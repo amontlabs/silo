@@ -38,11 +38,14 @@ const SHUTDOWN_WAIT: Duration = Duration::from_secs(120);
 const FORCED_STOP_WAIT: Duration = Duration::from_secs(30);
 const MACHINE_POLL: Duration = Duration::from_millis(500);
 
-const INHERITED_ACCESS_GONE: &str =
-    "This fork has lost the access it was copied with. Delete it and fork the checkpoint again.";
-
 pub(super) fn developer_tools_outdated(record: &Record, version: &str) -> bool {
     record.developer_tools_version.as_deref() != Some(version)
+}
+
+/// Whether developer tools still have to be installed: a fork carries its source's state, so
+/// only a source without them, or with another version, installs them again.
+pub(super) fn developer_tools_pending(record: &Record, version: &str) -> bool {
+    !record.setup.developer_tools || developer_tools_outdated(record, version)
 }
 
 /// Runs every unfinished step for `record`, saving progress after each.
@@ -138,9 +141,14 @@ impl Provision<'_> {
 
     fn steps(&self, record: &mut Record) -> Result<(), Stop> {
         let developer_tools_version = developer_tools::version();
+        // A fork is personalized in the boot that also finishes its setup, which then goes on.
+        let mut running = false;
         if record.setup.needs_personalizing {
             if record.imported {
                 self.personalize_import(record)?;
+            } else if record.inherited_access {
+                self.personalize_fork(record)?;
+                running = true;
             } else {
                 self.personalize(record)?;
             }
@@ -176,22 +184,25 @@ impl Provision<'_> {
             self.check()?;
         }
         if setup_finished(record, &developer_tools_version) {
+            if running {
+                self.shut_down()?;
+            }
             if record.imported {
                 record.imported = false;
                 self.mark(record, |_| {})?;
             }
             return Ok(());
         }
-        self.say("Starting macOS")?;
-        self.boot(Login::Key)?;
+        if !running {
+            self.say("Starting macOS")?;
+            self.boot(Login::Key)?;
+        }
         if !record.setup.sip {
             self.say("Checking System Integrity Protection")?;
             self.verify_sip_disabled()?;
             self.mark(record, |setup| setup.sip = true)?;
         }
-        if !record.setup.developer_tools
-            || developer_tools_outdated(record, &developer_tools_version)
-        {
+        if developer_tools_pending(record, &developer_tools_version) {
             self.say("Installing developer tools")?;
             developer_tools::install(self.app, &self.id, &|| self.cancelled()).map_err(
                 |message| {
@@ -322,24 +333,15 @@ impl Provision<'_> {
             Some(held) => held,
             None => templates::reserve_space(&data, templates::COPY_ESTIMATE)?,
         };
-        // A copy of a template holds a lease on it; a fork has the credentials of its source.
-        let (lease, access) = if record.inherited_access {
-            (None, checkpoints::inherited_access(self.layout))
-        } else {
-            let name = record
-                .template
-                .clone()
-                .ok_or_else(|| Stop::Failed(templates::TEMPLATE_GONE.into()))?;
-            let lease = templates::lease_named(&data, &name)?;
-            let access = lease.template.access_dir();
-            (Some(lease), access)
-        };
+        // A copy of a template holds a lease on it.
+        let name = record
+            .template
+            .clone()
+            .ok_or_else(|| Stop::Failed(templates::TEMPLATE_GONE.into()))?;
+        let lease = templates::lease_named(&data, &name)?;
+        let access = lease.template.access_dir();
         if !access.join("id_ed25519").exists() {
-            return Err(Stop::Failed(if record.inherited_access {
-                INHERITED_ACCESS_GONE.into()
-            } else {
-                templates::TEMPLATE_GONE.into()
-            }));
+            return Err(Stop::Failed(templates::TEMPLATE_GONE.into()));
         }
         let own = guest_access::ensure_account(self.layout)?;
         if let Some(log) = &self.log {
@@ -353,10 +355,7 @@ impl Provision<'_> {
         let mut shortfall = None;
         // The backing file's length is the target, whatever the record says after an attempt.
         let requested = personalize::requested_gib(&self.layout.disk())?;
-        // A fork has its source's disk size: there is nothing to grow.
-        let template_gib = lease
-            .as_ref()
-            .map_or(requested, |lease| lease.template.meta.disk_gib);
+        let template_gib = lease.template.meta.disk_gib;
         let grow = requested > template_gib;
         let mut unallocated = None;
         let mut reconciled = None;
@@ -430,15 +429,59 @@ impl Provision<'_> {
         if let Some(gib) = reconciled.filter(|gib| *gib != record.disk_gib) {
             record.disk_gib = gib;
         }
-        record.inherited_access = false;
         self.mark(record, |setup| {
             setup.needs_personalizing = false;
             setup.proxy_bootstrap = staged;
         })?;
-        // Its own credentials are the only ones left.
-        let _ = std::fs::remove_dir_all(checkpoints::inherited_access(self.layout));
         // The computer is usable and complete; the message stays as its failure detail.
         shortfall.map_or(Ok(()), |message| Err(Stop::Failed(message)))
+    }
+
+    /// Gives a fork its own password, key, name, host keys and keychain without a boot of
+    /// its own: the password hash, automatic login and keychain are changed on the stopped
+    /// disk, and the one boot that follows logs in with that password to install the key,
+    /// name and host keys. The guest is left running for the rest of the setup. A run that
+    /// ends early is repeated whole.
+    fn personalize_fork(&self, record: &mut Record) -> Result<(), Stop> {
+        let data = app_data(self.app)?;
+        let _space = match self.reservation.take() {
+            Some(held) => held,
+            None => templates::reserve_space(&data, templates::COPY_ESTIMATE)?,
+        };
+        let own = guest_access::ensure_account(self.layout)?;
+        if let Some(log) = &self.log {
+            log.hide(&own.password);
+        }
+        self.say("Personalizing the computer")?;
+        offline_setup::ensure_detached(&self.layout.disk())?;
+        offline_setup::run_fork_rekey(&self.layout.disk(), &own)?;
+        self.check()?;
+        self.say("Starting macOS")?;
+        boot_import_with_host_key_reset(self.layout, || self.boot(Login::Password))?;
+        finalize_fork_guest(self.layout, record, &own, self.log.as_ref()).map_err(Stop::Failed)?;
+        let output = guest_access::run(
+            self.layout,
+            record,
+            "/usr/bin/sudo -n true",
+            None,
+            GUEST_COMMAND,
+        )?;
+        self.log_command("fork key login with sudo -n", &output);
+        if output.status != 0 {
+            return Err(Stop::Failed(
+                "Silo could not log in to the fork with its new key.".into(),
+            ));
+        }
+        // The automatic login with the new password is what proves the password took effect.
+        self.verify_personalized()?;
+        // The offline password change cannot keep the account's SecureToken.
+        let token = self.enable_secure_token(record, &own)?;
+        record.secure_token_missing = secure_token_missing(token);
+        record.inherited_access = false;
+        self.mark(record, |setup| setup.needs_personalizing = false)?;
+        // Its own credentials are the only ones left.
+        let _ = std::fs::remove_dir_all(checkpoints::inherited_access(self.layout));
+        Ok(())
     }
 
     /// An imported disk has already had its managed password hash changed offline.
@@ -902,6 +945,43 @@ fn finalize_import_guest(
     Ok(())
 }
 
+/// Installs the fork's key, name and host keys over the password login the offline rekey
+/// allows, then proves the key works.
+fn finalize_fork_guest(
+    layout: &Layout,
+    record: &Record,
+    account: &guest_access::GuestAccount,
+    log: Option<&SetupLog>,
+) -> Result<(), String> {
+    let public_key = guest_access::public_key(account)?;
+    let script = base64_encode(
+        offline_setup::fork_finalization_script(&public_key, &record.name).as_bytes(),
+    );
+    let command =
+        format!("/usr/bin/sudo -S -p '' /bin/sh -c 'echo {script} | /usr/bin/base64 -D | /bin/sh'");
+    let password = format!("{}\n", account.password);
+    let output = guest_access::run_with_password(
+        layout,
+        record,
+        &command,
+        Some(password.as_bytes()),
+        GUEST_COMMAND,
+    )?;
+    if output.status != 0 || !output.stdout.contains("MARKER_OWNER=0:0") {
+        if let Some(log) = log {
+            log.command(
+                "fork account script",
+                output.status,
+                &output.stdout,
+                &output.stderr,
+            );
+        }
+        return Err(finalization_failure(output.status));
+    }
+    guest_access::reset_host_keys(layout)?;
+    Ok(())
+}
+
 /// A one-sentence reason for a failed account script; the details go to the log.
 fn finalization_failure(status: i32) -> String {
     if status == offline_setup::PREBOOT_FAILED {
@@ -1121,6 +1201,20 @@ mod tests {
         );
         let other = finalization_failure(1);
         assert!(other.ends_with('.') && !other.contains('\n') && !other.contains("chown"));
+    }
+
+    #[test]
+    fn a_fork_script_sets_its_identity_without_a_second_password_change_or_keychain_reset() {
+        let script = offline_setup::fork_finalization_script("ssh-ed25519 AAAA fork", "my-fork");
+        assert!(script.contains("scutil --set ComputerName 'my-fork'"));
+        assert!(script.contains("scutil --set HostName 'my-fork'"));
+        assert!(script.contains("/bin/rm -f /etc/ssh/ssh_host_*\n/usr/bin/ssh-keygen -A"));
+        assert!(script.contains("authorized_keys"));
+        // The password and the keychain are changed on the disk before the boot, and a
+        // keychain deleted after the login would be the one macOS just made.
+        assert!(!script.contains("dscl"));
+        assert!(!script.contains("Library/Keychains"));
+        assert!(offline_setup::import_finalization_script("k", "n").contains("Library/Keychains"));
     }
 
     #[test]

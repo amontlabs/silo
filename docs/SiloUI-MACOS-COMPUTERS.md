@@ -252,14 +252,30 @@ builds a computer with the MAC in its record.
 from a checkpoint's disk and auxiliary storage (a memory state can't move to a new
 MAC address and machine identifier, so forks start from the disk, as after a power
 cut) and from the source's hardware model, with a new MAC address and machine
-identifier. The fork's guest still has the source's password and keys, so it goes
-through the same personalization as a copy of a template ([Personalizing](#templates)):
-Silo logs in with the source's credentials, kept in `inherited-access/`, and sets the
-fork's own password, SSH key, host keys, keychain and name. The fork shows as setting
-up with the personalization step, takes about a minute, and counts as a macOS
-computer for names (the shared name reservation) and for the two-running limit like
-any other. The Fork command returns once the files are cloned; the fork can't be
-started until its setup finishes.
+identifier. The fork's guest still has the source's password and keys, so it is
+personalized before anyone uses it, with one boot of its own (below). The fork shows as
+setting up, counts as a macOS computer for names (the shared name reservation) and for
+the two-running limit like any other. The Fork command returns once the files are
+cloned; the fork can't be started until its setup finishes.
+
+Fork setup steps, measured on the Dev engine (n=1, 164.8 s to ready):
+
+| Before | s | Now |
+| --- | --- | --- |
+| Personalizing: boot with the source's key, a script sets password, host keys, name, keychain | 50.7 | Offline, on the stopped disk (seconds): new password hash and automatic login, source key and login keychain removed |
+| Shut down, check (boot, SIP, login), shut down | 27.4 | None |
+| Start macOS (a third boot) | 7.9 | The one setup boot, with the new password: a script installs the fork's key, name and host keys; the automatic login and `sudo -n` are checked; SecureToken is given back |
+| Installing developer tools again | 46.3 | Only if the checkpoint lacks them or has another version (the checkpoint's `developerTools` state is carried over) |
+| Workspace folders, network and trust, final shutdown | 8.8 | The same, in that boot, then one shutdown |
+
+A fork therefore boots once for its setup, and once more for the user's Start. The setup
+boot stays because the network and trust files are written into the running guest.
+
+The old script changed the password with `dscl . -passwd` over standard input; with no
+terminal that command printed `New Password:` and `Permission denied`, and the script
+did not check for it. The new password is now written to the account's record on the disk,
+and the setup boot proves it took effect: it logs in with it and the automatic login
+(which reads the same password) must reach the account.
 
 **Delete.** Removes the checkpoint's folder (the record first). A checkpoint a
 pending Restore will use can't be deleted. Deleting a computer deletes its

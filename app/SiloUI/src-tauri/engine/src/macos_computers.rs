@@ -6106,7 +6106,7 @@ fn fork_checkpoint_with_workflow(
             checkpoint.name, checkpoint.id, record.name
         ),
     );
-    let copied = copy_for_fork(&source, &checkpoint.id, &layout, record, &fork_id);
+    let copied = copy_for_fork(&source, &checkpoint, &layout, record, &fork_id);
     // The source command owns the copy. The setup continuation gets its own gate job only
     // after the source guard is released, so the two scopes never nest on this thread.
     drop(held);
@@ -6163,7 +6163,7 @@ fn start_fork_continuation(app: &MacosContext, continuation: ForkContinuation) {
 /// Clones the checkpoint into the fork's folder and publishes the fork as installed.
 fn copy_for_fork(
     source: &Layout,
-    checkpoint: &str,
+    checkpoint: &checkpoints::Meta,
     layout: &Layout,
     mut record: Record,
     fork_id: &str,
@@ -6173,23 +6173,14 @@ fn copy_for_fork(
     }
     checkpoints::clone_for_fork(
         source,
-        checkpoint,
+        &checkpoint.id,
         layout,
         &engine::new_machine_identifier(),
     )
     .map_err(|error| Stop::Failed(error.message()))?;
     record.installed = true;
     record.inherited_access = true;
-    record.setup = store::SetupProgress {
-        account: true,
-        sip: true,
-        developer_tools: false,
-        computer_use: true,
-        clipboard: true,
-        roots: false,
-        needs_personalizing: true,
-        proxy_bootstrap: false,
-    };
+    fork_setup(&mut record, checkpoint);
     // Persist while the fork is still in its creation state, where nothing else can start it.
     if !registry().creation_continues(fork_id) {
         return Err(Stop::Cancelled);
@@ -6199,6 +6190,23 @@ fn copy_for_fork(
         return Err(Stop::Cancelled);
     }
     Ok(record)
+}
+
+/// What a fork's setup still has to do. The disk is the checkpoint's, so the developer tools
+/// it had are kept with their version and are not installed again; the personalization, the
+/// workspace folders and the network and trust are the fork's own.
+fn fork_setup(record: &mut Record, checkpoint: &checkpoints::Meta) {
+    record.developer_tools_version = checkpoint.developer_tools_version.clone();
+    record.setup = store::SetupProgress {
+        account: true,
+        sip: true,
+        developer_tools: checkpoint.developer_tools,
+        computer_use: true,
+        clipboard: true,
+        roots: false,
+        needs_personalizing: true,
+        proxy_bootstrap: false,
+    };
 }
 
 fn fork_workflow(
@@ -6937,6 +6945,56 @@ mod tests {
         )
         .unwrap();
         (source, checkpoint_id)
+    }
+
+    fn fork_record(data: &std::path::Path) -> (Record, checkpoints::Meta) {
+        let (source, id) = checkpoint_fixture(data, true);
+        let meta = checkpoints::find(&Layout::new(data, &source.id), &id).unwrap();
+        let mut fork = store::new_record(
+            &CreateRequest {
+                name: "fork".into(),
+                cpus: 2,
+                memory_gib: 4,
+                disk_gib: 64,
+            },
+            "02:00:00:00:00:02".into(),
+        );
+        fork_setup(&mut fork, &meta);
+        (fork, meta)
+    }
+
+    #[test]
+    fn a_fork_does_not_install_the_developer_tools_its_checkpoint_has() {
+        let data = tempfile::tempdir().unwrap();
+        let (fork, _) = fork_record(data.path());
+        assert!(fork.setup.developer_tools);
+        assert_eq!(fork.developer_tools_version, Some(developer_tools::version()));
+        assert!(!provision::developer_tools_pending(
+            &fork,
+            &developer_tools::version()
+        ));
+        // Personalization, the workspace folders and the network and trust stay to do.
+        assert!(fork.setup.needs_personalizing && !fork.setup.roots && !fork.setup.proxy_bootstrap);
+    }
+
+    #[test]
+    fn a_fork_installs_developer_tools_its_checkpoint_lacks_or_has_outdated() {
+        let data = tempfile::tempdir().unwrap();
+        let (mut fork, mut meta) = fork_record(data.path());
+        meta.developer_tools = false;
+        meta.developer_tools_version = None;
+        fork_setup(&mut fork, &meta);
+        assert!(provision::developer_tools_pending(
+            &fork,
+            &developer_tools::version()
+        ));
+        meta.developer_tools = true;
+        meta.developer_tools_version = Some("older".into());
+        fork_setup(&mut fork, &meta);
+        assert!(provision::developer_tools_pending(
+            &fork,
+            &developer_tools::version()
+        ));
     }
 
     #[test]
