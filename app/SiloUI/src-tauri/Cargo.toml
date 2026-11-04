@@ -55,4 +55,4 @@ objc2-virtualization = "0.3.2"
 base64 = "0.22"
 libc = "0.2"
 tauri = { version = "2.11.3", features = ["test"] }
-toml = "0.9"
+toml = "1.1"
