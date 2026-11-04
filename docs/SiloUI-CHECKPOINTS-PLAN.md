@@ -141,24 +141,54 @@ Rules a fork applies, recorded in its checkpoint record under `quiet`
   (`allowPushes` false, `allRepositoriesAllowChanges` false), so the fork's
   tokens are minted with read permissions. A source that uses a personal token
   cannot be copied, because Silo cannot narrow that token.
-- New `/etc/machine-id`, `/var/lib/dbus/machine-id` (if present), hostname and the
-  `127.0.1.1` line of `/etc/hosts`.
+- New `/etc/machine-id`, `/var/lib/dbus/machine-id` (if present), hostname (a failure
+  fails the step) and the `127.0.1.1` line of `/etc/hosts`; other `/etc/hosts` lines
+  that name the old hostname are rewritten.
 - User and system crontabs (including `@reboot`), `/etc/cron.*`, `anacrontab`, at
-  jobs and systemd timers are disabled. Crontabs and drop-ins are moved to
-  `/var/lib/silo-quiet/disabled/` (not deleted); timers are masked.
-- Each `stop` name is killed, its systemd unit masked, its init script made
-  non-executable and its rc links, autostart entries and supervisor config moved
-  away. Each `scrub` path (globs allowed) is deleted.
+  jobs and systemd timers are disabled. Crontabs, drop-ins and timer units the
+  computer defined itself (`/etc/systemd/system`, user timers) are moved to
+  `/var/lib/silo-quiet/disabled/` (not deleted); timers are then masked. Every step
+  can run again: the first saved original is kept, a later copy gets a numeric
+  suffix, and the new machine-id and old hostname are remembered.
+- Each `stop` name is matched against the full command line of every process: the
+  program's base name, or the base name of its first non-option argument (so
+  `python3 poller.py` and `node server.js` match `poller.py` and `server.js`), by
+  string equality, never a pattern. Matches get TERM, then KILL, and the step fails if
+  any still run. The unit is masked, its init script made non-executable and its rc
+  links, autostart entries and supervisor config moved away. A name may hold letters,
+  digits and `. _ @ : + -`, and is not `.` or `..`.
+- Each `scrub` path (globs allowed, no spaces, no `.` or `..` component) is deleted.
+  Every match is resolved through its parent directory; one whose real parent is not
+  inside the pattern's literal directory (`/etc/.[.]/*`, a symlinked directory in the
+  path) or that sits at the top of the file system stops the step. Links are removed
+  without being followed. `/home/*/...` is allowed on purpose, so a pattern can clear
+  each user's home; the two-level minimum still keeps `/home/*` itself as the shallowest.
+- Environment variables set in the source's computer settings are Silo-managed
+  configuration and can carry credentials, so a fork does not copy them. A later
+  opt-in could name them like a secret.
 
 Mechanism: MicroSandbox 0.7.6 has no hook to edit a snapshot's disk before
-`msb restore` boots it, and the Silo guest image has no init system (`CMD` is
-`/bin/bash`), so a cold boot starts none of the source's services. The engine
-runs `runtime/checkpoints/quiet.sh` as root as the first command in the new
-guest, inside the same start step, before the start is reported done and before
-secrets, network or SSH are reconciled. Arguments are positional, never part of
-the script text. If the step fails the fork is stopped and the next Start runs it
-again before anything else (`quiet.applied` stays false until it succeeds). An
-offline disk edit before boot would be stricter and needs an upstream hook.
+`msb restore` boots it, and the guest does not run only init and `/bin/bash`: the Silo
+boot hook in `microsandbox-create-stopped-0.7.6.patch` runs
+`/usr/local/bin/silo-desktop boot` as root on every boot of a `silo.managed` computer
+before it is ready, which starts Xfce and its autostart entries. The restore therefore
+sets labels on the fork (`silo.quiet-token`, `silo.quiet-host`, `silo.quiet-args`; the
+token is the restore attempt's id). When the hook finds a token and
+`/var/lib/silo-quiet/applied-<token>` is absent, it runs `quiet.sh` (a copy of the file is
+embedded in the patch, and a test keeps them equal) first and starts nothing else
+unless it succeeds. The labels stay on the computer, so a later boot by the CLI, SSH or
+the engine quiets it the same way until the marker exists. No guest image change is
+needed: the script travels in the runtime patch, not in the image.
+
+The engine confirms after every start that has no `quiet.applied`: it looks for the
+marker, and when it is absent runs the script itself and then `silo-desktop boot`. It
+clears the pending restore before that check, because the runtime refuses `exec` on a
+computer with a pending restore. Retries, a running child that already matches, a
+crash recovery and a launch start all take this path. If the step fails the fork is
+stopped (and the message says when stopping failed too); `quiet.applied` stays false
+until the marker is confirmed. An offline disk edit before boot would be stricter and
+needs an upstream hook. The patch change needs a rebuilt runtime; the pinned
+`msb` executable hashes in `runtime-inputs.json` change with it.
 
 Not covered: shell profiles or other files in the guest that start programs at
 login, and secrets stored in files (use `scrub`).

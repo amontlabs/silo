@@ -199,36 +199,230 @@ index f6608cc4..ca01e916 100644
          // Spawn the sandbox process and create the bridge. On failure, mark the sandbox
          // from Starting to Stopped so it cannot remain as a phantom boot.
          let restore_closure = config
-@@ -1175,6 +1233,28 @@ impl LocalBackend {
+@@ -1175,6 +1233,222 @@ impl LocalBackend {
              }
          };
  
 +        // Silo's optional guest service starts on every actual boot, including
-+        // boots initiated through the CLI or SSH. A missing service must not
-+        // prevent the VM from becoming usable.
++        // boots initiated through the CLI or SSH. A fork carries `silo.quiet-*` labels:
++        // its quiet step runs first, as root, and nothing else is started until it has
++        // succeeded. A missing service must not prevent the VM from becoming usable.
 +        if config.spec.labels.get("silo.managed").map(String::as_str) == Some("true") {
++            const SILO_QUIET: &str = r####"set -u
++token=$1; host=$2; shift 2
++case $token in ''|*[!0-9a-f-]*) exit 1;; esac
++quiet=/var/lib/silo-quiet
++mkdir -p "$quiet/disabled" || exit 1
++
++if [ -s "$quiet/machine-id" ]; then
++  new=$(cat "$quiet/machine-id") || exit 1
++else
++  new=$(tr -d - < /proc/sys/kernel/random/uuid) || exit 1
++  printf '%s\n' "$new" > "$quiet/machine-id" || exit 1
++fi
++printf '%s\n' "$new" > /etc/machine-id || exit 1
++if [ -e /var/lib/dbus/machine-id ] || [ -L /var/lib/dbus/machine-id ]; then
++  rm -f /var/lib/dbus/machine-id
++  printf '%s\n' "$new" > /var/lib/dbus/machine-id || exit 1
++fi
++
++if [ ! -e "$quiet/old-hostname" ]; then
++  { cat /etc/hostname 2>/dev/null || hostname; } > "$quiet/old-hostname" || exit 1
++fi
++old=$(head -n 1 "$quiet/old-hostname")
++hostname "$host" || exit 1
++printf '%s\n' "$host" > /etc/hostname || exit 1
++if [ -f /etc/hosts ]; then
++  grep -v '^127\.0\.1\.1[[:space:]]' /etc/hosts > "$quiet/hosts.new" || true
++  case $old in
++    ''|"$host"|*[!A-Za-z0-9.-]*) ;;
++    *)
++      esc=$(printf '%s' "$old" | sed 's/\./\\./g')
++      for _ in 1 2; do
++        sed -E "/^[[:space:]]*#/!s/(^|[[:space:]])$esc([[:space:]]|\$)/\1$host\2/g" "$quiet/hosts.new" > "$quiet/hosts.sed" || exit 1
++        cat "$quiet/hosts.sed" > "$quiet/hosts.new"
++      done
++      rm -f "$quiet/hosts.sed"
++      ;;
++  esac
++  printf '127.0.1.1\t%s\n' "$host" >> "$quiet/hosts.new"
++  cat "$quiet/hosts.new" > /etc/hosts || exit 1
++  rm -f "$quiet/hosts.new"
++fi
++
++# Moves a file or link under the saved originals. An earlier copy is never replaced.
++park() {
++  [ -e "$1" ] || [ -L "$1" ] || return 0
++  d="$quiet/disabled$(dirname "$1")"
++  mkdir -p "$d" || return 1
++  dest="$d/$(basename "$1")"
++  n=0
++  while [ -e "$dest" ] || [ -L "$dest" ]; do n=$((n + 1)); dest="$d/$(basename "$1").$n"; done
++  mv -f "$1" "$dest"
++}
++
++# Succeeds when the argv on stdin, one entry per line, belongs to the program or script $1: the
++# first entry, or the first one that is not an option, has that base name.
++argv_matches() {
++  count=0
++  while IFS= read -r arg; do
++    count=$((count + 1))
++    if [ "$count" -gt 1 ]; then
++      case $arg in -*) continue;; esac
++    fi
++    [ "${arg##*/}" = "$1" ] && return 0
++    [ "$count" -gt 1 ] && return 1
++  done
++  return 1
++}
++
++# Masks a unit by name, keeping a real file of that name under the saved originals.
++mask() {
++  if [ -L "$1" ] && [ "$(readlink "$1")" = /dev/null ]; then return 0; fi
++  park "$1" && ln -sf /dev/null "$1"
++}
++
++pids_of() {
++  for d in /proc/[0-9]*; do
++    p=${d#/proc/}
++    [ "$p" = 1 ] && continue
++    [ "$p" = "$$" ] && continue
++    [ "$p" = "$PPID" ] && continue
++    [ -r "$d/cmdline" ] || continue
++    if tr '\0' '\n' < "$d/cmdline" 2>/dev/null | argv_matches "$1"; then printf '%s\n' "$p"; fi
++  done
++}
++
++stop_processes() {
++  pids=$(pids_of "$1")
++  [ -z "$pids" ] && return 0
++  for p in $pids; do kill -TERM "$p" 2>/dev/null; done
++  i=0
++  while [ "$i" -lt 25 ]; do
++    [ -z "$(pids_of "$1")" ] && return 0
++    sleep 0.2
++    i=$((i + 1))
++  done
++  for p in $(pids_of "$1"); do kill -KILL "$p" 2>/dev/null; done
++  sleep 0.5
++  [ -z "$(pids_of "$1")" ]
++}
++
++for daemon in cron crond anacron atd; do
++  stop_processes "$daemon" || exit 1
++done
++for f in /var/spool/cron/crontabs/* /var/spool/cron/* /var/spool/cron/atjobs/* /var/spool/cron/atspool/* /etc/cron.d/* /etc/cron.hourly/* /etc/cron.daily/* /etc/cron.weekly/* /etc/cron.monthly/* /etc/anacrontab; do
++  case "$f" in */crontabs|*/atjobs|*/atspool|*.placeholder) continue;; esac
++  park "$f" || exit 1
++done
++if [ -f /etc/crontab ]; then
++  mkdir -p "$quiet/disabled/etc" || exit 1
++  [ -e "$quiet/disabled/etc/crontab" ] || cp /etc/crontab "$quiet/disabled/etc/crontab" || exit 1
++  grep '^[[:space:]]*#' /etc/crontab > "$quiet/crontab.new"
++  cat "$quiet/crontab.new" > /etc/crontab; rm -f "$quiet/crontab.new"
++fi
++
++mkdir -p /etc/systemd/system || exit 1
++# A timer the computer defined itself is saved before a mask takes its name.
++for dir in /etc/systemd/system /usr/lib/systemd/system /lib/systemd/system; do
++  for f in "$dir"/*.timer; do
++    [ -e "$f" ] || [ -L "$f" ] || continue
++    mask "/etc/systemd/system/$(basename "$f")" || exit 1
++  done
++done
++for f in /root/.config/systemd/user/*.timer /home/*/.config/systemd/user/*.timer; do park "$f" || exit 1; done
++
++IFS='
++'
++for a; do
++  case "$a" in
++    stop=*)
++      n=${a#stop=}
++      case $n in ''|.|..|-*|*[!A-Za-z0-9._@:+-]*) exit 1;; esac
++      unit=${n%.service}
++      stop_processes "$n" || exit 1
++      [ "$unit" != "$n" ] && { stop_processes "$unit" || exit 1; }
++      mask "/etc/systemd/system/$unit.service" || exit 1
++      case "$n" in *.*) [ "$unit" = "$n" ] && { mask "/etc/systemd/system/$n" || exit 1; };; esac
++      if [ -f "/etc/init.d/$n" ]; then chmod a-x "/etc/init.d/$n" || exit 1; fi
++      for f in /etc/rc[0-9S].d/[SK][0-9][0-9]"$n"; do
++        [ -e "$f" ] || [ -L "$f" ] || continue
++        park "$f" || exit 1
++      done
++      for f in "/etc/xdg/autostart/$n.desktop" "/root/.config/autostart/$n.desktop" /home/*/.config/autostart/"$n".desktop "/etc/supervisor/conf.d/$n.conf"; do park "$f" || exit 1; done
++      ;;
++  esac
++done
++
++# Removes what a scrub pattern matches. Each match is resolved through its parent directory
++# first; one whose real parent is not inside the pattern's literal directory, or that lands
++# at the top of the file system, stops the script. Links are removed, never followed.
++scrub_one() {
++  pattern=$1
++  prefix=${pattern%%[*?[]*}
++  prefix=${prefix%/*}
++  [ -n "$prefix" ] || return 1
++  [ -d "$prefix" ] || return 0
++  for f in $pattern; do
++    [ -e "$f" ] || [ -L "$f" ] || continue
++    name=${f##*/}
++    case $name in .|..) continue;; esac
++    parent=$(cd -P -- "${f%/*}" 2>/dev/null && pwd -P) || continue
++    case "$parent/" in "$prefix"/*) ;; *) return 1;; esac
++    target=$parent/$name
++    case ${target#/} in */*) ;; *) return 1;; esac
++    rm -rf -- "$target" || return 1
++  done
++  return 0
++}
++for a; do
++  case "$a" in
++    scrub=*) scrub_one "${a#scrub=}" || exit 1;;
++  esac
++done
++
++: > "$quiet/applied-$token" || exit 1
++sync
++exit 0
++"####;
++            const SILO_BOOT: &str = r####"quiet=$1; token=$2; host=$3; list=$4
++if [ -n "$token" ] && [ ! -e "/var/lib/silo-quiet/applied-$token" ]; then
++  set -f
++  sh -c "$quiet" silo-quiet "$token" "$host" $list || exit 1
++fi
++if [ -x /usr/local/bin/silo-desktop ]; then /usr/local/bin/silo-desktop boot >/dev/null 2>&1; fi"####;
++            let label = |key: &str| config.spec.labels.get(key).cloned().unwrap_or_default();
++            let token = label("silo.quiet-token");
++            let quiet = !token.is_empty();
 +            let boot = crate::sandbox::exec::agent::exec(
 +                self,
 +                &config.spec.name,
 +                &config,
 +                "/bin/sh".into(),
 +                crate::sandbox::exec::ExecOptions {
-+                    args: vec!["-c".into(), "if [ -x /usr/local/bin/silo-desktop ]; then /usr/local/bin/silo-desktop boot >/dev/null 2>&1; fi".into()],
++                    args: vec![
++                        "-c".into(),
++                        SILO_BOOT.into(),
++                        "silo-boot".into(),
++                        if quiet { SILO_QUIET.into() } else { String::new() },
++                        token,
++                        label("silo.quiet-host"),
++                        label("silo.quiet-args"),
++                    ],
 +                    cwd: Some("/".into()),
 +                    user: Some("root".into()),
-+                    timeout: Some(std::time::Duration::from_secs(15)),
++                    timeout: Some(std::time::Duration::from_secs(if quiet { 120 } else { 15 })),
 +                    ..Default::default()
 +                },
 +            );
 +            if let Err(error) = boot.await {
-+                tracing::warn!(%error, "optional guest desktop startup failed; sandbox remains available");
++                tracing::warn!(%error, "optional guest startup failed; sandbox remains available");
 +            }
 +        }
-+
          if let Ok(ready) = client.ready() {
              tracing::info!(
                  sandbox_name = %config.spec.name,
-@@ -1942,6 +2022,7 @@ impl LocalBackend {
+@@ -1942,6 +2216,7 @@ impl LocalBackend {
      }
  
      /// Insert a provisional local create record that remains non-connectable until ready.
@@ -236,7 +430,7 @@ index f6608cc4..ca01e916 100644
      async fn insert_starting_sandbox_record(
          db: &DbWriteConnection,
          config: &SandboxConfig,
-@@ -2307,7 +2388,7 @@ mod tests {
+@@ -2307,7 +2582,7 @@ mod tests {
                  .image("registry.invalid/review-never-pulled:missing")
                  .pull_policy(crate::sandbox::PullPolicy::Never);
              let error = backend
@@ -245,7 +439,7 @@ index f6608cc4..ca01e916 100644
                  .await
                  .err()
                  .unwrap();
-@@ -2366,7 +2447,7 @@ mod tests {
+@@ -2366,7 +2641,7 @@ mod tests {
              .cpus(8)
              .max_cpus(3);
          let error = backend
@@ -254,7 +448,7 @@ index f6608cc4..ca01e916 100644
              .await
              .err()
              .expect("missing rootfs must fail without starting a VM");
-@@ -2409,7 +2490,7 @@ mod tests {
+@@ -2409,7 +2684,7 @@ mod tests {
              .cpus(2)
              .replace();
          let error = backend
@@ -263,7 +457,7 @@ index f6608cc4..ca01e916 100644
              .await
              .err()
              .expect("invalid managed CPU count must fail");
-@@ -2873,7 +2954,7 @@ mod tests {
+@@ -2873,7 +3148,7 @@ mod tests {
          config.replace_existing = true;
  
          let error = match backend
@@ -272,7 +466,7 @@ index f6608cc4..ca01e916 100644
              .await
          {
              Ok(_) => panic!("snapshot descriptor must be validated before replacement"),
-@@ -2911,7 +2992,7 @@ mod tests {
+@@ -2911,7 +3186,7 @@ mod tests {
          ));
  
          let error = match backend
@@ -281,7 +475,7 @@ index f6608cc4..ca01e916 100644
              .await
          {
              Ok(_) => panic!("stored snapshot references must be resolved before ordinary creation"),
-@@ -2959,7 +3040,7 @@ mod tests {
+@@ -2959,7 +3234,7 @@ mod tests {
          config.snapshot_upper_source = Some(temp.path().join("upper.ext4"));
  
          let error = match backend
@@ -290,7 +484,7 @@ index f6608cc4..ca01e916 100644
              .await
          {
              Ok(_) => panic!("patches must be rejected when combined with from_snapshot"),
-@@ -3008,7 +3089,7 @@ mod tests {
+@@ -3008,7 +3283,7 @@ mod tests {
          ];
  
          let err = match backend
@@ -299,7 +493,7 @@ index f6608cc4..ca01e916 100644
              .await
          {
              Ok(_) => panic!("expected invalid direct-config mounts to be rejected"),
-@@ -3037,7 +3118,7 @@ mod tests {
+@@ -3037,7 +3312,7 @@ mod tests {
          config.spec.runtime.hostname = Some("y".repeat(MAX_HOSTNAME_BYTES + 1));
  
          let err = match backend

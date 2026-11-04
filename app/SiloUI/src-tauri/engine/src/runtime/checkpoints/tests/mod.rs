@@ -481,7 +481,7 @@ fn an_import_preserves_environment_until_an_identity_is_saved() {
 }
 
 #[test]
-fn a_fork_after_an_identity_save_inherits_the_cleaned_environment() {
+fn a_fork_after_an_identity_save_copies_no_environment() {
     let _test_state = crate::test_support::global_state();
     let directory = tempfile::tempdir().unwrap();
     let (paths, fork) = fork_fixture(&directory);
@@ -517,15 +517,16 @@ fn a_fork_after_an_identity_save_inherits_the_cleaned_environment() {
         .iter()
         .find(|configuration| configuration.name() == "branch")
         .unwrap();
-    for id in [ID, child.id()] {
-        let keys: Vec<String> = load(&paths, id)
+    let keys = |id: &str| -> Vec<String> {
+        load(&paths, id)
             .unwrap()
             .desired_environment
             .into_iter()
             .map(|entry| entry.key)
-            .collect();
-        assert_eq!(keys, ["PROJECT_MODE"]);
-    }
+            .collect()
+    };
+    assert_eq!(keys(ID), ["PROJECT_MODE"]);
+    assert!(keys(child.id()).is_empty(), "a fork copies no environment");
 }
 
 /// Records every command, answers like a runtime whose restore fails.
@@ -5719,62 +5720,540 @@ fn the_first_boot_script_covers_every_quiet_rule() {
     assert!(status.success());
 }
 
+fn quiet_record(token: &str) -> QuietRecord {
+    QuietRecord {
+        scheduled_jobs_disabled: true,
+        new_identity: true,
+        token: token.into(),
+        ..QuietRecord::default()
+    }
+}
+
+const TOKEN: &str = "0f0f0f0f-0000-4000-8000-000000000001";
+
 #[test]
 fn quiet_arguments_are_positional_and_run_as_root() {
     let quiet = QuietRecord {
         stop: vec!["poller".into()],
-        scrub: vec!["/root/x y*".into()],
-        ..QuietRecord::default()
+        scrub: vec!["/root/xy*".into()],
+        ..quiet_record(TOKEN)
     };
     let args = quiet_exec_args("My Fork", &quiet);
     assert_eq!(&args[..2], ["exec", "My Fork"]);
     assert!(args.windows(2).any(|pair| pair == ["--user", "root"]));
     assert_eq!(
-        args[args.len() - 3..],
-        ["my-fork", "stop=poller", "scrub=/root/x y*"]
+        args[args.len() - 4..],
+        [TOKEN, "my-fork", "stop=poller", "scrub=/root/xy*"]
     );
-    assert_eq!(args[args.len() - 4], "silo-quiet");
+    assert_eq!(args[args.len() - 5], "silo-quiet");
+    assert_eq!(
+        quiet_labels("My Fork", &quiet),
+        [
+            format!("silo.quiet-token={TOKEN}"),
+            "silo.quiet-host=my-fork".to_string(),
+            "silo.quiet-args=stop=poller scrub=/root/xy*".to_string(),
+        ]
+    );
 }
 
-#[test]
-fn quieting_runs_once_and_a_failure_stops_the_fork() {
-    let _test_state = crate::test_support::global_state();
-    let directory = tempfile::tempdir().unwrap();
-    let paths = paths(&directory);
-    let quieted = || Record {
-        quiet: Some(QuietRecord::default()),
-        ..Record::default()
-    };
-
-    let runner = journal_runner("Running", "");
-    let mut record = quieted();
-    apply_quiet(&runner, &paths, "branch", &mut record).unwrap();
-    assert!(record.quiet.as_ref().unwrap().applied);
-    apply_quiet(&runner, &paths, "branch", &mut record).unwrap();
-    assert_eq!(
-        runner
-            .calls
+/// A guest that records whether the quiet step ran, behind the production runner's refusal to
+/// exec a computer with a pending restore.
+struct QuietGuest {
+    marker: Mutex<bool>,
+    script_fails: bool,
+    stop_fails: bool,
+    calls: Mutex<Vec<Vec<String>>>,
+}
+impl QuietGuest {
+    fn new(marker: bool) -> Self {
+        QuietGuest {
+            marker: Mutex::new(marker),
+            script_fails: false,
+            stop_fails: false,
+            calls: Mutex::new(Vec::new()),
+        }
+    }
+    fn count(&self, word: &str) -> usize {
+        self.calls
             .lock()
             .unwrap()
             .iter()
-            .filter(|call| call[0] == "exec")
-            .count(),
-        1
-    );
+            .filter(|call| call.iter().any(|arg| arg == word))
+            .count()
+    }
+}
+impl RuntimeRunner for QuietGuest {
+    fn run(
+        &self,
+        paths: &RuntimePaths,
+        args: &[String],
+        _timeout: Duration,
+    ) -> Result<CommandOutput, RuntimeError> {
+        self.calls.lock().unwrap().push(args.to_vec());
+        super::super::refuse_pending_start(paths, args)?;
+        let ok = || {
+            Ok(CommandOutput {
+                stdout: String::new(),
+                stderr: String::new(),
+            })
+        };
+        match args[0].as_str() {
+            "exec" if args.iter().any(|arg| arg == "test") => {
+                if *self.marker.lock().unwrap() {
+                    ok()
+                } else {
+                    Err(error("exit status 1"))
+                }
+            }
+            "exec" if args.iter().any(|arg| arg == "silo-quiet") => {
+                if self.script_fails {
+                    Err(error("the quiet step failed"))
+                } else {
+                    *self.marker.lock().unwrap() = true;
+                    ok()
+                }
+            }
+            "stop" if self.stop_fails => Err(error("stop failed")),
+            _ => ok(),
+        }
+    }
+}
 
-    let runner = journal_runner("Running", "");
-    apply_quiet(&runner, &paths, "branch", &mut Record::default()).unwrap();
-    assert!(runner.calls.lock().unwrap().is_empty(), "not a fork");
+fn unquieted_computer(directory: &tempfile::TempDir, pending: bool) -> RuntimePaths {
+    let paths = paths(directory);
+    write_metadata(
+        &paths.metadata,
+        &ComputerConfigurationRequest {
+            schema_version: 1,
+            computers: vec![computer_configuration()],
+        },
+    )
+    .unwrap();
+    let mut record = Record::default();
+    record.quiet = Some(quiet_record(TOKEN));
+    if pending {
+        record.pending_checkpoint_restore = Some(PendingRestore {
+            checkpoint_id: "c000000000000000000000000000000".into(),
+            source_computer: "dev".into(),
+            state: "disk".into(),
+        });
+    }
+    save(&paths, ID, &record).unwrap();
+    paths
+}
 
-    let runner = journal_runner("Running", "exec");
-    let mut record = quieted();
-    let failure = apply_quiet(&runner, &paths, "branch", &mut record).unwrap_err();
-    assert!(failure.to_string().contains("could not be made quiet"));
+#[test]
+fn the_production_guard_refuses_exec_while_a_restore_is_pending() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let paths = unquieted_computer(&directory, true);
+    let guest = QuietGuest::new(true);
+    let mut record = load(&paths, ID).unwrap();
+    assert!(apply_quiet(&guest, &paths, "dev", &mut record).is_err());
     assert!(!record.quiet.unwrap().applied);
-    assert!(runner
+}
+
+#[test]
+fn quieting_confirms_the_marker_and_runs_nothing_when_it_is_there() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let paths = unquieted_computer(&directory, false);
+    let guest = QuietGuest::new(true);
+    ensure_quiet(&guest, &paths, "dev").unwrap();
+    assert!(load(&paths, ID).unwrap().quiet.unwrap().applied);
+    assert_eq!(guest.count("silo-quiet"), 0, "the boot hook already ran it");
+    // Once applied, nothing is asked of the guest again.
+    let again = QuietGuest::new(false);
+    ensure_quiet(&again, &paths, "dev").unwrap();
+    assert!(again.calls.lock().unwrap().is_empty());
+}
+
+#[test]
+fn quieting_runs_the_step_itself_when_the_boot_hook_did_not() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let paths = unquieted_computer(&directory, false);
+    let guest = QuietGuest::new(false);
+    ensure_quiet(&guest, &paths, "dev").unwrap();
+    assert_eq!(guest.count("silo-quiet"), 1);
+    assert_eq!(guest.count("silo-desktop"), 0);
+    assert!(guest
         .calls
         .lock()
         .unwrap()
         .iter()
-        .any(|call| call[..2] == ["stop", "branch"]));
+        .any(|call| call.iter().any(|arg| arg.contains("silo-desktop boot"))));
+    assert!(load(&paths, ID).unwrap().quiet.unwrap().applied);
+}
+
+#[test]
+fn a_failed_quiet_step_stops_the_fork_and_stays_unapplied() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let paths = unquieted_computer(&directory, false);
+    let mut guest = QuietGuest::new(false);
+    guest.script_fails = true;
+    let failure = ensure_quiet(&guest, &paths, "dev").unwrap_err();
+    assert!(
+        failure.to_string().contains("so it was stopped"),
+        "{failure}"
+    );
+    assert_eq!(guest.count("stop"), 1);
+    assert!(!load(&paths, ID).unwrap().quiet.unwrap().applied);
+
+    let mut guest = QuietGuest::new(false);
+    guest.script_fails = true;
+    guest.stop_fails = true;
+    let failure = ensure_quiet(&guest, &paths, "dev").unwrap_err();
+    assert!(
+        failure.to_string().contains("could not be stopped"),
+        "{failure}"
+    );
+    assert!(!load(&paths, ID).unwrap().quiet.unwrap().applied);
+}
+
+#[test]
+fn a_computer_that_is_not_a_fork_is_left_alone() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let paths = unquieted_computer(&directory, false);
+    let mut record = load(&paths, ID).unwrap();
+    record.quiet = None;
+    save(&paths, ID, &record).unwrap();
+    let guest = QuietGuest::new(false);
+    ensure_quiet(&guest, &paths, "dev").unwrap();
+    assert!(guest.calls.lock().unwrap().is_empty());
+}
+
+/// A fork whose restore succeeds; the guest runs the quiet step only through the runner.
+struct ForkRestoreGuest {
+    guest: QuietGuest,
+    attempt: Mutex<Option<String>>,
+    restore_labels: Mutex<Vec<String>>,
+}
+impl RuntimeRunner for ForkRestoreGuest {
+    fn run(
+        &self,
+        paths: &RuntimePaths,
+        args: &[String],
+        timeout: Duration,
+    ) -> Result<CommandOutput, RuntimeError> {
+        let ok = |stdout: String| {
+            Ok(CommandOutput {
+                stdout,
+                stderr: String::new(),
+            })
+        };
+        match args[0].as_str() {
+            "snapshot" => {
+                self.guest.calls.lock().unwrap().push(args.to_vec());
+                ok(serde_json::json!([{"group":"dev","name":"c000000000000000000000000000000","scope":"disk","availability":"ready"}]).to_string())
+            }
+            "list" => {
+                self.guest.calls.lock().unwrap().push(args.to_vec());
+                ok(if self.attempt.lock().unwrap().is_some() {
+                    r#"[{"name":"dev"}]"#.into()
+                } else {
+                    "[]".into()
+                })
+            }
+            "restore" => {
+                self.guest.calls.lock().unwrap().push(args.to_vec());
+                let labels: Vec<String> = args
+                    .windows(2)
+                    .filter(|pair| pair[0] == "--label")
+                    .map(|pair| pair[1].clone())
+                    .collect();
+                *self.attempt.lock().unwrap() = labels.iter().find_map(|label| {
+                    label
+                        .strip_prefix("silo.restore-attempt=")
+                        .map(str::to_owned)
+                });
+                *self.restore_labels.lock().unwrap() = labels;
+                ok(String::new())
+            }
+            "inspect" => {
+                self.guest.calls.lock().unwrap().push(args.to_vec());
+                ok(serde_json::json!({"name":"dev","status":"Running","config":{
+                    "labels":{"silo.managed":"true","silo.machine-id":ID,"silo.restore-attempt":self.attempt.lock().unwrap().clone()},
+                    "network":{"policy":{"default_egress":"deny","default_ingress":"allow","rules":[]},
+                        "secrets":{"secrets":[{"env_var":"SILO_GITHUB","value":"","source":{"kind":"env","var":"SILO_GITHUB"}}]}}
+                }}).to_string())
+            }
+            _ => self.guest.run(paths, args, timeout),
+        }
+    }
+}
+
+fn fork_restore_guest(marker: bool) -> ForkRestoreGuest {
+    ForkRestoreGuest {
+        guest: QuietGuest::new(marker),
+        attempt: Mutex::new(None),
+        restore_labels: Mutex::new(Vec::new()),
+    }
+}
+
+fn fork_pending_fixture(directory: &tempfile::TempDir) -> RuntimePaths {
+    let paths = unquieted_computer(directory, true);
+    let mut record = load(&paths, ID).unwrap();
+    record.snapshot_group = Some("dev".into());
+    record.quiet = Some(QuietRecord {
+        stop: vec!["poller".into()],
+        scrub: vec!["/root/.env".into()],
+        ..quiet_record("")
+    });
+    record.desired_network_policy =
+        Some(serde_json::json!({"default_egress":"deny","default_ingress":"allow","rules":[]}));
+    save(&paths, ID, &record).unwrap();
+    paths
+}
+
+#[test]
+fn a_fork_start_goes_through_the_production_guard_and_is_quiet_before_it_is_reported() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let paths = fork_pending_fixture(&directory);
+    let runner = fork_restore_guest(true);
+    start_pending(&runner, &paths, &computer_configuration()).unwrap();
+    let labels = runner.restore_labels.lock().unwrap().clone();
+    let attempt = runner.attempt.lock().unwrap().clone().unwrap();
+    assert!(
+        labels.contains(&format!("silo.quiet-token={attempt}")),
+        "{labels:?}"
+    );
+    assert!(labels.contains(&"silo.quiet-host=dev".to_string()));
+    assert!(labels.contains(&"silo.quiet-args=stop=poller scrub=/root/.env".to_string()));
+    let stored = load(&paths, ID).unwrap();
+    assert!(stored.pending_checkpoint_restore.is_none());
+    let quiet = stored.quiet.unwrap();
+    assert!(quiet.applied);
+    assert_eq!(quiet.token, attempt);
+}
+
+#[test]
+fn a_fork_whose_quiet_step_fails_is_stopped_and_every_later_start_quiets_it_first() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let paths = fork_pending_fixture(&directory);
+    let mut runner = fork_restore_guest(false);
+    runner.guest.script_fails = true;
+    let failure = start_pending(&runner, &paths, &computer_configuration()).unwrap_err();
+    assert!(
+        failure.to_string().contains("so it was stopped"),
+        "{failure}"
+    );
+    let stored = load(&paths, ID).unwrap();
+    assert!(
+        stored.pending_checkpoint_restore.is_none(),
+        "the retry no longer clears a pending restore before it quiets"
+    );
+    assert!(!stored.quiet.as_ref().unwrap().applied);
+
+    // The next start, from any caller, confirms the step before it reports success.
+    let guest = QuietGuest::new(false);
+    ensure_quiet(&guest, &paths, "dev").unwrap();
+    assert_eq!(guest.count("silo-quiet"), 1);
+    assert!(load(&paths, ID).unwrap().quiet.unwrap().applied);
+}
+
+#[test]
+fn a_running_fork_that_already_matches_is_still_quieted() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let paths = fork_pending_fixture(&directory);
+    let runner = fork_restore_guest(false);
+    let mut first = fork_restore_guest(false);
+    first.guest.script_fails = true;
+    start_pending(&first, &paths, &computer_configuration()).unwrap_err();
+    // Put the pending restore back as an interrupted attempt that booted and matches.
+    let mut record = load(&paths, ID).unwrap();
+    let attempt = first.attempt.lock().unwrap().clone().unwrap();
+    record.pending_checkpoint_restore = Some(PendingRestore {
+        checkpoint_id: "c000000000000000000000000000000".into(),
+        source_computer: "dev".into(),
+        state: "disk".into(),
+    });
+    record.restore_attempted = true;
+    record.restore_attempt_id = Some(attempt.clone());
+    save(&paths, ID, &record).unwrap();
+    *runner.attempt.lock().unwrap() = Some(attempt);
+    start_pending(&runner, &paths, &computer_configuration()).unwrap();
+    assert_eq!(runner.guest.count("silo-quiet"), 1);
+    assert!(load(&paths, ID).unwrap().quiet.unwrap().applied);
+}
+
+#[test]
+fn a_fork_does_not_copy_the_sources_environment_variables() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let (paths, fork) = fork_fixture(&directory);
+    let mut source = load(&paths, &fork.source_id).unwrap();
+    source.set_environment_for_test(&[("API_TOKEN", "secret")]);
+    save(&paths, &fork.source_id, &source).unwrap();
+    fork_commit(
+        &journal_runner("Running", ""),
+        &paths,
+        &FakeAssignments::new(&[]),
+        &fork,
+        "branch",
+    )
+    .unwrap();
+    assert!(fork_child(&paths).1.desired_environment.is_empty());
+}
+
+#[test]
+fn stop_names_refuse_dots() {
+    let options = |stop: &str| ForkOptions {
+        stop: vec![stop.into()],
+        ..ForkOptions::default()
+    };
+    for stop in [".", "..", "...", "a b", "a/b"] {
+        assert!(options(stop).validate().is_err(), "{stop:?}");
+    }
+    assert!(options("poller.py").validate().is_ok());
+    let scrub = |path: &str| ForkOptions {
+        scrub: vec![path.into()],
+        ..ForkOptions::default()
+    };
+    for path in ["/root/./x", "/root/a b", "/root/a\tb"] {
+        assert!(scrub(path).validate().is_err(), "{path:?}");
+    }
+    assert!(scrub("/home/*/.cache").validate().is_ok());
+    assert!(scrub("/home/*").validate().is_ok());
+}
+
+fn script_function(name: &str, until: &str) -> String {
+    let start = QUIET_SCRIPT
+        .find(&format!("{name}() {{"))
+        .unwrap_or_else(|| panic!("{name} missing"));
+    let end = start + QUIET_SCRIPT[start..].find(until).unwrap();
+    QUIET_SCRIPT[start..end].to_string()
+}
+
+fn run_sh(program: &str) -> std::process::Output {
+    std::process::Command::new("sh")
+        .args(["-c", program])
+        .output()
+        .unwrap()
+}
+
+#[test]
+fn the_boot_patch_carries_the_script_the_engine_runs() {
+    let patch = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../patches/microsandbox-create-stopped-0.7.6.patch"),
+    )
+    .unwrap();
+    let lines: Vec<&str> = patch.lines().collect();
+    let first = lines
+        .iter()
+        .position(|line| line.ends_with("r####\"set -u"))
+        .unwrap();
+    let last = first
+        + 1
+        + lines[first + 1..]
+            .iter()
+            .position(|line| *line == "+\"####;")
+            .unwrap();
+    let mut embedded = String::from("set -u\n");
+    for line in &lines[first + 1..last] {
+        embedded.push_str(line.strip_prefix('+').unwrap());
+        embedded.push('\n');
+    }
+    assert_eq!(embedded, QUIET_SCRIPT);
+    assert!(patch.contains("silo.quiet-token"));
+}
+
+#[test]
+fn argv_matching_uses_the_program_or_script_name_exactly() {
+    let functions = script_function("argv_matches", "pids_of() {");
+    let check = |want: &str, argv: &[&str]| {
+        let lines = argv.join("\n");
+        let program = format!("{functions}\nprintf '%s\\n' \"$LINES_IN\" | argv_matches \"$WANT\"");
+        std::process::Command::new("sh")
+            .args(["-c", &program])
+            .env("LINES_IN", lines)
+            .env("WANT", want)
+            .status()
+            .unwrap()
+            .success()
+    };
+    assert!(check("poller", &["/usr/bin/poller", "--flag"]));
+    assert!(check("poller.py", &["python3", "-u", "/opt/app/poller.py"]));
+    assert!(check("server.js", &["node", "/srv/server.js"]));
+    assert!(check(
+        "a-very-long-service-name",
+        &["/bin/a-very-long-service-name"]
+    ));
+    assert!(!check("poller", &["python3", "/opt/pollerx.py"]));
+    assert!(!check("poller", &["sh", "-c", "echo poller"]));
+    assert!(!check("po.*", &["/usr/bin/poller"]));
+    assert!(!check("poller", &["python3", "/opt/a/poller/run.py"]));
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn stopping_by_name_ends_a_long_named_script_and_fails_on_survivors() {
+    let directory = tempfile::tempdir().unwrap();
+    let script = directory.path().join("a-long-named-poller-script.sh");
+    std::fs::write(&script, "#!/bin/sh\nwhile :; do sleep 1; done\n").unwrap();
+    let mut child = std::process::Command::new("sh")
+        .arg(&script)
+        .spawn()
+        .unwrap();
+    let functions = script_function("argv_matches", "for daemon in cron");
+    let program = format!("{functions}\nstop_processes a-long-named-poller-script.sh");
+    let outcome = run_sh(&program);
+    assert!(outcome.status.success(), "{outcome:?}");
+    assert!(child.wait().is_ok());
+    let none = run_sh(&format!("{functions}\nstop_processes no-such-thing"));
+    assert!(none.status.success());
+}
+
+#[test]
+fn scrub_stays_inside_the_pattern_and_removes_links_without_following_them() {
+    let functions = script_function("scrub_one", "for a; do");
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().canonicalize().unwrap();
+    let path = |relative: &str| root.join(relative);
+    let make = |relative: &str| {
+        let file = path(relative);
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(&file, "x").unwrap();
+    };
+    let scrub = |pattern: &str| {
+        run_sh(&format!("{functions}\nscrub_one '{pattern}'"))
+            .status
+            .success()
+    };
+
+    make("home/ann/.cache/x");
+    make("home/bob/.cache/y");
+    make("home/ann/keep");
+    assert!(scrub(&format!("{}/home/*/.cache", root.display())));
+    assert!(!path("home/ann/.cache").exists() && !path("home/bob/.cache").exists());
+    assert!(path("home/ann/keep").exists());
+
+    // `.[.]` is `..`: the match leaves the literal directory and the step fails.
+    make("etc/a");
+    make("outside/secret");
+    assert!(!scrub(&format!("{}/etc/.[.]/*", root.display())));
+    assert!(path("outside/secret").exists() && path("etc/a").exists());
+
+    // A symlinked directory in the path redirects nothing.
+    make("elsewhere/secret");
+    std::fs::create_dir_all(path("root")).unwrap();
+    std::os::unix::fs::symlink(path("elsewhere"), path("root/link")).unwrap();
+    assert!(!scrub(&format!("{}/root/link/secret", root.display())));
+    assert!(path("elsewhere/secret").exists());
+
+    // A link named by the pattern is removed itself.
+    make("kept/file");
+    std::os::unix::fs::symlink(path("kept"), path("root/pointer")).unwrap();
+    assert!(scrub(&format!("{}/root/pointer", root.display())));
+    assert!(std::fs::symlink_metadata(path("root/pointer")).is_err());
+    assert!(path("kept/file").exists());
+
+    // The top of the file system is never a target.
+    assert!(!scrub("/*"));
 }
