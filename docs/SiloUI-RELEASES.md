@@ -769,7 +769,7 @@ with ordinary targets, quote-breaking input and command-substitution input.
 Current release callers supply fixed matrix values; this protects the reusable
 input boundary without changing release gates or published asset names.
 
-Linux verification and release-tooling checks cancel obsolete runs for the same
+CI, including its release-tooling checks, cancels obsolete runs for the same
 pull request and workflow. Push and manual verification runs use their run IDs,
 so they stay independent. [GitHub concurrency groups](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency)
 are repository-wide; including the workflow name prevents cross-workflow

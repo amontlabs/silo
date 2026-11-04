@@ -59,7 +59,7 @@ class WorkflowPinTests(unittest.TestCase):
 
 class WorkflowConcurrencyTests(unittest.TestCase):
     def test_verification_supersedes_only_the_same_pull_request(self):
-        for name in ['release-tooling.yml']:
+        for name in ['ci.yml']:
             with self.subTest(workflow=name):
                 workflow = (GITHUB / 'workflows' / name).read_text()
                 concurrency = re.search(r'(?m)^concurrency:\n((?: +[^\n]*\n)+)', workflow)
