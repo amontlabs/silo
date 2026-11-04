@@ -302,6 +302,10 @@ updater still requires an explicit `-p` command. A relative-link check of the Ma
 documentation with [lychee](https://github.com/lycheeverse/lychee)
 in offline mode. The macOS job also runs `test_macos_release.py` against
 ad hoc signed disposable binaries. CI does not run the ignored live computer tests.
+Pull requests that change only `website/`, `demo/`, `docs/`, `artifacts/`,
+`assets/` or top-level Markdown skip the macOS Rust and Linux engine jobs;
+`scripts/ci-native-changes.py` decides, and any other path or a failed check
+runs them.
 The link check includes first-party source documentation, guest notices and
 changesets. A coverage regression compares its globs with tracked Markdown,
 excluding documentation in the partial upstream vendor tree.
