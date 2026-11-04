@@ -7,6 +7,8 @@ pub const RESTORE_EXPECTED_DURATION: Duration = Duration::from_secs(60 * 60);
 
 #[path = "checkpoints/native.rs"]
 mod native;
+#[path = "checkpoints/reclaim.rs"]
+mod reclaim;
 #[cfg(test)]
 #[path = "checkpoints/running_retry_tests.rs"]
 mod running_retry_tests;
@@ -1024,8 +1026,8 @@ fn api_checkpoint(checkpoint: Checkpoint) -> silo_api::methods::checkpoints::Che
     }
 }
 
-/// Removes this computer's automatic checkpoints beyond the newest N through the ordinary
-/// checkpoint deletion. It never touches other kinds. See [`trim_kind_with`].
+/// Removes this computer's automatic checkpoints beyond the newest N and returns their disk.
+/// It never touches other kinds. See [`trim_kind_with`].
 fn prune_automatic_with(
     gate: &super::operation_gate::OperationGate,
     runner: &dyn RuntimeRunner,
@@ -1068,12 +1070,11 @@ fn prune_before_keep_with(
     );
 }
 
-/// Removes this computer's checkpoints of `kind` beyond the newest N, through the ordinary
-/// checkpoint deletion. Candidates go newest first, so a chain of snapshots among them is removed from
-/// its leaf down to its root without `--force`. The count is read again once each deletion is
-/// admitted so turning the setting off stops later deletions, and a checkpoint something still
-/// needs is kept (visible with its `deleteBlocker`). A failed deletion is logged and the rest
-/// still run.
+/// Removes this computer's checkpoints of `kind` beyond the newest N and returns their
+/// disk (see [`reclaim`]). The count is read again once the device lane admits the work,
+/// so turning the setting off while it queued stops it. A checkpoint something still needs
+/// is kept (visible with its `deleteBlocker`); a failed merge removes nothing and is
+/// recorded in the computer's checkpoint operation.
 #[allow(clippy::too_many_arguments)]
 fn trim_kind_with(
     gate: &super::operation_gate::OperationGate,
@@ -1087,8 +1088,9 @@ fn trim_kind_with(
 ) {
     use super::operation_gate::{OperationKind, Scope};
 
-    let entries_of = |record: &Record| -> Vec<crate::checkpoints::retention::Entry> {
-        record
+    let candidates_of = |count: u32| -> Option<Vec<String>> {
+        let record = load(paths, computer_id).ok()?;
+        let entries: Vec<_> = record
             .checkpoints
             .iter()
             .map(|checkpoint| crate::checkpoints::retention::Entry {
@@ -1096,50 +1098,35 @@ fn trim_kind_with(
                 created_at_ms: i128::from(checkpoint.created_at),
                 automatic: checkpoint.kind == kind,
             })
-            .collect()
+            .collect();
+        Some(crate::checkpoints::retention::plan(&entries, count).candidates)
     };
     let Ok(count) = retention() else { return };
-    if count == 0 {
+    if count == 0 || candidates_of(count).is_none_or(|candidates| candidates.is_empty()) {
         return;
     }
-    let Ok(record) = load(paths, computer_id) else {
+    let Ok(_guard) = gate.kind(OperationKind::CheckpointDelete).acquire_for_job(
+        Scope::Device,
+        None,
+        activity,
+        None,
+        job_id,
+        None,
+    ) else {
         return;
     };
-    let mut candidates =
-        crate::checkpoints::retention::plan(&entries_of(&record), count).candidates;
-    candidates.reverse();
-    for candidate in candidates {
-        let Ok(_guard) = gate.kind(OperationKind::CheckpointDelete).acquire_for_job(
-            Scope::Device,
-            None,
-            activity,
-            None,
-            job_id.clone(),
-            None,
-        ) else {
-            break;
-        };
-        // The plan is made again once the queue admits this deletion: the setting and the
-        // history may have changed while it waited, and only a candidate that the current
-        // count still drops is deleted.
-        let Ok(current) = retention() else { break };
-        if current == 0 {
-            break;
-        }
-        let Ok(record) = load(paths, computer_id) else {
-            break;
-        };
-        if !crate::checkpoints::retention::plan(&entries_of(&record), current)
-            .candidates
-            .contains(&candidate)
-        {
-            continue;
-        }
-        // Dependencies and in-progress recovery defer retention. Never force-delete a
-        // checkpoint the runtime says something still needs.
-        if let Err(error) = delete_checkpoint_with(runner, paths, computer_id, &candidate) {
-            eprintln!("Silo kept an older {kind} checkpoint: {error}");
-        }
+    // The plan is made again once the queue admits this work: the setting and the history
+    // may have changed while it waited.
+    let Ok(current) = retention() else { return };
+    if current == 0 {
+        return;
+    }
+    let Some(candidates) = candidates_of(current).filter(|candidates| !candidates.is_empty())
+    else {
+        return;
+    };
+    if let Err(failure) = reclaim::reclaim(runner, paths, computer_id, &candidates) {
+        eprintln!("Silo kept older {kind} checkpoints: {failure}");
     }
 }
 
@@ -3114,7 +3101,8 @@ fn deletion(
 }
 
 /// Delete one checkpoint: remove its native member unless something still needs it,
-/// then drop the entry. Never passes `--force`; MicroSandbox's own guards stay in force.
+/// then drop the entry. Never passes `--force`; MicroSandbox's own guards stay in force. Only
+/// retention ([`reclaim`]) forces removal, after merging the layers.
 fn delete_checkpoint_with(
     runner: &dyn RuntimeRunner,
     paths: &RuntimePaths,
@@ -3142,9 +3130,10 @@ fn delete_checkpoint_with(
     {
         Deletion::EntryOnly => {}
         Deletion::Remove(member) => {
-            if let Some((_, failure)) = native::execute(runner, paths, &survey.inventory, &[member])
-                .into_iter()
-                .next()
+            if let Some((_, failure)) =
+                native::execute(runner, paths, &survey.inventory, &[member], false)
+                    .into_iter()
+                    .next()
             {
                 return Err(error(&format!(
                     "The checkpoint could not be deleted; it was kept. {}",
@@ -3447,7 +3436,7 @@ fn retry_deleted_snapshots(
         &survey.uses,
         &survey.positions,
     );
-    let failures = native::execute(runner, paths, &survey.inventory, &plan.remove);
+    let failures = native::execute(runner, paths, &survey.inventory, &plan.remove, false);
     let removed: HashSet<&str> = plan
         .remove
         .iter()
@@ -3591,7 +3580,7 @@ pub fn discard_failed_capture(
         );
         !plan.remove.is_empty()
             && plan.kept.is_empty()
-            && native::execute(runner, paths, &survey.inventory, &plan.remove).is_empty()
+            && native::execute(runner, paths, &survey.inventory, &plan.remove, false).is_empty()
     })
 }
 

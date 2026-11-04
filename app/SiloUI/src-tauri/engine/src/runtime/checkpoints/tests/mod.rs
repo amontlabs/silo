@@ -2603,6 +2603,9 @@ struct Store {
     computers: Vec<(&'static str, Option<&'static str>)>,
     fail_create_after_publish: bool,
     fail_remove: bool,
+    /// Layers (head included) the fake runtime reports per disk for `modify --compact`.
+    layers: usize,
+    fail_compact: bool,
     calls: Mutex<Vec<Vec<String>>>,
 }
 impl Store {
@@ -2613,8 +2616,30 @@ impl Store {
             computers,
             fail_create_after_publish: false,
             fail_remove: false,
+            layers: 0,
+            fail_compact: false,
             calls: Mutex::new(Vec::new()),
         }
+    }
+    fn with_layers(mut self, layers: usize) -> Self {
+        self.layers = layers;
+        self
+    }
+    fn failing_compaction(mut self) -> Self {
+        self.fail_compact = true;
+        self
+    }
+    /// The `--layers` of every real (not dry-run) compaction.
+    fn compactions(&self) -> Vec<usize> {
+        self.calls
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|call| {
+                call[0] == "modify" && call.contains(&"--compact".into()) && !call.contains(&"--dry-run".into())
+            })
+            .map(|call| call[call.iter().position(|arg| arg == "--layers").unwrap() + 1].parse().unwrap())
+            .collect()
     }
     fn with(self, group: &str, name: &str, id: &str, parent: Option<&str>) -> Self {
         self.members.lock().unwrap().push((
@@ -2640,7 +2665,7 @@ impl Store {
             .unwrap()
             .iter()
             .filter(|call| call[0] == "snapshot" && call[1] == "remove")
-            .map(|call| call[2].clone())
+            .map(|call| call.iter().skip(2).find(|arg| !arg.starts_with("--")).unwrap().clone())
             .collect()
     }
 }
@@ -2685,8 +2710,23 @@ impl RuntimeRunner for Store {
                     let group = selector.split(':').next().unwrap();
                     ok(serde_json::json!({"group": group, "head": self.heads.lock().unwrap().get(group)}).to_string())
                 }
+                ("modify", Some(name)) if args.contains(&"--compact".into()) => {
+                    let layers = args.iter().position(|arg| arg == "--layers").map(|at| args[at + 1].parse::<usize>().unwrap());
+                    if args.contains(&"--dry-run".into()) {
+                        let selected = layers.unwrap_or(self.layers.saturating_sub(1)).min(self.layers.saturating_sub(1));
+                        let disk = |guest: &str| serde_json::json!({"guest_path": guest, "input_layers": self.layers, "selected_layers": selected, "output_layers": self.layers - selected + 1});
+                        return ok(serde_json::json!({"dry_run": true, "disks": [disk("/"), disk("/workspace")]}).to_string());
+                    }
+                    assert_eq!(name, "dev");
+                    if self.fail_compact {
+                        return Err(RuntimeError::Unavailable("compaction of / failed: injected; VM kept paused; restart follows per-disk journals".into()));
+                    }
+                    ok("{}".into())
+                }
                 ("snapshot", Some("remove")) => {
-                    let (group, name) = args[2].split_once(':').unwrap();
+                    let force = args.contains(&"--force".into());
+                    let selector = args.iter().skip(2).find(|arg| !arg.starts_with("--")).unwrap();
+                    let (group, name) = selector.split_once(':').unwrap();
                     let mut members = self.members.lock().unwrap();
                     let index = members.iter().position(|member| member.0 == group && member.1 == name)
                         .ok_or_else(|| RuntimeError::Unavailable("snapshot not found".into()))?;
@@ -2694,7 +2734,7 @@ impl RuntimeRunner for Store {
                     if self.fail_remove {
                         return Err(RuntimeError::Unavailable("permission denied".into()));
                     }
-                    if members.iter().any(|member| member.3.as_deref() == Some(id.as_str())) {
+                    if !force && members.iter().any(|member| member.3.as_deref() == Some(id.as_str())) {
                         return Err(RuntimeError::Unavailable("snapshot has indexed children; pass --force".into()));
                     }
                     let mut heads = self.heads.lock().unwrap();
@@ -3327,9 +3367,12 @@ fn a_snapshot_group_directory_with_other_content_or_members_is_kept() {
     let directory = tempfile::tempdir().unwrap();
     let (paths, group) = deleted_dev_with_group_files(&directory, &[".group.lock", "group.json"]);
     // A member another computer still needs stays, and so does its group.
-    let store = Store::new(Vec::new())
-        .with("dev", A, "snap_a", None)
-        .with("dev", "silo-backup-0-1-2", "snap_x", None);
+    let store = Store::new(Vec::new()).with("dev", A, "snap_a", None).with(
+        "dev",
+        "silo-backup-0-1-2",
+        "snap_x",
+        None,
+    );
     store.members.lock().unwrap().retain(|member| member.1 == A);
     save(
         &paths,
@@ -3358,7 +3401,10 @@ fn a_snapshot_group_directory_with_other_content_or_members_is_kept() {
     .unwrap();
     remove_deleted_snapshots(&store, &paths, ID, "dev").unwrap();
     assert_eq!(store.names(), [A]);
-    assert!(group.exists(), "a group with a member the fork needs is kept");
+    assert!(
+        group.exists(),
+        "a group with a member the fork needs is kept"
+    );
 }
 
 #[test]
@@ -3379,7 +3425,11 @@ fn the_launch_upgrade_moves_a_layout_two_history_to_layout_three() {
     let upgraded: serde_json::Value = serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();
     assert_eq!(upgraded["version"], 3);
     assert_eq!(upgraded["checkpoints"][1]["kind"], "automatic");
-    assert_eq!(upgrade_records(storage).unwrap(), 0, "a layout-three file is left alone");
+    assert_eq!(
+        upgrade_records(storage).unwrap(),
+        0,
+        "a layout-three file is left alone"
+    );
     let mut with_before_keep = Record::default();
     with_before_keep
         .checkpoints
@@ -3387,7 +3437,10 @@ fn the_launch_upgrade_moves_a_layout_two_history_to_layout_three() {
     with_before_keep.version = RECORD_VERSION;
     validate(&with_before_keep).unwrap();
     with_before_keep.version = 2;
-    assert!(validate(&with_before_keep).is_err(), "an old layout is refused");
+    assert!(
+        validate(&with_before_keep).is_err(),
+        "an old layout is refused"
+    );
 }
 
 #[test]
@@ -4364,7 +4417,7 @@ fn trim_before_keep(store: &dyn RuntimeRunner, paths: &RuntimePaths, count: u32)
 }
 
 #[test]
-fn before_keep_retention_removes_a_chain_leaf_to_root() {
+fn before_keep_retention_removes_a_chain_oldest_first_with_force() {
     let _test_state = crate::test_support::global_state();
     let directory = tempfile::tempdir().unwrap();
     let mut entries: Vec<Checkpoint> = (1..=3)
@@ -4385,18 +4438,19 @@ fn before_keep_retention_removes_a_chain_leaf_to_root() {
     assert_eq!(
         store.removals(),
         [
-            format!("dev:{}", native_id(3)),
-            format!("dev:{}", native_id(2)),
             format!("dev:{}", native_id(1)),
+            format!("dev:{}", native_id(2)),
+            format!("dev:{}", native_id(3)),
         ],
-        "newest first, so each removal passes the children guard"
+        "oldest first"
     );
-    assert!(!store
+    assert!(store
         .calls
         .lock()
         .unwrap()
         .iter()
-        .any(|call| call.iter().any(|arg| arg == "--force")));
+        .filter(|call| call[0] == "snapshot" && call[1] == "remove")
+        .all(|call| call.iter().any(|arg| arg == "--force")));
     let left: Vec<_> = load(&paths, ID)
         .unwrap()
         .checkpoints
@@ -4407,14 +4461,15 @@ fn before_keep_retention_removes_a_chain_leaf_to_root() {
 }
 
 #[test]
-fn before_keep_retention_keeps_a_base_a_retained_checkpoint_builds_on() {
+fn before_keep_retention_removes_the_bases_a_retained_checkpoint_builds_on() {
     let _test_state = crate::test_support::global_state();
     let directory = tempfile::tempdir().unwrap();
     let entries: Vec<Checkpoint> = (1..=3)
         .map(|n| before_keep_entry(&native_id(n), n * 10))
         .collect();
     let paths = delete_fixture(&directory, entries, None);
-    // 3 is retained and builds on 2, which builds on 1: both candidates are bases.
+    // 3 is retained and builds on 2, which builds on 1. Parent links are lineage only: each
+    // snapshot holds its own layers, so both older ones go.
     let store = Store::new(vec![("dev", None)])
         .with("dev", &native_id(1), "snap_1", None)
         .with("dev", &native_id(2), "snap_2", Some("snap_1"))
@@ -4422,9 +4477,12 @@ fn before_keep_retention_keeps_a_base_a_retained_checkpoint_builds_on() {
 
     trim_before_keep(&store, &paths, 1);
 
-    assert!(store.removals().is_empty());
-    assert_eq!(store.names().len(), 3);
-    assert_eq!(load(&paths, ID).unwrap().checkpoints.len(), 3);
+    assert_eq!(
+        store.removals(),
+        [format!("dev:{}", native_id(1)), format!("dev:{}", native_id(2))]
+    );
+    assert_eq!(store.names(), [native_id(3)]);
+    assert_eq!(load(&paths, ID).unwrap().checkpoints.len(), 1);
 }
 
 #[test]
@@ -4489,15 +4547,8 @@ fn a_before_keep_capture_persists_its_policy_kind_and_reaches_the_api() {
     let paths = delete_fixture(&directory, Vec::new(), None);
     let store = Store::new(vec![("dev", None)]);
 
-    let captured = capture_with_kind(
-        &store,
-        &paths,
-        ID,
-        "Before keep",
-        "manual",
-        "before-keep",
-    )
-    .unwrap();
+    let captured =
+        capture_with_kind(&store, &paths, ID, "Before keep", "manual", "before-keep").unwrap();
 
     assert_eq!(load(&paths, ID).unwrap().checkpoints[0].kind, "before-keep");
     assert_eq!(
@@ -4506,10 +4557,7 @@ fn a_before_keep_capture_persists_its_policy_kind_and_reaches_the_api() {
     );
     let kind: silo_api::methods::checkpoints::CheckpointKind =
         serde_json::from_str("\"before-keep\"").unwrap();
-    assert_eq!(
-        serde_json::to_string(&kind).unwrap(),
-        "\"before-keep\""
-    );
+    assert_eq!(serde_json::to_string(&kind).unwrap(), "\"before-keep\"");
 }
 
 #[test]
@@ -4606,7 +4654,7 @@ fn retention_removes_only_automatic_records_beyond_the_newest_count() {
 }
 
 #[test]
-fn retention_stops_when_the_setting_is_turned_off_between_deletions() {
+fn retention_stops_when_the_setting_is_turned_off_before_the_work_is_admitted() {
     let _test_state = crate::test_support::global_state();
     let directory = tempfile::tempdir().unwrap();
     let entries: Vec<Checkpoint> = (1..=4)
@@ -4619,10 +4667,10 @@ fn retention_stops_when_the_setting_is_turned_off_between_deletions() {
     }
     let gate = super::super::operation_gate::OperationGate::new();
     let reads = std::sync::atomic::AtomicUsize::new(0);
-    // The first two reads (the plan, the first deletion) see 1; later reads see "off".
+    // The first read (the plan) sees 1; the read once the work is admitted sees "off".
     let setting = || {
         Ok(
-            if reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst) < 2 {
+            if reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst) < 1 {
                 1
             } else {
                 0
@@ -4639,12 +4687,8 @@ fn retention_stops_when_the_setting_is_turned_off_between_deletions() {
         silo_api::jobs::JobId::new("job:2").unwrap(),
     );
 
-    assert_eq!(
-        store.removals().len(),
-        1,
-        "only the deletion admitted before it was off"
-    );
-    assert_eq!(load(&paths, ID).unwrap().checkpoints.len(), 3);
+    assert!(store.removals().is_empty());
+    assert_eq!(load(&paths, ID).unwrap().checkpoints.len(), 4);
 }
 
 /// Runs retention with the device lane held, waits (without sleeping) until its first
@@ -4699,21 +4743,21 @@ fn retention_raised_while_the_deletion_queues_keeps_what_the_new_count_retains()
     let (store, left) = prune_while_queued(2, 5, 5);
     assert!(store.removals().is_empty());
     assert_eq!(left, 5);
-    // Lowered while queued, the oldest (the only planned candidate) is still dropped.
+    // Lowered while queued, the plan is made again with the new count.
     let (store, left) = prune_while_queued(4, 2, 5);
-    assert!(!store.removals().is_empty());
-    assert_eq!(left, 4);
+    assert_eq!(store.removals().len(), 3);
+    assert_eq!(left, 2);
 }
 
 #[test]
-fn retention_keeps_a_pinned_old_record_and_still_keeps_the_newest() {
+fn retention_removes_a_chained_old_record_and_keeps_the_newest() {
     let _test_state = crate::test_support::global_state();
     let directory = tempfile::tempdir().unwrap();
     let entries: Vec<Checkpoint> = (1..=4)
         .map(|n| automatic_entry(&native_id(n), n * 10))
         .collect();
     let paths = delete_fixture(&directory, entries, None);
-    // Checkpoint 2 builds on checkpoint 1, so 1 can only go after 2.
+    // Checkpoint 2 builds on checkpoint 1.
     let store = Store::new(vec![("dev", None)])
         .with("dev", &native_id(1), "snap_1", None)
         .with("dev", &native_id(2), "snap_2", Some("snap_1"))
@@ -4737,15 +4781,244 @@ fn retention_keeps_a_pinned_old_record_and_still_keeps_the_newest() {
         .map(|c| c.id.clone())
         .collect();
     left.sort();
-    // 2 goes first and releases 1, which then goes too; 3 and 4 are the kept newest pair.
+    // 1 and 2 go oldest first; 3 and 4 are the kept newest pair.
     assert_eq!(left, [native_id(3), native_id(4)]);
     assert_eq!(
         store.removals(),
         [
-            format!("dev:{}", native_id(2)),
-            format!("dev:{}", native_id(1))
+            format!("dev:{}", native_id(1)),
+            format!("dev:{}", native_id(2))
         ]
     );
+}
+
+// MARK: Retention that returns disk
+
+/// A linear chain `snap_1 <- ... <- snap_n`, one checkpoint per entry of `kinds`, in the
+/// group `dev`, the computer positioned on `snap_n` with `n + 1` layers (the head last).
+fn chain_fixture(
+    directory: &tempfile::TempDir,
+    kinds: &[&str],
+    fork: Option<Record>,
+) -> (RuntimePaths, Store) {
+    let n = kinds.len() as u64;
+    let entries: Vec<Checkpoint> = kinds
+        .iter()
+        .enumerate()
+        .map(|(index, kind)| Checkpoint {
+            created_at: (index as u64 + 1) * 10,
+            kind: (*kind).into(),
+            ..entry(
+                &native_id(index as u64 + 1),
+                &format!("Checkpoint {}", index + 1),
+                "manual",
+            )
+        })
+        .collect();
+    let paths = delete_fixture(directory, entries, fork);
+    let tip: &'static str = Box::leak(format!("snap_{n}").into_boxed_str());
+    let mut store = Store::new(vec![("dev", Some(tip))]).with_layers(n as usize + 1);
+    for index in 1..=n {
+        let parent = (index > 1).then(|| format!("snap_{}", index - 1));
+        store = store.with(
+            "dev",
+            &native_id(index),
+            &format!("snap_{index}"),
+            parent.as_deref(),
+        );
+    }
+    (paths, store)
+}
+
+fn trim_automatic(store: &dyn RuntimeRunner, paths: &RuntimePaths, count: u32) {
+    let gate = super::super::operation_gate::OperationGate::new();
+    prune_automatic_with(
+        &gate,
+        store,
+        paths,
+        ID,
+        &|| Ok(count),
+        silo_api::jobs::JobId::new("job:20").unwrap(),
+    );
+}
+
+fn left_ids(paths: &RuntimePaths) -> Vec<String> {
+    load(paths, ID)
+        .unwrap()
+        .checkpoints
+        .iter()
+        .map(|checkpoint| checkpoint.id.clone())
+        .collect()
+}
+
+#[test]
+fn retention_merges_the_layers_older_than_the_oldest_kept_checkpoint_before_removing() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let (paths, store) = chain_fixture(&directory, &["automatic"; 6], None);
+
+    trim_automatic(&store, &paths, 2);
+
+    // 6 captures plus the head are 7 layers; snap_5 (two newest kept) sealed layer 4, so
+    // layers 0..=3 (captures 1-4) are merged.
+    assert_eq!(store.compactions(), [4]);
+    assert_eq!(
+        store.removals(),
+        (1..=4)
+            .map(|n| format!("dev:{}", native_id(n)))
+            .collect::<Vec<_>>(),
+        "oldest first"
+    );
+    let calls = store.calls.lock().unwrap().clone();
+    let compact_at = calls
+        .iter()
+        .position(|call| call[0] == "modify" && !call.contains(&"--dry-run".into()))
+        .unwrap();
+    let first_removal = calls
+        .iter()
+        .position(|call| call.get(1).is_some_and(|word| word == "remove"))
+        .unwrap();
+    assert!(compact_at < first_removal, "the merge runs before any removal");
+    assert!(calls
+        .iter()
+        .filter(|call| call.get(1).is_some_and(|word| word == "remove"))
+        .all(|call| call.contains(&"--force".into())));
+    assert_eq!(left_ids(&paths), [native_id(5), native_id(6)]);
+}
+
+#[test]
+fn retention_skips_the_merge_when_fewer_than_two_layers_would_be_merged() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    // Keeping the newest 3 of 4: only one layer is older than snap_2's.
+    let (paths, store) = chain_fixture(&directory, &["automatic"; 4], None);
+
+    trim_automatic(&store, &paths, 3);
+
+    assert!(store.compactions().is_empty());
+    assert_eq!(store.removals(), [format!("dev:{}", native_id(1))]);
+    assert_eq!(left_ids(&paths).len(), 3);
+}
+
+#[test]
+fn a_failed_merge_removes_nothing_and_is_recorded_without_a_retry() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let (paths, store) = chain_fixture(&directory, &["automatic"; 6], None);
+    let store = store.failing_compaction();
+
+    trim_automatic(&store, &paths, 2);
+
+    assert!(store.removals().is_empty());
+    let attempts = store
+        .calls
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|call| call[0] == "modify" && !call.contains(&"--dry-run".into()))
+        .count();
+    assert_eq!(attempts, 1);
+    let record = load(&paths, ID).unwrap();
+    assert_eq!(record.checkpoints.len(), 6);
+    let operation = record.checkpoint_operation.unwrap();
+    assert_eq!(operation.status, "failed");
+    assert_eq!(operation.stage, reclaim::RECLAIM_STAGE);
+    let message = operation.error.unwrap();
+    assert!(message.contains("kept"), "{message}");
+    assert!(message.contains("Restart dev"), "{message}");
+}
+
+#[test]
+fn retention_never_removes_the_newest_checkpoint_or_another_kind() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let kinds = [
+        "automatic",
+        "before-keep",
+        "automatic",
+        "before-keep",
+        "automatic",
+        "before-keep",
+    ];
+    let (paths, store) = chain_fixture(&directory, &kinds, None);
+
+    trim_automatic(&store, &paths, 1);
+
+    assert_eq!(
+        store.removals(),
+        [native_id(1), native_id(3)].map(|id| format!("dev:{id}"))
+    );
+    assert_eq!(
+        left_ids(&paths),
+        [2, 4, 5, 6].map(native_id),
+        "the newest automatic record and every before-keep one remain"
+    );
+    // snap_2 stays and is the oldest keeper, so there is nothing older to merge.
+    assert!(store.compactions().is_empty());
+}
+
+#[test]
+fn retention_keeps_a_checkpoint_a_named_checkpoint_builds_on() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let kinds = ["automatic", "manual", "automatic", "automatic", "automatic"];
+    let (paths, store) = chain_fixture(&directory, &kinds, None);
+
+    trim_automatic(&store, &paths, 2);
+
+    // The named checkpoint 2 builds on 1, so 1 stays; nothing named builds on 3.
+    assert_eq!(store.removals(), [format!("dev:{}", native_id(3))]);
+    assert_eq!(left_ids(&paths), [1, 2, 4, 5].map(native_id));
+}
+
+#[test]
+fn retention_keeps_a_checkpoint_a_fork_computer_or_an_export_depends_on() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let fork = Record {
+        snapshot_group: Some("dev".into()),
+        pending_checkpoint_restore: Some(PendingRestore {
+            checkpoint_id: native_id(1),
+            source_computer: "dev".into(),
+            state: "full".into(),
+        }),
+        ..Record::default()
+    };
+    let (paths, store) = chain_fixture(&directory, &["automatic"; 4], Some(fork));
+    let store = Store {
+        computers: vec![("dev", Some("snap_4")), ("branch", None)],
+        ..store
+    };
+    store.members.lock().unwrap().push((
+        "dev".into(),
+        "silo-backup-1-2-3".into(),
+        "snap_export".into(),
+        Some("snap_2".into()),
+    ));
+
+    trim_automatic(&store, &paths, 1);
+
+    // 1 starts a fork and 2 has an export child, so both stay; 4 is the newest.
+    assert_eq!(store.removals(), [format!("dev:{}", native_id(3))]);
+    assert_eq!(left_ids(&paths), [1, 2, 4].map(native_id));
+}
+
+#[test]
+fn retention_keeps_the_checkpoint_a_computer_is_positioned_on() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let (paths, store) = chain_fixture(&directory, &["automatic"; 4], None);
+    // The computer was restored from checkpoint 2 and its next capture builds on it.
+    let store = Store {
+        computers: vec![("dev", Some("snap_2"))],
+        ..store
+    };
+
+    trim_automatic(&store, &paths, 1);
+
+    assert!(!store.removals().contains(&format!("dev:{}", native_id(2))));
+    assert!(left_ids(&paths).contains(&native_id(2)));
+    assert!(left_ids(&paths).contains(&native_id(4)));
 }
 
 // MARK: Launch upgrade of the record layout

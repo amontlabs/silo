@@ -771,19 +771,41 @@ impl<R: MsbRunner> BackupService<R> {
                     capture_intent(source, None)?;
                 }
                 let payload_path = stage.path().join(format!("{index}.msb"));
-                self.require_success_with(
-                    "Writing computer disks to the export file",
-                    &[
+                let save_arguments = |with_parents: bool| -> Vec<String> {
+                    let mut arguments = vec![
                         "snapshot".into(),
                         "save".into(),
                         snapshot.to_string_lossy().into_owned(),
                         payload_path.to_string_lossy().into_owned(),
-                        "--with-parents".into(),
-                        "--with-image".into(),
-                    ],
+                    ];
+                    if with_parents {
+                        arguments.push("--with-parents".into());
+                    }
+                    arguments.push("--with-image".into());
+                    arguments
+                };
+                match self.require_success_with(
+                    "Writing computer disks to the export file",
+                    &save_arguments(true),
                     data_timeout,
                     cancellation,
-                )?;
+                ) {
+                    // Checkpoint retention removes old ancestors. A snapshot holds its own
+                    // complete layers, so the archive is written without the missing lineage.
+                    Err(BackupError::CommandFailed { detail, .. })
+                        if detail.contains("not in local index") =>
+                    {
+                        self.require_success_with(
+                            "Writing computer disks to the export file",
+                            &save_arguments(false),
+                            data_timeout,
+                            cancellation,
+                        )?;
+                    }
+                    other => {
+                        other?;
+                    }
+                }
                 Ok::<_, BackupError>(payload_path)
             })();
             let payload_path = capture_result?;

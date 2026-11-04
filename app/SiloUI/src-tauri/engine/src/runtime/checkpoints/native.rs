@@ -1,8 +1,8 @@
 //! MicroSandbox's native snapshot store as Silo sees it: which members exist, what
 //! still depends on each one, and removal that never bypasses MicroSandbox's guards.
 //!
-//! Removal always calls `msb snapshot remove` without `--force` (see the E-03 design
-//! note). Beyond MicroSandbox's own children and head guards, Silo keeps a member that:
+//! Removal calls `msb snapshot remove` without `--force` (see the E-03 design note); only
+//! checkpoint retention, which merges the retired layers first, passes it. Beyond MicroSandbox's own children and head guards, Silo keeps a member that:
 //! - any Silo record references (a checkpoint, a capture in progress, a Restore's
 //!   recovery point, or a fork or import that has not started yet);
 //! - is a live computer's lineage position: the snapshot its next capture names as parent.
@@ -299,6 +299,7 @@ pub(crate) fn execute(
     paths: &RuntimePaths,
     inventory: &[Member],
     order: &[Member],
+    force: bool,
 ) -> Vec<(Member, RuntimeError)> {
     let mut removed: HashSet<String> = HashSet::new();
     let mut failures = Vec::new();
@@ -364,16 +365,12 @@ pub(crate) fn execute(
                 }
             }
         }
-        match runner.run(
-            paths,
-            &[
-                "snapshot".into(),
-                "remove".into(),
-                format!("{group}:{name}"),
-                "--quiet".into(),
-            ],
-            REMOVE_TIMEOUT,
-        ) {
+        let mut remove = vec!["snapshot".into(), "remove".into()];
+        if force {
+            remove.push("--force".into());
+        }
+        remove.extend([format!("{group}:{name}"), "--quiet".into()]);
+        match runner.run(paths, &remove, REMOVE_TIMEOUT) {
             Ok(_) => {
                 removed.insert(member.snapshot_id.clone());
             }
