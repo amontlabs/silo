@@ -1,5 +1,118 @@
 # silo-ui
 
+## 0.12.0
+
+Silo runs on Apple Silicon Macs with macOS 15 or later. Linux and macOS computers run as guests on that Mac. This release has only the macOS installer: Linux host packages stopped at 0.11.1. The engine (`silo-engine`) builds and passes its tests on Linux in CI, but there is no Linux daemon yet. Computer use now runs on Cua Driver instead of ChatGPT and LCU. The [threat model](https://github.com/amontlabs/silo/blob/main/docs/THREAT-MODEL.md), [security policy](https://github.com/amontlabs/silo/blob/main/SECURITY.md) and [isolation evals](https://github.com/amontlabs/silo/tree/main/docs/evals) are now published.
+
+### Minor Changes
+
+- 46e3791: Apps that embed Silo's engine can now install Node.js 24.21.0 and the Claude Code CLI 2.1.287 in a Linux computer with the new `setup-agent-tools` desktop action, and read whether they are installed from the computer's status. Nothing is installed unless an app asks. Silo never signs in to Claude Code; the app that runs it provides the sign-in.
+- 6975192: Computer use in Linux and macOS computers now runs on Cua Driver, an open-source tool, instead of LCU and the ChatGPT app. Silo no longer downloads the ChatGPT app. On Linux, creating a computer waits only for the image, and each new computer downloads the small Cua Driver package (about 37 MB) once, from inside the computer, until a computer image ships with it built in; on macOS Silo downloads the signed Cua Driver app (about 85 MB) once and installs it during setup, and there is no "Finish without computer use" step. Computer use is set up for Claude Code and Codex; Pi, OMP, Hermes and OpenCode are no longer set up. Cua Driver's usage reporting and update checks are turned off. Computers you already have keep working, and Silo frees the disk space of the old ChatGPT and LCU downloads when no computer is running. Existing macOS computers switch to Cua Driver at their next start, showing "Updating Computer Use", and lose the ChatGPT app and LCU.
+- aec1655: - Status colors for running, in progress, success and warning now share one palette that stays readable in light and dark appearance.
+  - Pages share one layout and heading style, and General now has a title.
+  - Text fields and pop-up menus share one size, shape and focus ring, and keyboard focus is easier to see in the light appearance.
+  - Buttons and rows use the standard arrow cursor, and only text you might copy (messages, paths, addresses, logs) can be selected.
+  - Loading indicators, empty lists, error boxes and truncated names are consistent across the app, and loading placeholders no longer shift the layout.
+- 56bb0ca: Two windows can now show the same Linux computer's desktop at once without one closing the other. The second window can type, use the clipboard and turn its own sound on or off. Existing computers get this from "Update desktop", which also brings the streamer to its fifth recipe.
+- 82e957e: The Linux desktop viewer can play the computer's sound, with a speaker button that remembers your choice for each computer (shown only where this device's web engine can play it, which includes macOS with the Safari 26 updates). The computer's screen now follows the viewer window, and "Reset to 1440×900" in the desktop actions menu restores the default size.
+- 4c79d33: Copy and paste text and images between this device and a computer's Linux desktop. The viewer toolbar has Paste into computer and Copy from computer buttons, Command+V and Command+C do the same on macOS, and nothing is copied unless you ask. Computers whose desktop predates this release ask you to update the desktop first.
+- 3258893: Installers and updates are about 400 MB smaller: Silo no longer ships its VM image inside the app. It downloads the image (about 400 MB) once, in the background, before your first sandbox, checks it against a pinned checksum and reuses it across updates. Creating a sandbox waits for the download if it is still running, and a failed download offers Retry. Devices that already have the image keep using it.
+- 46e3791: Silo's engine now runs as a separate background process. Quitting the app or a crash of the app no longer stops your computers: with computers running, Quit asks whether to keep them running or stop them and quit. An update saves running computers, including their memory, and resumes them after installing.
+- 6975192: The engine protocol is now version 7: the ChatGPT app and LCU methods, events and fields are gone (`preparation.chatgpt.status`, `preparation.chatgpt.retry`, `preparation.chatgpt.changed`, `computers.creation.skipComputerUseWait`, `PreparationStatus.lcu`, and `cause`, `compatibility`, `warning`, `appVersion` and `runtimeVersion` in the computer-use state, which gains `driverVersion`). Clients on protocol 6 are refused at the handshake.
+- a02b567: Upload files to a running computer and download files from it. In Files, point at a folder and choose Upload files here, or point at a file and choose Download. A name that already exists asks whether to replace the file or keep both. You can also drop files onto the Linux desktop viewer to upload them to the computer's Downloads folder. Transfers show progress, keep running and keep asking questions while you move between pages, can be cancelled, are stopped if a computer sends more than it listed, never overwrite a file that appears while uploading, and need the OpenSSH sftp client.
+- 1cd21a4: Serve the guest methods for macOS computers: SSH aliases, terminal and editor commands, the Files page, file uploads and downloads, and key authorization for other devices.
+- a9c0f17: Add the engine's guest methods: run commands in a computer (bounded or as a long-running job with live output, input and cancel), read, write, list, remove and watch its files, and create SSH aliases keyed by computer ID.
+- be300f4: Silo's host app and releases now support Apple Silicon macOS only. Linux computers remain supported as guests on a Mac.
+- 550b895: Silo now supports macOS 15 or later on Apple silicon. macOS 14 is no longer tested: Silo's release checks ran on GitHub's macOS 14 runners, which GitHub retired on November 2, 2026. Silo still opens and updates on macOS 14, but problems there will not be fixed.
+- 7e33ab8: macOS computers now have checkpoints. Each set-up computer has a Checkpoints button in its row with the same list as Linux computers: New checkpoint (memory and disk when the computer runs, disk only when it is stopped), Restore (saves a recovery checkpoint first and leaves the computer stopped; Start then continues from the saved memory, or boots from the restored disk with a note when macOS cannot restore it), Fork (a new, independent computer from the checkpoint's disk) and Delete.
+- 86d268b: Add macOS computers on Apple Silicon Macs. Choose macOS in New computer: Silo downloads the newest macOS your Mac can run from Apple, installs it, and sets it up for computer use with no clicks (an account, SSH, System Integrity Protection turned off, and Cua Driver with its Accessibility and Screen Recording permissions). macOS computers sit in the Computers list with a macOS badge; you can start, stop and delete them, open their screen in a native window, and move text and images with Paste into computer and Copy from computer. New macOS computers are copied from a set-up template, so after the first one (about 15 minutes) they are ready in about a minute.
+- 21e169f: Run macOS computers on another Mac and use them from this device. Choose macOS in New computer and pick which connected Mac runs it. Remote macOS computers appear in the Computers list with their device and can be started, stopped, force stopped, deleted and set up again, with progress and logs. Show screen opens a window with the computer's screen that follows the window's size. macOS computers also turn on Screen Sharing during their computer-use setup, which existing computers pick up the next time they start. Checkpoints and clipboard transfer are not available for remote macOS computers yet. Both devices need this version.
+- c380859: Export and import MicroSandbox and Apple Virtualization computers in one archive.
+- bff33a6: macOS computers now install developer tools, receive Screen Recording permission, check Screen Sharing readiness, start at launch, queue lifecycle work, and support CPU and memory edits.
+- 2c8d7d8: Ready macOS computers now use Silo's per-computer network gateway for DNS, trusted HTTPS, and scoped secret and GitHub credentials.
+- c6b64fa: The Linux desktop now renders at the display's full resolution with correctly scaled Xfce, so text is sharp on Retina displays, and it no longer encodes an unchanged screen. Existing desktops get this through Update desktop.
+- 2135536: Add Apple Virtualization computer export and import. Imported computers receive a new identity and must finish Retry setup before they can start.
+- babdefe: - The computer editor saves with Enter and cancels with Escape, and shows the computer name rule before you save.
+  - Resource fields are named consistently: "CPUs at start", "Maximum CPUs", "Memory at start" and "Maximum memory". A computer's page lists both, and its workspace and runtime disks.
+  - The computer use approval setting moved from Settings, Connections to Settings, General.
+  - Edit, Duplicate settings and Delete are in the ⋯ menu during setup, without needing a hover.
+  - Reasons for disabled Delete and Free up space are available to keyboard and screen reader users; the automatic free-up schedule is shown on screen.
+  - Disabling GitHub access says it applies to every computer, and Disconnect explains what it removes.
+  - SSH address and port errors appear next to their fields and are announced with them.
+  - Stop and Restart confirmations say what happens and that files in /workspace are kept. The menu bar's confirmation uses the same words.
+  - Setup and download messages use plain names instead of internal ones, and suggest checking your connection when a download fails.
+  - Choosing Start, Stop or Restart in the command palette no longer switches pages.
+  - Escape closes the Connect device form.
+
+### Patch Changes
+
+- 2ccefe0: Check free space before expanding macOS archive components.
+- 8a0b9b1: Completed macOS checkpoint jobs no longer receive stale progress updates.
+- 8b6f94c: Text copied from a computer no longer carries terminal control or escape characters into your clipboard.
+- 8e14482: Retry setup repairs missing or damaged Apple Command Line Tools files even when their package receipts still match.
+- f232e3d: Removing a connected Mac now also removes this Mac's management key from the other Mac, and Connections reports each device's reachability and when it was last seen.
+- 7f66b8e: Removing a connected Mac now removes the key this Mac installed there even after the key was deleted or replaced, and a removal that could not be confirmed stays pending instead of forgetting the Mac.
+- db86d56: Fix desktop clipboard edge cases: Ctrl+Shift+C and Command shortcuts no longer reach the computer as extra modifiers, Paste and Copy report a disconnected or older desktop instead of pasting stale content, Copy waits for the new selection and says when it is too large, browser selections copy as plain text, holding the shortcut starts one transfer, and an invalid desktop receipt keeps showing "Update desktop".
+- b47e96c: Typing and clicking in a local computer's desktop no longer pause for about half a second every second or so. The same fix removes periodic stalls from other connections to local computers, such as editor sessions and forwarded ports.
+- 6b249b8: The computer's desktop page can no longer make requests to other sites or services on your device or network; it may only talk to its own desktop connection.
+- c734b93: The desktop's connection password no longer appears in a computer's execution log.
+- 27eaf54: Fix desktop viewer edge cases: a desktop page that keeps reloading no longer piles up sound checks, a file dropped on one desktop window is uploaded only by that window, an upload that cannot be confirmed in the computer is reported as failed instead of "Uploaded", Copy no longer returns the computer's old selection on a fresh connection, holding Command+V and releasing the modifiers first no longer types into the computer, and Quit lets a running file transfer clean up before stopping computers.
+- 0820f70: Make file transfers and desktop windows more reliable when shutting down or updating: Quit and logout leave enough time to stop computers, updates let a running file transfer clean up before computers stop, uploads confirm the stored file by its exact name (including names with accented or non-Latin characters), Copy no longer returns an old selection when the computer answers late, and reloading or closing a desktop window no longer leaves sound checks behind.
+- 8f5cf19: Setup progress shows only in the main window, remote computer approval falls back safely, the native appearance follows saved settings, and checkpoint state refreshes after a failed operation.
+- 71974e4: Cancel an export through its own operation token so a stale cancel cannot stop a successor export.
+- 62319c7: Export and import jobs now publish their own final result before another transfer can start.
+- 647c9b9: Fix first launch on a new installation failing to prepare the VM image because the runtime's storage link could not be created. An installation already stuck this way recovers on the next attempt.
+- 9ae31a6: - The GitHub page no longer shows a large empty panel below a computer's settings.
+- 45fdfdb: Importing an exported computer no longer fails with "cache target already exists with different content" when this device already has the same VM image.
+- 0708f4f: Completion events now identify outcomes that must be retrieved through the chunked job lookup.
+- 3e274f7: Fix macOS guest SSH aliases so the ProxyCommand helper can connect to computers on the same device through Silo's local engine.
+- Check a macOS export's hardware model and resources against this Mac when inspecting it, and cap the account files Silo reads from an imported disk.
+- 30562d4: Checkpoint work on macOS now appears in Operations while it waits or runs, and a fork's background setup has its own result after the checkpoint copy completes.
+- c4b8a6b: macOS computers now update Computer Use in place when Silo ships a new version: existing computers update in the background after they start, new computers still start from the saved template, and the macOS download is deleted once a template exists, so it is fetched again only when macOS itself has to be reinstalled.
+- Detach an imported macOS disk before removing its staging folder, and remove the working files an interrupted macOS export leaves after Silo restarts.
+- 71974e4: macOS lifecycle jobs now preserve command failures, and generic cancellation no longer removes an admitted creation.
+- Keep macOS ports closed after you unpublish them or stop the computer while Silo is repairing its forwards, and treat a computer with no visible listeners as having none.
+- aec9397: macOS computer setup now installs the network and certificate trust needed for Start. Silo prepares older computers during launch before starting them.
+- f2d2b85: macOS computers now count their network setup as part of being set up, so a setup that failed halfway can be retried. Silo checks that the guest really trusts its certificate, follows split-DNS and network changes, falls back to TCP for large DNS answers, and removes a deleted computer's certificate key.
+- c0121d1: Keep macOS computer setup recoverable after cancellation, checkpoint restore, and developer-tools updates.
+- d56567c: Fix Edit CPU & memory for macOS computers, which failed both on this Mac and on a connected Mac. The form now sends the disk size it expects, and the connected-Mac command accepts the change. Jobs started on a connected device are now followed and acknowledged on that device instead of being looked up on this Mac.
+- f053aae: The Logs page now lists macOS computers and shows their setup log, and the setup window no longer shows the clipboard buttons.
+- Keep macOS forwarded SSH streams on the guest's SSH transport, end them when their port is unpublished, and open them only for a running computer.
+- 3299b4d: A Mac you control from another Mac can now manage its Linux computers: create, start, stop, change, delete and checkpoint them, read their files and logs, check storage and preparation, and run exports. The other Mac does the work and its answers and errors come back as its own.
+- 6f00034: Keep macOS computer display attachment on the AppKit main thread and reject a display window that closed or changed before attachment.
+- ce51e06: Silo now reports a computer that stops or crashes on its own as soon as it happens, instead of at the next health check up to 10 seconds later.
+- e29122f: Computers on another connected Mac can be opened in a terminal or editor, given an SSH alias, sent files and read back, and watched for folder changes, as if they were on this Mac. Their SSH entry runs through the other Mac, which also serves macOS computers' SSH connections to other Macs.
+- 109ee6d: An older Linux desktop can still be started while Silo offers an optional "Update desktop" beside "Start desktop". The update adds clipboard sharing, sound control and a screen that follows the window, and the offer now appears for existing computers after Silo is upgraded.
+- 67695ea: Keep backup, push, and macOS job outcomes consistent through completion and recovery, and restore native-only delivery for runtime notifications.
+- 743bfa8: macOS computers can browse and transfer workspace files, publish local ports, and return SSH-backed terminal and editor commands.
+- 16b4ed3: - Silo opens faster: live updates, saved settings and the application list now load in parallel, and the window code loads on demand.
+  - Fewer background reads: returning to the window, saving a secret and network or SSH polling no longer repeat state reads that were just done, and network services are read only where they are shown.
+  - The operation list recovers on its own if a read fails, and one stalled state read no longer stops Silo from refreshing.
+- 09c417a: Make the interface feel faster: pages you have not opened yet load on demand and no longer re-render on every update, the activity list and Logs avoid redundant work while scrolling or when computers change, notification timers share one clock, and expand and collapse animations are shorter.
+- adfd3ff: Repair published ports for Apple Virtualization computers so their SSH tunnel honors the requested loopback forward.
+- 318699d: Keep uploads working after a conflict choice, and let clients retrieve large saved job results after an engine restart.
+- 5cde56e: Bound imported macOS hardware model data before validation.
+- 4826931: Queue macOS guest file transfers with computer operations and cancel them through the operation queue.
+- 62319c7: Recovered backup and import jobs now show their saved outcomes.
+- 317fee5: Closing the desktop viewer while the computer is sending it data no longer stops the computer.
+- a05fdc3: Remote checkpoint requests now expire before gate admission when their connection or deadline ends. Interrupted export and import recovery now starts safely during application setup.
+- 874a7e6: A job on another Mac now stays on that Mac: you follow, cancel and dismiss it by its own id, and cancelling reaches the work there. Events from a connected Mac reach this Mac's windows as they happen, and Connections keeps each device's status current without a window open.
+- 5d22e43: Retry retained macOS job outcomes before resuming dependent checkpoint work after a transient registry write failure.
+- 17e6d50: Keep interrupted backup and import recovery outcomes accurate and replaceable until recovery settles.
+- 2121a1b: - Sizes in the delete confirmation and on the Storage page now use the same units, and whole values drop pointless decimals (for example "512 MiB" and "4.25 GiB").
+  - Update download progress shows sizes the same way as the rest of Silo.
+  - Errors that are not plain text now show their message in more places instead of "[object Object]".
+- 767493d: - Stopping a computer's runtime now asks it to shut down cleanly before forcing it.
+  - Repository discovery, log cleanup and sound checks recover from unexpected errors instead of staying stuck.
+  - A settings directory sync failure no longer reports a successful save as failed.
+- 68e81ef: Setup entries in the activity history name the computer they concern.
+- 5410d7c: Fix first-time setup failing at Finish with "Desktop removal is not supported. Turn off automatic startup instead." after creating a computer.
+- f0d9798: Clear inherited macOS authentication metadata when rekeying an imported computer.
+- 9a3ad23: The engine retains job outcomes and notices across restarts and publishes bounded, sequenced events to local clients.
+- c676d6e: Allow imported macOS computers to retain the authentication metadata added by macOS after first boot.
+- ffc8fc4: Allow imported computer setup to retry after guest SSH host keys rotate.
+- 77a15cb: Fix uploads to computers whose file server cannot report free space, which reported a failure for a file that had been stored (and left duplicates when keeping both), and stop Copy from returning an old image when the computer's earlier clipboard answer arrives after the copied text.
+
 ## 0.11.1
 
 0.11.0 was not published separately, so this release also contains all of its changes; see 0.11.0 below.

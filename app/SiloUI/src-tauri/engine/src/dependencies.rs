@@ -605,7 +605,7 @@ fn system_check(deadline: Instant) -> DependencyCheck {
                 std::env::consts::OS,
                 std::env::consts::ARCH
             ),
-            "Use Silo on macOS 14 or later on Apple silicon, or a supported Linux build.",
+            "Use Silo on an Apple silicon Mac with macOS 15 or later.",
         );
     }
     #[cfg(target_os = "macos")]
@@ -716,7 +716,7 @@ fn virtualization_check(deadline: Instant) -> DependencyCheck {
             }
             Ok(_) => DependencyCheck::failure(id, title, CheckStatus::Failed,
                 "Apple Hypervisor support is unavailable on this Mac.",
-                "Use an Apple silicon Mac with macOS 14 or later. If Silo is inside a VM, its host must support and enable nested virtualization."),
+                "Use an Apple silicon Mac with macOS 15 or later. If Silo is inside a VM, its host must support and enable nested virtualization."),
             Err(error) => error.to_check(id, title, false),
         };
     }
