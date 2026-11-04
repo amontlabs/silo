@@ -10,7 +10,13 @@
     "allowImportingTsExtensions": true,
     "allowArbitraryExtensions": true,
     "types": ["vite/client", "node"],
-    "paths": { "@/*": ["../app/SiloUI/src/*"] }
+    "paths": {
+      "@/*": ["../app/SiloUI/src/*"],
+      "react": ["../app/SiloUI/node_modules/@types/react"],
+      "react/*": ["../app/SiloUI/node_modules/@types/react/*"],
+      "react-dom": ["../app/SiloUI/node_modules/@types/react-dom"],
+      "react-dom/*": ["../app/SiloUI/node_modules/@types/react-dom/*"]
+    }
   },
   "include": ["src/demo/**/*.ts", "src/demo/**/*.tsx", "vite.config.ts"]
 }

@@ -10,9 +10,17 @@ updates:
       interval: weekly
     groups:
       github-actions:
+        applies-to: version-updates
         patterns: ['*']
-  # npm and Cargo minor and patch updates are grouped into weekly pull requests;
-  # major and security updates open on their own. Tauri stays on manual minor
+      github-actions-security:
+        applies-to: security-updates
+        patterns: ['*']
+  # npm and Cargo version updates arrive in two weekly grouped pull requests per
+  # ecosystem: minor and patch, and major (Dependabot counts a 0.x minor bump such
+  # as sha2 0.10 -> 0.11 as major). Majors stay apart so a breaking upgrade cannot
+  # hold back routine bumps; one that needs porting can be split out with an
+  # ignore rule. Security fixes arrive as advisories appear, grouped into one pull
+  # request per ecosystem. Tauri stays on manual minor
   # upgrades because its CLI rejects JS and Rust packages on different minors.
   # The artifacts/ film projects and src-tauri/macos-gateway are left out on
   # purpose: they are pinned to the recordings and the bundled runtime.
@@ -25,7 +33,14 @@ updates:
       interval: weekly
     groups:
       npm:
+        applies-to: version-updates
         update-types: [minor, patch]
+      npm-major:
+        applies-to: version-updates
+        update-types: [major]
+      npm-security:
+        applies-to: security-updates
+        patterns: ['*']
     ignore:
       - dependency-name: '@tauri-apps/*'
         update-types: [version-update:semver-minor, version-update:semver-major]
@@ -37,7 +52,14 @@ updates:
       interval: weekly
     groups:
       cargo:
+        applies-to: version-updates
         update-types: [minor, patch]
+      cargo-major:
+        applies-to: version-updates
+        update-types: [major]
+      cargo-security:
+        applies-to: security-updates
+        patterns: ['*']
     ignore:
       - dependency-name: 'tauri*'
         update-types: [version-update:semver-minor, version-update:semver-major]
@@ -45,3 +67,14 @@ updates:
       - dependency-name: 'tauri-plugin-updater'
       # Must match runtime-inputs.json and the microsandbox patch set.
       - dependency-name: 'microsandbox-*'
+      # gtk-rs majors must match the GTK version Tauri and wry build against.
+      - dependency-name: 'gtk'
+        update-types: [version-update:semver-major]
+      - dependency-name: 'gio'
+        update-types: [version-update:semver-major]
+      # sha2 0.11 and hmac 0.13 move to digest 0.11 together (new output type,
+      # no io::Write); port them in one deliberate change.
+      - dependency-name: 'sha2'
+        update-types: [version-update:semver-major]
+      - dependency-name: 'hmac'
+        update-types: [version-update:semver-major]
