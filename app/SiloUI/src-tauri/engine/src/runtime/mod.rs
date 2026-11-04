@@ -2958,6 +2958,20 @@ pub fn read_application_state_sync(
     Ok(source)
 }
 
+/// Establishes the settled inventory at engine start, so the first device-wide job does not
+/// leave readers with no earlier reading. A busy gate or recovery leaves it for the next read.
+pub fn warm_settled_inventory(host: &dyn RuntimeHost) -> Result<(), String> {
+    host.ensure_runtime_ready()?;
+    let paths = runtime_paths(host)?;
+    let ticket = observation_ticket();
+    let source = read_application_snapshot(&ProcessRunner, &paths, &OPERATIONS)
+        .map_err(|error| error.to_string())?;
+    if !source.from_cache {
+        remember_settled_since(&paths, ticket, &source.computers);
+    }
+    Ok(())
+}
+
 /// One engine-timer pass of expired-log cleanup (95 A-26), with no client reading state.
 /// It reads the computers like a state read does, then cleans the stopped ones that are due
 /// (at most hourly each, one pass at a time) on the calling thread. A busy gate postpones the
@@ -2966,8 +2980,12 @@ pub fn expire_stopped_logs(host: &dyn RuntimeHost) -> Result<(), String> {
     host.ensure_runtime_ready()?;
     shutdown::ensure_accepting_operations()?;
     let paths = runtime_paths(host)?;
+    let ticket = observation_ticket();
     let mut source = read_application_snapshot(&ProcessRunner, &paths, &OPERATIONS)
         .map_err(|error| error.to_string())?;
+    if !source.from_cache {
+        remember_settled_since(&paths, ticket, &source.computers);
+    }
     let due = plan_log_cleanup(&paths, &mut source.computers, Instant::now());
     if !due.is_empty() {
         clean_expired_logs(&ProcessRunner, &paths, &OPERATIONS, &due);
@@ -3211,7 +3229,10 @@ fn read_application_snapshot(
                 if attempt + 1 < MAX_ATTEMPTS {
                     thread::sleep(RETRY_DELAY);
                 } else {
-                    return Err(error);
+                    // No reading was ever published (a freshly started engine whose first
+                    // reader arrived during device-wide work): serve the saved computers,
+                    // all settling, instead of nothing.
+                    return read_saved_computers_settling(paths).map_err(BridgeError::from);
                 }
             }
             Err(error) => return Err(error),
@@ -3220,18 +3241,49 @@ fn read_application_snapshot(
     unreachable!("at least one application snapshot attempt is required")
 }
 
-/// The last settled rows of an inventory, every one marked `settling` because device-wide
-/// work may be changing it. `None` when this inventory never had a settled read.
+/// The saved computers with no runtime reading, every one marked `settling`.
+fn read_saved_computers_settling(paths: &RuntimePaths) -> Result<ApplicationSource, RuntimeError> {
+    let computers = read_metadata(&paths.metadata)?
+        .computers
+        .into_iter()
+        .map(|configuration| {
+            let mut computer = unread_computer(configuration);
+            computer.state = ComputerState::Starting;
+            computer.state_detail = "Updating".into();
+            computer.settling = true;
+            computer
+        })
+        .collect();
+    application_source_for_computers(paths, computers).map(|mut source| {
+        source.from_cache = true;
+        source
+    })
+}
+
+/// The last published rows of an inventory, every one marked `settling` because device-wide
+/// work may be changing it. `None` when this inventory never published a read.
 fn read_last_settled_snapshot(
     paths: &RuntimePaths,
 ) -> Option<Result<ApplicationSource, RuntimeError>> {
     let mut computers: Vec<ApplicationComputer> = {
         let readings = settled_readings();
         let inventory = readings.get(&paths.metadata)?;
-        if !inventory.complete {
+        if inventory.published == 0 {
             return None;
         }
-        inventory.rows.values().cloned().collect()
+        // The last published membership; a computer's fresh settled reading replaces its
+        // entry. A computer without a fresh reading (stale or settling) is still served.
+        inventory
+            .latest
+            .iter()
+            .map(|computer| {
+                inventory
+                    .rows
+                    .get(computer.configuration.id())
+                    .unwrap_or(computer)
+                    .clone()
+            })
+            .collect()
     };
     computers.sort_by(|a, b| a.configuration.name().cmp(b.configuration.name()));
     for computer in &mut computers {
@@ -5235,8 +5287,8 @@ struct SettledInventory {
     /// The observation ticket of the newest read published; an older observation never
     /// replaces it.
     published: u64,
-    /// True once a publication covered every computer, so the rows are the full membership.
-    complete: bool,
+    /// The newest publication's full membership (any freshness), served when no read can run.
+    latest: Vec<ApplicationComputer>,
     /// Each computer's last settled, fresh reading (after enrichment), by stable id. A
     /// computer a later read skipped keeps its earlier row.
     rows: HashMap<String, ApplicationComputer>,
@@ -5294,7 +5346,7 @@ fn remember_settled_since(paths: &RuntimePaths, ticket: u64, computers: &[Applic
                 .insert(computer.configuration.id().to_owned(), computer.clone());
         }
     }
-    inventory.complete = present.iter().all(|id| inventory.rows.contains_key(*id));
+    inventory.latest = computers.to_vec();
     inventory.published = ticket;
 }
 
@@ -10371,11 +10423,10 @@ exit 9
         let runner = StubRunner::successful_json(vec![json!([])]);
         let gate = operation_gate::OperationGate::new();
         let change = gate.device("Applying computer changes").unwrap();
-        assert_eq!(
+        assert!(
             read_application_snapshot(&runner, &paths, &gate)
-                .unwrap_err()
-                .code,
-            ErrorCode::UpdateInProgress
+                .unwrap()
+                .from_cache
         );
         drop(change);
         assert!(read_application_snapshot(&runner, &paths, &gate)
@@ -10469,23 +10520,6 @@ exit 9
         holder.join().unwrap();
     }
 
-    #[test]
-    fn a_state_read_with_no_settled_reading_still_defers_during_device_wide_work() {
-        let _test_state = crate::test_support::global_state();
-        let directory = tempfile::tempdir().unwrap();
-        let paths = paths(&directory);
-        write_metadata(&paths.metadata, &request(vec![computer()])).unwrap();
-        let gate = operation_gate::OperationGate::new();
-        let _change = gate.device("Applying computer changes").unwrap();
-        let runner = StubRunner::successful_json(vec![]);
-        assert_eq!(
-            read_application_snapshot(&runner, &paths, &gate)
-                .unwrap_err()
-                .code,
-            ErrorCode::UpdateInProgress
-        );
-    }
-
     fn two_settled_rows(paths: &RuntimePaths) -> Vec<ApplicationComputer> {
         read_application_snapshot(
             &two_computer_reading(paths, "Running", "Stopped"),
@@ -10497,7 +10531,7 @@ exit 9
     }
 
     #[test]
-    fn a_partial_reading_is_never_served_as_the_whole_inventory() {
+    fn a_reading_with_a_touched_computer_still_serves_the_whole_membership() {
         let _test_state = crate::test_support::global_state();
         let directory = tempfile::tempdir().unwrap();
         let paths = paths(&directory);
@@ -10506,24 +10540,121 @@ exit 9
             &request(vec![computer(), second_computer()]),
         )
         .unwrap();
-        // The second computer was touched during the only reading, so it has no row yet.
+        // The second computer was touched during the only reading, so it has no settled row.
         let mut rows = two_settled_rows(&paths);
         rows[1].settling = true;
         remember_settled(&paths, &rows);
-        assert!(read_last_settled_snapshot(&paths).is_none());
-        // Once a later reading covers it, the full membership is served.
-        remember_settled(&paths, &two_settled_rows(&paths));
         let served = published(&read_last_settled_snapshot(&paths).unwrap().unwrap());
         assert_eq!(served["computers"].as_array().unwrap().len(), 2);
-        // A later reading that skips it keeps its last row, still served as settling.
+        // A stale computer does not stop the inventory being served either.
         let mut rows = two_settled_rows(&paths);
-        rows[1].settling = true;
+        rows[1].freshness = Freshness::Stale;
         remember_settled(&paths, &rows);
         let served = published(&read_last_settled_snapshot(&paths).unwrap().unwrap());
+        assert_eq!(served["computers"].as_array().unwrap().len(), 2);
         for name in ["dev", "work"] {
             assert_eq!(row(&served, name)["settling"], true);
         }
+        // A later reading that skips it keeps its earlier settled row.
+        remember_settled(&paths, &two_settled_rows(&paths));
+        let mut rows = two_settled_rows(&paths);
+        rows[1].settling = true;
+        remember_settled(&paths, &rows);
+        let served = published(&read_last_settled_snapshot(&paths).unwrap().unwrap());
         assert_eq!(row(&served, "work")["state"], "stopped");
+    }
+
+    #[test]
+    fn a_list_during_creation_serves_the_earlier_inventory_without_the_new_computer() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let paths = paths(&directory);
+        write_metadata(&paths.metadata, &request(vec![computer()])).unwrap();
+        let gate = leaked_gate();
+        let first = read_application_snapshot(
+            &StubRunner::successful_json(vec![
+                json!([{"name": "dev"}]),
+                inspect_named(&paths, &computer(), "Running"),
+            ]),
+            &paths,
+            gate,
+        )
+        .unwrap();
+        remember_settled(&paths, &first.computers);
+        // Creation publishes the new computer's record while the job is still running.
+        write_metadata(
+            &paths.metadata,
+            &request(vec![computer(), second_computer()]),
+        )
+        .unwrap();
+        let (release, holder) =
+            hold_elsewhere(gate, |gate| gate.device("Creating computer").unwrap());
+        for _ in 0..3 {
+            let served = published(
+                &read_application_snapshot(&StubRunner::successful_json(vec![]), &paths, gate)
+                    .unwrap(),
+            );
+            assert_eq!(served["computers"].as_array().unwrap().len(), 1);
+            assert_eq!(row(&served, "dev")["settling"], true);
+        }
+        drop(release);
+        holder.join().unwrap();
+    }
+
+    #[test]
+    fn a_list_during_deletion_serves_the_earlier_inventory_with_the_computer_settling() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let paths = paths(&directory);
+        write_metadata(
+            &paths.metadata,
+            &request(vec![computer(), second_computer()]),
+        )
+        .unwrap();
+        let gate = leaked_gate();
+        let first = read_application_snapshot(
+            &two_computer_reading(&paths, "Running", "Stopped"),
+            &paths,
+            gate,
+        )
+        .unwrap();
+        remember_settled(&paths, &first.computers);
+        write_metadata(&paths.metadata, &request(vec![computer()])).unwrap();
+        let (release, holder) =
+            hold_elsewhere(gate, |gate| gate.device("Deleting computer").unwrap());
+        let served = published(
+            &read_application_snapshot(&StubRunner::successful_json(vec![]), &paths, gate).unwrap(),
+        );
+        assert_eq!(served["computers"].as_array().unwrap().len(), 2);
+        assert_eq!(row(&served, "work")["settling"], true);
+        drop(release);
+        holder.join().unwrap();
+    }
+
+    #[test]
+    fn a_list_on_a_fresh_engine_during_device_wide_work_serves_the_saved_computers() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let paths = paths(&directory);
+        write_metadata(
+            &paths.metadata,
+            &request(vec![computer(), second_computer()]),
+        )
+        .unwrap();
+        let gate = leaked_gate();
+        let (release, holder) =
+            hold_elsewhere(gate, |gate| gate.device("Creating computer").unwrap());
+        let served = published(
+            &read_application_snapshot(&StubRunner::successful_json(vec![]), &paths, gate).unwrap(),
+        );
+        assert_eq!(served["computers"].as_array().unwrap().len(), 2);
+        for name in ["dev", "work"] {
+            assert_eq!(row(&served, name)["settling"], true);
+        }
+        // Serving the placeholder does not establish a settled reading.
+        assert!(read_last_settled_snapshot(&paths).is_none());
+        drop(release);
+        holder.join().unwrap();
     }
 
     #[test]
@@ -10598,7 +10729,9 @@ exit 9
             let mut ready_without_rows = 0;
             while !reader_stopped.load(std::sync::atomic::Ordering::SeqCst) {
                 if let Some(inventory) = settled_readings().get(&reader_metadata) {
-                    if inventory.complete && inventory.rows.len() != 2 {
+                    if inventory.published > 0
+                        && (inventory.rows.len() != 2 || inventory.latest.len() != 2)
+                    {
                         ready_without_rows += 1;
                     }
                 }
