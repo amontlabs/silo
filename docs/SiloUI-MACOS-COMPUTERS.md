@@ -268,8 +268,16 @@ Fork setup steps, measured on the Dev engine (n=1, 164.8 s to ready):
 | Installing developer tools again | 46.3 | Only if the checkpoint lacks them or has another version (the checkpoint's `developerTools` state is carried over) |
 | Workspace folders, network and trust, final shutdown | 8.8 | The same, in that boot, then one shutdown |
 
-A fork therefore boots once for its setup, and once more for the user's Start. The setup
-boot stays because the network and trust files are written into the running guest.
+When the checkpoint's disk has nothing left to install (developer tools current, computer
+use up to date), the fork's setup does not start the guest at all. It rekeys the stopped
+disk and writes the fork's own gateway address and CA fingerprint into the guest's network
+configuration (in place, so the file keeps its owner); the record is marked `firstBoot`.
+The fork's first Start is its only boot, and it comes up behind its gateway. Before the
+computer is handed over, that Start logs in with the new password, installs the fork's key,
+name and host keys, the network files and the trust of the fork's proxy CA, and gives the
+account its SecureToken back (`fork_first_boot.rs`). A fork waiting for that Start can't be
+checkpointed. If the checkpoint needs developer tools or a computer-use update, the setup
+still uses one boot of its own, over the temporary NAT, and the Start is a second boot.
 
 The old script changed the password with `dscl . -passwd` over standard input; with no
 terminal that command printed `New Password:` and `Permission denied`, and the script
