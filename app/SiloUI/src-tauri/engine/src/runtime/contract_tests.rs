@@ -93,7 +93,7 @@ fn application_and_remote_snapshot_match_wire_contract() {
     // the read path, rather than copying the UI's own fixture into the response.
     fs::create_dir_all(directory.path().join("checkpoints")).unwrap();
     fs::write(directory.path().join("checkpoints").join(format!("{ID}.json")), json!({
-        "version":2,
+        "version":3,
         "checkpoints":[{"id":"point-1","nativeId":"native-1","name":"Before change","createdAt":1767225600000u64,"scope":"full","reason":"manual","kind":"manual"}],
         "pendingCheckpointRestore":null,
         "checkpointOperation":{"kind":"capture","status":"failed","stage":"Saving checkpoint","error":"Checkpoint storage is unavailable."},

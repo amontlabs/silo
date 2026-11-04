@@ -140,7 +140,11 @@ pub struct Service {
     host: Arc<dyn RuntimeHost>,
     macos: MacosContext,
     retention: RetentionPolicy,
+    before_keep_retention: RetentionPolicy,
 }
+
+/// How many before-keep checkpoints a computer keeps until the owner says otherwise.
+const DEFAULT_BEFORE_KEEP_RETENTION: u32 = 5;
 
 impl Service {
     pub fn new(
@@ -152,7 +156,15 @@ impl Service {
             host,
             macos,
             retention,
+            before_keep_retention: Arc::new(|| Ok(DEFAULT_BEFORE_KEEP_RETENTION)),
         }
+    }
+
+    /// Reads the before-keep retention count from `policy` instead of the default of five.
+    /// Zero keeps every before-keep checkpoint.
+    pub fn with_before_keep_retention(mut self, policy: RetentionPolicy) -> Self {
+        self.before_keep_retention = policy;
+        self
     }
 
     fn context(&self) -> Arc<dyn EngineContext> {
@@ -188,6 +200,13 @@ impl Service {
         kind: Option<CheckpointKind>,
     ) -> Result<JobId, Failure> {
         let automatic = kind == Some(CheckpointKind::Automatic);
+        if kind == Some(CheckpointKind::BeforeKeep) && self.platform(computer_id)? == Platform::Macos
+        {
+            return Err(Failure::new(
+                ErrorCode::Internal,
+                "Before-keep checkpoints are not available for macOS computers.",
+            ));
+        }
         if automatic && (self.retention)().map_err(Failure::from_message)? == 0 {
             return Err(Failure::new(ErrorCode::PermissionDenied, AUTOMATIC_OFF));
         }
@@ -203,6 +222,8 @@ impl Service {
             Platform::Linux => {
                 let (computer_id, name) = (computer_id.to_owned(), name.to_owned());
                 let retention = self.retention.clone();
+                let before_keep_retention = self.before_keep_retention.clone();
+                let kind = kind.unwrap_or(CheckpointKind::Manual);
                 self.start_linux_job(
                     "checkpoints.create",
                     true,
@@ -212,8 +233,9 @@ impl Service {
                             paths,
                             &computer_id,
                             &name,
-                            automatic,
+                            kind,
                             retention.as_ref(),
+                            before_keep_retention.as_ref(),
                             job_id,
                             cancellation,
                         )
@@ -711,6 +733,22 @@ mod tests {
         assert_eq!(missing.unwrap_err().code, ErrorCode::NotFound);
     }
 
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    #[test]
+    fn a_before_keep_capture_is_refused_for_a_macos_computer() {
+        let _state = crate::test_support::global_state();
+        let fixture = fixture(3);
+        let refused = fixture
+            .service
+            .start_create(
+                &fixture.macos_id,
+                "Before keep",
+                Some(CheckpointKind::BeforeKeep),
+            )
+            .unwrap_err();
+        assert!(refused.message.contains("macOS"), "{}", refused.message);
+    }
+
     #[test]
     fn an_automatic_capture_is_refused_while_retention_is_zero_on_both_platforms() {
         let _state = crate::test_support::global_state();
@@ -928,7 +966,7 @@ mod tests {
         upgrade_layouts(fixture.engine.as_ref(), &ready).unwrap();
         let converted: Value =
             serde_json::from_slice(&std::fs::read(&linux_file).unwrap()).unwrap();
-        assert_eq!(converted["version"], 2);
+        assert_eq!(converted["version"], 3);
         assert_eq!(converted["checkpoints"][0]["kind"], "manual");
         // And running it again changes nothing.
         let settled = std::fs::read(&linux_file).unwrap();
