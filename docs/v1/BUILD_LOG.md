@@ -6,10 +6,10 @@ Tracker: Linear project "Silo v1: git for agent computers" (P-AMO-8).
 
 ## Resume
 
-- **Phase:** 0 (AMO-88), in progress.
-- **Open slices:** 0a status reads during jobs; 0b checkpoint prune and retention; 0c app assessment.
-- **Clean up:** nothing yet.
-- **Next action:** review and merge phase 0 slices, build the Dev engine, run the phase 0 VM check.
+- **Phase:** 0 (AMO-88) checks passed; PR to main pending CI.
+- **Open slices:** AMO-91 (URL per fork, started early) is being reworked after review in its own worktree.
+- **Clean up:** the Dev engine runs from the worktree `.claude/worktrees/agent-af461c784262f09d6` (built from a235c34a); after the phase 0 PR merges, rebuild from main, restart the Dev `silod` from the main checkout's bundle, then remove that worktree.
+- **Next action:** merge the phase 0 PR, then start phase 1 in a fresh session.
 - **macOS slots:** one foreign VM (PID 60843, running since 2 Nov) holds one of the two slots.
 
 ## Start
@@ -49,3 +49,13 @@ VM check: create and fork a Linux computer through `engine.sock` while status po
 ## Spec changes
 
 ## Status
+
+### 4 Nov 2026: phase 0 passed
+
+- **Checks:** phase 0 VM check passed on the Dev engine (engine `a235c34a`, MicroSandbox 0.7.6 with 22 patches): 1033 `computers.list` polls at 250 ms through create, fork, retention and delete with 0 failures; fork disk came back (+5 MiB after delete); before-keep retention at count 2 kept the newest 2 and left +11.1 GB free compared with keeping all 5, the next capture worked; the newest retained checkpoint restored with the right data; nothing left after delete. Evidence: `docs/v1/evidence/phase-0/vm-check.txt`, earlier failed runs beside it, probes in `raw/`. Script: `docs/v1/checks/phase0_check.py`. Workspace tests: 3293 passed, 0 failed (before the last fixes); engine and silod suites pass after them.
+- **What changed:** status reads serve the last published inventory during device-wide work and live configuration changes; two Silo MicroSandbox patches (release per-capture staging dirs after publication; delete retired layers after compaction); retention compacts old layers then removes trimmed checkpoints, as its own job on the computer's lane; forks restore disk-only; unreferenced memory cache files are removed; a `before-keep` checkpoint kind with its own retention count. AMO-63 signing and notarization landed early (dry-run mode).
+- **Decisions:** checkpoint disk design advised by Fable (see Decisions). Reviews by gpt-6.1-sol, then Opus when Codex and Antigravity quotas ran out; Argon could not run (it asked for file-read permission).
+- **Spec changes:** none yet. The Disk row's "msb prune" wording describes upstream 0.7.13; the pinned runtime returns checkpoint disk through retention (compaction + removal) instead. I will fold this into PRODUCT.md with the phase 1 status after Fable confirms the wording.
+- **Blocked on a foreign VM:** nothing in phase 0 (no macOS step). PID 60843 still holds one macOS slot.
+- **Next:** phase 1 (CLI + MCP, quiet forks, macOS fork fast path).
+- **Needed from you:** for AMO-63, the Apple Developer ID certificate and App Store Connect key as secrets (list in `docs/SiloUI-RELEASES.md`). Optional: post the two upstream MicroSandbox PR drafts in `docs/v1/upstream/`.

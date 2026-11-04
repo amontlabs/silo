@@ -1,0 +1,53 @@
+# compaction probe 2026-11-04, Dev engine, msb 0.7.6, MSB_HOME=~/.silo-dev/c19a79dc92d3
+# computer e2e-p0-compact (Linux, 2 GiB, 4+4 GiB disks); numbers are avail_kb of /System/Volumes/Data
+
+setup: 1 checkpoint (dbg) + 4 x (write 300 MiB urandom, checkpoint) = 5 checkpoints, computer running
+  each data checkpoint cost 0.48-0.50 GB (snapshots dir 3.1 -> 7.0 GB)
+dry-run: modify e2e-p0-compact --compact --layers 3 --dry-run -> "/: 6 -> 4 layers (3 selected), /workspace: 6 -> 4 (3 selected)"
+  (6 layers per disk = base + 5 sealed checkpoint layers; no --layers: 6 -> 2)
+
+compact (running VM): modify ... --compact --layers 3
+  materialized_bytes=763428864 (/ 720437248, /workspace 42991616), pause 39 ms, total 4.2 s
+  avail 64500608 -> 63738052   (compaction COST 0.76 GB)
+
+snapshot remove --force of the 2 oldest (dbg, cp1): 63738052 -> 63738112 -> 63738152  (freed ~0)
+snapshot remove --force of cp2: 63738152 -> 63740076 (freed ~2 MB)
+new checkpoint cp5 after compaction (+100 MiB write): 63737900 -> 63475472 (cost 0.26 GB)
+snapshot remove --force of cp3, cp4 (every checkpoint older than the compaction now gone):
+  63650924 -> 63651236 -> 63651276 (freed ~0)
+  seen on disk: the live sandbox dir still holds the old upper-*.qcow2 layers (hard links) and runtime/.compact-*/
+  with the pre-compaction layers; the merged 721 MB layer has link count 3 (sandbox, runtime/.compact, snapshot).
+
+restore of the only surviving checkpoint through the engine -> computer running: 63622484 -> 63565736 (freed ~57 MB)
+start OK. Next checkpoint after restore (cp6): 63565636 -> 58186452 (5.4 GB: the 4 GiB raw upper layer is copied again)
+
+stop + computers.delete (needs `expected` configuration and a stopped computer):
+  58188888 -> 63989268 (freed 5.8 GB); snapshots dir 8.99 GB -> 1.74 GB; all 3 members gone
+  leftover: snapshots/e2e-p0-compact/{.group.lock,group.json} (empty group dir)
+
+conclusion: while the computer exists, compaction + snapshot remove --force returned no disk (the live sandbox
+dir keeps the old layers); compaction itself cost 0.76 GB. Disk returned only on computer delete.
+
+# ---- probe 2: e2e-p0-compact2, compaction with the computer STOPPED (same day) ----
+5 x (write 300 MiB, checkpoint): avail 63756760 -> 59757196 (0.48-1.1 GB per checkpoint); engine stop: 59761300
+dry-run --layers 3: "/: 6 -> 4 layers, /workspace: 6 -> 4" (same plan as the running case)
+real compact, stopped: materialized_bytes=1074855936, 4.3 s, no pause; avail 59761296 -> 58707912 (cost 1.05 GB)
+engine start then stop: avail 58710960 -> 58699592; runtime/.compact-0QCWPh still present after both (not cleaned)
+snapshot remove --force of the 3 oldest: 58681960 -> 58684704 -> 58684820 -> 58684780 (freed ~0)
+then the remaining 2 (every pre-compaction snapshot gone): 58824660 -> 58825424 -> 58825480 (freed ~0.8 MB)
+  sandbox dir still 8.2 GB: runtime/checkpoints/checkpoint_<id>/ x5 (each holds its hard-linked closure; link counts 5-6 on the
+  4 GiB raw layers, 1 on the 316 MB qcow2 layers) and runtime/.compact-*/ (1 GB merged base)
+msb source (pinned 09df3d4): `.compact-*` is the NEW layer directory, not scratch: compaction stages the merged base plus hard
+  links to the retained layers there (disk.rs:319, tempdir .keep()), journals it, and only unlinks the retired old paths inside
+  the journal's own directory (RetiredRootDisk::cleanup, disk.rs:664, errors ignored). Nothing removes runtime/checkpoints/<id>:
+  grep finds no deletion after a live capture is published; snapshots hard-link from it (create.rs copy_checkpoint_file:
+  hard_link, else fast_copy). So `snapshot remove` cannot release a sandbox's own capture closures; they go with the sandbox.
+  No msb command found that releases them (modify --compact retires only the old journal paths).
+stop + computers.delete: 58196536 -> 61964600 (freed 3.8 GB); snapshots/e2e-p0-compact2/{.group.lock,group.json} left behind
+
+# restore then capture (same computer, after compaction): rA checkpoint cost 1.05 GB; restore through engine; start; rB checkpoint:
+  avail 60058576 -> 58203460 (1.85 GB). Two snapshots made after the restore each hold their own copies (link count 1, identical
+  sizes 316/316/238 MB) of three qcow2 layers, while the 1 GB merged layer is shared (5 links): ~0.87 GB of layers copied instead
+  of linked per capture, plus memory/delta. No Silo patch touches linking or copying (grep of patches: no hard_link, reflink,
+  clonefile, fs::copy); restore.rs:269 hard-links snapshot layers into the new sandbox and copy_checkpoint_file falls back to
+  fast_copy when hard_link fails; the cause of the fallback was not isolated.

@@ -1,0 +1,185 @@
+# msb patch probe 2026-11-04 (throwaway MSB home /Users/polarzero/mpx, removed afterwards; not ~/.silo*, not ~/.msb*)
+msb runtime version: 0.7.6 (pinned source 09df3d4b9d832adaede1fb9a198cfc660bfab8cd)
+baseline binary = the cached Silo patched build with the 20 pinned patches:
+   patches/microsandbox-silo-network-0.7.6.patch
+   patches/microsandbox-restore-policy-0.7.6.patch
+   patches/microsandbox-create-stopped-0.7.6.patch
+   patches/microsandbox-adopt-owned-disk-0.7.6.patch
+   patches/microsandbox-log-retention-desktop-start-0.7.6.patch
+   patches/microsandbox-restore-root-capacity-0.7.6.patch
+   patches/microsandbox-portable-image-cache-0.7.6.patch
+   patches/microsandbox-live-public-ports-0.7.6.patch
+   patches/microsandbox-secret-values-stdin-0.7.6.patch
+   patches/microsandbox-import-stage-id-0.7.6.patch
+   patches/microsandbox-sftp-user-0.7.6.patch
+   patches/microsandbox-remove-created-0.7.6.patch
+   patches/microsandbox-restore-starting-control-0.7.6.patch
+   patches/microsandbox-runtime-instance-id-0.7.6.patch
+   patches/microsandbox-checkpoint-fs-state-0.7.6.patch
+   patches/microsandbox-relay-closed-local-arena-0.7.6.patch
+   patches/microsandbox-reordered-image-metadata-0.7.6.patch
+   patches/microsandbox-metrics-sampler-blocking-0.7.6.patch
+   patches/microsandbox-macos-proxy-0.7.6.patch
+   patches/microsandbox-macos-network-fixes-0.7.6.patch
+patched binary = baseline + 2 patches:
+   patches/microsandbox-reclaim-capture-dirs-0.7.6.patch
+   patches/microsandbox-retired-layer-cleanup-0.7.6.patch
+   (the patched binary also carried the held-back microsandbox-link-sealed-layers patch; it never takes effect in a live chain, see the trace below)
+guest image: Silo guest v5 (ghcr.io/amontlabs/silo-guest:ubuntu-24.04-v5-arm64), exported with msb save and loaded into the throwaway home
+host: macOS APFS. Numbers are df -k avail of / (other processes write on this Mac: about 1 MB noise)
+
+################ BASELINE (msb with the 20 pinned patches)
+# msb probe 2026-11-04T16:03:12Z binary=msb-base msb 0.7.6
+=== A: one computer, five full snapshots, compact, remove every snapshot
+## DISK computer created (baseline for A): avail_kb=58756200
+   snapshot s1: cost_kb=305968 capture_dirs_left=1
+   snapshot s2: cost_kb=225972 capture_dirs_left=2
+   snapshot s3: cost_kb=225952 capture_dirs_left=3
+   snapshot s4: cost_kb=220564 capture_dirs_left=4
+   snapshot s5: cost_kb=225296 capture_dirs_left=5
+## DISK after 5 snapshots: avail_kb=56479548
+   Compacted: 12 → 4 disk layers (10 selected, 1130364928 bytes materialized, 39.38 ms paused)
+## DISK after compact: avail_kb=55369424
+   snapshot s6 (after compaction): cost_kb=116780 capture_dirs_left=6
+   removed probe:s5: freed_kb=48
+   removed probe:s4: freed_kb=80
+   removed probe:s3: freed_kb=32
+   removed probe:s2: freed_kb=32
+   removed probe:s1: freed_kb=36
+## DISK after removing s1..s5, keeping s6: avail_kb=55149076
+   net kb used since creation, s6 kept: ending=3607120 (5 snapshots peaked at 2276648, compaction added 1110124)
+   sandbox dir after compaction:
+      7 224 logs
+      3 96 owned-volumes
+      12 384 runtime
+      1 70 snapshot-lineage.json
+      1 158072832 upper-4150a19005cc3d1317246b19f8bb0eec.qcow2
+      2 53215232 upper-4368293149ebfef3be91be45f94cb2cf.qcow2
+      1 158138368 upper-a15a955478d51b9a34b9cd3b5f05ac7e.qcow2
+      1 158138368 upper-aade7378c36cecd9afa5907557e46e63.qcow2
+      1 158138368 upper-b9eec45b2846d74c16f23fe5c2381296.qcow2
+      6 4294967296 upper.ext4
+   runtime dir entries: .compact-OmSWTr checkpoint-store checkpoints heartbeat.json owned-disks root-disk.json rootfs runtime-boot-id scripts tls 
+=== B: capture, restore, capture again
+## DISK before restore: avail_kb=57903444
+   restore cost_kb=4980
+   restored data present: 157286400 104857600 52428800 
+   first capture after restore: cost_kb=574552 capture_dirs_left=1
+   memory_mode=Full memory_logical_bytes=2147483648 memory_emitted_bytes=587202560
+   second capture after restore: cost_kb=116400 capture_dirs_left=2
+   memory_mode=Full memory_logical_bytes=2147483648 memory_emitted_bytes=587202560
+   memory_mode=Incremental memory_logical_bytes=382312448 memory_emitted_bytes=118046720
+   probe2 layer files that are copies, not links (nlink=1, size > 1 MB, excluding store objects):
+            6
+   first capture after --cow-mem restore: cost_kb=1569124
+   memory_mode=Full memory_logical_bytes=2147483648 memory_emitted_bytes=803209216
+## done
+
+################ PATCHED (reclaim-capture-dirs + retired-layer-cleanup)
+# msb probe 2026-11-04T16:03:47Z binary=msb-new msb 0.7.6
+=== A: one computer, five full snapshots, compact, remove every snapshot
+## DISK computer created (baseline for A): avail_kb=58750308
+   snapshot s1: cost_kb=308468 capture_dirs_left=0
+   snapshot s2: cost_kb=223324 capture_dirs_left=0
+   snapshot s3: cost_kb=224088 capture_dirs_left=0
+   snapshot s4: cost_kb=221660 capture_dirs_left=0
+   snapshot s5: cost_kb=225108 capture_dirs_left=0
+## DISK after 5 snapshots: avail_kb=56474708
+   Compacted: 12 → 4 disk layers (10 selected, 1130364928 bytes materialized, 60.49 ms paused)
+## DISK after compact: avail_kb=55400112
+   snapshot s6 (after compaction): cost_kb=115868 capture_dirs_left=0
+   removed probe:s5: freed_kb=206964
+   removed probe:s4: freed_kb=206612
+   removed probe:s3: freed_kb=206528
+   removed probe:s2: freed_kb=206328
+   removed probe:s1: freed_kb=44
+## DISK after removing s1..s5, keeping s6: avail_kb=56006916
+   net kb used since creation, s6 kept: ending=2743404 (5 snapshots peaked at 2275596, compaction added 1074596)
+   sandbox dir after compaction:
+      7 224 logs
+      3 96 owned-volumes
+      12 384 runtime
+      1 70 snapshot-lineage.json
+      1 4294967296 upper.ext4
+   runtime dir entries: .compact-aLSZI6 checkpoint-store checkpoints heartbeat.json owned-disks root-disk.json rootfs runtime-boot-id scripts tls 
+=== B: capture, restore, capture again
+## DISK before restore: avail_kb=57897828
+   restore cost_kb=4856
+   restored data present: 157286400 104857600 52428800 
+   first capture after restore: cost_kb=574652 capture_dirs_left=0
+   memory_mode=Full memory_logical_bytes=2147483648 memory_emitted_bytes=587202560
+   second capture after restore: cost_kb=118576 capture_dirs_left=0
+   memory_mode=Full memory_logical_bytes=2147483648 memory_emitted_bytes=587202560
+   memory_mode=Incremental memory_logical_bytes=382427136 memory_emitted_bytes=120238080
+   probe2 layer files that are copies, not links (nlink=1, size > 1 MB, excluding store objects):
+            6
+   first capture after --cow-mem restore: cost_kb=1569932
+   memory_mode=Full memory_logical_bytes=2147483648 memory_emitted_bytes=801112064
+## done
+
+################ clonefile trace of fast_copy during a patched run (temporary instrumentation, not part of the patches)
+   17 x reflink len=158138368
+   16 x reflink len=53149696
+   7 x reflink len=53084160
+   5 x reflink len=158072832
+   3 x reflink len=262144
+   2 x reflink len=53215232
+   copies that fell back to a sparse copy: 0 of 50
+
+################ unit tests (cargo +1.94.0 test, debug)
+microsandbox-image checkpoint:: 41 passed; microsandbox-runtime checkpoint:: 97 passed; microsandbox snapshot:: 127 passed; 0 failed
+new: stale_captures_release_their_layer_links_at_runtime_open, compaction_unlinks_retired_layers_that_live_beside_the_runtime_directory,
+     published_installed_capture_releases_its_runtime_directory, failed_installed_capture_releases_its_runtime_directory,
+     published_archive_capture_releases_its_runtime_directory, header_names_backing_only_after_relocation,
+     publication_links_a_layer_whose_header_already_names_its_predecessor
+
+################ checkpoint-store GC prototype (dropped), same probe, binary with the 2 patches + GC after each capture and at runtime start
+# msb probe 2026-11-04T16:27:57Z binary=msb-gc msb 0.7.6
+=== A: one computer, five full snapshots, compact, remove every snapshot
+## DISK computer created (baseline for A): avail_kb=53397224
+   snapshot s1: cost_kb=303968 capture_dirs_left=0 store_kb=303104 store_files=10
+   snapshot s2: cost_kb=224100 capture_dirs_left=0 store_kb=527900 store_files=17
+   snapshot s3: cost_kb=222528 capture_dirs_left=0 store_kb=750156 store_files=24
+   snapshot s4: cost_kb=219368 capture_dirs_left=0 store_kb=971324 store_files=31
+   snapshot s5: cost_kb=227004 capture_dirs_left=0 store_kb=1195516 store_files=38
+## DISK after 5 snapshots: avail_kb=51126844
+   Compacted: 12 → 4 disk layers (10 selected, 1130364928 bytes materialized, 42.05 ms paused)
+## DISK after compact: avail_kb=50035092
+   snapshot s6 (after compaction): cost_kb=118324 capture_dirs_left=0
+   removed probe:s5: freed_kb=207400
+   removed probe:s4: freed_kb=206964
+   removed probe:s3: freed_kb=206848
+   removed probe:s2: freed_kb=206644
+   removed probe:s1: freed_kb=276
+   checkpoint-store after removing s1..s5: store_kb=1311756 store_files=42
+## DISK after removing s1..s5, keeping s6: avail_kb=50641356
+   net kb used since creation, s6 kept: ending=2755864 (5 snapshots peaked at 2270376, compaction added 1091756)
+   sandbox dir after compaction:
+      7 224 logs
+      3 96 owned-volumes
+      12 384 runtime
+      1 70 snapshot-lineage.json
+      1 4294967296 upper.ext4
+   runtime dir entries: .compact-bKCLzR checkpoint-store checkpoints heartbeat.json owned-disks root-disk.json rootfs runtime-boot-id scripts tls 
+=== B: capture, restore, capture again
+## DISK before restore: avail_kb=52540556
+   restore cost_kb=4856
+   restored data present: 157286400 104857600 52428800 
+   first capture after restore: cost_kb=574760 capture_dirs_left=0
+   memory_mode=Full memory_logical_bytes=2147483648 memory_emitted_bytes=587202560
+   checkpoint-store of probe2 after first capture: store_kb=573440 store_files=18
+   second capture after restore: cost_kb=118988 capture_dirs_left=0 store_kb=691384
+   memory_mode=Full memory_logical_bytes=2147483648 memory_emitted_bytes=587202560
+   memory_mode=Incremental memory_logical_bytes=382959616 memory_emitted_bytes=120774656
+   third capture after restore:
+   memory_mode=Full memory_logical_bytes=2147483648 memory_emitted_bytes=587202560
+   memory_mode=Incremental memory_logical_bytes=382959616 memory_emitted_bytes=120774656
+   memory_mode=Incremental memory_logical_bytes=382459904 memory_emitted_bytes=120291328
+   probe2 layer files that are copies, not links (nlink=1, size > 1 MB, excluding store objects):
+            8
+   data in the restore of the newest snapshot: 157286400 104857600 52428800 52428800 52428800 
+   first capture after --cow-mem restore: cost_kb=1795332
+   memory_mode=Full memory_logical_bytes=2147483648 memory_emitted_bytes=912261120
+## done
+
+GC log lines (removed_bytes per run of the collector): 0 141368 247460 0 148786 0 144163 250085 285361 (memory packs all stay referenced by the incremental manifest)

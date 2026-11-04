@@ -1,0 +1,153 @@
+# checkpoint disk probe 2026-11-04T14:42:13Z
+engine commit: b30e03ccf3f33ed92cd26654ab04c1ff8025a561
+msb runtime version: 0.7.6
+engine: silod from Silo Dev.app, MSB_HOME=/Users/polarzero/.silo-dev/c19a79dc92d3 -> Library/Application Support/org.silo.dev/runtime/microsandbox
+## DISK baseline: avail_kb=71079180 used_kb=12276060 home_kb=5586672 snapshots_kb=1744088 sandboxes_kb=3231764
+## SNAPSHOTS baseline
+   group=e2e-relay name=c09ec33e939c445289fa1fdb63d7bd72 digest=sha256:77f022867a03 parent=None scope=full state=checkpoint avail=ready size_bytes=None
+## IMAGES baseline
+REFERENCE                                               DIGEST                 SIZE       CREATED
+ghcr.io/amontlabs/silo-guest:ubuntu-24.04-v5-arm64      sha256:c0eef2f73858    1.0 GiB    2026-11-04 15:41:30
+ghcr.io/0xpolarzero/silo-guest:ubuntu-24.04-v4-arm64    sha256:8886dc1dd821    1.2 GiB    2026-10-03 12:15:43
+
+create ack {"jobId": "setup:c88d85a7-148b-4bf7-9bbb-3c38d997daba"}
+## JOB computers.create took 9.1s outcome={"result": {"activities": [{"category": "computer", "computer": "e2e-p0-probe", "detail": "Computer setup", "id": "setup-c88d85a7-148b-4bf7-9bbb-3c38d997daba-1793803342521-setup-completed-15", "occurredAt": "2026-11-04T14:42:22.521Z", "status": "completed", "time": "2026-11-04T14:42:22.521Z", "title
+## DISK after create: avail_kb=71311984 used_kb=12276060 home_kb=5624932 snapshots_kb=1744088 sandboxes_kb=3270024
+state=stopped id=db577034-c5d5-434a-a78b-fc9bff765587
+## JOB computers.start took 5.1s error=null
+## DISK after start: avail_kb=71155724 used_kb=12276060 home_kb=5626824 snapshots_kb=1744088 sandboxes_kb=3271916
+## JOB computers.start took 0.5s error=null
+## DISK after start: avail_kb=71155296 used_kb=12276060 home_kb=5626936 snapshots_kb=1744088 sandboxes_kb=3272028
+(0, 'overlay         10246420 30876  10199160   1% /\n', "/bin/sh: 1: cannot create /root/data1.bin: Permission denied\nls: cannot access '/root/data1.bin': Permission denied\n")
+## DISK after write 500MB: avail_kb=71144532 used_kb=12276060 home_kb=5638124 snapshots_kb=1744088 sandboxes_kb=3283216
+## JOB checkpoints.create took 2.0s error=null
+   result {"checkpoint": {"createdAt": "2026-11-04T14:42:42.378Z", "id": "c153b7dc1d70147b5b3d0eb095ed0353", "kind": "manual", "name": "p0-cp1", "reason": "manual", "scope": "full"}}
+## DISK after p0-cp1: avail_kb=70457180 used_kb=12276060 home_kb=6324988 snapshots_kb=2481828 sandboxes_kb=3970068
+## SNAPSHOTS after p0-cp1
+   group=e2e-p0-probe name=c153b7dc1d70147b5b3d0eb095ed0353 digest=sha256:8c98c41abadd parent=None scope=full state=checkpoint avail=ready size_bytes=None
+   group=e2e-relay name=c09ec33e939c445289fa1fdb63d7bd72 digest=sha256:77f022867a03 parent=None scope=full state=checkpoint avail=ready size_bytes=None
+(2, '', "/bin/sh: 1: cannot create /root/data2.bin: Permission denied\nls: cannot access '/root/data2.bin': Permission denied\n")
+## DISK after write 200MB: avail_kb=70456736 used_kb=12276060 home_kb=6325436 snapshots_kb=2481828 sandboxes_kb=3970516
+## JOB checkpoints.create took 1.0s error=null
+   result {"checkpoint": {"createdAt": "2026-11-04T14:42:44.647Z", "id": "cb519ffbb128445679d676afae6cc8d5", "kind": "manual", "name": "p0-cp2", "reason": "manual", "scope": "full"}}
+## DISK after p0-cp2: avail_kb=70422740 used_kb=12276060 home_kb=6360864 snapshots_kb=2516680 sandboxes_kb=4005936
+## SNAPSHOTS after p0-cp2
+   group=e2e-p0-probe name=cb519ffbb128445679d676afae6cc8d5 digest=sha256:bc8716225f2d parent=snap_c6a28266e48a0d scope=full state=checkpoint avail=ready size_bytes=None
+   group=e2e-p0-probe name=c153b7dc1d70147b5b3d0eb095ed0353 digest=sha256:8c98c41abadd parent=None scope=full state=checkpoint avail=ready size_bytes=None
+   group=e2e-relay name=c09ec33e939c445289fa1fdb63d7bd72 digest=sha256:77f022867a03 parent=None scope=full state=checkpoint avail=ready size_bytes=None
+## JOB checkpoints.create took 1.0s error=null
+   result {"checkpoint": {"createdAt": "2026-11-04T14:42:45.719Z", "id": "c6250e8bd32c04a6385a39f6651c6a1f", "kind": "manual", "name": "p0-cp3-nochange", "reason": "manual", "scope": "full"}}
+## DISK after p0-cp3-nochange: avail_kb=70402724 used_kb=12276060 home_kb=6381972 snapshots_kb=2537272 sandboxes_kb=4027036
+## SNAPSHOTS after p0-cp3-nochange
+   group=e2e-p0-probe name=c6250e8bd32c04a6385a39f6651c6a1f digest=sha256:ace6dc32ace5 parent=snap_f683b79b2fc2ae scope=full state=checkpoint avail=ready size_bytes=None
+   group=e2e-p0-probe name=cb519ffbb128445679d676afae6cc8d5 digest=sha256:bc8716225f2d parent=snap_c6a28266e48a0d scope=full state=checkpoint avail=ready size_bytes=None
+   group=e2e-p0-probe name=c153b7dc1d70147b5b3d0eb095ed0353 digest=sha256:8c98c41abadd parent=None scope=full state=checkpoint avail=ready size_bytes=None
+   group=e2e-relay name=c09ec33e939c445289fa1fdb63d7bd72 digest=sha256:77f022867a03 parent=None scope=full state=checkpoint avail=ready size_bytes=None
+{"checkpoints": [{"deleteBlocker": "e2e-p0-probe\u2019s next checkpoint and export build on this one, so it can\u2019t be deleted while it is the latest state e2e-p0-probe builds on.", "id": "c6250e8bd32c04a6385a39f6651c6a1f", "sizeBytes": 810303488}, {"deleteBlocker": "\u201cp0-cp3-nochange\u201d was saved after this checkpoint and builds on it. Delete it first.", "id": "cb519ffbb128445679d676afae6cc8d5", "sizeBytes": 790908928}, {"deleteBlocker": "\u201cp0-cp2\u201d was saved after this checkpoint and builds on it. Delete it first.", "id": "c153b7dc1d70147b5b3d0eb095ed0353", "sizeBytes": 755441664}], "totalBytes": 2356654080}
+## NOTE: first three checkpoints (p0-cp1..3) were taken before any data was written (guest /root write was denied); data-bearing chain follows as p0-cp4..6
+(0, 'uid=1001(silo) gid=1001(silo) groups=1001(silo)\nFilesystem     1K-blocks  Used Available Use% Mounted on\noverlay         10246420 30876  10199160   1% /\noverlay         10246420 30876  10199160   1% /\n-rw-r--r-- 1 silo silo 524288000 Nov  4 14:42 /var/tmp/data1.bin\n', '')
+## DISK after write 500MB (real): avail_kb=69876704 used_kb=12276060 home_kb=6906904 snapshots_kb=2537272 sandboxes_kb=4551968
+## JOB checkpoints.create took 3.0s error=null
+## DISK after p0-cp4: avail_kb=69292896 used_kb=12276060 home_kb=8004356 snapshots_kb=3636072 sandboxes_kb=5649412
+## SNAPSHOTS after p0-cp4
+   group=e2e-p0-probe name=c9e4d148e61dc4780b2d45eb5f6d11ef digest=sha256:90b63e344475 parent=snap_00835f43a3034c scope=full state=checkpoint avail=ready size_bytes=None
+   group=e2e-p0-probe name=c6250e8bd32c04a6385a39f6651c6a1f digest=sha256:ace6dc32ace5 parent=snap_f683b79b2fc2ae scope=full state=checkpoint avail=ready size_bytes=None
+   group=e2e-p0-probe name=cb519ffbb128445679d676afae6cc8d5 digest=sha256:bc8716225f2d parent=snap_c6a28266e48a0d scope=full state=checkpoint avail=ready size_bytes=None
+   group=e2e-p0-probe name=c153b7dc1d70147b5b3d0eb095ed0353 digest=sha256:8c98c41abadd parent=None scope=full state=checkpoint avail=ready size_bytes=None
+   group=e2e-relay name=c09ec33e939c445289fa1fdb63d7bd72 digest=sha256:77f022867a03 parent=None scope=full state=checkpoint avail=ready size_bytes=None
+(0, '-rw-r--r-- 1 silo silo 209715200 Nov  4 14:43 /var/tmp/data2.bin\n', '')
+## DISK after write 200MB (real): avail_kb=69079156 used_kb=12276060 home_kb=8218052 snapshots_kb=3636072 sandboxes_kb=5863108
+## JOB checkpoints.create took 3.1s error=null
+## DISK after p0-cp5: avail_kb=68829672 used_kb=12276060 home_kb=9185680 snapshots_kb=4604852 sandboxes_kb=6830728
+## SNAPSHOTS after p0-cp5
+   group=e2e-p0-probe name=cc5e2ddd090344a2c95ad45feca42f88 digest=sha256:88da855d381c parent=snap_1d10264e42c17e scope=full state=checkpoint avail=ready size_bytes=None
+   group=e2e-p0-probe name=c9e4d148e61dc4780b2d45eb5f6d11ef digest=sha256:90b63e344475 parent=snap_00835f43a3034c scope=full state=checkpoint avail=ready size_bytes=None
+   group=e2e-p0-probe name=c6250e8bd32c04a6385a39f6651c6a1f digest=sha256:ace6dc32ace5 parent=snap_f683b79b2fc2ae scope=full state=checkpoint avail=ready size_bytes=None
+   group=e2e-p0-probe name=cb519ffbb128445679d676afae6cc8d5 digest=sha256:bc8716225f2d parent=snap_c6a28266e48a0d scope=full state=checkpoint avail=ready size_bytes=None
+   group=e2e-p0-probe name=c153b7dc1d70147b5b3d0eb095ed0353 digest=sha256:8c98c41abadd parent=None scope=full state=checkpoint avail=ready size_bytes=None
+   group=e2e-relay name=c09ec33e939c445289fa1fdb63d7bd72 digest=sha256:77f022867a03 parent=None scope=full state=checkpoint avail=ready size_bytes=None
+## JOB checkpoints.create took 2.5s error=null
+## DISK after p0-cp6-nochange: avail_kb=68800996 used_kb=12276060 home_kb=9935480 snapshots_kb=5354136 sandboxes_kb=7580520
+## SNAPSHOTS after p0-cp6-nochange
+   group=e2e-p0-probe name=c9cf085630979439f8147f95ce6f4714 digest=sha256:42750bee736b parent=snap_fa374b1fb68a0a scope=full state=checkpoint avail=ready size_bytes=None
+   group=e2e-p0-probe name=cc5e2ddd090344a2c95ad45feca42f88 digest=sha256:88da855d381c parent=snap_1d10264e42c17e scope=full state=checkpoint avail=ready size_bytes=None
+   group=e2e-p0-probe name=c9e4d148e61dc4780b2d45eb5f6d11ef digest=sha256:90b63e344475 parent=snap_00835f43a3034c scope=full state=checkpoint avail=ready size_bytes=None
+   group=e2e-p0-probe name=c6250e8bd32c04a6385a39f6651c6a1f digest=sha256:ace6dc32ace5 parent=snap_f683b79b2fc2ae scope=full state=checkpoint avail=ready size_bytes=None
+   group=e2e-p0-probe name=cb519ffbb128445679d676afae6cc8d5 digest=sha256:bc8716225f2d parent=snap_c6a28266e48a0d scope=full state=checkpoint avail=ready size_bytes=None
+   group=e2e-p0-probe name=c153b7dc1d70147b5b3d0eb095ed0353 digest=sha256:8c98c41abadd parent=None scope=full state=checkpoint avail=ready size_bytes=None
+   group=e2e-relay name=c09ec33e939c445289fa1fdb63d7bd72 digest=sha256:77f022867a03 parent=None scope=full state=checkpoint avail=ready size_bytes=None
+{"checkpoints": [{"deleteBlocker": "e2e-p0-probe\u2019s next checkpoint and export build on this one, so it can\u2019t be deleted while it is the latest state e2e-p0-probe builds on.", "id": "c9cf085630979439f8147f95ce6f4714", "sizeBytes": 2424152064}, {"deleteBlocker": "\u201cp0-cp6-nochange\u201d was saved after this checkpoint and builds on it. Delete it first.", "id": "cc5e2ddd090344a2c95ad45feca42f88", "sizeBytes": 2396491776}, {"deleteBlocker": "\u201cp0-cp5\u201d was saved after this checkpoint and builds on it. Delete it first.", "id": "c9e4d148e61dc4780b2d45eb5f6d11ef", "sizeBytes": 1932783616}, {"deleteBlocker": "\u201cp0-cp4\u201d was saved after this checkpoint and builds on it. Delete it first.", "id": "c6250e8bd32c04a6385a39f6651c6a1f", "sizeBytes": 810303488}, {"deleteBlocker": "\u201cp0-cp3-nochange\u201d was saved after this checkpoint and builds on it. Delete it first.", "id": "cb519ffbb128445679d676afae6cc8d5", "sizeBytes": 790908928}, {"deleteBlocker": "\u201cp0-cp2\u201d was saved after this checkpoint and builds on it. Delete it first.", "id": "c153b7dc1d70147b5b3d0eb095ed0353", "sizeBytes": 755441664}], "totalBytes": 9110081536}
+## DISK before deletes: avail_kb=68803624 used_kb=12276060 home_kb=9935480 snapshots_kb=5354136 sandboxes_kb=7580520
+## DELETE cp1 c153b7dc1d70147b5b3d0eb095ed0353
+## JOB checkpoints.delete took 0.5s error={"code": "internal", "message": "\u201cp0-cp2\u201d was saved after this checkpoint and builds on it. Delete it first."}
+## DISK after delete cp1: avail_kb=68803704 used_kb=12276060 home_kb=9935480 snapshots_kb=5354136 sandboxes_kb=7580520
+## DELETE cp6 c9cf085630979439f8147f95ce6f4714
+## JOB checkpoints.delete took 0.5s error={"code": "internal", "message": "e2e-p0-probe\u2019s next checkpoint and export build on this one, so it can\u2019t be deleted while it is the latest state e2e-p0-probe builds on."}
+## DISK after delete cp6: avail_kb=68803756 used_kb=12276060 home_kb=9935480 snapshots_kb=5354136 sandboxes_kb=7580520
+## SNAPSHOTS after oldest/newest delete attempts
+   group=e2e-p0-probe name=c9cf085630979439f8147f95ce6f4714 digest=sha256:42750bee736b parent=snap_fa374b1fb68a0a scope=full state=checkpoint avail=ready size_bytes=None
+   group=e2e-p0-probe name=cc5e2ddd090344a2c95ad45feca42f88 digest=sha256:88da855d381c parent=snap_1d10264e42c17e scope=full state=checkpoint avail=ready size_bytes=None
+   group=e2e-p0-probe name=c9e4d148e61dc4780b2d45eb5f6d11ef digest=sha256:90b63e344475 parent=snap_00835f43a3034c scope=full state=checkpoint avail=ready size_bytes=None
+   group=e2e-p0-probe name=c6250e8bd32c04a6385a39f6651c6a1f digest=sha256:ace6dc32ace5 parent=snap_f683b79b2fc2ae scope=full state=checkpoint avail=ready size_bytes=None
+   group=e2e-p0-probe name=cb519ffbb128445679d676afae6cc8d5 digest=sha256:bc8716225f2d parent=snap_c6a28266e48a0d scope=full state=checkpoint avail=ready size_bytes=None
+   group=e2e-p0-probe name=c153b7dc1d70147b5b3d0eb095ed0353 digest=sha256:8c98c41abadd parent=None scope=full state=checkpoint avail=ready size_bytes=None
+   group=e2e-relay name=c09ec33e939c445289fa1fdb63d7bd72 digest=sha256:77f022867a03 parent=None scope=full state=checkpoint avail=ready size_bytes=None
+## DISK before fork: avail_kb=68799024 used_kb=12276060 home_kb=9935480 snapshots_kb=5354136 sandboxes_kb=7580520
+## JOB checkpoints.fork took 0.5s error=null
+   fork result {"activities": [{"category": "computer", "computer": "e2e-p0-probe", "detail": "Runtime state verified.", "id": "lifecycle-49372-4d5325b7-91ab-42d2-920b-4ccffc556e6d", "occurredAt": "2026-11-04T14:42:
+## DISK after fork: avail_kb=68799568 used_kb=12276060 home_kb=9935480 snapshots_kb=5354136 sandboxes_kb=7580520
+## SNAPSHOTS after fork
+   group=e2e-p0-probe name=c9cf085630979439f8147f95ce6f4714 digest=sha256:42750bee736b parent=snap_fa374b1fb68a0a scope=full state=checkpoint avail=ready size_bytes=None
+   group=e2e-p0-probe name=cc5e2ddd090344a2c95ad45feca42f88 digest=sha256:88da855d381c parent=snap_1d10264e42c17e scope=full state=checkpoint avail=ready size_bytes=None
+   group=e2e-p0-probe name=c9e4d148e61dc4780b2d45eb5f6d11ef digest=sha256:90b63e344475 parent=snap_00835f43a3034c scope=full state=checkpoint avail=ready size_bytes=None
+   group=e2e-p0-probe name=c6250e8bd32c04a6385a39f6651c6a1f digest=sha256:ace6dc32ace5 parent=snap_f683b79b2fc2ae scope=full state=checkpoint avail=ready size_bytes=None
+   group=e2e-p0-probe name=cb519ffbb128445679d676afae6cc8d5 digest=sha256:bc8716225f2d parent=snap_c6a28266e48a0d scope=full state=checkpoint avail=ready size_bytes=None
+   group=e2e-p0-probe name=c153b7dc1d70147b5b3d0eb095ed0353 digest=sha256:8c98c41abadd parent=None scope=full state=checkpoint avail=ready size_bytes=None
+   group=e2e-relay name=c09ec33e939c445289fa1fdb63d7bd72 digest=sha256:77f022867a03 parent=None scope=full state=checkpoint avail=ready size_bytes=None
+fork computer: {"state": "stopped"} d0da5ba0-a45a-411c-ab85-5372b24a2a32
+fork checkpoints: null
+## JOB computers.delete took 1.0s error=null
+## DISK after fork delete: avail_kb=68799188 used_kb=12276060 home_kb=9935480 snapshots_kb=5354136 sandboxes_kb=7580520
+## SNAPSHOTS after fork delete
+   group=e2e-p0-probe name=c9cf085630979439f8147f95ce6f4714 digest=sha256:42750bee736b parent=snap_fa374b1fb68a0a scope=full state=checkpoint avail=ready size_bytes=None
+   group=e2e-p0-probe name=cc5e2ddd090344a2c95ad45feca42f88 digest=sha256:88da855d381c parent=snap_1d10264e42c17e scope=full state=checkpoint avail=ready size_bytes=None
+   group=e2e-p0-probe name=c9e4d148e61dc4780b2d45eb5f6d11ef digest=sha256:90b63e344475 parent=snap_00835f43a3034c scope=full state=checkpoint avail=ready size_bytes=None
+   group=e2e-p0-probe name=c6250e8bd32c04a6385a39f6651c6a1f digest=sha256:ace6dc32ace5 parent=snap_f683b79b2fc2ae scope=full state=checkpoint avail=ready size_bytes=None
+   group=e2e-p0-probe name=cb519ffbb128445679d676afae6cc8d5 digest=sha256:bc8716225f2d parent=snap_c6a28266e48a0d scope=full state=checkpoint avail=ready size_bytes=None
+   group=e2e-p0-probe name=c153b7dc1d70147b5b3d0eb095ed0353 digest=sha256:8c98c41abadd parent=None scope=full state=checkpoint avail=ready size_bytes=None
+   group=e2e-relay name=c09ec33e939c445289fa1fdb63d7bd72 digest=sha256:77f022867a03 parent=None scope=full state=checkpoint avail=ready size_bytes=None
+remaining computers: ['workspace-1', 'e2e-relay', 'silo-eval-a', 'silo-eval-b', 'e2e-p0-probe']
+## computer detail keys: {"state": "running", "pendingRestore": null, "checkpointOperation": null}
+## JOB computers.stop took 1.0s error=null
+## DISK after stop: avail_kb=68801568 used_kb=12276060 home_kb=9935868 snapshots_kb=5354136 sandboxes_kb=7580908
+## JOB checkpoints.delete took 0.5s error={"code": "internal", "message": "e2e-p0-probe\u2019s next checkpoint and export build on this one, so it can\u2019t be deleted while it is the latest state e2e-p0-probe builds on."}
+## DISK after retry delete cp6 (stopped): avail_kb=68801724 used_kb=12276060 home_kb=9935868 snapshots_kb=5354136 sandboxes_kb=7580908
+## DELETE cp5 (has child cp6)
+## JOB checkpoints.delete took 0.5s error={"code": "internal", "message": "\u201cp0-cp6-nochange\u201d was saved after this checkpoint and builds on it. Delete it first."}
+## DISK before computer delete: avail_kb=68802832 used_kb=12276060 home_kb=9935868 snapshots_kb=5354136 sandboxes_kb=7580908
+## IMAGES before computer delete
+REFERENCE                                               DIGEST                 SIZE       CREATED
+ghcr.io/amontlabs/silo-guest:ubuntu-24.04-v5-arm64      sha256:c0eef2f73858    1.0 GiB    2026-11-04 15:41:30
+ghcr.io/0xpolarzero/silo-guest:ubuntu-24.04-v4-arm64    sha256:8886dc1dd821    1.2 GiB    2026-10-03 12:15:43
+
+## JOB computers.delete took 1.5s error=null
+## DISK after computer delete: avail_kb=71191544 used_kb=12276060 home_kb=5586676 snapshots_kb=1744092 sandboxes_kb=3231764
+## SNAPSHOTS after computer delete
+   group=e2e-relay name=c09ec33e939c445289fa1fdb63d7bd72 digest=sha256:77f022867a03 parent=None scope=full state=checkpoint avail=ready size_bytes=None
+## IMAGES after computer delete
+REFERENCE                                               DIGEST                 SIZE       CREATED
+ghcr.io/amontlabs/silo-guest:ubuntu-24.04-v5-arm64      sha256:c0eef2f73858    1.0 GiB    2026-11-04 15:41:30
+ghcr.io/0xpolarzero/silo-guest:ubuntu-24.04-v4-arm64    sha256:8886dc1dd821    1.2 GiB    2026-10-03 12:15:43
+
+sandbox dirs: /Users/polarzero/Library/Application Support/org.silo.dev/runtime/microsandbox/sandboxes:
+e2e-relay
+silo-eval-a
+silo-eval-b
+workspace-1
+
+/Users/polarzero/Library/Application Support/org.silo.dev/runtime/microsandbox/snapshots:
+e2e-audit-1
+e2e-p0-probe
+e2e-relay
+remaining computers: ['workspace-1', 'e2e-relay', 'silo-eval-a', 'silo-eval-b']
+## leftover: snapshots/e2e-p0-probe dir ->        2 entries

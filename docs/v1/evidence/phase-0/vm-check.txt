@@ -1,0 +1,121 @@
+[20:00:05 +    0.0s] Silo v1 phase 0 VM check
+[20:00:05 +    0.0s] engine commit : a235c34a8c2e97812483f12f636ab28473b14239 (branch worktree-agent-af461c784262f09d6)
+[20:00:05 +    0.0s] msb version   : 0.7.6 with 22 patches (runtime-inputs.json; source 09df3d4b9d83)
+[20:00:05 +    0.0s] msb --version : msb 0.7.6 (bundle /Users/polarzero/code/projects/microsandbox-workspaces/.claude/worktrees/agent-af461c784262f09d6/app/SiloUI/target/debug/bundle/macos/Silo Dev.app/Contents/MacOS/msb)
+[20:00:05 +    0.1s] macOS         : 26.5 build 25F71 (arm64)
+[20:00:05 +    0.1s] socket        : /Users/polarzero/.silo-dev/engine.sock; MSB home /Users/polarzero/.silo-dev/c19a79dc92d3
+[20:00:05 +    0.1s] handshake: device polarzero-MBP protocol 7
+[20:00:05 +    0.2s] existing computers (untouched): ['workspace-1', 'e2e-relay', 'silo-eval-a', 'silo-eval-b']
+[20:00:05 +    0.2s] pre-existing snapshot dirs: ['.groups.lock', 'e2e-audit-1', 'e2e-p0-compact', 'e2e-p0-compact2', 'e2e-p0-probe', 'e2e-relay']
+[20:00:05 +    0.2s] cache/memory/snapshots at start: 0 MiB, files []
+[20:00:05 +    0.2s] beforeKeepCheckpointRetentionCount before: 5 (absent means default 5)
+[20:00:05 +    0.2s] ##### STEP 2: create, write, checkpoint, fork
+[20:00:10 +    5.2s] HOST FREE [before create]: 36902528 KiB avail (36038 MiB)  | memory cache 0 MiB | /dev/disk3s1s1   971350180  12276060  36902516    25%  458726 369025160    0%   /
+[20:00:20 +   15.0s] created e2e-p0-main id 23334562-9199-489d-af40-a9b4dadfbb10 state stopped
+[20:00:23 +   18.6s] guest home /home/silo
+[20:00:24 +   18.8s] GUEST df -k / (e2e-p0-main): overlay        103131064 30820 103083860   1% /
+[20:00:25 +   20.7s] wrote 300 MB to /home/silo/p0/base300.bin in e2e-p0-main (1.6s)
+[20:00:30 +   25.7s] HOST FREE [main running, 300 MB written]: 36513528 KiB avail (35658 MiB)  | memory cache 0 MiB | /dev/disk3s1s1   971350180  12276060  36513528    26%  458726 365135280    0%   /
+[20:00:47 +   41.8s] checkpoint p0-base cabe42fd1603849a69438362c4dd5c4e created in 16.1s
+[20:00:52 +   46.8s] HOST FREE [before fork (after p0-base)]: 32715012 KiB avail (31948 MiB)  | memory cache 0 MiB | /dev/disk3s1s1   971350180  12276060  32715012    28%  458726 327150120    0%   /
+[20:00:52 +   47.4s] fork created in 0.5s
+[20:00:57 +   52.0s] fork data check: base300.bin: OK
+-rw-r--r-- 1 silo silo 314572800 Nov  4 19:00 base300.bin
+[20:00:59 +   53.9s] wrote 200 MB to /home/silo/p0/fork200.bin in e2e-p0-fork (1.6s)
+[20:01:04 +   58.9s] HOST FREE [fork running, 200 MB written in fork]: 31417552 KiB avail (30681 MiB)  | memory cache 0 MiB | /dev/disk3s1s1   971350180  12276060  31417552    29%  458726 314175520    0%   /
+[20:01:04 +   59.2s] GUEST df -k / (e2e-p0-fork): overlay        103131064 553928 102560752   1% /
+[20:01:12 +   67.0s] HOST FREE [after fork delete]: 32719876 KiB avail (31953 MiB)  | memory cache 0 MiB | /dev/disk3s1s1   971350180  12276060  32719876    28%  458726 327198760    0%   /
+[20:01:12 +   67.0s] === step2 fork: PASS - free before fork 31948 MiB, fork running +200MB 30681 MiB, after delete 31953 MiB (after-before +5 MiB); fork saw base data
+[20:01:12 +   67.5s] could not delete p0-base: EngineError('job job:509 failed: {"code": "internal", "message": "e2e-p0-main\\u2019s next checkpoint and export build on this one, so it can\\u2019t be deleted while it is the latest state e2e-p0-main builds on."}')
+[20:01:12 +   67.5s] ##### STEP 3: before-keep retention (count 2)
+[20:01:17 +   72.5s] HOST FREE [step 3 start]: 32718296 KiB avail (31951 MiB)  | memory cache 0 MiB | /dev/disk3s1s1   971350180  12276060  32718296    28%  458726 327182960    0%   /
+[20:01:19 +   74.4s] wrote 150 MB to /home/silo/p0/bk1.bin in e2e-p0-main (1.5s)
+[20:01:24 +   79.4s] HOST FREE [bk1 before create]: 32553352 KiB avail (31790 MiB)  | memory cache 0 MiB | /dev/disk3s1s1   971350180  12276060  32553348    28%  458726 325533480    0%   /
+[20:01:38 +   93.0s] bk1 created c31eca63; waiting for checkpoints.reclaim follow-up job
+[20:01:38 +   93.5s] reclaim job job:512 finished in 0.5s: null
+[20:01:38 +   93.5s] guest probe during reclaim bk1: 1 ok probes, latency median 116 ms, max 116 ms, 0 failures []
+[20:01:43 +   98.5s] HOST FREE [bk1 after create + reclaim]: 29086208 KiB avail (28404 MiB)  | memory cache 0 MiB | /dev/disk3s1s1   971350180  12276060  29086208    30%  458726 290862080    0%   /
+[20:01:44 +   98.9s] checkpoints after bk1: [('p0-bk-1', 'before-keep', 'full', 'manual', 'c31eca63'), ('p0-base', 'manual', 'full', 'manual', 'cabe42fd')]
+[20:01:44 +   98.9s] usage after bk1: total 4731162624 bytes; per-checkpoint {"c31eca63": 2603577344, "cabe42fd": 2127585280}
+[20:01:44 +   98.9s] checkpoint operation: null
+[20:01:45 +  100.7s] wrote 150 MB to /home/silo/p0/bk2.bin in e2e-p0-main (1.5s)
+[20:01:50 +  105.7s] HOST FREE [bk2 before create]: 28921324 KiB avail (28243 MiB)  | memory cache 0 MiB | /dev/disk3s1s1   971350180  12276060  28921324    30%  458726 289213240    0%   /
+[20:01:54 +  108.7s] bk2 created c593692d; waiting for checkpoints.reclaim follow-up job
+[20:01:54 +  108.7s] reclaim job job:515 finished in 0.0s: null
+[20:01:54 +  108.9s] guest probe during reclaim bk2: 1 ok probes, latency median 129 ms, max 129 ms, 0 failures []
+[20:01:59 +  113.9s] HOST FREE [bk2 after create + reclaim]: 28704072 KiB avail (28031 MiB)  | memory cache 0 MiB | /dev/disk3s1s1   971350180  12276060  28704064    30%  458726 287040640    0%   /
+[20:01:59 +  114.2s] checkpoints after bk2: [('p0-bk-2', 'before-keep', 'full', 'manual', 'c593692d'), ('p0-bk-1', 'before-keep', 'full', 'manual', 'c31eca63'), ('p0-base', 'manual', 'full', 'manual', 'cabe42fd')]
+[20:01:59 +  114.2s] usage after bk2: total 7709564928 bytes; per-checkpoint {"c593692d": 2978402304, "c31eca63": 2603577344, "cabe42fd": 2127585280}
+[20:01:59 +  114.2s] checkpoint operation: null
+[20:02:01 +  116.0s] wrote 150 MB to /home/silo/p0/bk3.bin in e2e-p0-main (1.5s)
+[20:02:06 +  121.0s] HOST FREE [bk3 before create]: 28537496 KiB avail (27869 MiB)  | memory cache 0 MiB | /dev/disk3s1s1   971350180  12276060  28537496    31%  458726 285374960    0%   /
+[20:02:09 +  124.6s] bk3 created cd9ef808; waiting for checkpoints.reclaim follow-up job
+[20:03:49 +  223.8s] reclaim job job:518 finished in 99.2s: null
+[20:03:49 +  223.8s] guest probe during reclaim bk3: 38 ok probes, latency median 136 ms, max 1906 ms, 0 failures []
+[20:03:54 +  228.8s] HOST FREE [bk3 after create + reclaim]: 25911224 KiB avail (25304 MiB)  | memory cache 0 MiB | /dev/disk3s1s1   971350180  12276060  25911224    33%  458726 259112240    0%   /
+[20:03:54 +  229.2s] checkpoints after bk3: [('p0-bk-3', 'before-keep', 'full', 'manual', 'cd9ef808'), ('p0-bk-2', 'before-keep', 'full', 'manual', 'c593692d'), ('p0-base', 'manual', 'full', 'manual', 'cabe42fd')]
+[20:03:54 +  229.2s] usage after bk3: total 8461914112 bytes; per-checkpoint {"cd9ef808": 3355926528, "c593692d": 2978402304, "cabe42fd": 2127585280}
+[20:03:54 +  229.2s] checkpoint operation: null
+[20:03:56 +  231.0s] wrote 150 MB to /home/silo/p0/bk4.bin in e2e-p0-main (1.5s)
+[20:04:01 +  236.0s] HOST FREE [bk4 before create]: 25748340 KiB avail (25145 MiB)  | memory cache 0 MiB | /dev/disk3s1s1   971350180  12276060  25748332    33%  458726 257483320    0%   /
+[20:04:07 +  242.1s] bk4 created c8bc6430; waiting for checkpoints.reclaim follow-up job
+[20:04:13 +  248.1s] reclaim job job:521 finished in 6.1s: null
+[20:04:13 +  248.1s] guest probe during reclaim bk4: 2 ok probes, latency median 1889 ms, max 1889 ms, 0 failures []
+[20:04:18 +  253.1s] HOST FREE [bk4 after create + reclaim]: 22977904 KiB avail (22439 MiB)  | memory cache 0 MiB | /dev/disk3s1s1   971350180  12276060  22977900    35%  458726 229779000    0%   /
+[20:04:18 +  253.5s] checkpoints after bk4: [('p0-bk-4', 'before-keep', 'full', 'manual', 'c8bc6430'), ('p0-bk-3', 'before-keep', 'full', 'manual', 'cd9ef808'), ('p0-base', 'manual', 'full', 'manual', 'cabe42fd')]
+[20:04:18 +  253.5s] usage after bk4: total 11151020032 bytes; per-checkpoint {"c8bc6430": 5667508224, "cd9ef808": 3355926528, "cabe42fd": 2127585280}
+[20:04:18 +  253.5s] checkpoint operation: null
+[20:04:20 +  255.3s] wrote 150 MB to /home/silo/p0/bk5.bin in e2e-p0-main (1.5s)
+[20:04:25 +  260.3s] HOST FREE [bk5 before create]: 22812676 KiB avail (22278 MiB)  | memory cache 0 MiB | /dev/disk3s1s1   971350180  12276060  22812672    35%  458726 228126720    0%   /
+[20:04:31 +  266.4s] bk5 created cfa098b6; waiting for checkpoints.reclaim follow-up job
+[20:04:38 +  272.9s] reclaim job job:524 finished in 6.6s: null
+[20:04:38 +  272.9s] guest probe during reclaim bk5: 3 ok probes, latency median 351 ms, max 1359 ms, 0 failures []
+[20:04:43 +  278.0s] HOST FREE [bk5 after create + reclaim]: 23206216 KiB avail (22662 MiB)  | memory cache 0 MiB | /dev/disk3s1s1   971350180  12276060  23206204    35%  458726 232062040    0%   /
+[20:04:43 +  278.3s] checkpoints after bk5: [('p0-bk-5', 'before-keep', 'full', 'manual', 'cfa098b6'), ('p0-bk-4', 'before-keep', 'full', 'manual', 'c8bc6430'), ('p0-base', 'manual', 'full', 'manual', 'cabe42fd')]
+[20:04:43 +  278.3s] usage after bk5: total 13822308352 bytes; per-checkpoint {"cfa098b6": 6027214848, "c8bc6430": 5667508224, "cabe42fd": 2127585280}
+[20:04:43 +  278.3s] checkpoint operation: null
+[20:04:43 +  278.6s] per-checkpoint (id, usage size at creation bytes, host free drop create+reclaim KiB): [[1, "c31eca63", 2603577344, 3467144], [2, "c593692d", 2978402304, 217252], [3, "cd9ef808", 3355926528, 2626272], [4, "c8bc6430", 5667508224, 2770436], [5, "cfa098b6", 6027214848, -393540]]
+[20:04:43 +  278.6s] start free 31951 MiB; wrote 750 MiB; sum of per-checkpoint usage 19677 MiB; final free 22662 MiB; retained usage now 13182 MiB
+[20:04:43 +  278.6s] estimated free with all 5 kept (start - 750 MiB - sum of sizes): 11524 MiB; actual 22662 MiB; difference +11137 MiB
+[20:04:43 +  278.6s] === step3 retention: PASS - before-keep kept ['p0-bk-4', 'p0-bk-5']; final free 22662 MiB vs ~11524 MiB if all 5 kept (+11137 MiB); reclaim durations [(1, 0.5), (2, 0.0), (3, 99.2), (4, 6.1), (5, 6.6)]; reclaim failures: 0 []; failed ops seen 0; sum of per-checkpoint usage 19677 MiB vs retained 13182 MiB (df-measured create+reclaim drops summed 8484 MiB)
+[20:04:43 +  278.6s] ##### STEP 4: restore newest retained checkpoint
+[20:04:45 +  280.0s] wrote 10 MB to /home/silo/p0/after.bin in e2e-p0-main (1.0s)
+[20:04:53 +  287.9s] restore finished in 6.6s
+[20:05:05 +  299.8s] restored guest listing:
+bk1.bin: OK
+base300.bin: OK
+total 1075224
+-rw-r--r-- 1 silo silo 314572800 Nov  4 19:00 base300.bin
+-rw-r--r-- 1 silo silo        78 Nov  4 19:00 base300.bin.sha
+-rw-r--r-- 1 silo silo 157286400 Nov  4 19:01 bk1.bin
+-rw-r--r-- 1 silo silo        74 Nov  4 19:01 bk1.bin.sha
+-rw-r--r-- 1 silo silo 157286400 Nov  4 19:01 bk2.bin
+-rw-r--r-- 1 silo silo        74 Nov  4 19:01 bk2.bin.sha
+-rw-r--r-- 1 silo silo 157286400 Nov  4 19:02 bk3.bin
+-rw-r--r-- 1 silo silo        74 Nov  4 19:02 bk3.bin.sha
+-rw-r--r-- 1 silo silo 157286400 Nov  4 19:03 bk4.bin
+-rw-r--r-- 1 silo silo        74 Nov  4 19:03 bk4.bin.sha
+-rw-r--r-- 1 silo silo 157286400 Nov  4 19:04 bk5.bin
+-rw-r--r-- 1 silo silo        74 Nov  4 19:04 bk5.bin.sha
+
+[20:05:07 +  302.2s] === step4 restore: PASS - restore of newest retained p0-bk-5 ok; earlier data verified (sha256 rc=0), after.bin absent
+[20:05:07 +  302.2s] ##### STEP 5: delete main and check leftovers
+[20:05:12 +  307.4s] HOST FREE [before delete main]: 20782752 KiB avail (20296 MiB)  | memory cache 2380 MiB | /dev/disk3s1s1   971350180  12276060  20782752    38%  458726 207827520    0%   /
+[20:05:22 +  317.4s] HOST FREE [after delete main]: 34778260 KiB avail (33963 MiB)  | memory cache 0 MiB | /dev/disk3s1s1   971350180  12276060  34778244    27%  458726 347782440    0%   /
+[20:05:22 +  317.4s] free after delete vs start: -2074 MiB (start 36037 MiB, after 33963 MiB)
+[20:05:22 +  317.4s] msb snapshot list:
+NAME                                          SCOPE    MIGRATION    IMAGE                                                   SIZE    CREATED                DIGEST
+e2e-relay:c09ec33e939c445289fa1fdb63d7bd72    full     canonical    ghcr.io/0xpolarzero/silo-guest:ubuntu-24.04-v4-arm64    -       2026-10-14 16:09:20    sha256:77f022867a03
+[20:05:22 +  317.4s] snapshot dirs now: ['.groups.lock', 'e2e-audit-1', 'e2e-p0-compact', 'e2e-p0-compact2', 'e2e-p0-probe', 'e2e-relay']; new since start: []
+[20:05:22 +  317.4s] sandbox dirs named e2e-p0-*: []
+[20:05:22 +  317.6s] computers now: ['workspace-1', 'e2e-relay', 'silo-eval-a', 'silo-eval-b']
+[20:05:22 +  317.6s] === step5 delete: PASS - leftovers: none; pre-existing e2e-p0-* dirs from earlier runs untouched: ['e2e-p0-compact', 'e2e-p0-compact2', 'e2e-p0-probe']
+[20:05:22 +  317.6s] restored beforeKeepCheckpointRetentionCount to 5 (was 5)
+[20:05:30 +  325.6s] cache/memory/snapshots at end: 0 MiB, files []
+[20:05:30 +  325.6s] === step1 polls: PASS - 1033 computers.list polls at 250 ms, 0 failures, 0 reconnects; failures: []; failed checkpoint ops seen: []
+[20:05:30 +  325.6s] ##### SUMMARY
+[20:05:30 +  325.6s] step1 polls: PASS - 1033 computers.list polls at 250 ms, 0 failures, 0 reconnects; failures: []; failed checkpoint ops seen: []
+[20:05:30 +  325.6s] step2 fork: PASS - free before fork 31948 MiB, fork running +200MB 30681 MiB, after delete 31953 MiB (after-before +5 MiB); fork saw base data
+[20:05:30 +  325.6s] step3 retention: PASS - before-keep kept ['p0-bk-4', 'p0-bk-5']; final free 22662 MiB vs ~11524 MiB if all 5 kept (+11137 MiB); reclaim durations [(1, 0.5), (2, 0.0), (3, 99.2), (4, 6.1), (5, 6.6)]; reclaim failures: 0 []; failed ops seen 0; sum of per-checkpoint usage 19677 MiB vs retained 13182 MiB (df-measured create+reclaim drops summed 8484 MiB)
+[20:05:30 +  325.6s] step4 restore: PASS - restore of newest retained p0-bk-5 ok; earlier data verified (sha256 rc=0), after.bin absent
+[20:05:30 +  325.6s] step5 delete: PASS - leftovers: none; pre-existing e2e-p0-* dirs from earlier runs untouched: ['e2e-p0-compact', 'e2e-p0-compact2', 'e2e-p0-probe']
