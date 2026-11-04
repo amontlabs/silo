@@ -1008,12 +1008,18 @@ mod tests {
     #[test]
     fn the_before_keep_checkpoint_count_accepts_only_whole_numbers_that_fit_a_u32() {
         assert_eq!(DEFAULT_BEFORE_KEEP_CHECKPOINT_RETENTION_COUNT, 5);
-        let accepted =
-            |value: Value| valid_setting("beforeKeepCheckpointRetentionCount", &value) == Some(true);
+        let accepted = |value: Value| {
+            valid_setting("beforeKeepCheckpointRetentionCount", &value) == Some(true)
+        };
         for value in [json!(0), json!(5), json!(u32::MAX)] {
             assert!(accepted(value.clone()), "{value}");
         }
-        for value in [json!(-1), json!(1.5), json!("5"), json!(u64::from(u32::MAX) + 1)] {
+        for value in [
+            json!(-1),
+            json!(1.5),
+            json!("5"),
+            json!(u64::from(u32::MAX) + 1),
+        ] {
             assert!(!accepted(value.clone()), "{value}");
         }
     }
