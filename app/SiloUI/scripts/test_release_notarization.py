@@ -272,12 +272,20 @@ class VerificationIdentityTests(unittest.TestCase):
         self.assertEqual(release_identity({}), '-')
         self.assertEqual(release_identity({'SILO_RELEASE_SIGNING': 'dry-run'}), '-')
         self.assertEqual(release_identity(DEVELOPER_ID), 'Developer ID Application: Example (TEAM123456)')
+        # Exactly the environment of the workflow's verification step: no notarization credentials.
+        verify_env = {'SILO_RELEASE_SIGNING': 'developer-id',
+                      'APPLE_DEVELOPER_ID_IDENTITY': DEVELOPER_ID['APPLE_DEVELOPER_ID_IDENTITY']}
+        self.assertEqual(release_identity(verify_env), DEVELOPER_ID['APPLE_DEVELOPER_ID_IDENTITY'])
+        with self.assertRaisesRegex(RuntimeError, 'Developer ID Application'):
+            release_identity({**verify_env, 'APPLE_DEVELOPER_ID_IDENTITY': 'Apple Development: X'})
+        with self.assertRaisesRegex(RuntimeError, 'APPLE_DEVELOPER_ID_IDENTITY'):
+            release_identity({'SILO_RELEASE_SIGNING': 'developer-id'})
         script = SCRIPTS / 'verify-macos-signing.py'
         seen = []
         import macos_release_signing
         import runpy
         with patch.object(macos_release_signing, 'verify_bundle', lambda app, identity='-': seen.append(identity)), \
-                patch.dict(os.environ, DEVELOPER_ID), patch.object(sys, 'argv', [str(script), '/x/Silo.app']):
+                patch.dict(os.environ, verify_env, clear=True), patch.object(sys, 'argv', [str(script), '/x/Silo.app']):
             runpy.run_path(str(script), run_name='__main__')
         self.assertEqual(seen, ['Developer ID Application: Example (TEAM123456)'])
 

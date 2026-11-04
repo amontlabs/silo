@@ -44,9 +44,19 @@ def require_environment(names, environ=os.environ):
                            + '. See docs/SiloUI-RELEASES.md#apple-signing-and-notarization.')
 
 
+def developer_id_identity(environ):
+    identity = environ[IDENTITY_ENV].strip()
+    if not identity.startswith(DEVELOPER_ID_PREFIX):
+        raise RuntimeError(f'{IDENTITY_ENV} must name a "{DEVELOPER_ID_PREFIX}" certificate.')
+    return identity
+
+
 def release_identity(environ=os.environ):
     """The codesign identity of the selected mode: the Developer ID name, else ad hoc (`-`)."""
-    return Release.from_environ(environ).identity
+    if release_mode(environ) != 'developer-id':
+        return '-'
+    require_environment((IDENTITY_ENV,), environ)
+    return developer_id_identity(environ)
 
 
 class Release:
@@ -63,10 +73,7 @@ class Release:
         if mode != 'developer-id':
             return cls(mode, '-', environ, run, out)
         require_environment((IDENTITY_ENV,) + NOTARY_ENV, environ)
-        identity = environ[IDENTITY_ENV].strip()
-        if not identity.startswith(DEVELOPER_ID_PREFIX):
-            raise RuntimeError(f'{IDENTITY_ENV} must name a "{DEVELOPER_ID_PREFIX}" certificate.')
-        return cls(mode, identity, environ, run, out)
+        return cls(mode, developer_id_identity(environ), environ, run, out)
 
     @property
     def notarizes(self):
