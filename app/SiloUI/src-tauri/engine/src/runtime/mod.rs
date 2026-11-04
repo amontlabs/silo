@@ -701,6 +701,9 @@ pub struct ApplicationSource {
     /// be measured (every computer change is then rejected by `validate_device_ceiling`).
     #[serde(skip_serializing_if = "Option::is_none")]
     device_capacity: Option<DeviceCapacity>,
+    /// Served from the last settled rows rather than read; never remembered as a reading.
+    #[serde(skip)]
+    from_cache: bool,
 }
 
 impl ApplicationSource {
@@ -2930,6 +2933,7 @@ pub fn read_application_state_sync(
     // Only visible device-wide work (computer configuration) can add or remove
     // computers; work on one computer settles only that computer's row, and hidden housekeeping
     // never affects the read.
+    let ticket = settled_ticket(&paths);
     let mut source = read_application_snapshot(&ProcessRunner, &paths, &OPERATIONS)?;
     // Expired-log cleanup runs in the background, at most hourly per stopped computer, so a
     // state read never waits for it or re-inspects every stopped computer.
@@ -2948,7 +2952,9 @@ pub fn read_application_state_sync(
             refresh: refresh_repositories.unwrap_or(false),
         },
     );
-    remember_settled(&paths, &source.computers);
+    if !source.from_cache {
+        remember_settled_since(&paths, ticket, &source.computers);
+    }
     Ok(source)
 }
 
@@ -3177,7 +3183,7 @@ fn application_shell(paths: &RuntimePaths, error: &str) -> Result<ApplicationSou
 
 /// The user-facing state read. Visible device-wide work (it can add or remove
 /// computers) cannot be read through, so the read serves the last settled rows, each marked
-/// `settling`; only an inventory that was never read settled (or configuration recovery)
+/// `settling`; only an inventory without a complete settled reading (or configuration recovery)
 /// defers it with `update_in_progress`. Work on one computer only settles that computer's
 /// row (`settle_rows`), and hidden housekeeping never affects it.
 fn read_application_snapshot(
@@ -3219,15 +3225,24 @@ fn read_application_snapshot(
 fn read_last_settled_snapshot(
     paths: &RuntimePaths,
 ) -> Option<Result<ApplicationSource, RuntimeError>> {
-    if !settled_inventories().contains(&paths.metadata) {
-        return None;
-    }
-    let mut computers: Vec<ApplicationComputer> = last_settled(paths).into_values().collect();
+    let mut computers: Vec<ApplicationComputer> = {
+        let readings = settled_readings();
+        let inventory = readings.get(&paths.metadata)?;
+        if !inventory.complete {
+            return None;
+        }
+        inventory.rows.values().cloned().collect()
+    };
     computers.sort_by(|a, b| a.configuration.name().cmp(b.configuration.name()));
     for computer in &mut computers {
         computer.settling = true;
     }
-    Some(application_source_for_computers(paths, computers))
+    Some(
+        application_source_for_computers(paths, computers).map(|mut source| {
+            source.from_cache = true;
+            source
+        }),
+    )
 }
 
 fn read_application_snapshot_once(
@@ -5213,12 +5228,22 @@ fn keep_runtime_fields(computer: &mut ApplicationComputer, previous: &Applicatio
     computer.repositories = previous.repositories.clone();
 }
 
-/// Each computer's last settled, fresh reading (after enrichment), keyed by the inventory it
-/// belongs to and the computer's stable id. Returned in place of readings that overlap work.
-type SettledReadings = HashMap<(PathBuf, String), ApplicationComputer>;
-static LAST_SETTLED: OnceLock<Mutex<SettledReadings>> = OnceLock::new();
+/// One inventory's last settled readings. Rows and readiness live in one struct behind one
+/// mutex, so a reader never sees an inventory marked complete without its rows.
+#[derive(Default)]
+struct SettledInventory {
+    /// Publications accepted so far; a read only publishes if none landed since it started.
+    sequence: u64,
+    /// True once a publication covered every computer, so the rows are the full membership.
+    complete: bool,
+    /// Each computer's last settled, fresh reading (after enrichment), by stable id. A
+    /// computer a later read skipped keeps its earlier row.
+    rows: HashMap<String, ApplicationComputer>,
+}
 
-fn settled_readings() -> std::sync::MutexGuard<'static, SettledReadings> {
+static LAST_SETTLED: OnceLock<Mutex<HashMap<PathBuf, SettledInventory>>> = OnceLock::new();
+
+fn settled_readings() -> std::sync::MutexGuard<'static, HashMap<PathBuf, SettledInventory>> {
     // A cache of readings: a panic while holding it cannot leave a reading half-written.
     LAST_SETTLED
         .get_or_init(|| Mutex::new(HashMap::new()))
@@ -5226,45 +5251,48 @@ fn settled_readings() -> std::sync::MutexGuard<'static, SettledReadings> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-/// Inventories that have published at least one settled read, including empty ones.
-static SETTLED_INVENTORIES: OnceLock<Mutex<HashSet<PathBuf>>> = OnceLock::new();
-
-fn settled_inventories() -> std::sync::MutexGuard<'static, HashSet<PathBuf>> {
-    SETTLED_INVENTORIES
-        .get_or_init(|| Mutex::new(HashSet::new()))
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-}
-
 fn last_settled(paths: &RuntimePaths) -> HashMap<String, ApplicationComputer> {
     settled_readings()
-        .iter()
-        .filter(|((metadata, _), _)| *metadata == paths.metadata)
-        .map(|((_, id), computer)| (id.clone(), computer.clone()))
-        .collect()
+        .get(&paths.metadata)
+        .map(|inventory| inventory.rows.clone())
+        .unwrap_or_default()
+}
+
+/// The publication count to pass to `remember_settled_since` before starting a read.
+fn settled_ticket(paths: &RuntimePaths) -> u64 {
+    settled_readings()
+        .get(&paths.metadata)
+        .map_or(0, |inventory| inventory.sequence)
 }
 
 /// Remember the fresh, settled computer rows of a published source, and forget removed computers.
 fn remember_settled(paths: &RuntimePaths, computers: &[ApplicationComputer]) {
+    remember_settled_since(paths, u64::MAX, computers);
+}
+
+/// Like `remember_settled`, but ignored when another publication landed after `ticket`: an
+/// older read must not replace a newer membership. A computer without a fresh reading keeps
+/// its earlier row; the inventory counts as complete only when every computer has a row.
+fn remember_settled_since(paths: &RuntimePaths, ticket: u64, computers: &[ApplicationComputer]) {
+    let mut readings = settled_readings();
+    let inventory = readings.entry(paths.metadata.clone()).or_default();
+    if inventory.sequence > ticket {
+        return;
+    }
     let present: HashSet<&str> = computers
         .iter()
         .map(|computer| computer.configuration.id())
         .collect();
-    settled_inventories().insert(paths.metadata.clone());
-    let mut readings = settled_readings();
-    readings
-        .retain(|(metadata, id), _| *metadata != paths.metadata || present.contains(id.as_str()));
+    inventory.rows.retain(|id, _| present.contains(id.as_str()));
     for computer in computers {
         if !computer.settling && computer.freshness == Freshness::Fresh {
-            readings.insert(
-                (
-                    paths.metadata.clone(),
-                    computer.configuration.id().to_owned(),
-                ),
-                computer.clone(),
-            );
+            inventory
+                .rows
+                .insert(computer.configuration.id().to_owned(), computer.clone());
         }
     }
+    inventory.complete = present.iter().all(|id| inventory.rows.contains_key(*id));
+    inventory.sequence += 1;
 }
 
 /// The state a change returns once it has succeeded. It is enriched like a normal read
@@ -5275,9 +5303,10 @@ pub fn application_state_response(
     host: &dyn RuntimeHost,
     paths: &RuntimePaths,
 ) -> Result<ApplicationSource, RuntimeError> {
+    let ticket = settled_ticket(paths);
     let mut source = state_after_change(&ProcessRunner, paths, &OPERATIONS)?;
     enrich_application_state(host, paths, &mut source, Repositories::LastKnown);
-    remember_settled(paths, &source.computers);
+    remember_settled_since(paths, ticket, &source.computers);
     Ok(source)
 }
 
@@ -5466,6 +5495,7 @@ fn application_source_for_computers(
             .ok()
             .as_ref()
             .and_then(DeviceCapacity::of),
+        from_cache: false,
     })
 }
 
@@ -7100,6 +7130,7 @@ mod tests {
             runtime_repair: None,
             computers: vec![unread_computer(tests::computer())],
             activities: Vec::new(),
+            from_cache: false,
             computer_configuration_operation: None,
             repository_push_operations: Vec::new(),
             github: Value::Null,
@@ -7139,6 +7170,7 @@ mod tests {
             runtime_repair: None,
             computers: Vec::new(),
             activities: Vec::new(),
+            from_cache: false,
             computer_configuration_operation: None,
             repository_push_operations: Vec::new(),
             github: Value::Null,
@@ -10449,6 +10481,106 @@ exit 9
                 .code,
             ErrorCode::UpdateInProgress
         );
+    }
+
+    fn two_settled_rows(paths: &RuntimePaths) -> Vec<ApplicationComputer> {
+        read_application_snapshot(
+            &two_computer_reading(paths, "Running", "Stopped"),
+            paths,
+            &operation_gate::OperationGate::new(),
+        )
+        .unwrap()
+        .computers
+    }
+
+    #[test]
+    fn a_partial_reading_is_never_served_as_the_whole_inventory() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let paths = paths(&directory);
+        write_metadata(
+            &paths.metadata,
+            &request(vec![computer(), second_computer()]),
+        )
+        .unwrap();
+        // The second computer was touched during the only reading, so it has no row yet.
+        let mut rows = two_settled_rows(&paths);
+        rows[1].settling = true;
+        remember_settled(&paths, &rows);
+        assert!(read_last_settled_snapshot(&paths).is_none());
+        // Once a later reading covers it, the full membership is served.
+        remember_settled(&paths, &two_settled_rows(&paths));
+        let served = published(&read_last_settled_snapshot(&paths).unwrap().unwrap());
+        assert_eq!(served["computers"].as_array().unwrap().len(), 2);
+        // A later reading that skips it keeps its last row, still served as settling.
+        let mut rows = two_settled_rows(&paths);
+        rows[1].settling = true;
+        remember_settled(&paths, &rows);
+        let served = published(&read_last_settled_snapshot(&paths).unwrap().unwrap());
+        for name in ["dev", "work"] {
+            assert_eq!(row(&served, name)["settling"], true);
+        }
+        assert_eq!(row(&served, "work")["state"], "stopped");
+    }
+
+    #[test]
+    fn a_delayed_read_cannot_erase_a_newer_membership_or_cache_a_fallback() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let paths = paths(&directory);
+        write_metadata(
+            &paths.metadata,
+            &request(vec![computer(), second_computer()]),
+        )
+        .unwrap();
+        let both = two_settled_rows(&paths);
+        remember_settled(&paths, &both[..1]);
+        // A read starts while the second computer is being created...
+        let ticket = settled_ticket(&paths);
+        // ...the job publishes both computers before that read publishes.
+        remember_settled(&paths, &both);
+        remember_settled_since(&paths, ticket, &both[..1]);
+        assert_eq!(last_settled(&paths).len(), 2);
+        // A cached fallback is never remembered.
+        let source = read_last_settled_snapshot(&paths).unwrap().unwrap();
+        assert!(source.from_cache);
+        let before = settled_ticket(&paths);
+        if !source.from_cache {
+            remember_settled_since(&paths, before, &source.computers);
+        }
+        assert_eq!(settled_ticket(&paths), before);
+    }
+
+    #[test]
+    fn readiness_is_published_together_with_its_rows() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let paths = paths(&directory);
+        write_metadata(
+            &paths.metadata,
+            &request(vec![computer(), second_computer()]),
+        )
+        .unwrap();
+        let rows = two_settled_rows(&paths);
+        let reader_metadata = paths.metadata.clone();
+        let stopped = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let reader_stopped = stopped.clone();
+        let reader = std::thread::spawn(move || {
+            let mut ready_without_rows = 0;
+            while !reader_stopped.load(std::sync::atomic::Ordering::SeqCst) {
+                if let Some(inventory) = settled_readings().get(&reader_metadata) {
+                    if inventory.complete && inventory.rows.len() != 2 {
+                        ready_without_rows += 1;
+                    }
+                }
+                std::thread::yield_now();
+            }
+            ready_without_rows
+        });
+        remember_settled(&paths, &rows);
+        std::thread::sleep(Duration::from_millis(20));
+        stopped.store(true, std::sync::atomic::Ordering::SeqCst);
+        assert_eq!(reader.join().unwrap(), 0);
     }
 
     fn leaked_gate() -> &'static operation_gate::OperationGate {
