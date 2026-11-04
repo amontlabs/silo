@@ -232,7 +232,7 @@ This is a supported upstream failure state: the pinned [MicroSandbox executor](h
 
 ### R-13. APT retention preserves indexes without their package objects
 
-**Location:** [download-apt-releases.py](../../app/SiloUI/scripts/download-apt-releases.py), lines 28–34; [apt-repository.py](../../app/SiloUI/scripts/apt-repository.py), lines 45–75, 90–119.
+**Location:** [download-apt-releases.py](https://github.com/amontlabs/silo/blob/f15b8e33a9fde118fd970ae8d201c54533322ed9/app/SiloUI/scripts/download-apt-releases.py), lines 28–34; [apt-repository.py](https://github.com/amontlabs/silo/blob/f15b8e33a9fde118fd970ae8d201c54533322ed9/app/SiloUI/scripts/apt-repository.py), lines 45–75, 90–119.
 
 **Trigger:** publish releases 0.1/0.2, then 0.2/0.3, then 0.3/0.4 within the 14-day metadata validity period. The downloader retains two releases; preservation copies indexes from the immediately previous manifest, without their referenced pool packages or the earlier hash-index retention chain.
 

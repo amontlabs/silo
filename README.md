@@ -97,7 +97,7 @@ Researched 2026-11-03 from each project's own documentation; corrections welcome
 | Guests | Linux (Ubuntu 24.04, arm64 on Apple Silicon) and macOS | Unchanged |
 | Intel Macs | Not supported | Not planned |
 
-Silo app releases up to v0.11.1 also shipped Linux `.deb` and AppImage packages. Those builds predate the engine and are frozen at v0.11.1: they get no further updates.
+Silo app releases up to v0.11.1 also shipped Linux `.deb` and AppImage packages. Those builds predate the engine and are frozen at v0.11.1: they get no further updates, and their APT source is no longer re-signed, so `apt update` reports it as expired. Remove it with `sudo rm /etc/apt/sources.list.d/silo.sources`.
 
 ## How it fits together
 

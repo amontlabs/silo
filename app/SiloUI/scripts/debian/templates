@@ -1,7 +1,0 @@
-Template: silo/system-updates
-Type: boolean
-Default: true
-Description: Receive Silo updates through Software Updater?
- Add Silo's signed software source so your system can offer future Silo
- updates alongside other applications. You can disable this source later
- in Software & Updates.

@@ -229,7 +229,7 @@ The current helper with the existing temporary guest fixture produced:
 
 ### R-13. Preserved APT indexes can reference deleted packages
 
-**High confidence in file publication behavior; live cached-client APT not exercised.** [Package download](../../app/SiloUI/scripts/download-apt-releases.py), lines 28–34, fetches only two releases. [Repository generation](../../app/SiloUI/scripts/apt-repository.py), lines 45–75, emits those packages and declares 14-day metadata validity. Lines 90–119 preserve only the immediately previous InRelease's indexes, not referenced pool packages or the full earlier retention chain.
+**High confidence in file publication behavior; live cached-client APT not exercised.** [Package download](https://github.com/amontlabs/silo/blob/f15b8e33a9fde118fd970ae8d201c54533322ed9/app/SiloUI/scripts/download-apt-releases.py), lines 28–34, fetches only two releases. [Repository generation](https://github.com/amontlabs/silo/blob/f15b8e33a9fde118fd970ae8d201c54533322ed9/app/SiloUI/scripts/apt-repository.py), lines 45–75, emits those packages and declares 14-day metadata validity. Lines 90–119 preserve only the immediately previous InRelease's indexes, not referenced pool packages or the full earlier retention chain.
 
 **Trigger:** publish versions 0.1/0.2, then 0.2/0.3. The preserved old Packages index still advertises 0.1, but its `.deb` is absent. After additional publications within metadata validity, even an older still-valid index hash can disappear because preservation follows only the latest previous manifest.
 

@@ -1,8 +1,0 @@
-#!/bin/sh
-set -e
-. /usr/share/debconf/confmodule
-if [ "$1" = reconfigure ]; then rm -f /var/lib/silo/apt-source-configured; fi
-if [ "$1" = configure ] || [ "$1" = reconfigure ]; then
-    db_input high silo/system-updates || true
-    db_go || true
-fi

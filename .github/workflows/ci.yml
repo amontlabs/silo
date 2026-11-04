@@ -97,8 +97,6 @@ jobs:
       - run: python3 scripts/validate-release-version.py
       - name: Check build.rs declares every registered Tauri command
         run: python3 scripts/check-command-manifest.py
-      - name: Install APT repository test tools
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends gnupg dpkg-dev
       - name: Run every release and packaging script test
         run: python3 scripts/run-script-tests.py
       - name: Run the isolation eval self-tests
