@@ -33,10 +33,9 @@ variables, account, cookies, or analytics are required by the site.
   first-paint rules constrain the logo and hide the skip link until focused,
   even before external CSS arrives; keep these sizes aligned with `src/style.css`.
 - `src/style.css`: responsive layout and Zed-inspired typography/grid.
-- `src/main.js`: accessible workflow tabs and Linux architecture selection.
+- `src/main.js`: accessible workflow tabs.
 - `src/tour.js`: video chapter playback, media-duration-aware chapter selection,
   and dialog cleanup with focus restoration.
-- `src/downloads.js`: explicit Linux architecture-to-package mapping.
 - `demo.html` and `src/demo/`: an isolated, lazy-loaded React iframe using the
   actual Silo sidebar, navigation history, and production pages. Sample files,
   logs, repositories, secrets, computers, and backups come from bundled fixtures.

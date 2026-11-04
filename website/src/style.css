@@ -1399,11 +1399,116 @@ body:has(dialog[open]) {
 .theme-menu button[aria-checked="true"] .theme-check { visibility: visible; }
 @media (max-width: 480px) {
   .header-actions { gap: 6px; }
-  .site-header nav a[href="https://github.com/amontlabs/silo#start-working"] { display: none; }
+  .site-header nav a[href="https://github.com/amontlabs/silo#silo-app"] { display: none; }
 }
 .footer-note { align-items: center; }
 .feature-media picture, .detail-media picture { display: block; }
 @media (max-width: 640px) {
   .feature-media { aspect-ratio: auto; }
   .detail-media img { aspect-ratio: 16/10; }
+}
+.why-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border: 1px solid var(--line);
+  background: var(--surface);
+}
+.why-grid article {
+  padding: 22px 20px 24px;
+  border-right: 1px solid var(--line);
+  min-width: 0;
+}
+.why-grid article:last-child {
+  border-right: 0;
+}
+.why-grid h3 {
+  font-family: var(--serif);
+  font-size: 16px;
+  letter-spacing: -0.3px;
+  margin-bottom: 12px;
+}
+.why-grid p,
+.why-grid li {
+  font-size: 12px;
+  line-height: 1.8;
+  color: var(--muted);
+}
+.why-grid ul {
+  margin: 0;
+  padding-left: 16px;
+}
+.why-grid li + li {
+  margin-top: 6px;
+}
+.why-grid a,
+.compare-note a {
+  color: var(--accent-ink);
+}
+.compare {
+  margin-top: 32px;
+}
+.compare-scroll {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+}
+.compare table {
+  width: 100%;
+  min-width: 720px;
+  border-collapse: collapse;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.compare caption {
+  text-align: left;
+  font-family: var(--serif);
+  font-size: 16px;
+  padding: 16px 14px 12px;
+}
+.compare th,
+.compare td {
+  text-align: left;
+  vertical-align: top;
+  padding: 10px 14px;
+  border-top: 1px solid var(--line);
+}
+.compare thead th {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--muted);
+}
+.compare td {
+  color: var(--muted);
+}
+.compare tbody th {
+  font-weight: 500;
+  white-space: nowrap;
+}
+.compare tbody tr:first-child {
+  background: var(--accent-wash);
+}
+.compare tbody tr:first-child td {
+  color: var(--ink);
+}
+.compare-note {
+  font-size: 12px;
+  line-height: 1.8;
+  color: var(--muted);
+  margin-top: 14px;
+}
+.compare-note a {
+  display: inline-block;
+  margin-right: 14px;
+}
+@media (max-width: 900px) {
+  .why-grid {
+    grid-template-columns: 1fr;
+  }
+  .why-grid article {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .why-grid article:last-child {
+    border-bottom: 0;
+  }
 }
