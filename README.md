@@ -130,7 +130,7 @@ The Silo app is a desktop app built on the engine. It manages local and remote c
 
 ### Install
 
-The engine, computer runtime, and Git tools are bundled. The base Linux image (about 400 MB) downloads once in the background before your first computer, is checked against a pinned checksum, and is reused across updates. For computer use, each new Linux computer fetches Cua Driver's pinned, checksummed release archive (about 37 MB) from GitHub once at first start, until a guest image that includes it is published. macOS computers fetch Cua Driver's pinned, checksummed macOS archive (about 85 MB) the same way. Computers created before the built-in desktop download optional desktop packages when you add a desktop.
+The engine, computer runtime, and Git tools are bundled. The base Linux image (about 350 MB) downloads once in the background before your first computer, is checked against a pinned checksum, and is reused across updates. For computer use, new Linux computers have Cua Driver built into their image; a computer created from an earlier image fetches Cua Driver's pinned, checksummed release archive (about 37 MB) from GitHub once at first start. macOS computers fetch Cua Driver's pinned, checksummed macOS archive (about 85 MB) the same way. Computers created before the built-in desktop download optional desktop packages when you add a desktop.
 
 | Platform | Requirements | Download |
 | --- | --- | --- |
