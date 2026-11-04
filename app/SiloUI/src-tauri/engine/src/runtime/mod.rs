@@ -3176,8 +3176,10 @@ fn application_shell(paths: &RuntimePaths, error: &str) -> Result<ApplicationSou
 }
 
 /// The user-facing state read. Visible device-wide work (it can add or remove
-/// computers) defers the whole read with `update_in_progress`; work on one computer only
-/// settles that computer's row (`settle_rows`), and hidden housekeeping never affects it.
+/// computers) cannot be read through, so the read serves the last settled rows, each marked
+/// `settling`; only an inventory that was never read settled (or configuration recovery)
+/// defers it with `update_in_progress`. Work on one computer only settles that computer's
+/// row (`settle_rows`), and hidden housekeeping never affects it.
 fn read_application_snapshot(
     runner: &dyn RuntimeRunner,
     paths: &RuntimePaths,
@@ -3197,6 +3199,9 @@ fn read_application_snapshot(
                 if configuration_recovery::pending(paths)? {
                     return Err(BridgeError::updating());
                 }
+                if let Some(source) = read_last_settled_snapshot(paths) {
+                    return source.map_err(BridgeError::from);
+                }
                 if attempt + 1 < MAX_ATTEMPTS {
                     thread::sleep(RETRY_DELAY);
                 } else {
@@ -3207,6 +3212,22 @@ fn read_application_snapshot(
         }
     }
     unreachable!("at least one application snapshot attempt is required")
+}
+
+/// The last settled rows of an inventory, every one marked `settling` because device-wide
+/// work may be changing it. `None` when this inventory never had a settled read.
+fn read_last_settled_snapshot(
+    paths: &RuntimePaths,
+) -> Option<Result<ApplicationSource, RuntimeError>> {
+    if !settled_inventories().contains(&paths.metadata) {
+        return None;
+    }
+    let mut computers: Vec<ApplicationComputer> = last_settled(paths).into_values().collect();
+    computers.sort_by(|a, b| a.configuration.name().cmp(b.configuration.name()));
+    for computer in &mut computers {
+        computer.settling = true;
+    }
+    Some(application_source_for_computers(paths, computers))
 }
 
 fn read_application_snapshot_once(
@@ -5205,6 +5226,16 @@ fn settled_readings() -> std::sync::MutexGuard<'static, SettledReadings> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
+/// Inventories that have published at least one settled read, including empty ones.
+static SETTLED_INVENTORIES: OnceLock<Mutex<HashSet<PathBuf>>> = OnceLock::new();
+
+fn settled_inventories() -> std::sync::MutexGuard<'static, HashSet<PathBuf>> {
+    SETTLED_INVENTORIES
+        .get_or_init(|| Mutex::new(HashSet::new()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 fn last_settled(paths: &RuntimePaths) -> HashMap<String, ApplicationComputer> {
     settled_readings()
         .iter()
@@ -5219,6 +5250,7 @@ fn remember_settled(paths: &RuntimePaths, computers: &[ApplicationComputer]) {
         .iter()
         .map(|computer| computer.configuration.id())
         .collect();
+    settled_inventories().insert(paths.metadata.clone());
     let mut readings = settled_readings();
     readings
         .retain(|(metadata, id), _| *metadata != paths.metadata || present.contains(id.as_str()));
@@ -10315,6 +10347,108 @@ exit 9
             .unwrap_err()
             .message
             .contains("does not match"));
+    }
+
+    #[test]
+    fn a_state_read_during_device_wide_work_serves_the_last_settled_rows_as_settling() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let paths = paths(&directory);
+        write_metadata(
+            &paths.metadata,
+            &request(vec![computer(), second_computer()]),
+        )
+        .unwrap();
+        let gate = leaked_gate();
+        let first = read_application_snapshot(
+            &two_computer_reading(&paths, "Running", "Stopped"),
+            &paths,
+            gate,
+        )
+        .unwrap();
+        remember_settled(&paths, &first.computers);
+        let (release, holder) = hold_elsewhere(gate, |gate| {
+            gate.device("Applying computer changes").unwrap()
+        });
+        assert!(!gate.is_device_idle());
+        // The runner would fail if the read touched it.
+        let during = published(
+            &read_application_snapshot(&StubRunner::successful_json(vec![]), &paths, gate).unwrap(),
+        );
+        assert_eq!(during["computers"].as_array().unwrap().len(), 2);
+        for (name, state) in [("dev", "running"), ("work", "stopped")] {
+            assert_eq!(row(&during, name)["state"], state);
+            assert_eq!(row(&during, name)["settling"], true);
+        }
+        drop(release);
+        holder.join().unwrap();
+        let after = published(
+            &read_application_snapshot(
+                &two_computer_reading(&paths, "Stopped", "Running"),
+                &paths,
+                gate,
+            )
+            .unwrap(),
+        );
+        assert_eq!(row(&after, "dev")["state"], "stopped");
+        assert!(row(&after, "dev").get("settling").is_none());
+    }
+
+    #[test]
+    fn work_on_one_computer_does_not_hide_the_other_computers_during_device_wide_work() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let paths = paths(&directory);
+        write_metadata(
+            &paths.metadata,
+            &request(vec![computer(), second_computer()]),
+        )
+        .unwrap();
+        let gate = leaked_gate();
+        remember_settled(
+            &paths,
+            &read_application_snapshot(
+                &two_computer_reading(&paths, "Running", "Running"),
+                &paths,
+                gate,
+            )
+            .unwrap()
+            .computers,
+        );
+        let (release, holder) = hold_elsewhere(gate, |gate| {
+            gate.computer(computer().id(), "dev", "Creating checkpoint")
+                .unwrap()
+        });
+        let encoded = published(
+            &read_application_snapshot(
+                &two_computer_reading(&paths, "Paused", "Stopped"),
+                &paths,
+                gate,
+            )
+            .unwrap(),
+        );
+        assert_eq!(row(&encoded, "dev")["settling"], true);
+        assert_eq!(row(&encoded, "work")["state"], "stopped");
+        assert!(row(&encoded, "work").get("settling").is_none());
+        drop(release);
+        holder.join().unwrap();
+    }
+
+    #[test]
+    fn a_state_read_with_no_settled_reading_still_defers_during_device_wide_work() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let paths = paths(&directory);
+        write_metadata(&paths.metadata, &request(vec![computer()])).unwrap();
+        let gate = operation_gate::OperationGate::new();
+        let _change = gate.device("Applying computer changes").unwrap();
+        let runner = StubRunner::successful_json(vec![]);
+        assert_eq!(
+            read_application_snapshot(&runner, &paths, &gate)
+                .unwrap_err()
+                .code,
+            ErrorCode::UpdateInProgress
+        );
     }
 
     fn leaked_gate() -> &'static operation_gate::OperationGate {
