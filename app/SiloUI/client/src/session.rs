@@ -10,6 +10,7 @@ use std::{
 };
 
 use serde_json::{json, Value};
+use silo_api::jobs::ErrorCode;
 use silo_api::transport::{
     ClientMetadata, ErrorObject, HandshakeParams, HandshakeResult, ProtocolRange, RequestEnvelope,
     ResponseEnvelope,
@@ -23,6 +24,14 @@ use tokio::{
 use crate::codec::{read_frame, write_frame};
 
 const HANDSHAKE_ID: &str = "handshake";
+
+/// Waits before each retry of a query deferred with `update_in_progress`.
+const QUERY_RETRY_DELAYS: &[Duration] = &[
+    Duration::from_millis(100),
+    Duration::from_millis(250),
+    Duration::from_millis(500),
+    Duration::from_millis(1000),
+];
 
 /// What this client announces and the protocol range it can speak.
 #[derive(Clone, Debug)]
@@ -173,7 +182,36 @@ where
     }
 
     /// Sends one request and resolves with its reply by id, whatever else arrives meanwhile.
+    /// A query the engine defers with `update_in_progress` is retried with a short backoff;
+    /// commands and jobs are sent once.
     pub async fn request_with(
+        &self,
+        method: &str,
+        params: Value,
+        options: RequestOptions,
+    ) -> Result<Value, ClientError> {
+        let is_query = silo_api::methods::method_registry()
+            .iter()
+            .any(|descriptor| {
+                descriptor.name == method && descriptor.kind == silo_api::methods::MethodKind::Query
+            });
+        let mut delays = if is_query { QUERY_RETRY_DELAYS } else { &[] }.iter();
+        loop {
+            let result = self
+                .request_once(method, params.clone(), options.clone())
+                .await;
+            let deferred = matches!(
+                &result,
+                Err(ClientError::Remote(error)) if error.code == ErrorCode::UpdateInProgress
+            );
+            match delays.next() {
+                Some(delay) if deferred => time::sleep(*delay).await,
+                _ => return result,
+            }
+        }
+    }
+
+    async fn request_once(
         &self,
         method: &str,
         params: Value,
@@ -335,6 +373,7 @@ fn resolve<W>(inner: &Inner<W>, id: &str, reply: Reply) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::AtomicUsize;
     use tokio::io::duplex;
 
     fn options() -> ConnectOptions {
@@ -475,6 +514,63 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(result, Value::Null);
+    }
+
+    async fn serve_updating(
+        method: &'static str,
+        deferred: usize,
+    ) -> (Client<WriteHalf<tokio::io::DuplexStream>>, Arc<AtomicUsize>) {
+        let seen = Arc::new(AtomicUsize::new(0));
+        let counted = seen.clone();
+        let stream = serve(handshake_reply(7), move |mut server| async move {
+            while let Ok(Some(request)) = read_frame::<_, Value>(&mut server).await {
+                assert_eq!(request["method"], method);
+                let attempt = counted.fetch_add(1, Ordering::SeqCst);
+                let reply = if attempt < deferred {
+                    json!({"id": request["id"], "error": {
+                        "code": "update_in_progress", "message": "updating"}})
+                } else {
+                    json!({"id": request["id"], "result": {"ok": true}})
+                };
+                write_frame(&mut server, &reply).await.unwrap();
+            }
+        })
+        .await;
+        let (client, _events) = establish(stream, options()).await.unwrap();
+        (client, seen)
+    }
+
+    #[tokio::test]
+    async fn a_query_deferred_with_update_in_progress_is_retried() {
+        let (client, seen) = serve_updating("computers.list", 2).await;
+        let result = client.request("computers.list", json!({})).await.unwrap();
+        assert_eq!(result, json!({"ok": true}));
+        assert_eq!(seen.load(Ordering::SeqCst), 3);
+    }
+
+    #[tokio::test]
+    async fn a_query_that_stays_deferred_gives_up_with_the_engine_error() {
+        let (client, seen) = serve_updating("computers.list", usize::MAX).await;
+        let error = client
+            .request("computers.list", json!({}))
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            ClientError::Remote(error) if error.code == ErrorCode::UpdateInProgress
+        ));
+        assert_eq!(seen.load(Ordering::SeqCst), QUERY_RETRY_DELAYS.len() + 1);
+    }
+
+    #[tokio::test]
+    async fn a_mutation_deferred_with_update_in_progress_is_not_retried() {
+        let (client, seen) = serve_updating("computers.start", usize::MAX).await;
+        let error = client
+            .request("computers.start", json!({}))
+            .await
+            .unwrap_err();
+        assert!(matches!(error, ClientError::Remote(_)));
+        assert_eq!(seen.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test]
