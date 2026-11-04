@@ -11,6 +11,7 @@ mod native;
 #[path = "checkpoints/running_retry_tests.rs"]
 mod running_retry_tests;
 pub use native::{plan as native_removal_plan, Member as NativeMember};
+use native::prune_unused_images;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -205,7 +206,10 @@ fn validate(record: &Record) -> Result<(), RuntimeError> {
                     .is_some_and(|native_id| !valid_native_id(native_id))
                 || !matches!(checkpoint.scope.as_str(), "full" | "disk")
                 || !matches!(checkpoint.reason.as_str(), "manual" | "before-restore")
-                || !matches!(checkpoint.kind.as_str(), "manual" | "automatic")
+                || !matches!(
+                    checkpoint.kind.as_str(),
+                    "manual" | "automatic" | "before-keep"
+                )
         })
         || !unique_checkpoint_ids(&record.checkpoints)
         || record
@@ -913,13 +917,16 @@ pub fn has_computer(paths: &RuntimePaths, computer_id: &str) -> bool {
 
 /// Captures a Linux checkpoint as one durable, cancellable job operation and returns the
 /// exact record it committed. An automatic capture is refused while the setting is off,
-/// both before it queues (the caller) and once the queue admits it (here).
+/// both before it queues (the caller) and once the queue admits it (here). A before-keep
+/// capture trims that kind's oldest records beyond its own count afterwards.
+#[allow(clippy::too_many_arguments)]
 pub fn create_for_job(
     paths: &RuntimePaths,
     computer_id: &str,
     name: &str,
-    automatic: bool,
+    kind: silo_api::methods::checkpoints::CheckpointKind,
     retention: &dyn Fn() -> Result<u32, String>,
+    before_keep_retention: &dyn Fn() -> Result<u32, String>,
     job_id: silo_api::jobs::JobId,
     cancellation: std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) -> Result<silo_api::methods::checkpoints::Checkpoint, String> {
@@ -946,10 +953,15 @@ pub fn create_for_job(
     guard.allow_cancel();
     guard.expect_within(std::time::Duration::from_secs(15 * 60));
     shutdown::ensure_accepting_operations()?;
-    if automatic && retention()? == 0 {
+    use silo_api::methods::checkpoints::CheckpointKind;
+    if kind == CheckpointKind::Automatic && retention()? == 0 {
         return Err(crate::checkpoints::AUTOMATIC_OFF.into());
     }
-    let policy_kind = if automatic { "automatic" } else { "manual" };
+    let policy_kind = match kind {
+        CheckpointKind::Manual => "manual",
+        CheckpointKind::Automatic => "automatic",
+        CheckpointKind::BeforeKeep => "before-keep",
+    };
     let checkpoint = capture_with_kind(
         &ProcessRunner,
         paths,
@@ -961,15 +973,24 @@ pub fn create_for_job(
     .map_err(|error| error.to_string())?;
     // The capture's computer lane is released before retention asks for the device lane.
     drop(guard);
-    if automatic {
-        prune_automatic_with(
+    match kind {
+        CheckpointKind::Automatic => prune_automatic_with(
             &OPERATIONS,
             &ProcessRunner,
             paths,
             computer_id,
             retention,
             job_id,
-        );
+        ),
+        CheckpointKind::BeforeKeep => prune_before_keep_with(
+            &OPERATIONS,
+            &ProcessRunner,
+            paths,
+            computer_id,
+            before_keep_retention,
+            job_id,
+        ),
+        CheckpointKind::Manual => {}
     }
     Ok(api_checkpoint(checkpoint))
 }
@@ -992,24 +1013,73 @@ fn api_checkpoint(checkpoint: Checkpoint) -> silo_api::methods::checkpoints::Che
         } else {
             CheckpointReason::Manual
         },
-        kind: if checkpoint.kind == "automatic" {
-            CheckpointKind::Automatic
-        } else {
-            CheckpointKind::Manual
+        kind: match checkpoint.kind.as_str() {
+            "automatic" => CheckpointKind::Automatic,
+            "before-keep" => CheckpointKind::BeforeKeep,
+            _ => CheckpointKind::Manual,
         },
         size_bytes: None,
     }
 }
 
-/// Removes this computer's automatic checkpoints beyond the newest N, oldest first, through
-/// ordinary safe deletion. It never touches manual or before-restore records. The count is
-/// read again once each deletion is admitted so turning the setting off stops later deletions, and a
-/// checkpoint something still needs is kept (visible with its `deleteBlocker`).
+/// Removes this computer's automatic checkpoints beyond the newest N through the ordinary
+/// checkpoint deletion. It never touches other kinds. See [`trim_kind_with`].
 fn prune_automatic_with(
     gate: &super::operation_gate::OperationGate,
     runner: &dyn RuntimeRunner,
     paths: &RuntimePaths,
     computer_id: &str,
+    retention: &dyn Fn() -> Result<u32, String>,
+    job_id: silo_api::jobs::JobId,
+) {
+    trim_kind_with(
+        gate,
+        runner,
+        paths,
+        computer_id,
+        "automatic",
+        "Removing an older automatic checkpoint",
+        retention,
+        job_id,
+    );
+}
+
+/// Removes this computer's before-keep checkpoints beyond the newest N. A count of zero
+/// keeps them all.
+fn prune_before_keep_with(
+    gate: &super::operation_gate::OperationGate,
+    runner: &dyn RuntimeRunner,
+    paths: &RuntimePaths,
+    computer_id: &str,
+    retention: &dyn Fn() -> Result<u32, String>,
+    job_id: silo_api::jobs::JobId,
+) {
+    trim_kind_with(
+        gate,
+        runner,
+        paths,
+        computer_id,
+        "before-keep",
+        "Removing an older before-keep checkpoint",
+        retention,
+        job_id,
+    );
+}
+
+/// Removes this computer's checkpoints of `kind` beyond the newest N, through the ordinary
+/// checkpoint deletion. Candidates go newest first, so a chain of snapshots among them is removed from
+/// its leaf down to its root without `--force`. The count is read again once each deletion is
+/// admitted so turning the setting off stops later deletions, and a checkpoint something still
+/// needs is kept (visible with its `deleteBlocker`). A failed deletion is logged and the rest
+/// still run; unused image data is pruned once at the end.
+#[allow(clippy::too_many_arguments)]
+fn trim_kind_with(
+    gate: &super::operation_gate::OperationGate,
+    runner: &dyn RuntimeRunner,
+    paths: &RuntimePaths,
+    computer_id: &str,
+    kind: &str,
+    activity: &str,
     retention: &dyn Fn() -> Result<u32, String>,
     job_id: silo_api::jobs::JobId,
 ) {
@@ -1022,7 +1092,7 @@ fn prune_automatic_with(
             .map(|checkpoint| crate::checkpoints::retention::Entry {
                 id: checkpoint.id.clone(),
                 created_at_ms: i128::from(checkpoint.created_at),
-                automatic: checkpoint.kind == "automatic",
+                automatic: checkpoint.kind == kind,
             })
             .collect()
     };
@@ -1033,26 +1103,30 @@ fn prune_automatic_with(
     let Ok(record) = load(paths, computer_id) else {
         return;
     };
-    for candidate in crate::checkpoints::retention::plan(&entries_of(&record), count).candidates {
+    let mut candidates =
+        crate::checkpoints::retention::plan(&entries_of(&record), count).candidates;
+    candidates.reverse();
+    let mut removed_any = false;
+    for candidate in candidates {
         let Ok(_guard) = gate.kind(OperationKind::CheckpointDelete).acquire_for_job(
             Scope::Device,
             None,
-            "Removing an older automatic checkpoint",
+            activity,
             None,
             job_id.clone(),
             None,
         ) else {
-            return;
+            break;
         };
         // The plan is made again once the queue admits this deletion: the setting and the
         // history may have changed while it waited, and only a candidate that the current
         // count still drops is deleted.
-        let Ok(current) = retention() else { return };
+        let Ok(current) = retention() else { break };
         if current == 0 {
-            return;
+            break;
         }
         let Ok(record) = load(paths, computer_id) else {
-            return;
+            break;
         };
         if !crate::checkpoints::retention::plan(&entries_of(&record), current)
             .candidates
@@ -1060,11 +1134,15 @@ fn prune_automatic_with(
         {
             continue;
         }
-        if let Err(error) = delete_checkpoint_with(runner, paths, computer_id, &candidate) {
+        match delete_checkpoint_core(runner, paths, computer_id, &candidate) {
+            Ok(()) => removed_any = true,
             // Dependencies and in-progress recovery defer retention. Never force-delete a
             // checkpoint the runtime says something still needs.
-            eprintln!("Silo kept an older automatic checkpoint: {error}");
+            Err(error) => eprintln!("Silo kept an older {kind} checkpoint: {error}"),
         }
+    }
+    if removed_any {
+        prune_unused_images(runner, paths);
     }
 }
 
@@ -3038,9 +3116,21 @@ fn deletion(
     Ok(Deletion::Remove(member.clone()))
 }
 
+/// Delete one checkpoint, then give back the disk its removal released.
+fn delete_checkpoint_with(
+    runner: &dyn RuntimeRunner,
+    paths: &RuntimePaths,
+    computer_id: &str,
+    checkpoint_id: &str,
+) -> Result<(), RuntimeError> {
+    delete_checkpoint_core(runner, paths, computer_id, checkpoint_id)?;
+    prune_unused_images(runner, paths);
+    Ok(())
+}
+
 /// Delete one checkpoint: remove its native member unless something still needs it,
 /// then drop the entry. Never passes `--force`; MicroSandbox's own guards stay in force.
-fn delete_checkpoint_with(
+fn delete_checkpoint_core(
     runner: &dyn RuntimeRunner,
     paths: &RuntimePaths,
     computer_id: &str,
@@ -3412,6 +3502,7 @@ pub(crate) fn remove_deleted_snapshots(
         if let Err(failure) = retry_deleted_snapshots(runner, paths) {
             eprintln!("Previously deleted checkpoint data was kept: {failure}");
         }
+        prune_unused_images(runner, paths);
         return Ok(());
     }
     let group = record.snapshot_group.as_deref().unwrap_or(computer);
@@ -3432,6 +3523,7 @@ pub(crate) fn remove_deleted_snapshots(
     if let Err(failure) = retry_deleted_snapshots(runner, paths) {
         eprintln!("Kept checkpoint data of deleted computer {computer}: {failure}");
     }
+    prune_unused_images(runner, paths);
     Ok(())
 }
 

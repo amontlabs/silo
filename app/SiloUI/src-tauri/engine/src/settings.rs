@@ -12,6 +12,7 @@ use std::{
 const MAX_DOCUMENT_BYTES: u64 = 1024 * 1024;
 const MAX_DRAFT_BYTES: usize = 256 * 1024;
 pub const DEFAULT_AUTOMATIC_CHECKPOINT_RETENTION_COUNT: u32 = 3;
+pub const DEFAULT_BEFORE_KEEP_CHECKPOINT_RETENTION_COUNT: u32 = 5;
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -298,7 +299,7 @@ fn valid_setting(key: &str, value: &Value) -> Option<bool> {
         "computerOrder" => value.as_array().is_some_and(|keys| {
             keys.len() <= 1024 && keys.iter().all(|key| bounded_string(key, 512, false))
         }),
-        "automaticCheckpointRetentionCount" => value
+        "automaticCheckpointRetentionCount" | "beforeKeepCheckpointRetentionCount" => value
             .as_u64()
             .is_some_and(|count| count <= u64::from(u32::MAX)),
         _ => return None,
@@ -793,6 +794,22 @@ pub fn automatic_checkpoint_retention_count_for(
         .ok_or_else(|| "The automatic checkpoint retention setting is invalid.".to_owned())
 }
 
+/// The per-computer retention count for checkpoints taken before Keep applies changes to
+/// main. Unlike the automatic setting, zero keeps every one of them; a missing setting
+/// means the default of five.
+pub fn before_keep_checkpoint_retention_count_for(
+    context: &dyn silo_engine::EngineContext,
+) -> Result<u32, String> {
+    let settings = settings_of(context)?;
+    let Some(value) = settings.get("beforeKeepCheckpointRetentionCount") else {
+        return Ok(DEFAULT_BEFORE_KEEP_CHECKPOINT_RETENTION_COUNT);
+    };
+    value
+        .as_u64()
+        .and_then(|count| u32::try_from(count).ok())
+        .ok_or_else(|| "The before-keep checkpoint retention setting is invalid.".to_owned())
+}
+
 pub fn read(main: bool) -> Result<Snapshot, String> {
     let state = runtime_state()?;
     let mut snapshot = state
@@ -987,6 +1004,19 @@ mod tests {
     use super::*;
     use serde_json::json;
     use silo_engine::EngineRuntimeState;
+
+    #[test]
+    fn the_before_keep_checkpoint_count_accepts_only_whole_numbers_that_fit_a_u32() {
+        assert_eq!(DEFAULT_BEFORE_KEEP_CHECKPOINT_RETENTION_COUNT, 5);
+        let accepted =
+            |value: Value| valid_setting("beforeKeepCheckpointRetentionCount", &value) == Some(true);
+        for value in [json!(0), json!(5), json!(u32::MAX)] {
+            assert!(accepted(value.clone()), "{value}");
+        }
+        for value in [json!(-1), json!(1.5), json!("5"), json!(u64::from(u32::MAX) + 1)] {
+            assert!(!accepted(value.clone()), "{value}");
+        }
+    }
 
     #[test]
     fn the_automatic_checkpoint_count_accepts_only_whole_numbers_that_fit_a_u32() {

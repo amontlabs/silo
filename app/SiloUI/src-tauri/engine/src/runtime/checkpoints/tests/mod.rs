@@ -2634,6 +2634,15 @@ impl Store {
             .map(|member| member.1.clone())
             .collect()
     }
+    fn calls_matching(&self, verb: &str) -> Vec<Vec<String>> {
+        self.calls
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|call| call[0] == verb)
+            .cloned()
+            .collect()
+    }
     fn removals(&self) -> Vec<String> {
         self.calls
             .lock()
@@ -3277,6 +3286,13 @@ fn deleting_a_computer_removes_members_only_it_used_and_keeps_what_a_fork_builds
         ]
     );
     assert_eq!(store.names(), [A, C]);
+    assert_eq!(
+        store.calls_matching("image"),
+        [vec!["image", "prune", "--yes", "--quiet"]],
+        "unused image data is pruned once, after the removals"
+    );
+    let calls = store.calls.lock().unwrap().clone();
+    assert_eq!(calls.last().unwrap()[0], "image");
 }
 
 #[test]
@@ -4232,6 +4248,272 @@ fn native_id(index: u64) -> String {
     format!("c{index:031x}")
 }
 
+fn before_keep_entry(id: &str, created_at: u64) -> Checkpoint {
+    Checkpoint {
+        created_at,
+        kind: "before-keep".into(),
+        ..entry(id, &format!("Before keep: {created_at}"), "manual")
+    }
+}
+
+/// Delegates to a store except that pruning image data fails.
+struct PruneFails<'a>(&'a Store);
+impl RuntimeRunner for PruneFails<'_> {
+    fn run(
+        &self,
+        paths: &RuntimePaths,
+        args: &[String],
+        timeout: Duration,
+    ) -> Result<CommandOutput, RuntimeError> {
+        if args.first().map(String::as_str) == Some("image") {
+            self.0.calls.lock().unwrap().push(args.to_vec());
+            return Err(RuntimeError::Unavailable("disk busy".into()));
+        }
+        self.0.run(paths, args, timeout)
+    }
+}
+
+fn trim_before_keep(store: &dyn RuntimeRunner, paths: &RuntimePaths, count: u32) {
+    let gate = super::super::operation_gate::OperationGate::new();
+    prune_before_keep_with(
+        &gate,
+        store,
+        paths,
+        ID,
+        &|| Ok(count),
+        silo_api::jobs::JobId::new("job:9").unwrap(),
+    );
+}
+
+#[test]
+fn deleting_a_checkpoint_prunes_unused_images_after_the_removal() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let paths = delete_fixture(&directory, vec![entry(A, "Selected", "manual")], None);
+    let store = Store::new(vec![("dev", None)]).with("dev", A, "snap_a", None);
+
+    delete_checkpoint_with(&store, &paths, ID, A).unwrap();
+
+    let calls = store.calls.lock().unwrap().clone();
+    let removed = calls.iter().position(|call| call[1] == "remove").unwrap();
+    let pruned = calls
+        .iter()
+        .position(|call| call == &["image", "prune", "--yes", "--quiet"])
+        .expect("image data is pruned");
+    assert!(removed < pruned);
+    assert!(load(&paths, ID).unwrap().checkpoints.is_empty());
+}
+
+#[test]
+fn a_prune_failure_does_not_fail_the_deletion() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let paths = delete_fixture(&directory, vec![entry(A, "Selected", "manual")], None);
+    let store = Store::new(vec![("dev", None)]).with("dev", A, "snap_a", None);
+
+    delete_checkpoint_with(&PruneFails(&store), &paths, ID, A).unwrap();
+
+    assert!(store.names().is_empty());
+    assert!(load(&paths, ID).unwrap().checkpoints.is_empty());
+    assert_eq!(store.calls_matching("image").len(), 1);
+}
+
+#[test]
+fn nothing_is_pruned_when_no_computer_is_configured() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let paths = delete_fixture(&directory, Vec::new(), None);
+    let store = Store::new(Vec::new());
+
+    prune_unused_images(&store, &paths);
+    assert_eq!(store.calls_matching("image").len(), 1);
+
+    write_metadata(
+        &paths.metadata,
+        &ComputerConfigurationRequest {
+            schema_version: 1,
+            computers: Vec::new(),
+        },
+    )
+    .unwrap();
+    prune_unused_images(&store, &paths);
+    assert_eq!(
+        store.calls_matching("image").len(),
+        1,
+        "the pinned VM image would be dropped with no computer using it"
+    );
+}
+
+#[test]
+fn a_kept_checkpoint_is_not_followed_by_a_prune() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let paths = delete_fixture(
+        &directory,
+        vec![entry(B, "Later", "manual"), entry(A, "Base", "manual")],
+        None,
+    );
+    let store = Store::new(vec![("dev", None)])
+        .with("dev", A, "snap_a", None)
+        .with("dev", B, "snap_b", Some("snap_a"));
+
+    delete_checkpoint_with(&store, &paths, ID, A).unwrap_err();
+
+    assert_eq!(store.names(), [A, B]);
+    assert!(store.calls_matching("image").is_empty());
+}
+
+#[test]
+fn before_keep_retention_removes_a_chain_leaf_to_root_and_prunes_once() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let mut entries: Vec<Checkpoint> = (1..=3)
+        .map(|n| before_keep_entry(&native_id(n), n * 10))
+        .collect();
+    // Newer records outside the chain stay; the newest before-keep one is the retained one.
+    entries.push(entry(&native_id(9), "Mine", "manual"));
+    entries.push(before_keep_entry(&native_id(8), 80));
+    let paths = delete_fixture(&directory, entries, None);
+    let store = Store::new(vec![("dev", None)])
+        .with("dev", &native_id(1), "snap_1", None)
+        .with("dev", &native_id(2), "snap_2", Some("snap_1"))
+        .with("dev", &native_id(3), "snap_3", Some("snap_2"))
+        .with("dev", &native_id(9), "snap_9", None)
+        .with("dev", &native_id(8), "snap_8", None);
+    trim_before_keep(&store, &paths, 1);
+
+    assert_eq!(
+        store.removals(),
+        [
+            format!("dev:{}", native_id(3)),
+            format!("dev:{}", native_id(2)),
+            format!("dev:{}", native_id(1)),
+        ],
+        "newest first, so each removal passes the children guard"
+    );
+    assert!(!store
+        .calls
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|call| call.iter().any(|arg| arg == "--force")));
+    assert_eq!(store.calls_matching("image").len(), 1);
+    let left: Vec<_> = load(&paths, ID)
+        .unwrap()
+        .checkpoints
+        .iter()
+        .map(|checkpoint| checkpoint.id.clone())
+        .collect();
+    assert_eq!(left, [native_id(9), native_id(8)]);
+}
+
+#[test]
+fn before_keep_retention_keeps_a_base_a_retained_checkpoint_builds_on() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let entries: Vec<Checkpoint> = (1..=3)
+        .map(|n| before_keep_entry(&native_id(n), n * 10))
+        .collect();
+    let paths = delete_fixture(&directory, entries, None);
+    // 3 is retained and builds on 2, which builds on 1: both candidates are bases.
+    let store = Store::new(vec![("dev", None)])
+        .with("dev", &native_id(1), "snap_1", None)
+        .with("dev", &native_id(2), "snap_2", Some("snap_1"))
+        .with("dev", &native_id(3), "snap_3", Some("snap_2"));
+
+    trim_before_keep(&store, &paths, 1);
+
+    assert!(store.removals().is_empty());
+    assert_eq!(store.names().len(), 3);
+    assert_eq!(load(&paths, ID).unwrap().checkpoints.len(), 3);
+    assert!(store.calls_matching("image").is_empty());
+}
+
+#[test]
+fn before_keep_retention_trims_only_its_own_kind_beyond_the_newest_count() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let mut entries: Vec<Checkpoint> = (1..=7)
+        .map(|n| before_keep_entry(&native_id(n), n * 10))
+        .collect();
+    entries.push(entry(&native_id(90), "Mine", "manual"));
+    entries.push(automatic_entry(&native_id(91), 5));
+    let paths = delete_fixture(&directory, entries, None);
+    let mut store = Store::new(vec![("dev", None)]);
+    for n in [90, 91, 1, 2, 3, 4, 5, 6, 7] {
+        store = store.with("dev", &native_id(n), &format!("snap_{n}"), None);
+    }
+
+    trim_before_keep(&store, &paths, 5);
+
+    let mut removed = store.removals();
+    removed.sort();
+    assert_eq!(
+        removed,
+        [
+            format!("dev:{}", native_id(1)),
+            format!("dev:{}", native_id(2))
+        ]
+    );
+    let record = load(&paths, ID).unwrap();
+    let mut left: Vec<_> = record.checkpoints.iter().map(|c| c.id.clone()).collect();
+    left.sort();
+    assert_eq!(
+        left,
+        [3, 4, 5, 6, 7, 90, 91].map(native_id),
+        "manual and automatic records are never trimmed"
+    );
+}
+
+#[test]
+fn a_before_keep_count_of_zero_keeps_every_checkpoint() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let entries: Vec<Checkpoint> = (1..=3)
+        .map(|n| before_keep_entry(&native_id(n), n * 10))
+        .collect();
+    let paths = delete_fixture(&directory, entries, None);
+    let mut store = Store::new(vec![("dev", None)]);
+    for n in 1..=3 {
+        store = store.with("dev", &native_id(n), &format!("snap_{n}"), None);
+    }
+
+    trim_before_keep(&store, &paths, 0);
+
+    assert!(store.removals().is_empty());
+    assert_eq!(load(&paths, ID).unwrap().checkpoints.len(), 3);
+}
+
+#[test]
+fn a_before_keep_capture_persists_its_policy_kind_and_reaches_the_api() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let paths = delete_fixture(&directory, Vec::new(), None);
+    let store = Store::new(vec![("dev", None)]);
+
+    let captured = capture_with_kind(
+        &store,
+        &paths,
+        ID,
+        "Before keep",
+        "manual",
+        "before-keep",
+    )
+    .unwrap();
+
+    assert_eq!(load(&paths, ID).unwrap().checkpoints[0].kind, "before-keep");
+    assert_eq!(
+        api_checkpoint(captured).kind,
+        silo_api::methods::checkpoints::CheckpointKind::BeforeKeep
+    );
+    let kind: silo_api::methods::checkpoints::CheckpointKind =
+        serde_json::from_str("\"before-keep\"").unwrap();
+    assert_eq!(
+        serde_json::to_string(&kind).unwrap(),
+        "\"before-keep\""
+    );
+}
+
 #[test]
 fn an_automatic_capture_returns_its_record_and_persists_its_policy_kind() {
     let _test_state = crate::test_support::global_state();
@@ -4433,7 +4715,7 @@ fn retention_keeps_a_pinned_old_record_and_still_keeps_the_newest() {
         .map(|n| automatic_entry(&native_id(n), n * 10))
         .collect();
     let paths = delete_fixture(&directory, entries, None);
-    // Checkpoint 2 builds on checkpoint 1, so 1 cannot be removed without --force.
+    // Checkpoint 2 builds on checkpoint 1, so 1 can only go after 2.
     let store = Store::new(vec![("dev", None)])
         .with("dev", &native_id(1), "snap_1", None)
         .with("dev", &native_id(2), "snap_2", Some("snap_1"))
@@ -4457,10 +4739,15 @@ fn retention_keeps_a_pinned_old_record_and_still_keeps_the_newest() {
         .map(|c| c.id.clone())
         .collect();
     left.sort();
-    // 1 stays (pinned by its dependent), 2 is removed once it is the only blocker-free
-    // candidate, and 3 and 4 are the kept newest pair.
-    assert!(left.contains(&native_id(1)));
-    assert!(left.contains(&native_id(3)) && left.contains(&native_id(4)));
+    // 2 goes first and releases 1, which then goes too; 3 and 4 are the kept newest pair.
+    assert_eq!(left, [native_id(3), native_id(4)]);
+    assert_eq!(
+        store.removals(),
+        [
+            format!("dev:{}", native_id(2)),
+            format!("dev:{}", native_id(1))
+        ]
+    );
 }
 
 // MARK: Launch upgrade of the record layout

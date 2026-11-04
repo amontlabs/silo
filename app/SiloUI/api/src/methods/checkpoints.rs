@@ -163,6 +163,9 @@ pub enum CheckpointReason {
 pub enum CheckpointKind {
     Manual,
     Automatic,
+    // Taken before changes are applied to main; trimmed by its own retention count.
+    #[serde(rename = "before-keep")]
+    BeforeKeep,
 }
 
 wire_struct! {

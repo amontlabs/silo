@@ -13315,7 +13315,7 @@ exit 9
             };
             write_metadata(&paths.metadata, &previous).unwrap();
             let runner = StubRunner::successful_json(if removing {
-                vec![other_inspect.clone(), other_inspect, json!(null)]
+                vec![other_inspect.clone(), other_inspect, json!(null), json!(null)]
             } else {
                 vec![
                     json!([]),

@@ -187,6 +187,13 @@ pub struct SettingsValues {
     )]
     #[schemars(with = "u64")]
     pub automatic_checkpoint_retention_count: Option<u64>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_present"
+    )]
+    #[schemars(with = "u64")]
+    pub before_keep_checkpoint_retention_count: Option<u64>,
 }
 
 fn deserialize_present<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>

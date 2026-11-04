@@ -13,7 +13,7 @@ use std::{
     time::Duration,
 };
 
-static IMPORT_LOCK: Mutex<()> = Mutex::new(());
+pub(crate) static IMPORT_LOCK: Mutex<()> = Mutex::new(());
 const MAX_ARCHIVE_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 const MAX_UNPACKED_BYTES: u64 = 8 * 1024 * 1024 * 1024;
 const LOCK: &str = include_str!("../../../guest-image/image-lock.json");

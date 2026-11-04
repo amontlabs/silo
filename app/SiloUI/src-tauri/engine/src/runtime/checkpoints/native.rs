@@ -383,6 +383,37 @@ pub(crate) fn execute(
     failures
 }
 
+const PRUNE_TIMEOUT: Duration = Duration::from_secs(300);
+
+/// Gives back cached image data that no computer or saved snapshot uses, after a removal.
+/// The pinned MicroSandbox has no top-level `prune`: `msb image prune` drops image
+/// references, manifests, layers and their cache files that no sandbox and no indexed
+/// snapshot (retained checkpoints included) names, and it leaves snapshot artifacts alone;
+/// those go with `snapshot remove`. Pruning is skipped while no computer is configured,
+/// since the pinned VM image would then be unused and have to be imported again, and it
+/// holds the image import lock so a running import is not pruned between its load and first
+/// use. A failure is logged and never fails the removal that asked for it.
+pub(crate) fn prune_unused_images(runner: &dyn RuntimeRunner, paths: &RuntimePaths) {
+    if read_metadata(&paths.metadata).map_or(true, |metadata| metadata.computers.is_empty()) {
+        return;
+    }
+    let _import = super::super::guest_image::IMPORT_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Err(failure) = runner.run(
+        paths,
+        &[
+            "image".into(),
+            "prune".into(),
+            "--yes".into(),
+            "--quiet".into(),
+        ],
+        PRUNE_TIMEOUT,
+    ) {
+        eprintln!("Unused image data was kept: {failure}");
+    }
+}
+
 /// Members Silo created itself: checkpoint captures (`c` + 31 hex) and export captures.
 pub(crate) fn silo_member(key: &Key) -> bool {
     let (group, name) = key;
