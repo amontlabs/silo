@@ -200,7 +200,8 @@ impl Service {
         kind: Option<CheckpointKind>,
     ) -> Result<JobId, Failure> {
         let automatic = kind == Some(CheckpointKind::Automatic);
-        if kind == Some(CheckpointKind::BeforeKeep) && self.platform(computer_id)? == Platform::Macos
+        if kind == Some(CheckpointKind::BeforeKeep)
+            && self.platform(computer_id)? == Platform::Macos
         {
             return Err(Failure::new(
                 ErrorCode::Internal,

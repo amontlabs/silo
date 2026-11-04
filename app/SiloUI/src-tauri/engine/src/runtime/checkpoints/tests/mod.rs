@@ -3327,9 +3327,12 @@ fn a_snapshot_group_directory_with_other_content_or_members_is_kept() {
     let directory = tempfile::tempdir().unwrap();
     let (paths, group) = deleted_dev_with_group_files(&directory, &[".group.lock", "group.json"]);
     // A member another computer still needs stays, and so does its group.
-    let store = Store::new(Vec::new())
-        .with("dev", A, "snap_a", None)
-        .with("dev", "silo-backup-0-1-2", "snap_x", None);
+    let store = Store::new(Vec::new()).with("dev", A, "snap_a", None).with(
+        "dev",
+        "silo-backup-0-1-2",
+        "snap_x",
+        None,
+    );
     store.members.lock().unwrap().retain(|member| member.1 == A);
     save(
         &paths,
@@ -3358,7 +3361,10 @@ fn a_snapshot_group_directory_with_other_content_or_members_is_kept() {
     .unwrap();
     remove_deleted_snapshots(&store, &paths, ID, "dev").unwrap();
     assert_eq!(store.names(), [A]);
-    assert!(group.exists(), "a group with a member the fork needs is kept");
+    assert!(
+        group.exists(),
+        "a group with a member the fork needs is kept"
+    );
 }
 
 #[test]
@@ -3379,7 +3385,11 @@ fn the_launch_upgrade_moves_a_layout_two_history_to_layout_three() {
     let upgraded: serde_json::Value = serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();
     assert_eq!(upgraded["version"], 3);
     assert_eq!(upgraded["checkpoints"][1]["kind"], "automatic");
-    assert_eq!(upgrade_records(storage).unwrap(), 0, "a layout-three file is left alone");
+    assert_eq!(
+        upgrade_records(storage).unwrap(),
+        0,
+        "a layout-three file is left alone"
+    );
     let mut with_before_keep = Record::default();
     with_before_keep
         .checkpoints
@@ -3387,7 +3397,10 @@ fn the_launch_upgrade_moves_a_layout_two_history_to_layout_three() {
     with_before_keep.version = RECORD_VERSION;
     validate(&with_before_keep).unwrap();
     with_before_keep.version = 2;
-    assert!(validate(&with_before_keep).is_err(), "an old layout is refused");
+    assert!(
+        validate(&with_before_keep).is_err(),
+        "an old layout is refused"
+    );
 }
 
 #[test]
@@ -4489,15 +4502,8 @@ fn a_before_keep_capture_persists_its_policy_kind_and_reaches_the_api() {
     let paths = delete_fixture(&directory, Vec::new(), None);
     let store = Store::new(vec![("dev", None)]);
 
-    let captured = capture_with_kind(
-        &store,
-        &paths,
-        ID,
-        "Before keep",
-        "manual",
-        "before-keep",
-    )
-    .unwrap();
+    let captured =
+        capture_with_kind(&store, &paths, ID, "Before keep", "manual", "before-keep").unwrap();
 
     assert_eq!(load(&paths, ID).unwrap().checkpoints[0].kind, "before-keep");
     assert_eq!(
@@ -4506,10 +4512,7 @@ fn a_before_keep_capture_persists_its_policy_kind_and_reaches_the_api() {
     );
     let kind: silo_api::methods::checkpoints::CheckpointKind =
         serde_json::from_str("\"before-keep\"").unwrap();
-    assert_eq!(
-        serde_json::to_string(&kind).unwrap(),
-        "\"before-keep\""
-    );
+    assert_eq!(serde_json::to_string(&kind).unwrap(), "\"before-keep\"");
 }
 
 #[test]
