@@ -32,7 +32,17 @@ Tracker: Linear project "Silo v1: git for agent computers" (P-AMO-8).
 
 VM check: create and fork a Linux computer through `engine.sock` while status polls keep succeeding; disk returns after drop and checkpoint removal; the newest retained checkpoint still restores.
 
+### Phase 0c: Silo app assessment (4 Nov, read-only)
+
+- **Builds and runs on the current engine:** likely, not yet proven here. The app is a thin client of `silod` over `engine.sock`; `engine_boundary_tests.rs` forbids in-process engine calls and method-name literals, so engine API changes break the app at compile time (macOS CI `cargo nextest --workspace` compiles `src-tauri`). The protocol is a single number (`api/src/transport.rs:60`, client offers exactly 7 in `client/src/session.rs:36-42`), so app and engine ship together. CI never packages or launches the app; the baseline `desktop:build:debug` is the evidence for that.
+- **How a screen calls the engine:** no router; `application-app.tsx` switches pages. React store → `src/desktop/commands.ts` → `#[tauri::command]` in `src-tauri/src/commands/` → `engine_client` → typed `silo_api::requests::*` → `run_job`. Each new command needs a `build.rs` manifest entry, handler registration, a `FakeEngine` forwarding test and a permissions test. `checkpoint-panel.tsx` and `computer-detail-page.tsx` are reusable.
+- **Phase 7 cost:** about 7 forwarding commands, 3 new pages or components (review/keep/throw away with a new diff view is the largest; steps reuses the checkpoint panel; pending changes needs a per-device fan-out with "unavailable" rows), 3 to 4 fixtures and their tests, plus contract JSON updates.
+- **Risk to the backend:** medium-low if phase 7 stays deferred and additive. Shared churn points: `api/src/methods/*`, `schema.rs`, `src/contracts/silo.ts`, `src/test/contracts/*.json`.
+- **Recommendation:** bring the app back in phase 7; touch it before then only to keep CI green. Re-check at phase 7: the debug bundle builds and the Dev app connects at the then-current protocol; frontend checks and the command manifest pass; the review, step and tree methods are stable with typed constructors; the state shape is frozen for the phase; wording follows `docs/SiloUI-VOCABULARY.md` and `UI-PATTERNS.md`.
+
 ## Decisions
+
+- **4 Nov, merging to main:** main has a GitHub ruleset that refuses direct pushes (pull request plus 7 required status checks). Each phase lands as a squash-merged PR from `claude/project-thread-e72ch6` once CI is green and reviews pass, per the project rules. This replaces "commit directly to main".
 
 ## Spec changes
 
