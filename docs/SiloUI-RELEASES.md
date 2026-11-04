@@ -305,12 +305,10 @@ ad hoc signed disposable binaries. CI does not run the ignored live computer tes
 Pull requests that change only `website/`, `demo/`, `docs/`, `artifacts/`,
 `assets/`, top-level Markdown or frontend sources under `app/SiloUI/src/`
 (except the contract fixtures and reserved secret names that Rust tests read)
-skip the macOS Rust and Linux engine jobs. Pull requests that also leave
-silo-engine's crates (`src-tauri/engine`, `api`, `host`) and their inputs
-untouched skip the engine suite on both runners. `scripts/ci-native-changes.py`
-decides, `scripts/test_ci_native_changes.py` checks that no Rust source in each
-scope names a skipped path, and any other path, a failed check or a push to
-`main` runs everything.
+skip the macOS Rust and Linux engine jobs. `scripts/ci-native-changes.py`
+decides, `scripts/test_ci_native_changes.py` checks that no Rust source,
+manifest or Tauri config names a skipped path, and any other path, a failed
+check or a push to `main` runs them.
 The link check includes first-party source documentation, guest notices and
 changesets. A coverage regression compares its globs with tracked Markdown,
 excluding documentation in the partial upstream vendor tree.
