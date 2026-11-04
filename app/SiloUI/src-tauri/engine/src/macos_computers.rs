@@ -3529,6 +3529,11 @@ pub fn repair_published_ports(app: &MacosContext) -> Result<(), String> {
     ports::repair_running(app)
 }
 
+/// Whether a macOS computer publishes a website, from saved settings alone.
+pub fn has_http_forwards(app: &MacosContext) -> bool {
+    ports::has_http_forwards(app)
+}
+
 /// Observe and repair macOS guest listeners and their loopback SSH tunnels.
 pub fn read_network_state(
     app: &MacosContext,

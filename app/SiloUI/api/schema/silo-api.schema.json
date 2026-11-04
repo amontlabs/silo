@@ -6657,6 +6657,7 @@
         "network.publish",
         "network.state",
         "network.unpublish",
+        "network.urls",
         "notifications.list",
         "operations.cancel",
         "operations.job.acknowledge",
@@ -8539,6 +8540,22 @@
             },
             "params": {
               "$ref": "#/$defs/NetworkUnpublishParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "network.urls",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/ComputerTargetParams"
             }
           },
           "required": [
@@ -10895,6 +10912,22 @@
         {
           "properties": {
             "method": {
+              "const": "network.urls",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/NetworkUrlsResult"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
               "const": "notifications.list",
               "type": "string"
             },
@@ -11828,6 +11861,46 @@
       "required": [
         "computerId",
         "port"
+      ],
+      "type": "object"
+    },
+    "NetworkUrl": {
+      "properties": {
+        "host": {
+          "type": "string"
+        },
+        "port": {
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "port",
+        "host",
+        "url"
+      ],
+      "type": "object"
+    },
+    "NetworkUrlsResult": {
+      "properties": {
+        "computerId": {
+          "type": "string"
+        },
+        "urls": {
+          "items": {
+            "$ref": "#/$defs/NetworkUrl"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "computerId",
+        "urls"
       ],
       "type": "object"
     },
@@ -14645,6 +14718,12 @@
       "name": "network.unpublish",
       "paramsType": "network::NetworkUnpublishParams",
       "resultType": "network::NetworkState"
+    },
+    {
+      "kind": "query",
+      "name": "network.urls",
+      "paramsType": "network::NetworkTargetParams",
+      "resultType": "network::NetworkUrlsResult"
     },
     {
       "kind": "query",

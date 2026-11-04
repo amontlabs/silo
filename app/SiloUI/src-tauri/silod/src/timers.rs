@@ -188,6 +188,11 @@ impl Upkeep for SilodUpkeep {
             let _ = silo_engine::network::repair_published_ports(&paths);
         }
         let _ = silo_engine::macos_computers::repair_published_ports(&host.macos_context());
+        let macos = host.macos_context();
+        let websites = silo_engine::runtime::runtime_paths(&host)
+            .is_ok_and(|paths| silo_engine::network::has_http_forwards(&paths))
+            || silo_engine::macos_computers::has_http_forwards(&macos);
+        crate::methods::access::refresh_url_routes(websites);
     }
 
     fn probe_devices(&self) {
