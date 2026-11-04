@@ -11,8 +11,10 @@ updates:
     groups:
       github-actions:
         patterns: ['*']
-  # npm and Cargo minor and patch updates are grouped into weekly pull requests;
-  # major and security updates open on their own. Tauri stays on manual minor
+  # npm and Cargo updates are grouped into at most three weekly pull requests
+  # per ecosystem: minor and patch, major, and security. Majors stay apart so one
+  # breaking upgrade cannot hold back the rest; Dependabot counts a 0.x minor bump
+  # (sha2 0.10 -> 0.11) as major. Tauri stays on manual minor
   # upgrades because its CLI rejects JS and Rust packages on different minors.
   # The artifacts/ film projects and src-tauri/macos-gateway are left out on
   # purpose: they are pinned to the recordings and the bundled runtime.
@@ -25,7 +27,14 @@ updates:
       interval: weekly
     groups:
       npm:
+        applies-to: version-updates
         update-types: [minor, patch]
+      npm-major:
+        applies-to: version-updates
+        update-types: [major]
+      npm-security:
+        applies-to: security-updates
+        patterns: ['*']
     ignore:
       - dependency-name: '@tauri-apps/*'
         update-types: [version-update:semver-minor, version-update:semver-major]
@@ -37,7 +46,14 @@ updates:
       interval: weekly
     groups:
       cargo:
+        applies-to: version-updates
         update-types: [minor, patch]
+      cargo-major:
+        applies-to: version-updates
+        update-types: [major]
+      cargo-security:
+        applies-to: security-updates
+        patterns: ['*']
     ignore:
       - dependency-name: 'tauri*'
         update-types: [version-update:semver-minor, version-update:semver-major]
