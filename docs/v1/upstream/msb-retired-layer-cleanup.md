@@ -11,7 +11,7 @@ costs the merged size and returns nothing.
 The cleanup that runs after a compaction only removed paths under the `runtime/` directory. The
 root-disk layers live one level up, in the sandbox directory, so none matched. It now covers the
 sandbox directory, and skips every layer of the new chain and the launch base (the base is still
-needed to start the sandbox).
+needed to start the sandbox). A failed unlink is now logged instead of ignored.
 
 ## Why
 
@@ -22,7 +22,10 @@ changes.
 
 ## Test plan
 
-- Unit test: a chain whose layers sit beside `runtime/` is compacted; retired layers are gone, the
-  base, the new chain and a snapshot's hard link remain, and the chain still loads.
+- Unit tests: a chain whose layers sit beside `runtime/` is compacted; retired layers are gone, the
+  base, the new chain and a snapshot's hard link remain, and the chain still loads. A second
+  compaction unlinks the first merged layer under `runtime/.compact-*`. A restored child keeps its
+  nominal launch base (which need not exist), and the start-time base check still passes after
+  cleanup.
 - Live run on a throwaway home: compact, snapshot, remove the older snapshots; the sandbox directory
   lists only `upper.ext4`.

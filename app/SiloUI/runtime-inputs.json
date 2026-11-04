@@ -142,11 +142,11 @@
     },
     {
       "path": "patches/microsandbox-reclaim-capture-dirs-0.7.6.patch",
-      "sha256": "3d1f09d06a45b97344316191fba6d58400b93c4fb841c88ee4282f464b2755ed"
+      "sha256": "f86389dd76ad9d247e5dc67a3693d123720aa49e19edb3b74d0b6ce4d4597428"
     },
     {
       "path": "patches/microsandbox-retired-layer-cleanup-0.7.6.patch",
-      "sha256": "1d1a98aff72b11ace48df98cae3b2a48e21bfc2a824f0cbb241b34f45d218c06"
+      "sha256": "61a0ebb0c2f6f85a0a05cb3f1facea7e12087e7577ea2ecd56c0099d3066e18e"
     }
   ]
 }

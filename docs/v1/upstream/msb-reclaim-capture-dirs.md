@@ -9,11 +9,15 @@ snapshot.
 
 ## What changed
 
-- `snapshot create --full` (installed snapshot and `-o` archive) removes the capture directory
-  after the snapshot or archive is published. If publication fails, the directory is removed too,
-  unless the source also failed to resume: then the recovery error still points at the directory.
+- `snapshot create --full` (installed snapshot and `-o` archive) takes a lock file inside the
+  capture directory and removes the directory after the snapshot or archive is published. It also
+  removes it when validating or publishing the capture fails. It only adopts the directory its own
+  capture id names, never a path the runtime returned for something else.
 - When a sandbox runtime starts it removes the directories an earlier process left behind, which
-  reclaims captures of a crashed runtime or client. This runs before the runtime accepts captures.
+  reclaims captures of a crashed runtime or client. This runs before the runtime accepts captures
+  and skips a directory whose lock another process holds (a client still publishing from it).
+- A capture whose source failed to resume keeps its directory, named in the recovery error, until
+  the runtime next starts and sweeps it.
 - Disk-only snapshots already removed their directory; they are unchanged.
 
 Nothing else reads these directories: restore and export read the snapshot, and memory objects
@@ -28,8 +32,9 @@ none, and (together with the compaction cleanup fix) removing the old snapshots 
 ## Test plan
 
 - Unit tests: an installed snapshot, a failed installed publication and an archive each leave no
-  capture directory; a capture with a failed source resume keeps it; a runtime start removes stale
-  directories and drops the layer link count.
+  capture directory; a capture with a failed source resume keeps it; the sweep removes stale
+  directories (dropping the layer link count), skips one whose lock is held, and runs in the
+  step that creates the capture root.
 - Live run on a throwaway home: five captures leave no directories, snapshots restore, and the
   restored sandbox has the data written before the capture.
 
