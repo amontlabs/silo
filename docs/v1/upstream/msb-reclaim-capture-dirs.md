@@ -32,3 +32,13 @@ none, and (together with the compaction cleanup fix) removing the old snapshots 
   directories and drops the layer link count.
 - Live run on a throwaway home: five captures leave no directories, snapshots restore, and the
   restored sandbox has the data written before the capture.
+
+## Note
+
+A related idea, linking a sealed layer instead of cloning it when its header already names the
+published predecessor, was tried and dropped: no live layer header ever matches, and on APFS all
+50 traced copies were `clonefile` clones.
+
+A garbage collector for `runtime/checkpoint-store` was prototyped and dropped: the next
+incremental capture links every object of the previous manifest, which still points into old packs,
+so it removed only device-state objects (0.1 to 0.3 MiB per capture).

@@ -1042,10 +1042,18 @@ Three separate things kept the disk:
 
 - The per-capture directory under `runtime/checkpoints/` (fixed by `reclaim-capture-dirs`).
 - The retired layers of a compacted root disk (fixed by `retired-layer-cleanup`).
-- Memory objects. `runtime/checkpoint-store` keeps every memory object of every capture for the
-  computer's life (about 1.2 GiB after six captures of a 2 GiB computer) and nothing here changes
-  that. A snapshot that is the computer's newest also holds its whole disk closure, so the disk of
-  older layers returns only after every snapshot that contains them is gone.
+- Memory objects, which a garbage collector cannot return. Snapshots do not reference
+  `runtime/checkpoint-store` by digest: publishing hard-links (or copies) each object into the
+  snapshot's own `checkpoint/objects`, so removing a store entry never changes a snapshot. But the
+  next incremental capture links every object of the previous memory manifest, and an
+  incremental manifest keeps pointing into older 32 MiB packs for the regions that did not change.
+  A collector that keeps what the next capture needs therefore keeps all of them (a prototype
+  ran after each capture and at runtime start: it removed only 0.1 to 0.3 MiB of device-state
+  objects per capture, and the store still grew from 303 to 1312 MiB over six captures of a
+  2 GiB computer). The store is bounded by the guest's dirtied RAM, not unbounded, and shrinks to
+  one `Full` capture after a restart or restore. Freeing more needs repacking, which changes the
+  memory format. A snapshot that is the computer's newest also holds its whole disk closure, so
+  the disk of older layers returns only after every snapshot that contains them is gone.
 
 The first capture after a restore costs far more than the next one (575 MiB against 118 MiB in
 the same run) because a restored computer has no incremental memory baseline and writes a `Full`
@@ -1054,6 +1062,6 @@ layer copies of a traced run used `clonefile` on APFS and none fell back to a sp
 `restore --cow-mem` does not avoid it (801 MiB emitted). A third patch that links a sealed layer
 instead of cloning it when its header already names the published predecessor was written and
 tested, but no header in a live chain ever does (journal layers name their journal predecessor),
-so it is not part of the pinned set; it is kept in `docs/v1/upstream/`.
+so it was dropped.
 
 Raw output: `docs/v1/evidence/phase-0/raw/msb-patch-probe.txt` (not tracked).
