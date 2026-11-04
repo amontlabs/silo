@@ -3,6 +3,11 @@
 > Historical procedures for previously published Linux host packages. Linux
 > host packages no longer receive engine updates; current Silo releases contain
 > only the macOS host app. Linux guest computers on Mac hosts remain supported.
+>
+> Retired on 2026-11-04, after v0.12.0 shipped without Linux packages: the APT
+> publishing workflow and the Debian packaging scripts were removed, so the
+> repository index is no longer re-signed and expires. The sections below
+> describe the removed tooling.
 
 Silo's Debian installer registers a signed APT source, so Ubuntu/Xubuntu can
 install subsequent releases through Software Updater. AppImage remains an
