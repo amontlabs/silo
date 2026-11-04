@@ -5112,7 +5112,11 @@ fn silos_own_merge_timeout_does_not_start_another_wait() {
         .all(|call| !(call[0] == "modify" && call.contains(&"--dry-run".into()))));
     drop(calls);
     assert_eq!(
-        load(&paths, ID).unwrap().checkpoint_operation.unwrap().status,
+        load(&paths, ID)
+            .unwrap()
+            .checkpoint_operation
+            .unwrap()
+            .status,
         "failed"
     );
 }
@@ -5145,7 +5149,11 @@ fn a_failed_pass_leaves_the_next_pass_free_to_merge_and_remove() {
     let store = store.slow_compaction(1, 1);
     trim_automatic(&store, &paths, 2);
     assert_eq!(
-        load(&paths, ID).unwrap().checkpoint_operation.unwrap().status,
+        load(&paths, ID)
+            .unwrap()
+            .checkpoint_operation
+            .unwrap()
+            .status,
         "failed"
     );
 

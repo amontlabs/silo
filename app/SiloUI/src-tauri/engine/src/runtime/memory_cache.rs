@@ -77,7 +77,10 @@ fn try_lock_exclusive(file: &File) -> io::Result<bool> {
 /// restore is building it. Returns whether it was removed.
 fn remove_unpinned(path: &Path) -> io::Result<bool> {
     let build_lock = {
-        let name = path.file_name().and_then(|name| name.to_str()).unwrap_or("");
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("");
         let stem = name.strip_suffix(ENTRY_SUFFIX).unwrap_or(name);
         path.with_file_name(format!("{stem}{BUILD_LOCK_SUFFIX}"))
     };
