@@ -256,8 +256,9 @@ chain and capture staging still carry their layers. The two Silo MicroSandbox pa
 807 MiB.
 
 When an automatic or before-keep capture leaves more than the kind's count (the
-retention settings; 0 keeps all), the engine runs one pass under the device
-checkpoint-delete lane (`runtime/checkpoints/reclaim.rs`):
+retention settings; 0 keeps all), the engine runs one pass as its own job
+(`checkpoints.reclaim`) on that computer's lane, after the capture job has reported
+its result (`runtime/checkpoints/reclaim.rs`):
 
 1. Candidates are the kind's records beyond the newest N, oldest first. Never a
    candidate: the newest record of any kind, a manual (user-named) record, a record
@@ -265,24 +266,32 @@ checkpoint-delete lane (`runtime/checkpoints/reclaim.rs`):
    builds on (its latest state or restore source), or one with any descendant that is
    not another non-manual checkpoint of the same computer (an export capture, a fork's
    member, a manual checkpoint). Records of the other kind in the chain are untouched.
-2. `K` is the number of layers older than the oldest checkpoint that stays. The
-   computer's position is the snapshot its next capture names as parent; the capture
-   `j` steps back along parent links sealed layer `total - 2 - j`, where `total` is
-   the per-disk layer count from `msb modify --compact --dry-run --format json`
-   (it includes the writable head, which is never merged). A second dry run with
-   `--layers K` must report `K` selected layers on the root disk. MicroSandbox needs
-   `K` of at least 2; below that the merge is skipped and the records are still
-   removed.
-3. `msb modify <computer> --compact --layers K` runs once, with the computer running
-   or stopped.
+2. `K` is the number of layers older than the oldest checkpoint that stays, per
+   disk. The computer's position is the snapshot in MicroSandbox's capture cursor
+   (`sandboxes/<computer>/snapshot-lineage.json`); the configuration's
+   `snapshot_parent` is only the creation or restore origin and is used only while
+   no cursor exists. The capture `j` steps back along parent links sealed layer
+   `total - 2 - j`, where `total` is the disk's layer count from
+   `msb modify --compact --dry-run --format json` (it includes the writable head,
+   which is never merged). Checkpoints whose index is below 2 sit inside an earlier
+   merge and cannot bound a new one, so an old named checkpoint limits a merge only
+   while it is still above the merged base. Each plan is confirmed with a dry run
+   (`--layers K`, with `--disk` when the disks' chains differ in length, which then
+   get their own K). MicroSandbox needs `K` of at least 2; below that the merge is
+   skipped and the records are still removed.
+3. `msb modify <computer> --compact --layers K` runs once per plan, with the computer
+   running or stopped.
 4. The candidates are removed oldest first with `snapshot remove --force` (the only
    path that passes `--force`; interactive Delete is unchanged and still refuses
    the latest state and any checkpoint with children), and the records are dropped.
 
-A failed merge removes nothing. The failure is stored as the computer's failed
-checkpoint operation ("Freeing checkpoint disk") and is cleared by the next successful
-reclaim, delete or capture. The engine does not retry within the pass; the next
-automatic or before-keep capture runs the next pass. MicroSandbox reports a failure
+A failed merge removes nothing. Every problem (an unreadable store or capture cursor, a
+plan the runtime disagrees with, a failed merge, a checkpoint that could not be removed)
+is stored as the computer's failed checkpoint operation ("Freeing checkpoint disk") and
+returned as the reclaim job's error; it is cleared by the next successful reclaim,
+delete or capture. Routine outcomes (a checkpoint something builds on stays, fewer than
+two layers to merge) are not reported. The engine does not retry within the pass; the
+next automatic or before-keep capture runs the next pass. MicroSandbox reports a failure
 after the compaction journal committed as "VM kept paused; restart follows per-disk
 journals", and the message then tells the user to restart the computer, which follows
 the journal. The engine does not resume or restart the computer itself.

@@ -5,11 +5,13 @@
 //! checkpoint that stays (`msb modify --compact --layers K`), then removes the trimmed
 //! checkpoints oldest first with `--force`.
 //!
-//! The merge and the removal are one unit: when the merge fails nothing is removed and the
-//! failure is recorded in the computer's checkpoint operation. It is attempted once per
-//! retention pass and never retried inside it; the next capture is the next attempt. A
-//! failure that leaves the paused computer on its compaction journal is resolved by
-//! restarting the computer, which follows the journal.
+//! The merge and the removal are one unit: when the merge fails nothing is removed. Every
+//! problem (an unreadable store, a failed merge, a checkpoint that could not be removed) is
+//! returned to the caller and stored as the computer's failed checkpoint operation. A pass
+//! never retries inside itself; the next capture starts the next pass. A failure that
+//! leaves the paused computer on its compaction journal is resolved by restarting the
+//! computer, which follows the journal. Routine outcomes (a checkpoint something builds
+//! on is kept, fewer than two layers to merge) are not problems.
 use super::*;
 
 const COMPACT_TIMEOUT: Duration = Duration::from_secs(15 * 60);
@@ -82,24 +84,39 @@ fn blocker(
     None
 }
 
-fn disk_plans(
-    runner: &dyn RuntimeRunner,
-    paths: &RuntimePaths,
+fn compact_args(
     computer: &str,
+    disk: Option<&str>,
     layers: Option<usize>,
-) -> Result<Vec<DiskPlan>, String> {
-    let mut args = vec![
-        "modify".into(),
-        computer.to_owned(),
-        "--compact".into(),
-        "--dry-run".into(),
-    ];
+    dry_run: bool,
+) -> Vec<String> {
+    let mut args = vec!["modify".into(), computer.to_owned(), "--compact".into()];
+    if dry_run {
+        args.push("--dry-run".into());
+    }
+    if let Some(disk) = disk {
+        args.extend(["--disk".into(), disk.to_owned()]);
+    }
     if let Some(layers) = layers {
         args.extend(["--layers".into(), layers.to_string()]);
     }
     args.extend(["--format".into(), "json".into()]);
+    args
+}
+
+fn disk_plans(
+    runner: &dyn RuntimeRunner,
+    paths: &RuntimePaths,
+    computer: &str,
+    disk: Option<&str>,
+    layers: Option<usize>,
+) -> Result<Vec<DiskPlan>, String> {
     let output = runner
-        .run(paths, &args, READ_TIMEOUT)
+        .run(
+            paths,
+            &compact_args(computer, disk, layers, true),
+            READ_TIMEOUT,
+        )
         .map_err(|failure| safe_activity_error(&failure))?;
     let unreadable = || "The runtime returned an unreadable compaction plan.".to_owned();
     let value: Value = serde_json::from_str(&output.stdout).map_err(|_| unreadable())?;
@@ -120,31 +137,71 @@ fn disk_plans(
     Ok(plans)
 }
 
-/// How many of the oldest sealed layers to merge so that every layer older than the oldest
-/// checkpoint that stays is folded into one, or `None` when there is nothing worth merging.
+/// The snapshot the computer's next capture names as parent. MicroSandbox's capture cursor
+/// (`snapshot-lineage.json`) holds the latest capture; the configuration's `snapshot_parent`
+/// is only where the computer was created or restored from, and is used only while no
+/// capture has written a cursor.
+fn computer_tip(
+    paths: &RuntimePaths,
+    computer: &str,
+    inspected: &InspectedSandbox,
+) -> Result<Option<String>, String> {
+    let cursor = paths
+        .home
+        .join("sandboxes")
+        .join(computer)
+        .join("snapshot-lineage.json");
+    match fs::symlink_metadata(&cursor) {
+        Ok(metadata) if metadata.is_file() && metadata.len() <= 4096 => {
+            let value: Value = fs::read(&cursor)
+                .ok()
+                .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+                .ok_or_else(|| "The computer's checkpoint lineage could not be read.".to_owned())?;
+            return match value.get("snapshot_id").and_then(Value::as_str) {
+                Some(id) => Ok(Some(id.to_owned())),
+                None => Err("The computer's checkpoint lineage is not in a known format.".into()),
+            };
+        }
+        Err(failure) if failure.kind() == std::io::ErrorKind::NotFound => {}
+        _ => return Err("The computer's checkpoint lineage could not be read.".into()),
+    }
+    Ok(inspected
+        .active_config
+        .iter()
+        .chain(std::iter::once(&inspected.config))
+        .find_map(|config| config.get("snapshot_parent").and_then(Value::as_str))
+        .map(str::to_owned))
+}
+
+/// One `msb modify --compact` call: every disk at once, or a single disk.
+struct Merge {
+    disk: Option<String>,
+    layers: usize,
+}
+
+/// The merges that fold every layer older than the oldest checkpoint that stays into one,
+/// per disk, or none when there is nothing worth merging.
 ///
 /// Each capture seals the computer's writable head into one layer and the newest capture
 /// is the layer just below the head, so the capture `j` steps back from the computer's
 /// current position sealed layer `total - 2 - j` (layer 0 is the oldest, and a merged
-/// prefix counts as layer 0). `total` is the layer count the runtime reports, which
-/// includes the head. MicroSandbox merges at least two layers and never the head.
-fn merge_layers(
+/// prefix counts as layer 0). `total` is the layer count the runtime reports for the disk,
+/// which includes the head. MicroSandbox merges at least two layers and never the head,
+/// so a checkpoint that sits at index 0 or 1 cannot bound a merge: an old named checkpoint
+/// stops being the limit once the layers below it are folded. Disks whose chains differ
+/// in length get their own count, and each plan is confirmed with a dry run.
+fn merges(
     runner: &dyn RuntimeRunner,
     paths: &RuntimePaths,
     computer: &str,
     survey: &Survey,
     group: &str,
     removed: &HashSet<&str>,
-) -> Result<Option<usize>, String> {
+) -> Result<Vec<Merge>, String> {
     let inspected = inspect_computer(runner, paths, computer)
         .map_err(|failure| safe_activity_error(&failure))?;
-    let Some(tip) = inspected
-        .active_config
-        .iter()
-        .chain(std::iter::once(&inspected.config))
-        .find_map(|config| config.get("snapshot_parent").and_then(Value::as_str))
-    else {
-        return Ok(None);
+    let Some(tip) = computer_tip(paths, computer, &inspected)? else {
+        return Ok(Vec::new());
     };
     let members: HashMap<&str, &native::Member> = survey
         .inventory
@@ -153,7 +210,7 @@ fn merge_layers(
         .map(|member| (member.snapshot_id.as_str(), member))
         .collect();
     let mut chain: Vec<&str> = Vec::new();
-    let mut next = Some(tip);
+    let mut next = Some(tip.as_str());
     while let Some(id) = next {
         let Some(member) = members.get(id) else { break };
         if chain.contains(&id) {
@@ -162,33 +219,88 @@ fn merge_layers(
         chain.push(id);
         next = member.parent_digest.as_deref();
     }
-    let Some(oldest_staying) = chain.iter().rposition(|id| !removed.contains(id)) else {
-        return Ok(None);
+    let overview = disk_plans(runner, paths, computer, None, None)?;
+    let per_disk: Vec<(&DiskPlan, Option<usize>)> = overview
+        .iter()
+        .map(|disk| {
+            let oldest = chain
+                .iter()
+                .enumerate()
+                .filter(|(_, id)| !removed.contains(*id))
+                .filter_map(|(back, _)| {
+                    let sealed = disk.input_layers as isize - 2 - back as isize;
+                    (sealed >= 2).then_some(sealed as usize)
+                })
+                .min();
+            (disk, oldest)
+        })
+        .collect();
+    let uniform = per_disk.iter().all(|(_, layers)| *layers == per_disk[0].1);
+    let steps: Vec<Merge> = if uniform {
+        per_disk[0]
+            .1
+            .map(|layers| Merge { disk: None, layers })
+            .into_iter()
+            .collect()
+    } else {
+        per_disk
+            .iter()
+            .filter_map(|(disk, layers)| {
+                layers.map(|layers| Merge {
+                    disk: Some(disk.guest.clone()),
+                    layers,
+                })
+            })
+            .collect()
     };
-    let overview = disk_plans(runner, paths, computer, None)?;
-    let total = overview
-        .iter()
-        .map(|disk| disk.input_layers)
-        .min()
-        .unwrap_or(0);
-    let sealed_at = total as isize - 2 - oldest_staying as isize;
-    if sealed_at < 2 || sealed_at as usize >= total {
-        return Ok(None);
+    for step in &steps {
+        let confirmed = disk_plans(
+            runner,
+            paths,
+            computer,
+            step.disk.as_deref(),
+            Some(step.layers),
+        )?;
+        if confirmed
+            .iter()
+            .any(|disk| disk.selected_layers != step.layers)
+        {
+            return Err(format!(
+                "The runtime would merge a different number of layers than the {} Silo planned.",
+                step.layers
+            ));
+        }
     }
-    let layers = sealed_at as usize;
-    let confirmed = disk_plans(runner, paths, computer, Some(layers))?;
-    let root = confirmed
-        .iter()
-        .find(|disk| disk.guest == "/")
-        .or_else(|| confirmed.first());
-    if root.is_none_or(|disk| disk.selected_layers != layers) {
-        return Err(format!(
-            "The runtime would merge a different number of layers than the {layers} Silo planned."
-        ));
-    }
-    Ok(Some(layers))
+    Ok(steps)
 }
 
+fn run_merge(
+    runner: &dyn RuntimeRunner,
+    paths: &RuntimePaths,
+    computer: &str,
+    step: &Merge,
+) -> Result<(), String> {
+    runner
+        .run(
+            paths,
+            &compact_args(computer, step.disk.as_deref(), Some(step.layers), false),
+            COMPACT_TIMEOUT,
+        )
+        .map(|_| ())
+        .map_err(|failure| {
+            let detail = safe_activity_error(&failure);
+            if detail.contains("paused") {
+                format!("{detail} Restart {computer} to finish the merge.")
+            } else {
+                detail
+            }
+        })
+}
+
+/// Stores `message` as the computer's failed checkpoint operation. The caller holds the
+/// computer's lane, so an operation still marked running is one a crash left behind and
+/// belongs to recovery; it is kept, and the message reaches the caller through the
+/// returned error and its job instead.
 fn record_failure(paths: &RuntimePaths, computer_id: &str, message: &str) {
     let Ok(mut record) = load(paths, computer_id) else {
         return;
@@ -210,10 +322,23 @@ fn record_failure(paths: &RuntimePaths, computer_id: &str, message: &str) {
 }
 
 /// Removes the candidate checkpoints (oldest first) that only the computer's own
-/// automatic checkpoints build on, after merging the layers they held. The caller holds the
-/// device lane. Returns the failure of the merge or of reading the store; a candidate that
-/// cannot go is kept and logged.
+/// automatic checkpoints build on, after merging the layers they held. The caller holds
+/// the computer's lane. Any problem is recorded in the computer's checkpoint operation and
+/// returned; a candidate that cannot go is kept.
 pub(super) fn reclaim(
+    runner: &dyn RuntimeRunner,
+    paths: &RuntimePaths,
+    computer_id: &str,
+    candidates: &[String],
+) -> Result<(), String> {
+    let outcome = reclaim_inner(runner, paths, computer_id, candidates);
+    if let Err(message) = &outcome {
+        record_failure(paths, computer_id, message);
+    }
+    outcome
+}
+
+fn reclaim_inner(
     runner: &dyn RuntimeRunner,
     paths: &RuntimePaths,
     computer_id: &str,
@@ -229,7 +354,12 @@ pub(super) fn reclaim(
     {
         return Ok(());
     }
-    let survey = survey(runner, paths).map_err(|failure| safe_activity_error(&failure))?;
+    let survey = survey(runner, paths).map_err(|failure| {
+        format!(
+            "Older checkpoints were kept; the checkpoint store could not be read. {}",
+            safe_activity_error(&failure)
+        )
+    })?;
     let group = record
         .snapshot_group
         .clone()
@@ -287,37 +417,15 @@ pub(super) fn reclaim(
         .iter()
         .filter_map(|(_, member)| member.as_ref().map(|member| member.snapshot_id.as_str()))
         .collect();
-    let merged =
-        merge_layers(runner, paths, computer, &survey, &group, &removed).and_then(|layers| {
-            let Some(layers) = layers else { return Ok(()) };
-            runner
-                .run(
-                    paths,
-                    &[
-                        "modify".into(),
-                        computer.to_owned(),
-                        "--compact".into(),
-                        "--layers".into(),
-                        layers.to_string(),
-                        "--format".into(),
-                        "json".into(),
-                    ],
-                    COMPACT_TIMEOUT,
-                )
-                .map(|_| ())
-                .map_err(|failure| {
-                    let detail = safe_activity_error(&failure);
-                    if detail.contains("paused") {
-                        format!("{detail} Restart {computer} to finish the merge.")
-                    } else {
-                        detail
-                    }
-                })
-        });
+    let merged = merges(runner, paths, computer, &survey, &group, &removed).and_then(|steps| {
+        steps
+            .iter()
+            .try_for_each(|step| run_merge(runner, paths, computer, step))
+    });
     if let Err(detail) = merged {
-        let message = format!("Older checkpoints were kept; their disk was not freed. {detail}");
-        record_failure(paths, computer_id, &message);
-        return Err(message);
+        return Err(format!(
+            "Older checkpoints were kept; their disk was not freed. {detail}"
+        ));
     }
     let order: Vec<native::Member> = doomed
         .iter()
@@ -328,12 +436,6 @@ pub(super) fn reclaim(
         .iter()
         .map(|(member, _)| member.snapshot_id.as_str())
         .collect();
-    for (_, failure) in &failures {
-        eprintln!(
-            "Silo kept an older checkpoint: {}",
-            safe_activity_error(failure)
-        );
-    }
     let gone: HashSet<String> = doomed
         .iter()
         .filter(|(_, member)| {
@@ -356,6 +458,13 @@ pub(super) fn reclaim(
     save(paths, computer_id, &record).map_err(|failure| failure.to_string())?;
     if let Err(failure) = retry_deleted_snapshots(runner, paths) {
         eprintln!("Previously deleted checkpoint data was kept: {failure}");
+    }
+    if let Some((_, failure)) = failures.first() {
+        return Err(format!(
+            "{} older checkpoint(s) could not be removed and were kept. {}",
+            failures.len(),
+            safe_activity_error(failure)
+        ));
     }
     Ok(())
 }

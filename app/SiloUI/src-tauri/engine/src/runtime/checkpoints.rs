@@ -921,8 +921,9 @@ pub fn has_computer(paths: &RuntimePaths, computer_id: &str) -> bool {
 
 /// Captures a Linux checkpoint as one durable, cancellable job operation and returns the
 /// exact record it committed. An automatic capture is refused while the setting is off,
-/// both before it queues (the caller) and once the queue admits it (here). A before-keep
-/// capture trims that kind's oldest records beyond its own count afterwards.
+/// both before it queues (the caller) and once the queue admits it (here). Trimming older
+/// records is a separate pass, [`reclaim_after_capture_for_job`], that the caller runs once
+/// this job has returned its result.
 #[allow(clippy::too_many_arguments)]
 pub fn create_for_job(
     paths: &RuntimePaths,
@@ -930,7 +931,6 @@ pub fn create_for_job(
     name: &str,
     kind: silo_api::methods::checkpoints::CheckpointKind,
     retention: &dyn Fn() -> Result<u32, String>,
-    before_keep_retention: &dyn Fn() -> Result<u32, String>,
     job_id: silo_api::jobs::JobId,
     cancellation: std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) -> Result<silo_api::methods::checkpoints::Checkpoint, String> {
@@ -975,28 +975,46 @@ pub fn create_for_job(
         policy_kind,
     )
     .map_err(|error| error.to_string())?;
-    // The capture's computer lane is released before retention asks for the device lane.
     drop(guard);
-    match kind {
-        CheckpointKind::Automatic => prune_automatic_with(
-            &OPERATIONS,
-            &ProcessRunner,
-            paths,
-            computer_id,
-            retention,
-            job_id,
-        ),
-        CheckpointKind::BeforeKeep => prune_before_keep_with(
-            &OPERATIONS,
-            &ProcessRunner,
-            paths,
-            computer_id,
-            before_keep_retention,
-            job_id,
-        ),
-        CheckpointKind::Manual => {}
-    }
     Ok(api_checkpoint(checkpoint))
+}
+
+/// The retention pass that follows an automatic or before-keep capture. It is its own job
+/// on the computer's lane, so the capture's result never waits for the merge. A manual
+/// capture has nothing to trim.
+pub fn reclaim_after_capture_for_job(
+    paths: &RuntimePaths,
+    computer_id: &str,
+    kind: silo_api::methods::checkpoints::CheckpointKind,
+    retention: &dyn Fn() -> Result<u32, String>,
+    before_keep_retention: &dyn Fn() -> Result<u32, String>,
+    job_id: silo_api::jobs::JobId,
+) -> Result<(), String> {
+    use silo_api::methods::checkpoints::CheckpointKind;
+    let (policy_kind, activity, count): (_, _, &dyn Fn() -> Result<u32, String>) = match kind {
+        CheckpointKind::Automatic => (
+            "automatic",
+            "Removing an older automatic checkpoint",
+            retention,
+        ),
+        CheckpointKind::BeforeKeep => (
+            "before-keep",
+            "Removing an older before-keep checkpoint",
+            before_keep_retention,
+        ),
+        CheckpointKind::Manual => return Ok(()),
+    };
+    shutdown::ensure_accepting_operations()?;
+    trim_kind_with(
+        &OPERATIONS,
+        &ProcessRunner,
+        paths,
+        computer_id,
+        policy_kind,
+        activity,
+        count,
+        job_id,
+    )
 }
 
 fn api_checkpoint(checkpoint: Checkpoint) -> silo_api::methods::checkpoints::Checkpoint {
@@ -1045,7 +1063,8 @@ fn prune_automatic_with(
         "Removing an older automatic checkpoint",
         retention,
         job_id,
-    );
+    )
+    .unwrap_or_else(|failure| eprintln!("Silo kept older automatic checkpoints: {failure}"));
 }
 
 /// Removes this computer's before-keep checkpoints beyond the newest N. A count of zero
@@ -1067,11 +1086,12 @@ fn prune_before_keep_with(
         "Removing an older before-keep checkpoint",
         retention,
         job_id,
-    );
+    )
+    .unwrap_or_else(|failure| eprintln!("Silo kept older before-keep checkpoints: {failure}"));
 }
 
 /// Removes this computer's checkpoints of `kind` beyond the newest N and returns their
-/// disk (see [`reclaim`]). The count is read again once the device lane admits the work,
+/// disk (see [`reclaim`]). The count is read again once the computer's lane admits the work,
 /// so turning the setting off while it queued stops it. A checkpoint something still needs
 /// is kept (visible with its `deleteBlocker`); a failed merge removes nothing and is
 /// recorded in the computer's checkpoint operation.
@@ -1085,7 +1105,7 @@ fn trim_kind_with(
     activity: &str,
     retention: &dyn Fn() -> Result<u32, String>,
     job_id: silo_api::jobs::JobId,
-) {
+) -> Result<(), String> {
     use super::operation_gate::{OperationKind, Scope};
 
     let candidates_of = |count: u32| -> Option<Vec<String>> {
@@ -1101,33 +1121,38 @@ fn trim_kind_with(
             .collect();
         Some(crate::checkpoints::retention::plan(&entries, count).candidates)
     };
-    let Ok(count) = retention() else { return };
+    let count = retention()?;
     if count == 0 || candidates_of(count).is_none_or(|candidates| candidates.is_empty()) {
-        return;
+        return Ok(());
     }
-    let Ok(_guard) = gate.kind(OperationKind::CheckpointDelete).acquire_for_job(
-        Scope::Device,
-        None,
-        activity,
-        None,
-        job_id,
-        None,
-    ) else {
-        return;
-    };
+    let computer = computer_configuration(paths, computer_id)
+        .map_err(|failure| failure.to_string())?
+        .name()
+        .to_owned();
+    let _guard = gate
+        .kind(OperationKind::CheckpointDelete)
+        .acquire_for_job(
+            Scope::Computer {
+                id: computer_id.to_owned(),
+            },
+            Some(computer),
+            activity,
+            None,
+            job_id,
+            None,
+        )
+        .map_err(|failure| failure.to_string())?;
     // The plan is made again once the queue admits this work: the setting and the history
     // may have changed while it waited.
-    let Ok(current) = retention() else { return };
+    let current = retention()?;
     if current == 0 {
-        return;
+        return Ok(());
     }
     let Some(candidates) = candidates_of(current).filter(|candidates| !candidates.is_empty())
     else {
-        return;
+        return Ok(());
     };
-    if let Err(failure) = reclaim::reclaim(runner, paths, computer_id, &candidates) {
-        eprintln!("Silo kept older {kind} checkpoints: {failure}");
-    }
+    reclaim::reclaim(runner, paths, computer_id, &candidates)
 }
 
 thread_local! {

@@ -2605,6 +2605,8 @@ struct Store {
     fail_remove: bool,
     /// Layers (head included) the fake runtime reports per disk for `modify --compact`.
     layers: usize,
+    /// Layers of the `/workspace` disk when its chain differs from the root's.
+    workspace_layers: Option<usize>,
     fail_compact: bool,
     calls: Mutex<Vec<Vec<String>>>,
 }
@@ -2617,6 +2619,7 @@ impl Store {
             fail_create_after_publish: false,
             fail_remove: false,
             layers: 0,
+            workspace_layers: None,
             fail_compact: false,
             calls: Mutex::new(Vec::new()),
         }
@@ -2629,16 +2632,32 @@ impl Store {
         self.fail_compact = true;
         self
     }
-    /// The `--layers` of every real (not dry-run) compaction.
-    fn compactions(&self) -> Vec<usize> {
+    /// The disk and `--layers` of every real (not dry-run) compaction.
+    fn compaction_calls(&self) -> Vec<(Option<String>, usize)> {
         self.calls
             .lock()
             .unwrap()
             .iter()
             .filter(|call| {
-                call[0] == "modify" && call.contains(&"--compact".into()) && !call.contains(&"--dry-run".into())
+                call[0] == "modify"
+                    && call.contains(&"--compact".into())
+                    && !call.contains(&"--dry-run".into())
             })
-            .map(|call| call[call.iter().position(|arg| arg == "--layers").unwrap() + 1].parse().unwrap())
+            .map(|call| {
+                let value = |flag: &str| {
+                    call.iter()
+                        .position(|arg| arg == flag)
+                        .map(|at| call[at + 1].clone())
+                };
+                (value("--disk"), value("--layers").unwrap().parse().unwrap())
+            })
+            .collect()
+    }
+    /// The `--layers` of every real compaction.
+    fn compactions(&self) -> Vec<usize> {
+        self.compaction_calls()
+            .into_iter()
+            .map(|(_, layers)| layers)
             .collect()
     }
     fn with(self, group: &str, name: &str, id: &str, parent: Option<&str>) -> Self {
@@ -2713,9 +2732,18 @@ impl RuntimeRunner for Store {
                 ("modify", Some(name)) if args.contains(&"--compact".into()) => {
                     let layers = args.iter().position(|arg| arg == "--layers").map(|at| args[at + 1].parse::<usize>().unwrap());
                     if args.contains(&"--dry-run".into()) {
-                        let selected = layers.unwrap_or(self.layers.saturating_sub(1)).min(self.layers.saturating_sub(1));
-                        let disk = |guest: &str| serde_json::json!({"guest_path": guest, "input_layers": self.layers, "selected_layers": selected, "output_layers": self.layers - selected + 1});
-                        return ok(serde_json::json!({"dry_run": true, "disks": [disk("/"), disk("/workspace")]}).to_string());
+                        let only = args.iter().position(|arg| arg == "--disk").map(|at| args[at + 1].clone());
+                        let disk = |guest: &str, total: usize| {
+                            let selected = layers.unwrap_or(total.saturating_sub(1)).min(total.saturating_sub(1));
+                            serde_json::json!({"guest_path": guest, "input_layers": total, "selected_layers": selected, "output_layers": total - selected + 1})
+                        };
+                        let workspace = self.workspace_layers.unwrap_or(self.layers);
+                        let disks: Vec<_> = [("/", self.layers), ("/workspace", workspace)]
+                            .into_iter()
+                            .filter(|(guest, _)| only.as_deref().is_none_or(|only| only == *guest))
+                            .map(|(guest, total)| disk(guest, total))
+                            .collect();
+                        return ok(serde_json::json!({"dry_run": true, "disks": disks}).to_string());
                     }
                     assert_eq!(name, "dev");
                     if self.fail_compact {
@@ -4816,8 +4844,9 @@ fn chain_fixture(
         })
         .collect();
     let paths = delete_fixture(directory, entries, fork);
-    let tip: &'static str = Box::leak(format!("snap_{n}").into_boxed_str());
-    let mut store = Store::new(vec![("dev", Some(tip))]).with_layers(n as usize + 1);
+    // Created from an image: no `snapshot_parent`; the capture cursor names the latest capture.
+    cursor(&paths, "dev", &format!("snap_{n}"));
+    let mut store = Store::new(vec![("dev", None)]).with_layers(n as usize + 1);
     for index in 1..=n {
         let parent = (index > 1).then(|| format!("snap_{}", index - 1));
         store = store.with(
@@ -4890,14 +4919,14 @@ fn retention_merges_the_layers_older_than_the_oldest_kept_checkpoint_before_remo
 fn retention_skips_the_merge_when_fewer_than_two_layers_would_be_merged() {
     let _test_state = crate::test_support::global_state();
     let directory = tempfile::tempdir().unwrap();
-    // Keeping the newest 3 of 4: only one layer is older than snap_2's.
-    let (paths, store) = chain_fixture(&directory, &["automatic"; 4], None);
+    // Keeping the newest of 2: snap_2 sealed layer 1, so only one layer is older.
+    let (paths, store) = chain_fixture(&directory, &["automatic"; 2], None);
 
-    trim_automatic(&store, &paths, 3);
+    trim_automatic(&store, &paths, 1);
 
     assert!(store.compactions().is_empty());
     assert_eq!(store.removals(), [format!("dev:{}", native_id(1))]);
-    assert_eq!(left_ids(&paths).len(), 3);
+    assert_eq!(left_ids(&paths).len(), 1);
 }
 
 #[test]
@@ -4953,8 +4982,8 @@ fn retention_never_removes_the_newest_checkpoint_or_another_kind() {
         [2, 4, 5, 6].map(native_id),
         "the newest automatic record and every before-keep one remain"
     );
-    // snap_2 stays and is the oldest keeper, so there is nothing older to merge.
-    assert!(store.compactions().is_empty());
+    // snap_2 sits at layer 1 and cannot bound a merge; snap_4 (layer 3) does.
+    assert_eq!(store.compactions(), [3]);
 }
 
 #[test]
@@ -5019,6 +5048,147 @@ fn retention_keeps_the_checkpoint_a_computer_is_positioned_on() {
     assert!(!store.removals().contains(&format!("dev:{}", native_id(2))));
     assert!(left_ids(&paths).contains(&native_id(2)));
     assert!(left_ids(&paths).contains(&native_id(4)));
+}
+
+#[test]
+fn the_capture_cursor_not_the_restore_origin_positions_the_merge() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    // Restored from checkpoint 2, then captured four more times: the configuration still
+    // names snap_2, the cursor names snap_6.
+    let (paths, store) = chain_fixture(&directory, &["automatic"; 6], None);
+    let store = Store {
+        computers: vec![("dev", Some("snap_2"))],
+        ..store
+    };
+
+    trim_automatic(&store, &paths, 2);
+
+    // snap_2 is the computer's restore origin and stays; snap_5 bounds the merge.
+    assert_eq!(store.compactions(), [4]);
+    assert_eq!(
+        store.removals(),
+        [1, 3, 4].map(|n| format!("dev:{}", native_id(n)))
+    );
+    assert_eq!(left_ids(&paths), [2, 5, 6].map(native_id));
+}
+
+#[test]
+fn a_named_checkpoint_in_the_middle_bounds_the_merge_without_stopping_later_ones() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    // 9 layers for 8 captures. Checkpoints 1-3 stay behind the named 4; 5 and 6 go.
+    let kinds = [
+        "automatic",
+        "automatic",
+        "automatic",
+        "manual",
+        "automatic",
+        "automatic",
+        "automatic",
+        "automatic",
+    ];
+    let (paths, store) = chain_fixture(&directory, &kinds, None);
+
+    trim_automatic(&store, &paths, 2);
+
+    assert_eq!(store.compactions(), [2], "only the layers older than snap_3");
+    assert_eq!(
+        store.removals(),
+        [5, 6].map(|n| format!("dev:{}", native_id(n)))
+    );
+}
+
+#[test]
+fn a_checkpoint_older_than_the_merged_base_does_not_stop_the_merge() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    // An earlier merge folded the oldest captures: 8 captures sit on 5 layers. The named
+    // checkpoint 1 lies inside the base and must not bound the merge.
+    let kinds = [
+        "manual",
+        "automatic",
+        "automatic",
+        "automatic",
+        "automatic",
+        "automatic",
+        "automatic",
+        "automatic",
+    ];
+    let (paths, store) = chain_fixture(&directory, &kinds, None);
+    let store = store.with_layers(5);
+
+    trim_automatic(&store, &paths, 2);
+
+    assert_eq!(store.compactions(), [2]);
+    assert_eq!(
+        store.removals(),
+        [2, 3, 4, 5, 6].map(|n| format!("dev:{}", native_id(n)))
+    );
+}
+
+#[test]
+fn disks_with_different_chains_are_merged_and_confirmed_one_by_one() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let (paths, mut store) = chain_fixture(&directory, &["automatic"; 6], None);
+    store.workspace_layers = Some(6);
+
+    trim_automatic(&store, &paths, 2);
+
+    assert_eq!(
+        store.compaction_calls(),
+        [
+            (Some("/".to_owned()), 4),
+            (Some("/workspace".to_owned()), 3)
+        ]
+    );
+    let confirmations = store
+        .calls
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|call| call[0] == "modify" && call.contains(&"--dry-run".into()) && call.contains(&"--disk".into()))
+        .count();
+    assert_eq!(confirmations, 2);
+    assert_eq!(left_ids(&paths).len(), 2);
+}
+
+#[test]
+fn a_checkpoint_that_could_not_be_removed_is_reported_in_the_operation_status() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let (paths, mut store) = chain_fixture(&directory, &["automatic"; 6], None);
+    store.fail_remove = true;
+
+    trim_automatic(&store, &paths, 2);
+
+    let record = load(&paths, ID).unwrap();
+    assert_eq!(record.checkpoints.len(), 6);
+    let operation = record.checkpoint_operation.unwrap();
+    assert_eq!(operation.status, "failed");
+    assert_eq!(operation.stage, reclaim::RECLAIM_STAGE);
+    assert!(operation.error.unwrap().contains("could not be removed"));
+}
+
+#[test]
+fn an_unreadable_capture_cursor_is_reported_and_removes_nothing() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let (paths, store) = chain_fixture(&directory, &["automatic"; 6], None);
+    let cursor_path = paths
+        .home
+        .join("sandboxes")
+        .join("dev")
+        .join("snapshot-lineage.json");
+    fs::write(cursor_path, "not json").unwrap();
+
+    trim_automatic(&store, &paths, 2);
+
+    assert!(store.removals().is_empty());
+    let operation = load(&paths, ID).unwrap().checkpoint_operation.unwrap();
+    assert_eq!(operation.status, "failed");
+    assert!(operation.error.unwrap().contains("lineage"));
 }
 
 // MARK: Launch upgrade of the record layout

@@ -225,7 +225,24 @@ impl Service {
                 let retention = self.retention.clone();
                 let before_keep_retention = self.before_keep_retention.clone();
                 let kind = kind.unwrap_or(CheckpointKind::Manual);
-                self.start_linux_job(
+                let (follow_id, follow_retention, follow_before_keep) = (
+                    computer_id.clone(),
+                    retention.clone(),
+                    before_keep_retention.clone(),
+                );
+                // Trimming older checkpoints is its own job on the computer's lane. It
+                // starts once the capture has reported its result.
+                let follow_up: FollowUp = Box::new(move |paths, job_id| {
+                    runtime::checkpoints::reclaim_after_capture_for_job(
+                        paths,
+                        &follow_id,
+                        kind,
+                        follow_retention.as_ref(),
+                        follow_before_keep.as_ref(),
+                        job_id,
+                    )
+                });
+                self.start_linux_job_then(
                     "checkpoints.create",
                     true,
                     JobResult::Created,
@@ -236,12 +253,12 @@ impl Service {
                             &name,
                             kind,
                             retention.as_ref(),
-                            before_keep_retention.as_ref(),
                             job_id,
                             cancellation,
                         )
                         .map(|checkpoint| json!({ "checkpoint": checkpoint }))
                     },
+                    (kind != CheckpointKind::Manual).then_some(follow_up),
                 )
             }
         }
@@ -417,6 +434,20 @@ impl Service {
     where
         F: FnOnce(&RuntimePaths, JobId, Arc<AtomicBool>) -> Result<Value, String> + Send + 'static,
     {
+        self.start_linux_job_then(method, cancellable, result, work, None)
+    }
+
+    fn start_linux_job_then<F>(
+        &self,
+        method: &'static str,
+        cancellable: bool,
+        result: JobResult,
+        work: F,
+        follow_up: Option<FollowUp>,
+    ) -> Result<JobId, Failure>
+    where
+        F: FnOnce(&RuntimePaths, JobId, Arc<AtomicBool>) -> Result<Value, String> + Send + 'static,
+    {
         self.host
             .ensure_runtime_ready()
             .map_err(Failure::from_message)?;
@@ -454,6 +485,7 @@ impl Service {
                 },
                 || work(&paths, job_id.clone(), cancellation.clone()),
             );
+            let captured = outcome.is_ok();
             finish_linux_job(
                 host.as_ref(),
                 &paths,
@@ -462,9 +494,36 @@ impl Service {
                 outcome,
                 cancellation.load(Ordering::SeqCst),
             );
+            if let Some(follow_up) = follow_up.filter(|_| captured) {
+                run_follow_up(host.as_ref(), &paths, follow_up);
+            }
         });
         Ok(response)
     }
+}
+
+/// Work that runs as its own job once the job that started it has finished.
+type FollowUp = Box<dyn FnOnce(&RuntimePaths, JobId) -> Result<(), String> + Send>;
+
+fn run_follow_up(host: &dyn RuntimeHost, paths: &RuntimePaths, follow_up: FollowUp) {
+    let context = host.engine_context();
+    let Ok(accepted) = jobs::allocate(context.as_ref(), "checkpoints.reclaim") else {
+        return;
+    };
+    let Ok(registry) = context.job_registry() else {
+        return;
+    };
+    let job_id = accepted.job_id;
+    let (running_registry, running_id) = (registry.clone(), job_id.clone());
+    let outcome = runtime::checkpoints::with_admission(
+        move || {
+            running_registry
+                .mark_running(&running_id)
+                .map_err(|error| error.to_string())
+        },
+        || follow_up(paths, job_id.clone()).map(|()| Value::Null),
+    );
+    finish_linux_job(host, paths, job_id, JobResult::Created, outcome, false);
 }
 
 /// What a Linux job reports on success: the capture record it made, or the refreshed
