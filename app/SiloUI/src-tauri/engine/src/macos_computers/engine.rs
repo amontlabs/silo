@@ -959,16 +959,27 @@ pub(super) fn boots_behind_gateway(record: &Record) -> bool {
     record.setup.complete()
 }
 
-pub(super) fn start(app: &MacosContext, record: &Record, layout: &Layout) -> Result<(), String> {
+pub(super) fn start(
+    app: &MacosContext,
+    record: &Record,
+    layout: &Layout,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<(), String> {
     if !boots_behind_gateway(record) {
         return start_machine(app, record, layout, &Boot::BootstrapNat);
     }
     super::proxy::require_guest_bootstrap(record, layout)?;
     let boot_started = time::OffsetDateTime::now_utc();
     start_machine(app, record, layout, &Boot::Normal)?;
-    if record.first_boot {
-        super::fork_first_boot::complete(app, record, layout)?;
-    }
+    // The first boot of a fork can take minutes and changes its record; what follows uses the
+    // record as it is now.
+    let fresh;
+    let record = if record.first_boot {
+        fresh = super::fork_first_boot::complete(app, record, layout, cancelled)?;
+        &fresh
+    } else {
+        record
+    };
     let policy = reconcile_start_policy(record)?;
     // The guest reconfigures its network while it boots: connections made before its readiness
     // receipt are dropped, so the receipt comes first and the placeholders after.

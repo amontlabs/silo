@@ -13,7 +13,7 @@ fn eligible_record(app_data: &Path, computer_id: &str) -> Result<store::Record, 
         .into_iter()
         .find(|record| record.id == computer_id)
         .ok_or_else(|| "The macOS computer was not found on this device.".to_owned())?;
-    if !record.installed || !record.setup_complete() || record.inherited_access {
+    if !record.installed || !record.setup_complete() || record.inherited_access || record.first_boot {
         return Err("Finish setting up this computer before connecting over SSH.".into());
     }
     Ok(record)

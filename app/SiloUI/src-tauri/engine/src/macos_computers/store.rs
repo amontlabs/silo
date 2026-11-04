@@ -171,6 +171,9 @@ pub(super) struct Record {
     /// its key, name and trust over its password login before handing the computer over.
     #[serde(default)]
     pub first_boot: bool,
+    /// What a fork was made quiet with. Absent on computers that are not forks.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quiet: Option<super::quiet::QuietRecord>,
 }
 
 impl Record {
@@ -337,6 +340,7 @@ pub(super) fn new_record(request: &CreateRequest, mac_address: String) -> Record
         imported: false,
         secure_token_missing: false,
         first_boot: false,
+        quiet: None,
     }
 }
 

@@ -51,6 +51,8 @@ mod proxy;
 mod proxy_address;
 #[path = "macos_computers/proxy_ca.rs"]
 mod proxy_ca;
+#[path = "macos_computers/quiet.rs"]
+mod quiet;
 #[path = "macos_computers/recovery.rs"]
 mod recovery;
 #[path = "macos_computers/remote_display.rs"]
@@ -2303,9 +2305,11 @@ pub fn start_macos_checkpoint_abandon_job(
 pub fn start_macos_checkpoint_fork_job(
     app: MacosContext,
     id: String,
-    checkpoint_id: String,
+    checkpoint_id: Option<String>,
     new_name: String,
+    options: crate::runtime::checkpoints::ForkOptions,
 ) -> Result<silo_api::jobs::JobId, String> {
+    quiet::validate(&options)?;
     runtime::shutdown::ensure_accepting_operations()?;
     let job = accept_checkpoint_job(&app, "checkpoints.fork")?;
     let job_id = job.job_id.clone();
@@ -2314,7 +2318,15 @@ pub fn start_macos_checkpoint_fork_job(
     let worker_app = app.clone();
     let worker_id = id.clone();
     tokio::task::spawn_blocking(move || {
-        let fork = fork_checkpoint(&worker_app, &worker_id, &checkpoint_id, &new_name, job);
+        let fork = fork_checkpoint(
+            &worker_app,
+            &worker_id,
+            checkpoint_id.as_deref(),
+            &new_name,
+            &options,
+            &crate::checkpoints::EngineForkAssignments,
+            job,
+        );
         let (result, continuation) = match fork {
             Ok(continuation) => (Ok(()), Some(continuation)),
             Err(message) => (Err(message), None),
@@ -2429,9 +2441,18 @@ pub async fn fork_macos_checkpoint(
     let cancelled = job.cancellation.clone();
     let worker_app = app.clone();
     let worker_id = id.clone();
-    let fork =
-        blocking(move || fork_checkpoint(&worker_app, &worker_id, &checkpoint_id, &new_name, job))
-            .await;
+    let fork = blocking(move || {
+        fork_checkpoint(
+            &worker_app,
+            &worker_id,
+            Some(&checkpoint_id),
+            &new_name,
+            &Default::default(),
+            &crate::checkpoints::EngineForkAssignments,
+            job,
+        )
+    })
+    .await;
     let (result, continuation) = match fork {
         Ok(continuation) => (Ok(()), Some(continuation)),
         Err(message) => (Err(message), None),
@@ -5144,7 +5165,10 @@ fn start_machine(
     if let Some(note) = &note {
         log_line(app, &record.id, &format!("booting from the disk: {note}"));
     }
-    engine::start(app, record, layout)?;
+    let id = record.id.clone();
+    engine::start(app, record, layout, &move || {
+        !registry().start_is_current(&id, attempt)
+    })?;
     Ok(note)
 }
 
@@ -5835,7 +5859,20 @@ fn capture_checkpoint(
     let data = app_data(app)?;
     let held = begin_operation(app, id, checkpoints::OperationKind::Capture, &job)?;
     admitted()?;
-    let layout = Layout::new(&data, id);
+    capture_held(app, id, &name, &data, &held, policy_kind)
+}
+
+/// Captures a checkpoint of a computer whose operation `held` this thread already holds.
+fn capture_held(
+    app: &MacosContext,
+    id: &str,
+    name: &str,
+    data: &std::path::Path,
+    held: &Held<'_>,
+    policy_kind: checkpoints::PolicyKind,
+) -> Result<checkpoints::Meta, String> {
+    let name = checkpoints::validate_name(name)?;
+    let layout = Layout::new(data, id);
     if checkpoints::restore_unfinished(&layout) {
         return Err(UNFINISHED_RESTORE.into());
     }
@@ -5848,7 +5885,7 @@ fn capture_checkpoint(
             if running { "memory and disk" } else { "disk" }
         ),
     );
-    let _space = reserve_for_memory(&data, &held.record, running)?;
+    let _space = reserve_for_memory(data, &held.record, running)?;
     let machine = LiveMachine {
         app,
         id,
@@ -6027,8 +6064,10 @@ struct ForkContinuation {
 fn fork_checkpoint(
     app: &MacosContext,
     id: &str,
-    checkpoint_id: &str,
+    checkpoint_id: Option<&str>,
     new_name: &str,
+    options: &crate::runtime::checkpoints::ForkOptions,
+    assignments: &dyn crate::runtime::checkpoints::ForkAssignments,
     job: AcceptedMacosJob,
 ) -> Result<ForkContinuation, String> {
     require_supported()?;
@@ -6040,18 +6079,65 @@ fn fork_checkpoint(
         id,
         checkpoint_id,
         new_name,
+        options,
+        assignments,
         job,
         &runtime::OPERATIONS,
         run_setup,
     )
 }
 
+/// The name `checkpoints.fork` gives the checkpoint it takes when none is named.
+const FORK_POINT: &str = "Fork point";
+
+/// The assignments a fork starts with: none, except the named ones copied from its source.
+/// Returns whether anything was copied. A name the source does not have fails the fork.
+fn copy_fork_assignments(
+    assignments: &dyn crate::runtime::checkpoints::ForkAssignments,
+    options: &crate::runtime::checkpoints::ForkOptions,
+    source: &str,
+    target: &str,
+) -> Result<bool, String> {
+    let named: Vec<String> = options
+        .secrets
+        .iter()
+        .filter(|name| name.as_str() != "github")
+        .cloned()
+        .collect();
+    let github = options.secrets.iter().any(|name| name == "github");
+    if github {
+        assignments.copy_github(source, target)?;
+    }
+    if let Err(message) = assignments.copy_secrets(source, target, &named) {
+        if github {
+            let _ = assignments.forget_github(target);
+        }
+        return Err(message);
+    }
+    Ok(github || !named.is_empty())
+}
+
+fn forget_fork_assignments(
+    assignments: &dyn crate::runtime::checkpoints::ForkAssignments,
+    options: &crate::runtime::checkpoints::ForkOptions,
+    target: &str,
+) {
+    if options.secrets.iter().any(|name| name == "github") {
+        let _ = assignments.forget_github(target);
+    }
+    if options.secrets.iter().any(|name| name != "github") {
+        let _ = assignments.forget_secrets(target);
+    }
+}
+
 fn fork_checkpoint_with_workflow(
     app: &MacosContext,
     data: &std::path::Path,
     id: &str,
-    checkpoint_id: &str,
+    checkpoint_id: Option<&str>,
     new_name: &str,
+    options: &crate::runtime::checkpoints::ForkOptions,
+    assignments: &dyn crate::runtime::checkpoints::ForkAssignments,
     job: AcceptedMacosJob,
     gate: &'static runtime::operation_gate::OperationGate,
     workflow: impl FnOnce(
@@ -6064,14 +6150,33 @@ fn fork_checkpoint_with_workflow(
         + Send
         + 'static,
 ) -> Result<ForkContinuation, String> {
+    quiet::validate(options)?;
     let new_name = new_name.trim().to_string();
     // Held until the fork is registered and saved, so a Linux creation sees it.
     let reservation =
         crate::computer_names::reserve(&[new_name.clone()], &|| app.linux_computer_names())?;
     let held = begin_operation(app, id, checkpoints::OperationKind::Fork, &job)?;
     let source = Layout::new(data, id);
-    let checkpoint = checkpoints::find(&source, checkpoint_id)?;
+    let checkpoint = match checkpoint_id {
+        Some(checkpoint_id) => checkpoints::find(&source, checkpoint_id)?,
+        // The current state: a checkpoint of the source, taken under this same operation.
+        None => {
+            if matches!(held.state, State::Starting | State::Stopping) {
+                return Err("Wait for the computer to finish starting or stopping.".into());
+            }
+            capture_held(
+                app,
+                id,
+                FORK_POINT,
+                data,
+                &held,
+                checkpoints::PolicyKind::Automatic,
+            )?
+        }
+    };
     let space = templates::reserve_space(data, templates::COPY_ESTIMATE)?;
+    let mut copied_assignments = false;
+    let fork_name = new_name.clone();
     let prepared: Result<(Record, Arc<AtomicU8>), String> = (|| {
         let _admitted = admission()?;
         let mut registry = registry();
@@ -6083,7 +6188,10 @@ fn fork_checkpoint_with_workflow(
             disk_gib: held.record.disk_gib,
         };
         store::validate_request(&request, engine::host_limits(), &existing, 0)?;
+        copied_assignments =
+            copy_fork_assignments(assignments, options, &held.record.name, &request.name)?;
         let mut record = store::new_record(&request, engine::random_mac());
+        record.quiet = Some(quiet::QuietRecord::new(options));
         record.restore_image = held.record.restore_image.clone();
         record.pristine = false;
         record.setup_version = held.record.setup_version.clone();
@@ -6099,7 +6207,12 @@ fn fork_checkpoint_with_workflow(
     })();
     let (record, cancel) = match prepared {
         Ok(prepared) => prepared,
-        Err(message) => return Err(message),
+        Err(message) => {
+            if copied_assignments {
+                forget_fork_assignments(assignments, options, &fork_name);
+            }
+            return Err(message);
+        }
     };
     drop(reservation);
     let fork_id = record.id.clone();
@@ -6113,6 +6226,7 @@ fn fork_checkpoint_with_workflow(
             checkpoint.name, checkpoint.id, record.name
         ),
     );
+    let record_name = record.name.clone();
     let copied = copy_for_fork(&source, &checkpoint, &layout, record, &fork_id);
     // The source command owns the copy. The setup continuation gets its own gate job only
     // after the source guard is released, so the two scopes never nest on this thread.
@@ -6130,6 +6244,9 @@ fn fork_checkpoint_with_workflow(
             })
         }
         Err(stop) => {
+            if copied_assignments {
+                forget_fork_assignments(assignments, options, &record_name);
+            }
             let message = match &stop {
                 Stop::Failed(message) => message.clone(),
                 Stop::Cancelled => "Creating the fork was cancelled.".to_string(),
@@ -6716,6 +6833,59 @@ pub fn seed_test_computer(app_data: &std::path::Path, name: &str) -> (String, St
     (record.id, checkpoint.id)
 }
 
+/// Fork assignments that record what was copied and fail for names the source lacks.
+#[cfg(test)]
+#[derive(Default)]
+struct RecordingAssignments {
+    calls: Mutex<Vec<String>>,
+    known: Vec<String>,
+    github_fails: bool,
+}
+
+#[cfg(test)]
+type NoAssignments = RecordingAssignments;
+
+#[cfg(test)]
+#[allow(non_upper_case_globals)]
+const NoAssignments: RecordingAssignments = RecordingAssignments {
+    calls: Mutex::new(Vec::new()),
+    known: Vec::new(),
+    github_fails: false,
+};
+
+#[cfg(test)]
+impl crate::runtime::checkpoints::ForkAssignments for RecordingAssignments {
+    fn copy_github(&self, source: &str, target: &str) -> Result<(), String> {
+        self.calls.lock().unwrap().push(format!("github {source} {target}"));
+        if self.github_fails {
+            Err("personal token".into())
+        } else {
+            Ok(())
+        }
+    }
+    fn forget_github(&self, target: &str) -> Result<(), String> {
+        self.calls.lock().unwrap().push(format!("forget github {target}"));
+        Ok(())
+    }
+    fn copy_secrets(&self, source: &str, target: &str, names: &[String]) -> Result<(), String> {
+        if names.is_empty() {
+            return Ok(());
+        }
+        if let Some(missing) = names.iter().find(|name| !self.known.contains(name)) {
+            return Err(format!("The source computer has no secret named {missing}."));
+        }
+        self.calls
+            .lock()
+            .unwrap()
+            .push(format!("secrets {source} {target} {}", names.join(",")));
+        Ok(())
+    }
+    fn forget_secrets(&self, target: &str) -> Result<(), String> {
+        self.calls.lock().unwrap().push(format!("forget secrets {target}"));
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -6723,6 +6893,70 @@ mod tests {
         EngineIdentity, EnginePaths, EngineRuntimeState, MainThread, PackageKind, ProcessControl,
     };
     use std::sync::atomic::AtomicUsize;
+
+    fn options(secrets: &[&str]) -> crate::runtime::checkpoints::ForkOptions {
+        crate::runtime::checkpoints::ForkOptions {
+            secrets: secrets.iter().map(|name| (*name).to_owned()).collect(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn a_fork_copies_no_assignment_unless_it_names_one() {
+        let assignments = RecordingAssignments {
+            known: vec!["API_KEY".into()],
+            ..Default::default()
+        };
+        assert!(!copy_fork_assignments(&assignments, &options(&[]), "src", "fork").unwrap());
+        assert!(assignments.calls.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn named_secrets_and_github_are_copied_from_the_source() {
+        let assignments = RecordingAssignments {
+            known: vec!["API_KEY".into()],
+            ..Default::default()
+        };
+        let copied =
+            copy_fork_assignments(&assignments, &options(&["github", "API_KEY"]), "src", "fork")
+                .unwrap();
+        assert!(copied);
+        assert_eq!(
+            assignments.calls.lock().unwrap().as_slice(),
+            ["github src fork", "secrets src fork API_KEY"]
+        );
+    }
+
+    #[test]
+    fn an_unknown_name_fails_the_fork_and_takes_back_what_was_copied() {
+        let assignments = RecordingAssignments::default();
+        let result =
+            copy_fork_assignments(&assignments, &options(&["github", "NOPE"]), "src", "fork");
+        assert_eq!(result, Err("The source computer has no secret named NOPE.".into()));
+        assert_eq!(
+            assignments.calls.lock().unwrap().as_slice(),
+            ["github src fork", "forget github fork"]
+        );
+    }
+
+    #[test]
+    fn a_github_access_that_cannot_be_read_only_fails_the_fork() {
+        let assignments = RecordingAssignments {
+            github_fails: true,
+            ..Default::default()
+        };
+        assert!(copy_fork_assignments(&assignments, &options(&["github"]), "src", "fork").is_err());
+    }
+
+    #[test]
+    fn a_failed_fork_forgets_only_what_it_copied() {
+        let assignments = RecordingAssignments::default();
+        forget_fork_assignments(&assignments, &options(&["github"]), "fork");
+        assert_eq!(assignments.calls.lock().unwrap().as_slice(), ["forget github fork"]);
+        let assignments = RecordingAssignments::default();
+        forget_fork_assignments(&assignments, &options(&["API_KEY"]), "fork");
+        assert_eq!(assignments.calls.lock().unwrap().as_slice(), ["forget secrets fork"]);
+    }
 
     #[test]
     fn engine_refusals_are_classified_for_stable_api_codes() {
@@ -8337,8 +8571,10 @@ mod tests {
             &app,
             directory.path(),
             &source_id,
-            &checkpoint_id,
+            Some(&checkpoint_id),
             "forked-mac",
+            &Default::default(),
+            &NoAssignments,
             command,
             gate,
             move |_app, _layout, record, _cancel, _space| {
@@ -8547,8 +8783,10 @@ mod tests {
             &app,
             directory.path(),
             &source_id,
-            &checkpoint_id,
+            Some(&checkpoint_id),
             "fork-without-source-credentials",
+            &Default::default(),
+            &NoAssignments,
             command,
             gate,
             run_setup,

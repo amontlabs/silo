@@ -58,6 +58,31 @@ pub(super) fn fork_needs_no_guest_work(record: &Record, developer_tools_version:
         && !record.computer_use_stale()
 }
 
+/// The paths a fork's recipe asked to delete.
+fn scrub_paths(record: &Record) -> Vec<String> {
+    record
+        .quiet
+        .as_ref()
+        .map(|quiet| quiet.scrub.clone())
+        .unwrap_or_default()
+}
+
+/// Adds scheduled work that was moved aside to the fork's record of what it was made quiet
+/// with. A repeated run parks nothing new and keeps what the first run recorded.
+fn note_parked(record: &mut Record, parked: &[String]) {
+    if let Some(quiet) = record.quiet.as_mut() {
+        quiet.parked.extend(parked.iter().cloned());
+        quiet.parked.sort();
+        quiet.parked.dedup();
+    }
+}
+
+/// Whether a fork was personalized on its stopped disk and still waits for the first Start
+/// that installs its key, name and trust.
+pub(super) fn waits_for_first_start(record: &Record) -> bool {
+    record.first_boot
+}
+
 /// Runs every unfinished step for `record`, saving progress after each.
 pub(super) fn run(
     app: &MacosContext,
@@ -150,20 +175,31 @@ impl Provision<'_> {
     }
 
     fn steps(&self, record: &mut Record) -> Result<(), Stop> {
+        if waits_for_first_start(record) {
+            // Its key exists only after the first Start installs it, so a boot here could not
+            // log in. The Start finishes the setup; developer tools or computer use that are
+            // out of date are updated by a Retry after it.
+            self.log("the fork's first Start finishes its setup");
+            return Ok(());
+        }
         let developer_tools_version = developer_tools::version();
         // A fork is personalized in the boot that also finishes its setup, which then goes on.
         let mut running = false;
         if record.setup.needs_personalizing {
             if record.imported {
                 self.personalize_import(record)?;
-            } else if record.inherited_access && fork_needs_no_guest_work(record, &developer_tools_version)
-            {
-                self.personalize_fork_offline(record)?;
-            } else if record.inherited_access {
-                self.personalize_fork(record)?;
-                running = true;
             } else {
-                self.personalize(record)?;
+                let offline = record.inherited_access
+                    && fork_needs_no_guest_work(record, &developer_tools_version)
+                    && self.personalize_fork_offline(record)?;
+                if offline {
+                    // The first Start finishes it.
+                } else if record.inherited_access {
+                    self.personalize_fork(record)?;
+                    running = true;
+                } else {
+                    self.personalize(record)?;
+                }
             }
         }
         // The account step leaves the language Recovery uses set.
@@ -451,11 +487,13 @@ impl Provision<'_> {
     }
 
     /// Personalizes a fork without starting it. Its password, automatic login and keychain are
-    /// changed on the stopped disk, and its gateway address and proxy CA are allocated and
-    /// written to the network configuration the guest reads at boot. The fork's first Start is
-    /// its only boot: it installs the key, name, host keys and trust over the new password
-    /// (see `fork_first_boot`).
-    fn personalize_fork_offline(&self, record: &mut Record) -> Result<(), Stop> {
+    /// changed on the stopped disk, the source's scheduled work is moved aside, and its
+    /// gateway address and proxy CA are allocated and written to the network configuration
+    /// the guest reads at boot. The fork's first Start is its only boot: it installs the key,
+    /// name, host keys and trust over the new password (see `fork_first_boot`). Returns false,
+    /// leaving the fork for the setup boot, when the source disk has no network configuration
+    /// to take over.
+    fn personalize_fork_offline(&self, record: &mut Record) -> Result<bool, Stop> {
         let data = app_data(self.app)?;
         let _space = match self.reservation.take() {
             Some(held) => held,
@@ -468,13 +506,29 @@ impl Provision<'_> {
         self.say("Personalizing the computer")?;
         let config = super::proxy::prepare_fork_bootstrap(self.app, record, self.layout)?;
         offline_setup::ensure_detached(&self.layout.disk())?;
-        offline_setup::run_fork_rekey(&self.layout.disk(), &own, Some(&config))?;
+        let rekey = offline_setup::run_fork_rekey(
+            &self.layout.disk(),
+            &own,
+            Some(&config),
+            Some(&scrub_paths(record)),
+        )?;
         self.check()?;
+        note_parked(record, &rekey.parked);
+        if !rekey.bootstrap_staged {
+            self.log("the source has no network configuration; the fork gets a setup boot");
+            self.mark(record, |_| {})?;
+            return Ok(false);
+        }
         record.first_boot = true;
+        // The source's password and key are not needed again: the first Start logs in with
+        // the fork's own.
+        record.inherited_access = false;
         self.mark(record, |setup| {
             setup.needs_personalizing = false;
             setup.proxy_bootstrap = true;
-        })
+        })?;
+        let _ = std::fs::remove_dir_all(checkpoints::inherited_access(self.layout));
+        Ok(true)
     }
 
     /// Gives a fork its own password, key, name, host keys and keychain without a boot of
@@ -494,8 +548,14 @@ impl Provision<'_> {
         }
         self.say("Personalizing the computer")?;
         offline_setup::ensure_detached(&self.layout.disk())?;
-        offline_setup::run_fork_rekey(&self.layout.disk(), &own, None)?;
+        let rekey = offline_setup::run_fork_rekey(
+            &self.layout.disk(),
+            &own,
+            None,
+            Some(&scrub_paths(record)),
+        )?;
         self.check()?;
+        note_parked(record, &rekey.parked);
         self.say("Starting macOS")?;
         boot_import_with_host_key_reset(self.layout, || self.boot(Login::Password))?;
         finalize_fork_guest(self.layout, record, &own, self.log.as_ref()).map_err(Stop::Failed)?;
@@ -514,6 +574,7 @@ impl Provision<'_> {
         }
         // The automatic login with the new password is what proves the password took effect.
         self.verify_personalized()?;
+        self.quiet_running_fork(record)?;
         // The offline password change cannot keep the account's SecureToken.
         let token = self.enable_secure_token(record, &own)?;
         record.secure_token_missing = secure_token_missing(token);
@@ -521,6 +582,30 @@ impl Provision<'_> {
         self.mark(record, |setup| setup.needs_personalizing = false)?;
         // Its own credentials are the only ones left.
         let _ = std::fs::remove_dir_all(checkpoints::inherited_access(self.layout));
+        Ok(())
+    }
+
+    /// Stops the processes and launchd labels a quiet fork names, in the guest this setup
+    /// booted. What was scheduled on the disk was already moved aside before the boot.
+    fn quiet_running_fork(&self, record: &mut Record) -> Result<(), Stop> {
+        let Some(quiet) = record.quiet.as_mut() else {
+            return Ok(());
+        };
+        if let Some(script) = super::quiet::runtime_script(&quiet.stop) {
+            let command = format!(
+                "echo {} | /usr/bin/base64 -D | /usr/bin/sudo -n /bin/sh",
+                base64_encode(script.as_bytes())
+            );
+            let (layout, current) = layout_and_record(self.app, &self.id)?;
+            let output = guest_access::run(&layout, &current, &command, None, GUEST_COMMAND)?;
+            self.log_command("quiet the fork", &output);
+            if output.status != 0 {
+                return Err(Stop::Failed(
+                    "Silo could not stop the processes named for the fork.".into(),
+                ));
+            }
+        }
+        quiet.applied = true;
         Ok(())
     }
 
@@ -694,7 +779,7 @@ impl Provision<'_> {
         self.check()?;
         let (layout, record) = layout_and_record(self.app, &self.id)?;
         offline_setup::ensure_detached(&layout.disk())?;
-        engine::start(self.app, &record, &layout)?;
+        engine::start(self.app, &record, &layout, &|| self.cancelled())?;
         Ok(())
     }
 
@@ -725,7 +810,7 @@ impl Provision<'_> {
         self.check()?;
         let (layout, record) = layout_and_record(self.app, &self.id)?;
         offline_setup::ensure_detached(&layout.disk())?;
-        engine::start(self.app, &record, &layout)?;
+        engine::start(self.app, &record, &layout, &|| self.cancelled())?;
         let deadline = Instant::now() + FIRST_BOOT_ADDRESS;
         while guest_access::guest_address(&record.mac_address).is_err() {
             self.check()?;
@@ -1278,6 +1363,37 @@ mod tests {
         roots.setup.roots = false;
         assert!(!fork_needs_no_guest_work(&roots, &version));
         assert!(!fork_needs_no_guest_work(&fork, "another-version"));
+    }
+
+    #[test]
+    fn retry_setup_leaves_a_fork_waiting_for_its_first_start_to_that_start() {
+        let mut fork = finished_record();
+        fork.setup.proxy_bootstrap = true;
+        assert!(!waits_for_first_start(&fork));
+        fork.first_boot = true;
+        // Its key is installed only by the first Start, so a setup boot could not log in.
+        assert!(waits_for_first_start(&fork));
+        // Developer tools that went out of date do not change that.
+        fork.developer_tools_version = Some("older".into());
+        assert!(waits_for_first_start(&fork));
+        fork.first_boot = false;
+        assert!(!waits_for_first_start(&fork));
+    }
+
+    #[test]
+    fn scheduled_work_that_was_moved_aside_is_noted_once_on_the_fork_record() {
+        let mut fork = finished_record();
+        // A computer that is not a quiet fork has nothing to note.
+        note_parked(&mut fork, &["/Library/LaunchAgents/a.plist".into()]);
+        assert!(fork.quiet.is_none());
+        fork.quiet = Some(super::super::quiet::QuietRecord {
+            scrub: vec!["/Users/silo/.env".into()],
+            ..Default::default()
+        });
+        assert_eq!(scrub_paths(&fork), ["/Users/silo/.env"]);
+        note_parked(&mut fork, &["/Library/LaunchAgents/a.plist".into()]);
+        note_parked(&mut fork, &["/Library/LaunchAgents/a.plist".into()]);
+        assert_eq!(fork.quiet.unwrap().parked, ["/Library/LaunchAgents/a.plist"]);
     }
 
     #[test]
