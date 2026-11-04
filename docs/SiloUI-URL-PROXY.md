@@ -31,6 +31,12 @@ guest `:3000` can be open side by side. The code is `url_proxy.rs` in the engine
   exists, even when it is stopped. A taken label is never given to another computer:
   a later computer with the same label gets its id's first eight hex digits, and a
   counter if that is taken too.
+- The name follows the computer name. A computer deleted and created again under
+  the same name (a recreated `fork-1`) gets `fork-1`'s URL back; this is intended.
+  While the first computer exists its name is never given to another.
+- A WebSocket tunnel keeps its connection slot until it closes. A response body
+  that sends nothing for 120 seconds is cut, and a tunnel that carries nothing in
+  either direction for 15 minutes is closed.
 - Unknown names and unpublished ports answer 404; a computer whose forward is not
   answering answers 502, and one that takes more than 60 seconds to connect or send
   response headers answers 504. A client has 10 seconds to send its request head, and

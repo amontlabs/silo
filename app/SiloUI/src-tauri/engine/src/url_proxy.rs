@@ -51,7 +51,7 @@ pub const DOMAIN: &str = "silo.localhost";
 /// when it is busy.
 pub const DEFAULT_PORT: u16 = 47383;
 
-type Body = BoxBody<Bytes, hyper::Error>;
+type Body = BoxBody<Bytes, Box<dyn std::error::Error + Send + Sync>>;
 
 /// One reachable published website of a computer.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -79,6 +79,10 @@ pub struct Limits {
     pub upstream: Duration,
     /// Connections served at once; further ones are closed.
     pub max_connections: usize,
+    /// Time a response may go without sending a chunk of its body.
+    pub body_idle: Duration,
+    /// Time a WebSocket tunnel may carry nothing in either direction.
+    pub tunnel_idle: Duration,
 }
 impl Default for Limits {
     fn default() -> Self {
@@ -86,6 +90,8 @@ impl Default for Limits {
             header_read: Duration::from_secs(10),
             upstream: Duration::from_secs(60),
             max_connections: 256,
+            body_idle: Duration::from_secs(120),
+            tunnel_idle: Duration::from_secs(900),
         }
     }
 }
@@ -441,11 +447,13 @@ async fn accept_loop(listener: tokio::net::TcpListener, shared: Arc<Shared>) {
                     continue; // Over the limit: the connection closes.
                 };
                 let shared = shared.clone();
+                // An upgraded tunnel takes the permit out and holds it until it closes.
+                let slot = Arc::new(Mutex::new(Some(permit)));
                 tokio::spawn(async move {
-                    let _permit = permit;
                     let service = service_fn(move |request| {
                         let shared = shared.clone();
-                        async move { Ok::<_, Infallible>(route(&shared, peer, request).await) }
+                        let slot = slot.clone();
+                        async move { Ok::<_, Infallible>(route(&shared, peer, slot, request).await) }
                     });
                     let mut server = server_http1::Builder::new();
                     server
@@ -587,6 +595,7 @@ async fn closed(mut watcher: watch::Receiver<()>) {
 async fn route(
     shared: &Shared,
     peer: SocketAddr,
+    slot: Arc<Mutex<Option<tokio::sync::OwnedSemaphorePermit>>>,
     mut request: Request<Incoming>,
 ) -> Response<Body> {
     let limits = shared.limits;
@@ -731,18 +740,108 @@ async fn route(
         allow_websocket(response.headers_mut());
     }
     if let (Some(client), Some(upstream)) = (client_upgrade, upstream_upgrade) {
+        let permit = lock(&slot).take();
+        let idle = limits.tunnel_idle;
         tokio::spawn(async move {
+            let _permit = permit;
             if let (Ok(client), Ok(upstream)) = (client.await, upstream.await) {
-                let mut client = TokioIo::new(client);
-                let mut upstream = TokioIo::new(upstream);
                 tokio::select! {
-                    _ = tokio::io::copy_bidirectional(&mut client, &mut upstream) => {}
+                    _ = tunnel(TokioIo::new(client), TokioIo::new(upstream), idle) => {}
                     _ = closed(cancel) => {}
                 }
             }
         });
     }
-    response.map(|body| body.boxed())
+    let idle = limits.body_idle;
+    response.map(|body| IdleBody::new(body, idle).boxed())
+}
+
+/// Copies both ways until either side closes or nothing moves in either direction for `idle`.
+async fn tunnel<A, B>(a: A, b: B, idle: Duration)
+where
+    A: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+    B: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
+    let start = tokio::time::Instant::now();
+    let last = AtomicU64::new(0);
+    let (a_read, a_write) = tokio::io::split(a);
+    let (b_read, b_write) = tokio::io::split(b);
+    tokio::select! {
+        _ = pump(a_read, b_write, idle, start, &last) => {}
+        _ = pump(b_read, a_write, idle, start, &last) => {}
+    }
+}
+
+async fn pump<R, W>(
+    mut from: R,
+    mut to: W,
+    idle: Duration,
+    start: tokio::time::Instant,
+    last: &AtomicU64,
+) where
+    R: tokio::io::AsyncRead + Unpin,
+    W: tokio::io::AsyncWrite + Unpin,
+{
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let now = || start.elapsed().as_millis() as u64;
+    let mut buffer = vec![0u8; 16 * 1024];
+    loop {
+        match tokio::time::timeout(idle, from.read(&mut buffer)).await {
+            Ok(Ok(count)) if count > 0 => {
+                last.store(now(), Ordering::Relaxed);
+                if to.write_all(&buffer[..count]).await.is_err() {
+                    break;
+                }
+            }
+            Ok(_) => break,
+            // Quiet this way; keep going while the other way is moving.
+            Err(_) => {
+                if now().saturating_sub(last.load(Ordering::Relaxed)) >= idle.as_millis() as u64 {
+                    break;
+                }
+            }
+        }
+    }
+    let _ = to.shutdown().await;
+}
+
+/// A response body that fails when no chunk arrives for `idle`.
+struct IdleBody {
+    inner: BoxBody<Bytes, hyper::Error>,
+    sleep: std::pin::Pin<Box<tokio::time::Sleep>>,
+    idle: Duration,
+}
+impl IdleBody {
+    fn new(inner: Incoming, idle: Duration) -> Self {
+        Self {
+            inner: inner.boxed(),
+            sleep: Box::pin(tokio::time::sleep(idle)),
+            idle,
+        }
+    }
+}
+impl hyper::body::Body for IdleBody {
+    type Data = Bytes;
+    type Error = Box<dyn std::error::Error + Send + Sync>;
+
+    fn poll_frame(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Result<hyper::body::Frame<Bytes>, Self::Error>>> {
+        use std::{future::Future, task::Poll};
+        let this = &mut *self;
+        match std::pin::Pin::new(&mut this.inner).poll_frame(cx) {
+            Poll::Ready(frame) => {
+                let deadline = tokio::time::Instant::now() + this.idle;
+                this.sleep.as_mut().reset(deadline);
+                Poll::Ready(frame.map(|frame| frame.map_err(Into::into)))
+            }
+            Poll::Pending => match this.sleep.as_mut().poll(cx) {
+                Poll::Ready(()) => Poll::Ready(Some(Err("The computer stopped sending.".into()))),
+                Poll::Pending => Poll::Pending,
+            },
+        }
+    }
 }
 
 static SHARED: OnceLock<Option<UrlProxy>> = OnceLock::new();
@@ -794,6 +893,12 @@ mod tests {
                                 return;
                             }
                         }
+                        return;
+                    }
+                    if head.starts_with("GET /stall") {
+                        let _ = stream
+                            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\npartial");
+                        std::thread::sleep(Duration::from_secs(5));
                         return;
                     }
                     if head.starts_with("GET /hang") {
@@ -1085,6 +1190,7 @@ mod tests {
             header_read: Duration::from_millis(300),
             upstream: Duration::from_millis(500),
             max_connections: 2,
+            ..Limits::default()
         };
         let proxy = UrlProxy::new(0, limits).unwrap();
         apply(
@@ -1114,6 +1220,50 @@ mod tests {
             .unwrap();
         let mut rest = Vec::new();
         assert!(third.read_to_end(&mut rest).is_ok() && rest.is_empty());
+    }
+
+    #[test]
+    fn tunnels_hold_their_permit_and_stalled_bodies_and_idle_tunnels_are_cut() {
+        let limits = Limits {
+            max_connections: 1,
+            body_idle: Duration::from_millis(300),
+            tunnel_idle: Duration::from_millis(600),
+            ..Limits::default()
+        };
+        let proxy = UrlProxy::new(0, limits).unwrap();
+        apply(
+            &proxy,
+            &[route_for("web", "11111111", 3000, upstream("web"))],
+        );
+        let port = proxy.proxy_port();
+        // An open tunnel keeps the only permit, so another connection is closed.
+        let mut tunnel = open_websocket(port, "3000.web.silo.localhost");
+        let mut other = StdStream::connect((Ipv4Addr::LOCALHOST, port)).unwrap();
+        other
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        let mut rest = Vec::new();
+        assert!(other.read_to_end(&mut rest).is_ok() && rest.is_empty());
+        // Quiet in both directions, the tunnel is closed and the permit comes back.
+        tunnel
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut rest = Vec::new();
+        assert!(tunnel.read_to_end(&mut rest).is_ok() && rest.is_empty());
+        std::thread::sleep(Duration::from_millis(100));
+        let host = format!("3000.web.silo.localhost:{port}");
+        assert_eq!(request(port, &host, "/", "").0, 200);
+        // Headers followed by a stall: the body is cut and the permit comes back.
+        let mut stalled = StdStream::connect((Ipv4Addr::LOCALHOST, port)).unwrap();
+        stalled
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        write!(stalled, "GET /stall HTTP/1.1\r\nHost: {host}\r\n\r\n").unwrap();
+        let mut reply = Vec::new();
+        let _ = stalled.read_to_end(&mut reply);
+        assert!(String::from_utf8_lossy(&reply).starts_with("HTTP/1.1 200"));
+        std::thread::sleep(Duration::from_millis(100));
+        assert_eq!(request(port, &host, "/", "").0, 200);
     }
 
     #[test]
