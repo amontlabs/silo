@@ -755,17 +755,21 @@ mod tests {
                     )
                 });
                 wait_for(|| waiting_for(gate, &fixture.computer()));
+                let stopped = Instant::now();
                 if revoke_access {
                     enabled.store(false, Ordering::SeqCst)
                 } else {
                     open.store(false, Ordering::SeqCst)
                 }
-                queued.join().unwrap()
+                (queued.join().unwrap(), stopped)
             });
+            let (result, stopped) = result;
             assert_eq!(result, Err(EXPIRED.into()));
             if revoke_access {
+                // Measured from the revocation: under parallel test load the setup
+                // before it can take longer than the bound by itself.
                 assert!(
-                    started.elapsed() < Duration::from_millis(300),
+                    stopped.elapsed() < Duration::from_millis(300),
                     "revoked access stops a change at once"
                 );
             } else {

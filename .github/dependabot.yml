@@ -67,3 +67,14 @@ updates:
       - dependency-name: 'tauri-plugin-updater'
       # Must match runtime-inputs.json and the microsandbox patch set.
       - dependency-name: 'microsandbox-*'
+      # gtk-rs majors must match the GTK version Tauri and wry build against.
+      - dependency-name: 'gtk'
+        update-types: [version-update:semver-major]
+      - dependency-name: 'gio'
+        update-types: [version-update:semver-major]
+      # sha2 0.11 and hmac 0.13 move to digest 0.11 together (new output type,
+      # no io::Write); port them in one deliberate change.
+      - dependency-name: 'sha2'
+        update-types: [version-update:semver-major]
+      - dependency-name: 'hmac'
+        update-types: [version-update:semver-major]
