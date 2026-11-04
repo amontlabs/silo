@@ -31,6 +31,25 @@ wire_struct! {
         device_id: Option<String>,
         checkpoint_id: Option<String>,
         new_name: String,
+        /// Names of Silo-managed secrets the fork may use. The special name `github` copies
+        /// GitHub access, read-only. Nothing is copied unless named.
+        #[serde(default)]
+        secrets: Vec<String>,
+        /// What to quiet in the fork before it runs anything.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        quiet: Option<QuietSpec>,
+    }
+}
+
+wire_struct! {
+    /// Things a fork turns off on its first boot, beyond the scheduled jobs it always turns off.
+    QuietSpec {
+        /// Process names and systemd units to disable in the fork.
+        #[serde(default)]
+        stop: Vec<String>,
+        /// Absolute guest paths (globs allowed) to delete in the fork.
+        #[serde(default)]
+        scrub: Vec<String>,
     }
 }
 
@@ -171,5 +190,35 @@ pub enum CheckpointKind {
 wire_struct! {
     CheckpointCreatedResult {
         checkpoint: Checkpoint,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fork_params_default_to_nothing_copied_and_no_quiet_spec() {
+        let params: CheckpointForkParams =
+            serde_json::from_str(r#"{"computerId":"c","checkpointId":null,"newName":"n"}"#)
+                .unwrap();
+        assert!(params.secrets.is_empty());
+        assert_eq!(params.quiet, None);
+        let text = serde_json::to_string(&params).unwrap();
+        assert!(!text.contains("quiet"));
+    }
+
+    #[test]
+    fn fork_params_carry_secrets_and_quiet_spec() {
+        let params: CheckpointForkParams = serde_json::from_str(
+            r#"{"computerId":"c","checkpointId":"x","newName":"n","secrets":["github","API_KEY"],"quiet":{"stop":["poller"],"scrub":["/root/.env"]}}"#,
+        )
+        .unwrap();
+        assert_eq!(params.secrets, ["github", "API_KEY"]);
+        let quiet = params.quiet.unwrap();
+        assert_eq!(quiet.stop, ["poller"]);
+        assert_eq!(quiet.scrub, ["/root/.env"]);
+        let partial: QuietSpec = serde_json::from_str(r#"{"stop":["a"]}"#).unwrap();
+        assert!(partial.scrub.is_empty());
     }
 }

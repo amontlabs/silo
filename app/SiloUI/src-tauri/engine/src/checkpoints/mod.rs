@@ -9,6 +9,7 @@
 
 pub mod retention;
 
+pub use crate::runtime::checkpoints::ForkOptions;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
@@ -302,6 +303,7 @@ impl Service {
         computer_id: &str,
         checkpoint_id: Option<&str>,
         new_name: &str,
+        options: ForkOptions,
     ) -> Result<JobId, Failure> {
         match self.platform(computer_id)? {
             Platform::Macos => {
@@ -335,6 +337,7 @@ impl Service {
                             &computer_id,
                             checkpoint_id.as_deref(),
                             &new_name,
+                            options.clone(),
                             &|| macos_computers::names(&macos),
                             job_id,
                             cancellation,
@@ -595,8 +598,8 @@ impl runtime::checkpoints::ForkAssignments for EngineForkAssignments {
         crate::github::forget_fork_assignment(target)
     }
 
-    fn copy_secrets(&self, source: &str, target: &str) -> Result<(), String> {
-        crate::secrets::fork_assignments(source, target)
+    fn copy_secrets(&self, source: &str, target: &str, names: &[String]) -> Result<(), String> {
+        crate::secrets::fork_assignments(source, target, names)
     }
 
     fn forget_secrets(&self, target: &str) -> Result<(), String> {

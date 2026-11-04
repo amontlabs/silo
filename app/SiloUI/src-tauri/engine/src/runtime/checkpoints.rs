@@ -114,6 +114,93 @@ pub(super) struct Record {
     legacy_mounts: Vec<Value>,
     pub(super) pending_checkpoint_restore: Option<PendingRestore>,
     pub(super) checkpoint_operation: Option<Operation>,
+    /// What a fork turns off or leaves out on its first boot. Absent on computers that are not
+    /// forks.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) quiet: Option<QuietRecord>,
+}
+
+/// What a fork was made quiet with: the names the caller asked to stop and scrub, the
+/// assignments it was given, and whether the first-boot step has run.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(super) struct QuietRecord {
+    /// Always true for a fork: crontabs, anacron, at jobs and systemd timers are disabled.
+    pub(super) scheduled_jobs_disabled: bool,
+    /// Always true for a fork: machine-id and hostname are new.
+    pub(super) new_identity: bool,
+    pub(super) stop: Vec<String>,
+    pub(super) scrub: Vec<String>,
+    /// Silo secrets copied to the fork; `github` means read-only GitHub access.
+    pub(super) secrets: Vec<String>,
+    /// The first-boot step finished.
+    pub(super) applied: bool,
+}
+
+/// What the caller of a fork asked for beyond the always-on rules.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ForkOptions {
+    pub secrets: Vec<String>,
+    pub stop: Vec<String>,
+    pub scrub: Vec<String>,
+}
+
+/// The name of the assignment that stands for GitHub access.
+const GITHUB_SECRET_NAME: &str = "github";
+
+impl ForkOptions {
+    fn copies_github(&self) -> bool {
+        self.secrets.iter().any(|name| name == GITHUB_SECRET_NAME)
+    }
+
+    fn named_secrets(&self) -> Vec<String> {
+        self.secrets
+            .iter()
+            .filter(|name| name.as_str() != GITHUB_SECRET_NAME)
+            .cloned()
+            .collect()
+    }
+
+    pub(super) fn validate(&self) -> Result<(), RuntimeError> {
+        let invalid = |message: &str| Err(RuntimeError::Invalid(message.into()));
+        if self.secrets.len() > 64 || self.stop.len() > 64 || self.scrub.len() > 64 {
+            return invalid("A fork can name at most 64 secrets, processes and paths each.");
+        }
+        if self
+            .secrets
+            .iter()
+            .any(|name| name.is_empty() || name.len() > 128 || name.contains('\0'))
+        {
+            return invalid("A secret name is empty or invalid.");
+        }
+        if self.stop.iter().any(|name| {
+            name.is_empty()
+                || name.len() > 128
+                || name.starts_with('-')
+                || !name
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b"._@:+-".contains(&b))
+        }) {
+            return invalid(
+                "A process or unit to stop may only contain letters, digits and . _ @ : + -.",
+            );
+        }
+        for path in &self.scrub {
+            let parts: Vec<&str> = path.split('/').filter(|part| !part.is_empty()).collect();
+            if !path.starts_with('/')
+                || path.len() > 1024
+                || path.contains(['\0', '\n'])
+                || parts.iter().any(|part| *part == "..")
+                || parts.len() < 2
+                || parts[0].contains(['*', '?', '['])
+            {
+                return invalid(
+                    "A path to scrub must be absolute, name at least two levels, and not contain '..'.",
+                );
+            }
+        }
+        Ok(())
+    }
 }
 
 /// Boot variables that older versions used to set a computer's Git and jj identity.
@@ -1616,13 +1703,16 @@ pub(super) fn start_pending(
             record.restore_attempt_ran = false;
             record.checkpoint_operation = None;
             save(paths, configuration.id(), &record)?;
-            return super::lifecycle_recovery::perform(
+            super::lifecycle_recovery::perform(
                 runner,
                 paths,
                 &device_resources()?,
                 "start",
                 configuration.name(),
-            );
+            )?;
+            // An earlier attempt booted but did not finish quieting the fork.
+            apply_quiet(runner, paths, configuration.name(), &mut record)?;
+            return save(paths, configuration.id(), &record);
         }
         runner.run(
             paths,
@@ -1725,7 +1815,12 @@ pub(super) fn start_pending(
         .and_then(|_| inspect_computer(runner, paths, configuration.name()))
         .and_then(|observed| if running_child_matches(&observed, configuration.id(), &attempt_id, &material, &policy) {
             Ok(observed)
-        } else { Err(error("The restored computer did not reach a verified running state. Its checkpoint was preserved.")) });
+        } else { Err(error("The restored computer did not reach a verified running state. Its checkpoint was preserved.")) })
+        // The first command in the new guest, before the fork is reported started.
+        .and_then(|observed| {
+            apply_quiet(runner, paths, configuration.name(), &mut record)?;
+            Ok(observed)
+        });
     match result {
         Ok(observed) => {
             record.pending_checkpoint_restore = None;
@@ -1835,7 +1930,7 @@ fn pending_current_fork_point(
 pub trait ForkAssignments {
     fn copy_github(&self, source: &str, target: &str) -> Result<(), String>;
     fn forget_github(&self, target: &str) -> Result<(), String>;
-    fn copy_secrets(&self, source: &str, target: &str) -> Result<(), String>;
+    fn copy_secrets(&self, source: &str, target: &str, names: &[String]) -> Result<(), String>;
     fn forget_secrets(&self, target: &str) -> Result<(), String>;
 }
 
@@ -1846,6 +1941,7 @@ pub(super) struct ForkSource {
     member: String,
     scope: String,
     desired_policy: Value,
+    options: ForkOptions,
 }
 
 fn ensure_fork_name_available(
@@ -1859,6 +1955,85 @@ fn ensure_fork_name_available(
             "The fork name is already in use or the computer limit was reached.".into(),
         ));
     }
+    Ok(())
+}
+
+/// Runs as root in the fork's guest as the first command after its cold boot. MicroSandbox
+/// 0.7.6 cannot edit a snapshot's disk before it boots, and the guest starts only its init and
+/// `/bin/bash`, so no cron, timer or service has started when this runs. Arguments: the new
+/// hostname, then `stop=<name>` and `scrub=<path>` entries. They are positional, never part of
+/// the script text.
+const QUIET_SCRIPT: &str = include_str!("checkpoints/quiet.sh");
+
+/// A hostname for a fork: its name reduced to what a hostname allows.
+fn fork_hostname(name: &str) -> String {
+    let cleaned: String = name
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    let cleaned: String = cleaned.trim_matches('-').chars().take(63).collect();
+    if cleaned.is_empty() {
+        "silo-fork".into()
+    } else {
+        cleaned
+    }
+}
+
+fn quiet_exec_args(name: &str, quiet: &QuietRecord) -> Vec<String> {
+    let mut args: Vec<String> = [
+        "exec",
+        name,
+        "--user",
+        "root",
+        "--no-tty",
+        "--quiet",
+        "--timeout",
+        "120s",
+        "--",
+        "sh",
+        "-c",
+        QUIET_SCRIPT,
+        "silo-quiet",
+    ]
+    .iter()
+    .map(|part| (*part).into())
+    .collect();
+    args.push(fork_hostname(name));
+    args.extend(quiet.stop.iter().map(|n| format!("stop={n}")));
+    args.extend(quiet.scrub.iter().map(|p| format!("scrub={p}")));
+    args
+}
+
+/// Quiets a fork whose guest is running: new identity, scheduled jobs off, named processes
+/// stopped, named paths removed. Does nothing for a computer that is not an unquieted fork. On
+/// failure the guest is stopped, so a fork that could not be quieted does not keep running.
+fn apply_quiet(
+    runner: &dyn RuntimeRunner,
+    paths: &RuntimePaths,
+    name: &str,
+    record: &mut Record,
+) -> Result<(), RuntimeError> {
+    let Some(quiet) = record.quiet.as_mut().filter(|quiet| !quiet.applied) else {
+        return Ok(());
+    };
+    let outcome = runner.run(
+        paths,
+        &quiet_exec_args(name, quiet),
+        Duration::from_secs(150),
+    );
+    if outcome.is_err() {
+        let _ = runner.run(paths, &["stop".into(), name.into()], STOP_TIMEOUT);
+        return Err(error(
+            "The fork could not be made quiet, so it was stopped. Start it again to retry.",
+        ));
+    }
+    quiet.applied = true;
     Ok(())
 }
 
@@ -1939,6 +2114,7 @@ pub(super) fn fork_source(
         member,
         scope,
         desired_policy,
+        options: ForkOptions::default(),
     })
 }
 
@@ -2019,6 +2195,14 @@ fn fork_commit_with_metadata_writer(
         state: "disk".into(),
     });
     child_record.desired_network_policy = Some(fork.desired_policy.clone());
+    child_record.quiet = Some(QuietRecord {
+        scheduled_jobs_disabled: true,
+        new_identity: true,
+        stop: fork.options.stop.clone(),
+        scrub: fork.options.scrub.clone(),
+        secrets: fork.options.secrets.clone(),
+        applied: false,
+    });
     let source_record = load(paths, source.id())?;
     child_record.desired_environment = source_record.desired_environment;
     // A source from before Cua Driver recorded the read-only ChatGPT and LCU folders. Keep them
@@ -2029,14 +2213,20 @@ fn fork_commit_with_metadata_writer(
     let mut copied_secrets = false;
     let result = (|| {
         crate::computer_use::inherit_settings(paths, source.id(), &child_id)?;
-        assignments
-            .copy_github(source.name(), new_name)
-            .map_err(RuntimeError::Unavailable)?;
-        copied_github = true;
-        assignments
-            .copy_secrets(source.name(), new_name)
-            .map_err(RuntimeError::Unavailable)?;
-        copied_secrets = true;
+        // Nothing is copied unless the fork names it; GitHub access is always read-only.
+        if fork.options.copies_github() {
+            assignments
+                .copy_github(source.name(), new_name)
+                .map_err(RuntimeError::Unavailable)?;
+            copied_github = true;
+        }
+        let named = fork.options.named_secrets();
+        if !named.is_empty() {
+            assignments
+                .copy_secrets(source.name(), new_name, &named)
+                .map_err(RuntimeError::Unavailable)?;
+            copied_secrets = true;
+        }
         metadata.computers.push(child);
         write(&paths.metadata, &metadata)
     })();
@@ -2096,6 +2286,7 @@ fn fork_in_lanes(
     computer_id: &str,
     checkpoint_id: Option<&str>,
     new_name: &str,
+    options: ForkOptions,
     macos_names: &dyn Fn() -> Vec<String>,
     job: Option<(
         silo_api::jobs::JobId,
@@ -2103,10 +2294,11 @@ fn fork_in_lanes(
     )>,
 ) -> Result<(), RuntimeError> {
     use super::operation_gate::{OperationKind, Scope};
+    options.validate()?;
     let computer_name = computer_configuration(paths, computer_id)?
         .name()
         .to_owned();
-    let fork = {
+    let mut fork = {
         let gate = gate.kind(OperationKind::CheckpointFork);
         let guard = if let Some((job_id, cancellation)) = &job {
             gate.acquire_for_job(
@@ -2128,6 +2320,7 @@ fn fork_in_lanes(
         shutdown::ensure_accepting_operations().map_err(RuntimeError::Unavailable)?;
         fork_source(runner, paths, computer_id, checkpoint_id, new_name)?
     };
+    fork.options = options;
     let gate = gate.kind(OperationKind::CheckpointFork);
     let guard = if let Some((job_id, cancellation)) = &job {
         gate.acquire_for_job(
@@ -2163,6 +2356,7 @@ pub fn fork(
     computer_id: &str,
     checkpoint_id: Option<&str>,
     new_name: &str,
+    options: ForkOptions,
     macos_names: &dyn Fn() -> Vec<String>,
 ) -> Result<(), String> {
     fork_in_lanes(
@@ -2173,6 +2367,7 @@ pub fn fork(
         computer_id,
         checkpoint_id,
         new_name,
+        options,
         macos_names,
         None,
     )
@@ -2186,6 +2381,7 @@ pub fn fork_for_job(
     computer_id: &str,
     checkpoint_id: Option<&str>,
     new_name: &str,
+    options: ForkOptions,
     macos_names: &dyn Fn() -> Vec<String>,
     job_id: silo_api::jobs::JobId,
     cancellation: std::sync::Arc<std::sync::atomic::AtomicBool>,
@@ -2198,6 +2394,7 @@ pub fn fork_for_job(
         computer_id,
         checkpoint_id,
         new_name,
+        options,
         macos_names,
         Some((job_id, cancellation)),
     )

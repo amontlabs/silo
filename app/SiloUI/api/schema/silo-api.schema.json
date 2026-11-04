@@ -674,6 +674,25 @@
         },
         "newName": {
           "type": "string"
+        },
+        "quiet": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/QuietSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "What to quiet in the fork before it runs anything."
+        },
+        "secrets": {
+          "default": [],
+          "description": "Names of Silo-managed secrets the fork may use. The special name `github` copies\nGitHub access, read-only. Nothing is copied unless named.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         }
       },
       "required": [
@@ -12547,6 +12566,28 @@
         "branch",
         "commit"
       ],
+      "type": "object"
+    },
+    "QuietSpec": {
+      "description": "Things a fork turns off on its first boot, beyond the scheduled jobs it always turns off.",
+      "properties": {
+        "scrub": {
+          "default": [],
+          "description": "Absolute guest paths (globs allowed) to delete in the fork.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "stop": {
+          "default": [],
+          "description": "Process names and systemd units to disable in the fork.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
       "type": "object"
     },
     "ReclaimEntry": {
