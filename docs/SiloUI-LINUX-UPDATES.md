@@ -7,7 +7,9 @@
 > Retired on 2026-11-04, after v0.12.0 shipped without Linux packages: the APT
 > publishing workflow and the Debian packaging scripts were removed, so the
 > repository index is no longer re-signed and expires. The sections below
-> describe the removed tooling.
+> describe the removed tooling. Once the last index expires, `apt update` reports
+> the Silo source as expired; remove it with
+> `sudo rm /etc/apt/sources.list.d/silo.sources`.
 
 Silo's Debian installer registers a signed APT source, so Ubuntu/Xubuntu can
 install subsequent releases through Software Updater. AppImage remains an
