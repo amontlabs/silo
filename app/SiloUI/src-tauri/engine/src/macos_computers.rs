@@ -6980,8 +6980,8 @@ mod tests {
             &fork,
             &developer_tools::version()
         ));
-        // Personalization, the workspace folders and the network and trust stay to do.
-        assert!(fork.setup.needs_personalizing && !fork.setup.roots && !fork.setup.proxy_bootstrap);
+        // Personalization and the network and trust stay to do; the folders came with the disk.
+        assert!(fork.setup.needs_personalizing && fork.setup.roots && !fork.setup.proxy_bootstrap);
     }
 
     #[test]
