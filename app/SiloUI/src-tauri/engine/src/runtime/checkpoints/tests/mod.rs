@@ -2230,6 +2230,11 @@ fn fork_commit_adds_the_stopped_fork_and_its_assignments() {
         .unwrap();
     assert_eq!(pending.checkpoint_id, fork.member);
     assert_eq!(pending.source_computer, "dev");
+    assert_eq!(
+        (fork.scope.as_str(), pending.state.as_str()),
+        ("full", "disk"),
+        "a fork of a full checkpoint boots from its disks and never resumes memory"
+    );
     assert_eq!(*assignments.github.lock().unwrap(), ["branch"]);
     assert_eq!(*assignments.secrets.lock().unwrap(), ["branch"]);
 }
@@ -2608,8 +2613,25 @@ struct Store {
     /// Layers of the `/workspace` disk when its chain differs from the root's.
     workspace_layers: Option<usize>,
     fail_compact: bool,
+    /// The real compaction ends on Silo's own timeout.
+    compact_timed_out: bool,
+    /// What a poll of a busy runtime reports instead of the client deadline.
+    poll_failure: Option<&'static str>,
+    /// A real compaction whose reply the client stops waiting for while the runtime goes on.
+    slow_compaction: Mutex<SlowCompaction>,
     calls: Mutex<Vec<Vec<String>>>,
 }
+
+#[derive(Clone, Copy)]
+enum SlowCompaction {
+    Off,
+    /// The next real compaction hits the client's reply deadline; the runtime then answers
+    /// nothing for this many requests and applies the merge of `.1` layers when done.
+    Armed(usize, usize),
+    Busy(usize, usize),
+    Done(usize),
+}
+
 impl Store {
     fn new(computers: Vec<(&'static str, Option<&'static str>)>) -> Self {
         Self {
@@ -2621,8 +2643,17 @@ impl Store {
             layers: 0,
             workspace_layers: None,
             fail_compact: false,
+            compact_timed_out: false,
+            poll_failure: None,
+            slow_compaction: Mutex::new(SlowCompaction::Off),
             calls: Mutex::new(Vec::new()),
         }
+    }
+    /// The reply deadline expires; the runtime answers again after `busy` requests, having
+    /// merged `merged` layers into one.
+    fn slow_compaction(self, busy: usize, merged: usize) -> Self {
+        *self.slow_compaction.lock().unwrap() = SlowCompaction::Armed(busy, merged);
+        self
     }
     fn with_layers(mut self, layers: usize) -> Self {
         self.layers = layers;
@@ -2738,8 +2769,30 @@ impl RuntimeRunner for Store {
                 ("modify", Some(name)) if args.contains(&"--compact".into()) => {
                     let layers = args.iter().position(|arg| arg == "--layers").map(|at| args[at + 1].parse::<usize>().unwrap());
                     if args.contains(&"--dry-run".into()) {
+                        let mut slow = self.slow_compaction.lock().unwrap();
+                        match *slow {
+                            SlowCompaction::Busy(0, merged) => *slow = SlowCompaction::Done(merged),
+                            SlowCompaction::Busy(left, merged) => {
+                                *slow = SlowCompaction::Busy(left - 1, merged);
+                                if let Some(text) = self.poll_failure {
+                                    return Err(RuntimeError::Unavailable(text.into()));
+                                }
+                                return Err(RuntimeError::Failed {
+                                    operation: "modify".into(),
+                                    exit_code: Some(1),
+                                    detail: "control client error: local deadline expired (delivery: NotSent)".into(),
+                                });
+                            }
+                            _ => {}
+                        }
+                        let merged_away = match *slow {
+                            SlowCompaction::Done(merged) => merged.saturating_sub(1),
+                            _ => 0,
+                        };
+                        drop(slow);
                         let only = args.iter().position(|arg| arg == "--disk").map(|at| args[at + 1].clone());
                         let disk = |guest: &str, total: usize| {
+                            let total = total - merged_away;
                             let selected = layers.unwrap_or(total.saturating_sub(1)).min(total.saturating_sub(1));
                             serde_json::json!({"guest_path": guest, "input_layers": total, "selected_layers": selected, "output_layers": total - selected + 1})
                         };
@@ -2752,6 +2805,19 @@ impl RuntimeRunner for Store {
                         return ok(serde_json::json!({"dry_run": true, "disks": disks}).to_string());
                     }
                     assert_eq!(name, "dev");
+                    let mut slow = self.slow_compaction.lock().unwrap();
+                    if let SlowCompaction::Armed(busy, merged) = *slow {
+                        *slow = SlowCompaction::Busy(busy, merged);
+                        return Err(RuntimeError::Failed {
+                            operation: "modify".into(),
+                            exit_code: Some(1),
+                            detail: "control client error: local deadline expired (delivery: Unknown)".into(),
+                        });
+                    }
+                    drop(slow);
+                    if self.compact_timed_out {
+                        return Err(RuntimeError::TimedOut { operation: "modify".into() });
+                    }
                     if self.fail_compact {
                         return Err(RuntimeError::Unavailable("compaction of / failed: injected; VM kept paused; restart follows per-disk journals".into()));
                     }
@@ -4967,6 +5033,131 @@ fn a_failed_merge_removes_nothing_and_is_recorded_without_a_retry() {
     let message = operation.error.unwrap();
     assert!(message.contains("kept"), "{message}");
     assert!(message.contains("Restart dev"), "{message}");
+}
+
+#[test]
+fn a_merge_the_client_stopped_waiting_for_is_awaited_and_retention_goes_on() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let (paths, store) = chain_fixture(&directory, &["automatic"; 6], None);
+    let store = store.slow_compaction(3, 4);
+
+    trim_automatic(&store, &paths, 2);
+
+    assert_eq!(store.compactions(), [4], "the merge is not issued twice");
+    assert_eq!(
+        store.removals(),
+        (1..=4)
+            .map(|n| format!("dev:{}", native_id(n)))
+            .collect::<Vec<_>>()
+    );
+    let record = load(&paths, ID).unwrap();
+    assert_eq!(left_ids(&paths), [native_id(5), native_id(6)]);
+    assert!(
+        record.checkpoint_operation.is_none(),
+        "{:?}",
+        record.checkpoint_operation
+    );
+}
+
+#[test]
+fn a_merge_that_never_ran_after_the_wait_keeps_every_checkpoint_and_is_recorded() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let (paths, store) = chain_fixture(&directory, &["automatic"; 6], None);
+    // The runtime comes back with the same layers: nothing was merged.
+    let store = store.slow_compaction(1, 1);
+
+    trim_automatic(&store, &paths, 2);
+
+    assert!(store.removals().is_empty());
+    assert_eq!(load(&paths, ID).unwrap().checkpoints.len(), 6);
+    let operation = load(&paths, ID).unwrap().checkpoint_operation.unwrap();
+    assert_eq!(operation.status, "failed");
+    assert_eq!(operation.stage, reclaim::RECLAIM_STAGE);
+    assert!(operation.error.unwrap().contains("did not merge"));
+}
+
+fn dry_runs(store: &Store) -> usize {
+    store
+        .calls
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|call| call[0] == "modify" && call.contains(&"--dry-run".into()))
+        .count()
+}
+
+#[test]
+fn silos_own_merge_timeout_does_not_start_another_wait() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let (paths, mut store) = chain_fixture(&directory, &["automatic"; 6], None);
+    store.compact_timed_out = true;
+    let planning = {
+        trim_automatic(&store, &paths, 2);
+        dry_runs(&store)
+    };
+
+    assert!(store.removals().is_empty());
+    // Only the planning and confirmation dry runs ran; nothing polled afterwards.
+    assert_eq!(planning, dry_runs(&store));
+    let calls = store.calls.lock().unwrap();
+    let merge = calls
+        .iter()
+        .position(|call| call[0] == "modify" && !call.contains(&"--dry-run".into()))
+        .unwrap();
+    assert!(calls[merge + 1..]
+        .iter()
+        .all(|call| !(call[0] == "modify" && call.contains(&"--dry-run".into()))));
+    drop(calls);
+    assert_eq!(
+        load(&paths, ID).unwrap().checkpoint_operation.unwrap().status,
+        "failed"
+    );
+}
+
+#[test]
+fn a_poll_that_reports_a_paused_computer_ends_the_wait_with_the_restart_hint() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let (paths, mut store) = chain_fixture(&directory, &["automatic"; 6], None);
+    store.poll_failure = Some("the sandbox is paused");
+    let store = store.slow_compaction(5, 4);
+
+    trim_automatic(&store, &paths, 2);
+
+    assert!(store.removals().is_empty());
+    let message = load(&paths, ID)
+        .unwrap()
+        .checkpoint_operation
+        .unwrap()
+        .error
+        .unwrap();
+    assert!(message.contains("Restart dev"), "{message}");
+}
+
+#[test]
+fn a_failed_pass_leaves_the_next_pass_free_to_merge_and_remove() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let (paths, store) = chain_fixture(&directory, &["automatic"; 6], None);
+    let store = store.slow_compaction(1, 1);
+    trim_automatic(&store, &paths, 2);
+    assert_eq!(
+        load(&paths, ID).unwrap().checkpoint_operation.unwrap().status,
+        "failed"
+    );
+
+    // The next pass starts clean: the runtime answers and this time the merge applies.
+    let again = Store {
+        slow_compaction: Mutex::new(SlowCompaction::Off),
+        ..store
+    };
+    trim_automatic(&again, &paths, 2);
+
+    assert_eq!(left_ids(&paths), [native_id(5), native_id(6)]);
+    assert!(load(&paths, ID).unwrap().checkpoint_operation.is_none());
 }
 
 #[test]

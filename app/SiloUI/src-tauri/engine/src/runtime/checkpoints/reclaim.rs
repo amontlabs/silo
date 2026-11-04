@@ -16,6 +16,9 @@ use super::*;
 
 const COMPACT_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 
+/// How long a poll waits between asking a busy runtime whether it has finished compacting.
+const COMPACT_POLL: Duration = Duration::from_secs(3);
+
 /// The stage shown while retention merges and removes, and the label of its failure.
 pub(super) const RECLAIM_STAGE: &str = "Freeing checkpoint disk";
 
@@ -104,23 +107,37 @@ fn compact_args(
     args
 }
 
-fn disk_plans(
+/// Why a compaction plan could not be read.
+enum PlanError {
+    Run(RuntimeError),
+    Unreadable,
+}
+
+impl PlanError {
+    fn message(&self) -> String {
+        match self {
+            Self::Run(failure) => safe_activity_error(failure),
+            Self::Unreadable => "The runtime returned an unreadable compaction plan.".to_owned(),
+        }
+    }
+}
+
+fn read_plans(
     runner: &dyn RuntimeRunner,
     paths: &RuntimePaths,
     computer: &str,
     disk: Option<&str>,
     layers: Option<usize>,
-) -> Result<Vec<DiskPlan>, String> {
+) -> Result<Vec<DiskPlan>, PlanError> {
     let output = runner
         .run(
             paths,
             &compact_args(computer, disk, layers, true),
             READ_TIMEOUT,
         )
-        .map_err(|failure| safe_activity_error(&failure))?;
-    let unreadable = || "The runtime returned an unreadable compaction plan.".to_owned();
-    let value: Value = serde_json::from_str(&output.stdout).map_err(|_| unreadable())?;
-    let disks = value["disks"].as_array().ok_or_else(unreadable)?;
+        .map_err(PlanError::Run)?;
+    let value: Value = serde_json::from_str(&output.stdout).map_err(|_| PlanError::Unreadable)?;
+    let disks = value["disks"].as_array().ok_or(PlanError::Unreadable)?;
     let plans: Vec<DiskPlan> = disks
         .iter()
         .filter_map(|disk| {
@@ -132,9 +149,19 @@ fn disk_plans(
         })
         .collect();
     if plans.is_empty() || plans.len() != disks.len() {
-        return Err(unreadable());
+        return Err(PlanError::Unreadable);
     }
     Ok(plans)
+}
+
+fn disk_plans(
+    runner: &dyn RuntimeRunner,
+    paths: &RuntimePaths,
+    computer: &str,
+    disk: Option<&str>,
+    layers: Option<usize>,
+) -> Result<Vec<DiskPlan>, String> {
+    read_plans(runner, paths, computer, disk, layers).map_err(|failure| failure.message())
 }
 
 /// The snapshot the computer's next capture names as parent. MicroSandbox's capture cursor
@@ -177,6 +204,8 @@ fn computer_tip(
 struct Merge {
     disk: Option<String>,
     layers: usize,
+    /// The layer count each merged disk had when the merge was planned.
+    before: Vec<(String, usize)>,
 }
 
 /// The merges that fold every layer older than the oldest checkpoint that stays into one,
@@ -239,7 +268,14 @@ fn merges(
     let steps: Vec<Merge> = if uniform {
         per_disk[0]
             .1
-            .map(|layers| Merge { disk: None, layers })
+            .map(|layers| Merge {
+                disk: None,
+                layers,
+                before: overview
+                    .iter()
+                    .map(|disk| (disk.guest.clone(), disk.input_layers))
+                    .collect(),
+            })
             .into_iter()
             .collect()
     } else {
@@ -249,6 +285,7 @@ fn merges(
                 layers.map(|layers| Merge {
                     disk: Some(disk.guest.clone()),
                     layers,
+                    before: vec![(disk.guest.clone(), disk.input_layers)],
                 })
             })
             .collect()
@@ -274,27 +311,95 @@ fn merges(
     Ok(steps)
 }
 
+/// Whether msb's control client stopped waiting for a reply while the runtime went on
+/// compacting. MicroSandbox gives up on a request after 30 seconds and the runtime answers
+/// nothing else until the merge is done. Silo's own timeout is a different failure.
+fn client_deadline_expired(failure: &RuntimeError) -> bool {
+    matches!(
+        failure,
+        RuntimeError::Failed { detail, .. } if detail.to_lowercase().contains("deadline expired")
+    )
+}
+
+/// A poll that got no answer because the runtime is still busy: msb's deadline, or Silo
+/// ending its own short read.
+fn runtime_busy(failure: &RuntimeError) -> bool {
+    client_deadline_expired(failure) || matches!(failure, RuntimeError::TimedOut { .. })
+}
+
+fn pause(duration: Duration) {
+    if !cfg!(test) {
+        std::thread::sleep(duration);
+    }
+}
+
+/// Waits for a runtime that is still compacting after the client stopped waiting, then
+/// reports whether the merge was applied: every merged disk has fewer layers than planned.
+/// The whole pass, merge included, stays within one `COMPACT_TIMEOUT` from `started`. Any
+/// answer other than "busy" ends the wait at once.
+fn wait_for_compaction(
+    runner: &dyn RuntimeRunner,
+    paths: &RuntimePaths,
+    computer: &str,
+    step: &Merge,
+    started: Instant,
+) -> Result<bool, String> {
+    loop {
+        match read_plans(runner, paths, computer, step.disk.as_deref(), None) {
+            Ok(now) => {
+                return Ok(step.before.iter().all(|(guest, before)| {
+                    now.iter()
+                        .find(|disk| &disk.guest == guest)
+                        .is_some_and(|disk| disk.input_layers < *before)
+                }));
+            }
+            Err(PlanError::Run(failure)) if runtime_busy(&failure) => {
+                if started.elapsed() >= COMPACT_TIMEOUT {
+                    return Err(format!(
+                        "{computer} was still merging layers after {} minutes.",
+                        COMPACT_TIMEOUT.as_secs() / 60
+                    ));
+                }
+                pause(COMPACT_POLL);
+            }
+            Err(other) => return Err(paused_hint(other.message(), computer)),
+        }
+    }
+}
+
+fn paused_hint(detail: String, computer: &str) -> String {
+    if detail.contains("paused") {
+        format!("{detail} Restart {computer} to finish the merge.")
+    } else {
+        detail
+    }
+}
+
 fn run_merge(
     runner: &dyn RuntimeRunner,
     paths: &RuntimePaths,
     computer: &str,
     step: &Merge,
 ) -> Result<(), String> {
-    runner
-        .run(
-            paths,
-            &compact_args(computer, step.disk.as_deref(), Some(step.layers), false),
-            COMPACT_TIMEOUT,
-        )
-        .map(|_| ())
-        .map_err(|failure| {
-            let detail = safe_activity_error(&failure);
-            if detail.contains("paused") {
-                format!("{detail} Restart {computer} to finish the merge.")
-            } else {
-                detail
-            }
-        })
+    let started = Instant::now();
+    let failure = match runner.run(
+        paths,
+        &compact_args(computer, step.disk.as_deref(), Some(step.layers), false),
+        COMPACT_TIMEOUT,
+    ) {
+        Ok(_) => return Ok(()),
+        Err(failure) => failure,
+    };
+    if client_deadline_expired(&failure) {
+        return match wait_for_compaction(runner, paths, computer, step, started) {
+            Ok(true) => Ok(()),
+            Ok(false) => Err(format!(
+                "The runtime did not merge the layers of {computer}. The next checkpoint tries again."
+            )),
+            Err(detail) => Err(detail),
+        };
+    }
+    Err(paused_hint(safe_activity_error(&failure), computer))
 }
 
 /// Stores `message` as the computer's failed checkpoint operation. The caller holds the

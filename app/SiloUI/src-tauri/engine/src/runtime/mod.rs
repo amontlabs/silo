@@ -12,6 +12,7 @@ mod github_integration_tests;
 pub mod guest_image;
 pub mod image_cache;
 pub mod lifecycle_recovery;
+mod memory_cache;
 pub mod operation_gate;
 pub mod remote_ops;
 #[path = "../runtime_activity.rs"]
