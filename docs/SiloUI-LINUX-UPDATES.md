@@ -10,6 +10,11 @@
 > describe the removed tooling. Once the last index expires, `apt update` reports
 > the Silo source as expired; remove it with
 > `sudo rm /etc/apt/sources.list.d/silo.sources`.
+>
+> The archive signing key (`SILO_APT_SIGNING_KEY` in the `apt-publish`
+> environment) is kept for a future Linux app, since existing installs trust it.
+> The removed workflow and scripts can be restored from commit
+> [f15b8e3](https://github.com/amontlabs/silo/tree/f15b8e33a9fde118fd970ae8d201c54533322ed9).
 
 Silo's Debian installer registers a signed APT source, so Ubuntu/Xubuntu can
 install subsequent releases through Software Updater. AppImage remains an
