@@ -24,19 +24,24 @@ fn referenced_manifests(snapshots: &Path) -> io::Result<HashSet<String>> {
         Err(failure) if failure.kind() == io::ErrorKind::NotFound => return Ok(manifests),
         Err(failure) => return Err(failure),
     };
-    for group in groups.flatten() {
-        let Ok(members) = fs::read_dir(group.path()) else {
-            continue;
+    for group in groups {
+        let group = group?;
+        let members = match fs::read_dir(group.path()) {
+            Ok(members) => members,
+            Err(failure) if failure.kind() == io::ErrorKind::NotFound => continue,
+            Err(failure) => return Err(failure),
         };
-        for member in members.flatten() {
-            let Ok(bytes) = fs::read(member.path().join("checkpoint").join("checkpoint.json"))
-            else {
-                continue;
+        for member in members {
+            let member = member?;
+            let bytes = match fs::read(member.path().join("checkpoint").join("checkpoint.json")) {
+                Ok(bytes) => bytes,
+                // Nothing to name: a disk snapshot, or a member removed meanwhile.
+                Err(failure) if failure.kind() == io::ErrorKind::NotFound => continue,
+                Err(failure) => return Err(failure),
             };
-            let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
-                // An unreadable manifest might name any entry; keep them all.
-                return Err(io::Error::other("a checkpoint manifest could not be read"));
-            };
+            // An unreadable manifest might name any entry; keep them all.
+            let value = serde_json::from_slice::<serde_json::Value>(&bytes)
+                .map_err(|_| io::Error::other("a checkpoint manifest could not be read"))?;
             if let Some(memory) = value.get("memory").and_then(serde_json::Value::as_str) {
                 manifests.insert(memory.replace(':', "-"));
             }

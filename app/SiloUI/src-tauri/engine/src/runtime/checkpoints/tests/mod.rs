@@ -2613,6 +2613,10 @@ struct Store {
     /// Layers of the `/workspace` disk when its chain differs from the root's.
     workspace_layers: Option<usize>,
     fail_compact: bool,
+    /// The real compaction ends on Silo's own timeout.
+    compact_timed_out: bool,
+    /// What a poll of a busy runtime reports instead of the client deadline.
+    poll_failure: Option<&'static str>,
     /// A real compaction whose reply the client stops waiting for while the runtime goes on.
     slow_compaction: Mutex<SlowCompaction>,
     calls: Mutex<Vec<Vec<String>>>,
@@ -2639,6 +2643,8 @@ impl Store {
             layers: 0,
             workspace_layers: None,
             fail_compact: false,
+            compact_timed_out: false,
+            poll_failure: None,
             slow_compaction: Mutex::new(SlowCompaction::Off),
             calls: Mutex::new(Vec::new()),
         }
@@ -2768,6 +2774,9 @@ impl RuntimeRunner for Store {
                             SlowCompaction::Busy(0, merged) => *slow = SlowCompaction::Done(merged),
                             SlowCompaction::Busy(left, merged) => {
                                 *slow = SlowCompaction::Busy(left - 1, merged);
+                                if let Some(text) = self.poll_failure {
+                                    return Err(RuntimeError::Unavailable(text.into()));
+                                }
                                 return Err(RuntimeError::Failed {
                                     operation: "modify".into(),
                                     exit_code: Some(1),
@@ -2806,6 +2815,9 @@ impl RuntimeRunner for Store {
                         });
                     }
                     drop(slow);
+                    if self.compact_timed_out {
+                        return Err(RuntimeError::TimedOut { operation: "modify".into() });
+                    }
                     if self.fail_compact {
                         return Err(RuntimeError::Unavailable("compaction of / failed: injected; VM kept paused; restart follows per-disk journals".into()));
                     }
@@ -5064,6 +5076,65 @@ fn a_merge_that_never_ran_after_the_wait_keeps_every_checkpoint_and_is_recorded(
     assert_eq!(operation.status, "failed");
     assert_eq!(operation.stage, reclaim::RECLAIM_STAGE);
     assert!(operation.error.unwrap().contains("did not merge"));
+}
+
+fn dry_runs(store: &Store) -> usize {
+    store
+        .calls
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|call| call[0] == "modify" && call.contains(&"--dry-run".into()))
+        .count()
+}
+
+#[test]
+fn silos_own_merge_timeout_does_not_start_another_wait() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let (paths, mut store) = chain_fixture(&directory, &["automatic"; 6], None);
+    store.compact_timed_out = true;
+    let planning = {
+        trim_automatic(&store, &paths, 2);
+        dry_runs(&store)
+    };
+
+    assert!(store.removals().is_empty());
+    // Only the planning and confirmation dry runs ran; nothing polled afterwards.
+    assert_eq!(planning, dry_runs(&store));
+    let calls = store.calls.lock().unwrap();
+    let merge = calls
+        .iter()
+        .position(|call| call[0] == "modify" && !call.contains(&"--dry-run".into()))
+        .unwrap();
+    assert!(calls[merge + 1..]
+        .iter()
+        .all(|call| !(call[0] == "modify" && call.contains(&"--dry-run".into()))));
+    drop(calls);
+    assert_eq!(
+        load(&paths, ID).unwrap().checkpoint_operation.unwrap().status,
+        "failed"
+    );
+}
+
+#[test]
+fn a_poll_that_reports_a_paused_computer_ends_the_wait_with_the_restart_hint() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let (paths, mut store) = chain_fixture(&directory, &["automatic"; 6], None);
+    store.poll_failure = Some("the sandbox is paused");
+    let store = store.slow_compaction(5, 4);
+
+    trim_automatic(&store, &paths, 2);
+
+    assert!(store.removals().is_empty());
+    let message = load(&paths, ID)
+        .unwrap()
+        .checkpoint_operation
+        .unwrap()
+        .error
+        .unwrap();
+    assert!(message.contains("Restart dev"), "{message}");
 }
 
 #[test]

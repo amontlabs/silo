@@ -107,23 +107,37 @@ fn compact_args(
     args
 }
 
-fn disk_plans(
+/// Why a compaction plan could not be read.
+enum PlanError {
+    Run(RuntimeError),
+    Unreadable,
+}
+
+impl PlanError {
+    fn message(&self) -> String {
+        match self {
+            Self::Run(failure) => safe_activity_error(failure),
+            Self::Unreadable => "The runtime returned an unreadable compaction plan.".to_owned(),
+        }
+    }
+}
+
+fn read_plans(
     runner: &dyn RuntimeRunner,
     paths: &RuntimePaths,
     computer: &str,
     disk: Option<&str>,
     layers: Option<usize>,
-) -> Result<Vec<DiskPlan>, String> {
+) -> Result<Vec<DiskPlan>, PlanError> {
     let output = runner
         .run(
             paths,
             &compact_args(computer, disk, layers, true),
             READ_TIMEOUT,
         )
-        .map_err(|failure| safe_activity_error(&failure))?;
-    let unreadable = || "The runtime returned an unreadable compaction plan.".to_owned();
-    let value: Value = serde_json::from_str(&output.stdout).map_err(|_| unreadable())?;
-    let disks = value["disks"].as_array().ok_or_else(unreadable)?;
+        .map_err(PlanError::Run)?;
+    let value: Value = serde_json::from_str(&output.stdout).map_err(|_| PlanError::Unreadable)?;
+    let disks = value["disks"].as_array().ok_or(PlanError::Unreadable)?;
     let plans: Vec<DiskPlan> = disks
         .iter()
         .filter_map(|disk| {
@@ -135,9 +149,19 @@ fn disk_plans(
         })
         .collect();
     if plans.is_empty() || plans.len() != disks.len() {
-        return Err(unreadable());
+        return Err(PlanError::Unreadable);
     }
     Ok(plans)
+}
+
+fn disk_plans(
+    runner: &dyn RuntimeRunner,
+    paths: &RuntimePaths,
+    computer: &str,
+    disk: Option<&str>,
+    layers: Option<usize>,
+) -> Result<Vec<DiskPlan>, String> {
+    read_plans(runner, paths, computer, disk, layers).map_err(|failure| failure.message())
 }
 
 /// The snapshot the computer's next capture names as parent. MicroSandbox's capture cursor
@@ -287,18 +311,20 @@ fn merges(
     Ok(steps)
 }
 
-/// Whether the client stopped waiting for a reply without the operation failing.
-/// MicroSandbox's control client gives up on a request after 30 seconds, while the runtime
-/// keeps compacting a large disk and answers nothing else until it is done.
-fn reply_wait_expired(failure: &RuntimeError) -> bool {
-    match failure {
-        RuntimeError::TimedOut { .. } => true,
-        RuntimeError::Failed { detail, .. } => {
-            let detail = detail.to_lowercase();
-            detail.contains("deadline expired") || detail.contains("timed out")
-        }
-        _ => false,
-    }
+/// Whether msb's control client stopped waiting for a reply while the runtime went on
+/// compacting. MicroSandbox gives up on a request after 30 seconds and the runtime answers
+/// nothing else until the merge is done. Silo's own timeout is a different failure.
+fn client_deadline_expired(failure: &RuntimeError) -> bool {
+    matches!(
+        failure,
+        RuntimeError::Failed { detail, .. } if detail.to_lowercase().contains("deadline expired")
+    )
+}
+
+/// A poll that got no answer because the runtime is still busy: msb's deadline, or Silo
+/// ending its own short read.
+fn runtime_busy(failure: &RuntimeError) -> bool {
+    client_deadline_expired(failure) || matches!(failure, RuntimeError::TimedOut { .. })
 }
 
 fn pause(duration: Duration) {
@@ -309,15 +335,17 @@ fn pause(duration: Duration) {
 
 /// Waits for a runtime that is still compacting after the client stopped waiting, then
 /// reports whether the merge was applied: every merged disk has fewer layers than planned.
+/// The whole pass, merge included, stays within one `COMPACT_TIMEOUT` from `started`. Any
+/// answer other than "busy" ends the wait at once.
 fn wait_for_compaction(
     runner: &dyn RuntimeRunner,
     paths: &RuntimePaths,
     computer: &str,
     step: &Merge,
+    started: Instant,
 ) -> Result<bool, String> {
-    let started = Instant::now();
     loop {
-        match disk_plans(runner, paths, computer, step.disk.as_deref(), None) {
+        match read_plans(runner, paths, computer, step.disk.as_deref(), None) {
             Ok(now) => {
                 return Ok(step.before.iter().all(|(guest, before)| {
                     now.iter()
@@ -325,9 +353,25 @@ fn wait_for_compaction(
                         .is_some_and(|disk| disk.input_layers < *before)
                 }));
             }
-            Err(_) if started.elapsed() < COMPACT_TIMEOUT => pause(COMPACT_POLL),
-            Err(detail) => return Err(detail),
+            Err(PlanError::Run(failure)) if runtime_busy(&failure) => {
+                if started.elapsed() >= COMPACT_TIMEOUT {
+                    return Err(format!(
+                        "{computer} was still merging layers after {} minutes.",
+                        COMPACT_TIMEOUT.as_secs() / 60
+                    ));
+                }
+                pause(COMPACT_POLL);
+            }
+            Err(other) => return Err(paused_hint(other.message(), computer)),
         }
+    }
+}
+
+fn paused_hint(detail: String, computer: &str) -> String {
+    if detail.contains("paused") {
+        format!("{detail} Restart {computer} to finish the merge.")
+    } else {
+        detail
     }
 }
 
@@ -337,6 +381,7 @@ fn run_merge(
     computer: &str,
     step: &Merge,
 ) -> Result<(), String> {
+    let started = Instant::now();
     let failure = match runner.run(
         paths,
         &compact_args(computer, step.disk.as_deref(), Some(step.layers), false),
@@ -345,24 +390,16 @@ fn run_merge(
         Ok(_) => return Ok(()),
         Err(failure) => failure,
     };
-    if reply_wait_expired(&failure) {
-        return match wait_for_compaction(runner, paths, computer, step) {
+    if client_deadline_expired(&failure) {
+        return match wait_for_compaction(runner, paths, computer, step, started) {
             Ok(true) => Ok(()),
             Ok(false) => Err(format!(
                 "The runtime did not merge the layers of {computer}. The next checkpoint tries again."
             )),
-            Err(detail) => Err(format!(
-                "{computer} was still merging layers after {} minutes. {detail}",
-                COMPACT_TIMEOUT.as_secs() / 60
-            )),
+            Err(detail) => Err(detail),
         };
     }
-    let detail = safe_activity_error(&failure);
-    if detail.contains("paused") {
-        Err(format!("{detail} Restart {computer} to finish the merge."))
-    } else {
-        Err(detail)
-    }
+    Err(paused_hint(safe_activity_error(&failure), computer))
 }
 
 /// Stores `message` as the computer's failed checkpoint operation. The caller holds the
