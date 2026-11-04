@@ -124,6 +124,45 @@ and [lifecycle recovery](../app/SiloUI/src-tauri/engine/src/runtime/lifecycle_re
 Current code includes automatic startup and temporary boot through helpers;
 these require explicit pending-restore guards.
 
+## Quiet Linux forks
+
+A Linux fork is a new computer that always cold-boots the checkpoint's disks
+(`--disk-only`; the pending restore is recorded with state `disk` for every fork,
+including a fork of the current state), so no process, cron job or poller of the
+source continues in it. Disk contents are copied as they are: a `.env` file with a
+token is in the fork unless the caller names it in `scrub`.
+
+Rules a fork applies, recorded in its checkpoint record under `quiet`
+(`scheduledJobsDisabled`, `newIdentity`, `stop`, `scrub`, `secrets`, `applied`):
+
+- Nothing is assigned unless `checkpoints.fork` names it in `secrets`. Named Silo
+  secrets are copied by reference; a name the source does not have fails the fork.
+  The name `github` copies GitHub access with every change grant turned off
+  (`allowPushes` false, `allRepositoriesAllowChanges` false), so the fork's
+  tokens are minted with read permissions. A source that uses a personal token
+  cannot be copied, because Silo cannot narrow that token.
+- New `/etc/machine-id`, `/var/lib/dbus/machine-id` (if present), hostname and the
+  `127.0.1.1` line of `/etc/hosts`.
+- User and system crontabs (including `@reboot`), `/etc/cron.*`, `anacrontab`, at
+  jobs and systemd timers are disabled. Crontabs and drop-ins are moved to
+  `/var/lib/silo-quiet/disabled/` (not deleted); timers are masked.
+- Each `stop` name is killed, its systemd unit masked, its init script made
+  non-executable and its rc links, autostart entries and supervisor config moved
+  away. Each `scrub` path (globs allowed) is deleted.
+
+Mechanism: MicroSandbox 0.7.6 has no hook to edit a snapshot's disk before
+`msb restore` boots it, and the Silo guest image has no init system (`CMD` is
+`/bin/bash`), so a cold boot starts none of the source's services. The engine
+runs `runtime/checkpoints/quiet.sh` as root as the first command in the new
+guest, inside the same start step, before the start is reported done and before
+secrets, network or SSH are reconciled. Arguments are positional, never part of
+the script text. If the step fails the fork is stopped and the next Start runs it
+again before anything else (`quiet.applied` stays false until it succeeds). An
+offline disk edit before boot would be stricter and needs an upstream hook.
+
+Not covered: shell profiles or other files in the guest that start programs at
+login, and secrets stored in files (use `scrub`).
+
 ## Product flows
 
 | Action | Proposed behaviour |
