@@ -6246,6 +6246,7 @@ fn create_computer_with_progress(
     })();
     preflight?;
     progress("computer-image-preparation", name, 0);
+    let image_in_use = guest_image::hold_in_use();
     let image = runner.prepare_guest_image(paths)?;
     let args: Vec<String> = vec![
         "create".into(),
@@ -6289,7 +6290,9 @@ fn create_computer_with_progress(
         "--progress-json".into(),
     ];
     progress("computer-runtime-preparation", name, 0);
-    if let Err(error) = runner.run(paths, &args, MUTATION_TIMEOUT) {
+    let created = runner.run(paths, &args, MUTATION_TIMEOUT);
+    drop(image_in_use);
+    if let Err(error) = created {
         return Err(with_cleanup_error(
             error,
             cleanup_failed_create(runner, paths, name, id),

@@ -4285,6 +4285,72 @@ fn trim_before_keep(store: &dyn RuntimeRunner, paths: &RuntimePaths, count: u32)
     );
 }
 
+/// A runner for a creation that, when the runtime is asked to create the computer, requests
+/// an image prune the way a concurrent deletion would.
+struct PruneDuringCreate<'a> {
+    store: &'a Store,
+    paths: &'a RuntimePaths,
+    prunes_seen_during_create: Mutex<Option<usize>>,
+}
+impl RuntimeRunner for PruneDuringCreate<'_> {
+    fn prepare_guest_image(&self, _: &RuntimePaths) -> Result<String, RuntimeError> {
+        Ok("silo-guest:test".into())
+    }
+    fn run(
+        &self,
+        paths: &RuntimePaths,
+        args: &[String],
+        timeout: Duration,
+    ) -> Result<CommandOutput, RuntimeError> {
+        match args.first().map(String::as_str) {
+            Some("--silo-github-protocol" | "--silo-working-account-protocol") => {
+                return Ok(CommandOutput {
+                    stdout: "1".into(),
+                    stderr: String::new(),
+                })
+            }
+            Some("create") => {
+                prune_unused_images(self.store, self.paths);
+                *self.prunes_seen_during_create.lock().unwrap() =
+                    Some(self.store.calls_matching("image").len());
+                return Err(RuntimeError::Unavailable("create stopped".into()));
+            }
+            _ => {}
+        }
+        self.store.run(paths, args, timeout)
+    }
+}
+
+#[test]
+fn an_image_prune_requested_during_a_creation_waits_for_its_create_to_return() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let paths = delete_fixture(&directory, Vec::new(), None);
+    let store = Store::new(Vec::new());
+    let runner = PruneDuringCreate {
+        store: &store,
+        paths: &paths,
+        prunes_seen_during_create: Mutex::new(None),
+    };
+    let mut configuration = computer_configuration();
+    configuration.name = "fresh".into();
+    configuration.id = "00000000-0000-4000-8000-0000000000aa".into();
+
+    super::super::create_computer(&runner, &paths, &configuration).unwrap_err();
+
+    assert_eq!(
+        *runner.prunes_seen_during_create.lock().unwrap(),
+        Some(0),
+        "no prune ran while the creation held the image"
+    );
+    prune_unused_images(&store, &paths);
+    assert_eq!(
+        store.calls_matching("image").len(),
+        1,
+        "the same prune runs once the creation is over"
+    );
+}
+
 #[test]
 fn deleting_a_checkpoint_prunes_unused_images_after_the_removal() {
     let _test_state = crate::test_support::global_state();
