@@ -1,0 +1,325 @@
+diff --git a/crates/runtime/lib/checkpoint/coordinator.rs b/crates/runtime/lib/checkpoint/coordinator.rs
+index 39419dd..0dd1359 100644
+--- a/crates/runtime/lib/checkpoint/coordinator.rs
++++ b/crates/runtime/lib/checkpoint/coordinator.rs
+@@ -364,6 +364,7 @@ impl CheckpointCoordinator {
+     ) -> Result<Self, String> {
+         let root = runtime_dir.join("checkpoints");
+         std::fs::create_dir_all(&root).map_err(|error| error.to_string())?;
++        reclaim_stale_captures(&root);
+         let store = LocalObjectStore::open(runtime_dir.join("checkpoint-store"))
+             .map_err(|error| error.to_string())?;
+         let root_disk = RuntimeOwnedRootDisk::open(runtime_dir, vm)?;
+@@ -2386,6 +2387,33 @@ fn coalesce_extents(extents: Vec<MemoryExtent>) -> Vec<MemoryExtent> {
+     output
+ }
+ 
++/// Remove capture directories left by an earlier runtime process.
++///
++/// A capture directory holds hard links to its layer closure, so keeping one pins disk blocks
++/// that compaction and snapshot removal would otherwise return. Clients reclaim a directory once
++/// its snapshot is published; what remains here was abandoned by a crash or a failed client.
++/// This runs before the executor accepts captures, so no capture of this process is in flight.
++fn reclaim_stale_captures(root: &Path) {
++    let entries = match std::fs::read_dir(root) {
++        Ok(entries) => entries,
++        Err(error) => {
++            tracing::warn!(%error, "failed to list stale checkpoint captures");
++            return;
++        }
++    };
++    for entry in entries.flatten() {
++        let path = entry.path();
++        let removed = match entry.file_type() {
++            Ok(kind) if kind.is_dir() => std::fs::remove_dir_all(&path),
++            Ok(_) => std::fs::remove_file(&path),
++            Err(error) => Err(error),
++        };
++        if let Err(error) = removed {
++            tracing::warn!(%error, path = %path.display(), "failed to remove stale checkpoint capture");
++        }
++    }
++}
++
+ fn publish_root_last(staging: &Path, final_path: &Path, bytes: &[u8]) -> Result<(), String> {
+     let root = staging.join("checkpoint.json");
+     let mut file = std::fs::OpenOptions::new()
+@@ -2551,8 +2579,8 @@ fn sync_directory(path: &Path) -> io::Result<()> {
+ mod tests {
+     use super::{
+         FrozenWorkload, MemoryObjectSink, PendingDeviceState, WorkloadControl, overlay_extents,
+-        persist_device_states, publish_root_last, runtime_owned_fs_bindings,
+-        validate_vm_generation_state, validate_workload_reply,
++        persist_device_states, publish_root_last, reclaim_stale_captures,
++        runtime_owned_fs_bindings, validate_vm_generation_state, validate_workload_reply,
+     };
+     use std::collections::BTreeSet;
+ 
+@@ -2568,6 +2596,35 @@ mod tests {
+     use msb_krun::{GuestMemoryRange, MemoryCaptureSink};
+     use std::sync::Arc;
+ 
++    #[cfg(unix)]
++    #[test]
++    fn stale_captures_release_their_layer_links_at_runtime_open() {
++        let temp = tempfile::tempdir().unwrap();
++        let root = temp.path().join("checkpoints");
++        let layer = temp.path().join("upper.qcow2");
++        std::fs::write(&layer, b"sealed layer").unwrap();
++        for name in ["checkpoint_a", ".checkpoint_b.1.staging"] {
++            let layers = root.join(name).join("layers");
++            std::fs::create_dir_all(&layers).unwrap();
++            std::fs::hard_link(&layer, layers.join("layer_x.qcow2")).unwrap();
++        }
++        std::fs::write(root.join("stray"), b"x").unwrap();
++        assert_eq!(nlink(&layer), 3);
++
++        reclaim_stale_captures(&root);
++
++        assert!(root.is_dir());
++        assert_eq!(std::fs::read_dir(&root).unwrap().count(), 0);
++        assert_eq!(nlink(&layer), 1);
++        assert_eq!(std::fs::read(&layer).unwrap(), b"sealed layer");
++    }
++
++    #[cfg(unix)]
++    fn nlink(path: &std::path::Path) -> u64 {
++        use std::os::unix::fs::MetadataExt;
++        std::fs::metadata(path).unwrap().nlink()
++    }
++
+     #[test]
+     fn block_writeback_follows_policy_without_weakening_directory_barriers() {
+         use microsandbox_types::GuestFlush::{Auto, Required, Skip};
+diff --git a/sdk/rust/lib/backend/local/snapshot/create.rs b/sdk/rust/lib/backend/local/snapshot/create.rs
+index 044c818..9d7e9e7 100644
+--- a/sdk/rust/lib/backend/local/snapshot/create.rs
++++ b/sdk/rust/lib/backend/local/snapshot/create.rs
+@@ -37,6 +37,7 @@ pub(crate) const CHECKPOINT_DIRECTORY: &str = "checkpoint";
+ 
+ struct CapturedFullSnapshot {
+     checkpoint_path: PathBuf,
++    capture_dir: CaptureDir,
+     checkpoint_root: ObjectId,
+     manifest: Manifest,
+     labels: BTreeMap<String, String>,
+@@ -48,8 +49,17 @@ struct CapturedFullSnapshot {
+ struct StagedSnapshot {
+     snapshot: Snapshot,
+     source_recovery: Option<SnapshotSourceRecoveryError>,
++    capture_dir: CaptureDir,
+ }
+ 
++/// The runtime's per-capture directory, which holds links to the captured disk layers.
++///
++/// It is reclaimed when the capture has been published or has failed, so the layers it links
++/// can be freed once compaction and snapshot removal drop their other links. A capture whose
++/// source failed to resume keeps its directory: the recovery error names it for salvage.
++#[derive(Debug)]
++struct CaptureDir(Option<PathBuf>);
++
+ /// Non-identity publication options shared by the full-capture entry point.
+ #[derive(Clone, Copy)]
+ struct SnapshotDestination<'a> {
+@@ -112,6 +122,27 @@ impl Drop for SnapshotDiskClosure {
+     }
+ }
+ 
++impl CaptureDir {
++    fn owned(path: PathBuf, source_recovery: Option<&str>) -> Self {
++        Self(source_recovery.is_none().then_some(path))
++    }
++
++    fn retained() -> Self {
++        Self(None)
++    }
++}
++
++impl Drop for CaptureDir {
++    fn drop(&mut self) {
++        if let Some(path) = self.0.take()
++            && let Err(error) = std::fs::remove_dir_all(&path)
++            && error.kind() != std::io::ErrorKind::NotFound
++        {
++            tracing::warn!(%error, path = %path.display(), "failed to remove published checkpoint capture");
++        }
++    }
++}
++
+ //--------------------------------------------------------------------------------------------------
+ // Functions
+ //--------------------------------------------------------------------------------------------------
+@@ -173,6 +204,7 @@ async fn publish_snapshot_group(
+     let StagedSnapshot {
+         snapshot: mut captured,
+         source_recovery,
++        capture_dir,
+     } = captured;
+     let group_dir = staging
+         .path()
+@@ -221,6 +253,7 @@ async fn publish_snapshot_group(
+     }
+     Ok(captured)
+     }.await;
++    drop(capture_dir);
+     finish_capture(published, source_recovery, installed_artifact)
+ }
+ 
+@@ -437,6 +470,7 @@ async fn capture_installed(
+     Ok(StagedSnapshot {
+         snapshot: Snapshot::from_parts(dest_dir, digest, manifest, labels),
+         source_recovery: None,
++        capture_dir: CaptureDir::retained(),
+     })
+ }
+ 
+@@ -502,6 +536,7 @@ async fn stage_full_snapshot(
+         force,
+     } = destination;
+     let source_recovery = captured.source_recovery.take();
++    let capture_dir = std::mem::replace(&mut captured.capture_dir, CaptureDir::retained());
+     // Recovery belongs to the source, not to the immutable artifact. Carry it through staging
+     // until the outer publisher owns the final group member and its ancestry cursor.
+     let published = async {
+@@ -571,6 +606,7 @@ async fn stage_full_snapshot(
+         Ok(snapshot) => Ok(StagedSnapshot {
+             snapshot,
+             source_recovery,
++            capture_dir,
+         }),
+         Err(error) => Err(capture_publication_failure(error, source_recovery)),
+     }
+@@ -998,6 +1034,10 @@ async fn capture_full_snapshot(
+                     publication_error: None,
+                 }
+             }),
++            capture_dir: CaptureDir::owned(
++                checkpoint.path.clone(),
++                outcome.recovery_error.as_deref(),
++            ),
+             checkpoint_path: checkpoint.path,
+             checkpoint_root,
+             manifest,
+@@ -2360,6 +2400,7 @@ mod tests {
+         manifest.validate().unwrap();
+         CapturedFullSnapshot {
+             checkpoint_path: root.to_path_buf(),
++            capture_dir: CaptureDir::owned(root.to_path_buf(), detail),
+             source_recovery: detail.map(|detail| SnapshotSourceRecoveryError {
+                 source_sandbox: "box".into(),
+                 checkpoint_id: checkpoint.checkpoint_id,
+@@ -2587,6 +2628,114 @@ mod tests {
+         }
+     }
+ 
++    #[tokio::test]
++    async fn published_installed_capture_releases_its_runtime_directory() {
++        let temp = tempfile::tempdir().unwrap();
++        let local = crate::test_support::local_backend_builder(temp.path().join("home"))
++            .build()
++            .await
++            .unwrap();
++        fixture_source(&local).await;
++        let checkpoint = temp.path().join("checkpoint");
++        let captured = captured_fixture(&checkpoint, None);
++        let root = captured.checkpoint_root.clone();
++        let snapshot_id = captured.manifest.snapshot_id.clone();
++        let lineage = super::super::lineage::begin(&local, "box").await.unwrap();
++        let group = super::super::group::ensure(&local.snapshots_dir(), Some("box"))
++            .await
++            .unwrap();
++        let staging = tempfile::Builder::new()
++            .prefix(".capture-")
++            .tempdir_in(&group)
++            .unwrap();
++        let staged_path = staging.path().join("snapshot");
++        let staged = stage_full_snapshot(
++            SnapshotDestination {
++                name: "snapshot",
++                path: &staged_path,
++                force: false,
++            },
++            "box",
++            captured,
++            staging.path().to_path_buf(),
++            Instant::now(),
++            0,
++        )
++        .await
++        .unwrap();
++        assert!(checkpoint.exists(), "kept until the group publishes it");
++        let snapshot = publish_snapshot_group(
++            &local,
++            staged,
++            staging,
++            lineage,
++            "snapshot".into(),
++            false,
++            "box",
++        )
++        .await
++        .unwrap();
++        assert!(!checkpoint.exists());
++        assert_eq!(snapshot.path(), group.join(snapshot_id.as_str()));
++        CheckpointClosure::open(snapshot.path().join(CHECKPOINT_DIRECTORY), Some(&root)).unwrap();
++    }
++
++    #[tokio::test]
++    async fn failed_installed_capture_releases_its_runtime_directory() {
++        let temp = tempfile::tempdir().unwrap();
++        let checkpoint = temp.path().join("checkpoint");
++        let captured = captured_fixture(&checkpoint, None);
++        let destination = temp.path().join("existing");
++        std::fs::write(&destination, b"previous artifact").unwrap();
++        stage_full_snapshot(
++            SnapshotDestination {
++                name: "snapshot",
++                path: &destination,
++                force: false,
++            },
++            "box",
++            captured,
++            temp.path().to_path_buf(),
++            Instant::now(),
++            0,
++        )
++        .await
++        .unwrap_err();
++        assert!(!checkpoint.exists());
++        assert_eq!(std::fs::read(destination).unwrap(), b"previous artifact");
++    }
++
++    #[tokio::test]
++    async fn published_archive_capture_releases_its_runtime_directory() {
++        let temp = tempfile::tempdir().unwrap();
++        let local = crate::test_support::local_backend_builder(temp.path().join("home"))
++            .build()
++            .await
++            .unwrap();
++        fixture_source(&local).await;
++        let lineage = super::super::lineage::begin(&local, "box").await.unwrap();
++        let checkpoint = temp.path().join("checkpoint");
++        let captured = captured_fixture(&checkpoint, None);
++        let out = temp.path().join("snapshot.tar");
++        publish_full_archive(
++            SnapshotDestination {
++                name: "snapshot",
++                path: &out,
++                force: false,
++            },
++            "box",
++            captured,
++            lineage,
++            true,
++            Instant::now(),
++            0,
++        )
++        .await
++        .unwrap();
++        assert!(out.exists());
++        assert!(!checkpoint.exists());
++    }
++
+     #[tokio::test]
+     async fn successful_source_recovery_keeps_existing_success_result() {
+         let temp = tempfile::tempdir().unwrap();

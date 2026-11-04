@@ -139,6 +139,14 @@
     {
       "path": "patches/microsandbox-macos-network-fixes-0.7.6.patch",
       "sha256": "8e4a4173049bace12ffce30e1ef5a45066164cae2113d3e25750dbfaab81e982"
+    },
+    {
+      "path": "patches/microsandbox-reclaim-capture-dirs-0.7.6.patch",
+      "sha256": "3d1f09d06a45b97344316191fba6d58400b93c4fb841c88ee4282f464b2755ed"
+    },
+    {
+      "path": "patches/microsandbox-retired-layer-cleanup-0.7.6.patch",
+      "sha256": "1d1a98aff72b11ace48df98cae3b2a48e21bfc2a824f0cbb241b34f45d218c06"
     }
   ]
 }

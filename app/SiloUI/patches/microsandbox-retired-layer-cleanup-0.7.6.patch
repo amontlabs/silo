@@ -1,0 +1,118 @@
+diff --git a/crates/runtime/lib/checkpoint/disk.rs b/crates/runtime/lib/checkpoint/disk.rs
+index 01e55ff..a59edf0 100644
+--- a/crates/runtime/lib/checkpoint/disk.rs
++++ b/crates/runtime/lib/checkpoint/disk.rs
+@@ -652,18 +652,32 @@ impl RootDiskCompaction {
+         // follow a successful rename, so neither closure may be removed on uncertainty.
+         let _published = self.stage.expect("prepared root state owns staging").keep();
+         write_state(&disk.state_path, &next).map_err(RootDiskRolloverError::post_journal)?;
++        // Layers live beside the root journal's runtime directory, in the sandbox directory.
++        // The launch base stays because later starts must still find the configured base.
++        let owned = parent.parent().unwrap_or(&parent).to_path_buf();
++        let retained = next
++            .layers
++            .iter()
++            .map(|layer| layer.path.clone())
++            .chain(next.launch_base.clone())
++            .collect::<BTreeSet<_>>();
+         let old = std::mem::replace(&mut disk.state, next);
+         Ok(RetiredRootDisk {
+-            parent,
+-            paths: old.layers.into_iter().map(|layer| layer.path).collect(),
++            parent: owned,
++            paths: old
++                .layers
++                .into_iter()
++                .map(|layer| layer.path)
++                .filter(|path| !retained.contains(path))
++                .collect(),
+         })
+     }
+ }
+ 
+ impl RetiredRootDisk {
+     pub(super) fn cleanup(self) {
+-        // Same ownership boundary as before: only this root journal's directory entries.
+-        // Snapshots and children retain their own hardlinks; unlink errors merely retain data.
++        // Only entries of this sandbox's directory are unlinked. Snapshots and children retain
++        // their own hardlinks; unlink errors merely retain data.
+         for path in self.paths {
+             if path.starts_with(&self.parent) {
+                 let _ = std::fs::remove_file(path);
+@@ -2281,6 +2295,76 @@ mod tests {
+         }
+     }
+ 
++    #[test]
++    fn compaction_unlinks_retired_layers_that_live_beside_the_runtime_directory() {
++        use super::*;
++        let sandbox = tempfile::tempdir().unwrap();
++        let root = sandbox.path().join("runtime");
++        std::fs::create_dir(&root).unwrap();
++        let base = sandbox.path().join("upper.ext4");
++        std::fs::write(&base, vec![71u8; 131072]).unwrap();
++        let rt = tokio::runtime::Builder::new_current_thread()
++            .enable_all()
++            .build()
++            .unwrap();
++        let mut layers = vec![RootDiskLayer {
++            layer_id: new_id("layer"),
++            path: base.clone(),
++            format: RootDiskFormat::Raw,
++            integrity_root: None,
++        }];
++        for i in 0..3 {
++            let path = sandbox.path().join(format!("upper-{i}.qcow2"));
++            let prior = layers.last().unwrap();
++            rt.block_on(microsandbox_image::checkpoint::create_qcow2_overlay(
++                &path,
++                131072,
++                &prior.path,
++                prior.format.as_str(),
++            ))
++            .unwrap();
++            layers.push(RootDiskLayer {
++                layer_id: new_id("layer"),
++                path,
++                format: RootDiskFormat::Qcow2,
++                integrity_root: None,
++            });
++        }
++        let old_paths = layers.iter().map(|layer| layer.path.clone()).collect::<Vec<_>>();
++        // A published snapshot owns its own link and must survive the unlink.
++        let retained = sandbox.path().join("published-layer.qcow2");
++        std::fs::hard_link(&old_paths[1], &retained).unwrap();
++        let journal = root.join(ROOT_DISK_STATE_FILE);
++        write_state(
++            &journal,
++            &RootDiskState {
++                schema: ROOT_DISK_STATE_SCHEMA.into(),
++                volume_id: new_id("vol"),
++                device_id: RootDiskLayout::ManagedUpper.device_id().into(),
++                layout: RootDiskLayout::ManagedUpper,
++                published_generation: 3,
++                launch_base: None,
++                growth_target: None,
++                layers,
++            },
++        )
++        .unwrap();
++
++        compact_stopped_root(&root, None, false).unwrap();
++
++        let state = read_state(&journal).unwrap();
++        assert_eq!(state.launch_base.as_ref(), Some(&base));
++        assert!(base.exists(), "the launch base stays");
++        for layer in &state.layers {
++            assert!(layer.path.exists(), "{} is the live chain", layer.path.display());
++        }
++        for old in &old_paths[1..] {
++            assert!(!old.exists(), "{} was retired", old.display());
++        }
++        assert!(retained.exists());
++        assert!(load_runtime_owned_root_chain(&root).unwrap().is_some());
++    }
++
+     #[test]
+     fn stopped_compaction_preserves_head_and_recovers_both_layouts() {
+         use super::*;

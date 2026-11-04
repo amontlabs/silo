@@ -54,6 +54,8 @@ Ordered source patch pins (all `-0.7.6.patch`; "Feature" is a Silo-specific capa
 | `microsandbox-relay-closed-local-arena-0.7.6.patch` | `efbed4c5ea7b0e79e3745445b5dd54d5dc30590e530aad3a61840735f960ef10` | Fix | A guest bulk frame routed to a host relay client whose local shared arena was closed by that client's disconnect is dropped like any frame for a departed client; upstream treated `LocalShmError::Closed` as transport corruption, ended the shared guest reader and stopped the whole VM (see [Relay client disconnect during a bulk write](#relay-client-disconnect-during-a-bulk-write-2026-10-08)). Sent upstream as its own PR. |
 | `microsandbox-reordered-image-metadata-0.7.6.patch` | `5cd4d570c38ce0f50582c19107aa382cda89ba73533346ff556d9a47186ec37d` | Fix | Backport of upstream [#1744](https://github.com/superradcompany/microsandbox/pull/1744): importing an archive accepts existing cached image metadata that differs only in JSON key order (labels are a `HashMap`), so a device that already has the image can import it. Drop when the pinned release includes #1744. |
 | `microsandbox-metrics-sampler-blocking-0.7.6.patch` | `791cfc43eef69cdd425887eba5471e0ff90789e671664d54335e5022d185f681` | Fix | The runner's metrics sampler takes each snapshot on the blocking pool. The snapshot scans host residency of the whole guest-memory mapping with `mincore`, which took about 0.5 s every 1.5 s on a 32 GiB computer and held one of the runner's two async workers, so every agent relay (SSH forwards, the desktop stream and its input) stalled for that long. Measured in [desktop stream tuning](research/desktop-stream-tuning-2026-10-09.md). Not fixed upstream at `05a630e5`. |
+| `microsandbox-reclaim-capture-dirs-0.7.6.patch` | `3d1f09d06a45b97344316191fba6d58400b93c4fb841c88ee4282f464b2755ed` | Fix | A full capture publishes its disk layers into the sandbox's `runtime/checkpoints/<id>/` as hard links, and nothing removed that directory after the snapshot copied them, so every capture kept its layer links (and the layer data they share) for the life of the computer. The SDK now removes the directory once the snapshot or archive is published, or when publication fails and no source recovery needs the directory; a runtime start removes the directories an earlier process left behind. See [Checkpoint disk reclamation](#checkpoint-disk-reclamation-2026-11-04). |
+| `microsandbox-retired-layer-cleanup-0.7.6.patch` | `1d1a98aff72b11ace48df98cae3b2a48e21bfc2a824f0cbb241b34f45d218c06` | Fix | After `modify --compact` of the root disk the retired sealed layers were never unlinked: the cleanup only removed paths under the `runtime/` directory, but the layers sit in the sandbox directory beside it. Cleanup now covers the sandbox directory, keeps every layer of the new chain and the launch base. See [Checkpoint disk reclamation](#checkpoint-disk-reclamation-2026-11-04). |
 
 The former ninth patch (`microsandbox-preserve-basic-auth`, an independent Basic Auth substitution policy plus `query_params` normalization) was dropped for 0.7.4 and stays dropped; the rationale is in [MicroSandbox 0.7.4 upgrade](#microsandbox-074-upgrade). Its 2026-09-27 verification (isolated `adopt-disk` on a copied catalog preserving `headers=true`, `basic_auth=true`, `query=false`, `body=false`) applies to the 0.7.2 runtime only.
 
@@ -1023,3 +1025,35 @@ are recorded in [the Linux verification session](research/linux-verification-202
 The same patch sets SSH command `USER` and `LOGNAME` to the effective guest user,
 after client environment requests. The offline Linux account regression found
 these unset even though UID/GID and HOME were correct.
+
+### Checkpoint disk reclamation (2026-11-04)
+
+Measured on the pinned 0.7.6 runtime (`msb` with the 20 earlier patches, a throwaway home, a 2 GiB
+computer with a 4 GiB root disk and a 4 GiB `/workspace` disk, APFS): five full snapshots, then
+`modify --compact`, one more snapshot, then `snapshot remove --force` of the five older ones.
+
+| | before the two patches | with them |
+| --- | --- | --- |
+| `runtime/checkpoints/<id>/` directories left after five captures | 5 | 0 |
+| disk returned by removing the five older snapshots | about 0.2 MiB | 807 MiB |
+| old sealed layers left in the sandbox directory after compaction | 4 files, about 500 MiB | none |
+
+Three separate things kept the disk:
+
+- The per-capture directory under `runtime/checkpoints/` (fixed by `reclaim-capture-dirs`).
+- The retired layers of a compacted root disk (fixed by `retired-layer-cleanup`).
+- Memory objects. `runtime/checkpoint-store` keeps every memory object of every capture for the
+  computer's life (about 1.2 GiB after six captures of a 2 GiB computer) and nothing here changes
+  that. A snapshot that is the computer's newest also holds its whole disk closure, so the disk of
+  older layers returns only after every snapshot that contains them is gone.
+
+The first capture after a restore costs far more than the next one (575 MiB against 118 MiB in
+the same run) because a restored computer has no incremental memory baseline and writes a `Full`
+capture (587 MiB emitted; 1.2 GiB in a longer-running computer). It is not layer copying: all 50
+layer copies of a traced run used `clonefile` on APFS and none fell back to a sparse copy.
+`restore --cow-mem` does not avoid it (801 MiB emitted). A third patch that links a sealed layer
+instead of cloning it when its header already names the published predecessor was written and
+tested, but no header in a live chain ever does (journal layers name their journal predecessor),
+so it is not part of the pinned set; it is kept in `docs/v1/upstream/`.
+
+Raw output: `docs/v1/evidence/phase-0/raw/msb-patch-probe.txt` (not tracked).
