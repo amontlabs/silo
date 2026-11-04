@@ -1,0 +1,36 @@
+name: Verify macOS library security
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  security:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-15, macos-26]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Record operating-system security configuration
+        run: |
+          mkdir -p "$RUNNER_TEMP/security-host"
+          sw_vers > "$RUNNER_TEMP/security-host/os.txt"
+          uname -m >> "$RUNNER_TEMP/security-host/os.txt"
+          csrutil status > "$RUNNER_TEMP/security-host/sip.txt" 2>&1
+          sysctl kern.bootargs > "$RUNNER_TEMP/security-host/bootargs.txt" 2>&1
+          cat "$RUNNER_TEMP/security-host/"*.txt
+      - name: Test library constraints (hosted SIP is disabled)
+        run: python3 app/SiloUI/scripts/test-macos-library-constraints.py --constraints-only --output "$RUNNER_TEMP/library-constraints"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: ${{ matrix.runner }}-security
+          path: |
+            ${{ runner.temp }}/security-host/
+            ${{ runner.temp }}/library-constraints/results.json
+          if-no-files-found: error
+          retention-days: 7

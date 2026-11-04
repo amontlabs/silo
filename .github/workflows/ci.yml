@@ -1,8 +1,8 @@
 name: CI
 
 # Work lands directly on main, so every push to main and every pull request
-# runs the ordinary checks. Release, packaging and live VM checks stay in their
-# own workflows.
+# runs the ordinary checks, including the release-tooling checks. Release
+# builds, packaging and live VM checks stay in their own workflows.
 on:
   push:
     branches: [main]

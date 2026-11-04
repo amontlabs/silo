@@ -102,9 +102,15 @@ class PlatformCoverageTests(unittest.TestCase):
 
 class LinuxHostCoverageTests(unittest.TestCase):
     def test_ci_does_not_build_or_install_linux_host_packages(self):
-        workflow = (ROOT / '.github/workflows/ci.yml').read_text()
-        self.assertNotIn('SILO_APT_LIFECYCLE_TEST=1', workflow)
-        self.assertNotIn('test_debian_installation.py', workflow)
+        checked = 0
+        for path in sorted((ROOT / '.github/workflows').glob('*.yml')):
+            workflow = path.read_text()
+            if not re.search(r'(?m)^  pull_request(?:_target)?:', workflow):
+                continue
+            checked += 1
+            self.assertNotIn('SILO_APT_LIFECYCLE_TEST=1', workflow, path.name)
+            self.assertNotIn('test_debian_installation.py', workflow, path.name)
+        self.assertGreater(checked, 0)
 
 
 class DocumentationCoverageTests(unittest.TestCase):

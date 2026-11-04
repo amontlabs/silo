@@ -1702,17 +1702,22 @@ mod tests {
     #[test]
     fn a_slow_guest_does_not_stall_state_refreshes() {
         let root = tempfile::tempdir().unwrap();
-        // The guest read blocks until the test opens the gate. A fixed sleep raced the
-        // two bounded waits below, which together last as long as the sleep did.
+        // The guest read blocks until the test opens the gate (or 60 s pass, so a failed
+        // assertion cannot leave it polling). A fixed sleep raced the two bounded waits
+        // below, which together lasted as long as the sleep did.
         let gate = root.path().join("gate");
-        let wait = format!("while [ ! -e '{}' ]; do sleep 0.02; done", gate.display());
+        let wait = format!(
+            "i=0; while [ ! -e '{}' ] && [ $i -lt 3000 ]; do sleep 0.02; i=$((i+1)); done",
+            gate.display()
+        );
         let (paths, count) = slow_discovery_runtime(root.path(), &wait);
         let started = Instant::now();
         assert!(discover(&paths, "dev", "computer-1", false)
             .unwrap()
             .is_empty());
         assert!(started.elapsed() < DISCOVERY_FIRST_WAIT + Duration::from_secs(1));
-        // Later refreshes do not start another read or wait for this one.
+        // Later refreshes share the pending read instead of starting another, and wait no
+        // longer than the first one did.
         let started = Instant::now();
         assert!(discover(&paths, "dev", "computer-1", false)
             .unwrap()
@@ -1725,6 +1730,7 @@ mod tests {
             discover(&paths, "dev", "computer-1", true).unwrap().len(),
             1
         );
+        assert_eq!(runs(&count), 2);
         discoveries()
             .0
             .lock()
