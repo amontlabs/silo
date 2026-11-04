@@ -27,7 +27,7 @@ use silo_api::{
     },
 };
 use silo_engine::{
-    checkpoints::{Failure, Service},
+    checkpoints::{Failure, ForkOptions, Service},
     context::EngineContext,
     macos_computers_engine::MacosContext,
 };
@@ -216,6 +216,15 @@ async fn fork(context: &HandlerContext, params: &Value) -> Result<HandlerOutput,
                 &params.computer_id,
                 params.checkpoint_id.as_deref(),
                 &params.new_name,
+                ForkOptions {
+                    secrets: params.secrets,
+                    stop: params
+                        .quiet
+                        .as_ref()
+                        .map(|q| q.stop.clone())
+                        .unwrap_or_default(),
+                    scrub: params.quiet.map(|q| q.scrub).unwrap_or_default(),
+                },
             )
         })
         .await,

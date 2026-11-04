@@ -318,6 +318,16 @@ fn socket_path(paths: &RuntimePaths, computer: &str) -> std::path::PathBuf {
         .join(&digest[..24])
         .join("control.sock")
 }
+/// Whether any enabled saved forward is a website, read from saved settings alone.
+pub fn has_http_forwards(paths: &RuntimePaths) -> bool {
+    read_config(paths).is_ok_and(|config| {
+        config
+            .mappings
+            .iter()
+            .any(|m| m.enabled && m.scheme.as_deref() == Some("http"))
+    })
+}
+
 /// Forget saved forwarding intent before a deleted computer's name becomes reusable.
 pub(crate) fn computer_removed(paths: &RuntimePaths, computer: &str) -> Result<(), String> {
     let forwarding = forwarding_lock(computer);
@@ -326,6 +336,9 @@ pub(crate) fn computer_removed(paths: &RuntimePaths, computer: &str) -> Result<(
     let mut config = read_config(paths)?;
     let before = config.mappings.len();
     config.mappings.retain(|m| m.computer != computer);
+    if let Some(proxy) = crate::url_proxy::shared() {
+        proxy.forget_computer(computer);
+    }
     if config.mappings.len() != before {
         write_config(paths, &config)?;
     }

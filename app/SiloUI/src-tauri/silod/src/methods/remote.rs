@@ -554,6 +554,7 @@ mod tests {
         "network.publish",
         "network.state",
         "network.unpublish",
+        "network.urls",
         "push.dismiss",
         "push.repositories",
         "push.start",

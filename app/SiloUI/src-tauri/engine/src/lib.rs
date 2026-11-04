@@ -71,6 +71,7 @@ pub mod sync;
 pub mod terminal;
 pub mod transfer;
 pub mod updates;
+pub mod url_proxy;
 pub mod viewer_clipboard;
 pub mod working_account;
 

@@ -2128,6 +2128,7 @@ struct FakeAssignments {
     fail: &'static [&'static str],
     github: Mutex<Vec<String>>,
     secrets: Mutex<Vec<String>>,
+    secret_names: Mutex<Vec<String>>,
 }
 impl FakeAssignments {
     fn new(fail: &'static [&'static str]) -> Self {
@@ -2135,6 +2136,7 @@ impl FakeAssignments {
             fail,
             github: Mutex::new(Vec::new()),
             secrets: Mutex::new(Vec::new()),
+            secret_names: Mutex::new(Vec::new()),
         }
     }
     fn check(&self, step: &str) -> Result<(), String> {
@@ -2156,8 +2158,12 @@ impl ForkAssignments for FakeAssignments {
         self.github.lock().unwrap().retain(|name| name != target);
         Ok(())
     }
-    fn copy_secrets(&self, _: &str, target: &str) -> Result<(), String> {
+    fn copy_secrets(&self, _: &str, target: &str, names: &[String]) -> Result<(), String> {
         self.check("copy_secrets")?;
+        self.secret_names
+            .lock()
+            .unwrap()
+            .extend(names.iter().cloned());
         self.secrets.lock().unwrap().push(target.into());
         Ok(())
     }
@@ -2179,6 +2185,11 @@ fn fork_fixture(directory: &tempfile::TempDir) -> (RuntimePaths, ForkSource) {
         member: "c000000000000000000000000000000".into(),
         scope: "full".into(),
         desired_policy: serde_json::json!({"default_egress":"deny","default_ingress":"allow","rules":[]}),
+        // The fixture forks name GitHub and one secret, so the copy and rollback paths run.
+        options: ForkOptions {
+            secrets: vec!["github".into(), "TOKEN".into()],
+            ..ForkOptions::default()
+        },
     };
     (paths, fork)
 }
@@ -2569,6 +2580,7 @@ fn current_state_fork_captures_under_the_source_lane_and_writes_under_the_device
         ID,
         None,
         "branch",
+        ForkOptions::default(),
         &Vec::new,
         None,
     )
@@ -5535,4 +5547,234 @@ fn the_launch_upgrade_leaves_structurally_invalid_histories_untouched() {
 fn a_computer_without_a_history_folder_has_nothing_to_upgrade() {
     let directory = tempfile::tempdir().unwrap();
     assert_eq!(upgrade_records(directory.path()), Ok(0));
+}
+
+fn fork_child(paths: &RuntimePaths) -> (String, Record) {
+    let child = read_metadata(&paths.metadata)
+        .unwrap()
+        .computers
+        .into_iter()
+        .find(|configuration| configuration.name() == "branch")
+        .unwrap();
+    let record = load(paths, child.id()).unwrap();
+    (child.id().to_owned(), record)
+}
+
+#[test]
+fn a_fork_copies_nothing_it_was_not_told_to() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let (paths, mut fork) = fork_fixture(&directory);
+    fork.options = ForkOptions::default();
+    let assignments = FakeAssignments::new(&[]);
+    fork_commit(
+        &journal_runner("Running", ""),
+        &paths,
+        &assignments,
+        &fork,
+        "branch",
+    )
+    .unwrap();
+    assert!(assignments.github.lock().unwrap().is_empty());
+    assert!(assignments.secrets.lock().unwrap().is_empty());
+    let (_, record) = fork_child(&paths);
+    let pending = record.pending_checkpoint_restore.unwrap();
+    assert_eq!(pending.state, "disk", "a fork never resumes memory");
+    assert_eq!(
+        record.quiet,
+        Some(QuietRecord {
+            scheduled_jobs_disabled: true,
+            new_identity: true,
+            ..QuietRecord::default()
+        })
+    );
+}
+
+#[test]
+fn a_fork_copies_only_the_named_secrets_and_github_on_request() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let (paths, mut fork) = fork_fixture(&directory);
+    fork.options = ForkOptions {
+        secrets: vec!["API_KEY".into()],
+        ..ForkOptions::default()
+    };
+    let assignments = FakeAssignments::new(&[]);
+    fork_commit(
+        &journal_runner("Running", ""),
+        &paths,
+        &assignments,
+        &fork,
+        "branch",
+    )
+    .unwrap();
+    assert!(assignments.github.lock().unwrap().is_empty());
+    assert_eq!(*assignments.secret_names.lock().unwrap(), ["API_KEY"]);
+
+    let directory = tempfile::tempdir().unwrap();
+    let (paths, mut fork) = fork_fixture(&directory);
+    fork.options = ForkOptions {
+        secrets: vec!["github".into()],
+        ..ForkOptions::default()
+    };
+    let assignments = FakeAssignments::new(&[]);
+    fork_commit(
+        &journal_runner("Running", ""),
+        &paths,
+        &assignments,
+        &fork,
+        "branch",
+    )
+    .unwrap();
+    assert_eq!(*assignments.github.lock().unwrap(), ["branch"]);
+    assert!(assignments.secrets.lock().unwrap().is_empty());
+    let (_, record) = fork_child(&paths);
+    assert_eq!(record.quiet.unwrap().secrets, ["github"]);
+}
+
+#[test]
+fn a_fork_records_what_it_was_quieted_with() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let (paths, mut fork) = fork_fixture(&directory);
+    fork.options = ForkOptions {
+        secrets: vec!["github".into(), "TOKEN".into()],
+        stop: vec!["poller".into()],
+        scrub: vec!["/root/.bot.env".into()],
+    };
+    fork_commit(
+        &journal_runner("Running", ""),
+        &paths,
+        &FakeAssignments::new(&[]),
+        &fork,
+        "branch",
+    )
+    .unwrap();
+    let quiet = fork_child(&paths).1.quiet.unwrap();
+    assert_eq!(quiet.stop, ["poller"]);
+    assert_eq!(quiet.scrub, ["/root/.bot.env"]);
+    assert_eq!(quiet.secrets, ["github", "TOKEN"]);
+    assert!(!quiet.applied);
+}
+
+#[test]
+fn fork_options_refuse_odd_names_and_paths() {
+    let options = |stop: &[&str], scrub: &[&str]| ForkOptions {
+        secrets: Vec::new(),
+        stop: stop.iter().map(|s| s.to_string()).collect(),
+        scrub: scrub.iter().map(|s| s.to_string()).collect(),
+    };
+    assert!(options(
+        &["poller", "my-app.service", "a@b"],
+        &["/root/.env", "/home/*/.cache/x*"]
+    )
+    .validate()
+    .is_ok());
+    for stop in ["", "-rf", "a b", "a;b", "$(x)", "a\nb"] {
+        assert!(options(&[stop], &[]).validate().is_err(), "{stop:?}");
+    }
+    for scrub in [
+        "",
+        "relative/x",
+        "/",
+        "/*",
+        "/etc",
+        "/etc/../x",
+        "/a\nb/c",
+        "/*/x",
+    ] {
+        assert!(options(&[], &[scrub]).validate().is_err(), "{scrub:?}");
+    }
+}
+
+#[test]
+fn a_fork_hostname_follows_its_name() {
+    assert_eq!(fork_hostname("My Fork_2"), "my-fork-2");
+    assert_eq!(fork_hostname("---"), "silo-fork");
+    assert_eq!(fork_hostname(&"a".repeat(80)).len(), 63);
+}
+
+#[test]
+fn the_first_boot_script_covers_every_quiet_rule() {
+    for needle in [
+        "/etc/machine-id",
+        "/var/lib/dbus/machine-id",
+        "/etc/hostname",
+        "/var/spool/cron/crontabs",
+        "/etc/cron.d",
+        "/etc/anacrontab",
+        "/etc/crontab",
+        "atjobs",
+        "*.timer",
+        "stop=*",
+        "scrub=*",
+        "/dev/null",
+    ] {
+        assert!(QUIET_SCRIPT.contains(needle), "{needle}");
+    }
+    let status = std::process::Command::new("sh")
+        .args(["-n", "-c", QUIET_SCRIPT])
+        .status()
+        .unwrap();
+    assert!(status.success());
+}
+
+#[test]
+fn quiet_arguments_are_positional_and_run_as_root() {
+    let quiet = QuietRecord {
+        stop: vec!["poller".into()],
+        scrub: vec!["/root/x y*".into()],
+        ..QuietRecord::default()
+    };
+    let args = quiet_exec_args("My Fork", &quiet);
+    assert_eq!(&args[..2], ["exec", "My Fork"]);
+    assert!(args.windows(2).any(|pair| pair == ["--user", "root"]));
+    assert_eq!(
+        args[args.len() - 3..],
+        ["my-fork", "stop=poller", "scrub=/root/x y*"]
+    );
+    assert_eq!(args[args.len() - 4], "silo-quiet");
+}
+
+#[test]
+fn quieting_runs_once_and_a_failure_stops_the_fork() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let paths = paths(&directory);
+    let quieted = || Record {
+        quiet: Some(QuietRecord::default()),
+        ..Record::default()
+    };
+
+    let runner = journal_runner("Running", "");
+    let mut record = quieted();
+    apply_quiet(&runner, &paths, "branch", &mut record).unwrap();
+    assert!(record.quiet.as_ref().unwrap().applied);
+    apply_quiet(&runner, &paths, "branch", &mut record).unwrap();
+    assert_eq!(
+        runner
+            .calls
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|call| call[0] == "exec")
+            .count(),
+        1
+    );
+
+    let runner = journal_runner("Running", "");
+    apply_quiet(&runner, &paths, "branch", &mut Record::default()).unwrap();
+    assert!(runner.calls.lock().unwrap().is_empty(), "not a fork");
+
+    let runner = journal_runner("Running", "exec");
+    let mut record = quieted();
+    let failure = apply_quiet(&runner, &paths, "branch", &mut record).unwrap_err();
+    assert!(failure.to_string().contains("could not be made quiet"));
+    assert!(!record.quiet.unwrap().applied);
+    assert!(runner
+        .calls
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|call| call[..2] == ["stop", "branch"]));
 }

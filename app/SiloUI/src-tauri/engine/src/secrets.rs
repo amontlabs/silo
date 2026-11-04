@@ -330,19 +330,45 @@ pub(crate) fn runtime_material(
         .collect()
 }
 
-/// Copy assignment references only. Values remain in the host credential store.
-pub fn fork_assignments(source: &str, target: &str) -> Result<(), String> {
+/// Copy the named assignment references only. Values remain in the host credential store.
+/// A name the source does not have assigned fails the fork before anything is copied.
+pub fn fork_assignments(source: &str, target: &str, names: &[String]) -> Result<(), String> {
+    if names.is_empty() {
+        return Ok(());
+    }
     let _operation = try_lock_unit(&OPERATION)
         .ok_or_else(|| "Secret settings are busy. Retry the fork.".to_string())?;
     update(|document| {
-        copy_assignment_refs(document, source, target);
+        let missing = unassigned_names(document, source, names);
+        if !missing.is_empty() {
+            return Err(format!(
+                "The source computer has no secret named {}.",
+                missing.join(", ")
+            ));
+        }
+        copy_assignment_refs(document, source, target, names);
         Ok(())
     })
 }
 
-fn copy_assignment_refs(document: &mut Document, source: &str, target: &str) {
+fn unassigned_names(document: &Document, source: &str, names: &[String]) -> Vec<String> {
+    names
+        .iter()
+        .filter(|name| {
+            !document.secrets.iter().any(|secret| {
+                !secret.removing
+                    && &secret.name == *name
+                    && secret.computers.iter().any(|w| w == source)
+            })
+        })
+        .cloned()
+        .collect()
+}
+
+fn copy_assignment_refs(document: &mut Document, source: &str, target: &str, names: &[String]) {
     for secret in &mut document.secrets {
         if !secret.removing
+            && names.contains(&secret.name)
             && secret.computers.iter().any(|name| name == source)
             && !secret.computers.iter().any(|name| name == target)
         {
@@ -1094,7 +1120,14 @@ mod tests {
             activities: Vec::new(),
             ..Default::default()
         };
-        copy_assignment_refs(&mut document, "dev", "fork");
+        let name = document.secrets[0].name.clone();
+        copy_assignment_refs(&mut document, "dev", "fork", &["other".to_string()]);
+        assert_eq!(document.secrets[0].computers, ["dev"]);
+        assert_eq!(
+            unassigned_names(&document, "dev", &["other".to_string(), name.clone()]),
+            ["other"]
+        );
+        copy_assignment_refs(&mut document, "dev", "fork", &[name]);
         assert_eq!(document.secrets[0].computers, ["dev", "fork"]);
         assert_eq!(document.secrets[0].value_id, "private-reference");
         document.secrets[0].computers.retain(|name| name != "dev");

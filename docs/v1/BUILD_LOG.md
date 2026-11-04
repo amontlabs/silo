@@ -6,10 +6,10 @@ Tracker: Linear project "Silo v1: git for agent computers" (P-AMO-8).
 
 ## Resume
 
-- **Phase:** 0 (AMO-88) checks passed; PR to main pending CI.
-- **Open slices:** AMO-91 (URL per fork, started early) is being reworked after review in its own worktree.
-- **Clean up:** the Dev engine runs from the worktree `.claude/worktrees/agent-af461c784262f09d6` (built from a235c34a); after the phase 0 PR merges, rebuild from main, restart the Dev `silod` from the main checkout's bundle, then remove that worktree.
-- **Next action:** merge the phase 0 PR, then start phase 1 in a fresh session.
+- **Phase:** 1, in progress. Phase 0 merged in #60 (`25ca53eb`).
+- **Open slices:** 1a CLI + MCP, 1b quiet forks Linux, 1c macOS fork fast path (worktree agents); 1d quiet forks macOS after 1c. AMO-91 (URL per fork) is being reworked in its own worktree.
+- **Clean up:** none outstanding. The Dev engine runs from the main checkout's bundle (built from `25ca53eb`).
+- **Next action:** review and integrate phase 1 slices on `claude/project-thread-e72ch6`, rebuild, run the phase 1 VM check (Linux + macOS).
 - **macOS slots:** one foreign VM (PID 60843, running since 2 Nov) holds one of the two slots.
 
 ## Start
@@ -31,6 +31,17 @@ Tracker: Linear project "Silo v1: git for agent computers" (P-AMO-8).
 | 0c | Read-only Silo app assessment (builds and runs on the current engine; cost of phase 7 screens) | none | none |
 
 VM check: create and fork a Linux computer through `engine.sock` while status polls keep succeeding; disk returns after drop and checkpoint removal; the newest retained checkpoint still restores.
+
+### Phase 1 (AMO-74, AMO-77, AMO-89; AMO-63 landed in phase 0)
+
+| Slice | What | Files | Review |
+|---|---|---|---|
+| 1a | `silo` CLI + MCP server (`silo mcp`, stdio), engine discovery on `~/.silo-dev`/`~/.silo`, job waiting, `.silo/recipe.yaml` and `.silo/silo.yaml` loaders; phase 1 commands: `list`, `status`, `create`, `start`, `stop`, `fork`, `drop`, `exec`, `checkpoint` | new crate `app/SiloUI/cli` | reviewer |
+| 1b | Quiet forks, Linux: API contract (`secrets`, `quiet` on `checkpoints.fork`), cold boot only, no secret/GitHub assignment copy unless named, new machine-id and hostname, scheduled jobs off and `scrub:`/`quiet:` applied before guest boot | `api/src/methods/checkpoints.rs`, `engine/src/runtime/checkpoints.rs`, `engine/src/checkpoints/`, guest scripts | reviewer + Argon |
+| 1c | macOS fork fast path: one boot, no developer-tools reinstall, no extra shutdowns; `New Password: Permission denied` | `engine/src/macos_computers/` | reviewer + Argon |
+| 1d | Quiet forks, macOS (after 1c): automatic checkpoint when none named, `--secret` opt-in, scheduled jobs (LaunchAgents/cron) off, `scrub:`/`quiet:` | `engine/src/macos_computers/checkpoints.rs` | reviewer + Argon |
+
+VM check (Linux and macOS): a macOS fork boots once; a source with a boot-persistent scheduled job (incl. `@reboot`), a `quiet:` poller and a `scrub:` file; its fork shows no polls or job runs, a new machine-id and hostname, no assignments by default, `scrub:` paths gone; read-only GitHub against a mock GitHub API.
 
 ### Phase 0c: Silo app assessment (4 Nov, read-only)
 

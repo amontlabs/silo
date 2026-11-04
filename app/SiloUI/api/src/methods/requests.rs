@@ -663,6 +663,11 @@ pub fn network_unpublish(params: network::NetworkUnpublishParams) -> Request<kin
     Request::new(MethodParams::NetworkUnpublish(params))
 }
 
+/// `network.urls`
+pub fn network_urls(params: network::NetworkTargetParams) -> Request<kind::Query> {
+    Request::new(MethodParams::NetworkUrls(params))
+}
+
 /// `notifications.list`
 pub fn notifications_list(params: notifications::NotificationsListParams) -> Request<kind::Query> {
     Request::new(MethodParams::NotificationsList(params))

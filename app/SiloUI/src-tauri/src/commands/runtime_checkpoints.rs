@@ -49,6 +49,8 @@ pub(crate) async fn fork(
             device_id: None,
             checkpoint_id: checkpoint_id.map(str::to_owned),
             new_name: new_name.to_owned(),
+            secrets: Vec::new(),
+            quiet: None,
         }),
     )
     .await

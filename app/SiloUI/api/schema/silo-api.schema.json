@@ -674,6 +674,25 @@
         },
         "newName": {
           "type": "string"
+        },
+        "quiet": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/QuietSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "What to quiet in the fork before it runs anything."
+        },
+        "secrets": {
+          "default": [],
+          "description": "Names of Silo-managed secrets the fork may use. The special name `github` copies\nGitHub access, read-only. Nothing is copied unless named.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         }
       },
       "required": [
@@ -6657,6 +6676,7 @@
         "network.publish",
         "network.state",
         "network.unpublish",
+        "network.urls",
         "notifications.list",
         "operations.cancel",
         "operations.job.acknowledge",
@@ -8539,6 +8559,22 @@
             },
             "params": {
               "$ref": "#/$defs/NetworkUnpublishParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "network.urls",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/ComputerTargetParams"
             }
           },
           "required": [
@@ -10895,6 +10931,22 @@
         {
           "properties": {
             "method": {
+              "const": "network.urls",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/NetworkUrlsResult"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
               "const": "notifications.list",
               "type": "string"
             },
@@ -11831,6 +11883,46 @@
       ],
       "type": "object"
     },
+    "NetworkUrl": {
+      "properties": {
+        "host": {
+          "type": "string"
+        },
+        "port": {
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "port",
+        "host",
+        "url"
+      ],
+      "type": "object"
+    },
+    "NetworkUrlsResult": {
+      "properties": {
+        "computerId": {
+          "type": "string"
+        },
+        "urls": {
+          "items": {
+            "$ref": "#/$defs/NetworkUrl"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "computerId",
+        "urls"
+      ],
+      "type": "object"
+    },
     "Notice": {
       "properties": {
         "body": {
@@ -12474,6 +12566,28 @@
         "branch",
         "commit"
       ],
+      "type": "object"
+    },
+    "QuietSpec": {
+      "description": "Things a fork turns off on its first boot, beyond the scheduled jobs it always turns off.",
+      "properties": {
+        "scrub": {
+          "default": [],
+          "description": "Absolute guest paths (globs allowed) to delete in the fork.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "stop": {
+          "default": [],
+          "description": "Process names and systemd units to disable in the fork.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
       "type": "object"
     },
     "ReclaimEntry": {
@@ -14645,6 +14759,12 @@
       "name": "network.unpublish",
       "paramsType": "network::NetworkUnpublishParams",
       "resultType": "network::NetworkState"
+    },
+    {
+      "kind": "query",
+      "name": "network.urls",
+      "paramsType": "network::NetworkTargetParams",
+      "resultType": "network::NetworkUrlsResult"
     },
     {
       "kind": "query",
