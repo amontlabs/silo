@@ -29,9 +29,9 @@ What is implemented:
   `/usr/local/bin/cua-driver` shim, telemetry and update checks off system-wide, the MIT
   licence in `/usr/share/doc/silo-guest-third-party/`, no ChatGPT-only system packages,
   capabilities `["desktop","accessibility","cua-driver"]` and `cuaDriverVersion` in the marker.
-  v5 is not published. `guest-image/image-lock.json` stays on v4, so new computers still come
-  from v4 and the guest helper downloads and verifies the pinned archive once. Publishing is
-  the owner's step ([guest images](SiloUI-GUEST-IMAGES.md#guest-image-v5-recipe-unpublished)).
+  v5 is published and `guest-image/image-lock.json` pins it, so new computers have the driver
+  from the start; on a computer created from v4 the guest helper downloads and verifies the
+  pinned archive once ([guest images](SiloUI-GUEST-IMAGES.md#guest-image-v5-recipe-published)).
 - **Guest helper.** `silo-computer-use.py` (receipt `schemaVersion` 2) ensures the driver,
   registers it, applies the approval mode, removes LCU leftovers and checks readiness with
   `cua-driver doctor --json`. Registered agents: Claude Code and Codex only. Pi, OMP, Hermes and

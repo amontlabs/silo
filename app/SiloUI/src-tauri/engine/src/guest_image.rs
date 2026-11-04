@@ -422,7 +422,8 @@ mod tests {
         assert!(PinnedImage::parse(LOCK, "riscv", "aarch64").is_err());
         let plain = LOCK.replacen("https://", "http://", 1);
         assert!(PinnedImage::parse(&plain, "arm64", "aarch64").is_err());
-        let traversal = LOCK.replacen("\"version\": \"ubuntu-24.04-v4\"", "\"version\": \"..\"", 1);
+        let traversal = LOCK.replacen("\"version\": \"ubuntu-24.04-v5\"", "\"version\": \"..\"", 1);
+        assert_ne!(traversal, LOCK);
         assert!(PinnedImage::parse(&traversal, "arm64", "aarch64").is_err());
         assert!(PinnedImage::parse("{", "arm64", "aarch64").is_err());
     }

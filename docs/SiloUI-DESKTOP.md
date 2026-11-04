@@ -285,9 +285,9 @@ error. They use temporary paths without running a computer.
   `CUA_DRIVER_RS_UPDATE_CHECK=false` and `DO_NOT_TRACK=1` and runs the binary, so telemetry and
   the update check stay off however the driver is started (MCP launcher, desktop terminal, SSH
   shell, an agent's own command); `/etc/environment`, `/etc/profile.d` and the desktop session's
-  environment set the same switches. v5 is not published yet and `image-lock.json` still
-  points at v4, so new computers currently start from v4 and the guest helper downloads and
-  verifies the pinned archive once (see below).
+  environment set the same switches. `image-lock.json` pins v5, so new computers have the
+  driver from the image; on a computer created from v4 the guest helper downloads and verifies
+  the pinned archive once (see below).
 - **During creation.** "Created" means ready: the first start is only a start. Creation waits
   (`creation_inputs.rs`) only for the background VM image import ("Waiting for the VM image",
   `preparation::ensure_image`), before it takes the device-wide operation gate. The wait holds
