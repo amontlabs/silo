@@ -135,6 +135,11 @@ pub(super) struct QuietRecord {
     pub(super) secrets: Vec<String>,
     /// The first-boot step finished.
     pub(super) applied: bool,
+    /// The restore attempt whose boot carries the step: the guest writes
+    /// `/var/lib/silo-quiet/applied-<token>` once it has run, and the engine looks for that
+    /// file before it reports the fork started.
+    #[serde(default)]
+    pub(super) token: String,
 }
 
 /// What the caller of a fork asked for beyond the always-on rules.
@@ -177,25 +182,26 @@ impl ForkOptions {
             name.is_empty()
                 || name.len() > 128
                 || name.starts_with('-')
+                || name.bytes().all(|b| b == b'.')
                 || !name
                     .bytes()
                     .all(|b| b.is_ascii_alphanumeric() || b"._@:+-".contains(&b))
         }) {
             return invalid(
-                "A process or unit to stop may only contain letters, digits and . _ @ : + -.",
+                "A process or unit to stop may only contain letters, digits and . _ @ : + -, and is not . or ...",
             );
         }
         for path in &self.scrub {
             let parts: Vec<&str> = path.split('/').filter(|part| !part.is_empty()).collect();
             if !path.starts_with('/')
                 || path.len() > 1024
-                || path.contains(['\0', '\n'])
-                || parts.iter().any(|part| *part == "..")
+                || path.contains(|c: char| c.is_whitespace() || c.is_control())
+                || parts.iter().any(|part| matches!(*part, "." | ".."))
                 || parts.len() < 2
                 || parts[0].contains(['*', '?', '['])
             {
                 return invalid(
-                    "A path to scrub must be absolute, name at least two levels, and not contain '..'.",
+                    "A path to scrub must be absolute, name at least two levels, and contain no spaces, '.' or '..'.",
                 );
             }
         }
@@ -1670,7 +1676,9 @@ pub(super) fn start_pending(
             record.restore_attempt_ran = false;
             record.restore_attempt_id = None;
             save(paths, configuration.id(), &record)?;
-            return Ok(());
+            // An earlier attempt booted the fork but may not have confirmed it quiet.
+            apply_quiet(runner, paths, configuration.name(), &mut record)?;
+            return save(paths, configuration.id(), &record);
         }
         if observed
             .config
@@ -1710,9 +1718,8 @@ pub(super) fn start_pending(
                 "start",
                 configuration.name(),
             )?;
-            // An earlier attempt booted but did not finish quieting the fork.
-            apply_quiet(runner, paths, configuration.name(), &mut record)?;
-            return save(paths, configuration.id(), &record);
+            // The start quiets the fork before it reports success (`ensure_quiet`).
+            return Ok(());
         }
         runner.run(
             paths,
@@ -1744,6 +1751,9 @@ pub(super) fn start_pending(
     record.restore_attempted = true;
     let attempt_id = uuid::Uuid::new_v4().to_string();
     record.restore_attempt_id = Some(attempt_id.clone());
+    if let Some(quiet) = record.quiet.as_mut() {
+        quiet.token = attempt_id.clone();
+    }
     record.checkpoint_operation = Some(Operation {
         kind: "fork".into(),
         status: "running".into(),
@@ -1785,6 +1795,13 @@ pub(super) fn start_pending(
     ] {
         args.extend(["--label".into(), label]);
     }
+    // The guest's boot hook runs the quiet step first when it finds these, and starts nothing
+    // else until it has succeeded.
+    if let Some(quiet) = record.quiet.as_ref().filter(|quiet| !quiet.applied) {
+        for label in quiet_labels(configuration.name(), quiet) {
+            args.extend(["--label".into(), label]);
+        }
+    }
     for entry in &record.desired_environment {
         if entry.key != "GH_TOKEN" {
             args.push(format!("--env={}={}", entry.key, entry.value));
@@ -1816,11 +1833,7 @@ pub(super) fn start_pending(
         .and_then(|observed| if running_child_matches(&observed, configuration.id(), &attempt_id, &material, &policy) {
             Ok(observed)
         } else { Err(error("The restored computer did not reach a verified running state. Its checkpoint was preserved.")) })
-        // The first command in the new guest, before the fork is reported started.
-        .and_then(|observed| {
-            apply_quiet(runner, paths, configuration.name(), &mut record)?;
-            Ok(observed)
-        });
+        ;
     match result {
         Ok(observed) => {
             record.pending_checkpoint_restore = None;
@@ -1828,6 +1841,11 @@ pub(super) fn start_pending(
             record.restore_attempt_id = None;
             record.restore_attempt_ran = false;
             record.checkpoint_operation = None;
+            save(paths, configuration.id(), &record)?;
+            // Confirmed before the fork is reported started. The restore is no longer pending,
+            // so the runtime accepts the check; a failure stops the guest and every later
+            // start quiets it again before anything else runs.
+            apply_quiet(runner, paths, configuration.name(), &mut record)?;
             save(paths, configuration.id(), &record)?;
             let revision = crate::secrets::computer_revision(configuration.name())
                 .map_err(RuntimeError::Unavailable)?;
@@ -1958,12 +1976,19 @@ fn ensure_fork_name_available(
     Ok(())
 }
 
-/// Runs as root in the fork's guest as the first command after its cold boot. MicroSandbox
-/// 0.7.6 cannot edit a snapshot's disk before it boots, and the guest starts only its init and
-/// `/bin/bash`, so no cron, timer or service has started when this runs. Arguments: the new
-/// hostname, then `stop=<name>` and `scrub=<path>` entries. They are positional, never part of
-/// the script text.
-const QUIET_SCRIPT: &str = include_str!("checkpoints/quiet.sh");
+/// Runs as root in the fork's guest, before anything else there starts. MicroSandbox's boot
+/// hook (the Silo `create-stopped` patch) carries a copy of this script and runs it when the
+/// computer has a `silo.quiet-token` label and `/var/lib/silo-quiet/applied-<token>` is absent;
+/// it starts the desktop and everything else only after the script succeeded. The engine runs
+/// the same script itself as a fallback when the marker is missing afterwards. Arguments: the
+/// token, the new hostname, then `stop=<name>` and `scrub=<path>` entries. They are
+/// positional, never part of the script text.
+pub(super) const QUIET_SCRIPT: &str = include_str!("checkpoints/quiet.sh");
+
+/// Where the guest records that a fork's quiet step finished.
+fn quiet_marker(token: &str) -> String {
+    format!("/var/lib/silo-quiet/applied-{token}")
+}
 
 /// A hostname for a fork: its name reduced to what a hostname allows.
 fn fork_hostname(name: &str) -> String {
@@ -1985,7 +2010,26 @@ fn fork_hostname(name: &str) -> String {
     }
 }
 
-fn quiet_exec_args(name: &str, quiet: &QuietRecord) -> Vec<String> {
+fn quiet_entries(quiet: &QuietRecord) -> Vec<String> {
+    quiet
+        .stop
+        .iter()
+        .map(|n| format!("stop={n}"))
+        .chain(quiet.scrub.iter().map(|p| format!("scrub={p}")))
+        .collect()
+}
+
+/// The labels the guest's boot hook reads. Names and paths are validated to hold no
+/// whitespace, so the hook splits the list on spaces.
+fn quiet_labels(name: &str, quiet: &QuietRecord) -> Vec<String> {
+    vec![
+        format!("silo.quiet-token={}", quiet.token),
+        format!("silo.quiet-host={}", fork_hostname(name)),
+        format!("silo.quiet-args={}", quiet_entries(quiet).join(" ")),
+    ]
+}
+
+fn root_exec(name: &str, timeout: &str, command: &[&str]) -> Vec<String> {
     let mut args: Vec<String> = [
         "exec",
         name,
@@ -1994,25 +2038,37 @@ fn quiet_exec_args(name: &str, quiet: &QuietRecord) -> Vec<String> {
         "--no-tty",
         "--quiet",
         "--timeout",
-        "120s",
+        timeout,
         "--",
-        "sh",
-        "-c",
-        QUIET_SCRIPT,
-        "silo-quiet",
     ]
     .iter()
     .map(|part| (*part).into())
     .collect();
-    args.push(fork_hostname(name));
-    args.extend(quiet.stop.iter().map(|n| format!("stop={n}")));
-    args.extend(quiet.scrub.iter().map(|p| format!("scrub={p}")));
+    args.extend(command.iter().map(|part| (*part).to_string()));
     args
 }
 
-/// Quiets a fork whose guest is running: new identity, scheduled jobs off, named processes
-/// stopped, named paths removed. Does nothing for a computer that is not an unquieted fork. On
-/// failure the guest is stopped, so a fork that could not be quieted does not keep running.
+fn quiet_exec_args(name: &str, quiet: &QuietRecord) -> Vec<String> {
+    let mut args = root_exec(name, "120s", &["sh", "-c", QUIET_SCRIPT, "silo-quiet"]);
+    args.push(quiet.token.clone());
+    args.push(fork_hostname(name));
+    args.extend(quiet_entries(quiet));
+    args
+}
+
+fn quiet_marker_args(name: &str, quiet: &QuietRecord) -> Vec<String> {
+    let marker = quiet_marker(&quiet.token);
+    root_exec(name, "30s", &["test", "-f", &marker])
+}
+
+const DESKTOP_BOOT: &str =
+    "if [ -x /usr/local/bin/silo-desktop ]; then /usr/local/bin/silo-desktop boot >/dev/null 2>&1; fi";
+
+/// Confirms a running fork is quiet. The guest's boot hook quiets it before anything else
+/// starts, so this normally only finds the marker the hook left. When the marker is missing
+/// (the hook did not run or failed) the script runs here and the desktop, which the hook
+/// withheld, is started. Does nothing for a computer that is not an unquieted fork. On failure
+/// the guest is stopped and the error says whether that worked.
 fn apply_quiet(
     runner: &dyn RuntimeRunner,
     paths: &RuntimePaths,
@@ -2022,19 +2078,72 @@ fn apply_quiet(
     let Some(quiet) = record.quiet.as_mut().filter(|quiet| !quiet.applied) else {
         return Ok(());
     };
-    let outcome = runner.run(
-        paths,
-        &quiet_exec_args(name, quiet),
-        Duration::from_secs(150),
-    );
+    let marked = |quiet: &QuietRecord| {
+        runner
+            .run(
+                paths,
+                &quiet_marker_args(name, quiet),
+                Duration::from_secs(60),
+            )
+            .map(|_| ())
+    };
+    let outcome = if quiet.token.is_empty() {
+        Err(error("The fork has no quiet step to confirm."))
+    } else if marked(quiet).is_ok() {
+        Ok(())
+    } else {
+        runner
+            .run(
+                paths,
+                &quiet_exec_args(name, quiet),
+                Duration::from_secs(150),
+            )
+            .and_then(|_| marked(quiet))
+            .map(|()| {
+                // The hook withheld the desktop; start it now that the step has run.
+                let _ = runner.run(
+                    paths,
+                    &root_exec(name, "60s", &["sh", "-c", DESKTOP_BOOT]),
+                    Duration::from_secs(90),
+                );
+            })
+    };
     if outcome.is_err() {
-        let _ = runner.run(paths, &["stop".into(), name.into()], STOP_TIMEOUT);
-        return Err(error(
-            "The fork could not be made quiet, so it was stopped. Start it again to retry.",
-        ));
+        let stopped = runner.run(paths, &["stop".into(), name.into()], STOP_TIMEOUT);
+        return Err(error(if stopped.is_ok() {
+            "The fork could not be made quiet, so it was stopped. Start it again to retry."
+        } else {
+            "The fork could not be made quiet and could not be stopped. Stop it before using it, then start it again to retry."
+        }));
     }
     quiet.applied = true;
     Ok(())
+}
+
+/// Quiets the fork named `name` when it is running and has not been confirmed quiet: any start
+/// of such a fork goes through here, whether it came from a restore, a retry, a crash recovery
+/// or a launch.
+pub(super) fn ensure_quiet(
+    runner: &dyn RuntimeRunner,
+    paths: &RuntimePaths,
+    name: &str,
+) -> Result<(), RuntimeError> {
+    let Some(configuration) = read_metadata(&paths.metadata)?
+        .computers
+        .into_iter()
+        .find(|configuration| configuration.name() == name)
+    else {
+        return Ok(());
+    };
+    let mut record = load(paths, configuration.id())?;
+    if record.quiet.as_ref().is_none_or(|quiet| quiet.applied) {
+        return Ok(());
+    }
+    let result = apply_quiet(runner, paths, name, &mut record);
+    if record.quiet.as_ref().is_some_and(|quiet| quiet.applied) {
+        save(paths, configuration.id(), &record)?;
+    }
+    result
 }
 
 /// Phase one of a fork, under the source computer's lane: resolve the checkpoint, capturing a
@@ -2202,9 +2311,11 @@ fn fork_commit_with_metadata_writer(
         scrub: fork.options.scrub.clone(),
         secrets: fork.options.secrets.clone(),
         applied: false,
+        token: String::new(),
     });
     let source_record = load(paths, source.id())?;
-    child_record.desired_environment = source_record.desired_environment;
+    // Environment variables from the source's settings are Silo-managed configuration and can
+    // carry credentials, so a fork starts without them.
     // A source from before Cua Driver recorded the read-only ChatGPT and LCU folders. Keep them
     // with the child, so its first start passes them again even if the source is deleted first.
     child_record.legacy_mounts = source_legacy_mounts.unwrap_or(source_record.legacy_mounts);

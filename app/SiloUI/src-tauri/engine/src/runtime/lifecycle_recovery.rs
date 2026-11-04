@@ -239,6 +239,11 @@ fn advance(
         if started_here {
             storage::after_start(runner, paths, &observed);
         }
+        // A fork that was never confirmed quiet is quieted before this start reports success,
+        // whoever started it.
+        if command == "start" {
+            checkpoints::ensure_quiet(runner, paths, &intent.name)?;
+        }
     }
 }
 fn settle(

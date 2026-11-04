@@ -1246,11 +1246,12 @@ impl RuntimeRunner for SetupRunner<'_> {
     }
 }
 
-pub fn run_msb(
+/// The production runner's refusal to start, restart or exec a computer that still waits for
+/// an explicit Start from a checkpoint.
+pub(super) fn refuse_pending_start(
     paths: &RuntimePaths,
     args: &[String],
-    timeout: Duration,
-) -> Result<CommandOutput, RuntimeError> {
+) -> Result<(), RuntimeError> {
     if matches!(
         args.first().map(String::as_str),
         Some("start" | "restart" | "exec")
@@ -1271,6 +1272,15 @@ pub fn run_msb(
             }
         }
     }
+    Ok(())
+}
+
+pub fn run_msb(
+    paths: &RuntimePaths,
+    args: &[String],
+    timeout: Duration,
+) -> Result<CommandOutput, RuntimeError> {
+    refuse_pending_start(paths, args)?;
     run_msb_with_progress(paths, args, timeout, &|_| {})
 }
 
@@ -5992,7 +6002,7 @@ fn start_at_launch_with(
         let inspected = inspect_computer(runner, paths, name)?;
         ensure_computer_identity(configuration, &inspected)?;
         match inspected.status.to_ascii_lowercase().as_str() {
-            "running" => Ok(()),
+            "running" => checkpoints::ensure_quiet(runner, paths, name),
             "created" | "stopped" => computer_action_with(runner, paths, device, "start", name),
             _ => Err(RuntimeError::Invalid(format!(
                 "{name} is not stopped or running. Check its status before starting it."
