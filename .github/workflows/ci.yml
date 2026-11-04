@@ -18,10 +18,12 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # Pull requests that touch only the website, demo films or documentation
-  # skip the native jobs below, which hold a macOS runner for about half an
-  # hour. A skipped job still satisfies the required check. Pushes to main skip
-  # this job, and a skip or failure here runs every job.
+  # Pull requests skip native work that no Rust code in its scope reads:
+  # website, demo, documentation and frontend-only changes skip both Rust jobs,
+  # and changes outside silo-engine's crates skip the engine suite (see
+  # app/SiloUI/scripts/ci-native-changes.py). A skipped job still satisfies the
+  # required check. Pushes to main skip this job, and a skip or failure here
+  # runs everything.
   changes:
     name: Detect native changes
     if: github.event_name == 'pull_request'
@@ -29,6 +31,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       native: ${{ steps.native.outputs.native }}
+      engine: ${{ steps.native.outputs.engine }}
     steps:
       # A pull request checks out its merge commit, whose first parent is the base.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -152,7 +155,7 @@ jobs:
     name: Engine tests (Linux)
     needs: changes
     # Fails open: pushes skip detection, and a failed detection has an empty output.
-    if: ${{ !cancelled() && needs.changes.outputs.native != 'false' }}
+    if: ${{ !cancelled() && needs.changes.outputs.engine != 'false' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     defaults:
@@ -174,9 +177,9 @@ jobs:
         with:
           node-version-file: .nvmrc
       - run: node scripts/preflight.mjs
-      # silo-host links GTK on Linux; the tests also run OpenSSH and zsh.
+      # silo-host links GTK on Linux; the tests also run OpenSSH, zsh and fish.
       - name: Install Linux build and test dependencies
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libgtk-3-dev pkg-config openssh-client zsh
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libgtk-3-dev pkg-config openssh-client zsh fish
       - name: Install pinned Rust toolchain
         run: |
           runtime_toolchain=$(node -p "require(process.env.GITHUB_WORKSPACE + '/app/SiloUI/runtime-inputs.json').toolchain")
@@ -243,11 +246,7 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .nvmrc
-          cache: npm
-          cache-dependency-path: app/SiloUI/package-lock.json
       - run: node scripts/preflight.mjs
-      - name: Install shell test dependency
-        run: brew install fish
       - name: Install pinned Rust toolchain
         run: |
           runtime_toolchain=$(node -p "require(process.env.GITHUB_WORKSPACE + '/app/SiloUI/runtime-inputs.json').toolchain")
@@ -266,7 +265,7 @@ jobs:
         with:
           workspaces: app/SiloUI
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - run: npm ci
+      # Runtime preparation uses only Node built-ins, so this job needs no npm ci.
       # Restores the patched MicroSandbox build that warm-release-caches.yml
       # saves from main, instead of compiling it on every run.
       - name: Prepare native resources
@@ -288,9 +287,18 @@ jobs:
           echo "$NEXTEST_SHA256  $RUNNER_TEMP/nextest.tar.gz" | shasum -a 256 --check --strict -
           tar -xzf "$RUNNER_TEMP/nextest.tar.gz" -C "$(dirname "$(command -v cargo)")"
           cargo nextest --version
-      # The workspace has no doctests, which nextest does not run.
+      # The workspace has no doctests, which nextest does not run. A pull request
+      # that changes nothing silo-engine reads skips the engine suite here too;
+      # main always runs it.
       - name: Run Rust tests
         timeout-minutes: 30
-        run: cargo nextest run --manifest-path Cargo.toml --workspace --locked --profile ci
+        env:
+          ENGINE: ${{ needs.changes.outputs.engine }}
+        run: |
+          if [ "$ENGINE" = false ]; then
+            cargo nextest run --manifest-path Cargo.toml --workspace --locked --profile ci -E 'not package(silo-engine)'
+          else
+            cargo nextest run --manifest-path Cargo.toml --workspace --locked --profile ci
+          fi
       - name: Test patched updater transport and atomic installation
         run: cargo test --manifest-path src-tauri/Cargo.toml --locked -p tauri-plugin-updater --lib

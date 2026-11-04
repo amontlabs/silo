@@ -303,9 +303,14 @@ documentation with [lychee](https://github.com/lycheeverse/lychee)
 in offline mode. The macOS job also runs `test_macos_release.py` against
 ad hoc signed disposable binaries. CI does not run the ignored live computer tests.
 Pull requests that change only `website/`, `demo/`, `docs/`, `artifacts/`,
-`assets/` or top-level Markdown skip the macOS Rust and Linux engine jobs;
-`scripts/ci-native-changes.py` decides, and any other path or a failed check
-runs them.
+`assets/`, top-level Markdown or frontend sources under `app/SiloUI/src/`
+(except the contract fixtures and reserved secret names that Rust tests read)
+skip the macOS Rust and Linux engine jobs. Pull requests that also leave
+silo-engine's crates (`src-tauri/engine`, `api`, `host`) and their inputs
+untouched skip the engine suite on both runners. `scripts/ci-native-changes.py`
+decides, `scripts/test_ci_native_changes.py` checks that no Rust source in each
+scope names a skipped path, and any other path, a failed check or a push to
+`main` runs everything.
 The link check includes first-party source documentation, guest notices and
 changesets. A coverage regression compares its globs with tracked Markdown,
 excluding documentation in the partial upstream vendor tree.
