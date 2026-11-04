@@ -746,13 +746,14 @@ mod tests {
             let (open, connection) = flag(true);
             let (enabled, allowed) = flag(true);
             let runs = counter();
-            let started = Instant::now();
+            // A grace well above the gate's 250 ms re-check keeps the two outcomes
+            // apart under parallel test load.
+            let grace = Duration::from_secs(1);
             let result = thread::scope(|scope| {
                 let queued = scope.spawn(|| {
-                    registry.submit(
-                        fixture.submission(connection, allowed),
-                        change_on(gate, fixture.computer(), runs),
-                    )
+                    let mut submission = fixture.submission(connection, allowed);
+                    submission.reconnect_grace = grace;
+                    registry.submit(submission, change_on(gate, fixture.computer(), runs))
                 });
                 wait_for(|| waiting_for(gate, &fixture.computer()));
                 let stopped = Instant::now();
@@ -766,15 +767,15 @@ mod tests {
             let (result, stopped) = result;
             assert_eq!(result, Err(EXPIRED.into()));
             if revoke_access {
-                // Measured from the revocation: under parallel test load the setup
-                // before it can take longer than the bound by itself.
                 assert!(
-                    stopped.elapsed() < Duration::from_millis(300),
+                    stopped.elapsed() < grace,
                     "revoked access stops a change at once"
                 );
             } else {
+                // The grace runs from the last check that saw the connection open,
+                // at most one 250 ms re-check before it closed.
                 assert!(
-                    started.elapsed() >= Duration::from_millis(300),
+                    stopped.elapsed() >= grace - Duration::from_millis(250),
                     "a dropped connection has time to reconnect"
                 );
             }
