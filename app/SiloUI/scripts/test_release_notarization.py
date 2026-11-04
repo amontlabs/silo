@@ -158,6 +158,34 @@ class CertificateTests(unittest.TestCase):
             import_certificate({'APPLE_CERTIFICATE_P12_BASE64': 'x'}, run)
 
 
+class CertificateFailureTests(unittest.TestCase):
+    def test_a_failed_import_deletes_the_keychain_and_reports_no_passwords(self):
+        calls = []
+
+        def run(args, **kwargs):
+            calls.append(args)
+            if args[1] == 'import':
+                raise subprocess.CalledProcessError(1, args)
+            return subprocess.CompletedProcess(args, 0, '', '')
+
+        with tempfile.TemporaryDirectory() as temporary:
+            environ = {'RUNNER_TEMP': temporary, 'APPLE_CERTIFICATE_P12_BASE64': base64.b64encode(b'p12').decode(),
+                       'APPLE_CERTIFICATE_PASSWORD': 'p12-password-sentinel'}
+            with self.assertRaises(RuntimeError) as failure:
+                import_certificate(environ, run)
+            self.assertEqual(os.listdir(temporary), [])
+        # `from None` keeps the original arguments out of the printed traceback.
+        self.assertTrue(failure.exception.__suppress_context__)
+        self.assertIsNone(failure.exception.__cause__)
+        message = str(failure.exception)
+        self.assertIn('security import', message)
+        self.assertNotIn('p12-password-sentinel', message)
+        created = next(c for c in calls if c[1] == 'create-keychain')
+        self.assertNotIn(created[3], message)
+        self.assertEqual(calls[-1][:2], ['security', 'delete-keychain'])
+        self.assertEqual(calls[-1][2], created[4])
+
+
 class SignOtherCodeTests(unittest.TestCase):
     def test_a_release_identity_signs_every_other_binary_before_the_constrained_helpers(self):
         import macos_release_signing as signing
@@ -238,6 +266,22 @@ class PackagerDryRunTests(unittest.TestCase):
         self.assertTrue(printed and all(line.startswith('[dry-run] ') for line in printed))
 
 
+class VerificationIdentityTests(unittest.TestCase):
+    def test_verification_uses_the_release_identity(self):
+        from macos_notarization import release_identity
+        self.assertEqual(release_identity({}), '-')
+        self.assertEqual(release_identity({'SILO_RELEASE_SIGNING': 'dry-run'}), '-')
+        self.assertEqual(release_identity(DEVELOPER_ID), 'Developer ID Application: Example (TEAM123456)')
+        script = SCRIPTS / 'verify-macos-signing.py'
+        seen = []
+        import macos_release_signing
+        import runpy
+        with patch.object(macos_release_signing, 'verify_bundle', lambda app, identity='-': seen.append(identity)), \
+                patch.dict(os.environ, DEVELOPER_ID), patch.object(sys, 'argv', [str(script), '/x/Silo.app']):
+            runpy.run_path(str(script), run_name='__main__')
+        self.assertEqual(seen, ['Developer ID Application: Example (TEAM123456)'])
+
+
 class WorkflowTests(unittest.TestCase):
     def text(self, name):
         return (REPOSITORY / '.github/workflows' / name).read_text()
@@ -257,7 +301,14 @@ class WorkflowTests(unittest.TestCase):
         header = build[:build.index('    steps:')]
         self.assertNotIn('APPLE_API_KEY', header)
         self.assertNotIn('APPLE_CERTIFICATE', header)
-        self.assertIn('SILO_RELEASE_SIGNING: ${{ inputs.signing }}', build)
+        # The mode is set per step: the tooling tests run the packager before credentials exist.
+        self.assertNotIn('SILO_RELEASE_SIGNING', header)
+        self.assertEqual(build.count('SILO_RELEASE_SIGNING: ${{ inputs.signing }}'), 2)
+        self.assertNotIn('$(python3 scripts/macos_notarization.py import-certificate)" >>', build)
+        verify = build[build.index('- name: Collect and verify macOS assets'):
+                       build.index('- name: Delete the temporary signing keychain')]
+        self.assertIn('APPLE_DEVELOPER_ID_IDENTITY', verify)
+        self.assertIn('verify-macos-signing.py', verify)
         step = build[build.index('- name: Enforce exact macOS runtime libraries'):]
         step = step[:step.index('- name: Verify macOS library constraints')]
         for name in ('APPLE_DEVELOPER_ID_IDENTITY', 'APPLE_TEAM_ID', 'APPLE_API_KEY_P8',

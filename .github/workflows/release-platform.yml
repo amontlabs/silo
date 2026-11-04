@@ -195,7 +195,6 @@ jobs:
       RELEASE_BUNDLES: ${{ inputs.bundles }}
       RELEASE_ASSET: ${{ inputs.asset }}
       APPLE_SIGNING_IDENTITY: '-'
-      SILO_RELEASE_SIGNING: ${{ inputs.signing }}
       CARGO_INCREMENTAL: '0'
       CARGO_PROFILE_DEV_DEBUG: '0'
       CARGO_PROFILE_TEST_DEBUG: '0'
@@ -314,26 +313,29 @@ jobs:
         env:
           APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-        run: echo "SILO_SIGNING_KEYCHAIN=$(python3 scripts/macos_notarization.py import-certificate)" >> "$GITHUB_ENV"
+        run: |
+          keychain=$(python3 scripts/macos_notarization.py import-certificate)
+          echo "SILO_SIGNING_KEYCHAIN=$keychain" >> "$GITHUB_ENV"
       - name: Enforce exact macOS runtime libraries, sign, notarize and rebuild signed packages
         if: runner.os == 'macOS'
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ inputs.draft && secrets.TAURI_SIGNING_PRIVATE_KEY || env.SILO_TEST_SIGNING_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ inputs.draft && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
+          SILO_RELEASE_SIGNING: ${{ inputs.signing }}
           APPLE_DEVELOPER_ID_IDENTITY: ${{ inputs.signing == 'developer-id' && secrets.APPLE_DEVELOPER_ID_IDENTITY || '' }}
           APPLE_TEAM_ID: ${{ inputs.signing == 'developer-id' && secrets.APPLE_TEAM_ID || '' }}
           APPLE_API_KEY_P8: ${{ inputs.signing == 'developer-id' && secrets.APPLE_API_KEY_P8 || '' }}
           APPLE_API_KEY_ID: ${{ inputs.signing == 'developer-id' && secrets.APPLE_API_KEY_ID || '' }}
           APPLE_API_ISSUER_ID: ${{ inputs.signing == 'developer-id' && secrets.APPLE_API_ISSUER_ID || '' }}
         run: python3 scripts/package-macos-release.py "src-tauri/target/release-compile/$RUNTIME_TARGET/release/bundle/macos/Silo.app" release-assets --engine "src-tauri/target/release-compile/$RUNTIME_TARGET/release/silod"
-      - name: Delete the temporary signing keychain
-        if: always() && runner.os == 'macOS' && inputs.signing == 'developer-id'
-        run: python3 scripts/macos_notarization.py delete-keychain "$SILO_SIGNING_KEYCHAIN"
       - name: Verify macOS library constraints
         if: runner.os == 'macOS'
         run: python3 scripts/test-macos-library-constraints.py --constraints-only --output "$RUNNER_TEMP/library-constraints"
       - name: Collect and verify macOS assets
         if: runner.os == 'macOS'
+        env:
+          SILO_RELEASE_SIGNING: ${{ inputs.signing }}
+          APPLE_DEVELOPER_ID_IDENTITY: ${{ inputs.signing == 'developer-id' && secrets.APPLE_DEVELOPER_ID_IDENTITY || '' }}
         run: |
           mkdir -p release-assets
           bundle="src-tauri/target/release-compile/$RUNTIME_TARGET/release/bundle"
@@ -342,6 +344,9 @@ jobs:
           test -s release-assets/Silo-macos-arm64.app.tar.gz
           test -s release-assets/Silo-macos-arm64.app.tar.gz.sig
           test -s release-assets/Silo-macos-arm64.dmg
+      - name: Delete the temporary signing keychain
+        if: always() && runner.os == 'macOS' && inputs.signing == 'developer-id'
+        run: python3 scripts/macos_notarization.py delete-keychain "$SILO_SIGNING_KEYCHAIN"
       - name: Verify update signatures
         run: python3 scripts/verify-release-signatures.py release-assets
       - name: Verify signed package versions and architectures

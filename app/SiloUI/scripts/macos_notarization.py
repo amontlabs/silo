@@ -44,6 +44,11 @@ def require_environment(names, environ=os.environ):
                            + '. See docs/SiloUI-RELEASES.md#apple-signing-and-notarization.')
 
 
+def release_identity(environ=os.environ):
+    """The codesign identity of the selected mode: the Developer ID name, else ad hoc (`-`)."""
+    return Release.from_environ(environ).identity
+
+
 class Release:
     """The signing identity and the notarization steps for one packaging run."""
 
@@ -147,7 +152,8 @@ class Release:
 
 def import_certificate(environ=os.environ, run=subprocess.run):
     """Imports the Developer ID p12 into a new temporary keychain, puts it on the search list and
-    returns its path."""
+    returns its path. A failed command is reported by name only: its arguments hold passwords. The
+    keychain is deleted again on failure."""
     require_environment(CERTIFICATE_ENV, environ)
     base = Path(environ.get('RUNNER_TEMP') or tempfile.gettempdir())
     keychain = base / f'silo-signing-{secrets.token_hex(4)}.keychain-db'
@@ -168,6 +174,13 @@ def import_certificate(environ=os.environ, run=subprocess.run):
         existing = [line.strip().strip('"') for line in listing.splitlines() if line.strip()]
         run(['security', 'list-keychains', '-d', 'user', '-s', str(keychain), *existing],
             check=True, capture_output=True)
+    except subprocess.CalledProcessError as error:
+        delete_keychain(str(keychain), run)
+        raise RuntimeError(f'`security {error.cmd[1]}` failed with exit code {error.returncode} '
+                           'while importing the signing certificate.') from None
+    except BaseException:
+        delete_keychain(str(keychain), run)
+        raise
     finally:
         p12.unlink(missing_ok=True)
     return str(keychain)
