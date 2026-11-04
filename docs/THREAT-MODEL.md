@@ -297,11 +297,11 @@ found the share read-write from the guest and could not reach a host canary file
 **This share has not had a security review.** The guest can change what the host later reads
 there, and any escape from the passthrough root would be a host file write.
 
-The other two, present only on computers with built-in computer use, are Silo-managed
-**read-only** shares: the downloaded ChatGPT for Linux package at `/opt/silo/chatgpt` and, when Silo
-holds the verified LCU archive, that archive at `/opt/silo/lcu`. A checkpoint restore passes them
-again from host state ([`computer_use.rs#L664`](../app/SiloUI/src-tauri/engine/src/computer_use.rs#L664),
-[`#L708`](../app/SiloUI/src-tauri/engine/src/computer_use.rs#L708)).
+The other two, present only on computers created before Cua Driver (v4 guest image), are
+Silo-managed **read-only** legacy shares at `/opt/silo/chatgpt` and `/opt/silo/lcu`. Silo no
+longer downloads ChatGPT or LCU, so both host folders are empty: Silo recreates them empty before a
+start, restore or fork, passes them again on a checkpoint restore, strips them from exports, and
+new computers never get them ([`legacy_mounts.rs`](../app/SiloUI/src-tauri/engine/src/legacy_mounts.rs)).
 
 Host features read the disk only through the guest: directory listings run a bounded script in the
 guest without following links ([`files.rs`](../app/SiloUI/src-tauri/engine/src/files.rs)), and

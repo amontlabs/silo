@@ -1,26 +1,4 @@
 import { initializeTour } from "./tour.js";
-import { linuxDownloads } from "./downloads.js";
-
-const architecture = document.querySelector("#linux-architecture");
-function updateDownloads() {
-  const urls = linuxDownloads(architecture.value);
-  document.querySelector("#linux-download").href = urls.deb;
-  document.querySelector("#appimage-download").href = urls.appImage;
-  document
-    .querySelector("#linux-download")
-    .setAttribute(
-      "aria-label",
-      `Download Silo for Linux ${architecture.value}, Debian package`,
-    );
-  document
-    .querySelector("#appimage-download")
-    .setAttribute(
-      "aria-label",
-      `Download Silo for Linux ${architecture.value}, AppImage`,
-    );
-}
-architecture.addEventListener("change", updateDownloads);
-updateDownloads();
 
 const tabs = [...document.querySelectorAll('[role="tab"]')];
 function selectWorkflow(tab, focus = false) {

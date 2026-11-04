@@ -1,4 +1,9 @@
-name: Publish Silo system updates
+# FROZEN AT v0.11.1. The Linux app is no longer built (the Linux host returns with the
+# Linux engine daemon; see the README). This workflow only re-signs the existing apt
+# repository so v0.11.1 installs keep a valid, non-expired index. It publishes no new
+# Linux version. It will fail once a release without Linux packages becomes "latest";
+# retire it then (existing installs keep v0.11.1 and see an expired index).
+name: Publish Silo system updates (frozen at v0.11.1)
 on:
   workflow_dispatch:
   workflow_run:
