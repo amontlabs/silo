@@ -2684,7 +2684,13 @@ impl Store {
             .unwrap()
             .iter()
             .filter(|call| call[0] == "snapshot" && call[1] == "remove")
-            .map(|call| call.iter().skip(2).find(|arg| !arg.starts_with("--")).unwrap().clone())
+            .map(|call| {
+                call.iter()
+                    .skip(2)
+                    .find(|arg| !arg.starts_with("--"))
+                    .unwrap()
+                    .clone()
+            })
             .collect()
     }
 }
@@ -4507,7 +4513,10 @@ fn before_keep_retention_removes_the_bases_a_retained_checkpoint_builds_on() {
 
     assert_eq!(
         store.removals(),
-        [format!("dev:{}", native_id(1)), format!("dev:{}", native_id(2))]
+        [
+            format!("dev:{}", native_id(1)),
+            format!("dev:{}", native_id(2))
+        ]
     );
     assert_eq!(store.names(), [native_id(3)]);
     assert_eq!(load(&paths, ID).unwrap().checkpoints.len(), 1);
@@ -4907,7 +4916,10 @@ fn retention_merges_the_layers_older_than_the_oldest_kept_checkpoint_before_remo
         .iter()
         .position(|call| call.get(1).is_some_and(|word| word == "remove"))
         .unwrap();
-    assert!(compact_at < first_removal, "the merge runs before any removal");
+    assert!(
+        compact_at < first_removal,
+        "the merge runs before any removal"
+    );
     assert!(calls
         .iter()
         .filter(|call| call.get(1).is_some_and(|word| word == "remove"))
@@ -5092,7 +5104,11 @@ fn a_named_checkpoint_in_the_middle_bounds_the_merge_without_stopping_later_ones
 
     trim_automatic(&store, &paths, 2);
 
-    assert_eq!(store.compactions(), [2], "only the layers older than snap_3");
+    assert_eq!(
+        store.compactions(),
+        [2],
+        "only the layers older than snap_3"
+    );
     assert_eq!(
         store.removals(),
         [5, 6].map(|n| format!("dev:{}", native_id(n)))
@@ -5148,7 +5164,11 @@ fn disks_with_different_chains_are_merged_and_confirmed_one_by_one() {
         .lock()
         .unwrap()
         .iter()
-        .filter(|call| call[0] == "modify" && call.contains(&"--dry-run".into()) && call.contains(&"--disk".into()))
+        .filter(|call| {
+            call[0] == "modify"
+                && call.contains(&"--dry-run".into())
+                && call.contains(&"--disk".into())
+        })
         .count();
     assert_eq!(confirmations, 2);
     assert_eq!(left_ids(&paths).len(), 2);

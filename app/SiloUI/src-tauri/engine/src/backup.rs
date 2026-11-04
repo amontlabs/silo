@@ -4403,7 +4403,9 @@ mod tests {
                 }
                 ["snapshot", "save", _, output, "--with-parents", "--with-image"]
                 | ["snapshot", "save", _, output, "--with-image"] => {
-                    if arguments.iter().any(|argument| argument == "--with-parents")
+                    if arguments
+                        .iter()
+                        .any(|argument| argument == "--with-parents")
                         && self.ancestor_missing.load(Ordering::Acquire)
                     {
                         return Ok(CommandOutput {
