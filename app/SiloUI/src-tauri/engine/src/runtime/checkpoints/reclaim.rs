@@ -16,6 +16,9 @@ use super::*;
 
 const COMPACT_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 
+/// How long a poll waits between asking a busy runtime whether it has finished compacting.
+const COMPACT_POLL: Duration = Duration::from_secs(3);
+
 /// The stage shown while retention merges and removes, and the label of its failure.
 pub(super) const RECLAIM_STAGE: &str = "Freeing checkpoint disk";
 
@@ -177,6 +180,8 @@ fn computer_tip(
 struct Merge {
     disk: Option<String>,
     layers: usize,
+    /// The layer count each merged disk had when the merge was planned.
+    before: Vec<(String, usize)>,
 }
 
 /// The merges that fold every layer older than the oldest checkpoint that stays into one,
@@ -239,7 +244,14 @@ fn merges(
     let steps: Vec<Merge> = if uniform {
         per_disk[0]
             .1
-            .map(|layers| Merge { disk: None, layers })
+            .map(|layers| Merge {
+                disk: None,
+                layers,
+                before: overview
+                    .iter()
+                    .map(|disk| (disk.guest.clone(), disk.input_layers))
+                    .collect(),
+            })
             .into_iter()
             .collect()
     } else {
@@ -249,6 +261,7 @@ fn merges(
                 layers.map(|layers| Merge {
                     disk: Some(disk.guest.clone()),
                     layers,
+                    before: vec![(disk.guest.clone(), disk.input_layers)],
                 })
             })
             .collect()
@@ -274,27 +287,82 @@ fn merges(
     Ok(steps)
 }
 
+/// Whether the client stopped waiting for a reply without the operation failing.
+/// MicroSandbox's control client gives up on a request after 30 seconds, while the runtime
+/// keeps compacting a large disk and answers nothing else until it is done.
+fn reply_wait_expired(failure: &RuntimeError) -> bool {
+    match failure {
+        RuntimeError::TimedOut { .. } => true,
+        RuntimeError::Failed { detail, .. } => {
+            let detail = detail.to_lowercase();
+            detail.contains("deadline expired") || detail.contains("timed out")
+        }
+        _ => false,
+    }
+}
+
+fn pause(duration: Duration) {
+    if !cfg!(test) {
+        std::thread::sleep(duration);
+    }
+}
+
+/// Waits for a runtime that is still compacting after the client stopped waiting, then
+/// reports whether the merge was applied: every merged disk has fewer layers than planned.
+fn wait_for_compaction(
+    runner: &dyn RuntimeRunner,
+    paths: &RuntimePaths,
+    computer: &str,
+    step: &Merge,
+) -> Result<bool, String> {
+    let started = Instant::now();
+    loop {
+        match disk_plans(runner, paths, computer, step.disk.as_deref(), None) {
+            Ok(now) => {
+                return Ok(step.before.iter().all(|(guest, before)| {
+                    now.iter()
+                        .find(|disk| &disk.guest == guest)
+                        .is_some_and(|disk| disk.input_layers < *before)
+                }));
+            }
+            Err(_) if started.elapsed() < COMPACT_TIMEOUT => pause(COMPACT_POLL),
+            Err(detail) => return Err(detail),
+        }
+    }
+}
+
 fn run_merge(
     runner: &dyn RuntimeRunner,
     paths: &RuntimePaths,
     computer: &str,
     step: &Merge,
 ) -> Result<(), String> {
-    runner
-        .run(
-            paths,
-            &compact_args(computer, step.disk.as_deref(), Some(step.layers), false),
-            COMPACT_TIMEOUT,
-        )
-        .map(|_| ())
-        .map_err(|failure| {
-            let detail = safe_activity_error(&failure);
-            if detail.contains("paused") {
-                format!("{detail} Restart {computer} to finish the merge.")
-            } else {
-                detail
-            }
-        })
+    let failure = match runner.run(
+        paths,
+        &compact_args(computer, step.disk.as_deref(), Some(step.layers), false),
+        COMPACT_TIMEOUT,
+    ) {
+        Ok(_) => return Ok(()),
+        Err(failure) => failure,
+    };
+    if reply_wait_expired(&failure) {
+        return match wait_for_compaction(runner, paths, computer, step) {
+            Ok(true) => Ok(()),
+            Ok(false) => Err(format!(
+                "The runtime did not merge the layers of {computer}. The next checkpoint tries again."
+            )),
+            Err(detail) => Err(format!(
+                "{computer} was still merging layers after {} minutes. {detail}",
+                COMPACT_TIMEOUT.as_secs() / 60
+            )),
+        };
+    }
+    let detail = safe_activity_error(&failure);
+    if detail.contains("paused") {
+        Err(format!("{detail} Restart {computer} to finish the merge."))
+    } else {
+        Err(detail)
+    }
 }
 
 /// Stores `message` as the computer's failed checkpoint operation. The caller holds the

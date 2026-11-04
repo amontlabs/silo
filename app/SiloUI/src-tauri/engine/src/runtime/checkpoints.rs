@@ -2014,7 +2014,9 @@ fn fork_commit_with_metadata_writer(
     child_record.pending_checkpoint_restore = Some(PendingRestore {
         checkpoint_id: fork.member.clone(),
         source_computer: fork.snapshot_group.clone(),
-        state: fork.scope.clone(),
+        // A fork is a new computer that boots from the checkpoint's disks. A full checkpoint
+        // is restored disk-only, so the fork never resumes the source's memory.
+        state: "disk".into(),
     });
     child_record.desired_network_policy = Some(fork.desired_policy.clone());
     let source_record = load(paths, source.id())?;
@@ -3437,7 +3439,19 @@ fn save_cleanup(paths: &RuntimePaths, members: &[native::Member]) -> Result<(), 
         .map_err(|_| error("Checkpoint cleanup journal could not be synced."))
 }
 
+/// Finishes the removals queued by earlier deletions, then drops the memory cache files
+/// that no stored checkpoint names any more (a fork or restore that resumed memory leaves
+/// one behind).
 fn retry_deleted_snapshots(
+    runner: &dyn RuntimeRunner,
+    paths: &RuntimePaths,
+) -> Result<(), RuntimeError> {
+    let outcome = retry_queued_snapshots(runner, paths);
+    memory_cache::prune(paths);
+    outcome
+}
+
+fn retry_queued_snapshots(
     runner: &dyn RuntimeRunner,
     paths: &RuntimePaths,
 ) -> Result<(), RuntimeError> {
