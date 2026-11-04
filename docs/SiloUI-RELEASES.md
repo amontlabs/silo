@@ -434,9 +434,116 @@ Actionlint 1.7.12's unsupported-key diagnostic is a known
 [upstream validation gap](https://github.com/rhysd/actionlint/issues/680), as
 described in the [workflow fix audit](research/micro-reviews/workflows-fixes.md).
 
-macOS uses ad-hoc signing and no notarization. A downloaded installation can
-require System Settings → Privacy & Security → Open Anyway. Do not instruct users
-to disable Gatekeeper globally. Update signatures are separate and always checked.
+Drafts are Developer ID signed and notarized once the owner steps in
+[Apple signing and notarization](#apple-signing-and-notarization) are done.
+Artifact-only builds, local builds and a dry run stay ad-hoc signed and are not
+notarized; such an installation can require System Settings → Privacy & Security
+→ Open Anyway. Do not instruct users to disable Gatekeeper globally. Update
+signatures are separate and always checked.
+
+### Apple signing and notarization
+
+`SILO_RELEASE_SIGNING` selects the mode of `scripts/package-macos-release.py`
+(`scripts/macos_notarization.py` holds the steps):
+
+| Mode | Used by | Signing | Notarization |
+| --- | --- | --- | --- |
+| `adhoc` | local builds, artifact-only runs | ad hoc | none |
+| `dry-run` | release workflow dispatched with `dry_run` | ad hoc | every notarization, stapling and Gatekeeper command is printed with a `[dry-run]` prefix, not run |
+| `developer-id` | every draft (version tag push or `draft` dispatch) | Developer ID Application, hardened runtime, timestamp | `notarytool submit --wait`, `stapler staple`, `spctl --assess` |
+
+The `validate` job derives the mode: a draft is always `developer-id`, and
+`dry_run` together with `draft` is refused, so an unnotarized build cannot become
+a draft. Credentials are read only from the environment. A `developer-id` run
+stops before signing if any of them is missing, or if the identity is not a
+`Developer ID Application:` certificate.
+
+Order of one `developer-id` run:
+
+1. Every other Mach-O file in the app (the Git tools and the VM library) is
+   re-signed with the identity, hardened runtime and a timestamp, because the
+   Tauri bundle step signs them ad hoc. Then the tools `msb`,
+   `silo-macos-gateway` and `silo-network-bootstrap` are signed with their
+   entitlements and the library constraint, which names the library's final
+   code hash.
+2. `Silo Engine.app` is assembled from the signed tools and signed with the
+   identity and the engine entitlements. Its `SiloEngineCodeRequirement` names
+   the Developer ID team.
+3. The app is sealed with the identity and `src-tauri/Entitlements.plist`
+   (nested code first, outer bundle last, never `--deep`), then verified.
+4. The app is zipped and submitted with `xcrun notarytool submit --wait`; the run
+   fails unless the status is `Accepted`. The engine is nested in the app and is
+   covered by that submission and ticket. It is not stapled on its own, because
+   adding a file inside the sealed app would break its signature.
+5. `xcrun stapler staple` and `validate` on the app, then
+   `codesign --verify --deep --strict` and `spctl --assess --type execute`.
+6. Only now are the updater archive (`.app.tar.gz`) and its Tauri signature
+   created, so the archive carries the stapled app.
+7. The DMG is built from the stapled app, signed, submitted, stapled and
+   assessed with `spctl --assess --type open --context context:primary-signature`.
+
+The standalone engine release tarball (`silo-engine-<version>-macos-arm64.tar.gz`)
+holds an unsigned `silod` binary and the files an app needs to assemble its own
+engine bundle, and that app signs it. Notarytool does not take a tarball and a
+tarball cannot be stapled, so the tarball is not notarized; the engine that
+ships is the one inside the notarized app.
+
+#### Dry run
+
+Dispatch `Build Silo release` with `dry_run` checked (no `draft`). The macOS job
+signs ad hoc, and the log shows each command the real run would execute, with
+credential values replaced by placeholders such as `<APPLE_API_KEY_ID>`. No
+Apple credentials are needed. Locally:
+
+```sh
+SILO_RELEASE_SIGNING=dry-run TAURI_SIGNING_PRIVATE_KEY=<test key> \
+  python3 scripts/package-macos-release.py <Silo.app> <output> --engine <silod>
+```
+
+`python3 -m unittest discover -s scripts -p 'test_release_notarization.py'`
+checks the order of the steps, the dry-run stubs, that nothing runs in a dry run
+and that no credential value is printed.
+
+#### Repository secrets
+
+All names are Actions secrets. The workflow passes them only to the steps that
+need them, and only for `developer-id` runs. Add them to the `release-signing`
+environment, which already requires maintainer review:
+
+| Secret | Content |
+| --- | --- |
+| `APPLE_CERTIFICATE_P12_BASE64` | the Developer ID Application certificate with its private key, exported as `.p12` and base64 encoded |
+| `APPLE_CERTIFICATE_PASSWORD` | the password chosen when exporting the `.p12` |
+| `APPLE_DEVELOPER_ID_IDENTITY` | the exact certificate name, `Developer ID Application: Name (TEAMID)` |
+| `APPLE_TEAM_ID` | the ten-character Apple team ID |
+| `APPLE_API_KEY_P8` | contents of the App Store Connect API key `.p8` file |
+| `APPLE_API_KEY_ID` | that key's ID |
+| `APPLE_API_ISSUER_ID` | the issuer ID shown on the App Store Connect Keys page |
+
+The certificate is imported into a temporary keychain for the packaging step and
+deleted afterwards; the `.p8` is written to a temporary file with mode 0600 and
+removed after notarization.
+
+#### Owner checklist
+
+- [ ] Enrol the team in the Apple Developer Program, if it is not already.
+- [ ] In the Apple Developer account, create a **Developer ID Application**
+  certificate (Certificates, Identifiers & Profiles) from a certificate signing
+  request made in Keychain Access, and download it. Only the Account Holder can
+  create Developer ID certificates.
+- [ ] In Keychain Access, export the certificate with its private key as a
+  `.p12` with a password; base64 encode it (`base64 -i file.p12`).
+- [ ] Read the exact identity name with
+  `security find-identity -v -p codesigning` and the team ID from the Apple
+  Developer account.
+- [ ] In App Store Connect, Users and Access, Integrations, create an API key
+  with access that allows notarization, download the `.p8` once, and note the key
+  ID and issuer ID.
+- [ ] Add the seven secrets above to the `release-signing` environment.
+- [ ] Run `Build Silo release` with `dry_run` and read the printed steps.
+- [ ] Tag a release and check the draft: `spctl --assess --type execute -vv Silo.app`
+  and `xcrun stapler validate Silo-macos-arm64.dmg` on a downloaded copy.
+- [ ] Keep an independent backup of the `.p12`, its password and the `.p8`.
 
 The macOS release packager signs the bundled VM engine first, then constrains
 `msb` to that exact library's code hash. Apple system libraries remain permitted

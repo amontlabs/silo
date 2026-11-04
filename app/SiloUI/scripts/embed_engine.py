@@ -98,7 +98,10 @@ def engine_requirement(identifier, identity, run=subprocess.run):
 
 
 def codesign_engine(engine, entitlements, run=subprocess.run, environ=os.environ, identity=None):
-    run(['codesign', '--force', '--sign', identity or signing_identity(environ), '--options', 'runtime',
+    identity = identity or signing_identity(environ)
+    # Apple's notary service requires a trusted timestamp; a local development identity does not need one.
+    timestamp = ['--timestamp'] if environ.get('SILO_RELEASE_SIGNING') == 'developer-id' else []
+    run(['codesign', '--force', '--sign', identity, *timestamp, '--options', 'runtime',
          '--entitlements', str(entitlements), str(engine)], check=True, capture_output=True)
     run(['codesign', '--verify', '--strict', str(engine)], check=True, capture_output=True)
 

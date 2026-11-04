@@ -36,11 +36,11 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.notes.write_text('User-facing release notes')
         self.output = self.root / 'output'
 
-    def run_gate(self, *, draft=True, ref='refs/tags/v0.2.3', schedule='parallel', allow_stable=False):
+    def run_gate(self, *, draft=True, ref='refs/tags/v0.2.3', schedule='parallel', allow_stable=False, dry_run=False):
         return subprocess.run(['bash', '-c', GATE], cwd=self.root,
                               env={**os.environ, 'CREATE_DRAFT': str(draft).lower(),
                                    'RELEASE_REF': ref, 'BENCHMARK_SCHEDULE': schedule,
-                                   'ALLOW_STABLE': str(allow_stable).lower(), 'GITHUB_OUTPUT': str(self.output)},
+                                   'ALLOW_STABLE': str(allow_stable).lower(), 'DRY_RUN': str(dry_run).lower(), 'GITHUB_OUTPUT': str(self.output)},
                               capture_output=True, text=True)
 
     def test_sequential_benchmark_cannot_publish(self):
@@ -50,12 +50,12 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertFalse(self.output.exists())
         result = self.run_gate(draft=False, ref='refs/heads/benchmark', schedule='sequential')
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.output.read_text(), 'draft=false\n')
+        self.assertEqual(self.output.read_text(), 'signing=adhoc\ndraft=false\n')
 
     def test_prepared_tag_produces_draft(self):
         result = self.run_gate()
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.output.read_text(), 'draft=true\n')
+        self.assertEqual(self.output.read_text(), 'signing=developer-id\ndraft=true\n')
 
     def test_stable_draft_requires_opt_in_before_platform_builds(self):
         for path in [self.app / 'package.json', self.app / 'package-lock.json',
@@ -68,7 +68,7 @@ class ReleaseWorkflowTests(unittest.TestCase):
         self.assertFalse(self.output.exists())
         result = self.run_gate(ref='refs/tags/v1.0.0', allow_stable=True)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.output.read_text(), 'draft=true\n')
+        self.assertEqual(self.output.read_text(), 'signing=developer-id\ndraft=true\n')
 
     def test_branch_and_mismatched_tags_fail_before_build(self):
         for ref in ['refs/heads/main', 'refs/tags/v0.2.4', 'refs/tags/v0.2.3-rc.1']:
@@ -105,7 +105,17 @@ class ReleaseWorkflowTests(unittest.TestCase):
         (self.app / '.changeset/new-feature.md').write_text('Pending note')
         result = self.run_gate(draft=False, ref='refs/heads/main')
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.output.read_text(), 'draft=false\n')
+        self.assertEqual(self.output.read_text(), 'signing=adhoc\ndraft=false\n')
+
+    def test_dry_run_is_stubbed_signing_and_never_a_draft(self):
+        result = self.run_gate(draft=False, ref='refs/heads/main', dry_run=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.output.read_text(), 'signing=dry-run\ndraft=false\n')
+        self.output.unlink()
+        result = self.run_gate(dry_run=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('cannot create a draft', result.stdout)
+        self.assertFalse(self.output.exists())
 
 
 class PublicationWorkflowTests(unittest.TestCase):
