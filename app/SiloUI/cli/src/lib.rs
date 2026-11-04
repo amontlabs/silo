@@ -1,0 +1,10 @@
+//! The `silo` command line and its MCP server, built on `silo-client` and the typed
+//! requests in `silo-api`.
+
+pub mod cli;
+pub mod config;
+pub mod engine;
+pub mod error;
+pub mod mcp;
+pub mod ops;
+pub mod render;
