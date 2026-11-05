@@ -4,6 +4,7 @@
 //! Regenerate with `cargo run -p silo-api --example generate_requests`.
 
 use crate::transport;
+use super::changes;
 use super::checkpoints;
 use super::clipboard;
 use super::common;
@@ -38,6 +39,21 @@ use super::MethodParams;
 /// `activity.setup.read`
 pub fn activity_setup_read(params: common::DeviceParams) -> Request<kind::Query> {
     Request::new(MethodParams::ActivitySetupRead(params))
+}
+
+/// `changes.baseline`
+pub fn changes_baseline(params: changes::ChangesBaselineParams) -> Request<kind::Job> {
+    Request::new(MethodParams::ChangesBaseline(params))
+}
+
+/// `changes.capture`
+pub fn changes_capture(params: changes::ChangesCaptureParams) -> Request<kind::Job> {
+    Request::new(MethodParams::ChangesCapture(params))
+}
+
+/// `changes.diff`
+pub fn changes_diff(params: changes::ChangesDiffParams) -> Request<kind::Job> {
+    Request::new(MethodParams::ChangesDiff(params))
 }
 
 /// `checkpoints.abandonRestore`
