@@ -147,6 +147,9 @@ pub struct Service {
 /// How many before-keep checkpoints a computer keeps until the owner says otherwise.
 const DEFAULT_BEFORE_KEEP_RETENTION: u32 = 5;
 
+/// How many step checkpoints a computer keeps when the caller names no count.
+pub const DEFAULT_STEP_RETENTION: u32 = 20;
+
 impl Service {
     pub fn new(
         host: Arc<dyn RuntimeHost>,
@@ -200,6 +203,22 @@ impl Service {
         name: &str,
         kind: Option<CheckpointKind>,
     ) -> Result<JobId, Failure> {
+        self.start_create_keeping(computer_id, name, kind, None)
+    }
+
+    /// `checkpoints.create` with the count of `step` checkpoints to keep (zero keeps every
+    /// one; [`DEFAULT_STEP_RETENTION`] when it is `None`).
+    pub fn start_create_keeping(
+        &self,
+        computer_id: &str,
+        name: &str,
+        kind: Option<CheckpointKind>,
+        keep_newest: Option<u32>,
+    ) -> Result<JobId, Failure> {
+        let step_retention: RetentionPolicy = {
+            let keep = keep_newest.unwrap_or(DEFAULT_STEP_RETENTION);
+            Arc::new(move || Ok(keep))
+        };
         let automatic = kind == Some(CheckpointKind::Automatic);
         if kind == Some(CheckpointKind::ForkPoint) {
             return Err(Failure::new(
@@ -218,20 +237,27 @@ impl Service {
                 automatic,
                 kind == Some(CheckpointKind::Warm),
                 self.retention.clone(),
-                (kind == Some(CheckpointKind::BeforeKeep))
-                    .then(|| self.before_keep_retention.clone()),
+                match kind {
+                    Some(CheckpointKind::BeforeKeep) => Some((
+                        CheckpointKind::BeforeKeep,
+                        self.before_keep_retention.clone(),
+                    )),
+                    Some(CheckpointKind::Step) => Some((CheckpointKind::Step, step_retention)),
+                    _ => None,
+                },
             )
             .map_err(Failure::from_message),
             Platform::Linux => {
                 let (computer_id, name) = (computer_id.to_owned(), name.to_owned());
                 let retention = self.retention.clone();
-                let before_keep_retention = self.before_keep_retention.clone();
                 let kind = kind.unwrap_or(CheckpointKind::Manual);
-                let (follow_id, follow_retention, follow_before_keep) = (
-                    computer_id.clone(),
-                    retention.clone(),
-                    before_keep_retention.clone(),
-                );
+                let kind_retention = if kind == CheckpointKind::Step {
+                    step_retention
+                } else {
+                    self.before_keep_retention.clone()
+                };
+                let (follow_id, follow_retention, follow_kind_retention) =
+                    (computer_id.clone(), retention.clone(), kind_retention);
                 // Trimming older checkpoints is its own job on the computer's lane. It
                 // starts once the capture has reported its result.
                 let follow_up: FollowUp = Box::new(move |paths, job_id| {
@@ -240,7 +266,7 @@ impl Service {
                         &follow_id,
                         kind,
                         follow_retention.as_ref(),
-                        follow_before_keep.as_ref(),
+                        follow_kind_retention.as_ref(),
                         job_id,
                     )
                 });

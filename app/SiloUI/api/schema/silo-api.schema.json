@@ -1023,6 +1023,15 @@
             "null"
           ]
         },
+        "keepNewest": {
+          "description": "For a `step` checkpoint: how many of the computer's step checkpoints to keep (the\nnewest ones). The engine keeps 20 when it is left out.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "kind": {
           "anyOf": [
             {
@@ -1112,7 +1121,8 @@
         "automatic",
         "before-keep",
         "fork-point",
-        "warm"
+        "warm",
+        "step"
       ],
       "type": "string"
     },
@@ -2265,6 +2275,20 @@
       "required": [
         "linux",
         "macos"
+      ],
+      "type": "object"
+    },
+    "ComputersTreeResult": {
+      "properties": {
+        "nodes": {
+          "items": {
+            "$ref": "#/$defs/TreeNode"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "nodes"
       ],
       "type": "object"
     },
@@ -7219,6 +7243,7 @@
         "computers.shell",
         "computers.start",
         "computers.stop",
+        "computers.tree",
         "connections.devices.connect",
         "connections.devices.health",
         "connections.devices.list",
@@ -7332,6 +7357,8 @@
         "sshAccess.connection",
         "sshAccess.save",
         "sshAccess.state",
+        "steps.list",
+        "steps.record",
         "storage.read",
         "storage.reclaim",
         "terminal.command",
@@ -7897,6 +7924,22 @@
             },
             "params": {
               "$ref": "#/$defs/ComputerTargetParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "computers.tree",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/EmptyParams"
             }
           },
           "required": [
@@ -9716,6 +9759,38 @@
         {
           "properties": {
             "method": {
+              "const": "steps.list",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/StepsListParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "steps.record",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/StepsRecordParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
               "const": "storage.read",
               "type": "string"
             },
@@ -10400,6 +10475,22 @@
             },
             "result": {
               "$ref": "#/$defs/JobStartResult"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "computers.tree",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/ComputersTreeResult"
             }
           },
           "required": [
@@ -12265,6 +12356,38 @@
         {
           "properties": {
             "method": {
+              "const": "steps.list",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/StepsListResult"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "steps.record",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/StepsRecordResult"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
               "const": "storage.read",
               "type": "string"
             },
@@ -13109,6 +13232,30 @@
     "OperationsListParams": {
       "properties": {
         "deviceId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "PendingChanges": {
+      "properties": {
+        "buckets": {
+          "additionalProperties": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "description": "Changed paths by bucket, when cheaply known.",
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "requestId": {
+          "description": "The open review request for this fork, if there is one.",
           "type": [
             "string",
             "null"
@@ -14563,6 +14710,148 @@
       ],
       "type": "object"
     },
+    "Step": {
+      "properties": {
+        "checkpointId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "command": {
+          "description": "The command, joined and cut to 200 characters.",
+          "type": "string"
+        },
+        "computerId": {
+          "type": "string"
+        },
+        "exitCode": {
+          "format": "int32",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "finishedAt": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "number": {
+          "description": "1-based per computer and never reused.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "parentCheckpoint": {
+          "description": "For a fork's first step: the checkpoint the fork was made from.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "parentStep": {
+          "description": "The step before this one on the same computer.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "startedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "computerId",
+        "number",
+        "command",
+        "startedAt",
+        "finishedAt"
+      ],
+      "type": "object"
+    },
+    "StepsListParams": {
+      "properties": {
+        "computerId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "computerId"
+      ],
+      "type": "object"
+    },
+    "StepsListResult": {
+      "properties": {
+        "steps": {
+          "items": {
+            "$ref": "#/$defs/Step"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "steps"
+      ],
+      "type": "object"
+    },
+    "StepsRecordParams": {
+      "description": "Records a finished command as the computer's next step. The engine numbers it and\nlinks it to the step (and checkpoint) it follows.",
+      "properties": {
+        "checkpointId": {
+          "description": "The `step` checkpoint taken after the command, when one was.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "command": {
+          "description": "The command as an argument vector; the engine joins and shortens it.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "computerId": {
+          "type": "string"
+        },
+        "exitCode": {
+          "format": "int32",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "finishedAt": {
+          "type": "string"
+        },
+        "startedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "computerId",
+        "command",
+        "startedAt",
+        "finishedAt"
+      ],
+      "type": "object"
+    },
+    "StepsRecordResult": {
+      "properties": {
+        "step": {
+          "$ref": "#/$defs/Step"
+        }
+      },
+      "required": [
+        "step"
+      ],
+      "type": "object"
+    },
     "StorageParams": {
       "properties": {
         "computerId": {
@@ -14782,6 +15071,142 @@
         "failed"
       ],
       "type": "string"
+    },
+    "TreeFrom": {
+      "description": "What a fork was made from.",
+      "oneOf": [
+        {
+          "description": "Not a fork, or a fork with no record.",
+          "properties": {
+            "kind": {
+              "const": "root",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "The parent's state when the fork was made.",
+          "properties": {
+            "kind": {
+              "const": "main",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "checkpointId": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "checkpoint",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "checkpointId"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "checkpointId": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "step",
+              "type": "string"
+            },
+            "number": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "kind",
+            "number",
+            "checkpointId"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "hash": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "recipe",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "hash"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A host folder; filled in by the `silo` command line, which keeps that record.",
+          "properties": {
+            "kind": {
+              "const": "folder",
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "path"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "TreeNode": {
+      "properties": {
+        "from": {
+          "$ref": "#/$defs/TreeFrom"
+        },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "parent": {
+          "description": "The computer this one was forked from, after any promote in force.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pendingChanges": {
+          "$ref": "#/$defs/PendingChanges"
+        },
+        "state": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "from",
+        "state",
+        "pendingChanges"
+      ],
+      "type": "object"
     },
     "UndoneCheckpoint": {
       "properties": {
@@ -15618,6 +16043,12 @@
       "resultType": "common::JobStartResult"
     },
     {
+      "kind": "query",
+      "name": "computers.tree",
+      "paramsType": "steps::ComputersTreeParams",
+      "resultType": "steps::ComputersTreeResult"
+    },
+    {
       "kind": "command",
       "name": "connections.devices.connect",
       "paramsType": "connections::ConnectDeviceParams",
@@ -16294,6 +16725,18 @@
       "name": "sshAccess.state",
       "paramsType": "common::DeviceParams",
       "resultType": "ssh_access::SshAccessState"
+    },
+    {
+      "kind": "query",
+      "name": "steps.list",
+      "paramsType": "steps::StepsListParams",
+      "resultType": "steps::StepsListResult"
+    },
+    {
+      "kind": "command",
+      "name": "steps.record",
+      "paramsType": "steps::StepsRecordParams",
+      "resultType": "steps::StepsRecordResult"
     },
     {
       "kind": "query",

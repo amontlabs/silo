@@ -49,6 +49,16 @@ pub struct Meta {
     pub bytes: u64,
 }
 
+/// What the fork-time record says about where a fork came from.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ForkLink {
+    /// The computer it was made from.
+    pub origin: Option<String>,
+    /// The checkpoint it was made from (a `recipe:` key for a recipe fork; the computer
+    /// itself while the fork's own checkpoint is not yet known).
+    pub source: Option<String>,
+}
+
 #[derive(Clone, Debug)]
 pub struct Store {
     root: PathBuf,
@@ -84,6 +94,35 @@ impl Store {
                 .join("engine")
         };
         Self::new(engine_data.join("changes"))
+    }
+
+    /// A folder beside this store under the engine's data directory (the step records live
+    /// in one).
+    pub fn sibling_dir(&self, name: &str) -> PathBuf {
+        self.root.parent().unwrap_or(&self.root).join(name)
+    }
+
+    /// Where a computer was forked from, read from the fork-time record (`id`) once the fork
+    /// has started, and from the note made when it was created (`name`) until then.
+    pub fn fork_link(&self, id: &str, name: &str) -> Option<ForkLink> {
+        let recorded = self
+            .computer_dir(id)
+            .ok()
+            .and_then(|directory| fs::read(directory.join("base.json")).ok())
+            .and_then(|bytes| serde_json::from_slice::<Meta>(&bytes).ok());
+        if let Some(meta) = recorded {
+            if meta.source.is_some() || meta.origin.is_some() {
+                return Some(ForkLink {
+                    origin: meta.origin,
+                    source: meta.source,
+                });
+            }
+        }
+        let source = fs::read_to_string(self.pending_path(name)).ok()?;
+        Some(ForkLink {
+            origin: fs::read_to_string(self.origin_path(name)).ok(),
+            source: Some(source),
+        })
     }
 
     fn computer_dir(&self, computer: &str) -> Result<PathBuf, String> {
@@ -278,8 +317,10 @@ impl Store {
 /// Drops everything kept for computers that no longer exist.
 pub fn forget(context: &dyn EngineContext, computers: &[String]) {
     let store = Store::for_engine(context);
+    let steps = crate::steps::StepStore::for_engine(context);
     for id in computers {
         let _ = store.remove_computer(id);
+        let _ = steps.remove_computer(id);
     }
 }
 

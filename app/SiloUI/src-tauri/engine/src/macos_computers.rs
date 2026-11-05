@@ -1547,6 +1547,8 @@ fn prune_macos_checkpoints_with(
             None,
             if kind == checkpoints::PolicyKind::BeforeKeep {
                 "Removing an older before-keep checkpoint"
+            } else if kind == checkpoints::PolicyKind::Step {
+                "Removing an older step checkpoint"
             } else {
                 "Removing an older automatic checkpoint"
             },
@@ -2277,7 +2279,10 @@ pub fn start_macos_checkpoint_job(
     automatic: bool,
     warm: bool,
     retention: RetentionPolicy,
-    before_keep_retention: Option<RetentionPolicy>,
+    trimmed: Option<(
+        silo_api::methods::checkpoints::CheckpointKind,
+        RetentionPolicy,
+    )>,
 ) -> Result<silo_api::jobs::JobId, String> {
     runtime::shutdown::ensure_accepting_operations()?;
     if automatic && retention()? == 0 {
@@ -2285,8 +2290,11 @@ pub fn start_macos_checkpoint_job(
     }
     let policy_kind = if automatic {
         checkpoints::PolicyKind::Automatic
-    } else if before_keep_retention.is_some() {
-        checkpoints::PolicyKind::BeforeKeep
+    } else if let Some((kind, _)) = &trimmed {
+        match kind {
+            silo_api::methods::checkpoints::CheckpointKind::Step => checkpoints::PolicyKind::Step,
+            _ => checkpoints::PolicyKind::BeforeKeep,
+        }
     } else if warm {
         checkpoints::PolicyKind::Warm
     } else {
@@ -2322,13 +2330,13 @@ pub fn start_macos_checkpoint_job(
                 job_id.clone(),
             );
         }
-        if let (true, Some(before_keep)) = (result.is_ok(), before_keep_retention.as_ref()) {
+        if let (true, Some((_, count))) = (result.is_ok(), trimmed.as_ref()) {
             prune_macos_checkpoints_with(
                 &runtime::OPERATIONS,
-                checkpoints::PolicyKind::BeforeKeep,
+                policy_kind,
                 &worker_app,
                 &worker_id,
-                before_keep.as_ref(),
+                count.as_ref(),
                 job_id.clone(),
             );
         }
@@ -2495,6 +2503,7 @@ fn checkpoint_created_job_result(
                 checkpoints::PolicyKind::BeforeKeep => CheckpointKind::BeforeKeep,
                 checkpoints::PolicyKind::ForkPoint => CheckpointKind::ForkPoint,
                 checkpoints::PolicyKind::Warm => CheckpointKind::Warm,
+                checkpoints::PolicyKind::Step => CheckpointKind::Step,
             },
             size_bytes: meta.size_bytes,
             generation: None,
@@ -7161,6 +7170,7 @@ pub fn seed_check_policy(app_data: &std::path::Path, computer_id: &str) -> Vec<S
             checkpoints::PolicyKind::BeforeKeep => "before-keep".to_owned(),
             checkpoints::PolicyKind::ForkPoint => "fork-point".to_owned(),
             checkpoints::PolicyKind::Warm => "warm".to_owned(),
+            checkpoints::PolicyKind::Step => "step".to_owned(),
         })
         .collect()
 }

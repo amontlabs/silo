@@ -305,7 +305,7 @@ fn validate(record: &Record) -> Result<(), RuntimeError> {
                 || !matches!(checkpoint.reason.as_str(), "manual" | "before-restore")
                 || !matches!(
                     checkpoint.kind.as_str(),
-                    "manual" | "automatic" | "before-keep" | "warm"
+                    "manual" | "automatic" | "before-keep" | "warm" | "step"
                 )
         })
         || !unique_checkpoint_ids(&record.checkpoints)
@@ -1059,6 +1059,7 @@ pub fn create_for_job(
         CheckpointKind::Automatic => "automatic",
         CheckpointKind::BeforeKeep => "before-keep",
         CheckpointKind::Warm => "warm",
+        CheckpointKind::Step => "step",
         CheckpointKind::ForkPoint => {
             return Err("A fork point is made by Fork, not saved as a checkpoint.".into())
         }
@@ -1076,7 +1077,8 @@ pub fn create_for_job(
     Ok(api_checkpoint(checkpoint))
 }
 
-/// The retention pass that follows an automatic or before-keep capture. It is its own job
+/// The retention pass that follows an automatic, before-keep or step capture (`kind_retention`
+/// counts the latter two). It is its own job
 /// on the computer's lane, so the capture's result never waits for the merge. A manual
 /// capture has nothing to trim.
 pub fn reclaim_after_capture_for_job(
@@ -1084,7 +1086,7 @@ pub fn reclaim_after_capture_for_job(
     computer_id: &str,
     kind: silo_api::methods::checkpoints::CheckpointKind,
     retention: &dyn Fn() -> Result<u32, String>,
-    before_keep_retention: &dyn Fn() -> Result<u32, String>,
+    kind_retention: &dyn Fn() -> Result<u32, String>,
     job_id: silo_api::jobs::JobId,
 ) -> Result<(), String> {
     use silo_api::methods::checkpoints::CheckpointKind;
@@ -1097,8 +1099,9 @@ pub fn reclaim_after_capture_for_job(
         CheckpointKind::BeforeKeep => (
             "before-keep",
             "Removing an older before-keep checkpoint",
-            before_keep_retention,
+            kind_retention,
         ),
+        CheckpointKind::Step => ("step", "Removing an older step checkpoint", kind_retention),
         CheckpointKind::Manual | CheckpointKind::Warm | CheckpointKind::ForkPoint => return Ok(()),
     };
     shutdown::ensure_accepting_operations()?;
@@ -1137,6 +1140,7 @@ fn api_checkpoint(checkpoint: Checkpoint) -> silo_api::methods::checkpoints::Che
             "before-keep" => CheckpointKind::BeforeKeep,
             "fork-point" => CheckpointKind::ForkPoint,
             "warm" => CheckpointKind::Warm,
+            "step" => CheckpointKind::Step,
             _ => CheckpointKind::Manual,
         },
         size_bytes: None,
