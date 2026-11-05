@@ -19,6 +19,7 @@ pub mod computer_use;
 pub mod computers;
 pub mod connections;
 pub mod credentials;
+pub mod credentials_used;
 pub mod desktop;
 pub mod device;
 pub mod display;
