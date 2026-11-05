@@ -18,6 +18,7 @@ use crate::{
     fanout::{self, ManyArgs},
     flows, folder,
     ops::{self, DiffArgs, ExecArgs, ForkArgs},
+    review,
 };
 
 #[derive(Clone)]
@@ -69,6 +70,29 @@ pub struct ForkParams {
     #[serde(default)]
     pub secrets: Vec<String>,
     /// Path of a recipe whose quiet and scrub lists apply to the fork.
+    pub recipe_file: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct RequestsListParams {
+    /// open (default), kept, thrown-away or all.
+    pub status: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct RequestIdParam {
+    /// The request's id, such as fr-ab12cd34.
+    pub id: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct RequestKeepParams {
+    /// The request's id, such as fr-ab12cd34.
+    pub id: String,
+    /// Carry database changes even though no migrate step covers them.
+    #[serde(default)]
+    pub data_ok: bool,
+    /// Path of a recipe whose keep: section applies.
     pub recipe_file: Option<String>,
 }
 
@@ -355,6 +379,84 @@ impl SiloMcp {
             }
             .await,
         )
+    }
+
+    #[tool(
+        description = "List the review requests recorded with `fold` and `request`: each with its fork's name and state, the computer it would be kept into and how many changes each bucket held. Defaults to the open ones."
+    )]
+    async fn requests_list(
+        &self,
+        Parameters(params): Parameters<RequestsListParams>,
+    ) -> Result<String, String> {
+        show(
+            async {
+                let status = params
+                    .status
+                    .as_deref()
+                    .map(review::parse_filter)
+                    .transpose()?;
+                review::list(&self.engine().await?, status).await
+            }
+            .await,
+        )
+    }
+
+    #[tool(
+        description = "Show a review request: a fresh diff of its fork by bucket, the credentials the fork used (`credentials.used`) and was refused (`credentials.blocked`), and `stale: true` when the fork changed since the request was made (a keep then refuses)."
+    )]
+    async fn request_show(
+        &self,
+        Parameters(RequestIdParam { id }): Parameters<RequestIdParam>,
+    ) -> Result<String, String> {
+        show(async { review::show(&self.engine().await?, &id, &|_| {}).await }.await)
+    }
+
+    #[tool(
+        description = "Keep a review request's fork into the computer it would be kept into, pinned to the digest the request was made from. Returns status kept or refused; a refusal (the fork changed, divergent changes, a database change nothing migrates) leaves the request open and the target unchanged. A fork made from a folder is kept with `fold`."
+    )]
+    async fn request_keep(
+        &self,
+        Parameters(params): Parameters<RequestKeepParams>,
+    ) -> Result<String, String> {
+        show(
+            async {
+                let project = Project::discover(&self.working_directory);
+                let explicit = params
+                    .recipe_file
+                    .as_deref()
+                    .map(|path| self.working_directory.join(path));
+                let recipe = ops::resolve_recipe(explicit.as_deref(), &project)?;
+                review::keep(
+                    &self.engine().await?,
+                    &params.id,
+                    ops::keep_hooks(recipe.as_ref()),
+                    params.data_ok,
+                    &|_| {},
+                )
+                .await
+            }
+            .await,
+        )
+    }
+
+    #[tool(
+        description = "Throw away a review request's fork without keeping its changes. main and the computer the changes would be kept into are never dropped."
+    )]
+    async fn request_throw_away(
+        &self,
+        Parameters(RequestIdParam { id }): Parameters<RequestIdParam>,
+    ) -> Result<String, String> {
+        show(async { review::throw_away(&self.engine().await?, &id, &|_| {}).await }.await)
+    }
+
+    #[tool(
+        description = "Start a review request's fork if it is stopped and return how to reach it: its name and id, the SSH name (after `ssh-setup`) and the URLs of its published ports."
+    )]
+    async fn request_open(
+        &self,
+        Parameters(RequestIdParam { id }): Parameters<RequestIdParam>,
+    ) -> Result<String, String> {
+        show(async { review::open(&self.engine().await?, &id, &|_| {}).await }.await)
     }
 
     #[tool(
