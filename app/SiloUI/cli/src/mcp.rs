@@ -77,6 +77,10 @@ pub struct FoldParams {
     /// Report what would be kept and what would stop it, changing nothing.
     #[serde(default)]
     pub dry_run: bool,
+    /// Make the fork main instead of keeping its changes: it takes the name, settings and
+    /// published ports of `into` (default: its source), which is archived. `undo` swaps back.
+    #[serde(default)]
+    pub promote: bool,
     /// Carry database changes even though no migrate step covers them.
     #[serde(default)]
     pub data_ok: bool,
@@ -171,11 +175,21 @@ impl SiloMcp {
     }
 
     #[tool(
-        description = "Keep a fork's changes into the computer it came from (or `into`). Returns status kept, dry-run or refused; a refusal (divergent changes, a database change nothing migrates) lists what stopped it and the target was not changed. Takes a checkpoint of the target first; `undo` puts it back."
+        description = "Keep a fork's changes into the computer it came from (or `into`). Returns status kept, dry-run or refused; a refusal (divergent changes, a database change nothing migrates) lists what stopped it and the target was not changed. Takes a checkpoint of the target first; `undo` puts it back. With `promote` the fork replaces main instead (the old main is archived as main-before-<time>); a refusal means nothing changed."
     )]
     async fn fold(&self, Parameters(params): Parameters<FoldParams>) -> Result<String, String> {
         show(
             async {
+                if params.promote {
+                    return ops::promote(
+                        &self.engine().await?,
+                        &params.fork,
+                        params.into.as_deref(),
+                        params.dry_run,
+                        &|_| {},
+                    )
+                    .await;
+                }
                 let project = Project::discover(&self.working_directory);
                 let explicit = params
                     .recipe_file

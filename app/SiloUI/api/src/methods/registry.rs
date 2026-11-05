@@ -228,7 +228,7 @@ mod tests {
 
     #[test]
     fn registry_covers_every_canonical_method_and_kind() {
-        assert_eq!(METHOD_REGISTRY.len(), 151);
+        assert_eq!(METHOD_REGISTRY.len(), 152);
         assert_eq!(
             METHOD_REGISTRY
                 .iter()
@@ -248,7 +248,7 @@ mod tests {
                 .iter()
                 .filter(|m| m.kind == MethodKind::Job)
                 .count(),
-            34
+            35
         );
         assert_eq!(
             METHOD_REGISTRY

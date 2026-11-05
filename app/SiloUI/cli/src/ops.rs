@@ -13,7 +13,7 @@ use silo_api::methods::{
         MacosComputerCreateRequest,
     },
     guest::GuestExecParams,
-    keep::{ChangesKeepParams, ChangesUndoParams, KeepHooks},
+    keep::{ChangesKeepParams, ChangesPromoteParams, ChangesUndoParams, KeepHooks},
     requests,
     secrets::{SecretSaveAction, SecretSaveRequest, SecretsSaveParams},
 };
@@ -1015,6 +1015,34 @@ pub async fn fold(
                 dry_run: dry_run.then_some(true),
                 data_ok: data_ok.then_some(true),
                 review_digest: reviewed,
+            }),
+            progress,
+        )
+        .await
+}
+
+/// Makes a fork main: it replaces `into` (default: the computer it was made from). A refused
+/// promote is a result (`status: "refused"`); nothing was changed.
+pub async fn promote(
+    engine: &Engine,
+    fork: &str,
+    into: Option<&str>,
+    dry_run: bool,
+    progress: Progress<'_>,
+) -> Result<Value, CliError> {
+    let fork = engine.computer(fork).await?;
+    let target_id = match into {
+        Some(name) => Some(engine.computer(name).await?.id),
+        None => None,
+    };
+    let label = if dry_run { "Checking" } else { "Promoting" };
+    engine
+        .run_job(
+            &format!("{label} {}", fork.name),
+            requests::changes_promote(ChangesPromoteParams {
+                fork_id: fork.id,
+                target_id,
+                dry_run: dry_run.then_some(true),
             }),
             progress,
         )

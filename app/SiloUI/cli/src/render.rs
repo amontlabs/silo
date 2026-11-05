@@ -198,6 +198,23 @@ fn lines(value: &Value, key: &str) -> Vec<String> {
 }
 
 /// `silo fold`: what was kept, what a dry run would keep, or why nothing was changed.
+pub fn promote(value: &Value) -> String {
+    let report = &value["report"];
+    let (fork, target) = (text(report, "fork"), text(report, "target"));
+    let archive = text(report, "archive");
+    let mut out = match text(value, "status") {
+        "refused" => return text(&value["refusal"], "message").to_owned(),
+        "dry-run" => format!(
+            "Would make {fork} the new {target}; {target} would be archived as {archive}."
+        ),
+        _ => format!("{fork} is now {target}. The old {target} is {archive} (stopped)."),
+    };
+    for line in lines(report, "notes") {
+        out.push_str(&format!("\nnote: {line}"));
+    }
+    out
+}
+
 pub fn fold(value: &Value) -> String {
     let report = &value["report"];
     let (fork, target) = (text(report, "fork"), text(report, "target"));
