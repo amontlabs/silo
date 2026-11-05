@@ -56,6 +56,7 @@ done >>"$TMP/own"
 
 # npm: global packages live under `npm root -g`, as <name> or @<scope>/<name>.
 if have npm; then
+  export npm_config_update_notifier=false npm_config_fund=false npm_config_audit=false
   root=$(npm root -g 2>/dev/null)
   if [ -n "$root" ]; then
     awk -v r="$root/" 'index($0,r)==1 {

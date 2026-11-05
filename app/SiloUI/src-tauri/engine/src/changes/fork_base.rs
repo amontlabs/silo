@@ -48,6 +48,24 @@ pub fn expect(context: Arc<dyn EngineContext>, new_name: &str, source: &str) {
     }
 }
 
+/// The checkpoint a fork was actually made from, known once the fork's source is resolved
+/// (for a fork of the current state, the checkpoint taken for it). It replaces the key noted
+/// at fork creation, so a later fork of the same computer never shares this baseline.
+pub fn forked_from(new_name: &str, checkpoint_id: &str) {
+    let Some(context) = context() else { return };
+    let store = Store::for_engine(context.as_ref());
+    if store.take_pending(new_name).is_some() {
+        if let Err(error) = store.put_pending(new_name, checkpoint_id) {
+            eprintln!("The fork-time record of {new_name} could not be updated: {error}");
+        }
+    }
+}
+
+/// Withdraws the note of a fork that was never created.
+pub fn withdraw(context: &dyn EngineContext, new_name: &str) {
+    let _ = Store::for_engine(context).take_pending(new_name);
+}
+
 /// A Linux fork has just been confirmed quiet.
 pub fn captured_after_quiet(paths: &RuntimePaths, name: &str, id: &str) {
     let Some(context) = context() else { return };
@@ -78,6 +96,10 @@ pub fn capture_with(
     let Some(source) = store.take_pending(name) else {
         return;
     };
+    // A capture that could not run leaves the note, so the next start tries again.
+    let keep_note = |source: &str| {
+        let _ = store.put_pending(name, source);
+    };
     let outcome = target
         .map_err(|error| error.message)
         .and_then(|target| {
@@ -86,6 +108,7 @@ pub fn capture_with(
         .and_then(|text| store.put(id, Slot::Base, &text, Some(&source)).map(|_| ()));
     if let Err(message) = outcome {
         let _ = store.put_failure(id, &message);
+        keep_note(&source);
     }
 }
 
@@ -95,7 +118,7 @@ mod tests {
     use crate::guest::test_support;
 
     #[test]
-    fn a_failed_capture_is_recorded_and_the_note_is_used_up() {
+    fn a_failed_capture_is_recorded_and_the_note_is_kept() {
         let dir = tempfile::tempdir().unwrap();
         let context = test_support::RecordingContext::new(dir.path());
         let store = Store::for_engine(context.as_ref());
@@ -122,7 +145,26 @@ mod tests {
             Some("The computer is not reachable.")
         );
         assert_eq!(store.get("id-1", Slot::Base).unwrap(), None);
-        assert_eq!(store.take_pending("try"), None);
+        assert_eq!(store.take_pending("try").as_deref(), Some("cp1"));
+    }
+
+    #[test]
+    fn the_actual_checkpoint_replaces_the_noted_key() {
+        let _test_state = crate::test_support::global_state();
+        let dir = tempfile::tempdir().unwrap();
+        let context = test_support::RecordingContext::new(dir.path());
+        let store = Store::for_engine(context.as_ref());
+        install(context.clone());
+        // Noted with the source computer; the fork-point checkpoint then takes its place.
+        expect(context.clone(), "try", "src");
+        forked_from("try", "cp-auto-1");
+        assert_eq!(store.take_pending("try").as_deref(), Some("cp-auto-1"));
+        // Nothing noted: nothing is created.
+        forked_from("other", "cp-2");
+        assert_eq!(store.take_pending("other"), None);
+        expect(context.clone(), "gone", "src");
+        withdraw(context.as_ref(), "gone");
+        assert_eq!(store.take_pending("gone"), None);
     }
 
     #[test]

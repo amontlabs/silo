@@ -113,6 +113,8 @@ pub struct Options {
     pub chunk: u64,
     /// The largest manifest accepted once decompressed.
     pub max_manifest_bytes: u64,
+    /// The largest compressed manifest read back from the computer.
+    pub max_compressed_bytes: u64,
 }
 
 impl Default for Options {
@@ -122,17 +124,28 @@ impl Default for Options {
             poll: Duration::from_secs(60),
             chunk: MAX_RESPONSE_RAW_BYTES as u64,
             max_manifest_bytes: 512 * 1024 * 1024,
+            max_compressed_bytes: 128 * 1024 * 1024,
         }
     }
 }
 
 const SHORT_CALL: Duration = Duration::from_secs(60);
 
-/// Starts the collector detached: the script arrives on stdin, runs under `bash`, and ends by
-/// writing `DONE` (its exit status) after the gzip and its digest.
+/// Starts the collector detached in a process group of its own: the script arrives on stdin,
+/// runs under `bash`, and ends by writing `DONE` (its exit status) after the gzip and its
+/// digest. One collector runs per computer: the lock file names its process group, and a
+/// second start while that one lives answers `busy`.
 const START: &str = r#"d=$1
+lock=/tmp/silo-collect.lock
+if ! ( set -C; echo $$ > "$lock" ) 2>/dev/null; then
+  old=$(cat "$lock" 2>/dev/null)
+  if [ -n "$old" ] && kill -0 "$old" 2>/dev/null; then echo busy; exit 0; fi
+  rm -f "$lock"
+  ( set -C; echo $$ > "$lock" ) 2>/dev/null || { echo busy; exit 0; }
+fi
 umask 022
-mkdir -p "$d" && cat > "$d/collect.sh" || exit 1
+mkdir -p "$d" && cat > "$d/collect.sh" || { rm -f "$lock"; exit 1; }
+set -m
 nohup sh -c 'cd "$1" || exit 1
 bash collect.sh > m.tsv 2> err.txt < /dev/null
 rc=$?
@@ -141,7 +154,22 @@ chmod 644 m.tsv.gz err.txt
 ( sha256sum m.tsv.gz 2>/dev/null || shasum -a 256 m.tsv.gz ) | cut -d" " -f1 > sum
 echo $rc > DONE' sh "$d" < /dev/null > /dev/null 2>&1 &
 echo $! > "$d/pid"
+echo $! > "$lock"
 echo started"#;
+
+/// Ends the collector of folder `$1` (its whole process group) when it still runs, then removes
+/// the folder and the lock if the lock is its own. Safe to run after a normal end.
+const CLEAN: &str = r#"d=$1
+lock=/tmp/silo-collect.lock
+p=$(cat "$d/pid" 2>/dev/null)
+case "$p" in ''|*[!0-9]*) p= ;; esac
+if [ -n "$p" ] && kill -0 "$p" 2>/dev/null; then
+  kill -TERM -- "-$p" 2>/dev/null; kill -TERM "$p" 2>/dev/null
+  i=0; while kill -0 "$p" 2>/dev/null && [ "$i" -lt 5 ]; do sleep 1; i=$((i+1)); done
+  kill -KILL -- "-$p" 2>/dev/null; kill -KILL "$p" 2>/dev/null
+fi
+if [ -n "$p" ] && [ "$(cat "$lock" 2>/dev/null)" = "$p" ]; then rm -f "$lock"; fi
+rm -rf "$d""#;
 
 /// Waits up to `$2` seconds for the collector; prints `done <rc> <sha256>`, `running` or `gone`
 /// (the collector's process ended without finishing).
@@ -188,9 +216,10 @@ pub fn capture(runner: &dyn GuestRunner, options: &Options) -> Result<String, Gu
     let directory = format!("/tmp/silo-collect-{}", uuid::Uuid::new_v4().simple());
     let user = exec_user(runner);
     let outcome = run_collector(runner, &directory, user, options);
-    // The temporary folder never outlives the capture, whichever way it ended.
+    // Neither the collector nor its temporary folder outlives the capture, whichever way it
+    // ended: one that is still running (a timeout) is stopped here.
     let _ = runner.exec(
-        &argv(&["rm", "-rf", &directory]),
+        &argv(&["sh", "-c", CLEAN, "sh", &directory]),
         None,
         user,
         Duration::from_secs(30),
@@ -211,6 +240,12 @@ fn run_collector(
         user,
         SHORT_CALL,
     )?;
+    if launch.exit_code == Some(0) && text(&launch) == "busy" {
+        return Err(GuestError::new(
+            ErrorCode::Busy,
+            "Another capture of this computer is still running.",
+        ));
+    }
     if launch.exit_code != Some(0) || text(&launch) != "started" {
         return Err(failed("Starting the collector", &launch));
     }
@@ -255,7 +290,13 @@ fn run_collector(
             _ => return Err(failed("Waiting for the collector", &poll)),
         }
     };
-    let compressed = read_all(runner, &format!("{directory}/m.tsv.gz"), options.chunk)?;
+    let compressed = read_bounded(
+        runner,
+        &format!("{directory}/m.tsv.gz"),
+        options.chunk,
+        options.max_compressed_bytes,
+        started + options.budget,
+    )?;
     if !digest.is_empty() {
         let actual = hex(&Sha256::digest(&compressed));
         if actual != digest {
@@ -308,12 +349,31 @@ fn collector_failure(
     ))
 }
 
-/// Reads a whole guest file in chunks that each fit one response.
-pub fn read_all(runner: &dyn GuestRunner, path: &str, chunk: u64) -> Result<Vec<u8>, GuestError> {
+/// Reads a whole guest file in chunks that each fit one response, refusing a file larger than
+/// `max` before reading it and giving up at `deadline`.
+pub fn read_bounded(
+    runner: &dyn GuestRunner,
+    path: &str,
+    chunk: u64,
+    max: u64,
+    deadline: Instant,
+) -> Result<Vec<u8>, GuestError> {
     let mut bytes = Vec::new();
     loop {
+        if Instant::now() >= deadline {
+            return Err(GuestError::new(
+                ErrorCode::TimedOut,
+                "The computer took too long to describe itself.",
+            ));
+        }
         let offset = bytes.len() as u64;
         let part = runner.read(path, offset, chunk)?;
+        if part.size > max {
+            return Err(GuestError::new(
+                ErrorCode::OutputTooLarge,
+                "The manifest is larger than the engine accepts.",
+            ));
+        }
         bytes.extend_from_slice(&part.data);
         if bytes.len() as u64 >= part.size {
             return Ok(bytes);
