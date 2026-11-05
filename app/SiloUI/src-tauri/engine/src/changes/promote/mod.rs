@@ -319,7 +319,7 @@ pub fn promote(
     report.checkpoint = Some(checkpoint.id.clone());
     env.note("Stopping both computers");
     stop_and_wait(env, &[&main.id, &fork.id])?;
-    let _holds = env.hold_pair(
+    let holds = env.hold_pair(
         &target,
         &request.fork,
         &format!("Replacing {} with {}", main.name, fork.name),
@@ -392,7 +392,9 @@ pub fn promote(
         "{} is now {}. {} was archived as {}; `silo undo {}` swaps them back.",
         fork.name, main.name, main.name, record.swap.archive_name, main.name
     ));
-    // The new main runs when the old one did (best effort: the swap is done); the archive stays stopped.
+    // The new main runs when the old one did (best effort: the swap is done); the archive stays
+    // stopped. A start takes the computer's lane itself, so the swap's hold ends first.
+    drop(holds);
     if record.swap.target_was_running {
         env.note("Starting the new main");
         if let Err(error) = env.start(&record.swap.fork_id) {
@@ -510,8 +512,9 @@ pub fn undo(
         }
     }
     stop_and_wait(env, &[&key.0, &key.1])?;
-    let _holds = env.hold_pair(&key.0, &key.1, "Swapping the computers back")?;
+    let holds = env.hold_pair(&key.0, &key.1, "Swapping the computers back")?;
     finish_undo(env, journal, &mut record)?;
+    drop(holds);
     // Whatever was running before the promote runs again (best effort: the swap is done).
     for (id, was_running) in [
         (&record.swap.target_id, record.swap.target_was_running),

@@ -83,7 +83,7 @@ AFTER=$(snap); echo "$AFTER"; AR=$(archive); echo "archive: $AR"
 [ "$(idof main)" = "$FORKID" ]; check "the fork is now named main (id $FORKID)" $? "main id $(idof main)"
 [ -n "$AR" ] && [ "$(idof $AR)" = "$MAINID" ]; check "old main archived as main-before-* with its id" $? "$AR"
 echo "-- content on the new main"
-"$SILO" start main >/dev/null 2>&1; check "start new main" $? ""
+[ "$("$SILO" status main --json | python3 -c "import json,sys; print(json.load(sys.stdin)['state'])")" = running ]; check "promoted main is running without a start (old main was running)" $? "archive: $(archive) $("$SILO" status $(archive) --json | python3 -c "import json,sys; print(json.load(sys.stdin)['state'])")"
 sleep 4
 echo "marker: $(x main 'cat /root/p3-marker')  web: $(x main 'curl -s -m 5 http://127.0.0.1:3000/')"
 [ "$(x main 'cat /root/p3-marker')" = fork-v2 ] && x main 'curl -s -m 5 http://127.0.0.1:3000/' | grep -q content=v2; check "new main serves the fork's content (file + web app output, in-guest)" $? ""
@@ -102,7 +102,7 @@ echo "== silo undo main"
 t=$(now); "$SILO" undo main --json > /tmp/p3-undo.json 2> /tmp/p3-undo.err; rc=$?; check "silo undo main exits 0" $rc "wall $(( $(now)-t )) s"; tail -4 /tmp/p3-undo.err; head -c 800 /tmp/p3-undo.json; echo
 AFTERU=$(snap); echo "$AFTERU"
 [ "$(idof main)" = "$MAINID" ] && [ "$(idof $FORK)" = "$FORKID" ] && [ -z "$(archive)" ]; check "names back: main=$MAINID, $FORK=$FORKID, no main-before-*" $? "archive now: [$(archive)]"
-"$SILO" start main >/dev/null 2>&1; sleep 4
+[ "$("$SILO" status main --json | python3 -c "import json,sys; print(json.load(sys.stdin)['state'])")" = running ]; check "undone main is running without a start" $? ""; sleep 4
 echo "marker: $(x main 'cat /root/p3-marker')  web: $(x main 'curl -s -m 5 http://127.0.0.1:3000/')  cron: $(x main 'ls /etc/cron.d | tr "\n" " "; crontab -l | tail -1')"
 [ "$(x main 'cat /root/p3-marker')" = main-v1 ] && x main 'curl -s -m 5 http://127.0.0.1:3000/' | grep -q content=v1; check "content back on main (file + web app)" $? ""
 "$SILO" ports main; urlwait $URLMAIN content=v1 >/dev/null; check "main's URL serves the original content again" $? ""
@@ -115,6 +115,7 @@ echo "fork after undo: $(x $FORK 'cat /root/p3-marker' 2>&1 | head -1)"
 if [ "${SKIP_MAC:-0}" != 1 ]; then
 echo "== macOS: source $MSRC, fork $MFORK"
 echo "macOS VMs running: $(nvms)"
+for i in $(seq 40); do [ "$(nvms)" = 0 ] && break; sleep 5; done
 [ "$(nvms)" -le 0 ] || { echo "macOS VMs of someone else are running: skipping macOS"; SKIP_MAC=1; }
 fi
 if [ "${SKIP_MAC:-0}" != 1 ]; then
@@ -139,15 +140,14 @@ if false; then echo "-- diagnostic retry: stop both, then promote again"; "$SILO
 import json,sys
 d=json.load(sys.stdin); d=d if isinstance(d,list) else d.get('computers',d)
 print([ (c['name'],c['id'][:8]) for c in d if c['id'] in ('$MSID','$MFID')])"
-"$SILO" start $MSRC >/dev/null 2>&1; echo "source name expected after promote: $MSRC now id $(idof $MSRC) (fork id ${MFID:0:8}, source id ${MSID:0:8})"
+echo "source name expected after promote: $MSRC now id $(idof $MSRC) (fork id ${MFID:0:8}, source id ${MSID:0:8})"
 [ "$(idof $MSRC)" = "$MFID" ]; check "macOS: the fork now carries the source's name" $? ""
 echo "macOS VMs running: $(nvms)"
-"$SILO" start $MSRC >/dev/null 2>&1; echo "marker on promoted: $(xm $MSRC 'cat ~/p3-marker')"
+[ "$("$SILO" status $MSRC --json | python3 -c "import json,sys; print(json.load(sys.stdin)['state'])")" = running ]; check "macOS: promoted computer is running without a start" $? ""; echo "marker on promoted: $(xm $MSRC 'cat ~/p3-marker')"
 [ "$(xm $MSRC 'cat ~/p3-marker')" = mac-fork-v2 ]; check "macOS: promoted computer has the fork's content" $? ""
-"$SILO" stop $MSRC >/dev/null 2>&1
 t=$(now); "$SILO" undo $MSRC --json > /tmp/p3-mundo.json 2> /tmp/p3-mundo.err; rc=$?; check "silo undo $MSRC (macOS)" $rc "wall $(( $(now)-t )) s"; tail -4 /tmp/p3-mundo.err; head -c 600 /tmp/p3-mundo.json; echo
 snap
 [ "$(idof $MSRC)" = "$MSID" ] && [ "$(idof $MFORK)" = "$MFID" ]; check "macOS: names back after undo" $? ""
-"$SILO" start $MSRC >/dev/null 2>&1; echo "marker after undo: $(xm $MSRC 'cat ~/p3-marker')"
+[ "$("$SILO" status $MSRC --json | python3 -c "import json,sys; print(json.load(sys.stdin)['state'])")" = running ]; check "macOS: undone source is running without a start" $? ""; echo "marker after undo: $(xm $MSRC 'cat ~/p3-marker')"
 [ "$(xm $MSRC 'cat ~/p3-marker')" = mac-main-v1 ]; check "macOS: content back after undo" $? ""
 fi
