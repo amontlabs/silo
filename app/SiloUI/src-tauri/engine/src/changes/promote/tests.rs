@@ -148,7 +148,7 @@ impl PromoteEnv for Fake {
         Ok(Box::new(()))
     }
 
-    fn export_bindings(&self, name: &str) -> Result<Value, String> {
+    fn export_bindings(&self, id: &str, name: &str) -> Result<Value, String> {
         let d = self.device.lock().unwrap();
         let mut out = serde_json::Map::new();
         for store in STORES {
@@ -532,7 +532,8 @@ fn a_crash_before_any_step_leaves_the_device_as_it_was() {
             target_name: "main".into(),
             archive_name: "main-before-x".into(),
             macos: false,
-            fork_bindings: fake.export_bindings("try-it").unwrap(),
+            fork_bindings: fake.export_bindings(FORK, "try-it").unwrap(),
+            target_bindings: Value::Null,
             fork_source: Some(MAIN.into()),
             checkpoint: CheckpointRef {
                 id: "cp".into(),

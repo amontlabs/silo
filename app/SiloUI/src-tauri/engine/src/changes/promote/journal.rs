@@ -56,6 +56,8 @@ pub struct Swap {
     pub macos: bool,
     /// The fork's own name-keyed settings before the swap, put back by an undo.
     pub fork_bindings: Value,
+    /// Main's, which move to the fork when ports are keyed by computer id.
+    pub target_bindings: Value,
     /// Where the fork was forked from before it replaced `target_id`.
     pub fork_source: Option<String>,
     pub checkpoint: CheckpointRef,

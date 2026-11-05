@@ -50,7 +50,7 @@ pub trait PromoteEnv: Send + Sync {
         Ok(Box::new(()))
     }
     /// Everything the stores keep under the computer's name, as one document.
-    fn export_bindings(&self, name: &str) -> Result<Value, String>;
+    fn export_bindings(&self, id: &str, name: &str) -> Result<Value, String>;
     /// Does one step. Repeating it changes nothing.
     fn apply(&self, step: Step, swap: &Swap) -> Result<(), String>;
     /// Undoes one step, whether or not it was applied. Repeating it changes nothing.
@@ -263,7 +263,8 @@ pub fn promote(
         target_name: main.name.clone(),
         archive_name: archive,
         macos: main.os == Os::Macos,
-        fork_bindings: env.export_bindings(&fork.name)?,
+        fork_bindings: env.export_bindings(&fork.id, &fork.name)?,
+        target_bindings: env.export_bindings(&main.id, &main.name)?,
         fork_source: store.source(&fork.id)?,
         checkpoint,
     };

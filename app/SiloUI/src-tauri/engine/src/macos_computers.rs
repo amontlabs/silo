@@ -2677,6 +2677,67 @@ pub fn name_for_id(app: &MacosContext, id: &str) -> Option<String> {
         .map(|(_, name)| name)
 }
 
+/// What a promote needs to know about a macOS computer: `(name, stopped, deleting)`.
+pub fn promote_view(id: &str) -> Option<(String, bool, bool)> {
+    registry()
+        .entries
+        .iter()
+        .find(|entry| entry.record.id == id)
+        .map(|entry| {
+            (
+                entry.record.name.clone(),
+                matches!(entry.state, store::State::Stopped | store::State::Failed),
+                entry.deleting,
+            )
+        })
+}
+
+/// Stops a macOS computer for a promote.
+pub fn promote_stop(app: &MacosContext, id: &str) -> Result<(), String> {
+    perform(app, id, Action::Stop)
+}
+
+/// Gives a stopped macOS computer a new name (record on disk and in memory). Repeating it
+/// changes nothing. The caller holds the computer's operation lane.
+pub fn promote_set_name(app: &MacosContext, id: &str, name: &str) -> Result<(), String> {
+    ensure_loaded(app)?;
+    let data = app_data(app)?;
+    let (mut record, _) = computer(id)?;
+    if record.name == name {
+        return Ok(());
+    }
+    record.name = name.to_owned();
+    let layout = Layout::new(&data, id);
+    persist_then_commit(
+        record,
+        |record| store::save(&layout, record),
+        || store::read_record(&layout).ok(),
+        |record| {
+            update(app, id, |entry| entry.record = record);
+        },
+    )?;
+    emit(app);
+    Ok(())
+}
+
+/// The saved forwards of a macOS computer (see `ports::export_mappings`).
+pub fn promote_export_ports(app: &MacosContext, id: &str) -> Result<Vec<serde_json::Value>, String> {
+    ports::export_mappings(&app_data(app)?, id)
+}
+
+/// Replaces the saved forwards of a macOS computer and forgets its URL routes.
+pub fn promote_replace_ports(
+    app: &MacosContext,
+    id: &str,
+    mappings: &[serde_json::Value],
+) -> Result<(), String> {
+    ports::replace_mappings(&app_data(app)?, id, mappings)?;
+    if let Some(proxy) = crate::url_proxy::shared() {
+        proxy.forget_computer_id(id);
+    }
+    Ok(())
+}
+
 /// The identity of the macOS computer with this name, if one is stored on this device.
 pub fn id_for_name(app: &MacosContext, name: &str) -> Option<String> {
     let data = app_data(app).ok()?;

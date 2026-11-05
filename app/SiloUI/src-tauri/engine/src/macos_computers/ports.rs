@@ -1095,6 +1095,37 @@ pub(super) fn has_http_forwards(app: &MacosContext) -> bool {
     })
 }
 
+/// The saved forwards of one computer, to put back after a promote.
+pub(super) fn export_mappings(app_data: &Path, computer_id: &str) -> Result<Vec<serde_json::Value>, String> {
+    let _lock = configuration_lock();
+    let config = read_configuration_unlocked(app_data)?;
+    Ok(config
+        .mappings
+        .iter()
+        .filter(|m| m.computer_id == computer_id)
+        .filter_map(|m| serde_json::to_value(m).ok())
+        .collect())
+}
+
+/// Makes `mappings` (from [`export_mappings`], possibly of another computer) the saved
+/// forwards of `computer_id`, replacing what it had.
+pub(super) fn replace_mappings(
+    app_data: &Path,
+    computer_id: &str,
+    mappings: &[serde_json::Value],
+) -> Result<(), String> {
+    let _lock = configuration_lock();
+    let mut config = read_configuration_unlocked(app_data)?;
+    config.mappings.retain(|m| m.computer_id != computer_id);
+    for value in mappings {
+        let mut mapping: Mapping = serde_json::from_value(value.clone())
+            .map_err(|_| "Saved ports are invalid.".to_string())?;
+        mapping.computer_id = computer_id.to_owned();
+        config.mappings.push(mapping);
+    }
+    write_configuration_unlocked(app_data, &config)
+}
+
 pub(super) fn computer_removed(app: &MacosContext, computer_id: &str) -> Result<(), String> {
     close_computer(computer_id);
     if let Some(proxy) = crate::url_proxy::shared() {

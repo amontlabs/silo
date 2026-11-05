@@ -687,6 +687,36 @@ fn source_fork_assignment(
     read_only_assignment(assignment, target)
 }
 
+/// The saved GitHub assignment of `computer`, to put back after a promote.
+pub(crate) fn export_computer(computer: &str) -> Result<Value, String> {
+    let _state = serialize(&STATE);
+    let document = load()?;
+    Ok(document
+        .computers
+        .iter()
+        .find(|value| value["computer"].as_str() == Some(computer))
+        .cloned()
+        .unwrap_or(Value::Null))
+}
+
+/// Saves `assignment` (from [`export_computer`]) for `computer`; null removes it. The computer
+/// gets its own runtime identity at its next Start.
+pub(crate) fn import_computer(computer: &str, assignment: &Value) -> Result<(), String> {
+    let _state = serialize(&STATE);
+    let mut document = load()?;
+    forget_computer(&mut document, computer);
+    if !assignment.is_null() {
+        let mut copy = assignment.clone();
+        copy["computer"] = json!(computer);
+        document.computers.push(copy);
+        document.access_pending.push(computer.into());
+        document.identity_pending.push(computer.into());
+    }
+    document.revision = next_policy_revision(document.revision)?;
+    stamp(&mut document, computer, None);
+    save(&document)
+}
+
 pub fn forget_fork_assignment(target: &str) -> Result<(), String> {
     let _state = serialize(&STATE);
     let mut document = load()?;
