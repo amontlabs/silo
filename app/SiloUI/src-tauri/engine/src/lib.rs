@@ -7,6 +7,7 @@ pub mod backup;
 pub mod backup_controller;
 pub mod bridge_error;
 pub mod bundled_tools;
+pub mod changes;
 pub mod checkpoints;
 pub(crate) mod child_process;
 pub mod clipboard;
