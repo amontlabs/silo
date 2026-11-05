@@ -1,0 +1,97 @@
+== header
+commit: 1e985caefa191e892d2ad6ce047fbeeed4459d6e; tracked changes under app/: []
+bundled msb: msb 0.7.6; silo: silo 0.1.0; host 26.5 arm64; date 2026-11-05T21:13:07Z
+== silo up (project recipe .silo/recipes/linux-dev.yaml replaces the built-in: python3 web app on :3000 as service 'web', ports [3000])
+[22:13:51] PASS  silo up  -- 44 s
+Building the recipe linux-dev: 25s
+Building the recipe linux-dev: 30s
+Making main from linux-dev...
+Starting main...
+Checkpointing main...
+{
+  "created": true,
+  "main": {
+    "checkpoints": 1,
+    "cpus": 2,
+    "detail": "Running",
+    "diskGiB": 10,
+    "id": "2774e0ec-8474-42df-aabf-f25edfa361e9",
+    "kind": "linux",
+    "memoryGiB": 4,
+    "name": "main",
+    "state": "running"
+  },
+  "recipe": "linux-dev",
+  "warmCheckpoint": "cd39da2bdc7a24e7d81267ad48946f0c"
+}
+
+guest OS: Ubuntu 24.04.4 LTS kernel 6.12.109
+main
+== web app through the boot entry on main
+in-guest: host=main content=v1
+cd39da2bdc7a24e7d81267ad48946f0c  silo-warm  warm  2026-11-05T21:13:47.747Z
+== fork main -n 4
+[22:14:10] PASS  silo fork main -n 4  -- wall 15 s (dev signal only)
+Starting main-4e7985: 5s
+Starting main-fa9ba2: 5s
+Starting main-fcce13: 5s
+Starting main-fa9ba2: 10s
+forks: main-4e7985 main-fa9ba2 main-53fa0b main-fcce13
+[22:14:10] PASS  4 forks created  -- 4 forks
+checkpoint: cd39da2bdc7a24e7d81267ad48946f0c (main warm checkpoint: see list above)
+main-4e7985 running urls= []
+main-fa9ba2 running urls= []
+main-53fa0b running urls= []
+main-fcce13 running urls= []
+NAME         STATE      KIND    SIZE
+workspace-1  stopped    linux   8 cpu, 32 GiB
+e2e-relay    stopped    linux   8 cpu, 32 GiB
+silo-eval-a  stopped    linux   2 cpu, 2 GiB
+silo-eval-b  stopped    linux   2 cpu, 2 GiB
+main         running    linux   2 cpu, 4 GiB
+main-53fa0b  running    linux   2 cpu, 4 GiB
+main-fcce13  running    linux   2 cpu, 4 GiB
+main-fa9ba2  running    linux   2 cpu, 4 GiB
+main-4e7985  running    linux   2 cpu, 4 GiB
+[22:14:11] PASS  all 4 forks running  -- 4 running
+== each fork serves :3000 inside the guest (silo exec) with its own hostname
+main-4e7985 in-guest: [host=main-4e7985 content=v1]
+main-fa9ba2 in-guest: [host=main-fa9ba2 content=v1]
+main-53fa0b in-guest: [host=main-53fa0b content=v1]
+main-fcce13 in-guest: [host=main-fcce13 content=v1]
+[22:14:13] PASS  web app runs in each fork with its own hostname (in-guest)  -- 4 distinct:  main-4e7985 main-fa9ba2 main-53fa0b main-fcce13
+== URLs through the proxy (network.urls)
+dev proxy port (lsof of the dev silod; default 47383): 47383
+main-4e7985 printed urls: []
+main-fa9ba2 printed urls: []
+main-53fa0b printed urls: []
+main-fcce13 printed urls: []
+[22:14:13] FAIL  each fork prints its own URL (network.urls)  -- 0 of 4 forks have URLs; recipe 'ports: [3000]' is stored in the build cache but no published port reaches main or its forks, and silo has no command to publish one
+-- direct probe of the conventional names
+main-4e7985: No Silo computer is open at main-4e7985.silo.localhost.
+ http=404
+main-fa9ba2: No Silo computer is open at main-fa9ba2.silo.localhost.
+ http=404
+main-53fa0b: No Silo computer is open at main-53fa0b.silo.localhost.
+ http=404
+main-fcce13: No Silo computer is open at main-fcce13.silo.localhost.
+ http=404
+[22:14:13] FAIL  4 concurrent curls of http://3000.<fork>.silo.localhost:<port> each answer with the fork's hostname  -- 
+== drop forks
+dropped main-4e7985 rc=0
+dropped main-fa9ba2 rc=0
+dropped main-53fa0b rc=0
+dropped main-fcce13 rc=0
+main-4e7985 after drop: http 404
+main-fa9ba2 after drop: http 404
+main-53fa0b after drop: http 404
+main-fcce13 after drop: http 404
+[22:14:27] PASS  dropped forks' URLs stop answering (404/502)  -- (vacuous: they answered 404 before the drop too, as no route was ever published)
+[22:14:27] cleanup
+NAME         STATE      KIND    SIZE
+workspace-1  stopped    linux   8 cpu, 32 GiB
+e2e-relay    stopped    linux   8 cpu, 32 GiB
+silo-eval-a  stopped    linux   2 cpu, 2 GiB
+silo-eval-b  stopped    linux   2 cpu, 2 GiB
+main         running    linux   2 cpu, 4 GiB
+== summary: 6 passed, 2 failed

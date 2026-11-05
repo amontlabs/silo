@@ -227,3 +227,92 @@ $ msb snapshot rm probe-group:snap-before --force
    ✓ Removed      probe-group:snap-before
 [exit 0]
 ls: /private/tmp/mrp: No such file or directory
+
+note: second probe after the review fixes; msb built by npm run runtime:prepare from the 23-patch series (rename patch sha 07dff550...), libkrunfw beside it, no VM started (created sandboxes only); crash injection is hand-written journals plus SIGKILL of msb rename at random moments
+
+== second probe: journal kept until every step is confirmed, recovery under the lock
+msb: msb 0.7.6
+date 2026-11-05T21:17:10Z
+$ msb pull ghcr.io/amontlabs/silo-guest:ubuntu-24.04-v5-arm64
+   ✓ Pulled       ghcr.io/amontlabs/silo-guest:ubuntu-24.04-v5-arm64 (5.8s)
+[exit 0]
+$ msb create --no-start -n probe-a -c 1 -m 1G --label silo.managed=true --mount-owned /workspace:kind=disk,size=1G ghcr.io/amontlabs/silo-guest:ubuntu-24.04-v5-arm64
+[exit 0]
+$ msb create --no-start -n probe-b -c 1 -m 1G --label silo.managed=true --mount-owned /workspace:kind=disk,size=1G ghcr.io/amontlabs/silo-guest:ubuntu-24.04-v5-arm64
+[exit 0]
+catalog: [(1, 'probe-a', 'Created'), (2, 'probe-b', 'Created')]
+
+== A: a rename that died after the directory moved (journal written, step journaled, state not rewritten)
+injected: journal ['/private/tmp/mrp2/rename-journal/1.json'], directories ['probe-a2', 'probe-b'], catalog [(1, 'probe-a', 'Created'), (2, 'probe-b', 'Created')]
+$ msb rename no-such-sandbox probe-a
+   error: sandbox not found: no-such-sandbox
+[exit 1]
+after recovery: journals [], directories ['probe-a2', 'probe-b'], catalog [(1, 'probe-a2', 'Created'), (2, 'probe-b', 'Created')]
+PASS: A: catalog name probe-a2, directory probe-a2, journal removed
+PASS: A: stored configuration names probe-a2
+
+== B: a rename that was rolling back (journal rolling_back, directory moved)
+injected: journal ['/private/tmp/mrp2/rename-journal/1.json'], directories ['probe-a3', 'probe-b']
+$ msb rename no-such-sandbox probe-a3
+   error: sandbox not found: no-such-sandbox
+[exit 1]
+after recovery: journals [], directories ['probe-a2', 'probe-b'], catalog [(1, 'probe-a2', 'Created'), (2, 'probe-b', 'Created')]
+PASS: B: rolled back to probe-a2
+
+== C: a stale journal of another generation is not removed by a reader that read the earlier one
+covered by the unit test a_stale_reader_leaves_a_later_rename_of_the_same_sandbox_alone (it needs two interleaved readers)
+
+== D: real crashes: msb rename killed with SIGKILL at random moments, then recovery
+iter 00 delay 0.081s killed=False journal-left=0 -> probe-a4 ok
+iter 01 delay 0.038s killed=True journal-left=1 -> probe-a2 ok
+iter 02 delay 0.163s killed=False journal-left=0 -> probe-a4 ok
+iter 03 delay 0.018s killed=True journal-left=1 -> probe-a2 ok
+iter 04 delay 0.134s killed=False journal-left=0 -> probe-a4 ok
+iter 05 delay 0.091s killed=True journal-left=0 -> probe-a2 ok
+iter 06 delay 0.014s killed=True journal-left=0 -> probe-a2 ok
+iter 07 delay 0.127s killed=False journal-left=0 -> probe-a4 ok
+iter 08 delay 0.009s killed=True journal-left=0 -> probe-a4 ok
+iter 09 delay 0.108s killed=False journal-left=0 -> probe-a2 ok
+iter 10 delay 0.017s killed=True journal-left=1 -> probe-a4 ok
+iter 11 delay 0.023s killed=True journal-left=1 -> probe-a2 ok
+iter 12 delay 0.106s killed=False journal-left=0 -> probe-a4 ok
+iter 13 delay 0.207s killed=False journal-left=0 -> probe-a2 ok
+iter 14 delay 0.031s killed=True journal-left=1 -> probe-a4 ok
+iter 15 delay 0.056s killed=True journal-left=0 -> probe-a2 ok
+iter 16 delay 0.157s killed=False journal-left=0 -> probe-a4 ok
+iter 17 delay 0.237s killed=False journal-left=0 -> probe-a2 ok
+iter 18 delay 0.144s killed=False journal-left=0 -> probe-a4 ok
+iter 19 delay 0.099s killed=False journal-left=0 -> probe-a2 ok
+iter 20 delay 0.244s killed=False journal-left=0 -> probe-a4 ok
+iter 21 delay 0.012s killed=True journal-left=1 -> probe-a2 ok
+iter 22 delay 0.215s killed=False journal-left=0 -> probe-a4 ok
+iter 23 delay 0.072s killed=False journal-left=0 -> probe-a2 ok
+iter 24 delay 0.036s killed=True journal-left=1 -> probe-a4 ok
+iter 25 delay 0.029s killed=True journal-left=1 -> probe-a2 ok
+iter 26 delay 0.077s killed=False journal-left=0 -> probe-a4 ok
+iter 27 delay 0.204s killed=False journal-left=0 -> probe-a2 ok
+iter 28 delay 0.045s killed=True journal-left=1 -> probe-a4 ok
+iter 29 delay 0.145s killed=False journal-left=0 -> probe-a2 ok
+iter 30 delay 0.160s killed=False journal-left=0 -> probe-a4 ok
+iter 31 delay 0.093s killed=False journal-left=0 -> probe-a2 ok
+iter 32 delay 0.137s killed=False journal-left=0 -> probe-a4 ok
+iter 33 delay 0.016s killed=True journal-left=1 -> probe-a2 ok
+iter 34 delay 0.015s killed=True journal-left=1 -> probe-a4 ok
+iter 35 delay 0.051s killed=True journal-left=1 -> probe-a2 ok
+iter 36 delay 0.170s killed=False journal-left=0 -> probe-a4 ok
+iter 37 delay 0.107s killed=False journal-left=0 -> probe-a2 ok
+iter 38 delay 0.079s killed=False journal-left=0 -> probe-a4 ok
+iter 39 delay 0.146s killed=False journal-left=0 -> probe-a2 ok
+PASS: D: every iteration ended with catalog, directory and stored name agreeing and no journal
+kills that landed mid-rename: 16 of 40
+final catalog: [(1, 'probe-a2', 'Created'), (2, 'probe-b', 'Created')], directories ['probe-a2', 'probe-b'], journals []
+
+== cleanup
+$ msb remove probe-a2
+   ✓ Removed      probe-a2
+[exit 0]
+$ msb remove probe-b
+   ✓ Removed      probe-b
+[exit 0]
+removed /private/tmp/mrp2: True
+RESULT: PASS
