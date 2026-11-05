@@ -1,49 +1,46 @@
 == header
-commit: a6a05394c932552c143c952aa052f686a41d5289; git status --porcelain app: [ M app/SiloUI/src-tauri/engine/src/changes/promote/tests.rs  M app/SiloUI/src-tauri/src/commands/macos_computers.rs  M app/SiloUI/src-tauri/src/commands/remote.rs  M app/SiloUI/src-tauri/src/commands/runtime_checkpoints.rs ]
-NOTE: another session started a merge in this shared checkout during the run (HEAD moved to the line above, app/ dirty); the engine and CLI under test are the binaries built at 2a5f0f9a8232374b24a305acf8d881fb4abf8ff8 (HEAD and a clean app/ tree when the Linux half of this re-run started, same binaries)
+commit: 2dee54e898b44d0dca6066635aa70a41944cbdad; git status --porcelain app: []
 bundled msb: msb 0.7.6
-host macOS 26.5 (arm64); silo silo 0.1.0; date 2026-11-05T19:22:47Z
+host macOS 26.5 (arm64); silo silo 0.1.0; date 2026-11-05T19:34:05Z
 macOS VMs running (pgrep Virtualization.VirtualMachine): 0
 == main: create (or reuse), service, brew, repo
 Creating e2e-p2r-main...
 Created e2e-p2r-main (stopped)
-create rc=0 in 75 s
+create rc=0 in 76 s
 macOS VMs running (pgrep Virtualization.VirtualMachine): 0
 Starting e2e-p2r-main...
 Started e2e-p2r-main (running)
 guest: ProductName:		macOS ProductVersion:		26.6.2 BuildVersion:		25G83 silo
-[20:24:22] installing Homebrew as the user
-733
-801
+[20:35:40] installing Homebrew as the user
 Homebrew 7.0.12
 jq: not installed
-[20:24:46] PASS  main service up on 8080  -- p2m service v1
-main agent pid: 1329
-09a356d service v1
+[20:35:58] PASS  main service up on 8080  -- p2m service v1
+main agent pid: 1322
+9129c32 service v1
 keep:
   restart: [org.silo.p2r.web]
 macOS VMs running (pgrep Virtualization.VirtualMachine): 0
 == fork
 Forking e2e-p2r-main into e2e-p2r-t1...
 Forked e2e-p2r-t1 (setting-up)
-[20:24:55] PASS  fork e2e-p2r-t1  -- 
+[20:36:07] PASS  fork e2e-p2r-t1  -- 
 macOS VMs running (pgrep Virtualization.VirtualMachine): 0
 Starting e2e-p2r-t1...
 Started e2e-p2r-t1 (running)
-[20:25:33] PASS  start e2e-p2r-t1  -- 
-775af19 service v2
-09a356d service v1
-[20:25:33] PASS  fork: only the served repo content changed (plist untouched)  -- 
+[20:36:46] PASS  start e2e-p2r-t1  -- 
+1700e26 service v2
+9129c32 service v1
+[20:36:46] PASS  fork: only the served repo content changed (plist untouched)  -- 
 1
 == keep with restart: [org.silo.p2r.web]
 macOS VMs running (pgrep Virtualization.VirtualMachine): 1
 Starting e2e-p2r-main...
 Started e2e-p2r-main (running)
-[20:25:59] PASS  start main  -- 
-[20:25:59] PASS  main serves v1 before keep  -- p2m service v1
-agent pid before (agent_pid): 438
+[20:37:07] PASS  start main  -- 
+[20:37:07] PASS  main serves v1 before keep  -- p2m service v1
+agent pid before (agent_pid): 436
 	state = running
-	pid = 438
+	pid = 436
 		state = active
 		state = active
 Keeping e2e-p2r-t1...
@@ -52,33 +49,37 @@ Keeping e2e-p2r-t1: 10s
 Keeping e2e-p2r-t1: 15s
 Keeping e2e-p2r-t1: 20s
 Keeping e2e-p2r-t1: 25s
-Keeping e2e-p2r-t1: 31s
-3a51bfd4-63b5-491c-8dc8-5bcf196e4357 changed while the keep was starting. 3a51bfd4-63b5-491c-8dc8-5bcf196e4357 was not changed by the keep.
-  main 3a51bfd4-63b5-491c-8dc8-5bcf196e4357: Other changed
-  main 3a51bfd4-63b5-491c-8dc8-5bcf196e4357:   ~ ~/Movies/TV/TV Library.tvlibrary/Library Preferences.tvdb
-  main 3a51bfd4-63b5-491c-8dc8-5bcf196e4357:   ~ ~/Movies/TV/TV Library.tvlibrary/Library.tvdb
-  main 3a51bfd4-63b5-491c-8dc8-5bcf196e4357: Not kept
-  main 3a51bfd4-63b5-491c-8dc8-5bcf196e4357:   processes: sshd-session: [rexeced]
-  main 3a51bfd4-63b5-491c-8dc8-5bcf196e4357: Ignored: 1 paths (caches, logs, build output)
-Keep again once nothing else is changing it.
-[20:26:33] FAIL  fold succeeded  -- rc=2
-agent pid after: 438
+Keeping e2e-p2r-t1: 30s
+Keeping e2e-p2r-t1: 36s
+Keeping e2e-p2r-t1: 41s
+Keeping e2e-p2r-t1: 46s
+Kept 494b94e1-f749-4bee-ad38-2c71465f17ac into 16d69d01-fd82-447e-940e-d88bed6ee2a8.
+  git /Users/silo/srv: merged, now at 1700e26
+  restart org.silo.p2r.web: pid 436 -> 4993
+Undo with `silo undo 16d69d01-fd82-447e-940e-d88bed6ee2a8`.
+[20:37:58] PASS  fold succeeded  -- rc=0
+agent pid after: 4993
 	state = running
-	pid = 438
+	pid = 4993
 		state = active
 		state = active
-[20:26:33] FAIL  agent PID changed (restart step ran; plist not reloaded)  -- 438 -> 438
-[20:26:34] PASS  plist unchanged by the keep  -- 
-[20:26:34] FAIL  main serves v2 after keep  -- p2m service v1
+[20:37:58] PASS  agent PID changed (restart step ran; plist not reloaded)  -- 436 -> 4993
+[20:37:59] PASS  plist unchanged by the keep  -- 
+[20:37:59] PASS  main serves v2 after keep  -- p2m service v2
 == undo
 Undoing the last keep of e2e-p2r-main...
-Nothing to undo on 3a51bfd4-63b5-491c-8dc8-5bcf196e4357.
-[20:26:34] PASS  undo succeeded  -- rc=0
-[20:26:35] PASS  main running after undo (no script start)  -- running
-[20:26:35] PASS  main serves old content (v1) after undo  -- p2m service v1
-09a356d service v1
-agent pid after undo: 438
-[20:26:36] cleanup
+Undoing the last keep of e2e-p2r-main: 5s
+Undoing the last keep of e2e-p2r-main: 10s
+Undoing the last keep of e2e-p2r-main: 15s
+Undoing the last keep of e2e-p2r-main: 20s
+Put 16d69d01-fd82-447e-940e-d88bed6ee2a8 back to Before keep of 494b94e1-f749-4bee-ad38-2c71465f17ac. 16d69d01-fd82-447e-940e-d88bed6ee2a8 is running again, as it was.
+[20:38:23] PASS  undo succeeded  -- rc=0
+[20:38:23] PASS  main running after undo (no script start)  -- running
+[20:38:24] PASS  main serves old content (v1) after undo  -- p2m service v1
+9129c32 service v1
+agent pid after undo: 436
+[20:38:25] PASS  agent running after undo  -- pid 436
+[20:38:25] cleanup
 NAME         STATE      KIND    SIZE
 workspace-1  stopped    linux   8 cpu, 32 GiB
 e2e-relay    stopped    linux   8 cpu, 32 GiB
@@ -86,4 +87,4 @@ silo-eval-a  stopped    linux   2 cpu, 2 GiB
 silo-eval-b  stopped    linux   2 cpu, 2 GiB
 e2e-p2r computers left: 0
 macOS VMs running (pgrep Virtualization.VirtualMachine): 0
-== summary: 10 passed, 3 failed
+== summary: 14 passed, 0 failed

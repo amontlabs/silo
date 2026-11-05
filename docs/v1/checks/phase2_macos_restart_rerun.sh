@@ -40,7 +40,6 @@ cleanup() {
 trap cleanup EXIT
 echo "== header"
 echo "commit: $(git -C "$REPO" rev-parse HEAD); git status --porcelain app: [$(git -C "$REPO" status --porcelain app | tr '\n' ' ')]"
-echo "NOTE: another session started a merge in this shared checkout during the run (HEAD moved to the line above, app/ dirty); the engine and CLI under test are the binaries built at 2a5f0f9a8232374b24a305acf8d881fb4abf8ff8 (HEAD and a clean app/ tree when the Linux half of this re-run started, same binaries)"
 echo "bundled msb: $("$REPO/app/SiloUI/target/debug/bundle/macos/Silo Dev.app/Contents/MacOS/msb" --version 2>&1 | head -1)"
 echo "host macOS $(sw_vers -productVersion) ($(uname -m)); silo $("$SILO" --version); date $(date -u +%FT%TZ)"
 vms
@@ -86,10 +85,6 @@ wait_http $MAIN 8080 >/dev/null; check "main serves v1 before keep" $? "$(x $MAI
 PID0=$(agent_pid); echo "agent pid before (agent_pid): $PID0"; x $MAIN "launchctl print gui/\$(id -u)/$LABEL | grep -E '^\s*(pid|state) ='"
 PLIST0=$(x $MAIN "shasum ~/Library/LaunchAgents/$LABEL.plist")
 "$SILO" fold $T1 --into $MAIN > "$PROJ/fold.txt" 2>&1; frc=$?; head -30 "$PROJ/fold.txt"
-if [ $frc -eq 2 ] && grep -q "changed while it was being read" "$PROJ/fold.txt"; then
-  echo "NOTE: first fold attempt refused (live fork still settling, as the product message says); waiting 90 s idle and keeping again, as the message instructs"
-  sleep 90; "$SILO" fold $T1 --into $MAIN > "$PROJ/fold.txt" 2>&1; frc=$?; head -30 "$PROJ/fold.txt"
-fi
 check "fold succeeded" $frc "rc=$frc"
 PID1=$(agent_pid); echo "agent pid after: $PID1"; x $MAIN "launchctl print gui/\$(id -u)/$LABEL | grep -E '^\s*(pid|state) ='"
 [ -n "$PID0" ] && [ -n "$PID1" ] && [ "$PID1" != "$PID0" ]; check "agent PID changed (restart step ran; plist not reloaded)" $? "$PID0 -> $PID1"
@@ -100,4 +95,4 @@ echo "== undo"
 st=$(state $MAIN); [ "$st" = running ]; check "main running after undo (no script start)" $? "$st"
 wait_http $MAIN 8080 60 >/dev/null; out=$(x $MAIN 'curl -s -m 5 http://127.0.0.1:8080/'); echo "$out" | grep -q v1; check "main serves old content (v1) after undo" $? "$out"
 x $MAIN 'cd ~/srv && git log --oneline'
-echo "agent pid after undo: $(agent_pid)"
+echo "agent pid after undo: $(agent_pid)"; [ -n "$(agent_pid)" ]; check "agent running after undo" $? "pid $(agent_pid)"
