@@ -78,23 +78,14 @@ wire_struct! {
     }
 }
 
-wire_struct! {
-    /// The credentials a fork's agent used and the ones it was refused.
-    CredentialUsage {
-        #[serde(default)]
-        used: Vec<CredentialUse>,
-        #[serde(default)]
-        blocked: Vec<CredentialBlock>,
-    }
-}
-
-impl Default for CredentialUsage {
-    fn default() -> Self {
-        Self {
-            used: Vec::new(),
-            blocked: Vec::new(),
-        }
-    }
+/// The credentials a fork's agent used and the ones it was refused.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CredentialUsage {
+    #[serde(default)]
+    pub used: Vec<CredentialUse>,
+    #[serde(default)]
+    pub blocked: Vec<CredentialBlock>,
 }
 
 wire_struct! {

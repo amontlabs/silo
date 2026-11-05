@@ -538,7 +538,7 @@ async fn reach(context: &HandlerContext, request: FoldRequest, fork: Row) -> Res
     })
 }
 
-/// The computers the handlers see in a test, where no MicroSandbox runtime can list them.
+/// The computers the handlers see in a test, where no Linux runtime can list them.
 #[cfg(test)]
 pub(super) mod tests_rows {
     use super::Row;
