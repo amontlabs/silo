@@ -208,3 +208,38 @@ an unreadable file or a changed mode is never taken as unchanged.
 `silo undo` restores the latest checkpoint of a keep that succeeded, once, and lists what
 changed on the computer after the keep (that is discarded). Temporary bundles and git refs are
 removed on every path.
+
+## Making a fork main: `silo fold <fork> --promote`
+
+`silo fold <fork> --promote [--into main] [--dry-run] [--json]` (MCP `fold` with `promote`) makes
+the fork the computer a keep would have changed (`changes.promote`,
+`app/SiloUI/src-tauri/engine/src/changes/promote/`). The fork takes main's name and settings;
+main is archived as `main-before-<yyyymmdd-hhmm>` (a number is added if taken), stopped, with
+its checkpoints. `silo undo main` (or `silo undo <fork>`) swaps everything back.
+
+A promote refuses, changing nothing, when either computer is busy, the two run different
+systems, or the computers are Linux (below). Otherwise it saves a `Before promote of <fork>`
+checkpoint of main, stops both, holds both operation lanes (in id order), writes the journal
+(`changes/promote/<fork id>.promote.json`, synced) and applies these steps, recording each:
+
+| Step | What moves |
+| --- | --- |
+| names | the fork becomes `main`, old main becomes the archive name (computer record on macOS) |
+| name-keyed settings | secret assignments (`secrets.rs`) and the GitHub assignment (`github.rs`) are keyed by name, so main's stay with the name `main`, now the fork's; the fork's own grants under its old name are dropped, never added. Published ports (`macos-computers/ports`, keyed by id) move from main's id to the fork's; main's are emptied; URL routes (`url_proxy`, hosts derived from the name) are forgotten and rebuilt from the new name |
+| lineage | the journal records which fork replaced which computer; the fork's fork-point checkpoint stays |
+| macOS network identity | the proxy CA and machine identity are keyed by computer id and never move; the step checks both computers still have theirs |
+| quiet parking | best effort, never fails a promote |
+
+Keyed by id and therefore untouched: the SSH alias (`silo-<id>`), changes store manifests,
+checkpoint records, the proxy CA and the proxy address slot.
+
+A crash is repaired when the engine starts: a promote with every step but quiet parking
+recorded is rolled forward, any other is rolled back (steps are idempotent and reverted in
+reverse order); an interrupted undo is finished. The next promote or undo of either computer
+settles it first.
+
+Known gaps: **Linux computers cannot be promoted yet.** The bundled runtime names each sandbox
+after its computer and has no rename, so the swap is refused with `unsupported`. **Quiet parking
+is not restored yet**: files and jobs parked at fork time stay parked and the report notes it
+(restoring them needs the stopped fork's disk or a boot). The keep's database refusal prints the
+exact promote command.
