@@ -214,11 +214,20 @@ pub fn pkg_remove(os: Os, manager: &str, names: &[String]) -> Result<GuestCmd, S
 }
 
 /// The version `brew install name` would install, from the formula or cask.
+/// The JSON is flattened and read with `grep -o` and `cut`, which BSD and GNU tools share
+/// (BSD `sed` has no `t;`).
 pub fn brew_version(name: &str, cask: bool) -> GuestCmd {
-    let flag = if cask { "--cask" } else { "" };
+    let (flag, pick) = if cask {
+        ("--cask", "grep -o '\"version\":\"[^\"]*\"'")
+    } else {
+        (
+            "",
+            "grep -o '\"versions\":{[^}]*}' | grep -o '\"stable\":\"[^\"]*\"'",
+        )
+    };
     cmd(
         "brew_version",
-        &format!("brew info --json=v2 {flag} -- \"$A_name\" 2>/dev/null | tr -d '\\n ' | sed -n 's/.*\"stable\":\"\\([^\"]*\\)\".*/\\1/p;t;s/.*\"version\":\"\\([^\"]*\\)\".*/\\1/p' | head -1"),
+        &format!("brew info --json=v2 {flag} -- \"$A_name\" 2>/dev/null | tr -d '\\n ' | {pick} | head -1 | cut -d'\"' -f4; true"),
     )
     .arg("name", name)
 }

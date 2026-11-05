@@ -492,18 +492,18 @@ pub fn prepare(
                 || pkg.version.starts_with(&format!("{shipped}_"))
                 || shipped.starts_with(&format!("{}_", pkg.version)));
         if !same {
+            let detail = if shipped.is_empty() {
+                format!(
+                    "brew did not report a version for it; the fork has {}",
+                    pkg.version
+                )
+            } else {
+                format!("brew now offers {shipped}; the fork has {}", pkg.version)
+            };
             plan.conflicts.push(Conflict::new(
                 "package",
                 format!("{} {}", pkg.manager, pkg.name),
-                format!(
-                    "the fork has {}, brew would install {}",
-                    pkg.version,
-                    if shipped.is_empty() {
-                        "an unknown version"
-                    } else {
-                        shipped
-                    }
-                ),
+                detail,
             ));
         }
     }
@@ -592,19 +592,30 @@ pub fn prepare(
         } else {
             "divergent"
         };
-        let message = format!(
-            "Keep stopped: {} {} on {target} and in {fork_name}. {target} was not changed.",
-            conflicts
-                .iter()
-                .map(|c| c.item.clone())
-                .collect::<Vec<_>>()
-                .join(", "),
-            if reason == "credentials" {
-                "would bring credentials or ignored files"
-            } else {
-                "clash"
-            },
-        );
+        let message = if conflicts.iter().all(|c| c.kind == "package") {
+            format!(
+                "Keep stopped: package version: {}. {target} was not changed.",
+                conflicts
+                    .iter()
+                    .map(|c| format!("{} ({})", c.item, c.detail))
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            )
+        } else {
+            format!(
+                "Keep stopped: {} {} on {target} and in {fork_name}. {target} was not changed.",
+                conflicts
+                    .iter()
+                    .map(|c| c.item.clone())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                if reason == "credentials" {
+                    "would bring credentials or ignored files"
+                } else {
+                    "clash"
+                },
+            )
+        };
         report.notes.extend(plan.notes.clone());
         return Ok(refuse(
             report,

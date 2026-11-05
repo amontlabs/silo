@@ -1245,9 +1245,25 @@ fn brew_installs_only_when_it_would_install_the_forks_version() {
         )
         .unwrap(),
     );
+    assert_eq!(
+        refusal.conflicts[0].detail,
+        "brew now offers 1.8; the fork has 1.7"
+    );
+    assert!(refusal.message.contains("package version: brew jq"));
+    assert!(!refusal.message.contains("clash"));
+    *world.brew.lock().unwrap() = String::new();
+    let refusal = refused(
+        run(
+            &world,
+            &store(base, fork, base),
+            &journal,
+            &request(Hooks::default()),
+        )
+        .unwrap(),
+    );
     assert!(refusal.conflicts[0]
         .detail
-        .contains("brew would install 1.8"));
+        .contains("brew did not report a version"));
     *world.brew.lock().unwrap() = "1.7".into();
     assert!(matches!(
         run(
