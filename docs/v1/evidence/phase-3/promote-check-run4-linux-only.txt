@@ -1,0 +1,143 @@
+== header
+commit: 21172facf82db60458c90780aaff25024db2ab5f; tracked changes under app/: []
+bundled msb: msb 0.7.6; silo: silo 0.1.0; host macOS 26.5 arm64; date 2026-11-05T22:33:52Z
+macOS VMs running at start: 0
+NAME         STATE      KIND    SIZE
+workspace-1  stopped    linux   8 cpu, 32 GiB
+e2e-relay    stopped    linux   8 cpu, 32 GiB
+silo-eval-a  stopped    linux   2 cpu, 2 GiB
+silo-eval-b  stopped    linux   2 cpu, 2 GiB
+== Linux: main with a web app, a crontab line, a secret
+[23:33:52] main absent: silo up
+[23:34:37] PASS  silo up (main created for part B)  -- 
+guest OS: Ubuntu 24.04.4 LTS kernel 6.12.109
+main id 79454216-d804-4898-88c2-dddadebcf0fa
+main crontab: */5 * * * * echo p3root >> /var/log/p3root.log
+p3-job
+silo: Allow Silo's engine to use its saved sign-in in the macOS Keychain. (credential_access_denied)
+[23:34:38] BLOCKED  secret assignment on main  -- credential_access_denied: silo: Allow Silo's engine to use its saved sign-in in the macOS Keychain. (credential_access_denied)
+No secrets yet.
+SSH entries on this Dev home before: ls: /Users/polarzero/.silo-dev/ssh: No such file or directory 
+e2e-relay:a7a0e7cb:stopped
+main:79454216:running
+silo-eval-a:2b0a8fba:stopped
+silo-eval-b:b0e0b6d0:stopped
+workspace-1:96b9e3e6:stopped
+== fork main into e2e-p3-pr
+[23:34:43] PASS  silo fork main --name e2e-p3-pr  -- wall 4 s (Linux)
+[23:34:48] PASS  start e2e-p3-pr  -- 
+fork id 5be3acfb-a3a4-4d5f-bd03-362299895466
+fork status: quiet: applied; stopped: none; scrubbed: none; secrets: none
+fork cron parked: etc/cron.d=[] root crontab=[no crontab for root]
+host=e2e-p3-pr content=v2
+fork web: host=e2e-p3-pr content=v2
+main web (v1): host=main content=v1
+3000  http  reachable  http://3000.main.silo.localhost:47383
+main URL: http://3000.main.silo.localhost:47383
+main URL before promote: host=main content=v1
+ http=200
+== silo fold e2e-p3-pr --promote
+[23:35:06] PASS  silo fold e2e-p3-pr --promote exits 0  -- wall 11 s
+Promoting e2e-p3-pr...
+Promoting e2e-p3-pr: 5s
+{
+  "report": {
+    "archive": "main-before-20261105-2234",
+    "checkpoint": "c467c5e8c1dac44d29faccfccb0ca631",
+    "fork": "e2e-p3-pr",
+    "notes": [
+      "e2e-p3-pr is now main. main was archived as main-before-20261105-2234; `silo undo main` swaps them back."
+    ],
+    "steps": [
+      "names",
+      "name-keyed settings",
+      "SSH access",
+      "lineage",
+      "quiet parking"
+    ],
+    "target": "main"
+  },
+  "ssh": {
+    "computer": "main",
+    "config": "/Users/polarzero/.silo-dev/ssh-hosts.conf",
+    "connect": "ssh main.silo-dev",
+    "host": "main.silo-dev"
+  },
+  "status": "promoted"
+}
+
+e2e-relay:a7a0e7cb:stopped
+main-before-20261105-2234:79454216:stopped
+main:5be3acfb:running
+silo-eval-a:2b0a8fba:stopped
+silo-eval-b:b0e0b6d0:stopped
+workspace-1:96b9e3e6:stopped
+archive: main-before-20261105-2234
+[23:35:07] PASS  the fork is now named main (id 5be3acfb-a3a4-4d5f-bd03-362299895466)  -- main id 5be3acfb-a3a4-4d5f-bd03-362299895466
+[23:35:07] PASS  old main archived as main-before-* with its id  -- main-before-20261105-2234
+-- content on the new main
+[23:35:08] PASS  promoted main is running without a start (old main was running)  -- archive: main-before-20261105-2234 stopped
+marker: fork-v2  web: host=main content=v2
+[23:35:13] PASS  new main serves the fork's content (file + web app output, in-guest)  -- 
+3000  http  reachable  http://3000.main.silo.localhost:47383
+main URL after promote (waits up to 45 s): host=main content=v2
+[23:35:14] PASS  main's URL serves the fork's content  -- http://3000.main.silo.localhost:47383/
+-- secrets
+No secrets yet.
+secrets assigned: none
+[23:35:14] BLOCKED  secrets carried  -- no secret could be assigned
+-- quiet-parked jobs
+new main: etc/cron.d=[e2scrub_all p3-job ] root crontab=[*/5 * * * * echo p3root >> /var/log/p3root.log]
+[23:35:15] PASS  cron.d line and root crontab line restored on the new main  -- 
+-- SSH alias
+ssh main.silo-dev: fork-v2 main 
+[23:35:15] PASS  ssh main.silo-dev reaches the new main (marker fork-v2)  -- 
+== silo undo main
+[23:35:26] PASS  silo undo main exits 0  -- wall 11 s
+Undoing the latest keep or promote of main...
+Undoing the latest keep or promote of main: 5s
+{
+  "archive": "main-before-20261105-2234",
+  "changedSince": [],
+  "computer": "main",
+  "fork": "e2e-p3-pr",
+  "kind": "promote",
+  "recovered": false,
+  "ssh": {
+    "computer": "main",
+    "config": "/Users/polarzero/.silo-dev/ssh-hosts.conf",
+    "connect": "ssh main.silo-dev",
+    "host": "main.silo-dev"
+  },
+  "status": "undone"
+}
+
+e2e-p3-pr:5be3acfb:running
+e2e-relay:a7a0e7cb:stopped
+main:79454216:running
+silo-eval-a:2b0a8fba:stopped
+silo-eval-b:b0e0b6d0:stopped
+workspace-1:96b9e3e6:stopped
+[23:35:27] PASS  names back: main=79454216-d804-4898-88c2-dddadebcf0fa, e2e-p3-pr=5be3acfb-a3a4-4d5f-bd03-362299895466, no main-before-*  -- archive now: []
+[23:35:27] PASS  undone main is running without a start  -- 
+marker: main-v1  web: host=main content=v1  cron: p3-job */5 * * * * echo p3root >> /var/log/p3root.log
+[23:35:33] PASS  content back on main (file + web app)  -- 
+3000  http  reachable  http://3000.main.silo.localhost:47383
+[23:35:33] PASS  main's URL serves the original content again  -- 
+[23:35:34] PASS  main's cron lines intact after undo  -- 
+[23:35:34] PASS  ssh main.silo-dev reaches the original main again  -- 
+[23:35:34] PASS  main's ports back as before  -- 
+fork after undo: fork-v2
+== macOS: source e2e-p3-macsrc, fork e2e-p3-macpr
+macOS VMs running: 1
+macOS VMs of someone else are running: skipping macOS
+[23:35:35] cleanup
+Removed the build of linux-dev.
+[23:35:44] silo list after cleanup:
+NAME         STATE      KIND    SIZE
+workspace-1  stopped    linux   8 cpu, 32 GiB
+e2e-relay    stopped    linux   8 cpu, 32 GiB
+silo-eval-a  stopped    linux   2 cpu, 2 GiB
+silo-eval-b  stopped    linux   2 cpu, 2 GiB
+macOS VMs running: 1
+== summary: 19 passed, 0 failed (2 blocked, not counted)
