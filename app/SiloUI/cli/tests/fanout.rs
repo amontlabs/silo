@@ -153,7 +153,8 @@ fn engine(
                     .iter()
                     .map(|(name, state)| {
                         let checkpoints = if name == "main" && world.warm {
-                            json!([{"id": "cp-warm", "name": "silo-warm", "kind": "warm", "createdAt": "t"}])
+                            json!([{"id": "cp-warm", "name": "silo-warm", "kind": "warm",
+                                "createdAt": silo_cli::clock::format_rfc3339_utc(silo_cli::clock::now_unix() - 30)}])
                         } else {
                             json!([])
                         };
