@@ -14,7 +14,7 @@ use crate::{
     config::Project,
     engine::Engine,
     error::CliError,
-    ops::{self, ExecArgs, ForkArgs},
+    ops::{self, DiffArgs, ExecArgs, ForkArgs},
 };
 
 #[derive(Clone)]
@@ -77,8 +77,24 @@ pub struct FoldParams {
     /// Report what would be kept and what would stop it, changing nothing.
     #[serde(default)]
     pub dry_run: bool,
+    /// Carry database changes even though no migrate step covers them.
+    #[serde(default)]
+    pub data_ok: bool,
+    /// The reviewDigest from `diff`; the keep refuses if the fork changed since.
+    pub reviewed: Option<String>,
     /// Path of a recipe whose keep: section applies.
     pub recipe_file: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct DiffParams {
+    /// The fork to look at.
+    pub computer: String,
+    /// Cut the text to this many lines (default 15).
+    pub max_lines: Option<u32>,
+    /// Include the idle fork's own background changes.
+    #[serde(default)]
+    pub no_baseline: bool,
 }
 
 fn show(result: Result<Value, CliError>) -> Result<String, String> {
@@ -171,10 +187,28 @@ impl SiloMcp {
                     &params.fork,
                     params.into.as_deref(),
                     ops::keep_hooks(recipe.as_ref()),
-                    params.dry_run,
+                    ops::FoldOptions { dry_run: params.dry_run, data_ok: params.data_ok, reviewed: params.reviewed },
                     &|_| {},
                 )
                 .await
+            }
+            .await,
+        )
+    }
+
+    #[tool(
+        description = "Show what changed in a computer since it was forked, by bucket (code, packages, settings and files, databases, other, not kept). Returns the diff document and its readable text."
+    )]
+    async fn diff(&self, Parameters(params): Parameters<DiffParams>) -> Result<String, String> {
+        show(
+            async {
+                let args = DiffArgs {
+                    computer: params.computer,
+                    max_lines: params.max_lines,
+                    no_baseline: params.no_baseline,
+                    compute_baseline: false,
+                };
+                ops::diff(&self.engine().await?, &args, &|_| {}).await
             }
             .await,
         )

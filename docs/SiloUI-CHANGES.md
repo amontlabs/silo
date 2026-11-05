@@ -18,7 +18,17 @@ manifest at both points ([format 2](v1/PHASE2_CONTRACT.md)); the engine compares
 | Ignored | A count of paths that are never reviewed (logs, caches, build output, boot-time rewrites; also in `ignore.rs`). |
 
 A no-op baseline (the diff of a fork of the same source left idle for the same time) can be
-passed in; entries that match it are removed first, so background churn does not show.
+passed in; entries that match it are removed first, so background churn does not show. An
+entry matches only when the path, the kind of change and the resulting content (file hash,
+size and link target; Postgres schema and table data digests; SQLite file digest; crontab and
+launch agent digests; the working-tree content of a dirty file) are all the same. A path that
+ends up with different content in the task than in the baseline stays in the diff.
+
+SQLite files go through the same ignore and credential rules as other files: a database under an
+ignored tree is only counted, and one under a credential path appears under Not kept only.
+Paths from `git status` are unquoted (git's C-style quoting) and the `old -> new` form is read
+only for rename and copy status codes. Editing a file that was already dirty shows it under Code
+again when its content changed.
 
 The text is at most 15 lines for a typical task. Longer sections are cut longest-first and end
 in `… +N more (see --json)`.
@@ -70,6 +80,18 @@ may be added.
 ```
 
 - `change` is `added`, `modified` or `deleted`.
+- Every path entry (`settings.files[]`, `other[]`, `repo_changes[]`, `code[].gitignored[]`,
+  `packages[].owned_changes{pkg: []}`, `not_kept.credential_details{group: []}`) carries
+  `before` and `after`, each `null` or `{kind: "file"|"link", size, hash?, target?, mtime?}`
+  (`hash` is absent for files too large to hash, which then carry `mtime`; `target` is a
+  symlink's destination). For packages, the entry's `change` is the operation on the package's
+  file; `owned_files` keeps the plain path lists.
+- `code[]` also has `removed_from` (head and branch of a removed repo), `dirty_identity`
+  (repo-relative path to the content now) and `renamed_from` (new path to old path).
+- `settings.cron[]` and `settings.launch_agents[]` carry the exact `path` of the crontab file or
+  plist and the `before` and `after` digests. `database[].tables[]` carries `digest_before` and
+  `digest_after`; row counts are informational only.
+- `not_kept.credentials` is derived from `credential_details` (paths only, as before).
 - `summary` holds the text lines of each non-empty bucket before any line limit, in display order
   (`Code`, `Packages`, `Settings & files`, `Database changed`, `Other changed`, `Not kept`).
   The `Ignored` line is `ignored.paths.length` plus the `delta` of every pruned tree.

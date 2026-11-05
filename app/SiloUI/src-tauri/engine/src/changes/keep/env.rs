@@ -2,10 +2,7 @@
 //! checkpoints of main and the stored manifests. Tests supply fakes; the engine supplies
 //! [`super::guest_env::GuestEnv`].
 
-use std::time::Duration;
-
-use super::super::diff::Diff;
-use super::super::manifest::Manifest;
+use std::{any::Any, collections::BTreeMap, time::Duration};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Os {
@@ -108,21 +105,62 @@ pub struct CheckpointRef {
     pub created_at: String,
 }
 
+/// What a path holds in a guest, looked at without following links.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Live {
+    Missing,
+    File { sha: String, mode: String },
+    Link(String),
+    Dir,
+    /// Present but not readable: never equal to anything.
+    Unreadable,
+}
+
+/// Parses the NUL-delimited records of the `inspect` command: path, kind, mode, value.
+pub fn parse_inspect(bytes: &[u8]) -> BTreeMap<String, Live> {
+    let fields: Vec<&[u8]> = bytes.split(|b| *b == 0).collect();
+    let mut out = BTreeMap::new();
+    for record in fields.chunks_exact(4) {
+        let text = |i: usize| String::from_utf8_lossy(record[i]).into_owned();
+        let live = match text(1).as_str() {
+            "F" => Live::File { sha: text(3), mode: text(2) },
+            "L" => Live::Link(text(3)),
+            "D" => Live::Dir,
+            "X" => Live::Missing,
+            _ => Live::Unreadable,
+        };
+        out.insert(text(0), live);
+    }
+    out
+}
+
 pub trait KeepEnv: Send + Sync {
     fn os(&self, computer: &str) -> Result<Os, String>;
     fn run(&self, computer: &str, who: RunAs, cmd: &GuestCmd) -> Result<ExecOut, String>;
 
-    /// File bytes and the permission bits (octal text).
-    fn read(&self, computer: &str, path: &str) -> Result<(Vec<u8>, String), String> {
-        let os = self.os(computer)?;
-        let mode = self
-            .run(computer, RunAs::Root, &super::scripts::file_mode(os, path))?
-            .success("Reading a file mode")?;
-        let data = self.run(computer, RunAs::Root, &super::scripts::file_read(path))?;
-        if data.code != 0 {
-            return Err(data.success("Reading a file").unwrap_err());
+    /// What each path holds, without following links. Every path is answered.
+    fn inspect(&self, computer: &str, paths: &[String]) -> Result<BTreeMap<String, Live>, String> {
+        if paths.is_empty() {
+            return Ok(BTreeMap::new());
         }
-        Ok((data.stdout, mode.trim().to_owned()))
+        let os = self.os(computer)?;
+        let out = self
+            .run(computer, RunAs::Root, &super::scripts::inspect(os, paths))?
+            .code_ok("Looking at files")?;
+        let mut found = parse_inspect(&out);
+        for path in paths {
+            found.entry(path.clone()).or_insert(Live::Unreadable);
+        }
+        Ok(found)
+    }
+
+    /// The bytes of a regular file (never through a link).
+    fn read(&self, computer: &str, path: &str) -> Result<Vec<u8>, String> {
+        let out = self.run(computer, RunAs::Root, &super::scripts::file_read(path))?;
+        if out.code != 0 {
+            return Err(out.success("Reading a file").unwrap_err());
+        }
+        Ok(out.stdout)
     }
 
     /// Writes next to the target and renames it into place, keeping the owner of what is
@@ -140,28 +178,43 @@ pub trait KeepEnv: Send + Sync {
 
     /// Saves a before-keep checkpoint of `computer` and returns it.
     fn checkpoint_before_keep(&self, computer: &str, name: &str) -> Result<CheckpointRef, String>;
-    /// This computer's before-keep checkpoints, oldest first.
-    fn before_keep_checkpoints(&self, computer: &str) -> Result<Vec<CheckpointRef>, String>;
     fn restore(&self, computer: &str, checkpoint_id: &str) -> Result<(), String>;
+    /// Holds the engine's operation lane for `computer` until the returned value is dropped,
+    /// so no restore, stop, fork or delete of it interleaves with the keep.
+    fn hold(&self, _computer: &str, _label: &str) -> Result<Box<dyn Any>, String> {
+        Ok(Box::new(()))
+    }
     /// Progress lines for the job.
     fn note(&self, _line: &str) {}
 }
 
-/// Manifests recorded by `changes::collect`.
+impl ExecOut {
+    /// The raw output when the command succeeded.
+    pub fn code_ok(self, what: &str) -> Result<Vec<u8>, String> {
+        if self.code == 0 {
+            Ok(self.stdout)
+        } else {
+            self.success(what).map(|_| Vec::new())
+        }
+    }
+}
+
+/// Manifests recorded by `changes::collect`, as text.
 pub trait ManifestStore: Send + Sync {
     /// The fork's state when it was forked.
-    fn fork_time(&self, fork: &str) -> Result<Manifest, String>;
+    fn fork_time(&self, fork: &str) -> Result<String, String>;
     /// Looks at `computer` now.
-    fn capture(&self, computer: &str) -> Result<Manifest, String>;
-    /// The no-op baseline of the fork's source, when one is cached.
-    fn baseline(&self, _fork: &str) -> Option<Diff> {
+    fn capture(&self, computer: &str) -> Result<String, String>;
+    /// The no-op baseline of the fork's source: its base and idle manifests, when cached.
+    fn baseline(&self, _fork: &str) -> Option<(String, String)> {
         None
     }
     /// The text of `user`'s crontab at fork time, when the collector recorded it. Without it
     /// a crontab that main changed since is merged by adding the fork's new lines only.
-    fn fork_time_crontab(&self, _fork: &str, _user: &str) -> Result<Option<String>, String> {
+    fn fork_time_crontab(&self, fork: &str, user: &str) -> Result<Option<String>, String> {
+        let _ = (fork, user);
         Ok(None)
     }
-    /// The computer the fork was made from.
+    /// The computer (or checkpoint) the fork was made from.
     fn source(&self, fork: &str) -> Result<Option<String>, String>;
 }

@@ -29,6 +29,13 @@ wire_struct! {
         /// Check and report what a keep would do, changing nothing.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         dry_run: Option<bool>,
+        /// Carry database changes even though no migration step covers them.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        data_ok: Option<bool>,
+        /// The `reviewDigest` of the `changes.diff` the user reviewed; the keep refuses when the
+        /// fork's changes no longer match it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        review_digest: Option<String>,
     }
 }
 
@@ -67,6 +74,9 @@ wire_struct! {
         notes: Vec<String>,
         /// The before-keep checkpoint of the target.
         checkpoint: Option<String>,
+        /// The digest of the fork's changes the keep acted on.
+        #[serde(default)]
+        review_digest: Option<String>,
     }
 }
 
@@ -96,6 +106,9 @@ wire_struct! {
         computer: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         recovered: Option<bool>,
+        /// What changed on the computer after the keep; the undo discards it.
+        #[serde(default)]
+        changed_since: Vec<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         checkpoint: Option<UndoneCheckpoint>,
     }
@@ -109,8 +122,8 @@ mod tests {
     fn keep_params_default_to_the_forks_source_and_no_hooks() {
         let params: ChangesKeepParams = serde_json::from_str(r#"{"forkId":"f"}"#).unwrap();
         assert_eq!(
-            (params.target_id, params.keep, params.dry_run),
-            (None, None, None)
+            (params.target_id, params.keep, params.dry_run, params.data_ok, params.review_digest),
+            (None, None, None, None, None)
         );
         let hooks: KeepHooks = serde_json::from_str(r#"{"restart":["web"]}"#).unwrap();
         assert!(hooks.migrate.is_empty() && hooks.after.is_empty());

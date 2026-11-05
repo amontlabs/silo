@@ -2,9 +2,11 @@
 //! scripts are fixed text. Linux and macOS differ in `stat`, hashing, package managers and
 //! how services restart.
 
-use super::env::{GuestCmd, Os};
+use std::time::Duration;
 
-const PRELUDE: &str = "export PATH=\"$PATH:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:$HOME/.cargo/bin:$HOME/.local/bin\"\nset -u\n";
+use super::env::{GuestCmd, Os, RunAs};
+
+const PRELUDE: &str = "export PATH=\"$PATH:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/home/linuxbrew/.linuxbrew/bin:$HOME/.cargo/bin:$HOME/.local/bin\"\nset -u\n";
 
 fn cmd(tag: &'static str, body: &str) -> GuestCmd {
     GuestCmd::new(tag, format!("{PRELUDE}{body}"))
@@ -31,34 +33,76 @@ fn sha(os: Os) -> &'static str {
     }
 }
 
-pub fn file_mode(os: Os, path: &str) -> GuestCmd {
-    cmd("file_mode", &format!("{} -- \"$A_path\"", stat_mode(os))).arg("path", path)
+fn nul_list(paths: &[String]) -> Vec<u8> {
+    let mut out = Vec::new();
+    for path in paths {
+        out.extend_from_slice(path.as_bytes());
+        out.push(0);
+    }
+    out
+}
+
+/// On macOS `/etc`, `/var` and `/tmp` are links into `/private`; keeps address the real place.
+pub fn normalize(os: Os, path: &str) -> String {
+    if os == Os::Macos {
+        for root in ["/etc", "/var", "/tmp"] {
+            if path == root || path.starts_with(&format!("{root}/")) {
+                return format!("/private{path}");
+            }
+        }
+    }
+    path.to_owned()
+}
+
+/// Paths in (NUL-delimited), records out: path, kind (`F`, `L`, `D`, `X` missing, `E`
+/// unreadable), mode, sha256 or link target. Links are reported, never followed.
+pub fn inspect(os: Os, paths: &[String]) -> GuestCmd {
+    let body = format!(
+        "while IFS= read -r -d '' p; do\n  if [ -L \"$p\" ]; then printf '%s\\0L\\0-\\0%s\\0' \"$p\" \"$(readlink \"$p\")\"\n  elif [ -d \"$p\" ]; then printf '%s\\0D\\0-\\0-\\0' \"$p\"\n  elif [ -f \"$p\" ]; then\n    if [ -r \"$p\" ]; then m=$({mode} \"$p\"); h=$({sha} < \"$p\" | cut -d' ' -f1); printf '%s\\0F\\0%s\\0%s\\0' \"$p\" \"$m\" \"$h\"; else printf '%s\\0E\\0-\\0-\\0' \"$p\"; fi\n  elif [ -e \"$p\" ]; then printf '%s\\0E\\0-\\0-\\0' \"$p\"\n  else printf '%s\\0X\\0-\\0-\\0' \"$p\"; fi\ndone",
+        mode = stat_mode(os),
+        sha = sha(os)
+    );
+    cmd("inspect", &body).stdin(nul_list(paths))
+}
+
+/// Paths in (NUL-delimited), pairs out: path, `ok` or why a keep may not write there.
+pub fn dest_check(paths: &[String]) -> GuestCmd {
+    let body = "while IFS= read -r -d '' p; do\n  r=ok\n  d=$(dirname -- \"$p\")\n  while [ \"$d\" != / ] && [ \"$d\" != . ]; do\n    if [ -L \"$d\" ]; then r=\"$d is a link\"; break; fi\n    if [ -e \"$d\" ] && [ ! -d \"$d\" ]; then r=\"$d is not a folder\"; break; fi\n    d=$(dirname -- \"$d\")\n  done\n  if [ \"$r\" = ok ] && [ -d \"$p\" ] && [ ! -L \"$p\" ]; then r=\"$p is a folder\"; fi\n  printf '%s\\0%s\\0' \"$p\" \"$r\"\ndone";
+    cmd("dest_check", body).stdin(nul_list(paths))
+}
+
+pub fn parse_pairs(bytes: &[u8]) -> Vec<(String, String)> {
+    let fields: Vec<&[u8]> = bytes.split(|b| *b == 0).collect();
+    fields
+        .chunks_exact(2)
+        .map(|pair| {
+            (
+                String::from_utf8_lossy(pair[0]).into_owned(),
+                String::from_utf8_lossy(pair[1]).into_owned(),
+            )
+        })
+        .collect()
 }
 
 pub fn file_read(path: &str) -> GuestCmd {
-    let mut c = cmd("file_read", "cat -- \"$A_path\"").arg("path", path);
-    c.timeout = std::time::Duration::from_secs(175);
+    let mut c = cmd(
+        "file_read",
+        "if [ -L \"$A_path\" ] || [ ! -f \"$A_path\" ]; then echo 'not a regular file' >&2; exit 3; fi\ncat -- \"$A_path\"",
+    )
+    .arg("path", path);
+    c.timeout = Duration::from_secs(175);
     c
 }
 
 pub fn file_write(os: Os, path: &str, mode: &str, data: &[u8]) -> GuestCmd {
     let body = format!(
-        "set -e\nd=$(dirname -- \"$A_path\")\nmkdir -p -- \"$d\"\nt=\"$A_path.silo-keep.$$\"\ncat > \"$t\"\nchmod \"$A_mode\" \"$t\"\nif [ -e \"$A_path\" ]; then o=$({owner} -- \"$A_path\"); else o=$({owner} -- \"$d\"); fi\nchown \"$o\" \"$t\" 2>/dev/null || true\nmv -f -- \"$t\" \"$A_path\"",
+        "set -e\nd=$(dirname -- \"$A_path\")\nmkdir -p -- \"$d\"\nt=\"$A_path.silo-keep.$$\"\ntrap 'rm -f \"$t\"' EXIT\ncat > \"$t\"\nchmod \"$A_mode\" \"$t\"\nif [ -e \"$A_path\" ] && [ ! -L \"$A_path\" ]; then o=$({owner} -- \"$A_path\"); else o=$({owner} -- \"$d\"); fi\nchown \"$o\" \"$t\" 2>/dev/null || true\nmv -f -- \"$t\" \"$A_path\"\ntrap - EXIT",
         owner = stat_owner(os)
     );
     cmd("file_write", &body)
         .arg("path", path)
         .arg("mode", mode)
         .stdin(data.to_vec())
-}
-
-/// Reads one path per line from stdin; prints `path<TAB>sha256` or `path<TAB>L:target`.
-pub fn fingerprint(os: Os, paths: &[String]) -> GuestCmd {
-    let body = format!(
-        "while IFS= read -r p; do if [ -L \"$p\" ]; then printf '%s\\tL:%s\\n' \"$p\" \"$(readlink \"$p\")\"; elif [ -f \"$p\" ]; then printf '%s\\t%s\\n' \"$p\" \"$({sha} < \"$p\" | cut -d' ' -f1)\"; fi; done",
-        sha = sha(os)
-    );
-    cmd("fingerprint", &body).stdin(paths.join("\n").into_bytes())
 }
 
 pub fn file_remove(path: &str) -> GuestCmd {
@@ -68,23 +112,43 @@ pub fn file_remove(path: &str) -> GuestCmd {
 pub fn symlink(path: &str, target: &str) -> GuestCmd {
     cmd(
         "symlink",
-        "mkdir -p -- \"$(dirname -- \"$A_path\")\"\nln -sfn -- \"$A_target\" \"$A_path\"",
+        "set -e\nmkdir -p -- \"$(dirname -- \"$A_path\")\"\nt=\"$A_path.silo-keep.$$\"\ntrap 'rm -f \"$t\"' EXIT\nln -s -- \"$A_target\" \"$t\"\nmv -f -- \"$t\" \"$A_path\"\ntrap - EXIT",
     )
     .arg("path", path)
     .arg("target", target)
 }
 
+/// Package and version names a keep will hand to a package manager.
+pub fn valid_package_word(word: &str, scoped: bool) -> bool {
+    let first = word.chars().next();
+    let start_ok = first.is_some_and(|c| c.is_ascii_alphanumeric() || (scoped && c == '@'));
+    start_ok
+        && word.len() <= 200
+        && word
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "._+-:~@/".contains(c))
+        && !word.contains("..")
+}
+
+/// Who runs a manager: user-level managers as the working account, system ones as root.
+pub fn pkg_runner(os: Os, manager: &str) -> RunAs {
+    match (manager, os) {
+        ("dpkg", _) => RunAs::Root,
+        ("npm" | "pip", Os::Linux) => RunAs::Root,
+        _ => RunAs::Account,
+    }
+}
+
 /// `specs` is one install spec per line, in the manager's own syntax.
 pub fn pkg_install(os: Os, manager: &str, specs: &[String]) -> Result<GuestCmd, String> {
     let install = match (manager, os) {
-        ("dpkg", Os::Linux) => "DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \"${S[@]}\" >/dev/null",
-        ("brew", _) => "brew install \"${S[@]}\"",
-        ("brew-cask", _) => "brew install --cask \"${S[@]}\"",
-        ("npm", _) => "npm install -g --silent \"${S[@]}\"",
-        ("pip", Os::Linux) => "python3 -m pip install -q --break-system-packages \"${S[@]}\"",
-        ("pip", Os::Macos) => "python3 -m pip install -q --break-system-packages \"${S[@]}\"",
-        ("pipx", _) => "for s in \"${S[@]}\"; do pipx install --force \"$s\"; done",
-        ("cargo", _) => "for s in \"${S[@]}\"; do cargo install --locked \"${s%%=*}\" --version \"${s#*=}\"; done",
+        ("dpkg", Os::Linux) => "DEBIAN_FRONTEND=noninteractive apt-get install -y -qq -- \"${S[@]}\" >/dev/null",
+        ("brew", _) => "brew install -- \"${S[@]}\"",
+        ("brew-cask", _) => "brew install --cask -- \"${S[@]}\"",
+        ("npm", _) => "npm install -g --silent -- \"${S[@]}\"",
+        ("pip", _) => "python3 -m pip install -q --break-system-packages -- \"${S[@]}\"",
+        ("pipx", _) => "for s in \"${S[@]}\"; do pipx install --force -- \"$s\"; done",
+        ("cargo", _) => "for s in \"${S[@]}\"; do cargo install --locked --version \"${s#*=}\" -- \"${s%%=*}\"; done",
         _ => return Err(format!("{manager} packages cannot be replayed here.")),
     };
     let body = format!(
@@ -93,8 +157,39 @@ pub fn pkg_install(os: Os, manager: &str, specs: &[String]) -> Result<GuestCmd, 
     let mut c = cmd("pkg_install", &body)
         .arg("manager", manager)
         .arg("specs", specs.join("\n"));
-    c.timeout = std::time::Duration::from_secs(900);
+    c.timeout = Duration::from_secs(900);
     Ok(c)
+}
+
+pub fn pkg_remove(os: Os, manager: &str, names: &[String]) -> Result<GuestCmd, String> {
+    let remove = match (manager, os) {
+        ("dpkg", Os::Linux) => "DEBIAN_FRONTEND=noninteractive apt-get remove -y -qq -- \"${S[@]}\" >/dev/null",
+        ("brew", _) => "brew uninstall -- \"${S[@]}\"",
+        ("brew-cask", _) => "brew uninstall --cask -- \"${S[@]}\"",
+        ("npm", _) => "npm uninstall -g --silent -- \"${S[@]}\"",
+        ("pip", _) => "python3 -m pip uninstall -y -q --break-system-packages -- \"${S[@]}\"",
+        ("pipx", _) => "for s in \"${S[@]}\"; do pipx uninstall -- \"$s\"; done",
+        ("cargo", _) => "for s in \"${S[@]}\"; do cargo uninstall -- \"$s\"; done",
+        _ => return Err(format!("{manager} packages cannot be removed here.")),
+    };
+    let body = format!(
+        "set -e\nS=()\nwhile IFS= read -r s; do [ -n \"$s\" ] && S+=(\"$s\"); done <<<\"$A_specs\"\n{remove}"
+    );
+    let mut c = cmd("pkg_remove", &body)
+        .arg("manager", manager)
+        .arg("specs", names.join("\n"));
+    c.timeout = Duration::from_secs(900);
+    Ok(c)
+}
+
+/// The version `brew install name` would install, from the formula or cask.
+pub fn brew_version(name: &str, cask: bool) -> GuestCmd {
+    let flag = if cask { "--cask" } else { "" };
+    cmd(
+        "brew_version",
+        &format!("brew info --json=v2 {flag} -- \"$A_name\" 2>/dev/null | tr -d '\\n ' | sed -n 's/.*\"stable\":\"\\([^\"]*\\)\".*/\\1/p;t;s/.*\"version\":\"\\([^\"]*\\)\".*/\\1/p' | head -1"),
+    )
+    .arg("name", name)
 }
 
 pub fn git_bundle(repo: &str, bundle: &str) -> GuestCmd {
@@ -106,47 +201,73 @@ pub fn git_bundle(repo: &str, bundle: &str) -> GuestCmd {
     .arg("bundle", bundle)
 }
 
-/// Prints `uptodate`, `ff`, `merge`, `conflict` (then the conflict lines) or `unsupported`.
-pub fn git_precheck(repo: &str, bundle: &str) -> GuestCmd {
+/// Fetches the bundle into a temporary ref and prints `uptodate`, `ff`, `merge`, `conflict`
+/// (then the conflict lines) or `unsupported`.
+pub fn git_precheck(repo: &str, bundle: &str, tmp_ref: &str) -> GuestCmd {
     cmd(
         "git_precheck",
-        "set -e\ncd \"$A_repo\"\ngit fetch -q \"$A_bundle\" HEAD:refs/silo/keep\nif git merge-base --is-ancestor refs/silo/keep HEAD; then echo uptodate; exit 0; fi\nif git merge-base --is-ancestor HEAD refs/silo/keep; then echo ff; exit 0; fi\nif out=$(git merge-tree --write-tree HEAD refs/silo/keep 2>&1); then echo merge; else if echo \"$out\" | grep -q CONFLICT; then echo conflict; echo \"$out\" | grep CONFLICT; else echo unsupported; fi; fi",
+        "set -e\ncd \"$A_repo\"\ngit fetch -q --no-write-fetch-head \"$A_bundle\" \"HEAD:$A_ref\"\nif git merge-base --is-ancestor \"$A_ref\" HEAD; then echo uptodate; exit 0; fi\nif git merge-base --is-ancestor HEAD \"$A_ref\"; then echo ff; exit 0; fi\nif ! git merge-tree --write-tree HEAD HEAD >/dev/null 2>&1; then echo unsupported; exit 0; fi\nset +e\nout=$(git merge-tree --write-tree HEAD \"$A_ref\" 2>&1); rc=$?\nset -e\nif [ $rc -eq 0 ]; then echo merge; elif echo \"$out\" | grep -q CONFLICT; then echo conflict; echo \"$out\" | grep CONFLICT; else echo unsupported; fi",
     )
     .arg("repo", repo)
     .arg("bundle", bundle)
+    .arg("ref", tmp_ref)
 }
 
-pub fn git_merge(repo: &str) -> GuestCmd {
+pub fn git_drop_ref(repo: &str, tmp_ref: &str) -> GuestCmd {
     cmd(
-        "git_merge",
-        "cd \"$A_repo\"\nif git merge --ff-only -q refs/silo/keep 2>/dev/null; then :; elif git -c user.name=Silo -c user.email=silo@localhost merge --no-edit -q refs/silo/keep; then :; else git merge --abort 2>/dev/null; echo 'merge conflict' >&2; exit 3; fi\ngit rev-parse --short HEAD",
+        "git_drop_ref",
+        "cd \"$A_repo\" 2>/dev/null && git update-ref -d \"$A_ref\" 2>/dev/null; true",
     )
     .arg("repo", repo)
+    .arg("ref", tmp_ref)
+}
+
+pub fn git_merge(repo: &str, tmp_ref: &str) -> GuestCmd {
+    cmd(
+        "git_merge",
+        "cd \"$A_repo\"\nif git merge --ff-only -q \"$A_ref\" 2>/dev/null; then :; elif git -c user.name=Silo -c user.email=silo@localhost merge --no-edit -q \"$A_ref\"; then :; else git merge --abort 2>/dev/null; echo 'merge conflict' >&2; exit 3; fi\ngit update-ref -d \"$A_ref\"\ngit rev-parse --short HEAD",
+    )
+    .arg("repo", repo)
+    .arg("ref", tmp_ref)
 }
 
 pub fn git_clone(repo: &str, bundle: &str) -> GuestCmd {
     cmd(
         "git_clone",
-        "set -e\nmkdir -p -- \"$(dirname -- \"$A_repo\")\"\ngit clone -q \"$A_bundle\" \"$A_repo\"\ncd \"$A_repo\"\ngit rev-parse --short HEAD",
+        "set -e\nmkdir -p -- \"$(dirname -- \"$A_repo\")\"\ngit clone -q \"$A_bundle\" \"$A_repo\"\ncd \"$A_repo\"\ngit remote remove origin\ngit rev-parse --short HEAD",
     )
     .arg("repo", repo)
     .arg("bundle", bundle)
 }
 
+/// NUL-delimited paths the commits `old..new` add or change (all tracked files when `old`
+/// is empty).
 pub fn git_changed(repo: &str, old: &str, new: &str) -> GuestCmd {
     cmd(
         "git_changed",
-        "cd \"$A_repo\" && git diff --name-only \"$A_old\" \"$A_new\"",
+        "cd \"$A_repo\" || exit 1\nif [ -z \"$A_old\" ]; then git ls-tree -r -z --name-only \"$A_new\"; else git diff -z --name-only --diff-filter=d \"$A_old\" \"$A_new\"; fi",
     )
     .arg("repo", repo)
     .arg("old", old)
     .arg("new", new)
 }
 
+/// `blob main` for a repo-relative path: the blob at `base` (`-` if none) and the hash of
+/// what the working tree holds (`-` if missing, `L:target` for a link).
+pub fn git_file_state(repo: &str, rel: &str, base: &str) -> GuestCmd {
+    cmd(
+        "git_file_state",
+        "cd \"$A_repo\" || exit 1\nb=-; if [ -n \"$A_base\" ]; then b=$(git rev-parse -q --verify \"$A_base:$A_rel\" 2>/dev/null || echo -); fi\nif [ -L \"$A_rel\" ]; then m=\"L:$(readlink \"$A_rel\")\"; elif [ -f \"$A_rel\" ]; then m=$(git hash-object -- \"$A_rel\"); else m=-; fi\necho \"$b $m\"",
+    )
+    .arg("repo", repo)
+    .arg("rel", rel)
+    .arg("base", base)
+}
+
 pub fn crontab_read(user: &str) -> GuestCmd {
     cmd(
         "crontab_read",
-        "e=$(mktemp)\ncrontab -u \"$A_user\" -l 2>\"$e\" || { grep -q 'no crontab' \"$e\" || { cat \"$e\" >&2; exit 1; }; }\nrm -f \"$e\"",
+        "e=$(mktemp)\ncrontab -u \"$A_user\" -l 2>\"$e\" || { grep -q 'no crontab' \"$e\" || { cat \"$e\" >&2; rm -f \"$e\"; exit 1; }; }\nrm -f \"$e\"",
     )
     .arg("user", user)
 }
@@ -157,11 +278,11 @@ pub fn crontab_write(user: &str, text: &str) -> GuestCmd {
         .stdin(text.as_bytes().to_vec())
 }
 
-/// Loads a LaunchAgent or daemon; a failure is the caller's to report, not fatal.
+/// Loads a LaunchAgent or daemon. A failure fails the keep.
 pub fn agent_load(scope: &str, label: &str, path: &str) -> GuestCmd {
     cmd(
         "agent_load",
-        "if [ \"$A_scope\" = system ]; then d=system; else d=gui/$(stat -f %u /dev/console); fi\nlaunchctl bootout \"$d/$A_label\" 2>/dev/null || true\nlaunchctl bootstrap \"$d\" \"$A_path\"",
+        "set -e\nif [ \"$A_scope\" = system ]; then d=system; else d=gui/$(stat -f %u /dev/console); fi\nlaunchctl bootout \"$d/$A_label\" 2>/dev/null || true\nlaunchctl bootstrap \"$d\" \"$A_path\"",
     )
     .arg("scope", scope)
     .arg("label", label)
@@ -203,6 +324,6 @@ pub fn hook(command: &str, cwd: &str) -> GuestCmd {
     let mut c = cmd("hook", "cd \"$A_cwd\" && bash -lc \"$A_cmd\"")
         .arg("cmd", command)
         .arg("cwd", cwd);
-    c.timeout = std::time::Duration::from_secs(900);
+    c.timeout = Duration::from_secs(900);
     c
 }

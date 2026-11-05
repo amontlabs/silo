@@ -8,7 +8,6 @@ pub mod computers;
 pub mod display;
 pub mod guest;
 pub mod guest_remote;
-pub mod keep;
 pub mod operations;
 pub mod remote;
 pub mod services;
@@ -228,7 +227,6 @@ pub fn serves(method: MethodName) -> bool {
     is_built_in(method)
         || computers::owns(method)
         || checkpoints::owns(method)
-        || keep::owns(method)
         || guest::owns(method)
         || access::owns(method)
         || display::owns(method)
@@ -253,9 +251,6 @@ pub(crate) async fn dispatch(
     if let Some(result) = checkpoints::handle(method, params, context).await {
         return result;
     }
-    if let Some(result) = keep::handle(method, params, context).await {
-        return result;
-    }
     if let Some(result) = guest::handle(method, params, context).await {
         return result;
     }
@@ -275,7 +270,7 @@ pub(crate) async fn dispatch(
 mod tests {
     use silo_api::methods::{method_registry, MethodName};
 
-    use super::{access, checkpoints, computers, display, guest, keep, serves, services};
+    use super::{access, checkpoints, computers, display, guest, serves, services};
 
     #[test]
     fn the_capability_set_is_every_routed_method_and_nothing_unserved() {
@@ -337,7 +332,6 @@ mod tests {
         let domains = [
             computers::owns as fn(MethodName) -> bool,
             checkpoints::owns,
-            keep::owns,
             guest::owns,
             access::owns,
             display::owns,

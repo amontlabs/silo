@@ -66,6 +66,7 @@ pub fn start_background(
     drive_launch_migration(context.clone(), exports.clone());
     install_creation_inputs(context.clone());
     start_computer_use(context.clone());
+    start_keep_recovery(context.clone());
     // The timers are the engine's own upkeep with no client connected (95 A-26).
     crate::timers::start(context.clone());
     let services = Arc::new(SilodStartupServices::new(
@@ -176,6 +177,42 @@ impl silo_engine::creation_inputs::Inputs for SilodCreationWait {
 
     fn show(&self, step: &silo_engine::creation_inputs::Step) {
         runtime::publish_creation_wait(&self.request_id, step);
+    }
+}
+
+// MARK: Interrupted keeps
+
+/// Puts back any computer an interrupted keep left half-changed, before anything else is
+/// kept into it. The runtime may not be ready at once, so a failure is retried for a while.
+fn start_keep_recovery(context: Arc<SilodContext>) {
+    let spawned = std::thread::Builder::new()
+        .name("silod-keep-recovery".into())
+        .spawn(move || {
+            let host: Arc<dyn RuntimeHost> = Arc::new(SilodRuntimeHost::for_engine(context.clone()));
+            let journal = silo_engine::changes::keep::service::journal_for(host.engine_context().as_ref());
+            for attempt in 0..30 {
+                if journal.pending_targets().is_empty() {
+                    return;
+                }
+                let env = silo_engine::changes::keep::guest_env::GuestEnv::new(
+                    host.clone(),
+                    crate::methods::checkpoints::service_for(&context),
+                    journal.clone(),
+                    Box::new(|_| {}),
+                );
+                let failures = silo_engine::changes::keep::recover_all(&env, &journal);
+                if failures.is_empty() {
+                    return;
+                }
+                if attempt == 29 {
+                    eprintln!("silod: could not put back an interrupted keep: {}", failures.join("; "));
+                    return;
+                }
+                std::thread::sleep(std::time::Duration::from_secs(10));
+            }
+        });
+    if let Err(error) = spawned {
+        eprintln!("silod: could not start the keep recovery: {error}");
     }
 }
 

@@ -12,7 +12,7 @@ use crate::{
     config::{Project, Recipe, Settings},
     engine::{default_socket, Engine},
     error::CliError,
-    ops::{self, CreateArgs, ExecArgs, ForkArgs, Platform},
+    ops::{self, CreateArgs, DiffArgs, ExecArgs, ForkArgs, Platform},
     render,
 };
 
@@ -56,6 +56,8 @@ pub enum Command {
     Fold(FoldCommand),
     /// Put a computer back to before its latest keep.
     Undo { computer: String },
+    /// Show what changed in a computer since it was forked.
+    Diff(DiffCommand),
     /// Throw a computer away.
     Drop(DropCommand),
     /// Run a command in a computer.
@@ -138,9 +140,29 @@ pub struct FoldCommand {
     /// Report what would be kept and what would stop it, changing nothing.
     #[arg(long)]
     pub dry_run: bool,
+    /// Carry database changes even though no migrate step covers them.
+    #[arg(long)]
+    pub data_ok: bool,
+    /// The review digest from `silo diff --json`; the keep refuses if the fork has changed since.
+    #[arg(long, value_name = "DIGEST")]
+    pub reviewed: Option<String>,
     /// A recipe whose keep: section applies.
     #[arg(long, value_name = "PATH")]
     pub recipe_file: Option<PathBuf>,
+}
+
+#[derive(Args, Debug)]
+pub struct DiffCommand {
+    pub computer: String,
+    /// Cut the text to this many lines (default 15).
+    #[arg(long, value_name = "N")]
+    pub max_lines: Option<u32>,
+    /// Show the idle fork's own background changes too.
+    #[arg(long)]
+    pub no_baseline: bool,
+    /// Measure the no-op baseline first: the computer must be a fork that has sat idle.
+    #[arg(long, conflicts_with = "no_baseline")]
+    pub baseline: bool,
 }
 
 #[derive(Args, Debug)]
@@ -296,7 +318,7 @@ async fn dispatch(
                 &fold.fork,
                 fold.into.as_deref(),
                 keep,
-                fold.dry_run,
+                ops::FoldOptions { dry_run: fold.dry_run, data_ok: fold.data_ok, reviewed: fold.reviewed },
                 progress,
             )
             .await?;
@@ -306,6 +328,18 @@ async fn dispatch(
         Command::Undo { computer } => {
             let value = ops::undo(engine, &computer, progress).await?;
             emit(json, &value, render::undo);
+        }
+        Command::Diff(diff) => {
+            let args = DiffArgs {
+                computer: diff.computer,
+                max_lines: diff.max_lines,
+                no_baseline: diff.no_baseline,
+                compute_baseline: diff.baseline,
+            };
+            let value = ops::diff(engine, &args, progress).await?;
+            emit(json, &value, |v| {
+                v["text"].as_str().unwrap_or_default().to_owned()
+            });
         }
         Command::Drop(drop) => {
             let value = ops::drop_computer(engine, &drop.computer, drop.force, progress).await?;
@@ -523,6 +557,19 @@ mod tests {
             parse(&["undo", "main"]).command,
             Command::Undo { .. }
         ));
+    }
+
+    #[test]
+    fn diff_takes_a_limit_and_baseline_flags() {
+        let Command::Diff(diff) =
+            parse(&["diff", "try", "--max-lines", "30", "--no-baseline"]).command
+        else {
+            panic!("not a diff")
+        };
+        assert_eq!(diff.computer, "try");
+        assert_eq!(diff.max_lines, Some(30));
+        assert!(diff.no_baseline && !diff.baseline);
+        assert!(Cli::try_parse_from(["silo", "diff", "x", "--baseline", "--no-baseline"]).is_err());
     }
 
     #[test]

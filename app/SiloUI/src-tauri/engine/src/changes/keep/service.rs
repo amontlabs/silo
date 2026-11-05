@@ -79,12 +79,13 @@ pub fn start_keep(
 pub fn start_undo(
     host: Arc<dyn RuntimeHost>,
     service: Service,
+    store: Arc<dyn ManifestStore>,
     computer: String,
 ) -> Result<JobId, Failure> {
     start(host, "changes.undo", move |host| {
         let journal = journal_for(host.engine_context().as_ref());
         let env = GuestEnv::new(host.clone(), service, journal.clone(), Box::new(|_| {}));
-        super::undo(&env as &dyn KeepEnv, &journal, &computer, LANE_WAIT)
+        super::undo(&env as &dyn KeepEnv, store.as_ref(), &journal, &computer, LANE_WAIT)
             .map(|outcome| outcome.to_json())
     })
 }

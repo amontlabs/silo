@@ -249,7 +249,15 @@ pub fn undo(value: &Value) -> String {
             } else {
                 ""
             };
-            format!("Put {computer} back to {name}{how}.")
+            let mut out = format!("Put {computer} back to {name}{how}.");
+            let changed = lines(value, "changedSince");
+            if !changed.is_empty() {
+                out.push_str("\nThese changes made on the computer after the keep are gone:");
+                for line in changed {
+                    out.push_str(&format!("\n  {line}"));
+                }
+            }
+            out
         }
         _ => format!("Nothing to undo on {computer}."),
     }

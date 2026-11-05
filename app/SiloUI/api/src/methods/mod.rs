@@ -11,6 +11,7 @@ macro_rules! wire_struct {
     };
 }
 
+pub mod changes;
 pub mod checkpoints;
 pub mod clipboard;
 pub mod common;

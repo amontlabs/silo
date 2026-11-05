@@ -152,12 +152,7 @@ impl KeepEnv for GuestEnv {
         if reference.id.is_empty() {
             return Err("The checkpoint job returned no checkpoint id.".into());
         }
-        self.journal.record_checkpoint(computer, &reference)?;
         Ok(reference)
-    }
-
-    fn before_keep_checkpoints(&self, computer: &str) -> Result<Vec<CheckpointRef>, String> {
-        Ok(self.journal.checkpoints(computer))
     }
 
     fn restore(&self, computer: &str, checkpoint_id: &str) -> Result<(), String> {
@@ -166,6 +161,15 @@ impl KeepEnv for GuestEnv {
             .start_restore(computer, checkpoint_id)
             .map_err(|failure| failure.message)?;
         self.finish(job).map(|_| ())
+    }
+
+    fn hold(&self, computer: &str, label: &str) -> Result<Box<dyn std::any::Any>, String> {
+        let target = self.target(computer)?;
+        let guard = runtime::OPERATIONS
+            .kind(runtime::operation_gate::OperationKind::Other)
+            .computer(target.id(), target.name(), label)
+            .map_err(|error| error.to_string())?;
+        Ok(Box::new(guard))
     }
 
     fn note(&self, line: &str) {
