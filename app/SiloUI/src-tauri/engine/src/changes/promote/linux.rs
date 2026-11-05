@@ -8,12 +8,12 @@
 //! carries (`silo.machine-id`), never by its name, because the names are what a crash can leave
 //! half swapped.
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use super::journal::Swap;
 use crate::{
     network,
-    runtime::{self, checkpoints, RuntimePaths, RuntimeRunner},
+    runtime::{self, RuntimePaths, RuntimeRunner, checkpoints},
 };
 
 /// Moves the fork's parked scheduled jobs back (`restore`) or parks them again (`repark`).
@@ -186,8 +186,10 @@ impl Linux<'_> {
         // nothing to do when none were put back.
         checkpoints::set_quiet_scheduled_jobs_disabled(self.paths, &swap.fork_id, false)?;
         let output = self.run_quiet(&self.name_of(&swap.fork_id)?, "restore")?;
-        // Nothing came back (the fork replaced it all): the jobs are still parked.
-        if !output.lines().any(|line| line.starts_with("restored ")) {
+        // Nothing came back (the fork replaced it all): the jobs are still parked. The guest
+        // reports its durable record of what it moved, not only what this run moved, so a run
+        // that follows one that stopped half-way still sees the jobs that one put back.
+        if !output.lines().any(|line| line.starts_with("recorded ")) {
             checkpoints::set_quiet_scheduled_jobs_disabled(self.paths, &swap.fork_id, true)?;
         }
         Ok(())
@@ -221,8 +223,9 @@ mod tests {
 
     use super::{
         super::{
+            Info, Outcome, PromoteEnv, Request,
             journal::{Journal, Step},
-            promote, undo, Info, Outcome, PromoteEnv, Request,
+            promote, undo,
         },
         *,
     };
@@ -607,7 +610,8 @@ mod tests {
         checkpoints::quiet_for_test(&device.paths, FORK, true);
         let swap = swap(&device.paths);
         device.linux().names_apply(&swap).unwrap();
-        *device.output.lock().unwrap() = "restored /etc/cron.d/poll\n".into();
+        *device.output.lock().unwrap() =
+            "restored /etc/cron.d/poll\nrecorded done file /etc/cron.d/poll\n".into();
 
         device.linux().quiet_apply(&swap).unwrap();
         assert_eq!(
@@ -635,6 +639,29 @@ mod tests {
         device.calls.lock().unwrap().clear();
         device.linux().quiet_revert(&swap).unwrap();
         assert!(device.calls.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_retry_after_a_stop_in_the_middle_still_sees_what_the_first_run_restored() {
+        let device = Device::new();
+        checkpoints::quiet_for_test(&device.paths, FORK, true);
+        let swap = swap(&device.paths);
+        device.linux().names_apply(&swap).unwrap();
+        // The first run moved a job and stopped before the engine recorded it; the retry finds
+        // nothing left to move, but the guest's record still names the job.
+        *device.output.lock().unwrap() = "recorded pending file /etc/cron.d/poll\n".into();
+        device.linux().quiet_apply(&swap).unwrap();
+        assert_eq!(
+            checkpoints::quiet_scheduled_jobs_disabled(&device.paths, FORK).unwrap(),
+            Some(false)
+        );
+        // So the undo parks it again.
+        device.calls.lock().unwrap().clear();
+        device.linux().quiet_revert(&swap).unwrap();
+        assert_eq!(
+            *device.calls.lock().unwrap(),
+            ["start main", "guest main repark", "stop main"]
+        );
     }
 
     #[test]
@@ -747,7 +774,8 @@ mod tests {
     fn a_linux_promote_swaps_the_computers_and_its_undo_swaps_them_back() {
         let device = Device::new();
         checkpoints::quiet_for_test(&device.paths, FORK, true);
-        *device.output.lock().unwrap() = "restored /etc/cron.d/poll\n".into();
+        *device.output.lock().unwrap() =
+            "restored /etc/cron.d/poll\nrecorded done file /etc/cron.d/poll\n".into();
         let journal_dir = tempfile::tempdir().unwrap();
         let journal = Journal::new(journal_dir.path().join("promote"));
         let env = LinuxEnv(&device);
@@ -887,6 +915,30 @@ mod tests {
             .unwrap();
         put(root, "usr/lib/systemd/system/apt-daily.timer", "[Timer]\n");
         put(root, "etc/crontab", "# comments only\n");
+        // A mask made before the quiet step and one made after it, each with a vendor unit.
+        for unit in ["before-fork.timer", "after-quiet.timer"] {
+            std::os::unix::fs::symlink("/dev/null", root.join("etc/systemd/system").join(unit))
+                .unwrap();
+            put(root, &format!("usr/lib/systemd/system/{unit}"), "[Timer]\n");
+        }
+        // The quiet step starts at 00:00, ends at 00:10, and its masks are made in between.
+        let quiet = "var/lib/silo-quiet";
+        put(root, &format!("{quiet}/0a1b.machine-id"), "id\n");
+        put(root, &format!("{quiet}/applied-0a1b"), "");
+        let stamp = |relative: &str, time: &str| {
+            let status = std::process::Command::new("touch")
+                .args(["-h", "-t", time])
+                .arg(root.join(relative))
+                .status()
+                .unwrap();
+            assert!(status.success());
+        };
+        stamp(&format!("{quiet}/0a1b.machine-id"), "202601020000.00");
+        stamp(&format!("{quiet}/applied-0a1b"), "202601020010.00");
+        stamp("etc/systemd/system/before-fork.timer", "202512310000.00");
+        stamp("etc/systemd/system/backup.timer", "202601020003.00");
+        stamp("etc/systemd/system/apt-daily.timer", "202601020005.00");
+        stamp("etc/systemd/system/after-quiet.timer", "202601030000.00");
         dir
     }
 
@@ -906,18 +958,28 @@ mod tests {
                 .unwrap()
                 .contains("[Timer]")
         );
-        assert!(std::fs::read_to_string(root.join("etc/crontab"))
-            .unwrap()
-            .contains("run-parts"));
-        // A timer that was only masked is unmasked; the stopped service stays parked.
+        assert!(
+            std::fs::read_to_string(root.join("etc/crontab"))
+                .unwrap()
+                .contains("run-parts")
+        );
+        // A timer the quiet step only masked is unmasked; a mask from before the fork or from
+        // after the quiet step stays; the stopped service stays parked.
         assert!(!exists(root, "/etc/systemd/system/apt-daily.timer"));
+        assert!(exists(root, "/etc/systemd/system/before-fork.timer"));
+        assert!(exists(root, "/etc/systemd/system/after-quiet.timer"));
         assert!(exists(
             root,
             "/var/lib/silo-quiet/disabled/etc/systemd/system/web.service"
         ));
         assert!(!exists(root, "/etc/systemd/system/web.service"));
-        // Repeating it finds nothing more.
-        assert!(!guest_script(root, "restore").contains("restored"));
+        // Repeating it finds nothing more to move but still reports what was put back.
+        let again = guest_script(root, "restore");
+        assert!(!again.contains("restored"), "{again}");
+        assert!(
+            again.contains("recorded done file /etc/cron.d/poll"),
+            "{again}"
+        );
 
         guest_script(root, "repark");
         assert!(!exists(root, "/etc/cron.d/poll"));
@@ -942,7 +1004,139 @@ mod tests {
         );
         assert!(exists(root, "/var/lib/silo-quiet/disabled/etc/crontab"));
         assert!(!exists(root, "/var/lib/silo-quiet/restored.list"));
+        // The masks the quiet step did not make were not touched by either direction.
+        assert!(exists(root, "/etc/systemd/system/before-fork.timer"));
+        assert!(exists(root, "/etc/systemd/system/after-quiet.timer"));
         guest_script(root, "repark");
+    }
+
+    fn marker_of(root: &std::path::Path) -> String {
+        std::fs::read_to_string(root.join("var/lib/silo-quiet/restored.list")).unwrap_or_default()
+    }
+
+    #[test]
+    fn every_change_is_recorded_before_it_is_made_and_marked_when_done() {
+        let dir = parked_fork();
+        let root = dir.path();
+        guest_script(root, "restore");
+        let marker = marker_of(root);
+        for item in [
+            "file /etc/cron.d/poll",
+            "file /var/spool/cron/crontabs/silo",
+            "mask /etc/systemd/system/backup.timer",
+            "crontab /etc/crontab",
+            "unmask /etc/systemd/system/apt-daily.timer",
+        ] {
+            let pending = marker.find(&format!("pending {item}\n")).expect(item);
+            let done = marker.find(&format!("done {item}\n")).expect(item);
+            assert!(pending < done, "{item}");
+        }
+    }
+
+    #[test]
+    fn a_run_that_stopped_after_moving_an_item_reports_it_and_the_undo_parks_it() {
+        let dir = parked_fork();
+        let root = dir.path();
+        // The job was moved and the run stopped before the mark: the intent is on record, the
+        // parked copy is gone.
+        std::fs::rename(
+            root.join("var/lib/silo-quiet/disabled/etc/cron.d/poll"),
+            root.join("etc/cron.d/poll"),
+        )
+        .unwrap_or_else(|_| {
+            put(root, "etc/cron.d/poll", "* * * * * root poll\n");
+            std::fs::remove_file(root.join("var/lib/silo-quiet/disabled/etc/cron.d/poll")).unwrap();
+        });
+        put(
+            root,
+            "var/lib/silo-quiet/restored.list",
+            "pending file /etc/cron.d/poll\n",
+        );
+        let output = guest_script(root, "restore");
+        assert!(!output.contains("restored /etc/cron.d/poll"), "{output}");
+        assert!(
+            output.contains("recorded pending file /etc/cron.d/poll"),
+            "{output}"
+        );
+        assert!(exists(root, "/etc/cron.d/poll"));
+        guest_script(root, "repark");
+        assert!(!exists(root, "/etc/cron.d/poll"));
+        assert!(exists(root, "/var/lib/silo-quiet/disabled/etc/cron.d/poll"));
+    }
+
+    #[test]
+    fn a_run_that_stopped_before_moving_an_item_finishes_it() {
+        let dir = parked_fork();
+        let root = dir.path();
+        put(
+            root,
+            "var/lib/silo-quiet/restored.list",
+            "pending mask /etc/systemd/system/backup.timer\n",
+        );
+        let output = guest_script(root, "restore");
+        assert!(
+            output.contains("restored /etc/systemd/system/backup.timer"),
+            "{output}"
+        );
+        assert!(
+            std::fs::read_to_string(root.join("etc/systemd/system/backup.timer"))
+                .unwrap()
+                .contains("[Timer]")
+        );
+        // Parking again puts the mask back over the file it replaced.
+        guest_script(root, "repark");
+        assert_eq!(
+            std::fs::read_link(root.join("etc/systemd/system/backup.timer")).unwrap(),
+            std::path::Path::new("/dev/null")
+        );
+    }
+
+    #[test]
+    fn a_crontab_written_before_a_stop_is_finished_not_reported_as_replaced() {
+        let dir = parked_fork();
+        let root = dir.path();
+        // The saved copy was written back and the run stopped before deleting it.
+        let saved = "# comments only\n17 * * * * root run-parts\n";
+        put(root, "etc/crontab", saved);
+        put(
+            root,
+            "var/lib/silo-quiet/restored.list",
+            "pending crontab /etc/crontab\n",
+        );
+        let output = guest_script(root, "restore");
+        assert!(output.contains("restored /etc/crontab"), "{output}");
+        assert!(!output.contains("left /etc/crontab"), "{output}");
+        assert!(!exists(root, "/var/lib/silo-quiet/disabled/etc/crontab"));
+        guest_script(root, "repark");
+        assert_eq!(
+            std::fs::read_to_string(root.join("etc/crontab"))
+                .unwrap()
+                .trim(),
+            "# comments only"
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.join("var/lib/silo-quiet/disabled/etc/crontab")).unwrap(),
+            saved
+        );
+    }
+
+    #[test]
+    fn a_mask_the_quiet_step_did_not_make_is_never_removed() {
+        let dir = parked_fork();
+        let root = dir.path();
+        // No record of the quiet step at all: nothing is known to be its own.
+        std::fs::remove_file(root.join("var/lib/silo-quiet/0a1b.machine-id")).unwrap();
+        guest_script(root, "restore");
+        assert!(exists(root, "/etc/systemd/system/apt-daily.timer"));
+        // A list written by the quiet step, if there is one, decides.
+        put(
+            root,
+            "var/lib/silo-quiet/masked-timers.list",
+            "/etc/systemd/system/apt-daily.timer\n",
+        );
+        guest_script(root, "restore");
+        assert!(!exists(root, "/etc/systemd/system/apt-daily.timer"));
+        assert!(exists(root, "/etc/systemd/system/before-fork.timer"));
     }
 
     #[test]
@@ -954,17 +1148,23 @@ mod tests {
         let output = guest_script(root, "restore");
         assert!(output.contains("left /etc/cron.d/poll"), "{output}");
         assert!(output.contains("left /etc/crontab"), "{output}");
-        assert!(std::fs::read_to_string(root.join("etc/cron.d/poll"))
-            .unwrap()
-            .contains("replacement"));
+        assert!(
+            std::fs::read_to_string(root.join("etc/cron.d/poll"))
+                .unwrap()
+                .contains("replacement")
+        );
         assert!(exists(root, "/var/lib/silo-quiet/disabled/etc/cron.d/poll"));
-        assert!(std::fs::read_to_string(root.join("etc/crontab"))
-            .unwrap()
-            .contains("new-job"));
+        assert!(
+            std::fs::read_to_string(root.join("etc/crontab"))
+                .unwrap()
+                .contains("new-job")
+        );
         // Parking again leaves the replacement alone as well.
         guest_script(root, "repark");
-        assert!(std::fs::read_to_string(root.join("etc/cron.d/poll"))
-            .unwrap()
-            .contains("replacement"));
+        assert!(
+            std::fs::read_to_string(root.join("etc/cron.d/poll"))
+                .unwrap()
+                .contains("replacement")
+        );
     }
 }
