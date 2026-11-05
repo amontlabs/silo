@@ -63,6 +63,12 @@ wire_struct! {
         captured_at: String,
         baseline_applied: bool,
         baseline_available: bool,
+        /// The checkpoint (or computer) the base was forked from, when recorded.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        base_source: Option<String>,
+        /// Seconds between the base capture and this capture.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        elapsed_seconds: Option<u64>,
     }
 }
 
@@ -113,6 +119,8 @@ mod tests {
             captured_at: "b".into(),
             baseline_applied: false,
             baseline_available: true,
+            base_source: Some("cp1".into()),
+            elapsed_seconds: Some(30),
         };
         let value = serde_json::to_value(&result).unwrap();
         assert_eq!(value["baselineAvailable"], true);

@@ -101,46 +101,6 @@ async fn fork_names_the_source_and_waits_for_the_job() {
 }
 
 #[tokio::test]
-async fn diff_asks_the_engine_and_returns_the_document_with_its_text() {
-    let engine = FakeEngine::start(|method, _| match method {
-        "computers.list" => Ok(listing(&[("try", "running")])),
-        "changes.baseline" | "changes.diff" => Ok(json!({"jobId": "job:1"})),
-        "operations.job.get" => Ok(finished(json!({
-            "diff": {"format": 1, "other": []},
-            "text": "No changes.",
-            "baselineApplied": true, "baselineAvailable": true,
-            "baseCapturedAt": "a", "capturedAt": "b"
-        }))),
-        "operations.job.acknowledge" => Ok(Value::Null),
-        other => Err(("internal", format!("unexpected {other}"))),
-    });
-    let connected = Engine::connect(&engine.socket).await.unwrap();
-    let args = ops::DiffArgs {
-        computer: "try".into(),
-        max_lines: Some(30),
-        no_baseline: false,
-        compute_baseline: true,
-    };
-    let value = ops::diff(&connected, &args, &ignore).await.unwrap();
-    assert_eq!(value["format"], 1);
-    assert_eq!(value["text"], "No changes.");
-    assert_eq!(value["baselineApplied"], true);
-    assert_eq!(engine.calls("changes.baseline")[0]["computerId"], "id-try");
-    let sent = &engine.calls("changes.diff")[0];
-    assert_eq!(sent["maxLines"], 30);
-    assert_eq!(sent["baseline"], true);
-
-    let raw = ops::DiffArgs {
-        no_baseline: true,
-        compute_baseline: false,
-        ..args
-    };
-    ops::diff(&connected, &raw, &ignore).await.unwrap();
-    assert_eq!(engine.calls("changes.baseline").len(), 1);
-    assert_eq!(engine.calls("changes.diff")[1]["baseline"], false);
-}
-
-#[tokio::test]
 async fn fork_refuses_secrets_outside_fork_secrets() {
     let (engine, _) = engine_with(&["main"]);
     let connected = Engine::connect(&engine.socket).await.unwrap();
@@ -593,39 +553,243 @@ async fn retry_setup_runs_the_engines_setup_retry_for_the_computer() {
 }
 
 #[tokio::test]
-async fn a_baseline_that_cannot_be_measured_is_reported_and_the_diff_still_runs() {
-    let polled = std::sync::atomic::AtomicUsize::new(0);
-    let engine = FakeEngine::start(move |method, _| match method {
+async fn diff_uses_a_cached_baseline_and_measures_nothing() {
+    let engine = FakeEngine::start(|method, _| match method {
         "computers.list" => Ok(listing(&[("try", "running")])),
-        "changes.baseline" | "changes.diff" => Ok(json!({"jobId": "job:1"})),
-        "operations.job.get" => {
-            if polled.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
-                Ok(json!({"jobId": "job:1", "state": "finished", "outcome": {
-                    "error": {"code": "internal", "message": "No baseline: this fork has been used."}}}))
-            } else {
-                Ok(finished(json!({
-                    "diff": {"format": 1, "other": []},
-                    "text": "Code\n  ~/app: a..b",
-                    "baselineApplied": false, "baselineAvailable": false,
-                    "baseCapturedAt": "a", "capturedAt": "b"
-                })))
-            }
-        }
+        "changes.diff" => Ok(json!({"jobId": "job:1"})),
+        "operations.job.get" => Ok(finished(json!({
+            "diff": {"format": 1, "other": []},
+            "text": "No changes.",
+            "baselineApplied": true, "baselineAvailable": true,
+            "baseSource": "cp1", "elapsedSeconds": 30,
+            "baseCapturedAt": "a", "capturedAt": "b"
+        }))),
         "operations.job.acknowledge" => Ok(Value::Null),
         other => Err(("internal", format!("unexpected {other}"))),
     });
     let connected = Engine::connect(&engine.socket).await.unwrap();
     let args = ops::DiffArgs {
         computer: "try".into(),
-        max_lines: None,
+        max_lines: Some(30),
         no_baseline: false,
         compute_baseline: true,
     };
     let value = ops::diff(&connected, &args, &ignore).await.unwrap();
-    assert_eq!(value["baselineApplied"], false);
-    assert_eq!(
-        value["baselineError"],
-        "No baseline: this fork has been used."
+    assert_eq!(value["format"], 1);
+    assert_eq!(value["text"], "No changes.");
+    assert_eq!(value["baselineApplied"], true);
+    assert_eq!(engine.calls("changes.baseline").len(), 0);
+    assert_eq!(engine.calls("checkpoints.fork").len(), 0);
+    let sent = &engine.calls("changes.diff")[0];
+    assert_eq!(sent["maxLines"], 30);
+    assert_eq!(sent["baseline"], true);
+
+    let raw = ops::DiffArgs {
+        no_baseline: true,
+        compute_baseline: false,
+        ..args
+    };
+    ops::diff(&connected, &raw, &ignore).await.unwrap();
+    assert_eq!(engine.calls("changes.diff")[1]["baseline"], false);
+}
+
+/// An engine that knows one fork (`try`) of checkpoint `cp1` and tracks the throwaway.
+struct Baseline {
+    computers: Vec<(String, String)>,
+    measured: bool,
+    fail_baseline: bool,
+}
+
+fn baseline_engine(
+    fail_baseline: bool,
+    extra: &[(&str, &str)],
+) -> (FakeEngine, Arc<Mutex<Baseline>>) {
+    let mut computers = vec![("try".to_owned(), "running".to_owned())];
+    computers.extend(
+        extra
+            .iter()
+            .map(|(n, s)| ((*n).to_owned(), (*s).to_owned())),
     );
-    assert_eq!(engine.calls("changes.diff").len(), 1);
+    let state = Arc::new(Mutex::new(Baseline {
+        computers,
+        measured: false,
+        fail_baseline,
+    }));
+    let shared = state.clone();
+    let engine = FakeEngine::start(move |method, params| {
+        let mut state = shared.lock().unwrap();
+        let named = |id: &str| id.trim_start_matches("id-").to_owned();
+        match method {
+            "computers.list" => {
+                let pairs: Vec<(&str, &str)> = state
+                    .computers
+                    .iter()
+                    .map(|(n, s)| (n.as_str(), s.as_str()))
+                    .collect();
+                Ok(listing(&pairs))
+            }
+            "checkpoints.fork" => {
+                let name = params["newName"].as_str().unwrap().to_owned();
+                state.computers.push((name, "stopped".into()));
+                Ok(json!({"jobId": "job:3"}))
+            }
+            "computers.start" | "computers.stop" => {
+                let name = named(params["computerId"].as_str().unwrap());
+                let to = if method == "computers.start" {
+                    "running"
+                } else {
+                    "stopped"
+                };
+                for (n, s) in state.computers.iter_mut() {
+                    if *n == name {
+                        *s = to.into();
+                    }
+                }
+                Ok(json!({"jobId": "job:3"}))
+            }
+            "computers.delete" => {
+                let name = named(params["computerId"].as_str().unwrap());
+                state.computers.retain(|(n, _)| *n != name);
+                Ok(json!({"jobId": "job:3"}))
+            }
+            "changes.baseline" => Ok(json!({"jobId": "job:2"})),
+            "changes.diff" => Ok(json!({"jobId": "job:1"})),
+            "operations.job.get" => match params["jobId"].as_str().unwrap() {
+                "job:2" if state.fail_baseline => Ok(json!({
+                    "jobId": "job:2", "state": "finished",
+                    "outcome": {"error": {"code": "internal", "message": "The copy did not start."}}})),
+                "job:2" => {
+                    state.measured = true;
+                    Ok(finished(
+                        json!({"source": "cp1", "idleSeconds": 42, "capturedAt": "t"}),
+                    ))
+                }
+                "job:1" => Ok(finished(json!({
+                    "diff": {"format": 1, "other": []},
+                    "text": "Code",
+                    "baselineApplied": state.measured, "baselineAvailable": state.measured,
+                    "baseSource": "cp1", "elapsedSeconds": 42,
+                    "baseCapturedAt": "a", "capturedAt": "b"
+                }))),
+                _ => Ok(finished(json!({}))),
+            },
+            "operations.job.acknowledge" => Ok(Value::Null),
+            other => Err(("internal", format!("unexpected {other}"))),
+        }
+    });
+    (engine, state)
+}
+
+fn compute_baseline_args() -> ops::DiffArgs {
+    ops::DiffArgs {
+        computer: "try".into(),
+        max_lines: None,
+        no_baseline: false,
+        compute_baseline: true,
+    }
+}
+
+#[tokio::test]
+async fn a_missing_baseline_is_measured_on_a_throwaway_fork_that_is_dropped() {
+    let (engine, state) = baseline_engine(false, &[]);
+    let connected = Engine::connect(&engine.socket).await.unwrap();
+    let value = ops::diff(&connected, &compute_baseline_args(), &ignore)
+        .await
+        .unwrap();
+    assert_eq!(value["baselineApplied"], true);
+    assert_eq!(value["baselineIdleSeconds"], 42);
+    // The copy came from the checkpoint the fork was made from, and the idle time is the
+    // time the real fork had run.
+    let fork = &engine.calls("checkpoints.fork")[0];
+    assert_eq!(fork["checkpointId"], "cp1");
+    let name = fork["newName"].as_str().unwrap().to_owned();
+    assert!(name.starts_with(ops::BASELINE_PREFIX));
+    let baseline = &engine.calls("changes.baseline")[0];
+    assert_eq!(baseline["computerId"], format!("id-{name}"));
+    assert_eq!(baseline["source"], "cp1");
+    assert_eq!(baseline["idleSeconds"], 42);
+    assert_eq!(
+        engine.calls("computers.start")[0]["computerId"],
+        format!("id-{name}")
+    );
+    // It is dropped, and only it.
+    let deleted = engine.calls("computers.delete");
+    assert_eq!(deleted.len(), 1);
+    assert_eq!(deleted[0]["computerId"], format!("id-{name}"));
+    assert_eq!(state.lock().unwrap().computers.len(), 1);
+}
+
+#[tokio::test]
+async fn the_throwaway_is_dropped_when_the_measurement_fails() {
+    let (engine, state) = baseline_engine(true, &[]);
+    let connected = Engine::connect(&engine.socket).await.unwrap();
+    let value = ops::diff(&connected, &compute_baseline_args(), &ignore)
+        .await
+        .unwrap();
+    assert_eq!(value["baselineApplied"], false);
+    assert_eq!(value["baselineError"], "The copy did not start.");
+    assert_eq!(engine.calls("computers.delete").len(), 1);
+    let left: Vec<String> = state
+        .lock()
+        .unwrap()
+        .computers
+        .iter()
+        .map(|c| c.0.clone())
+        .collect();
+    assert_eq!(left, ["try"]);
+}
+
+#[tokio::test]
+async fn the_throwaway_never_shows_in_the_list_and_stale_ones_are_dropped() {
+    let (engine, state) = baseline_engine(false, &[("silo-baseline-old", "stopped")]);
+    let connected = Engine::connect(&engine.socket).await.unwrap();
+    let listed = ops::list(&connected).await.unwrap();
+    let names: Vec<&str> = listed["computers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["try"]);
+    ops::diff(&connected, &compute_baseline_args(), &ignore)
+        .await
+        .unwrap();
+    let left: Vec<String> = state
+        .lock()
+        .unwrap()
+        .computers
+        .iter()
+        .map(|c| c.0.clone())
+        .collect();
+    assert_eq!(left, ["try"], "the stale copy was dropped too");
+}
+
+#[tokio::test]
+async fn a_macos_baseline_is_refused_when_two_virtual_machines_already_run() {
+    let engine = FakeEngine::start(|method, _| match method {
+        "computers.list" => Ok(json!({"linux": {"computers": []}, "macos": {"computers": [
+            {"id": "m1", "name": "mac-a", "state": "running", "checkpoints": [{"id": "cp1"}]},
+            {"id": "m2", "name": "mac-b", "state": "running", "checkpoints": []}
+        ]}})),
+        "changes.diff" => Ok(json!({"jobId": "job:1"})),
+        "operations.job.get" => Ok(finished(json!({
+            "diff": {"format": 1, "other": []}, "text": "Code",
+            "baselineApplied": false, "baselineAvailable": false,
+            "baseSource": "cp1", "elapsedSeconds": 10,
+            "baseCapturedAt": "a", "capturedAt": "b"
+        }))),
+        "operations.job.acknowledge" => Ok(Value::Null),
+        other => Err(("internal", format!("unexpected {other}"))),
+    });
+    let connected = Engine::connect(&engine.socket).await.unwrap();
+    let args = ops::DiffArgs {
+        computer: "mac-b".into(),
+        ..compute_baseline_args()
+    };
+    let value = ops::diff(&connected, &args, &ignore).await.unwrap();
+    assert!(value["baselineError"]
+        .as_str()
+        .unwrap()
+        .contains("two macOS virtual machines"));
+    assert!(engine.calls("checkpoints.fork").is_empty());
 }

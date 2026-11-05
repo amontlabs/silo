@@ -344,6 +344,10 @@ pub async fn retry_setup(
     Ok(engine.computer(name).await?.to_json())
 }
 
+fn target_of(computer: &Computer) -> ComputerTargetParams {
+    target(computer)
+}
+
 fn target(computer: &Computer) -> ComputerTargetParams {
     ComputerTargetParams {
         computer_id: computer.id.clone(),
@@ -461,39 +465,22 @@ pub struct DiffArgs {
     pub compute_baseline: bool,
 }
 
-/// What changed in a computer since it was forked: the diff document, plus the readable
-/// `text` and what was compared.
-pub async fn diff(
+/// Name prefix of the throwaway computers that measure baselines. `silo list` leaves them out.
+pub const BASELINE_PREFIX: &str = "silo-baseline-";
+/// The longest a throwaway fork is left idle, however long the real fork has run.
+pub const BASELINE_CAP_SECONDS: u64 = 600;
+
+async fn run_diff(
     engine: &Engine,
+    target: &Computer,
     args: &DiffArgs,
     progress: Progress<'_>,
 ) -> Result<Value, CliError> {
-    let target = engine.computer(&args.computer).await?;
-    // A baseline that cannot be measured correctly (the fork was used) is reported, and the
-    // diff is shown without one.
-    let mut baseline_error = None;
-    if args.compute_baseline {
-        let measured = engine
-            .run_job(
-                &format!("Measuring the idle baseline of {}", target.name),
-                requests::changes_baseline(ChangesBaselineParams {
-                    computer_id: target.id.clone(),
-                    device_id: None,
-                    source: None,
-                    idle_seconds: None,
-                }),
-                progress,
-            )
-            .await;
-        if let Err(error) = measured {
-            baseline_error = Some(error.message);
-        }
-    }
-    let mut result = engine
+    engine
         .run_job(
             &format!("Comparing {} with when it was forked", target.name),
             requests::changes_diff(ChangesDiffParams {
-                computer_id: target.id,
+                computer_id: target.id.clone(),
                 device_id: None,
                 max_lines: args.max_lines,
                 baseline: Some(!args.no_baseline),
@@ -501,7 +488,43 @@ pub async fn diff(
             }),
             progress,
         )
-        .await?;
+        .await
+}
+
+/// What changed in a computer since it was forked: the diff document, plus the readable
+/// `text` and what was compared. With `compute_baseline`, a missing no-op baseline is
+/// measured first on a throwaway fork of the same checkpoint; one already cached is used.
+pub async fn diff(
+    engine: &Engine,
+    args: &DiffArgs,
+    progress: Progress<'_>,
+) -> Result<Value, CliError> {
+    let target = engine.computer(&args.computer).await?;
+    let mut result = run_diff(engine, &target, args, progress).await?;
+    let mut baseline_error = None;
+    let mut baseline_seconds = None;
+    if args.compute_baseline && result["baselineAvailable"] != true {
+        let measured = match result["baseSource"].as_str() {
+            Some(source) => {
+                // The idle time matches the time the real fork has been running.
+                let seconds = result["elapsedSeconds"]
+                    .as_u64()
+                    .unwrap_or(0)
+                    .clamp(1, BASELINE_CAP_SECONDS);
+                measure_baseline(engine, &target, source, seconds, progress).await
+            }
+            None => Err(CliError::new(
+                "No baseline: this computer has no record of the checkpoint it was forked from.",
+            )),
+        };
+        match measured {
+            Ok(seconds) => {
+                baseline_seconds = Some(seconds);
+                result = run_diff(engine, &target, args, progress).await?;
+            }
+            Err(error) => baseline_error = Some(error.message),
+        }
+    }
     let mut document = result["diff"].take();
     if let Some(object) = document.as_object_mut() {
         for key in [
@@ -513,11 +536,172 @@ pub async fn diff(
         ] {
             object.insert(key.to_owned(), result[key].clone());
         }
+        if let Some(seconds) = baseline_seconds {
+            object.insert("baselineIdleSeconds".to_owned(), json!(seconds));
+        }
         if let Some(error) = baseline_error {
             object.insert("baselineError".to_owned(), json!(error));
         }
     }
     Ok(document)
+}
+
+/// Forks `source` (a checkpoint) into a throwaway computer, starts it so that its base is
+/// captured like a real fork's, leaves it idle for `seconds` since that capture, captures it
+/// again and caches the idle diff under the checkpoint. The throwaway is dropped whichever way
+/// this ends. Returns the idle seconds used.
+async fn measure_baseline(
+    engine: &Engine,
+    target: &Computer,
+    source: &str,
+    seconds: u64,
+    progress: Progress<'_>,
+) -> Result<u64, CliError> {
+    let all = engine.all_computers().await?;
+    // A Mac runs two macOS virtual machines at most; the throwaway would be the third.
+    if target.kind == "macos" {
+        let running = all
+            .iter()
+            .filter(|c| c.kind == "macos" && c.state == "running")
+            .count();
+        if running >= 2 {
+            return Err(CliError::new(
+                "No baseline: two macOS virtual machines are already running, and measuring the baseline needs a third. Stop one and try again.",
+            ));
+        }
+    }
+    let owner = all
+        .iter()
+        .find(|c| c.checkpoints.iter().any(|cp| cp["id"] == source))
+        .ok_or_else(|| {
+            CliError::new(
+                "No baseline: the checkpoint this computer was forked from no longer exists.",
+            )
+        })?;
+    // Throwaways left by an interrupted run are dropped first.
+    for stale in all.iter().filter(|c| c.name.starts_with(BASELINE_PREFIX)) {
+        let _ = remove_computer(engine, stale, progress).await;
+    }
+    let name = format!("{BASELINE_PREFIX}{}", short_id());
+    let outcome =
+        measure_on_throwaway(engine, target, owner, source, &name, seconds, progress).await;
+    let cleanup = async {
+        let all = engine.all_computers().await?;
+        match all.iter().find(|c| c.name == name) {
+            Some(throwaway) => remove_computer(engine, throwaway, progress).await,
+            None => Ok(()),
+        }
+    }
+    .await;
+    match (outcome, cleanup) {
+        (Ok(used), Ok(())) => Ok(used),
+        (Err(error), Ok(())) => Err(error),
+        (_, Err(error)) => Err(CliError::new(format!(
+            "The throwaway computer {name} could not be dropped: {}",
+            error.message
+        ))),
+    }
+}
+
+async fn measure_on_throwaway(
+    engine: &Engine,
+    target: &Computer,
+    owner: &Computer,
+    source: &str,
+    name: &str,
+    seconds: u64,
+    progress: Progress<'_>,
+) -> Result<u64, CliError> {
+    // Quiet like the real fork.
+    let list = |key: &str| -> Vec<String> {
+        target
+            .quiet
+            .as_ref()
+            .and_then(|quiet| quiet.get(key))
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|v| v.as_str().map(str::to_owned))
+            .collect()
+    };
+    let (stop, scrub) = (list("stop"), list("scrub"));
+    let extras = ForkExtras {
+        secrets: Vec::new(),
+        quiet: (!stop.is_empty() || !scrub.is_empty()).then_some(QuietSpec { stop, scrub }),
+    };
+    let mut params = CheckpointForkParams {
+        computer_id: owner.id.clone(),
+        device_id: None,
+        checkpoint_id: Some(source.to_owned()),
+        new_name: name.to_owned(),
+        secrets: Vec::new(),
+        quiet: None,
+    };
+    apply_fork_extras(&mut params, &extras)?;
+    engine
+        .run_job(
+            "Forking the idle copy that measures the baseline",
+            requests::checkpoints_fork(params),
+            progress,
+        )
+        .await?;
+    let listed = engine.all_computers().await?;
+    let throwaway = find(&listed, name)?.clone();
+    // The first start captures the fork-time base, as for any fork.
+    engine
+        .run_job(
+            "Starting the idle copy",
+            requests::computers_start(target_of(&throwaway)),
+            progress,
+        )
+        .await?;
+    let measured = engine
+        .run_job(
+            &format!("Leaving the idle copy alone for {seconds}s"),
+            requests::changes_baseline(ChangesBaselineParams {
+                computer_id: throwaway.id.clone(),
+                device_id: None,
+                source: Some(source.to_owned()),
+                idle_seconds: Some(seconds),
+            }),
+            progress,
+        )
+        .await?;
+    Ok(measured["idleSeconds"].as_u64().unwrap_or(seconds))
+}
+
+/// Stops (when running) and deletes a computer.
+async fn remove_computer(
+    engine: &Engine,
+    computer: &Computer,
+    progress: Progress<'_>,
+) -> Result<(), CliError> {
+    if computer.state == "running" {
+        let _ = engine
+            .run_job(
+                &format!("Stopping {}", computer.name),
+                requests::computers_stop(target_of(computer)),
+                progress,
+            )
+            .await;
+    }
+    let expected = match &computer.configuration {
+        Some(configuration) => Some(serde_json::from_value(configuration.clone())?),
+        None => None,
+    };
+    engine
+        .run_job(
+            &format!("Dropping {}", computer.name),
+            requests::computers_delete(ComputerDeleteParams {
+                computer_id: computer.id.clone(),
+                device_id: None,
+                expected,
+                request_id: None,
+            }),
+            progress,
+        )
+        .await?;
+    Ok(())
 }
 
 pub fn check_drop(name: &str, force: bool) -> Result<(), CliError> {

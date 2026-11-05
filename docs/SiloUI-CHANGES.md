@@ -19,13 +19,16 @@ manifest at both points ([format 2](v1/PHASE2_CONTRACT.md)); the engine compares
 | Ignored | A count of paths that are never reviewed (logs, caches, build output, boot-time rewrites; also in `ignore.rs`). |
 
 A no-op baseline (the diff of a fork of the same source left idle for the same time) can be
-passed in. `changes.baseline` measures it on the fork itself, so it is valid only for a fork that
-has just started and sits untouched: it refuses ("No baseline") when the fork has run for more
-than two minutes past its idle time, or when its capture shows a moved repository or a changed
-package, because the capture would then hold the task's own changes and subtract them. A baseline
-from a separate idle fork of the same checkpoint is the other correct source. `silo diff --baseline`
-shows the diff without a baseline and a `baselineError` when it is refused. Entries that match it
-are removed first, so background churn does not show; entries that match it are removed first, so background churn does not show. An
+passed in. `silo diff --baseline` measures a missing one on a throwaway fork of the same
+checkpoint (named `silo-baseline-*`, quiet like any fork, left out of `silo list`): it is started so
+its base is captured like a real fork's, left idle for as long as the real fork had run (at most
+ten minutes; `baselineIdleSeconds` records it), captured again, and the idle diff is cached under
+the source checkpoint. The throwaway is dropped whether or not the measurement worked. A cached
+baseline is used as it is. On a Mac with two macOS virtual machines already running nothing is
+measured. `changes.baseline` itself refuses ("No baseline") on a fork that has run more than two
+minutes past its idle time or whose capture shows a moved repository or changed package, because
+that capture would hold the task's own changes. When no baseline can be measured, `silo diff`
+shows the plain diff and a `baselineError`. Entries that match the baseline are removed first, so background churn does not show; entries that match it are removed first, so background churn does not show. An
 entry matches only when the path, the kind of change and the resulting content (file hash,
 size and link target; Postgres schema and table data digests; SQLite file digest; crontab and
 launch agent digests; the working-tree content of a dirty file) are all the same. A path that

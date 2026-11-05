@@ -220,7 +220,12 @@ fn diff(
         noise.as_ref(),
         &ignore,
     );
+    let elapsed_seconds = store::unix_seconds(&base_meta.captured_at)
+        .zip(store::unix_seconds(&current_meta.captured_at))
+        .map(|(base, now)| now.saturating_sub(base).max(0) as u64);
     to_value(ChangesDiffResult {
+        base_source: base_meta.source.clone(),
+        elapsed_seconds,
         diff: to_value(&result)?,
         text: result.render(max_lines.map_or(DEFAULT_MAX_LINES, |lines| lines as usize)),
         base_captured_at: base_meta.captured_at,

@@ -270,7 +270,16 @@ impl Engine {
             .await?)
     }
 
+    /// The computers a person works with: the throwaway computers that measure baselines are
+    /// left out.
     pub async fn computers(&self) -> Result<Vec<Computer>, CliError> {
+        let mut computers = self.all_computers().await?;
+        computers.retain(|computer| !computer.name.starts_with(crate::ops::BASELINE_PREFIX));
+        Ok(computers)
+    }
+
+    /// Every computer, throwaway baseline computers included.
+    pub async fn all_computers(&self) -> Result<Vec<Computer>, CliError> {
         let listed = self
             .call(requests::computers_list(ComputerListParams {
                 device_id: None,
