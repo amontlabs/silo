@@ -89,10 +89,17 @@ fn parse(text: &str) -> Result<Manifest, GuestError> {
         .map_err(|error| internal(format!("A stored manifest is unreadable: {error}")))
 }
 
-fn no_base() -> GuestError {
-    GuestError::not_found(
-        "This computer has no fork-time record. Computers forked with silo fork have one.",
-    )
+fn no_base(store: &Store, computer: &str) -> GuestError {
+    let retake =
+        "Retake it with changes.capture role=base while the computer is still as it was forked.";
+    match store.get_failure(computer) {
+        Some(why) => GuestError::not_found(format!(
+            "The fork-time record of this computer could not be taken ({why}). {retake}"
+        )),
+        None => GuestError::not_found(format!(
+            "This computer has no fork-time record; forks have one taken when they first start. {retake}"
+        )),
+    }
 }
 
 /// Runs one piece of work to its JSON result.
@@ -180,7 +187,7 @@ fn diff(
     let (base_text, base_meta) = store
         .get(computer, Slot::Base)
         .map_err(internal)?
-        .ok_or_else(no_base)?;
+        .ok_or_else(|| no_base(store, computer))?;
     let (current_text, current_meta) = if refresh {
         let text = fresh(runner, Some(&base_text), options)?;
         let meta = store
@@ -234,7 +241,7 @@ fn baseline(
     let (base_text, base_meta) = store
         .get(computer, Slot::Base)
         .map_err(internal)?
-        .ok_or_else(no_base)?;
+        .ok_or_else(|| no_base(store, computer))?;
     let source = source.or(base_meta.source.clone()).ok_or_else(|| {
         GuestError::invalid("Name the checkpoint this computer was forked from (source).")
     })?;

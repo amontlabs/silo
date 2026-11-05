@@ -311,6 +311,23 @@ impl Service {
         new_name: &str,
         options: ForkOptions,
     ) -> Result<JobId, Failure> {
+        let started = self.start_fork_job(computer_id, checkpoint_id, new_name, options)?;
+        // The fork-time record is taken when the fork first starts.
+        crate::changes::fork_base::expect(
+            self.context(),
+            new_name,
+            &crate::changes::fork_base::source_key(checkpoint_id, computer_id),
+        );
+        Ok(started)
+    }
+
+    fn start_fork_job(
+        &self,
+        computer_id: &str,
+        checkpoint_id: Option<&str>,
+        new_name: &str,
+        options: ForkOptions,
+    ) -> Result<JobId, Failure> {
         match self.platform(computer_id)? {
             Platform::Macos => macos_computers::start_macos_checkpoint_fork_job(
                 self.macos.clone(),

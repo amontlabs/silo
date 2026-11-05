@@ -4,6 +4,7 @@
 
 pub mod collect;
 pub mod diff;
+pub mod fork_base;
 pub mod ignore;
 pub mod manifest;
 pub mod service;

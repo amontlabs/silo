@@ -3,7 +3,7 @@
 
 use serde_json::{json, Value};
 use silo_api::methods::{
-    changes::{ChangesBaselineParams, ChangesCaptureParams, ChangesDiffParams, ChangesRole},
+    changes::{ChangesBaselineParams, ChangesDiffParams},
     checkpoints::{CheckpointCreateParams, CheckpointForkParams, CheckpointKind},
     common::{ComputerTargetParams, DeviceParams},
     computers::{
@@ -447,24 +447,6 @@ pub async fn fork(
         )
         .await?;
     let forked = engine.computer(&name).await?;
-    // The fork-time record `silo diff` compares against; a fork without one still works.
-    let record = engine
-        .run_job(
-            &format!("Recording {name} as it is now"),
-            requests::changes_capture(ChangesCaptureParams {
-                computer_id: forked.id.clone(),
-                device_id: None,
-                role: Some(ChangesRole::Base),
-                source: Some(args.checkpoint.clone().unwrap_or_else(|| source.id.clone())),
-            }),
-            progress,
-        )
-        .await;
-    if let Err(error) = record {
-        progress(&format!(
-            "warning: {name} has no fork-time record, so silo diff cannot compare it: {error}"
-        ));
-    }
     let mut fork = forked.to_json();
     fork["source"] = json!(source.name);
     Ok(fork)

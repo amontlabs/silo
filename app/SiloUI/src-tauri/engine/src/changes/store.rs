@@ -109,6 +109,9 @@ impl Store {
             records: manifest.lines().count() as u64,
             bytes: manifest.len() as u64,
         };
+        if slot == Slot::Base {
+            let _ = fs::remove_file(directory.join("base-error.txt"));
+        }
         write_gz(&directory.join(format!("{}.tsv.gz", slot.name())), manifest)?;
         write_atomic(
             &directory.join(format!("{}.json", slot.name())),
@@ -159,11 +162,51 @@ impl Store {
         Ok(base.zip(idle))
     }
 
+    fn pending_path(&self, name: &str) -> PathBuf {
+        let key = Sha256::digest(name.as_bytes());
+        let file: String = key.iter().take(16).map(|b| format!("{b:02x}")).collect();
+        self.root.join("pending").join(format!("{file}.json"))
+    }
+
+    /// Notes that the computer about to be created as `name` is a fork of `source` and wants
+    /// its fork-time base captured at its first start.
+    pub fn put_pending(&self, name: &str, source: &str) -> Result<(), String> {
+        write_atomic(&self.pending_path(name), source.as_bytes())
+    }
+
+    /// The source noted for `name`, removed so that only one start captures it.
+    pub fn take_pending(&self, name: &str) -> Option<String> {
+        let path = self.pending_path(name);
+        let source = fs::read_to_string(&path).ok()?;
+        fs::remove_file(&path).ok()?;
+        Some(source)
+    }
+
+    /// Records why a computer's fork-time base could not be taken.
+    pub fn put_failure(&self, computer: &str, message: &str) -> Result<(), String> {
+        write_atomic(
+            &self.computer_dir(computer)?.join("base-error.txt"),
+            message.as_bytes(),
+        )
+    }
+
+    pub fn get_failure(&self, computer: &str) -> Option<String> {
+        fs::read_to_string(self.computer_dir(computer).ok()?.join("base-error.txt")).ok()
+    }
+
     pub fn remove_computer(&self, computer: &str) -> Result<(), String> {
         match fs::remove_dir_all(self.computer_dir(computer)?) {
             Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(error.to_string()),
             _ => Ok(()),
         }
+    }
+}
+
+/// Drops everything kept for computers that no longer exist.
+pub fn forget(context: &dyn EngineContext, computers: &[String]) {
+    let store = Store::for_engine(context);
+    for id in computers {
+        let _ = store.remove_computer(id);
     }
 }
 
@@ -266,6 +309,39 @@ mod tests {
         // A path-like key stays inside the store.
         store.put_baseline("../../escape", "b\n", "i\n").unwrap();
         assert!(store.get_baseline("../../escape").unwrap().is_some());
+    }
+
+    #[test]
+    fn pending_forks_are_taken_once_and_failures_clear_on_a_new_base() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(dir.path());
+        assert_eq!(store.take_pending("try"), None);
+        store.put_pending("try", "cp1").unwrap();
+        assert_eq!(store.take_pending("try").as_deref(), Some("cp1"));
+        assert_eq!(store.take_pending("try"), None);
+        store.put_failure("c1", "no ssh").unwrap();
+        assert_eq!(store.get_failure("c1").as_deref(), Some("no ssh"));
+        store.put("c1", Slot::Base, "x\n", None).unwrap();
+        assert_eq!(store.get_failure("c1"), None);
+    }
+
+    #[test]
+    fn deleting_computers_drops_what_was_kept_for_them() {
+        let dir = tempfile::tempdir().unwrap();
+        let context = crate::guest::test_support::RecordingContext::new(dir.path());
+        let store = Store::for_engine(context.as_ref());
+        store.put("gone", Slot::Base, "a\n", None).unwrap();
+        store.put("gone", Slot::Latest, "b\n", None).unwrap();
+        store.put_failure("gone", "why").unwrap();
+        store.put("kept", Slot::Base, "c\n", None).unwrap();
+        forget(
+            context.as_ref(),
+            &["gone".to_owned(), "never-existed".to_owned()],
+        );
+        assert_eq!(store.get("gone", Slot::Base).unwrap(), None);
+        assert_eq!(store.get("gone", Slot::Latest).unwrap(), None);
+        assert_eq!(store.get_failure("gone"), None);
+        assert!(store.get("kept", Slot::Base).unwrap().is_some());
     }
 
     #[test]

@@ -5601,6 +5601,7 @@ fn delete(app: &MacosContext, id: &str) -> Result<(), String> {
         match remove_computer(&Layout::new(&data, id)) {
             Ok(()) => {
                 registry().entries.retain(|entry| entry.record.id != id);
+                crate::changes::store::forget(app.engine.as_ref(), &[id.to_owned()]);
                 if let Err(message) = ports::computer_removed(app, id) {
                     eprintln!("A deleted macOS computer's published ports could not be removed: {message}");
                 }

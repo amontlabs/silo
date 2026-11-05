@@ -249,6 +249,22 @@ fn a_baseline_needs_to_know_its_source() {
 }
 
 #[test]
+fn a_missing_base_says_why_and_how_to_retake_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::new(dir.path());
+    let guest = ScriptedGuest::new(&[]);
+    store
+        .put_failure("failed", "The computer is not reachable.")
+        .unwrap();
+    let options = Options::default();
+    let error = run(&guest, &store, "failed", diff_work(true, true), &options).unwrap_err();
+    assert!(error.message.contains("not reachable"), "{}", error.message);
+    assert!(error.message.contains("changes.capture role=base"));
+    let error = run(&guest, &store, "plain", diff_work(true, true), &options).unwrap_err();
+    assert!(error.message.contains("changes.capture role=base"));
+}
+
+#[test]
 fn a_computer_is_captured_one_at_a_time() {
     let claim = InFlight::claim("busy").unwrap();
     let dir = tempfile::tempdir().unwrap();

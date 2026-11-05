@@ -2147,6 +2147,10 @@ pub(super) fn ensure_quiet(
     let result = apply_quiet(runner, paths, name, &mut record);
     if record.quiet.as_ref().is_some_and(|quiet| quiet.applied) {
         save(paths, configuration.id(), &record)?;
+        if result.is_ok() {
+            // The fork is quiet and has run nothing of its own: its state is the base.
+            crate::changes::fork_base::captured_after_quiet(paths, name, configuration.id());
+        }
     }
     result
 }

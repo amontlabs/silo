@@ -1,0 +1,133 @@
+//! The fork-time base: noted when a fork is created, captured when the fork first starts,
+//! right after its quiet step is confirmed and before the start reports ready.
+
+use std::sync::{Arc, Mutex, OnceLock};
+
+use super::{
+    collect::{self, Options, TargetRunner},
+    store::{Slot, Store},
+};
+use crate::{
+    context::EngineContext,
+    guest::{self, Target},
+    runtime::RuntimePaths,
+};
+
+fn installed() -> &'static Mutex<Option<Arc<dyn EngineContext>>> {
+    static CONTEXT: OnceLock<Mutex<Option<Arc<dyn EngineContext>>>> = OnceLock::new();
+    CONTEXT.get_or_init(Default::default)
+}
+
+/// Remembers the engine the start paths capture for. The host installs it at boot and every
+/// fork creation refreshes it.
+pub fn install(context: Arc<dyn EngineContext>) {
+    *installed()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(context);
+}
+
+fn context() -> Option<Arc<dyn EngineContext>> {
+    installed()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone()
+}
+
+/// The key the baseline of a fork is cached under: the checkpoint it was made from, or the
+/// source computer when it was made from the current state.
+pub fn source_key(checkpoint_id: Option<&str>, source_computer_id: &str) -> String {
+    checkpoint_id.unwrap_or(source_computer_id).to_owned()
+}
+
+/// Notes at fork creation that `new_name` wants a base at its first start.
+pub fn expect(context: Arc<dyn EngineContext>, new_name: &str, source: &str) {
+    let store = Store::for_engine(context.as_ref());
+    install(context);
+    if let Err(error) = store.put_pending(new_name, source) {
+        eprintln!("The fork-time record of {new_name} could not be scheduled: {error}");
+    }
+}
+
+/// A Linux fork has just been confirmed quiet.
+pub fn captured_after_quiet(paths: &RuntimePaths, name: &str, id: &str) {
+    let Some(context) = context() else { return };
+    let target = guest::resolve(Ok(paths.clone()), &context.paths().app_data, id);
+    capture_with(context.as_ref(), target, name, id);
+}
+
+/// A macOS fork has just finished its first boot.
+pub fn captured_after_first_boot(name: &str, id: &str) {
+    let Some(context) = context() else { return };
+    let target = guest::resolve(
+        Err("This device has no Linux runtime.".into()),
+        &context.paths().app_data,
+        id,
+    );
+    capture_with(context.as_ref(), target, name, id);
+}
+
+/// Takes the base for `id` if `name` is a fork waiting for one. A failure is recorded for
+/// `changes.diff` to report, and never fails the start.
+pub fn capture_with(
+    context: &dyn EngineContext,
+    target: Result<Target, guest::GuestError>,
+    name: &str,
+    id: &str,
+) {
+    let store = Store::for_engine(context);
+    let Some(source) = store.take_pending(name) else {
+        return;
+    };
+    let outcome = target
+        .map_err(|error| error.message)
+        .and_then(|target| {
+            collect::capture(&TargetRunner(target), &Options::default()).map_err(|e| e.message)
+        })
+        .and_then(|text| store.put(id, Slot::Base, &text, Some(&source)).map(|_| ()));
+    if let Err(message) = outcome {
+        let _ = store.put_failure(id, &message);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::guest::test_support;
+
+    #[test]
+    fn a_failed_capture_is_recorded_and_the_note_is_used_up() {
+        let dir = tempfile::tempdir().unwrap();
+        let context = test_support::RecordingContext::new(dir.path());
+        let store = Store::for_engine(context.as_ref());
+        // Nobody noted this computer: nothing happens.
+        capture_with(
+            context.as_ref(),
+            Err(guest::GuestError::internal("x")),
+            "plain",
+            "id-0",
+        );
+        assert_eq!(store.get_failure("id-0"), None);
+
+        store.put_pending("try", "cp1").unwrap();
+        capture_with(
+            context.as_ref(),
+            Err(guest::GuestError::internal(
+                "The computer is not reachable.",
+            )),
+            "try",
+            "id-1",
+        );
+        assert_eq!(
+            store.get_failure("id-1").as_deref(),
+            Some("The computer is not reachable.")
+        );
+        assert_eq!(store.get("id-1", Slot::Base).unwrap(), None);
+        assert_eq!(store.take_pending("try"), None);
+    }
+
+    #[test]
+    fn a_checkpoint_keys_the_baseline_and_the_current_state_keys_by_source() {
+        assert_eq!(source_key(Some("cp1"), "src"), "cp1");
+        assert_eq!(source_key(None, "src"), "src");
+    }
+}

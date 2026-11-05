@@ -46,7 +46,7 @@ fn engine_with(names: &[&str]) -> (FakeEngine, Arc<Mutex<Vec<String>>>) {
                 .retain(|name| format!("id-{name}") != id);
             Ok(json!({"jobId": "job:1"}))
         }
-        "checkpoints.create" | "changes.capture" => Ok(json!({"jobId": "job:1"})),
+        "checkpoints.create" => Ok(json!({"jobId": "job:1"})),
         "operations.job.get" => Ok(finished(json!({
             "checkpoint": {"id": "cp9", "name": "saved", "kind": "manual"}
         }))),
@@ -95,41 +95,9 @@ async fn fork_names_the_source_and_waits_for_the_job() {
     assert_eq!(sent["computerId"], "id-main");
     assert_eq!(sent["checkpointId"], "cp1");
     assert_eq!(sent["newName"], name);
-    assert_eq!(engine.calls("operations.job.acknowledge").len(), 2);
-    let record = &engine.calls("changes.capture")[0];
-    assert_eq!(record["computerId"], format!("id-{name}"));
-    assert_eq!(record["role"], "base");
-    assert_eq!(record["source"], "cp1");
-}
-
-#[tokio::test]
-async fn a_fork_without_a_record_still_forks() {
-    let engine = FakeEngine::start(|method, _| match method {
-        "computers.list" => Ok(listing(&[("main", "running"), ("try", "running")])),
-        "checkpoints.fork" => Ok(json!({"jobId": "job:1"})),
-        "changes.capture" => Err(("internal", "Start try first.".into())),
-        "operations.job.get" => Ok(finished(Value::Null)),
-        "operations.job.acknowledge" => Ok(Value::Null),
-        other => Err(("internal", format!("unexpected {other}"))),
-    });
-    let connected = Engine::connect(&engine.socket).await.unwrap();
-    let notes = Mutex::new(Vec::<String>::new());
-    let args = ForkArgs {
-        source: "main".into(),
-        name: Some("try".into()),
-        ..ForkArgs::default()
-    };
-    let fork = ops::fork(&connected, &args, None, &|line| {
-        notes.lock().unwrap().push(line.to_owned())
-    })
-    .await
-    .unwrap();
-    assert_eq!(fork["name"], "try");
-    assert!(notes
-        .lock()
-        .unwrap()
-        .iter()
-        .any(|line| line.contains("no fork-time record")));
+    assert_eq!(engine.calls("operations.job.acknowledge").len(), 1);
+    // The engine takes the fork-time record itself; the client asks for nothing more.
+    assert!(engine.calls("changes.capture").is_empty());
 }
 
 #[tokio::test]
