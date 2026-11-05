@@ -86,13 +86,14 @@ pub(super) struct ForkRekey {
 /// Gives a fork its own credentials on the stopped computer's disk before its first start:
 /// a new password hash and automatic login, no login keychain (it is sealed with the
 /// source's password), and none of the source's SSH keys. The key, names and host keys are
-/// set by `fork_finalization_script` in the same boot that checks the result. With `scrub`,
-/// the source's scheduled work is moved aside and the paths are deleted in the same mount.
+/// set by `fork_finalization_script` in the same boot that checks the result. With `scrub` and
+/// `stop`, the source's scheduled work and the jobs named in `stop` are moved aside and the
+/// paths are deleted in the same mount.
 pub(super) fn run_fork_rekey(
     disk: &Path,
     account: &GuestAccount,
     bootstrap_config: Option<&[u8]>,
-    scrub: Option<&[String]>,
+    scrub: Option<(&[String], &[String])>,
 ) -> Result<ForkRekey, String> {
     let mut attached = Attached::attach(disk)?;
     let patched = attached.mount_data_volume().and_then(|mount| {
@@ -102,7 +103,7 @@ pub(super) fn run_fork_rekey(
             None => true,
         };
         let quieted = match scrub {
-            Some(scrub) => super::quiet::apply_offline(&mount, scrub)?,
+            Some((scrub, stop)) => super::quiet::apply_offline(&mount, scrub, stop)?,
             None => Default::default(),
         };
         Ok(ForkRekey {

@@ -58,12 +58,12 @@ pub(super) fn fork_needs_no_guest_work(record: &Record, developer_tools_version:
         && !record.computer_use_stale()
 }
 
-/// The paths a fork's recipe asked to delete.
-fn scrub_paths(record: &Record) -> Vec<String> {
+/// The paths a fork's recipe asked to delete and the names it asked to stop.
+fn quiet_lists(record: &Record) -> (&[String], &[String]) {
     record
         .quiet
         .as_ref()
-        .map(|quiet| quiet.scrub.clone())
+        .map(|quiet| (quiet.scrub.as_slice(), quiet.stop.as_slice()))
         .unwrap_or_default()
 }
 
@@ -518,7 +518,7 @@ impl Provision<'_> {
             &self.layout.disk(),
             &own,
             Some(&config),
-            Some(&scrub_paths(record)),
+            Some(quiet_lists(record)),
         )?;
         self.check()?;
         note_parked(record, &rekey.parked, &rekey.still_scheduled);
@@ -560,7 +560,7 @@ impl Provision<'_> {
             &self.layout.disk(),
             &own,
             None,
-            Some(&scrub_paths(record)),
+            Some(quiet_lists(record)),
         )?;
         self.check()?;
         note_parked(record, &rekey.parked, &rekey.still_scheduled);
@@ -1417,7 +1417,7 @@ mod tests {
             scrub: vec!["/Users/silo/.env".into()],
             ..Default::default()
         });
-        assert_eq!(scrub_paths(&fork), ["/Users/silo/.env"]);
+        assert_eq!(quiet_lists(&fork).0, ["/Users/silo/.env"]);
         note_parked(&mut fork, &["/Library/LaunchAgents/a.plist".into()], &[]);
         note_parked(&mut fork, &["/Library/LaunchAgents/a.plist".into()], &[]);
         assert_eq!(

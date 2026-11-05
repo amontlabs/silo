@@ -401,6 +401,9 @@ pub struct MacosComputer {
     pub pending_restore: Option<super::checkpoints::PendingRestore>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub quiet: Option<QuietState>,
+    /// How many times the engine has booted the computer.
+    #[serde(default)]
+    pub boots: u32,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize, schemars::JsonSchema)]
@@ -478,6 +481,20 @@ pub struct ComputerConfigurationProgress {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_macos_row_keeps_its_boot_count() {
+        let wire = serde_json::json!({
+            "kind": "macos", "id": "i", "name": "n", "cpus": 4, "memoryGiB": 8, "diskGiB": 64,
+            "osVersion": null, "state": "stopped", "progress": null, "detail": null, "note": null,
+            "displayOpen": false, "installed": true, "setupComplete": true,
+            "needsPersonalizing": false, "checkpoints": [], "checkpointOperation": null,
+            "pendingRestore": null, "boots": 2
+        });
+        let row: MacosComputer = serde_json::from_value(wire).unwrap();
+        assert_eq!(row.boots, 2);
+        assert_eq!(serde_json::to_value(row).unwrap()["boots"], 2);
+    }
 
     #[test]
     fn macos_resources_change_uses_the_wire_names_and_round_trips() {

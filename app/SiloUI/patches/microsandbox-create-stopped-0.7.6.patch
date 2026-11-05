@@ -199,7 +199,7 @@ index f6608cc4..ca01e916 100644
          // Spawn the sandbox process and create the bridge. On failure, mark the sandbox
          // from Starting to Stopped so it cannot remain as a phantom boot.
          let restore_closure = config
-@@ -1175,6 +1233,222 @@ impl LocalBackend {
+@@ -1175,6 +1233,242 @@ impl LocalBackend {
              }
          };
  
@@ -282,6 +282,19 @@ index f6608cc4..ca01e916 100644
 +  park "$1" && ln -sf /dev/null "$1"
 +}
 +
++# Succeeds when the Exec line of the autostart entry $1 has a word whose base name is $2, so an
++# entry still matches when it starts the program through a wrapper.
++desktop_runs() {
++  line=$(grep -m 1 '^Exec=' "$1" 2>/dev/null) || return 1
++  printf '%s\n' "${line#Exec=}" | tr -s ' \t' '\n\n' | (
++    while IFS= read -r w; do
++      w=${w#\"}; w=${w%\"}; w=${w#\'}; w=${w%\'}
++      [ "${w##*/}" = "$2" ] && exit 0
++    done
++    exit 1
++  )
++}
++
 +pids_of() {
 +  for d in /proc/[0-9]*; do
 +    p=${d#/proc/}
@@ -350,6 +363,13 @@ index f6608cc4..ca01e916 100644
 +        park "$f" || exit 1
 +      done
 +      for f in "/etc/xdg/autostart/$n.desktop" "/root/.config/autostart/$n.desktop" /home/*/.config/autostart/"$n".desktop "/etc/supervisor/conf.d/$n.conf"; do park "$f" || exit 1; done
++      for f in /etc/xdg/autostart/*.desktop /root/.config/autostart/*.desktop /home/*/.config/autostart/*.desktop; do
++        [ -f "$f" ] || continue
++        if desktop_runs "$f" "$n"; then park "$f" || exit 1; fi
++      done
++      for f in "/root/.config/systemd/user/$unit.service" /home/*/.config/systemd/user/"$unit".service; do park "$f" || exit 1; done
++      mkdir -p /etc/systemd/user || exit 1
++      mask "/etc/systemd/user/$unit.service" || exit 1
 +      ;;
 +  esac
 +done
@@ -422,7 +442,7 @@ index f6608cc4..ca01e916 100644
          if let Ok(ready) = client.ready() {
              tracing::info!(
                  sandbox_name = %config.spec.name,
-@@ -1942,6 +2216,7 @@ impl LocalBackend {
+@@ -1942,6 +2236,7 @@ impl LocalBackend {
      }
  
      /// Insert a provisional local create record that remains non-connectable until ready.
@@ -430,7 +450,7 @@ index f6608cc4..ca01e916 100644
      async fn insert_starting_sandbox_record(
          db: &DbWriteConnection,
          config: &SandboxConfig,
-@@ -2307,7 +2582,7 @@ mod tests {
+@@ -2307,7 +2602,7 @@ mod tests {
                  .image("registry.invalid/review-never-pulled:missing")
                  .pull_policy(crate::sandbox::PullPolicy::Never);
              let error = backend
@@ -439,7 +459,7 @@ index f6608cc4..ca01e916 100644
                  .await
                  .err()
                  .unwrap();
-@@ -2366,7 +2641,7 @@ mod tests {
+@@ -2366,7 +2661,7 @@ mod tests {
              .cpus(8)
              .max_cpus(3);
          let error = backend
@@ -448,7 +468,7 @@ index f6608cc4..ca01e916 100644
              .await
              .err()
              .expect("missing rootfs must fail without starting a VM");
-@@ -2409,7 +2684,7 @@ mod tests {
+@@ -2409,7 +2704,7 @@ mod tests {
              .cpus(2)
              .replace();
          let error = backend
@@ -457,7 +477,7 @@ index f6608cc4..ca01e916 100644
              .await
              .err()
              .expect("invalid managed CPU count must fail");
-@@ -2873,7 +3148,7 @@ mod tests {
+@@ -2873,7 +3168,7 @@ mod tests {
          config.replace_existing = true;
  
          let error = match backend
@@ -466,7 +486,7 @@ index f6608cc4..ca01e916 100644
              .await
          {
              Ok(_) => panic!("snapshot descriptor must be validated before replacement"),
-@@ -2911,7 +3186,7 @@ mod tests {
+@@ -2911,7 +3206,7 @@ mod tests {
          ));
  
          let error = match backend
@@ -475,7 +495,7 @@ index f6608cc4..ca01e916 100644
              .await
          {
              Ok(_) => panic!("stored snapshot references must be resolved before ordinary creation"),
-@@ -2959,7 +3234,7 @@ mod tests {
+@@ -2959,7 +3254,7 @@ mod tests {
          config.snapshot_upper_source = Some(temp.path().join("upper.ext4"));
  
          let error = match backend
@@ -484,7 +504,7 @@ index f6608cc4..ca01e916 100644
              .await
          {
              Ok(_) => panic!("patches must be rejected when combined with from_snapshot"),
-@@ -3008,7 +3283,7 @@ mod tests {
+@@ -3008,7 +3303,7 @@ mod tests {
          ];
  
          let err = match backend
@@ -493,7 +513,7 @@ index f6608cc4..ca01e916 100644
              .await
          {
              Ok(_) => panic!("expected invalid direct-config mounts to be rejected"),
-@@ -3037,7 +3312,7 @@ mod tests {
+@@ -3037,7 +3332,7 @@ mod tests {
          config.spec.runtime.hostname = Some("y".repeat(MAX_HOSTNAME_BYTES + 1));
  
          let err = match backend

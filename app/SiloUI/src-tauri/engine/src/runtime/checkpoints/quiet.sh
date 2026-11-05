@@ -72,6 +72,19 @@ mask() {
   park "$1" && ln -sf /dev/null "$1"
 }
 
+# Succeeds when the Exec line of the autostart entry $1 has a word whose base name is $2, so an
+# entry still matches when it starts the program through a wrapper.
+desktop_runs() {
+  line=$(grep -m 1 '^Exec=' "$1" 2>/dev/null) || return 1
+  printf '%s\n' "${line#Exec=}" | tr -s ' \t' '\n\n' | (
+    while IFS= read -r w; do
+      w=${w#\"}; w=${w%\"}; w=${w#\'}; w=${w%\'}
+      [ "${w##*/}" = "$2" ] && exit 0
+    done
+    exit 1
+  )
+}
+
 pids_of() {
   for d in /proc/[0-9]*; do
     p=${d#/proc/}
@@ -140,6 +153,13 @@ for a; do
         park "$f" || exit 1
       done
       for f in "/etc/xdg/autostart/$n.desktop" "/root/.config/autostart/$n.desktop" /home/*/.config/autostart/"$n".desktop "/etc/supervisor/conf.d/$n.conf"; do park "$f" || exit 1; done
+      for f in /etc/xdg/autostart/*.desktop /root/.config/autostart/*.desktop /home/*/.config/autostart/*.desktop; do
+        [ -f "$f" ] || continue
+        if desktop_runs "$f" "$n"; then park "$f" || exit 1; fi
+      done
+      for f in "/root/.config/systemd/user/$unit.service" /home/*/.config/systemd/user/"$unit".service; do park "$f" || exit 1; done
+      mkdir -p /etc/systemd/user || exit 1
+      mask "/etc/systemd/user/$unit.service" || exit 1
       ;;
   esac
 done

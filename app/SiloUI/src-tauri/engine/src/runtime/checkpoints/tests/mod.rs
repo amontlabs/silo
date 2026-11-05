@@ -6257,3 +6257,34 @@ fn scrub_stays_inside_the_pattern_and_removes_links_without_following_them() {
     // The top of the file system is never a target.
     assert!(!scrub("/*"));
 }
+
+#[test]
+fn autostart_entries_match_any_word_of_their_exec_line() {
+    let functions = script_function("desktop_runs", "pids_of() {");
+    let dir = tempfile::tempdir().unwrap();
+    let check = |exec: &str, want: &str| {
+        let file = dir.path().join("entry.desktop");
+        std::fs::write(&file, format!("[Desktop Entry]\nName=x\nExec={exec}\n")).unwrap();
+        std::process::Command::new("sh")
+            .args([
+                "-c",
+                &format!("{functions}\ndesktop_runs \"$FILE\" \"$WANT\""),
+            ])
+            .env("FILE", &file)
+            .env("WANT", want)
+            .status()
+            .unwrap()
+            .success()
+    };
+    assert!(check(
+        "/usr/local/bin/silo-check-poller.sh",
+        "silo-check-poller.sh"
+    ));
+    assert!(check(
+        "sh /opt/silo-check-poller.sh --loop",
+        "silo-check-poller.sh"
+    ));
+    assert!(check("env A=1 \"/opt/poller\"", "poller"));
+    assert!(!check("/usr/bin/pollerx", "poller"));
+    assert!(!check("/usr/bin/poller.old", "poller"));
+}

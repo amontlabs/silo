@@ -3,10 +3,11 @@
 //! The fork's Data volume is already mounted for the offline rekey, so the scheduled work of
 //! the source is moved aside there and nothing of it starts at the fork's boot. Moved files
 //! are parked under `Library/Application Support/Silo/Quieted/` with their original paths, not
-//! deleted. Only scheduled work is parked (jobs that launchd starts on a timer, a watched
-//! path or a mount, crontabs, at jobs and periodic scripts); services that keep running or
-//! start at login stay, since they are part of the environment the fork is meant to have. What
-//! needs the running system (stopping named processes and launchd labels) runs first in the
+//! deleted. Scheduled work is parked (jobs that launchd starts on a timer, a watched path or a
+//! mount, crontabs, at jobs and periodic scripts), and so is any LaunchAgent or LaunchDaemon
+//! that the recipe's `stop` list names by label or program, whatever its schedule. Other
+//! services that keep running or start at login stay, since they are part of the environment
+//! the fork is meant to have. What needs the running system (stopping named processes and launchd labels) runs first in the
 //! fork's first boot (`fork_first_boot.rs`).
 use super::{guest_access::shell_quote, offline_setup};
 use serde::{Deserialize, Serialize};
@@ -239,14 +240,18 @@ pub(super) struct Outcome {
 /// Quiets a fork's mounted Data volume: parks the source's scheduled work and deletes the
 /// scrub paths. Every scrub path is checked before anything is changed. A repeat finds
 /// nothing left to park.
-pub(super) fn apply_offline(root: &Path, scrub: &[String]) -> Result<Outcome, String> {
+pub(super) fn apply_offline(
+    root: &Path,
+    scrub: &[String],
+    stop: &[String],
+) -> Result<Outcome, String> {
     let mut doomed = Vec::new();
     for pattern in scrub {
         let parts = data_volume_components(pattern)?;
         collect_matches(root.to_path_buf(), &parts, &mut Vec::new(), &mut doomed)?;
     }
     let mut outcome = Outcome::default();
-    launchd_jobs(root, &mut outcome)?;
+    launchd_jobs(root, stop, &mut outcome)?;
     for dir in ["private/var/at/tabs", "private/var/at/jobs"] {
         park_entries(root, dir, &mut outcome, &|_| true)?;
     }
@@ -298,7 +303,7 @@ struct Job {
     program: Option<String>,
 }
 
-fn launchd_jobs(root: &Path, outcome: &mut Outcome) -> Result<(), String> {
+fn launchd_jobs(root: &Path, stop: &[String], outcome: &mut Outcome) -> Result<(), String> {
     let mut dirs = vec![
         "Library/LaunchAgents".to_string(),
         "Library/LaunchDaemons".to_string(),
@@ -324,7 +329,7 @@ fn launchd_jobs(root: &Path, outcome: &mut Outcome) -> Result<(), String> {
             let Some(job) = read_job(&path.join(&name), &name) else {
                 continue;
             };
-            if job.scheduled && !keeps(&job, system) {
+            if (job.scheduled || is_stopped(&job, stop)) && !keeps(&job, system) {
                 park(root, &format!("{resolved}/{name}"), outcome)?;
             }
         }
@@ -427,6 +432,17 @@ fn read_job(file: &Path, name: &str) -> Option<Job> {
         scheduled: SCHEDULE_KEYS.iter().any(|key| dictionary.contains_key(key)),
         program,
     })
+}
+
+/// Whether the recipe's `stop` list names the job: by its label, or by the base name of its
+/// program. Such a job is parked whatever its schedule, so it can't start at the fork's boot.
+fn is_stopped(job: &Job, stop: &[String]) -> bool {
+    let program = job
+        .program
+        .as_deref()
+        .and_then(|program| program.rsplit('/').next());
+    stop.iter()
+        .any(|name| *name == job.label || program == Some(name.as_str()))
 }
 
 /// Silo's jobs stay. macOS's stay only when the file is in a system-wide folder and runs a
@@ -823,7 +839,7 @@ mod tests {
             ),
         );
 
-        let outcome = apply_offline(root, &[]).unwrap();
+        let outcome = apply_offline(root, &[], &[]).unwrap();
 
         assert_eq!(
             outcome.parked,
@@ -887,7 +903,7 @@ mod tests {
             &plist_with_keys("com.apple.user", INTERVAL, "/usr/bin/true"),
         );
 
-        let outcome = apply_offline(root, &[]).unwrap();
+        let outcome = apply_offline(root, &[], &[]).unwrap();
 
         assert_eq!(
             outcome.parked,
@@ -914,7 +930,7 @@ mod tests {
             &plist_with_keys("dev.tool.keep", "<key>KeepAlive</key><true/>", "/bin/true"),
         );
 
-        let outcome = apply_offline(root, &[]).unwrap();
+        let outcome = apply_offline(root, &[], &[]).unwrap();
 
         assert!(outcome.parked.is_empty());
         assert_eq!(outcome.still_scheduled, [format!("/{agent}")]);
@@ -936,7 +952,7 @@ mod tests {
             root.join("Users/silo/Library/LaunchAgents"),
         )
         .unwrap();
-        let outcome = apply_offline(root, &[]).unwrap();
+        let outcome = apply_offline(root, &[], &[]).unwrap();
         assert_eq!(outcome.parked, ["/Users/silo/dotfiles/agents/poller.plist"]);
 
         let absolute = tempfile::tempdir().unwrap();
@@ -953,7 +969,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            apply_offline(root, &[]).unwrap().parked,
+            apply_offline(root, &[], &[]).unwrap().parked,
             ["/Users/silo/agents/poller.plist"]
         );
 
@@ -967,7 +983,7 @@ mod tests {
             fs::create_dir_all(root.join("Users/silo/Library")).unwrap();
             std::os::unix::fs::symlink(target, root.join("Users/silo/Library/LaunchAgents"))
                 .unwrap();
-            let error = apply_offline(root, &[]).unwrap_err();
+            let error = apply_offline(root, &[], &[]).unwrap_err();
             assert!(error.contains("Data volume"), "{target}: {error}");
         }
     }
@@ -993,7 +1009,7 @@ mod tests {
             "#!/bin/sh",
         );
 
-        let outcome = apply_offline(root, &[]).unwrap();
+        let outcome = apply_offline(root, &[], &[]).unwrap();
 
         assert_eq!(outcome.parked.len(), 5);
         assert!(!exists(root, "private/var/at/tabs/silo"));
@@ -1013,10 +1029,10 @@ mod tests {
     fn a_disk_with_nothing_scheduled_is_untouched_and_a_repeat_parks_nothing_new() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
-        assert_eq!(apply_offline(root, &[]).unwrap(), Outcome::default());
+        assert_eq!(apply_offline(root, &[], &[]).unwrap(), Outcome::default());
         write(root, "private/var/at/tabs/silo", "x");
-        assert_eq!(apply_offline(root, &[]).unwrap().parked.len(), 1);
-        assert!(apply_offline(root, &[]).unwrap().parked.is_empty());
+        assert_eq!(apply_offline(root, &[], &[]).unwrap().parked.len(), 1);
+        assert!(apply_offline(root, &[], &[]).unwrap().parked.is_empty());
     }
 
     #[test]
@@ -1025,7 +1041,7 @@ mod tests {
         let root = dir.path();
         fs::create_dir_all(root.join("elsewhere/LaunchAgents")).unwrap();
         std::os::unix::fs::symlink(root.join("elsewhere"), root.join("Library")).unwrap();
-        assert!(apply_offline(root, &[]).is_err());
+        assert!(apply_offline(root, &[], &[]).is_err());
     }
 
     #[test]
@@ -1049,7 +1065,7 @@ mod tests {
             "/etc/tool.conf",
         ]
         .map(String::from);
-        apply_offline(root, &scrub).unwrap();
+        apply_offline(root, &scrub, &[]).unwrap();
 
         assert!(!exists(root, "Users/silo/proj/.env"));
         assert!(exists(root, "Users/silo/proj/keep.txt"));
@@ -1068,7 +1084,7 @@ mod tests {
         write(root, "outside/secret", "s");
         fs::create_dir_all(root.join("Users/silo")).unwrap();
         std::os::unix::fs::symlink(root.join("outside"), root.join("Users/silo/link")).unwrap();
-        let result = apply_offline(root, &["/Users/silo/link/secret".into()]);
+        let result = apply_offline(root, &["/Users/silo/link/secret".into()], &[]);
         assert!(result.is_err());
         assert!(exists(root, "outside/secret"));
     }
@@ -1144,7 +1160,7 @@ mod tests {
             "/Users/*/Library/LaunchAgents",
             "/Users/silo/Library/LaunchAgents/org.silo.*",
         ] {
-            assert!(apply_offline(root, &[path.into()]).is_err(), "{path}");
+            assert!(apply_offline(root, &[path.into()], &[]).is_err(), "{path}");
         }
         for kept in [
             "Users/silo/f",
@@ -1161,8 +1177,8 @@ mod tests {
             assert!(exists(root, kept), "{kept}");
         }
         // Something unrelated under the same folders is fine.
-        apply_offline(root, &["/Users/silo/Library/Caches/c".into()]).unwrap();
-        apply_offline(root, &["/Library/LaunchDaemons/dev.*".into()]).unwrap();
+        apply_offline(root, &["/Users/silo/Library/Caches/c".into()], &[]).unwrap();
+        apply_offline(root, &["/Library/LaunchDaemons/dev.*".into()], &[]).unwrap();
         assert!(!exists(root, "Users/silo/Library/Caches/c"));
         assert!(!exists(root, "Library/LaunchDaemons/dev.mine.plist"));
     }
@@ -1193,7 +1209,7 @@ mod tests {
             "/Users/silo/logs/*.log".to_string(),
             "/Library/Application Support/Silo/*".to_string(),
         ];
-        assert!(apply_offline(root, &scrub).is_err());
+        assert!(apply_offline(root, &scrub, &[]).is_err());
         assert!(exists(root, "Users/silo/logs/a.log"));
         assert!(exists(root, "Users/silo/logs/b.log"));
         assert!(exists(root, "Library/LaunchDaemons/dev.mine.plist"));
@@ -1206,7 +1222,7 @@ mod tests {
             "/Users/silo/logs/a.log".to_string(),
             "/Users/silo/x/link/silo".to_string(),
         ];
-        assert!(apply_offline(root, &scrub).is_err());
+        assert!(apply_offline(root, &scrub, &[]).is_err());
         assert!(exists(root, "Users/silo/logs/a.log"));
     }
 
@@ -1306,5 +1322,73 @@ mod tests {
             .unwrap()
             .still_scheduled
             .is_empty());
+    }
+
+    #[test]
+    fn jobs_named_in_stop_are_parked_whatever_their_schedule() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let keep_alive = "<key>KeepAlive</key><true/><key>RunAtLoad</key><true/>";
+        write(
+            root,
+            "Users/silo/Library/LaunchAgents/by-label.plist",
+            &plist_with_keys("dev.poller", keep_alive, "/opt/bin/other"),
+        );
+        write(
+            root,
+            "Library/LaunchDaemons/by-program.plist",
+            &plist_with_keys("dev.renamed", keep_alive, "/opt/bin/silo-check-poller.sh"),
+        );
+        write(
+            root,
+            "Users/silo/Library/LaunchAgents/unrelated.plist",
+            &plist_with_keys("dev.db", keep_alive, "/opt/bin/postgres"),
+        );
+        write(
+            root,
+            "Users/silo/Library/LaunchAgents/partial.plist",
+            &plist_with_keys(
+                "dev.partial",
+                keep_alive,
+                "/opt/bin/silo-check-poller.sh.old",
+            ),
+        );
+        let stop = ["dev.poller".to_string(), "silo-check-poller.sh".to_string()];
+        let outcome = apply_offline(root, &[], &stop).unwrap();
+        assert!(!exists(
+            root,
+            "Users/silo/Library/LaunchAgents/by-label.plist"
+        ));
+        assert!(!exists(root, "Library/LaunchDaemons/by-program.plist"));
+        assert!(exists(
+            root,
+            "Users/silo/Library/LaunchAgents/unrelated.plist"
+        ));
+        assert!(exists(
+            root,
+            "Users/silo/Library/LaunchAgents/partial.plist"
+        ));
+        assert_eq!(outcome.parked.len(), 2);
+        assert!(exists(
+            root,
+            "Library/Application Support/Silo/Quieted/Library/LaunchDaemons/by-program.plist"
+        ));
+    }
+
+    #[test]
+    fn stop_never_parks_silo_jobs() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        write(
+            root,
+            "Library/LaunchDaemons/com.silo.network-bootstrap.plist",
+            &plist_with("com.silo.network-bootstrap"),
+        );
+        let stop = ["com.silo.network-bootstrap".to_string()];
+        assert!(apply_offline(root, &[], &stop).unwrap().parked.is_empty());
+        assert!(exists(
+            root,
+            "Library/LaunchDaemons/com.silo.network-bootstrap.plist"
+        ));
     }
 }

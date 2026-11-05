@@ -6136,6 +6136,13 @@
     "MacosComputer": {
       "description": "Mirrors `app/SiloUI/src-tauri/engine/src/macos_computers.rs::MacosComputer`\n(lines 68-92). `kind` is added by the unified `computers.list` contract;\nsource `Option` fields remain explicit JSON nulls.",
       "properties": {
+        "boots": {
+          "default": 0,
+          "description": "How many times the engine has booted the computer.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
         "checkpointOperation": {
           "anyOf": [
             {
