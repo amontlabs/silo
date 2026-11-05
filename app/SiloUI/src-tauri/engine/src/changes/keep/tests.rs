@@ -1076,13 +1076,36 @@ fn a_fork_that_moves_while_it_is_read_stops_the_keep() {
     let world = simple_world();
     let (_dir, journal) = journal();
     let mut st = store(SIMPLE_BASE, SIMPLE_FORK, SIMPLE_BASE);
-    st.fork_later = Some(mt(
-        "F\t/root/.bashrc\t12\t2\tbb\nF\t/root/new.txt\t1\t3\tcc\n",
-    ));
+    st.fork_later = Some(mt("F\t/root/.bashrc\t13\t3\tcc\n"));
     let refusal = refused(run(&world, &st, &journal, &request(Hooks::default())).unwrap());
     assert_eq!(refusal.reason, "changed");
     assert_eq!(world.logged("file_write"), 0);
     assert_eq!(journal.latest_undoable("main"), None);
+}
+
+#[test]
+fn churn_the_keep_does_not_read_does_not_refuse_it() {
+    let world = simple_world();
+    let (_dir, journal) = journal();
+    let mut st = store(SIMPLE_BASE, SIMPLE_FORK, SIMPLE_BASE);
+    st.fork_later = Some(mt(&format!(
+        "{}F\t/root/Library/Preferences/com.apple.noise.plist\t9\t7\tzz\n",
+        &SIMPLE_FORK
+    )));
+    assert!(matches!(
+        run(&world, &st, &journal, &request(Hooks::default())).unwrap(),
+        Outcome::Kept(_)
+    ));
+}
+
+#[test]
+fn a_file_the_keep_copies_changing_between_the_looks_refuses_it() {
+    let world = simple_world();
+    let (_dir, journal) = journal();
+    let mut st = store(SIMPLE_BASE, SIMPLE_FORK, SIMPLE_BASE);
+    st.fork_later = Some(mt(&SIMPLE_FORK.replace("\tbb\n", "\tbc\n")));
+    let refusal = refused(run(&world, &st, &journal, &request(Hooks::default())).unwrap());
+    assert_eq!(refusal.reason, "changed");
 }
 
 #[test]
@@ -1852,7 +1875,7 @@ fn a_keep_is_refused_when_main_changed_between_the_checkpoint_and_the_held_lane(
     let world = simple_world();
     let (_dir, journal) = journal();
     let mut st = store(BASE, FORK, BASE);
-    st.main_later = Some(mt(&format!("{BASE}F\t/root/new.txt\t10\t3\tc:x\n")));
+    st.main_later = Some(mt(&BASE.replace("c:old", "c:other")));
     let mut req = request(Hooks::default());
     req.data_ok = true;
     let refusal = refused(run(&world, &st, &journal, &req).unwrap());
@@ -1861,6 +1884,22 @@ fn a_keep_is_refused_when_main_changed_between_the_checkpoint_and_the_held_lane(
     assert_eq!(world.logged("restore"), 0);
     assert_eq!(journal.pending("main").unwrap(), None);
     assert_eq!(journal.latest_undoable("main"), None);
+}
+
+#[test]
+fn main_churn_the_keep_does_not_touch_does_not_refuse_it() {
+    let world = simple_world();
+    let (_dir, journal) = journal();
+    let mut st = store(BASE, FORK, BASE);
+    st.main_later = Some(mt(&format!(
+        "{BASE}F\t/root/Documents/notes.txt\t10\t3\tc:x\nPROC\tsshd-session\n"
+    )));
+    let mut req = request(Hooks::default());
+    req.data_ok = true;
+    assert!(matches!(
+        run(&world, &st, &journal, &req).unwrap(),
+        Outcome::Kept(_)
+    ));
 }
 
 #[test]

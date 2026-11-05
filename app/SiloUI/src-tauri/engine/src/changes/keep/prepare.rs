@@ -10,7 +10,7 @@ use sha2::{Digest, Sha256};
 use super::{
     cron::{self, Merge},
     env::{KeepEnv, Live, ManifestStore, Os, RunAs},
-    plan::{self, Base, Conflict, Decision, FileAction, FileOp, Plan},
+    plan::{self, Base, Conflict, Decision, FileAction, FileOp, Plan, PkgOp},
     scripts, Refusal, Report, Request,
 };
 use crate::changes::{
@@ -202,6 +202,8 @@ pub fn prepare(
     env.note("Looking at the target");
     let main = parse(&store.capture(target)?)?;
     let mut plan = plan::build(&view.diff, &view.base, &view.fork, &main, os);
+    let first_plan = plan.clone();
+    let first_read = read_signature(&first_plan, &view.fork);
     let mut report = Report {
         fork: fork_name.to_owned(),
         target: target.to_owned(),
@@ -545,9 +547,10 @@ pub fn prepare(
     plan.cron
         .retain(|(user, _)| cron_texts.iter().any(|(u, _)| u == user));
 
-    // The fork must not have moved while it was read.
-    let (_, again) = compare(store, fork_name, &view.base, &store.capture(fork_name)?)?;
-    if review_digest(&again) != view.digest {
+    // The fork must not have moved while it was read: only what the keep uses is compared, so
+    // background churn elsewhere on the fork does not refuse a keep.
+    let again = parse(&store.capture(fork_name)?)?;
+    if read_signature(&first_plan, &again) != first_read {
         return Ok(refuse(
             report,
             "changed",
@@ -638,6 +641,50 @@ pub fn prepare(
         return Ok(refuse(report, "database", message, Vec::new(), &hint));
     }
     Ok(Prepared::Ready(ready(plan, cron_texts, bundles, report)))
+}
+
+/// The identity, in `fork`, of every item `plan` reads: file identities (kind, size, content
+/// digest; no timestamps), package versions, repo state and crontab digests. Anything else the
+/// fork changes while it is read is not part of the keep.
+pub(super) fn read_signature(plan: &Plan, fork: &Manifest) -> Vec<String> {
+    let mut paths: Vec<&str> = plan.file_cands.iter().map(|c| c.path.as_str()).collect();
+    paths.extend(plan.agents.iter().map(|a| a.path.as_str()));
+    for repo in &plan.repos {
+        paths.extend(repo.dirty.iter().map(|d| d.path.as_str()));
+    }
+    paths.sort_unstable();
+    paths.dedup();
+    let mut items: Vec<String> = paths
+        .into_iter()
+        .map(|p| {
+            let id = fork
+                .files
+                .get(p)
+                .map(|e| (e.kind, e.size.as_str(), e.digest.as_str()));
+            format!("file {p}: {id:?}")
+        })
+        .collect();
+    let package = |p: &PkgOp| fork.pkg.get(&(p.manager.clone(), p.name.clone()));
+    items.extend(
+        plan.packages
+            .iter()
+            .chain(&plan.removals)
+            .map(|p| format!("package {} {}: {:?}", p.manager, p.name, package(p))),
+    );
+    items.extend(plan.repos.iter().map(|r| {
+        format!(
+            "repo {}: {:?} {:?}",
+            r.repo,
+            fork.git.get(&r.repo),
+            fork.gitf.get(&r.repo)
+        )
+    }));
+    items.extend(
+        plan.cron
+            .iter()
+            .map(|(user, _)| format!("crontab {user}: {:?}", fork.cron.get(user))),
+    );
+    items
 }
 
 fn link_is_sensitive(path: &str, target: &str) -> bool {

@@ -6,7 +6,7 @@ use std::{
     any::Any,
     collections::{BTreeMap, BTreeSet},
     panic::{catch_unwind, AssertUnwindSafe},
-    sync::{Arc, Mutex},
+    sync::{Arc, Condvar, Mutex},
     time::Duration,
 };
 
@@ -44,7 +44,39 @@ struct Device {
     checkpoints: Vec<(String, String)>,
 }
 
+/// One promote test at a time (a test may hold several fakes): the lanes they take are keyed
+/// by the shared computer ids.
+struct Serial;
+
+static SERIAL: (Mutex<(Option<std::thread::ThreadId>, usize)>, Condvar) =
+    (Mutex::new((None, 0)), Condvar::new());
+
+impl Serial {
+    fn take() -> Self {
+        let me = std::thread::current().id();
+        let mut state = SERIAL.0.lock().unwrap_or_else(|e| e.into_inner());
+        while state.0.is_some_and(|owner| owner != me) {
+            state = SERIAL.1.wait(state).unwrap_or_else(|e| e.into_inner());
+        }
+        *state = (Some(me), state.1 + 1);
+        Serial
+    }
+}
+
+impl Drop for Serial {
+    fn drop(&mut self) {
+        let mut state = SERIAL.0.lock().unwrap_or_else(|e| e.into_inner());
+        state.1 -= 1;
+        if state.1 == 0 {
+            state.0 = None;
+            SERIAL.1.notify_all();
+        }
+    }
+}
+
 struct Fake {
+    /// Promote and undo take lanes keyed by computer id, shared by every test in the process.
+    _serial: Serial,
     os: Os,
     device: Mutex<Device>,
     /// Stop (panic) right after this step's work, before the journal marks it.
@@ -74,6 +106,7 @@ impl Fake {
             .proxy_policy
             .extend(["main".to_owned(), "try-it".to_owned()]);
         Arc::new(Self {
+            _serial: Serial::take(),
             os,
             device: Mutex::new(device),
             crash_after: Mutex::default(),
