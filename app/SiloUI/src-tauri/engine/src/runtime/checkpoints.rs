@@ -1099,9 +1099,7 @@ pub fn reclaim_after_capture_for_job(
             "Removing an older before-keep checkpoint",
             before_keep_retention,
         ),
-        CheckpointKind::Manual | CheckpointKind::Warm | CheckpointKind::ForkPoint => {
-            return Ok(())
-        }
+        CheckpointKind::Manual | CheckpointKind::Warm | CheckpointKind::ForkPoint => return Ok(()),
     };
     shutdown::ensure_accepting_operations()?;
     trim_kind_with(

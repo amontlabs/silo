@@ -176,7 +176,11 @@ pub fn verify_steps(spec: &RecipeSpec) -> Vec<Step> {
         "python3 -m pip show \"$name\" >/dev/null 2>&1"
     };
     add("pip", &p.pip, pip);
-    add("pipx", &p.pipx, "pipx list --short 2>/dev/null | grep -qi \"^$name \"");
+    add(
+        "pipx",
+        &p.pipx,
+        "pipx list --short 2>/dev/null | grep -qi \"^$name \"",
+    );
     add(
         "npm",
         &p.npm,

@@ -5,7 +5,7 @@
 use silo_api::methods::recipes::{RecipeEntry, RecipeOs, RecipeSpec};
 use time::format_description::well_known::Rfc3339;
 
-use super::{cache::Cache, default_resources, hash, normalize, scripts, validate, valid_name};
+use super::{cache::Cache, default_resources, hash, normalize, scripts, valid_name, validate};
 
 /// Builder computers are named `silo-build-<name>`. `silo list` leaves them out.
 pub const BUILDER_PREFIX: &str = "silo-build-";
@@ -81,7 +81,7 @@ pub trait BuildEnv {
     fn note(&self, line: &str);
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct BuildOutcome {
     pub entry: RecipeEntry,
     /// False when the cache already held this build.
@@ -129,9 +129,12 @@ pub fn build(
     }
     let builder_name = format!("{BUILDER_PREFIX}{name}");
     // A builder an interrupted build left behind is dropped first.
+    let mut dropped = None;
     if let Some(stale) = env.find(&builder_name)? {
-        env.delete(&stale)
-            .map_err(|error| format!("The old builder {builder_name} could not be dropped: {error}"))?;
+        dropped = Some(stale.clone());
+        env.delete(&stale).map_err(|error| {
+            format!("The old builder {builder_name} could not be dropped: {error}")
+        })?;
     }
     let (cpus, memory, disk) = default_resources(spec.os);
     env.note(&format!("Creating the builder computer for {name}"));
@@ -168,7 +171,8 @@ pub fn build(
             }
         }
         env.note("Saving the checkpoint");
-        let checkpoint = env.checkpoint(&created.id, &format!("recipe {name} {}", &spec_hash[..12]))?;
+        let checkpoint =
+            env.checkpoint(&created.id, &format!("recipe {name} {}", &spec_hash[..12]))?;
         env.stop(&created.id)?;
         Ok(checkpoint)
     })();
@@ -199,7 +203,9 @@ pub fn build(
         return Err(error);
     }
     // The rebuilt recipe replaces the old builder, which forks may no longer start from.
-    if let Some(old) = previous.filter(|old| old.computer_id != entry.computer_id) {
+    if let Some(old) = previous.filter(|old| {
+        old.computer_id != entry.computer_id && dropped.as_ref() != Some(&old.computer_id)
+    }) {
         let _ = env.delete(&old.computer_id);
     }
     Ok(BuildOutcome { entry, built: true })

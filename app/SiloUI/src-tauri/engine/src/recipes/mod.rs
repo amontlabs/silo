@@ -12,7 +12,7 @@ mod scripts;
 use sha2::{Digest, Sha256};
 use silo_api::methods::recipes::{RecipeOs, RecipePackages, RecipeService, RecipeSpec};
 
-pub use build::{build, BuildEnv, BuildOutcome, Created, ExecOut, RunAs, BUILDER_PREFIX};
+pub use build::{build, remove, BuildEnv, BuildOutcome, Created, ExecOut, RunAs, BUILDER_PREFIX};
 pub use cache::Cache;
 
 /// Folded into every hash, so a change to how a build runs retires every cached build.
@@ -131,7 +131,9 @@ pub fn validate(spec: &RecipeSpec) -> Result<(), String> {
             return Err(format!("packages.{manager} cannot be used in {os} recipe."));
         }
         if let Some(bad) = packages.iter().find(|package| !safe_word(package.trim())) {
-            return Err(format!("packages.{manager}: `{bad}` is not a package name."));
+            return Err(format!(
+                "packages.{manager}: `{bad}` is not a package name."
+            ));
         }
     }
     let mut seen = std::collections::BTreeSet::new();
