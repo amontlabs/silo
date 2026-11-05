@@ -133,8 +133,6 @@ MB=$(snap); echo "$MB"
 t=$(now); "$SILO" fold $MFORK --promote --json > /tmp/p3-mpromote.json 2> /tmp/p3-mpromote.err; rc=$?; check "silo fold $MFORK --promote (macOS)" $rc "wall $(( $(now)-t )) s"
 tail -5 /tmp/p3-mpromote.err; head -c 1200 /tmp/p3-mpromote.json; echo
 snap; AR=$(archive); echo "archive: [$AR]"
-if [ -z "$AR" ]; then echo "-- diagnostic retry: stop both, then promote again"; "$SILO" stop $MFORK >/dev/null 2>&1; "$SILO" stop $MSRC >/dev/null 2>&1; sleep 5; snap
-  "$SILO" fold $MFORK --promote --json > /tmp/p3-mpromote2.json 2> /tmp/p3-mpromote2.err; rc2=$?; echo "retry rc=$rc2"; head -c 700 /tmp/p3-mpromote2.json; echo; check "diagnostic: silo fold $MFORK --promote with both stopped" $rc2 ""; snap; fi
 "$SILO" list --json | python3 -c "
 import json,sys
 d=json.load(sys.stdin); d=d if isinstance(d,list) else d.get('computers',d)

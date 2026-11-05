@@ -94,7 +94,7 @@ pub trait PromoteEnv: Send + Sync {
     /// Saves the `before-promote` checkpoint of main.
     fn checkpoint(&self, id: &str, name: &str) -> Result<CheckpointRef, String>;
     fn stop(&self, id: &str) -> Result<(), String>;
-    /// Starts the computer again after an undo.
+    /// Starts the computer again after a promote or an undo.
     fn start(&self, _id: &str) -> Result<(), String> {
         Ok(())
     }
@@ -392,6 +392,15 @@ pub fn promote(
         "{} is now {}. {} was archived as {}; `silo undo {}` swaps them back.",
         fork.name, main.name, main.name, record.swap.archive_name, main.name
     ));
+    // The new main runs when the old one did (best effort: the swap is done); the archive stays stopped.
+    if record.swap.target_was_running {
+        env.note("Starting the new main");
+        if let Err(error) = env.start(&record.swap.fork_id) {
+            report
+                .notes
+                .push(format!("{} was not started again: {error}", main.name));
+        }
+    }
     Ok(Outcome::Promoted(report))
 }
 
