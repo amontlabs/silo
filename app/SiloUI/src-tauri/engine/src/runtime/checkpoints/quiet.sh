@@ -126,11 +126,17 @@ if [ -f /etc/crontab ]; then
 fi
 
 mkdir -p /etc/systemd/system || exit 1
-# A timer the computer defined itself is saved before a mask takes its name.
+# A timer the computer defined itself is saved before a mask takes its name. Each mask made here
+# is listed first, so a promote removes those and no mask that was there before or came later.
+masked_list=$quiet/$token.masked-timers.list
 for dir in /etc/systemd/system /usr/lib/systemd/system /lib/systemd/system; do
   for f in "$dir"/*.timer; do
     [ -e "$f" ] || [ -L "$f" ] || continue
-    mask "/etc/systemd/system/$(basename "$f")" || exit 1
+    unit=/etc/systemd/system/$(basename "$f")
+    if ! { [ -L "$unit" ] && [ "$(readlink "$unit")" = /dev/null ]; }; then
+      grep -qxF "$unit" "$masked_list" 2>/dev/null || printf '%s\n' "$unit" >> "$masked_list" || exit 1
+    fi
+    mask "$unit" || exit 1
   done
 done
 for f in /root/.config/systemd/user/*.timer /home/*/.config/systemd/user/*.timer; do park "$f" || exit 1; done

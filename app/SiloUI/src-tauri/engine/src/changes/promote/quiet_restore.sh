@@ -3,12 +3,17 @@ set -u
 # The jobs were moved under /var/lib/silo-quiet/disabled when the fork was made quiet. An item
 # the fork has replaced since stays where it is. Repeating either mode finds nothing more to do.
 # SILO_ROOT is a prefix for every path, so the script can be tried on a directory.
+#
+# Every change is written to restored.list before it is made ("pending <kind> <path>") and
+# marked afterwards ("done <kind> <path>"); each change is one rename or removal, so a run that
+# stops anywhere leaves an item either untouched or complete. `repark` reads the list and looks
+# at what each item is now. `restore` ends by printing the whole list as "recorded ..." lines,
+# so a run that finds nothing left to do still reports what an earlier run restored.
 mode=${1:-}
 root=${SILO_ROOT:-}
 quiet=$root/var/lib/silo-quiet
 disabled=$quiet/disabled
 marker=$quiet/restored.list
-
 # The parked paths that are scheduled jobs; everything else under disabled/ belongs to the
 # services the fork was asked to stop and stays parked.
 scheduled() {
@@ -20,7 +25,9 @@ scheduled() {
   return 1
 }
 
-remember() { printf '%s %s\n' "$1" "$2" >> "$marker" || exit 1; }
+# Written and flushed before the change it names.
+intend() { printf 'pending %s %s\n' "$1" "$2" >> "$marker" || exit 1; sync; }
+finish() { printf 'done %s %s\n' "$1" "$2" >> "$marker" || exit 1; }
 
 parked_list() {
   [ -d "$disabled" ] || return 0
@@ -44,6 +51,14 @@ collision_copy() {
   esac
 }
 
+# Whether the quiet step listed the mask at $1 as its own (<token>.masked-timers.list).
+masked_by_quiet() {
+  for list in "$quiet"/*.masked-timers.list; do
+    [ -f "$list" ] && grep -qxF "$1" "$list" && return 0
+  done
+  return 1
+}
+
 restore() {
   mkdir -p "$quiet" || exit 1
   parked_list | while IFS= read -r rel; do
@@ -54,44 +69,60 @@ restore() {
     if [ -e "$dest" ] || [ -L "$dest" ]; then
       if [ -L "$dest" ] && [ "$(readlink "$dest")" = /dev/null ]; then
         kind=mask
-        rm -f "$dest" || exit 1
       else
         echo "left $rel"
         continue
       fi
     fi
     mkdir -p "$(dirname "$dest")" || exit 1
-    mv "$from" "$dest" || exit 1
-    remember "$kind" "$rel"
+    intend "$kind" "$rel"
+    # One rename; over a mask it replaces the link, so the timer is never left unmasked and
+    # unrestored in between.
+    mv -f "$from" "$dest" || exit 1
+    finish "$kind" "$rel"
     echo "restored $rel"
   done || exit 1
   if [ -f "$disabled/etc/crontab" ]; then
-    if crontab_is_quiet; then
-      cat "$disabled/etc/crontab" > "$root/etc/crontab" || exit 1
-      rm -f "$disabled/etc/crontab"
-      remember crontab /etc/crontab
+    if [ -f "$root/etc/crontab" ] && cmp -s "$disabled/etc/crontab" "$root/etc/crontab"; then
+      # An earlier run wrote it and stopped before removing the saved copy.
+      rm -f "$disabled/etc/crontab" || exit 1
+      finish crontab /etc/crontab
+      echo "restored /etc/crontab"
+    elif crontab_is_quiet; then
+      intend crontab /etc/crontab
+      cat "$disabled/etc/crontab" > "$root/etc/crontab.silo-new" || exit 1
+      mv -f "$root/etc/crontab.silo-new" "$root/etc/crontab" || exit 1
+      rm -f "$disabled/etc/crontab" || exit 1
+      finish crontab /etc/crontab
       echo "restored /etc/crontab"
     else
       echo "left /etc/crontab"
     fi
   fi
-  # A timer the quiet step masked had no file to park: its vendor unit is what comes back.
+  # A timer the quiet step masked had no file to park: its vendor unit is what comes back. Only
+  # the masks the quiet step recorded are removed.
   for f in "$root"/etc/systemd/system/*.timer; do
     [ -L "$f" ] && [ "$(readlink "$f")" = /dev/null ] || continue
     unit=${f##*/}
+    masked_by_quiet "/etc/systemd/system/$unit" || continue
     if [ -e "$root/usr/lib/systemd/system/$unit" ] || [ -e "$root/lib/systemd/system/$unit" ]; then
+      intend unmask "/etc/systemd/system/$unit"
       rm -f "$f" || exit 1
-      remember unmask "/etc/systemd/system/$unit"
+      finish unmask "/etc/systemd/system/$unit"
       echo "restored /etc/systemd/system/$unit"
     fi
   done
   [ -n "$root" ] || systemctl daemon-reload >/dev/null 2>&1 || true
   sync
+  [ -f "$marker" ] && sed 's/^/recorded /' "$marker"
+  return 0
 }
 
 repark() {
   [ -f "$marker" ] || exit 0
-  while IFS=' ' read -r kind rel; do
+  while IFS=' ' read -r state kind rel; do
+    # A list written before the states existed has only "<kind> <path>".
+    case $state in pending|done) ;; *) rel=$kind; kind=$state;; esac
     [ -n "$rel" ] || continue
     dest=$root$rel
     case $kind in
@@ -107,11 +138,16 @@ repark() {
         if [ ! -e "$dest" ] && [ ! -L "$dest" ]; then ln -sf /dev/null "$dest" || exit 1; fi
         ;;
       crontab)
-        if [ -f "$dest" ] && [ ! -e "$disabled/etc/crontab" ]; then
-          mkdir -p "$disabled/etc" || exit 1
-          cp "$dest" "$disabled/etc/crontab" || exit 1
-          grep '^[[:space:]]*#' "$dest" > "$quiet/crontab.new"
-          cat "$quiet/crontab.new" > "$dest"; rm -f "$quiet/crontab.new"
+        if [ -f "$dest" ]; then
+          if [ ! -e "$disabled/etc/crontab" ]; then
+            mkdir -p "$disabled/etc" || exit 1
+            cp "$dest" "$disabled/etc/crontab" || exit 1
+          fi
+          # Quiet again unless it already is (the saved copy then still holds the jobs).
+          if ! crontab_is_quiet; then
+            grep '^[[:space:]]*#' "$dest" > "$quiet/crontab.new"
+            cat "$quiet/crontab.new" > "$dest"; rm -f "$quiet/crontab.new"
+          fi
         fi
         ;;
     esac
