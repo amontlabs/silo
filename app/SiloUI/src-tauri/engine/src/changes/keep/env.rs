@@ -190,6 +190,18 @@ pub trait KeepEnv: Send + Sync {
     fn hold(&self, _computer: &str, _label: &str) -> Result<Box<dyn Any>, String> {
         Ok(Box::new(()))
     }
+    /// Puts main back from an interrupted keep's checkpoint. `held` is called once main's
+    /// lane is held (or, when it cannot be, just before the restore), so the caller knows
+    /// nothing else can start on it meanwhile.
+    fn recover(
+        &self,
+        computer: &str,
+        checkpoint_id: &str,
+        held: &dyn Fn(),
+    ) -> Result<(), String> {
+        held();
+        self.restore(computer, checkpoint_id)
+    }
     /// Progress lines for the job.
     fn note(&self, _line: &str) {}
 }

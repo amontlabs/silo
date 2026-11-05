@@ -58,7 +58,7 @@ pub fn normalize(os: Os, path: &str) -> String {
 /// unreadable), mode, sha256 or link target. Links are reported, never followed.
 pub fn inspect(os: Os, paths: &[String]) -> GuestCmd {
     let body = format!(
-        "while IFS= read -r -d '' p; do\n  if [ -L \"$p\" ]; then printf '%s\\0L\\0-\\0%s\\0' \"$p\" \"$(readlink \"$p\")\"\n  elif [ -d \"$p\" ]; then printf '%s\\0D\\0-\\0-\\0' \"$p\"\n  elif [ -f \"$p\" ]; then\n    if [ -r \"$p\" ]; then m=$({mode} \"$p\"); h=$({sha} < \"$p\" | cut -d' ' -f1); printf '%s\\0F\\0%s\\0%s\\0' \"$p\" \"$m\" \"$h\"; else printf '%s\\0E\\0-\\0-\\0' \"$p\"; fi\n  elif [ -e \"$p\" ]; then printf '%s\\0E\\0-\\0-\\0' \"$p\"\n  else printf '%s\\0X\\0-\\0-\\0' \"$p\"; fi\ndone",
+        "while IFS= read -r -d '' p; do\n  if [ -L \"$p\" ]; then printf '%s\\0L\\0-\\0%s\\0' \"$p\" \"$(readlink -- \"$p\")\"\n  elif [ -d \"$p\" ]; then printf '%s\\0D\\0-\\0-\\0' \"$p\"\n  elif [ -f \"$p\" ]; then\n    if [ -r \"$p\" ]; then m=$({mode} \"$p\"); h=$({sha} < \"$p\" | cut -d' ' -f1); printf '%s\\0F\\0%s\\0%s\\0' \"$p\" \"$m\" \"$h\"; else printf '%s\\0E\\0-\\0-\\0' \"$p\"; fi\n  elif [ -e \"$p\" ]; then printf '%s\\0E\\0-\\0-\\0' \"$p\"\n  else printf '%s\\0X\\0-\\0-\\0' \"$p\"; fi\ndone",
         mode = stat_mode(os),
         sha = sha(os)
     );
@@ -161,6 +161,25 @@ pub fn pkg_install(os: Os, manager: &str, specs: &[String]) -> Result<GuestCmd, 
     Ok(c)
 }
 
+/// Refuses, with exit code 4, a removal that would take anything beyond the listed packages
+/// with it: apt's simulated removal, or the installed formulae that depend on a brew one.
+fn remove_guard(manager: &str) -> &'static str {
+    match manager {
+        "dpkg" => concat!(
+            "sim=$(apt-get -s remove -- \"${S[@]}\" 2>/dev/null | sed -n 's/^Remv \\([^ ]*\\).*/\\1/p')\n",
+            "extra=\"\"\n",
+            "for p in $sim; do b=${p%%:*}; ok=0; for s in \"${S[@]}\"; do [ \"$b\" = \"${s%%:*}\" ] && ok=1; done; [ $ok = 1 ] || extra=\"$extra $b\"; done\n",
+            "if [ -n \"$extra\" ]; then echo \"Removing these packages would also remove:$extra\" >&2; exit 4; fi\n",
+        ),
+        "brew" => concat!(
+            "extra=\"\"\n",
+            "for s in \"${S[@]}\"; do for u in $(brew uses --installed -- \"$s\" 2>/dev/null); do ok=0; for t in \"${S[@]}\"; do [ \"$u\" = \"$t\" ] && ok=1; done; [ $ok = 1 ] || extra=\"$extra $u\"; done; done\n",
+            "if [ -n \"$extra\" ]; then echo \"Other installed packages depend on these:$extra\" >&2; exit 4; fi\n",
+        ),
+        _ => "",
+    }
+}
+
 pub fn pkg_remove(os: Os, manager: &str, names: &[String]) -> Result<GuestCmd, String> {
     let remove = match (manager, os) {
         ("dpkg", Os::Linux) => {
@@ -174,8 +193,9 @@ pub fn pkg_remove(os: Os, manager: &str, names: &[String]) -> Result<GuestCmd, S
         ("cargo", _) => "for s in \"${S[@]}\"; do cargo uninstall -- \"$s\"; done",
         _ => return Err(format!("{manager} packages cannot be removed here.")),
     };
+    let guard = remove_guard(manager);
     let body = format!(
-        "set -e\nS=()\nwhile IFS= read -r s; do [ -n \"$s\" ] && S+=(\"$s\"); done <<<\"$A_specs\"\n{remove}"
+        "set -e\nS=()\nwhile IFS= read -r s; do [ -n \"$s\" ] && S+=(\"$s\"); done <<<\"$A_specs\"\n{guard}{remove}"
     );
     let mut c = cmd("pkg_remove", &body)
         .arg("manager", manager)
@@ -242,12 +262,13 @@ pub fn git_clone(repo: &str, bundle: &str) -> GuestCmd {
     .arg("bundle", bundle)
 }
 
-/// NUL-delimited paths the commits `old..new` add or change (all tracked files when `old`
-/// is empty).
+/// NUL-delimited paths that any commit in `old..new` touched, including ones a later commit
+/// deleted (the whole history of `new` when `old` is empty). Blank entries may appear
+/// between commits.
 pub fn git_changed(repo: &str, old: &str, new: &str) -> GuestCmd {
     cmd(
         "git_changed",
-        "cd \"$A_repo\" || exit 1\nif [ -z \"$A_old\" ]; then git ls-tree -r -z --name-only \"$A_new\"; else git diff -z --name-only --diff-filter=d \"$A_old\" \"$A_new\"; fi",
+        "cd \"$A_repo\" || exit 1\nif [ -z \"$A_old\" ]; then r=\"$A_new\"; else r=\"$A_old..$A_new\"; fi\ngit log -z --name-only --format= \"$r\" --",
     )
     .arg("repo", repo)
     .arg("old", old)
@@ -259,7 +280,7 @@ pub fn git_changed(repo: &str, old: &str, new: &str) -> GuestCmd {
 pub fn git_file_state(repo: &str, rel: &str, base: &str) -> GuestCmd {
     cmd(
         "git_file_state",
-        "cd \"$A_repo\" || exit 1\nb=-; if [ -n \"$A_base\" ]; then b=$(git rev-parse -q --verify \"$A_base:$A_rel\" 2>/dev/null || echo -); fi\nif [ -L \"$A_rel\" ]; then m=\"L:$(readlink \"$A_rel\")\"; elif [ -f \"$A_rel\" ]; then m=$(git hash-object -- \"$A_rel\"); else m=-; fi\necho \"$b $m\"",
+        "cd \"$A_repo\" || exit 1\nb=-; if [ -n \"$A_base\" ]; then b=$(git rev-parse -q --verify \"$A_base:$A_rel\" 2>/dev/null || echo -); fi\nif [ -L \"$A_rel\" ]; then m=\"L:$(readlink -- \"$A_rel\")\"; elif [ -f \"$A_rel\" ]; then m=$(git hash-object -- \"$A_rel\"); else m=-; fi\necho \"$b $m\"",
     )
     .arg("repo", repo)
     .arg("rel", rel)
