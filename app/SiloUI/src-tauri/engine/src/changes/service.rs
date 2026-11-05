@@ -17,7 +17,7 @@ use silo_api::{
 
 use super::{
     collect::{self, GuestRunner, Options},
-    diff as diff_module,
+    diff as diff_module, keep,
     store::{self, Slot, Store},
     IgnoreList, Manifest,
 };
@@ -232,6 +232,7 @@ fn diff(
         captured_at: current_meta.captured_at,
         baseline_applied: noise.is_some(),
         baseline_available: cached.is_some(),
+        review_digest: keep::review_digest(&result),
     })
 }
 

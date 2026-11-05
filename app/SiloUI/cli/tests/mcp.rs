@@ -79,6 +79,8 @@ async fn initialize_list_and_call_round_trip() {
         "exec",
         "checkpoint",
         "retry_setup",
+        "fold",
+        "undo",
     ] {
         assert!(
             names.contains(&expected),

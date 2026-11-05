@@ -52,6 +52,10 @@ pub enum Command {
     RetrySetup { computer: String },
     /// Copy a computer for a task.
     Fork(ForkCommand),
+    /// Keep a fork's changes into the computer it came from.
+    Fold(FoldCommand),
+    /// Put a computer back to before its latest keep.
+    Undo { computer: String },
     /// Show what changed in a computer since it was forked.
     Diff(DiffCommand),
     /// Throw a computer away.
@@ -122,6 +126,27 @@ pub struct ForkCommand {
     #[arg(long = "secret", value_name = "NAME")]
     pub secrets: Vec<String>,
     /// A recipe whose quiet: and scrub: lists apply to the fork.
+    #[arg(long, value_name = "PATH")]
+    pub recipe_file: Option<PathBuf>,
+}
+
+#[derive(Args, Debug)]
+pub struct FoldCommand {
+    /// The fork whose changes are kept.
+    pub fork: String,
+    /// The computer to keep into (default: the one the fork was made from).
+    #[arg(long, value_name = "COMPUTER")]
+    pub into: Option<String>,
+    /// Report what would be kept and what would stop it, changing nothing.
+    #[arg(long)]
+    pub dry_run: bool,
+    /// Carry database changes even though no migrate step covers them.
+    #[arg(long)]
+    pub data_ok: bool,
+    /// The review digest from `silo diff --json`; the keep refuses if the fork has changed since.
+    #[arg(long, value_name = "DIGEST")]
+    pub reviewed: Option<String>,
+    /// A recipe whose keep: section applies.
     #[arg(long, value_name = "PATH")]
     pub recipe_file: Option<PathBuf>,
 }
@@ -218,6 +243,7 @@ pub async fn run(cli: Cli, working_directory: &Path) -> Result<i32, CliError> {
     let settings = project.load_settings()?;
     let recipe = match &cli.command {
         Command::Fork(fork) => ops::resolve_recipe(fork.recipe_file.as_deref(), &project)?,
+        Command::Fold(fold) => ops::resolve_recipe(fold.recipe_file.as_deref(), &project)?,
         _ => None,
     };
     let engine = Engine::connect(&socket).await?;
@@ -285,6 +311,28 @@ async fn dispatch(
             let value = ops::fork(engine, &args, settings.as_ref(), progress).await?;
             emit(json, &value, |v| render::computer_line("Forked", v));
         }
+        Command::Fold(fold) => {
+            let keep = ops::keep_hooks(recipe.as_ref());
+            let value = ops::fold(
+                engine,
+                &fold.fork,
+                fold.into.as_deref(),
+                keep,
+                ops::FoldOptions {
+                    dry_run: fold.dry_run,
+                    data_ok: fold.data_ok,
+                    reviewed: fold.reviewed,
+                },
+                progress,
+            )
+            .await?;
+            emit(json, &value, render::fold);
+            return Ok(if value["status"] == "refused" { 2 } else { 0 });
+        }
+        Command::Undo { computer } => {
+            let value = ops::undo(engine, &computer, progress).await?;
+            emit(json, &value, render::undo);
+        }
         Command::Diff(diff) => {
             let args = DiffArgs {
                 computer: diff.computer,
@@ -294,7 +342,10 @@ async fn dispatch(
             };
             let value = ops::diff(engine, &args, progress).await?;
             emit(json, &value, |v| {
-                let text = v["text"].as_str().unwrap_or_default().to_owned();
+                let mut text = v["text"].as_str().unwrap_or_default().to_owned();
+                if let Some(digest) = v["reviewDigest"].as_str().filter(|d| !d.is_empty()) {
+                    text.push_str(&format!("\nreview: {digest}"));
+                }
                 match v["baselineError"].as_str() {
                     Some(error) => format!("{error}\n\n{text}"),
                     None => text,
@@ -501,6 +552,22 @@ mod tests {
         assert_eq!(trim_newline("abc\r\n".into()), "abc");
         assert_eq!(trim_newline("abc\n\n".into()), "abc\n");
         assert_eq!(trim_newline("abc".into()), "abc");
+    }
+
+    #[test]
+    fn fold_takes_a_fork_a_target_and_dry_run() {
+        let Command::Fold(fold) = parse(&["fold", "try", "--into", "main", "--dry-run"]).command
+        else {
+            panic!("not a fold")
+        };
+        assert_eq!(
+            (fold.fork.as_str(), fold.into.as_deref(), fold.dry_run),
+            ("try", Some("main"), true)
+        );
+        assert!(matches!(
+            parse(&["undo", "main"]).command,
+            Command::Undo { .. }
+        ));
     }
 
     #[test]

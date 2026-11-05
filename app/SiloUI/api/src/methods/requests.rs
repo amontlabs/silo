@@ -20,6 +20,7 @@ use super::exports;
 use super::files;
 use super::github;
 use super::guest;
+use super::keep;
 use super::logs;
 use super::macos;
 use super::network;
@@ -39,6 +40,16 @@ use super::MethodParams;
 /// `activity.setup.read`
 pub fn activity_setup_read(params: common::DeviceParams) -> Request<kind::Query> {
     Request::new(MethodParams::ActivitySetupRead(params))
+}
+
+/// `changes.keep`
+pub fn changes_keep(params: keep::ChangesKeepParams) -> Request<kind::Job> {
+    Request::new(MethodParams::ChangesKeep(params))
+}
+
+/// `changes.undo`
+pub fn changes_undo(params: keep::ChangesUndoParams) -> Request<kind::Job> {
+    Request::new(MethodParams::ChangesUndo(params))
 }
 
 /// `changes.baseline`

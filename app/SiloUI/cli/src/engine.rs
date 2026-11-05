@@ -103,6 +103,8 @@ pub fn default_socket(flag: Option<PathBuf>, allow_other: bool) -> Result<PathBu
 pub struct Engine {
     client: Client,
     last_job: Arc<Mutex<Option<String>>>,
+    /// Where the CLI keeps what it remembers between commands (beside the socket).
+    memory: std::path::PathBuf,
     _closer: Arc<Closer>,
 }
 
@@ -246,7 +248,26 @@ impl Engine {
             _closer: Arc::new(Closer(client.clone())),
             client,
             last_job: Arc::new(Mutex::new(None)),
+            memory: socket.parent().map(Path::to_path_buf).unwrap_or_default(),
         })
+    }
+
+    /// Remembers the review digest of the last `silo diff` of a computer.
+    pub fn remember_review(&self, computer_id: &str, digest: &str) {
+        let path = self.memory.join("cli-reviewed.json");
+        let mut all: serde_json::Map<String, Value> = std::fs::read(&path)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+            .unwrap_or_default();
+        all.insert(computer_id.to_owned(), Value::String(digest.to_owned()));
+        let _ = serde_json::to_vec(&all).map(|bytes| std::fs::write(&path, bytes));
+    }
+
+    /// The digest the last `silo diff` of this computer showed, if any.
+    pub fn recall_review(&self, computer_id: &str) -> Option<String> {
+        let bytes = std::fs::read(self.memory.join("cli-reviewed.json")).ok()?;
+        let all: serde_json::Map<String, Value> = serde_json::from_slice(&bytes).ok()?;
+        all.get(computer_id)?.as_str().map(str::to_owned)
     }
 
     pub fn is_closed(&self) -> bool {

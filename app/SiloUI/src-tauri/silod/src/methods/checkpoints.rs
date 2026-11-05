@@ -9,6 +9,7 @@
 mod changes;
 mod device;
 mod exports;
+mod keep;
 mod migration;
 pub(crate) mod preparation;
 
@@ -72,6 +73,8 @@ async fn dispatch(
         MethodName::ChangesCapture => changes::capture(context, params).await,
         MethodName::ChangesDiff => changes::diff(context, params).await,
         MethodName::ChangesBaseline => changes::baseline(context, params).await,
+        MethodName::ChangesKeep => keep::keep(context, params).await,
+        MethodName::ChangesUndo => keep::undo(context, params).await,
         MethodName::CheckpointsCreate => create(context, params).await,
         MethodName::CheckpointsRestore => restore(context, params).await,
         MethodName::CheckpointsFork => fork(context, params).await,
@@ -162,11 +165,16 @@ pub(super) fn macos_context(context: &HandlerContext) -> MacosContext {
 /// The two-platform checkpoint service, reading the owner's retention setting from the
 /// engine's settings each time it is asked.
 pub(super) fn service(context: &HandlerContext) -> Service {
-    let engine = engine_context(context);
+    service_for(context.silod_context())
+}
+
+/// The same service for work that has no request, such as startup recovery.
+pub(crate) fn service_for(silod: &crate::context::SilodContext) -> Service {
+    let engine: Arc<dyn EngineContext> = Arc::new(silod.clone());
     let before_keep_engine = engine.clone();
     Service::new(
-        context.silod_context().runtime_host(),
-        macos_context(context),
+        silod.runtime_host(),
+        silod.macos_context(),
         Arc::new(move || {
             silo_engine::settings::automatic_checkpoint_retention_count_for(engine.as_ref())
         }),

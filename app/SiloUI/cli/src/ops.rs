@@ -11,6 +11,7 @@ use silo_api::methods::{
         MacosComputerCreateRequest,
     },
     guest::GuestExecParams,
+    keep::{ChangesKeepParams, ChangesUndoParams, KeepHooks},
     requests,
     secrets::{SecretSaveAction, SecretSaveRequest, SecretsSaveParams},
 };
@@ -533,11 +534,15 @@ pub async fn diff(
             "baselineAvailable",
             "baseCapturedAt",
             "capturedAt",
+            "reviewDigest",
         ] {
             object.insert(key.to_owned(), result[key].clone());
         }
         if let Some(seconds) = baseline_seconds {
             object.insert("baselineIdleSeconds".to_owned(), json!(seconds));
+        }
+        if let Some(digest) = result["reviewDigest"].as_str().filter(|d| !d.is_empty()) {
+            engine.remember_review(&target.id, digest);
         }
         if let Some(error) = baseline_error {
             object.insert("baselineError".to_owned(), json!(error));
@@ -920,6 +925,82 @@ pub async fn checkpoint(
         )
         .await?;
     Ok(result.get("checkpoint").cloned().unwrap_or(result))
+}
+
+/// The recipe's `keep:` section as the engine takes it.
+pub fn keep_hooks(recipe: Option<&Recipe>) -> Option<KeepHooks> {
+    recipe.map(|recipe| KeepHooks {
+        restart: recipe.keep.restart.clone(),
+        migrate: recipe.keep.migrate.clone(),
+        after: recipe.keep.after.clone(),
+    })
+}
+
+/// What a keep is asked beyond the fork and target.
+#[derive(Clone, Debug, Default)]
+pub struct FoldOptions {
+    pub dry_run: bool,
+    /// Carry database changes even though no migrate step covers them.
+    pub data_ok: bool,
+    /// The review digest from `silo diff --json`.
+    pub reviewed: Option<String>,
+}
+
+/// Keeps a fork's changes into `into` (default: the computer the fork was made from). A
+/// refused keep is a result (`status: "refused"`), not an error: nothing was changed.
+pub async fn fold(
+    engine: &Engine,
+    fork: &str,
+    into: Option<&str>,
+    keep: Option<KeepHooks>,
+    options: FoldOptions,
+    progress: Progress<'_>,
+) -> Result<Value, CliError> {
+    let FoldOptions {
+        dry_run,
+        data_ok,
+        reviewed,
+    } = options;
+    let fork = engine.computer(fork).await?;
+    // Without a digest, the one the last `silo diff` of this fork showed pins the keep.
+    let reviewed = reviewed.or_else(|| engine.recall_review(&fork.id));
+    let target_id = match into {
+        Some(name) => Some(engine.computer(name).await?.id),
+        None => None,
+    };
+    let label = if dry_run { "Checking" } else { "Keeping" };
+    engine
+        .run_job(
+            &format!("{label} {}", fork.name),
+            requests::changes_keep(ChangesKeepParams {
+                fork_id: fork.id,
+                target_id,
+                keep,
+                dry_run: dry_run.then_some(true),
+                data_ok: data_ok.then_some(true),
+                review_digest: reviewed,
+            }),
+            progress,
+        )
+        .await
+}
+
+/// Puts a computer back to before its latest keep.
+pub async fn undo(
+    engine: &Engine,
+    computer: &str,
+    progress: Progress<'_>,
+) -> Result<Value, CliError> {
+    let target = engine.computer(computer).await?;
+    engine
+        .run_job(
+            &format!("Undoing the last keep of {}", target.name),
+            requests::changes_undo(ChangesUndoParams {
+                computer_id: target.id,
+            }),
+            progress,
+        )
+        .await
 }
 
 pub async fn checkpoints(engine: &Engine, computer: &str) -> Result<Value, CliError> {

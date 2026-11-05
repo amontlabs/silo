@@ -1,0 +1,390 @@
+//! Keep and undo: bring a fork's reviewed changes onto its source (main), or put main back.
+//!
+//! A keep pins to the diff the user reviewed (a digest), takes a `before-keep` checkpoint of
+//! main, holds main's operation lane, and only then compares the fork with main and the
+//! fork-time base (three-way). Everything it will write is read from the fork first; a keep
+//! that would clash, bring credentials, or carry a database change nothing migrates stops
+//! before main is touched and returns a structured refusal. A journal written before the
+//! first change lets a restart put main back from the checkpoint.
+
+pub mod apply;
+pub mod cron;
+pub mod env;
+pub mod guest_env;
+pub mod journal;
+pub mod lane;
+pub mod plan;
+mod prepare;
+pub mod scripts;
+pub mod service;
+pub mod store;
+
+#[cfg(test)]
+mod tests;
+
+use std::time::Duration;
+
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+
+pub use env::{CheckpointRef, ExecOut, GuestCmd, KeepEnv, ManifestStore, Os, RunAs};
+pub use journal::Journal;
+pub use plan::{Conflict, Plan};
+pub use prepare::review_digest;
+
+/// The recipe's `keep:` section.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Hooks {
+    #[serde(default)]
+    pub restart: Vec<String>,
+    #[serde(default)]
+    pub migrate: Vec<String>,
+    #[serde(default)]
+    pub after: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct Request {
+    pub fork: String,
+    /// `None` keeps into the fork's source.
+    pub target: Option<String>,
+    pub hooks: Hooks,
+    pub dry_run: bool,
+    /// Carry database changes even though no migration covers them.
+    pub data_ok: bool,
+    /// The review digest the user saw (`silo diff --json`); the keep refuses if the fork moved.
+    pub reviewed: Option<String>,
+}
+
+/// How long a keep or undo waits for another one on the same target.
+pub const LANE_WAIT: Duration = Duration::from_secs(120);
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Refusal {
+    /// `divergent`, `database`, `git`, `credentials` or `changed`.
+    pub reason: String,
+    pub message: String,
+    pub conflicts: Vec<Conflict>,
+    pub hint: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Report {
+    pub fork: String,
+    pub target: String,
+    pub summary: Vec<String>,
+    pub steps: Vec<String>,
+    pub notes: Vec<String>,
+    pub checkpoint: Option<String>,
+    /// The digest of the fork's changes this keep acted on.
+    pub review_digest: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Outcome {
+    Kept(Report),
+    DryRun(Report),
+    /// Main was not changed.
+    Refused {
+        report: Report,
+        refusal: Refusal,
+    },
+}
+
+impl Outcome {
+    pub fn to_json(&self) -> Value {
+        match self {
+            Outcome::Kept(report) => json!({"status": "kept", "report": report}),
+            Outcome::DryRun(report) => json!({"status": "dry-run", "report": report}),
+            Outcome::Refused { report, refusal } => {
+                json!({"status": "refused", "report": report, "refusal": refusal})
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum UndoOutcome {
+    Undone {
+        computer: String,
+        checkpoint: CheckpointRef,
+        /// The checkpoint came from a keep that was interrupted.
+        recovered: bool,
+        /// What changed on the computer after the keep; the undo discards it.
+        changed_since: Vec<String>,
+    },
+    NothingToUndo {
+        computer: String,
+    },
+}
+
+impl UndoOutcome {
+    pub fn to_json(&self) -> Value {
+        match self {
+            UndoOutcome::Undone {
+                computer,
+                checkpoint,
+                recovered,
+                changed_since,
+            } => json!({
+                "status": "undone",
+                "computer": computer,
+                "recovered": recovered,
+                "changedSince": changed_since,
+                "checkpoint": {"id": checkpoint.id, "name": checkpoint.name, "createdAt": checkpoint.created_at},
+            }),
+            UndoOutcome::NothingToUndo { computer } => {
+                json!({"status": "nothing-to-undo", "computer": computer})
+            }
+        }
+    }
+}
+
+fn refused_early(request: &Request, target: &str, digest: &str) -> Outcome {
+    Outcome::Refused {
+        report: Report {
+            fork: request.fork.clone(),
+            target: target.to_owned(),
+            review_digest: Some(digest.to_owned()),
+            ..Report::default()
+        },
+        refusal: Refusal {
+            reason: "changed".into(),
+            message: format!(
+                "{} changed since it was reviewed. {target} was not changed.",
+                request.fork
+            ),
+            conflicts: vec![Conflict::new(
+                "fork",
+                request.fork.clone(),
+                "its changes differ from the reviewed diff",
+            )],
+            hint: "Review it again with `silo diff --json` and keep with the new digest.".into(),
+        },
+    }
+}
+
+/// Keeps `request.fork` into its target.
+pub fn keep(
+    env: &dyn KeepEnv,
+    store: &dyn ManifestStore,
+    journal: &Journal,
+    request: &Request,
+    wait: Duration,
+) -> Result<Outcome, String> {
+    let target = match &request.target {
+        Some(target) => target.clone(),
+        None => store.source(&request.fork)?.ok_or_else(|| {
+            format!(
+                "Silo does not know where {} was forked from. Name the computer to keep into.",
+                request.fork
+            )
+        })?,
+    };
+    if target == request.fork {
+        return Err("A computer cannot be kept into itself.".into());
+    }
+    env.os(&target).map_err(|_| {
+        format!("{target} is not a computer on this device. Name the computer to keep into.")
+    })?;
+    let _lane = lane::acquire(&target, wait)?;
+    recover_locked(env, journal, &target)?;
+
+    let view = prepare::look_at_fork(env, store, &request.fork)?;
+    if request
+        .reviewed
+        .as_deref()
+        .is_some_and(|reviewed| reviewed != view.digest)
+    {
+        return Ok(refused_early(request, &target, &view.digest));
+    }
+    let mut tracker = prepare::Tracker {
+        fork: request.fork.clone(),
+        target: target.clone(),
+        ..Default::default()
+    };
+
+    if request.dry_run {
+        let prepared = prepare::prepare(env, store, request, &target, &view, &mut tracker);
+        tracker.cleanup(env);
+        return Ok(match prepared? {
+            prepare::Prepared::Refused { report, refusal } => Outcome::Refused { report, refusal },
+            prepare::Prepared::Ready(ready) => Outcome::DryRun(ready.report),
+        });
+    }
+
+    env.note("Saving a checkpoint of main");
+    let checkpoint =
+        env.checkpoint_before_keep(&target, &format!("Before keep of {}", request.fork))?;
+    journal.record_pending(&target, &checkpoint)?;
+    journal.begin(&journal::Entry {
+        fork: request.fork.clone(),
+        target: target.clone(),
+        checkpoint_id: checkpoint.id.clone(),
+        checkpoint_name: checkpoint.name.clone(),
+    })?;
+    let consume = |journal: &Journal| {
+        let _ = journal.set_state(&target, &checkpoint.id, journal::State::Consumed);
+        journal.clear(&target);
+    };
+
+    // From here to the end of the apply, main's lane is held.
+    let applied = {
+        let _gate = match env.hold(&target, &format!("Keeping {}", request.fork)) {
+            Ok(gate) => gate,
+            Err(error) => {
+                consume(journal);
+                return Err(error);
+            }
+        };
+        let prepared = prepare::prepare(env, store, request, &target, &view, &mut tracker);
+        let result = match prepared {
+            Ok(prepare::Prepared::Refused { report, refusal }) => {
+                Ok(Err(Outcome::Refused { report, refusal }))
+            }
+            Ok(prepare::Prepared::Ready(ready)) => {
+                apply::apply(env, &ready, request, &target).map(|applied| Ok((ready, applied)))
+            }
+            Err(error) => Err(error),
+        };
+        tracker.cleanup(env);
+        result
+    };
+    match applied {
+        Ok(Err(refused)) => {
+            consume(journal);
+            Ok(refused)
+        }
+        Ok(Ok((ready, applied))) => {
+            let mut report = ready.report;
+            report.checkpoint = Some(checkpoint.id.clone());
+            report.steps = applied.steps;
+            report.notes.extend(applied.notes);
+            match store.capture(&target) {
+                Ok(after) => {
+                    if let Err(error) = journal.save_after(&target, &checkpoint.id, &after) {
+                        report.notes.push(format!(
+                            "Undo will not be able to tell what changes after this keep: {error}"
+                        ));
+                    }
+                }
+                Err(error) => report.notes.push(format!(
+                    "Undo will not be able to tell what changes after this keep: {error}"
+                )),
+            }
+            journal.set_state(&target, &checkpoint.id, journal::State::Undoable)?;
+            journal.clear(&target);
+            Ok(Outcome::Kept(report))
+        }
+        Err(error) => {
+            env.note("Putting main back from the checkpoint");
+            let restored = env.restore(&target, &checkpoint.id);
+            if restored.is_ok() {
+                consume(journal);
+            }
+            Err(match restored {
+                Ok(()) => format!("{error} Main was put back from the checkpoint taken before the keep."),
+                Err(restore) => format!(
+                    "{error} Putting main back also failed ({restore}); `silo undo {target}` retries it."
+                ),
+            })
+        }
+    }
+}
+
+/// Puts main back from the latest before-keep checkpoint a successful keep made.
+pub fn undo(
+    env: &dyn KeepEnv,
+    store: &dyn ManifestStore,
+    journal: &Journal,
+    computer: &str,
+    wait: Duration,
+) -> Result<UndoOutcome, String> {
+    let _lane = lane::acquire(computer, wait)?;
+    if let Some(entry) = journal.pending(computer)? {
+        let checkpoint = CheckpointRef {
+            id: entry.checkpoint_id.clone(),
+            name: entry.checkpoint_name.clone(),
+            created_at: String::new(),
+        };
+        env.restore(computer, &entry.checkpoint_id)?;
+        journal.set_state(computer, &entry.checkpoint_id, journal::State::Consumed)?;
+        journal.clear(computer);
+        return Ok(UndoOutcome::Undone {
+            computer: computer.to_owned(),
+            checkpoint,
+            recovered: true,
+            changed_since: Vec::new(),
+        });
+    }
+    let Some(checkpoint) = journal.latest_undoable(computer) else {
+        return Ok(UndoOutcome::NothingToUndo {
+            computer: computer.to_owned(),
+        });
+    };
+    let changed_since = changed_after(store, journal, computer, &checkpoint.id);
+    env.restore(computer, &checkpoint.id)?;
+    journal.set_state(computer, &checkpoint.id, journal::State::Consumed)?;
+    Ok(UndoOutcome::Undone {
+        computer: computer.to_owned(),
+        checkpoint,
+        recovered: false,
+        changed_since,
+    })
+}
+
+/// What changed on the computer since the keep left it, as report lines.
+fn changed_after(
+    store: &dyn ManifestStore,
+    journal: &Journal,
+    computer: &str,
+    checkpoint_id: &str,
+) -> Vec<String> {
+    use crate::changes::{diff::diff, ignore::IgnoreList, manifest::Manifest};
+    let Some(after) = journal.after(computer, checkpoint_id) else {
+        return vec!["Silo could not tell whether the computer changed after the keep.".into()];
+    };
+    let (Ok(before), Ok(now)) = (
+        Manifest::parse(&after),
+        store
+            .capture(computer)
+            .and_then(|t| Manifest::parse(&t).map_err(|e| e.to_string())),
+    ) else {
+        return vec!["Silo could not tell whether the computer changed after the keep.".into()];
+    };
+    let changes = diff(&before, &now, None, &IgnoreList::builtin());
+    let lines = changes.render_lines(15);
+    if changes
+        .summary
+        .iter()
+        .all(|s| s.lines.is_empty() || s.bucket == "Not kept")
+    {
+        return Vec::new();
+    }
+    lines
+}
+
+/// A journal found while no keep runs means the engine stopped mid-keep.
+fn recover_locked(env: &dyn KeepEnv, journal: &Journal, target: &str) -> Result<(), String> {
+    if let Some(entry) = journal.pending(target)? {
+        env.note("A keep was interrupted; putting main back first");
+        env.restore(target, &entry.checkpoint_id)?;
+        let _ = journal.set_state(target, &entry.checkpoint_id, journal::State::Consumed);
+        journal.clear(target);
+    }
+    Ok(())
+}
+
+/// Restores every interrupted keep. Run when the engine starts.
+pub fn recover_all(env: &dyn KeepEnv, journal: &Journal) -> Vec<String> {
+    let mut failures = Vec::new();
+    for entry in journal.pending_targets() {
+        let result = lane::acquire(&entry.target, Duration::from_secs(1))
+            .and_then(|_lane| recover_locked(env, journal, &entry.target));
+        if let Err(error) = result {
+            failures.push(format!("{}: {error}", entry.target));
+        }
+    }
+    failures
+}

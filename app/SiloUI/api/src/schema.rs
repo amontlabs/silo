@@ -51,6 +51,8 @@ struct JobTerminalResultsSchema {
     application_source: crate::methods::computers::ApplicationSource,
     macos_computers: crate::methods::computers::MacosComputersState,
     checkpoint_created: crate::methods::checkpoints::CheckpointCreatedResult,
+    keep: crate::methods::keep::ChangesKeepResult,
+    undo: crate::methods::keep::ChangesUndoResult,
     desktop: crate::methods::desktop::DesktopStatus,
     backup: crate::methods::exports::BackupOperation,
     archive_inspection: crate::methods::exports::ArchiveInspectionResult,
@@ -67,6 +69,8 @@ struct JobTerminalResultsSchema {
 /// Method-specific final job result schemas. Conditional rows describe the
 /// platform-specific terminal outcomes called out in the domain specifications.
 pub const JOB_FINISHED_RESULT_REGISTRY: &[(&str, &str)] = &[
+    ("changes.keep", "ChangesKeepResult"),
+    ("changes.undo", "ChangesUndoResult"),
     ("checkpoints.abandonRestore", "ApplicationSource | null"),
     ("checkpoints.create", "CheckpointCreatedResult"),
     ("checkpoints.delete", "ApplicationSource | null"),
@@ -174,8 +178,8 @@ mod tests {
             schema_json().unwrap()
         );
         let schema: serde_json::Value = serde_json::from_str(&schema_json().unwrap()).unwrap();
-        assert_eq!(schema["x-silo-methods"].as_array().unwrap().len(), 149);
-        assert_eq!(schema["x-silo-job-results"].as_array().unwrap().len(), 29);
+        assert_eq!(schema["x-silo-methods"].as_array().unwrap().len(), 151);
+        assert_eq!(schema["x-silo-job-results"].as_array().unwrap().len(), 31);
         assert_eq!(
             schema["$schema"],
             "https://json-schema.org/draft/2020-12/schema"
