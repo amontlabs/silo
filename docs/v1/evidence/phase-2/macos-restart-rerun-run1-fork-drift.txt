@@ -1,0 +1,80 @@
+== header
+commit: a6a05394c932552c143c952aa052f686a41d5289; git status --porcelain app: []
+NOTE: another session started a merge in this shared checkout during the run (HEAD moved to the line above, app/ dirty); the engine and CLI under test are the binaries built at 2a5f0f9a8232374b24a305acf8d881fb4abf8ff8 (HEAD and a clean app/ tree when the Linux half of this re-run started, same binaries)
+bundled msb: msb 0.7.6
+host macOS 26.5 (arm64); silo silo 0.1.0; date 2026-11-05T19:16:09Z
+macOS VMs running (pgrep Virtualization.VirtualMachine): 0
+== main: create (or reuse), service, brew, repo
+Creating e2e-p2r-main...
+Created e2e-p2r-main (stopped)
+create rc=0 in 65 s
+macOS VMs running (pgrep Virtualization.VirtualMachine): 0
+Starting e2e-p2r-main...
+Started e2e-p2r-main (running)
+guest: ProductName:		macOS ProductVersion:		26.6.2 BuildVersion:		25G83 silo
+[20:17:36] installing Homebrew as the user
+740
+821
+Homebrew 7.0.12
+jq: not installed
+[20:18:09] PASS  main service up on 8080  -- p2m service v1
+main agent pid: 1361
+76f061c service v1
+keep:
+  restart: [org.silo.p2r.web]
+macOS VMs running (pgrep Virtualization.VirtualMachine): 0
+== fork
+Forking e2e-p2r-main into e2e-p2r-t1...
+Forked e2e-p2r-t1 (setting-up)
+[20:18:19] PASS  fork e2e-p2r-t1  -- 
+macOS VMs running (pgrep Virtualization.VirtualMachine): 0
+Starting e2e-p2r-t1...
+Started e2e-p2r-t1 (running)
+[20:18:59] PASS  start e2e-p2r-t1  -- 
+6bb7c01 service v2
+76f061c service v1
+[20:19:00] PASS  fork: only the served repo content changed (plist untouched)  -- 
+1
+== keep with restart: [org.silo.p2r.web]
+macOS VMs running (pgrep Virtualization.VNAME         STATE      KIND    SIZE
+workspace-1  stopped    linux   8 cpu, 32 GiB
+e2e-relay    stopped    linux   8 cpu, 32 GiB
+silo-eval-a  stopped    linux   2 cpu, 2 GiB
+silo-eval-b  stopped    linux   2 cpu, 2 GiB
+e2e-p2r computers left: 0
+macOS VMs running (pgrep Virtualization.VirtualMachine): 0
+== summary: 0 passed, 0 failed
+Keeping e2e-p2r-t1: 15s
+Keeping e2e-p2r-t1: 20s
+Keeping e2e-p2r-t1: 25s
+Keeping e2e-p2r-t1: 30s
+Keeping e2e-p2r-t1: 36s
+2a1ebdaf-1081-4f2a-a3d3-4d04014eeb24 changed while it was being read. a27dce5f-d919-4df4-9c9a-46f8194dd435 was not changed.
+  fork 2a1ebdaf-1081-4f2a-a3d3-4d04014eeb24: its changes differ from the first look
+Let the fork finish, review it again with `silo diff`, and keep again.
+[20:20:10] FAIL  fold succeeded  -- rc=2
+agent pid after: 427
+	state = running
+	pid = 427
+		state = active
+		state = active
+[20:20:11] FAIL  agent PID changed (restart step ran; plist not reloaded)  -- 427 -> 427
+[20:20:11] PASS  plist unchanged by the keep  -- 
+[20:20:12] FAIL  main serves v2 after keep  -- p2m service v1
+== undo
+Undoing the last keep of e2e-p2r-main...
+Nothing to undo on a27dce5f-d919-4df4-9c9a-46f8194dd435.
+[20:20:12] PASS  undo succeeded  -- rc=0
+[20:20:12] PASS  main running after undo (no script start)  -- running
+[20:20:12] PASS  main serves old content (v1) after undo  -- p2m service v1
+76f061c service v1
+agent pid after undo: 427
+[20:20:13] cleanup
+NAME         STATE      KIND    SIZE
+workspace-1  stopped    linux   8 cpu, 32 GiB
+e2e-relay    stopped    linux   8 cpu, 32 GiB
+silo-eval-a  stopped    linux   2 cpu, 2 GiB
+silo-eval-b  stopped    linux   2 cpu, 2 GiB
+e2e-p2r computers left: 0
+macOS VMs running (pgrep Virtualization.VirtualMachine): 0
+== summary: 10 passed, 3 failed

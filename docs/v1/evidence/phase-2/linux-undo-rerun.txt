@@ -1,0 +1,133 @@
+== header
+commit: 2a5f0f9a8232374b24a305acf8d881fb4abf8ff8; git status --porcelain app: []
+bundled msb: msb 0.7.6; silo: silo 0.1.0; host 26.5 arm64; date 2026-11-05T19:04:25Z
+== main e2e-p2r-main: create, install the stack
+[20:04:34] PASS  create e2e-p2r-main  -- 
+[20:04:37] PASS  start e2e-p2r-main  -- 
+guest OS: Ubuntu 24.04.4 LTS kernel 6.12.109
+apt rc=0; node v18.19.1; postgres 16
+> p2app@1.0.0 migrate
+> node migrate.js
+
+applied 001_init.sql
+setup done
+[20:06:51] PASS  setup script ran  -- 
+[20:06:58] PASS  restart e2e-p2r-main  -- 
+[20:07:02] PASS  stack came up at boot  -- web pid 444
+== cycle 1
+pre-keep: pid=444
+head=c788fac8fd8ebac97cbcd18cb7df87ba90e51222
+status=[]
+files=35395d46b91d176a
+env=d605f1862eff3d81
+schema=81b5b0035ecd171e
+data=20719b119f5d3ae9
+dpkg=a872e905ab144bc7
+bashrc=342099da4dd28c39
+cfg=Thunar,pulse,xfce4,
+[20:07:18] PASS  cycle 1 fork+start  -- 
+
+> p2app@1.0.0 migrate
+> node migrate.js
+
+applied 002_cyc1.sql
+[20:07:18] PASS  cycle 1 migration applied+committed in fork  -- 
+Keeping e2e-p2r-f1...
+Kept 6fc8a339-c8a4-4082-856b-32ded9f68248 into 2a02be3d-e811-48af-957d-fa4298079683.
+  git /home/silo/app: merged, now at 9d39b25
+  migrate: cd /home/silo/app && npm run migrate
+  restart web: pid 444 -> 4749
+  after: cd /home/silo/app && npm test
+Undo with `silo undo 2a02be3d-e811-48af-957d-fa4298079683`.
+[20:07:49] PASS  cycle 1 fold  -- rc=0
+[20:07:49] PASS  cycle 1 column exists on main after fold  -- count=1
+Undoing the last keep of e2e-p2r-main...
+Put 2a02be3d-e811-48af-957d-fa4298079683 back to Before keep of 6fc8a339-c8a4-4082-856b-32ded9f68248. 2a02be3d-e811-48af-957d-fa4298079683 is running again, as it was.
+[20:08:02] PASS  cycle 1 undo  -- rc=0
+state right after undo (no script start): running
+[20:08:02] PASS  cycle 1 main running after undo  -- running
+[20:08:03] PASS  cycle 1 stack answers after undo  -- 
+post-undo: pid=444
+[20:08:03] PASS  cycle 1 fingerprint identical (git/files/schema/data/packages)  -- identical
+[20:08:04] PASS  cycle 1 web pid unchanged  -- 444 -> 444
+== cycle 2
+pre-keep: pid=444
+head=c788fac8fd8ebac97cbcd18cb7df87ba90e51222
+status=[]
+files=35395d46b91d176a
+env=d605f1862eff3d81
+schema=81b5b0035ecd171e
+data=20719b119f5d3ae9
+dpkg=a872e905ab144bc7
+bashrc=342099da4dd28c39
+cfg=Thunar,pulse,xfce4,
+[20:08:20] PASS  cycle 2 fork+start  -- 
+
+> p2app@1.0.0 migrate
+> node migrate.js
+
+applied 002_cyc2.sql
+[20:08:21] PASS  cycle 2 migration applied+committed in fork  -- 
+Keeping e2e-p2r-f2...
+Kept 888161ef-5321-4423-ac44-0214618caff1 into 2a02be3d-e811-48af-957d-fa4298079683.
+  git /home/silo/app: merged, now at 482622e
+  migrate: cd /home/silo/app && npm run migrate
+  restart web: pid 444 -> 6956
+  after: cd /home/silo/app && npm test
+Undo with `silo undo 2a02be3d-e811-48af-957d-fa4298079683`.
+[20:08:53] PASS  cycle 2 fold  -- rc=0
+[20:08:53] PASS  cycle 2 column exists on main after fold  -- count=1
+Undoing the last keep of e2e-p2r-main...
+Put 2a02be3d-e811-48af-957d-fa4298079683 back to Before keep of 888161ef-5321-4423-ac44-0214618caff1. 2a02be3d-e811-48af-957d-fa4298079683 is running again, as it was.
+[20:09:08] PASS  cycle 2 undo  -- rc=0
+state right after undo (no script start): running
+[20:09:09] PASS  cycle 2 main running after undo  -- running
+[20:09:09] PASS  cycle 2 stack answers after undo  -- 
+post-undo: pid=444
+[20:09:10] PASS  cycle 2 fingerprint identical (git/files/schema/data/packages)  -- identical
+[20:09:10] PASS  cycle 2 web pid unchanged  -- 444 -> 444
+== cycle 3
+pre-keep: pid=444
+head=c788fac8fd8ebac97cbcd18cb7df87ba90e51222
+status=[]
+files=35395d46b91d176a
+env=d605f1862eff3d81
+schema=81b5b0035ecd171e
+data=20719b119f5d3ae9
+dpkg=a872e905ab144bc7
+bashrc=342099da4dd28c39
+cfg=Thunar,pulse,xfce4,
+[20:09:30] PASS  cycle 3 fork+start  -- 
+
+> p2app@1.0.0 migrate
+> node migrate.js
+
+applied 002_cyc3.sql
+[20:09:31] PASS  cycle 3 migration applied+committed in fork  -- 
+Keeping e2e-p2r-f3...
+Kept 998ef902-9075-4609-b726-f5b52ef14948 into 2a02be3d-e811-48af-957d-fa4298079683.
+  git /home/silo/app: merged, now at 5147de7
+  migrate: cd /home/silo/app && npm run migrate
+  restart web: pid 444 -> 9165
+  after: cd /home/silo/app && npm test
+Undo with `silo undo 2a02be3d-e811-48af-957d-fa4298079683`.
+[20:10:02] PASS  cycle 3 fold  -- rc=0
+[20:10:02] PASS  cycle 3 column exists on main after fold  -- count=1
+Undoing the last keep of e2e-p2r-main...
+Put 2a02be3d-e811-48af-957d-fa4298079683 back to Before keep of 998ef902-9075-4609-b726-f5b52ef14948. 2a02be3d-e811-48af-957d-fa4298079683 is running again, as it was.
+[20:10:18] PASS  cycle 3 undo  -- rc=0
+state right after undo (no script start): running
+[20:10:18] PASS  cycle 3 main running after undo  -- running
+[20:10:18] PASS  cycle 3 stack answers after undo  -- 
+post-undo: pid=444
+[20:10:19] PASS  cycle 3 fingerprint identical (git/files/schema/data/packages)  -- identical
+[20:10:19] PASS  cycle 3 web pid unchanged  -- 444 -> 444
+disk: /dev/disk3s1s1   926Gi    12Gi    21Gi    36%    459k  225M    0%   /
+[20:10:22] cleanup
+[20:10:27] silo list after cleanup:
+NAME         STATE      KIND    SIZE
+workspace-1  stopped    linux   8 cpu, 32 GiB
+e2e-relay    stopped    linux   8 cpu, 32 GiB
+silo-eval-a  stopped    linux   2 cpu, 2 GiB
+silo-eval-b  stopped    linux   2 cpu, 2 GiB
+== summary: 32 passed, 0 failed
