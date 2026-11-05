@@ -823,12 +823,6 @@
     "ChangesRequestParams": {
       "description": "Ask for a fork to be reviewed without keeping it: `changes.request` stores a\n[`FoldRequest`] and changes nothing else.",
       "properties": {
-        "deviceId": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
         "forkId": {
           "description": "The fork to be reviewed.",
           "type": "string"

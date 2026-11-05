@@ -162,7 +162,7 @@ pub struct ForkCommand {
     )]
     pub count: Option<u32>,
     /// A command to run in each fork once it is started (after `--`); the fork is left for review.
-    #[arg(last = true, value_name = "COMMAND")]
+    #[arg(last = true, value_name = "COMMAND", conflicts_with = "recipe")]
     pub command: Vec<String>,
     /// Fork from this checkpoint instead of the current state.
     #[arg(long, value_name = "ID")]

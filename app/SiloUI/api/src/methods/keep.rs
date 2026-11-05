@@ -172,8 +172,6 @@ wire_struct! {
     ChangesRequestParams {
         /// The fork to be reviewed.
         fork_id: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        device_id: Option<String>,
         /// The computer it would be kept into; defaults to the one the fork was made from.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         target_id: Option<String>,

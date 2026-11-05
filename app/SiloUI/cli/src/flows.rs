@@ -103,7 +103,6 @@ pub async fn request(
         .call(requests::changes_request(
             silo_api::methods::keep::ChangesRequestParams {
                 fork_id: computer.id.clone(),
-                device_id: None,
                 target_id,
                 review_digest: (!digest.is_empty()).then_some(digest),
                 summary: Some(summary),

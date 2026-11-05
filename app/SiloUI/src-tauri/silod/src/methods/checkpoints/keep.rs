@@ -20,9 +20,7 @@ use silo_engine::{
 
 use crate::dispatcher::{DispatchError, HandlerOutput};
 
-use super::{
-    failure, output, require_local_device, service as checkpoint_service, HandlerContext,
-};
+use super::{failure, output, service as checkpoint_service, HandlerContext};
 
 pub(super) async fn keep(
     context: &HandlerContext,
@@ -105,7 +103,6 @@ pub(super) async fn request(
     params: &Value,
 ) -> Result<HandlerOutput, DispatchError> {
     let params: ChangesRequestParams = context.decode_params(params)?;
-    require_local_device(context, params.device_id.as_deref())?;
     let host = context.silod_context().runtime_host();
     let app_data = context.silod_context().paths().app_data.clone();
     let manifests = store::production(host);

@@ -447,17 +447,6 @@ async fn changes_request_records_an_open_request_and_answers_with_it() {
     )
     .await
     .is_err());
-    assert_eq!(
-        error_code(
-            call(
-                &fixture,
-                MethodName::ChangesRequest,
-                json!({"forkId": LINUX_ID, "deviceId": "some-other-device", "targetId": "m"}),
-            )
-            .await
-        ),
-        ErrorCode::UnsupportedRemoteOperation
-    );
 }
 
 // MARK: exports.*
