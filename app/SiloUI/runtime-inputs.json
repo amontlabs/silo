@@ -147,6 +147,10 @@
     {
       "path": "patches/microsandbox-retired-layer-cleanup-0.7.6.patch",
       "sha256": "61a0ebb0c2f6f85a0a05cb3f1facea7e12087e7577ea2ecd56c0099d3066e18e"
+    },
+    {
+      "path": "patches/microsandbox-rename-stopped-0.7.6.patch",
+      "sha256": "221f46a96f3b0d807a73cf409a70f70dd9128a0149f86fdf8f97e7e9b1ab3296"
     }
   ]
 }
