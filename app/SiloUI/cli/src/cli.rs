@@ -42,7 +42,11 @@ pub struct Cli {
 #[derive(Subcommand, Debug)]
 pub enum Command {
     /// List computers and their state.
-    List,
+    List {
+        /// Also show the hidden throwaway computers (baselines, recipe builders).
+        #[arg(long)]
+        all: bool,
+    },
     /// Show one computer.
     Status { computer: String },
     /// Create a computer.
@@ -387,7 +391,14 @@ async fn dispatch(
                 )
             });
         }
-        Command::List => emit(json, &ops::list(engine).await?, render::list),
+        Command::List { all } => {
+            let value = if all {
+                ops::list_all(engine).await?
+            } else {
+                ops::list(engine).await?
+            };
+            emit(json, &value, render::list)
+        }
         Command::Status { computer } => {
             emit(json, &ops::status(engine, &computer).await?, render::status)
         }

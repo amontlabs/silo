@@ -27,6 +27,12 @@ const STORES: [&str; 4] = ["secrets", "github", "urls", "ssh"];
 struct Device {
     names: BTreeMap<String, String>,
     running: BTreeSet<String>,
+    /// Computers that were asked to stop and still report running.
+    stopping: BTreeSet<String>,
+    /// A stop takes until the next `settle` to finish.
+    slow_stop: bool,
+    /// A stop never finishes.
+    never_stops: bool,
     busy: BTreeMap<String, String>,
     /// store -> computer name -> what it holds
     stores: BTreeMap<String, BTreeMap<String, Value>>,
@@ -183,8 +189,31 @@ impl PromoteEnv for Fake {
     }
 
     fn stop(&self, id: &str) -> Result<(), String> {
-        self.device.lock().unwrap().running.remove(id);
+        let mut d = self.device.lock().unwrap();
+        if d.slow_stop {
+            d.stopping.insert(id.into());
+        } else {
+            d.running.remove(id);
+        }
         Ok(())
+    }
+
+    fn start(&self, id: &str) -> Result<(), String> {
+        self.device.lock().unwrap().running.insert(id.into());
+        Ok(())
+    }
+
+    fn settle(&self) {
+        // A computer that was asked to stop finishes stopping the next time it is looked at.
+        let mut d = self.device.lock().unwrap();
+        if d.never_stops {
+            return;
+        }
+        let done: Vec<String> = d.stopping.iter().cloned().collect();
+        for id in done {
+            d.running.remove(&id);
+            d.stopping.remove(&id);
+        }
     }
 
     fn hold(&self, _id: &str, _label: &str) -> Result<Box<dyn Any>, String> {
@@ -454,14 +483,13 @@ fn the_archive_name_avoids_a_taken_name() {
 fn undo_swaps_everything_back_exactly() {
     let fake = Fake::new(Os::Linux);
     let (_dir, journal) = scratch_journal();
-    let before = stopped(fake.snapshot());
+    let before = fake.snapshot();
     promoted(&fake, &journal);
     // Whichever of the two the user names finds the record.
     for id in [FORK, MAIN] {
         let fake = Fake::new(Os::Linux);
         let (_dir, journal) = scratch_journal();
         promoted(&fake, &journal);
-        fake.device.lock().unwrap().running.insert(FORK.into());
         let undone = undo(fake.as_ref(), &journal, id, Duration::from_secs(1))
             .unwrap()
             .unwrap();
@@ -479,6 +507,65 @@ fn undo_swaps_everything_back_exactly() {
         assert!(undo(fake.as_ref(), &journal, id, Duration::from_secs(1))
             .unwrap()
             .is_none());
+    }
+}
+
+#[test]
+fn a_promote_waits_for_both_computers_to_finish_stopping() {
+    let fake = Fake::new(Os::Linux);
+    fake.device.lock().unwrap().slow_stop = true;
+    let (_dir, journal) = scratch_journal();
+    let after = promoted(&fake, &journal);
+    assert!(after.running.is_empty() && after.stopping.is_empty());
+    assert_eq!(after.names[FORK], "main");
+}
+
+#[test]
+fn a_computer_that_never_finishes_stopping_refuses_the_promote() {
+    let fake = Fake::new(Os::Linux);
+    {
+        let mut d = fake.device.lock().unwrap();
+        d.slow_stop = true;
+        d.never_stops = true;
+    }
+    let (_dir, journal) = scratch_journal();
+    let before = fake.snapshot();
+    let error = run(&fake, &journal, &request()).unwrap_err();
+    assert!(error.contains("did not finish stopping"), "{error}");
+    assert_eq!(fake.snapshot().names, before.names);
+}
+
+#[test]
+fn undo_starts_again_the_computers_that_were_running_before_the_promote() {
+    for (main_ran, fork_ran) in [(true, true), (false, true), (true, false), (false, false)] {
+        let fake = Fake::new(Os::Linux);
+        fake.device.lock().unwrap().slow_stop = true;
+        {
+            let mut d = fake.device.lock().unwrap();
+            if !main_ran {
+                d.running.remove(MAIN);
+            }
+            if !fork_ran {
+                d.running.remove(FORK);
+            }
+        }
+        let (_dir, journal) = scratch_journal();
+        promoted(&fake, &journal);
+        assert!(fake.snapshot().running.is_empty());
+        undo(fake.as_ref(), &journal, MAIN, Duration::from_secs(1))
+            .unwrap()
+            .unwrap();
+        let running = fake.snapshot().running;
+        assert_eq!(
+            running.contains(MAIN),
+            main_ran,
+            "main {main_ran}/{fork_ran}"
+        );
+        assert_eq!(
+            running.contains(FORK),
+            fork_ran,
+            "fork {main_ran}/{fork_ran}"
+        );
     }
 }
 
@@ -654,6 +741,8 @@ fn a_crash_before_any_step_leaves_the_device_as_it_was() {
                 created_at: String::new(),
                 scope: String::new(),
             },
+            fork_was_running: false,
+            target_was_running: false,
         },
         state: State::Promoting,
         at: 1,
@@ -868,6 +957,8 @@ fn an_undo_never_reverts_a_promote_that_a_later_one_built_on() {
     now.checkpoints.clear();
     let mut want = before;
     want.checkpoints.clear();
+    // Everything that ran before each promote runs again.
+    want.running = [MAIN, FORK, THIRD].map(String::from).into();
     assert_eq!(now, want);
 }
 

@@ -91,6 +91,12 @@ pub struct Swap {
     #[serde(default)]
     pub target_source: Option<String>,
     pub checkpoint: CheckpointRef,
+    /// Whether the fork was running when the promote began; an undo starts it again.
+    #[serde(default)]
+    pub fork_was_running: bool,
+    /// The same for main.
+    #[serde(default)]
+    pub target_was_running: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

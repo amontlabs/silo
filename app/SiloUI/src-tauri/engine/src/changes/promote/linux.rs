@@ -8,12 +8,12 @@
 //! carries (`silo.machine-id`), never by its name, because the names are what a crash can leave
 //! half swapped.
 
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use super::journal::Swap;
 use crate::{
     network,
-    runtime::{self, RuntimePaths, RuntimeRunner, checkpoints},
+    runtime::{self, checkpoints, RuntimePaths, RuntimeRunner},
 };
 
 /// Moves the fork's parked scheduled jobs back (`restore`) or parks them again (`repark`).
@@ -223,9 +223,8 @@ mod tests {
 
     use super::{
         super::{
-            Info, Outcome, PromoteEnv, Request,
             journal::{Journal, Step},
-            promote, undo,
+            promote, undo, Info, Outcome, PromoteEnv, Request,
         },
         *,
     };
@@ -383,6 +382,8 @@ mod tests {
             fork_source: Some(MAIN.into()),
             target_source: None,
             checkpoint,
+            fork_was_running: false,
+            target_was_running: false,
         };
         let none: &dyn Fn(&str, &str) -> Result<(), String> = &|_, _| Ok(());
         let guest: &dyn Fn(&str, &[String]) -> Result<String, String> = &|_, _| Ok(String::new());
@@ -946,11 +947,9 @@ mod tests {
                 .unwrap()
                 .contains("[Timer]")
         );
-        assert!(
-            std::fs::read_to_string(root.join("etc/crontab"))
-                .unwrap()
-                .contains("run-parts")
-        );
+        assert!(std::fs::read_to_string(root.join("etc/crontab"))
+            .unwrap()
+            .contains("run-parts"));
         // A timer the quiet step only masked is unmasked; a mask from before the fork or from
         // after the quiet step stays; the stopped service stays parked.
         assert!(!exists(root, "/etc/systemd/system/apt-daily.timer"));
@@ -996,6 +995,78 @@ mod tests {
         assert!(exists(root, "/etc/systemd/system/before-fork.timer"));
         assert!(exists(root, "/etc/systemd/system/after-quiet.timer"));
         guest_script(root, "repark");
+    }
+
+    /// What the quiet step leaves on an Ubuntu computer whose main was itself made quiet: the
+    /// vendor job, the user's own job and the root crontab, all under the saved originals.
+    #[test]
+    fn the_jobs_of_a_real_ubuntu_fork_come_back_on_the_new_main() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let parked = "var/lib/silo-quiet/disabled";
+        put(
+            root,
+            &format!("{parked}/etc/cron.d/e2scrub_all"),
+            "30 3 * * 0 root e2scrub_all_cron\n",
+        );
+        put(
+            root,
+            &format!("{parked}/etc/cron.d/p3-job"),
+            "* * * * * root echo p3cron\n",
+        );
+        put(
+            root,
+            &format!("{parked}/var/spool/cron/crontabs/root"),
+            "*/5 * * * * echo p3root >> /var/log/p3root.log\n",
+        );
+        put(
+            root,
+            &format!("{parked}/etc/crontab"),
+            "# m h dom mon dow user command\n17 * * * * root cd / && run-parts --report /etc/cron.hourly\n",
+        );
+        put(
+            root,
+            &format!("{parked}/etc/anacrontab"),
+            "1 5 cron.daily run-parts /etc/cron.daily\n",
+        );
+        put(root, "etc/crontab", "# m h dom mon dow user command\n");
+        std::fs::create_dir_all(root.join("etc/cron.d")).unwrap();
+        std::fs::create_dir_all(root.join("var/spool/cron/crontabs")).unwrap();
+
+        let output = guest_script(root, "restore");
+        for path in [
+            "/etc/cron.d/e2scrub_all",
+            "/etc/cron.d/p3-job",
+            "/var/spool/cron/crontabs/root",
+            "/etc/anacrontab",
+        ] {
+            assert!(
+                output.contains(&format!("restored {path}")),
+                "{path}: {output}"
+            );
+            assert!(exists(root, path), "{path}");
+            assert!(
+                !exists(root, &format!("/var/lib/silo-quiet/disabled{path}")),
+                "{path}"
+            );
+        }
+        assert!(
+            std::fs::read_to_string(root.join("var/spool/cron/crontabs/root"))
+                .unwrap()
+                .contains("p3root")
+        );
+        assert!(std::fs::read_to_string(root.join("etc/crontab"))
+            .unwrap()
+            .contains("run-parts"));
+
+        guest_script(root, "repark");
+        for path in ["/etc/cron.d/p3-job", "/var/spool/cron/crontabs/root"] {
+            assert!(!exists(root, path), "{path}");
+            assert!(
+                exists(root, &format!("/var/lib/silo-quiet/disabled{path}")),
+                "{path}"
+            );
+        }
     }
 
     fn marker_of(root: &std::path::Path) -> String {
@@ -1136,23 +1207,17 @@ mod tests {
         let output = guest_script(root, "restore");
         assert!(output.contains("left /etc/cron.d/poll"), "{output}");
         assert!(output.contains("left /etc/crontab"), "{output}");
-        assert!(
-            std::fs::read_to_string(root.join("etc/cron.d/poll"))
-                .unwrap()
-                .contains("replacement")
-        );
+        assert!(std::fs::read_to_string(root.join("etc/cron.d/poll"))
+            .unwrap()
+            .contains("replacement"));
         assert!(exists(root, "/var/lib/silo-quiet/disabled/etc/cron.d/poll"));
-        assert!(
-            std::fs::read_to_string(root.join("etc/crontab"))
-                .unwrap()
-                .contains("new-job")
-        );
+        assert!(std::fs::read_to_string(root.join("etc/crontab"))
+            .unwrap()
+            .contains("new-job"));
         // Parking again leaves the replacement alone as well.
         guest_script(root, "repark");
-        assert!(
-            std::fs::read_to_string(root.join("etc/cron.d/poll"))
-                .unwrap()
-                .contains("replacement")
-        );
+        assert!(std::fs::read_to_string(root.join("etc/cron.d/poll"))
+            .unwrap()
+            .contains("replacement"));
     }
 }

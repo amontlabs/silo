@@ -58,6 +58,7 @@ struct Lab {
     engine: FakeEngine,
     host: PathBuf,
     guest_home: PathBuf,
+    computers: Arc<Mutex<Vec<(String, String)>>>,
     requests: Arc<Mutex<Vec<Value>>>,
     _root: tempfile::TempDir,
 }
@@ -71,10 +72,11 @@ fn lab() -> Lab {
     let computers: Arc<Mutex<Vec<(String, String)>>> = Arc::new(Mutex::new(Vec::new()));
     let requests = Arc::new(Mutex::new(Vec::new()));
     let (home, seen) = (guest_home.clone(), requests.clone());
+    let shared = computers.clone();
     // The guest's /workspace is a folder of the fake guest's home.
     let workspace = home.join("workspace").to_string_lossy().into_owned();
     let engine = FakeEngine::start(move |method, params| {
-        let mut world = computers.lock().unwrap();
+        let mut world = shared.lock().unwrap();
         match method {
             "computers.list" => {
                 let linux: Vec<Value> = world
@@ -121,6 +123,15 @@ fn lab() -> Lab {
                 for (name, state) in world.iter_mut() {
                     if format!("id-{name}") == id {
                         *state = "running".into();
+                    }
+                }
+                Ok(json!({"jobId": "job:1"}))
+            }
+            "computers.stop" => {
+                let id = params["computerId"].as_str().unwrap();
+                for (name, state) in world.iter_mut() {
+                    if format!("id-{name}") == id {
+                        *state = "stopped".into();
                     }
                 }
                 Ok(json!({"jobId": "job:1"}))
@@ -191,6 +202,7 @@ fn lab() -> Lab {
         engine,
         host,
         guest_home,
+        computers,
         requests,
         _root: root,
     }
@@ -530,4 +542,39 @@ async fn a_review_request_records_the_fork_its_digest_and_a_summary() {
     // Requesting changes nothing: the host and the fork keep their commits.
     assert_eq!(git(&lab.host, &["rev-list", "--count", "HEAD"]), "1");
     assert!(backup_refs(&lab.host).is_empty());
+}
+
+#[tokio::test]
+async fn folding_a_stopped_fork_starts_it_and_stops_it_again() {
+    let lab = lab();
+    let engine = lab.connect().await;
+    let (fork, guest) = lab.fork(&engine).await;
+    commit(&guest, "b.txt", "two\n", "add b");
+    let set = |state: &str| {
+        for (name, current) in lab.computers.lock().unwrap().iter_mut() {
+            if *name == fork {
+                *current = state.into();
+            }
+        }
+    };
+    let state = || {
+        lab.computers
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|(name, _)| *name == fork)
+            .map(|(_, state)| state.clone())
+            .unwrap()
+    };
+    set("stopped");
+    let kept = lab.fold(&engine, &fork, false).await;
+    assert_eq!(kept["status"], "kept", "{kept}");
+    assert!(lab.host.join("b.txt").exists());
+    assert_eq!(state(), "stopped");
+    // A running fork stays running.
+    commit(&guest, "c.txt", "three\n", "add c");
+    assert_eq!(state(), "stopped");
+    set("running");
+    lab.fold(&engine, &fork, false).await;
+    assert_eq!(state(), "running");
 }

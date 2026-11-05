@@ -30,6 +30,39 @@ pub use journal::{Journal, Record, State, Step, Swap};
 /// How long a promote or undo waits for another operation on one of the two computers.
 pub const LANE_WAIT: Duration = Duration::from_secs(120);
 
+/// How long a computer may take to finish stopping before a promote or undo gives up.
+#[cfg(not(test))]
+const STOP_WAIT: Duration = Duration::from_secs(120);
+#[cfg(test)]
+const STOP_WAIT: Duration = Duration::from_millis(50);
+
+/// Stops each running computer and waits until it reports stopped: a computer that is still
+/// stopping looks running, and the request to stop it returns before it is done.
+fn stop_and_wait(env: &dyn PromoteEnv, ids: &[&str]) -> Result<(), String> {
+    for id in ids {
+        if env.info(id)?.running {
+            env.stop(id)?;
+        }
+    }
+    let begun = std::time::Instant::now();
+    for id in ids {
+        loop {
+            let info = env.info(id)?;
+            if !info.running {
+                break;
+            }
+            if begun.elapsed() > STOP_WAIT {
+                return Err(format!(
+                    "{} did not finish stopping. Nothing was changed; retry in a moment.",
+                    info.name
+                ));
+            }
+            env.settle();
+        }
+    }
+    Ok(())
+}
+
 /// What a promote needs to know about a computer.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Info {
@@ -61,6 +94,14 @@ pub trait PromoteEnv: Send + Sync {
     /// Saves the `before-promote` checkpoint of main.
     fn checkpoint(&self, id: &str, name: &str) -> Result<CheckpointRef, String>;
     fn stop(&self, id: &str) -> Result<(), String>;
+    /// Starts the computer again after an undo.
+    fn start(&self, _id: &str) -> Result<(), String> {
+        Ok(())
+    }
+    /// Waits a moment before a computer that is still stopping is looked at again.
+    fn settle(&self) {
+        std::thread::sleep(Duration::from_millis(250));
+    }
     /// Holds the computer's operation lane until the value is dropped.
     fn hold(&self, _id: &str, _label: &str) -> Result<Box<dyn Any>, String> {
         Ok(Box::new(()))
@@ -277,11 +318,7 @@ pub fn promote(
     let checkpoint = env.checkpoint(&target, &format!("Before promote of {}", fork.name))?;
     report.checkpoint = Some(checkpoint.id.clone());
     env.note("Stopping both computers");
-    for info in [&main, &fork] {
-        if info.running {
-            env.stop(&info.id)?;
-        }
-    }
+    stop_and_wait(env, &[&main.id, &fork.id])?;
     let _holds = env.hold_pair(
         &target,
         &request.fork,
@@ -313,6 +350,8 @@ pub fn promote(
         fork_source: store.source(&fork.id)?,
         target_source: store.source(&main.id)?,
         checkpoint,
+        fork_was_running: fork.running,
+        target_was_running: main.running,
     };
     let mut record = Record {
         swap,
@@ -461,13 +500,19 @@ pub fn undo(
             ));
         }
     }
-    for id in [&key.0, &key.1] {
-        if env.info(id)?.running {
-            env.stop(id)?;
-        }
-    }
+    stop_and_wait(env, &[&key.0, &key.1])?;
     let _holds = env.hold_pair(&key.0, &key.1, "Swapping the computers back")?;
     finish_undo(env, journal, &mut record)?;
+    // Whatever was running before the promote runs again (best effort: the swap is done).
+    for (id, was_running) in [
+        (&record.swap.target_id, record.swap.target_was_running),
+        (&record.swap.fork_id, record.swap.fork_was_running),
+    ] {
+        if was_running {
+            env.note("Starting the computers that were running");
+            let _ = env.start(id);
+        }
+    }
     Ok(Some(Undone {
         computer: record.swap.target_name.clone(),
         fork: record.swap.fork_name.clone(),

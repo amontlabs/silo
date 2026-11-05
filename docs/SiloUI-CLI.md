@@ -34,7 +34,7 @@ the engine's message.
 
 | Command | What it does |
 | --- | --- |
-| `silo list` | computers and their state |
+| `silo list [--all]` | computers and their state; `--all` also shows the hidden throwaways (`silo-baseline-*`, `silo-build-*`) |
 | `silo status <computer>` | one computer: size, checkpoints, a fork's quiet state, assigned secrets and GitHub access |
 | `silo secrets list` | secret names and the computers they are assigned to (never values) |
 | `silo secrets set NAME [--computer C]... [--domain D]...` | add a secret or replace its value; the value is read from stdin, never an argument |
@@ -56,7 +56,7 @@ the engine's message.
 | `silo diff <computer> [--json] [--max-lines N] [--no-baseline] [--baseline]` | what changed since the fork (captures the computer now, compares with the record `silo fork` took); `--baseline` measures a missing baseline first, on a throwaway idle fork of the same checkpoint (also for a fork that has been used), and a baseline measured on one fork of a computer applies to its other forks; `silo fold --dry-run` ignores review digests |
 | `silo fold <fork> --promote [--into C] [--dry-run]` | make the fork main: it takes main's name, ports, secrets and GitHub access, and the old main is archived as `main-before-<time>`; `silo undo main` swaps back ([details](SiloUI-CHANGES.md#making-a-fork-main-silo-fold-fork---promote)) |
 | `silo undo <computer\|fork\|./dir>` | put a computer back to before its latest keep, or a folder back to before its latest fold |
-| `silo drop <computer> [--force]` | throw a computer away; `main` needs `--force` |
+| `silo drop <computer> [--force]` | throw a computer away (a hidden throwaway too, by name or id); `main` needs `--force`. A stopped `silo-baseline-*` copy more than an hour old is dropped by the next fork or `silo diff --baseline` |
 | `silo exec <computer> [--cwd DIR] [--timeout SECS] -- <cmd...>` | run a command; the exit code is passed through |
 | `silo checkpoint <computer> [--name N] [--kind manual\|automatic\|before-keep\|warm]` | save a checkpoint |
 | `silo checkpoints <computer>` | list checkpoints |

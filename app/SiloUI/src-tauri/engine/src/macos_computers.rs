@@ -2750,6 +2750,11 @@ pub fn promote_stop(app: &MacosContext, id: &str) -> Result<(), String> {
     perform(app, id, Action::Stop)
 }
 
+/// Starts a macOS computer again after an undo.
+pub fn promote_start(app: &MacosContext, id: &str) -> Result<(), String> {
+    perform(app, id, Action::Start)
+}
+
 /// Gives a stopped macOS computer a new name (record on disk and in memory). Repeating it
 /// changes nothing. The caller holds the computer's operation lane.
 pub fn promote_set_name(app: &MacosContext, id: &str, name: &str) -> Result<(), String> {

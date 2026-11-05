@@ -332,19 +332,31 @@ async fn download(
     destination: &Path,
     progress: Progress<'_>,
 ) -> Result<(), CliError> {
-    let outcome = engine
-        .run_job(
-            &format!("Fetching the commits from {}", computer.name),
-            requests::files_download(FileDownloadParams {
-                transfer_id: transfer_id(),
-                computer_id: computer.id.clone(),
-                device_id: None,
-                path: path.to_owned(),
-                destination: Some(destination.to_string_lossy().into_owned()),
-            }),
-            progress,
-        )
-        .await?;
+    // A fork that was just started or used can refuse the first connection of the transfer
+    // while its SSH service settles; the second try comes a few seconds later.
+    let mut attempt = 0;
+    let outcome = loop {
+        attempt += 1;
+        let tried = engine
+            .run_job(
+                &format!("Fetching the commits from {}", computer.name),
+                requests::files_download(FileDownloadParams {
+                    transfer_id: transfer_id(),
+                    computer_id: computer.id.clone(),
+                    device_id: None,
+                    path: path.to_owned(),
+                    destination: Some(destination.to_string_lossy().into_owned()),
+                }),
+                progress,
+            )
+            .await;
+        match tried {
+            Err(error) if attempt < 3 && error.message.starts_with("Could not connect") => {
+                tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+            }
+            other => break other?,
+        }
+    };
     match outcome["status"].as_str() {
         Some("done") | None if destination.is_file() => Ok(()),
         _ => Err(CliError::new(format!(
@@ -562,6 +574,33 @@ fn utc_stamp() -> String {
 pub async fn fold_folder(
     engine: &Engine,
     fork: &Computer,
+    record: Record,
+    dry_run: bool,
+    progress: Progress<'_>,
+) -> Result<Value, CliError> {
+    // The commits are read from the running fork: a stopped one is started for this and put
+    // back to stopped afterwards.
+    if fork.state == "running" {
+        return fold_running_folder(engine, fork, record, dry_run, progress).await;
+    }
+    if fork.state != "stopped" {
+        return Err(CliError::new(format!(
+            "{} is {}; wait until it is running or stopped, then fold again.",
+            fork.name, fork.state
+        )));
+    }
+    ops::start(engine, &fork.name, progress).await?;
+    let started = engine.computer(&fork.name).await?;
+    let result = fold_running_folder(engine, &started, record, dry_run, progress).await;
+    let stopped = ops::stop(engine, &fork.name, progress).await;
+    let value = result?;
+    stopped?;
+    Ok(value)
+}
+
+async fn fold_running_folder(
+    engine: &Engine,
+    fork: &Computer,
     mut record: Record,
     dry_run: bool,
     progress: Progress<'_>,
@@ -590,12 +629,6 @@ pub async fn fold_folder(
             format!("{target} has uncommitted changes to tracked files."),
             "Commit or stash them, then fold again.",
         ));
-    }
-    if fork.state != "running" {
-        return Err(CliError::new(format!(
-            "{} is {}; start it with `silo start {}` so its commits can be read.",
-            fork.name, fork.state, fork.name
-        )));
     }
     // Uncommitted work in the fork is committed first, so the fork's files are not left out.
     let outbox = format!("{TRANSFER_ROOT}/silo-out-{}", uuid::Uuid::new_v4().simple());

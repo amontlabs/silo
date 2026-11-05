@@ -1029,3 +1029,61 @@ async fn fold_promote_sends_changes_promote_and_prints_the_archive_name() {
         "{text}"
     );
 }
+
+fn names_in(state: &Arc<Mutex<Baseline>>) -> Vec<String> {
+    state
+        .lock()
+        .unwrap()
+        .computers
+        .iter()
+        .map(|c| c.0.clone())
+        .collect()
+}
+
+#[tokio::test]
+async fn list_all_shows_the_hidden_throwaways_and_drop_takes_them_by_name_or_id() {
+    let (engine, state) = baseline_engine(
+        false,
+        &[
+            ("silo-baseline-8fa22f", "stopped"),
+            ("silo-build-linux-dev", "stopped"),
+        ],
+    );
+    let connected = Engine::connect(&engine.socket).await.unwrap();
+    let shown = ops::list(&connected).await.unwrap();
+    assert_eq!(shown["computers"].as_array().unwrap().len(), 1);
+    let all = ops::list_all(&connected).await.unwrap();
+    assert_eq!(all["computers"].as_array().unwrap().len(), 3);
+
+    let dropped = ops::drop_computer(&connected, "silo-baseline-8fa22f", false, &ignore)
+        .await
+        .unwrap();
+    assert_eq!(dropped["dropped"], "silo-baseline-8fa22f");
+    ops::drop_computer(&connected, "id-silo-build-linux-dev", false, &ignore)
+        .await
+        .unwrap();
+    assert_eq!(names_in(&state), ["try"]);
+}
+
+#[tokio::test]
+async fn only_stopped_throwaways_older_than_an_hour_are_swept() {
+    let now = silo_cli::clock::now_unix();
+    let old = ops::baseline_name(now - 7200);
+    let fresh = ops::baseline_name(now - 60);
+    let (engine, state) = baseline_engine(
+        false,
+        &[
+            ("silo-baseline-8fa22f", "stopped"),
+            (old.as_str(), "stopped"),
+            (fresh.as_str(), "stopped"),
+            ("silo-baseline-bbbbbb", "running"),
+        ],
+    );
+    let connected = Engine::connect(&engine.socket).await.unwrap();
+    let swept = ops::sweep_throwaways(&connected, &ignore).await;
+    assert_eq!(swept.len(), 2, "{swept:?}");
+    assert_eq!(
+        names_in(&state),
+        ["try", fresh.as_str(), "silo-baseline-bbbbbb"]
+    );
+}

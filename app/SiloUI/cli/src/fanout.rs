@@ -330,14 +330,17 @@ async fn one(
         .recipe_name
         .as_ref()
         .and(args.fork.recipe.as_ref());
-    let (fork, published) =
-        match make_one(engine, source, name, checkpoint, extras, None, recipe, progress).await {
-            Ok(made) => made,
-            Err(error) => {
-                entry["error"] = json!(error.message);
-                return entry;
-            }
-        };
+    let (fork, published) = match make_one(
+        engine, source, name, checkpoint, extras, None, recipe, progress,
+    )
+    .await
+    {
+        Ok(made) => made,
+        Err(error) => {
+            entry["error"] = json!(error.message);
+            return entry;
+        }
+    };
     match published {
         Ok(ports) => entry["ports"] = json!(ports),
         Err(error) => entry["portsError"] = json!(error.message),
@@ -396,6 +399,7 @@ pub async fn fork_many(
         )));
     }
     Settings::check_fork_secrets(settings, &args.fork.secrets)?;
+    ops::sweep_throwaways(engine, progress).await;
     let all = engine.computers().await?;
     let source = find(&all, &args.fork.source)?.clone();
     let names = fork_names(

@@ -33,6 +33,52 @@ pub async fn list(engine: &Engine) -> Result<Value, CliError> {
     Ok(json!({ "computers": computers.iter().map(Computer::to_json).collect::<Vec<_>>() }))
 }
 
+/// `silo list --all`: the throwaway baseline and recipe-builder computers too.
+pub async fn list_all(engine: &Engine) -> Result<Value, CliError> {
+    let computers = engine.all_computers().await?;
+    Ok(json!({ "computers": computers.iter().map(Computer::to_json).collect::<Vec<_>>() }))
+}
+
+/// How long a throwaway baseline computer may exist before it counts as left behind.
+pub const THROWAWAY_MAX_AGE_SECONDS: i64 = 3600;
+
+/// `silo-baseline-<unix seconds in hex>-<short id>`: the time lets a later run tell a copy
+/// that is being measured from one left behind.
+pub fn baseline_name(now: i64) -> String {
+    format!("{BASELINE_PREFIX}{now:x}-{}", short_id())
+}
+
+/// The baseline computers that nothing is using: stopped or failed, and not made within
+/// `THROWAWAY_MAX_AGE_SECONDS`. A name with no time in it (made by an earlier version) counts
+/// as old.
+pub fn stale_throwaways(all: &[Computer], now: i64) -> Vec<&Computer> {
+    all.iter()
+        .filter(|computer| computer.name.starts_with(BASELINE_PREFIX))
+        .filter(|computer| matches!(computer.state.as_str(), "stopped" | "failed"))
+        .filter(|computer| {
+            let rest = &computer.name[BASELINE_PREFIX.len()..];
+            let made = rest
+                .split_once('-')
+                .and_then(|(stamp, _)| i64::from_str_radix(stamp, 16).ok());
+            made.map_or(true, |made| now - made >= THROWAWAY_MAX_AGE_SECONDS)
+        })
+        .collect()
+}
+
+/// Drops the stale throwaways. Best effort; returns the names dropped.
+pub async fn sweep_throwaways(engine: &Engine, progress: Progress<'_>) -> Vec<String> {
+    let Ok(all) = engine.all_computers().await else {
+        return Vec::new();
+    };
+    let mut dropped = Vec::new();
+    for stale in stale_throwaways(&all, crate::clock::now_unix()) {
+        if remove_computer(engine, stale, progress).await.is_ok() {
+            dropped.push(stale.name.clone());
+        }
+    }
+    dropped
+}
+
 /// One computer with its checkpoints, its recorded quiet state, the Silo secrets assigned to
 /// it and its GitHub assignment. A reading the engine cannot give is `null`.
 pub async fn status(engine: &Engine, name: &str) -> Result<Value, CliError> {
@@ -432,6 +478,7 @@ pub async fn fork(
     progress: Progress<'_>,
 ) -> Result<Value, CliError> {
     Settings::check_fork_secrets(settings, &args.secrets)?;
+    sweep_throwaways(engine, progress).await;
     let mut recipe_hash = None;
     let mut checkpoint = args.checkpoint.clone();
     let source = match &args.recipe_name {
@@ -726,10 +773,10 @@ async fn measure_baseline(
         }
     };
     // Throwaways left by an interrupted run are dropped first.
-    for stale in all.iter().filter(|c| c.name.starts_with(BASELINE_PREFIX)) {
+    for stale in stale_throwaways(&all, crate::clock::now_unix()) {
         let _ = remove_computer(engine, stale, progress).await;
     }
-    let name = format!("{BASELINE_PREFIX}{}", short_id());
+    let name = baseline_name(crate::clock::now_unix());
     let copy = BaselineCopy {
         owner,
         checkpoint: &checkpoint,
@@ -911,7 +958,9 @@ pub async fn drop_computer(
     progress: Progress<'_>,
 ) -> Result<Value, CliError> {
     check_drop(name, force)?;
-    let computer = engine.computer(name).await?;
+    // Hidden throwaways (baselines, recipe builders) can be dropped by name or id.
+    let all = engine.all_computers().await?;
+    let computer = find(&all, name)?.clone();
     check_drop(&computer.name, force)?;
     let expected = match &computer.configuration {
         Some(configuration) => Some(serde_json::from_value(configuration.clone())?),

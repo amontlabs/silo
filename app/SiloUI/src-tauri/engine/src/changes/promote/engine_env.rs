@@ -255,6 +255,16 @@ impl PromoteEnv for EngineEnv {
         macos_computers::promote_stop(&self.macos()?, id)
     }
 
+    fn start(&self, id: &str) -> Result<(), String> {
+        if self.guest.os(id)? == Os::Linux {
+            let name = self.info(id)?.name;
+            return with_linux(self.host.as_ref(), |linux| {
+                (linux.lifecycle)("start", &name)
+            });
+        }
+        macos_computers::promote_start(&self.macos()?, id)
+    }
+
     fn hold(&self, id: &str, label: &str) -> Result<Box<dyn Any>, String> {
         self.guest.hold(id, label)
     }
