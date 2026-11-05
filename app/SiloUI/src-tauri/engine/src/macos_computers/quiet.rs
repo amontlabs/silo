@@ -18,8 +18,14 @@ use std::{
 /// Where parked files go on the Data volume, under their original path.
 const PARK_DIR: &str = "Library/Application Support/Silo/Quieted";
 
-/// Launchd labels with these prefixes belong to Silo and are never parked.
-const SILO_LABEL_PREFIXES: [&str; 2] = ["com.silo.", "org.silo."];
+/// The launchd jobs Silo installs itself, by exact label. A job stays only when its file is
+/// named after one of these labels too; any other label, whatever its prefix, is the user's.
+const SILO_JOB_LABELS: [&str; 4] = [
+    "com.silo.network-bootstrap",
+    "com.silo.proxy-environment",
+    "org.silo.computer-use-reconcile",
+    "org.silo.guest-recorder",
+];
 
 /// The launchd keys that make a job start on its own schedule rather than keep running.
 const SCHEDULE_KEYS: [&str; 5] = [
@@ -287,6 +293,7 @@ pub(super) fn apply_offline(root: &Path, scrub: &[String]) -> Result<Outcome, St
 /// What a launchd job file says about itself.
 struct Job {
     label: String,
+    file_name: String,
     scheduled: bool,
     program: Option<String>,
 }
@@ -416,6 +423,7 @@ fn read_job(file: &Path, name: &str) -> Option<Job> {
         .map(str::to_owned);
     Some(Job {
         label,
+        file_name: name.to_string(),
         scheduled: SCHEDULE_KEYS.iter().any(|key| dictionary.contains_key(key)),
         program,
     })
@@ -424,9 +432,8 @@ fn read_job(file: &Path, name: &str) -> Option<Job> {
 /// Silo's jobs stay. macOS's stay only when the file is in a system-wide folder and runs a
 /// program of the system: a label alone says nothing about who wrote the file.
 fn keeps(job: &Job, system_folder: bool) -> bool {
-    if SILO_LABEL_PREFIXES
-        .iter()
-        .any(|prefix| job.label.starts_with(prefix))
+    if SILO_JOB_LABELS.contains(&job.label.as_str())
+        && job.file_name == format!("{}.plist", job.label)
     {
         return true;
     }
@@ -769,6 +776,11 @@ mod tests {
         );
         write(
             root,
+            "Users/silo/Library/LaunchAgents/org.silo.check.interval.plist",
+            &scheduled("org.silo.check.interval"),
+        );
+        write(
+            root,
             "Users/silo/Library/LaunchAgents/db.plist",
             &plist_with_keys(
                 "homebrew.mxcl.postgresql",
@@ -819,6 +831,7 @@ mod tests {
                 "/Library/LaunchAgents/renamed.plist",
                 "/Users/other/Library/LaunchAgents/cal.plist",
                 "/Users/other/Library/LaunchAgents/watch.plist",
+                "/Users/silo/Library/LaunchAgents/org.silo.check.interval.plist",
                 "/Users/silo/Library/LaunchAgents/poller.plist",
             ]
         );

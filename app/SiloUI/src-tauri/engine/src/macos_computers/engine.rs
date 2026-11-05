@@ -966,16 +966,29 @@ pub(super) fn start(
     cancelled: &dyn Fn() -> bool,
 ) -> Result<(), String> {
     if !boots_behind_gateway(record) {
-        return start_machine(app, record, layout, &Boot::BootstrapNat);
+        start_machine(app, record, layout, &Boot::BootstrapNat)?;
+        count_boot(app, record, layout, "setup boot");
+        return Ok(());
     }
     super::proxy::require_guest_bootstrap(record, layout)?;
     let boot_started = time::OffsetDateTime::now_utc();
     start_machine(app, record, layout, &Boot::Normal)?;
-    // The first boot of a fork can take minutes and changes its record; what follows uses the
-    // record as it is now.
+    count_boot(
+        app,
+        record,
+        layout,
+        if record.first_boot {
+            "first Start"
+        } else {
+            "Start"
+        },
+    );
+    // The boot is counted in the saved record, and the first boot of a fork can take minutes
+    // and changes it; what follows uses the record as it is now.
     let fresh;
     let record = if record.first_boot {
-        fresh = super::fork_first_boot::complete(app, record, layout, cancelled)?;
+        let counted = store::read_record(layout).unwrap_or_else(|_| record.clone());
+        fresh = super::fork_first_boot::complete(app, &counted, layout, cancelled)?;
         &fresh
     } else {
         record
@@ -990,6 +1003,21 @@ pub(super) fn start(
     }
     crate::github::computer_restored(&record.name);
     Ok(())
+}
+
+/// Logs one step line for a boot the engine just made and adds it to the computer's count,
+/// in the saved record and in the registry. Best effort: a computer that can't record the
+/// count still runs.
+fn count_boot(app: &MacosContext, record: &Record, layout: &Layout, reason: &str) {
+    let mut saved = store::read_record(layout).unwrap_or_else(|_| record.clone());
+    saved.boots = saved.boots.saturating_add(1);
+    let boots = saved.boots;
+    if let Some(log) = super::setup_log::SetupLog::open(app, &record.id) {
+        log.line(&format!("boot {boots}: {reason}"));
+    }
+    if store::save(layout, &saved).is_ok() {
+        super::update(app, &record.id, |entry| entry.record.boots = boots);
+    }
 }
 
 /// Temporary Apple NAT boot used only while staging the guest's persistent bootstrap.
@@ -1008,7 +1036,9 @@ pub(super) fn start_in_recovery(
     record: &Record,
     layout: &Layout,
 ) -> Result<(), String> {
-    start_machine(app, record, layout, &Boot::Recovery)
+    start_machine(app, record, layout, &Boot::Recovery)?;
+    count_boot(app, record, layout, "Recovery");
+    Ok(())
 }
 
 /// How a machine begins running.

@@ -174,6 +174,10 @@ pub(super) struct Record {
     /// its key, name and trust over its password login before handing the computer over.
     #[serde(default)]
     pub first_boot: bool,
+    /// How many times the engine has booted this computer (setup boots, first Start and every
+    /// Start, Recovery included).
+    #[serde(default)]
+    pub boots: u32,
     /// What a fork was made quiet with. Absent on computers that are not forks.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub quiet: Option<super::quiet::QuietRecord>,
@@ -356,6 +360,7 @@ pub(super) fn new_record(request: &CreateRequest, mac_address: String) -> Record
         secure_token_missing: false,
         disk_note: None,
         first_boot: false,
+        boots: 0,
         quiet: None,
         forked_from: None,
     }

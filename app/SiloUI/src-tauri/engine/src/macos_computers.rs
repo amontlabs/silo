@@ -208,6 +208,8 @@ pub struct MacosComputer {
     /// What a fork was made quiet with. Absent on computers that are not forks.
     #[serde(skip_serializing_if = "Option::is_none")]
     quiet: Option<silo_api::methods::computers::QuietState>,
+    /// How many times the engine has booted the computer.
+    boots: u32,
 }
 
 /// The informational note of an imported computer without a SecureToken (95 §3).
@@ -314,6 +316,7 @@ impl Entry {
             checkpoint_operation: self.operation.clone(),
             pending_restore: self.record.pending_restore.clone(),
             quiet: self.record.quiet.as_ref().map(quiet::QuietRecord::view),
+            boots: self.record.boots,
         }
     }
 }
@@ -9222,6 +9225,7 @@ mod tests {
                 checkpoint_operation: None,
                 pending_restore: None,
                 quiet: None,
+                boots: 0,
             }],
             template: None,
             min_disk_gib: 1,
