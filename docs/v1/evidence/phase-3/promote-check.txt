@@ -1,32 +1,36 @@
 == header
-commit: 5a97be10b7b4a2ae4e9266905f69505b2382d56e; tracked changes under app/: []
-bundled msb: msb 0.7.6; silo: silo 0.1.0; host macOS 26.5 arm64; date 2026-11-05T22:48:56Z
+commit: b00a6ddebad9b2d7b1abf13ec9b7f2474c761a96; tracked changes under app/: []
+bundled msb: msb 0.7.6; silo: silo 0.1.0; host macOS 26.5 arm64; date 2026-11-05T22:59:31Z
 macOS VMs running at start: 0
-NAME         STATE      KIND    SIZE
-workspace-1  stopped    linux   8 cpu, 32 GiB
-e2e-relay    stopped    linux   8 cpu, 32 GiB
-silo-eval-a  stopped    linux   2 cpu, 2 GiB
-silo-eval-b  stopped    linux   2 cpu, 2 GiB
+NAME                                STATE      KIND    SIZE
+workspace-1                         stopped    linux   8 cpu, 32 GiB
+e2e-relay                           stopped    linux   8 cpu, 32 GiB
+silo-eval-a                         stopped    linux   2 cpu, 2 GiB
+silo-eval-b                         stopped    linux   2 cpu, 2 GiB
+e2e-p3-macsrc-before-20261105-2253  failed     macos   4 cpu, 8 GiB
+e2e-p3-macsrc                       failed     macos   4 cpu, 8 GiB
 == Linux: main with a web app, a crontab line, a secret
-[23:48:56] main absent: silo up
-[23:49:40] PASS  silo up (main created for part B)  -- 
+[23:59:31] main absent: silo up
+[00:00:15] PASS  silo up (main created for part B)  -- 
 guest OS: Ubuntu 24.04.4 LTS kernel 6.12.109
-main id c7c4da56-5b73-456c-af74-413c231a9a73
+main id b2ef85ea-c4f0-4326-b8eb-810502a2ac6e
 main crontab: */5 * * * * echo p3root >> /var/log/p3root.log
 p3-job
 silo: Allow Silo's engine to use its saved sign-in in the macOS Keychain. (credential_access_denied)
-[23:49:42] BLOCKED  secret assignment on main  -- credential_access_denied: silo: Allow Silo's engine to use its saved sign-in in the macOS Keychain. (credential_access_denied)
+[00:00:17] BLOCKED  secret assignment on main  -- credential_access_denied: silo: Allow Silo's engine to use its saved sign-in in the macOS Keychain. (credential_access_denied)
 No secrets yet.
 SSH entries on this Dev home before: ls: /Users/polarzero/.silo-dev/ssh: No such file or directory 
+e2e-p3-macsrc-before-20261105-2253:bed7cf4e:failed
+e2e-p3-macsrc:92f47db8:failed
 e2e-relay:a7a0e7cb:stopped
-main:c7c4da56:running
+main:b2ef85ea:running
 silo-eval-a:2b0a8fba:stopped
 silo-eval-b:b0e0b6d0:stopped
 workspace-1:96b9e3e6:stopped
 == fork main into e2e-p3-pr
-[23:49:46] PASS  silo fork main --name e2e-p3-pr  -- wall 4 s (Linux)
-[23:49:52] PASS  start e2e-p3-pr  -- 
-fork id 886da309-b34b-4375-8e4e-3e1a0c4b3899
+[00:00:21] PASS  silo fork main --name e2e-p3-pr  -- wall 4 s (Linux)
+[00:00:27] PASS  start e2e-p3-pr  -- 
+fork id 2605406d-b58f-40a5-82a2-b3c1b748d188
 fork status: quiet: applied; stopped: none; scrubbed: none; secrets: none
 fork cron parked: etc/cron.d=[] root crontab=[no crontab for root]
 host=e2e-p3-pr content=v2
@@ -37,270 +41,178 @@ main URL: http://3000.main.silo.localhost:47383
 main URL before promote: host=main content=v1
  http=200
 == silo fold e2e-p3-pr --promote
-[23:50:09] FAIL  silo fold e2e-p3-pr --promote exits 0  -- wall 10 s
+[00:00:46] PASS  silo fold e2e-p3-pr --promote exits 0  -- wall 12 s
 Promoting e2e-p3-pr...
 Promoting e2e-p3-pr: 5s
-silo: The changes.promote stopped unexpectedly: port reconciliation requires the computer operation gate
-
-e2e-relay:a7a0e7cb:stopped
-main-before-20261105-2249:c7c4da56:stopped
-main:886da309:running
-silo-eval-a:2b0a8fba:stopped
-silo-eval-b:b0e0b6d0:stopped
-workspace-1:96b9e3e6:stopped
-archive: main-before-20261105-2249
-[23:50:10] PASS  the fork is now named main (id 886da309-b34b-4375-8e4e-3e1a0c4b3899)  -- main id 886da309-b34b-4375-8e4e-3e1a0c4b3899
-[23:50:10] PASS  old main archived as main-before-* with its id  -- main-before-20261105-2249
--- content on the new main
-[23:50:11] PASS  promoted main is running without a start (old main was running)  -- archive: main-before-20261105-2249 stopped
-marker: fork-v2  web: host=main content=v2
-[23:50:16] PASS  new main serves the fork's content (file + web app output, in-guest)  -- 
-3000  http  unknown  http://3000.main.silo.localhost:47383
-main URL after promote (waits up to 45 s): host=main content=v2
-[23:50:17] PASS  main's URL serves the fork's content  -- http://3000.main.silo.localhost:47383/
--- secrets
-No secrets yet.
-secrets assigned: none
-[23:50:18] BLOCKED  secrets carried  -- no secret could be assigned
--- quiet-parked jobs
-new main: etc/cron.d=[e2scrub_all p3-job ] root crontab=[*/5 * * * * echo p3root >> /var/log/p3root.log]
-[23:50:19] PASS  cron.d line and root crontab line restored on the new main  -- 
--- SSH alias
-ssh main.silo-dev: ssh: connect to host 127.0.0.1 port 2222: Connection refused 
-[23:50:19] FAIL  ssh main.silo-dev reaches the new main (marker fork-v2)  -- 
-== silo undo main
-[23:50:25] FAIL  silo undo main exits 0  -- wall 6 s
-Undoing the latest keep or promote of main...
-Undoing the latest keep or promote of main: 5s
-silo: The changes.undo stopped unexpectedly: port reconciliation requires the computer operation gate
-
-e2e-p3-pr:886da309:stopped
-e2e-relay:a7a0e7cb:stopped
-main:c7c4da56:running
-silo-eval-a:2b0a8fba:stopped
-silo-eval-b:b0e0b6d0:stopped
-workspace-1:96b9e3e6:stopped
-[23:50:26] PASS  names back: main=c7c4da56-5b73-456c-af74-413c231a9a73, e2e-p3-pr=886da309-b34b-4375-8e4e-3e1a0c4b3899, no main-before-*  -- archive now: []
-[23:50:27] PASS  undone main is running without a start  -- 
-marker: main-v1  web: host=main content=v1  cron: p3-job */5 * * * * echo p3root >> /var/log/p3root.log
-[23:50:33] PASS  content back on main (file + web app)  -- 
-3000  http  reachable  http://3000.main.silo.localhost:47383
-[23:50:33] PASS  main's URL serves the original content again  -- 
-[23:50:33] PASS  main's cron lines intact after undo  -- 
-[23:50:33] FAIL  ssh main.silo-dev reaches the original main again  -- 
-[23:50:34] PASS  main's ports back as before  -- 
-fork after undo: silo: Start e2e-p3-pr first.
-== macOS: source e2e-p3-macsrc, fork e2e-p3-macpr
-macOS VMs running: 0
-Creating e2e-p3-macsrc...
-Created e2e-p3-macsrc (stopped)
-[23:51:55] PASS  create e2e-p3-macsrc (macOS)  -- 81 s
-[23:52:14] PASS  start e2e-p3-macsrc  -- 
-guest: ProductName:		macOS ProductVersion:		26.6.2 BuildVersion:		25G83 
-[23:52:21] PASS  silo fork e2e-p3-macsrc --name e2e-p3-macpr  -- wall 6 s (macOS fork of a running source, dev signal only)
-Dropping silo-baseline-8fa22f...
-Forking e2e-p3-macsrc into e2e-p3-macpr...
-Forked e2e-p3-macpr (setting-up): e2e-p3-macsrc as of 23:52:17 (new checkpoint)
-[23:53:02] PASS  start e2e-p3-macpr  -- macOS VMs: 2
-fork marker: mac-fork-v2
-macOS VMs running: 2
-e2e-p3-macpr:92f47db8:running
-e2e-p3-macsrc:bed7cf4e:running
-e2e-p3-pr:886da309:stopped
-e2e-relay:a7a0e7cb:stopped
-main:c7c4da56:running
-silo-eval-a:2b0a8fba:stopped
-silo-eval-b:b0e0b6d0:stopped
-workspace-1:96b9e3e6:stopped
-[23:53:27] PASS  silo fold e2e-p3-macpr --promote (macOS)  -- wall 23 s
-Promoting e2e-p3-macpr...
-Promoting e2e-p3-macpr: 5s
-Promoting e2e-p3-macpr: 10s
-Promoting e2e-p3-macpr: 15s
-Promoting e2e-p3-macpr: 20s
 {
   "report": {
-    "archive": "e2e-p3-macsrc-before-20261105-2253",
-    "checkpoint": "3187da68-07b7-4b5f-93ed-4030ddfda126",
-    "fork": "e2e-p3-macpr",
+    "archive": "main-before-20261105-2300",
+    "checkpoint": "cc5bb8e20768a47389761b37efbc0312",
+    "fork": "e2e-p3-pr",
     "notes": [
-      "e2e-p3-macpr is now e2e-p3-macsrc. e2e-p3-macsrc was archived as e2e-p3-macsrc-before-20261105-2253; `silo undo e2e-p3-macsrc` swaps them back.",
-      "e2e-p3-macsrc was not started again: The macOS proxy bootstrap identity is missing or has changed. Retry computer setup."
+      "e2e-p3-pr is now main. main was archived as main-before-20261105-2300; `silo undo main` swaps them back."
     ],
     "steps": [
       "names",
       "name-keyed settings",
       "SSH access",
       "lineage",
-      "macOS network identity",
       "quiet parking"
     ],
-    "target": "e2e-p3-macsrc"
+    "target": "main"
+  },
+  "ssh": {
+    "computer": "main",
+    "config": "/Users/polarzero/.silo-dev/ssh-hosts.conf",
+    "connect": "ssh main.silo-dev",
+    "host": "main.silo-dev"
   },
   "status": "promoted"
 }
 
-e2e-p3-macsrc-before-20261105-2253:bed7cf4e:stopped
-e2e-p3-macsrc:92f47db8:stopped
-e2e-p3-pr:886da309:stopped
+e2e-p3-macsrc-before-20261105-2253:bed7cf4e:failed
+e2e-p3-macsrc:92f47db8:failed
 e2e-relay:a7a0e7cb:stopped
-main:c7c4da56:running
+main-before-20261105-2300:b2ef85ea:stopped
+main:2605406d:running
+silo-eval-a:2b0a8fba:stopped
+silo-eval-b:b0e0b6d0:stopped
+workspace-1:96b9e3e6:stopped
+archive: main-before-20261105-2300
+[00:00:47] PASS  the fork is now named main (id 2605406d-b58f-40a5-82a2-b3c1b748d188)  -- main id 2605406d-b58f-40a5-82a2-b3c1b748d188
+[00:00:47] PASS  old main archived as main-before-* with its id  -- main-before-20261105-2300
+-- content on the new main
+[00:00:48] PASS  promoted main is running without a start (old main was running)  -- archive: main-before-20261105-2300 stopped
+marker: fork-v2  web: host=main content=v2
+[00:00:53] PASS  new main serves the fork's content (file + web app output, in-guest)  -- 
+3000  http  reachable  http://3000.main.silo.localhost:47383
+main URL after promote (waits up to 45 s): host=main content=v2
+[00:00:54] PASS  main's URL serves the fork's content  -- http://3000.main.silo.localhost:47383/
+-- secrets
+No secrets yet.
+secrets assigned: none
+[00:00:54] BLOCKED  secrets carried  -- no secret could be assigned
+-- quiet-parked jobs
+new main: etc/cron.d=[e2scrub_all p3-job ] root crontab=[*/5 * * * * echo p3root >> /var/log/p3root.log]
+[00:00:55] PASS  cron.d line and root crontab line restored on the new main  -- 
+-- SSH alias
+ssh main.silo-dev: fork-v2 main 
+[00:00:56] PASS  ssh main.silo-dev reaches the new main (marker fork-v2)  -- 
+== silo undo main
+[00:01:09] PASS  silo undo main exits 0  -- wall 13 s
+Undoing the latest keep or promote of main...
+Undoing the latest keep or promote of main: 5s
+Undoing the latest keep or promote of main: 10s
+{
+  "archive": "main-before-20261105-2300",
+  "changedSince": [],
+  "computer": "main",
+  "fork": "e2e-p3-pr",
+  "kind": "promote",
+  "recovered": false,
+  "ssh": {
+    "computer": "main",
+    "config": "/Users/polarzero/.silo-dev/ssh-hosts.conf",
+    "connect": "ssh main.silo-dev",
+    "host": "main.silo-dev"
+  },
+  "status": "undone"
+}
+
+e2e-p3-macsrc-before-20261105-2253:bed7cf4e:failed
+e2e-p3-macsrc:92f47db8:failed
+e2e-p3-pr:2605406d:running
+e2e-relay:a7a0e7cb:stopped
+main:b2ef85ea:running
+silo-eval-a:2b0a8fba:stopped
+silo-eval-b:b0e0b6d0:stopped
+workspace-1:96b9e3e6:stopped
+[00:01:10] PASS  names back: main=b2ef85ea-c4f0-4326-b8eb-810502a2ac6e, e2e-p3-pr=2605406d-b58f-40a5-82a2-b3c1b748d188, no main-before-*  -- archive now: []
+[00:01:10] PASS  undone main is running without a start  -- 
+marker: main-v1  web: host=main content=v1  cron: p3-job */5 * * * * echo p3root >> /var/log/p3root.log
+[00:01:16] PASS  content back on main (file + web app)  -- 
+3000  http  reachable  http://3000.main.silo.localhost:47383
+[00:01:17] PASS  main's URL serves the original content again  -- 
+[00:01:17] PASS  main's cron lines intact after undo  -- 
+[00:01:17] PASS  ssh main.silo-dev reaches the original main again  -- 
+[00:01:18] PASS  main's ports back as before  -- 
+fork after undo: fork-v2
+== macOS: source e2e-p3-macsrc, fork e2e-p3-macpr
+macOS VMs running: 0
+silo: A macOS computer named 'e2e-p3-macsrc' already exists.
+[00:01:18] FAIL  create e2e-p3-macsrc (macOS)  -- 0 s
+[00:01:19] FAIL  start e2e-p3-macsrc  -- 
+silo: Start e2e-p3-macsrc first.
+guest: 
+silo: Start e2e-p3-macsrc first.
+[00:01:22] PASS  silo fork e2e-p3-macsrc --name e2e-p3-macpr  -- wall 2 s (macOS fork of a running source, dev signal only)
+Dropping silo-baseline-8fa22f...
+Forking e2e-p3-macsrc into e2e-p3-macpr...
+Forked e2e-p3-macpr (setting-up): e2e-p3-macsrc as of 00:01:21 (new checkpoint)
+[00:02:16] PASS  start e2e-p3-macpr  -- macOS VMs: 1
+fork marker: mac-fork-v2
+macOS VMs running: 1
+e2e-p3-macpr:4026b558:running
+e2e-p3-macsrc-before-20261105-2253:bed7cf4e:failed
+e2e-p3-macsrc:92f47db8:stopped
+e2e-p3-pr:2605406d:running
+e2e-relay:a7a0e7cb:stopped
+main:b2ef85ea:running
+silo-eval-a:2b0a8fba:stopped
+silo-eval-b:b0e0b6d0:stopped
+workspace-1:96b9e3e6:stopped
+[00:02:25] FAIL  silo fold e2e-p3-macpr --promote (macOS)  -- wall 9 s
+Promoting e2e-p3-macpr...
+Promoting e2e-p3-macpr: 5s
+silo: Allow Silo's engine to use its saved sign-in in the macOS Keychain. (credential_access_denied)
+
+e2e-p3-macpr:4026b558:running
+e2e-p3-macsrc-before-20261105-2253:bed7cf4e:failed
+e2e-p3-macsrc:92f47db8:stopped
+e2e-p3-pr:2605406d:running
+e2e-relay:a7a0e7cb:stopped
+main:b2ef85ea:running
 silo-eval-a:2b0a8fba:stopped
 silo-eval-b:b0e0b6d0:stopped
 workspace-1:96b9e3e6:stopped
 archive: []
-[('e2e-p3-macsrc-before-20261105-2253', 'bed7cf4e'), ('e2e-p3-macsrc', '92f47db8')]
-source name expected after promote: e2e-p3-macsrc now id 92f47db8-e47e-433b-83d0-0b16510a37b8 (fork id 92f47db8, source id bed7cf4e)
-[23:53:29] PASS  macOS: the fork now carries the source's name  -- 
-macOS VMs running: 0
-silo: The bundled MicroSandbox executable is unavailable in this Silo installation.
-Traceback (most recent call last):
-  File "<string>", line 1, in <module>
-    import json,sys; print(json.load(sys.stdin)['state'])
-                           ~~~~~~~~~^^^^^^^^^^^
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/__init__.py", line 293, in load
-    return loads(fp.read(),
-        cls=cls, object_hook=object_hook,
-        parse_float=parse_float, parse_int=parse_int,
-        parse_constant=parse_constant, object_pairs_hook=object_pairs_hook, **kw)
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/__init__.py", line 346, in loads
-    return _default_decoder.decode(s)
-           ~~~~~~~~~~~~~~~~~~~~~~~^^^
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/decoder.py", line 345, in decode
-    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
-               ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/decoder.py", line 363, in raw_decode
-    raise JSONDecodeError("Expecting value", s, err.value) from None
-json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
-silo: The bundled MicroSandbox executable is unavailable in this Silo installation.
-Traceback (most recent call last):
-  File "<string>", line 1, in <module>
-    import json,sys; print(json.load(sys.stdin)['state'])
-                           ~~~~~~~~~^^^^^^^^^^^
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/__init__.py", line 293, in load
-    return loads(fp.read(),
-        cls=cls, object_hook=object_hook,
-        parse_float=parse_float, parse_int=parse_int,
-        parse_constant=parse_constant, object_pairs_hook=object_pairs_hook, **kw)
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/__init__.py", line 346, in loads
-    return _default_decoder.decode(s)
-           ~~~~~~~~~~~~~~~~~~~~~~~^^^
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/decoder.py", line 345, in decode
-    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
-               ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/decoder.py", line 363, in raw_decode
-    raise JSONDecodeError("Expecting value", s, err.value) from None
-json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
-silo: The bundled MicroSandbox executable is unavailable in this Silo installation.
-Traceback (most recent call last):
-  File "<string>", line 1, in <module>
-    import json,sys; print(json.load(sys.stdin)['state'])
-                           ~~~~~~~~~^^^^^^^^^^^
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/__init__.py", line 293, in load
-    return loads(fp.read(),
-        cls=cls, object_hook=object_hook,
-        parse_float=parse_float, parse_int=parse_int,
-        parse_constant=parse_constant, object_pairs_hook=object_pairs_hook, **kw)
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/__init__.py", line 346, in loads
-    return _default_decoder.decode(s)
-           ~~~~~~~~~~~~~~~~~~~~~~~^^^
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/decoder.py", line 345, in decode
-    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
-               ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/decoder.py", line 363, in raw_decode
-    raise JSONDecodeError("Expecting value", s, err.value) from None
-json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
-silo: The bundled MicroSandbox executable is unavailable in this Silo installation.
-Traceback (most recent call last):
-  File "<string>", line 1, in <module>
-    import json,sys; print(json.load(sys.stdin)['state'])
-                           ~~~~~~~~~^^^^^^^^^^^
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/__init__.py", line 293, in load
-    return loads(fp.read(),
-        cls=cls, object_hook=object_hook,
-        parse_float=parse_float, parse_int=parse_int,
-        parse_constant=parse_constant, object_pairs_hook=object_pairs_hook, **kw)
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/__init__.py", line 346, in loads
-    return _default_decoder.decode(s)
-           ~~~~~~~~~~~~~~~~~~~~~~~^^^
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/decoder.py", line 345, in decode
-    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
-               ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/decoder.py", line 363, in raw_decode
-    raise JSONDecodeError("Expecting value", s, err.value) from None
-json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
-silo: The bundled MicroSandbox executable is unavailable in this Silo installation.
-Traceback (most recent call last):
-  File "<string>", line 1, in <module>
-    import json,sys; print(json.load(sys.stdin)['state'])
-                           ~~~~~~~~~^^^^^^^^^^^
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/__init__.py", line 293, in load
-    return loads(fp.read(),
-        cls=cls, object_hook=object_hook,
-        parse_float=parse_float, parse_int=parse_int,
-        parse_constant=parse_constant, object_pairs_hook=object_pairs_hook, **kw)
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/__init__.py", line 346, in loads
-    return _default_decoder.decode(s)
-           ~~~~~~~~~~~~~~~~~~~~~~~^^^
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/decoder.py", line 345, in decode
-    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
-               ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/decoder.py", line 363, in raw_decode
-    raise JSONDecodeError("Expecting value", s, err.value) from None
-json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
-silo: The bundled MicroSandbox executable is unavailable in this Silo installation.
-Traceback (most recent call last):
-  File "<string>", line 1, in <module>
-    import json,sys; print(json.load(sys.stdin)['state'])
-                           ~~~~~~~~~^^^^^^^^^^^
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/__init__.py", line 293, in load
-    return loads(fp.read(),
-        cls=cls, object_hook=object_hook,
-        parse_float=parse_float, parse_int=parse_int,
-        parse_constant=parse_constant, object_pairs_hook=object_pairs_hook, **kw)
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/__init__.py", line 346, in loads
-    return _default_decoder.decode(s)
-           ~~~~~~~~~~~~~~~~~~~~~~~^^^
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/decoder.py", line 345, in decode
-    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
-               ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/decoder.py", line 363, in raw_decode
-    raise JSONDecodeError("Expecting value", s, err.value) from None
-json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
-silo: Cannot reach the Silo engine at /Users/polarzero/.silo-dev/engine.sock: The engine connection failed: No such file or directory (os error 2). Open Silo and try again.
-Traceback (most recent call last):
-  File "<string>", line 1, in <module>
-    import json,sys; print(json.load(sys.stdin)['state'])
-                           ~~~~~~~~~^^^^^^^^^^^
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/__init__.py", line 293, in load
-    return loads(fp.read(),
-        cls=cls, object_hook=object_hook,
-        parse_float=parse_float, parse_int=parse_int,
-        parse_constant=parse_constant, object_pairs_hook=object_pairs_hook, **kw)
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/__init__.py", line 346, in loads
-    return _default_decoder.decode(s)
-           ~~~~~~~~~~~~~~~~~~~~~~~^^^
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/decoder.py", line 345, in decode
-    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
-               ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/decoder.py", line 363, in raw_decode
-    raise JSONDecodeError("Expecting value", s, err.value) from None
-json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
-[23:55:40] FAIL  macOS: promoted computer is running without a start  -- 
+[('e2e-p3-macsrc', '92f47db8'), ('e2e-p3-macpr', '4026b558')]
+source name expected after promote: e2e-p3-macsrc now id 92f47db8-e47e-433b-83d0-0b16510a37b8 (fork id 4026b558, source id 92f47db8)
+[00:02:26] FAIL  macOS: the fork now carries the source's name  -- 
+macOS VMs running: 1
+[00:04:36] FAIL  macOS: promoted computer is running without a start  -- 
 silo: Start e2e-p3-macsrc first.
 marker on promoted: 
 silo: Start e2e-p3-macsrc first.
-[23:55:41] FAIL  macOS: promoted computer has the fork's content  -- 
-[23:55:43] FAIL  silo undo e2e-p3-macsrc (macOS)  -- wall 2 s
+[00:04:36] FAIL  macOS: promoted computer has the fork's content  -- 
+[00:04:39] FAIL  silo undo e2e-p3-macsrc (macOS)  -- wall 3 s
 Undoing the latest keep or promote of e2e-p3-macsrc...
 silo: Allow Silo's engine to use its saved sign-in in the macOS Keychain. (credential_access_denied)
 
-e2e-p3-macsrc-before-20261105-2253:bed7cf4e:stopped
+e2e-p3-macpr:4026b558:running
+e2e-p3-macsrc-before-20261105-2253:bed7cf4e:failed
 e2e-p3-macsrc:92f47db8:stopped
-e2e-p3-pr:886da309:stopped
+e2e-p3-pr:2605406d:running
 e2e-relay:a7a0e7cb:stopped
-main:c7c4da56:stopped
+main:b2ef85ea:running
 silo-eval-a:2b0a8fba:stopped
 silo-eval-b:b0e0b6d0:stopped
 workspace-1:96b9e3e6:stopped
-[23:55:44] FAIL  macOS: names back after undo  -- 
+[00:04:39] PASS  macOS: names back after undo  -- 
+[00:06:49] FAIL  macOS: undone source is running without a start  -- 
+silo: Start e2e-p3-macsrc first.
+marker after undo: 
+silo: Start e2e-p3-macsrc first.
+[00:06:50] FAIL  macOS: content back after undo  -- 
+[00:06:50] cleanup
+Removed the build of linux-dev.
+[00:08:23] silo list after cleanup:
+NAME                                STATE      KIND    SIZE
+workspace-1                         stopped    linux   8 cpu, 32 GiB
+e2e-relay                           stopped    linux   8 cpu, 32 GiB
+silo-eval-a                         stopped    linux   2 cpu, 2 GiB
+silo-eval-b                         stopped    linux   2 cpu, 2 GiB
+e2e-p3-macsrc-before-20261105-2253  failed     macos   4 cpu, 8 GiB
+e2e-p3-macsrc                       failed     macos   4 cpu, 8 GiB
+macOS VMs running: 1
+== summary: 22 passed, 9 failed (2 blocked, not counted)

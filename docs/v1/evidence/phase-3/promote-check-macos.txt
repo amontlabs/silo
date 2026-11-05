@@ -1,0 +1,115 @@
+== header
+commit: b00a6ddebad9b2d7b1abf13ec9b7f2474c761a96; tracked changes under app/: []
+bundled msb: msb 0.7.6; silo: silo 0.1.0; host macOS 26.5 arm64; date 2026-11-05T23:09:12Z
+macOS VMs running at start: 0
+NAME                                STATE      KIND    SIZE
+workspace-1                         stopped    linux   8 cpu, 32 GiB
+e2e-relay                           stopped    linux   8 cpu, 32 GiB
+silo-eval-a                         stopped    linux   2 cpu, 2 GiB
+silo-eval-b                         stopped    linux   2 cpu, 2 GiB
+e2e-p3-macsrc-before-20261105-2253  failed     macos   4 cpu, 8 GiB
+e2e-p3-macsrc                       failed     macos   4 cpu, 8 GiB
+== macOS: source e2e-p3-macsrc2, fork e2e-p3-macpr2
+macOS VMs running: 0
+Creating e2e-p3-macsrc2...
+Created e2e-p3-macsrc2 (stopped)
+[00:10:26] PASS  create e2e-p3-macsrc2 (macOS)  -- 74 s
+[00:10:45] PASS  start e2e-p3-macsrc2  -- 
+guest: ProductName:		macOS ProductVersion:		26.6.2 BuildVersion:		25G83 
+[00:10:51] PASS  silo fork e2e-p3-macsrc2 --name e2e-p3-macpr2  -- wall 6 s (macOS fork of a running source, dev signal only)
+Dropping silo-baseline-8fa22f...
+Forking e2e-p3-macsrc2 into e2e-p3-macpr2...
+Forked e2e-p3-macpr2 (setting-up): e2e-p3-macsrc2 as of 00:10:47 (new checkpoint)
+[00:11:24] PASS  start e2e-p3-macpr2  -- macOS VMs: 2
+fork marker: mac-fork-v2
+macOS VMs running: 2
+e2e-p3-macpr2:e7543253:running
+e2e-p3-macsrc-before-20261105-2253:bed7cf4e:failed
+e2e-p3-macsrc2:496357a2:running
+e2e-p3-macsrc:92f47db8:failed
+e2e-relay:a7a0e7cb:stopped
+silo-eval-a:2b0a8fba:stopped
+silo-eval-b:b0e0b6d0:stopped
+workspace-1:96b9e3e6:stopped
+[00:12:05] PASS  silo fold e2e-p3-macpr2 --promote (macOS)  -- wall 40 s
+Promoting e2e-p3-macpr2: 15s
+Promoting e2e-p3-macpr2: 20s
+Promoting e2e-p3-macpr2: 25s
+Promoting e2e-p3-macpr2: 31s
+Promoting e2e-p3-macpr2: 36s
+{
+  "report": {
+    "archive": "e2e-p3-macsrc2-before-20261105-2311",
+    "checkpoint": "362688fe-4d70-4b41-be49-2861e7e74319",
+    "fork": "e2e-p3-macpr2",
+    "notes": [
+      "e2e-p3-macpr2 is now e2e-p3-macsrc2. e2e-p3-macsrc2 was archived as e2e-p3-macsrc2-before-20261105-2311; `silo undo e2e-p3-macsrc2` swaps them back."
+    ],
+    "steps": [
+      "names",
+      "name-keyed settings",
+      "SSH access",
+      "lineage",
+      "macOS network identity",
+      "quiet parking"
+    ],
+    "target": "e2e-p3-macsrc2"
+  },
+  "status": "promoted"
+}
+
+e2e-p3-macsrc-before-20261105-2253:bed7cf4e:failed
+e2e-p3-macsrc2-before-20261105-2311:496357a2:stopped
+e2e-p3-macsrc2:e7543253:running
+e2e-p3-macsrc:92f47db8:failed
+e2e-relay:a7a0e7cb:stopped
+silo-eval-a:2b0a8fba:stopped
+silo-eval-b:b0e0b6d0:stopped
+workspace-1:96b9e3e6:stopped
+archive: []
+[('e2e-p3-macsrc2-before-20261105-2311', '496357a2'), ('e2e-p3-macsrc2', 'e7543253')]
+source name expected after promote: e2e-p3-macsrc2 now id e7543253-3e63-4418-a362-3484af7a5d83 (fork id e7543253, source id 496357a2)
+[00:12:06] PASS  macOS: the fork now carries the source's name  -- 
+macOS VMs running: 1
+[00:12:06] PASS  macOS: promoted computer is running without a start  -- 
+marker on promoted: mac-fork-v2
+[00:12:07] PASS  macOS: promoted computer has the fork's content  -- 
+[00:12:51] PASS  silo undo e2e-p3-macsrc2 (macOS)  -- wall 44 s
+Undoing the latest keep or promote of e2e-p3-macsrc2: 25s
+Undoing the latest keep or promote of e2e-p3-macsrc2: 30s
+Undoing the latest keep or promote of e2e-p3-macsrc2: 36s
+Undoing the latest keep or promote of e2e-p3-macsrc2: 41s
+{
+  "archive": "e2e-p3-macsrc2-before-20261105-2311",
+  "changedSince": [],
+  "computer": "e2e-p3-macsrc2",
+  "fork": "e2e-p3-macpr2",
+  "kind": "promote",
+  "recovered": false,
+  "status": "undone"
+}
+
+e2e-p3-macpr2:e7543253:running
+e2e-p3-macsrc-before-20261105-2253:bed7cf4e:failed
+e2e-p3-macsrc2:496357a2:running
+e2e-p3-macsrc:92f47db8:failed
+e2e-relay:a7a0e7cb:stopped
+silo-eval-a:2b0a8fba:stopped
+silo-eval-b:b0e0b6d0:stopped
+workspace-1:96b9e3e6:stopped
+[00:12:52] PASS  macOS: names back after undo  -- 
+[00:12:52] PASS  macOS: undone source is running without a start  -- 
+marker after undo: mac-main-v1
+[00:12:53] PASS  macOS: content back after undo  -- 
+[00:12:53] cleanup
+silo: There is no built recipe named linux-dev.
+[00:13:10] silo list after cleanup:
+NAME                                STATE      KIND    SIZE
+workspace-1                         stopped    linux   8 cpu, 32 GiB
+e2e-relay                           stopped    linux   8 cpu, 32 GiB
+silo-eval-a                         stopped    linux   2 cpu, 2 GiB
+silo-eval-b                         stopped    linux   2 cpu, 2 GiB
+e2e-p3-macsrc-before-20261105-2253  failed     macos   4 cpu, 8 GiB
+e2e-p3-macsrc                       failed     macos   4 cpu, 8 GiB
+macOS VMs running: 0
+== summary: 12 passed, 0 failed (0 blocked, not counted)

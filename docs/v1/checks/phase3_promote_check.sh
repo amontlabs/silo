@@ -9,7 +9,7 @@ REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
 SILO="$REPO/app/SiloUI/target/debug/silo"
 BUNDLE="$REPO/app/SiloUI/target/debug/bundle/macos/Silo Dev.app"
 PROJ="$REPO/docs/v1/checks/phase3-proj"
-FORK=e2e-p3-pr; SECRET=E2E_P3_SECRET; MSRC=e2e-p3-macsrc; MFORK=e2e-p3-macpr
+FORK=e2e-p3-pr; SECRET=E2E_P3_SECRET; MSRC=${MSRC:-e2e-p3-macsrc}; MFORK=${MFORK:-e2e-p3-macpr}
 PASS=0; FAILN=0; BLOCKED=0
 ts() { date +%H:%M:%S; }
 say() { echo "[$(ts)] $*"; }
@@ -36,8 +36,9 @@ print(' '.join(c['name'] for c in d if c['name'].startswith('main-before-')))"; 
 created_main=0
 cleanup() {
   say "cleanup"
-  for c in $FORK $MFORK $MSRC $(archive) main; do "$SILO" stop "$c" >/dev/null 2>&1; done
-  for c in $FORK $MFORK $MSRC $(archive) main; do for i in $(seq 20); do "$SILO" drop "$c" --force >/dev/null 2>&1 && break; "$SILO" status "$c" >/dev/null 2>&1 || break; sleep 3; done; done
+  MARCH=$("$SILO" list --json | python3 -c "import json,sys; d=json.load(sys.stdin); d=d if isinstance(d,list) else d.get('computers',d); print(' '.join(c['name'] for c in d if c['name'].startswith('$MSRC-before-')))"); [ "${MAC_ONLY:-0}" = 1 ] && LIN="" || LIN="$FORK $(archive) main"
+  for c in $LIN $MFORK $MSRC $MARCH; do "$SILO" stop "$c" >/dev/null 2>&1; done
+  for c in $LIN $MFORK $MSRC $MARCH; do for i in $(seq 20); do "$SILO" drop "$c" --force >/dev/null 2>&1 && break; "$SILO" status "$c" >/dev/null 2>&1 || break; sleep 3; done; done
   "$SILO" secrets list 2>&1 | grep -q "$SECRET" && echo "note: secret $SECRET still listed (no silo command removes a secret)"
   (cd "$PROJ" && "$SILO" recipe rm linux-dev) 2>&1
   say "silo list after cleanup:"; "$SILO" list; echo "macOS VMs running: $(nvms)"
@@ -49,6 +50,7 @@ echo "commit: $(git -C "$REPO" rev-parse HEAD); tracked changes under app/: [$(g
 echo "bundled msb: $("$BUNDLE/Contents/MacOS/msb" --version 2>&1 | head -1); silo: $("$SILO" --version); host macOS $(sw_vers -productVersion) $(uname -m); date $(date -u +%FT%TZ)"
 echo "macOS VMs running at start: $(nvms)"; "$SILO" list
 
+if [ "${MAC_ONLY:-0}" != 1 ]; then
 echo "== Linux: main with a web app, a crontab line, a secret"
 cd "$PROJ"
 if ! "$SILO" status main >/dev/null 2>&1; then say "main absent: silo up"; "$SILO" up >/dev/null 2>&1; check "silo up (main created for part B)" $? ""; fi
@@ -114,6 +116,7 @@ x main 'test -f /etc/cron.d/p3-job && crontab -l | grep -q p3root'; check "main'
 [ "$HAVE_SECRET" = 1 ] && { "$SILO" secrets list | grep "$SECRET" | grep -q main; check "secret still on main after undo" $? ""; }
 echo "fork after undo: $(x $FORK 'cat /root/p3-marker' 2>&1 | head -1)"
 
+fi
 if [ "${SKIP_MAC:-0}" != 1 ]; then
 echo "== macOS: source $MSRC, fork $MFORK"
 echo "macOS VMs running: $(nvms)"
