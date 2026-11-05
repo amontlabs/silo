@@ -68,7 +68,12 @@ define_registry! {
     ChangesKeep => ("changes.keep", Job, keep::ChangesKeepParams, common::JobStartResult);
     ChangesPromote => ("changes.promote", Job, keep::ChangesPromoteParams, common::JobStartResult);
     ChangesRequest => ("changes.request", Command, keep::ChangesRequestParams, keep::ChangesRequestResult);
-    ChangesUndo => ("changes.undo", Job, keep::ChangesUndoParams, common::JobStartResult);
+    ChangesRequestsList => ("changes.requests.list", Query, review_requests::ChangesRequestsListParams, review_requests::ChangesRequestsListResult);
+    ChangesRequestsShow => ("changes.requests.show", Job, review_requests::RequestIdParams, common::JobStartResult);
+    ChangesRequestsKeep => ("changes.requests.keep", Job, review_requests::ChangesRequestsKeepParams, common::JobStartResult);
+    ChangesRequestsThrowAway => ("changes.requests.throwAway", Job, review_requests::RequestIdParams, common::JobStartResult);
+    ChangesRequestsOpen => ("changes.requests.open", Job, review_requests::RequestIdParams, common::JobStartResult);
+    ChangesUndo =>("changes.undo", Job, keep::ChangesUndoParams, common::JobStartResult);
     ChangesBaseline => ("changes.baseline", Job, changes::ChangesBaselineParams, common::JobStartResult);
     ChangesCapture => ("changes.capture", Job, changes::ChangesCaptureParams, common::JobStartResult);
     ChangesDiff => ("changes.diff", Job, changes::ChangesDiffParams, common::JobStartResult);
@@ -232,13 +237,13 @@ mod tests {
 
     #[test]
     fn registry_covers_every_canonical_method_and_kind() {
-        assert_eq!(METHOD_REGISTRY.len(), 156);
+        assert_eq!(METHOD_REGISTRY.len(), 161);
         assert_eq!(
             METHOD_REGISTRY
                 .iter()
                 .filter(|m| m.kind == MethodKind::Query)
                 .count(),
-            48
+            49
         );
         assert_eq!(
             METHOD_REGISTRY
@@ -252,7 +257,7 @@ mod tests {
                 .iter()
                 .filter(|m| m.kind == MethodKind::Job)
                 .count(),
-            36
+            40
         );
         assert_eq!(
             METHOD_REGISTRY

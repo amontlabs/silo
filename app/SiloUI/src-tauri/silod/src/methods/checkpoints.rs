@@ -13,6 +13,7 @@ mod keep;
 mod migration;
 pub(crate) mod preparation;
 mod recipes;
+mod requests;
 
 use std::sync::Arc;
 
@@ -82,6 +83,11 @@ async fn dispatch(
         MethodName::ChangesPromote => keep::promote(context, params).await,
         MethodName::ChangesUndo => keep::undo(context, params).await,
         MethodName::ChangesRequest => keep::request(context, params).await,
+        MethodName::ChangesRequestsList => requests::list(context, params).await,
+        MethodName::ChangesRequestsShow => requests::show(context, params).await,
+        MethodName::ChangesRequestsKeep => requests::keep(context, params).await,
+        MethodName::ChangesRequestsThrowAway => requests::throw_away(context, params).await,
+        MethodName::ChangesRequestsOpen => requests::open(context, params).await,
         MethodName::CheckpointsCreate => create(context, params).await,
         MethodName::CheckpointsRestore => restore(context, params).await,
         MethodName::CheckpointsFork => fork(context, params).await,

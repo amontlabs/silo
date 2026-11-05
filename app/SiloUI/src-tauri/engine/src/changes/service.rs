@@ -306,6 +306,21 @@ pub fn start(
     method: &str,
     work: Work,
 ) -> Result<JobId, GuestError> {
+    start_with(context, runner, computer_id, method, work, Box::new(Ok))
+}
+
+/// What a job does with the work's result before it is published.
+pub type Finish = Box<dyn FnOnce(Value) -> Result<Value, GuestError> + Send>;
+
+/// [`start`], with `finish` turning the work's result into the job's result.
+pub fn start_with(
+    context: Arc<dyn EngineContext>,
+    runner: Arc<dyn GuestRunner>,
+    computer_id: String,
+    method: &str,
+    work: Work,
+    finish: Finish,
+) -> Result<JobId, GuestError> {
     let registry = context.job_registry().map_err(internal)?;
     let accepted = crate::jobs::allocate(context.as_ref(), method)
         .map_err(|error| internal(error.to_string()))?;
@@ -322,7 +337,8 @@ pub fn start(
             &computer_id,
             work,
             &Options::default(),
-        );
+        )
+        .and_then(finish);
         let _ = match outcome {
             Ok(value) => {
                 crate::jobs::finish_with_result(context.as_ref(), id, value, Audience::All)

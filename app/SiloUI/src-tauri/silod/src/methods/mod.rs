@@ -246,6 +246,7 @@ fn changes_computer(method: MethodName) -> bool {
             | MethodName::GuestPrepare
             | MethodName::FilesUpload
             | MethodName::ChangesKeep
+            | MethodName::ChangesRequestsKeep
             | MethodName::ChangesPromote
             | MethodName::ChangesUndo
             | MethodName::CheckpointsRestore

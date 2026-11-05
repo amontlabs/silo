@@ -832,6 +832,18 @@
     "ChangesRequestParams": {
       "description": "Ask for a fork to be reviewed without keeping it: `changes.request` stores a\n[`FoldRequest`] and changes nothing else.",
       "properties": {
+        "counts": {
+          "additionalProperties": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "description": "The bucket counts of the diff the request was made from.",
+          "type": [
+            "object",
+            "null"
+          ]
+        },
         "forkId": {
           "description": "The fork to be reviewed.",
           "type": "string"
@@ -871,6 +883,65 @@
       },
       "required": [
         "request"
+      ],
+      "type": "object"
+    },
+    "ChangesRequestsKeepParams": {
+      "properties": {
+        "dataOk": {
+          "description": "Carry database changes even though no migration step covers them.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "keep": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/KeepHooks"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The recipe's `keep:` steps to run around the keep."
+        },
+        "requestId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "requestId"
+      ],
+      "type": "object"
+    },
+    "ChangesRequestsListParams": {
+      "properties": {
+        "status": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RequestFilter"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Defaults to `open`."
+        }
+      },
+      "type": "object"
+    },
+    "ChangesRequestsListResult": {
+      "properties": {
+        "requests": {
+          "items": {
+            "$ref": "#/$defs/RequestEntry"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "requests"
       ],
       "type": "object"
     },
@@ -4303,6 +4374,16 @@
     "FoldRequest": {
       "description": "A recorded request to review a fork. The engine keeps it until it is answered.",
       "properties": {
+        "counts": {
+          "additionalProperties": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "default": {},
+          "description": "How many changes each bucket (`code`, `packages`, `settings`, `database`, `other`)\nheld when the request was made; empty when it was not given.",
+          "type": "object"
+        },
         "createdAt": {
           "type": "string"
         },
@@ -4311,6 +4392,20 @@
         },
         "id": {
           "type": "string"
+        },
+        "keepId": {
+          "description": "The checkpoint of the target taken before the keep, once the request is `kept`;\n`changes.undo` goes back to it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "resolvedAt": {
+          "description": "When the request was kept or thrown away.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "reviewDigest": {
           "description": "The digest of the changes the requester reviewed; empty when none was given.",
@@ -4343,6 +4438,16 @@
         {
           "const": "open",
           "description": "Waiting for a review.",
+          "type": "string"
+        },
+        {
+          "const": "kept",
+          "description": "Kept into its target.",
+          "type": "string"
+        },
+        {
+          "const": "thrown-away",
+          "description": "The fork was dropped without keeping it.",
           "type": "string"
         }
       ]
@@ -7188,6 +7293,11 @@
         "changes.keep",
         "changes.promote",
         "changes.request",
+        "changes.requests.list",
+        "changes.requests.show",
+        "changes.requests.keep",
+        "changes.requests.throwAway",
+        "changes.requests.open",
         "changes.undo",
         "changes.baseline",
         "changes.capture",
@@ -7401,6 +7511,86 @@
             },
             "params": {
               "$ref": "#/$defs/ChangesRequestParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "changes.requests.list",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/ChangesRequestsListParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "changes.requests.show",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/RequestIdParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "changes.requests.keep",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/ChangesRequestsKeepParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "changes.requests.throwAway",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/RequestIdParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "changes.requests.open",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/RequestIdParams"
             }
           },
           "required": [
@@ -9904,6 +10094,86 @@
             },
             "result": {
               "$ref": "#/$defs/ChangesRequestResult"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "changes.requests.list",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/ChangesRequestsListResult"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "changes.requests.show",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/JobStartResult"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "changes.requests.keep",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/JobStartResult"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "changes.requests.throwAway",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/JobStartResult"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "changes.requests.open",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/JobStartResult"
             }
           },
           "required": [
@@ -13948,6 +14218,39 @@
       ],
       "type": "string"
     },
+    "RequestEntry": {
+      "description": "One request with the fork it is about.",
+      "properties": {
+        "forkName": {
+          "description": "The fork's name; `None` when the fork no longer exists.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "forkState": {
+          "description": "`running`, `stopped`, and so on; `None` when the fork no longer exists.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "request": {
+          "$ref": "#/$defs/FoldRequest"
+        },
+        "targetName": {
+          "description": "The target computer's name; `None` for a folder or a computer that is gone.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "request"
+      ],
+      "type": "object"
+    },
     "RequestEnvelope": {
       "description": "A canonical multiplexed request. `operationId` and `startWithinMs` are\npresent only for methods that use change admission semantics.",
       "properties": {
@@ -13977,6 +14280,28 @@
         "id",
         "method",
         "params"
+      ],
+      "type": "object"
+    },
+    "RequestFilter": {
+      "description": "Which requests `changes.requests.list` returns.",
+      "enum": [
+        "open",
+        "kept",
+        "thrown-away",
+        "all"
+      ],
+      "type": "string"
+    },
+    "RequestIdParams": {
+      "description": "A request named by its id.",
+      "properties": {
+        "requestId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "requestId"
       ],
       "type": "object"
     },
@@ -15430,6 +15755,36 @@
       "name": "changes.request",
       "paramsType": "keep::ChangesRequestParams",
       "resultType": "keep::ChangesRequestResult"
+    },
+    {
+      "kind": "query",
+      "name": "changes.requests.list",
+      "paramsType": "review_requests::ChangesRequestsListParams",
+      "resultType": "review_requests::ChangesRequestsListResult"
+    },
+    {
+      "kind": "job",
+      "name": "changes.requests.show",
+      "paramsType": "review_requests::RequestIdParams",
+      "resultType": "common::JobStartResult"
+    },
+    {
+      "kind": "job",
+      "name": "changes.requests.keep",
+      "paramsType": "review_requests::ChangesRequestsKeepParams",
+      "resultType": "common::JobStartResult"
+    },
+    {
+      "kind": "job",
+      "name": "changes.requests.throwAway",
+      "paramsType": "review_requests::RequestIdParams",
+      "resultType": "common::JobStartResult"
+    },
+    {
+      "kind": "job",
+      "name": "changes.requests.open",
+      "paramsType": "review_requests::RequestIdParams",
+      "resultType": "common::JobStartResult"
     },
     {
       "kind": "job",

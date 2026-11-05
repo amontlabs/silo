@@ -181,6 +181,9 @@ wire_struct! {
         /// A short text for the reviewer, usually the readable diff.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         summary: Option<String>,
+        /// The bucket counts of the diff the request was made from.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        counts: Option<std::collections::BTreeMap<String, u64>>,
     }
 }
 
@@ -191,6 +194,10 @@ wire_struct! {
 pub enum FoldRequestStatus {
     /// Waiting for a review.
     Open,
+    /// Kept into its target.
+    Kept,
+    /// The fork was dropped without keeping it.
+    ThrownAway,
 }
 
 wire_struct! {
@@ -205,6 +212,17 @@ wire_struct! {
         review_digest: String,
         summary: String,
         status: FoldRequestStatus,
+        /// How many changes each bucket (`code`, `packages`, `settings`, `database`, `other`)
+        /// held when the request was made; empty when it was not given.
+        #[serde(default)]
+        counts: std::collections::BTreeMap<String, u64>,
+        /// The checkpoint of the target taken before the keep, once the request is `kept`;
+        /// `changes.undo` goes back to it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        keep_id: Option<String>,
+        /// When the request was kept or thrown away.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        resolved_at: Option<String>,
     }
 }
 

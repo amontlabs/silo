@@ -93,6 +93,41 @@ pub fn start_keep(
     })
 }
 
+/// `changes.requests.keep`: the keep of an open review request's fork, pinned to the request's
+/// digest through `request.reviewed`. A kept outcome marks the request kept with the target's
+/// before-keep checkpoint; a refusal leaves it open. The job's result is the keep's result
+/// with the request after it.
+pub fn start_request_keep(
+    host: Arc<dyn RuntimeHost>,
+    service: Service,
+    store: Arc<dyn ManifestStore>,
+    request: Request,
+    request_id: String,
+) -> Result<JobId, Failure> {
+    start(host, "changes.requests.keep", move |host| {
+        let context = host.engine_context();
+        let journal = journal_for(context.as_ref());
+        let env = GuestEnv::new(host.clone(), service, journal.clone(), Box::new(|_| {}));
+        let outcome = super::keep(
+            &env as &dyn KeepEnv,
+            store.as_ref(),
+            &journal,
+            &request,
+            LANE_WAIT,
+        )?;
+        let requests = crate::fold_requests::Store::new(&context.paths().app_data);
+        let after = match &outcome {
+            super::Outcome::Kept(report) => requests
+                .mark_kept(&request_id, report.checkpoint.clone())
+                .map_err(|error| format!("The changes were kept, but {error}"))?,
+            _ => requests.open_request(&request_id)?,
+        };
+        let mut result = outcome.to_json();
+        result["request"] = serde_json::to_value(after).map_err(|error| error.to_string())?;
+        Ok(result)
+    })
+}
+
 /// `changes.undo`.
 pub fn start_undo(
     host: Arc<dyn RuntimeHost>,

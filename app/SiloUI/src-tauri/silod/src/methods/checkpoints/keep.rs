@@ -121,6 +121,7 @@ pub(super) async fn request(
             target,
             review_digest: params.review_digest.unwrap_or_default(),
             summary: params.summary.unwrap_or_default(),
+            counts: params.counts.unwrap_or_default(),
         })
     })
     .await
