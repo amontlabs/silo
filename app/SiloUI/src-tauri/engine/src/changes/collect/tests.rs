@@ -40,6 +40,8 @@ struct FakeGuest {
     reads: Mutex<Vec<(u64, u64)>>,
     commands: Mutex<Vec<String>>,
     owners: &'static str,
+    launch: &'static str,
+    claimed_size: Option<u64>,
 }
 
 impl FakeGuest {
@@ -53,6 +55,8 @@ impl FakeGuest {
             reads: Mutex::new(Vec::new()),
             commands: Mutex::new(Vec::new()),
             owners: "",
+            launch: "started\n",
+            claimed_size: None,
         }
     }
 }
@@ -86,8 +90,9 @@ impl GuestRunner for FakeGuest {
         match argv[0].as_str() {
             "sh" if argv[2] == START => {
                 assert_eq!(stdin.as_deref(), Some(COLLECT_SCRIPT.as_bytes()));
-                Ok(out("started\n"))
+                Ok(out(self.launch))
             }
+            "sh" if argv[2] == CLEAN => Ok(out("")),
             "sh" if argv[2] == POLL => {
                 let mut left = self.running_polls.lock().unwrap();
                 if *left > 0 {
@@ -115,7 +120,7 @@ impl GuestRunner for FakeGuest {
         let end = (start + length as usize).min(self.gz.len());
         Ok(FileChunk {
             data: self.gz[start..end].to_vec(),
-            size: self.gz.len() as u64,
+            size: self.claimed_size.unwrap_or(self.gz.len() as u64),
         })
     }
 }
@@ -144,13 +149,16 @@ fn a_manifest_past_the_exec_cap_is_read_back_in_chunks() {
     assert_eq!(reads[0].0, 0);
     assert!(reads.windows(2).all(|pair| pair[1].0 > pair[0].0));
     let commands = guest.commands.lock().unwrap();
-    assert_eq!(commands.iter().filter(|c| c.contains("sleep 1")).count(), 3);
-    assert!(
+    assert_eq!(
         commands
-            .last()
-            .unwrap()
-            .starts_with("rm -rf /tmp/silo-collect-"),
-        "the temp folder is removed: {commands:?}"
+            .iter()
+            .filter(|c| c.contains("while [ ! -f"))
+            .count(),
+        3
+    );
+    assert!(
+        commands.last().unwrap().contains("rm -rf \"$d\""),
+        "the collector and its folder are cleaned up: {commands:?}"
     );
 }
 
@@ -164,7 +172,10 @@ fn polling_stays_inside_the_bounded_call_cap() {
     };
     capture(&guest, &options).unwrap();
     let commands = guest.commands.lock().unwrap();
-    let poll = commands.iter().find(|c| c.contains("sleep 1")).unwrap();
+    let poll = commands
+        .iter()
+        .find(|c| c.contains("while [ ! -f"))
+        .unwrap();
     let seconds: u64 = poll.rsplit(' ').next().unwrap().parse().unwrap();
     assert!(seconds + 25 <= MAX_BOUNDED_TIMEOUT_MS / 1000, "{seconds}");
 }
@@ -178,6 +189,50 @@ fn a_collector_that_never_finishes_runs_out_of_budget() {
         ..quick()
     };
     let error = capture(&guest, &options).unwrap_err();
+    assert_eq!(error.code, ErrorCode::TimedOut);
+}
+
+#[test]
+fn a_timed_out_collector_is_stopped_and_cleaned_up() {
+    let guest = FakeGuest::new("META\tformat\t2\n");
+    *guest.running_polls.lock().unwrap() = u32::MAX;
+    let options = Options {
+        budget: Duration::from_millis(40),
+        ..quick()
+    };
+    assert_eq!(
+        capture(&guest, &options).unwrap_err().code,
+        ErrorCode::TimedOut
+    );
+    let commands = guest.commands.lock().unwrap();
+    let clean = commands.last().unwrap();
+    assert!(clean.contains("kill -TERM -- \"-$p\""), "{clean}");
+    assert!(clean.contains("kill -KILL"), "{clean}");
+    assert!(clean.ends_with(&commands[0].rsplit(' ').next().unwrap().to_owned()));
+}
+
+#[test]
+fn a_second_capture_is_refused_while_one_runs() {
+    let mut guest = FakeGuest::new("META\tformat\t2\n");
+    guest.launch = "busy\n";
+    let error = capture(&guest, &quick()).unwrap_err();
+    assert_eq!(error.code, ErrorCode::Busy);
+    assert!(guest.reads.lock().unwrap().is_empty());
+}
+
+#[test]
+fn a_file_over_the_download_cap_is_refused_before_it_is_read() {
+    let mut guest = FakeGuest::new("META\tformat\t2\n");
+    guest.claimed_size = Some(10 * 1024 * 1024 * 1024);
+    let error = capture(&guest, &quick()).unwrap_err();
+    assert_eq!(error.code, ErrorCode::OutputTooLarge);
+    assert_eq!(guest.reads.lock().unwrap().len(), 1);
+}
+
+#[test]
+fn reading_chunks_counts_against_the_deadline() {
+    let guest = FakeGuest::new(&large_manifest());
+    let error = read_bounded(&guest, "/x/m.tsv.gz", 1024, u64::MAX, Instant::now()).unwrap_err();
     assert_eq!(error.code, ErrorCode::TimedOut);
 }
 
@@ -424,4 +479,131 @@ fn the_collector_describes_a_fixture_home() {
     assert!(lines
         .iter()
         .all(|line| known.contains(&line.split('\t').next().unwrap())));
+}
+
+// MARK: Commands the collector runs on the user's behalf
+
+fn run_collector_with(
+    home: &std::path::Path,
+    path_prefix: &std::path::Path,
+    env: &[(&str, &str)],
+) -> String {
+    let path = format!(
+        "{}:{}",
+        path_prefix.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let mut command = Command::new("bash");
+    command
+        .arg("-c")
+        .arg(COLLECT_SCRIPT)
+        .env("HOME", home)
+        .env("PATH", path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    for (name, value) in env {
+        command.env(name, value);
+    }
+    String::from_utf8_lossy(&command.output().unwrap().stdout).into_owned()
+}
+
+fn write_executable(path: &std::path::Path, body: &str) {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::write(path, body).unwrap();
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+#[test]
+fn a_repository_that_names_a_command_in_its_config_does_not_run_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join("home");
+    let project = home.join("proj");
+    std::fs::create_dir_all(&project).unwrap();
+    let marker = dir.path().join("ran");
+    let hook = dir.path().join("hook.sh");
+    write_executable(
+        &hook,
+        &format!("#!/bin/sh\ntouch '{}'\nprintf '\\0'\n", marker.display()),
+    );
+    let git = |args: &[&str]| {
+        assert!(Command::new("git")
+            .args(args)
+            .current_dir(&project)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .status()
+            .unwrap()
+            .success())
+    };
+    git(&["init", "-q", "."]);
+    std::fs::write(project.join("a.txt"), "a\n").unwrap();
+    git(&["config", "core.fsmonitor", hook.to_str().unwrap()]);
+    git(&["config", "core.untrackedCache", "true"]);
+    // The control: git itself runs the command when asked about this repository.
+    git(&["status", "--porcelain"]);
+    if !marker.exists() {
+        eprintln!("this git does not run core.fsmonitor commands; nothing to guard against");
+        return;
+    }
+    std::fs::remove_file(&marker).unwrap();
+    let out = run_collector_with(&home, dir.path(), &[]);
+    assert!(
+        out.lines().any(|l| l.starts_with("GIT\t")),
+        "the repository is still described: {out}"
+    );
+    assert!(!marker.exists(), "the repository's command ran");
+}
+
+#[test]
+fn postgres_names_cannot_become_options_and_the_dump_key_is_not_hashed() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join("home");
+    std::fs::create_dir_all(&home).unwrap();
+    let bin = dir.path().join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let log = dir.path().join("calls.log");
+    write_executable(
+        &bin.join("sudo"),
+        "#!/bin/sh\nshift; shift; shift\nexec \"$@\"\n",
+    );
+    write_executable(
+        &bin.join("psql"),
+        &format!(
+            "#!/bin/sh\necho \"psql $*\" >> '{}'\ncase \"$*\" in\n  *'select datname'*) printf 'app\\n--file=/tmp/pwned\\nhost=evil dbname=x\\n-bad\\n' ;;\nesac\nexit 0\n",
+            log.display()
+        ),
+    );
+    write_executable(
+        &bin.join("pg_dump"),
+        &format!(
+            "#!/bin/sh\necho \"pg_dump $*\" >> '{}'\nprintf -- '-- PostgreSQL database dump\\n\\\\restrict %s\\nCREATE TABLE t (a int);\\n\\\\unrestrict %s\\n' \"$KEY\" \"$KEY\"\n",
+            log.display()
+        ),
+    );
+    let digest = |key: &str| {
+        let out = run_collector_with(&home, &bin, &[("KEY", key)]);
+        let lines: Vec<&str> = out
+            .lines()
+            .filter(|l| l.starts_with("DB\tpostgres\t"))
+            .collect();
+        assert_eq!(lines.len(), 1, "only the plain name is dumped: {out}");
+        assert!(lines[0].starts_with("DB\tpostgres\tapp\tschema\t"), "{out}");
+        lines[0].to_owned()
+    };
+    let first = digest("aaaaaaaa");
+    let second = digest("zzzzzzzz");
+    assert_eq!(first, second, "the random restrict key changed the digest");
+    let calls = std::fs::read_to_string(&log).unwrap();
+    assert!(
+        calls
+            .lines()
+            .filter(|l| l.starts_with("pg_dump"))
+            .all(|l| l == "pg_dump --schema-only --dbname=app"),
+        "{calls}"
+    );
+    assert!(
+        !calls.contains("pwned") && !calls.contains("evil"),
+        "{calls}"
+    );
 }

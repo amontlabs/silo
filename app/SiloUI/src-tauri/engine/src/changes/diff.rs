@@ -318,6 +318,10 @@ pub struct Diff {
     pub settings: SettingsChanges,
     pub database: Vec<DbChange>,
     pub other: Vec<PathChange>,
+    /// Files that change when the computer sits idle but ended with other content here: not
+    /// removed as background, and not listed in a bucket; the text shows one collapsed line.
+    #[serde(default)]
+    pub idle_noise: Vec<PathChange>,
     pub not_kept: NotKept,
     /// Changed files that live in git repos; reported through Code only.
     pub repo_files: Vec<String>,
@@ -1278,6 +1282,17 @@ impl Diff {
                 )
             },
         );
+        let idle: HashSet<(&str, Change)> = bl
+            .other
+            .iter()
+            .map(|c| (c.path.as_str(), c.change))
+            .collect();
+        let (noisy, rest): (Vec<PathChange>, Vec<PathChange>) =
+            std::mem::take(&mut self.other).into_iter().partition(|c| {
+                idle.contains(&(c.path.as_str(), c.change)) && !bl.other.iter().any(|b| b == c)
+            });
+        self.other = rest;
+        self.idle_noise = noisy;
         subtract_paths(&mut self.other, &bl.other);
         subtract_paths(&mut self.repo_changes, &bl.repo_changes);
 
@@ -1349,6 +1364,7 @@ impl Diff {
         }
         self.settings.files.sort();
         self.other.sort();
+        self.idle_noise.sort();
         self.repo_changes.sort();
         self.repo_files = self.repo_changes.iter().map(|c| c.path.clone()).collect();
         for v in self.not_kept.credential_details.values_mut() {
@@ -1390,7 +1406,31 @@ impl Diff {
             rollup(&ctx, &self.other, |p| other_group(&ctx, p)),
         );
         push("Not kept", self.not_kept_lines(&ctx));
+        push("Also changes when idle", self.idle_noise_lines(&ctx));
         out
+    }
+
+    fn idle_noise_lines(&self, ctx: &Ctx) -> Vec<String> {
+        if self.idle_noise.is_empty() {
+            return Vec::new();
+        }
+        let names: Vec<String> = self
+            .idle_noise
+            .iter()
+            .take(3)
+            .map(|c| ctx.short(&c.path))
+            .collect();
+        let more = self.idle_noise.len().saturating_sub(3);
+        vec![format!(
+            "{} files ({}{})",
+            self.idle_noise.len(),
+            names.join(", "),
+            if more > 0 {
+                format!(", +{more} more")
+            } else {
+                String::new()
+            }
+        )]
     }
 
     fn code_lines(&self, ctx: &Ctx) -> Vec<String> {

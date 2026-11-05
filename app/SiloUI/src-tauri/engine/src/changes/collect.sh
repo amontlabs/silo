@@ -122,17 +122,22 @@ if have dpkg-query; then
         if (d!="") out=out (out==""?"":",") d }
       if (out!="") printf "PKGD\tdpkg\t%s\t%s\n",$1,out }'
 fi
-if have brew; then
+# Homebrew refuses to run as root and reads the user's own configuration; it is asked as the
+# account that owns it.
+if have brew && [ "$(id -u)" != 0 ]; then
   brew list --versions 2>/dev/null | awk 'NF>=2{v=$2; for(i=3;i<=NF;i++) v=v","$i; printf "PKG\tbrew\t%s\t%s\n",$1,v}'
   brew list --cask --versions 2>/dev/null | awk 'NF>=2{v=$2; for(i=3;i<=NF;i++) v=v","$i; printf "PKG\tbrew-cask\t%s\t%s\n",$1,v}'
   brew leaves 2>/dev/null | awk 'NF{printf "PKGM\tbrew\t%s\n",$1}'
   brew deps --installed --direct 2>/dev/null | awk -F': ' 'NF>=2 && $2!="" {gsub(/ +/,",",$2); printf "PKGD\tbrew\t%s\t%s\n",$1,$2}'
 fi
 if have npm; then
+  export npm_config_update_notifier=false npm_config_fund=false npm_config_audit=false
   npm ls -g --depth=0 --json 2>/dev/null | awk '
     /^    "[^"]+": \{/ { split($0,a,"\""); name=a[2]; next }
     /^      "version": "/ { split($0,a,"\""); if (name!="") printf "PKG\tnpm\t%s\t%s\n",name,a[4]; name="" }'
 fi
+export PIP_CONFIG_FILE=/dev/null PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_NO_INPUT=1 \
+  PYTHONDONTWRITEBYTECODE=1 PYTHONSAFEPATH=1
 for py in python3 python; do
   if have $py; then
     $py -m pip list --format=freeze 2>/dev/null | awk -F'==' 'NF==2{printf "PKG\tpip\t%s\t%s\n",$1,$2}'
@@ -175,6 +180,30 @@ gig_repo() {
   ' "$TMP/gh" "$TMP/gs"
 }
 
+# Repositories belong to the user and may carry configuration that runs commands (an fsmonitor
+# hook, filters). Git reads them with the system and global configuration set aside, hooks and
+# the file-system monitor off, and, when the collector is root, as the account that owns the
+# repository. A repository whose owner cannot be switched to is left out.
+GIT_ENV=(env -i PATH="$PATH" HOME=/nonexistent XDG_CONFIG_HOME=/nonexistent LC_ALL=C
+  GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_TERMINAL_PROMPT=0 GIT_OPTIONAL_LOCKS=0
+  GIT_ASKPASS=/bin/false GIT_ATTR_NOSYSTEM=1)
+GPRE=()
+repo_prefix() {
+  local ids uid gid name
+  GPRE=()
+  [ "$(id -u)" = 0 ] || return 0
+  if stat --version >/dev/null 2>&1; then ids=$(stat -c '%u %g' "$1/.git" 2>/dev/null)
+  else ids=$(stat -f '%u %g' "$1/.git" 2>/dev/null); fi
+  uid=${ids% *}; gid=${ids#* }
+  case "$uid" in ''|*[!0-9]*) return 1;; esac
+  case "$gid" in ''|*[!0-9]*) return 1;; esac
+  [ "$uid" = 0 ] && return 0
+  if have setpriv; then GPRE=(setpriv --reuid="$uid" --regid="$gid" --clear-groups); return 0; fi
+  name=$(id -nu "$uid" 2>/dev/null) || return 1
+  if have runuser; then GPRE=(runuser -u "$name" --); return 0; fi
+  return 1
+}
+
 if have git; then
   GR=()
   for r in "$HOME" /srv /opt; do [ -d "$r" ] && GR[${#GR[@]}]=$r; done
@@ -193,7 +222,10 @@ if have git; then
           if (!skip) { kept[$0]=1; print } }' >"$TMP/repos"
     while IFS= read -r R; do
       [ -n "$R" ] || continue
-      gg() { git -c safe.directory='*' -c core.quotepath=off -C "$R" "$@" 2>/dev/null; }
+      repo_prefix "$R" || continue
+      gg() { "${GPRE[@]}" "${GIT_ENV[@]}" git --no-optional-locks -c core.fsmonitor=false -c core.untrackedCache=false \
+        -c core.hooksPath=/dev/null -c core.pager=cat -c core.quotepath=off -c core.attributesFile=/dev/null \
+        -c safe.directory='*' -C "$R" "$@" 2>/dev/null; }
       [ "$(gg rev-parse --is-inside-work-tree)" = true ] || continue
       head=$(gg rev-parse HEAD); [ -n "$head" ] || head=-
       br=$(gg symbolic-ref --short -q HEAD); [ -n "$br" ] || br=detached
@@ -260,31 +292,41 @@ fi
 # DB postgres <db> schema <sha256>, DBT postgres <db> <table> <sha256|-> <rows>: only when
 # psql answers as the postgres OS user. DB sqlite <path> <sha256>: file digests under the
 # user's own roots.
+# The postgres account's own service file, password file and options are set aside.
+PGENV=(env PGSERVICEFILE=/dev/null PGSYSCONFDIR=/nonexistent PGPASSFILE=/dev/null PGOPTIONS=
+  PGCONNECT_TIMEOUT=5)
 pgrun() {
-  if [ "$(id -un 2>/dev/null)" = postgres ]; then "$@"
-  elif [ "$(id -u)" = 0 ] && have runuser; then runuser -u postgres -- "$@"
-  elif have sudo; then sudo -n -u postgres "$@"
+  if [ "$(id -un 2>/dev/null)" = postgres ]; then "${PGENV[@]}" "$@"
+  elif [ "$(id -u)" = 0 ] && have runuser; then runuser -u postgres -- "${PGENV[@]}" "$@"
+  elif have sudo; then sudo -n -u postgres "${PGENV[@]}" "$@"
   else return 127; fi
 }
+# Names that could be read as an option or a connection string are left out.
+pgname_ok() {
+  case "$1" in ''|-*|*[!A-Za-z0-9_.-]*) return 1;; esac
+  return 0
+}
+# pg_dump 17.6+ writes a random \restrict key into every dump; it is not part of the schema.
+pgnorm() { sed -e '/^\\restrict /d' -e '/^\\unrestrict /d'; }
 if have psql && have pg_dump && PGCONNECT_TIMEOUT=5 pgrun psql -XAtqc 'select 1' postgres >/dev/null 2>&1; then
   export PGCONNECT_TIMEOUT=5
   pgrun psql -XAtqc "select datname from pg_database where not datistemplate and datallowconn order by 1" postgres 2>/dev/null |
   while IFS= read -r db; do
-    [ -n "$db" ] || continue
+    pgname_ok "$db" || continue
     edb=$(esc "$db")
-    if pgrun pg_dump --schema-only "$db" >"$TMP/pgd" 2>/dev/null; then
-      printf 'DB\tpostgres\t%s\tschema\t%s\n' "$edb" "$("${SHA[@]}" <"$TMP/pgd" | awk '{print $1}')"
+    if pgrun pg_dump --schema-only --dbname="$db" >"$TMP/pgd" 2>/dev/null; then
+      printf 'DB\tpostgres\t%s\tschema\t%s\n' "$edb" "$(pgnorm <"$TMP/pgd" | "${SHA[@]}" | awk '{print $1}')"
     fi
-    pgrun psql -XAtqd "$db" -c "select format('%I.%I', schemaname, tablename) from pg_tables where schemaname not in ('pg_catalog','information_schema') order by 1" 2>/dev/null |
+    pgrun psql -XAtq --dbname="$db" -c "select format('%I.%I', schemaname, tablename) from pg_tables where schemaname not in ('pg_catalog','information_schema') order by 1" 2>/dev/null |
       grep -v "['[:cntrl:]]" | head -n 300 |
     while IFS= read -r t; do
       [ -n "$t" ] || continue
-      size=$(pgrun psql -XAtqd "$db" -c "select pg_total_relation_size('$t')" 2>/dev/null)
-      rows=$(pgrun psql -XAtqd "$db" -c "select count(*) from $t" 2>/dev/null)
+      size=$(pgrun psql -XAtq --dbname="$db" -c "select pg_total_relation_size('$t')" 2>/dev/null)
+      rows=$(pgrun psql -XAtq --dbname="$db" -c "select count(*) from $t" 2>/dev/null)
       [ -n "$rows" ] || rows=-
       h=-
       if [ "${size:-0}" -le 1073741824 ] 2>/dev/null; then
-        pgrun psql -XAtqd "$db" -c "COPY $t TO STDOUT" 2>/dev/null | "${SHA[@]}" | awk '{print $1}' >"$TMP/pgh"
+        pgrun psql -XAtq --dbname="$db" -c "COPY $t TO STDOUT" 2>/dev/null | "${SHA[@]}" | awk '{print $1}' >"$TMP/pgh"
         [ "${PIPESTATUS[0]}" = 0 ] && h=$(cat "$TMP/pgh")
       fi
       printf 'DBT\tpostgres\t%s\t%s\t%s\t%s\n' "$edb" "$(esc "$t")" "${h:--}" "$rows"

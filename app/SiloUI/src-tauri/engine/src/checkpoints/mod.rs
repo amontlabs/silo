@@ -311,14 +311,19 @@ impl Service {
         new_name: &str,
         options: ForkOptions,
     ) -> Result<JobId, Failure> {
-        let started = self.start_fork_job(computer_id, checkpoint_id, new_name, options)?;
-        // The fork-time record is taken when the fork first starts.
+        // Noted first: the fork's source is resolved on the job and replaces the key.
         crate::changes::fork_base::expect(
             self.context(),
             new_name,
             &crate::changes::fork_base::source_key(checkpoint_id, computer_id),
         );
-        Ok(started)
+        match self.start_fork_job(computer_id, checkpoint_id, new_name, options) {
+            Ok(started) => Ok(started),
+            Err(failure) => {
+                crate::changes::fork_base::withdraw(self.context().as_ref(), new_name);
+                Err(failure)
+            }
+        }
     }
 
     fn start_fork_job(
