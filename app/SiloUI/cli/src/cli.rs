@@ -582,22 +582,44 @@ fn write_all(mut stream: impl Write, bytes: &[u8]) {
 
 /// Streams a command's output, one fork's as it comes or several with the fork's name in
 /// front of each line. Nothing is written in JSON mode, where the result carries the text.
-fn output_sink(json: bool, several: bool) -> impl Fn(&str, bool, &[u8]) + Sync {
-    let prefixer = std::sync::Mutex::new(fanout::Prefixer::default());
-    move |name: &str, is_err: bool, bytes: &[u8]| {
+fn output_sink(
+    json: bool,
+    several: bool,
+) -> (
+    impl Fn(&str, bool, &[u8]) + Sync,
+    std::sync::Arc<std::sync::Mutex<fanout::Prefixer>>,
+) {
+    let prefixer = std::sync::Arc::new(std::sync::Mutex::new(fanout::Prefixer::default()));
+    let held = prefixer.clone();
+    let sink = move |name: &str, is_err: bool, bytes: &[u8]| {
         if json {
             return;
         }
         let bytes = if several {
-            prefixer.lock().unwrap().push(name, is_err, bytes)
+            held.lock().unwrap().push(name, is_err, bytes)
         } else {
             bytes.to_vec()
         };
-        if is_err {
-            write_all(std::io::stderr(), &bytes);
-        } else {
-            write_all(std::io::stdout(), &bytes);
-        }
+        write_stream(is_err, &bytes);
+    };
+    (sink, prefixer)
+}
+
+fn write_stream(is_err: bool, bytes: &[u8]) {
+    if is_err {
+        write_all(std::io::stderr(), bytes);
+    } else {
+        write_all(std::io::stdout(), bytes);
+    }
+}
+
+/// Writes the unfinished lines still held once the commands have ended.
+fn flush_partial(json: bool, prefixer: &std::sync::Mutex<fanout::Prefixer>) {
+    if json {
+        return;
+    }
+    for (is_err, line) in prefixer.lock().unwrap().finish() {
+        write_stream(is_err, &line);
     }
 }
 
@@ -608,8 +630,9 @@ async fn fork_many(
     settings: Option<&Settings>,
 ) -> Result<i32, CliError> {
     let several = args.count > 1;
-    let sink = output_sink(json, several);
+    let (sink, prefixer) = output_sink(json, several);
     let value = fanout::fork_many(engine, args, settings, &stderr_progress, &sink).await?;
+    flush_partial(json, &prefixer);
     if json {
         emit(true, &value, |_| String::new());
     } else if args.command.is_empty() || several {
@@ -656,19 +679,31 @@ async fn fork_folder(
     let computer = engine
         .computer(value["name"].as_str().unwrap_or_default())
         .await?;
-    let sink = output_sink(json, false);
+    let (sink, _) = output_sink(json, false);
+    let (mut out, mut err) = (fanout::Capture::default(), fanout::Capture::default());
     let ran = fanout::exec_streaming(
         engine,
         &computer,
         &fork.command,
         value["guestPath"].as_str(),
         &stderr_progress,
-        |is_err, bytes| sink(&computer.name, is_err, bytes),
+        |is_err, bytes| {
+            if is_err {
+                err.push(bytes);
+            } else {
+                out.push(bytes);
+            }
+            sink(&computer.name, is_err, bytes);
+        },
     )
     .await?;
     if json {
         let mut value = value;
         value["exitCode"] = serde_json::json!(ran.exit_code);
+        value["signal"] = serde_json::json!(ran.signal);
+        value["stdout"] = serde_json::json!(String::from_utf8_lossy(&out.bytes));
+        value["stderr"] = serde_json::json!(String::from_utf8_lossy(&err.bytes));
+        value["outputTruncated"] = serde_json::json!(out.truncated || err.truncated);
         emit(true, &value, |_| String::new());
     } else {
         eprintln!("{}", render::folder_fork(&value));

@@ -3,8 +3,10 @@
 //! and throwing away a request build on this store.
 
 use std::{
+    collections::HashMap,
     fs,
     path::{Path, PathBuf},
+    sync::{Arc, Mutex, OnceLock},
 };
 
 use silo_api::methods::keep::{FoldRequest, FoldRequestStatus};
@@ -19,6 +21,19 @@ pub struct NewRequest {
     pub target: String,
     pub review_digest: String,
     pub summary: String,
+}
+
+/// One lock for each (fork, target), so two first requests for the same pair cannot both
+/// find no open request and make two.
+fn pair_lock(fork: &str, target: &str) -> Arc<Mutex<()>> {
+    static LOCKS: OnceLock<Mutex<HashMap<(String, String), Arc<Mutex<()>>>>> = OnceLock::new();
+    LOCKS
+        .get_or_init(Mutex::default)
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .entry((fork.to_owned(), target.to_owned()))
+        .or_default()
+        .clone()
 }
 
 fn valid_id(id: &str) -> bool {
@@ -80,6 +95,10 @@ impl Store {
     /// Records an open request. A fork that already has an open request for the same target
     /// keeps its id: the request is updated with the newer digest and summary.
     pub fn create(&self, new: NewRequest) -> Result<FoldRequest, String> {
+        let lock = pair_lock(&new.fork_id, &new.target);
+        let _held = lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let existing = self.list().into_iter().find(|request| {
             request.fork_id == new.fork_id
                 && request.target == new.target
@@ -107,10 +126,13 @@ impl Store {
         fs::create_dir_all(&self.root)
             .map_err(|error| format!("Cannot create the request store: {error}"))?;
         let text = serde_json::to_string_pretty(request).map_err(|error| error.to_string())?;
-        let temporary = path.with_extension("json.tmp");
+        let temporary = path.with_extension(format!("json.{}.tmp", uuid::Uuid::new_v4().simple()));
         fs::write(&temporary, text)
             .and_then(|()| fs::rename(&temporary, &path))
-            .map_err(|error| format!("Cannot save the request {}: {error}", request.id))
+            .map_err(|error| {
+                let _ = fs::remove_file(&temporary);
+                format!("Cannot save the request {}: {error}", request.id)
+            })
     }
 }
 
@@ -152,5 +174,27 @@ mod tests {
         assert_ne!(other.id, first.id);
         assert_eq!(store.list().len(), 2);
         assert_eq!(store.get(&first.id).unwrap().unwrap().summary, "newer");
+    }
+
+    #[test]
+    fn concurrent_first_requests_make_one_record_and_leave_no_temporary_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(Store::new(dir.path()));
+        let handles: Vec<_> = (0..8)
+            .map(|n| {
+                let store = store.clone();
+                std::thread::spawn(move || store.create(new("race", &format!("s{n}"))).unwrap())
+            })
+            .collect();
+        let ids: std::collections::HashSet<String> =
+            handles.into_iter().map(|h| h.join().unwrap().id).collect();
+        assert_eq!(ids.len(), 1);
+        assert_eq!(store.list().len(), 1);
+        let leftovers = fs::read_dir(&store.root)
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|e| e.path().extension().is_some_and(|x| x == "tmp"))
+            .count();
+        assert_eq!(leftovers, 0);
     }
 }

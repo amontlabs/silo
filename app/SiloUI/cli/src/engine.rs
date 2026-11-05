@@ -298,6 +298,11 @@ impl Engine {
         self.client.is_closed()
     }
 
+    /// Records the job Ctrl-C should name when it is the one running.
+    pub fn note_job(&self, job_id: &str) {
+        *self.last_job.lock().unwrap() = Some(job_id.to_owned());
+    }
+
     /// The job this connection most recently started.
     pub fn last_job(&self) -> Option<String> {
         self.last_job.lock().unwrap().clone()

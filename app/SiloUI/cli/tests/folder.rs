@@ -66,11 +66,13 @@ fn lab() -> Lab {
     let root = tempfile::tempdir().unwrap();
     let host = host_repo(root.path());
     let guest_home = root.path().join("guest-home");
-    std::fs::create_dir_all(&guest_home).unwrap();
+    std::fs::create_dir_all(guest_home.join("workspace")).unwrap();
     let guest_home = std::fs::canonicalize(guest_home).unwrap();
     let computers: Arc<Mutex<Vec<(String, String)>>> = Arc::new(Mutex::new(Vec::new()));
     let requests = Arc::new(Mutex::new(Vec::new()));
     let (home, seen) = (guest_home.clone(), requests.clone());
+    // The guest's /workspace is a folder of the fake guest's home.
+    let workspace = home.join("workspace").to_string_lossy().into_owned();
     let engine = FakeEngine::start(move |method, params| {
         let mut world = computers.lock().unwrap();
         match method {
@@ -129,7 +131,7 @@ fn lab() -> Lab {
                     .as_array()
                     .unwrap()
                     .iter()
-                    .map(|word| word.as_str().unwrap().to_owned())
+                    .map(|word| word.as_str().unwrap().replace("/workspace", &workspace))
                     .collect();
                 let output = Command::new(&argv[0])
                     .args(&argv[1..])
@@ -147,7 +149,9 @@ fn lab() -> Lab {
                 }))
             }
             "files.upload" => {
-                let directory = Path::new(params["directory"].as_str().unwrap());
+                let directory = params["directory"].as_str().unwrap();
+                assert!(directory.starts_with("/workspace/"), "{directory}");
+                let directory = PathBuf::from(directory.replace("/workspace", &workspace));
                 for path in params["paths"].as_array().unwrap() {
                     let path = Path::new(path.as_str().unwrap());
                     std::fs::copy(path, directory.join(path.file_name().unwrap())).unwrap();
@@ -158,8 +162,10 @@ fn lab() -> Lab {
                 Ok(finished(json!({"status": "done", "names": ["x"]})))
             }
             "files.download" => {
+                let remote = params["path"].as_str().unwrap();
+                assert!(remote.starts_with("/workspace/"), "{remote}");
                 std::fs::copy(
-                    params["path"].as_str().unwrap(),
+                    remote.replace("/workspace", &workspace),
                     params["destination"].as_str().unwrap(),
                 )
                 .unwrap();
@@ -263,7 +269,10 @@ async fn a_folder_is_copied_into_a_started_fork_as_a_repository() {
     assert_eq!(git(&guest, &["rev-parse", "--abbrev-ref", "HEAD"]), "main");
     // The bundle is not a remote any more and nothing is left in transit.
     assert_eq!(git(&guest, &["remote"]), "");
-    assert!(!lab.guest_home.join(".silo-inbox").exists());
+    let left: Vec<_> = std::fs::read_dir(lab.guest_home.join("workspace"))
+        .unwrap()
+        .collect();
+    assert!(left.is_empty(), "{left:?}");
     assert!(!lab.host.join(".git/silo").exists());
     // The fork is a Linux fork of the linux-dev recipe, started, and recorded against the folder.
     let forks = lab.engine.calls("checkpoints.fork");

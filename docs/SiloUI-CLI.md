@@ -88,7 +88,8 @@ The forks stay for review: `silo diff <fork>`, then `silo fold <fork>` or `silo 
 
 `silo fork ./repo` needs the top folder of a git repository with a commit. It makes a fork
 of the `linux-dev` recipe (built if needed; `--name`, `--secret` and `silo.yaml` limits apply),
-starts it, sends `git bundle --all` through `files.upload` and clones it to `~/<folder>` in the
+starts it, sends `git bundle --all` through `files.upload` (into a `/workspace/silo-in-<id>` folder,
+a root the transfer API allows, removed after the clone) and clones it to `~/<folder>` in the
 fork. Only commits are copied; uncommitted changes stay on the host (the command says so). The
 CLI remembers the host path, the commit the fork started from and the branch, beside the engine
 socket (`cli-folders.json`). Words after `--` run in the repository inside the fork.
@@ -98,8 +99,12 @@ socket (`cli-folders.json`). Words after `--` run in the repository inside the f
 1. The host folder must be on a branch with no uncommitted changes to tracked files; otherwise
    the fold is refused and changes nothing. Uncommitted work in the fork is committed there
    first (`silo: uncommitted changes in <fork>`).
-2. The fork's commits since the starting commit come back as a bundle (`files.download`) and
-   are fetched into `refs/silo/<fork>/head` in the folder.
+2. The fork's commits since the starting commit come back as a bundle (`files.download` from a
+   `/workspace/silo-out-<id>` folder in the fork, removed after) and are fetched into
+   `refs/silo/<fork>/head` in the folder. The fold is refused, before anything is changed,
+   when the commits add or change a `.gitattributes` file (it could select filter or merge
+   programs the folder's git configuration defines), or add files where the folder has files git
+   does not track (untracked or ignored; they are listed).
 3. A backup ref `refs/silo/backup/<UTC time>` marks the folder's HEAD, then the branch is
    fast-forwarded, or merged when the folder moved on. A merge that would conflict is refused
    (the files are listed) before the tree is touched; the backup ref is made only for a fold that
@@ -107,7 +112,12 @@ socket (`cli-folders.json`). Words after `--` run in the repository inside the f
 
 `--dry-run` stops after step 2 and adds only the `refs/silo/<fork>/head` ref. `silo undo <fork>`
 or `silo undo ./repo` resets the branch to the backup ref; it refuses when the folder has
-uncommitted changes to tracked files or has new commits since the fold. Everything done on the
+uncommitted changes to tracked files, has new commits since the fold, or has untracked or ignored
+files where the reset would write files. Every host git command of a fold or undo runs with
+`core.hooksPath=/dev/null`, `core.fsmonitor=false` and `protocol.ext.allow=never`, and merges with
+`--no-verify`, so no hook or program named by the folder's configuration runs because of a fork's
+commits (the folder's own commit hooks do not run for the merge commit either); its identity and
+other settings still apply. Everything done on the
 host stays inside the repository (its `.git/silo` folder holds the bundles in transit, removed
 afterwards). A folder fork cannot be made main or kept `--into` a computer.
 

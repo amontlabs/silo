@@ -23,7 +23,9 @@ pub const MAX_FORKS: u32 = 32;
 /// Apple's limit on macOS virtual machines running at once.
 pub const MACOS_VM_LIMIT: usize = 2;
 const EXEC_POLL: Duration = Duration::from_millis(250);
-const RETAIN_OUTPUT_BYTES: u64 = 8 << 20;
+/// The most output the engine retains for a command between reads (its response limit);
+/// longer output is streamed by reading again from the last sequence number.
+const RETAIN_OUTPUT_BYTES: u64 = 960 * 1024;
 /// How much of a command's output the result keeps for each stream.
 const KEEP_OUTPUT_BYTES: usize = 256 * 1024;
 
@@ -189,6 +191,7 @@ pub async fn exec_streaming(
         .and_then(Value::as_str)
         .ok_or_else(|| CliError::new("The engine did not start the command."))?
         .to_owned();
+    engine.note_job(&job);
     let job_id = silo_api::JobId::new(&job)
         .map_err(|_| CliError::new("The engine sent an invalid job id."))?;
     let mut seen = 0u64;
@@ -200,7 +203,9 @@ pub async fn exec_streaming(
                 since_seq: Some(seen),
             }))
             .await?;
+        let mut received = false;
         for chunk in reply["output"].as_array().into_iter().flatten() {
+            received = true;
             let bytes: Vec<u8> = chunk["data"]
                 .as_array()
                 .into_iter()
@@ -211,6 +216,7 @@ pub async fn exec_streaming(
             sink(chunk["stream"] == "stderr", &bytes);
         }
         match reply["state"].as_str() {
+            Some("running") if received => {}
             Some("running") => tokio::time::sleep(EXEC_POLL).await,
             Some("exited") => break,
             Some(other) => {
@@ -245,13 +251,13 @@ pub async fn exec_streaming(
 
 /// Keeps the first `KEEP_OUTPUT_BYTES` of a stream.
 #[derive(Default)]
-struct Capture {
-    bytes: Vec<u8>,
-    truncated: bool,
+pub struct Capture {
+    pub bytes: Vec<u8>,
+    pub truncated: bool,
 }
 
 impl Capture {
-    fn push(&mut self, data: &[u8]) {
+    pub fn push(&mut self, data: &[u8]) {
         let room = KEEP_OUTPUT_BYTES.saturating_sub(self.bytes.len());
         self.bytes.extend_from_slice(&data[..data.len().min(room)]);
         self.truncated |= data.len() > room;
@@ -464,5 +470,29 @@ impl Prefixer {
             }
         }
         out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_retained_output_fits_the_engines_response_limit() {
+        assert!(RETAIN_OUTPUT_BYTES <= 960 * 1024);
+    }
+
+    #[test]
+    fn unfinished_lines_are_flushed_with_their_fork_name() {
+        let mut prefixer = Prefixer::default();
+        assert_eq!(prefixer.push("a", false, b"one\ntw"), b"[a] one\n");
+        assert_eq!(prefixer.push("b", true, b"err"), b"");
+        let mut rest = prefixer.finish();
+        rest.sort();
+        assert_eq!(
+            rest,
+            vec![(false, b"[a] tw\n".to_vec()), (true, b"[b] err\n".to_vec())]
+        );
+        assert!(prefixer.finish().is_empty());
     }
 }
