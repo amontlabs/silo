@@ -1140,6 +1140,7 @@ fn api_checkpoint(checkpoint: Checkpoint) -> silo_api::methods::checkpoints::Che
             _ => CheckpointKind::Manual,
         },
         size_bytes: None,
+        generation: None,
     }
 }
 

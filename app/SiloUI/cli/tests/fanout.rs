@@ -31,6 +31,7 @@ fn computer(name: &str, kind: &'static str, state: &str, memory_gib: u64) -> Com
         configuration: None,
         quiet: None,
         boots: None,
+        generation: None,
     }
 }
 
@@ -153,7 +154,7 @@ fn engine(
                     .iter()
                     .map(|(name, state)| {
                         let checkpoints = if name == "main" && world.warm {
-                            json!([{"id": "cp-warm", "name": "silo-warm", "kind": "warm",
+                            json!([{"id": "cp-warm", "name": "silo-warm", "kind": "warm", "generation": 0,
                                 "createdAt": silo_cli::clock::format_rfc3339_utc(silo_cli::clock::now_unix() - 30)}])
                         } else {
                             json!([])
@@ -164,7 +165,7 @@ fn engine(
                                 "memoryGiB": 2, "maxMemoryGiB": 2,
                                 "workspaceStorageGiB": 10, "runtimeStorageGiB": 10
                             },
-                            "state": state, "stateDetail": "", "checkpoints": checkpoints,
+                            "state": state, "stateDetail": "", "generation": 0, "checkpoints": checkpoints,
                         })
                     })
                     .collect();

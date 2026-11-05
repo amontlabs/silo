@@ -137,6 +137,8 @@ pub struct Computer {
     pub quiet: Option<Value>,
     /// How many times the engine has booted this macOS computer.
     pub boots: Option<u64>,
+    /// The engine's "changed since" count for the computer.
+    pub generation: Option<u64>,
 }
 
 impl Computer {
@@ -151,6 +153,7 @@ impl Computer {
             "memoryGiB": self.memory_gib,
             "diskGiB": self.disk_gib,
             "checkpoints": self.checkpoints.len(),
+            "generation": self.generation,
         })
     }
 }
@@ -195,6 +198,7 @@ pub fn computers_from(listed: &Value) -> Vec<Computer> {
             configuration: Some(configuration.clone()),
             quiet: quiet(computer),
             boots: None,
+            generation: number(computer, "generation"),
         });
     }
     for computer in listed
@@ -216,6 +220,7 @@ pub fn computers_from(listed: &Value) -> Vec<Computer> {
             configuration: None,
             quiet: quiet(computer),
             boots: number(computer, "boots"),
+            generation: number(computer, "generation"),
         });
     }
     found

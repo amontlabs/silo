@@ -481,6 +481,7 @@ pub async fn fork(
     sweep_throwaways(engine, progress).await;
     let mut recipe_hash = None;
     let mut checkpoint = args.checkpoint.clone();
+    let mut warm_reused = false;
     let source = match &args.recipe_name {
         Some(recipe_name) => {
             Settings::check_recipe(settings, recipe_name)?;
@@ -506,8 +507,9 @@ pub async fn fork(
     let started = crate::clock::now_unix();
     if checkpoint.is_none() {
         let max_age = Settings::warm_max_age_secs(settings);
-        checkpoint = fresh_warm(&source.checkpoints, started, max_age)
+        checkpoint = fresh_warm(&source, started, max_age)
             .and_then(|warm| warm["id"].as_str().map(str::to_owned));
+        warm_reused = checkpoint.is_some();
     }
     let known_before: Vec<Value> = source.checkpoints.clone();
     let mut params = CheckpointForkParams {
@@ -571,6 +573,7 @@ pub async fn fork(
         "createdAt": crate::clock::format_rfc3339_utc(at),
         "ageSeconds": (started - at).max(0),
         "reused": reused,
+        "unchanged": warm_reused,
     });
     fork["forkedAsOf"] = json!(crate::clock::local_clock(at));
     Ok(fork)
@@ -593,13 +596,21 @@ async fn new_checkpoint(engine: &Engine, computer_id: &str, before: &[Value]) ->
         .cloned()
 }
 
-/// The newest warm checkpoint among `checkpoints`, when it was taken no more than `max_age`
-/// seconds before `now`. A fork with no named checkpoint starts from it; otherwise the engine
-/// takes a new one.
-pub fn fresh_warm(checkpoints: &[Value], now: i64, max_age: u64) -> Option<&Value> {
-    checkpoints
+/// The newest warm checkpoint of `source`, when it was taken no more than `max_age` seconds
+/// before `now`, `source` runs, and the engine can tell `source` is unchanged since: the
+/// checkpoint records the generation `source` has now. A fork with no named checkpoint starts
+/// from it; otherwise the engine takes a new one. A change made over a plain `ssh` session
+/// that does not go through the engine is not seen, which is what the age limit is for.
+pub fn fresh_warm(source: &Computer, now: i64, max_age: u64) -> Option<&Value> {
+    let generation = source.generation?;
+    if source.state != "running" {
+        return None;
+    }
+    source
+        .checkpoints
         .iter()
         .filter(|cp| cp["kind"] == "warm")
+        .filter(|cp| cp["generation"].as_u64() == Some(generation))
         .filter_map(|cp| {
             let at = crate::clock::parse_rfc3339(cp["createdAt"].as_str()?)?;
             Some((at, cp))

@@ -105,6 +105,11 @@ pub struct Checkpoint {
     pub kind: CheckpointKind,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub size_bytes: Option<u64>,
+    /// A warm checkpoint: the generation its computer had when it was taken, when the engine
+    /// recorded one. A fork reuses the checkpoint only while the computer's generation is
+    /// still this one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generation: Option<u64>,
 }
 
 /// The Linux and macOS forms described in 20 §1.4. Their field names and

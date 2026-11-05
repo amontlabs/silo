@@ -35,7 +35,7 @@ the engine's message.
 | Command | What it does |
 | --- | --- |
 | `silo list [--all]` | computers and their state; `--all` also shows the hidden throwaways (`silo-baseline-*`, `silo-build-*`) |
-| `silo status <computer>` | one computer: size, checkpoints, a fork's quiet state, assigned secrets and GitHub access |
+| `silo status <computer>` | one computer: size, checkpoints, its `generation` (moves when the engine sees a change), a fork's quiet state, assigned secrets and GitHub access |
 | `silo secrets list` | secret names and the computers they are assigned to (never values) |
 | `silo secrets set NAME [--computer C]... [--domain D]...` | add a secret or replace its value; the value is read from stdin, never an argument |
 | `silo secrets assign NAME COMPUTER` / `silo secrets unassign NAME COMPUTER` | change which computers have a secret |
@@ -68,7 +68,7 @@ A fork publishes the ports its source publishes (a recipe fork, the recipe's `po
 ## Several forks and commands
 
 `-n N` (1 to 32) makes N forks of one checkpoint concurrently: the warm checkpoint from
-`silo up` when `main` has not changed since, else one new checkpoint (`silo-fork-<id>`, kept,
+`silo up` when the engine can tell `main` has not changed since (and it is under a minute old; see [recipes](SiloUI-RECIPES.md#silo-up)), else one new checkpoint (`silo-fork-<id>`, kept,
 because `silo diff --baseline` forks from it) that all N share. Names are `<source>-<6 hex>`,
 or `<prefix>-1` to `<prefix>-N` with `--name`. Each fork is started and its URLs
 (`network.urls`) are printed. Without `-n` or a command, `silo fork` makes one stopped fork
@@ -173,7 +173,7 @@ recipes: [linux-dev]
 fork_secrets: [OPENAI_API_KEY]   # what --secret may name
 fold: ask                        # or auto-code
 fork_ram_budget: 8G
-warm_max_age: 5m                 # how old main's warm checkpoint may be for a fork to use it
+warm_max_age: 60s               # how old main's warm checkpoint may be for a fork to use it (and only if main is unchanged)
 auto_keep:
   - when: { only: [code], tests: pass }
 agents:

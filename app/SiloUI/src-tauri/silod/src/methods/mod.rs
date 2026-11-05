@@ -233,8 +233,77 @@ pub fn serves(method: MethodName) -> bool {
         || services::owns(method)
 }
 
-/// Tries domain handlers in stable order and returns the unsupported error if none handles it.
+/// The methods that can change a computer's state, which move its generation
+/// (`silo_engine::generation`). Network and port changes are not state.
+fn changes_computer(method: MethodName) -> bool {
+    matches!(
+        method,
+        MethodName::GuestExec
+            | MethodName::GuestExecStart
+            | MethodName::GuestExecInput
+            | MethodName::GuestFilesWrite
+            | MethodName::GuestFilesRemove
+            | MethodName::GuestPrepare
+            | MethodName::FilesUpload
+            | MethodName::ChangesKeep
+            | MethodName::ChangesPromote
+            | MethodName::ChangesUndo
+            | MethodName::CheckpointsRestore
+            | MethodName::CheckpointsAbandonRestore
+            | MethodName::ComputersStart
+            | MethodName::ComputersStop
+            | MethodName::ComputersRestart
+            | MethodName::ComputersForceStop
+            | MethodName::ComputersLaunch
+            | MethodName::ComputersDelete
+            | MethodName::SshAccessConnection
+            | MethodName::TerminalCommand
+            | MethodName::EditorCommand
+            | MethodName::DesktopAction
+            | MethodName::DisplayViewerOpen
+            | MethodName::DisplayShow
+            | MethodName::MacosDisplayConnect
+            | MethodName::MacosDisplaySession
+            | MethodName::ClipboardWrite
+            | MethodName::ClipboardTransfer
+            | MethodName::ComputerUseSetup
+            | MethodName::ComputerUseApproval
+    )
+}
+
+/// The computer a state-changing request names. A keep or promote into the fork's default
+/// target, and any request that names no computer, moves every computer's generation.
+fn changed_computer(method: MethodName, params: &Value) -> Option<String> {
+    if matches!(method, MethodName::ChangesKeep | MethodName::ChangesPromote) {
+        return None;
+    }
+    params
+        .get("computerId")
+        .and_then(Value::as_str)
+        .filter(|id| !id.is_empty())
+        .map(str::to_owned)
+}
+
+/// Runs the request, moving the generation of the computer it can change.
 pub(crate) async fn dispatch(
+    context: &HandlerContext,
+    method: MethodName,
+    params: &Value,
+) -> Result<HandlerOutput, DispatchError> {
+    if !changes_computer(method) {
+        return route(context, method, params).await;
+    }
+    let computer = changed_computer(method, params);
+    let _touch = silo_engine::generation::touch(computer.as_deref());
+    let output = route(context, method, params).await?;
+    if let Some(job) = output.value.get("jobId").and_then(Value::as_str) {
+        silo_engine::generation::note_job(job, computer.as_deref());
+    }
+    Ok(output)
+}
+
+/// Tries domain handlers in stable order and returns the unsupported error if none handles it.
+async fn route(
     context: &HandlerContext,
     method: MethodName,
     params: &Value,
@@ -270,7 +339,27 @@ pub(crate) async fn dispatch(
 mod tests {
     use silo_api::methods::{method_registry, MethodName};
 
-    use super::{access, checkpoints, computers, display, guest, serves, services};
+    use super::{
+        access, changed_computer, changes_computer, checkpoints, computers, display, guest, serves,
+        services,
+    };
+
+    #[test]
+    fn commands_and_file_writes_change_a_computer_but_ports_do_not() {
+        let params = serde_json::json!({"computerId": "c1"});
+        assert!(changes_computer(MethodName::GuestExec));
+        assert!(changes_computer(MethodName::GuestFilesWrite));
+        assert!(changes_computer(MethodName::ComputersStart));
+        assert!(!changes_computer(MethodName::NetworkPublish));
+        assert!(!changes_computer(MethodName::NetworkUnpublish));
+        assert!(!changes_computer(MethodName::GuestFilesRead));
+        assert_eq!(
+            changed_computer(MethodName::GuestExec, &params).as_deref(),
+            Some("c1")
+        );
+        // A keep into a default target cannot name the computer it changes.
+        assert_eq!(changed_computer(MethodName::ChangesKeep, &params), None);
+    }
 
     #[test]
     fn the_capability_set_is_every_routed_method_and_nothing_unserved() {

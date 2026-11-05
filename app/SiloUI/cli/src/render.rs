@@ -148,7 +148,7 @@ pub fn computer_line(verb: &str, value: &Value) -> String {
     format!("{verb} {} ({})", text(value, "name"), text(value, "state"))
 }
 
-/// `Forked try (stopped): main as of 14:02:31 (warm checkpoint, 2m 10s old)`.
+/// `Forked try (stopped): main as of 14:02:31 (warm checkpoint, unchanged since, 40s old)`.
 pub fn forked(value: &Value) -> String {
     let line = computer_line("Forked", value);
     let checkpoint = &value["checkpoint"];
@@ -156,9 +156,14 @@ pub fn forked(value: &Value) -> String {
         return line;
     }
     let what = if checkpoint["reused"] == true {
-        match text(checkpoint, "kind") {
+        let named = match text(checkpoint, "kind") {
             "" => "checkpoint".to_owned(),
             kind => format!("{kind} checkpoint"),
+        };
+        if checkpoint["unchanged"] == true {
+            format!("{named}, unchanged since")
+        } else {
+            named
         }
     } else {
         "new checkpoint".to_owned()

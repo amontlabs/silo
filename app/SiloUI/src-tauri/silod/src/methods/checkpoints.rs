@@ -208,12 +208,16 @@ async fn create(context: &HandlerContext, params: &Value) -> Result<HandlerOutpu
     let params: CheckpointCreateParams = context.decode_params(params)?;
     require_local_device(context, params.device_id.as_deref())?;
     let service = service(context);
-    job_started(
-        blocking_failure(move || {
-            service.start_create(&params.computer_id, &params.name, params.kind)
-        })
-        .await,
-    )
+    let warm = (params.kind == Some(silo_api::methods::checkpoints::CheckpointKind::Warm))
+        .then(|| silo_engine::generation::warm_baseline(&params.computer_id));
+    let started = blocking_failure(move || {
+        service.start_create(&params.computer_id, &params.name, params.kind)
+    })
+    .await;
+    if let (Some(baseline), Ok(job_id)) = (warm, &started) {
+        silo_engine::generation::note_warm_job(job_id.as_str(), baseline);
+    }
+    job_started(started)
 }
 
 async fn restore(context: &HandlerContext, params: &Value) -> Result<HandlerOutput, DispatchError> {

@@ -2497,6 +2497,7 @@ fn checkpoint_created_job_result(
                 checkpoints::PolicyKind::Warm => CheckpointKind::Warm,
             },
             size_bytes: meta.size_bytes,
+            generation: None,
         },
     }
 }

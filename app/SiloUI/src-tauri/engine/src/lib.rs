@@ -32,6 +32,7 @@ pub mod engine_update;
 pub mod events;
 pub mod files;
 pub mod fold_requests;
+pub mod generation;
 pub mod github;
 pub mod github_http;
 pub mod github_tokens;

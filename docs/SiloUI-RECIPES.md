@@ -91,13 +91,32 @@ MCP tools `recipe_list`, `up` and `fork` (with `recipe`) use the same calls.
 checkpoint of kind `warm`. Each `up` replaces the previous warm checkpoint (one that a fork
 still depends on stays until a later `up`); retention never removes it.
 
-A fork with no `--checkpoint` starts from the newest warm checkpoint only when it was taken
-within the last five minutes (`warm_max_age` in `.silo/silo.yaml`, such as `90s`, `10m` or
-`1h`); otherwise the engine takes a new checkpoint. The fork reports which one and its age,
-for example `Forked try (stopped): main as of 14:02:31 (warm checkpoint, 2m 10s old)`; `--json`
-carries `checkpoint` (`id`, `kind`, `createdAt`, `ageSeconds`, `reused`) and `forkedAsOf`. The
-rule lives in the shared operations, so the MCP `fork` tool applies it too. `up` replaces the
-warm checkpoint only after the new one has been saved.
+A fork with no `--checkpoint` starts from the newest warm checkpoint only when the engine can
+tell `main` is unchanged since it was taken, `main` is running, and the checkpoint is at most a
+minute old (`warm_max_age` in `.silo/silo.yaml`, such as `90s` or `5m`); otherwise the engine
+takes a new checkpoint.
+
+The engine keeps a "changed since" generation per computer (`generation` in `silo status`
+and in `computers.list`). Every operation the engine performs that can change a computer
+moves it: commands and command streams, file uploads and writes, keep, undo and promote,
+restore, start, stop and restart, ssh sessions opened through the engine, and terminal,
+editor, desktop and display sessions. Network and port changes do not. A warm checkpoint
+records the generation `main` had when its capture began (and records none if the engine was
+working on `main` then). A fork reuses the checkpoint only while `main` still has that
+generation. The generation lives in the engine process, so after an engine restart no warm
+checkpoint is reused until the next `silo up`.
+
+The limit: a change made over a plain `ssh` session that does not go through the engine
+cannot be seen. That is why a warm checkpoint is reused for at most `warm_max_age`, one
+minute by default; a fork made after editing `main` over such a session, within that minute,
+can start without the edit. Name a checkpoint (`--checkpoint`) or take one first when that
+matters.
+
+The fork reports which checkpoint it used and its age, for example
+`Forked try (stopped): main as of 14:02:31 (warm checkpoint, unchanged since, 40s old)`;
+`--json` carries `checkpoint` (`id`, `kind`, `createdAt`, `ageSeconds`, `reused`, `unchanged`)
+and `forkedAsOf`. The rule lives in the shared operations, so the MCP `fork` tool applies it
+too. `up` replaces the warm checkpoint only after the new one has been saved.
 
 ## Fork baselines
 

@@ -595,17 +595,53 @@ async fn read_computers(
     let macos = silo_engine::macos_computers::read_macos_computers(host.macos_context())
         .await
         .map_err(invalid)?;
-    let result: ComputersListResult = serde_json::from_value(json!({
+    let mut listed = json!({
         "linux": linux
             .to_canonical_value()
             .map_err(|error| DispatchError::internal(error.to_string()))?,
         "macos": with_kind(encode(macos)?, "macos"),
-    }))
-    .map_err(|error| DispatchError::internal(error.to_string()))?;
+    });
+    add_generations(&mut listed);
+    let result: ComputersListResult = serde_json::from_value(listed)
+        .map_err(|error| DispatchError::internal(error.to_string()))?;
     Ok(HandlerOutput {
         value: encode(result)?,
         event_barrier: barrier,
     })
+}
+
+/// Adds each computer's `generation`, and to each warm checkpoint the generation it was taken
+/// at when the engine recorded one (`silo_engine::generation`).
+fn add_generations(listed: &mut Value) {
+    for (list, id_path) in [
+        ("/linux/computers", "/configuration/id"),
+        ("/macos/computers", "/id"),
+    ] {
+        let Some(computers) = listed.pointer_mut(list).and_then(Value::as_array_mut) else {
+            continue;
+        };
+        for computer in computers {
+            let Some(id) = computer.pointer(id_path).and_then(Value::as_str) else {
+                continue;
+            };
+            let generation = silo_engine::generation::generation(id);
+            if let Some(checkpoints) = computer
+                .get_mut("checkpoints")
+                .and_then(Value::as_array_mut)
+            {
+                for checkpoint in checkpoints {
+                    let recorded = (checkpoint["kind"] == "warm")
+                        .then(|| checkpoint["id"].as_str())
+                        .flatten()
+                        .and_then(silo_engine::generation::warm_generation);
+                    if let Some(recorded) = recorded {
+                        checkpoint["generation"] = json!(recorded);
+                    }
+                }
+            }
+            computer["generation"] = json!(generation);
+        }
+    }
 }
 
 async fn read_shell(
