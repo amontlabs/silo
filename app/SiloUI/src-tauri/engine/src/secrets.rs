@@ -351,6 +351,36 @@ pub fn fork_assignments(source: &str, target: &str, names: &[String]) -> Result<
     })
 }
 
+/// The names of the secrets assigned to `computer`, to put back after a promote.
+pub(crate) fn assigned_names(computer: &str) -> Result<Vec<String>, String> {
+    Ok(load()?
+        .secrets
+        .iter()
+        .filter(|s| !s.removing && s.computers.iter().any(|w| w == computer))
+        .map(|s| s.name.clone())
+        .collect())
+}
+
+/// Assigns the named secrets to `computer` (references only). Missing names are skipped.
+pub(crate) fn reassign(computer: &str, names: &[String]) -> Result<(), String> {
+    if names.is_empty() {
+        return Ok(());
+    }
+    let _operation =
+        try_lock_unit(&OPERATION).ok_or_else(|| "Secret settings are busy. Retry.".to_string())?;
+    update(|document| {
+        for secret in &mut document.secrets {
+            if !secret.removing
+                && names.contains(&secret.name)
+                && !secret.computers.iter().any(|w| w == computer)
+            {
+                secret.computers.push(computer.into());
+            }
+        }
+        Ok(())
+    })
+}
+
 fn unassigned_names(document: &Document, source: &str, names: &[String]) -> Vec<String> {
     names
         .iter()

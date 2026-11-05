@@ -170,6 +170,10 @@ pub struct FoldCommand {
     /// Report what would be kept and what would stop it, changing nothing.
     #[arg(long)]
     pub dry_run: bool,
+    /// Make the fork main instead of keeping its changes: it takes main's name, settings and
+    /// published ports, and the old main is archived (`silo undo main` swaps back).
+    #[arg(long)]
+    pub promote: bool,
     /// Carry database changes even though no migrate step covers them.
     #[arg(long)]
     pub data_ok: bool,
@@ -385,6 +389,18 @@ async fn dispatch(
             };
             let value = ops::fork(engine, &args, settings.as_ref(), progress).await?;
             emit(json, &value, |v| render::computer_line("Forked", v));
+        }
+        Command::Fold(fold) if fold.promote => {
+            let value = ops::promote(
+                engine,
+                &fold.fork,
+                fold.into.as_deref(),
+                fold.dry_run,
+                progress,
+            )
+            .await?;
+            emit(json, &value, render::promote);
+            return Ok(if value["status"] == "refused" { 2 } else { 0 });
         }
         Command::Fold(fold) => {
             let keep = ops::keep_hooks(recipe.as_ref());

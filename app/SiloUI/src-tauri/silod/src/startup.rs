@@ -233,6 +233,7 @@ fn start_keep_recovery(context: Arc<SilodContext>) {
         }
     }
     drop(held_tx);
+    start_promote_recovery(context, host);
     // Startup goes on once every computer is held, or after a short wait when it cannot be.
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
     for _ in 0..started {
@@ -240,6 +241,40 @@ fn start_keep_recovery(context: Arc<SilodContext>) {
         if held_rx.recv_timeout(left).is_err() {
             break;
         }
+    }
+}
+
+/// Finishes a promote or undo the engine stopped in the middle of: rolled forward when every
+/// step that matters was applied, rolled back otherwise. Retried while the runtime is not ready.
+fn start_promote_recovery(context: Arc<SilodContext>, host: Arc<dyn RuntimeHost>) {
+    let journal =
+        silo_engine::changes::promote::service::journal_for(host.engine_context().as_ref());
+    if journal.interrupted().is_empty() {
+        return;
+    }
+    let spawned = std::thread::Builder::new()
+        .name("silod-promote-recovery".into())
+        .spawn(move || {
+            for attempt in 0..30 {
+                let failures = silo_engine::changes::promote::service::recover_interrupted(
+                    host.clone(),
+                    crate::methods::checkpoints::service_for(&context),
+                );
+                if failures.is_empty() {
+                    return;
+                }
+                if attempt == 29 {
+                    eprintln!(
+                        "silod: could not settle an interrupted promote: {}",
+                        failures.join("; ")
+                    );
+                    return;
+                }
+                std::thread::sleep(std::time::Duration::from_secs(10));
+            }
+        });
+    if let Err(error) = spawned {
+        eprintln!("silod: could not start the promote recovery: {error}");
     }
 }
 

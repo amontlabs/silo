@@ -53,6 +53,7 @@ struct JobTerminalResultsSchema {
     checkpoint_created: crate::methods::checkpoints::CheckpointCreatedResult,
     keep: crate::methods::keep::ChangesKeepResult,
     recipe_build: crate::methods::recipes::RecipeBuildResult,
+    promote: crate::methods::keep::ChangesPromoteResult,
     undo: crate::methods::keep::ChangesUndoResult,
     desktop: crate::methods::desktop::DesktopStatus,
     backup: crate::methods::exports::BackupOperation,
@@ -71,6 +72,7 @@ struct JobTerminalResultsSchema {
 /// platform-specific terminal outcomes called out in the domain specifications.
 pub const JOB_FINISHED_RESULT_REGISTRY: &[(&str, &str)] = &[
     ("changes.keep", "ChangesKeepResult"),
+    ("changes.promote", "ChangesPromoteResult"),
     ("changes.undo", "ChangesUndoResult"),
     ("checkpoints.abandonRestore", "ApplicationSource | null"),
     ("checkpoints.create", "CheckpointCreatedResult"),
@@ -180,8 +182,8 @@ mod tests {
             schema_json().unwrap()
         );
         let schema: serde_json::Value = serde_json::from_str(&schema_json().unwrap()).unwrap();
-        assert_eq!(schema["x-silo-methods"].as_array().unwrap().len(), 154);
-        assert_eq!(schema["x-silo-job-results"].as_array().unwrap().len(), 32);
+        assert_eq!(schema["x-silo-methods"].as_array().unwrap().len(), 155);
+        assert_eq!(schema["x-silo-job-results"].as_array().unwrap().len(), 33);
         assert_eq!(
             schema["$schema"],
             "https://json-schema.org/draft/2020-12/schema"

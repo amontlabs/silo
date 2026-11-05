@@ -555,7 +555,7 @@ async fn retry_setup_runs_the_engines_setup_retry_for_the_computer() {
 fn keep_engine(result: Value) -> FakeEngine {
     FakeEngine::start(move |method, _| match method {
         "computers.list" => Ok(listing(&[("main", "running"), ("try", "running")])),
-        "changes.keep" | "changes.undo" => Ok(json!({"jobId": "job:1"})),
+        "changes.keep" | "changes.undo" | "changes.promote" => Ok(json!({"jobId": "job:1"})),
         "operations.job.get" => Ok(finished(result.clone())),
         "operations.job.acknowledge" => Ok(Value::Null),
         other => Err(("internal", format!("unexpected {other}"))),
@@ -990,4 +990,26 @@ async fn a_throwaway_is_stopped_and_seen_stopped_before_it_is_dropped() {
 
 fn order_state(order: &Arc<Mutex<Vec<String>>>) -> Vec<String> {
     order.lock().unwrap().clone()
+}
+
+#[tokio::test]
+async fn fold_promote_sends_changes_promote_and_prints_the_archive_name() {
+    let engine = keep_engine(json!({
+        "status": "promoted",
+        "report": {"fork": "try", "target": "main", "archive": "main-before-20261105-1432", "steps": [], "notes": [], "checkpoint": "cp1"}
+    }));
+    let cli = fold_cli(&engine, &["try", "--promote", "--dry-run"]);
+    assert_eq!(run(cli, std::env::temp_dir().as_path()).await.unwrap(), 0);
+    let sent = &engine.calls("changes.promote")[0];
+    assert_eq!(sent["forkId"], "id-try");
+    assert_eq!(sent["dryRun"], true);
+    assert!(engine.calls("changes.keep").is_empty());
+    let text = silo_cli::render::promote(&json!({
+        "status": "promoted",
+        "report": {"fork": "try", "target": "main", "archive": "main-before-x", "notes": []}
+    }));
+    assert!(
+        text.contains("try is now main") && text.contains("main-before-x"),
+        "{text}"
+    );
 }
