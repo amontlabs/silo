@@ -1008,5 +1008,8 @@ async fn fold_promote_sends_changes_promote_and_prints_the_archive_name() {
         "status": "promoted",
         "report": {"fork": "try", "target": "main", "archive": "main-before-x", "notes": []}
     }));
-    assert!(text.contains("try is now main") && text.contains("main-before-x"), "{text}");
+    assert!(
+        text.contains("try is now main") && text.contains("main-before-x"),
+        "{text}"
+    );
 }

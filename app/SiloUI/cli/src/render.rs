@@ -204,9 +204,9 @@ pub fn promote(value: &Value) -> String {
     let archive = text(report, "archive");
     let mut out = match text(value, "status") {
         "refused" => return text(&value["refusal"], "message").to_owned(),
-        "dry-run" => format!(
-            "Would make {fork} the new {target}; {target} would be archived as {archive}."
-        ),
+        "dry-run" => {
+            format!("Would make {fork} the new {target}; {target} would be archived as {archive}.")
+        }
         _ => format!("{fork} is now {target}. The old {target} is {archive} (stopped)."),
     };
     for line in lines(report, "notes") {
