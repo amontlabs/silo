@@ -50,6 +50,11 @@ pub enum Command {
     Stop { computer: String },
     /// Finish the setup of a computer that stopped before it was ready.
     RetrySetup { computer: String },
+    /// Start `main` (made from a recipe the first time) and keep a warm checkpoint of it.
+    Up(UpCommand),
+    /// List, build or remove recipes.
+    #[command(subcommand)]
+    Recipe(RecipeCommand),
     /// Copy a computer for a task.
     Fork(ForkCommand),
     /// Keep a fork's changes into the computer it came from.
@@ -115,7 +120,29 @@ pub struct CreateCommand {
 }
 
 #[derive(Args, Debug)]
+pub struct UpCommand {
+    /// The recipe `main` is made from when it does not exist (default linux-dev).
+    #[arg(long, value_name = "NAME")]
+    pub recipe: Option<String>,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum RecipeCommand {
+    /// List the built-in and project recipes and which are built.
+    Ls,
+    /// Build a recipe now (or again, with --force) so forks from it start at once.
+    Build {
+        name: String,
+        #[arg(long)]
+        force: bool,
+    },
+    /// Remove a recipe's build and its hidden computer.
+    Rm { name: String },
+}
+
+#[derive(Args, Debug)]
 pub struct ForkCommand {
+    /// The computer to copy; with --recipe, the new fork's name.
     pub source: String,
     #[arg(long)]
     pub name: Option<String>,
@@ -125,7 +152,10 @@ pub struct ForkCommand {
     /// A Silo-managed secret the fork may use (repeatable).
     #[arg(long = "secret", value_name = "NAME")]
     pub secrets: Vec<String>,
-    /// A recipe whose quiet: and scrub: lists apply to the fork.
+    /// Fork from this recipe's cached build (building it first when needed), not from a computer.
+    #[arg(long, value_name = "NAME", conflicts_with_all = ["checkpoint", "name"])]
+    pub recipe: Option<String>,
+    /// A recipe file whose quiet: and scrub: lists apply to the fork.
     #[arg(long, value_name = "PATH")]
     pub recipe_file: Option<PathBuf>,
 }
@@ -242,14 +272,25 @@ pub async fn run(cli: Cli, working_directory: &Path) -> Result<i32, CliError> {
     // Read before connecting so a bad file is reported without the engine.
     let settings = project.load_settings()?;
     let recipe = match &cli.command {
-        Command::Fork(fork) => ops::resolve_recipe(fork.recipe_file.as_deref(), &project)?,
+        Command::Fork(fork) => match &fork.recipe {
+            Some(name) => Some(project.named_recipe(name)?),
+            None => ops::resolve_recipe(fork.recipe_file.as_deref(), &project)?,
+        },
+        Command::Up(up) => Some(
+            project.named_recipe(
+                up.recipe
+                    .as_deref()
+                    .unwrap_or(crate::config::DEFAULT_RECIPE),
+            )?,
+        ),
+        Command::Recipe(RecipeCommand::Build { name, .. }) => Some(project.named_recipe(name)?),
         Command::Fold(fold) => ops::resolve_recipe(fold.recipe_file.as_deref(), &project)?,
         _ => None,
     };
     let engine = Engine::connect(&socket).await?;
     let json = cli.json;
     tokio::select! {
-        result = dispatch(&engine, cli.command, json, settings, recipe) => result,
+        result = dispatch(&engine, cli.command, json, settings, recipe, &project) => result,
         _ = tokio::signal::ctrl_c() => {
             match engine.last_job() {
                 Some(job) => eprintln!("Interrupted. {}", Engine::reattach_hint(&job)),
@@ -266,9 +307,37 @@ async fn dispatch(
     json: bool,
     settings: Option<Settings>,
     recipe: Option<Recipe>,
+    project: &Project,
 ) -> Result<i32, CliError> {
     let progress = &stderr_progress;
     match command {
+        Command::Up(up) => {
+            let name = up
+                .recipe
+                .unwrap_or_else(|| crate::config::DEFAULT_RECIPE.to_owned());
+            let recipe = recipe.ok_or_else(|| CliError::new("No recipe was loaded."))?;
+            let value = ops::up(engine, &name, &recipe, progress).await?;
+            emit(json, &value, render::up);
+        }
+        Command::Recipe(RecipeCommand::Ls) => emit(
+            json,
+            &ops::recipe_list(engine, project).await?,
+            render::recipes,
+        ),
+        Command::Recipe(RecipeCommand::Build { name, force }) => {
+            let recipe = recipe.ok_or_else(|| CliError::new("No recipe was loaded."))?;
+            let value = ops::build_recipe(engine, &name, &recipe, force, progress).await?;
+            emit(json, &value, render::recipe_built);
+        }
+        Command::Recipe(RecipeCommand::Rm { name }) => {
+            let value = ops::recipe_remove(engine, &name).await?;
+            emit(json, &value, |v| {
+                format!(
+                    "Removed the build of {}.",
+                    v["removed"].as_str().unwrap_or_default()
+                )
+            });
+        }
         Command::List => emit(json, &ops::list(engine).await?, render::list),
         Command::Status { computer } => {
             emit(json, &ops::status(engine, &computer).await?, render::status)
@@ -301,12 +370,18 @@ async fn dispatch(
             emit(json, &value, |v| render::computer_line("Set up", v));
         }
         Command::Fork(fork) => {
+            let recipe_name = fork.recipe;
+            let (source, name) = match &recipe_name {
+                Some(_) => (String::new(), Some(fork.source)),
+                None => (fork.source, fork.name),
+            };
             let args = ForkArgs {
-                source: fork.source,
-                name: fork.name,
+                source,
+                name,
                 checkpoint: fork.checkpoint,
                 secrets: fork.secrets,
                 recipe,
+                recipe_name,
             };
             let value = ops::fork(engine, &args, settings.as_ref(), progress).await?;
             emit(json, &value, |v| render::computer_line("Forked", v));

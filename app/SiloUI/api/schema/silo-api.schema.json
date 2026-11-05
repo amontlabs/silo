@@ -970,6 +970,13 @@
           ],
           "description": "What to quiet in the fork before it runs anything."
         },
+        "recipeHash": {
+          "description": "The content hash of the recipe this fork was built from. The fork's idle baseline\nis cached under it, so every fork of one recipe shares a baseline.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "secrets": {
           "description": "Names of Silo-managed secrets the fork may use. The special name `github` copies\nGitHub access, read-only. Nothing is copied unless named.",
           "items": {
@@ -989,7 +996,8 @@
         "manual",
         "automatic",
         "before-keep",
-        "fork-point"
+        "fork-point",
+        "warm"
       ],
       "type": "string"
     },
@@ -6089,6 +6097,9 @@
         "push": {
           "$ref": "#/$defs/PushOperation"
         },
+        "recipe_build": {
+          "$ref": "#/$defs/RecipeBuildResult"
+        },
         "storage": {
           "$ref": "#/$defs/StorageState"
         },
@@ -6107,6 +6118,7 @@
         "macos_computers",
         "checkpoint_created",
         "keep",
+        "recipe_build",
         "undo",
         "desktop",
         "backup",
@@ -7130,6 +7142,9 @@
         "push.repositories",
         "push.start",
         "push.status",
+        "recipes.build",
+        "recipes.list",
+        "recipes.remove",
         "secrets.list",
         "secrets.remove",
         "secrets.retry",
@@ -9273,6 +9288,54 @@
             },
             "params": {
               "$ref": "#/$defs/PushStatusParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "recipes.build",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/RecipeBuildParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "recipes.list",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/EmptyParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "recipes.remove",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/RecipeRemoveParams"
             }
           },
           "required": [
@@ -11738,6 +11801,54 @@
         {
           "properties": {
             "method": {
+              "const": "recipes.build",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/JobStartResult"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "recipes.list",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/RecipesListResult"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "recipes.remove",
+              "type": "string"
+            },
+            "result": {
+              "type": "null"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
               "const": "secrets.list",
               "type": "string"
             },
@@ -13245,6 +13356,250 @@
       ],
       "type": "object"
     },
+    "RecipeBuildParams": {
+      "properties": {
+        "force": {
+          "description": "Build again even when the cache holds this spec.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "name": {
+          "description": "The recipe's name (`linux-dev`, or a file under `.silo/recipes/`).",
+          "type": "string"
+        },
+        "spec": {
+          "$ref": "#/$defs/RecipeSpec"
+        }
+      },
+      "required": [
+        "name",
+        "spec"
+      ],
+      "type": "object"
+    },
+    "RecipeBuildResult": {
+      "description": "The final result of `recipes.build`.",
+      "properties": {
+        "built": {
+          "description": "False when the cache already held this spec on this image.",
+          "type": "boolean"
+        },
+        "recipe": {
+          "$ref": "#/$defs/RecipeEntry"
+        }
+      },
+      "required": [
+        "recipe",
+        "built"
+      ],
+      "type": "object"
+    },
+    "RecipeEntry": {
+      "description": "A built recipe: the hidden computer and the checkpoint forks start from.",
+      "properties": {
+        "builtAt": {
+          "type": "string"
+        },
+        "checkpointId": {
+          "type": "string"
+        },
+        "computerId": {
+          "type": "string"
+        },
+        "computerName": {
+          "type": "string"
+        },
+        "hash": {
+          "description": "Content hash of the normalized spec.",
+          "type": "string"
+        },
+        "imageVersion": {
+          "description": "The guest image version it was built on (`unknown` when none is pinned).",
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "os": {
+          "$ref": "#/$defs/RecipeOs"
+        },
+        "ports": {
+          "items": {
+            "format": "uint16",
+            "maximum": 65535,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "name",
+        "hash",
+        "imageVersion",
+        "os",
+        "computerId",
+        "computerName",
+        "checkpointId",
+        "builtAt"
+      ],
+      "type": "object"
+    },
+    "RecipeOs": {
+      "enum": [
+        "linux",
+        "macos"
+      ],
+      "type": "string"
+    },
+    "RecipePackages": {
+      "description": "Packages per manager, installed in this order: apt, brew, pip, pipx, npm, cargo.",
+      "properties": {
+        "apt": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "brew": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "cargo": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "npm": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "pip": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "pipx": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "RecipeRemoveParams": {
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "RecipeService": {
+      "description": "A command started when the computer boots.",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "run": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "run"
+      ],
+      "type": "object"
+    },
+    "RecipeSpec": {
+      "description": "Everything that decides what a built recipe contains.",
+      "properties": {
+        "cpus": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "diskGib": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "memoryGib": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "os": {
+          "$ref": "#/$defs/RecipeOs"
+        },
+        "packages": {
+          "$ref": "#/$defs/RecipePackages",
+          "default": {}
+        },
+        "ports": {
+          "description": "Ports a fork publishes.",
+          "items": {
+            "format": "uint16",
+            "maximum": 65535,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "services": {
+          "items": {
+            "$ref": "#/$defs/RecipeService"
+          },
+          "type": "array"
+        },
+        "setup": {
+          "description": "Commands run once, as root on Linux and as the account on macOS.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "os"
+      ],
+      "type": "object"
+    },
+    "RecipesListResult": {
+      "properties": {
+        "recipes": {
+          "items": {
+            "$ref": "#/$defs/RecipeEntry"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "recipes"
+      ],
+      "type": "object"
+    },
     "ReclaimEntry": {
       "properties": {
         "at": {
@@ -14653,6 +15008,10 @@
       "resultType": "DesktopStatus"
     },
     {
+      "method": "recipes.build",
+      "resultType": "RecipeBuildResult"
+    },
+    {
       "method": "computers.configuration.change",
       "resultType": "ApplicationSource"
     },
@@ -15543,6 +15902,24 @@
       "name": "push.status",
       "paramsType": "push::PushStatusParams",
       "resultType": "Option<push::PushOperation>"
+    },
+    {
+      "kind": "job",
+      "name": "recipes.build",
+      "paramsType": "recipes::RecipeBuildParams",
+      "resultType": "common::JobStartResult"
+    },
+    {
+      "kind": "query",
+      "name": "recipes.list",
+      "paramsType": "common::EmptyParams",
+      "resultType": "recipes::RecipesListResult"
+    },
+    {
+      "kind": "command",
+      "name": "recipes.remove",
+      "paramsType": "recipes::RecipeRemoveParams",
+      "resultType": "()"
     },
     {
       "kind": "query",

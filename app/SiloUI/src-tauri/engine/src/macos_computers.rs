@@ -2263,6 +2263,7 @@ pub fn start_macos_checkpoint_job(
     id: String,
     name: String,
     automatic: bool,
+    warm: bool,
     retention: RetentionPolicy,
     before_keep_retention: Option<RetentionPolicy>,
 ) -> Result<silo_api::jobs::JobId, String> {
@@ -2274,6 +2275,8 @@ pub fn start_macos_checkpoint_job(
         checkpoints::PolicyKind::Automatic
     } else if before_keep_retention.is_some() {
         checkpoints::PolicyKind::BeforeKeep
+    } else if warm {
+        checkpoints::PolicyKind::Warm
     } else {
         checkpoints::PolicyKind::Manual
     };
@@ -2479,6 +2482,7 @@ fn checkpoint_created_job_result(
                 checkpoints::PolicyKind::Automatic => CheckpointKind::Automatic,
                 checkpoints::PolicyKind::BeforeKeep => CheckpointKind::BeforeKeep,
                 checkpoints::PolicyKind::ForkPoint => CheckpointKind::ForkPoint,
+                checkpoints::PolicyKind::Warm => CheckpointKind::Warm,
             },
             size_bytes: meta.size_bytes,
         },
@@ -6956,6 +6960,7 @@ pub fn seed_check_policy(app_data: &std::path::Path, computer_id: &str) -> Vec<S
             checkpoints::PolicyKind::Automatic => "automatic".to_owned(),
             checkpoints::PolicyKind::BeforeKeep => "before-keep".to_owned(),
             checkpoints::PolicyKind::ForkPoint => "fork-point".to_owned(),
+            checkpoints::PolicyKind::Warm => "warm".to_owned(),
         })
         .collect()
 }
@@ -12124,6 +12129,7 @@ mod tests {
             source.id.clone(),
             "Before run: x, deleted automatically".into(),
             true,
+            false,
             Arc::new(|| Ok(0)),
             None,
         );

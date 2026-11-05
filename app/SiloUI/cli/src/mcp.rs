@@ -33,8 +33,12 @@ pub struct ComputerParam {
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct ForkParams {
-    /// The computer to copy, usually `main`.
-    pub source: String,
+    /// The computer to copy, usually `main` (the default). Ignored when `recipe` is set.
+    #[serde(default)]
+    pub source: Option<String>,
+    /// Fork from this recipe's cached build (a built-in such as linux-dev, or a file in
+    /// `.silo/recipes/`), building it first when needed.
+    pub recipe: Option<String>,
     /// The fork's name; defaults to the source name plus a short id.
     pub name: Option<String>,
     /// Fork from this checkpoint id instead of the current state.
@@ -44,6 +48,12 @@ pub struct ForkParams {
     pub secrets: Vec<String>,
     /// Path of a recipe whose quiet and scrub lists apply to the fork.
     pub recipe_file: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct UpParams {
+    /// The recipe `main` is made from when it does not exist (default linux-dev).
+    pub recipe: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -146,6 +156,36 @@ impl SiloMcp {
         show(async { ops::secrets_list(&self.engine().await?).await }.await)
     }
 
+    #[tool(
+        description = "Start `main` (made from a recipe the first time, default linux-dev) and keep a warm checkpoint of it, so forks of an unchanged main start without a new checkpoint."
+    )]
+    async fn up(&self, Parameters(params): Parameters<UpParams>) -> Result<String, String> {
+        show(
+            async {
+                let project = Project::discover(&self.working_directory);
+                let name = params
+                    .recipe
+                    .unwrap_or_else(|| crate::config::DEFAULT_RECIPE.to_owned());
+                let recipe = project.named_recipe(&name)?;
+                ops::up(&self.engine().await?, &name, &recipe, &|_| {}).await
+            }
+            .await,
+        )
+    }
+
+    #[tool(
+        description = "List the recipes (built-in and in .silo/recipes/) and whether each is built. Fork from one with `fork` and its `recipe` parameter."
+    )]
+    async fn recipe_list(&self) -> Result<String, String> {
+        show(
+            async {
+                let project = Project::discover(&self.working_directory);
+                ops::recipe_list(&self.engine().await?, &project).await
+            }
+            .await,
+        )
+    }
+
     #[tool(description = "Copy a computer into a new fork for a task and wait until it is ready.")]
     async fn fork(&self, Parameters(params): Parameters<ForkParams>) -> Result<String, String> {
         show(
@@ -156,13 +196,17 @@ impl SiloMcp {
                     .recipe_file
                     .as_deref()
                     .map(|path| self.working_directory.join(path));
-                let recipe = ops::resolve_recipe(explicit.as_deref(), &project)?;
+                let recipe = match &params.recipe {
+                    Some(name) => Some(project.named_recipe(name)?),
+                    None => ops::resolve_recipe(explicit.as_deref(), &project)?,
+                };
                 let args = ForkArgs {
-                    source: params.source,
+                    source: params.source.unwrap_or_else(|| ops::MAIN.to_owned()),
                     name: params.name,
                     checkpoint: params.checkpoint,
                     secrets: params.secrets,
                     recipe,
+                    recipe_name: params.recipe,
                 };
                 ops::fork(&self.engine().await?, &args, settings.as_ref(), &|_| {}).await
             }

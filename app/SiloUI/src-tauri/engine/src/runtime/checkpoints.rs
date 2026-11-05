@@ -305,7 +305,7 @@ fn validate(record: &Record) -> Result<(), RuntimeError> {
                 || !matches!(checkpoint.reason.as_str(), "manual" | "before-restore")
                 || !matches!(
                     checkpoint.kind.as_str(),
-                    "manual" | "automatic" | "before-keep"
+                    "manual" | "automatic" | "before-keep" | "warm"
                 )
         })
         || !unique_checkpoint_ids(&record.checkpoints)
@@ -1058,6 +1058,7 @@ pub fn create_for_job(
         CheckpointKind::Manual => "manual",
         CheckpointKind::Automatic => "automatic",
         CheckpointKind::BeforeKeep => "before-keep",
+        CheckpointKind::Warm => "warm",
         CheckpointKind::ForkPoint => {
             return Err("A fork point is made by Fork, not saved as a checkpoint.".into())
         }
@@ -1098,7 +1099,7 @@ pub fn reclaim_after_capture_for_job(
             "Removing an older before-keep checkpoint",
             before_keep_retention,
         ),
-        CheckpointKind::Manual | CheckpointKind::ForkPoint => return Ok(()),
+        CheckpointKind::Manual | CheckpointKind::Warm | CheckpointKind::ForkPoint => return Ok(()),
     };
     shutdown::ensure_accepting_operations()?;
     trim_kind_with(
@@ -1135,6 +1136,7 @@ fn api_checkpoint(checkpoint: Checkpoint) -> silo_api::methods::checkpoints::Che
             "automatic" => CheckpointKind::Automatic,
             "before-keep" => CheckpointKind::BeforeKeep,
             "fork-point" => CheckpointKind::ForkPoint,
+            "warm" => CheckpointKind::Warm,
             _ => CheckpointKind::Manual,
         },
         size_bytes: None,

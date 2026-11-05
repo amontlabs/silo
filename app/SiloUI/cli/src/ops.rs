@@ -14,6 +14,7 @@ use silo_api::methods::{
     },
     guest::GuestExecParams,
     keep::{ChangesKeepParams, ChangesUndoParams, KeepHooks},
+    recipes::{RecipeBuildParams, RecipeRemoveParams},
     requests,
     secrets::{SecretSaveAction, SecretSaveRequest, SecretsSaveParams},
 };
@@ -420,6 +421,8 @@ pub struct ForkArgs {
     pub checkpoint: Option<String>,
     pub secrets: Vec<String>,
     pub recipe: Option<Recipe>,
+    /// Fork from this recipe's cached build instead of `source`.
+    pub recipe_name: Option<String>,
 }
 
 pub async fn fork(
@@ -429,18 +432,41 @@ pub async fn fork(
     progress: Progress<'_>,
 ) -> Result<Value, CliError> {
     Settings::check_fork_secrets(settings, &args.secrets)?;
-    let source = engine.computer(&args.source).await?;
-    let name = args
-        .name
-        .clone()
-        .unwrap_or_else(|| default_fork_name(&source.name, &short_id()));
+    let mut recipe_hash = None;
+    let mut checkpoint = args.checkpoint.clone();
+    let source = match &args.recipe_name {
+        Some(recipe_name) => {
+            Settings::check_recipe(settings, recipe_name)?;
+            let recipe = args.recipe.as_ref().ok_or_else(|| {
+                CliError::new(format!("The recipe {recipe_name} was not loaded."))
+            })?;
+            let built = build_recipe(engine, recipe_name, recipe, false, progress).await?;
+            let entry = &built["recipe"];
+            let text = |key: &str| entry[key].as_str().unwrap_or_default().to_owned();
+            recipe_hash = Some(text("hash"));
+            checkpoint = Some(text("checkpointId"));
+            let all = engine.all_computers().await?;
+            let mut builder = find(&all, &text("computerId"))?.clone();
+            builder.name = recipe_name.clone();
+            builder
+        }
+        None => engine.computer(&args.source).await?,
+    };
+    let name = match (&args.name, &args.recipe_name) {
+        (Some(name), _) => name.clone(),
+        (None, _) => default_fork_name(&source.name, &short_id()),
+    };
+    if checkpoint.is_none() {
+        checkpoint = warm_checkpoint(engine, &source).await;
+    }
     let mut params = CheckpointForkParams {
         computer_id: source.id.clone(),
         device_id: None,
-        checkpoint_id: args.checkpoint.clone(),
+        checkpoint_id: checkpoint,
         new_name: name.clone(),
         secrets: Vec::new(),
         quiet: None,
+        recipe_hash,
     };
     apply_fork_extras(
         &mut params,
@@ -470,6 +496,8 @@ pub struct DiffArgs {
 
 /// Name prefix of the throwaway computers that measure baselines. `silo list` leaves them out.
 pub const BASELINE_PREFIX: &str = "silo-baseline-";
+/// Name prefix of the hidden computers that recipes are built in.
+pub const BUILDER_PREFIX: &str = "silo-build-";
 /// The longest a throwaway fork is left idle, however long the real fork has run.
 pub const BASELINE_CAP_SECONDS: u64 = 600;
 
@@ -643,6 +671,7 @@ async fn measure_on_throwaway(
         new_name: name.to_owned(),
         secrets: Vec::new(),
         quiet: None,
+        recipe_hash: None,
     };
     apply_fork_extras(&mut params, &extras)?;
     engine
@@ -923,11 +952,12 @@ pub fn resolve_recipe(
 
 pub fn parse_checkpoint_kind(text: &str) -> Result<CheckpointKind, CliError> {
     match text {
+        "warm" => Ok(CheckpointKind::Warm),
         "manual" => Ok(CheckpointKind::Manual),
         "automatic" => Ok(CheckpointKind::Automatic),
         "before-keep" => Ok(CheckpointKind::BeforeKeep),
         other => Err(CliError::new(format!(
-            "Unknown checkpoint kind {other}; use manual, automatic or before-keep."
+            "Unknown checkpoint kind {other}; use manual, automatic, before-keep or warm."
         ))),
     }
 }
@@ -1093,6 +1123,7 @@ mod tests {
             new_name: "n".into(),
             secrets: Vec::new(),
             quiet: None,
+            recipe_hash: None,
         };
         apply_fork_extras(&mut params, &ForkExtras::default()).unwrap();
         assert!(params.secrets.is_empty());
@@ -1145,4 +1176,201 @@ mod tests {
         );
         assert!(parse_checkpoint_kind("later").is_err());
     }
+}
+
+// MARK: Recipes
+
+/// Builds a recipe, or returns its cached build. The result carries `recipe` (the cache entry)
+/// and `built` (false for a cache hit).
+pub async fn build_recipe(
+    engine: &Engine,
+    name: &str,
+    recipe: &Recipe,
+    force: bool,
+    progress: Progress<'_>,
+) -> Result<Value, CliError> {
+    engine
+        .run_job(
+            &format!("Building the recipe {name}"),
+            requests::recipes_build(RecipeBuildParams {
+                name: name.to_owned(),
+                spec: recipe.spec(),
+                force: force.then_some(true),
+            }),
+            progress,
+        )
+        .await
+}
+
+/// Every recipe the project and the CLI offer, with whether the engine holds a build of it.
+pub async fn recipe_list(
+    engine: &Engine,
+    project: &crate::config::Project,
+) -> Result<Value, CliError> {
+    let built = engine
+        .call(requests::recipes_list(silo_api::methods::EmptyParams {}))
+        .await?;
+    let built = built["recipes"].as_array().cloned().unwrap_or_default();
+    let recipes: Vec<Value> = project
+        .recipe_names()
+        .into_iter()
+        .map(|(name, origin)| {
+            let entry = built.iter().find(|entry| entry["name"] == name.as_str());
+            json!({
+                "name": name,
+                "origin": origin,
+                "built": entry.is_some(),
+                "builtAt": entry.map(|entry| entry["builtAt"].clone()),
+                "imageVersion": entry.map(|entry| entry["imageVersion"].clone()),
+            })
+        })
+        .collect();
+    Ok(json!({ "recipes": recipes }))
+}
+
+pub async fn recipe_remove(engine: &Engine, name: &str) -> Result<Value, CliError> {
+    engine
+        .call(requests::recipes_remove(RecipeRemoveParams {
+            name: name.to_owned(),
+        }))
+        .await?;
+    Ok(json!({ "removed": name }))
+}
+
+// MARK: Up
+
+/// Marker file whose time says when `main` was last checkpointed warm.
+const WARM_MARKER: &str = "/var/lib/silo-warm-marker";
+const WARM_NAME: &str = "silo-warm";
+
+fn exec_args(computer: &str, script: &str) -> ExecArgs {
+    ExecArgs {
+        computer: computer.to_owned(),
+        argv: vec!["sh".into(), "-c".into(), script.to_owned()],
+        cwd: None,
+        timeout_secs: 120,
+    }
+}
+
+/// Prints `unchanged` when nothing outside the noisy system folders was written since the
+/// warm marker.
+fn unchanged_script(macos: bool) -> String {
+    if macos {
+        "m=/tmp/.silo-warm-marker; [ -e $m ] || exit 0; \
+         [ -z \"$(find \"$HOME\" /usr/local /opt -xdev \\( -path \"$HOME/Library/Caches\" -o -path \"$HOME/Library/Logs\" \\) -prune -o -newer $m -print -quit 2>/dev/null)\" ] && echo unchanged"
+            .to_owned()
+    } else {
+        format!(
+            "m={WARM_MARKER}; [ -e $m ] || exit 0; \
+             [ -z \"$(find / -xdev \\( -path /proc -o -path /sys -o -path /dev -o -path /run -o -path /tmp -o -path /var/log -o -path /var/cache \\) -prune -o -newer $m -print -quit 2>/dev/null)\" ] && echo unchanged"
+        )
+    }
+}
+
+/// The warm checkpoint of `source` when `source` is `main`, runs, and nothing was written
+/// since the checkpoint was taken. Any doubt means no warm checkpoint.
+async fn warm_checkpoint(engine: &Engine, source: &Computer) -> Option<String> {
+    if source.name != MAIN || source.state != "running" {
+        return None;
+    }
+    let warm = source
+        .checkpoints
+        .iter()
+        .filter(|cp| cp["kind"] == "warm")
+        .max_by_key(|cp| cp["createdAt"].as_str().unwrap_or_default().to_owned())?;
+    let out = exec_raw(
+        engine,
+        &exec_args(&source.name, &unchanged_script(source.kind == "macos")),
+    )
+    .await
+    .ok()?;
+    (out.exit_code == Some(0) && String::from_utf8_lossy(&out.stdout).trim() == "unchanged")
+        .then(|| warm["id"].as_str().map(str::to_owned))
+        .flatten()
+}
+
+/// Makes sure the engine answers, `main` exists (made from the recipe) and runs, and keeps a
+/// warm checkpoint of it that replaces the previous one.
+pub async fn up(
+    engine: &Engine,
+    recipe_name: &str,
+    recipe: &Recipe,
+    progress: Progress<'_>,
+) -> Result<Value, CliError> {
+    let mut created = false;
+    let mut main = match engine.computer(MAIN).await {
+        Ok(main) => main,
+        Err(_) => {
+            let built = build_recipe(engine, recipe_name, recipe, false, progress).await?;
+            let entry = &built["recipe"];
+            let text = |key: &str| entry[key].as_str().unwrap_or_default().to_owned();
+            let all = engine.all_computers().await?;
+            let builder = find(&all, &text("computerId"))?.clone();
+            let params = CheckpointForkParams {
+                computer_id: builder.id,
+                device_id: None,
+                checkpoint_id: Some(text("checkpointId")),
+                new_name: MAIN.to_owned(),
+                secrets: Vec::new(),
+                quiet: None,
+                recipe_hash: None,
+            };
+            engine
+                .run_job(
+                    &format!("Making main from {recipe_name}"),
+                    requests::checkpoints_fork(params),
+                    progress,
+                )
+                .await?;
+            created = true;
+            engine.computer(MAIN).await?
+        }
+    };
+    if main.state != "running" {
+        start(engine, MAIN, progress).await?;
+        main = engine.computer(MAIN).await?;
+    }
+    let macos = main.kind == "macos";
+    let marker = if macos {
+        "/tmp/.silo-warm-marker"
+    } else {
+        WARM_MARKER
+    };
+    exec_raw(engine, &exec_args(MAIN, &format!("touch {marker}"))).await?;
+    let previous: Vec<String> = main
+        .checkpoints
+        .iter()
+        .filter(|cp| cp["kind"] == "warm")
+        .filter_map(|cp| cp["id"].as_str().map(str::to_owned))
+        .collect();
+    let warm = checkpoint(
+        engine,
+        MAIN,
+        Some(WARM_NAME),
+        Some(CheckpointKind::Warm),
+        progress,
+    )
+    .await?;
+    for id in previous {
+        // A checkpoint a fork still depends on stays until a later `up`.
+        let _ = engine
+            .run_job(
+                "Removing the previous warm checkpoint",
+                requests::checkpoints_delete(
+                    silo_api::methods::checkpoints::CheckpointTargetParams {
+                        computer_id: main.id.clone(),
+                        device_id: None,
+                        checkpoint_id: id,
+                    },
+                ),
+                progress,
+            )
+            .await;
+    }
+    Ok(json!({
+        "main": engine.computer(MAIN).await?.to_json(),
+        "created": created,
+        "recipe": recipe_name,
+        "warmCheckpoint": warm["id"],
+    }))
 }

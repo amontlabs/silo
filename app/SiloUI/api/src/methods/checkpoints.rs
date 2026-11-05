@@ -38,6 +38,10 @@ wire_struct! {
         /// What to quiet in the fork before it runs anything.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         quiet: Option<QuietSpec>,
+        /// The content hash of the recipe this fork was built from. The fork's idle baseline
+        /// is cached under it, so every fork of one recipe shares a baseline.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        recipe_hash: Option<String>,
     }
 }
 
@@ -189,6 +193,9 @@ pub enum CheckpointKind {
     // fork made from it exists.
     #[serde(rename = "fork-point")]
     ForkPoint,
+    // The checkpoint `silo up` keeps of main so a fork of an unchanged main starts without
+    // taking a new one; replaced on every `up`, never trimmed by retention.
+    Warm,
 }
 
 wire_struct! {

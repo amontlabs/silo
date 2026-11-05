@@ -197,6 +197,9 @@ define_registry! {
     PushRepositories => ("push.repositories", Query, push::PushRepositoriesParams, Vec<push::PushRepository>);
     PushStart => ("push.start", Job, push::PushStartParams, common::JobStartResult);
     PushStatus => ("push.status", Query, push::PushStatusParams, Option<push::PushOperation>);
+    RecipesBuild => ("recipes.build", Job, recipes::RecipeBuildParams, common::JobStartResult);
+    RecipesList => ("recipes.list", Query, common::EmptyParams, recipes::RecipesListResult);
+    RecipesRemove => ("recipes.remove", Command, recipes::RecipeRemoveParams, ());
     SecretsList => ("secrets.list", Query, common::DeviceParams, Vec<secrets::Secret>);
     SecretsRemove => ("secrets.remove", Command, secrets::SecretsRemoveParams, Vec<secrets::Secret>);
     SecretsRetry => ("secrets.retry", Command, secrets::SecretsRetryParams, Vec<secrets::Secret>);
@@ -227,27 +230,27 @@ mod tests {
 
     #[test]
     fn registry_covers_every_canonical_method_and_kind() {
-        assert_eq!(METHOD_REGISTRY.len(), 151);
+        assert_eq!(METHOD_REGISTRY.len(), 154);
         assert_eq!(
             METHOD_REGISTRY
                 .iter()
                 .filter(|m| m.kind == MethodKind::Query)
                 .count(),
-            47
+            48
         );
         assert_eq!(
             METHOD_REGISTRY
                 .iter()
                 .filter(|m| m.kind == MethodKind::Command)
                 .count(),
-            64
+            65
         );
         assert_eq!(
             METHOD_REGISTRY
                 .iter()
                 .filter(|m| m.kind == MethodKind::Job)
                 .count(),
-            34
+            35
         );
         assert_eq!(
             METHOD_REGISTRY

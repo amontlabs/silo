@@ -42,11 +42,14 @@ the engine's message.
 | `silo create <name> [--linux\|--macos] [--cpus N --memory GiB --disk GiB]` | create a computer |
 | `silo start <computer>` / `silo stop <computer>` | lifecycle |
 | `silo retry-setup <computer>` | finish the setup of a macOS computer that ended `failed` before it was ready |
+| `silo up [--recipe R]` | make `main` from a recipe if needed, start it, keep a warm checkpoint ([recipes](SiloUI-RECIPES.md)) |
+| `silo recipe ls\|build NAME [--force]\|rm NAME` | list, build or remove recipe builds |
+| `silo fork NAME --recipe R` | fork from the cached build of recipe R (built first if missing) |
 | `silo fork <source> [--name N] [--checkpoint ID] [--secret NAME]... [--recipe-file PATH]` | copy a computer; the name defaults to `<source>-<6 hex>` |
 | `silo diff <computer> [--json] [--max-lines N] [--no-baseline] [--baseline]` | what changed since the fork (captures the computer now, compares with the record `silo fork` took); `--baseline` measures a missing baseline first, on a throwaway idle fork of the same checkpoint (also for a fork that has been used), and a baseline measured on one fork of a computer applies to its other forks; `silo fold --dry-run` ignores review digests |
 | `silo drop <computer> [--force]` | throw a computer away; `main` needs `--force` |
 | `silo exec <computer> [--cwd DIR] [--timeout SECS] -- <cmd...>` | run a command; the exit code is passed through |
-| `silo checkpoint <computer> [--name N] [--kind manual\|automatic\|before-keep]` | save a checkpoint |
+| `silo checkpoint <computer> [--name N] [--kind manual\|automatic\|before-keep\|warm]` | save a checkpoint |
 | `silo checkpoints <computer>` | list checkpoints |
 | `silo job <id>` | wait for a job that is already running |
 | `silo mcp` | serve the MCP tools on stdio |
@@ -70,7 +73,7 @@ destination (`*`) is created in the app. `set` reads all of stdin and drops one 
 `silo` looks upward from the working directory for a `.silo/` that holds `recipe.yaml` or
 `silo.yaml`. Unknown keys are errors.
 
-`.silo/recipe.yaml`:
+`.silo/recipe.yaml` (recipes can also name an OS, packages, setup commands, services and ports, and live in `.silo/recipes/`; see [recipes](SiloUI-RECIPES.md)):
 
 ```yaml
 quiet: [poller]          # processes stopped in a fork
@@ -105,7 +108,7 @@ gets the named secrets (`github` gives read-only GitHub access) and the recipe's
 claude mcp add silo -- silo mcp
 ```
 
-Tools: `list`, `status`, `fork`, `drop`, `exec`, `checkpoint`, `checkpoints`, `secrets_list`. They make the
+Tools: `up`, `recipe_list`, `list`, `status`, `fork` (with `recipe`), `drop`, `exec`, `checkpoint`, `checkpoints`, `secrets_list`. They make the
 same engine calls as the commands and return the same JSON as `--json`. `drop` cannot
 drop `main` through MCP. No tool sets or assigns secrets; values are never sent over MCP.
 

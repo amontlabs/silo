@@ -55,6 +55,7 @@ pub mod notices;
 pub mod owned_tunnel;
 pub mod pre_upgrade_backup;
 pub mod preparation;
+pub mod recipes;
 pub mod remote;
 pub mod remote_access;
 pub mod remote_events;

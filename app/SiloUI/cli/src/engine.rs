@@ -295,7 +295,10 @@ impl Engine {
     /// left out.
     pub async fn computers(&self) -> Result<Vec<Computer>, CliError> {
         let mut computers = self.all_computers().await?;
-        computers.retain(|computer| !computer.name.starts_with(crate::ops::BASELINE_PREFIX));
+        computers.retain(|computer| {
+            !computer.name.starts_with(crate::ops::BASELINE_PREFIX)
+                && !computer.name.starts_with(crate::ops::BUILDER_PREFIX)
+        });
         Ok(computers)
     }
 

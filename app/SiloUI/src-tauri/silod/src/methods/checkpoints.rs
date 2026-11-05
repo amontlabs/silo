@@ -12,6 +12,7 @@ mod exports;
 mod keep;
 mod migration;
 pub(crate) mod preparation;
+mod recipes;
 
 use std::sync::Arc;
 
@@ -47,6 +48,7 @@ pub(super) fn owns(method: MethodName) -> bool {
             "exports.",
             "migration.",
             "preparation.",
+            "recipes.",
             "device.",
         ],
     )
@@ -70,6 +72,9 @@ async fn dispatch(
     context: &HandlerContext,
 ) -> Result<HandlerOutput, DispatchError> {
     match method {
+        MethodName::RecipesBuild => recipes::build(context, params).await,
+        MethodName::RecipesList => recipes::list(context).await,
+        MethodName::RecipesRemove => recipes::remove(context, params).await,
         MethodName::ChangesCapture => changes::capture(context, params).await,
         MethodName::ChangesDiff => changes::diff(context, params).await,
         MethodName::ChangesBaseline => changes::baseline(context, params).await,
@@ -225,7 +230,7 @@ async fn fork(context: &HandlerContext, params: &Value) -> Result<HandlerOutput,
     let service = service(context);
     job_started(
         blocking_failure(move || {
-            service.start_fork(
+            service.start_fork_from_recipe(
                 &params.computer_id,
                 params.checkpoint_id.as_deref(),
                 &params.new_name,
@@ -238,6 +243,7 @@ async fn fork(context: &HandlerContext, params: &Value) -> Result<HandlerOutput,
                         .unwrap_or_default(),
                     scrub: params.quiet.map(|q| q.scrub).unwrap_or_default(),
                 },
+                params.recipe_hash.as_deref(),
             )
         })
         .await,
