@@ -1,14 +1,14 @@
 {
-  "baseCapturedAt": "2026-11-05T14:00:40.333903Z",
+  "baseCapturedAt": "2026-11-05T15:00:11.370415Z",
   "baselineApplied": false,
   "baselineAvailable": false,
-  "capturedAt": "2026-11-05T14:01:45.462292Z",
+  "capturedAt": "2026-11-05T15:01:00.93193Z",
   "code": [
     {
       "branch": null,
       "commits": [
-        "06e624f99aa05be3bd936f41cf7807fbd099af70",
-        "21bd50be6ac1eaad52c265bbf335f25d09461dc0"
+        "7866ecba9ecb4300478c30ef246e4256e4a14b22",
+        "82a4dbf87b41c1aa042aec7f3116b510aaa56b64"
       ],
       "dirty_delta": 0,
       "dirty_gone": [],
@@ -28,8 +28,8 @@
   "idle_noise": [],
   "ignored": {
     "paths": [
-      "/home/silo/.config/pulse/a826810a173b40518b2c711fd6765532-default-sink",
-      "/home/silo/.config/pulse/a826810a173b40518b2c711fd6765532-default-source"
+      "/home/silo/.config/pulse/0e69b909da8c488fa5ee3d030f330668-default-sink",
+      "/home/silo/.config/pulse/0e69b909da8c488fa5ee3d030f330668-default-source"
     ],
     "pruned_trees": [
       {
@@ -103,7 +103,7 @@
   "repo_files": [
     "/home/silo/app/package.json"
   ],
-  "reviewDigest": "afc13e134ef751d8a688bd86e5761c8659ad783ede334c26aeaf4d3b8f84c6c9",
+  "reviewDigest": "b2905c62d9e924373a626305efab5d33e97072f0b8a3bb356066abba6c9d9ff0",
   "settings": {
     "cron": [],
     "files": [],
@@ -114,7 +114,7 @@
     {
       "bucket": "Code",
       "lines": [
-        "/home/silo/app: 06e624f..21bd50b"
+        "/home/silo/app: 7866ecb..82a4dbf"
       ]
     },
     {
@@ -131,5 +131,5 @@
       ]
     }
   ],
-  "text": "Code\n  /home/silo/app: 06e624f..21bd50b\nPackages\n  apt: ripgrep\nNot kept\n  listening: :3000 (web)\n  processes: web\nIgnored: 8 paths (caches, logs, build output)"
+  "text": "Code\n  /home/silo/app: 7866ecb..82a4dbf\nPackages\n  apt: ripgrep\nNot kept\n  listening: :3000 (web)\n  processes: web\nIgnored: 8 paths (caches, logs, build output)"
 }

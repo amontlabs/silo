@@ -1,9 +1,9 @@
 Code
-  /home/silo/app: 06e624f..bb6e6e0
+  /home/silo/app: 7866ecb..86d5a3c
 Database changed
   postgres appdb: schema changed; data changed in public.items (1→1 rows), public.schema_migrations (1→2 rows)
 Not kept
   listening: :3000 (web)
   processes: web
-Ignored: 11 paths (caches, logs, build output)
-review: 7bdb473cf913ec7c90279121837180018fa3d6e8c30d64439cbf24f462aea824
+Ignored: 10 paths (caches, logs, build output)
+review: 004d78177d4ca683d060be264be6589e741f4b5e93af9f276961a4f07cf923b1

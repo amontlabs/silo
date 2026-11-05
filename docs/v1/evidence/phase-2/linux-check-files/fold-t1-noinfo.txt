@@ -1,2 +1,5 @@
 Checking e2e-p2-t1...
-silo: cf2ea162781ad4beda69b49514c24462 is not a computer on this device. Name the computer to keep into.
+Checking e2e-p2-t1: 5s
+Keep stopped: /home/silo/app clash on f37f9c1c-f060-474b-8387-d1aa3a934166 and in ce18dfb9-7d7d-4a9b-a7e3-7af67dd2cfb8. f37f9c1c-f060-474b-8387-d1aa3a934166 was not changed.
+  git /home/silo/app: CONFLICT (content): Merge conflict in package.json
+Bring main's change into the fork (or remove the file from the fork's commits) and keep again.

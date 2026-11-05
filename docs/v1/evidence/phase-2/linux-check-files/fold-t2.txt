@@ -4,27 +4,9 @@ Keeping e2e-p2-t2: 10s
 Keeping e2e-p2-t2: 15s
 Keeping e2e-p2-t2: 20s
 Keeping e2e-p2-t2: 25s
-Keeping e2e-p2-t2: 30s
-Keeping e2e-p2-t2: 36s
-Keeping e2e-p2-t2: 41s
-Keeping e2e-p2-t2: 46s
-Keeping e2e-p2-t2: 51s
-Keeping e2e-p2-t2: 56s
-Keeping e2e-p2-t2: 61s
-Keeping e2e-p2-t2: 66s
-Keeping e2e-p2-t2: 72s
-Keeping e2e-p2-t2: 77s
-Keeping e2e-p2-t2: 82s
-Keeping e2e-p2-t2: 87s
-Keeping e2e-p2-t2: 92s
-Keeping e2e-p2-t2: 97s
-Keeping e2e-p2-t2: 103s
-Keeping e2e-p2-t2: 108s
-Keeping e2e-p2-t2: 113s
-Keeping e2e-p2-t2: 118s
-Keeping e2e-p2-t2: 123s
-Keeping e2e-p2-t2: 128s
-Keeping e2e-p2-t2: 133s
-Keeping e2e-p2-t2: 139s
-Keeping e2e-p2-t2: 144s
-Keeping e2e-p2-t2: 149s
+Kept b81657cd-6763-4360-bf76-87e66fe7d955 into f37f9c1c-f060-474b-8387-d1aa3a934166.
+  git /home/silo/app: merged, now at 86d5a3c
+  migrate: cd /home/silo/app && npm run migrate
+  restart web: pid 447 -> 5611
+  after: cd /home/silo/app && npm test
+Undo with `silo undo f37f9c1c-f060-474b-8387-d1aa3a934166`.

@@ -1,2 +1,4 @@
 Checking e2e-p2-data...
-silo: c352e2a1c98db4e5dbd5b0b16351831c is not a computer on this device. Name the computer to keep into.
+Checking e2e-p2-data: 5s
+Database changed (postgres appdb) and no migration covers it. f37f9c1c-f060-474b-8387-d1aa3a934166 was not changed.
+A keep carries a database change only when the recipe has a migrate: step and the fork changed migration files. Otherwise use "Make this main": the fork becomes main with its database.

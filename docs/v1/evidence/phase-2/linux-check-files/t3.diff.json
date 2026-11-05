@@ -1,8 +1,8 @@
 {
-  "baseCapturedAt": "2026-11-05T14:01:00.540643Z",
+  "baseCapturedAt": "2026-11-05T15:00:31.136311Z",
   "baselineApplied": false,
   "baselineAvailable": false,
-  "capturedAt": "2026-11-05T14:01:58.806278Z",
+  "capturedAt": "2026-11-05T15:01:14.357184Z",
   "code": [
     {
       "branch": null,
@@ -40,8 +40,8 @@
   "idle_noise": [],
   "ignored": {
     "paths": [
-      "/home/silo/.config/pulse/11efea2ff8334f48a5147960b1dd72f9-default-sink",
-      "/home/silo/.config/pulse/11efea2ff8334f48a5147960b1dd72f9-default-source"
+      "/home/silo/.config/pulse/08fae91047bb4615bc9ef1414143050d-default-sink",
+      "/home/silo/.config/pulse/08fae91047bb4615bc9ef1414143050d-default-source"
     ],
     "pruned_trees": [
       {
@@ -86,7 +86,7 @@
   "repo_files": [
     "/home/silo/app/.env"
   ],
-  "reviewDigest": "9aaf6e756820a2db081fea2f10147442306f9fd88825faf1451c9a868e0ee496",
+  "reviewDigest": "6dcde07dc276c265874d17f260add59394cd960461097397823305e37e45a4e3",
   "settings": {
     "cron": [],
     "files": [
@@ -106,9 +106,9 @@
       },
       {
         "after": {
-          "hash": "0f4f87db4567232a7f1756aa1534ec1314777b39c3bf5209f87cf9739321cddc",
+          "hash": "057c817c6a65ba4c95e68d754eaf8323b5714e95d5ecb624049f5afe95e47ba4",
           "kind": "file",
-          "size": "16"
+          "size": "17"
         },
         "before": null,
         "change": "added",

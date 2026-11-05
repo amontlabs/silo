@@ -159,8 +159,8 @@ cat > /etc/init.d/web <<'EOF'
 # Short-Description: the p2app web server
 ### END INIT INFO
 case "$1" in
-  start) cd /home/silo/app && setsid nohup /usr/local/bin/web server.js >>/var/log/web.log 2>&1 </dev/null & ;;
-  stop) pkill -x web || true ;;
+  start) cd /home/silo/app && { setsid nohup /usr/local/bin/web server.js >>/var/log/web.log 2>&1 </dev/null & echo $! > /run/web.pid; } ;;
+  stop) [ -f /run/web.pid ] && kill $(cat /run/web.pid) 2>/dev/null; rm -f /run/web.pid; true ;;
   restart) "$0" stop; sleep 1; "$0" start ;;
   status) pidof web ;;
 esac
@@ -258,7 +258,7 @@ bounded() {
 }
 quiet_text() { grep -v '^\(Keeping\|Checking\|Undoing\|Putting\)[^:]*: [0-9]*s$' "$1"; }
 ENGLOG="$REPO/app/SiloUI/src-tauri/target/verification/silod-dev-p2b.log"
-engine_panic() { [ -f "$ENGLOG" ] && echo "engine stderr ($ENGLOG): $(tail -n 3 "$ENGLOG" | tr '\n' ' ')"; }
+engine_panic() { [ "${SHOW_ENGLOG:-0}" = 1 ] && [ -f "$ENGLOG" ] && echo "engine stderr ($ENGLOG): $(tail -n 3 "$ENGLOG" | tr '\n' ' ')"; }
 
 dodiff() { # computer label
   local c=$1 t0 t1 lines
@@ -325,12 +325,15 @@ t=$(now); bounded 90 "$EVID/undo.txt" "$SILO" undo $MAIN; rc=$?; UT=$(( $(now)-t
 quiet_text "$EVID/undo.txt" | tail -12; engine_panic
 if [ $rc = 0 ] && ! grep -q "Nothing to undo" "$EVID/undo.txt"; then
   check "(d) silo undo succeeded" $rc "rc=$rc, $UT s"
+  UST=$("$SILO" list | awk -v n=$MAIN '$1==n{print $2}'); echo "state of $MAIN right after undo: $UST"
+  if [ "$UST" != running ]; then echo "NOTE: undo leaves $MAIN $UST; starting it with silo start (restore does not restart the computer)"; "$SILO" start $MAIN >/dev/null 2>&1; fi
   ok=1; for i in $(seq 40); do stack_up $MAIN >/dev/null 2>&1 && { ok=0; break; }; sleep 3; done
   check "(d) server runs after undo" $ok "web pid $(webpid $MAIN)"
   COL2=$(x $MAIN "sudo -u postgres psql -Atc \"select count(*) from information_schema.columns where table_name='items' and column_name='priority'\" appdb")
   [ "$COL2" = 0 ]; check "(d) priority column is gone" $? "count=$COL2"
+  S_D=$(mainstate)
   x $MAIN 'cd /home/silo/app && npm test 2>&1 | grep -E "^# (pass|fail)"'; check "(d) npm test passes at the pre-keep state" $? ""
-  S_D=$(mainstate); [ "$S_A0" = "$S_D" ]; check "(d) main's fingerprint equals the pre-keep one" $? ""
+  [ "$S_A0" = "$S_D" ]; check "(d) main's fingerprint equals the pre-keep one" $? "$( [ "$S_A0" = "$S_D" ] && echo identical || diff <(echo "$S_A0") <(echo "$S_D") | tr '\n' ' ')"
 else
   check "(d) silo undo restores the pre-keep state" 1 "rc=$rc after $UT s (no successful keep to undo: $(head -c 200 "$EVID/undo.txt" | tr '\n' ' '))"
 fi

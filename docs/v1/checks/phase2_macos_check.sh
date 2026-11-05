@@ -15,6 +15,8 @@ say() { echo "[$(ts)] $*"; }
 check() { if [ "$2" = 0 ]; then echo "[$(ts)] PASS  $1  -- $3"; PASS=$((PASS+1)); else echo "[$(ts)] FAIL  $1  -- $3"; FAILN=$((FAILN+1)); fi; }
 nvms() { pgrep -f Virtualization.VirtualMachine | wc -l | tr -d ' '; }
 vms() { echo "macOS VMs running (pgrep Virtualization.VirtualMachine): $(nvms)"; }
+# watchdog: wd SECS cmd... kills the command (a silo client) after SECS and returns 124
+wd() { local n=$1; shift; "$@" & local p=$!; ( sleep $n; kill -INT $p 2>/dev/null; sleep 5; kill $p 2>/dev/null ) & local w=$!; wait $p; local r=$?; kill $w 2>/dev/null; wait $w 2>/dev/null; [ $r -ge 128 ] && echo "WATCHDOG: command ended by signal after <=${n}s (rc=$r)"; return $r; }
 x() { local c=$1; shift; "$SILO" exec "$c" --timeout 170 -- bash -c "$*"; }
 state() { "$SILO" status "$1" --json 2>/dev/null | python3 -c "import json,sys;print(json.load(sys.stdin)['state'])" 2>/dev/null; }
 stop_wait() { "$SILO" stop "$1" >/dev/null 2>&1; for i in $(seq 60); do [ "$(state "$1")" = stopped ] && return 0; sleep 3; done; return 1; }
@@ -119,7 +121,7 @@ PY
 echo "-- without baseline subtraction (--no-baseline), for churn size"
 "$SILO" diff $T1 --no-baseline --max-lines 200 2>&1 | tee "$PROJ/diff-nobase.txt" | head -60; echo "no-baseline lines: $(wc -l < "$PROJ/diff-nobase.txt" | tr -d ' ')"
 echo "-- diff --baseline on the used fork (expected to refuse: it has run past its idle time); main stopped, $T1 running"
-vms; t0=$(date +%s); "$SILO" diff $T1 --baseline > "$PROJ/diffb1.txt" 2> "$PROJ/diffb1.err"; echo "rc=$? in $(( $(date +%s) - t0 )) s"; cat "$PROJ/diffb1.txt"; echo "(stderr:)"; cut -c1-300 "$PROJ/diffb1.err" | tail -6; vms
+vms; t0=$(date +%s); wd 600 "$SILO" diff $T1 --baseline > "$PROJ/diffb1.txt" 2> "$PROJ/diffb1.err"; echo "rc=$? in $(( $(date +%s) - t0 )) s"; cat "$PROJ/diffb1.txt"; echo "(stderr:)"; cut -c1-300 "$PROJ/diffb1.err" | tail -6; vms
 echo "-- diff again after that (does it use a cached baseline?)"
 "$SILO" diff $T1 2>/dev/null | tee "$PROJ/diff2.txt"; echo "lines: $(wc -l < "$PROJ/diff2.txt" | tr -d ' ')"
 "$SILO" diff $T1 --json > "$PROJ/diff2.json" 2>/dev/null
@@ -135,7 +137,7 @@ x $MAIN '! test -e /opt/homebrew/bin/jq && ! test -d /opt/homebrew/Cellar/jq'; c
 cd "$PROJ"
 echo "-- fold --dry-run"; "$SILO" fold $T1 --into $MAIN --dry-run 2>&1 | head -30
 REVIEW=$("$SILO" diff $T1 --json 2>/dev/null | python3 -c "import json,sys;print(json.load(sys.stdin).get('reviewDigest',''))")
-t0=$(date +%s); "$SILO" fold $T1 --into $MAIN ${REVIEW:+--reviewed $REVIEW} > "$PROJ/fold.txt" 2>&1; frc=$?; head -40 "$PROJ/fold.txt"
+t0=$(date +%s); wd 600 "$SILO" fold $T1 --into $MAIN ${REVIEW:+--reviewed $REVIEW} > "$PROJ/fold.txt" 2>&1; frc=$?; head -40 "$PROJ/fold.txt"
 if [ $frc -eq 2 ] && grep -q "changed since it was reviewed" "$PROJ/fold.txt"; then
   check "fold --reviewed with a digest taken seconds earlier (live macOS fork)" 1 "refused: digest drifted"
   "$SILO" diff $T1 --json 2>/dev/null | python3 -c "import json,sys;print('digest now',json.load(sys.stdin).get('reviewDigest'))"; echo "was $REVIEW"
@@ -153,7 +155,7 @@ x $MAIN "launchctl print gui/\$(id -u)/$LABEL | grep -E 'SILO_P2M|pid ='"
 "$SILO" checkpoints $MAIN
 
 echo "== undo"
-t0=$(date +%s); "$SILO" undo $MAIN 2>&1 | head -30; urc=${PIPESTATUS[0]}; echo "undo rc=$urc in $(( $(date +%s) - t0 )) s"
+t0=$(date +%s); wd 600 "$SILO" undo $MAIN > "$PROJ/undo.txt" 2>&1; urc=$?; head -30 "$PROJ/undo.txt"; echo "undo rc=$urc in $(( $(date +%s) - t0 )) s"
 check "undo succeeded" $urc "rc=$urc"
 [ "$(state $MAIN)" = running ] || { echo "main state after undo: $(state $MAIN); starting"; start_wait $MAIN; }
 wait_http $MAIN 8080 60 >/dev/null; check "agent back on 8080 after undo" $? "$(x $MAIN 'curl -s -m 5 http://127.0.0.1:8080/ | head -1')"
@@ -166,7 +168,7 @@ stop_wait $MAIN; stop_wait $T1; vms
 [ -z "${P2M_QUICK:-}" ] || { echo "== summary PASS=$PASS FAIL=$FAILN (quick: baseline section skipped)"; exit 0; }
 echo "== diff --baseline on an idle fork ($T2), main and $T1 stopped"
 start_wait $T2; check "start $T2 (idle)" $? ""; say "idle 90 s"; sleep 90; vms
-t0=$(date +%s); "$SILO" diff $T2 --baseline > "$PROJ/diffb.txt" 2> "$PROJ/diffb.err"; brc=$?
+t0=$(date +%s); wd 600 "$SILO" diff $T2 --baseline > "$PROJ/diffb.txt" 2> "$PROJ/diffb.err"; brc=$?
 cat "$PROJ/diffb.txt"; echo "(stderr:)"; cut -c1-300 "$PROJ/diffb.err" | tail -5; echo "baseline rc=$brc in $(( $(date +%s) - t0 )) s"; vms
 "$SILO" diff $T2 --baseline --json 2>/dev/null | python3 -c "
 import json,sys

@@ -1,14 +1,14 @@
 {
-  "baseCapturedAt": "2026-11-05T14:00:50.87627Z",
+  "baseCapturedAt": "2026-11-05T15:00:21.576713Z",
   "baselineApplied": false,
   "baselineAvailable": false,
-  "capturedAt": "2026-11-05T14:01:52.13062Z",
+  "capturedAt": "2026-11-05T15:01:07.608475Z",
   "code": [
     {
       "branch": null,
       "commits": [
-        "06e624f99aa05be3bd936f41cf7807fbd099af70",
-        "bb6e6e0dcfc4a241f420ef72cc9d2f68e99a6f38"
+        "7866ecba9ecb4300478c30ef246e4256e4a14b22",
+        "86d5a3ce4dd7171eb500f8a9e51a5baa2fcc07b6"
       ],
       "dirty_delta": 0,
       "dirty_gone": [],
@@ -57,8 +57,8 @@
   "idle_noise": [],
   "ignored": {
     "paths": [
-      "/home/silo/.config/pulse/da87e7ab4c684d778fc8fac2e0bf9ced-default-sink",
-      "/home/silo/.config/pulse/da87e7ab4c684d778fc8fac2e0bf9ced-default-source"
+      "/home/silo/.config/pulse/bb2b6a0d70f94bf187b1a42f34b80e32-default-sink",
+      "/home/silo/.config/pulse/bb2b6a0d70f94bf187b1a42f34b80e32-default-source"
     ],
     "pruned_trees": [
       {
@@ -66,7 +66,7 @@
         "path": "/home/silo/.npm"
       },
       {
-        "delta": 6,
+        "delta": 5,
         "path": "/home/silo/app/.git"
       },
       {
@@ -105,9 +105,9 @@
     },
     {
       "after": {
-        "hash": "7528b8e9da830a5afed317a21c1c057625f8b68151b5c8c386f65bbe738ce9b9",
+        "hash": "ed8855df63d6dbe7bd953e16060420ca6c73a1042e4415e7de649d3515fdd4ad",
         "kind": "file",
-        "size": "1217"
+        "size": "1200"
       },
       "before": {
         "hash": "5a23c48b75995baab3f4c1ef1091e90897c54794bb583c8d4db7dff8c0a26a1f",
@@ -119,9 +119,9 @@
     },
     {
       "after": {
-        "hash": "679002bf2c14a382d668560ca8e1bd101d51916e63074c31db987ef93b5141e4",
+        "hash": "b5073819b4c120fbc064a328edc64f7d944415ff5452d29aea0e7aa30cacc725",
         "kind": "file",
-        "size": "955"
+        "size": "942"
       },
       "before": {
         "hash": "117cc561025244fcc6c4eda7d9bf384cb3bd9c0118b7193c5893763ceaf57d36",
@@ -137,7 +137,7 @@
     "/home/silo/app/server.js",
     "/home/silo/app/test/api.test.js"
   ],
-  "reviewDigest": "7bdb473cf913ec7c90279121837180018fa3d6e8c30d64439cbf24f462aea824",
+  "reviewDigest": "004d78177d4ca683d060be264be6589e741f4b5e93af9f276961a4f07cf923b1",
   "settings": {
     "cron": [],
     "files": [],
@@ -148,7 +148,7 @@
     {
       "bucket": "Code",
       "lines": [
-        "/home/silo/app: 06e624f..bb6e6e0"
+        "/home/silo/app: 7866ecb..86d5a3c"
       ]
     },
     {
@@ -165,5 +165,5 @@
       ]
     }
   ],
-  "text": "Code\n  /home/silo/app: 06e624f..bb6e6e0\nDatabase changed\n  postgres appdb: schema changed; data changed in public.items (1→1 rows), public.schema_migrations (1→2 rows)\nNot kept\n  listening: :3000 (web)\n  processes: web\nIgnored: 13 paths (caches, logs, build output)"
+  "text": "Code\n  /home/silo/app: 7866ecb..86d5a3c\nDatabase changed\n  postgres appdb: schema changed; data changed in public.items (1→1 rows), public.schema_migrations (1→2 rows)\nNot kept\n  listening: :3000 (web)\n  processes: web\nIgnored: 12 paths (caches, logs, build output)"
 }
