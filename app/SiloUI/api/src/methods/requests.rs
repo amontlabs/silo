@@ -28,6 +28,7 @@ use super::notifications;
 use super::operations;
 use super::preparation;
 use super::push;
+use super::recipes;
 use super::secrets;
 use super::settings;
 use super::ssh_access;
@@ -45,6 +46,16 @@ pub fn activity_setup_read(params: common::DeviceParams) -> Request<kind::Query>
 /// `changes.keep`
 pub fn changes_keep(params: keep::ChangesKeepParams) -> Request<kind::Job> {
     Request::new(MethodParams::ChangesKeep(params))
+}
+
+/// `changes.promote`
+pub fn changes_promote(params: keep::ChangesPromoteParams) -> Request<kind::Job> {
+    Request::new(MethodParams::ChangesPromote(params))
+}
+
+/// `changes.request`
+pub fn changes_request(params: keep::ChangesRequestParams) -> Request<kind::Command> {
+    Request::new(MethodParams::ChangesRequest(params))
 }
 
 /// `changes.undo`
@@ -750,6 +761,21 @@ pub fn push_start(params: push::PushStartParams) -> Request<kind::Job> {
 /// `push.status`
 pub fn push_status(params: push::PushStatusParams) -> Request<kind::Query> {
     Request::new(MethodParams::PushStatus(params))
+}
+
+/// `recipes.build`
+pub fn recipes_build(params: recipes::RecipeBuildParams) -> Request<kind::Job> {
+    Request::new(MethodParams::RecipesBuild(params))
+}
+
+/// `recipes.list`
+pub fn recipes_list(params: common::EmptyParams) -> Request<kind::Query> {
+    Request::new(MethodParams::RecipesList(params))
+}
+
+/// `recipes.remove`
+pub fn recipes_remove(params: recipes::RecipeRemoveParams) -> Request<kind::Command> {
+    Request::new(MethodParams::RecipesRemove(params))
 }
 
 /// `secrets.list`

@@ -305,7 +305,7 @@ fn validate(record: &Record) -> Result<(), RuntimeError> {
                 || !matches!(checkpoint.reason.as_str(), "manual" | "before-restore")
                 || !matches!(
                     checkpoint.kind.as_str(),
-                    "manual" | "automatic" | "before-keep"
+                    "manual" | "automatic" | "before-keep" | "warm"
                 )
         })
         || !unique_checkpoint_ids(&record.checkpoints)
@@ -1058,6 +1058,7 @@ pub fn create_for_job(
         CheckpointKind::Manual => "manual",
         CheckpointKind::Automatic => "automatic",
         CheckpointKind::BeforeKeep => "before-keep",
+        CheckpointKind::Warm => "warm",
         CheckpointKind::ForkPoint => {
             return Err("A fork point is made by Fork, not saved as a checkpoint.".into())
         }
@@ -1098,7 +1099,7 @@ pub fn reclaim_after_capture_for_job(
             "Removing an older before-keep checkpoint",
             before_keep_retention,
         ),
-        CheckpointKind::Manual | CheckpointKind::ForkPoint => return Ok(()),
+        CheckpointKind::Manual | CheckpointKind::Warm | CheckpointKind::ForkPoint => return Ok(()),
     };
     shutdown::ensure_accepting_operations()?;
     trim_kind_with(
@@ -1135,9 +1136,11 @@ fn api_checkpoint(checkpoint: Checkpoint) -> silo_api::methods::checkpoints::Che
             "automatic" => CheckpointKind::Automatic,
             "before-keep" => CheckpointKind::BeforeKeep,
             "fork-point" => CheckpointKind::ForkPoint,
+            "warm" => CheckpointKind::Warm,
             _ => CheckpointKind::Manual,
         },
         size_bytes: None,
+        generation: None,
     }
 }
 
@@ -3151,6 +3154,47 @@ pub(super) struct UnfinishedRestore {
     checkpoint_name: Option<String>,
     /// "capturing" before the recovery checkpoint was saved, then "secured".
     phase: String,
+}
+
+/// Whether the fork `id` has its scheduled jobs parked: `Some(disabled)` for a quiet fork,
+/// `None` for a computer that is not one.
+pub fn quiet_scheduled_jobs_disabled(
+    paths: &RuntimePaths,
+    id: &str,
+) -> Result<Option<bool>, String> {
+    let record = load(paths, id).map_err(|error| error.to_string())?;
+    Ok(record.quiet.map(|quiet| quiet.scheduled_jobs_disabled))
+}
+
+/// Gives `id` a quiet record, as a fork has.
+#[cfg(test)]
+pub(crate) fn quiet_for_test(paths: &RuntimePaths, id: &str, disabled: bool) {
+    let mut record = Record::default();
+    record.version = RECORD_VERSION;
+    record.quiet = Some(QuietRecord {
+        scheduled_jobs_disabled: disabled,
+        new_identity: true,
+        applied: true,
+        ..QuietRecord::default()
+    });
+    save(paths, id, &record).unwrap();
+}
+
+/// Records whether the fork's scheduled jobs are parked. Repeating it changes nothing.
+pub fn set_quiet_scheduled_jobs_disabled(
+    paths: &RuntimePaths,
+    id: &str,
+    disabled: bool,
+) -> Result<(), String> {
+    let mut record = load(paths, id).map_err(|error| error.to_string())?;
+    let Some(quiet) = record.quiet.as_mut() else {
+        return Ok(());
+    };
+    if quiet.scheduled_jobs_disabled == disabled {
+        return Ok(());
+    }
+    quiet.scheduled_jobs_disabled = disabled;
+    save(paths, id, &record).map_err(|error| error.to_string())
 }
 
 pub(super) fn view_quiet(record: &Record) -> Option<silo_api::methods::computers::QuietState> {

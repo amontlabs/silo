@@ -1483,6 +1483,21 @@ pub(crate) fn ensure_id_alias(
     })
 }
 
+/// Makes the saved entry of computer `id` connect to the runtime computer called `reach`,
+/// pinning that computer's host key. Does nothing when `id` has no saved entry. Repeating it
+/// changes nothing.
+pub(crate) fn repoint_id_alias(paths: &RuntimePaths, id: &str, reach: &str) -> Result<(), String> {
+    runtime::validate_name(reach).map_err(|error| error.to_string())?;
+    uuid::Uuid::parse_str(id).map_err(|_| "Invalid computer identity.")?;
+    let root = paths.home.join("ssh");
+    let config = root.join(format!("{id}.conf"));
+    if fs::symlink_metadata(&config).is_err() {
+        return Ok(());
+    }
+    let known_hosts = root.join(format!("{id}.known_hosts"));
+    prepare_configuration_as(paths, reach, &id_alias(id), &config, &known_hosts, false).map(|_| ())
+}
+
 /// Removes a computer's ID-keyed entry and its pinned host key. The shared `Include` goes
 /// only when no entry is left in the folder it names, and only if that file can be edited
 /// safely; a leftover line matches nothing and is harmless. Repeating it changes nothing.

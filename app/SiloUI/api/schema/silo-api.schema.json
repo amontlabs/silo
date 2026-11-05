@@ -133,6 +133,15 @@
         "freshness": {
           "$ref": "#/$defs/Freshness"
         },
+        "generation": {
+          "description": "Moves whenever the engine sees something that can change the computer.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "githubRepositories": {
           "items": {
             "type": "string"
@@ -768,6 +777,103 @@
       ],
       "type": "object"
     },
+    "ChangesPromoteParams": {
+      "properties": {
+        "dryRun": {
+          "description": "Check and report what a promote would do, changing nothing.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "forkId": {
+          "description": "The fork that replaces main.",
+          "type": "string"
+        },
+        "targetId": {
+          "description": "The computer it replaces; defaults to the one the fork was made from.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "forkId"
+      ],
+      "type": "object"
+    },
+    "ChangesPromoteResult": {
+      "description": "The final result of `changes.promote`. `status` is `promoted`, `dry-run` or `refused`; a\nrefused promote changed nothing.",
+      "properties": {
+        "refusal": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PromoteRefusal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "report": {
+          "$ref": "#/$defs/PromoteReport"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "status",
+        "report"
+      ],
+      "type": "object"
+    },
+    "ChangesRequestParams": {
+      "description": "Ask for a fork to be reviewed without keeping it: `changes.request` stores a\n[`FoldRequest`] and changes nothing else.",
+      "properties": {
+        "forkId": {
+          "description": "The fork to be reviewed.",
+          "type": "string"
+        },
+        "reviewDigest": {
+          "description": "The `reviewDigest` of the `changes.diff` the request was made from.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "summary": {
+          "description": "A short text for the reviewer, usually the readable diff.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "targetId": {
+          "description": "The computer it would be kept into; defaults to the one the fork was made from.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "forkId"
+      ],
+      "type": "object"
+    },
+    "ChangesRequestResult": {
+      "properties": {
+        "request": {
+          "$ref": "#/$defs/FoldRequest"
+        }
+      },
+      "required": [
+        "request"
+      ],
+      "type": "object"
+    },
     "ChangesRole": {
       "description": "Which stored manifest a capture replaces.",
       "oneOf": [
@@ -862,6 +968,15 @@
       "properties": {
         "createdAt": {
           "type": "string"
+        },
+        "generation": {
+          "description": "A warm checkpoint: the generation its computer had when it was taken, when the engine\nrecorded one. A fork reuses the checkpoint only while the computer's generation is\nstill this one.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "id": {
           "type": "string"
@@ -970,6 +1085,13 @@
           ],
           "description": "What to quiet in the fork before it runs anything."
         },
+        "recipeHash": {
+          "description": "The content hash of the recipe this fork was built from. The fork's idle baseline\nis cached under it, so every fork of one recipe shares a baseline.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "secrets": {
           "description": "Names of Silo-managed secrets the fork may use. The special name `github` copies\nGitHub access, read-only. Nothing is copied unless named.",
           "items": {
@@ -989,7 +1111,8 @@
         "manual",
         "automatic",
         "before-keep",
-        "fork-point"
+        "fork-point",
+        "warm"
       ],
       "type": "string"
     },
@@ -4177,6 +4300,53 @@
       ],
       "type": "object"
     },
+    "FoldRequest": {
+      "description": "A recorded request to review a fork. The engine keeps it until it is answered.",
+      "properties": {
+        "createdAt": {
+          "type": "string"
+        },
+        "forkId": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "reviewDigest": {
+          "description": "The digest of the changes the requester reviewed; empty when none was given.",
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/FoldRequestStatus"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "target": {
+          "description": "The computer the fork would be kept into.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "forkId",
+        "target",
+        "createdAt",
+        "reviewDigest",
+        "summary",
+        "status"
+      ],
+      "type": "object"
+    },
+    "FoldRequestStatus": {
+      "oneOf": [
+        {
+          "const": "open",
+          "description": "Waiting for a review.",
+          "type": "string"
+        }
+      ]
+    },
     "Freshness": {
       "enum": [
         "fresh",
@@ -6086,8 +6256,14 @@
         "macos_computers": {
           "$ref": "#/$defs/MacosComputersState"
         },
+        "promote": {
+          "$ref": "#/$defs/ChangesPromoteResult"
+        },
         "push": {
           "$ref": "#/$defs/PushOperation"
+        },
+        "recipe_build": {
+          "$ref": "#/$defs/RecipeBuildResult"
         },
         "storage": {
           "$ref": "#/$defs/StorageState"
@@ -6107,6 +6283,8 @@
         "macos_computers",
         "checkpoint_created",
         "keep",
+        "recipe_build",
+        "promote",
         "undo",
         "desktop",
         "backup",
@@ -6588,6 +6766,15 @@
         "displayOpen": {
           "type": "boolean"
         },
+        "generation": {
+          "description": "Moves whenever the engine sees something that can change the computer.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "id": {
           "type": "string"
         },
@@ -6999,6 +7186,8 @@
       "enum": [
         "activity.setup.read",
         "changes.keep",
+        "changes.promote",
+        "changes.request",
         "changes.undo",
         "changes.baseline",
         "changes.capture",
@@ -7130,6 +7319,9 @@
         "push.repositories",
         "push.start",
         "push.status",
+        "recipes.build",
+        "recipes.list",
+        "recipes.remove",
         "secrets.list",
         "secrets.remove",
         "secrets.retry",
@@ -7177,6 +7369,38 @@
             },
             "params": {
               "$ref": "#/$defs/ChangesKeepParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "changes.promote",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/ChangesPromoteParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "changes.request",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/ChangesRequestParams"
             }
           },
           "required": [
@@ -9284,6 +9508,54 @@
         {
           "properties": {
             "method": {
+              "const": "recipes.build",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/RecipeBuildParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "recipes.list",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/EmptyParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "recipes.remove",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/RecipeRemoveParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
               "const": "secrets.list",
               "type": "string"
             },
@@ -9600,6 +9872,38 @@
             },
             "result": {
               "$ref": "#/$defs/JobStartResult"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "changes.promote",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/JobStartResult"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "changes.request",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/ChangesRequestResult"
             }
           },
           "required": [
@@ -11738,6 +12042,54 @@
         {
           "properties": {
             "method": {
+              "const": "recipes.build",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/JobStartResult"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "recipes.list",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/RecipesListResult"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "recipes.remove",
+              "type": "string"
+            },
+            "result": {
+              "type": "null"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
               "const": "secrets.list",
               "type": "string"
             },
@@ -12876,6 +13228,63 @@
       ],
       "type": "string"
     },
+    "PromoteRefusal": {
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "reason": {
+          "description": "`busy`, `os` or `unsupported`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "reason",
+        "message"
+      ],
+      "type": "object"
+    },
+    "PromoteReport": {
+      "properties": {
+        "archive": {
+          "description": "The name the old main has afterwards.",
+          "type": "string"
+        },
+        "checkpoint": {
+          "description": "The before-promote checkpoint of the old main.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "fork": {
+          "type": "string"
+        },
+        "notes": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "steps": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "target": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "fork",
+        "target",
+        "archive",
+        "steps",
+        "notes"
+      ],
+      "type": "object"
+    },
     "ProtocolRange": {
       "description": "The inclusive protocol range a client supports.",
       "properties": {
@@ -13242,6 +13651,250 @@
         "stop",
         "scrub",
         "secrets"
+      ],
+      "type": "object"
+    },
+    "RecipeBuildParams": {
+      "properties": {
+        "force": {
+          "description": "Build again even when the cache holds this spec.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "name": {
+          "description": "The recipe's name (`linux-dev`, or a file under `.silo/recipes/`).",
+          "type": "string"
+        },
+        "spec": {
+          "$ref": "#/$defs/RecipeSpec"
+        }
+      },
+      "required": [
+        "name",
+        "spec"
+      ],
+      "type": "object"
+    },
+    "RecipeBuildResult": {
+      "description": "The final result of `recipes.build`.",
+      "properties": {
+        "built": {
+          "description": "False when the cache already held this spec on this image.",
+          "type": "boolean"
+        },
+        "recipe": {
+          "$ref": "#/$defs/RecipeEntry"
+        }
+      },
+      "required": [
+        "recipe",
+        "built"
+      ],
+      "type": "object"
+    },
+    "RecipeEntry": {
+      "description": "A built recipe: the hidden computer and the checkpoint forks start from.",
+      "properties": {
+        "builtAt": {
+          "type": "string"
+        },
+        "checkpointId": {
+          "type": "string"
+        },
+        "computerId": {
+          "type": "string"
+        },
+        "computerName": {
+          "type": "string"
+        },
+        "hash": {
+          "description": "Content hash of the normalized spec.",
+          "type": "string"
+        },
+        "imageVersion": {
+          "description": "The guest image version it was built on (`unknown` when none is pinned).",
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "os": {
+          "$ref": "#/$defs/RecipeOs"
+        },
+        "ports": {
+          "items": {
+            "format": "uint16",
+            "maximum": 65535,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "name",
+        "hash",
+        "imageVersion",
+        "os",
+        "computerId",
+        "computerName",
+        "checkpointId",
+        "builtAt"
+      ],
+      "type": "object"
+    },
+    "RecipeOs": {
+      "enum": [
+        "linux",
+        "macos"
+      ],
+      "type": "string"
+    },
+    "RecipePackages": {
+      "description": "Packages per manager, installed in this order: apt, brew, pip, pipx, npm, cargo.",
+      "properties": {
+        "apt": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "brew": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "cargo": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "npm": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "pip": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "pipx": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "RecipeRemoveParams": {
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "RecipeService": {
+      "description": "A command started when the computer boots.",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "run": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "run"
+      ],
+      "type": "object"
+    },
+    "RecipeSpec": {
+      "description": "Everything that decides what a built recipe contains.",
+      "properties": {
+        "cpus": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "diskGib": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "memoryGib": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "os": {
+          "$ref": "#/$defs/RecipeOs"
+        },
+        "packages": {
+          "$ref": "#/$defs/RecipePackages",
+          "default": {}
+        },
+        "ports": {
+          "description": "Ports a fork publishes.",
+          "items": {
+            "format": "uint16",
+            "maximum": 65535,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "services": {
+          "items": {
+            "$ref": "#/$defs/RecipeService"
+          },
+          "type": "array"
+        },
+        "setup": {
+          "description": "Commands run once, as root on Linux and as the account on macOS.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "os"
+      ],
+      "type": "object"
+    },
+    "RecipesListResult": {
+      "properties": {
+        "recipes": {
+          "items": {
+            "$ref": "#/$defs/RecipeEntry"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "recipes"
       ],
       "type": "object"
     },
@@ -14625,6 +15278,10 @@
       "resultType": "ChangesKeepResult"
     },
     {
+      "method": "changes.promote",
+      "resultType": "ChangesPromoteResult"
+    },
+    {
       "method": "changes.undo",
       "resultType": "ChangesUndoResult"
     },
@@ -14651,6 +15308,10 @@
     {
       "method": "computerUse.setup",
       "resultType": "DesktopStatus"
+    },
+    {
+      "method": "recipes.build",
+      "resultType": "RecipeBuildResult"
     },
     {
       "method": "computers.configuration.change",
@@ -14757,6 +15418,18 @@
       "name": "changes.keep",
       "paramsType": "keep::ChangesKeepParams",
       "resultType": "common::JobStartResult"
+    },
+    {
+      "kind": "job",
+      "name": "changes.promote",
+      "paramsType": "keep::ChangesPromoteParams",
+      "resultType": "common::JobStartResult"
+    },
+    {
+      "kind": "command",
+      "name": "changes.request",
+      "paramsType": "keep::ChangesRequestParams",
+      "resultType": "keep::ChangesRequestResult"
     },
     {
       "kind": "job",
@@ -15543,6 +16216,24 @@
       "name": "push.status",
       "paramsType": "push::PushStatusParams",
       "resultType": "Option<push::PushOperation>"
+    },
+    {
+      "kind": "job",
+      "name": "recipes.build",
+      "paramsType": "recipes::RecipeBuildParams",
+      "resultType": "common::JobStartResult"
+    },
+    {
+      "kind": "query",
+      "name": "recipes.list",
+      "paramsType": "common::EmptyParams",
+      "resultType": "recipes::RecipesListResult"
+    },
+    {
+      "kind": "command",
+      "name": "recipes.remove",
+      "paramsType": "recipes::RecipeRemoveParams",
+      "resultType": "()"
     },
     {
       "kind": "query",

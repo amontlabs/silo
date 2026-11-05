@@ -10,7 +10,7 @@ use sha2::{Digest, Sha256};
 use super::{
     cron::{self, Merge},
     env::{KeepEnv, Live, ManifestStore, Os, RunAs},
-    plan::{self, Base, Conflict, Decision, FileAction, FileOp, Plan, PkgOp},
+    plan::{self, Base, Conflict, Decision, FileAction, FileOp, PkgOp, Plan},
     scripts, Refusal, Report, Request,
 };
 use crate::changes::{
@@ -634,13 +634,11 @@ pub fn prepare(
             "Database changed ({}) and no migration covers it. {target} was not changed.",
             plan.databases.join(", ")
         );
-        return Ok(refuse(
-            report,
-            "database",
-            message,
-            Vec::new(),
-            "A keep carries a database change only when the recipe has a migrate: step and the fork changed migration files. Otherwise use \"Make this main\": the fork becomes main with its database.",
-        ));
+        let hint = format!(
+            "A keep carries a database change only when the recipe has a migrate: step and the fork changed migration files. Otherwise use \"Make this main\": run `silo fold {} --promote` and the fork becomes main with its database.",
+            report.fork
+        );
+        return Ok(refuse(report, "database", message, Vec::new(), &hint));
     }
     Ok(Prepared::Ready(ready(plan, cron_texts, bundles, report)))
 }

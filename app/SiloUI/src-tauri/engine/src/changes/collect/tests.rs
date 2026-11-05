@@ -612,7 +612,14 @@ fn postgres_names_cannot_become_options_and_the_dump_key_is_not_hashed() {
         ),
     );
     let digest = |key: &str| {
-        let out = run_collector_with(&home, &bin, &[("KEY", key), ("SILO_SKIP", "packages services procs sqlite")]);
+        let out = run_collector_with(
+            &home,
+            &bin,
+            &[
+                ("KEY", key),
+                ("SILO_SKIP", "packages services procs sqlite"),
+            ],
+        );
         let lines: Vec<&str> = out
             .lines()
             .filter(|l| l.starts_with("DB\tpostgres\t"))
@@ -758,7 +765,11 @@ fn postgres_that_does_not_answer_is_recorded_not_started_or_hidden() {
         ),
     );
     write_executable(&bin.join("pg_dump"), "#!/bin/sh\nexit 1\n");
-    let out = run_collector_with(&home, &bin, &[("SILO_SKIP", "packages services procs sqlite")]);
+    let out = run_collector_with(
+        &home,
+        &bin,
+        &[("SILO_SKIP", "packages services procs sqlite")],
+    );
     assert_eq!(
         records(&out, "DBU"),
         ["DBU\tpostgres\tthe server did not answer"],

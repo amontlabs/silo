@@ -13,7 +13,8 @@ use silo_api::methods::{
         MacosComputerCreateRequest,
     },
     guest::GuestExecParams,
-    keep::{ChangesKeepParams, ChangesUndoParams, KeepHooks},
+    keep::{ChangesKeepParams, ChangesPromoteParams, ChangesUndoParams, KeepHooks},
+    recipes::{RecipeBuildParams, RecipeRemoveParams},
     requests,
     secrets::{SecretSaveAction, SecretSaveRequest, SecretsSaveParams},
 };
@@ -30,6 +31,52 @@ pub const MAIN: &str = "main";
 pub async fn list(engine: &Engine) -> Result<Value, CliError> {
     let computers = engine.computers().await?;
     Ok(json!({ "computers": computers.iter().map(Computer::to_json).collect::<Vec<_>>() }))
+}
+
+/// `silo list --all`: the throwaway baseline and recipe-builder computers too.
+pub async fn list_all(engine: &Engine) -> Result<Value, CliError> {
+    let computers = engine.all_computers().await?;
+    Ok(json!({ "computers": computers.iter().map(Computer::to_json).collect::<Vec<_>>() }))
+}
+
+/// How long a throwaway baseline computer may exist before it counts as left behind.
+pub const THROWAWAY_MAX_AGE_SECONDS: i64 = 3600;
+
+/// `silo-baseline-<unix seconds in hex>-<short id>`: the time lets a later run tell a copy
+/// that is being measured from one left behind.
+pub fn baseline_name(now: i64) -> String {
+    format!("{BASELINE_PREFIX}{now:x}-{}", short_id())
+}
+
+/// The baseline computers that nothing is using: stopped or failed, and not made within
+/// `THROWAWAY_MAX_AGE_SECONDS`. A name with no time in it (made by an earlier version) counts
+/// as old.
+pub fn stale_throwaways(all: &[Computer], now: i64) -> Vec<&Computer> {
+    all.iter()
+        .filter(|computer| computer.name.starts_with(BASELINE_PREFIX))
+        .filter(|computer| matches!(computer.state.as_str(), "stopped" | "failed"))
+        .filter(|computer| {
+            let rest = &computer.name[BASELINE_PREFIX.len()..];
+            let made = rest
+                .split_once('-')
+                .and_then(|(stamp, _)| i64::from_str_radix(stamp, 16).ok());
+            made.map_or(true, |made| now - made >= THROWAWAY_MAX_AGE_SECONDS)
+        })
+        .collect()
+}
+
+/// Drops the stale throwaways. Best effort; returns the names dropped.
+pub async fn sweep_throwaways(engine: &Engine, progress: Progress<'_>) -> Vec<String> {
+    let Ok(all) = engine.all_computers().await else {
+        return Vec::new();
+    };
+    let mut dropped = Vec::new();
+    for stale in stale_throwaways(&all, crate::clock::now_unix()) {
+        if remove_computer(engine, stale, progress).await.is_ok() {
+            dropped.push(stale.name.clone());
+        }
+    }
+    dropped
 }
 
 /// One computer with its checkpoints, its recorded quiet state, the Silo secrets assigned to
@@ -409,7 +456,7 @@ pub fn default_fork_name(source: &str, short_id: &str) -> String {
     format!("{source}-{short_id}")
 }
 
-fn short_id() -> String {
+pub(crate) fn short_id() -> String {
     uuid::Uuid::new_v4().simple().to_string()[..6].to_owned()
 }
 
@@ -420,6 +467,8 @@ pub struct ForkArgs {
     pub checkpoint: Option<String>,
     pub secrets: Vec<String>,
     pub recipe: Option<Recipe>,
+    /// Fork from this recipe's cached build instead of `source`.
+    pub recipe_name: Option<String>,
 }
 
 pub async fn fork(
@@ -429,18 +478,48 @@ pub async fn fork(
     progress: Progress<'_>,
 ) -> Result<Value, CliError> {
     Settings::check_fork_secrets(settings, &args.secrets)?;
-    let source = engine.computer(&args.source).await?;
-    let name = args
-        .name
-        .clone()
-        .unwrap_or_else(|| default_fork_name(&source.name, &short_id()));
+    sweep_throwaways(engine, progress).await;
+    let mut recipe_hash = None;
+    let mut checkpoint = args.checkpoint.clone();
+    let mut warm_reused = false;
+    let source = match &args.recipe_name {
+        Some(recipe_name) => {
+            Settings::check_recipe(settings, recipe_name)?;
+            let recipe = args.recipe.as_ref().ok_or_else(|| {
+                CliError::new(format!("The recipe {recipe_name} was not loaded."))
+            })?;
+            let built = build_recipe(engine, recipe_name, recipe, false, progress).await?;
+            let entry = &built["recipe"];
+            let text = |key: &str| entry[key].as_str().unwrap_or_default().to_owned();
+            recipe_hash = Some(text("hash"));
+            checkpoint = Some(text("checkpointId"));
+            let all = engine.all_computers().await?;
+            let mut builder = find(&all, &text("computerId"))?.clone();
+            builder.name = recipe_name.clone();
+            builder
+        }
+        None => engine.computer(&args.source).await?,
+    };
+    let name = match (&args.name, &args.recipe_name) {
+        (Some(name), _) => name.clone(),
+        (None, _) => default_fork_name(&source.name, &short_id()),
+    };
+    let started = crate::clock::now_unix();
+    if checkpoint.is_none() {
+        let max_age = Settings::warm_max_age_secs(settings);
+        checkpoint = fresh_warm(&source, started, max_age)
+            .and_then(|warm| warm["id"].as_str().map(str::to_owned));
+        warm_reused = checkpoint.is_some();
+    }
+    let known_before: Vec<Value> = source.checkpoints.clone();
     let mut params = CheckpointForkParams {
         computer_id: source.id.clone(),
         device_id: None,
-        checkpoint_id: args.checkpoint.clone(),
+        checkpoint_id: checkpoint.clone(),
         new_name: name.clone(),
         secrets: Vec::new(),
         quiet: None,
+        recipe_hash,
     };
     apply_fork_extras(
         &mut params,
@@ -456,7 +535,89 @@ pub async fn fork(
     let forked = engine.computer(&name).await?;
     let mut fork = forked.to_json();
     fork["source"] = json!(source.name);
+    // The fork reaches the same ports its source publishes (a recipe fork, those the recipe
+    // names), each on a host port of its own.
+    let published = match (&args.recipe_name, &args.recipe) {
+        (Some(_), Some(recipe)) => {
+            crate::access::publish_recipe_ports(engine, &forked, &recipe.ports).await
+        }
+        (Some(_), None) => Ok(Vec::new()),
+        (None, _) => crate::access::inherit_ports(engine, &source, &forked).await,
+    };
+    match published {
+        Ok(ports) => fork["ports"] = json!(ports),
+        Err(error) => fork["portsError"] = json!(error.message),
+    }
+    let used = match &checkpoint {
+        Some(id) => known_before
+            .iter()
+            .find(|cp| cp["id"] == id.as_str())
+            .cloned(),
+        None => new_checkpoint(engine, &source.id, &known_before).await,
+    };
+    let (at, reused) = match &used {
+        Some(cp) => (
+            cp["createdAt"]
+                .as_str()
+                .and_then(crate::clock::parse_rfc3339),
+            checkpoint.is_some(),
+        ),
+        None => (None, false),
+    };
+    // A checkpoint taken for this fork is as of the moment the fork began.
+    let at = at.unwrap_or(started);
+    fork["checkpoint"] = json!({
+        "id": used.as_ref().map(|cp| cp["id"].clone()),
+        "name": used.as_ref().map(|cp| cp["name"].clone()),
+        "kind": used.as_ref().map(|cp| cp["kind"].clone()),
+        "createdAt": crate::clock::format_rfc3339_utc(at),
+        "ageSeconds": (started - at).max(0),
+        "reused": reused,
+        "unchanged": warm_reused,
+    });
+    fork["forkedAsOf"] = json!(crate::clock::local_clock(at));
     Ok(fork)
+}
+
+/// The newest checkpoint of `computer_id` that was not in `before`: the one a fork without a
+/// named checkpoint took.
+async fn new_checkpoint(engine: &Engine, computer_id: &str, before: &[Value]) -> Option<Value> {
+    let all = engine.all_computers().await.ok()?;
+    let now = all.iter().find(|c| c.id == computer_id)?;
+    now.checkpoints
+        .iter()
+        .filter(|cp| !before.iter().any(|old| old["id"] == cp["id"]))
+        .max_by_key(|cp| {
+            cp["createdAt"]
+                .as_str()
+                .and_then(crate::clock::parse_rfc3339)
+                .unwrap_or(0)
+        })
+        .cloned()
+}
+
+/// The newest warm checkpoint of `source`, when it was taken no more than `max_age` seconds
+/// before `now`, `source` runs, and the engine can tell `source` is unchanged since: the
+/// checkpoint records the generation `source` has now. A fork with no named checkpoint starts
+/// from it; otherwise the engine takes a new one. A change made over a plain `ssh` session
+/// that does not go through the engine is not seen, which is what the age limit is for.
+pub fn fresh_warm(source: &Computer, now: i64, max_age: u64) -> Option<&Value> {
+    let generation = source.generation?;
+    if source.state != "running" {
+        return None;
+    }
+    source
+        .checkpoints
+        .iter()
+        .filter(|cp| cp["kind"] == "warm")
+        .filter(|cp| cp["generation"].as_u64() == Some(generation))
+        .filter_map(|cp| {
+            let at = crate::clock::parse_rfc3339(cp["createdAt"].as_str()?)?;
+            Some((at, cp))
+        })
+        .max_by_key(|(at, _)| *at)
+        .filter(|(at, _)| now - at <= max_age as i64)
+        .map(|(_, cp)| cp)
 }
 
 pub struct DiffArgs {
@@ -470,6 +631,10 @@ pub struct DiffArgs {
 
 /// Name prefix of the throwaway computers that measure baselines. `silo list` leaves them out.
 pub const BASELINE_PREFIX: &str = "silo-baseline-";
+/// What a baseline source starts with when the fork came from a recipe: `recipe:<hash>`.
+const RECIPE_KEY_PREFIX: &str = "recipe:";
+/// Name prefix of the hidden computers that recipes are built in.
+pub const BUILDER_PREFIX: &str = "silo-build-";
 /// The longest a throwaway fork is left idle, however long the real fork has run.
 pub const BASELINE_CAP_SECONDS: u64 = 600;
 
@@ -577,21 +742,59 @@ async fn measure_baseline(
             ));
         }
     }
-    let owner = all
-        .iter()
-        .find(|c| c.checkpoints.iter().any(|cp| cp["id"] == source))
-        .ok_or_else(|| {
-            CliError::new(
-                "No baseline: the checkpoint this computer was forked from no longer exists.",
-            )
-        })?;
+    // A fork made from a recipe is keyed by the recipe; the copy starts from the recipe's
+    // cached checkpoint.
+    let (owner, checkpoint, recipe_hash) = match source.strip_prefix(RECIPE_KEY_PREFIX) {
+        Some(hash) => {
+            let listed = engine
+                .call(requests::recipes_list(silo_api::methods::EmptyParams {}))
+                .await?;
+            let entry = listed["recipes"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .find(|entry| entry["hash"] == hash)
+                .ok_or_else(|| {
+                    CliError::new(
+                        "No baseline: the recipe this computer was built from is no longer built.",
+                    )
+                })?;
+            let owner = all
+                .iter()
+                .find(|c| entry["computerId"] == c.id.as_str())
+                .ok_or_else(|| {
+                    CliError::new("No baseline: the builder of this computer's recipe is gone.")
+                })?;
+            let checkpoint = entry["checkpointId"]
+                .as_str()
+                .unwrap_or_default()
+                .to_owned();
+            (owner, checkpoint, Some(hash.to_owned()))
+        }
+        None => {
+            let owner = all
+                .iter()
+                .find(|c| c.checkpoints.iter().any(|cp| cp["id"] == source))
+                .ok_or_else(|| {
+                    CliError::new(
+                        "No baseline: the checkpoint this computer was forked from no longer exists.",
+                    )
+                })?;
+            (owner, source.to_owned(), None)
+        }
+    };
     // Throwaways left by an interrupted run are dropped first.
-    for stale in all.iter().filter(|c| c.name.starts_with(BASELINE_PREFIX)) {
+    for stale in stale_throwaways(&all, crate::clock::now_unix()) {
         let _ = remove_computer(engine, stale, progress).await;
     }
-    let name = format!("{BASELINE_PREFIX}{}", short_id());
+    let name = baseline_name(crate::clock::now_unix());
+    let copy = BaselineCopy {
+        owner,
+        checkpoint: &checkpoint,
+        recipe_hash: recipe_hash.as_deref(),
+    };
     let outcome =
-        measure_on_throwaway(engine, target, owner, source, &name, seconds, progress).await;
+        measure_on_throwaway(engine, target, &copy, source, &name, seconds, progress).await;
     let cleanup = async {
         let all = engine.all_computers().await?;
         match all.iter().find(|c| c.name == name) {
@@ -610,10 +813,19 @@ async fn measure_baseline(
     }
 }
 
+/// What the idle copy that measures a baseline is made from.
+struct BaselineCopy<'a> {
+    /// The computer that holds the checkpoint.
+    owner: &'a Computer,
+    checkpoint: &'a str,
+    /// Set when the baseline is keyed by a recipe.
+    recipe_hash: Option<&'a str>,
+}
+
 async fn measure_on_throwaway(
     engine: &Engine,
     target: &Computer,
-    owner: &Computer,
+    copy: &BaselineCopy<'_>,
     source: &str,
     name: &str,
     seconds: u64,
@@ -637,12 +849,13 @@ async fn measure_on_throwaway(
         quiet: (!stop.is_empty() || !scrub.is_empty()).then_some(QuietSpec { stop, scrub }),
     };
     let mut params = CheckpointForkParams {
-        computer_id: owner.id.clone(),
+        computer_id: copy.owner.id.clone(),
         device_id: None,
-        checkpoint_id: Some(source.to_owned()),
+        checkpoint_id: Some(copy.checkpoint.to_owned()),
         new_name: name.to_owned(),
         secrets: Vec::new(),
         quiet: None,
+        recipe_hash: copy.recipe_hash.map(str::to_owned),
     };
     apply_fork_extras(&mut params, &extras)?;
     engine
@@ -756,7 +969,9 @@ pub async fn drop_computer(
     progress: Progress<'_>,
 ) -> Result<Value, CliError> {
     check_drop(name, force)?;
-    let computer = engine.computer(name).await?;
+    // Hidden throwaways (baselines, recipe builders) can be dropped by name or id.
+    let all = engine.all_computers().await?;
+    let computer = find(&all, name)?.clone();
     check_drop(&computer.name, force)?;
     let expected = match &computer.configuration {
         Some(configuration) => Some(serde_json::from_value(configuration.clone())?),
@@ -923,11 +1138,12 @@ pub fn resolve_recipe(
 
 pub fn parse_checkpoint_kind(text: &str) -> Result<CheckpointKind, CliError> {
     match text {
+        "warm" => Ok(CheckpointKind::Warm),
         "manual" => Ok(CheckpointKind::Manual),
         "automatic" => Ok(CheckpointKind::Automatic),
         "before-keep" => Ok(CheckpointKind::BeforeKeep),
         other => Err(CliError::new(format!(
-            "Unknown checkpoint kind {other}; use manual, automatic or before-keep."
+            "Unknown checkpoint kind {other}; use manual, automatic, before-keep or warm."
         ))),
     }
 }
@@ -1021,6 +1237,40 @@ pub async fn fold(
         .await
 }
 
+/// Makes a fork main: it replaces `into` (default: the computer it was made from). A refused
+/// promote is a result (`status: "refused"`); nothing was changed.
+pub async fn promote(
+    engine: &Engine,
+    fork: &str,
+    into: Option<&str>,
+    dry_run: bool,
+    progress: Progress<'_>,
+) -> Result<Value, CliError> {
+    let fork = engine.computer(fork).await?;
+    if let Some(record) = crate::folder::record_for(engine, &fork.id) {
+        return Err(CliError::new(format!(
+            "{} was made from {}; it cannot become main. Fold it into that folder instead.",
+            fork.name, record.path
+        )));
+    }
+    let target_id = match into {
+        Some(name) => Some(engine.computer(name).await?.id),
+        None => None,
+    };
+    let label = if dry_run { "Checking" } else { "Promoting" };
+    engine
+        .run_job(
+            &format!("{label} {}", fork.name),
+            requests::changes_promote(ChangesPromoteParams {
+                fork_id: fork.id,
+                target_id,
+                dry_run: dry_run.then_some(true),
+            }),
+            progress,
+        )
+        .await
+}
+
 /// Puts a computer back to before its latest keep.
 pub async fn undo(
     engine: &Engine,
@@ -1030,7 +1280,7 @@ pub async fn undo(
     let target = engine.computer(computer).await?;
     engine
         .run_job(
-            &format!("Undoing the last keep of {}", target.name),
+            &format!("Undoing the latest keep or promote of {}", target.name),
             requests::changes_undo(ChangesUndoParams {
                 computer_id: target.id,
             }),
@@ -1093,6 +1343,7 @@ mod tests {
             new_name: "n".into(),
             secrets: Vec::new(),
             quiet: None,
+            recipe_hash: None,
         };
         apply_fork_extras(&mut params, &ForkExtras::default()).unwrap();
         assert!(params.secrets.is_empty());
@@ -1145,4 +1396,156 @@ mod tests {
         );
         assert!(parse_checkpoint_kind("later").is_err());
     }
+}
+
+// MARK: Recipes
+
+/// Builds a recipe, or returns its cached build. The result carries `recipe` (the cache entry)
+/// and `built` (false for a cache hit).
+pub async fn build_recipe(
+    engine: &Engine,
+    name: &str,
+    recipe: &Recipe,
+    force: bool,
+    progress: Progress<'_>,
+) -> Result<Value, CliError> {
+    engine
+        .run_job(
+            &format!("Building the recipe {name}"),
+            requests::recipes_build(RecipeBuildParams {
+                name: name.to_owned(),
+                spec: recipe.spec(),
+                force: force.then_some(true),
+            }),
+            progress,
+        )
+        .await
+}
+
+/// Every recipe the project and the CLI offer, with whether the engine holds a build of it.
+pub async fn recipe_list(
+    engine: &Engine,
+    project: &crate::config::Project,
+) -> Result<Value, CliError> {
+    let built = engine
+        .call(requests::recipes_list(silo_api::methods::EmptyParams {}))
+        .await?;
+    let built = built["recipes"].as_array().cloned().unwrap_or_default();
+    let recipes: Vec<Value> = project
+        .recipe_names()
+        .into_iter()
+        .map(|(name, origin)| {
+            let entry = built.iter().find(|entry| entry["name"] == name.as_str());
+            json!({
+                "name": name,
+                "origin": origin,
+                "built": entry.is_some(),
+                "builtAt": entry.map(|entry| entry["builtAt"].clone()),
+                "imageVersion": entry.map(|entry| entry["imageVersion"].clone()),
+            })
+        })
+        .collect();
+    Ok(json!({ "recipes": recipes }))
+}
+
+pub async fn recipe_remove(engine: &Engine, name: &str) -> Result<Value, CliError> {
+    engine
+        .call(requests::recipes_remove(RecipeRemoveParams {
+            name: name.to_owned(),
+        }))
+        .await?;
+    Ok(json!({ "removed": name }))
+}
+
+// MARK: Up
+
+const WARM_NAME: &str = "silo-warm";
+
+/// Makes sure the engine answers, `main` exists (made from the recipe) and runs, and keeps a
+/// warm checkpoint of it. The previous warm checkpoint is replaced only after the new one has
+/// been saved; a fork that names no checkpoint uses the warm one while it is young enough
+/// (`warm_max_age`, five minutes by default; see [`fresh_warm`]).
+pub async fn up(
+    engine: &Engine,
+    recipe_name: &str,
+    recipe: &Recipe,
+    progress: Progress<'_>,
+) -> Result<Value, CliError> {
+    let mut created = false;
+    let mut main = match engine.computer(MAIN).await {
+        Ok(main) => main,
+        Err(_) => {
+            let built = build_recipe(engine, recipe_name, recipe, false, progress).await?;
+            let entry = &built["recipe"];
+            let text = |key: &str| entry[key].as_str().unwrap_or_default().to_owned();
+            let all = engine.all_computers().await?;
+            let builder = find(&all, &text("computerId"))?.clone();
+            let params = CheckpointForkParams {
+                computer_id: builder.id,
+                device_id: None,
+                checkpoint_id: Some(text("checkpointId")),
+                new_name: MAIN.to_owned(),
+                secrets: Vec::new(),
+                quiet: None,
+                recipe_hash: None,
+            };
+            engine
+                .run_job(
+                    &format!("Making main from {recipe_name}"),
+                    requests::checkpoints_fork(params),
+                    progress,
+                )
+                .await?;
+            created = true;
+            engine.computer(MAIN).await?
+        }
+    };
+    if main.state != "running" {
+        start(engine, MAIN, progress).await?;
+        main = engine.computer(MAIN).await?;
+    }
+    // The recipe's ports are published from main itself, so its forks inherit them.
+    let (ports, ports_error) =
+        match crate::access::publish_recipe_ports(engine, &main, &recipe.ports).await {
+            Ok(ports) => (json!(ports), Value::Null),
+            Err(error) => (Value::Null, json!(error.message)),
+        };
+    let previous: Vec<String> = main
+        .checkpoints
+        .iter()
+        .filter(|cp| cp["kind"] == "warm")
+        .filter_map(|cp| cp["id"].as_str().map(str::to_owned))
+        .collect();
+    let warm = checkpoint(
+        engine,
+        MAIN,
+        Some(WARM_NAME),
+        Some(CheckpointKind::Warm),
+        progress,
+    )
+    .await?;
+    for id in previous {
+        // A checkpoint a fork still depends on stays until a later `up`.
+        let _ = engine
+            .run_job(
+                "Removing the previous warm checkpoint",
+                requests::checkpoints_delete(
+                    silo_api::methods::checkpoints::CheckpointTargetParams {
+                        computer_id: main.id.clone(),
+                        device_id: None,
+                        checkpoint_id: id,
+                    },
+                ),
+                progress,
+            )
+            .await;
+    }
+    Ok(json!({
+        "main": engine.computer(MAIN).await?.to_json(),
+        "created": created,
+        "recipe": recipe_name,
+        "warmCheckpoint": warm["id"],
+        "publishedPorts": ports,
+        "portsError": ports_error,
+    }))
 }

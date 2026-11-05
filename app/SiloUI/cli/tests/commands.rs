@@ -555,7 +555,7 @@ async fn retry_setup_runs_the_engines_setup_retry_for_the_computer() {
 fn keep_engine(result: Value) -> FakeEngine {
     FakeEngine::start(move |method, _| match method {
         "computers.list" => Ok(listing(&[("main", "running"), ("try", "running")])),
-        "changes.keep" | "changes.undo" => Ok(json!({"jobId": "job:1"})),
+        "changes.keep" | "changes.undo" | "changes.promote" => Ok(json!({"jobId": "job:1"})),
         "operations.job.get" => Ok(finished(result.clone())),
         "operations.job.acknowledge" => Ok(Value::Null),
         other => Err(("internal", format!("unexpected {other}"))),
@@ -614,6 +614,22 @@ async fn the_undo_command_names_the_computer_and_reports_what_was_undone() {
     let value = ops::undo(&connected, "main", &ignore).await.unwrap();
     assert_eq!(engine.calls("changes.undo")[0]["computerId"], "id-main");
     assert!(silo_cli::render::undo(&value).contains("Before keep of try"));
+}
+
+#[tokio::test]
+async fn an_undone_promote_is_reported_as_a_promote_not_a_keep() {
+    let engine = keep_engine(json!({
+        "status": "undone", "kind": "promote", "computer": "main", "fork": "try",
+        "archive": "main-before-20261105-1432", "recovered": false, "changedSince": []
+    }));
+    let connected = Engine::connect(&engine.socket).await.unwrap();
+    let value = ops::undo(&connected, "main", &ignore).await.unwrap();
+    let text = silo_cli::render::undo(&value);
+    assert_eq!(
+        text,
+        "Undid the promote: main is main again, and try has its own name back."
+    );
+    assert!(!text.contains("Put "));
 }
 
 #[tokio::test]
@@ -990,4 +1006,84 @@ async fn a_throwaway_is_stopped_and_seen_stopped_before_it_is_dropped() {
 
 fn order_state(order: &Arc<Mutex<Vec<String>>>) -> Vec<String> {
     order.lock().unwrap().clone()
+}
+
+#[tokio::test]
+async fn fold_promote_sends_changes_promote_and_prints_the_archive_name() {
+    let engine = keep_engine(json!({
+        "status": "promoted",
+        "report": {"fork": "try", "target": "main", "archive": "main-before-20261105-1432", "steps": [], "notes": [], "checkpoint": "cp1"}
+    }));
+    let cli = fold_cli(&engine, &["try", "--promote", "--dry-run"]);
+    assert_eq!(run(cli, std::env::temp_dir().as_path()).await.unwrap(), 0);
+    let sent = &engine.calls("changes.promote")[0];
+    assert_eq!(sent["forkId"], "id-try");
+    assert_eq!(sent["dryRun"], true);
+    assert!(engine.calls("changes.keep").is_empty());
+    let text = silo_cli::render::promote(&json!({
+        "status": "promoted",
+        "report": {"fork": "try", "target": "main", "archive": "main-before-x", "notes": []}
+    }));
+    assert!(
+        text.contains("try is now main") && text.contains("main-before-x"),
+        "{text}"
+    );
+}
+
+fn names_in(state: &Arc<Mutex<Baseline>>) -> Vec<String> {
+    state
+        .lock()
+        .unwrap()
+        .computers
+        .iter()
+        .map(|c| c.0.clone())
+        .collect()
+}
+
+#[tokio::test]
+async fn list_all_shows_the_hidden_throwaways_and_drop_takes_them_by_name_or_id() {
+    let (engine, state) = baseline_engine(
+        false,
+        &[
+            ("silo-baseline-8fa22f", "stopped"),
+            ("silo-build-linux-dev", "stopped"),
+        ],
+    );
+    let connected = Engine::connect(&engine.socket).await.unwrap();
+    let shown = ops::list(&connected).await.unwrap();
+    assert_eq!(shown["computers"].as_array().unwrap().len(), 1);
+    let all = ops::list_all(&connected).await.unwrap();
+    assert_eq!(all["computers"].as_array().unwrap().len(), 3);
+
+    let dropped = ops::drop_computer(&connected, "silo-baseline-8fa22f", false, &ignore)
+        .await
+        .unwrap();
+    assert_eq!(dropped["dropped"], "silo-baseline-8fa22f");
+    ops::drop_computer(&connected, "id-silo-build-linux-dev", false, &ignore)
+        .await
+        .unwrap();
+    assert_eq!(names_in(&state), ["try"]);
+}
+
+#[tokio::test]
+async fn only_stopped_throwaways_older_than_an_hour_are_swept() {
+    let now = silo_cli::clock::now_unix();
+    let old = ops::baseline_name(now - 7200);
+    let fresh = ops::baseline_name(now - 60);
+    let (engine, state) = baseline_engine(
+        false,
+        &[
+            ("silo-baseline-8fa22f", "stopped"),
+            (old.as_str(), "stopped"),
+            (fresh.as_str(), "stopped"),
+            ("silo-baseline-bbbbbb", "running"),
+        ],
+    );
+    let connected = Engine::connect(&engine.socket).await.unwrap();
+    let swept = ops::sweep_throwaways(&connected, &ignore).await;
+    assert_eq!(swept.len(), 2, "{swept:?}");
+    assert_eq!(
+        names_in(&state),
+        ["try", fresh.as_str(), "silo-baseline-bbbbbb"]
+    );
 }

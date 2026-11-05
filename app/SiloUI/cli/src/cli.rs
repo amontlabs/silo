@@ -9,9 +9,12 @@ use clap::{Args, Parser, Subcommand};
 use serde_json::Value;
 
 use crate::{
+    access,
     config::{Project, Recipe, Settings},
-    engine::{default_socket, Engine},
+    engine::{build_channel, default_socket, Engine},
     error::CliError,
+    fanout::{self, ManyArgs},
+    flows, folder,
     ops::{self, CreateArgs, DiffArgs, ExecArgs, ForkArgs, Platform},
     render,
 };
@@ -39,7 +42,11 @@ pub struct Cli {
 #[derive(Subcommand, Debug)]
 pub enum Command {
     /// List computers and their state.
-    List,
+    List {
+        /// Also show the hidden throwaway computers (baselines, recipe builders).
+        #[arg(long)]
+        all: bool,
+    },
     /// Show one computer.
     Status { computer: String },
     /// Create a computer.
@@ -50,12 +57,20 @@ pub enum Command {
     Stop { computer: String },
     /// Finish the setup of a computer that stopped before it was ready.
     RetrySetup { computer: String },
+    /// Start `main` (made from a recipe the first time) and keep a warm checkpoint of it.
+    Up(UpCommand),
+    /// List, build or remove recipes.
+    #[command(subcommand)]
+    Recipe(RecipeCommand),
     /// Copy a computer for a task.
     Fork(ForkCommand),
     /// Keep a fork's changes into the computer it came from.
     Fold(FoldCommand),
-    /// Put a computer back to before its latest keep.
-    Undo { computer: String },
+    /// Put a computer back to before its latest keep, or a folder back to before its latest fold.
+    Undo {
+        /// A computer, a fork made from a folder, or the folder's path.
+        computer: String,
+    },
     /// Show what changed in a computer since it was forked.
     Diff(DiffCommand),
     /// Throw a computer away.
@@ -66,6 +81,21 @@ pub enum Command {
     Checkpoint(CheckpointCommand),
     /// List a computer's checkpoints.
     Checkpoints { computer: String },
+    /// List the ports published from a computer and where they are reachable.
+    Ports { computer: String },
+    /// Publish a port of a computer on this device.
+    Publish {
+        computer: String,
+        /// The port inside the computer.
+        port: u16,
+        /// Serve it as a website (a URL per computer).
+        #[arg(long)]
+        http: bool,
+    },
+    /// Stop publishing a port of a computer.
+    Unpublish { computer: String, port: u16 },
+    /// Make `ssh <computer>.silo` reach a computer (`silo up` does it for main).
+    SshSetup { computer: String },
     /// Manage the Silo secrets and which computers have them.
     #[command(subcommand)]
     Secrets(SecretsCommand),
@@ -115,17 +145,55 @@ pub struct CreateCommand {
 }
 
 #[derive(Args, Debug)]
+pub struct UpCommand {
+    /// The recipe `main` is made from when it does not exist (default linux-dev).
+    #[arg(long, value_name = "NAME")]
+    pub recipe: Option<String>,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum RecipeCommand {
+    /// List the built-in and project recipes and which are built.
+    Ls,
+    /// Build a recipe now (or again, with --force) so forks from it start at once.
+    Build {
+        name: String,
+        #[arg(long)]
+        force: bool,
+    },
+    /// Remove a recipe's build and its hidden computer.
+    Rm { name: String },
+}
+
+#[derive(Args, Debug)]
 pub struct ForkCommand {
+    /// The computer to copy, or a folder (./repo) to copy into a new Linux fork; with
+    /// --recipe, the new fork's name.
     pub source: String,
+    /// The fork's name; with -n, the prefix of the names (`<prefix>-1`, `<prefix>-2`).
     #[arg(long)]
     pub name: Option<String>,
+    /// Make this many forks of the same checkpoint at once and start them.
+    #[arg(
+        short = 'n',
+        long = "count",
+        value_name = "N",
+        conflicts_with = "recipe"
+    )]
+    pub count: Option<u32>,
+    /// A command to run in each fork once it is started (after `--`); the fork is left for review.
+    #[arg(last = true, value_name = "COMMAND", conflicts_with = "recipe")]
+    pub command: Vec<String>,
     /// Fork from this checkpoint instead of the current state.
     #[arg(long, value_name = "ID")]
     pub checkpoint: Option<String>,
     /// A Silo-managed secret the fork may use (repeatable).
     #[arg(long = "secret", value_name = "NAME")]
     pub secrets: Vec<String>,
-    /// A recipe whose quiet: and scrub: lists apply to the fork.
+    /// Fork from this recipe's cached build (building it first when needed), not from a computer.
+    #[arg(long, value_name = "NAME", conflicts_with_all = ["checkpoint", "name"])]
+    pub recipe: Option<String>,
+    /// A recipe file whose quiet: and scrub: lists apply to the fork.
     #[arg(long, value_name = "PATH")]
     pub recipe_file: Option<PathBuf>,
 }
@@ -140,6 +208,10 @@ pub struct FoldCommand {
     /// Report what would be kept and what would stop it, changing nothing.
     #[arg(long)]
     pub dry_run: bool,
+    /// Make the fork main instead of keeping its changes: it takes main's name, settings and
+    /// published ports, and the old main is archived (`silo undo main` swaps back).
+    #[arg(long)]
+    pub promote: bool,
     /// Carry database changes even though no migrate step covers them.
     #[arg(long)]
     pub data_ok: bool,
@@ -149,6 +221,9 @@ pub struct FoldCommand {
     /// A recipe whose keep: section applies.
     #[arg(long, value_name = "PATH")]
     pub recipe_file: Option<PathBuf>,
+    /// Ask for a review instead of keeping: records a fold request for the fork and prints its id.
+    #[arg(long, conflicts_with_all = ["promote", "dry_run"])]
+    pub request: bool,
 }
 
 #[derive(Args, Debug)]
@@ -242,14 +317,28 @@ pub async fn run(cli: Cli, working_directory: &Path) -> Result<i32, CliError> {
     // Read before connecting so a bad file is reported without the engine.
     let settings = project.load_settings()?;
     let recipe = match &cli.command {
-        Command::Fork(fork) => ops::resolve_recipe(fork.recipe_file.as_deref(), &project)?,
+        Command::Fork(fork) => match &fork.recipe {
+            Some(name) => Some(project.named_recipe(name)?),
+            None if folder::is_folder(&fork.source) => {
+                Some(project.named_recipe(crate::config::DEFAULT_RECIPE)?)
+            }
+            None => ops::resolve_recipe(fork.recipe_file.as_deref(), &project)?,
+        },
+        Command::Up(up) => Some(
+            project.named_recipe(
+                up.recipe
+                    .as_deref()
+                    .unwrap_or(crate::config::DEFAULT_RECIPE),
+            )?,
+        ),
+        Command::Recipe(RecipeCommand::Build { name, .. }) => Some(project.named_recipe(name)?),
         Command::Fold(fold) => ops::resolve_recipe(fold.recipe_file.as_deref(), &project)?,
         _ => None,
     };
     let engine = Engine::connect(&socket).await?;
     let json = cli.json;
     tokio::select! {
-        result = dispatch(&engine, cli.command, json, settings, recipe) => result,
+        result = dispatch(&engine, cli.command, json, settings, recipe, &project, working_directory) => result,
         _ = tokio::signal::ctrl_c() => {
             match engine.last_job() {
                 Some(job) => eprintln!("Interrupted. {}", Engine::reattach_hint(&job)),
@@ -266,10 +355,50 @@ async fn dispatch(
     json: bool,
     settings: Option<Settings>,
     recipe: Option<Recipe>,
+    project: &Project,
+    working_directory: &Path,
 ) -> Result<i32, CliError> {
     let progress = &stderr_progress;
     match command {
-        Command::List => emit(json, &ops::list(engine).await?, render::list),
+        Command::Up(up) => {
+            let name = up
+                .recipe
+                .unwrap_or_else(|| crate::config::DEFAULT_RECIPE.to_owned());
+            let recipe = recipe.ok_or_else(|| CliError::new("No recipe was loaded."))?;
+            let mut value = ops::up(engine, &name, &recipe, progress).await?;
+            match access::home_dir() {
+                Ok(home) => access::ssh_for_up(engine, &mut value, &home, build_channel()).await,
+                Err(error) => value["ssh"] = serde_json::json!({ "error": error.message }),
+            }
+            emit(json, &value, render::up);
+        }
+        Command::Recipe(RecipeCommand::Ls) => emit(
+            json,
+            &ops::recipe_list(engine, project).await?,
+            render::recipes,
+        ),
+        Command::Recipe(RecipeCommand::Build { name, force }) => {
+            let recipe = recipe.ok_or_else(|| CliError::new("No recipe was loaded."))?;
+            let value = ops::build_recipe(engine, &name, &recipe, force, progress).await?;
+            emit(json, &value, render::recipe_built);
+        }
+        Command::Recipe(RecipeCommand::Rm { name }) => {
+            let value = ops::recipe_remove(engine, &name).await?;
+            emit(json, &value, |v| {
+                format!(
+                    "Removed the build of {}.",
+                    v["removed"].as_str().unwrap_or_default()
+                )
+            });
+        }
+        Command::List { all } => {
+            let value = if all {
+                ops::list_all(engine).await?
+            } else {
+                ops::list(engine).await?
+            };
+            emit(json, &value, render::list)
+        }
         Command::Status { computer } => {
             emit(json, &ops::status(engine, &computer).await?, render::status)
         }
@@ -301,19 +430,67 @@ async fn dispatch(
             emit(json, &value, |v| render::computer_line("Set up", v));
         }
         Command::Fork(fork) => {
+            if fork.recipe.is_none() && folder::is_folder(&fork.source) {
+                return fork_folder(
+                    engine,
+                    fork,
+                    json,
+                    settings.as_ref(),
+                    recipe,
+                    working_directory,
+                )
+                .await;
+            }
+            if fork.count.is_some() || !fork.command.is_empty() {
+                let args = ManyArgs {
+                    fork: ForkArgs {
+                        source: fork.source,
+                        name: fork.name,
+                        checkpoint: fork.checkpoint,
+                        secrets: fork.secrets,
+                        recipe,
+                        recipe_name: None,
+                    },
+                    count: fork.count.unwrap_or(1),
+                    command: fork.command,
+                    cwd: None,
+                };
+                return fork_many(engine, &args, json, settings.as_ref()).await;
+            }
+            let recipe_name = fork.recipe;
+            let (source, name) = match &recipe_name {
+                Some(_) => (String::new(), Some(fork.source)),
+                None => (fork.source, fork.name),
+            };
             let args = ForkArgs {
-                source: fork.source,
-                name: fork.name,
+                source,
+                name,
                 checkpoint: fork.checkpoint,
                 secrets: fork.secrets,
                 recipe,
+                recipe_name,
             };
             let value = ops::fork(engine, &args, settings.as_ref(), progress).await?;
-            emit(json, &value, |v| render::computer_line("Forked", v));
+            emit(json, &value, render::forked);
+        }
+        Command::Fold(fold) if fold.promote => {
+            let mut value = ops::promote(
+                engine,
+                &fold.fork,
+                fold.into.as_deref(),
+                fold.dry_run,
+                progress,
+            )
+            .await?;
+            if let Ok(home) = access::home_dir() {
+                access::ssh_after_change(engine, &mut value, &home, build_channel()).await;
+            }
+            emit(json, &value, render::promote);
+            return Ok(if value["status"] == "refused" { 2 } else { 0 });
         }
         Command::Fold(fold) => {
             let keep = ops::keep_hooks(recipe.as_ref());
-            let value = ops::fold(
+            let value = flows::fold(
                 engine,
                 &fold.fork,
                 fold.into.as_deref(),
@@ -323,15 +500,24 @@ async fn dispatch(
                     data_ok: fold.data_ok,
                     reviewed: fold.reviewed,
                 },
+                fold.request,
                 progress,
             )
             .await?;
+            if value["status"] == "requested" {
+                emit(json, &value, render::requested);
+                return Ok(0);
+            }
             emit(json, &value, render::fold);
             return Ok(if value["status"] == "refused" { 2 } else { 0 });
         }
         Command::Undo { computer } => {
-            let value = ops::undo(engine, &computer, progress).await?;
+            let mut value = flows::undo(engine, &computer, working_directory, progress).await?;
+            if let Ok(home) = access::home_dir() {
+                access::ssh_after_change(engine, &mut value, &home, build_channel()).await;
+            }
             emit(json, &value, render::undo);
+            return Ok(if value["status"] == "refused" { 2 } else { 0 });
         }
         Command::Diff(diff) => {
             let args = DiffArgs {
@@ -390,6 +576,30 @@ async fn dispatch(
                 )
             });
         }
+        Command::Ports { computer } => emit(
+            json,
+            &access::ports(engine, &computer).await?,
+            render::ports,
+        ),
+        Command::Publish {
+            computer,
+            port,
+            http,
+        } => emit(
+            json,
+            &access::publish(engine, &computer, port, http).await?,
+            render::ports,
+        ),
+        Command::Unpublish { computer, port } => emit(
+            json,
+            &access::unpublish(engine, &computer, port).await?,
+            render::ports,
+        ),
+        Command::SshSetup { computer } => {
+            let home = access::home_dir()?;
+            let value = access::ssh_setup(engine, &computer, &home, build_channel()).await?;
+            emit(json, &value, render::ssh);
+        }
         Command::Checkpoints { computer } => emit(
             json,
             &ops::checkpoints(engine, &computer).await?,
@@ -424,6 +634,142 @@ async fn dispatch(
         Command::Mcp => unreachable!("handled above"),
     }
     Ok(0)
+}
+
+fn write_all(mut stream: impl Write, bytes: &[u8]) {
+    let _ = stream.write_all(bytes);
+    let _ = stream.flush();
+}
+
+/// Streams a command's output, one fork's as it comes or several with the fork's name in
+/// front of each line. Nothing is written in JSON mode, where the result carries the text.
+fn output_sink(
+    json: bool,
+    several: bool,
+) -> (
+    impl Fn(&str, bool, &[u8]) + Sync,
+    std::sync::Arc<std::sync::Mutex<fanout::Prefixer>>,
+) {
+    let prefixer = std::sync::Arc::new(std::sync::Mutex::new(fanout::Prefixer::default()));
+    let held = prefixer.clone();
+    let sink = move |name: &str, is_err: bool, bytes: &[u8]| {
+        if json {
+            return;
+        }
+        let bytes = if several {
+            held.lock().unwrap().push(name, is_err, bytes)
+        } else {
+            bytes.to_vec()
+        };
+        write_stream(is_err, &bytes);
+    };
+    (sink, prefixer)
+}
+
+fn write_stream(is_err: bool, bytes: &[u8]) {
+    if is_err {
+        write_all(std::io::stderr(), bytes);
+    } else {
+        write_all(std::io::stdout(), bytes);
+    }
+}
+
+/// Writes the unfinished lines still held once the commands have ended.
+fn flush_partial(json: bool, prefixer: &std::sync::Mutex<fanout::Prefixer>) {
+    if json {
+        return;
+    }
+    for (is_err, line) in prefixer.lock().unwrap().finish() {
+        write_stream(is_err, &line);
+    }
+}
+
+async fn fork_many(
+    engine: &Engine,
+    args: &ManyArgs,
+    json: bool,
+    settings: Option<&Settings>,
+) -> Result<i32, CliError> {
+    let several = args.count > 1;
+    let (sink, prefixer) = output_sink(json, several);
+    let value = fanout::fork_many(engine, args, settings, &stderr_progress, &sink).await?;
+    flush_partial(json, &prefixer);
+    if json {
+        emit(true, &value, |_| String::new());
+    } else if args.command.is_empty() || several {
+        println!("{}", render::forks(&value));
+    } else {
+        // A single command's output is on stdout, so the summary goes to stderr.
+        eprintln!("{}", render::forks(&value));
+    }
+    Ok(fanout::exit_code(&value))
+}
+
+async fn fork_folder(
+    engine: &Engine,
+    fork: ForkCommand,
+    json: bool,
+    settings: Option<&Settings>,
+    recipe: Option<Recipe>,
+    working_directory: &Path,
+) -> Result<i32, CliError> {
+    if fork.count.unwrap_or(1) != 1 {
+        return Err(CliError::new(
+            "-n makes forks of a computer; a folder is copied into one fork.",
+        ));
+    }
+    if fork.checkpoint.is_some() {
+        return Err(CliError::new("--checkpoint does not apply to a folder."));
+    }
+    let recipe = recipe.ok_or_else(|| CliError::new("No recipe was loaded."))?;
+    let directory = working_directory.join(&fork.source);
+    let value = folder::fork_folder(
+        engine,
+        &directory,
+        fork.name.as_deref(),
+        &recipe,
+        settings,
+        &fork.secrets,
+        &stderr_progress,
+    )
+    .await?;
+    if fork.command.is_empty() {
+        emit(json, &value, render::folder_fork);
+        return Ok(0);
+    }
+    let computer = engine
+        .computer(value["name"].as_str().unwrap_or_default())
+        .await?;
+    let (sink, _) = output_sink(json, false);
+    let (mut out, mut err) = (fanout::Capture::default(), fanout::Capture::default());
+    let ran = fanout::exec_streaming(
+        engine,
+        &computer,
+        &fork.command,
+        value["guestPath"].as_str(),
+        &stderr_progress,
+        |is_err, bytes| {
+            if is_err {
+                err.push(bytes);
+            } else {
+                out.push(bytes);
+            }
+            sink(&computer.name, is_err, bytes);
+        },
+    )
+    .await?;
+    if json {
+        let mut value = value;
+        value["exitCode"] = serde_json::json!(ran.exit_code);
+        value["signal"] = serde_json::json!(ran.signal);
+        value["stdout"] = serde_json::json!(String::from_utf8_lossy(&out.bytes));
+        value["stderr"] = serde_json::json!(String::from_utf8_lossy(&err.bytes));
+        value["outputTruncated"] = serde_json::json!(out.truncated || err.truncated);
+        emit(true, &value, |_| String::new());
+    } else {
+        eprintln!("{}", render::folder_fork(&value));
+    }
+    Ok(ran.exit_code)
 }
 
 /// Prints an exec result and returns the process exit code. The text mode writes the

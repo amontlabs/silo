@@ -215,7 +215,11 @@ pub(super) fn retire_with(
         store.delete(&service, &account).and_then(|()| {
             // A deletion that reported success but left the item is not retired.
             match store.get(&service, &account)? {
-                None => Ok(()),
+                None => {
+                    // The CA a promote set aside goes with the computer.
+                    let _ = store.delete(&service, &set_aside_account(computer_id));
+                    Ok(())
+                }
                 Some(mut left) => {
                     left.zeroize();
                     Err("The macOS proxy CA could not be removed from the credential store.".into())
@@ -225,6 +229,95 @@ pub(super) fn retire_with(
     };
     prune_item_locks();
     result
+}
+
+/// Where a fork's own CA waits while it carries main's (see [`carry`]).
+fn set_aside_account(computer_id: &str) -> String {
+    format!("{}.before-promote", account_name(computer_id))
+}
+
+/// Makes `fork_id` present the CA of `main_id`. A promote no longer does this (the guest trusts
+/// the CA it was set up with); it stays to build the state an older promote left, for [`uncarry`]. The fork's own CA is set aside first, once, for [`uncarry`]. The old
+/// main keeps its own, so both still match the trust inside their disks. Repeating it
+/// changes nothing.
+#[cfg(test)]
+pub(super) fn carry_with(
+    channel: Channel,
+    main_id: &str,
+    fork_id: &str,
+    store: &dyn CaStore,
+) -> Result<(), String> {
+    validate_computer_id(main_id)?;
+    validate_computer_id(fork_id)?;
+    let service = service_name(channel);
+    let (main_account, fork_account) = (account_name(main_id), account_name(fork_id));
+    let aside = set_aside_account(fork_id);
+    // Items are locked in a fixed order so two carries cannot wait on each other.
+    let mut accounts = [main_account.clone(), fork_account.clone()];
+    accounts.sort();
+    let locks: Vec<_> = accounts.iter().map(|a| item_lock(&service, a)).collect();
+    let _guards: Vec<_> = locks
+        .iter()
+        .map(|lock| lock.lock().unwrap_or_else(PoisonError::into_inner))
+        .collect();
+    let Some(mut main) = store.get(&service, &main_account)? else {
+        return Err("The computer being replaced has no network identity to carry over.".into());
+    };
+    let result = (|| {
+        if store.get(&service, &aside)?.is_none() {
+            let Some(mut own) = store.get(&service, &fork_account)? else {
+                return Err("The fork has no network identity to set aside.".to_owned());
+            };
+            let set = store.set(&service, &aside, &own);
+            own.zeroize();
+            set?;
+        }
+        store.set(&service, &fork_account, &main)?;
+        match store.get(&service, &fork_account)? {
+            Some(mut stored) => {
+                let same = stored == main;
+                stored.zeroize();
+                if same {
+                    Ok(())
+                } else {
+                    Err(
+                        "The network identity could not be verified in the credential store."
+                            .to_owned(),
+                    )
+                }
+            }
+            None => Err(
+                "The network identity could not be verified in the credential store.".to_owned(),
+            ),
+        }
+    })();
+    main.zeroize();
+    result
+}
+
+/// Gives `fork_id` its own CA back. Nothing to do when it carries none.
+pub(super) fn uncarry(fork_id: &str) -> Result<(), String> {
+    uncarry_with(crate::channel::current(), fork_id, live_store())
+}
+
+pub(super) fn uncarry_with(
+    channel: Channel,
+    fork_id: &str,
+    store: &dyn CaStore,
+) -> Result<(), String> {
+    validate_computer_id(fork_id)?;
+    let service = service_name(channel);
+    let account = account_name(fork_id);
+    let aside = set_aside_account(fork_id);
+    let lock = item_lock(&service, &account);
+    let _guard = lock.lock().unwrap_or_else(PoisonError::into_inner);
+    let Some(mut own) = store.get(&service, &aside)? else {
+        return Ok(());
+    };
+    let set = store.set(&service, &account, &own);
+    own.zeroize();
+    set?;
+    store.delete(&service, &aside)
 }
 
 fn get_existing_with(
@@ -733,5 +826,52 @@ mod tests {
         assert!(item_locks()
             .keys()
             .all(|(_, account)| account != "computer:held-lock"));
+    }
+    #[test]
+    fn a_promoted_fork_presents_mains_ca_and_gets_its_own_back() {
+        let store = MemoryStore::default();
+        for (id, label) in [("main-id", "bWFpbg=="), ("fork-id", "Zm9yaw==")] {
+            get_or_create_with(Channel::Development, id, &store, || Ok(generated(label))).unwrap();
+        }
+        let fingerprint = |id: &str| {
+            get_existing_with(Channel::Development, id, &store)
+                .unwrap()
+                .unwrap()
+                .certificate_fingerprint()
+                .unwrap()
+        };
+        let (main, fork) = (fingerprint("main-id"), fingerprint("fork-id"));
+        assert_ne!(main, fork);
+
+        carry_with(Channel::Development, "main-id", "fork-id", &store).unwrap();
+        // Repeating it keeps the fork's own CA set aside, not main's.
+        carry_with(Channel::Development, "main-id", "fork-id", &store).unwrap();
+        assert_eq!(fingerprint("fork-id"), main);
+        assert_eq!(fingerprint("main-id"), main, "the old main keeps its own");
+
+        uncarry_with(Channel::Development, "fork-id", &store).unwrap();
+        uncarry_with(Channel::Development, "fork-id", &store).unwrap();
+        assert_eq!(fingerprint("fork-id"), fork);
+        assert_eq!(fingerprint("main-id"), main);
+        assert_eq!(
+            store.0.lock().unwrap().len(),
+            2,
+            "nothing is left set aside"
+        );
+    }
+
+    #[test]
+    fn carrying_needs_both_computers_to_have_a_ca() {
+        let store = MemoryStore::default();
+        get_or_create_with(Channel::Development, "fork-id", &store, || {
+            Ok(generated("Zm9yaw=="))
+        })
+        .unwrap();
+        assert!(carry_with(Channel::Development, "main-id", "fork-id", &store).is_err());
+        assert!(get_existing_with(Channel::Development, "fork-id", &store)
+            .unwrap()
+            .unwrap()
+            .certificate_pem()
+            .contains("Zm9yaw=="));
     }
 }

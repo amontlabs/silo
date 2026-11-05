@@ -6,12 +6,13 @@ Tracker: Linear project "Silo v1: git for agent computers" (P-AMO-8).
 
 ## Resume
 
-- **Phase:** 1 checks passed; PR to main pending CI. Phase 0 merged in #60.
-- **Open slices:** none.
-- **Clean up:** none outstanding. The Dev engine runs from the main checkout's bundle.
-- **Blocked on the owner:** the positive `--secret NAME` fork check and a non-trivial "no assignments by default" need the owner to allow the Dev engine's Keychain access once (`credential_access_denied`). Read-only GitHub against a mock needs a GitHub App installation the CLI can't create; covered by unit tests only.
-- **Next action:** merge the phase 1 PR, then start phase 2 (change capture + bucketed diff, Keep + Undo).
-- **macOS slots:** the foreign VM (PID 60843) is gone; both slots free as of 5 Nov.
+- **Phase:** 3, checks in progress on branch `claude/silo-v1-phase-3`. Phases 0-2 merged (#60, #61, #62).
+- **Done in phase 3 (reviewed):** recipes + cache + `silo up` + warm checkpoint, Make this main (macOS and Linux, with the `microsandbox-rename-stopped` patch), `fork -n` with RAM budget, `fork -- cmd`, `fork ./dir` with fold/undo back to the host repo, fold requests, `silo ports/publish/unpublish`, `silo ssh-setup` (`ssh main.silo`), URL per fork (AMO-91).
+- **Open:** warm-checkpoint correctness fix (engine change generation + 60 s cap) in a worktree; then rebuild the Dev engine and re-run `docs/v1/checks/phase3_*` (urls, promote, folder). Evidence in `docs/v1/evidence/phase-3/`.
+- **Blocked on the owner:** Keychain approval for the Dev engine (secret carry-over checks in phases 1 and 3); a leaked hidden test computer `silo-baseline-8fa22f` (27 GB) to drop.
+- **Clean up:** Dev engine runs from the main checkout's bundle. Stale throwaways are swept by the CLI now.
+- **Next action:** after phase 3 checks pass, open the phase 3 PR, then phase 4.
+- **macOS slots:** free (no foreign VM since 5 Nov).
 
 ## Start
 
@@ -56,6 +57,8 @@ VM check (Linux and macOS): a macOS fork boots once; a source with a boot-persis
 
 - **4 Nov, checkpoint disk (phase 0b), advised by Fable:** a live probe on the pinned runtime (`docs/v1/evidence/phase-0/raw/checkpoint-disk-probe.txt`) showed a computer's checkpoints form one linear msb chain, the engine refuses every checkpoint delete while the computer exists, disk comes back only when the computer is deleted, and images do not leak. The pinned msb 0.7.6 has no top-level `msb prune` (the validation's prune figures came from upstream 0.7.13). Two reviews (gpt-6.1-sol, Opus; Argon failed to run) found that retention by deletion frees nothing on a linear chain and that `msb image prune` can drop layers a loaded, not yet started snapshot needs. Fable read the msb source: each checkpoint holds its whole layer closure, so parent links are lineage only, and msb ships `msb modify --compact`, which merges old sealed layers into a new base. Decision: no automatic image prune; retention = compact the computer's oldest layers, then remove the pruned Silo-owned checkpoints with `--force`, always keeping the newest. Spec change pending the measurement in the phase 0 VM check.
 - **4 Nov, checkpoint disk follow-up, advised by Fable:** two compaction probes (`compact-probe.txt`) showed compaction (running or stopped) costs about 0.8-1.1 GB and removing every older snapshot afterwards returns about 0. Cause in the pinned msb: each capture's layer closure is staged in the sandbox's `runtime/checkpoints/<id>/` and never removed after publication, so those hard links hold the data until the sandbox is deleted. Separately, `publish_layer_closure` copies every qcow2 layer on each capture, so the first capture after a restore cost 1-5 GB. Decision: carry two Silo msb patches (release the staging dir after publication plus a crash sweep; link instead of copy when the backing name already matches), re-probe, then implement retention as compact + forced removal. Fallback if the copy patch fails: accept growth in v1, show checkpoint disk per computer, and record the spec change.
+- **6 Nov, Make this main and the macOS proxy CA, advised by Fable:** the brief lists "(macOS) proxy CA" among what a promote carries; PRODUCT.md does not mention it. Each macOS computer's guest trusts its own proxy CA (Keychain item keyed by computer id, verified at start); only that guest and its own proxy use it, and a fork already replaces an inherited CA at start. Carrying main's CA made the promoted computer fail the start check and would need re-trusting the guest. Decision: each computer keeps its own proxy CA and machine identifier; the promote carries main's name, assignments, SSH alias, ports, lineage, hostname and scheduled jobs. No user-visible loss (Fable checked: host apps never trust these CAs). No PRODUCT.md change needed.
+- **6 Nov, warm checkpoint reuse:** a fork reuses `silo up`'s warm checkpoint only when the engine saw no change to main since (a per-computer change generation) and it is at most 60 s old; plain `ssh` edits bypass the engine, which the docs state.
 - **5 Nov, quiet forks scope:** "scheduled jobs off" means scheduled jobs (cron, at, launchd jobs with intervals, calendars or watch paths, periodic scripts); services that keep running (a Postgres or other dev-stack service) stay, since the fork should carry the dev stack. Anything else an agent wants stopped goes in the recipe's `quiet:` list. The macOS "Fork point" is its own checkpoint kind, disk scope, kept while a fork needs it as the fork-time base for Keep.
 - **5 Nov, URL per fork:** `http://<port>.<computer>.silo.localhost:<proxy port>` on one loopback listener instead of binding each guest port on the host, because binding `127.0.0.1:3000` blocks the user's own dev server on `0.0.0.0:3000` (gpt-6.1-sol review). The spec's `:3000` example becomes the guest port in the name.
 - **4 Nov, merging to main:** main has a GitHub ruleset that refuses direct pushes (pull request plus 7 required status checks). Each phase lands as a squash-merged PR from its own branch (`claude/silo-v1-phase-N`; phase 0 used `claude/project-thread-e72ch6`) once CI is green and reviews pass, per the project rules. This replaces "commit directly to main".
@@ -63,6 +66,15 @@ VM check (Linux and macOS): a macOS fork boots once; a source with a boot-persis
 ## Spec changes
 
 ## Status
+
+### 6 Nov 2026: phase 3 passed (secret carry-over blocked on the owner)
+
+- **Checks (Dev engine + CLI at `9d1eba7f`, MicroSandbox 0.7.6 with 23 patches):** URLs (`urls-check.txt`, 8/8): `silo up` made `main` from the recipe and a warm checkpoint; `silo fork main -n 4` made four forks from it, each serving :3000 at `http://3000.<fork>.silo.localhost:<proxy port>` with its own hostname, all four answering at once; dropped forks' URLs stop answering. Make this main, Linux (`promote-check.txt`, Linux half all pass) and macOS (`promote-check-macos.txt`, 12/12): the fork takes main's name, content, URL, ports, `ssh main.silo` and scheduled jobs, the old main is archived and stopped, the new main keeps main's running state; Undo swaps back exactly. `fork ./dir` (`folder-check.txt`, 11/11): a host repo's commit made in the fork comes back with a backup ref, Undo restores the host branch, dirty-tree and new-commit cases refused. macOS fork 2-6 s and fork-to-ready about 35 s, Linux `fork -n 4` 15 s: dev signals only, not published.
+- **Shipped:** recipes and the recipe cache, `silo up` with a warm checkpoint (reused only when main is unchanged and at most 60 s old), `fork -n` with `fork_ram_budget` and the macOS slot limit, `fork -- cmd`, `fork ./dir`, fold requests, `silo ports/publish/unpublish`, `silo ssh-setup`, Make this main on Linux (new `microsandbox-rename-stopped` patch) and macOS, URL per fork.
+- **Reviews:** gpt-6.1-sol and Opus on every slice; fixes included host-side git hook execution and overwrite checks for `fork ./dir`, rename journal crash safety, nested lock ordering in promote, and stale warm checkpoints.
+- **Decisions:** proxy CA stays per computer; warm checkpoint reuse rule (see Decisions).
+- **Blocked on the owner:** each Dev engine rebuild loses Keychain access to items earlier builds made, so secret carry-over can't be checked and three leftover test computers (`silo-baseline-8fa22f`, `e2e-p3-macsrc`, `e2e-p3-macsrc-before-20261105-2253`) can't be dropped by me.
+- **Next:** phase 4.
 
 ### 5 Nov 2026: phase 2 passed
 

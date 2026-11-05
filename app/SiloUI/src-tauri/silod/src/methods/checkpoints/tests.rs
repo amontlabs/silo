@@ -414,6 +414,41 @@ async fn checkpoints_fork_starts_a_job_on_both_platforms_with_or_without_a_check
         .is_some());
 }
 
+#[tokio::test]
+async fn changes_request_records_an_open_request_and_answers_with_it() {
+    let fixture = fixture();
+    let made = call(
+        &fixture,
+        MethodName::ChangesRequest,
+        json!({"forkId": LINUX_ID, "targetId": "main-id", "reviewDigest": "d1", "summary": "2 files"}),
+    )
+    .await
+    .unwrap();
+    let request = &made["request"];
+    assert_eq!(request["status"], "open");
+    assert_eq!(request["forkId"], LINUX_ID);
+    assert_eq!(request["target"], "main-id");
+    assert_eq!(request["reviewDigest"], "d1");
+    assert!(request["id"].as_str().unwrap().starts_with("fr-"));
+    let again = call(
+        &fixture,
+        MethodName::ChangesRequest,
+        json!({"forkId": LINUX_ID, "targetId": "main-id", "summary": "3 files"}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(again["request"]["id"], request["id"]);
+    assert_eq!(again["request"]["summary"], "3 files");
+    // Without a target and without a fork-time record there is nowhere to keep it.
+    assert!(call(
+        &fixture,
+        MethodName::ChangesRequest,
+        json!({"forkId": LINUX_ID})
+    )
+    .await
+    .is_err());
+}
+
 // MARK: exports.*
 
 #[tokio::test]
@@ -837,4 +872,23 @@ async fn device_dependencies_validates_the_request_id_and_reports_each_check() {
         serde_json::from_value(report).unwrap();
     assert_eq!(report.request_id, "check-1");
     assert!(!report.checks.is_empty());
+}
+
+// MARK: recipes.*
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_recipe_build_reads_the_computers_without_an_event_client() {
+    let fixture = fixture();
+    let env = super::recipes::DispatchEnv {
+        silod: fixture.silod.clone(),
+        handle: tokio::runtime::Handle::current(),
+    };
+    let read = tokio::task::spawn_blocking(move || env.rows())
+        .await
+        .unwrap();
+    // The test device has no runtime, so the read may fail; it must not fail for want of an
+    // event client session.
+    if let Err(message) = read {
+        assert!(!message.contains("event client"), "{message}");
+    }
 }

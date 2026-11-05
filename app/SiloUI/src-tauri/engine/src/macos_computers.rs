@@ -35,6 +35,8 @@ mod guest_exec;
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 #[path = "macos_computers/guest_screen.rs"]
 mod guest_screen;
+#[path = "macos_computers/hostname.rs"]
+mod hostname;
 #[path = "macos_computers/input.rs"]
 mod input;
 #[path = "macos_computers/offline_setup.rs"]
@@ -839,6 +841,16 @@ impl Registry {
             current: used.as_ref() == Some(&template.name),
         });
     }
+}
+
+/// The image a macOS recipe is built on: the build of the newest template and the setup
+/// fingerprint. A recipe's cache key includes it, so a macOS update or a changed setup builds
+/// the recipe again.
+pub fn recipe_image_version(app_data: &std::path::Path) -> String {
+    let build = templates::list(app_data)
+        .first()
+        .map_or_else(|| "none".to_owned(), |template| template.meta.build.clone());
+    format!("macos-{build}-{}", templates::setup_version())
 }
 
 /// The templates that computers still being personalized depend on.
@@ -2263,6 +2275,7 @@ pub fn start_macos_checkpoint_job(
     id: String,
     name: String,
     automatic: bool,
+    warm: bool,
     retention: RetentionPolicy,
     before_keep_retention: Option<RetentionPolicy>,
 ) -> Result<silo_api::jobs::JobId, String> {
@@ -2274,6 +2287,8 @@ pub fn start_macos_checkpoint_job(
         checkpoints::PolicyKind::Automatic
     } else if before_keep_retention.is_some() {
         checkpoints::PolicyKind::BeforeKeep
+    } else if warm {
+        checkpoints::PolicyKind::Warm
     } else {
         checkpoints::PolicyKind::Manual
     };
@@ -2479,8 +2494,10 @@ fn checkpoint_created_job_result(
                 checkpoints::PolicyKind::Automatic => CheckpointKind::Automatic,
                 checkpoints::PolicyKind::BeforeKeep => CheckpointKind::BeforeKeep,
                 checkpoints::PolicyKind::ForkPoint => CheckpointKind::ForkPoint,
+                checkpoints::PolicyKind::Warm => CheckpointKind::Warm,
             },
             size_bytes: meta.size_bytes,
+            generation: None,
         },
     }
 }
@@ -2712,6 +2729,193 @@ pub fn name_for_id(app: &MacosContext, id: &str) -> Option<String> {
         .into_iter()
         .find(|(candidate, _)| candidate == id)
         .map(|(_, name)| name)
+}
+
+/// What a promote needs to know about a macOS computer: `(name, stopped, deleting)`.
+pub fn promote_view(id: &str) -> Option<(String, bool, bool)> {
+    registry()
+        .entries
+        .iter()
+        .find(|entry| entry.record.id == id)
+        .map(|entry| {
+            (
+                entry.record.name.clone(),
+                matches!(entry.state, store::State::Stopped | store::State::Failed),
+                entry.deleting,
+            )
+        })
+}
+
+/// Stops a macOS computer for a promote.
+pub fn promote_stop(app: &MacosContext, id: &str) -> Result<(), String> {
+    perform(app, id, Action::Stop)
+}
+
+/// Starts a macOS computer again after an undo.
+pub fn promote_start(app: &MacosContext, id: &str) -> Result<(), String> {
+    perform(app, id, Action::Start)
+}
+
+/// Gives a stopped macOS computer a new name (record on disk and in memory). Repeating it
+/// changes nothing. The caller holds the computer's operation lane.
+pub fn promote_set_name(app: &MacosContext, id: &str, name: &str) -> Result<(), String> {
+    ensure_loaded(app)?;
+    let data = app_data(app)?;
+    let (mut record, _) = computer(id)?;
+    if record.name == name {
+        return Ok(());
+    }
+    // Two computers never share a name, not even for the moment between two renames.
+    if store::identities(&data)
+        .iter()
+        .any(|(other, taken)| other != id && taken.eq_ignore_ascii_case(name))
+    {
+        return Err(format!("Another computer is already named {name}."));
+    }
+    record.name = name.to_owned();
+    let layout = Layout::new(&data, id);
+    persist_then_commit(
+        record,
+        |record| store::save(&layout, record),
+        || store::read_record(&layout).ok(),
+        |record| {
+            update(app, id, |entry| entry.record = record);
+        },
+    )?;
+    emit(app);
+    Ok(())
+}
+
+/// Checks that both computers have the proxy CA the network bootstrap expects; a missing CA
+/// fails the promote before anything moves.
+pub fn promote_check_identity(id: &str) -> Result<(), String> {
+    proxy_ca::get_existing(id)?.map(|_| ()).ok_or_else(|| {
+        "The computer's network identity is missing; set it up before promoting.".into()
+    })
+}
+
+/// Gives a fork its own proxy CA back when an earlier promote set it aside; nothing to do
+/// otherwise.
+pub fn promote_uncarry_ca(fork_id: &str) -> Result<(), String> {
+    proxy_ca::uncarry(fork_id)
+}
+
+/// Points the saved SSH entries of the two computers at each other (`swapped`) or back.
+pub fn promote_point_ssh_alias(
+    app: &MacosContext,
+    a: &str,
+    b: &str,
+    swapped: bool,
+) -> Result<(), String> {
+    ssh_alias::point(app, a, b, swapped)
+}
+
+/// The hostnames a stopped computer has, read from its disk.
+pub fn promote_read_hostnames(app: &MacosContext, id: &str) -> Result<serde_json::Value, String> {
+    let disk = Layout::new(&app_data(app)?, id).disk();
+    let names = offline_setup::with_data_volume(&disk, |root| hostname::read(root))?;
+    serde_json::to_value(names).map_err(|e| e.to_string())
+}
+
+/// Gives a stopped computer these hostnames (from [`promote_read_hostnames`]) on its disk.
+pub fn promote_write_hostnames(
+    app: &MacosContext,
+    id: &str,
+    names: &serde_json::Value,
+) -> Result<(), String> {
+    if names.is_null() {
+        return Ok(());
+    }
+    let names: hostname::Hostnames = serde_json::from_value(names.clone())
+        .map_err(|_| "The saved hostnames are invalid.".to_string())?;
+    let disk = Layout::new(&app_data(app)?, id).disk();
+    offline_setup::with_data_volume(&disk, |root| hostname::write(root, &names))
+}
+
+/// What a fork was made quiet with (null for a computer that is not a quiet fork).
+pub fn promote_export_quiet(id: &str) -> Result<serde_json::Value, String> {
+    let (record, _) = computer(id)?;
+    serde_json::to_value(&record.quiet).map_err(|e| e.to_string())
+}
+
+fn promote_save_quiet(
+    app: &MacosContext,
+    id: &str,
+    quiet: Option<quiet::QuietRecord>,
+) -> Result<(), String> {
+    let data = app_data(app)?;
+    let (mut record, _) = computer(id)?;
+    record.quiet = quiet;
+    let layout = Layout::new(&data, id);
+    persist_then_commit(
+        record,
+        |record| store::save(&layout, record),
+        || store::read_record(&layout).ok(),
+        |record| {
+            update(app, id, |entry| entry.record = record);
+        },
+    )?;
+    emit(app);
+    Ok(())
+}
+
+/// Puts the work parked when a fork was made quiet back on the promoted fork's stopped disk,
+/// except at paths the fork has used since, and records what is still parked. Returns the
+/// paths that were put back. Repeating it changes nothing.
+pub fn promote_restore_quiet(app: &MacosContext, id: &str) -> Result<Vec<String>, String> {
+    let (record, _) = computer(id)?;
+    let Some(mut quiet) = record.quiet.clone() else {
+        return Ok(Vec::new());
+    };
+    if quiet.parked.is_empty() {
+        return Ok(Vec::new());
+    }
+    let disk = Layout::new(&app_data(app)?, id).disk();
+    let parked = quiet.parked.clone();
+    let done =
+        offline_setup::with_data_volume(&disk, |root| quiet::restore_offline(root, &parked))?;
+    quiet.parked = done.left;
+    quiet.scheduled_jobs_disabled = !quiet.parked.is_empty();
+    promote_save_quiet(app, id, Some(quiet))?;
+    Ok(done.restored)
+}
+
+/// Undoes [`promote_restore_quiet`]: parks again what was put back and gives the fork its
+/// record (`original`, from [`promote_export_quiet`]) back.
+pub fn promote_repark_quiet(
+    app: &MacosContext,
+    id: &str,
+    original: &serde_json::Value,
+) -> Result<(), String> {
+    let original: Option<quiet::QuietRecord> = serde_json::from_value(original.clone())
+        .map_err(|_| "The saved quiet settings are invalid.".to_string())?;
+    if original.is_none() {
+        return Ok(());
+    }
+    let disk = Layout::new(&app_data(app)?, id).disk();
+    offline_setup::with_data_volume(&disk, |root| quiet::repark_offline(root))?;
+    promote_save_quiet(app, id, original)
+}
+
+/// The saved forwards of a macOS computer (see `ports::export_mappings`).
+pub fn promote_export_ports(
+    app: &MacosContext,
+    id: &str,
+) -> Result<Vec<serde_json::Value>, String> {
+    ports::export_mappings(&app_data(app)?, id)
+}
+
+/// Replaces the saved forwards of a macOS computer and forgets its URL routes.
+pub fn promote_replace_ports(
+    app: &MacosContext,
+    id: &str,
+    mappings: &[serde_json::Value],
+) -> Result<(), String> {
+    ports::replace_mappings(&app_data(app)?, id, mappings)?;
+    if let Some(proxy) = crate::url_proxy::shared() {
+        proxy.forget_computer_id(id);
+    }
+    Ok(())
 }
 
 /// The identity of the macOS computer with this name, if one is stored on this device.
@@ -6956,6 +7160,7 @@ pub fn seed_check_policy(app_data: &std::path::Path, computer_id: &str) -> Vec<S
             checkpoints::PolicyKind::Automatic => "automatic".to_owned(),
             checkpoints::PolicyKind::BeforeKeep => "before-keep".to_owned(),
             checkpoints::PolicyKind::ForkPoint => "fork-point".to_owned(),
+            checkpoints::PolicyKind::Warm => "warm".to_owned(),
         })
         .collect()
 }
@@ -12124,6 +12329,7 @@ mod tests {
             source.id.clone(),
             "Before run: x, deleted automatically".into(),
             true,
+            false,
             Arc::new(|| Ok(0)),
             None,
         );

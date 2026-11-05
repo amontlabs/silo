@@ -232,6 +232,7 @@ fn start_keep_recovery(context: Arc<SilodContext>) {
             Err(error) => eprintln!("silod: could not start the keep recovery: {error}"),
         }
     }
+    started += start_promote_recovery(context, host, &held_tx);
     drop(held_tx);
     // Startup goes on once every computer is held, or after a short wait when it cannot be.
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
@@ -241,6 +242,54 @@ fn start_keep_recovery(context: Arc<SilodContext>) {
             break;
         }
     }
+}
+
+/// Finishes a promote or undo the engine stopped in the middle of: rolled forward when every
+/// step that matters was applied, rolled back otherwise. Both computers of each are held from
+/// engine start until it is settled, so a half-swapped computer cannot start; the recovery is
+/// retried while the runtime is not ready. Returns how many holds will be reported on
+/// `held`.
+fn start_promote_recovery(
+    context: Arc<SilodContext>,
+    host: Arc<dyn RuntimeHost>,
+    held: &std::sync::mpsc::Sender<()>,
+) -> usize {
+    let journal =
+        silo_engine::changes::promote::service::journal_for(host.engine_context().as_ref());
+    let mut started = 0;
+    for key in silo_engine::changes::promote::interrupted_keys(&journal) {
+        let (context, host, journal, held) =
+            (context.clone(), host.clone(), journal.clone(), held.clone());
+        let spawned = std::thread::Builder::new()
+            .name("silod-promote-recovery".into())
+            .spawn(move || {
+                let env = silo_engine::changes::promote::engine_env::EngineEnv::new(
+                    host.clone(),
+                    crate::methods::checkpoints::service_for(&context),
+                    silo_engine::changes::keep::service::journal_for(
+                        host.engine_context().as_ref(),
+                    ),
+                );
+                let result = silo_engine::changes::promote::recover_one(
+                    &env,
+                    &journal,
+                    &key,
+                    &|| {
+                        let _ = held.send(());
+                    },
+                    30,
+                    std::time::Duration::from_secs(10),
+                );
+                if let Err(error) = result {
+                    eprintln!("silod: could not settle an interrupted promote: {error}");
+                }
+            });
+        match spawned {
+            Ok(_) => started += 1,
+            Err(error) => eprintln!("silod: could not start the promote recovery: {error}"),
+        }
+    }
+    started
 }
 
 // MARK: Computer use

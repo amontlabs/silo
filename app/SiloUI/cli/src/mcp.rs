@@ -11,9 +11,12 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use crate::{
+    access,
     config::Project,
-    engine::Engine,
+    engine::{build_channel, Engine},
     error::CliError,
+    fanout::{self, ManyArgs},
+    flows, folder,
     ops::{self, DiffArgs, ExecArgs, ForkArgs},
 };
 
@@ -32,9 +35,32 @@ pub struct ComputerParam {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct PublishParams {
+    /// The computer's name.
+    pub computer: String,
+    /// The port inside the computer.
+    pub port: u16,
+    /// Serve it as a website.
+    #[serde(default)]
+    pub http: bool,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct ForkParams {
-    /// The computer to copy, usually `main`.
-    pub source: String,
+    /// The computer to copy, usually `main` (the default), or a path to a git repository on
+    /// this machine (`./repo`) to copy into a new Linux fork. Ignored when `recipe` is set.
+    #[serde(default)]
+    pub source: Option<String>,
+    /// Make this many forks of the same checkpoint at once (default 1), each started. The
+    /// `name` becomes a prefix.
+    pub count: Option<u32>,
+    /// A command to run in each fork once it is started, with no time limit. The result has
+    /// each fork's exit code and output; the fork is left for review.
+    #[serde(default)]
+    pub command: Vec<String>,
+    /// Fork from this recipe's cached build (a built-in such as linux-dev, or a file in
+    /// `.silo/recipes/`), building it first when needed.
+    pub recipe: Option<String>,
     /// The fork's name; defaults to the source name plus a short id.
     pub name: Option<String>,
     /// Fork from this checkpoint id instead of the current state.
@@ -44,6 +70,12 @@ pub struct ForkParams {
     pub secrets: Vec<String>,
     /// Path of a recipe whose quiet and scrub lists apply to the fork.
     pub recipe_file: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct UpParams {
+    /// The recipe `main` is made from when it does not exist (default linux-dev).
+    pub recipe: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -77,6 +109,10 @@ pub struct FoldParams {
     /// Report what would be kept and what would stop it, changing nothing.
     #[serde(default)]
     pub dry_run: bool,
+    /// Make the fork main instead of keeping its changes: it takes the name, settings and
+    /// published ports of `into` (default: its source), which is archived. `undo` swaps back.
+    #[serde(default)]
+    pub promote: bool,
     /// Carry database changes even though no migrate step covers them.
     #[serde(default)]
     pub data_ok: bool,
@@ -84,6 +120,9 @@ pub struct FoldParams {
     pub reviewed: Option<String>,
     /// Path of a recipe whose keep: section applies.
     pub recipe_file: Option<String>,
+    /// Record a review request for the fork instead of keeping it; returns the request.
+    #[serde(default)]
+    pub request: bool,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -146,7 +185,47 @@ impl SiloMcp {
         show(async { ops::secrets_list(&self.engine().await?).await }.await)
     }
 
-    #[tool(description = "Copy a computer into a new fork for a task and wait until it is ready.")]
+    #[tool(
+        description = "Start `main` (made from a recipe the first time, default linux-dev) and keep a warm checkpoint of it, so forks of an unchanged main start without a new checkpoint."
+    )]
+    async fn up(&self, Parameters(params): Parameters<UpParams>) -> Result<String, String> {
+        show(
+            async {
+                let project = Project::discover(&self.working_directory);
+                let name = params
+                    .recipe
+                    .unwrap_or_else(|| crate::config::DEFAULT_RECIPE.to_owned());
+                let recipe = project.named_recipe(&name)?;
+                let engine = self.engine().await?;
+                let mut value = ops::up(&engine, &name, &recipe, &|_| {}).await?;
+                match access::home_dir() {
+                    Ok(home) => {
+                        access::ssh_for_up(&engine, &mut value, &home, build_channel()).await
+                    }
+                    Err(error) => value["ssh"] = serde_json::json!({ "error": error.message }),
+                }
+                Ok(value)
+            }
+            .await,
+        )
+    }
+
+    #[tool(
+        description = "List the recipes (built-in and in .silo/recipes/) and whether each is built. Fork from one with `fork` and its `recipe` parameter."
+    )]
+    async fn recipe_list(&self) -> Result<String, String> {
+        show(
+            async {
+                let project = Project::discover(&self.working_directory);
+                ops::recipe_list(&self.engine().await?, &project).await
+            }
+            .await,
+        )
+    }
+
+    #[tool(
+        description = "Copy a computer into a new fork for a task and wait until it is ready. `count` makes several forks of one checkpoint at once and starts them; each result has its name and URLs. `command` runs in each fork and the result has its exit code and output. A `source` that is a path to a git repository copies it into a new Linux fork; `fold` then brings only its commits back."
+    )]
     async fn fork(&self, Parameters(params): Parameters<ForkParams>) -> Result<String, String> {
         show(
             async {
@@ -156,33 +235,110 @@ impl SiloMcp {
                     .recipe_file
                     .as_deref()
                     .map(|path| self.working_directory.join(path));
-                let recipe = ops::resolve_recipe(explicit.as_deref(), &project)?;
+                let source = params.source.unwrap_or_else(|| ops::MAIN.to_owned());
+                let engine = self.engine().await?;
+                if params.recipe.is_none() && folder::is_folder(&source) {
+                    if params.count.unwrap_or(1) != 1 {
+                        return Err(CliError::new(
+                            "count makes forks of a computer; a folder is copied into one fork.",
+                        ));
+                    }
+                    let recipe = project.named_recipe(crate::config::DEFAULT_RECIPE)?;
+                    let mut made = folder::fork_folder(
+                        &engine,
+                        &self.working_directory.join(&source),
+                        params.name.as_deref(),
+                        &recipe,
+                        settings.as_ref(),
+                        &params.secrets,
+                        &|_| {},
+                    )
+                    .await?;
+                    if !params.command.is_empty() {
+                        let computer = engine
+                            .computer(made["name"].as_str().unwrap_or_default())
+                            .await?;
+                        let (mut out, mut err) = (Vec::new(), Vec::new());
+                        let ran = fanout::exec_streaming(
+                            &engine,
+                            &computer,
+                            &params.command,
+                            made["guestPath"].as_str(),
+                            &|_| {},
+                            |is_err, bytes| {
+                                if is_err { &mut err } else { &mut out }.extend_from_slice(bytes)
+                            },
+                        )
+                        .await?;
+                        made["exitCode"] = serde_json::json!(ran.exit_code);
+                        made["stdout"] = serde_json::json!(String::from_utf8_lossy(&out));
+                        made["stderr"] = serde_json::json!(String::from_utf8_lossy(&err));
+                    }
+                    return Ok(made);
+                }
+                let recipe = match &params.recipe {
+                    Some(name) => Some(project.named_recipe(name)?),
+                    None => ops::resolve_recipe(explicit.as_deref(), &project)?,
+                };
                 let args = ForkArgs {
-                    source: params.source,
+                    source,
                     name: params.name,
                     checkpoint: params.checkpoint,
                     secrets: params.secrets,
                     recipe,
+                    recipe_name: params.recipe.clone(),
                 };
-                ops::fork(&self.engine().await?, &args, settings.as_ref(), &|_| {}).await
+                if params.recipe.is_none() && (params.count.is_some() || !params.command.is_empty())
+                {
+                    let many = ManyArgs {
+                        fork: args,
+                        count: params.count.unwrap_or(1),
+                        command: params.command,
+                        cwd: None,
+                    };
+                    return fanout::fork_many(
+                        &engine,
+                        &many,
+                        settings.as_ref(),
+                        &|_| {},
+                        &|_, _, _| {},
+                    )
+                    .await;
+                }
+                ops::fork(&engine, &args, settings.as_ref(), &|_| {}).await
             }
             .await,
         )
     }
 
     #[tool(
-        description = "Keep a fork's changes into the computer it came from (or `into`). Returns status kept, dry-run or refused; a refusal (divergent changes, a database change nothing migrates) lists what stopped it and the target was not changed. Takes a checkpoint of the target first; `undo` puts it back."
+        description = "Keep a fork's changes into the computer it came from (or `into`). Returns status kept, dry-run or refused; a refusal (divergent changes, a database change nothing migrates) lists what stopped it and the target was not changed. Takes a checkpoint of the target first; `undo` puts it back. With `request` nothing is kept: a review request is recorded for the fork and returned. For a fork made from a folder, the fork's commits are fetched into the folder (a fast-forward or a clean merge, with a backup ref `undo` goes back to). With `promote` the fork replaces main instead (the old main is archived as main-before-<time>); a refusal means nothing changed."
     )]
     async fn fold(&self, Parameters(params): Parameters<FoldParams>) -> Result<String, String> {
         show(
             async {
+                if params.promote && !params.request {
+                    let engine = self.engine().await?;
+                    let mut value = ops::promote(
+                        &engine,
+                        &params.fork,
+                        params.into.as_deref(),
+                        params.dry_run,
+                        &|_| {},
+                    )
+                    .await?;
+                    if let Ok(home) = access::home_dir() {
+                        access::ssh_after_change(&engine, &mut value, &home, build_channel()).await;
+                    }
+                    return Ok(value);
+                }
                 let project = Project::discover(&self.working_directory);
                 let explicit = params
                     .recipe_file
                     .as_deref()
                     .map(|path| self.working_directory.join(path));
                 let recipe = ops::resolve_recipe(explicit.as_deref(), &project)?;
-                ops::fold(
+                flows::fold(
                     &self.engine().await?,
                     &params.fork,
                     params.into.as_deref(),
@@ -192,6 +348,7 @@ impl SiloMcp {
                         data_ok: params.data_ok,
                         reviewed: params.reviewed,
                     },
+                    params.request,
                     &|_| {},
                 )
                 .await
@@ -218,12 +375,25 @@ impl SiloMcp {
         )
     }
 
-    #[tool(description = "Put a computer back to before its latest keep.")]
+    #[tool(
+        description = "Put a computer back to before its latest keep. For a fork made from a folder, pass the fork or the folder's path to put the folder's branch back to before its latest fold."
+    )]
     async fn undo(
         &self,
         Parameters(ComputerParam { computer }): Parameters<ComputerParam>,
     ) -> Result<String, String> {
-        show(async { ops::undo(&self.engine().await?, &computer, &|_| {}).await }.await)
+        show(
+            async {
+                let engine = self.engine().await?;
+                let mut value =
+                    flows::undo(&engine, &computer, &self.working_directory, &|_| {}).await?;
+                if let Ok(home) = access::home_dir() {
+                    access::ssh_after_change(&engine, &mut value, &home, build_channel()).await;
+                }
+                Ok(value)
+            }
+            .await,
+        )
     }
 
     #[tool(
@@ -285,6 +455,64 @@ impl SiloMcp {
                     &|_| {},
                 )
                 .await
+            }
+            .await,
+        )
+    }
+
+    #[tool(
+        description = "List the ports published from a computer, with the host port and URL each is reachable at. Forks publish the ports their source does."
+    )]
+    async fn ports(
+        &self,
+        Parameters(ComputerParam { computer }): Parameters<ComputerParam>,
+    ) -> Result<String, String> {
+        show(async { access::ports(&self.engine().await?, &computer).await }.await)
+    }
+
+    #[tool(
+        description = "Publish a port of a computer on this device. With `http` it is served as a website."
+    )]
+    async fn publish(
+        &self,
+        Parameters(params): Parameters<PublishParams>,
+    ) -> Result<String, String> {
+        show(
+            async {
+                access::publish(
+                    &self.engine().await?,
+                    &params.computer,
+                    params.port,
+                    params.http,
+                )
+                .await
+            }
+            .await,
+        )
+    }
+
+    #[tool(description = "Stop publishing a port of a computer.")]
+    async fn unpublish(
+        &self,
+        Parameters(params): Parameters<PublishParams>,
+    ) -> Result<String, String> {
+        show(
+            async { access::unpublish(&self.engine().await?, &params.computer, params.port).await }
+                .await,
+        )
+    }
+
+    #[tool(
+        description = "Make `ssh <computer>.silo` (`.silo-dev` from a development build) reach a computer; `up` does it for main."
+    )]
+    async fn ssh_name(
+        &self,
+        Parameters(ComputerParam { computer }): Parameters<ComputerParam>,
+    ) -> Result<String, String> {
+        show(
+            async {
+                let home = access::home_dir()?;
+                access::ssh_setup(&self.engine().await?, &computer, &home, build_channel()).await
             }
             .await,
         )

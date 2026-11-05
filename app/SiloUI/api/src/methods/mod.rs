@@ -36,6 +36,7 @@ pub mod notifications;
 pub mod operations;
 pub mod preparation;
 pub mod push;
+pub mod recipes;
 pub mod registry;
 pub mod request;
 #[rustfmt::skip]

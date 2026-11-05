@@ -118,6 +118,20 @@ pub(super) fn run_fork_rekey(
     Ok(rekeyed)
 }
 
+/// Runs `work` on the mounted Data volume of a stopped computer's disk, then unmounts and
+/// detaches it, so the guest never boots while the host holds its disk.
+pub(super) fn with_data_volume<T>(
+    disk: &Path,
+    work: impl FnOnce(&Path) -> Result<T, String>,
+) -> Result<T, String> {
+    let mut attached = Attached::attach(disk)?;
+    let result = attached.mount_data_volume().and_then(|mount| work(&mount));
+    let closed = attached.close();
+    let value = result?;
+    closed?;
+    Ok(value)
+}
+
 /// Gives a copy of a template its own password hash, automatic login and login keychain on
 /// the stopped disk. Unlike a fork's rekey it leaves the template's SSH key in place, which
 /// the personalization that follows logs in with.

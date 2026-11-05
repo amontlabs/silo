@@ -987,6 +987,7 @@ fn a_database_change_is_carried_only_with_a_migrate_step_and_migration_files_or_
     let refusal = refused(try_keep(Hooks::default(), &["src/a.js"], false));
     assert_eq!(refusal.reason, "database");
     assert!(refusal.hint.contains("Make this main"));
+    assert!(refusal.hint.contains("--promote"), "{}", refusal.hint);
     // A migrate step but no migration file changed: still refused.
     let hooks = Hooks {
         migrate: vec!["make migrate".into()],

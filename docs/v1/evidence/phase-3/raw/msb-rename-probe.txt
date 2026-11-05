@@ -1,0 +1,318 @@
+note: msb below is the patched msb built from the 23-patch series in a scratch tree (debug build, ad hoc signed with the VM entitlements); MSB_HOME=/private/tmp/mrp (a short path: runtime sockets must fit in 104 bytes), removed at the end.
+
+
+== header
+msb 0.7.6
+patches in runtime-inputs.json:
+microsandbox-silo-network-0.7.6.patch
+microsandbox-restore-policy-0.7.6.patch
+microsandbox-create-stopped-0.7.6.patch
+microsandbox-adopt-owned-disk-0.7.6.patch
+microsandbox-log-retention-desktop-start-0.7.6.patch
+microsandbox-restore-root-capacity-0.7.6.patch
+microsandbox-portable-image-cache-0.7.6.patch
+microsandbox-live-public-ports-0.7.6.patch
+microsandbox-secret-values-stdin-0.7.6.patch
+microsandbox-import-stage-id-0.7.6.patch
+microsandbox-sftp-user-0.7.6.patch
+microsandbox-remove-created-0.7.6.patch
+microsandbox-restore-starting-control-0.7.6.patch
+microsandbox-runtime-instance-id-0.7.6.patch
+microsandbox-checkpoint-fs-state-0.7.6.patch
+microsandbox-relay-closed-local-arena-0.7.6.patch
+microsandbox-reordered-image-metadata-0.7.6.patch
+microsandbox-metrics-sampler-blocking-0.7.6.patch
+microsandbox-macos-proxy-0.7.6.patch
+microsandbox-macos-network-fixes-0.7.6.patch
+microsandbox-reclaim-capture-dirs-0.7.6.patch
+microsandbox-retired-layer-cleanup-0.7.6.patch
+microsandbox-rename-stopped-0.7.6.patch
+date 2026-11-05T20:31:47Z
+
+== pull the Silo guest image
+$ msb pull ghcr.io/amontlabs/silo-guest:ubuntu-24.04-v5-arm64
+   ✓ Pulled       ghcr.io/amontlabs/silo-guest:ubuntu-24.04-v5-arm64 (19.0s)
+[exit 0]
+
+== create two sandboxes (no start) with the labels and owned workspace disk Silo uses
+$ msb create --no-start -n probe-a -c 1 -m 1G --label silo.managed=true --label silo.machine-id=aaaaaaaa-0000-4000-8000-00000000000a --mount-owned /workspace:kind=disk,size=1G ghcr.io/amontlabs/silo-guest:ubuntu-24.04-v5-arm64
+[exit 0]
+$ msb create --no-start -n probe-b -c 1 -m 1G --label silo.managed=true --label silo.machine-id=bbbbbbbb-0000-4000-8000-00000000000b --mount-owned /workspace:kind=disk,size=1G ghcr.io/amontlabs/silo-guest:ubuntu-24.04-v5-arm64
+[exit 0]
+sandboxes/: probe-a probe-b 
+1|probe-a|Created|probe-a
+2|probe-b|Created|probe-b
+
+== write a marker into each workspace, then stop
+$ msb start probe-a
+   ✓ Started      probe-a
+[exit 0]
+$ msb exec probe-a --user root -- sh -c mkdir -p /workspace && echo marker-a > /workspace/marker && sync
+[exit 0]
+$ msb stop probe-a
+   ✓ Stopped      probe-a
+[exit 0]
+$ msb start probe-b
+   ✓ Started      probe-b
+[exit 0]
+$ msb exec probe-b --user root -- sh -c mkdir -p /workspace && echo marker-b > /workspace/marker && sync
+[exit 0]
+$ msb stop probe-b
+   ✓ Stopped      probe-b
+[exit 0]
+
+== snapshot probe-a (disk-only) into group probe-group before the rename
+$ msb snapshot create snap-before --sandbox probe-a --group probe-group
+   ✓ Snapshotted  probe-a
+group probe-group: head snap_6e1eb598ade98f4ddf215135cf19ede2 (Initialized)
+snap_6e1eb598ade98f4ddf215135cf19ede2
+/private/tmp/mrp/snapshots/probe-group/snap_6e1eb598ade98f4ddf215135cf19ede2
+[exit 0]
+$ msb snapshot ls
+NAME                       SCOPE    MIGRATION    IMAGE                                                 SIZE       CREATED                DIGEST
+probe-group:snap-before    disk     canonical    ghcr.io/amontlabs/silo-guest:ubuntu-24.04-v5-arm64    4.0 GiB    2026-11-05 21:32:08    sha256:9d4b40f7311c
+[exit 0]
+probe-group
+
+/private/tmp/mrp/snapshots/probe-group:
+group.json
+snap_6e1eb598ade98f4ddf215135cf19ede2
+
+/private/tmp/mrp/snapshots/probe-group/snap_6e1eb598ade98f4ddf215135cf19ede2:
+group-member.json
+layers
+snapshot.json
+
+/private/tmp/mrp/snapshots/probe-group/snap_6e1eb598ade98f4ddf215135cf19ede2/layers:
+layer_94d72555765dd757833873e92cc3c3a3.raw
+layer_d69da7f49d3d87a8d50c2e6439afbdd5.raw
+
+== state before the rename
+1|probe-a|Stopped|probe-a
+2|probe-b|Stopped|probe-b
+sandboxes/: probe-a probe-b 
+"name": "probe-a"
+"name": "probe-a"
+{"sandbox_id":1,"snapshot_id":"snap_6e1eb598ade98f4ddf215135cf19ede2"}
+
+== refusals: same name, existing name, missing sandbox
+$ msb rename probe-a probe-a
+error: invalid config: the new name must differ from the current name
+[exit 1]
+$ msb rename probe-a probe-b
+error: sandbox already exists: sandbox 'probe-b' already exists
+[exit 1]
+$ msb rename no-such-sandbox other
+error: sandbox not found: no-such-sandbox
+[exit 1]
+1|probe-a|Stopped|probe-a
+2|probe-b|Stopped|probe-b
+
+== refusal: a running sandbox
+$ msb start probe-a
+   ✓ Started      probe-a
+[exit 0]
+$ msb rename probe-a probe-c
+error: sandbox still running: cannot rename sandbox "probe-a": stop it first
+[exit 1]
+$ msb stop probe-a
+   ✓ Stopped      probe-a
+[exit 0]
+1|probe-a|Stopped|probe-a
+2|probe-b|Stopped|probe-b
+
+== swap the two names through a third (rename both ways)
+$ msb rename probe-a probe-tmp
+Renamed probe-a to probe-tmp
+[exit 0]
+$ msb rename probe-b probe-a
+Renamed probe-b to probe-a
+[exit 0]
+$ msb rename probe-tmp probe-b
+Renamed probe-tmp to probe-b
+[exit 0]
+1|probe-b|Stopped|probe-b
+2|probe-a|Stopped|probe-a
+sandboxes/: probe-a probe-b 
+probe-a config name / label / dir marker: "silo.machine-id":"bbbbbbbb-0000-4000-8000-00000000000b" "name":"probe-a" "name":"probe-a" 
+probe-b config name / label / dir marker: "silo.machine-id":"aaaaaaaa-0000-4000-8000-00000000000a" "name":"probe-b" "name":"probe-b" {"sandbox_id":1,"snapshot_id":"snap_6e1eb598ade98f4ddf215135cf19ede2"}
+
+== root disk state follows the directory
+probe-a: "path":"/private/tmp/mrp/sandboxes/probe-a/upper.ext4"
+probe-b: "path":"/private/tmp/mrp/sandboxes/probe-b/upper.ext4"
+
+== start each renamed sandbox: the workspace follows the sandbox, not the name
+$ msb start probe-a
+   ✓ Started      probe-a
+[exit 0]
+$ msb exec probe-a --user root -- sh -c cat /workspace/marker; hostname
+marker-b
+probe-a
+[exit 0]
+$ msb stop probe-a
+   ✓ Stopped      probe-a
+[exit 0]
+$ msb start probe-b
+   ✓ Started      probe-b
+[exit 0]
+$ msb exec probe-b --user root -- sh -c cat /workspace/marker; hostname
+marker-a
+probe-b
+[exit 0]
+$ msb stop probe-b
+   ✓ Stopped      probe-b
+[exit 0]
+
+== snapshot group keeps its name; restore from it after the rename
+$ msb snapshot ls
+NAME                       SCOPE    MIGRATION    IMAGE                                                 SIZE       CREATED                DIGEST
+probe-group:snap-before    disk     canonical    ghcr.io/amontlabs/silo-guest:ubuntu-24.04-v5-arm64    4.0 GiB    2026-11-05 21:32:08    sha256:9d4b40f7311c
+[exit 0]
+$ msb restore probe-group:snap-before --name probe-restored
+[exit 0]
+$ msb start probe-restored
+error: sandbox still running: cannot start sandbox 'probe-restored': already running
+[exit 1]
+$ msb exec probe-restored --user root -- sh -c cat /workspace/marker
+marker-a
+[exit 0]
+$ msb stop probe-restored
+   ✓ Stopped      probe-restored
+[exit 0]
+
+== capture from a renamed sandbox (default group is the new name)
+$ msb snapshot create snap-after --sandbox probe-a
+   ✓ Snapshotted  probe-a
+group probe-a: head snap_64929c49bb837798f96576dce76b3758 (Initialized)
+snap_64929c49bb837798f96576dce76b3758
+/private/tmp/mrp/snapshots/probe-a/snap_64929c49bb837798f96576dce76b3758
+[exit 0]
+probe-a
+probe-group
+$ msb snapshot ls
+NAME                       SCOPE    MIGRATION    IMAGE                                                 SIZE       CREATED                DIGEST
+probe-a:snap-after         disk     canonical    ghcr.io/amontlabs/silo-guest:ubuntu-24.04-v5-arm64    4.0 GiB    2026-11-05 21:32:10    sha256:d634e14fcf5f
+probe-group:snap-before    disk     canonical    ghcr.io/amontlabs/silo-guest:ubuntu-24.04-v5-arm64    4.0 GiB    2026-11-05 21:32:08    sha256:9d4b40f7311c
+[exit 0]
+
+== rename a restored sandbox back and forth, with the journal directory empty afterwards
+$ msb rename probe-restored probe-restored2
+Renamed probe-restored to probe-restored2
+[exit 0]
+$ msb rename probe-restored2 probe-restored
+Renamed probe-restored2 to probe-restored
+[exit 0]
+total 0
+drwxr-xr-x@ 2 polarzero  wheel   64 Nov  5 21:32 .
+drwxr-xr-x@ 8 polarzero  wheel  256 Nov  5 21:32 ..
+
+== final catalog
+1|probe-b|Stopped|probe-b
+2|probe-a|Stopped|probe-a
+3|probe-restored|Stopped|probe-restored
+$ msb list
+NAME              IMAGE                                                 STATUS     CREATED
+probe-restored    ghcr.io/amontlabs/silo-guest:ubuntu-24.04-v5-arm64    stopped    2026-11-05 21:32:10
+probe-a           ghcr.io/amontlabs/silo-guest:ubuntu-24.04-v5-arm64    stopped    2026-11-05 21:32:07
+probe-b           ghcr.io/amontlabs/silo-guest:ubuntu-24.04-v5-arm64    stopped    2026-11-05 21:32:07
+[exit 0]
+
+== cleanup
+$ msb remove probe-a probe-b probe-restored
+   ✓ Removed      probe-a
+   ✓ Removed      probe-b
+   ✓ Removed      probe-restored
+[exit 0]
+$ msb snapshot rm probe-group:snap-before --force
+   ✓ Removed      probe-group:snap-before
+[exit 0]
+ls: /private/tmp/mrp: No such file or directory
+
+note: second probe after the review fixes; msb built by npm run runtime:prepare from the 23-patch series (rename patch sha 07dff550...), libkrunfw beside it, no VM started (created sandboxes only); crash injection is hand-written journals plus SIGKILL of msb rename at random moments
+
+== second probe: journal kept until every step is confirmed, recovery under the lock
+msb: msb 0.7.6
+date 2026-11-05T21:17:10Z
+$ msb pull ghcr.io/amontlabs/silo-guest:ubuntu-24.04-v5-arm64
+   ✓ Pulled       ghcr.io/amontlabs/silo-guest:ubuntu-24.04-v5-arm64 (5.8s)
+[exit 0]
+$ msb create --no-start -n probe-a -c 1 -m 1G --label silo.managed=true --mount-owned /workspace:kind=disk,size=1G ghcr.io/amontlabs/silo-guest:ubuntu-24.04-v5-arm64
+[exit 0]
+$ msb create --no-start -n probe-b -c 1 -m 1G --label silo.managed=true --mount-owned /workspace:kind=disk,size=1G ghcr.io/amontlabs/silo-guest:ubuntu-24.04-v5-arm64
+[exit 0]
+catalog: [(1, 'probe-a', 'Created'), (2, 'probe-b', 'Created')]
+
+== A: a rename that died after the directory moved (journal written, step journaled, state not rewritten)
+injected: journal ['/private/tmp/mrp2/rename-journal/1.json'], directories ['probe-a2', 'probe-b'], catalog [(1, 'probe-a', 'Created'), (2, 'probe-b', 'Created')]
+$ msb rename no-such-sandbox probe-a
+   error: sandbox not found: no-such-sandbox
+[exit 1]
+after recovery: journals [], directories ['probe-a2', 'probe-b'], catalog [(1, 'probe-a2', 'Created'), (2, 'probe-b', 'Created')]
+PASS: A: catalog name probe-a2, directory probe-a2, journal removed
+PASS: A: stored configuration names probe-a2
+
+== B: a rename that was rolling back (journal rolling_back, directory moved)
+injected: journal ['/private/tmp/mrp2/rename-journal/1.json'], directories ['probe-a3', 'probe-b']
+$ msb rename no-such-sandbox probe-a3
+   error: sandbox not found: no-such-sandbox
+[exit 1]
+after recovery: journals [], directories ['probe-a2', 'probe-b'], catalog [(1, 'probe-a2', 'Created'), (2, 'probe-b', 'Created')]
+PASS: B: rolled back to probe-a2
+
+== C: a stale journal of another generation is not removed by a reader that read the earlier one
+covered by the unit test a_stale_reader_leaves_a_later_rename_of_the_same_sandbox_alone (it needs two interleaved readers)
+
+== D: real crashes: msb rename killed with SIGKILL at random moments, then recovery
+iter 00 delay 0.081s killed=False journal-left=0 -> probe-a4 ok
+iter 01 delay 0.038s killed=True journal-left=1 -> probe-a2 ok
+iter 02 delay 0.163s killed=False journal-left=0 -> probe-a4 ok
+iter 03 delay 0.018s killed=True journal-left=1 -> probe-a2 ok
+iter 04 delay 0.134s killed=False journal-left=0 -> probe-a4 ok
+iter 05 delay 0.091s killed=True journal-left=0 -> probe-a2 ok
+iter 06 delay 0.014s killed=True journal-left=0 -> probe-a2 ok
+iter 07 delay 0.127s killed=False journal-left=0 -> probe-a4 ok
+iter 08 delay 0.009s killed=True journal-left=0 -> probe-a4 ok
+iter 09 delay 0.108s killed=False journal-left=0 -> probe-a2 ok
+iter 10 delay 0.017s killed=True journal-left=1 -> probe-a4 ok
+iter 11 delay 0.023s killed=True journal-left=1 -> probe-a2 ok
+iter 12 delay 0.106s killed=False journal-left=0 -> probe-a4 ok
+iter 13 delay 0.207s killed=False journal-left=0 -> probe-a2 ok
+iter 14 delay 0.031s killed=True journal-left=1 -> probe-a4 ok
+iter 15 delay 0.056s killed=True journal-left=0 -> probe-a2 ok
+iter 16 delay 0.157s killed=False journal-left=0 -> probe-a4 ok
+iter 17 delay 0.237s killed=False journal-left=0 -> probe-a2 ok
+iter 18 delay 0.144s killed=False journal-left=0 -> probe-a4 ok
+iter 19 delay 0.099s killed=False journal-left=0 -> probe-a2 ok
+iter 20 delay 0.244s killed=False journal-left=0 -> probe-a4 ok
+iter 21 delay 0.012s killed=True journal-left=1 -> probe-a2 ok
+iter 22 delay 0.215s killed=False journal-left=0 -> probe-a4 ok
+iter 23 delay 0.072s killed=False journal-left=0 -> probe-a2 ok
+iter 24 delay 0.036s killed=True journal-left=1 -> probe-a4 ok
+iter 25 delay 0.029s killed=True journal-left=1 -> probe-a2 ok
+iter 26 delay 0.077s killed=False journal-left=0 -> probe-a4 ok
+iter 27 delay 0.204s killed=False journal-left=0 -> probe-a2 ok
+iter 28 delay 0.045s killed=True journal-left=1 -> probe-a4 ok
+iter 29 delay 0.145s killed=False journal-left=0 -> probe-a2 ok
+iter 30 delay 0.160s killed=False journal-left=0 -> probe-a4 ok
+iter 31 delay 0.093s killed=False journal-left=0 -> probe-a2 ok
+iter 32 delay 0.137s killed=False journal-left=0 -> probe-a4 ok
+iter 33 delay 0.016s killed=True journal-left=1 -> probe-a2 ok
+iter 34 delay 0.015s killed=True journal-left=1 -> probe-a4 ok
+iter 35 delay 0.051s killed=True journal-left=1 -> probe-a2 ok
+iter 36 delay 0.170s killed=False journal-left=0 -> probe-a4 ok
+iter 37 delay 0.107s killed=False journal-left=0 -> probe-a2 ok
+iter 38 delay 0.079s killed=False journal-left=0 -> probe-a4 ok
+iter 39 delay 0.146s killed=False journal-left=0 -> probe-a2 ok
+PASS: D: every iteration ended with catalog, directory and stored name agreeing and no journal
+kills that landed mid-rename: 16 of 40
+final catalog: [(1, 'probe-a2', 'Created'), (2, 'probe-b', 'Created')], directories ['probe-a2', 'probe-b'], journals []
+
+== cleanup
+$ msb remove probe-a2
+   ✓ Removed      probe-a2
+[exit 0]
+$ msb remove probe-b
+   ✓ Removed      probe-b
+[exit 0]
+removed /private/tmp/mrp2: True
+RESULT: PASS

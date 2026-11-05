@@ -73,6 +73,12 @@ impl Channel {
         home.join(self.state_dir_name())
     }
 
+    /// The domain-like suffix of the SSH names `silo ssh-setup` adds (`main.silo`); the
+    /// development build uses its own so it never answers to production's names.
+    pub fn ssh_host_suffix(self) -> &'static str {
+        self.pick("silo", "silo-dev")
+    }
+
     /// The engine's socket, `~/.silo/engine.sock`.
     pub fn engine_socket(self, home: &Path) -> PathBuf {
         self.state_dir(home).join("engine.sock")

@@ -70,7 +70,7 @@
     },
     {
       "path": "patches/microsandbox-create-stopped-0.7.6.patch",
-      "sha256": "ef9a83a5daaf8e79486a260cebf8a20ea738d35a936b76c443de2d561239a1b7"
+      "sha256": "ae9c061a6124a998f10f6ec3fb58b86209c8533f24b89e6d603c32aff812da7b"
     },
     {
       "path": "patches/microsandbox-adopt-owned-disk-0.7.6.patch",
@@ -147,6 +147,10 @@
     {
       "path": "patches/microsandbox-retired-layer-cleanup-0.7.6.patch",
       "sha256": "61a0ebb0c2f6f85a0a05cb3f1facea7e12087e7577ea2ecd56c0099d3066e18e"
+    },
+    {
+      "path": "patches/microsandbox-rename-stopped-0.7.6.patch",
+      "sha256": "07dff550951d356d484b3a6dc69354b85676465fcaf07e63a05c897a7cc494e1"
     }
   ]
 }

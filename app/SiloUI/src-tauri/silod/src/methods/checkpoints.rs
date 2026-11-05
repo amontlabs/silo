@@ -12,6 +12,7 @@ mod exports;
 mod keep;
 mod migration;
 pub(crate) mod preparation;
+mod recipes;
 
 use std::sync::Arc;
 
@@ -47,6 +48,7 @@ pub(super) fn owns(method: MethodName) -> bool {
             "exports.",
             "migration.",
             "preparation.",
+            "recipes.",
             "device.",
         ],
     )
@@ -70,11 +72,16 @@ async fn dispatch(
     context: &HandlerContext,
 ) -> Result<HandlerOutput, DispatchError> {
     match method {
+        MethodName::RecipesBuild => recipes::build(context, params).await,
+        MethodName::RecipesList => recipes::list(context).await,
+        MethodName::RecipesRemove => recipes::remove(context, params).await,
         MethodName::ChangesCapture => changes::capture(context, params).await,
         MethodName::ChangesDiff => changes::diff(context, params).await,
         MethodName::ChangesBaseline => changes::baseline(context, params).await,
         MethodName::ChangesKeep => keep::keep(context, params).await,
+        MethodName::ChangesPromote => keep::promote(context, params).await,
         MethodName::ChangesUndo => keep::undo(context, params).await,
+        MethodName::ChangesRequest => keep::request(context, params).await,
         MethodName::CheckpointsCreate => create(context, params).await,
         MethodName::CheckpointsRestore => restore(context, params).await,
         MethodName::CheckpointsFork => fork(context, params).await,
@@ -201,12 +208,16 @@ async fn create(context: &HandlerContext, params: &Value) -> Result<HandlerOutpu
     let params: CheckpointCreateParams = context.decode_params(params)?;
     require_local_device(context, params.device_id.as_deref())?;
     let service = service(context);
-    job_started(
-        blocking_failure(move || {
-            service.start_create(&params.computer_id, &params.name, params.kind)
-        })
-        .await,
-    )
+    let warm = (params.kind == Some(silo_api::methods::checkpoints::CheckpointKind::Warm))
+        .then(|| silo_engine::generation::warm_baseline(&params.computer_id));
+    let started = blocking_failure(move || {
+        service.start_create(&params.computer_id, &params.name, params.kind)
+    })
+    .await;
+    if let (Some(baseline), Ok(job_id)) = (warm, &started) {
+        silo_engine::generation::note_warm_job(job_id.as_str(), baseline);
+    }
+    job_started(started)
 }
 
 async fn restore(context: &HandlerContext, params: &Value) -> Result<HandlerOutput, DispatchError> {
@@ -225,7 +236,7 @@ async fn fork(context: &HandlerContext, params: &Value) -> Result<HandlerOutput,
     let service = service(context);
     job_started(
         blocking_failure(move || {
-            service.start_fork(
+            service.start_fork_from_recipe(
                 &params.computer_id,
                 params.checkpoint_id.as_deref(),
                 &params.new_name,
@@ -238,6 +249,7 @@ async fn fork(context: &HandlerContext, params: &Value) -> Result<HandlerOutput,
                         .unwrap_or_default(),
                     scrub: params.quiet.map(|q| q.scrub).unwrap_or_default(),
                 },
+                params.recipe_hash.as_deref(),
             )
         })
         .await,

@@ -1,0 +1,114 @@
+== header
+commit: 93cebb6cb57e82d2513a05d014b57903044bf7ee; tracked changes under app/: []
+bundled msb: msb 0.7.6; silo: silo 0.1.0; host 26.5 arm64; date 2026-11-05T22:21:22Z
+== silo up (project recipe .silo/recipes/linux-dev.yaml replaces the built-in: python3 web app on :3000 as service 'web', ports [3000])
+[23:22:09] PASS  silo up  -- 47 s
+Building the recipe linux-dev: 25s
+Building the recipe linux-dev: 30s
+Making main from linux-dev...
+Starting main...
+Checkpointing main...
+{
+  "created": true,
+  "main": {
+    "checkpoints": 1,
+    "cpus": 2,
+    "detail": "Running",
+    "diskGiB": 10,
+    "generation": 3,
+    "id": "7410c71c-9fe2-44f9-b3c6-3fb4c18066bd",
+    "kind": "linux",
+    "memoryGiB": 4,
+    "name": "main",
+    "state": "running"
+  },
+  "portsError": null,
+  "publishedPorts": [
+    3000
+  ],
+  "recipe": "linux-dev",
+  "ssh": {
+    "computer": "main",
+    "config": "/Users/polarzero/.silo-dev/ssh-hosts.conf",
+    "connect": "ssh main.silo-dev",
+    "host": "main.silo-dev"
+  },
+  "warmCheckpoint": "c63eca52ffe274bac841dd41400feedf"
+}
+
+guest OS: Ubuntu 24.04.4 LTS kernel 6.12.109
+main
+== web app through the boot entry on main
+in-guest: host=main content=v1
+c63eca52ffe274bac841dd41400feedf  silo-warm  warm  2026-11-05T22:22:04.599Z
+main ports:
+3000  http  reachable  http://3000.main.silo.localhost:47383
+== fork main -n 4
+[23:22:31] PASS  silo fork main -n 4  -- wall 18 s (dev signal only)
+Starting main-9a0b8b: 5s
+Starting main-a5d41d: 5s
+Starting main-3715ff: 5s
+Starting main-3715ff: 10s
+forks: main-a6e2b4 main-9a0b8b main-a5d41d main-3715ff
+[23:22:31] PASS  4 forks created  -- 4 forks
+checkpoint: cc6b8e68ad0b44a968ea6edf76bcb5e9 (main warm checkpoint: see list above)
+main-a6e2b4 running urls= ['http://3000.main-a6e2b4.silo.localhost:47383']
+main-9a0b8b running urls= ['http://3000.main-9a0b8b.silo.localhost:47383']
+main-a5d41d running urls= ['http://3000.main-a5d41d.silo.localhost:47383']
+main-3715ff running urls= ['http://3000.main-3715ff.silo.localhost:47383']
+NAME         STATE      KIND    SIZE
+workspace-1  stopped    linux   8 cpu, 32 GiB
+e2e-relay    stopped    linux   8 cpu, 32 GiB
+silo-eval-a  stopped    linux   2 cpu, 2 GiB
+silo-eval-b  stopped    linux   2 cpu, 2 GiB
+main         running    linux   2 cpu, 4 GiB
+main-a6e2b4  running    linux   2 cpu, 4 GiB
+main-9a0b8b  running    linux   2 cpu, 4 GiB
+main-3715ff  running    linux   2 cpu, 4 GiB
+main-a5d41d  running    linux   2 cpu, 4 GiB
+[23:22:33] PASS  all 4 forks running  -- 4 running
+== each fork serves :3000 inside the guest (silo exec) with its own hostname
+main-a6e2b4 in-guest: [host=main-a6e2b4 content=v1]
+main-9a0b8b in-guest: [host=main-9a0b8b content=v1]
+main-a5d41d in-guest: [host=main-a5d41d content=v1]
+main-3715ff in-guest: [host=main-3715ff content=v1]
+[23:22:34] PASS  web app runs in each fork with its own hostname (in-guest)  -- 4 distinct:  main-a6e2b4 main-9a0b8b main-a5d41d main-3715ff
+== URLs through the proxy (network.urls)
+dev proxy port (lsof of the dev silod; default 47383): 47383
+main-a6e2b4 printed urls: [http://3000.main-a6e2b4.silo.localhost:47383]
+main-9a0b8b printed urls: [http://3000.main-9a0b8b.silo.localhost:47383]
+main-a5d41d printed urls: [http://3000.main-a5d41d.silo.localhost:47383]
+main-3715ff printed urls: [http://3000.main-3715ff.silo.localhost:47383]
+[23:22:35] PASS  each fork prints its own URL (network.urls)  -- 4 of 4 forks have URLs
+-- concurrent curl of each fork's printed URL
+main-a6e2b4 http://3000.main-a6e2b4.silo.localhost:47383: host=main-a6e2b4 content=v1
+ http=200
+main-9a0b8b http://3000.main-9a0b8b.silo.localhost:47383: host=main-9a0b8b content=v1
+ http=200
+main-a5d41d http://3000.main-a5d41d.silo.localhost:47383: host=main-a5d41d content=v1
+ http=200
+main-3715ff http://3000.main-3715ff.silo.localhost:47383: host=main-3715ff content=v1
+ http=200
+[23:22:35] PASS  4 concurrent curls: each fork's URL answers 200 with its own hostname  -- 
+3000  http  reachable  http://3000.main-a6e2b4.silo.localhost:47383
+3000  http  reachable  http://3000.main-9a0b8b.silo.localhost:47383
+3000  http  reachable  http://3000.main-a5d41d.silo.localhost:47383
+3000  http  reachable  http://3000.main-3715ff.silo.localhost:47383
+== drop forks
+dropped main-a6e2b4 rc=0
+dropped main-9a0b8b rc=0
+dropped main-a5d41d rc=0
+dropped main-3715ff rc=0
+main-a6e2b4 after drop: http 404
+main-9a0b8b after drop: http 404
+main-a5d41d after drop: http 404
+main-3715ff after drop: http 404
+[23:22:53] PASS  dropped forks' URLs stop answering (404/502)  -- 
+[23:22:53] cleanup
+NAME         STATE      KIND    SIZE
+workspace-1  stopped    linux   8 cpu, 32 GiB
+e2e-relay    stopped    linux   8 cpu, 32 GiB
+silo-eval-a  stopped    linux   2 cpu, 2 GiB
+silo-eval-b  stopped    linux   2 cpu, 2 GiB
+main         running    linux   2 cpu, 4 GiB
+== summary: 8 passed, 0 failed

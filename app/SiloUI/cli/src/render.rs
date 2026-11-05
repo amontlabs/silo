@@ -148,6 +148,73 @@ pub fn computer_line(verb: &str, value: &Value) -> String {
     format!("{verb} {} ({})", text(value, "name"), text(value, "state"))
 }
 
+/// `Forked try (stopped): main as of 14:02:31 (warm checkpoint, unchanged since, 40s old)`.
+pub fn forked(value: &Value) -> String {
+    let line = computer_line("Forked", value);
+    let checkpoint = &value["checkpoint"];
+    if !checkpoint.is_object() || text(value, "forkedAsOf").is_empty() {
+        return line;
+    }
+    let what = if checkpoint["reused"] == true {
+        let named = match text(checkpoint, "kind") {
+            "" => "checkpoint".to_owned(),
+            kind => format!("{kind} checkpoint"),
+        };
+        if checkpoint["unchanged"] == true {
+            format!("{named}, unchanged since")
+        } else {
+            named
+        }
+    } else {
+        "new checkpoint".to_owned()
+    };
+    let age = if checkpoint["reused"] == true {
+        format!(
+            ", {} old",
+            crate::clock::age_text(checkpoint["ageSeconds"].as_i64().unwrap_or(0))
+        )
+    } else {
+        String::new()
+    };
+    format!(
+        "{line}: {} as of {} ({what}{age})",
+        text(value, "source"),
+        text(value, "forkedAsOf")
+    )
+}
+
+pub fn ports(value: &Value) -> String {
+    let rows = value["ports"].as_array().cloned().unwrap_or_default();
+    if rows.is_empty() {
+        return format!("No ports are published from {}.", text(value, "computer"));
+    }
+    rows.iter()
+        .map(|row| {
+            let target = row["url"]
+                .as_str()
+                .map(str::to_owned)
+                .or_else(|| row["hostPort"].as_u64().map(|p| format!("127.0.0.1:{p}")))
+                .unwrap_or_else(|| "not reachable yet".to_owned());
+            format!(
+                "{}  {}  {}  {}",
+                number(row, "port"),
+                text(row, "scheme"),
+                text(row, "state"),
+                target
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+pub fn ssh(value: &Value) -> String {
+    format!(
+        "ssh {} reaches {}.",
+        text(value, "host"),
+        text(value, "computer")
+    )
+}
+
 pub fn checkpoints(value: &Value) -> String {
     let items = value["checkpoints"].as_array().cloned().unwrap_or_default();
     if items.is_empty() {
@@ -197,6 +264,85 @@ fn lines(value: &Value, key: &str) -> Vec<String> {
         .collect()
 }
 
+pub fn up(value: &Value) -> String {
+    let main = &value["main"];
+    let made = if value["created"] == true {
+        format!(" (made from {})", text(value, "recipe"))
+    } else {
+        String::new()
+    };
+    let mut out = format!(
+        "main is {}{made}. Warm checkpoint {} saved.",
+        text(main, "state"),
+        text(value, "warmCheckpoint")
+    );
+    if let Some(host) = value["ssh"]["host"].as_str() {
+        out.push_str(&format!(" ssh {host} reaches it."));
+    } else if let Some(error) = value["ssh"]["error"].as_str() {
+        out.push_str(&format!(" SSH name not set up: {error}"));
+    }
+    if let Some(error) = value["portsError"].as_str() {
+        out.push_str(&format!(" Ports not published: {error}"));
+    }
+    out
+}
+
+pub fn recipes(value: &Value) -> String {
+    let rows = value["recipes"].as_array().cloned().unwrap_or_default();
+    let width = rows
+        .iter()
+        .map(|r| text(r, "name").len())
+        .max()
+        .unwrap_or(4)
+        .max(4);
+    let mut out = format!("{:<width$}  {:<9}  BUILT\n", "NAME", "FROM");
+    for row in rows {
+        let built = if row["built"] == true {
+            format!("{} ({})", text(&row, "builtAt"), text(&row, "imageVersion"))
+        } else {
+            "not built".to_owned()
+        };
+        out.push_str(&format!(
+            "{:<width$}  {:<9}  {built}\n",
+            text(&row, "name"),
+            text(&row, "origin")
+        ));
+    }
+    out.trim_end().to_owned()
+}
+
+pub fn recipe_built(value: &Value) -> String {
+    let recipe = &value["recipe"];
+    let verb = if value["built"] == true {
+        "Built"
+    } else {
+        "Already built:"
+    };
+    format!(
+        "{verb} {} ({}), checkpoint {}.",
+        text(recipe, "name"),
+        &text(recipe, "hash")[..12.min(text(recipe, "hash").len())],
+        text(recipe, "checkpointId")
+    )
+}
+
+pub fn promote(value: &Value) -> String {
+    let report = &value["report"];
+    let (fork, target) = (text(report, "fork"), text(report, "target"));
+    let archive = text(report, "archive");
+    let mut out = match text(value, "status") {
+        "refused" => return text(&value["refusal"], "message").to_owned(),
+        "dry-run" => {
+            format!("Would make {fork} the new {target}; {target} would be archived as {archive}.")
+        }
+        _ => format!("{fork} is now {target}. The old {target} is {archive} (stopped)."),
+    };
+    for line in lines(report, "notes") {
+        out.push_str(&format!("\nnote: {line}"));
+    }
+    out
+}
+
 /// `silo fold`: what was kept, what a dry run would keep, or why nothing was changed.
 pub fn fold(value: &Value) -> String {
     let report = &value["report"];
@@ -216,6 +362,9 @@ pub fn fold(value: &Value) -> String {
             }
             out.push_str(&format!("\n{}", text(refusal, "hint")));
             return out;
+        }
+        "unchanged" => {
+            return lines(report, "steps").join("\n");
         }
         "dry-run" => {
             out.push_str(&format!("Would keep {fork} into {target}:"));
@@ -242,7 +391,25 @@ pub fn fold(value: &Value) -> String {
 pub fn undo(value: &Value) -> String {
     let computer = text(value, "computer");
     match text(value, "status") {
+        "undone" if text(value, "kind") == "promote" => {
+            let how = if value["recovered"] == true {
+                " (an interrupted promote)"
+            } else {
+                ""
+            };
+            format!(
+                "Undid the promote{how}: {computer} is main again, and {} has its own name back.",
+                text(value, "fork")
+            )
+        }
         "undone" => {
+            if value.get("branch").is_some() {
+                return format!(
+                    "Put {} in {computer} back to {}.",
+                    text(value, "branch"),
+                    &text(value, "head")[..8.min(text(value, "head").len())]
+                );
+            }
             let name = text(&value["checkpoint"], "name");
             let how = if value["recovered"] == true {
                 " (an interrupted keep)"
@@ -265,6 +432,80 @@ pub fn undo(value: &Value) -> String {
             }
             out
         }
+        "refused" => text(value, "message").to_owned(),
         _ => format!("Nothing to undo on {computer}."),
     }
+}
+
+/// `silo fork -n N` and `silo fork ... -- cmd`: one line per fork, with its URLs and, when a
+/// command ran, how it ended.
+pub fn forks(value: &Value) -> String {
+    let forks = value["forks"].as_array().cloned().unwrap_or_default();
+    let width = forks
+        .iter()
+        .map(|fork| text(fork, "name").len())
+        .max()
+        .unwrap_or(4);
+    let mut out = String::new();
+    for fork in &forks {
+        let name = text(fork, "name");
+        let status = if let Some(error) = fork.get("error").and_then(Value::as_str) {
+            format!("failed: {error}")
+        } else if let Some(code) = fork.get("exitCode").and_then(Value::as_i64) {
+            format!("exit {code}")
+        } else {
+            text(fork, "state").to_owned()
+        };
+        let urls: Vec<&str> = fork["urls"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .collect();
+        out.push_str(&format!("{name:<width$}  {status}"));
+        if !urls.is_empty() {
+            out.push_str(&format!("  {}", urls.join(" ")));
+        }
+        out.push('\n');
+    }
+    out.push_str(&format!(
+        "{} fork{} of {}; review with `silo diff <fork>`, keep with `silo fold <fork>`.",
+        forks.len(),
+        if forks.len() == 1 { "" } else { "s" },
+        text(value, "source"),
+    ));
+    out
+}
+
+/// `silo fork ./dir`.
+pub fn folder_fork(value: &Value) -> String {
+    let mut out = format!(
+        "Forked {} into {}; the repository is at {} in the fork.",
+        text(value, "folder"),
+        text(value, "name"),
+        text(value, "guestPath"),
+    );
+    for url in value["urls"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+    {
+        out.push_str(&format!("\n{url}"));
+    }
+    out.push_str(&format!(
+        "\nBring the commits back with `silo fold {}`.",
+        text(value, "name")
+    ));
+    out
+}
+
+/// `silo fold --request`.
+pub fn requested(value: &Value) -> String {
+    let request = &value["request"];
+    format!(
+        "Requested a review of {} (request {}).",
+        text(value, "fork"),
+        text(request, "id")
+    )
 }

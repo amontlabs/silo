@@ -292,7 +292,17 @@ pub(in crate::macos_computers_engine) fn require_guest_bootstrap(
     let address = proxy_address::load_existing(layout, &proxy_address::host_ipv4_routes()?)?;
     let ca = proxy_ca::get_existing(&record.id)?
         .ok_or_else(|| "The macOS proxy CA is missing. Retry computer setup.".to_owned())?;
-    let identity = expected_identity(record, address, &ca)?;
+    check_identity(record, layout, address, &ca)
+}
+
+/// The start-time check: the saved identity must match this computer's id, address, MAC and CA.
+fn check_identity(
+    record: &Record,
+    layout: &Layout,
+    address: ProxyAddress,
+    ca: &CaMaterial,
+) -> Result<(), String> {
+    let identity = expected_identity(record, address, ca)?;
     if read_identity(layout)?.as_ref() != Some(&identity) {
         return Err(
             "The macOS proxy bootstrap identity is missing or has changed. Retry computer setup."
@@ -1126,5 +1136,58 @@ mod tests {
             .format(&time::format_description::well_known::Rfc3339)
             .unwrap();
         assert!(validate_receipt(&record, &identity, &stale, now, true).is_err());
+    }
+
+    fn other_ca() -> CaMaterial {
+        CaMaterial::from_pem(
+            "-----BEGIN CERTIFICATE-----\nb3RoZXI=\n-----END CERTIFICATE-----\n".into(),
+            "-----BEGIN PRIVATE KEY-----\nb3RoZXI=\n-----END PRIVATE KEY-----\n".into(),
+        )
+        .unwrap()
+    }
+
+    /// Each disk's identity names its own computer id and CA, which a promote's swap of names,
+    /// ports and hostnames leaves alone, so the start-time check still passes after a swap and
+    /// after an undo (the record's name is not part of the identity).
+    #[test]
+    fn the_start_check_passes_after_a_swap_and_after_an_undo() {
+        let directory = tempfile::tempdir().unwrap();
+        let layout = Layout {
+            dir: directory.path().join("computer-a"),
+            access: None,
+        };
+        let address = proxy_address::load_or_allocate(&layout, &[]).unwrap();
+        let mut record = record();
+        write_identity(
+            &layout,
+            &expected_identity(&record, address, &ca()).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(check_identity(&record, &layout, address, &ca()), Ok(()));
+        record.name = "main".into();
+        assert_eq!(check_identity(&record, &layout, address, &ca()), Ok(()));
+        record.name = "Computer A".into();
+        assert_eq!(check_identity(&record, &layout, address, &ca()), Ok(()));
+    }
+
+    /// Presenting another computer's CA fails the check, which is why a promote leaves each
+    /// computer with the CA its disk trusts.
+    #[test]
+    fn the_start_check_fails_when_another_computers_ca_is_presented() {
+        let directory = tempfile::tempdir().unwrap();
+        let layout = Layout {
+            dir: directory.path().join("computer-a"),
+            access: None,
+        };
+        let address = proxy_address::load_or_allocate(&layout, &[]).unwrap();
+        let record = record();
+        write_identity(
+            &layout,
+            &expected_identity(&record, address, &ca()).unwrap(),
+        )
+        .unwrap();
+        assert!(check_identity(&record, &layout, address, &other_ca())
+            .unwrap_err()
+            .contains("missing or has changed"));
     }
 }

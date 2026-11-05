@@ -107,7 +107,7 @@ fn safe_version(value: &str) -> bool {
 }
 
 /// The recipe version of the pinned image (for example `ubuntu-24.04-v4`).
-pub(crate) fn pinned_version() -> Option<String> {
+pub fn pinned_version() -> Option<String> {
     PinnedImage::host()
         .ok()
         .map(|pinned| pinned.manifest.version)
