@@ -66,7 +66,9 @@ impl ManifestStore for StoredManifests {
     }
 
     fn source(&self, fork: &str) -> Result<Option<String>, String> {
-        Ok(self.base(fork)?.and_then(|(_, meta)| meta.source))
+        Ok(self
+            .base(fork)?
+            .and_then(|(_, meta)| meta.origin.or(meta.source)))
     }
 }
 

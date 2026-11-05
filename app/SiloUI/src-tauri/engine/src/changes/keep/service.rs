@@ -21,10 +21,18 @@ pub fn journal_for(context: &dyn EngineContext) -> Journal {
     Journal::new(context.paths().app_data.join("changes").join("keep"))
 }
 
-fn start<F>(host: Arc<dyn RuntimeHost>, method: &'static str, work: F) -> Result<JobId, Failure>
+pub(crate) fn start<F>(
+    host: Arc<dyn RuntimeHost>,
+    method: &'static str,
+    work: F,
+) -> Result<JobId, Failure>
 where
     F: FnOnce(&Arc<dyn RuntimeHost>) -> Result<serde_json::Value, String> + Send + 'static,
 {
+    // The checkpoint code a keep calls needs a Tokio runtime, so the job runs on the engine's
+    // own blocking pool rather than a bare thread.
+    let runtime = tokio::runtime::Handle::try_current()
+        .map_err(|_| Failure::from_message("The engine has no runtime to run the keep on."))?;
     let context = host.engine_context();
     let registry = context.job_registry().map_err(Failure::from_message)?;
     let accepted = jobs::allocate(context.as_ref(), method)?;
@@ -33,8 +41,18 @@ where
         .mark_running(&job_id)
         .map_err(|error| Failure::from_message(error.to_string()))?;
     let id = job_id.clone();
-    std::thread::spawn(move || {
-        let finished = match work(&host) {
+    runtime.spawn_blocking(move || {
+        // A panic fails the job with its message instead of leaving it running.
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| work(&host)))
+            .unwrap_or_else(|panic| {
+                let detail = panic
+                    .downcast_ref::<&str>()
+                    .map(|text| (*text).to_owned())
+                    .or_else(|| panic.downcast_ref::<String>().cloned())
+                    .unwrap_or_default();
+                Err(format!("The {method} stopped unexpectedly: {detail}"))
+            });
+        let finished = match outcome {
             Ok(value) => jobs::finish_with_result(context.as_ref(), id, value, Audience::All),
             Err(message) => {
                 let failure = Failure::from_message(message);

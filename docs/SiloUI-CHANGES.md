@@ -152,7 +152,10 @@ an unreadable file or a changed mode is never taken as unchanged.
 2. **Checkpoint, then lane.** A `before-keep` checkpoint of the target (macOS computers use a
    manual checkpoint named `Before keep of <fork>`), then the target's operation lane is held
    until the apply ends, so no restore, stop, fork or delete of it interleaves. The target is
-   captured after the lane is taken.
+   captured after the lane is taken. Every check below that does not change the target runs once
+   before the checkpoint too, so a refused keep is quick and creates nothing; the checks run
+   again once the lane is held. On Linux a keep reads and writes as root, and runs repository
+   commands and recipe steps as the owner of the folder they work in.
 3. **Checks, before anything is written.** Per file, package, crontab line and uncommitted file:
    if the target changed it since the fork point and the fork ended differently, it is a
    conflict (uncommitted files are compared with the blob at the fork point, so a commit on

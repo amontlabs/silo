@@ -251,12 +251,21 @@ pub fn keep(
     };
 
     if request.dry_run {
-        let prepared = prepare::prepare(env, store, request, &target, &view, &mut tracker);
+        let prepared = prepare::prepare(env, store, request, &target, &view, &mut tracker, true);
         tracker.cleanup(env);
         return Ok(match prepared? {
             prepare::Prepared::Refused { report, refusal } => Outcome::Refused { report, refusal },
             prepare::Prepared::Ready(ready) => Outcome::DryRun(ready.report),
         });
+    }
+
+    // Every refusal that does not need main held is decided before anything is created, so a
+    // refused keep is quick and leaves no checkpoint. The same checks run again once main
+    // is held, because main may have moved since.
+    let preflight = prepare::prepare(env, store, request, &target, &view, &mut tracker, false);
+    tracker.cleanup(env);
+    if let prepare::Prepared::Refused { report, refusal } = preflight? {
+        return Ok(Outcome::Refused { report, refusal });
     }
 
     let main_before = store.capture(&target)?;
@@ -300,7 +309,7 @@ pub fn keep(
                 return Err(error);
             }
         }
-        let prepared = prepare::prepare(env, store, request, &target, &view, &mut tracker);
+        let prepared = prepare::prepare(env, store, request, &target, &view, &mut tracker, true);
         let result = match prepared {
             Ok(prepare::Prepared::Refused { report, refusal }) => {
                 Ok(Err(Outcome::Refused { report, refusal }))

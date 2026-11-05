@@ -401,8 +401,9 @@ impl ManifestStore for Store {
             }
         }
         if computer == "main" {
+            // The first two are the look ahead and the one taken before the checkpoint.
             let n = self.main_captures.fetch_add(1, Ordering::SeqCst);
-            if n >= 1 {
+            if n >= 2 {
                 if let Some(later) = &self.main_later {
                     return Ok(later.clone());
                 }
@@ -766,7 +767,8 @@ fn a_plain_keep_runs_in_order_migrates_and_restarts_with_new_process_ids() {
         // No bundle is left behind, and the temporary ref was dropped.
         assert!(c.files.keys().all(|p| !p.contains("silo-keep")));
     });
-    assert_eq!(world.logged("git_drop_ref"), 1);
+    // The look ahead and the keep each drop their own temporary ref.
+    assert_eq!(world.logged("git_drop_ref"), 2);
     assert_eq!(journal.pending("main").unwrap(), None);
     assert_eq!(journal.latest_undoable("main").unwrap().id, "cp1");
 }
@@ -815,7 +817,8 @@ fn a_divergent_keep_stops_before_anything_changes() {
     world.with("main", |c| {
         assert_eq!(c.files["/root/.bashrc"].0, b"main edited")
     });
-    // The refused keep's checkpoint cannot be undone.
+    // A refusal is decided before a checkpoint is taken, so it creates nothing.
+    assert_eq!(world.logged("checkpoint"), 0);
     assert_eq!(journal.latest_undoable("main"), None);
     assert_eq!(journal.pending("main").unwrap(), None);
 }
@@ -1258,7 +1261,8 @@ fn brew_installs_only_when_it_would_install_the_forks_version() {
     ));
     assert_eq!(scripts::pkg_runner(Os::Macos, "brew"), RunAs::Account);
     assert_eq!(scripts::pkg_runner(Os::Linux, "dpkg"), RunAs::Root);
-    assert_eq!(scripts::pkg_runner(Os::Linux, "cargo"), RunAs::Account);
+    assert_eq!(scripts::pkg_runner(Os::Linux, "cargo"), RunAs::Root);
+    assert_eq!(scripts::pkg_runner(Os::Linux, "brew"), RunAs::Account);
 }
 
 #[test]
@@ -1705,7 +1709,9 @@ fn a_keep_is_refused_when_main_changed_between_the_checkpoint_and_the_held_lane(
     let (_dir, journal) = journal();
     let mut st = store(BASE, FORK, BASE);
     st.main_later = Some(mt(&format!("{BASE}F\t/root/new.txt\t10\t3\tc:x\n")));
-    let refusal = refused(run(&world, &st, &journal, &request(Hooks::default())).unwrap());
+    let mut req = request(Hooks::default());
+    req.data_ok = true;
+    let refusal = refused(run(&world, &st, &journal, &req).unwrap());
     assert_eq!(refusal.reason, "main-changed");
     assert_eq!(world.logged("git_merge"), 0);
     assert_eq!(world.logged("restore"), 0);
