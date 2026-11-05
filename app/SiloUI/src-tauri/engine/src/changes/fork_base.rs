@@ -33,10 +33,22 @@ fn context() -> Option<Arc<dyn EngineContext>> {
         .clone()
 }
 
-/// The key the baseline of a fork is cached under: the checkpoint it was made from, or the
-/// source computer when it was made from the current state.
-pub fn source_key(checkpoint_id: Option<&str>, source_computer_id: &str) -> String {
-    checkpoint_id.unwrap_or(source_computer_id).to_owned()
+/// What a baseline key starts with when the fork came from a recipe.
+pub const RECIPE_KEY_PREFIX: &str = "recipe:";
+
+/// The key the baseline of a fork is cached under: the recipe it was built from, else the
+/// checkpoint it was made from, else the source computer when it was made from the current
+/// state. A recipe's key survives the checkpoint being rebuilt, so every fork of one recipe
+/// shares a baseline.
+pub fn source_key(
+    checkpoint_id: Option<&str>,
+    source_computer_id: &str,
+    recipe_hash: Option<&str>,
+) -> String {
+    match recipe_hash {
+        Some(hash) => format!("{RECIPE_KEY_PREFIX}{hash}"),
+        None => checkpoint_id.unwrap_or(source_computer_id).to_owned(),
+    }
 }
 
 /// Notes at fork creation that `new_name` wants a base at its first start.
@@ -57,8 +69,14 @@ pub fn expect(context: Arc<dyn EngineContext>, new_name: &str, source: &str, com
 pub fn forked_from(new_name: &str, checkpoint_id: &str) {
     let Some(context) = context() else { return };
     let store = Store::for_engine(context.as_ref());
-    if store.take_pending(new_name).is_some() {
-        if let Err(error) = store.put_pending(new_name, checkpoint_id) {
+    if let Some(noted) = store.take_pending(new_name) {
+        // A recipe's key stays: it is what the baseline is shared under.
+        let key = if noted.starts_with(RECIPE_KEY_PREFIX) {
+            noted.as_str()
+        } else {
+            checkpoint_id
+        };
+        if let Err(error) = store.put_pending(new_name, key) {
             eprintln!("The fork-time record of {new_name} could not be updated: {error}");
         }
     }
@@ -182,7 +200,8 @@ mod tests {
 
     #[test]
     fn a_checkpoint_keys_the_baseline_and_the_current_state_keys_by_source() {
-        assert_eq!(source_key(Some("cp1"), "src"), "cp1");
-        assert_eq!(source_key(None, "src"), "src");
+        assert_eq!(source_key(Some("cp1"), "src", None), "cp1");
+        assert_eq!(source_key(None, "src", None), "src");
+        assert_eq!(source_key(Some("cp1"), "src", Some("ab12")), "recipe:ab12");
     }
 }

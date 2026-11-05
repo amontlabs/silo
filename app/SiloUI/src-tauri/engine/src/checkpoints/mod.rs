@@ -224,6 +224,7 @@ impl Service {
                 computer_id.to_owned(),
                 name.to_owned(),
                 automatic,
+                kind == Some(CheckpointKind::Warm),
                 self.retention.clone(),
             )
             .map_err(Failure::from_message),
@@ -311,11 +312,24 @@ impl Service {
         new_name: &str,
         options: ForkOptions,
     ) -> Result<JobId, Failure> {
+        self.start_fork_from_recipe(computer_id, checkpoint_id, new_name, options, None)
+    }
+
+    /// `checkpoints.fork` for a fork built from a recipe: its idle baseline is cached under
+    /// the recipe's hash.
+    pub fn start_fork_from_recipe(
+        &self,
+        computer_id: &str,
+        checkpoint_id: Option<&str>,
+        new_name: &str,
+        options: ForkOptions,
+        recipe_hash: Option<&str>,
+    ) -> Result<JobId, Failure> {
         // Noted first: the fork's source is resolved on the job and replaces the key.
         crate::changes::fork_base::expect(
             self.context(),
             new_name,
-            &crate::changes::fork_base::source_key(checkpoint_id, computer_id),
+            &crate::changes::fork_base::source_key(checkpoint_id, computer_id, recipe_hash),
             computer_id,
         );
         match self.start_fork_job(computer_id, checkpoint_id, new_name, options) {

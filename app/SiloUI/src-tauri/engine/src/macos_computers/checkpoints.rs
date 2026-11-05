@@ -71,6 +71,8 @@ pub(super) enum PolicyKind {
     /// The disk a Fork of the current state starts from. It never holds memory, retention
     /// leaves it alone, and it stays while a fork made from it exists.
     ForkPoint,
+    /// The checkpoint `silo up` keeps of main; replaced on every `up`, never trimmed.
+    Warm,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
