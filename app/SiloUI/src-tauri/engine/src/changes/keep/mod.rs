@@ -214,9 +214,10 @@ fn main_changed(request: &Request, target: &str, digest: &str, lines: Vec<String
 }
 
 /// What differs between two manifests of the same computer, as report lines; `None` when
-/// nothing a keep or an undo would care about moved.
-fn main_moved(before: &str, now: &str) -> Option<Vec<String>> {
-    use crate::changes::{diff::diff, ignore::IgnoreList, manifest::Manifest};
+/// nothing the keep will write or check moved: its files, packages, crontabs, agents and the
+/// repos it merges. Processes, ports and background churn elsewhere do not count.
+fn main_moved(view: &prepare::ForkView, os: Os, before: &str, now: &str) -> Option<Vec<String>> {
+    use crate::changes::manifest::Manifest;
     if before == now {
         return None;
     }
@@ -225,15 +226,23 @@ fn main_moved(before: &str, now: &str) -> Option<Vec<String>> {
             "Silo could not compare main before and after the checkpoint.".into(),
         ]);
     };
-    let changes = diff(&before, &now, None, &IgnoreList::builtin());
-    if changes
-        .summary
-        .iter()
-        .all(|s| s.lines.is_empty() || s.bucket == "Not kept")
-    {
+    let items = |main: &Manifest| {
+        let plan = plan::build(&view.diff, &view.base, &view.fork, main, os);
+        prepare::read_signature(&plan, main)
+    };
+    let (first, second) = (items(&before), items(&now));
+    if first == second {
         return None;
     }
-    Some(changes.render_lines(15))
+    let mut lines: Vec<String> = second
+        .iter()
+        .filter(|item| !first.contains(item))
+        .cloned()
+        .collect();
+    if lines.is_empty() {
+        lines.push("what the keep would write changed".into());
+    }
+    Some(lines)
 }
 
 /// Keeps `request.fork` into its target.
@@ -256,7 +265,7 @@ pub fn keep(
     if target == request.fork {
         return Err("A computer cannot be kept into itself.".into());
     }
-    env.os(&target).map_err(|_| {
+    let os = env.os(&target).map_err(|_| {
         format!("{target} is not a computer on this device. Name the computer to keep into.")
     })?;
     let _lane = lane::acquire(&target, wait)?;
@@ -324,7 +333,7 @@ pub fn keep(
         // the checkpoint saved now that nothing else can change it.
         let moved = store
             .capture(&target)
-            .map(|now| main_moved(&main_before, &now));
+            .map(|now| main_moved(&view, os, &main_before, &now));
         match moved {
             Ok(None) => {}
             Ok(Some(lines)) => {

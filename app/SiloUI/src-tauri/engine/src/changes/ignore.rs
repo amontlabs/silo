@@ -70,6 +70,8 @@ pub const BUILTIN_IGNORE: &str = "\
 */Library/Biome
 */Library/Daemon Containers
 */Library/Metadata
+# the TV app's library databases, rewritten while it idles
+*/Movies/TV/TV Library.tvlibrary
 */Library/Logs
 */Library/Group Containers/group.com.apple.*
 */Library/Containers/com.apple.*
@@ -349,6 +351,13 @@ pub fn credential_group_owned(path: &str, owned: bool) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_tv_library_is_background_churn() {
+        let list = IgnoreList::builtin();
+        assert!(list.matches("/Users/a/Movies/TV/TV Library.tvlibrary/library.tvdb"));
+        assert!(!list.matches("/Users/a/Movies/film.mov"));
+    }
 
     #[test]
     fn glob_basics() {
