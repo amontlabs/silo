@@ -1,7 +1,7 @@
 == header
-commit: 765dd6e3511853f15b95d4c7630273fdfdd7935e; git status --porcelain app: []
+commit: 2547e1903a38047f65a280480a5e5136fdfa650c; git status --porcelain app: []
 bundled msb: msb 0.7.6
-host macOS 26.5 (arm64); silo silo 0.1.0; claude 2.1.311 (Claude Code); date 2026-11-05T14:27:02Z
+host macOS 26.5 (arm64); silo silo 0.1.0; claude 2.1.311 (Claude Code); date 2026-11-05T18:38:23Z
 macOS VMs running (pgrep Virtualization.VirtualMachine): 0
 NAME         STATE      KIND    SIZE
 workspace-1  stopped    linux   8 cpu, 32 GiB
@@ -11,56 +11,54 @@ silo-eval-b  stopped    linux   2 cpu, 2 GiB
 == main: create (or reuse), service, brew, repo
 Creating e2e-p2m-main...
 Created e2e-p2m-main (stopped)
-create rc=0 in 74 s
+create rc=0 in 77 s
 macOS VMs running (pgrep Virtualization.VirtualMachine): 0
 Starting e2e-p2m-main...
 Started e2e-p2m-main (running)
 guest: ProductName:		macOS ProductVersion:		26.6.2 BuildVersion:		25G83 silo
-[15:28:43] installing Homebrew as the user
-726
-801
+[19:40:00] installing Homebrew as the user
 Homebrew 7.0.12
 jq: not installed
-[15:29:10] PASS  main service up on 8080  -- p2m service v1
-main agent pid: 1330
-f961216 service v1
+[19:40:18] PASS  main service up on 8080  -- p2m service v1
+main agent pid: 1334
+75ea8c0 service v1
 keep:
   restart: [org.silo.p2m.web]
 macOS VMs running (pgrep Virtualization.VirtualMachine): 0
 == forks (from project dir)
 Forking e2e-p2m-main into e2e-p2m-t1...
 Forked e2e-p2m-t1 (setting-up)
-[15:29:19] PASS  fork e2e-p2m-t1  -- 1 s
+[19:40:26] PASS  fork e2e-p2m-t1  -- 0 s
 Forking e2e-p2m-main into e2e-p2m-t2...
 Forked e2e-p2m-t2 (setting-up)
-[15:29:20] PASS  fork e2e-p2m-t2 (idle, for --baseline)  -- 
+[19:40:27] PASS  fork e2e-p2m-t2 (idle, for --baseline)  -- 
 e2e-p2m-main  stopped    macos   4 cpu, 8 GiB
 e2e-p2m-t1    setting-up  macos   4 cpu, 8 GiB
 e2e-p2m-t2    setting-up  macos   4 cpu, 8 GiB
-3f72eb4d-7963-4cf9-b93b-26f9a8a49c34  Fork point  fork-point  2026-11-05T14:29:19.844703Z
-f1e564ae-342f-4a4a-b56f-c32e66f12aba  Fork point  fork-point  2026-11-05T14:29:19.085094Z
+8094a664-688e-483f-a384-dc13dae68fdd  Fork point  fork-point  2026-11-05T18:40:27.134307Z
+f1aac7ff-4692-4ef0-875d-c470f782ce34  Fork point  fork-point  2026-11-05T18:40:26.544144Z
 macOS VMs running (pgrep Virtualization.VirtualMachine): 0
 Starting e2e-p2m-t1...
 Started e2e-p2m-t1 (running)
-[15:30:04] PASS  start e2e-p2m-t1  -- 
+[19:41:09] PASS  start e2e-p2m-t1  -- 
 macOS VMs running (pgrep Virtualization.VirtualMachine): 1
 == live task (claude -p on host, silo exec into e2e-p2m-t1)
-claude rc=0 in 22 s
-model(s): claude-sonnet-5-5 turns: 5 cost_usd: 0.0975329 is_error: False
+claude rc=0 in 18 s
+model(s): claude-sonnet-5-5 turns: 5 cost_usd: 0.10061020000000001 is_error: False
 agent result: All three steps are done on e2e-p2m-t1.
 
-1. **Web service:** In `org.silo.p2m.web.plist` I changed the port from 8080 to 8081 and added an `EnvironmentVariables` dict with `SILO_P2M_MODE=fork`. The plist passes `plutil -lint`. I reloaded it with `launchctl bootout` and `bootstrap` on `gui/501`. `http://localhost:8081/` returns 200, and `launchctl print` shows `SILO_P2M_MODE => fork`. I did not check that 8080 stopped answering.
-2. **jq:** After `eval "$(/opt/homebrew/bin/brew shellenv)"`, `brew install jq` installed jq 1.8.2 (with oniguruma), and `jq --version` reports 1.8.2.
-3. **Notes commit:** I added `NOTES.md` to `~/srv` saying the service now listens on port 8081, and committed it as `5e17c41` on `main`.
+1. **Service on 8081:** I edited `org.silo.p2m.web.plist` to use port 8081 and added an `EnvironmentVariables` dict with `SILO_P2M_MODE=fork`. The plist passes `plutil -lint`. I reloaded it with `launchctl bootout` and `bootstrap` on `gui/501`. The service is running with the new port and env var, and `curl localhost:8081` returned HTTP 200.
+2. **jq:** I ran `eval "$(/opt/homebrew/bin/brew shellenv)"` and then `brew install jq`. It installed jq 1.8.2, and `jq --version` confirms it.
+3. **NOTES.md:** I added `~/srv/NOTES.md` saying the service now listens on port 8081 and committed it as `d4de961` on `main`.
 -- observe task result read-only
 <plist version="1.0"><dict><key>Label</key><string>org.silo.p2m.web</string><key>ProgramArguments</key><array><string>/usr/bin/python3</string><string>-m</string><string>http.server</string><string>8081</string><string>--directory</string><string>/Users/silo/srv</string></array><key>EnvironmentVariables</key><dict><key>SILO_P2M_MODE</key><string>fork</string></dict><key>KeepAlive</key><true/><key>RunAtLoad</key><true/></dict></plist>
 jq 1.8.2
-5e17c41 Add NOTES.md: service now listens on 8081
-f961216 service v1
+d4de961 Add NOTES.md: service now listens on 8081
+75ea8c0 service v1
 == diff
 macOS VMs running (pgrep Virtualization.VirtualMachine): 1
 Code
-  ~/srv: f961216..5e17c41
+  ~/srv: 75ea8c0..d4de961
 Packages
   brew: jq (+1 dependencies)
 Settings & files
@@ -70,28 +68,27 @@ Other changed
   ~ ~/Movies/TV/TV Library.tvlibrary/Library.tvdb
 Not kept
   listening: :8081 (Python)
-  processes: AMPArtworkAgent, AMPLibraryAgent, AUCrashHandlerService, HostInferenceProviderService, IMTransferAgent, MTLCompilerService, +26 more
-Ignored: 59 paths (caches, logs, build output)
-review: 876a0fbc8ed88e46df2e03c2727cefd7e955ed5c80dea642724da50a35eff35b
+  processes: AMPArtworkAgent, AMPLibraryAgent, IMTransferAgent, ManagedClient, ModelCatalogAgent, SiriSuggestionsBookkeepingService, +11 more
+Ignored: 41 paths (caches, logs, build output)
+review: 46f63fa4148833e0ffb30f2d57b7ec6f03abcf9a53020d11e01345a42f83e85e
 (stderr:)
 Comparing e2e-p2m-t1 with when it was forked...
-Comparing e2e-p2m-t1 with when it was forked: 5s
-[15:30:33] PASS  diff text <=15 lines  -- rc=0 lines=14
-[15:30:33] PASS  diff shows the LaunchAgent change  -- 
-[15:30:33] PASS  diff shows brew jq  --   brew: jq (+1 dependencies)
-[15:30:33] PASS  diff collapses jq dependencies (+N dependencies)  -- (+1 dependencies)
-[15:30:33] PASS  diff shows the commit / repo change  --   ~/srv: f961216..5e17c41|
-json rc=0 bytes=9362
+[19:41:33] PASS  diff text <=15 lines  -- rc=0 lines=14
+[19:41:33] PASS  diff shows the LaunchAgent change  -- 
+[19:41:33] PASS  diff shows brew jq  --   brew: jq (+1 dependencies)
+[19:41:33] PASS  diff collapses jq dependencies (+N dependencies)  -- (+1 dependencies)
+[19:41:33] PASS  diff shows the commit / repo change  --   ~/srv: 75ea8c0..d4de961|
+json rc=0 bytes=7836
 json top-level keys: ['baseCapturedAt', 'baselineApplied', 'baselineAvailable', 'capturedAt', 'code', 'database', 'format', 'home', 'idle_noise', 'ignored', 'not_kept', 'other', 'packages', 'repo_changes', 'repo_files', 'reviewDigest', 'settings', 'summary', 'text']
 baselineApplied = False
 baselineAvailable = False
-reviewDigest = 876a0fbc8ed88e46df2e03c2727cefd7e955ed5c80dea642724da50a35eff35b
-json size by key: {'baseCapturedAt': 29, 'baselineApplied': 5, 'baselineAvailable': 5, 'capturedAt': 28, 'code': 312, 'database': 2, 'format': 1, 'home': 13, 'idle_noise': 2, 'ignored': 3601, 'not_kept': 827, 'other': 670, 'packages': 246, 'repo_changes': 190, 'repo_files': 28, 'reviewDigest': 66, 'settings': 352, 'summary': 580, 'text': 503}
+reviewDigest = 46f63fa4148833e0ffb30f2d57b7ec6f03abcf9a53020d11e01345a42f83e85e
+json size by key: {'baseCapturedAt': 29, 'baselineApplied': 5, 'baselineAvailable': 5, 'capturedAt': 29, 'code': 312, 'database': 2, 'format': 1, 'home': 13, 'idle_noise': 2, 'ignored': 2675, 'not_kept': 456, 'other': 670, 'packages': 246, 'repo_changes': 190, 'repo_files': 28, 'reviewDigest': 66, 'settings': 352, 'summary': 576, 'text': 499}
 json mentions launchagent/label, jq, srv: True True True
 -- without baseline subtraction (--no-baseline), for churn size
 Comparing e2e-p2m-t1 with when it was forked...
 Code
-  ~/srv: f961216..5e17c41
+  ~/srv: 75ea8c0..d4de961
 Packages
   brew: jq (+1 dependencies)
 Settings & files
@@ -101,141 +98,176 @@ Other changed
   ~ ~/Movies/TV/TV Library.tvlibrary/Library.tvdb
 Not kept
   listening: :8081 (Python)
-  processes: AMPArtworkAgent, AMPLibraryAgent, AUCrashHandlerService, HostInferenceProviderService, IMTransferAgent, MTLCompilerService, +27 more
-Ignored: 63 paths (caches, logs, build output)
-review: 876a0fbc8ed88e46df2e03c2727cefd7e955ed5c80dea642724da50a35eff35b
+  processes: AMPArtworkAgent, AMPLibraryAgent, IMTransferAgent, ManagedClient, ModelCatalogAgent, SiriSuggestionsBookkeepingService, +11 more
+Ignored: 47 paths (caches, logs, build output)
+review: 46f63fa4148833e0ffb30f2d57b7ec6f03abcf9a53020d11e01345a42f83e85e
 no-baseline lines: 15
 -- diff --baseline on the used fork (expected to refuse: it has run past its idle time); main stopped, e2e-p2m-t1 running
 macOS VMs running (pgrep Virtualization.VirtualMachine): 1
-rc=0 in 112 s
+rc=0 in 103 s
 Code
-  ~/srv: f961216..5e17c41
+  ~/srv: 75ea8c0..d4de961
 Packages
   brew: jq (+1 dependencies)
 Settings & files
   launch agent org.silo.p2m.web (user): changed
 Other changed
   ~ ~/Library/Application Support/com.apple.ap.promotedcontentd/shared/all/ro/APCS/Storefront.txt
-  … +2 more (see --json)
 Not kept
   listening: :8081 (Python)
-  … +2 more (see --json)
+  processes: CalendarIntentsExtension, CategoriesService, DiskManagementSubscriber, DistributionHelper, IMTransferAgent, InteractiveLegacyProfilesSubscriber, +35 more
+  credentials: ~/Library/Application Support/com.apple.TCC/ (1 file)
 Also changes when idle
   2 files (~/Movies/TV/TV Library.tvlibrary/Library Preferences.tvdb, ~/Movies/TV/TV Library.tvlibrary/Library.tvdb)
-Ignored: 82 paths (caches, logs, build output)
-review: 5f9ce1c9faa65345d703e57df9141e804d5e1649d0603d0ae93619e963e5bbdc
+Ignored: 62 paths (caches, logs, build output)
+review: 42475e1337aae8dba8bd5db5203ce76815eb74fcf0929f788f694c11e691c2a7
 (stderr:)
-Leaving the idle copy alone for 42s: 41s
-Leaving the idle copy alone for 42s: 46s
-Stopping silo-baseline-a3c321...
-Dropping silo-baseline-a3c321...
+Leaving the idle copy alone for 37s: 30s
+Leaving the idle copy alone for 37s: 35s
+Leaving the idle copy alone for 37s: 41s
+Stopping silo-baseline-1cb31d...
+Dropping silo-baseline-1cb31d...
 Comparing e2e-p2m-t1 with when it was forked...
-Comparing e2e-p2m-t1 with when it was forked: 5s
 macOS VMs running (pgrep Virtualization.VirtualMachine): 1
 -- diff again after that (does it use a cached baseline?)
 Code
-  ~/srv: f961216..5e17c41
+  ~/srv: 75ea8c0..d4de961
 Packages
   brew: jq (+1 dependencies)
 Settings & files
   launch agent org.silo.p2m.web (user): changed
 Other changed
   ~ ~/Library/Application Support/com.apple.ap.promotedcontentd/shared/all/ro/APCS/Storefront.txt
-  … +2 more (see --json)
 Not kept
   listening: :8081 (Python)
-  … +2 more (see --json)
+  processes: CalendarIntentsExtension, CategoriesService, DiskManagementSubscriber, DistributionHelper, IMTransferAgent, InteractiveLegacyProfilesSubscriber, +35 more
+  credentials: ~/Library/Application Support/com.apple.TCC/ (1 file)
 Also changes when idle
   2 files (~/Movies/TV/TV Library.tvlibrary/Library Preferences.tvdb, ~/Movies/TV/TV Library.tvlibrary/Library.tvdb)
-Ignored: 84 paths (caches, logs, build output)
-review: 5f9ce1c9faa65345d703e57df9141e804d5e1649d0603d0ae93619e963e5bbdc
+Ignored: 66 paths (caches, logs, build output)
+review: 42475e1337aae8dba8bd5db5203ce76815eb74fcf0929f788f694c11e691c2a7
 lines: 16
 {'baselineApplied': True, 'baselineAvailable': True}
 == keep: main before
 macOS VMs running (pgrep Virtualization.VirtualMachine): 1
 Starting e2e-p2m-main...
 Started e2e-p2m-main (running)
-[15:33:06] PASS  start main  -- 
+[19:43:53] PASS  start main  -- 
 macOS VMs running (pgrep Virtualization.VirtualMachine): 2
-[15:33:06] PASS  main serves 8080 before keep  -- 
-main agent pid before: 411
+[19:43:53] PASS  main serves 8080 before keep  -- 
+main agent pid before: 403
 main before: 0
-f961216 service v1|
-[15:33:08] PASS  Homebrew jq absent on main before keep (the system has /usr/bin/jq)  -- 
+75ea8c0 service v1|
+[19:43:54] PASS  Homebrew jq absent on main before keep (the system has /usr/bin/jq)  -- 
 -- fold --dry-run
 Checking e2e-p2m-t1...
 Checking e2e-p2m-t1: 5s
 Checking e2e-p2m-t1: 10s
 Checking e2e-p2m-t1: 15s
-Keep stopped: brew jq clash on 212d988c-77ec-4aca-bbe3-626bfc18d715 and in 11fbd5d6-a75e-4726-b53a-e4997153a55c. 212d988c-77ec-4aca-bbe3-626bfc18d715 was not changed.
-  package brew jq: the fork has 1.8.2, brew would install an unknown version
-Bring main's change into the fork (or remove the file from the fork's commits) and keep again.
+Would keep ae51e355-e64a-49f8-8e02-ea6e508db788 into 2260fa9c-d3ac-47ca-add6-76dc4374adf4:
+  Code
+    ~/srv: 75ea8c0..d4de961
+  Packages
+    brew: jq (+1 dependencies)
+  Settings & files
+    launch agent org.silo.p2m.web (user): changed
+  Other changed
+    ~ ~/Library/Application Support/com.apple.ap.promotedcontentd/shared/all/ro/APCS/Storefront.txt
+    … +2 more (see --json)
+  Not kept
+    listening: :8081 (Python)
+    … +2 more (see --json)
+  Also changes when idle
+    2 files (~/Movies/TV/TV Library.tvlibrary/Library Preferences.tvdb, ~/Movies/TV/TV Library.tvlibrary/Library.tvdb)
+  Ignored: 89 paths (caches, logs, build output)
+  will keep packages: jq 1.8.2 (+1 dependencies: oniguruma)
+  will keep git: /Users/silo/srv
+  will keep files: 4
+  will keep launch agent: org.silo.p2m.web
 Keeping e2e-p2m-t1...
 Keeping e2e-p2m-t1: 5s
 Keeping e2e-p2m-t1: 10s
 Keeping e2e-p2m-t1: 15s
-Keep stopped: brew jq clash on 212d988c-77ec-4aca-bbe3-626bfc18d715 and in 11fbd5d6-a75e-4726-b53a-e4997153a55c. 212d988c-77ec-4aca-bbe3-626bfc18d715 was not changed.
-  package brew jq: the fork has 1.8.2, brew would install an unknown version
-Bring main's change into the fork (or remove the file from the fork's commits) and keep again.
-fold rc=2 in 18 s
-[15:33:49] FAIL  fold succeeded  -- rc=2
-bash: /opt/homebrew/bin/jq: No such file or directory
-[15:33:49] FAIL  Homebrew jq installed on main  -- bash: /opt/homebrew/bin/jq: No such file or directory
-[15:33:50] FAIL  LaunchAgent change applied on main (8081 + env var)  -- 
-f961216 service v1
-[15:33:50] FAIL  repo commit on main  -- 
-[15:36:03] FAIL  main serves 8081  -- 
-main agent pid after: 411 (before 411)
-[15:36:03] FAIL  agent restarted with a new PID  -- 411 -> 411
-	pid = 411
-3f72eb4d-7963-4cf9-b93b-26f9a8a49c34  Fork point  fork-point  2026-11-05T14:29:19.844703Z
-f1e564ae-342f-4a4a-b56f-c32e66f12aba  Fork point  fork-point  2026-11-05T14:29:19.085094Z
+Keeping e2e-p2m-t1: 20s
+Keeping e2e-p2m-t1: 25s
+Keeping e2e-p2m-t1: 30s
+Keeping e2e-p2m-t1: 36s
+Keeping e2e-p2m-t1: 41s
+Keeping e2e-p2m-t1: 46s
+Kept ae51e355-e64a-49f8-8e02-ea6e508db788 into 2260fa9c-d3ac-47ca-add6-76dc4374adf4.
+  packages brew: jq
+  git /Users/silo/srv: merged, now at d4de961
+  files: 4 written, 0 already identical
+  launch agent org.silo.p2m.web: loaded
+  restart org.silo.p2m.web: pid 6800 -> 6826
+Undo with `silo undo 2260fa9c-d3ac-47ca-add6-76dc4374adf4`.
+fold rc=0 in 52 s
+[19:45:07] PASS  fold succeeded  -- rc=0
+jq-1.8.2
+[19:45:07] PASS  Homebrew jq installed on main  -- jq-1.8.2
+[19:45:07] PASS  LaunchAgent change applied on main (8081 + env var)  -- 
+d4de961 Add NOTES.md: service now listens on 8081
+75ea8c0 service v1
+[19:45:08] PASS  repo commit on main  -- 
+[19:45:08] PASS  main serves 8081  -- p2m service v1
+main agent pid after: 6826 (before 403)
+[19:45:08] PASS  agent restarted with a new PID  -- 403 -> 6826
+		SILO_P2M_MODE => fork
+	pid = 6826
+f2a29361-56ca-47a8-a2c4-edab9ba9808f  Before keep of ae51e355-e64a-49f8-8e02-ea6e508db788  manual  2026-11-05T18:44:35.022333Z
+8094a664-688e-483f-a384-dc13dae68fdd  Fork point  fork-point  2026-11-05T18:40:27.134307Z
+f1aac7ff-4692-4ef0-875d-c470f782ce34  Fork point  fork-point  2026-11-05T18:40:26.544144Z
 == undo
 Undoing the last keep of e2e-p2m-main...
-Nothing to undo on 212d988c-77ec-4aca-bbe3-626bfc18d715.
-undo rc=0 in 0 s
-[15:36:04] PASS  undo succeeded  -- rc=0
-[15:36:05] PASS  agent back on 8080 after undo  -- p2m service v1
-[15:36:05] PASS  nothing on 8081 after undo  -- 
-[15:36:05] PASS  plist and NOTES.md change gone  -- 
-[15:36:06] PASS  Homebrew jq gone after undo  -- ls: /opt/homebrew/bin/jq: No such file or directory /opt/homebrew/Cellar: 
-f961216 service v1
+Undoing the last keep of e2e-p2m-main: 5s
+Undoing the last keep of e2e-p2m-main: 10s
+Put 2260fa9c-d3ac-47ca-add6-76dc4374adf4 back to Before keep of ae51e355-e64a-49f8-8e02-ea6e508db788.
+undo rc=0 in 11 s
+[19:45:20] PASS  undo succeeded  -- rc=0
+main state after undo: stopped; starting
+macOS VMs running (pgrep Virtualization.VirtualMachine): 1
+Starting e2e-p2m-main...
+Started e2e-p2m-main (running)
+[19:45:26] PASS  agent back on 8080 after undo  -- p2m service v1
+[19:45:27] PASS  nothing on 8081 after undo  -- 
+[19:45:27] PASS  plist and NOTES.md change gone  -- 
+[19:45:27] PASS  Homebrew jq gone after undo  -- ls: /opt/homebrew/bin/jq: No such file or directory /opt/homebrew/Cellar: 
+75ea8c0 service v1
 macOS VMs running (pgrep Virtualization.VirtualMachine): 0
 == diff --baseline on an idle fork (e2e-p2m-t2), main and e2e-p2m-t1 stopped
 macOS VMs running (pgrep Virtualization.VirtualMachine): 0
 Starting e2e-p2m-t2...
 Started e2e-p2m-t2 (running)
-[15:36:57] PASS  start e2e-p2m-t2 (idle)  -- 
-[15:36:57] idle 90 s
+[19:46:13] PASS  start e2e-p2m-t2 (idle)  -- 
+[19:46:13] idle 90 s
 macOS VMs running (pgrep Virtualization.VirtualMachine): 2
+Database changed
+  sqlite ~/Library/Application Support/com.apple.ProtectedCloudStorage/KeysSyncingVersion3-(null)-ProtectedCloudStorage.db: added (f6fb1ac)
+  sqlite ~/Library/Application Support/com.apple.ProtectedCloudStorage/PCSAnalytics.db: added (3b66773)
 Other changed
   + ~/Library/Application Support/com.apple.appleintelligencereporting.processing/AssetBringUpProcessedBuilds.json
   + ~/Library/Application Support/com.apple.appleintelligencereporting.processing/BuildHistory.json
 Not kept
-  processes: ASConfigurationSubscriber, AccountSubscriber, AppleIntelligenceReportingProcessingService, CalendarWidgetExtension, CategoriesService, ContactsCoreSpotlightExtension, +42 more
+  processes: ASConfigurationSubscriber, ASPCarryLog, AccountSubscriber, AppleIntelligenceReportingProcessingService, AuthenticationServicesAgent, CalendarIntentsExtension, +83 more
   credentials: ~/Library/Application Support/com.apple.TCC/ (1 file)
 Also changes when idle
   2 files (~/Movies/TV/TV Library.tvlibrary/Library Preferences.tvdb, ~/Movies/TV/TV Library.tvlibrary/Library.tvdb)
-Ignored: 135 paths (caches, logs, build output)
-review: 36ddaf24a115afc515a129d85de70a398050f3735d2087ad5fa5fab9cb45d6a2
+Ignored: 172 paths (caches, logs, build output)
+review: 54a52d2e263a85f6a2eb7238587077e9ae99232f7896d091e1ddaa00461bafad
 (stderr:)
 Comparing e2e-p2m-t2 with when it was forked...
 Comparing e2e-p2m-t2 with when it was forked: 5s
-baseline rc=0 in 6 s
+baseline rc=0 in 7 s
 macOS VMs running (pgrep Virtualization.VirtualMachine): 2
 {'baselineApplied': True, 'baselineAvailable': True}
-[15:38:38] PASS  diff --baseline ran on idle fork  -- rc=0 lines=10
-== summary PASS=19 FAIL=6
-[15:38:38] cleanup
+[19:47:55] PASS  diff --baseline ran on idle fork  -- rc=0 lines=13
+[19:47:55] cleanup
 NAME         STATE      KIND    SIZE
 workspace-1  stopped    linux   8 cpu, 32 GiB
 e2e-relay    stopped    linux   8 cpu, 32 GiB
 silo-eval-a  stopped    linux   2 cpu, 2 GiB
 silo-eval-b  stopped    linux   2 cpu, 2 GiB
-e2e-p2-main  running    linux   2 cpu, 3 GiB
-e2e-p2-t1    running    linux   2 cpu, 3 GiB
-e2e-p2-t2    running    linux   2 cpu, 3 GiB
-e2e-p2-t3    running    linux   2 cpu, 3 GiB
 e2e-p2m computers left: 0
 silo: No computer is called e2e-p2m-main.
 macOS VMs running (pgrep Virtualization.VirtualMachine): 1
+== summary: 25 passed, 0 failed

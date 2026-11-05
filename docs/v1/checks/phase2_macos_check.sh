@@ -35,6 +35,7 @@ cleanup() {
   for c in $T1 $T2 $MAIN; do stop_wait $c; done
   for c in $T1 $T2 $MAIN; do for i in $(seq 40); do "$SILO" drop $c --force >/dev/null 2>&1 && break; "$SILO" status $c >/dev/null 2>&1 || break; sleep 3; done; done
   rm -rf "$PROJ"; "$SILO" list; "$SILO" list | grep -c e2e-p2m | sed "s/^/e2e-p2m computers left: /"; "$SILO" checkpoints $MAIN 2>&1 | head -2; vms
+  echo "== summary: $PASS passed, $FAILN failed"
 }
 trap cleanup EXIT
 
@@ -76,7 +77,7 @@ echo "== forks (from project dir)"
 cd "$PROJ"
 t1=$(date +%s); "$SILO" fork $MAIN --name $T1 2>&1 | grep -v "^Forking .*: [0-9]*s$"; rc=${PIPESTATUS[0]}
 check "fork $T1" $rc "$(( $(date +%s) - t1 )) s"
-[ $rc -eq 0 ] || { echo "ABORT: fork failed"; echo "== summary PASS=$PASS FAIL=$FAILN"; exit 1; }
+[ $rc -eq 0 ] || { echo "ABORT: fork failed"; true; exit 1; }
 "$SILO" fork $MAIN --name $T2 2>&1 | grep -v "^Forking .*: [0-9]*s$"; check "fork $T2 (idle, for --baseline)" ${PIPESTATUS[0]} ""
 "$SILO" list | grep e2e-p2m; "$SILO" checkpoints $MAIN
 start_wait $T1; check "start $T1" $? ""; vms
@@ -165,7 +166,7 @@ x $MAIN '! test -e /opt/homebrew/bin/jq && ! test -d /opt/homebrew/Cellar/jq'; c
 x $MAIN 'cd ~/srv && git log --oneline'
 stop_wait $MAIN; stop_wait $T1; vms
 
-[ -z "${P2M_QUICK:-}" ] || { echo "== summary PASS=$PASS FAIL=$FAILN (quick: baseline section skipped)"; exit 0; }
+[ -z "${P2M_QUICK:-}" ] || { true; exit 0; }
 echo "== diff --baseline on an idle fork ($T2), main and $T1 stopped"
 start_wait $T2; check "start $T2 (idle)" $? ""; say "idle 90 s"; sleep 90; vms
 t0=$(date +%s); wd 600 "$SILO" diff $T2 --baseline > "$PROJ/diffb.txt" 2> "$PROJ/diffb.err"; brc=$?
@@ -175,4 +176,4 @@ import json,sys
 d=json.load(sys.stdin)
 print({k:d[k] for k in d if k.startswith('baseline')})"
 check "diff --baseline ran on idle fork" $brc "rc=$brc lines=$(wc -l < "$PROJ/diffb.txt" | tr -d ' ')"
-echo "== summary PASS=$PASS FAIL=$FAILN"
+true
