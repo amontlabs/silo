@@ -271,8 +271,9 @@ async fn make_one(
     checkpoint: Option<String>,
     extras: &ops::ForkExtras,
     recipe_hash: Option<String>,
+    recipe: Option<&crate::config::Recipe>,
     progress: Progress<'_>,
-) -> Result<Computer, CliError> {
+) -> Result<(Computer, Result<Vec<u16>, CliError>), CliError> {
     let mut params = CheckpointForkParams {
         computer_id: source.id.clone(),
         device_id: None,
@@ -290,8 +291,25 @@ async fn make_one(
             progress,
         )
         .await?;
+    // Same as a single fork: the fork reaches the ports its source publishes, each on a host
+    // port of its own.
+    let forked = engine.computer(name).await?;
+    let published = publish_for_fork(engine, source, &forked, recipe).await;
     ops::start(engine, name, progress).await?;
-    engine.computer(name).await
+    Ok((engine.computer(name).await?, published))
+}
+
+/// Publishes on a new fork the ports its recipe names, else those its source publishes.
+pub async fn publish_for_fork(
+    engine: &Engine,
+    source: &Computer,
+    fork: &Computer,
+    recipe: Option<&crate::config::Recipe>,
+) -> Result<Vec<u16>, CliError> {
+    match recipe {
+        Some(recipe) => crate::access::publish_recipe_ports(engine, fork, &recipe.ports).await,
+        None => crate::access::inherit_ports(engine, source, fork).await,
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -306,13 +324,24 @@ async fn one(
     output: Output<'_>,
 ) -> Value {
     let mut entry = json!({"name": name, "source": source.name});
-    let fork = match make_one(engine, source, name, checkpoint, extras, None, progress).await {
-        Ok(fork) => fork,
-        Err(error) => {
-            entry["error"] = json!(error.message);
-            return entry;
-        }
-    };
+    // A fork of a recipe publishes the recipe's ports; -n forks of a computer, its source's.
+    let recipe = args
+        .fork
+        .recipe_name
+        .as_ref()
+        .and(args.fork.recipe.as_ref());
+    let (fork, published) =
+        match make_one(engine, source, name, checkpoint, extras, None, recipe, progress).await {
+            Ok(made) => made,
+            Err(error) => {
+                entry["error"] = json!(error.message);
+                return entry;
+            }
+        };
+    match published {
+        Ok(ports) => entry["ports"] = json!(ports),
+        Err(error) => entry["portsError"] = json!(error.message),
+    }
     entry["id"] = json!(fork.id);
     entry["state"] = json!(fork.state);
     entry["kind"] = json!(fork.kind);

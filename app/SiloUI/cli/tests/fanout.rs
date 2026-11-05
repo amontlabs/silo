@@ -198,6 +198,11 @@ fn engine(
             "operations.job.get" if params["jobId"] == "job:12" => Ok(finished(
                 json!({"checkpoint": {"id": "cp-shared", "name": "silo-fork", "kind": "manual"}}),
             )),
+            "network.state" => Ok(json!({"computers": [{
+                "computerId": "id-main", "computer": "main",
+                "ports": [{"port": 3000, "scheme": "http", "configured": true}]
+            }]})),
+            "network.publish" => Ok(json!({})),
             "network.urls" => {
                 let id = params["computerId"].as_str().unwrap();
                 Ok(json!({"computerId": id, "urls": [{
@@ -426,4 +431,22 @@ async fn a_signal_exit_is_passed_as_128_plus_the_signal() {
         fanout::exit_code(&json!({"forks": [{"name": "a", "exitCode": 0}]})),
         0
     );
+}
+
+#[tokio::test]
+async fn every_fork_publishes_the_ports_its_source_publishes() {
+    let (engine, _) = engine(3, false, &[]);
+    let result = run(&engine, &many(3, Some("web"), &[]), None)
+        .await
+        .unwrap();
+    let published = engine.calls("network.publish");
+    assert_eq!(published.len(), 3);
+    for fork in result["forks"].as_array().unwrap() {
+        let id = format!("id-{}", fork["name"].as_str().unwrap());
+        assert!(published
+            .iter()
+            .any(|call| call["computerId"] == id.as_str() && call["port"] == 3000));
+        assert_eq!(fork["ports"], json!([3000]));
+        assert!(fork["urls"][0].as_str().unwrap().starts_with("http://"));
+    }
 }
