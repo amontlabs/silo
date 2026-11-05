@@ -5048,6 +5048,11 @@ fn start_with_job(
             .unwrap_or(false);
             if running {
                 ports::computer_started(app, id);
+                // The computer is Running now, so the guest answers: a fork noted for a base
+                // takes it before the start reports done.
+                if let Some(name) = computer(id).ok().map(|(record, _)| record.name) {
+                    crate::changes::fork_base::captured_after_first_boot(&name, id);
+                }
             }
             guest_computer_use::update_in_background(app, id, attempt);
             finish_macos_job(
@@ -6319,6 +6324,7 @@ fn fork_checkpoint_with_workflow(
             }
         },
     };
+    crate::changes::fork_base::forked_from(&fork_name, &checkpoint.id);
     let prepared: Result<(Record, Arc<AtomicU8>), String> = (|| {
         let _admitted = admission()?;
         let mut registry = registry();

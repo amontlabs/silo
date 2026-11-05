@@ -989,7 +989,6 @@ pub(super) fn start(
     let record = if record.first_boot {
         let counted = store::read_record(layout).unwrap_or_else(|_| record.clone());
         fresh = super::fork_first_boot::complete(app, &counted, layout, cancelled)?;
-        crate::changes::fork_base::captured_after_first_boot(&fresh.name, &fresh.id);
         &fresh
     } else {
         record

@@ -46,7 +46,7 @@ impl GuestRunner for ScriptedGuest {
         _timeout: Duration,
     ) -> Result<ExecOut, GuestError> {
         match argv[0].as_str() {
-            "sh" if argv[2].starts_with("d=$1\numask") => {
+            "sh" if argv[2].contains("cat > \"$d/collect.sh\"") => {
                 let next = self
                     .captures
                     .lock()
