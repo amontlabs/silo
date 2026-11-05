@@ -37,6 +37,9 @@ pub struct Meta {
     /// The checkpoint (or computer) a fork was made from; set on a base capture.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
+    /// The computer a fork was made from, set on a base capture.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<String>,
     pub records: u64,
     pub bytes: u64,
 }
@@ -102,10 +105,22 @@ impl Store {
         manifest: &str,
         source: Option<&str>,
     ) -> Result<Meta, String> {
+        self.put_with_origin(computer, slot, manifest, source, None)
+    }
+
+    pub fn put_with_origin(
+        &self,
+        computer: &str,
+        slot: Slot,
+        manifest: &str,
+        source: Option<&str>,
+        origin: Option<&str>,
+    ) -> Result<Meta, String> {
         let directory = self.computer_dir(computer)?;
         let meta = Meta {
             captured_at: now(),
             source: source.map(str::to_owned),
+            origin: origin.map(str::to_owned),
             records: manifest.lines().count() as u64,
             bytes: manifest.len() as u64,
         };
@@ -138,6 +153,7 @@ impl Store {
         let meta = Meta {
             captured_at: now(),
             source: Some(source.to_owned()),
+            origin: None,
             records: idle.lines().count() as u64,
             bytes: idle.len() as u64,
         };
@@ -172,6 +188,22 @@ impl Store {
     /// its fork-time base captured at its first start.
     pub fn put_pending(&self, name: &str, source: &str) -> Result<(), String> {
         write_atomic(&self.pending_path(name), source.as_bytes())
+    }
+
+    fn origin_path(&self, name: &str) -> PathBuf {
+        self.pending_path(name).with_extension("origin")
+    }
+
+    /// Notes the computer the fork `name` is being made from.
+    pub fn put_pending_origin(&self, name: &str, computer: &str) -> Result<(), String> {
+        write_atomic(&self.origin_path(name), computer.as_bytes())
+    }
+
+    pub fn take_pending_origin(&self, name: &str) -> Option<String> {
+        let path = self.origin_path(name);
+        let computer = fs::read_to_string(&path).ok()?;
+        let _ = fs::remove_file(&path);
+        Some(computer)
     }
 
     /// The source noted for `name`, removed so that only one start captures it.
@@ -323,6 +355,24 @@ mod tests {
         assert_eq!(store.get_failure("c1").as_deref(), Some("no ssh"));
         store.put("c1", Slot::Base, "x\n", None).unwrap();
         assert_eq!(store.get_failure("c1"), None);
+    }
+
+    #[test]
+    fn a_forks_origin_computer_is_noted_and_recorded_with_its_base() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(dir.path());
+        store.put_pending_origin("try", "main").unwrap();
+        assert_eq!(store.take_pending_origin("try").as_deref(), Some("main"));
+        assert_eq!(store.take_pending_origin("try"), None);
+        let meta = store
+            .put_with_origin("c1", Slot::Base, "x\n", Some("cp1"), Some("main"))
+            .unwrap();
+        assert_eq!(meta.origin.as_deref(), Some("main"));
+        let (_, read) = store.get("c1", Slot::Base).unwrap().unwrap();
+        assert_eq!(
+            (read.source.as_deref(), read.origin.as_deref()),
+            (Some("cp1"), Some("main"))
+        );
     }
 
     #[test]

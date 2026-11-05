@@ -12,6 +12,15 @@ fn cmd(tag: &'static str, body: &str) -> GuestCmd {
     GuestCmd::new(tag, format!("{PRELUDE}{body}"))
 }
 
+/// Runs what follows as the owner of `$1` when the script is root and that owner is another
+/// account (the collector reads as root, but a repository belongs to its owner, and git
+/// refuses a repository owned by someone else). `git` below is that, for `$A_repo`.
+const AS_OWNER: &str = "as_owner() {\n  o=$(stat -c %U -- \"$1\" 2>/dev/null || stat -f %Su -- \"$1\" 2>/dev/null)\n  shift\n  if [ \"$(id -u)\" = 0 ] && [ -n \"$o\" ] && [ \"$o\" != root ]; then\n    h=$(getent passwd \"$o\" 2>/dev/null | cut -d: -f6); [ -n \"$h\" ] || h=$(eval echo \"~$o\")\n    if command -v runuser >/dev/null 2>&1; then runuser -u \"$o\" -- env HOME=\"$h\" \"$@\"; else sudo -n -u \"$o\" -H \"$@\"; fi\n  else command \"$@\"; fi\n}\ngit() { as_owner \"$A_repo\" git \"$@\"; }\n";
+
+fn git_cmd(tag: &'static str, body: &str) -> GuestCmd {
+    cmd(tag, &format!("{AS_OWNER}{body}"))
+}
+
 fn stat_mode(os: Os) -> &'static str {
     match os {
         Os::Linux => "stat -c %a",
@@ -134,7 +143,7 @@ pub fn valid_package_word(word: &str, scoped: bool) -> bool {
 pub fn pkg_runner(os: Os, manager: &str) -> RunAs {
     match (manager, os) {
         ("dpkg", _) => RunAs::Root,
-        ("npm" | "pip", Os::Linux) => RunAs::Root,
+        ("npm" | "pip" | "cargo" | "pipx", Os::Linux) => RunAs::Root,
         _ => RunAs::Account,
     }
 }
@@ -215,7 +224,7 @@ pub fn brew_version(name: &str, cask: bool) -> GuestCmd {
 }
 
 pub fn git_bundle(repo: &str, bundle: &str) -> GuestCmd {
-    cmd(
+    git_cmd(
         "git_bundle",
         "set -e\ncd \"$A_repo\"\ngit bundle create \"$A_bundle\" HEAD >/dev/null 2>&1",
     )
@@ -226,7 +235,7 @@ pub fn git_bundle(repo: &str, bundle: &str) -> GuestCmd {
 /// Fetches the bundle into a temporary ref and prints `uptodate`, `ff`, `merge`, `conflict`
 /// (then the conflict lines) or `unsupported`.
 pub fn git_precheck(repo: &str, bundle: &str, tmp_ref: &str) -> GuestCmd {
-    cmd(
+    git_cmd(
         "git_precheck",
         "set -e\ncd \"$A_repo\"\ngit fetch -q --no-write-fetch-head \"$A_bundle\" \"HEAD:$A_ref\"\nif git merge-base --is-ancestor \"$A_ref\" HEAD; then echo uptodate; exit 0; fi\nif git merge-base --is-ancestor HEAD \"$A_ref\"; then echo ff; exit 0; fi\nif ! git merge-tree --write-tree HEAD HEAD >/dev/null 2>&1; then echo unsupported; exit 0; fi\nset +e\nout=$(git merge-tree --write-tree HEAD \"$A_ref\" 2>&1); rc=$?\nset -e\nif [ $rc -eq 0 ]; then echo merge; elif echo \"$out\" | grep -q CONFLICT; then echo conflict; echo \"$out\" | grep CONFLICT; else echo unsupported; fi",
     )
@@ -236,7 +245,7 @@ pub fn git_precheck(repo: &str, bundle: &str, tmp_ref: &str) -> GuestCmd {
 }
 
 pub fn git_drop_ref(repo: &str, tmp_ref: &str) -> GuestCmd {
-    cmd(
+    git_cmd(
         "git_drop_ref",
         "cd \"$A_repo\" 2>/dev/null && git update-ref -d \"$A_ref\" 2>/dev/null; true",
     )
@@ -245,7 +254,7 @@ pub fn git_drop_ref(repo: &str, tmp_ref: &str) -> GuestCmd {
 }
 
 pub fn git_merge(repo: &str, tmp_ref: &str) -> GuestCmd {
-    cmd(
+    git_cmd(
         "git_merge",
         "cd \"$A_repo\"\nif git merge --ff-only -q \"$A_ref\" 2>/dev/null; then :; elif git -c user.name=Silo -c user.email=silo@localhost merge --no-edit -q \"$A_ref\"; then :; else git merge --abort 2>/dev/null; echo 'merge conflict' >&2; exit 3; fi\ngit update-ref -d \"$A_ref\"\ngit rev-parse --short HEAD",
     )
@@ -254,9 +263,9 @@ pub fn git_merge(repo: &str, tmp_ref: &str) -> GuestCmd {
 }
 
 pub fn git_clone(repo: &str, bundle: &str) -> GuestCmd {
-    cmd(
+    git_cmd(
         "git_clone",
-        "set -e\nmkdir -p -- \"$(dirname -- \"$A_repo\")\"\ngit clone -q \"$A_bundle\" \"$A_repo\"\ncd \"$A_repo\"\ngit remote remove origin\ngit rev-parse --short HEAD",
+        "set -e\nmkdir -p -- \"$(dirname -- \"$A_repo\")\"\na=$(dirname -- \"$A_repo\"); while [ ! -d \"$a\" ]; do a=$(dirname -- \"$a\"); done\no=$(stat -c %u:%g -- \"$a\" 2>/dev/null || stat -f %u:%g -- \"$a\")\ncommand git clone -q \"$A_bundle\" \"$A_repo\"\nif [ \"$(id -u)\" = 0 ] && [ \"${o%%:*}\" != 0 ]; then chown -R \"$o\" \"$A_repo\"; fi\ncd \"$A_repo\"\ngit remote remove origin\ngit rev-parse --short HEAD",
     )
     .arg("repo", repo)
     .arg("bundle", bundle)
@@ -266,7 +275,7 @@ pub fn git_clone(repo: &str, bundle: &str) -> GuestCmd {
 /// deleted (the whole history of `new` when `old` is empty). Blank entries may appear
 /// between commits.
 pub fn git_changed(repo: &str, old: &str, new: &str) -> GuestCmd {
-    cmd(
+    git_cmd(
         "git_changed",
         "cd \"$A_repo\" || exit 1\nif [ -z \"$A_old\" ]; then r=\"$A_new\"; else r=\"$A_old..$A_new\"; fi\ngit log -z --name-only --format= \"$r\" --",
     )
@@ -278,7 +287,7 @@ pub fn git_changed(repo: &str, old: &str, new: &str) -> GuestCmd {
 /// `blob main` for a repo-relative path: the blob at `base` (`-` if none) and the hash of
 /// what the working tree holds (`-` if missing, `L:target` for a link).
 pub fn git_file_state(repo: &str, rel: &str, base: &str) -> GuestCmd {
-    cmd(
+    git_cmd(
         "git_file_state",
         "cd \"$A_repo\" || exit 1\nb=-; if [ -n \"$A_base\" ]; then b=$(git rev-parse -q --verify \"$A_base:$A_rel\" 2>/dev/null || echo -); fi\nif [ -L \"$A_rel\" ]; then m=\"L:$(readlink -- \"$A_rel\")\"; elif [ -f \"$A_rel\" ]; then m=$(git hash-object -- \"$A_rel\"); else m=-; fi\necho \"$b $m\"",
     )
@@ -342,11 +351,15 @@ pub fn pid_alive(pid: &str) -> GuestCmd {
     cmd("pid_alive", "kill -0 \"$A_pid\"").arg("pid", pid)
 }
 
-/// A recipe hook, run in `cwd` as the working account.
+/// A recipe hook, run in `cwd` as the working account, or as the folder's owner when the
+/// script starts as root.
 pub fn hook(command: &str, cwd: &str) -> GuestCmd {
-    let mut c = cmd("hook", "cd \"$A_cwd\" && bash -lc \"$A_cmd\"")
-        .arg("cmd", command)
-        .arg("cwd", cwd);
+    let mut c = cmd(
+        "hook",
+        &format!("{AS_OWNER}cd \"$A_cwd\" && as_owner \"$A_cwd\" bash -lc \"$A_cmd\""),
+    )
+    .arg("cmd", command)
+    .arg("cwd", cwd);
     c.timeout = Duration::from_secs(900);
     c
 }

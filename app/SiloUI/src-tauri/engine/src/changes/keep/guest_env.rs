@@ -98,6 +98,17 @@ impl KeepEnv for GuestEnv {
 
     fn run(&self, computer: &str, who: RunAs, cmd: &GuestCmd) -> Result<ExecOut, String> {
         let target = self.target(computer)?;
+        // The collector reads a Linux computer as root, so a keep does too: commands that
+        // touch repositories and folders start as root and the scripts hand git and hooks to
+        // the owner of the folder they work in.
+        let who = if who == RunAs::Account
+            && !target.is_macos()
+            && (cmd.tag.starts_with("git_") || cmd.tag == "hook")
+        {
+            RunAs::Root
+        } else {
+            who
+        };
         let request = ExecRequest {
             argv: vec!["bash".into(), "-c".into(), cmd.script.clone()],
             cwd: None,

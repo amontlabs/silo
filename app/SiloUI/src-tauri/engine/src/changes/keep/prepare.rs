@@ -192,6 +192,7 @@ pub fn prepare(
     target: &str,
     view: &ForkView,
     tracker: &mut Tracker,
+    read_files: bool,
 ) -> Result<Prepared, String> {
     let fork_name = request.fork.as_str();
     let os = env.os(target)?;
@@ -461,8 +462,9 @@ pub fn prepare(
         }
     }
 
-    // Read what the fork will give.
-    if plan.conflicts.is_empty() {
+    // Read what the fork will give. A look ahead of the checkpoint only decides refusals, so
+    // the fork's files are read once, for the keep itself.
+    if read_files && plan.conflicts.is_empty() {
         for path in &writes {
             if matches!(fork_final.get(path), Some(Live::File { .. })) {
                 staged.insert(path.clone(), env.read(fork_name, path)?);

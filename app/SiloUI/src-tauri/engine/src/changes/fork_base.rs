@@ -40,10 +40,13 @@ pub fn source_key(checkpoint_id: Option<&str>, source_computer_id: &str) -> Stri
 }
 
 /// Notes at fork creation that `new_name` wants a base at its first start.
-pub fn expect(context: Arc<dyn EngineContext>, new_name: &str, source: &str) {
+pub fn expect(context: Arc<dyn EngineContext>, new_name: &str, source: &str, computer: &str) {
     let store = Store::for_engine(context.as_ref());
     install(context);
-    if let Err(error) = store.put_pending(new_name, source) {
+    if let Err(error) = store
+        .put_pending(new_name, source)
+        .and_then(|()| store.put_pending_origin(new_name, computer))
+    {
         eprintln!("The fork-time record of {new_name} could not be scheduled: {error}");
     }
 }
@@ -63,7 +66,9 @@ pub fn forked_from(new_name: &str, checkpoint_id: &str) {
 
 /// Withdraws the note of a fork that was never created.
 pub fn withdraw(context: &dyn EngineContext, new_name: &str) {
-    let _ = Store::for_engine(context).take_pending(new_name);
+    let store = Store::for_engine(context);
+    let _ = store.take_pending(new_name);
+    let _ = store.take_pending_origin(new_name);
 }
 
 /// A Linux fork has just been confirmed quiet.
@@ -96,16 +101,24 @@ pub fn capture_with(
     let Some(source) = store.take_pending(name) else {
         return;
     };
+    let origin = store.take_pending_origin(name);
     // A capture that could not run leaves the note, so the next start tries again.
     let keep_note = |source: &str| {
         let _ = store.put_pending(name, source);
+        if let Some(origin) = &origin {
+            let _ = store.put_pending_origin(name, origin);
+        }
     };
     let outcome = target
         .map_err(|error| error.message)
         .and_then(|target| {
             collect::capture(&TargetRunner(target), &Options::default()).map_err(|e| e.message)
         })
-        .and_then(|text| store.put(id, Slot::Base, &text, Some(&source)).map(|_| ()));
+        .and_then(|text| {
+            store
+                .put_with_origin(id, Slot::Base, &text, Some(&source), origin.as_deref())
+                .map(|_| ())
+        });
     if let Err(message) = outcome {
         let _ = store.put_failure(id, &message);
         keep_note(&source);
@@ -156,13 +169,13 @@ mod tests {
         let store = Store::for_engine(context.as_ref());
         install(context.clone());
         // Noted with the source computer; the fork-point checkpoint then takes its place.
-        expect(context.clone(), "try", "src");
+        expect(context.clone(), "try", "src", "src");
         forked_from("try", "cp-auto-1");
         assert_eq!(store.take_pending("try").as_deref(), Some("cp-auto-1"));
         // Nothing noted: nothing is created.
         forked_from("other", "cp-2");
         assert_eq!(store.take_pending("other"), None);
-        expect(context.clone(), "gone", "src");
+        expect(context.clone(), "gone", "src", "src");
         withdraw(context.as_ref(), "gone");
         assert_eq!(store.take_pending("gone"), None);
     }
