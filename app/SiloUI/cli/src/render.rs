@@ -198,6 +198,59 @@ fn lines(value: &Value, key: &str) -> Vec<String> {
 }
 
 /// `silo fold`: what was kept, what a dry run would keep, or why nothing was changed.
+pub fn up(value: &Value) -> String {
+    let main = &value["main"];
+    let made = if value["created"] == true {
+        format!(" (made from {})", text(value, "recipe"))
+    } else {
+        String::new()
+    };
+    format!(
+        "main is {}{made}. Warm checkpoint {} saved.",
+        text(main, "state"),
+        text(value, "warmCheckpoint")
+    )
+}
+
+pub fn recipes(value: &Value) -> String {
+    let rows = value["recipes"].as_array().cloned().unwrap_or_default();
+    let width = rows
+        .iter()
+        .map(|r| text(r, "name").len())
+        .max()
+        .unwrap_or(4)
+        .max(4);
+    let mut out = format!("{:<width$}  {:<9}  BUILT\n", "NAME", "FROM");
+    for row in rows {
+        let built = if row["built"] == true {
+            format!("{} ({})", text(&row, "builtAt"), text(&row, "imageVersion"))
+        } else {
+            "not built".to_owned()
+        };
+        out.push_str(&format!(
+            "{:<width$}  {:<9}  {built}\n",
+            text(&row, "name"),
+            text(&row, "origin")
+        ));
+    }
+    out.trim_end().to_owned()
+}
+
+pub fn recipe_built(value: &Value) -> String {
+    let recipe = &value["recipe"];
+    let verb = if value["built"] == true {
+        "Built"
+    } else {
+        "Already built:"
+    };
+    format!(
+        "{verb} {} ({}), checkpoint {}.",
+        text(recipe, "name"),
+        &text(recipe, "hash")[..12.min(text(recipe, "hash").len())],
+        text(recipe, "checkpointId")
+    )
+}
+
 pub fn fold(value: &Value) -> String {
     let report = &value["report"];
     let (fork, target) = (text(report, "fork"), text(report, "target"));

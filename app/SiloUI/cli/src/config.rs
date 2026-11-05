@@ -9,6 +9,7 @@ use std::{
 };
 
 use serde::Deserialize;
+use silo_api::methods::recipes::{RecipePackages, RecipeService, RecipeSpec};
 
 use crate::error::CliError;
 
@@ -18,6 +19,28 @@ const SETTINGS_FILE: &str = "silo.yaml";
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Recipe {
+    /// The kind of computer the recipe builds; `linux` when left out.
+    #[serde(default)]
+    pub os: RecipeOs,
+    #[serde(default)]
+    pub cpus: Option<u32>,
+    /// Memory in GiB.
+    #[serde(default)]
+    pub memory: Option<u32>,
+    /// Disk in GiB.
+    #[serde(default)]
+    pub disk: Option<u32>,
+    #[serde(default)]
+    pub packages: Packages,
+    /// Commands run once while the recipe is built: as root on Linux, as the account on macOS.
+    #[serde(default)]
+    pub setup: Vec<String>,
+    /// Commands started at boot, by service name.
+    #[serde(default)]
+    pub services: BTreeMap<String, String>,
+    /// Ports a fork publishes.
+    #[serde(default)]
+    pub ports: Vec<u16>,
     /// Process names stopped in a fork.
     #[serde(default)]
     pub quiet: Vec<String>,
@@ -26,6 +49,32 @@ pub struct Recipe {
     pub scrub: Vec<String>,
     #[serde(default)]
     pub keep: Keep,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+pub enum RecipeOs {
+    #[default]
+    #[serde(rename = "linux")]
+    Linux,
+    #[serde(rename = "macos")]
+    Macos,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Packages {
+    #[serde(default)]
+    pub apt: Vec<String>,
+    #[serde(default)]
+    pub brew: Vec<String>,
+    #[serde(default)]
+    pub npm: Vec<String>,
+    #[serde(default)]
+    pub pip: Vec<String>,
+    #[serde(default)]
+    pub pipx: Vec<String>,
+    #[serde(default)]
+    pub cargo: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
@@ -130,6 +179,21 @@ impl Settings {
         Ok(())
     }
 
+    /// Whether a recipe may be forked from: any, unless the settings list some.
+    pub fn check_recipe(settings: Option<&Settings>, name: &str) -> Result<(), CliError> {
+        match settings {
+            Some(settings)
+                if !settings.recipes.is_empty()
+                    && !settings.recipes.iter().any(|allowed| allowed == name) =>
+            {
+                Err(CliError::new(format!(
+                    "The recipe {name} is not in recipes in .silo/{SETTINGS_FILE}."
+                )))
+            }
+            _ => Ok(()),
+        }
+    }
+
     /// Whether `--secret name` may be used: any name when no settings file exists, else only
     /// the names `fork_secrets` lists.
     pub fn check_fork_secrets(
@@ -158,12 +222,77 @@ impl Recipe {
             ("keep.restart", &self.keep.restart),
             ("keep.migrate", &self.keep.migrate),
             ("keep.after", &self.keep.after),
+            ("setup", &self.setup),
+            ("packages.apt", &self.packages.apt),
+            ("packages.brew", &self.packages.brew),
+            ("packages.npm", &self.packages.npm),
+            ("packages.pip", &self.packages.pip),
+            ("packages.pipx", &self.packages.pipx),
+            ("packages.cargo", &self.packages.cargo),
         ] {
             if blank(names) {
                 return Err(format!("{key}: entries may not be empty"));
             }
         }
+        for (name, command) in &self.services {
+            if command.trim().is_empty() {
+                return Err(format!("services.{name}: the command may not be empty"));
+            }
+        }
+        let (wrong, os) = match self.os {
+            RecipeOs::Linux => ("brew", "linux"),
+            RecipeOs::Macos => ("apt", "macos"),
+        };
+        let used = match self.os {
+            RecipeOs::Linux => !self.packages.brew.is_empty(),
+            RecipeOs::Macos => !self.packages.apt.is_empty(),
+        };
+        if used {
+            return Err(format!("packages.{wrong}: not available when os is {os}"));
+        }
+        for name in self.services.keys() {
+            let fine = !name.is_empty()
+                && name
+                    .chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_');
+            if !fine {
+                return Err(format!(
+                    "services.{name}: a service name is lowercase letters, digits, - and _"
+                ));
+            }
+        }
         Ok(())
+    }
+
+    /// The build inputs, as the engine takes them.
+    pub fn spec(&self) -> RecipeSpec {
+        RecipeSpec {
+            os: match self.os {
+                RecipeOs::Linux => silo_api::methods::recipes::RecipeOs::Linux,
+                RecipeOs::Macos => silo_api::methods::recipes::RecipeOs::Macos,
+            },
+            cpus: self.cpus,
+            memory_gib: self.memory,
+            disk_gib: self.disk,
+            packages: RecipePackages {
+                apt: self.packages.apt.clone(),
+                brew: self.packages.brew.clone(),
+                npm: self.packages.npm.clone(),
+                pip: self.packages.pip.clone(),
+                pipx: self.packages.pipx.clone(),
+                cargo: self.packages.cargo.clone(),
+            },
+            setup: self.setup.clone(),
+            services: self
+                .services
+                .iter()
+                .map(|(name, run)| RecipeService {
+                    name: name.clone(),
+                    run: run.clone(),
+                })
+                .collect(),
+            ports: self.ports.clone(),
+        }
     }
 }
 
@@ -227,6 +356,32 @@ pub fn load_settings(path: &Path) -> Result<Settings, CliError> {
     parse_file(path, Settings::validate)
 }
 
+/// Recipes shipped with the CLI. Minimal on purpose: they add what a coding agent usually
+/// wants and nothing else.
+const BUILT_IN: &[(&str, &str)] = &[
+    (
+        "linux-dev",
+        "os: linux\npackages:\n  apt: [build-essential, jq, ripgrep]\n",
+    ),
+    (
+        "macos-xcode",
+        "os: macos\nsetup:\n  - xcode-select -p\n  - xcodebuild -version\n",
+    ),
+];
+
+pub const DEFAULT_RECIPE: &str = "linux-dev";
+
+pub fn built_in_names() -> Vec<&'static str> {
+    BUILT_IN.iter().map(|(name, _)| *name).collect()
+}
+
+fn built_in(name: &str) -> Option<Recipe> {
+    BUILT_IN
+        .iter()
+        .find(|(known, _)| *known == name)
+        .map(|(_, text)| parse_recipe(text).expect("a built-in recipe parses"))
+}
+
 /// The `.silo/` files found from a directory upward.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Project {
@@ -243,7 +398,7 @@ impl Project {
             let silo = directory.join(".silo");
             let recipe = silo.join(RECIPE_FILE);
             let settings = silo.join(SETTINGS_FILE);
-            if recipe.is_file() || settings.is_file() {
+            if recipe.is_file() || settings.is_file() || silo.join("recipes").is_dir() {
                 return Self {
                     directory: Some(silo),
                     recipe: recipe.is_file().then_some(recipe),
@@ -256,6 +411,52 @@ impl Project {
 
     pub fn load_settings(&self) -> Result<Option<Settings>, CliError> {
         self.settings.as_deref().map(load_settings).transpose()
+    }
+
+    /// A named recipe: `.silo/recipes/<name>.yaml` of the project, else a built-in one.
+    pub fn named_recipe(&self, name: &str) -> Result<Recipe, CliError> {
+        let fine = !name.is_empty()
+            && name
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_');
+        if !fine {
+            return Err(CliError::new(format!(
+                "`{name}` is not a recipe name (lowercase letters, digits, - and _)."
+            )));
+        }
+        if let Some(directory) = &self.directory {
+            let path = directory.join("recipes").join(format!("{name}.yaml"));
+            if path.is_file() {
+                return load_recipe(&path);
+            }
+        }
+        built_in(name).ok_or_else(|| {
+            CliError::new(format!(
+                "No recipe is called {name}: there is no .silo/recipes/{name}.yaml and the built-in recipes are {}.",
+                built_in_names().join(", ")
+            ))
+        })
+    }
+
+    /// Every recipe the project and the CLI offer, by name, with where it comes from.
+    pub fn recipe_names(&self) -> Vec<(String, &'static str)> {
+        let mut found: BTreeMap<String, &'static str> = built_in_names()
+            .into_iter()
+            .map(|name| (name.to_owned(), "built-in"))
+            .collect();
+        if let Some(directory) = &self.directory {
+            if let Ok(entries) = fs::read_dir(directory.join("recipes")) {
+                for entry in entries.filter_map(Result::ok) {
+                    let path = entry.path();
+                    if path.extension().is_some_and(|ext| ext == "yaml") {
+                        if let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) {
+                            found.insert(stem.to_owned(), "project");
+                        }
+                    }
+                }
+            }
+        }
+        found.into_iter().collect()
     }
 
     pub fn load_recipe(&self) -> Result<Option<Recipe>, CliError> {
@@ -377,5 +578,71 @@ mod tests {
         let error = load_recipe(&path).unwrap_err();
         assert!(error.message.contains("recipe.yaml") && error.message.contains("bogus"));
         assert!(load_recipe(&root.path().join("missing.yaml")).is_err());
+    }
+
+    #[test]
+    fn a_build_recipe_parses_and_becomes_a_spec() {
+        let recipe = parse_recipe(
+            "os: macos\ncpus: 6\nmemory: 12\npackages:\n  brew: [jq]\n  npm: [typescript]\nsetup: [make deps]\nservices:\n  web: python3 -m http.server\nports: [8000]\nquiet: [x]\n",
+        )
+        .unwrap();
+        let spec = recipe.spec();
+        assert_eq!(spec.cpus, Some(6));
+        assert_eq!(spec.memory_gib, Some(12));
+        assert_eq!(spec.packages.brew, ["jq"]);
+        assert_eq!(spec.services[0].name, "web");
+        assert_eq!(spec.ports, [8000]);
+        assert_eq!(parse_recipe("quiet: [a]\n").unwrap().os, RecipeOs::Linux);
+    }
+
+    #[test]
+    fn recipe_build_keys_are_checked_with_their_line() {
+        let error = parse_recipe("os: linux\npackages:\n  apk: [git]\n").unwrap_err();
+        assert!(error.contains("apk") && error.contains("line 3"), "{error}");
+        assert!(parse_recipe("os: windows\n").is_err());
+        assert!(parse_recipe("os: linux\npackages:\n  brew: [jq]\n")
+            .unwrap_err()
+            .contains("brew"));
+        assert!(parse_recipe("services:\n  Web: x\n").is_err());
+        assert!(parse_recipe("setup: ['']\n").is_err());
+    }
+
+    #[test]
+    fn named_recipes_come_from_the_project_then_the_built_ins() {
+        let root = tempfile::tempdir().unwrap();
+        let silo = root.path().join(".silo");
+        fs::create_dir_all(silo.join("recipes")).unwrap();
+        fs::write(silo.join("recipes/web.yaml"), "packages:\n  apt: [nginx]\n").unwrap();
+        fs::write(silo.join("recipes/linux-dev.yaml"), "setup: [true]\n").unwrap();
+        let project = Project::discover(root.path());
+        assert_eq!(project.named_recipe("web").unwrap().packages.apt, ["nginx"]);
+        assert_eq!(project.named_recipe("linux-dev").unwrap().setup, ["true"]);
+        assert_eq!(
+            project.named_recipe("macos-xcode").unwrap().os,
+            RecipeOs::Macos
+        );
+        assert!(project
+            .named_recipe("nope")
+            .unwrap_err()
+            .message
+            .contains("linux-dev"));
+        assert!(project.named_recipe("../x").is_err());
+        let names = project.recipe_names();
+        assert!(names.contains(&("web".to_owned(), "project")));
+        assert!(names.contains(&("macos-xcode".to_owned(), "built-in")));
+        assert_eq!(
+            Project::default().named_recipe("linux-dev").unwrap().os,
+            RecipeOs::Linux
+        );
+    }
+
+    #[test]
+    fn settings_limit_which_recipes_may_be_forked() {
+        let settings = parse_settings("recipes: [linux-dev]\n").unwrap();
+        assert!(Settings::check_recipe(Some(&settings), "linux-dev").is_ok());
+        assert!(Settings::check_recipe(Some(&settings), "macos-xcode").is_err());
+        assert!(Settings::check_recipe(None, "macos-xcode").is_ok());
+        let open = parse_settings("fold: ask\n").unwrap();
+        assert!(Settings::check_recipe(Some(&open), "any").is_ok());
     }
 }
