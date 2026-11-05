@@ -6,12 +6,13 @@ Tracker: Linear project "Silo v1: git for agent computers" (P-AMO-8).
 
 ## Resume
 
-- **Phase:** 1 checks passed; PR to main pending CI. Phase 0 merged in #60.
-- **Open slices:** none.
-- **Clean up:** none outstanding. The Dev engine runs from the main checkout's bundle.
-- **Blocked on the owner:** the positive `--secret NAME` fork check and a non-trivial "no assignments by default" need the owner to allow the Dev engine's Keychain access once (`credential_access_denied`). Read-only GitHub against a mock needs a GitHub App installation the CLI can't create; covered by unit tests only.
-- **Next action:** merge the phase 1 PR, then start phase 2 (change capture + bucketed diff, Keep + Undo).
-- **macOS slots:** the foreign VM (PID 60843) is gone; both slots free as of 5 Nov.
+- **Phase:** 3, checks in progress on branch `claude/silo-v1-phase-3`. Phases 0-2 merged (#60, #61, #62).
+- **Done in phase 3 (reviewed):** recipes + cache + `silo up` + warm checkpoint, Make this main (macOS and Linux, with the `microsandbox-rename-stopped` patch), `fork -n` with RAM budget, `fork -- cmd`, `fork ./dir` with fold/undo back to the host repo, fold requests, `silo ports/publish/unpublish`, `silo ssh-setup` (`ssh main.silo`), URL per fork (AMO-91).
+- **Open:** warm-checkpoint correctness fix (engine change generation + 60 s cap) in a worktree; then rebuild the Dev engine and re-run `docs/v1/checks/phase3_*` (urls, promote, folder). Evidence in `docs/v1/evidence/phase-3/`.
+- **Blocked on the owner:** Keychain approval for the Dev engine (secret carry-over checks in phases 1 and 3); a leaked hidden test computer `silo-baseline-8fa22f` (27 GB) to drop.
+- **Clean up:** Dev engine runs from the main checkout's bundle. Stale throwaways are swept by the CLI now.
+- **Next action:** after phase 3 checks pass, open the phase 3 PR, then phase 4.
+- **macOS slots:** free (no foreign VM since 5 Nov).
 
 ## Start
 

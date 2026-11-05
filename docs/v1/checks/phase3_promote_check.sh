@@ -16,6 +16,8 @@ say() { echo "[$(ts)] $*"; }
 check() { local name=$1 ok=$2; shift 2; if [ "$ok" = 0 ]; then echo "[$(ts)] PASS  $name  -- $*"; PASS=$((PASS+1)); else echo "[$(ts)] FAIL  $name  -- $*"; FAILN=$((FAILN+1)); fi; }
 blocked() { echo "[$(ts)] BLOCKED  $1  -- $2"; BLOCKED=$((BLOCKED+1)); }
 now() { date +%s; }
+# urlwait URL PATTERN: retry up to 45 s, print last answer
+urlwait() { local i o; for i in $(seq 15); do o=$(curl -s -m 8 "$1"); echo "$o" | grep -q "$2" && { echo "$o"; return 0; }; sleep 3; done; echo "$o"; return 1; }
 x() { local c=$1; shift; "$SILO" exec "$c" --timeout 120 -- sudo bash -c "$*"; }
 xm() { local c=$1; shift; "$SILO" exec "$c" --timeout 120 -- bash -c "$*"; }
 nvms() { pgrep -f Virtualization.VirtualMachine | wc -l | tr -d ' '; }
@@ -68,10 +70,10 @@ t=$(now); "$SILO" fork main --name $FORK > /tmp/p3-pfork.out 2>&1; check "silo f
 FORKID=$(idof $FORK); echo "fork id $FORKID"
 echo "fork status: $("$SILO" status $FORK | grep quiet)"
 echo "fork cron parked: etc/cron.d=[$(x $FORK 'ls /etc/cron.d | tr "\n" " "')] root crontab=[$(x $FORK 'crontab -l 2>&1 | tail -1')]"
-x $FORK 'echo fork-v2 > /root/p3-marker; sed -i "s/content=v1/content=v2/" /opt/p3web/server.py; pkill -f "[p]3web/server.py"; sleep 1; (setsid nohup python3 /opt/p3web/server.py >/dev/null 2>&1 &); sleep 2; curl -s -m 5 http://127.0.0.1:3000/'
+x $FORK 'echo fork-v2 > /root/p3-marker; sed -i "s/content=v1/content=v2/" /opt/p3web/server.py; pkill -x python3; sleep 1; (setsid nohup python3 /opt/p3web/server.py >/dev/null 2>&1 &); sleep 2; curl -s -m 5 http://127.0.0.1:3000/'
 echo "fork web: $(x $FORK 'curl -s -m 5 http://127.0.0.1:3000/')"
 echo "main web (v1): $(x main 'curl -s -m 5 http://127.0.0.1:3000/')"
-URLMAIN="http://3000.main.silo.localhost:47383/"
+"$SILO" ports main; URLMAIN=$("$SILO" ports main --json | python3 -c "import json,sys,re; print(re.findall(r'http://[^\\s\"]+', sys.stdin.read())[0])"); echo "main URL: $URLMAIN"; PORTSBEFORE=$("$SILO" ports main | sed "s/[0-9]*\\.[0-9]*s//" | tr -s " ")
 echo "main URL before promote: $(curl -s -m 8 -w ' http=%{http_code}' $URLMAIN | head -c 200)"
 
 echo "== silo fold $FORK --promote"
@@ -85,8 +87,8 @@ echo "-- content on the new main"
 sleep 4
 echo "marker: $(x main 'cat /root/p3-marker')  web: $(x main 'curl -s -m 5 http://127.0.0.1:3000/')"
 [ "$(x main 'cat /root/p3-marker')" = fork-v2 ] && x main 'curl -s -m 5 http://127.0.0.1:3000/' | grep -q content=v2; check "new main serves the fork's content (file + web app output, in-guest)" $? ""
-echo "main URL after promote: $(curl -s -m 8 -w ' http=%{http_code}' $URLMAIN | head -c 200)"
-curl -s -m 8 $URLMAIN | grep -q content=v2; check "main's URL serves the fork's content" $? "http://3000.main.silo.localhost:47383/ (no port is published for main: recipe ports are not applied and silo has no publish command)"
+"$SILO" ports main; echo "main URL after promote (waits up to 45 s): $(urlwait $URLMAIN content=v2)"
+urlwait $URLMAIN content=v2 >/dev/null; check "main's URL serves the fork's content" $? "http://3000.main.silo.localhost:47383/"
 echo "-- secrets"
 "$SILO" secrets list; "$SILO" status main | grep -i "secrets assigned"
 if [ "$HAVE_SECRET" = 1 ]; then "$SILO" secrets list | grep "$SECRET" | grep -q main; check "secret $SECRET stays assigned to main (new main)" $? ""; else blocked "secrets carried" "no secret could be assigned"; fi
@@ -94,11 +96,8 @@ echo "-- quiet-parked jobs"
 echo "new main: etc/cron.d=[$(x main 'ls /etc/cron.d | tr "\n" " "')] root crontab=[$(x main 'crontab -l 2>&1 | tail -1')]"
 x main 'test -f /etc/cron.d/p3-job && crontab -l | grep -q p3root'; check "cron.d line and root crontab line restored on the new main" $? ""
 echo "-- SSH alias"
-echo "SSH entries on this Dev home after: $(ls "$SSHDIR" 2>&1 | tr '\n' ' ')"
-if ls "$SSHDIR/$FORKID.conf" >/dev/null 2>&1; then
-  ALIAS=$(grep -m1 '^Host ' "$SSHDIR/$FORKID.conf" | cut -d' ' -f2); echo "alias $ALIAS"; ssh -F "$SSHDIR/$FORKID.conf" -o BatchMode=yes "$ALIAS" 'cat /root/p3-marker'; check "main's SSH alias reaches the new main" $? ""
-else blocked "main's SSH alias" "no entry exists for the computer ($SSHDIR/<id>.conf, alias silo-dev-<id>); the engine writes it only when the app sets up SSH/editor access, and silo has no command for that. The promote repoints only entries that exist"; fi
-
+echo "ssh main.silo-dev: $(ssh -o BatchMode=yes -o ConnectTimeout=15 main.silo-dev 'sudo cat /root/p3-marker; hostname' 2>&1 | tr '\n' ' ')"
+[ "$(ssh -o BatchMode=yes -o ConnectTimeout=15 main.silo-dev 'sudo cat /root/p3-marker' 2>/dev/null)" = fork-v2 ]; check "ssh main.silo-dev reaches the new main (marker fork-v2)" $? ""
 echo "== silo undo main"
 t=$(now); "$SILO" undo main --json > /tmp/p3-undo.json 2> /tmp/p3-undo.err; rc=$?; check "silo undo main exits 0" $rc "wall $(( $(now)-t )) s"; tail -4 /tmp/p3-undo.err; head -c 800 /tmp/p3-undo.json; echo
 AFTERU=$(snap); echo "$AFTERU"
@@ -106,8 +105,10 @@ AFTERU=$(snap); echo "$AFTERU"
 "$SILO" start main >/dev/null 2>&1; sleep 4
 echo "marker: $(x main 'cat /root/p3-marker')  web: $(x main 'curl -s -m 5 http://127.0.0.1:3000/')  cron: $(x main 'ls /etc/cron.d | tr "\n" " "; crontab -l | tail -1')"
 [ "$(x main 'cat /root/p3-marker')" = main-v1 ] && x main 'curl -s -m 5 http://127.0.0.1:3000/' | grep -q content=v1; check "content back on main (file + web app)" $? ""
-curl -s -m 8 $URLMAIN | grep -q content=v1; check "main's URL serves the original content again" $? "(no published port)"
+"$SILO" ports main; urlwait $URLMAIN content=v1 >/dev/null; check "main's URL serves the original content again" $? ""
 x main 'test -f /etc/cron.d/p3-job && crontab -l | grep -q p3root'; check "main's cron lines intact after undo" $? ""
+[ "$(ssh -o BatchMode=yes -o ConnectTimeout=15 main.silo-dev 'sudo cat /root/p3-marker' 2>/dev/null)" = main-v1 ]; check "ssh main.silo-dev reaches the original main again" $? ""
+[ "$("$SILO" ports main | sed "s/[0-9]*\\.[0-9]*s//" | tr -s " ")" = "$PORTSBEFORE" ]; check "main's ports back as before" $? ""
 [ "$HAVE_SECRET" = 1 ] && { "$SILO" secrets list | grep "$SECRET" | grep -q main; check "secret still on main after undo" $? ""; }
 echo "fork after undo: $(x $FORK 'cat /root/p3-marker' 2>&1 | head -1)"
 
@@ -132,6 +133,8 @@ MB=$(snap); echo "$MB"
 t=$(now); "$SILO" fold $MFORK --promote --json > /tmp/p3-mpromote.json 2> /tmp/p3-mpromote.err; rc=$?; check "silo fold $MFORK --promote (macOS)" $rc "wall $(( $(now)-t )) s"
 tail -5 /tmp/p3-mpromote.err; head -c 1200 /tmp/p3-mpromote.json; echo
 snap; AR=$(archive); echo "archive: [$AR]"
+if [ -z "$AR" ]; then echo "-- diagnostic retry: stop both, then promote again"; "$SILO" stop $MFORK >/dev/null 2>&1; "$SILO" stop $MSRC >/dev/null 2>&1; sleep 5; snap
+  "$SILO" fold $MFORK --promote --json > /tmp/p3-mpromote2.json 2> /tmp/p3-mpromote2.err; rc2=$?; echo "retry rc=$rc2"; head -c 700 /tmp/p3-mpromote2.json; echo; check "diagnostic: silo fold $MFORK --promote with both stopped" $rc2 ""; snap; fi
 "$SILO" list --json | python3 -c "
 import json,sys
 d=json.load(sys.stdin); d=d if isinstance(d,list) else d.get('computers',d)

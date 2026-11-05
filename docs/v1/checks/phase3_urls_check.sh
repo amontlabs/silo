@@ -37,6 +37,7 @@ echo "guest OS: $(x main '. /etc/os-release; echo $PRETTY_NAME kernel $(uname -r
 echo "== web app through the boot entry on main"
 sleep 3; echo "in-guest: $(x main 'curl -s -m 5 http://127.0.0.1:3000/')"
 "$SILO" checkpoints main
+echo "main ports:"; "$SILO" ports main
 echo "== fork main -n 4"
 t=$(now); "$SILO" fork main -n 4 --json > /tmp/p3-fork.json 2> /tmp/p3-fork.err; rc=$?; ft=$(( $(now)-t ))
 check "silo fork main -n 4" $rc "wall $ft s (dev signal only)"
@@ -67,13 +68,20 @@ import json
 d=json.load(open('/tmp/p3-fork.json'))
 for x in d['forks']:
     if x['name']=='$f': print(' '.join(x.get('urls') or []))"); [ -n "$u" ] && nurl=$((nurl+1)); echo "$f printed urls: [$u]"; done
-[ "$nurl" = 4 ]; check "each fork prints its own URL (network.urls)" $? "$nurl of 4 forks have URLs; recipe 'ports: [3000]' is stored in the build cache but no published port reaches main or its forks, and silo has no command to publish one"
-echo "-- direct probe of the conventional names"
-bad=0; for f in "${FORKS[@]}"; do r=$(curl -s -m 10 -w ' http=%{http_code}' "http://3000.$f.silo.localhost:${PORT:-47383}/"); echo "$f: $r"; case "$r" in *http=200) ;; *) bad=1;; esac; done
-check "4 concurrent curls of http://3000.<fork>.silo.localhost:<port> each answer with the fork's hostname" $bad ""
+[ "$nurl" = 4 ]; check "each fork prints its own URL (network.urls)" $? "$nurl of 4 forks have URLs"
+echo "-- concurrent curl of each fork's printed URL"
+rm -rf /tmp/p3-out; mkdir -p /tmp/p3-out
+i=0; for f in "${FORKS[@]}"; do u=$(python3 -c "
+import json
+d=json.load(open('/tmp/p3-fork.json'))
+for x in d['forks']:
+    if x['name']=='$f': print((x.get('urls') or [''])[0])"); echo "$u" > /tmp/p3-out/$i.url; ( curl -s -m 20 -w ' http=%{http_code}' "$u" > /tmp/p3-out/$i.out ) & i=$((i+1)); done; wait
+bad=0; hosts=""; i=0; for f in "${FORKS[@]}"; do echo "$f $(cat /tmp/p3-out/$i.url): $(cat /tmp/p3-out/$i.out)"; grep -q "host=$f " /tmp/p3-out/$i.out && grep -q 'http=200' /tmp/p3-out/$i.out || bad=1; i=$((i+1)); done
+check "4 concurrent curls: each fork's URL answers 200 with its own hostname" $bad ""
+for f in "${FORKS[@]}"; do "$SILO" ports $f; done
 echo "== drop forks"
 for f in "${FORKS[@]}"; do "$SILO" stop "$f" >/dev/null 2>&1; "$SILO" drop "$f" --force >/dev/null 2>&1; echo "dropped $f rc=$?"; done
 sleep 3
-bad=0; for f in "${FORKS[@]}"; do c=$(curl -s -m 10 -o /dev/null -w "%{http_code}" "http://3000.$f.silo.localhost:${PORT:-47383}/"); echo "$f after drop: http $c"; case $c in 404|502) ;; *) bad=1;; esac; done
-check "dropped forks' URLs stop answering (404/502)" $bad "(vacuous: they answered 404 before the drop too, as no route was ever published)"
+bad=0; i=0; for f in "${FORKS[@]}"; do c=$(curl -s -m 10 -o /dev/null -w "%{http_code}" "$(cat /tmp/p3-out/$i.url)"); i=$((i+1)); echo "$f after drop: http $c"; case $c in 404|502) ;; *) bad=1;; esac; done
+check "dropped forks' URLs stop answering (404/502)" $bad ""
 FORKS=()
