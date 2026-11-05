@@ -118,8 +118,24 @@ pub async fn status(engine: &Engine, name: &str) -> Result<Value, CliError> {
             .unwrap_or(Value::Null),
         Err(_) => Value::Null,
     };
+    value["credentialsUsed"] = credentials_used(engine, &computer.id).await;
     value["checkpointList"] = Value::Array(computer.checkpoints);
     Ok(value)
+}
+
+/// Which Silo secrets a computer used and which attempts were blocked. `null` when the
+/// engine cannot say (an older engine does not know the method).
+pub async fn credentials_used(engine: &Engine, computer_id: &str) -> Value {
+    engine
+        .call(requests::computers_credentials(
+            silo_api::methods::credentials_used::ComputerCredentialsParams {
+                computer_id: computer_id.to_owned(),
+                device_id: None,
+                since: None,
+            },
+        ))
+        .await
+        .unwrap_or(Value::Null)
 }
 
 fn assigned_ids(secret: &Value) -> impl Iterator<Item = &str> {
@@ -708,6 +724,10 @@ pub async fn diff(
         if let Some(seconds) = baseline_seconds {
             object.insert("baselineIdleSeconds".to_owned(), json!(seconds));
         }
+        object.insert(
+            "credentialsUsed".to_owned(),
+            credentials_used(engine, &target.id).await,
+        );
         if let Some(digest) = result["reviewDigest"].as_str().filter(|d| !d.is_empty()) {
             engine.remember_review(&target.id, digest);
         }

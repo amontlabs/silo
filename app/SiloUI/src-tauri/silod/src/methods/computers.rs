@@ -33,6 +33,7 @@ use silo_api::{
             ComputerIdentitiesParams, ComputerIdentity, ComputerListParams, ComputerShellParams,
             ComputersListResult, LaunchStatus,
         },
+        credentials_used::ComputerCredentialsParams,
         logs::{LogSource, LogsExportParams, LogsQueryParams},
         macos::{
             MacosDisplayConnectParams, MacosDisplayConnectResult, MacosDisplayResizeParams,
@@ -851,6 +852,36 @@ fn canonical_storage(state: impl Serialize) -> Result<Value, String> {
     serde_json::to_value(state).map_err(|error| error.to_string())
 }
 
+/// `computers.credentials`: the secrets this computer used and the attempts that were blocked.
+async fn read_credentials(
+    context: &HandlerContext,
+    params: ComputerCredentialsParams,
+) -> Result<HandlerOutput, DispatchError> {
+    require_local_device(context, params.device_id.as_deref())?;
+    let host = SilodRuntimeHost::new(context);
+    let resolved = resolve(&host, &params.computer_id)?;
+    let app_data = context.silod_context().paths().app_data.clone();
+    let usage = tokio::task::spawn_blocking(move || {
+        let file = match resolved {
+            Resolved::Linux(name) => {
+                let paths = silo_engine::runtime::runtime_paths(&host)?;
+                silo_engine::credentials_usage::linux_usage_file(&paths.home, &name)
+            }
+            Resolved::Macos => {
+                silo_engine::macos_computers::usage_file(&app_data, &params.computer_id)
+            }
+        };
+        Ok::<_, String>(silo_engine::credentials_usage::read_usage(
+            &[file],
+            params.since,
+        ))
+    })
+    .await
+    .map_err(join_failure)?
+    .map_err(invalid)?;
+    Ok(plain(encode(usage)?))
+}
+
 // MARK: Lifecycle
 
 /// Linux start/stop/restart, and macOS start/stop, as jobs.
@@ -1634,6 +1665,7 @@ async fn route(
             read_setup_activity(context).await
         }
         MethodName::ComputersLaunch => read_launch_status(context, decoded!()).await,
+        MethodName::ComputersCredentials => read_credentials(context, decoded!()).await,
         MethodName::LogsQuery => read_logs(context, decoded!()).await,
         MethodName::LogsExport => begin_logs_export(context, decoded!()).await,
         MethodName::StorageRead => read_storage(context, decoded!()).await,
@@ -1884,6 +1916,32 @@ pub(crate) mod tests {
                 .unwrap(),
             json!({"enabled": false, "computerIds": [], "lastPass": null})
         );
+    }
+
+    #[tokio::test]
+    async fn credentials_reads_the_sandbox_event_file_without_values() {
+        let f = fixture();
+        seed_linux(&f);
+        let host = SilodRuntimeHost::new(&f.context);
+        let paths = silo_engine::runtime::runtime_paths(&host).unwrap();
+        let file = silo_engine::credentials_usage::linux_usage_file(&paths.home, "dev");
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(
+            &file,
+            "{\"v\":1,\"at\":5,\"kind\":\"used\",\"secret\":\"K\",\"host\":\"h.example\",\"method\":\"GET\",\"value\":\"sekret\"}\nbroken\n",
+        )
+        .unwrap();
+        let value = f
+            .call(
+                MethodName::ComputersCredentials,
+                json!({"computerId": LINUX}),
+            )
+            .await
+            .unwrap();
+        assert_eq!(value["used"][0]["secret"], "K");
+        assert_eq!(value["used"][0]["count"], 1);
+        assert_eq!(value["blocked"], json!([]));
+        assert!(!value.to_string().contains("sekret"));
     }
 
     #[tokio::test]

@@ -293,3 +293,14 @@ fork-time record), `reviewDigest` (from `changes.diff`) and `summary`. The resul
 The store is `fold_requests.rs` in the engine, one JSON file per request; a later request for
 the same fork and target updates the open one and keeps its id. The CLI and the MCP `fold` tool
 (`request: true`) call it after a fresh diff.
+
+## Credentials used: `computers.credentials`
+
+`computers.credentials` (a query; params `computerId`, optional `since` in epoch milliseconds)
+returns `{used, blocked}` read from the proxy's `secret-usage.jsonl` (see
+[secrets](SiloUI-SECRETS.md#credentials-a-fork-used)). `silo status` and `silo diff` print the
+`credentials used:` line and carry `credentialsUsed` in `--json`; the value is `null` when an
+older engine does not know the method. The Linux events come from the
+`microsandbox-secret-usage-events` patch, the macOS ones from the same patched network crate
+inside `silo-macos-gateway`. In the engine, `credentials_usage::credentials_for(computer_id)`
+(with `set_locator`) is the plain entry point for the review-request `credentials` field.

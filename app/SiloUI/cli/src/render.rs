@@ -63,7 +63,55 @@ pub fn status(value: &Value) -> String {
     if let Some(github) = value.get("github").filter(|github| github.is_object()) {
         out.push_str(&format!("\n{}", github_line(github)));
     }
+    if let Some(used) = value.get("credentialsUsed").filter(|used| used.is_object()) {
+        out.push_str(&format!("\n{}", credentials_line(used)));
+    }
     out
+}
+
+/// `credentials used: KEY → host (POST ×3); blocked: 1 (TOKEN → evil.example GET)`, or
+/// `credentials used: none`.
+pub fn credentials_line(usage: &Value) -> String {
+    let used: Vec<String> = list_of(usage, "used")
+        .iter()
+        .map(|entry| {
+            format!(
+                "{} → {} ({} ×{})",
+                text(entry, "secret"),
+                text(entry, "host"),
+                text(entry, "method"),
+                number(entry, "count"),
+            )
+        })
+        .collect();
+    let mut line = format!(
+        "credentials used: {}",
+        if used.is_empty() {
+            "none".to_owned()
+        } else {
+            used.join(", ")
+        }
+    );
+    let blocked = list_of(usage, "blocked");
+    if !blocked.is_empty() {
+        let total: u64 = blocked
+            .iter()
+            .map(|entry| entry.get("count").and_then(Value::as_u64).unwrap_or(1))
+            .sum();
+        let details: Vec<String> = blocked
+            .iter()
+            .map(|entry| match entry.get("secret").and_then(Value::as_str) {
+                Some(secret) => format!(
+                    "{secret} → {} {}",
+                    text(entry, "host"),
+                    text(entry, "method")
+                ),
+                None => format!("{} {}", text(entry, "host"), text(entry, "method")),
+            })
+            .collect();
+        line.push_str(&format!("; blocked: {} ({})", total, details.join(", ")));
+    }
+    line
 }
 
 fn names_or_none(items: &[Value]) -> String {
@@ -237,6 +285,27 @@ pub fn checkpoints(value: &Value) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn credentials_line_names_used_and_blocked() {
+        let usage = json!({"used": [{"secret": "OPENAI_API_KEY", "host": "api.openai.com", "method": "POST", "count": 3}],
+            "blocked": [{"secret": "GITHUB_TOKEN", "host": "evil.example", "method": "GET", "count": 1, "reason": "host_not_allowed"}]});
+        assert_eq!(
+            credentials_line(&usage),
+            "credentials used: OPENAI_API_KEY → api.openai.com (POST ×3); blocked: 1 (GITHUB_TOKEN → evil.example GET)"
+        );
+        assert_eq!(
+            credentials_line(&json!({"used": [], "blocked": []})),
+            "credentials used: none"
+        );
+    }
+
+    #[test]
+    fn status_prints_the_credentials_line_when_known() {
+        let value = json!({"name": "a", "kind": "linux", "state": "running", "credentialsUsed": {"used": [], "blocked": []}});
+        assert!(status(&value).ends_with("credentials used: none"));
+        assert!(!status(&json!({"name": "a"})).contains("credentials"));
+    }
+
     use super::*;
     use serde_json::json;
 

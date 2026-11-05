@@ -92,6 +92,21 @@ source computer's cached grants and credentials held by historical checkpoint
 memory are not used. If the target has no current GitHub profile, restore starts
 without GitHub access.
 
+## Credentials a fork used
+
+Forks get none of the credentials Silo manages unless you name them; files on disk are copied.
+For the ones you do name, `silo status <fork>` and `silo diff <fork>` print a line such as
+`credentials used: OPENAI_API_KEY → api.openai.com (POST ×3); blocked: 1 (GITHUB_TOKEN → evil.example GET)`,
+or `credentials used: none`. The engine method `computers.credentials` returns the same data as
+`{used: [{secret, host, method, count, lastAt}], blocked: [{secret, host, method, count, reason, lastAt}]}`.
+
+The network proxy appends one JSON line per event to `secret-usage.jsonl`: in the sandbox's
+`logs/` directory for a Linux computer, in the computer's folder for a macOS computer (whose
+gateway output also goes to a capped `gateway.log` there). Lines hold names, hosts and
+methods, never a value or a placeholder. Substitution in headers and the request line is
+recorded; substitution in a request body is not yet. A file belongs to one computer, so a fork
+counts from its own first request. Aggregation is `credentials_usage.rs` in the engine.
+
 ## Sources
 
 - [MicroSandbox placeholder substitution](https://microsandbox.dev/blog/sandboxes-that-lie-about-their-secrets)

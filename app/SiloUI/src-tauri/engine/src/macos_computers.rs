@@ -96,6 +96,13 @@ use std::{
     time::{Duration, Instant},
 };
 pub use store::{Action, CreateRequest, ExpectedResources};
+
+/// Where a macOS computer's gateway appends credential-use events.
+pub fn usage_file(app_data: &std::path::Path, computer_id: &str) -> std::path::PathBuf {
+    store::Layout::new(app_data, computer_id)
+        .dir
+        .join(crate::credentials_usage::USAGE_FILE)
+}
 use store::{DeleteMode, Layout, Record, State};
 
 const CHANGED_EVENT: &str = "silo://macos-computers-changed";
