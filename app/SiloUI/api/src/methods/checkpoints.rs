@@ -33,7 +33,7 @@ wire_struct! {
         new_name: String,
         /// Names of Silo-managed secrets the fork may use. The special name `github` copies
         /// GitHub access, read-only. Nothing is copied unless named.
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
         secrets: Vec<String>,
         /// What to quiet in the fork before it runs anything.
         #[serde(default, skip_serializing_if = "Option::is_none")]

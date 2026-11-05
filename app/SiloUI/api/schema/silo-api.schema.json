@@ -698,7 +698,6 @@
           "description": "What to quiet in the fork before it runs anything."
         },
         "secrets": {
-          "default": [],
           "description": "Names of Silo-managed secrets the fork may use. The special name `github` copies\nGitHub access, read-only. Nothing is copied unless named.",
           "items": {
             "type": "string"
