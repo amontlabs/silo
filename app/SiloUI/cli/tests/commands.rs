@@ -617,6 +617,22 @@ async fn the_undo_command_names_the_computer_and_reports_what_was_undone() {
 }
 
 #[tokio::test]
+async fn an_undone_promote_is_reported_as_a_promote_not_a_keep() {
+    let engine = keep_engine(json!({
+        "status": "undone", "kind": "promote", "computer": "main", "fork": "try",
+        "archive": "main-before-20261105-1432", "recovered": false, "changedSince": []
+    }));
+    let connected = Engine::connect(&engine.socket).await.unwrap();
+    let value = ops::undo(&connected, "main", &ignore).await.unwrap();
+    let text = silo_cli::render::undo(&value);
+    assert_eq!(
+        text,
+        "Undid the promote: main is main again, and try has its own name back."
+    );
+    assert!(!text.contains("Put "));
+}
+
+#[tokio::test]
 async fn diff_uses_a_cached_baseline_and_measures_nothing() {
     let engine = FakeEngine::start(|method, _| match method {
         "computers.list" => Ok(listing(&[("try", "running")])),

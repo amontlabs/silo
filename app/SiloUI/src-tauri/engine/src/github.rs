@@ -717,13 +717,10 @@ pub(crate) fn import_computer(computer: &str, assignment: &Value) -> Result<(), 
     save(&document)
 }
 
+/// Drops the assignment a fork was given, as when the fork is removed: the saved choices, the
+/// cached attachments and the issued tokens go too, so nothing the fork was given outlives it.
 pub fn forget_fork_assignment(target: &str) -> Result<(), String> {
-    let _state = serialize(&STATE);
-    let mut document = load()?;
-    forget_computer(&mut document, target);
-    document.revision = next_policy_revision(document.revision)?;
-    stamp(&mut document, target, None);
-    save(&document)
+    computer_removed(target)
 }
 
 /// Remove every saved choice and pending result for a computer. Returns whether any existed.

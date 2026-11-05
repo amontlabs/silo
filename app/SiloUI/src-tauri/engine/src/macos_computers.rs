@@ -35,6 +35,8 @@ mod guest_exec;
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 #[path = "macos_computers/guest_screen.rs"]
 mod guest_screen;
+#[path = "macos_computers/hostname.rs"]
+mod hostname;
 #[path = "macos_computers/input.rs"]
 mod input;
 #[path = "macos_computers/offline_setup.rs"]
@@ -2747,6 +2749,13 @@ pub fn promote_set_name(app: &MacosContext, id: &str, name: &str) -> Result<(), 
     if record.name == name {
         return Ok(());
     }
+    // Two computers never share a name, not even for the moment between two renames.
+    if store::identities(&data)
+        .iter()
+        .any(|(other, taken)| other != id && taken.eq_ignore_ascii_case(name))
+    {
+        return Err(format!("Another computer is already named {name}."));
+    }
     record.name = name.to_owned();
     let layout = Layout::new(&data, id);
     persist_then_commit(
@@ -2761,12 +2770,118 @@ pub fn promote_set_name(app: &MacosContext, id: &str, name: &str) -> Result<(), 
     Ok(())
 }
 
-/// Checks the proxy CA the network bootstrap expects for this computer. It is keyed by the
-/// computer's id, which a promote never changes, so nothing moves; a missing CA fails the promote.
+/// Checks that both computers have the proxy CA the network bootstrap expects; a missing CA
+/// fails the promote before anything moves.
 pub fn promote_check_identity(id: &str) -> Result<(), String> {
     proxy_ca::get_existing(id)?.map(|_| ()).ok_or_else(|| {
         "The computer's network identity is missing; set it up before promoting.".into()
     })
+}
+
+/// The promoted fork presents main's proxy CA, and gets its own back with `uncarry`.
+pub fn promote_carry_ca(main_id: &str, fork_id: &str) -> Result<(), String> {
+    proxy_ca::carry(main_id, fork_id)
+}
+
+pub fn promote_uncarry_ca(fork_id: &str) -> Result<(), String> {
+    proxy_ca::uncarry(fork_id)
+}
+
+/// Points the saved SSH entries of the two computers at each other (`swapped`) or back.
+pub fn promote_point_ssh_alias(
+    app: &MacosContext,
+    a: &str,
+    b: &str,
+    swapped: bool,
+) -> Result<(), String> {
+    ssh_alias::point(app, a, b, swapped)
+}
+
+/// The hostnames a stopped computer has, read from its disk.
+pub fn promote_read_hostnames(app: &MacosContext, id: &str) -> Result<serde_json::Value, String> {
+    let disk = Layout::new(&app_data(app)?, id).disk();
+    let names = offline_setup::with_data_volume(&disk, |root| hostname::read(root))?;
+    serde_json::to_value(names).map_err(|e| e.to_string())
+}
+
+/// Gives a stopped computer these hostnames (from [`promote_read_hostnames`]) on its disk.
+pub fn promote_write_hostnames(
+    app: &MacosContext,
+    id: &str,
+    names: &serde_json::Value,
+) -> Result<(), String> {
+    if names.is_null() {
+        return Ok(());
+    }
+    let names: hostname::Hostnames = serde_json::from_value(names.clone())
+        .map_err(|_| "The saved hostnames are invalid.".to_string())?;
+    let disk = Layout::new(&app_data(app)?, id).disk();
+    offline_setup::with_data_volume(&disk, |root| hostname::write(root, &names))
+}
+
+/// What a fork was made quiet with (null for a computer that is not a quiet fork).
+pub fn promote_export_quiet(id: &str) -> Result<serde_json::Value, String> {
+    let (record, _) = computer(id)?;
+    serde_json::to_value(&record.quiet).map_err(|e| e.to_string())
+}
+
+fn promote_save_quiet(
+    app: &MacosContext,
+    id: &str,
+    quiet: Option<quiet::QuietRecord>,
+) -> Result<(), String> {
+    let data = app_data(app)?;
+    let (mut record, _) = computer(id)?;
+    record.quiet = quiet;
+    let layout = Layout::new(&data, id);
+    persist_then_commit(
+        record,
+        |record| store::save(&layout, record),
+        || store::read_record(&layout).ok(),
+        |record| {
+            update(app, id, |entry| entry.record = record);
+        },
+    )?;
+    emit(app);
+    Ok(())
+}
+
+/// Puts the work parked when a fork was made quiet back on the promoted fork's stopped disk,
+/// except at paths the fork has used since, and records what is still parked. Returns the
+/// paths that were put back. Repeating it changes nothing.
+pub fn promote_restore_quiet(app: &MacosContext, id: &str) -> Result<Vec<String>, String> {
+    let (record, _) = computer(id)?;
+    let Some(mut quiet) = record.quiet.clone() else {
+        return Ok(Vec::new());
+    };
+    if quiet.parked.is_empty() {
+        return Ok(Vec::new());
+    }
+    let disk = Layout::new(&app_data(app)?, id).disk();
+    let parked = quiet.parked.clone();
+    let done =
+        offline_setup::with_data_volume(&disk, |root| quiet::restore_offline(root, &parked))?;
+    quiet.parked = done.left;
+    quiet.scheduled_jobs_disabled = !quiet.parked.is_empty();
+    promote_save_quiet(app, id, Some(quiet))?;
+    Ok(done.restored)
+}
+
+/// Undoes [`promote_restore_quiet`]: parks again what was put back and gives the fork its
+/// record (`original`, from [`promote_export_quiet`]) back.
+pub fn promote_repark_quiet(
+    app: &MacosContext,
+    id: &str,
+    original: &serde_json::Value,
+) -> Result<(), String> {
+    let original: Option<quiet::QuietRecord> = serde_json::from_value(original.clone())
+        .map_err(|_| "The saved quiet settings are invalid.".to_string())?;
+    if original.is_none() {
+        return Ok(());
+    }
+    let disk = Layout::new(&app_data(app)?, id).disk();
+    offline_setup::with_data_volume(&disk, |root| quiet::repark_offline(root))?;
+    promote_save_quiet(app, id, original)
 }
 
 /// The saved forwards of a macOS computer (see `ports::export_mappings`).

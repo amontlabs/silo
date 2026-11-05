@@ -740,6 +740,92 @@ pub(super) fn runtime_script(stop: &[String]) -> Option<String> {
     Some(script)
 }
 
+// MARK: Restore
+
+/// Lists what a promote moved back out of the parking folder, so an undo can park it again.
+const RESTORED_MARKER: &str = ".restored-by-promote";
+
+/// What a restore did.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(super) struct Restored {
+    /// Guest paths put back where they were.
+    pub restored: Vec<String>,
+    /// Guest paths still parked: the computer made something of its own at that path.
+    pub left: Vec<String>,
+}
+
+/// Puts the parked scheduled work of a promoted fork back where it was, except at paths the
+/// fork has used for something else since (those stay parked). `parked` is the list the fork's
+/// record keeps. Repeating it finds nothing more to move.
+pub(super) fn restore_offline(root: &Path, parked: &[String]) -> Result<Restored, String> {
+    let mut done = Restored::default();
+    let marker = root.join(PARK_DIR).join(RESTORED_MARKER);
+    for guest in parked {
+        let relative = guest.trim_start_matches('/');
+        let parts = data_volume_components(&format!("/{relative}"))?;
+        let relative = parts.join("/");
+        let from = root.join(PARK_DIR).join(&relative);
+        let to = root.join(&relative);
+        if fs::symlink_metadata(&from).is_err() {
+            // Moved already, or never parked.
+            if fs::symlink_metadata(&to).is_ok() {
+                done.restored.push(guest.clone());
+            }
+            continue;
+        }
+        if fs::symlink_metadata(&to).is_ok() {
+            done.left.push(guest.clone());
+            continue;
+        }
+        let parent = to
+            .parent()
+            .ok_or("Silo could not put a scheduled job back.")?;
+        make_real_dirs(root, parent)?;
+        remember_restored(&marker, &relative)?;
+        fs::rename(&from, &to).map_err(|error| io("put a scheduled job back", &error))?;
+        done.restored.push(guest.clone());
+    }
+    Ok(done)
+}
+
+/// Parks again what [`restore_offline`] put back (the promote was undone), unless the
+/// computer has since put something at the parking spot.
+pub(super) fn repark_offline(root: &Path) -> Result<(), String> {
+    let marker = root.join(PARK_DIR).join(RESTORED_MARKER);
+    let Ok(text) = fs::read_to_string(&marker) else {
+        return Ok(());
+    };
+    let mut outcome = Outcome::default();
+    for relative in text.lines().filter(|line| !line.is_empty()) {
+        let parked = root.join(PARK_DIR).join(relative);
+        if fs::symlink_metadata(&parked).is_ok() {
+            continue;
+        }
+        park(root, relative, &mut outcome)?;
+    }
+    fs::remove_file(&marker).map_err(|error| io("finish parking again", &error))
+}
+
+fn remember_restored(marker: &Path, relative: &str) -> Result<(), String> {
+    use std::io::Write;
+    let existing = fs::read_to_string(marker).unwrap_or_default();
+    if existing.lines().any(|line| line == relative) {
+        return Ok(());
+    }
+    let parent = marker
+        .parent()
+        .ok_or("Silo could not put a scheduled job back.")?;
+    fs::create_dir_all(parent).map_err(|error| io("make the parking folder", &error))?;
+    let mut file = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(marker)
+        .map_err(|error| io("note a scheduled job put back", &error))?;
+    writeln!(file, "{relative}").map_err(|error| io("note a scheduled job put back", &error))?;
+    file.sync_all()
+        .map_err(|error| io("note a scheduled job put back", &error))
+}
+
 fn io(action: &str, error: &std::io::Error) -> String {
     super::store::io_error(action, error)
 }
@@ -1392,5 +1478,79 @@ mod tests {
             root,
             "Library/LaunchDaemons/com.silo.network-bootstrap.plist"
         ));
+    }
+    fn parked_fork() -> (tempfile::TempDir, Vec<String>) {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        write(
+            root,
+            "Users/silo/Library/LaunchAgents/poller.plist",
+            &scheduled("dev.poller"),
+        );
+        write(root, "private/var/at/tabs/silo", "* * * * * poll\n");
+        let parked = apply_offline(root, &[], &[]).unwrap().parked;
+        assert_eq!(parked.len(), 2);
+        (dir, parked)
+    }
+
+    #[test]
+    fn a_promote_puts_the_parked_work_back_and_an_undo_parks_it_again() {
+        let (dir, parked) = parked_fork();
+        let root = dir.path();
+        let agent = "Users/silo/Library/LaunchAgents/poller.plist";
+        assert!(!exists(root, agent));
+
+        let done = restore_offline(root, &parked).unwrap();
+        assert_eq!(done.restored.len(), 2);
+        assert!(done.left.is_empty());
+        assert!(exists(root, agent));
+        assert!(exists(root, "private/var/at/tabs/silo"));
+        assert!(!exists(root, &format!("{PARK_DIR}/{agent}")));
+        // A repeat finds nothing to move.
+        assert!(restore_offline(root, &parked).unwrap().left.is_empty());
+
+        repark_offline(root).unwrap();
+        repark_offline(root).unwrap();
+        assert!(!exists(root, agent));
+        assert!(exists(root, &format!("{PARK_DIR}/{agent}")));
+        assert!(exists(
+            root,
+            &format!("{PARK_DIR}/private/var/at/tabs/silo")
+        ));
+        assert!(!exists(root, &format!("{PARK_DIR}/{RESTORED_MARKER}")));
+    }
+
+    #[test]
+    fn work_the_fork_replaced_stays_parked_and_is_not_overwritten() {
+        let (dir, parked) = parked_fork();
+        let root = dir.path();
+        write(
+            root,
+            "Users/silo/Library/LaunchAgents/poller.plist",
+            &scheduled("dev.replacement"),
+        );
+
+        let done = restore_offline(root, &parked).unwrap();
+
+        assert_eq!(done.left, ["/Users/silo/Library/LaunchAgents/poller.plist"]);
+        assert_eq!(done.restored, ["/private/var/at/tabs/silo"]);
+        let text =
+            fs::read_to_string(root.join("Users/silo/Library/LaunchAgents/poller.plist")).unwrap();
+        assert!(text.contains("dev.replacement"));
+        // The undo leaves the replacement alone too.
+        repark_offline(root).unwrap();
+        let text =
+            fs::read_to_string(root.join("Users/silo/Library/LaunchAgents/poller.plist")).unwrap();
+        assert!(text.contains("dev.replacement"));
+        assert!(exists(
+            root,
+            &format!("{PARK_DIR}/private/var/at/tabs/silo")
+        ));
+    }
+
+    #[test]
+    fn a_restore_refuses_paths_that_leave_the_data_volume() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(restore_offline(dir.path(), &["/Users/../etc/passwd".to_owned()]).is_err());
     }
 }

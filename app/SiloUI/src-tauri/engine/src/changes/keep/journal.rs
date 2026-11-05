@@ -40,6 +40,9 @@ pub enum State {
 pub struct Record {
     pub checkpoint: CheckpointRef,
     pub state: State,
+    /// When the keep succeeded (milliseconds since the epoch); orders it against a promote.
+    #[serde(default)]
+    pub undoable_at: u128,
 }
 
 #[derive(Clone, Debug)]
@@ -113,6 +116,7 @@ impl Journal {
         all.push(Record {
             checkpoint: checkpoint.clone(),
             state: State::Pending,
+            undoable_at: 0,
         });
         self.save_records(target, &all)
     }
@@ -121,6 +125,9 @@ impl Journal {
         let mut all = self.records(target);
         for record in all.iter_mut().filter(|r| r.checkpoint.id == id) {
             record.state = state;
+            if state == State::Undoable {
+                record.undoable_at = super::super::promote::journal::now_millis();
+            }
         }
         self.save_records(target, &all)
     }
@@ -132,6 +139,20 @@ impl Journal {
             .rev()
             .find(|r| r.state == State::Undoable)
             .map(|r| r.checkpoint)
+    }
+
+    /// When the keep that `latest_undoable` would restore succeeded.
+    pub fn latest_undoable_at(&self, target: &str) -> Option<u128> {
+        self.records(target)
+            .into_iter()
+            .rev()
+            .find(|r| r.state == State::Undoable)
+            .map(|r| r.undoable_at)
+    }
+
+    /// Whether an interrupted keep of the target is waiting to be put back.
+    pub fn has_pending(&self, target: &str) -> bool {
+        matches!(self.pending(target), Ok(Some(_)) | Err(_))
     }
 
     /// The manifest of the target as the last keep left it, to tell what changed after.

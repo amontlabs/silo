@@ -48,8 +48,14 @@ pub fn start_undo(
         let journal = journal_for(context.as_ref());
         let keep_journal = keep_service::journal_for(context.as_ref());
         let env = EngineEnv::new(host.clone(), service.clone(), keep_journal.clone());
-        if let Some(done) = super::undo(&env, &journal, &computer, LANE_WAIT)? {
-            return Ok(done.to_json());
+        // `silo undo` takes back the newest thing done to the computer: a promote or a keep.
+        // An interrupted keep is put back first, whatever came before it.
+        let promoted = super::latest_at(&journal, &computer);
+        let kept = keep_journal.latest_undoable_at(&computer);
+        if super::promote_is_newest(promoted, kept, keep_journal.has_pending(&computer)) {
+            if let Some(done) = super::undo(&env, &journal, &computer, LANE_WAIT)? {
+                return Ok(done.to_json());
+            }
         }
         let guest = keep::guest_env::GuestEnv::new(
             host.clone(),
@@ -66,12 +72,4 @@ pub fn start_undo(
         )
         .map(|outcome| outcome.to_json())
     })
-}
-
-/// Settles every promote or undo the engine stopped in the middle of; returns the failures.
-pub fn recover_interrupted(host: Arc<dyn RuntimeHost>, service: Service) -> Vec<String> {
-    let context = host.engine_context();
-    let journal = journal_for(context.as_ref());
-    let env = EngineEnv::new(host, service, keep_service::journal_for(context.as_ref()));
-    super::recover_all(&env, &journal)
 }

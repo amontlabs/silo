@@ -112,18 +112,40 @@ fn config_text(
     known_hosts: &Path,
     helper: &Path,
 ) -> Result<String, String> {
+    config_text_for(
+        device_id,
+        computer_id,
+        computer_id,
+        identity,
+        known_hosts,
+        helper,
+    )
+}
+
+/// The entry named after `entry_id` that connects to the computer `target_id`, with that
+/// computer's key and pinned host key. They are the same computer except after a promote.
+fn config_text_for(
+    device_id: &str,
+    entry_id: &str,
+    target_id: &str,
+    identity: &Path,
+    known_hosts: &Path,
+    helper: &Path,
+) -> Result<String, String> {
     validate_id(device_id)?;
-    validate_id(computer_id)?;
+    validate_id(entry_id)?;
+    validate_id(target_id)?;
     let identity = editor::ssh_quote(identity)?;
     let known_hosts = editor::ssh_quote(known_hosts)?;
     let helper = helper.to_str().ok_or(FAILED)?;
     if helper.chars().any(char::is_control) {
         return Err(FAILED.into());
     }
-    let alias = alias(computer_id);
-    let proxy = proxy_text(helper, device_id, computer_id, None);
+    let pinned = alias(target_id);
+    let alias = alias(entry_id);
+    let proxy = proxy_text(helper, device_id, target_id, None);
     Ok(format!(
-        "Host {alias}\n  HostName {alias}\n  Port 22\n  User silo\n  IdentityFile {identity}\n  IdentitiesOnly yes\n  IdentityAgent none\n  UserKnownHostsFile {known_hosts}\n  GlobalKnownHostsFile /dev/null\n  HostKeyAlias {alias}\n  StrictHostKeyChecking yes\n  UpdateHostKeys no\n  ForwardAgent no\n  ForwardX11 no\n  ClearAllForwardings yes\n  PermitLocalCommand no\n  ConnectTimeout 10\n  ServerAliveInterval 15\n  LogLevel ERROR\n  ProxyCommand {proxy}\n"
+        "Host {alias}\n  HostName {alias}\n  Port 22\n  User silo\n  IdentityFile {identity}\n  IdentitiesOnly yes\n  IdentityAgent none\n  UserKnownHostsFile {known_hosts}\n  GlobalKnownHostsFile /dev/null\n  HostKeyAlias {pinned}\n  StrictHostKeyChecking yes\n  UpdateHostKeys no\n  ForwardAgent no\n  ForwardX11 no\n  ClearAllForwardings yes\n  PermitLocalCommand no\n  ConnectTimeout 10\n  ServerAliveInterval 15\n  LogLevel ERROR\n  ProxyCommand {proxy}\n"
     ))
 }
 
@@ -235,6 +257,46 @@ pub(super) fn ensure(
     })
 }
 
+/// After a promote: the saved entry of `a` connects to `b` and the entry of `b` to `a`
+/// (`swapped`), or each to its own computer again. Only entries that exist are rewritten, so
+/// a client that saved main's alias reaches the new main. Repeating it changes nothing.
+pub(super) fn point(app: &MacosContext, a: &str, b: &str, swapped: bool) -> Result<(), String> {
+    validate_id(a)?;
+    validate_id(b)?;
+    let entries = [
+        (a, if swapped { b } else { a }),
+        (b, if swapped { a } else { b }),
+    ];
+    if !entries
+        .iter()
+        .any(|(entry, _)| config_path(app, entry).exists())
+    {
+        return Ok(());
+    }
+    let device_id = crate::remote::log_identity()?.0;
+    let helper = proxy_helper()?;
+    let data = app.paths().app_data.clone();
+    for (entry, target) in entries {
+        let config = config_path(app, entry);
+        if !config.exists() {
+            continue;
+        }
+        let layout = super::store::Layout::new(&data, target);
+        let account = guest_access::account(&layout)?;
+        let text = config_text_for(
+            &device_id,
+            entry,
+            target,
+            &account.key,
+            &known_hosts(&layout),
+            &helper,
+        )?;
+        let _guard = lock();
+        editor::write_private(&config, text.as_bytes())?;
+    }
+    Ok(())
+}
+
 pub(super) fn remove(app: &MacosContext, computer_id: &str) -> Result<(), String> {
     validate_id(computer_id)?;
     let path = config_path(app, computer_id);
@@ -314,6 +376,31 @@ mod tests {
         assert!(config.contains(&format!(
             "--remote-guest 'c690f54f-4cc9-4950-8782-30f21e89d18b' '{id}'\n"
         )));
+    }
+
+    #[test]
+    fn after_a_promote_main_s_entry_connects_to_the_new_main() {
+        let (main, fork) = (
+            "e38c0e77-28bc-44a0-9b3d-3b4f68f0d85f",
+            "1f4f1f9a-7c6e-4a58-8a2e-0d8f3c2b9a11",
+        );
+        let config = config_text_for(
+            "c690f54f-4cc9-4950-8782-30f21e89d18b",
+            main,
+            fork,
+            Path::new("/tmp/fork/guest-access/id_ed25519"),
+            Path::new("/tmp/fork/guest-access/known_hosts"),
+            Path::new("/Applications/Silo Dev.app/Contents/MacOS/silod"),
+        )
+        .unwrap();
+        // Saved connections keep the name they were saved with...
+        assert!(config.starts_with(&format!("Host silo-{main}\n")));
+        // ...and reach the new main, pinned to its host key.
+        assert!(config.contains(&format!(
+            "--remote-guest 'c690f54f-4cc9-4950-8782-30f21e89d18b' '{fork}'\n"
+        )));
+        assert!(config.contains(&format!("HostKeyAlias silo-{fork}\n")));
+        assert!(config.contains("/tmp/fork/guest-access/known_hosts"));
     }
 
     #[test]

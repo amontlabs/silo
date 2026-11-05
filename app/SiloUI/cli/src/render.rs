@@ -312,6 +312,17 @@ pub fn fold(value: &Value) -> String {
 pub fn undo(value: &Value) -> String {
     let computer = text(value, "computer");
     match text(value, "status") {
+        "undone" if text(value, "kind") == "promote" => {
+            let how = if value["recovered"] == true {
+                " (an interrupted promote)"
+            } else {
+                ""
+            };
+            format!(
+                "Undid the promote{how}: {computer} is main again, and {} has its own name back.",
+                text(value, "fork")
+            )
+        }
         "undone" => {
             let name = text(&value["checkpoint"], "name");
             let how = if value["recovered"] == true {
