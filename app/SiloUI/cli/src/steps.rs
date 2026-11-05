@@ -116,10 +116,16 @@ pub async fn run_exec(
     settings: StepSettings,
     progress: Progress<'_>,
 ) -> Result<(ExecOutput, Value), CliError> {
-    let started = clock::now_unix();
-    let output = ops::exec_raw(engine, args).await?;
-    let finished = clock::now_unix();
+    if args.argv.is_empty() {
+        return Err(CliError::new("Give a command to run after --."));
+    }
+    // The target is fixed before anything runs: a promote or undo while the command runs must
+    // not move the step onto the computer that now has the name.
     let computer = engine.computer(&args.computer).await?;
+    let _step_lock = engine.lock_steps(&computer.id).await?;
+    let started = clock::now_unix();
+    let output = ops::exec_on(engine, computer.clone(), args).await?;
+    let finished = clock::now_unix();
     let step = record(
         engine,
         &computer,

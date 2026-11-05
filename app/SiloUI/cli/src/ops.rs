@@ -1074,6 +1074,15 @@ pub async fn exec_raw(engine: &Engine, args: &ExecArgs) -> Result<ExecOutput, Cl
         )));
     }
     let computer = engine.computer(&args.computer).await?;
+    exec_on(engine, computer, args).await
+}
+
+/// Runs the command on this exact computer (by id), whatever its name has become.
+pub async fn exec_on(
+    engine: &Engine,
+    computer: crate::engine::Computer,
+    args: &ExecArgs,
+) -> Result<ExecOutput, CliError> {
     let reply = engine
         .call(requests::guest_exec(GuestExecParams {
             computer_id: computer.id,

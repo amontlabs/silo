@@ -284,3 +284,96 @@ async fn the_tree_names_a_folder_fork_by_its_folder() {
     );
     assert_eq!(tree["nodes"][0]["from"]["kind"], "root");
 }
+
+#[tokio::test]
+async fn a_computers_steps_run_one_at_a_time_in_order() {
+    let order: Arc<Mutex<Vec<String>>> = Arc::default();
+    let seen = order.clone();
+    let engine = FakeEngine::start(move |method, _| {
+        seen.lock().unwrap().push(method.to_owned());
+        match method {
+            "computers.list" => Ok(listing(&[("main", "running")])),
+            "guest.exec" => Ok(json!({"exitCode": 0, "signal": null, "stdout": [], "stderr": []})),
+            "checkpoints.create" => Ok(json!({"jobId": "job:1"})),
+            "operations.job.get" => Ok(finished(
+                json!({"checkpoint": {"id": "cp", "name": "s", "kind": "step"}}),
+            )),
+            "operations.job.acknowledge" => Ok(Value::Null),
+            "steps.record" => Ok(json!({"step": {"number": 1}})),
+            other => Err(("internal", format!("unexpected {other}"))),
+        }
+    });
+    let connected = Engine::connect(&engine.socket).await.unwrap();
+    let on = settings("step_checkpoints: true\n");
+    let args = exec_args();
+    let (a, b) = tokio::join!(
+        steps::run_exec(&connected, &args, on, &ignore),
+        steps::run_exec(&connected, &args, on, &ignore)
+    );
+    a.unwrap();
+    b.unwrap();
+    let work: Vec<String> = order
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|method| {
+            ["guest.exec", "checkpoints.create", "steps.record"].contains(&method.as_str())
+        })
+        .cloned()
+        .collect();
+    assert_eq!(
+        work,
+        [
+            "guest.exec",
+            "checkpoints.create",
+            "steps.record",
+            "guest.exec",
+            "checkpoints.create",
+            "steps.record"
+        ]
+    );
+}
+
+#[tokio::test]
+async fn the_step_lock_waits_for_the_holder() {
+    let (engine, _) = engine(json!([]), json!([]), false);
+    let connected = Engine::connect(&engine.socket).await.unwrap();
+    let held = connected.lock_steps("id-main").await.unwrap();
+    let waiting = tokio::time::timeout(
+        std::time::Duration::from_millis(200),
+        connected.lock_steps("id-main"),
+    )
+    .await;
+    assert!(waiting.is_err(), "the second lock must wait");
+    assert!(connected.lock_steps("id-other").await.is_ok());
+    drop(held);
+    assert!(connected.lock_steps("id-main").await.is_ok());
+    assert!(connected.lock_steps("../x").await.is_err());
+}
+
+#[tokio::test]
+async fn a_step_belongs_to_the_computer_the_command_ran_on_even_if_the_name_moves() {
+    let listings = Arc::new(Mutex::new(0u32));
+    let calls = listings.clone();
+    let engine = FakeEngine::start(move |method, _| match method {
+        "computers.list" => {
+            let mut count = calls.lock().unwrap();
+            *count += 1;
+            // After the first listing a promote hands the name to another computer.
+            if *count == 1 {
+                Ok(listing(&[("main", "running")]))
+            } else {
+                Ok(listing(&[("main-before", "running"), ("main", "running")]))
+            }
+        }
+        "guest.exec" => Ok(json!({"exitCode": 0, "signal": null, "stdout": [], "stderr": []})),
+        "steps.record" => Ok(json!({"step": {"number": 1}})),
+        other => Err(("internal", format!("unexpected {other}"))),
+    });
+    let connected = Engine::connect(&engine.socket).await.unwrap();
+    steps::run_exec(&connected, &exec_args(), settings(""), &ignore)
+        .await
+        .unwrap();
+    assert_eq!(engine.calls("guest.exec")[0]["computerId"], "id-main");
+    assert_eq!(engine.calls("steps.record")[0]["computerId"], "id-main");
+}
