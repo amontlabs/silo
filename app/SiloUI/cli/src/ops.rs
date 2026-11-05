@@ -1142,8 +1142,9 @@ pub fn parse_checkpoint_kind(text: &str) -> Result<CheckpointKind, CliError> {
         "manual" => Ok(CheckpointKind::Manual),
         "automatic" => Ok(CheckpointKind::Automatic),
         "before-keep" => Ok(CheckpointKind::BeforeKeep),
+        "step" => Ok(CheckpointKind::Step),
         other => Err(CliError::new(format!(
-            "Unknown checkpoint kind {other}; use manual, automatic, before-keep or warm."
+            "Unknown checkpoint kind {other}; use manual, automatic, before-keep, warm or step."
         ))),
     }
 }
@@ -1167,6 +1168,7 @@ pub async fn checkpoint(
                 device_id: None,
                 name,
                 kind,
+                keep_newest: None,
             }),
             progress,
         )

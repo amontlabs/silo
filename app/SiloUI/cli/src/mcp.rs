@@ -18,6 +18,7 @@ use crate::{
     fanout::{self, ManyArgs},
     flows, folder,
     ops::{self, DiffArgs, ExecArgs, ForkArgs},
+    steps,
 };
 
 #[derive(Clone)]
@@ -65,6 +66,10 @@ pub struct ForkParams {
     pub name: Option<String>,
     /// Fork from this checkpoint id instead of the current state.
     pub checkpoint: Option<String>,
+    /// Fork from the checkpoint taken after this step number of the computer (see
+    /// `steps_list`); it needs step checkpoints turned on when the step ran.
+    #[serde(rename = "fromStep", alias = "from_step")]
+    pub from_step: Option<u32>,
     /// Silo-managed secrets the fork may use; each must be in fork_secrets in `.silo/silo.yaml`.
     #[serde(default)]
     pub secrets: Vec<String>,
@@ -237,6 +242,20 @@ impl SiloMcp {
                     .map(|path| self.working_directory.join(path));
                 let source = params.source.unwrap_or_else(|| ops::MAIN.to_owned());
                 let engine = self.engine().await?;
+                let checkpoint = match params.from_step {
+                    Some(number) => {
+                        if params.recipe.is_some()
+                            || params.checkpoint.is_some()
+                            || folder::is_folder(&source)
+                        {
+                            return Err(CliError::new(
+                                "fromStep names a step of a computer; it cannot be combined with recipe, checkpoint or a folder.",
+                            ));
+                        }
+                        Some(steps::checkpoint_for(&engine, &source, number).await?)
+                    }
+                    None => params.checkpoint.clone(),
+                };
                 if params.recipe.is_none() && folder::is_folder(&source) {
                     if params.count.unwrap_or(1) != 1 {
                         return Err(CliError::new(
@@ -283,7 +302,7 @@ impl SiloMcp {
                 let args = ForkArgs {
                     source,
                     name: params.name,
-                    checkpoint: params.checkpoint,
+                    checkpoint,
                     secrets: params.secrets,
                     recipe,
                     recipe_name: params.recipe.clone(),
@@ -429,10 +448,34 @@ impl SiloMcp {
                     cwd: params.cwd,
                     timeout_secs: params.timeout_secs.unwrap_or(ops::MAX_EXEC_SECS),
                 };
-                ops::exec(&self.engine().await?, &args).await
+                let project = Project::discover(&self.working_directory);
+                let settings = project.load_settings()?;
+                let step_settings = crate::config::Settings::step_settings(settings.as_ref(), None);
+                let (output, step) =
+                    steps::run_exec(&self.engine().await?, &args, step_settings, &|_| {}).await?;
+                let mut value = output.to_json();
+                value["step"] = step;
+                Ok(value)
             }
             .await,
         )
+    }
+
+    #[tool(
+        description = "List the steps of a computer: the commands run in it through Silo (`exec`, or `fork` with a command), numbered from 1, with exit code, times and the checkpoint taken after each when step checkpoints are on. Fork from one with `fork` and `fromStep`."
+    )]
+    async fn steps_list(
+        &self,
+        Parameters(ComputerParam { computer }): Parameters<ComputerParam>,
+    ) -> Result<String, String> {
+        show(async { steps::list(&self.engine().await?, &computer).await }.await)
+    }
+
+    #[tool(
+        description = "Show how the computers descend from each other: each has a parent, what it was forked from (main, a checkpoint, a step, a recipe or a folder), its state and its pending changes (the open review request)."
+    )]
+    async fn tree(&self) -> Result<String, String> {
+        show(async { steps::tree(&self.engine().await?).await }.await)
     }
 
     #[tool(description = "Save a checkpoint of a computer.")]

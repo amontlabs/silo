@@ -16,7 +16,7 @@ use crate::{
     fanout::{self, ManyArgs},
     flows, folder,
     ops::{self, CreateArgs, DiffArgs, ExecArgs, ForkArgs, Platform},
-    render,
+    render, steps,
 };
 
 #[derive(Parser, Debug)]
@@ -81,6 +81,10 @@ pub enum Command {
     Checkpoint(CheckpointCommand),
     /// List a computer's checkpoints.
     Checkpoints { computer: String },
+    /// List the commands run in a computer through Silo (its steps).
+    Steps { computer: String },
+    /// Show how the computers descend from each other, with their state and pending changes.
+    Tree,
     /// List the ports published from a computer and where they are reachable.
     Ports { computer: String },
     /// Publish a port of a computer on this device.
@@ -187,6 +191,9 @@ pub struct ForkCommand {
     /// Fork from this checkpoint instead of the current state.
     #[arg(long, value_name = "ID")]
     pub checkpoint: Option<String>,
+    /// Fork from the checkpoint taken after step N of the computer (see `silo steps`).
+    #[arg(long, value_name = "N", conflicts_with_all = ["checkpoint", "recipe"])]
+    pub from_step: Option<u32>,
     /// A Silo-managed secret the fork may use (repeatable).
     #[arg(long = "secret", value_name = "NAME")]
     pub secrets: Vec<String>,
@@ -429,7 +436,13 @@ async fn dispatch(
             let value = ops::retry_setup(engine, &computer, progress).await?;
             emit(json, &value, |v| render::computer_line("Set up", v));
         }
-        Command::Fork(fork) => {
+        Command::Fork(mut fork) => {
+            if let Some(number) = fork.from_step {
+                if folder::is_folder(&fork.source) {
+                    return Err(CliError::new("--from-step needs a computer, not a folder."));
+                }
+                fork.checkpoint = Some(steps::checkpoint_for(engine, &fork.source, number).await?);
+            }
             if fork.recipe.is_none() && folder::is_folder(&fork.source) {
                 return fork_folder(
                     engine,
@@ -551,8 +564,9 @@ async fn dispatch(
                 cwd: exec.cwd,
                 timeout_secs: exec.timeout,
             };
-            let output = ops::exec_raw(engine, &args).await?;
-            return Ok(print_exec(json, &output));
+            let step_settings = Settings::step_settings(settings.as_ref(), None);
+            let (output, step) = steps::run_exec(engine, &args, step_settings, progress).await?;
+            return Ok(print_exec(json, &output, &step));
         }
         Command::Checkpoint(checkpoint) => {
             let kind = checkpoint
@@ -605,6 +619,10 @@ async fn dispatch(
             &ops::checkpoints(engine, &computer).await?,
             render::checkpoints,
         ),
+        Command::Steps { computer } => {
+            emit(json, &steps::list(engine, &computer).await?, render::steps)
+        }
+        Command::Tree => emit(json, &steps::tree(engine).await?, render::tree),
         Command::Secrets(secrets) => {
             let value = match secrets {
                 SecretsCommand::List => ops::secrets_list(engine).await?,
@@ -774,15 +792,18 @@ async fn fork_folder(
 
 /// Prints an exec result and returns the process exit code. The text mode writes the
 /// output bytes as they are; `--json` carries them as text with invalid UTF-8 replaced.
-fn print_exec(json: bool, output: &ops::ExecOutput) -> i32 {
+fn print_exec(json: bool, output: &ops::ExecOutput, step: &Value) -> i32 {
     if json {
+        let mut value = output.to_json();
+        value["step"] = step.clone();
         println!(
             "{}",
-            serde_json::to_string_pretty(&output.to_json()).unwrap_or_default()
+            serde_json::to_string_pretty(&value).unwrap_or_default()
         );
     } else {
         let _ = std::io::stdout().write_all(&output.stdout);
         let _ = std::io::stderr().write_all(&output.stderr);
+        eprintln!("{}", steps::note(step));
     }
     output.process_exit_code()
 }
