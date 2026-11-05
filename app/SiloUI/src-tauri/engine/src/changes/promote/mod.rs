@@ -10,6 +10,7 @@
 
 pub mod engine_env;
 pub mod journal;
+pub mod service;
 #[cfg(test)]
 mod tests;
 
