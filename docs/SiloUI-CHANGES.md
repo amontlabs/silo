@@ -273,8 +273,11 @@ Known gaps:
 - A Linux computer whose configuration still mounts a disk from `volumes/<name>/` (not yet
   converted to a disk the computer owns) is refused with `storage`: the folder is named after the
   computer and a delete by name would remove the wrong one.
-- Linux quiet parking is restored only for scheduled jobs. A masked timer is unmasked on the
-  assumption that the quiet step masked it; a timer the fork masked itself comes back too.
+- Linux quiet parking is restored only for scheduled jobs. A masked timer is unmasked only when
+  the quiet step listed it in `<token>.masked-timers.list` (written before each mask it makes); a
+  mask from before the fork or added since stays, and a fork with no list unmasks nothing. Each
+  change is recorded in `restored.list` before it is made, and the engine reads that record, not
+  the script's output, to learn whether anything was restored.
 - The Linux restore starts the new main once (and stops it again), so a promote of a quiet fork
   runs guest code that a macOS promote does not.
 - Not yet run end to end against a live Linux computer pair: the rename itself is covered by the

@@ -127,7 +127,7 @@ new file mode 100644
 index 0000000..1111111
 --- /dev/null
 +++ b/sdk/rust/lib/sandbox/rename.rs
-@@ -0,0 +1,782 @@
+@@ -0,0 +1,1248 @@
 +//! Rename a stopped sandbox.
 +//!
 +//! A sandbox name lives in three places: the catalog row (`name`, and the `spec.name` inside the
@@ -138,16 +138,22 @@ index 0000000..1111111
 +//! sandbox directory, so it follows the directory.
 +//!
 +//! The runtime keeps one more thing under the old name: `runtime/root-disk.json` records the
-+//! absolute path of every layer of the root disk, and a start refuses a journal whose layer is
-+//! not the configured one. The rename rewrites the paths below the old directory in the JSON
-+//! files of the sandbox's `runtime/` folder.
++//! absolute path of every layer of the root disk (and of its launch base), and a start refuses a
++//! journal whose layer is not the configured one. The saved configuration can also name host
++//! paths below the sandbox directory. The rename rewrites exactly those fields (the fields that
++//! hold a host path, listed in `HOST_PATH_FIELDS` below), never a string that merely looks like
++//! such a path, such as a guest working directory or mount destination.
 +//!
 +//! The rename takes the transition, snapshot-ancestry and lifecycle locks of both names (in name
-+//! order, so two opposite renames cannot wait on each other), writes a journal that records the
-+//! complete new configuration, renames the directory, updates the row in one transaction and
-+//! removes the journal. A process that dies in between leaves the journal; the next rename or
-+//! start of either name finishes it. Snapshot groups are labels chosen when a capture is taken
-+//! and keep their name.
++//! order, so two opposite renames cannot wait on each other) and writes a journal that records
++//! the complete new configuration. Each step then runs in turn: the directory moves and the
++//! sandboxes directory is synced, the state files are rewritten, and the catalog row is updated.
++//! The journal records each step once it is confirmed and is removed only after the last one, so
++//! a process that dies in between, or a step that fails, leaves a journal whose recorded step
++//! says what remains. A step that fails before the catalog changed is undone the same way (the
++//! journal then says it is rolling back). The next rename or start of either name reads the
++//! journal while holding the locks and finishes or undoes the rename. Snapshot groups are labels
++//! chosen when a capture is taken and keep their name.
 +
 +use std::{
 +    any::Any,
@@ -158,6 +164,7 @@ index 0000000..1111111
 +
 +use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, sea_query::Expr};
 +use serde::{Deserialize, Serialize};
++use serde_json::Value;
 +
 +use crate::backend::{Backend, LocalBackend};
 +use crate::db::entity::sandbox as sandbox_entity;
@@ -171,22 +178,66 @@ index 0000000..1111111
 +
 +const JOURNAL_DIRECTORY: &str = "rename-journal";
 +const JOURNAL_SCHEMA: u32 = 1;
++const STATE_FILE: &str = "root-disk.json";
 +const STATE_FILE_LIMIT: u64 = 1024 * 1024;
++const RECOVERY_ROUNDS: usize = 8;
++
++/// The fields of the saved configuration that hold a host path which can lie below the sandbox
++/// directory. Each entry is a path of object keys; `*` visits every array element, and `[key=value]`
++/// keeps an object only when its `key` field equals `value`.
++const HOST_PATH_FIELDS: &[&str] = &[
++    "image.Bind.path",
++    "image.DiskImage.path",
++    "image.Oci.root_disk[kind=disk-image].path",
++    "mounts.*[type=Bind].host",
++    "mounts.*[type=DiskImage].host",
++    "patches.*.CopyFile.src",
++    "patches.*.CopyDir.src",
++    "vsock.routes.*.host_socket",
++    "checkpoint_restore.closure",
++    "network.tls.upstream_ca_cert.*",
++    "network.tls.scoped_upstream_ca_cert.*.path",
++    "network.tls.intercept_ca.cert_path",
++    "network.tls.intercept_ca.key_path",
++];
 +
 +//--------------------------------------------------------------------------------------------------
 +// Types
 +//--------------------------------------------------------------------------------------------------
 +
-+/// Everything needed to finish a rename after the process that began it is gone.
-+#[derive(Debug, Serialize, Deserialize)]
++/// How far a rename has got. Each value is recorded only after its step is confirmed.
++#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
++#[serde(rename_all = "snake_case")]
++enum Step {
++    /// The journal is written; nothing has moved.
++    #[default]
++    Journaled,
++    /// The directory carries the new name and the sandboxes directory is synced.
++    DirectoryMoved,
++    /// The state files name the new directory.
++    StateRewritten,
++    /// The catalog row has the new name and configuration.
++    CatalogUpdated,
++}
++
++/// Everything needed to finish (or undo) a rename after the process that began it is gone.
++#[derive(Debug, Clone, Serialize, Deserialize)]
 +#[serde(deny_unknown_fields)]
 +struct Journal {
 +    schema: u32,
++    /// Distinguishes this rename from a later one of the same sandbox.
++    #[serde(default)]
++    generation: String,
 +    sandbox_id: i32,
 +    old: String,
 +    new: String,
 +    config: String,
 +    active_config: Option<String>,
++    #[serde(default)]
++    step: Step,
++    /// The rename is being undone: the directory and state files go back to the old name.
++    #[serde(default)]
++    rolling_back: bool,
 +}
 +
 +type Held = Vec<Box<dyn Any + Send>>;
@@ -211,23 +262,40 @@ index 0000000..1111111
 +            "the new name must differ from the current name".into(),
 +        ));
 +    }
-+    recover_for_names(local, &[old, new]).await?;
 +
-+    // The handle reconciles a row left Running by a crashed runtime before the status check.
-+    let handle = backend.sandboxes().get(backend.clone(), old).await?;
-+    if !matches!(
-+        handle.status_snapshot(),
-+        SandboxStatus::Created | SandboxStatus::Stopped | SandboxStatus::Crashed
-+    ) {
-+        return Err(MicrosandboxError::SandboxStillRunning(format!(
-+            "cannot rename sandbox {old:?}: stop it first"
-+        )));
-+    }
++    let mut rounds = 0;
++    let (_held, handle, model) = loop {
++        recover_for_names(local, &[old, new]).await?;
 +
-+    let _held = acquire(local, &[old, new]).await?;
-+    let model = find_by_name(local, old)
-+        .await?
-+        .ok_or_else(|| MicrosandboxError::SandboxNotFound(old.into()))?;
++        // The handle reconciles a row left Running by a crashed runtime before the status check.
++        let handle = backend.sandboxes().get(backend.clone(), old).await?;
++        if !matches!(
++            handle.status_snapshot(),
++            SandboxStatus::Created | SandboxStatus::Stopped | SandboxStatus::Crashed
++        ) {
++            return Err(MicrosandboxError::SandboxStillRunning(format!(
++                "cannot rename sandbox {old:?}: stop it first"
++            )));
++        }
++
++        let held = acquire(local, &[old, new]).await?;
++        // A rename that began after the recovery above, and died, left a journal: finish it
++        // before reading the row.
++        if !pending_for_names(local, &[old, new])?.is_empty() {
++            drop(held);
++            rounds += 1;
++            if rounds >= RECOVERY_ROUNDS {
++                return Err(MicrosandboxError::Runtime(format!(
++                    "cannot rename sandbox {old:?}: another rename keeps being left unfinished"
++                )));
++            }
++            continue;
++        }
++        let model = find_by_name(local, old)
++            .await?
++            .ok_or_else(|| MicrosandboxError::SandboxNotFound(old.into()))?;
++        break (held, handle, model);
++    };
 +    if let Some(state) = handle.local()
 +        && state.db_id != model.id
 +    {
@@ -265,8 +333,9 @@ index 0000000..1111111
 +        )));
 +    }
 +
-+    let journal = Journal {
++    let mut journal = Journal {
 +        schema: JOURNAL_SCHEMA,
++        generation: format!("{:032x}", rand::random::<u128>()),
 +        sandbox_id: model.id,
 +        old: old.into(),
 +        new: new.into(),
@@ -276,40 +345,74 @@ index 0000000..1111111
 +            .as_deref()
 +            .map(|json| rewrite_config(json, new, &old_dir, &new_dir))
 +            .transpose()?,
++        step: Step::Journaled,
++        rolling_back: false,
 +    };
 +    crate::runtime::remove_sandbox_socket_artifacts_for(local, old)?;
 +    write_journal(local, &journal)?;
-+    if let Err(error) = rename_directory(&old_dir, &new_dir) {
-+        remove_journal(local, model.id)?;
-+        return Err(error);
-+    }
-+    let moved = rewrite_state_files(&new_dir, &old_dir, &new_dir);
-+    let updated = match moved {
-+        Ok(()) => update_row(local, &journal).await,
-+        Err(error) => Err(error),
-+    };
-+    if let Err(error) = updated {
-+        // Put the directory back so the catalog and the filesystem agree; if that fails too the
-+        // journal stays and the next start finishes the rename instead.
-+        if rename_directory(&new_dir, &old_dir).is_ok()
-+            && rewrite_state_files(&old_dir, &new_dir, &old_dir).is_ok()
-+        {
-+            remove_journal(local, model.id)?;
++    match advance(local, &mut journal).await {
++        Ok(()) => Ok(()),
++        Err(error) => {
++            // The journal stays unless every step of the undo is confirmed too; either way the
++            // next rename or start of either name finishes whichever direction it records.
++            let _ = undo_after_failure(local, &mut journal).await;
++            Err(error)
 +        }
-+        return Err(error);
 +    }
-+    remove_journal(local, model.id)
 +}
 +
-+/// Finish any interrupted rename that involves one of `names`.
++/// Finish or undo any interrupted rename that involves one of `names`.
++///
++/// The journals found by an unlocked scan only say which names to lock; each one is read again
++/// while holding the locks of its names, and acted on only if it is still the same rename.
 +pub(crate) async fn recover_for_names(
 +    local: &LocalBackend,
 +    names: &[&str],
 +) -> MicrosandboxResult<()> {
++    for _ in 0..RECOVERY_ROUNDS {
++        let candidates = pending_for_names(local, names)?;
++        if candidates.is_empty() {
++            return Ok(());
++        }
++        let mut changed = false;
++        for candidate in candidates {
++            changed |= recover_candidate(local, &candidate).await?;
++        }
++        if !changed {
++            return Ok(());
++        }
++    }
++    Err(MicrosandboxError::Runtime(
++        "a sandbox rename kept changing while it was being finished".into(),
++    ))
++}
++
++/// Lock the names of `candidate`, a journal read without any lock, read the journal again and
++/// carry it on only if it is still that rename. Returns whether a different rename of the same
++/// sandbox has taken its place, which the caller must look at in another round.
++async fn recover_candidate(local: &LocalBackend, candidate: &Journal) -> MicrosandboxResult<bool> {
++    let _held = acquire(local, &[&candidate.old, &candidate.new]).await?;
++    // Another process may have finished it, or finished it and begun a different rename of the
++    // same sandbox, while this one waited for the locks.
++    let Some(mut journal) = read_journal(local, candidate.sandbox_id)? else {
++        return Ok(false);
++    };
++    if journal.generation != candidate.generation
++        || journal.old != candidate.old
++        || journal.new != candidate.new
++    {
++        return Ok(true);
++    }
++    advance(local, &mut journal).await?;
++    Ok(false)
++}
++
++/// The journals, read without any lock, that involve one of `names`.
++fn pending_for_names(local: &LocalBackend, names: &[&str]) -> MicrosandboxResult<Vec<Journal>> {
 +    let directory = journal_directory(local);
 +    let entries = match std::fs::read_dir(&directory) {
 +        Ok(entries) => entries,
-+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
++        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
 +        Err(error) => return Err(error.into()),
 +    };
 +    let mut pending = Vec::new();
@@ -318,7 +421,13 @@ index 0000000..1111111
 +        if path.extension().and_then(|extension| extension.to_str()) != Some("json") {
 +            continue;
 +        }
-+        let journal: Journal = serde_json::from_slice(&std::fs::read(&path)?)?;
++        let bytes = match std::fs::read(&path) {
++            Ok(bytes) => bytes,
++            // Finished by another process since the directory was listed.
++            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
++            Err(error) => return Err(error.into()),
++        };
++        let journal: Journal = serde_json::from_slice(&bytes)?;
 +        if journal.schema == JOURNAL_SCHEMA
 +            && names
 +                .iter()
@@ -327,70 +436,127 @@ index 0000000..1111111
 +            pending.push(journal);
 +        }
 +    }
-+    for journal in pending {
-+        let _held = acquire(local, &[&journal.old, &journal.new]).await?;
-+        // Another process may have finished it while this one waited for the locks.
-+        if journal_path(local, journal.sandbox_id).is_file() {
-+            finish(local, &journal).await?;
-+        }
-+    }
-+    Ok(())
++    Ok(pending)
 +}
 +
-+/// Complete a journaled rename once the caller holds the locks of both names.
-+async fn finish(local: &LocalBackend, journal: &Journal) -> MicrosandboxResult<()> {
++/// Carry a journaled rename to its end in the direction the journal records, with the locks of
++/// both names held.
++async fn advance(local: &LocalBackend, journal: &mut Journal) -> MicrosandboxResult<()> {
++    if !journal.rolling_back && journal.step == Step::Journaled {
++        let sandboxes_dir = local.sandboxes_dir();
++        let old_present = std::fs::symlink_metadata(sandboxes_dir.join(&journal.old)).is_ok();
++        let row = find_by_id(local, journal.sandbox_id).await?;
++        let still_old = row.is_some_and(|row| row.name == journal.old);
++        // Another sandbox took the new name before this one's directory moved: abandon the
++        // rename, which leaves the sandbox under its old name.
++        if still_old && old_present && find_by_name(local, &journal.new).await?.is_some() {
++            journal.rolling_back = true;
++            write_journal(local, journal)?;
++        }
++    }
++    if journal.rolling_back {
++        roll_back(local, journal).await
++    } else {
++        roll_forward(local, journal).await
++    }
++}
++
++/// After a failed step: if the catalog still has the old name, record that the rename is being
++/// undone and undo it.
++async fn undo_after_failure(local: &LocalBackend, journal: &mut Journal) -> MicrosandboxResult<()> {
++    let row = find_by_id(local, journal.sandbox_id).await?;
++    if row.is_some_and(|row| row.name == journal.new) {
++        // The row changed even though its update reported a failure: keep going forward.
++        return roll_forward(local, journal).await;
++    }
++    journal.rolling_back = true;
++    write_journal(local, journal)?;
++    roll_back(local, journal).await
++}
++
++/// Move the directory, rewrite the state files and update the row; remove the journal last.
++async fn roll_forward(local: &LocalBackend, journal: &mut Journal) -> MicrosandboxResult<()> {
 +    let sandboxes_dir = local.sandboxes_dir();
 +    let old_dir = sandboxes_dir.join(&journal.old);
 +    let new_dir = sandboxes_dir.join(&journal.new);
-+    let old_present = std::fs::symlink_metadata(&old_dir).is_ok();
-+    let new_present = std::fs::symlink_metadata(&new_dir).is_ok();
-+    let row = find_by_id(local, journal.sandbox_id).await?;
 +
-+    let Some(row) = row else {
-+        // The sandbox is gone; nothing remains to finish.
-+        return remove_journal(local, journal.sandbox_id);
-+    };
-+    if row.name == journal.new {
-+        if !new_present && old_present {
-+            rename_directory(&old_dir, &new_dir)?;
++    if journal.step < Step::DirectoryMoved {
++        let old_present = std::fs::symlink_metadata(&old_dir).is_ok();
++        let new_present = std::fs::symlink_metadata(&new_dir).is_ok();
++        match (old_present, new_present) {
++            (true, false) => std::fs::rename(&old_dir, &new_dir)?,
++            // Moved by an earlier attempt that died before it could sync.
++            (false, true) => {}
++            _ => return Err(inconsistent(journal, &old_dir, &new_dir)),
 +        }
++        sync_directory(&sandboxes_dir)?;
++        set_step(local, journal, Step::DirectoryMoved)?;
++    }
++    if journal.step < Step::StateRewritten {
 +        rewrite_state_files(&new_dir, &old_dir, &new_dir)?;
-+        return remove_journal(local, journal.sandbox_id);
++        set_step(local, journal, Step::StateRewritten)?;
 +    }
-+    if row.name != journal.old {
-+        return Err(MicrosandboxError::Runtime(format!(
-+            "rename journal for sandbox {} names {:?} and {:?}, but the sandbox is {:?}",
-+            journal.sandbox_id, journal.old, journal.new, row.name
-+        )));
-+    }
-+    if find_by_name(local, &journal.new).await?.is_some() {
-+        // Another sandbox took the new name before this one's directory moved: abandon the
-+        // rename, which leaves the sandbox under its old name.
-+        if old_present {
-+            return remove_journal(local, journal.sandbox_id);
++    if journal.step < Step::CatalogUpdated {
++        match find_by_id(local, journal.sandbox_id).await? {
++            // The sandbox is gone; nothing remains to finish.
++            None => return remove_journal(local, journal),
++            Some(row) if row.name == journal.new => {}
++            Some(row) if row.name == journal.old => update_row(local, journal).await?,
++            Some(row) => {
++                return Err(MicrosandboxError::Runtime(format!(
++                    "rename journal for sandbox {} names {:?} and {:?}, but the sandbox is {:?}",
++                    journal.sandbox_id, journal.old, journal.new, row.name
++                )));
++            }
 +        }
-+        return Err(MicrosandboxError::Runtime(format!(
-+            "cannot finish renaming sandbox {:?}: {:?} is taken",
-+            journal.old, journal.new
-+        )));
++        set_step(local, journal, Step::CatalogUpdated)?;
 +    }
-+    match (old_present, new_present) {
-+        (true, false) => {
-+            rename_directory(&old_dir, &new_dir)?;
-+            rewrite_state_files(&new_dir, &old_dir, &new_dir)?;
++    remove_journal(local, journal)
++}
++
++/// Put the directory and the state files back under the old name; remove the journal last.
++async fn roll_back(local: &LocalBackend, journal: &mut Journal) -> MicrosandboxResult<()> {
++    let sandboxes_dir = local.sandboxes_dir();
++    let old_dir = sandboxes_dir.join(&journal.old);
++    let new_dir = sandboxes_dir.join(&journal.new);
++
++    match find_by_id(local, journal.sandbox_id).await? {
++        None => return remove_journal(local, journal),
++        // The row changed after all: the rename is complete, so complete it.
++        Some(row) if row.name == journal.new => {
++            journal.rolling_back = false;
++            write_journal(local, journal)?;
++            return roll_forward(local, journal).await;
 +        }
-+        (false, true) => rewrite_state_files(&new_dir, &old_dir, &new_dir)?,
-+        _ => {
++        Some(row) if row.name == journal.old => {}
++        Some(row) => {
 +            return Err(MicrosandboxError::Runtime(format!(
-+                "cannot finish renaming sandbox {:?}: the directories {} and {} are inconsistent",
-+                journal.old,
-+                old_dir.display(),
-+                new_dir.display()
++                "rename journal for sandbox {} names {:?} and {:?}, but the sandbox is {:?}",
++                journal.sandbox_id, journal.old, journal.new, row.name
 +            )));
 +        }
 +    }
-+    update_row(local, journal).await?;
-+    remove_journal(local, journal.sandbox_id)
++    let old_present = std::fs::symlink_metadata(&old_dir).is_ok();
++    let new_present = std::fs::symlink_metadata(&new_dir).is_ok();
++    match (old_present, new_present) {
++        (false, true) => std::fs::rename(&new_dir, &old_dir)?,
++        (true, false) => {}
++        // Nothing moved yet and another sandbox owns the new name's directory: leave both.
++        (true, true) if journal.step == Step::Journaled => return remove_journal(local, journal),
++        _ => return Err(inconsistent(journal, &old_dir, &new_dir)),
++    }
++    sync_directory(&sandboxes_dir)?;
++    rewrite_state_files(&old_dir, &new_dir, &old_dir)?;
++    remove_journal(local, journal)
++}
++
++fn inconsistent(journal: &Journal, old_dir: &Path, new_dir: &Path) -> MicrosandboxError {
++    MicrosandboxError::Runtime(format!(
++        "cannot finish renaming sandbox {:?}: the directories {} and {} are inconsistent",
++        journal.old,
++        old_dir.display(),
++        new_dir.display()
++    ))
 +}
 +
 +async fn acquire(local: &LocalBackend, names: &[&str]) -> MicrosandboxResult<Held> {
@@ -477,7 +643,7 @@ index 0000000..1111111
 +        .await
 +}
 +
-+/// Set the new name and move every path under the old sandbox directory to the new one.
++/// Set the new name and move the host paths below the old sandbox directory to the new one.
 +fn rewrite_config(
 +    json: &str,
 +    new: &str,
@@ -487,79 +653,115 @@ index 0000000..1111111
 +    let mut config: SandboxConfig = serde_json::from_str(json)?;
 +    config.spec.name = new.into();
 +    let mut value = serde_json::to_value(&config)?;
-+    move_paths(&mut value, old_dir, new_dir);
++    for field in HOST_PATH_FIELDS {
++        move_field(&mut value, &parse_field(field), old_dir, new_dir);
++    }
 +    Ok(serde_json::to_string(&value)?)
 +}
 +
-+fn move_paths(value: &mut serde_json::Value, old_dir: &Path, new_dir: &Path) -> bool {
-+    match value {
-+        serde_json::Value::String(text) => {
-+            let Ok(rest) = Path::new(text.as_str()).strip_prefix(old_dir) else {
-+                return false;
-+            };
-+            let moved = if rest.as_os_str().is_empty() {
-+                new_dir.to_path_buf()
-+            } else {
-+                new_dir.join(rest)
-+            };
-+            *text = moved.to_string_lossy().into_owned();
-+            true
-+        }
-+        serde_json::Value::Array(items) => items.iter_mut().fold(false, |changed, item| {
-+            move_paths(item, old_dir, new_dir) | changed
-+        }),
-+        serde_json::Value::Object(map) => map.values_mut().fold(false, |changed, item| {
-+            move_paths(item, old_dir, new_dir) | changed
-+        }),
-+        _ => false,
-+    }
++/// One component of a `HOST_PATH_FIELDS` entry.
++enum Part<'a> {
++    Key(&'a str),
++    Each,
++    /// Keep the element only if `key` of the object is `value`.
++    Where(&'a str, &'a str),
 +}
 +
-+/// Rewrites the paths below `from` to `to` in the JSON state files under `sandbox_dir/runtime`.
-+/// Repeating it changes nothing.
-+fn rewrite_state_files(sandbox_dir: &Path, from: &Path, to: &Path) -> MicrosandboxResult<()> {
-+    fn walk(directory: &Path, depth: usize, from: &Path, to: &Path) -> MicrosandboxResult<()> {
-+        let entries = match std::fs::read_dir(directory) {
-+            Ok(entries) => entries,
-+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-+            Err(error) => return Err(error.into()),
++fn parse_field(field: &str) -> Vec<Part<'_>> {
++    let mut parts = Vec::new();
++    for component in field.split('.') {
++        let (key, filter) = match component.split_once('[') {
++            Some((key, rest)) => (key, rest.strip_suffix(']')),
++            None => (component, None),
 +        };
-+        for entry in entries {
-+            let entry = entry?;
-+            let path = entry.path();
-+            let kind = entry.file_type()?;
-+            if kind.is_dir() && depth < 3 {
-+                walk(&path, depth + 1, from, to)?;
-+            } else if kind.is_file()
-+                && path.extension().and_then(|extension| extension.to_str()) == Some("json")
-+                && entry.metadata()?.len() <= STATE_FILE_LIMIT
-+            {
-+                let Ok(mut value) =
-+                    serde_json::from_slice::<serde_json::Value>(&std::fs::read(&path)?)
-+                else {
-+                    continue;
-+                };
-+                if move_paths(&mut value, from, to) {
-+                    use std::io::Write;
-+                    let parent = path.parent().expect("state file has a directory");
-+                    let mut staged = tempfile::NamedTempFile::new_in(parent)?;
-+                    staged.write_all(&serde_json::to_vec(&value)?)?;
-+                    staged.as_file().sync_all()?;
-+                    staged
-+                        .persist(&path)
-+                        .map_err(|error| MicrosandboxError::Io(error.error))?;
-+                    sync_directory(parent)?;
-+                }
-+            }
++        parts.push(if key == "*" {
++            Part::Each
++        } else {
++            Part::Key(key)
++        });
++        if let Some((tag, value)) = filter.and_then(|filter| filter.split_once('=')) {
++            parts.push(Part::Where(tag, value));
 +        }
-+        Ok(())
 +    }
-+    walk(&sandbox_dir.join("runtime"), 0, from, to)
++    parts
 +}
 +
-+fn rename_directory(from: &Path, to: &Path) -> MicrosandboxResult<()> {
-+    std::fs::rename(from, to)?;
-+    sync_directory(to.parent().expect("sandbox directory has a parent"))
++/// Rewrite the string at `parts` below `value` if it is a path below `old_dir`.
++fn move_field(value: &mut Value, parts: &[Part<'_>], old_dir: &Path, new_dir: &Path) -> bool {
++    let Some((part, rest)) = parts.split_first() else {
++        return move_path(value, old_dir, new_dir);
++    };
++    match part {
++        Part::Key(key) => value
++            .as_object_mut()
++            .and_then(|map| map.get_mut(*key))
++            .is_some_and(|child| move_field(child, rest, old_dir, new_dir)),
++        Part::Each => value.as_array_mut().is_some_and(|items| {
++            items.iter_mut().fold(false, |changed, item| {
++                move_field(item, rest, old_dir, new_dir) | changed
++            })
++        }),
++        Part::Where(key, expected) => {
++            value.get(*key).and_then(Value::as_str) == Some(*expected)
++                && move_field(value, rest, old_dir, new_dir)
++        }
++    }
++}
++
++/// Replace a string that is a path at or below `old_dir` with the same path below `new_dir`.
++fn move_path(value: &mut Value, old_dir: &Path, new_dir: &Path) -> bool {
++    let Value::String(text) = value else {
++        return false;
++    };
++    let Ok(rest) = Path::new(text.as_str()).strip_prefix(old_dir) else {
++        return false;
++    };
++    let moved = if rest.as_os_str().is_empty() {
++        new_dir.to_path_buf()
++    } else {
++        new_dir.join(rest)
++    };
++    *text = moved.to_string_lossy().into_owned();
++    true
++}
++
++/// Rewrites the paths below `from` to `to` in the root-disk record of the sandbox (the
++/// `launch_base` and the `path` of every layer). Repeating it changes nothing.
++fn rewrite_state_files(sandbox_dir: &Path, from: &Path, to: &Path) -> MicrosandboxResult<()> {
++    use std::io::Write;
++    let path = sandbox_dir.join("runtime").join(STATE_FILE);
++    let metadata = match std::fs::symlink_metadata(&path) {
++        Ok(metadata) => metadata,
++        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
++        Err(error) => return Err(error.into()),
++    };
++    if !metadata.is_file() || metadata.len() > STATE_FILE_LIMIT {
++        return Ok(());
++    }
++    let Ok(mut value) = serde_json::from_slice::<Value>(&std::fs::read(&path)?) else {
++        return Ok(());
++    };
++    let mut changed = value
++        .get_mut("launch_base")
++        .is_some_and(|base| move_path(base, from, to));
++    if let Some(Value::Array(layers)) = value.get_mut("layers") {
++        for layer in layers {
++            changed |= layer
++                .get_mut("path")
++                .is_some_and(|layer_path| move_path(layer_path, from, to));
++        }
++    }
++    if changed {
++        let parent = path.parent().expect("state file has a directory");
++        let mut staged = tempfile::NamedTempFile::new_in(parent)?;
++        staged.write_all(&serde_json::to_vec(&value)?)?;
++        staged.as_file().sync_all()?;
++        staged
++            .persist(&path)
++            .map_err(|error| MicrosandboxError::Io(error.error))?;
++        sync_directory(parent)?;
++    }
++    Ok(())
 +}
 +
 +fn journal_directory(local: &LocalBackend) -> PathBuf {
@@ -568,6 +770,14 @@ index 0000000..1111111
 +
 +fn journal_path(local: &LocalBackend, sandbox_id: i32) -> PathBuf {
 +    journal_directory(local).join(format!("{sandbox_id}.json"))
++}
++
++fn read_journal(local: &LocalBackend, sandbox_id: i32) -> MicrosandboxResult<Option<Journal>> {
++    match std::fs::read(journal_path(local, sandbox_id)) {
++        Ok(bytes) => Ok(Some(serde_json::from_slice(&bytes)?)),
++        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
++        Err(error) => Err(error.into()),
++    }
 +}
 +
 +fn write_journal(local: &LocalBackend, journal: &Journal) -> MicrosandboxResult<()> {
@@ -583,16 +793,29 @@ index 0000000..1111111
 +    sync_directory(&directory)
 +}
 +
-+fn remove_journal(local: &LocalBackend, sandbox_id: i32) -> MicrosandboxResult<()> {
-+    match std::fs::remove_file(journal_path(local, sandbox_id)) {
-+        Ok(()) => {}
-+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-+        Err(error) => return Err(error.into()),
++fn set_step(local: &LocalBackend, journal: &mut Journal, step: Step) -> MicrosandboxResult<()> {
++    journal.step = step;
++    write_journal(local, journal)
++}
++
++/// Remove the journal of this rename. The caller holds the locks of both names, so the file is
++/// still this rename's; a journal of another generation is left alone.
++fn remove_journal(local: &LocalBackend, journal: &Journal) -> MicrosandboxResult<()> {
++    match read_journal(local, journal.sandbox_id)? {
++        Some(current) if current.generation == journal.generation => {
++            std::fs::remove_file(journal_path(local, journal.sandbox_id))?;
++        }
++        _ => {}
 +    }
-+    sync_directory(&journal_directory(local))
++    // A sync that fails here only risks the removal being undone by a crash; the journal then
++    // finds every step complete and is removed again.
++    let _ = sync_directory(&journal_directory(local));
++    Ok(())
 +}
 +
 +fn sync_directory(path: &Path) -> MicrosandboxResult<()> {
++    #[cfg(test)]
++    tests::inject_sync_failure(path)?;
 +    #[cfg(unix)]
 +    std::fs::File::open(path)?.sync_all()?;
 +    #[cfg(not(unix))]
@@ -631,6 +854,7 @@ index 0000000..1111111
 +            directory.join("runtime/root-disk.json"),
 +            serde_json::json!({
 +                "schema": "microsandbox.runtime-root-disk/1",
++                "launch_base": directory.join("base.ext4"),
 +                "layers": [{"path": directory.join("upper.ext4"), "format": "raw"}],
 +            })
 +            .to_string(),
@@ -643,9 +867,17 @@ index 0000000..1111111
 +            key: "PATH_HINT".into(),
 +            value: directory.join("runtime").to_string_lossy().into_owned(),
 +        });
++        // A host path below the directory, and guest paths that spell the same prefix.
++        let mut value = serde_json::to_value(&config).unwrap();
++        value["mounts"] = serde_json::json!([{
++            "type": "Bind",
++            "host": directory.join("share"),
++            "guest": directory.join("mnt"),
++        }]);
++        value["runtime"]["workdir"] = serde_json::json!(directory);
 +        sandbox_entity::ActiveModel {
 +            name: Set(name.into()),
-+            config: Set(serde_json::to_string(&config).unwrap()),
++            config: Set(value.to_string()),
 +            status: Set(status),
 +            ephemeral: Set(false),
 +            ..Default::default()
@@ -692,12 +924,29 @@ index 0000000..1111111
 +            assert_eq!(row.status, status);
 +            let config = stored_config(&row);
 +            assert_eq!(config.spec.name, "after");
++            // Only the host-path fields move; a guest path or a variable that spells the old
++            // directory is left as it was.
++            let before = local.sandboxes_dir().join("before");
 +            assert_eq!(
 +                config.spec.env[0].value,
++                before.join("runtime").to_string_lossy()
++            );
++            assert_eq!(
++                config.spec.runtime.workdir.as_deref(),
++                Some(before.to_string_lossy().as_ref())
++            );
++            let saved: serde_json::Value = serde_json::from_str(&row.config).unwrap();
++            assert_eq!(
++                saved["mounts"][0]["host"],
 +                local
 +                    .sandboxes_dir()
-+                    .join("after/runtime")
++                    .join("after/share")
 +                    .to_string_lossy()
++                    .as_ref()
++            );
++            assert_eq!(
++                saved["mounts"][0]["guest"],
++                before.join("mnt").to_string_lossy().as_ref()
 +            );
 +            assert!(!journal_path(local, id).exists());
 +            // The root disk's layer paths follow the directory, or a start would refuse them.
@@ -705,6 +954,14 @@ index 0000000..1111111
 +                &std::fs::read(local.sandboxes_dir().join("after/runtime/root-disk.json")).unwrap(),
 +            )
 +            .unwrap();
++            assert_eq!(
++                state["launch_base"],
++                local
++                    .sandboxes_dir()
++                    .join("after/base.ext4")
++                    .to_string_lossy()
++                    .as_ref()
++            );
 +            assert_eq!(
 +                state["layers"][0]["path"],
 +                local
@@ -802,6 +1059,7 @@ index 0000000..1111111
 +        let sandboxes_dir = local.sandboxes_dir();
 +        let journal = Journal {
 +            schema: JOURNAL_SCHEMA,
++            generation: format!("{:032x}", rand::random::<u128>()),
 +            sandbox_id: row.id,
 +            old: old.into(),
 +            new: new.into(),
@@ -813,6 +1071,8 @@ index 0000000..1111111
 +            )
 +            .unwrap(),
 +            active_config: None,
++            step: Step::Journaled,
++            rolling_back: false,
 +        };
 +        write_journal(local, &journal).unwrap();
 +        journal
@@ -891,22 +1151,228 @@ index 0000000..1111111
 +        assert_eq!(name_of(&backend, id).await.as_deref(), Some("old"));
 +    }
 +
++    use std::{cell::RefCell, path::PathBuf};
++
++    thread_local! {
++        static SYNC_FAULT: RefCell<Option<(PathBuf, usize)>> = const { RefCell::new(None) };
++    }
++
++    /// Called by `sync_directory`: fail the next `count` syncs of `path` when armed.
++    pub(super) fn inject_sync_failure(path: &Path) -> MicrosandboxResult<()> {
++        SYNC_FAULT.with(|fault| {
++            let mut fault = fault.borrow_mut();
++            if let Some((target, remaining)) = fault.as_mut()
++                && target == path
++                && *remaining > 0
++            {
++                *remaining -= 1;
++                return Err(MicrosandboxError::Io(std::io::Error::other(
++                    "injected sync failure",
++                )));
++            }
++            Ok(())
++        })
++    }
++
++    fn fail_syncs_of(path: PathBuf, count: usize) {
++        SYNC_FAULT.with(|fault| *fault.borrow_mut() = Some((path, count)));
++    }
++
++    fn assert_named(local: &LocalBackend, name: &str, other: &str) {
++        let directory = local.sandboxes_dir();
++        assert!(directory.join(name).join("marker").is_file(), "{name}");
++        assert!(!directory.join(other).exists(), "{other}");
++        let state =
++            std::fs::read_to_string(directory.join(name).join("runtime/root-disk.json")).unwrap();
++        assert!(state.contains(&directory.join(name).to_string_lossy().into_owned()));
++        assert!(!state.contains(&directory.join(other).to_string_lossy().into_owned()));
++    }
++
++    #[tokio::test]
++    async fn a_directory_sync_that_fails_once_undoes_the_rename() {
++        let (_temp, backend) = fixture().await;
++        let id = add(&backend, "before", SandboxStatus::Stopped).await;
++        let local = backend.as_local().unwrap();
++        fail_syncs_of(local.sandboxes_dir(), 1);
++        let error = rename_stopped(backend.clone(), "before", "after")
++            .await
++            .unwrap_err();
++        assert!(error.to_string().contains("injected"), "{error}");
++        // The directory moved before the sync failed: it is back, the row never changed, and no
++        // journal is left claiming otherwise.
++        assert_eq!(name_of(&backend, id).await.as_deref(), Some("before"));
++        assert_named(local, "before", "after");
++        assert!(!journal_path(local, id).exists());
++    }
++
++    #[tokio::test]
++    async fn a_directory_sync_that_keeps_failing_keeps_the_journal_until_recovery() {
++        let (_temp, backend) = fixture().await;
++        let id = add(&backend, "before", SandboxStatus::Stopped).await;
++        let local = backend.as_local().unwrap();
++        fail_syncs_of(local.sandboxes_dir(), 100);
++        rename_stopped(backend.clone(), "before", "after")
++            .await
++            .unwrap_err();
++        // Neither the rename nor its undo could be confirmed, so the journal stays.
++        let journal = read_journal(local, id).unwrap().expect("journal is kept");
++        assert!(journal.rolling_back);
++        assert_eq!(name_of(&backend, id).await.as_deref(), Some("before"));
++
++        fail_syncs_of(local.sandboxes_dir(), 0);
++        recover_for_names(local, &["before"]).await.unwrap();
++        assert!(!journal_path(local, id).exists());
++        assert_eq!(name_of(&backend, id).await.as_deref(), Some("before"));
++        assert_named(local, "before", "after");
++        // The sandbox can be renamed afterwards.
++        rename_stopped(backend.clone(), "before", "after")
++            .await
++            .unwrap();
++        assert_eq!(name_of(&backend, id).await.as_deref(), Some("after"));
++        assert_named(local, "after", "before");
++    }
++
++    #[tokio::test]
++    async fn a_rename_that_died_in_every_step_finishes_or_rolls_back() {
++        // (directory moved, state rewritten, recorded step), then forward or back.
++        let points = [
++            (false, false, Step::Journaled),
++            (true, false, Step::Journaled),
++            (true, false, Step::DirectoryMoved),
++            (true, true, Step::DirectoryMoved),
++            (true, true, Step::StateRewritten),
++        ];
++        for rolling_back in [false, true] {
++            for (moved, rewritten, step) in points {
++                let label = format!("{rolling_back} {moved} {rewritten} {step:?}");
++                let (_temp, backend) = fixture().await;
++                let id = add(&backend, "old", SandboxStatus::Stopped).await;
++                let local = backend.as_local().unwrap();
++                let mut journal = crashed_journal(&backend, "old", "new").await;
++                let directory = local.sandboxes_dir();
++                if moved {
++                    std::fs::rename(directory.join("old"), directory.join("new")).unwrap();
++                }
++                if rewritten {
++                    rewrite_state_files(
++                        &directory.join("new"),
++                        &directory.join("old"),
++                        &directory.join("new"),
++                    )
++                    .unwrap();
++                }
++                journal.step = step;
++                journal.rolling_back = rolling_back;
++                write_journal(local, &journal).unwrap();
++                recover_for_names(local, &["new"]).await.unwrap();
++                let (name, other) = if rolling_back {
++                    ("old", "new")
++                } else {
++                    ("new", "old")
++                };
++                assert_eq!(
++                    name_of(&backend, id).await.as_deref(),
++                    Some(name),
++                    "{label}"
++                );
++                assert_named(local, name, other);
++                assert!(!journal_path(local, id).exists(), "{label}");
++                let row = find_by_id(local, id).await.unwrap().unwrap();
++                assert_eq!(stored_config(&row).spec.name, name, "{label}");
++            }
++        }
++    }
++
++    #[tokio::test]
++    async fn a_stale_reader_leaves_a_later_rename_of_the_same_sandbox_alone() {
++        let (_temp, backend) = fixture().await;
++        let id = add(&backend, "a", SandboxStatus::Stopped).await;
++        let local = backend.as_local().unwrap();
++        // One process reads the journal of a -> b without a lock...
++        let stale = crashed_journal(&backend, "a", "b").await;
++        // ...another finishes it and begins b -> c, which also dies.
++        recover_for_names(local, &["a"]).await.unwrap();
++        assert_eq!(name_of(&backend, id).await.as_deref(), Some("b"));
++        let later = crashed_journal(&backend, "b", "c").await;
++
++        let changed = recover_candidate(local, &stale).await.unwrap();
++        assert!(changed, "the journal of a different rename took its place");
++        let kept = read_journal(local, id)
++            .unwrap()
++            .expect("later journal kept");
++        assert_eq!(kept.generation, later.generation);
++        assert_eq!((kept.old.as_str(), kept.new.as_str()), ("b", "c"));
++        assert_eq!(name_of(&backend, id).await.as_deref(), Some("b"));
++        assert!(local.sandboxes_dir().join("b/marker").is_file());
++
++        // Removing with the stale journal is also refused.
++        remove_journal(local, &stale).unwrap();
++        assert!(journal_path(local, id).is_file());
++
++        // The rounds in recover_for_names pick the later rename up under its own locks.
++        recover_for_names(local, &["b"]).await.unwrap();
++        assert_eq!(name_of(&backend, id).await.as_deref(), Some("c"));
++        assert!(!journal_path(local, id).exists());
++    }
++
 +    #[test]
-+    fn only_paths_below_the_old_directory_are_rewritten() {
++    fn only_host_path_fields_below_the_old_directory_are_rewritten() {
++        let old = Path::new("/home/sandboxes/old");
++        let new = Path::new("/home/sandboxes/new");
 +        let mut value = serde_json::json!({
-+            "inside": "/home/sandboxes/old/runtime/disk",
-+            "exact": "/home/sandboxes/old",
-+            "sibling": "/home/sandboxes/older/disk",
-+            "elsewhere": ["/data/old", "old"],
++            "image": {"Oci": {"reference": "x", "root_disk": {"kind": "disk-image", "path": "/home/sandboxes/old/root.img"}}},
++            "mounts": [
++                {"type": "Bind", "host": "/home/sandboxes/old/share", "guest": "/home/sandboxes/old/share"},
++                {"type": "Tmpfs", "guest": "/home/sandboxes/old/tmp"},
++                {"type": "Bind", "host": "/home/sandboxes/older/share", "guest": "/g"},
++                {"type": "DiskImage", "host": "/home/sandboxes/old", "guest": "/d"},
++            ],
++            "patches": [
++                {"CopyFile": {"src": "/home/sandboxes/old/f", "dst": "/home/sandboxes/old/f"}},
++                {"Text": {"path": "/home/sandboxes/old/t", "content": "/home/sandboxes/old/c"}},
++            ],
++            "runtime": {"workdir": "/home/sandboxes/old/work", "scripts": {"s": "/home/sandboxes/old/s"}},
++            "env": [{"key": "K", "value": "/home/sandboxes/old/x"}],
++            "vsock": {"routes": [{"host_socket": "/home/sandboxes/old/v.sock", "port": 1}]},
++            "network": {"tls": {"upstream_ca_cert": ["/home/sandboxes/old/ca.pem", "/etc/ca.pem"]}},
++            "labels": {"l": "/home/sandboxes/old"},
 +        });
-+        assert!(move_paths(
-+            &mut value,
-+            Path::new("/home/sandboxes/old"),
-+            Path::new("/home/sandboxes/new"),
-+        ));
-+        assert_eq!(value["inside"], "/home/sandboxes/new/runtime/disk");
-+        assert_eq!(value["exact"], "/home/sandboxes/new");
-+        assert_eq!(value["sibling"], "/home/sandboxes/older/disk");
-+        assert_eq!(value["elsewhere"], serde_json::json!(["/data/old", "old"]));
++        for field in HOST_PATH_FIELDS {
++            move_field(&mut value, &parse_field(field), old, new);
++        }
++        assert_eq!(
++            value["image"]["Oci"]["root_disk"]["path"],
++            "/home/sandboxes/new/root.img"
++        );
++        assert_eq!(value["mounts"][0]["host"], "/home/sandboxes/new/share");
++        assert_eq!(value["mounts"][0]["guest"], "/home/sandboxes/old/share");
++        assert_eq!(value["mounts"][1]["guest"], "/home/sandboxes/old/tmp");
++        assert_eq!(value["mounts"][2]["host"], "/home/sandboxes/older/share");
++        assert_eq!(value["mounts"][3]["host"], "/home/sandboxes/new");
++        assert_eq!(
++            value["patches"][0]["CopyFile"]["src"],
++            "/home/sandboxes/new/f"
++        );
++        assert_eq!(
++            value["patches"][0]["CopyFile"]["dst"],
++            "/home/sandboxes/old/f"
++        );
++        assert_eq!(value["patches"][1]["Text"]["path"], "/home/sandboxes/old/t");
++        assert_eq!(value["runtime"]["workdir"], "/home/sandboxes/old/work");
++        assert_eq!(value["runtime"]["scripts"]["s"], "/home/sandboxes/old/s");
++        assert_eq!(value["env"][0]["value"], "/home/sandboxes/old/x");
++        assert_eq!(
++            value["vsock"]["routes"][0]["host_socket"],
++            "/home/sandboxes/new/v.sock"
++        );
++        assert_eq!(
++            value["network"]["tls"]["upstream_ca_cert"][0],
++            "/home/sandboxes/new/ca.pem"
++        );
++        assert_eq!(
++            value["network"]["tls"]["upstream_ca_cert"][1],
++            "/etc/ca.pem"
++        );
++        assert_eq!(value["labels"]["l"], "/home/sandboxes/old");
 +    }
 +}
