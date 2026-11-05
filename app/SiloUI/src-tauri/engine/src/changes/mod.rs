@@ -8,6 +8,7 @@ pub mod fork_base;
 pub mod ignore;
 pub mod keep;
 pub mod manifest;
+pub mod promote;
 pub mod service;
 pub mod store;
 
