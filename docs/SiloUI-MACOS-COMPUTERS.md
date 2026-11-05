@@ -288,32 +288,68 @@ does not exist before it.
 
 **Quiet forks.** `checkpoints.fork` takes `secrets` and a `quiet` recipe, and a fork made
 without a checkpoint name forks the computer's current state: it takes a checkpoint named
-"Fork point" of the source first (an automatic one, under the same Fork operation) and
-copies that.
+"Fork point" of the source first, under the same Fork operation, and copies that.
 
+- The fork point has its own kind (`fork-point`) and a disk scope: it holds no memory file.
+  A running source is flushed (`sync` in the guest) and then paused only while its disk is
+  cloned. Retention never removes it, and it is taken after the fork's name and its secret
+  and GitHub assignments were checked, so a fork that is refused leaves nothing behind (one
+  that fails later takes the fork point back). It is the fork-time base a later three-way
+  Keep needs, so it stays while a fork made from it exists: the fork's record names it
+  (`forkedFrom`), Delete checkpoint refuses it, and deleting the last fork made from it
+  removes it. A source that is busy at that moment keeps it as an ordinary checkpoint.
 - Secrets and GitHub: a fork gets no Silo-managed secret or GitHub assignment. `secrets`
   names the ones to copy from the source; `github` is read-only GitHub access (the same
-  copy as Linux, refused for a personal token). A name the source does not have fails the
-  fork before anything is created.
+  copy as Linux, refused for a personal token). A name the source does not have, including
+  `github` when the source has no GitHub assignment, fails the fork before anything is
+  created.
 - Scheduled work, on the stopped disk in the mount used for the rekey (`quiet.rs`), so none
-  of it runs at the fork's boot: LaunchAgents and LaunchDaemons that are not Apple's
-  (`com.apple.`) or Silo's (`com.silo.`, `org.silo.`) by their label, in `/Library` and each
-  user's `Library`; user crontabs (`/var/at/tabs`) and at jobs; the user's periodic scripts
-  (`/usr/local/etc/periodic/*`, `/etc/{daily,weekly,monthly}.local`). They are moved, not
-  deleted, to `/Library/Application Support/Silo/Quieted/` under their original path, and the
-  fork's record lists them in `quiet.parked`.
+  of it runs at the fork's boot. Only scheduled work is parked, as the recipe's "scheduled
+  jobs off": LaunchAgents and LaunchDaemons whose property list has `StartInterval`,
+  `StartCalendarInterval`, `WatchPaths`, `QueueDirectories` or `StartOnMount`, in `/Library`
+  and each user's `Library`; user crontabs (`/var/at/tabs`) and at jobs; the user's periodic
+  scripts (`/usr/local/etc/periodic/*`, `/etc/{daily,weekly,monthly}.local`, and scripts in
+  `/etc/periodic/*` that macOS does not ship). Services that keep running or start at login
+  (`KeepAlive`, `RunAtLoad`, such as a database from Homebrew) stay: they are the
+  development stack the fork is meant to have, and `stop` names anything else. Silo's jobs
+  (`com.silo.`, `org.silo.`) always stay. A `com.apple.` label is kept only when the file is
+  in `/Library/LaunchAgents` or `/Library/LaunchDaemons` and its program is under `/System`
+  or `/usr` (not `/usr/local`); the same label in a user's folder, or with another program,
+  is treated like any other. A property list that can't be read is left alone, since
+  launchd can't load it either. Parked files are moved, not deleted, to
+  `/Library/Application Support/Silo/Quieted/` under their original path, and the fork's
+  record lists them in `quiet.parked`.
+- A user's `~/Library/LaunchAgents` that is a link is followed once when its target stays on
+  the Data volume (the job files are parked from where the link points); a link that leaves
+  it, or any other link on the way, fails the fork with a message saying so.
+- Jobs that apps register themselves (`SMAppService` agents and daemons, in an app's
+  `Contents/Library/LaunchAgents|LaunchDaemons`) are not parked. They are enabled through
+  the Background Task Management database, which is not edited offline, and moving a file
+  inside a signed bundle would invalidate its signature. The scheduled ones found in
+  `/Applications` and each user's `Applications` are listed in `quiet.stillScheduled`, and
+  `stop` can name their labels.
 - `scrub` paths are deleted on the same mount. The rules are Linux's: absolute, at least two
   levels, no `..`, no walking through a link (a link at the end is removed itself). They
   must be on the Data volume (`/System`, `/bin` and most of `/usr` are not), `*` and `?`
-  match within one path part, and `[` is refused. The account's home, Silo's files and the
-  account database are never scrubbed.
+  match within one path part, and `[` is refused. Every match is checked before anything is
+  removed, and a match that equals, contains or lies below a protected path refuses the
+  whole scrub: the account's home folder and the folders above it, Silo's files and launchd
+  jobs, the account database, `/etc/ssh`, sudoers, automatic login and the `silo` user's
+  `.ssh` (names are compared without regard to case).
 - `stop` names (launchd labels or process names) run in the first Start, first, over the
-  password login: `launchctl disable` and `bootout` in the system and user domains, then
-  `pkill -x`. Login items and apps that start at the automatic login still start before
-  that, since the login comes before the first SSH connection. The new machine identifier is
-  made when the files are cloned and the host and computer names are set in that Start.
+  password login: `launchctl disable` and `bootout` in the system and the `gui/501` domains,
+  then each process whose executable has exactly that name is ended (a name is compared whole,
+  not as a pattern or as the kernel's 16-character process name). The step fails the Start
+  when a label is still loaded or a process of that name is still running afterwards.
+- What still runs before the quieting: the fork's login items and the apps reopened at the
+  automatic login start before the first SSH connection, so before `stop` runs. A job that
+  is not scheduled and is not named in `stop` keeps running, as does anything an app starts
+  by itself. The new machine identifier is made when the files are cloned and the host and
+  computer names are set in that Start.
 - The record's `quiet` holds `scheduledJobsDisabled`, `newIdentity`, `stop`, `scrub`,
-  `secrets`, `parked` and `applied`, which is true once the Start has finished.
+  `secrets`, `parked`, `stillScheduled` and `applied`, which is true once the Start has
+  finished. The Start saves its result before the in-memory record says the first boot is
+  over, so a failed save leaves the fork waiting for another Start.
 
 Not yet run against a live guest.
 

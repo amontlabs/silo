@@ -1539,6 +1539,36 @@ pub(super) fn save_running(
     }
 }
 
+/// Pauses the running machine, calls `copy` while it is paused and resumes it, whatever `copy`
+/// returned. A machine that could not be paused is left as it was and `copy` does not run.
+pub(super) fn pause_for_copy(
+    app: &MacosContext,
+    id: &str,
+    copy: &mut dyn FnMut() -> Result<(), String>,
+) -> Result<(), String> {
+    on_machine(app, id, false, |machine, send| {
+        // SAFETY: Main thread; the machine is a framework object in a slot.
+        unsafe {
+            if machine.canPause() {
+                machine.pauseWithCompletionHandler(&completion(send));
+            } else {
+                let _ = send.send(Err("This computer can't be paused right now.".into()));
+            }
+        }
+    })?;
+    let copied = copy();
+    match (copied, resume_paused(app, id)) {
+        (copied, Ok(())) => copied,
+        (copied, Err(why)) => Err(format!(
+            "{}The computer could not be resumed ({why}). Use Force stop.",
+            copied
+                .err()
+                .map(|message| format!("{message} "))
+                .unwrap_or_default()
+        )),
+    }
+}
+
 /// Pauses the running machine, saves its memory to `state` and calls `copy` while it is paused,
 /// then leaves it paused and returns its generation: an engine update holds the saved machine
 /// until the engine is replaced. Whatever failed, the machine is resumed before the error

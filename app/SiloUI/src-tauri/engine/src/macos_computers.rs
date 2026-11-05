@@ -1547,6 +1547,17 @@ fn prune_macos_automatic_checkpoints_with(
     }
 }
 
+const FORK_POINT_BLOCKER: &str = "A computer forked from this one still depends on this checkpoint. It is removed when that computer is deleted.";
+
+/// Whether a fork made from `checkpoint_id` of `computer_id` still exists.
+fn fork_point_in_use(entries: &[Entry], computer_id: &str, checkpoint_id: &str) -> bool {
+    entries.iter().any(|entry| {
+        entry.record.forked_from.as_ref().is_some_and(|origin| {
+            origin.computer_id == computer_id && origin.checkpoint_id == checkpoint_id
+        })
+    })
+}
+
 const PENDING_START_BLOCKER: &str = "The next Start of this computer continues from this checkpoint. Start the computer first, or restore another checkpoint.";
 
 /// Why a checkpoint cannot be deleted right now. Deletion and `checkpoints.usage` share it,
@@ -1555,11 +1566,14 @@ fn checkpoint_delete_blocker(
     layout: &Layout,
     pending: Option<&checkpoints::PendingRestore>,
     checkpoint_id: &str,
+    forked: bool,
 ) -> Option<&'static str> {
     if checkpoints::journal_pins(layout, checkpoint_id) {
         Some(UNFINISHED_RESTORE)
     } else if pending.is_some_and(|pending| pending.checkpoint_id == checkpoint_id) {
         Some(PENDING_START_BLOCKER)
+    } else if forked {
+        Some(FORK_POINT_BLOCKER)
     } else {
         None
     }
@@ -1576,6 +1590,13 @@ pub fn macos_checkpoint_usage(
     ensure_loaded(app)?;
     let data = app_data(app)?;
     let mut computers = registry();
+    let forked: Vec<String> = computers
+        .entries
+        .iter()
+        .filter_map(|entry| entry.record.forked_from.as_ref())
+        .filter(|origin| origin.computer_id == computer_id)
+        .map(|origin| origin.checkpoint_id.clone())
+        .collect();
     let entry = computers
         .entry(computer_id)
         .ok_or_else(|| "This computer no longer exists.".to_owned())?;
@@ -1595,6 +1616,7 @@ pub fn macos_checkpoint_usage(
                     &layout,
                     entry.record.pending_restore.as_ref(),
                     &checkpoint.id,
+                    forked.contains(&checkpoint.id),
                 )
                 .map(str::to_owned),
             }
@@ -2402,6 +2424,7 @@ fn checkpoint_created_job_result(
             kind: match meta.policy_kind {
                 checkpoints::PolicyKind::Manual => CheckpointKind::Manual,
                 checkpoints::PolicyKind::Automatic => CheckpointKind::Automatic,
+                checkpoints::PolicyKind::ForkPoint => CheckpointKind::ForkPoint,
             },
             size_bytes: meta.size_bytes,
         },
@@ -5520,6 +5543,7 @@ fn force_stop_with(
 
 fn delete(app: &MacosContext, id: &str) -> Result<(), String> {
     let data = app_data(app)?;
+    let origin;
     let removed = {
         let mut registry = registry();
         let index = registry
@@ -5527,6 +5551,7 @@ fn delete(app: &MacosContext, id: &str) -> Result<(), String> {
             .iter()
             .position(|entry| entry.record.id == id)
             .ok_or("This computer no longer exists.")?;
+        origin = registry.entries[index].record.forked_from.clone();
         if registry.entries[index].operation.is_some() {
             return Err(checkpoints::BUSY.into());
         }
@@ -5562,6 +5587,9 @@ fn delete(app: &MacosContext, id: &str) -> Result<(), String> {
                 if let Err(message) = ports::computer_removed(app, id) {
                     eprintln!("A deleted macOS computer's published ports could not be removed: {message}");
                 }
+                if let Some(origin) = &origin {
+                    release_fork_point(app, &data, origin);
+                }
             }
             Err(message) => {
                 update(app, id, |entry| {
@@ -5576,6 +5604,40 @@ fn delete(app: &MacosContext, id: &str) -> Result<(), String> {
     prune_templates(app);
     emit(app);
     Ok(())
+}
+
+/// Removes the fork point a deleted fork was made from once no other fork depends on it. A
+/// source that is busy or gone keeps it: it then shows as an ordinary checkpoint to delete.
+fn release_fork_point(app: &MacosContext, data: &std::path::Path, origin: &store::ForkOrigin) {
+    if fork_point_in_use(
+        &registry().entries,
+        &origin.computer_id,
+        &origin.checkpoint_id,
+    ) {
+        return;
+    }
+    let Ok(held) = begin_operation_for(
+        app,
+        &origin.computer_id,
+        checkpoints::OperationKind::Delete,
+        None,
+    ) else {
+        return;
+    };
+    let layout = Layout::new(data, &origin.computer_id);
+    let is_fork_point = checkpoints::find(&layout, &origin.checkpoint_id)
+        .is_ok_and(|meta| meta.policy_kind == checkpoints::PolicyKind::ForkPoint);
+    let blocked = checkpoint_delete_blocker(
+        &layout,
+        held.record.pending_restore.as_ref(),
+        &origin.checkpoint_id,
+        false,
+    )
+    .is_some();
+    if is_fork_point && !blocked {
+        let _ = checkpoints::remove(&layout, &origin.checkpoint_id);
+        refresh_checkpoints(app, &origin.computer_id, &layout);
+    }
 }
 
 /// A force stop failed while the machine is still alive: keep it tracked as running.
@@ -5782,6 +5844,10 @@ impl checkpoints::Machine for LiveMachine<'_> {
         engine::save_running(self.app, self.id, state, copy)
     }
 
+    fn pause_for_copy(&self, copy: &mut dyn FnMut() -> Result<(), String>) -> Result<(), String> {
+        engine::pause_for_copy(self.app, self.id, copy)
+    }
+
     fn force_stop(&self) -> Result<(), String> {
         engine::force_stop(self.app, self.id)?;
         if engine::wait_until_stopped(self.app, self.id, FORCED_STOP_WAIT) {
@@ -5877,15 +5943,29 @@ fn capture_held(
         return Err(UNFINISHED_RESTORE.into());
     }
     let running = held.state == State::Running;
+    let disk_only = policy_kind == checkpoints::PolicyKind::ForkPoint;
     log_line(
         app,
         id,
         &format!(
             "creating checkpoint \"{name}\" ({})",
-            if running { "memory and disk" } else { "disk" }
+            if running && !disk_only {
+                "memory and disk"
+            } else {
+                "disk"
+            }
         ),
     );
-    let _space = reserve_for_memory(data, &held.record, running)?;
+    let _space = reserve_for_memory(data, &held.record, running && !disk_only)?;
+    if running && disk_only {
+        // The disk is copied while the machine is paused, so what the guest still holds in
+        // memory has to reach it first.
+        let flushed = guest_access::run(&layout, &held.record, "/bin/sync", None, FLUSH_WAIT)
+            .is_ok_and(|output| output.status == 0);
+        if !flushed {
+            return Err("Silo could not flush the running computer's disk. Try again, or stop the computer first.".into());
+        }
+    }
     let machine = LiveMachine {
         app,
         id,
@@ -6021,9 +6101,13 @@ fn delete_checkpoint(
     let held = begin_operation(app, id, checkpoints::OperationKind::Delete, &job)?;
     let layout = Layout::new(&data, id);
     let target = checkpoints::find(&layout, checkpoint_id)?;
-    if let Some(blocker) =
-        checkpoint_delete_blocker(&layout, held.record.pending_restore.as_ref(), &target.id)
-    {
+    let forked = fork_point_in_use(&registry().entries, id, &target.id);
+    if let Some(blocker) = checkpoint_delete_blocker(
+        &layout,
+        held.record.pending_restore.as_ref(),
+        &target.id,
+        forked,
+    ) {
         return Err(blocker.into());
     }
     let removed = checkpoints::remove(&layout, &target.id);
@@ -6086,6 +6170,9 @@ fn fork_checkpoint(
         run_setup,
     )
 }
+
+/// How long the guest gets to write its disk cache out before a fork point copies the disk.
+const FLUSH_WAIT: std::time::Duration = std::time::Duration::from_secs(60);
 
 /// The name `checkpoints.fork` gives the checkpoint it takes when none is named.
 const FORK_POINT: &str = "Fork point";
@@ -6157,41 +6244,71 @@ fn fork_checkpoint_with_workflow(
         crate::computer_names::reserve(&[new_name.clone()], &|| app.linux_computer_names())?;
     let held = begin_operation(app, id, checkpoints::OperationKind::Fork, &job)?;
     let source = Layout::new(data, id);
-    let checkpoint = match checkpoint_id {
-        Some(checkpoint_id) => checkpoints::find(&source, checkpoint_id)?,
-        // The current state: a checkpoint of the source, taken under this same operation.
+    let named = match checkpoint_id {
+        Some(checkpoint_id) => Some(checkpoints::find(&source, checkpoint_id)?),
         None => {
             if matches!(held.state, State::Starting | State::Stopping) {
                 return Err("Wait for the computer to finish starting or stopping.".into());
             }
-            capture_held(
-                app,
-                id,
-                FORK_POINT,
-                data,
-                &held,
-                checkpoints::PolicyKind::Automatic,
-            )?
+            None
         }
     };
     let space = templates::reserve_space(data, templates::COPY_ESTIMATE)?;
-    let mut copied_assignments = false;
     let fork_name = new_name.clone();
+    let request = CreateRequest {
+        name: new_name,
+        cpus: held.record.cpus,
+        memory_gib: held.record.memory_gib,
+        disk_gib: held.record.disk_gib,
+    };
+    // Everything that can refuse the fork comes before the fork point is taken.
+    let mut copied_assignments = false;
+    let validated: Result<(), String> = (|| {
+        let _admitted = admission()?;
+        let registry = registry();
+        let existing: Vec<Record> = registry.entries.iter().map(|e| e.record.clone()).collect();
+        store::validate_request(&request, engine::host_limits(), &existing, 0)?;
+        copied_assignments =
+            copy_fork_assignments(assignments, options, &held.record.name, &request.name)?;
+        Ok(())
+    })();
+    if let Err(message) = validated {
+        return Err(message);
+    }
+    let (checkpoint, origin) = match named {
+        Some(checkpoint) => (checkpoint, None),
+        // The current state: a disk checkpoint of the source, taken under this same operation.
+        None => match capture_held(
+            app,
+            id,
+            FORK_POINT,
+            data,
+            &held,
+            checkpoints::PolicyKind::ForkPoint,
+        ) {
+            Ok(point) => {
+                let origin = store::ForkOrigin {
+                    computer_id: id.to_owned(),
+                    checkpoint_id: point.id.clone(),
+                };
+                (point, Some(origin))
+            }
+            Err(message) => {
+                if copied_assignments {
+                    forget_fork_assignments(assignments, options, &fork_name);
+                }
+                return Err(message);
+            }
+        },
+    };
     let prepared: Result<(Record, Arc<AtomicU8>), String> = (|| {
         let _admitted = admission()?;
         let mut registry = registry();
         let existing: Vec<Record> = registry.entries.iter().map(|e| e.record.clone()).collect();
-        let request = CreateRequest {
-            name: new_name,
-            cpus: held.record.cpus,
-            memory_gib: held.record.memory_gib,
-            disk_gib: held.record.disk_gib,
-        };
         store::validate_request(&request, engine::host_limits(), &existing, 0)?;
-        copied_assignments =
-            copy_fork_assignments(assignments, options, &held.record.name, &request.name)?;
         let mut record = store::new_record(&request, engine::random_mac());
         record.quiet = Some(quiet::QuietRecord::new(options));
+        record.forked_from = origin.clone();
         record.restore_image = held.record.restore_image.clone();
         record.pristine = false;
         record.setup_version = held.record.setup_version.clone();
@@ -6205,12 +6322,19 @@ fn fork_checkpoint_with_workflow(
         registry.entries.push(entry);
         Ok((record, cancel))
     })();
+    let take_back_fork_point = |layout: &Layout| {
+        if let Some(origin) = &origin {
+            let _ = checkpoints::remove(layout, &origin.checkpoint_id);
+            refresh_checkpoints(app, id, layout);
+        }
+    };
     let (record, cancel) = match prepared {
         Ok(prepared) => prepared,
         Err(message) => {
             if copied_assignments {
                 forget_fork_assignments(assignments, options, &fork_name);
             }
+            take_back_fork_point(&source);
             return Err(message);
         }
     };
@@ -6247,6 +6371,7 @@ fn fork_checkpoint_with_workflow(
             if copied_assignments {
                 forget_fork_assignments(assignments, options, &record_name);
             }
+            take_back_fork_point(&source);
             let message = match &stop {
                 Stop::Failed(message) => message.clone(),
                 Stop::Cancelled => "Creating the fork was cancelled.".to_string(),
@@ -6768,6 +6893,7 @@ pub fn seed_check_policy(app_data: &std::path::Path, computer_id: &str) -> Vec<S
         .map(|meta| match meta.policy_kind {
             checkpoints::PolicyKind::Manual => "manual".to_owned(),
             checkpoints::PolicyKind::Automatic => "automatic".to_owned(),
+            checkpoints::PolicyKind::ForkPoint => "fork-point".to_owned(),
         })
         .collect()
 }
@@ -6856,7 +6982,10 @@ const NoAssignments: RecordingAssignments = RecordingAssignments {
 #[cfg(test)]
 impl crate::runtime::checkpoints::ForkAssignments for RecordingAssignments {
     fn copy_github(&self, source: &str, target: &str) -> Result<(), String> {
-        self.calls.lock().unwrap().push(format!("github {source} {target}"));
+        self.calls
+            .lock()
+            .unwrap()
+            .push(format!("github {source} {target}"));
         if self.github_fails {
             Err("personal token".into())
         } else {
@@ -6864,7 +6993,10 @@ impl crate::runtime::checkpoints::ForkAssignments for RecordingAssignments {
         }
     }
     fn forget_github(&self, target: &str) -> Result<(), String> {
-        self.calls.lock().unwrap().push(format!("forget github {target}"));
+        self.calls
+            .lock()
+            .unwrap()
+            .push(format!("forget github {target}"));
         Ok(())
     }
     fn copy_secrets(&self, source: &str, target: &str, names: &[String]) -> Result<(), String> {
@@ -6872,7 +7004,9 @@ impl crate::runtime::checkpoints::ForkAssignments for RecordingAssignments {
             return Ok(());
         }
         if let Some(missing) = names.iter().find(|name| !self.known.contains(name)) {
-            return Err(format!("The source computer has no secret named {missing}."));
+            return Err(format!(
+                "The source computer has no secret named {missing}."
+            ));
         }
         self.calls
             .lock()
@@ -6881,7 +7015,10 @@ impl crate::runtime::checkpoints::ForkAssignments for RecordingAssignments {
         Ok(())
     }
     fn forget_secrets(&self, target: &str) -> Result<(), String> {
-        self.calls.lock().unwrap().push(format!("forget secrets {target}"));
+        self.calls
+            .lock()
+            .unwrap()
+            .push(format!("forget secrets {target}"));
         Ok(())
     }
 }
@@ -6917,9 +7054,13 @@ mod tests {
             known: vec!["API_KEY".into()],
             ..Default::default()
         };
-        let copied =
-            copy_fork_assignments(&assignments, &options(&["github", "API_KEY"]), "src", "fork")
-                .unwrap();
+        let copied = copy_fork_assignments(
+            &assignments,
+            &options(&["github", "API_KEY"]),
+            "src",
+            "fork",
+        )
+        .unwrap();
         assert!(copied);
         assert_eq!(
             assignments.calls.lock().unwrap().as_slice(),
@@ -6932,7 +7073,10 @@ mod tests {
         let assignments = RecordingAssignments::default();
         let result =
             copy_fork_assignments(&assignments, &options(&["github", "NOPE"]), "src", "fork");
-        assert_eq!(result, Err("The source computer has no secret named NOPE.".into()));
+        assert_eq!(
+            result,
+            Err("The source computer has no secret named NOPE.".into())
+        );
         assert_eq!(
             assignments.calls.lock().unwrap().as_slice(),
             ["github src fork", "forget github fork"]
@@ -6952,10 +7096,16 @@ mod tests {
     fn a_failed_fork_forgets_only_what_it_copied() {
         let assignments = RecordingAssignments::default();
         forget_fork_assignments(&assignments, &options(&["github"]), "fork");
-        assert_eq!(assignments.calls.lock().unwrap().as_slice(), ["forget github fork"]);
+        assert_eq!(
+            assignments.calls.lock().unwrap().as_slice(),
+            ["forget github fork"]
+        );
         let assignments = RecordingAssignments::default();
         forget_fork_assignments(&assignments, &options(&["API_KEY"]), "fork");
-        assert_eq!(assignments.calls.lock().unwrap().as_slice(), ["forget secrets fork"]);
+        assert_eq!(
+            assignments.calls.lock().unwrap().as_slice(),
+            ["forget secrets fork"]
+        );
     }
 
     #[test]
@@ -7209,7 +7359,10 @@ mod tests {
         let data = tempfile::tempdir().unwrap();
         let (fork, _) = fork_record(data.path());
         assert!(fork.setup.developer_tools);
-        assert_eq!(fork.developer_tools_version, Some(developer_tools::version()));
+        assert_eq!(
+            fork.developer_tools_version,
+            Some(developer_tools::version())
+        );
         assert!(!provision::developer_tools_pending(
             &fork,
             &developer_tools::version()
@@ -8527,6 +8680,147 @@ mod tests {
         assert!(
             unrelated_finished,
             "unrelated operation must finish after release"
+        );
+    }
+
+    fn fork_point_fixture(directory: &std::path::Path) -> (MacosContext, String) {
+        reopen_after_quit();
+        reopen_after_update();
+        let context = Arc::new(JobTestContext::new(directory.to_path_buf()));
+        let app = macos_context(context);
+        {
+            let mut computers = registry();
+            computers.entries.clear();
+            computers.loaded = false;
+            computers.template = None;
+            computers.min_disk_gib = store::MIN_DISK_GIB;
+        }
+        let (source, _) = checkpoint_fixture(directory, true);
+        ensure_loaded(&app).unwrap();
+        (app, source.id)
+    }
+
+    fn fork_of_current_state(
+        app: &MacosContext,
+        directory: &std::path::Path,
+        source_id: &str,
+        assignments: &RecordingAssignments,
+        options: &crate::runtime::checkpoints::ForkOptions,
+    ) -> Result<ForkContinuation, String> {
+        let gate = isolated_operation_gate();
+        let command = accept_macos_job(app.engine.as_ref(), "checkpoints.fork", gate).unwrap();
+        fork_checkpoint_with_workflow(
+            app,
+            directory,
+            source_id,
+            None,
+            "forked-mac",
+            options,
+            assignments,
+            command,
+            gate,
+            |_app, _layout, _record, _cancel, _space| Err(Stop::Failed("not run".into())),
+        )
+    }
+
+    fn fork_points(source_id: &str) -> Vec<checkpoints::Meta> {
+        registry()
+            .entry(source_id)
+            .unwrap()
+            .checkpoints
+            .iter()
+            .filter(|meta| meta.policy_kind == checkpoints::PolicyKind::ForkPoint)
+            .cloned()
+            .collect()
+    }
+
+    #[test]
+    #[cfg_attr(
+        not(all(target_os = "macos", target_arch = "aarch64")),
+        ignore = "macOS computers are loaded only on an Apple silicon host"
+    )]
+    fn a_fork_of_the_current_state_keeps_its_disk_fork_point_until_the_last_fork_is_dropped() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let (app, source_id) = fork_point_fixture(directory.path());
+        let before = registry().entry(&source_id).unwrap().checkpoints.len();
+
+        let assignments = RecordingAssignments::default();
+        let continuation = fork_of_current_state(
+            &app,
+            directory.path(),
+            &source_id,
+            &assignments,
+            &Default::default(),
+        )
+        .unwrap();
+
+        let points = fork_points(&source_id);
+        assert_eq!(points.len(), 1);
+        assert_eq!(points[0].kind, checkpoints::Kind::Disk);
+        assert_eq!(points[0].name, "Fork point");
+        assert_eq!(
+            registry().entry(&source_id).unwrap().checkpoints.len(),
+            before + 1
+        );
+        let origin = continuation.record.forked_from.clone().unwrap();
+        assert_eq!(origin.computer_id, source_id);
+        assert_eq!(origin.checkpoint_id, points[0].id);
+
+        // It stays while the fork exists, even for an explicit delete.
+        let layout = Layout::new(directory.path(), &source_id);
+        assert!(fork_point_in_use(
+            &registry().entries,
+            &source_id,
+            &origin.checkpoint_id
+        ));
+        assert_eq!(
+            checkpoint_delete_blocker(&layout, None, &origin.checkpoint_id, true),
+            Some(FORK_POINT_BLOCKER)
+        );
+        release_fork_point(&app, directory.path(), &origin);
+        assert_eq!(fork_points(&source_id).len(), 1);
+
+        // Dropping the last fork made from it removes it.
+        let fork_id = continuation.record.id.clone();
+        registry()
+            .entries
+            .retain(|entry| entry.record.id != fork_id);
+        release_fork_point(&app, directory.path(), &origin);
+        assert!(fork_points(&source_id).is_empty());
+        assert!(checkpoints::find(&layout, &origin.checkpoint_id).is_err());
+        assert_eq!(
+            registry().entry(&source_id).unwrap().checkpoints.len(),
+            before
+        );
+    }
+
+    #[test]
+    #[cfg_attr(
+        not(all(target_os = "macos", target_arch = "aarch64")),
+        ignore = "macOS computers are loaded only on an Apple silicon host"
+    )]
+    fn a_refused_fork_of_the_current_state_takes_no_fork_point() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let (app, source_id) = fork_point_fixture(directory.path());
+        let before = registry().entry(&source_id).unwrap().checkpoints.len();
+
+        // A secret the source doesn't have.
+        let assignments = RecordingAssignments::default();
+        let options = options(&["NOPE"]);
+        let result =
+            fork_of_current_state(&app, directory.path(), &source_id, &assignments, &options);
+        assert!(result.is_err());
+        assert!(fork_points(&source_id).is_empty());
+        assert_eq!(
+            registry().entry(&source_id).unwrap().checkpoints.len(),
+            before
+        );
+        assert!(
+            checkpoints::list(&Layout::new(directory.path(), &source_id))
+                .iter()
+                .all(|meta| meta.policy_kind != checkpoints::PolicyKind::ForkPoint)
         );
     }
 

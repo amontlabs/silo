@@ -17,7 +17,7 @@ export const macosCheckpointSchema = z.object({
   createdAt: z.string(),
   scope: z.enum(["full", "disk"]),
   reason: z.enum(["manual", "before-restore"]),
-  kind: z.enum(["manual", "automatic", "before-keep"]).optional(),
+  kind: z.enum(["manual", "automatic", "before-keep", "fork-point"]).optional(),
   sizeBytes: z.number().int().nonnegative().optional(),
 })
 
