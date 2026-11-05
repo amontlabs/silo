@@ -271,7 +271,7 @@ fn remove_drops_the_builder_and_the_entry() {
 }
 
 #[test]
-fn names_are_file_safe() {
+fn names_work_as_file_names() {
     assert!(valid_name("linux-dev"));
     assert!(!valid_name("../x"));
     assert!(!valid_name("Dev"));

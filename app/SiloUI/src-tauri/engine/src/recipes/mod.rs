@@ -104,7 +104,7 @@ pub fn valid_name(name: &str) -> bool {
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_')
 }
 
-fn safe_word(word: &str) -> bool {
+fn plain_word(word: &str) -> bool {
     !word.is_empty()
         && word.len() <= 200
         && !word.starts_with('-')
@@ -130,7 +130,7 @@ pub fn validate(spec: &RecipeSpec) -> Result<(), String> {
             let os = if linux { "a Linux" } else { "a macOS" };
             return Err(format!("packages.{manager} cannot be used in {os} recipe."));
         }
-        if let Some(bad) = packages.iter().find(|package| !safe_word(package.trim())) {
+        if let Some(bad) = packages.iter().find(|package| !plain_word(package.trim())) {
             return Err(format!(
                 "packages.{manager}: `{bad}` is not a package name."
             ));
