@@ -1,6 +1,5 @@
 //! Keep and undo: `changes.keep` and `changes.undo`.
 
-
 wire_struct! {
     /// The recipe's `keep:` section.
     KeepHooks {
