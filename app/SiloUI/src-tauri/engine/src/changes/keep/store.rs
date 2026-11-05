@@ -3,8 +3,6 @@
 
 use std::sync::Arc;
 
-use base64::Engine as _;
-
 use super::env::ManifestStore;
 use crate::{
     changes::{
@@ -65,23 +63,6 @@ impl ManifestStore for StoredManifests {
             .get_baseline(meta.source.as_deref()?)
             .ok()
             .flatten()
-    }
-
-    fn fork_time_crontab(&self, fork: &str, user: &str) -> Result<Option<String>, String> {
-        let Some((text, _)) = self.base(fork)? else {
-            return Ok(None);
-        };
-        for line in text.lines() {
-            let mut fields = line.split('\t');
-            if fields.next() == Some("CRONTXT") && fields.next() == Some(user) {
-                let encoded = fields.next().unwrap_or("");
-                let bytes = base64::engine::general_purpose::STANDARD
-                    .decode(encoded)
-                    .map_err(|e| format!("The recorded crontab is unreadable: {e}"))?;
-                return Ok(Some(String::from_utf8_lossy(&bytes).into_owned()));
-            }
-        }
-        Ok(None)
     }
 
     fn source(&self, fork: &str) -> Result<Option<String>, String> {

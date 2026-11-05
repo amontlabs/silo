@@ -342,7 +342,14 @@ async fn dispatch(
             };
             let value = ops::diff(engine, &args, progress).await?;
             emit(json, &value, |v| {
-                v["text"].as_str().unwrap_or_default().to_owned()
+                let mut text = v["text"].as_str().unwrap_or_default().to_owned();
+                if let Some(digest) = v["reviewDigest"].as_str().filter(|d| !d.is_empty()) {
+                    text.push_str(&format!("\nreview: {digest}"));
+                }
+                match v["baselineError"].as_str() {
+                    Some(error) => format!("{error}\n\n{text}"),
+                    None => text,
+                }
             });
         }
         Command::Drop(drop) => {

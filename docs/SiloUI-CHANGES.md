@@ -11,14 +11,21 @@ manifest at both points ([format 2](v1/PHASE2_CONTRACT.md)); the engine compares
 | --- | --- |
 | Code | One line per git repo: new or removed repo, moved head and branch, dirty and untracked files, changed gitignored files (`~/app: .env changed (gitignored)`). Files under a repo are reported only here. |
 | Packages | One line per manager (`apt`, `brew`, `brew cask`, `npm -g`, `pip`, ...). Added packages are named; their transitive dependencies fold into the manual install (`apt: ripgrep, jq (+3 dependencies)`). Upgrades and removals follow. Files that a package installed (`OWN` records) count toward the package, never toward Other changed. |
-| Settings & files | Dotfiles, `/etc`, preferences, crontab (one `cron <user>: added` line, not the crontab file as well), launch agents, service state changes. Directories with more than three changed files roll up to one line. |
+| Settings & files | Dotfiles, `/etc`, preferences, crontab (one `cron <user>: added` or `cron <user>: 1 line added` line, not the crontab file as well), launch agents, service state changes. Directories with more than three changed files roll up to one line. |
 | Database changed | Postgres: `schema changed` and `data changed in <table> (10→12 rows)`; SQLite: the file digest before and after. |
+| Database not compared | A Postgres database whose side of the comparison could not be read (the server did not answer when the fork-time base was captured): `postgres appdb: database not compared: base unreadable (...)`. It is not listed as new, dropped or changed. |
 | Other changed | Everything else, rolled up by directory. |
 | Not kept | What a keep never brings back: new listening ports, processes, services, and credential paths (`~/.ssh/`, `~/.aws/credentials`, `~/.config/gh/hosts.yml`, `~/.openclaw/credentials/`, `*.pem`, keychains; the list is in `changes/ignore.rs`). |
 | Ignored | A count of paths that are never reviewed (logs, caches, build output, boot-time rewrites; also in `ignore.rs`). |
 
 A no-op baseline (the diff of a fork of the same source left idle for the same time) can be
-passed in; entries that match it are removed first, so background churn does not show. An
+passed in. `changes.baseline` measures it on the fork itself, so it is valid only for a fork that
+has just started and sits untouched: it refuses ("No baseline") when the fork has run for more
+than two minutes past its idle time, or when its capture shows a moved repository or a changed
+package, because the capture would then hold the task's own changes and subtract them. A baseline
+from a separate idle fork of the same checkpoint is the other correct source. `silo diff --baseline`
+shows the diff without a baseline and a `baselineError` when it is refused. Entries that match it
+are removed first, so background churn does not show; entries that match it are removed first, so background churn does not show. An
 entry matches only when the path, the kind of change and the resulting content (file hash,
 size and link target; Postgres schema and table data digests; SQLite file digest; crontab and
 launch agent digests; the working-tree content of a dirty file) are all the same. A path that
@@ -93,11 +100,15 @@ may be added.
   `digest_after`; row counts are informational only.
 - `not_kept.credentials` is derived from `credential_details` (paths only, as before).
 - `summary` holds the text lines of each non-empty bucket before any line limit, in display order
-  (`Code`, `Packages`, `Settings & files`, `Database changed`, `Other changed`, `Not kept`).
+  (`Code`, `Packages`, `Settings & files`, `Database changed`, `Database not compared`,
+  `Other changed`, `Not kept`).
   The `Ignored` line is `ignored.paths.length` plus the `delta` of every pruned tree.
 - `other` and `settings.files` list every changed path; the text rolls them up.
 - `repo_files` lists changed files inside repos; they are not shown outside Code.
 - `database[].schema` and `digest` are `[before, after]` with `null` for a missing side.
+  `database[].not_compared` is set (with the reason) when one side's server could not be read.
+- `settings.cron[]` may carry `lines_added` and `lines_removed` when both crontab texts are
+  known. A crontab the quiet step parked is compared with its parked original.
 
 ## Manifest additions the diff reads
 

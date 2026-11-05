@@ -215,12 +215,6 @@ pub trait ManifestStore: Send + Sync {
     fn baseline(&self, _fork: &str) -> Option<(String, String)> {
         None
     }
-    /// The text of `user`'s crontab at fork time, when the collector recorded it. Without it
-    /// a crontab that main changed since is merged by adding the fork's new lines only.
-    fn fork_time_crontab(&self, fork: &str, user: &str) -> Result<Option<String>, String> {
-        let _ = (fork, user);
-        Ok(None)
-    }
     /// The computer (or checkpoint) the fork was made from.
     fn source(&self, fork: &str) -> Result<Option<String>, String>;
 }

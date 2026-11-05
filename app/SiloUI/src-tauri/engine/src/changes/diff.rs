@@ -201,6 +201,12 @@ pub struct CronChange {
     pub before: Option<String>,
     #[serde(default)]
     pub after: Option<String>,
+    /// Lines in the crontab now that it did not have, and lines it lost, when both texts are
+    /// known. A crontab the quiet step set aside is compared with its parked original.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lines_added: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lines_removed: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -258,6 +264,10 @@ pub struct DbChange {
     pub tables: Vec<TableChange>,
     /// File digests before and after (SQLite).
     pub digest: Option<(Option<String>, Option<String>)>,
+    /// Set when one side of the comparison could not be read (a database that was not running
+    /// when the fork-time base was captured): the database is listed, not called changed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub not_compared: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -523,6 +533,27 @@ fn cap(mut items: Vec<String>, n: usize, noun: &str) -> Vec<String> {
         items.push(format!("+{rest} {noun}"));
     }
     items
+}
+
+/// Non-blank lines `after` has beyond `before`, and lines it lost (repeats counted).
+fn line_delta(before: &str, after: &str) -> (u32, u32) {
+    let mut counts: BTreeMap<&str, i64> = BTreeMap::new();
+    for line in before.lines().map(str::trim_end).filter(|l| !l.is_empty()) {
+        *counts.entry(line).or_default() -= 1;
+    }
+    for line in after.lines().map(str::trim_end).filter(|l| !l.is_empty()) {
+        *counts.entry(line).or_default() += 1;
+    }
+    let added: i64 = counts.values().filter(|n| **n > 0).sum();
+    let removed: i64 = counts.values().filter(|n| **n < 0).map(|n| -n).sum();
+    (
+        u32::try_from(added).unwrap_or(u32::MAX),
+        u32::try_from(removed).unwrap_or(u32::MAX),
+    )
+}
+
+fn lines_text(n: u32) -> String {
+    format!("{n} line{}", if n == 1 { "" } else { "s" })
 }
 
 fn short7(s: &str) -> String {
@@ -975,30 +1006,62 @@ impl<'a> Builder<'a> {
 
     fn settings_extras(&mut self) {
         let (a, b) = (self.base, self.cur);
-        let users: BTreeSet<&String> = a.cron.keys().chain(b.cron.keys()).collect();
+        let users: BTreeSet<&String> = a
+            .cron
+            .keys()
+            .chain(b.cron.keys())
+            .chain(a.qcron.keys())
+            .collect();
         for u in users {
-            let (x, y) = (
+            let (mut x, y) = (
                 a.cron.get(u).map(String::as_str).unwrap_or("-"),
                 b.cron.get(u).map(String::as_str).unwrap_or("-"),
             );
-            if x != y {
-                let change = if x == "-" {
-                    Change::Added
-                } else if y == "-" {
-                    Change::Deleted
-                } else {
-                    Change::Modified
-                };
-                let side = |v: &str| (v != "-").then(|| v.to_owned());
-                let path = b.cronf.get(u).or_else(|| a.cronf.get(u)).cloned();
-                self.d.settings.cron.push(CronChange {
-                    user: u.clone(),
-                    change,
-                    path,
-                    before: side(x),
-                    after: side(y),
-                });
+            // A crontab that could not be read says nothing either way.
+            if x == "?" || y == "?" {
+                continue;
             }
+            let mut before_text = a.cront.get(u).map(String::as_str);
+            // The quiet step parked main's crontab before the base was taken, so the base shows
+            // none. What the fork started from is the parked original.
+            if x == "-" {
+                if let Some((hash, text)) = a.qcron.get(u) {
+                    // Parked and still absent: the quiet step, not a change.
+                    if y == "-" {
+                        continue;
+                    }
+                    x = hash;
+                    before_text = Some(text);
+                }
+            }
+            if x == y {
+                continue;
+            }
+            let change = if x == "-" {
+                Change::Added
+            } else if y == "-" {
+                Change::Deleted
+            } else {
+                Change::Modified
+            };
+            let side = |v: &str| (v != "-").then(|| v.to_owned());
+            let path = b.cronf.get(u).or_else(|| a.cronf.get(u)).cloned();
+            let (lines_added, lines_removed) = match (change, before_text, b.cront.get(u)) {
+                (Change::Modified, Some(before), Some(after)) => {
+                    let (added, removed) = line_delta(before, after);
+                    (Some(added), Some(removed))
+                }
+                _ => (None, None),
+            };
+            self.d.settings.cron.push(CronChange {
+                user: u.clone(),
+                change,
+                path,
+                before: side(x),
+                after: side(y),
+                lines_added,
+                lines_removed,
+            });
         }
         for (s, from) in &a.svc {
             if let Some(to) = b.svc.get(s) {
@@ -1081,6 +1144,13 @@ impl<'a> Builder<'a> {
             if change == Change::Modified && schema.is_none() && tcs.is_empty() {
                 continue;
             }
+            // A server that was not readable on one side has no databases there: what the
+            // other side lists is not a creation or a drop.
+            let not_compared = match (change, &a.pg_unreadable, &b.pg_unreadable) {
+                (Change::Added, Some(why), _) => Some(format!("base unreadable ({why})")),
+                (Change::Deleted, _, Some(why)) => Some(format!("now unreadable ({why})")),
+                _ => None,
+            };
             self.d.database.push(DbChange {
                 engine: "postgres".into(),
                 name: db.clone(),
@@ -1088,6 +1158,7 @@ impl<'a> Builder<'a> {
                 schema,
                 tables: tcs,
                 digest: None,
+                not_compared,
             });
         }
         let files: BTreeSet<&String> = a.sqlite.keys().chain(b.sqlite.keys()).collect();
@@ -1121,6 +1192,7 @@ impl<'a> Builder<'a> {
                 schema: None,
                 tables: Vec::new(),
                 digest: Some((x.cloned(), y.cloned())),
+                not_compared: None,
             });
         }
     }
@@ -1400,7 +1472,8 @@ impl Diff {
         push("Code", self.code_lines(&ctx));
         push("Packages", self.package_lines());
         push("Settings & files", self.settings_lines(&ctx));
-        push("Database changed", self.database_lines(&ctx));
+        push("Database changed", self.database_lines(&ctx, false));
+        push("Database not compared", self.database_lines(&ctx, true));
         push(
             "Other changed",
             rollup(&ctx, &self.other, |p| other_group(&ctx, p)),
@@ -1558,6 +1631,16 @@ impl Diff {
                 Change::Deleted => "removed",
                 Change::Modified => "changed",
             };
+            let verb = match (c.change, c.lines_added, c.lines_removed) {
+                (Change::Modified, Some(added), Some(removed)) if added + removed > 0 => {
+                    match (added, removed) {
+                        (a, 0) => format!("{} added", lines_text(a)),
+                        (0, r) => format!("{} removed", lines_text(r)),
+                        (a, r) => format!("{} added, {r} removed", lines_text(a)),
+                    }
+                }
+                _ => verb.to_owned(),
+            };
             lines.push(format!("cron {}: {verb}", c.user));
         }
         for v in &s.services {
@@ -1566,9 +1649,20 @@ impl Diff {
         lines
     }
 
-    fn database_lines(&self, ctx: &Ctx) -> Vec<String> {
+    fn database_lines(&self, ctx: &Ctx, uncompared: bool) -> Vec<String> {
         let mut out = Vec::new();
         for d in &self.database {
+            if d.not_compared.is_some() != uncompared {
+                continue;
+            }
+            if let Some(why) = &d.not_compared {
+                out.push(format!(
+                    "{} {}: database not compared: {why}",
+                    d.engine,
+                    ctx.short(&d.name)
+                ));
+                continue;
+            }
             if d.engine == "sqlite" {
                 let name = ctx.short(&d.name);
                 let (x, y) = d.digest.clone().unwrap_or((None, None));

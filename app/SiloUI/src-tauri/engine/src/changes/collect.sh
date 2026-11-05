@@ -242,32 +242,67 @@ fi
 # ---------------------------------------------------------------- cron / services / ports / procs
 me=$(id -un 2>/dev/null)
 cronhash() { "${SHA[@]}" | awk '{print $1}'; }
-# CRONF user path: the file the user's crontab lives in, so the diff shows one change.
-cronf() {
-  local f
-  for f in "/var/spool/cron/crontabs/$1" "/var/spool/cron/$1" "/var/at/tabs/$1"; do
-    [ -f "$f" ] && { printf 'CRONF\t%s\t%s\n' "$(esc "$1")" "$(esc "$f")"; return 0; }
-  done
-  return 0
-}
-# CRONTXT user base64: the crontab text, so a keep can merge it by line against the fork point.
-crontxt() {
-  have base64 || return 0
-  printf 'CRONTXT\t%s\t%s\n' "$(esc "$1")" "$(printf '%s\n' "$2" | base64 | tr -d '\n')"
-}
-if have crontab; then
-  h=-; out=$(crontab -l 2>/dev/null) && h=$(printf '%s\n' "$out" | cronhash)
-  printf 'CRON\t%s\t%s\n' "$me" "$h"
-  crontxt "$me" "$out"
-  cronf "$me"
-  if [ "$OS" = Linux ] && [ "$(id -u)" = 0 ]; then
-    for f in /var/spool/cron/crontabs/* /var/spool/cron/*; do
-      [ -f "$f" ] || continue
-      u=${f##*/}; [ "$u" = "$me" ] && continue
-      out=$(crontab -u "$u" -l 2>/dev/null) && printf 'CRON\t%s\t%s\n' "$u" "$(printf '%s\n' "$out" | cronhash)" && crontxt "$u" "$out"
-      printf 'CRONF\t%s\t%s\n' "$(esc "$u")" "$(esc "$f")"
-    done
+CRON_TEXT_MAX=65536
+# cron_record user file: CRON user sha256 (of the file's exact content), CRONF, and CRONT with the
+# text when it is small. A file that cannot be read is CRON user ?, never the hash of nothing.
+cron_record() {
+  local u=$1 f=$2 t
+  printf 'CRONF\t%s\t%s\n' "$(esc "$u")" "$(esc "$f")"
+  if cat "$f" >"$TMP/cron.txt" 2>/dev/null; then
+    printf 'CRON\t%s\t%s\n' "$(esc "$u")" "$(cronhash <"$TMP/cron.txt")"
+    if [ "$(wc -c <"$TMP/cron.txt" | tr -d ' ')" -le "$CRON_TEXT_MAX" ]; then
+      t=$(cat "$TMP/cron.txt"; echo x); t=${t%x}
+      printf 'CRONT\t%s\t%s\n' "$(esc "$u")" "$(esc "$t")"
+    fi
+  else
+    printf 'CRON\t%s\t?\n' "$(esc "$u")"
   fi
+}
+CRONSEEN=" "
+# Crontab files are read as the account the collector runs as: root on Linux, which reads them
+# all. A user whose crontab is in no known file is asked through crontab -l below.
+for d in ${SILO_CRON_DIRS:-/var/spool/cron/crontabs /var/spool/cron /var/at/tabs}; do
+  for f in "$d"/*; do
+    [ -f "$f" ] || continue
+    u=${f##*/}
+    case "$u" in *.placeholder|.*) continue;; esac
+    case "$CRONSEEN" in *" $u "*) continue;; esac
+    CRONSEEN="$CRONSEEN$u "
+    cron_record "$u" "$f"
+  done
+done
+if have crontab; then
+  case "$CRONSEEN" in
+    *" $me "*) ;;
+    *)
+      h=-; out=$(crontab -l 2>/dev/null) && h=$(printf '%s\n' "$out" | cronhash)
+      printf 'CRON\t%s\t%s\n' "$me" "$h"
+      ;;
+  esac
+fi
+# QPARK path sha256: files the quiet step set aside (crontabs, timers, autostart entries), under
+# their original paths. QCRON user sha256 text: a parked crontab in full, so a fork's own
+# crontab is compared with main as it was when the fork was made.
+QUIET_DISABLED=${SILO_QUIET_DISABLED:-/var/lib/silo-quiet/disabled}
+if [ -d "$QUIET_DISABLED" ]; then
+  find "$QUIET_DISABLED" '(' -type f -o -type l ')' 2>/dev/null | grep -v '[[:cntrl:]]' | sort | head -n 500 |
+  while IFS= read -r qf; do
+    orig=${qf#"$QUIET_DISABLED"}
+    case "$orig" in *.[0-9]) orig=${orig%.*};; esac
+    h=-
+    if [ -f "$qf" ] && [ ! -L "$qf" ] && cat "$qf" >"$TMP/qpark" 2>/dev/null; then h=$(cronhash <"$TMP/qpark"); fi
+    printf 'QPARK\t%s\t%s\n' "$(esc "$orig")" "$h"
+    case "$orig" in
+      /var/spool/cron/crontabs/*|/var/spool/cron/*|/var/at/tabs/*)
+        u=${orig##*/}
+        case "$u" in atjobs|atspool|'') ;; *)
+          if [ "$h" != - ] && [ "$(wc -c <"$TMP/qpark" | tr -d ' ')" -le "$CRON_TEXT_MAX" ]; then
+            t=$(cat "$TMP/qpark"; echo x); t=${t%x}
+            printf 'QCRON\t%s\t%s\t%s\n' "$(esc "$u")" "$h" "$(esc "$t")"
+          fi;;
+        esac;;
+    esac
+  done
 fi
 if [ "$OS" = Darwin ]; then
   have launchctl && launchctl list 2>/dev/null |
@@ -276,17 +311,31 @@ else
   have systemctl && systemctl list-unit-files --type=service --no-legend --no-pager 2>/dev/null |
     awk 'NF>=2{printf "SVC\t%s\t%s\n",$1,$2}'
 fi
-if have ss; then
+# Where the kernel lists sockets, listeners are read from there and matched to the process that
+# holds the socket (as root every process is visible); ss and lsof only answer for processes of
+# the account the collector runs as unless it is root.
+PROCROOT=${SILO_PROC_ROOT:-/proc}
+if [ -r "$PROCROOT/net/tcp" ]; then
+  cat "$PROCROOT/net/tcp" "$PROCROOT/net/tcp6" 2>/dev/null | while read -r _ local _ st _ _ _ _ _ inode _; do
+    [ "$st" = 0A ] && printf '%d %s\n' "0x${local##*:}" "$inode"
+  done | sort -u >"$TMP/listen"
+  ls -l "$PROCROOT"/[0-9]*/fd 2>/dev/null | awk -v root="$PROCROOT" '
+    index($0, root "/") == 1 && /\/fd:$/ { n = split($0, p, "/"); pid = p[n-1]; next }
+    /socket:\[[0-9]+\]/ { s = $0; sub(/.*socket:\[/, "", s); sub(/\].*/, "", s); if (!(s in seen)) { seen[s] = 1; print s, pid } }' >"$TMP/sockpid"
+  while read -r port inode; do
+    pid=$(awk -v i="$inode" '$1==i {print $2; exit}' "$TMP/sockpid")
+    proc=-
+    if [ -n "$pid" ]; then
+      proc=$(cat "$PROCROOT/$pid/comm" 2>/dev/null); [ -n "$proc" ] || proc=-
+    fi
+    printf 'LISTEN\ttcp\t%s\t%s\n' "$port" "$(esc "$proc")"
+  done <"$TMP/listen" | sort -u
+elif have ss; then
   ss -ltnpH 2>/dev/null | awk '{n=split($4,a,":"); proc="-";
     if (match($0,/\(\("[^"]*"/)) proc=substr($0,RSTART+3,RLENGTH-4);
     printf "LISTEN\ttcp\t%s\t%s\n",a[n],proc}' | sort -u
 elif have lsof; then
   lsof -nP -iTCP -sTCP:LISTEN 2>/dev/null | awk 'NR>1 && NF>=2{n=split($(NF-1),a,":"); printf "LISTEN\ttcp\t%s\t%s\n",a[n],$1}' | sort -u
-elif [ -r /proc/net/tcp ]; then
-  # Minimal guests ship neither ss nor lsof: state 0A is LISTEN; the process is not resolved.
-  cat /proc/net/tcp /proc/net/tcp6 2>/dev/null | while read -r _ local _ st _; do
-    [ "$st" = 0A ] && printf 'LISTEN\ttcp\t%d\t-\n' "0x${local##*:}"
-  done | sort -u
 fi
 # ---------------------------------------------------------------- databases
 # DB postgres <db> schema <sha256>, DBT postgres <db> <table> <sha256|-> <rows>: only when
@@ -308,7 +357,22 @@ pgname_ok() {
 }
 # pg_dump 17.6+ writes a random \restrict key into every dump; it is not part of the schema.
 pgnorm() { sed -e '/^\\restrict /d' -e '/^\\unrestrict /d'; }
-if have psql && have pg_dump && PGCONNECT_TIMEOUT=5 pgrun psql -XAtqc 'select 1' postgres >/dev/null 2>&1; then
+# DBU postgres reason: Postgres is installed but could not be read. The diff then says the
+# database was not compared, rather than reading its absence as an empty server. The
+# collector never starts a service.
+pg_unreadable=
+if have psql && have pg_dump; then
+  PGCONNECT_TIMEOUT=5 pgrun psql -XAtqc 'select 1' postgres >/dev/null 2>&1
+  case $? in
+    0) ;;
+    127) pg_unreadable="cannot act as the postgres account";;
+    *) pg_unreadable="the server did not answer";;
+  esac
+elif have psql || [ -d /usr/lib/postgresql ]; then
+  pg_unreadable="the postgres tools are incomplete"
+fi
+[ -z "$pg_unreadable" ] || printf 'DBU\tpostgres\t%s\n' "$(esc "$pg_unreadable")"
+if have psql && have pg_dump && [ -z "$pg_unreadable" ]; then
   export PGCONNECT_TIMEOUT=5
   pgrun psql -XAtqc "select datname from pg_database where not datistemplate and datallowconn order by 1" postgres 2>/dev/null |
   while IFS= read -r db; do

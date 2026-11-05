@@ -316,3 +316,80 @@ fn a_started_job_finishes_with_the_work_result() {
         .unwrap();
     assert_eq!(stored.1.source.as_deref(), Some("cp1"));
 }
+
+fn age_base(dir: &std::path::Path, computer: &str, seconds: i64) {
+    let path = dir.join("computers").join(computer).join("base.json");
+    let mut meta: store::Meta = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    let then = time::OffsetDateTime::now_utc() - time::Duration::seconds(seconds);
+    meta.captured_at = then
+        .format(&time::format_description::well_known::Rfc3339)
+        .unwrap();
+    std::fs::write(&path, serde_json::to_vec(&meta).unwrap()).unwrap();
+}
+
+#[test]
+fn a_baseline_taken_after_work_can_never_subtract_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::new(dir.path());
+    let start = manifest(&[("/srv/data/a", "1\t1\t-")]);
+    // The fork has been running for an hour: whatever it holds now is the task's.
+    let worked = manifest(&[("/srv/data/a", "2\t2\t-"), ("/srv/data/task", "1\t1\t-")]);
+    let guest = ScriptedGuest::new(&[&start, &worked, &worked]);
+    let options = Options::default();
+    run(
+        &guest,
+        &store,
+        "fork-late",
+        capture_work(ChangesRole::Base, Some("cp1")),
+        &options,
+    )
+    .unwrap();
+    age_base(dir.path(), "fork-late", 3600);
+    let work = Work::Baseline {
+        source: None,
+        idle_seconds: Some(60),
+    };
+    let error = run(&guest, &store, "fork-late", work, &options).unwrap_err();
+    assert!(
+        error.message.starts_with("No baseline"),
+        "{}",
+        error.message
+    );
+    // Nothing was cached, so the diff keeps every change.
+    let result = run(&guest, &store, "fork-late", diff_work(true, true), &options).unwrap();
+    assert_eq!(result["baselineAvailable"], false);
+    assert_eq!(result["baselineApplied"], false);
+    assert_eq!(
+        other(&result),
+        ["/srv/data/a:modified", "/srv/data/task:added"]
+    );
+}
+
+#[test]
+fn a_baseline_whose_capture_moved_a_repository_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::new(dir.path());
+    let start = "META\tformat\t2\nMETA\thome\t/root\nGIT\t/root/app\taaa\tmain\t0\t0\n";
+    let moved = "META\tformat\t2\nMETA\thome\t/root\nGIT\t/root/app\tbbb\tmain\t0\t0\n";
+    let guest = ScriptedGuest::new(&[start, moved]);
+    let options = Options::default();
+    run(
+        &guest,
+        &store,
+        "fork-moved",
+        capture_work(ChangesRole::Base, Some("cp1")),
+        &options,
+    )
+    .unwrap();
+    let work = Work::Baseline {
+        source: None,
+        idle_seconds: Some(0),
+    };
+    let error = run(&guest, &store, "fork-moved", work, &options).unwrap_err();
+    assert!(
+        error.message.starts_with("No baseline"),
+        "{}",
+        error.message
+    );
+    assert_eq!(store.get_baseline("cp1").unwrap(), None);
+}

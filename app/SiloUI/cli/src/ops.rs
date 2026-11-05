@@ -470,8 +470,11 @@ pub async fn diff(
     progress: Progress<'_>,
 ) -> Result<Value, CliError> {
     let target = engine.computer(&args.computer).await?;
+    // A baseline that cannot be measured correctly (the fork was used) is reported, and the
+    // diff is shown without one.
+    let mut baseline_error = None;
     if args.compute_baseline {
-        engine
+        let measured = engine
             .run_job(
                 &format!("Measuring the idle baseline of {}", target.name),
                 requests::changes_baseline(ChangesBaselineParams {
@@ -482,8 +485,12 @@ pub async fn diff(
                 }),
                 progress,
             )
-            .await?;
+            .await;
+        if let Err(error) = measured {
+            baseline_error = Some(error.message);
+        }
     }
+    let computer_id = target.id.clone();
     let mut result = engine
         .run_job(
             &format!("Comparing {} with when it was forked", target.name),
@@ -505,8 +512,15 @@ pub async fn diff(
             "baselineAvailable",
             "baseCapturedAt",
             "capturedAt",
+            "reviewDigest",
         ] {
             object.insert(key.to_owned(), result[key].clone());
+        }
+        if let Some(digest) = result["reviewDigest"].as_str().filter(|d| !d.is_empty()) {
+            engine.remember_review(&computer_id, digest);
+        }
+        if let Some(error) = baseline_error {
+            object.insert("baselineError".to_owned(), json!(error));
         }
     }
     Ok(document)
@@ -765,6 +779,8 @@ pub async fn fold(
         reviewed,
     } = options;
     let fork = engine.computer(fork).await?;
+    // Without a digest, the one the last `silo diff` of this fork showed pins the keep.
+    let reviewed = reviewed.or_else(|| engine.recall_review(&fork.id));
     let target_id = match into {
         Some(name) => Some(engine.computer(name).await?.id),
         None => None,

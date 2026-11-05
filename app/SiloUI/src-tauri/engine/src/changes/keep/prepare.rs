@@ -515,7 +515,12 @@ pub fn prepare(
         let ours = env
             .run(target, RunAs::Root, &scripts::crontab_read(user))?
             .success("Reading main's crontab")?;
-        let untouched = view.base.cron.get(user) == main.cron.get(user);
+        // A quiet fork's own crontab was parked: the parked original is main's at fork time.
+        let (base_digest, base_text) = match view.base.qcron.get(user) {
+            Some((digest, text)) => (Some(digest), Some(text)),
+            None => (view.base.cron.get(user), view.base.cront.get(user)),
+        };
+        let untouched = base_digest == main.cron.get(user);
         let merged = if untouched {
             if theirs.lines().eq(ours.lines()) {
                 Merge::Unchanged
@@ -523,10 +528,7 @@ pub fn prepare(
                 Merge::Merged(theirs.clone())
             }
         } else {
-            match store.fork_time_crontab(fork_name, user)? {
-                Some(before) => cron::merge(&before, &theirs, &ours),
-                None => cron::merge("", &theirs, &ours),
-            }
+            cron::merge(base_text.map_or("", String::as_str), &theirs, &ours)
         };
         match merged {
             Merge::Unchanged => {}

@@ -382,7 +382,6 @@ struct Store {
     /// What the second capture of the fork returns, when it moved.
     fork_later: Option<String>,
     fork_captures: AtomicUsize,
-    crontab: Option<String>,
 }
 
 impl ManifestStore for Store {
@@ -402,9 +401,6 @@ impl ManifestStore for Store {
             .get(computer)
             .cloned()
             .ok_or_else(|| "not captured".into())
-    }
-    fn fork_time_crontab(&self, _: &str, _: &str) -> Result<Option<String>, String> {
-        Ok(self.crontab.clone())
     }
     fn source(&self, _: &str) -> Result<Option<String>, String> {
         Ok(Some("main".into()))
@@ -438,7 +434,6 @@ fn store(base: &str, fork: &str, main: &str) -> Store {
         manifests: BTreeMap::from([("fork".to_owned(), mt(fork)), ("main".to_owned(), mt(main))]),
         fork_later: None,
         fork_captures: AtomicUsize::new(0),
-        crontab: None,
     }
 }
 
@@ -1288,8 +1283,8 @@ fn a_crontab_is_merged_by_line_against_the_fork_time_text() {
             "* * * * * a\n0 1 * * * b\n0 2 * * * c\n0 3 * * * main-only\n".into(),
         )
     });
-    let mut st = store(CRON_BASE, CRON_FORK, CRON_MAIN);
-    st.crontab = Some("* * * * * a\n0 1 * * * b\n0 2 * * * c\n".into());
+    let base = format!("{CRON_BASE}CRONT\troot\t* * * * * a\\n0 1 * * * b\\n0 2 * * * c\\n\n");
+    let st = store(&base, CRON_FORK, CRON_MAIN);
     let (_dir, journal) = journal();
     let outcome = run(&world, &st, &journal, &request(Hooks::default())).unwrap();
     assert!(matches!(outcome, Outcome::Kept(_)), "{outcome:?}");
@@ -1297,6 +1292,58 @@ fn a_crontab_is_merged_by_line_against_the_fork_time_text() {
         assert_eq!(
             c.crontab["root"],
             "* * * * * a\n0 3 * * * main-only\n5 1 * * * b\n"
+        )
+    });
+}
+
+#[test]
+fn a_parked_original_is_the_base_for_a_quiet_forks_crontab() {
+    // The fork's own crontab was parked at fork time; the parked original is main's then.
+    let base = "QCRON\troot\t03\t* * * * * a\\n0 2 * * * c\\n\nCRONF\troot\t/var/spool/cron/crontabs/root\n";
+    let fork_text = "* * * * * a\n0 2 * * * c\n7 7 * * * new\n";
+    let world = World::new(Os::Linux, &["fork", "main"]);
+    world.with("fork", |c| {
+        c.crontab.insert("root".into(), fork_text.into())
+    });
+    world.with("main", |c| {
+        c.crontab
+            .insert("root".into(), "* * * * * a\n0 2 * * * c\n".into())
+    });
+    let (_dir, journal) = journal();
+    // Main still has the parked original (digest 03): the fork's crontab is taken.
+    run(
+        &world,
+        &store(base, CRON_FORK, CRON_MAIN),
+        &journal,
+        &request(Hooks::default()),
+    )
+    .unwrap();
+    world.with("main", |c| {
+        assert!(c.crontab["root"].contains("7 7 * * * new"))
+    });
+    // Main edited its crontab since: merged by line against the parked original.
+    let world = World::new(Os::Linux, &["fork", "main"]);
+    world.with("fork", |c| {
+        c.crontab.insert("root".into(), fork_text.into())
+    });
+    world.with("main", |c| {
+        c.crontab.insert(
+            "root".into(),
+            "* * * * * a\n0 2 * * * c\n9 9 * * * main\n".into(),
+        )
+    });
+    let main_now = "CRON\troot\t99\nCRONF\troot\t/var/spool/cron/crontabs/root\n";
+    run(
+        &world,
+        &store(base, CRON_FORK, main_now),
+        &journal,
+        &request(Hooks::default()),
+    )
+    .unwrap();
+    world.with("main", |c| {
+        assert_eq!(
+            c.crontab["root"],
+            "* * * * * a\n0 2 * * * c\n9 9 * * * main\n7 7 * * * new\n"
         )
     });
 }

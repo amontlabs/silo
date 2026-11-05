@@ -248,15 +248,30 @@ fn baseline(
     })?;
     let idle = idle_seconds.unwrap_or(DEFAULT_IDLE_SECONDS);
     // The fork is judged idle from its base capture, so one that has already sat that long
-    // is captured at once.
+    // is captured at once. A fork that has been running longer than that has most likely been
+    // used: what it holds is the task's changes as much as idle noise, so nothing is measured.
     if let Some(started) = store::unix_seconds(&base_meta.captured_at) {
         let due = started + idle as i64;
         let now = time::OffsetDateTime::now_utc().unix_timestamp();
+        if now > due + BASELINE_WINDOW_SECONDS {
+            return Err(too_late());
+        }
         if due > now {
             std::thread::sleep(Duration::from_secs((due - now) as u64));
         }
     }
     let text = fresh(runner, None, options)?;
+    // Idle noise never moves a repository or installs a package; a fork where either
+    // happened was used, and its capture would hide the task's own changes.
+    let settled = diff_module::diff(
+        &parse(&base_text)?,
+        &parse(&text)?,
+        None,
+        &IgnoreList::builtin(),
+    );
+    if !settled.code.is_empty() || !settled.packages.is_empty() {
+        return Err(too_late());
+    }
     let meta = store
         .put_baseline(&source, &base_text, &text)
         .map_err(internal)?;
@@ -265,6 +280,15 @@ fn baseline(
         idle_seconds: idle,
         captured_at: meta.captured_at,
     })
+}
+
+/// How long after the idle time a baseline may still be measured on the fork itself.
+pub const BASELINE_WINDOW_SECONDS: i64 = 120;
+
+fn too_late() -> GuestError {
+    GuestError::invalid(
+        "No baseline: this fork has been used since it was forked, so its idle noise cannot be told from its changes. A baseline is measured on a fork that has just started and sits untouched.",
+    )
 }
 
 /// Accepts the work as a job and runs it on its own thread.
