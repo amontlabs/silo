@@ -83,6 +83,22 @@ fn with_linux<T>(
     })
 }
 
+/// Runs `work` while holding the computer's operation lane, as a `computers.start` job does:
+/// the runtime's start reconciles published ports, which requires the lane to be held.
+/// Callers must not hold the lane themselves (the gate does not nest).
+fn under_gate<T>(
+    id: &str,
+    name: &str,
+    label: &str,
+    work: impl FnOnce() -> Result<T, String>,
+) -> Result<T, String> {
+    let _gate = runtime::OPERATIONS
+        .kind(runtime::operation_gate::OperationKind::Other)
+        .computer(id, name, label)
+        .map_err(|error| error.to_string())?;
+    work()
+}
+
 /// The computer ids that hold disks under a name of their own (see `refusal`).
 fn stored_under_its_name(paths: &RuntimePaths, name: &str) -> bool {
     let folder = paths.volumes.join(name).to_string_lossy().into_owned();
@@ -250,7 +266,9 @@ impl PromoteEnv for EngineEnv {
     fn stop(&self, id: &str) -> Result<(), String> {
         if self.guest.os(id)? == Os::Linux {
             let name = self.info(id)?.name;
-            return with_linux(self.host.as_ref(), |linux| (linux.lifecycle)("stop", &name));
+            return under_gate(id, &name, "Stopping the computer", || {
+                with_linux(self.host.as_ref(), |linux| (linux.lifecycle)("stop", &name))
+            });
         }
         macos_computers::promote_stop(&self.macos()?, id)
     }
@@ -258,8 +276,10 @@ impl PromoteEnv for EngineEnv {
     fn start(&self, id: &str) -> Result<(), String> {
         if self.guest.os(id)? == Os::Linux {
             let name = self.info(id)?.name;
-            return with_linux(self.host.as_ref(), |linux| {
-                (linux.lifecycle)("start", &name)
+            return under_gate(id, &name, "Starting the computer", || {
+                with_linux(self.host.as_ref(), |linux| {
+                    (linux.lifecycle)("start", &name)
+                })
             });
         }
         macos_computers::promote_start(&self.macos()?, id)
@@ -334,13 +354,12 @@ impl PromoteEnv for EngineEnv {
             Step::MacosIdentity => {
                 macos_computers::promote_check_identity(&swap.fork_id)?;
                 macos_computers::promote_check_identity(&swap.target_id)?;
-                // The new main presents main's CA, which the trust set up for main already
-                // covers, and calls itself what main called itself. The archive takes the
-                // fork's hostname so the two never share one. The machine identifier stays
-                // with each disk: Apple ties a guest's hardware identity (and what it
-                // activated or signed in with) to the identifier it first booted with, and
-                // the two disks are swapped by name, never by hardware.
-                macos_computers::promote_carry_ca(&swap.target_id, &swap.fork_id)?;
+                // The new main calls itself what main called itself. The archive takes the
+                // fork's hostname so the two never share one. The proxy CA and the machine
+                // identifier stay with each disk: the guest trusts the CA it was set up with
+                // and the start verifies it, and Apple ties a guest's hardware identity (and
+                // what it activated or signed in with) to the identifier it first booted
+                // with, so the two disks are swapped by name, never by hardware or CA.
                 macos_computers::promote_write_hostnames(
                     &macos,
                     &swap.fork_id,
@@ -396,6 +415,7 @@ impl PromoteEnv for EngineEnv {
                 false,
             ),
             Step::MacosIdentity => {
+                // A promote made before the CA stayed with its disk set the fork's CA aside.
                 macos_computers::promote_uncarry_ca(&swap.fork_id)?;
                 macos_computers::promote_write_hostnames(
                     &macos,
@@ -415,5 +435,29 @@ impl PromoteEnv for EngineEnv {
             ),
             Step::Lineage => Ok(()),
         }
+    }
+}
+
+#[cfg(test)]
+mod gate_tests {
+    use super::under_gate;
+
+    #[test]
+    fn lifecycle_work_runs_with_the_computer_lane_held() {
+        assert!(!crate::runtime::operation_gate::held());
+        let held = under_gate("c-gate", "gate-test", "test", || {
+            Ok(crate::runtime::operation_gate::held())
+        })
+        .unwrap();
+        assert!(held);
+        assert!(!crate::runtime::operation_gate::held());
+    }
+
+    #[test]
+    fn the_lane_does_not_nest() {
+        let nested = under_gate("c-gate-2", "gate-test-2", "outer", || {
+            under_gate("c-gate-2", "gate-test-2", "inner", || Ok(()))
+        });
+        assert!(nested.is_err());
     }
 }

@@ -2794,11 +2794,8 @@ pub fn promote_check_identity(id: &str) -> Result<(), String> {
     })
 }
 
-/// The promoted fork presents main's proxy CA, and gets its own back with `uncarry`.
-pub fn promote_carry_ca(main_id: &str, fork_id: &str) -> Result<(), String> {
-    proxy_ca::carry(main_id, fork_id)
-}
-
+/// Gives a fork its own proxy CA back when an earlier promote set it aside; nothing to do
+/// otherwise.
 pub fn promote_uncarry_ca(fork_id: &str) -> Result<(), String> {
     proxy_ca::uncarry(fork_id)
 }

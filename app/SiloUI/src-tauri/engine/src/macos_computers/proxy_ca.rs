@@ -236,14 +236,11 @@ fn set_aside_account(computer_id: &str) -> String {
     format!("{}.before-promote", account_name(computer_id))
 }
 
-/// Makes `fork_id` present the CA of `main_id`, which is the CA anything configured to trust
-/// main already trusts. The fork's own CA is set aside first, once, for [`uncarry`]. The old
+/// Makes `fork_id` present the CA of `main_id`. A promote no longer does this (the guest trusts
+/// the CA it was set up with); it stays to build the state an older promote left, for [`uncarry`]. The fork's own CA is set aside first, once, for [`uncarry`]. The old
 /// main keeps its own, so both still match the trust inside their disks. Repeating it
 /// changes nothing.
-pub(super) fn carry(main_id: &str, fork_id: &str) -> Result<(), String> {
-    carry_with(crate::channel::current(), main_id, fork_id, live_store())
-}
-
+#[cfg(test)]
 pub(super) fn carry_with(
     channel: Channel,
     main_id: &str,
