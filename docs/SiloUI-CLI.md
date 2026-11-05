@@ -133,8 +133,24 @@ and uncommitted files) and calls `changes.request`, which stores a fold request 
 (`fold-requests/<id>.json` under the app data folder): `id` (`fr-` and 8 hex), `forkId`, `target`
 (the computer id; `folder:<path>` for a folder fork), `createdAt`, `reviewDigest`, `summary` and
 `status: open`. Asking again for the same fork and target updates that open request. The id is
-printed. Listing, showing, keeping and throwing away requests come with phase 4; CI or cron call
-`silo fork main -- <cmd>` then `silo fold --request`.
+printed. CI or cron call `silo fork main -- <cmd>` then `silo fold --request`.
+
+- `silo requests [--status open|kept|thrown-away|all]` lists requests (default open) with the
+  fork, its state, the computer it would be kept into and the count of changes per bucket.
+- `silo requests show <id>` prints the same buckets as `silo diff` for a fresh look at the fork,
+  then `Credentials used: ...` (`none` when the fork used no secret; a `Blocked:` line follows
+  when the proxy refused something). It says when the fork changed since the request, which makes
+  a keep refuse.
+- `silo requests keep <id> [--data-ok] [--recipe-file PATH]` keeps the fork pinned to the
+  request's digest and exits 2 when refused (the request stays open). A folder fork is kept with
+  `silo fold`.
+- `silo requests throw-away <id>` drops the fork and closes the request; `main` and the
+  request's target are refused.
+- `silo requests open <id>` starts the fork if it is stopped and prints its name, SSH name and
+  URLs.
+
+Each takes `--json`. The MCP tools are `requests_list`, `request_show`, `request_keep`,
+`request_throw_away` and `request_open`, on the same engine methods.
 
 `silo status` prints, for a fork, a line such as
 `quiet: applied; stopped: poller; scrubbed: /root/.env; secrets: none` (on macOS it adds the
