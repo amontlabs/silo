@@ -134,15 +134,11 @@ impl KeepEnv for GuestEnv {
     }
 
     fn checkpoint_before_keep(&self, computer: &str, name: &str) -> Result<CheckpointRef, String> {
-        // macOS computers have no before-keep kind: theirs is a manual checkpoint with this name.
-        let kind = if self.os(computer)? == Os::Macos {
-            CheckpointKind::Manual
-        } else {
-            CheckpointKind::BeforeKeep
-        };
+        // A running Linux computer is captured with its memory (`--full --guest-flush
+        // required`) and a running Mac with its saved state, so an undo resumes it.
         let job = self
             .service
-            .start_create(computer, name, Some(kind))
+            .start_create(computer, name, Some(CheckpointKind::BeforeKeep))
             .map_err(|failure| failure.message)?;
         let result = self.finish(job)?;
         let checkpoint = result
@@ -159,6 +155,7 @@ impl KeepEnv for GuestEnv {
             id: text("id"),
             name: text("name"),
             created_at: text("createdAt"),
+            scope: text("scope"),
         };
         if reference.id.is_empty() {
             return Err("The checkpoint job returned no checkpoint id.".into());
@@ -172,6 +169,44 @@ impl KeepEnv for GuestEnv {
             .start_restore(computer, checkpoint_id)
             .map_err(|failure| failure.message)?;
         self.finish(job).map(|_| ())
+    }
+
+    fn start(&self, computer: &str) -> Result<(), String> {
+        let context = self.host.engine_context();
+        let accepted = jobs::allocate(context.as_ref(), "computers.start")
+            .map_err(|failure| failure.message().to_owned())?;
+        let job = accepted.job_id;
+        let target = self.target(computer)?;
+        let result = if target.is_macos() {
+            let macos = self
+                .host
+                .macos_context()
+                .ok_or("macOS computers are not available here.")?;
+            tokio::runtime::Handle::try_current()
+                .map_err(|error| error.to_string())?
+                .block_on(crate::macos_computers::macos_computer_action_with_job(
+                    macos,
+                    computer.to_owned(),
+                    crate::macos_computers::Action::Start,
+                    job.clone(),
+                    "computers.start",
+                ))
+        } else {
+            runtime::computer_action_with_host_and_job(
+                self.host.as_ref(),
+                "start".into(),
+                target.name().to_owned(),
+                None,
+                job.clone(),
+                "computers.start",
+            )
+            .map(|_| ())
+            .map_err(|error| error.message)
+        };
+        if let Ok(registry) = context.job_registry() {
+            let _ = registry.acknowledge(&job);
+        }
+        result
     }
 
     fn hold(&self, computer: &str, label: &str) -> Result<Box<dyn std::any::Any>, String> {

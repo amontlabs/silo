@@ -103,6 +103,16 @@ pub struct CheckpointRef {
     pub id: String,
     pub name: String,
     pub created_at: String,
+    /// `full` when the checkpoint holds the computer's memory (it was running), `disk` when
+    /// not. Empty for a record from before this was kept.
+    #[serde(default)]
+    pub scope: String,
+}
+
+impl CheckpointRef {
+    pub fn has_memory(&self) -> bool {
+        self.scope == "full"
+    }
 }
 
 /// What a path holds in a guest, looked at without following links.
@@ -185,6 +195,11 @@ pub trait KeepEnv: Send + Sync {
     /// Saves a before-keep checkpoint of `computer` and returns it.
     fn checkpoint_before_keep(&self, computer: &str, name: &str) -> Result<CheckpointRef, String>;
     fn restore(&self, computer: &str, checkpoint_id: &str) -> Result<(), String>;
+    /// Starts `computer` after a restore. A restore leaves the computer stopped; the start
+    /// resumes it from the checkpoint's memory when the checkpoint holds it.
+    fn start(&self, _computer: &str) -> Result<(), String> {
+        Ok(())
+    }
     /// Holds the engine's operation lane for `computer` until the returned value is dropped,
     /// so no restore, stop, fork or delete of it interleaves with the keep.
     fn hold(&self, _computer: &str, _label: &str) -> Result<Box<dyn Any>, String> {

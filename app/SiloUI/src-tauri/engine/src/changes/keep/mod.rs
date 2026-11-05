@@ -113,10 +113,31 @@ pub enum UndoOutcome {
         recovered: bool,
         /// What changed on the computer after the keep; the undo discards it.
         changed_since: Vec<String>,
+        /// How main came back, and anything the undo could not do.
+        resumed: Resumed,
+        notes: Vec<String>,
     },
     NothingToUndo {
         computer: String,
     },
+}
+
+/// What state main is in once an undo restored it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Resumed {
+    /// Running again from the checkpoint's memory, processes included.
+    Memory,
+    /// Left stopped: it was stopped when the keep started, or it could not be started.
+    Stopped,
+}
+
+impl Resumed {
+    fn label(self) -> &'static str {
+        match self {
+            Resumed::Memory => "memory",
+            Resumed::Stopped => "stopped",
+        }
+    }
 }
 
 impl UndoOutcome {
@@ -127,11 +148,16 @@ impl UndoOutcome {
                 checkpoint,
                 recovered,
                 changed_since,
+                resumed,
+                notes,
             } => json!({
                 "status": "undone",
                 "computer": computer,
                 "recovered": recovered,
                 "changedSince": changed_since,
+                "main": if *resumed == Resumed::Stopped { "stopped" } else { "running" },
+                "resumedFrom": resumed.label(),
+                "notes": notes,
                 "checkpoint": {"id": checkpoint.id, "name": checkpoint.name, "createdAt": checkpoint.created_at},
             }),
             UndoOutcome::NothingToUndo { computer } => {
@@ -278,6 +304,7 @@ pub fn keep(
         target: target.clone(),
         checkpoint_id: checkpoint.id.clone(),
         checkpoint_name: checkpoint.name.clone(),
+        checkpoint_scope: checkpoint.scope.clone(),
     })?;
     let consume = |journal: &Journal| {
         let _ = journal.set_state(&target, &checkpoint.id, journal::State::Consumed);
@@ -355,7 +382,15 @@ pub fn keep(
                 consume(journal);
             }
             Err(match restored {
-                Ok(()) => format!("{error} Main was put back from the checkpoint taken before the keep."),
+                Ok(()) => {
+                    let (_, notes) = bring_back(env, &target, &checkpoint);
+                    format!(
+                        "{error} Main was put back from the checkpoint taken before the keep. {}",
+                        notes.join(" ")
+                    )
+                    .trim_end()
+                    .to_owned()
+                }
                 Err(restore) => format!(
                     "{error} Putting main back also failed ({restore}); `silo undo {target}` retries it."
                 ),
@@ -378,15 +413,19 @@ pub fn undo(
             id: entry.checkpoint_id.clone(),
             name: entry.checkpoint_name.clone(),
             created_at: String::new(),
+            scope: entry.checkpoint_scope.clone(),
         };
         env.restore(computer, &entry.checkpoint_id)?;
         journal.set_state(computer, &entry.checkpoint_id, journal::State::Consumed)?;
         journal.clear(computer);
+        let (resumed, notes) = bring_back(env, computer, &checkpoint);
         return Ok(UndoOutcome::Undone {
             computer: computer.to_owned(),
             checkpoint,
             recovered: true,
             changed_since: Vec::new(),
+            resumed,
+            notes,
         });
     }
     let Some(checkpoint) = journal.latest_undoable(computer) else {
@@ -397,12 +436,46 @@ pub fn undo(
     let changed_since = changed_after(store, journal, computer, &checkpoint.id);
     env.restore(computer, &checkpoint.id)?;
     journal.set_state(computer, &checkpoint.id, journal::State::Consumed)?;
+    let (resumed, notes) = bring_back(env, computer, &checkpoint);
     Ok(UndoOutcome::Undone {
         computer: computer.to_owned(),
         checkpoint,
         recovered: false,
         changed_since,
+        resumed,
+        notes,
     })
+}
+
+/// A restore leaves main stopped. Main goes back the way it was when the keep started: a
+/// checkpoint with memory means main was running, and starting it resumes that memory (its
+/// processes and an open database as they were); a disk checkpoint means it was stopped.
+fn bring_back(
+    env: &dyn KeepEnv,
+    computer: &str,
+    checkpoint: &CheckpointRef,
+) -> (Resumed, Vec<String>) {
+    match checkpoint.scope.as_str() {
+        "full" => {
+            env.note("Starting main from the checkpoint's memory");
+            match env.start(computer) {
+                Ok(()) => (Resumed::Memory, Vec::new()),
+                Err(error) => (
+                    Resumed::Stopped,
+                    vec![format!(
+                        "Main was put back but did not start: {error} Start it with `silo start {computer}`."
+                    )],
+                ),
+            }
+        }
+        "disk" => (Resumed::Stopped, Vec::new()),
+        _ => (
+            Resumed::Stopped,
+            vec![format!(
+                "Silo could not tell whether {computer} was running before the keep, so it was left stopped. Start it with `silo start {computer}` if it was."
+            )],
+        ),
+    }
 }
 
 /// What changed on the computer since the keep left it, as report lines.

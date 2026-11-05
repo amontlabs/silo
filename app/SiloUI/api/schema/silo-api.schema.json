@@ -819,9 +819,31 @@
         "computer": {
           "type": "string"
         },
+        "main": {
+          "description": "`running` or `stopped`: main as the undo left it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "notes": {
+          "default": [],
+          "description": "What the undo could not do, such as starting main.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "recovered": {
           "type": [
             "boolean",
+            "null"
+          ]
+        },
+        "resumedFrom": {
+          "description": "`memory` when main resumed from the checkpoint's memory, else `stopped`.",
+          "type": [
+            "string",
             "null"
           ]
         },

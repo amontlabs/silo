@@ -109,6 +109,15 @@ wire_struct! {
         changed_since: Vec<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         checkpoint: Option<UndoneCheckpoint>,
+        /// `running` or `stopped`: main as the undo left it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        main: Option<String>,
+        /// `memory` when main resumed from the checkpoint's memory, else `stopped`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        resumed_from: Option<String>,
+        /// What the undo could not do, such as starting main.
+        #[serde(default)]
+        notes: Vec<String>,
     }
 }
 

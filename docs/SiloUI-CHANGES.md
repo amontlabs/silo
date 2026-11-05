@@ -175,8 +175,9 @@ an unreadable file or a changed mode is never taken as unchanged.
    it never refuses on a stale one: a dry run reports and does not pin. Whatever the
    keep writes is read from the fork once, before main is touched, and the fork is looked at
    again afterwards: if it moved meanwhile, the keep stops.
-2. **Checkpoint, then lane.** A `before-keep` checkpoint of the target (macOS computers use a
-   manual checkpoint named `Before keep of <fork>`), then the target's operation lane is held
+2. **Checkpoint, then lane.** A `before-keep` checkpoint named `Before keep of <fork>` of the
+   target (on both platforms, with the same retention count; a running computer is captured
+   with its memory, a Linux one with `--full --guest-flush required`), then the target's operation lane is held
    until the apply ends, so no restore, stop, fork or delete of it interleaves. The target is
    captured after the lane is taken. Every check below that does not change the target runs once
    before the checkpoint too, so a refused keep is quick and creates nothing; the checks run
@@ -206,5 +207,10 @@ an unreadable file or a changed mode is never taken as unchanged.
 6. **One keep at a time per target.** A second waits up to two minutes, then fails with `busy`.
 
 `silo undo` restores the latest checkpoint of a keep that succeeded, once, and lists what
-changed on the computer after the keep (that is discarded). Temporary bundles and git refs are
+changed on the computer after the keep (that is discarded). A restore leaves the computer
+stopped, so the undo then starts it when it was running at the keep (the checkpoint has memory):
+the start resumes the checkpoint's memory, processes and open databases as they were. A
+computer that was stopped stays stopped. The result says which (`main`, `resumedFrom`) and
+carries a note when main was put back but could not be started. A restore has no disk-only
+fallback for a checkpoint with memory. Temporary bundles and git refs are
 removed on every path.

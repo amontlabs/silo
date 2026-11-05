@@ -17,7 +17,7 @@ use super::{
     env::{CheckpointRef, ExecOut, GuestCmd, KeepEnv, Live, ManifestStore, Os, RunAs},
     journal::{Entry, Journal, State},
     plan::{self, Base, Decision},
-    prepare, scripts, Hooks, Outcome, Request, UndoOutcome,
+    prepare, scripts, Hooks, Outcome, Request, Resumed, UndoOutcome,
 };
 use crate::changes::{diff::diff, ignore::IgnoreList, manifest::Manifest};
 
@@ -55,6 +55,9 @@ struct World {
     /// Whether the lane was held when each tagged command ran.
     held_at: Mutex<Vec<(String, bool)>>,
     dirs: Mutex<Vec<String>>,
+    /// Computers that are stopped; every other computer runs.
+    stopped: Mutex<Vec<String>>,
+    fail_start: Mutex<bool>,
 }
 
 impl World {
@@ -82,11 +85,24 @@ impl World {
             holds: AtomicUsize::new(0),
             held_at: Mutex::default(),
             dirs: Mutex::default(),
+            stopped: Mutex::default(),
+            fail_start: Mutex::default(),
         })
     }
 
     fn with<R>(&self, name: &str, f: impl FnOnce(&mut Comp) -> R) -> R {
         f(self.comps.lock().unwrap().get_mut(name).unwrap())
+    }
+
+    fn last_scope(&self) -> String {
+        self.snapshots
+            .lock()
+            .unwrap()
+            .last()
+            .unwrap()
+            .1
+            .scope
+            .clone()
     }
 
     fn logged(&self, tag: &str) -> usize {
@@ -328,6 +344,12 @@ impl KeepEnv for Fake {
             id: format!("cp{}", snaps.len() + 1),
             name: name.to_owned(),
             created_at: "t".into(),
+            scope: if self.0.stopped.lock().unwrap().iter().any(|c| c == computer) {
+                "disk"
+            } else {
+                "full"
+            }
+            .into(),
         };
         let state = self.0.comps.lock().unwrap().get(computer).unwrap().clone();
         snaps.push((computer.to_owned(), reference.clone(), state));
@@ -364,6 +386,24 @@ impl KeepEnv for Fake {
             .lock()
             .unwrap()
             .push(format!("{computer}:restore:{id}"));
+        // A restore leaves the computer stopped until it is started.
+        let mut stopped = self.0.stopped.lock().unwrap();
+        if !stopped.iter().any(|c| c == computer) {
+            stopped.push(computer.to_owned());
+        }
+        Ok(())
+    }
+
+    fn start(&self, computer: &str) -> Result<(), String> {
+        self.0
+            .log
+            .lock()
+            .unwrap()
+            .push(format!("{computer}:start:"));
+        if *self.0.fail_start.lock().unwrap() {
+            return Err("the memory could not be loaded.".into());
+        }
+        self.0.stopped.lock().unwrap().retain(|c| c != computer);
         Ok(())
     }
 
@@ -1557,6 +1597,7 @@ fn an_interrupted_keep_is_recovered_by_restoring_its_checkpoint_which_is_then_no
             target: "main".into(),
             checkpoint_id: checkpoint.id.clone(),
             checkpoint_name: checkpoint.name,
+            checkpoint_scope: "full".into(),
         })
         .unwrap();
     world.with("main", |c| {
@@ -1574,6 +1615,7 @@ fn an_interrupted_keep_is_recovered_by_restoring_its_checkpoint_which_is_then_no
             target: "main".into(),
             checkpoint_id: "cp1".into(),
             checkpoint_name: "x".into(),
+            checkpoint_scope: "full".into(),
         })
         .unwrap();
     let before = world.logged("restore");
@@ -1629,6 +1671,89 @@ fn undo_restores_a_successful_keeps_checkpoint_once_and_says_what_it_discards() 
 }
 
 #[test]
+fn undo_returns_a_running_main_running_from_the_checkpoints_memory() {
+    let world = simple_world();
+    let env = Fake(world.clone());
+    let (_dir, journal) = journal();
+    let st = store(SIMPLE_BASE, SIMPLE_FORK, SIMPLE_FORK);
+    run(&world, &st, &journal, &request(Hooks::default())).unwrap();
+    let kept = world.last_scope();
+    assert_eq!(kept, "full", "a running main is captured with its memory");
+    let UndoOutcome::Undone { resumed, notes, .. } =
+        super::undo(&env, &st, &journal, "main", WAIT).unwrap()
+    else {
+        panic!()
+    };
+    assert_eq!(resumed, Resumed::Memory);
+    assert!(notes.is_empty(), "{notes:?}");
+    assert_eq!(world.order(&["restore", "start"]), ["restore", "start"]);
+    assert!(!world.stopped.lock().unwrap().iter().any(|c| c == "main"));
+}
+
+#[test]
+fn undo_leaves_a_main_that_was_stopped_before_the_keep_stopped() {
+    let world = simple_world();
+    world.stopped.lock().unwrap().push("main".into());
+    let env = Fake(world.clone());
+    let (_dir, journal) = journal();
+    let st = store(SIMPLE_BASE, SIMPLE_FORK, SIMPLE_FORK);
+    run(&world, &st, &journal, &request(Hooks::default())).unwrap();
+    assert_eq!(world.last_scope(), "disk");
+    let UndoOutcome::Undone { resumed, .. } =
+        super::undo(&env, &st, &journal, "main", WAIT).unwrap()
+    else {
+        panic!()
+    };
+    assert_eq!(resumed, Resumed::Stopped);
+    assert_eq!(world.logged("start"), 0);
+}
+
+#[test]
+fn undo_says_so_when_main_was_put_back_but_could_not_be_started() {
+    let world = simple_world();
+    let env = Fake(world.clone());
+    let (_dir, journal) = journal();
+    let st = store(SIMPLE_BASE, SIMPLE_FORK, SIMPLE_FORK);
+    run(&world, &st, &journal, &request(Hooks::default())).unwrap();
+    *world.fail_start.lock().unwrap() = true;
+    let outcome = super::undo(&env, &st, &journal, "main", WAIT).unwrap();
+    let UndoOutcome::Undone { resumed, notes, .. } = &outcome else {
+        panic!()
+    };
+    assert_eq!(*resumed, Resumed::Stopped);
+    assert!(notes[0].contains("did not start"), "{notes:?}");
+    let json = outcome.to_json();
+    assert_eq!(json["main"], "stopped");
+    assert_eq!(json["resumedFrom"], "stopped");
+}
+
+#[test]
+fn undo_of_an_interrupted_keep_also_starts_a_main_that_was_running() {
+    let world = simple_world();
+    let env = Fake(world.clone());
+    let (_dir, journal) = journal();
+    let st = store(SIMPLE_BASE, SIMPLE_FORK, SIMPLE_FORK);
+    run(&world, &st, &journal, &request(Hooks::default())).unwrap();
+    journal
+        .begin(&Entry {
+            fork: "fork".into(),
+            target: "main".into(),
+            checkpoint_id: "cp1".into(),
+            checkpoint_name: "x".into(),
+            checkpoint_scope: "full".into(),
+        })
+        .unwrap();
+    let UndoOutcome::Undone {
+        recovered, resumed, ..
+    } = super::undo(&env, &st, &journal, "main", WAIT).unwrap()
+    else {
+        panic!()
+    };
+    assert!(recovered);
+    assert_eq!(resumed, Resumed::Memory);
+}
+
+#[test]
 fn undo_with_nothing_changed_since_reports_nothing_lost() {
     let world = simple_world();
     let env = Fake(world.clone());
@@ -1650,11 +1775,13 @@ fn the_journal_survives_reopening_and_keeps_states_apart() {
         id: "a".into(),
         name: "A".into(),
         created_at: "1".into(),
+        scope: "full".into(),
     };
     let b = CheckpointRef {
         id: "b".into(),
         name: "B".into(),
         created_at: "2".into(),
+        scope: "full".into(),
     };
     journal.record_pending("main", &a).unwrap();
     journal.record_pending("main", &b).unwrap();
@@ -1747,6 +1874,7 @@ fn recovery_reports_the_lane_held_before_it_restores() {
             target: "main".into(),
             checkpoint_id: checkpoint.id.clone(),
             checkpoint_name: checkpoint.name,
+            checkpoint_scope: "full".into(),
         })
         .unwrap();
     let seen = std::cell::Cell::new(None);

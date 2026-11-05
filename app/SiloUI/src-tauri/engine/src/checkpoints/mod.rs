@@ -207,14 +207,6 @@ impl Service {
                 "A fork point is made by Fork, not saved as a checkpoint.",
             ));
         }
-        if kind == Some(CheckpointKind::BeforeKeep)
-            && self.platform(computer_id)? == Platform::Macos
-        {
-            return Err(Failure::new(
-                ErrorCode::Internal,
-                "Before-keep checkpoints are not available for macOS computers.",
-            ));
-        }
         if automatic && (self.retention)().map_err(Failure::from_message)? == 0 {
             return Err(Failure::new(ErrorCode::PermissionDenied, AUTOMATIC_OFF));
         }
@@ -225,6 +217,8 @@ impl Service {
                 name.to_owned(),
                 automatic,
                 self.retention.clone(),
+                (kind == Some(CheckpointKind::BeforeKeep))
+                    .then(|| self.before_keep_retention.clone()),
             )
             .map_err(Failure::from_message),
             Platform::Linux => {
@@ -822,18 +816,17 @@ mod tests {
 
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     #[test]
-    fn a_before_keep_capture_is_refused_for_a_macos_computer() {
+    fn a_before_keep_capture_is_accepted_for_a_macos_computer() {
         let _state = crate::test_support::global_state();
         let fixture = fixture(3);
-        let refused = fixture
-            .service
-            .start_create(
-                &fixture.macos_id,
-                "Before keep",
-                Some(CheckpointKind::BeforeKeep),
-            )
-            .unwrap_err();
-        assert!(refused.message.contains("macOS"), "{}", refused.message);
+        let runtime = test_runtime();
+        let _entered = runtime.enter();
+        let accepted = fixture.service.start_create(
+            &fixture.macos_id,
+            "Before keep",
+            Some(CheckpointKind::BeforeKeep),
+        );
+        assert!(accepted.is_ok(), "{:?}", accepted.err());
     }
 
     #[test]

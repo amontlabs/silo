@@ -20,6 +20,9 @@ pub struct Entry {
     pub target: String,
     pub checkpoint_id: String,
     pub checkpoint_name: String,
+    /// The checkpoint's scope (`full` or `disk`); empty in a journal from before it was kept.
+    #[serde(default)]
+    pub checkpoint_scope: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

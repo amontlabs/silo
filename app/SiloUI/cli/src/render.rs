@@ -250,6 +250,12 @@ pub fn undo(value: &Value) -> String {
                 ""
             };
             let mut out = format!("Put {computer} back to {name}{how}.");
+            if text(value, "resumedFrom") == "memory" {
+                out.push_str(&format!(" {computer} is running again, as it was."));
+            }
+            for note in lines(value, "notes") {
+                out.push_str(&format!("\nnote: {note}"));
+            }
             let changed = lines(value, "changedSince");
             if !changed.is_empty() {
                 out.push_str("\nThese changes made on the computer after the keep are gone:");
