@@ -201,6 +201,12 @@ impl Service {
         kind: Option<CheckpointKind>,
     ) -> Result<JobId, Failure> {
         let automatic = kind == Some(CheckpointKind::Automatic);
+        if kind == Some(CheckpointKind::ForkPoint) {
+            return Err(Failure::new(
+                ErrorCode::Internal,
+                "A fork point is made by Fork, not saved as a checkpoint.",
+            ));
+        }
         if kind == Some(CheckpointKind::BeforeKeep)
             && self.platform(computer_id)? == Platform::Macos
         {

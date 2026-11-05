@@ -185,6 +185,10 @@ pub enum CheckpointKind {
     // Taken before changes are applied to main; trimmed by its own retention count.
     #[serde(rename = "before-keep")]
     BeforeKeep,
+    // The disk a Fork of a computer's current state starts from; made by Fork, kept while a
+    // fork made from it exists.
+    #[serde(rename = "fork-point")]
+    ForkPoint,
 }
 
 wire_struct! {

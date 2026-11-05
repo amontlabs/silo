@@ -69,11 +69,16 @@ fn scrub_paths(record: &Record) -> Vec<String> {
 
 /// Adds scheduled work that was moved aside to the fork's record of what it was made quiet
 /// with. A repeated run parks nothing new and keeps what the first run recorded.
-fn note_parked(record: &mut Record, parked: &[String]) {
+fn note_parked(record: &mut Record, parked: &[String], still_scheduled: &[String]) {
     if let Some(quiet) = record.quiet.as_mut() {
         quiet.parked.extend(parked.iter().cloned());
         quiet.parked.sort();
         quiet.parked.dedup();
+        quiet
+            .still_scheduled
+            .extend(still_scheduled.iter().cloned());
+        quiet.still_scheduled.sort();
+        quiet.still_scheduled.dedup();
     }
 }
 
@@ -513,7 +518,7 @@ impl Provision<'_> {
             Some(&scrub_paths(record)),
         )?;
         self.check()?;
-        note_parked(record, &rekey.parked);
+        note_parked(record, &rekey.parked, &rekey.still_scheduled);
         if !rekey.bootstrap_staged {
             self.log("the source has no network configuration; the fork gets a setup boot");
             self.mark(record, |_| {})?;
@@ -555,7 +560,7 @@ impl Provision<'_> {
             Some(&scrub_paths(record)),
         )?;
         self.check()?;
-        note_parked(record, &rekey.parked);
+        note_parked(record, &rekey.parked, &rekey.still_scheduled);
         self.say("Starting macOS")?;
         boot_import_with_host_key_reset(self.layout, || self.boot(Login::Password))?;
         finalize_fork_guest(self.layout, record, &own, self.log.as_ref()).map_err(Stop::Failed)?;
@@ -1384,16 +1389,19 @@ mod tests {
     fn scheduled_work_that_was_moved_aside_is_noted_once_on_the_fork_record() {
         let mut fork = finished_record();
         // A computer that is not a quiet fork has nothing to note.
-        note_parked(&mut fork, &["/Library/LaunchAgents/a.plist".into()]);
+        note_parked(&mut fork, &["/Library/LaunchAgents/a.plist".into()], &[]);
         assert!(fork.quiet.is_none());
         fork.quiet = Some(super::super::quiet::QuietRecord {
             scrub: vec!["/Users/silo/.env".into()],
             ..Default::default()
         });
         assert_eq!(scrub_paths(&fork), ["/Users/silo/.env"]);
-        note_parked(&mut fork, &["/Library/LaunchAgents/a.plist".into()]);
-        note_parked(&mut fork, &["/Library/LaunchAgents/a.plist".into()]);
-        assert_eq!(fork.quiet.unwrap().parked, ["/Library/LaunchAgents/a.plist"]);
+        note_parked(&mut fork, &["/Library/LaunchAgents/a.plist".into()], &[]);
+        note_parked(&mut fork, &["/Library/LaunchAgents/a.plist".into()], &[]);
+        assert_eq!(
+            fork.quiet.unwrap().parked,
+            ["/Library/LaunchAgents/a.plist"]
+        );
     }
 
     #[test]
@@ -1402,11 +1410,13 @@ mod tests {
         let mut fork = finished_record();
         fork.setup.proxy_bootstrap = true;
         fork.first_boot = true;
-        assert!(store::checkpoint_allowed(store::State::Stopped, &fork, false, false, Capture)
-            .is_err());
+        assert!(
+            store::checkpoint_allowed(store::State::Stopped, &fork, false, false, Capture).is_err()
+        );
         fork.first_boot = false;
-        assert!(store::checkpoint_allowed(store::State::Stopped, &fork, false, false, Capture)
-            .is_ok());
+        assert!(
+            store::checkpoint_allowed(store::State::Stopped, &fork, false, false, Capture).is_ok()
+        );
     }
 
     #[test]

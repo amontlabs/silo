@@ -9,7 +9,9 @@
 //! and the trust of the fork's proxy CA, and gives the account its SecureToken back.
 use super::{
     guest_access::{self, CommandOutput},
-    offline_setup, personalize, proxy, quiet, setup_log::SetupLog, store, update, MacosContext,
+    offline_setup, personalize, proxy, quiet,
+    setup_log::SetupLog,
+    store, update, MacosContext,
 };
 use std::time::Duration;
 
@@ -90,6 +92,20 @@ pub(super) fn apply_outcome(record: &mut store::Record, outcome: &Outcome) {
     }
 }
 
+/// Saves the outcome on a copy of the record and only then makes it the current one, so a
+/// failed save leaves the record saying the first boot is still to come.
+fn commit_outcome(
+    current: &mut store::Record,
+    outcome: &Outcome,
+    save: &dyn Fn(&store::Record) -> Result<(), String>,
+) -> Result<store::Record, String> {
+    let mut next = current.clone();
+    apply_outcome(&mut next, outcome);
+    save(&next)?;
+    *current = next.clone();
+    Ok(next)
+}
+
 /// Finishes the personalization of a fork in its first boot and saves the result on the
 /// computer's current record, which other operations may have changed since the Start began.
 /// Returns that record.
@@ -120,18 +136,16 @@ pub(super) fn complete(
         .unwrap_or_default();
     let id = record.id.clone();
     complete_with(&guest, &stop, &identity_script, cancelled, &mut |outcome| {
-        let mut saved = None;
-        let result = update(app, &id, |entry| {
-            apply_outcome(&mut entry.record, outcome);
-            saved = Some(entry.record.clone());
-            store::save(layout, &entry.record)
+        let saved = update(app, &id, |entry| {
+            commit_outcome(&mut entry.record, outcome, &|record| {
+                store::save(layout, record)
+            })
         })
         .ok_or_else(|| "This computer no longer exists.".to_string())
-        .and_then(|result| result);
-        result?;
+        .and_then(|result| result)?;
         // Its own credentials are the only ones left.
         let _ = std::fs::remove_dir_all(super::checkpoints::inherited_access(layout));
-        saved.ok_or_else(|| "This computer no longer exists.".to_string())
+        Ok(saved)
     })
 }
 
@@ -247,10 +261,18 @@ mod tests {
             self.scripts.borrow_mut().push(script.into());
             let quiet = script.contains("launchctl");
             self.note(if quiet { "quiet" } else { "identity" });
-            let failed = if quiet { self.fail_quiet } else { self.fail_identity };
+            let failed = if quiet {
+                self.fail_quiet
+            } else {
+                self.fail_identity
+            };
             Ok(CommandOutput {
                 status: i32::from(failed),
-                stdout: if failed { "partial".into() } else { "MARKER_OWNER=0:0".into() },
+                stdout: if failed {
+                    "partial".into()
+                } else {
+                    "MARKER_OWNER=0:0".into()
+                },
                 stderr: "oops".into(),
             })
         }
@@ -340,7 +362,10 @@ mod tests {
         };
         let result = finish(&guest, &[], "identity", &|| false);
         assert!(result.is_err());
-        assert_eq!(guest.logged.borrow().as_slice(), ["fork account script: 1 oops"]);
+        assert_eq!(
+            guest.logged.borrow().as_slice(),
+            ["fork account script: 1 oops"]
+        );
         let guest = Fake {
             fail_quiet: true,
             ..Default::default()
@@ -367,6 +392,19 @@ mod tests {
     }
 
     #[test]
+    fn a_failed_save_leaves_the_first_boot_pending_in_memory() {
+        let mut current = record();
+        let outcome = Outcome {
+            secure_token_missing: true,
+        };
+        let failed = commit_outcome(&mut current, &outcome, &|_| Err("disk full".into()));
+        assert_eq!(failed, Err("disk full".to_string()));
+        assert!(current.first_boot && current.inherited_access && !current.secure_token_missing);
+        let saved = commit_outcome(&mut current, &outcome, &|_| Ok(())).unwrap();
+        assert!(!current.first_boot && !saved.first_boot && current.secure_token_missing);
+    }
+
+    #[test]
     fn a_finished_boot_changes_only_its_own_fields_on_the_current_record() {
         let guest = Fake {
             no_token: true,
@@ -388,7 +426,10 @@ mod tests {
         .unwrap();
         assert!(!saved.first_boot && !saved.inherited_access && saved.secure_token_missing);
         assert_eq!(saved.disk_gib, 128);
-        assert_eq!(saved.setup_version.as_deref(), Some("changed while the boot ran"));
+        assert_eq!(
+            saved.setup_version.as_deref(),
+            Some("changed while the boot ran")
+        );
         let quiet = saved.quiet.unwrap();
         assert!(quiet.applied);
         assert_eq!(quiet.parked, ["/Library/LaunchAgents/a.plist"]);

@@ -79,6 +79,8 @@ pub(super) struct ForkRekey {
     pub bootstrap_staged: bool,
     /// Guest paths of the scheduled work that was moved aside (see `quiet`).
     pub parked: Vec<String>,
+    /// Scheduled jobs inside app bundles, which are left as they are.
+    pub still_scheduled: Vec<String>,
 }
 
 /// Gives a fork its own credentials on the stopped computer's disk before its first start:
@@ -99,13 +101,14 @@ pub(super) fn run_fork_rekey(
             Some(config) => write_bootstrap_config(&mount, config)?,
             None => true,
         };
-        let parked = match scrub {
-            Some(scrub) => super::quiet::apply_offline(&mount, scrub)?.parked,
-            None => Vec::new(),
+        let quieted = match scrub {
+            Some(scrub) => super::quiet::apply_offline(&mount, scrub)?,
+            None => Default::default(),
         };
         Ok(ForkRekey {
             bootstrap_staged,
-            parked,
+            parked: quieted.parked,
+            still_scheduled: quieted.still_scheduled,
         })
     });
     let closed = attached.close();
@@ -1912,7 +1915,11 @@ mod tests {
         let (root, generated_uid, old_hash) = imported_volume();
         let keychains = root.path().join("Users/silo/Library/Keychains");
         fs::create_dir_all(keychains.join("nested")).unwrap();
-        fs::write(keychains.join("login.keychain-db"), b"sealed with the old password").unwrap();
+        fs::write(
+            keychains.join("login.keychain-db"),
+            b"sealed with the old password",
+        )
+        .unwrap();
         let receipt = root
             .path()
             .join("Users/silo/Library/Application Support/Silo/computer-use-receipt.json");

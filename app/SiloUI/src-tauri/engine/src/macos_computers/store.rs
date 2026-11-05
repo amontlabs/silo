@@ -174,6 +174,18 @@ pub(super) struct Record {
     /// What a fork was made quiet with. Absent on computers that are not forks.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub quiet: Option<super::quiet::QuietRecord>,
+    /// The fork point of another computer this fork was made from. That checkpoint stays while
+    /// this computer exists.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub forked_from: Option<ForkOrigin>,
+}
+
+/// A checkpoint of a source computer that a fork depends on.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct ForkOrigin {
+    pub computer_id: String,
+    pub checkpoint_id: String,
 }
 
 impl Record {
@@ -341,6 +353,7 @@ pub(super) fn new_record(request: &CreateRequest, mac_address: String) -> Record
         secure_token_missing: false,
         first_boot: false,
         quiet: None,
+        forked_from: None,
     }
 }
 

@@ -142,6 +142,14 @@ pub(super) fn save_running(
     Err(UNSUPPORTED.into())
 }
 
+pub(super) fn pause_for_copy(
+    _app: &MacosContext,
+    _id: &str,
+    _copy: &mut dyn FnMut() -> Result<(), String>,
+) -> Result<(), String> {
+    Err(UNSUPPORTED.into())
+}
+
 pub(super) fn save_and_hold(
     _app: &MacosContext,
     _id: &str,

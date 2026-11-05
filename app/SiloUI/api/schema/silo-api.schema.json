@@ -705,7 +705,8 @@
       "enum": [
         "manual",
         "automatic",
-        "before-keep"
+        "before-keep",
+        "fork-point"
       ],
       "type": "string"
     },
