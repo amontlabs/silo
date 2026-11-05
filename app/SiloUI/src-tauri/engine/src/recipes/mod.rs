@@ -13,10 +13,12 @@ use sha2::{Digest, Sha256};
 use silo_api::methods::recipes::{RecipeOs, RecipePackages, RecipeService, RecipeSpec};
 
 pub use build::{build, remove, BuildEnv, BuildOutcome, Created, ExecOut, RunAs, BUILDER_PREFIX};
+#[cfg(test)]
+use build::{builder_name, is_builder_of};
 pub use cache::Cache;
 
 /// Folded into every hash, so a change to how a build runs retires every cached build.
-const BUILD_VERSION: &str = "silo-recipe-build-1";
+const BUILD_VERSION: &str = "silo-recipe-build-2";
 
 /// A recipe's size when it names none.
 pub fn default_resources(os: RecipeOs) -> (u32, u32, u32) {
@@ -79,12 +81,15 @@ pub fn normalize(spec: &RecipeSpec) -> RecipeSpec {
     }
 }
 
-/// The content hash of the normalized spec, hex. Two specs that build the same computer have
-/// the same hash.
-pub fn hash(spec: &RecipeSpec) -> String {
+/// The content hash of the normalized spec on `image`, hex. Two specs that build the same
+/// computer on the same image have the same hash; a new image gives a new hash, so a new
+/// cache entry and a new baseline key.
+pub fn hash(spec: &RecipeSpec, image: &str) -> String {
     let normalized = serde_json::to_vec(&normalize(spec)).unwrap_or_default();
     let mut digest = Sha256::new();
     digest.update(BUILD_VERSION.as_bytes());
+    digest.update([0]);
+    digest.update(image.as_bytes());
     digest.update([0]);
     digest.update(&normalized);
     digest

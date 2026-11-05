@@ -36,8 +36,15 @@ keep:
 
 Package names are single words (a version suffix such as `name@1.2` or `name==1.0` is
 fine); they are passed to the package manager as arguments, never as shell text. `setup`
-commands are shell text. Services start at boot through an XDG autostart entry on Linux and
-a LaunchAgent on macOS.
+commands are shell text. Services start at boot through an XDG autostart entry on Linux
+(`/etc/xdg/autostart/<name>.desktop`) and a LaunchAgent labelled `<name>` on macOS. Each runs a
+launcher file named `<name>`; for a plain command (a program and arguments, no shell syntax)
+the launcher `exec`s it, so the process runs under its own name. A `quiet:` entry that names
+the service, or the command's program, therefore finds the entry, the label and the process.
+
+On macOS, a recipe that needs Homebrew (brew packages, or pip, pipx, npm or cargo when their
+tool is missing) installs it first as the account with the official non-interactive
+installer.
 
 Built-in recipes, minimal on purpose:
 
@@ -49,12 +56,18 @@ Built-in recipes, minimal on purpose:
 ## Build and cache
 
 `silo recipe build <name>` (or the first `silo fork --recipe <name>` or `silo up`) asks the
-engine (`recipes.build`) to create a computer named `silo-build-<name>`, run the packages,
+engine (`recipes.build`) to create a computer named `silo-build-<name>-<8 hex>`, run the packages,
 the setup commands and the services, check that each package manager lists its packages and
 each service entry exists, save a checkpoint, and stop it. A failed step drops the builder
-computer and leaves no cache entry; a rebuild that fails keeps the previous build.
+computer and leaves no cache entry. Builds of one recipe run one at a time in the engine (a
+second waits and then finds the first build in the cache), each with its own builder name. A
+rebuild keeps the previous builder and cache entry until the new build succeeds, and a failed
+rebuild keeps them; builders an interrupted build left behind are dropped by the next build
+of the same recipe.
 
-The cache key is a hash of the normalized recipe plus the guest image version. Normalizing
+The cache key is a hash of the normalized recipe plus the image version (the guest image on
+Linux; the macOS build of the newest template and the setup fingerprint on macOS), so a new
+image gives a new cache entry and a new baseline key. Normalizing
 ignores package order, repeated packages, repeated ports, service order, surrounding
 whitespace and resources written at their default; setup order stays, because it is the run
 order. Changing the recipe or the image version builds again; `--force` rebuilds anyway.
@@ -78,13 +91,19 @@ MCP tools `recipe_list`, `up` and `fork` (with `recipe`) use the same calls.
 checkpoint of kind `warm`. Each `up` replaces the previous warm checkpoint (one that a fork
 still depends on stays until a later `up`); retention never removes it.
 
-A fork of `main` with no `--checkpoint` starts from the warm checkpoint when `main` runs and
-nothing outside the system's log, cache and temporary folders has been written since: `up`
-leaves a marker file in `main` and the fork checks for files newer than it. When in doubt it
-takes a new checkpoint as before.
+A fork with no `--checkpoint` starts from the newest warm checkpoint only when it was taken
+within the last five minutes (`warm_max_age` in `.silo/silo.yaml`, such as `90s`, `10m` or
+`1h`); otherwise the engine takes a new checkpoint. The fork reports which one and its age,
+for example `Forked try (stopped): main as of 14:02:31 (warm checkpoint, 2m 10s old)`; `--json`
+carries `checkpoint` (`id`, `kind`, `createdAt`, `ageSeconds`, `reused`) and `forkedAsOf`. The
+rule lives in the shared operations, so the MCP `fork` tool applies it too. `up` replaces the
+warm checkpoint only after the new one has been saved.
 
 ## Fork baselines
 
 A fork's idle baseline (`silo diff --baseline`) is cached under the recipe's hash when the
 fork came from a recipe, so every fork of one recipe shares a baseline and rebuilding the
 recipe's checkpoint does not discard it.
+
+For a fork from a recipe, `silo diff --baseline` measures a missing baseline on a throwaway
+fork of the recipe's cached checkpoint.

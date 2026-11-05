@@ -36,9 +36,19 @@ fn checkpoint(id: &str, kind: &str, at: &str) -> Value {
     json!({"id": id, "name": id, "kind": kind, "createdAt": at})
 }
 
-/// An engine that keeps its computers: forks and starts change them, `recipes.build` makes the
-/// hidden builder, and `guest.exec` answers `unchanged` when `unchanged` is set.
-fn world_engine(start: Vec<Computer>, unchanged: bool) -> (FakeEngine, World) {
+/// `seconds` ago, as the engine writes times.
+fn ago(seconds: i64) -> String {
+    silo_cli::clock::format_rfc3339_utc(silo_cli::clock::now_unix() - seconds)
+}
+
+/// An engine that keeps its computers: forks and starts change them and `recipes.build` makes
+/// the hidden builder. A checkpoint taken for a fork without one is added to the source.
+fn world_engine(start: Vec<Computer>) -> (FakeEngine, World) {
+    world_engine_with(start, false)
+}
+
+/// As [`world_engine`]; with `fail_checkpoint`, saving a checkpoint fails.
+fn world_engine_with(start: Vec<Computer>, fail_checkpoint: bool) -> (FakeEngine, World) {
     let world: World = Arc::new(Mutex::new(start));
     let shared = world.clone();
     let engine = FakeEngine::start(move |method, params| {
@@ -82,11 +92,21 @@ fn world_engine(start: Vec<Computer>, unchanged: bool) -> (FakeEngine, World) {
                 }
             }))),
             "recipes.list" => Ok(json!({"recipes": [{
-                "name": "linux-dev", "hash": "abc", "imageVersion": "v5", "os": "linux",
-                "computerId": "x", "computerName": "silo-build-linux-dev",
+                "name": "linux-dev", "hash": "abc123abc123abc123", "imageVersion": "v5", "os": "linux",
+                "computerId": "id-silo-build-linux-dev", "computerName": "silo-build-linux-dev",
                 "checkpointId": "cp-recipe", "builtAt": "2026-11-05T00:00:00Z"
             }]})),
             "checkpoints.fork" => {
+                if params["checkpointId"].is_null() {
+                    let source = params["computerId"].as_str().unwrap().to_owned();
+                    for c in world
+                        .iter_mut()
+                        .filter(|c| format!("id-{}", c.name) == source)
+                    {
+                        c.checkpoints
+                            .push(checkpoint("cp-auto", "automatic", &ago(0)));
+                    }
+                }
                 world.push(computer(
                     params["newName"].as_str().unwrap(),
                     "stopped",
@@ -103,13 +123,30 @@ fn world_engine(start: Vec<Computer>, unchanged: bool) -> (FakeEngine, World) {
             }
             "checkpoints.create" => {
                 let kind = params["kind"].as_str().unwrap_or("manual").to_owned();
-                for c in world.iter_mut().filter(|c| c.name == "main") {
-                    c.checkpoints.push(checkpoint("cp-new", &kind, "t9"));
+                if !fail_checkpoint {
+                    for c in world.iter_mut().filter(|c| c.name == "main") {
+                        c.checkpoints.push(checkpoint("cp-new", &kind, &ago(0)));
+                    }
                 }
                 Ok(json!({"jobId": "job:3"}))
             }
+            "operations.job.get" if params["jobId"] == "job:3" && fail_checkpoint => Ok(json!({
+                "jobId": "job:3", "state": "finished",
+                "outcome": {"error": {"code": "internal", "message": "No room for a checkpoint."}}
+            })),
             "operations.job.get" if params["jobId"] == "job:3" => Ok(finished(json!({
                 "checkpoint": {"id": "cp-new", "name": "silo-warm", "kind": "warm"}
+            }))),
+            "changes.diff" => Ok(json!({"jobId": "job:4"})),
+            "changes.baseline" => Ok(json!({"jobId": "job:5"})),
+            "operations.job.get" if params["jobId"] == "job:4" => Ok(finished(json!({
+                "diff": {"format": 1, "other": []}, "text": "Code",
+                "baselineApplied": false, "baselineAvailable": false,
+                "baseSource": "recipe:abc123abc123abc123", "elapsedSeconds": 12,
+                "baseCapturedAt": "a", "capturedAt": "b"
+            }))),
+            "operations.job.get" if params["jobId"] == "job:5" => Ok(finished(json!({
+                "source": "recipe:abc123abc123abc123", "idleSeconds": 12, "capturedAt": "t"
             }))),
             "checkpoints.delete" => {
                 let gone = params["checkpointId"].as_str().unwrap().to_owned();
@@ -120,17 +157,17 @@ fn world_engine(start: Vec<Computer>, unchanged: bool) -> (FakeEngine, World) {
             }
             "operations.job.get" => Ok(finished(Value::Null)),
             "operations.job.acknowledge" => Ok(Value::Null),
-            "guest.exec" => {
-                let script = params["argv"][2].as_str().unwrap_or_default();
-                let out = if script.starts_with("m=") && unchanged {
-                    "unchanged\n"
-                } else {
-                    ""
-                };
-                Ok(json!({
-                    "exitCode": 0, "signal": null,
-                    "stdout": out.bytes().collect::<Vec<u8>>(), "stderr": []
-                }))
+            "computers.stop" => {
+                let id = params["computerId"].as_str().unwrap();
+                for c in world.iter_mut().filter(|c| format!("id-{}", c.name) == id) {
+                    c.state = "stopped".into();
+                }
+                Ok(json!({"jobId": "job:1"}))
+            }
+            "computers.delete" => {
+                let id = params["computerId"].as_str().unwrap().to_owned();
+                world.retain(|c| format!("id-{}", c.name) != id);
+                Ok(json!({"jobId": "job:1"}))
             }
             other => Err(("internal", format!("unexpected {other}"))),
         }
@@ -144,7 +181,7 @@ fn linux_dev() -> silo_cli::config::Recipe {
 
 #[tokio::test]
 async fn up_makes_main_from_the_recipe_and_keeps_a_warm_checkpoint() {
-    let (engine, world) = world_engine(vec![], false);
+    let (engine, world) = world_engine(vec![]);
     let connected = Engine::connect(&engine.socket).await.unwrap();
     let value = ops::up(&connected, "linux-dev", &linux_dev(), &ignore)
         .await
@@ -174,7 +211,7 @@ async fn up_on_an_existing_main_builds_nothing_and_replaces_the_warm_checkpoint(
             checkpoint("cp-old-warm", "warm", "t2"),
         ],
     );
-    let (engine, world) = world_engine(vec![main], false);
+    let (engine, world) = world_engine(vec![main]);
     let connected = Engine::connect(&engine.socket).await.unwrap();
     let value = ops::up(&connected, "linux-dev", &linux_dev(), &ignore)
         .await
@@ -197,7 +234,7 @@ async fn up_on_an_existing_main_builds_nothing_and_replaces_the_warm_checkpoint(
 
 #[tokio::test]
 async fn up_starts_a_stopped_main() {
-    let (engine, _) = world_engine(vec![computer("main", "stopped", vec![])], false);
+    let (engine, _) = world_engine(vec![computer("main", "stopped", vec![])]);
     let connected = Engine::connect(&engine.socket).await.unwrap();
     ops::up(&connected, "linux-dev", &linux_dev(), &ignore)
         .await
@@ -205,38 +242,165 @@ async fn up_starts_a_stopped_main() {
     assert_eq!(engine.calls("computers.start")[0]["computerId"], "id-main");
 }
 
-#[tokio::test]
-async fn a_fork_of_an_unchanged_main_starts_from_the_warm_checkpoint() {
-    let main = computer(
+fn main_with_warm(age_seconds: i64) -> Computer {
+    computer(
         "main",
         "running",
         vec![
-            checkpoint("cp-manual", "manual", "t1"),
-            checkpoint("cp-warm", "warm", "t2"),
+            checkpoint("cp-manual", "manual", &ago(30)),
+            checkpoint("cp-warm", "warm", &ago(age_seconds)),
         ],
-    );
-    let (engine, _) = world_engine(vec![main.clone()], true);
-    let connected = Engine::connect(&engine.socket).await.unwrap();
-    let args = ForkArgs {
+    )
+}
+
+fn fork_main() -> ForkArgs {
+    ForkArgs {
         source: "main".into(),
         ..ForkArgs::default()
-    };
-    ops::fork(&connected, &args, None, &ignore).await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn a_fork_of_main_starts_from_a_warm_checkpoint_taken_in_the_last_five_minutes() {
+    let (engine, _) = world_engine(vec![main_with_warm(120)]);
+    let connected = Engine::connect(&engine.socket).await.unwrap();
+    let fork = ops::fork(&connected, &fork_main(), None, &ignore)
+        .await
+        .unwrap();
     assert_eq!(
         engine.calls("checkpoints.fork")[0]["checkpointId"],
         "cp-warm"
     );
+    assert_eq!(fork["checkpoint"]["id"], "cp-warm");
+    assert_eq!(fork["checkpoint"]["reused"], true);
+    let age = fork["checkpoint"]["ageSeconds"].as_i64().unwrap();
+    assert!((120..=125).contains(&age), "{age}");
+    let line = silo_cli::render::forked(&fork);
+    assert!(
+        line.contains("main as of ") && line.contains("warm checkpoint, 2m"),
+        "{line}"
+    );
+}
 
-    // Main changed since the warm checkpoint: the engine takes a fresh one.
-    let (engine, _) = world_engine(vec![main], false);
+#[tokio::test]
+async fn an_older_warm_checkpoint_is_not_used_and_the_fork_reports_the_new_one() {
+    let (engine, _) = world_engine(vec![main_with_warm(600)]);
     let connected = Engine::connect(&engine.socket).await.unwrap();
-    ops::fork(&connected, &args, None, &ignore).await.unwrap();
+    let fork = ops::fork(&connected, &fork_main(), None, &ignore)
+        .await
+        .unwrap();
+    assert!(engine.calls("checkpoints.fork")[0]["checkpointId"].is_null());
+    assert_eq!(fork["checkpoint"]["id"], "cp-auto");
+    assert_eq!(fork["checkpoint"]["reused"], false);
+    assert!(fork["checkpoint"]["ageSeconds"].as_i64().unwrap() <= 5);
+    let line = silo_cli::render::forked(&fork);
+    assert!(line.contains("new checkpoint"), "{line}");
+    assert!(!fork["forkedAsOf"].as_str().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn warm_max_age_in_the_settings_changes_how_old_a_warm_checkpoint_may_be() {
+    let settings = silo_cli::config::parse_settings("warm_max_age: 15m\n").unwrap();
+    let (engine, _) = world_engine(vec![main_with_warm(600)]);
+    let connected = Engine::connect(&engine.socket).await.unwrap();
+    ops::fork(&connected, &fork_main(), Some(&settings), &ignore)
+        .await
+        .unwrap();
+    assert_eq!(
+        engine.calls("checkpoints.fork")[0]["checkpointId"],
+        "cp-warm"
+    );
+    let strict = silo_cli::config::parse_settings("warm_max_age: 30s\n").unwrap();
+    let (engine, _) = world_engine(vec![main_with_warm(120)]);
+    let connected = Engine::connect(&engine.socket).await.unwrap();
+    ops::fork(&connected, &fork_main(), Some(&strict), &ignore)
+        .await
+        .unwrap();
     assert!(engine.calls("checkpoints.fork")[0]["checkpointId"].is_null());
 }
 
 #[tokio::test]
+async fn a_named_checkpoint_is_always_used_and_reported() {
+    let (engine, _) = world_engine(vec![main_with_warm(120)]);
+    let connected = Engine::connect(&engine.socket).await.unwrap();
+    let args = ForkArgs {
+        checkpoint: Some("cp-manual".into()),
+        ..fork_main()
+    };
+    let fork = ops::fork(&connected, &args, None, &ignore).await.unwrap();
+    assert_eq!(
+        engine.calls("checkpoints.fork")[0]["checkpointId"],
+        "cp-manual"
+    );
+    assert_eq!(fork["checkpoint"]["id"], "cp-manual");
+}
+
+#[test]
+fn only_the_newest_warm_checkpoint_counts() {
+    let now = silo_cli::clock::now_unix();
+    let at = |seconds: i64| silo_cli::clock::format_rfc3339_utc(now - seconds);
+    let list = vec![
+        json!({"id": "old", "kind": "warm", "createdAt": at(1000)}),
+        json!({"id": "manual", "kind": "manual", "createdAt": at(5)}),
+        json!({"id": "young", "kind": "warm", "createdAt": at(100)}),
+        json!({"id": "broken", "kind": "warm", "createdAt": "yesterday"}),
+    ];
+    assert_eq!(ops::fresh_warm(&list, now, 300).unwrap()["id"], "young");
+    assert!(ops::fresh_warm(&list, now, 50).is_none());
+    assert!(ops::fresh_warm(&[], now, 300).is_none());
+}
+
+#[tokio::test]
+async fn a_failed_up_keeps_the_previous_warm_checkpoint() {
+    let main = computer(
+        "main",
+        "running",
+        vec![checkpoint("cp-old-warm", "warm", &ago(100))],
+    );
+    let (engine, world) = world_engine_with(vec![main], true);
+    let connected = Engine::connect(&engine.socket).await.unwrap();
+    let error = ops::up(&connected, "linux-dev", &linux_dev(), &ignore)
+        .await
+        .unwrap_err();
+    assert!(error.message.contains("No room"), "{}", error.message);
+    assert!(engine.calls("checkpoints.delete").is_empty());
+    assert_eq!(world.lock().unwrap()[0].checkpoints.len(), 1);
+}
+
+#[tokio::test]
+async fn the_baseline_of_a_recipe_fork_is_measured_from_the_recipes_checkpoint() {
+    let (engine, _) = world_engine(vec![]);
+    let connected = Engine::connect(&engine.socket).await.unwrap();
+    let args = ForkArgs {
+        name: Some("try".into()),
+        recipe: Some(linux_dev()),
+        recipe_name: Some("linux-dev".into()),
+        ..ForkArgs::default()
+    };
+    ops::fork(&connected, &args, None, &ignore).await.unwrap();
+    let diff = ops::DiffArgs {
+        computer: "try".into(),
+        max_lines: None,
+        no_baseline: false,
+        compute_baseline: true,
+    };
+    let value = ops::diff(&connected, &diff, &ignore).await.unwrap();
+    assert!(value["baselineError"].is_null(), "{value}");
+    let copy = &engine.calls("checkpoints.fork")[1];
+    assert!(copy["newName"]
+        .as_str()
+        .unwrap()
+        .starts_with(ops::BASELINE_PREFIX));
+    assert_eq!(copy["computerId"], "id-silo-build-linux-dev");
+    assert_eq!(copy["checkpointId"], "cp-recipe");
+    assert_eq!(copy["recipeHash"], "abc123abc123abc123");
+    let measured = &engine.calls("changes.baseline")[0];
+    assert_eq!(measured["source"], "recipe:abc123abc123abc123");
+}
+
+#[tokio::test]
 async fn fork_from_a_recipe_builds_first_and_keys_the_baseline_by_its_hash() {
-    let (engine, world) = world_engine(vec![], false);
+    let (engine, world) = world_engine(vec![]);
     let connected = Engine::connect(&engine.socket).await.unwrap();
     let args = ForkArgs {
         name: Some("try".into()),
@@ -267,7 +431,7 @@ async fn fork_from_a_recipe_builds_first_and_keys_the_baseline_by_its_hash() {
 
 #[tokio::test]
 async fn settings_can_limit_the_recipes_a_fork_may_use() {
-    let (engine, _) = world_engine(vec![], false);
+    let (engine, _) = world_engine(vec![]);
     let connected = Engine::connect(&engine.socket).await.unwrap();
     let settings = silo_cli::config::parse_settings("recipes: [macos-xcode]\n").unwrap();
     let args = ForkArgs {
@@ -284,7 +448,7 @@ async fn settings_can_limit_the_recipes_a_fork_may_use() {
 
 #[tokio::test]
 async fn the_recipe_list_marks_which_recipes_are_built() {
-    let (engine, _) = world_engine(vec![], false);
+    let (engine, _) = world_engine(vec![]);
     let connected = Engine::connect(&engine.socket).await.unwrap();
     let listed = ops::recipe_list(&connected, &Project::default())
         .await
@@ -318,7 +482,7 @@ async fn call(
 
 #[tokio::test]
 async fn mcp_offers_up_recipe_list_and_fork_with_a_recipe() {
-    let (engine, _) = world_engine(vec![], false);
+    let (engine, _) = world_engine(vec![]);
     let (server_side, client_side) = tokio::io::duplex(64 * 1024);
     let (server_read, server_write) = tokio::io::split(server_side);
     let server = SiloMcp::new(engine.socket.clone(), std::env::temp_dir());

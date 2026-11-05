@@ -16,6 +16,9 @@ use crate::error::CliError;
 const RECIPE_FILE: &str = "recipe.yaml";
 const SETTINGS_FILE: &str = "silo.yaml";
 
+/// How old `main`'s warm checkpoint may be for a fork to start from it.
+pub const DEFAULT_WARM_MAX_AGE_SECS: u64 = 300;
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Recipe {
@@ -139,6 +142,9 @@ pub struct Settings {
     /// [`Settings::fork_ram_budget_bytes`].
     #[serde(default)]
     pub fork_ram_budget: Option<String>,
+    /// How old `main`'s warm checkpoint may be for a fork to start from it, like `5m`.
+    #[serde(default)]
+    pub warm_max_age: Option<String>,
     #[serde(default)]
     pub auto_keep: Vec<AutoKeepRule>,
     #[serde(default)]
@@ -156,9 +162,22 @@ impl Settings {
             .and_then(|text| parse_size(text).ok())
     }
 
+    /// The longest a warm checkpoint may be and still be used by a fork that names no
+    /// checkpoint: `warm_max_age`, else five minutes.
+    pub fn warm_max_age_secs(settings: Option<&Settings>) -> u64 {
+        settings
+            .and_then(|settings| settings.warm_max_age.as_deref())
+            .and_then(|text| crate::clock::parse_duration_secs(text).ok())
+            .unwrap_or(DEFAULT_WARM_MAX_AGE_SECS)
+    }
+
     fn validate(&self) -> Result<(), String> {
         if let Some(text) = &self.fork_ram_budget {
             parse_size(text).map_err(|reason| format!("fork_ram_budget: {reason}"))?;
+        }
+        if let Some(text) = &self.warm_max_age {
+            crate::clock::parse_duration_secs(text)
+                .map_err(|reason| format!("warm_max_age: {reason}"))?;
         }
         if blank(&self.recipes) {
             return Err("recipes: names may not be empty".into());
@@ -517,6 +536,20 @@ mod tests {
         assert_eq!(settings.agents["openclaw"].fold, Some(Fold::Ask));
         assert_eq!(settings.agents["openclaw"].fork_secrets, Some(vec![]));
         assert_eq!(parse_settings("").unwrap().fold, Fold::Ask);
+    }
+
+    #[test]
+    fn warm_max_age_defaults_to_five_minutes_and_reads_units() {
+        assert_eq!(Settings::warm_max_age_secs(None), 300);
+        let empty = parse_settings("").unwrap();
+        assert_eq!(Settings::warm_max_age_secs(Some(&empty)), 300);
+        let set = parse_settings("warm_max_age: 90s\n").unwrap();
+        assert_eq!(Settings::warm_max_age_secs(Some(&set)), 90);
+        let set = parse_settings("warm_max_age: 1h\n").unwrap();
+        assert_eq!(Settings::warm_max_age_secs(Some(&set)), 3600);
+        assert!(parse_settings("warm_max_age: soon\n")
+            .unwrap_err()
+            .contains("warm_max_age"));
     }
 
     #[test]

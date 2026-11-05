@@ -92,6 +92,7 @@ recipes: [linux-dev]
 fork_secrets: [OPENAI_API_KEY]   # what --secret may name
 fold: ask                        # or auto-code
 fork_ram_budget: 8G
+warm_max_age: 5m                 # how old main's warm checkpoint may be for a fork to use it
 auto_keep:
   - when: { only: [code], tests: pass }
 agents:

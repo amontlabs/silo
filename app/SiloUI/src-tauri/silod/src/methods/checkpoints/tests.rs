@@ -838,3 +838,22 @@ async fn device_dependencies_validates_the_request_id_and_reports_each_check() {
     assert_eq!(report.request_id, "check-1");
     assert!(!report.checks.is_empty());
 }
+
+// MARK: recipes.*
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_recipe_build_reads_the_computers_without_an_event_client() {
+    let fixture = fixture();
+    let env = super::recipes::DispatchEnv {
+        silod: fixture.silod.clone(),
+        handle: tokio::runtime::Handle::current(),
+    };
+    let read = tokio::task::spawn_blocking(move || env.rows())
+        .await
+        .unwrap();
+    // The test device has no runtime, so the read may fail; it must not fail for want of an
+    // event client session.
+    if let Err(message) = read {
+        assert!(!message.contains("event client"), "{message}");
+    }
+}

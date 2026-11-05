@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::sync::Mutex;
 
 use silo_api::methods::recipes::{RecipeOs, RecipePackages, RecipeService, RecipeSpec};
 
@@ -33,24 +33,24 @@ fn normalization_ignores_order_repeats_whitespace_and_default_sizes() {
     other.memory_gib = Some(4);
     other.disk_gib = Some(10);
     other.setup = vec!["echo one ".into(), "".into(), "echo two".into()];
-    assert_eq!(hash(&spec()), hash(&other));
+    assert_eq!(hash(&spec(), "v5"), hash(&other, "v5"));
 }
 
 #[test]
 fn the_hash_changes_with_anything_that_changes_the_build() {
-    let base = hash(&spec());
+    let base = hash(&spec(), "v5");
     let mut changed = spec();
     changed.setup.reverse();
-    assert_ne!(base, hash(&changed), "setup order is the run order");
+    assert_ne!(base, hash(&changed, "v5"), "setup order is the run order");
     let mut changed = spec();
     changed.packages.apt.push("jq".into());
-    assert_ne!(base, hash(&changed));
+    assert_ne!(base, hash(&changed, "v5"));
     let mut changed = spec();
     changed.cpus = Some(8);
-    assert_ne!(base, hash(&changed));
+    assert_ne!(base, hash(&changed, "v5"));
     let mut changed = spec();
     changed.os = RecipeOs::Macos;
-    assert_ne!(base, hash(&changed));
+    assert_ne!(base, hash(&changed, "v5"));
 }
 
 #[test]
@@ -69,39 +69,60 @@ fn validation_refuses_what_cannot_be_built() {
 
 #[derive(Default)]
 struct Fake {
-    log: RefCell<Vec<String>>,
+    log: Mutex<Vec<String>>,
     fail_on: Option<&'static str>,
     macos_running: usize,
-    existing: RefCell<Vec<(String, String)>>,
+    existing: Mutex<Vec<(String, String)>>,
+    /// Added to the image version, so a test can move the image on.
+    image: Mutex<String>,
+    /// Slows `create` down, so builds that overlap would show.
+    slow: bool,
 }
+
+static NEXT_ID: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(1);
 
 impl Fake {
     fn log(&self, line: impl Into<String>) {
-        self.log.borrow_mut().push(line.into());
+        self.log.lock().unwrap().push(line.into());
     }
     fn calls(&self, prefix: &str) -> usize {
         self.log
-            .borrow()
+            .lock()
+            .unwrap()
             .iter()
             .filter(|line| line.starts_with(prefix))
             .count()
     }
+    fn names(&self) -> Vec<String> {
+        self.existing
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(_, name)| name.clone())
+            .collect()
+    }
+    fn add(&self, name: &str) -> String {
+        let id = format!(
+            "id-{}",
+            NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+        );
+        self.existing
+            .lock()
+            .unwrap()
+            .push((id.clone(), name.into()));
+        id
+    }
 }
 
 impl BuildEnv for Fake {
-    fn image_version(&self) -> String {
-        "v5".into()
+    fn image_version(&self, _os: RecipeOs) -> String {
+        format!("v5{}", self.image.lock().unwrap())
     }
     fn macos_running(&self) -> Result<usize, String> {
         Ok(self.macos_running)
     }
-    fn find(&self, name: &str) -> Result<Option<String>, String> {
-        Ok(self
-            .existing
-            .borrow()
-            .iter()
-            .find(|(_, existing)| existing == name)
-            .map(|(id, _)| id.clone()))
+    fn computers(&self) -> Result<Vec<(String, String)>, String> {
+        Ok(self.existing.lock().unwrap().clone())
     }
     fn create(
         &self,
@@ -112,8 +133,10 @@ impl BuildEnv for Fake {
         disk: u32,
     ) -> Result<Created, String> {
         self.log(format!("create {name} {cpus}/{memory}/{disk}"));
-        let id = format!("id-{}", self.calls("create"));
-        self.existing.borrow_mut().push((id.clone(), name.into()));
+        if self.slow {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        let id = self.add(name);
         Ok(Created {
             id,
             name: name.into(),
@@ -149,7 +172,10 @@ impl BuildEnv for Fake {
     }
     fn delete(&self, computer: &str) -> Result<(), String> {
         self.log(format!("delete {computer}"));
-        self.existing.borrow_mut().retain(|(id, _)| id != computer);
+        self.existing
+            .lock()
+            .unwrap()
+            .retain(|(id, _)| id != computer);
         Ok(())
     }
     fn note(&self, _line: &str) {}
@@ -163,10 +189,11 @@ fn a_build_runs_every_step_checkpoints_and_caches() {
     let outcome = build(&env, &cache, "dev", &spec(), false).unwrap();
     assert!(outcome.built);
     assert_eq!(outcome.entry.checkpoint_id, "cp-1");
-    assert_eq!(outcome.entry.computer_name, "silo-build-dev");
+    assert!(is_builder_of(&outcome.entry.computer_name, "dev"));
     // apt, npm, two setup commands, one service, then two package checks and one service check.
     assert_eq!(env.calls("run"), 2 + 2 + 1 + 3);
-    assert_eq!(env.calls("create silo-build-dev 2/4/10"), 1);
+    assert_eq!(env.calls("create silo-build-dev-"), 1);
+    assert!(env.log.lock().unwrap()[0].ends_with(" 2/4/10"));
     assert_eq!(env.calls("stop"), 1);
     assert_eq!(cache.get("dev").unwrap().unwrap(), outcome.entry);
     assert_eq!(cache.list().len(), 1);
@@ -177,15 +204,97 @@ fn the_same_spec_on_the_same_image_is_a_cache_hit() {
     let dir = tempfile::tempdir().unwrap();
     let cache = Cache::new(dir.path());
     let env = Fake::default();
-    build(&env, &cache, "dev", &spec(), false).unwrap();
+    let first = build(&env, &cache, "dev", &spec(), false).unwrap();
     let again = build(&env, &cache, "dev", &spec(), false).unwrap();
     assert!(!again.built);
     assert_eq!(env.calls("create"), 1);
     let forced = build(&env, &cache, "dev", &spec(), true).unwrap();
     assert!(forced.built);
     assert_eq!(env.calls("create"), 2);
-    // The rebuilt recipe replaced the first builder.
-    assert_eq!(env.calls("delete id-1"), 1);
+    assert_ne!(first.entry.computer_name, forced.entry.computer_name);
+    // The rebuilt recipe replaced the first builder, once the new one was made.
+    assert_eq!(env.calls(&format!("delete {}", first.entry.computer_id)), 1);
+    assert_eq!(env.names(), [forced.entry.computer_name]);
+    let log = env.log.lock().unwrap();
+    let created = log
+        .iter()
+        .position(|l| l.starts_with("create") && l != &log[0]);
+    let dropped = log
+        .iter()
+        .position(|l| *l == format!("delete {}", first.entry.computer_id));
+    assert!(created < dropped, "{log:?}");
+}
+
+#[test]
+fn a_new_image_is_a_new_cache_entry() {
+    let dir = tempfile::tempdir().unwrap();
+    let cache = Cache::new(dir.path());
+    let env = Fake::default();
+    let first = build(&env, &cache, "dev", &spec(), false).unwrap();
+    assert_ne!(hash(&spec(), "v5"), hash(&spec(), "v6"));
+    *env.image.lock().unwrap() = "-next".into();
+    let second = build(&env, &cache, "dev", &spec(), false).unwrap();
+    assert!(second.built);
+    assert_ne!(first.entry.hash, second.entry.hash);
+    assert_eq!(second.entry.image_version, "v5-next");
+}
+
+#[test]
+fn builders_are_named_per_build_and_matched_exactly() {
+    assert!(is_builder_of("silo-build-dev-0123abcd", "dev"));
+    assert!(!is_builder_of("silo-build-dev-more-0123abcd", "dev"));
+    assert!(is_builder_of("silo-build-dev-more-0123abcd", "dev-more"));
+    assert!(!is_builder_of("silo-build-dev-0123abcg", "dev"));
+    assert!(!is_builder_of("silo-build-dev", "dev"));
+    assert_ne!(builder_name("dev"), builder_name("dev"));
+}
+
+#[test]
+fn leftover_builders_of_this_recipe_are_dropped_and_no_others() {
+    let dir = tempfile::tempdir().unwrap();
+    let cache = Cache::new(dir.path());
+    let env = Fake::default();
+    env.add("silo-build-dev-deadbeef");
+    env.add("silo-build-dev-more-deadbeef");
+    env.add("main");
+    let outcome = build(&env, &cache, "dev", &spec(), false).unwrap();
+    let names = env.names();
+    assert!(!names.contains(&"silo-build-dev-deadbeef".to_owned()));
+    assert!(names.contains(&"silo-build-dev-more-deadbeef".to_owned()));
+    assert!(names.contains(&"main".to_owned()));
+    assert!(names.contains(&outcome.entry.computer_name));
+}
+
+#[test]
+fn builds_of_one_recipe_run_one_at_a_time_and_never_share_a_builder() {
+    let dir = tempfile::tempdir().unwrap();
+    let cache = Cache::new(dir.path());
+    let env = Fake {
+        slow: true,
+        ..Fake::default()
+    };
+    let (first, second) = std::thread::scope(|scope| {
+        let one = scope.spawn(|| build(&env, &cache, "dev", &spec(), false).unwrap());
+        let two = scope.spawn(|| build(&env, &cache, "dev", &spec(), false).unwrap());
+        (one.join().unwrap(), two.join().unwrap())
+    });
+    // The second finds the first one's build in the cache.
+    assert_eq!(env.calls("create"), 1);
+    assert_eq!(
+        [first.built, second.built].iter().filter(|b| **b).count(),
+        1
+    );
+    assert_eq!(first.entry, second.entry);
+    // Forced builds in turn each get their own builder, and none deletes one still in use.
+    let (one, two) = std::thread::scope(|scope| {
+        let one = scope.spawn(|| build(&env, &cache, "dev", &spec(), true).unwrap());
+        let two = scope.spawn(|| build(&env, &cache, "dev", &spec(), true).unwrap());
+        (one.join().unwrap(), two.join().unwrap())
+    });
+    assert_ne!(one.entry.computer_name, two.entry.computer_name);
+    assert_eq!(env.calls("create"), 3);
+    let kept = cache.get("dev").unwrap().unwrap();
+    assert_eq!(env.names(), [kept.computer_name]);
 }
 
 #[test]
@@ -203,9 +312,9 @@ fn a_failing_step_leaves_no_cache_entry_and_drops_the_builder() {
     );
     assert!(error.contains("no such package"), "{error}");
     assert!(cache.get("dev").unwrap().is_none());
-    assert_eq!(env.calls("delete id-1"), 1);
+    assert_eq!(env.calls("delete"), 1);
     assert_eq!(env.calls("checkpoint"), 0);
-    assert!(env.existing.borrow().is_empty());
+    assert!(env.names().is_empty());
 }
 
 #[test]
@@ -219,24 +328,28 @@ fn a_failing_check_fails_the_build() {
     let error = build(&env, &cache, "dev", &spec(), false).unwrap_err();
     assert!(error.contains("Checking the apt packages"), "{error}");
     assert!(cache.get("dev").unwrap().is_none());
-    assert!(env.existing.borrow().is_empty());
+    assert!(env.names().is_empty());
 }
 
 #[test]
-fn a_failed_rebuild_keeps_the_previous_build() {
+fn a_failed_rebuild_keeps_the_previous_build_and_its_builder() {
     let dir = tempfile::tempdir().unwrap();
     let cache = Cache::new(dir.path());
     let env = Fake::default();
     let first = build(&env, &cache, "dev", &spec(), false).unwrap();
     let broken = Fake {
         fail_on: Some("apt-get"),
-        existing: RefCell::new(env.existing.borrow().clone()),
+        existing: Mutex::new(env.existing.lock().unwrap().clone()),
         ..Fake::default()
     };
     let mut changed = spec();
     changed.packages.apt.push("jq".into());
     assert!(build(&broken, &cache, "dev", &changed, false).is_err());
     assert_eq!(cache.get("dev").unwrap().unwrap(), first.entry);
+    assert_eq!(broken.names(), [first.entry.computer_name.clone()]);
+    // A forced rebuild that fails keeps it too.
+    assert!(build(&broken, &cache, "dev", &spec(), true).is_err());
+    assert_eq!(broken.names(), [first.entry.computer_name]);
 }
 
 #[test]
@@ -276,4 +389,171 @@ fn names_work_as_file_names() {
     assert!(!valid_name("../x"));
     assert!(!valid_name("Dev"));
     assert!(!valid_name(""));
+}
+
+// MARK: Scripts
+
+fn service_spec(os: RecipeOs, run: &str) -> RecipeSpec {
+    RecipeSpec {
+        os,
+        cpus: None,
+        memory_gib: None,
+        disk_gib: None,
+        packages: RecipePackages::default(),
+        setup: Vec::new(),
+        services: vec![RecipeService {
+            name: "poller".into(),
+            run: run.into(),
+        }],
+        ports: Vec::new(),
+    }
+}
+
+fn run_script(step: &scripts::Step, env: &[(&str, &std::path::Path)]) -> std::process::Output {
+    let mut command = std::process::Command::new("bash");
+    command.arg("-c").arg(&step.script);
+    for (name, value) in env {
+        command.env(name, value);
+    }
+    for (name, value) in &step.args {
+        command.env(format!("A_{name}"), value);
+    }
+    command.output().unwrap()
+}
+
+#[test]
+fn a_linux_service_is_named_after_the_service_and_runs_its_own_command() {
+    let step = &scripts::service_steps(&service_spec(
+        RecipeOs::Linux,
+        "/usr/local/bin/poller --every 5",
+    ))[0];
+    let root = tempfile::tempdir().unwrap();
+    let out = run_script(step, &[("A_ROOT", root.path())]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let entry =
+        std::fs::read_to_string(root.path().join("etc/xdg/autostart/poller.desktop")).unwrap();
+    assert!(entry.contains("Name=poller\n"), "{entry}");
+    let exec = entry.lines().find_map(|l| l.strip_prefix("Exec=")).unwrap();
+    // `quiet: [poller]` matches the entry by file name and by the base name of its command.
+    assert_eq!(exec.rsplit('/').next(), Some("poller"));
+    let launcher =
+        std::fs::read_to_string(root.path().join("usr/local/libexec/silo-services/poller"))
+            .unwrap();
+    assert_eq!(
+        launcher,
+        "#!/bin/sh\nexec /usr/local/bin/poller --every 5\n"
+    );
+}
+
+#[test]
+fn a_service_with_shell_syntax_runs_as_written() {
+    for run in [
+        "cd /app && ./poll",
+        "FOO=1 poll",
+        "poll > /var/log/poll.log",
+    ] {
+        let step = &scripts::service_steps(&service_spec(RecipeOs::Linux, run))[0];
+        let root = tempfile::tempdir().unwrap();
+        let out = run_script(step, &[("A_ROOT", root.path())]);
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let launcher =
+            std::fs::read_to_string(root.path().join("usr/local/libexec/silo-services/poller"))
+                .unwrap();
+        assert_eq!(launcher, format!("#!/bin/sh\n{run}\n"));
+    }
+}
+
+#[test]
+fn a_service_check_looks_for_the_entry_named_after_the_service() {
+    let checks = scripts::verify_steps(&service_spec(RecipeOs::Linux, "poller"));
+    assert!(checks[0]
+        .script
+        .contains("/etc/xdg/autostart/$A_NAME.desktop"));
+    let mac = scripts::verify_steps(&service_spec(RecipeOs::Macos, "poller"));
+    assert!(mac[0].script.contains("LaunchAgents/$A_NAME.plist"));
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn a_macos_service_has_a_launch_agent_labelled_with_the_service_name() {
+    let step = &scripts::service_steps(&service_spec(RecipeOs::Macos, "/opt/bin/poller -v"))[0];
+    let home = tempfile::tempdir().unwrap();
+    let out = run_script(step, &[("HOME", home.path())]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let plist =
+        plist::Value::from_file(home.path().join("Library/LaunchAgents/poller.plist")).unwrap();
+    let dictionary = plist.as_dictionary().unwrap();
+    assert_eq!(
+        dictionary.get("Label").and_then(plist::Value::as_string),
+        Some("poller")
+    );
+    let program = dictionary
+        .get("ProgramArguments")
+        .and_then(plist::Value::as_array)
+        .and_then(|a| a.first())
+        .and_then(plist::Value::as_string)
+        .unwrap();
+    assert!(program.ends_with("/silo-services/poller"), "{program}");
+}
+
+#[test]
+fn the_pipx_check_uses_the_pipx_home_the_install_used() {
+    let spec = RecipeSpec {
+        packages: RecipePackages {
+            pipx: vec!["ruff".into()],
+            ..RecipePackages::default()
+        },
+        ..service_spec(RecipeOs::Linux, "x")
+    };
+    let install = &scripts::install_steps(&spec)[0];
+    let check = &scripts::verify_steps(&spec)[0];
+    for script in [&install.script, &check.script] {
+        assert!(
+            script.contains("PIPX_HOME=/opt/pipx PIPX_BIN_DIR=/usr/local/bin"),
+            "{script}"
+        );
+    }
+}
+
+#[test]
+fn macos_recipes_install_homebrew_before_they_need_it() {
+    let mut spec = service_spec(RecipeOs::Macos, "x");
+    spec.services.clear();
+    spec.packages = RecipePackages {
+        brew: vec!["jq".into()],
+        pipx: vec!["ruff".into()],
+        npm: vec!["typescript".into()],
+        ..RecipePackages::default()
+    };
+    let steps = scripts::install_steps(&spec);
+    assert_eq!(steps.len(), 3);
+    for step in steps {
+        assert!(step.script.contains("Homebrew/install"), "{}", step.script);
+        let install = step.script.rfind("brew install").unwrap();
+        let ensure = step
+            .script
+            .rfind("ensure_brew;")
+            .or_else(|| step.script.rfind("ensure_brew\n"));
+        assert!(ensure.unwrap() < install, "{}", step.script);
+    }
+    let linux = scripts::install_steps(&RecipeSpec {
+        packages: RecipePackages {
+            apt: vec!["jq".into()],
+            ..RecipePackages::default()
+        },
+        ..service_spec(RecipeOs::Linux, "x")
+    });
+    assert!(!linux[0].script.contains("brew"));
 }

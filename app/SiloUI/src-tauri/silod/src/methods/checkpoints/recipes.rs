@@ -34,14 +34,17 @@ use super::{
 const STEP_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 const JOB_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 
-struct DispatchEnv {
-    silod: Arc<SilodContext>,
-    handle: tokio::runtime::Handle,
+pub(super) struct DispatchEnv {
+    pub(super) silod: Arc<SilodContext>,
+    pub(super) handle: tokio::runtime::Handle,
 }
 
 impl DispatchEnv {
+    /// The build is no client with an event stream, so it runs as the bridge does: work that
+    /// would answer only "the client that asked" is announced to every subscriber instead,
+    /// and reads need no subscription to order against.
     fn context(&self) -> HandlerContext {
-        HandlerContext::new(
+        HandlerContext::for_owner_bridge(
             self.silod.clone(),
             RequestContext {
                 client_id: "recipes".to_owned(),
@@ -51,7 +54,7 @@ impl DispatchEnv {
         )
     }
 
-    fn call(&self, method: MethodName, params: Value) -> Result<Value, String> {
+    pub(super) fn call(&self, method: MethodName, params: Value) -> Result<Value, String> {
         let context = self.context();
         self.handle
             .block_on(crate::methods::dispatch(&context, method, &params))
@@ -90,7 +93,7 @@ impl DispatchEnv {
         }
     }
 
-    fn computers(&self) -> Result<Vec<Value>, String> {
+    pub(super) fn rows(&self) -> Result<Vec<Value>, String> {
         let listed = self.call(MethodName::ComputersList, json!({}))?;
         let mut all = Vec::new();
         for (path, linux) in [("/linux/computers", true), ("/macos/computers", false)] {
@@ -120,31 +123,42 @@ impl DispatchEnv {
 
     fn row(&self, id: &str) -> Result<Option<Value>, String> {
         Ok(self
-            .computers()?
+            .rows()?
             .into_iter()
             .find(|row| row["id"].as_str() == Some(id)))
     }
 }
 
 impl BuildEnv for DispatchEnv {
-    fn image_version(&self) -> String {
-        silo_engine::runtime::guest_image::pinned_version().unwrap_or_else(|| "unknown".into())
+    fn image_version(&self, os: RecipeOs) -> String {
+        match os {
+            RecipeOs::Linux => silo_engine::runtime::guest_image::pinned_version()
+                .unwrap_or_else(|| "unknown".into()),
+            RecipeOs::Macos => {
+                silo_engine::macos_computers::recipe_image_version(&self.silod.paths().app_data)
+            }
+        }
     }
 
     fn macos_running(&self) -> Result<usize, String> {
         Ok(self
-            .computers()?
+            .rows()?
             .iter()
             .filter(|row| row["macos"] == true && row["state"] == "running")
             .count())
     }
 
-    fn find(&self, name: &str) -> Result<Option<String>, String> {
+    fn computers(&self) -> Result<Vec<(String, String)>, String> {
         Ok(self
-            .computers()?
+            .rows()?
             .into_iter()
-            .find(|row| row["name"].as_str() == Some(name))
-            .and_then(|row| row["id"].as_str().map(str::to_owned)))
+            .filter_map(|row| {
+                Some((
+                    row["id"].as_str()?.to_owned(),
+                    row["name"].as_str()?.to_owned(),
+                ))
+            })
+            .collect())
     }
 
     fn create(
@@ -184,7 +198,10 @@ impl BuildEnv for DispatchEnv {
         };
         self.job(MethodName::ComputersCreate, params)?;
         let id = self
-            .find(name)?
+            .rows()?
+            .into_iter()
+            .find(|row| row["name"].as_str() == Some(name))
+            .and_then(|row| row["id"].as_str().map(str::to_owned))
             .ok_or("The builder computer did not appear.")?;
         self.job(MethodName::ComputersStart, json!({"computerId": id}))?;
         Ok(Created {

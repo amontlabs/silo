@@ -841,6 +841,16 @@ impl Registry {
     }
 }
 
+/// The image a macOS recipe is built on: the build of the newest template and the setup
+/// fingerprint. A recipe's cache key includes it, so a macOS update or a changed setup builds
+/// the recipe again.
+pub fn recipe_image_version(app_data: &std::path::Path) -> String {
+    let build = templates::list(app_data)
+        .first()
+        .map_or_else(|| "none".to_owned(), |template| template.meta.build.clone());
+    format!("macos-{build}-{}", templates::setup_version())
+}
+
 /// The templates that computers still being personalized depend on.
 fn protected_templates() -> Vec<String> {
     registry()

@@ -148,6 +148,36 @@ pub fn computer_line(verb: &str, value: &Value) -> String {
     format!("{verb} {} ({})", text(value, "name"), text(value, "state"))
 }
 
+/// `Forked try (stopped): main as of 14:02:31 (warm checkpoint, 2m 10s old)`.
+pub fn forked(value: &Value) -> String {
+    let line = computer_line("Forked", value);
+    let checkpoint = &value["checkpoint"];
+    if !checkpoint.is_object() || text(value, "forkedAsOf").is_empty() {
+        return line;
+    }
+    let what = if checkpoint["reused"] == true {
+        match text(checkpoint, "kind") {
+            "" => "checkpoint".to_owned(),
+            kind => format!("{kind} checkpoint"),
+        }
+    } else {
+        "new checkpoint".to_owned()
+    };
+    let age = if checkpoint["reused"] == true {
+        format!(
+            ", {} old",
+            crate::clock::age_text(checkpoint["ageSeconds"].as_i64().unwrap_or(0))
+        )
+    } else {
+        String::new()
+    };
+    format!(
+        "{line}: {} as of {} ({what}{age})",
+        text(value, "source"),
+        text(value, "forkedAsOf")
+    )
+}
+
 pub fn checkpoints(value: &Value) -> String {
     let items = value["checkpoints"].as_array().cloned().unwrap_or_default();
     if items.is_empty() {

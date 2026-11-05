@@ -1,14 +1,48 @@
 //! The build flow: create a hidden computer, run the recipe's steps, check the result, save a
 //! checkpoint, and record the build in the cache. A build that fails anywhere leaves no cache
-//! entry and no builder computer behind.
+//! entry and no builder computer behind, and the previous good build stays until the new one
+//! has succeeded.
+
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex, OnceLock, PoisonError},
+};
 
 use silo_api::methods::recipes::{RecipeEntry, RecipeOs, RecipeSpec};
 use time::format_description::well_known::Rfc3339;
 
 use super::{cache::Cache, default_resources, hash, normalize, scripts, valid_name, validate};
 
-/// Builder computers are named `silo-build-<name>`. `silo list` leaves them out.
+/// Builder computers are named `silo-build-<name>-<8 hex>`; the suffix is new for every
+/// build, so two builds never share a builder. `silo list` leaves them out.
 pub const BUILDER_PREFIX: &str = "silo-build-";
+
+/// Builds of one recipe run one at a time. The second waits, then finds the first one's
+/// build in the cache.
+fn recipe_lock(name: &str) -> Arc<Mutex<()>> {
+    static LOCKS: OnceLock<Mutex<HashMap<String, Arc<Mutex<()>>>>> = OnceLock::new();
+    LOCKS
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .entry(name.to_owned())
+        .or_default()
+        .clone()
+}
+
+pub(super) fn builder_name(recipe: &str) -> String {
+    let id = uuid::Uuid::new_v4().simple().to_string();
+    format!("{BUILDER_PREFIX}{recipe}-{}", &id[..8])
+}
+
+/// Whether `computer` is a builder of the recipe `recipe` (and not of `recipe-more`).
+pub(super) fn is_builder_of(computer: &str, recipe: &str) -> bool {
+    computer
+        .strip_prefix(BUILDER_PREFIX)
+        .and_then(|rest| rest.strip_prefix(recipe))
+        .and_then(|rest| rest.strip_prefix('-'))
+        .is_some_and(|suffix| suffix.len() == 8 && suffix.chars().all(|c| c.is_ascii_hexdigit()))
+}
 
 /// The most macOS virtual machines a Mac runs at once.
 const MACOS_LIMIT: usize = 2;
@@ -50,12 +84,13 @@ pub struct Created {
 /// What a build needs from the world. The engine supplies [`crate::recipes`]' real one in
 /// `silod`; tests supply a fake.
 pub trait BuildEnv {
-    /// The guest image the computer will be made from.
-    fn image_version(&self) -> String;
+    /// The image a computer of this kind is made from: the guest image on Linux, the macOS
+    /// template and build on macOS.
+    fn image_version(&self, os: RecipeOs) -> String;
     /// How many macOS virtual machines are running now.
     fn macos_running(&self) -> Result<usize, String>;
-    /// The id of the computer with this name, if there is one.
-    fn find(&self, name: &str) -> Result<Option<String>, String>;
+    /// Every computer, as (id, name).
+    fn computers(&self) -> Result<Vec<(String, String)>, String>;
     /// Creates a computer and starts it.
     fn create(
         &self,
@@ -109,9 +144,11 @@ pub fn build(
         ));
     }
     validate(spec)?;
+    let lock = recipe_lock(name);
+    let _held = lock.lock().unwrap_or_else(PoisonError::into_inner);
     let spec = normalize(spec);
-    let spec_hash = hash(&spec);
-    let image = env.image_version();
+    let image = env.image_version(spec.os);
+    let spec_hash = hash(&spec, &image);
     let previous = cache.get(name)?;
     if let Some(entry) = previous.as_ref().filter(|entry| {
         !force
@@ -127,15 +164,18 @@ pub fn build(
     if spec.os == RecipeOs::Macos && env.macos_running()? >= MACOS_LIMIT {
         return Err("Two macOS virtual machines are already running, and building a recipe needs a third. Stop one and try again.".into());
     }
-    let builder_name = format!("{BUILDER_PREFIX}{name}");
-    // A builder an interrupted build left behind is dropped first.
-    let mut dropped = None;
-    if let Some(stale) = env.find(&builder_name)? {
-        dropped = Some(stale.clone());
-        env.delete(&stale).map_err(|error| {
-            format!("The old builder {builder_name} could not be dropped: {error}")
-        })?;
+    // Builders an interrupted build of this recipe left behind are dropped first. The lock
+    // means no other build of it runs now, and the cached build's builder stays.
+    for (id, computer) in env.computers()? {
+        if is_builder_of(&computer, name)
+            && previous.as_ref().map(|old| old.computer_id.as_str()) != Some(id.as_str())
+        {
+            env.delete(&id).map_err(|error| {
+                format!("The old builder {computer} could not be dropped: {error}")
+            })?;
+        }
     }
+    let builder_name = builder_name(name);
     let (cpus, memory, disk) = default_resources(spec.os);
     env.note(&format!("Creating the builder computer for {name}"));
     let created = env.create(
@@ -149,8 +189,10 @@ pub fn build(
         Ok(created) => created,
         Err(error) => {
             // The create may have left a half-made computer.
-            if let Ok(Some(leftover)) = env.find(&builder_name) {
-                let _ = env.delete(&leftover);
+            for (id, computer) in env.computers().unwrap_or_default() {
+                if computer == builder_name {
+                    let _ = env.delete(&id);
+                }
             }
             return Err(format!("The builder could not be created: {error}"));
         }
@@ -202,10 +244,8 @@ pub fn build(
         let _ = env.delete(&created.id);
         return Err(error);
     }
-    // The rebuilt recipe replaces the old builder, which forks may no longer start from.
-    if let Some(old) = previous.filter(|old| {
-        old.computer_id != entry.computer_id && dropped.as_ref() != Some(&old.computer_id)
-    }) {
+    // Only now does the rebuilt recipe replace the old builder.
+    if let Some(old) = previous.filter(|old| old.computer_id != entry.computer_id) {
         let _ = env.delete(&old.computer_id);
     }
     Ok(BuildOutcome { entry, built: true })
@@ -213,6 +253,8 @@ pub fn build(
 
 /// Removes a recipe from the cache and drops its builder computer.
 pub fn remove(env: &dyn BuildEnv, cache: &Cache, name: &str) -> Result<(), String> {
+    let lock = recipe_lock(name);
+    let _held = lock.lock().unwrap_or_else(PoisonError::into_inner);
     let entry = cache
         .get(name)?
         .ok_or_else(|| format!("There is no built recipe named {name}."))?;

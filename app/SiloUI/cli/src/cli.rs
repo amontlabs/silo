@@ -388,7 +388,7 @@ async fn dispatch(
                 recipe_name,
             };
             let value = ops::fork(engine, &args, settings.as_ref(), progress).await?;
-            emit(json, &value, |v| render::computer_line("Forked", v));
+            emit(json, &value, render::forked);
         }
         Command::Fold(fold) if fold.promote => {
             let value = ops::promote(
