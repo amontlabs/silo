@@ -178,6 +178,38 @@ pub fn forked(value: &Value) -> String {
     )
 }
 
+pub fn ports(value: &Value) -> String {
+    let rows = value["ports"].as_array().cloned().unwrap_or_default();
+    if rows.is_empty() {
+        return format!("No ports are published from {}.", text(value, "computer"));
+    }
+    rows.iter()
+        .map(|row| {
+            let target = row["url"]
+                .as_str()
+                .map(str::to_owned)
+                .or_else(|| row["hostPort"].as_u64().map(|p| format!("127.0.0.1:{p}")))
+                .unwrap_or_else(|| "not reachable yet".to_owned());
+            format!(
+                "{}  {}  {}  {}",
+                number(row, "port"),
+                text(row, "scheme"),
+                text(row, "state"),
+                target
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+pub fn ssh(value: &Value) -> String {
+    format!(
+        "ssh {} reaches {}.",
+        text(value, "host"),
+        text(value, "computer")
+    )
+}
+
 pub fn checkpoints(value: &Value) -> String {
     let items = value["checkpoints"].as_array().cloned().unwrap_or_default();
     if items.is_empty() {
@@ -234,11 +266,20 @@ pub fn up(value: &Value) -> String {
     } else {
         String::new()
     };
-    format!(
+    let mut out = format!(
         "main is {}{made}. Warm checkpoint {} saved.",
         text(main, "state"),
         text(value, "warmCheckpoint")
-    )
+    );
+    if let Some(host) = value["ssh"]["host"].as_str() {
+        out.push_str(&format!(" ssh {host} reaches it."));
+    } else if let Some(error) = value["ssh"]["error"].as_str() {
+        out.push_str(&format!(" SSH name not set up: {error}"));
+    }
+    if let Some(error) = value["portsError"].as_str() {
+        out.push_str(&format!(" Ports not published: {error}"));
+    }
+    out
 }
 
 pub fn recipes(value: &Value) -> String {

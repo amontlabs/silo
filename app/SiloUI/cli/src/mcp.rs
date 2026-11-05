@@ -11,8 +11,9 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use crate::{
+    access,
     config::Project,
-    engine::Engine,
+    engine::{build_channel, Engine},
     error::CliError,
     fanout::{self, ManyArgs},
     flows, folder,
@@ -31,6 +32,17 @@ pub struct SiloMcp {
 pub struct ComputerParam {
     /// The computer's name.
     pub computer: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct PublishParams {
+    /// The computer's name.
+    pub computer: String,
+    /// The port inside the computer.
+    pub port: u16,
+    /// Serve it as a website.
+    #[serde(default)]
+    pub http: bool,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -184,7 +196,15 @@ impl SiloMcp {
                     .recipe
                     .unwrap_or_else(|| crate::config::DEFAULT_RECIPE.to_owned());
                 let recipe = project.named_recipe(&name)?;
-                ops::up(&self.engine().await?, &name, &recipe, &|_| {}).await
+                let engine = self.engine().await?;
+                let mut value = ops::up(&engine, &name, &recipe, &|_| {}).await?;
+                match access::home_dir() {
+                    Ok(home) => {
+                        access::ssh_for_up(&engine, &mut value, &home, build_channel()).await
+                    }
+                    Err(error) => value["ssh"] = serde_json::json!({ "error": error.message }),
+                }
+                Ok(value)
             }
             .await,
         )
@@ -298,14 +318,19 @@ impl SiloMcp {
         show(
             async {
                 if params.promote && !params.request {
-                    return ops::promote(
-                        &self.engine().await?,
+                    let engine = self.engine().await?;
+                    let mut value = ops::promote(
+                        &engine,
                         &params.fork,
                         params.into.as_deref(),
                         params.dry_run,
                         &|_| {},
                     )
-                    .await;
+                    .await?;
+                    if let Ok(home) = access::home_dir() {
+                        access::ssh_after_change(&engine, &mut value, &home, build_channel()).await;
+                    }
+                    return Ok(value);
                 }
                 let project = Project::discover(&self.working_directory);
                 let explicit = params
@@ -359,13 +384,13 @@ impl SiloMcp {
     ) -> Result<String, String> {
         show(
             async {
-                flows::undo(
-                    &self.engine().await?,
-                    &computer,
-                    &self.working_directory,
-                    &|_| {},
-                )
-                .await
+                let engine = self.engine().await?;
+                let mut value =
+                    flows::undo(&engine, &computer, &self.working_directory, &|_| {}).await?;
+                if let Ok(home) = access::home_dir() {
+                    access::ssh_after_change(&engine, &mut value, &home, build_channel()).await;
+                }
+                Ok(value)
             }
             .await,
         )
@@ -430,6 +455,64 @@ impl SiloMcp {
                     &|_| {},
                 )
                 .await
+            }
+            .await,
+        )
+    }
+
+    #[tool(
+        description = "List the ports published from a computer, with the host port and URL each is reachable at. Forks publish the ports their source does."
+    )]
+    async fn ports(
+        &self,
+        Parameters(ComputerParam { computer }): Parameters<ComputerParam>,
+    ) -> Result<String, String> {
+        show(async { access::ports(&self.engine().await?, &computer).await }.await)
+    }
+
+    #[tool(
+        description = "Publish a port of a computer on this device. With `http` it is served as a website."
+    )]
+    async fn publish(
+        &self,
+        Parameters(params): Parameters<PublishParams>,
+    ) -> Result<String, String> {
+        show(
+            async {
+                access::publish(
+                    &self.engine().await?,
+                    &params.computer,
+                    params.port,
+                    params.http,
+                )
+                .await
+            }
+            .await,
+        )
+    }
+
+    #[tool(description = "Stop publishing a port of a computer.")]
+    async fn unpublish(
+        &self,
+        Parameters(params): Parameters<PublishParams>,
+    ) -> Result<String, String> {
+        show(
+            async { access::unpublish(&self.engine().await?, &params.computer, params.port).await }
+                .await,
+        )
+    }
+
+    #[tool(
+        description = "Make `ssh <computer>.silo` (`.silo-dev` from a development build) reach a computer; `up` does it for main."
+    )]
+    async fn ssh_name(
+        &self,
+        Parameters(ComputerParam { computer }): Parameters<ComputerParam>,
+    ) -> Result<String, String> {
+        show(
+            async {
+                let home = access::home_dir()?;
+                access::ssh_setup(&self.engine().await?, &computer, &home, build_channel()).await
             }
             .await,
         )

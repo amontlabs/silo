@@ -42,7 +42,10 @@ the engine's message.
 | `silo create <name> [--linux\|--macos] [--cpus N --memory GiB --disk GiB]` | create a computer |
 | `silo start <computer>` / `silo stop <computer>` | lifecycle |
 | `silo retry-setup <computer>` | finish the setup of a macOS computer that ended `failed` before it was ready |
-| `silo up [--recipe R]` | make `main` from a recipe if needed, start it, keep a warm checkpoint ([recipes](SiloUI-RECIPES.md)) |
+| `silo up [--recipe R]` | make `main` from a recipe if needed, start it, publish the recipe's ports on it, make `ssh main.silo` work (`main.silo-dev` from a development build), keep a warm checkpoint ([recipes](SiloUI-RECIPES.md)) |
+| `silo ports <computer>` | list the published ports with their host port and URL |
+| `silo publish <computer> <port> [--http]` / `silo unpublish <computer> <port>` | publish or stop publishing a guest port; `--http` serves it as a website with a URL per computer ([URL proxy](SiloUI-URL-PROXY.md)) |
+| `silo ssh-setup <computer>` | make `ssh <computer>.silo` reach a computer. A Linux computer gets SSH access turned on and an entry in `~/.silo/ssh-hosts.conf` (`~/.silo-dev/` for a development build), which `~/.ssh/config` includes; a macOS computer's saved entry also answers to the name. After `silo fold --promote` or its undo the name is written again for the computer that now has it (a macOS entry follows on its own) |
 | `silo recipe ls\|build NAME [--force]\|rm NAME` | list, build or remove recipe builds |
 | `silo fork NAME --recipe R` | fork from the cached build of recipe R (built first if missing) |
 | `silo fork <source> [--name N] [--checkpoint ID] [--secret NAME]... [--recipe-file PATH]` | copy a computer; the name defaults to `<source>-<6 hex>` |
@@ -57,6 +60,8 @@ the engine's message.
 | `silo exec <computer> [--cwd DIR] [--timeout SECS] -- <cmd...>` | run a command; the exit code is passed through |
 | `silo checkpoint <computer> [--name N] [--kind manual\|automatic\|before-keep\|warm]` | save a checkpoint |
 | `silo checkpoints <computer>` | list checkpoints |
+
+A fork publishes the ports its source publishes (a recipe fork, the recipe's `ports`), each on a host port of its own. The engine does not copy published ports when it forks a computer, so `silo fork` does it with the same `publish` calls. The MCP server has `ports`, `publish`, `unpublish` and `ssh_name` tools.
 | `silo job <id>` | wait for a job that is already running |
 | `silo mcp` | serve the MCP tools on stdio |
 

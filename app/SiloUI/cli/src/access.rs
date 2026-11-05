@@ -391,16 +391,18 @@ fn release_name_elsewhere(keep: &Path, host: &str) -> Result<(), CliError> {
             continue;
         }
         let names: Vec<&str> = names.split_whitespace().filter(|n| *n != host).collect();
-        write_private(&path, format!("Host {}\n{rest}", names.join(" ")).as_bytes())?;
+        write_private(
+            &path,
+            format!("Host {}\n{rest}", names.join(" ")).as_bytes(),
+        )?;
     }
     Ok(())
 }
 
 /// Adds `host` to the first `Host` line of the engine's entry in `config`.
 fn add_name_to_entry(config: &Path, host: &str) -> Result<(), CliError> {
-    let text = fs::read_to_string(config).map_err(|error| {
-        CliError::new(format!("Could not read {}: {error}.", config.display()))
-    })?;
+    let text = fs::read_to_string(config)
+        .map_err(|error| CliError::new(format!("Could not read {}: {error}.", config.display())))?;
     let Some((first, rest)) = text.split_once('\n') else {
         return Err(CliError::new("The engine wrote an unreadable SSH entry."));
     };
@@ -441,7 +443,10 @@ async fn linux_endpoint(engine: &Engine, computer: &Computer) -> Result<Endpoint
         })
         .cloned()
         .ok_or_else(|| {
-            CliError::new(format!("The engine has no SSH settings for {}.", computer.name))
+            CliError::new(format!(
+                "The engine has no SSH settings for {}.",
+                computer.name
+            ))
         })?;
     if row["enabled"] != true {
         engine
@@ -490,12 +495,14 @@ pub async fn ssh_setup(
     let computer = engine.computer(name).await?;
     let config = if computer.kind == "macos" {
         let ensured = engine
-            .call(requests::guest_ssh_alias_ensure(GuestSshAliasEnsureParams {
-                computer_id: computer.id.clone(),
-                device_id: None,
-                install_include: None,
-                path: None,
-            }))
+            .call(requests::guest_ssh_alias_ensure(
+                GuestSshAliasEnsureParams {
+                    computer_id: computer.id.clone(),
+                    device_id: None,
+                    install_include: None,
+                    path: None,
+                },
+            ))
             .await?;
         let path = PathBuf::from(
             ensured["configPath"]
@@ -541,6 +548,30 @@ pub async fn refresh_ssh_name(
     })
 }
 
+/// `silo up`: makes `ssh main.silo` work. A failure is reported in the result, not raised.
+pub async fn ssh_for_up(engine: &Engine, value: &mut Value, home: &Path, channel: Channel) {
+    value["ssh"] = match ssh_setup(engine, crate::ops::MAIN, home, channel).await {
+        Ok(ssh) => ssh,
+        Err(error) => json!({ "error": error.message }),
+    };
+}
+
+/// After a promote or an undo of one: the name `main.silo` is written again for the
+/// computer that now has the name, when it was written before.
+pub async fn ssh_after_change(engine: &Engine, value: &mut Value, home: &Path, channel: Channel) {
+    let name = match value["status"].as_str() {
+        Some("promoted") => value["report"]["target"].as_str(),
+        Some("undone") if value["kind"] == "promote" => value["computer"].as_str(),
+        _ => None,
+    }
+    .map(str::to_owned);
+    if let Some(name) = name {
+        if let Some(ssh) = refresh_ssh_name(engine, &name, home, channel).await {
+            value["ssh"] = ssh;
+        }
+    }
+}
+
 /// The user's home directory.
 pub fn home_dir() -> Result<PathBuf, CliError> {
     std::env::var_os("HOME")
@@ -554,10 +585,7 @@ mod tests {
 
     #[test]
     fn the_name_carries_the_channel_suffix() {
-        assert_eq!(
-            ssh_host("main", Channel::Production).unwrap(),
-            "main.silo"
-        );
+        assert_eq!(ssh_host("main", Channel::Production).unwrap(), "main.silo");
         assert_eq!(
             ssh_host("main", Channel::Development).unwrap(),
             "main.silo-dev"
@@ -591,8 +619,16 @@ mod tests {
             user: "silo".into(),
             address: "127.0.0.1".into(),
         };
-        let first = with_entry("", "main.silo", &stanza("main.silo", &endpoint(2222)).unwrap());
-        let other = with_entry(&first, "x.silo", &stanza("x.silo", &endpoint(2300)).unwrap());
+        let first = with_entry(
+            "",
+            "main.silo",
+            &stanza("main.silo", &endpoint(2222)).unwrap(),
+        );
+        let other = with_entry(
+            &first,
+            "x.silo",
+            &stanza("x.silo", &endpoint(2300)).unwrap(),
+        );
         let again = with_entry(
             &other,
             "main.silo",

@@ -9,8 +9,9 @@ use clap::{Args, Parser, Subcommand};
 use serde_json::Value;
 
 use crate::{
+    access,
     config::{Project, Recipe, Settings},
-    engine::{default_socket, Engine},
+    engine::{build_channel, default_socket, Engine},
     error::CliError,
     fanout::{self, ManyArgs},
     flows, folder,
@@ -76,6 +77,21 @@ pub enum Command {
     Checkpoint(CheckpointCommand),
     /// List a computer's checkpoints.
     Checkpoints { computer: String },
+    /// List the ports published from a computer and where they are reachable.
+    Ports { computer: String },
+    /// Publish a port of a computer on this device.
+    Publish {
+        computer: String,
+        /// The port inside the computer.
+        port: u16,
+        /// Serve it as a website (a URL per computer).
+        #[arg(long)]
+        http: bool,
+    },
+    /// Stop publishing a port of a computer.
+    Unpublish { computer: String, port: u16 },
+    /// Make `ssh <computer>.silo` reach a computer (`silo up` does it for main).
+    SshSetup { computer: String },
     /// Manage the Silo secrets and which computers have them.
     #[command(subcommand)]
     Secrets(SecretsCommand),
@@ -345,7 +361,11 @@ async fn dispatch(
                 .recipe
                 .unwrap_or_else(|| crate::config::DEFAULT_RECIPE.to_owned());
             let recipe = recipe.ok_or_else(|| CliError::new("No recipe was loaded."))?;
-            let value = ops::up(engine, &name, &recipe, progress).await?;
+            let mut value = ops::up(engine, &name, &recipe, progress).await?;
+            match access::home_dir() {
+                Ok(home) => access::ssh_for_up(engine, &mut value, &home, build_channel()).await,
+                Err(error) => value["ssh"] = serde_json::json!({ "error": error.message }),
+            }
             emit(json, &value, render::up);
         }
         Command::Recipe(RecipeCommand::Ls) => emit(
@@ -443,7 +463,7 @@ async fn dispatch(
             emit(json, &value, render::forked);
         }
         Command::Fold(fold) if fold.promote => {
-            let value = ops::promote(
+            let mut value = ops::promote(
                 engine,
                 &fold.fork,
                 fold.into.as_deref(),
@@ -451,6 +471,9 @@ async fn dispatch(
                 progress,
             )
             .await?;
+            if let Ok(home) = access::home_dir() {
+                access::ssh_after_change(engine, &mut value, &home, build_channel()).await;
+            }
             emit(json, &value, render::promote);
             return Ok(if value["status"] == "refused" { 2 } else { 0 });
         }
@@ -478,7 +501,10 @@ async fn dispatch(
             return Ok(if value["status"] == "refused" { 2 } else { 0 });
         }
         Command::Undo { computer } => {
-            let value = flows::undo(engine, &computer, working_directory, progress).await?;
+            let mut value = flows::undo(engine, &computer, working_directory, progress).await?;
+            if let Ok(home) = access::home_dir() {
+                access::ssh_after_change(engine, &mut value, &home, build_channel()).await;
+            }
             emit(json, &value, render::undo);
             return Ok(if value["status"] == "refused" { 2 } else { 0 });
         }
@@ -538,6 +564,30 @@ async fn dispatch(
                     v["id"].as_str().unwrap_or_default()
                 )
             });
+        }
+        Command::Ports { computer } => emit(
+            json,
+            &access::ports(engine, &computer).await?,
+            render::ports,
+        ),
+        Command::Publish {
+            computer,
+            port,
+            http,
+        } => emit(
+            json,
+            &access::publish(engine, &computer, port, http).await?,
+            render::ports,
+        ),
+        Command::Unpublish { computer, port } => emit(
+            json,
+            &access::unpublish(engine, &computer, port).await?,
+            render::ports,
+        ),
+        Command::SshSetup { computer } => {
+            let home = access::home_dir()?;
+            let value = access::ssh_setup(engine, &computer, &home, build_channel()).await?;
+            emit(json, &value, render::ssh);
         }
         Command::Checkpoints { computer } => emit(
             json,

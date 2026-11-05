@@ -486,6 +486,19 @@ pub async fn fork(
     let forked = engine.computer(&name).await?;
     let mut fork = forked.to_json();
     fork["source"] = json!(source.name);
+    // The fork reaches the same ports its source publishes (a recipe fork, those the recipe
+    // names), each on a host port of its own.
+    let published = match (&args.recipe_name, &args.recipe) {
+        (Some(_), Some(recipe)) => {
+            crate::access::publish_recipe_ports(engine, &forked, &recipe.ports).await
+        }
+        (Some(_), None) => Ok(Vec::new()),
+        (None, _) => crate::access::inherit_ports(engine, &source, &forked).await,
+    };
+    match published {
+        Ok(ports) => fork["ports"] = json!(ports),
+        Err(error) => fork["portsError"] = json!(error.message),
+    }
     let used = match &checkpoint {
         Some(id) => known_before
             .iter()
@@ -1431,6 +1444,12 @@ pub async fn up(
         start(engine, MAIN, progress).await?;
         main = engine.computer(MAIN).await?;
     }
+    // The recipe's ports are published from main itself, so its forks inherit them.
+    let (ports, ports_error) =
+        match crate::access::publish_recipe_ports(engine, &main, &recipe.ports).await {
+            Ok(ports) => (json!(ports), Value::Null),
+            Err(error) => (Value::Null, json!(error.message)),
+        };
     let previous: Vec<String> = main
         .checkpoints
         .iter()
@@ -1466,5 +1485,7 @@ pub async fn up(
         "created": created,
         "recipe": recipe_name,
         "warmCheckpoint": warm["id"],
+        "publishedPorts": ports,
+        "portsError": ports_error,
     }))
 }

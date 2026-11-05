@@ -27,7 +27,7 @@ setup:                 # run once, in order: as root on Linux, as the account on
   - git clone https://example.com/app /opt/app
 services:              # started at boot
   web: python3 -m http.server 8080
-ports: [8080]          # published for each fork
+ports: [8080]          # published (as websites) on main by `silo up` and on each recipe fork
 quiet: [poller]        # fork rules (see SiloUI-CLI.md); not part of the build
 scrub: [/root/.env]
 keep:

@@ -1,6 +1,7 @@
 //! The `silo` command line and its MCP server, built on `silo-client` and the typed
 //! requests in `silo-api`.
 
+pub mod access;
 pub mod cli;
 pub mod clock;
 pub mod config;
