@@ -141,6 +141,16 @@ impl SiloMcp {
         )
     }
 
+    #[tool(
+        description = "Finish the setup of a macOS computer that stopped before it was ready, and wait until it ends."
+    )]
+    async fn retry_setup(
+        &self,
+        Parameters(ComputerParam { computer }): Parameters<ComputerParam>,
+    ) -> Result<String, String> {
+        show(async { ops::retry_setup(&self.engine().await?, &computer, &|_| {}).await }.await)
+    }
+
     #[tool(description = "Throw a computer away. main cannot be dropped through this tool.")]
     async fn drop(
         &self,

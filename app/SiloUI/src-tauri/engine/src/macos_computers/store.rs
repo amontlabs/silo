@@ -167,6 +167,9 @@ pub(super) struct Record {
     /// cannot keep it and the engine cannot restore it. Informational only.
     #[serde(default)]
     pub secure_token_missing: bool,
+    /// Why the disk is smaller than asked: a warning, not a failure.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disk_note: Option<String>,
     /// A fork whose disk was rekeyed and staged while stopped: its first start still installs
     /// its key, name and trust over its password login before handing the computer over.
     #[serde(default)]
@@ -351,6 +354,7 @@ pub(super) fn new_record(request: &CreateRequest, mac_address: String) -> Record
         inherited_access: false,
         imported: false,
         secure_token_missing: false,
+        disk_note: None,
         first_boot: false,
         quiet: None,
         forked_from: None,

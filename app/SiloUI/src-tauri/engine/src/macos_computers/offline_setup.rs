@@ -117,6 +117,23 @@ pub(super) fn run_fork_rekey(
     Ok(rekeyed)
 }
 
+/// Gives a copy of a template its own password hash, automatic login and login keychain on
+/// the stopped disk. Unlike a fork's rekey it leaves the template's SSH key in place, which
+/// the personalization that follows logs in with.
+pub(super) fn run_template_rekey(disk: &Path, account: &GuestAccount) -> Result<(), String> {
+    let mut attached = Attached::attach(disk)?;
+    let patched = attached.mount_data_volume().and_then(|mount| {
+        if account.user != USER || account.password.is_empty() {
+            return Err("Silo could not identify the computer's managed account.".to_string());
+        }
+        rekey_account(&mount, account)?;
+        clear_login_keychain(&mount)
+    });
+    let closed = attached.close();
+    patched?;
+    closed
+}
+
 // MARK: Disk
 
 /// A disk image attached to the host without mounting its volumes. `close`

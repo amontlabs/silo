@@ -413,6 +413,10 @@ impl Provision<'_> {
         let grow = requested > template_gib;
         let mut unallocated = None;
         let mut reconciled = None;
+        // The copy still has the template's password hash; it is replaced on the stopped disk.
+        offline_setup::ensure_detached(&self.layout.disk())?;
+        offline_setup::run_template_rekey(&self.layout.disk(), &own)?;
+        self.check()?;
         // The guest's host keys are about to change.
         guest_access::reset_host_keys(self.layout)?;
         self.start_machine()?;
@@ -422,10 +426,7 @@ impl Provision<'_> {
                 &template_login,
                 record,
                 &personalize::command(&script),
-                Some(&personalize::input(
-                    &own.password,
-                    &guest_access::account(&template_login)?.password,
-                )),
+                None,
                 PERSONALIZE_COMMAND,
             )?;
             self.log_command("personalization script", &output);
@@ -448,16 +449,17 @@ impl Provision<'_> {
                 None,
                 PERSONALIZE_COMMAND,
             )?;
+            self.log_command("disk expansion", &output);
             unallocated = personalize::unallocated(&output.stdout);
         }
+        // The offline password change cannot keep the account's SecureToken.
+        let token = self.enable_secure_token(record, &own)?;
+        record.secure_token_missing = secure_token_missing(token);
         if grow {
             let disk = personalize::reconcile_disk(requested, template_gib, unallocated);
             if disk.short {
                 self.log("personalization: the disk could not be expanded");
-                shortfall = Some(format!(
-                    "Silo could not expand the disk to {requested} GiB, so the computer has {} GiB. It is otherwise ready to start.",
-                    disk.gib
-                ));
+                shortfall = Some(disk_shortfall(requested, disk.gib));
             }
             reconciled = Some(disk.gib);
         }
@@ -483,12 +485,13 @@ impl Provision<'_> {
         if let Some(gib) = reconciled.filter(|gib| *gib != record.disk_gib) {
             record.disk_gib = gib;
         }
+        record.disk_note = shortfall;
         self.mark(record, |setup| {
             setup.needs_personalizing = false;
             setup.proxy_bootstrap = staged;
         })?;
-        // The computer is usable and complete; the message stays as its failure detail.
-        shortfall.map_or(Ok(()), |message| Err(Stop::Failed(message)))
+        // A smaller disk is a warning: the rest of the setup goes on and the computer is ready.
+        Ok(())
     }
 
     /// Personalizes a fork without starting it. Its password, automatic login and keychain are
@@ -1127,6 +1130,10 @@ fn sip_disabled(csrutil_status: &str) -> bool {
 
 /// Whether the working account has no SecureToken after an import. Anything but a
 /// confirmed token counts as missing: the note is informational, never a setup failure.
+fn disk_shortfall(requested: u64, actual: u64) -> String {
+    format!("Silo could not expand the disk to {requested} GiB, so the computer has {actual} GiB. It is otherwise ready to start.")
+}
+
 fn secure_token_missing(token: personalize::SecureToken) -> bool {
     token != personalize::SecureToken::Enabled
 }
@@ -1257,6 +1264,21 @@ mod tests {
         assert!(store::setup_allowed(store::State::Stopped, &record).is_err());
         #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
         assert!(engine::boots_behind_gateway(&record));
+    }
+
+    #[test]
+    fn a_disk_shortfall_is_a_message_for_the_note_not_a_stop() {
+        let message = disk_shortfall(64, 40);
+        assert_eq!(
+            message,
+            "Silo could not expand the disk to 64 GiB, so the computer has 40 GiB. It is otherwise ready to start."
+        );
+        // The copy's remaining steps run: the shortfall is stored on the record, which setup
+        // completeness does not read.
+        let mut record = finished_record();
+        record.disk_note = Some(message);
+        record.setup.proxy_bootstrap = true;
+        assert!(setup_finished(&record, &developer_tools::version()));
     }
 
     #[test]

@@ -529,3 +529,23 @@ async fn secrets_set_sends_the_value_and_requires_scope_for_a_new_secret() {
         .await
         .is_err());
 }
+
+#[tokio::test]
+async fn retry_setup_runs_the_engines_setup_retry_for_the_computer() {
+    let engine = FakeEngine::start(|method, _| match method {
+        "computers.list" => Ok(listing(&[("mac", "failed")])),
+        "macos.setup.retry" => Ok(json!({"jobId": "job:3"})),
+        "operations.job.get" => {
+            Ok(json!({"jobId": "job:3", "state": "finished", "outcome": {"result": null}}))
+        }
+        "operations.job.acknowledge" => Ok(Value::Null),
+        other => Err(("internal", format!("unexpected {other}"))),
+    });
+    let connected = Engine::connect(&engine.socket).await.unwrap();
+    ops::retry_setup(&connected, "mac", &ignore).await.unwrap();
+    assert_eq!(engine.calls("macos.setup.retry")[0]["computerId"], "id-mac");
+    let cli = <Cli as clap::Parser>::try_parse_from(["silo", "retry-setup", "mac"]).unwrap();
+    assert!(
+        matches!(cli.command, silo_cli::cli::Command::RetrySetup { ref computer } if computer == "mac")
+    );
+}

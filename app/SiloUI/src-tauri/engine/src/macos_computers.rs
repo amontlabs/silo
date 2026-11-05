@@ -288,10 +288,20 @@ impl Entry {
             state: self.state,
             progress: self.progress,
             detail: self.detail.clone(),
-            note: self
-                .record
-                .secure_token_missing
-                .then(|| SECURE_TOKEN_NOTE.to_owned()),
+            note: {
+                let notes: Vec<&str> = self
+                    .record
+                    .disk_note
+                    .as_deref()
+                    .into_iter()
+                    .chain(
+                        self.record
+                            .secure_token_missing
+                            .then_some(SECURE_TOKEN_NOTE),
+                    )
+                    .collect();
+                (!notes.is_empty()).then(|| notes.join(" "))
+            },
             display_open: self.display_open,
             installed: self.record.installed,
             setup_complete: self.record.setup_complete(),
@@ -10121,6 +10131,15 @@ mod tests {
             json["detail"], "Creating the account",
             "a note is not a failure detail"
         );
+        done.record.secure_token_missing = false;
+        done.record.disk_note = Some("Silo could not expand the disk to 64 GiB.".into());
+        done.state = State::Stopped;
+        done.detail = None;
+        let json = serde_json::to_value(done.row()).unwrap();
+        assert_eq!(json["note"], "Silo could not expand the disk to 64 GiB.");
+        assert_eq!(json["detail"], serde_json::Value::Null);
+        assert_eq!(json["state"], "stopped");
+        assert_eq!(json["setupComplete"], true);
         let state = serde_json::to_value(MacosComputersState {
             supported: false,
             unsupported_reason: Some("no".into()),

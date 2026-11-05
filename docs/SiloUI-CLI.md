@@ -41,6 +41,7 @@ the engine's message.
 | `silo secrets assign NAME COMPUTER` / `silo secrets unassign NAME COMPUTER` | change which computers have a secret |
 | `silo create <name> [--linux\|--macos] [--cpus N --memory GiB --disk GiB]` | create a computer |
 | `silo start <computer>` / `silo stop <computer>` | lifecycle |
+| `silo retry-setup <computer>` | finish the setup of a macOS computer that ended `failed` before it was ready |
 | `silo fork <source> [--name N] [--checkpoint ID] [--secret NAME]... [--recipe-file PATH]` | copy a computer; the name defaults to `<source>-<6 hex>` |
 | `silo drop <computer> [--force]` | throw a computer away; `main` needs `--force` |
 | `silo exec <computer> [--cwd DIR] [--timeout SECS] -- <cmd...>` | run a command; the exit code is passed through |

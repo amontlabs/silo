@@ -326,6 +326,22 @@ pub async fn stop(engine: &Engine, name: &str, progress: Progress<'_>) -> Result
     Ok(engine.computer(name).await?.to_json())
 }
 
+pub async fn retry_setup(
+    engine: &Engine,
+    name: &str,
+    progress: Progress<'_>,
+) -> Result<Value, CliError> {
+    let computer = engine.computer(name).await?;
+    engine
+        .run_job(
+            &format!("Setting up {name}"),
+            requests::macos_setup_retry(target(&computer)),
+            progress,
+        )
+        .await?;
+    Ok(engine.computer(name).await?.to_json())
+}
+
 fn target(computer: &Computer) -> ComputerTargetParams {
     ComputerTargetParams {
         computer_id: computer.id.clone(),

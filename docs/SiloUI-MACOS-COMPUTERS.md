@@ -150,25 +150,22 @@ the same template. Setup therefore ends with a step the template never needed.
 Silo boots the copy without a display and logs in as `silo` with the template's
 key from `template-access/`, then runs one script as root (`personalize.rs`):
 
-- sets the account password to the copy's own, with `dscl . -passwd` reading it
-  from standard input, and rewrites `/etc/kcpassword` for it (the same encoder as
-  the offline setup); both arrive on the SSH command's standard input, never in
-  an argument, the script or the environment;
+- before the boot, the copy's disk is attached on the host and the account's password
+  hash, automatic login (`/etc/kcpassword`) and login keychain are replaced offline
+  (`offline_setup::run_template_rekey`, the same rewrite forks use), leaving the
+  template's SSH key for the login below; `dscl . -passwd` is not used because it
+  refuses to change the password of an account with a SecureToken without a terminal
+  to ask for the old one. After the script the SecureToken is enabled again;
 - replaces `/etc/ssh/ssh_host_*` (`ssh-keygen -A`) and sets `ComputerName`,
   `LocalHostName` and `HostName` from the computer's name;
-- removes the contents of `~/Library/Keychains`. The login keychain is locked
-  with the old password, and macOS asks to unlock it at the next automatic login
-  when the password changes. Deleting it in the copy, rather than leaving it out of
-  the template, keeps the template an exact image of a finished computer, and
-  macOS creates a fresh keychain, unlocked with the new password, at the next
-  login;
 - when the disk is larger than the template's, expands the APFS container with
   `diskutil apfs resizeContainer` (after `repairDisk`) on the container's
   physical store, found with `diskutil info`. Every attempt, including a resumed
   one, measures the bytes no partition covers and expands only while a GiB or more is
   unused; the record's disk size is set from that measurement. If the container does
   not fill the disk, the computer keeps the space it got, its recorded disk size says
-  so, and it ends as Failed with that message but is complete and can be started. A
+  so. The message is shown as a note on the computer, not a failure: the rest of the setup
+  runs and the computer is ready to start. A
   requested disk smaller than the template that is selected when the copy starts
   fails with "This macOS template needs at least N GiB" instead of being enlarged;
 - replaces `authorized_keys` with the copy's own public key, as its last change, so

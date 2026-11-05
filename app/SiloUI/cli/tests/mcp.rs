@@ -70,7 +70,15 @@ async fn initialize_list_and_call_round_trip() {
         .iter()
         .map(|tool| tool["name"].as_str().unwrap())
         .collect();
-    for expected in ["list", "status", "fork", "drop", "exec", "checkpoint"] {
+    for expected in [
+        "list",
+        "status",
+        "fork",
+        "drop",
+        "exec",
+        "checkpoint",
+        "retry_setup",
+    ] {
         assert!(
             names.contains(&expected),
             "{expected} missing from {names:?}"
@@ -80,7 +88,7 @@ async fn initialize_list_and_call_round_trip() {
     assert!(
         !names
             .iter()
-            .any(|name| name.contains("set") || name.contains("assign")),
+            .any(|name| *name != "retry_setup" && (name.contains("set") || name.contains("assign"))),
         "no tool changes secrets: {names:?}"
     );
     let fork = tools["result"]["tools"]

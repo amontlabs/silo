@@ -48,6 +48,8 @@ pub enum Command {
     Start { computer: String },
     /// Stop a computer.
     Stop { computer: String },
+    /// Finish the setup of a computer that stopped before it was ready.
+    RetrySetup { computer: String },
     /// Copy a computer for a task.
     Fork(ForkCommand),
     /// Throw a computer away.
@@ -251,6 +253,10 @@ async fn dispatch(
         Command::Stop { computer } => {
             let value = ops::stop(engine, &computer, progress).await?;
             emit(json, &value, |v| render::computer_line("Stopped", v));
+        }
+        Command::RetrySetup { computer } => {
+            let value = ops::retry_setup(engine, &computer, progress).await?;
+            emit(json, &value, |v| render::computer_line("Set up", v));
         }
         Command::Fork(fork) => {
             let args = ForkArgs {
