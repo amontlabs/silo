@@ -240,6 +240,7 @@ fn json_shape_is_stable() {
             "database",
             "format",
             "home",
+            "idle_noise",
             "ignored",
             "not_kept",
             "other",
@@ -604,6 +605,8 @@ fn baseline_does_not_hide_different_content_at_the_same_path() {
         section(&d, "Settings & files"),
         ["~ /etc/app.conf", "~ /etc/l"]
     );
+    // Settings & files paths stay in their bucket; only Other changed collapses.
+    assert!(d.idle_noise.is_empty());
     // the same resulting content is background
     assert!(with_baseline(a, idle, idle).is_empty());
     // identities are in the JSON
@@ -784,4 +787,22 @@ fn large_baselines_subtract_quickly() {
     let d = with_baseline("", &idle, &task);
     assert_eq!(d.settings.files.len(), n);
     assert!(started.elapsed().as_secs() < 20);
+}
+
+#[test]
+fn idle_files_with_other_content_collapse_into_one_line_and_stay_in_the_json() {
+    let a = "F\t/srv/x/a\t1\t1\th0\nF\t/srv/x/b\t1\t1\th0\n";
+    let idle = "F\t/srv/x/a\t1\t2\th1\nF\t/srv/x/b\t1\t2\th1\n";
+    let task = "F\t/srv/x/a\t1\t3\th2\nF\t/srv/x/b\t1\t2\th1\nF\t/srv/x/c\t1\t3\th3\n";
+    let d = with_baseline(a, idle, task);
+    assert_eq!(d.idle_noise.len(), 1);
+    assert_eq!(d.idle_noise[0].path, "/srv/x/a");
+    assert_eq!(
+        section(&d, "Also changes when idle"),
+        ["1 files (/srv/x/a)"]
+    );
+    assert_eq!(
+        d.other.iter().map(|c| c.path.as_str()).collect::<Vec<_>>(),
+        ["/srv/x/c"]
+    );
 }

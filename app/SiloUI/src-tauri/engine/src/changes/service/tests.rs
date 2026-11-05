@@ -214,6 +214,14 @@ fn the_cached_baseline_is_subtracted_from_a_diff() {
     let result = run(&guest, &store, "fork", diff_work(true, true), &options).unwrap();
     assert_eq!(result["baselineApplied"], true);
     assert_eq!(other(&result), ["/srv/data/a:modified"]);
+    // The idle file ended with other content: kept apart, not hidden.
+    let noise = result["diff"]["idle_noise"].as_array().unwrap();
+    assert_eq!(noise.len(), 1);
+    assert_eq!(noise[0]["path"], "/srv/data/noise");
+    assert!(result["text"]
+        .as_str()
+        .unwrap()
+        .contains("Also changes when idle\n  1 files (/srv/data/noise)"));
 
     // `--no-baseline` shows the idle noise too.
     let guest = ScriptedGuest::new(&[&later]);
