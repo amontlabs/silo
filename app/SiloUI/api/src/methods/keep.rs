@@ -1,6 +1,5 @@
 //! Keep and undo: `changes.keep` and `changes.undo`.
 
-use serde::{Deserialize, Serialize};
 
 wire_struct! {
     /// The recipe's `keep:` section.
