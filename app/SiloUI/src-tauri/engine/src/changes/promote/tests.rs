@@ -1076,3 +1076,122 @@ fn recovery_holds_both_computers_until_it_is_done() {
         );
     }
 }
+
+// MARK: The real operation gate
+
+/// The fake with the engine's gate behind it: the stop and checkpoint take the gate the way
+/// the engine's do, the holds are real admissions, and applying a step needs one held.
+struct Gated {
+    fake: Arc<Fake>,
+    gate: &'static crate::runtime::operation_gate::OperationGate,
+    /// Hold each computer in turn, as the engine's environment once did.
+    one_by_one: bool,
+}
+
+impl Gated {
+    fn new(fake: Arc<Fake>, one_by_one: bool) -> Self {
+        Self {
+            fake,
+            gate: Box::leak(Box::new(
+                crate::runtime::operation_gate::OperationGate::new(),
+            )),
+            one_by_one,
+        }
+    }
+
+    fn admit(&self, id: &str, label: &str) -> Result<Box<dyn Any>, String> {
+        let name = self.fake.name_of(id);
+        self.gate
+            .computer(id, &name, label)
+            .map(|guard| Box::new(guard) as Box<dyn Any>)
+            .map_err(|error| error.to_string())
+    }
+}
+
+impl PromoteEnv for Gated {
+    fn info(&self, id: &str) -> Result<Info, String> {
+        self.fake.info(id)
+    }
+    fn name_in_use(&self, name: &str) -> bool {
+        self.fake.name_in_use(name)
+    }
+    fn stamp(&self) -> String {
+        self.fake.stamp()
+    }
+    fn checkpoint(&self, id: &str, name: &str) -> Result<CheckpointRef, String> {
+        let _turn = self.admit(id, "Checkpoint")?;
+        self.fake.checkpoint(id, name)
+    }
+    fn stop(&self, id: &str) -> Result<(), String> {
+        let _turn = self.admit(id, "Stop")?;
+        self.fake.stop(id)
+    }
+    fn hold(&self, id: &str, label: &str) -> Result<Box<dyn Any>, String> {
+        self.admit(id, label)
+    }
+    fn hold_pair(&self, first: &str, second: &str, label: &str) -> Result<Box<dyn Any>, String> {
+        if self.one_by_one {
+            return Ok(Box::new((
+                self.hold(first, label)?,
+                self.hold(second, label)?,
+            )));
+        }
+        self.gate
+            .device(label)
+            .map(|guard| Box::new(guard) as Box<dyn Any>)
+            .map_err(|error| error.to_string())
+    }
+    fn export_bindings(&self, id: &str, name: &str) -> Result<Value, String> {
+        self.fake.export_bindings(id, name)
+    }
+    fn apply(&self, step: Step, swap: &Swap) -> Result<(), String> {
+        assert!(
+            crate::runtime::operation_gate::held(),
+            "{step:?} runs under a held admission"
+        );
+        self.fake.apply(step, swap)
+    }
+    fn revert(&self, step: Step, swap: &Swap) -> Result<(), String> {
+        assert!(
+            crate::runtime::operation_gate::held(),
+            "{step:?} is undone under a held admission"
+        );
+        self.fake.revert(step, swap)
+    }
+}
+
+fn run_gated(env: &Gated, journal: &Journal) -> Result<Outcome, String> {
+    promote(
+        env,
+        &Lineage::new(Arc::new(Source::standard()), journal.clone()),
+        journal,
+        &request(),
+        Duration::from_secs(1),
+    )
+}
+
+#[test]
+fn holding_the_computers_one_by_one_fails_the_real_gate() {
+    let env = Gated::new(Fake::new(Os::Linux), true);
+    let (_dir, journal) = scratch_journal();
+    let error = run_gated(&env, &journal).unwrap_err();
+    assert_eq!(error, "Computer operation ordering failed.");
+}
+
+#[test]
+fn a_promote_and_its_undo_run_through_the_real_gate() {
+    let env = Gated::new(Fake::new(Os::Linux), false);
+    let mut before = env.fake.snapshot();
+    let (_dir, journal) = scratch_journal();
+    let outcome = run_gated(&env, &journal).unwrap();
+    before.checkpoints = env.fake.snapshot().checkpoints;
+    assert!(matches!(outcome, Outcome::Promoted(_)), "{outcome:?}");
+    assert_eq!(env.fake.name_of(FORK), "main");
+    assert!(env.gate.is_idle(), "the holds are released afterwards");
+
+    undo(&env, &journal, FORK, Duration::from_secs(1))
+        .unwrap()
+        .expect("the promote is undone");
+    assert_eq!(stopped(env.fake.snapshot()), stopped(before));
+    assert!(env.gate.is_idle());
+}

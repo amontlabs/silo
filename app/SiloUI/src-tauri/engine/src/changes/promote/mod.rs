@@ -65,6 +65,14 @@ pub trait PromoteEnv: Send + Sync {
     fn hold(&self, _id: &str, _label: &str) -> Result<Box<dyn Any>, String> {
         Ok(Box::new(()))
     }
+    /// Holds both computers' operation lanes until the value is dropped. The gate admits one
+    /// operation per thread, so an environment backed by it takes both under one admission.
+    fn hold_pair(&self, first: &str, second: &str, label: &str) -> Result<Box<dyn Any>, String> {
+        Ok(Box::new((
+            self.hold(first, label)?,
+            self.hold(second, label)?,
+        )))
+    }
     /// Everything the stores keep under the computer's name, as one document.
     fn export_bindings(&self, id: &str, name: &str) -> Result<Value, String>;
     /// Does one step. Repeating it changes nothing.
@@ -274,10 +282,11 @@ pub fn promote(
             env.stop(&info.id)?;
         }
     }
-    let _holds = (
-        env.hold(&target, &format!("Replacing it with {}", fork.name))?,
-        env.hold(&request.fork, "Becoming main")?,
-    );
+    let _holds = env.hold_pair(
+        &target,
+        &request.fork,
+        &format!("Replacing {} with {}", main.name, fork.name),
+    )?;
     for id in [&target, &request.fork] {
         let now = env.info(id)?;
         if now.running || now.busy.is_some() {
@@ -457,10 +466,7 @@ pub fn undo(
             env.stop(id)?;
         }
     }
-    let _holds = (
-        env.hold(&key.0, "Swapping back")?,
-        env.hold(&key.1, "Becoming main again")?,
-    );
+    let _holds = env.hold_pair(&key.0, &key.1, "Swapping the computers back")?;
     finish_undo(env, journal, &mut record)?;
     Ok(Some(Undone {
         computer: record.swap.target_name.clone(),

@@ -259,6 +259,18 @@ impl PromoteEnv for EngineEnv {
         self.guest.hold(id, label)
     }
 
+    fn hold_pair(&self, first: &str, second: &str, label: &str) -> Result<Box<dyn Any>, String> {
+        // Both computers change together and the gate admits one operation per thread, so
+        // the pair is held as one device-wide admission.
+        self.guest.os(first)?;
+        self.guest.os(second)?;
+        let guard = runtime::OPERATIONS
+            .kind(runtime::operation_gate::OperationKind::Other)
+            .device(label)
+            .map_err(|error| error.to_string())?;
+        Ok(Box::new(guard))
+    }
+
     fn export_bindings(&self, id: &str, name: &str) -> Result<Value, String> {
         if self.guest.os(id)? == Os::Linux {
             let linux = with_linux(self.host.as_ref(), |linux| linux.export(id, name))?;
