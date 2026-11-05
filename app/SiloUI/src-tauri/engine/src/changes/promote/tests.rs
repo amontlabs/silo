@@ -456,7 +456,11 @@ fn a_promote_moves_every_name_keyed_item_to_the_fork() {
         (FORK, MAIN),
         "main's SSH entry reaches the new main"
     );
-    assert!(after.running.is_empty(), "both computers are stopped");
+    assert_eq!(
+        after.running,
+        [FORK.to_owned()].into(),
+        "the new main runs again and the archive stays stopped"
+    );
     assert_eq!(
         after.checkpoints,
         vec![(MAIN.to_owned(), "Before promote of try-it".to_owned())]
@@ -516,7 +520,7 @@ fn a_promote_waits_for_both_computers_to_finish_stopping() {
     fake.device.lock().unwrap().slow_stop = true;
     let (_dir, journal) = scratch_journal();
     let after = promoted(&fake, &journal);
-    assert!(after.running.is_empty() && after.stopping.is_empty());
+    assert!(!after.running.contains(MAIN) && after.stopping.is_empty());
     assert_eq!(after.names[FORK], "main");
 }
 
@@ -551,7 +555,8 @@ fn undo_starts_again_the_computers_that_were_running_before_the_promote() {
         }
         let (_dir, journal) = scratch_journal();
         promoted(&fake, &journal);
-        assert!(fake.snapshot().running.is_empty());
+        assert_eq!(fake.snapshot().running.contains(FORK), main_ran);
+        assert!(!fake.snapshot().running.contains(MAIN));
         undo(fake.as_ref(), &journal, MAIN, Duration::from_secs(1))
             .unwrap()
             .unwrap();
@@ -566,6 +571,28 @@ fn undo_starts_again_the_computers_that_were_running_before_the_promote() {
             fork_ran,
             "fork {main_ran}/{fork_ran}"
         );
+    }
+}
+
+#[test]
+fn a_promote_leaves_the_new_main_in_the_running_state_of_the_old_one() {
+    for os in [Os::Linux, Os::Macos] {
+        for (main_ran, fork_ran) in [(true, true), (true, false), (false, true), (false, false)] {
+            let fake = Fake::new(os);
+            {
+                let mut d = fake.device.lock().unwrap();
+                if !main_ran {
+                    d.running.remove(MAIN);
+                }
+                if !fork_ran {
+                    d.running.remove(FORK);
+                }
+            }
+            let (_dir, journal) = scratch_journal();
+            let after = promoted(&fake, &journal);
+            assert_eq!(after.running.contains(FORK), main_ran, "{os:?} {main_ran}");
+            assert!(!after.running.contains(MAIN), "the archive stays stopped");
+        }
     }
 }
 
@@ -705,6 +732,8 @@ fn a_crash_at_every_step_is_rolled_forward_or_back_at_start() {
         };
         now.checkpoints.clear();
         want.checkpoints.clear();
+        // Recovery at engine start leaves every computer stopped.
+        want.running.clear();
         assert_eq!(now, want, "crash after {step:?}");
         let state = journal.all()[0].state;
         assert_eq!(
