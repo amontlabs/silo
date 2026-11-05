@@ -449,6 +449,189 @@ async fn changes_request_records_an_open_request_and_answers_with_it() {
     .is_err());
 }
 
+// MARK: changes.requests.*
+
+/// An engine whose computers are `linux-dev` (stopped) and `main` (`main-id`, running).
+fn request_fixture() -> Fixture {
+    use super::requests::{tests_rows, Row};
+    let fixture = fixture();
+    tests_rows::set(vec![
+        Row {
+            id: LINUX_ID.into(),
+            name: "linux-dev".into(),
+            state: "stopped".into(),
+            configuration: Some(json!({"id": LINUX_ID, "name": "linux-dev"})),
+        },
+        Row {
+            id: "main-id".into(),
+            name: "main".into(),
+            state: "running".into(),
+            configuration: None,
+        },
+    ]);
+    fixture
+}
+
+async fn make_request(fixture: &Fixture, fork: &str, target: &str, digest: &str) -> Value {
+    call(
+        fixture,
+        MethodName::ChangesRequest,
+        json!({"forkId": fork, "targetId": target, "reviewDigest": digest, "summary": "2 files",
+               "counts": {"code": 2}}),
+    )
+    .await
+    .unwrap()["request"]
+        .clone()
+}
+
+#[tokio::test]
+async fn requests_list_filters_by_status_and_names_the_fork() {
+    let fixture = request_fixture();
+    let made = make_request(&fixture, LINUX_ID, "main-id", "d1").await;
+    let gone = make_request(&fixture, "no-such-fork", "main-id", "d1").await;
+    let listed = call(&fixture, MethodName::ChangesRequestsList, json!({}))
+        .await
+        .unwrap();
+    let entries = listed["requests"].as_array().unwrap();
+    assert_eq!(entries.len(), 2);
+    let known = entries
+        .iter()
+        .find(|entry| entry["request"]["id"] == made["id"])
+        .unwrap();
+    assert_eq!(known["forkName"], "linux-dev");
+    assert_eq!(known["forkState"], "stopped");
+    assert_eq!(known["request"]["counts"]["code"], 2);
+    let missing = entries
+        .iter()
+        .find(|entry| entry["request"]["id"] == gone["id"])
+        .unwrap();
+    assert!(missing.get("forkName").is_none());
+    let kept = call(
+        &fixture,
+        MethodName::ChangesRequestsList,
+        json!({"status": "kept"}),
+    )
+    .await
+    .unwrap();
+    assert!(kept["requests"].as_array().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn requests_keep_refuses_what_the_engine_cannot_keep() {
+    let fixture = request_fixture();
+    let folder = make_request(&fixture, LINUX_ID, "folder:/work/app", "d1").await;
+    let error = call(
+        &fixture,
+        MethodName::ChangesRequestsKeep,
+        json!({"requestId": folder["id"]}),
+    )
+    .await
+    .expect_err("a folder fork is kept with silo fold");
+    assert!(error.message.contains("silo fold"), "{}", error.message);
+    let undigested = call(
+        &fixture,
+        MethodName::ChangesRequest,
+        json!({"forkId": LINUX_ID, "targetId": "main-id"}),
+    )
+    .await
+    .unwrap()["request"]
+        .clone();
+    let error = call(
+        &fixture,
+        MethodName::ChangesRequestsKeep,
+        json!({"requestId": undigested["id"]}),
+    )
+    .await
+    .expect_err("a request without a digest cannot pin a keep");
+    assert!(error.message.contains("no review digest"));
+    let error = call(
+        &fixture,
+        MethodName::ChangesRequestsKeep,
+        json!({"requestId": "fr-nothing"}),
+    )
+    .await
+    .expect_err("an unknown request");
+    assert!(error.message.contains("no review request"));
+    let gone = make_request(&fixture, "no-such-fork", "main-id", "d1").await;
+    let error = call(
+        &fixture,
+        MethodName::ChangesRequestsKeep,
+        json!({"requestId": gone["id"]}),
+    )
+    .await
+    .expect_err("the fork is gone");
+    assert!(error.message.contains("no longer exists"));
+}
+
+#[tokio::test]
+async fn requests_throw_away_never_drops_the_target() {
+    let fixture = request_fixture();
+    // The fork and the target are the same computer: it is the target and stays.
+    let request = make_request(&fixture, LINUX_ID, LINUX_ID, "d1").await;
+    let started = call(
+        &fixture,
+        MethodName::ChangesRequestsThrowAway,
+        json!({"requestId": request["id"]}),
+    )
+    .await
+    .unwrap();
+    let outcome = finished(&fixture, &job_id(started)).await.outcome.unwrap();
+    assert!(outcome.error.unwrap().message.contains("never thrown away"));
+    let listed = call(&fixture, MethodName::ChangesRequestsList, json!({}))
+        .await
+        .unwrap();
+    assert_eq!(listed["requests"][0]["request"]["status"], "open");
+    assert_eq!(listed["requests"][0]["forkName"], "linux-dev");
+}
+
+#[tokio::test]
+async fn requests_throw_away_closes_a_request_whose_fork_is_gone() {
+    let fixture = request_fixture();
+    let request = make_request(&fixture, "no-such-fork", "main-id", "d1").await;
+    let started = call(
+        &fixture,
+        MethodName::ChangesRequestsThrowAway,
+        json!({"requestId": request["id"]}),
+    )
+    .await
+    .unwrap();
+    let outcome = finished(&fixture, &job_id(started)).await.outcome.unwrap();
+    assert_eq!(outcome.result.unwrap()["request"]["status"], "thrown-away");
+    let error = call(
+        &fixture,
+        MethodName::ChangesRequestsThrowAway,
+        json!({"requestId": request["id"]}),
+    )
+    .await
+    .expect_err("an answered request cannot be answered again");
+    assert!(error.message.contains("already thrown away"));
+}
+
+#[tokio::test]
+async fn requests_show_a_folder_fork_with_its_own_summary_and_no_credentials() {
+    let fixture = request_fixture();
+    let request = make_request(&fixture, LINUX_ID, "folder:/work/app", "d1").await;
+    let started = call(
+        &fixture,
+        MethodName::ChangesRequestsShow,
+        json!({"requestId": request["id"]}),
+    )
+    .await
+    .unwrap();
+    let result = finished(&fixture, &job_id(started))
+        .await
+        .outcome
+        .unwrap()
+        .result
+        .unwrap();
+    assert_eq!(result["text"], "2 files");
+    assert_eq!(result["diff"], Value::Null);
+    assert!(result.get("stale").is_none());
+    assert_eq!(result["credentials"], json!({"used": [], "blocked": []}));
+    assert_eq!(result["forkName"], "linux-dev");
+    assert_eq!(result["request"]["id"], request["id"]);
+}
+
 // MARK: exports.*
 
 #[tokio::test]

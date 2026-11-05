@@ -106,9 +106,16 @@ async fn call_computers(
         .map(|output| output.value)
 }
 
+/// Every computer. The read has no event barrier of its own: it is not a subscription's
+/// snapshot, so a client that has not subscribed to `computers.*` can still ask.
 async fn all_rows(context: &HandlerContext) -> Result<Vec<Row>, DispatchError> {
+    #[cfg(test)]
+    if let Some(rows) = tests_rows::get() {
+        return Ok(rows);
+    }
+    let reader = HandlerContext::for_owner_bridge(context.engine.clone(), context.client.clone());
     Ok(rows(
-        &call_computers(context, MethodName::ComputersList, json!({})).await?,
+        &call_computers(&reader, MethodName::ComputersList, json!({})).await?,
     ))
 }
 
@@ -529,6 +536,23 @@ async fn reach(context: &HandlerContext, request: FoldRequest, fork: Row) -> Res
         started,
         urls,
     })
+}
+
+/// The computers the handlers see in a test, where no MicroSandbox runtime can list them.
+#[cfg(test)]
+pub(super) mod tests_rows {
+    use super::Row;
+    use std::sync::Mutex;
+
+    static ROWS: Mutex<Option<Vec<Row>>> = Mutex::new(None);
+
+    pub fn set(rows: Vec<Row>) {
+        *ROWS.lock().unwrap_or_else(|p| p.into_inner()) = Some(rows);
+    }
+
+    pub fn get() -> Option<Vec<Row>> {
+        ROWS.lock().unwrap_or_else(|p| p.into_inner()).clone()
+    }
 }
 
 #[cfg(test)]
