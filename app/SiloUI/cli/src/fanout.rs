@@ -418,7 +418,7 @@ pub async fn fork_many(
     let mut checkpoint = args.fork.checkpoint.clone();
     if checkpoint.is_none() {
         let max_age = Settings::warm_max_age_secs(settings);
-        checkpoint = ops::fresh_warm(&source.checkpoints, crate::clock::now_unix(), max_age)
+        checkpoint = ops::fresh_warm(&source, crate::clock::now_unix(), max_age)
             .and_then(|warm| warm["id"].as_str().map(str::to_owned));
     }
     if checkpoint.is_none() && args.count > 1 {

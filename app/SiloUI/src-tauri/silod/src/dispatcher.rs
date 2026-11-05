@@ -287,6 +287,10 @@ impl MethodRegistry for CoreMethodRegistry {
                 _ => return Err(DispatchError::internal("Invalid guest connection.")),
             };
             let app_data = context.paths().app_data.clone();
+            // A session with no forward label can change the computer for as long as it lasts.
+            let session = label
+                .is_none()
+                .then(|| silo_engine::generation::touch(Some(&params.computer_id)));
             tokio::task::spawn_blocking(move || {
                 silo_engine::macos_computers_engine::open_guest_ssh_stream(
                     &app_data,
@@ -300,7 +304,10 @@ impl MethodRegistry for CoreMethodRegistry {
                 let silo_engine::macos_computers_engine::GuestSshStream { stream, guard } = opened;
                 OpenedStream {
                     stream,
-                    allowed: Box::new(move || guard.allowed()),
+                    allowed: Box::new(move || {
+                        let _ = &session;
+                        guard.allowed()
+                    }),
                 }
             })
             .map_err(DispatchError::internal)
