@@ -46,14 +46,80 @@ the engine's message.
 | `silo recipe ls\|build NAME [--force]\|rm NAME` | list, build or remove recipe builds |
 | `silo fork NAME --recipe R` | fork from the cached build of recipe R (built first if missing) |
 | `silo fork <source> [--name N] [--checkpoint ID] [--secret NAME]... [--recipe-file PATH]` | copy a computer; the name defaults to `<source>-<6 hex>` |
+| `silo fork <source> -n N [--name PREFIX]` | N forks of the same checkpoint, made at once and started; each fork's name and URLs are printed ([details](#several-forks-and-commands)) |
+| `silo fork <source> [-n N] -- <cmd...>` | fork, start, run the command in the fork (output streams, the exit code is passed through) and leave the fork for review |
+| `silo fork ./dir` | copy a host folder's git repository into a fresh Linux fork ([details](#folder-forks)) |
+| `silo fold <fork> --request` | record a review request for the fork and print its id; nothing is kept |
 | `silo diff <computer> [--json] [--max-lines N] [--no-baseline] [--baseline]` | what changed since the fork (captures the computer now, compares with the record `silo fork` took); `--baseline` measures a missing baseline first, on a throwaway idle fork of the same checkpoint (also for a fork that has been used), and a baseline measured on one fork of a computer applies to its other forks; `silo fold --dry-run` ignores review digests |
 | `silo fold <fork> --promote [--into C] [--dry-run]` | make the fork main: it takes main's name, ports, secrets and GitHub access, and the old main is archived as `main-before-<time>`; `silo undo main` swaps back ([details](SiloUI-CHANGES.md#making-a-fork-main-silo-fold-fork---promote)) |
+| `silo undo <computer\|fork\|./dir>` | put a computer back to before its latest keep, or a folder back to before its latest fold |
 | `silo drop <computer> [--force]` | throw a computer away; `main` needs `--force` |
 | `silo exec <computer> [--cwd DIR] [--timeout SECS] -- <cmd...>` | run a command; the exit code is passed through |
 | `silo checkpoint <computer> [--name N] [--kind manual\|automatic\|before-keep\|warm]` | save a checkpoint |
 | `silo checkpoints <computer>` | list checkpoints |
 | `silo job <id>` | wait for a job that is already running |
 | `silo mcp` | serve the MCP tools on stdio |
+
+## Several forks and commands
+
+`-n N` (1 to 32) makes N forks of one checkpoint concurrently: the warm checkpoint from
+`silo up` when `main` has not changed since, else one new checkpoint (`silo-fork-<id>`, kept,
+because `silo diff --baseline` forks from it) that all N share. Names are `<source>-<6 hex>`,
+or `<prefix>-1` to `<prefix>-N` with `--name`. Each fork is started and its URLs
+(`network.urls`) are printed. Without `-n` or a command, `silo fork` makes one stopped fork
+as before.
+
+Limits are checked before anything is made:
+
+- macOS: Apple allows two macOS VMs at once, so N may not exceed the free slots (2 minus the
+  macOS computers running, the source included). Fork a Linux computer for more.
+- `fork_ram_budget` in `.silo/silo.yaml` (for example `8G`): the running forks (every running
+  computer except `main`) plus N more must fit. The engine does not report how much memory a
+  running computer uses, so each counts as the memory it was created with. The command refuses
+  and says how many would fit.
+
+`-- <cmd...>` runs the command in each fork once it is started, with no time limit (it uses the
+engine's streaming exec). With one fork the output goes to stdout and stderr as it arrives and the
+exit code is the command's own (128 plus the signal when it was killed). With `-n N` each line is
+prefixed with `[fork]`, a per-fork summary follows, and the exit code is the first non-zero one.
+The forks stay for review: `silo diff <fork>`, then `silo fold <fork>` or `silo drop <fork>`.
+
+## Folder forks
+
+`silo fork ./repo` needs the top folder of a git repository with a commit. It makes a fork
+of the `linux-dev` recipe (built if needed; `--name`, `--secret` and `silo.yaml` limits apply),
+starts it, sends `git bundle --all` through `files.upload` and clones it to `~/<folder>` in the
+fork. Only commits are copied; uncommitted changes stay on the host (the command says so). The
+CLI remembers the host path, the commit the fork started from and the branch, beside the engine
+socket (`cli-folders.json`). Words after `--` run in the repository inside the fork.
+
+`silo fold <fork>` on such a fork keeps into the folder instead of a computer:
+
+1. The host folder must be on a branch with no uncommitted changes to tracked files; otherwise
+   the fold is refused and changes nothing. Uncommitted work in the fork is committed there
+   first (`silo: uncommitted changes in <fork>`).
+2. The fork's commits since the starting commit come back as a bundle (`files.download`) and
+   are fetched into `refs/silo/<fork>/head` in the folder.
+3. A backup ref `refs/silo/backup/<UTC time>` marks the folder's HEAD, then the branch is
+   fast-forwarded, or merged when the folder moved on. A merge that would conflict is refused
+   (the files are listed) before the tree is touched; the backup ref is made only for a fold that
+   goes ahead.
+
+`--dry-run` stops after step 2 and adds only the `refs/silo/<fork>/head` ref. `silo undo <fork>`
+or `silo undo ./repo` resets the branch to the backup ref; it refuses when the folder has
+uncommitted changes to tracked files or has new commits since the fold. Everything done on the
+host stays inside the repository (its `.git/silo` folder holds the bundles in transit, removed
+afterwards). A folder fork cannot be made main or kept `--into` a computer.
+
+## Review requests
+
+`silo fold <fork> --request` takes a fresh `silo diff` of the fork (for a folder fork, its commits
+and uncommitted files) and calls `changes.request`, which stores a fold request in the engine
+(`fold-requests/<id>.json` under the app data folder): `id` (`fr-` and 8 hex), `forkId`, `target`
+(the computer id; `folder:<path>` for a folder fork), `createdAt`, `reviewDigest`, `summary` and
+`status: open`. Asking again for the same fork and target updates that open request. The id is
+printed. Listing, showing, keeping and throwing away requests come with phase 4; CI or cron call
+`silo fork main -- <cmd>` then `silo fold --request`.
 
 `silo status` prints, for a fork, a line such as
 `quiet: applied; stopped: poller; scrubbed: /root/.env; secrets: none` (on macOS it adds the
@@ -109,7 +175,7 @@ gets the named secrets (`github` gives read-only GitHub access) and the recipe's
 claude mcp add silo -- silo mcp
 ```
 
-Tools: `up`, `recipe_list`, `list`, `status`, `fork` (with `recipe`), `drop`, `exec`, `checkpoint`, `checkpoints`, `secrets_list`. They make the
+Tools: `up`, `recipe_list`, `list`, `status`, `fork` (with `recipe`, `count`, `command`, or a repository path as `source`), `fold` (with `promote` or `request`), `undo`, `drop`, `exec`, `checkpoint`, `checkpoints`, `secrets_list`. They make the
 same engine calls as the commands and return the same JSON as `--json`. `drop` cannot
 drop `main` through MCP. No tool sets or assigns secrets; values are never sent over MCP.
 

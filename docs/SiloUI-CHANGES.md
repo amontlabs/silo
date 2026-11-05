@@ -249,3 +249,13 @@ after its computer and has no rename, so the swap is refused with `unsupported`.
 is not restored yet**: files and jobs parked at fork time stay parked and the report notes it
 (restoring them needs the stopped fork's disk or a boot). The keep's database refusal prints the
 exact promote command.
+
+## Review requests: `changes.request`
+
+`changes.request` (a command) records that a fork waits for a review and changes nothing else.
+Params: `forkId`, optional `targetId` (default: the computer the fork came from, read from its
+fork-time record), `reviewDigest` (from `changes.diff`) and `summary`. The result is
+`{request: {id, forkId, target, createdAt, reviewDigest, summary, status}}` with `status: "open"`.
+The store is `fold_requests.rs` in the engine, one JSON file per request; a later request for
+the same fork and target updates the open one and keeps its id. The CLI and the MCP `fold` tool
+(`request: true`) call it after a fresh diff.
