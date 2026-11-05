@@ -768,6 +768,58 @@
       ],
       "type": "object"
     },
+    "ChangesPromoteParams": {
+      "properties": {
+        "dryRun": {
+          "description": "Check and report what a promote would do, changing nothing.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "forkId": {
+          "description": "The fork that replaces main.",
+          "type": "string"
+        },
+        "targetId": {
+          "description": "The computer it replaces; defaults to the one the fork was made from.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "forkId"
+      ],
+      "type": "object"
+    },
+    "ChangesPromoteResult": {
+      "description": "The final result of `changes.promote`. `status` is `promoted`, `dry-run` or `refused`; a\nrefused promote changed nothing.",
+      "properties": {
+        "refusal": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PromoteRefusal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "report": {
+          "$ref": "#/$defs/PromoteReport"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "status",
+        "report"
+      ],
+      "type": "object"
+    },
     "ChangesRole": {
       "description": "Which stored manifest a capture replaces.",
       "oneOf": [
@@ -6064,6 +6116,9 @@
         "macos_computers": {
           "$ref": "#/$defs/MacosComputersState"
         },
+        "promote": {
+          "$ref": "#/$defs/ChangesPromoteResult"
+        },
         "push": {
           "$ref": "#/$defs/PushOperation"
         },
@@ -6085,6 +6140,7 @@
         "macos_computers",
         "checkpoint_created",
         "keep",
+        "promote",
         "undo",
         "desktop",
         "backup",
@@ -6977,6 +7033,7 @@
       "enum": [
         "activity.setup.read",
         "changes.keep",
+        "changes.promote",
         "changes.undo",
         "changes.baseline",
         "changes.capture",
@@ -7155,6 +7212,22 @@
             },
             "params": {
               "$ref": "#/$defs/ChangesKeepParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "changes.promote",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/ChangesPromoteParams"
             }
           },
           "required": [
@@ -9574,6 +9647,22 @@
           "properties": {
             "method": {
               "const": "changes.keep",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/JobStartResult"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "changes.promote",
               "type": "string"
             },
             "result": {
@@ -12854,6 +12943,63 @@
       ],
       "type": "string"
     },
+    "PromoteRefusal": {
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "reason": {
+          "description": "`busy`, `os` or `unsupported`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "reason",
+        "message"
+      ],
+      "type": "object"
+    },
+    "PromoteReport": {
+      "properties": {
+        "archive": {
+          "description": "The name the old main has afterwards.",
+          "type": "string"
+        },
+        "checkpoint": {
+          "description": "The before-promote checkpoint of the old main.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "fork": {
+          "type": "string"
+        },
+        "notes": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "steps": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "target": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "fork",
+        "target",
+        "archive",
+        "steps",
+        "notes"
+      ],
+      "type": "object"
+    },
     "ProtocolRange": {
       "description": "The inclusive protocol range a client supports.",
       "properties": {
@@ -14603,6 +14749,10 @@
       "resultType": "ChangesKeepResult"
     },
     {
+      "method": "changes.promote",
+      "resultType": "ChangesPromoteResult"
+    },
+    {
       "method": "changes.undo",
       "resultType": "ChangesUndoResult"
     },
@@ -14734,6 +14884,12 @@
       "kind": "job",
       "name": "changes.keep",
       "paramsType": "keep::ChangesKeepParams",
+      "resultType": "common::JobStartResult"
+    },
+    {
+      "kind": "job",
+      "name": "changes.promote",
+      "paramsType": "keep::ChangesPromoteParams",
       "resultType": "common::JobStartResult"
     },
     {

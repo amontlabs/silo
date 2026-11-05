@@ -139,9 +139,9 @@ impl PromoteEnv for EngineEnv {
                 macos_computers::promote_check_identity(&swap.fork_id)?;
                 macos_computers::promote_check_identity(&swap.target_id)
             }
-            Step::Quiet => Err(
-                "Parked scheduled jobs are listed on the fork and were not restored.".into(),
-            ),
+            Step::Quiet => {
+                Err("Parked scheduled jobs are listed on the fork and were not restored.".into())
+            }
         }
     }
 

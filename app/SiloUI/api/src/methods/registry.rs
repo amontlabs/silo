@@ -66,6 +66,7 @@ pub struct MethodDescriptor {
 define_registry! {
     ActivitySetupRead => ("activity.setup.read", Query, common::DeviceParams, Vec<computers::ComputerConfigurationProgress>);
     ChangesKeep => ("changes.keep", Job, keep::ChangesKeepParams, common::JobStartResult);
+    ChangesPromote => ("changes.promote", Job, keep::ChangesPromoteParams, common::JobStartResult);
     ChangesUndo => ("changes.undo", Job, keep::ChangesUndoParams, common::JobStartResult);
     ChangesBaseline => ("changes.baseline", Job, changes::ChangesBaselineParams, common::JobStartResult);
     ChangesCapture => ("changes.capture", Job, changes::ChangesCaptureParams, common::JobStartResult);

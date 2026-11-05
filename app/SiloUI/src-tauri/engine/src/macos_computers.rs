@@ -2729,7 +2729,10 @@ pub fn promote_check_identity(id: &str) -> Result<(), String> {
 }
 
 /// The saved forwards of a macOS computer (see `ports::export_mappings`).
-pub fn promote_export_ports(app: &MacosContext, id: &str) -> Result<Vec<serde_json::Value>, String> {
+pub fn promote_export_ports(
+    app: &MacosContext,
+    id: &str,
+) -> Result<Vec<serde_json::Value>, String> {
     ports::export_mappings(&app_data(app)?, id)
 }
 

@@ -4,9 +4,12 @@
 use serde_json::Value;
 use silo_api::methods::{
     common::JobStartResult,
-    keep::{ChangesKeepParams, ChangesUndoParams},
+    keep::{ChangesKeepParams, ChangesPromoteParams, ChangesUndoParams},
 };
-use silo_engine::changes::keep::{service, store, Hooks, Request};
+use silo_engine::changes::{
+    keep::{service, store, Hooks, Request},
+    promote,
+};
 
 use crate::dispatcher::{DispatchError, HandlerOutput};
 
@@ -53,10 +56,34 @@ pub(super) async fn undo(
     let checkpoints = checkpoint_service(context);
     let manifests = store::production(host.clone());
     let started = tokio::task::spawn_blocking(move || {
-        service::start_undo(host, checkpoints, manifests, params.computer_id)
+        promote::service::start_undo(host, checkpoints, manifests, params.computer_id)
     })
     .await
     .map_err(|_| DispatchError::internal("The undo could not start."))?;
+    started
+        .map(|job_id| JobStartResult { job_id })
+        .map_err(failure)
+        .and_then(output)
+}
+
+pub(super) async fn promote(
+    context: &HandlerContext,
+    params: &Value,
+) -> Result<HandlerOutput, DispatchError> {
+    let params: ChangesPromoteParams = context.decode_params(params)?;
+    let host = context.silod_context().runtime_host();
+    let request = promote::Request {
+        fork: params.fork_id,
+        target: params.target_id,
+        dry_run: params.dry_run.unwrap_or(false),
+    };
+    let checkpoints = checkpoint_service(context);
+    let manifests = store::production(host.clone());
+    let started = tokio::task::spawn_blocking(move || {
+        promote::service::start_promote(host, checkpoints, manifests, request)
+    })
+    .await
+    .map_err(|_| DispatchError::internal("The promote could not start."))?;
     started
         .map(|job_id| JobStartResult { job_id })
         .map_err(failure)

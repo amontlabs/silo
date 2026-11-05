@@ -129,7 +129,6 @@ impl Undone {
             "computer": self.computer,
             "recovered": self.recovered,
             "changedSince": [],
-            "swapped": {"main": self.computer, "was": self.archive},
         })
     }
 }

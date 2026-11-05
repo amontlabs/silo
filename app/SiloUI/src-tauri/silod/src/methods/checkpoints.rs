@@ -74,6 +74,7 @@ async fn dispatch(
         MethodName::ChangesDiff => changes::diff(context, params).await,
         MethodName::ChangesBaseline => changes::baseline(context, params).await,
         MethodName::ChangesKeep => keep::keep(context, params).await,
+        MethodName::ChangesPromote => keep::promote(context, params).await,
         MethodName::ChangesUndo => keep::undo(context, params).await,
         MethodName::CheckpointsCreate => create(context, params).await,
         MethodName::CheckpointsRestore => restore(context, params).await,

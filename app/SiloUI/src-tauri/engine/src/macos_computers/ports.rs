@@ -1096,7 +1096,10 @@ pub(super) fn has_http_forwards(app: &MacosContext) -> bool {
 }
 
 /// The saved forwards of one computer, to put back after a promote.
-pub(super) fn export_mappings(app_data: &Path, computer_id: &str) -> Result<Vec<serde_json::Value>, String> {
+pub(super) fn export_mappings(
+    app_data: &Path,
+    computer_id: &str,
+) -> Result<Vec<serde_json::Value>, String> {
     let _lock = configuration_lock();
     let config = read_configuration_unlocked(app_data)?;
     Ok(config

@@ -26,7 +26,11 @@ pub fn start_promote(
     keep_service::start(host, "changes.promote", move |host| {
         let context = host.engine_context();
         let journal = journal_for(context.as_ref());
-        let env = EngineEnv::new(host.clone(), service, keep_service::journal_for(context.as_ref()));
+        let env = EngineEnv::new(
+            host.clone(),
+            service,
+            keep_service::journal_for(context.as_ref()),
+        );
         super::promote(&env, store.as_ref(), &journal, &request, LANE_WAIT)
             .map(|outcome| outcome.to_json())
     })
@@ -65,10 +69,7 @@ pub fn start_undo(
 }
 
 /// Settles every promote or undo the engine stopped in the middle of; returns the failures.
-pub fn recover_interrupted(
-    host: Arc<dyn RuntimeHost>,
-    service: Service,
-) -> Vec<String> {
+pub fn recover_interrupted(host: Arc<dyn RuntimeHost>, service: Service) -> Vec<String> {
     let context = host.engine_context();
     let journal = journal_for(context.as_ref());
     let env = EngineEnv::new(host, service, keep_service::journal_for(context.as_ref()));

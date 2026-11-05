@@ -45,6 +45,51 @@ wire_struct! {
 }
 
 wire_struct! {
+    ChangesPromoteParams {
+        /// The fork that replaces main.
+        fork_id: String,
+        /// The computer it replaces; defaults to the one the fork was made from.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        target_id: Option<String>,
+        /// Check and report what a promote would do, changing nothing.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        dry_run: Option<bool>,
+    }
+}
+
+wire_struct! {
+    PromoteReport {
+        fork: String,
+        target: String,
+        /// The name the old main has afterwards.
+        archive: String,
+        steps: Vec<String>,
+        notes: Vec<String>,
+        /// The before-promote checkpoint of the old main.
+        checkpoint: Option<String>,
+    }
+}
+
+wire_struct! {
+    PromoteRefusal {
+        /// `busy`, `os` or `unsupported`.
+        reason: String,
+        message: String,
+    }
+}
+
+wire_struct! {
+    /// The final result of `changes.promote`. `status` is `promoted`, `dry-run` or `refused`; a
+    /// refused promote changed nothing.
+    ChangesPromoteResult {
+        status: String,
+        report: PromoteReport,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        refusal: Option<PromoteRefusal>,
+    }
+}
+
+wire_struct! {
     KeepConflict {
         /// `file`, `package`, `crontab`, `launch agent` or `git`.
         kind: String,

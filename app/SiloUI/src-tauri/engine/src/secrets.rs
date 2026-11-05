@@ -366,8 +366,8 @@ pub(crate) fn reassign(computer: &str, names: &[String]) -> Result<(), String> {
     if names.is_empty() {
         return Ok(());
     }
-    let _operation = try_lock_unit(&OPERATION)
-        .ok_or_else(|| "Secret settings are busy. Retry.".to_string())?;
+    let _operation =
+        try_lock_unit(&OPERATION).ok_or_else(|| "Secret settings are busy. Retry.".to_string())?;
     update(|document| {
         for secret in &mut document.secrets {
             if !secret.removing
