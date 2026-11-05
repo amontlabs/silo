@@ -150,7 +150,7 @@
     },
     {
       "path": "patches/microsandbox-rename-stopped-0.7.6.patch",
-      "sha256": "221f46a96f3b0d807a73cf409a70f70dd9128a0149f86fdf8f97e7e9b1ab3296"
+      "sha256": "bcc0e76e46b902c578e6c84ec4113d564fb466f4a43e5d0272f80dce1470ae96"
     }
   ]
 }

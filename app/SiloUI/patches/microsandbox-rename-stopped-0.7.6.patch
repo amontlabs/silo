@@ -127,7 +127,7 @@ new file mode 100644
 index 0000000..1111111
 --- /dev/null
 +++ b/sdk/rust/lib/sandbox/rename.rs
-@@ -0,0 +1,689 @@
+@@ -0,0 +1,782 @@
 +//! Rename a stopped sandbox.
 +//!
 +//! A sandbox name lives in three places: the catalog row (`name`, and the `spec.name` inside the
@@ -136,6 +136,11 @@ index 0000000..1111111
 +//! else the runtime persists is keyed by the numeric sandbox id (runs, labels, root disk records,
 +//! the snapshot ancestry cursor inside the sandbox directory) or is a relative path inside the
 +//! sandbox directory, so it follows the directory.
++//!
++//! The runtime keeps one more thing under the old name: `runtime/root-disk.json` records the
++//! absolute path of every layer of the root disk, and a start refuses a journal whose layer is
++//! not the configured one. The rename rewrites the paths below the old directory in the JSON
++//! files of the sandbox's `runtime/` folder.
 +//!
 +//! The rename takes the transition, snapshot-ancestry and lifecycle locks of both names (in name
 +//! order, so two opposite renames cannot wait on each other), writes a journal that records the
@@ -166,6 +171,7 @@ index 0000000..1111111
 +
 +const JOURNAL_DIRECTORY: &str = "rename-journal";
 +const JOURNAL_SCHEMA: u32 = 1;
++const STATE_FILE_LIMIT: u64 = 1024 * 1024;
 +
 +//--------------------------------------------------------------------------------------------------
 +// Types
@@ -277,10 +283,17 @@ index 0000000..1111111
 +        remove_journal(local, model.id)?;
 +        return Err(error);
 +    }
-+    if let Err(error) = update_row(local, &journal).await {
++    let moved = rewrite_state_files(&new_dir, &old_dir, &new_dir);
++    let updated = match moved {
++        Ok(()) => update_row(local, &journal).await,
++        Err(error) => Err(error),
++    };
++    if let Err(error) = updated {
 +        // Put the directory back so the catalog and the filesystem agree; if that fails too the
 +        // journal stays and the next start finishes the rename instead.
-+        if rename_directory(&new_dir, &old_dir).is_ok() {
++        if rename_directory(&new_dir, &old_dir).is_ok()
++            && rewrite_state_files(&old_dir, &new_dir, &old_dir).is_ok()
++        {
 +            remove_journal(local, model.id)?;
 +        }
 +        return Err(error);
@@ -341,6 +354,7 @@ index 0000000..1111111
 +        if !new_present && old_present {
 +            rename_directory(&old_dir, &new_dir)?;
 +        }
++        rewrite_state_files(&new_dir, &old_dir, &new_dir)?;
 +        return remove_journal(local, journal.sandbox_id);
 +    }
 +    if row.name != journal.old {
@@ -361,8 +375,11 @@ index 0000000..1111111
 +        )));
 +    }
 +    match (old_present, new_present) {
-+        (true, false) => rename_directory(&old_dir, &new_dir)?,
-+        (false, true) => {}
++        (true, false) => {
++            rename_directory(&old_dir, &new_dir)?;
++            rewrite_state_files(&new_dir, &old_dir, &new_dir)?;
++        }
++        (false, true) => rewrite_state_files(&new_dir, &old_dir, &new_dir)?,
 +        _ => {
 +            return Err(MicrosandboxError::Runtime(format!(
 +                "cannot finish renaming sandbox {:?}: the directories {} and {} are inconsistent",
@@ -474,29 +491,70 @@ index 0000000..1111111
 +    Ok(serde_json::to_string(&value)?)
 +}
 +
-+fn move_paths(value: &mut serde_json::Value, old_dir: &Path, new_dir: &Path) {
++fn move_paths(value: &mut serde_json::Value, old_dir: &Path, new_dir: &Path) -> bool {
 +    match value {
 +        serde_json::Value::String(text) => {
-+            if let Ok(rest) = Path::new(text.as_str()).strip_prefix(old_dir) {
-+                let moved = if rest.as_os_str().is_empty() {
-+                    new_dir.to_path_buf()
-+                } else {
-+                    new_dir.join(rest)
++            let Ok(rest) = Path::new(text.as_str()).strip_prefix(old_dir) else {
++                return false;
++            };
++            let moved = if rest.as_os_str().is_empty() {
++                new_dir.to_path_buf()
++            } else {
++                new_dir.join(rest)
++            };
++            *text = moved.to_string_lossy().into_owned();
++            true
++        }
++        serde_json::Value::Array(items) => items.iter_mut().fold(false, |changed, item| {
++            move_paths(item, old_dir, new_dir) | changed
++        }),
++        serde_json::Value::Object(map) => map.values_mut().fold(false, |changed, item| {
++            move_paths(item, old_dir, new_dir) | changed
++        }),
++        _ => false,
++    }
++}
++
++/// Rewrites the paths below `from` to `to` in the JSON state files under `sandbox_dir/runtime`.
++/// Repeating it changes nothing.
++fn rewrite_state_files(sandbox_dir: &Path, from: &Path, to: &Path) -> MicrosandboxResult<()> {
++    fn walk(directory: &Path, depth: usize, from: &Path, to: &Path) -> MicrosandboxResult<()> {
++        let entries = match std::fs::read_dir(directory) {
++            Ok(entries) => entries,
++            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
++            Err(error) => return Err(error.into()),
++        };
++        for entry in entries {
++            let entry = entry?;
++            let path = entry.path();
++            let kind = entry.file_type()?;
++            if kind.is_dir() && depth < 3 {
++                walk(&path, depth + 1, from, to)?;
++            } else if kind.is_file()
++                && path.extension().and_then(|extension| extension.to_str()) == Some("json")
++                && entry.metadata()?.len() <= STATE_FILE_LIMIT
++            {
++                let Ok(mut value) =
++                    serde_json::from_slice::<serde_json::Value>(&std::fs::read(&path)?)
++                else {
++                    continue;
 +                };
-+                *text = moved.to_string_lossy().into_owned();
++                if move_paths(&mut value, from, to) {
++                    use std::io::Write;
++                    let parent = path.parent().expect("state file has a directory");
++                    let mut staged = tempfile::NamedTempFile::new_in(parent)?;
++                    staged.write_all(&serde_json::to_vec(&value)?)?;
++                    staged.as_file().sync_all()?;
++                    staged
++                        .persist(&path)
++                        .map_err(|error| MicrosandboxError::Io(error.error))?;
++                    sync_directory(parent)?;
++                }
 +            }
 +        }
-+        serde_json::Value::Array(items) => {
-+            items
-+                .iter_mut()
-+                .for_each(|item| move_paths(item, old_dir, new_dir));
-+        }
-+        serde_json::Value::Object(map) => {
-+            map.values_mut()
-+                .for_each(|item| move_paths(item, old_dir, new_dir));
-+        }
-+        _ => {}
++        Ok(())
 +    }
++    walk(&sandbox_dir.join("runtime"), 0, from, to)
 +}
 +
 +fn rename_directory(from: &Path, to: &Path) -> MicrosandboxResult<()> {
@@ -569,6 +627,15 @@ index 0000000..1111111
 +        let directory = local.sandboxes_dir().join(name);
 +        std::fs::create_dir_all(directory.join("runtime")).unwrap();
 +        std::fs::write(directory.join("marker"), name).unwrap();
++        std::fs::write(
++            directory.join("runtime/root-disk.json"),
++            serde_json::json!({
++                "schema": "microsandbox.runtime-root-disk/1",
++                "layers": [{"path": directory.join("upper.ext4"), "format": "raw"}],
++            })
++            .to_string(),
++        )
++        .unwrap();
 +        let mut config = SandboxConfig::default();
 +        config.spec.name = name.into();
 +        config.snapshot_parent = None;
@@ -633,6 +700,19 @@ index 0000000..1111111
 +                    .to_string_lossy()
 +            );
 +            assert!(!journal_path(local, id).exists());
++            // The root disk's layer paths follow the directory, or a start would refuse them.
++            let state: serde_json::Value = serde_json::from_slice(
++                &std::fs::read(local.sandboxes_dir().join("after/runtime/root-disk.json")).unwrap(),
++            )
++            .unwrap();
++            assert_eq!(
++                state["layers"][0]["path"],
++                local
++                    .sandboxes_dir()
++                    .join("after/upper.ext4")
++                    .to_string_lossy()
++                    .as_ref()
++            );
 +        }
 +    }
 +
@@ -770,6 +850,19 @@ index 0000000..1111111
 +            assert!(!journal_path(local, id).exists(), "{point}");
 +            let row = find_by_name(local, "new").await.unwrap().unwrap();
 +            assert_eq!(stored_config(&row).spec.name, "new");
++            let state =
++                std::fs::read_to_string(local.sandboxes_dir().join("new/runtime/root-disk.json"))
++                    .unwrap();
++            assert!(
++                state.contains(
++                    &local
++                        .sandboxes_dir()
++                        .join("new/upper.ext4")
++                        .to_string_lossy()
++                        .into_owned()
++                )
++            );
++            assert!(!state.contains("/old/"));
 +        }
 +    }
 +
@@ -806,11 +899,11 @@ index 0000000..1111111
 +            "sibling": "/home/sandboxes/older/disk",
 +            "elsewhere": ["/data/old", "old"],
 +        });
-+        move_paths(
++        assert!(move_paths(
 +            &mut value,
 +            Path::new("/home/sandboxes/old"),
 +            Path::new("/home/sandboxes/new"),
-+        );
++        ));
 +        assert_eq!(value["inside"], "/home/sandboxes/new/runtime/disk");
 +        assert_eq!(value["exact"], "/home/sandboxes/new");
 +        assert_eq!(value["sibling"], "/home/sandboxes/older/disk");
