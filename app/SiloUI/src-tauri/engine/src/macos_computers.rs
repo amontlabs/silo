@@ -2720,6 +2720,14 @@ pub fn promote_set_name(app: &MacosContext, id: &str, name: &str) -> Result<(), 
     Ok(())
 }
 
+/// Checks the proxy CA the network bootstrap expects for this computer. It is keyed by the
+/// computer's id, which a promote never changes, so nothing moves; a missing CA fails the promote.
+pub fn promote_check_identity(id: &str) -> Result<(), String> {
+    proxy_ca::get_existing(id)?.map(|_| ()).ok_or_else(|| {
+        "The computer's network identity is missing; set it up before promoting.".into()
+    })
+}
+
 /// The saved forwards of a macOS computer (see `ports::export_mappings`).
 pub fn promote_export_ports(app: &MacosContext, id: &str) -> Result<Vec<serde_json::Value>, String> {
     ports::export_mappings(&app_data(app)?, id)

@@ -8,6 +8,7 @@
 //! start by [`recover_all`]: rolled forward when every step that matters was applied, rolled
 //! back otherwise. `silo undo main` afterwards swaps the names and settings back.
 
+pub mod engine_env;
 pub mod journal;
 #[cfg(test)]
 mod tests;
@@ -38,6 +39,10 @@ pub struct Info {
 /// `engine_env::EngineEnv`.
 pub trait PromoteEnv: Send + Sync {
     fn info(&self, id: &str) -> Result<Info, String>;
+    /// Why computers of this kind cannot be promoted on this device, when they cannot.
+    fn unsupported(&self, _os: Os) -> Option<String> {
+        None
+    }
     /// Whether any computer already has `name`.
     fn name_in_use(&self, name: &str) -> bool;
     /// A sortable local time stamp for the archive name, such as `20261105-1432`.
@@ -199,6 +204,9 @@ pub fn promote(
         steps: steps.iter().map(|s| s.label().to_owned()).collect(),
         ..Report::default()
     };
+    if let Some(why) = env.unsupported(main.os) {
+        return Ok(refuse(report, "unsupported", why));
+    }
     if main.os != fork.os {
         return Ok(refuse(
             report,
