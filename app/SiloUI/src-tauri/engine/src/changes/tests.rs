@@ -12,10 +12,15 @@ use super::diff::Change;
 use super::*;
 
 fn fixture(name: &str) -> Manifest {
-    let path = format!("{}/src/changes/fixtures/{name}.tsv.gz", env!("CARGO_MANIFEST_DIR"));
+    let path = format!(
+        "{}/src/changes/fixtures/{name}.tsv.gz",
+        env!("CARGO_MANIFEST_DIR")
+    );
     let bytes = std::fs::read(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
     let mut text = String::new();
-    flate2::read::GzDecoder::new(&bytes[..]).read_to_string(&mut text).unwrap();
+    flate2::read::GzDecoder::new(&bytes[..])
+        .read_to_string(&mut text)
+        .unwrap();
     Manifest::parse(&text).unwrap()
 }
 
@@ -149,9 +154,17 @@ Not kept\n  credentials: ~/.openclaw/credentials/ (1 file)\nIgnored: 81 paths (c
 fn golden_macos_brew_step_is_14_lines() {
     let l = golden("mac-m0-m1");
     assert_eq!(l.len(), 14);
-    assert_eq!(l[0..2], lines("Packages\n  brew: jq, ripgrep (+2 dependencies)")[..]);
-    assert!(l.iter().any(|x| x.starts_with("  processes: AUCrashHandlerService")));
-    assert_eq!(l.last().unwrap(), "Ignored: 27 paths (caches, logs, build output)");
+    assert_eq!(
+        l[0..2],
+        lines("Packages\n  brew: jq, ripgrep (+2 dependencies)")[..]
+    );
+    assert!(l
+        .iter()
+        .any(|x| x.starts_with("  processes: AUCrashHandlerService")));
+    assert_eq!(
+        l.last().unwrap(),
+        "Ignored: 27 paths (caches, logs, build output)"
+    );
 }
 
 #[test]
@@ -192,12 +205,23 @@ fn golden_live_idle_agent_task_is_3_lines() {
 
 #[test]
 fn golden_json_round_trips_and_is_complete() {
-    let d = diff(&fixture("l4.parent"), &fixture("l4.fork"), None, &IgnoreList::builtin());
+    let d = diff(
+        &fixture("l4.parent"),
+        &fixture("l4.fork"),
+        None,
+        &IgnoreList::builtin(),
+    );
     let json = serde_json::to_string(&d).unwrap();
     let back: Diff = serde_json::from_str(&json).unwrap();
     assert_eq!(back, d);
     // the full list stays in the JSON although the text rolls it up
-    assert_eq!(d.other.iter().filter(|c| c.path.starts_with("/usr/local/lib/")).count(), 834);
+    assert_eq!(
+        d.other
+            .iter()
+            .filter(|c| c.path.starts_with("/usr/local/lib/"))
+            .count(),
+        834
+    );
     assert!(d.render_lines(15).len() <= 15);
 }
 
@@ -211,14 +235,52 @@ fn json_shape_is_stable() {
     keys.sort();
     assert_eq!(
         keys,
-        ["code", "database", "format", "home", "ignored", "not_kept", "other", "packages", "repo_files", "settings", "summary"]
+        [
+            "code",
+            "database",
+            "format",
+            "home",
+            "ignored",
+            "not_kept",
+            "other",
+            "packages",
+            "repo_changes",
+            "repo_files",
+            "settings",
+            "summary"
+        ]
     );
     assert_eq!(v["format"], 1);
-    assert_eq!(v["settings"]["files"][0], serde_json::json!({"path": "/etc/a.conf", "change": "added"}));
-    assert_eq!(v["summary"][0], serde_json::json!({"bucket": "Settings & files", "lines": ["+ /etc/a.conf"]}));
-    let mut nk: Vec<&str> = v["not_kept"].as_object().unwrap().keys().map(String::as_str).collect();
+    assert_eq!(
+        v["settings"]["files"][0],
+        serde_json::json!({
+            "path": "/etc/a.conf",
+            "change": "added",
+            "before": null,
+            "after": {"kind": "file", "size": "1", "hash": "x"}
+        })
+    );
+    assert_eq!(
+        v["summary"][0],
+        serde_json::json!({"bucket": "Settings & files", "lines": ["+ /etc/a.conf"]})
+    );
+    let mut nk: Vec<&str> = v["not_kept"]
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect();
     nk.sort();
-    assert_eq!(nk, ["credentials", "listening", "processes", "services"]);
+    assert_eq!(
+        nk,
+        [
+            "credential_details",
+            "credentials",
+            "listening",
+            "processes",
+            "services"
+        ]
+    );
 }
 
 #[test]
@@ -255,7 +317,10 @@ fn gitignored_files_in_ignored_trees_and_credentials_are_not_code() {
     );
     assert!(section(&d, "Code").is_empty());
     assert_eq!(d.ignored.paths, ["/root/app/debug.log"]);
-    assert_eq!(section(&d, "Not kept"), ["credentials: ~/app/certs/dev.pem"]);
+    assert_eq!(
+        section(&d, "Not kept"),
+        ["credentials: ~/app/certs/dev.pem"]
+    );
 }
 
 #[test]
@@ -270,7 +335,10 @@ fn baseline_removes_matching_entries_only() {
     let task = diff(&m(a), &m(&b_task), Some(&baseline), &IgnoreList::builtin());
     assert_eq!(section(&task, "Settings & files"), ["+ /etc/app.conf"]);
     assert_eq!(section(&task, "Packages"), ["apt: jq"]);
-    assert_eq!(section(&task, "Not kept"), ["listening: :3000 (node)", "processes: node"]);
+    assert_eq!(
+        section(&task, "Not kept"),
+        ["listening: :3000 (node)", "processes: node"]
+    );
     // the pruned-tree change differs (3 -> 9 vs 3), so it stays counted
     assert_eq!(task.ignored.count(), 6);
     // an identical run leaves nothing
@@ -303,7 +371,10 @@ fn owned_files_of_an_unchanged_package_are_named_in_the_package_line() {
     let a = "PKG\tdpkg\tnginx\t1\nF\t/etc/nginx/nginx.conf\t1\t1\ta\n";
     let b = "PKG\tdpkg\tnginx\t1\nF\t/etc/nginx/nginx.conf\t2\t2\tb\nOWN\tdpkg\tnginx\t/etc/nginx/nginx.conf\n";
     let d = run(a, b);
-    assert_eq!(section(&d, "Packages"), ["apt: files changed in nginx (1 file)"]);
+    assert_eq!(
+        section(&d, "Packages"),
+        ["apt: files changed in nginx (1 file)"]
+    );
     assert!(section(&d, "Settings & files").is_empty());
 }
 
@@ -320,8 +391,14 @@ fn postgres_schema_and_table_changes_with_row_counts() {
 
 #[test]
 fn postgres_database_added_and_dropped() {
-    let d = run("", "DB\tpostgres\tnew\tschema\ts\nDBT\tpostgres\tnew\tt\td\t5\n");
-    assert_eq!(section(&d, "Database changed"), ["postgres new: new database (1 table)"]);
+    let d = run(
+        "",
+        "DB\tpostgres\tnew\tschema\ts\nDBT\tpostgres\tnew\tt\td\t5\n",
+    );
+    assert_eq!(
+        section(&d, "Database changed"),
+        ["postgres new: new database (1 table)"]
+    );
     let d = run("DB\tpostgres\told\tschema\ts\n", "");
     assert_eq!(section(&d, "Database changed"), ["postgres old: dropped"]);
 }
@@ -331,7 +408,10 @@ fn sqlite_files_report_digests_and_not_as_other_changes() {
     let a = "DB\tsqlite\t/srv/dev.db\taaaaaaaaaa\nF\t/srv/dev.db\t1\t1\t-\n";
     let b = "DB\tsqlite\t/srv/dev.db\tbbbbbbbbbb\nF\t/srv/dev.db\t2\t2\t-\n";
     let d = run(a, b);
-    assert_eq!(section(&d, "Database changed"), ["sqlite /srv/dev.db: changed (aaaaaaa→bbbbbbb)"]);
+    assert_eq!(
+        section(&d, "Database changed"),
+        ["sqlite /srv/dev.db: changed (aaaaaaa→bbbbbbb)"]
+    );
     assert!(section(&d, "Other changed").is_empty());
 }
 
@@ -362,7 +442,10 @@ fn credential_paths_go_to_not_kept() {
 #[test]
 fn dirty_credential_in_a_repo_is_not_listed_as_code() {
     let git = "GIT\t/root/app\taaaaaaa1\tmain\t1\t0\n";
-    let d = run(git, &format!("{git}GITF\t/root/app\t??\tid_rsa\nGITF\t/root/app\t_M\tsrc/a.rs\n"));
+    let d = run(
+        git,
+        &format!("{git}GITF\t/root/app\t??\tid_rsa\nGITF\t/root/app\t_M\tsrc/a.rs\n"),
+    );
     assert_eq!(section(&d, "Code"), ["~/app: 1 dirty/untracked: a.rs"]);
     assert_eq!(section(&d, "Not kept"), ["credentials: ~/app/id_rsa"]);
 }
@@ -371,8 +454,14 @@ fn dirty_credential_in_a_repo_is_not_listed_as_code() {
 fn apt_transitive_dependencies_collapse_into_the_manual_parent() {
     let b = "PKG\tdpkg\tripgrep\t1\nPKG\tdpkg\tjq\t1\nPKG\tdpkg\tlibjq1\t1\nPKG\tdpkg\tlibonig5\t1\nPKG\tdpkg\tlibpcre2\t1\nPKGM\tdpkg\tripgrep\nPKGM\tdpkg\tjq\n";
     let d = run("", b);
-    assert_eq!(section(&d, "Packages"), ["apt: jq, ripgrep (+3 dependencies)"]);
-    assert_eq!(d.packages[0].dependencies, ["libjq1", "libonig5", "libpcre2"]);
+    assert_eq!(
+        section(&d, "Packages"),
+        ["apt: jq, ripgrep (+3 dependencies)"]
+    );
+    assert_eq!(
+        d.packages[0].dependencies,
+        ["libjq1", "libonig5", "libpcre2"]
+    );
 }
 
 #[test]
@@ -380,12 +469,18 @@ fn dependency_data_attributes_dependencies_per_parent() {
     let b = "PKG\tbrew\tjq\t1\nPKG\tbrew\toniguruma\t1\nPKG\tbrew\tripgrep\t1\nPKG\tbrew\tpcre2\t1\nPKGM\tbrew\tjq\nPKGM\tbrew\tripgrep\n\
 PKGD\tbrew\tjq\toniguruma\nPKGD\tbrew\tripgrep\tpcre2\nPKGD\tbrew\toniguruma\t\n";
     let d = run("", b);
-    assert_eq!(section(&d, "Packages"), ["brew: jq (+1 dependencies), ripgrep (+1 dependencies)"]);
+    assert_eq!(
+        section(&d, "Packages"),
+        ["brew: jq (+1 dependencies), ripgrep (+1 dependencies)"]
+    );
 }
 
 #[test]
 fn pip_without_dependency_data_collapses_beyond_three_with_a_count() {
-    let b: String = ["a", "b", "c", "d", "e"].iter().map(|n| format!("PKG\tpip\t{n}\t1\n")).collect();
+    let b: String = ["a", "b", "c", "d", "e"]
+        .iter()
+        .map(|n| format!("PKG\tpip\t{n}\t1\n"))
+        .collect();
     let d = run("", &b);
     assert_eq!(section(&d, "Packages"), ["pip: a, b, c (+2 more)"]);
     assert_eq!(d.packages[0].top_level, None);
@@ -397,13 +492,19 @@ fn pip_with_dependency_data_keeps_the_packages_nothing_requires() {
 PKGD\tpip\thttpie\trequests,pygments\nPKGD\tpip\trequests\turllib3,certifi\nPKGD\tpip\turllib3\t\n";
     let d = run("", b);
     assert_eq!(section(&d, "Packages"), ["pip: httpie (+4 dependencies)"]);
-    assert_eq!(d.packages[0].top_level.as_deref(), Some(&["httpie".to_owned()][..]));
+    assert_eq!(
+        d.packages[0].top_level.as_deref(),
+        Some(&["httpie".to_owned()][..])
+    );
 }
 
 #[test]
 fn upgrades_and_removals_are_listed() {
     let d = run("PKG\tnpm\tx\t1\nPKG\tnpm\ty\t1\n", "PKG\tnpm\tx\t2\n");
-    assert_eq!(section(&d, "Packages"), ["npm -g: upgraded x 1→2; removed y"]);
+    assert_eq!(
+        section(&d, "Packages"),
+        ["npm -g: upgraded x 1→2; removed y"]
+    );
 }
 
 #[test]
@@ -425,27 +526,45 @@ fn launch_agent_file_and_record_are_one_change() {
         None,
         &IgnoreList::builtin(),
     );
-    assert_eq!(section(&d, "Settings & files"), ["launch agent dev.x (user): added"]);
+    assert_eq!(
+        section(&d, "Settings & files"),
+        ["launch agent dev.x (user): added"]
+    );
 }
 
 #[test]
 fn rollup_collapses_more_than_three_files_per_directory() {
-    let three: String = (0..3).map(|i| format!("F\t/etc/app/{i}.conf\t1\t1\tx\n")).collect();
+    let three: String = (0..3)
+        .map(|i| format!("F\t/etc/app/{i}.conf\t1\t1\tx\n"))
+        .collect();
     assert_eq!(section(&run("", &three), "Settings & files").len(), 3);
-    let four: String = (0..4).map(|i| format!("F\t/etc/app/{i}.conf\t1\t1\tx\n")).collect();
-    assert_eq!(section(&run("", &four), "Settings & files"), ["/etc/app/ (4 files: +4)"]);
+    let four: String = (0..4)
+        .map(|i| format!("F\t/etc/app/{i}.conf\t1\t1\tx\n"))
+        .collect();
+    assert_eq!(
+        section(&run("", &four), "Settings & files"),
+        ["/etc/app/ (4 files: +4)"]
+    );
 }
 
 #[test]
 fn ignored_paths_are_counted_not_listed() {
-    let d = run("", "F\t/var/log/syslog\t1\t1\tx\nF\t/root/.bash_history\t1\t1\ty\nP\t/root/.cache\t5\n");
+    let d = run(
+        "",
+        "F\t/var/log/syslog\t1\t1\tx\nF\t/root/.bash_history\t1\t1\ty\nP\t/root/.cache\t5\n",
+    );
     assert_eq!(d.ignored.count(), 7);
-    assert_eq!(d.render(15), "Ignored: 7 paths (caches, logs, build output)");
+    assert_eq!(
+        d.render(15),
+        "Ignored: 7 paths (caches, logs, build output)"
+    );
 }
 
 #[test]
 fn render_limit_hides_items_behind_a_more_line() {
-    let files: String = (0..9).map(|i| format!("F\t/etc/d{i}/a.conf\t1\t1\tx\n")).collect();
+    let files: String = (0..9)
+        .map(|i| format!("F\t/etc/d{i}/a.conf\t1\t1\tx\n"))
+        .collect();
     let d = run("", &files);
     let l = d.render_lines(5);
     assert_eq!(l, lines("Settings & files\n  + /etc/d0/a.conf\n  + /etc/d1/a.conf\n  + /etc/d2/a.conf\n  … +6 more (see --json)"));
@@ -453,7 +572,216 @@ fn render_limit_hides_items_behind_a_more_line() {
 
 #[test]
 fn typical_task_fits_in_fifteen_lines() {
-    for n in ["l1", "l2", "l3", "l4", "l5", "s1", "mac-m1-m2", "mac-m2-m3", "live"] {
+    for n in [
+        "l1",
+        "l2",
+        "l3",
+        "l4",
+        "l5",
+        "s1",
+        "mac-m1-m2",
+        "mac-m2-m3",
+        "live",
+    ] {
         assert!(golden(n).len() <= 15, "{n}");
     }
+}
+
+// ---------------------------------------------------------------- review fixes
+
+fn with_baseline(a: &str, idle: &str, task: &str) -> Diff {
+    let baseline = run(a, idle);
+    diff(&m(a), &m(task), Some(&baseline), &IgnoreList::builtin())
+}
+
+#[test]
+fn baseline_does_not_hide_different_content_at_the_same_path() {
+    let a = "F\t/etc/app.conf\t1\t1\th0\nL\t/etc/l\t1\t1\t/x\n";
+    let idle = "F\t/etc/app.conf\t1\t2\th1\nL\t/etc/l\t1\t1\t/y\n";
+    let task = "F\t/etc/app.conf\t1\t3\th2\nL\t/etc/l\t1\t1\t/z\n";
+    let d = with_baseline(a, idle, task);
+    assert_eq!(
+        section(&d, "Settings & files"),
+        ["~ /etc/app.conf", "~ /etc/l"]
+    );
+    // the same resulting content is background
+    assert!(with_baseline(a, idle, idle).is_empty());
+    // identities are in the JSON
+    let f = &d.settings.files[0];
+    assert_eq!(f.before.as_ref().unwrap().hash.as_deref(), Some("h0"));
+    assert_eq!(f.after.as_ref().unwrap().hash.as_deref(), Some("h2"));
+    assert_eq!(
+        d.settings.files[1]
+            .after
+            .as_ref()
+            .unwrap()
+            .target
+            .as_deref(),
+        Some("/z")
+    );
+}
+
+#[test]
+fn baseline_does_not_hide_a_different_change_type() {
+    let a = "F\t/etc/app.conf\t1\t1\th0\n";
+    let d = with_baseline(a, "F\t/etc/app.conf\t1\t1\th1\n", "");
+    assert_eq!(section(&d, "Settings & files"), ["- /etc/app.conf"]);
+}
+
+#[test]
+fn added_databases_with_other_digests_are_not_hidden_by_the_baseline() {
+    let idle =
+        "DB\tsqlite\t/srv/a.db\tdig1\nDB\tpostgres\tnew\tschema\ts\nDBT\tpostgres\tnew\tt\td1\t5\n";
+    let task =
+        "DB\tsqlite\t/srv/a.db\tdig2\nDB\tpostgres\tnew\tschema\ts\nDBT\tpostgres\tnew\tt\td2\t5\n";
+    let d = with_baseline("", idle, task);
+    assert_eq!(d.database.len(), 2, "{:?}", d.database);
+    assert!(with_baseline("", idle, idle).is_empty());
+}
+
+#[test]
+fn table_digests_not_row_counts_decide_what_the_baseline_removes() {
+    let a = "DB\tpostgres\tapp\tschema\ts\nDBT\tpostgres\tapp\tusers\tt0\t10\n";
+    let idle = "DB\tpostgres\tapp\tschema\ts\nDBT\tpostgres\tapp\tusers\tt1\t12\n";
+    let task = "DB\tpostgres\tapp\tschema\ts\nDBT\tpostgres\tapp\tusers\tt2\t12\n";
+    assert_eq!(
+        section(&with_baseline(a, idle, task), "Database changed"),
+        ["postgres app: data changed in users (10→12 rows)"]
+    );
+    assert!(with_baseline(a, idle, idle).is_empty());
+    let d = run(a, task);
+    let t = &d.database[0].tables[0];
+    assert_eq!(
+        (t.digest_before.as_deref(), t.digest_after.as_deref()),
+        (Some("t0"), Some("t2"))
+    );
+}
+
+#[test]
+fn sqlite_records_follow_credential_and_ignore_rules() {
+    let d = run(
+        "",
+        "DB\tsqlite\t/root/.ssh/store.db\td1\nDB\tsqlite\t/root/.cache/x.db\td2\nDB\tsqlite\t/srv/app.db\td3\n",
+    );
+    assert_eq!(d.database.len(), 1);
+    assert_eq!(d.database[0].name, "/srv/app.db");
+    assert_eq!(section(&d, "Not kept"), ["credentials: ~/.ssh/ (1 file)"]);
+    assert_eq!(d.ignored.paths, ["/root/.cache/x.db"]);
+    assert_eq!(d.ignored.count(), 1);
+}
+
+#[test]
+fn system_secrets_are_not_kept() {
+    let d = run(
+        "",
+        "F\t/etc/shadow\t1\t1\ta\nF\t/etc/ssh/ssh_host_ed25519_key\t1\t1\tb\nF\t/etc/ssh/ssh_host_ed25519_key.pub\t1\t1\tc\n\
+F\t/usr/local/share/x/private.pem\t1\t1\td\nF\t/usr/share/ca/cacert.pem\t1\t1\te\nOWN\tdpkg\tca\t/usr/share/ca/cacert.pem\n",
+    );
+    assert_eq!(
+        section(&d, "Not kept"),
+        ["credentials: /etc/shadow, /etc/ssh/ssh_host_ed25519_key, /usr/local/share/x/private.pem"]
+    );
+    assert_eq!(
+        section(&d, "Settings & files"),
+        ["+ /etc/ssh/ssh_host_ed25519_key.pub"]
+    );
+    assert_eq!(
+        section(&d, "Packages"),
+        ["apt: files changed in ca (1 file)"]
+    );
+}
+
+#[test]
+fn git_paths_are_unquoted_and_renames_read_from_rename_records() {
+    let git = "GIT\t/root/app\taaaaaaa1\tmain\t0\t0\n";
+    let b = format!(
+        "{git}GITF\t/root/app\t??\t\"caf\\303\\251.txt\"\nGITF\t/root/app\tR_\told.txt -> new.txt\n\
+GITF\t/root/app\t??\ta -> b.txt\nGITF\t/root/app\t??\t\"sec\\303\\251.pem\"\n\
+GITF\t/root/app\tR_\t\"x y.rs\" -> \"z \\\"q\\\".rs\"\n"
+    );
+    let d = run(git, &b);
+    let rc = &d.code[0];
+    let keys: Vec<&str> = rc.dirty_new.keys().map(String::as_str).collect();
+    assert_eq!(keys, ["a -> b.txt", "café.txt", "new.txt", "z \"q\".rs"]);
+    assert_eq!(rc.renamed_from["new.txt"], "old.txt");
+    assert_eq!(rc.renamed_from["z \"q\".rs"], "x y.rs");
+    assert_eq!(
+        d.not_kept.credentials["/root/app/secé.pem"],
+        ["/root/app/secé.pem"]
+    );
+}
+
+#[test]
+fn editing_an_already_dirty_file_shows_under_code() {
+    let git = "GIT\t/root/app\taaaaaaa1\tmain\t1\t0\nGITF\t/root/app\t_M\tsrc/a.rs\n";
+    let a = format!("{git}F\t/root/app/src/a.rs\t1\t1\th1\n");
+    let idle = format!("{git}F\t/root/app/src/a.rs\t2\t2\th2\n");
+    let other = format!("{git}F\t/root/app/src/a.rs\t3\t3\th3\n");
+    let d = run(&a, &idle);
+    assert_eq!(section(&d, "Code"), ["~/app: 1 dirty/untracked: a.rs"]);
+    assert_eq!(
+        d.code[0].dirty_identity["src/a.rs"].hash.as_deref(),
+        Some("h2")
+    );
+    // an identical edit in the baseline is background, a different one is not
+    assert!(with_baseline(&a, &idle, &idle).is_empty());
+    assert_eq!(
+        section(&with_baseline(&a, &idle, &other), "Code"),
+        ["~/app: 1 dirty/untracked: a.rs"]
+    );
+}
+
+#[test]
+fn json_carries_keep_details() {
+    let b = "PKG\tdpkg\tca\t1\nF\t/usr/share/ca/x\t1\t1\th\nOWN\tdpkg\tca\t/usr/share/ca/x\n\
+CRON\troot\tc1\nCRONF\troot\t/var/spool/cron/crontabs/root\n\
+LAGENT\tuser\tdev.x\td9\t/Users/a/Library/LaunchAgents/dev.x.plist\n";
+    let d = run("", b);
+    let v = serde_json::to_value(&d).unwrap();
+    assert_eq!(
+        v["packages"][0]["owned_changes"]["ca"][0]["change"],
+        "added"
+    );
+    assert_eq!(
+        v["settings"]["cron"][0]["path"],
+        "/var/spool/cron/crontabs/root"
+    );
+    assert_eq!(v["settings"]["cron"][0]["after"], "c1");
+    assert_eq!(
+        v["settings"]["launch_agents"][0]["path"],
+        "/Users/a/Library/LaunchAgents/dev.x.plist"
+    );
+    let d = run("GIT\t/root/gone\tdeadbeef1\tmain\t0\t0\n", "");
+    assert_eq!(
+        d.code[0].removed_from,
+        Some(("deadbeef1".into(), "main".into()))
+    );
+}
+
+#[test]
+fn counts_saturate() {
+    let max = u64::MAX;
+    let a = "GIT\t/root/app\taaaaaaa1\tmain\t0\t0\nP\t/root/t1\t0\nP\t/root/t2\t0\n";
+    let b = format!(
+        "GIT\t/root/app\taaaaaaa1\tmain\t{max}\t{max}\nP\t/root/t1\t{max}\nP\t/root/t2\t{max}\n"
+    );
+    let d = run(a, &b);
+    assert_eq!(d.ignored.count(), u64::MAX);
+    assert!(!d.render(15).is_empty());
+    assert_eq!(d.code[0].dirty_delta, i64::MAX);
+}
+
+#[test]
+fn large_baselines_subtract_quickly() {
+    let n = 30_000;
+    let files = |h: &str| {
+        (0..n)
+            .map(|i| format!("F\t/etc/f{i}\t1\t1\t{h}\n"))
+            .collect::<String>()
+    };
+    let (idle, task) = (files("a"), files("b"));
+    let started = std::time::Instant::now();
+    let d = with_baseline("", &idle, &task);
+    assert_eq!(d.settings.files.len(), n);
+    assert!(started.elapsed().as_secs() < 20);
 }

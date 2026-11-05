@@ -126,9 +126,11 @@ pub fn glob(pattern: &str, text: &str) -> bool {
                     continue;
                 }
                 '?' => Some(pi + 1),
-                '[' => class_end(&p, pi).and_then(|(end, neg, set)| {
-                    (class_has(&set, t[ti]) != neg).then_some(end)
-                }),
+                '[' => match class_end(&p, pi) {
+                    Some((end, neg, set)) => (class_has(&set, t[ti]) != neg).then_some(end),
+                    // an unclosed bracket is an ordinary character, as in fnmatch
+                    None => (t[ti] == '[').then_some(pi + 1),
+                },
                 c => (c == t[ti]).then_some(pi + 1),
             }
         } else {
@@ -159,7 +161,8 @@ pub fn glob(pattern: &str, text: &str) -> bool {
 /// bracket is not closed, in which case it is an ordinary character.
 fn class_end(p: &[char], start: usize) -> Option<(usize, bool, Vec<char>)> {
     let mut i = start + 1;
-    let neg = matches!(p.get(i), Some('!') | Some('^'));
+    // Only `!` negates; `[^a]` is the set of `^` and `a`, as in Python's fnmatch.
+    let neg = matches!(p.get(i), Some('!'));
     if neg {
         i += 1;
     }
@@ -203,6 +206,24 @@ const CREDENTIAL_DIRS: &[&str] = &[
     "/.openclaw/credentials/",
     "/.config/gcloud/",
     "/.azure/",
+    "/etc/ssl/private/",
+    "/etc/letsencrypt/",
+];
+
+/// Exact absolute paths of system credential files.
+const CREDENTIAL_PATHS: &[&str] = &[
+    "/etc/shadow",
+    "/etc/gshadow",
+    "/etc/master.passwd",
+    "/etc/sudoers",
+];
+
+/// Glob patterns matched against the whole path (host keys and the like).
+const CREDENTIAL_GLOBS: &[&str] = &[
+    "/etc/ssh/ssh_host_*_key",
+    "*/ssh_host_*_key",
+    "*_rsa_key",
+    "*_ed25519_key",
 ];
 
 /// Exact file names (any directory).
@@ -216,6 +237,8 @@ const CREDENTIAL_NAMES: &[&str] = &[
     "id_dsa",
     "id_ecdsa",
     "id_ed25519",
+    "id_ecdsa_sk",
+    "id_ed25519_sk",
 ];
 
 /// Path suffixes of single credential files.
@@ -227,7 +250,22 @@ const CREDENTIAL_SUFFIXES: &[&str] = &[
 ];
 
 /// Base-name extensions of key material, wherever it sits.
-const CREDENTIAL_EXTENSIONS: &[&str] = &[".pem", ".p12", ".pfx", ".keychain", ".keychain-db"];
+const CREDENTIAL_EXTENSIONS: &[&str] = &[
+    ".pem",
+    ".key",
+    ".p12",
+    ".pfx",
+    ".p8",
+    ".ppk",
+    ".jks",
+    ".keystore",
+    ".keychain",
+    ".keychain-db",
+];
+
+/// Trees of installed packages in which key-material extensions name the package's own
+/// files; the exemption needs ownership evidence (an `OWN` record) for the path.
+const OWNED_TREES: &[&str] = &["/usr/", "/opt/homebrew/"];
 
 /// Installed-package trees where the extension rule does not apply.
 const PACKAGE_TREES: &[&str] = &[
@@ -242,6 +280,15 @@ const PACKAGE_TREES: &[&str] = &[
 /// directory rules, the path itself for single files. `None` when the path is not a
 /// credential.
 pub fn credential_group(path: &str) -> Option<String> {
+    credential_group_owned(path, false)
+}
+
+/// Like [`credential_group`]; `owned` says a package manager owns the path (`OWN`), which
+/// exempts key-material extensions under `/usr/` and `/opt/homebrew/` (bundled CA files).
+pub fn credential_group_owned(path: &str, owned: bool) -> Option<String> {
+    if CREDENTIAL_PATHS.contains(&path) || CREDENTIAL_GLOBS.iter().any(|g| glob(g, path)) {
+        return Some(path.to_owned());
+    }
     for marker in CREDENTIAL_DIRS {
         if let Some(i) = path.find(marker) {
             return Some(path[..i + marker.len()].to_owned());
@@ -251,8 +298,7 @@ pub fn credential_group(path: &str) -> Option<String> {
     // Key-material extensions also name bundled CA certificates inside installed packages
     // (certifi's cacert.pem); those are the package's files, not credentials.
     let extension_rule = !PACKAGE_TREES.iter().any(|t| path.contains(t))
-        && !path.starts_with("/usr/")
-        && !path.starts_with("/opt/homebrew/")
+        && !(owned && OWNED_TREES.iter().any(|t| path.starts_with(t)))
         && CREDENTIAL_EXTENSIONS.iter().any(|e| base.ends_with(e));
     if CREDENTIAL_NAMES.contains(&base)
         || CREDENTIAL_SUFFIXES.iter().any(|s| path.ends_with(s))
@@ -291,6 +337,36 @@ mod tests {
     }
 
     #[test]
+    fn glob_matches_fnmatch_brackets() {
+        assert!(glob("a[b", "a[b"));
+        assert!(!glob("a[b", "ab"));
+        assert!(glob("[!a]x", "bx"));
+        assert!(!glob("[!a]x", "ax"));
+        assert!(glob("[^a]x", "^x"));
+        assert!(glob("[^a]x", "ax"));
+        assert!(!glob("[^a]x", "bx"));
+        assert!(glob("[]a]x", "]x"));
+    }
+
+    #[test]
+    fn system_and_host_keys_are_credentials() {
+        for p in [
+            "/etc/shadow",
+            "/etc/gshadow",
+            "/etc/ssh/ssh_host_ed25519_key",
+            "/etc/ssh/ssh_host_rsa_key",
+            "/srv/app/tls.key",
+            "/usr/local/share/app/private.pem",
+        ] {
+            assert!(credential_group(p).is_some(), "{p}");
+        }
+        assert_eq!(credential_group("/etc/ssh/ssh_host_ed25519_key.pub"), None);
+        // bundled CA files are exempt only with package ownership
+        assert!(credential_group_owned("/usr/share/x/cacert.pem", true).is_none());
+        assert!(credential_group_owned("/usr/share/x/cacert.pem", false).is_some());
+    }
+
+    #[test]
     fn parse_skips_comments() {
         let l = IgnoreList::parse("# c\n\n*.tmp\n");
         assert!(l.matches("/x/a.tmp"));
@@ -311,10 +387,7 @@ mod tests {
                 "/Users/a/Library/Keychains/",
             ),
             ("/root/.aws/credentials", "/root/.aws/credentials"),
-            (
-                "/root/.config/gh/hosts.yml",
-                "/root/.config/gh/hosts.yml",
-            ),
+            ("/root/.config/gh/hosts.yml", "/root/.config/gh/hosts.yml"),
             ("/srv/certs/site.pem", "/srv/certs/site.pem"),
             ("/root/.netrc", "/root/.netrc"),
         ] {

@@ -1,10 +1,10 @@
 //! Bucketed comparison of two manifests. See `docs/SiloUI-CHANGES.md`.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
-use super::ignore::{credential_group, IgnoreList};
+use super::ignore::{credential_group, credential_group_owned, IgnoreList};
 use super::manifest::{FileEntry, FileKind, GigEntry, Manifest};
 
 /// Version of the JSON shape produced by `Diff`'s serialization.
@@ -45,7 +45,7 @@ const CAP_DEFAULT: usize = 6;
 /// Same, for pip: its installed set is mostly transitive dependencies.
 const CAP_PIP: usize = 3;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Change {
     Added,
@@ -63,10 +63,57 @@ impl Change {
     }
 }
 
+/// What a path was (or became) in a manifest: enough to tell two different contents apart.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub struct Identity {
+    /// `file` or `link`.
+    pub kind: String,
+    pub size: String,
+    /// sha256 of a file; `None` when it was too large to hash.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hash: Option<String>,
+    /// Link target of a symlink.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
+    /// Modification time, only recorded for files without a hash.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mtime: Option<String>,
+}
+
+impl Identity {
+    fn of(e: &FileEntry) -> Identity {
+        match e.kind {
+            FileKind::Link => Identity {
+                kind: "link".into(),
+                size: e.size.clone(),
+                hash: None,
+                target: Some(e.digest.clone()),
+                mtime: None,
+            },
+            FileKind::File => {
+                let hashed = e.digest != "-";
+                Identity {
+                    kind: "file".into(),
+                    size: e.size.clone(),
+                    hash: hashed.then(|| e.digest.clone()),
+                    target: None,
+                    mtime: (!hashed).then(|| e.mtime.clone()),
+                }
+            }
+        }
+    }
+}
+
+/// A changed path with its content before and after (`None` on the side where it does not
+/// exist).
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct PathChange {
     pub path: String,
     pub change: Change,
+    #[serde(default)]
+    pub before: Option<Identity>,
+    #[serde(default)]
+    pub after: Option<Identity>,
 }
 
 /// Code (git) changes for one repo.
@@ -76,6 +123,9 @@ pub struct RepoChange {
     /// Set when the repo did not exist in the base: (head, branch).
     pub new: Option<(String, String)>,
     pub removed: bool,
+    /// Set when the repo no longer exists: (head, branch) it had in the base.
+    #[serde(default)]
+    pub removed_from: Option<(String, String)>,
     /// (old head, new head)
     pub commits: Option<(String, String)>,
     /// (old branch, new branch)
@@ -83,6 +133,12 @@ pub struct RepoChange {
     /// Dirty or untracked files that are new or changed: repo-relative path -> status code.
     pub dirty_new: BTreeMap<String, String>,
     pub dirty_gone: Vec<String>,
+    /// Content of the files in `dirty_new` as they are now (when the manifest has them).
+    #[serde(default)]
+    pub dirty_identity: BTreeMap<String, Identity>,
+    /// Renamed files in `dirty_new`: new path -> old path.
+    #[serde(default)]
+    pub renamed_from: BTreeMap<String, String>,
     /// Growth of the dirty+untracked count when the file lists do not explain it.
     pub dirty_delta: i64,
     /// Changed gitignored files (`.env`).
@@ -116,6 +172,9 @@ pub struct PackageChange {
     pub requires: BTreeMap<String, Vec<String>>,
     /// Files changed by a package, attributed through `OWN` records: package -> paths.
     pub owned_files: BTreeMap<String, Vec<String>>,
+    /// The same files with the operation (added, modified, deleted) and content.
+    #[serde(default)]
+    pub owned_changes: BTreeMap<String, Vec<PathChange>>,
     /// Added packages shown by name; `None` when nothing identifies them.
     pub top_level: Option<Vec<String>>,
     /// Added packages folded into a top-level one.
@@ -135,6 +194,13 @@ impl PackageChange {
 pub struct CronChange {
     pub user: String,
     pub change: Change,
+    /// The crontab file, when the manifest names it.
+    #[serde(default)]
+    pub path: Option<String>,
+    #[serde(default)]
+    pub before: Option<String>,
+    #[serde(default)]
+    pub after: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -149,6 +215,12 @@ pub struct LaunchAgentChange {
     pub scope: String,
     pub label: String,
     pub change: Change,
+    #[serde(default)]
+    pub path: Option<String>,
+    #[serde(default)]
+    pub before: Option<String>,
+    #[serde(default)]
+    pub after: Option<String>,
 }
 
 /// Settings & files bucket detail.
@@ -166,6 +238,11 @@ pub struct TableChange {
     pub change: Change,
     pub rows_before: Option<u64>,
     pub rows_after: Option<u64>,
+    /// Data digests before and after.
+    #[serde(default)]
+    pub digest_before: Option<String>,
+    #[serde(default)]
+    pub digest_after: Option<String>,
 }
 
 /// One changed database: a Postgres database or a SQLite file.
@@ -197,6 +274,9 @@ pub struct NotKept {
     pub services: Vec<String>,
     /// Credential group (directory ending in `/`, or a single file) -> changed paths.
     pub credentials: BTreeMap<String, Vec<String>>,
+    /// The changes behind `credentials`, with content: credential group -> changes.
+    #[serde(default)]
+    pub credential_details: BTreeMap<String, Vec<PathChange>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -213,7 +293,9 @@ pub struct Ignored {
 
 impl Ignored {
     pub fn count(&self) -> u64 {
-        self.paths.len() as u64 + self.pruned_trees.iter().map(|t| t.delta).sum::<u64>()
+        self.pruned_trees
+            .iter()
+            .fold(self.paths.len() as u64, |n, t| n.saturating_add(t.delta))
     }
 }
 
@@ -239,6 +321,9 @@ pub struct Diff {
     pub not_kept: NotKept,
     /// Changed files that live in git repos; reported through Code only.
     pub repo_files: Vec<String>,
+    /// The same files with the change and content.
+    #[serde(default)]
+    pub repo_changes: Vec<PathChange>,
     pub ignored: Ignored,
 }
 
@@ -293,22 +378,34 @@ fn same_entry(x: &FileEntry, y: &FileEntry) -> bool {
     x.size == y.size && x.mtime == y.mtime
 }
 
-fn file_changes(a: &BTreeMap<String, FileEntry>, b: &BTreeMap<String, FileEntry>) -> Vec<PathChange> {
+fn file_changes(
+    a: &BTreeMap<String, FileEntry>,
+    b: &BTreeMap<String, FileEntry>,
+) -> Vec<PathChange> {
     let mut out = Vec::new();
     let paths: BTreeSet<&String> = a.keys().chain(b.keys()).collect();
     for p in paths {
-        let change = match (a.get(p), b.get(p)) {
+        let (x, y) = (a.get(p), b.get(p));
+        let change = match (x, y) {
             (None, Some(_)) => Change::Added,
             (Some(_), None) => Change::Deleted,
             (Some(x), Some(y)) if !same_entry(x, y) => Change::Modified,
             _ => continue,
         };
-        out.push(PathChange { path: p.clone(), change });
+        out.push(PathChange {
+            path: p.clone(),
+            change,
+            before: x.map(Identity::of),
+            after: y.map(Identity::of),
+        });
     }
     out
 }
 
-fn gig_changes(a: &BTreeMap<String, GigEntry>, b: &BTreeMap<String, GigEntry>) -> Vec<(String, PathChange)> {
+fn gig_changes(
+    a: &BTreeMap<String, GigEntry>,
+    b: &BTreeMap<String, GigEntry>,
+) -> Vec<(String, PathChange)> {
     let as_entry = |g: &GigEntry| FileEntry {
         kind: FileKind::File,
         size: g.size.clone(),
@@ -318,13 +415,22 @@ fn gig_changes(a: &BTreeMap<String, GigEntry>, b: &BTreeMap<String, GigEntry>) -
     let mut out = Vec::new();
     let paths: BTreeSet<&String> = a.keys().chain(b.keys()).collect();
     for p in paths {
-        let (change, repo) = match (a.get(p), b.get(p)) {
+        let (x, y) = (a.get(p), b.get(p));
+        let (change, repo) = match (x, y) {
             (None, Some(y)) => (Change::Added, &y.repo),
             (Some(x), None) => (Change::Deleted, &x.repo),
-            (Some(x), Some(y)) if !same_entry(&as_entry(x), &as_entry(y)) => (Change::Modified, &y.repo),
+            (Some(x), Some(y)) if !same_entry(&as_entry(x), &as_entry(y)) => {
+                (Change::Modified, &y.repo)
+            }
             _ => continue,
         };
-        out.push((repo.clone(), PathChange { path: p.clone(), change }));
+        let pc = PathChange {
+            path: p.clone(),
+            change,
+            before: x.map(|g| Identity::of(&as_entry(g))),
+            after: y.map(|g| Identity::of(&as_entry(g))),
+        };
+        out.push((repo.clone(), pc));
     }
     out
 }
@@ -356,7 +462,11 @@ fn is_settings(ctx: &Ctx, p: &str) -> bool {
 
 fn other_group(ctx: &Ctx, p: &str) -> String {
     if let Some((h, rel)) = ctx.home_rel(p) {
-        let base = if !ctx.home.is_empty() && h == ctx.home { "~".to_owned() } else { h };
+        let base = if !ctx.home.is_empty() && h == ctx.home {
+            "~".to_owned()
+        } else {
+            h
+        };
         return format!("{}/{}", base, rel.split('/').next().unwrap_or(""));
     }
     for r in GROUP_ROOTS {
@@ -387,7 +497,12 @@ fn rollup(ctx: &Ctx, chs: &[PathChange], key: impl Fn(&str) -> String) -> Vec<St
     let mut lines = Vec::new();
     for (k, g) in groups {
         if g.len() > 3 {
-            lines.push(format!("{}/ ({} files: {})", ctx.short(&k), g.len(), counts(&g)));
+            lines.push(format!(
+                "{}/ ({} files: {})",
+                ctx.short(&k),
+                g.len(),
+                counts(&g)
+            ));
         } else {
             for c in g {
                 lines.push(format!("{} {}", c.change.sym(), ctx.short(&c.path)));
@@ -423,13 +538,98 @@ fn pkg_label(mgr: &str) -> &str {
     }
 }
 
-/// Removes from `items` everything that also appears in `base`.
-fn subtract<T: PartialEq>(items: &mut Vec<T>, base: &[T]) {
-    items.retain(|i| !base.contains(i));
+/// Removes from `items` everything whose key also appears among `base`'s keys.
+fn subtract_by<T, K: std::hash::Hash + Eq>(items: &mut Vec<T>, base: &[T], key: impl Fn(&T) -> K) {
+    if base.is_empty() {
+        return;
+    }
+    let seen: HashSet<K> = base.iter().map(&key).collect();
+    items.retain(|i| !seen.contains(&key(i)));
+}
+
+fn subtract<T: std::hash::Hash + Eq>(items: &mut Vec<T>, base: &[T]) {
+    let seen: HashSet<&T> = base.iter().collect();
+    items.retain(|i| !seen.contains(i));
+}
+
+/// Baseline identity of a path change: the path, the kind of change and the resulting
+/// content.
+fn subtract_paths(items: &mut Vec<PathChange>, base: &[PathChange]) {
+    subtract_by(items, base, |c| (c.path.clone(), c.change, c.after.clone()));
+}
+
+/// Unquotes one git C-style quoted name (`"a\303\251"`). Returns the name and the rest.
+fn git_unquote(s: &str) -> Option<(String, &str)> {
+    let rest = s.strip_prefix('"')?;
+    let bytes = rest.as_bytes();
+    let mut out: Vec<u8> = Vec::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'"' => return Some((String::from_utf8_lossy(&out).into_owned(), &rest[i + 1..])),
+            b'\\' if i + 1 < bytes.len() => {
+                i += 1;
+                match bytes[i] {
+                    b'a' => out.push(7),
+                    b'b' => out.push(8),
+                    b'f' => out.push(12),
+                    b'n' => out.push(b'\n'),
+                    b'r' => out.push(b'\r'),
+                    b't' => out.push(b'\t'),
+                    b'v' => out.push(11),
+                    d @ b'0'..=b'7' => {
+                        let mut v = u32::from(d - b'0');
+                        let mut n = 1;
+                        while n < 3 && i + 1 < bytes.len() && (b'0'..=b'7').contains(&bytes[i + 1])
+                        {
+                            i += 1;
+                            v = v * 8 + u32::from(bytes[i] - b'0');
+                            n += 1;
+                        }
+                        out.push(v as u8);
+                    }
+                    other => out.push(other),
+                }
+                i += 1;
+            }
+            c => {
+                out.push(c);
+                i += 1;
+            }
+        }
+    }
+    None
+}
+
+fn git_name(s: &str) -> (String, &str) {
+    match git_unquote(s) {
+        Some(x) => x,
+        None => (s.to_owned(), ""),
+    }
+}
+
+/// A `git status --porcelain` path field: (new path, old path for renames and copies).
+/// The `old -> new` arrow is read only for rename or copy status codes (`R`, `C`); other
+/// records are a single, possibly quoted, path.
+fn porcelain_path(code: &str, raw: &str) -> (String, Option<String>) {
+    if code.contains(['R', 'C']) {
+        let (old, rest) = git_name(raw);
+        if let Some(new) = rest.strip_prefix(" -> ") {
+            return (git_name(new).0, Some(old));
+        }
+        if rest.is_empty() {
+            if let Some((o, n)) = raw.split_once(" -> ") {
+                return (git_name(n).0, Some(git_name(o).0));
+            }
+        }
+    }
+    (git_name(raw).0, None)
 }
 
 fn rel_to<'a>(repo: &str, path: &'a str) -> &'a str {
-    path.strip_prefix(repo).map(|r| r.trim_start_matches('/')).unwrap_or(path)
+    path.strip_prefix(repo)
+        .map(|r| r.trim_start_matches('/'))
+        .unwrap_or(path)
 }
 
 struct Builder<'a> {
@@ -439,70 +639,122 @@ struct Builder<'a> {
     d: Diff,
 }
 
+/// The deepest repo in `repos` that contains `p`.
+fn repo_of<'r>(repos: &HashSet<&'r str>, p: &str) -> Option<&'r str> {
+    let mut end = p.len();
+    while let Some(i) = p[..end].rfind('/') {
+        if let Some(r) = repos.get(&p[..i]) {
+            return Some(*r);
+        }
+        end = i;
+    }
+    None
+}
+
+fn db_identity(digest: &str) -> Identity {
+    Identity {
+        kind: "file".into(),
+        size: String::new(),
+        hash: Some(digest.to_owned()),
+        target: None,
+        mtime: None,
+    }
+}
+
 impl<'a> Builder<'a> {
     fn run(mut self, ignore: &IgnoreList) -> Diff {
         self.d.format = DIFF_FORMAT;
         self.d.home = self.ctx.home.clone();
         let repos = self.classify_files(ignore);
         self.packages();
-        self.code(repos, ignore);
+        self.code(repos);
         self.settings_extras();
-        self.database();
+        self.database(ignore);
         self.not_kept();
         self.pruned_trees();
-        for v in self.d.not_kept.credentials.values_mut() {
-            v.sort();
-            v.dedup();
-        }
+        self.d.ignored.paths.sort();
+        self.d.ignored.paths.dedup();
         self.d
+    }
+
+    fn credential(&mut self, group: String, change: PathChange) {
+        self.d
+            .not_kept
+            .credential_details
+            .entry(group)
+            .or_default()
+            .push(change);
     }
 
     /// Splits the changed files into buckets. Returns the gitignored changes per repo and
     /// leaves credential routing of those to `code`.
     fn classify_files(&mut self, ignore: &IgnoreList) -> BTreeMap<String, Vec<PathChange>> {
         let (a, b) = (self.base, self.cur);
-        let mut repos: Vec<&String> = a.git.keys().chain(b.git.keys()).collect::<BTreeSet<_>>().into_iter().collect();
-        repos.sort_by_key(|r| std::cmp::Reverse(r.len()));
-        let sqlite: BTreeSet<&String> = a.db.sqlite.keys().chain(b.db.sqlite.keys()).collect();
-        let cronf: BTreeSet<&String> = a.cronf.values().chain(b.cronf.values()).collect();
-        let lagent: BTreeSet<&String> = a
+        let repos: HashSet<&str> = a
+            .git
+            .keys()
+            .chain(b.git.keys())
+            .map(String::as_str)
+            .collect();
+        let sqlite: HashSet<&str> =
+            a.db.sqlite
+                .keys()
+                .chain(b.db.sqlite.keys())
+                .map(String::as_str)
+                .collect();
+        let cronf: HashSet<&str> = a
+            .cronf
+            .values()
+            .chain(b.cronf.values())
+            .map(String::as_str)
+            .collect();
+        let lagent: HashSet<&str> = a
             .lagent
             .values()
             .chain(b.lagent.values())
-            .map(|l| &l.path)
+            .map(|l| l.path.as_str())
             .collect();
         let owner = |p: &str| b.own.get(p).or_else(|| a.own.get(p)).cloned();
 
-        let mut owned: BTreeMap<(String, String), Vec<String>> = BTreeMap::new();
+        let mut owned: BTreeMap<(String, String), Vec<PathChange>> = BTreeMap::new();
         for c in file_changes(&a.files, &b.files) {
-            let p = &c.path;
-            if ignore.matches(p) {
-                self.d.ignored.paths.push(p.clone());
-            } else if let Some(g) = credential_group(p) {
-                self.d.not_kept.credentials.entry(g).or_default().push(p.clone());
-            } else if repos.iter().any(|r| p.starts_with(&format!("{r}/"))) {
-                self.d.repo_files.push(p.clone());
-            } else if sqlite.contains(p) || cronf.contains(p) || lagent.contains(p) {
+            let p = c.path.clone();
+            let own = owner(&p);
+            if ignore.matches(&p) {
+                self.d.ignored.paths.push(p);
+            } else if let Some(g) = credential_group_owned(&p, own.is_some()) {
+                self.credential(g, c);
+            } else if repo_of(&repos, &p).is_some() {
+                self.d.repo_changes.push(c);
+            } else if sqlite.contains(p.as_str())
+                || cronf.contains(p.as_str())
+                || lagent.contains(p.as_str())
+            {
                 // reported as a database, crontab or launch agent change
-            } else if let Some(o) = owner(p) {
-                owned.entry(o).or_default().push(p.clone());
-            } else if is_settings(&self.ctx, p) {
+            } else if let Some(o) = own {
+                owned.entry(o).or_default().push(c);
+            } else if is_settings(&self.ctx, &p) {
                 self.d.settings.files.push(c);
             } else {
                 self.d.other.push(c);
             }
         }
-        for ((mgr, name), paths) in owned {
+        for ((mgr, name), changes) in owned {
             let pc = self.package_entry(&mgr);
-            pc.owned_files.insert(name, paths);
+            pc.owned_files.insert(
+                name.clone(),
+                changes.iter().map(|c| c.path.clone()).collect(),
+            );
+            pc.owned_changes.insert(name, changes);
         }
 
         let mut gigs: BTreeMap<String, Vec<PathChange>> = BTreeMap::new();
         for (repo, c) in gig_changes(&a.gig, &b.gig) {
+            let own = owner(&c.path).is_some();
             if ignore.matches(&c.path) {
                 self.d.ignored.paths.push(c.path);
-            } else if let Some(g) = credential_group(&c.path) {
-                self.d.not_kept.credentials.entry(g).or_default().push(c.path);
+            } else if let Some(g) = credential_group_owned(&c.path, own) {
+                self.credential(g, c);
             } else {
                 gigs.entry(repo).or_default().push(c);
             }
@@ -514,29 +766,46 @@ impl<'a> Builder<'a> {
         if let Some(i) = self.d.packages.iter().position(|p| p.manager == mgr) {
             return &mut self.d.packages[i];
         }
-        self.d.packages.push(PackageChange { manager: mgr.to_owned(), ..Default::default() });
+        self.d.packages.push(PackageChange {
+            manager: mgr.to_owned(),
+            ..Default::default()
+        });
         self.d.packages.last_mut().expect("just pushed")
     }
 
     fn packages(&mut self) {
         let (a, b) = (self.base, self.cur);
-        let mgrs: BTreeSet<&String> = a.pkg.keys().chain(b.pkg.keys()).map(|k| &k.0).collect();
+        let group = |m: &'a Manifest| {
+            let mut out: BTreeMap<&'a String, BTreeMap<&'a String, &'a String>> = BTreeMap::new();
+            for (k, v) in &m.pkg {
+                out.entry(&k.0).or_default().insert(&k.1, v);
+            }
+            out
+        };
+        let (ga, gb) = (group(a), group(b));
+        let empty = BTreeMap::new();
+        let mgrs: BTreeSet<&&String> = ga.keys().chain(gb.keys()).collect();
         for mgr in mgrs {
-            let pa: BTreeMap<&String, &String> = a.pkg.iter().filter(|(k, _)| &k.0 == mgr).map(|(k, v)| (&k.1, v)).collect();
-            let pb: BTreeMap<&String, &String> = b.pkg.iter().filter(|(k, _)| &k.0 == mgr).map(|(k, v)| (&k.1, v)).collect();
-            let mut pc = PackageChange { manager: mgr.clone(), ..Default::default() };
-            for (n, v) in &pb {
+            let mgr: &String = mgr;
+            let pa = ga.get(mgr).unwrap_or(&empty);
+            let pb = gb.get(mgr).unwrap_or(&empty);
+            let mut pc = PackageChange {
+                manager: mgr.clone(),
+                ..Default::default()
+            };
+            for (n, v) in pb {
                 match pa.get(n) {
                     None => {
                         pc.added.insert((*n).clone(), (*v).clone());
                     }
                     Some(old) if old != v => {
-                        pc.upgraded.insert((*n).clone(), ((*old).clone(), (*v).clone()));
+                        pc.upgraded
+                            .insert((*n).clone(), ((*old).clone(), (*v).clone()));
                     }
                     _ => {}
                 }
             }
-            for (n, v) in &pa {
+            for (n, v) in pa {
                 if !pb.contains_key(n) {
                     pc.removed.insert((*n).clone(), (*v).clone());
                 }
@@ -557,8 +826,10 @@ impl<'a> Builder<'a> {
             }
             if let Some(existing) = self.d.packages.iter_mut().find(|p| &p.manager == mgr) {
                 let owned = std::mem::take(&mut existing.owned_files);
+                let changes = std::mem::take(&mut existing.owned_changes);
                 *existing = pc;
                 existing.owned_files = owned;
+                existing.owned_changes = changes;
             } else {
                 self.d.packages.push(pc);
             }
@@ -566,15 +837,51 @@ impl<'a> Builder<'a> {
         self.d.packages.sort_by(|x, y| x.manager.cmp(&y.manager));
     }
 
-    fn code(&mut self, mut gigs: BTreeMap<String, Vec<PathChange>>, _ignore: &IgnoreList) {
+    fn code(&mut self, mut gigs: BTreeMap<String, Vec<PathChange>>) {
         let (a, b) = (self.base, self.cur);
-        let repos: BTreeSet<String> = a.git.keys().chain(b.git.keys()).chain(gigs.keys()).cloned().collect();
+        let repos: BTreeSet<String> = a
+            .git
+            .keys()
+            .chain(b.git.keys())
+            .chain(gigs.keys())
+            .cloned()
+            .collect();
+        let repo_set: HashSet<&str> = a
+            .git
+            .keys()
+            .chain(b.git.keys())
+            .map(String::as_str)
+            .collect();
+        // Changed files under each repo (their content changed since the base).
+        let mut changed: HashMap<&str, HashSet<&str>> = HashMap::new();
+        for c in &self.d.repo_changes {
+            if let Some(r) = repo_of(&repo_set, &c.path) {
+                changed.entry(r).or_default().insert(&c.path);
+            }
+        }
+        let normalize =
+            |m: Option<&BTreeMap<String, String>>| -> BTreeMap<String, (String, Option<String>)> {
+                let mut out = BTreeMap::new();
+                for (raw, code) in m.into_iter().flatten() {
+                    let (new, old) = porcelain_path(code, raw);
+                    out.insert(new, (code.clone(), old));
+                }
+                out
+            };
+        let mut creds: Vec<(String, PathChange)> = Vec::new();
+        let mut found: Vec<RepoChange> = Vec::new();
         for r in &repos {
-            let mut rc = RepoChange { repo: r.clone(), ..Default::default() };
+            let mut rc = RepoChange {
+                repo: r.clone(),
+                ..Default::default()
+            };
             let (x, y) = (a.git.get(r), b.git.get(r));
             match (x, y) {
                 (None, Some(y)) => rc.new = Some((y.head.clone(), y.branch.clone())),
-                (Some(_), None) => rc.removed = true,
+                (Some(x), None) => {
+                    rc.removed = true;
+                    rc.removed_from = Some((x.head.clone(), x.branch.clone()));
+                }
                 (Some(x), Some(y)) => {
                     if x.head != y.head {
                         rc.commits = Some((x.head.clone(), y.head.clone()));
@@ -586,23 +893,50 @@ impl<'a> Builder<'a> {
                 (None, None) => {}
             }
             if let Some(y) = y {
-                let empty = BTreeMap::new();
-                let fa = if x.is_some() { a.gitf.get(r).unwrap_or(&empty) } else { &empty };
-                let fb = b.gitf.get(r).unwrap_or(&empty);
-                let cred = |rel: &str, nk: &mut NotKept| -> bool {
-                    let target = rel.rsplit(" -> ").next().unwrap_or(rel);
-                    let abs = format!("{}/{}", r.trim_end_matches('/'), target);
-                    match credential_group(&abs) {
-                        Some(g) => {
-                            nk.credentials.entry(g).or_default().push(abs);
-                            true
-                        }
-                        None => false,
-                    }
+                let fa = if x.is_some() {
+                    normalize(a.gitf.get(r))
+                } else {
+                    BTreeMap::new()
                 };
-                for (p, code) in fb {
-                    if fa.get(p) != Some(code) && !cred(p, &mut self.d.not_kept) {
-                        rc.dirty_new.insert(p.clone(), code.clone());
+                let fb = normalize(b.gitf.get(r));
+                let touched = changed.get(r.as_str());
+                let abs_of = |rel: &str| format!("{}/{}", r.trim_end_matches('/'), rel);
+                for (p, (code, old)) in &fb {
+                    let abs = abs_of(p);
+                    let content_changed = touched.is_some_and(|t| t.contains(abs.as_str()));
+                    if fa.get(p).map(|x| &x.0) == Some(code) && !content_changed {
+                        continue;
+                    }
+                    let after = b.files.get(&abs).map(Identity::of);
+                    let cred = credential_group(&abs)
+                        .map(|g| (g, abs.clone()))
+                        .or_else(|| {
+                            old.as_ref()
+                                .and_then(|o| credential_group(&abs_of(o)).map(|g| (g, abs_of(o))))
+                        });
+                    if let Some((g, path)) = cred {
+                        let change = if code.starts_with('?') {
+                            Change::Added
+                        } else {
+                            Change::Modified
+                        };
+                        creds.push((
+                            g,
+                            PathChange {
+                                path,
+                                change,
+                                before: None,
+                                after,
+                            },
+                        ));
+                        continue;
+                    }
+                    rc.dirty_new.insert(p.clone(), code.clone());
+                    if let Some(i) = after {
+                        rc.dirty_identity.insert(p.clone(), i);
+                    }
+                    if let Some(o) = old {
+                        rc.renamed_from.insert(p.clone(), o.clone());
                     }
                 }
                 for p in fa.keys() {
@@ -612,9 +946,12 @@ impl<'a> Builder<'a> {
                 }
                 if let Some(x) = x {
                     if rc.dirty_new.is_empty() && rc.dirty_gone.is_empty() {
-                        let dd = (y.dirty + y.untracked) as i64 - (x.dirty + x.untracked) as i64;
+                        let total = |g: &super::manifest::GitRepo| {
+                            i128::from(g.dirty) + i128::from(g.untracked)
+                        };
+                        let dd = total(y) - total(x);
                         if dd > 0 {
-                            rc.dirty_delta = dd;
+                            rc.dirty_delta = i64::try_from(dd).unwrap_or(i64::MAX);
                         }
                     }
                 }
@@ -623,8 +960,12 @@ impl<'a> Builder<'a> {
                 rc.gitignored = g;
             }
             if !rc.is_empty() {
-                self.d.code.push(rc);
+                found.push(rc);
             }
+        }
+        self.d.code.extend(found);
+        for (g, c) in creds {
+            self.credential(g, c);
         }
     }
 
@@ -632,7 +973,10 @@ impl<'a> Builder<'a> {
         let (a, b) = (self.base, self.cur);
         let users: BTreeSet<&String> = a.cron.keys().chain(b.cron.keys()).collect();
         for u in users {
-            let (x, y) = (a.cron.get(u).map(String::as_str).unwrap_or("-"), b.cron.get(u).map(String::as_str).unwrap_or("-"));
+            let (x, y) = (
+                a.cron.get(u).map(String::as_str).unwrap_or("-"),
+                b.cron.get(u).map(String::as_str).unwrap_or("-"),
+            );
             if x != y {
                 let change = if x == "-" {
                     Change::Added
@@ -641,37 +985,67 @@ impl<'a> Builder<'a> {
                 } else {
                     Change::Modified
                 };
-                self.d.settings.cron.push(CronChange { user: u.clone(), change });
+                let side = |v: &str| (v != "-").then(|| v.to_owned());
+                let path = b.cronf.get(u).or_else(|| a.cronf.get(u)).cloned();
+                self.d.settings.cron.push(CronChange {
+                    user: u.clone(),
+                    change,
+                    path,
+                    before: side(x),
+                    after: side(y),
+                });
             }
         }
         for (s, from) in &a.svc {
             if let Some(to) = b.svc.get(s) {
                 if from != to {
-                    self.d.settings.services.push(ServiceChange { name: s.clone(), from: from.clone(), to: to.clone() });
+                    self.d.settings.services.push(ServiceChange {
+                        name: s.clone(),
+                        from: from.clone(),
+                        to: to.clone(),
+                    });
                 }
             }
         }
         let keys: BTreeSet<&(String, String)> = a.lagent.keys().chain(b.lagent.keys()).collect();
         for k in keys {
-            let change = match (a.lagent.get(k), b.lagent.get(k)) {
+            let (x, y) = (a.lagent.get(k), b.lagent.get(k));
+            let change = match (x, y) {
                 (None, Some(_)) => Change::Added,
                 (Some(_), None) => Change::Deleted,
                 (Some(x), Some(y)) if x.digest != y.digest => Change::Modified,
                 _ => continue,
             };
-            self.d.settings.launch_agents.push(LaunchAgentChange { scope: k.0.clone(), label: k.1.clone(), change });
+            self.d.settings.launch_agents.push(LaunchAgentChange {
+                scope: k.0.clone(),
+                label: k.1.clone(),
+                change,
+                path: y.or(x).map(|l| l.path.clone()),
+                before: x.map(|l| l.digest.clone()),
+                after: y.map(|l| l.digest.clone()),
+            });
         }
     }
 
-    fn database(&mut self) {
+    fn database(&mut self, ignore: &IgnoreList) {
         let (a, b) = (&self.base.db, &self.cur.db);
-        let dbs: BTreeSet<&String> = a.pg_schema.keys().chain(b.pg_schema.keys()).chain(a.pg_tables.keys().map(|k| &k.0)).chain(b.pg_tables.keys().map(|k| &k.0)).collect();
+        let mut tabs: BTreeMap<&String, BTreeSet<&String>> = BTreeMap::new();
+        for k in a.pg_tables.keys().chain(b.pg_tables.keys()) {
+            tabs.entry(&k.0).or_default().insert(&k.1);
+        }
+        let tabs_a: HashSet<&String> = a.pg_tables.keys().map(|k| &k.0).collect();
+        let tabs_b: HashSet<&String> = b.pg_tables.keys().map(|k| &k.0).collect();
+        let dbs: BTreeSet<&String> = a
+            .pg_schema
+            .keys()
+            .chain(b.pg_schema.keys())
+            .chain(tabs.keys().copied())
+            .collect();
         for db in dbs {
             let (sa, sb) = (a.pg_schema.get(db), b.pg_schema.get(db));
-            let tables: BTreeSet<&String> = a.pg_tables.keys().chain(b.pg_tables.keys()).filter(|k| &k.0 == db).map(|k| &k.1).collect();
             let mut tcs = Vec::new();
-            for t in tables {
-                let key = (db.clone(), t.clone());
+            for t in tabs.get(db).into_iter().flatten() {
+                let key = (db.clone(), (*t).clone());
                 let (ta, tb) = (a.pg_tables.get(&key), b.pg_tables.get(&key));
                 let change = match (ta, tb) {
                     (None, Some(_)) => Change::Added,
@@ -680,24 +1054,37 @@ impl<'a> Builder<'a> {
                     _ => continue,
                 };
                 tcs.push(TableChange {
-                    table: t.clone(),
+                    table: (*t).clone(),
                     change,
                     rows_before: ta.and_then(|t| t.rows),
                     rows_after: tb.and_then(|t| t.rows),
+                    digest_before: ta.map(|t| t.digest.clone()),
+                    digest_after: tb.map(|t| t.digest.clone()),
                 });
             }
-            let in_a = sa.is_some() || a.pg_tables.keys().any(|k| &k.0 == db);
-            let in_b = sb.is_some() || b.pg_tables.keys().any(|k| &k.0 == db);
+            let in_a = sa.is_some() || tabs_a.contains(db);
+            let in_b = sb.is_some() || tabs_b.contains(db);
             let change = match (in_a, in_b) {
                 (false, true) => Change::Added,
                 (true, false) => Change::Deleted,
                 _ => Change::Modified,
             };
-            let schema = if sa != sb { Some((sa.cloned(), sb.cloned())) } else { None };
+            let schema = if sa != sb {
+                Some((sa.cloned(), sb.cloned()))
+            } else {
+                None
+            };
             if change == Change::Modified && schema.is_none() && tcs.is_empty() {
                 continue;
             }
-            self.d.database.push(DbChange { engine: "postgres".into(), name: db.clone(), change, schema, tables: tcs, digest: None });
+            self.d.database.push(DbChange {
+                engine: "postgres".into(),
+                name: db.clone(),
+                change,
+                schema,
+                tables: tcs,
+                digest: None,
+            });
         }
         let files: BTreeSet<&String> = a.sqlite.keys().chain(b.sqlite.keys()).collect();
         for f in files {
@@ -708,6 +1095,21 @@ impl<'a> Builder<'a> {
                 (Some(x), Some(y)) if x != y => Change::Modified,
                 _ => continue,
             };
+            if ignore.matches(f) {
+                self.d.ignored.paths.push(f.clone());
+                continue;
+            }
+            let owned = self.cur.own.contains_key(f) || self.base.own.contains_key(f);
+            if let Some(g) = credential_group_owned(f, owned) {
+                let pc = PathChange {
+                    path: f.clone(),
+                    change,
+                    before: x.map(|d| db_identity(d)),
+                    after: y.map(|d| db_identity(d)),
+                };
+                self.credential(g, pc);
+                continue;
+            }
             self.d.database.push(DbChange {
                 engine: "sqlite".into(),
                 name: f.clone(),
@@ -730,10 +1132,19 @@ impl<'a> Builder<'a> {
         ports.sort();
         self.d.not_kept.listening = ports
             .into_iter()
-            .map(|(_, k, v)| Listener { proto: k.0.clone(), port: k.1.clone(), process: v.clone() })
+            .map(|(_, k, v)| Listener {
+                proto: k.0.clone(),
+                port: k.1.clone(),
+                process: v.clone(),
+            })
             .collect();
         self.d.not_kept.processes = b.proc.difference(&a.proc).cloned().collect();
-        self.d.not_kept.services = b.svc.keys().filter(|s| !a.svc.contains_key(*s)).cloned().collect();
+        self.d.not_kept.services = b
+            .svc
+            .keys()
+            .filter(|s| !a.svc.contains_key(*s))
+            .cloned()
+            .collect();
     }
 
     fn pruned_trees(&mut self) {
@@ -749,7 +1160,10 @@ impl<'a> Builder<'a> {
                 (Some(Some(x)), Some(Some(y))) => x.abs_diff(*y),
                 _ => 1,
             };
-            self.d.ignored.pruned_trees.push(PrunedTree { path: p.clone(), delta });
+            self.d.ignored.pruned_trees.push(PrunedTree {
+                path: p.clone(),
+                delta,
+            });
         }
     }
 }
@@ -758,8 +1172,19 @@ impl<'a> Builder<'a> {
 /// the same source left idle for the same time; whatever it contains is background noise
 /// and is removed from the result.
 pub fn diff(base: &Manifest, cur: &Manifest, baseline: Option<&Diff>, ignore: &IgnoreList) -> Diff {
-    let home = cur.home().or_else(|| base.home()).unwrap_or("").trim_end_matches('/').to_owned();
-    let mut d = Builder { base, cur, ctx: Ctx { home }, d: Diff::default() }.run(ignore);
+    let home = cur
+        .home()
+        .or_else(|| base.home())
+        .unwrap_or("")
+        .trim_end_matches('/')
+        .to_owned();
+    let mut d = Builder {
+        base,
+        cur,
+        ctx: Ctx { home },
+        d: Diff::default(),
+    }
+    .run(ignore);
     if let Some(bl) = baseline {
         d.subtract_baseline(bl);
     }
@@ -769,13 +1194,18 @@ pub fn diff(base: &Manifest, cur: &Manifest, baseline: Option<&Diff>, ignore: &I
 
 impl Diff {
     fn subtract_baseline(&mut self, bl: &Diff) {
+        let bcode: HashMap<&str, &RepoChange> =
+            bl.code.iter().map(|b| (b.repo.as_str(), b)).collect();
         for rc in &mut self.code {
-            let Some(b) = bl.code.iter().find(|b| b.repo == rc.repo) else { continue };
+            let Some(b) = bcode.get(rc.repo.as_str()) else {
+                continue;
+            };
             if rc.new == b.new {
                 rc.new = None;
             }
-            if rc.removed && b.removed {
+            if rc.removed && b.removed && rc.removed_from == b.removed_from {
                 rc.removed = false;
+                rc.removed_from = None;
             }
             if rc.commits == b.commits {
                 rc.commits = None;
@@ -783,87 +1213,154 @@ impl Diff {
             if rc.branch == b.branch {
                 rc.branch = None;
             }
-            rc.dirty_new.retain(|p, c| b.dirty_new.get(p) != Some(c));
+            let ident = &rc.dirty_identity;
+            rc.dirty_new.retain(|p, c| {
+                !(b.dirty_new.get(p) == Some(c) && b.dirty_identity.get(p) == ident.get(p))
+            });
+            let kept = &rc.dirty_new;
+            rc.dirty_identity.retain(|p, _| kept.contains_key(p));
+            rc.renamed_from.retain(|p, _| kept.contains_key(p));
             subtract(&mut rc.dirty_gone, &b.dirty_gone);
             if rc.dirty_delta == b.dirty_delta {
                 rc.dirty_delta = 0;
             }
-            subtract(&mut rc.gitignored, &b.gitignored);
+            subtract_paths(&mut rc.gitignored, &b.gitignored);
         }
         self.code.retain(|r| !r.is_empty());
 
+        let bpk: HashMap<&str, &PackageChange> = bl
+            .packages
+            .iter()
+            .map(|b| (b.manager.as_str(), b))
+            .collect();
         for pc in &mut self.packages {
-            let Some(b) = bl.packages.iter().find(|b| b.manager == pc.manager) else { continue };
+            let Some(b) = bpk.get(pc.manager.as_str()) else {
+                continue;
+            };
             pc.added.retain(|n, v| b.added.get(n) != Some(v));
             pc.removed.retain(|n, v| b.removed.get(n) != Some(v));
             pc.upgraded.retain(|n, v| b.upgraded.get(n) != Some(v));
             pc.manual.retain(|n| pc.added.contains_key(n));
             pc.requires.retain(|n, _| pc.added.contains_key(n));
-            for (n, paths) in &mut pc.owned_files {
-                if let Some(bp) = b.owned_files.get(n) {
-                    paths.retain(|p| !bp.contains(p));
+            for (n, changes) in &mut pc.owned_changes {
+                if let Some(bp) = b.owned_changes.get(n) {
+                    subtract_paths(changes, bp);
                 }
             }
-            pc.owned_files.retain(|_, v| !v.is_empty());
+        }
+        for pc in &mut self.packages {
+            pc.owned_changes.retain(|_, v| !v.is_empty());
+            pc.owned_files = pc
+                .owned_changes
+                .iter()
+                .map(|(n, v)| (n.clone(), v.iter().map(|c| c.path.clone()).collect()))
+                .collect();
         }
         self.packages.retain(|p| !p.is_empty());
 
-        subtract(&mut self.settings.files, &bl.settings.files);
-        subtract(&mut self.settings.cron, &bl.settings.cron);
-        subtract(&mut self.settings.services, &bl.settings.services);
-        subtract(&mut self.settings.launch_agents, &bl.settings.launch_agents);
-        subtract(&mut self.other, &bl.other);
-        subtract(&mut self.repo_files, &bl.repo_files);
+        subtract_paths(&mut self.settings.files, &bl.settings.files);
+        subtract_by(&mut self.settings.cron, &bl.settings.cron, |c| {
+            (c.user.clone(), c.change, c.after.clone(), c.path.clone())
+        });
+        subtract_by(&mut self.settings.services, &bl.settings.services, |s| {
+            (s.name.clone(), s.from.clone(), s.to.clone())
+        });
+        subtract_by(
+            &mut self.settings.launch_agents,
+            &bl.settings.launch_agents,
+            |l| {
+                (
+                    l.scope.clone(),
+                    l.label.clone(),
+                    l.change,
+                    l.after.clone(),
+                    l.path.clone(),
+                )
+            },
+        );
+        subtract_paths(&mut self.other, &bl.other);
+        subtract_paths(&mut self.repo_changes, &bl.repo_changes);
 
-        for db in &mut self.database {
-            if let Some(b) = bl.database.iter().find(|b| b.engine == db.engine && b.name == db.name) {
-                if db.schema == b.schema {
-                    db.schema = None;
+        let bdb: HashMap<(&str, &str), &DbChange> = bl
+            .database
+            .iter()
+            .map(|b| ((b.engine.as_str(), b.name.as_str()), b))
+            .collect();
+        let mut drop = vec![false; self.database.len()];
+        for (i, db) in self.database.iter_mut().enumerate() {
+            let Some(b) = bdb.get(&(db.engine.as_str(), db.name.as_str())) else {
+                continue;
+            };
+            match db.change {
+                Change::Added | Change::Deleted => drop[i] = db.change == b.change && *db == **b,
+                Change::Modified if b.change == Change::Modified => {
+                    if db.schema.as_ref().map(|s| &s.1) == b.schema.as_ref().map(|s| &s.1) {
+                        db.schema = None;
+                    }
+                    subtract_by(&mut db.tables, &b.tables, |t| {
+                        (t.table.clone(), t.change, t.digest_after.clone())
+                    });
+                    if db.digest.as_ref().map(|s| &s.1) == b.digest.as_ref().map(|s| &s.1) {
+                        db.digest = None;
+                    }
+                    drop[i] = db.schema.is_none() && db.tables.is_empty() && db.digest.is_none();
                 }
-                subtract(&mut db.tables, &b.tables);
-                if db.digest == b.digest {
-                    db.digest = None;
-                }
-                if db.change == Change::Modified && b.change == Change::Modified {
-                    // nothing else to compare
-                } else if db.change == b.change {
-                    db.schema = None;
-                    db.tables.clear();
-                    db.digest = None;
-                    db.change = Change::Modified;
-                }
+                Change::Modified => {}
             }
         }
-        self.database.retain(|d| match d.engine.as_str() {
-            "sqlite" => d.digest.is_some() || d.change != Change::Modified,
-            _ => d.schema.is_some() || !d.tables.is_empty() || d.change != Change::Modified,
+        let mut i = 0;
+        self.database.retain(|_| {
+            i += 1;
+            !drop[i - 1]
         });
 
-        subtract(&mut self.not_kept.listening, &bl.not_kept.listening);
+        subtract_by(&mut self.not_kept.listening, &bl.not_kept.listening, |l| {
+            (l.proto.clone(), l.port.clone(), l.process.clone())
+        });
         subtract(&mut self.not_kept.processes, &bl.not_kept.processes);
         subtract(&mut self.not_kept.services, &bl.not_kept.services);
-        for (g, paths) in &mut self.not_kept.credentials {
-            if let Some(bp) = bl.not_kept.credentials.get(g) {
-                paths.retain(|p| !bp.contains(p));
+        for (g, changes) in &mut self.not_kept.credential_details {
+            if let Some(bp) = bl.not_kept.credential_details.get(g) {
+                subtract_paths(changes, bp);
             }
         }
-        self.not_kept.credentials.retain(|_, v| !v.is_empty());
+        self.not_kept
+            .credential_details
+            .retain(|_, v| !v.is_empty());
         subtract(&mut self.ignored.paths, &bl.ignored.paths);
+        let btrees: HashMap<&str, u64> = bl
+            .ignored
+            .pruned_trees
+            .iter()
+            .map(|b| (b.path.as_str(), b.delta))
+            .collect();
         for t in &mut self.ignored.pruned_trees {
-            if let Some(b) = bl.ignored.pruned_trees.iter().find(|b| b.path == t.path) {
-                t.delta = t.delta.saturating_sub(b.delta);
+            if let Some(b) = btrees.get(t.path.as_str()) {
+                t.delta = t.delta.saturating_sub(*b);
             }
         }
         self.ignored.pruned_trees.retain(|t| t.delta > 0);
     }
 
-    /// Derives the dependency collapse and the text lines from the detail.
+    /// Derives the dependency collapse, the path lists and the text lines from the detail.
     fn finish(&mut self) {
         for pc in &mut self.packages {
             collapse(pc);
         }
         self.settings.files.sort();
         self.other.sort();
+        self.repo_changes.sort();
+        self.repo_files = self.repo_changes.iter().map(|c| c.path.clone()).collect();
+        for v in self.not_kept.credential_details.values_mut() {
+            v.sort_by(|x, y| x.path.cmp(&y.path));
+            v.dedup_by(|y, x| x.path == y.path);
+        }
+        self.not_kept.credentials = self
+            .not_kept
+            .credential_details
+            .iter()
+            .map(|(g, v)| (g.clone(), v.iter().map(|c| c.path.clone()).collect()))
+            .collect();
         self.summary = self.sections();
     }
 
@@ -872,18 +1369,26 @@ impl Diff {
     }
 
     fn sections(&self) -> Vec<Section> {
-        let ctx = Ctx { home: self.home.clone() };
+        let ctx = Ctx {
+            home: self.home.clone(),
+        };
         let mut out: Vec<Section> = Vec::new();
         let mut push = |bucket: &str, lines: Vec<String>| {
             if !lines.is_empty() {
-                out.push(Section { bucket: bucket.to_owned(), lines });
+                out.push(Section {
+                    bucket: bucket.to_owned(),
+                    lines,
+                });
             }
         };
         push("Code", self.code_lines(&ctx));
         push("Packages", self.package_lines());
         push("Settings & files", self.settings_lines(&ctx));
         push("Database changed", self.database_lines(&ctx));
-        push("Other changed", rollup(&ctx, &self.other, |p| other_group(&ctx, p)));
+        push(
+            "Other changed",
+            rollup(&ctx, &self.other, |p| other_group(&ctx, p)),
+        );
         push("Not kept", self.not_kept_lines(&ctx));
         out
     }
@@ -907,19 +1412,44 @@ impl Diff {
             }
             if !rc.dirty_new.is_empty() {
                 let names: Vec<&str> = rc.dirty_new.keys().map(|p| base_name(p)).collect();
-                let tail = if names.len() > 3 { format!(" +{} more", names.len() - 3) } else { String::new() };
-                out.push(format!("{r}: {} dirty/untracked: {}{tail}", names.len(), names[..names.len().min(3)].join(", ")));
+                let tail = if names.len() > 3 {
+                    format!(" +{} more", names.len() - 3)
+                } else {
+                    String::new()
+                };
+                out.push(format!(
+                    "{r}: {} dirty/untracked: {}{tail}",
+                    names.len(),
+                    names[..names.len().min(3)].join(", ")
+                ));
             }
             if !rc.dirty_gone.is_empty() {
-                out.push(format!("{r}: {} dirty/untracked files now clean", rc.dirty_gone.len()));
+                out.push(format!(
+                    "{r}: {} dirty/untracked files now clean",
+                    rc.dirty_gone.len()
+                ));
             }
             if rc.dirty_delta > 0 {
-                out.push(format!("{r}: {} more dirty/untracked files", rc.dirty_delta));
+                out.push(format!(
+                    "{r}: {} more dirty/untracked files",
+                    rc.dirty_delta
+                ));
             }
             if !rc.gitignored.is_empty() {
-                let names: Vec<&str> = rc.gitignored.iter().map(|c| rel_to(&rc.repo, &c.path)).collect();
-                let tail = if names.len() > 3 { format!(" +{} more", names.len() - 3) } else { String::new() };
-                out.push(format!("{r}: {}{tail} changed (gitignored)", names[..names.len().min(3)].join(", ")));
+                let names: Vec<&str> = rc
+                    .gitignored
+                    .iter()
+                    .map(|c| rel_to(&rc.repo, &c.path))
+                    .collect();
+                let tail = if names.len() > 3 {
+                    format!(" +{} more", names.len() - 3)
+                } else {
+                    String::new()
+                };
+                out.push(format!(
+                    "{r}: {}{tail} changed (gitignored)",
+                    names[..names.len().min(3)].join(", ")
+                ));
             }
         }
         out
@@ -933,7 +1463,11 @@ impl Diff {
                 parts.push(added_text(pc));
             }
             if !pc.upgraded.is_empty() {
-                let items = pc.upgraded.iter().map(|(n, (x, y))| format!("{n} {x}→{y}")).collect();
+                let items = pc
+                    .upgraded
+                    .iter()
+                    .map(|(n, (x, y))| format!("{n} {x}→{y}"))
+                    .collect();
                 parts.push(format!("upgraded {}", cap(items, 4, "more").join(", ")));
             }
             if !pc.removed.is_empty() {
@@ -944,10 +1478,19 @@ impl Diff {
                 .owned_files
                 .iter()
                 .filter(|(n, _)| !pc.added.contains_key(*n) && !pc.upgraded.contains_key(*n))
-                .map(|(n, p)| format!("{n} ({} file{})", p.len(), if p.len() == 1 { "" } else { "s" }))
+                .map(|(n, p)| {
+                    format!(
+                        "{n} ({} file{})",
+                        p.len(),
+                        if p.len() == 1 { "" } else { "s" }
+                    )
+                })
                 .collect();
             if !files_only.is_empty() {
-                parts.push(format!("files changed in {}", cap(files_only, 4, "more").join(", ")));
+                parts.push(format!(
+                    "files changed in {}",
+                    cap(files_only, 4, "more").join(", ")
+                ));
             }
             if !parts.is_empty() {
                 out.push(format!("{}: {}", pkg_label(&pc.manager), parts.join("; ")));
@@ -958,7 +1501,9 @@ impl Diff {
 
     fn settings_lines(&self, ctx: &Ctx) -> Vec<String> {
         let s = &self.settings;
-        let mut lines = rollup(ctx, &s.files, |p| p.rsplit_once('/').map(|x| x.0).unwrap_or("").to_owned());
+        let mut lines = rollup(ctx, &s.files, |p| {
+            p.rsplit_once('/').map(|x| x.0).unwrap_or("").to_owned()
+        });
         for l in &s.launch_agents {
             let verb = match l.change {
                 Change::Added => "added",
@@ -987,11 +1532,14 @@ impl Diff {
             if d.engine == "sqlite" {
                 let name = ctx.short(&d.name);
                 let (x, y) = d.digest.clone().unwrap_or((None, None));
-                let digest = |o: &Option<String>| o.as_deref().map(short7).unwrap_or_else(|| "-".into());
+                let digest =
+                    |o: &Option<String>| o.as_deref().map(short7).unwrap_or_else(|| "-".into());
                 out.push(match d.change {
                     Change::Added => format!("sqlite {name}: added ({})", digest(&y)),
                     Change::Deleted => format!("sqlite {name}: removed"),
-                    Change::Modified => format!("sqlite {name}: changed ({}→{})", digest(&x), digest(&y)),
+                    Change::Modified => {
+                        format!("sqlite {name}: changed ({}→{})", digest(&x), digest(&y))
+                    }
                 });
                 continue;
             }
@@ -999,7 +1547,10 @@ impl Diff {
             match d.change {
                 Change::Added => {
                     let t = d.tables.len();
-                    out.push(format!("{head}: new database ({t} table{})", if t == 1 { "" } else { "s" }));
+                    out.push(format!(
+                        "{head}: new database ({t} table{})",
+                        if t == 1 { "" } else { "s" }
+                    ));
                 }
                 Change::Deleted => out.push(format!("{head}: dropped")),
                 Change::Modified => {
@@ -1009,7 +1560,10 @@ impl Diff {
                     }
                     if !d.tables.is_empty() {
                         let items = d.tables.iter().map(table_text).collect();
-                        parts.push(format!("data changed in {}", cap(items, 3, "more tables").join(", ")));
+                        parts.push(format!(
+                            "data changed in {}",
+                            cap(items, 3, "more tables").join(", ")
+                        ));
                     }
                     out.push(format!("{head}: {}", parts.join("; ")));
                 }
@@ -1025,15 +1579,27 @@ impl Diff {
             let items = nk
                 .listening
                 .iter()
-                .map(|l| if l.process == "-" { format!(":{}", l.port) } else { format!(":{} ({})", l.port, l.process) })
+                .map(|l| {
+                    if l.process == "-" {
+                        format!(":{}", l.port)
+                    } else {
+                        format!(":{} ({})", l.port, l.process)
+                    }
+                })
                 .collect();
             out.push(format!("listening: {}", cap(items, 6, "more").join(", ")));
         }
         if !nk.processes.is_empty() {
-            out.push(format!("processes: {}", cap(nk.processes.clone(), 6, "more").join(", ")));
+            out.push(format!(
+                "processes: {}",
+                cap(nk.processes.clone(), 6, "more").join(", ")
+            ));
         }
         if !nk.services.is_empty() {
-            out.push(format!("services: {}", cap(nk.services.clone(), 6, "more").join(", ")));
+            out.push(format!(
+                "services: {}",
+                cap(nk.services.clone(), 6, "more").join(", ")
+            ));
         }
         if !nk.credentials.is_empty() {
             let items = nk
@@ -1042,7 +1608,11 @@ impl Diff {
                 .map(|(g, paths)| {
                     if g.ends_with('/') {
                         let n = paths.len();
-                        format!("{} ({n} file{})", ctx.short(g), if n == 1 { "" } else { "s" })
+                        format!(
+                            "{} ({n} file{})",
+                            ctx.short(g),
+                            if n == 1 { "" } else { "s" }
+                        )
                     } else {
                         ctx.short(g)
                     }
@@ -1061,10 +1631,17 @@ impl Diff {
 
     pub fn render_lines(&self, max_lines: usize) -> Vec<String> {
         let ignored = self.ignored.count();
-        let mut secs: Vec<(String, Vec<String>, usize)> =
-            self.summary.iter().filter(|s| !s.lines.is_empty()).map(|s| (s.bucket.clone(), s.lines.clone(), 0)).collect();
+        let mut secs: Vec<(String, Vec<String>, usize)> = self
+            .summary
+            .iter()
+            .filter(|s| !s.lines.is_empty())
+            .map(|s| (s.bucket.clone(), s.lines.clone(), 0))
+            .collect();
         let total = |secs: &Vec<(String, Vec<String>, usize)>| -> usize {
-            secs.iter().map(|s| 1 + s.1.len() + usize::from(s.2 > 0)).sum::<usize>() + usize::from(ignored > 0)
+            secs.iter()
+                .map(|s| 1 + s.1.len() + usize::from(s.2 > 0))
+                .sum::<usize>()
+                + usize::from(ignored > 0)
         };
         while total(&secs) > max_lines {
             let Some(idx) = secs
@@ -1091,7 +1668,9 @@ impl Diff {
             }
         }
         if ignored > 0 {
-            lines.push(format!("Ignored: {ignored} paths (caches, logs, build output)"));
+            lines.push(format!(
+                "Ignored: {ignored} paths (caches, logs, build output)"
+            ));
         }
         if lines.is_empty() {
             lines.push("No changes".to_owned());
@@ -1105,7 +1684,12 @@ fn table_text(t: &TableChange) -> String {
     match t.change {
         Change::Added => format!("{} (new, {} rows)", t.table, n(t.rows_after)),
         Change::Deleted => format!("{} (dropped)", t.table),
-        Change::Modified => format!("{} ({}→{} rows)", t.table, n(t.rows_before), n(t.rows_after)),
+        Change::Modified => format!(
+            "{} ({}→{} rows)",
+            t.table,
+            n(t.rows_before),
+            n(t.rows_after)
+        ),
     }
 }
 
@@ -1123,7 +1707,11 @@ fn collapse(pc: &mut PackageChange) {
     } else if has_deps {
         // no manual marker (pip): packages no other added package requires
         let required: BTreeSet<&String> = pc.requires.values().flatten().collect();
-        pc.added.keys().filter(|n| !required.contains(n)).cloned().collect()
+        pc.added
+            .keys()
+            .filter(|n| !required.contains(n))
+            .cloned()
+            .collect()
     } else {
         return;
     };
@@ -1131,16 +1719,20 @@ fn collapse(pc: &mut PackageChange) {
         return;
     }
     let tops: BTreeSet<&String> = top.iter().collect();
-    pc.dependencies = added.iter().filter(|n| !tops.contains(**n)).map(|n| (*n).clone()).collect();
+    pc.dependencies = added
+        .iter()
+        .filter(|n| !tops.contains(**n))
+        .map(|n| (*n).clone())
+        .collect();
     pc.top_level = Some(top);
 }
 
-fn deps_of(pc: &PackageChange, name: &str) -> usize {
+fn deps_of(pc: &PackageChange, deps: &BTreeSet<&String>, name: &str) -> usize {
     let mut seen: BTreeSet<&str> = BTreeSet::new();
     let mut stack = vec![name];
     while let Some(n) = stack.pop() {
         for d in pc.requires.get(n).into_iter().flatten() {
-            if pc.dependencies.contains(d) && seen.insert(d) {
+            if deps.contains(d) && seen.insert(d) {
                 stack.push(d);
             }
         }
@@ -1152,10 +1744,11 @@ fn added_text(pc: &PackageChange) -> String {
     match &pc.top_level {
         Some(top) => {
             let per_parent = !pc.requires.is_empty();
+            let deps: BTreeSet<&String> = pc.dependencies.iter().collect();
             let items: Vec<String> = top
                 .iter()
                 .map(|n| {
-                    let k = if per_parent { deps_of(pc, n) } else { 0 };
+                    let k = if per_parent { deps_of(pc, &deps, n) } else { 0 };
                     if k > 0 {
                         format!("{n} (+{k} dependencies)")
                     } else {
@@ -1170,9 +1763,18 @@ fn added_text(pc: &PackageChange) -> String {
             s
         }
         None => {
-            let n = if pc.manager == "pip" { CAP_PIP } else { CAP_DEFAULT };
+            let n = if pc.manager == "pip" {
+                CAP_PIP
+            } else {
+                CAP_DEFAULT
+            };
             let names: Vec<&String> = pc.added.keys().collect();
-            let mut s = names.iter().take(n).map(|x| x.as_str()).collect::<Vec<_>>().join(", ");
+            let mut s = names
+                .iter()
+                .take(n)
+                .map(|x| x.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
             if names.len() > n {
                 s.push_str(&format!(" (+{} more)", names.len() - n));
             }

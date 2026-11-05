@@ -164,10 +164,19 @@ impl Manifest {
             match f[0].as_str() {
                 "F" | "L" => {
                     need(5)?;
-                    let kind = if f[0] == "F" { FileKind::File } else { FileKind::Link };
+                    let kind = if f[0] == "F" {
+                        FileKind::File
+                    } else {
+                        FileKind::Link
+                    };
                     m.files.insert(
                         f[1].clone(),
-                        FileEntry { kind, size: f[2].clone(), mtime: f[3].clone(), digest: f[4].clone() },
+                        FileEntry {
+                            kind,
+                            size: f[2].clone(),
+                            mtime: f[3].clone(),
+                            digest: f[4].clone(),
+                        },
                     );
                 }
                 "P" => {
@@ -184,7 +193,11 @@ impl Manifest {
                 }
                 "PKGD" => {
                     need(4)?;
-                    let deps = f[3].split(',').filter(|d| !d.is_empty()).map(str::to_owned).collect();
+                    let deps = f[3]
+                        .split(',')
+                        .filter(|d| !d.is_empty())
+                        .map(str::to_owned)
+                        .collect();
                     m.pkgd.insert((f[1].clone(), f[2].clone()), deps);
                 }
                 "GIT" => {
@@ -201,7 +214,10 @@ impl Manifest {
                 }
                 "GITF" => {
                     need(4)?;
-                    m.gitf.entry(f[1].clone()).or_default().insert(f[3].clone(), f[2].clone());
+                    m.gitf
+                        .entry(f[1].clone())
+                        .or_default()
+                        .insert(f[3].clone(), f[2].clone());
                 }
                 "GIG" => {
                     need(6)?;
@@ -212,7 +228,12 @@ impl Manifest {
                     };
                     m.gig.insert(
                         path,
-                        GigEntry { repo: f[1].clone(), size: f[3].clone(), mtime: f[4].clone(), digest: f[5].clone() },
+                        GigEntry {
+                            repo: f[1].clone(),
+                            size: f[3].clone(),
+                            mtime: f[4].clone(),
+                            digest: f[5].clone(),
+                        },
                     );
                 }
                 "CRON" => {
@@ -242,7 +263,10 @@ impl Manifest {
                         if v > u64::from(MAX_FORMAT) {
                             return Err(ManifestError {
                                 line,
-                                message: format!("manifest format {} is newer than this reader ({})", f[2], MAX_FORMAT),
+                                message: format!(
+                                    "manifest format {} is newer than this reader ({})",
+                                    f[2], MAX_FORMAT
+                                ),
                             });
                         }
                     }
@@ -266,7 +290,10 @@ impl Manifest {
                     if f[1] == "postgres" {
                         m.db.pg_tables.insert(
                             (f[2].clone(), f[3].clone()),
-                            PgTable { digest: f[4].clone(), rows: num(&f[5]) },
+                            PgTable {
+                                digest: f[4].clone(),
+                                rows: num(&f[5]),
+                            },
                         );
                     }
                 }
@@ -274,7 +301,10 @@ impl Manifest {
                     need(5)?;
                     m.lagent.insert(
                         (f[1].clone(), f[2].clone()),
-                        LaunchAgent { digest: f[3].clone(), path: f[4].clone() },
+                        LaunchAgent {
+                            digest: f[3].clone(),
+                            path: f[4].clone(),
+                        },
                     );
                 }
                 "OWN" => {
@@ -288,7 +318,10 @@ impl Manifest {
     }
 
     pub fn home(&self) -> Option<&str> {
-        self.meta.get("home").map(String::as_str).filter(|h| !h.is_empty())
+        self.meta
+            .get("home")
+            .map(String::as_str)
+            .filter(|h| !h.is_empty())
     }
 }
 
@@ -314,7 +347,10 @@ LAGENT\tuser\tdev.x\t44\t/Users/a/Library/LaunchAgents/dev.x.plist\nOWN\tdpkg\tj
         assert_eq!(m.pdirs["/x"], None);
         assert_eq!(m.pkg[&("dpkg".into(), "jq".into())], "1.7");
         assert!(m.pkgm.contains(&("dpkg".into(), "jq".into())));
-        assert_eq!(m.pkgd[&("dpkg".into(), "jq".into())], vec!["libjq1", "libonig5"]);
+        assert_eq!(
+            m.pkgd[&("dpkg".into(), "jq".into())],
+            vec!["libjq1", "libonig5"]
+        );
         assert_eq!(m.git["/root/app"].untracked, 2);
         assert_eq!(m.gitf["/root/app"]["src/a.rs"], "_M");
         assert!(m.gig.contains_key("/root/app/.env"));
@@ -322,7 +358,10 @@ LAGENT\tuser\tdev.x\t44\t/Users/a/Library/LaunchAgents/dev.x.plist\nOWN\tdpkg\tj
         assert_eq!(m.cronf["root"], "/var/spool/cron/crontabs/root");
         assert_eq!(m.listen[&("tcp".into(), "3001".into())], "node");
         assert_eq!(m.db.pg_schema["app"], "11");
-        assert_eq!(m.db.pg_tables[&("app".into(), "users".into())].rows, Some(7));
+        assert_eq!(
+            m.db.pg_tables[&("app".into(), "users".into())].rows,
+            Some(7)
+        );
         assert_eq!(m.db.sqlite["/root/x.db"], "33");
         assert_eq!(m.lagent[&("user".into(), "dev.x".into())].digest, "44");
         assert_eq!(m.own["/usr/bin/jq"].1, "jq");
