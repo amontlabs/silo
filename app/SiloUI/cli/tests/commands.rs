@@ -549,3 +549,67 @@ async fn retry_setup_runs_the_engines_setup_retry_for_the_computer() {
         matches!(cli.command, silo_cli::cli::Command::RetrySetup { ref computer } if computer == "mac")
     );
 }
+
+fn keep_engine(result: Value) -> FakeEngine {
+    FakeEngine::start(move |method, _| match method {
+        "computers.list" => Ok(listing(&[("main", "running"), ("try", "running")])),
+        "changes.keep" | "changes.undo" => Ok(json!({"jobId": "job:1"})),
+        "operations.job.get" => Ok(finished(result.clone())),
+        "operations.job.acknowledge" => Ok(Value::Null),
+        other => Err(("internal", format!("unexpected {other}"))),
+    })
+}
+
+fn fold_cli(engine: &FakeEngine, extra: &[&str]) -> Cli {
+    let socket = engine.socket.to_str().unwrap();
+    let mut args = vec!["silo", "--socket", socket, "--allow-other-channel", "fold"];
+    args.extend_from_slice(extra);
+    <Cli as clap::Parser>::try_parse_from(args).unwrap()
+}
+
+#[tokio::test]
+async fn fold_sends_the_fork_the_target_and_the_recipe_keep_section() {
+    let engine = keep_engine(json!({
+        "status": "kept",
+        "report": {"fork": "id-try", "target": "id-main", "summary": [], "steps": ["restart web: pid 1 -> 2"], "notes": [], "checkpoint": "cp1"}
+    }));
+    let project = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(project.path().join(".silo")).unwrap();
+    std::fs::write(
+        project.path().join(".silo/recipe.yaml"),
+        "keep:\n  restart: [web]\n  migrate: [make migrate]\n",
+    )
+    .unwrap();
+    let cli = fold_cli(&engine, &["try", "--into", "main", "--dry-run"]);
+    assert_eq!(run(cli, project.path()).await.unwrap(), 0);
+    let sent = &engine.calls("changes.keep")[0];
+    assert_eq!(sent["forkId"], "id-try");
+    assert_eq!(sent["targetId"], "id-main");
+    assert_eq!(sent["dryRun"], true);
+    assert_eq!(sent["keep"]["restart"], json!(["web"]));
+    assert_eq!(sent["keep"]["migrate"], json!(["make migrate"]));
+}
+
+#[tokio::test]
+async fn a_refused_fold_is_a_result_with_a_distinct_exit_code() {
+    let engine = keep_engine(json!({
+        "status": "refused",
+        "report": {"fork": "id-try", "target": "id-main", "summary": [], "steps": [], "notes": [], "checkpoint": null},
+        "refusal": {"reason": "database", "message": "Database changed and nothing migrates it.", "conflicts": [], "hint": "Use Make this main."}
+    }));
+    let cli = fold_cli(&engine, &["try"]);
+    assert_eq!(run(cli, std::env::temp_dir().as_path()).await.unwrap(), 2);
+    assert!(engine.calls("changes.keep")[0]["targetId"].is_null());
+}
+
+#[tokio::test]
+async fn the_undo_command_names_the_computer_and_reports_what_was_undone() {
+    let engine = keep_engine(json!({
+        "status": "undone", "computer": "id-main", "recovered": false,
+        "checkpoint": {"id": "cp1", "name": "Before keep of try", "createdAt": "t"}
+    }));
+    let connected = Engine::connect(&engine.socket).await.unwrap();
+    let value = ops::undo(&connected, "main", &ignore).await.unwrap();
+    assert_eq!(engine.calls("changes.undo")[0]["computerId"], "id-main");
+    assert!(silo_cli::render::undo(&value).contains("Before keep of try"));
+}

@@ -185,3 +185,72 @@ mod tests {
         assert!(list(&json!({"computers": []})).contains("silo create"));
     }
 }
+
+fn lines(value: &Value, key: &str) -> Vec<String> {
+    value
+        .get(key)
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(str::to_owned)
+        .collect()
+}
+
+/// `silo fold`: what was kept, what a dry run would keep, or why nothing was changed.
+pub fn fold(value: &Value) -> String {
+    let report = &value["report"];
+    let (fork, target) = (text(report, "fork"), text(report, "target"));
+    let mut out = String::new();
+    match text(value, "status") {
+        "refused" => {
+            let refusal = &value["refusal"];
+            out.push_str(text(refusal, "message"));
+            for conflict in refusal["conflicts"].as_array().into_iter().flatten() {
+                out.push_str(&format!(
+                    "\n  {} {}: {}",
+                    text(conflict, "kind"),
+                    text(conflict, "item"),
+                    text(conflict, "detail")
+                ));
+            }
+            out.push_str(&format!("\n{}", text(refusal, "hint")));
+            return out;
+        }
+        "dry-run" => {
+            out.push_str(&format!("Would keep {fork} into {target}:"));
+            for line in lines(report, "summary") {
+                out.push_str(&format!("\n  {line}"));
+            }
+        }
+        _ => {
+            out.push_str(&format!("Kept {fork} into {target}."));
+            for line in lines(report, "steps") {
+                out.push_str(&format!("\n  {line}"));
+            }
+        }
+    }
+    for note in lines(report, "notes") {
+        out.push_str(&format!("\nnote: {note}"));
+    }
+    if text(value, "status") == "kept" {
+        out.push_str(&format!("\nUndo with `silo undo {target}`."));
+    }
+    out
+}
+
+pub fn undo(value: &Value) -> String {
+    let computer = text(value, "computer");
+    match text(value, "status") {
+        "undone" => {
+            let name = text(&value["checkpoint"], "name");
+            let how = if value["recovered"] == true {
+                " (an interrupted keep)"
+            } else {
+                ""
+            };
+            format!("Put {computer} back to {name}{how}.")
+        }
+        _ => format!("Nothing to undo on {computer}."),
+    }
+}

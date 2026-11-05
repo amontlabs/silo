@@ -96,3 +96,34 @@ task) are kept in `changes/fixtures/`, reduced to the records that differ betwee
 and `changes/tests.rs` asserts the exact text for each. Line counts against the first
 prototype: 3, 4, 7, 15, 9, 8 and 11 on Linux (the PDF skill moved from 10 to 11 because its
 credentials file now has its own Not kept line), 14, 12 and 12 on macOS, 3 for the live task.
+
+## Keeping a fork: `silo fold` and `silo undo`
+
+`silo fold <fork> [--into main] [--dry-run] [--json]` keeps a fork's changes into the computer it
+was made from (`changes.keep`, `app/SiloUI/src-tauri/engine/src/changes/keep/`). `silo undo <computer>`
+puts the computer back to before its latest keep (`changes.undo`). Both are MCP tools (`fold`, `undo`).
+
+A keep reads three manifests (the fork-time base, the fork now, the target now) and builds its
+plan from them; the diff supplies the item list (never Not kept or Ignored) and the database check.
+
+1. **Checks, before anything changes.** For each file, package, crontab line and launch agent the
+   keep would touch: if the target changed it since the fork point and the fork ended differently,
+   it is a conflict. Git: the fork's commits are bundled into the target and the merge is tried
+   (`git merge-tree`); a conflicting merge is a conflict. A database change (schema or data) with
+   no changed migration file and no `keep: migrate:` step is refused, pointing to "Make this main".
+   A refusal is a result (`status: "refused"`, exit code 2), the target is untouched.
+2. **Checkpoint.** A `before-keep` checkpoint of the target (macOS computers use a manual
+   checkpoint named `Before keep of <fork>`), and a journal entry naming it.
+3. **Apply, in order.** Packages by name and version (`apt-get install name=ver`, `brew install`,
+   `npm -g`, `pip`, `pipx`, `cargo`; package files are never copied), git merge and uncommitted
+   files, files (written next to the target and renamed; links recreated; files identical after the
+   package replay skipped), crontabs merged by line against the fork-time text (an edited line
+   appears once, a deleted line is gone, lines only the target has stay), launch agents, then the
+   recipe's `migrate:` commands (always, when set), `restart:` services (the process id must change
+   and the new process must run), and `after:` commands.
+4. **Failure.** A failing step restores the checkpoint and reports the error. If the engine stops
+   mid-keep, the journal lets the next keep, `silo undo`, or engine start restore the checkpoint.
+5. **One keep at a time per target.** A second waits up to two minutes, then fails with `busy`.
+
+`silo undo` restores the latest before-keep checkpoint a keep made (the engine's restore saves a
+"Before restore" checkpoint first) and does not use the same one twice.

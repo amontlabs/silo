@@ -584,6 +584,112 @@
       ],
       "type": "object"
     },
+    "ChangesKeepParams": {
+      "properties": {
+        "dryRun": {
+          "description": "Check and report what a keep would do, changing nothing.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "forkId": {
+          "description": "The fork whose changes are kept.",
+          "type": "string"
+        },
+        "keep": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/KeepHooks"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "targetId": {
+          "description": "The computer to keep into; defaults to the one the fork was made from.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "forkId"
+      ],
+      "type": "object"
+    },
+    "ChangesKeepResult": {
+      "description": "The final result of `changes.keep`. `status` is `kept`, `dry-run` or `refused`; a\nrefused keep did not change the target.",
+      "properties": {
+        "refusal": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/KeepRefusal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "report": {
+          "$ref": "#/$defs/KeepReport"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "status",
+        "report"
+      ],
+      "type": "object"
+    },
+    "ChangesUndoParams": {
+      "properties": {
+        "computerId": {
+          "description": "The computer a keep changed.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "computerId"
+      ],
+      "type": "object"
+    },
+    "ChangesUndoResult": {
+      "description": "The final result of `changes.undo`. `status` is `undone` or `nothing-to-undo`.",
+      "properties": {
+        "checkpoint": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UndoneCheckpoint"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "computer": {
+          "type": "string"
+        },
+        "recovered": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "status",
+        "computer"
+      ],
+      "type": "object"
+    },
     "Checkpoint": {
       "description": "The common checkpoint view returned by Linux and macOS computers.",
       "properties": {
@@ -5807,6 +5913,9 @@
         "guest_exec": {
           "$ref": "#/$defs/GuestExecFinishedResult"
         },
+        "keep": {
+          "$ref": "#/$defs/ChangesKeepResult"
+        },
         "macos_computers": {
           "$ref": "#/$defs/MacosComputersState"
         },
@@ -5815,6 +5924,9 @@
         },
         "storage": {
           "$ref": "#/$defs/StorageState"
+        },
+        "undo": {
+          "$ref": "#/$defs/ChangesUndoResult"
         },
         "update": {
           "$ref": "#/$defs/UpdateSnapshot"
@@ -5827,6 +5939,8 @@
         "application_source",
         "macos_computers",
         "checkpoint_created",
+        "keep",
+        "undo",
         "desktop",
         "backup",
         "archive_inspection",
@@ -5838,6 +5952,126 @@
         "push",
         "storage",
         "update"
+      ],
+      "type": "object"
+    },
+    "KeepConflict": {
+      "properties": {
+        "detail": {
+          "type": "string"
+        },
+        "item": {
+          "type": "string"
+        },
+        "kind": {
+          "description": "`file`, `package`, `crontab`, `launch agent` or `git`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "item",
+        "detail"
+      ],
+      "type": "object"
+    },
+    "KeepHooks": {
+      "description": "The recipe's `keep:` section.",
+      "properties": {
+        "after": {
+          "default": [],
+          "description": "Commands run last.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "migrate": {
+          "default": [],
+          "description": "Commands run once the code and files are in place (database migrations).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "restart": {
+          "default": [],
+          "description": "Services restarted after the changes are applied.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "KeepRefusal": {
+      "properties": {
+        "conflicts": {
+          "items": {
+            "$ref": "#/$defs/KeepConflict"
+          },
+          "type": "array"
+        },
+        "hint": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "reason": {
+          "description": "`divergent`, `database` or `git`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "reason",
+        "message",
+        "conflicts",
+        "hint"
+      ],
+      "type": "object"
+    },
+    "KeepReport": {
+      "properties": {
+        "checkpoint": {
+          "description": "The before-keep checkpoint of the target.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "fork": {
+          "type": "string"
+        },
+        "notes": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "steps": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "summary": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "target": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "fork",
+        "target",
+        "summary",
+        "steps",
+        "notes"
       ],
       "type": "object"
     },
@@ -6589,6 +6823,8 @@
     "MethodName": {
       "enum": [
         "activity.setup.read",
+        "changes.keep",
+        "changes.undo",
         "checkpoints.abandonRestore",
         "checkpoints.create",
         "checkpoints.delete",
@@ -6747,6 +6983,38 @@
             },
             "params": {
               "$ref": "#/$defs/DeviceParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "changes.keep",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/ChangesKeepParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "changes.undo",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/ChangesUndoParams"
             }
           },
           "required": [
@@ -9090,6 +9358,38 @@
                 "$ref": "#/$defs/ComputerConfigurationProgress"
               },
               "type": "array"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "changes.keep",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/JobStartResult"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "changes.undo",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/JobStartResult"
             }
           },
           "required": [
@@ -13556,6 +13856,25 @@
       ],
       "type": "string"
     },
+    "UndoneCheckpoint": {
+      "properties": {
+        "createdAt": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "createdAt"
+      ],
+      "type": "object"
+    },
     "UnexpectedComputerChange": {
       "properties": {
         "computerId": {
@@ -14028,6 +14347,14 @@
   "type": "object",
   "x-silo-job-results": [
     {
+      "method": "changes.keep",
+      "resultType": "ChangesKeepResult"
+    },
+    {
+      "method": "changes.undo",
+      "resultType": "ChangesUndoResult"
+    },
+    {
       "method": "checkpoints.abandonRestore",
       "resultType": "ApplicationSource | null"
     },
@@ -14150,6 +14477,18 @@
       "name": "activity.setup.read",
       "paramsType": "common::DeviceParams",
       "resultType": "Vec<computers::ComputerConfigurationProgress>"
+    },
+    {
+      "kind": "job",
+      "name": "changes.keep",
+      "paramsType": "keep::ChangesKeepParams",
+      "resultType": "common::JobStartResult"
+    },
+    {
+      "kind": "job",
+      "name": "changes.undo",
+      "paramsType": "keep::ChangesUndoParams",
+      "resultType": "common::JobStartResult"
     },
     {
       "kind": "job",

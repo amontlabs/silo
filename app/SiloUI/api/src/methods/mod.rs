@@ -26,6 +26,7 @@ pub mod exports;
 pub mod files;
 pub mod github;
 pub mod guest;
+pub mod keep;
 pub mod logs;
 pub mod macos;
 pub mod migration;

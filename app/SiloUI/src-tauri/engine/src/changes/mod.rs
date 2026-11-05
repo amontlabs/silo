@@ -4,6 +4,7 @@
 
 pub mod diff;
 pub mod ignore;
+pub mod keep;
 pub mod manifest;
 
 #[cfg(test)]

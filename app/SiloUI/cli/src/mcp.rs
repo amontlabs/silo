@@ -68,6 +68,19 @@ pub struct CheckpointParams {
     pub kind: Option<String>,
 }
 
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct FoldParams {
+    /// The fork whose changes are kept.
+    pub fork: String,
+    /// The computer to keep into; defaults to the one the fork was made from.
+    pub into: Option<String>,
+    /// Report what would be kept and what would stop it, changing nothing.
+    #[serde(default)]
+    pub dry_run: bool,
+    /// Path of a recipe whose keep: section applies.
+    pub recipe_file: Option<String>,
+}
+
 fn show(result: Result<Value, CliError>) -> Result<String, String> {
     match result {
         Ok(value) => Ok(serde_json::to_string_pretty(&value).unwrap_or_default()),
@@ -139,6 +152,40 @@ impl SiloMcp {
             }
             .await,
         )
+    }
+
+    #[tool(
+        description = "Keep a fork's changes into the computer it came from (or `into`). Returns status kept, dry-run or refused; a refusal (divergent changes, a database change nothing migrates) lists what stopped it and the target was not changed. Takes a checkpoint of the target first; `undo` puts it back."
+    )]
+    async fn fold(&self, Parameters(params): Parameters<FoldParams>) -> Result<String, String> {
+        show(
+            async {
+                let project = Project::discover(&self.working_directory);
+                let explicit = params
+                    .recipe_file
+                    .as_deref()
+                    .map(|path| self.working_directory.join(path));
+                let recipe = ops::resolve_recipe(explicit.as_deref(), &project)?;
+                ops::fold(
+                    &self.engine().await?,
+                    &params.fork,
+                    params.into.as_deref(),
+                    ops::keep_hooks(recipe.as_ref()),
+                    params.dry_run,
+                    &|_| {},
+                )
+                .await
+            }
+            .await,
+        )
+    }
+
+    #[tool(description = "Put a computer back to before its latest keep.")]
+    async fn undo(
+        &self,
+        Parameters(ComputerParam { computer }): Parameters<ComputerParam>,
+    ) -> Result<String, String> {
+        show(async { ops::undo(&self.engine().await?, &computer, &|_| {}).await }.await)
     }
 
     #[tool(
