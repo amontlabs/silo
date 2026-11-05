@@ -187,7 +187,11 @@ impl SiloMcp {
                     &params.fork,
                     params.into.as_deref(),
                     ops::keep_hooks(recipe.as_ref()),
-                    ops::FoldOptions { dry_run: params.dry_run, data_ok: params.data_ok, reviewed: params.reviewed },
+                    ops::FoldOptions {
+                        dry_run: params.dry_run,
+                        data_ok: params.data_ok,
+                        reviewed: params.reviewed,
+                    },
                     &|_| {},
                 )
                 .await

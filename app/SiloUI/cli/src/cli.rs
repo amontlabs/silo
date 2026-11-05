@@ -318,7 +318,11 @@ async fn dispatch(
                 &fold.fork,
                 fold.into.as_deref(),
                 keep,
-                ops::FoldOptions { dry_run: fold.dry_run, data_ok: fold.data_ok, reviewed: fold.reviewed },
+                ops::FoldOptions {
+                    dry_run: fold.dry_run,
+                    data_ok: fold.data_ok,
+                    reviewed: fold.reviewed,
+                },
                 progress,
             )
             .await?;

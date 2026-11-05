@@ -42,7 +42,11 @@ impl Tracker {
             for computer in [&self.fork, &self.target] {
                 let _ = env.run(computer, RunAs::Root, &scripts::file_remove(&path));
             }
-            let _ = env.run(&self.target, RunAs::Account, &scripts::git_drop_ref(&repo, &tmp_ref));
+            let _ = env.run(
+                &self.target,
+                RunAs::Account,
+                &scripts::git_drop_ref(&repo, &tmp_ref),
+            );
         }
     }
 }
@@ -100,7 +104,12 @@ fn compare(
 ) -> Result<(Manifest, Diff), String> {
     let fork = parse(fork_text)?;
     let noise = match store.baseline(fork_name) {
-        Some((before, idle)) => Some(diff(&parse(&before)?, &parse(&idle)?, None, &IgnoreList::builtin())),
+        Some((before, idle)) => Some(diff(
+            &parse(&before)?,
+            &parse(&idle)?,
+            None,
+            &IgnoreList::builtin(),
+        )),
         None => None,
     };
     let changes = diff(base, &fork, noise.as_ref(), &IgnoreList::builtin());
@@ -108,12 +117,21 @@ fn compare(
 }
 
 /// Captures the fork and compares it with its fork-time base.
-pub fn look_at_fork(env: &dyn KeepEnv, store: &dyn ManifestStore, fork_name: &str) -> Result<ForkView, String> {
+pub fn look_at_fork(
+    env: &dyn KeepEnv,
+    store: &dyn ManifestStore,
+    fork_name: &str,
+) -> Result<ForkView, String> {
     env.note("Looking at the fork");
     let base = parse(&store.fork_time(fork_name)?)?;
     let (fork, changes) = compare(store, fork_name, &base, &store.capture(fork_name)?)?;
     let digest = review_digest(&changes);
-    Ok(ForkView { base, fork, diff: changes, digest })
+    Ok(ForkView {
+        base,
+        fork,
+        diff: changes,
+        digest,
+    })
 }
 
 /// Migration folders and files, not any path that happens to contain the word.
@@ -128,23 +146,42 @@ pub fn is_migration(path: &str) -> bool {
 
 /// Paths a git history must not carry into main: credentials, env files, ignored paths.
 pub fn sensitive_path(path: &str) -> bool {
-    let abs = if path.starts_with('/') { path.to_owned() } else { format!("/{path}") };
+    let abs = if path.starts_with('/') {
+        path.to_owned()
+    } else {
+        format!("/{path}")
+    };
     let base = abs.rsplit('/').next().unwrap_or("");
     credential_group(&abs).is_some()
         || IgnoreList::builtin().matches(&abs)
         || base == ".env"
-        || (base.starts_with(".env.") && !matches!(base, ".env.example" | ".env.sample" | ".env.template"))
+        || (base.starts_with(".env.")
+            && !matches!(base, ".env.example" | ".env.sample" | ".env.template"))
 }
 
-fn refuse(report: Report, reason: &str, message: String, conflicts: Vec<Conflict>, hint: &str) -> Prepared {
+fn refuse(
+    report: Report,
+    reason: &str,
+    message: String,
+    conflicts: Vec<Conflict>,
+    hint: &str,
+) -> Prepared {
     Prepared::Refused {
         report,
-        refusal: Refusal { reason: reason.to_owned(), message, conflicts, hint: hint.to_owned() },
+        refusal: Refusal {
+            reason: reason.to_owned(),
+            message,
+            conflicts,
+            hint: hint.to_owned(),
+        },
     }
 }
 
 fn nul_names(text: &str) -> Vec<String> {
-    text.split('\0').filter(|s| !s.is_empty()).map(str::to_owned).collect()
+    text.split('\0')
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
+        .collect()
 }
 
 #[allow(clippy::too_many_lines)]
@@ -184,13 +221,19 @@ pub fn prepare(
         let (f, m) = (&fork_live[&cand.path], &main_live[&cand.path]);
         match plan::decide(&cand.base, f, m) {
             Decision::Skip => {}
-            Decision::Conflict(why) => plan.conflicts.push(Conflict::new("file", cand.path.clone(), why)),
+            Decision::Conflict(why) => {
+                plan.conflicts
+                    .push(Conflict::new("file", cand.path.clone(), why))
+            }
             Decision::Write => {
                 let action = match f {
                     Live::Missing => FileAction::Delete,
                     Live::Link(t) => {
                         if link_is_sensitive(&cand.path, t) {
-                            plan.notes.push(format!("{} links to a credential path and is not kept", cand.path));
+                            plan.notes.push(format!(
+                                "{} links to a credential path and is not kept",
+                                cand.path
+                            ));
                             continue;
                         }
                         FileAction::Link(t.clone())
@@ -204,7 +247,10 @@ pub fn prepare(
                     writes.push(cand.path.clone());
                 }
                 fork_final.insert(cand.path.clone(), f.clone());
-                plan.files.push(FileOp { path: cand.path.clone(), action });
+                plan.files.push(FileOp {
+                    path: cand.path.clone(),
+                    action,
+                });
             }
         }
     }
@@ -215,11 +261,22 @@ pub fn prepare(
     let mut dirty_checked: Vec<(usize, Vec<usize>)> = Vec::new();
     let mut migrations_changed = plan.files.iter().any(|op| is_migration(&op.path));
     for (index, repo) in plan.repos.clone().iter().enumerate() {
-        let old = repo.commits.as_ref().map(|(old, _)| old.clone()).unwrap_or_default();
+        let old = repo
+            .commits
+            .as_ref()
+            .map(|(old, _)| old.clone())
+            .unwrap_or_default();
         if let Some((_, new)) = &repo.commits {
             let names = env
-                .run(fork_name, RunAs::Account, &scripts::git_changed(&repo.repo, if repo.new { "" } else { &old }, new))?
-                .code_ok(&format!("Listing the fork's changed files in {}", repo.repo))?;
+                .run(
+                    fork_name,
+                    RunAs::Account,
+                    &scripts::git_changed(&repo.repo, if repo.new { "" } else { &old }, new),
+                )?
+                .code_ok(&format!(
+                    "Listing the fork's changed files in {}",
+                    repo.repo
+                ))?;
             for name in nul_names(&String::from_utf8_lossy(&names)) {
                 if is_migration(&name) {
                     migrations_changed = true;
@@ -241,8 +298,15 @@ pub fn prepare(
         }
         let path = format!("/tmp/silo-keep-{id}-{index}.bundle");
         let tmp_ref = format!("refs/silo-tmp/{id}-{index}");
-        tracker.temps.push((repo.repo.clone(), path.clone(), tmp_ref.clone()));
-        env.run(fork_name, RunAs::Account, &scripts::git_bundle(&repo.repo, &path))?.success("Bundling the fork's commits")?;
+        tracker
+            .temps
+            .push((repo.repo.clone(), path.clone(), tmp_ref.clone()));
+        env.run(
+            fork_name,
+            RunAs::Account,
+            &scripts::git_bundle(&repo.repo, &path),
+        )?
+        .success("Bundling the fork's commits")?;
         let data = env.read(fork_name, &path)?;
         env.write(target, &path, &data, "644")?;
         bundle_data.insert(path.clone(), data);
@@ -250,7 +314,11 @@ pub fn prepare(
             "new".to_owned()
         } else {
             let out = env
-                .run(target, RunAs::Account, &scripts::git_precheck(&repo.repo, &path, &tmp_ref))?
+                .run(
+                    target,
+                    RunAs::Account,
+                    &scripts::git_precheck(&repo.repo, &path, &tmp_ref),
+                )?
                 .success(&format!("Checking the merge in {}", repo.repo))?;
             let mut lines = out.lines();
             let state = lines.next().unwrap_or("unsupported").trim().to_owned();
@@ -269,14 +337,24 @@ pub fn prepare(
             }
             state
         };
-        bundles.push(Bundle { repo: repo.repo.clone(), path, tmp_ref, state });
+        bundles.push(Bundle {
+            repo: repo.repo.clone(),
+            path,
+            tmp_ref,
+            state,
+        });
     }
 
     // Uncommitted files and deletes: three-way against the blob at the fork point.
     for (index, repo) in plan.repos.clone().iter().enumerate() {
         let mut keep_ops = Vec::new();
         let base_head = repo.base_head.clone().unwrap_or_default();
-        let paths: Vec<String> = repo.dirty.iter().filter(|d| !d.delete).map(|d| d.path.clone()).collect();
+        let paths: Vec<String> = repo
+            .dirty
+            .iter()
+            .filter(|d| !d.delete)
+            .map(|d| d.path.clone())
+            .collect();
         let fork_paths = env.inspect(fork_name, &paths)?;
         for (n, op) in repo.dirty.iter().enumerate() {
             if sensitive_path(&op.rel) {
@@ -288,31 +366,54 @@ pub fn prepare(
             }
             let state = |computer: &str, repo_dir: &str| -> Result<(String, String), String> {
                 let out = env
-                    .run(computer, RunAs::Account, &scripts::git_file_state(repo_dir, &op.rel, &base_head))?
+                    .run(
+                        computer,
+                        RunAs::Account,
+                        &scripts::git_file_state(repo_dir, &op.rel, &base_head),
+                    )?
                     .success("Comparing an uncommitted file")?;
                 let mut words = out.split_whitespace();
-                Ok((words.next().unwrap_or("-").to_owned(), words.next().unwrap_or("-").to_owned()))
+                Ok((
+                    words.next().unwrap_or("-").to_owned(),
+                    words.next().unwrap_or("-").to_owned(),
+                ))
             };
             let on_main = !repo.new && main.git.contains_key(&repo.repo);
-            let (blob, main_m) = if on_main { state(target, &repo.repo)? } else { ("-".to_owned(), "-".to_owned()) };
-            let fork_m = if op.delete { "-".to_owned() } else { state(fork_name, &repo.repo)?.1 };
+            let (blob, main_m) = if on_main {
+                state(target, &repo.repo)?
+            } else {
+                ("-".to_owned(), "-".to_owned())
+            };
+            let fork_m = if op.delete {
+                "-".to_owned()
+            } else {
+                state(fork_name, &repo.repo)?.1
+            };
             if !op.delete {
                 match fork_paths.get(&op.path) {
                     Some(Live::File { .. }) => {}
                     Some(Live::Link(_)) | Some(Live::Dir) => {
-                        plan.notes.push(format!("{} is a link or folder and not kept", op.path));
+                        plan.notes
+                            .push(format!("{} is a link or folder and not kept", op.path));
                         continue;
                     }
                     Some(Live::Missing) | None => continue,
                     Some(Live::Unreadable) => {
-                        plan.conflicts.push(Conflict::new("file", op.path.clone(), "it cannot be read"));
+                        plan.conflicts.push(Conflict::new(
+                            "file",
+                            op.path.clone(),
+                            "it cannot be read",
+                        ));
                         continue;
                     }
                 }
             }
             match plan::decide_dirty(&blob, &fork_m, &main_m) {
                 Decision::Skip => {}
-                Decision::Conflict(why) => plan.conflicts.push(Conflict::new("file", op.path.clone(), why)),
+                Decision::Conflict(why) => {
+                    plan.conflicts
+                        .push(Conflict::new("file", op.path.clone(), why))
+                }
                 Decision::Write => {
                     if !op.delete {
                         writes.push(op.path.clone());
@@ -333,16 +434,29 @@ pub fn prepare(
             keep.contains(&(n - 1))
         });
     }
-    plan.repos.retain(|r| r.commits.is_some() || r.new || !r.dirty.is_empty());
+    plan.repos
+        .retain(|r| r.commits.is_some() || r.new || !r.dirty.is_empty());
 
     // Destinations: no link or file in the way on main.
-    let mut dests: Vec<String> = plan.files.iter().filter(|op| op.action != FileAction::Delete).map(|op| op.path.clone()).collect();
-    dests.extend(plan.repos.iter().flat_map(|r| r.dirty.iter().filter(|d| !d.delete).map(|d| d.path.clone())));
+    let mut dests: Vec<String> = plan
+        .files
+        .iter()
+        .filter(|op| op.action != FileAction::Delete)
+        .map(|op| op.path.clone())
+        .collect();
+    dests.extend(
+        plan.repos
+            .iter()
+            .flat_map(|r| r.dirty.iter().filter(|d| !d.delete).map(|d| d.path.clone())),
+    );
     if !dests.is_empty() {
-        let out = env.run(target, RunAs::Root, &scripts::dest_check(&dests))?.code_ok("Checking destinations")?;
+        let out = env
+            .run(target, RunAs::Root, &scripts::dest_check(&dests))?
+            .code_ok("Checking destinations")?;
         for (path, verdict) in scripts::parse_pairs(&out) {
             if verdict != "ok" {
-                plan.conflicts.push(Conflict::new("destination", path, verdict));
+                plan.conflicts
+                    .push(Conflict::new("destination", path, verdict));
             }
         }
     }
@@ -357,17 +471,37 @@ pub fn prepare(
     }
 
     // Brew installs whatever it currently ships: it must be the fork's version.
-    for pkg in plan.packages.clone().iter().filter(|p| p.manager.starts_with("brew")) {
+    for pkg in plan
+        .packages
+        .clone()
+        .iter()
+        .filter(|p| p.manager.starts_with("brew"))
+    {
         let shipped = env
-            .run(target, RunAs::Account, &scripts::brew_version(&pkg.name, pkg.manager == "brew-cask"))?
+            .run(
+                target,
+                RunAs::Account,
+                &scripts::brew_version(&pkg.name, pkg.manager == "brew-cask"),
+            )?
             .success("Asking brew for a version")?;
         let shipped = shipped.trim();
-        let same = !shipped.is_empty() && (shipped == pkg.version || pkg.version.starts_with(&format!("{shipped}_")) || shipped.starts_with(&format!("{}_", pkg.version)));
+        let same = !shipped.is_empty()
+            && (shipped == pkg.version
+                || pkg.version.starts_with(&format!("{shipped}_"))
+                || shipped.starts_with(&format!("{}_", pkg.version)));
         if !same {
             plan.conflicts.push(Conflict::new(
                 "package",
                 format!("{} {}", pkg.manager, pkg.name),
-                format!("the fork has {}, brew would install {}", pkg.version, if shipped.is_empty() { "an unknown version" } else { shipped }),
+                format!(
+                    "the fork has {}, brew would install {}",
+                    pkg.version,
+                    if shipped.is_empty() {
+                        "an unknown version"
+                    } else {
+                        shipped
+                    }
+                ),
             ));
         }
     }
@@ -375,11 +509,19 @@ pub fn prepare(
     // Crontabs: by line against the fork-time text.
     let mut cron_texts = Vec::new();
     for (user, _) in &plan.cron {
-        let theirs = env.run(fork_name, RunAs::Root, &scripts::crontab_read(user))?.success("Reading the fork's crontab")?;
-        let ours = env.run(target, RunAs::Root, &scripts::crontab_read(user))?.success("Reading main's crontab")?;
+        let theirs = env
+            .run(fork_name, RunAs::Root, &scripts::crontab_read(user))?
+            .success("Reading the fork's crontab")?;
+        let ours = env
+            .run(target, RunAs::Root, &scripts::crontab_read(user))?
+            .success("Reading main's crontab")?;
         let untouched = view.base.cron.get(user) == main.cron.get(user);
         let merged = if untouched {
-            if theirs.lines().eq(ours.lines()) { Merge::Unchanged } else { Merge::Merged(theirs.clone()) }
+            if theirs.lines().eq(ours.lines()) {
+                Merge::Unchanged
+            } else {
+                Merge::Merged(theirs.clone())
+            }
         } else {
             match store.fork_time_crontab(fork_name, user)? {
                 Some(before) => cron::merge(&before, &theirs, &ours),
@@ -389,10 +531,15 @@ pub fn prepare(
         match merged {
             Merge::Unchanged => {}
             Merge::Merged(text) => cron_texts.push((user.clone(), text)),
-            Merge::Conflict(lines) => plan.conflicts.push(Conflict::new("crontab", user.clone(), format!("main and the fork both changed: {}", lines.join(" | ")))),
+            Merge::Conflict(lines) => plan.conflicts.push(Conflict::new(
+                "crontab",
+                user.clone(),
+                format!("main and the fork both changed: {}", lines.join(" | ")),
+            )),
         }
     }
-    plan.cron.retain(|(user, _)| cron_texts.iter().any(|(u, _)| u == user));
+    plan.cron
+        .retain(|(user, _)| cron_texts.iter().any(|(u, _)| u == user));
 
     // The fork must not have moved while it was read.
     let (_, again) = compare(store, fork_name, &view.base, &store.capture(fork_name)?)?;
@@ -401,27 +548,36 @@ pub fn prepare(
             report,
             "changed",
             format!("{fork_name} changed while it was being read. {target} was not changed."),
-            vec![Conflict::new("fork", fork_name, "its changes differ from the first look")],
+            vec![Conflict::new(
+                "fork",
+                fork_name,
+                "its changes differ from the first look",
+            )],
             "Let the fork finish, review it again with `silo diff`, and keep again.",
         ));
     }
 
-    let ready = |plan: Plan, cron: Vec<(String, String)>, bundles: Vec<Bundle>, mut report: Report| {
-        report.summary.extend(plan.summary().into_iter().map(|line| format!("will keep {line}")));
-        report.notes.extend(plan.notes.clone());
-        Ready {
-            plan,
-            main: main.clone(),
-            os,
-            report,
-            cron,
-            bundles,
-            migrations_changed,
-            fork_live: fork_final.clone(),
-            staged: staged.clone(),
-            bundle_data: bundle_data.clone(),
-        }
-    };
+    let ready =
+        |plan: Plan, cron: Vec<(String, String)>, bundles: Vec<Bundle>, mut report: Report| {
+            report.summary.extend(
+                plan.summary()
+                    .into_iter()
+                    .map(|line| format!("will keep {line}")),
+            );
+            report.notes.extend(plan.notes.clone());
+            Ready {
+                plan,
+                main: main.clone(),
+                os,
+                report,
+                cron,
+                bundles,
+                migrations_changed,
+                fork_live: fork_final.clone(),
+                staged: staged.clone(),
+                bundle_data: bundle_data.clone(),
+            }
+        };
 
     if !plan.conflicts.is_empty() {
         let conflicts = plan.conflicts.clone();
@@ -434,8 +590,16 @@ pub fn prepare(
         };
         let message = format!(
             "Keep stopped: {} {} on {target} and in {fork_name}. {target} was not changed.",
-            conflicts.iter().map(|c| c.item.clone()).collect::<Vec<_>>().join(", "),
-            if reason == "credentials" { "would bring credentials or ignored files" } else { "clash" },
+            conflicts
+                .iter()
+                .map(|c| c.item.clone())
+                .collect::<Vec<_>>()
+                .join(", "),
+            if reason == "credentials" {
+                "would bring credentials or ignored files"
+            } else {
+                "clash"
+            },
         );
         report.notes.extend(plan.notes.clone());
         return Ok(refuse(

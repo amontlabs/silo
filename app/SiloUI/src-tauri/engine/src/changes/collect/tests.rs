@@ -473,7 +473,7 @@ fn the_collector_describes_a_fixture_home() {
     );
     // Every record is a known tag with tabs between its fields.
     let known = [
-        "META", "F", "L", "P", "PKG", "PKGM", "GIT", "GITF", "GIG", "CRON", "CRONF", "SVC",
+        "META", "F", "L", "P", "PKG", "PKGM", "GIT", "GITF", "GIG", "CRON", "CRONTXT", "CRONF", "SVC",
         "LISTEN", "PROC", "PKGD", "DB", "DBT", "LAGENT",
     ];
     assert!(lines

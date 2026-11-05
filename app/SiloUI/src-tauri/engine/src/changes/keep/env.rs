@@ -109,7 +109,10 @@ pub struct CheckpointRef {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Live {
     Missing,
-    File { sha: String, mode: String },
+    File {
+        sha: String,
+        mode: String,
+    },
     Link(String),
     Dir,
     /// Present but not readable: never equal to anything.
@@ -123,7 +126,10 @@ pub fn parse_inspect(bytes: &[u8]) -> BTreeMap<String, Live> {
     for record in fields.chunks_exact(4) {
         let text = |i: usize| String::from_utf8_lossy(record[i]).into_owned();
         let live = match text(1).as_str() {
-            "F" => Live::File { sha: text(3), mode: text(2) },
+            "F" => Live::File {
+                sha: text(3),
+                mode: text(2),
+            },
             "L" => Live::Link(text(3)),
             "D" => Live::Dir,
             "X" => Live::Missing,

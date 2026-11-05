@@ -47,7 +47,13 @@ pub struct Journal {
 fn file_name(target: &str) -> String {
     target
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '_' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect()
 }
 
@@ -61,7 +67,11 @@ impl Journal {
     }
 
     pub fn begin(&self, entry: &Entry) -> Result<(), String> {
-        write_durable(&self.dir, &self.path(&entry.target, "keep.json"), &serde_json::to_vec(entry).unwrap_or_default())
+        write_durable(
+            &self.dir,
+            &self.path(&entry.target, "keep.json"),
+            &serde_json::to_vec(entry).unwrap_or_default(),
+        )
     }
 
     pub fn pending(&self, target: &str) -> Result<Option<Entry>, String> {
@@ -87,13 +97,20 @@ impl Journal {
     }
 
     fn save_records(&self, target: &str, records: &[Record]) -> Result<(), String> {
-        write_durable(&self.dir, &self.path(target, "checkpoints.json"), &serde_json::to_vec(records).unwrap_or_default())
+        write_durable(
+            &self.dir,
+            &self.path(target, "checkpoints.json"),
+            &serde_json::to_vec(records).unwrap_or_default(),
+        )
     }
 
     /// A checkpoint taken for a keep that has not finished.
     pub fn record_pending(&self, target: &str, checkpoint: &CheckpointRef) -> Result<(), String> {
         let mut all = self.records(target);
-        all.push(Record { checkpoint: checkpoint.clone(), state: State::Pending });
+        all.push(Record {
+            checkpoint: checkpoint.clone(),
+            state: State::Pending,
+        });
         self.save_records(target, &all)
     }
 
@@ -115,8 +132,17 @@ impl Journal {
     }
 
     /// The manifest of the target as the last keep left it, to tell what changed after.
-    pub fn save_after(&self, target: &str, checkpoint_id: &str, manifest: &str) -> Result<(), String> {
-        write_durable(&self.dir, &self.path(target, &format!("{}.after", file_name(checkpoint_id))), manifest.as_bytes())
+    pub fn save_after(
+        &self,
+        target: &str,
+        checkpoint_id: &str,
+        manifest: &str,
+    ) -> Result<(), String> {
+        write_durable(
+            &self.dir,
+            &self.path(target, &format!("{}.after", file_name(checkpoint_id))),
+            manifest.as_bytes(),
+        )
     }
 
     pub fn after(&self, target: &str, checkpoint_id: &str) -> Option<String> {

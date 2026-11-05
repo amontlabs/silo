@@ -121,31 +121,47 @@ credentials file now has its own Not kept line), 14, 12 and 12 on macOS, 3 for t
 
 ## Keeping a fork: `silo fold` and `silo undo`
 
-`silo fold <fork> [--into main] [--dry-run] [--json]` keeps a fork's changes into the computer it
-was made from (`changes.keep`, `app/SiloUI/src-tauri/engine/src/changes/keep/`). `silo undo <computer>`
-puts the computer back to before its latest keep (`changes.undo`). Both are MCP tools (`fold`, `undo`).
+`silo fold <fork> [--into main] [--dry-run] [--reviewed DIGEST] [--data-ok] [--json]` keeps a
+fork's changes into the computer it was made from (`changes.keep`,
+`app/SiloUI/src-tauri/engine/src/changes/keep/`). `silo undo <computer>` puts the computer back
+to before its latest successful keep (`changes.undo`). Both are MCP tools (`fold`, `undo`).
 
-A keep reads three manifests (the fork-time base, the fork now, the target now) and builds its
-plan from them; the diff supplies the item list (never Not kept or Ignored) and the database check.
+A keep builds its plan from three manifests (the fork-time base, the fork, the target); the
+diff supplies the item list (never Not kept or Ignored) and the database check. Files are
+compared live: both computers are hashed at keep time, so a file the collector could not hash,
+an unreadable file or a changed mode is never taken as unchanged.
 
-1. **Checks, before anything changes.** For each file, package, crontab line and launch agent the
-   keep would touch: if the target changed it since the fork point and the fork ended differently,
-   it is a conflict. Git: the fork's commits are bundled into the target and the merge is tried
-   (`git merge-tree`); a conflicting merge is a conflict. A database change (schema or data) with
-   no changed migration file and no `keep: migrate:` step is refused, pointing to "Make this main".
-   A refusal is a result (`status: "refused"`, exit code 2), the target is untouched.
-2. **Checkpoint.** A `before-keep` checkpoint of the target (macOS computers use a manual
-   checkpoint named `Before keep of <fork>`), and a journal entry naming it.
-3. **Apply, in order.** Packages by name and version (`apt-get install name=ver`, `brew install`,
-   `npm -g`, `pip`, `pipx`, `cargo`; package files are never copied), git merge and uncommitted
-   files, files (written next to the target and renamed; links recreated; files identical after the
-   package replay skipped), crontabs merged by line against the fork-time text (an edited line
-   appears once, a deleted line is gone, lines only the target has stay), launch agents, then the
-   recipe's `migrate:` commands (always, when set), `restart:` services (the process id must change
-   and the new process must run), and `after:` commands.
-4. **Failure.** A failing step restores the checkpoint and reports the error. If the engine stops
-   mid-keep, the journal lets the next keep, `silo undo`, or engine start restore the checkpoint.
-5. **One keep at a time per target.** A second waits up to two minutes, then fails with `busy`.
+1. **Pinned to what was reviewed.** `silo diff --json` returns a `reviewDigest`; `--reviewed`
+   passes it back, and the keep refuses (`changed`) if the fork's changes differ. Whatever the
+   keep writes is read from the fork once, before main is touched, and the fork is looked at
+   again afterwards: if it moved meanwhile, the keep stops.
+2. **Checkpoint, then lane.** A `before-keep` checkpoint of the target (macOS computers use a
+   manual checkpoint named `Before keep of <fork>`), then the target's operation lane is held
+   until the apply ends, so no restore, stop, fork or delete of it interleaves. The target is
+   captured after the lane is taken.
+3. **Checks, before anything is written.** Per file, package, crontab line and uncommitted file:
+   if the target changed it since the fork point and the fork ended differently, it is a
+   conflict (uncommitted files are compared with the blob at the fork point, so a commit on
+   main counts). Git history is searched for credentials, `.env` files and ignored paths; any
+   found refuses the keep (`credentials`) with the list. The fork's commits are fetched into a
+   temporary ref and tested with `git merge-tree`; a conflict, or a git that cannot test,
+   refuses. Destinations are checked: a link or non-folder in the path, or a folder where a
+   file goes, refuses. Package names are validated; brew installs only when it would install
+   the fork's version. A database change is carried only with a `keep: migrate:` step and
+   changed migration files (folders named `migrations`, `migrate` or `alembic`), or `--data-ok`;
+   otherwise the refusal points to "Make this main". A refusal is a result
+   (`status: "refused"`, exit code 2) and the target is untouched.
+4. **Apply, in order.** Package installs and removals (each manager as the user it belongs to),
+   git merge, uncommitted files and deletes (renames delete the old path), files (written next
+   to the target and renamed; links recreated, never read through), crontabs merged by line
+   against the fork-time text (`CRONTXT` in the base manifest), launch agents (a plist that
+   will not load fails the keep), then the recipe's `migrate:`, `restart:` (the process id must
+   change and the new process must run) and `after:`.
+5. **Failure and crashes.** A failing step restores the checkpoint, which then can no longer be
+   undone. The journal (synced to disk) lets the next keep, `silo undo`, or the engine's start
+   restore the checkpoint of an interrupted keep.
+6. **One keep at a time per target.** A second waits up to two minutes, then fails with `busy`.
 
-`silo undo` restores the latest before-keep checkpoint a keep made (the engine's restore saves a
-"Before restore" checkpoint first) and does not use the same one twice.
+`silo undo` restores the latest checkpoint of a keep that succeeded, once, and lists what
+changed on the computer after the keep (that is discarded). Temporary bundles and git refs are
+removed on every path.

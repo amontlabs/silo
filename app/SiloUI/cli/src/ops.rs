@@ -759,7 +759,11 @@ pub async fn fold(
     options: FoldOptions,
     progress: Progress<'_>,
 ) -> Result<Value, CliError> {
-    let FoldOptions { dry_run, data_ok, reviewed } = options;
+    let FoldOptions {
+        dry_run,
+        data_ok,
+        reviewed,
+    } = options;
     let fork = engine.computer(fork).await?;
     let target_id = match into {
         Some(name) => Some(engine.computer(name).await?.id),

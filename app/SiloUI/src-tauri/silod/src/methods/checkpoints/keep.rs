@@ -12,10 +12,17 @@ use crate::dispatcher::{DispatchError, HandlerOutput};
 
 use super::{failure, output, service as checkpoint_service, HandlerContext};
 
-pub(super) async fn keep(context: &HandlerContext, params: &Value) -> Result<HandlerOutput, DispatchError> {
+pub(super) async fn keep(
+    context: &HandlerContext,
+    params: &Value,
+) -> Result<HandlerOutput, DispatchError> {
     let params: ChangesKeepParams = context.decode_params(params)?;
     let host = context.silod_context().runtime_host();
-    let hooks = params.keep.map(|h| Hooks { restart: h.restart, migrate: h.migrate, after: h.after });
+    let hooks = params.keep.map(|h| Hooks {
+        restart: h.restart,
+        migrate: h.migrate,
+        after: h.after,
+    });
     let request = Request {
         fork: params.fork_id,
         target: params.target_id,
@@ -26,13 +33,21 @@ pub(super) async fn keep(context: &HandlerContext, params: &Value) -> Result<Han
     };
     let checkpoints = checkpoint_service(context);
     let manifests = store::production(host.clone());
-    let started = tokio::task::spawn_blocking(move || service::start_keep(host, checkpoints, manifests, request))
-        .await
-        .map_err(|_| DispatchError::internal("The keep could not start."))?;
-    started.map(|job_id| JobStartResult { job_id }).map_err(failure).and_then(output)
+    let started = tokio::task::spawn_blocking(move || {
+        service::start_keep(host, checkpoints, manifests, request)
+    })
+    .await
+    .map_err(|_| DispatchError::internal("The keep could not start."))?;
+    started
+        .map(|job_id| JobStartResult { job_id })
+        .map_err(failure)
+        .and_then(output)
 }
 
-pub(super) async fn undo(context: &HandlerContext, params: &Value) -> Result<HandlerOutput, DispatchError> {
+pub(super) async fn undo(
+    context: &HandlerContext,
+    params: &Value,
+) -> Result<HandlerOutput, DispatchError> {
     let params: ChangesUndoParams = context.decode_params(params)?;
     let host = context.silod_context().runtime_host();
     let checkpoints = checkpoint_service(context);
@@ -42,5 +57,8 @@ pub(super) async fn undo(context: &HandlerContext, params: &Value) -> Result<Han
     })
     .await
     .map_err(|_| DispatchError::internal("The undo could not start."))?;
-    started.map(|job_id| JobStartResult { job_id }).map_err(failure).and_then(output)
+    started
+        .map(|job_id| JobStartResult { job_id })
+        .map_err(failure)
+        .and_then(output)
 }

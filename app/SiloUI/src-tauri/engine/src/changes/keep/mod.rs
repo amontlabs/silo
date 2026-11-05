@@ -86,7 +86,10 @@ pub enum Outcome {
     Kept(Report),
     DryRun(Report),
     /// Main was not changed.
-    Refused { report: Report, refusal: Refusal },
+    Refused {
+        report: Report,
+        refusal: Refusal,
+    },
 }
 
 impl Outcome {
@@ -111,13 +114,20 @@ pub enum UndoOutcome {
         /// What changed on the computer after the keep; the undo discards it.
         changed_since: Vec<String>,
     },
-    NothingToUndo { computer: String },
+    NothingToUndo {
+        computer: String,
+    },
 }
 
 impl UndoOutcome {
     pub fn to_json(&self) -> Value {
         match self {
-            UndoOutcome::Undone { computer, checkpoint, recovered, changed_since } => json!({
+            UndoOutcome::Undone {
+                computer,
+                checkpoint,
+                recovered,
+                changed_since,
+            } => json!({
                 "status": "undone",
                 "computer": computer,
                 "recovered": recovered,
@@ -141,8 +151,15 @@ fn refused_early(request: &Request, target: &str, digest: &str) -> Outcome {
         },
         refusal: Refusal {
             reason: "changed".into(),
-            message: format!("{} changed since it was reviewed. {target} was not changed.", request.fork),
-            conflicts: vec![Conflict::new("fork", request.fork.clone(), "its changes differ from the reviewed diff")],
+            message: format!(
+                "{} changed since it was reviewed. {target} was not changed.",
+                request.fork
+            ),
+            conflicts: vec![Conflict::new(
+                "fork",
+                request.fork.clone(),
+                "its changes differ from the reviewed diff",
+            )],
             hint: "Review it again with `silo diff --json` and keep with the new digest.".into(),
         },
     }
@@ -159,7 +176,10 @@ pub fn keep(
     let target = match &request.target {
         Some(target) => target.clone(),
         None => store.source(&request.fork)?.ok_or_else(|| {
-            format!("Silo does not know where {} was forked from. Name the computer to keep into.", request.fork)
+            format!(
+                "Silo does not know where {} was forked from. Name the computer to keep into.",
+                request.fork
+            )
         })?,
     };
     if target == request.fork {
@@ -172,7 +192,11 @@ pub fn keep(
     recover_locked(env, journal, &target)?;
 
     let view = prepare::look_at_fork(env, store, &request.fork)?;
-    if request.reviewed.as_deref().is_some_and(|reviewed| reviewed != view.digest) {
+    if request
+        .reviewed
+        .as_deref()
+        .is_some_and(|reviewed| reviewed != view.digest)
+    {
         return Ok(refused_early(request, &target, &view.digest));
     }
     let mut tracker = prepare::Tracker {
@@ -191,7 +215,8 @@ pub fn keep(
     }
 
     env.note("Saving a checkpoint of main");
-    let checkpoint = env.checkpoint_before_keep(&target, &format!("Before keep of {}", request.fork))?;
+    let checkpoint =
+        env.checkpoint_before_keep(&target, &format!("Before keep of {}", request.fork))?;
     journal.record_pending(&target, &checkpoint)?;
     journal.begin(&journal::Entry {
         fork: request.fork.clone(),
@@ -215,7 +240,9 @@ pub fn keep(
         };
         let prepared = prepare::prepare(env, store, request, &target, &view, &mut tracker);
         let result = match prepared {
-            Ok(prepare::Prepared::Refused { report, refusal }) => Ok(Err(Outcome::Refused { report, refusal })),
+            Ok(prepare::Prepared::Refused { report, refusal }) => {
+                Ok(Err(Outcome::Refused { report, refusal }))
+            }
             Ok(prepare::Prepared::Ready(ready)) => {
                 apply::apply(env, &ready, request, &target).map(|applied| Ok((ready, applied)))
             }
@@ -237,10 +264,14 @@ pub fn keep(
             match store.capture(&target) {
                 Ok(after) => {
                     if let Err(error) = journal.save_after(&target, &checkpoint.id, &after) {
-                        report.notes.push(format!("Undo will not be able to tell what changes after this keep: {error}"));
+                        report.notes.push(format!(
+                            "Undo will not be able to tell what changes after this keep: {error}"
+                        ));
                     }
                 }
-                Err(error) => report.notes.push(format!("Undo will not be able to tell what changes after this keep: {error}")),
+                Err(error) => report.notes.push(format!(
+                    "Undo will not be able to tell what changes after this keep: {error}"
+                )),
             }
             journal.set_state(&target, &checkpoint.id, journal::State::Undoable)?;
             journal.clear(&target);
@@ -288,26 +319,47 @@ pub fn undo(
         });
     }
     let Some(checkpoint) = journal.latest_undoable(computer) else {
-        return Ok(UndoOutcome::NothingToUndo { computer: computer.to_owned() });
+        return Ok(UndoOutcome::NothingToUndo {
+            computer: computer.to_owned(),
+        });
     };
     let changed_since = changed_after(store, journal, computer, &checkpoint.id);
     env.restore(computer, &checkpoint.id)?;
     journal.set_state(computer, &checkpoint.id, journal::State::Consumed)?;
-    Ok(UndoOutcome::Undone { computer: computer.to_owned(), checkpoint, recovered: false, changed_since })
+    Ok(UndoOutcome::Undone {
+        computer: computer.to_owned(),
+        checkpoint,
+        recovered: false,
+        changed_since,
+    })
 }
 
 /// What changed on the computer since the keep left it, as report lines.
-fn changed_after(store: &dyn ManifestStore, journal: &Journal, computer: &str, checkpoint_id: &str) -> Vec<String> {
+fn changed_after(
+    store: &dyn ManifestStore,
+    journal: &Journal,
+    computer: &str,
+    checkpoint_id: &str,
+) -> Vec<String> {
     use crate::changes::{diff::diff, ignore::IgnoreList, manifest::Manifest};
     let Some(after) = journal.after(computer, checkpoint_id) else {
         return vec!["Silo could not tell whether the computer changed after the keep.".into()];
     };
-    let (Ok(before), Ok(now)) = (Manifest::parse(&after), store.capture(computer).and_then(|t| Manifest::parse(&t).map_err(|e| e.to_string()))) else {
+    let (Ok(before), Ok(now)) = (
+        Manifest::parse(&after),
+        store
+            .capture(computer)
+            .and_then(|t| Manifest::parse(&t).map_err(|e| e.to_string())),
+    ) else {
         return vec!["Silo could not tell whether the computer changed after the keep.".into()];
     };
     let changes = diff(&before, &now, None, &IgnoreList::builtin());
     let lines = changes.render_lines(15);
-    if changes.summary.iter().all(|s| s.lines.is_empty() || s.bucket == "Not kept") {
+    if changes
+        .summary
+        .iter()
+        .all(|s| s.lines.is_empty() || s.bucket == "Not kept")
+    {
         return Vec::new();
     }
     lines

@@ -122,7 +122,13 @@ mod tests {
     fn keep_params_default_to_the_forks_source_and_no_hooks() {
         let params: ChangesKeepParams = serde_json::from_str(r#"{"forkId":"f"}"#).unwrap();
         assert_eq!(
-            (params.target_id, params.keep, params.dry_run, params.data_ok, params.review_digest),
+            (
+                params.target_id,
+                params.keep,
+                params.dry_run,
+                params.data_ok,
+                params.review_digest
+            ),
             (None, None, None, None, None)
         );
         let hooks: KeepHooks = serde_json::from_str(r#"{"restart":["web"]}"#).unwrap();

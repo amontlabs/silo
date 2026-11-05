@@ -26,7 +26,10 @@ impl StoredManifests {
         Self { host, store }
     }
 
-    fn base(&self, computer: &str) -> Result<Option<(String, crate::changes::store::Meta)>, String> {
+    fn base(
+        &self,
+        computer: &str,
+    ) -> Result<Option<(String, crate::changes::store::Meta)>, String> {
         self.store.get(computer, Slot::Base)
     }
 }
@@ -58,11 +61,16 @@ impl ManifestStore for StoredManifests {
 
     fn baseline(&self, fork: &str) -> Option<(String, String)> {
         let (_, meta) = self.base(fork).ok().flatten()?;
-        self.store.get_baseline(meta.source.as_deref()?).ok().flatten()
+        self.store
+            .get_baseline(meta.source.as_deref()?)
+            .ok()
+            .flatten()
     }
 
     fn fork_time_crontab(&self, fork: &str, user: &str) -> Result<Option<String>, String> {
-        let Some((text, _)) = self.base(fork)? else { return Ok(None) };
+        let Some((text, _)) = self.base(fork)? else {
+            return Ok(None);
+        };
         for line in text.lines() {
             let mut fields = line.split('\t');
             if fields.next() == Some("CRONTXT") && fields.next() == Some(user) {

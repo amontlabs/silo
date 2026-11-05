@@ -163,7 +163,9 @@ pub fn pkg_install(os: Os, manager: &str, specs: &[String]) -> Result<GuestCmd, 
 
 pub fn pkg_remove(os: Os, manager: &str, names: &[String]) -> Result<GuestCmd, String> {
     let remove = match (manager, os) {
-        ("dpkg", Os::Linux) => "DEBIAN_FRONTEND=noninteractive apt-get remove -y -qq -- \"${S[@]}\" >/dev/null",
+        ("dpkg", Os::Linux) => {
+            "DEBIAN_FRONTEND=noninteractive apt-get remove -y -qq -- \"${S[@]}\" >/dev/null"
+        }
         ("brew", _) => "brew uninstall -- \"${S[@]}\"",
         ("brew-cask", _) => "brew uninstall --cask -- \"${S[@]}\"",
         ("npm", _) => "npm uninstall -g --silent -- \"${S[@]}\"",

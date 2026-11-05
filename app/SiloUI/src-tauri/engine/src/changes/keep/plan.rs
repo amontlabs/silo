@@ -25,7 +25,11 @@ pub struct Conflict {
 
 impl Conflict {
     pub fn new(kind: &str, item: impl Into<String>, detail: impl Into<String>) -> Self {
-        Self { kind: kind.into(), item: item.into(), detail: detail.into() }
+        Self {
+            kind: kind.into(),
+            item: item.into(),
+            detail: detail.into(),
+        }
     }
 }
 
@@ -125,19 +129,34 @@ impl Plan {
         if !self.packages.is_empty() {
             let mut line = format!(
                 "packages: {}",
-                self.packages.iter().map(|p| format!("{} {}", p.name, p.version)).collect::<Vec<_>>().join(", ")
+                self.packages
+                    .iter()
+                    .map(|p| format!("{} {}", p.name, p.version))
+                    .collect::<Vec<_>>()
+                    .join(", ")
             );
             let deps: usize = self.dependencies.iter().map(|(_, names)| names.len()).sum();
             if deps > 0 {
                 line.push_str(&format!(
                     " (+{deps} dependencies: {})",
-                    self.dependencies.iter().flat_map(|(_, n)| n.iter().cloned()).collect::<Vec<_>>().join(", ")
+                    self.dependencies
+                        .iter()
+                        .flat_map(|(_, n)| n.iter().cloned())
+                        .collect::<Vec<_>>()
+                        .join(", ")
                 ));
             }
             out.push(line);
         }
         if !self.removals.is_empty() {
-            out.push(format!("remove packages: {}", self.removals.iter().map(|p| p.name.clone()).collect::<Vec<_>>().join(", ")));
+            out.push(format!(
+                "remove packages: {}",
+                self.removals
+                    .iter()
+                    .map(|p| p.name.clone())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
         }
         for repo in &self.repos {
             out.push(format!("git: {}", repo.repo));
@@ -206,7 +225,9 @@ pub fn decide(base: &Base, fork: &Live, main: &Live) -> Decision {
             return Decision::Write;
         }
     }
-    Decision::Conflict("changed on main since the fork was made, and differently in the fork".into())
+    Decision::Conflict(
+        "changed on main since the fork was made, and differently in the fork".into(),
+    )
 }
 
 /// The three-way rule for an uncommitted file: the blob at the fork point, and the hashes the
@@ -215,9 +236,15 @@ pub fn decide_dirty(base_blob: &str, fork: &str, main: &str) -> Decision {
     if fork == main {
         return Decision::Skip;
     }
-    let main_changed = if base_blob == "-" { main != "-" } else { main != base_blob };
+    let main_changed = if base_blob == "-" {
+        main != "-"
+    } else {
+        main != base_blob
+    };
     if main_changed {
-        Decision::Conflict("changed on main since the fork was made, and differently in the fork".into())
+        Decision::Conflict(
+            "changed on main since the fork was made, and differently in the fork".into(),
+        )
     } else {
         Decision::Write
     }
@@ -245,16 +272,25 @@ pub fn build(diff: &Diff, base: &Manifest, fork: &Manifest, main: &Manifest, os:
         let gone: BTreeSet<String> = change.removed.keys().cloned().collect();
         if !REPLAYED.contains(&manager) {
             if !wanted.is_empty() || !gone.is_empty() {
-                plan.notes.push(format!("{manager} packages are not replayed: {}", wanted.union(&gone).cloned().collect::<Vec<_>>().join(", ")));
+                plan.notes.push(format!(
+                    "{manager} packages are not replayed: {}",
+                    wanted.union(&gone).cloned().collect::<Vec<_>>().join(", ")
+                ));
             }
             continue;
         }
         let scoped = manager == "npm";
         for name in wanted {
             let key = pkg_key(manager, &name);
-            let Some(version) = fork.pkg.get(&key) else { continue };
+            let Some(version) = fork.pkg.get(&key) else {
+                continue;
+            };
             if !valid_package_word(&name, scoped) || !valid_package_word(version, false) {
-                plan.conflicts.push(Conflict::new("package", format!("{manager} {name}"), "the name or version has characters a package manager is not given"));
+                plan.conflicts.push(Conflict::new(
+                    "package",
+                    format!("{manager} {name}"),
+                    "the name or version has characters a package manager is not given",
+                ));
                 continue;
             }
             let (before, now) = (base.pkg.get(&key), main.pkg.get(&key));
@@ -273,7 +309,11 @@ pub fn build(diff: &Diff, base: &Manifest, fork: &Manifest, main: &Manifest, os:
                 ));
                 continue;
             }
-            plan.packages.push(PkgOp { manager: manager.to_owned(), name, version: version.clone() });
+            plan.packages.push(PkgOp {
+                manager: manager.to_owned(),
+                name,
+                version: version.clone(),
+            });
         }
         for name in gone {
             let key = pkg_key(manager, &name);
@@ -282,22 +322,40 @@ pub fn build(diff: &Diff, base: &Manifest, fork: &Manifest, main: &Manifest, os:
                 continue;
             }
             if !valid_package_word(&name, scoped) {
-                plan.conflicts.push(Conflict::new("package", format!("{manager} {name}"), "the name has characters a package manager is not given"));
+                plan.conflicts.push(Conflict::new(
+                    "package",
+                    format!("{manager} {name}"),
+                    "the name has characters a package manager is not given",
+                ));
                 continue;
             }
             if now != before {
-                plan.conflicts.push(Conflict::new("package", format!("{manager} {name}"), "the fork removed it, but main changed it since the fork was made"));
+                plan.conflicts.push(Conflict::new(
+                    "package",
+                    format!("{manager} {name}"),
+                    "the fork removed it, but main changed it since the fork was made",
+                ));
                 continue;
             }
-            plan.removals.push(PkgOp { manager: manager.to_owned(), name, version: before.cloned().unwrap_or_default() });
+            plan.removals.push(PkgOp {
+                manager: manager.to_owned(),
+                name,
+                version: before.cloned().unwrap_or_default(),
+            });
         }
         if !change.dependencies.is_empty() {
-            plan.dependencies.push((manager.to_owned(), change.dependencies.clone()));
+            plan.dependencies
+                .push((manager.to_owned(), change.dependencies.clone()));
         }
     }
 
     // Files (decided against live content in `prepare`).
-    let crontab_files: BTreeSet<&str> = fork.cronf.values().chain(main.cronf.values()).map(String::as_str).collect();
+    let crontab_files: BTreeSet<&str> = fork
+        .cronf
+        .values()
+        .chain(main.cronf.values())
+        .map(String::as_str)
+        .collect();
     let mut candidates: BTreeSet<String> = BTreeSet::new();
     candidates.extend(diff.settings.files.iter().map(|c| c.path.clone()));
     candidates.extend(diff.other.iter().map(|c| c.path.clone()));
@@ -308,22 +366,36 @@ pub fn build(diff: &Diff, base: &Manifest, fork: &Manifest, main: &Manifest, os:
         if path.starts_with("/var/spool/cron/") || crontab_files.contains(path.as_str()) {
             continue;
         }
-        plan.file_cands.push(FileCand { base: live_of(base, &path), path: normalize(os, &path) });
+        plan.file_cands.push(FileCand {
+            base: live_of(base, &path),
+            path: normalize(os, &path),
+        });
     }
 
     // Git.
     for repo in &diff.code {
         let new = repo.new.is_some() && !main.git.contains_key(&repo.repo);
         if repo.removed {
-            plan.notes.push(format!("{} was removed in the fork; main keeps it", repo.repo));
+            plan.notes.push(format!(
+                "{} was removed in the fork; main keeps it",
+                repo.repo
+            ));
         }
         let mut dirty = Vec::new();
         for (rel, code) in &repo.dirty_new {
             let prefix = repo.repo.trim_end_matches('/');
             if let Some(from) = repo.renamed_from.get(rel).filter(|_| !code.contains('C')) {
-                dirty.push(DirtyOp { rel: from.clone(), path: format!("{prefix}/{from}"), delete: true });
+                dirty.push(DirtyOp {
+                    rel: from.clone(),
+                    path: format!("{prefix}/{from}"),
+                    delete: true,
+                });
             }
-            dirty.push(DirtyOp { rel: rel.clone(), path: format!("{prefix}/{rel}"), delete: code.contains('D') });
+            dirty.push(DirtyOp {
+                rel: rel.clone(),
+                path: format!("{prefix}/{rel}"),
+                delete: code.contains('D'),
+            });
         }
         if repo.commits.is_none() && !new && dirty.is_empty() {
             continue;
@@ -332,14 +404,23 @@ pub fn build(diff: &Diff, base: &Manifest, fork: &Manifest, main: &Manifest, os:
             repo: repo.repo.clone(),
             new,
             commits: repo.commits.clone(),
-            base_head: base.git.get(&repo.repo).map(|g| g.head.clone()).filter(|h| !h.is_empty()),
+            base_head: base
+                .git
+                .get(&repo.repo)
+                .map(|g| g.head.clone())
+                .filter(|h| !h.is_empty()),
             dirty,
         });
     }
 
     // Crontabs.
     for change in &diff.settings.cron {
-        let path = fork.cronf.get(&change.user).or_else(|| main.cronf.get(&change.user)).cloned().unwrap_or_default();
+        let path = fork
+            .cronf
+            .get(&change.user)
+            .or_else(|| main.cronf.get(&change.user))
+            .cloned()
+            .unwrap_or_default();
         plan.cron.push((change.user.clone(), path));
     }
 
@@ -347,7 +428,12 @@ pub fn build(diff: &Diff, base: &Manifest, fork: &Manifest, main: &Manifest, os:
     for change in &diff.settings.launch_agents {
         let key = (change.scope.clone(), change.label.clone());
         let delete = !fork.lagent.contains_key(&key);
-        let Some(entry) = fork.lagent.get(&key).or_else(|| main.lagent.get(&key)).or_else(|| base.lagent.get(&key)) else {
+        let Some(entry) = fork
+            .lagent
+            .get(&key)
+            .or_else(|| main.lagent.get(&key))
+            .or_else(|| base.lagent.get(&key))
+        else {
             continue;
         };
         let path = normalize(os, &entry.path);
@@ -356,8 +442,16 @@ pub fn build(diff: &Diff, base: &Manifest, fork: &Manifest, main: &Manifest, os:
             None => Base::Missing,
         };
         plan.file_cands.retain(|c| c.path != path);
-        plan.file_cands.push(FileCand { path: path.clone(), base: base_ident });
-        plan.agents.push(AgentOp { scope: change.scope.clone(), label: change.label.clone(), path, delete });
+        plan.file_cands.push(FileCand {
+            path: path.clone(),
+            base: base_ident,
+        });
+        plan.agents.push(AgentOp {
+            scope: change.scope.clone(),
+            label: change.label.clone(),
+            path,
+            delete,
+        });
     }
 
     for db in &diff.database {
