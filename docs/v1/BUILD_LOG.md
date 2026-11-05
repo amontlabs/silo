@@ -53,6 +53,19 @@ VM check (Linux and macOS): a macOS fork boots once; a source with a boot-persis
 - **Risk to the backend:** medium-low if phase 7 stays deferred and additive. Shared churn points: `api/src/methods/*`, `schema.rs`, `src/contracts/silo.ts`, `src/test/contracts/*.json`.
 - **Recommendation:** bring the app back in phase 7; touch it before then only to keep CI green. Re-check at phase 7: the debug bundle builds and the Dev app connects at the then-current protocol; frontend checks and the command manifest pass; the review, step and tree methods are stable with typed constructors; the state shape is frozen for the phase; wording follows `docs/SiloUI-VOCABULARY.md` and `UI-PATTERNS.md`.
 
+### Phase 4 (AMO-79, AMO-69, AMO-92, AMO-84, AMO-93, AMO-94; credentials-used line)
+
+| Slice | What | Review |
+|---|---|---|
+| 4a | Review requests in the engine API: list, show, keep, throw away, open fork, with buckets and the credentials line; CLI and MCP on the same methods | reviewer |
+| 4b | Fork from step + fork tree: parent links, per-step checkpoints, step listing, `--from-step N`, `silo tree` + API | reviewer |
+| 4c | Credentials-used line: network-crate patch logging successful substitutions (Linux runtime rebuild), macOS proxy log capture, per-computer aggregator and method | reviewer + Argon |
+| 4d | Per-agent settings (`agents:`), recipe write-back on keep, `silo fold --pr` (host GitHub connection or runner `GITHUB_TOKEN`) | reviewer |
+| 4e | Auto-keep rules (`auto_keep:`, `fold: auto-code`) | reviewer |
+| 4f | GitHub Action `silo-action/` (not published), tested with a local runner | reviewer |
+
+All tests use the mock GitHub API, a local bare git remote and a loopback HTTP endpoint with a fake secret. VM check: only the credentials line (Linux and macOS).
+
 ## Decisions
 
 - **4 Nov, checkpoint disk (phase 0b), advised by Fable:** a live probe on the pinned runtime (`docs/v1/evidence/phase-0/raw/checkpoint-disk-probe.txt`) showed a computer's checkpoints form one linear msb chain, the engine refuses every checkpoint delete while the computer exists, disk comes back only when the computer is deleted, and images do not leak. The pinned msb 0.7.6 has no top-level `msb prune` (the validation's prune figures came from upstream 0.7.13). Two reviews (gpt-6.1-sol, Opus; Argon failed to run) found that retention by deletion frees nothing on a linear chain and that `msb image prune` can drop layers a loaded, not yet started snapshot needs. Fable read the msb source: each checkpoint holds its whole layer closure, so parent links are lineage only, and msb ships `msb modify --compact`, which merges old sealed layers into a new base. Decision: no automatic image prune; retention = compact the computer's oldest layers, then remove the pruned Silo-owned checkpoints with `--force`, always keeping the newest. Spec change pending the measurement in the phase 0 VM check.
