@@ -921,24 +921,12 @@ mod tests {
                 .unwrap();
             put(root, &format!("usr/lib/systemd/system/{unit}"), "[Timer]\n");
         }
-        // The quiet step starts at 00:00, ends at 00:10, and its masks are made in between.
-        let quiet = "var/lib/silo-quiet";
-        put(root, &format!("{quiet}/0a1b.machine-id"), "id\n");
-        put(root, &format!("{quiet}/applied-0a1b"), "");
-        let stamp = |relative: &str, time: &str| {
-            let status = std::process::Command::new("touch")
-                .args(["-h", "-t", time])
-                .arg(root.join(relative))
-                .status()
-                .unwrap();
-            assert!(status.success());
-        };
-        stamp(&format!("{quiet}/0a1b.machine-id"), "202601020000.00");
-        stamp(&format!("{quiet}/applied-0a1b"), "202601020010.00");
-        stamp("etc/systemd/system/before-fork.timer", "202512310000.00");
-        stamp("etc/systemd/system/backup.timer", "202601020003.00");
-        stamp("etc/systemd/system/apt-daily.timer", "202601020005.00");
-        stamp("etc/systemd/system/after-quiet.timer", "202601030000.00");
+        // The quiet step listed the masks it made; the other two are not on its list.
+        put(
+            root,
+            "var/lib/silo-quiet/0a1b.masked-timers.list",
+            "/etc/systemd/system/backup.timer\n/etc/systemd/system/apt-daily.timer\n",
+        );
         dir
     }
 
@@ -1121,22 +1109,22 @@ mod tests {
     }
 
     #[test]
-    fn a_mask_the_quiet_step_did_not_make_is_never_removed() {
+    fn a_mask_the_quiet_step_did_not_list_is_never_removed() {
         let dir = parked_fork();
         let root = dir.path();
-        // No record of the quiet step at all: nothing is known to be its own.
-        std::fs::remove_file(root.join("var/lib/silo-quiet/0a1b.machine-id")).unwrap();
+        // Without the list nothing is known to be the quiet step's own.
+        std::fs::remove_file(root.join("var/lib/silo-quiet/0a1b.masked-timers.list")).unwrap();
         guest_script(root, "restore");
         assert!(exists(root, "/etc/systemd/system/apt-daily.timer"));
-        // A list written by the quiet step, if there is one, decides.
         put(
             root,
-            "var/lib/silo-quiet/masked-timers.list",
+            "var/lib/silo-quiet/0a1b.masked-timers.list",
             "/etc/systemd/system/apt-daily.timer\n",
         );
         guest_script(root, "restore");
         assert!(!exists(root, "/etc/systemd/system/apt-daily.timer"));
         assert!(exists(root, "/etc/systemd/system/before-fork.timer"));
+        assert!(exists(root, "/etc/systemd/system/after-quiet.timer"));
     }
 
     #[test]

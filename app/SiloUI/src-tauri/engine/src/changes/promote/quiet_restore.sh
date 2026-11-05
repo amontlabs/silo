@@ -14,9 +14,6 @@ root=${SILO_ROOT:-}
 quiet=$root/var/lib/silo-quiet
 disabled=$quiet/disabled
 marker=$quiet/restored.list
-# A mask that was there before the quiet step, or was added since, is not ours to remove.
-masked=$quiet/masked-timers.list
-
 # The parked paths that are scheduled jobs; everything else under disabled/ belongs to the
 # services the fork was asked to stop and stays parked.
 scheduled() {
@@ -54,21 +51,10 @@ collision_copy() {
   esac
 }
 
-# Whether the mask at $1 is one the quiet step made. The quiet step writes <token>.machine-id
-# when it starts and applied-<token> when it ends, and masks the timers in between, so a mask
-# link made in that span is its own; one that is older was there before the fork, one that is
-# newer was added since. A masked-timers.list, if the quiet step wrote one, is used instead.
+# Whether the quiet step listed the mask at $1 as its own (<token>.masked-timers.list).
 masked_by_quiet() {
-  if [ -f "$masked" ]; then grep -qxF "$1" "$masked"; return; fi
-  link=$root$1
-  for started in "$quiet"/*.machine-id; do
-    [ -f "$started" ] || continue
-    token=${started##*/}; token=${token%.machine-id}
-    ended=$quiet/applied-$token
-    [ -f "$ended" ] || continue
-    [ -n "$(find "$link" -newer "$started" 2>/dev/null)" ] || continue
-    [ -z "$(find "$link" -newer "$ended" 2>/dev/null)" ] || continue
-    return 0
+  for list in "$quiet"/*.masked-timers.list; do
+    [ -f "$list" ] && grep -qxF "$1" "$list" && return 0
   done
   return 1
 }
