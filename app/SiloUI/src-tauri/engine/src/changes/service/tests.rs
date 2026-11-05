@@ -393,3 +393,43 @@ fn a_baseline_whose_capture_moved_a_repository_is_refused() {
     );
     assert_eq!(store.get_baseline("cp1").unwrap(), None);
 }
+
+#[test]
+fn a_baseline_measured_on_one_fork_applies_to_another_fork_of_the_same_computer() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::new(dir.path());
+    let start = manifest(&[("/srv/data/a", "1\t1\t-"), ("/srv/data/noise", "1\t1\t-")]);
+    let idle = manifest(&[("/srv/data/a", "1\t1\t-"), ("/srv/data/noise", "9\t9\t-")]);
+    let later = manifest(&[("/srv/data/a", "2\t2\t-"), ("/srv/data/noise", "9\t9\t-")]);
+    let options = Options::default();
+    // Each fork of `main` has a fork-point checkpoint of its own.
+    for (fork, checkpoint) in [("fork1", "cp1"), ("fork2", "cp2")] {
+        store
+            .put_with_origin(fork, Slot::Base, &start, Some(checkpoint), Some("main"))
+            .unwrap();
+    }
+    let guest = ScriptedGuest::new(&[&idle]);
+    run(
+        &guest,
+        &store,
+        "fork1",
+        Work::Baseline {
+            source: None,
+            idle_seconds: Some(0),
+        },
+        &options,
+    )
+    .unwrap();
+    let guest = ScriptedGuest::new(&[&later]);
+    let result = run(&guest, &store, "fork2", diff_work(true, true), &options).unwrap();
+    assert_eq!(result["baselineAvailable"], true);
+    assert_eq!(result["baselineApplied"], true);
+    assert_eq!(other(&result), ["/srv/data/a:modified"]);
+    // a fork of another computer does not share it
+    store
+        .put_with_origin("fork3", Slot::Base, &start, Some("cp3"), Some("other"))
+        .unwrap();
+    let guest = ScriptedGuest::new(&[&later]);
+    let result = run(&guest, &store, "fork3", diff_work(true, true), &options).unwrap();
+    assert_eq!(result["baselineAvailable"], false);
+}

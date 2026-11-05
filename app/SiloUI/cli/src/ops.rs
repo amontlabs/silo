@@ -1,6 +1,8 @@
 //! The operations behind both the commands and the MCP tools. Each returns the JSON the
 //! `--json` flag prints; `render` turns the same values into short text.
 
+use std::time::Duration;
+
 use serde_json::{json, Value};
 use silo_api::methods::{
     changes::{ChangesBaselineParams, ChangesDiffParams},
@@ -675,38 +677,67 @@ async fn measure_on_throwaway(
     Ok(measured["idleSeconds"].as_u64().unwrap_or(seconds))
 }
 
-/// Stops (when running) and deletes a computer.
-async fn remove_computer(
+/// How long a computer that was asked to stop is waited for before it is dropped anyway.
+const STOP_WAIT: Duration = Duration::from_secs(120);
+const STOP_POLL: Duration = Duration::from_secs(1);
+/// Drops that find the computer still stopping are tried again this many times.
+const DROP_RETRIES: u32 = 10;
+
+/// Stops a computer that is not stopped, waits until it reports stopped, then deletes it. A
+/// delete that finds it still stopping is retried; only a failure that remains is returned.
+pub async fn remove_computer(
     engine: &Engine,
     computer: &Computer,
     progress: Progress<'_>,
 ) -> Result<(), CliError> {
-    if computer.state == "running" {
-        let _ = engine
+    if computer.state != "stopped" {
+        let stopped = engine
             .run_job(
                 &format!("Stopping {}", computer.name),
                 requests::computers_stop(target_of(computer)),
                 progress,
             )
             .await;
+        // A refused stop shows in the delete below; a slow one is waited for.
+        if stopped.is_ok() {
+            let started = std::time::Instant::now();
+            while started.elapsed() < STOP_WAIT {
+                let listed = engine.all_computers().await?;
+                match listed.iter().find(|c| c.id == computer.id) {
+                    Some(now) if now.state != "stopped" => tokio::time::sleep(STOP_POLL).await,
+                    _ => break,
+                }
+            }
+        }
     }
     let expected = match &computer.configuration {
         Some(configuration) => Some(serde_json::from_value(configuration.clone())?),
         None => None,
     };
-    engine
-        .run_job(
-            &format!("Dropping {}", computer.name),
-            requests::computers_delete(ComputerDeleteParams {
-                computer_id: computer.id.clone(),
-                device_id: None,
-                expected,
-                request_id: None,
-            }),
-            progress,
-        )
-        .await?;
-    Ok(())
+    let mut attempt = 0;
+    loop {
+        let dropped = engine
+            .run_job(
+                &format!("Dropping {}", computer.name),
+                requests::computers_delete(ComputerDeleteParams {
+                    computer_id: computer.id.clone(),
+                    device_id: None,
+                    expected: expected.clone(),
+                    request_id: None,
+                }),
+                progress,
+            )
+            .await;
+        match dropped {
+            Err(error)
+                if error.message.contains("Stop the computer first") && attempt < DROP_RETRIES =>
+            {
+                attempt += 1;
+                tokio::time::sleep(Duration::from_secs(2)).await;
+            }
+            other => return other.map(|_| ()),
+        }
+    }
 }
 
 pub fn check_drop(name: &str, force: bool) -> Result<(), CliError> {
@@ -963,7 +994,12 @@ pub async fn fold(
     } = options;
     let fork = engine.computer(fork).await?;
     // Without a digest, the one the last `silo diff` of this fork showed pins the keep.
-    let reviewed = reviewed.or_else(|| engine.recall_review(&fork.id));
+    // A dry run reports and never pins: it ignores the digest a review left behind.
+    let reviewed = if dry_run {
+        None
+    } else {
+        reviewed.or_else(|| engine.recall_review(&fork.id))
+    };
     let target_id = match into {
         Some(name) => Some(engine.computer(name).await?.id),
         None => None,

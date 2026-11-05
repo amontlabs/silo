@@ -202,7 +202,9 @@ fn diff(
     };
     let ignore = IgnoreList::builtin();
     let cached = match base_meta.source.as_deref() {
-        Some(source) => store.get_baseline(source).map_err(internal)?,
+        Some(source) => store
+            .get_baseline_for(source, base_meta.origin.as_deref())
+            .map_err(internal)?,
         None => None,
     };
     let noise = match cached.as_ref().filter(|_| use_baseline) {
@@ -278,7 +280,7 @@ fn baseline(
         return Err(too_late());
     }
     let meta = store
-        .put_baseline(&source, &base_text, &text)
+        .put_baseline_for(&source, base_meta.origin.as_deref(), &base_text, &text)
         .map_err(internal)?;
     to_value(ChangesBaselineResult {
         source,

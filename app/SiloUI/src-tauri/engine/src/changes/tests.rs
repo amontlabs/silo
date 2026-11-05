@@ -100,8 +100,8 @@ fn golden_l4_python_tooling_is_15_lines() {
             "Code\n  ~/app: 46cc034..a5334d1\n  ~/app: 1 dirty/untracked: scripts-smoke.sh\n\
 Packages\n  npm -g: typescript\n  pip: PySocks, Pygments, certifi (+11 more)\n\
 Settings & files\n  + ~/.config/httpie/config.json\n\
-Other changed\n  /usr/local/bin/ (9 files: +9)\n  /usr/local/lib/ (834 files: +834)\n\
-\x20\x20+ /usr/local/share/man/man1/http.1\n  + /usr/local/share/man/man1/httpie.1\n  + /usr/local/share/man/man1/https.1\n\
+Other changed\n  + /usr/local/share/man/man1/http.1\n  + /usr/local/share/man/man1/httpie.1\n  + /usr/local/share/man/man1/https.1\n\
+\x20\x20/usr/local/bin/ (9 files: +9)\n  /usr/local/lib/ (834 files: +834)\n\
 Ignored: 794 paths (caches, logs, build output)"
         )
     );
@@ -151,9 +151,9 @@ Not kept\n  credentials: ~/.openclaw/credentials/ (1 file)\nIgnored: 81 paths (c
 // ---------------------------------------------------------------- golden: macOS and live
 
 #[test]
-fn golden_macos_brew_step_is_14_lines() {
+fn golden_macos_brew_step_is_11_lines() {
     let l = golden("mac-m0-m1");
-    assert_eq!(l.len(), 14);
+    assert_eq!(l.len(), 11);
     assert_eq!(
         l[0..2],
         lines("Packages\n  brew: jq, ripgrep (+2 dependencies)")[..]
@@ -163,20 +163,21 @@ fn golden_macos_brew_step_is_14_lines() {
         .any(|x| x.starts_with("  processes: AUCrashHandlerService")));
     assert_eq!(
         l.last().unwrap(),
-        "Ignored: 27 paths (caches, logs, build output)"
+        "Ignored: 57 paths (caches, logs, build output)"
     );
 }
 
 #[test]
 fn golden_macos_launchagent_step_is_12_lines() {
-    // The recorded manifests have no LAGENT records, so the plist still shows as a file.
+    // The recorded manifests have no LAGENT records, so the plist still shows as a file. The
+    // five `~/Library/Preferences` files that used to roll up here are macOS churn, now ignored.
     assert_eq!(
         golden("mac-m1-m2"),
         lines(
             "Code\n  new repo ~/code/dotfiles @ 53a2a53 (main)\nSettings & files\n  + ~/.zshrc\n\
-\x20\x20+ ~/Library/LaunchAgents/dev.example.clean-shots.plist\n  ~/Library/Preferences/ (5 files: ~5)\n\
+\x20\x20+ ~/Library/LaunchAgents/dev.example.clean-shots.plist\n\
 Other changed\n  + ~/bin/clean-shots\nNot kept\n  processes: ModelCatalogAgent, sysmond\n\
-\x20\x20services: dev.example.clean-shots\nIgnored: 38 paths (caches, logs, build output)"
+\x20\x20services: dev.example.clean-shots\nIgnored: 43 paths (caches, logs, build output)"
         )
     );
 }
@@ -596,39 +597,33 @@ fn with_baseline(a: &str, idle: &str, task: &str) -> Diff {
 }
 
 #[test]
-fn baseline_does_not_hide_different_content_at_the_same_path() {
-    let a = "F\t/etc/app.conf\t1\t1\th0\nL\t/etc/l\t1\t1\t/x\n";
-    let idle = "F\t/etc/app.conf\t1\t2\th1\nL\t/etc/l\t1\t1\t/y\n";
-    let task = "F\t/etc/app.conf\t1\t3\th2\nL\t/etc/l\t1\t1\t/z\n";
+fn settings_files_the_idle_computer_also_changed_collapse_whatever_they_hold() {
+    let a = "F\t/etc/app.conf\t1\t1\th0\nL\t/etc/l\t1\t1\t/x\nF\t/etc/own.conf\t1\t1\th0\n";
+    let idle = "F\t/etc/app.conf\t1\t2\th1\nL\t/etc/l\t1\t1\t/y\nF\t/etc/own.conf\t1\t1\th0\n";
+    let task = "F\t/etc/app.conf\t1\t3\th2\nL\t/etc/l\t1\t1\t/z\nF\t/etc/own.conf\t1\t3\th5\n";
     let d = with_baseline(a, idle, task);
+    assert_eq!(section(&d, "Settings & files"), ["~ /etc/own.conf"]);
     assert_eq!(
-        section(&d, "Settings & files"),
-        ["~ /etc/app.conf", "~ /etc/l"]
+        d.idle_noise
+            .iter()
+            .map(|c| c.path.as_str())
+            .collect::<Vec<_>>(),
+        ["/etc/app.conf", "/etc/l"]
     );
-    // Settings & files paths stay in their bucket; only Other changed collapses.
-    assert!(d.idle_noise.is_empty());
-    // the same resulting content is background
-    assert!(with_baseline(a, idle, idle).is_empty());
-    // identities are in the JSON
-    let f = &d.settings.files[0];
+    // identities stay in the JSON
+    let f = &d.idle_noise[0];
     assert_eq!(f.before.as_ref().unwrap().hash.as_deref(), Some("h0"));
     assert_eq!(f.after.as_ref().unwrap().hash.as_deref(), Some("h2"));
-    assert_eq!(
-        d.settings.files[1]
-            .after
-            .as_ref()
-            .unwrap()
-            .target
-            .as_deref(),
-        Some("/z")
-    );
+    // the same resulting content is removed outright
+    assert!(with_baseline(a, idle, idle).is_empty());
 }
 
 #[test]
-fn baseline_does_not_hide_a_different_change_type() {
+fn a_different_change_type_at_an_idle_path_is_also_idle_noise() {
     let a = "F\t/etc/app.conf\t1\t1\th0\n";
     let d = with_baseline(a, "F\t/etc/app.conf\t1\t1\th1\n", "");
-    assert_eq!(section(&d, "Settings & files"), ["- /etc/app.conf"]);
+    assert!(section(&d, "Settings & files").is_empty());
+    assert_eq!(d.idle_noise.len(), 1);
 }
 
 #[test]
@@ -785,7 +780,7 @@ fn large_baselines_subtract_quickly() {
     let (idle, task) = (files("a"), files("b"));
     let started = std::time::Instant::now();
     let d = with_baseline("", &idle, &task);
-    assert_eq!(d.settings.files.len(), n);
+    assert_eq!(d.idle_noise.len(), n);
     assert!(started.elapsed().as_secs() < 20);
 }
 
@@ -903,4 +898,98 @@ fn quiet_parks_parse_from_the_manifest() {
     assert_eq!(parsed.qcron["root"], ("h0".to_owned(), "a\nb\n".to_owned()));
     assert_eq!(parsed.cront["root"], "x\n");
     assert_eq!(parsed.db.pg_unreadable.as_deref(), Some("why not"));
+}
+
+// ---------------------------------------------------------------- macOS churn and rendering
+
+/// An idle macOS fork's churn around one real LaunchAgent change.
+fn mac_churn() -> (String, String, String) {
+    let home = "/Users/silo";
+    let head = format!("META\tformat\t2\nHOME\t{home}\n");
+    let (mut base, mut idle, mut task) = (head.clone(), head.clone(), head);
+    for i in 0..17 {
+        let p = format!("{home}/Library/Preferences/org.vendor.app{i}.plist");
+        base += &format!("F\t{p}\t1\t1\th0\n");
+        idle += &format!("F\t{p}\t1\t2\th1\n");
+        task += &format!("F\t{p}\t1\t3\th2\n");
+    }
+    for p in [
+        "Library/Preferences/ByHost/x.plist",
+        "Library/Application Support/AddressBook/AddressBook-v22.abcddb-wal",
+    ] {
+        task += &format!("F\t{home}/{p}\t1\t3\th9\n");
+    }
+    let la = format!("{home}/Library/LaunchAgents/org.silo.p2m.web.plist");
+    base += &format!("F\t{la}\t1\t1\ta\nLAGENT\tuser\torg.silo.p2m.web\ta\t{la}\n");
+    task += &format!("F\t{la}\t1\t3\tb\nLAGENT\tuser\torg.silo.p2m.web\tb\t{la}\n");
+    (base, idle, task)
+}
+
+#[test]
+fn macos_idle_preference_churn_does_not_hide_a_launch_agent() {
+    let (base, idle, task) = mac_churn();
+    let d = with_baseline(&base, &idle, &task);
+    let text = d.render(15);
+    assert!(
+        text.contains("launch agent org.silo.p2m.web (user): changed"),
+        "{text}"
+    );
+    assert_eq!(d.idle_noise.len(), 17);
+    assert!(section(&d, "Settings & files")
+        .iter()
+        .all(|l| l.contains("launch agent")));
+    assert!(d.ignored.count() >= 2, "ByHost and AddressBook are ignored");
+}
+
+#[test]
+fn a_line_limit_cuts_directory_counts_before_named_changes() {
+    let (base, _, task) = mac_churn();
+    let d = run(&base, &task);
+    let full = d.render_lines(100);
+    let at = |needle: &str| full.iter().position(|l| l.contains(needle)).unwrap();
+    assert!(at("launch agent") < at("Library/Preferences/ ("));
+    let cut = d.render_lines(4);
+    assert!(cut.iter().any(|l| l.contains("launch agent")), "{cut:?}");
+}
+
+#[test]
+fn macos_background_paths_are_ignored_and_permissions_are_not_kept() {
+    let ig = IgnoreList::builtin();
+    for p in [
+        "/Users/a/Library/Preferences/ByHost/com.apple.x.plist",
+        "/Users/a/Library/Preferences/com.apple.dock.plist",
+        "/Users/a/Library/Application Support/Knowledge/knowledgeC.db-shm",
+        "/Users/a/Library/Biome/streams/x",
+        "/Users/a/Library/Daemon Containers/x",
+    ] {
+        assert!(ig.matches(p), "{p}");
+    }
+    assert!(!ig.matches("/Users/a/Library/Preferences/org.vendor.app.plist"));
+    let base = "META\tformat\t2\nHOME\t/Users/a\n";
+    let tcc = "/Users/a/Library/Application Support/com.apple.TCC/TCC.db";
+    let task = format!("{base}F\t{tcc}\t1\t3\th\nDB\tsqlite\t{tcc}\tdig\n");
+    let d = run(base, &task);
+    assert!(d.database.is_empty());
+    assert!(d
+        .not_kept
+        .credentials
+        .contains_key("/Users/a/Library/Application Support/com.apple.TCC/"));
+}
+
+#[test]
+fn the_review_digest_ignores_timestamps_and_idle_noise() {
+    use crate::changes::keep::review_digest;
+    let a = "F\t/srv/big.bin\t10\t100\t-\n";
+    let t1 = "F\t/srv/big.bin\t11\t200\t-\nF\t/etc/a\t1\t5\th1\n";
+    let t2 = "F\t/srv/big.bin\t11\t999\t-\nF\t/etc/a\t1\t6\th1\n";
+    assert_eq!(review_digest(&run(a, t1)), review_digest(&run(a, t2)));
+    let t3 = "F\t/srv/big.bin\t11\t200\t-\nF\t/etc/a\t1\t5\th2\n";
+    assert_ne!(review_digest(&run(a, t1)), review_digest(&run(a, t3)));
+    let idle = "F\t/etc/n\t1\t2\th1\n";
+    let n1 = format!("{t1}F\t/etc/n\t1\t3\th2\n");
+    let n2 = format!("{t1}F\t/etc/n\t1\t4\th3\n");
+    assert_eq!(
+        review_digest(&with_baseline(a, idle, &n1)),
+        review_digest(&with_baseline(a, idle, &n2))
+    );
 }

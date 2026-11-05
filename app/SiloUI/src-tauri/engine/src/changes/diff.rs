@@ -75,7 +75,8 @@ pub struct Identity {
     /// Link target of a symlink.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target: Option<String>,
-    /// Modification time, only recorded for files without a hash.
+    /// Never set: a timestamp is not part of what a file is, so it stays out of the JSON and
+    /// out of the review digest. Kept so older stored documents still read.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mtime: Option<String>,
 }
@@ -97,7 +98,7 @@ impl Identity {
                     size: e.size.clone(),
                     hash: hashed.then(|| e.digest.clone()),
                     target: None,
-                    mtime: (!hashed).then(|| e.mtime.clone()),
+                    mtime: None,
                 }
             }
         }
@@ -503,15 +504,27 @@ fn counts(chs: &[&PathChange]) -> String {
         .join(" ")
 }
 
+/// One line per changed file, then one line per directory with more than three changed
+/// files. Lines for single files come first so a cut at the end drops the rollups first.
 fn rollup(ctx: &Ctx, chs: &[PathChange], key: impl Fn(&str) -> String) -> Vec<String> {
+    let (mut singles, rolled) = rollup_parts(ctx, chs, key);
+    singles.extend(rolled);
+    singles
+}
+
+fn rollup_parts(
+    ctx: &Ctx,
+    chs: &[PathChange],
+    key: impl Fn(&str) -> String,
+) -> (Vec<String>, Vec<String>) {
     let mut groups: BTreeMap<String, Vec<&PathChange>> = BTreeMap::new();
     for c in chs {
         groups.entry(key(&c.path)).or_default().push(c);
     }
-    let mut lines = Vec::new();
+    let (mut singles, mut rolled) = (Vec::new(), Vec::new());
     for (k, g) in groups {
         if g.len() > 3 {
-            lines.push(format!(
+            rolled.push(format!(
                 "{}/ ({} files: {})",
                 ctx.short(&k),
                 g.len(),
@@ -519,11 +532,11 @@ fn rollup(ctx: &Ctx, chs: &[PathChange], key: impl Fn(&str) -> String) -> Vec<St
             ));
         } else {
             for c in g {
-                lines.push(format!("{} {}", c.change.sym(), ctx.short(&c.path)));
+                singles.push(format!("{} {}", c.change.sym(), ctx.short(&c.path)));
             }
         }
     }
-    lines
+    (singles, rolled)
 }
 
 fn cap(mut items: Vec<String>, n: usize, noun: &str) -> Vec<String> {
@@ -1354,18 +1367,25 @@ impl Diff {
                 )
             },
         );
-        let idle: HashSet<(&str, Change)> = bl
-            .other
-            .iter()
-            .map(|c| (c.path.as_str(), c.change))
-            .collect();
-        let (noisy, rest): (Vec<PathChange>, Vec<PathChange>) =
-            std::mem::take(&mut self.other).into_iter().partition(|c| {
-                idle.contains(&(c.path.as_str(), c.change)) && !bl.other.iter().any(|b| b == c)
-            });
-        self.other = rest;
-        self.idle_noise = noisy;
         subtract_paths(&mut self.other, &bl.other);
+        // A file outside Code, Packages and Database that the idle computer also touched
+        // (whatever it holds now) is background churn: listed by path, not in a bucket.
+        let idle: HashSet<&str> = bl
+            .settings
+            .files
+            .iter()
+            .chain(&bl.other)
+            .map(|c| c.path.as_str())
+            .collect();
+        let mut noisy = Vec::new();
+        for list in [&mut self.settings.files, &mut self.other] {
+            let (n, rest): (Vec<PathChange>, Vec<PathChange>) = std::mem::take(list)
+                .into_iter()
+                .partition(|c| idle.contains(c.path.as_str()));
+            *list = rest;
+            noisy.extend(n);
+        }
+        self.idle_noise = noisy;
         subtract_paths(&mut self.repo_changes, &bl.repo_changes);
 
         let bdb: HashMap<(&str, &str), &DbChange> = bl
@@ -1614,7 +1634,7 @@ impl Diff {
 
     fn settings_lines(&self, ctx: &Ctx) -> Vec<String> {
         let s = &self.settings;
-        let mut lines = rollup(ctx, &s.files, |p| {
+        let (mut lines, rolled) = rollup_parts(ctx, &s.files, |p| {
             p.rsplit_once('/').map(|x| x.0).unwrap_or("").to_owned()
         });
         for l in &s.launch_agents {
@@ -1646,6 +1666,8 @@ impl Diff {
         for v in &s.services {
             lines.push(format!("service {}: {}→{}", v.name, v.from, v.to));
         }
+        // Directory counts last: a line limit cuts them before any named change.
+        lines.extend(rolled);
         lines
     }
 

@@ -58,6 +58,28 @@ pub const BUILTIN_IGNORE: &str = "\
 .Xauthority
 */.local/share/recently-used.xbel
 
+# macOS background churn, from the files an idle macOS fork rewrites within minutes of its
+# first start (preference caches, contacts and knowledge databases with their write-ahead
+# files, system management state, Spotlight and Biome event stores)
+*/Library/Preferences/ByHost
+*/Library/Preferences/com.apple.*
+*/Library/Preferences/.GlobalPreferences*
+*/Library/Application Support/AddressBook
+*/Library/Application Support/Knowledge
+*/Library/Application Support/com.apple.RemoteManagementAgent
+*/Library/Biome
+*/Library/Daemon Containers
+*/Library/Metadata
+*/Library/Logs
+*/Library/Group Containers/group.com.apple.*
+*/Library/Containers/com.apple.*
+*.db-shm
+*.db-wal
+*.sqlite-shm
+*.sqlite-wal
+*.abcddb-shm
+*.abcddb-wal
+
 # agent session data
 */.claude/projects
 .claude.json.backup*
@@ -214,6 +236,9 @@ const CREDENTIAL_DIRS: &[&str] = &[
     "/.ssh/",
     "/.gnupg/",
     "/Library/Keychains/",
+    // macOS permission grants (camera, files, automation), rewritten while idle: a change
+    // is reported as not kept, never carried to another computer.
+    "/Library/Application Support/com.apple.TCC/",
     // OpenClaw keeps provider tokens next to its config.
     "/.openclaw/credentials/",
     "/.config/gcloud/",

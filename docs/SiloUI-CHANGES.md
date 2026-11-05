@@ -23,16 +23,35 @@ passed in. `silo diff --baseline` measures a missing one on a throwaway fork of 
 checkpoint (named `silo-baseline-*`, quiet like any fork, left out of `silo list`): it is started so
 its base is captured like a real fork's, left idle for as long as the real fork had run (at most
 ten minutes; `baselineIdleSeconds` records it), captured again, and the idle diff is cached under
-the source checkpoint. The throwaway is dropped whether or not the measurement worked. A cached
-baseline is used as it is. On a Mac with two macOS virtual machines already running nothing is
-measured. `changes.baseline` itself refuses ("No baseline") on a fork that has run more than two
-minutes past its idle time or whose capture shows a moved repository or changed package, because
-that capture would hold the task's own changes. When no baseline can be measured, `silo diff`
-shows the plain diff and a `baselineError`. Entries that match the baseline are removed first, so background churn does not show; entries that match it are removed first, so background churn does not show. An
-entry matches only when the path, the kind of change and the resulting content (file hash,
-size and link target; Postgres schema and table data digests; SQLite file digest; crontab and
-launch agent digests; the working-tree content of a dirty file) are all the same. A path that
-ends up with different content in the task than in the baseline stays in the diff.
+the source checkpoint and under the computer the fork was made from, so every fork of that
+computer finds it (a macOS fork has a fork-point checkpoint of its own). This is how a baseline is
+measured for a fork that has been used: the measurement never runs on the used fork. The
+throwaway is stopped, seen stopped, and dropped, whether or not the measurement worked; a
+failure to drop it is reported only if it remains after retries. A cached baseline is used as it
+is. On a Mac with two macOS virtual machines already running nothing is measured. The engine
+method `changes.baseline` itself, called on a used fork, still refuses ("No baseline") when the
+fork has run more than two minutes past its idle time or its capture shows a moved repository or
+changed package, because that capture would hold the task's own changes; `silo diff --baseline`
+does not call it on the used fork. When no baseline can be measured, `silo diff` shows the plain
+diff and a `baselineError`.
+
+Applying a baseline, in order:
+
+1. Entries that match it are removed. An entry matches only when the path, the kind of change and
+   the resulting content (file hash, size and link target; Postgres schema and table data
+   digests; SQLite file digest; crontab and launch agent digests; the working-tree content of a
+   dirty file) are all the same.
+2. Any file outside Code, Packages and Database (Settings & files and Other changed) whose path
+   also changed in the idle baseline, with any content, moves to `idle_noise`: it is counted in
+   the text under "Also changes when idle" and listed by path (with its identities) in the JSON,
+   not in a bucket. Code, Packages and Database entries that end up different from the baseline
+   stay in the diff.
+
+Built-in ignore patterns (`changes/ignore.rs`) cover well-known macOS background churn seen on an
+idle macOS fork: `~/Library/Preferences/ByHost`, `com.apple.*` preference files, contacts and
+knowledge databases and their `-shm`/`-wal` files, system management state, Biome, Daemon
+Containers, Spotlight metadata, logs. macOS permission grants (`com.apple.TCC`) are reported under
+Not kept, never as a database change.
 
 SQLite files go through the same ignore and credential rules as other files: a database under an
 ignored tree is only counted, and one under a credential path appears under Not kept only.
@@ -41,7 +60,9 @@ only for rename and copy status codes. Editing a file that was already dirty sho
 again when its content changed.
 
 The text is at most 15 lines for a typical task. Longer sections are cut longest-first and end
-in `… +N more (see --json)`.
+in `… +N more (see --json)`. Within a section, lines for single files, launch agents, crontabs
+and services come before the directory counts (`~/Library/Preferences/ (17 files: ~17)`), so a
+cut drops the counts first.
 
 ## `silo diff --json`
 
@@ -92,8 +113,8 @@ may be added.
 - `change` is `added`, `modified` or `deleted`.
 - Every path entry (`settings.files[]`, `other[]`, `repo_changes[]`, `code[].gitignored[]`,
   `packages[].owned_changes{pkg: []}`, `not_kept.credential_details{group: []}`) carries
-  `before` and `after`, each `null` or `{kind: "file"|"link", size, hash?, target?, mtime?}`
-  (`hash` is absent for files too large to hash, which then carry `mtime`; `target` is a
+  `before` and `after`, each `null` or `{kind: "file"|"link", size, hash?, target?}`
+  (`hash` is absent for files too large to hash; those are compared by size and modification time, which are not part of the entry; `target` is a
   symlink's destination). For packages, the entry's `change` is the operation on the package's
   file; `owned_files` keeps the plain path lists.
 - `code[]` also has `removed_from` (head and branch of a removed repo), `dirty_identity`
@@ -146,7 +167,12 @@ compared live: both computers are hashed at keep time, so a file the collector c
 an unreadable file or a changed mode is never taken as unchanged.
 
 1. **Pinned to what was reviewed.** `silo diff --json` returns a `reviewDigest`; `--reviewed`
-   passes it back, and the keep refuses (`changed`) if the fork's changes differ. Whatever the
+   passes it back, and the keep refuses (`changed`) if the fork's changes differ. The digest is a
+   SHA-256 over the reviewed content only: the Code, Packages, Settings & files, Database and
+   Other changed entries as shown after the ignore list and the baseline, with their identities
+   (hash, size, link target). It leaves out the Ignored count, idle noise, Not kept, and every
+   timestamp (an entry carries no modification time). `silo fold --dry-run` does not send a digest, so
+   it never refuses on a stale one: a dry run reports and does not pin. Whatever the
    keep writes is read from the fork once, before main is touched, and the fork is looked at
    again afterwards: if it moved meanwhile, the keep stops.
 2. **Checkpoint, then lane.** A `before-keep` checkpoint of the target (macOS computers use a

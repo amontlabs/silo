@@ -903,3 +903,91 @@ async fn fold_defaults_to_the_digest_the_last_diff_of_that_fork_showed() {
         .unwrap();
     assert_eq!(engine.calls("changes.keep")[1]["reviewDigest"], "zzz");
 }
+
+#[tokio::test]
+async fn a_dry_run_fold_never_sends_a_review_digest() {
+    let engine = FakeEngine::start(|method, _| match method {
+        "computers.list" => Ok(listing(&[("main", "running"), ("try", "running")])),
+        "changes.diff" | "changes.keep" => Ok(json!({"jobId": "job:1"})),
+        "operations.job.get" => Ok(finished(json!({
+            "diff": {"format": 1, "other": []}, "text": "", "baselineApplied": false,
+            "baselineAvailable": false, "baseCapturedAt": "a", "capturedAt": "b",
+            "reviewDigest": "stale", "status": "dry-run",
+            "report": {"fork": "id-try", "target": "id-main", "summary": [], "steps": [], "notes": [], "checkpoint": null}
+        }))),
+        "operations.job.acknowledge" => Ok(Value::Null),
+        other => Err(("internal", format!("unexpected {other}"))),
+    });
+    let connected = Engine::connect(&engine.socket).await.unwrap();
+    let args = ops::DiffArgs {
+        computer: "try".into(),
+        max_lines: None,
+        no_baseline: false,
+        compute_baseline: false,
+    };
+    ops::diff(&connected, &args, &ignore).await.unwrap();
+    let options = ops::FoldOptions {
+        dry_run: true,
+        reviewed: Some("older".into()),
+        ..Default::default()
+    };
+    ops::fold(&connected, "try", None, None, options, &ignore)
+        .await
+        .unwrap();
+    assert!(engine.calls("changes.keep")[0]["reviewDigest"].is_null());
+}
+
+#[tokio::test]
+async fn a_throwaway_is_stopped_and_seen_stopped_before_it_is_dropped() {
+    // The computer reports "stopping" for two listings after its stop job, and the engine
+    // refuses a delete until it reads stopped.
+    let polls = Arc::new(Mutex::new(0u32));
+    let order = Arc::new(Mutex::new(Vec::<String>::new()));
+    let (p, o) = (polls.clone(), order.clone());
+    let engine = FakeEngine::start(move |method, _| match method {
+        "computers.list" => {
+            let seen = order_state(&o);
+            let state = if seen.iter().any(|m| m == "stop") {
+                let mut n = p.lock().unwrap();
+                *n += 1;
+                if *n > 2 {
+                    "stopped"
+                } else {
+                    "stopping"
+                }
+            } else {
+                "running"
+            };
+            Ok(listing(&[("silo-baseline-aaaaaa", state)]))
+        }
+        "computers.stop" => {
+            o.lock().unwrap().push("stop".into());
+            Ok(json!({"jobId": "job:1"}))
+        }
+        "computers.delete" => {
+            if *p.lock().unwrap() <= 2 {
+                return Err(("invalid", "Stop the computer first.".into()));
+            }
+            o.lock().unwrap().push("delete".into());
+            Ok(json!({"jobId": "job:1"}))
+        }
+        "operations.job.get" => Ok(finished(json!({}))),
+        "operations.job.acknowledge" => Ok(Value::Null),
+        other => Err(("internal", format!("unexpected {other}"))),
+    });
+    let connected = Engine::connect(&engine.socket).await.unwrap();
+    let all = connected.all_computers().await.unwrap();
+    let computer = all
+        .iter()
+        .find(|c| c.name == "silo-baseline-aaaaaa")
+        .unwrap()
+        .clone();
+    ops::remove_computer(&connected, &computer, &ignore)
+        .await
+        .unwrap();
+    assert_eq!(order_state(&order), ["stop", "delete"]);
+}
+
+fn order_state(order: &Arc<Mutex<Vec<String>>>) -> Vec<String> {
+    order.lock().unwrap().clone()
+}

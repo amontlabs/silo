@@ -29,6 +29,11 @@ impl Slot {
     }
 }
 
+/// The baseline key of a computer that forks are made from (never a checkpoint id).
+fn origin_key(computer: &str) -> String {
+    format!("computer:{computer}")
+}
+
 /// What is recorded beside a stored manifest.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -176,6 +181,42 @@ impl Store {
         let base = read_gz(&directory.join("base.tsv.gz"))?;
         let idle = read_gz(&directory.join("idle.tsv.gz"))?;
         Ok(base.zip(idle))
+    }
+
+    /// Like [`Store::put_baseline`], and also under the computer the fork was made from, so
+    /// the other forks of that computer (each has a checkpoint of its own) find it too.
+    pub fn put_baseline_for(
+        &self,
+        source: &str,
+        origin: Option<&str>,
+        base: &str,
+        idle: &str,
+    ) -> Result<Meta, String> {
+        let meta = self.put_baseline(source, base, idle)?;
+        if let Some(origin) = origin {
+            self.put_baseline(&origin_key(origin), base, idle)?;
+        }
+        Ok(meta)
+    }
+
+    /// The cached baseline of `source`; when there is none, the one measured on another fork
+    /// of `origin`, which is then kept under `source` as well.
+    pub fn get_baseline_for(
+        &self,
+        source: &str,
+        origin: Option<&str>,
+    ) -> Result<Option<(String, String)>, String> {
+        if let Some(found) = self.get_baseline(source)? {
+            return Ok(Some(found));
+        }
+        let Some(origin) = origin else {
+            return Ok(None);
+        };
+        let Some((base, idle)) = self.get_baseline(&origin_key(origin))? else {
+            return Ok(None);
+        };
+        self.put_baseline(source, &base, &idle)?;
+        Ok(Some((base, idle)))
     }
 
     fn pending_path(&self, name: &str) -> PathBuf {
