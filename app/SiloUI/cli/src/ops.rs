@@ -3,6 +3,7 @@
 
 use serde_json::{json, Value};
 use silo_api::methods::{
+    changes::{ChangesBaselineParams, ChangesDiffParams},
     checkpoints::{CheckpointCreateParams, CheckpointForkParams, CheckpointKind},
     common::{ComputerTargetParams, DeviceParams},
     computers::{
@@ -445,9 +446,69 @@ pub async fn fork(
             progress,
         )
         .await?;
-    let mut fork = engine.computer(&name).await?.to_json();
+    let forked = engine.computer(&name).await?;
+    let mut fork = forked.to_json();
     fork["source"] = json!(source.name);
     Ok(fork)
+}
+
+pub struct DiffArgs {
+    pub computer: String,
+    pub max_lines: Option<u32>,
+    /// Do not subtract the cached no-op baseline.
+    pub no_baseline: bool,
+    /// Compute the baseline first (the computer must be an idle fork).
+    pub compute_baseline: bool,
+}
+
+/// What changed in a computer since it was forked: the diff document, plus the readable
+/// `text` and what was compared.
+pub async fn diff(
+    engine: &Engine,
+    args: &DiffArgs,
+    progress: Progress<'_>,
+) -> Result<Value, CliError> {
+    let target = engine.computer(&args.computer).await?;
+    if args.compute_baseline {
+        engine
+            .run_job(
+                &format!("Measuring the idle baseline of {}", target.name),
+                requests::changes_baseline(ChangesBaselineParams {
+                    computer_id: target.id.clone(),
+                    device_id: None,
+                    source: None,
+                    idle_seconds: None,
+                }),
+                progress,
+            )
+            .await?;
+    }
+    let mut result = engine
+        .run_job(
+            &format!("Comparing {} with when it was forked", target.name),
+            requests::changes_diff(ChangesDiffParams {
+                computer_id: target.id,
+                device_id: None,
+                max_lines: args.max_lines,
+                baseline: Some(!args.no_baseline),
+                refresh: None,
+            }),
+            progress,
+        )
+        .await?;
+    let mut document = result["diff"].take();
+    if let Some(object) = document.as_object_mut() {
+        for key in [
+            "text",
+            "baselineApplied",
+            "baselineAvailable",
+            "baseCapturedAt",
+            "capturedAt",
+        ] {
+            object.insert(key.to_owned(), result[key].clone());
+        }
+    }
+    Ok(document)
 }
 
 pub fn check_drop(name: &str, force: bool) -> Result<(), CliError> {

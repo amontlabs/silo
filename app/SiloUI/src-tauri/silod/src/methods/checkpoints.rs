@@ -1,4 +1,4 @@
-//! Handlers for `checkpoints.*`, `exports.*`, `migration.*`, `preparation.*` and `device.*`.
+//! Handlers for `checkpoints.*`, `changes.*`, `exports.*`, `migration.*`, `preparation.*` and `device.*`.
 //!
 //! Each method decodes its `silo-api` params, runs the engine behavior and returns the
 //! `silo-api` result. Long operations are durable jobs (`{jobId}`) whose outcome and
@@ -6,6 +6,7 @@
 //! the domain's catalogue topic (`checkpoints.changed`, `exports.changed`, ...).
 //! Requests naming another device belong to the Connections router and are refused here.
 
+mod changes;
 mod device;
 mod exports;
 mod migration;
@@ -40,6 +41,7 @@ pub(super) fn owns(method: MethodName) -> bool {
     owns_prefix(
         method,
         &[
+            "changes.",
             "checkpoints.",
             "exports.",
             "migration.",
@@ -67,6 +69,9 @@ async fn dispatch(
     context: &HandlerContext,
 ) -> Result<HandlerOutput, DispatchError> {
     match method {
+        MethodName::ChangesCapture => changes::capture(context, params).await,
+        MethodName::ChangesDiff => changes::diff(context, params).await,
+        MethodName::ChangesBaseline => changes::baseline(context, params).await,
         MethodName::CheckpointsCreate => create(context, params).await,
         MethodName::CheckpointsRestore => restore(context, params).await,
         MethodName::CheckpointsFork => fork(context, params).await,

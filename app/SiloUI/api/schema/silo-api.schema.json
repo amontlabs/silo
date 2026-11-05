@@ -584,6 +584,129 @@
       ],
       "type": "object"
     },
+    "ChangesBaselineParams": {
+      "properties": {
+        "computerId": {
+          "type": "string"
+        },
+        "deviceId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "idleSeconds": {
+          "description": "How long after the base capture the fork is left idle before it is captured again.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "source": {
+          "description": "The checkpoint the idle fork came from; defaults to the source recorded with its base.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "computerId"
+      ],
+      "type": "object"
+    },
+    "ChangesCaptureParams": {
+      "properties": {
+        "computerId": {
+          "type": "string"
+        },
+        "deviceId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "role": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ChangesRole"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "`base` records the fork-time state; `latest` (the default) records the current one."
+        },
+        "source": {
+          "description": "For a `base` capture: the checkpoint (or computer) the fork was made from. The\nno-op baseline is cached under it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "computerId"
+      ],
+      "type": "object"
+    },
+    "ChangesDiffParams": {
+      "properties": {
+        "baseline": {
+          "description": "Subtract the cached no-op baseline when there is one (default true).",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "computerId": {
+          "type": "string"
+        },
+        "deviceId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "maxLines": {
+          "description": "Cut the readable text to this many lines.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "refresh": {
+          "description": "Capture the computer now (default true); false compares the last capture.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "computerId"
+      ],
+      "type": "object"
+    },
+    "ChangesRole": {
+      "description": "Which stored manifest a capture replaces.",
+      "oneOf": [
+        {
+          "const": "base",
+          "description": "The computer as it was when it was forked, before any agent work.",
+          "type": "string"
+        },
+        {
+          "const": "latest",
+          "description": "The most recent look at the computer.",
+          "type": "string"
+        }
+      ]
+    },
     "Checkpoint": {
       "description": "The common checkpoint view returned by Linux and macOS computers.",
       "properties": {
@@ -6589,6 +6712,9 @@
     "MethodName": {
       "enum": [
         "activity.setup.read",
+        "changes.baseline",
+        "changes.capture",
+        "changes.diff",
         "checkpoints.abandonRestore",
         "checkpoints.create",
         "checkpoints.delete",
@@ -6747,6 +6873,54 @@
             },
             "params": {
               "$ref": "#/$defs/DeviceParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "changes.baseline",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/ChangesBaselineParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "changes.capture",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/ChangesCaptureParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "changes.diff",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/ChangesDiffParams"
             }
           },
           "required": [
@@ -9090,6 +9264,54 @@
                 "$ref": "#/$defs/ComputerConfigurationProgress"
               },
               "type": "array"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "changes.baseline",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/JobStartResult"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "changes.capture",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/JobStartResult"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "changes.diff",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/JobStartResult"
             }
           },
           "required": [
@@ -14150,6 +14372,24 @@
       "name": "activity.setup.read",
       "paramsType": "common::DeviceParams",
       "resultType": "Vec<computers::ComputerConfigurationProgress>"
+    },
+    {
+      "kind": "job",
+      "name": "changes.baseline",
+      "paramsType": "changes::ChangesBaselineParams",
+      "resultType": "common::JobStartResult"
+    },
+    {
+      "kind": "job",
+      "name": "changes.capture",
+      "paramsType": "changes::ChangesCaptureParams",
+      "resultType": "common::JobStartResult"
+    },
+    {
+      "kind": "job",
+      "name": "changes.diff",
+      "paramsType": "changes::ChangesDiffParams",
+      "resultType": "common::JobStartResult"
     },
     {
       "kind": "job",

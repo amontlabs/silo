@@ -75,6 +75,7 @@ async fn initialize_list_and_call_round_trip() {
         "status",
         "fork",
         "drop",
+        "diff",
         "exec",
         "checkpoint",
         "retry_setup",

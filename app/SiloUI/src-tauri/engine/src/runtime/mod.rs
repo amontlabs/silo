@@ -5129,7 +5129,10 @@ pub fn change_computer_configuration_with_host_and_job(
     match &result {
         Err(message) => notify_configuration_failure(host, &failure_title, message),
         // A deleted computer has nothing left to open: withdraw its delivered notices.
-        Ok(_) => host.clear_computer_notices(&deleted),
+        Ok(_) => {
+            host.clear_computer_notices(&deleted);
+            crate::changes::store::forget(host.engine_context().as_ref(), &deleted);
+        }
     }
     let cancelled = accepted.cancelled.load(Ordering::SeqCst);
     finish_setup_job(context.as_ref(), accepted.job_id, &result, cancelled)?;

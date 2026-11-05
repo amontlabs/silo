@@ -65,6 +65,9 @@ pub struct MethodDescriptor {
 
 define_registry! {
     ActivitySetupRead => ("activity.setup.read", Query, common::DeviceParams, Vec<computers::ComputerConfigurationProgress>);
+    ChangesBaseline => ("changes.baseline", Job, changes::ChangesBaselineParams, common::JobStartResult);
+    ChangesCapture => ("changes.capture", Job, changes::ChangesCaptureParams, common::JobStartResult);
+    ChangesDiff => ("changes.diff", Job, changes::ChangesDiffParams, common::JobStartResult);
     CheckpointsAbandonRestore => ("checkpoints.abandonRestore", Job, common::ComputerTargetParams, common::JobStartResult);
     CheckpointsCreate => ("checkpoints.create", Job, checkpoints::CheckpointCreateParams, common::JobStartResult);
     CheckpointsDelete => ("checkpoints.delete", Job, checkpoints::CheckpointTargetParams, common::JobStartResult);
@@ -222,7 +225,7 @@ mod tests {
 
     #[test]
     fn registry_covers_every_canonical_method_and_kind() {
-        assert_eq!(METHOD_REGISTRY.len(), 146);
+        assert_eq!(METHOD_REGISTRY.len(), 149);
         assert_eq!(
             METHOD_REGISTRY
                 .iter()
@@ -242,7 +245,7 @@ mod tests {
                 .iter()
                 .filter(|m| m.kind == MethodKind::Job)
                 .count(),
-            29
+            32
         );
         assert_eq!(
             METHOD_REGISTRY

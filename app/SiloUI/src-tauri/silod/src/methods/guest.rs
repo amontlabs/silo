@@ -152,6 +152,14 @@ async fn blocking<T: Send + 'static>(
 }
 
 fn resolve(engine: &SilodContext, computer_id: &str) -> Result<Target, GuestError> {
+    resolve_target(engine, computer_id)
+}
+
+/// The computer `computer_id` as a guest target, for domains that run guest work themselves.
+pub(super) fn resolve_target(
+    engine: &SilodContext,
+    computer_id: &str,
+) -> Result<Target, GuestError> {
     guest::resolve(runtime_paths(engine), &engine.paths().app_data, computer_id)
 }
 
