@@ -136,6 +136,7 @@ impl PromoteEnv for Fake {
             id: format!("cp{}", d.checkpoints.len()),
             name: name.into(),
             created_at: String::new(),
+            scope: String::new(),
         })
     }
 
@@ -539,6 +540,7 @@ fn a_crash_before_any_step_leaves_the_device_as_it_was() {
                 id: "cp".into(),
                 name: "n".into(),
                 created_at: String::new(),
+                scope: String::new(),
             },
         },
         state: State::Promoting,

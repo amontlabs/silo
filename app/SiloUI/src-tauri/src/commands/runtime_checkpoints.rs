@@ -51,6 +51,7 @@ pub(crate) async fn fork(
             new_name: new_name.to_owned(),
             secrets: Vec::new(),
             quiet: None,
+            recipe_hash: None,
         }),
     )
     .await

@@ -333,6 +333,7 @@ pub(crate) async fn fork_macos_checkpoint(
             new_name,
             secrets: Vec::new(),
             quiet: None,
+            recipe_hash: None,
         }),
     )
     .await
@@ -518,6 +519,7 @@ mod forwarding_tests {
                 new_name: "n".into(),
                 secrets: Vec::new(),
                 quiet: None,
+                recipe_hash: None,
             }),
         )
         .await
