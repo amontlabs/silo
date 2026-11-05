@@ -4977,6 +4977,7 @@ name = "silo-cli"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "futures",
  "libc",
  "rmcp",
  "schemars 1.2.3",
@@ -4986,6 +4987,7 @@ dependencies = [
  "silo-api",
  "silo-client",
  "tempfile",
+ "time",
  "tokio",
  "uuid",
 ]

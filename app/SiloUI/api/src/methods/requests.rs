@@ -53,6 +53,11 @@ pub fn changes_promote(params: keep::ChangesPromoteParams) -> Request<kind::Job>
     Request::new(MethodParams::ChangesPromote(params))
 }
 
+/// `changes.request`
+pub fn changes_request(params: keep::ChangesRequestParams) -> Request<kind::Command> {
+    Request::new(MethodParams::ChangesRequest(params))
+}
+
 /// `changes.undo`
 pub fn changes_undo(params: keep::ChangesUndoParams) -> Request<kind::Job> {
     Request::new(MethodParams::ChangesUndo(params))

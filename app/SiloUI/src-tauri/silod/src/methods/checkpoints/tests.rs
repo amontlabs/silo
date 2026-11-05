@@ -414,6 +414,41 @@ async fn checkpoints_fork_starts_a_job_on_both_platforms_with_or_without_a_check
         .is_some());
 }
 
+#[tokio::test]
+async fn changes_request_records_an_open_request_and_answers_with_it() {
+    let fixture = fixture();
+    let made = call(
+        &fixture,
+        MethodName::ChangesRequest,
+        json!({"forkId": LINUX_ID, "targetId": "main-id", "reviewDigest": "d1", "summary": "2 files"}),
+    )
+    .await
+    .unwrap();
+    let request = &made["request"];
+    assert_eq!(request["status"], "open");
+    assert_eq!(request["forkId"], LINUX_ID);
+    assert_eq!(request["target"], "main-id");
+    assert_eq!(request["reviewDigest"], "d1");
+    assert!(request["id"].as_str().unwrap().starts_with("fr-"));
+    let again = call(
+        &fixture,
+        MethodName::ChangesRequest,
+        json!({"forkId": LINUX_ID, "targetId": "main-id", "summary": "3 files"}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(again["request"]["id"], request["id"]);
+    assert_eq!(again["request"]["summary"], "3 files");
+    // Without a target and without a fork-time record there is nowhere to keep it.
+    assert!(call(
+        &fixture,
+        MethodName::ChangesRequest,
+        json!({"forkId": LINUX_ID})
+    )
+    .await
+    .is_err());
+}
+
 // MARK: exports.*
 
 #[tokio::test]

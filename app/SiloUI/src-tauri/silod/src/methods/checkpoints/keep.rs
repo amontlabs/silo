@@ -4,11 +4,18 @@
 use serde_json::Value;
 use silo_api::methods::{
     common::JobStartResult,
-    keep::{ChangesKeepParams, ChangesPromoteParams, ChangesUndoParams},
+    keep::{
+        ChangesKeepParams, ChangesPromoteParams, ChangesRequestParams, ChangesRequestResult,
+        ChangesUndoParams,
+    },
 };
-use silo_engine::changes::{
-    keep::{service, store, Hooks, Request},
-    promote,
+use silo_engine::{
+    changes::{
+        keep::{service, store, Hooks, Request},
+        promote,
+    },
+    context::EngineContext,
+    fold_requests,
 };
 
 use crate::dispatcher::{DispatchError, HandlerOutput};
@@ -88,4 +95,36 @@ pub(super) async fn promote(
         .map(|job_id| JobStartResult { job_id })
         .map_err(failure)
         .and_then(output)
+}
+
+/// `changes.request`: records that a fork waits for a review. Nothing is kept or changed.
+pub(super) async fn request(
+    context: &HandlerContext,
+    params: &Value,
+) -> Result<HandlerOutput, DispatchError> {
+    let params: ChangesRequestParams = context.decode_params(params)?;
+    let host = context.silod_context().runtime_host();
+    let app_data = context.silod_context().paths().app_data.clone();
+    let manifests = store::production(host);
+    let request = tokio::task::spawn_blocking(move || -> Result<_, String> {
+        let target = match params.target_id.filter(|id| !id.is_empty()) {
+            Some(target) => target,
+            None => manifests.source(&params.fork_id)?.ok_or_else(|| {
+                format!(
+                    "{} has no recorded source; name the computer it would be kept into.",
+                    params.fork_id
+                )
+            })?,
+        };
+        fold_requests::Store::new(&app_data).create(fold_requests::NewRequest {
+            fork_id: params.fork_id,
+            target,
+            review_digest: params.review_digest.unwrap_or_default(),
+            summary: params.summary.unwrap_or_default(),
+        })
+    })
+    .await
+    .map_err(|_| DispatchError::internal("The request could not be recorded."))?
+    .map_err(DispatchError::internal)?;
+    output(ChangesRequestResult { request })
 }

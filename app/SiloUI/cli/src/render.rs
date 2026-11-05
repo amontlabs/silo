@@ -317,6 +317,9 @@ pub fn fold(value: &Value) -> String {
             out.push_str(&format!("\n{}", text(refusal, "hint")));
             return out;
         }
+        "unchanged" => {
+            return lines(report, "steps").join("\n");
+        }
         "dry-run" => {
             out.push_str(&format!("Would keep {fork} into {target}:"));
             for line in lines(report, "summary") {
@@ -343,6 +346,13 @@ pub fn undo(value: &Value) -> String {
     let computer = text(value, "computer");
     match text(value, "status") {
         "undone" => {
+            if value.get("branch").is_some() {
+                return format!(
+                    "Put {} in {computer} back to {}.",
+                    text(value, "branch"),
+                    &text(value, "head")[..8.min(text(value, "head").len())]
+                );
+            }
             let name = text(&value["checkpoint"], "name");
             let how = if value["recovered"] == true {
                 " (an interrupted keep)"
@@ -365,6 +375,80 @@ pub fn undo(value: &Value) -> String {
             }
             out
         }
+        "refused" => text(value, "message").to_owned(),
         _ => format!("Nothing to undo on {computer}."),
     }
+}
+
+/// `silo fork -n N` and `silo fork ... -- cmd`: one line per fork, with its URLs and, when a
+/// command ran, how it ended.
+pub fn forks(value: &Value) -> String {
+    let forks = value["forks"].as_array().cloned().unwrap_or_default();
+    let width = forks
+        .iter()
+        .map(|fork| text(fork, "name").len())
+        .max()
+        .unwrap_or(4);
+    let mut out = String::new();
+    for fork in &forks {
+        let name = text(fork, "name");
+        let status = if let Some(error) = fork.get("error").and_then(Value::as_str) {
+            format!("failed: {error}")
+        } else if let Some(code) = fork.get("exitCode").and_then(Value::as_i64) {
+            format!("exit {code}")
+        } else {
+            text(fork, "state").to_owned()
+        };
+        let urls: Vec<&str> = fork["urls"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .collect();
+        out.push_str(&format!("{name:<width$}  {status}"));
+        if !urls.is_empty() {
+            out.push_str(&format!("  {}", urls.join(" ")));
+        }
+        out.push('\n');
+    }
+    out.push_str(&format!(
+        "{} fork{} of {}; review with `silo diff <fork>`, keep with `silo fold <fork>`.",
+        forks.len(),
+        if forks.len() == 1 { "" } else { "s" },
+        text(value, "source"),
+    ));
+    out
+}
+
+/// `silo fork ./dir`.
+pub fn folder_fork(value: &Value) -> String {
+    let mut out = format!(
+        "Forked {} into {}; the repository is at {} in the fork.",
+        text(value, "folder"),
+        text(value, "name"),
+        text(value, "guestPath"),
+    );
+    for url in value["urls"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+    {
+        out.push_str(&format!("\n{url}"));
+    }
+    out.push_str(&format!(
+        "\nBring the commits back with `silo fold {}`.",
+        text(value, "name")
+    ));
+    out
+}
+
+/// `silo fold --request`.
+pub fn requested(value: &Value) -> String {
+    let request = &value["request"];
+    format!(
+        "Requested a review of {} (request {}).",
+        text(value, "fork"),
+        text(request, "id")
+    )
 }

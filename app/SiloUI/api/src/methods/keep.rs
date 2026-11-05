@@ -166,6 +166,54 @@ wire_struct! {
     }
 }
 
+wire_struct! {
+    /// Ask for a fork to be reviewed without keeping it: `changes.request` stores a
+    /// [`FoldRequest`] and changes nothing else.
+    ChangesRequestParams {
+        /// The fork to be reviewed.
+        fork_id: String,
+        /// The computer it would be kept into; defaults to the one the fork was made from.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        target_id: Option<String>,
+        /// The `reviewDigest` of the `changes.diff` the request was made from.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        review_digest: Option<String>,
+        /// A short text for the reviewer, usually the readable diff.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        summary: Option<String>,
+    }
+}
+
+#[derive(
+    Clone, Copy, Debug, serde::Deserialize, PartialEq, Eq, serde::Serialize, schemars::JsonSchema,
+)]
+#[serde(rename_all = "kebab-case")]
+pub enum FoldRequestStatus {
+    /// Waiting for a review.
+    Open,
+}
+
+wire_struct! {
+    /// A recorded request to review a fork. The engine keeps it until it is answered.
+    FoldRequest {
+        id: String,
+        fork_id: String,
+        /// The computer the fork would be kept into.
+        target: String,
+        created_at: String,
+        /// The digest of the changes the requester reviewed; empty when none was given.
+        review_digest: String,
+        summary: String,
+        status: FoldRequestStatus,
+    }
+}
+
+wire_struct! {
+    ChangesRequestResult {
+        request: FoldRequest,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -185,6 +233,21 @@ mod tests {
         );
         let hooks: KeepHooks = serde_json::from_str(r#"{"restart":["web"]}"#).unwrap();
         assert!(hooks.migrate.is_empty() && hooks.after.is_empty());
+    }
+
+    #[test]
+    fn a_fold_request_params_need_only_the_fork() {
+        let params: ChangesRequestParams = serde_json::from_str(r#"{"forkId":"f"}"#).unwrap();
+        assert_eq!(
+            (params.target_id, params.review_digest, params.summary),
+            (None, None, None)
+        );
+        let record: FoldRequest = serde_json::from_value(serde_json::json!({
+            "id": "fr-1", "forkId": "f", "target": "m", "createdAt": "t",
+            "reviewDigest": "d", "summary": "s", "status": "open"
+        }))
+        .unwrap();
+        assert_eq!(record.status, FoldRequestStatus::Open);
     }
 
     #[test]

@@ -81,6 +81,7 @@ async fn dispatch(
         MethodName::ChangesKeep => keep::keep(context, params).await,
         MethodName::ChangesPromote => keep::promote(context, params).await,
         MethodName::ChangesUndo => keep::undo(context, params).await,
+        MethodName::ChangesRequest => keep::request(context, params).await,
         MethodName::CheckpointsCreate => create(context, params).await,
         MethodName::CheckpointsRestore => restore(context, params).await,
         MethodName::CheckpointsFork => fork(context, params).await,
