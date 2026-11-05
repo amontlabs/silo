@@ -6,11 +6,12 @@ Tracker: Linear project "Silo v1: git for agent computers" (P-AMO-8).
 
 ## Resume
 
-- **Phase:** 1, in progress. Phase 0 merged in #60 (`25ca53eb`).
-- **Open slices:** 1a CLI + MCP, 1b quiet forks Linux, 1c macOS fork fast path (worktree agents); 1d quiet forks macOS after 1c. AMO-91 (URL per fork) is being reworked in its own worktree.
-- **Clean up:** none outstanding. The Dev engine runs from the main checkout's bundle (built from `25ca53eb`).
-- **Next action:** review and integrate phase 1 slices on `claude/project-thread-e72ch6`, rebuild, run the phase 1 VM check (Linux + macOS).
-- **macOS slots:** one foreign VM (PID 60843, running since 2 Nov) holds one of the two slots.
+- **Phase:** 1 checks passed; PR to main pending CI. Phase 0 merged in #60.
+- **Open slices:** none.
+- **Clean up:** none outstanding. The Dev engine runs from the main checkout's bundle.
+- **Blocked on the owner:** the positive `--secret NAME` fork check and a non-trivial "no assignments by default" need the owner to allow the Dev engine's Keychain access once (`credential_access_denied`). Read-only GitHub against a mock needs a GitHub App installation the CLI can't create; covered by unit tests only.
+- **Next action:** merge the phase 1 PR, then start phase 2 (change capture + bucketed diff, Keep + Undo).
+- **macOS slots:** the foreign VM (PID 60843) is gone; both slots free as of 5 Nov.
 
 ## Start
 
@@ -62,6 +63,17 @@ VM check (Linux and macOS): a macOS fork boots once; a source with a boot-persis
 ## Spec changes
 
 ## Status
+
+### 5 Nov 2026: phase 1 passed (two items blocked on the owner)
+
+- **Checks:** Linux and macOS quiet-fork checks through the `silo` CLI only (engine and CLI at `726020f2`, MicroSandbox 0.7.6 with 22 patches, Ubuntu 24.04.4 and macOS 26.6.2 guests). Sources had boot-persistent jobs (Linux: XDG autostart starting a poller and cron with a minute job and `@reboot`; macOS: StartInterval and KeepAlive LaunchAgents, a minute crontab and `@reboot`), confirmed running after a source restart. Quiet forks over 130 s: no job or poller lines from the fork and no log growth on either OS; new machine-id/identifier, hostname and host keys (also for a fork of a fork); scrubbed file gone in the fork and kept on the source; quiet record applied; macOS fork booted once (`boots == 1`, one `boot 1: first Start` line), 26 s from start to ready (dev signal only). A Linux control fork without a recipe ran the unnamed poller and no scheduled jobs. One check line reads FAIL by design of the script: the cron daemon itself still starts from an XDG autostart entry in the quiet fork, with its crontab and `@reboot` parked, so no job runs; the spec asks for no job runs, which holds. Evidence: `docs/v1/evidence/phase-1/` (`linux-quiet-check.txt`, `macos-check.txt`, earlier runs beside them). Scripts: `docs/v1/checks/phase1_*_check.sh`. Workspace tests pass; frontend 2812 tests pass.
+- **Shipped:** `silo` CLI and MCP server (`app/SiloUI/cli`) with the recipe and settings loaders; quiet forks on Linux (boot hook in the Silo msb patch runs the quiet step before the desktop) and macOS (offline parking during fork setup); cold-boot forks only; no assignments copied unless named, `github` read-only; macOS fork in one boot with offline personalization and network staging (was 4 boots); macOS create no longer fails on the password step; URL per fork (AMO-91, early).
+- **Evidence review (Opus; Argon could not run):** found the first runs showed several conditions for the wrong reason (no boot-persistent source jobs, no control). Re-run with persistent jobs and a control; that re-run found two real bugs (XDG autostart entries and KeepAlive LaunchAgents named in `quiet:` still started), both fixed and re-checked.
+- **Decisions:** quiet scope and URL format (see Decisions). Reviews by gpt-6.1-sol and Opus.
+- **Spec changes:** none. The URL example becomes `http://<port>.<fork>.silo.localhost:<proxy port>`; PRODUCT.md says "e.g.", so no text change is needed yet.
+- **Blocked:** the positive `--secret` copy and a non-trivial "no assignments by default" check need your Keychain approval for the Dev engine; read-only GitHub against a mock needs a GitHub App installation (unit-tested). Known issue outside v1 scope: macOS disks stay at 40 GiB because the Recovery partition blocks the container grow (now a note, not a failure).
+- **Wording:** clean over added lines. One commit message on the branch (`e3a457f1`) uses a listed word; it does not reach main because PRs are squash-merged with a clean message.
+- **Next:** phase 2.
 
 ### 4 Nov 2026: phase 0 passed
 
