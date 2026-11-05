@@ -193,12 +193,7 @@ pub trait KeepEnv: Send + Sync {
     /// Puts main back from an interrupted keep's checkpoint. `held` is called once main's
     /// lane is held (or, when it cannot be, just before the restore), so the caller knows
     /// nothing else can start on it meanwhile.
-    fn recover(
-        &self,
-        computer: &str,
-        checkpoint_id: &str,
-        held: &dyn Fn(),
-    ) -> Result<(), String> {
+    fn recover(&self, computer: &str, checkpoint_id: &str, held: &dyn Fn()) -> Result<(), String> {
         held();
         self.restore(computer, checkpoint_id)
     }

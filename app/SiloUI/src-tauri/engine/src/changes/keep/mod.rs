@@ -195,7 +195,9 @@ fn main_moved(before: &str, now: &str) -> Option<Vec<String>> {
         return None;
     }
     let (Ok(before), Ok(now)) = (Manifest::parse(before), Manifest::parse(now)) else {
-        return Some(vec!["Silo could not compare main before and after the checkpoint.".into()]);
+        return Some(vec![
+            "Silo could not compare main before and after the checkpoint.".into(),
+        ]);
     };
     let changes = diff(&before, &now, None, &IgnoreList::builtin());
     if changes

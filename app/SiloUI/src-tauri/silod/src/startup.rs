@@ -193,8 +193,12 @@ fn start_keep_recovery(context: Arc<SilodContext>) {
     let (held_tx, held_rx) = std::sync::mpsc::channel::<()>();
     let mut started = 0;
     for target in targets {
-        let (context, host, journal, held_tx) =
-            (context.clone(), host.clone(), journal.clone(), held_tx.clone());
+        let (context, host, journal, held_tx) = (
+            context.clone(),
+            host.clone(),
+            journal.clone(),
+            held_tx.clone(),
+        );
         let spawned = std::thread::Builder::new()
             .name("silod-keep-recovery".into())
             .spawn(move || {
@@ -208,13 +212,16 @@ fn start_keep_recovery(context: Arc<SilodContext>) {
                     let held = || {
                         let _ = held_tx.send(());
                     };
-                    let result = silo_engine::changes::keep::recover_one(&env, &journal, &target, &held);
+                    let result =
+                        silo_engine::changes::keep::recover_one(&env, &journal, &target, &held);
                     let _ = held_tx.send(());
                     let Err(error) = result else {
                         return;
                     };
                     if attempt == 29 {
-                        eprintln!("silod: could not put back an interrupted keep of {target}: {error}");
+                        eprintln!(
+                            "silod: could not put back an interrupted keep of {target}: {error}"
+                        );
                         return;
                     }
                     std::thread::sleep(std::time::Duration::from_secs(10));
