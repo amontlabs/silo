@@ -183,36 +183,56 @@ impl silo_engine::creation_inputs::Inputs for SilodCreationWait {
 // MARK: Interrupted keeps
 
 /// Puts back any computer an interrupted keep left half-changed, before anything else is
-/// kept into it. The runtime may not be ready at once, so a failure is retried for a while.
+/// kept into it. Each such computer is held from engine start, with other work on it
+/// queued behind "Recovering an interrupted keep", until its restore is under way. The
+/// runtime may not be ready at once, so a failure is retried for a while.
 fn start_keep_recovery(context: Arc<SilodContext>) {
-    let spawned = std::thread::Builder::new()
-        .name("silod-keep-recovery".into())
-        .spawn(move || {
-            let host: Arc<dyn RuntimeHost> = Arc::new(SilodRuntimeHost::for_engine(context.clone()));
-            let journal = silo_engine::changes::keep::service::journal_for(host.engine_context().as_ref());
-            for attempt in 0..30 {
-                if journal.pending_targets().is_empty() {
-                    return;
+    let host: Arc<dyn RuntimeHost> = Arc::new(SilodRuntimeHost::for_engine(context.clone()));
+    let journal = silo_engine::changes::keep::service::journal_for(host.engine_context().as_ref());
+    let targets = silo_engine::changes::keep::interrupted_targets(&journal);
+    let (held_tx, held_rx) = std::sync::mpsc::channel::<()>();
+    let mut started = 0;
+    for target in targets {
+        let (context, host, journal, held_tx) =
+            (context.clone(), host.clone(), journal.clone(), held_tx.clone());
+        let spawned = std::thread::Builder::new()
+            .name("silod-keep-recovery".into())
+            .spawn(move || {
+                for attempt in 0..30 {
+                    let env = silo_engine::changes::keep::guest_env::GuestEnv::new(
+                        host.clone(),
+                        crate::methods::checkpoints::service_for(&context),
+                        journal.clone(),
+                        Box::new(|_| {}),
+                    );
+                    let held = || {
+                        let _ = held_tx.send(());
+                    };
+                    let result = silo_engine::changes::keep::recover_one(&env, &journal, &target, &held);
+                    let _ = held_tx.send(());
+                    let Err(error) = result else {
+                        return;
+                    };
+                    if attempt == 29 {
+                        eprintln!("silod: could not put back an interrupted keep of {target}: {error}");
+                        return;
+                    }
+                    std::thread::sleep(std::time::Duration::from_secs(10));
                 }
-                let env = silo_engine::changes::keep::guest_env::GuestEnv::new(
-                    host.clone(),
-                    crate::methods::checkpoints::service_for(&context),
-                    journal.clone(),
-                    Box::new(|_| {}),
-                );
-                let failures = silo_engine::changes::keep::recover_all(&env, &journal);
-                if failures.is_empty() {
-                    return;
-                }
-                if attempt == 29 {
-                    eprintln!("silod: could not put back an interrupted keep: {}", failures.join("; "));
-                    return;
-                }
-                std::thread::sleep(std::time::Duration::from_secs(10));
-            }
-        });
-    if let Err(error) = spawned {
-        eprintln!("silod: could not start the keep recovery: {error}");
+            });
+        match spawned {
+            Ok(_) => started += 1,
+            Err(error) => eprintln!("silod: could not start the keep recovery: {error}"),
+        }
+    }
+    drop(held_tx);
+    // Startup goes on once every computer is held, or after a short wait when it cannot be.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    for _ in 0..started {
+        let left = deadline.saturating_duration_since(std::time::Instant::now());
+        if held_rx.recv_timeout(left).is_err() {
+            break;
+        }
     }
 }
 

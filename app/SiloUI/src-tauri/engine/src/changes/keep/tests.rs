@@ -382,6 +382,9 @@ struct Store {
     /// What the second capture of the fork returns, when it moved.
     fork_later: Option<String>,
     fork_captures: AtomicUsize,
+    /// What main's later captures return, when it moved after the first.
+    main_later: Option<String>,
+    main_captures: AtomicUsize,
 }
 
 impl ManifestStore for Store {
@@ -393,6 +396,14 @@ impl ManifestStore for Store {
             let n = self.fork_captures.fetch_add(1, Ordering::SeqCst);
             if n >= 1 {
                 if let Some(later) = &self.fork_later {
+                    return Ok(later.clone());
+                }
+            }
+        }
+        if computer == "main" {
+            let n = self.main_captures.fetch_add(1, Ordering::SeqCst);
+            if n >= 1 {
+                if let Some(later) = &self.main_later {
                     return Ok(later.clone());
                 }
             }
@@ -434,6 +445,8 @@ fn store(base: &str, fork: &str, main: &str) -> Store {
         manifests: BTreeMap::from([("fork".to_owned(), mt(fork)), ("main".to_owned(), mt(main))]),
         fork_later: None,
         fork_captures: AtomicUsize::new(0),
+        main_later: None,
+        main_captures: AtomicUsize::new(0),
     }
 }
 
@@ -1529,7 +1542,7 @@ fn an_interrupted_keep_is_recovered_by_restoring_its_checkpoint_which_is_then_no
     world.with("main", |c| {
         c.pkgs.insert("dpkg half-applied".into(), "1".into())
     });
-    assert!(super::recover_all(&env, &journal).is_empty());
+    assert_eq!(super::recover_all(&env, &journal), Vec::<String>::new());
     world.with("main", |c| assert!(c.pkgs.is_empty()));
     assert_eq!(journal.pending("main").unwrap(), None);
     assert_eq!(journal.latest_undoable("main"), None);
@@ -1684,4 +1697,158 @@ fn two_keeps_into_the_same_main_wait_or_fail_cleanly() {
     assert!(matches!(second.join().unwrap().unwrap(), Outcome::Kept(_)));
     assert_eq!(journal.pending("main").unwrap(), None);
     assert_eq!(world.logged("checkpoint"), 2);
+}
+
+#[test]
+fn a_keep_is_refused_when_main_changed_between_the_checkpoint_and_the_held_lane() {
+    let world = simple_world();
+    let (_dir, journal) = journal();
+    let mut st = store(BASE, FORK, BASE);
+    st.main_later = Some(mt(&format!("{BASE}F\t/root/new.txt\t10\t3\tc:x\n")));
+    let refusal = refused(run(&world, &st, &journal, &request(Hooks::default())).unwrap());
+    assert_eq!(refusal.reason, "main-changed");
+    assert_eq!(world.logged("git_merge"), 0);
+    assert_eq!(world.logged("restore"), 0);
+    assert_eq!(journal.pending("main").unwrap(), None);
+    assert_eq!(journal.latest_undoable("main"), None);
+}
+
+#[test]
+fn recovery_reports_the_lane_held_before_it_restores() {
+    let world = World::new(Os::Linux, &["fork", "main"]);
+    let env = Fake(world.clone());
+    let (_dir, journal) = journal();
+    let checkpoint = env.checkpoint_before_keep("main", "Before keep").unwrap();
+    journal
+        .begin(&Entry {
+            fork: "fork".into(),
+            target: "main".into(),
+            checkpoint_id: checkpoint.id.clone(),
+            checkpoint_name: checkpoint.name,
+        })
+        .unwrap();
+    let seen = std::cell::Cell::new(None);
+    super::recover_one(&env, &journal, "main", &|| {
+        seen.set(Some(world.logged("restore")));
+    })
+    .unwrap();
+    assert_eq!(seen.get(), Some(0));
+    assert_eq!(world.logged("restore"), 1);
+    assert_eq!(super::interrupted_targets(&journal), Vec::<String>::new());
+}
+
+fn run_script(cmd: &GuestCmd, path: &std::path::Path, dir: &std::path::Path) -> (i32, String) {
+    let mut command = std::process::Command::new("bash");
+    command.args(["-c", &cmd.script]).current_dir(dir).env(
+        "PATH",
+        format!("{}:{}", path.display(), std::env::var("PATH").unwrap()),
+    );
+    for (name, value) in &cmd.args {
+        command.env(format!("A_{name}"), value);
+    }
+    let out = command.output().unwrap();
+    (
+        out.status.code().unwrap_or(-1),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+    )
+}
+
+fn stub(dir: &std::path::Path, name: &str, body: &str) {
+    let path = dir.join(name);
+    std::fs::write(&path, format!("#!/bin/bash\n{body}\n")).unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+#[test]
+fn a_package_removal_that_takes_other_packages_with_it_is_refused() {
+    let bin = tempfile::tempdir().unwrap();
+    stub(
+        bin.path(),
+        "apt-get",
+        "if [ \"$1\" = -s ]; then echo 'Remv libfoo [1.0]'; echo 'Remv main-tool:amd64 [2.0]'; exit 0; fi\necho real >> \"$PWD/ran\"",
+    );
+    let work = tempfile::tempdir().unwrap();
+    let only = scripts::pkg_remove(Os::Linux, "dpkg", &["libfoo".into()]).unwrap();
+    let (code, stderr) = run_script(&only, bin.path(), work.path());
+    assert_eq!(code, 4, "{stderr}");
+    assert!(stderr.contains("main-tool"), "{stderr}");
+    assert!(!work.path().join("ran").exists());
+    let both =
+        scripts::pkg_remove(Os::Linux, "dpkg", &["libfoo".into(), "main-tool".into()]).unwrap();
+    let (code, stderr) = run_script(&both, bin.path(), work.path());
+    assert_eq!(code, 0, "{stderr}");
+    assert!(work.path().join("ran").exists());
+}
+
+#[test]
+fn a_brew_removal_with_installed_dependents_is_refused() {
+    let bin = tempfile::tempdir().unwrap();
+    stub(
+        bin.path(),
+        "brew",
+        "if [ \"$1\" = uses ]; then echo dependent; exit 0; fi\necho real >> \"$PWD/ran\"",
+    );
+    let work = tempfile::tempdir().unwrap();
+    let cmd = scripts::pkg_remove(Os::Macos, "brew", &["lib".into()]).unwrap();
+    let (code, stderr) = run_script(&cmd, bin.path(), work.path());
+    assert_eq!(code, 4, "{stderr}");
+    assert!(stderr.contains("dependent"));
+    assert!(!work.path().join("ran").exists());
+}
+
+#[test]
+fn every_commit_is_checked_for_credentials_even_when_a_later_one_deletes_the_file() {
+    let repo = tempfile::tempdir().unwrap();
+    let git = |args: &[&str]| {
+        let out = std::process::Command::new("git")
+            .args([
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "-c",
+                "commit.gpgsign=false",
+            ])
+            .args(args)
+            .current_dir(repo.path())
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout).trim().to_owned()
+    };
+    git(&["init", "-q"]);
+    std::fs::write(repo.path().join("a.txt"), "a").unwrap();
+    git(&["add", "."]);
+    git(&["commit", "-q", "-m", "one"]);
+    let old = git(&["rev-parse", "HEAD"]);
+    std::fs::write(repo.path().join(".env"), "SECRET=1").unwrap();
+    git(&["add", "."]);
+    git(&["commit", "-q", "-m", "two"]);
+    git(&["rm", "-q", ".env"]);
+    git(&["commit", "-q", "-m", "three"]);
+    let new = git(&["rev-parse", "HEAD"]);
+    let repo_path = repo.path().to_string_lossy().into_owned();
+    let list = |old: &str| {
+        let cmd = scripts::git_changed(&repo_path, old, &new);
+        let mut command = std::process::Command::new("bash");
+        command.args(["-c", &cmd.script]);
+        for (name, value) in &cmd.args {
+            command.env(format!("A_{name}"), value);
+        }
+        let out = command.output().unwrap();
+        assert!(out.status.success());
+        String::from_utf8_lossy(&out.stdout)
+            .split('\0')
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned)
+            .collect::<Vec<_>>()
+    };
+    assert!(list(&old).contains(&".env".to_owned()));
+    assert!(list("").contains(&".env".to_owned()));
+    assert!(list("").contains(&"a.txt".to_owned()));
 }

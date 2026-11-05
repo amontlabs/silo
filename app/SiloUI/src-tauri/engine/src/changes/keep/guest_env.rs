@@ -172,6 +172,38 @@ impl KeepEnv for GuestEnv {
         Ok(Box::new(guard))
     }
 
+    fn recover(&self, computer: &str, checkpoint_id: &str, held: &dyn Fn()) -> Result<(), String> {
+        // The restore job takes the lane itself, so the hold is handed over: the job is
+        // queued first, then the hold is dropped, and everything else queues behind it.
+        let gate = self.hold(computer, "Recovering an interrupted keep").ok();
+        held();
+        let Some(gate) = gate else {
+            return self.restore(computer, checkpoint_id);
+        };
+        let job = self
+            .service
+            .start_restore(computer, checkpoint_id)
+            .map_err(|failure| failure.message)?;
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < deadline {
+            let queued = runtime::OPERATIONS
+                .snapshot()
+                .waiting
+                .iter()
+                .any(|entry| entry.job_id.as_ref() == Some(&job));
+            let done = jobs::get_at(self.host.engine_context().as_ref(), &job, None)
+                .ok()
+                .flatten()
+                .is_some_and(|lookup| lookup.state == JobState::Finished);
+            if queued || done {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        drop(gate);
+        self.finish(job).map(|_| ())
+    }
+
     fn note(&self, line: &str) {
         (self.progress)(line);
     }

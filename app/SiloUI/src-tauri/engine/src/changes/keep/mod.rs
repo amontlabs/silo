@@ -165,6 +165,49 @@ fn refused_early(request: &Request, target: &str, digest: &str) -> Outcome {
     }
 }
 
+fn main_changed(request: &Request, target: &str, digest: &str, lines: Vec<String>) -> Outcome {
+    Outcome::Refused {
+        report: Report {
+            fork: request.fork.clone(),
+            target: target.to_owned(),
+            review_digest: Some(digest.to_owned()),
+            ..Report::default()
+        },
+        refusal: Refusal {
+            reason: "main-changed".into(),
+            message: format!(
+                "{target} changed while the keep was starting. {target} was not changed by the keep."
+            ),
+            conflicts: lines
+                .into_iter()
+                .map(|line| Conflict::new("main", target.to_owned(), line))
+                .collect(),
+            hint: "Keep again once nothing else is changing it.".into(),
+        },
+    }
+}
+
+/// What differs between two manifests of the same computer, as report lines; `None` when
+/// nothing a keep or an undo would care about moved.
+fn main_moved(before: &str, now: &str) -> Option<Vec<String>> {
+    use crate::changes::{diff::diff, ignore::IgnoreList, manifest::Manifest};
+    if before == now {
+        return None;
+    }
+    let (Ok(before), Ok(now)) = (Manifest::parse(before), Manifest::parse(now)) else {
+        return Some(vec!["Silo could not compare main before and after the checkpoint.".into()]);
+    };
+    let changes = diff(&before, &now, None, &IgnoreList::builtin());
+    if changes
+        .summary
+        .iter()
+        .all(|s| s.lines.is_empty() || s.bucket == "Not kept")
+    {
+        return None;
+    }
+    Some(changes.render_lines(15))
+}
+
 /// Keeps `request.fork` into its target.
 pub fn keep(
     env: &dyn KeepEnv,
@@ -189,7 +232,7 @@ pub fn keep(
         format!("{target} is not a computer on this device. Name the computer to keep into.")
     })?;
     let _lane = lane::acquire(&target, wait)?;
-    recover_locked(env, journal, &target)?;
+    recover_locked(env, journal, &target, &|| {})?;
 
     let view = prepare::look_at_fork(env, store, &request.fork)?;
     if request
@@ -214,6 +257,7 @@ pub fn keep(
         });
     }
 
+    let main_before = store.capture(&target)?;
     env.note("Saving a checkpoint of main");
     let checkpoint =
         env.checkpoint_before_keep(&target, &format!("Before keep of {}", request.fork))?;
@@ -238,6 +282,22 @@ pub fn keep(
                 return Err(error);
             }
         };
+        // A restore after a failure goes back to the checkpoint, so main must still be what
+        // the checkpoint saved now that nothing else can change it.
+        let moved = store
+            .capture(&target)
+            .map(|now| main_moved(&main_before, &now));
+        match moved {
+            Ok(None) => {}
+            Ok(Some(lines)) => {
+                consume(journal);
+                return Ok(main_changed(request, &target, &view.digest, lines));
+            }
+            Err(error) => {
+                consume(journal);
+                return Err(error);
+            }
+        }
         let prepared = prepare::prepare(env, store, request, &target, &view, &mut tracker);
         let result = match prepared {
             Ok(prepare::Prepared::Refused { report, refusal }) => {
@@ -366,24 +426,51 @@ fn changed_after(
 }
 
 /// A journal found while no keep runs means the engine stopped mid-keep.
-fn recover_locked(env: &dyn KeepEnv, journal: &Journal, target: &str) -> Result<(), String> {
-    if let Some(entry) = journal.pending(target)? {
-        env.note("A keep was interrupted; putting main back first");
-        env.restore(target, &entry.checkpoint_id)?;
-        let _ = journal.set_state(target, &entry.checkpoint_id, journal::State::Consumed);
-        journal.clear(target);
-    }
+fn recover_locked(
+    env: &dyn KeepEnv,
+    journal: &Journal,
+    target: &str,
+    held: &dyn Fn(),
+) -> Result<(), String> {
+    let Some(entry) = journal.pending(target)? else {
+        held();
+        return Ok(());
+    };
+    env.note("A keep was interrupted; putting main back first");
+    env.recover(target, &entry.checkpoint_id, held)?;
+    let _ = journal.set_state(target, &entry.checkpoint_id, journal::State::Consumed);
+    journal.clear(target);
     Ok(())
 }
 
-/// Restores every interrupted keep. Run when the engine starts.
+/// Restores the interrupted keep of one computer. `held` is called once its lane is held,
+/// before the restore starts, with "recovering an interrupted keep" shown to anything
+/// that queues for it meanwhile.
+pub fn recover_one(
+    env: &dyn KeepEnv,
+    journal: &Journal,
+    target: &str,
+    held: &dyn Fn(),
+) -> Result<(), String> {
+    let _lane = lane::acquire(target, Duration::from_secs(30))?;
+    recover_locked(env, journal, target, held)
+}
+
+/// Computers with an interrupted keep still to restore.
+pub fn interrupted_targets(journal: &Journal) -> Vec<String> {
+    journal
+        .pending_targets()
+        .into_iter()
+        .map(|entry| entry.target)
+        .collect()
+}
+
+/// Restores every interrupted keep.
 pub fn recover_all(env: &dyn KeepEnv, journal: &Journal) -> Vec<String> {
     let mut failures = Vec::new();
-    for entry in journal.pending_targets() {
-        let result = lane::acquire(&entry.target, Duration::from_secs(1))
-            .and_then(|_lane| recover_locked(env, journal, &entry.target));
-        if let Err(error) = result {
-            failures.push(format!("{}: {error}", entry.target));
+    for target in interrupted_targets(journal) {
+        if let Err(error) = recover_one(env, journal, &target, &|| {}) {
+            failures.push(format!("{target}: {error}"));
         }
     }
     failures
