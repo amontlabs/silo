@@ -1264,6 +1264,8 @@ mod tests {
             .collect()
     }
 
+    // The stop script runs in a macOS guest; its `ps` output differs on Linux.
+    #[cfg(target_os = "macos")]
     #[test]
     fn processes_match_by_exact_name_not_by_prefix_or_pattern() {
         let dir = tempfile::tempdir().unwrap();
