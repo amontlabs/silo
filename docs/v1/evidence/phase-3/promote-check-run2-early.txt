@@ -1,0 +1,220 @@
+== header
+commit: 395da600ce9adf2377b70bfaf1ad9a5a54e0d373; tracked changes under app/: []
+bundled msb: msb 0.7.6; silo: silo 0.1.0; host macOS 26.5 arm64; date 2026-11-05T21:43:28Z
+macOS VMs running at start: 0
+NAME         STATE      KIND    SIZE
+workspace-1  stopped    linux   8 cpu, 32 GiB
+e2e-relay    stopped    linux   8 cpu, 32 GiB
+silo-eval-a  stopped    linux   2 cpu, 2 GiB
+silo-eval-b  stopped    linux   2 cpu, 2 GiB
+main         running    linux   2 cpu, 4 GiB
+== Linux: main with a web app, a crontab line, a secret
+guest OS: Ubuntu 24.04.4 LTS kernel 6.12.109
+main id b022c6f3-a44c-4be3-8f44-0f74c464773e
+main crontab: */5 * * * * echo p3root >> /var/log/p3root.log
+p3-job
+silo: Allow Silo's engine to use its saved sign-in in the macOS Keychain. (credential_access_denied)
+[22:43:30] BLOCKED  secret assignment on main  -- credential_access_denied: silo: Allow Silo's engine to use its saved sign-in in the macOS Keychain. (credential_access_denied)
+No secrets yet.
+SSH entries on this Dev home before: ls: /Users/polarzero/.silo-dev/ssh: No such file or directory 
+e2e-relay:a7a0e7cb:stopped
+main:b022c6f3:running
+silo-eval-a:2b0a8fba:stopped
+silo-eval-b:b0e0b6d0:stopped
+workspace-1:96b9e3e6:stopped
+== fork main into e2e-p3-pr
+[22:43:32] PASS  silo fork main --name e2e-p3-pr  -- wall 2 s (Linux)
+[22:43:37] PASS  start e2e-p3-pr  -- 
+fork id 7f717864-8261-4ede-b404-abeb7475fed0
+fork status: quiet: applied; stopped: none; scrubbed: none; secrets: none
+fork cron parked: etc/cron.d=[] root crontab=[no crontab for root]
+host=e2e-p3-pr content=v2
+fork web: host=e2e-p3-pr content=v2
+main web (v1): host=main content=v1
+3000  http  reachable  http://3000.main.silo.localhost:47383
+main URL: http://3000.main.silo.localhost:47383
+main URL before promote: host=main content=v1
+ http=200
+== silo fold e2e-p3-pr --promote
+[22:43:53] PASS  silo fold e2e-p3-pr --promote exits 0  -- wall 9 s
+Promoting e2e-p3-pr...
+Promoting e2e-p3-pr: 5s
+{
+  "report": {
+    "archive": "main-before-20261105-2143",
+    "checkpoint": "c376ba1bebf4a401b8038e62f581973a",
+    "fork": "e2e-p3-pr",
+    "notes": [
+      "e2e-p3-pr is now main. main was archived as main-before-20261105-2143; `silo undo main` swaps them back."
+    ],
+    "steps": [
+      "names",
+      "name-keyed settings",
+      "SSH access",
+      "lineage",
+      "quiet parking"
+    ],
+    "target": "main"
+  },
+  "ssh": {
+    "computer": "main",
+    "config": "/Users/polarzero/.silo-dev/ssh-hosts.conf",
+    "connect": "ssh main.silo-dev",
+    "host": "main.silo-dev"
+  },
+  "status": "promoted"
+}
+
+e2e-relay:a7a0e7cb:stopped
+main-before-20261105-2143:b022c6f3:stopped
+main:7f717864:stopped
+silo-eval-a:2b0a8fba:stopped
+silo-eval-b:b0e0b6d0:stopped
+workspace-1:96b9e3e6:stopped
+archive: main-before-20261105-2143
+[22:43:54] PASS  the fork is now named main (id 7f717864-8261-4ede-b404-abeb7475fed0)  -- main id 7f717864-8261-4ede-b404-abeb7475fed0
+[22:43:54] PASS  old main archived as main-before-* with its id  -- main-before-20261105-2143
+-- content on the new main
+[22:43:57] PASS  start new main  -- 
+marker: fork-v2  web: host=main content=v2
+[22:44:02] PASS  new main serves the fork's content (file + web app output, in-guest)  -- 
+main URL after promote: No Silo computer is open at main.silo.localhost.
+ http=404
+[22:44:02] FAIL  main's URL serves the fork's content  -- http://3000.main.silo.localhost:47383/
+-- secrets
+No secrets yet.
+secrets assigned: none
+[22:44:03] BLOCKED  secrets carried  -- no secret could be assigned
+-- quiet-parked jobs
+new main: etc/cron.d=[e2scrub_all ] root crontab=[no crontab for root]
+[22:44:04] FAIL  cron.d line and root crontab line restored on the new main  -- 
+-- SSH alias
+ssh main.silo-dev: cat: /root/p3-marker: Permission denied main 
+[22:44:04] FAIL  ssh main.silo-dev reaches the new main (marker fork-v2)  -- 
+== silo undo main
+[22:44:09] PASS  silo undo main exits 0  -- wall 5 s
+Undoing the latest keep or promote of main...
+{
+  "archive": "main-before-20261105-2143",
+  "changedSince": [],
+  "computer": "main",
+  "fork": "e2e-p3-pr",
+  "kind": "promote",
+  "recovered": false,
+  "ssh": {
+    "computer": "main",
+    "config": "/Users/polarzero/.silo-dev/ssh-hosts.conf",
+    "connect": "ssh main.silo-dev",
+    "host": "main.silo-dev"
+  },
+  "status": "undone"
+}
+
+e2e-p3-pr:7f717864:stopped
+e2e-relay:a7a0e7cb:stopped
+main:b022c6f3:stopped
+silo-eval-a:2b0a8fba:stopped
+silo-eval-b:b0e0b6d0:stopped
+workspace-1:96b9e3e6:stopped
+[22:44:11] PASS  names back: main=b022c6f3-a44c-4be3-8f44-0f74c464773e, e2e-p3-pr=7f717864-8261-4ede-b404-abeb7475fed0, no main-before-*  -- archive now: []
+marker: main-v1  web: host=main content=v1  cron: p3-job */5 * * * * echo p3root >> /var/log/p3root.log
+[22:44:20] PASS  content back on main (file + web app)  -- 
+[22:44:20] FAIL  main's URL serves the original content again  -- 
+[22:44:20] PASS  main's cron lines intact after undo  -- 
+[22:44:20] FAIL  ssh main.silo-dev reaches the original main again  -- 
+[22:44:20] PASS  main's ports back as before  -- 
+fork after undo: silo: Start e2e-p3-pr first.
+== macOS: source e2e-p3-macsrc, fork e2e-p3-macpr
+macOS VMs running: 0
+Creating e2e-p3-macsrc...
+Created e2e-p3-macsrc (stopped)
+[22:45:32] PASS  create e2e-p3-macsrc (macOS)  -- 71 s
+[22:45:53] PASS  start e2e-p3-macsrc  -- 
+guest: ProductName:		macOS ProductVersion:		26.6.2 BuildVersion:		25G83 
+[22:45:59] PASS  silo fork e2e-p3-macsrc --name e2e-p3-macpr  -- wall 5 s (macOS fork of a running source, dev signal only)
+Forking e2e-p3-macsrc into e2e-p3-macpr...
+Forked e2e-p3-macpr (setting-up): e2e-p3-macsrc as of 22:45:54 (new checkpoint)
+[22:46:34] PASS  start e2e-p3-macpr  -- macOS VMs: 2
+fork marker: mac-fork-v2
+macOS VMs running: 2
+e2e-p3-macpr:830dae51:running
+e2e-p3-macsrc:a0c6c628:running
+e2e-p3-pr:7f717864:stopped
+e2e-relay:a7a0e7cb:stopped
+main:b022c6f3:running
+silo-eval-a:2b0a8fba:stopped
+silo-eval-b:b0e0b6d0:stopped
+workspace-1:96b9e3e6:stopped
+[22:46:43] FAIL  silo fold e2e-p3-macpr --promote (macOS)  -- wall 8 s
+Promoting e2e-p3-macpr...
+Promoting e2e-p3-macpr: 5s
+{
+  "refusal": {
+    "conflicts": [],
+    "hint": "",
+    "message": "e2e-p3-macsrc started again while the promote was starting. Nothing was changed.",
+    "reason": "busy"
+  },
+  "report": {
+    "archive": "e2e-p3-macsrc-before-20261105-2146",
+    "checkpoint": "6ff2a7b1-92b8-4a15-8674-ad450647bc84",
+    "fork": "e2e-p3-macpr",
+    "notes": [],
+    "steps": [
+      "names",
+      "name-keyed settings",
+      "SSH access",
+      "lineage",
+      "macOS network identity",
+      "quiet parking"
+    ],
+    "target": "e2e-p3-macsrc"
+  },
+  "status": "refused"
+}
+
+e2e-p3-macpr:830dae51:stopping
+e2e-p3-macsrc:a0c6c628:stopping
+e2e-p3-pr:7f717864:stopped
+e2e-relay:a7a0e7cb:stopped
+main:b022c6f3:running
+silo-eval-a:2b0a8fba:stopped
+silo-eval-b:b0e0b6d0:stopped
+workspace-1:96b9e3e6:stopped
+archive: []
+[('e2e-p3-macsrc', 'a0c6c628'), ('e2e-p3-macpr', '830dae51')]
+source name expected after promote: e2e-p3-macsrc now id a0c6c628-a971-4acf-af5d-a0dbac212b15 (fork id 830dae51, source id a0c6c628)
+[22:46:45] FAIL  macOS: the fork now carries the source's name  -- 
+macOS VMs running: 2
+silo: Start e2e-p3-macsrc first.
+marker on promoted: 
+silo: Start e2e-p3-macsrc first.
+[22:46:46] FAIL  macOS: promoted computer has the fork's content  -- 
+[22:46:48] PASS  silo undo e2e-p3-macsrc (macOS)  -- wall 1 s
+Undoing the latest keep or promote of e2e-p3-macsrc...
+{
+  "computer": "a0c6c628-a971-4acf-af5d-a0dbac212b15",
+  "status": "nothing-to-undo"
+}
+
+e2e-p3-macpr:830dae51:stopping
+e2e-p3-macsrc:a0c6c628:stopping
+e2e-p3-pr:7f717864:stopped
+e2e-relay:a7a0e7cb:stopped
+main:b022c6f3:running
+silo-eval-a:2b0a8fba:stopped
+silo-eval-b:b0e0b6d0:stopped
+workspace-1:96b9e3e6:stopped
+[22:46:49] PASS  macOS: names back after undo  -- 
+marker after undo: mac-main-v1
+[22:47:08] PASS  macOS: content back after undo  -- 
+[22:47:08] cleanup
+Removed the build of linux-dev.
+[22:47:25] silo list after cleanup:
+NAME         STATE      KIND    SIZE
+workspace-1  stopped    linux   8 cpu, 32 GiB
+e2e-relay    stopped    linux   8 cpu, 32 GiB
+silo-eval-a  stopped    linux   2 cpu, 2 GiB
+silo-eval-b  stopped    linux   2 cpu, 2 GiB
+macOS VMs running: 0
+== summary: 19 passed, 8 failed (2 blocked, not counted)

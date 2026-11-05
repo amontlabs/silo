@@ -1,0 +1,56 @@
+== header
+commit: 93cebb6cb57e82d2513a05d014b57903044bf7ee; tracked changes under app/: []
+bundled msb: msb 0.7.6; silo: silo 0.1.0; host macOS 26.5 arm64; date 2026-11-05T22:27:24Z
+host repo /var/folders/bq/fnyn1bq95d37b4q3lrwc_f600000gn/T//e2e-p3-folder.qyWkkh/p3repo at 133a233e6507a02bfb778df2a535662588d1ffad on main
+[23:28:03] PASS  silo fork ./p3repo  -- 39 s
+Starting e2e-p3-folder...
+Sending the repository to e2e-p3-folder...
+Forked /private/var/folders/bq/fnyn1bq95d37b4q3lrwc_f600000gn/T/e2e-p3-folder.qyWkkh/p3repo into e2e-p3-folder; the repository is at /home/silo/p3repo in the fork.
+Bring the commits back with `silo fold e2e-p3-folder`.
+guest OS: Ubuntu 24.04.4 LTS
+home=/home/silo
+a.txt
+e19a341 from the fork
+133a233 first
+[23:28:04] PASS  commit made in the fork  -- 
+-- refusal: dirty host tree
+/private/var/folders/bq/fnyn1bq95d37b4q3lrwc_f600000gn/T/e2e-p3-folder.qyWkkh/p3repo has uncommitted changes to tracked files.
+Commit or stash them, then fold again.
+[23:28:04] PASS  fold refused with uncommitted tracked changes, host HEAD unchanged  -- rc=2
+-- silo fold
+Fetching the commits from e2e-p3-folder...
+Kept e2e-p3-folder into /private/var/folders/bq/fnyn1bq95d37b4q3lrwc_f600000gn/T/e2e-p3-folder.qyWkkh/p3repo.
+  Fast-forwarded main with 1 commit
+  The folder's previous HEAD is refs/silo/backup/20261105T222806Z.
+Undo with `silo undo /private/var/folders/bq/fnyn1bq95d37b4q3lrwc_f600000gn/T/e2e-p3-folder.qyWkkh/p3repo`.
+[23:28:06] PASS  silo fold e2e-p3-folder exits 0  -- 2 s
+host log:
+e19a341 (HEAD -> main) from the fork
+133a233 first
+refs:
+e19a341c8dc2f25db95dcf1c92853ede4aa0d7dc commit	refs/heads/main
+133a233e6507a02bfb778df2a535662588d1ffad commit	refs/silo/backup/20261105T222806Z
+e19a341c8dc2f25db95dcf1c92853ede4aa0d7dc commit	refs/silo/e2e-p3-folder/head
+[23:28:06] PASS  host log shows the fork's commit and b.txt is there  -- 
+backup: refs/silo/backup/20261105T222806Z 133a233e6507a02bfb778df2a535662588d1ffad
+[23:28:06] PASS  backup ref refs/silo/backup/* marks the previous HEAD  -- refs/silo/backup/20261105T222806Z 133a233e6507a02bfb778df2a535662588d1ffad
+[23:28:06] PASS  refs/silo/e2e-p3-folder/head exists  -- 
+-- refusal: undo with uncommitted tracked changes
+/private/var/folders/bq/fnyn1bq95d37b4q3lrwc_f600000gn/T/e2e-p3-folder.qyWkkh/p3repo has uncommitted changes to tracked files.
+[23:28:06] PASS  undo refused with a dirty host tree, HEAD unchanged  -- rc=2
+-- refusal: undo with new commits since the fold
+main has new commits since the fold; undoing would drop them. To go back anyway: git -C /private/var/folders/bq/fnyn1bq95d37b4q3lrwc_f600000gn/T/e2e-p3-folder.qyWkkh/p3repo reset --hard refs/silo/backup/20261105T222806Z
+[23:28:07] PASS  undo refused after new host commits, HEAD unchanged  -- rc=2
+-- silo undo
+Put main in /private/var/folders/bq/fnyn1bq95d37b4q3lrwc_f600000gn/T/e2e-p3-folder.qyWkkh/p3repo back to 133a233e.
+[23:28:07] PASS  silo undo e2e-p3-folder exits 0  -- 
+[23:28:07] PASS  host branch restored exactly (HEAD 133a233e6507a02bfb778df2a535662588d1ffad, branch main, clean tree, no b.txt)  -- HEAD now 133a233e6507a02bfb778df2a535662588d1ffad
+133a233 first
+[23:28:07] cleanup
+Removed the build of linux-dev.
+NAME         STATE      KIND    SIZE
+workspace-1  stopped    linux   8 cpu, 32 GiB
+e2e-relay    stopped    linux   8 cpu, 32 GiB
+silo-eval-a  stopped    linux   2 cpu, 2 GiB
+silo-eval-b  stopped    linux   2 cpu, 2 GiB
+== summary: 11 passed, 0 failed

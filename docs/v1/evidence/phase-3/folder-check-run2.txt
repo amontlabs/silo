@@ -1,0 +1,50 @@
+== header
+commit: 395da600ce9adf2377b70bfaf1ad9a5a54e0d373; tracked changes under app/: []
+bundled msb: msb 0.7.6; silo: silo 0.1.0; host macOS 26.5 arm64; date 2026-11-05T21:53:00Z
+host repo /var/folders/bq/fnyn1bq95d37b4q3lrwc_f600000gn/T//e2e-p3-folder.frjFcl/p3repo at 19e492d4a70ec5001d8cf7795c251daa171935b7 on main
+[22:53:37] PASS  silo fork ./p3repo  -- 37 s
+Starting e2e-p3-folder...
+Sending the repository to e2e-p3-folder...
+Forked /private/var/folders/bq/fnyn1bq95d37b4q3lrwc_f600000gn/T/e2e-p3-folder.frjFcl/p3repo into e2e-p3-folder; the repository is at /home/silo/p3repo in the fork.
+Bring the commits back with `silo fold e2e-p3-folder`.
+guest OS: Ubuntu 24.04.4 LTS
+home=/home/silo
+a.txt
+a9c97f2 from the fork
+19e492d first
+[22:53:37] PASS  commit made in the fork  -- 
+-- refusal: dirty host tree
+/private/var/folders/bq/fnyn1bq95d37b4q3lrwc_f600000gn/T/e2e-p3-folder.frjFcl/p3repo has uncommitted changes to tracked files.
+Commit or stash them, then fold again.
+[22:53:38] PASS  fold refused with uncommitted tracked changes, host HEAD unchanged  -- rc=2
+-- silo fold
+Fetching the commits from e2e-p3-folder...
+silo: Could not connect to this computer. Make sure it is running, then try again.
+[22:53:39] FAIL  silo fold e2e-p3-folder exits 0  -- 1 s
+host log:
+19e492d (HEAD -> main) first
+refs:
+19e492d4a70ec5001d8cf7795c251daa171935b7 commit	refs/heads/main
+[22:53:39] FAIL  host log shows the fork's commit and b.txt is there  -- 
+backup: 
+[22:53:39] FAIL  backup ref refs/silo/backup/* marks the previous HEAD  -- 
+[22:53:39] FAIL  refs/silo/e2e-p3-folder/head exists  -- 
+-- refusal: undo with uncommitted tracked changes
+Nothing to undo on /private/var/folders/bq/fnyn1bq95d37b4q3lrwc_f600000gn/T/e2e-p3-folder.frjFcl/p3repo.
+[22:53:40] FAIL  undo refused with a dirty host tree, HEAD unchanged  -- rc=0
+-- refusal: undo with new commits since the fold
+Nothing to undo on /private/var/folders/bq/fnyn1bq95d37b4q3lrwc_f600000gn/T/e2e-p3-folder.frjFcl/p3repo.
+[22:53:40] FAIL  undo refused after new host commits, HEAD unchanged  -- rc=0
+-- silo undo
+Nothing to undo on /private/var/folders/bq/fnyn1bq95d37b4q3lrwc_f600000gn/T/e2e-p3-folder.frjFcl/p3repo.
+[22:53:40] PASS  silo undo e2e-p3-folder exits 0  -- 
+[22:53:40] PASS  host branch restored exactly (HEAD 19e492d4a70ec5001d8cf7795c251daa171935b7, branch main, clean tree, no b.txt)  -- HEAD now 19e492d4a70ec5001d8cf7795c251daa171935b7
+19e492d first
+[22:53:40] cleanup
+Removed the build of linux-dev.
+NAME         STATE      KIND    SIZE
+workspace-1  stopped    linux   8 cpu, 32 GiB
+e2e-relay    stopped    linux   8 cpu, 32 GiB
+silo-eval-a  stopped    linux   2 cpu, 2 GiB
+silo-eval-b  stopped    linux   2 cpu, 2 GiB
+== summary: 5 passed, 6 failed
