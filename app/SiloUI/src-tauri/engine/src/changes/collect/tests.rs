@@ -441,7 +441,11 @@ fn the_collector_describes_a_fixture_home() {
     std::fs::write(project.join("node_modules/x/i.js"), "n\n").unwrap();
     std::fs::write(project.join("we\tird.log"), "t\n").unwrap();
     std::fs::write(project.join("app.sqlite3"), b"SQLite format 3\0").unwrap();
-    let (stdout, _) = run_script(COLLECT_SCRIPT, &[], "", &home);
+    let stdout = run_collector_with(
+        &home,
+        &home.join("no-bin"),
+        &[("SILO_SKIP", "packages services procs postgres")],
+    );
     let lines: Vec<&str> = stdout.lines().collect();
     assert_eq!(lines[0], "META\tformat\t2");
     let repo = project.display().to_string();
