@@ -866,7 +866,7 @@ pub async fn review_digest(
     record: &Record,
 ) -> Result<String, CliError> {
     let script = "cd \"$1\" && h=$(git rev-parse HEAD) && \
-                  d=$( (git diff HEAD; git ls-files -o --exclude-standard) | sha256sum | cut -c1-16) && \
+                  d=$( (git diff HEAD; git ls-files -o --exclude-standard) | { sha256sum 2>/dev/null || shasum -a 256; } | cut -c1-16) && \
                   printf '%s-%s' \"$h\" \"$d\"";
     guest(
         engine,
