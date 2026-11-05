@@ -224,19 +224,19 @@ main is archived as `main-before-<yyyymmdd-hhmm>` (a number is added if taken), 
 its checkpoints. `silo undo main` (or `silo undo <fork>`) swaps everything back.
 
 A promote refuses, changing nothing, when either computer is busy, the two run different
-systems, they carry the same name, or the computers are Linux (below). Otherwise it saves a
+systems, they carry the same name, or (Linux) one of them keeps a disk in a folder named after it. Otherwise it saves a
 `Before promote of <fork>` checkpoint of main, stops both, holds both operation lanes (in id
 order), writes the journal (`changes/promote/<fork id>.<main id>.promote.json`, synced) and
 applies these steps, recording each:
 
 | Step | What moves |
 | --- | --- |
-| names | the fork becomes `main`, old main becomes the archive name (computer record on macOS). A rename that would give two computers one name fails, so a duplicate `main` cannot exist even between the two renames |
-| name-keyed settings | secret assignments (`secrets.rs`) and the GitHub assignment (`github.rs`) are keyed by name, so main's stay with the name `main`, now the fork's; the fork's own grants under its old name are dropped like a removed computer's (saved choices, cached attachments and issued tokens), never added to main's. Published ports (`macos-computers/ports`, keyed by id) move from main's id to the fork's; main's are emptied; URL routes (`url_proxy`, hosts derived from the name) are forgotten and rebuilt from the new name |
-| SSH access | the saved SSH entries are named after the computer id (`silo-<id>`), so main's entry is rewritten to connect to the new main (with its key and pinned host key) and the archive's to the archive; only entries that exist are touched |
+| names | the fork becomes `main`, old main becomes the archive name (computer record on macOS). A rename that would give two computers one name fails, so a duplicate `main` cannot exist even between the two renames. Linux: `msb rename` of the stopped main (to the archive name) and then of the stopped fork (to `main`), then both saved names in one write. Each sandbox is identified by the `silo.machine-id` label it carries, never by its name, so a repeat after a crash renames only what is not renamed yet; the SSH entries are rewritten here too (below) |
+| name-keyed settings | secret assignments (`secrets.rs`) and the GitHub assignment (`github.rs`) are keyed by name, so main's stay with the name `main`, now the fork's; the fork's own grants under its old name are dropped like a removed computer's (saved choices, cached attachments and issued tokens), never added to main's. Published ports move from main's id to the fork's on macOS (`macos-computers/ports`, keyed by id); on Linux they are saved under the computer name (`network.json`), so main's stay with the name `main`, now the fork's, and the fork's own are removed (an undo gives them back); URL routes (`url_proxy`, hosts derived from the name) are forgotten and rebuilt from the new name |
+| SSH access | the saved SSH entries are named after the computer id (`silo-<id>`), so main's entry is rewritten to connect to the new main (with its key and pinned host key) and the archive's to the archive; only entries that exist are touched. Linux entries connect by computer name and pin that sandbox's host key, so they are rewritten at the end of the names step, after both sandboxes carry their final names (an undo rewrites them back the same way) |
 | lineage | read from the journal, nothing is rewritten: while a promote is in force, forks made from the old main resolve to the new main (so `silo fold` and keep of those forks target it), and the new main's own source is the old main's. An undo ends the record and every answer returns |
 | macOS network identity | the new main presents main's proxy CA (the trust set up for main covers it; the fork's own CA is set aside in the Keychain and comes back on undo) and main's hostname, written to the stopped disk's system configuration; the archive takes the fork's hostname. The machine identifier stays with each disk: Apple ties a guest's hardware identity and what it activated to the identifier it first booted with, and the disks swap names, not hardware |
-| quiet parking | macOS: the scheduled work parked when the fork was made quiet is put back from `Library/Application Support/Silo/Quieted/` on the stopped disk, except at paths the fork has used since (those stay parked and listed). Best effort; it never fails a promote |
+| quiet parking | macOS: the scheduled work parked when the fork was made quiet is put back from `Library/Application Support/Silo/Quieted/` on the stopped disk, except at paths the fork has used since (those stay parked and listed). Linux: the new main is started, the cron, at, anacron and systemd timer items under `/var/lib/silo-quiet/disabled` are moved back through the guest (`quiet_restore.sh`, as root) except at paths the fork has used since, and it is stopped again; a timer the quiet step only masked is unmasked, and `/etc/crontab` gets its parked text back when it still holds nothing but comments. Items parked for the services the fork was asked to stop stay parked. Best effort; it never fails a promote |
 
 Keyed by id and therefore untouched: changes store manifests, checkpoint records and the
 proxy address slot.
@@ -262,14 +262,24 @@ lanes) from engine start until their recovery is done, and the recovery retries 
 runtime is not ready, so a half-swapped computer cannot start. The next promote or undo of
 either computer settles it first.
 
-Known gaps: **Linux computers cannot be promoted yet.** The bundled MicroSandbox runtime names
-each sandbox after its computer (its catalog row, its folder and its saved configuration all
-carry the name) and has no rename, so the names cannot be swapped and the promote is refused
-with `unsupported`. The fix belongs upstream: a stopped-sandbox rename in MicroSandbox, after
-which the Linux half is the same steps (names, name-keyed settings, SSH entries, lineage) plus
-restoring `/var/lib/silo-quiet/disabled` through the guest after start. Copying state into
-new sandboxes instead was rejected: it changes the computer ids and drops the checkpoints that
-belong to main. The keep's database refusal prints the exact promote command.
+Linux computers are promoted with the same steps. The runtime names each sandbox after its
+computer, so the names step uses the stopped-sandbox rename of the bundled `msb`
+(`microsandbox-rename-stopped`, see [runtime packaging](SiloUI-RUNTIME-PACKAGING.md#rename-a-stopped-sandbox-2026-11-05)).
+Checkpoint records, SSH aliases' file names and changes manifests are keyed by computer id and
+need no change; the snapshot group is stored on the computer's record and keeps its name.
+
+Known gaps:
+
+- A Linux computer whose configuration still mounts a disk from `volumes/<name>/` (not yet
+  converted to a disk the computer owns) is refused with `storage`: the folder is named after the
+  computer and a delete by name would remove the wrong one.
+- Linux quiet parking is restored only for scheduled jobs. A masked timer is unmasked on the
+  assumption that the quiet step masked it; a timer the fork masked itself comes back too.
+- The Linux restore starts the new main once (and stops it again), so a promote of a quiet fork
+  runs guest code that a macOS promote does not.
+- Not yet run end to end against a live Linux computer pair: the rename itself is covered by the
+  unit tests and the live run in the runtime packaging notes, and the promote and undo by the
+  engine tests with a fake runtime.
 
 ## Review requests: `changes.request`
 

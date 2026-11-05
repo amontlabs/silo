@@ -329,6 +329,41 @@ pub fn has_http_forwards(paths: &RuntimePaths) -> bool {
 }
 
 /// Forget saved forwarding intent before a deleted computer's name becomes reusable.
+/// The saved published ports of the computer called `name`, as plain JSON, for a promote.
+pub(crate) fn export_mappings(paths: &RuntimePaths, name: &str) -> Result<Vec<Value>, String> {
+    let _guard = network_lock();
+    read_config(paths)?
+        .mappings
+        .iter()
+        .filter(|mapping| mapping.computer == name)
+        .map(|mapping| serde_json::to_value(mapping).map_err(|_| FAILED.to_owned()))
+        .collect()
+}
+
+/// Replaces the saved published ports of the computer called `name` (see `export_mappings`).
+/// Nothing is forwarded or removed in the runtime, so the computer must be stopped; the saved
+/// table is applied at its next start. Repeating it changes nothing.
+pub(crate) fn replace_mappings(
+    paths: &RuntimePaths,
+    name: &str,
+    mappings: &[Value],
+) -> Result<(), String> {
+    let _guard = network_lock();
+    let mut config = read_config(paths)?;
+    config.mappings.retain(|mapping| mapping.computer != name);
+    for value in mappings {
+        let mut mapping: Mapping = serde_json::from_value(value.clone())
+            .map_err(|_| "The saved ports are invalid.".to_owned())?;
+        mapping.computer = name.to_owned();
+        validate(&mapping)?;
+        config.mappings.push(mapping);
+    }
+    if config.mappings.len() > 4096 {
+        return Err("Too many saved ports. Remove an unused port first.".into());
+    }
+    write_config(paths, &config)
+}
+
 pub(crate) fn computer_removed(paths: &RuntimePaths, computer: &str) -> Result<(), String> {
     let forwarding = forwarding_lock(computer);
     let _forwarding = hold(&forwarding);

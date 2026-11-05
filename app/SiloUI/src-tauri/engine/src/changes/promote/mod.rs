@@ -13,6 +13,7 @@
 pub mod engine_env;
 pub mod journal;
 pub mod lineage;
+pub mod linux;
 pub mod service;
 #[cfg(test)]
 mod tests;
@@ -46,6 +47,11 @@ pub trait PromoteEnv: Send + Sync {
     fn info(&self, id: &str) -> Result<Info, String>;
     /// Why computers of this kind cannot be promoted on this device, when they cannot.
     fn unsupported(&self, _os: Os) -> Option<String> {
+        None
+    }
+    /// Why these two particular computers cannot swap names, when they cannot (a disk stored
+    /// under a computer's name, say).
+    fn refusal(&self, _main: &Info, _fork: &Info) -> Option<String> {
         None
     }
     /// Whether any computer already has `name`.
@@ -247,6 +253,9 @@ pub fn promote(
                 ),
             ));
         }
+    }
+    if let Some(why) = env.refusal(&main, &fork) {
+        return Ok(refuse(report, "storage", why));
     }
     if request.dry_run {
         report.notes.push(format!(
