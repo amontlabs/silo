@@ -20,11 +20,17 @@ trap 'rm -rf "$TMP"' EXIT
 bs='\'; tb=$'\t'; nl=$'\n'
 
 have() { command -v "$1" >/dev/null 2>&1; }
+# SILO_SKIP: space-separated sections left out (packages, services, procs, postgres, sqlite).
+# SILO_ROOTS and SILO_GIT_ROOTS (colon-separated; set, even empty, they replace the defaults)
+# narrow the directories scanned. Nothing sets them in a guest; a test points every scan at
+# its own fixtures with them.
+skip() { case " ${SILO_SKIP:-} " in *" $1 "*) return 0;; esac; return 1; }
 esc() { local s=$1; s=${s//"$bs"/"$bs$bs"}; s=${s//"$tb"/"${bs}t"}; s=${s//"$nl"/"${bs}n"}; printf '%s' "$s"; }
 if have sha256sum; then SHA=(sha256sum); elif have shasum; then SHA=(shasum -a 256); else SHA=(cat); fi
 
 # PROC first, so the helpers started below do not show up.
-PROCS=$(ps -A -o pid=,ppid=,comm= 2>/dev/null | awk -v me=$$ '
+PROCS=
+skip procs || PROCS=$(ps -A -o pid=,ppid=,comm= 2>/dev/null | awk -v me=$$ '
   $2==2 || $1==2 || $1==0 || $1==me || $2==me {next}
   { sub(/^ *[0-9]+ +[0-9]+ +/,""); sub(/.*\//,""); sub(/ +$/,"");
     if ($0=="" || $0 ~ /^(ps|bash|sh|awk|sort|sed|tr|uniq|cat|msb-guest|-bash)$/) next; print }' | sort -u)
@@ -37,7 +43,10 @@ printf 'META\tuser\t%s\n' "$(id -un 2>/dev/null)"
 # ---------------------------------------------------------------- files
 ROOTS=()
 add_root() { [ -d "$1" ] && ROOTS[${#ROOTS[@]}]=$1; }
-if [ "$OS" = Darwin ]; then
+if [ -n "${SILO_ROOTS+x}" ]; then
+  IFS=: read -r -a _rs <<<"$SILO_ROOTS"
+  for r in ${_rs[@]+"${_rs[@]}"}; do add_root "$r"; done
+elif [ "$OS" = Darwin ]; then
   add_root "$HOME"; add_root /usr/local; add_root /opt/homebrew/etc
   add_root /Library/LaunchAgents; add_root /Library/LaunchDaemons
 else
@@ -111,6 +120,7 @@ sort "$TMP/pdirs" | {
 sort -t "$tb" -k2,2 "$TMP/fs"
 
 # ---------------------------------------------------------------- packages
+if ! skip packages; then
 if have dpkg-query; then
   dpkg-query -W -f='${db:Status-Abbrev}\t${binary:Package}\t${Version}\n' 2>/dev/null |
     awk -F'\t' '$1 ~ /^ii/ {printf "PKG\tdpkg\t%s\t%s\n",$2,$3}'
@@ -152,6 +162,7 @@ if have gem; then
   gem list --local 2>/dev/null | awk 'NF>=2 && $2 ~ /^\(/ {v=$0; sub(/^[^(]*\(/,"",v); sub(/\)$/,"",v); gsub(/, /,",",v); printf "PKG\tgem\t%s\t%s\n",$1,v}'
 fi
 have snap && snap list 2>/dev/null | awk 'NR>1 && NF>=2{printf "PKG\tsnap\t%s\t%s\n",$1,$2}'
+fi
 
 # ---------------------------------------------------------------- git
 # GIG repo path size mtime sha256|-: gitignored files (outside build and cache trees), so a
@@ -206,8 +217,13 @@ repo_prefix() {
 
 if have git; then
   GR=()
-  for r in "$HOME" /srv /opt; do [ -d "$r" ] && GR[${#GR[@]}]=$r; done
-  [ "$OS" = Linux ] && [ -d /home ] && GR[${#GR[@]}]=/home
+  if [ -n "${SILO_GIT_ROOTS+x}" ]; then
+    IFS=: read -r -a _gs <<<"$SILO_GIT_ROOTS"
+    for r in ${_gs[@]+"${_gs[@]}"}; do [ -d "$r" ] && GR[${#GR[@]}]=$r; done
+  else
+    for r in "$HOME" /srv /opt; do [ -d "$r" ] && GR[${#GR[@]}]=$r; done
+    [ "$OS" = Linux ] && [ -d /home ] && GR[${#GR[@]}]=/home
+  fi
   GP=( -type d '(' -false )
   for n in node_modules .cache .npm .rustup .cargo target __pycache__ .venv venv .Trash; do
     GP[${#GP[@]}]=-o; GP[${#GP[@]}]=-name; GP[${#GP[@]}]=$n
@@ -304,7 +320,8 @@ if [ -d "$QUIET_DISABLED" ]; then
     esac
   done
 fi
-if [ "$OS" = Darwin ]; then
+if skip services; then :
+elif [ "$OS" = Darwin ]; then
   have launchctl && launchctl list 2>/dev/null |
     awk 'NR>1 && NF>=3 && $3 !~ /^(com\.apple\.|application\.|0x)/ {printf "SVC\t%s\tloaded\n",$3}'
 else
@@ -347,7 +364,7 @@ PGENV=(env PGSERVICEFILE=/dev/null PGSYSCONFDIR=/nonexistent PGPASSFILE=/dev/nul
 pgrun() {
   if [ "$(id -un 2>/dev/null)" = postgres ]; then "${PGENV[@]}" "$@"
   elif [ "$(id -u)" = 0 ] && have runuser; then runuser -u postgres -- "${PGENV[@]}" "$@"
-  elif have sudo; then sudo -n -u postgres "${PGENV[@]}" "$@"
+  elif have sudo; then sudo -n -u postgres "${PGENV[@]}" "$@" </dev/null
   else return 127; fi
 }
 # Names that could be read as an option or a connection string are left out.
@@ -361,8 +378,9 @@ pgnorm() { sed -e '/^\\restrict /d' -e '/^\\unrestrict /d'; }
 # database was not compared, rather than reading its absence as an empty server. The
 # collector never starts a service.
 pg_unreadable=
-if have psql && have pg_dump; then
-  PGCONNECT_TIMEOUT=5 pgrun psql -XAtqc 'select 1' postgres >/dev/null 2>&1
+if skip postgres; then :
+elif have psql && have pg_dump; then
+  PGCONNECT_TIMEOUT=5 pgrun psql -wXAtqc 'select 1' postgres >/dev/null 2>&1
   case $? in
     0) ;;
     127) pg_unreadable="cannot act as the postgres account";;
@@ -372,25 +390,25 @@ elif have psql || [ -d /usr/lib/postgresql ]; then
   pg_unreadable="the postgres tools are incomplete"
 fi
 [ -z "$pg_unreadable" ] || printf 'DBU\tpostgres\t%s\n' "$(esc "$pg_unreadable")"
-if have psql && have pg_dump && [ -z "$pg_unreadable" ]; then
+if ! skip postgres && have psql && have pg_dump && [ -z "$pg_unreadable" ]; then
   export PGCONNECT_TIMEOUT=5
-  pgrun psql -XAtqc "select datname from pg_database where not datistemplate and datallowconn order by 1" postgres 2>/dev/null |
+  pgrun psql -wXAtqc "select datname from pg_database where not datistemplate and datallowconn order by 1" postgres 2>/dev/null |
   while IFS= read -r db; do
     pgname_ok "$db" || continue
     edb=$(esc "$db")
-    if pgrun pg_dump --schema-only --dbname="$db" >"$TMP/pgd" 2>/dev/null; then
+    if pgrun pg_dump -w --schema-only --dbname="$db" >"$TMP/pgd" 2>/dev/null; then
       printf 'DB\tpostgres\t%s\tschema\t%s\n' "$edb" "$(pgnorm <"$TMP/pgd" | "${SHA[@]}" | awk '{print $1}')"
     fi
-    pgrun psql -XAtq --dbname="$db" -c "select format('%I.%I', schemaname, tablename) from pg_tables where schemaname not in ('pg_catalog','information_schema') order by 1" 2>/dev/null |
+    pgrun psql -wXAtq --dbname="$db" -c "select format('%I.%I', schemaname, tablename) from pg_tables where schemaname not in ('pg_catalog','information_schema') order by 1" 2>/dev/null |
       grep -v "['[:cntrl:]]" | head -n 300 |
     while IFS= read -r t; do
       [ -n "$t" ] || continue
-      size=$(pgrun psql -XAtq --dbname="$db" -c "select pg_total_relation_size('$t')" 2>/dev/null)
-      rows=$(pgrun psql -XAtq --dbname="$db" -c "select count(*) from $t" 2>/dev/null)
+      size=$(pgrun psql -wXAtq --dbname="$db" -c "select pg_total_relation_size('$t')" 2>/dev/null)
+      rows=$(pgrun psql -wXAtq --dbname="$db" -c "select count(*) from $t" 2>/dev/null)
       [ -n "$rows" ] || rows=-
       h=-
       if [ "${size:-0}" -le 1073741824 ] 2>/dev/null; then
-        pgrun psql -XAtq --dbname="$db" -c "COPY $t TO STDOUT" 2>/dev/null | "${SHA[@]}" | awk '{print $1}' >"$TMP/pgh"
+        pgrun psql -wXAtq --dbname="$db" -c "COPY $t TO STDOUT" 2>/dev/null | "${SHA[@]}" | awk '{print $1}' >"$TMP/pgh"
         [ "${PIPESTATUS[0]}" = 0 ] && h=$(cat "$TMP/pgh")
       fi
       printf 'DBT\tpostgres\t%s\t%s\t%s\t%s\n' "$edb" "$(esc "$t")" "${h:--}" "$rows"
@@ -401,7 +419,7 @@ SQR=()
 for r in "${ROOTS[@]}"; do
   case "$r" in /etc|/var/spool/cron|/Library/*|/opt/homebrew/etc) ;; *) SQR[${#SQR[@]}]=$r;; esac
 done
-if [ ${#SQR[@]} -gt 0 ]; then
+if [ ${#SQR[@]} -gt 0 ] && ! skip sqlite; then
   find -H "${SQR[@]}" '(' "${PR[@]}" ')' -prune -o -type f \
     '(' -name '*.sqlite' -o -name '*.sqlite3' -o -name '*.db' ')' -size -262144k -print 2>/dev/null |
     grep -v '[[:cntrl:]]' | sort -u >"$TMP/sqlite"

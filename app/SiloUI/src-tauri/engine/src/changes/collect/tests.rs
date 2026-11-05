@@ -483,6 +483,12 @@ fn the_collector_describes_a_fixture_home() {
 
 // MARK: Commands the collector runs on the user's behalf
 
+/// How long one run of the collector may take before the test fails instead of hanging.
+const COLLECTOR_DEADLINE: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// Runs the collector against fixtures only: the scans cover `home`, no package manager, service
+/// manager, process list, SQLite scan or PostgreSQL server is asked (unless `SILO_SKIP` says
+/// otherwise), and the run fails after `COLLECTOR_DEADLINE`.
 fn run_collector_with(
     home: &std::path::Path,
     path_prefix: &std::path::Path,
@@ -493,19 +499,39 @@ fn run_collector_with(
         path_prefix.display(),
         std::env::var("PATH").unwrap_or_default()
     );
+    let stdout_file = tempfile::NamedTempFile::new().unwrap();
     let mut command = Command::new("bash");
     command
         .arg("-c")
         .arg(COLLECT_SCRIPT)
         .env("HOME", home)
         .env("PATH", path)
+        .env("SILO_ROOTS", home)
+        .env("SILO_GIT_ROOTS", home)
+        .env("SILO_CRON_DIRS", home.join("no-cron"))
+        .env("SILO_QUIET_DISABLED", home.join("no-quiet"))
+        .env("SILO_PROC_ROOT", home.join("no-proc"))
+        .env("SILO_SKIP", "packages services procs sqlite postgres")
         .stdin(Stdio::null())
-        .stdout(Stdio::piped())
+        .stdout(stdout_file.reopen().unwrap())
         .stderr(Stdio::null());
     for (name, value) in env {
         command.env(name, value);
     }
-    String::from_utf8_lossy(&command.output().unwrap().stdout).into_owned()
+    let mut child = command.spawn().unwrap();
+    let started = std::time::Instant::now();
+    loop {
+        if child.try_wait().unwrap().is_some() {
+            break;
+        }
+        if started.elapsed() > COLLECTOR_DEADLINE {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("the collector did not finish within {COLLECTOR_DEADLINE:?}");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    std::fs::read_to_string(stdout_file.path()).unwrap()
 }
 
 fn write_executable(path: &std::path::Path, body: &str) {
@@ -582,7 +608,7 @@ fn postgres_names_cannot_become_options_and_the_dump_key_is_not_hashed() {
         ),
     );
     let digest = |key: &str| {
-        let out = run_collector_with(&home, &bin, &[("KEY", key)]);
+        let out = run_collector_with(&home, &bin, &[("KEY", key), ("SILO_SKIP", "packages services procs sqlite")]);
         let lines: Vec<&str> = out
             .lines()
             .filter(|l| l.starts_with("DB\tpostgres\t"))
@@ -599,7 +625,7 @@ fn postgres_names_cannot_become_options_and_the_dump_key_is_not_hashed() {
         calls
             .lines()
             .filter(|l| l.starts_with("pg_dump"))
-            .all(|l| l == "pg_dump --schema-only --dbname=app"),
+            .all(|l| l == "pg_dump -w --schema-only --dbname=app"),
         "{calls}"
     );
     assert!(
@@ -728,7 +754,7 @@ fn postgres_that_does_not_answer_is_recorded_not_started_or_hidden() {
         ),
     );
     write_executable(&bin.join("pg_dump"), "#!/bin/sh\nexit 1\n");
-    let out = run_collector_with(&home, &bin, &[]);
+    let out = run_collector_with(&home, &bin, &[("SILO_SKIP", "packages services procs sqlite")]);
     assert_eq!(
         records(&out, "DBU"),
         ["DBU\tpostgres\tthe server did not answer"],
