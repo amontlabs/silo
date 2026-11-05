@@ -133,6 +133,8 @@ pub struct Computer {
     pub configuration: Option<Value>,
     /// The fork's recorded quiet state, as listed.
     pub quiet: Option<Value>,
+    /// How many times the engine has booted this macOS computer.
+    pub boots: Option<u64>,
 }
 
 impl Computer {
@@ -190,6 +192,7 @@ pub fn computers_from(listed: &Value) -> Vec<Computer> {
             checkpoints: checkpoints(computer),
             configuration: Some(configuration.clone()),
             quiet: quiet(computer),
+            boots: None,
         });
     }
     for computer in listed
@@ -210,6 +213,7 @@ pub fn computers_from(listed: &Value) -> Vec<Computer> {
             checkpoints: checkpoints(computer),
             configuration: None,
             quiet: quiet(computer),
+            boots: number(computer, "boots"),
         });
     }
     found

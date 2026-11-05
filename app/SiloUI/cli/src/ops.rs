@@ -34,6 +34,7 @@ pub async fn status(engine: &Engine, name: &str) -> Result<Value, CliError> {
     let computer = engine.computer(name).await?;
     let mut value = computer.to_json();
     value["quiet"] = computer.quiet.clone().unwrap_or(Value::Null);
+    value["boots"] = computer.boots.map_or(Value::Null, Value::from);
     value["secrets"] = match fetch_secrets(engine).await {
         Ok(secrets) => json!(secrets
             .iter()
