@@ -1682,7 +1682,13 @@ pub(super) fn start_pending(
             record.restore_attempt_id = None;
             save(paths, configuration.id(), &record)?;
             // An earlier attempt booted the fork but may not have confirmed it quiet.
-            apply_quiet(runner, paths, configuration.name(), &mut record)?;
+            confirm_quiet(
+                runner,
+                paths,
+                configuration.id(),
+                configuration.name(),
+                &mut record,
+            )?;
             return save(paths, configuration.id(), &record);
         }
         if observed
@@ -1850,7 +1856,13 @@ pub(super) fn start_pending(
             // Confirmed before the fork is reported started. The restore is no longer pending,
             // so the runtime accepts the check; a failure stops the guest and every later
             // start quiets it again before anything else runs.
-            apply_quiet(runner, paths, configuration.name(), &mut record)?;
+            confirm_quiet(
+                runner,
+                paths,
+                configuration.id(),
+                configuration.name(),
+                &mut record,
+            )?;
             save(paths, configuration.id(), &record)?;
             let revision = crate::secrets::computer_revision(configuration.name())
                 .map_err(RuntimeError::Unavailable)?;
@@ -2144,9 +2156,26 @@ pub(super) fn ensure_quiet(
     if record.quiet.as_ref().is_none_or(|quiet| quiet.applied) {
         return Ok(());
     }
-    let result = apply_quiet(runner, paths, name, &mut record);
-    if record.quiet.as_ref().is_some_and(|quiet| quiet.applied) {
-        save(paths, configuration.id(), &record)?;
+    confirm_quiet(runner, paths, configuration.id(), name, &mut record)
+}
+
+/// `apply_quiet`, and when it newly confirms the fork quiet: the record is saved and the
+/// fork-time base is taken. Every path that confirms quiet goes through here.
+fn confirm_quiet(
+    runner: &dyn RuntimeRunner,
+    paths: &RuntimePaths,
+    id: &str,
+    name: &str,
+    record: &mut Record,
+) -> Result<(), RuntimeError> {
+    let was_applied = record.quiet.as_ref().is_none_or(|quiet| quiet.applied);
+    let result = apply_quiet(runner, paths, name, record);
+    if !was_applied && record.quiet.as_ref().is_some_and(|quiet| quiet.applied) {
+        save(paths, id, record)?;
+        if result.is_ok() {
+            // The fork is quiet and has run nothing of its own: its state is the base.
+            crate::changes::fork_base::captured_after_quiet(paths, name, id);
+        }
     }
     result
 }
@@ -2191,6 +2220,7 @@ pub(super) fn fork_source(
     }
     let desired_policy = fork_source_policy(runner, paths, &source, &source_record)?;
     let (member, scope) = if let Some(pending) = pending_current {
+        crate::changes::fork_base::forked_from(new_name, &pending.checkpoint_id);
         (pending.checkpoint_id, pending.state)
     } else {
         let selected_id = match checkpoint_id {
@@ -2220,6 +2250,7 @@ pub(super) fn fork_source(
             checkpoint.native_id(),
             &checkpoint.scope,
         )?;
+        crate::changes::fork_base::forked_from(new_name, &selected_id);
         (checkpoint.native_id().to_owned(), checkpoint.scope.clone())
     };
     Ok(ForkSource {

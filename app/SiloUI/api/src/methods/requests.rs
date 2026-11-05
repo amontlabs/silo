@@ -4,6 +4,7 @@
 //! Regenerate with `cargo run -p silo-api --example generate_requests`.
 
 use crate::transport;
+use super::changes;
 use super::checkpoints;
 use super::clipboard;
 use super::common;
@@ -19,6 +20,7 @@ use super::exports;
 use super::files;
 use super::github;
 use super::guest;
+use super::keep;
 use super::logs;
 use super::macos;
 use super::network;
@@ -38,6 +40,31 @@ use super::MethodParams;
 /// `activity.setup.read`
 pub fn activity_setup_read(params: common::DeviceParams) -> Request<kind::Query> {
     Request::new(MethodParams::ActivitySetupRead(params))
+}
+
+/// `changes.keep`
+pub fn changes_keep(params: keep::ChangesKeepParams) -> Request<kind::Job> {
+    Request::new(MethodParams::ChangesKeep(params))
+}
+
+/// `changes.undo`
+pub fn changes_undo(params: keep::ChangesUndoParams) -> Request<kind::Job> {
+    Request::new(MethodParams::ChangesUndo(params))
+}
+
+/// `changes.baseline`
+pub fn changes_baseline(params: changes::ChangesBaselineParams) -> Request<kind::Job> {
+    Request::new(MethodParams::ChangesBaseline(params))
+}
+
+/// `changes.capture`
+pub fn changes_capture(params: changes::ChangesCaptureParams) -> Request<kind::Job> {
+    Request::new(MethodParams::ChangesCapture(params))
+}
+
+/// `changes.diff`
+pub fn changes_diff(params: changes::ChangesDiffParams) -> Request<kind::Job> {
+    Request::new(MethodParams::ChangesDiff(params))
 }
 
 /// `checkpoints.abandonRestore`

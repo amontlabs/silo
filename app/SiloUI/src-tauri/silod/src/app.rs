@@ -172,6 +172,7 @@ fn run_appkit(
     // driven on the dedicated I/O thread.
     let _runtime_context = runtime.enter();
     crate::methods::remote::install_runtime(runtime.handle().clone());
+    silo_engine::changes::fork_base::install(context.clone());
     // The exports controller is installed at boot: it settles an interrupted operation's
     // journal before any client can start a new one.
     let exports = crate::startup::install_exports(&context);

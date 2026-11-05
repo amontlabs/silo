@@ -96,6 +96,8 @@ async fn fork_names_the_source_and_waits_for_the_job() {
     assert_eq!(sent["checkpointId"], "cp1");
     assert_eq!(sent["newName"], name);
     assert_eq!(engine.calls("operations.job.acknowledge").len(), 1);
+    // The engine takes the fork-time record itself; the client asks for nothing more.
+    assert!(engine.calls("changes.capture").is_empty());
 }
 
 #[tokio::test]
@@ -548,4 +550,444 @@ async fn retry_setup_runs_the_engines_setup_retry_for_the_computer() {
     assert!(
         matches!(cli.command, silo_cli::cli::Command::RetrySetup { ref computer } if computer == "mac")
     );
+}
+
+fn keep_engine(result: Value) -> FakeEngine {
+    FakeEngine::start(move |method, _| match method {
+        "computers.list" => Ok(listing(&[("main", "running"), ("try", "running")])),
+        "changes.keep" | "changes.undo" => Ok(json!({"jobId": "job:1"})),
+        "operations.job.get" => Ok(finished(result.clone())),
+        "operations.job.acknowledge" => Ok(Value::Null),
+        other => Err(("internal", format!("unexpected {other}"))),
+    })
+}
+
+fn fold_cli(engine: &FakeEngine, extra: &[&str]) -> Cli {
+    let socket = engine.socket.to_str().unwrap();
+    let mut args = vec!["silo", "--socket", socket, "--allow-other-channel", "fold"];
+    args.extend_from_slice(extra);
+    <Cli as clap::Parser>::try_parse_from(args).unwrap()
+}
+
+#[tokio::test]
+async fn fold_sends_the_fork_the_target_and_the_recipe_keep_section() {
+    let engine = keep_engine(json!({
+        "status": "kept",
+        "report": {"fork": "id-try", "target": "id-main", "summary": [], "steps": ["restart web: pid 1 -> 2"], "notes": [], "checkpoint": "cp1"}
+    }));
+    let project = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(project.path().join(".silo")).unwrap();
+    std::fs::write(
+        project.path().join(".silo/recipe.yaml"),
+        "keep:\n  restart: [web]\n  migrate: [make migrate]\n",
+    )
+    .unwrap();
+    let cli = fold_cli(&engine, &["try", "--into", "main", "--dry-run"]);
+    assert_eq!(run(cli, project.path()).await.unwrap(), 0);
+    let sent = &engine.calls("changes.keep")[0];
+    assert_eq!(sent["forkId"], "id-try");
+    assert_eq!(sent["targetId"], "id-main");
+    assert_eq!(sent["dryRun"], true);
+    assert_eq!(sent["keep"]["restart"], json!(["web"]));
+    assert_eq!(sent["keep"]["migrate"], json!(["make migrate"]));
+}
+
+#[tokio::test]
+async fn a_refused_fold_is_a_result_with_a_distinct_exit_code() {
+    let engine = keep_engine(json!({
+        "status": "refused",
+        "report": {"fork": "id-try", "target": "id-main", "summary": [], "steps": [], "notes": [], "checkpoint": null},
+        "refusal": {"reason": "database", "message": "Database changed and nothing migrates it.", "conflicts": [], "hint": "Use Make this main."}
+    }));
+    let cli = fold_cli(&engine, &["try"]);
+    assert_eq!(run(cli, std::env::temp_dir().as_path()).await.unwrap(), 2);
+    assert!(engine.calls("changes.keep")[0]["targetId"].is_null());
+}
+
+#[tokio::test]
+async fn the_undo_command_names_the_computer_and_reports_what_was_undone() {
+    let engine = keep_engine(json!({
+        "status": "undone", "computer": "id-main", "recovered": false,
+        "checkpoint": {"id": "cp1", "name": "Before keep of try", "createdAt": "t"}
+    }));
+    let connected = Engine::connect(&engine.socket).await.unwrap();
+    let value = ops::undo(&connected, "main", &ignore).await.unwrap();
+    assert_eq!(engine.calls("changes.undo")[0]["computerId"], "id-main");
+    assert!(silo_cli::render::undo(&value).contains("Before keep of try"));
+}
+
+#[tokio::test]
+async fn diff_uses_a_cached_baseline_and_measures_nothing() {
+    let engine = FakeEngine::start(|method, _| match method {
+        "computers.list" => Ok(listing(&[("try", "running")])),
+        "changes.diff" => Ok(json!({"jobId": "job:1"})),
+        "operations.job.get" => Ok(finished(json!({
+            "diff": {"format": 1, "other": []},
+            "text": "No changes.",
+            "baselineApplied": true, "baselineAvailable": true,
+            "baseSource": "cp1", "elapsedSeconds": 30,
+            "baseCapturedAt": "a", "capturedAt": "b"
+        }))),
+        "operations.job.acknowledge" => Ok(Value::Null),
+        other => Err(("internal", format!("unexpected {other}"))),
+    });
+    let connected = Engine::connect(&engine.socket).await.unwrap();
+    let args = ops::DiffArgs {
+        computer: "try".into(),
+        max_lines: Some(30),
+        no_baseline: false,
+        compute_baseline: true,
+    };
+    let value = ops::diff(&connected, &args, &ignore).await.unwrap();
+    assert_eq!(value["format"], 1);
+    assert_eq!(value["text"], "No changes.");
+    assert_eq!(value["baselineApplied"], true);
+    assert_eq!(engine.calls("changes.baseline").len(), 0);
+    assert_eq!(engine.calls("checkpoints.fork").len(), 0);
+    let sent = &engine.calls("changes.diff")[0];
+    assert_eq!(sent["maxLines"], 30);
+    assert_eq!(sent["baseline"], true);
+
+    let raw = ops::DiffArgs {
+        no_baseline: true,
+        compute_baseline: false,
+        ..args
+    };
+    ops::diff(&connected, &raw, &ignore).await.unwrap();
+    assert_eq!(engine.calls("changes.diff")[1]["baseline"], false);
+}
+
+/// An engine that knows one fork (`try`) of checkpoint `cp1` and tracks the throwaway.
+struct Baseline {
+    computers: Vec<(String, String)>,
+    measured: bool,
+    fail_baseline: bool,
+}
+
+fn baseline_engine(
+    fail_baseline: bool,
+    extra: &[(&str, &str)],
+) -> (FakeEngine, Arc<Mutex<Baseline>>) {
+    let mut computers = vec![("try".to_owned(), "running".to_owned())];
+    computers.extend(
+        extra
+            .iter()
+            .map(|(n, s)| ((*n).to_owned(), (*s).to_owned())),
+    );
+    let state = Arc::new(Mutex::new(Baseline {
+        computers,
+        measured: false,
+        fail_baseline,
+    }));
+    let shared = state.clone();
+    let engine = FakeEngine::start(move |method, params| {
+        let mut state = shared.lock().unwrap();
+        let named = |id: &str| id.trim_start_matches("id-").to_owned();
+        match method {
+            "computers.list" => {
+                let pairs: Vec<(&str, &str)> = state
+                    .computers
+                    .iter()
+                    .map(|(n, s)| (n.as_str(), s.as_str()))
+                    .collect();
+                Ok(listing(&pairs))
+            }
+            "checkpoints.fork" => {
+                let name = params["newName"].as_str().unwrap().to_owned();
+                state.computers.push((name, "stopped".into()));
+                Ok(json!({"jobId": "job:3"}))
+            }
+            "computers.start" | "computers.stop" => {
+                let name = named(params["computerId"].as_str().unwrap());
+                let to = if method == "computers.start" {
+                    "running"
+                } else {
+                    "stopped"
+                };
+                for (n, s) in state.computers.iter_mut() {
+                    if *n == name {
+                        *s = to.into();
+                    }
+                }
+                Ok(json!({"jobId": "job:3"}))
+            }
+            "computers.delete" => {
+                let name = named(params["computerId"].as_str().unwrap());
+                state.computers.retain(|(n, _)| *n != name);
+                Ok(json!({"jobId": "job:3"}))
+            }
+            "changes.baseline" => Ok(json!({"jobId": "job:2"})),
+            "changes.diff" => Ok(json!({"jobId": "job:1"})),
+            "operations.job.get" => match params["jobId"].as_str().unwrap() {
+                "job:2" if state.fail_baseline => Ok(json!({
+                    "jobId": "job:2", "state": "finished",
+                    "outcome": {"error": {"code": "internal", "message": "The copy did not start."}}})),
+                "job:2" => {
+                    state.measured = true;
+                    Ok(finished(
+                        json!({"source": "cp1", "idleSeconds": 42, "capturedAt": "t"}),
+                    ))
+                }
+                "job:1" => Ok(finished(json!({
+                    "diff": {"format": 1, "other": []},
+                    "text": "Code",
+                    "baselineApplied": state.measured, "baselineAvailable": state.measured,
+                    "baseSource": "cp1", "elapsedSeconds": 42,
+                    "baseCapturedAt": "a", "capturedAt": "b"
+                }))),
+                _ => Ok(finished(json!({}))),
+            },
+            "operations.job.acknowledge" => Ok(Value::Null),
+            other => Err(("internal", format!("unexpected {other}"))),
+        }
+    });
+    (engine, state)
+}
+
+fn compute_baseline_args() -> ops::DiffArgs {
+    ops::DiffArgs {
+        computer: "try".into(),
+        max_lines: None,
+        no_baseline: false,
+        compute_baseline: true,
+    }
+}
+
+#[tokio::test]
+async fn a_missing_baseline_is_measured_on_a_throwaway_fork_that_is_dropped() {
+    let (engine, state) = baseline_engine(false, &[]);
+    let connected = Engine::connect(&engine.socket).await.unwrap();
+    let value = ops::diff(&connected, &compute_baseline_args(), &ignore)
+        .await
+        .unwrap();
+    assert_eq!(value["baselineApplied"], true);
+    assert_eq!(value["baselineIdleSeconds"], 42);
+    // The copy came from the checkpoint the fork was made from, and the idle time is the
+    // time the real fork had run.
+    let fork = &engine.calls("checkpoints.fork")[0];
+    assert_eq!(fork["checkpointId"], "cp1");
+    let name = fork["newName"].as_str().unwrap().to_owned();
+    assert!(name.starts_with(ops::BASELINE_PREFIX));
+    let baseline = &engine.calls("changes.baseline")[0];
+    assert_eq!(baseline["computerId"], format!("id-{name}"));
+    assert_eq!(baseline["source"], "cp1");
+    assert_eq!(baseline["idleSeconds"], 42);
+    assert_eq!(
+        engine.calls("computers.start")[0]["computerId"],
+        format!("id-{name}")
+    );
+    // It is dropped, and only it.
+    let deleted = engine.calls("computers.delete");
+    assert_eq!(deleted.len(), 1);
+    assert_eq!(deleted[0]["computerId"], format!("id-{name}"));
+    assert_eq!(state.lock().unwrap().computers.len(), 1);
+}
+
+#[tokio::test]
+async fn the_throwaway_is_dropped_when_the_measurement_fails() {
+    let (engine, state) = baseline_engine(true, &[]);
+    let connected = Engine::connect(&engine.socket).await.unwrap();
+    let value = ops::diff(&connected, &compute_baseline_args(), &ignore)
+        .await
+        .unwrap();
+    assert_eq!(value["baselineApplied"], false);
+    assert_eq!(value["baselineError"], "The copy did not start.");
+    assert_eq!(engine.calls("computers.delete").len(), 1);
+    let left: Vec<String> = state
+        .lock()
+        .unwrap()
+        .computers
+        .iter()
+        .map(|c| c.0.clone())
+        .collect();
+    assert_eq!(left, ["try"]);
+}
+
+#[tokio::test]
+async fn the_throwaway_never_shows_in_the_list_and_stale_ones_are_dropped() {
+    let (engine, state) = baseline_engine(false, &[("silo-baseline-old", "stopped")]);
+    let connected = Engine::connect(&engine.socket).await.unwrap();
+    let listed = ops::list(&connected).await.unwrap();
+    let names: Vec<&str> = listed["computers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["try"]);
+    ops::diff(&connected, &compute_baseline_args(), &ignore)
+        .await
+        .unwrap();
+    let left: Vec<String> = state
+        .lock()
+        .unwrap()
+        .computers
+        .iter()
+        .map(|c| c.0.clone())
+        .collect();
+    assert_eq!(left, ["try"], "the stale copy was dropped too");
+}
+
+#[tokio::test]
+async fn a_macos_baseline_is_refused_when_two_virtual_machines_already_run() {
+    let engine = FakeEngine::start(|method, _| match method {
+        "computers.list" => Ok(json!({"linux": {"computers": []}, "macos": {"computers": [
+            {"id": "m1", "name": "mac-a", "state": "running", "checkpoints": [{"id": "cp1"}]},
+            {"id": "m2", "name": "mac-b", "state": "running", "checkpoints": []}
+        ]}})),
+        "changes.diff" => Ok(json!({"jobId": "job:1"})),
+        "operations.job.get" => Ok(finished(json!({
+            "diff": {"format": 1, "other": []}, "text": "Code",
+            "baselineApplied": false, "baselineAvailable": false,
+            "baseSource": "cp1", "elapsedSeconds": 10,
+            "baseCapturedAt": "a", "capturedAt": "b"
+        }))),
+        "operations.job.acknowledge" => Ok(Value::Null),
+        other => Err(("internal", format!("unexpected {other}"))),
+    });
+    let connected = Engine::connect(&engine.socket).await.unwrap();
+    let args = ops::DiffArgs {
+        computer: "mac-b".into(),
+        ..compute_baseline_args()
+    };
+    let value = ops::diff(&connected, &args, &ignore).await.unwrap();
+    assert!(value["baselineError"]
+        .as_str()
+        .unwrap()
+        .contains("two macOS virtual machines"));
+    assert!(engine.calls("checkpoints.fork").is_empty());
+}
+
+#[tokio::test]
+async fn fold_defaults_to_the_digest_the_last_diff_of_that_fork_showed() {
+    let engine = FakeEngine::start(|method, _| match method {
+        "computers.list" => Ok(listing(&[("main", "running"), ("try", "running")])),
+        "changes.diff" | "changes.keep" => Ok(json!({"jobId": "job:1"})),
+        "operations.job.get" => Ok(finished(json!({
+            "diff": {"format": 1, "other": []}, "text": "Code\n  ~/app: a..b",
+            "baselineApplied": false, "baselineAvailable": false,
+            "baseCapturedAt": "a", "capturedAt": "b", "reviewDigest": "abc123",
+            "status": "dry-run",
+            "report": {"fork": "id-try", "target": "id-main", "summary": [], "steps": [], "notes": [], "checkpoint": null}
+        }))),
+        "operations.job.acknowledge" => Ok(Value::Null),
+        other => Err(("internal", format!("unexpected {other}"))),
+    });
+    let connected = Engine::connect(&engine.socket).await.unwrap();
+    let args = ops::DiffArgs {
+        computer: "try".into(),
+        max_lines: None,
+        no_baseline: false,
+        compute_baseline: false,
+    };
+    let value = ops::diff(&connected, &args, &ignore).await.unwrap();
+    assert_eq!(value["reviewDigest"], "abc123");
+    ops::fold(
+        &connected,
+        "try",
+        None,
+        None,
+        ops::FoldOptions::default(),
+        &ignore,
+    )
+    .await
+    .unwrap();
+    assert_eq!(engine.calls("changes.keep")[0]["reviewDigest"], "abc123");
+    // An explicit digest wins.
+    let options = ops::FoldOptions {
+        reviewed: Some("zzz".into()),
+        ..Default::default()
+    };
+    ops::fold(&connected, "try", None, None, options, &ignore)
+        .await
+        .unwrap();
+    assert_eq!(engine.calls("changes.keep")[1]["reviewDigest"], "zzz");
+}
+
+#[tokio::test]
+async fn a_dry_run_fold_never_sends_a_review_digest() {
+    let engine = FakeEngine::start(|method, _| match method {
+        "computers.list" => Ok(listing(&[("main", "running"), ("try", "running")])),
+        "changes.diff" | "changes.keep" => Ok(json!({"jobId": "job:1"})),
+        "operations.job.get" => Ok(finished(json!({
+            "diff": {"format": 1, "other": []}, "text": "", "baselineApplied": false,
+            "baselineAvailable": false, "baseCapturedAt": "a", "capturedAt": "b",
+            "reviewDigest": "stale", "status": "dry-run",
+            "report": {"fork": "id-try", "target": "id-main", "summary": [], "steps": [], "notes": [], "checkpoint": null}
+        }))),
+        "operations.job.acknowledge" => Ok(Value::Null),
+        other => Err(("internal", format!("unexpected {other}"))),
+    });
+    let connected = Engine::connect(&engine.socket).await.unwrap();
+    let args = ops::DiffArgs {
+        computer: "try".into(),
+        max_lines: None,
+        no_baseline: false,
+        compute_baseline: false,
+    };
+    ops::diff(&connected, &args, &ignore).await.unwrap();
+    let options = ops::FoldOptions {
+        dry_run: true,
+        reviewed: Some("older".into()),
+        ..Default::default()
+    };
+    ops::fold(&connected, "try", None, None, options, &ignore)
+        .await
+        .unwrap();
+    assert!(engine.calls("changes.keep")[0]["reviewDigest"].is_null());
+}
+
+#[tokio::test]
+async fn a_throwaway_is_stopped_and_seen_stopped_before_it_is_dropped() {
+    // The computer reports "stopping" for two listings after its stop job, and the engine
+    // refuses a delete until it reads stopped.
+    let polls = Arc::new(Mutex::new(0u32));
+    let order = Arc::new(Mutex::new(Vec::<String>::new()));
+    let (p, o) = (polls.clone(), order.clone());
+    let engine = FakeEngine::start(move |method, _| match method {
+        "computers.list" => {
+            let seen = order_state(&o);
+            let state = if seen.iter().any(|m| m == "stop") {
+                let mut n = p.lock().unwrap();
+                *n += 1;
+                if *n > 2 {
+                    "stopped"
+                } else {
+                    "stopping"
+                }
+            } else {
+                "running"
+            };
+            Ok(listing(&[("silo-baseline-aaaaaa", state)]))
+        }
+        "computers.stop" => {
+            o.lock().unwrap().push("stop".into());
+            Ok(json!({"jobId": "job:1"}))
+        }
+        "computers.delete" => {
+            if *p.lock().unwrap() <= 2 {
+                return Err(("invalid", "Stop the computer first.".into()));
+            }
+            o.lock().unwrap().push("delete".into());
+            Ok(json!({"jobId": "job:1"}))
+        }
+        "operations.job.get" => Ok(finished(json!({}))),
+        "operations.job.acknowledge" => Ok(Value::Null),
+        other => Err(("internal", format!("unexpected {other}"))),
+    });
+    let connected = Engine::connect(&engine.socket).await.unwrap();
+    let all = connected.all_computers().await.unwrap();
+    let computer = all
+        .iter()
+        .find(|c| c.name == "silo-baseline-aaaaaa")
+        .unwrap()
+        .clone();
+    ops::remove_computer(&connected, &computer, &ignore)
+        .await
+        .unwrap();
+    assert_eq!(order_state(&order), ["stop", "delete"]);
+}
+
+fn order_state(order: &Arc<Mutex<Vec<String>>>) -> Vec<String> {
+    order.lock().unwrap().clone()
 }

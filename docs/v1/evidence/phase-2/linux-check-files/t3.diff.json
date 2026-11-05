@@ -1,0 +1,144 @@
+{
+  "baseCapturedAt": "2026-11-05T15:00:31.136311Z",
+  "baselineApplied": false,
+  "baselineAvailable": false,
+  "capturedAt": "2026-11-05T15:01:14.357184Z",
+  "code": [
+    {
+      "branch": null,
+      "commits": null,
+      "dirty_delta": 0,
+      "dirty_gone": [],
+      "dirty_identity": {},
+      "dirty_new": {},
+      "gitignored": [
+        {
+          "after": {
+            "hash": "3d9b5308307d3039d30a9fe604584c3dea1bb5d72fe165e25c55ba224a1b34d6",
+            "kind": "file",
+            "size": "98"
+          },
+          "before": {
+            "hash": "d605f1862eff3d81d575c35990a9369ac3eac5d91759b386668cf4dae9781f83",
+            "kind": "file",
+            "size": "81"
+          },
+          "change": "modified",
+          "path": "/home/silo/app/.env"
+        }
+      ],
+      "new": null,
+      "removed": false,
+      "removed_from": null,
+      "renamed_from": {},
+      "repo": "/home/silo/app"
+    }
+  ],
+  "database": [],
+  "format": 1,
+  "home": "/root",
+  "idle_noise": [],
+  "ignored": {
+    "paths": [
+      "/home/silo/.config/pulse/08fae91047bb4615bc9ef1414143050d-default-sink",
+      "/home/silo/.config/pulse/08fae91047bb4615bc9ef1414143050d-default-source"
+    ],
+    "pruned_trees": [
+      {
+        "delta": 3,
+        "path": "/root/.npm"
+      }
+    ]
+  },
+  "not_kept": {
+    "credential_details": {},
+    "credentials": {},
+    "listening": [
+      {
+        "port": "3000",
+        "process": "web",
+        "proto": "tcp"
+      }
+    ],
+    "processes": [
+      "web"
+    ],
+    "services": []
+  },
+  "other": [],
+  "packages": [],
+  "repo_changes": [
+    {
+      "after": {
+        "hash": "3d9b5308307d3039d30a9fe604584c3dea1bb5d72fe165e25c55ba224a1b34d6",
+        "kind": "file",
+        "size": "98"
+      },
+      "before": {
+        "hash": "d605f1862eff3d81d575c35990a9369ac3eac5d91759b386668cf4dae9781f83",
+        "kind": "file",
+        "size": "81"
+      },
+      "change": "modified",
+      "path": "/home/silo/app/.env"
+    }
+  ],
+  "repo_files": [
+    "/home/silo/app/.env"
+  ],
+  "reviewDigest": "6dcde07dc276c265874d17f260add59394cd960461097397823305e37e45a4e3",
+  "settings": {
+    "cron": [],
+    "files": [
+      {
+        "after": {
+          "hash": "995749d42949fe3daed51758918eefcd3d33dad3ee3600eb6c915a3df7634f46",
+          "kind": "file",
+          "size": "3793"
+        },
+        "before": {
+          "hash": "342099da4dd28c394d3f8782d90d7465cb2eaa611193f8f378d6918261cb9bb8",
+          "kind": "file",
+          "size": "3771"
+        },
+        "change": "modified",
+        "path": "/home/silo/.bashrc"
+      },
+      {
+        "after": {
+          "hash": "057c817c6a65ba4c95e68d754eaf8323b5714e95d5ecb624049f5afe95e47ba4",
+          "kind": "file",
+          "size": "17"
+        },
+        "before": null,
+        "change": "added",
+        "path": "/home/silo/.config/p2app/settings.json"
+      }
+    ],
+    "launch_agents": [],
+    "services": []
+  },
+  "summary": [
+    {
+      "bucket": "Code",
+      "lines": [
+        "/home/silo/app: .env changed (gitignored)"
+      ]
+    },
+    {
+      "bucket": "Settings & files",
+      "lines": [
+        "~ /home/silo/.bashrc",
+        "+ /home/silo/.config/p2app/settings.json"
+      ]
+    },
+    {
+      "bucket": "Not kept",
+      "lines": [
+        "listening: :3000 (web)",
+        "processes: web"
+      ]
+    }
+  ],
+  "text": "Code\n  /home/silo/app: .env changed (gitignored)\nSettings & files\n  ~ /home/silo/.bashrc\n  + /home/silo/.config/p2app/settings.json\nNot kept\n  listening: :3000 (web)\n  processes: web\nIgnored: 5 paths (caches, logs, build output)"
+}

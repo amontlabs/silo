@@ -1483,6 +1483,25 @@ fn prune_macos_automatic_checkpoints_with(
     retention: &dyn Fn() -> Result<u32, String>,
     job_id: silo_api::jobs::JobId,
 ) {
+    prune_macos_checkpoints_with(
+        gate,
+        checkpoints::PolicyKind::Automatic,
+        app,
+        computer_id,
+        retention,
+        job_id,
+    );
+}
+
+/// Removes this computer's checkpoints of `kind` beyond the newest N the owner keeps.
+fn prune_macos_checkpoints_with(
+    gate: &runtime::operation_gate::OperationGate,
+    kind: checkpoints::PolicyKind,
+    app: &MacosContext,
+    computer_id: &str,
+    retention: &dyn Fn() -> Result<u32, String>,
+    job_id: silo_api::jobs::JobId,
+) {
     use runtime::operation_gate::{OperationKind, Scope};
 
     let Ok(count) = retention() else { return };
@@ -1503,7 +1522,7 @@ fn prune_macos_automatic_checkpoints_with(
                     created_at_ms: crate::checkpoints::retention::parse_millis(
                         &checkpoint.created_at,
                     ),
-                    automatic: checkpoint.policy_kind == checkpoints::PolicyKind::Automatic,
+                    automatic: checkpoint.policy_kind == kind,
                 })
                 .collect(),
         )
@@ -1514,7 +1533,11 @@ fn prune_macos_automatic_checkpoints_with(
         let Ok(_gate) = gate.kind(OperationKind::CheckpointDelete).acquire_for_job(
             Scope::Device,
             None,
-            "Removing an older automatic checkpoint",
+            if kind == checkpoints::PolicyKind::BeforeKeep {
+                "Removing an older before-keep checkpoint"
+            } else {
+                "Removing an older automatic checkpoint"
+            },
             None,
             job_id.clone(),
             None,
@@ -1555,7 +1578,7 @@ fn prune_macos_automatic_checkpoints_with(
         }
         match checkpoints::remove(&layout, &candidate) {
             Ok(()) => changed = true,
-            Err(message) => eprintln!("Silo kept an older automatic checkpoint: {message}"),
+            Err(message) => eprintln!("Silo kept an older checkpoint: {message}"),
         }
     }
     if changed {
@@ -2241,6 +2264,7 @@ pub fn start_macos_checkpoint_job(
     name: String,
     automatic: bool,
     retention: RetentionPolicy,
+    before_keep_retention: Option<RetentionPolicy>,
 ) -> Result<silo_api::jobs::JobId, String> {
     runtime::shutdown::ensure_accepting_operations()?;
     if automatic && retention()? == 0 {
@@ -2248,6 +2272,8 @@ pub fn start_macos_checkpoint_job(
     }
     let policy_kind = if automatic {
         checkpoints::PolicyKind::Automatic
+    } else if before_keep_retention.is_some() {
+        checkpoints::PolicyKind::BeforeKeep
     } else {
         checkpoints::PolicyKind::Manual
     };
@@ -2278,6 +2304,16 @@ pub fn start_macos_checkpoint_job(
                 &worker_app,
                 &worker_id,
                 retention.as_ref(),
+                job_id.clone(),
+            );
+        }
+        if let (true, Some(before_keep)) = (result.is_ok(), before_keep_retention.as_ref()) {
+            prune_macos_checkpoints_with(
+                &runtime::OPERATIONS,
+                checkpoints::PolicyKind::BeforeKeep,
+                &worker_app,
+                &worker_id,
+                before_keep.as_ref(),
                 job_id.clone(),
             );
         }
@@ -2441,6 +2477,7 @@ fn checkpoint_created_job_result(
             kind: match meta.policy_kind {
                 checkpoints::PolicyKind::Manual => CheckpointKind::Manual,
                 checkpoints::PolicyKind::Automatic => CheckpointKind::Automatic,
+                checkpoints::PolicyKind::BeforeKeep => CheckpointKind::BeforeKeep,
                 checkpoints::PolicyKind::ForkPoint => CheckpointKind::ForkPoint,
             },
             size_bytes: meta.size_bytes,
@@ -5048,6 +5085,11 @@ fn start_with_job(
             .unwrap_or(false);
             if running {
                 ports::computer_started(app, id);
+                // The computer is Running now, so the guest answers: a fork noted for a base
+                // takes it before the start reports done.
+                if let Some(name) = computer(id).ok().map(|(record, _)| record.name) {
+                    crate::changes::fork_base::captured_after_first_boot(&name, id);
+                }
             }
             guest_computer_use::update_in_background(app, id, attempt);
             finish_macos_job(
@@ -5601,6 +5643,7 @@ fn delete(app: &MacosContext, id: &str) -> Result<(), String> {
         match remove_computer(&Layout::new(&data, id)) {
             Ok(()) => {
                 registry().entries.retain(|entry| entry.record.id != id);
+                crate::changes::store::forget(app.engine.as_ref(), &[id.to_owned()]);
                 if let Err(message) = ports::computer_removed(app, id) {
                     eprintln!("A deleted macOS computer's published ports could not be removed: {message}");
                 }
@@ -6318,6 +6361,7 @@ fn fork_checkpoint_with_workflow(
             }
         },
     };
+    crate::changes::fork_base::forked_from(&fork_name, &checkpoint.id);
     let prepared: Result<(Record, Arc<AtomicU8>), String> = (|| {
         let _admitted = admission()?;
         let mut registry = registry();
@@ -6910,6 +6954,7 @@ pub fn seed_check_policy(app_data: &std::path::Path, computer_id: &str) -> Vec<S
         .map(|meta| match meta.policy_kind {
             checkpoints::PolicyKind::Manual => "manual".to_owned(),
             checkpoints::PolicyKind::Automatic => "automatic".to_owned(),
+            checkpoints::PolicyKind::BeforeKeep => "before-keep".to_owned(),
             checkpoints::PolicyKind::ForkPoint => "fork-point".to_owned(),
         })
         .collect()
@@ -12009,6 +12054,61 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        not(all(target_os = "macos", target_arch = "aarch64")),
+        ignore = "macOS computers are loaded only on an Apple silicon host"
+    )]
+    fn macos_before_keep_retention_trims_only_before_keep_checkpoints() {
+        use checkpoints::{PolicyKind::*, Reason};
+        let _test_state = crate::test_support::global_state();
+        reopen_after_quit();
+        reopen_after_update();
+        let directory = tempfile::tempdir().unwrap();
+        let context = Arc::new(JobTestContext::new(directory.path().to_path_buf()));
+        let app = macos_context(context);
+        fresh_registry();
+        let (source, _) = checkpoint_fixture(directory.path(), false);
+        let data = directory.path();
+        let oldest = add_checkpoint(
+            data,
+            &source.id,
+            "2026-01-01T00:00:01Z",
+            BeforeKeep,
+            Reason::Manual,
+        );
+        let newest = add_checkpoint(
+            data,
+            &source.id,
+            "2026-01-01T00:00:02Z",
+            BeforeKeep,
+            Reason::Manual,
+        );
+        let automatic = add_checkpoint(
+            data,
+            &source.id,
+            "2026-01-01T00:00:00Z",
+            Automatic,
+            Reason::Manual,
+        );
+        ensure_loaded(&app).unwrap();
+
+        prune_macos_checkpoints_with(
+            &runtime::OPERATIONS,
+            BeforeKeep,
+            &app,
+            &source.id,
+            &|| Ok(1),
+            silo_api::jobs::JobId::new("job:9").unwrap(),
+        );
+
+        let layout = Layout::new(data, &source.id);
+        assert!(!checkpoints::dir(&layout, &oldest).exists());
+        assert!(checkpoints::dir(&layout, &newest).exists());
+        assert!(checkpoints::dir(&layout, &automatic).exists());
+        assert!(seed_check_policy(data, &source.id).contains(&"before-keep".to_owned()));
+    }
+
+    #[test]
     fn an_automatic_macos_capture_is_refused_while_the_setting_is_off() {
         let _test_state = crate::test_support::global_state();
         reopen_after_quit();
@@ -12025,6 +12125,7 @@ mod tests {
             "Before run: x, deleted automatically".into(),
             true,
             Arc::new(|| Ok(0)),
+            None,
         );
 
         assert_eq!(refused.unwrap_err(), crate::checkpoints::AUTOMATIC_OFF);

@@ -1,0 +1,12 @@
+Checking e2e-p2-t2...
+Checking e2e-p2-t2: 5s
+Would keep b81657cd-6763-4360-bf76-87e66fe7d955 into f37f9c1c-f060-474b-8387-d1aa3a934166:
+  Code
+    /home/silo/app: 7866ecb..86d5a3c
+  Database changed
+    postgres appdb: schema changed; data changed in public.items (1→1 rows), public.schema_migrations (1→2 rows)
+  Not kept
+    listening: :3000 (web)
+    processes: web
+  Ignored: 14 paths (caches, logs, build output)
+  will keep git: /home/silo/app

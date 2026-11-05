@@ -1,0 +1,224 @@
+== header
+engine/CLI commit: 765dd6e3511853f15b95d4c7630273fdfdd7935e; tracked changes under app/ (git status --porcelain app): []
+bundled msb: msb 0.7.6; silo: silo 0.1.0; host 26.5 arm64; date 2026-11-05T14:43:30Z
+claude: 2.1.311 (Claude Code); model requested: --model sonnet (actual model(s) from the usage record are printed after each task)
+== main e2e-p2-main: create, install the stack, boot persistence
+[15:43:38] PASS  create e2e-p2-main  -- 8 s
+[15:43:41] PASS  start e2e-p2-main  -- 
+guest OS: Ubuntu 24.04.4 LTS kernel 6.12.109
+[15:43:41] installing postgresql, nodejs, npm in the guest (max 600 s)
+apt rc=0; node v18.19.1; postgres 16
+> p2app@1.0.0 migrate
+> node migrate.js
+
+applied 001_init.sql
+setup done
+[15:45:54] PASS  setup script ran  -- 
+-- restart main so the stack starts only through the boot entry
+[15:46:02] PASS  restart e2e-p2-main (silo stop/start)  -- 
+[15:46:05] PASS  stack (postgres + web on :3000) came up at boot  -- after ~6 s; web pid 445
+== project dir with the keep recipe
+keep:
+  migrate: ["cd /home/silo/app && npm run migrate"]
+  restart: [web]
+  after: ["cd /home/silo/app && npm test"]
+# pass 2
+# fail 0
+[15:46:06] PASS  main: npm test passes  -- 
+main state before everything:
+head=84a53d58bb47d5ae268ca68b65938ba75ecc4ac7
+status=[]
+files=35395d46b91d176a
+env=d605f1862eff3d81
+schema=81b5b0035ecd171e
+data=004a57891fb87715
+dpkg=a872e905ab144bc7
+bashrc=342099da4dd28c39
+cfg=Thunar,pulse,xfce4,
+main web pid 445
+== three forks from main
+[15:46:18] PASS  fork + start e2e-p2-t1  -- fork 4 s, start 7 s
+[15:46:28] PASS  fork + start e2e-p2-t2  -- fork 4 s, start 6 s
+[15:46:38] PASS  fork + start e2e-p2-t3  -- fork 3 s, start 7 s
+[15:46:40] PASS  fork e2e-p2-t1 has the stack running (web pid 1997)  -- 
+[15:46:41] PASS  fork e2e-p2-t2 has the stack running (web pid 1996)  -- 
+[15:46:41] PASS  fork e2e-p2-t3 has the stack running (web pid 2008)  -- 
+T1 fork head: 84a53d58bb47d5ae268ca68b65938ba75ecc4ac7
+== three live agent tasks (claude -p, model sonnet, in parallel)
+[15:47:04] agents finished after 22 s (exit 0 0 0)
+T1: turns=3 cost=$0.025 models=['claude-sonnet-5-5'] is_error=False
+    result: I installed ripgrep 14.1.0 and added `search` (`rg -n "$1" server.js`) as the last entry in the `scripts` object in `package.json`, then committed it. I didn't run `npm test` or run the new script.
+T2: turns=4 cost=$0.040 models=['claude-sonnet-5-5'] is_error=False
+    result: I added `priority` (integer, not null, default 0) in `migrations/002_priority.sql` and applied it with `npm run migrate`. POST /items now takes an optional `priority`, GET /items returns it, and I added a test for it. After restarting the web server, all 3 tests in `npm test` pass, and the changes a
+T3: turns=3 cost=$0.026 models=['claude-sonnet-5-5'] is_error=False
+    result: I added `LOG_FLAG=verbose` to `.env` (on its own line, and git doesn't show it as a change), added the `gs` alias to `.bashrc`, and created `settings.json` with `{"theme":"dark"}`. Nothing was committed.
+== diffs
+--- silo diff e2e-p2-t1 (rc=0, 3 s for capture+compare, 9 lines)
+Code
+  /home/silo/app: 84a53d5..afc58a7
+Packages
+  apt: ripgrep
+Not kept
+  listening: :3000 (web)
+  processes: web
+Ignored: 6 paths (caches, logs, build output)
+review: 12b22a3a8c1f6dec66c330398c5805da96e3bcda59ccb78d3b3895e6773381e7
+stderr: Comparing e2e-p2-t1 with when it was forked...
+--- silo diff e2e-p2-t2 (rc=0, 4 s for capture+compare, 9 lines)
+Code
+  /home/silo/app: 84a53d5..c3250e4
+Database changed
+  postgres appdb: schema changed; data changed in public.items (1→1 rows), public.schema_migrations (1→2 rows)
+Not kept
+  listening: :3000 (web)
+  processes: web
+Ignored: 11 paths (caches, logs, build output)
+review: e4fb76cb47bc1b8bcda4f95a9ed79c867d926f3bdd0bbb29862a653046e0c8d3
+stderr: Comparing e2e-p2-t2 with when it was forked...
+--- silo diff e2e-p2-t3 (rc=0, 4 s for capture+compare, 10 lines)
+Code
+  /home/silo/app: .env changed (gitignored)
+Settings & files
+  ~ /home/silo/.bashrc
+  + /home/silo/.config/p2app/settings.json
+Not kept
+  listening: :3000 (web)
+  processes: web
+Ignored: 3 paths (caches, logs, build output)
+review: 6dcde07dc276c265874d17f260add59394cd960461097397823305e37e45a4e3
+stderr: Comparing e2e-p2-t3 with when it was forked...
+T1 buckets:
+BUCKET Code | /home/silo/app: 84a53d5..afc58a7
+BUCKET Packages | apt: ripgrep
+BUCKET Not kept | listening: :3000 (web) ; processes: web
+T2 buckets:
+BUCKET Code | /home/silo/app: 84a53d5..c3250e4
+BUCKET Database changed | postgres appdb: schema changed; data changed in public.items (1→1 rows), public.schema_migrations (1→2 rows)
+BUCKET Not kept | listening: :3000 (web) ; processes: web
+T3 buckets:
+BUCKET Code | /home/silo/app: .env changed (gitignored)
+BUCKET Settings & files | ~ /home/silo/.bashrc ; + /home/silo/.config/p2app/settings.json
+BUCKET Not kept | listening: :3000 (web) ; processes: web
+[15:47:24] PASS  T1 diff <= 15 lines  -- 9 lines
+[15:47:24] PASS  T1: ripgrep under Packages, commit under Code  -- packages=0 code=0
+[15:47:24] PASS  T2 diff <= 15 lines  -- 9 lines
+[15:47:24] PASS  T2: migration under Code, schema under Database changed  -- code=0 db=0 (migrations/ file listed in repo_files/dirty: 0)
+[15:47:24] PASS  T3 diff <= 15 lines  -- 10 lines
+[15:47:24] PASS  T3: .env under Code (gitignored), .bashrc and settings file under Settings & files  -- env=0 bashrc=0 settingsfile=0
+== keep (a): plain keep of T2 into main
+main pid before: 445; priority column on main: 0
+-- silo fold --dry-run (rc=0):
+Checking e2e-p2-t2...
+Would keep cadc04c9-8ed5-453c-932c-c3fc34102ea1 into 8afdf8b2-9562-42c9-a9e2-c825add9d30b:
+  Code
+    /home/silo/app: 84a53d5..c3250e4
+  Database changed
+    postgres appdb: schema changed; data changed in public.items (1→1 rows), public.schema_migrations (1→2 rows)
+  Not kept
+    listening: :3000 (web)
+    processes: web
+  Ignored: 15 paths (caches, logs, build output)
+  will keep git: /home/silo/app
+[15:47:35] PASS  (a) silo fold --dry-run plans the keep  -- 
+-- silo fold e2e-p2-t2 --into e2e-p2-main (rc=0, 28 s; 124 = still running after the 150 s bound):
+Keeping e2e-p2-t2...
+Kept cadc04c9-8ed5-453c-932c-c3fc34102ea1 into 8afdf8b2-9562-42c9-a9e2-c825add9d30b.
+  git /home/silo/app: merged, now at c3250e4
+  migrate: cd /home/silo/app && npm run migrate
+  restart web: pid 445 -> 5614
+  after: cd /home/silo/app && npm test
+Undo with `silo undo 8afdf8b2-9562-42c9-a9e2-c825add9d30b`.
+[15:48:03] PASS  (a) silo fold e2e-p2-t2 --into e2e-p2-main succeeded  -- rc=0 after 28 s
+[15:48:04] PASS  (a) migrate step ran  --   migrate: cd /home/silo/app && npm run migrate
+[15:48:04] PASS  (a) web server pid changed  -- 445 -> 5614
+{"ok":true,"pid":5614}[15:48:04] PASS  (a) web server running and answering  -- 
+# pass 3
+# fail 0
+[15:48:05] PASS  (a) npm test passes on main  -- 
+[15:48:05] PASS  (a) priority column exists on main  -- integer default 0
+ceb5f301a61ee4d47adf5a8564d3b017  Before keep of cadc04c9-8ed5-453c-932c-c3fc34102ea1  before-keep  2026-11-05T14:47:47.329Z
+cadcbca47767048f3aaa42979088fdff  Fork point  manual  2026-11-05T14:46:29.02Z
+c4716314adea54ea3a7884ddf688aeab  Fork point  manual  2026-11-05T14:46:18.859Z
+cc935c03e19434d4398c546364b49ee4  Fork point  manual  2026-11-05T14:46:07.595Z
+== (d) silo undo e2e-p2-main after (a)
+Undoing the last keep of e2e-p2-main...
+Put 8afdf8b2-9562-42c9-a9e2-c825add9d30b back to Before keep of cadc04c9-8ed5-453c-932c-c3fc34102ea1.
+[15:48:15] PASS  (d) silo undo succeeded  -- rc=0, 9 s
+state of e2e-p2-main right after undo: stopped
+NOTE: undo leaves e2e-p2-main stopped; starting it with silo start (restore does not restart the computer)
+[15:48:20] PASS  (d) server runs after undo  -- web pid 445
+[15:48:20] PASS  (d) priority column is gone  -- count=0
+# pass 2
+# fail 0
+[15:48:21] PASS  (d) npm test passes at the pre-keep state  -- 
+[15:48:21] FAIL  (d) main's fingerprint equals the pre-keep one  -- 
+== keep (b): divergent keep of T1
+fe8d2c7 add lint script on main
+84a53d5 initial app
+-    "test": "node --test test/"
++    "test": "node --test test/",
++    "lint": "echo lint"
+T1 changed on its side:
+afc58a7 Add search script using ripgrep
+84a53d5 initial app
+-    "test": "node --test test/"
++    "test": "node --test test/",
++    "search": "rg -n \"$1\" server.js"
+-- silo fold e2e-p2-t1 --dry-run, no --into (rc=2):
+Checking e2e-p2-t1...
+Keep stopped: /home/silo/app clash on 8afdf8b2-9562-42c9-a9e2-c825add9d30b and in 9cb00b57-4dcf-4a85-9702-2f82d7384dee. 8afdf8b2-9562-42c9-a9e2-c825add9d30b was not changed.
+  git /home/silo/app: CONFLICT (content): Merge conflict in package.json
+Bring main's change into the fork (or remove the file from the fork's commits) and keep again.
+[15:48:33] PASS  fold's default target (the fork's source) resolves to the computer it was forked from  -- Checking e2e-p2-t1... Checking e2e-p2-t1: 5s Keep stopped: /home/silo/app clash on 8afdf8b2-9562-42c9-a9e2-c825add9d30b and in 9cb00b57-4dcf-4a85-9702-2f82d7384dee. 8afdf8b2-9562-42c9-a9e2-c825add9d30
+-- silo fold e2e-p2-t1 --into e2e-p2-main --dry-run (rc=2):
+Checking e2e-p2-t1...
+Keep stopped: /home/silo/app clash on 8afdf8b2-9562-42c9-a9e2-c825add9d30b and in 9cb00b57-4dcf-4a85-9702-2f82d7384dee. 8afdf8b2-9562-42c9-a9e2-c825add9d30b was not changed.
+  git /home/silo/app: CONFLICT (content): Merge conflict in package.json
+Bring main's change into the fork (or remove the file from the fork's commits) and keep again.
+-- silo fold e2e-p2-t1 (rc=2, 10 s; 124 = still running after the 100 s bound):
+Keeping e2e-p2-t1...
+Keep stopped: /home/silo/app clash on 8afdf8b2-9562-42c9-a9e2-c825add9d30b and in 9cb00b57-4dcf-4a85-9702-2f82d7384dee. 8afdf8b2-9562-42c9-a9e2-c825add9d30b was not changed.
+  git /home/silo/app: CONFLICT (content): Merge conflict in package.json
+Bring main's change into the fork (or remove the file from the fork's commits) and keep again.
+[15:48:54] PASS  (b) fold of T1 refused as divergent/conflict (rc 2)  -- rc=2 after 10 s
+[15:48:54] PASS  (b) fold --dry-run names the divergence  --   git /home/silo/app: CONFLICT (content): Merge conflict in package.json
+[15:48:54] PASS  (b) main byte-for-byte untouched (fingerprint and web pid)  -- pid 445 -> 445; identical
+== keep (c): uncovered data change
+[15:49:08] PASS  fork + start e2e-p2-data from main  -- 
+INSERT 0 5
+--- silo diff e2e-p2-data (rc=0, 3 s for capture+compare, 7 lines)
+Database changed
+  postgres appdb: data changed in public.items (1→6 rows)
+Not kept
+  listening: :3000 (web)
+  processes: web
+Ignored: 3 paths (caches, logs, build output)
+review: 23a511c39da66e18b6ad692b9348691fb02f25ed86290c69f319aa811ac60c2e
+stderr: Comparing e2e-p2-data with when it was forked...
+BUCKET Database changed | postgres appdb: data changed in public.items (1→6 rows)
+BUCKET Not kept | listening: :3000 (web) ; processes: web
+[15:49:16] PASS  (c) diff shows Database changed  -- 
+-- silo fold e2e-p2-data --dry-run, no --into (rc=2):
+Checking e2e-p2-data...
+Database changed (postgres appdb) and no migration covers it. 8afdf8b2-9562-42c9-a9e2-c825add9d30b was not changed.
+A keep carries a database change only when the recipe has a migrate: step and the fork changed migration files. Otherwise use "Make this main": the fork becomes main with its database.
+-- silo fold e2e-p2-data --into e2e-p2-main --dry-run (rc=2):
+Checking e2e-p2-data...
+Database changed (postgres appdb) and no migration covers it. 8afdf8b2-9562-42c9-a9e2-c825add9d30b was not changed.
+A keep carries a database change only when the recipe has a migrate: step and the fork changed migration files. Otherwise use "Make this main": the fork becomes main with its database.
+-- silo fold e2e-p2-data (rc=2, 9 s):
+Keeping e2e-p2-data...
+Database changed (postgres appdb) and no migration covers it. 8afdf8b2-9562-42c9-a9e2-c825add9d30b was not changed.
+A keep carries a database change only when the recipe has a migrate: step and the fork changed migration files. Otherwise use "Make this main": the fork becomes main with its database.
+[15:49:44] PASS  (c) fold refused, names Make this main (rc 2)  -- rc=2 after 9 s
+[15:49:44] PASS  (c) fold --dry-run names Make this main  -- 
+[15:49:45] PASS  (c) main untouched  -- pid 445 -> 445
+== summary: 38 passed, 1 failed
+disk: /dev/disk3s1s1   926Gi    12Gi    40Gi    23%    459k  416M    0%   /
+[15:49:45] cleanup
+[15:49:59] silo list after cleanup:
+NAME         STATE      KIND    SIZE
+workspace-1  stopped    linux   8 cpu, 32 GiB
+e2e-relay    stopped    linux   8 cpu, 32 GiB
+silo-eval-a  stopped    linux   2 cpu, 2 GiB
+silo-eval-b  stopped    linux   2 cpu, 2 GiB

@@ -207,14 +207,6 @@ impl Service {
                 "A fork point is made by Fork, not saved as a checkpoint.",
             ));
         }
-        if kind == Some(CheckpointKind::BeforeKeep)
-            && self.platform(computer_id)? == Platform::Macos
-        {
-            return Err(Failure::new(
-                ErrorCode::Internal,
-                "Before-keep checkpoints are not available for macOS computers.",
-            ));
-        }
         if automatic && (self.retention)().map_err(Failure::from_message)? == 0 {
             return Err(Failure::new(ErrorCode::PermissionDenied, AUTOMATIC_OFF));
         }
@@ -225,6 +217,8 @@ impl Service {
                 name.to_owned(),
                 automatic,
                 self.retention.clone(),
+                (kind == Some(CheckpointKind::BeforeKeep))
+                    .then(|| self.before_keep_retention.clone()),
             )
             .map_err(Failure::from_message),
             Platform::Linux => {
@@ -305,6 +299,29 @@ impl Service {
     /// `checkpoints.fork`. Both platforms fork the computer's current state, by taking a
     /// checkpoint of it, when no checkpoint is named.
     pub fn start_fork(
+        &self,
+        computer_id: &str,
+        checkpoint_id: Option<&str>,
+        new_name: &str,
+        options: ForkOptions,
+    ) -> Result<JobId, Failure> {
+        // Noted first: the fork's source is resolved on the job and replaces the key.
+        crate::changes::fork_base::expect(
+            self.context(),
+            new_name,
+            &crate::changes::fork_base::source_key(checkpoint_id, computer_id),
+            computer_id,
+        );
+        match self.start_fork_job(computer_id, checkpoint_id, new_name, options) {
+            Ok(started) => Ok(started),
+            Err(failure) => {
+                crate::changes::fork_base::withdraw(self.context().as_ref(), new_name);
+                Err(failure)
+            }
+        }
+    }
+
+    fn start_fork_job(
         &self,
         computer_id: &str,
         checkpoint_id: Option<&str>,
@@ -706,6 +723,7 @@ mod tests {
     }
 
     struct Fixture {
+        host: Arc<TestHost>,
         _directory: tempfile::TempDir,
         engine: Arc<TestEngine>,
         service: Service,
@@ -754,8 +772,9 @@ mod tests {
             tools: root.join("tools"),
         });
         let macos = MacosContext::new(engine.clone(), Arc::new(NoDisplays));
-        let service = Service::new(host, macos, Arc::new(move || Ok(retention)));
+        let service = Service::new(host.clone(), macos, Arc::new(move || Ok(retention)));
         Fixture {
+            host,
             _directory: directory,
             engine,
             service,
@@ -797,18 +816,17 @@ mod tests {
 
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     #[test]
-    fn a_before_keep_capture_is_refused_for_a_macos_computer() {
+    fn a_before_keep_capture_is_accepted_for_a_macos_computer() {
         let _state = crate::test_support::global_state();
         let fixture = fixture(3);
-        let refused = fixture
-            .service
-            .start_create(
-                &fixture.macos_id,
-                "Before keep",
-                Some(CheckpointKind::BeforeKeep),
-            )
-            .unwrap_err();
-        assert!(refused.message.contains("macOS"), "{}", refused.message);
+        let runtime = test_runtime();
+        let _entered = runtime.enter();
+        let accepted = fixture.service.start_create(
+            &fixture.macos_id,
+            "Before keep",
+            Some(CheckpointKind::BeforeKeep),
+        );
+        assert!(accepted.is_ok(), "{:?}", accepted.err());
     }
 
     #[test]
@@ -854,6 +872,37 @@ mod tests {
             std::thread::yield_now();
         }
         (job_id, hold)
+    }
+
+    #[test]
+    fn a_keep_job_takes_its_checkpoint_on_the_engine_runtime_and_a_panic_fails_it() {
+        use crate::changes::keep::{guest_env::GuestEnv, journal::Journal, service, KeepEnv};
+        let _state = crate::test_support::global_state();
+        let fixture = fixture(3);
+        let runtime = test_runtime();
+        let _entered = runtime.enter();
+        let host: Arc<dyn RuntimeHost> = fixture.host.clone();
+
+        // The checkpoint path spawns a blocking task, which a bare thread cannot do.
+        let (checkpoints, journal_dir) = (fixture.service.clone(), tempfile::tempdir().unwrap());
+        let job_id = service::start(host.clone(), "changes.keep", move |host| {
+            let journal = Journal::new(journal_dir.path().to_path_buf());
+            let env = GuestEnv::new(host.clone(), checkpoints, journal, Box::new(|_| {}));
+            let outcome = env.checkpoint_before_keep(LINUX_ID, "Before keep of fork");
+            Err(format!("checkpoint outcome: {outcome:?}"))
+        })
+        .unwrap();
+        let finished = wait_finished(&fixture, &job_id);
+        let message = finished.outcome.unwrap().error.unwrap().message;
+        assert!(
+            !message.contains("no reactor running") && !message.contains("stopped unexpectedly"),
+            "{message}"
+        );
+
+        let job_id = service::start(host, "changes.keep", |_| panic!("boom")).unwrap();
+        let finished = wait_finished(&fixture, &job_id);
+        let message = finished.outcome.unwrap().error.unwrap().message;
+        assert!(message.contains("stopped unexpectedly: boom"), "{message}");
     }
 
     #[test]

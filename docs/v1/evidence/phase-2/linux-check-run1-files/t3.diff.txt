@@ -1,0 +1,10 @@
+Code
+  /home/silo/app: .env changed (gitignored)
+Settings & files
+  ~ /home/silo/.bashrc
+  + /home/silo/.config/p2app/settings.json
+Not kept
+  listening: :3000 (web)
+  processes: web
+Ignored: 3 paths (caches, logs, build output)
+review: 9aaf6e756820a2db081fea2f10147442306f9fd88825faf1451c9a868e0ee496

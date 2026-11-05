@@ -1,0 +1,83 @@
+{
+  "baseCapturedAt": "2026-11-05T15:02:56.234665Z",
+  "baselineApplied": false,
+  "baselineAvailable": false,
+  "capturedAt": "2026-11-05T15:03:04.752132Z",
+  "code": [],
+  "database": [
+    {
+      "change": "modified",
+      "digest": null,
+      "engine": "postgres",
+      "name": "appdb",
+      "schema": null,
+      "tables": [
+        {
+          "change": "modified",
+          "digest_after": "50a94f5aef073aa3d6eb14248e3bbf787a92e9a6c79396a329d65b49ed0eab10",
+          "digest_before": "f233e9cb979b1988d92e7069574671e5a59dba139b8cd0681e2b6946f6f8d1f4",
+          "rows_after": 6,
+          "rows_before": 1,
+          "table": "public.items"
+        }
+      ]
+    }
+  ],
+  "format": 1,
+  "home": "/root",
+  "idle_noise": [],
+  "ignored": {
+    "paths": [
+      "/home/silo/.config/pulse/143f159ef8424b719fbc7bfeae0c09c0-default-sink",
+      "/home/silo/.config/pulse/143f159ef8424b719fbc7bfeae0c09c0-default-source"
+    ],
+    "pruned_trees": [
+      {
+        "delta": 3,
+        "path": "/root/.npm"
+      }
+    ]
+  },
+  "not_kept": {
+    "credential_details": {},
+    "credentials": {},
+    "listening": [
+      {
+        "port": "3000",
+        "process": "web",
+        "proto": "tcp"
+      }
+    ],
+    "processes": [
+      "web"
+    ],
+    "services": []
+  },
+  "other": [],
+  "packages": [],
+  "repo_changes": [],
+  "repo_files": [],
+  "reviewDigest": "23a511c39da66e18b6ad692b9348691fb02f25ed86290c69f319aa811ac60c2e",
+  "settings": {
+    "cron": [],
+    "files": [],
+    "launch_agents": [],
+    "services": []
+  },
+  "summary": [
+    {
+      "bucket": "Database changed",
+      "lines": [
+        "postgres appdb: data changed in public.items (1→6 rows)"
+      ]
+    },
+    {
+      "bucket": "Not kept",
+      "lines": [
+        "listening: :3000 (web)",
+        "processes: web"
+      ]
+    }
+  ],
+  "text": "Database changed\n  postgres appdb: data changed in public.items (1→6 rows)\nNot kept\n  listening: :3000 (web)\n  processes: web\nIgnored: 5 paths (caches, logs, build output)"
+}

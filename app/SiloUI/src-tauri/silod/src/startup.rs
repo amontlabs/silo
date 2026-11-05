@@ -66,6 +66,7 @@ pub fn start_background(
     drive_launch_migration(context.clone(), exports.clone());
     install_creation_inputs(context.clone());
     start_computer_use(context.clone());
+    start_keep_recovery(context.clone());
     // The timers are the engine's own upkeep with no client connected (95 A-26).
     crate::timers::start(context.clone());
     let services = Arc::new(SilodStartupServices::new(
@@ -176,6 +177,69 @@ impl silo_engine::creation_inputs::Inputs for SilodCreationWait {
 
     fn show(&self, step: &silo_engine::creation_inputs::Step) {
         runtime::publish_creation_wait(&self.request_id, step);
+    }
+}
+
+// MARK: Interrupted keeps
+
+/// Puts back any computer an interrupted keep left half-changed, before anything else is
+/// kept into it. Each such computer is held from engine start, with other work on it
+/// queued behind "Recovering an interrupted keep", until its restore is under way. The
+/// runtime may not be ready at once, so a failure is retried for a while.
+fn start_keep_recovery(context: Arc<SilodContext>) {
+    let host: Arc<dyn RuntimeHost> = Arc::new(SilodRuntimeHost::for_engine(context.clone()));
+    let journal = silo_engine::changes::keep::service::journal_for(host.engine_context().as_ref());
+    let targets = silo_engine::changes::keep::interrupted_targets(&journal);
+    let (held_tx, held_rx) = std::sync::mpsc::channel::<()>();
+    let mut started = 0;
+    for target in targets {
+        let (context, host, journal, held_tx) = (
+            context.clone(),
+            host.clone(),
+            journal.clone(),
+            held_tx.clone(),
+        );
+        let spawned = std::thread::Builder::new()
+            .name("silod-keep-recovery".into())
+            .spawn(move || {
+                for attempt in 0..30 {
+                    let env = silo_engine::changes::keep::guest_env::GuestEnv::new(
+                        host.clone(),
+                        crate::methods::checkpoints::service_for(&context),
+                        journal.clone(),
+                        Box::new(|_| {}),
+                    );
+                    let held = || {
+                        let _ = held_tx.send(());
+                    };
+                    let result =
+                        silo_engine::changes::keep::recover_one(&env, &journal, &target, &held);
+                    let _ = held_tx.send(());
+                    let Err(error) = result else {
+                        return;
+                    };
+                    if attempt == 29 {
+                        eprintln!(
+                            "silod: could not put back an interrupted keep of {target}: {error}"
+                        );
+                        return;
+                    }
+                    std::thread::sleep(std::time::Duration::from_secs(10));
+                }
+            });
+        match spawned {
+            Ok(_) => started += 1,
+            Err(error) => eprintln!("silod: could not start the keep recovery: {error}"),
+        }
+    }
+    drop(held_tx);
+    // Startup goes on once every computer is held, or after a short wait when it cannot be.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    for _ in 0..started {
+        let left = deadline.saturating_duration_since(std::time::Instant::now());
+        if held_rx.recv_timeout(left).is_err() {
+            break;
+        }
     }
 }
 

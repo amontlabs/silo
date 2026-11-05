@@ -1,0 +1,370 @@
+commit 1b442cd5 (branch claude/silo-v1-phase-2), live smoke on Dev engine, Linux arm64 Ubuntu 24.04
+NOTE: silo exec runs as uid silo (sudo needed for /root)
+=== diff right after first fork start ===
+Comparing e2e-p2s-fork with when it was forked...
+Settings & files
+  + /home/silo/.config/pulse/8f4ae2e7d33f44148ddaf92cba4f8b2c-default-sink
+  + /home/silo/.config/pulse/8f4ae2e7d33f44148ddaf92cba4f8b2c-default-source
+$S diff e2e-p2s-fork  0.00s user 0.00s system 0% cpu 2.043 total
+=== diff after changes (text) ===
+Comparing e2e-p2s-fork with when it was forked...
+Code
+  ~/app: 38b7fee..54589c9
+  ~/app: .env changed (gitignored)
+Packages
+  apt: jq
+Settings & files
+  + /home/silo/.config/pulse/8f4ae2e7d33f44148ddaf92cba4f8b2c-default-sink
+  … +3 more (see --json)
+Database changed
+  postgres appdb: new database (1 table)
+  postgres postgres: new database (0 tables)
+Other changed
+  + ~/chg.sh
+Not kept
+  listening: :5432
+  processes: postgres
+Ignored: 8 paths (caches, logs, build output)
+$S diff e2e-p2s-fork  0.01s user 0.00s system 0% cpu 2.950 total
+=== diff --json (after changes, crontab fixed) ===
+{
+  "baseCapturedAt": "2026-11-05T12:39:27.366954Z",
+  "baselineApplied": false,
+  "baselineAvailable": false,
+  "capturedAt": "2026-11-05T12:40:16.193237Z",
+  "code": [
+    {
+      "branch": null,
+      "commits": [
+        "38b7fee17cc527211a96b4e726faf52acf80ceda",
+        "54589c91b02a9b1fc88fb220a3d4d4bffb12213c"
+      ],
+      "dirty_delta": 0,
+      "dirty_gone": [],
+      "dirty_identity": {},
+      "dirty_new": {},
+      "gitignored": [
+        {
+          "after": {
+            "hash": "1fa65cce5bf83e2b0056aa837487b8409fc89a7640a05b60f532de83d45c0b80",
+            "kind": "file",
+            "size": "9"
+          },
+          "before": {
+            "hash": "664049a85e2251d253ff78a9a7808b41ef4a9f14c8a1b998b6bffd40b2494808",
+            "kind": "file",
+            "size": "9"
+          },
+          "change": "modified",
+          "path": "/root/app/.env"
+        }
+      ],
+      "new": null,
+      "removed": false,
+      "removed_from": null,
+      "renamed_from": {},
+      "repo": "/root/app"
+    }
+  ],
+  "database": [
+    {
+      "change": "added",
+      "digest": null,
+      "engine": "postgres",
+      "name": "appdb",
+      "schema": [
+        null,
+        "bd58e4b0439f1f55b9f560fd5a2275008ab10f8ae2e8c5fffe142aecdc50d430"
+      ],
+      "tables": [
+        {
+          "change": "added",
+          "digest_after": "e357f4994ff6adc4948a756fc60f5b34342123505c8f0595ced96ce931941f25",
+          "digest_before": null,
+          "rows_after": 5,
+          "rows_before": null,
+          "table": "public.items"
+        }
+      ]
+    },
+    {
+      "change": "added",
+      "digest": null,
+      "engine": "postgres",
+      "name": "postgres",
+      "schema": [
+        null,
+        "8155aba129b16794b07763b9f05992809ca722a09263e1f7cece2bf672bdf123"
+      ],
+      "tables": []
+    }
+  ],
+  "format": 1,
+  "home": "/root",
+  "idle_noise": [],
+  "ignored": {
+    "paths": [
+      "/etc/ld.so.cache"
+    ],
+    "pruned_trees": [
+      {
+        "delta": 7,
+        "path": "/root/app/.git"
+      }
+    ]
+  },
+  "not_kept": {
+    "credential_details": {},
+    "credentials": {},
+    "listening": [
+      {
+        "port": "5432",
+        "process": "-",
+        "proto": "tcp"
+      }
+    ],
+    "processes": [
+      "postgres"
+    ],
+    "services": []
+  },
+  "other": [
+    {
+      "after": {
+        "hash": "15e0aa1365ae79237625f6db19c649a45702f93f9563e3076394273fc2c0e525",
+        "kind": "file",
+        "size": "750"
+      },
+      "before": null,
+      "change": "added",
+      "path": "/root/chg.sh"
+    }
+  ],
+  "packages": [
+    {
+      "added": {
+        "jq": "1.7.1-3ubuntu0.24.04.2",
+        "libjq1:arm64": "1.7.1-3ubuntu0.24.04.2",
+        "libonig5:arm64": "6.9.9-1build1"
+      },
+      "dependencies": [
+        "libjq1:arm64",
+        "libonig5:arm64"
+      ],
+      "manager": "dpkg",
+      "manual": [
+        "jq"
+      ],
+      "owned_changes": {},
+      "owned_files": {},
+      "removed": {},
+      "requires": {
+        "jq": [
+          "libc6",
+          "libjq1"
+        ],
+        "libjq1:arm64": [
+          "libc6",
+          "libonig5"
+        ],
+        "libonig5:arm64": [
+          "libc6"
+        ]
+      },
+      "top_level": [
+        "jq"
+      ],
+      "upgraded": {}
+    }
+  ],
+  "repo_changes": [
+    {
+      "after": {
+        "hash": "1fa65cce5bf83e2b0056aa837487b8409fc89a7640a05b60f532de83d45c0b80",
+        "kind": "file",
+        "size": "9"
+      },
+      "before": {
+        "hash": "664049a85e2251d253ff78a9a7808b41ef4a9f14c8a1b998b6bffd40b2494808",
+        "kind": "file",
+        "size": "9"
+      },
+      "change": "modified",
+      "path": "/root/app/.env"
+    },
+    {
+      "after": {
+        "hash": "d343e6ff8ce23b3b55ac169504ec851567a2c579f71b5cc2cf262f99ed0d62fc",
+        "kind": "file",
+        "size": "29"
+      },
+      "before": {
+        "hash": "0ca9091eb4e31fb1ab24c8c5de92a08e4e5f402919f82ea3ca784f38534f03f3",
+        "kind": "file",
+        "size": "12"
+      },
+      "change": "modified",
+      "path": "/root/app/main.py"
+    },
+    {
+      "after": {
+        "hash": "ba1f6f1c50821133f9d7087311109e9e75c9edb0d878b97ca3f14113ad818a79",
+        "kind": "file",
+        "size": "48"
+      },
+      "before": null,
+      "change": "added",
+      "path": "/root/app/migrations/002.sql"
+    }
+  ],
+  "repo_files": [
+    "/root/app/.env",
+    "/root/app/main.py",
+    "/root/app/migrations/002.sql"
+  ],
+  "settings": {
+    "cron": [
+      {
+        "after": "f685503b3646a3773e3930a15b2b4973136366daeea806ce84817556e0be235d",
+        "before": null,
+        "change": "added",
+        "path": "/var/spool/cron/crontabs/root",
+        "user": "root"
+      }
+    ],
+    "files": [
+      {
+        "after": {
+          "hash": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "kind": "file",
+          "size": "1"
+        },
+        "before": null,
+        "change": "added",
+        "path": "/home/silo/.config/pulse/8f4ae2e7d33f44148ddaf92cba4f8b2c-default-sink"
+      },
+      {
+        "after": {
+          "hash": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+          "kind": "file",
+          "size": "1"
+        },
+        "before": null,
+        "change": "added",
+        "path": "/home/silo/.config/pulse/8f4ae2e7d33f44148ddaf92cba4f8b2c-default-source"
+      },
+      {
+        "after": {
+          "hash": "6839b464968c9b5f8538c72dffd5b2202af72a2a4076c49ea422ee97cd51f6b1",
+          "kind": "file",
+          "size": "3123"
+        },
+        "before": {
+          "hash": "34fbc467b8c624d92abcdf3edcf35ee46032618a6f23b210efab0e6824978126",
+          "kind": "file",
+          "size": "3106"
+        },
+        "change": "modified",
+        "path": "/root/.bashrc"
+      }
+    ],
+    "launch_agents": [],
+    "services": []
+  },
+  "summary": [
+    {
+      "bucket": "Code",
+      "lines": [
+        "~/app: 38b7fee..54589c9",
+        "~/app: .env changed (gitignored)"
+      ]
+    },
+    {
+      "bucket": "Packages",
+      "lines": [
+        "apt: jq"
+      ]
+    },
+    {
+      "bucket": "Settings & files",
+      "lines": [
+        "+ /home/silo/.config/pulse/8f4ae2e7d33f44148ddaf92cba4f8b2c-default-sink",
+        "+ /home/silo/.config/pulse/8f4ae2e7d33f44148ddaf92cba4f8b2c-default-source",
+        "~ ~/.bashrc",
+        "cron root: added"
+      ]
+    },
+    {
+      "bucket": "Database changed",
+      "lines": [
+        "postgres appdb: new database (1 table)",
+        "postgres postgres: new database (0 tables)"
+      ]
+    },
+    {
+      "bucket": "Other changed",
+      "lines": [
+        "+ ~/chg.sh"
+      ]
+    },
+    {
+      "bucket": "Not kept",
+      "lines": [
+        "listening: :5432",
+        "processes: postgres"
+      ]
+    }
+  ],
+  "text": "Code\n  ~/app: 38b7fee..54589c9\n  ~/app: .env changed (gitignored)\nPackages\n  apt: jq\nSettings & files\n  + /home/silo/.config/pulse/8f4ae2e7d33f44148ddaf92cba4f8b2c-default-sink\n  … +3 more (see --json)\nDatabase changed\n  postgres appdb: new database (1 table)\n  postgres postgres: new database (0 tables)\nOther changed\n  + ~/chg.sh\nNot kept\n  listening: :5432\n  processes: postgres\nIgnored: 8 paths (caches, logs, build output)"
+}
+=== diff --baseline ===
+Measuring the idle baseline of e2e-p2s-fork...
+Comparing e2e-p2s-fork with when it was forked...
+No changes
+=== plain diff after baseline ===
+Comparing e2e-p2s-fork with when it was forked...
+No changes
+=== --no-baseline after baseline ===
+Comparing e2e-p2s-fork with when it was forked...
+Code
+  ~/app: 38b7fee..54589c9
+  ~/app: .env changed (gitignored)
+Packages
+  apt: jq
+Settings & files
+  + /home/silo/.config/pulse/8f4ae2e7d33f44148ddaf92cba4f8b2c-default-sink
+=== --baseline --json ===
+{
+  "baseCapturedAt": "2026-11-05T12:39:27.366954Z",
+  "baselineApplied": true,
+  "baselineAvailable": true,
+  "capturedAt": "2026-11-05T12:40:44.514264Z",
+  "code": [],
+  "database": [],
+  "format": 1,
+  "home": "/root",
+  "idle_noise": [],
+  "ignored": {
+    "paths": [],
+    "pruned_trees": []
+  },
+  "not_kept": {
+    "credential_details": {},
+    "credentials": {},
+    "listening": [],
+    "processes": [],
+    "services": []
+  },
+  "other": [],
+  "packages": [],
+  "repo_changes": [],
+  "repo_files": [],
+  "settings": {
+    "cron": [],
+    "files": [],
+    "launch_agents": [],
+    "services": []
+  },
+  "summary": [],
+  "text": "No changes"
+}

@@ -1,0 +1,3 @@
+BUCKET Code | /home/silo/app: .env changed (gitignored)
+BUCKET Settings & files | ~ /home/silo/.bashrc ; + /home/silo/.config/p2app/settings.json
+BUCKET Not kept | listening: :3000 (web) ; processes: web

@@ -1,0 +1,12 @@
+Keeping e2e-p2-t2...
+Keeping e2e-p2-t2: 5s
+Keeping e2e-p2-t2: 10s
+Keeping e2e-p2-t2: 15s
+Keeping e2e-p2-t2: 20s
+Keeping e2e-p2-t2: 25s
+Kept b81657cd-6763-4360-bf76-87e66fe7d955 into f37f9c1c-f060-474b-8387-d1aa3a934166.
+  git /home/silo/app: merged, now at 86d5a3c
+  migrate: cd /home/silo/app && npm run migrate
+  restart web: pid 447 -> 5611
+  after: cd /home/silo/app && npm test
+Undo with `silo undo f37f9c1c-f060-474b-8387-d1aa3a934166`.

@@ -68,6 +68,8 @@ pub(super) enum Reason {
 pub(super) enum PolicyKind {
     Manual,
     Automatic,
+    /// Saved before a keep changed the computer; an undo restores it.
+    BeforeKeep,
     /// The disk a Fork of the current state starts from. It never holds memory, retention
     /// leaves it alone, and it stays while a fork made from it exists.
     ForkPoint,

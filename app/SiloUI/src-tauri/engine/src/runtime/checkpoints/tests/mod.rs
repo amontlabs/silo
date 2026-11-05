@@ -5869,6 +5869,39 @@ fn quieting_confirms_the_marker_and_runs_nothing_when_it_is_there() {
 }
 
 #[test]
+fn a_fork_noted_for_a_base_gets_one_attempted_once_it_is_quiet() {
+    use crate::changes::store::{Slot, Store};
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let paths = unquieted_computer(&directory, false);
+    let context = crate::guest::test_support::RecordingContext::new(directory.path());
+    let store = Store::for_engine(context.as_ref());
+    crate::changes::fork_base::install(context.clone());
+    store.put_pending("dev", "cp1").unwrap();
+    ensure_quiet(&QuietGuest::new(true), &paths, "dev").unwrap();
+    // Quiet was confirmed, so the capture ran: it either stored the base (and used the note up)
+    // or recorded why not (and kept the note for the next start).
+    assert!(
+        store.get(ID, Slot::Base).unwrap().is_some() || store.get_failure(ID).is_some(),
+        "the start neither stored a base nor recorded a failure"
+    );
+}
+
+#[test]
+fn a_fork_that_is_not_quiet_yet_keeps_its_note() {
+    use crate::changes::store::Store;
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let paths = unquieted_computer(&directory, true);
+    let context = crate::guest::test_support::RecordingContext::new(directory.path());
+    let store = Store::for_engine(context.as_ref());
+    crate::changes::fork_base::install(context.clone());
+    store.put_pending("dev", "cp1").unwrap();
+    assert!(ensure_quiet(&QuietGuest::new(true), &paths, "dev").is_err());
+    assert_eq!(store.take_pending("dev").as_deref(), Some("cp1"));
+}
+
+#[test]
 fn quieting_runs_the_step_itself_when_the_boot_hook_did_not() {
     let _test_state = crate::test_support::global_state();
     let directory = tempfile::tempdir().unwrap();
@@ -6028,6 +6061,26 @@ fn a_fork_start_goes_through_the_production_guard_and_is_quiet_before_it_is_repo
     let quiet = stored.quiet.unwrap();
     assert!(quiet.applied);
     assert_eq!(quiet.token, attempt);
+}
+
+#[test]
+fn a_first_start_of_a_noted_fork_takes_its_base_when_quiet_is_confirmed() {
+    use crate::changes::store::{Slot, Store};
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let paths = fork_pending_fixture(&directory);
+    let context = crate::guest::test_support::RecordingContext::new(directory.path());
+    let store = Store::for_engine(context.as_ref());
+    crate::changes::fork_base::install(context.clone());
+    store.put_pending("dev", "cp1").unwrap();
+    let runner = fork_restore_guest(true);
+    start_pending(&runner, &paths, &computer_configuration()).unwrap();
+    // The capture could not reach a real guest here, so it recorded why and kept the note
+    // for the next start; either way the start path attempted it.
+    assert!(
+        store.get(ID, Slot::Base).unwrap().is_some() || store.get_failure(ID).is_some(),
+        "the start neither stored a base nor recorded a failure"
+    );
 }
 
 #[test]

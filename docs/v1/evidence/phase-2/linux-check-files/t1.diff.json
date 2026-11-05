@@ -1,0 +1,135 @@
+{
+  "baseCapturedAt": "2026-11-05T15:00:11.370415Z",
+  "baselineApplied": false,
+  "baselineAvailable": false,
+  "capturedAt": "2026-11-05T15:01:00.93193Z",
+  "code": [
+    {
+      "branch": null,
+      "commits": [
+        "7866ecba9ecb4300478c30ef246e4256e4a14b22",
+        "82a4dbf87b41c1aa042aec7f3116b510aaa56b64"
+      ],
+      "dirty_delta": 0,
+      "dirty_gone": [],
+      "dirty_identity": {},
+      "dirty_new": {},
+      "gitignored": [],
+      "new": null,
+      "removed": false,
+      "removed_from": null,
+      "renamed_from": {},
+      "repo": "/home/silo/app"
+    }
+  ],
+  "database": [],
+  "format": 1,
+  "home": "/root",
+  "idle_noise": [],
+  "ignored": {
+    "paths": [
+      "/home/silo/.config/pulse/0e69b909da8c488fa5ee3d030f330668-default-sink",
+      "/home/silo/.config/pulse/0e69b909da8c488fa5ee3d030f330668-default-source"
+    ],
+    "pruned_trees": [
+      {
+        "delta": 3,
+        "path": "/home/silo/app/.git"
+      },
+      {
+        "delta": 3,
+        "path": "/root/.npm"
+      }
+    ]
+  },
+  "not_kept": {
+    "credential_details": {},
+    "credentials": {},
+    "listening": [
+      {
+        "port": "3000",
+        "process": "web",
+        "proto": "tcp"
+      }
+    ],
+    "processes": [
+      "web"
+    ],
+    "services": []
+  },
+  "other": [],
+  "packages": [
+    {
+      "added": {
+        "ripgrep": "14.1.0-1"
+      },
+      "dependencies": [],
+      "manager": "dpkg",
+      "manual": [
+        "ripgrep"
+      ],
+      "owned_changes": {},
+      "owned_files": {},
+      "removed": {},
+      "requires": {
+        "ripgrep": [
+          "libc6",
+          "libgcc-s1",
+          "libpcre2-8-0"
+        ]
+      },
+      "top_level": [
+        "ripgrep"
+      ],
+      "upgraded": {}
+    }
+  ],
+  "repo_changes": [
+    {
+      "after": {
+        "hash": "6e6c0c20aa27f72616be04327de58d419cc7442df89b36726ad71faed7870289",
+        "kind": "file",
+        "size": "240"
+      },
+      "before": {
+        "hash": "ecd80307c742635070763489d39a4f0fed4c8e456986ffd393ad73999c0dbdbe",
+        "kind": "file",
+        "size": "200"
+      },
+      "change": "modified",
+      "path": "/home/silo/app/package.json"
+    }
+  ],
+  "repo_files": [
+    "/home/silo/app/package.json"
+  ],
+  "reviewDigest": "b2905c62d9e924373a626305efab5d33e97072f0b8a3bb356066abba6c9d9ff0",
+  "settings": {
+    "cron": [],
+    "files": [],
+    "launch_agents": [],
+    "services": []
+  },
+  "summary": [
+    {
+      "bucket": "Code",
+      "lines": [
+        "/home/silo/app: 7866ecb..82a4dbf"
+      ]
+    },
+    {
+      "bucket": "Packages",
+      "lines": [
+        "apt: ripgrep"
+      ]
+    },
+    {
+      "bucket": "Not kept",
+      "lines": [
+        "listening: :3000 (web)",
+        "processes: web"
+      ]
+    }
+  ],
+  "text": "Code\n  /home/silo/app: 7866ecb..82a4dbf\nPackages\n  apt: ripgrep\nNot kept\n  listening: :3000 (web)\n  processes: web\nIgnored: 8 paths (caches, logs, build output)"
+}

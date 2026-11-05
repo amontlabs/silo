@@ -43,6 +43,7 @@ the engine's message.
 | `silo start <computer>` / `silo stop <computer>` | lifecycle |
 | `silo retry-setup <computer>` | finish the setup of a macOS computer that ended `failed` before it was ready |
 | `silo fork <source> [--name N] [--checkpoint ID] [--secret NAME]... [--recipe-file PATH]` | copy a computer; the name defaults to `<source>-<6 hex>` |
+| `silo diff <computer> [--json] [--max-lines N] [--no-baseline] [--baseline]` | what changed since the fork (captures the computer now, compares with the record `silo fork` took); `--baseline` measures a missing baseline first, on a throwaway idle fork of the same checkpoint (also for a fork that has been used), and a baseline measured on one fork of a computer applies to its other forks; `silo fold --dry-run` ignores review digests |
 | `silo drop <computer> [--force]` | throw a computer away; `main` needs `--force` |
 | `silo exec <computer> [--cwd DIR] [--timeout SECS] -- <cmd...>` | run a command; the exit code is passed through |
 | `silo checkpoint <computer> [--name N] [--kind manual\|automatic\|before-keep]` | save a checkpoint |

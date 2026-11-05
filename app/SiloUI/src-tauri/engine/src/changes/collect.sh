@@ -1,0 +1,452 @@
+#!/usr/bin/env bash
+# collect.sh - guest-side state manifest, format 2 (docs/v1/PHASE2_CONTRACT.md).
+# Run inside a guest:  bash collect.sh > manifest.tsv
+# Prints one tab-separated record per line. Read-only. Works with bash 3.2 (macOS) and 5.x.
+# Everything lives inside main() so that bash -s has parsed the whole script
+# before any child process can touch stdin.
+main() {
+exec </dev/null
+export LC_ALL=C
+cd / 2>/dev/null
+export HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_ANALYTICS=1 HOMEBREW_NO_ENV_HINTS=1 \
+  HOMEBREW_NO_INSTALL_CLEANUP=1 NO_COLOR=1 GIT_TERMINAL_PROMPT=0 GIT_OPTIONAL_LOCKS=0
+START=$(date +%s)
+OS=$(uname -s)
+[ -n "${HOME:-}" ] || HOME=$(cd ~ 2>/dev/null && pwd)
+HOME=${HOME%/}
+export PATH="$PATH:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:$HOME/.cargo/bin:$HOME/.local/bin"
+TMP=$(mktemp -d 2>/dev/null || mktemp -d -t manifest) || return 1
+trap 'rm -rf "$TMP"' EXIT
+bs='\'; tb=$'\t'; nl=$'\n'
+
+have() { command -v "$1" >/dev/null 2>&1; }
+# SILO_SKIP: space-separated sections left out (packages, services, procs, postgres, sqlite).
+# SILO_ROOTS and SILO_GIT_ROOTS (colon-separated; set, even empty, they replace the defaults)
+# narrow the directories scanned. Nothing sets them in a guest; a test points every scan at
+# its own fixtures with them.
+skip() { case " ${SILO_SKIP:-} " in *" $1 "*) return 0;; esac; return 1; }
+esc() { local s=$1; s=${s//"$bs"/"$bs$bs"}; s=${s//"$tb"/"${bs}t"}; s=${s//"$nl"/"${bs}n"}; printf '%s' "$s"; }
+if have sha256sum; then SHA=(sha256sum); elif have shasum; then SHA=(shasum -a 256); else SHA=(cat); fi
+
+# PROC first, so the helpers started below do not show up.
+PROCS=
+skip procs || PROCS=$(ps -A -o pid=,ppid=,comm= 2>/dev/null | awk -v me=$$ '
+  $2==2 || $1==2 || $1==0 || $1==me || $2==me {next}
+  { sub(/^ *[0-9]+ +[0-9]+ +/,""); sub(/.*\//,""); sub(/ +$/,"");
+    if ($0=="" || $0 ~ /^(ps|bash|sh|awk|sort|sed|tr|uniq|cat|msb-guest|-bash)$/) next; print }' | sort -u)
+
+printf 'META\tformat\t2\n'
+printf 'META\tos\t%s\n' "$OS"
+printf 'META\thome\t%s\n' "$(esc "$HOME")"
+printf 'META\tuser\t%s\n' "$(id -un 2>/dev/null)"
+
+# ---------------------------------------------------------------- files
+ROOTS=()
+add_root() { [ -d "$1" ] && ROOTS[${#ROOTS[@]}]=$1; }
+if [ -n "${SILO_ROOTS+x}" ]; then
+  IFS=: read -r -a _rs <<<"$SILO_ROOTS"
+  for r in ${_rs[@]+"${_rs[@]}"}; do add_root "$r"; done
+elif [ "$OS" = Darwin ]; then
+  add_root "$HOME"; add_root /usr/local; add_root /opt/homebrew/etc
+  add_root /Library/LaunchAgents; add_root /Library/LaunchDaemons
+else
+  for r in /etc /root /home /usr/local /opt /srv /var/spool/cron; do add_root "$r"; done
+  case "$HOME" in /root|/root/*|/home|/home/*) ;; *) add_root "$HOME";; esac
+fi
+
+PR=( -type d '(' -false )
+for n in .git node_modules .cache .npm .rustup target __pycache__ .venv venv .Trash Caches GPUCache CachedData 'Code Cache'; do
+  PR[${#PR[@]}]=-o; PR[${#PR[@]}]=-name; PR[${#PR[@]}]=$n
+done
+for pth in '*/.cargo/registry' /opt/homebrew/Cellar /usr/local/Cellar /usr/local/lib/node_modules; do
+  PR[${#PR[@]}]=-o; PR[${#PR[@]}]=-path; PR[${#PR[@]}]=$pth
+done
+if [ "$OS" = Darwin ]; then
+  # prune every ~/Library child except the allow-listed ones
+  PR=( "${PR[@]}" -o '(' -path "$HOME/Library/*" ! -path "$HOME/Library/*/*" \
+       ! -name LaunchAgents ! -name Preferences ! -name 'Application Support' ')' )
+fi
+PR[${#PR[@]}]=')'
+
+XSH='for f do printf "X\t%s\n" "$(printf %s "$f" | tr "\n\t" "\001\002")"; done'
+RAW=$TMP/raw
+if [ ${#ROOTS[@]} -gt 0 ]; then
+  if find /dev/null -printf '' >/dev/null 2>&1; then
+    FMT='%y\t%s\t%T@\t%p\t%l\n'
+    find -H "${ROOTS[@]}" '(' "${PR[@]}" ')' -prune -printf "$FMT" -o \
+      '(' -type f -o -type l ')' '(' -path '*[[:cntrl:]]*' -exec sh -c "$XSH" sh '{}' + -o -printf "$FMT" ')' \
+      >"$RAW" 2>/dev/null
+  else
+    SF='%HT%t%z%t%m%t%N%t%Y'
+    find -H "${ROOTS[@]}" '(' "${PR[@]}" ')' -prune -exec stat -f "$SF" '{}' + -o \
+      '(' -type f -o -type l ')' '(' -path '*[[:cntrl:]]*' -exec sh -c "$XSH" sh '{}' + -o -exec stat -f "$SF" '{}' + ')' \
+      >"$RAW" 2>/dev/null
+  fi
+fi
+: >>"$RAW"
+
+# files <= 1 MiB get hashed
+awk -F'\t' '($1=="f"||$1=="Regular File") && NF>=5 && $2+0<=1048576 {print $4}' "$RAW" >"$TMP/tohash"
+tr '\n' '\0' <"$TMP/tohash" | xargs -0 -n 500 "${SHA[@]}" >"$TMP/hashes" 2>/dev/null
+: >>"$TMP/hashes"
+
+awk -F'\t' -v H="$TMP/hashes" -v PF="$TMP/pdirs" '
+function esc(s,  o,i,c){ if (index(s,"\\")==0) return s; o=""
+  for(i=1;i<=length(s);i++){c=substr(s,i,1); o=o (c=="\\"?"\\\\":c)} return o }
+function xesc(s,  o,i,c){ o=""
+  for(i=1;i<=length(s);i++){c=substr(s,i,1)
+    o=o (c=="\001"?"\\n":(c=="\002"?"\\t":(c=="\\"?"\\\\":c)))} return o }
+FILENAME==H { if (substr($0,1,1)=="\\" || length($0)<67) next; hs[substr($0,67)]=substr($0,1,64); next }
+$1=="X" { print "F\t" xesc($2) "\t-\t-\t-"; next }
+NF>=5 {
+  t=$1; m=$3; sub(/\..*/,"",m)
+  if (t=="d"||t=="Directory") print $4 >PF
+  else if (t=="f"||t=="Regular File") print "F\t" esc($4) "\t" $2 "\t" m "\t" (($4 in hs)?hs[$4]:"-")
+  else if (t=="l"||t=="Symbolic Link") print "L\t" esc($4) "\t" $2 "\t" m "\t" esc($5)
+}' "$TMP/hashes" "$RAW" >"$TMP/fs"
+: >>"$TMP/pdirs"
+
+sort "$TMP/pdirs" | {
+  np=0
+  while IFS= read -r d; do
+    n=-
+    if [ $np -lt 400 ]; then
+      n=$(find "$d" -maxdepth 2 2>/dev/null | wc -l | tr -d ' ')
+      np=$((np+1))
+    fi
+    printf 'P\t%s\t%s\n' "$(esc "$d")" "$n"
+  done
+} >>"$TMP/fs"
+sort -t "$tb" -k2,2 "$TMP/fs"
+
+# ---------------------------------------------------------------- packages
+if ! skip packages; then
+if have dpkg-query; then
+  dpkg-query -W -f='${db:Status-Abbrev}\t${binary:Package}\t${Version}\n' 2>/dev/null |
+    awk -F'\t' '$1 ~ /^ii/ {printf "PKG\tdpkg\t%s\t%s\n",$2,$3}'
+  have apt-mark && apt-mark showmanual 2>/dev/null | awk 'NF{printf "PKGM\tdpkg\t%s\n",$1}'
+  # PKGD mgr name dep,dep: direct requirements (first alternative, no versions).
+  dpkg-query -W -f='${binary:Package}\t${Depends}\n' 2>/dev/null | awk -F'\t' '
+    NF>=2 && $2!="" { n=split($2,a,", "); out=""
+      for (i=1;i<=n;i++) { d=a[i]; sub(/ *\|.*/,"",d); sub(/ *\(.*/,"",d); sub(/:[a-z0-9]+$/,"",d)
+        if (d!="") out=out (out==""?"":",") d }
+      if (out!="") printf "PKGD\tdpkg\t%s\t%s\n",$1,out }'
+fi
+# Homebrew refuses to run as root and reads the user's own configuration; it is asked as the
+# account that owns it.
+if have brew && [ "$(id -u)" != 0 ]; then
+  brew list --versions 2>/dev/null | awk 'NF>=2{v=$2; for(i=3;i<=NF;i++) v=v","$i; printf "PKG\tbrew\t%s\t%s\n",$1,v}'
+  brew list --cask --versions 2>/dev/null | awk 'NF>=2{v=$2; for(i=3;i<=NF;i++) v=v","$i; printf "PKG\tbrew-cask\t%s\t%s\n",$1,v}'
+  brew leaves 2>/dev/null | awk 'NF{printf "PKGM\tbrew\t%s\n",$1}'
+  brew deps --installed --direct 2>/dev/null | awk -F': ' 'NF>=2 && $2!="" {gsub(/ +/,",",$2); printf "PKGD\tbrew\t%s\t%s\n",$1,$2}'
+fi
+if have npm; then
+  export npm_config_update_notifier=false npm_config_fund=false npm_config_audit=false
+  npm ls -g --depth=0 --json 2>/dev/null | awk '
+    /^    "[^"]+": \{/ { split($0,a,"\""); name=a[2]; next }
+    /^      "version": "/ { split($0,a,"\""); if (name!="") printf "PKG\tnpm\t%s\t%s\n",name,a[4]; name="" }'
+fi
+export PIP_CONFIG_FILE=/dev/null PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_NO_INPUT=1 \
+  PYTHONDONTWRITEBYTECODE=1 PYTHONSAFEPATH=1
+for py in python3 python; do
+  if have $py; then
+    $py -m pip list --format=freeze 2>/dev/null | awk -F'==' 'NF==2{printf "PKG\tpip\t%s\t%s\n",$1,$2}'
+    $py -m pip list --format=freeze 2>/dev/null | awk -F'==' 'NF==2{print $1}' | xargs $py -m pip show 2>/dev/null |
+      awk '/^Name: /{n=$2} /^Requires: /{r=$0; sub(/^Requires: */,"",r); gsub(/, */,",",r); if (n!="" && r!="") printf "PKGD\tpip\t%s\t%s\n",n,r; n=""}'
+    break
+  fi
+done
+have pipx && pipx list --short 2>/dev/null | awk 'NF>=2{printf "PKG\tpipx\t%s\t%s\n",$1,$2}'
+have cargo && cargo install --list 2>/dev/null | awk '/^[^ ]/ {v=$2; sub(/^v/,"",v); sub(/:$/,"",v); printf "PKG\tcargo\t%s\t%s\n",$1,v}'
+if have gem; then
+  gem list --local 2>/dev/null | awk 'NF>=2 && $2 ~ /^\(/ {v=$0; sub(/^[^(]*\(/,"",v); sub(/\)$/,"",v); gsub(/, /,",",v); printf "PKG\tgem\t%s\t%s\n",$1,v}'
+fi
+have snap && snap list 2>/dev/null | awk 'NR>1 && NF>=2{printf "PKG\tsnap\t%s\t%s\n",$1,$2}'
+fi
+
+# ---------------------------------------------------------------- git
+# GIG repo path size mtime sha256|-: gitignored files (outside build and cache trees), so a
+# changed .env shows. Files up to 1 MiB are hashed; at most 2000 files per repo.
+if stat --version >/dev/null 2>&1; then
+  gstat() { xargs -0 stat --printf='%s\t%Y\t%n\n'; }
+else
+  gstat() { xargs -0 stat -f '%z%t%m%t%N'; }
+fi
+gig_repo() {
+  local R=$1 er=$2
+  case "$R" in /opt/homebrew|/usr/local/Homebrew) return 0;; esac
+  gg ls-files --others --ignored --exclude-standard 2>/dev/null | grep -v '[[:cntrl:]]' |
+    awk 'BEGIN{n=split("node_modules .cache .npm .rustup .cargo target __pycache__ .venv venv .Trash dist build .next .nuxt .turbo .parcel-cache coverage .gradle .tox .mypy_cache .pytest_cache .ruff_cache .terraform .svelte-kit",a," "); for(i=1;i<=n;i++)P[a[i]]=1}
+         {m=split($0,c,"/"); for(i=1;i<=m;i++) if (c[i] in P) next; print}' | head -n 2000 >"$TMP/gl"
+  [ -s "$TMP/gl" ] || return 0
+  awk -v r="$R" '{print r "/" $0}' "$TMP/gl" | tr '\n' '\0' | gstat >"$TMP/gs" 2>/dev/null
+  : >>"$TMP/gs"
+  awk -F'\t' '$1+0<=1048576 {print $3}' "$TMP/gs" | tr '\n' '\0' | xargs -0 -n 500 "${SHA[@]}" >"$TMP/gh" 2>/dev/null
+  : >>"$TMP/gh"
+  awk -F'\t' -v H="$TMP/gh" -v r="$er" -v pre="$R/" '
+    function esc(s,  o,i,c){ if (index(s,"\\")==0) return s; o=""
+      for(i=1;i<=length(s);i++){c=substr(s,i,1); o=o (c=="\\"?"\\\\":c)} return o }
+    FILENAME==H { if (substr($0,1,1)=="\\" || length($0)<67) next; hs[substr($0,67)]=substr($0,1,64); next }
+    NF>=3 { p=$3; printf "GIG\t%s\t%s\t%s\t%s\t%s\n", r, esc(substr(p,length(pre)+1)), $1, $2, ((p in hs)?hs[p]:"-") }
+  ' "$TMP/gh" "$TMP/gs"
+}
+
+# Repositories belong to the user and may carry configuration that runs commands (an fsmonitor
+# hook, filters). Git reads them with the system and global configuration set aside, hooks and
+# the file-system monitor off, and, when the collector is root, as the account that owns the
+# repository. A repository whose owner cannot be switched to is left out.
+GIT_ENV=(env -i PATH="$PATH" HOME=/nonexistent XDG_CONFIG_HOME=/nonexistent LC_ALL=C
+  GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_TERMINAL_PROMPT=0 GIT_OPTIONAL_LOCKS=0
+  GIT_ASKPASS=/bin/false GIT_ATTR_NOSYSTEM=1)
+GPRE=()
+repo_prefix() {
+  local ids uid gid name
+  GPRE=()
+  [ "$(id -u)" = 0 ] || return 0
+  if stat --version >/dev/null 2>&1; then ids=$(stat -c '%u %g' "$1/.git" 2>/dev/null)
+  else ids=$(stat -f '%u %g' "$1/.git" 2>/dev/null); fi
+  uid=${ids% *}; gid=${ids#* }
+  case "$uid" in ''|*[!0-9]*) return 1;; esac
+  case "$gid" in ''|*[!0-9]*) return 1;; esac
+  [ "$uid" = 0 ] && return 0
+  if have setpriv; then GPRE=(setpriv --reuid="$uid" --regid="$gid" --clear-groups); return 0; fi
+  name=$(id -nu "$uid" 2>/dev/null) || return 1
+  if have runuser; then GPRE=(runuser -u "$name" --); return 0; fi
+  return 1
+}
+
+if have git; then
+  GR=()
+  if [ -n "${SILO_GIT_ROOTS+x}" ]; then
+    IFS=: read -r -a _gs <<<"$SILO_GIT_ROOTS"
+    for r in ${_gs[@]+"${_gs[@]}"}; do [ -d "$r" ] && GR[${#GR[@]}]=$r; done
+  else
+    for r in "$HOME" /srv /opt; do [ -d "$r" ] && GR[${#GR[@]}]=$r; done
+    [ "$OS" = Linux ] && [ -d /home ] && GR[${#GR[@]}]=/home
+  fi
+  GP=( -type d '(' -false )
+  for n in node_modules .cache .npm .rustup .cargo target __pycache__ .venv venv .Trash; do
+    GP[${#GP[@]}]=-o; GP[${#GP[@]}]=-name; GP[${#GP[@]}]=$n
+  done
+  GP[${#GP[@]}]=-o; GP[${#GP[@]}]=-path; GP[${#GP[@]}]="$HOME/Library"
+  GP[${#GP[@]}]=')'
+  if [ ${#GR[@]} -gt 0 ]; then
+    find -H "${GR[@]}" -maxdepth 4 '(' "${GP[@]}" ')' -prune -o -name .git -prune -print 2>/dev/null |
+      sed 's,/\.git$,,' | sort -u | awk '
+        { q=$0; skip=0
+          while ((i=match(q,/\/[^\/]*$/))>0) { q=substr(q,1,i-1); if (q in kept) {skip=1;break} }
+          if (!skip) { kept[$0]=1; print } }' >"$TMP/repos"
+    while IFS= read -r R; do
+      [ -n "$R" ] || continue
+      repo_prefix "$R" || continue
+      gg() { "${GPRE[@]}" "${GIT_ENV[@]}" git --no-optional-locks -c core.fsmonitor=false -c core.untrackedCache=false \
+        -c core.hooksPath=/dev/null -c core.pager=cat -c core.quotepath=off -c core.attributesFile=/dev/null \
+        -c safe.directory='*' -C "$R" "$@" 2>/dev/null; }
+      [ "$(gg rev-parse --is-inside-work-tree)" = true ] || continue
+      head=$(gg rev-parse HEAD); [ -n "$head" ] || head=-
+      br=$(gg symbolic-ref --short -q HEAD); [ -n "$br" ] || br=detached
+      gg status --porcelain=v1 -uall >"$TMP/st"
+      dirty=$(grep -vc '^??' "$TMP/st"); untr=$(grep -c '^??' "$TMP/st")
+      er=$(esc "$R")
+      printf 'GIT\t%s\t%s\t%s\t%s\t%s\n' "$er" "$head" "$(esc "$br")" "$dirty" "$untr"
+      head -n 200 "$TMP/st" | awk -v r="$er" '{xy=substr($0,1,2); gsub(/ /,"_",xy); printf "GITF\t%s\t%s\t%s\n",r,xy,substr($0,4)}'
+      gig_repo "$R" "$er"
+    done <"$TMP/repos"
+  fi
+fi
+
+# ---------------------------------------------------------------- cron / services / ports / procs
+me=$(id -un 2>/dev/null)
+cronhash() { "${SHA[@]}" | awk '{print $1}'; }
+CRON_TEXT_MAX=65536
+# cron_record user file: CRON user sha256 (of the file's exact content), CRONF, and CRONT with the
+# text when it is small. A file that cannot be read is CRON user ?, never the hash of nothing.
+cron_record() {
+  local u=$1 f=$2 t
+  printf 'CRONF\t%s\t%s\n' "$(esc "$u")" "$(esc "$f")"
+  if cat "$f" >"$TMP/cron.txt" 2>/dev/null; then
+    printf 'CRON\t%s\t%s\n' "$(esc "$u")" "$(cronhash <"$TMP/cron.txt")"
+    if [ "$(wc -c <"$TMP/cron.txt" | tr -d ' ')" -le "$CRON_TEXT_MAX" ]; then
+      t=$(cat "$TMP/cron.txt"; echo x); t=${t%x}
+      printf 'CRONT\t%s\t%s\n' "$(esc "$u")" "$(esc "$t")"
+    fi
+  else
+    printf 'CRON\t%s\t?\n' "$(esc "$u")"
+  fi
+}
+CRONSEEN=" "
+# Crontab files are read as the account the collector runs as: root on Linux, which reads them
+# all. A user whose crontab is in no known file is asked through crontab -l below.
+for d in ${SILO_CRON_DIRS:-/var/spool/cron/crontabs /var/spool/cron /var/at/tabs}; do
+  for f in "$d"/*; do
+    [ -f "$f" ] || continue
+    u=${f##*/}
+    case "$u" in *.placeholder|.*) continue;; esac
+    case "$CRONSEEN" in *" $u "*) continue;; esac
+    CRONSEEN="$CRONSEEN$u "
+    cron_record "$u" "$f"
+  done
+done
+if have crontab; then
+  case "$CRONSEEN" in
+    *" $me "*) ;;
+    *)
+      h=-; out=$(crontab -l 2>/dev/null) && h=$(printf '%s\n' "$out" | cronhash)
+      printf 'CRON\t%s\t%s\n' "$me" "$h"
+      ;;
+  esac
+fi
+# QPARK path sha256: files the quiet step set aside (crontabs, timers, autostart entries), under
+# their original paths. QCRON user sha256 text: a parked crontab in full, so a fork's own
+# crontab is compared with main as it was when the fork was made.
+QUIET_DISABLED=${SILO_QUIET_DISABLED:-/var/lib/silo-quiet/disabled}
+if [ -d "$QUIET_DISABLED" ]; then
+  find "$QUIET_DISABLED" '(' -type f -o -type l ')' 2>/dev/null | grep -v '[[:cntrl:]]' | sort | head -n 500 |
+  while IFS= read -r qf; do
+    orig=${qf#"$QUIET_DISABLED"}
+    case "$orig" in *.[0-9]) orig=${orig%.*};; esac
+    h=-
+    if [ -f "$qf" ] && [ ! -L "$qf" ] && cat "$qf" >"$TMP/qpark" 2>/dev/null; then h=$(cronhash <"$TMP/qpark"); fi
+    printf 'QPARK\t%s\t%s\n' "$(esc "$orig")" "$h"
+    case "$orig" in
+      /var/spool/cron/crontabs/*|/var/spool/cron/*|/var/at/tabs/*)
+        u=${orig##*/}
+        case "$u" in atjobs|atspool|'') ;; *)
+          if [ "$h" != - ] && [ "$(wc -c <"$TMP/qpark" | tr -d ' ')" -le "$CRON_TEXT_MAX" ]; then
+            t=$(cat "$TMP/qpark"; echo x); t=${t%x}
+            printf 'QCRON\t%s\t%s\t%s\n' "$(esc "$u")" "$h" "$(esc "$t")"
+          fi;;
+        esac;;
+    esac
+  done
+fi
+if skip services; then :
+elif [ "$OS" = Darwin ]; then
+  have launchctl && launchctl list 2>/dev/null |
+    awk 'NR>1 && NF>=3 && $3 !~ /^(com\.apple\.|application\.|0x)/ {printf "SVC\t%s\tloaded\n",$3}'
+else
+  have systemctl && systemctl list-unit-files --type=service --no-legend --no-pager 2>/dev/null |
+    awk 'NF>=2{printf "SVC\t%s\t%s\n",$1,$2}'
+fi
+# Where the kernel lists sockets, listeners are read from there and matched to the process that
+# holds the socket (as root every process is visible); ss and lsof only answer for processes of
+# the account the collector runs as unless it is root.
+PROCROOT=${SILO_PROC_ROOT:-/proc}
+if [ -r "$PROCROOT/net/tcp" ]; then
+  cat "$PROCROOT/net/tcp" "$PROCROOT/net/tcp6" 2>/dev/null | while read -r _ local _ st _ _ _ _ _ inode _; do
+    [ "$st" = 0A ] && printf '%d %s\n' "0x${local##*:}" "$inode"
+  done | sort -u >"$TMP/listen"
+  ls -l "$PROCROOT"/[0-9]*/fd 2>/dev/null | awk -v root="$PROCROOT" '
+    index($0, root "/") == 1 && /\/fd:$/ { n = split($0, p, "/"); pid = p[n-1]; next }
+    /socket:\[[0-9]+\]/ { s = $0; sub(/.*socket:\[/, "", s); sub(/\].*/, "", s); if (!(s in seen)) { seen[s] = 1; print s, pid } }' >"$TMP/sockpid"
+  while read -r port inode; do
+    pid=$(awk -v i="$inode" '$1==i {print $2; exit}' "$TMP/sockpid")
+    proc=-
+    if [ -n "$pid" ]; then
+      proc=$(cat "$PROCROOT/$pid/comm" 2>/dev/null); [ -n "$proc" ] || proc=-
+    fi
+    printf 'LISTEN\ttcp\t%s\t%s\n' "$port" "$(esc "$proc")"
+  done <"$TMP/listen" | sort -u
+elif have ss; then
+  ss -ltnpH 2>/dev/null | awk '{n=split($4,a,":"); proc="-";
+    if (match($0,/\(\("[^"]*"/)) proc=substr($0,RSTART+3,RLENGTH-4);
+    printf "LISTEN\ttcp\t%s\t%s\n",a[n],proc}' | sort -u
+elif have lsof; then
+  lsof -nP -iTCP -sTCP:LISTEN 2>/dev/null | awk 'NR>1 && NF>=2{n=split($(NF-1),a,":"); printf "LISTEN\ttcp\t%s\t%s\n",a[n],$1}' | sort -u
+fi
+# ---------------------------------------------------------------- databases
+# DB postgres <db> schema <sha256>, DBT postgres <db> <table> <sha256|-> <rows>: only when
+# psql answers as the postgres OS user. DB sqlite <path> <sha256>: file digests under the
+# user's own roots.
+# The postgres account's own service file, password file and options are set aside.
+PGENV=(env PGSERVICEFILE=/dev/null PGSYSCONFDIR=/nonexistent PGPASSFILE=/dev/null PGOPTIONS=
+  PGCONNECT_TIMEOUT=5)
+pgrun() {
+  if [ "$(id -un 2>/dev/null)" = postgres ]; then "${PGENV[@]}" "$@"
+  elif [ "$(id -u)" = 0 ] && have runuser; then runuser -u postgres -- "${PGENV[@]}" "$@"
+  elif have sudo; then sudo -n -u postgres "${PGENV[@]}" "$@" </dev/null
+  else return 127; fi
+}
+# Names that could be read as an option or a connection string are left out.
+pgname_ok() {
+  case "$1" in ''|-*|*[!A-Za-z0-9_.-]*) return 1;; esac
+  return 0
+}
+# pg_dump 17.6+ writes a random \restrict key into every dump; it is not part of the schema.
+pgnorm() { sed -e '/^\\restrict /d' -e '/^\\unrestrict /d'; }
+# DBU postgres reason: Postgres is installed but could not be read. The diff then says the
+# database was not compared, rather than reading its absence as an empty server. The
+# collector never starts a service.
+pg_unreadable=
+if skip postgres; then :
+elif have psql && have pg_dump; then
+  PGCONNECT_TIMEOUT=5 pgrun psql -wXAtqc 'select 1' postgres >/dev/null 2>&1
+  case $? in
+    0) ;;
+    127) pg_unreadable="cannot act as the postgres account";;
+    *) pg_unreadable="the server did not answer";;
+  esac
+elif have psql || [ -d /usr/lib/postgresql ]; then
+  pg_unreadable="the postgres tools are incomplete"
+fi
+[ -z "$pg_unreadable" ] || printf 'DBU\tpostgres\t%s\n' "$(esc "$pg_unreadable")"
+if ! skip postgres && have psql && have pg_dump && [ -z "$pg_unreadable" ]; then
+  export PGCONNECT_TIMEOUT=5
+  pgrun psql -wXAtqc "select datname from pg_database where not datistemplate and datallowconn order by 1" postgres 2>/dev/null |
+  while IFS= read -r db; do
+    pgname_ok "$db" || continue
+    edb=$(esc "$db")
+    if pgrun pg_dump -w --schema-only --dbname="$db" >"$TMP/pgd" 2>/dev/null; then
+      printf 'DB\tpostgres\t%s\tschema\t%s\n' "$edb" "$(pgnorm <"$TMP/pgd" | "${SHA[@]}" | awk '{print $1}')"
+    fi
+    pgrun psql -wXAtq --dbname="$db" -c "select format('%I.%I', schemaname, tablename) from pg_tables where schemaname not in ('pg_catalog','information_schema') order by 1" 2>/dev/null |
+      grep -v "['[:cntrl:]]" | head -n 300 |
+    while IFS= read -r t; do
+      [ -n "$t" ] || continue
+      size=$(pgrun psql -wXAtq --dbname="$db" -c "select pg_total_relation_size('$t')" 2>/dev/null)
+      rows=$(pgrun psql -wXAtq --dbname="$db" -c "select count(*) from $t" 2>/dev/null)
+      [ -n "$rows" ] || rows=-
+      h=-
+      if [ "${size:-0}" -le 1073741824 ] 2>/dev/null; then
+        pgrun psql -wXAtq --dbname="$db" -c "COPY $t TO STDOUT" 2>/dev/null | "${SHA[@]}" | awk '{print $1}' >"$TMP/pgh"
+        [ "${PIPESTATUS[0]}" = 0 ] && h=$(cat "$TMP/pgh")
+      fi
+      printf 'DBT\tpostgres\t%s\t%s\t%s\t%s\n' "$edb" "$(esc "$t")" "${h:--}" "$rows"
+    done
+  done
+fi
+SQR=()
+for r in "${ROOTS[@]}"; do
+  case "$r" in /etc|/var/spool/cron|/Library/*|/opt/homebrew/etc) ;; *) SQR[${#SQR[@]}]=$r;; esac
+done
+if [ ${#SQR[@]} -gt 0 ] && ! skip sqlite; then
+  find -H "${SQR[@]}" '(' "${PR[@]}" ')' -prune -o -type f \
+    '(' -name '*.sqlite' -o -name '*.sqlite3' -o -name '*.db' ')' -size -262144k -print 2>/dev/null |
+    grep -v '[[:cntrl:]]' | sort -u >"$TMP/sqlite"
+  if [ -s "$TMP/sqlite" ]; then
+    tr '\n' '\0' <"$TMP/sqlite" | xargs -0 -n 50 "${SHA[@]}" 2>/dev/null | awk '
+      function esc(s,  o,i,c){ if (index(s,"\\")==0) return s; o=""
+        for(i=1;i<=length(s);i++){c=substr(s,i,1); o=o (c=="\\"?"\\\\":c)} return o }
+      length($0)>=67 && substr($0,1,1)!="\\" { printf "DB\tsqlite\t%s\t%s\n", esc(substr($0,67)), substr($0,1,64) }'
+  fi
+fi
+
+# ---------------------------------------------------------------- launch agents
+# LAGENT scope label sha256 path (macOS LaunchAgents and LaunchDaemons).
+if [ "$OS" = Darwin ]; then
+  for pair in "user:$HOME/Library/LaunchAgents" "system:/Library/LaunchAgents" "system:/Library/LaunchDaemons"; do
+    scope=${pair%%:*}; dir=${pair#*:}
+    for f in "$dir"/*.plist; do
+      [ -f "$f" ] || continue
+      label=$(/usr/libexec/PlistBuddy -c 'Print :Label' "$f" 2>/dev/null) || label=
+      [ -n "$label" ] || label=$(basename "$f" .plist)
+      h=$("${SHA[@]}" <"$f" 2>/dev/null | awk '{print $1}')
+      printf 'LAGENT\t%s\t%s\t%s\t%s\n' "$scope" "$(esc "$label")" "${h:--}" "$(esc "$f")"
+    done
+  done
+fi
+
+[ -n "$PROCS" ] && printf '%s\n' "$PROCS" | while IFS= read -r p; do printf 'PROC\t%s\n' "$(esc "$p")"; done
+printf 'META\tscan_seconds\t%s\n' "$(( $(date +%s) - START ))"
+}
+main "$@"; exit $?

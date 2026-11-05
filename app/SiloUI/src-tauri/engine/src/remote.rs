@@ -362,6 +362,9 @@ const METHODS: &[(&str, Access)] = &[
 pub const OWNER_METHODS: &[(&str, bool)] = &[
     // (method, changes state)
     ("activity.setup.read", false),
+    ("changes.baseline", true),
+    ("changes.capture", true),
+    ("changes.diff", true),
     ("checkpoints.abandonRestore", true),
     ("checkpoints.create", true),
     ("checkpoints.delete", true),

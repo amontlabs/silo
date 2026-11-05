@@ -1,0 +1,7 @@
+Database changed
+  postgres appdb: data changed in public.items (1→6 rows)
+Not kept
+  listening: :3000 (web)
+  processes: web
+Ignored: 3 paths (caches, logs, build output)
+review: 23a511c39da66e18b6ad692b9348691fb02f25ed86290c69f319aa811ac60c2e

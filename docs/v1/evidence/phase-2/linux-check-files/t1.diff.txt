@@ -1,0 +1,9 @@
+Code
+  /home/silo/app: 7866ecb..82a4dbf
+Packages
+  apt: ripgrep
+Not kept
+  listening: :3000 (web)
+  processes: web
+Ignored: 6 paths (caches, logs, build output)
+review: b2905c62d9e924373a626305efab5d33e97072f0b8a3bb356066abba6c9d9ff0
