@@ -14,13 +14,14 @@ use serde_json::{json, Value};
 
 use super::{
     journal::{Journal, State, Step, Swap},
-    promote, recover_all, undo, Info, Outcome, PromoteEnv, Request,
+    lineage::Lineage,
+    promote, promote_is_newest, recover_all, recover_one, undo, Info, Outcome, PromoteEnv, Request,
 };
-use crate::changes::keep::{CheckpointRef, ManifestStore, Os};
+use crate::changes::keep::{lane, CheckpointRef, ManifestStore, Os};
 
 const MAIN: &str = "id-main";
 const FORK: &str = "id-fork";
-const STORES: [&str; 5] = ["secrets", "github", "ports", "urls", "ssh"];
+const STORES: [&str; 4] = ["secrets", "github", "urls", "ssh"];
 
 #[derive(Clone, Debug, Default, PartialEq)]
 struct Device {
@@ -29,15 +30,19 @@ struct Device {
     busy: BTreeMap<String, String>,
     /// store -> computer name -> what it holds
     stores: BTreeMap<String, BTreeMap<String, Value>>,
-    /// computer id -> id of the computer it was forked from
-    source: BTreeMap<String, String>,
-    /// computer id -> id of the fork that replaced it
-    replaced_by: BTreeMap<String, String>,
+    /// computer id -> published ports (id-keyed)
+    ports: BTreeMap<String, Value>,
+    /// SSH entry (named after a computer id) -> the computer it connects to
+    alias: BTreeMap<String, String>,
+    /// computer id -> hostname on its disk
+    hostname: BTreeMap<String, String>,
+    /// computer id -> the proxy CA it had before it carried main's
+    ca_aside: BTreeMap<String, String>,
     /// computer id -> quiet parking still in place
     parked: BTreeMap<String, bool>,
     /// computer id -> the fork changed what was parked
     quiet_changed: BTreeSet<String>,
-    /// computer id -> proxy CA fingerprint (id-keyed: never moves)
+    /// computer id -> the proxy CA it presents
     ca: BTreeMap<String, String>,
     /// computer name -> cached proxy policy
     proxy_policy: BTreeSet<String>,
@@ -92,8 +97,12 @@ impl Fake {
             device.parked.insert(id.into(), id == FORK);
             device.ca.insert(id.into(), format!("ca-{id}"));
             device.running.insert(id.into());
+            device
+                .ports
+                .insert(id.into(), json!([format!("port-of-{id}")]));
+            device.alias.insert(id.into(), id.into());
+            device.hostname.insert(id.into(), format!("host-{id}"));
         }
-        device.source.insert(FORK.into(), MAIN.into());
         for store in STORES {
             let entry = device.stores.entry(store.into()).or_default();
             entry.insert("main".into(), json!({"from": "main", "store": store}));
@@ -185,6 +194,14 @@ impl PromoteEnv for Fake {
     fn export_bindings(&self, id: &str, name: &str) -> Result<Value, String> {
         let d = self.device.lock().unwrap();
         let mut out = serde_json::Map::new();
+        out.insert(
+            "ports".into(),
+            d.ports.get(id).cloned().unwrap_or(Value::Null),
+        );
+        out.insert(
+            "hostnames".into(),
+            json!(d.hostname.get(id).cloned().unwrap_or_default()),
+        );
         for store in STORES {
             if let Some(value) = d.stores.get(store).and_then(|s| s.get(name)) {
                 out.insert(store.into(), value.clone());
@@ -220,14 +237,32 @@ impl PromoteEnv for Fake {
                         }
                     }
                     d.proxy_policy.remove(&swap.fork_name);
+                    let main_ports = d.ports.get(&swap.target_id).cloned().unwrap();
+                    d.ports.insert(swap.fork_id.clone(), main_ports);
+                    d.ports.insert(swap.target_id.clone(), json!([]));
                 }
-                Step::Lineage => {
-                    d.source.remove(&swap.fork_id);
-                    d.replaced_by
-                        .insert(swap.target_id.clone(), swap.fork_id.clone());
+                Step::Alias => {
+                    d.alias.insert(swap.target_id.clone(), swap.fork_id.clone());
+                    d.alias.insert(swap.fork_id.clone(), swap.target_id.clone());
                 }
+                Step::Lineage => {}
                 Step::MacosIdentity => {
                     d.proxy_policy.clear();
+                    let main_ca = d.ca[&swap.target_id].clone();
+                    if !d.ca_aside.contains_key(&swap.fork_id) {
+                        let own = d.ca[&swap.fork_id].clone();
+                        d.ca_aside.insert(swap.fork_id.clone(), own);
+                    }
+                    d.ca.insert(swap.fork_id.clone(), main_ca);
+                    let (main_host, fork_host) = (
+                        swap.target_bindings["hostnames"]
+                            .as_str()
+                            .unwrap()
+                            .to_owned(),
+                        swap.fork_bindings["hostnames"].as_str().unwrap().to_owned(),
+                    );
+                    d.hostname.insert(swap.fork_id.clone(), main_host);
+                    d.hostname.insert(swap.target_id.clone(), fork_host);
                 }
                 Step::Quiet => {
                     if !d.quiet_changed.contains(&swap.fork_id) {
@@ -259,16 +294,35 @@ impl PromoteEnv for Fake {
                         }
                     }
                     d.proxy_policy.insert(swap.fork_name.clone());
-                }
-                Step::Lineage => {
-                    if let Some(source) = &swap.fork_source {
-                        d.source.insert(swap.fork_id.clone(), source.clone());
+                    // Ports changed while promoted stay with the main role.
+                    let mine = swap.fork_bindings["ports"].clone();
+                    let now = d.ports[&swap.fork_id].clone();
+                    if now != mine {
+                        d.ports.insert(swap.target_id.clone(), now);
                     }
-                    d.replaced_by.remove(&swap.target_id);
+                    d.ports.insert(swap.fork_id.clone(), mine);
                 }
+                Step::Alias => {
+                    d.alias
+                        .insert(swap.target_id.clone(), swap.target_id.clone());
+                    d.alias.insert(swap.fork_id.clone(), swap.fork_id.clone());
+                }
+                Step::Lineage => {}
                 Step::MacosIdentity => {
                     d.proxy_policy.insert(swap.target_name.clone());
                     d.proxy_policy.insert(swap.fork_name.clone());
+                    if let Some(own) = d.ca_aside.remove(&swap.fork_id) {
+                        d.ca.insert(swap.fork_id.clone(), own);
+                    }
+                    let (main_host, fork_host) = (
+                        swap.target_bindings["hostnames"]
+                            .as_str()
+                            .unwrap()
+                            .to_owned(),
+                        swap.fork_bindings["hostnames"].as_str().unwrap().to_owned(),
+                    );
+                    d.hostname.insert(swap.fork_id.clone(), fork_host);
+                    d.hostname.insert(swap.target_id.clone(), main_host);
                 }
                 Step::Quiet => {
                     if !d.quiet_changed.contains(&swap.fork_id) {
@@ -282,7 +336,15 @@ impl PromoteEnv for Fake {
     }
 }
 
-struct Source;
+/// The sources the stores recorded when the forks were made (they never change).
+struct Source(BTreeMap<String, String>);
+
+impl Source {
+    fn standard() -> Self {
+        Self([(FORK.to_owned(), MAIN.to_owned())].into())
+    }
+}
+
 impl ManifestStore for Source {
     fn fork_time(&self, _: &str) -> Result<String, String> {
         Ok(String::new())
@@ -291,7 +353,7 @@ impl ManifestStore for Source {
         Ok(String::new())
     }
     fn source(&self, fork: &str) -> Result<Option<String>, String> {
-        Ok((fork == FORK).then(|| MAIN.to_owned()))
+        Ok(self.0.get(fork).cloned())
     }
 }
 
@@ -310,7 +372,13 @@ fn scratch_journal() -> (tempfile::TempDir, Journal) {
 }
 
 fn run(fake: &Fake, journal: &Journal, request: &Request) -> Result<Outcome, String> {
-    promote(fake, &Source, journal, request, Duration::from_secs(1))
+    promote(
+        fake,
+        &Lineage::new(Arc::new(Source::standard()), journal.clone()),
+        journal,
+        request,
+        Duration::from_secs(1),
+    )
 }
 
 fn promoted(fake: &Fake, journal: &Journal) -> Device {
@@ -349,11 +417,16 @@ fn a_promote_moves_every_name_keyed_item_to_the_fork() {
             "{store}: the archive has none"
         );
     }
-    assert!(
-        !after.source.contains_key(FORK),
-        "the fork is no longer a fork"
+    assert_eq!(
+        (after.ports[FORK].clone(), after.ports[MAIN].clone()),
+        (before.ports[MAIN].clone(), json!([])),
+        "main's published ports move to the new main"
     );
-    assert_eq!(after.replaced_by[MAIN], FORK);
+    assert_eq!(
+        (after.alias[MAIN].as_str(), after.alias[FORK].as_str()),
+        (FORK, MAIN),
+        "main's SSH entry reaches the new main"
+    );
     assert!(after.running.is_empty(), "both computers are stopped");
     assert_eq!(
         after.checkpoints,
@@ -361,7 +434,7 @@ fn a_promote_moves_every_name_keyed_item_to_the_fork() {
     );
     assert!(!after.proxy_policy.contains("try-it"));
     let record = &journal.all()[0];
-    assert_eq!((record.state, record.steps.len()), (State::Promoted, 4));
+    assert_eq!((record.state, record.steps.len()), (State::Promoted, 5));
 }
 
 #[test]
@@ -400,8 +473,6 @@ fn undo_swaps_everything_back_exactly() {
         now.checkpoints.clear();
         let mut expected = before.clone();
         expected.checkpoints.clear();
-        expected.replaced_by.clear();
-        now.replaced_by.clear();
         assert_eq!(now, expected, "undo by {id}");
         assert_eq!(journal.all()[0].state, State::Over);
         // A second undo finds nothing to swap back.
@@ -455,7 +526,13 @@ fn a_dry_run_reports_the_archive_name_and_changes_nothing() {
     assert_eq!(report.archive, "main-before-20261105-1432");
     assert_eq!(
         report.steps,
-        ["names", "name-keyed settings", "lineage", "quiet parking"]
+        [
+            "names",
+            "name-keyed settings",
+            "SSH access",
+            "lineage",
+            "quiet parking"
+        ]
     );
     assert_eq!(fake.snapshot(), before);
 }
@@ -478,7 +555,7 @@ fn a_computer_cannot_replace_a_different_system_or_itself() {
 
 #[test]
 fn a_failing_step_rolls_every_step_back() {
-    for step in [Step::Names, Step::Bindings, Step::Lineage] {
+    for step in [Step::Names, Step::Bindings, Step::Alias, Step::Lineage] {
         let fake = Fake::new(Os::Linux);
         *fake.fail_apply.lock().unwrap() = Some(step);
         let (_dir, journal) = scratch_journal();
@@ -519,6 +596,7 @@ fn a_crash_at_every_step_is_rolled_forward_or_back_at_start() {
     for (step, forward) in [
         (Step::Names, false),
         (Step::Bindings, false),
+        (Step::Alias, false),
         (Step::Lineage, false),
         (Step::Quiet, true),
     ] {
@@ -567,8 +645,9 @@ fn a_crash_before_any_step_leaves_the_device_as_it_was() {
             archive_name: "main-before-x".into(),
             macos: false,
             fork_bindings: fake.export_bindings(FORK, "try-it").unwrap(),
-            target_bindings: Value::Null,
+            target_bindings: fake.export_bindings(MAIN, "main").unwrap(),
             fork_source: Some(MAIN.into()),
+            target_source: None,
             checkpoint: CheckpointRef {
                 id: "cp".into(),
                 name: "n".into(),
@@ -577,6 +656,7 @@ fn a_crash_before_any_step_leaves_the_device_as_it_was() {
             },
         },
         state: State::Promoting,
+        at: 1,
         steps: Vec::new(),
     };
     journal.save(&record).unwrap();
@@ -601,7 +681,6 @@ fn a_crash_during_an_undo_is_finished_at_start() {
     assert!(recover_all(fake.as_ref(), &journal).is_empty());
     let mut now = fake.snapshot();
     now.checkpoints.clear();
-    now.replaced_by.clear();
     let mut want = before;
     want.checkpoints.clear();
     assert_eq!(now, want);
@@ -641,25 +720,359 @@ fn quiet_parking_comes_back_unless_the_fork_changed_it() {
 }
 
 #[test]
-fn on_macos_the_proxy_identity_stays_with_the_computer_and_the_name_keyed_cache_resets() {
+fn on_macos_the_new_main_presents_mains_proxy_ca_and_hostname() {
     let fake = Fake::new(Os::Macos);
     let (_dir, journal) = scratch_journal();
     let before = fake.snapshot();
     let after = promoted(&fake, &journal);
     assert_eq!(
-        after.ca, before.ca,
-        "the proxy CA is keyed by computer id and does not move"
+        after.ca[FORK], before.ca[MAIN],
+        "the new main presents main's CA"
     );
+    assert_eq!(after.ca[MAIN], before.ca[MAIN], "the archive keeps its own");
+    assert_eq!(after.hostname[FORK], before.hostname[MAIN]);
+    assert_eq!(after.hostname[MAIN], before.hostname[FORK]);
     assert!(
         after.proxy_policy.is_empty(),
         "cached proxy policy keyed by name is dropped"
     );
     assert!(journal.all()[0].swap.macos);
-    assert_eq!(journal.all()[0].steps.len(), 5);
+    assert_eq!(journal.all()[0].steps.len(), 6);
     undo(fake.as_ref(), &journal, FORK, Duration::from_secs(1))
         .unwrap()
         .unwrap();
     let now = fake.snapshot();
     assert_eq!(now.ca, before.ca);
+    assert_eq!(now.hostname, before.hostname);
+    assert!(now.ca_aside.is_empty());
     assert!(now.proxy_policy.contains("main") && now.proxy_policy.contains("try-it"));
+}
+
+#[test]
+fn a_crash_while_carrying_the_ca_keeps_the_forks_own_for_the_undo() {
+    let fake = Fake::new(Os::Macos);
+    fake.crash_after(Step::MacosIdentity, false);
+    let (_dir, journal) = scratch_journal();
+    let before = stopped(fake.snapshot());
+    assert!(catch_unwind(AssertUnwindSafe(|| run(&fake, &journal, &request()))).is_err());
+    assert!(recover_all(fake.as_ref(), &journal).is_empty());
+    let mut now = fake.snapshot();
+    now.checkpoints.clear();
+    let mut want = before;
+    want.checkpoints.clear();
+    assert_eq!(now, want);
+}
+
+#[test]
+fn ports_changed_while_promoted_stay_with_the_main_role_on_undo() {
+    let fake = Fake::new(Os::Linux);
+    let (_dir, journal) = scratch_journal();
+    let before = fake.snapshot();
+    promoted(&fake, &journal);
+    fake.device
+        .lock()
+        .unwrap()
+        .ports
+        .insert(FORK.into(), json!(["added-while-main"]));
+    undo(fake.as_ref(), &journal, MAIN, Duration::from_secs(1))
+        .unwrap()
+        .unwrap();
+    let now = fake.snapshot();
+    assert_eq!(now.ports[MAIN], json!(["added-while-main"]));
+    assert_eq!(now.ports[FORK], before.ports[FORK]);
+}
+
+// MARK: Nested promotes and undo order
+
+const THIRD: &str = "id-third";
+
+fn add_third(fake: &Fake) {
+    let mut d = fake.device.lock().unwrap();
+    d.names.insert(THIRD.into(), "second-try".into());
+    d.running.insert(THIRD.into());
+    d.ca.insert(THIRD.into(), format!("ca-{THIRD}"));
+    d.ports.insert(THIRD.into(), json!(["port-of-third"]));
+    d.alias.insert(THIRD.into(), THIRD.into());
+    d.hostname.insert(THIRD.into(), "host-third".into());
+    d.proxy_policy.insert("second-try".into());
+    d.parked.insert(THIRD.into(), true);
+}
+
+fn no_duplicate_names(fake: &Fake) {
+    let names: Vec<String> = fake.snapshot().names.values().cloned().collect();
+    let mut sorted = names.clone();
+    sorted.sort();
+    sorted.dedup();
+    assert_eq!(
+        sorted.len(),
+        names.len(),
+        "two computers share a name: {names:?}"
+    );
+}
+
+fn promote_third(fake: &Fake, journal: &Journal) {
+    let outcome = promote(
+        fake,
+        &Lineage::new(
+            Arc::new(Source([(THIRD.to_owned(), FORK.to_owned())].into())),
+            journal.clone(),
+        ),
+        journal,
+        &Request {
+            fork: THIRD.into(),
+            target: None,
+            dry_run: false,
+        },
+        Duration::from_secs(1),
+    )
+    .unwrap();
+    assert!(matches!(outcome, Outcome::Promoted(_)), "{outcome:?}");
+}
+
+#[test]
+fn an_undo_never_reverts_a_promote_that_a_later_one_built_on() {
+    let fake = Fake::new(Os::Linux);
+    add_third(&fake);
+    let (_dir, journal) = scratch_journal();
+    let before = stopped(fake.snapshot());
+    promoted(&fake, &journal);
+    // The first fork is main; a fork of it replaces it in turn.
+    let journal_for_third = journal.clone();
+    {
+        let mut d = fake.device.lock().unwrap();
+        d.running.insert(THIRD.into());
+    }
+    promote_third(&fake, &journal_for_third);
+    no_duplicate_names(&fake);
+    assert_eq!(fake.name_of(THIRD), "main");
+    assert_eq!(fake.name_of(FORK), "main-before-20261105-1432-2");
+
+    // The archive of the first promote cannot swap back under the second.
+    let after_both = fake.snapshot();
+    let error = undo(fake.as_ref(), &journal, MAIN, Duration::from_secs(1)).unwrap_err();
+    assert!(error.contains("Undo that one first"), "{error}");
+    assert_eq!(fake.snapshot(), after_both, "nothing changed");
+    no_duplicate_names(&fake);
+
+    // Undoing in order puts everything back, never with two computers named main.
+    undo(fake.as_ref(), &journal, THIRD, Duration::from_secs(1))
+        .unwrap()
+        .unwrap();
+    no_duplicate_names(&fake);
+    assert_eq!(fake.name_of(FORK), "main");
+    undo(fake.as_ref(), &journal, MAIN, Duration::from_secs(1))
+        .unwrap()
+        .unwrap();
+    no_duplicate_names(&fake);
+    let mut now = fake.snapshot();
+    now.checkpoints.clear();
+    let mut want = before;
+    want.checkpoints.clear();
+    assert_eq!(now, want);
+}
+
+#[test]
+fn an_undo_by_the_fork_that_holds_main_picks_the_latest_promote() {
+    let fake = Fake::new(Os::Linux);
+    add_third(&fake);
+    let (_dir, journal) = scratch_journal();
+    promoted(&fake, &journal);
+    promote_third(&fake, &journal);
+    // FORK is in both records; the latest one (third over it) is the one to undo.
+    let undone = undo(fake.as_ref(), &journal, FORK, Duration::from_secs(1))
+        .unwrap()
+        .unwrap();
+    assert_eq!(undone.fork, "second-try");
+    assert_eq!(fake.name_of(THIRD), "second-try");
+    assert_eq!(fake.name_of(FORK), "main");
+}
+
+#[test]
+fn an_undo_refuses_when_the_promoted_computers_were_renamed_or_a_name_was_taken() {
+    let fake = Fake::new(Os::Linux);
+    let (_dir, journal) = scratch_journal();
+    promoted(&fake, &journal);
+    let promoted_state = fake.snapshot();
+
+    // The user renamed the new main.
+    fake.device
+        .lock()
+        .unwrap()
+        .names
+        .insert(FORK.into(), "renamed".into());
+    let renamed = fake.snapshot();
+    let error = undo(fake.as_ref(), &journal, FORK, Duration::from_secs(1)).unwrap_err();
+    assert!(error.contains("renamed"), "{error}");
+    assert_eq!(fake.snapshot(), renamed);
+
+    // Back to the promoted names, but another computer took the fork's old name.
+    fake.device
+        .lock()
+        .unwrap()
+        .names
+        .insert(FORK.into(), "main".into());
+    fake.device
+        .lock()
+        .unwrap()
+        .names
+        .insert("id-other".into(), "try-it".into());
+    let error = undo(fake.as_ref(), &journal, FORK, Duration::from_secs(1)).unwrap_err();
+    assert!(
+        error.contains("Another computer is named try-it"),
+        "{error}"
+    );
+    no_duplicate_names(&fake);
+    let mut expected = promoted_state;
+    expected.names.insert("id-other".into(), "try-it".into());
+    assert_eq!(fake.snapshot(), expected);
+    assert_eq!(journal.all()[0].state, State::Promoted);
+}
+
+#[test]
+fn a_fork_with_main_s_name_is_not_promoted() {
+    let fake = Fake::new(Os::Linux);
+    fake.device
+        .lock()
+        .unwrap()
+        .names
+        .insert(FORK.into(), "Main".into());
+    let (_dir, journal) = scratch_journal();
+    let before = fake.snapshot();
+    let Outcome::Refused { reason, .. } = run(&fake, &journal, &request()).unwrap() else {
+        panic!("not refused")
+    };
+    assert_eq!(reason, "name");
+    assert_eq!(fake.snapshot(), before);
+}
+
+#[test]
+fn undo_takes_the_newest_of_a_promote_and_a_keep() {
+    // (promote, keep, interrupted keep) -> whether the promote is undone
+    for (promoted, kept, pending, expected) in [
+        (Some(5), None, false, true),
+        (Some(5), Some(3), false, true),
+        (Some(5), Some(9), false, false),
+        (Some(5), Some(3), true, false),
+        (None, Some(3), false, false),
+        (None, None, false, false),
+    ] {
+        assert_eq!(
+            promote_is_newest(promoted, kept, pending),
+            expected,
+            "{promoted:?} {kept:?} {pending}"
+        );
+    }
+}
+
+// MARK: Lineage
+
+#[test]
+fn forks_of_the_old_main_resolve_to_the_new_main_and_back_after_an_undo() {
+    let fake = Fake::new(Os::Linux);
+    add_third(&fake);
+    let (_dir, journal) = scratch_journal();
+    let sources = Arc::new(Source(
+        [
+            (FORK.to_owned(), MAIN.to_owned()),
+            (THIRD.to_owned(), MAIN.to_owned()),
+            ("id-grandchild".to_owned(), "id-ancestor".to_owned()),
+        ]
+        .into(),
+    ));
+    let lineage = Lineage::new(sources.clone(), journal.clone());
+    let source = |id: &str| lineage.source(id).unwrap();
+    assert_eq!(source(THIRD).as_deref(), Some(MAIN));
+
+    promote(
+        fake.as_ref(),
+        &lineage,
+        &journal,
+        &request(),
+        Duration::from_secs(1),
+    )
+    .unwrap();
+    assert_eq!(
+        source(THIRD).as_deref(),
+        Some(FORK),
+        "a fork of the old main now belongs to the computer that is main"
+    );
+    assert_eq!(
+        source(FORK),
+        None,
+        "the new main has the old main's source (none)"
+    );
+    assert_eq!(source("id-grandchild").as_deref(), Some("id-ancestor"));
+
+    // `silo keep`/`fold` of the other fork now targets the new main.
+    let target = lineage.source(THIRD).unwrap().unwrap();
+    assert_eq!(fake.name_of(&target), "main");
+
+    undo(fake.as_ref(), &journal, FORK, Duration::from_secs(1))
+        .unwrap()
+        .unwrap();
+    assert_eq!(source(THIRD).as_deref(), Some(MAIN));
+    assert_eq!(source(FORK).as_deref(), Some(MAIN));
+}
+
+#[test]
+fn the_new_main_takes_the_old_mains_own_source() {
+    let fake = Fake::new(Os::Linux);
+    // Main was itself forked from an earlier computer.
+    let sources = Arc::new(Source(
+        [
+            (FORK.to_owned(), MAIN.to_owned()),
+            (MAIN.to_owned(), "id-origin".to_owned()),
+        ]
+        .into(),
+    ));
+    let (_dir, journal) = scratch_journal();
+    let lineage = Lineage::new(sources, journal.clone());
+    promote(
+        fake.as_ref(),
+        &lineage,
+        &journal,
+        &request(),
+        Duration::from_secs(1),
+    )
+    .unwrap();
+    assert_eq!(lineage.source(FORK).unwrap().as_deref(), Some("id-origin"));
+    assert_eq!(lineage.source(MAIN).unwrap().as_deref(), Some("id-origin"));
+}
+
+// MARK: Recovery holds the computers
+
+#[test]
+fn recovery_holds_both_computers_until_it_is_done() {
+    let fake = Fake::new(Os::Linux);
+    fake.crash_after(Step::Names, false);
+    let (_dir, journal) = scratch_journal();
+    assert!(catch_unwind(AssertUnwindSafe(|| run(&fake, &journal, &request()))).is_err());
+    let key = (FORK.to_owned(), MAIN.to_owned());
+
+    let held = std::cell::Cell::new(false);
+    recover_one(
+        fake.as_ref(),
+        &journal,
+        &key,
+        &|| {
+            held.set(true);
+            for id in [FORK, MAIN] {
+                assert!(
+                    lane::acquire(id, Duration::from_millis(30)).is_err(),
+                    "{id} must be held while it is recovered"
+                );
+            }
+        },
+        1,
+        Duration::ZERO,
+    )
+    .unwrap();
+    assert!(held.get());
+    assert!(journal.interrupted().is_empty());
+    for id in [FORK, MAIN] {
+        assert!(
+            lane::acquire(id, Duration::from_millis(30)).is_ok(),
+            "{id} is free again"
+        );
+    }
 }

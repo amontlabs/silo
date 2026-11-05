@@ -8,6 +8,25 @@ use serde_json::Value;
 
 use crate::changes::keep::CheckpointRef;
 
+/// Milliseconds since the epoch, never the same twice in one process, so two records made
+/// within a millisecond still order.
+pub fn now_millis() -> u128 {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static LAST: AtomicU64 = AtomicU64::new(0);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or_default();
+    let mut last = LAST.load(Ordering::SeqCst);
+    loop {
+        let next = now.max(last + 1);
+        match LAST.compare_exchange(last, next, Ordering::SeqCst, Ordering::SeqCst) {
+            Ok(_) => return u128::from(next),
+            Err(seen) => last = seen,
+        }
+    }
+}
+
 /// One identity move. Each is idempotent in both directions, so a crash can repeat it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -17,18 +36,25 @@ pub enum Step {
     /// Everything keyed by computer name: secret and GitHub assignments, published ports,
     /// URL names and SSH access. Main's stay under the name; the fork's own are dropped.
     Bindings,
-    /// The fork's lineage: it no longer has a source; the archive records what replaced it.
+    /// SSH access: main's saved connection reaches the new main (and the archive's reaches
+    /// the archive), because the alias entries are keyed by computer id.
+    Alias,
+    /// The fork's lineage. The record itself is the lineage: forks of the old main resolve to
+    /// the new main and the new main's source is the old main's (see `lineage`), so nothing
+    /// is stored apart from the journal.
     Lineage,
-    /// macOS only: the proxy CA and machine identity the network bootstrap expects.
+    /// macOS only: main's proxy CA and hostname go to the new main, and the archive gets the
+    /// fork's hostname.
     MacosIdentity,
     /// Quiet parking restored on the promoted fork. Best effort; it never fails a promote.
     Quiet,
 }
 
 impl Step {
-    pub const ORDER: [Step; 5] = [
+    pub const ORDER: [Step; 6] = [
         Step::Names,
         Step::Bindings,
+        Step::Alias,
         Step::Lineage,
         Step::MacosIdentity,
         Step::Quiet,
@@ -38,6 +64,7 @@ impl Step {
         match self {
             Step::Names => "names",
             Step::Bindings => "name-keyed settings",
+            Step::Alias => "SSH access",
             Step::Lineage => "lineage",
             Step::MacosIdentity => "macOS network identity",
             Step::Quiet => "quiet parking",
@@ -60,6 +87,9 @@ pub struct Swap {
     pub target_bindings: Value,
     /// Where the fork was forked from before it replaced `target_id`.
     pub fork_source: Option<String>,
+    /// Where main was forked from; the promoted fork's source from now on.
+    #[serde(default)]
+    pub target_source: Option<String>,
     pub checkpoint: CheckpointRef,
 }
 
@@ -80,6 +110,10 @@ pub enum State {
 pub struct Record {
     pub swap: Swap,
     pub state: State,
+    /// When the record was made, and again when the promote finished (milliseconds since the
+    /// epoch): orders the promotes and keeps of one computer.
+    #[serde(default)]
+    pub at: u128,
     /// Steps applied (while promoting) or still to revert (while undoing).
     pub steps: Vec<Step>,
 }
@@ -94,11 +128,11 @@ impl Journal {
         Self { dir: dir.into() }
     }
 
-    fn path(&self, fork_id: &str) -> PathBuf {
-        let safe: String = fork_id
+    fn path(&self, fork_id: &str, target_id: &str) -> PathBuf {
+        let safe: String = format!("{fork_id}.{target_id}")
             .chars()
             .map(|c| {
-                if c.is_ascii_alphanumeric() || c == '-' {
+                if c.is_ascii_alphanumeric() || c == '-' || c == '.' {
                     c
                 } else {
                     '_'
@@ -111,7 +145,7 @@ impl Journal {
     pub fn save(&self, record: &Record) -> Result<(), String> {
         let fail = |e: std::io::Error| format!("Cannot write the promote journal: {e}");
         fs::create_dir_all(&self.dir).map_err(fail)?;
-        let path = self.path(&record.swap.fork_id);
+        let path = self.path(&record.swap.fork_id, &record.swap.target_id);
         let temp = path.with_extension("tmp");
         let mut file = fs::File::create(&temp).map_err(fail)?;
         file.write_all(&serde_json::to_vec(record).unwrap_or_default())
@@ -134,7 +168,13 @@ impl Journal {
             .filter_map(|e| fs::read(e.path()).ok())
             .filter_map(|bytes| serde_json::from_slice(&bytes).ok())
             .collect();
-        records.sort_by(|a, b| a.swap.fork_id.cmp(&b.swap.fork_id));
+        records.sort_by(|a, b| {
+            (a.at, &a.swap.fork_id, &a.swap.target_id).cmp(&(
+                b.at,
+                &b.swap.fork_id,
+                &b.swap.target_id,
+            ))
+        });
         records
     }
 
@@ -144,6 +184,21 @@ impl Journal {
             .into_iter()
             .filter(|r| r.state != State::Over)
             .filter(|r| r.swap.fork_id == id || r.swap.target_id == id)
+            .collect()
+    }
+
+    /// The record of this fork over this old main, when one is on file.
+    pub fn get(&self, fork_id: &str, target_id: &str) -> Option<Record> {
+        self.all()
+            .into_iter()
+            .find(|r| r.swap.fork_id == fork_id && r.swap.target_id == target_id)
+    }
+
+    /// Records that are in force: promoted, or still being promoted or undone.
+    pub fn in_force(&self) -> Vec<Record> {
+        self.all()
+            .into_iter()
+            .filter(|r| r.state != State::Over)
             .collect()
     }
 

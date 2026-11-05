@@ -1207,7 +1207,7 @@ pub async fn undo(
     let target = engine.computer(computer).await?;
     engine
         .run_job(
-            &format!("Undoing the last keep of {}", target.name),
+            &format!("Undoing the latest keep or promote of {}", target.name),
             requests::changes_undo(ChangesUndoParams {
                 computer_id: target.id,
             }),

@@ -1,8 +1,11 @@
-//! The engine's [`PromoteEnv`]: names and ports through the macOS computer store, secret and
-//! GitHub assignments through their stores, checkpoints through the keep environment.
+//! The engine's [`PromoteEnv`]: names, ports, SSH entries, the proxy CA, hostnames and quiet
+//! parking through the macOS computer store, secret and GitHub assignments through their
+//! stores, checkpoints through the keep environment.
 //!
 //! Linux computers are not promoted yet: the bundled runtime names each sandbox after its
-//! computer and has no rename, so the names cannot be swapped (`unsupported`).
+//! computer and has no rename, so the names cannot be swapped (`unsupported`). Everything
+//! else a promote moves is already keyed so that it works for them once a rename exists
+//! (`docs/SiloUI-CHANGES.md`, "Making a fork main").
 
 use std::{any::Any, sync::Arc};
 
@@ -15,7 +18,7 @@ use crate::{
     },
     checkpoints::Service,
     macos_computers,
-    runtime::RuntimeHost,
+    runtime::{self, RuntimeHost},
 };
 
 pub struct EngineEnv {
@@ -31,6 +34,10 @@ fn ports(bindings: &Value) -> Vec<Value> {
         .unwrap_or_default()
 }
 
+fn field<'a>(bindings: &'a Value, name: &str) -> &'a Value {
+    bindings.get(name).unwrap_or(&Value::Null)
+}
+
 impl EngineEnv {
     pub fn new(host: Arc<dyn RuntimeHost>, service: Service, keep_journal: KeepJournal) -> Self {
         let guest = GuestEnv::new(host.clone(), service, keep_journal, Box::new(|_| {}));
@@ -42,15 +49,39 @@ impl EngineEnv {
             .macos_context()
             .ok_or_else(|| "macOS computers are unavailable on this device.".to_owned())
     }
+
+    /// The names of the Linux computers on this device.
+    fn linux_names(&self) -> Result<Vec<String>, String> {
+        let Ok(paths) = runtime::runtime_paths(self.host.as_ref()) else {
+            return Ok(Vec::new());
+        };
+        Ok(runtime::read_metadata(&paths.metadata)
+            .map_err(|error| error.to_string())?
+            .computers
+            .iter()
+            .map(|computer| computer.name().to_owned())
+            .collect())
+    }
 }
 
 impl PromoteEnv for EngineEnv {
     fn info(&self, id: &str) -> Result<Info, String> {
         let os = self.guest.os(id)?;
         if os == Os::Linux {
+            let name = runtime::runtime_paths(self.host.as_ref())
+                .ok()
+                .and_then(|paths| runtime::read_metadata(&paths.metadata).ok())
+                .and_then(|inventory| {
+                    inventory
+                        .computers
+                        .iter()
+                        .find(|computer| computer.id() == id)
+                        .map(|computer| computer.name().to_owned())
+                })
+                .unwrap_or_else(|| id.to_owned());
             return Ok(Info {
                 id: id.into(),
-                name: id.into(),
+                name,
                 os,
                 running: false,
                 busy: None,
@@ -74,11 +105,16 @@ impl PromoteEnv for EngineEnv {
     }
 
     fn name_in_use(&self, name: &str) -> bool {
-        let Ok(macos) = self.macos() else {
+        let macos = match self.macos() {
+            Ok(macos) => macos_computers::names(&macos),
+            Err(_) => Vec::new(),
+        };
+        let Ok(linux) = self.linux_names() else {
             return true;
         };
-        macos_computers::names(&macos)
+        macos
             .iter()
+            .chain(&linux)
             .any(|other| other.eq_ignore_ascii_case(name))
     }
 
@@ -107,10 +143,13 @@ impl PromoteEnv for EngineEnv {
     }
 
     fn export_bindings(&self, id: &str, name: &str) -> Result<Value, String> {
+        let macos = self.macos()?;
         Ok(json!({
             "secrets": crate::secrets::assigned_names(name)?,
             "github": crate::github::export_computer(name)?,
-            "ports": macos_computers::promote_export_ports(&self.macos()?, id)?,
+            "ports": macos_computers::promote_export_ports(&macos, id)?,
+            "hostnames": macos_computers::promote_read_hostnames(&macos, id)?,
+            "quiet": macos_computers::promote_export_quiet(id)?,
         }))
     }
 
@@ -133,15 +172,38 @@ impl PromoteEnv for EngineEnv {
                 )?;
                 macos_computers::promote_replace_ports(&macos, &swap.target_id, &[])
             }
-            // The journal keeps the lineage; the fork's checkpoint dependency stays as it is.
+            Step::Alias => macos_computers::promote_point_ssh_alias(
+                &macos,
+                &swap.target_id,
+                &swap.fork_id,
+                true,
+            ),
+            // The lineage is read from the journal (see `lineage`).
             Step::Lineage => Ok(()),
             Step::MacosIdentity => {
                 macos_computers::promote_check_identity(&swap.fork_id)?;
-                macos_computers::promote_check_identity(&swap.target_id)
+                macos_computers::promote_check_identity(&swap.target_id)?;
+                // The new main presents main's CA, which the trust set up for main already
+                // covers, and calls itself what main called itself. The archive takes the
+                // fork's hostname so the two never share one. The machine identifier stays
+                // with each disk: Apple ties a guest's hardware identity (and what it
+                // activated or signed in with) to the identifier it first booted with, and
+                // the two disks are swapped by name, never by hardware.
+                macos_computers::promote_carry_ca(&swap.target_id, &swap.fork_id)?;
+                macos_computers::promote_write_hostnames(
+                    &macos,
+                    &swap.fork_id,
+                    field(&swap.target_bindings, "hostnames"),
+                )?;
+                macos_computers::promote_write_hostnames(
+                    &macos,
+                    &swap.target_id,
+                    field(&swap.fork_bindings, "hostnames"),
+                )
             }
-            Step::Quiet => {
-                Err("Parked scheduled jobs are listed on the fork and were not restored.".into())
-            }
+            Step::Quiet => macos_computers::promote_restore_quiet(&macos, &swap.fork_id)
+                .map(|_| ())
+                .map_err(|error| format!("Parked scheduled jobs were not restored: {error}")),
         }
     }
 
@@ -153,16 +215,15 @@ impl PromoteEnv for EngineEnv {
                 macos_computers::promote_set_name(&macos, &swap.target_id, &swap.target_name)
             }
             Step::Bindings => {
-                macos_computers::promote_replace_ports(
-                    &macos,
-                    &swap.target_id,
-                    &ports(&swap.target_bindings),
-                )?;
-                macos_computers::promote_replace_ports(
-                    &macos,
-                    &swap.fork_id,
-                    &ports(&swap.fork_bindings),
-                )?;
+                // Ports changed while the fork was main belong to the main role, so they go
+                // back to the old main with it; the fork gets the ports it had. A repeat
+                // after a crash finds the fork's own ports already back and moves nothing.
+                let mine = ports(&swap.fork_bindings);
+                let now = macos_computers::promote_export_ports(&macos, &swap.fork_id)?;
+                if now != mine {
+                    macos_computers::promote_replace_ports(&macos, &swap.target_id, &now)?;
+                }
+                macos_computers::promote_replace_ports(&macos, &swap.fork_id, &mine)?;
                 let names: Vec<String> = swap
                     .fork_bindings
                     .get("secrets")
@@ -174,7 +235,31 @@ impl PromoteEnv for EngineEnv {
                     swap.fork_bindings.get("github").unwrap_or(&Value::Null),
                 )
             }
-            Step::Lineage | Step::MacosIdentity | Step::Quiet => Ok(()),
+            Step::Alias => macos_computers::promote_point_ssh_alias(
+                &macos,
+                &swap.target_id,
+                &swap.fork_id,
+                false,
+            ),
+            Step::MacosIdentity => {
+                macos_computers::promote_uncarry_ca(&swap.fork_id)?;
+                macos_computers::promote_write_hostnames(
+                    &macos,
+                    &swap.fork_id,
+                    field(&swap.fork_bindings, "hostnames"),
+                )?;
+                macos_computers::promote_write_hostnames(
+                    &macos,
+                    &swap.target_id,
+                    field(&swap.target_bindings, "hostnames"),
+                )
+            }
+            Step::Quiet => macos_computers::promote_repark_quiet(
+                &macos,
+                &swap.fork_id,
+                field(&swap.fork_bindings, "quiet"),
+            ),
+            Step::Lineage => Ok(()),
         }
     }
 }

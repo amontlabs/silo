@@ -6,10 +6,13 @@
 //! main's name, main becomes `main-before-<time>`, and everything keyed by name follows the
 //! name (see [`journal::Step`]). Each step is idempotent, so a crash is repaired at engine
 //! start by [`recover_all`]: rolled forward when every step that matters was applied, rolled
-//! back otherwise. `silo undo main` afterwards swaps the names and settings back.
+//! back otherwise. `silo undo main` afterwards swaps the names and settings back, but only
+//! the latest promote of a computer, and only while the two still carry the names the promote
+//! gave them.
 
 pub mod engine_env;
 pub mod journal;
+pub mod lineage;
 pub mod service;
 #[cfg(test)]
 mod tests;
@@ -20,6 +23,7 @@ use serde::Serialize;
 use serde_json::{json, Value};
 
 use super::keep::{lane, CheckpointRef, ManifestStore, Os};
+use journal::now_millis;
 pub use journal::{Journal, Record, State, Step, Swap};
 
 /// How long a promote or undo waits for another operation on one of the two computers.
@@ -118,6 +122,8 @@ impl Outcome {
 pub struct Undone {
     /// The computer that is main again.
     pub computer: String,
+    /// The name the promoted fork had before, and has again.
+    pub fork: String,
     pub archive: String,
     pub recovered: bool,
 }
@@ -126,7 +132,10 @@ impl Undone {
     pub fn to_json(&self) -> Value {
         json!({
             "status": "undone",
+            "kind": "promote",
             "computer": self.computer,
+            "fork": self.fork,
+            "archive": self.archive,
             "recovered": self.recovered,
             "changedSince": [],
         })
@@ -217,6 +226,16 @@ pub fn promote(
             ),
         ));
     }
+    if main.name.eq_ignore_ascii_case(&fork.name) {
+        return Ok(refuse(
+            report,
+            "name",
+            format!(
+                "{} and {} have the same name; Silo will not leave two computers named {}.",
+                fork.name, main.name, main.name
+            ),
+        ));
+    }
     for info in [&main, &fork] {
         if let Some(why) = &info.busy {
             return Ok(refuse(
@@ -274,11 +293,13 @@ pub fn promote(
         fork_bindings: env.export_bindings(&fork.id, &fork.name)?,
         target_bindings: env.export_bindings(&main.id, &main.name)?,
         fork_source: store.source(&fork.id)?,
+        target_source: store.source(&main.id)?,
         checkpoint,
     };
     let mut record = Record {
         swap,
         state: State::Promoting,
+        at: now_millis(),
         steps: Vec::new(),
     };
     journal.save(&record)?;
@@ -308,6 +329,7 @@ pub fn promote(
         journal.save(&record)?;
     }
     record.state = State::Promoted;
+    record.at = now_millis();
     journal.save(&record)?;
     report.notes.push(format!(
         "{} is now {}. {} was archived as {}; `silo undo {}` swaps them back.",
@@ -326,33 +348,73 @@ fn roll_back(env: &dyn PromoteEnv, journal: &Journal, record: &mut Record) -> Re
     journal.save(record)
 }
 
+/// The record `silo undo` would act on for `computer`: the latest promote in force that
+/// involves it.
+fn latest_for(journal: &Journal, computer: &str) -> Option<Record> {
+    journal
+        .live_for(computer)
+        .into_iter()
+        .filter(|r| matches!(r.state, State::Promoted | State::Undoing | State::Promoting))
+        .max_by_key(|r| r.at)
+}
+
+/// When the latest promote of `computer` finished, if one is in force. A keep made after it
+/// is newer, and `silo undo` takes the newest of the two.
+pub fn latest_at(journal: &Journal, computer: &str) -> Option<u128> {
+    latest_for(journal, computer).map(|r| r.at)
+}
+
+/// Whether `silo undo` takes back the promote rather than a keep: the promote is the newest of
+/// the two, and no interrupted keep is waiting to be put back.
+pub fn promote_is_newest(promoted: Option<u128>, kept: Option<u128>, keep_pending: bool) -> bool {
+    match (promoted, kept) {
+        (Some(promoted), Some(kept)) => !keep_pending && promoted > kept,
+        (Some(_), None) => !keep_pending,
+        (None, _) => false,
+    }
+}
+
 /// Swaps a promoted fork and the archived old main back. `Ok(None)` when no promote involves
 /// `computer`, so the caller falls back to the keep undo.
+///
+/// Only the latest promote that involves either computer is undone, and only while the fork
+/// still has the name it was given and the old main still has the archive name; otherwise
+/// nothing changes. Ports changed while promoted stay with the computer that holds the main
+/// role, which is the old main again afterwards (see `EngineEnv::revert`).
 pub fn undo(
     env: &dyn PromoteEnv,
     journal: &Journal,
     computer: &str,
     wait: Duration,
 ) -> Result<Option<Undone>, String> {
-    let Some(record) = journal
-        .live_for(computer)
-        .into_iter()
-        .find(|r| matches!(r.state, State::Promoted | State::Undoing | State::Promoting))
-    else {
+    let Some(record) = latest_for(journal, computer) else {
         return Ok(None);
     };
-    let (fork, target) = (record.swap.fork_id.clone(), record.swap.target_id.clone());
-    let _lanes = lanes(&fork, &target, wait)?;
+    let key = (record.swap.fork_id.clone(), record.swap.target_id.clone());
+    let _lanes = lanes(&key.0, &key.1, wait)?;
     // Look again with the lanes held: a recovery or another undo may have finished it.
     let Some(mut record) = journal
-        .live_for(&fork)
-        .into_iter()
-        .find(|r| r.swap.target_id == target)
+        .get(&key.0, &key.1)
+        .filter(|r| r.state != State::Over)
     else {
         return Ok(None);
     };
     let recovered = record.state != State::Promoted;
-    for id in [&fork, &target] {
+    if !recovered {
+        // A promote made after this one that involves either computer must be undone first.
+        if let Some(later) = journal.in_force().into_iter().find(|other| {
+            other.at > record.at
+                && [&key.0, &key.1]
+                    .iter()
+                    .any(|id| other.swap.fork_id == **id || other.swap.target_id == **id)
+        }) {
+            return Err(format!(
+                "{} replaced {} after this promote. Undo that one first (`silo undo {}`). Nothing was changed.",
+                later.swap.fork_name, later.swap.target_name, later.swap.fork_name
+            ));
+        }
+    }
+    for id in [&key.0, &key.1] {
         let info = env.info(id)?;
         if let Some(why) = info.busy {
             return Err(format!(
@@ -360,17 +422,40 @@ pub fn undo(
                 info.name
             ));
         }
-        if info.running {
+    }
+    if !recovered {
+        let (fork, main) = (env.info(&key.0)?, env.info(&key.1)?);
+        if fork.name != record.swap.target_name || main.name != record.swap.archive_name {
+            return Err(format!(
+                "{} and {} were renamed after the promote (they are {} and {}; the promote left {} and {}). Rename them back, then undo. Nothing was changed.",
+                record.swap.fork_name,
+                record.swap.target_name,
+                fork.name,
+                main.name,
+                record.swap.target_name,
+                record.swap.archive_name
+            ));
+        }
+        if env.name_in_use(&record.swap.fork_name) {
+            return Err(format!(
+                "Another computer is named {} now, so {} cannot get its name back. Nothing was changed.",
+                record.swap.fork_name, record.swap.target_name
+            ));
+        }
+    }
+    for id in [&key.0, &key.1] {
+        if env.info(id)?.running {
             env.stop(id)?;
         }
     }
     let _holds = (
-        env.hold(&fork, "Swapping back")?,
-        env.hold(&target, "Becoming main again")?,
+        env.hold(&key.0, "Swapping back")?,
+        env.hold(&key.1, "Becoming main again")?,
     );
     finish_undo(env, journal, &mut record)?;
     Ok(Some(Undone {
         computer: record.swap.target_name.clone(),
+        fork: record.swap.fork_name.clone(),
         archive: record.swap.archive_name.clone(),
         recovered,
     }))
@@ -420,6 +505,7 @@ fn recover_record(
                     }
                 }
                 record.state = State::Promoted;
+                record.at = now_millis();
                 journal.save(record)
             } else {
                 roll_back(env, journal, record)
@@ -429,47 +515,57 @@ fn recover_record(
     }
 }
 
-/// Computers with an interrupted promote or undo still to settle.
-pub fn interrupted_ids(journal: &Journal) -> Vec<String> {
+/// The fork and the old main of every interrupted promote or undo.
+pub fn interrupted_keys(journal: &Journal) -> Vec<(String, String)> {
     journal
         .interrupted()
         .into_iter()
-        .map(|r| r.swap.fork_id)
+        .map(|r| (r.swap.fork_id, r.swap.target_id))
         .collect()
 }
 
-/// Settles one interrupted record, with both lanes held. `held` runs once they are.
+/// Settles one interrupted record with both computers held from the start. `held` runs once
+/// they are, so the caller can let startup go on knowing neither computer can start. The
+/// recovery is tried up to `attempts` times, `pause` apart, with the computers still held
+/// (the runtime may not be ready yet at engine start).
 pub fn recover_one(
     env: &dyn PromoteEnv,
     journal: &Journal,
-    fork_id: &str,
+    key: &(String, String),
     held: &dyn Fn(),
+    attempts: u32,
+    pause: Duration,
 ) -> Result<(), String> {
-    let Some(mut record) = journal
-        .interrupted()
-        .into_iter()
-        .find(|r| r.swap.fork_id == fork_id)
-    else {
-        held();
-        return Ok(());
-    };
-    let _lanes = lanes(
-        &record.swap.fork_id,
-        &record.swap.target_id,
-        Duration::from_secs(30),
-    )?;
+    let _lanes = lanes(&key.0, &key.1, Duration::from_secs(30))?;
     held();
-    recover_record(env, journal, &mut record)
+    let mut last = Ok(());
+    for attempt in 0..attempts.max(1) {
+        let Some(mut record) = journal
+            .interrupted()
+            .into_iter()
+            .find(|r| r.swap.fork_id == key.0 && r.swap.target_id == key.1)
+        else {
+            return Ok(());
+        };
+        last = recover_record(env, journal, &mut record);
+        if last.is_ok() {
+            return Ok(());
+        }
+        if attempt + 1 < attempts {
+            std::thread::sleep(pause);
+        }
+    }
+    last
 }
 
 /// Settles every interrupted promote; returns the failures.
 pub fn recover_all(env: &dyn PromoteEnv, journal: &Journal) -> Vec<String> {
-    interrupted_ids(journal)
+    interrupted_keys(journal)
         .into_iter()
-        .filter_map(|id| {
-            recover_one(env, journal, &id, &|| {})
+        .filter_map(|key| {
+            recover_one(env, journal, &key, &|| {}, 1, Duration::ZERO)
                 .err()
-                .map(|e| format!("{id}: {e}"))
+                .map(|e| format!("{}: {e}", key.0))
         })
         .collect()
 }

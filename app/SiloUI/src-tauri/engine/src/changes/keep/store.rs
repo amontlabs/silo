@@ -72,6 +72,11 @@ impl ManifestStore for StoredManifests {
     }
 }
 
+/// The stores a keep or promote reads, with lineage following the promotes in force.
 pub fn production(host: Arc<dyn RuntimeHost>) -> Arc<dyn ManifestStore> {
-    Arc::new(StoredManifests::new(host))
+    let journal = crate::changes::promote::service::journal_for(host.engine_context().as_ref());
+    Arc::new(crate::changes::promote::lineage::Lineage::new(
+        Arc::new(StoredManifests::new(host)),
+        journal,
+    ))
 }
