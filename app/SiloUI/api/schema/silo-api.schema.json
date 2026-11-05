@@ -820,6 +820,57 @@
       ],
       "type": "object"
     },
+    "ChangesRequestParams": {
+      "description": "Ask for a fork to be reviewed without keeping it: `changes.request` stores a\n[`FoldRequest`] and changes nothing else.",
+      "properties": {
+        "deviceId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "forkId": {
+          "description": "The fork to be reviewed.",
+          "type": "string"
+        },
+        "reviewDigest": {
+          "description": "The `reviewDigest` of the `changes.diff` the request was made from.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "summary": {
+          "description": "A short text for the reviewer, usually the readable diff.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "targetId": {
+          "description": "The computer it would be kept into; defaults to the one the fork was made from.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "forkId"
+      ],
+      "type": "object"
+    },
+    "ChangesRequestResult": {
+      "properties": {
+        "request": {
+          "$ref": "#/$defs/FoldRequest"
+        }
+      },
+      "required": [
+        "request"
+      ],
+      "type": "object"
+    },
     "ChangesRole": {
       "description": "Which stored manifest a capture replaces.",
       "oneOf": [
@@ -4237,6 +4288,53 @@
       ],
       "type": "object"
     },
+    "FoldRequest": {
+      "description": "A recorded request to review a fork. The engine keeps it until it is answered.",
+      "properties": {
+        "createdAt": {
+          "type": "string"
+        },
+        "forkId": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "reviewDigest": {
+          "description": "The digest of the changes the requester reviewed; empty when none was given.",
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/FoldRequestStatus"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "target": {
+          "description": "The computer the fork would be kept into.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "forkId",
+        "target",
+        "createdAt",
+        "reviewDigest",
+        "summary",
+        "status"
+      ],
+      "type": "object"
+    },
+    "FoldRequestStatus": {
+      "oneOf": [
+        {
+          "const": "open",
+          "description": "Waiting for a review.",
+          "type": "string"
+        }
+      ]
+    },
     "Freshness": {
       "enum": [
         "fresh",
@@ -7068,6 +7166,7 @@
         "activity.setup.read",
         "changes.keep",
         "changes.promote",
+        "changes.request",
         "changes.undo",
         "changes.baseline",
         "changes.capture",
@@ -7265,6 +7364,22 @@
             },
             "params": {
               "$ref": "#/$defs/ChangesPromoteParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "changes.request",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/ChangesRequestParams"
             }
           },
           "required": [
@@ -9752,6 +9867,22 @@
             },
             "result": {
               "$ref": "#/$defs/JobStartResult"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "changes.request",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/ChangesRequestResult"
             }
           },
           "required": [
@@ -15272,6 +15403,12 @@
       "name": "changes.promote",
       "paramsType": "keep::ChangesPromoteParams",
       "resultType": "common::JobStartResult"
+    },
+    {
+      "kind": "command",
+      "name": "changes.request",
+      "paramsType": "keep::ChangesRequestParams",
+      "resultType": "keep::ChangesRequestResult"
     },
     {
       "kind": "job",

@@ -8,6 +8,7 @@ pub mod backup_controller;
 pub mod bridge_error;
 pub mod bundled_tools;
 pub mod changes;
+pub mod fold_requests;
 pub mod checkpoints;
 pub(crate) mod child_process;
 pub mod clipboard;
