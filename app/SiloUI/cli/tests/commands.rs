@@ -46,7 +46,7 @@ fn engine_with(names: &[&str]) -> (FakeEngine, Arc<Mutex<Vec<String>>>) {
                 .retain(|name| format!("id-{name}") != id);
             Ok(json!({"jobId": "job:1"}))
         }
-        "checkpoints.create" => Ok(json!({"jobId": "job:1"})),
+        "checkpoints.create" | "changes.capture" => Ok(json!({"jobId": "job:1"})),
         "operations.job.get" => Ok(finished(json!({
             "checkpoint": {"id": "cp9", "name": "saved", "kind": "manual"}
         }))),
@@ -95,7 +95,81 @@ async fn fork_names_the_source_and_waits_for_the_job() {
     assert_eq!(sent["computerId"], "id-main");
     assert_eq!(sent["checkpointId"], "cp1");
     assert_eq!(sent["newName"], name);
-    assert_eq!(engine.calls("operations.job.acknowledge").len(), 1);
+    assert_eq!(engine.calls("operations.job.acknowledge").len(), 2);
+    let record = &engine.calls("changes.capture")[0];
+    assert_eq!(record["computerId"], format!("id-{name}"));
+    assert_eq!(record["role"], "base");
+    assert_eq!(record["source"], "cp1");
+}
+
+#[tokio::test]
+async fn a_fork_without_a_record_still_forks() {
+    let engine = FakeEngine::start(|method, _| match method {
+        "computers.list" => Ok(listing(&[("main", "running"), ("try", "running")])),
+        "checkpoints.fork" => Ok(json!({"jobId": "job:1"})),
+        "changes.capture" => Err(("internal", "Start try first.".into())),
+        "operations.job.get" => Ok(finished(Value::Null)),
+        "operations.job.acknowledge" => Ok(Value::Null),
+        other => Err(("internal", format!("unexpected {other}"))),
+    });
+    let connected = Engine::connect(&engine.socket).await.unwrap();
+    let notes = Mutex::new(Vec::<String>::new());
+    let args = ForkArgs {
+        source: "main".into(),
+        name: Some("try".into()),
+        ..ForkArgs::default()
+    };
+    let fork = ops::fork(&connected, &args, None, &|line| {
+        notes.lock().unwrap().push(line.to_owned())
+    })
+    .await
+    .unwrap();
+    assert_eq!(fork["name"], "try");
+    assert!(notes
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|line| line.contains("no fork-time record")));
+}
+
+#[tokio::test]
+async fn diff_asks_the_engine_and_returns_the_document_with_its_text() {
+    let engine = FakeEngine::start(|method, _| match method {
+        "computers.list" => Ok(listing(&[("try", "running")])),
+        "changes.baseline" | "changes.diff" => Ok(json!({"jobId": "job:1"})),
+        "operations.job.get" => Ok(finished(json!({
+            "diff": {"format": 1, "other": []},
+            "text": "No changes.",
+            "baselineApplied": true, "baselineAvailable": true,
+            "baseCapturedAt": "a", "capturedAt": "b"
+        }))),
+        "operations.job.acknowledge" => Ok(Value::Null),
+        other => Err(("internal", format!("unexpected {other}"))),
+    });
+    let connected = Engine::connect(&engine.socket).await.unwrap();
+    let args = ops::DiffArgs {
+        computer: "try".into(),
+        max_lines: Some(30),
+        no_baseline: false,
+        compute_baseline: true,
+    };
+    let value = ops::diff(&connected, &args, &ignore).await.unwrap();
+    assert_eq!(value["format"], 1);
+    assert_eq!(value["text"], "No changes.");
+    assert_eq!(value["baselineApplied"], true);
+    assert_eq!(engine.calls("changes.baseline")[0]["computerId"], "id-try");
+    let sent = &engine.calls("changes.diff")[0];
+    assert_eq!(sent["maxLines"], 30);
+    assert_eq!(sent["baseline"], true);
+
+    let raw = ops::DiffArgs {
+        no_baseline: true,
+        compute_baseline: false,
+        ..args
+    };
+    ops::diff(&connected, &raw, &ignore).await.unwrap();
+    assert_eq!(engine.calls("changes.baseline").len(), 1);
+    assert_eq!(engine.calls("changes.diff")[1]["baseline"], false);
 }
 
 #[tokio::test]

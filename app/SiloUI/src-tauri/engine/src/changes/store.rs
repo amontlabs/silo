@@ -178,7 +178,9 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
 
 fn write_gz(path: &Path, text: &str) -> Result<(), String> {
     let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
-    encoder.write_all(text.as_bytes()).map_err(|e| e.to_string())?;
+    encoder
+        .write_all(text.as_bytes())
+        .map_err(|e| e.to_string())?;
     write_atomic(path, &encoder.finish().map_err(|e| e.to_string())?)
 }
 
@@ -205,7 +207,12 @@ mod tests {
         let store = Store::new(dir.path());
         assert_eq!(store.get("c1", Slot::Base).unwrap(), None);
         let meta = store
-            .put("c1", Slot::Base, "META\tformat\t2\nF\t/a\t1\t1\t-\n", Some("cp1"))
+            .put(
+                "c1",
+                Slot::Base,
+                "META\tformat\t2\nF\t/a\t1\t1\t-\n",
+                Some("cp1"),
+            )
             .unwrap();
         assert_eq!((meta.records, meta.source.as_deref()), (2, Some("cp1")));
         store.put("c1", Slot::Latest, "later\n", None).unwrap();

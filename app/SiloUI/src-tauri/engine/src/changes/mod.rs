@@ -1,6 +1,17 @@
-//! Whole-computer change capture, review and keeps (docs/v1/PHASE2_CONTRACT.md).
+//! Change capture for forks: collect guest manifests, parse them and compare them into a
+//! bucketed, reviewable [`diff::Diff`]. Format and contract: `docs/v1/PHASE2_CONTRACT.md`;
+//! output shape: `docs/SiloUI-CHANGES.md`.
 
 pub mod collect;
-pub mod model;
+pub mod diff;
+pub mod ignore;
+pub mod manifest;
 pub mod service;
 pub mod store;
+
+#[cfg(test)]
+mod tests;
+
+pub use diff::{diff, Diff};
+pub use ignore::IgnoreList;
+pub use manifest::Manifest;

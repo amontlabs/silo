@@ -309,11 +309,7 @@ fn collector_failure(
 }
 
 /// Reads a whole guest file in chunks that each fit one response.
-pub fn read_all(
-    runner: &dyn GuestRunner,
-    path: &str,
-    chunk: u64,
-) -> Result<Vec<u8>, GuestError> {
+pub fn read_all(runner: &dyn GuestRunner, path: &str, chunk: u64) -> Result<Vec<u8>, GuestError> {
     let mut bytes = Vec::new();
     loop {
         let offset = bytes.len() as u64;

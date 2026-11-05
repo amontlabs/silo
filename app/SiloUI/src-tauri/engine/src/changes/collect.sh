@@ -115,11 +115,18 @@ if have dpkg-query; then
   dpkg-query -W -f='${db:Status-Abbrev}\t${binary:Package}\t${Version}\n' 2>/dev/null |
     awk -F'\t' '$1 ~ /^ii/ {printf "PKG\tdpkg\t%s\t%s\n",$2,$3}'
   have apt-mark && apt-mark showmanual 2>/dev/null | awk 'NF{printf "PKGM\tdpkg\t%s\n",$1}'
+  # PKGD mgr name dep,dep: direct requirements (first alternative, no versions).
+  dpkg-query -W -f='${binary:Package}\t${Depends}\n' 2>/dev/null | awk -F'\t' '
+    NF>=2 && $2!="" { n=split($2,a,", "); out=""
+      for (i=1;i<=n;i++) { d=a[i]; sub(/ *\|.*/,"",d); sub(/ *\(.*/,"",d); sub(/:[a-z0-9]+$/,"",d)
+        if (d!="") out=out (out==""?"":",") d }
+      if (out!="") printf "PKGD\tdpkg\t%s\t%s\n",$1,out }'
 fi
 if have brew; then
   brew list --versions 2>/dev/null | awk 'NF>=2{v=$2; for(i=3;i<=NF;i++) v=v","$i; printf "PKG\tbrew\t%s\t%s\n",$1,v}'
   brew list --cask --versions 2>/dev/null | awk 'NF>=2{v=$2; for(i=3;i<=NF;i++) v=v","$i; printf "PKG\tbrew-cask\t%s\t%s\n",$1,v}'
   brew leaves 2>/dev/null | awk 'NF{printf "PKGM\tbrew\t%s\n",$1}'
+  brew deps --installed --direct 2>/dev/null | awk -F': ' 'NF>=2 && $2!="" {gsub(/ +/,",",$2); printf "PKGD\tbrew\t%s\t%s\n",$1,$2}'
 fi
 if have npm; then
   npm ls -g --depth=0 --json 2>/dev/null | awk '
@@ -129,6 +136,8 @@ fi
 for py in python3 python; do
   if have $py; then
     $py -m pip list --format=freeze 2>/dev/null | awk -F'==' 'NF==2{printf "PKG\tpip\t%s\t%s\n",$1,$2}'
+    $py -m pip list --format=freeze 2>/dev/null | awk -F'==' 'NF==2{print $1}' | xargs $py -m pip show 2>/dev/null |
+      awk '/^Name: /{n=$2} /^Requires: /{r=$0; sub(/^Requires: */,"",r); gsub(/, */,",",r); if (n!="" && r!="") printf "PKGD\tpip\t%s\t%s\n",n,r; n=""}'
     break
   fi
 done

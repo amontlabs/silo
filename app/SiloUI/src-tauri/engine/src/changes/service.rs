@@ -17,8 +17,9 @@ use silo_api::{
 
 use super::{
     collect::{self, GuestRunner, Options},
-    model::{self, IgnoreList, Manifest},
+    diff as diff_module,
     store::{self, Slot, Store},
+    IgnoreList, Manifest,
 };
 use crate::{
     context::{Audience, EngineContext},
@@ -27,6 +28,8 @@ use crate::{
 
 /// How long a fork sits idle before the baseline capture, counted from its base capture.
 pub const DEFAULT_IDLE_SECONDS: u64 = 60;
+/// The length of the readable diff unless the caller asks for another.
+pub const DEFAULT_MAX_LINES: usize = 15;
 
 #[derive(Clone, Debug)]
 pub enum Work {
@@ -82,7 +85,8 @@ fn internal(message: String) -> GuestError {
 }
 
 fn parse(text: &str) -> Result<Manifest, GuestError> {
-    Manifest::parse(text).map_err(|error| internal(format!("A stored manifest is unreadable: {error}")))
+    Manifest::parse(text)
+        .map_err(|error| internal(format!("A stored manifest is unreadable: {error}")))
 }
 
 fn no_base() -> GuestError {
@@ -106,7 +110,9 @@ pub fn run(
             max_lines,
             baseline,
             refresh,
-        } => diff(runner, store, computer, max_lines, baseline, refresh, options),
+        } => diff(
+            runner, store, computer, max_lines, baseline, refresh, options,
+        ),
         Work::Baseline {
             source,
             idle_seconds,
@@ -146,7 +152,11 @@ fn capture(
             store.get(computer, Slot::Base).map_err(internal)?,
         ),
     };
-    let text = fresh(runner, base.as_ref().map(|(text, _)| text.as_str()), options)?;
+    let text = fresh(
+        runner,
+        base.as_ref().map(|(text, _)| text.as_str()),
+        options,
+    )?;
     let meta = store
         .put(computer, slot, &text, source.as_deref())
         .map_err(internal)?;
@@ -167,10 +177,15 @@ fn diff(
     refresh: bool,
     options: &Options,
 ) -> Result<Value, GuestError> {
-    let (base_text, base_meta) = store.get(computer, Slot::Base).map_err(internal)?.ok_or_else(no_base)?;
+    let (base_text, base_meta) = store
+        .get(computer, Slot::Base)
+        .map_err(internal)?
+        .ok_or_else(no_base)?;
     let (current_text, current_meta) = if refresh {
         let text = fresh(runner, Some(&base_text), options)?;
-        let meta = store.put(computer, Slot::Latest, &text, None).map_err(internal)?;
+        let meta = store
+            .put(computer, Slot::Latest, &text, None)
+            .map_err(internal)?;
         (text, meta)
     } else {
         store
@@ -178,16 +193,21 @@ fn diff(
             .map_err(internal)?
             .ok_or_else(|| GuestError::not_found("This computer has not been captured yet."))?
     };
-    let ignore = IgnoreList::default();
+    let ignore = IgnoreList::builtin();
     let cached = match base_meta.source.as_deref() {
         Some(source) => store.get_baseline(source).map_err(internal)?,
         None => None,
     };
     let noise = match cached.as_ref().filter(|_| use_baseline) {
-        Some((before, idle)) => Some(model::diff(&parse(before)?, &parse(idle)?, None, &ignore)),
+        Some((before, idle)) => Some(diff_module::diff(
+            &parse(before)?,
+            &parse(idle)?,
+            None,
+            &ignore,
+        )),
         None => None,
     };
-    let result = model::diff(
+    let result = diff_module::diff(
         &parse(&base_text)?,
         &parse(&current_text)?,
         noise.as_ref(),
@@ -195,7 +215,7 @@ fn diff(
     );
     to_value(ChangesDiffResult {
         diff: to_value(&result)?,
-        text: result.render(max_lines.map(|lines| lines as usize)),
+        text: result.render(max_lines.map_or(DEFAULT_MAX_LINES, |lines| lines as usize)),
         base_captured_at: base_meta.captured_at,
         captured_at: current_meta.captured_at,
         baseline_applied: noise.is_some(),
@@ -211,7 +231,10 @@ fn baseline(
     idle_seconds: Option<u64>,
     options: &Options,
 ) -> Result<Value, GuestError> {
-    let (base_text, base_meta) = store.get(computer, Slot::Base).map_err(internal)?.ok_or_else(no_base)?;
+    let (base_text, base_meta) = store
+        .get(computer, Slot::Base)
+        .map_err(internal)?
+        .ok_or_else(no_base)?;
     let source = source.or(base_meta.source.clone()).ok_or_else(|| {
         GuestError::invalid("Name the checkpoint this computer was forked from (source).")
     })?;
@@ -262,7 +285,9 @@ pub fn start(
             &Options::default(),
         );
         let _ = match outcome {
-            Ok(value) => crate::jobs::finish_with_result(context.as_ref(), id, value, Audience::All),
+            Ok(value) => {
+                crate::jobs::finish_with_result(context.as_ref(), id, value, Audience::All)
+            }
             Err(error) => crate::jobs::finish_with_error(
                 context.as_ref(),
                 id,

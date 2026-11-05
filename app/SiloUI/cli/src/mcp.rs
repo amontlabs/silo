@@ -14,7 +14,7 @@ use crate::{
     config::Project,
     engine::Engine,
     error::CliError,
-    ops::{self, ExecArgs, ForkArgs},
+    ops::{self, DiffArgs, ExecArgs, ForkArgs},
 };
 
 #[derive(Clone)]
@@ -66,6 +66,17 @@ pub struct CheckpointParams {
     pub name: Option<String>,
     /// manual, automatic or before-keep.
     pub kind: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct DiffParams {
+    /// The fork to look at.
+    pub computer: String,
+    /// Cut the text to this many lines (default 15).
+    pub max_lines: Option<u32>,
+    /// Include the idle fork's own background changes.
+    #[serde(default)]
+    pub no_baseline: bool,
 }
 
 fn show(result: Result<Value, CliError>) -> Result<String, String> {
@@ -136,6 +147,24 @@ impl SiloMcp {
                     recipe,
                 };
                 ops::fork(&self.engine().await?, &args, settings.as_ref(), &|_| {}).await
+            }
+            .await,
+        )
+    }
+
+    #[tool(
+        description = "Show what changed in a computer since it was forked, by bucket (code, packages, settings and files, databases, other, not kept). Returns the diff document and its readable text."
+    )]
+    async fn diff(&self, Parameters(params): Parameters<DiffParams>) -> Result<String, String> {
+        show(
+            async {
+                let args = DiffArgs {
+                    computer: params.computer,
+                    max_lines: params.max_lines,
+                    no_baseline: params.no_baseline,
+                    compute_baseline: false,
+                };
+                ops::diff(&self.engine().await?, &args, &|_| {}).await
             }
             .await,
         )

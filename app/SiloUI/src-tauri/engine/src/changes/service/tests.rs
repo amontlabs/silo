@@ -47,7 +47,12 @@ impl GuestRunner for ScriptedGuest {
     ) -> Result<ExecOut, GuestError> {
         match argv[0].as_str() {
             "sh" if argv[2].starts_with("d=$1\numask") => {
-                let next = self.captures.lock().unwrap().pop_front().expect("a capture is left");
+                let next = self
+                    .captures
+                    .lock()
+                    .unwrap()
+                    .pop_front()
+                    .expect("a capture is left");
                 let mut encoder =
                     flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
                 encoder.write_all(next.as_bytes()).unwrap();
@@ -85,6 +90,22 @@ fn manifest(files: &[(&str, &str)]) -> String {
     text
 }
 
+/// `path:change` of every entry of the diff's Other changed list.
+fn other(result: &Value) -> Vec<String> {
+    result["diff"]["other"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|entry| {
+            format!(
+                "{}:{}",
+                entry["path"].as_str().unwrap(),
+                entry["change"].as_str().unwrap()
+            )
+        })
+        .collect()
+}
+
 fn capture_work(role: ChangesRole, source: Option<&str>) -> Work {
     Work::Capture {
         role,
@@ -105,18 +126,31 @@ fn a_diff_compares_the_current_capture_with_the_fork_time_base() {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::new(dir.path());
     let guest = ScriptedGuest::new(&[
-        &manifest(&[("/etc/a", "1\t1\t-"), ("/etc/b", "1\t1\t-")]),
-        &manifest(&[("/etc/a", "2\t2\t-"), ("/etc/b", "1\t1\t-"), ("/etc/c", "1\t1\t-")]),
+        &manifest(&[("/srv/data/a", "1\t1\t-"), ("/srv/data/b", "1\t1\t-")]),
+        &manifest(&[
+            ("/srv/data/a", "2\t2\t-"),
+            ("/srv/data/b", "1\t1\t-"),
+            ("/srv/data/c", "1\t1\t-"),
+        ]),
     ]);
     let options = Options::default();
-    let base = run(&guest, &store, "c1", capture_work(ChangesRole::Base, Some("cp1")), &options).unwrap();
+    let base = run(
+        &guest,
+        &store,
+        "c1",
+        capture_work(ChangesRole::Base, Some("cp1")),
+        &options,
+    )
+    .unwrap();
     assert_eq!(base["role"], "base");
     let result = run(&guest, &store, "c1", diff_work(true, true), &options).unwrap();
-    assert_eq!(result["diff"]["added"], serde_json::json!(["/etc/c"]));
-    assert_eq!(result["diff"]["changed"], serde_json::json!(["/etc/a"]));
+    assert_eq!(
+        other(&result),
+        ["/srv/data/a:modified", "/srv/data/c:added"]
+    );
     assert_eq!(result["baselineAvailable"], false);
     assert_eq!(result["baselineApplied"], false);
-    assert!(result["text"].as_str().unwrap().contains("+ /etc/c"));
+    assert!(result["text"].as_str().unwrap().contains("/srv/data"));
     // The capture was stored: the same comparison without a new scan.
     let again = run(&guest, &store, "c1", diff_work(true, false), &options).unwrap();
     assert_eq!(again["diff"], result["diff"]);
@@ -127,9 +161,23 @@ fn without_a_base_there_is_nothing_to_compare() {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::new(dir.path());
     let guest = ScriptedGuest::new(&[]);
-    let error = run(&guest, &store, "c9", diff_work(true, true), &Options::default()).unwrap_err();
+    let error = run(
+        &guest,
+        &store,
+        "c9",
+        diff_work(true, true),
+        &Options::default(),
+    )
+    .unwrap_err();
     assert_eq!(error.code, ErrorCode::NotFound);
-    let error = run(&guest, &store, "c9", diff_work(true, false), &Options::default()).unwrap_err();
+    let error = run(
+        &guest,
+        &store,
+        "c9",
+        diff_work(true, false),
+        &Options::default(),
+    )
+    .unwrap_err();
     assert_eq!(error.code, ErrorCode::NotFound);
 }
 
@@ -137,15 +185,19 @@ fn without_a_base_there_is_nothing_to_compare() {
 fn the_cached_baseline_is_subtracted_from_a_diff() {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::new(dir.path());
-    let start = manifest(&[("/etc/a", "1\t1\t-"), ("/var/log/noise", "1\t1\t-")]);
-    let idle = manifest(&[("/etc/a", "1\t1\t-"), ("/var/log/noise", "9\t9\t-")]);
-    let later = manifest(&[
-        ("/etc/a", "2\t2\t-"),
-        ("/var/log/noise", "12\t12\t-"),
-    ]);
+    let start = manifest(&[("/srv/data/a", "1\t1\t-"), ("/srv/data/noise", "1\t1\t-")]);
+    let idle = manifest(&[("/srv/data/a", "1\t1\t-"), ("/srv/data/noise", "9\t9\t-")]);
+    let later = manifest(&[("/srv/data/a", "2\t2\t-"), ("/srv/data/noise", "12\t12\t-")]);
     let guest = ScriptedGuest::new(&[&start, &idle, &later]);
     let options = Options::default();
-    run(&guest, &store, "fork", capture_work(ChangesRole::Base, Some("cp1")), &options).unwrap();
+    run(
+        &guest,
+        &store,
+        "fork",
+        capture_work(ChangesRole::Base, Some("cp1")),
+        &options,
+    )
+    .unwrap();
     let baseline = run(
         &guest,
         &store,
@@ -161,7 +213,7 @@ fn the_cached_baseline_is_subtracted_from_a_diff() {
     assert_eq!(baseline["idleSeconds"], 0);
     let result = run(&guest, &store, "fork", diff_work(true, true), &options).unwrap();
     assert_eq!(result["baselineApplied"], true);
-    assert_eq!(result["diff"]["changed"], serde_json::json!(["/etc/a"]));
+    assert_eq!(other(&result), ["/srv/data/a:modified"]);
 
     // `--no-baseline` shows the idle noise too.
     let guest = ScriptedGuest::new(&[&later]);
@@ -169,8 +221,8 @@ fn the_cached_baseline_is_subtracted_from_a_diff() {
     assert_eq!(raw["baselineApplied"], false);
     assert_eq!(raw["baselineAvailable"], true);
     assert_eq!(
-        raw["diff"]["changed"],
-        serde_json::json!(["/etc/a", "/var/log/noise"])
+        other(&raw),
+        ["/srv/data/a:modified", "/srv/data/noise:modified"]
     );
 }
 
@@ -180,7 +232,14 @@ fn a_baseline_needs_to_know_its_source() {
     let store = Store::new(dir.path());
     let guest = ScriptedGuest::new(&[&manifest(&[])]);
     let options = Options::default();
-    run(&guest, &store, "forkb", capture_work(ChangesRole::Base, None), &options).unwrap();
+    run(
+        &guest,
+        &store,
+        "forkb",
+        capture_work(ChangesRole::Base, None),
+        &options,
+    )
+    .unwrap();
     let work = Work::Baseline {
         source: None,
         idle_seconds: Some(0),
@@ -211,7 +270,10 @@ fn a_computer_is_captured_one_at_a_time() {
 fn a_started_job_finishes_with_the_work_result() {
     let dir = tempfile::tempdir().unwrap();
     let context = crate::guest::test_support::RecordingContext::new(dir.path());
-    let guest = Arc::new(ScriptedGuest::new(&[&manifest(&[("/etc/a", "1\t1\t-")])]));
+    let guest = Arc::new(ScriptedGuest::new(&[&manifest(&[(
+        "/srv/data/a",
+        "1\t1\t-",
+    )])]));
     let job = start(
         context.clone(),
         guest,
