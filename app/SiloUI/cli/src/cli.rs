@@ -12,6 +12,8 @@ use crate::{
     config::{Project, Recipe, Settings},
     engine::{default_socket, Engine},
     error::CliError,
+    fanout::{self, ManyArgs},
+    flows, folder,
     ops::{self, CreateArgs, DiffArgs, ExecArgs, ForkArgs, Platform},
     render,
 };
@@ -59,8 +61,11 @@ pub enum Command {
     Fork(ForkCommand),
     /// Keep a fork's changes into the computer it came from.
     Fold(FoldCommand),
-    /// Put a computer back to before its latest keep.
-    Undo { computer: String },
+    /// Put a computer back to before its latest keep, or a folder back to before its latest fold.
+    Undo {
+        /// A computer, a fork made from a folder, or the folder's path.
+        computer: String,
+    },
     /// Show what changed in a computer since it was forked.
     Diff(DiffCommand),
     /// Throw a computer away.
@@ -142,10 +147,23 @@ pub enum RecipeCommand {
 
 #[derive(Args, Debug)]
 pub struct ForkCommand {
-    /// The computer to copy; with --recipe, the new fork's name.
+    /// The computer to copy, or a folder (./repo) to copy into a new Linux fork; with
+    /// --recipe, the new fork's name.
     pub source: String,
+    /// The fork's name; with -n, the prefix of the names (`<prefix>-1`, `<prefix>-2`).
     #[arg(long)]
     pub name: Option<String>,
+    /// Make this many forks of the same checkpoint at once and start them.
+    #[arg(
+        short = 'n',
+        long = "count",
+        value_name = "N",
+        conflicts_with = "recipe"
+    )]
+    pub count: Option<u32>,
+    /// A command to run in each fork once it is started (after `--`); the fork is left for review.
+    #[arg(last = true, value_name = "COMMAND")]
+    pub command: Vec<String>,
     /// Fork from this checkpoint instead of the current state.
     #[arg(long, value_name = "ID")]
     pub checkpoint: Option<String>,
@@ -183,6 +201,9 @@ pub struct FoldCommand {
     /// A recipe whose keep: section applies.
     #[arg(long, value_name = "PATH")]
     pub recipe_file: Option<PathBuf>,
+    /// Ask for a review instead of keeping: records a fold request for the fork and prints its id.
+    #[arg(long, conflicts_with_all = ["promote", "dry_run"])]
+    pub request: bool,
 }
 
 #[derive(Args, Debug)]
@@ -278,6 +299,9 @@ pub async fn run(cli: Cli, working_directory: &Path) -> Result<i32, CliError> {
     let recipe = match &cli.command {
         Command::Fork(fork) => match &fork.recipe {
             Some(name) => Some(project.named_recipe(name)?),
+            None if folder::is_folder(&fork.source) => {
+                Some(project.named_recipe(crate::config::DEFAULT_RECIPE)?)
+            }
             None => ops::resolve_recipe(fork.recipe_file.as_deref(), &project)?,
         },
         Command::Up(up) => Some(
@@ -294,7 +318,7 @@ pub async fn run(cli: Cli, working_directory: &Path) -> Result<i32, CliError> {
     let engine = Engine::connect(&socket).await?;
     let json = cli.json;
     tokio::select! {
-        result = dispatch(&engine, cli.command, json, settings, recipe, &project) => result,
+        result = dispatch(&engine, cli.command, json, settings, recipe, &project, working_directory) => result,
         _ = tokio::signal::ctrl_c() => {
             match engine.last_job() {
                 Some(job) => eprintln!("Interrupted. {}", Engine::reattach_hint(&job)),
@@ -312,6 +336,7 @@ async fn dispatch(
     settings: Option<Settings>,
     recipe: Option<Recipe>,
     project: &Project,
+    working_directory: &Path,
 ) -> Result<i32, CliError> {
     let progress = &stderr_progress;
     match command {
@@ -374,6 +399,33 @@ async fn dispatch(
             emit(json, &value, |v| render::computer_line("Set up", v));
         }
         Command::Fork(fork) => {
+            if fork.recipe.is_none() && folder::is_folder(&fork.source) {
+                return fork_folder(
+                    engine,
+                    fork,
+                    json,
+                    settings.as_ref(),
+                    recipe,
+                    working_directory,
+                )
+                .await;
+            }
+            if fork.count.is_some() || !fork.command.is_empty() {
+                let args = ManyArgs {
+                    fork: ForkArgs {
+                        source: fork.source,
+                        name: fork.name,
+                        checkpoint: fork.checkpoint,
+                        secrets: fork.secrets,
+                        recipe,
+                        recipe_name: None,
+                    },
+                    count: fork.count.unwrap_or(1),
+                    command: fork.command,
+                    cwd: None,
+                };
+                return fork_many(engine, &args, json, settings.as_ref()).await;
+            }
             let recipe_name = fork.recipe;
             let (source, name) = match &recipe_name {
                 Some(_) => (String::new(), Some(fork.source)),
@@ -404,7 +456,7 @@ async fn dispatch(
         }
         Command::Fold(fold) => {
             let keep = ops::keep_hooks(recipe.as_ref());
-            let value = ops::fold(
+            let value = flows::fold(
                 engine,
                 &fold.fork,
                 fold.into.as_deref(),
@@ -414,15 +466,21 @@ async fn dispatch(
                     data_ok: fold.data_ok,
                     reviewed: fold.reviewed,
                 },
+                fold.request,
                 progress,
             )
             .await?;
+            if value["status"] == "requested" {
+                emit(json, &value, render::requested);
+                return Ok(0);
+            }
             emit(json, &value, render::fold);
             return Ok(if value["status"] == "refused" { 2 } else { 0 });
         }
         Command::Undo { computer } => {
-            let value = ops::undo(engine, &computer, progress).await?;
+            let value = flows::undo(engine, &computer, working_directory, progress).await?;
             emit(json, &value, render::undo);
+            return Ok(if value["status"] == "refused" { 2 } else { 0 });
         }
         Command::Diff(diff) => {
             let args = DiffArgs {
@@ -515,6 +573,107 @@ async fn dispatch(
         Command::Mcp => unreachable!("handled above"),
     }
     Ok(0)
+}
+
+fn write_all(mut stream: impl Write, bytes: &[u8]) {
+    let _ = stream.write_all(bytes);
+    let _ = stream.flush();
+}
+
+/// Streams a command's output, one fork's as it comes or several with the fork's name in
+/// front of each line. Nothing is written in JSON mode, where the result carries the text.
+fn output_sink(json: bool, several: bool) -> impl Fn(&str, bool, &[u8]) + Sync {
+    let prefixer = std::sync::Mutex::new(fanout::Prefixer::default());
+    move |name: &str, is_err: bool, bytes: &[u8]| {
+        if json {
+            return;
+        }
+        let bytes = if several {
+            prefixer.lock().unwrap().push(name, is_err, bytes)
+        } else {
+            bytes.to_vec()
+        };
+        if is_err {
+            write_all(std::io::stderr(), &bytes);
+        } else {
+            write_all(std::io::stdout(), &bytes);
+        }
+    }
+}
+
+async fn fork_many(
+    engine: &Engine,
+    args: &ManyArgs,
+    json: bool,
+    settings: Option<&Settings>,
+) -> Result<i32, CliError> {
+    let several = args.count > 1;
+    let sink = output_sink(json, several);
+    let value = fanout::fork_many(engine, args, settings, &stderr_progress, &sink).await?;
+    if json {
+        emit(true, &value, |_| String::new());
+    } else if args.command.is_empty() || several {
+        println!("{}", render::forks(&value));
+    } else {
+        // A single command's output is on stdout, so the summary goes to stderr.
+        eprintln!("{}", render::forks(&value));
+    }
+    Ok(fanout::exit_code(&value))
+}
+
+async fn fork_folder(
+    engine: &Engine,
+    fork: ForkCommand,
+    json: bool,
+    settings: Option<&Settings>,
+    recipe: Option<Recipe>,
+    working_directory: &Path,
+) -> Result<i32, CliError> {
+    if fork.count.unwrap_or(1) != 1 {
+        return Err(CliError::new(
+            "-n makes forks of a computer; a folder is copied into one fork.",
+        ));
+    }
+    if fork.checkpoint.is_some() {
+        return Err(CliError::new("--checkpoint does not apply to a folder."));
+    }
+    let recipe = recipe.ok_or_else(|| CliError::new("No recipe was loaded."))?;
+    let directory = working_directory.join(&fork.source);
+    let value = folder::fork_folder(
+        engine,
+        &directory,
+        fork.name.as_deref(),
+        &recipe,
+        settings,
+        &fork.secrets,
+        &stderr_progress,
+    )
+    .await?;
+    if fork.command.is_empty() {
+        emit(json, &value, render::folder_fork);
+        return Ok(0);
+    }
+    let computer = engine
+        .computer(value["name"].as_str().unwrap_or_default())
+        .await?;
+    let sink = output_sink(json, false);
+    let ran = fanout::exec_streaming(
+        engine,
+        &computer,
+        &fork.command,
+        value["guestPath"].as_str(),
+        &stderr_progress,
+        |is_err, bytes| sink(&computer.name, is_err, bytes),
+    )
+    .await?;
+    if json {
+        let mut value = value;
+        value["exitCode"] = serde_json::json!(ran.exit_code);
+        emit(true, &value, |_| String::new());
+    } else {
+        eprintln!("{}", render::folder_fork(&value));
+    }
+    Ok(ran.exit_code)
 }
 
 /// Prints an exec result and returns the process exit code. The text mode writes the

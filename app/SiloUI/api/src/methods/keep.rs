@@ -186,7 +186,9 @@ wire_struct! {
     }
 }
 
-#[derive(Clone, Copy, Debug, serde::Deserialize, PartialEq, Eq, serde::Serialize, schemars::JsonSchema)]
+#[derive(
+    Clone, Copy, Debug, serde::Deserialize, PartialEq, Eq, serde::Serialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "kebab-case")]
 pub enum FoldRequestStatus {
     /// Waiting for a review.

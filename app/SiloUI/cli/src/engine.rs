@@ -270,6 +270,30 @@ impl Engine {
         all.get(computer_id)?.as_str().map(str::to_owned)
     }
 
+    /// Saves `value` under `key` in the CLI's memory file `file`.
+    pub fn remember(&self, file: &str, key: &str, value: Value) -> Result<(), CliError> {
+        let path = self.memory.join(file);
+        let mut all = self.recall_all(file);
+        all.insert(key.to_owned(), value);
+        let bytes = serde_json::to_vec_pretty(&all)
+            .map_err(|error| CliError::new(format!("Cannot save {file}: {error}")))?;
+        std::fs::write(&path, bytes)
+            .map_err(|error| CliError::new(format!("Cannot save {}: {error}", path.display())))
+    }
+
+    /// What was saved under `key` in the memory file `file`.
+    pub fn recall(&self, file: &str, key: &str) -> Option<Value> {
+        self.recall_all(file).remove(key)
+    }
+
+    /// Every entry of the memory file `file`.
+    pub fn recall_all(&self, file: &str) -> serde_json::Map<String, Value> {
+        std::fs::read(self.memory.join(file))
+            .ok()
+            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+            .unwrap_or_default()
+    }
+
     pub fn is_closed(&self) -> bool {
         self.client.is_closed()
     }

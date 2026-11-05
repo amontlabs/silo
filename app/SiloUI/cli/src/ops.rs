@@ -410,7 +410,7 @@ pub fn default_fork_name(source: &str, short_id: &str) -> String {
     format!("{source}-{short_id}")
 }
 
-fn short_id() -> String {
+pub(crate) fn short_id() -> String {
     uuid::Uuid::new_v4().simple().to_string()[..6].to_owned()
 }
 
@@ -1061,6 +1061,12 @@ pub async fn promote(
     progress: Progress<'_>,
 ) -> Result<Value, CliError> {
     let fork = engine.computer(fork).await?;
+    if let Some(record) = crate::folder::record_for(engine, &fork.id) {
+        return Err(CliError::new(format!(
+            "{} was made from {}; it cannot become main. Fold it into that folder instead.",
+            fork.name, record.path
+        )));
+    }
     let target_id = match into {
         Some(name) => Some(engine.computer(name).await?.id),
         None => None,
@@ -1297,7 +1303,7 @@ fn unchanged_script(macos: bool) -> String {
 
 /// The warm checkpoint of `source` when `source` is `main`, runs, and nothing was written
 /// since the checkpoint was taken. Any doubt means no warm checkpoint.
-async fn warm_checkpoint(engine: &Engine, source: &Computer) -> Option<String> {
+pub(crate) async fn warm_checkpoint(engine: &Engine, source: &Computer) -> Option<String> {
     if source.name != MAIN || source.state != "running" {
         return None;
     }
