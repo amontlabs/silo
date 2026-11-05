@@ -69,3 +69,17 @@ wire_struct! { NetworkOpenParams { computer_id: String, #[serde(default, skip_se
 wire_struct! { NetworkOpenResult { url: String } }
 pub type NetworkChangeResult = ();
 pub type NetworkTargetParams = ComputerTargetParams;
+
+wire_struct! {
+    NetworkUrl {
+        port: u16,
+        host: String,
+        url: String,
+    }
+}
+wire_struct! {
+    NetworkUrlsResult {
+        computer_id: String,
+        urls: Vec<NetworkUrl>,
+    }
+}

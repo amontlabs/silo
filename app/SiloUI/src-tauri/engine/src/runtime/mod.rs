@@ -798,6 +798,8 @@ struct ApplicationComputer {
     checkpoint_operation: Option<checkpoints::Operation>,
     #[serde(skip_serializing_if = "Option::is_none")]
     unfinished_restore: Option<checkpoints::UnfinishedRestore>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    quiet: Option<silo_api::methods::computers::QuietState>,
 }
 
 #[derive(Clone, Copy, Debug, Serialize)]
@@ -1246,11 +1248,12 @@ impl RuntimeRunner for SetupRunner<'_> {
     }
 }
 
-pub fn run_msb(
+/// The production runner's refusal to start, restart or exec a computer that still waits for
+/// an explicit Start from a checkpoint.
+pub(super) fn refuse_pending_start(
     paths: &RuntimePaths,
     args: &[String],
-    timeout: Duration,
-) -> Result<CommandOutput, RuntimeError> {
+) -> Result<(), RuntimeError> {
     if matches!(
         args.first().map(String::as_str),
         Some("start" | "restart" | "exec")
@@ -1271,6 +1274,15 @@ pub fn run_msb(
             }
         }
     }
+    Ok(())
+}
+
+pub fn run_msb(
+    paths: &RuntimePaths,
+    args: &[String],
+    timeout: Duration,
+) -> Result<CommandOutput, RuntimeError> {
+    refuse_pending_start(paths, args)?;
     run_msb_with_progress(paths, args, timeout, &|_| {})
 }
 
@@ -5459,6 +5471,7 @@ fn unread_computer(configuration: ComputerConfiguration) -> ApplicationComputer 
         pending_checkpoint_restore: None,
         checkpoint_operation: None,
         unfinished_restore: None,
+        quiet: None,
     }
 }
 
@@ -5499,6 +5512,7 @@ fn application_source_for_computers(
                 computer.pending_checkpoint_restore =
                     checkpoints::view_pending(&checkpoint, computer.configuration.name());
                 computer.unfinished_restore = checkpoints::view_unfinished_restore(&checkpoint);
+                computer.quiet = checkpoints::view_quiet(&checkpoint);
                 computer.checkpoints = checkpoint.checkpoints;
                 let live = !OPERATIONS.is_computer_idle(computer.configuration.id());
                 computer.checkpoint_operation = checkpoint
@@ -5511,6 +5525,7 @@ fn application_source_for_computers(
                 computer.pending_checkpoint_restore = None;
                 computer.checkpoint_operation = None;
                 computer.unfinished_restore = None;
+                computer.quiet = None;
                 computer.attention = Some(ComputerAttention {
                         level: AttentionLevel::Error,
                         message: format!("{error} Checkpoints and actions that need them are unavailable for this computer."),
@@ -5809,6 +5824,7 @@ fn application_computer(
         pending_checkpoint_restore: None,
         checkpoint_operation: None,
         unfinished_restore: None,
+        quiet: None,
     }
 }
 
@@ -5992,7 +6008,7 @@ fn start_at_launch_with(
         let inspected = inspect_computer(runner, paths, name)?;
         ensure_computer_identity(configuration, &inspected)?;
         match inspected.status.to_ascii_lowercase().as_str() {
-            "running" => Ok(()),
+            "running" => checkpoints::ensure_quiet(runner, paths, name),
             "created" | "stopped" => computer_action_with(runner, paths, device, "start", name),
             _ => Err(RuntimeError::Invalid(format!(
                 "{name} is not stopped or running. Check its status before starting it."

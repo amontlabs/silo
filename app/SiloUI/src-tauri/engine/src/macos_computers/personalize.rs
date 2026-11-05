@@ -12,7 +12,7 @@
 //! in the script or in the environment of any process.
 use super::{
     guest_access::{shell_quote, USER},
-    offline_setup::{self, GID, UID},
+    offline_setup::{GID, UID},
 };
 
 const GIB: u64 = 1 << 30;
@@ -20,11 +20,11 @@ const UNALLOCATED: &str = "SILO_UNALLOCATED=";
 pub(super) const DONE: &str = "SILO_PERSONALIZED";
 const MISSING_SECRETS: i32 = 64;
 
-/// The commands run as root. The password change is skipped when the new password already
-/// works, so a run that failed after it can be repeated: the old password is gone by then. `grow` adds the expansion of the APFS container into a disk
-/// that was made larger than the template's. The secrets are only ever read into
-/// shell variables and written through the shell's builtin `printf`, so no external process
-/// receives them as an argument.
+/// The commands run as root in the copy. The password hash, automatic login and keychain were
+/// already replaced on the stopped disk (see `offline_setup::run_template_rekey`), so the
+/// script gives the copy its host keys, name and SSH key, and with `grow` expands the APFS
+/// container into a disk that was made larger than the template's. The template's key is
+/// replaced last, so a run cut short can be repeated.
 pub(super) fn script(public_key: &str, computer_name: &str, grow: bool) -> String {
     let name = shell_quote(computer_name);
     let authorized_key = shell_quote(public_key.trim());
@@ -32,25 +32,11 @@ pub(super) fn script(public_key: &str, computer_name: &str, grow: bool) -> Strin
     let grow = if grow { grow_script() } else { String::new() };
     format!(
         "set -e
-IFS= read -r SILO_PASSWORD
-IFS= read -r SILO_KCPASSWORD
-IFS= read -r SILO_OLD_PASSWORD
-if [ -z \"$SILO_PASSWORD\" ] || [ -z \"$SILO_KCPASSWORD\" ] || [ -z \"$SILO_OLD_PASSWORD\" ]; then exit {MISSING_SECRETS}; fi
-silo_authenticates() {{ printf '%s\\n' \"$1\" | /usr/bin/dscl . -authonly {USER} >/dev/null 2>&1; }}
-if ! silo_authenticates \"$SILO_PASSWORD\"; then
-printf '%s\\n%s\\n' \"$SILO_PASSWORD\" \"$SILO_OLD_PASSWORD\" | /usr/bin/dscl . -passwd /Users/{USER}
-fi
-printf '%s' \"$SILO_KCPASSWORD\" | /usr/bin/base64 -D > /etc/kcpassword.new
-/usr/sbin/chown root:wheel /etc/kcpassword.new
-/bin/chmod 600 /etc/kcpassword.new
-/bin/mv -f /etc/kcpassword.new /etc/kcpassword
-unset SILO_PASSWORD SILO_KCPASSWORD SILO_OLD_PASSWORD
 /usr/sbin/scutil --set ComputerName {name}
 /usr/sbin/scutil --set LocalHostName {name}
 /usr/sbin/scutil --set HostName {name}
 /bin/rm -f /etc/ssh/ssh_host_*
 /usr/bin/ssh-keygen -A
-/usr/bin/find {home}/Library/Keychains -mindepth 1 -maxdepth 1 -exec /bin/rm -rf {{}} + 2>/dev/null || true
 {grow}/bin/mkdir -p {home}/.ssh
 printf '%s\\n' {authorized_key} > {home}/.ssh/authorized_keys.new
 /usr/sbin/chown {UID}:{GID} {home}/.ssh {home}/.ssh/authorized_keys.new
@@ -86,8 +72,9 @@ gap=
 if [ -n "$store" ] && [ -n "$whole" ]; then
 gap=$(unallocated_bytes)
 if [ -n "$gap" ] && [ "$gap" -ge GIB_BYTES ]; then
-/bin/echo y | /usr/sbin/diskutil repairDisk "$whole" >/dev/null 2>&1
-/usr/sbin/diskutil apfs resizeContainer "$store" 0 >/dev/null 2>&1
+/bin/echo y | /usr/sbin/diskutil repairDisk "$whole" >&2 2>&1
+/usr/sbin/diskutil apfs resizeContainer "$store" 0 >&2 2>&1
+/usr/sbin/diskutil list "$whole" >&2 2>&1
 gap=$(unallocated_bytes)
 fi
 fi
@@ -146,16 +133,6 @@ pub(super) fn unallocated(stdout: &str) -> Option<u64> {
         .and_then(|value| value.parse().ok())
 }
 
-/// The standard input of the personalization command.
-///
-/// `dscl` changes the password of an account that holds a secure token only when it is
-/// given the old password too: it asks for it after the new one, so the old one (the
-/// template's) is the third line.
-pub(super) fn input(password: &str, old_password: &str) -> Vec<u8> {
-    let kcpassword = base64_encode(&offline_setup::kcpassword(password));
-    format!("{password}\n{kcpassword}\n{old_password}\n").into_bytes()
-}
-
 /// The command that runs `script` as root with the key of the account. The script is
 /// passed as one argument, base64 encoded so no quoting survives to be broken, and the
 /// standard input stays free for the secrets.
@@ -171,9 +148,6 @@ pub(super) struct Outcome {
 }
 
 pub(super) fn outcome(status: i32, stdout: &str) -> Result<Outcome, String> {
-    if status == MISSING_SECRETS {
-        return Err("Silo could not give the computer its own password.".into());
-    }
     if status != 0 || !stdout.lines().any(|line| line.trim() == DONE) {
         return Err("Silo could not personalize the computer.".into());
     }
@@ -349,36 +323,17 @@ mod tests {
         for text in [&script, &command, &decoded(&command)] {
             assert!(!text.contains(PASSWORD));
         }
-        // The password reaches only a pipe into dscl, which reads it from standard input.
-        assert!(script.contains("IFS= read -r SILO_PASSWORD"));
-        assert!(script.contains("| /usr/bin/dscl . -passwd /Users/silo\n"));
-        assert!(script.contains("if ! silo_authenticates \"$SILO_PASSWORD\"; then"));
-        assert!(script.contains("| /usr/bin/dscl . -authonly silo >/dev/null 2>&1"));
-        assert!(!script.contains("-passwd /Users/silo \""));
-        assert!(!script.contains("sysadminctl"));
-        // Only builtins touch the secrets: no external program names them in its arguments.
-        for line in script.lines().filter(|line| line.contains("$SILO_")) {
-            assert!(
-                !line.contains("/usr/bin/printf") && !line.contains("/bin/echo"),
-                "{line}"
-            );
+        // The password hash is replaced on the stopped disk; the guest never changes it, so
+        // `dscl` never asks for an old password it cannot be given.
+        for gone in [
+            "dscl",
+            "SILO_PASSWORD",
+            "SILO_OLD_PASSWORD",
+            "kcpassword",
+            "read -r",
+        ] {
+            assert!(!script.contains(gone), "{gone}");
         }
-        assert!(script.contains("| /usr/bin/base64 -D > /etc/kcpassword.new"));
-    }
-
-    #[test]
-    fn the_secrets_travel_on_standard_input() {
-        let input = String::from_utf8(input(PASSWORD, "Old-template-password")).unwrap();
-        let lines: Vec<_> = input.lines().collect();
-        assert_eq!(lines.len(), 3);
-        assert_eq!(lines[2], "Old-template-password");
-        assert_eq!(lines[0], PASSWORD);
-        let kcpassword = base64::engine::general_purpose::STANDARD
-            .decode(lines[1])
-            .unwrap();
-        assert_eq!(kcpassword, offline_setup::kcpassword(PASSWORD));
-        assert_eq!(kcpassword.len() % 12, 0);
-        assert!(input.ends_with('\n'));
     }
 
     #[test]
@@ -394,13 +349,11 @@ mod tests {
     fn the_copy_gets_its_own_identity() {
         let script = script(KEY, "mac-one", false);
         for expected in [
-            "/etc/kcpassword",
             "scutil --set ComputerName 'mac-one'",
             "scutil --set LocalHostName 'mac-one'",
             "scutil --set HostName 'mac-one'",
             "rm -f /etc/ssh/ssh_host_*",
             "ssh-keygen -A",
-            "/Users/silo/Library/Keychains -mindepth 1 -maxdepth 1 -exec /bin/rm -rf {} +",
         ] {
             assert!(script.contains(expected), "{expected}");
         }
@@ -414,14 +367,7 @@ mod tests {
         let script = script(KEY, "mac-one", true);
         let at = |needle: &str| script.find(needle).unwrap();
         let replaced = at("mv -f /Users/silo/.ssh/authorized_keys.new");
-        for earlier in [
-            "dscl",
-            "kcpassword",
-            "scutil",
-            "ssh-keygen",
-            "Keychains",
-            "resizeContainer",
-        ] {
+        for earlier in ["scutil", "ssh-keygen", "resizeContainer"] {
             assert!(at(earlier) < replaced, "{earlier}");
         }
         assert!(script[replaced..].matches("mv -f").count() == 1);
@@ -544,8 +490,5 @@ mod tests {
         assert_eq!(unallocated("noise\nSILO_UNALLOCATED=7\n"), Some(7));
         assert!(outcome(1, &ok).is_err());
         assert!(outcome(0, "").is_err());
-        assert!(outcome(MISSING_SECRETS, "")
-            .unwrap_err()
-            .contains("password"));
     }
 }

@@ -74,7 +74,12 @@ pub(super) fn install(
     Err(InstallError::Failed(UNSUPPORTED.into()))
 }
 
-pub(super) fn start(_app: &MacosContext, _record: &Record, _layout: &Layout) -> Result<(), String> {
+pub(super) fn start(
+    _app: &MacosContext,
+    _record: &Record,
+    _layout: &Layout,
+    _cancelled: &dyn Fn() -> bool,
+) -> Result<(), String> {
     Err(UNSUPPORTED.into())
 }
 
@@ -132,6 +137,14 @@ pub(super) fn save_running(
     _app: &MacosContext,
     _id: &str,
     _state: &Path,
+    _copy: &mut dyn FnMut() -> Result<(), String>,
+) -> Result<(), String> {
+    Err(UNSUPPORTED.into())
+}
+
+pub(super) fn pause_for_copy(
+    _app: &MacosContext,
+    _id: &str,
     _copy: &mut dyn FnMut() -> Result<(), String>,
 ) -> Result<(), String> {
     Err(UNSUPPORTED.into())

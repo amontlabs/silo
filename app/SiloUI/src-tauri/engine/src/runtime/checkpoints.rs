@@ -114,6 +114,99 @@ pub(super) struct Record {
     legacy_mounts: Vec<Value>,
     pub(super) pending_checkpoint_restore: Option<PendingRestore>,
     pub(super) checkpoint_operation: Option<Operation>,
+    /// What a fork turns off or leaves out on its first boot. Absent on computers that are not
+    /// forks.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) quiet: Option<QuietRecord>,
+}
+
+/// What a fork was made quiet with: the names the caller asked to stop and scrub, the
+/// assignments it was given, and whether the first-boot step has run.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(super) struct QuietRecord {
+    /// Always true for a fork: crontabs, anacron, at jobs and systemd timers are disabled.
+    pub(super) scheduled_jobs_disabled: bool,
+    /// Always true for a fork: machine-id and hostname are new.
+    pub(super) new_identity: bool,
+    pub(super) stop: Vec<String>,
+    pub(super) scrub: Vec<String>,
+    /// Silo secrets copied to the fork; `github` means read-only GitHub access.
+    pub(super) secrets: Vec<String>,
+    /// The first-boot step finished.
+    pub(super) applied: bool,
+    /// The restore attempt whose boot carries the step: the guest writes
+    /// `/var/lib/silo-quiet/applied-<token>` once it has run, and the engine looks for that
+    /// file before it reports the fork started.
+    #[serde(default)]
+    pub(super) token: String,
+}
+
+/// What the caller of a fork asked for beyond the always-on rules.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ForkOptions {
+    pub secrets: Vec<String>,
+    pub stop: Vec<String>,
+    pub scrub: Vec<String>,
+}
+
+/// The name of the assignment that stands for GitHub access.
+const GITHUB_SECRET_NAME: &str = "github";
+
+impl ForkOptions {
+    fn copies_github(&self) -> bool {
+        self.secrets.iter().any(|name| name == GITHUB_SECRET_NAME)
+    }
+
+    fn named_secrets(&self) -> Vec<String> {
+        self.secrets
+            .iter()
+            .filter(|name| name.as_str() != GITHUB_SECRET_NAME)
+            .cloned()
+            .collect()
+    }
+
+    pub(super) fn validate(&self) -> Result<(), RuntimeError> {
+        let invalid = |message: &str| Err(RuntimeError::Invalid(message.into()));
+        if self.secrets.len() > 64 || self.stop.len() > 64 || self.scrub.len() > 64 {
+            return invalid("A fork can name at most 64 secrets, processes and paths each.");
+        }
+        if self
+            .secrets
+            .iter()
+            .any(|name| name.is_empty() || name.len() > 128 || name.contains('\0'))
+        {
+            return invalid("A secret name is empty or invalid.");
+        }
+        if self.stop.iter().any(|name| {
+            name.is_empty()
+                || name.len() > 128
+                || name.starts_with('-')
+                || name.bytes().all(|b| b == b'.')
+                || !name
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b"._@:+-".contains(&b))
+        }) {
+            return invalid(
+                "A process or unit to stop may only contain letters, digits and . _ @ : + -, and is not . or ...",
+            );
+        }
+        for path in &self.scrub {
+            let parts: Vec<&str> = path.split('/').filter(|part| !part.is_empty()).collect();
+            if !path.starts_with('/')
+                || path.len() > 1024
+                || path.contains(|c: char| c.is_whitespace() || c.is_control())
+                || parts.iter().any(|part| matches!(*part, "." | ".."))
+                || parts.len() < 2
+                || parts[0].contains(['*', '?', '['])
+            {
+                return invalid(
+                    "A path to scrub must be absolute, name at least two levels, and contain no spaces, '.' or '..'.",
+                );
+            }
+        }
+        Ok(())
+    }
 }
 
 /// Boot variables that older versions used to set a computer's Git and jj identity.
@@ -965,6 +1058,9 @@ pub fn create_for_job(
         CheckpointKind::Manual => "manual",
         CheckpointKind::Automatic => "automatic",
         CheckpointKind::BeforeKeep => "before-keep",
+        CheckpointKind::ForkPoint => {
+            return Err("A fork point is made by Fork, not saved as a checkpoint.".into())
+        }
     };
     let checkpoint = capture_with_kind(
         &ProcessRunner,
@@ -1002,7 +1098,7 @@ pub fn reclaim_after_capture_for_job(
             "Removing an older before-keep checkpoint",
             before_keep_retention,
         ),
-        CheckpointKind::Manual => return Ok(()),
+        CheckpointKind::Manual | CheckpointKind::ForkPoint => return Ok(()),
     };
     shutdown::ensure_accepting_operations()?;
     trim_kind_with(
@@ -1038,6 +1134,7 @@ fn api_checkpoint(checkpoint: Checkpoint) -> silo_api::methods::checkpoints::Che
         kind: match checkpoint.kind.as_str() {
             "automatic" => CheckpointKind::Automatic,
             "before-keep" => CheckpointKind::BeforeKeep,
+            "fork-point" => CheckpointKind::ForkPoint,
             _ => CheckpointKind::Manual,
         },
         size_bytes: None,
@@ -1263,6 +1360,7 @@ pub(super) fn pending_computer(
         pending_checkpoint_restore: None,
         checkpoint_operation: None,
         unfinished_restore: None,
+        quiet: None,
     })
 }
 
@@ -1583,7 +1681,9 @@ pub(super) fn start_pending(
             record.restore_attempt_ran = false;
             record.restore_attempt_id = None;
             save(paths, configuration.id(), &record)?;
-            return Ok(());
+            // An earlier attempt booted the fork but may not have confirmed it quiet.
+            apply_quiet(runner, paths, configuration.name(), &mut record)?;
+            return save(paths, configuration.id(), &record);
         }
         if observed
             .config
@@ -1616,13 +1716,15 @@ pub(super) fn start_pending(
             record.restore_attempt_ran = false;
             record.checkpoint_operation = None;
             save(paths, configuration.id(), &record)?;
-            return super::lifecycle_recovery::perform(
+            super::lifecycle_recovery::perform(
                 runner,
                 paths,
                 &device_resources()?,
                 "start",
                 configuration.name(),
-            );
+            )?;
+            // The start quiets the fork before it reports success (`ensure_quiet`).
+            return Ok(());
         }
         runner.run(
             paths,
@@ -1654,6 +1756,9 @@ pub(super) fn start_pending(
     record.restore_attempted = true;
     let attempt_id = uuid::Uuid::new_v4().to_string();
     record.restore_attempt_id = Some(attempt_id.clone());
+    if let Some(quiet) = record.quiet.as_mut() {
+        quiet.token = attempt_id.clone();
+    }
     record.checkpoint_operation = Some(Operation {
         kind: "fork".into(),
         status: "running".into(),
@@ -1695,6 +1800,13 @@ pub(super) fn start_pending(
     ] {
         args.extend(["--label".into(), label]);
     }
+    // The guest's boot hook runs the quiet step first when it finds these, and starts nothing
+    // else until it has succeeded.
+    if let Some(quiet) = record.quiet.as_ref().filter(|quiet| !quiet.applied) {
+        for label in quiet_labels(configuration.name(), quiet) {
+            args.extend(["--label".into(), label]);
+        }
+    }
     for entry in &record.desired_environment {
         if entry.key != "GH_TOKEN" {
             args.push(format!("--env={}={}", entry.key, entry.value));
@@ -1725,7 +1837,8 @@ pub(super) fn start_pending(
         .and_then(|_| inspect_computer(runner, paths, configuration.name()))
         .and_then(|observed| if running_child_matches(&observed, configuration.id(), &attempt_id, &material, &policy) {
             Ok(observed)
-        } else { Err(error("The restored computer did not reach a verified running state. Its checkpoint was preserved.")) });
+        } else { Err(error("The restored computer did not reach a verified running state. Its checkpoint was preserved.")) })
+        ;
     match result {
         Ok(observed) => {
             record.pending_checkpoint_restore = None;
@@ -1733,6 +1846,11 @@ pub(super) fn start_pending(
             record.restore_attempt_id = None;
             record.restore_attempt_ran = false;
             record.checkpoint_operation = None;
+            save(paths, configuration.id(), &record)?;
+            // Confirmed before the fork is reported started. The restore is no longer pending,
+            // so the runtime accepts the check; a failure stops the guest and every later
+            // start quiets it again before anything else runs.
+            apply_quiet(runner, paths, configuration.name(), &mut record)?;
             save(paths, configuration.id(), &record)?;
             let revision = crate::secrets::computer_revision(configuration.name())
                 .map_err(RuntimeError::Unavailable)?;
@@ -1835,7 +1953,7 @@ fn pending_current_fork_point(
 pub trait ForkAssignments {
     fn copy_github(&self, source: &str, target: &str) -> Result<(), String>;
     fn forget_github(&self, target: &str) -> Result<(), String>;
-    fn copy_secrets(&self, source: &str, target: &str) -> Result<(), String>;
+    fn copy_secrets(&self, source: &str, target: &str, names: &[String]) -> Result<(), String>;
     fn forget_secrets(&self, target: &str) -> Result<(), String>;
 }
 
@@ -1846,6 +1964,7 @@ pub(super) struct ForkSource {
     member: String,
     scope: String,
     desired_policy: Value,
+    options: ForkOptions,
 }
 
 fn ensure_fork_name_available(
@@ -1860,6 +1979,176 @@ fn ensure_fork_name_available(
         ));
     }
     Ok(())
+}
+
+/// Runs as root in the fork's guest, before anything else there starts. MicroSandbox's boot
+/// hook (the Silo `create-stopped` patch) carries a copy of this script and runs it when the
+/// computer has a `silo.quiet-token` label and `/var/lib/silo-quiet/applied-<token>` is absent;
+/// it starts the desktop and everything else only after the script succeeded. The engine runs
+/// the same script itself as a fallback when the marker is missing afterwards. Arguments: the
+/// token, the new hostname, then `stop=<name>` and `scrub=<path>` entries. They are
+/// positional, never part of the script text.
+pub(super) const QUIET_SCRIPT: &str = include_str!("checkpoints/quiet.sh");
+
+/// Where the guest records that a fork's quiet step finished.
+fn quiet_marker(token: &str) -> String {
+    format!("/var/lib/silo-quiet/applied-{token}")
+}
+
+/// A hostname for a fork: its name reduced to what a hostname allows.
+fn fork_hostname(name: &str) -> String {
+    let cleaned: String = name
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    let cleaned: String = cleaned.trim_matches('-').chars().take(63).collect();
+    if cleaned.is_empty() {
+        "silo-fork".into()
+    } else {
+        cleaned
+    }
+}
+
+fn quiet_entries(quiet: &QuietRecord) -> Vec<String> {
+    quiet
+        .stop
+        .iter()
+        .map(|n| format!("stop={n}"))
+        .chain(quiet.scrub.iter().map(|p| format!("scrub={p}")))
+        .collect()
+}
+
+/// The labels the guest's boot hook reads. Names and paths are validated to hold no
+/// whitespace, so the hook splits the list on spaces.
+fn quiet_labels(name: &str, quiet: &QuietRecord) -> Vec<String> {
+    vec![
+        format!("silo.quiet-token={}", quiet.token),
+        format!("silo.quiet-host={}", fork_hostname(name)),
+        format!("silo.quiet-args={}", quiet_entries(quiet).join(" ")),
+    ]
+}
+
+fn root_exec(name: &str, timeout: &str, command: &[&str]) -> Vec<String> {
+    let mut args: Vec<String> = [
+        "exec",
+        name,
+        "--user",
+        "root",
+        "--no-tty",
+        "--quiet",
+        "--timeout",
+        timeout,
+        "--",
+    ]
+    .iter()
+    .map(|part| (*part).into())
+    .collect();
+    args.extend(command.iter().map(|part| (*part).to_string()));
+    args
+}
+
+fn quiet_exec_args(name: &str, quiet: &QuietRecord) -> Vec<String> {
+    let mut args = root_exec(name, "120s", &["sh", "-c", QUIET_SCRIPT, "silo-quiet"]);
+    args.push(quiet.token.clone());
+    args.push(fork_hostname(name));
+    args.extend(quiet_entries(quiet));
+    args
+}
+
+fn quiet_marker_args(name: &str, quiet: &QuietRecord) -> Vec<String> {
+    let marker = quiet_marker(&quiet.token);
+    root_exec(name, "30s", &["test", "-f", &marker])
+}
+
+const DESKTOP_BOOT: &str =
+    "if [ -x /usr/local/bin/silo-desktop ]; then /usr/local/bin/silo-desktop boot >/dev/null 2>&1; fi";
+
+/// Confirms a running fork is quiet. The guest's boot hook quiets it before anything else
+/// starts, so this normally only finds the marker the hook left. When the marker is missing
+/// (the hook did not run or failed) the script runs here and the desktop, which the hook
+/// withheld, is started. Does nothing for a computer that is not an unquieted fork. On failure
+/// the guest is stopped and the error says whether that worked.
+fn apply_quiet(
+    runner: &dyn RuntimeRunner,
+    paths: &RuntimePaths,
+    name: &str,
+    record: &mut Record,
+) -> Result<(), RuntimeError> {
+    let Some(quiet) = record.quiet.as_mut().filter(|quiet| !quiet.applied) else {
+        return Ok(());
+    };
+    let marked = |quiet: &QuietRecord| {
+        runner
+            .run(
+                paths,
+                &quiet_marker_args(name, quiet),
+                Duration::from_secs(60),
+            )
+            .map(|_| ())
+    };
+    let outcome = if quiet.token.is_empty() {
+        Err(error("The fork has no quiet step to confirm."))
+    } else if marked(quiet).is_ok() {
+        Ok(())
+    } else {
+        runner
+            .run(
+                paths,
+                &quiet_exec_args(name, quiet),
+                Duration::from_secs(150),
+            )
+            .and_then(|_| marked(quiet))
+            .map(|()| {
+                // The hook withheld the desktop; start it now that the step has run.
+                let _ = runner.run(
+                    paths,
+                    &root_exec(name, "60s", &["sh", "-c", DESKTOP_BOOT]),
+                    Duration::from_secs(90),
+                );
+            })
+    };
+    if outcome.is_err() {
+        let stopped = runner.run(paths, &["stop".into(), name.into()], STOP_TIMEOUT);
+        return Err(error(if stopped.is_ok() {
+            "The fork could not be made quiet, so it was stopped. Start it again to retry."
+        } else {
+            "The fork could not be made quiet and could not be stopped. Stop it before using it, then start it again to retry."
+        }));
+    }
+    quiet.applied = true;
+    Ok(())
+}
+
+/// Quiets the fork named `name` when it is running and has not been confirmed quiet: any start
+/// of such a fork goes through here, whether it came from a restore, a retry, a crash recovery
+/// or a launch.
+pub(super) fn ensure_quiet(
+    runner: &dyn RuntimeRunner,
+    paths: &RuntimePaths,
+    name: &str,
+) -> Result<(), RuntimeError> {
+    let Some(configuration) = read_metadata(&paths.metadata)?
+        .computers
+        .into_iter()
+        .find(|configuration| configuration.name() == name)
+    else {
+        return Ok(());
+    };
+    let mut record = load(paths, configuration.id())?;
+    if record.quiet.as_ref().is_none_or(|quiet| quiet.applied) {
+        return Ok(());
+    }
+    let result = apply_quiet(runner, paths, name, &mut record);
+    if record.quiet.as_ref().is_some_and(|quiet| quiet.applied) {
+        save(paths, configuration.id(), &record)?;
+    }
+    result
 }
 
 /// Phase one of a fork, under the source computer's lane: resolve the checkpoint, capturing a
@@ -1939,6 +2228,7 @@ pub(super) fn fork_source(
         member,
         scope,
         desired_policy,
+        options: ForkOptions::default(),
     })
 }
 
@@ -2019,8 +2309,18 @@ fn fork_commit_with_metadata_writer(
         state: "disk".into(),
     });
     child_record.desired_network_policy = Some(fork.desired_policy.clone());
+    child_record.quiet = Some(QuietRecord {
+        scheduled_jobs_disabled: true,
+        new_identity: true,
+        stop: fork.options.stop.clone(),
+        scrub: fork.options.scrub.clone(),
+        secrets: fork.options.secrets.clone(),
+        applied: false,
+        token: String::new(),
+    });
     let source_record = load(paths, source.id())?;
-    child_record.desired_environment = source_record.desired_environment;
+    // Environment variables from the source's settings are Silo-managed configuration and can
+    // carry credentials, so a fork starts without them.
     // A source from before Cua Driver recorded the read-only ChatGPT and LCU folders. Keep them
     // with the child, so its first start passes them again even if the source is deleted first.
     child_record.legacy_mounts = source_legacy_mounts.unwrap_or(source_record.legacy_mounts);
@@ -2029,14 +2329,20 @@ fn fork_commit_with_metadata_writer(
     let mut copied_secrets = false;
     let result = (|| {
         crate::computer_use::inherit_settings(paths, source.id(), &child_id)?;
-        assignments
-            .copy_github(source.name(), new_name)
-            .map_err(RuntimeError::Unavailable)?;
-        copied_github = true;
-        assignments
-            .copy_secrets(source.name(), new_name)
-            .map_err(RuntimeError::Unavailable)?;
-        copied_secrets = true;
+        // Nothing is copied unless the fork names it; GitHub access is always read-only.
+        if fork.options.copies_github() {
+            assignments
+                .copy_github(source.name(), new_name)
+                .map_err(RuntimeError::Unavailable)?;
+            copied_github = true;
+        }
+        let named = fork.options.named_secrets();
+        if !named.is_empty() {
+            assignments
+                .copy_secrets(source.name(), new_name, &named)
+                .map_err(RuntimeError::Unavailable)?;
+            copied_secrets = true;
+        }
         metadata.computers.push(child);
         write(&paths.metadata, &metadata)
     })();
@@ -2096,6 +2402,7 @@ fn fork_in_lanes(
     computer_id: &str,
     checkpoint_id: Option<&str>,
     new_name: &str,
+    options: ForkOptions,
     macos_names: &dyn Fn() -> Vec<String>,
     job: Option<(
         silo_api::jobs::JobId,
@@ -2103,10 +2410,11 @@ fn fork_in_lanes(
     )>,
 ) -> Result<(), RuntimeError> {
     use super::operation_gate::{OperationKind, Scope};
+    options.validate()?;
     let computer_name = computer_configuration(paths, computer_id)?
         .name()
         .to_owned();
-    let fork = {
+    let mut fork = {
         let gate = gate.kind(OperationKind::CheckpointFork);
         let guard = if let Some((job_id, cancellation)) = &job {
             gate.acquire_for_job(
@@ -2128,6 +2436,7 @@ fn fork_in_lanes(
         shutdown::ensure_accepting_operations().map_err(RuntimeError::Unavailable)?;
         fork_source(runner, paths, computer_id, checkpoint_id, new_name)?
     };
+    fork.options = options;
     let gate = gate.kind(OperationKind::CheckpointFork);
     let guard = if let Some((job_id, cancellation)) = &job {
         gate.acquire_for_job(
@@ -2163,6 +2472,7 @@ pub fn fork(
     computer_id: &str,
     checkpoint_id: Option<&str>,
     new_name: &str,
+    options: ForkOptions,
     macos_names: &dyn Fn() -> Vec<String>,
 ) -> Result<(), String> {
     fork_in_lanes(
@@ -2173,6 +2483,7 @@ pub fn fork(
         computer_id,
         checkpoint_id,
         new_name,
+        options,
         macos_names,
         None,
     )
@@ -2186,6 +2497,7 @@ pub fn fork_for_job(
     computer_id: &str,
     checkpoint_id: Option<&str>,
     new_name: &str,
+    options: ForkOptions,
     macos_names: &dyn Fn() -> Vec<String>,
     job_id: silo_api::jobs::JobId,
     cancellation: std::sync::Arc<std::sync::atomic::AtomicBool>,
@@ -2198,6 +2510,7 @@ pub fn fork_for_job(
         computer_id,
         checkpoint_id,
         new_name,
+        options,
         macos_names,
         Some((job_id, cancellation)),
     )
@@ -2807,6 +3120,22 @@ pub(super) struct UnfinishedRestore {
     checkpoint_name: Option<String>,
     /// "capturing" before the recovery checkpoint was saved, then "secured".
     phase: String,
+}
+
+pub(super) fn view_quiet(record: &Record) -> Option<silo_api::methods::computers::QuietState> {
+    record
+        .quiet
+        .as_ref()
+        .map(|quiet| silo_api::methods::computers::QuietState {
+            applied: quiet.applied,
+            new_identity: quiet.new_identity,
+            scheduled_jobs_disabled: quiet.scheduled_jobs_disabled,
+            stop: quiet.stop.clone(),
+            scrub: quiet.scrub.clone(),
+            secrets: quiet.secrets.clone(),
+            parked: Vec::new(),
+            still_scheduled: Vec::new(),
+        })
 }
 
 pub(super) fn view_unfinished_restore(record: &Record) -> Option<UnfinishedRestore> {

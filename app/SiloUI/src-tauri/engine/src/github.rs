@@ -633,33 +633,58 @@ fn stale_save(d: &Document, computer: &str, base: Option<u64>) -> bool {
         .is_some_and(|stamp| stamp.revision > base && stamp.base.is_none_or(|writer| writer > base))
 }
 
-/// Copy the source's current GitHub assignment for a stopped checkpoint fork.
+/// The assignment a fork receives: the source's repositories with every change grant turned
+/// off, so the fork's tokens are minted with read permissions only. A personal token carries
+/// permissions Silo cannot narrow, so it is not copied.
+fn read_only_assignment(assignment: &Value, target: &str) -> Result<Value, String> {
+    if assignment["authenticationMethod"].as_str() == Some("token") {
+        return Err("GitHub access by personal token cannot be copied read-only. Use GitHub OAuth for the source, or fork without GitHub access.".into());
+    }
+    let mut copy = assignment.clone();
+    copy["computer"] = json!(target);
+    copy["allRepositoriesAllowChanges"] = json!(false);
+    if let Some(repositories) = copy["repositories"].as_array_mut() {
+        for repository in repositories {
+            repository["allowPushes"] = json!(false);
+        }
+    }
+    Ok(copy)
+}
+
+/// Copy the source's current GitHub assignment for a stopped checkpoint fork, read-only.
 /// The child obtains its own runtime identity and resolves credentials at Start.
 pub fn fork_assignment(source: &str, target: &str) -> Result<(), String> {
     let _state = serialize(&STATE);
     let mut document = load()?;
-    if let Some(mut assignment) = document
+    let assignment = source_fork_assignment(&document, source, target)?;
+    document
+        .computers
+        .retain(|value| value["computer"].as_str() != Some(target));
+    document.computers.push(assignment);
+    document.revision = next_policy_revision(document.revision)?;
+    stamp(&mut document, target, None);
+    if !document.access_pending.iter().any(|name| name == target) {
+        document.access_pending.push(target.into());
+    }
+    if !document.identity_pending.iter().any(|name| name == target) {
+        document.identity_pending.push(target.into());
+    }
+    save(&document)
+}
+
+/// The read-only copy of the source's assignment. A source without one fails: a fork that
+/// names GitHub access must not start without it.
+fn source_fork_assignment(
+    document: &Document,
+    source: &str,
+    target: &str,
+) -> Result<Value, String> {
+    let assignment = document
         .computers
         .iter()
         .find(|value| value["computer"].as_str() == Some(source))
-        .cloned()
-    {
-        assignment["computer"] = json!(target);
-        document
-            .computers
-            .retain(|value| value["computer"].as_str() != Some(target));
-        document.computers.push(assignment);
-        document.revision = next_policy_revision(document.revision)?;
-        stamp(&mut document, target, None);
-        if !document.access_pending.iter().any(|name| name == target) {
-            document.access_pending.push(target.into());
-        }
-        if !document.identity_pending.iter().any(|name| name == target) {
-            document.identity_pending.push(target.into());
-        }
-        save(&document)?;
-    }
-    Ok(())
+        .ok_or_else(|| format!("{source} has no GitHub access to copy."))?;
+    read_only_assignment(assignment, target)
 }
 
 pub fn forget_fork_assignment(target: &str) -> Result<(), String> {
@@ -2552,6 +2577,41 @@ mod host_push_authorization_tests {
             super::issue_host_push(|| Ok("credential"), || Ok(())),
             Ok("credential")
         );
+    }
+
+    #[test]
+    fn fork_assignment_is_read_only_whatever_the_source_may_change() {
+        let source = json!({"computer":"dev","repositoryMode":"all","allRepositoriesAllowChanges":true,
+            "repositories":[{"repository":"owner/a","allowPushes":true},{"repository":"owner/b","allowPushes":false}],
+            "identity":{"name":"N","email":"e","apply":true}});
+        let copy = super::read_only_assignment(&source, "fork").unwrap();
+        assert_eq!(copy["computer"], "fork");
+        assert_eq!(copy["allRepositoriesAllowChanges"], false);
+        assert!(copy["repositories"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|r| r["allowPushes"] == false));
+        assert_eq!(copy["identity"], source["identity"]);
+        assert!(super::push_authorized(&copy, "owner/a").is_err());
+        let all = json!({"repositoryMode":"all","allRepositoriesAllowChanges":false});
+        assert!(super::push_authorized(&all, "owner/a").is_err());
+        let mut token = source.clone();
+        token["authenticationMethod"] = json!("token");
+        assert!(super::read_only_assignment(&token, "fork").is_err());
+    }
+
+    #[test]
+    fn a_fork_naming_github_fails_when_the_source_has_no_assignment() {
+        let mut document = super::Document::default();
+        let error = super::source_fork_assignment(&document, "dev", "fork").unwrap_err();
+        assert_eq!(error, "dev has no GitHub access to copy.");
+        document
+            .computers
+            .push(json!({"computer":"dev","repositoryMode":"all"}));
+        let copy = super::source_fork_assignment(&document, "dev", "fork").unwrap();
+        assert_eq!(copy["computer"], "fork");
+        assert!(super::source_fork_assignment(&document, "other", "fork").is_err());
     }
 
     #[test]

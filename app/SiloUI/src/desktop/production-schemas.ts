@@ -1,5 +1,6 @@
 import { defaultSettings, settingSchemas } from "@/features/preferences/model/settings"
 import { z } from "zod"
+import { quietStateSchema } from "@/features/macos-computers/model/macos-computers"
 
 import { siloBootstrapResultSchema, siloProgressEventSchema, siloProtocolErrorSchema, setupComputerConfigurationRequestSchema } from "@/contracts/silo"
 import type { SshAccessState, NetworkState, ApplicationFileEntry, ApplicationSource } from "@/features/application/model/application-source"
@@ -57,7 +58,7 @@ const checkpointShape = z.object({
     z.number().int().nonnegative().max(8.64e15).transform(value => new Date(value).toISOString()),
   ]),
   scope: z.enum(["full", "disk"]), reason: z.enum(["manual", "before-restore"]),
-  kind: z.enum(["manual", "automatic", "before-keep"]).optional(),
+  kind: z.enum(["manual", "automatic", "before-keep", "fork-point"]).optional(),
   sizeBytes: z.number().int().nonnegative().optional(),
 })
 const checkpointOperationShape = z.object({
@@ -120,6 +121,7 @@ const computerShape = z.object({
   checkpointOperation: checkpointOperationShape.nullable().optional().catch(null),
   pendingCheckpointRestore: pendingCheckpointRestoreShape.nullable().optional().catch(null),
   unfinishedRestore: unfinishedRestoreShape.nullable().optional().catch(null),
+  quiet: quietStateSchema.nullable().optional().catch(null),
   settling: z.boolean().optional(),
 }).passthrough().transform(computer => (computerStates as readonly string[]).includes(computer.state)
   ? { ...computer, state: computer.state as (typeof computerStates)[number] }

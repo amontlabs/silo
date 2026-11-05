@@ -373,16 +373,18 @@ async fn linux_restore_delete_and_abandon_each_start_a_job_that_ends_in_the_runt
 }
 
 #[tokio::test]
-async fn checkpoints_fork_needs_a_checkpoint_on_macos_and_starts_a_job_on_linux() {
+async fn checkpoints_fork_starts_a_job_on_both_platforms_with_or_without_a_checkpoint() {
     let fixture = fixture();
-    let refused = call(
-        &fixture,
-        MethodName::CheckpointsFork,
-        json!({"computerId": fixture.macos_id, "checkpointId": null, "newName": "branch"}),
-    )
-    .await
-    .unwrap_err();
-    assert!(refused.message.contains("Choose the checkpoint"));
+    let id = job_id(
+        call(
+            &fixture,
+            MethodName::CheckpointsFork,
+            json!({"computerId": fixture.macos_id, "checkpointId": null, "newName": "current"}),
+        )
+        .await
+        .unwrap(),
+    );
+    finished(&fixture, &id).await;
 
     let id = job_id(
         call(

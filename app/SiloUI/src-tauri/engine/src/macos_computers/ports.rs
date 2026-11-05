@@ -1084,8 +1084,22 @@ pub(super) fn open_url(app: &MacosContext, computer_id: &str, port: u16) -> Resu
     ))
 }
 
+/// Whether any enabled macOS forward is a website, read from saved settings only.
+pub(super) fn has_http_forwards(app: &MacosContext) -> bool {
+    let _lock = configuration_lock();
+    read_configuration_unlocked(&app.paths().app_data).is_ok_and(|config| {
+        config
+            .mappings
+            .iter()
+            .any(|mapping| mapping.enabled && mapping.scheme.as_deref() == Some("http"))
+    })
+}
+
 pub(super) fn computer_removed(app: &MacosContext, computer_id: &str) -> Result<(), String> {
     close_computer(computer_id);
+    if let Some(proxy) = crate::url_proxy::shared() {
+        proxy.forget_computer_id(computer_id);
+    }
     let _lock = configuration_lock();
     let mut config = read_configuration_unlocked(&app.paths().app_data)?;
     let before = config.mappings.len();

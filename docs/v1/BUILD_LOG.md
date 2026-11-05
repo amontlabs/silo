@@ -6,11 +6,12 @@ Tracker: Linear project "Silo v1: git for agent computers" (P-AMO-8).
 
 ## Resume
 
-- **Phase:** 0 (AMO-88) checks passed; PR to main pending CI.
-- **Open slices:** AMO-91 (URL per fork, started early) is being reworked after review in its own worktree.
-- **Clean up:** the Dev engine runs from the worktree `.claude/worktrees/agent-af461c784262f09d6` (built from a235c34a); after the phase 0 PR merges, rebuild from main, restart the Dev `silod` from the main checkout's bundle, then remove that worktree.
-- **Next action:** merge the phase 0 PR, then start phase 1 in a fresh session.
-- **macOS slots:** one foreign VM (PID 60843, running since 2 Nov) holds one of the two slots.
+- **Phase:** 1 checks passed; PR to main pending CI. Phase 0 merged in #60.
+- **Open slices:** none.
+- **Clean up:** none outstanding. The Dev engine runs from the main checkout's bundle.
+- **Blocked on the owner:** the positive `--secret NAME` fork check and a non-trivial "no assignments by default" need the owner to allow the Dev engine's Keychain access once (`credential_access_denied`). Read-only GitHub against a mock needs a GitHub App installation the CLI can't create; covered by unit tests only.
+- **Next action:** merge the phase 1 PR, then start phase 2 (change capture + bucketed diff, Keep + Undo).
+- **macOS slots:** the foreign VM (PID 60843) is gone; both slots free as of 5 Nov.
 
 ## Start
 
@@ -32,6 +33,17 @@ Tracker: Linear project "Silo v1: git for agent computers" (P-AMO-8).
 
 VM check: create and fork a Linux computer through `engine.sock` while status polls keep succeeding; disk returns after drop and checkpoint removal; the newest retained checkpoint still restores.
 
+### Phase 1 (AMO-74, AMO-77, AMO-89; AMO-63 landed in phase 0)
+
+| Slice | What | Files | Review |
+|---|---|---|---|
+| 1a | `silo` CLI + MCP server (`silo mcp`, stdio), engine discovery on `~/.silo-dev`/`~/.silo`, job waiting, `.silo/recipe.yaml` and `.silo/silo.yaml` loaders; phase 1 commands: `list`, `status`, `create`, `start`, `stop`, `fork`, `drop`, `exec`, `checkpoint` | new crate `app/SiloUI/cli` | reviewer |
+| 1b | Quiet forks, Linux: API contract (`secrets`, `quiet` on `checkpoints.fork`), cold boot only, no secret/GitHub assignment copy unless named, new machine-id and hostname, scheduled jobs off and `scrub:`/`quiet:` applied before guest boot | `api/src/methods/checkpoints.rs`, `engine/src/runtime/checkpoints.rs`, `engine/src/checkpoints/`, guest scripts | reviewer + Argon |
+| 1c | macOS fork fast path: one boot, no developer-tools reinstall, no extra shutdowns; `New Password: Permission denied` | `engine/src/macos_computers/` | reviewer + Argon |
+| 1d | Quiet forks, macOS (after 1c): automatic checkpoint when none named, `--secret` opt-in, scheduled jobs (LaunchAgents/cron) off, `scrub:`/`quiet:` | `engine/src/macos_computers/checkpoints.rs` | reviewer + Argon |
+
+VM check (Linux and macOS): a macOS fork boots once; a source with a boot-persistent scheduled job (incl. `@reboot`), a `quiet:` poller and a `scrub:` file; its fork shows no polls or job runs, a new machine-id and hostname, no assignments by default, `scrub:` paths gone; read-only GitHub against a mock GitHub API.
+
 ### Phase 0c: Silo app assessment (4 Nov, read-only)
 
 - **Builds and runs on the current engine:** likely, not yet proven here. The app is a thin client of `silod` over `engine.sock`; `engine_boundary_tests.rs` forbids in-process engine calls and method-name literals, so engine API changes break the app at compile time (macOS CI `cargo nextest --workspace` compiles `src-tauri`). The protocol is a single number (`api/src/transport.rs:60`, client offers exactly 7 in `client/src/session.rs:36-42`), so app and engine ship together. CI never packages or launches the app; the baseline `desktop:build:debug` is the evidence for that.
@@ -44,11 +56,24 @@ VM check: create and fork a Linux computer through `engine.sock` while status po
 
 - **4 Nov, checkpoint disk (phase 0b), advised by Fable:** a live probe on the pinned runtime (`docs/v1/evidence/phase-0/raw/checkpoint-disk-probe.txt`) showed a computer's checkpoints form one linear msb chain, the engine refuses every checkpoint delete while the computer exists, disk comes back only when the computer is deleted, and images do not leak. The pinned msb 0.7.6 has no top-level `msb prune` (the validation's prune figures came from upstream 0.7.13). Two reviews (gpt-6.1-sol, Opus; Argon failed to run) found that retention by deletion frees nothing on a linear chain and that `msb image prune` can drop layers a loaded, not yet started snapshot needs. Fable read the msb source: each checkpoint holds its whole layer closure, so parent links are lineage only, and msb ships `msb modify --compact`, which merges old sealed layers into a new base. Decision: no automatic image prune; retention = compact the computer's oldest layers, then remove the pruned Silo-owned checkpoints with `--force`, always keeping the newest. Spec change pending the measurement in the phase 0 VM check.
 - **4 Nov, checkpoint disk follow-up, advised by Fable:** two compaction probes (`compact-probe.txt`) showed compaction (running or stopped) costs about 0.8-1.1 GB and removing every older snapshot afterwards returns about 0. Cause in the pinned msb: each capture's layer closure is staged in the sandbox's `runtime/checkpoints/<id>/` and never removed after publication, so those hard links hold the data until the sandbox is deleted. Separately, `publish_layer_closure` copies every qcow2 layer on each capture, so the first capture after a restore cost 1-5 GB. Decision: carry two Silo msb patches (release the staging dir after publication plus a crash sweep; link instead of copy when the backing name already matches), re-probe, then implement retention as compact + forced removal. Fallback if the copy patch fails: accept growth in v1, show checkpoint disk per computer, and record the spec change.
-- **4 Nov, merging to main:** main has a GitHub ruleset that refuses direct pushes (pull request plus 7 required status checks). Each phase lands as a squash-merged PR from `claude/project-thread-e72ch6` once CI is green and reviews pass, per the project rules. This replaces "commit directly to main".
+- **5 Nov, quiet forks scope:** "scheduled jobs off" means scheduled jobs (cron, at, launchd jobs with intervals, calendars or watch paths, periodic scripts); services that keep running (a Postgres or other dev-stack service) stay, since the fork should carry the dev stack. Anything else an agent wants stopped goes in the recipe's `quiet:` list. The macOS "Fork point" is its own checkpoint kind, disk scope, kept while a fork needs it as the fork-time base for Keep.
+- **5 Nov, URL per fork:** `http://<port>.<computer>.silo.localhost:<proxy port>` on one loopback listener instead of binding each guest port on the host, because binding `127.0.0.1:3000` blocks the user's own dev server on `0.0.0.0:3000` (gpt-6.1-sol review). The spec's `:3000` example becomes the guest port in the name.
+- **4 Nov, merging to main:** main has a GitHub ruleset that refuses direct pushes (pull request plus 7 required status checks). Each phase lands as a squash-merged PR from its own branch (`claude/silo-v1-phase-N`; phase 0 used `claude/project-thread-e72ch6`) once CI is green and reviews pass, per the project rules. This replaces "commit directly to main".
 
 ## Spec changes
 
 ## Status
+
+### 5 Nov 2026: phase 1 passed (two items blocked on the owner)
+
+- **Checks:** Linux and macOS quiet-fork checks through the `silo` CLI only (engine and CLI at `726020f2`, MicroSandbox 0.7.6 with 22 patches, Ubuntu 24.04.4 and macOS 26.6.2 guests). Sources had boot-persistent jobs (Linux: XDG autostart starting a poller and cron with a minute job and `@reboot`; macOS: StartInterval and KeepAlive LaunchAgents, a minute crontab and `@reboot`), confirmed running after a source restart. Quiet forks over 130 s: no job or poller lines from the fork and no log growth on either OS; new machine-id/identifier, hostname and host keys (also for a fork of a fork); scrubbed file gone in the fork and kept on the source; quiet record applied; macOS fork booted once (`boots == 1`, one `boot 1: first Start` line), 26 s from start to ready (dev signal only). A Linux control fork without a recipe ran the unnamed poller and no scheduled jobs. One check line reads FAIL by design of the script: the cron daemon itself still starts from an XDG autostart entry in the quiet fork, with its crontab and `@reboot` parked, so no job runs; the spec asks for no job runs, which holds. Evidence: `docs/v1/evidence/phase-1/` (`linux-quiet-check.txt`, `macos-check.txt`, earlier runs beside them). Scripts: `docs/v1/checks/phase1_*_check.sh`. Workspace tests pass; frontend 2812 tests pass.
+- **Shipped:** `silo` CLI and MCP server (`app/SiloUI/cli`) with the recipe and settings loaders; quiet forks on Linux (boot hook in the Silo msb patch runs the quiet step before the desktop) and macOS (offline parking during fork setup); cold-boot forks only; no assignments copied unless named, `github` read-only; macOS fork in one boot with offline personalization and network staging (was 4 boots); macOS create no longer fails on the password step; URL per fork (AMO-91, early).
+- **Evidence review (Opus; Argon could not run):** found the first runs showed several conditions for the wrong reason (no boot-persistent source jobs, no control). Re-run with persistent jobs and a control; that re-run found two real bugs (XDG autostart entries and KeepAlive LaunchAgents named in `quiet:` still started), both fixed and re-checked.
+- **Decisions:** quiet scope and URL format (see Decisions). Reviews by gpt-6.1-sol and Opus.
+- **Spec changes:** none. The URL example becomes `http://<port>.<fork>.silo.localhost:<proxy port>`; PRODUCT.md says "e.g.", so no text change is needed yet.
+- **Blocked:** the positive `--secret` copy and a non-trivial "no assignments by default" check need your Keychain approval for the Dev engine; read-only GitHub against a mock needs a GitHub App installation (unit-tested). Known issue outside v1 scope: macOS disks stay at 40 GiB because the Recovery partition blocks the container grow (now a note, not a failure).
+- **Wording:** clean over added lines. One commit message on the branch (`e3a457f1`) uses a listed word; it does not reach main because PRs are squash-merged with a clean message.
+- **Next:** phase 2.
 
 ### 4 Nov 2026: phase 0 passed
 

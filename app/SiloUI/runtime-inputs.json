@@ -70,7 +70,7 @@
     },
     {
       "path": "patches/microsandbox-create-stopped-0.7.6.patch",
-      "sha256": "7234d5319f05452e4cfc6355f21cedb0f50589df17bca13cdcaa2ed97816ca2c"
+      "sha256": "ef9a83a5daaf8e79486a260cebf8a20ea738d35a936b76c443de2d561239a1b7"
     },
     {
       "path": "patches/microsandbox-adopt-owned-disk-0.7.6.patch",

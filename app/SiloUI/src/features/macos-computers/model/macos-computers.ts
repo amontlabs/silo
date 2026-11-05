@@ -17,7 +17,7 @@ export const macosCheckpointSchema = z.object({
   createdAt: z.string(),
   scope: z.enum(["full", "disk"]),
   reason: z.enum(["manual", "before-restore"]),
-  kind: z.enum(["manual", "automatic", "before-keep"]).optional(),
+  kind: z.enum(["manual", "automatic", "before-keep", "fork-point"]).optional(),
   sizeBytes: z.number().int().nonnegative().optional(),
 })
 
@@ -27,6 +27,19 @@ export const macosCheckpointOperationSchema = z.object({
   stage: z.string(),
   error: z.string().optional(),
 })
+
+/** What a fork was made quiet with; absent on computers that are not forks. */
+export const quietStateSchema = z.object({
+  applied: z.boolean(),
+  newIdentity: z.boolean(),
+  scheduledJobsDisabled: z.boolean(),
+  stop: z.array(z.string()),
+  scrub: z.array(z.string()),
+  secrets: z.array(z.string()),
+  parked: z.array(z.string()).optional(),
+  stillScheduled: z.array(z.string()).optional(),
+})
+export type QuietState = z.infer<typeof quietStateSchema>
 
 export const macosComputerSchema = z.object({
   id: z.string().min(1),
@@ -48,6 +61,7 @@ export const macosComputerSchema = z.object({
   checkpointOperation: macosCheckpointOperationSchema.nullable().optional(),
   /** A Restore that the next Start continues; `memory` when it brings the saved memory back. */
   pendingRestore: z.object({ checkpointId: z.string(), memory: z.boolean() }).nullable().optional(),
+  quiet: quietStateSchema.nullable().optional().catch(null),
 })
 export type MacosComputer = z.infer<typeof macosComputerSchema>
 

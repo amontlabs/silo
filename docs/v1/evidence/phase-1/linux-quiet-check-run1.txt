@@ -1,0 +1,115 @@
+== header
+engine commit: 465a731f93c2afd8ad7d35bfcf0e9397b27513b5
+msb: 0.7.6 patches: 22
+macOS: 26.5 (arm64)
+silo --version: silo 0.1.0
+date: 2026-11-05T00:12:07Z
+== silo list / status / drop main
+NAME         STATE      KIND    SIZE
+workspace-1  stopped    linux   8 cpu, 32 GiB
+e2e-relay    stopped    linux   8 cpu, 32 GiB
+silo-eval-a  stopped    linux   2 cpu, 2 GiB
+silo-eval-b  stopped    linux   2 cpu, 2 GiB
+[01:12:08] PASS  silo list  -- exits 0
+[01:12:08] PASS  silo status  -- exits 0 for an existing computer
+silo drop main -> rc=1: silo: main is the long-lived computer. Pass --force to drop it.
+[01:12:08] PASS  silo drop refuses main  -- non-zero exit without --force
+== source setup
+Creating e2e-p1-src...
+Creating e2e-p1-src: 5s
+Created e2e-p1-src (stopped)
+Starting e2e-p1-src...
+Started e2e-p1-src (running)
+[01:12:19] PASS  create+start source  -- 
+/usr/sbin/cron
+* * * * * echo "$(hostname) $(date +\%s) cron" >> /var/log/silo-check-cron.log
+@reboot echo "$(hostname) $(date +\%s) reboot" >> /var/log/silo-check-reboot.log
+   ...done.
+830 perl -e # Silo guest process supervisor. Arguments: TOKEN CWD PROGRAM [ARGUMENT...]. # Runs PROGRAM as the leader of its own process group so the engine can stop the whole # tree, and records that group in /tmp/silo-exec-TOKEN.pid. The supervisor itself stays # outside the group, so once PROGRAM exits the group id still names exactly its remaining # descendants. The record is kept while any descendant lives, so a later cancellation can # still end them, and removed once none remain. A signal death is reported as 128+N after # saving the signal name in /tmp/silo-exec-TOKEN.sig; an exit code of 255, which SSH also # uses for its own failures, is saved in /tmp/silo-exec-TOKEN.exit so the engine can tell # the two apart. use strict; use warnings; use POSIX (); use Config;  my ($token, $cwd, @argv) = @ARGV; my $state = "/tmp/silo-exec-$token"; if (!@argv) { print STDERR "silo: no command\n"; exit 126; }  sub record {     my ($file, $text) = @_;     my $old = umask(077);     if (open(my $handle, '>', $file)) {         print $handle $text;         close $handle;     }     umask($old); }  if (length $cwd) {     unless (chdir $cwd) {         print STDERR "silo: cannot enter $cwd: $!\n";         exit 126;     } } my $child; $SIG{TERM} = $SIG{INT} = $SIG{HUP} = sub {     my ($name) = @_;     kill($name, -$child) if defined $child && $child > 0; }; my $pid = fork(); if (!defined $pid) {     print STDERR "silo: cannot start $argv[0]: $!\n";     exit 126; } if ($pid == 0) {     $SIG{TERM} = $SIG{INT} = $SIG{HUP} = 'DEFAULT';     setpgrp(0, 0) or POSIX::setsid();     { no warnings; exec { $argv[0] } @argv; }     my $code = $!{ENOENT} ? 127 : 126;     print STDERR "silo: cannot run $argv[0]: $!\n";     POSIX::_exit($code); } # Both sides set the group, so it exists before either continues. setpgrp($pid, $pid); $child = $pid; record("$state.pid", "$pid\n"); waitpid($pid, 0); my $status = $?; # Keep the record while descendants of the command live: they are still in its group. if (!(kill(0, -$pid) || $!{EPERM})) {     unlink "$state.pid"; } if ($status & 127) {     my $number = $status & 127;     my @names = split ' ', $Config{sig_name};     my $name = $names[$number] // "SIG$number";     record("$state.sig", "$name\n");     exit 128 + $number; } my $code = $status >> 8; record("$state.exit", "$code\n") if $code == 255; exit($code);  -- 2a1972c6d99a4b8d9940ef0052efbbb1  sudo bash -c mkdir -p /root/.config/autostart cat > /usr/local/bin/silo-check-poller.sh <<"P" #!/bin/bash while true; do   code=$(curl -s -m 2 -o /dev/null -w "%{http_code}" "http://127.0.0.1:8099/poll?host=$(hostname)")   echo "$(hostname) $(date +%s) poll $code" >> /var/log/silo-check-poll.log   sleep 5 done P chmod +x /usr/local/bin/silo-check-poller.sh cat > /root/.config/autostart/poller.desktop <<"D" [Desktop Entry] Type=Application Name=poller Exec=bash /usr/local/bin/silo-check-poller.sh D echo "FAKE_BOT_TOKEN=p1-fake-not-real" > /root/.bot.env cat > /tmp/ct <<"C" * * * * * echo "$(hostname) $(date +\%s) cron" >> /var/log/silo-check-cron.log @reboot echo "$(hostname) $(date +\%s) reboot" >> /var/log/silo-check-reboot.log C crontab /tmp/ct; crontab -l (service cron start || cron) 2>&1 | tail -1 setsid -f bash /usr/local/bin/silo-check-poller.sh </dev/null >/dev/null 2>&1 sleep 1; pgrep -af silo-check-poller
+831 sudo bash -c mkdir -p /root/.config/autostart cat > /usr/local/bin/silo-check-poller.sh <<"P" #!/bin/bash while true; do   code=$(curl -s -m 2 -o /dev/null -w "%{http_code}" "http://127.0.0.1:8099/poll?host=$(hostname)")   echo "$(hostname) $(date +%s) poll $code" >> /var/log/silo-check-poll.log   sleep 5 done P chmod +x /usr/local/bin/silo-check-poller.sh cat > /root/.config/autostart/poller.desktop <<"D" [Desktop Entry] Type=Application Name=poller Exec=bash /usr/local/bin/silo-check-poller.sh D echo "FAKE_BOT_TOKEN=p1-fake-not-real" > /root/.bot.env cat > /tmp/ct <<"C" * * * * * echo "$(hostname) $(date +\%s) cron" >> /var/log/silo-check-cron.log @reboot echo "$(hostname) $(date +\%s) reboot" >> /var/log/silo-check-reboot.log C crontab /tmp/ct; crontab -l (service cron start || cron) 2>&1 | tail -1 setsid -f bash /usr/local/bin/silo-check-poller.sh </dev/null >/dev/null 2>&1 sleep 1; pgrep -af silo-check-poller
+850 bash /usr/local/bin/silo-check-poller.sh
+[01:12:32] waiting for cron to fire on the source (max 150 s)
+bash: line 1: /var/log/silo-check-cron.log: No such file or directory
+bash: line 1: /var/log/silo-check-cron.log: No such file or directory
+bash: line 1: /var/log/silo-check-cron.log: No such file or directory
+bash: line 1: /var/log/silo-check-cron.log: No such file or directory
+bash: line 1: /var/log/silo-check-cron.log: No such file or directory
+bash: line 1: /var/log/silo-check-cron.log: No such file or directory
+[01:13:04] PASS  source cron fired  -- cron.log lines=1 after 30s
+src poll lines=7
+1
+/root/.bot.env
+== recipe + fork
+Forking e2e-p1-src into e2e-p1-fork...
+Forked e2e-p1-fork (stopped)
+[01:13:08] PASS  fork e2e-p1-fork (recipe discovered)  -- 
+Starting e2e-p1-fork...
+Started e2e-p1-fork (running)
+[01:13:11] PASS  start e2e-p1-fork  -- 
+[01:13:11] fork baseline after start: poll=7 cron=1 reboot=1 procs=0
+[01:13:11] watching fork for 130 s
+[01:15:22] fork after 130 s:        poll=7 cron=1 reboot=1 procs=0
+[01:15:22] PASS  no poller/cron/@reboot lines written in fork  -- before[poll=7 cron=1 reboot=1 procs=0] after[poll=7 cron=1 reboot=1 procs=0]
+[01:15:22] PASS  no poller process in fork  -- matching processes=0
+e2e-p1-src 1793837571 poll 000
+e2e-p1-src 1793837576 poll 000
+e2e-p1-src 1793837581 poll 000
+e2e-p1-src 1793837551 reboot
+cron-procs=0
+no crontab for root
+etc
+var
+poller.desktop
+source id=a58639137b9771e322faf1aa6aeae96f host=e2e-p1-src | fork id=d1b619e9bf7940ad8fb94d5621fc2cce host=e2e-p1-fork
+[01:15:23] PASS  new machine-id  -- a58639137b9771e322faf1aa6aeae96f -> d1b619e9bf7940ad8fb94d5621fc2cce
+[01:15:23] PASS  new hostname  -- e2e-p1-src -> e2e-p1-fork
+[01:15:24] PASS  /root/.bot.env gone  -- 
+[01:15:24] PASS  source still has /root/.bot.env  -- 
+-- fork status --json
+{
+  "checkpointList": [],
+  "checkpoints": 0,
+  "cpus": 2,
+  "detail": "Running",
+  "diskGiB": 8,
+  "id": "969d63cc-e3fe-472c-b696-2d66180bb054",
+  "kind": "linux",
+  "memoryGiB": 2,
+  "name": "e2e-p1-fork",
+  "state": "running"
+}
+-- fork checkpoints --json (quiet)
+{"checkpoints": [], "computer": "e2e-p1-fork"}
+assignment-looking fields in status: none (status has no assignment fields: [])
+quiet fields: {}
+[01:15:24] FAIL  fork quiet.applied true, no secrets/github in status+record  -- see fields above
+== fork of a fork
+Forking e2e-p1-fork into e2e-p1-fork2...
+Forked e2e-p1-fork2 (stopped)
+Starting e2e-p1-fork2...
+Started e2e-p1-fork2 (running)
+[01:15:31] PASS  fork+start e2e-p1-fork2  -- 
+fork2 id=fc6c3a9f52124c6892db70e5ee77225f host=e2e-p1-fork2
+[01:15:32] PASS  fork2 machine-id differs from fork and source  -- fc6c3a9f52124c6892db70e5ee77225f
+[01:15:32] PASS  fork2 hostname differs  -- e2e-p1-fork2
+fork2 procs=0 poll=7
+== secrets opt-in
+[01:15:34] NOTE: silo CLI has no secret command; cannot assign a throwaway secret to the source. Checking that an unknown --secret fails cleanly.
+rc=1: Forking e2e-p1-src into e2e-p1-nosecret...
+silo: The source computer has no secret named E2E_P1_NO_SUCH_SECRET.
+[01:15:36] PASS  --secret for a name the source lacks fails  -- rc=1
+[01:15:36] PASS  failed fork leaves no computer behind  -- 
+== read-only GitHub
+425:        || !matches!(url.host_str(), Some("api.github.com" | "github.com"))
+482:        url: format!("https://api.github.com{path}"),
+875:            "http://api.github.com/user",
+876:            "https://api.github.com.evil.test/user",
+[01:15:36] SKIP: no GitHub API base URL override in the engine (github_http.rs hard-codes https://api.github.com and rejects other hosts); no mock possible, real GitHub never contacted.
+== summary: PASS=18 FAIL=1
+[01:15:36] cleanup
+[01:15:41] silo list after cleanup:
+NAME         STATE      KIND    SIZE
+workspace-1  stopped    linux   8 cpu, 32 GiB
+e2e-relay    stopped    linux   8 cpu, 32 GiB
+silo-eval-a  stopped    linux   2 cpu, 2 GiB
+silo-eval-b  stopped    linux   2 cpu, 2 GiB

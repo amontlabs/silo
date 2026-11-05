@@ -181,6 +181,17 @@
         "purpose": {
           "type": "string"
         },
+        "quiet": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/QuietState"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "What a fork was made quiet with. Absent on computers that are not forks."
+        },
         "repositories": {
           "items": true,
           "type": "array"
@@ -674,6 +685,24 @@
         },
         "newName": {
           "type": "string"
+        },
+        "quiet": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/QuietSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "What to quiet in the fork before it runs anything."
+        },
+        "secrets": {
+          "description": "Names of Silo-managed secrets the fork may use. The special name `github` copies\nGitHub access, read-only. Nothing is copied unless named.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         }
       },
       "required": [
@@ -686,7 +715,8 @@
       "enum": [
         "manual",
         "automatic",
-        "before-keep"
+        "before-keep",
+        "fork-point"
       ],
       "type": "string"
     },
@@ -6106,6 +6136,13 @@
     "MacosComputer": {
       "description": "Mirrors `app/SiloUI/src-tauri/engine/src/macos_computers.rs::MacosComputer`\n(lines 68-92). `kind` is added by the unified `computers.list` contract;\nsource `Option` fields remain explicit JSON nulls.",
       "properties": {
+        "boots": {
+          "default": 0,
+          "description": "How many times the engine has booted the computer.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
         "checkpointOperation": {
           "anyOf": [
             {
@@ -6193,6 +6230,16 @@
           "type": [
             "number",
             "null"
+          ]
+        },
+        "quiet": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/QuietState"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "setupComplete": {
@@ -6657,6 +6704,7 @@
         "network.publish",
         "network.state",
         "network.unpublish",
+        "network.urls",
         "notifications.list",
         "operations.cancel",
         "operations.job.acknowledge",
@@ -8539,6 +8587,22 @@
             },
             "params": {
               "$ref": "#/$defs/NetworkUnpublishParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "network.urls",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/ComputerTargetParams"
             }
           },
           "required": [
@@ -10895,6 +10959,22 @@
         {
           "properties": {
             "method": {
+              "const": "network.urls",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/NetworkUrlsResult"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
               "const": "notifications.list",
               "type": "string"
             },
@@ -11831,6 +11911,46 @@
       ],
       "type": "object"
     },
+    "NetworkUrl": {
+      "properties": {
+        "host": {
+          "type": "string"
+        },
+        "port": {
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "port",
+        "host",
+        "url"
+      ],
+      "type": "object"
+    },
+    "NetworkUrlsResult": {
+      "properties": {
+        "computerId": {
+          "type": "string"
+        },
+        "urls": {
+          "items": {
+            "$ref": "#/$defs/NetworkUrl"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "computerId",
+        "urls"
+      ],
+      "type": "object"
+    },
     "Notice": {
       "properties": {
         "body": {
@@ -12473,6 +12593,81 @@
         "repository",
         "branch",
         "commit"
+      ],
+      "type": "object"
+    },
+    "QuietSpec": {
+      "description": "Things a fork turns off on its first boot, beyond the scheduled jobs it always turns off.",
+      "properties": {
+        "scrub": {
+          "default": [],
+          "description": "Absolute guest paths (globs allowed) to delete in the fork.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "stop": {
+          "default": [],
+          "description": "Process names and systemd units to disable in the fork.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "QuietState": {
+      "description": "A fork's recorded quiet state. `parked` and `stillScheduled` are reported on macOS only.",
+      "properties": {
+        "applied": {
+          "type": "boolean"
+        },
+        "newIdentity": {
+          "type": "boolean"
+        },
+        "parked": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "scheduledJobsDisabled": {
+          "type": "boolean"
+        },
+        "scrub": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "secrets": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "stillScheduled": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "stop": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "applied",
+        "newIdentity",
+        "scheduledJobsDisabled",
+        "stop",
+        "scrub",
+        "secrets"
       ],
       "type": "object"
     },
@@ -14645,6 +14840,12 @@
       "name": "network.unpublish",
       "paramsType": "network::NetworkUnpublishParams",
       "resultType": "network::NetworkState"
+    },
+    {
+      "kind": "query",
+      "name": "network.urls",
+      "paramsType": "network::NetworkTargetParams",
+      "resultType": "network::NetworkUrlsResult"
     },
     {
       "kind": "query",

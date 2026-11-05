@@ -9,6 +9,7 @@
 
 pub mod retention;
 
+pub use crate::runtime::checkpoints::ForkOptions;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
@@ -200,6 +201,12 @@ impl Service {
         kind: Option<CheckpointKind>,
     ) -> Result<JobId, Failure> {
         let automatic = kind == Some(CheckpointKind::Automatic);
+        if kind == Some(CheckpointKind::ForkPoint) {
+            return Err(Failure::new(
+                ErrorCode::Internal,
+                "A fork point is made by Fork, not saved as a checkpoint.",
+            ));
+        }
         if kind == Some(CheckpointKind::BeforeKeep)
             && self.platform(computer_id)? == Platform::Macos
         {
@@ -295,30 +302,24 @@ impl Service {
         }
     }
 
-    /// `checkpoints.fork`. Linux forks the computer's current state when no checkpoint is
-    /// named; macOS always needs one.
+    /// `checkpoints.fork`. Both platforms fork the computer's current state, by taking a
+    /// checkpoint of it, when no checkpoint is named.
     pub fn start_fork(
         &self,
         computer_id: &str,
         checkpoint_id: Option<&str>,
         new_name: &str,
+        options: ForkOptions,
     ) -> Result<JobId, Failure> {
         match self.platform(computer_id)? {
-            Platform::Macos => {
-                let checkpoint_id = checkpoint_id.ok_or_else(|| {
-                    Failure::new(
-                        ErrorCode::Internal,
-                        "Choose the checkpoint to fork. macOS computers cannot fork their current state.",
-                    )
-                })?;
-                macos_computers::start_macos_checkpoint_fork_job(
-                    self.macos.clone(),
-                    computer_id.to_owned(),
-                    checkpoint_id.to_owned(),
-                    new_name.to_owned(),
-                )
-                .map_err(Failure::from_message)
-            }
+            Platform::Macos => macos_computers::start_macos_checkpoint_fork_job(
+                self.macos.clone(),
+                computer_id.to_owned(),
+                checkpoint_id.map(str::to_owned),
+                new_name.to_owned(),
+                options,
+            )
+            .map_err(Failure::from_message),
             Platform::Linux => {
                 let computer_id = computer_id.to_owned();
                 let checkpoint_id = checkpoint_id.map(str::to_owned);
@@ -335,6 +336,7 @@ impl Service {
                             &computer_id,
                             checkpoint_id.as_deref(),
                             &new_name,
+                            options.clone(),
                             &|| macos_computers::names(&macos),
                             job_id,
                             cancellation,
@@ -584,7 +586,7 @@ fn finish_linux_job(
 }
 
 /// GitHub and secret assignments follow a fork on this device.
-struct EngineForkAssignments;
+pub(crate) struct EngineForkAssignments;
 
 impl runtime::checkpoints::ForkAssignments for EngineForkAssignments {
     fn copy_github(&self, source: &str, target: &str) -> Result<(), String> {
@@ -595,8 +597,8 @@ impl runtime::checkpoints::ForkAssignments for EngineForkAssignments {
         crate::github::forget_fork_assignment(target)
     }
 
-    fn copy_secrets(&self, source: &str, target: &str) -> Result<(), String> {
-        crate::secrets::fork_assignments(source, target)
+    fn copy_secrets(&self, source: &str, target: &str, names: &[String]) -> Result<(), String> {
+        crate::secrets::fork_assignments(source, target, names)
     }
 
     fn forget_secrets(&self, target: &str) -> Result<(), String> {

@@ -499,6 +499,7 @@ pub async fn handle(
         MethodName::NetworkPublish => network_change(params, context, true).await,
         MethodName::NetworkUnpublish => network_change(params, context, false).await,
         MethodName::NetworkOpen => network_open(params, context).await,
+        MethodName::NetworkUrls => network_urls(params, context).await,
         MethodName::SshAccessState => ssh_access_state(params, context).await,
         MethodName::SshAccessSave => ssh_access_save(params, context).await,
         MethodName::SshAccessConnection => ssh_access_connection(params, context).await,
@@ -1871,6 +1872,11 @@ async fn network_state(
 
 fn local_network_state() -> Result<Value, String> {
     let paths = local_paths()?;
+    // The ticket is taken before observing, so a slower, older read never overwrites a newer one.
+    let ticket = silo_engine::url_proxy::shared().map(|proxy| {
+        proxy.use_names_file(paths.metadata.with_file_name("url-names.json"));
+        proxy.ticket()
+    });
     let state = silo_engine::network::read_network_state(&paths)?;
     let mut value = serde_json::to_value(state).map_err(|error| error.to_string())?;
     // The macOS computers' published ports are kept by the macOS store, not by the Linux
@@ -1885,7 +1891,96 @@ fn local_network_state() -> Result<Value, String> {
         }
     }
     project_name_rows_to_ids(&mut value, &paths, &["computers"]);
+    sync_url_routes(ticket, &value);
     Ok(value)
+}
+
+/// Feeds the per-computer URL proxy from observed published ports: a computer is routed
+/// only while a website port of it is reachable, so a stopped or deleted computer drops out.
+fn sync_url_routes(ticket: Option<u64>, state: &Value) {
+    let (Some(proxy), Some(ticket)) = (silo_engine::url_proxy::shared(), ticket) else {
+        return;
+    };
+    let mut routes = Vec::new();
+    for row in state
+        .get("computers")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let (Some(name), Some(id)) = (
+            row.get("computer").and_then(Value::as_str),
+            row.get("computerId").and_then(Value::as_str),
+        ) else {
+            continue;
+        };
+        for port in row
+            .get("ports")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            let (Some(guest), Some(host), Some("reachable"), Some("http")) = (
+                port.get("port").and_then(Value::as_u64),
+                port.get("hostPort").and_then(Value::as_u64),
+                port.get("state").and_then(Value::as_str),
+                port.get("scheme").and_then(Value::as_str),
+            ) else {
+                continue;
+            };
+            let (Ok(guest_port), Ok(upstream_port)) = (u16::try_from(guest), u16::try_from(host))
+            else {
+                continue;
+            };
+            routes.push(silo_engine::url_proxy::Route {
+                computer_id: id.to_owned(),
+                computer: name.to_owned(),
+                guest_port,
+                upstream_port,
+            });
+        }
+    }
+    proxy.set_routes(ticket, &routes);
+}
+
+/// The timer's refresh, so a computer that started or stopped gains or loses its names
+/// without a client reading the state.
+///
+/// Nothing is observed while no computer saves a website port and no route is open.
+pub(crate) fn refresh_url_routes(has_websites: bool) {
+    let routed = silo_engine::url_proxy::shared().is_some_and(|proxy| proxy.has_routes());
+    if has_websites || routed {
+        let _ = local_network_state();
+    }
+}
+
+async fn network_urls(
+    params: &Value,
+    context: &HandlerContext,
+) -> Result<HandlerOutput, DispatchError> {
+    let typed = context.decode_params::<network::NetworkTargetParams>(params)?;
+    if remote_target(context, typed.device_id.as_deref()).is_some() {
+        return Err(failure(
+            "Names for computers on another device are served by that device.",
+        ));
+    }
+    let computer_id = typed.computer_id;
+    let wanted = computer_id.clone();
+    let urls = blocking(move || {
+        local_network_state()?;
+        Ok(silo_engine::url_proxy::shared()
+            .map(|proxy| proxy.urls(&wanted))
+            .unwrap_or_default()
+            .into_iter()
+            .map(|url| network::NetworkUrl {
+                port: url.guest_port,
+                host: url.host,
+                url: url.url,
+            })
+            .collect::<Vec<_>>())
+    })
+    .await?;
+    to_output(network::NetworkUrlsResult { computer_id, urls })
 }
 
 async fn network_change(

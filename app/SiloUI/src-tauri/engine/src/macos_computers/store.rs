@@ -167,6 +167,32 @@ pub(super) struct Record {
     /// cannot keep it and the engine cannot restore it. Informational only.
     #[serde(default)]
     pub secure_token_missing: bool,
+    /// Why the disk is smaller than asked: a warning, not a failure.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disk_note: Option<String>,
+    /// A fork whose disk was rekeyed and staged while stopped: its first start still installs
+    /// its key, name and trust over its password login before handing the computer over.
+    #[serde(default)]
+    pub first_boot: bool,
+    /// How many times the engine has booted this computer (setup boots, first Start and every
+    /// Start, Recovery included).
+    #[serde(default)]
+    pub boots: u32,
+    /// What a fork was made quiet with. Absent on computers that are not forks.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quiet: Option<super::quiet::QuietRecord>,
+    /// The fork point of another computer this fork was made from. That checkpoint stays while
+    /// this computer exists.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub forked_from: Option<ForkOrigin>,
+}
+
+/// A checkpoint of a source computer that a fork depends on.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct ForkOrigin {
+    pub computer_id: String,
+    pub checkpoint_id: String,
 }
 
 impl Record {
@@ -332,6 +358,11 @@ pub(super) fn new_record(request: &CreateRequest, mac_address: String) -> Record
         inherited_access: false,
         imported: false,
         secure_token_missing: false,
+        disk_note: None,
+        first_boot: false,
+        boots: 0,
+        quiet: None,
+        forked_from: None,
     }
 }
 
@@ -404,7 +435,7 @@ pub(super) fn checkpoint_allowed(
     if !record.installed {
         return Err(INTERRUPTED_INSTALL.into());
     }
-    if !record.setup_complete() {
+    if !record.setup_complete() || record.first_boot {
         return Err(super::checkpoints::NOT_READY.into());
     }
     match state {

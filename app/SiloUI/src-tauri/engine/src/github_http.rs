@@ -419,8 +419,41 @@ pub(crate) fn send(request: Request) -> Result<Value, String> {
 pub(crate) fn send_for_computer(request: Request, computer: &str) -> Result<Value, String> {
     send_scoped(request, Some(computer))
 }
-fn send_scoped(request: Request, computer: Option<&str>) -> Result<Value, String> {
-    let url = reqwest::Url::parse(&request.url).map_err(|_| "Invalid GitHub destination.")?;
+/// The environment variable that points GitHub API calls at a local test server.
+const API_BASE_VARIABLE: &str = "SILO_GITHUB_API_BASE";
+/// A loopback `http` or `https` origin, or nothing. Credentials, a path, a query and a
+/// fragment are all refused.
+fn loopback_base(value: &str) -> Option<reqwest::Url> {
+    let url = reqwest::Url::parse(value).ok()?;
+    let host = url.host_str()?;
+    let loopback = host == "localhost"
+        || host == "[::1]"
+        || host
+            .parse::<std::net::Ipv4Addr>()
+            .is_ok_and(|address| address.is_loopback());
+    (matches!(url.scheme(), "http" | "https")
+        && loopback
+        && url.username().is_empty()
+        && url.password().is_none()
+        && matches!(url.path(), "" | "/")
+        && url.query().is_none()
+        && url.fragment().is_none())
+    .then_some(url)
+}
+/// Where `api.github.com` requests go instead, for tests of a debug build. A release build
+/// never reads the variable.
+#[cfg(debug_assertions)]
+fn api_override() -> Option<reqwest::Url> {
+    loopback_base(&std::env::var(API_BASE_VARIABLE).ok()?)
+}
+#[cfg(not(debug_assertions))]
+fn api_override() -> Option<reqwest::Url> {
+    None
+}
+/// The checked destination of a request. Only `https://api.github.com` and
+/// `https://github.com` are accepted; with `base`, requests for the API go there instead.
+fn destination(raw: &str, base: Option<&reqwest::Url>) -> Result<reqwest::Url, String> {
+    let mut url = reqwest::Url::parse(raw).map_err(|_| "Invalid GitHub destination.")?;
     if url.scheme() != "https"
         || !matches!(url.host_str(), Some("api.github.com" | "github.com"))
         || url.port().is_some()
@@ -430,6 +463,18 @@ fn send_scoped(request: Request, computer: Option<&str>) -> Result<Value, String
     {
         return Err("Invalid GitHub destination.".into());
     }
+    if let (Some(base), Some("api.github.com")) = (base, url.host_str()) {
+        let moved = url.set_scheme(base.scheme()).is_ok()
+            && url.set_host(base.host_str()).is_ok()
+            && url.set_port(base.port()).is_ok();
+        if !moved {
+            return Err("Invalid GitHub destination.".into());
+        }
+    }
+    Ok(url)
+}
+fn send_scoped(request: Request, computer: Option<&str>) -> Result<Value, String> {
+    let url = destination(&request.url, api_override().as_ref())?;
     let mut bytes =
         serde_json::to_vec(&request.body).map_err(|_| "Cannot encode GitHub request.")?;
     let class = rate_class(&request.authentication);
@@ -868,6 +913,75 @@ mod tests {
         }
         let error = wire_response(200, r#"{"error":"bad_refresh_token"}"#, false).unwrap_err();
         assert!(authorization_rejected(&error));
+    }
+    #[test]
+    fn api_base_must_be_a_loopback_origin() {
+        for good in [
+            "http://127.0.0.1:8080",
+            "http://localhost:9000/",
+            "https://[::1]:8443",
+            "http://127.0.0.1",
+        ] {
+            assert!(loopback_base(good).is_some(), "{good}");
+        }
+        for bad in [
+            "http://example.com",
+            "http://127.0.0.1.evil.test:80",
+            "http://user@127.0.0.1:80",
+            "http://127.0.0.1:80/api",
+            "http://127.0.0.1:80?x=1",
+            "ftp://127.0.0.1",
+            "http://10.0.0.1",
+            "not a url",
+            "",
+        ] {
+            assert!(loopback_base(bad).is_none(), "{bad}");
+        }
+    }
+    #[test]
+    fn api_requests_move_to_the_base_and_nothing_else_does() {
+        let base = loopback_base("http://127.0.0.1:8080").unwrap();
+        assert_eq!(
+            destination("https://api.github.com/user?a=1", Some(&base))
+                .unwrap()
+                .as_str(),
+            "http://127.0.0.1:8080/user?a=1"
+        );
+        assert_eq!(
+            destination("https://github.com/login/oauth", Some(&base))
+                .unwrap()
+                .as_str(),
+            "https://github.com/login/oauth"
+        );
+        assert_eq!(
+            destination("https://api.github.com/user", None)
+                .unwrap()
+                .as_str(),
+            "https://api.github.com/user"
+        );
+        assert!(destination("http://127.0.0.1:8080/user", Some(&base)).is_err());
+    }
+    #[cfg(debug_assertions)]
+    #[test]
+    fn a_debug_build_reads_the_api_base_variable() {
+        let _test_state = crate::test_support::global_state();
+        std::env::set_var(API_BASE_VARIABLE, "http://127.0.0.1:8081");
+        let honored = api_override();
+        std::env::set_var(API_BASE_VARIABLE, "http://example.com");
+        let refused = api_override();
+        std::env::remove_var(API_BASE_VARIABLE);
+        assert_eq!(honored.unwrap().as_str(), "http://127.0.0.1:8081/");
+        assert!(refused.is_none());
+        assert!(api_override().is_none());
+    }
+    #[cfg(not(debug_assertions))]
+    #[test]
+    fn a_release_build_ignores_the_api_base_variable() {
+        let _test_state = crate::test_support::global_state();
+        std::env::set_var(API_BASE_VARIABLE, "http://127.0.0.1:8081");
+        let ignored = api_override();
+        std::env::remove_var(API_BASE_VARIABLE);
+        assert!(ignored.is_none());
     }
     #[test]
     fn credential_destinations_are_fixed_before_network() {

@@ -1,0 +1,57 @@
+engine commit: 46492ff3d9471eff1d79e3cae7df03eff0cebd8e
+msb: 0.7.6 patches: 22
+macOS: 26.5 (arm64); silo: silo 0.1.0
+foreign macOS VMs (pgrep Virtualization.VirtualMachine): 0
+NAME         STATE      KIND    SIZE
+workspace-1  stopped    linux   8 cpu, 32 GiB
+e2e-relay    stopped    linux   8 cpu, 32 GiB
+silo-eval-a  stopped    linux   2 cpu, 2 GiB
+silo-eval-b  stopped    linux   2 cpu, 2 GiB
+Creating e2e-p1-mac...
+Creating e2e-p1-mac: 5s
+Creating e2e-p1-mac: 10s
+Creating e2e-p1-mac: 15s
+Creating e2e-p1-mac: 20s
+Creating e2e-p1-mac: 25s
+Creating e2e-p1-mac: 30s
+Creating e2e-p1-mac: 35s
+Creating e2e-p1-mac: 41s
+Creating e2e-p1-mac: 46s
+silo: Silo could not expand the disk to 64 GiB, so the computer has 40 GiB. It is otherwise ready to start.
+create rc=1 in 47 s
+{
+  "checkpointList": [],
+  "checkpoints": 0,
+  "cpus": 4,
+  "detail": "Silo could not expand the disk to 64 GiB, so the computer has 40 GiB. It is otherwise ready to start.",
+  "diskGiB": 40,
+  "github": null,
+  "id": "3dc326ff-dbad-4a8a-b20f-ea1aaf767e82",
+  "kind": "macos",
+  "memoryGiB": 8,
+  "name": "e2e-p1-mac",
+  "quiet": null,
+  "secrets": [],
+  "state": "failed"
+}
+Starting e2e-p1-mac...
+silo: This computer is not ready yet. Use Retry setup to finish it, or delete it.
+start rc=1
+FAIL: e2e-p1-mac cannot start; the CLI has no 'retry setup', so the macOS scenario cannot continue (no raw engine call allowed).
+engine setup log (/Users/polarzero/Library/Logs/org.silo.dev/macos-computers/3dc326ff-dbad-4a8a-b20f-ea1aaf767e82/runtime.log, read-only):
+2026-11-05T00:42:41.208051Z setup started
+2026-11-05T00:42:41.217514Z step: Personalizing the computer
+2026-11-05T00:43:01.102479Z personalization script: status 0; stdout: ssh-keygen: generating new host keys: RSA ECDSA ED25519  | SILO_UNALLOCATED=25769844736 | SILO_PERSONALIZED; stderr: New Password: Permission denied. Please enter user's old password:
+2026-11-05T00:43:01.208678Z personalization: the disk could not be expanded
+2026-11-05T00:43:01.208822Z step: Shutting down
+2026-11-05T00:43:07.432255Z step: Checking the computer
+2026-11-05T00:43:18.205596Z csrutil status: status 0; stdout: System Integrity Protection status: disabled.; stderr: 
+2026-11-05T00:43:19.395484Z step: Shutting down
+2026-11-05T00:43:26.042634Z setup step finished: account, sip, developer tools, computer use, clipboard, personalized done
+2026-11-05T00:43:26.051941Z setup failed: Silo could not expand the disk to 64 GiB, so the computer has 40 GiB. It is otherwise ready to start.
+silo list after cleanup:
+NAME         STATE      KIND    SIZE
+workspace-1  stopped    linux   8 cpu, 32 GiB
+e2e-relay    stopped    linux   8 cpu, 32 GiB
+silo-eval-a  stopped    linux   2 cpu, 2 GiB
+silo-eval-b  stopped    linux   2 cpu, 2 GiB

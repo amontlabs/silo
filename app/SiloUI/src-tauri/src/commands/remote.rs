@@ -247,6 +247,8 @@ pub(crate) async fn checkpoint_action(
             device_id,
             checkpoint_id,
             new_name: new_name.ok_or_else(|| EngineError::internal("Missing fork name."))?,
+            secrets: Vec::new(),
+            quiet: None,
         }),
         "restore" => requests::checkpoints_restore(CheckpointTargetParams {
             computer_id,

@@ -64,10 +64,13 @@ pub(super) enum Reason {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "kebab-case")]
 pub(super) enum PolicyKind {
     Manual,
     Automatic,
+    /// The disk a Fork of the current state starts from. It never holds memory, retention
+    /// leaves it alone, and it stays while a fork made from it exists.
+    ForkPoint,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -443,6 +446,9 @@ pub(super) trait Machine {
     ) -> Result<(), String>;
     /// Turns the machine off at once and returns when it has stopped.
     fn force_stop(&self) -> Result<(), String>;
+    /// Pauses the running machine, runs `copy` while it is paused and resumes it. The machine
+    /// is resumed whatever happened.
+    fn pause_for_copy(&self, copy: &mut dyn FnMut() -> Result<(), String>) -> Result<(), String>;
     /// Names the step under way, for the UI.
     fn stage(&self, stage: &str);
     /// Writes a line to the computer's log.
@@ -488,7 +494,7 @@ pub(super) fn create_with_policy<M: Machine>(
     let name = validate_name(name)?;
     let machine = subject.machine;
     let layout = subject.layout;
-    if subject.running {
+    if with_memory(subject, policy_kind) {
         machine.memory_support().map_err(|why| {
             format!("This computer's memory can't be saved ({why}). Stop it to save a checkpoint of its disk.")
         })?;
@@ -523,6 +529,11 @@ pub(super) fn create_with_policy<M: Machine>(
     }
 }
 
+/// Whether the capture saves the running machine's memory. A fork point never does.
+fn with_memory<M: Machine>(subject: &Subject<'_, M>, policy_kind: PolicyKind) -> bool {
+    subject.running && policy_kind != PolicyKind::ForkPoint
+}
+
 fn build<M: Machine>(
     subject: &Subject<'_, M>,
     partial: &Path,
@@ -534,7 +545,8 @@ fn build<M: Machine>(
     let machine = subject.machine;
     private_dir(partial)?;
     let mut size_bytes = None;
-    if subject.running {
+    let memory = with_memory(subject, policy_kind);
+    if memory {
         let state = partial.join(STATE);
         machine.stage("Pausing the computer and saving its memory");
         let mut copy = || {
@@ -544,6 +556,9 @@ fn build<M: Machine>(
         machine.save_running(&state, &mut copy)?;
         secure_state(&state)?;
         size_bytes = fs::metadata(&state).ok().map(|meta| meta.len());
+    } else if subject.running {
+        machine.stage("Pausing the computer and copying its disk");
+        machine.pause_for_copy(&mut || clone_files(subject.layout, partial))?;
     } else {
         machine.stage("Copying the disk");
         clone_files(subject.layout, partial)?;
@@ -556,11 +571,7 @@ fn build<M: Machine>(
         id: id.to_string(),
         name,
         created_at: now(),
-        kind: if subject.running {
-            Kind::Memory
-        } else {
-            Kind::Disk
-        },
+        kind: if memory { Kind::Memory } else { Kind::Disk },
         reason,
         policy_kind,
         macos_version: subject.macos_version.clone(),
@@ -578,7 +589,7 @@ fn build<M: Machine>(
     // Everything is on disk before the folder gets its final name, and so before a Restore
     // may replace the computer's files with it.
     let mut files = vec![DISK, AUXILIARY_STORAGE];
-    if subject.running {
+    if memory {
         files.push(STATE);
     }
     for name in files {
@@ -1039,6 +1050,15 @@ mod tests {
                 }
                 copy()
             })();
+            self.note("resume");
+            result
+        }
+        fn pause_for_copy(
+            &self,
+            copy: &mut dyn FnMut() -> Result<(), String>,
+        ) -> Result<(), String> {
+            self.note("pause");
+            let result = copy();
             self.note("resume");
             result
         }

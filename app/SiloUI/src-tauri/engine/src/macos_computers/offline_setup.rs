@@ -71,6 +71,70 @@ pub(super) fn run_import_rekey(disk: &Path, account: &GuestAccount) -> Result<()
     patched.and(closed)
 }
 
+/// What the offline setup of a fork did beyond its credentials.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(super) struct ForkRekey {
+    /// The network configuration was written. False when the source disk has no bootstrap
+    /// configuration to replace, so the fork needs a boot of its own to stage it.
+    pub bootstrap_staged: bool,
+    /// Guest paths of the scheduled work that was moved aside (see `quiet`).
+    pub parked: Vec<String>,
+    /// Scheduled jobs inside app bundles, which are left as they are.
+    pub still_scheduled: Vec<String>,
+}
+
+/// Gives a fork its own credentials on the stopped computer's disk before its first start:
+/// a new password hash and automatic login, no login keychain (it is sealed with the
+/// source's password), and none of the source's SSH keys. The key, names and host keys are
+/// set by `fork_finalization_script` in the same boot that checks the result. With `scrub` and
+/// `stop`, the source's scheduled work and the jobs named in `stop` are moved aside and the
+/// paths are deleted in the same mount.
+pub(super) fn run_fork_rekey(
+    disk: &Path,
+    account: &GuestAccount,
+    bootstrap_config: Option<&[u8]>,
+    scrub: Option<(&[String], &[String])>,
+) -> Result<ForkRekey, String> {
+    let mut attached = Attached::attach(disk)?;
+    let patched = attached.mount_data_volume().and_then(|mount| {
+        rekey_fork_data_volume(&mount, account)?;
+        let bootstrap_staged = match bootstrap_config {
+            Some(config) => write_bootstrap_config(&mount, config)?,
+            None => true,
+        };
+        let quieted = match scrub {
+            Some((scrub, stop)) => super::quiet::apply_offline(&mount, scrub, stop)?,
+            None => Default::default(),
+        };
+        Ok(ForkRekey {
+            bootstrap_staged,
+            parked: quieted.parked,
+            still_scheduled: quieted.still_scheduled,
+        })
+    });
+    let closed = attached.close();
+    let rekeyed = patched?;
+    closed?;
+    Ok(rekeyed)
+}
+
+/// Gives a copy of a template its own password hash, automatic login and login keychain on
+/// the stopped disk. Unlike a fork's rekey it leaves the template's SSH key in place, which
+/// the personalization that follows logs in with.
+pub(super) fn run_template_rekey(disk: &Path, account: &GuestAccount) -> Result<(), String> {
+    let mut attached = Attached::attach(disk)?;
+    let patched = attached.mount_data_volume().and_then(|mount| {
+        if account.user != USER || account.password.is_empty() {
+            return Err("Silo could not identify the computer's managed account.".to_string());
+        }
+        rekey_account(&mount, account)?;
+        clear_login_keychain(&mount)
+    });
+    let closed = attached.close();
+    patched?;
+    closed
+}
+
 // MARK: Disk
 
 /// A disk image attached to the host without mounting its volumes. `close`
@@ -351,6 +415,23 @@ fn rekey_import_data_volume(root: &Path, account: &GuestAccount) -> Result<(), S
         validate_import_data_path(root, Path::new(relative), allow_missing)?;
     }
 
+    rekey_account(root, account)?;
+    remove_import_managed_file(root, "Users/silo/.ssh/authorized_keys")?;
+    for relative in [
+        "Users/silo/Library/LaunchAgents/org.silo.computer-use-reconcile.plist",
+        "Users/silo/Library/LaunchAgents/org.silo.guest-recorder.plist",
+        "Users/silo/Library/Application Support/Silo/computer-use-receipt.json",
+        "Library/Application Support/Silo/developer-tools-receipt.json",
+    ] {
+        remove_import_managed_file(root, relative)?;
+    }
+    disable_import_screen_sharing(root)?;
+    enable_ssh(root)
+}
+
+/// Replaces the verifier and the automatic login of the managed account `silo`, which must
+/// have the identity Silo created.
+fn rekey_account(root: &Path, account: &GuestAccount) -> Result<(), String> {
     let path = root.join("private/var/db/dslocal/nodes/Default/users/silo.plist");
     let mut user = read_plist(&path)?;
     validate_import_account_identity(&user)?;
@@ -365,18 +446,82 @@ fn rekey_import_data_volume(root: &Path, account: &GuestAccount) -> Result<(), S
     );
     normalize_import_shadow_hash_authority(&mut user);
     write_plist(&user, &path, 0o600, true, Format::Binary)?;
-    configure_autologin(root, &account.password)?;
-    remove_import_managed_file(root, "Users/silo/.ssh/authorized_keys")?;
-    for relative in [
-        "Users/silo/Library/LaunchAgents/org.silo.computer-use-reconcile.plist",
-        "Users/silo/Library/LaunchAgents/org.silo.guest-recorder.plist",
-        "Users/silo/Library/Application Support/Silo/computer-use-receipt.json",
-        "Library/Application Support/Silo/developer-tools-receipt.json",
-    ] {
-        remove_import_managed_file(root, relative)?;
+    configure_autologin(root, &account.password)
+}
+
+/// Rekeys a fork's copy of the managed account in place. Unlike an import, the fork keeps
+/// its home data, Silo's guest services and receipts: they are the source's own, installed
+/// by the setup the checkpoint was taken after.
+fn rekey_fork_data_volume(root: &Path, account: &GuestAccount) -> Result<(), String> {
+    if account.user != USER || account.password.is_empty() {
+        return Err("Silo could not identify the fork's managed account.".into());
     }
-    disable_import_screen_sharing(root)?;
+    for (relative, allow_missing) in [
+        (
+            "private/var/db/dslocal/nodes/Default/users/silo.plist",
+            false,
+        ),
+        ("Library/Preferences/com.apple.loginwindow.plist", true),
+        ("private/etc/kcpassword", true),
+        (LAUNCHD_DISABLED, true),
+        (
+            "private/var/db/com.apple.xpc.launchd/disabled.migrated",
+            true,
+        ),
+        ("Users/silo/.ssh/authorized_keys", true),
+    ] {
+        validate_import_data_path(root, Path::new(relative), allow_missing)?;
+    }
+    rekey_account(root, account)?;
+    remove_import_managed_file(root, "Users/silo/.ssh/authorized_keys")?;
+    clear_login_keychain(root)?;
     enable_ssh(root)
+}
+
+/// Where the guest's network bootstrap reads its configuration.
+const BOOTSTRAP_CONFIG: &str = "Library/Application Support/Silo/NetworkBootstrap/config.json";
+
+/// Replaces the source's network bootstrap configuration in place, so the file keeps the
+/// owner the guest requires of it and the fork's first boot already has its own address
+/// behind its gateway. Returns false, writing nothing, when the source has none.
+fn write_bootstrap_config(root: &Path, config: &[u8]) -> Result<bool, String> {
+    let relative = Path::new(BOOTSTRAP_CONFIG);
+    let path = validate_import_data_path(root, relative, true)?;
+    if fs::symlink_metadata(&path).is_err() {
+        return Ok(false);
+    }
+    let path = validate_import_data_path(root, relative, false)?;
+    write_file(&path, config, 0o644, true)?;
+    Ok(true)
+}
+
+/// Removes what is in the account's `Library/Keychains`. macOS makes a new login keychain
+/// with the new password at the first automatic login. Links are removed, never followed.
+fn clear_login_keychain(root: &Path) -> Result<(), String> {
+    let mut path = root.to_path_buf();
+    for name in ["Users", "silo", "Library", "Keychains"] {
+        path.push(name);
+        match fs::symlink_metadata(&path) {
+            Ok(meta) if meta.is_dir() && !meta.file_type().is_symlink() => {}
+            Ok(_) => {
+                return Err("Silo could not safely access the fork's keychain files.".into());
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(fs_error("inspect the fork's keychain files", &error)),
+        }
+    }
+    let entries = fs::read_dir(&path).map_err(|error| fs_error("read the keychains", &error))?;
+    for entry in entries {
+        let entry = entry.map_err(|error| fs_error("read the keychains", &error))?;
+        let is_dir = entry.file_type().is_ok_and(|kind| kind.is_dir());
+        let removed = if is_dir {
+            fs::remove_dir_all(entry.path())
+        } else {
+            fs::remove_file(entry.path())
+        };
+        removed.map_err(|error| fs_error("clear the keychains", &error))?;
+    }
+    Ok(())
 }
 
 /// Prevent the copied guest's Silo automation and key from running before the new
@@ -939,25 +1084,37 @@ pub(super) fn sudoers() -> String {
 /// plus the ownership the host cannot set while it edits the volume offline and
 /// the installation of the sudoers entry.
 pub(super) fn finalization_script(public_key: &str) -> String {
-    finalization_script_with_host_key_rotation(public_key, None, false)
+    finalization_script_with_host_key_rotation(public_key, None, false, false)
+}
+
+/// Root finalization for a fork whose disk was rekeyed offline: its key, name and SSH host
+/// keys. The keychain is already gone, and the login that just happened made a new one.
+pub(super) fn fork_finalization_script(public_key: &str, computer_name: &str) -> String {
+    finalization_script_with_host_key_rotation(public_key, Some(computer_name), true, false)
 }
 
 /// Root finalization for an imported disk. It installs this computer's key and
 /// replaces the source disk's SSH host keys without needing source credentials.
 pub(super) fn import_finalization_script(public_key: &str, computer_name: &str) -> String {
-    finalization_script_with_host_key_rotation(public_key, Some(computer_name), true)
+    finalization_script_with_host_key_rotation(public_key, Some(computer_name), true, true)
 }
 
 fn finalization_script_with_host_key_rotation(
     public_key: &str,
     computer_name: Option<&str>,
     rotate_host_keys: bool,
+    clear_keychains: bool,
 ) -> String {
+    let clear_keychains = if clear_keychains {
+        format!("/usr/bin/find /Users/{USER}/Library/Keychains -mindepth 1 -maxdepth 1 -exec /bin/rm -rf {{}} + 2>/dev/null || true\n")
+    } else {
+        String::new()
+    };
     let authorized_key = super::guest_access::shell_quote(public_key.trim());
     let identity_reset = computer_name.map_or_else(String::new, |name| {
         let name = super::guest_access::shell_quote(name);
         format!(
-            "/usr/sbin/scutil --set ComputerName {name}\n/usr/sbin/scutil --set LocalHostName {name}\n/usr/sbin/scutil --set HostName {name}\n/usr/bin/find /Users/{USER}/Library/Keychains -mindepth 1 -maxdepth 1 -exec /bin/rm -rf {{}} + 2>/dev/null || true\n"
+            "/usr/sbin/scutil --set ComputerName {name}\n/usr/sbin/scutil --set LocalHostName {name}\n/usr/sbin/scutil --set HostName {name}\n{clear_keychains}"
         )
     });
     let sudoers_entry = sudoers();
@@ -1769,6 +1926,69 @@ mod tests {
         ] {
             assert!(!root.path().join(relative).exists(), "{relative}");
         }
+    }
+
+    #[test]
+    fn fork_rekey_gives_the_fork_its_own_password_and_keeps_the_source_guest_state() {
+        let (root, generated_uid, old_hash) = imported_volume();
+        let keychains = root.path().join("Users/silo/Library/Keychains");
+        fs::create_dir_all(keychains.join("nested")).unwrap();
+        fs::write(
+            keychains.join("login.keychain-db"),
+            b"sealed with the old password",
+        )
+        .unwrap();
+        let receipt = root
+            .path()
+            .join("Users/silo/Library/Application Support/Silo/computer-use-receipt.json");
+        let tools = root
+            .path()
+            .join("Library/Application Support/Silo/developer-tools-receipt.json");
+        for file in [&receipt, &tools] {
+            fs::create_dir_all(file.parent().unwrap()).unwrap();
+            fs::write(file, b"{}").unwrap();
+        }
+        let mut new_account = account();
+        new_account.password = "fork-password".into();
+
+        rekey_fork_data_volume(root.path(), &new_account).unwrap();
+
+        let user = read_plist(
+            &root
+                .path()
+                .join("private/var/db/dslocal/nodes/Default/users/silo.plist"),
+        )
+        .unwrap();
+        assert_ne!(user["ShadowHashData"], old_hash);
+        assert_eq!(user["generateduid"], string_list(&generated_uid));
+        assert_eq!(
+            fs::read(root.path().join("private/etc/kcpassword")).unwrap(),
+            kcpassword("fork-password")
+        );
+        assert!(!root.path().join("Users/silo/.ssh/authorized_keys").exists());
+        assert!(keychains.is_dir());
+        assert_eq!(fs::read_dir(&keychains).unwrap().count(), 0);
+        assert!(receipt.is_file() && tools.is_file());
+        let disabled = read_plist(&root.path().join(LAUNCHD_DISABLED)).unwrap();
+        assert_eq!(disabled["com.openssh.sshd"].as_boolean(), Some(false));
+        assert!(disabled.get("com.apple.screensharing").is_none());
+    }
+
+    #[test]
+    fn the_fork_network_configuration_replaces_the_sources_in_place() {
+        use std::os::unix::fs::MetadataExt;
+        let root = volume();
+        let path = root.path().join(BOOTSTRAP_CONFIG);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, b"source config").unwrap();
+        let inode = fs::metadata(&path).unwrap().ino();
+        assert!(write_bootstrap_config(root.path(), b"fork config").unwrap());
+        assert_eq!(fs::read(&path).unwrap(), b"fork config");
+        assert_eq!(fs::metadata(&path).unwrap().ino(), inode);
+        // A source without a bootstrap has nothing to take over, and nothing is created.
+        let bare = volume();
+        assert!(!write_bootstrap_config(bare.path(), b"x").unwrap());
+        assert!(!bare.path().join(BOOTSTRAP_CONFIG).exists());
     }
 
     #[test]
