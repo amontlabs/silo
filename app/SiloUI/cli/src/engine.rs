@@ -270,7 +270,9 @@ impl Engine {
                 .chars()
                 .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
         if !fine {
-            return Err(CliError::new("The computer id is not usable as a lock name."));
+            return Err(CliError::new(
+                "The computer id is not usable as a lock name.",
+            ));
         }
         let path = self.memory.join(format!("cli-steps-{computer_id}.lock"));
         let locked = tokio::task::spawn_blocking(move || -> std::io::Result<std::fs::File> {

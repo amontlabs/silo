@@ -1586,6 +1586,7 @@ fn prune_macos_checkpoints_with(
                 .is_some_and(|restore| restore.checkpoint_id == candidate)
                 || entry.operation.is_some()
                 || entry.deleting
+                || fork_point_in_use(&computers.entries, computer_id, &candidate)
         };
         if pinned || checkpoints::journal_pins(&layout, &candidate) {
             continue;
@@ -6548,8 +6549,17 @@ fn fork_checkpoint_with_workflow(
     if let Err(message) = validated {
         return Err(message);
     }
-    let (checkpoint, origin) = match named {
-        Some(checkpoint) => (checkpoint, None),
+    // The fork depends on the checkpoint it was made from, a named one included: retention
+    // and deletion leave it while the fork exists. Only a fork point taken for this fork is
+    // removed again when the fork fails to start.
+    let (checkpoint, origin, took_fork_point) = match named {
+        Some(checkpoint) => {
+            let origin = store::ForkOrigin {
+                computer_id: id.to_owned(),
+                checkpoint_id: checkpoint.id.clone(),
+            };
+            (checkpoint, Some(origin), false)
+        }
         // The current state: a disk checkpoint of the source, taken under this same operation.
         None => match capture_held(
             app,
@@ -6564,7 +6574,7 @@ fn fork_checkpoint_with_workflow(
                     computer_id: id.to_owned(),
                     checkpoint_id: point.id.clone(),
                 };
-                (point, Some(origin))
+                (point, Some(origin), true)
             }
             Err(message) => {
                 if copied_assignments {
@@ -6597,7 +6607,7 @@ fn fork_checkpoint_with_workflow(
         Ok((record, cancel))
     })();
     let take_back_fork_point = |layout: &Layout| {
-        if let Some(origin) = &origin {
+        if let (Some(origin), true) = (&origin, took_fork_point) {
             let _ = checkpoints::remove(layout, &origin.checkpoint_id);
             refresh_checkpoints(app, id, layout);
         }
@@ -12321,6 +12331,69 @@ mod tests {
         assert!(checkpoints::dir(&layout, &newest).exists());
         assert!(checkpoints::dir(&layout, &automatic).exists());
         assert!(seed_check_policy(data, &source.id).contains(&"before-keep".to_owned()));
+    }
+
+    #[test]
+    fn macos_step_retention_keeps_a_checkpoint_a_fork_was_made_from() {
+        use checkpoints::{PolicyKind::*, Reason};
+        let _test_state = crate::test_support::global_state();
+        reopen_after_quit();
+        reopen_after_update();
+        let directory = tempfile::tempdir().unwrap();
+        let context = Arc::new(JobTestContext::new(directory.path().to_path_buf()));
+        let app = macos_context(context);
+        fresh_registry();
+        let (source, _) = checkpoint_fixture(directory.path(), false);
+        let data = directory.path();
+        let forked_from = add_checkpoint(
+            data,
+            &source.id,
+            "2026-01-01T00:00:01Z",
+            Step,
+            Reason::Manual,
+        );
+        let unused = add_checkpoint(
+            data,
+            &source.id,
+            "2026-01-01T00:00:02Z",
+            Step,
+            Reason::Manual,
+        );
+        let newest = add_checkpoint(
+            data,
+            &source.id,
+            "2026-01-01T00:00:03Z",
+            Step,
+            Reason::Manual,
+        );
+        ensure_loaded(&app).unwrap();
+        // A fork made from the oldest step checkpoint by name.
+        let mut fork = source.clone();
+        fork.id = "fork-of-step".into();
+        fork.forked_from = Some(store::ForkOrigin {
+            computer_id: source.id.clone(),
+            checkpoint_id: forked_from.clone(),
+        });
+        registry()
+            .entries
+            .push(Entry::new(fork, State::Stopped, None));
+
+        prune_macos_checkpoints_with(
+            &runtime::OPERATIONS,
+            Step,
+            &app,
+            &source.id,
+            &|| Ok(1),
+            silo_api::jobs::JobId::new("job:9").unwrap(),
+        );
+
+        let layout = Layout::new(data, &source.id);
+        assert!(
+            checkpoints::dir(&layout, &forked_from).exists(),
+            "a fork depends on it"
+        );
+        assert!(!checkpoints::dir(&layout, &unused).exists());
+        assert!(checkpoints::dir(&layout, &newest).exists());
     }
 
     #[test]

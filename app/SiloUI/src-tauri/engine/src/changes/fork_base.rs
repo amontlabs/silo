@@ -79,6 +79,17 @@ pub fn forked_from(new_name: &str, checkpoint_id: &str) {
         if let Err(error) = store.put_pending(new_name, key) {
             eprintln!("The fork-time record of {new_name} could not be updated: {error}");
         }
+        // Step records are trimmed; the fork keeps which step its checkpoint was.
+        match crate::steps::StepStore::for_engine(context.as_ref())
+            .step_of_checkpoint(checkpoint_id)
+        {
+            Some((_, number)) => {
+                let _ = store.put_pending_step(new_name, number);
+            }
+            None => {
+                let _ = store.take_pending_step(new_name);
+            }
+        }
     }
 }
 
@@ -87,6 +98,7 @@ pub fn withdraw(context: &dyn EngineContext, new_name: &str) {
     let store = Store::for_engine(context);
     let _ = store.take_pending(new_name);
     let _ = store.take_pending_origin(new_name);
+    let _ = store.take_pending_step(new_name);
 }
 
 /// A Linux fork has just been confirmed quiet.
@@ -120,11 +132,15 @@ pub fn capture_with(
         return;
     };
     let origin = store.take_pending_origin(name);
+    let step = store.take_pending_step(name);
     // A capture that could not run leaves the note, so the next start tries again.
     let keep_note = |source: &str| {
         let _ = store.put_pending(name, source);
         if let Some(origin) = &origin {
             let _ = store.put_pending_origin(name, origin);
+        }
+        if let Some(step) = step {
+            let _ = store.put_pending_step(name, step);
         }
     };
     let outcome = target
@@ -134,7 +150,14 @@ pub fn capture_with(
         })
         .and_then(|text| {
             store
-                .put_with_origin(id, Slot::Base, &text, Some(&source), origin.as_deref())
+                .put_with_link(
+                    id,
+                    Slot::Base,
+                    &text,
+                    Some(&source),
+                    origin.as_deref(),
+                    step,
+                )
                 .map(|_| ())
         });
     if let Err(message) = outcome {
@@ -196,6 +219,54 @@ mod tests {
         expect(context.clone(), "gone", "src", "src");
         withdraw(context.as_ref(), "gone");
         assert_eq!(store.take_pending("gone"), None);
+    }
+
+    #[test]
+    fn a_fork_keeps_the_step_number_of_its_checkpoint_after_the_step_records_go() {
+        let _test_state = crate::test_support::global_state();
+        let dir = tempfile::tempdir().unwrap();
+        let context = test_support::RecordingContext::new(dir.path());
+        let store = Store::for_engine(context.as_ref());
+        install(context.clone());
+        let steps = crate::steps::StepStore::for_engine(context.as_ref());
+        steps
+            .record(crate::steps::NewStep {
+                computer_id: "src".into(),
+                command: vec!["ls".into()],
+                exit_code: Some(0),
+                started_at: "a".into(),
+                finished_at: "b".into(),
+                checkpoint_id: Some("cp-step".into()),
+                parent_checkpoint: None,
+            })
+            .unwrap();
+        expect(context.clone(), "try", "src", "src");
+        forked_from("try", "cp-step");
+        // Before its first start the fork's note carries the step.
+        assert_eq!(store.fork_link("id-1", "try").unwrap().step, Some(1));
+        // A first start whose capture fails keeps the note, step included.
+        capture_with(
+            context.as_ref(),
+            Err(guest::GuestError::internal("not reachable")),
+            "try",
+            "id-1",
+        );
+        assert_eq!(store.fork_link("id-1", "try").unwrap().step, Some(1));
+        // Once captured the record holds it, and the step file may be gone.
+        store
+            .put_with_link(
+                "id-1",
+                Slot::Base,
+                "m",
+                Some("cp-step"),
+                Some("src"),
+                Some(1),
+            )
+            .unwrap();
+        steps.remove_computer("src").unwrap();
+        let link = store.fork_link("id-1", "other-name").unwrap();
+        assert_eq!(link.step, Some(1));
+        assert_eq!(link.source.as_deref(), Some("cp-step"));
     }
 
     #[test]
