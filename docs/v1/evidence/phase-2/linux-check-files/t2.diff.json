@@ -1,0 +1,169 @@
+{
+  "baseCapturedAt": "2026-11-05T14:00:50.87627Z",
+  "baselineApplied": false,
+  "baselineAvailable": false,
+  "capturedAt": "2026-11-05T14:01:52.13062Z",
+  "code": [
+    {
+      "branch": null,
+      "commits": [
+        "06e624f99aa05be3bd936f41cf7807fbd099af70",
+        "bb6e6e0dcfc4a241f420ef72cc9d2f68e99a6f38"
+      ],
+      "dirty_delta": 0,
+      "dirty_gone": [],
+      "dirty_identity": {},
+      "dirty_new": {},
+      "gitignored": [],
+      "new": null,
+      "removed": false,
+      "removed_from": null,
+      "renamed_from": {},
+      "repo": "/home/silo/app"
+    }
+  ],
+  "database": [
+    {
+      "change": "modified",
+      "digest": null,
+      "engine": "postgres",
+      "name": "appdb",
+      "schema": [
+        "81b5b0035ecd171e90508b0f1f3b1db44b76494af3085d971dd8b0b0adfe4787",
+        "1a7c91e00d025ff00b1c3a79ec9a2e6fcd98e45af2e9e5b89952235f94e4182c"
+      ],
+      "tables": [
+        {
+          "change": "modified",
+          "digest_after": "177b1fcc4550114ac4ef30b3b23212eb976f429fe8aa77c4a53bfc35a956b0df",
+          "digest_before": "f233e9cb979b1988d92e7069574671e5a59dba139b8cd0681e2b6946f6f8d1f4",
+          "rows_after": 1,
+          "rows_before": 1,
+          "table": "public.items"
+        },
+        {
+          "change": "modified",
+          "digest_after": "3bc0643c2e018c4a9332d38fe136f344419999f1c8beccf0df9eebffa15eb1f8",
+          "digest_before": "d0041783799edb8c4e53ef26c24ebc9ee0fc77603ce1655d91e3497949e0ad59",
+          "rows_after": 2,
+          "rows_before": 1,
+          "table": "public.schema_migrations"
+        }
+      ]
+    }
+  ],
+  "format": 1,
+  "home": "/root",
+  "idle_noise": [],
+  "ignored": {
+    "paths": [
+      "/home/silo/.config/pulse/da87e7ab4c684d778fc8fac2e0bf9ced-default-sink",
+      "/home/silo/.config/pulse/da87e7ab4c684d778fc8fac2e0bf9ced-default-source"
+    ],
+    "pruned_trees": [
+      {
+        "delta": 2,
+        "path": "/home/silo/.npm"
+      },
+      {
+        "delta": 6,
+        "path": "/home/silo/app/.git"
+      },
+      {
+        "delta": 3,
+        "path": "/root/.npm"
+      }
+    ]
+  },
+  "not_kept": {
+    "credential_details": {},
+    "credentials": {},
+    "listening": [
+      {
+        "port": "3000",
+        "process": "web",
+        "proto": "tcp"
+      }
+    ],
+    "processes": [
+      "web"
+    ],
+    "services": []
+  },
+  "other": [],
+  "packages": [],
+  "repo_changes": [
+    {
+      "after": {
+        "hash": "d424b85e3dcf794c6bed4a4eeaea1100ba52864fe8a2148495f511999d339d65",
+        "kind": "file",
+        "size": "66"
+      },
+      "before": null,
+      "change": "added",
+      "path": "/home/silo/app/migrations/002_priority.sql"
+    },
+    {
+      "after": {
+        "hash": "7528b8e9da830a5afed317a21c1c057625f8b68151b5c8c386f65bbe738ce9b9",
+        "kind": "file",
+        "size": "1217"
+      },
+      "before": {
+        "hash": "5a23c48b75995baab3f4c1ef1091e90897c54794bb583c8d4db7dff8c0a26a1f",
+        "kind": "file",
+        "size": "1142"
+      },
+      "change": "modified",
+      "path": "/home/silo/app/server.js"
+    },
+    {
+      "after": {
+        "hash": "679002bf2c14a382d668560ca8e1bd101d51916e63074c31db987ef93b5141e4",
+        "kind": "file",
+        "size": "955"
+      },
+      "before": {
+        "hash": "117cc561025244fcc6c4eda7d9bf384cb3bd9c0118b7193c5893763ceaf57d36",
+        "kind": "file",
+        "size": "603"
+      },
+      "change": "modified",
+      "path": "/home/silo/app/test/api.test.js"
+    }
+  ],
+  "repo_files": [
+    "/home/silo/app/migrations/002_priority.sql",
+    "/home/silo/app/server.js",
+    "/home/silo/app/test/api.test.js"
+  ],
+  "reviewDigest": "7bdb473cf913ec7c90279121837180018fa3d6e8c30d64439cbf24f462aea824",
+  "settings": {
+    "cron": [],
+    "files": [],
+    "launch_agents": [],
+    "services": []
+  },
+  "summary": [
+    {
+      "bucket": "Code",
+      "lines": [
+        "/home/silo/app: 06e624f..bb6e6e0"
+      ]
+    },
+    {
+      "bucket": "Database changed",
+      "lines": [
+        "postgres appdb: schema changed; data changed in public.items (1→1 rows), public.schema_migrations (1→2 rows)"
+      ]
+    },
+    {
+      "bucket": "Not kept",
+      "lines": [
+        "listening: :3000 (web)",
+        "processes: web"
+      ]
+    }
+  ],
+  "text": "Code\n  /home/silo/app: 06e624f..bb6e6e0\nDatabase changed\n  postgres appdb: schema changed; data changed in public.items (1→1 rows), public.schema_migrations (1→2 rows)\nNot kept\n  listening: :3000 (web)\n  processes: web\nIgnored: 13 paths (caches, logs, build output)"
+}

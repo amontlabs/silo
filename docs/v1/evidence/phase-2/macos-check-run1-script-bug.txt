@@ -1,0 +1,199 @@
+== header
+commit: 04a4d8fd78a66ecea44e7e022d34b636f553b9cd; git status --porcelain app: []
+bundled msb: msb 0.7.6
+host macOS 26.5 (arm64); silo silo 0.1.0; claude 2.1.311 (Claude Code); date 2026-11-05T13:19:48Z
+macOS VMs running (pgrep Virtualization.VirtualMachine): 1
+NAME          STATE      KIND    SIZE
+workspace-1   stopped    linux   8 cpu, 32 GiB
+e2e-relay     stopped    linux   8 cpu, 32 GiB
+silo-eval-a   stopped    linux   2 cpu, 2 GiB
+silo-eval-b   stopped    linux   2 cpu, 2 GiB
+e2e-p2-main   running    linux   2 cpu, 3 GiB
+e2e-p2m-main  running    macos   4 cpu, 8 GiB
+== main: create (or reuse), service, brew, repo
+guest: ProductName:		macOS ProductVersion:		26.6.2 BuildVersion:		25G83 silo
+Homebrew 7.0.12
+jq: not installed
+[14:19:52] PASS  main service up on 8080  -- p2m service v1
+main agent pid: 1485
+3c07e79 service v1
+keep:
+  restart: [org.silo.p2m.web]
+macOS VMs running (pgrep Virtualization.VirtualMachine): 0
+== forks (from project dir)
+Forking e2e-p2m-main into e2e-p2m-t1...
+Forked e2e-p2m-t1 (setting-up)
+[14:20:01] PASS  fork e2e-p2m-t1  -- 1 s
+Forking e2e-p2m-main into e2e-p2m-t2...
+Forked e2e-p2m-t2 (setting-up)
+[14:20:01] PASS  fork e2e-p2m-t2 (idle, for --baseline)  -- 
+e2e-p2m-main  stopped    macos   4 cpu, 8 GiB
+e2e-p2m-t1    setting-up  macos   4 cpu, 8 GiB
+e2e-p2m-t2    setting-up  macos   4 cpu, 8 GiB
+d6557c51-2052-4502-9cd6-0e7741e42292  Fork point  fork-point  2026-11-05T13:20:01.467866Z
+291d8a58-201d-4fce-88a9-ecb6a31a46e2  Fork point  fork-point  2026-11-05T13:20:00.784902Z
+macOS VMs running (pgrep Virtualization.VirtualMachine): 0
+Starting e2e-p2m-t1...
+Started e2e-p2m-t1 (running)
+[14:20:40] PASS  start e2e-p2m-t1  -- 
+macOS VMs running (pgrep Virtualization.VirtualMachine): 1
+== live task (claude -p on host, silo exec into e2e-p2m-t1)
+claude rc=0 in 29 s
+model(s): claude-sonnet-5-5 turns: 3 cost_usd: 0.0933593 is_error: False
+agent result: All three steps worked on e2e-p2m-t1.
+
+1. **Service:** In `org.silo.p2m.web.plist` I changed the port from 8080 to 8081 and added an `EnvironmentVariables` dict with `SILO_P2M_MODE=fork`. I reloaded it with `launchctl bootout` and `bootstrap` on `gui/$(id -u)`. It answers on 8081 with "p2m service v1", and `launchctl print` shows `SILO_P2M_MODE => fork`.
+2. **jq:** I ran `eval "$(/opt/homebrew/bin/brew shellenv)"` and then `brew install jq`. It installed jq 1.8.2, along with oniguruma.
+3. **Notes:** I added `~/srv/NOTES.md` saying the service now listens on 8081. I committed it on `main` as 1023012, "Add NOTES.md: service now listens on 8081".
+-- observe task result read-only
+<plist version="1.0"><dict><key>Label</key><string>org.silo.p2m.web</string><key>ProgramArguments</key><array><string>/usr/bin/python3</string><string>-m</string><string>http.server</string><string>8081</string><string>--directory</string><string>/Users/silo/srv</string></array><key>EnvironmentVariables</key><dict><key>SILO_P2M_MODE</key><string>fork</string></dict><key>KeepAlive</key><true/><key>RunAtLoad</key><true/></dict></plist>
+jq 1.8.2
+1023012 Add NOTES.md: service now listens on 8081
+3c07e79 service v1
+== diff
+macOS VMs running (pgrep Virtualization.VirtualMachine): 1
+Code
+  ~/srv: 3c07e79..1023012
+Packages
+  brew: jq (+1 dependencies)
+Settings & files
+  ~/Library/Preferences/ (55 files: +1 ~54)
+  … +2 more (see --json)
+Database changed
+  sqlite ~/Library/Application Support/com.apple.TCC/TCC.db: changed (67bbc4e→5ddbb54)
+Other changed
+  ~/Library/ (6 files: ~6)
+  … +2 more (see --json)
+Not kept
+  listening: :8081 (Python)
+  processes: AMPArtworkAgent, AMPLibraryAgent, CalendarIntentsExtension, CalendarWidgetExtension, DistributionHelper, HostInferenceProviderService, +36 more
+Ignored: 10 paths (caches, logs, build output)
+review: b409257c38318b57b8dbe7a011da60810d40f0e4fd734b20a1aed2e7e0ec4036
+(stderr:)
+Comparing e2e-p2m-t1 with when it was forked...
+Comparing e2e-p2m-t1 with when it was forked: 5s
+[14:21:16] FAIL  diff text <=15 lines  -- rc=0 lines=17
+[14:21:16] FAIL  diff shows the LaunchAgent change  -- 
+[14:21:16] PASS  diff shows brew jq  --   brew: jq (+1 dependencies)
+[14:21:16] PASS  diff collapses jq dependencies (+N dependencies)  -- (+1 dependencies)
+[14:21:16] PASS  diff shows the commit / repo change  --   ~/srv: 3c07e79..1023012|
+json rc=0 bytes=37294
+json top-level keys: ['baseCapturedAt', 'baselineApplied', 'baselineAvailable', 'capturedAt', 'code', 'database', 'format', 'home', 'idle_noise', 'ignored', 'not_kept', 'other', 'packages', 'repo_changes', 'repo_files', 'reviewDigest', 'settings', 'summary', 'text']
+baselineApplied = False
+baselineAvailable = False
+reviewDigest = 8242239f211b4a5259763c7543a8a2d7e0ea2c12e45cb4219e34feb3f9587a5e
+json size by key: {'baseCapturedAt': 29, 'baselineApplied': 5, 'baselineAvailable': 5, 'capturedAt': 29, 'code': 312, 'database': 294, 'format': 1, 'home': 13, 'idle_noise': 2, 'ignored': 233, 'not_kept': 1110, 'other': 2780, 'packages': 246, 'repo_changes': 190, 'repo_files': 28, 'reviewDigest': 66, 'settings': 20644, 'summary': 850, 'text': 597}
+json mentions launchagent/label, jq, srv: True True True
+-- without baseline subtraction (--no-baseline), for churn size
+Comparing e2e-p2m-t1 with when it was forked...
+Comparing e2e-p2m-t1 with when it was forked: 5s
+Code
+  ~/srv: 3c07e79..1023012
+Packages
+  brew: jq (+1 dependencies)
+Settings & files
+  ~/Library/Preferences/ (55 files: +1 ~54)
+  ~/Library/Preferences/ByHost/ (6 files: +4 ~2)
+  launch agent org.silo.p2m.web (user): changed
+Database changed
+  sqlite ~/Library/Application Support/com.apple.TCC/TCC.db: changed (67bbc4e→5ddbb54)
+Other changed
+  ~/Library/ (6 files: ~6)
+  ~ ~/Movies/TV/TV Library.tvlibrary/Library Preferences.tvdb
+  ~ ~/Movies/TV/TV Library.tvlibrary/Library.tvdb
+Not kept
+  listening: :8081 (Python)
+  processes: AMPArtworkAgent, AMPLibraryAgent, CalendarIntentsExtension, CalendarWidgetExtension, DistributionHelper, HostInferenceProviderService, +38 more
+Ignored: 19 paths (caches, logs, build output)
+review: 8242239f211b4a5259763c7543a8a2d7e0ea2c12e45cb4219e34feb3f9587a5e
+no-baseline lines: 21
+macOS VMs running (pgrep Virtualization.VirtualMachine): 0
+== keep: main before
+macOS VMs running (pgrep Virtualization.VirtualMachine): 0
+Starting e2e-p2m-main...
+Started e2e-p2m-main (running)
+[14:22:02] PASS  start main  -- 
+macOS VMs running (pgrep Virtualization.VirtualMachine): 1
+[14:22:06] PASS  main serves 8080 before keep  -- 
+main agent pid before: 433
+main before: 0
+3c07e79 service v1|
+[14:22:08] PASS  jq absent on main before keep  -- 
+-- fold --dry-run
+Checking e2e-p2m-t1...
+silo: Start e2e-p2m-t1 first.
+Keeping e2e-p2m-t1...
+silo: Start e2e-p2m-t1 first.
+fold rc=1 in 1 s
+[14:22:10] FAIL  fold succeeded  -- rc=1
+jq-1.7.1-apple
+[14:22:10] PASS  jq installed on main  -- jq-1.7.1-apple
+[14:22:11] FAIL  LaunchAgent change applied on main (8081 + env var)  -- 
+3c07e79 service v1
+[14:22:11] FAIL  repo commit on main  -- 
+[14:24:26] FAIL  main serves 8081  -- 
+main agent pid after: 433 (before 433)
+[14:24:26] FAIL  agent restarted with a new PID  -- 433 -> 433
+	pid = 433
+d6557c51-2052-4502-9cd6-0e7741e42292  Fork point  fork-point  2026-11-05T13:20:01.467866Z
+291d8a58-201d-4fce-88a9-ecb6a31a46e2  Fork point  fork-point  2026-11-05T13:20:00.784902Z
+== undo
+Undoing the last keep of e2e-p2m-main...
+Nothing to undo on 43169865-e7c1-4a07-83d6-ce79bfa9041d.
+undo rc=0 in 0 s
+[14:24:27] PASS  undo succeeded  -- rc=0
+[14:24:28] PASS  agent back on 8080 after undo  -- p2m service v1
+[14:24:28] PASS  nothing on 8081 after undo  -- 
+[14:24:29] PASS  plist and NOTES.md change gone  -- 
+[14:24:30] PASS  jq gone after undo  -- 
+3c07e79 service v1
+macOS VMs running (pgrep Virtualization.VirtualMachine): 0
+== diff --baseline on an idle fork (e2e-p2m-t2), main and e2e-p2m-t1 stopped
+macOS VMs running (pgrep Virtualization.VirtualMachine): 0
+Starting e2e-p2m-t2...
+Started e2e-p2m-t2 (running)
+[14:25:13] PASS  start e2e-p2m-t2 (idle)  -- 
+[14:25:13] idle 90 s
+macOS VMs running (pgrep Virtualization.VirtualMachine): 1
+The throwaway computer silo-baseline-7072cc could not be dropped: Stop the computer first.
+
+Settings & files
+  ~ ~/Library/Application Support/AddressBook/Metadata/.info
+  ~/Library/Preferences/ (56 files: +6 ~50)
+  ~/Library/Preferences/ByHost/ (8 files: +6 ~2)
+Database changed
+  sqlite ~/Library/Application Support/com.apple.ProtectedCloudStorage/KeysSyncingVersion3-(null)-ProtectedCloudStorage.db: added (f6fb1ac)
+  sqlite ~/Library/Application Support/com.apple.ProtectedCloudStorage/PCSAnalytics.db: added (fcb7981)
+  sqlite ~/Library/Application Support/com.apple.TCC/TCC.db: changed (67bbc4e→c2c36ba)
+Other changed
+  ~/Library/ (12 files: +6 ~6)
+  ~ ~/Movies/TV/TV Library.tvlibrary/Library Preferences.tvdb
+  ~ ~/Movies/TV/TV Library.tvlibrary/Library.tvdb
+Not kept
+  processes: AMPArtworkAgent, AMPLibraryAgent, ASPCarryLog, AuthenticationServicesAgent, CalendarIntentsExtension, CategoriesService, +64 more
+Ignored: 75 paths (caches, logs, build output)
+review: ef964ffdad1a571d0dc592473c7644a454ed11eb74d7cdc382d1528c5a094246
+(stderr:)
+Leaving the idle copy alone for 96s: 87s
+Leaving the idle copy alone for 96s: 92s
+Leaving the idle copy alone for 96s: 97s
+Stopping silo-baseline-7072cc...
+Dropping silo-baseline-7072cc...
+baseline rc=0 in 151 s
+macOS VMs running (pgrep Virtualization.VirtualMachine): 2
+{'baselineApplied': True, 'baselineAvailable': True}
+[14:29:21] PASS  diff --baseline ran on idle fork  -- rc=0 lines=18
+== summary PASS=18 FAIL=7
+[14:29:21] cleanup
+NAME         STATE      KIND    SIZE
+workspace-1  stopped    linux   8 cpu, 32 GiB
+e2e-relay    stopped    linux   8 cpu, 32 GiB
+silo-eval-a  stopped    linux   2 cpu, 2 GiB
+silo-eval-b  stopped    linux   2 cpu, 2 GiB
+e2e-p2-main  running    linux   2 cpu, 3 GiB
+e2e-p2-t1    running    linux   2 cpu, 3 GiB
+e2e-p2-t2    running    linux   2 cpu, 3 GiB
+e2e-p2-t3    running    linux   2 cpu, 3 GiB
+e2e-p2m computers left: 0
+silo: No computer is called e2e-p2m-main.
+macOS VMs running (pgrep Virtualization.VirtualMachine): 0
