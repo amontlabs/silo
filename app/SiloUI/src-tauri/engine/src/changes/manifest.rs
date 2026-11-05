@@ -73,6 +73,9 @@ pub struct Databases {
     pub pg_tables: BTreeMap<(String, String), PgTable>,
     /// file path -> file digest
     pub sqlite: BTreeMap<String, String>,
+    /// Why Postgres could not be read (`DBU postgres reason`); `None` when it was read or is
+    /// not installed.
+    pub pg_unreadable: Option<String>,
 }
 
 /// A macOS launch agent or daemon (`LAGENT`).
@@ -101,6 +104,12 @@ pub struct Manifest {
     pub cron: BTreeMap<String, String>,
     /// user -> crontab file path
     pub cronf: BTreeMap<String, String>,
+    /// user -> crontab text (`CRONT`), when it was small enough to record
+    pub cront: BTreeMap<String, String>,
+    /// original path -> content digest of files the quiet step set aside (`QPARK`)
+    pub qpark: BTreeMap<String, String>,
+    /// user -> (digest, text) of a crontab the quiet step set aside (`QCRON`)
+    pub qcron: BTreeMap<String, (String, String)>,
     pub svc: BTreeMap<String, String>,
     /// (proto, port) -> process
     pub listen: BTreeMap<(String, String), String>,
@@ -244,6 +253,18 @@ impl Manifest {
                     need(3)?;
                     m.cronf.insert(f[1].clone(), f[2].clone());
                 }
+                "CRONT" => {
+                    need(3)?;
+                    m.cront.insert(f[1].clone(), f[2].clone());
+                }
+                "QPARK" => {
+                    need(3)?;
+                    m.qpark.insert(f[1].clone(), f[2].clone());
+                }
+                "QCRON" => {
+                    need(4)?;
+                    m.qcron.insert(f[1].clone(), (f[2].clone(), f[3].clone()));
+                }
                 "SVC" => {
                     need(3)?;
                     m.svc.insert(f[1].clone(), f[2].clone());
@@ -283,6 +304,12 @@ impl Manifest {
                             m.db.sqlite.insert(f[2].clone(), f[3].clone());
                         }
                         _ => {}
+                    }
+                }
+                "DBU" => {
+                    need(3)?;
+                    if f[1] == "postgres" {
+                        m.db.pg_unreadable = Some(f[2].clone());
                     }
                 }
                 "DBT" => {

@@ -806,3 +806,101 @@ fn idle_files_with_other_content_collapse_into_one_line_and_stay_in_the_json() {
         ["/srv/x/c"]
     );
 }
+
+// ---------------------------------------------------------------- unreadable sides, quiet parks
+
+#[test]
+fn a_database_unreadable_at_the_base_is_not_compared_and_not_called_changed() {
+    let base = "DBU\tpostgres\tthe server did not answer\n";
+    let now = "DB\tpostgres\tappdb\tschema\ts1\nDBT\tpostgres\tappdb\tpublic.items\td1\t5\n";
+    let d = run(base, now);
+    assert_eq!(section(&d, "Database changed"), Vec::<&str>::new());
+    assert_eq!(
+        section(&d, "Database not compared"),
+        ["postgres appdb: database not compared: base unreadable (the server did not answer)"]
+    );
+    assert!(!d.render(15).contains("new database"));
+    // The same server answering at both ends still reports a created database.
+    let readable = run("", now);
+    assert_eq!(
+        section(&readable, "Database changed"),
+        ["postgres appdb: new database (1 table)"]
+    );
+    // And one that stopped answering afterwards does not read as dropped.
+    let gone = run(now, "DBU\tpostgres\tthe server did not answer\n");
+    assert_eq!(section(&gone, "Database changed"), Vec::<&str>::new());
+    assert_eq!(section(&gone, "Database not compared").len(), 1);
+}
+
+#[test]
+fn an_unreadable_crontab_is_never_compared() {
+    let d = run(
+        "CRON\troot\t?\n",
+        "CRON\troot\tabc\nCRONT\troot\t* * * * * x\\n\n",
+    );
+    assert!(d.settings.cron.is_empty());
+    let d = run("CRON\troot\tabc\n", "CRON\troot\t?\n");
+    assert!(d.settings.cron.is_empty());
+}
+
+#[test]
+fn a_parked_crontab_is_the_base_of_the_fork_crontab() {
+    let parked = "QCRON\troot\th0\t0 3 * * * backup\\n# keep\\n\n";
+    // Quiet forks start with no crontab; it stays parked: nothing changed.
+    let still = run(&format!("CRON\troot\t-\n{parked}"), "CRON\troot\t-\n");
+    assert!(still.settings.cron.is_empty());
+    assert!(still.is_empty());
+    // The fork adds one line to its own crontab.
+    let d = run(
+        &format!("CRON\troot\t-\n{parked}"),
+        "CRON\troot\th1\nCRONF\troot\t/var/spool/cron/crontabs/root\nCRONT\troot\t0 3 * * * backup\\n# keep\\n* * * * * tick\\n\n",
+    );
+    assert_eq!(d.settings.cron.len(), 1);
+    let c = &d.settings.cron[0];
+    assert_eq!(c.change, Change::Modified);
+    assert_eq!(c.before.as_deref(), Some("h0"));
+    assert_eq!((c.lines_added, c.lines_removed), (Some(1), Some(0)));
+    assert_eq!(section(&d, "Settings & files"), ["cron root: 1 line added"]);
+    // The same crontab back unchanged is no change.
+    let same = run(
+        &format!("CRON\troot\t-\n{parked}"),
+        "CRON\troot\th0\nCRONT\troot\t0 3 * * * backup\\n# keep\\n\n",
+    );
+    assert!(same.settings.cron.is_empty());
+    // Without a parked original the crontab is a new one.
+    let fresh = run("CRON\troot\t-\n", "CRON\troot\th1\nCRONT\troot\tx\\n\n");
+    assert_eq!(section(&fresh, "Settings & files"), ["cron root: added"]);
+}
+
+#[test]
+fn crontab_edits_count_lines_added_and_removed() {
+    let d = run(
+        "CRON\troot\ta\nCRONT\troot\tone\\ntwo\\n\n",
+        "CRON\troot\tb\nCRONT\troot\ttwo\\nthree\\nfour\\n\n",
+    );
+    assert_eq!(
+        section(&d, "Settings & files"),
+        ["cron root: 2 lines added, 1 removed"]
+    );
+}
+
+#[test]
+fn pulse_audio_churn_is_ignored() {
+    let d = run(
+        "",
+        "F\t/home/silo/.config/pulse/8f4a-default-sink\t5\t1\tabc\nF\t/home/silo/.config/pulse/8f4a-default-source\t5\t1\tabc\nF\t/home/silo/.config/pulse/cookie\t256\t1\tabc\n",
+    );
+    assert!(d.settings.files.is_empty(), "{:?}", d.settings.files);
+    assert_eq!(d.ignored.paths.len(), 3);
+    let kept = run("", "F\t/home/silo/.config/pulse/client.conf\t5\t1\tabc\n");
+    assert_eq!(kept.settings.files.len(), 1);
+}
+
+#[test]
+fn quiet_parks_parse_from_the_manifest() {
+    let parsed = m("QPARK\t/var/spool/cron/crontabs/root\th0\nQCRON\troot\th0\ta\\nb\\n\nCRONT\troot\tx\\n\nDBU\tpostgres\twhy not\n");
+    assert_eq!(parsed.qpark["/var/spool/cron/crontabs/root"], "h0");
+    assert_eq!(parsed.qcron["root"], ("h0".to_owned(), "a\nb\n".to_owned()));
+    assert_eq!(parsed.cront["root"], "x\n");
+    assert_eq!(parsed.db.pg_unreadable.as_deref(), Some("why not"));
+}

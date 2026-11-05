@@ -469,8 +469,11 @@ pub async fn diff(
     progress: Progress<'_>,
 ) -> Result<Value, CliError> {
     let target = engine.computer(&args.computer).await?;
+    // A baseline that cannot be measured correctly (the fork was used) is reported, and the
+    // diff is shown without one.
+    let mut baseline_error = None;
     if args.compute_baseline {
-        engine
+        let measured = engine
             .run_job(
                 &format!("Measuring the idle baseline of {}", target.name),
                 requests::changes_baseline(ChangesBaselineParams {
@@ -481,7 +484,10 @@ pub async fn diff(
                 }),
                 progress,
             )
-            .await?;
+            .await;
+        if let Err(error) = measured {
+            baseline_error = Some(error.message);
+        }
     }
     let mut result = engine
         .run_job(
@@ -506,6 +512,9 @@ pub async fn diff(
             "capturedAt",
         ] {
             object.insert(key.to_owned(), result[key].clone());
+        }
+        if let Some(error) = baseline_error {
+            object.insert("baselineError".to_owned(), json!(error));
         }
     }
     Ok(document)

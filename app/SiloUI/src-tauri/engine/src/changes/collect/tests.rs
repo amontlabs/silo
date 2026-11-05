@@ -474,7 +474,7 @@ fn the_collector_describes_a_fixture_home() {
     // Every record is a known tag with tabs between its fields.
     let known = [
         "META", "F", "L", "P", "PKG", "PKGM", "GIT", "GITF", "GIG", "CRON", "CRONF", "SVC",
-        "LISTEN", "PROC", "PKGD", "DB", "DBT", "LAGENT",
+        "LISTEN", "PROC", "PKGD", "DB", "DBT", "LAGENT", "CRONT", "QPARK", "QCRON", "DBU",
     ];
     assert!(lines
         .iter()
@@ -605,5 +605,139 @@ fn postgres_names_cannot_become_options_and_the_dump_key_is_not_hashed() {
     assert!(
         !calls.contains("pwned") && !calls.contains("evil"),
         "{calls}"
+    );
+}
+
+// MARK: Crontabs, quiet parks, listeners and unreadable databases
+
+fn records(out: &str, kind: &str) -> Vec<String> {
+    out.lines()
+        .filter(|l| l.split('\t').next() == Some(kind))
+        .map(str::to_owned)
+        .collect()
+}
+
+#[test]
+fn crontabs_are_hashed_from_their_files_and_parked_ones_are_reported() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join("home");
+    std::fs::create_dir_all(&home).unwrap();
+    let spool = dir.path().join("spool");
+    std::fs::create_dir_all(&spool).unwrap();
+    std::fs::write(spool.join("silo"), "* * * * * tick\n").unwrap();
+    std::fs::write(spool.join("empty"), "").unwrap();
+    let secret = spool.join("locked");
+    std::fs::write(&secret, "0 0 * * * x\n").unwrap();
+    std::fs::set_permissions(&secret, std::fs::Permissions::from_mode(0o000)).unwrap();
+    let quiet = dir.path().join("quiet");
+    std::fs::create_dir_all(quiet.join("var/spool/cron/crontabs")).unwrap();
+    std::fs::write(
+        quiet.join("var/spool/cron/crontabs/root"),
+        "0 3 * * * backup\n",
+    )
+    .unwrap();
+    let out = run_collector_with(
+        &home,
+        dir.path(),
+        &[
+            ("SILO_CRON_DIRS", spool.to_str().unwrap()),
+            ("SILO_QUIET_DISABLED", quiet.to_str().unwrap()),
+        ],
+    );
+    let sha = |text: &str| {
+        let digest = Sha256::digest(text.as_bytes());
+        hex(&digest)
+    };
+    let cron = records(&out, "CRON");
+    assert!(
+        cron.contains(&format!("CRON\tsilo\t{}", sha("* * * * * tick\n"))),
+        "{out}"
+    );
+    assert!(cron.contains(&format!("CRON\tempty\t{}", sha(""))), "{out}");
+    assert!(records(&out, "CRONT").contains(&"CRONT\tsilo\t* * * * * tick\\n".to_owned()));
+    // The file nobody could read is marked, not hashed as empty. (When the tests run as root
+    // nothing is unreadable.)
+    if std::fs::read(&secret).is_err() {
+        assert!(cron.contains(&"CRON\tlocked\t?".to_owned()), "{out}");
+        assert!(records(&out, "CRONT")
+            .iter()
+            .all(|line| !line.starts_with("CRONT\tlocked")));
+    }
+    let backup = sha("0 3 * * * backup\n");
+    assert_eq!(
+        records(&out, "QPARK"),
+        [format!("QPARK\t/var/spool/cron/crontabs/root\t{backup}")]
+    );
+    assert_eq!(
+        records(&out, "QCRON"),
+        [format!("QCRON\troot\t{backup}\t0 3 * * * backup\\n")]
+    );
+    std::fs::set_permissions(&secret, std::fs::Permissions::from_mode(0o600)).unwrap();
+}
+
+#[test]
+fn listeners_are_matched_to_the_process_holding_the_socket() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join("home");
+    std::fs::create_dir_all(&home).unwrap();
+    let proc = dir.path().join("proc");
+    std::fs::create_dir_all(proc.join("net")).unwrap();
+    // 0x1538 is 5432; 0A is the listening state, 01 an established connection.
+    std::fs::write(
+        proc.join("net/tcp"),
+        "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n   0: 00000000:1538 00000000:0000 0A 00000000:00000000 00:00000000 00000000   110        0 4242 1 0 100 0 0 10 0\n   1: 0100007F:0050 0100007F:9999 01 00000000:00000000 00:00000000 00000000     0        0 5555 1 0 100 0 0 10 0\n",
+    )
+    .unwrap();
+    std::fs::write(proc.join("net/tcp6"), "  sl  local_address\n").unwrap();
+    for (pid, comm, inode) in [("100", "postgres", "4242"), ("200", "bash", "9999")] {
+        std::fs::create_dir_all(proc.join(pid).join("fd")).unwrap();
+        std::fs::write(proc.join(pid).join("comm"), format!("{comm}\n")).unwrap();
+        std::os::unix::fs::symlink(format!("socket:[{inode}]"), proc.join(pid).join("fd/3"))
+            .unwrap();
+    }
+    let out = run_collector_with(
+        &home,
+        dir.path(),
+        &[("SILO_PROC_ROOT", proc.to_str().unwrap())],
+    );
+    assert_eq!(
+        records(&out, "LISTEN"),
+        ["LISTEN\ttcp\t5432\tpostgres"],
+        "{out}"
+    );
+}
+
+#[test]
+fn postgres_that_does_not_answer_is_recorded_not_started_or_hidden() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().join("home");
+    std::fs::create_dir_all(&home).unwrap();
+    let bin = dir.path().join("bin");
+    std::fs::create_dir_all(&bin).unwrap();
+    let log = dir.path().join("calls.log");
+    write_executable(
+        &bin.join("sudo"),
+        "#!/bin/sh\nshift; shift; shift\nexec \"$@\"\n",
+    );
+    write_executable(
+        &bin.join("psql"),
+        &format!(
+            "#!/bin/sh\necho \"psql $*\" >> '{}'\nexit 2\n",
+            log.display()
+        ),
+    );
+    write_executable(&bin.join("pg_dump"), "#!/bin/sh\nexit 1\n");
+    let out = run_collector_with(&home, &bin, &[]);
+    assert_eq!(
+        records(&out, "DBU"),
+        ["DBU\tpostgres\tthe server did not answer"],
+        "{out}"
+    );
+    assert!(records(&out, "DB").is_empty() && records(&out, "DBT").is_empty());
+    let calls = std::fs::read_to_string(&log).unwrap();
+    assert!(
+        calls.lines().all(|l| l.contains("select 1")),
+        "only the probe ran: {calls}"
     );
 }

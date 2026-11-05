@@ -591,3 +591,41 @@ async fn retry_setup_runs_the_engines_setup_retry_for_the_computer() {
         matches!(cli.command, silo_cli::cli::Command::RetrySetup { ref computer } if computer == "mac")
     );
 }
+
+#[tokio::test]
+async fn a_baseline_that_cannot_be_measured_is_reported_and_the_diff_still_runs() {
+    let polled = std::sync::atomic::AtomicUsize::new(0);
+    let engine = FakeEngine::start(move |method, _| match method {
+        "computers.list" => Ok(listing(&[("try", "running")])),
+        "changes.baseline" | "changes.diff" => Ok(json!({"jobId": "job:1"})),
+        "operations.job.get" => {
+            if polled.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
+                Ok(json!({"jobId": "job:1", "state": "finished", "outcome": {
+                    "error": {"code": "internal", "message": "No baseline: this fork has been used."}}}))
+            } else {
+                Ok(finished(json!({
+                    "diff": {"format": 1, "other": []},
+                    "text": "Code\n  ~/app: a..b",
+                    "baselineApplied": false, "baselineAvailable": false,
+                    "baseCapturedAt": "a", "capturedAt": "b"
+                })))
+            }
+        }
+        "operations.job.acknowledge" => Ok(Value::Null),
+        other => Err(("internal", format!("unexpected {other}"))),
+    });
+    let connected = Engine::connect(&engine.socket).await.unwrap();
+    let args = ops::DiffArgs {
+        computer: "try".into(),
+        max_lines: None,
+        no_baseline: false,
+        compute_baseline: true,
+    };
+    let value = ops::diff(&connected, &args, &ignore).await.unwrap();
+    assert_eq!(value["baselineApplied"], false);
+    assert_eq!(
+        value["baselineError"],
+        "No baseline: this fork has been used."
+    );
+    assert_eq!(engine.calls("changes.diff").len(), 1);
+}

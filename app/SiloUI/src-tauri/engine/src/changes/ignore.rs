@@ -46,6 +46,18 @@ pub const BUILTIN_IGNORE: &str = "\
 */Library/Caches
 */Library/Saved Application State
 
+# PulseAudio and the desktop session rewrite these on every login: the default output and
+# input device per machine id, remembered volumes, the auth cookie
+*/.config/pulse/*-default-sink
+*/.config/pulse/*-default-source
+*/.config/pulse/*-device-volumes.*
+*/.config/pulse/*-stream-volumes.*
+*/.config/pulse/*-card-database.*
+*/.config/pulse/cookie
+.ICEauthority
+.Xauthority
+*/.local/share/recently-used.xbel
+
 # agent session data
 */.claude/projects
 .claude.json.backup*
