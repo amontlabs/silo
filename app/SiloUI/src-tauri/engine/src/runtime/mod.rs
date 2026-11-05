@@ -1700,7 +1700,7 @@ fn takes_worker_lock(args: &[String]) -> bool {
     args.first().is_some_and(|command| {
         matches!(
             command.as_str(),
-            "create" | "modify" | "remove" | "stop" | "restore" | "adopt-disk"
+            "create" | "modify" | "remove" | "rename" | "stop" | "restore" | "adopt-disk"
         )
     })
 }
@@ -5706,6 +5706,99 @@ pub fn observe_computer(
         Err(error) if is_missing_computer(&error) => Ok(ComputerRuntime::Absent),
         Err(error) => Err(error),
     }
+}
+
+/// The Silo computer id carried by the runtime computer called `name` (empty when it has none),
+/// or `None` when the runtime has no computer of that name. Looks only at the runtime, so it
+/// answers while the saved computer names and the runtime names disagree during a promote.
+pub(crate) fn sandbox_machine_id(
+    runner: &dyn RuntimeRunner,
+    paths: &RuntimePaths,
+    name: &str,
+) -> Result<Option<String>, RuntimeError> {
+    match inspect_computer(runner, paths, name) {
+        Ok(inspected) => Ok(Some(
+            inspected
+                .config
+                .pointer("/labels/silo.machine-id")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned(),
+        )),
+        Err(error) if is_missing_computer(&error) => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
+/// Renames a stopped runtime computer (`msb rename`): its catalog row, its folder and the name
+/// in its saved configuration. The caller holds the computer's operation gate.
+pub(crate) fn rename_sandbox(
+    runner: &dyn RuntimeRunner,
+    paths: &RuntimePaths,
+    from: &str,
+    to: &str,
+) -> Result<(), RuntimeError> {
+    validate_name(from)?;
+    validate_name(to)?;
+    runner
+        .run(
+            paths,
+            &["rename".into(), from.into(), to.into(), "--quiet".into()],
+            Duration::from_secs(120),
+        )
+        .map(|_| ())
+}
+
+/// Forgets what this process remembers under a computer name (GitHub identity and access state),
+/// after a promote moved the name to another computer.
+pub(crate) fn forget_name_state(paths: &RuntimePaths, name: &str) {
+    forget_github_state(&paths.home, name);
+}
+
+/// Starts or stops a computer the way a person's start or stop does. The caller holds the
+/// computer's operation gate.
+pub(crate) fn computer_lifecycle(
+    paths: &RuntimePaths,
+    action: &str,
+    name: &str,
+) -> Result<(), RuntimeError> {
+    computer_action_with(&ProcessRunner, paths, &device_resources()?, action, name)
+}
+
+/// Gives computers new saved names in one write, so two computers never share a name, not even
+/// between the two changes. Repeating it changes nothing.
+pub(crate) fn set_computer_names(
+    paths: &RuntimePaths,
+    renames: &[(&str, &str)],
+) -> Result<(), RuntimeError> {
+    let mut inventory = read_metadata(&paths.metadata)?;
+    let mut changed = false;
+    for (id, name) in renames {
+        validate_name(name)?;
+        let computer = inventory
+            .computers
+            .iter_mut()
+            .find(|computer| computer.id() == *id)
+            .ok_or_else(|| RuntimeError::Invalid("This computer no longer exists.".into()))?;
+        if computer.name != *name {
+            computer.name = (*name).to_owned();
+            changed = true;
+        }
+    }
+    if !changed {
+        return Ok(());
+    }
+    let mut seen = HashSet::new();
+    if !inventory
+        .computers
+        .iter()
+        .all(|computer| seen.insert(computer.name().to_ascii_lowercase()))
+    {
+        return Err(RuntimeError::Invalid(
+            "Another computer already has that name.".into(),
+        ));
+    }
+    write_metadata(&paths.metadata, &inventory)
 }
 
 pub fn ensure_managed(inspected: &InspectedSandbox) -> Result<(), RuntimeError> {
