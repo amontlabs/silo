@@ -1,75 +1,112 @@
 == header
-engine commit: 46492ff3d9471eff1d79e3cae7df03eff0cebd8e
-msb: 0.7.6 patches: 22
-macOS: 26.5 (arm64)
-silo --version: silo 0.1.0
-date: 2026-11-05T00:36:29Z
+engine/CLI commit: 726020f26d819c8f4d346c1fb6782ed903f7ef43; tracked changes under app/ (git status --porcelain app): []
+bundled msb: msb 0.7.6; patches in runtime-inputs.json: 22
+host macOS: 26.5 (arm64); silo: silo 0.1.0; date 2026-11-05T02:28:20Z
 == silo list / status / drop main
 NAME         STATE      KIND    SIZE
 workspace-1  stopped    linux   8 cpu, 32 GiB
 e2e-relay    stopped    linux   8 cpu, 32 GiB
 silo-eval-a  stopped    linux   2 cpu, 2 GiB
 silo-eval-b  stopped    linux   2 cpu, 2 GiB
-[01:36:29] PASS  silo list  -- exits 0
-[01:36:30] PASS  silo status  -- exits 0 for an existing computer
+[03:28:20] PASS  silo list  -- 
+[03:28:21] PASS  silo status  -- 
 silo drop main -> rc=1: silo: main is the long-lived computer. Pass --force to drop it.
-[01:36:30] PASS  silo drop refuses main  -- non-zero exit without --force
-== source setup
-Creating e2e-p1-src...
-Creating e2e-p1-src: 5s
-Created e2e-p1-src (stopped)
-Starting e2e-p1-src...
-Started e2e-p1-src (running)
-[01:36:41] PASS  create+start source  -- 
+[03:28:21] PASS  silo drop refuses main  -- 
+== source: boot-persistent jobs
+[03:28:32] PASS  create+start source  -- 
+guest OS: Ubuntu 24.04.4 LTS 6.12.109 
+desktop session processes: 7
+[03:28:33] PASS  silo-desktop autostart is on (Xfce session running)  -- XDG autostart runs under it
 /usr/sbin/cron
 * * * * * echo "$(hostname) $(date +\%s) cron" >> /var/log/silo-check-cron.log
 @reboot echo "$(hostname) $(date +\%s) reboot" >> /var/log/silo-check-reboot.log
-   ...done.
-831 perl -e # Silo guest process supervisor. Arguments: TOKEN CWD PROGRAM [ARGUMENT...]. # Runs PROGRAM as the leader of its own process group so the engine can stop the whole # tree, and records that group in /tmp/silo-exec-TOKEN.pid. The supervisor itself stays # outside the group, so once PROGRAM exits the group id still names exactly its remaining # descendants. The record is kept while any descendant lives, so a later cancellation can # still end them, and removed once none remain. A signal death is reported as 128+N after # saving the signal name in /tmp/silo-exec-TOKEN.sig; an exit code of 255, which SSH also # uses for its own failures, is saved in /tmp/silo-exec-TOKEN.exit so the engine can tell # the two apart. use strict; use warnings; use POSIX (); use Config;  my ($token, $cwd, @argv) = @ARGV; my $state = "/tmp/silo-exec-$token"; if (!@argv) { print STDERR "silo: no command\n"; exit 126; }  sub record {     my ($file, $text) = @_;     my $old = umask(077);     if (open(my $handle, '>', $file)) {         print $handle $text;         close $handle;     }     umask($old); }  if (length $cwd) {     unless (chdir $cwd) {         print STDERR "silo: cannot enter $cwd: $!\n";         exit 126;     } } my $child; $SIG{TERM} = $SIG{INT} = $SIG{HUP} = sub {     my ($name) = @_;     kill($name, -$child) if defined $child && $child > 0; }; my $pid = fork(); if (!defined $pid) {     print STDERR "silo: cannot start $argv[0]: $!\n";     exit 126; } if ($pid == 0) {     $SIG{TERM} = $SIG{INT} = $SIG{HUP} = 'DEFAULT';     setpgrp(0, 0) or POSIX::setsid();     { no warnings; exec { $argv[0] } @argv; }     my $code = $!{ENOENT} ? 127 : 126;     print STDERR "silo: cannot run $argv[0]: $!\n";     POSIX::_exit($code); } # Both sides set the group, so it exists before either continues. setpgrp($pid, $pid); $child = $pid; record("$state.pid", "$pid\n"); waitpid($pid, 0); my $status = $?; # Keep the record while descendants of the command live: they are still in its group. if (!(kill(0, -$pid) || $!{EPERM})) {     unlink "$state.pid"; } if ($status & 127) {     my $number = $status & 127;     my @names = split ' ', $Config{sig_name};     my $name = $names[$number] // "SIG$number";     record("$state.sig", "$name\n");     exit 128 + $number; } my $code = $status >> 8; record("$state.exit", "$code\n") if $code == 255; exit($code);  -- dbc44a27f2a249aaa328d9d4834ad799  sudo bash -c mkdir -p /root/.config/autostart cat > /usr/local/bin/silo-check-poller.sh <<"P" #!/bin/bash while true; do   code=$(curl -s -m 2 -o /dev/null -w "%{http_code}" "http://127.0.0.1:8099/poll?host=$(hostname)")   echo "$(hostname) $(date +%s) poll $code" >> /var/log/silo-check-poll.log   sleep 5 done P chmod +x /usr/local/bin/silo-check-poller.sh cat > /root/.config/autostart/poller.desktop <<"D" [Desktop Entry] Type=Application Name=poller Exec=bash /usr/local/bin/silo-check-poller.sh D echo "FAKE_BOT_TOKEN=p1-fake-not-real" > /root/.bot.env cat > /tmp/ct <<"C" * * * * * echo "$(hostname) $(date +\%s) cron" >> /var/log/silo-check-cron.log @reboot echo "$(hostname) $(date +\%s) reboot" >> /var/log/silo-check-reboot.log C crontab /tmp/ct; crontab -l (service cron start || cron) 2>&1 | tail -1 setsid -f bash /usr/local/bin/silo-check-poller.sh </dev/null >/dev/null 2>&1 sleep 1; pgrep -af silo-check-poller
-832 sudo bash -c mkdir -p /root/.config/autostart cat > /usr/local/bin/silo-check-poller.sh <<"P" #!/bin/bash while true; do   code=$(curl -s -m 2 -o /dev/null -w "%{http_code}" "http://127.0.0.1:8099/poll?host=$(hostname)")   echo "$(hostname) $(date +%s) poll $code" >> /var/log/silo-check-poll.log   sleep 5 done P chmod +x /usr/local/bin/silo-check-poller.sh cat > /root/.config/autostart/poller.desktop <<"D" [Desktop Entry] Type=Application Name=poller Exec=bash /usr/local/bin/silo-check-poller.sh D echo "FAKE_BOT_TOKEN=p1-fake-not-real" > /root/.bot.env cat > /tmp/ct <<"C" * * * * * echo "$(hostname) $(date +\%s) cron" >> /var/log/silo-check-cron.log @reboot echo "$(hostname) $(date +\%s) reboot" >> /var/log/silo-check-reboot.log C crontab /tmp/ct; crontab -l (service cron start || cron) 2>&1 | tail -1 setsid -f bash /usr/local/bin/silo-check-poller.sh </dev/null >/dev/null 2>&1 sleep 1; pgrep -af silo-check-poller
-851 bash /usr/local/bin/silo-check-poller.sh
-[01:36:53] waiting for cron to fire on the source (max 150 s)
-bash: line 1: /var/log/silo-check-cron.log: No such file or directory
-bash: line 1: /var/log/silo-check-cron.log: No such file or directory
-[01:37:04] PASS  source cron fired  -- cron.log lines=1 after 10s
-src poll lines=3
-1
-/root/.bot.env
-== recipe + fork
-Forking e2e-p1-src into e2e-p1-fork...
-Forked e2e-p1-fork (stopped)
-[01:37:08] PASS  fork e2e-p1-fork (recipe discovered)  -- 
-Starting e2e-p1-fork...
-Started e2e-p1-fork (running)
-[01:37:12] PASS  start e2e-p1-fork  -- 
-[01:37:12] fork baseline after start: poll=3 cron=1 reboot=1 procs=0
-[01:37:12] watching fork for 130 s
-[01:39:22] fork after 130 s:        poll=3 cron=1 reboot=1 procs=0
-[01:39:22] PASS  no poller/cron/@reboot lines written in fork  -- before[poll=3 cron=1 reboot=1 procs=0] after[poll=3 cron=1 reboot=1 procs=0]
-[01:39:23] PASS  no poller process in fork  -- matching processes=0
-e2e-p1-src 1793839012 poll 000
-e2e-p1-src 1793839017 poll 000
-e2e-p1-src 1793839022 poll 000
-e2e-p1-src 1793839012 reboot
-cron-procs=0
+no hand-started job: restarting the source so everything starts only through boot
+[03:28:47] PASS  restart source (silo stop/start)  -- 
+[03:28:47] waiting for poller, cron and @reboot after the boot (max 180 s)
+source after boot (15s): cron=1 reboot=1 poll=4 poller_procs=1 crond_procs=1
+  silo-check-cron.log: e2e-p1-src 1793845741 cron
+  silo-check-reboot.log: e2e-p1-src 1793845726 reboot
+  silo-check-poll.log: e2e-p1-src 1793845731 poll 000
+  silo-check-poll.log: e2e-p1-src 1793845736 poll 000
+  silo-check-poll.log: e2e-p1-src 1793845741 poll 000
+[03:29:04] PASS  source: cron job ran after boot  -- cron=1 reboot=1 poll=4 poller_procs=1 crond_procs=1
+[03:29:04] PASS  source: @reboot job ran after boot  -- 
+[03:29:04] PASS  source: poller ran after boot (autostart)  -- 
+== CONTROL fork (empty recipe: no quiet/scrub list)
+[03:29:07] PASS  control fork created  -- 
+[03:29:11] PASS  start e2e-p1-ctl  -- 
+[03:29:11] e2e-p1-ctl boot settle 45 s, then baseline
+[03:29:57] e2e-p1-ctl (e2e-p1-ctl) baseline: cron=1 reboot=1 poll=14 poller_procs=1 crond_procs=1
+[03:29:57] watching e2e-p1-ctl 130 s
+[03:32:07] e2e-p1-ctl after: cron=1 reboot=1 poll=40 poller_procs=1 crond_procs=1
+  silo-check-cron.log: e2e-p1-src 1793845741 cron
+  silo-check-reboot.log: e2e-p1-src 1793845726 reboot
+  silo-check-poll.log: e2e-p1-ctl 1793845915 poll 000
+  silo-check-poll.log: e2e-p1-ctl 1793845920 poll 000
+  silo-check-poll.log: e2e-p1-ctl 1793845925 poll 000
+e2e-p1-ctl: lines written by host 'e2e-p1-ctl': 36; by source host 'e2e-p1-src' (inherited): 6
+CONTROL report: baseline[cron=1 reboot=1 poll=14 poller_procs=1 crond_procs=1] after[cron=1 reboot=1 poll=40 poller_procs=1 crond_procs=1]
+control status quiet: {"applied": true, "newIdentity": true, "scheduledJobsDisabled": true, "scrub": [], "secrets": [], "stop": []}
+control: crontab=no crontab for root xdg=silo-check-cron.desktop poller.desktop 
+control: token present=yes
+== QUIET fork (recipe: quiet [silo-check-poller.sh], scrub [/root/.bot.env])
+[03:32:13] PASS  fork e2e-p1-fork (recipe discovered)  -- 
+[03:32:17] PASS  start e2e-p1-fork  -- 
+[03:32:17] e2e-p1-fork boot settle 45 s, then baseline
+[03:33:02] e2e-p1-fork (e2e-p1-fork) baseline: cron=4 reboot=1 poll=42 poller_procs=0 crond_procs=1
+[03:33:02] watching e2e-p1-fork 130 s
+[03:35:13] e2e-p1-fork after: cron=4 reboot=1 poll=42 poller_procs=0 crond_procs=1
+  silo-check-cron.log: e2e-p1-src 1793845801 cron
+  silo-check-cron.log: e2e-p1-src 1793845861 cron
+  silo-check-cron.log: e2e-p1-src 1793845921 cron
+  silo-check-reboot.log: e2e-p1-src 1793845726 reboot
+  silo-check-poll.log: e2e-p1-src 1793845922 poll 000
+  silo-check-poll.log: e2e-p1-src 1793845927 poll 000
+  silo-check-poll.log: e2e-p1-src 1793845932 poll 000
+e2e-p1-fork: lines written by host 'e2e-p1-fork': 0; by source host 'e2e-p1-src' (inherited): 47
+[03:35:14] PASS  no cron/@reboot/poller line written by the fork host  -- fork-host lines=0
+[03:35:14] PASS  no log growth in 130 s  -- [cron=4 reboot=1 poll=42 poller_procs=0 crond_procs=1] -> [cron=4 reboot=1 poll=42 poller_procs=0 crond_procs=1]
+[03:35:14] PASS  no poller process  -- 
+[03:35:14] FAIL  no cron daemon process  -- crond_procs=1
+-- diagnostics in the quiet fork: who runs the poller, what autostart/cron state remains
+  971   969 silo           02:59 xfce4-session
+ 1209     1 silo           00:00 perl -e # Silo guest process supervisor. Arguments: TOKEN CWD PROGRAM [ARGUMENT...]. # Runs PROGRAM as the leader of 
+ 1210  1209 root           00:00 sudo bash -c ps -eo pid,ppid,user,etime,args | grep "[s]ilo-check\|[x]fce4-session\| [c]ron" | cut -c1-150; echo xdg-
+ 1211  1210 root           00:00 bash -c ps -eo pid,ppid,user,etime,args | grep "[s]ilo-check\|[x]fce4-session\| [c]ron" | cut -c1-150; echo xdg-syste
+xdg-system:
+silo-check-cron.desktop
+xdg-silo:
+total 8
+drwxr-xr-x 2 silo silo 4096 Nov  5 02:32 .
+drwx------ 6 silo silo 4096 Nov  5 02:28 ..
+quiet-disabled:
+/var/lib/silo-quiet
+/var/lib/silo-quiet/21d65ced-38d8-4357-a385-b88cbe88e1dc.old-hostname
+/var/lib/silo-quiet/disabled
+/var/lib/silo-quiet/disabled/home
+/var/lib/silo-quiet/disabled/home/silo
+/var/lib/silo-quiet/disabled/var
+/var/lib/silo-quiet/disabled/var/spool
+/var/lib/silo-quiet/disabled/etc
+/var/lib/silo-quiet/disabled/etc/crontab
+/var/lib/silo-quiet/disabled/etc/cron.d
+/var/lib/silo-quiet/disabled/etc/cron.daily
+/var/lib/silo-quiet/applied-21d65ced-38d8-4357-a385-b88cbe88e1dc
+/var/lib/silo-quiet/21d65ced-38d8-4357-a385-b88cbe88e1dc.machine-id
 no crontab for root
-etc
-var
-poller.desktop
-source id=a58639137b9771e322faf1aa6aeae96f host=e2e-p1-src | fork id=386a0e3245494bc5ba98608541f71fe2 host=e2e-p1-fork
-[01:39:24] PASS  new machine-id  -- a58639137b9771e322faf1aa6aeae96f -> 386a0e3245494bc5ba98608541f71fe2
-[01:39:24] PASS  new hostname  -- e2e-p1-src -> e2e-p1-fork
-[01:39:25] PASS  /root/.bot.env gone  -- 
-[01:39:25] PASS  source still has /root/.bot.env  -- 
--- fork status --json
+[03:35:14] PASS  new machine-id  -- a58639137b9771e322faf1aa6aeae96f -> 355866dfb3c94009ad5d9b77a907fad7
+[03:35:14] PASS  new hostname  -- e2e-p1-src -> e2e-p1-fork
+[03:35:15] PASS  /root/.bot.env gone in fork  -- 
+[03:35:15] PASS  source still has /root/.bot.env  -- 
 {
+  "boots": null,
   "checkpointList": [],
   "checkpoints": 0,
   "cpus": 2,
   "detail": "Running",
   "diskGiB": 8,
   "github": null,
-  "id": "5151690f-a429-405a-b362-73475f11b8dc",
+  "id": "490aa1b0-3ffa-4ae0-b9ef-7e729fc8e77e",
   "kind": "linux",
   "memoryGiB": 2,
   "name": "e2e-p1-fork",
@@ -88,68 +125,28 @@ source id=a58639137b9771e322faf1aa6aeae96f host=e2e-p1-src | fork id=386a0e32454
   "secrets": [],
   "state": "running"
 }
-quiet record: {"applied": true, "newIdentity": true, "scheduledJobsDisabled": true, "scrub": ["/root/.bot.env"], "secrets": [], "stop": ["silo-check-poller.sh"]}
-secrets: [] github: None
-[01:39:25] PASS  quiet record: applied, stop+scrub as in recipe; no secrets/github assignment  -- silo status --json
+[03:35:15] PASS  quiet record applied, stop/scrub as recipe, no assignments (the source has none either: weak)  -- 
 == fork of a fork
-Forking e2e-p1-fork into e2e-p1-fork2...
-Forked e2e-p1-fork2 (stopped)
-Starting e2e-p1-fork2...
-Started e2e-p1-fork2 (running)
-[01:39:32] PASS  fork+start e2e-p1-fork2  -- 
-fork2 id=084db476bb3c419eb41a79eb711c7fd9 host=e2e-p1-fork2
-[01:39:32] PASS  fork2 machine-id differs from fork and source  -- 084db476bb3c419eb41a79eb711c7fd9
-[01:39:32] PASS  fork2 hostname differs  -- e2e-p1-fork2
-fork2 procs=0 poll=3
-== secrets opt-in
-silo: Allow Silo's engine to use its saved sign-in in the macOS Keychain. (credential_access_denied)
-[01:39:36] FAIL  secrets set + assign to source  -- 
-No secrets yet.
-Forking e2e-p1-src into e2e-p1-nosec...
-Forked e2e-p1-nosec (stopped)
-Starting e2e-p1-nosec...
-Started e2e-p1-nosec (running)
-[01:39:41] PASS  fork without --secret  -- 
-fork (no --secret) secrets: [] github: None
-[01:39:42] PASS  fork without --secret has no secret  -- 
-Forking e2e-p1-src into e2e-p1-sec...
-silo: The source computer has no secret named E2E_P1_TOKEN.
-[01:39:46] FAIL  fork with --secret E2E_P1_TOKEN  -- 
-silo: No computer is called e2e-p1-sec.
-Traceback (most recent call last):
-  File "<stdin>", line 2, in <module>
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/__init__.py", line 293, in load
-    return loads(fp.read(),
-        cls=cls, object_hook=object_hook,
-        parse_float=parse_float, parse_int=parse_int,
-        parse_constant=parse_constant, object_pairs_hook=object_pairs_hook, **kw)
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/__init__.py", line 346, in loads
-    return _default_decoder.decode(s)
-           ~~~~~~~~~~~~~~~~~~~~~~~^^^
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/decoder.py", line 345, in decode
-    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
-               ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
-  File "/opt/homebrew/Cellar/python@3.14/3.14.0_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/decoder.py", line 363, in raw_decode
-    raise JSONDecodeError("Expecting value", s, err.value) from None
-json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
-[01:39:46] FAIL  fork with --secret has exactly that secret  -- 
-No secrets yet.
+[03:35:22] PASS  fork+start e2e-p1-fork2  -- 
+[03:35:23] PASS  fork2 machine-id differs from fork and source  -- fab079c308544bcf80b6634cdd2ac579
+[03:35:23] PASS  fork2 hostname differs  -- e2e-p1-fork2
+fork2 (forked from the quiet fork WITHOUT a recipe, so the poller is not named): host wrote 0 log lines (informational)
+== secrets
+secrets set rc=1: silo: Allow Silo's engine to use its saved sign-in in the macOS Keychain. (credential_access_denied)
+[03:35:56] BLOCKED  positive --secret case (fork has exactly E2E_P1_TOKEN)  -- owner's Keychain approval for the engine (credential_access_denied)
+[03:35:56] BLOCKED  non-trivial 'no assignments by default'  -- same: the source cannot be given a secret
 rc=1: Forking e2e-p1-src into e2e-p1-x...
 silo: The source computer has no secret named E2E_P1_NO_SUCH_SECRET.
-[01:39:48] PASS  --secret for a name the source lacks fails  -- rc=1
-[01:39:48] PASS  failed fork leaves no computer behind  -- 
-silo: No secret is called E2E_P1_TOKEN.
-No secrets yet.
-== read-only GitHub
-silo fork --secret github on a source with no GitHub access -> rc=1: Forking e2e-p1-src into e2e-p1-x...
+[03:35:57] PASS  --secret for a name the source lacks fails  -- rc=1
+[03:35:58] PASS  failed fork leaves no computer  -- 
+--secret github on a source with no GitHub access -> Forking e2e-p1-src into e2e-p1-x...
 silo: e2e-p1-src has no GitHub access to copy.
-[01:39:50] SKIP: the engine honours SILO_GITHUB_API_BASE (github_http.rs), but a source gets a GitHub assignment only through github.connect (OAuth sign-in + GitHub App config) or github.access.set; the silo CLI has no GitHub command, and a raw engine call is out of scope for this check. So no scoped-token request is made and the read-only permissions cannot be observed. Real GitHub never contacted.
-== summary: PASS=21 FAIL=3
-[01:39:50] cleanup
-[01:39:57] silo list after cleanup:
+[03:35:59] BLOCKED  read-only GitHub against a mock  -- SILO_GITHUB_API_BASE exists but the source needs a GitHub App installation (github.connect / github.access.set); the CLI has no GitHub command
+== summary: PASS=26 FAIL=1 BLOCKED=3
+[03:35:59] cleanup
+[03:36:06] silo list after cleanup:
 NAME         STATE      KIND    SIZE
 workspace-1  stopped    linux   8 cpu, 32 GiB
 e2e-relay    stopped    linux   8 cpu, 32 GiB
 silo-eval-a  stopped    linux   2 cpu, 2 GiB
 silo-eval-b  stopped    linux   2 cpu, 2 GiB
-No secrets yet.

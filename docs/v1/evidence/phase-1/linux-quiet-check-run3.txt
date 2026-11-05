@@ -1,0 +1,126 @@
+== header
+engine/CLI commit: 4050f861ac7e6f57f8860e26104b4730550ad8ca; tracked changes under app/ (git status --porcelain app): []
+bundled msb: msb 0.7.6; patches in runtime-inputs.json: 22
+host macOS: 26.5 (arm64); silo: silo 0.1.0; date 2026-11-05T01:21:02Z
+== silo list / status / drop main
+NAME         STATE      KIND    SIZE
+workspace-1  stopped    linux   8 cpu, 32 GiB
+e2e-relay    stopped    linux   8 cpu, 32 GiB
+silo-eval-a  stopped    linux   2 cpu, 2 GiB
+silo-eval-b  stopped    linux   2 cpu, 2 GiB
+[02:21:02] PASS  silo list  -- 
+[02:21:02] PASS  silo status  -- 
+silo drop main -> rc=1: silo: main is the long-lived computer. Pass --force to drop it.
+[02:21:02] PASS  silo drop refuses main  -- 
+== source: boot-persistent jobs
+[02:21:13] PASS  create+start source  -- 
+guest OS: Ubuntu 24.04.4 LTS 6.12.109 
+desktop session processes: 7
+[02:21:14] PASS  silo-desktop autostart is on (Xfce session running)  -- XDG autostart runs under it
+/usr/sbin/cron
+* * * * * echo "$(hostname) $(date +\%s) cron" >> /var/log/silo-check-cron.log
+@reboot echo "$(hostname) $(date +\%s) reboot" >> /var/log/silo-check-reboot.log
+no hand-started job: restarting the source so everything starts only through boot
+[02:21:28] PASS  restart source (silo stop/start)  -- 
+[02:21:28] waiting for poller, cron and @reboot after the boot (max 180 s)
+source after boot (35s): cron=1 reboot=1 poll=8 poller_procs=1 crond_procs=1
+  silo-check-cron.log: e2e-p1-src 1793841721 cron
+  silo-check-reboot.log: e2e-p1-src 1793841687 reboot
+  silo-check-poll.log: e2e-p1-src 1793841712 poll 000
+  silo-check-poll.log: e2e-p1-src 1793841717 poll 000
+  silo-check-poll.log: e2e-p1-src 1793841722 poll 000
+[02:22:06] PASS  source: cron job ran after boot  -- cron=1 reboot=1 poll=8 poller_procs=1 crond_procs=1
+[02:22:06] PASS  source: @reboot job ran after boot  -- 
+[02:22:06] PASS  source: poller ran after boot (autostart)  -- 
+== CONTROL fork (empty recipe: no quiet/scrub list)
+[02:22:09] PASS  control fork created  -- 
+[02:22:13] PASS  start e2e-p1-ctl  -- 
+[02:22:13] e2e-p1-ctl boot settle 45 s, then baseline
+[02:22:58] e2e-p1-ctl (e2e-p1-ctl) baseline: cron=1 reboot=1 poll=18 poller_procs=1 crond_procs=1
+[02:22:58] watching e2e-p1-ctl 130 s
+[02:25:09] e2e-p1-ctl after: cron=1 reboot=1 poll=44 poller_procs=1 crond_procs=1
+  silo-check-cron.log: e2e-p1-src 1793841721 cron
+  silo-check-reboot.log: e2e-p1-src 1793841687 reboot
+  silo-check-poll.log: e2e-p1-ctl 1793841896 poll 000
+  silo-check-poll.log: e2e-p1-ctl 1793841901 poll 000
+  silo-check-poll.log: e2e-p1-ctl 1793841906 poll 000
+e2e-p1-ctl: lines written by host 'e2e-p1-ctl': 36; by source host 'e2e-p1-src' (inherited): 10
+CONTROL report: baseline[cron=1 reboot=1 poll=18 poller_procs=1 crond_procs=1] after[cron=1 reboot=1 poll=44 poller_procs=1 crond_procs=1]
+control status quiet: {"applied": true, "newIdentity": true, "scheduledJobsDisabled": true, "scrub": [], "secrets": [], "stop": []}
+control: crontab=no crontab for root xdg=silo-check-cron.desktop poller.desktop 
+control: token present=yes
+== QUIET fork (recipe: quiet [silo-check-poller.sh], scrub [/root/.bot.env])
+[02:25:15] PASS  fork e2e-p1-fork (recipe discovered)  -- 
+[02:25:18] PASS  start e2e-p1-fork  -- 
+[02:25:18] e2e-p1-fork boot settle 45 s, then baseline
+[02:26:04] e2e-p1-fork (e2e-p1-fork) baseline: cron=4 reboot=1 poll=55 poller_procs=1 crond_procs=1
+[02:26:04] watching e2e-p1-fork 130 s
+[02:28:14] e2e-p1-fork after: cron=4 reboot=1 poll=81 poller_procs=1 crond_procs=1
+  silo-check-cron.log: e2e-p1-src 1793841781 cron
+  silo-check-cron.log: e2e-p1-src 1793841841 cron
+  silo-check-cron.log: e2e-p1-src 1793841901 cron
+  silo-check-reboot.log: e2e-p1-src 1793841687 reboot
+  silo-check-poll.log: e2e-p1-fork 1793842082 poll 000
+  silo-check-poll.log: e2e-p1-fork 1793842087 poll 000
+  silo-check-poll.log: e2e-p1-fork 1793842092 poll 000
+e2e-p1-fork: lines written by host 'e2e-p1-fork': 36; by source host 'e2e-p1-src' (inherited): 50
+[02:28:16] FAIL  no cron/@reboot/poller line written by the fork host  -- fork-host lines=36
+[02:28:16] FAIL  no log growth in 130 s  -- [cron=4 reboot=1 poll=55 poller_procs=1 crond_procs=1] -> [cron=4 reboot=1 poll=81 poller_procs=1 crond_procs=1]
+[02:28:16] FAIL  no poller process  -- 
+[02:28:16] FAIL  no cron daemon process  -- crond_procs=1
+[02:28:16] PASS  new machine-id  -- a58639137b9771e322faf1aa6aeae96f -> 7fb752ed3a5140b9a401e2ebbb2cbb4f
+[02:28:16] PASS  new hostname  -- e2e-p1-src -> e2e-p1-fork
+[02:28:16] PASS  /root/.bot.env gone in fork  -- 
+[02:28:16] PASS  source still has /root/.bot.env  -- 
+{
+  "boots": null,
+  "checkpointList": [],
+  "checkpoints": 0,
+  "cpus": 2,
+  "detail": "Running",
+  "diskGiB": 8,
+  "github": null,
+  "id": "9dbed3cd-a71e-4eb1-b848-b16363805b44",
+  "kind": "linux",
+  "memoryGiB": 2,
+  "name": "e2e-p1-fork",
+  "quiet": {
+    "applied": true,
+    "newIdentity": true,
+    "scheduledJobsDisabled": true,
+    "scrub": [
+      "/root/.bot.env"
+    ],
+    "secrets": [],
+    "stop": [
+      "silo-check-poller.sh"
+    ]
+  },
+  "secrets": [],
+  "state": "running"
+}
+[02:28:17] PASS  quiet record applied, stop/scrub as recipe, no assignments (the source has none either: weak)  -- 
+== fork of a fork
+[02:28:23] PASS  fork+start e2e-p1-fork2  -- 
+[02:28:24] PASS  fork2 machine-id differs from fork and source  -- af0e455b3e4b49098e62c10201cf4124
+[02:28:24] PASS  fork2 hostname differs  -- e2e-p1-fork2
+[02:28:54] FAIL  fork2 host wrote no log lines  -- lines=7
+== secrets
+secrets set rc=1: silo: Allow Silo's engine to use its saved sign-in in the macOS Keychain. (credential_access_denied)
+[02:28:57] BLOCKED  positive --secret case (fork has exactly E2E_P1_TOKEN)  -- owner's Keychain approval for the engine (credential_access_denied)
+[02:28:57] BLOCKED  non-trivial 'no assignments by default'  -- same: the source cannot be given a secret
+rc=1: Forking e2e-p1-src into e2e-p1-x...
+silo: The source computer has no secret named E2E_P1_NO_SUCH_SECRET.
+[02:28:59] PASS  --secret for a name the source lacks fails  -- rc=1
+[02:28:59] PASS  failed fork leaves no computer  -- 
+--secret github on a source with no GitHub access -> Forking e2e-p1-src into e2e-p1-x...
+silo: e2e-p1-src has no GitHub access to copy.
+[02:29:01] BLOCKED  read-only GitHub against a mock  -- SILO_GITHUB_API_BASE exists but the source needs a GitHub App installation (github.connect / github.access.set); the CLI has no GitHub command
+== summary: PASS=23 FAIL=5 BLOCKED=3
+[02:29:01] cleanup
+[02:29:07] silo list after cleanup:
+NAME         STATE      KIND    SIZE
+workspace-1  stopped    linux   8 cpu, 32 GiB
+e2e-relay    stopped    linux   8 cpu, 32 GiB
+silo-eval-a  stopped    linux   2 cpu, 2 GiB
+silo-eval-b  stopped    linux   2 cpu, 2 GiB

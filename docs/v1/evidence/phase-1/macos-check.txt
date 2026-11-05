@@ -1,7 +1,8 @@
 == header
-engine commit: 83a8ed97b3184a4d41a0044f5eca7b0a4c03273d
+engine/CLI commit: 726020f26d819c8f4d346c1fb6782ed903f7ef43; tracked changes under app/ (git status --porcelain app): []
+bundled msb: msb 0.7.6
 msb: 0.7.6 patches: 22
-macOS: 26.5 (arm64); silo: silo 0.1.0; date 2026-11-05T01:11:19Z
+macOS: 26.5 (arm64); silo: silo 0.1.0; date 2026-11-05T02:36:06Z
 macOS VMs running (pgrep Virtualization.VirtualMachine): 0
 NAME         STATE      KIND    SIZE
 workspace-1  stopped    linux   8 cpu, 32 GiB
@@ -11,64 +12,80 @@ silo-eval-b  stopped    linux   2 cpu, 2 GiB
 == create source
 Creating e2e-p1-mac...
 Created e2e-p1-mac (stopped)
-create rc=0 in 73 s
+create rc=0 in 69 s
   "detail": null,
   "diskGiB": 40,
   "state": "stopped"
 -- create runtime.log
-2026-11-05T01:11:19.5929Z setup started
-2026-11-05T01:11:19.599197Z step: Personalizing the computer
-2026-11-05T01:11:26.82753Z boot 1: setup boot
-2026-11-05T01:11:43.496782Z personalization script: status 0; stdout: ssh-keygen: generating new host keys: RSA ECDSA ED25519  | SILO_UNALLOCATED=25769844736 | SILO_PERSONALIZED; stderr: Repairing the partition map might erase disk0s1, proceed? (y/N) Started partition map repair on disk0 | Checking prerequisites | Checking the partition list | Adjusting partition map to fit whole disk as required | Checking for an EFI system partition | Checking all HFS data partition loader spaces | Checking booter partitions | Reviewing boot support loaders | Checking Core Storage Physical Volume partitions | The partition map appears to be OK | Finished partition map repair on disk0 | Started APFS operation | Error: -69519: The target disk is too small for this operation, or a gap is required in your partition map which is missing or too small, which is often caused by an attempt to grow a partition beyond the beginning of another partition or beyond the end of partition map usable space | /dev/disk0 (internal, physical): |    #:                       TYPE NAME                    SIZE       IDENTIFIER |    0:      GUID_partition_scheme                        *68.7 GB    disk0 |    1:             Apple_APFS_ISC Container disk1         524.3 MB   disk0s1 |    2:                 Apple_APFS Container disk3         37.1 GB    disk0s2 |    3:        Apple_APFS_Recovery Container disk2         5.4 GB     disk0s3 |                     (free space)                         25.8 GB    -
-2026-11-05T01:11:44.188445Z secure token: status 0; stdout: SILO_SECURETOKEN=disabled; stderr: 
-2026-11-05T01:11:44.188614Z personalization: the disk could not be expanded
-2026-11-05T01:11:44.188719Z step: Shutting down
-2026-11-05T01:11:50.753634Z step: Checking the computer
-2026-11-05T01:11:51.057646Z boot 2: setup boot
-2026-11-05T01:11:57.880551Z csrutil status: status 0; stdout: System Integrity Protection status: disabled.; stderr: 
-2026-11-05T01:12:00.713933Z step: Shutting down
-2026-11-05T01:12:08.925126Z setup step finished: account, sip, developer tools, computer use, clipboard, personalized done
-2026-11-05T01:12:08.936125Z step: Starting macOS
-2026-11-05T01:12:09.22123Z boot 1: setup boot
-2026-11-05T01:12:15.69036Z step: Creating workspace folders
-2026-11-05T01:12:15.867843Z workspace folders: status 0; stdout: ; stderr: 
-2026-11-05T01:12:15.867996Z setup step finished: account, sip, developer tools, computer use, clipboard, workspace folders, personalized done
-2026-11-05T01:12:15.877747Z step: Setting up network and trust
-2026-11-05T01:12:25.650225Z setup step finished: account, sip, developer tools, computer use, clipboard, workspace folders, personalized done
-2026-11-05T01:12:25.660535Z step: Shutting down
-2026-11-05T01:12:32.359274Z setup finished
-[02:12:33] PASS  create: 'New Password: Permission denied' gone  -- 
-[02:12:33] PASS  create ends stopped (not failed)  -- diskGiB=40
+2026-11-05T02:36:06.929294Z setup started
+2026-11-05T02:36:06.939049Z step: Personalizing the computer
+2026-11-05T02:36:13.77137Z boot 1: setup boot
+2026-11-05T02:36:31.708909Z personalization script: status 0; stdout: ssh-keygen: generating new host keys: RSA ECDSA ED25519  | SILO_UNALLOCATED=25769844736 | SILO_PERSONALIZED; stderr: Repairing the partition map might erase disk0s1, proceed? (y/N) Started partition map repair on disk0 | Checking prerequisites | Checking the partition list | Adjusting partition map to fit whole disk as required | Checking for an EFI system partition | Checking all HFS data partition loader spaces | Checking booter partitions | Reviewing boot support loaders | Checking Core Storage Physical Volume partitions | The partition map appears to be OK | Finished partition map repair on disk0 | Started APFS operation | Error: -69519: The target disk is too small for this operation, or a gap is required in your partition map which is missing or too small, which is often caused by an attempt to grow a partition beyond the beginning of another partition or beyond the end of partition map usable space | /dev/disk0 (internal, physical): |    #:                       TYPE NAME                    SIZE       IDENTIFIER |    0:      GUID_partition_scheme                        *68.7 GB    disk0 |    1:             Apple_APFS_ISC Container disk1         524.3 MB   disk0s1 |    2:                 Apple_APFS Container disk3         37.1 GB    disk0s2 |    3:        Apple_APFS_Recovery Container disk2         5.4 GB     disk0s3 |                     (free space)                         25.8 GB    -
+2026-11-05T02:36:32.306446Z secure token: status 0; stdout: SILO_SECURETOKEN=disabled; stderr: 
+2026-11-05T02:36:32.306586Z personalization: the disk could not be expanded
+2026-11-05T02:36:32.306651Z step: Shutting down
+2026-11-05T02:36:38.685866Z step: Checking the computer
+2026-11-05T02:36:38.970938Z boot 2: setup boot
+2026-11-05T02:36:45.717449Z csrutil status: status 0; stdout: System Integrity Protection status: disabled.; stderr: 
+2026-11-05T02:36:45.928964Z step: Shutting down
+2026-11-05T02:36:52.133473Z setup step finished: account, sip, developer tools, computer use, clipboard, personalized done
+2026-11-05T02:36:52.143463Z step: Starting macOS
+2026-11-05T02:36:52.435495Z boot 1: setup boot
+2026-11-05T02:36:59.648161Z step: Creating workspace folders
+2026-11-05T02:37:01.828121Z workspace folders: status 0; stdout: ; stderr: 
+2026-11-05T02:37:01.828248Z setup step finished: account, sip, developer tools, computer use, clipboard, workspace folders, personalized done
+2026-11-05T02:37:01.844745Z step: Setting up network and trust
+2026-11-05T02:37:08.769153Z setup step finished: account, sip, developer tools, computer use, clipboard, workspace folders, personalized done
+2026-11-05T02:37:08.779756Z step: Shutting down
+2026-11-05T02:37:14.998423Z setup finished
+[03:37:15] PASS  create: 'New Password: Permission denied' gone  -- 
+[03:37:15] PASS  create ends stopped (not failed)  -- diskGiB=40
 macOS VMs running (pgrep Virtualization.VirtualMachine): 0
 Starting e2e-p1-mac...
 Starting e2e-p1-mac: 5s
 Starting e2e-p1-mac: 10s
 Starting e2e-p1-mac: 15s
-Starting e2e-p1-mac: 20s
 Started e2e-p1-mac (running)
-[02:12:54] PASS  start source  -- 
+[03:37:33] PASS  start source  -- 
 -- source LaunchAgent dir, user
 silo
 org.silo.computer-use-reconcile.plist
 org.silo.guest-recorder.plist
 == source setup
 * * * * * echo "$(hostname) $(date +\%s) cron" >> $HOME/cron.log
-[02:12:55] waiting for interval, poller and cron to fire on the source (max 150 s)
+@reboot echo "$(hostname) $(date +\%s) reboot" >> $HOME/reboot.log
+restarting the source so the crontab @reboot job and the LaunchAgents run from a boot
+[03:37:58] PASS  restart source  -- 
+[03:37:58] waiting for interval, poller and cron to fire on the source (max 150 s)
 bash: /Users/silo/cron.log: No such file or directory
-source after 10s: interval=1 poll=3 cron=1
-[02:13:06] PASS  source jobs fired (interval, poller, cron)  -- interval=1 poll=3 cron=1
-source: host=e2e-p1-mac local=e2e-p1-mac uuid=1C9864DA-2FBB-5343-AAE3-EB542DA34E20 hostkey=SHA256:5dmQF1TTW8F7m0lhpcwiMjRGKhAF6yNg2grgtT4Z9iU
+source after 5s: interval=1 poll=4 cron=1 reboot=2
+[03:38:04] PASS  source jobs fired after boot (interval, poller, cron, @reboot)  -- interval=1 poll=4 cron=1 reboot=2
+source guest: ProductName:		macOS ProductVersion:		26.6.2 BuildVersion:		25G83 
+==> /Users/silo/interval.log <==
+e2e-p1-mac 1793846254 interval
+
+==> /Users/silo/poll.log <==
+e2e-p1-mac 1793846278 poll
+e2e-p1-mac 1793846283 poll
+
+==> /Users/silo/cron.log <==
+e2e-p1-mac 1793846280 cron
+
+==> /Users/silo/reboot.log <==
+e2e-p1-mac 1793846254 reboot
+e2e-p1-mac 1793846268 reboot
+source: host=e2e-p1-mac local=e2e-p1-mac uuid=6B227A78-964E-58D6-AD86-35AB0EA9E389 hostkey=SHA256:mvpbXbcRejAGy51R6ZyXYdm2TPqDA5zqwKkJHVrpdIU
 token:
 /Users/silo/.bot.env
 Stopping e2e-p1-mac...
 Stopped e2e-p1-mac (stopping)
-[02:13:07] PASS  stop source (one macOS VM of ours at a time)  -- 
+[03:38:06] PASS  stop source (one macOS VM of ours at a time)  -- 
 macOS VMs running (pgrep Virtualization.VirtualMachine): 0
 == recipe + fork (no checkpoint named)
 Forking e2e-p1-mac into e2e-p1-macfork...
 Forked e2e-p1-macfork (setting-up)
-[02:13:15] PASS  fork created (automatic fork point)  -- fork setup took 1 s
-b1399c32-5463-4e52-9c4a-7cf6294d8849  Fork point  fork-point  2026-11-05T01:13:14.643952Z
+[03:38:13] PASS  fork created (automatic fork point)  -- fork setup took 1 s
+766924bb-a8f4-46bb-aaf5-a1113c85aedc  Fork point  fork-point  2026-11-05T02:38:13.051395Z
 e2e-p1-macfork has no checkpoints.
 macOS VMs running (pgrep Virtualization.VirtualMachine): 0
 Starting e2e-p1-macfork...
@@ -76,50 +93,61 @@ Starting e2e-p1-macfork: 5s
 Starting e2e-p1-macfork: 10s
 Starting e2e-p1-macfork: 15s
 Starting e2e-p1-macfork: 20s
-Starting e2e-p1-macfork: 25s
-Starting e2e-p1-macfork: 30s
 Started e2e-p1-macfork (running)
-[02:13:50] PASS  start fork  -- start to ready 35 s; fork+start 36 s (dev signal, not published)
+[03:38:39] PASS  start fork  -- start to ready 26 s; fork+start 27 s (dev signal, not published)
 -- fork runtime.log
-2026-11-05T01:13:14.691495Z setup started
-2026-11-05T01:13:14.698655Z step: Personalizing the computer
-2026-11-05T01:13:23.199872Z setup step finished: account, sip, developer tools, computer use, clipboard, workspace folders, personalized done
-2026-11-05T01:13:23.21156Z setup finished
-2026-11-05T01:13:23.745043Z boot 1: first Start
+2026-11-05T02:38:13.102056Z setup started
+2026-11-05T02:38:13.109271Z step: Personalizing the computer
+2026-11-05T02:38:17.085051Z setup step finished: account, sip, developer tools, computer use, clipboard, workspace folders, personalized done
+2026-11-05T02:38:17.09603Z setup finished
+2026-11-05T02:38:17.503899Z boot 1: first Start
 boot-related log lines: starts=0 shutdowns=0
-status boots: None
-5:2026-11-05T01:13:23.745043Z boot 1: first Start
-guest boots: 11
-{ sec = 1793841204, usec = 225675 } Wed Nov  4 17:13:24 2026
-[02:13:50] fork baseline: interval=1 poll=4 cron=1
-[02:13:51] watching 130 s
-[02:16:01] fork after:    interval=1 poll=4 cron=1
-[02:16:01] PASS  no interval/poller/cron runs in fork over 130 s  -- [interval=1 poll=4 cron=1] -> [interval=1 poll=4 cron=1]
+status boots: 1
+5:2026-11-05T02:38:17.503899Z boot 1: first Start
+fork guest: ProductName:		macOS ProductVersion:		26.6.2 BuildVersion:		25G83 
+guest boots: 12
+{ sec = 1793846297, usec = 877586 } Wed Nov  4 18:38:17 2026
+[03:38:40] fork baseline: interval=1 poll=4 cron=1 reboot=2
+[03:38:40] watching 130 s
+[03:40:51] fork after:    interval=1 poll=4 cron=1 reboot=2
+[03:40:51] PASS  no interval/poller/cron runs in fork over 130 s  -- [interval=1 poll=4 cron=1 reboot=2] -> [interval=1 poll=4 cron=1 reboot=2]
 procs=0
 crontab: no crontab for silo
 0
-org.silo.check.poller.plist
 org.silo.computer-use-reconcile.plist
 org.silo.guest-recorder.plist
-fork:   host=e2e-p1-macfork local=e2e-p1-macfork uuid=2DBC84F0-0F93-5672-8231-B629917B73B4 hostkey=SHA256:VPoBJ5MDOHhuFMd9lbHxOCTCoCgwheMdz7F0i4/zPGc
-[02:16:01] PASS  new hostname  -- host=e2e-p1-mac -> host=e2e-p1-macfork
-[02:16:01] PASS  new machine identifier (IOPlatformUUID)  -- 
-[02:16:01] PASS  new ssh host key  -- 
-[02:16:02] PASS  token gone  -- 
-quiet: {"applied": true, "newIdentity": true, "parked": ["/Users/silo/Library/LaunchAgents/org.silo.check.interval.plist", "/private/var/at/tabs/silo"], "scheduledJobsDisabled": true, "scrub": ["/Users/silo/.bot.env"], "secrets": [], "stop": ["silo-check-poller.sh", "org.silo.check.poller"]} secrets: [] github: None state: running
-[02:16:02] PASS  quiet record applied; no secret/github assignment  -- 
+fork:   host=e2e-p1-macfork local=e2e-p1-macfork uuid=B954B8B4-68C4-52F7-8F93-9E5FFD5D7E51 hostkey=SHA256:kXkg8eA4dToFUXeCc37YqHZoyNRlFcIA+tkHGECttAo
+[03:40:51] PASS  new hostname  -- host=e2e-p1-mac -> host=e2e-p1-macfork
+[03:40:51] PASS  new machine identifier (IOPlatformUUID)  -- 
+[03:40:51] PASS  new ssh host key  -- 
+[03:40:51] PASS  token gone  -- 
+quiet: {"applied": true, "newIdentity": true, "parked": ["/Users/silo/Library/LaunchAgents/org.silo.check.interval.plist", "/Users/silo/Library/LaunchAgents/org.silo.check.poller.plist", "/private/var/at/tabs/silo"], "scheduledJobsDisabled": true, "scrub": ["/Users/silo/.bot.env"], "secrets": [], "stop": ["silo-check-poller.sh", "org.silo.check.poller"]} secrets: [] github: None state: running
+[03:40:51] PASS  quiet record applied; no secret/github assignment  -- 
 /Library/Developer/CommandLineTools
 clt-present
 clt mtime Oct 14 15:47:53 2026
 fork runtime.log lines mentioning developer tools: 1
-[02:16:02] FAIL  one boot  -- status boots=None
-== summary PASS=13 FAIL=1
-[02:16:02] cleanup
-NAME            STATE      KIND    SIZE
-workspace-1     stopped    linux   8 cpu, 32 GiB
-e2e-relay       stopped    linux   8 cpu, 32 GiB
-silo-eval-a     stopped    linux   2 cpu, 2 GiB
-silo-eval-b     stopped    linux   2 cpu, 2 GiB
-e2e-p1-macfork  stopping   macos   4 cpu, 8 GiB
+[03:40:52] PASS  one boot (silo status boots == 1)  -- status boots=1
+[03:40:52] PASS  one boot (runtime.log 'boot N:' lines == 1)  -- log boot lines=1: boot 1: first Start;
+fork log lines (with hostnames):
+  interval.log: e2e-p1-mac 1793846254 interval
+  poll.log: e2e-p1-mac 1793846278 poll
+  poll.log: e2e-p1-mac 1793846283 poll
+  cron.log: e2e-p1-mac 1793846280 cron
+  reboot.log: e2e-p1-mac 1793846254 reboot
+  reboot.log: e2e-p1-mac 1793846268 reboot
+[03:40:53] PASS  no log line written by the fork host (e2e-p1-macfork)  -- lines=0
+fork boot epoch 1793846297; log lines stamped at or after the fork's boot (any hostname):
+[03:40:53] PASS  no job ran in the fork after its boot (any hostname, by timestamp)  -- lines=0
+macOS VMs running (pgrep Virtualization.VirtualMachine): 0
+[03:41:25] PASS  source still has the scrubbed file  -- (fork's scrub did not touch the source)
+== summary PASS=19 FAIL=0
+[03:41:26] cleanup
+NAME         STATE      KIND    SIZE
+workspace-1  stopped    linux   8 cpu, 32 GiB
+e2e-relay    stopped    linux   8 cpu, 32 GiB
+silo-eval-a  stopped    linux   2 cpu, 2 GiB
+silo-eval-b  stopped    linux   2 cpu, 2 GiB
+e2e-p1 computers left: 0
 silo: No computer is called e2e-p1-mac.
 macOS VMs running (pgrep Virtualization.VirtualMachine): 0

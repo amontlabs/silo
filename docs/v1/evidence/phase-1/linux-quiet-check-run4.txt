@@ -1,0 +1,152 @@
+== header
+engine/CLI commit: 4050f861ac7e6f57f8860e26104b4730550ad8ca; tracked changes under app/ (git status --porcelain app): []
+bundled msb: msb 0.7.6; patches in runtime-inputs.json: 22
+host macOS: 26.5 (arm64); silo: silo 0.1.0; date 2026-11-05T01:29:36Z
+== silo list / status / drop main
+NAME         STATE      KIND    SIZE
+workspace-1  stopped    linux   8 cpu, 32 GiB
+e2e-relay    stopped    linux   8 cpu, 32 GiB
+silo-eval-a  stopped    linux   2 cpu, 2 GiB
+silo-eval-b  stopped    linux   2 cpu, 2 GiB
+[02:29:36] PASS  silo list  -- 
+[02:29:36] PASS  silo status  -- 
+silo drop main -> rc=1: silo: main is the long-lived computer. Pass --force to drop it.
+[02:29:36] PASS  silo drop refuses main  -- 
+== source: boot-persistent jobs
+[02:29:47] PASS  create+start source  -- 
+guest OS: Ubuntu 24.04.4 LTS 6.12.109 
+desktop session processes: 7
+[02:29:48] PASS  silo-desktop autostart is on (Xfce session running)  -- XDG autostart runs under it
+/usr/sbin/cron
+* * * * * echo "$(hostname) $(date +\%s) cron" >> /var/log/silo-check-cron.log
+@reboot echo "$(hostname) $(date +\%s) reboot" >> /var/log/silo-check-reboot.log
+no hand-started job: restarting the source so everything starts only through boot
+[02:30:01] PASS  restart source (silo stop/start)  -- 
+[02:30:01] waiting for poller, cron and @reboot after the boot (max 180 s)
+source after boot (60s): cron=1 reboot=1 poll=14 poller_procs=1 crond_procs=1
+  silo-check-cron.log: e2e-p1-src 1793842261 cron
+  silo-check-reboot.log: e2e-p1-src 1793842200 reboot
+  silo-check-poll.log: e2e-p1-src 1793842255 poll 000
+  silo-check-poll.log: e2e-p1-src 1793842260 poll 000
+  silo-check-poll.log: e2e-p1-src 1793842265 poll 000
+[02:31:06] PASS  source: cron job ran after boot  -- cron=1 reboot=1 poll=14 poller_procs=1 crond_procs=1
+[02:31:06] PASS  source: @reboot job ran after boot  -- 
+[02:31:06] PASS  source: poller ran after boot (autostart)  -- 
+== CONTROL fork (empty recipe: no quiet/scrub list)
+[02:31:09] PASS  control fork created  -- 
+[02:31:13] PASS  start e2e-p1-ctl  -- 
+[02:31:13] e2e-p1-ctl boot settle 45 s, then baseline
+[02:31:58] e2e-p1-ctl (e2e-p1-ctl) baseline: cron=1 reboot=1 poll=24 poller_procs=1 crond_procs=1
+[02:31:58] watching e2e-p1-ctl 130 s
+[02:34:08] e2e-p1-ctl after: cron=1 reboot=1 poll=50 poller_procs=1 crond_procs=1
+  silo-check-cron.log: e2e-p1-src 1793842261 cron
+  silo-check-reboot.log: e2e-p1-src 1793842200 reboot
+  silo-check-poll.log: e2e-p1-ctl 1793842436 poll 000
+  silo-check-poll.log: e2e-p1-ctl 1793842441 poll 000
+  silo-check-poll.log: e2e-p1-ctl 1793842446 poll 000
+e2e-p1-ctl: lines written by host 'e2e-p1-ctl': 36; by source host 'e2e-p1-src' (inherited): 16
+CONTROL report: baseline[cron=1 reboot=1 poll=24 poller_procs=1 crond_procs=1] after[cron=1 reboot=1 poll=50 poller_procs=1 crond_procs=1]
+control status quiet: {"applied": true, "newIdentity": true, "scheduledJobsDisabled": true, "scrub": [], "secrets": [], "stop": []}
+control: crontab=no crontab for root xdg=silo-check-cron.desktop poller.desktop 
+control: token present=yes
+== QUIET fork (recipe: quiet [silo-check-poller.sh], scrub [/root/.bot.env])
+[02:34:14] PASS  fork e2e-p1-fork (recipe discovered)  -- 
+[02:34:17] PASS  start e2e-p1-fork  -- 
+[02:34:17] e2e-p1-fork boot settle 45 s, then baseline
+[02:35:03] e2e-p1-fork (e2e-p1-fork) baseline: cron=4 reboot=1 poll=61 poller_procs=1 crond_procs=1
+[02:35:03] watching e2e-p1-fork 130 s
+[02:37:13] e2e-p1-fork after: cron=4 reboot=1 poll=87 poller_procs=1 crond_procs=1
+  silo-check-cron.log: e2e-p1-src 1793842321 cron
+  silo-check-cron.log: e2e-p1-src 1793842381 cron
+  silo-check-cron.log: e2e-p1-src 1793842441 cron
+  silo-check-reboot.log: e2e-p1-src 1793842200 reboot
+  silo-check-poll.log: e2e-p1-fork 1793842621 poll 000
+  silo-check-poll.log: e2e-p1-fork 1793842626 poll 000
+  silo-check-poll.log: e2e-p1-fork 1793842631 poll 000
+e2e-p1-fork: lines written by host 'e2e-p1-fork': 36; by source host 'e2e-p1-src' (inherited): 56
+[02:37:15] FAIL  no cron/@reboot/poller line written by the fork host  -- fork-host lines=36
+[02:37:15] FAIL  no log growth in 130 s  -- [cron=4 reboot=1 poll=61 poller_procs=1 crond_procs=1] -> [cron=4 reboot=1 poll=87 poller_procs=1 crond_procs=1]
+[02:37:15] FAIL  no poller process  -- 
+[02:37:15] FAIL  no cron daemon process  -- crond_procs=1
+-- diagnostics in the quiet fork: who runs the poller, what autostart/cron state remains
+  937   935 silo           02:59 xfce4-session
+ 1016   937 silo           02:59 bash /usr/local/bin/silo-check-poller.sh
+ 1356     1 silo           00:00 perl -e # Silo guest process supervisor. Arguments: TOKEN CWD PROGRAM [ARGUMENT...]. # Runs PROGRAM as the leader of 
+ 1357  1356 root           00:00 sudo bash -c ps -eo pid,ppid,user,etime,args | grep "[s]ilo-check\|[x]fce4-session\| [c]ron" | cut -c1-150; echo xdg-
+ 1358  1357 root           00:00 bash -c ps -eo pid,ppid,user,etime,args | grep "[s]ilo-check\|[x]fce4-session\| [c]ron" | cut -c1-150; echo xdg-syste
+xdg-system:
+silo-check-cron.desktop
+xdg-silo:
+total 12
+drwxr-xr-x 2 silo silo 4096 Nov  5 01:29 .
+drwx------ 6 silo silo 4096 Nov  5 01:29 ..
+-rw-r--r-- 1 silo silo   91 Nov  5 01:29 poller.desktop
+quiet-disabled:
+/var/lib/silo-quiet
+/var/lib/silo-quiet/b4b229ef-83c4-48c6-847d-158c1ab66a19.machine-id
+/var/lib/silo-quiet/disabled
+/var/lib/silo-quiet/disabled/etc
+/var/lib/silo-quiet/disabled/etc/cron.daily
+/var/lib/silo-quiet/disabled/etc/crontab
+/var/lib/silo-quiet/disabled/etc/cron.d
+/var/lib/silo-quiet/disabled/var
+/var/lib/silo-quiet/disabled/var/spool
+/var/lib/silo-quiet/b4b229ef-83c4-48c6-847d-158c1ab66a19.old-hostname
+/var/lib/silo-quiet/applied-b4b229ef-83c4-48c6-847d-158c1ab66a19
+no crontab for root
+[02:37:15] PASS  new machine-id  -- a58639137b9771e322faf1aa6aeae96f -> 5cfdb20920774e51a2adb0e5807906f5
+[02:37:15] PASS  new hostname  -- e2e-p1-src -> e2e-p1-fork
+[02:37:15] PASS  /root/.bot.env gone in fork  -- 
+[02:37:16] PASS  source still has /root/.bot.env  -- 
+{
+  "boots": null,
+  "checkpointList": [],
+  "checkpoints": 0,
+  "cpus": 2,
+  "detail": "Running",
+  "diskGiB": 8,
+  "github": null,
+  "id": "43e46f9e-6593-4643-851f-fbe507fa413f",
+  "kind": "linux",
+  "memoryGiB": 2,
+  "name": "e2e-p1-fork",
+  "quiet": {
+    "applied": true,
+    "newIdentity": true,
+    "scheduledJobsDisabled": true,
+    "scrub": [
+      "/root/.bot.env"
+    ],
+    "secrets": [],
+    "stop": [
+      "silo-check-poller.sh"
+    ]
+  },
+  "secrets": [],
+  "state": "running"
+}
+[02:37:16] PASS  quiet record applied, stop/scrub as recipe, no assignments (the source has none either: weak)  -- 
+== fork of a fork
+[02:37:22] PASS  fork+start e2e-p1-fork2  -- 
+[02:37:23] PASS  fork2 machine-id differs from fork and source  -- 42f82842eae947f2923faeb44c94a4d5
+[02:37:23] PASS  fork2 hostname differs  -- e2e-p1-fork2
+fork2 (forked from the quiet fork WITHOUT a recipe, so the poller is not named): host wrote 7 log lines (informational)
+== secrets
+secrets set rc=1: silo: Allow Silo's engine to use its saved sign-in in the macOS Keychain. (credential_access_denied)
+[02:37:56] BLOCKED  positive --secret case (fork has exactly E2E_P1_TOKEN)  -- owner's Keychain approval for the engine (credential_access_denied)
+[02:37:56] BLOCKED  non-trivial 'no assignments by default'  -- same: the source cannot be given a secret
+rc=1: Forking e2e-p1-src into e2e-p1-x...
+silo: The source computer has no secret named E2E_P1_NO_SUCH_SECRET.
+[02:37:58] PASS  --secret for a name the source lacks fails  -- rc=1
+[02:37:58] PASS  failed fork leaves no computer  -- 
+--secret github on a source with no GitHub access -> Forking e2e-p1-src into e2e-p1-x...
+silo: e2e-p1-src has no GitHub access to copy.
+[02:38:00] BLOCKED  read-only GitHub against a mock  -- SILO_GITHUB_API_BASE exists but the source needs a GitHub App installation (github.connect / github.access.set); the CLI has no GitHub command
+== summary: PASS=23 FAIL=4 BLOCKED=3
+[02:38:00] cleanup
+[02:38:06] silo list after cleanup:
+NAME         STATE      KIND    SIZE
+workspace-1  stopped    linux   8 cpu, 32 GiB
+e2e-relay    stopped    linux   8 cpu, 32 GiB
+silo-eval-a  stopped    linux   2 cpu, 2 GiB
+silo-eval-b  stopped    linux   2 cpu, 2 GiB
