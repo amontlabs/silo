@@ -149,6 +149,45 @@ fn config_text_for(
     ))
 }
 
+/// The other names a saved entry answers to (`Host silo-<id> main.silo`), which a client
+/// added after the engine wrote it. Rewriting the entry keeps them.
+fn extra_hosts(existing: &str) -> Vec<String> {
+    let valid = |name: &str| {
+        !name.is_empty()
+            && name
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
+    };
+    existing
+        .lines()
+        .find_map(|line| line.strip_prefix("Host "))
+        .map(|names| {
+            names
+                .split_whitespace()
+                .skip(1)
+                .filter(|name| valid(name))
+                .map(str::to_owned)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn with_extra_hosts(text: String, extras: &[String]) -> String {
+    if extras.is_empty() {
+        return text;
+    }
+    match text.split_once('\n') {
+        Some((first, rest)) => format!("{first} {}\n{rest}", extras.join(" ")),
+        None => text,
+    }
+}
+
+fn saved_extras(config: &Path) -> Vec<String> {
+    fs::read_to_string(config)
+        .map(|text| extra_hosts(&text))
+        .unwrap_or_default()
+}
+
 fn check_guest_path(
     layout: &super::store::Layout,
     record: &super::store::Record,
@@ -229,13 +268,16 @@ pub(super) fn ensure(
     let config = config_path(app, computer_id);
     let root = config.parent().ok_or(FAILED)?;
     let include = editor::include_line(root)?;
-    let text = config_text(
-        &device_id,
-        computer_id,
-        &account.key,
-        &known_hosts(&layout),
-        &proxy_helper()?,
-    )?;
+    let text = with_extra_hosts(
+        config_text(
+            &device_id,
+            computer_id,
+            &account.key,
+            &known_hosts(&layout),
+            &proxy_helper()?,
+        )?,
+        &saved_extras(&config),
+    );
     let _guard = lock();
     editor::private_directory(root)?;
     editor::write_private(&config, text.as_bytes())?;
@@ -283,14 +325,17 @@ pub(super) fn point(app: &MacosContext, a: &str, b: &str, swapped: bool) -> Resu
         }
         let layout = super::store::Layout::new(&data, target);
         let account = guest_access::account(&layout)?;
-        let text = config_text_for(
-            &device_id,
-            entry,
-            target,
-            &account.key,
-            &known_hosts(&layout),
-            &helper,
-        )?;
+        let text = with_extra_hosts(
+            config_text_for(
+                &device_id,
+                entry,
+                target,
+                &account.key,
+                &known_hosts(&layout),
+                &helper,
+            )?,
+            &saved_extras(&config),
+        );
         let _guard = lock();
         editor::write_private(&config, text.as_bytes())?;
     }
@@ -401,6 +446,26 @@ mod tests {
         )));
         assert!(config.contains(&format!("HostKeyAlias silo-{fork}\n")));
         assert!(config.contains("/tmp/fork/guest-access/known_hosts"));
+    }
+
+    #[test]
+    fn names_added_to_an_entry_survive_rewriting_it() {
+        let id = "e38c0e77-28bc-44a0-9b3d-3b4f68f0d85f";
+        let written = config_text(
+            "c690f54f-4cc9-4950-8782-30f21e89d18b",
+            id,
+            Path::new("/tmp/key"),
+            Path::new("/tmp/known"),
+            Path::new("/tmp/silod"),
+        )
+        .unwrap();
+        assert!(extra_hosts(&written).is_empty());
+        let edited = with_extra_hosts(written.clone(), &["main.silo-dev".to_owned()]);
+        assert!(edited.starts_with(&format!("Host silo-{id} main.silo-dev\n  HostName")));
+        let extras = extra_hosts(&edited);
+        assert_eq!(extras, ["main.silo-dev"]);
+        assert_eq!(with_extra_hosts(written, &extras), edited);
+        assert!(!extra_hosts("Host silo-x bad;name ok.silo\n").contains(&"bad;name".to_owned()));
     }
 
     #[test]
