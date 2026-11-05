@@ -4,18 +4,19 @@
 use serde_json::{json, Value};
 use silo_api::methods::{
     checkpoints::{CheckpointCreateParams, CheckpointForkParams, CheckpointKind},
-    common::ComputerTargetParams,
+    common::{ComputerTargetParams, DeviceParams},
     computers::{
         ComputerConfiguration, ComputerCreateParams, ComputerDeleteParams,
         MacosComputerCreateRequest,
     },
     guest::GuestExecParams,
     requests,
+    secrets::{SecretSaveAction, SecretSaveRequest, SecretsSaveParams},
 };
 
 use crate::{
     config::{Recipe, Settings},
-    engine::{Computer, Engine, Progress},
+    engine::{find, Computer, Engine, Progress},
     error::CliError,
 };
 
@@ -27,11 +28,214 @@ pub async fn list(engine: &Engine) -> Result<Value, CliError> {
     Ok(json!({ "computers": computers.iter().map(Computer::to_json).collect::<Vec<_>>() }))
 }
 
+/// One computer with its checkpoints, its recorded quiet state, the Silo secrets assigned to
+/// it and its GitHub assignment. A reading the engine cannot give is `null`.
 pub async fn status(engine: &Engine, name: &str) -> Result<Value, CliError> {
     let computer = engine.computer(name).await?;
     let mut value = computer.to_json();
+    value["quiet"] = computer.quiet.clone().unwrap_or(Value::Null);
+    value["secrets"] = match fetch_secrets(engine).await {
+        Ok(secrets) => json!(secrets
+            .iter()
+            .filter(|secret| secret["removing"] != true)
+            .filter(|secret| assigned_ids(secret).any(|id| id == computer.id))
+            .filter_map(|secret| secret["name"].as_str())
+            .collect::<Vec<_>>()),
+        Err(_) => Value::Null,
+    };
+    value["github"] = match engine
+        .call(requests::github_state(DeviceParams { device_id: None }))
+        .await
+    {
+        Ok(state) => state
+            .get("computers")
+            .and_then(Value::as_array)
+            .and_then(|policies| {
+                policies
+                    .iter()
+                    .find(|policy| policy["computerId"].as_str() == Some(&computer.id))
+            })
+            .map(|policy| {
+                json!({
+                    "repositoryMode": policy["repositoryMode"],
+                    "repositories": policy["repositories"],
+                    "allRepositoriesAllowChanges": policy["allRepositoriesAllowChanges"],
+                    "authenticationMethod": policy["authenticationMethod"],
+                })
+            })
+            .unwrap_or(Value::Null),
+        Err(_) => Value::Null,
+    };
     value["checkpointList"] = Value::Array(computer.checkpoints);
     Ok(value)
+}
+
+fn assigned_ids(secret: &Value) -> impl Iterator<Item = &str> {
+    ["computerIds", "pendingComputerIds"]
+        .into_iter()
+        .filter_map(|key| secret.get(key).and_then(Value::as_array))
+        .flatten()
+        .filter_map(Value::as_str)
+}
+
+async fn fetch_secrets(engine: &Engine) -> Result<Vec<Value>, CliError> {
+    let listed = engine
+        .call(requests::secrets_list(DeviceParams { device_id: None }))
+        .await?;
+    Ok(listed.as_array().cloned().unwrap_or_default())
+}
+
+/// The secrets by name with the computers they are assigned to. Values are never read.
+pub async fn secrets_list(engine: &Engine) -> Result<Value, CliError> {
+    let computers = engine.computers().await?;
+    let name_of = |id: &str| {
+        computers
+            .iter()
+            .find(|computer| computer.id == id)
+            .map_or_else(|| id.to_owned(), |computer| computer.name.clone())
+    };
+    let secrets = fetch_secrets(engine).await?;
+    Ok(json!({ "secrets": secrets.iter().map(|secret| {
+        let names = |key: &str| -> Vec<String> {
+            secret.get(key).and_then(Value::as_array).into_iter().flatten()
+                .filter_map(Value::as_str).map(name_of).collect()
+        };
+        json!({
+            "name": secret["name"],
+            "computers": names("computerIds"),
+            "pendingComputers": names("pendingComputerIds"),
+            "allowedDomains": secret["allowedDomains"],
+            "state": secret["state"],
+            "removing": secret["removing"],
+            "error": secret["error"],
+        })
+    }).collect::<Vec<_>>() }))
+}
+
+/// Adds the secret, or replaces the value of the one with this name. Computers and domains
+/// default to the existing secret's own.
+pub async fn secret_set(
+    engine: &Engine,
+    name: &str,
+    value: String,
+    computers: &[String],
+    domains: &[String],
+) -> Result<Value, CliError> {
+    if value.is_empty() {
+        return Err(CliError::new("The secret value is empty."));
+    }
+    let existing = fetch_secrets(engine)
+        .await?
+        .into_iter()
+        .find(|secret| secret["name"].as_str() == Some(name));
+    let known = engine.computers().await?;
+    let ids: Vec<String> = if computers.is_empty() {
+        existing
+            .as_ref()
+            .map(|secret| {
+                secret["computerIds"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .map(str::to_owned)
+                    .collect()
+            })
+            .unwrap_or_default()
+    } else {
+        computers
+            .iter()
+            .map(|computer| find(&known, computer).map(|found| found.id.clone()))
+            .collect::<Result<Vec<_>, _>>()?
+    };
+    let allowed: Vec<String> = if domains.is_empty() {
+        existing
+            .as_ref()
+            .and_then(|secret| serde_json::from_value(secret["allowedDomains"].clone()).ok())
+            .unwrap_or_default()
+    } else {
+        domains.to_vec()
+    };
+    if existing.is_none() && (ids.is_empty() || allowed.is_empty()) {
+        return Err(CliError::new(
+            "A new secret needs at least one --computer and one --domain.",
+        ));
+    }
+    save_secret(engine, name, existing.as_ref(), Some(value), ids, allowed).await?;
+    secrets_list(engine).await
+}
+
+/// Assigns the secret to a computer, or takes it away.
+pub async fn secret_assign(
+    engine: &Engine,
+    name: &str,
+    computer: &str,
+    assign: bool,
+) -> Result<Value, CliError> {
+    let existing = fetch_secrets(engine)
+        .await?
+        .into_iter()
+        .find(|secret| secret["name"].as_str() == Some(name))
+        .ok_or_else(|| CliError::new(format!("No secret is called {name}.")))?;
+    let target = engine.computer(computer).await?;
+    let mut ids: Vec<String> = existing["computerIds"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(str::to_owned)
+        .collect();
+    if assign {
+        if !ids.contains(&target.id) {
+            ids.push(target.id.clone());
+        }
+    } else {
+        ids.retain(|id| *id != target.id);
+        if ids.is_empty() {
+            return Err(CliError::new(format!(
+                "{name} would have no computer left; a secret needs at least one."
+            )));
+        }
+    }
+    let allowed = serde_json::from_value(existing["allowedDomains"].clone()).unwrap_or_default();
+    save_secret(engine, name, Some(&existing), None, ids, allowed).await?;
+    secrets_list(engine).await
+}
+
+async fn save_secret(
+    engine: &Engine,
+    name: &str,
+    existing: Option<&Value>,
+    value: Option<String>,
+    computer_ids: Vec<String>,
+    allowed_domains: Vec<String>,
+) -> Result<(), CliError> {
+    // A wildcard is kept as it was; this command never widens one.
+    let wildcard = allowed_domains.iter().any(|domain| domain.trim() == "*");
+    if wildcard && existing.is_none() {
+        return Err(CliError::new(
+            "A secret that may go to any destination must be created in the app.",
+        ));
+    }
+    engine
+        .call(requests::secrets_save(SecretsSaveParams {
+            request: SecretSaveRequest {
+                operation: if existing.is_some() {
+                    SecretSaveAction::Edit
+                } else {
+                    SecretSaveAction::Add
+                },
+                id: existing.and_then(|secret| secret["id"].as_str().map(str::to_owned)),
+                name: name.to_owned(),
+                value,
+                computer_ids,
+                allowed_domains,
+                allow_any_destination: wildcard.then_some(true),
+            },
+            device_id: None,
+        }))
+        .await?;
+    Ok(())
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

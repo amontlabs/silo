@@ -58,10 +58,33 @@ pub enum Command {
     Checkpoint(CheckpointCommand),
     /// List a computer's checkpoints.
     Checkpoints { computer: String },
+    /// Manage the Silo secrets and which computers have them.
+    #[command(subcommand)]
+    Secrets(SecretsCommand),
     /// Wait for a job that is already running, by id.
     Job { id: String },
     /// Serve the MCP tools on stdio.
     Mcp,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum SecretsCommand {
+    /// List secret names and the computers they are assigned to (never values).
+    List,
+    /// Add a secret or replace its value; the value is read from stdin.
+    Set {
+        name: String,
+        /// A computer that gets the secret (repeatable; required for a new secret).
+        #[arg(long = "computer", value_name = "COMPUTER")]
+        computers: Vec<String>,
+        /// A domain the secret may be sent to (repeatable; required for a new secret).
+        #[arg(long = "domain", value_name = "DOMAIN")]
+        domains: Vec<String>,
+    },
+    /// Give a computer an existing secret.
+    Assign { name: String, computer: String },
+    /// Take a secret away from a computer.
+    Unassign { name: String, computer: String },
 }
 
 #[derive(Args, Debug)]
@@ -128,6 +151,26 @@ pub struct CheckpointCommand {
     /// manual, automatic or before-keep.
     #[arg(long)]
     pub kind: Option<String>,
+}
+
+/// The secret value from stdin, without its final newline. Never taken from an argument.
+fn read_secret_value() -> Result<String, CliError> {
+    use std::io::Read;
+    let mut value = String::new();
+    std::io::stdin()
+        .read_to_string(&mut value)
+        .map_err(|error| CliError::new(format!("Cannot read the secret from stdin: {error}")))?;
+    Ok(trim_newline(value))
+}
+
+fn trim_newline(mut value: String) -> String {
+    if value.ends_with('\n') {
+        value.pop();
+        if value.ends_with('\r') {
+            value.pop();
+        }
+    }
+    value
 }
 
 fn stderr_progress(line: &str) {
@@ -263,6 +306,26 @@ async fn dispatch(
             &ops::checkpoints(engine, &computer).await?,
             render::checkpoints,
         ),
+        Command::Secrets(secrets) => {
+            let value = match secrets {
+                SecretsCommand::List => ops::secrets_list(engine).await?,
+                SecretsCommand::Set {
+                    name,
+                    computers,
+                    domains,
+                } => {
+                    let value = read_secret_value()?;
+                    ops::secret_set(engine, &name, value, &computers, &domains).await?
+                }
+                SecretsCommand::Assign { name, computer } => {
+                    ops::secret_assign(engine, &name, &computer, true).await?
+                }
+                SecretsCommand::Unassign { name, computer } => {
+                    ops::secret_assign(engine, &name, &computer, false).await?
+                }
+            };
+            emit(json, &value, render::secrets);
+        }
         Command::Job { id } => {
             let value = ops::job(engine, &id, progress).await?;
             emit(json, &value, |v| {
@@ -354,6 +417,52 @@ mod tests {
             (create.cpus, create.memory, create.disk),
             (Some(6), Some(12), Some(80))
         );
+    }
+
+    #[test]
+    fn secrets_commands_parse_and_never_take_a_value_argument() {
+        let Command::Secrets(SecretsCommand::Set {
+            name,
+            computers,
+            domains,
+        }) = parse(&[
+            "secrets",
+            "set",
+            "API_KEY",
+            "--computer",
+            "main",
+            "--domain",
+            "api.example.com",
+        ])
+        .command
+        else {
+            panic!("not a secrets set")
+        };
+        assert_eq!(
+            (name.as_str(), computers.len(), domains.len()),
+            ("API_KEY", 1, 1)
+        );
+        assert!(Cli::try_parse_from(["silo", "secrets", "set", "API_KEY", "the-value"]).is_err());
+        assert!(matches!(
+            parse(&["secrets", "assign", "API_KEY", "fork"]).command,
+            Command::Secrets(SecretsCommand::Assign { .. })
+        ));
+        assert!(matches!(
+            parse(&["secrets", "unassign", "API_KEY", "fork"]).command,
+            Command::Secrets(SecretsCommand::Unassign { .. })
+        ));
+        assert!(matches!(
+            parse(&["secrets", "list"]).command,
+            Command::Secrets(SecretsCommand::List)
+        ));
+    }
+
+    #[test]
+    fn one_final_newline_is_dropped_from_a_piped_value() {
+        assert_eq!(trim_newline("abc\n".into()), "abc");
+        assert_eq!(trim_newline("abc\r\n".into()), "abc");
+        assert_eq!(trim_newline("abc\n\n".into()), "abc\n");
+        assert_eq!(trim_newline("abc".into()), "abc");
     }
 
     #[test]

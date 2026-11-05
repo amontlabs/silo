@@ -71,6 +71,19 @@ pub(super) struct QuietRecord {
 }
 
 impl QuietRecord {
+    pub(super) fn view(&self) -> silo_api::methods::computers::QuietState {
+        silo_api::methods::computers::QuietState {
+            applied: self.applied,
+            new_identity: self.new_identity,
+            scheduled_jobs_disabled: self.scheduled_jobs_disabled,
+            stop: self.stop.clone(),
+            scrub: self.scrub.clone(),
+            secrets: self.secrets.clone(),
+            parked: self.parked.clone(),
+            still_scheduled: self.still_scheduled.clone(),
+        }
+    }
+
     pub(super) fn new(options: &crate::runtime::checkpoints::ForkOptions) -> Self {
         Self {
             scheduled_jobs_disabled: true,

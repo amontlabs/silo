@@ -1,5 +1,6 @@
 import { defaultSettings, settingSchemas } from "@/features/preferences/model/settings"
 import { z } from "zod"
+import { quietStateSchema } from "@/features/macos-computers/model/macos-computers"
 
 import { siloBootstrapResultSchema, siloProgressEventSchema, siloProtocolErrorSchema, setupComputerConfigurationRequestSchema } from "@/contracts/silo"
 import type { SshAccessState, NetworkState, ApplicationFileEntry, ApplicationSource } from "@/features/application/model/application-source"
@@ -120,6 +121,7 @@ const computerShape = z.object({
   checkpointOperation: checkpointOperationShape.nullable().optional().catch(null),
   pendingCheckpointRestore: pendingCheckpointRestoreShape.nullable().optional().catch(null),
   unfinishedRestore: unfinishedRestoreShape.nullable().optional().catch(null),
+  quiet: quietStateSchema.nullable().optional().catch(null),
   settling: z.boolean().optional(),
 }).passthrough().transform(computer => (computerStates as readonly string[]).includes(computer.state)
   ? { ...computer, state: computer.state as (typeof computerStates)[number] }

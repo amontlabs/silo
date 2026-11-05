@@ -131,6 +131,8 @@ pub struct Computer {
     pub checkpoints: Vec<Value>,
     /// The Linux configuration exactly as listed (a delete must quote it).
     pub configuration: Option<Value>,
+    /// The fork's recorded quiet state, as listed.
+    pub quiet: Option<Value>,
 }
 
 impl Computer {
@@ -161,6 +163,12 @@ pub fn computers_from(listed: &Value) -> Vec<Computer> {
             .cloned()
             .unwrap_or_default()
     };
+    let quiet = |value: &Value| {
+        value
+            .get("quiet")
+            .filter(|quiet| quiet.is_object())
+            .cloned()
+    };
     for computer in listed
         .pointer("/linux/computers")
         .and_then(Value::as_array)
@@ -181,6 +189,7 @@ pub fn computers_from(listed: &Value) -> Vec<Computer> {
             disk_gib: number(configuration, "workspaceStorageGiB"),
             checkpoints: checkpoints(computer),
             configuration: Some(configuration.clone()),
+            quiet: quiet(computer),
         });
     }
     for computer in listed
@@ -200,6 +209,7 @@ pub fn computers_from(listed: &Value) -> Vec<Computer> {
             disk_gib: number(computer, "diskGiB"),
             checkpoints: checkpoints(computer),
             configuration: None,
+            quiet: quiet(computer),
         });
     }
     found

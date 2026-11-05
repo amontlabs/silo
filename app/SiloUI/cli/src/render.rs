@@ -54,7 +54,94 @@ pub fn status(value: &Value) -> String {
     if let Some(detail) = value.get("detail").and_then(Value::as_str) {
         out.push_str(&format!("\n{detail}"));
     }
+    if let Some(quiet) = value.get("quiet").filter(|quiet| quiet.is_object()) {
+        out.push_str(&format!("\n{}", quiet_line(quiet)));
+    }
+    if let Some(secrets) = value.get("secrets").and_then(Value::as_array) {
+        out.push_str(&format!("\nsecrets assigned: {}", names_or_none(secrets)));
+    }
+    if let Some(github) = value.get("github").filter(|github| github.is_object()) {
+        out.push_str(&format!("\n{}", github_line(github)));
+    }
     out
+}
+
+fn names_or_none(items: &[Value]) -> String {
+    let names: Vec<&str> = items.iter().filter_map(Value::as_str).collect();
+    if names.is_empty() {
+        "none".to_owned()
+    } else {
+        names.join(", ")
+    }
+}
+
+fn list_of(value: &Value, key: &str) -> Vec<Value> {
+    value
+        .get(key)
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default()
+}
+
+/// `quiet: applied; stopped: a; scrubbed: none; secrets: none`, then the macOS extras.
+fn quiet_line(quiet: &Value) -> String {
+    let applied = quiet.get("applied").and_then(Value::as_bool) == Some(true);
+    let mut line = format!(
+        "quiet: {}; stopped: {}; scrubbed: {}; secrets: {}",
+        if applied { "applied" } else { "pending" },
+        names_or_none(&list_of(quiet, "stop")),
+        names_or_none(&list_of(quiet, "scrub")),
+        names_or_none(&list_of(quiet, "secrets")),
+    );
+    let parked = list_of(quiet, "parked");
+    if !parked.is_empty() {
+        line.push_str(&format!("; parked: {}", parked.len()));
+    }
+    let still = list_of(quiet, "stillScheduled");
+    if !still.is_empty() {
+        line.push_str(&format!("; still scheduled: {}", names_or_none(&still)));
+    }
+    line
+}
+
+fn github_line(github: &Value) -> String {
+    let repositories = list_of(github, "repositories");
+    let pushes = repositories
+        .iter()
+        .any(|repository| repository["allowPushes"] == true)
+        || github["allRepositoriesAllowChanges"] == true;
+    let which = if text(github, "repositoryMode") == "all" {
+        "all repositories".to_owned()
+    } else {
+        names_or_none(
+            &repositories
+                .iter()
+                .map(|repository| repository["repository"].clone())
+                .collect::<Vec<_>>(),
+        )
+    };
+    format!(
+        "github: {} ({which})",
+        if pushes { "can push" } else { "read-only" }
+    )
+}
+
+pub fn secrets(value: &Value) -> String {
+    let items = value["secrets"].as_array().cloned().unwrap_or_default();
+    if items.is_empty() {
+        return "No secrets yet.".to_owned();
+    }
+    items
+        .iter()
+        .map(|item| {
+            format!(
+                "{}  {}",
+                text(item, "name"),
+                names_or_none(&list_of(item, "computers"))
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 pub fn computer_line(verb: &str, value: &Value) -> String {

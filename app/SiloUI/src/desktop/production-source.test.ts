@@ -52,6 +52,14 @@ function native(overrides: Partial<ProductionBridge> = {}, handlers: NativeComma
 }
 
 describe("production application bridge", () => {
+  it("keeps a fork's recorded quiet state and leaves other computers without one", () => {
+    const response = structuredClone(source)
+    expect(parseApplicationSource(response).computers[0].quiet ?? null).toBeNull()
+    const quiet = { applied: true, newIdentity: true, scheduledJobsDisabled: true, stop: ["poller"], scrub: ["/root/.env"], secrets: [] }
+    response.computers[0].quiet = quiet
+    expect(parseApplicationSource(response).computers[0].quiet).toEqual(quiet)
+  })
+
   it("validates pending secret revocation names without exposing them as configured secrets", () => {
     const response = structuredClone(source)
     response.computers[0].pendingSecretRevocations = ["REMOVED_TOKEN"]

@@ -110,6 +110,13 @@ impl SiloMcp {
         show(async { ops::status(&self.engine().await?, &computer).await }.await)
     }
 
+    #[tool(
+        description = "List the Silo secrets by name with the computers they are assigned to. Values are never returned, and none can be set through MCP."
+    )]
+    async fn secrets_list(&self) -> Result<String, String> {
+        show(async { ops::secrets_list(&self.engine().await?).await }.await)
+    }
+
     #[tool(description = "Copy a computer into a new fork for a task and wait until it is ready.")]
     async fn fork(&self, Parameters(params): Parameters<ForkParams>) -> Result<String, String> {
         show(

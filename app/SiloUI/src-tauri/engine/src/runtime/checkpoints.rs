@@ -1360,6 +1360,7 @@ pub(super) fn pending_computer(
         pending_checkpoint_restore: None,
         checkpoint_operation: None,
         unfinished_restore: None,
+        quiet: None,
     })
 }
 
@@ -3119,6 +3120,22 @@ pub(super) struct UnfinishedRestore {
     checkpoint_name: Option<String>,
     /// "capturing" before the recovery checkpoint was saved, then "secured".
     phase: String,
+}
+
+pub(super) fn view_quiet(record: &Record) -> Option<silo_api::methods::computers::QuietState> {
+    record
+        .quiet
+        .as_ref()
+        .map(|quiet| silo_api::methods::computers::QuietState {
+            applied: quiet.applied,
+            new_identity: quiet.new_identity,
+            scheduled_jobs_disabled: quiet.scheduled_jobs_disabled,
+            stop: quiet.stop.clone(),
+            scrub: quiet.scrub.clone(),
+            secrets: quiet.secrets.clone(),
+            parked: Vec::new(),
+            still_scheduled: Vec::new(),
+        })
 }
 
 pub(super) fn view_unfinished_restore(record: &Record) -> Option<UnfinishedRestore> {

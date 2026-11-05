@@ -24,6 +24,11 @@ async fn exchange(
 async fn initialize_list_and_call_round_trip() {
     let engine = FakeEngine::start(|method, _| match method {
         "computers.list" => Ok(listing(&[("main", "running")])),
+        "secrets.list" => Ok(json!([{
+            "id": "s1", "name": "API_KEY", "computerIds": ["id-main"],
+            "allowedDomains": ["api.example.com"], "state": "active",
+            "pendingComputerIds": [], "removing": false, "error": null
+        }])),
         other => Err(("internal", format!("unexpected {other}"))),
     });
     let (server_side, client_side) = tokio::io::duplex(64 * 1024);
@@ -71,6 +76,13 @@ async fn initialize_list_and_call_round_trip() {
             "{expected} missing from {names:?}"
         );
     }
+    assert!(names.contains(&"secrets_list"));
+    assert!(
+        !names
+            .iter()
+            .any(|name| name.contains("set") || name.contains("assign")),
+        "no tool changes secrets: {names:?}"
+    );
     let fork = tools["result"]["tools"]
         .as_array()
         .unwrap()
@@ -89,6 +101,18 @@ async fn initialize_list_and_call_round_trip() {
     let text = called["result"]["content"][0]["text"].as_str().unwrap();
     let listed: Value = serde_json::from_str(text).unwrap();
     assert_eq!(listed["computers"][0]["name"], "main");
+
+    let secrets = exchange(
+        &mut write,
+        &mut read,
+        json!({"jsonrpc": "2.0", "id": 5, "method": "tools/call",
+               "params": {"name": "secrets_list", "arguments": {}}}),
+    )
+    .await;
+    let text = secrets["result"]["content"][0]["text"].as_str().unwrap();
+    let listed: Value = serde_json::from_str(text).unwrap();
+    assert_eq!(listed["secrets"][0]["name"], "API_KEY");
+    assert_eq!(listed["secrets"][0]["computers"][0], "main");
 
     for id in 10..14 {
         exchange(

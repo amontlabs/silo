@@ -298,6 +298,25 @@ pub struct ApplicationComputer {
     pub checkpoint_operation: Option<super::checkpoints::Operation>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unfinished_restore: Option<super::checkpoints::UnfinishedRestore>,
+    /// What a fork was made quiet with. Absent on computers that are not forks.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quiet: Option<QuietState>,
+}
+
+wire_struct! {
+    #[doc = "A fork's recorded quiet state. `parked` and `stillScheduled` are reported on macOS only."]
+    QuietState {
+        applied: bool,
+        new_identity: bool,
+        scheduled_jobs_disabled: bool,
+        stop: Vec<String>,
+        scrub: Vec<String>,
+        secrets: Vec<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        parked: Vec<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        still_scheduled: Vec<String>,
+    }
 }
 
 /// Mirrors `app/SiloUI/src-tauri/engine/src/runtime.rs::ComputerAttention`
@@ -380,6 +399,8 @@ pub struct MacosComputer {
     pub checkpoints: Vec<super::checkpoints::Checkpoint>,
     pub checkpoint_operation: Option<super::checkpoints::Operation>,
     pub pending_restore: Option<super::checkpoints::PendingRestore>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quiet: Option<QuietState>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize, schemars::JsonSchema)]

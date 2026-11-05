@@ -1,6 +1,7 @@
 import type { LifecycleStep } from "./lifecycle-progress"
 import type { OperationQueue } from "./operation-queue"
 import type { WorkspaceStorageState } from "./workspace-storage"
+import type { QuietState } from "../../macos-computers/model/macos-computers"
 import type { CheckpointUsage, PendingCheckpointRestore, UnfinishedRestore, ComputerCheckpoint, ComputerCheckpointOperation } from "./checkpoint-source"
 import type { LogLoader, LogQuery } from "./logs"
 import type { Device, ConnectionsStatus, ComputerDevice } from "./connections"
@@ -197,6 +198,8 @@ export interface ApplicationComputer {
   checkpointOperation?: ComputerCheckpointOperation | null
   pendingCheckpointRestore?: PendingCheckpointRestore | null
   unfinishedRestore?: UnfinishedRestore | null
+  /** What a fork was made quiet with. */
+  quiet?: QuietState | null
 }
 
 export interface ApplicationSecret {

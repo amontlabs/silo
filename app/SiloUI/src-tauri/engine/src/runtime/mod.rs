@@ -798,6 +798,8 @@ struct ApplicationComputer {
     checkpoint_operation: Option<checkpoints::Operation>,
     #[serde(skip_serializing_if = "Option::is_none")]
     unfinished_restore: Option<checkpoints::UnfinishedRestore>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    quiet: Option<silo_api::methods::computers::QuietState>,
 }
 
 #[derive(Clone, Copy, Debug, Serialize)]
@@ -5469,6 +5471,7 @@ fn unread_computer(configuration: ComputerConfiguration) -> ApplicationComputer 
         pending_checkpoint_restore: None,
         checkpoint_operation: None,
         unfinished_restore: None,
+        quiet: None,
     }
 }
 
@@ -5509,6 +5512,7 @@ fn application_source_for_computers(
                 computer.pending_checkpoint_restore =
                     checkpoints::view_pending(&checkpoint, computer.configuration.name());
                 computer.unfinished_restore = checkpoints::view_unfinished_restore(&checkpoint);
+                computer.quiet = checkpoints::view_quiet(&checkpoint);
                 computer.checkpoints = checkpoint.checkpoints;
                 let live = !OPERATIONS.is_computer_idle(computer.configuration.id());
                 computer.checkpoint_operation = checkpoint
@@ -5521,6 +5525,7 @@ fn application_source_for_computers(
                 computer.pending_checkpoint_restore = None;
                 computer.checkpoint_operation = None;
                 computer.unfinished_restore = None;
+                computer.quiet = None;
                 computer.attention = Some(ComputerAttention {
                         level: AttentionLevel::Error,
                         message: format!("{error} Checkpoints and actions that need them are unavailable for this computer."),
@@ -5819,6 +5824,7 @@ fn application_computer(
         pending_checkpoint_restore: None,
         checkpoint_operation: None,
         unfinished_restore: None,
+        quiet: None,
     }
 }
 

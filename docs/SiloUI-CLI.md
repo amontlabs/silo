@@ -35,7 +35,10 @@ the engine's message.
 | Command | What it does |
 | --- | --- |
 | `silo list` | computers and their state |
-| `silo status <computer>` | one computer |
+| `silo status <computer>` | one computer: size, checkpoints, a fork's quiet state, assigned secrets and GitHub access |
+| `silo secrets list` | secret names and the computers they are assigned to (never values) |
+| `silo secrets set NAME [--computer C]... [--domain D]...` | add a secret or replace its value; the value is read from stdin, never an argument |
+| `silo secrets assign NAME COMPUTER` / `silo secrets unassign NAME COMPUTER` | change which computers have a secret |
 | `silo create <name> [--linux\|--macos] [--cpus N --memory GiB --disk GiB]` | create a computer |
 | `silo start <computer>` / `silo stop <computer>` | lifecycle |
 | `silo fork <source> [--name N] [--checkpoint ID] [--secret NAME]... [--recipe-file PATH]` | copy a computer; the name defaults to `<source>-<6 hex>` |
@@ -45,6 +48,20 @@ the engine's message.
 | `silo checkpoints <computer>` | list checkpoints |
 | `silo job <id>` | wait for a job that is already running |
 | `silo mcp` | serve the MCP tools on stdio |
+
+`silo status` prints, for a fork, a line such as
+`quiet: applied; stopped: poller; scrubbed: /root/.env; secrets: none` (on macOS it adds the
+count of parked jobs and the jobs left scheduled), then `secrets assigned:` and a `github:`
+line (`read-only` or `can push`, with the repositories). `--json` carries the same data as
+`quiet` (the fork's record, `null` for other computers), `secrets` (names) and `github`
+(`null` when the computer has no assignment, or when the engine could not be read). The quiet
+record comes from the engine's per-computer state (`quiet` on a Linux or macOS computer in
+`computers.list` and the application state); it is absent on computers that are not forks.
+
+A new secret needs at least one `--computer` and one `--domain`; for an existing secret both
+default to what it has. A secret cannot be left with no computer, and a secret for any
+destination (`*`) is created in the app. `set` reads all of stdin and drops one final newline:
+`printf %s "$VALUE" | silo secrets set NAME --computer main --domain api.example.com`.
 
 ## Project files
 
@@ -86,6 +103,13 @@ gets the named secrets (`github` gives read-only GitHub access) and the recipe's
 claude mcp add silo -- silo mcp
 ```
 
-Tools: `list`, `status`, `fork`, `drop`, `exec`, `checkpoint`, `checkpoints`. They make the
+Tools: `list`, `status`, `fork`, `drop`, `exec`, `checkpoint`, `checkpoints`, `secrets_list`. They make the
 same engine calls as the commands and return the same JSON as `--json`. `drop` cannot
-drop `main` through MCP.
+drop `main` through MCP. No tool sets or assigns secrets; values are never sent over MCP.
+
+## Testing against a local GitHub server
+
+A debug build of the engine sends its `api.github.com` requests to the URL in
+`SILO_GITHUB_API_BASE` when it is a loopback `http` or `https` origin (`localhost`,
+`127.0.0.1` or `[::1]`, with an optional port and no path). Anything else is ignored. A
+release build never reads the variable.

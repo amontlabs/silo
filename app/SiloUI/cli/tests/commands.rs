@@ -401,3 +401,131 @@ async fn dropping_the_engine_closes_the_connection() {
     }
     assert_eq!(engine.open(), 0);
 }
+
+/// An engine whose `main` and fork are listed with a quiet record, one secret and one
+/// GitHub assignment, and that remembers saved secrets.
+fn engine_with_secrets() -> FakeEngine {
+    let secret = Arc::new(Mutex::new(json!({
+        "id": "s1", "name": "API_KEY", "computerIds": ["id-main"],
+        "allowedDomains": ["api.example.com"], "state": "active",
+        "pendingComputerIds": [], "removing": false, "error": null
+    })));
+    FakeEngine::start(move |method, params| match method {
+        "computers.list" => {
+            let mut listed = listing(&[("main", "running"), ("fork", "running")]);
+            listed["linux"]["computers"][1]["quiet"] = json!({
+                "applied": true, "newIdentity": true, "scheduledJobsDisabled": true,
+                "stop": ["poller"], "scrub": ["/root/.env"], "secrets": []
+            });
+            Ok(listed)
+        }
+        "secrets.list" => Ok(json!([secret.lock().unwrap().clone()])),
+        "secrets.save" => {
+            let request = &params["request"];
+            let mut stored = secret.lock().unwrap();
+            stored["computerIds"] = request["computerIds"].clone();
+            stored["allowedDomains"] = request["allowedDomains"].clone();
+            Ok(json!([stored.clone()]))
+        }
+        "github.state" => Ok(json!({"computers": [{
+            "computerId": "id-fork", "repositoryMode": "selected",
+            "repositories": [{"repository": "o/r", "allowPushes": false}],
+            "allRepositoriesAllowChanges": false, "authenticationMethod": "oauth"
+        }]})),
+        other => Err(("internal", format!("unexpected {other}"))),
+    })
+}
+
+#[tokio::test]
+async fn status_shows_the_quiet_state_secrets_and_github() {
+    let engine = engine_with_secrets();
+    let connected = Engine::connect(&engine.socket).await.unwrap();
+    let fork = ops::status(&connected, "fork").await.unwrap();
+    assert_eq!(fork["quiet"]["applied"], true);
+    assert_eq!(fork["quiet"]["stop"][0], "poller");
+    assert_eq!(fork["secrets"], json!([]));
+    assert_eq!(fork["github"]["repositoryMode"], "selected");
+    let text = silo_cli::render::status(&fork);
+    assert!(
+        text.contains("quiet: applied; stopped: poller; scrubbed: /root/.env; secrets: none"),
+        "{text}"
+    );
+    assert!(text.contains("github: read-only (o/r)"), "{text}");
+    let main = ops::status(&connected, "main").await.unwrap();
+    assert!(main["quiet"].is_null());
+    assert_eq!(main["secrets"], json!(["API_KEY"]));
+    assert!(main["github"].is_null());
+    let text = silo_cli::render::status(&main);
+    assert!(!text.contains("quiet:"));
+    assert!(text.contains("secrets assigned: API_KEY"));
+}
+
+#[tokio::test]
+async fn secrets_list_names_computers_and_no_values() {
+    let engine = engine_with_secrets();
+    let connected = Engine::connect(&engine.socket).await.unwrap();
+    let listed = ops::secrets_list(&connected).await.unwrap();
+    assert_eq!(listed["secrets"][0]["name"], "API_KEY");
+    assert_eq!(listed["secrets"][0]["computers"], json!(["main"]));
+    assert!(!listed.to_string().contains("value"));
+}
+
+#[tokio::test]
+async fn secrets_assign_and_unassign_edit_the_computer_list() {
+    let engine = engine_with_secrets();
+    let connected = Engine::connect(&engine.socket).await.unwrap();
+    let assigned = ops::secret_assign(&connected, "API_KEY", "fork", true)
+        .await
+        .unwrap();
+    assert_eq!(assigned["secrets"][0]["computers"], json!(["main", "fork"]));
+    let saved = &engine.calls("secrets.save")[0]["request"];
+    assert_eq!(saved["operation"], "edit");
+    assert_eq!(saved["id"], "s1");
+    assert_eq!(saved["computerIds"], json!(["id-main", "id-fork"]));
+    assert!(saved.get("value").is_none());
+    let removed = ops::secret_assign(&connected, "API_KEY", "main", false)
+        .await
+        .unwrap();
+    assert_eq!(removed["secrets"][0]["computers"], json!(["fork"]));
+    let last = ops::secret_assign(&connected, "API_KEY", "fork", false)
+        .await
+        .unwrap_err();
+    assert!(last.message.contains("at least one"));
+    assert!(ops::secret_assign(&connected, "NOPE", "fork", true)
+        .await
+        .is_err());
+}
+
+#[tokio::test]
+async fn secrets_set_sends_the_value_and_requires_scope_for_a_new_secret() {
+    let engine = engine_with_secrets();
+    let connected = Engine::connect(&engine.socket).await.unwrap();
+    ops::secret_set(&connected, "API_KEY", "v2".into(), &[], &[])
+        .await
+        .unwrap();
+    let saved = &engine.calls("secrets.save")[0]["request"];
+    assert_eq!(saved["operation"], "edit");
+    assert_eq!(saved["value"], "v2");
+    assert_eq!(saved["computerIds"], json!(["id-main"]));
+    assert_eq!(saved["allowedDomains"], json!(["api.example.com"]));
+    let error = ops::secret_set(&connected, "NEW_KEY", "v".into(), &[], &[])
+        .await
+        .unwrap_err();
+    assert!(error.message.contains("--computer"));
+    ops::secret_set(
+        &connected,
+        "NEW_KEY",
+        "v".into(),
+        &["fork".into()],
+        &["x.example.com".into()],
+    )
+    .await
+    .unwrap();
+    let added = &engine.calls("secrets.save")[1]["request"];
+    assert_eq!(added["operation"], "add");
+    assert!(added.get("id").is_none());
+    assert_eq!(added["computerIds"], json!(["id-fork"]));
+    assert!(ops::secret_set(&connected, "K", String::new(), &[], &[])
+        .await
+        .is_err());
+}

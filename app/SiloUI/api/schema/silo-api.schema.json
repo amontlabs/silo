@@ -181,6 +181,17 @@
         "purpose": {
           "type": "string"
         },
+        "quiet": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/QuietState"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "What a fork was made quiet with. Absent on computers that are not forks."
+        },
         "repositories": {
           "items": true,
           "type": "array"
@@ -6213,6 +6224,16 @@
           "type": [
             "number",
             "null"
+          ]
+        },
+        "quiet": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/QuietState"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "setupComplete": {
@@ -12589,6 +12610,59 @@
           "type": "array"
         }
       },
+      "type": "object"
+    },
+    "QuietState": {
+      "description": "A fork's recorded quiet state. `parked` and `stillScheduled` are reported on macOS only.",
+      "properties": {
+        "applied": {
+          "type": "boolean"
+        },
+        "newIdentity": {
+          "type": "boolean"
+        },
+        "parked": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "scheduledJobsDisabled": {
+          "type": "boolean"
+        },
+        "scrub": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "secrets": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "stillScheduled": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "stop": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "applied",
+        "newIdentity",
+        "scheduledJobsDisabled",
+        "stop",
+        "scrub",
+        "secrets"
+      ],
       "type": "object"
     },
     "ReclaimEntry": {
