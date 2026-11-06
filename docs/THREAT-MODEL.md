@@ -377,20 +377,23 @@ methods through the `/.msb/silo-bridge` folder. The engine serves it from
 [`guest_client/scope.rs`](../app/SiloUI/src-tauri/engine/src/guest_client/scope.rs).
 
 What the token can do: fork its own computer (secrets only those the settings list for that agent,
-none by default), start, stop and diff that computer's forks, ask for review of a fork, read the
-review requests and steps of itself and its forks, and follow the jobs it started. Results of the
-list methods are cut to the computer and its forks.
+none by default; at most 32 forks per token and 3 running), start, stop and diff the forks it
+asked for, ask for review of those forks, read the review requests and steps of itself and those
+forks, and follow the jobs it started. Forks the person made, or another token made, are not
+reachable, and list results hold only the computer and its own forks.
 
 What it cannot do, and the engine refuses before any handler runs: keep, promote, undo, throw away
 or drop (`changes.keep`, `changes.promote`, `changes.undo`, `changes.requests.keep`,
 `changes.requests.throwAway`, `computers.delete`), change secrets or GitHub access, run commands or
 move files in any computer, publish ports, act for another device, act on a computer that is
-neither itself nor its own fork, or mint, revoke or read tokens. `fold: ask` and `fold: auto-code`
-behave the same here: nothing is kept from inside.
+neither itself nor a fork it asked for, or mint, revoke or read tokens. It cannot make checkpoints,
+capture or baseline either. `fold` and `auto_keep` are not part of its policy: nothing is kept from
+inside.
 
 What a compromised guest gains: the agent already controls the computer, so the token adds the
-ability to make forks of it (a disk and CPU cost, bounded only by the settings' `fork_ram_budget`
-when the host CLI makes them, not for forks made from inside) and to put review requests in front of
+ability to make up to 32 forks of it, 3 running at once (a disk and CPU cost; the engine adds no
+total RAM limit, each running fork uses the memory it was created with, and `fork_ram_budget`
+applies only to forks the host CLI makes) and to put review requests in front of
 the person, whose summary text the agent wrote. A fork, request or summary can be flooded or
 misleading; a keep still shows the engine's own diff, pinned to its digest. It gains no host file,
 secret, GitHub token or other computer's data.
@@ -404,11 +407,20 @@ secret, GitHub token or other computer's data.
   and forks made from inside also have the file scrubbed.
 - **Promote and undo.** Both revoke the tokens of the computers they swap, so the agent in a former
   main stops; a new token is installed on purpose.
-- **Parsing.** The engine reads each request file with `O_NOFOLLOW`, regular files only, at most
-  256 KiB, valid names only, and writes answers by rename. The share itself still has no security
-  review (boundary 6); this adds a parser of guest-written JSON on the Mac.
-- **Logging.** The engine writes one line per call to its log: the computer, the method, and
-  whether it was refused. Parameters and tokens are not logged. There is no audit trail beyond that.
+- **Parsing and links.** The guest can replace `silo-bridge`, `req` or `resp` with links, and on a
+  macOS host a guest symlink is a real host symlink. The engine opens each component with
+  `openat(O_NOFOLLOW | O_DIRECTORY)` through directory descriptors (`rustix`), afresh each pass,
+  and stops serving a computer whose folder is a link. Request files are regular files only
+  (checked after opening), at most 256 KiB, `<32 hex>.json` names only; answers are written `0600`
+  by rename. At most 64 answers wait unread and a full folder drops new requests. The share itself
+  still has no security review (boundary 6); this adds a parser of guest-written JSON on the Mac.
+- **Other guest users.** `req/` is `1733` and `resp/` `0711`, requests and answers `0600`, so a
+  guest user other than the token's owner cannot list or read them (VM check pending for the
+  share's uid mapping).
+- **Logging.** The engine writes one line per call to its log: the computer, the method (only a
+  name from the allow-list; anything else is logged as "not offered"), and whether it was refused.
+  Parameters and tokens are not logged, and a call with a bad token is logged without its method.
+  There is no audit trail beyond that.
 
 The 2026-10-02 security review checked these surfaces in source
 ([report](SiloUI-CODE-REVIEW-PASS-3-SECURITY-2026-10-02.md)); it was not a live exploit campaign.
