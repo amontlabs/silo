@@ -657,8 +657,8 @@ const BUILT_IN: &[(&str, &str)] = &[
         "os: linux\npackages:\n  apt: [build-essential, jq, ripgrep]\n",
     ),
     // Resident agents: the install lines come from each project's own docs (see
-    // SiloUI-CLI.md, "Resident agents"). Lines marked CONFIRM are not in those docs and the
-    // owner checks them before relying on them.
+    // SiloUI-CLI.md, "Resident agents"). Lines marked measured were checked against a running
+    // install in the v1 final run; lines marked unverified were not.
     (
         "openclaw",
         concat!(
@@ -669,9 +669,9 @@ const BUILT_IN: &[(&str, &str)] = &[
             "  # https://docs.openclaw.ai/install (installer script; --no-onboard skips the prompts)\n",
             "  - curl -fsSL https://openclaw.ai/install.sh | bash -s -- --no-onboard\n",
             "services:\n",
-            "  # CONFIRM: the foreground gateway command; docs.openclaw.ai/linux documents the systemd user unit instead\n",
+            "  # measured: `openclaw gateway` stays in the foreground (docs.openclaw.ai/linux documents a systemd user unit instead)\n",
             "  openclaw-gateway: openclaw gateway\n",
-            "# CONFIRM the process names; a fork stops the gateway so it does not answer chat channels twice\n",
+            "# measured: the gateway process is named openclaw-gateway, its node workers are its children; a fork stops it so it does not answer chat channels twice\n",
             "quiet: [openclaw-gateway, openclaw]\n",
             "# credentials/ holds channel logins and .env the channel tokens (both checked in the final run); the engine needs absolute paths\n",
             "scrub: [/home/silo/.openclaw/credentials, /home/silo/.openclaw/.env]\n",
@@ -689,9 +689,9 @@ const BUILT_IN: &[(&str, &str)] = &[
             "services:\n",
             "  # README: `hermes gateway` starts the messaging gateway\n",
             "  hermes-gateway: hermes gateway\n",
-            "# CONFIRM the process names; Hermes also has a built-in cron scheduler that the gateway runs\n",
+            "# unverified: the process names; Hermes also has a built-in cron scheduler that the gateway runs\n",
             "quiet: [hermes-gateway, hermes]\n",
-            "# CONFIRM: ~/.hermes is the install folder; the README does not say where API keys live (the engine needs absolute paths)\n",
+            "# unverified: ~/.hermes is the install folder; the README does not say where API keys live (the engine needs absolute paths)\n",
             "scrub: [/home/silo/.hermes/.env]\n",
         ),
     ),

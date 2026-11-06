@@ -398,12 +398,14 @@ computer, and needs the guest `silo` binary ([in-guest client](SiloUI-IN-GUEST-C
 Onboarding (model keys, chat channel logins) is interactive and happens once in `main` over
 `ssh main.silo`; it is not part of the recipe.
 
-Entries marked `CONFIRM` in the recipe text are not stated in the agents' own docs and are
-unverified: the foreground gateway command (`openclaw gateway`; `hermes gateway` is in the
-Hermes README), the gateway process names that `quiet:` matches, and the credential paths in
-`scrub:` (`~/.openclaw/credentials` is the folder Silo already keeps out of reviews;
-`~/.hermes/.env` is a guess for Hermes). Confirm them against a running install, and copy the
-recipe to `.silo/recipes/<name>.yaml` to change it. Neither recipe sets `keep:` hooks. Hermes
+Comments in the recipe text say which entries were checked against a running install in the v1
+final run. For `openclaw` they were: `openclaw gateway` stays in the foreground, its process is
+named `openclaw-gateway` (its node workers are its children), and a fork with the recipe's lists
+has no gateway and neither `credentials/` nor `.env`. OpenClaw keeps a single-gateway lock in
+`~/.openclaw/state/openclaw.sqlite`, so a fork made without `quiet:` starts a second gateway only
+on a boot more than 90 s after main's last heartbeat. The `hermes` entries are unverified: the
+gateway process names and `~/.hermes/.env`, which is a guess. Copy a recipe to
+`.silo/recipes/<name>.yaml` to change it. Neither recipe sets `keep:` hooks. Hermes
 also has a built-in cron scheduler, which runs inside its gateway and so stops with it.
 
 ## MCP setup
