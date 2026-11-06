@@ -19,9 +19,13 @@ export const staleReason = "The fork or its target changed since this request wa
 const message = (error: unknown) => error instanceof Error ? error.message : String(error)
 
 /** One review request: what the fork changed, the credentials it used, and Keep, Throw away and Open fork. */
-export function ReviewRequest({ requestId, deviceId, onBack, actions = productionActions }: {
+export function ReviewRequest({ requestId, deviceId, deviceName, onBack, onClose, actions = productionActions }: {
   requestId: string
   deviceId?: string
+  /** Shown in the header instead of the device id. */
+  deviceName?: string
+  /** Called from the Back button. */
+  onClose?: () => void
   /** Called after the fork is thrown away. */
   onBack?: () => void
   actions?: ReviewRequestActions
@@ -72,12 +76,13 @@ export function ReviewRequest({ requestId, deviceId, onBack, actions = productio
   const keptNow = kept && !refusal ? kept : null
   const stale = detail.stale === true
   const keepDisabledReason = stale ? staleReason : request.status !== "open" ? `This request is ${request.status}.` : keptNow ? "Already kept." : undefined
-  const subtitle = [deviceId ? `on ${deviceId}` : "this device", `created ${formatAbsoluteTime(request.createdAt)}`, request.status].join(" · ")
+  const subtitle = [deviceId ? `on ${deviceName ?? deviceId}` : "this device", `created ${formatAbsoluteTime(request.createdAt)}`, request.status].join(" · ")
 
   return (
     <PageContainer className="grid gap-4">
       <PageHeader title={`${detail.forkName} → ${request.target}`} subtitle={subtitle} actions={
         <div className="flex flex-wrap gap-2">
+          {onClose && <Button variant="ghost" size="sm" onClick={onClose}>Back</Button>}
           <Button variant="outline" size="sm" disabled={busy} onClick={open}>Open fork</Button>
           <ConfirmPopover title={`Throw away ${detail.forkName}?`} description="The fork and its changes are removed. Nothing is kept into the target." confirmLabel="Throw away" tone="destructive" onConfirm={throwAway}>
             <Button variant="outline" size="sm" disabled={busy}>Throw away</Button>
@@ -122,6 +127,13 @@ export function ReviewRequest({ requestId, deviceId, onBack, actions = productio
 }
 
 /** The page slice B renders for `onOpenRequest(requestId, deviceId?)`. */
-export function ReviewRequestPage({ requestId, deviceId, onBack }: { requestId: string, deviceId?: string, onBack?: () => void }) {
-  return <ReviewRequest key={`${deviceId ?? ""}:${requestId}`} requestId={requestId} deviceId={deviceId} onBack={onBack} />
+export function ReviewRequestPage({ requestId, deviceId, deviceName, onBack, actions }: {
+  requestId: string
+  deviceId?: string
+  deviceName?: string
+  /** Returns to the list; also called after the fork is thrown away. */
+  onBack?: () => void
+  actions?: ReviewRequestActions
+}) {
+  return <ReviewRequest key={`${deviceId ?? ""}:${requestId}`} requestId={requestId} deviceId={deviceId} deviceName={deviceName} onBack={onBack} onClose={onBack} actions={actions} />
 }

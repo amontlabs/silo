@@ -35,6 +35,13 @@ export const reviewRequestFixtures: Record<string, RequestDetail> = {
   },
 }
 
+/** The ids of the pending changes fixture open the matching requests: same fork names, same ids. */
+Object.assign(reviewRequestFixtures, {
+  "req-login-fix": { ...reviewRequestFixtures["req-fresh"], request: request("req-login-fix", "fork-login-fix") },
+  "req-docs-pass": { ...base("req-docs-pass", "docs-pass"), forkState: "stopped", counts: { Code: 3 }, request: { ...request("req-docs-pass", "fork-docs-pass"), status: "keeping" as const } },
+  "req-cache-tune": { ...base("req-cache-tune", "cache-tune"), forkState: "stopped", text: "", counts: {} },
+})
+
 /** Actions answered from the fixtures, for the browser preview. */
 export function createReviewRequestFixtureActions(overrides: Partial<ReviewRequestActions> = {}): ReviewRequestActions {
   return {
@@ -55,7 +62,7 @@ export function createReviewRequestFixtureActions(overrides: Partial<ReviewReque
     throwAway: async ({ requestId }): Promise<ThrowAwayResult> => ({ request: reviewRequestFixtures[requestId].request, dropped: reviewRequestFixtures[requestId].forkName }),
     open: async ({ requestId }): Promise<OpenRequestResult> => ({
       request: reviewRequestFixtures[requestId].request, computerId: `${requestId}-computer`, name: reviewRequestFixtures[requestId].forkName,
-      state: "running", started: false, sshAlias: `silo-${reviewRequestFixtures[requestId].forkName}`, urls: ["http://login-fix-3000.localhost"],
+      state: "running", started: false, sshAlias: `silo-${reviewRequestFixtures[requestId].forkName}`, urls: [`http://${reviewRequestFixtures[requestId].forkName}-3000.localhost`],
     }),
     ...overrides,
   }

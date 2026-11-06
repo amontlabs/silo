@@ -1,9 +1,11 @@
+import { useState } from "react"
 import { GitPullRequestArrow, TriangleAlert } from "lucide-react"
 
 import { EmptyState } from "@/components/empty-state"
 import { ListCard, ListRow, ListRowIcon, ListRowSkeleton } from "@/components/list-row"
 import { PageContainer, PageHeader } from "@/components/page"
 import { Button } from "@/components/ui/button"
+import { ReviewRequestPage, type ReviewRequestActions } from "@/features/application/components/review-request"
 import type { RequestEntry } from "@/desktop/production-schemas"
 import { bucketSummary, usePendingChanges } from "@/features/application/model/use-pending-changes"
 import type { ApplicationActions } from "@/features/application/model/application-source"
@@ -38,15 +40,22 @@ function RequestRow({ entry, onOpen }: { entry: RequestEntry; onOpen: () => void
  * Pending changes: the review requests of this device and every connected device in one list.
  * Selecting a row calls `onOpenRequest`, which opens the review screen.
  */
-export function PendingChangesPage({ listReviewRequests, active = true, onOpenRequest }: {
+export function PendingChangesPage({ listReviewRequests, reviewActions, active = true, onOpenRequest }: {
   listReviewRequests: ApplicationActions["listReviewRequests"]
+  /** What the review screen runs; the desktop's by default. */
+  reviewActions?: ReviewRequestActions
   active?: boolean
-  /** Opens the review screen for a request, naming the device when it is not this one. */
-  onOpenRequest: (requestId: string, deviceId?: string) => void
+  /** Told when a request is opened, naming the device when it is not this one. */
+  onOpenRequest?: (requestId: string, deviceId?: string) => void
 }) {
-  const { list, error, loading, refresh } = usePendingChanges(listReviewRequests, active)
+  const [opened, setOpened] = useState<{ requestId: string, deviceId?: string, deviceName?: string } | null>(null)
+  const { list, error, loading, refresh } = usePendingChanges(listReviewRequests, active && !opened)
   const requests = list?.requests ?? []
   const unreachable = list?.unreachable ?? []
+  if (opened) {
+    const back = () => { setOpened(null); refresh() }
+    return <ReviewRequestPage {...opened} actions={reviewActions} onBack={back} />
+  }
   return (
     <PageContainer className="grid gap-2">
       <PageHeader title="Pending changes" subtitle="Changes in forks, waiting for review" />
@@ -63,7 +72,10 @@ export function PendingChangesPage({ listReviewRequests, active = true, onOpenRe
       {(requests.length > 0 || unreachable.length > 0) && (
         <ListCard divided aria-label="Pending changes">
           {requests.map(entry => (
-            <RequestRow key={`${entry.deviceId ?? ""}:${entry.request.id}`} entry={entry} onOpen={() => onOpenRequest(entry.request.id, entry.deviceId)} />
+            <RequestRow key={`${entry.deviceId ?? ""}:${entry.request.id}`} entry={entry} onOpen={() => {
+              setOpened({ requestId: entry.request.id, deviceId: entry.deviceId, deviceName: entry.deviceName })
+              onOpenRequest?.(entry.request.id, entry.deviceId)
+            }} />
           ))}
           {unreachable.map(device => (
             <ListRow

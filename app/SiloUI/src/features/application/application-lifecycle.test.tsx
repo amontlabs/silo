@@ -426,6 +426,7 @@ it("routes a global runtime failure to a dedicated item above Settings", async (
 
   expect(primaryItems).toEqual([
     "Computers",
+    "Pending changes",
     "GitHub",
     "Secrets",
     "System issue",

@@ -456,7 +456,7 @@ function ApplicationContent({ source, actions, backup, initialRoute, routeReques
       </section>
       <section id="application-panel-changes" role="region" aria-labelledby="application-nav-changes" hidden={visibleTab !== "changes"}>
         <PanelContent active={visibleTab === "changes"}>
-          <PendingChangesPage listReviewRequests={actions.listReviewRequests} active={visibleTab === "changes"} onOpenRequest={(requestId, deviceId) => onOpenRequest?.(requestId, deviceId)} />
+          <PendingChangesPage listReviewRequests={actions.listReviewRequests} reviewActions={actions.reviewRequestActions} active={visibleTab === "changes"} onOpenRequest={(requestId, deviceId) => onOpenRequest?.(requestId, deviceId)} />
         </PanelContent>
       </section>
       <section id="application-panel-github" role="region" aria-labelledby="application-nav-github" hidden={visibleTab !== "github"} className="h-full min-h-0 overflow-hidden">

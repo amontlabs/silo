@@ -5,6 +5,7 @@ import { fixtureDirectoryLoader } from "./directory-loader"
 import { fixtureComputerSteps, fixtureComputerTree } from "./computer-steps"
 import { fixtureFileTransfers } from "./file-transfers"
 import { fixtureListReviewRequests } from "./pending-changes"
+import { createReviewRequestFixtureActions } from "./review-requests"
 import { useApplicationFixture } from "@/fixtures/application-state"
 import { ApplicationApp } from "@/features/application/application-app"
 import type { ApplicationActions, ApplicationSource, SshAccessRequest, SshAccessComputer } from "@/features/application/model/application-source"
@@ -102,6 +103,7 @@ function FixtureApplicationPreview({ source, actions, backupPreviewMode, initial
       readComputerTree: async () => fixtureComputerTree,
       listComputerDirectory,
       listReviewRequests: fixtureListReviewRequests,
+      reviewRequestActions: createReviewRequestFixtureActions(),
       fileTransfers,
       queryLogs,
       ...actions,

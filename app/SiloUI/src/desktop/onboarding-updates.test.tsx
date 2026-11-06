@@ -19,7 +19,8 @@ vi.mock("./production-source", async () => {
   const { applicationSourceForScenario } = await import("@/fixtures/application-scenarios")
   const { useUnavailableBackup } = await import("@/fixtures/application-backup")
   const source = applicationSourceForScenario("running")
-  return { useProductionSource: () => ({ source, backup: useUnavailableBackup(source), loading: false }) }
+  const unused = vi.fn()
+  return { showReviewRequest: unused, keepReviewRequest: unused, throwAwayReviewRequest: unused, openReviewRequest: unused, useProductionSource: () => ({ source, backup: useUnavailableBackup(source), loading: false }) }
 })
 vi.mock("./dependencies", () => {
   const dependencies = { checks: [], retry: vi.fn() }

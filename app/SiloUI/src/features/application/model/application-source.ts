@@ -323,6 +323,8 @@ export interface ApplicationSource {
 }
 
 export interface ApplicationActions {
+  /** What the review screen runs; the desktop's when omitted. */
+  reviewRequestActions?: import("@/features/application/components/review-request").ReviewRequestActions
   /** The review requests of this device and, with `allDevices`, every connected device. */
   listReviewRequests?: (options?: { status?: "open" | "kept" | "thrown-away" | "all"; allDevices?: boolean }) => Promise<RequestList>
   createCheckpoint?: (computer: string, name: string) => Promise<void>

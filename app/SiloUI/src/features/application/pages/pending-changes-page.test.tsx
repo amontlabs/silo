@@ -4,6 +4,7 @@ import { afterEach, expect, it, vi } from "vitest"
 import { requestListSchema } from "@/desktop/production-schemas"
 import { fixtureListReviewRequests, fixtureReviewRequests } from "@/fixtures/pending-changes"
 import { bucketSummary, PENDING_CHANGES_INTERVAL_MS, pendingChangesDelay } from "../model/use-pending-changes"
+import { createReviewRequestFixtureActions } from "@/fixtures/review-requests"
 import { PendingChangesPage } from "./pending-changes-page"
 
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks() })
@@ -36,15 +37,31 @@ it("shows an empty state when nothing is pending", async () => {
   expect(await screen.findByText("No pending changes")).toBeInTheDocument()
 })
 
-it("opens a request with its device from the title or the row", async () => {
+it("reports the opened request with its device", async () => {
   const open = vi.fn()
   const user = userEvent.setup()
-  render(<PendingChangesPage listReviewRequests={fixtureListReviewRequests} onOpenRequest={open} />)
+  render(<PendingChangesPage listReviewRequests={fixtureListReviewRequests} reviewActions={createReviewRequestFixtureActions()} onOpenRequest={open} />)
   await user.click(await screen.findByRole("button", { name: "cache-tune" }))
-  expect(open).toHaveBeenLastCalledWith("req-cache-tune", "mac-mini")
-  await user.click(screen.getByText(/2 added/))
-  expect(open).toHaveBeenLastCalledWith("req-login-fix", undefined)
-  expect(open).toHaveBeenCalledTimes(2)
+  expect(open).toHaveBeenCalledWith("req-cache-tune", "mac-mini")
+})
+
+it("opens the review from a row, names the device, and goes back to a refreshed list", async () => {
+  const user = userEvent.setup()
+  const load = vi.fn(fixtureListReviewRequests)
+  render(<PendingChangesPage listReviewRequests={load} reviewActions={createReviewRequestFixtureActions()} />)
+  await user.click(await screen.findByText(/2 added/))
+  expect(await screen.findByText("login-fix → main")).toBeInTheDocument()
+  expect(screen.queryByLabelText("Pending changes")).toBeNull()
+  await user.click(screen.getByRole("button", { name: "Back" }))
+  expect(await screen.findByLabelText("Pending changes")).toBeInTheDocument()
+  expect(load.mock.calls.length).toBeGreaterThanOrEqual(2)
+})
+
+it("shows the device name in the review header", async () => {
+  const user = userEvent.setup()
+  render(<PendingChangesPage listReviewRequests={fixtureListReviewRequests} reviewActions={createReviewRequestFixtureActions()} />)
+  await user.click(await screen.findByRole("button", { name: "cache-tune" }))
+  expect(await screen.findByText(/on Mac mini/)).toBeInTheDocument()
 })
 
 it("polls, backs off while reads fail, keeps the last list, and recovers", async () => {

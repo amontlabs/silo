@@ -167,8 +167,9 @@ it("opens a computer detail page and returns to the list with the app's Back con
 })
 
 
-it("deep-links into a computer detail page and tab from an initial route", () => {
+it("deep-links into a computer detail page and tab from an initial route", async () => {
   render(<ApplicationPreview source={applicationSourceForScenario("complete")} initialRoute={{ computer: "dev", computerTab: "checkpoints" }} />)
+  await act(async () => {})
   expect(screen.getByRole("navigation", { name: "Breadcrumb" })).toHaveTextContent("Computersdev")
   expect(screen.getByRole("tab", { name: "Checkpoints" })).toHaveAttribute("aria-selected", "true")
 })
