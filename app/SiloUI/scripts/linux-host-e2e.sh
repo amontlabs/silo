@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Drives a real Linux computer on a running Linux host engine through its `silo` command:
-# create, start, exec, checkpoint, fork, exec in the fork, then drop both. The computers are
-# named e2e-hosts-* and dropped even when a step fails.
+# create, start, exec, checkpoint, fork, exec in the fork, then stop and drop both. The
+# computers are named e2e-hosts-* and stopped and dropped even when a step fails.
 #
 # Usage: linux-host-e2e.sh ENGINE_DIR
 # ENGINE_DIR is an unpacked engine archive (silo-engine/), whose engine is already serving.
@@ -36,7 +36,8 @@ cleanup() {
   trap - EXIT
   for computer in "$fork" "$name"; do
     if listed "$computer" 2>/dev/null | grep -qx -- "$computer"; then
-      echo "Dropping $computer after a failed run"
+      echo "Stopping and dropping $computer after a failed run"
+      "$silo" stop "$computer" || true
       "$silo" drop "$computer" || true
     fi
   done
@@ -53,7 +54,13 @@ until "$silo" list >/dev/null 2>&1; do
   fi
   sleep 2
 done
-if [[ -n "$(listed "$name" "$fork")" ]]; then
+# The check must fail when the list does: an empty answer would let the test take over a
+# computer it did not make.
+if ! existing=$(listed "$name" "$fork"); then
+  echo "Could not list the engine's computers; this test never runs without knowing them" >&2
+  exit 1
+fi
+if [[ -n "$existing" ]]; then
   echo "A computer named $name or $fork already exists; this test never touches it" >&2
   exit 1
 fi
@@ -84,6 +91,11 @@ step "Running a command in $fork"
 output=$("$silo" exec "$fork" -- uname -a)
 echo "$output"
 [[ "$output" == Linux* ]] || { echo "uname -a in $fork did not print a Linux kernel" >&2; exit 1; }
+
+# Stopped first, so the run checks Stop too and Drop never has to end a running guest.
+step "Stopping $fork and $name"
+"$silo" stop "$fork"
+"$silo" stop "$name"
 
 step "Dropping $fork and $name"
 "$silo" drop "$fork"

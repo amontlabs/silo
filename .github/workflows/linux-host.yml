@@ -73,16 +73,12 @@ jobs:
           print('KVM API 12; a VM handle was created')
           PY
       - name: Install Linux build dependencies
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends build-essential pkg-config libclang-dev libcap-ng-dev libdbus-1-dev libssl-dev cmake
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends build-essential pkg-config libclang-dev libcap-ng-dev libdbus-1-dev cmake
       - name: Install pinned Rust toolchain
         run: |
           runtime_toolchain=$(node -p "require(process.env.GITHUB_WORKSPACE + '/app/SiloUI/runtime-inputs.json').toolchain")
           rustup toolchain install "$runtime_toolchain" --profile minimal
           rustup default "$runtime_toolchain"
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          workspaces: app/SiloUI
-          save-if: ${{ github.ref == 'refs/heads/main' }}
       # Restores the runtime caches main populates; a miss builds MicroSandbox here.
       - name: Prepare the runtime
         timeout-minutes: 45
@@ -108,10 +104,12 @@ jobs:
       - name: Start the engine as a systemd user service
         run: |
           set -euo pipefail
-          sudo loginctl enable-linger "$USER"
+          sudo loginctl enable-linger "$(id -un)"
           runtime_dir="/run/user/$(id -u)"
           echo "XDG_RUNTIME_DIR=$runtime_dir" >> "$GITHUB_ENV"
+          echo "DBUS_SESSION_BUS_ADDRESS=unix:path=$runtime_dir/bus" >> "$GITHUB_ENV"
           export XDG_RUNTIME_DIR="$runtime_dir"
+          export DBUS_SESSION_BUS_ADDRESS="unix:path=$runtime_dir/bus"
           for _ in $(seq 30); do
             systemctl --user show-environment >/dev/null 2>&1 && break
             sleep 1
@@ -130,9 +128,18 @@ jobs:
         timeout-minutes: 40
         run: bash scripts/linux-host-e2e.sh "$ENGINE"
       # SIGTERM ends the engine's session; it must exit 0 so systemd does not restart it.
+      # A session end that left computers running exits non-zero, and fails here. After an
+      # earlier failure the step only stops the engine, leaving the unit for the logs below.
       - name: Stop the engine and remove the service
+        if: always() && env.ENGINE != ''
+        env:
+          JOB_STATUS: ${{ job.status }}
         run: |
           set -euo pipefail
+          if [[ "$JOB_STATUS" != success ]]; then
+            systemctl --user stop "$UNIT" || true
+            exit 0
+          fi
           systemctl --user stop "$UNIT"
           result=$(systemctl --user show "$UNIT" --property=Result --value)
           status=$(systemctl --user show "$UNIT" --property=ExecMainStatus --value)

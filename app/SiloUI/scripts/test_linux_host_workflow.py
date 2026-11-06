@@ -31,13 +31,15 @@ FAKE_SILO = textwrap.dedent('''\
     def save():
         state.write_text(json.dumps(computers))
     if command == 'list':
-        if os.environ.get('FAKE_DOWN'):
+        if os.environ.get('FAKE_DOWN') or (as_json and os.environ.get('FAKE_JSON_LIST_FAILS')):
             sys.exit(1)
         print(json.dumps({{'computers': [{{'name': n, 'state': s}} for n, s in computers.items()]}}))
     elif command == 'create':
         computers[rest[0]] = 'stopped'; save()
     elif command == 'start':
         computers[rest[0]] = 'running'; save()
+    elif command == 'stop':
+        computers[rest[0]] = 'stopped'; save()
     elif command == 'fork':
         computers[rest[rest.index('--name') + 1]] = 'stopped'; save()
     elif command == 'status':
@@ -47,6 +49,8 @@ FAKE_SILO = textwrap.dedent('''\
     elif command == 'checkpoint':
         pass
     elif command == 'drop':
+        if computers[rest[0]] == 'running':
+            sys.exit(f'{{rest[0]}} is still running')
         computers.pop(rest[0]); save()
     else:
         sys.exit(f'unexpected command {{args}}')
@@ -92,16 +96,30 @@ class LinuxHostWorkflowTests(unittest.TestCase):
         self.assertIn('package-engine.py --platform linux-x64 --channel development', steps)
         self.assertIn('sha256sum -c', steps)
         self.assertIn('--print-channel-identifier)" = org.silo.dev', steps)
-        self.assertIn('sudo loginctl enable-linger "$USER"', steps)
+        self.assertIn('sudo loginctl enable-linger "$(id -un)"', steps)
+        self.assertNotIn('$USER', WORKFLOW)
+        self.assertIn('echo "DBUS_SESSION_BUS_ADDRESS=unix:path=$runtime_dir/bus" >> "$GITHUB_ENV"', steps)
         self.assertIn('"$ENGINE/silod" --service register', steps)
         self.assertIn("'linger: yes'", steps)
         self.assertIn('bash scripts/linux-host-e2e.sh "$ENGINE"', steps)
         self.assertIn('UNIT: org.silo.dev.engine.service', WORKFLOW)
         # A graceful stop: SIGTERM, exit 0, socket removed; then the unit is gone.
         stop = steps.split('- name: Stop the engine and remove the service\n', 1)[1].split('      - ', 1)[0]
+        # It stops the engine after a failure too, and asserts only after a passing run.
+        self.assertTrue(stop.startswith("        if: always() && env.ENGINE != ''\n"), stop)
+        self.assertIn('JOB_STATUS: ${{ job.status }}', stop)
+        self.assertIn('if [[ "$JOB_STATUS" != success ]]; then', stop)
         for needle in ('systemctl --user stop "$UNIT"', 'test "$result" = success', 'test "$status" = 0',
                        'engine.sock', '--service unregister', '= notRegistered'):
             self.assertIn(needle, stop)
+
+    def test_it_saves_no_caches_and_installs_no_openssl(self):
+        # Pull requests never write caches; prepare-release-runtime only restores here.
+        self.assertNotIn('rust-cache', WORKFLOW)
+        self.assertNotIn('save:', WORKFLOW)
+        # Nothing in either lockfile links OpenSSL (reqwest uses rustls).
+        self.assertNotIn('libssl-dev', WORKFLOW)
+        self.assertNotIn('name = "openssl-sys"', (ROOT / 'app/SiloUI/Cargo.lock').read_text())
 
     def test_logs_are_uploaded_only_when_it_fails(self):
         collect = WORKFLOW.split('- name: Collect logs\n', 1)[1]
@@ -148,6 +166,8 @@ class LinuxHostEndToEndScriptTests(unittest.TestCase):
             '--json status e2e-hosts-ci-fork',
             'start e2e-hosts-ci-fork',
             'exec e2e-hosts-ci-fork -- uname -a',
+            'stop e2e-hosts-ci-fork',
+            'stop e2e-hosts-ci',
             'drop e2e-hosts-ci-fork',
             'drop e2e-hosts-ci',
         ])
@@ -158,7 +178,7 @@ class LinuxHostEndToEndScriptTests(unittest.TestCase):
         result, calls = self.run_script(FAKE_UNAME='Darwin')
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('did not print a Linux kernel', result.stderr)
-        self.assertEqual(calls[-1], 'drop e2e-hosts-ci')
+        self.assertEqual(calls[-2:], ['stop e2e-hosts-ci', 'drop e2e-hosts-ci'])
         self.assertEqual(self.computers(), {})
 
     def test_it_never_touches_a_computer_it_did_not_make(self):
@@ -171,6 +191,12 @@ class LinuxHostEndToEndScriptTests(unittest.TestCase):
         result, calls = self.run_script(SILO_E2E_COMPUTER='main')
         self.assertEqual(result.returncode, 2)
         self.assertIn('named e2e-hosts-*', result.stderr)
+
+    def test_a_list_that_fails_stops_the_run_before_it_makes_anything(self):
+        result, calls = self.run_script(FAKE_JSON_LIST_FAILS='1')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('Could not list', result.stderr)
+        self.assertEqual(calls, [])
 
     def test_an_engine_that_does_not_answer_fails(self):
         result, calls = self.run_script(FAKE_DOWN='1')
