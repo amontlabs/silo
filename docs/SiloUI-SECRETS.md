@@ -102,10 +102,9 @@ or `credentials used: none`. The engine method `computers.credentials` returns t
 
 The network proxy appends one JSON line per event to `secret-usage.jsonl`: in the sandbox's
 `logs/` directory for a Linux computer, in the computer's folder for a macOS computer (whose
-gateway output also goes to a capped `gateway.log` there). Lines hold names, hosts and
-methods, never a value or a placeholder. Substitution in headers and the request line is
-recorded; substitution in a request body is not yet. A file belongs to one computer, so a fork
-counts from its own first request. Aggregation is `credentials_usage.rs` in the engine.
+gateway output also goes to a `gateway.log` there, which moves to `gateway.log.1` at the next gateway start once it reaches 1 MiB). Lines hold names, hosts and
+methods, never a value or a placeholder. Substitution in headers, the request line and the body is recorded, as are the GitHub profile's uses and refusals. Blocked attempts carry a reason: `host_not_allowed`, `tls_identity_required`, `proxy_metadata`, `unsupported_location`, `placeholder_too_long`, or a `github_*` reason. A request with no host to name shows as `(unknown host)`. A file belongs to one computer, so a fork
+counts from its own first request. The event file is capped at 1 MiB with one older generation, so a very busy computer loses its oldest events; a small `secret-usage-summary.tsv` beside it keeps one counter per secret, host, method and reason (at most 512 of them, then an `(other)` row) and is never rotated. `computers.credentials` reads the counters, and the events only when `since` is given. Method and host are cleaned before they are written (a method that is not a short HTTP token becomes `other`, a host over 253 bytes `(invalid host)`), and a host that contains a configured placeholder is written as `(redacted host)`. Aggregation is `credentials_usage.rs` in the engine.
 
 ## Sources
 

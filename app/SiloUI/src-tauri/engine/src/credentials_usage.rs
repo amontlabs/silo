@@ -28,6 +28,7 @@ struct Event {
     kind: String,
     #[serde(default)]
     secret: Option<String>,
+    #[serde(default)]
     host: String,
     #[serde(default)]
     method: String,
@@ -43,78 +44,156 @@ pub fn linux_usage_file(home: &Path, sandbox_name: &str) -> PathBuf {
         .join(USAGE_FILE)
 }
 
-/// Aggregates the events in `files` (each read with its `.1` generation first).
-pub fn read_usage(files: &[PathBuf], since: Option<u64>) -> CredentialsUsage {
-    let mut text = String::new();
-    for file in files {
-        let mut older = file.clone().into_os_string();
-        older.push(".1");
-        for path in [PathBuf::from(older), file.clone()] {
-            if let Ok(bytes) = fs::read(&path) {
-                text.push_str(&String::from_utf8_lossy(&bytes));
-                text.push('\n');
-            }
-        }
-    }
-    aggregate(&text, since)
+/// Counter file the proxy keeps next to the event file; rotation never drops it.
+pub const SUMMARY_FILE: &str = "secret-usage-summary.tsv";
+/// Host shown when the proxy had none to name.
+pub const UNKNOWN_HOST: &str = "(unknown host)";
+
+type UsedKey = (String, String, String);
+type BlockedKey = (Option<String>, String, String, String);
+
+/// Running totals while files are read.
+#[derive(Default)]
+struct Totals {
+    used: BTreeMap<UsedKey, (u64, u64)>,
+    blocked: BTreeMap<BlockedKey, (u64, u64)>,
 }
 
-/// Aggregates JSON-lines text; malformed or incomplete lines are skipped.
-pub fn aggregate(text: &str, since: Option<u64>) -> CredentialsUsage {
-    let mut used: BTreeMap<(String, String, String), (u64, u64)> = BTreeMap::new();
-    let mut blocked: BTreeMap<(Option<String>, String, String, String), (u64, u64)> =
-        BTreeMap::new();
-    for line in text.lines() {
-        let Ok(event) = serde_json::from_str::<Event>(line) else {
-            continue;
+impl Totals {
+    fn add(&mut self, row: Row, count: u64, last_at: u64) {
+        let host = if row.host.is_empty() {
+            UNKNOWN_HOST.to_owned()
+        } else {
+            row.host
         };
-        if event.host.is_empty() || since.is_some_and(|since| event.at < since) {
-            continue;
-        }
-        let secret = event.secret.filter(|name| !name.is_empty());
-        let slot = match event.kind.as_str() {
+        let secret = row.secret.filter(|name| !name.is_empty());
+        let slot = match row.kind.as_str() {
             "used" => {
-                let Some(secret) = secret else { continue };
-                used.entry((secret, event.host, event.method))
-                    .or_insert((0, 0))
+                let Some(secret) = secret else { return };
+                self.used.entry((secret, host, row.method)).or_insert((0, 0))
             }
-            "blocked" => blocked
-                .entry((
-                    secret,
-                    event.host,
-                    event.method,
-                    event.reason.unwrap_or_default(),
-                ))
+            "blocked" => self
+                .blocked
+                .entry((secret, host, row.method, row.reason.unwrap_or_default()))
                 .or_insert((0, 0)),
-            _ => continue,
+            _ => return,
         };
-        slot.0 += 1;
-        slot.1 = slot.1.max(event.at);
+        slot.0 += count;
+        slot.1 = slot.1.max(last_at);
     }
-    CredentialsUsage {
-        used: used
-            .into_iter()
-            .map(|((secret, host, method), (count, last_at))| CredentialUse {
-                secret,
-                host,
-                method,
-                count,
-                last_at,
-            })
-            .collect(),
-        blocked: blocked
-            .into_iter()
-            .map(
-                |((secret, host, method, reason), (count, last_at))| CredentialBlocked {
+
+    fn finish(self) -> CredentialsUsage {
+        CredentialsUsage {
+            used: self
+                .used
+                .into_iter()
+                .map(|((secret, host, method), (count, last_at))| CredentialUse {
                     secret,
                     host,
                     method,
                     count,
-                    reason,
                     last_at,
-                },
-            )
-            .collect(),
+                })
+                .collect(),
+            blocked: self
+                .blocked
+                .into_iter()
+                .map(
+                    |((secret, host, method, reason), (count, last_at))| CredentialBlocked {
+                        secret,
+                        host,
+                        method,
+                        count,
+                        reason,
+                        last_at,
+                    },
+                )
+                .collect(),
+        }
+    }
+}
+
+struct Row {
+    kind: String,
+    secret: Option<String>,
+    host: String,
+    method: String,
+    reason: Option<String>,
+}
+
+/// Aggregates the proxy's files. Each event file gets its counter file when there is one and
+/// `since` is not set; otherwise its events (the `.1` generation first) are counted.
+pub fn read_usage(files: &[PathBuf], since: Option<u64>) -> CredentialsUsage {
+    let mut totals = Totals::default();
+    for file in files {
+        let summary = file.with_file_name(SUMMARY_FILE);
+        if since.is_none() {
+            if let Ok(text) = fs::read_to_string(&summary) {
+                add_summary(&mut totals, &text);
+                continue;
+            }
+        }
+        let mut older = file.clone().into_os_string();
+        older.push(".1");
+        for path in [PathBuf::from(older), file.clone()] {
+            if let Ok(bytes) = fs::read(&path) {
+                add_events(&mut totals, &String::from_utf8_lossy(&bytes), since);
+            }
+        }
+    }
+    totals.finish()
+}
+
+/// Aggregates JSON-lines text; malformed or incomplete lines are skipped.
+pub fn aggregate(text: &str, since: Option<u64>) -> CredentialsUsage {
+    let mut totals = Totals::default();
+    add_events(&mut totals, text, since);
+    totals.finish()
+}
+
+fn add_events(totals: &mut Totals, text: &str, since: Option<u64>) {
+    for line in text.lines() {
+        let Ok(event) = serde_json::from_str::<Event>(line) else {
+            continue;
+        };
+        if since.is_some_and(|since| event.at < since) {
+            continue;
+        }
+        totals.add(
+            Row {
+                kind: event.kind,
+                secret: event.secret,
+                host: event.host,
+                method: event.method,
+                reason: event.reason,
+            },
+            1,
+            event.at,
+        );
+    }
+}
+
+/// Counter lines: `kind  secret  host  method  reason  count  lastAt`, tab separated.
+fn add_summary(totals: &mut Totals, text: &str) {
+    for line in text.lines() {
+        let fields: Vec<&str> = line.split('\t').collect();
+        let [kind, secret, host, method, reason, count, last] = fields[..] else {
+            continue;
+        };
+        let (Ok(count), Ok(last)) = (count.parse::<u64>(), last.parse::<u64>()) else {
+            continue;
+        };
+        totals.add(
+            Row {
+                kind: kind.into(),
+                secret: Some(secret.into()),
+                host: host.into(),
+                method: method.into(),
+                reason: Some(reason.into()),
+            },
+            count,
+            last,
+        );
     }
 }
 
@@ -199,6 +278,36 @@ mod tests {
         let usage = read_usage(&[linux, macos, dir.path().join("missing.jsonl")], None);
         assert_eq!(usage.used[0].count, 4);
         assert_eq!(usage.used[0].last_at, 40);
+    }
+
+    #[test]
+    fn an_event_without_a_host_is_kept_as_unknown() {
+        let usage = aggregate(
+            "{\"at\":1,\"kind\":\"blocked\",\"secret\":\"K\",\"method\":\"CONNECT\",\"reason\":\"proxy_metadata\"}\n",
+            None,
+        );
+        assert_eq!(usage.blocked.len(), 1);
+        assert_eq!(usage.blocked[0].host, UNKNOWN_HOST);
+        assert_eq!(usage.blocked[0].reason, "proxy_metadata");
+    }
+
+    #[test]
+    fn the_counter_file_outlives_event_rotation() {
+        let dir = tempfile::tempdir().unwrap();
+        let events = dir.path().join(USAGE_FILE);
+        // The event file lost its older lines; the counters still know all 40 requests.
+        fs::write(&events, MACOS).unwrap();
+        fs::write(
+            dir.path().join(SUMMARY_FILE),
+            "used\tOPENAI_API_KEY\tapi.openai.com\tPOST\t\t40\t99\nblocked\tK\tevil.example\tGET\thost_not_allowed\t2\t50\n",
+        )
+        .unwrap();
+        let usage = read_usage(&[events.clone()], None);
+        assert_eq!(usage.used[0].count, 40);
+        assert_eq!(usage.used[0].last_at, 99);
+        assert_eq!(usage.blocked[0].count, 2);
+        // With `since`, the retained events answer instead.
+        assert_eq!(read_usage(&[events], Some(1)).used[0].count, 1);
     }
 
     #[test]

@@ -303,4 +303,4 @@ returns `{used, blocked}` read from the proxy's `secret-usage.jsonl` (see
 older engine does not know the method. The Linux events come from the
 `microsandbox-secret-usage-events` patch, the macOS ones from the same patched network crate
 inside `silo-macos-gateway`. In the engine, `credentials_usage::credentials_for(computer_id)`
-(with `set_locator`) is the plain entry point for the review-request `credentials` field.
+(with `set_locator`) is a plain function the review-request code can call once it is wired in; no review-request field reads it yet, and nothing registers a locator yet, so it returns an empty result until then.
