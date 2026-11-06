@@ -122,6 +122,9 @@ pub struct ConnectionsStatus {
     addresses: Vec<ConnectionAddress>,
     /// Why Connections does not work on this device right now, if it does not.
     error: Option<String>,
+    /// Why the `silo` command could not be linked on PATH at the engine's start, if it could
+    /// not. Unrelated to Connections, and kept until the next start.
+    cli_link_error: Option<String>,
 }
 #[derive(Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -486,7 +489,23 @@ fn status(config: &Config) -> ConnectionsStatus {
         addresses,
         name,
         error: crate::sync::lock_or_recover(&START_ERROR, "connections status").clone(),
+        cli_link_error: crate::sync::lock_or_recover(&CLI_LINK_ERROR, "connections status")
+            .clone(),
     }
+}
+/// Why the `silo` command is not on PATH, from the engine's start. Changes to Connections
+/// never clear it.
+static CLI_LINK_ERROR: Mutex<Option<String>> = Mutex::new(None);
+/// Links the `silo` command for this engine and records the outcome for the status.
+fn link_cli_for_this_account() {
+    let linked = std::env::current_exe()
+        .map_err(|e| e.to_string())
+        .and_then(|engine| link_cli(&current_home()?, &engine))
+        .map_err(|error| format!("The silo command is not on PATH: {error}"));
+    if let Err(error) = &linked {
+        eprintln!("{error}");
+    }
+    *crate::sync::lock_or_recover(&CLI_LINK_ERROR, "connections status") = linked.err();
 }
 /// Why Connections is not working although Silo runs, such as another Silo
 /// process owning it or a file in the way of the bridge link. Cleared once fixed.
@@ -2900,6 +2919,8 @@ pub fn start(
         macos,
         local_access,
     }));
+    // The command line links on every start, whatever the state of Connections.
+    link_cli_for_this_account();
     let enabled = match read_config() {
         Ok(config) => config.enabled,
         Err(error) => return record_start_error(Some(error)),
@@ -2912,13 +2933,8 @@ pub fn start(
     } else {
         Ok(())
     };
-    // The command line links on every start; a refused link shows in the same status.
-    let cli = std::env::current_exe()
-        .map_err(|e| e.to_string())
-        .and_then(|engine| link_cli(&current_home()?, &engine))
-        .map_err(|error| format!("The silo command is not on PATH: {error}"));
     let listening = listen();
-    record_start_error(listening.err().or(linked.err()).or(cli.err()));
+    record_start_error(listening.err().or(linked.err()));
 }
 fn listen() -> Result<(), String> {
     let remote_runtime = remote_runtime()?;
@@ -5970,6 +5986,14 @@ mod bridge_link_tests {
         );
         record_start_error(None);
         assert_eq!(status(&config).error, None);
+        // A refused `silo` link is its own field, and Connections changes leave it alone.
+        *crate::sync::lock_or_recover(&CLI_LINK_ERROR, "test") = Some("not linked".into());
+        record_start_error(Some("Another Silo instance owns Connections.".into()));
+        record_start_error(None);
+        let status = status(&config);
+        assert_eq!(status.error, None);
+        assert_eq!(status.cli_link_error.as_deref(), Some("not linked"));
+        *crate::sync::lock_or_recover(&CLI_LINK_ERROR, "test") = None;
     }
 }
 
