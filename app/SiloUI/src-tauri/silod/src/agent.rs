@@ -175,7 +175,9 @@ pub(crate) fn serve(
         .name("silod-runtime".to_owned())
         .spawn(move || {
             // SIGTERM is a session end: no prompt, bounded, never cancelled. On Linux, where
-            // silod also runs in a terminal, Ctrl-C (SIGINT) ends the session the same way.
+            // silod also runs in a terminal, Ctrl-C (SIGINT) ends the session the same way;
+            // the engine starts `msb` in its own process group there, so the terminal's
+            // SIGINT reaches silod alone and the session end stops the computers in order.
             #[cfg(target_os = "linux")]
             runtime.spawn(end_session_on_signal(
                 tokio::signal::unix::SignalKind::interrupt(),
@@ -204,6 +206,7 @@ pub(crate) fn serve(
 
 /// Waits for the first `kind` signal, then ends the session through the engine's bounded
 /// session-end shutdown, which exits the process when it is done.
+#[cfg(not(target_os = "linux"))]
 async fn end_session_on_signal(
     kind: tokio::signal::unix::SignalKind,
     name: &str,
@@ -216,6 +219,58 @@ async fn end_session_on_signal(
             }
         }
         Err(error) => eprintln!("silod: could not install {name} handler: {error}"),
+    }
+}
+
+/// The first SIGINT or SIGTERM ends the session through the engine's bounded session-end
+/// shutdown, which exits the process when it is done. The handlers keep listening: a second
+/// signal of either kind (a second Ctrl-C in a terminal, or a supervisor that gave up
+/// waiting) exits at once with status 1, leaving running computers to the next start.
+#[cfg(target_os = "linux")]
+async fn end_session_on_signal(
+    kind: tokio::signal::unix::SignalKind,
+    name: &str,
+    context: Arc<SilodContext>,
+) {
+    use std::sync::atomic::AtomicBool;
+    static SESSION_ENDING: AtomicBool = AtomicBool::new(false);
+    match tokio::signal::unix::signal(kind) {
+        Ok(mut signal) => {
+            while signal.recv().await.is_some() {
+                match signal_action(&SESSION_ENDING) {
+                    SignalAction::EndSession => {
+                        eprintln!("silod: {name} received, ending the session (send it again to exit at once)");
+                        crate::methods::services::session_end(context.clone());
+                    }
+                    SignalAction::ExitNow => {
+                        eprintln!("silod: {name} received again, exiting now");
+                        std::process::exit(1);
+                    }
+                }
+            }
+        }
+        Err(error) => eprintln!("silod: could not install {name} handler: {error}"),
+    }
+}
+
+/// What one ending signal does on Linux.
+#[cfg(target_os = "linux")]
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum SignalAction {
+    /// The first: the bounded session end.
+    EndSession,
+    /// Any later one: exit at once.
+    ExitNow,
+}
+
+/// The first call on `ending` (shared by the SIGINT and SIGTERM handlers) ends the session;
+/// every later one exits.
+#[cfg(target_os = "linux")]
+pub(crate) fn signal_action(ending: &std::sync::atomic::AtomicBool) -> SignalAction {
+    if ending.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        SignalAction::ExitNow
+    } else {
+        SignalAction::EndSession
     }
 }
 
@@ -352,6 +407,15 @@ mod channel_startup_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn the_first_ending_signal_ends_the_session_and_any_later_one_exits() {
+        let ending = std::sync::atomic::AtomicBool::new(false);
+        assert_eq!(signal_action(&ending), SignalAction::EndSession);
+        assert_eq!(signal_action(&ending), SignalAction::ExitNow);
+        assert_eq!(signal_action(&ending), SignalAction::ExitNow);
+    }
 
     /// The migration gate is process-wide: tests that open and close it take turns.
     static MIGRATION_GATE: std::sync::Mutex<()> = std::sync::Mutex::new(());
