@@ -133,6 +133,14 @@ fn migration_and_checkpoint_commands_are_allowlisted_for_the_main_window() {
         "abandon_restore",
         "read_checkpoint_usage",
         "remote_checkpoint_action",
+        "list_review_requests",
+        "show_review_request",
+        "keep_review_request",
+        "throw_away_review_request",
+        "open_review_request",
+        "list_computer_steps",
+        "read_computer_tree",
+        "read_computer_credentials",
         "acknowledge_backup_result",
     ] {
         let permission = format!("allow-{}", command.replace('_', "-"));
