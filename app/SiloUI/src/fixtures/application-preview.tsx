@@ -2,6 +2,7 @@ import { computerTarget } from "@/features/application/model/connections"
 import { fixtureLogPage, type LogLoader } from "@/features/application/model/logs"
 import { useMemo, useState } from "react"
 import { fixtureDirectoryLoader } from "./directory-loader"
+import { fixtureComputerSteps, fixtureComputerTree } from "./computer-steps"
 import { fixtureFileTransfers } from "./file-transfers"
 import { useApplicationFixture } from "@/fixtures/application-state"
 import { ApplicationApp } from "@/features/application/application-app"
@@ -96,6 +97,8 @@ function FixtureApplicationPreview({ source, actions, backupPreviewMode, initial
       forkCheckpoint: fixture.forkCheckpoint,
       restoreCheckpoint: fixture.restoreCheckpoint,
       deleteCheckpoint: fixture.deleteCheckpoint,
+      listComputerSteps: async () => fixtureComputerSteps,
+      readComputerTree: async () => fixtureComputerTree,
       listComputerDirectory,
       fileTransfers,
       queryLogs,

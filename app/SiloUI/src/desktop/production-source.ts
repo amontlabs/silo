@@ -1180,6 +1180,8 @@ export function createProductionSource(native: ProductionBridge = bridge) {
     saveSecret: (request: SecretConfigurationRequest) => changeSecret("save_secret", { request }),
     removeSecret: (id: string) => changeSecret("remove_secret", { id }),
     retrySecret: (id: string) => changeSecret("retry_secret", { id }),
+    listComputerSteps: (computerId, deviceId) => listComputerSteps(computerId, deviceId, native),
+    readComputerTree: deviceId => readComputerTree(deviceId, native),
     readWorkspaceStorage: async computerId => workspaceStorageStateSchema.parse(await native.invoke("read_workspace_storage", { computerId })),
     reclaimWorkspaceStorage: async computerId => workspaceStorageStateSchema.parse(await native.invoke("reclaim_workspace_storage", { computerId })),
     refreshSshAccess: services.refreshSshAccess,

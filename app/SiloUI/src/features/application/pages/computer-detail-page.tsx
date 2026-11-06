@@ -20,6 +20,7 @@ import type { ApplicationInitialRoute } from "@/features/application/model/use-a
 import { DeleteComputerBody, type DeleteComputerDetails } from "@/features/computers/components/delete-computer-confirmation"
 import { computerEditMenu } from "@/features/computers/model/computer-edit-menu"
 import { CheckpointPanel } from "@/features/application/components/checkpoint-panel"
+import { StepsPanel } from "@/features/application/components/steps-panel"
 import { StatusSeparator, ComputerStatus } from "@/features/application/components/computer-status"
 import { DisabledReason } from "@/features/application/components/disabled-reason"
 import { LifecycleControl } from "@/features/application/components/lifecycle-control"
@@ -472,6 +473,7 @@ export function ComputerDetailPage({ computer, source, actions, controls }: {
             <TabsContent value="overview"><OverviewTab computer={computer} source={source} actions={actions} active={activeTab === "overview" && controls.pageActive !== false} onEdit={canEdit ? () => editing.startEdit(configuration) : undefined} onNavigate={controls.onNavigate} computerUse={configuration.desktop ? <ComputerUseSection key={target} computer={target} active={activeTab === "overview" && controls.pageActive !== false} /> : undefined} /></TabsContent>
             <TabsContent value="checkpoints">
               <CheckpointPanel computer={computer} target={target} actions={actions} takenNames={computerNamesOnDevice(source.computers, computer.device?.id, macosNames)} disabled={controls.configurationLocked || Boolean(computer.lifecycleAction) || Boolean(computer.device?.busy) || computer.freshness === "stale"} onExport={controls.onCheckpointExport} exportDisabled={controls.checkpointExportDisabled} forkedAction={controls.onCheckpointForkedAction} restoredAction={controls.onCheckpointRestoredAction} />
+              <div className="pt-5"><StepsPanel computer={computer} target={target} actions={actions} takenNames={computerNamesOnDevice(source.computers, computer.device?.id, macosNames)} disabled={controls.configurationLocked || Boolean(computer.lifecycleAction) || Boolean(computer.device?.busy) || computer.freshness === "stale"} forkedAction={controls.onCheckpointForkedAction} /></div>
             </TabsContent>
             {showStorage && actions.readWorkspaceStorage && <TabsContent value="storage">
               <WorkspaceStoragePanel key={configuration.id} computerId={configuration.id} computerName={configuration.name} deviceName={computer.device?.name} running={state === "running"} disabled={controls.configurationLocked || controls.computerOperationBusy} read={actions.readWorkspaceStorage} reclaim={actions.reclaimWorkspaceStorage} />
