@@ -32,8 +32,9 @@ class EngineReleaseWorkflowTests(unittest.TestCase):
         self.assertRegex(WORKFLOW, r'(?m)^permissions:\n  contents: read\n')
         self.assertEqual(WORKFLOW.count('contents: write'), 1)
         self.assertIn('contents: write', job('publish'))
-        self.assertNotIn('permissions:', job('build'))
-        self.assertNotIn('secrets.GITHUB_TOKEN', job('build'))
+        for name in ('build', 'build-linux'):
+            self.assertNotIn('permissions:', job(name))
+            self.assertNotIn('secrets.GITHUB_TOKEN', job(name))
         # The publishing job never runs repository code.
         self.assertNotIn('actions/checkout', job('publish'))
         self.assertNotIn('cargo', job('publish'))
@@ -43,18 +44,20 @@ class EngineReleaseWorkflowTests(unittest.TestCase):
         self.assertIn('runs-on: macos-15', build)
         self.assertRegex(build, r'(?s)uses: actions/checkout@[0-9a-f]{40} # v[\d.]+\n        with:\n          persist-credentials: false')
 
-    def test_github_app_configuration_reaches_only_the_engine_build_step(self):
+    def test_github_app_configuration_reaches_only_the_engine_build_steps(self):
         for name in ('SILO_GITHUB_APP_SLUG', 'SILO_GITHUB_CLIENT_ID', 'SILO_GITHUB_CLIENT_SECRET'):
-            self.assertEqual(WORKFLOW.count(f'secrets.{name}'), 1, name)
+            self.assertEqual(WORKFLOW.count(f'secrets.{name}'), 2, name)
             self.assertIn(f'secrets.{name}', step(job('build'), 'Build and package the engine'))
+            self.assertIn(f'secrets.{name}', step(job('build-linux'), 'Build and package the Linux engine'))
 
     def test_the_pinned_toolchain_and_only_the_apple_silicon_target_are_installed(self):
         installation = step(job('build'), 'Install pinned Rust toolchain for Apple Silicon')
         self.assertIn('runtime-inputs.json', installation)
         self.assertIn('--target aarch64-apple-darwin', installation)
-        for text in (WORKFLOW,):
-            for forbidden in ('x86_64', 'universal', '--universal'):
-                self.assertNotIn(forbidden, text)
+        # The macOS engine is Apple Silicon only; x86-64 is a Linux host platform.
+        for forbidden in ('x86_64', 'universal', '--universal'):
+            self.assertNotIn(forbidden, job('build'))
+            self.assertNotIn(forbidden, job('publish'))
         self.assertIn('package-engine.py --out-dir', WORKFLOW)
 
     def test_the_tag_is_computed_once_and_shared_by_both_jobs(self):
@@ -81,6 +84,40 @@ class EngineReleaseWorkflowTests(unittest.TestCase):
         for needle in ('lipo -archs', '"$archs" == arm64', 'shasum -a 256 -c', 'macos-arm64.tar.gz'):
             self.assertIn(needle, verification)
         self.assertIn("['aarch64-apple-darwin']", verification)
+
+    def test_linux_engines_build_natively_for_both_architectures(self):
+        linux = job('build-linux')
+        self.assertNotIn('needs:', linux.split('steps:', 1)[0])
+        self.assertIn('runs-on: ${{ matrix.runner }}', linux)
+        matrix = re.findall(r'- runner: (\S+)\n\s+platform: (\S+)\n\s+target: (\S+)\n\s+machine: (\S+)', linux)
+        self.assertEqual(matrix, [
+            ('ubuntu-24.04', 'linux-x64', 'x86_64-unknown-linux-gnu', 'X86-64'),
+            ('ubuntu-24.04-arm', 'linux-arm64', 'aarch64-unknown-linux-gnu', 'AArch64'),
+        ])
+        self.assertRegex(linux, r'(?s)uses: actions/checkout@[0-9a-f]{40} # v[\d.]+\n        with:\n          persist-credentials: false')
+        for dependency in ('libclang-dev', 'libcap-ng-dev', 'libdbus-1-dev'):
+            self.assertIn(dependency, step(linux, 'Install Linux build dependencies'))
+        self.assertIn('runtime-inputs.json', step(linux, 'Install pinned Rust toolchain'))
+        runtime = step(linux, 'Prepare the runtime')
+        self.assertIn('uses: ./.github/actions/prepare-release-runtime', runtime)
+        self.assertNotIn('save:', runtime)
+        self.assertIn('package-engine.py --platform "$PLATFORM" --out-dir', step(linux, 'Build and package the Linux engine'))
+
+    def test_the_linux_verification_checks_architecture_channel_and_checksum(self):
+        verification = step(job('build-linux'), 'Verify the Linux archive')
+        for needle in ('sha256sum -c', 'silo-engine-$version-$PLATFORM.tar.gz', 'readelf -h', 'Machine:.*$MACHINE',
+                       '--print-channel-identifier)" = org.silo.preview', "info['targets'] == [target]",
+                       "manifest['channelIdentifier'] == 'org.silo.preview'"):
+            self.assertIn(needle, verification)
+
+    def test_the_release_carries_every_archive_and_checksum(self):
+        publish = job('publish')
+        self.assertIn('needs: [build, build-linux]', publish)
+        self.assertIn('pattern: silo-engine*\n          merge-multiple: true', publish)
+        create = step(publish, 'Create the engine release')
+        self.assertIn('linux=("silo-engine-$version-linux-x64.tar.gz" "silo-engine-$version-linux-arm64.tar.gz")', create)
+        self.assertIn('test "$(ls | wc -l)" -eq 6', create)
+        self.assertIn('"${linux[0]}" "${linux[0]}.sha256" "${linux[1]}" "${linux[1]}.sha256"', create)
 
     def run_tag_step(self, event, ref, existing=False):
         script = textwrap.dedent(step(job('build'), 'Determine the engine tag').split('        run: |\n', 1)[1])
