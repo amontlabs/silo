@@ -34,12 +34,14 @@ pub struct SiloMcp {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ComputerParam {
     /// The computer's name.
     pub computer: String,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct PublishParams {
     /// The computer's name.
     pub computer: String,
@@ -51,6 +53,7 @@ pub struct PublishParams {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ForkParams {
     /// The computer to copy, usually `main` (the default), or a path to a git repository on
     /// this machine (`./repo`) to copy into a new Linux fork. Ignored when `recipe` is set.
@@ -82,18 +85,21 @@ pub struct ForkParams {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct RequestsListParams {
     /// open (default), kept, thrown-away or all.
     pub status: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct RequestIdParam {
     /// The request's id, such as fr-ab12cd34.
     pub id: String,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct RequestKeepParams {
     /// The request's id, such as fr-ab12cd34.
     pub id: String,
@@ -105,12 +111,14 @@ pub struct RequestKeepParams {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct UpParams {
     /// The recipe `main` is made from when it does not exist (default linux-dev).
     pub recipe: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ExecParams {
     /// The computer to run in.
     pub computer: String,
@@ -123,6 +131,7 @@ pub struct ExecParams {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct CheckpointParams {
     /// The computer to checkpoint.
     pub computer: String,
@@ -133,6 +142,7 @@ pub struct CheckpointParams {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct FoldParams {
     /// The fork whose changes are kept.
     pub fork: String,
@@ -162,6 +172,7 @@ pub struct FoldParams {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct DiffParams {
     /// The fork to look at.
     pub computer: String,
@@ -203,7 +214,8 @@ impl SiloMcp {
     }
 
     /// The agent whose settings apply: `--agent` or `SILO_AGENT`, else the connected client's
-    /// name (self-reported, so `agents:` entries may only narrow the top level).
+    /// name (self-reported: its entry then narrows `recipes` and `fork_secrets` but sets no `fold` or
+    /// `auto_keep`).
     pub fn agent(&self) -> Option<String> {
         self.agent.lock().unwrap().clone()
     }
@@ -284,7 +296,7 @@ impl SiloMcp {
         show(
             async {
                 let project = Project::discover(&self.working_directory);
-                let settings = project.load_settings(self.agent().as_deref())?;
+                let settings = project.load_settings_as(self.agent().as_deref(), self.agent_named)?;
                 let explicit = params
                     .recipe_file
                     .as_deref()
@@ -429,7 +441,8 @@ impl SiloMcp {
                     .as_deref()
                     .map(|path| self.working_directory.join(path));
                 let recipe = ops::resolve_recipe(explicit.as_deref(), &project)?;
-                let settings = project.load_settings(self.agent().as_deref())?;
+                let settings =
+                    project.load_settings_as(self.agent().as_deref(), self.agent_named)?;
                 let context = flows::Context {
                     project: &project,
                     settings: settings.as_ref(),
@@ -611,7 +624,8 @@ impl SiloMcp {
                     timeout_secs: params.timeout_secs.unwrap_or(ops::MAX_EXEC_SECS),
                 };
                 let project = Project::discover(&self.working_directory);
-                let settings = project.load_settings(self.agent().as_deref())?;
+                let settings =
+                    project.load_settings_as(self.agent().as_deref(), self.agent_named)?;
                 let step_settings = crate::config::Settings::step_settings(settings.as_ref());
                 let (output, step) =
                     steps::run_exec(&self.engine().await?, &args, step_settings, &|_| {}).await?;

@@ -151,6 +151,19 @@ async fn initialize_list_and_call_round_trip() {
         .as_str()
         .unwrap()
         .contains("--force"));
+
+    let stale = exchange(
+        &mut write,
+        &mut read,
+        json!({"jsonrpc": "2.0", "id": 6, "method": "tools/call",
+               "params": {"name": "fold", "arguments": {"fork": "f", "pr": true}}}),
+    )
+    .await;
+    assert_eq!(stale["result"]["isError"], true, "{stale}");
+    assert!(stale["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap()
+        .contains("pr"));
 }
 
 async fn agent_after_initialize(server: SiloMcp, client: &str) -> Option<String> {
