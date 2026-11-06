@@ -1,0 +1,331 @@
+== header
+engine/CLI commit: 135da5ab00bbc987fb5c4f70e3ef5e77d2063c3b; branch claude/silo-v1-phase-5; tracked changes under app/: []
+bundled msb: msb 0.7.6
+host macOS: 26.5 (arm64); silo: silo 0.1.0; date 2026-11-06T03:18:35Z
+guest binary: /Users/polarzero/code/projects/microsandbox-workspaces/app/SiloUI/target/aarch64-unknown-linux-musl/release/silo: ELF 64-bit LSB executable, ARM aarch; sha256 abe2fa18f2c8307c
+computers before: e2e-p3-macsrc e2e-p3-macsrc-before-20261105-2253 e2e-p5cu-f1 e2e-p5cu-msrc e2e-p5cu-src e2e-relay silo-eval-a silo-eval-b workspace-1
+== create, start, install
+[04:19:49] PASS  create+start e2e-p5-main  -- 
+step 1
+guest: Ubuntu 24.04.4 LTS aarch64 
+Sending the silo binary to e2e-p5-main...
+silo: That file or folder is no longer available in the computer.
+[04:19:50] FAIL  guest-client install --binary (upload of the guest binary)  -- 
+step 2
+-- install --binary failed; token file after the failed install: -rw-r----- 1 root silo 176 Nov  6 03:19 /etc/silo/guest-client.json
+-- retrying the same upload once: Sending the silo binary to e2e-p5-main... silo: That file or folder is no longer available in the computer. 
+step 3
+-- workaround for the rest of the check: pushing the binary through silo exec (gzip+base64 chunks), not a product path
+step 4
+step 5
+step 6
+step 7
+step 8
+step 9
+step 10
+step 11
+step 12
+step 13
+step 14
+step 15
+step 16
+step 17
+step 18
+step 19
+step 20
+step 21
+step 22
+step 23
+step 24
+step 25
+step 26
+step 27
+step 28
+step 29
+step 30
+step 31
+step 32
+step 33
+step 34
+step 35
+step 36
+step 37
+step 38
+step 39
+step 40
+step 41
+step 42
+step 43
+step 44
+step 45
+step 46
+step 47
+step 48
+step 49
+step 50
+step 51
+step 52
+step 53
+step 54
+step 55
+step 56
+step 57
+step 58
+step 59
+step 60
+step 61
+step 62
+step 63
+step 64
+step 65
+step 66
+step 67
+step 68
+step 69
+step 70
+step 71
+step 72
+step 73
+step 74
+step 75
+step 76
+step 77
+step 78
+step 79
+step 80
+step 81
+step 82
+step 83
+[04:20:22] PASS  guest binary pushed by chunks (workaround)  -- sha256 in guest abe2fa18f2c8307c
+30ea85ac-834d-4dc1-869a-6320a4e469b8: token minted 2026-11-06T03:19:51.995665Z; fork_secrets: []
+/usr/bin/python3
+-rw-r----- 1 root silo      176 Nov  6 03:19 /etc/silo/guest-client.json
+-rwxr-xr-x 1 root root 12030376 Nov  6 03:20 /usr/local/bin/silo
+silo 0.1.0
+step 84
+host bridge folder: drwxr-xr-x@ 4 polarzero  staff  128 Nov  6 04:19 /Users/polarzero/Library/Application Support/org.silo.dev/runtime/microsandbox/sandboxes/e2e-p5-main/runtime/silo-bridge;drwx-wx-wt@ 2 polarzero  staff   64 Nov  6 04:19 /Users/polarzero/Library/Application Support/org.silo.dev/runtime/microsandbox/sandboxes/e2e-p5-main/runtime/silo-bridge/req;drwx--x--x@ 2 polarzero  staff   64 Nov  6 04:19 /Users/polarzero/Library/Application Support/org.silo.dev/runtime/microsandbox/sandboxes/e2e-p5-main/runtime/silo-bridge/resp;
+== inside the guest as root
+drwxr-xr-x 4 root root 128 Nov  6 03:19 /.msb/silo-bridge
+drwx-wx-wt 2 root root  64 Nov  6 03:19 /.msb/silo-bridge/req
+drwx--x--x 2 root root  64 Nov  6 03:19 /.msb/silo-bridge/resp
+root
+-rw-r----- 1 root silo 176 Nov  6 03:19 /etc/silo/guest-client.json
+token-readable
+step 85
+[04:20:24] PASS  [root] bridge folders exist, token file readable  -- 
+e2e-p5-main  running
+step 86
+[04:20:25] PASS  [root] silo --in-guest list shows e2e-p5-main  -- rc=0
+[04:20:25] PASS  [root] list shows no unrelated computer  -- 
+== inside the guest as silo
+silo
+-rw-r----- 1 root silo 176 Nov  6 03:19 /etc/silo/guest-client.json
+token-readable
+ls: cannot access '/.msb/silo-bridge': Permission denied
+ls: cannot access '/.msb/silo-bridge/req': Permission denied
+ls: cannot access '/.msb/silo-bridge/resp': Permission denied
+step 87
+[04:20:26] PASS  [silo] bridge folders exist, token file readable  -- 
+silo: Cannot reach the Silo bridge at /.msb/silo-bridge: Permission denied (os error 13)
+step 88
+[04:20:26] FAIL  [silo] silo --in-guest list shows e2e-p5-main  -- rc=1
+[04:20:26] PASS  [silo] list shows no unrelated computer  -- 
+== fork from inside (root), change, diff, request
+Forking e2e-p5-main into e2e-p5-in1...
+silo: The computer operation: The runtime did not complete the operation. Check the computer state and retry.
+step 89
+[04:20:30] FAIL  [root] in-guest fork e2e-p5-in1 (first attempt)  -- 
+[04:20:30] retrying once after 30 s; engine log tail:
+silod: guest client of 30ea85ac-834d-4dc1-869a-6320a4e469b8: computers.tree
+silod: guest client of 30ea85ac-834d-4dc1-869a-6320a4e469b8: computers.tree
+silod: guest client of 30ea85ac-834d-4dc1-869a-6320a4e469b8: checkpoints.fork
+silod: guest client of 30ea85ac-834d-4dc1-869a-6320a4e469b8: operations.job.get
+silod: guest client of 30ea85ac-834d-4dc1-869a-6320a4e469b8: operations.job.acknowledge
+Forking e2e-p5-main into e2e-p5-in1...
+silo: The computer operation: The runtime did not complete the operation. Check the computer state and retry.
+step 90
+[04:21:04] FAIL  [root] in-guest fork e2e-p5-in1 (retry)  -- 
+-- diagnosis: does a plain host fork of the running e2e-p5-main work after a bridge call?
+host fork of running e2e-p5-main: rc=1 Stopping silo-baseline-8fa22f...
+Dropping silo-baseline-8fa22f...
+Forking e2e-p5-main into e2e-p5-host1...
+silo: The computer operation: The runtime did not complete the operation. Check the computer state and retry.
+[04:21:06] workaround for the remaining steps: stop e2e-p5-main, fork it on the host (stopped forks work), start all
+Forked e2e-p5-in1 (stopped): e2e-p5-main as of 04:21:08 (new checkpoint)
+Forked e2e-p5-host1 (stopped): e2e-p5-main as of 04:21:11 (new checkpoint)
+e2e-p5-main                         running    linux   2 cpu, 2 GiB
+e2e-p5-in1                          running    linux   2 cpu, 2 GiB
+e2e-p5-host1                        running    linux   2 cpu, 2 GiB
+e2e-p5-in1                          running    linux   2 cpu, 2 GiB
+e2e-p5-main  running
+step 91
+[04:21:29] FAIL  [root] list now shows e2e-p5-in1  -- 
+step 1
+[04:21:29] PASS  change in fork (e2e-p5-in1: /root/p5-in-guest)  -- 
+silo: No computer named e2e-p5-in1 among this computer's forks.
+step 92
+[04:21:31] FAIL  [root] in-guest diff shows the change  -- rc=1
+silo: No computer named e2e-p5-in1 among this computer's forks.
+step 93
+[04:21:32] FAIL  [root] fold --request  -- 
+No review requests. Ask for one with `silo fold <fork> --request`.
+[04:21:33] FAIL  host 'silo requests' shows the request for e2e-p5-in1  -- 
+== fork from inside as the non-root silo user
+skipped: the silo user cannot reach the bridge (FAIL above); the remaining silo-user checks stop here
+== refusals from inside
+[root] silo --in-guest fold e2e-p5-in1 -> rc=1: silo: Keeping, promoting or opening a pull request is not available from inside a computer. Fork and ask for review with `silo fold <fork> --request`; the person who runs Silo keeps, promotes or drops.
+step 94
+[04:21:33] PASS  [root] refused: silo --in-guest fold e2e-p5-in1  -- 
+[root] silo --in-guest fold e2e-p5-in1 --promote -> rc=1: silo: Keeping, promoting or opening a pull request is not available from inside a computer. Fork and ask for review with `silo fold <fork> --request`; the person who runs Silo keeps, promotes or drops.
+step 95
+[04:21:33] PASS  [root] refused: silo --in-guest fold e2e-p5-in1 --promote  -- 
+[root] silo --in-guest undo e2e-p5-main -> rc=1: silo: That is not available from inside a computer. Fork and ask for review with `silo fold <fork> --request`; the person who runs Silo keeps, promotes or drops.
+step 96
+[04:21:34] PASS  [root] refused: silo --in-guest undo e2e-p5-main  -- 
+[root] silo --in-guest drop e2e-p5-in1 -> rc=1: silo: That is not available from inside a computer. Fork and ask for review with `silo fold <fork> --request`; the person who runs Silo keeps, promotes or drops.
+step 97
+[04:21:34] PASS  [root] refused: silo --in-guest drop e2e-p5-in1  -- 
+[root] silo --in-guest secrets list -> rc=1: silo: That is not available from inside a computer. Fork and ask for review with `silo fold <fork> --request`; the person who runs Silo keeps, promotes or drops.
+step 98
+[04:21:35] PASS  [root] refused: silo --in-guest secrets list  -- 
+[root] silo --in-guest requests keep 0 -> rc=1: silo: Keeping, throwing away or opening a request is not available from inside a computer. Fork and ask for review with `silo fold <fork> --request`; the person who runs Silo keeps, promotes or drops.
+step 99
+[04:21:35] PASS  [root] refused: silo --in-guest requests keep 0  -- 
+-- hand-written frames
+[root] changes.keep -> {"v":1,"id":"5028c86866ee4963b92a28100f8f3129","ok":false,"error":{"code":"permission_denied","message":"changes.keep is not available to a computer's own agent. Ask the person who runs Silo."}}
+step 100
+[04:21:36] PASS  [root] frame changes.keep gets permission_denied  -- 
+[root] guest.exec -> {"v":1,"id":"230b8d379de44bc9bc2a9759ea1289eb","ok":false,"error":{"code":"permission_denied","message":"guest.exec is not available to a computer's own agent. Ask the person who runs Silo."}}
+step 101
+[04:21:38] PASS  [root] frame guest.exec gets permission_denied  -- 
+== ownership: a fork made on the host
+(already made by the workaround above)
+[04:21:38] PASS  host fork e2e-p5-host1  -- 
+e2e-p5-host1 id a2deaac7-b851-4ff8-a21d-d5a44cf15777
+[04:21:41] PASS  [root] list does not show the host's fork  -- 
+diff e2e-p5-host1 -> rc=1: silo: No computer named e2e-p5-host1 among this computer's forks.
+step 103
+[04:21:42] PASS  diff of host fork refused/not found  -- 
+frame computers.stop e2e-p5-host1 -> {"v":1,"id":"439d9f11f20b4478bbe8bfda8052aafa","ok":false,"error":{"code":"permission_denied","message":"That computer is not one of this computer's forks."}}
+step 104
+[04:21:44] PASS  frame computers.stop on host fork refused  -- 
+frame computers.start e2e-p5-host1 -> {"v":1,"id":"f6ad0a54ac07468192cf14d594ea3ad8","ok":false,"error":{"code":"permission_denied","message":"That computer is not one of this computer's forks."}}
+step 105
+[04:21:45] PASS  frame computers.start on host fork refused  -- 
+frame changes.diff e2e-p5-host1 -> {"v":1,"id":"aa0dd509a3b543878176b49aa4af36c9","ok":false,"error":{"code":"permission_denied","message":"That computer is not one of this computer's forks."}}
+step 106
+[04:21:46] PASS  frame changes.diff on host fork refused  -- 
+e2e-p5-host1 (linux): running
+2 cpu, 2 GiB memory, 8 GiB disk
+0 checkpoints
+== symlink attempt on resp/
+lrwxrwxrwx 1 root root   4 Nov  6 03:21 /.msb/silo-bridge/resp -> /tmp
+drwx--x--x 7 root root 224 Nov  6 03:21 /.msb/silo-bridge/resp.real
+NO_ANSWER id=f50906400f31467fbddf018ed8108a84
+step 107
+[04:21:57] PASS  symlink replaced resp inside the guest  -- 
+[04:21:57] PASS  no answer delivered through the symlink  -- 
+host /tmp new entries: []
+[04:22:02] PASS  host /tmp has no <request id>.json (symlink not followed)  -- id=f50906400f31467fbddf018ed8108a84
+[04:22:02] PASS  no answer-shaped file appeared in host /tmp  -- 
+engine log delta:
+drwx--x--x 7 root root 224 Nov  6 03:21 /.msb/silo-bridge/resp
+step 108
+total 0
+drwx-wx-wt@ 3 polarzero  staff   96 Nov  6 04:21 req
+drwx--x--x@ 7 polarzero  staff  224 Nov  6 04:21 resp
+after restoring resp: rc=0
+e2e-p5-main  running
+step 109
+[04:22:07] PASS  bridge serves again after the folder is restored (informational)  -- 
+== the fork's token
+total 4
+-rw-r----- 1 root silo 176 Nov  6 03:19 guest-client.json
+step 2
+[04:22:08] FAIL  token file gone in e2e-p5-in1  -- 
+step 110
+-rw-r----- 1 root silo 176 Nov  6 03:22 /etc/silo/guest-client.json
+step 3
+parent's token copied into e2e-p5-in1: rc=1: silo: Cannot reach the Silo bridge at /.msb/silo-bridge: No such file or directory (os error 2)
+step 4
+[04:22:09] PASS  copied parent token refused in the fork (vacuous for a host-made fork: it has no bridge folder)  -- rc=1
+step 5
+== promote on the host: the old main's token ends
+NAME                                STATE      KIND    SIZE
+workspace-1                         stopped    linux   8 cpu, 32 GiB
+e2e-relay                           stopped    linux   8 cpu, 32 GiB
+silo-eval-a                         stopped    linux   2 cpu, 2 GiB
+silo-eval-b                         stopped    linux   2 cpu, 2 GiB
+e2e-p5cu-src                        running    linux   2 cpu, 4 GiB
+e2e-p5cu-f1                         running    linux   2 cpu, 4 GiB
+e2e-p5-main                         running    linux   2 cpu, 2 GiB
+e2e-p5-in1                          running    linux   2 cpu, 2 GiB
+e2e-p5-host1                        running    linux   2 cpu, 2 GiB
+e2e-p3-macsrc-before-20261105-2253  stopped    macos   4 cpu, 8 GiB
+e2e-p3-macsrc                       stopped    macos   4 cpu, 8 GiB
+e2e-p5cu-msrc                       running    macos   4 cpu, 8 GiB
+e2e-p5cu-mf1                        running    macos   4 cpu, 8 GiB
+Promoting e2e-p5-in1...
+silo: The computer operation: The runtime did not complete the operation. Check the computer state and retry.
+[04:22:11] FAIL  silo fold e2e-p5-in1 --promote (computers running)  -- 
+[04:22:11] retry with e2e-p5-main, e2e-p5-in1 and e2e-p5-host1 stopped (workaround)
+Promoting e2e-p5-in1...
+e2e-p5-in1 is now e2e-p5-main. The old e2e-p5-main is e2e-p5-main-before-20261106-0322 (stopped).
+note: e2e-p5-in1 is now e2e-p5-main. e2e-p5-main was archived as e2e-p5-main-before-20261106-0322; `silo undo e2e-p5-main` swaps them back.
+[04:22:20] PASS  silo fold e2e-p5-in1 --promote (computers stopped)  -- 
+NAME                                STATE      KIND    SIZE
+workspace-1                         stopped    linux   8 cpu, 32 GiB
+e2e-relay                           stopped    linux   8 cpu, 32 GiB
+silo-eval-a                         stopped    linux   2 cpu, 2 GiB
+silo-eval-b                         stopped    linux   2 cpu, 2 GiB
+e2e-p5cu-src                        running    linux   2 cpu, 4 GiB
+e2e-p5cu-f1                         running    linux   2 cpu, 4 GiB
+e2e-p5-main-before-20261106-0322    stopped    linux   2 cpu, 2 GiB
+e2e-p5-main                         running    linux   2 cpu, 2 GiB
+e2e-p5-host1                        stopped    linux   2 cpu, 2 GiB
+e2e-p3-macsrc-before-20261105-2253  stopped    macos   4 cpu, 8 GiB
+e2e-p3-macsrc                       stopped    macos   4 cpu, 8 GiB
+e2e-p5cu-msrc                       running    macos   4 cpu, 8 GiB
+e2e-p5cu-mf1                        running    macos   4 cpu, 8 GiB
+archived old main is named: [e2e-p5-main-before-20261106-0322]
+c9bc34f3-b0be-4a3d-8970-24743d706a39: no token
+old main status: 30ea85ac-834d-4dc1-869a-6320a4e469b8: no token 
+old main: rc=1: silo: Silo did not answer in time. Is Silo's engine running, and is this computer's token current? (A call with a token the engine does not know is dropped without an answer; `silo guest-client status` on the Mac says.)
+step 111
+[04:23:34] PASS  old main's token is revoked (silo --in-guest list fails)  -- rc=1
+== undo and revoke
+Undoing the latest keep or promote of e2e-p5-main...
+Undid the promote: e2e-p5-main is main again, and e2e-p5-in1 has its own name back.
+[04:23:39] PASS  silo undo e2e-p5-main  -- 
+NAME                                STATE      KIND    SIZE
+workspace-1                         stopped    linux   8 cpu, 32 GiB
+e2e-relay                           stopped    linux   8 cpu, 32 GiB
+silo-eval-a                         stopped    linux   2 cpu, 2 GiB
+silo-eval-b                         stopped    linux   2 cpu, 2 GiB
+e2e-p5cu-src                        running    linux   2 cpu, 4 GiB
+e2e-p5cu-f1                         running    linux   2 cpu, 4 GiB
+e2e-p5-main                         stopped    linux   2 cpu, 2 GiB
+e2e-p5-in1                          stopped    linux   2 cpu, 2 GiB
+e2e-p5-host1                        stopped    linux   2 cpu, 2 GiB
+e2e-p3-macsrc-before-20261105-2253  stopped    macos   4 cpu, 8 GiB
+e2e-p3-macsrc                       stopped    macos   4 cpu, 8 GiB
+e2e-p5cu-msrc                       running    macos   4 cpu, 8 GiB
+e2e-p5cu-mf1                        running    macos   4 cpu, 8 GiB
+main back, id matches original: True
+30ea85ac-834d-4dc1-869a-6320a4e469b8: no token
+[04:23:40] PASS  guest-client revoke  -- 
+30ea85ac-834d-4dc1-869a-6320a4e469b8: no token
+== summary: PASS=32 FAIL=10 BLOCKED=0
+[04:23:40] cleanup (drops only computers this run created)
+[04:24:04] silo list after cleanup:
+NAME                                STATE      KIND    SIZE
+workspace-1                         stopped    linux   8 cpu, 32 GiB
+e2e-relay                           stopped    linux   8 cpu, 32 GiB
+silo-eval-a                         stopped    linux   2 cpu, 2 GiB
+silo-eval-b                         stopped    linux   2 cpu, 2 GiB
+e2e-p5cu-src                        running    linux   2 cpu, 4 GiB
+e2e-p5cu-f1                         running    linux   2 cpu, 4 GiB
+e2e-p3-macsrc-before-20261105-2253  stopped    macos   4 cpu, 8 GiB
+e2e-p3-macsrc                       stopped    macos   4 cpu, 8 GiB
+e2e-p5cu-msrc                       running    macos   4 cpu, 8 GiB
+e2e-p5cu-mf1                        running    macos   4 cpu, 8 GiB
