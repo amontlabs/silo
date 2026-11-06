@@ -3,13 +3,17 @@ use serde::Serialize;
 
 pub const ROUTE_KEY: &str = "route";
 
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", not(feature = "desktop")))]
+mod headless;
+#[cfg(all(target_os = "linux", feature = "desktop"))]
 mod linux;
 #[cfg(target_os = "macos")]
 pub mod macos;
-#[cfg(any(test, target_os = "linux"))]
+#[cfg(any(test, all(target_os = "linux", feature = "desktop")))]
 mod notification_ids;
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", not(feature = "desktop")))]
+use headless as platform;
+#[cfg(all(target_os = "linux", feature = "desktop"))]
 use linux as platform;
 #[cfg(target_os = "macos")]
 use macos as platform;
@@ -29,6 +33,7 @@ impl IntegrationStatus {
         }
     }
 
+    #[cfg_attr(all(target_os = "linux", not(feature = "desktop")), allow(dead_code))]
     fn error(message: impl Into<String>) -> Self {
         Self {
             state: "error".into(),
@@ -82,6 +87,7 @@ pub fn clear_notifications(keys: &[String]) {
     platform::clear_notifications(keys);
 }
 
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn notification_authorized(state: &str) -> bool {
     matches!(state, "authorized" | "provisional")
 }
