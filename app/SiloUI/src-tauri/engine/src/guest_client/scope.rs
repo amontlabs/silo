@@ -7,7 +7,7 @@ use std::collections::HashSet;
 use serde_json::{json, Value};
 use silo_api::methods::guest_client::{GuestClientPolicy, GUEST_TOKEN_PATH};
 
-use super::tokens::MAX_FORKS;
+use super::tokens::{MAX_FORKS, MAX_JOBS};
 
 /// The most of its forks one token may have running at once. Each counts as the memory it was
 /// created with; the engine does not limit their total.
@@ -20,8 +20,12 @@ pub trait Topology {
     fn created(&self, caller: &str) -> HashSet<String>;
     /// How many of those are running.
     fn running(&self, caller: &str) -> usize;
-    /// How many forks this token has asked for in all.
+    /// How many forks this token holds: made and still being made.
     fn forks_asked(&self, caller: &str) -> usize;
+    /// Whether a computer by this name exists or a fork by it is being made.
+    fn name_taken(&self, name: &str) -> bool;
+    /// How many jobs this caller started and has not acknowledged.
+    fn jobs_outstanding(&self, caller: &str) -> usize;
     /// The fork a review request is about.
     fn request_fork(&self, request_id: &str) -> Option<String>;
     /// Whether this caller started the job.
@@ -117,6 +121,23 @@ pub fn authorize(
     params: &Value,
     topology: &dyn Topology,
 ) -> Result<Authorized, Refusal> {
+    let authorized = authorize_call(caller, policy, method, params, topology)?;
+    // A job nobody follows still takes a place in the engine's job admission.
+    if authorized.starts_job && topology.jobs_outstanding(caller) >= MAX_JOBS {
+        return refuse(format!(
+            "{MAX_JOBS} jobs of this computer's client are not finished and acknowledged yet."
+        ));
+    }
+    Ok(authorized)
+}
+
+fn authorize_call(
+    caller: &str,
+    policy: &GuestClientPolicy,
+    method: &str,
+    params: &Value,
+    topology: &dyn Topology,
+) -> Result<Authorized, Refusal> {
     if !ALLOWED.contains(&method) {
         return refuse(format!(
             "{method} is not available to a computer's own agent. Ask the person who runs Silo."
@@ -167,9 +188,14 @@ pub fn authorize(
                 return refuse("A fork can be made from this computer only.");
             }
             if topology.forks_asked(caller) >= MAX_FORKS {
-                return refuse(format!(
-                    "This token has asked for {MAX_FORKS} forks already."
-                ));
+                return refuse(format!("This token holds {MAX_FORKS} forks already."));
+            }
+            let name = text(&params, "newName").unwrap_or_default();
+            if crate::computer_tree::hidden(name) {
+                return refuse("That name is reserved for Silo's own computers.");
+            }
+            if topology.name_taken(name) {
+                return refuse(format!("A computer named {name} exists or is being made."));
             }
             if topology.running(caller) >= MAX_RUNNING {
                 return refuse(format!(
@@ -324,6 +350,16 @@ mod tests {
                 2
             }
         }
+        fn name_taken(&self, name: &str) -> bool {
+            name == "taken"
+        }
+        fn jobs_outstanding(&self, computer: &str) -> usize {
+            if computer == "jobby" {
+                MAX_JOBS
+            } else {
+                0
+            }
+        }
         fn request_fork(&self, request_id: &str) -> Option<String> {
             match request_id {
                 "fr-mine" => Some("fork-1".into()),
@@ -465,6 +501,19 @@ mod tests {
             &World,
         );
         assert!(allowed.is_ok());
+    }
+
+    #[test]
+    fn reserved_and_taken_names_are_refused_and_jobs_are_capped() {
+        for name in ["silo-build-x", "silo-baseline-1", "taken", ""] {
+            let fork = json!({"computerId": "main", "newName": name});
+            assert!(check("checkpoints.fork", fork).is_err(), "{name}");
+        }
+        let fork = json!({"computerId": "jobby", "newName": "ok"});
+        assert!(authorize("jobby", &policy(&[]), "checkpoints.fork", &fork, &World).is_err());
+        let diff = json!({"computerId": "fork-1"});
+        assert!(authorize("jobby", &policy(&[]), "computers.list", &json!({}), &World).is_ok());
+        assert!(check("changes.diff", diff).is_ok());
     }
 
     #[test]

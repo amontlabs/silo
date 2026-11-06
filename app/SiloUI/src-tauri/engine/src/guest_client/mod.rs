@@ -8,4 +8,6 @@ pub mod tokens;
 
 pub use scope::{authorize, filter_result, Authorized, Filter, Refusal, Topology, ALLOWED};
 pub use spool::{spool_dir, Spool, Taken};
-pub use tokens::{Minted, Record, TokenStore};
+pub use tokens::{
+    now_secs, Minted, OwnedJob, PendingFork, Record, TokenStore, MAX_FORKS, MAX_JOBS,
+};

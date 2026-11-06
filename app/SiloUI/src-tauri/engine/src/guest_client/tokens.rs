@@ -23,14 +23,80 @@ pub struct Record {
     pub hash: String,
     pub minted_at: String,
     pub policy: GuestClientPolicy,
-    /// Names of the forks this token asked for. Only these are the agent's to start, stop,
-    /// diff or ask review for.
+    /// Ids of the forks this token made (confirmed by a finished fork job). Only these are the
+    /// agent's to start, stop, diff or ask review for.
     #[serde(default)]
-    pub fork_names: Vec<String>,
+    pub fork_ids: Vec<String>,
+    /// Forks asked for whose jobs have not been confirmed yet.
+    #[serde(default)]
+    pub pending: Vec<PendingFork>,
+    /// Jobs this token started and has not acknowledged.
+    #[serde(default)]
+    pub jobs: Vec<OwnedJob>,
 }
 
-/// The most forks one token may ask for.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PendingFork {
+    pub name: String,
+    #[serde(default)]
+    pub job_id: Option<String>,
+    pub at: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OwnedJob {
+    pub id: String,
+    pub at: u64,
+}
+
+/// The most forks one token holds at once (made and pending).
 pub const MAX_FORKS: usize = 32;
+/// The most jobs one token may have started and not acknowledged.
+pub const MAX_JOBS: usize = 16;
+
+pub fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_secs())
+}
+
+impl Record {
+    /// Reserves a pending fork named `name`, refusing a second one for the same name and one
+    /// above the cap.
+    pub fn begin_fork(&mut self, name: &str) -> Result<(), String> {
+        if self.pending.iter().any(|pending| pending.name == name) {
+            return Err(format!("A fork named {name} is already being made."));
+        }
+        if self.fork_ids.len() + self.pending.len() >= MAX_FORKS {
+            return Err(format!("This token holds {MAX_FORKS} forks already."));
+        }
+        self.pending.push(PendingFork {
+            name: name.to_owned(),
+            job_id: None,
+            at: now_secs(),
+        });
+        Ok(())
+    }
+
+    pub fn note_job(&mut self, id: &str) {
+        if !self.jobs.iter().any(|job| job.id == id) {
+            self.jobs.push(OwnedJob {
+                id: id.to_owned(),
+                at: now_secs(),
+            });
+        }
+    }
+
+    pub fn drop_job(&mut self, id: &str) {
+        self.jobs.retain(|job| job.id != id);
+    }
+
+    pub fn owns_job(&self, id: &str) -> bool {
+        self.jobs.iter().any(|job| job.id == id)
+    }
+}
 
 /// 32 bytes from the operating system's random source.
 fn random_hex() -> Result<String, String> {
@@ -140,7 +206,9 @@ impl TokenStore {
             hash: hash_of(&token),
             minted_at: now(),
             policy,
-            fork_names: Vec::new(),
+            fork_ids: Vec::new(),
+            pending: Vec::new(),
+            jobs: Vec::new(),
         };
         let mut records = self.read()?;
         records.retain(|existing| existing.computer_id != computer_id);
@@ -163,26 +231,24 @@ impl TokenStore {
             .find(|record| record.computer_id == computer_id && same(&record.hash, &hash))
     }
 
-    /// Records that this computer's token asked for a fork named `name`.
-    pub fn note_fork(&self, computer_id: &str, name: &str) -> Result<(), String> {
+    /// Changes this computer's record under the store's lock and saves it when `change`
+    /// succeeds. `Ok(None)` when the computer has no token.
+    pub fn update<R>(
+        &self,
+        computer_id: &str,
+        change: impl FnOnce(&mut Record) -> Result<R, String>,
+    ) -> Result<Option<R>, String> {
         let _held = lock();
         let mut records = self.read()?;
-        let record = records
+        let Some(record) = records
             .iter_mut()
             .find(|record| record.computer_id == computer_id)
-            .ok_or("This computer has no token.")?;
-        if record.fork_names.iter().any(|known| known == name) {
-            return Ok(());
-        }
-        if record.fork_names.len() >= MAX_FORKS {
-            return Err(format!(
-                "This token has asked for {MAX_FORKS} forks already."
-            ));
-        }
-        if !record.fork_names.iter().any(|known| known == name) {
-            record.fork_names.push(name.to_owned());
-        }
-        self.write(&records)
+        else {
+            return Ok(None);
+        };
+        let result = change(record)?;
+        self.write(&records)?;
+        Ok(Some(result))
     }
 
     pub fn status(&self, computer_id: &str) -> Result<Option<Record>, String> {
@@ -229,22 +295,37 @@ mod tests {
         let store = TokenStore::new(dir.path());
         let minted = store.mint("main", policy()).unwrap();
         assert_eq!(minted.token.len(), PREFIX.len() + 64);
-        assert!(store.note_fork("other", "x").is_err());
+        assert!(store.update("other", |_| Ok(())).unwrap().is_none());
         for number in 0..MAX_FORKS {
-            store.note_fork("main", &format!("f{number}")).unwrap();
+            store
+                .update("main", |record| record.begin_fork(&format!("f{number}")))
+                .unwrap();
         }
-        store.note_fork("main", "f0").unwrap();
-        assert!(store.note_fork("main", "one-more").is_err());
-        assert_eq!(
-            store.status("main").unwrap().unwrap().fork_names.len(),
-            MAX_FORKS
-        );
-        assert!(store
-            .mint("main", policy())
-            .unwrap()
-            .record
-            .fork_names
-            .is_empty());
+        let again = store.update("main", |record| record.begin_fork("f0"));
+        assert!(again.unwrap_err().contains("already being made"));
+        let more = store.update("main", |record| record.begin_fork("one-more"));
+        assert!(more.unwrap_err().contains("forks already"));
+        let record = store.status("main").unwrap().unwrap();
+        assert_eq!(record.pending.len(), MAX_FORKS);
+        assert!(record.fork_ids.is_empty());
+        let fresh = store.mint("main", policy()).unwrap().record;
+        assert!(fresh.pending.is_empty() && fresh.jobs.is_empty());
+    }
+
+    #[test]
+    fn owned_jobs_are_kept_with_the_token_until_dropped() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = TokenStore::new(dir.path());
+        store.mint("main", policy()).unwrap();
+        store
+            .update("main", |record| Ok(record.note_job("job:1")))
+            .unwrap();
+        let record = store.status("main").unwrap().unwrap();
+        assert!(record.owns_job("job:1") && !record.owns_job("job:2"));
+        store
+            .update("main", |record| Ok(record.drop_job("job:1")))
+            .unwrap();
+        assert!(!store.status("main").unwrap().unwrap().owns_job("job:1"));
     }
 
     #[test]
