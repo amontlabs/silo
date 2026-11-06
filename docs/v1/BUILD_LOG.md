@@ -6,10 +6,10 @@ Tracker: Linear project "Silo v1: git for agent computers" (P-AMO-8).
 
 ## Resume
 
-- **Phase:** 4 on branch `claude/silo-v1-phase-4`, PR #64 (CI running). Phases 0-3 merged (#60-#63).
+- **Phase:** 5 on branch `claude/silo-v1-phase-5`. Phases 0-4 merged (#60-#64).
 - **Done in phase 4 (reviewed, merged into the branch):** review requests (`changes.requests.*`, `silo requests`, MCP), steps + `--from-step` + `silo tree`, credentials-used line (msb patch `microsandbox-secret-usage-events`, macOS gateway, `computers.credentials`), `agents:` + auto-keep + recipe write-back + `silo fold --pr`, `silo-action/`.
 - **Blocked on the owner:** the credentials VM check (`docs/v1/checks/phase4_credentials_check.sh`) needs Keychain repair for the Dev engine (`engine.credentials.repair`, owner clicks Always Allow); same for the secret carry-over checks of phases 1 and 3. Leftover computers to drop: `silo-baseline-8fa22f`, `e2e-p3-macsrc`, `e2e-p3-macsrc-before-20261105-2253`.
-- **Next action:** merge #64 when CI is green; after the Keychain repair, re-run the phase 4 credentials check (and phase 1/3 secret checks); then phase 5.
+- **Next action:** phase 5 slices; after the Keychain repair, re-run the phase 4 credentials check (and phase 1/3 secret checks); then phase 5.
 - **macOS slots:** free.
 
 ## Start
@@ -63,6 +63,17 @@ VM check (Linux and macOS): a macOS fork boots once; a source with a boot-persis
 | 4f | GitHub Action `silo-action/` (not published), tested with a local runner | reviewer |
 
 All tests use the mock GitHub API, a local bare git remote and a loopback HTTP endpoint with a fake secret. VM check: only the credentials line (Linux and macOS).
+
+### Phase 5 (AMO-85, AMO-86, AMO-87, AMO-70)
+
+| Slice | What | Review |
+|---|---|---|
+| 5a | In-guest client: guest-to-host endpoint with a scoped credential enforcing the settings file (`fold: ask` agents fork and request, never keep, promote or grant secrets); threat-model doc | reviewer + Argon |
+| 5b | Mac mini remote: new `OWNER_METHODS`, one pending-changes list across engines, actions routed to the right machine; tests with a second Dev engine | reviewer |
+| 5c | Hosted reviewer: engine/CLI send only the diff to a configurable endpoint, three lenses, advisory banner, forbidden-word filter; service folder tested as a local mock, nothing deployed | reviewer |
+| 5d | Native computer use on AMO-70: Cua Linux image built locally if unpublished, host MCP bridge, "fork, start, wait until ready", `auto` approval for unattended forks, diff ignore entries, macOS port with permissions pre-granted | reviewer + Argon |
+
+VM checks: in-guest client from inside a Linux main; computer use on Linux and macOS (drive a fork's GUI from the host).
 
 ## Decisions
 - 2026-11-06, steps (AMO-69): a step is one command an agent runs on a computer through Silo (CLI exec/run, MCP run). Per-step checkpoints are off by default (`step_checkpoints: true` turns them on; the last `step_checkpoints_keep`, default 20, are kept per computer). `--from-step N` forks from the checkpoint taken after step N.
