@@ -259,6 +259,8 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.12'
+      - name: Install the hosted reviewer service dependencies
+        run: python3 -m pip install --quiet -r ../../reviewer-service/requirements.txt
       - name: Test macOS release signing with disposable fixtures
         run: python3 -m unittest discover -s scripts -p 'test_macos_release.py'
       - name: Check Rust formatting
@@ -294,6 +296,9 @@ jobs:
       # The workspace has no doctests, which nextest does not run.
       - name: Run Rust tests
         timeout-minutes: 30
+        env:
+          # The CLI's end-to-end test of the reviewer service fails instead of skipping.
+          SILO_REVIEWER_E2E_REQUIRED: '1'
         run: cargo nextest run --manifest-path Cargo.toml --workspace --locked --profile ci
       - name: Test patched updater transport and atomic installation
         run: cargo test --manifest-path src-tauri/Cargo.toml --locked -p tauri-plugin-updater --lib

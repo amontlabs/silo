@@ -178,24 +178,31 @@ request's text. It is a Pro feature and off until a service is configured.
 
 | Setting | Where |
 | --- | --- |
-| Service URL | `reviewer: {url: https://...}` in `.silo/silo.yaml`, or `SILO_REVIEWER_URL` (the variable wins). `https://` only, except `http://localhost`, `127.0.0.1` and `[::1]`. |
-| Token | `SILO_REVIEWER_TOKEN` only, sent as a bearer token. It is not read from `silo.yaml` and not from the Keychain. |
+| Service URL | `SILO_REVIEWER_URL`, or `url:` in `~/.config/silo/reviewer.yaml` (the variable wins). `https://` only, except `http://` to exactly `localhost`, `127.0.0.1` or `[::1]`; an address with a user name or password is refused. |
+| Token | `SILO_REVIEWER_TOKEN` only, sent as a bearer token. It is not read from a file or the Keychain. |
+
+A `reviewer.url` in a project's `.silo/silo.yaml` is **ignored** (the command says so) unless it is
+the same address as the one above: a project file comes with the repository, and the token does not
+belong to whoever wrote the repository.
 
 **What is sent.** The diff document of [`silo diff --json`](SiloUI-CHANGES.md) rebuilt from an
-allowlist (`cli/src/hosted/document.rs`): the bucket summary, repos with their changed file
-names, packages, settings file names, databases and what is not kept. Left out: crontab and
-launch agent texts, file-change entries for credential files (counted, not named), the details
-behind not-kept credentials, background changes, the home directory name (paths show as `~/`),
-the digest and the credentials-used record. No file contents and no secret values are in the
-diff to begin with. A body over 256 KiB is not sent (the command says so); the service gets 90
-seconds to answer.
+allowlist (`cli/src/hosted/document.rs`): file names, packages, settings, databases and what is
+not kept. Left out: the engine's readable summary, names and changes of credential, key and
+environment files (counted, not named), hashes, sizes and digests, crontab and launch agent texts,
+background changes, and the home directory name (paths show as `~/`). With the code lens, the text
+of the Code bucket's changes is added as `code_diff` (`cli/src/hosted/codediff.rs`): the commits
+since the fork and the uncommitted changes of each repo, read inside the computer, at most 300
+lines per file and 120 KiB in all. Credential and environment files, binary changes and
+untracked or ignored files are not included (names only), and token-shaped strings are replaced
+by `[redacted]`. This is pattern based and can miss a value. The output says when code was sent.
+A body over 256 KiB is not sent; the service gets 90 seconds to answer and its answer is read up to 1 MiB.
 
 **What is shown.** A fixed line, `Advisory review of the diff only. It can miss things; you
 decide what to keep.`, then the three lenses, each with a summary and findings (severity `info`,
-`low`, `medium` or `high`, file, message). Before anything is shown, the answer goes through a
-wording filter: a sentence that uses one of a fixed list of claim words (`cli/src/hosted/
-filter.rs`) is dropped, and the output says how many words were filtered (`filtered` in
-`--json`). The filter runs on this device whatever the service does.
+`low`, `medium` or `high`, file, message). The answer is normalised and each use of a word the
+product does not claim (listed in `cli/src/hosted/filter.rs`, matched by stem, through look-alike
+letters and invisible characters) is replaced by `[wording removed]`; the output says how many
+(`filtered` in `--json`). The filter runs on this device whatever the service does.
 
 The service is in [`reviewer-service/`](../reviewer-service/README.md), with its data handling
 (no retention) and deploy steps.
@@ -244,7 +251,7 @@ agents:
 | `fork_secrets` | Secret names `--secret` may name. |
 | `fold` | `ask` (default) or `auto-code`, which is `auto_keep: [{when: {only: [code], tests: pass}}]`. Explicit `auto_keep` rules win over `fold: auto-code`. |
 | `auto_keep` | Rules that keep a fork without asking (below). |
-| `reviewer` | `url:` of the [hosted reviewer](#hosted-reviewer); top level only. |
+| `reviewer` | `url:` is ignored here; the [hosted reviewer](#hosted-reviewer) takes its address from `SILO_REVIEWER_URL` or `~/.config/silo/reviewer.yaml`. |
 | `fork_ram_budget`, `warm_max_age` | Top level only. |
 | `step_checkpoints`, `step_checkpoints_keep` | Step checkpoints (see [steps](SiloUI-CHANGES.md#steps-and-the-fork-tree)). |
 | `agents.<name>` | Per-agent overrides of `recipes`, `fork_secrets`, `fold`, `auto_keep`, `step_checkpoints` and `step_checkpoints_keep`. |
