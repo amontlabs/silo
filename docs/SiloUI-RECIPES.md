@@ -42,7 +42,9 @@ commands are shell text. Services start at boot through an XDG autostart entry o
 (`/etc/xdg/autostart/<name>.desktop`) and a LaunchAgent labelled `<name>` on macOS. Each runs a
 launcher file named `<name>`; for a plain command (a program and arguments, no shell syntax)
 the launcher `exec`s it, so the process runs under its own name. A `quiet:` entry that names
-the service, or the command's program, therefore finds the entry, the label and the process.
+the service stops its entry or label and also the name the command runs under: the script after
+an interpreter (`python3 /opt/app/poller.py` is `poller.py`), else the program (`openclaw
+gateway` is `openclaw`). The fork's `silo status` lists both names.
 
 On macOS, a recipe that needs Homebrew (brew packages, or pip, pipx, npm or cargo when their
 tool is missing) installs it first as the account with the official non-interactive

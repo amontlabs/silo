@@ -259,7 +259,7 @@ and skips one whose last health check failed.
 `.silo/recipe.yaml` (recipes can also name an OS, packages, setup commands, services and ports, and live in `.silo/recipes/`; see [recipes](SiloUI-RECIPES.md)):
 
 ```yaml
-quiet: [poller]          # processes stopped in a fork
+quiet: [poller]          # processes, or recipe services, stopped in a fork
 scrub: [/root/.env]      # paths removed from a fork
 keep:
   restart: [web]         # services restarted after a keep

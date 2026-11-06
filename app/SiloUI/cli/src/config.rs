@@ -821,7 +821,9 @@ mod tests {
         .unwrap();
         assert_eq!(recipe.quiet, ["poller", "cron"]);
         assert_eq!(recipe.scrub, ["/root/.env"]);
-        assert!(parse_recipe("scrub: [~/.env]\n").unwrap_err().contains("absolute"));
+        assert!(parse_recipe("scrub: [~/.env]\n")
+            .unwrap_err()
+            .contains("absolute"));
         assert_eq!(recipe.keep.restart, ["web"]);
         assert_eq!(recipe.keep.migrate, ["make migrate"]);
         assert_eq!(recipe.keep.after, ["make test"]);

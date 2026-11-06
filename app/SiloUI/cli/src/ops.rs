@@ -526,13 +526,62 @@ pub fn fork_extras(recipe: Option<&Recipe>, secrets: &[String]) -> ForkExtras {
     let quiet = recipe
         .filter(|recipe| !recipe.quiet.is_empty() || !recipe.scrub.is_empty())
         .map(|recipe| QuietSpec {
-            stop: recipe.quiet.clone(),
+            stop: quiet_names(recipe),
             scrub: recipe.scrub.clone(),
         });
     ForkExtras {
         secrets: secrets.to_vec(),
         quiet,
     }
+}
+
+/// The recipe's `quiet:` list as the guest matches it. The guest stops processes by program
+/// or script name, and a service's launcher `exec`s its command, so the running process of a
+/// service never carries the service's name: an entry naming one of the recipe's `services:`
+/// is kept (its launcher and autostart entry go by that name) and followed by the name its
+/// process runs under.
+fn quiet_names(recipe: &Recipe) -> Vec<String> {
+    let mut names: Vec<String> = Vec::new();
+    for entry in &recipe.quiet {
+        let program = recipe
+            .services
+            .get(entry)
+            .and_then(|command| service_program(command));
+        for name in std::iter::once(entry.clone()).chain(program) {
+            if !names.contains(&name) {
+                names.push(name);
+            }
+        }
+    }
+    names
+}
+
+/// The program or script name a service command runs under, as the guest's quiet step matches
+/// it: the script after an interpreter (`python3 -u /opt/app/poller.py` is `poller.py`), else
+/// the program (`openclaw gateway` is `openclaw`). `None` when the command is not a plain
+/// command line the launcher `exec`s.
+fn service_program(command: &str) -> Option<String> {
+    let plain = |c: char| c.is_ascii_alphanumeric() || "-_./:=@%+, ".contains(c);
+    if !command.chars().all(plain) {
+        return None;
+    }
+    let mut words = command.split_whitespace();
+    let first = words.next().filter(|word| !word.contains('='))?;
+    let base = |word: &str| word.rsplit('/').next().unwrap_or(word).to_owned();
+    let program = base(first);
+    let family = program.trim_end_matches(|c: char| c.is_ascii_digit() || c == '.');
+    let name = if [
+        "python", "node", "nodejs", "bash", "sh", "perl", "ruby", "php",
+    ]
+    .contains(&family)
+    {
+        base(words.find(|word| !word.starts_with('-'))?)
+    } else {
+        program
+    };
+    let valid = |c: char| c.is_ascii_alphanumeric() || "._@:+-".contains(c);
+    let usable = !name.is_empty() && name != "." && name != ".." && !name.starts_with('-');
+    (usable && name.chars().all(valid)).then_some(name)
 }
 
 /// Puts the extras onto the engine's fork parameters. The parameters carry no secrets or
@@ -1460,6 +1509,40 @@ mod tests {
         assert_eq!(fork_extras(None, &[]), ForkExtras::default());
         let empty = parse_recipe("keep: { restart: [web] }\n").unwrap();
         assert_eq!(fork_extras(Some(&empty), &[]).quiet, None);
+    }
+
+    #[test]
+    fn a_quiet_service_also_stops_the_program_it_runs() {
+        let recipe = parse_recipe(concat!(
+            "services:\n",
+            "  final-poller: python3 -u /opt/final/poller.py\n",
+            "  gateway: openclaw gateway\n",
+            "  shell: cd /srv && ./run\n",
+            "quiet: [final-poller, gateway, openclaw, shell, cron]\n",
+        ))
+        .unwrap();
+        let stop = fork_extras(Some(&recipe), &[]).quiet.unwrap().stop;
+        assert_eq!(
+            stop,
+            [
+                "final-poller",
+                "poller.py",
+                "gateway",
+                "openclaw",
+                "shell",
+                "cron"
+            ]
+        );
+        assert_eq!(
+            service_program("node server.js").as_deref(),
+            Some("server.js")
+        );
+        assert_eq!(
+            service_program("/usr/bin/redis-server --port 6380").as_deref(),
+            Some("redis-server")
+        );
+        assert_eq!(service_program("PORT=1 node app.js"), None);
+        assert_eq!(service_program("python3"), None);
     }
 
     #[test]
