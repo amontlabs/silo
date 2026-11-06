@@ -147,6 +147,14 @@ fn hash(data: &[u8]) -> String {
 }
 
 impl KeepEnv for Fake {
+    fn after_kept(&self, computer: &str) {
+        self.0
+            .log
+            .lock()
+            .unwrap()
+            .push(format!("{computer}:after_kept"));
+    }
+
     fn os(&self, _: &str) -> Result<Os, String> {
         Ok(self.0.os)
     }
@@ -772,6 +780,8 @@ fn a_plain_keep_runs_in_order_migrates_and_restarts_with_new_process_ids() {
     };
     assert_eq!(report.checkpoint.as_deref(), Some("cp1"));
     assert!(report.review_digest.is_some());
+    // The target's own computer-use approval is applied again once the keep is in.
+    assert_eq!(world.logged("after_kept"), 1);
     assert_eq!(
         world.order(&[
             "checkpoint",

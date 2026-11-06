@@ -1010,6 +1010,29 @@ pub fn after_boot(
     apply_with(&runtime::OPERATIONS, runner, paths, name, Trigger::Boot)
 }
 
+/// After a keep into `name`: drives the computer's guest back to its own recorded approval
+/// mode. A fork made with `auto` carries the `mcp__cua-driver` rule of Claude Code's settings
+/// and Codex's approval line in its own files, and a keep brings changed settings files into
+/// the target; the apply rewrites both from the target's mode. Linux computers only; the thread
+/// is returned for tests.
+pub fn reapply_after_keep(paths: &RuntimePaths, name: &str) -> Option<std::thread::JoinHandle<()>> {
+    reapply_in(
+        &runtime::OPERATIONS,
+        Arc::new(runtime::ProcessRunner),
+        paths,
+        name,
+    )
+}
+
+fn reapply_in(
+    gate: &'static runtime::operation_gate::OperationGate,
+    runner: SharedRunner,
+    paths: &RuntimePaths,
+    name: &str,
+) -> Option<std::thread::JoinHandle<()>> {
+    apply_with(gate, runner, paths, name, Trigger::Boot)
+}
+
 /// Drives a running built-in computer's guest toward the computer's chosen approval mode on a host
 /// thread, and returns the thread (for tests); `None` unless the computer is the running,
 /// labelled built-in one.

@@ -133,6 +133,12 @@ impl KeepEnv for GuestEnv {
         })
     }
 
+    fn after_kept(&self, computer: &str) {
+        if let Ok(paths) = runtime::runtime_paths(self.host.as_ref()) {
+            crate::computer_use::reapply_after_keep(&paths, computer);
+        }
+    }
+
     fn checkpoint_before_keep(&self, computer: &str, name: &str) -> Result<CheckpointRef, String> {
         // A running Linux computer is captured with its memory (`--full --guest-flush
         // required`) and a running Mac with its saved state, so an undo resumes it.

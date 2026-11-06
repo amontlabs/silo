@@ -388,6 +388,7 @@ pub fn keep(
             }
             journal.set_state(&target, &checkpoint.id, journal::State::Undoable)?;
             journal.clear(&target);
+            env.after_kept(&target);
             Ok(Outcome::Kept(report))
         }
         Err(error) => {

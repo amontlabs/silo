@@ -200,6 +200,8 @@ pub trait KeepEnv: Send + Sync {
     fn start(&self, _computer: &str) -> Result<(), String> {
         Ok(())
     }
+    /// Called after a keep into `computer` succeeded, with its lane released.
+    fn after_kept(&self, _computer: &str) {}
     /// Holds the engine's operation lane for `computer` until the returned value is dropped,
     /// so no restore, stop, fork or delete of it interleaves with the keep.
     fn hold(&self, _computer: &str, _label: &str) -> Result<Box<dyn Any>, String> {
