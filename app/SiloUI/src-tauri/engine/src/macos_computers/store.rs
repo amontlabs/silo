@@ -198,6 +198,13 @@ pub(super) struct ForkOrigin {
 impl Record {
     /// Whether the guest's computer use differs from what this build installs, or is not
     /// known to match: the update runs again.
+    /// The approval the user chose, falling back to what the guest has.
+    pub(super) fn computer_use_wanted_approval(&self) -> crate::computer_use::Approval {
+        self.computer_use_desired_approval
+            .or(self.computer_use_approval)
+            .unwrap_or_else(crate::computer_use::initial_approval)
+    }
+
     pub(super) fn computer_use_stale(&self) -> bool {
         let approval = self
             .computer_use_desired_approval
@@ -1111,6 +1118,17 @@ mod tests {
             &[],
         )
         .is_err()
+    }
+
+    #[test]
+    fn the_wanted_approval_is_the_chosen_one_before_the_applied_one() {
+        use crate::computer_use::Approval;
+        let mut computer = finished();
+        computer.computer_use_approval = Some(Approval::Ask);
+        computer.computer_use_desired_approval = Some(Approval::Auto);
+        assert_eq!(computer.computer_use_wanted_approval(), Approval::Auto);
+        computer.computer_use_desired_approval = None;
+        assert_eq!(computer.computer_use_wanted_approval(), Approval::Ask);
     }
 
     #[test]

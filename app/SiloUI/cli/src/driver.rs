@@ -50,6 +50,8 @@ pub struct Session {
     stderr: Vec<u8>,
     next_id: u64,
     shots: u64,
+    /// Whether this driver has taken a screenshot, which is what it maps coordinates from.
+    mapped: bool,
     /// Whether the request being handled has been written to the driver.
     sent: bool,
 }
@@ -67,6 +69,16 @@ impl From<CliError> for Failure {
 }
 
 /// Requests that change nothing, so repeating one on a new driver is harmless.
+/// Tools whose coordinates the driver maps from its latest screenshot back to the screen; a
+/// driver that has taken none reads them as screen pixels.
+fn needs_mapping(method: &str, params: &Value) -> bool {
+    method == "tools/call"
+        && matches!(
+            params["name"].as_str(),
+            Some("click" | "scroll" | "move_cursor" | "drag")
+        )
+}
+
 fn repeatable(method: &str, params: &Value) -> bool {
     method == "tools/list" || (method == "tools/call" && params["name"] == "get_desktop_state")
 }
@@ -176,6 +188,7 @@ impl Session {
         self.seen = 0;
         self.buffer.clear();
         self.next_id = 0;
+        self.mapped = false;
     }
 
     fn stderr_text(&self) -> String {
@@ -197,8 +210,30 @@ impl Session {
         if self.job.is_none() {
             self.start(engine, computer, timeout).await?;
         }
+        if needs_mapping(method, params) && !self.mapped {
+            // The first coordinate call before any screenshot: take one now, so coordinates
+            // read off the screenshots the agent sees map the same way as later ones.
+            self.shots += 1;
+            let path = format!(
+                "{SCREENSHOT_PREFIX}{}-{}.png",
+                std::process::id(),
+                self.shots
+            );
+            let mapping = json!({"name": "get_desktop_state",
+                "arguments": {"max_image_dimension": crate::usetools::DEFAULT_MAX_SIDE, "screenshot_out_file": path}});
+            let taken = self
+                .call(engine, computer, "tools/call", &mapping, timeout)
+                .await;
+            remove_file(engine, computer, &path).await;
+            taken?;
+            self.mapped = true;
+        }
         self.sent = false;
-        self.call(engine, computer, method, params, timeout).await
+        let result = self.call(engine, computer, method, params, timeout).await?;
+        if method == "tools/call" && params["name"] == "get_desktop_state" {
+            self.mapped = true;
+        }
+        Ok(result)
     }
 
     async fn start(
@@ -231,6 +266,7 @@ impl Session {
         self.buffer.clear();
         self.stderr.clear();
         self.next_id = 0;
+        self.mapped = false;
         let init = json!({"protocolVersion": "2025-06-18", "capabilities": {},
                           "clientInfo": {"name": "silo", "version": "1"}});
         self.call(engine, computer, "initialize", &init, timeout)
@@ -452,5 +488,28 @@ async fn remove_file(engine: &Engine, computer: &Computer, path: &str) {
             None,
         )
         .await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_coordinate_tools_need_a_screenshot_first() {
+        for tool in ["click", "scroll", "move_cursor", "drag"] {
+            assert!(
+                needs_mapping("tools/call", &json!({"name": tool})),
+                "{tool}"
+            );
+        }
+        for tool in ["type_text", "press_key", "hotkey", "get_desktop_state"] {
+            assert!(
+                !needs_mapping("tools/call", &json!({"name": tool})),
+                "{tool}"
+            );
+        }
+        assert!(!needs_mapping("tools/list", &json!({})));
+        assert!(!Session::default().mapped);
     }
 }

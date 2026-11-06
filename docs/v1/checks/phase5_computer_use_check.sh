@@ -212,16 +212,6 @@ macos() {
   [ $rc = 0 ] && [ "$cu" = ready ]; check "M1 macOS fork --gui returns with computerUse.state ready" $? "rc=$rc ${secs}s state=[$cu]; engine status: $("$SILO" status $MF1 | grep 'computer use'); ready tool below"
   "$SILO" status $MF1 | grep -q 'approval auto'; check "M1 the macOS fork's recorded approval is auto" $? "$("$SILO" status $MF1 | grep 'computer use')"
   [ "$(state $MF1)" = running ] || { blocked "M2-M4" "$MF1 not running"; return; }
-  echo "== M2 cua-driver permissions status in the fork"
-  out=$(x $MF1 /usr/local/bin/cua-driver permissions status --json); echo "$out"
-  echo "$out" | python3 -c "
-import json,sys
-t=sys.stdin.read(); d=json.loads(t[t.index('{'):])
-s=json.dumps(d).lower()
-raise SystemExit(0 if d.get('status')!='unknown' and 'accessibility' in s and 'screen' in s else 1)"
-  check "M2 permissions status lists Accessibility and Screen Recording as granted" $? "see output above"
-  echo "receipt in fork: $(x $MF1 bash -c 'cat "$HOME/Library/Application Support/Silo/computer-use-receipt.json"')"
-
   echo "== M3 MCP: screenshot, spotlight Terminal, click, type, Return"
   mcp "$PLAIN" "$WORK/mm1.jsonl" <<PY
 [{"call":"computer_use_ready","args":{"computer":"$MF1"}},
@@ -247,6 +237,17 @@ raise SystemExit(0 if ok else 1)"
   check "M3 computer_use_screenshot returns an image (<= max_side)" $? ""
   out=$(x $MF1 cat /tmp/p5cu.txt); echo "silo exec $MF1 -- cat /tmp/p5cu.txt -> $out"
   [ "$out" = p5-cu-ok ]; check "M3 click + type + Return in the fork's GUI Terminal wrote the file the host reads" $? "$out"
+
+  echo "== M2 cua-driver permissions status in the fork (after M3: no LaunchAgent starts the daemon, the first cua-driver mcp session does)"
+  out=""; for _ in 1 2 3 4 5 6; do out=$(x $MF1 /usr/local/bin/cua-driver permissions status --json); echo "$out" | grep -q '"daemon_running": *false' || break; sleep 5; done; echo "$out"
+  echo "$out" | python3 -c "
+import json,sys
+t=sys.stdin.read(); d=json.loads(t[t.index('{'):])
+s=json.dumps(d).lower()
+raise SystemExit(0 if d.get('status')!='unknown' and 'accessibility' in s and 'screen' in s else 1)"
+  check "M2 permissions status lists Accessibility and Screen Recording as granted" $? "see output above"
+  echo "receipt in fork: $(x $MF1 bash -c 'cat "$HOME/Library/Application Support/Silo/computer-use-receipt.json"')"
+
 
   echo "== M4 keep the auto fork into its ask source"
   x $MF1 bash -c 'echo "fork claude: $(command -v claude)"; grep -n cua-driver ~/.claude/settings.json 2>&1; grep -n -i "cua-driver\|approve" ~/.codex/config.toml 2>&1'

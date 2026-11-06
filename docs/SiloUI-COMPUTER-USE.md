@@ -157,10 +157,12 @@ macOS (Apple Silicon host):
 
 1. `silo fork <macos main> --gui --json` returns with `computerUse.state` `ready`; the wait must
    not end at "desktop running, computer use unavailable".
-2. `silo exec <fork> -- /usr/local/bin/cua-driver permissions status --json` lists Accessibility
-   and Screen Recording as granted without a prompt in the viewer.
-3. `computer_use_screenshot`, `_click` and `_type` work (the session runs
+2. `computer_use_screenshot`, `_click` and `_type` work (the session runs
    `/usr/local/bin/cua-driver mcp` through `guest.exec.start`).
+3. Then `silo exec <fork> -- /usr/local/bin/cua-driver permissions status --json` lists
+   Accessibility and Screen Recording as granted without a prompt in the viewer. No LaunchAgent
+   starts the Cua Driver daemon; the first `cua-driver mcp` session does, so before any session
+   the answer is `daemon_running: false` and `unknown`, which is expected.
 4. Keep an `auto` macOS fork into its `ask` main and read the Claude Code and Codex files as in
    Linux step 6 (the guest update runs again after the keep). Promote an `auto` fork over an
    `ask` main: `silo status main` says `ask`; undo and the fork says `auto` again.

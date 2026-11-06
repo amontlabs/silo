@@ -310,9 +310,7 @@ impl Provision<'_> {
         // before the computer is handed over.
         if record.setup.computer_use && record.computer_use_stale() {
             self.say("Updating Computer Use")?;
-            let approval = record
-                .computer_use_approval
-                .unwrap_or_else(crate::computer_use::initial_approval);
+            let approval = record.computer_use_wanted_approval();
             guest_computer_use::install(self.app, &self.id, approval)?;
             record.computer_use_version = Some(templates::computer_use_version_for(approval));
             record.computer_use_approval = Some(approval);
