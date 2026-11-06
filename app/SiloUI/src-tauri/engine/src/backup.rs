@@ -17,10 +17,12 @@ use std::{
 };
 
 mod macos_archive;
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+pub(crate) use macos_archive::MAX_HARDWARE_MODEL_BYTES;
 pub(crate) use macos_archive::{
     memory_configuration_digest, ArchiveRuntimeKind, MacosArchiveComponentInput,
     MacosArchiveConfig, MacosArchiveConfiguration, MacosArchiveMemory, MacosArchiveSource,
-    MacosArchiveSourceKind, MacosCheckpointKind, MacosComponentRole, MAX_HARDWARE_MODEL_BYTES,
+    MacosArchiveSourceKind, MacosCheckpointKind, MacosComponentRole,
 };
 
 const MAGIC: &[u8; 16] = b"SILO-BACKUP\0\0\0\0\0";
@@ -3878,10 +3880,10 @@ fn rename_without_replacing_with(
     link: impl Fn(&Path, &Path) -> io::Result<()>,
 ) -> io::Result<()> {
     let unsupported = |error: &io::Error| {
-        matches!(
-            error.raw_os_error(),
-            Some(libc::EINVAL | libc::ENOTSUP | libc::EOPNOTSUPP | libc::ENOSYS)
-        )
+        // ENOTSUP and EOPNOTSUPP are the same value on Linux and differ on macOS.
+        error.raw_os_error().is_some_and(|code| {
+            [libc::EINVAL, libc::ENOTSUP, libc::EOPNOTSUPP, libc::ENOSYS].contains(&code)
+        })
     };
     match exclusive(source, destination) {
         Err(error) if unsupported(&error) => {}

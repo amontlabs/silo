@@ -5678,7 +5678,7 @@ fn the_launch_upgrade_leaves_structurally_invalid_histories_untouched() {
     let directory = tempfile::tempdir().unwrap();
     let storage = directory.path();
     fs::create_dir_all(storage.join("checkpoints")).unwrap();
-    let mut write = |id: &str, change: &dyn Fn(&mut Value)| {
+    let write = |id: &str, change: &dyn Fn(&mut Value)| {
         let mut value = layout_one_record();
         change(&mut value);
         let file = storage.join("checkpoints").join(format!("{id}.json"));

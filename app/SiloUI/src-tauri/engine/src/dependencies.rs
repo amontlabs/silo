@@ -233,6 +233,31 @@ pub struct ProbePaths {
     pub(crate) runtime_library: Option<PathBuf>,
 }
 
+impl ProbePaths {
+    /// The probe inputs of a host. On Linux the runtime library is not beside the tools, so
+    /// the host also names it with [`ProbePaths::with_runtime_library`].
+    pub fn new(
+        executable_dir: PathBuf,
+        resource_dir: PathBuf,
+        frameworks_dir: Option<PathBuf>,
+    ) -> Self {
+        Self {
+            executable_dir,
+            resource_dir,
+            frameworks_dir,
+            #[cfg(target_os = "linux")]
+            runtime_library: None,
+        }
+    }
+
+    /// The `libkrunfw` the runtime loads (`runtime::bundled_runtime_library`).
+    #[cfg(target_os = "linux")]
+    pub fn with_runtime_library(mut self, library: PathBuf) -> Self {
+        self.runtime_library = Some(library);
+        self
+    }
+}
+
 fn expected_target() -> Option<&'static str> {
     match (std::env::consts::OS, std::env::consts::ARCH) {
         ("macos", "aarch64") => Some("aarch64-apple-darwin"),
@@ -888,10 +913,10 @@ fn microsandbox_check(paths: &ProbePaths, deadline: Instant) -> DependencyCheck 
         .expect("macOS frameworks path")
         .join(&manifest.library.bundled_name);
     #[cfg(target_os = "linux")]
-    let library = paths
-        .runtime_library
-        .as_ref()
-        .expect("Linux dependency probes receive the resolved runtime library");
+    let Some(library) = paths.runtime_library.as_ref() else {
+        return ProbeError::Missing("The MicroSandbox runtime library was not located.".into())
+            .to_check(id, title, true);
+    };
     for candidate in [executable.as_path(), library.as_path()] {
         if let Err(error) = readable_file(candidate) {
             return error.to_check(id, title, true);

@@ -1,4 +1,6 @@
 //! Engine library for Silo.
+// The macOS computer code compiles everywhere and runs only on macOS, as in silod.
+#![cfg_attr(not(target_os = "macos"), allow(dead_code, private_interfaces))]
 
 extern crate self as silo_engine;
 

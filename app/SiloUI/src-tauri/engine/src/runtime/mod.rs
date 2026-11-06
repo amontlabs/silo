@@ -37,7 +37,6 @@ use silo_engine::context::{Audience, EngineContext, Event};
 use std::collections::VecDeque;
 use std::{
     collections::{HashMap, HashSet},
-    ffi::CString,
     fs::{self, File},
     io::{Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
@@ -2086,7 +2085,7 @@ fn device_resources() -> Result<DeviceResources, RuntimeError> {
 
 #[cfg(target_os = "macos")]
 fn physical_memory_bytes() -> Result<Option<u64>, RuntimeError> {
-    let name = CString::new("hw.memsize").expect("static sysctl name");
+    let name = std::ffi::CString::new("hw.memsize").expect("static sysctl name");
     let mut value = 0_u64;
     let mut length = std::mem::size_of::<u64>();
     // SAFETY: `name` is NUL-terminated and both output pointers refer to
