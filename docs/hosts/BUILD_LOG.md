@@ -243,7 +243,7 @@ Plan: [PLAN.md](PLAN.md).
   - The app: Connect device already adds a host by address, and its Set up Silo SSH key action
     is the same key setup; no UI change.
 - **Tests (Linux x86_64 container, as root):** `silo-cli` 328 passed (15 new in
-  `tests/hosts.rs`, 9 new unit tests), `silo-api` 49, `silo-client` 6; `silod` 346 unit tests
+  `tests/hosts.rs`, 8 new unit tests), `silo-api` 49, `silo-client` 15; `silod` 346 unit tests
   (1 new) and its other test binaries passed; `silo-engine` `remote::` 162 passed, 1 failed:
   `handshake_reports_failed_key_upgrade_and_preserves_managed_files`, which also fails at the
   phase 3 head in this container (its read-only directory does not stop root). 4 of the new
