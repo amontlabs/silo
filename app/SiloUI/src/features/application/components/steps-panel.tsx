@@ -1,4 +1,4 @@
-import { useEffect, useEffectEvent, useState } from "react"
+import { useEffect, useState } from "react"
 import { GitFork, Terminal } from "lucide-react"
 import { SectionHeading } from "@/components/page"
 import { ListCard, ListRow, ListRowIcon } from "@/components/list-row"
@@ -29,14 +29,13 @@ export function StepsPanel({ computer, target, actions, disabled, takenNames, fo
   const [openStep, setOpenStep] = useState<number | null>(null)
   const computerId = computer.configuration.id
   const deviceId = computer.device?.id
-  const read = useEffectEvent(() => actions.listComputerSteps!(computerId, deviceId))
+  const list = actions.listComputerSteps
   useEffect(() => {
-    if (!actions.listComputerSteps) return
+    if (!list) return
     let current = true
-    setFailed(false)
-    void read().then(value => { if (current) setSteps(value) }, () => { if (current) { setSteps([]); setFailed(true) } })
+    void list(computerId, deviceId).then(value => { if (current) { setSteps(value); setFailed(false) } }, () => { if (current) { setSteps([]); setFailed(true) } })
     return () => { current = false }
-  }, [computerId, deviceId, Boolean(actions.listComputerSteps)])
+  }, [list, computerId, deviceId])
   if (!actions.listComputerSteps) return null
 
   function fork(step: ComputerStep, newName: string) {
