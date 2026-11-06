@@ -2412,9 +2412,24 @@ async fn connections_keys_authorize(
 
 async fn connections_keys_list(context: &HandlerContext) -> Result<HandlerOutput, DispatchError> {
     let barrier = read_barrier(context, "connections");
-    let public_keys = blocking(silo_engine::remote::authorized_connections_keys).await?;
+    let listed = blocking(silo_engine::remote::authorized_connections_keys).await?;
+    let mut public_keys: Vec<String> = Vec::new();
+    for key in &listed {
+        if !public_keys.contains(&key.public_key) {
+            public_keys.push(key.public_key.clone());
+        }
+    }
+    let keys = listed
+        .into_iter()
+        .map(|key| connections::AuthorizedKey {
+            public_key: key.public_key,
+            fingerprint: key.fingerprint,
+            canonical: key.canonical,
+            identified: key.identified,
+        })
+        .collect();
     Ok(HandlerOutput {
-        value: serde_json::to_value(connections::AuthorizedKeysResult { public_keys })
+        value: serde_json::to_value(connections::AuthorizedKeysResult { public_keys, keys })
             .map_err(serialization)?,
         event_barrier: barrier,
     })
@@ -3762,7 +3777,7 @@ pub(crate) mod tests {
         let _key = KEY_LOCK.lock().await;
         let path = fixture().home.join(".ssh/authorized_keys");
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        let blob = "AAAAC3NzaC1lZDI1NTE5AAAAIFakeFakeFakeFakeFakeFakeFakeFakeFakeFakeFake";
+        let blob = "AAAAC3NzaC1lZDI1NTE5AAAAIFakeFakeFakeFakeFakeFakeFakeFakeFakeFakeFak";
         let public_key = format!("ssh-ed25519 {blob} Silo remote management");
         let original = format!(
             "ssh-ed25519 AAAAother user@laptop\nssh-ed25519 {blob} someone@elsewhere\n# comment\n"
@@ -3788,7 +3803,7 @@ pub(crate) mod tests {
             json!({"publicKey": "garbage"}),
         )
         .await;
-        assert_eq!(error.message, "Invalid Silo SSH public key.");
+        assert_eq!(error.message, "Invalid SSH public key.");
         expect_invalid_params(MethodName::ConnectionsKeysRevoke, json!({})).await;
     }
 
@@ -3796,7 +3811,7 @@ pub(crate) mod tests {
     async fn keys_authorize_and_list_are_this_devices_own() {
         let _key = KEY_LOCK.lock().await;
         let path = fixture().home.join(".ssh/authorized_keys");
-        let blob = "AAAAC3NzaC1lZDI1NTE5AAAAIAuthAuthAuthAuthAuthAuthAuthAuthAuthAuthAuth";
+        let blob = "AAAAC3NzaC1lZDI1NTE5AAAAIAuthAuthAuthAuthAuthAuthAuthAuthAuthAuthAut";
         let offered = format!("ssh-ed25519 {blob} laptop");
         let first = call(
             MethodName::ConnectionsKeysAuthorize,
@@ -3824,9 +3839,18 @@ pub(crate) mod tests {
                 .contains(&json!(installed)),
             "{listed}"
         );
+        let key = listed["keys"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|key| key["publicKey"] == json!(installed))
+            .unwrap();
+        assert_eq!(key["canonical"], true, "{listed}");
+        assert_eq!(key["identified"], true, "{listed}");
+        let fingerprint = key["fingerprint"].as_str().unwrap();
         let contents = std::fs::read_to_string(&path).unwrap();
         assert!(contents.contains(&format!(
-            r#"restrict,command="{}" {installed}"#,
+            r#"restrict,command="{} --key {fingerprint}" {installed}"#,
             silo_engine::channel::current().remote_bridge_command()
         )));
         call(
@@ -3847,7 +3871,11 @@ pub(crate) mod tests {
             json!({"publicKey": "ssh-rsa AAAA x"}),
         )
         .await;
-        assert_eq!(error.message, "Invalid Silo SSH public key.");
+        assert!(
+            error.message.starts_with("Not an Ed25519 public key"),
+            "{}",
+            error.message
+        );
         expect_invalid_params(MethodName::ConnectionsKeysAuthorize, json!({})).await;
 
         let own = call(MethodName::ConnectionsKeysOwn, json!({}))

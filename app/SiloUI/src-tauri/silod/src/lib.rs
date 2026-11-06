@@ -102,11 +102,29 @@ mod entry_tests {
     }
 
     #[test]
-    fn the_bridge_takes_no_arguments() {
-        let args = ["silod", "--remote-bridge", "extra"].map(String::from);
-        assert_eq!(
-            super::entry(&args).unwrap_err(),
-            "usage: silod --remote-bridge"
-        );
+    fn the_bridge_takes_only_a_key_fingerprint() {
+        let refused = |args: &[&str]| {
+            let mut all = vec!["silod", "--remote-bridge"];
+            all.extend_from_slice(args);
+            let all: Vec<String> = all.into_iter().map(String::from).collect();
+            super::entry(&all).unwrap_err()
+        };
+        for args in [
+            &["extra"][..],
+            &["--key"],
+            &["--key", "SHA256:short"],
+            &[
+                "--key",
+                "SHA256:LH9ifkGkEurhEj7pgiSwRedJtKQomUQeevYOdCTeGWw",
+                "extra",
+            ],
+            &[
+                "--other",
+                "SHA256:LH9ifkGkEurhEj7pgiSwRedJtKQomUQeevYOdCTeGWw",
+            ],
+        ] {
+            assert_eq!(refused(args), silo_engine::remote::BRIDGE_USAGE, "{args:?}");
+        }
+        assert!(silo_engine::remote::BRIDGE_USAGE.starts_with("usage: silod --remote-bridge"));
     }
 }

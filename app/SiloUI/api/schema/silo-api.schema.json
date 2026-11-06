@@ -391,10 +391,49 @@
       ],
       "type": "object"
     },
-    "AuthorizedKeysResult": {
-      "description": "The controller keys this device's account accepts for Connections: the Silo lines of `~/.ssh/authorized_keys` that may only run the bridge.",
+    "AuthorizedKey": {
+      "description": "One line of `~/.ssh/authorized_keys` whose forced command is this channel's Connections bridge.",
       "properties": {
+        "canonical": {
+          "description": "The line is exactly the one Silo writes now (`restrict`, the bridge with `--key` and the key's fingerprint).",
+          "type": "boolean"
+        },
+        "fingerprint": {
+          "description": "`SHA256:...`, as `ssh-keygen -l` prints it; absent when the key is not base64.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "identified": {
+          "description": "The forced command passes the bridge this line's own key fingerprint, so a request through it can revoke that key.",
+          "type": "boolean"
+        },
+        "publicKey": {
+          "description": "`<type> <key> [comment]`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "publicKey",
+        "canonical",
+        "identified"
+      ],
+      "type": "object"
+    },
+    "AuthorizedKeysResult": {
+      "description": "The controller keys this device's account accepts for Connections: every line of `~/.ssh/authorized_keys` whose forced command is the bridge, whatever its other options, comment or the Silo version that wrote it.",
+      "properties": {
+        "keys": {
+          "default": [],
+          "description": "Each line, in file order.",
+          "items": {
+            "$ref": "#/$defs/AuthorizedKey"
+          },
+          "type": "array"
+        },
         "publicKeys": {
+          "description": "The keys of `keys`, each once.",
           "items": {
             "type": "string"
           },

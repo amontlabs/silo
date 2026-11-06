@@ -84,15 +84,15 @@ pub fn run_remote_guest(args: &[String]) -> Result<i32, String> {
 }
 
 /// Runs the Connections bridge that a controller's forced SSH command starts through the
-/// `~/.local/bin` link. It relays one request to this channel's `control.sock` and writes
-/// nothing to stdout before the reply, which the controller reads as a framed stream.
+/// `~/.local/bin` link, with `--key` and the fingerprint of the key it belongs to when Silo
+/// wrote the line (see `silo_engine::remote::bridge_key_argument`). It relays one request to
+/// this channel's `control.sock` and writes nothing to stdout before the reply, which the
+/// controller reads as a framed stream.
 pub fn run_remote_bridge(args: &[String]) -> Result<i32, String> {
-    if !args.is_empty() {
-        return Err("usage: silod --remote-bridge".to_owned());
-    }
+    let key = silo_engine::remote::bridge_key_argument(args)?;
     crate::run_from_bundle(&std::env::args().collect::<Vec<_>>())?;
     helper_paths()?;
-    silo_engine::remote::run_bridge()?;
+    silo_engine::remote::run_bridge(key.as_deref())?;
     Ok(0)
 }
 

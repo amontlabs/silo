@@ -48,9 +48,27 @@ wire_struct! {
 }
 
 wire_struct! {
-    #[doc = "The controller keys this device's account accepts for Connections: the Silo lines of `~/.ssh/authorized_keys` that may only run the bridge."]
+    #[doc = "One line of `~/.ssh/authorized_keys` whose forced command is this channel's Connections bridge."]
+    AuthorizedKey {
+        #[doc = "`<type> <key> [comment]`."]
+        public_key: String,
+        #[doc = "`SHA256:...`, as `ssh-keygen -l` prints it; absent when the key is not base64."]
+        fingerprint: Option<String>,
+        #[doc = "The line is exactly the one Silo writes now (`restrict`, the bridge with `--key` and the key's fingerprint)."]
+        canonical: bool,
+        #[doc = "The forced command passes the bridge this line's own key fingerprint, so a request through it can revoke that key."]
+        identified: bool,
+    }
+}
+
+wire_struct! {
+    #[doc = "The controller keys this device's account accepts for Connections: every line of `~/.ssh/authorized_keys` whose forced command is the bridge, whatever its other options, comment or the Silo version that wrote it."]
     AuthorizedKeysResult {
+        #[doc = "The keys of `keys`, each once."]
         public_keys: Vec<String>,
+        #[doc = "Each line, in file order."]
+        #[serde(default)]
+        keys: Vec<AuthorizedKey>,
     }
 }
 
