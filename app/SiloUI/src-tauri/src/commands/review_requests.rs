@@ -226,9 +226,9 @@ mod forwarding_tests {
             | MethodName::ChangesRequestsKeep
             | MethodName::ChangesRequestsThrowAway
             | MethodName::ChangesRequestsOpen => Ok(json!({"jobId": "job:1"})),
-            MethodName::OperationsJobGet => Ok(
-                json!({"jobId": "job:1", "state": "finished", "outcome": {"result": {"ok": 1}}}),
-            ),
+            MethodName::OperationsJobGet => {
+                Ok(json!({"jobId": "job:1", "state": "finished", "outcome": {"result": {"ok": 1}}}))
+            }
             MethodName::ChangesRequestsList => Ok(json!({"requests": []})),
             MethodName::StepsList => Ok(json!({"steps": []})),
             MethodName::ComputersTree => Ok(json!({"nodes": []})),
@@ -292,5 +292,56 @@ mod forwarding_tests {
         let (engine, _) = connected_client(&fake).await;
         let error = keep(&engine, None, "r1", false).await.unwrap_err();
         assert_eq!(error.code, "busy");
+    }
+
+    #[test]
+    fn the_contract_fixtures_are_what_the_typed_results_read() {
+        use silo_api::methods::{review_requests as rr, steps};
+        let fixtures: Value = serde_json::from_str(include_str!(
+            "../../../src/test/contracts/review-requests.json"
+        ))
+        .unwrap();
+        fn read<T: serde::de::DeserializeOwned>(fixtures: &Value, key: &str) -> T {
+            serde_json::from_value(fixtures[key].clone()).unwrap()
+        }
+        assert_eq!(
+            read::<rr::ChangesRequestsListResult>(&fixtures, "list")
+                .requests
+                .len(),
+            2
+        );
+        assert!(read::<rr::ChangesRequestsShowResult>(&fixtures, "show").fresh);
+        assert_eq!(
+            read::<rr::ChangesRequestsKeepResult>(&fixtures, "keep").status,
+            "kept"
+        );
+        assert!(
+            read::<rr::ChangesRequestsKeepResult>(&fixtures, "refusedKeep")
+                .refusal
+                .is_some()
+        );
+        assert_eq!(
+            read::<rr::ChangesRequestsThrowAwayResult>(&fixtures, "throwAway").dropped,
+            "login-fix"
+        );
+        assert!(read::<rr::ChangesRequestsOpenResult>(&fixtures, "open").started);
+        assert_eq!(
+            read::<steps::StepsListResult>(&fixtures, "steps")
+                .steps
+                .len(),
+            2
+        );
+        assert_eq!(
+            read::<steps::ComputersTreeResult>(&fixtures, "tree")
+                .nodes
+                .len(),
+            2
+        );
+        assert_eq!(
+            read::<rr::CredentialUsage>(&fixtures, "credentials")
+                .used
+                .len(),
+            1
+        );
     }
 }
