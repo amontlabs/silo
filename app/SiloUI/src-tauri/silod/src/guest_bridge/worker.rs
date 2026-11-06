@@ -165,6 +165,7 @@ fn work(shared: &Shared, computer: &str) {
             continue;
         };
         let spool = Spool::new(guest_client::spool_dir(&home, name));
+        spool.seal();
         if spool.has_work() {
             let snapshot = shared.fresh(FRESH);
             let requests = |id: &str| shared.requests(id);
