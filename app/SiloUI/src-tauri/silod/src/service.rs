@@ -17,11 +17,7 @@ pub fn current_bundle_identifier() -> Result<String, String> {
 }
 
 pub fn current_bundle_manifest() -> Result<EngineManifest, String> {
-    // SSH starts the Connections bridge through the `~/.local/bin` link, and macOS then
-    // reports the link as the executable. The bundle is found from the real file.
-    let executable = std::env::current_exe()
-        .and_then(std::fs::canonicalize)
-        .map_err(|error| error.to_string())?;
+    let executable = std::env::current_exe().map_err(|error| error.to_string())?;
     let resources = default_resource_dir(&executable)?;
     let bundle_identifier = current_bundle_identifier()?;
     let bundle_path = bundle_path_for_executable(&executable)?;
