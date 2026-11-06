@@ -44,9 +44,9 @@ cd "$PROJ" || return
 echo "== Q1 quiet fork of main: no scheduled runs in the fork (main is the control)"
 q=e2e-final-quiet
 echo "-- main gets a cron job (every minute) and a boot-time cron start, like the phase 1 check; the poller is a recipe service"
-x main 'echo "* * * * * root echo \"\$(hostname) \$(date +%s) cron\" >> /var/log/final-cron.log" > /etc/cron.d/final-job; chmod 644 /etc/cron.d/final-job
-printf "[Desktop Entry]\nType=Application\nName=final-cron\nExec=sudo -n /usr/sbin/service cron start\n" > /etc/xdg/autostart/final-cron.desktop; service cron start; sleep 70; cat /var/log/final-cron.log | tail -2'
-"$SILO" fork main --name $q > "$RAW/quiet-fork.out" 2>&1; "$SILO" start $q >/dev/null 2>&1; check "Q1 fork started" $([ "$(state $q)" = running ]; echo $?) ""
+x main 'echo "* * * * * root echo \"\$(hostname) \$(date -u) cron\" >> /var/log/final-cron.log" > /etc/cron.d/final-job; chmod 644 /etc/cron.d/final-job
+printf "[Desktop Entry]\nType=Application\nName=final-cron\nExec=sudo -n /usr/sbin/service cron start\n" > /etc/xdg/autostart/final-cron.desktop; service cron start; sleep 70; tail -2 /var/log/final-cron.log'
+"$SILO" fork main --name $q --recipe-file "$PROJ/.silo/recipes/demo.yaml" > "$RAW/quiet-fork.out" 2>&1; "$SILO" start $q >/dev/null 2>&1; check "Q1 fork started" $([ "$(state $q)" = running ]; echo $?) ""
 say "settling 45 s, then watching 90 s"; sleep 45
 fh=$(xs $q hostname | head -1); mh=$(xs main hostname | head -1)
 cnt() { echo "poll=$(x $1 "grep -c '^$2 ' /var/tmp/final-poll.log 2>/dev/null || true") cron=$(x $1 "grep -c '^$2 ' /var/log/final-cron.log 2>/dev/null || true") pollers=$(x $1 'pgrep -fc "final/poller.py" || true') crond=$(x $1 'pgrep -xc cron || true')"; }
