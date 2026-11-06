@@ -375,12 +375,16 @@ fn trim_newline(mut value: String) -> String {
 fn render_guest_client(result: &Value) -> String {
     if let Some(enabled) = result["enabled"].as_bool() {
         let name = result["computerId"].as_str().unwrap_or_default();
-        return match (enabled, result["mintedAt"].as_str()) {
+        let line = match (enabled, result["mintedAt"].as_str()) {
             (true, Some(at)) => format!(
-                "{name}: token minted {at}; fold: {}",
-                result["policy"]["fold"].as_str().unwrap_or("ask")
+                "{name}: token minted {at}; fork_secrets: {}",
+                result["policy"]["forkSecrets"]
             ),
             _ => format!("{name}: no token"),
+        };
+        return match result["warning"].as_str() {
+            Some(warning) => format!("{line}\nwarning: {warning}"),
+            None => line,
         };
     }
     format!(
@@ -474,7 +478,13 @@ pub async fn run(cli: Cli, working_directory: &Path) -> Result<i32, CliError> {
                 crate::guest_install::revoke(&engine, computer).await?
             }
             GuestClientCommand::Status { computer } => {
-                crate::guest_install::status(&engine, computer).await?
+                let mut status = crate::guest_install::status(&engine, computer).await?;
+                let current =
+                    crate::guest_install::policy_from(settings.as_ref(), cli.agent.as_deref());
+                if let Some(warning) = crate::guest_install::stale_warning(&status, &current) {
+                    status["warning"] = serde_json::json!(warning);
+                }
+                status
             }
         };
         println!(

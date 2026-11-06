@@ -93,7 +93,17 @@ impl Link {
         };
         let temporary = self.spool.join("req").join(format!("{id}.json.tmp"));
         let target = self.spool.join("req").join(format!("{id}.json"));
-        fs::write(&temporary, &bytes).map_err(io)?;
+        {
+            use std::{io::Write, os::unix::fs::OpenOptionsExt};
+            // Readable by this user only: the frame carries the token.
+            let mut file = fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(&temporary)
+                .map_err(io)?;
+            file.write_all(&bytes).map_err(io)?;
+        }
         fs::rename(&temporary, &target).map_err(io)?;
         let answer = self.spool.join("resp").join(format!("{id}.json"));
         let begun = Instant::now();

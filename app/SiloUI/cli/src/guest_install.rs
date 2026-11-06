@@ -15,23 +15,36 @@ use silo_api::methods::{
 };
 
 use crate::{
-    config::{Fold, Settings},
+    config::Settings,
     engine::{Engine, Progress},
     error::CliError,
 };
 
-/// The policy the settings give an agent: its `fold` mode and the secrets a fork may name.
+/// The policy the settings give an agent: the secrets a fork made from inside may name. The
+/// in-guest client never keeps, so `fold` and `auto_keep` do not enter it.
 pub fn policy_from(settings: Option<&Settings>, agent: Option<&str>) -> GuestClientPolicy {
     let settings = settings.cloned().unwrap_or_default();
     GuestClientPolicy {
-        fold: match settings.fold {
-            Fold::Ask => "ask",
-            Fold::AutoCode => "auto-code",
-        }
-        .into(),
         fork_secrets: settings.fork_secrets,
         agent: agent.map(str::to_owned),
     }
+}
+
+/// A warning when the settings now differ from what the token was minted with.
+pub fn stale_warning(status: &Value, current: &GuestClientPolicy) -> Option<String> {
+    let stored: Vec<String> = status["policy"]["forkSecrets"]
+        .as_array()?
+        .iter()
+        .filter_map(|name| name.as_str().map(str::to_owned))
+        .collect();
+    let (mut stored, mut now) = (stored, current.fork_secrets.clone());
+    stored.sort();
+    now.sort();
+    (stored != now).then(|| {
+        format!(
+            "The token was minted with fork_secrets {stored:?} but the settings now say {now:?}. Run `silo guest-client install` again to apply them."
+        )
+    })
 }
 
 fn valid_group(group: &str) -> bool {
@@ -191,7 +204,12 @@ async fn upload_binary(
     as_root(
         engine,
         computer_id,
-        "set -e; install -m 0755 \"$1/$2\" /usr/local/bin/silo; rm -rf \"$1\"",
+        // The upload folder belongs to the working account, so the file is copied into a folder
+        // only root can enter, checked there, and installed from there.
+        "set -e; src=\"$1/$2\"; [ -f \"$src\" ] && [ ! -L \"$src\" ]; \
+         safe=$(mktemp -d /var/lib/silo-install.XXXXXX); chmod 700 \"$safe\"; \
+         cp -P \"$src\" \"$safe/silo\"; rm -rf \"$1\"; [ -f \"$safe/silo\" ] && [ ! -L \"$safe/silo\" ]; \
+         install -m 0755 -o root -g root \"$safe/silo\" /usr/local/bin/silo; rm -rf \"$safe\"",
         &[&directory, file_name],
         None,
     )

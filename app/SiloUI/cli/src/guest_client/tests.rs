@@ -233,6 +233,25 @@ async fn an_engine_refusal_reaches_the_agent_as_the_error() {
 }
 
 #[test]
+fn status_warns_when_the_settings_no_longer_match_the_token() {
+    use crate::guest_install::stale_warning;
+    use silo_api::methods::guest_client::GuestClientPolicy;
+    let status = json!({"policy": {"forkSecrets": ["github"]}});
+    let same = GuestClientPolicy {
+        fork_secrets: vec!["github".into()],
+        agent: None,
+    };
+    let changed = GuestClientPolicy {
+        fork_secrets: vec![],
+        agent: None,
+    };
+    assert!(stale_warning(&status, &same).is_none());
+    assert!(stale_warning(&status, &changed)
+        .unwrap()
+        .contains("install"));
+}
+
+#[test]
 fn a_missing_token_file_says_how_to_get_one() {
     let error = Link::load(Path::new("/nonexistent/guest-client.json"))
         .err()
