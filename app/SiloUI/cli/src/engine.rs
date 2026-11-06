@@ -265,6 +265,11 @@ impl Engine {
     /// checkpoint is always taken after step N-1's and the numbers follow that order, whichever
     /// `silo` process runs the step. The lock is a file beside the socket.
     pub async fn lock_steps(&self, computer_id: &str) -> Result<StepLock, CliError> {
+        if self.memory.as_os_str().is_empty() {
+            return Err(CliError::new(
+                "There is no folder beside the socket for the lock.",
+            ));
+        }
         let fine = !computer_id.is_empty()
             && computer_id
                 .chars()
@@ -288,6 +293,13 @@ impl Engine {
         .map_err(|_| CliError::new("The step lock could not be taken."))?
         .map_err(|error| CliError::new(format!("Cannot lock the computer's steps: {error}")))?;
         Ok(StepLock(locked))
+    }
+
+    /// Removes the step lock file of a computer that no longer exists.
+    pub fn forget_step_lock(&self, computer_id: &str) {
+        if !self.memory.as_os_str().is_empty() {
+            let _ = std::fs::remove_file(self.memory.join(format!("cli-steps-{computer_id}.lock")));
+        }
     }
 
     /// Remembers the review digest of the last `silo diff` of a computer.

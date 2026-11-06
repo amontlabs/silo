@@ -354,13 +354,6 @@ async fn one(
         return entry;
     }
     let (mut out, mut err) = (Capture::default(), Capture::default());
-    let _step_lock = match engine.lock_steps(&fork.id).await {
-        Ok(lock) => lock,
-        Err(error) => {
-            entry["error"] = json!(error.message);
-            return entry;
-        }
-    };
     let started = crate::clock::now_unix();
     let ran = exec_streaming(
         engine,
@@ -382,7 +375,7 @@ async fn one(
         Ok(ran) => {
             entry["exitCode"] = json!(ran.exit_code);
             entry["signal"] = json!(ran.signal);
-            entry["step"] = crate::steps::record(
+            entry["step"] = crate::steps::record_in_order(
                 engine,
                 &fork,
                 &args.command,

@@ -1671,7 +1671,8 @@ pub fn macos_checkpoint_usage(
                     &layout,
                     entry.record.pending_restore.as_ref(),
                     &checkpoint.id,
-                    forked.contains(&checkpoint.id),
+                    checkpoint.policy_kind == checkpoints::PolicyKind::ForkPoint
+                        && forked.contains(&checkpoint.id),
                 )
                 .map(str::to_owned),
             }
@@ -6375,7 +6376,10 @@ fn delete_checkpoint(
     let held = begin_operation(app, id, checkpoints::OperationKind::Delete, &job)?;
     let layout = Layout::new(&data, id);
     let target = checkpoints::find(&layout, checkpoint_id)?;
-    let forked = fork_point_in_use(&registry().entries, id, &target.id);
+    // Only a fork point is held for its forks. A named checkpoint a fork was made from is the
+    // owner's to delete; retention alone leaves it while the fork exists.
+    let forked = target.policy_kind == checkpoints::PolicyKind::ForkPoint
+        && fork_point_in_use(&registry().entries, id, &target.id);
     if let Some(blocker) = checkpoint_delete_blocker(
         &layout,
         held.record.pending_restore.as_ref(),
@@ -12394,6 +12398,15 @@ mod tests {
         );
         assert!(!checkpoints::dir(&layout, &unused).exists());
         assert!(checkpoints::dir(&layout, &newest).exists());
+        // Retention leaves it, but the owner may still delete a checkpoint they named or
+        // kept: only a fork point is held for its forks.
+        let usage = macos_checkpoint_usage(&app, &source.id).unwrap();
+        let row = usage
+            .checkpoints
+            .iter()
+            .find(|row| row.id == forked_from)
+            .unwrap();
+        assert_eq!(row.delete_blocker, None);
     }
 
     #[test]

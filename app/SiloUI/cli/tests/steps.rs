@@ -321,17 +321,67 @@ async fn a_computers_steps_run_one_at_a_time_in_order() {
         })
         .cloned()
         .collect();
-    assert_eq!(
-        work,
-        [
-            "guest.exec",
-            "checkpoints.create",
-            "steps.record",
-            "guest.exec",
-            "checkpoints.create",
-            "steps.record"
-        ]
-    );
+    assert_eq!(work.len(), 6);
+    // Another command may run meanwhile, but one step's checkpoint and record are never
+    // separated by the other's.
+    for (index, method) in work.iter().enumerate() {
+        if method == "checkpoints.create" {
+            assert_eq!(work[index + 1], "steps.record", "{work:?}");
+        }
+    }
+}
+
+#[tokio::test]
+async fn without_step_checkpoints_nothing_waits_for_the_step_lock() {
+    let (engine, _) = engine(json!([]), json!([]), false);
+    let connected = Engine::connect(&engine.socket).await.unwrap();
+    let _held = connected.lock_steps("id-main").await.unwrap();
+    let ran = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        steps::run_exec(&connected, &exec_args(), settings(""), &ignore),
+    )
+    .await;
+    assert!(ran.expect("the command must not wait for the lock").is_ok());
+}
+
+#[tokio::test]
+async fn a_step_lock_that_cannot_be_taken_does_not_fail_the_command() {
+    let (engine, _) = engine(json!([]), json!([]), false);
+    // A folder where the lock file would go makes the lock impossible.
+    std::fs::create_dir(
+        engine
+            .socket
+            .parent()
+            .unwrap()
+            .join("cli-steps-id-main.lock"),
+    )
+    .unwrap();
+    let connected = Engine::connect(&engine.socket).await.unwrap();
+    let (output, step) = steps::run_exec(
+        &connected,
+        &exec_args(),
+        settings("step_checkpoints: true\n"),
+        &ignore,
+    )
+    .await
+    .unwrap();
+    assert_eq!(output.process_exit_code(), 3);
+    assert_eq!(step["number"], 1);
+}
+
+#[tokio::test]
+async fn run_exec_keeps_the_timeout_limit_without_overflowing() {
+    let (engine, _) = engine(json!([]), json!([]), false);
+    let connected = Engine::connect(&engine.socket).await.unwrap();
+    for timeout_secs in [0, 181, u64::MAX] {
+        let mut args = exec_args();
+        args.timeout_secs = timeout_secs;
+        let error = steps::run_exec(&connected, &args, settings(""), &ignore)
+            .await
+            .unwrap_err();
+        assert!(error.message.contains("timeout"), "{}", error.message);
+    }
+    assert!(engine.calls("guest.exec").is_empty());
 }
 
 #[tokio::test]
