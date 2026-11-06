@@ -121,6 +121,18 @@ out=$(x $F1 cat /tmp/p5cu.txt); echo "silo exec $F1 -- cat /tmp/p5cu.txt -> $out
 [ "$out" = p5-cu-ok ]; check "L2 typing into the fork's GUI terminal wrote a file the host reads with silo exec" $? "$out"
 grep -q '"call": "computer_use_hotkey".*isError": false' "$WORK/m1.jsonl" && grep -q '"call": "computer_use_scroll".*isError": false' "$WORK/m1.jsonl"; check "L2 hotkey ctrl+l and scroll answer without error" $? ""
 
+echo "== L2b first click in a fresh silo mcp session (no screenshot first) lands at the mapped position"
+mcp "$PLAIN" "$WORK/m1b.jsonl" <<PY
+[{"call":"computer_use_click","args":{"computer":"$F1","x":320,"y":200}},
+ {"sh":S+" exec $F1 -- env DISPLAY=:1 XAUTHORITY=/run/silo-desktop/user/Xauthority python3 -c \"\$(cat "+P+")\""}]
+PY
+python3 -c "
+import json
+for l in open('$WORK/m1b.jsonl'):
+    r=json.loads(l); print('  step',r['step'],r.get('call') or 'pointer','isError/rc=',r.get('isError',r.get('rc')),(r.get('text') or r.get('out') or '').replace(chr(10),' | ')[:200])"
+ptr=$(grep '"step": 1' "$WORK/m1b.jsonl" | grep -o 'pointer [0-9]* [0-9]*'); echo "pointer after first-ever click at pixel (320,200) with no prior screenshot: $ptr"
+[ "$ptr" = "pointer 360 225" ]; check "L2b first click with no screenshot first lands at the mapped position" $? "$ptr (expected 360 225 on a 1440x900 screen)"
+
 echo "== L3 kill the driver in the fork, next call works (same silo mcp session as step before)"
 mcp "$PLAIN" "$WORK/m2.jsonl" <<PY
 [{"call":"computer_use_screenshot","args":{"computer":"$F1"}},

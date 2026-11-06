@@ -1,6 +1,6 @@
 == header
-commit: 135da5ab00bbc987fb5c4f70e3ef5e77d2063c3b; git status --porcelain app: []
-bundled msb: msb 0.7.6; silo silo 0.1.0; host macOS 26.5 (arm64); date 2026-11-06T03:25:05Z
+commit: 64081fd5528c66a796f3ba2f67e3b14a36be8f4d; git status --porcelain app: []
+bundled msb: msb 0.7.6; silo silo 0.1.0; host macOS 26.5 (arm64); date 2026-11-06T04:03:51Z
 macOS VMs running at start (silo list; pgrep Virtualization.VirtualMachine lines: 0): 0; mode: all
 NAME                                STATE      KIND    SIZE
 workspace-1                         stopped    linux   8 cpu, 32 GiB
@@ -10,18 +10,18 @@ silo-eval-b                         stopped    linux   2 cpu, 2 GiB
 e2e-p3-macsrc-before-20261105-2253  stopped    macos   4 cpu, 8 GiB
 e2e-p3-macsrc                       stopped    macos   4 cpu, 8 GiB
 == LINUX: source e2e-p5cu-src (stub claude/codex binaries so the guest helper registers them)
-[04:25:13] PASS  create source  -- 
-[04:25:17] PASS  start source  -- 
+[05:03:59] PASS  create source  -- 
+[05:04:03] PASS  start source  -- 
 claude
 codex
-[04:25:17] letting the source desktop settle 60 s (a panel config written after the fork makes the keep clash)
+[05:04:03] letting the source desktop settle 60 s (a panel config written after the fork makes the keep clash)
 source status: computer use: ready, approval ask, driver 0.38.0
 == L1 silo fork --gui --computer-use auto (CLI, person)
 Dropping silo-baseline-8fa22f...
 Forking e2e-p5cu-src into e2e-p5cu-f1...
 Starting e2e-p5cu-f1...
 {"appliedApproval": "auto", "approval": "auto", "driverVersion": "0.38.0", "reason": null, "session": "running", "state": "ready"}
-[04:26:27] PASS  L1 fork --gui auto ready  -- rc=0 10s state=ready approval=auto
+[05:05:13] PASS  L1 fork --gui auto ready  -- rc=0 9s state=ready approval=auto
 fork status: computer use: ready, approval auto, driver 0.38.0
 fork agent files:
 4:      "mcp__cua-driver"
@@ -29,43 +29,48 @@ fork agent files:
 2:command = "/usr/local/libexec/silo-cua-driver-mcp"
 4:default_tools_approval_mode = "approve"
 6:[mcp_servers.cua-driver.env]
-[04:26:28] PASS  L1 the auto fork has the cua-driver allow rule and Codex approve line  -- 
+[05:05:14] PASS  L1 the auto fork has the cua-driver allow rule and Codex approve line  -- 
 == L2 MCP session on e2e-p5cu-f1
   step 0 ['checkpoint', 'checkpoints', 'computer_use_call', 'computer_use_click', 'computer_use_drag', 'computer_use_hotkey', 'computer_use_key', 'computer_use_move', 'computer_use_ready', 'computer_use_screenshot', 'computer_use_scroll', 'computer_use_tools', 'computer_use_type', 'computer_use_wait', 'diff', 'drop', 'exec', 'fold', 'fork', 'fork_gui', 'list', 'ports', 'publish', 'recipe_list', 'request_keep', 'request_open', 'request_show', 'request_throw_away', 'requests_list', 'retry_setup', 'review', 'secrets_list', 'ssh_name', 'status', 'steps_list', 'tree', 'undo', 'unpublish', 'up'] isError=None images=[] 
   step 1 computer_use_tools isError=False images=[] { |   "capability_version": "1", |   "enforcement_adapters": [ |     { |       "absolute_ttl_seconds": null, |       "authorization_requirement": "profile_behavior_and_optional_capability_manifest", |       "authorization_source": "built_in_standard; unattende
   step 2 computer_use_ready isError=False images=[] { |   "computer": "e2e-p5cu-f1", |   "computerUse": { |     "appliedApproval": "auto", |     "approval": "auto", |     "driverVersion": "0.38.0", |     "reason": null, |     "session": "running", |     "state": "ready" |   }, |   "failed": null, |   "ready": t
-  step 3 computer_use_screenshot isError=False images=[([1280, 800], 47083)] ✅ Desktop screenshot 1280x800 written to /tmp/silo-cu.shot-5366-1.png (screen 1440x900; x/y for scope:"desktop" actions are pixels of THIS screenshot (mapped ×1.12 back to the screen automatically)) | Visible windows (use these pid + window_id values in every 
+  step 3 computer_use_screenshot isError=False images=[([1280, 800], 47050)] ✅ Desktop screenshot 1280x800 written to /tmp/silo-cu.shot-88321-1.png (screen 1440x900; x/y for scope:"desktop" actions are pixels of THIS screenshot (mapped ×1.12 back to the screen automatically)) | Visible windows (use these pid + window_id values in every
   step 4 computer_use_click isError=False images=[] ✅ Sent screen-absolute click at (720,450) (desktop scope).
   step 5 /Users/polarzero/code/projects/microsand isError=None images=[] 
   step 6 computer_use_hotkey isError=False images=[] Pressed desktop hotkey ctrl+alt+t.
   step 7  isError=None images=[] 
-  step 8 computer_use_screenshot isError=False images=[([1280, 800], 69112)] ✅ Desktop screenshot 1280x800 written to /tmp/silo-cu.shot-5366-2.png (screen 1440x900; x/y for scope:"desktop" actions are pixels of THIS screenshot (mapped ×1.12 back to the screen automatically)) | Visible windows (use these pid + window_id values in every 
+  step 8 computer_use_screenshot isError=False images=[([1280, 800], 69088)] ✅ Desktop screenshot 1280x800 written to /tmp/silo-cu.shot-88321-2.png (screen 1440x900; x/y for scope:"desktop" actions are pixels of THIS screenshot (mapped ×1.12 back to the screen automatically)) | Visible windows (use these pid + window_id values in every
   step 9 computer_use_click isError=False images=[] ✅ Sent screen-absolute click at (338,281) (desktop scope).
   step 10 computer_use_type isError=False images=[] Typed text into the focused desktop application.
   step 11 computer_use_key isError=False images=[] Pressed desktop key 'Return'.
   step 12  isError=None images=[] 
   step 13 computer_use_hotkey isError=False images=[] Pressed desktop hotkey ctrl+l.
   step 14 computer_use_scroll isError=False images=[] Scrolled desktop down × 3.
-  step 15 computer_use_screenshot isError=False images=[([1280, 800], 73345)] ✅ Desktop screenshot 1280x800 written to /tmp/silo-cu.shot-5366-3.png (screen 1440x900; x/y for scope:"desktop" actions are pixels of THIS screenshot (mapped ×1.12 back to the screen automatically)) | Visible windows (use these pid + window_id values in every 
+  step 15 computer_use_screenshot isError=False images=[([1280, 800], 73321)] ✅ Desktop screenshot 1280x800 written to /tmp/silo-cu.shot-88321-3.png (screen 1440x900; x/y for scope:"desktop" actions are pixels of THIS screenshot (mapped ×1.12 back to the screen automatically)) | Visible windows (use these pid + window_id values in every
 driver tools: ["click", "drag", "get_desktop_state", "get_screen_size", "hotkey", "move_cursor", "press_key", "scroll", "type_text"]
-[04:26:44] PASS  L2 computer_use_tools matches the pinned fixture  -- fixture ["click", "drag", "get_desktop_state", "get_screen_size", "hotkey", "move_cursor", "press_key", "scroll", "type_text"]
-[04:26:44] PASS  L2 screenshots are images no wider than 1280, text gives size and the screen size  -- Screenshot 1280x800 (the screen is 1440x900); files in raw/linux-*
+[05:05:29] PASS  L2 computer_use_tools matches the pinned fixture  -- fixture ["click", "drag", "get_desktop_state", "get_screen_size", "hotkey", "move_cursor", "press_key", "scroll", "type_text"]
+[05:05:29] PASS  L2 screenshots are images no wider than 1280, text gives size and the screen size  -- Screenshot 1280x800 (the screen is 1440x900); files in raw/linux-*
 pointer after click at screenshot pixel (640,400) on a 1440x900 screen: pointer 720 450
-[04:26:44] PASS  L2 a click read off the (1280-wide) screenshot lands scaled on the 1440x900 screen  -- pointer 720 450 (expected 720 450)
-[04:26:44] PASS  L2 ctrl+alt+t opens a terminal (window list shows Terminal)  -- 
+[05:05:29] PASS  L2 a click read off the (1280-wide) screenshot lands scaled on the 1440x900 screen  -- pointer 720 450 (expected 720 450)
+[05:05:29] PASS  L2 ctrl+alt+t opens a terminal (window list shows Terminal)  -- 
 silo exec e2e-p5cu-f1 -- cat /tmp/p5cu.txt -> p5-cu-ok
-[04:26:44] PASS  L2 typing into the fork's GUI terminal wrote a file the host reads with silo exec  -- p5-cu-ok
-[04:26:44] PASS  L2 hotkey ctrl+l and scroll answer without error  -- 
+[05:05:30] PASS  L2 typing into the fork's GUI terminal wrote a file the host reads with silo exec  -- p5-cu-ok
+[05:05:30] PASS  L2 hotkey ctrl+l and scroll answer without error  -- 
+== L2b first click in a fresh silo mcp session (no screenshot first) lands at the mapped position
+  step 0 computer_use_click isError/rc= False ✅ Sent screen-absolute click at (360,225) (desktop scope).
+  step 1 pointer isError/rc= 0 pointer 360 225 | step 5
+pointer after first-ever click at pixel (320,200) with no prior screenshot: pointer 360 225
+[05:05:31] PASS  L2b first click with no screenshot first lands at the mapped position  -- pointer 360 225 (expected 360 225 on a 1440x900 screen)
 == L3 kill the driver in the fork, next call works (same silo mcp session as step before)
-  step 0 computer_use_screenshot rc/isError= False ✅ Desktop screenshot 1280x800 written to /tmp/silo-cu.shot-5764-1.png (screen 1440x900; x/y for scope:"desktop" actions are pixels of THIS screenshot (mapped ×1.12 back to the screen automatically)) |
-  step 1 /Users/polarzero/code/projects/microsandbox-workspaces/app/S rc/isError= 0 1841 /usr/local/lib/silo/cua-driver/0.38.0/cua-driver mcp
-  step 2 /Users/polarzero/code/projects/microsandbox-workspaces/app/S rc/isError= 0 step 6
+  step 0 computer_use_screenshot rc/isError= False ✅ Desktop screenshot 1280x800 written to /tmp/silo-cu.shot-88785-1.png (screen 1440x900; x/y for scope:"desktop" actions are pixels of THIS screenshot (mapped ×1.12 back to the screen automatically)) 
+  step 1 /Users/polarzero/code/projects/microsandbox-workspaces/app/S rc/isError= 0 1857 /usr/local/lib/silo/cua-driver/0.38.0/cua-driver mcp
+  step 2 /Users/polarzero/code/projects/microsandbox-workspaces/app/S rc/isError= 0 step 7
   step 3  rc/isError= None 
   step 4 /Users/polarzero/code/projects/microsandbox-workspaces/app/S rc/isError= 0 0
-  step 5 computer_use_screenshot rc/isError= False ✅ Desktop screenshot 1280x800 written to /tmp/silo-cu.shot-5764-2.png (screen 1440x900; x/y for scope:"desktop" actions are pixels of THIS screenshot (mapped ×1.12 back to the screen automatically)) |
+  step 5 computer_use_screenshot rc/isError= False ✅ Desktop screenshot 1280x800 written to /tmp/silo-cu.shot-88785-2.png (screen 1440x900; x/y for scope:"desktop" actions are pixels of THIS screenshot (mapped ×1.12 back to the screen automatically)) 
   step 6 computer_use_click rc/isError= False ✅ Sent screen-absolute click at (338,281) (desktop scope).
   step 7 computer_use_ready rc/isError= False { |   "computer": "e2e-p5cu-f1", |   "computerUse": { |     "appliedApproval": "auto", |     "approval": "auto", |     "driverVersion": "0.38.0", |     "reason": null, |     "session": "running", |   
-[04:26:51] PASS  L3 driver killed (pgrep before/after), the next tool calls start a new driver and work  -- see steps
+[05:05:38] PASS  L3 driver killed (pgrep before/after), the next tool calls start a new driver and work  -- see steps
 == L4 silo diff e2e-p5cu-f1 after the session
 Comparing e2e-p5cu-f1 with when it was forked...
 Settings & files
@@ -78,8 +83,8 @@ Not kept
 Ignored: 2 paths (caches, logs, build output)
 credentials used: none
 review: 3dfdcfd6cfd1440ee43b64be15e6815e410ef3100ea3214efe8c75a2b8c9f639
-  json /ignored/paths "/home/silo/.config/pulse/0446d86f31784c59b60416beeaba511c-default-sink"
-  json /ignored/paths "/home/silo/.config/pulse/0446d86f31784c59b60416beeaba511c-default-source"
+  json /ignored/paths "/home/silo/.config/pulse/f8ce5843dafd446abfdaf8a88ca6c23d-default-sink"
+  json /ignored/paths "/home/silo/.config/pulse/f8ce5843dafd446abfdaf8a88ca6c23d-default-source"
   json /not_kept/processes "dconf-service"
   json /not_kept/processes "xfce4-terminal"
   json /settings/files {"after": {"hash": "7abbbadbd1fe74c341927677c9c30b4bf9fddf1efc73070c279ebfed220138e3", "kind": "file", "size": "269"}, "before": null, "change": "added", "path"
@@ -88,60 +93,60 @@ review: 3dfdcfd6cfd1440ee43b64be15e6815e410ef3100ea3214efe8c75a2b8c9f639
   json /settings/files {"after": {"hash": "0f585635619b0dfc385a470f323451d2d268d9d0445555449995206fb348bd65", "kind": "file", "size": "331"}, "before": null, "change": "added", "path"
   json /summary {"bucket": "Settings & files", "lines": ["+ /home/silo/.claude.json", "+ /home/silo/.claude/settings.json", "+ /home/silo/.codex/config.toml", "+ /home/silo/.co
   json /summary {"bucket": "Not kept", "lines": ["processes: dconf-service, xfce4-terminal"]}
-[04:26:57] PASS  L4 no driver, helper or screenshot file in the change list  -- recorded above; /tmp/p5cu.txt is under the ignored /tmp
+[05:05:44] PASS  L4 no driver, helper or screenshot file in the change list  -- recorded above; /tmp/p5cu.txt is under the ignored /tmp
 == L5 refusals
   step 0 computer_use_screenshot isError= True e2e-p5cu-src is not a fork. Computer-use tools and the unattended approval are for forks; fork main (fork_gui) and use the fork.
   step 1 computer_use_tools isError= True e2e-p5cu-src is not a fork. Computer-use tools and the unattended approval are for forks; fork main (fork_gui) and use the fork.
   step 2 computer_use_click isError= True e2e-p5cu-src is not a fork. Computer-use tools and the unattended approval are for forks; fork main (fork_gui) and use the fork.
   step 3 fork_gui isError= True A fork made by an agent keeps asking for computer-use approval. To let agents make forks that run without asking, set computer_use_auto: true in .silo/silo.yaml.
-[04:26:59] PASS  L5 host computer_use_* tools refuse the source (not a fork)  -- 
-[04:26:59] PASS  L5 fork_gui computer_use auto refused without computer_use_auto in .silo/silo.yaml  -- no e2e-p5cu-nogui created: []
+[05:05:46] PASS  L5 host computer_use_* tools refuse the source (not a fork)  -- 
+[05:05:46] PASS  L5 fork_gui computer_use auto refused without computer_use_auto in .silo/silo.yaml  -- no e2e-p5cu-nogui created: []
 silo: A fork made by an agent keeps asking for computer-use approval. To let agents make forks that run without asking, set computer_use_auto: true in .silo/silo.yaml.
-[04:26:59] PASS  L5 CLI with SILO_AGENT set and no computer_use_auto refuses --computer-use auto  -- []
+[05:05:46] PASS  L5 CLI with SILO_AGENT set and no computer_use_auto refuses --computer-use auto  -- []
 source approval: computer use: ready, approval ask, driver 0.38.0
-[04:27:00] PASS  L5 source status still says approval ask  -- 
-[04:27:04] PASS  L5 fork without --gui is fine; source still ask  -- 
+[05:05:47] PASS  L5 source status still says approval ask  -- 
+[05:05:51] PASS  L5 fork without --gui is fine; source still ask  -- 
 == L6 keep e2e-p5cu-f1 (approval auto) into e2e-p5cu-src (ask)
 Keeping e2e-p5cu-f1...
 Keeping e2e-p5cu-f1: 5s
 Keeping e2e-p5cu-f1: 10s
-Kept fbe0900a-65ef-4a03-ba24-777cb6cc4ba0 into ccdb763e-fd16-46b8-92bc-0d1343fa3227.
+Kept d2d276aa-9748-4b06-9901-766ec0798b19 into 30652586-4efd-43e4-aceb-57a147254405.
   files: 4 written, 0 already identical
-Undo with `silo undo ccdb763e-fd16-46b8-92bc-0d1343fa3227`.
+Undo with `silo undo 30652586-4efd-43e4-aceb-57a147254405`.
 fold rc=0
-[04:27:20] PASS  L6 silo fold e2e-p5cu-f1 keeps into e2e-p5cu-src  -- rc=0
-[04:27:20] waiting 20 s for the guest update after the keep
-source after keep: computer use: failed, approval ask, driver 0.38.0 (Setup failed. Details are in /var/log/silo-computer-use.log in the computer.)
+[05:06:07] PASS  L6 silo fold e2e-p5cu-f1 keeps into e2e-p5cu-src  -- rc=0
+[05:06:07] waiting 20 s for the guest update after the keep
+source after keep: computer use: ready, approval ask, driver 0.38.0
 source files after keep (read as root: the keep may leave them root-owned):
 /home/silo/.claude:
 total 12
-drwxr-xr-x  2 root root 4096 Nov  6 03:27 .
-drwxr-x--- 10 silo silo 4096 Nov  6 03:27 ..
--rw-------  1 root root   72 Nov  6 03:27 settings.json
+drwxr-xr-x  2 silo silo 4096 Nov  6 04:06 .
+drwxr-x--- 10 silo silo 4096 Nov  6 04:06 ..
+-rw-------  1 silo silo    3 Nov  6 04:06 settings.json
 
 /home/silo/.codex:
 total 12
-drwxr-xr-x  2 root root 4096 Nov  6 03:27 .
-drwxr-x--- 10 silo silo 4096 Nov  6 03:27 ..
--rw-------  1 root root  231 Nov  6 03:27 config.toml
+drwxr-xr-x  2 silo silo 4096 Nov  6 04:06 .
+drwxr-x--- 10 silo silo 4096 Nov  6 04:06 ..
+-rw-------  1 silo silo  191 Nov  6 04:06 config.toml
 --- settings.json:
-{
-  "permissions": {
-    "allow": [
-      "mcp__cua-driver"
-    ]
-  }
-}
+{}
 --- config.toml:
 [mcp_servers.cua-driver]
 command = "/usr/local/libexec/silo-cua-driver-mcp"
 args = []
-default_tools_approval_mode = "approve"
 
 [mcp_servers.cua-driver.env]
 CUA_DRIVER_RS_TELEMETRY_ENABLED = "0"
 CUA_DRIVER_RS_UPDATE_CHECK = "false"
 --- silo-computer-use.log (tail):
+      "status": "ok"
+    },
+    {
+      "label": "X11 connection",
+      "message": "connected, 4 visible top-level windows",
+      "status": "ok"
+    },
     {
       "label": "AT-SPI",
       "message": "org.a11y.Bus reachable via session bus",
@@ -150,71 +155,75 @@ CUA_DRIVER_RS_UPDATE_CHECK = "false"
   ]
 }
 exit 0
-$ runuser -u silo -- env HOME=/home/silo USER=silo LOGNAME=silo PATH=/home/silo/.local/bin:/home/silo/.bun/bin:/home/silo/.cargo/bin:/home/silo/.npm-global/bin:/usr/local/bin:/usr/bin:/bin CUA_DRIVER_RS_TELEMETRY_ENABLED=0 CUA_DRIVER_RS_UPDATE_CHECK=false /usr/local/lib/silo/cua-driver/0.38.0/cua-driver --version
-exit 0
-could not remove the LCU entries for claude-code: PermissionError: [Errno 13] Permission denied: '/home/silo/.claude/settings.json'
-could not remove the LCU entries for codex: PermissionError: [Errno 13] Permission denied: '/home/silo/.codex/config.toml'
-could not register cua-driver with claude-code: PermissionError: [Errno 13] Permission denied: '/home/silo/.claude/settings.json'
-could not register cua-driver with codex: PermissionError: [Errno 13] Permission denied: '/home/silo/.codex/config.toml'
-computer use setup failed: setup-failed: could not register the driver with claude-code, codex
-[04:27:42] FAIL  L6 source has no mcp__cua-driver auto rule and no approve line after the keep  -- 
-[04:27:42] FAIL  L6 the kept settings files are owned by the working account (silo)  -- owners: root:600 /home/silo/.claude/settings.json root:600 /home/silo/.codex/config.toml 
-[04:27:43] FAIL  L6 source computer use is not 'failed' after the keep  -- computer use: failed, approval ask, driver 0.38.0 (Setup failed. Details are in /var/log/silo-computer-use.log in the computer.)
-[04:27:43] PASS  L6 source status says approval ask after the keep  -- 
+[05:06:28] PASS  L6 source has no mcp__cua-driver auto rule and no approve line after the keep  -- 
+[05:06:29] PASS  L6 the kept settings files are owned by the working account (silo)  -- owners: silo:600 /home/silo/.claude/settings.json silo:600 /home/silo/.codex/config.toml 
+[05:06:30] PASS  L6 source computer use is not 'failed' after the keep  -- computer use: ready, approval ask, driver 0.38.0
+[05:06:30] PASS  L6 source status says approval ask after the keep  -- 
 == MACOS
 Creating e2e-p5cu-msrc...
 Created e2e-p5cu-msrc (stopped)
-create rc=0 in 74 s
+create rc=0 in 76 s
 Starting e2e-p5cu-msrc...
 Started e2e-p5cu-msrc (running)
 macOS source: ProductName:		macOS ProductVersion:		26.6.2 BuildVersion:		25G83 silo
 == M1 silo fork e2e-p5cu-msrc --gui --computer-use auto (the wait must reach ready)
-e2e-p5cu-mf1: waiting for desktop running, computer use unknown
-silo: e2e-p5cu-mf1 was not ready after 120s: desktop running, computer use unknown. It keeps running; `silo status e2e-p5cu-mf1` shows where it stands.
-[04:31:57] FAIL  M1 macOS fork --gui returns with computerUse.state ready  -- rc=1 159s state=[]; engine status: computer use: unknown, approval ask, driver 0.38.0; ready tool below
-[04:31:57] FAIL  M1 the macOS fork's recorded approval is auto  -- computer use: unknown, approval ask, driver 0.38.0
-== M2 cua-driver permissions status in the fork
-{
-  "daemon_running": false,
-  "reason": "No CuaDriver daemon is running under the driver's own identity (com.trycua.driver), so its real TCC status can't be read from this process. Run `cua-driver permissions grant` to grant + verify and start the daemon, then re-run this command.",
-  "status": "unknown"
-}
-[04:31:59] FAIL  M2 permissions status lists Accessibility and Screen Recording as granted  -- see output above
-receipt in fork: {"schemaVersion":2,"state":"ready","reason":"","driverVersion":"0.38.0","approval":"ask","agents":["claude-code","codex"],"pending":[],"at":"2026-11-05T00:54:07Z"}
+Starting e2e-p5cu-mf1: 30s
+Starting e2e-p5cu-mf1: 36s
+[05:08:49] PASS  M1 macOS fork --gui returns with computerUse.state ready  -- rc=0 41s state=[ready]; engine status: computer use: ready, approval ask, driver 0.38.0; ready tool below
+[05:08:49] FAIL  M1 the macOS fork's recorded approval is auto  -- computer use: ready, approval ask, driver 0.38.0
 == M3 MCP: screenshot, spotlight Terminal, click, type, Return
   step 0 computer_use_ready isError= False [] { |   "computer": "e2e-p5cu-mf1", |   "computerUse": { |     "appliedApproval": "ask", |     "approval": "ask", |     "driverVersion": "0.38.0", |     "reason": null, |     "session": "running", |    
-  step 1 computer_use_screenshot isError= False [([900, 563], 774927)] desktop screenshot 900x563 px (screen 1280x800 pts @ 2x) | Screenshot 900x563 (the screen is 1280x800); give coordinates in this image's pixels.
+  step 1 computer_use_screenshot isError= False [([900, 563], 757475)] desktop screenshot 900x563 px (screen 1280x800 pts @ 2x) | Screenshot 900x563 (the screen is 1280x800); give coordinates in this image's pixels.
   step 2 computer_use_hotkey isError= False [] Pressed desktop hotkey cmd+space.
   step 3  isError= None [] 
   step 4 computer_use_type isError= False [] Typed text into the frontmost desktop application.
   step 5  isError= None [] 
   step 6 computer_use_key isError= False [] Pressed 'Return' on the desktop.
   step 7  isError= None [] 
-  step 8 computer_use_screenshot isError= False [([900, 563], 559141)] desktop screenshot 900x563 px (screen 1280x800 pts @ 2x) | Screenshot 900x563 (the screen is 1280x800); give coordinates in this image's pixels.
+  step 8 computer_use_screenshot isError= False [([900, 563], 559364)] desktop screenshot 900x563 px (screen 1280x800 pts @ 2x) | Screenshot 900x563 (the screen is 1280x800); give coordinates in this image's pixels.
   step 9 computer_use_click isError= False [] ✅ Sent screen-absolute click at desktop-pixel (1280,710) → screen-point (640,355) (desktop scope; not driver-verified).
   step 10 computer_use_type isError= False [] Typed text into the frontmost desktop application.
   step 11 computer_use_key isError= False [] Pressed 'Return' on the desktop.
   step 12  isError= None [] 
-  step 13 computer_use_screenshot isError= False [([900, 563], 567079)] desktop screenshot 900x563 px (screen 1280x800 pts @ 2x) | Screenshot 900x563 (the screen is 1280x800); give coordinates in this image's pixels.
-[04:32:20] PASS  M3 computer_use_screenshot returns an image (<= max_side)  -- 
+  step 13 computer_use_screenshot isError= False [([900, 563], 567261)] desktop screenshot 900x563 px (screen 1280x800 pts @ 2x) | Screenshot 900x563 (the screen is 1280x800); give coordinates in this image's pixels.
+[05:09:11] PASS  M3 computer_use_screenshot returns an image (<= max_side)  -- 
 silo exec e2e-p5cu-mf1 -- cat /tmp/p5cu.txt -> p5-cu-ok
-[04:32:20] PASS  M3 click + type + Return in the fork's GUI Terminal wrote the file the host reads  -- p5-cu-ok
+[05:09:12] PASS  M3 click + type + Return in the fork's GUI Terminal wrote the file the host reads  -- p5-cu-ok
+== M2 cua-driver permissions status in the fork (after M3: no LaunchAgent starts the daemon, the first cua-driver mcp session does)
+{
+  "accessibility": true,
+  "direct_capture_error": null,
+  "direct_capture_status": "not_checked",
+  "screen_recording": true,
+  "screen_recording_capturable": null,
+  "source": {
+    "attribution": "driver-daemon",
+    "bundle_id": "com.trycua.driver",
+    "disclaim_env": false,
+    "executable": "/Applications/CuaDriver.app/Contents/MacOS/cua-driver",
+    "note": "These booleans reflect the CuaDriver daemon's own TCC identity (com.trycua.driver) because this process is its own responsible process.",
+    "pid": 1908,
+    "responsible_ppid": 1
+  }
+}
+[05:09:12] PASS  M2 permissions status lists Accessibility and Screen Recording as granted  -- see output above
+receipt in fork: {"schemaVersion":2,"state":"ready","reason":"","driverVersion":"0.38.0","approval":"ask","agents":["claude-code","codex"],"pending":[],"at":"2026-11-05T00:54:07Z"}
 == M4 keep the auto fork into its ask source
 fork claude: /usr/local/bin/claude
 1:[mcp_servers.cua-driver]
 2:command = "/usr/local/bin/cua-driver"
 5:[mcp_servers.cua-driver.env]
-[04:32:21] FAIL  M4 before the keep the fork has the auto rule and approve line (so the keep tests something)  -- 
-Keeping e2e-p5cu-mf1...
-Keeping e2e-p5cu-mf1: 5s
-Keeping e2e-p5cu-mf1: 10s
-Keep stopped: /Users/silo/Library/Application Support/com.apple.appleintelligencereporting.processing/BuildHistory.json clash on d14509b5-a27c-4ea3-8b54-c2a447081b2a and in 7b38bb29-8872-4352-ab29-4c71d818f1b2. d14509b5-a27c-4ea3-8b54-c2a447081b2a was not changed.
-  file /Users/silo/Library/Application Support/com.apple.appleintelligencereporting.processing/BuildHistory.json: changed on main since the fork was made, and differently in the fork
-Bring main's change into the fork (or remove the file from the fork's commits) and keep again.
-fold rc=2
-[04:32:36] FAIL  M4 silo fold e2e-p5cu-mf1 keeps into e2e-p5cu-msrc  -- rc=2
-[04:32:36] waiting 60 s for the guest update after the keep
-source after keep: computer use: unknown, approval ask, driver 0.38.0
+[05:09:13] FAIL  M4 before the keep the fork has the auto rule and approve line (so the keep tests something)  -- 
+Keeping e2e-p5cu-mf1: 25s
+Keeping e2e-p5cu-mf1: 30s
+Keeping e2e-p5cu-mf1: 36s
+Kept 4918154e-48b4-4456-996f-b025d2318fa6 into 7349053a-eee8-4125-af8b-f8d5e8e9e359.
+  files: 3 written, 0 already identical
+Undo with `silo undo 7349053a-eee8-4125-af8b-f8d5e8e9e359`.
+fold rc=0
+[05:09:54] PASS  M4 silo fold e2e-p5cu-mf1 keeps into e2e-p5cu-msrc  -- rc=0
+[05:09:54] waiting 60 s for the guest update after the keep
+source after keep: computer use: ready, approval ask, driver 0.38.0
 --- settings.json:
 {
   "permissions": {
@@ -230,11 +239,11 @@ args = ["mcp"]
 CUA_DRIVER_RS_TELEMETRY_ENABLED = "0"
 CUA_DRIVER_RS_UPDATE_CHECK = "false"
 --- p5cu.txt: cat: /tmp/p5cu.txt: No such file or directory
-[04:33:37] PASS  M4 source has no mcp__cua-driver rule and no approve line after the keep  -- 
-[04:33:37] PASS  M4 source status says approval ask after the keep  -- 
-[04:33:37] BLOCKED  M4 promote an auto fork over an ask main  -- needs a computer named main; this check never creates or touches main
-[04:33:37] cleanup (only e2e-p5cu-* computers)
-[04:33:56] silo list after cleanup:
+[05:10:55] PASS  M4 source has no mcp__cua-driver rule and no approve line after the keep  -- 
+[05:10:56] PASS  M4 source status says approval ask after the keep  -- 
+[05:10:56] BLOCKED  M4 promote an auto fork over an ask main  -- needs a computer named main; this check never creates or touches main
+[05:10:56] cleanup (only e2e-p5cu-* computers)
+[05:11:15] silo list after cleanup:
 NAME                                STATE      KIND    SIZE
 workspace-1                         stopped    linux   8 cpu, 32 GiB
 e2e-relay                           stopped    linux   8 cpu, 32 GiB
@@ -244,4 +253,4 @@ e2e-p3-macsrc-before-20261105-2253  stopped    macos   4 cpu, 8 GiB
 e2e-p3-macsrc                       stopped    macos   4 cpu, 8 GiB
 e2e-p5cu computers left: 0
 macOS VMs running: 0
-== summary (all): 23 passed, 8 failed, 1 blocked
+== summary (all): 30 passed, 2 failed, 1 blocked
