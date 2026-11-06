@@ -531,6 +531,12 @@ async fn dispatch(
                     pr::PrArgs {
                         repo: fold.repo,
                         base: fold.base,
+                        host_root: project
+                            .directory
+                            .as_ref()
+                            .and_then(|silo| silo.parent())
+                            .map(std::path::Path::to_path_buf)
+                            .or_else(|| Some(working_directory.to_path_buf())),
                     },
                     pr::PrEnv::from_process(),
                 )

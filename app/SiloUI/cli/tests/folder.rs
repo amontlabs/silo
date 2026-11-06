@@ -60,6 +60,7 @@ struct Lab {
     guest_home: PathBuf,
     computers: Arc<Mutex<Vec<(String, String)>>>,
     requests: Arc<Mutex<Vec<Value>>>,
+    diff: Arc<Mutex<Value>>,
     _root: tempfile::TempDir,
 }
 
@@ -73,6 +74,8 @@ fn lab() -> Lab {
     let requests = Arc::new(Mutex::new(Vec::new()));
     let (home, seen) = (guest_home.clone(), requests.clone());
     let shared = computers.clone();
+    let diff = Arc::new(Mutex::new(json!({})));
+    let shared_diff = diff.clone();
     // The guest's /workspace is a folder of the fake guest's home.
     let workspace = home.join("workspace").to_string_lossy().into_owned();
     let engine = FakeEngine::start(move |method, params| {
@@ -185,6 +188,14 @@ fn lab() -> Lab {
             "operations.job.get" if params["jobId"] == "job:4" => {
                 Ok(finished(json!({"status": "done", "path": "x"})))
             }
+            "changes.diff" => Ok(json!({"jobId": "job:5"})),
+            "operations.job.get" if params["jobId"] == "job:5" => {
+                let diff = shared_diff.lock().unwrap().clone();
+                Ok(finished(json!({
+                    "diff": diff, "text": "Code\n  ~/repo: a..b",
+                    "reviewDigest": "d", "baselineApplied": false, "baselineAvailable": false,
+                })))
+            }
             "changes.request" => {
                 seen.lock().unwrap().push(params.clone());
                 Ok(json!({"request": {
@@ -204,6 +215,7 @@ fn lab() -> Lab {
         guest_home,
         computers,
         requests,
+        diff,
         _root: root,
     }
 }
@@ -650,6 +662,7 @@ fn pr_mode(token: Option<&str>, api: String) -> flows::Mode {
             token: token.map(str::to_owned),
             api_url: api,
             repository: Some("acme/app".into()),
+            git_base: "https://github.com".into(),
         },
     )
 }
@@ -765,4 +778,97 @@ async fn fold_pr_without_a_token_pushes_nothing_and_a_refused_call_names_the_bra
         error.message
     );
     assert!(error.message.contains("was pushed"), "{}", error.message);
+}
+
+/// A computer fork `plain` whose repository `~/repo` has the remote `origin` set by the fork.
+fn computer_fork(lab: &Lab, origin: &str) -> PathBuf {
+    let guest = lab.guest_home.join("repo");
+    std::fs::create_dir_all(&guest).unwrap();
+    git(&guest, &["init", "-q", "-b", "main"]);
+    commit(&guest, "a.txt", "one\n", "first");
+    git(&guest, &["remote", "add", "origin", origin]);
+    lab.computers
+        .lock()
+        .unwrap()
+        .push(("plain".into(), "running".into()));
+    *lab.diff.lock().unwrap() =
+        json!({"code": [{"repo": guest.to_string_lossy()}], "reviewDigest": "d"});
+    guest
+}
+
+fn pr_env(repository: Option<&str>) -> silo_cli::pr::PrEnv {
+    silo_cli::pr::PrEnv {
+        token: Some("secret-token".into()),
+        api_url: "http://127.0.0.1:1".into(),
+        repository: repository.map(str::to_owned),
+        git_base: "https://127.0.0.1:1".into(),
+    }
+}
+
+#[tokio::test]
+async fn a_computer_fork_never_chooses_where_the_token_goes() {
+    let lab = lab();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let origin = format!("http://{}/evil/app.git", listener.local_addr().unwrap());
+    let guest = computer_fork(&lab, &origin);
+    std::fs::write(guest.join("new.txt"), "x\n").unwrap();
+    let engine = lab.connect().await;
+    let project = Project::default();
+    // The destination is built on this device and cannot be reached, so the push fails;
+    // the fork's own remote is not asked.
+    let error = flows::run(
+        &engine,
+        "plain",
+        None,
+        &pr_context(&project),
+        FoldOptions::default(),
+        flows::Mode::PullRequest(silo_cli::pr::PrArgs::default(), pr_env(Some("acme/app"))),
+        &ignore,
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        error.message.contains("https://127.0.0.1:1/acme/app.git"),
+        "{}",
+        error.message
+    );
+    assert!(!error.message.contains("secret-token"));
+    assert!(listener.accept().is_err(), "the fork's remote was contacted");
+}
+
+#[tokio::test]
+async fn a_computer_fork_needs_a_host_named_repository_and_no_credentials_in_it() {
+    let lab = lab();
+    let guest = computer_fork(&lab, "https://example.invalid/evil/app.git");
+    let engine = lab.connect().await;
+    let project = Project::default();
+    let (engine, project) = (&engine, &project);
+    let run = |repository: Option<&str>| {
+        let repository = repository.map(str::to_owned);
+        async move {
+        flows::run(
+            engine,
+            "plain",
+            None,
+            &pr_context(project),
+            FoldOptions::default(),
+            flows::Mode::PullRequest(silo_cli::pr::PrArgs::default(), pr_env(repository.as_deref())),
+            &ignore,
+        )
+        .await
+        }
+    };
+    let error = run(None).await.unwrap_err();
+    assert!(error.message.contains("--repo"), "{}", error.message);
+    let error = run(Some("-oProxy/x")).await.unwrap_err();
+    assert!(error.message.contains("OWNER/NAME"), "{}", error.message);
+    let ssh = format!("{}/.ssh/", guest.display());
+    *lab.diff.lock().unwrap() = json!({
+        "code": [{"repo": guest.to_string_lossy()}],
+        "not_kept": {"credentials": {ssh.clone(): [format!("{ssh}id")]}},
+        "reviewDigest": "d"
+    });
+    let error = run(Some("acme/app")).await.unwrap_err();
+    assert!(error.message.contains("credential"), "{}", error.message);
 }

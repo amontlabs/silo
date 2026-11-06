@@ -5,6 +5,11 @@
 //! `GITHUB_TOKEN` of the environment (a CI runner sets it) or the token `gh` holds, and the
 //! host's own git configuration. Nothing here reads a fork's credentials, and a fork's GitHub
 //! access stays read-only.
+//!
+//! The place a branch is pushed to never comes from a fork: a fork controls its own `origin`,
+//! and the host token would go wherever that points. For a folder fork it is the host
+//! folder's `origin`; for any other fork it is `https://<git host>/<repo>.git`, built on the
+//! host from `--repo`, else `GITHUB_REPOSITORY`, else the host project's `origin`.
 
 use serde_json::{json, Value};
 
@@ -25,6 +30,9 @@ pub struct PrArgs {
     pub repo: Option<String>,
     /// The branch to merge into.
     pub base: Option<String>,
+    /// The host project's top folder (the one holding `.silo/`), whose `origin` names the
+    /// repository when nothing else does.
+    pub host_root: Option<std::path::PathBuf>,
 }
 
 /// What the process around us provides.
@@ -34,6 +42,18 @@ pub struct PrEnv {
     pub api_url: String,
     /// `GITHUB_REPOSITORY` (set on a CI runner).
     pub repository: Option<String>,
+    /// Where repositories are pushed to, like `https://github.com`; follows `api_url`.
+    pub git_base: String,
+}
+
+/// The git host that goes with a REST base: `https://github.com` for `https://api.github.com`,
+/// the host of `https://ghe.example/api/v3`, else the base itself.
+pub fn git_base_for(api_url: &str) -> String {
+    let api = api_url.trim_end_matches('/');
+    if api == DEFAULT_API {
+        return "https://github.com".to_owned();
+    }
+    api.strip_suffix("/api/v3").unwrap_or(api).to_owned()
 }
 
 impl PrEnv {
@@ -43,9 +63,11 @@ impl PrEnv {
                 .ok()
                 .filter(|value| !value.trim().is_empty())
         };
+        let api_url = set("SILO_GITHUB_API_URL").unwrap_or_else(|| DEFAULT_API.to_owned());
         Self {
             token: set("GITHUB_TOKEN").or_else(gh_token),
-            api_url: set("SILO_GITHUB_API_URL").unwrap_or_else(|| DEFAULT_API.to_owned()),
+            git_base: git_base_for(&api_url),
+            api_url,
             repository: set("GITHUB_REPOSITORY"),
         }
     }
@@ -143,8 +165,11 @@ async fn push(source: &PrSource, token: &str) -> Result<(), CliError> {
     };
     let refspec = format!("refs/heads/{0}:refs/heads/{0}", source.branch);
     let env = auth_env(&source.remote, token);
+    if source.remote.starts_with('-') {
+        return Err(CliError::new("The push destination is not a repository URL."));
+    }
     let output = git
-        .run_env(&["push", "--quiet", &source.remote, &refspec], &env)
+        .run_env(&["push", "--quiet", "--", &source.remote, &refspec], &env)
         .await?;
     if output.code != 0 {
         return Err(CliError::new(format!(
@@ -212,15 +237,95 @@ fn create_pull_request(
     })
 }
 
+/// Whether `path` is `repo` itself, under it, or a folder that holds it.
+fn within(path: &str, repo: &str) -> bool {
+    let (path, repo) = (path.trim_end_matches('/'), repo.trim_end_matches('/'));
+    path == repo || path.starts_with(&format!("{repo}/")) || repo.starts_with(&format!("{path}/"))
+}
+
+/// The credential paths the diff names that lie in `repo`.
+fn credentials_in(diff: &Value, repo: &str) -> Vec<String> {
+    let mut found = Vec::new();
+    for (group, paths) in diff["not_kept"]["credentials"]
+        .as_object()
+        .into_iter()
+        .flatten()
+    {
+        let listed = paths.as_array().into_iter().flatten().filter_map(Value::as_str);
+        for path in std::iter::once(group.as_str()).chain(listed) {
+            if within(path, repo) && !found.iter().any(|f| f == path) {
+                found.push(path.to_owned());
+            }
+        }
+    }
+    found
+}
+
+/// `owner/name` with the characters of GitHub names only, so it is a path and nothing else.
+fn valid_repository(repository: &str) -> bool {
+    let part = |text: &str| {
+        !text.is_empty()
+            && text != "."
+            && text != ".."
+            && !text.starts_with('-')
+            && text
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
+    };
+    repository.split_once('/').is_some_and(|(owner, name)| part(owner) && part(name))
+}
+
+/// The repository and push URL for a fork of a computer, decided on this device: `--repo`,
+/// else `GITHUB_REPOSITORY`, else the `origin` of the host project; never what the fork says.
+async fn computer_destination(
+    args: &PrArgs,
+    env: &PrEnv,
+    host_root: Option<&std::path::Path>,
+) -> Result<(String, String), CliError> {
+    let mut repository = args.repo.clone().or_else(|| env.repository.clone());
+    if repository.is_none() {
+        if let Some(root) = host_root {
+            let origin = Git {
+                dir: root.to_path_buf(),
+            }
+            .run(&["remote", "get-url", "origin"])
+            .await?;
+            if origin.code == 0 {
+                repository = repository_of(&origin.out);
+            }
+        }
+    }
+    let repository = repository.ok_or_else(|| {
+        CliError::new(
+            "Cannot tell which GitHub repository to push to: pass --repo OWNER/NAME, or set GITHUB_REPOSITORY. A fork's own remote is never used.",
+        )
+    })?;
+    if !valid_repository(&repository) {
+        return Err(CliError::new(format!(
+            "`{repository}` is not a repository name like OWNER/NAME."
+        )));
+    }
+    let url = format!("{}/{repository}.git", env.git_base.trim_end_matches('/'));
+    if !url.starts_with("https://") {
+        return Err(CliError::new(format!(
+            "Refusing to push to {}: only https destinations are used for a fork of a computer.",
+            redact(&url)
+        )));
+    }
+    Ok((repository, url))
+}
+
 /// A fork of a computer: its repository's work bundled in the fork, fetched into a temporary
-/// repository on this device, ready to push.
+/// repository on this device, ready to push to `url`. Returns the untracked files that were
+/// committed with it.
 async fn computer_source(
     engine: &Engine,
     fork: &str,
     diff: &Value,
     branch: &str,
+    url: &str,
     progress: Progress<'_>,
-) -> Result<(PrSource, Vec<String>), CliError> {
+) -> Result<(PrSource, Vec<String>, Vec<String>), CliError> {
     let repos: Vec<&str> = diff["code"]
         .as_array()
         .into_iter()
@@ -233,6 +338,13 @@ async fn computer_source(
             "{fork} has no code changes to open a pull request for."
         )));
     };
+    let credentials = credentials_in(diff, repo);
+    if !credentials.is_empty() {
+        return Err(CliError::new(format!(
+            "{repo} in {fork} holds credential paths, which a pull request would publish: {}. Remove them from the fork, then try again.",
+            credentials.join(", ")
+        )));
+    }
     let notes: Vec<String> = repos
         .iter()
         .skip(1)
@@ -251,14 +363,15 @@ async fn computer_source(
             )))
         }
     };
-    let made = computer_bundle(engine, fork, repo, branch, progress).await;
+    let made = computer_bundle(engine, fork, repo, branch, url, progress).await;
     if started_here {
         let stopped = ops::stop(engine, fork, progress).await;
-        let source = made?;
+        let (source, untracked) = made?;
         stopped?;
-        return Ok((source, notes));
+        return Ok((source, untracked, notes));
     }
-    Ok((made?, notes))
+    let (source, untracked) = made?;
+    Ok((source, untracked, notes))
 }
 
 async fn computer_bundle(
@@ -266,22 +379,23 @@ async fn computer_bundle(
     fork: &str,
     repo: &str,
     branch: &str,
+    url: &str,
     progress: Progress<'_>,
-) -> Result<PrSource, CliError> {
+) -> Result<(PrSource, Vec<String>), CliError> {
     let computer = engine.computer(fork).await?;
     let outbox = format!(
         "{}/silo-out-{}",
         folder::TRANSFER_ROOT,
         uuid::Uuid::new_v4().simple()
     );
-    let gather = "set -e; cd \"$1\"; git add -A; \
+    // Prints how many untracked files there are and their names, then commits everything.
+    let gather = "set -e; cd \"$1\"; git ls-files -o --exclude-standard | wc -l | tr -d ' '; \
+                  git ls-files -o --exclude-standard; git add -A; \
                   git diff --cached --quiet || git \
                   -c user.name=\"$(git config user.name || echo Silo)\" \
                   -c user.email=\"$(git config user.email || echo silo@localhost)\" \
                   commit -q -m \"silo: uncommitted changes in $2\"; \
-                  mkdir -p \"$3\"; git bundle create --quiet \"$3/out.bundle\" HEAD; \
-                  git remote get-url origin 2>/dev/null || echo; \
-                  git symbolic-ref --short -q refs/remotes/origin/HEAD 2>/dev/null || echo";
+                  mkdir -p \"$3\"; git bundle create --quiet \"$3/out.bundle\" HEAD";
     let found = folder::guest(
         engine,
         fork,
@@ -291,21 +405,16 @@ async fn computer_bundle(
     )
     .await?;
     let mut lines = found.lines();
-    let remote = lines.next().unwrap_or("").trim().to_owned();
-    let base = lines
+    let count: usize = lines
         .next()
-        .map(|line| line.trim().trim_start_matches("origin/").to_owned())
-        .filter(|line| !line.is_empty());
+        .and_then(|line| line.trim().parse().ok())
+        .unwrap_or(0);
+    let untracked: Vec<String> = lines.take(count).map(str::to_owned).collect();
     let cleanup = |outbox: String| async move {
         let _ = folder::guest(engine, fork, "rm -rf \"$1\"", &[&outbox], "Cleaning up").await;
     };
-    if remote.is_empty() {
-        cleanup(outbox).await;
-        return Err(CliError::new(format!(
-            "The repository {repo} in {fork} has no origin remote to push the branch to."
-        )));
-    }
-    let directory = std::env::temp_dir().join(format!("silo-pr-{}", uuid::Uuid::new_v4().simple()));
+    let directory =
+        std::env::temp_dir().join(format!("silo-pr-{}", uuid::Uuid::new_v4().simple()));
     let result = async {
         std::fs::create_dir_all(&directory).map_err(|error| {
             CliError::new(format!("Cannot create {}: {error}", directory.display()))
@@ -339,12 +448,13 @@ async fn computer_bundle(
         let _ = std::fs::remove_dir_all(&directory);
         return Err(error);
     }
-    Ok(PrSource {
+    let source = PrSource {
         directory,
         branch: branch.to_owned(),
-        base,
-        remote,
-    })
+        base: None,
+        remote: url.to_owned(),
+    };
+    Ok((source, untracked))
 }
 
 /// Opens a pull request for a fork's code changes. The result carries `branch`, `base`,
@@ -387,9 +497,18 @@ pub async fn open(
                 progress,
             )
             .await?;
-            let (source, notes) =
-                computer_source(engine, &computer.name, &seen, &branch, progress).await?;
-            (source, summary::review(&seen), notes)
+            let (repository, url) =
+                computer_destination(args, env, args.host_root.as_deref()).await?;
+            let _ = repository;
+            let (source, untracked, mut notes) =
+                computer_source(engine, &computer.name, &seen, &branch, &url, progress).await?;
+            let mut text = summary::review(&seen);
+            if !untracked.is_empty() {
+                let list = untracked.join(", ");
+                text.push_str(&format!("\n\nUntracked files committed: {list}"));
+                notes.push(format!("Untracked files were committed: {list}"));
+            }
+            (source, text, notes)
         }
     };
     let outcome = publish(&source, args, env, &token, &computer.name, &text).await;
