@@ -6,7 +6,8 @@ import { listen } from "@tauri-apps/api/event"
 import { useMemo, useSyncExternalStore } from "react"
 import { z } from "zod"
 import { showOperationFailure } from "@/lib/operation-toast"
-import { directoryPageShape, githubStateShape, parseApplicationSource, parseBackupState, parseRemoteApplicationSource, secretShape } from "./production-schemas"
+import { computerTreeSchema, directoryPageShape, githubStateShape, keepRequestResultSchema, openRequestResultSchema, parseApplicationSource, parseBackupState, parseRemoteApplicationSource, requestDetailSchema, requestListSchema, secretShape, stepListSchema, throwAwayResultSchema } from "./production-schemas"
+import type { ComputerStep, ComputerTreeNode, KeepRequestResult, OpenRequestResult, RequestDetail, RequestList, ThrowAwayResult } from "./production-schemas"
 export { parseApplicationSource, parseBackupState, parseNetworkState, parseRemoteApplicationSource, parseSshAccessState } from "./production-schemas"
 
 import { siloProgressEventSchema, setupComputerConfigurationSchema, type SetupComputerConfiguration, type SiloProgressEvent, type SetupComputerConfigurationRequest, type SetupQueueItemID } from "@/contracts/silo"
@@ -34,6 +35,49 @@ export { isUpdateInProgress, shareStructure } from "./production-helpers"
 const bridge: ProductionBridge = {
   invoke: (command, arguments_) => invoke(command, arguments_),
   listen: (event, handler) => listen(event, handler),
+}
+
+/** Which review requests `listReviewRequests` returns; `open` when omitted. */
+export type ReviewRequestFilter = "open" | "kept" | "thrown-away" | "all"
+/** A request is named by its id and, when it lives on another device, that device. */
+export type ReviewRequestTarget = { requestId: string, deviceId?: string }
+
+/** The review requests; `allDevices` also lists the requests of every connected device. */
+export async function listReviewRequests(
+  options: { status?: ReviewRequestFilter, deviceId?: string, allDevices?: boolean } = {},
+  native: ProductionBridge = bridge,
+): Promise<RequestList> {
+  return requestListSchema.parse(await native.invoke("list_review_requests", options))
+}
+
+/** A request with a fresh look at its fork's changes and the credentials the fork used. */
+export async function showReviewRequest(target: ReviewRequestTarget, native: ProductionBridge = bridge): Promise<RequestDetail> {
+  return requestDetailSchema.parse(await native.invoke("show_review_request", target))
+}
+
+/** Keeps the fork's changes into its target; a stale request is refused. `dataOk` carries database changes. */
+export async function keepReviewRequest(target: ReviewRequestTarget & { dataOk?: boolean }, native: ProductionBridge = bridge): Promise<KeepRequestResult> {
+  return keepRequestResultSchema.parse(await native.invoke("keep_review_request", target))
+}
+
+/** Drops the fork without keeping its changes. */
+export async function throwAwayReviewRequest(target: ReviewRequestTarget, native: ProductionBridge = bridge): Promise<ThrowAwayResult> {
+  return throwAwayResultSchema.parse(await native.invoke("throw_away_review_request", target))
+}
+
+/** Starts the fork when needed and returns where to reach it. */
+export async function openReviewRequest(target: ReviewRequestTarget, native: ProductionBridge = bridge): Promise<OpenRequestResult> {
+  return openRequestResultSchema.parse(await native.invoke("open_review_request", target))
+}
+
+/** The recorded steps of a computer, oldest first. */
+export async function listComputerSteps(computerId: string, deviceId?: string, native: ProductionBridge = bridge): Promise<ComputerStep[]> {
+  return stepListSchema.parse(await native.invoke("list_computer_steps", { computerId, deviceId })).steps
+}
+
+/** Every computer with what it was forked from and its pending changes. */
+export async function readComputerTree(deviceId?: string, native: ProductionBridge = bridge): Promise<ComputerTreeNode[]> {
+  return computerTreeSchema.parse(await native.invoke("read_computer_tree", { deviceId })).nodes
 }
 
 export const localUpdatingNotice = "Computers on this device are updating. They appear here when the update finishes."
@@ -1131,9 +1175,12 @@ export function createProductionSource(native: ProductionBridge = bridge) {
     saveSecret: (request: SecretConfigurationRequest) => changeSecret("save_secret", { request }),
     removeSecret: (id: string) => changeSecret("remove_secret", { id }),
     retrySecret: (id: string) => changeSecret("retry_secret", { id }),
+    listComputerSteps: (computerId, deviceId) => listComputerSteps(computerId, deviceId, native),
+    readComputerTree: deviceId => readComputerTree(deviceId, native),
     readWorkspaceStorage: async computerId => workspaceStorageStateSchema.parse(await native.invoke("read_workspace_storage", { computerId })),
     reclaimWorkspaceStorage: async computerId => workspaceStorageStateSchema.parse(await native.invoke("reclaim_workspace_storage", { computerId })),
     refreshSshAccess: services.refreshSshAccess,
+    listReviewRequests: options => listReviewRequests(options, native),
     sshConnection: (computer, download, network) => {
       const remote = parseRemoteComputerTarget(computer)
       return native.invoke<string | null>("ssh_connection", remote ? { ...remote, download, ...(network === undefined ? {} : { network }) } : { computer, download, ...(network === undefined ? {} : { network }) })

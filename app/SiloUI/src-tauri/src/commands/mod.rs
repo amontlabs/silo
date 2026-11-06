@@ -17,6 +17,7 @@ pub(crate) mod notifications;
 pub(crate) mod pre_upgrade_backup;
 pub(crate) mod preparation;
 pub(crate) mod remote;
+pub(crate) mod review_requests;
 pub(crate) mod runtime;
 pub(crate) mod runtime_checkpoints;
 pub(crate) mod runtime_logs;

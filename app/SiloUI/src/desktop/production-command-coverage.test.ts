@@ -3,7 +3,8 @@ import { applicationSourceForScenario } from "@/fixtures/application-scenarios"
 import type { BackupState } from "@/features/application/model/backup-source"
 import { remoteComputerTarget } from "@/features/application/model/connections"
 import { assertNativeBridgeMocksHandled, nativeBridgeMock, type NativeCommandHandlers } from "@/test/native-bridge-mock"
-import { createProductionSource, type ProductionBridge } from "./production-source"
+import contracts from "@/test/contracts/review-requests.json"
+import { createProductionSource, keepReviewRequest, listComputerSteps, listReviewRequests, openReviewRequest, readComputerTree, showReviewRequest, throwAwayReviewRequest, type ProductionBridge } from "./production-source"
 
 afterEach(assertNativeBridgeMocksHandled)
 
@@ -367,5 +368,59 @@ describe("production command behavior", () => {
       }))
       await expect(store.backupActions.revealArchive(archive)).rejects.toThrow("Archive missing")
     } finally { store.dispose() }
+  })
+})
+
+describe("review request commands", () => {
+  const fixtures = contracts as Record<string, unknown>
+
+  it("lists, shows, keeps, throws away and opens requests through their commands", async () => {
+    const native = bridge({
+      list_review_requests: () => fixtures.list,
+      show_review_request: () => fixtures.show,
+      keep_review_request: () => fixtures.keep,
+      throw_away_review_request: () => fixtures.throwAway,
+      open_review_request: () => fixtures.open,
+    })
+    const list = await listReviewRequests({ status: "all", allDevices: true }, native)
+    expect(list.requests.map(entry => [entry.request.id, entry.request.status, entry.deviceId])).toEqual([["req-1", "open", "dev-2"], ["req-2", "thrown-away", undefined]])
+    expect(list.unreachable).toEqual([{ deviceId: "dev-3", deviceName: "mac-mini", reason: "offline" }])
+    const detail = await showReviewRequest({ requestId: "req-1", deviceId: "dev-2" }, native)
+    expect(detail).toMatchObject({ stale: false, reviewDigest: "d1", counts: { code: 1 } })
+    expect(detail.credentials.used[0]).toMatchObject({ secret: "GITHUB_TOKEN", count: 4 })
+    expect((await keepReviewRequest({ requestId: "req-1", dataOk: true }, native)).request.keepId).toBe("cp-before-keep")
+    expect((await throwAwayReviewRequest({ requestId: "req-1" }, native)).dropped).toBe("login-fix")
+    expect((await openReviewRequest({ requestId: "req-1" }, native)).urls).toEqual(["http://login-fix-3000.localhost"])
+    expect(native.invoke.mock.calls).toEqual([
+      ["list_review_requests", { status: "all", allDevices: true }],
+      ["show_review_request", { requestId: "req-1", deviceId: "dev-2" }],
+      ["keep_review_request", { requestId: "req-1", dataOk: true }],
+      ["throw_away_review_request", { requestId: "req-1" }],
+      ["open_review_request", { requestId: "req-1" }],
+    ])
+  })
+
+  it("reads steps and the tree", async () => {
+    const native = bridge({
+      list_computer_steps: () => fixtures.steps,
+      read_computer_tree: () => fixtures.tree,
+    })
+    expect((await listComputerSteps("fork-1", undefined, native)).map(step => [step.number, step.exitCode, step.parentStep])).toEqual([[1, 0, undefined], [2, undefined, 1]])
+    const nodes = await readComputerTree(undefined, native)
+    expect(nodes[1]).toMatchObject({ parent: "main-1", from: { kind: "step", number: 2 }, pendingChanges: { requestId: "req-1" } })
+  })
+
+  it("keeps a refused keep and tolerates rows and origins it cannot read", async () => {
+    const native = bridge({
+      keep_review_request: () => fixtures.refusedKeep,
+      read_computer_tree: () => ({ nodes: [{ id: "a", name: "a", parent: null, from: { kind: "from-the-future" }, state: "running", pendingChanges: { requestId: null, buckets: null } }, { broken: true }] }),
+      list_review_requests: () => ({ requests: [{ nonsense: 1 }, ...(fixtures.list as { requests: unknown[] }).requests.slice(0, 1)] }),
+    })
+    const refused = await keepReviewRequest({ requestId: "req-1" }, native)
+    expect(refused).toMatchObject({ status: "refused", refusal: { reason: "divergent" }, request: { status: "open" } })
+    expect(await readComputerTree(undefined, native)).toMatchObject([{ id: "a", from: { kind: "root" } }])
+    const list = await listReviewRequests({}, native)
+    expect(list.requests).toHaveLength(1)
+    expect(list.unreachable).toEqual([])
   })
 })

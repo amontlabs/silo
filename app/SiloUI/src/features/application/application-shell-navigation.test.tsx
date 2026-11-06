@@ -167,8 +167,9 @@ it("opens a computer detail page and returns to the list with the app's Back con
 })
 
 
-it("deep-links into a computer detail page and tab from an initial route", () => {
+it("deep-links into a computer detail page and tab from an initial route", async () => {
   render(<ApplicationPreview source={applicationSourceForScenario("complete")} initialRoute={{ computer: "dev", computerTab: "checkpoints" }} />)
+  await act(async () => {})
   expect(screen.getByRole("navigation", { name: "Breadcrumb" })).toHaveTextContent("Computersdev")
   expect(screen.getByRole("tab", { name: "Checkpoints" })).toHaveAttribute("aria-selected", "true")
 })
@@ -400,7 +401,7 @@ it("opens on the nested computer Overview with compact navigation", () => {
 
   const navigation = appNavigation()
   const primaryItems = [...navigation.querySelectorAll<HTMLElement>("[data-navigation-level='primary']")]
-  expect(primaryItems).toEqual(["Computers", "GitHub", "Secrets", "Settings"].map(name => within(navigation).getByRole("button", { name })))
+  expect(primaryItems).toEqual(["Computers", "Pending changes", "GitHub", "Secrets", "Settings"].map(name => within(navigation).getByRole("button", { name })))
   for (const item of primaryItems) expect(item).toHaveClass("flex-none", "w-full")
 
   expect(within(navigation).getByRole("button", { name: "Computers" })).toHaveAttribute("aria-current", "page")

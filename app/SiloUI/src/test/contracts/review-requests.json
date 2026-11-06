@@ -1,0 +1,95 @@
+{
+  "list": {
+    "requests": [
+      {
+        "request": {
+          "id": "req-1", "forkId": "fork-1", "target": "main-1", "createdAt": "2026-11-05T10:00:00Z",
+          "reviewDigest": "d1", "summary": "Fix the login page", "status": "open",
+          "counts": { "code": 3, "packages": 1 }
+        },
+        "forkName": "login-fix", "forkState": "running", "targetName": "main",
+        "deviceId": "dev-2", "deviceName": "linux-box"
+      },
+      {
+        "request": {
+          "id": "req-2", "forkId": "fork-2", "target": "folder:/Users/dev/app", "createdAt": "2026-11-04T09:00:00Z",
+          "reviewDigest": "", "summary": "", "status": "thrown-away", "resolvedAt": "2026-11-04T10:00:00Z"
+        }
+      }
+    ],
+    "unreachable": [{ "deviceId": "dev-3", "deviceName": "mac-mini", "reason": "offline" }]
+  },
+  "show": {
+    "request": {
+      "id": "req-1", "forkId": "fork-1", "target": "main-1", "createdAt": "2026-11-05T10:00:00Z",
+      "reviewDigest": "d1", "summary": "Fix the login page", "status": "open", "counts": { "code": 3 }
+    },
+    "forkName": "login-fix", "forkState": "running", "stale": false, "reviewDigest": "d1", "fresh": true,
+    "diff": { "code": [{ "path": "src/login.ts", "change": "modified" }] },
+    "text": "code: 1 change", "counts": { "code": 1 },
+    "credentials": {
+      "used": [{ "secret": "GITHUB_TOKEN", "host": "api.github.com", "method": "GET", "count": 4 }],
+      "blocked": [{ "host": "example.com", "method": "POST", "count": 1, "reason": "not allowed for this host" }]
+    }
+  },
+  "keep": {
+    "status": "kept",
+    "report": {
+      "fork": "login-fix", "target": "main", "summary": ["1 code change"], "steps": [], "notes": [],
+      "checkpoint": "cp-before-keep", "reviewDigest": "d1"
+    },
+    "request": {
+      "id": "req-1", "forkId": "fork-1", "target": "main-1", "createdAt": "2026-11-05T10:00:00Z",
+      "reviewDigest": "d1", "summary": "Fix the login page", "status": "kept", "keepId": "cp-before-keep"
+    }
+  },
+  "refusedKeep": {
+    "status": "refused",
+    "report": { "fork": "login-fix", "target": "main", "summary": [], "steps": [], "notes": [], "checkpoint": null },
+    "refusal": { "reason": "divergent", "message": "The target moved on.", "conflicts": [], "hint": "Review again." },
+    "request": {
+      "id": "req-1", "forkId": "fork-1", "target": "main-1", "createdAt": "2026-11-05T10:00:00Z",
+      "reviewDigest": "d1", "summary": "", "status": "open"
+    }
+  },
+  "throwAway": {
+    "request": {
+      "id": "req-1", "forkId": "fork-1", "target": "main-1", "createdAt": "2026-11-05T10:00:00Z",
+      "reviewDigest": "d1", "summary": "", "status": "thrown-away"
+    },
+    "dropped": "login-fix"
+  },
+  "open": {
+    "request": {
+      "id": "req-1", "forkId": "fork-1", "target": "main-1", "createdAt": "2026-11-05T10:00:00Z",
+      "reviewDigest": "d1", "summary": "", "status": "open"
+    },
+    "computerId": "fork-1", "name": "login-fix", "state": "running", "started": true,
+    "sshAlias": "silo-login-fix", "urls": ["http://login-fix-3000.localhost"]
+  },
+  "steps": {
+    "steps": [
+      {
+        "id": "s1", "computerId": "fork-1", "number": 1, "command": "npm install", "exitCode": 0,
+        "startedAt": "2026-11-05T09:00:00Z", "finishedAt": "2026-11-05T09:01:00Z", "checkpointId": "cp1",
+        "parentCheckpoint": "cp0"
+      },
+      {
+        "id": "s2", "computerId": "fork-1", "number": 2, "command": "npm test",
+        "startedAt": "2026-11-05T09:02:00Z", "finishedAt": "2026-11-05T09:03:00Z", "parentStep": 1
+      }
+    ]
+  },
+  "tree": {
+    "nodes": [
+      { "id": "main-1", "name": "main", "parent": null, "from": { "kind": "root" }, "state": "running",
+        "pendingChanges": { "requestId": null, "buckets": null } },
+      { "id": "fork-1", "name": "login-fix", "parent": "main-1", "from": { "kind": "step", "number": 2, "checkpointId": "cp2" },
+        "state": "stopped", "pendingChanges": { "requestId": "req-1", "buckets": { "code": 3 } } }
+    ]
+  },
+  "credentials": {
+    "used": [{ "secret": "GITHUB_TOKEN", "host": "api.github.com", "method": "GET", "count": 4, "lastAt": 1793000000000 }],
+    "blocked": []
+  }
+}

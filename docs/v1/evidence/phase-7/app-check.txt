@@ -1,0 +1,21 @@
+Silo v1 phase 7: the new app screens driven once in the real app (6 Nov 2026)
+
+Build: Silo Dev.app from branch p7 (commit d356fe00 + merges), `build_desktop.py --dev-release`, engine from the same bundle (Dev home ~/.silo-dev).
+Data: `silo up --recipe demo` (main); `silo fork main --name e2e-p7-a -- sh -c 'echo p7 > ~/p7-note.txt'`; `silo fold e2e-p7-a --request` (fr-21a6cce6);
+two steps on main with `step_checkpoints: true` (`touch /tmp/s1`, `touch /tmp/s2`).
+Driver: LCU (`mcp__lcu.js`) via an automation agent; screenshots were taken but could not be saved (EPERM), so this file records what each screen showed.
+
+1. Pending changes: "e2e-p7-a into main", "1 other"; six older rows named by id with "No changes" (requests whose fork was deleted earlier: bug, fixed separately).
+2. Review: "e2e-p7-a → main"; Code 0, Database 0, Other 1, Packages 0, Settings & files 0. Diff text "Other changed", "+ /home/silo/p7-note.txt",
+   "Ignored: 2 paths (caches, logs, build output)"; "Credentials used: none".
+3. Open fork: "e2e-p7-a is running.", "SSH: e2e-p7-a.silo-dev", "http://3000.e2e-p7-a.silo.localhost:47383" with Copy.
+4. Keep: confirmation "Keep into main?" / "The changes in e2e-p7-a are carried into main."; result "Kept into main. Undo with silo undo main."
+5. Back: returned to Pending changes.
+6. Steps (main, Checkpoints tab): "#1 touch /tmp/s1", "#2 touch /tmp/s2", both "Exit 0", "Checkpoint saved".
+7. Fork from step 1 named e2e-p7-step1: toast "Fork created", "e2e-p7-step1 is stopped. Start it when you're ready." The fork popover then also
+   showed "A computer named e2e-p7-step1 already exists." (stale name check after success: bug, fixed separately).
+
+CLI cross-check after the run:
+  silo exec main -- cat /home/silo/p7-note.txt   -> p7
+  silo list                                      -> e2e-p7-step1 stopped
+  silo requests --status all | grep 21a6         -> fr-21a6cce6  e2e-p7-a (running)  into main  other 1  [kept]

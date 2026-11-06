@@ -1,5 +1,5 @@
 import { useEffect, useEffectEvent, useRef, useState, type ReactNode } from "react"
-import { Activity, Bell, Boxes, ChevronRight, CircleAlert, File, GitFork, KeyRound, LayoutDashboard, Monitor, Network, Settings2, SlidersHorizontal, Terminal } from "lucide-react"
+import { Activity, Bell, Boxes, ChevronRight, CircleAlert, File, GitFork, GitPullRequestArrow, KeyRound, LayoutDashboard, Monitor, Network, Settings2, SlidersHorizontal, Terminal } from "lucide-react"
 
 import { ShortcutBadge } from "@/components/shortcut-badge"
 import { shortcutFor, type KeyboardShortcut } from "@/lib/shortcuts"
@@ -22,6 +22,7 @@ export interface ApplicationNavigationLoading {
 }
 
 const primaryItems = [
+  { id: "changes", label: "Pending changes", icon: GitPullRequestArrow },
   { id: "github", label: "GitHub", icon: GitFork },
   { id: "secrets", label: "Secrets", icon: KeyRound },
 ] as const

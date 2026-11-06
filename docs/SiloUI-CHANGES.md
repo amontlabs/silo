@@ -296,7 +296,12 @@ the same fork and target updates the open one and keeps its id. The CLI and the 
 bucket) so a list can show them without a diff.
 
 A request is `open`, `keeping` (a keep of it started and is not recorded as finished), `kept`
-(with `keepId`, the target's before-keep checkpoint, and `resolvedAt`) or `thrown-away`. A request
+(with `keepId`, the target's before-keep checkpoint, and `resolvedAt`) or `thrown-away`. It is
+also `thrown-away`, with `closedReason` `fork-deleted` or `target-deleted`, when its fork or
+target computer is deleted: `computers.delete` closes the open requests that name the computer, and
+`changes.requests.list` closes any open request whose fork or target is missing, but only when
+both platforms were read and the Linux runtime reported no repair (never from a partial list). A
+`keeping` request is left to its keep. A request
 is made only for a fork of its target: `changes.request` refuses a fork whose fork-time record does
 not name the target (so main and unrelated computers cannot be named), and a folder target needs
 the folder record the CLI keeps for that fork. A fork's source may be recorded as a checkpoint

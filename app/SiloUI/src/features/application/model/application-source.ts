@@ -1,6 +1,7 @@
 import type { LifecycleStep } from "./lifecycle-progress"
 import type { OperationQueue } from "./operation-queue"
 import type { WorkspaceStorageState } from "./workspace-storage"
+import type { ComputerStep, ComputerTreeNode } from "@/desktop/production-schemas"
 import type { QuietState } from "../../macos-computers/model/macos-computers"
 import type { CheckpointUsage, PendingCheckpointRestore, UnfinishedRestore, ComputerCheckpoint, ComputerCheckpointOperation } from "./checkpoint-source"
 import type { LogLoader, LogQuery } from "./logs"
@@ -14,9 +15,10 @@ import type {
   SiloProgressEvent,
   SiloProtocolError,
 } from "@/contracts/silo"
+import type { RequestList } from "@/desktop/production-schemas"
 import type { ApplicationPreferenceSelection } from "@/features/preferences/model/application-preferences"
 
-export type ApplicationTab = "computers" | "github" | "secrets" | "system" | "settings"
+export type ApplicationTab = "computers" | "changes" | "github" | "secrets" | "system" | "settings"
 export type SettingsSection = "general" | "connections" | "notifications"
 export type ComputerSection = "overview" | "files" | "logs" | "network" | "activity"
 export type ComputerDetailSection = Exclude<ComputerSection, "overview">
@@ -321,6 +323,10 @@ export interface ApplicationSource {
 }
 
 export interface ApplicationActions {
+  /** What the review screen runs; the desktop's when omitted. */
+  reviewRequestActions?: import("@/features/application/components/review-request").ReviewRequestActions
+  /** The review requests of this device and, with `allDevices`, every connected device. */
+  listReviewRequests?: (options?: { status?: "open" | "kept" | "thrown-away" | "all"; allDevices?: boolean }) => Promise<RequestList>
   createCheckpoint?: (computer: string, name: string) => Promise<void>
   forkCheckpoint?: (computer: string, checkpointId: string | null, newName: string) => Promise<void>
   restoreCheckpoint?: (computer: string, checkpointId: string) => Promise<void>
@@ -330,6 +336,10 @@ export interface ApplicationActions {
   deleteCheckpoint?: (computer: string, checkpointId: string) => Promise<void>
   /** Checkpoint sizes and Delete availability for a computer on this device, by its ID. */
   readCheckpointUsage?: (computerId: string) => Promise<CheckpointUsage>
+  /** The recorded steps of a computer (oldest first); `deviceId` for a computer on another device. */
+  listComputerSteps?: (computerId: string, deviceId?: string) => Promise<ComputerStep[]>
+  /** Every computer on a device with what it was forked from and its pending changes. */
+  readComputerTree?: (deviceId?: string) => Promise<ComputerTreeNode[]>
   readWorkspaceStorage?: (computerId: string) => Promise<WorkspaceStorageState>
   reclaimWorkspaceStorage?: (computerId: string) => Promise<WorkspaceStorageState>
   refreshRepositories?: () => Promise<void>

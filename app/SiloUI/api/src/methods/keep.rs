@@ -214,6 +214,18 @@ pub enum FoldRequestStatus {
     ThrownAway,
 }
 
+/// Why a request was closed without being answered.
+#[derive(
+    Clone, Copy, Debug, serde::Deserialize, PartialEq, Eq, serde::Serialize, schemars::JsonSchema,
+)]
+#[serde(rename_all = "kebab-case")]
+pub enum FoldRequestClosedReason {
+    /// The fork was deleted.
+    ForkDeleted,
+    /// The computer the fork would be kept into was deleted.
+    TargetDeleted,
+}
+
 wire_struct! {
     /// A recorded request to review a fork. The engine keeps it until it is answered.
     FoldRequest {
@@ -241,6 +253,10 @@ wire_struct! {
         /// status is `keeping`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         keeping_since_ms: Option<u64>,
+        /// Why a `thrown-away` request was closed when no one answered it: the fork or the
+        /// target computer was deleted.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        closed_reason: Option<FoldRequestClosedReason>,
     }
 }
 

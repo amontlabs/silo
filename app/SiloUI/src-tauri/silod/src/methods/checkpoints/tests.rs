@@ -506,7 +506,17 @@ async fn requests_list_filters_by_status_and_names_the_fork() {
     let listed = call(&fixture, MethodName::ChangesRequestsList, json!({}))
         .await
         .unwrap();
+    // The request of the missing fork is closed by the listing, so it is no longer open.
     let entries = listed["requests"].as_array().unwrap();
+    assert_eq!(entries.len(), 1);
+    let all = call(
+        &fixture,
+        MethodName::ChangesRequestsList,
+        json!({"status": "all"}),
+    )
+    .await
+    .unwrap();
+    let entries = all["requests"].as_array().unwrap();
     assert_eq!(entries.len(), 2);
     let known = entries
         .iter()
@@ -661,6 +671,22 @@ async fn throw_away_does_not_conclude_a_fork_is_gone_from_an_incomplete_list() {
         .await
         .unwrap();
     assert_eq!(listed["requests"][0]["request"]["status"], "open");
+}
+
+#[tokio::test]
+async fn listing_closes_open_requests_whose_fork_is_gone_from_a_complete_list() {
+    let fixture = request_fixture();
+    make_request(&fixture, "no-such-fork", "main-id", "d1").await;
+    let listed = call(
+        &fixture,
+        MethodName::ChangesRequestsList,
+        json!({"status": "all"}),
+    )
+    .await
+    .unwrap();
+    let request = &listed["requests"][0]["request"];
+    assert_eq!(request["status"], "thrown-away");
+    assert_eq!(request["closedReason"], "fork-deleted");
 }
 
 #[tokio::test]
