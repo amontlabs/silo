@@ -159,7 +159,7 @@ fn dir_flags() -> OFlags {
 /// Opens (creating, with `mode`, when `create`) a real directory below `parent`.
 fn sub(parent: &OwnedFd, name: &str, create: Option<u16>) -> Result<OwnedFd, String> {
     if let Some(mode) = create {
-        match mkdirat(parent, name, Mode::from_raw_mode(mode)) {
+        match mkdirat(parent, name, Mode::from_bits_truncate(mode.into())) {
             Ok(()) | Err(rustix::io::Errno::EXIST) => {}
             Err(error) => return Err(io(error)),
         }
@@ -167,7 +167,7 @@ fn sub(parent: &OwnedFd, name: &str, create: Option<u16>) -> Result<OwnedFd, Str
     let fd = openat(parent, name, dir_flags(), Mode::empty())
         .map_err(|_| format!("{name} in the bridge folder is not a real folder."))?;
     if let Some(mode) = create {
-        fchmod(&fd, Mode::from_raw_mode(mode)).map_err(io)?;
+        fchmod(&fd, Mode::from_bits_truncate(mode.into())).map_err(io)?;
         // The guest sees these folders as root's, so its sticky bit and modes mean what they say.
         write_override(&fd, 0, 0, S_IFDIR | u32::from(mode));
     }
