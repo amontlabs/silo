@@ -180,11 +180,32 @@ The first form is used rather than an `@device` prefix on computer names, so nam
 `fold --pr` use this device's files, SSH configuration or secrets and refuse `--device`.
 The routing is described in [Connections](SiloUI-CONNECTIONS.md#driving-another-devices-main-v1-methods).
 
+Settings, recipes (`keep:` hooks), `auto_keep:` rules and write-back are read on this device and
+applied to the other device's computers: a `fold` on `--device mini` runs the keep hooks and
+auto-keep rules of this project, and does not append kept packages to a recipe file here.
+`fork -- <command>` runs the command on this device's terminal path and refuses `--device`; run
+the fork and `exec` on the device itself. `requests open` on another device prints that
+device's URLs as `(as the other device sees it)` and no SSH name, since both belong to its own
+network. An id found on this device and another device (or two devices) is refused until
+`--device` says which. `list --all-devices` asks each device for at most 15 seconds, at once,
+and skips one whose last health check failed.
+
 - `silo list --all-devices` lists this device's computers and every connected device's, with a
   `DEVICE` column, and a line for each device it could not reach.
 - `silo requests --all-devices` is one list of pending changes across devices (`[Mac mini] fr-...`).
   `requests show`, `keep`, `throw-away` and `open` find the device a request is on by its id
   (this device first, then the merged list) and act there; `--device` skips the search.
+- MCP: a change on another device (`fork`, `fold`, `undo`, `request_keep`, `request_throw_away`,
+  `request_open`) happens only when the call names `device`, and only when the agent's entry in
+  `.silo/silo.yaml` lists it (default none; the agent must be named with `--agent` or
+  `SILO_AGENT`, not just the client's own name). The command line is not gated.
+
+  ```yaml
+  agents:
+    openclaw:
+      devices: [Mac mini]
+  ```
+
 - MCP: `device` on `list`, `status`, `fork`, `fold`, `diff`, `undo`, `steps_list`, `tree`,
   `checkpoints`, `requests_list` and the request tools, and `allDevices` on `list` and
   `requests_list`.

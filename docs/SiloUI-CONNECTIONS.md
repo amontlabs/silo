@@ -57,6 +57,15 @@ returns the owner's `jobId`, followed with `(deviceId, jobId)` through `operatio
 | `recipes.build`, `list`, `remove` | that device | A recipe's build is a hidden computer and a checkpoint on that device. |
 | Folder forks, `fold --pr`, `ssh-setup`, `ports`, `publish`, `secrets`, `exec` | this device | They read or write this device's folders, SSH configuration, tunnels, Keychain or terminal; the CLI refuses `--device` for them. |
 
+A connected controller can therefore keep, promote and undo changes in the owner's `main` and
+manage its review requests, steps and recipes, with the same access as the controller's other
+remote methods; Connections is the permission. Each of these handlers refuses a request that
+still names another device (`require_local_device`), and an owner serving a request over the
+bridge never lists or asks its own devices (`allDevices` is dropped there). The engine
+advertises `device.routing.v1` in its handshake; the command line refuses `--device` and
+`--all-devices` against an engine that does not, because such an engine would answer for
+itself.
+
 `changes.requests.list` with `allDevices: true` returns this device's requests and every
 connected device's in one list. Each row has `deviceId` and `deviceName`; the devices that did
 not answer are in `unreachable` (`deviceId`, `deviceName`, `reason`) and never fail the list. A

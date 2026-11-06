@@ -130,7 +130,8 @@ pub struct RequestsListParams {
 pub struct RequestIdParam {
     /// The request's id, such as fr-ab12cd34.
     pub id: String,
-    /// The device the request is on (default: found by id on this device or a connected one).
+    /// The device the request is on. Needed for a request on another device, and the agent's
+    /// `devices:` entry in `.silo/silo.yaml` must list it.
     pub device: Option<String>,
 }
 
@@ -144,7 +145,8 @@ pub struct RequestKeepParams {
     pub data_ok: bool,
     /// Path of a recipe whose keep: section applies.
     pub recipe_file: Option<String>,
-    /// The device the request is on (default: found by id on this device or a connected one).
+    /// The device the request is on. Needed for a request on another device, and the agent's
+    /// `devices:` entry in `.silo/silo.yaml` must list it.
     pub device: Option<String>,
 }
 
@@ -275,10 +277,35 @@ impl SiloMcp {
         }
     }
 
-    /// The engine a request's actions go to.
-    async fn engine_for_request(&self, device: Option<&str>, id: &str) -> Result<Engine, CliError> {
+    /// The engine for a change on `device`. Another device is acted on only when the call names
+    /// it, and only when the agent's `devices:` entry in `.silo/silo.yaml` lists it.
+    async fn engine_acting_on(&self, device: Option<&str>) -> Result<Engine, CliError> {
         let engine = self.engine_on(device).await?;
-        review::locate(&engine, id).await
+        let Some(id) = engine.device().map(str::to_owned) else {
+            return Ok(engine);
+        };
+        let project = Project::discover(&self.working_directory);
+        let settings = project.load_settings_as(self.agent().as_deref(), self.agent_named)?;
+        let allowed = settings
+            .map(|settings| settings.devices)
+            .unwrap_or_default();
+        let name = engine
+            .devices()
+            .await?
+            .into_iter()
+            .find(|(known, _)| *known == id)
+            .map(|(_, name)| name)
+            .unwrap_or_default();
+        if allowed
+            .iter()
+            .any(|entry| entry.eq_ignore_ascii_case(&name) || *entry == id)
+        {
+            Ok(engine)
+        } else {
+            Err(CliError::new(format!(
+                "This agent may not act on {name}. List it under devices: in the agent's entry of agents: in .silo/silo.yaml."
+            )))
+        }
     }
 
     async fn engine(&self) -> Result<Engine, CliError> {
@@ -379,7 +406,12 @@ impl SiloMcp {
                         "A folder is on this device, so `device` cannot be used with it.",
                     ));
                 }
-                let engine = self.engine_on(params.device.as_deref()).await?;
+                let engine = self.engine_acting_on(params.device.as_deref()).await?;
+                if engine.device().is_some() && !params.command.is_empty() {
+                    return Err(CliError::new(
+                        "A command runs on this device, so `device` cannot be used with `command`.",
+                    ));
+                }
                 let checkpoint = match params.from_step {
                     Some(number) => {
                         if params.recipe.is_some()
@@ -497,7 +529,7 @@ impl SiloMcp {
     async fn fold(&self, Parameters(params): Parameters<FoldParams>) -> Result<String, String> {
         show(
             async {
-                let engine = self.engine_on(params.device.as_deref()).await?;
+                let engine = self.engine_acting_on(params.device.as_deref()).await?;
                 if params.promote && !params.request {
                     let mut value = ops::promote(
                         &engine,
@@ -524,7 +556,7 @@ impl SiloMcp {
                     project: &project,
                     settings: settings.as_ref(),
                     recipe: recipe.as_ref(),
-                    write_back: !params.no_write_back,
+                    write_back: !params.no_write_back && engine.device().is_none(),
                 };
                 let mode = if params.request {
                     flows::Mode::Request
@@ -584,7 +616,7 @@ impl SiloMcp {
     ) -> Result<String, String> {
         show(
             async {
-                let engine = self.engine_for_request(device.as_deref(), &id).await?;
+                let engine = self.engine_on(device.as_deref()).await?;
                 review::show(&engine, &id, &|_| {}).await
             }
             .await,
@@ -606,9 +638,7 @@ impl SiloMcp {
                     .as_deref()
                     .map(|path| self.working_directory.join(path));
                 let recipe = ops::resolve_recipe(explicit.as_deref(), &project)?;
-                let engine = self
-                    .engine_for_request(params.device.as_deref(), &params.id)
-                    .await?;
+                let engine = self.engine_acting_on(params.device.as_deref()).await?;
                 review::keep(
                     &engine,
                     &params.id,
@@ -631,7 +661,7 @@ impl SiloMcp {
     ) -> Result<String, String> {
         show(
             async {
-                let engine = self.engine_for_request(device.as_deref(), &id).await?;
+                let engine = self.engine_acting_on(device.as_deref()).await?;
                 review::throw_away(&engine, &id, &|_| {}).await
             }
             .await,
@@ -647,7 +677,7 @@ impl SiloMcp {
     ) -> Result<String, String> {
         show(
             async {
-                let engine = self.engine_for_request(device.as_deref(), &id).await?;
+                let engine = self.engine_acting_on(device.as_deref()).await?;
                 review::open(&engine, &id, &|_| {}).await
             }
             .await,
@@ -682,7 +712,7 @@ impl SiloMcp {
     ) -> Result<String, String> {
         show(
             async {
-                let engine = self.engine_on(device.as_deref()).await?;
+                let engine = self.engine_acting_on(device.as_deref()).await?;
                 if engine.device().is_some() && folder::is_folder(&computer) {
                     return Err(CliError::new(
                         "A folder is on this device, so `device` cannot be used with it.",

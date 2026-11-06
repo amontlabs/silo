@@ -27,6 +27,10 @@ fn engine() -> FakeEngine {
                 {"id": MINI, "name": "Mac mini", "address": "ssh://mini"},
                 {"id": DOWN, "name": "Laptop", "address": "ssh://laptop"}
             ])),
+            "connections.devices.health" => Ok(json!({"devices": [
+                {"deviceId": MINI, "connected": true, "busy": false, "error": null},
+                {"deviceId": DOWN, "connected": false, "busy": false, "error": "Connection refused"}
+            ]})),
             "computers.list" if device == Some(DOWN) => {
                 Err(("internal", "This device is no longer connected.".to_owned()))
             }
@@ -131,7 +135,8 @@ async fn list_across_devices_asks_each_device_and_reports_the_one_it_cannot_reac
         .collect();
     assert_eq!(
         asked,
-        vec![None, Some(MINI.to_owned()), Some(DOWN.to_owned())]
+        vec![None, Some(MINI.to_owned())],
+        "a device known to be offline is not asked"
     );
 }
 
@@ -174,5 +179,116 @@ async fn an_action_on_a_request_of_this_device_stays_here() {
     assert!(engine.calls("changes.requests.throwAway")[0]
         .get("deviceId")
         .is_none());
-    assert!(engine.calls("connections.devices.list").is_empty());
+}
+
+#[tokio::test]
+async fn a_slow_device_is_reported_instead_of_waited_for() {
+    let engine = FakeEngine::start(|method, params| match method {
+        "connections.devices.list" => Ok(json!([
+            {"id": MINI, "name": "Mac mini", "address": "ssh://mini"}
+        ])),
+        "computers.list" if params["deviceId"] == MINI => {
+            std::thread::sleep(std::time::Duration::from_millis(400));
+            Ok(listing(&[("main", "running")]))
+        }
+        "computers.list" => Ok(listing(&[("main", "running")])),
+        other => Err(("internal", format!("unexpected {other}"))),
+    });
+    let socket = engine.socket.clone();
+    let connected = silo_cli::engine::Engine::connect(&socket).await.unwrap();
+    let listed = silo_cli::ops::list_everywhere_within(
+        &connected,
+        false,
+        std::time::Duration::from_millis(50),
+    )
+    .await
+    .unwrap();
+    assert_eq!(listed["computers"].as_array().unwrap().len(), 1);
+    assert_eq!(listed["unreachable"][0]["deviceId"], MINI);
+    assert!(listed["unreachable"][0]["reason"]
+        .as_str()
+        .unwrap()
+        .contains("in time"));
+}
+
+#[tokio::test]
+async fn a_request_id_on_two_devices_is_refused_until_a_device_is_named() {
+    let engine = FakeEngine::start(|method, params| match method {
+        "connections.devices.list" => Ok(json!([
+            {"id": MINI, "name": "Mac mini", "address": "a"}
+        ])),
+        "changes.requests.list" if params["allDevices"] == true => Ok(json!({"requests": [
+            {"request": request("fr-same"), "deviceId": MINI, "deviceName": "Mac mini"}
+        ]})),
+        "changes.requests.list" => Ok(json!({"requests": [{"request": request("fr-same")}]})),
+        "changes.requests.throwAway" => Ok(json!({"jobId": "job:7"})),
+        "operations.job.get" => Ok(json!({"jobId": "job:7", "state": "finished",
+            "outcome": {"result": {"request": request("fr-same"), "dropped": "try"}}})),
+        "operations.job.acknowledge" => Ok(Value::Null),
+        other => Err(("internal", format!("unexpected {other}"))),
+    });
+    let message = error(&engine, &["requests", "throw-away", "fr-same"]).await;
+    assert!(
+        message.contains("this device and Mac mini") && message.contains("--device"),
+        "{message}"
+    );
+    assert!(engine.calls("changes.requests.throwAway").is_empty());
+    let args = ["--device", "mac mini", "requests", "throw-away", "fr-same"];
+    assert_eq!(exit_code(&engine, &args).await, 0);
+    assert_eq!(
+        engine.calls("changes.requests.throwAway")[0]["deviceId"],
+        MINI
+    );
+}
+
+#[tokio::test]
+async fn opening_a_request_on_another_device_drops_its_ssh_name_and_loopback_urls() {
+    let engine = FakeEngine::start(|method, _| match method {
+        "connections.devices.list" => Ok(json!([
+            {"id": MINI, "name": "Mac mini", "address": "a"}
+        ])),
+        "changes.requests.open" => Ok(json!({"jobId": "job:7"})),
+        "operations.job.get" => Ok(
+            json!({"jobId": "job:7", "state": "finished", "outcome": {"result": {
+                "request": request("fr-mini"), "computerId": "c", "name": "try", "state": "running",
+                "started": false, "sshAlias": "try.silo", "urls": ["http://127.0.0.1:3000"]
+            }}}),
+        ),
+        "operations.job.acknowledge" => Ok(Value::Null),
+        other => Err(("internal", format!("unexpected {other}"))),
+    });
+    let connected = silo_cli::engine::Engine::connect(&engine.socket)
+        .await
+        .unwrap();
+    let id = connected.resolve_device("mac mini").await.unwrap();
+    let opened = silo_cli::review::open(&connected.on_device(Some(id)), "fr-mini", &|_| {})
+        .await
+        .unwrap();
+    assert!(opened.get("sshAlias").is_none(), "{opened}");
+    assert_eq!(opened["urls"], json!([]));
+    assert_eq!(opened["deviceUrls"][0], "http://127.0.0.1:3000");
+}
+
+#[tokio::test]
+async fn an_engine_without_device_routing_refuses_device() {
+    let engine = FakeEngine::start_with(&[], |method, _| {
+        Err(("internal", format!("unexpected {method}")))
+    });
+    let message = error(&engine, &["--device", "mini", "list"]).await;
+    assert!(message.contains("older"), "{message}");
+    assert!(engine.calls("computers.list").is_empty());
+}
+
+#[tokio::test]
+async fn nothing_that_would_run_here_is_sent_under_device() {
+    let engine = engine();
+    // `status` reads secrets and GitHub access from this device's engine; on another device
+    // it must not ask them.
+    let _ = run(
+        cli(&engine, &["--device", "mac mini", "status", "main"]),
+        std::env::temp_dir().as_path(),
+    )
+    .await;
+    assert!(engine.calls("secrets.list").is_empty());
+    assert!(engine.calls("github.state").is_empty());
 }

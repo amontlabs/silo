@@ -39,9 +39,22 @@ pub async fn list_all(engine: &Engine) -> Result<Value, CliError> {
     Ok(json!({ "computers": computers.iter().map(Computer::to_json).collect::<Vec<_>>() }))
 }
 
+/// How long one device may take to list its computers.
+pub const DEVICE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+
 /// `silo list --all-devices`: this device's computers and every connected device's, each with
-/// the device it is on. A device that cannot be read is listed in `unreachable`.
+/// the device it is on. Devices are asked at once, each for at most `DEVICE_TIMEOUT`; one that
+/// is known to be offline, fails or is too slow is listed in `unreachable`.
 pub async fn list_everywhere(engine: &Engine, hidden: bool) -> Result<Value, CliError> {
+    list_everywhere_within(engine, hidden, DEVICE_TIMEOUT).await
+}
+
+pub async fn list_everywhere_within(
+    engine: &Engine,
+    hidden: bool,
+    timeout: std::time::Duration,
+) -> Result<Value, CliError> {
+    engine.require_routing()?;
     let read = |engine: Engine| async move {
         if hidden {
             engine.all_computers().await
@@ -50,14 +63,30 @@ pub async fn list_everywhere(engine: &Engine, hidden: bool) -> Result<Value, Cli
         }
     };
     let mut rows = Vec::new();
-    let mut unreachable = Vec::new();
     for computer in read(engine.on_device(None)).await? {
         let mut row = computer.to_json();
         row["deviceName"] = json!("this device");
         rows.push(row);
     }
-    for (id, name) in engine.devices().await? {
-        match read(engine.on_device(Some(id.clone()))).await {
+    let offline = engine.known_offline().await;
+    let asked = engine.devices().await?.into_iter().map(|(id, name)| {
+        let known = offline.get(&id).cloned();
+        let remote = engine.on_device(Some(id.clone()));
+        async move {
+            let result = match known {
+                Some(reason) => Err(reason),
+                None => match tokio::time::timeout(timeout, read(remote)).await {
+                    Ok(Ok(computers)) => Ok(computers),
+                    Ok(Err(error)) => Err(error.message),
+                    Err(_) => Err("It did not answer in time.".to_owned()),
+                },
+            };
+            (id, name, result)
+        }
+    });
+    let mut unreachable = Vec::new();
+    for (id, name, result) in futures::future::join_all(asked).await {
+        match result {
             Ok(computers) => {
                 for computer in computers {
                     let mut row = computer.to_json();
@@ -66,8 +95,9 @@ pub async fn list_everywhere(engine: &Engine, hidden: bool) -> Result<Value, Cli
                     rows.push(row);
                 }
             }
-            Err(error) => unreachable
-                .push(json!({ "deviceId": id, "deviceName": name, "reason": error.message })),
+            Err(reason) => {
+                unreachable.push(json!({ "deviceId": id, "deviceName": name, "reason": reason }))
+            }
         }
     }
     Ok(json!({ "computers": rows, "unreachable": unreachable }))
@@ -120,7 +150,11 @@ pub async fn status(engine: &Engine, name: &str) -> Result<Value, CliError> {
     let mut value = computer.to_json();
     value["quiet"] = computer.quiet.clone().unwrap_or(Value::Null);
     value["boots"] = computer.boots.map_or(Value::Null, Value::from);
+    // Secrets and GitHub access are read from this device's engine, so a computer on another
+    // device shows neither.
+    let on_other_device = engine.device().is_some();
     value["secrets"] = match fetch_secrets(engine).await {
+        _ if on_other_device => Value::Null,
         Ok(secrets) => json!(secrets
             .iter()
             .filter(|secret| secret["removing"] != true)
@@ -129,10 +163,13 @@ pub async fn status(engine: &Engine, name: &str) -> Result<Value, CliError> {
             .collect::<Vec<_>>()),
         Err(_) => Value::Null,
     };
-    value["github"] = match engine
-        .call(requests::github_state(DeviceParams { device_id: None }))
-        .await
-    {
+    value["github"] = match if on_other_device {
+        Err(CliError::new("another device"))
+    } else {
+        engine
+            .call(requests::github_state(DeviceParams { device_id: None }))
+            .await
+    } {
         Ok(state) => state
             .get("computers")
             .and_then(Value::as_array)

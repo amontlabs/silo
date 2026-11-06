@@ -444,6 +444,7 @@ fn refuse_on_device(command: &Command, engine: &Engine) -> Result<(), CliError> 
         Command::Fork(fork) if fork.recipe.is_none() && folder::is_folder(&fork.source) => {
             "fork of a folder"
         }
+        Command::Fork(fork) if !fork.command.is_empty() => "fork with a command",
         Command::Fold(fold) if fold.pr => "fold --pr",
         Command::Undo { computer } if folder::is_folder(computer) => "undo of a folder",
         _ => return Ok(()),

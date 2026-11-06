@@ -1092,5 +1092,11 @@ pub fn request_open(value: &Value) -> String {
     for url in list_of(value, "urls").iter().filter_map(Value::as_str) {
         out.push_str(&format!("\n{url}"));
     }
+    for url in list_of(value, "deviceUrls")
+        .iter()
+        .filter_map(Value::as_str)
+    {
+        out.push_str(&format!("\n{url} (as the other device sees it)"));
+    }
     out
 }

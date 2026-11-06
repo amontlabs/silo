@@ -107,6 +107,8 @@ pub struct Engine {
     memory: std::path::PathBuf,
     /// The connected device the commands act on; `None` is this device.
     device: Option<String>,
+    /// Whether the engine serves requests for another device (older engines ignore `deviceId`).
+    routes_devices: bool,
     _closer: Arc<Closer>,
 }
 
@@ -254,13 +256,30 @@ impl Engine {
         })?;
         // The commands read replies only; the event feed is dropped.
         drop(events);
+        let routes_devices = client.supports("device.routing.v1");
         Ok(Self {
             _closer: Arc::new(Closer(client.clone())),
             client,
             last_job: Arc::new(Mutex::new(None)),
             memory: socket.parent().map(Path::to_path_buf).unwrap_or_default(),
             device: None,
+            routes_devices,
         })
+    }
+
+    /// Refuses to go on when the engine would answer a request for another device itself.
+    pub fn require_routing(&self) -> Result<(), CliError> {
+        if self.routes_devices {
+            Ok(())
+        } else {
+            Err(CliError::new(
+                "This Silo engine is older than the command line and cannot work on another device. Update Silo.",
+            ))
+        }
+    }
+
+    pub fn routes_devices(&self) -> bool {
+        self.routes_devices
     }
 
     /// The same connection, acting on another device (`None`: this one). Commands that run
@@ -279,6 +298,7 @@ impl Engine {
 
     /// The id of the connected device called `name` (its name, its id, or an id prefix).
     pub async fn resolve_device(&self, name: &str) -> Result<String, CliError> {
+        self.require_routing()?;
         let listed = self
             .on_device(None)
             .call(requests::connections_devices_list(
@@ -286,6 +306,32 @@ impl Engine {
             ))
             .await?;
         pick_device(&listed, name)
+    }
+
+    /// Devices whose last health probe failed (not merely busy), with the reason. Empty when
+    /// the engine cannot say.
+    pub async fn known_offline(&self) -> std::collections::HashMap<String, String> {
+        let Ok(health) = self
+            .on_device(None)
+            .call(requests::connections_devices_health(
+                silo_api::methods::EmptyParams {},
+            ))
+            .await
+        else {
+            return Default::default();
+        };
+        health["devices"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|device| device["connected"] == false && device["busy"] == false)
+            .filter_map(|device| {
+                Some((
+                    device["deviceId"].as_str()?.to_owned(),
+                    device["error"].as_str()?.to_owned(),
+                ))
+            })
+            .collect()
     }
 
     /// The devices this one is connected to, as `(id, name)`.
@@ -403,6 +449,15 @@ impl Engine {
     }
 
     pub async fn call<K: Kind>(&self, request: Request<K>) -> Result<Value, CliError> {
+        if self.device.is_some()
+            && !is_routed(request.name())
+            && !request.name().starts_with("connections.")
+        {
+            return Err(CliError::new(format!(
+                "{} cannot run on another device.",
+                request.name()
+            )));
+        }
         let params = routed_params(request.name(), request.params_value(), self.device());
         Ok(self.client.request(request.name(), params).await?)
     }
@@ -537,16 +592,21 @@ const ROUTED_PREFIXES: &[&str] = &[
     "changes.",
     "checkpoints.",
     "computers.",
+    "macos.setup.",
     "operations.job.",
     "recipes.",
     "steps.",
 ];
 
+fn is_routed(method: &str) -> bool {
+    ROUTED_PREFIXES
+        .iter()
+        .any(|prefix| method.starts_with(prefix))
+}
+
 /// `params` with the `deviceId` of `device` added when `method` is routed.
 pub fn routed_params(method: &str, mut params: Value, device: Option<&str>) -> Value {
-    let routed = ROUTED_PREFIXES
-        .iter()
-        .any(|prefix| method.starts_with(prefix));
+    let routed = is_routed(method);
     if let (Some(device), true, Some(object)) = (device, routed, params.as_object_mut()) {
         object
             .entry("deviceId")
