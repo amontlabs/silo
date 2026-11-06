@@ -276,18 +276,18 @@ command alone builds with `cargo build --release -p silo-cli`.
 ## Numbers
 
 Measured once, on one Mac (Apple M4 Max, 64 GiB RAM, macOS 26.5), on a Dev-channel build of the
-same commit in the release profile with the release runtime binaries, not the signed production
-app. Each time is the median of N=3 runs, with min–max. Source: `docs/v1/evidence/final/final-run.txt`
+same commit (`09677470`) in the release profile with the release runtime binaries, not the signed
+production app. Each time is the median of N=3 runs, with min–max. Source: `docs/v1/evidence/final/final-run.txt`
 (summary in `docs/v1/evidence/final/README.md`).
 
 | What | The clock stops when | Median | Min–max |
 |---|---|---|---|
-| Linux fork of a running `main`, no usable warm checkpoint | `silo fork` exits with the fork running and a command answered in it | 8.87 s | 8.62–10.75 s |
-| `silo fork main -n 4` from the warm checkpoint | all four forks running and a command answered in each | 15.57 s | 15.53–17.67 s |
-| macOS fork to ready | `silo fork --gui` returns with the desktop and computer use ready | 51.69 s | 51.68–57.84 s |
+| Linux fork of a running `main`, no usable warm checkpoint | `silo fork` exits with the fork running and a command answered in it | 9.80 s | 9.47–12.49 s |
+| `silo fork main -n 4` from the warm checkpoint | all four forks running and a command answered in each | 17.06 s | 16.45–19.69 s |
+| macOS fork to ready | `silo fork --gui` returns with the desktop and computer use ready | 59.19 s | 58.97–60.35 s |
 
 Memory of one Linux fork (its VM processes, measured with `footprint` 20 s after ready): about
-500 MiB, 499.0–507.1 MiB over 5 forks. Method, caveats and what was not measured:
+500 MiB, 497.7–502.2 MiB over 5 forks. Method, caveats and what was not measured:
 [numbers post draft](docs/v1/launch/numbers-post.md).
 
 ## Not there yet
