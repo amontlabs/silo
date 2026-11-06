@@ -6,11 +6,10 @@ Tracker: Linear project "Silo v1: git for agent computers" (P-AMO-8).
 
 ## Resume
 
-- **Phase:** 6 on branch `claude/silo-v1-phase-6`. Phases 0-5 merged (#60-#65).
-- **Done in phase 5 (reviewed, VM-checked):** in-guest client (AMO-85), Mac mini remote + one pending-changes list (AMO-86), hosted reviewer (AMO-87, service not deployed), host computer use for forks (AMO-70).
-- **Blocked on the owner:** Keychain repair for the Dev engine (phase 4 credentials check; phase 1/3 secret carry-over). Leftover computers to drop: `silo-baseline-8fa22f`, `e2e-p3-macsrc`, `e2e-p3-macsrc-before-20261105-2253`. Upstream drafts to post: `docs/v1/upstream/`.
-- **Next action:** merge the phase 5 PR when CI is green; then phase 6 (OpenClaw/Hermes recipes, final run, README/demo/numbers drafts, release prep).
-- **macOS slots:** free.
+- **Phase:** 6 on branch `claude/silo-v1-phase-6`, PR open. Phases 0-5 merged (#60-#65).
+- **Done in phase 6:** OpenClaw and Hermes recipes (OpenClaw values measured; Hermes unverified), final run 25/25 plus OpenClaw 9/9 on a release-profile Dev build (`docs/v1/evidence/final/`), release prep (`docs/v1/release/`), the `silo` CLI shipped in the app, launch drafts (`docs/v1/launch/`, owner approves).
+- **Owner steps:** approve the launch drafts; Keychain repair (phase 4 credentials check, phase 1/3 secret checks); drop leftovers `e2e-p3-macsrc`, `e2e-p3-macsrc-before-20261105-2253`, `silo-baseline-8fa22f` (the last fails on the Keychain); the release steps in `docs/v1/release/README.md`; post `docs/v1/upstream/` drafts.
+- **Next action:** merge the phase 6 PR when CI is green; then phase 7 assessment (AMO-90).
 
 ## Start
 
@@ -110,6 +109,14 @@ VM checks: in-guest client from inside a Linux main; computer use on Linux and m
 ## Spec changes
 
 ## Status
+
+### 6 Nov 2026: phase 6 final run passed
+
+- **Final run** (commit `09677470`, Dev-identity release-profile build, M4 Max 64 GiB, macOS 26.5, MicroSandbox 0.7.6 with 24 Silo patches): demo flow (up, fork -n 4, review, keep, undo, throw away), quiet forks, computer use, promote over main and undo, cold and warm measurements, macOS forks: 25 passed. OpenClaw recipe: 9 passed. Measurements (N=3, median, min–max): cold Linux fork of a running main 9.80 s (9.47–12.49); `-n 4` from the warm checkpoint 17.06 s (16.45–19.69); macOS fork to ready 59.19 s (58.97–60.35); RAM per Linux fork about 500 MiB (497.7–502.2 over 5). Evidence and method: `docs/v1/evidence/final/README.md`.
+- **Fixed during the run:** quiet entries naming a recipe service; `up` invalidating its own warm checkpoint; the throwaway sweep slowing forks; a `--dev-release` bundle's CLI believing it was production (it now takes its channel from the bundle, and the engine links only a CLI of its own channel); warm reuse after sessions over `ssh main.silo` (MicroSandbox patch reports SSH sessions); quiet names for launchers; SSH listener retry backoff; CLI link errors reported apart from Connections.
+- **Release prep:** dry runs pass; changesets plan 0.12.0 → 0.13.0; the `silo` CLI is now built, signed and bundled on the real release path.
+- **Drafts for approval:** `docs/v1/launch/` (README, 60-s demo script, numbers post).
+- **Next:** phase 7 assessment.
 
 ### 6 Nov 2026: phase 5 passed
 
