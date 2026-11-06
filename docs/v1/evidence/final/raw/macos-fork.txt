@@ -1,3 +1,3 @@
-mfork1 57.84
-mfork2 51.69
-mfork3 51.68
+mfork1 60.35
+mfork2 58.97
+mfork3 59.19

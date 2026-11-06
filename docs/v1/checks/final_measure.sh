@@ -8,7 +8,7 @@ fp() { python3 "$CHECKS/final_footprint.py" "$1"; }
 header_facts() {
 echo "commit: $(git -C "$REPO" rev-parse HEAD); tracked changes under app/: [$(git -C "$REPO" status --porcelain app | tr '\n' ' ')]"
 echo "machine: $(sysctl -n machdep.cpu.brand_string), $(( $(sysctl -n hw.memsize) / 1073741824 )) GiB RAM, $(sysctl -n hw.ncpu) cores, macOS $(sw_vers -productVersion) ($(sw_vers -buildVersion)), $(uname -m)"
-echo "bundle: $BUNDLE; engine pid $(engine_pid); silo CLI $("$SILO" --version) (release profile, debug assertions on, Dev channel)"
+echo "bundle: $BUNDLE; engine pid $(engine_pid); silo CLI $("$SILO" --version) ($SILO, channel $("$SILO" --print-channel-identifier 2>/dev/null))"
 echo "msb: $("$BUNDLE/Contents/Resources/SiloEngineDistribution/Silo Engine.app/Contents/MacOS/msb" --version 2>&1 | head -1); microsandboxVersion $(jfield microsandboxVersion < "$REPO/app/SiloUI/runtime-inputs.json") (source commit $(jfield sourceCommit < "$REPO/app/SiloUI/runtime-inputs.json" | cut -c1-12)); Silo patches on it: $(ls "$REPO"/app/SiloUI/patches/*.patch | wc -l | tr -d ' ')"
 echo "libkrunfw: $(jfield libkrunfwVersion < "$REPO/app/SiloUI/runtime-inputs.json") (commit $(jfield libkrunfwCommit < "$REPO/app/SiloUI/runtime-inputs.json" | cut -c1-12)); libkrun (msb_krun crate, macOS gateway lock): $(grep -A1 'name = "msb_krun"$' "$REPO/app/SiloUI/src-tauri/macos-gateway/Cargo.lock" | grep version)"
 python3 - "$REPO/app/SiloUI/guest-image/image-lock.json" <<'PY'

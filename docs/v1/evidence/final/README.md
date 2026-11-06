@@ -23,3 +23,5 @@ Measurements (all from `final-run.txt`, N=3 each, median with min–max):
 | RAM of one Linux fork (`footprint` of its VM processes, 20 s after ready) | — | about 500 MiB (497.7–502.2 MiB over 5 forks) | — |
 
 Scripts: `docs/v1/checks/final_run.sh` and `final_*.sh` beside it.
+
+Note: the header line in `final-run.txt` labels the CLI "debug assertions on"; that label was a stale string in the script. The CLI measured is the `silo` bundled in the release-profile Dev app (`--print-channel-identifier` prints `org.silo.dev`). The script now prints the path and channel instead.

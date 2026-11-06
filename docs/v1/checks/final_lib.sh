@@ -1,8 +1,8 @@
 # Helpers for final_run.sh (sourced). Release-profile Dev build; computers: main (if absent) and e2e-final-* only.
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
-# The CLI is built `--release` with debug assertions on (CARGO_TARGET_DIR=app/SiloUI/target/dev-release-cli):
+# The CLI is the `silo` bundled in the release-profile Dev app (its channel comes from the bundle identifier):
 # a plain release CLI is the production channel (it would use ~/.silo), so it is not used.
-SILO="$REPO/app/SiloUI/target/dev-release-cli/release/silo"
+SILO="$REPO/app/SiloUI/target/release/bundle/macos/Silo Dev.app/Contents/MacOS/silo"
 BUNDLE="$REPO/app/SiloUI/target/release/bundle/macos/Silo Dev.app"
 EVID="$REPO/docs/v1/evidence/final"; RAW="$EVID/raw"
 PROJ="$REPO/docs/v1/checks/final-proj"

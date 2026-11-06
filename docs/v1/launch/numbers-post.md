@@ -25,8 +25,7 @@ forks of the first `-n 4` run). `main` was a Linux computer with 2 CPUs and 4 Gi
 - **Build:** a Dev-channel build of commit `09677470` in the release profile, with the same
   runtime binaries a release ships (MicroSandbox 0.7.6 with 24 Silo patches, libkrunfw 5.6.1,
   guest image ubuntu-24.04-v5). It is not the signed production app. The `silo` command is the one
-  bundled in that app; it reports itself as `silo 0.1.0 (release profile, debug assertions on, Dev
-  channel)`.
+  bundled in that app (release profile, Dev channel).
 - **Runs:** N=3 for each time; we report the median with min and max, and every run.
 - **Clock:** monotonic wall time of the `silo fork` process from start to exit. Each fork ran
   `true` (`-- true`), so the command returns only after the fork is started and answers a command.

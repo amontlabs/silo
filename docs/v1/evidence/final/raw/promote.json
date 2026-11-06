@@ -1,10 +1,10 @@
 {
   "report": {
-    "archive": "main-before-20261106-0933",
-    "checkpoint": "c2900e2ff840c4d9f84f47072cbc9600",
+    "archive": "main-before-20261106-1030",
+    "checkpoint": "cc4b52fee1fce40af8a2b8cdade06307",
     "fork": "e2e-final-gui",
     "notes": [
-      "e2e-final-gui is now main. main was archived as main-before-20261106-0933; `silo undo main` swaps them back."
+      "e2e-final-gui is now main. main was archived as main-before-20261106-1030; `silo undo main` swaps them back."
     ],
     "steps": [
       "names",
