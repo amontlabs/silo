@@ -1,0 +1,164 @@
+name: Linux host
+
+# Runs a real Linux computer on a Linux host engine: builds the Silo Dev engine
+# archive (package-engine.py), unpacks it, registers it as a systemd user
+# service and drives a computer through its silo command
+# (scripts/linux-host-e2e.sh): create, start, exec, checkpoint, fork, exec in
+# the fork, drop both. GitHub's ubuntu-24.04 runners have /dev/kvm. Build values
+# are synthetic; this workflow gets no secrets and never signs in to GitHub.
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'app/SiloUI/**'
+      - '!app/SiloUI/**/*.md'
+      - '!app/SiloUI/.changeset/**'
+      - '!app/SiloUI/docs/**'
+      # Frontend sources, except the two that Rust tests read (scripts/ci-native-changes.py).
+      - '!app/SiloUI/src/**'
+      - 'app/SiloUI/src/test/contracts/**'
+      - 'app/SiloUI/src/features/application/model/reserved-secret-names.json'
+      - '.github/actions/prepare-release-runtime/**'
+      - '.github/workflows/linux-host.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linux-host-${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  computer:
+    name: Linux computer on KVM
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    defaults:
+      run:
+        working-directory: app/SiloUI
+    env:
+      # Synthetic build values from the release guide, as in ci.yml.
+      SILO_GITHUB_APP_SLUG: silo-ci-test
+      SILO_GITHUB_CLIENT_ID: test-client
+      SILO_GITHUB_CLIENT_SECRET: test-secret
+      CARGO_INCREMENTAL: '0'
+      UNIT: org.silo.dev.engine.service
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+      # GitHub's documented way to give the runner account KVM on hosted Linux runners.
+      # The user manager's processes are not in the kvm group, so the device is opened up.
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      # The same probe as scripts/test-linux-runtime.py: the KVM API answers and a VM handle
+      # can be created. A runner without usable KVM fails here instead of passing.
+      - name: Probe KVM
+        run: |
+          ls -l /dev/kvm
+          python3 - <<'PY'
+          import fcntl, os
+          with open('/dev/kvm', 'rb+', buffering=0) as device:
+              assert fcntl.ioctl(device, 0xAE00, 0) == 12, 'unsupported KVM API version'
+              os.close(fcntl.ioctl(device, 0xAE01, 0))
+          print('KVM API 12; a VM handle was created')
+          PY
+      - name: Install Linux build dependencies
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends build-essential pkg-config libclang-dev libcap-ng-dev libdbus-1-dev libssl-dev cmake
+      - name: Install pinned Rust toolchain
+        run: |
+          runtime_toolchain=$(node -p "require(process.env.GITHUB_WORKSPACE + '/app/SiloUI/runtime-inputs.json').toolchain")
+          rustup toolchain install "$runtime_toolchain" --profile minimal
+          rustup default "$runtime_toolchain"
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: app/SiloUI
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      # Restores the runtime caches main populates; a miss builds MicroSandbox here.
+      - name: Prepare the runtime
+        timeout-minutes: 45
+        uses: ./.github/actions/prepare-release-runtime
+        with:
+          runner: ubuntu-24.04
+          target: x86_64-unknown-linux-gnu
+      - name: Build and package the Dev engine
+        timeout-minutes: 40
+        run: python3 scripts/package-engine.py --platform linux-x64 --channel development --out-dir "$RUNNER_TEMP/engine-release" --source-commit "$GITHUB_SHA"
+      - name: Install the engine from its archive
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/engine-release"
+          sha256sum -c ./*.tar.gz.sha256
+          mkdir -p "$RUNNER_TEMP/prefix"
+          tar -xzf ./*.tar.gz -C "$RUNNER_TEMP/prefix"
+          engine="$RUNNER_TEMP/prefix/silo-engine"
+          test "$("$engine/silo" --print-channel-identifier)" = org.silo.dev
+          echo "ENGINE=$engine" >> "$GITHUB_ENV"
+      # Lingering starts the runner account's systemd user manager without a login session,
+      # as on a headless host whose owner turned it on.
+      - name: Start the engine as a systemd user service
+        run: |
+          set -euo pipefail
+          sudo loginctl enable-linger "$USER"
+          runtime_dir="/run/user/$(id -u)"
+          echo "XDG_RUNTIME_DIR=$runtime_dir" >> "$GITHUB_ENV"
+          export XDG_RUNTIME_DIR="$runtime_dir"
+          for _ in $(seq 30); do
+            systemctl --user show-environment >/dev/null 2>&1 && break
+            sleep 1
+          done
+          systemctl --user show-environment >/dev/null
+          "$ENGINE/silod" --service register | tee "$RUNNER_TEMP/service-status.txt"
+          python3 - "$RUNNER_TEMP/service-status.txt" <<'PY'
+          import sys
+          lines = open(sys.argv[1]).read().splitlines()
+          assert lines[0] == 'enabled', lines
+          assert 'state: active' in lines, lines
+          assert 'program: this silod' in lines, lines
+          assert 'linger: yes' in lines, lines
+          PY
+      - name: Drive a Linux computer through the silo command
+        timeout-minutes: 40
+        run: bash scripts/linux-host-e2e.sh "$ENGINE"
+      # SIGTERM ends the engine's session; it must exit 0 so systemd does not restart it.
+      - name: Stop the engine and remove the service
+        run: |
+          set -euo pipefail
+          systemctl --user stop "$UNIT"
+          result=$(systemctl --user show "$UNIT" --property=Result --value)
+          status=$(systemctl --user show "$UNIT" --property=ExecMainStatus --value)
+          echo "Result=$result ExecMainStatus=$status"
+          test "$result" = success
+          test "$status" = 0
+          test ! -e "$HOME/.silo-dev/engine.sock"
+          "$ENGINE/silod" --service unregister | tee "$RUNNER_TEMP/service-status.txt"
+          test "$(head -n 1 "$RUNNER_TEMP/service-status.txt")" = notRegistered
+          test ! -e "$HOME/.config/systemd/user/$UNIT"
+      - name: Collect logs
+        if: failure()
+        run: |
+          logs="$RUNNER_TEMP/linux-host-logs"
+          mkdir -p "$logs"
+          systemctl --user status "$UNIT" --no-pager > "$logs/service-status.txt" 2>&1 || true
+          journalctl --user --unit "$UNIT" --no-pager > "$logs/engine-journal.txt" 2>&1 || true
+          cp -r "$HOME/.local/state/org.silo.dev/logs" "$logs/engine-logs" 2>/dev/null || true
+          find "$HOME/.local/share/org.silo.dev" -name '*.log' -size -20M -exec cp --parents {} "$logs" \; 2>/dev/null || true
+          "$ENGINE/silo" --json list --all > "$logs/computers.json" 2>&1 || true
+          ls -l /dev/kvm > "$logs/kvm.txt" 2>&1 || true
+          df -h > "$logs/disk.txt" 2>&1 || true
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: failure()
+        with:
+          name: linux-host-logs
+          path: ${{ runner.temp }}/linux-host-logs/
+          if-no-files-found: warn
+          retention-days: 7
