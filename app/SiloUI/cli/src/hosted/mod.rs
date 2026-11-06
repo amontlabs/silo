@@ -3,6 +3,7 @@
 //! `.silo/silo.yaml` or `SILO_REVIEWER_URL` is set. Only the diff document goes out
 //! ([`document::review_document`]); the answer is filtered for wording before it is shown.
 
+pub mod codediff;
 pub mod document;
 pub mod filter;
 
@@ -24,6 +25,8 @@ pub const BANNER: &str =
 /// The most the request body may hold.
 pub const MAX_REQUEST_BYTES: usize = 256 * 1024;
 /// How long the service has to answer.
+/// The most of the service's answer that is read.
+pub const MAX_ANSWER_BYTES: u64 = 1024 * 1024;
 pub const TIMEOUT: Duration = Duration::from_secs(90);
 const LENSES: &[&str] = &["general", "packages", "code"];
 const MAX_FINDINGS: usize = 50;
@@ -33,6 +36,8 @@ const MAX_TEXT: usize = 800;
 pub struct Reviewer {
     pub url: String,
     pub token: Option<String>,
+    /// Things worth telling the person, such as a project URL that was ignored.
+    pub notes: Vec<String>,
 }
 
 /// `general`, `packages`, `code` or `all`, as the lenses to ask for.
@@ -46,29 +51,73 @@ pub fn parse_lenses(text: Option<&str>) -> Result<Vec<String>, CliError> {
     }
 }
 
+/// `https`, or `http` to this device only; no user name or password in the address.
+pub fn check_url(text: &str) -> Result<String, CliError> {
+    let url = reqwest::Url::parse(text.trim())
+        .map_err(|_| CliError::new("The reviewer URL is not a valid address."))?;
+    if !url.username().is_empty() || url.password().is_some() {
+        return Err(CliError::new(
+            "The reviewer URL must not contain a user name or password.",
+        ));
+    }
+    let local = matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"));
+    match url.scheme() {
+        "https" => {}
+        "http" if local => {}
+        _ => {
+            return Err(CliError::new(
+                "The reviewer URL must start with https:// (http:// is only for localhost, 127.0.0.1 and [::1]).",
+            ))
+        }
+    }
+    Ok(text.trim().to_owned())
+}
+
+/// The URL in `~/.config/silo/reviewer.yaml` (`url: https://...`), if the file exists.
+fn user_url() -> Result<Option<String>, CliError> {
+    let Some(home) = std::env::var_os("HOME") else {
+        return Ok(None);
+    };
+    let path = std::path::Path::new(&home).join(".config/silo/reviewer.yaml");
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return Ok(None);
+    };
+    let settings: crate::config::ReviewerSettings = serde_yaml_ng::from_str(&text)
+        .map_err(|error| CliError::new(format!("{}: {error}", path.display())))?;
+    Ok(settings.url)
+}
+
 impl Reviewer {
-    /// The reviewer the environment or the project settings name; an error when neither does.
+    /// The reviewer `SILO_REVIEWER_URL` or the user-level file names. A URL in the project's
+    /// `.silo/silo.yaml` is used only when it is the same address, because a project file
+    /// comes with the repository and the token does not.
     pub fn resolve(settings: Option<&Settings>) -> Result<Self, CliError> {
         let from_env = |name: &str| std::env::var(name).ok().filter(|v| !v.trim().is_empty());
-        let url = from_env("SILO_REVIEWER_URL")
-            .or_else(|| settings.and_then(|s| s.reviewer.as_ref()).and_then(|r| r.url.clone()))
-            .ok_or_else(|| {
-                CliError::new(
-                    "The hosted reviewer is off. Set reviewer.url in .silo/silo.yaml or SILO_REVIEWER_URL, and SILO_REVIEWER_TOKEN for its token.",
-                )
-            })?;
-        let url = url.trim().to_owned();
-        let local = ["http://localhost", "http://127.0.0.1", "http://[::1]"]
-            .iter()
-            .any(|prefix| url.starts_with(prefix));
-        if !url.starts_with("https://") && !local {
-            return Err(CliError::new(
-                "The reviewer URL must start with https:// (http:// is only for this device).",
-            ));
+        let project = settings
+            .and_then(|s| s.reviewer.as_ref())
+            .and_then(|r| r.url.clone());
+        let trusted = from_env("SILO_REVIEWER_URL").or(user_url()?);
+        let mut notes = Vec::new();
+        if let Some(project) = &project {
+            let same = trusted.as_deref().map(|t| t.trim().trim_end_matches('/'))
+                == Some(project.trim().trim_end_matches('/'));
+            if !same {
+                notes.push(
+                    "reviewer.url in .silo/silo.yaml was ignored: set the URL with SILO_REVIEWER_URL or ~/.config/silo/reviewer.yaml."
+                        .to_owned(),
+                );
+            }
         }
+        let url = trusted.ok_or_else(|| {
+            CliError::new(format!(
+                "The hosted reviewer is off. Set SILO_REVIEWER_URL (or url: in ~/.config/silo/reviewer.yaml) and SILO_REVIEWER_TOKEN.{}",
+                notes.first().map(|n| format!(" Note: {n}")).unwrap_or_default()
+            ))
+        })?;
         Ok(Self {
-            url,
+            url: check_url(&url)?,
             token: from_env("SILO_REVIEWER_TOKEN"),
+            notes,
         })
     }
 
@@ -118,8 +167,16 @@ fn send(reviewer: &Reviewer, document: &Value, lenses: &[String]) -> Result<Valu
             "The reviewer answered {status}.{hint}"
         )));
     }
-    response
-        .json::<Value>()
+    let mut body = Vec::new();
+    std::io::Read::read_to_end(
+        &mut std::io::Read::take(response, MAX_ANSWER_BYTES + 1),
+        &mut body,
+    )
+    .map_err(|error| CliError::new(format!("Reading the reviewer's answer failed: {error}")))?;
+    if body.len() as u64 > MAX_ANSWER_BYTES {
+        return Err(CliError::new("The reviewer's answer is larger than 1 MiB."));
+    }
+    serde_json::from_slice(&body)
         .map_err(|_| CliError::new("The reviewer's answer was not the expected JSON."))
 }
 
@@ -181,14 +238,18 @@ pub async fn review_target(
     progress: Progress<'_>,
 ) -> Result<Value, CliError> {
     let reviewer = Reviewer::resolve(settings)?;
-    let (document, hidden) = if is_request_id(target) {
+    let (mut document, hidden, code_sent) = if is_request_id(target) {
         let shown = review::show(engine, target, progress).await?;
         match shown["diff"].as_object() {
-            Some(_) => document::review_document(&shown["diff"]),
-            None => (
-                document::text_document(shown["text"].as_str().unwrap_or_default(), ""),
-                0,
-            ),
+            Some(_) => {
+                let name = shown["forkName"].as_str().unwrap_or_default();
+                with_code(engine, name, &shown["diff"], lenses).await
+            }
+            None => {
+                let (document, dropped) =
+                    document::text_document(shown["text"].as_str().unwrap_or_default(), "");
+                (document, dropped, false)
+            }
         }
     } else {
         let args = DiffArgs {
@@ -197,8 +258,12 @@ pub async fn review_target(
             no_baseline: false,
             compute_baseline: false,
         };
-        document::review_document(&ops::diff(engine, &args, progress).await?)
+        let diff = ops::diff(engine, &args, progress).await?;
+        with_code(engine, target, &diff, lenses).await
     };
+    if !document.is_object() {
+        document = json!({});
+    }
     let (reviewer_for_task, lenses_for_task) = (reviewer.clone(), lenses.to_vec());
     let answer =
         tokio::task::spawn_blocking(move || send(&reviewer_for_task, &document, &lenses_for_task))
@@ -206,8 +271,30 @@ pub async fn review_target(
             .map_err(|error| CliError::new(error.to_string()))??;
     let mut result = shape(&answer, lenses);
     result["target"] = json!(target);
+    result["codeContentSent"] = json!(code_sent);
+    result["notes"] = json!(reviewer.notes);
     result["credentialFilesLeftOut"] = json!(hidden);
     Ok(result)
+}
+
+/// The review document of `diff`, with the code lens's diff text added when it is asked for.
+async fn with_code(
+    engine: &Engine,
+    computer: &str,
+    diff: &Value,
+    lenses: &[String],
+) -> (Value, usize, bool) {
+    let (mut document, hidden) = document::review_document(diff);
+    let mut sent = false;
+    if lenses.iter().any(|lens| lens == "code") {
+        let home = diff["home"].as_str().unwrap_or_default();
+        let text = codediff::read(engine, computer, diff, home).await;
+        if !text.is_empty() {
+            document["code_diff"] = json!(text);
+            sent = true;
+        }
+    }
+    (document, hidden, sent)
 }
 
 fn is_request_id(text: &str) -> bool {
@@ -237,10 +324,16 @@ pub fn render(value: &Value) -> String {
             ));
         }
     }
+    if value["codeContentSent"] == true {
+        out.push_str("\nCode changes (text of the diff, with credential files and token-shaped strings removed) were sent to the reviewer.\n");
+    }
+    for note in value["notes"].as_array().into_iter().flatten() {
+        out.push_str(&format!("\nNote: {}\n", note.as_str().unwrap_or_default()));
+    }
     match value["filtered"].as_u64().unwrap_or(0) {
         0 => {}
         n => out.push_str(&format!(
-            "\n{n} word(s) in the service's answer were filtered out.\n"
+            "\n{n} word(s) in the service's answer were replaced.\n"
         )),
     }
     out.trim_end().to_owned()

