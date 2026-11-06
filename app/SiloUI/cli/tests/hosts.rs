@@ -408,6 +408,35 @@ impl Terminal for FakeTerminal {
         self.ran.borrow_mut().push(command.to_owned());
         Ok(true)
     }
+
+    fn keyscan(&self, host: &str, port: u16) -> Result<String, silo_cli::error::CliError> {
+        self.ran.borrow_mut().push(format!("keyscan {host} {port}"));
+        Ok(format!(
+            "# {host}:{port} SSH-2.0-OpenSSH_9.6\n[{host}]:{port} ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAAAgQC0\n[{host}]:{port} {HOST_KEY}\n"
+        ))
+    }
+}
+
+/// A host key and its `ssh-keygen -lf` fingerprint.
+const HOST_KEY: &str =
+    "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKVyZDGnacgUkbjXHi/TsIZ+GxIgprlkfONi9t33BGz3";
+
+fn add(
+    address: &str,
+    replace: bool,
+    host_key: Option<&str>,
+    known_hosts: &Path,
+) -> hosts::AddRequest {
+    hosts::AddRequest {
+        address: address.to_owned(),
+        replace,
+        host_key: host_key.map(str::to_owned),
+        known_hosts: known_hosts.to_owned(),
+    }
+}
+
+fn no_known_hosts() -> PathBuf {
+    PathBuf::from("/nonexistent/known_hosts")
 }
 
 const HOST_KEY_FAILED: &str = "Host key verification failed. Connect once with SSH in a terminal to verify and trust the other device's host key.";
@@ -449,9 +478,12 @@ async fn add_trusts_the_host_key_and_installs_the_key_when_ssh_asks() {
         ran: RefCell::default(),
     };
     let said = RefCell::new(Vec::new());
-    let value = hosts::add_device(&client, "ada@box", false, &terminal, &|line| {
-        said.borrow_mut().push(line.to_owned())
-    })
+    let value = hosts::add_device(
+        &client,
+        &add("ada@box", false, None, &no_known_hosts()),
+        &terminal,
+        &|line| said.borrow_mut().push(line.to_owned()),
+    )
     .await
     .unwrap();
     assert_eq!(value["device"]["id"], "dev-1");
@@ -481,9 +513,14 @@ async fn add_repairs_each_problem_once_and_never_a_changed_host_key() {
         interactive: true,
         ran: RefCell::default(),
     };
-    let error = hosts::add_device(&client, "ada@box", true, &terminal, &|_| {})
-        .await
-        .unwrap_err();
+    let error = hosts::add_device(
+        &client,
+        &add("ada@box", true, None, &no_known_hosts()),
+        &terminal,
+        &|_| {},
+    )
+    .await
+    .unwrap_err();
     assert_eq!(error.message, AUTH_FAILED);
     assert_eq!(terminal.ran.borrow().len(), 1);
     assert_eq!(
@@ -494,9 +531,14 @@ async fn add_repairs_each_problem_once_and_never_a_changed_host_key() {
     let changed = "The other device's SSH host key changed. Verify the device before trusting its new key (Host key verification failed).";
     let engine = controller(vec![changed]);
     let client = Engine::connect(&engine.socket).await.unwrap();
-    let error = hosts::add_device(&client, "ada@box", false, &terminal, &|_| {})
-        .await
-        .unwrap_err();
+    let error = hosts::add_device(
+        &client,
+        &add("ada@box", false, None, &no_known_hosts()),
+        &terminal,
+        &|_| {},
+    )
+    .await
+    .unwrap_err();
     assert_eq!(error.message, changed);
     assert_eq!(terminal.ran.borrow().len(), 1);
 }
@@ -509,9 +551,14 @@ async fn add_without_a_terminal_prints_the_command_instead() {
         interactive: false,
         ran: RefCell::default(),
     };
-    let error = hosts::add_device(&client, "ada@box", false, &terminal, &|_| {})
-        .await
-        .unwrap_err();
+    let error = hosts::add_device(
+        &client,
+        &add("ada@box", false, None, &no_known_hosts()),
+        &terminal,
+        &|_| {},
+    )
+    .await
+    .unwrap_err();
     assert!(
         error
             .message
@@ -571,20 +618,115 @@ async fn host_and_devices_refuse_another_device() {
             error.message
         );
     }
-    let cli = <silo_cli::cli::Cli as clap::Parser>::try_parse_from([
-        "silo",
-        "--socket",
-        socket,
-        "--allow-other-channel",
-        "--json",
-        "devices",
-        "list",
-    ])
-    .unwrap();
+    for args in [["devices", "list"], ["devices", "remove"]] {
+        let mut all = vec![
+            "silo",
+            "--socket",
+            socket,
+            "--allow-other-channel",
+            "--json",
+        ];
+        all.extend_from_slice(&args);
+        if args[1] == "remove" {
+            all.push("box");
+        }
+        let cli = <silo_cli::cli::Cli as clap::Parser>::try_parse_from(all).unwrap();
+        assert!(cli.device.is_none());
+        assert_eq!(
+            silo_cli::cli::run(cli, std::env::temp_dir().as_path())
+                .await
+                .unwrap(),
+            0
+        );
+    }
     assert_eq!(
-        silo_cli::cli::run(cli, std::env::temp_dir().as_path())
-            .await
-            .unwrap(),
-        0
+        engine.calls("connections.devices.remove"),
+        vec![json!({"deviceId": "dev-1"})]
     );
+}
+
+#[tokio::test]
+async fn add_pins_the_host_key_by_fingerprint_and_needs_no_prompt() {
+    let engine = controller(vec![]);
+    let client = Engine::connect(&engine.socket).await.unwrap();
+    let home = tempfile::tempdir().unwrap();
+    let known_hosts = home.path().join(".ssh/known_hosts");
+    let terminal = FakeTerminal {
+        interactive: false,
+        ran: RefCell::default(),
+    };
+    let request = add("ada@127.0.0.1:2222", false, Some(FINGERPRINT), &known_hosts);
+    let value = hosts::add_device(&client, &request, &terminal, &|_| {})
+        .await
+        .unwrap();
+    assert_eq!(
+        *terminal.ran.borrow(),
+        vec!["keyscan 127.0.0.1 2222".to_owned()]
+    );
+    assert_eq!(
+        engine.calls("connections.devices.connect"),
+        vec![json!({"address": "ssh://ada@127.0.0.1:2222"})]
+    );
+    assert_eq!(
+        fs::read_to_string(&known_hosts).unwrap(),
+        format!("[127.0.0.1]:2222 {HOST_KEY}\n")
+    );
+    assert_eq!(
+        fs::metadata(home.path().join(".ssh"))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777,
+        0o700
+    );
+    assert_eq!(value["hostKey"]["added"], true);
+    assert!(hosts::render_added(&value).contains(FINGERPRINT));
+    // Again: already there, nothing written twice.
+    let value = hosts::add_device(&client, &request, &terminal, &|_| {})
+        .await
+        .unwrap();
+    assert_eq!(value["hostKey"]["added"], false);
+    assert_eq!(fs::read_to_string(&known_hosts).unwrap().lines().count(), 1);
+}
+
+#[test]
+fn a_host_key_pin_never_trusts_what_it_does_not_name() {
+    let home = tempfile::tempdir().unwrap();
+    let known_hosts = home.path().join("known_hosts");
+    let terminal = FakeTerminal {
+        interactive: false,
+        ran: RefCell::default(),
+    };
+    let wrong = "SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+    let error =
+        hosts::pin_host_key(&known_hosts, "ssh://ada@box:2222", wrong, &terminal).unwrap_err();
+    assert!(
+        error.message.contains("No host key box offers matches"),
+        "{}",
+        error.message
+    );
+    assert!(error.message.contains(FINGERPRINT), "{}", error.message);
+    assert!(!known_hosts.exists());
+
+    // A key file, as /etc/ssh/ssh_host_ed25519_key.pub holds it, on the default port.
+    let file = home.path().join("ssh_host_ed25519_key.pub");
+    fs::write(&file, format!("{HOST_KEY} root@box\n")).unwrap();
+    fs::write(&known_hosts, "other ssh-ed25519 AAAA").unwrap();
+    let pinned =
+        hosts::pin_host_key(&known_hosts, "ada@box", file.to_str().unwrap(), &terminal).unwrap();
+    assert_eq!(pinned["name"], "box");
+    assert_eq!(
+        fs::read_to_string(&known_hosts).unwrap(),
+        format!("other ssh-ed25519 AAAA\nbox {HOST_KEY}\n")
+    );
+
+    // Another key already listed for the name is reported, never replaced.
+    let other = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHk8t0ahm+m4Qf9wTQ2xV1Vv2Qb2QeQ3bE8m0l2a6y5Z";
+    let error = hosts::pin_host_key(&known_hosts, "ada@box", other, &terminal).unwrap_err();
+    assert!(
+        error.message.contains("ssh-keygen -R 'box'"),
+        "{}",
+        error.message
+    );
+    assert!(hosts::pin_host_key(&known_hosts, "ada@box", "nonsense", &terminal).is_err());
 }

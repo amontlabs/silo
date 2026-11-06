@@ -612,11 +612,20 @@ async fn run_connections(cli: Cli, socket: PathBuf) -> Result<i32, CliError> {
         Command::Devices(command) => {
             let engine = Engine::connect(&socket).await?;
             match command {
-                DevicesCommand::Add { address, replace } => {
+                DevicesCommand::Add {
+                    address,
+                    replace,
+                    host_key,
+                } => {
+                    let request = hosts::AddRequest {
+                        address,
+                        replace,
+                        host_key,
+                        known_hosts: crate::access::home_dir()?.join(".ssh/known_hosts"),
+                    };
                     let value = hosts::add_device(
                         &engine,
-                        &address,
-                        replace,
+                        &request,
                         &hosts::SystemTerminal,
                         &stderr_progress,
                     )
@@ -628,8 +637,8 @@ async fn run_connections(cli: Cli, socket: PathBuf) -> Result<i32, CliError> {
                     &hosts::list_devices(&engine).await?,
                     hosts::render_devices,
                 ),
-                DevicesCommand::Remove { device } => {
-                    let value = hosts::remove_device(&engine, &device).await?;
+                DevicesCommand::Remove { name } => {
+                    let value = hosts::remove_device(&engine, &name).await?;
                     emit(json, &value, |value| {
                         format!(
                             "Removed {}; its key was revoked there.",

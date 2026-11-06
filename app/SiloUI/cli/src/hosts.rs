@@ -57,15 +57,25 @@ pub enum DevicesCommand {
     /// `ssh://user@host:port`), as Connect device does in the app. When SSH asks, it verifies the
     /// host key and installs this device's Silo key there, in this terminal.
     Add {
+        /// `user@host`, `user@host:port`, an SSH alias, or `ssh://user@host:port`.
         address: String,
         /// The device is already saved at another address: save this one instead.
         #[arg(long)]
         replace: bool,
+        /// The host's SSH key to trust, added to ~/.ssh/known_hosts first so nothing asks: its
+        /// fingerprint (`SHA256:...`, matched against what the host offers), the key
+        /// (`ssh-ed25519 AAAA...`), or a file holding it (`ssh_host_ed25519_key.pub`).
+        #[arg(long, value_name = "FINGERPRINT|KEY|FILE")]
+        host_key: Option<String>,
     },
     /// List the connected devices and whether they answer.
     List,
     /// Remove a connected device (its name or id); its key is revoked there first.
-    Remove { device: String },
+    Remove {
+        /// Its name or id (the field is not called `device`: that is the global `--device`).
+        #[arg(value_name = "DEVICE")]
+        name: String,
+    },
     /// Print this device's Silo key, for `silo host init --authorize` on a host.
     Key,
 }
@@ -1029,6 +1039,8 @@ pub trait Terminal {
     /// Runs `command` (a shell command line the engine built) with this terminal's input and
     /// output, and says whether it succeeded.
     fn run(&self, command: &str) -> Result<bool, CliError>;
+    /// The host keys `host` offers on `port`, as `ssh-keyscan` prints them.
+    fn keyscan(&self, host: &str, port: u16) -> Result<String, CliError>;
 }
 
 /// The real terminal.
@@ -1046,6 +1058,223 @@ impl Terminal for SystemTerminal {
             .map_err(|error| CliError::new(format!("Could not run ssh: {error}")))?;
         Ok(status.success())
     }
+
+    fn keyscan(&self, host: &str, port: u16) -> Result<String, CliError> {
+        let output = Command::new("ssh-keyscan")
+            .args(["-T", "10", "-p", &port.to_string(), "--", host])
+            .stdin(Stdio::null())
+            .output()
+            .map_err(|error| CliError::new(format!("Could not run ssh-keyscan: {error}")))?;
+        Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    }
+}
+
+/// `user@host:port` as `ssh://user@host:port`, the form ssh reads a port from; every other
+/// address as given.
+pub fn normalize_address(address: &str) -> String {
+    let address = address.trim();
+    if address.starts_with("ssh://") || address.contains('[') {
+        return address.to_owned();
+    }
+    match address.rsplit_once(':') {
+        Some((host, port))
+            if !host.is_empty()
+                && !host.contains(':')
+                && !port.is_empty()
+                && port.parse::<u16>().is_ok_and(|port| port > 0) =>
+        {
+            format!("ssh://{address}")
+        }
+        _ => address.to_owned(),
+    }
+}
+
+/// The host and port SSH connects to for `address` (port 22 when it names none). An SSH alias
+/// is returned as it is; its `HostName` in ssh_config is not read.
+pub fn ssh_target(address: &str) -> Result<(String, u16), CliError> {
+    let invalid = || CliError::new(format!("Cannot read a host from {address}."));
+    let rest = address.strip_prefix("ssh://").unwrap_or(address);
+    let rest = rest.trim_end_matches('/');
+    let rest = rest.rsplit_once('@').map_or(rest, |(_, host)| host);
+    let (host, port) = if let Some(bracketed) = rest.strip_prefix('[') {
+        let (host, after) = bracketed.split_once(']').ok_or_else(invalid)?;
+        let port = match after.strip_prefix(':') {
+            Some(port) => port.parse().map_err(|_| invalid())?,
+            None if after.is_empty() => 22,
+            None => return Err(invalid()),
+        };
+        (host.to_owned(), port)
+    } else if address.starts_with("ssh://") {
+        match rest.rsplit_once(':') {
+            Some((host, port)) => (host.to_owned(), port.parse().map_err(|_| invalid())?),
+            None => (rest.to_owned(), 22),
+        }
+    } else {
+        (rest.to_owned(), 22)
+    };
+    if host.is_empty() || port == 0 {
+        return Err(invalid());
+    }
+    Ok((host, port))
+}
+
+/// The name `known_hosts` lists `host` under: the host itself on port 22, else `[host]:port`.
+fn known_hosts_name(host: &str, port: u16) -> String {
+    if port == 22 {
+        host.to_owned()
+    } else {
+        format!("[{host}]:{port}")
+    }
+}
+
+/// `type key` from a line holding a public key (a `.pub` file, a `known_hosts` or
+/// `ssh-keyscan` line), whatever comes before or after it.
+fn key_in_line(line: &str) -> Option<(String, String)> {
+    let words: Vec<&str> = line.split_whitespace().collect();
+    words.windows(2).find_map(|pair| {
+        let known = pair[0].starts_with("ssh-")
+            || pair[0].starts_with("ecdsa-")
+            || pair[0].starts_with("sk-");
+        (known && fingerprint(&format!("{} {}", pair[0], pair[1])).is_some())
+            .then(|| (pair[0].to_owned(), pair[1].to_owned()))
+    })
+}
+
+/// Adds the host key `pin` names to `known_hosts` for `address` and returns what it pinned.
+/// A fingerprint is matched against the keys the host offers; a key or key file is taken as
+/// given. Nothing is trusted that the pin does not name.
+pub fn pin_host_key(
+    known_hosts: &Path,
+    address: &str,
+    pin: &str,
+    terminal: &dyn Terminal,
+) -> Result<Value, CliError> {
+    let (host, port) = ssh_target(address)?;
+    let pin = pin.trim();
+    let (kind, key) = if pin.starts_with("SHA256:") {
+        let scanned = terminal.keyscan(&host, port)?;
+        let offered: Vec<(String, String)> = scanned
+            .lines()
+            .filter(|line| !line.starts_with('#'))
+            .filter_map(key_in_line)
+            .collect();
+        offered
+            .iter()
+            .find(|(kind, key)| fingerprint(&format!("{kind} {key}")).as_deref() == Some(pin))
+            .cloned()
+            .ok_or_else(|| {
+                let seen: Vec<String> = offered
+                    .iter()
+                    .filter_map(|(kind, key)| {
+                        fingerprint(&format!("{kind} {key}")).map(|print| format!("{kind} {print}"))
+                    })
+                    .collect();
+                CliError::new(if seen.is_empty() {
+                    format!("{host} port {port} offered no SSH host key (ssh-keyscan); is its SSH server running?")
+                } else {
+                    format!(
+                        "No host key {host} offers matches {pin}; it offers {}. Check the fingerprint on the host (ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub).",
+                        seen.join(", ")
+                    )
+                })
+            })?
+    } else {
+        let text = if key_in_line(pin).is_some() {
+            pin.to_owned()
+        } else {
+            let path = Path::new(pin);
+            if fs::metadata(path)
+                .map(|metadata| metadata.len())
+                .unwrap_or(u64::MAX)
+                > 64 * 1024
+            {
+                return Err(CliError::new(format!(
+                    "{pin} is neither a host key fingerprint (SHA256:...), a key, nor a readable key file."
+                )));
+            }
+            fs::read_to_string(path).map_err(|error| {
+                CliError::new(format!(
+                    "{pin} is neither a host key fingerprint (SHA256:...), a key, nor a readable key file: {error}"
+                ))
+            })?
+        };
+        text.lines()
+            .filter(|line| !line.trim_start().starts_with('#'))
+            .find_map(key_in_line)
+            .ok_or_else(|| CliError::new(format!("{pin} holds no SSH public key.")))?
+    };
+    let name = known_hosts_name(&host, port);
+    let printed = fingerprint(&format!("{kind} {key}"));
+    let existing = match fs::read_to_string(known_hosts) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(error) => {
+            return Err(CliError::new(format!(
+                "Cannot read {}: {error}",
+                known_hosts.display()
+            )))
+        }
+    };
+    let mut added = true;
+    for line in existing.lines() {
+        let mut words = line.split_whitespace();
+        let (Some(names), Some(listed_kind), Some(listed_key)) =
+            (words.next(), words.next(), words.next())
+        else {
+            continue;
+        };
+        if !names.split(',').any(|listed| listed == name) || listed_kind != kind {
+            continue;
+        }
+        if listed_key == key {
+            added = false;
+        } else {
+            return Err(CliError::new(format!(
+                "{} already holds another {kind} key for {name}. If the host's key really changed, remove the old one first (ssh-keygen -R '{name}').",
+                known_hosts.display()
+            )));
+        }
+    }
+    if added {
+        use std::io::Write;
+        use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+        let directory = known_hosts.parent().expect("known_hosts has a directory");
+        fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(directory)
+            .map_err(|error| {
+                CliError::new(format!("Cannot create {}: {error}", directory.display()))
+            })?;
+        let mut file = fs::OpenOptions::new()
+            .append(true)
+            .create(true)
+            .mode(0o600)
+            .open(known_hosts)
+            .map_err(|error| {
+                CliError::new(format!("Cannot open {}: {error}", known_hosts.display()))
+            })?;
+        let separator = if existing.is_empty() || existing.ends_with('\n') {
+            ""
+        } else {
+            "\n"
+        };
+        file.write_all(format!("{separator}{name} {kind} {key}\n").as_bytes())
+            .map_err(|error| {
+                CliError::new(format!("Cannot write {}: {error}", known_hosts.display()))
+            })?;
+    }
+    Ok(json!({"name": name, "type": kind, "fingerprint": printed, "added": added}))
+}
+
+/// What `silo devices add` was asked to do.
+#[derive(Clone, Debug)]
+pub struct AddRequest {
+    pub address: String,
+    pub replace: bool,
+    pub host_key: Option<String>,
+    /// `~/.ssh/known_hosts`, where `host_key` is pinned.
+    pub known_hosts: PathBuf,
 }
 
 /// The repair a failed connection needs.
@@ -1075,11 +1304,31 @@ fn repair_for(message: &str) -> Option<Repair> {
 /// device's Silo key installed, runs the engine's command for that here and tries again.
 pub async fn add_device(
     engine: &Engine,
-    address: &str,
-    replace: bool,
+    request: &AddRequest,
     terminal: &dyn Terminal,
     progress: &dyn Fn(&str),
 ) -> Result<Value, CliError> {
+    let address = normalize_address(&request.address);
+    let address = address.as_str();
+    let replace = request.replace;
+    let host_key = match &request.host_key {
+        Some(pin) => {
+            let pinned = pin_host_key(&request.known_hosts, address, pin, terminal)?;
+            progress(&format!(
+                "{} {} host key {} for {}",
+                if pinned["added"] == true {
+                    "Trusting"
+                } else {
+                    "Already trusting"
+                },
+                pinned["type"].as_str().unwrap_or_default(),
+                pinned["fingerprint"].as_str().unwrap_or_default(),
+                pinned["name"].as_str().unwrap_or_default()
+            ));
+            pinned
+        }
+        None => Value::Null,
+    };
     let mut repaired = Vec::new();
     loop {
         let connected = engine
@@ -1092,7 +1341,7 @@ pub async fn add_device(
             .await;
         let error = match connected {
             Ok(device) => {
-                return Ok(json!({"device": device, "repaired": repaired}));
+                return Ok(json!({"device": device, "repaired": repaired, "hostKey": host_key}));
             }
             Err(error) => error,
         };
@@ -1122,8 +1371,12 @@ pub async fn add_device(
             .ok_or_else(|| CliError::new("The engine sent no SSH command."))?
             .to_owned();
         if !terminal.interactive() {
+            let instead = match repair {
+                Repair::TrustHostKey => " (or pass --host-key with the host's key fingerprint)",
+                Repair::InstallKey => " (or authorize this device's key on the host: silo devices key here, then silo host init --authorize there)",
+            };
             return Err(CliError::new(format!(
-                "{} {what}: run this in a terminal, then silo devices add {address} again:\n{command}",
+                "{} {what}: run this in a terminal, then silo devices add {address} again{instead}:\n{command}",
                 error.message
             )));
         }
@@ -1197,8 +1450,16 @@ pub async fn own_key(engine: &Engine) -> Result<Value, CliError> {
 pub fn render_added(value: &Value) -> String {
     let device = &value["device"];
     let name = device["name"].as_str().unwrap_or_default();
+    let pinned = match value["hostKey"]["fingerprint"].as_str() {
+        Some(print) => format!(
+            "Host key {} {print} is in known_hosts for {}.\n",
+            value["hostKey"]["type"].as_str().unwrap_or_default(),
+            value["hostKey"]["name"].as_str().unwrap_or_default()
+        ),
+        None => String::new(),
+    };
     format!(
-        "Connected {name} ({}) at {}.\nIts computers: silo list --all-devices, or silo --device \"{name}\" <command>.",
+        "{pinned}Connected {name} ({}) at {}.\nIts computers: silo list --all-devices, or silo --device \"{name}\" <command>.",
         device["id"].as_str().unwrap_or_default(),
         device["address"].as_str().unwrap_or_default()
     )
@@ -1350,6 +1611,35 @@ mod tests {
         );
         assert_eq!(fingerprint("ssh-ed25519 !!! x"), None);
         assert_eq!(fingerprint("ssh-ed25519"), None);
+    }
+
+    #[test]
+    fn addresses_with_a_port_become_ssh_uris() {
+        assert_eq!(normalize_address("ada@box:2222"), "ssh://ada@box:2222");
+        assert_eq!(normalize_address("127.0.0.1:22"), "ssh://127.0.0.1:22");
+        for unchanged in [
+            "ada@box",
+            "box",
+            "ssh://ada@box:2222",
+            "[::1]:22",
+            "ada@fe80::1",
+            "ada@box:x",
+        ] {
+            assert_eq!(normalize_address(unchanged), unchanged);
+        }
+        assert_eq!(ssh_target("ada@box").unwrap(), ("box".into(), 22));
+        assert_eq!(
+            ssh_target("ssh://ada@box:2222").unwrap(),
+            ("box".into(), 2222)
+        );
+        assert_eq!(
+            ssh_target("ssh://ada@[::1]:2200").unwrap(),
+            ("::1".into(), 2200)
+        );
+        assert_eq!(ssh_target("ssh://box").unwrap(), ("box".into(), 22));
+        assert!(ssh_target("ssh://ada@box:0").is_err());
+        assert_eq!(known_hosts_name("box", 22), "box");
+        assert_eq!(known_hosts_name("127.0.0.1", 2222), "[127.0.0.1]:2222");
     }
 
     #[test]
