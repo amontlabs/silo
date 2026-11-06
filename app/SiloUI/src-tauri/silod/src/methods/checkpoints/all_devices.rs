@@ -13,6 +13,36 @@ use crate::methods::access::{call_owner, without_device};
 /// One connected device: its id and name.
 type Peer = (String, String);
 
+/// How long one device may take to answer before the list goes on without it.
+pub(crate) const PEER_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+
+#[cfg(test)]
+pub(crate) static TEST_TIMEOUT: std::sync::Mutex<Option<std::time::Duration>> =
+    std::sync::Mutex::new(None);
+
+fn timeout() -> std::time::Duration {
+    #[cfg(test)]
+    if let Some(timeout) = *TEST_TIMEOUT.lock().unwrap() {
+        return timeout;
+    }
+    PEER_TIMEOUT
+}
+
+/// Why a device is known to be offline: its last health probe failed and it is not just busy.
+fn known_offline(id: &str) -> Option<String> {
+    #[cfg(test)]
+    if TEST_PEERS.lock().unwrap().is_some() {
+        return None;
+    }
+    let health = silo_engine::remote::device_health().ok()?;
+    health
+        .devices
+        .into_iter()
+        .find(|device| device.device_id == id)
+        .filter(|device| !device.connected && !device.busy)
+        .and_then(|device| device.error)
+}
+
 #[cfg(test)]
 pub(crate) static TEST_PEERS: std::sync::Mutex<Option<Vec<Peer>>> = std::sync::Mutex::new(None);
 
@@ -38,6 +68,10 @@ pub(crate) async fn merge(
     params: &Value,
     mut local: ChangesRequestsListResult,
 ) -> ChangesRequestsListResult {
+    // An owner answers for itself: a request that came over the bridge never asks further.
+    if context.is_owner_bridge() {
+        return local;
+    }
     let identity = context.silod_context().local_device();
     tag(
         &mut local.requests,
@@ -55,19 +89,31 @@ pub(crate) async fn merge(
         .into_iter()
         .map(|peer| {
             let id = peer.0.clone();
+            let offline = known_offline(&id);
             let owner_params = owner_params.clone();
-            let task = tokio::task::spawn_blocking(move || {
-                call_owner(&id, "changes.requests.list", owner_params)
+            let task = offline.is_none().then(|| {
+                tokio::task::spawn_blocking(move || {
+                    call_owner(&id, "changes.requests.list", owner_params)
+                })
             });
-            (peer, task)
+            (peer, offline, task)
         })
         .collect();
-    for (peer, task) in asked {
-        let parsed = match task.await {
-            Ok(Ok(value)) => serde_json::from_value::<ChangesRequestsListResult>(value)
+    for (peer, offline, task) in asked {
+        let Some(task) = task else {
+            local.unreachable.push(UnreachableDevice {
+                device_id: peer.0,
+                device_name: peer.1,
+                reason: offline.unwrap_or_default(),
+            });
+            continue;
+        };
+        let parsed = match tokio::time::timeout(timeout(), task).await {
+            Err(_) => Err("It did not answer in time.".to_owned()),
+            Ok(Ok(Ok(value))) => serde_json::from_value::<ChangesRequestsListResult>(value)
                 .map_err(|_| "It sent a reply this Silo cannot read.".to_owned()),
-            Ok(Err(error)) => Err(error.to_string()),
-            Err(_) => Err("The request could not finish.".to_owned()),
+            Ok(Ok(Err(error))) => Err(error.to_string()),
+            Ok(Err(_)) => Err("The request could not finish.".to_owned()),
         };
         match parsed {
             Ok(mut remote) => {

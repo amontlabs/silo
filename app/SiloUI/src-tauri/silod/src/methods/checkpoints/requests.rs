@@ -41,8 +41,8 @@ use super::{
         computers,
         guest::{guest_error, resolve_target},
     },
-    blocking, engine_context, failure, message_error, output, service as checkpoint_service,
-    HandlerContext,
+    blocking, engine_context, failure, message_error, output, require_local_device,
+    service as checkpoint_service, HandlerContext,
 };
 
 /// A computer as `computers.list` reports it.
@@ -279,6 +279,7 @@ pub(super) async fn list(
     raw: &Value,
 ) -> Result<HandlerOutput, DispatchError> {
     let params: ChangesRequestsListParams = context.decode_params(raw)?;
+    require_local_device(context, params.device_id.as_deref())?;
     let filter = params.status.unwrap_or_default();
     settle(context).await;
     let store = store_for(context);
@@ -315,6 +316,7 @@ pub(super) async fn mark_kept(
     params: &Value,
 ) -> Result<HandlerOutput, DispatchError> {
     let params: ChangesRequestsMarkKeptParams = context.decode_params(params)?;
+    require_local_device(context, params.device_id.as_deref())?;
     verify_fork(context, &params.fork_id, &params.target).await?;
     let store = store_for(context);
     let requests = blocking(move || {
@@ -386,6 +388,7 @@ pub(super) async fn show(
     params: &Value,
 ) -> Result<HandlerOutput, DispatchError> {
     let params: RequestIdParams = context.decode_params(params)?;
+    require_local_device(context, params.device_id.as_deref())?;
     let request = open_request(context, params.request_id, Need::Any).await?;
     let computers = all_rows(context).await?;
     let Some(fork) = fork_row(&computers, &request).cloned() else {
@@ -467,6 +470,7 @@ pub(super) async fn keep(
     params: &Value,
 ) -> Result<HandlerOutput, DispatchError> {
     let params: ChangesRequestsKeepParams = context.decode_params(params)?;
+    require_local_device(context, params.device_id.as_deref())?;
     // One job per request: taken before anything is read, held until the keep job ends.
     let hold = claim(&params.request_id)?;
     let request = open_request(context, params.request_id, Need::Keepable).await?;
@@ -614,6 +618,7 @@ pub(super) async fn throw_away(
     params: &Value,
 ) -> Result<HandlerOutput, DispatchError> {
     let params: RequestIdParams = context.decode_params(params)?;
+    require_local_device(context, params.device_id.as_deref())?;
     // One job per request: held until the drop job ends, so a keep cannot start meanwhile.
     let hold = claim(&params.request_id)?;
     let request = open_request(context, params.request_id, Need::Open).await?;
@@ -688,6 +693,7 @@ pub(super) async fn open(
     params: &Value,
 ) -> Result<HandlerOutput, DispatchError> {
     let params: RequestIdParams = context.decode_params(params)?;
+    require_local_device(context, params.device_id.as_deref())?;
     let request = open_request(context, params.request_id, Need::Open).await?;
     let computers = all_rows(context).await?;
     let fork = fork_row(&computers, &request)

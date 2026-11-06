@@ -27,7 +27,7 @@ use crate::{
 
 use super::{
     super::{guest::resolve_target, HandlerContext},
-    output,
+    output, require_local_device,
 };
 
 /// The longest one build step may run.
@@ -315,6 +315,7 @@ pub(super) async fn build(
     params: &Value,
 ) -> Result<HandlerOutput, DispatchError> {
     let params: RecipeBuildParams = context.decode_params(params)?;
+    require_local_device(context, params.device_id.as_deref())?;
     recipes::validate(&params.spec).map_err(|message| DispatchError {
         code: silo_api::jobs::ErrorCode::Internal,
         message,
@@ -364,7 +365,12 @@ pub(super) async fn build(
     output(started)
 }
 
-pub(super) async fn list(context: &HandlerContext) -> Result<HandlerOutput, DispatchError> {
+pub(super) async fn list(
+    context: &HandlerContext,
+    params: &serde_json::Value,
+) -> Result<HandlerOutput, DispatchError> {
+    let params: silo_api::methods::common::DeviceParams = context.decode_params(params)?;
+    require_local_device(context, params.device_id.as_deref())?;
     let cache = cache(context);
     let recipes = tokio::task::spawn_blocking(move || cache.list())
         .await
@@ -377,6 +383,7 @@ pub(super) async fn remove(
     params: &Value,
 ) -> Result<HandlerOutput, DispatchError> {
     let params: RecipeRemoveParams = context.decode_params(params)?;
+    require_local_device(context, params.device_id.as_deref())?;
     let silod = Arc::new(context.silod_context().clone());
     let handle = tokio::runtime::Handle::current();
     tokio::task::spawn_blocking(move || {

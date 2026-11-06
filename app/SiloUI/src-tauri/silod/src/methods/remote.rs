@@ -156,7 +156,11 @@ pub fn serve_owner(
             client: None,
         },
     );
-    let params = params.clone();
+    let mut params = params.clone();
+    // A request makes one hop: an owner lists its own requests, never its devices'.
+    if let Some(object) = params.as_object_mut() {
+        object.remove("allDevices");
+    }
     handle
         .block_on(super::dispatch(&context, method, &params))
         .map(|output| output.value)
@@ -711,6 +715,120 @@ mod tests {
         );
         assert_eq!(listed["unreachable"][0]["deviceId"], DOWN);
         set_peers(None);
+    }
+
+    #[tokio::test]
+    async fn an_owner_never_asks_its_own_devices_for_requests() {
+        const PEER: &str = "88888888-8888-4888-8888-888888888840";
+        let _peers = PEERS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (seen, _peer) = canned_owner(PEER, |_, _| Ok(json!({ "requests": [] })));
+        set_peers(Some(&[(PEER, "Third")]));
+        // The bridge's own context merges nothing.
+        let bridge = HandlerContext::for_owner_bridge(
+            fixture().context.clone(),
+            RequestContext {
+                client_id: OWNER_CLIENT.to_owned(),
+                protocol: PROTOCOL_VERSION,
+                client: None,
+            },
+        );
+        let merged = crate::methods::checkpoints::all_devices::merge(
+            &bridge,
+            &json!({ "allDevices": true }),
+            serde_json::from_value(json!({ "requests": [] })).unwrap(),
+        )
+        .await;
+        assert!(merged.unreachable.is_empty());
+        // And `serve_owner` drops the option before running the handler.
+        let engine = fixture().context.clone();
+        let _ = tokio::task::spawn_blocking(move || {
+            serve_owner(
+                &engine,
+                "changes.requests.list",
+                &json!({ "allDevices": true }),
+            )
+        })
+        .await
+        .unwrap();
+        set_peers(None);
+        assert!(seen.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_device_that_does_not_answer_in_time_is_unreachable() {
+        const SLOW: &str = "88888888-8888-4888-8888-888888888842";
+        let _peers = PEERS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _slow = stub_owner(SLOW, |_, _| {
+            std::thread::sleep(std::time::Duration::from_millis(600));
+            Ok(json!({ "requests": [] }))
+        });
+        set_peers(Some(&[(SLOW, "Slow Mac")]));
+        *crate::methods::checkpoints::all_devices::TEST_TIMEOUT
+            .lock()
+            .unwrap() = Some(std::time::Duration::from_millis(100));
+        let merged = crate::methods::checkpoints::all_devices::merge(
+            &request_context(),
+            &json!({ "allDevices": true }),
+            serde_json::from_value(json!({ "requests": [] })).unwrap(),
+        )
+        .await;
+        *crate::methods::checkpoints::all_devices::TEST_TIMEOUT
+            .lock()
+            .unwrap() = None;
+        set_peers(None);
+        assert_eq!(merged.unreachable.len(), 1);
+        assert_eq!(merged.unreachable[0].device_id, SLOW);
+        assert!(merged.unreachable[0].reason.contains("in time"));
+    }
+
+    #[tokio::test]
+    async fn routed_reads_run_the_owners_real_handlers() {
+        const OWNER: &str = "88888888-8888-4888-8888-888888888841";
+        let (seen, _owner) = engine_as_owner(OWNER);
+        let recipes = as_controller(MethodName::RecipesList, with_device(OWNER, json!({})))
+            .await
+            .unwrap();
+        assert!(recipes["recipes"].is_array(), "{recipes}");
+        let steps = as_controller(
+            MethodName::StepsList,
+            with_device(OWNER, json!({ "computerId": COMPUTER })),
+        )
+        .await
+        .unwrap();
+        assert!(steps["steps"].is_array(), "{steps}");
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen[0].0, "recipes.list");
+        assert_eq!(seen[1].0, "steps.list");
+        assert!(seen
+            .iter()
+            .all(|(_, params)| params.get("deviceId").is_none()));
+    }
+
+    #[tokio::test]
+    async fn a_v1_handler_reached_with_another_device_is_refused() {
+        let request = request_context();
+        for (method, params) in [
+            (MethodName::StepsList, json!({ "computerId": COMPUTER })),
+            (MethodName::RecipesList, json!({})),
+            (MethodName::ChangesUndo, json!({ "computerId": COMPUTER })),
+            (MethodName::ChangesRequestsList, json!({})),
+        ] {
+            let mut params = params;
+            params["deviceId"] = json!(THIRD);
+            let error = crate::methods::checkpoints::handle(method, &params, &request)
+                .await
+                .expect("owned")
+                .unwrap_err();
+            assert_eq!(
+                error.code,
+                ErrorCode::UnsupportedRemoteOperation,
+                "{method:?}"
+            );
+        }
     }
 
     /// Whether the canonical params of `method` have a top-level `deviceId`.
