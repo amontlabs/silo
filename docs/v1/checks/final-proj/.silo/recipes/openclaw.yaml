@@ -1,0 +1,10 @@
+# The built-in openclaw recipe with quiet and scrub as the final run found them (see final-run.txt, O-section).
+os: linux
+packages:
+  apt: [build-essential, ca-certificates, curl, git, jq, ripgrep]
+setup:
+  - curl -fsSL https://openclaw.ai/install.sh | bash -s -- --no-onboard
+services:
+  openclaw-gateway: openclaw gateway
+quiet: [openclaw-gateway, openclaw]
+scrub: [~/.openclaw/credentials, ~/.openclaw/.env]
