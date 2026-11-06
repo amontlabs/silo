@@ -119,7 +119,7 @@ pub fn run_command(args: &[String]) -> Result<i32, String> {
         }
         _ => return Err(format!("unsupported service command: {command}")),
     }
-    let manifest = crate::app::current_manifest()?;
+    let manifest = crate::app::trusted_manifest()?;
     let channel = manifest.channel()?;
     let executable = std::env::current_exe()
         .and_then(fs::canonicalize)
