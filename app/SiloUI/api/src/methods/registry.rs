@@ -233,13 +233,13 @@ mod tests {
 
     #[test]
     fn registry_covers_every_canonical_method_and_kind() {
-        assert_eq!(METHOD_REGISTRY.len(), 156);
+        assert_eq!(METHOD_REGISTRY.len(), 157);
         assert_eq!(
             METHOD_REGISTRY
                 .iter()
                 .filter(|m| m.kind == MethodKind::Query)
                 .count(),
-            48
+            49
         );
         assert_eq!(
             METHOD_REGISTRY
