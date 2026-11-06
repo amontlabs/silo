@@ -12,7 +12,7 @@ use std::{
     path::PathBuf,
     process::{Child, Command, Stdio},
     sync::{Mutex, OnceLock},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 const FAILED: &str = "Could not read SSH access settings.";
@@ -84,10 +84,52 @@ struct Owners {
     generation: u64,
     closed: BTreeMap<String, u64>,
     all_closed: u64,
+    /// Computer id to when a background pass may next try a listener that failed to start.
+    retries: BTreeMap<String, Retry>,
+    /// Computer id to its change generation (`crate::generation`) when a pass last inspected
+    /// it and found it stopped, and when. A background pass does not inspect it again until
+    /// that generation moves or [`RETRY_LIMIT`] passes (a start outside Silo).
+    stopped: BTreeMap<String, (u64, Instant)>,
 }
 impl Owners {
     fn closed_since(&self, computer: &str, generation: u64) -> bool {
         self.all_closed > generation || self.closed.get(computer).is_some_and(|g| *g > generation)
+    }
+    /// Found stopped recently, and nothing has started or stopped it since.
+    fn still_stopped(&self, config: &Configuration, now: Instant) -> bool {
+        self.stopped
+            .get(&config.computer_id)
+            .is_some_and(|(generation, at)| {
+                *generation == crate::generation::generation(&config.computer_id)
+                    && now.duration_since(*at) < RETRY_LIMIT
+            })
+    }
+    /// The retry that keeps a background pass from starting this computer's listener now.
+    fn waiting_retry(&self, config: &Configuration, now: Instant) -> Option<&Retry> {
+        self.retries
+            .get(&config.computer_id)
+            .filter(|retry| retry.next > now)
+    }
+}
+/// The longest a background pass waits before trying a failed listener again.
+const RETRY_LIMIT: Duration = Duration::from_secs(300);
+/// A listener that failed to start: the wait doubles with every failure, up to
+/// [`RETRY_LIMIT`]. A save or lifecycle command tries again at once.
+struct Retry {
+    delay: Duration,
+    next: Instant,
+    error: String,
+}
+impl Retry {
+    fn after(previous: Option<&Retry>, error: String, now: Instant) -> Self {
+        let delay = previous.map_or(MONITOR_INTERVAL * 2, |retry| {
+            (retry.delay * 2).min(RETRY_LIMIT)
+        });
+        Self {
+            delay,
+            next: now + delay,
+            error,
+        }
     }
 }
 /// The listeners and their errors. Held only briefly, never across runtime
@@ -326,6 +368,11 @@ fn inspect_running(paths: &RuntimePaths, config: &Configuration) -> Result<bool,
 /// state. Runtime inspection and listener start-up (up to 8 s each) run without the
 /// `owners()` lock, so state reads and closes never wait behind a pass (C-10).
 pub(crate) fn reconcile(paths: &RuntimePaths) {
+    reconcile_pass(paths, false)
+}
+/// A `background` pass (the monitor, a read's repair) does not inspect a computer that
+/// stayed stopped since the last pass, and waits out a failed listener's retry delay.
+fn reconcile_pass(paths: &RuntimePaths, background: bool) {
     if paths.metadata.as_os_str().is_empty() {
         return;
     }
@@ -357,7 +404,11 @@ pub(crate) fn reconcile(paths: &RuntimePaths) {
                 .iter()
                 .any(|m| m.name() == config.computer && m.id() == config.computer_id)
             {
-                inspect_running(paths, config)
+                if background && owned().still_stopped(config, Instant::now()) {
+                    Ok(false)
+                } else {
+                    inspect_running(paths, config)
+                }
             } else {
                 Err("The computer identity changed. Configure SSH access again.".into())
             };
@@ -381,9 +432,33 @@ pub(crate) fn reconcile(paths: &RuntimePaths) {
             .collect();
         retired.extend(stale.iter().filter_map(|name| owned.listeners.remove(name)));
         owned.errors.clear();
+        let now = Instant::now();
         observed
             .into_iter()
             .filter_map(|(config, observed)| {
+                if matches!(observed, Ok(false)) {
+                    // A skipped inspection keeps the time of the one that found it stopped.
+                    if !owned.still_stopped(config, now) {
+                        let generation = crate::generation::generation(&config.computer_id);
+                        owned
+                            .stopped
+                            .insert(config.computer_id.clone(), (generation, now));
+                    }
+                } else {
+                    owned.stopped.remove(&config.computer_id);
+                }
+                if background
+                    && matches!(observed, Ok(true))
+                    && !owned.listeners.contains_key(&config.computer)
+                {
+                    if let Some(error) = owned
+                        .waiting_retry(config, now)
+                        .map(|retry| retry.error.clone())
+                    {
+                        owned.errors.insert(config.computer.clone(), error);
+                        return None;
+                    }
+                }
                 prepare_one(&mut owned, config, observed, &addresses, &mut retired)
                     .then_some(config)
             })
@@ -410,6 +485,19 @@ pub(crate) fn reconcile(paths: &RuntimePaths) {
             && !owned.closed_since(&config.computer, generation)
             && current.contains(config)
         {
+            match &listener {
+                Ok(_) => {
+                    owned.retries.remove(&config.computer_id);
+                }
+                Err(error) => {
+                    let retry = Retry::after(
+                        owned.retries.get(&config.computer_id),
+                        error.clone(),
+                        Instant::now(),
+                    );
+                    owned.retries.insert(config.computer_id.clone(), retry);
+                }
+            }
             finish_one(&mut owned, config, listener, &mut retired);
         } else {
             // Closed or changed while starting: the next pass decides from fresh state.
@@ -530,7 +618,7 @@ fn reconcile_if_idle(paths: &RuntimePaths) {
     // Background listener reconcile touches shared SSH state; skip when busy.
     if let Ok(_guard) = runtime::OPERATIONS.try_device_hidden("Reconciling SSH access") {
         if runtime::shutdown::ensure_accepting_operations().is_ok() {
-            reconcile(paths);
+            reconcile_pass(paths, true);
         }
     }
 }
@@ -551,7 +639,7 @@ fn schedule_reconcile(paths: RuntimePaths) {
 /// Background safety net for changes nothing reports: a computer stopping outside
 /// Silo, a listener exiting, a network interface going away. Lifecycle commands,
 /// saves, backups and checkpoints reconcile directly, so this runs rarely (C-10).
-const MONITOR_INTERVAL: Duration = Duration::from_secs(15);
+pub const MONITOR_INTERVAL: Duration = Duration::from_secs(15);
 /// Whether a background pass has anything to open, check or close. Without any
 /// enabled SSH access and without owned listeners or errors, a pass would only take
 /// the device gate and inspect nothing, so it is skipped.
@@ -1027,6 +1115,38 @@ mod tests {
             )],
             managed_key: None,
         }
+    }
+    #[test]
+    fn a_failed_listener_waits_twice_as_long_each_time_up_to_five_minutes() {
+        let c = config();
+        let now = Instant::now();
+        let mut owned = Owners::default();
+        let mut delays = Vec::new();
+        for _ in 0..6 {
+            let retry = Retry::after(owned.retries.get(&c.computer_id), "no".into(), now);
+            delays.push(retry.delay.as_secs());
+            owned.retries.insert(c.computer_id.clone(), retry);
+        }
+        assert_eq!(delays, [30, 60, 120, 240, 300, 300]);
+        assert_eq!(owned.waiting_retry(&c, now).unwrap().error, "no");
+        assert!(owned
+            .waiting_retry(&c, now + Duration::from_secs(301))
+            .is_none());
+    }
+    #[test]
+    fn a_stopped_computer_is_inspected_again_only_after_a_lifecycle_change_or_a_while() {
+        let mut c = config();
+        c.computer_id = "00000000-0000-4000-8000-0000000000bb".into();
+        let now = Instant::now();
+        let mut owned = Owners::default();
+        assert!(!owned.still_stopped(&c, now));
+        let at = crate::generation::generation(&c.computer_id);
+        owned.stopped.insert(c.computer_id.clone(), (at, now));
+        assert!(owned.still_stopped(&c, now + MONITOR_INTERVAL));
+        assert!(!owned.still_stopped(&c, now + RETRY_LIMIT));
+        // A start or stop through the engine moves the generation.
+        crate::generation::bump(&c.computer_id);
+        assert!(!owned.still_stopped(&c, now));
     }
     #[test]
     fn a_warm_checkpoint_is_not_reused_while_a_listener_can_serve_sessions() {

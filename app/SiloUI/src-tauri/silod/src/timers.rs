@@ -18,7 +18,9 @@
 //! A fifth pass reopens the SSH listeners of running computers every 15 s
 //! (`silo_engine::ssh_access::monitor`): a listener ends with the engine that started it, so
 //! a computer still running after an engine restart, or one stopped and started outside
-//! Silo, has none until this pass (or a lifecycle command) opens it again.
+//! Silo, has none until this pass (or a lifecycle command) opens it again. The pass does not
+//! inspect a computer it found stopped until a lifecycle change or five minutes, and a
+//! listener that failed to start waits 30 s, doubling to five minutes, before the next try.
 //!
 //! The intervals are not sourced in the decisions (05 §10 OQ23); they are chosen here:
 //! revocations every minute (the pass returns at once when none is pending), ports every 30 s
@@ -41,7 +43,7 @@ pub const START_DELAY: Duration = Duration::from_secs(30);
 pub const REVOCATION_INTERVAL: Duration = Duration::from_secs(60);
 pub const PORT_REPAIR_INTERVAL: Duration = Duration::from_secs(30);
 pub const LOG_EXPIRY_INTERVAL: Duration = Duration::from_secs(10 * 60);
-pub const SSH_REPAIR_INTERVAL: Duration = Duration::from_secs(15);
+pub const SSH_REPAIR_INTERVAL: Duration = silo_engine::ssh_access::MONITOR_INTERVAL;
 /// How often the device pass looks for devices that are due. Each device answers to its own
 /// schedule inside the pass: [`DEVICE_QUIET_FOR`], doubling after each failure.
 pub const DEVICE_PROBE_INTERVAL: Duration = Duration::from_secs(10);
