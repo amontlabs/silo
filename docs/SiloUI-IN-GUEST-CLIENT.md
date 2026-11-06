@@ -67,9 +67,7 @@ silo guest-client install main --agent openclaw --binary ~/.silo/guest/silo
 3. With `--binary`, the binary goes first (below); a failed upload stops the install before any token exists.
    The CLI then writes `/etc/silo/guest-client.json` as root in the computer (`0640`, group `silo`, or
    `0600` when there is no such group; `--group` names another). If writing the file fails the
-   token is revoked. The binary is uploaded to a new folder in the sticky `/tmp` that root creates (`mkdir` fails on an
-   existing name, a link included) and hands to the working account, copied into a folder only root can enter, checked there and installed at
-   `/usr/local/bin/silo` from there.
+   token is revoked. The binary is staged under a fresh name on the host and uploaded to `/workspace` like any file; root then refuses a link or a non-regular file, copies the bytes into a `0700` folder under `/root`, checks that copy's sha256 against the hash the host computed of the local binary, and installs it at `/usr/local/bin/silo` from there. Root changes nothing under `/workspace`; the account removes the uploaded file.
 
 `silo guest-client status main` and `silo guest-client revoke main` read and remove the token.
 
