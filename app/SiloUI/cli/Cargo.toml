@@ -12,6 +12,7 @@ name = "silo"
 path = "src/main.rs"
 
 [dependencies]
+base64 = "0.23"
 clap = { version = "4", features = ["derive", "env"] }
 futures = "0.3"
 libc = "0.2"

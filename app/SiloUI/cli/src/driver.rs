@@ -4,10 +4,15 @@
 //! The driver runs in the computer as the working account (Linux: the launcher
 //! `/usr/local/libexec/silo-cua-driver-mcp`, which finds the live desktop session; macOS:
 //! `/usr/local/bin/cua-driver mcp`). JSON-RPC lines go in through `guest.exec.input` and come
-//! back through `guest.exec.get`. When the driver exits, the next request starts it again.
+//! back through `guest.exec.get`. Any failure ends the session (its standard input is closed
+//! and its state cleared); the next request starts a new one. Only requests that change
+//! nothing (`tools/list`, `get_desktop_state`) are repeated on a new session after the driver
+//! exited. Screenshots never travel on the driver's standard output: the driver writes the PNG
+//! to a temporary file in the computer, which is read back in parts and removed.
 
 use std::time::{Duration, Instant};
 
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde_json::{json, Value};
 use silo_api::methods::{
     guest::{GuestExecGetParams, GuestExecInputParams, GuestExecStartParams},
@@ -17,6 +22,7 @@ use silo_api::methods::{
 use crate::{
     engine::{Computer, Engine},
     error::CliError,
+    ops::{self, ExecArgs},
 };
 
 /// The command that starts the driver's MCP server in a computer.
@@ -30,8 +36,11 @@ pub fn driver_argv(kind: &str) -> Vec<String> {
 const RETAIN_OUTPUT_BYTES: u64 = 960 * 1024;
 const POLL: Duration = Duration::from_millis(50);
 const STDERR_KEEP: usize = 4096;
-/// The longest single JSON-RPC line read back (a base64 screenshot).
-const MAX_LINE: usize = 24 * 1024 * 1024;
+/// The longest JSON-RPC line read back; a screenshot never travels in one.
+pub const MAX_LINE: usize = 256 * 1024;
+const PART: u64 = 500_000;
+const MAX_SCREENSHOT_BYTES: u64 = 16 * 1024 * 1024;
+const SCREENSHOT_PREFIX: &str = "/tmp/silo-cu.shot-";
 
 #[derive(Default)]
 pub struct Session {
@@ -40,10 +49,13 @@ pub struct Session {
     buffer: Vec<u8>,
     stderr: Vec<u8>,
     next_id: u64,
+    shots: u64,
+    /// Whether the request being handled has been written to the driver.
+    sent: bool,
 }
 
 enum Failure {
-    /// The driver process is gone; a new one may be started.
+    /// The driver process is gone.
     Exited,
     Other(CliError),
 }
@@ -54,9 +66,14 @@ impl From<CliError> for Failure {
     }
 }
 
+/// Requests that change nothing, so repeating one on a new driver is harmless.
+fn repeatable(method: &str, params: &Value) -> bool {
+    method == "tools/list" || (method == "tools/call" && params["name"] == "get_desktop_state")
+}
+
 impl Session {
-    /// Sends one MCP request and returns its `result`. Starts the driver first when none runs,
-    /// and once more when it turns out to have exited.
+    /// Sends one MCP request and returns its `result`. Starts the driver first when none runs.
+    /// A failure closes the session.
     pub async fn request(
         &mut self,
         engine: &Engine,
@@ -65,7 +82,9 @@ impl Session {
         params: Value,
         timeout: Duration,
     ) -> Result<Value, CliError> {
-        for attempt in 0..2 {
+        let mut attempt = 0;
+        loop {
+            self.sent = false;
             let outcome = self
                 .try_request(engine, computer, method, &params, timeout)
                 .await;
@@ -73,21 +92,76 @@ impl Session {
                 Ok(result) => return Ok(result),
                 Err(Failure::Exited) => {
                     let said = self.stderr_text();
-                    self.job = None;
-                    if attempt == 1 {
+                    let sent = self.sent;
+                    self.close(engine).await;
+                    attempt += 1;
+                    if sent && !repeatable(method, &params) {
                         return Err(CliError::new(format!(
-                            "The computer-use driver in {} keeps exiting{}. Check `silo status {}`.",
-                            computer.name, said, computer.name
+                            "The computer-use driver in {} exited while handling the request{said}; it may or may not have been carried out. Look at the screen before trying again.",
+                            computer.name
+                        )));
+                    }
+                    if attempt >= 2 {
+                        return Err(CliError::new(format!(
+                            "The computer-use driver in {} keeps exiting{said}. Check `silo status {}`.",
+                            computer.name, computer.name
                         )));
                     }
                 }
-                Err(Failure::Other(error)) => return Err(error),
+                Err(Failure::Other(error)) => {
+                    self.close(engine).await;
+                    return Err(error);
+                }
             }
         }
-        unreachable!("the loop returns")
     }
 
-    /// Stops the driver (its standard input closes), if one runs.
+    /// A screenshot of the desktop as an MCP result with the image in it. The driver scales
+    /// it to `max_side` and writes it to a temporary file in the computer, which is read in
+    /// parts and removed.
+    pub async fn screenshot(
+        &mut self,
+        engine: &Engine,
+        computer: &Computer,
+        max_side: u32,
+        timeout: Duration,
+    ) -> Result<Value, CliError> {
+        self.shots += 1;
+        let path = format!(
+            "{SCREENSHOT_PREFIX}{}-{}.png",
+            std::process::id(),
+            self.shots
+        );
+        let result = self
+            .request(
+                engine,
+                computer,
+                "tools/call",
+                json!({"name": "get_desktop_state",
+                       "arguments": {"max_image_dimension": max_side, "screenshot_out_file": path}}),
+                timeout,
+            )
+            .await?;
+        let image = read_file(engine, computer, &path).await;
+        remove_file(engine, computer, &path).await;
+        let image = image?;
+        let mut content: Vec<Value> = result["content"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|item| item["type"] == "text")
+            .cloned()
+            .collect();
+        content.push(
+            json!({"type": "image", "mimeType": "image/png", "data": STANDARD.encode(image)}),
+        );
+        Ok(
+            json!({"content": content, "structuredContent": result["structuredContent"],
+                  "isError": result["isError"]}),
+        )
+    }
+
+    /// Ends the driver: closes its standard input and forgets the session.
     pub async fn close(&mut self, engine: &Engine) {
         if let Some(job) = self.job.take() {
             let _ = engine
@@ -99,15 +173,16 @@ impl Session {
                 }))
                 .await;
         }
+        self.seen = 0;
+        self.buffer.clear();
+        self.next_id = 0;
     }
 
     fn stderr_text(&self) -> String {
         let text = String::from_utf8_lossy(&self.stderr);
-        let text = text.trim();
-        if text.is_empty() {
-            String::new()
-        } else {
-            format!(" ({})", text.lines().last().unwrap_or(""))
+        match text.trim().lines().last() {
+            Some(line) if !line.is_empty() => format!(" ({line})"),
+            _ => String::new(),
         }
     }
 
@@ -122,6 +197,7 @@ impl Session {
         if self.job.is_none() {
             self.start(engine, computer, timeout).await?;
         }
+        self.sent = false;
         self.call(engine, computer, method, params, timeout).await
     }
 
@@ -163,24 +239,38 @@ impl Session {
             engine,
             &json!({"jsonrpc": "2.0", "method": "notifications/initialized"}),
         )
-        .await?;
-        Ok(())
+        .await
     }
 
     async fn send(&mut self, engine: &Engine, message: &Value) -> Result<(), Failure> {
         let job = self.job.clone().ok_or(Failure::Exited)?;
         let mut line = message.to_string().into_bytes();
         line.push(b'\n');
-        engine
+        let written = engine
             .call(requests::guest_exec_input(GuestExecInputParams {
-                job_id: job,
+                job_id: job.clone(),
                 device_id: None,
                 data: Some(line),
                 close: None,
             }))
-            .await
-            .map_err(|_| Failure::Exited)?;
-        Ok(())
+            .await;
+        match written {
+            Ok(_) => Ok(()),
+            Err(error) => {
+                // A refused write is an exited driver only when the job says so.
+                let state = engine
+                    .call(requests::guest_exec_get(GuestExecGetParams {
+                        job_id: job,
+                        device_id: None,
+                        since_seq: Some(self.seen),
+                    }))
+                    .await;
+                match state {
+                    Ok(reply) if reply["state"].as_str() != Some("running") => Err(Failure::Exited),
+                    _ => Err(Failure::Other(error)),
+                }
+            }
+        }
     }
 
     async fn call(
@@ -198,6 +288,7 @@ impl Session {
             &json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}),
         )
         .await?;
+        self.sent = true;
         let deadline = Instant::now() + timeout;
         loop {
             if let Some(message) = self.take_message(id) {
@@ -209,6 +300,9 @@ impl Session {
                     .into());
                 }
                 return Ok(message["result"].clone());
+            }
+            if self.buffer.len() > MAX_LINE {
+                return Err(CliError::new("The driver sent an answer that is too large.").into());
             }
             if Instant::now() >= deadline {
                 return Err(CliError::new(format!(
@@ -224,17 +318,26 @@ impl Session {
         }
     }
 
-    /// The reply with this id, once its line has arrived.
+    /// The reply with this id, once its line has arrived. Other lines are dropped.
     fn take_message(&mut self, id: u64) -> Option<Value> {
-        while let Some(end) = self.buffer.iter().position(|byte| *byte == b'\n') {
-            let line: Vec<u8> = self.buffer.drain(..=end).collect();
-            if let Ok(message) = serde_json::from_slice::<Value>(&line) {
-                if message["id"] == id {
-                    return Some(message);
+        let mut start = 0;
+        let mut found = None;
+        while let Some(offset) = self.buffer[start..].iter().position(|byte| *byte == b'\n') {
+            let end = start + offset;
+            if let Ok(message) = serde_json::from_slice::<Value>(&self.buffer[start..end]) {
+                let reply = message.get("method").is_none()
+                    && (message.get("result").is_some() || message.get("error").is_some());
+                if reply && message["id"] == id {
+                    found = Some(message);
                 }
             }
+            start = end + 1;
+            if found.is_some() {
+                break;
+            }
         }
-        None
+        self.buffer.drain(..start);
+        found
     }
 
     /// Reads what the driver wrote since last time; false when there was nothing.
@@ -248,7 +351,7 @@ impl Session {
             }))
             .await?;
         let first = reply["firstRetainedSeq"].as_u64().unwrap_or(0);
-        if first > self.seen + 1 && self.seen > 0 {
+        if first > self.seen + 1 {
             return Err(
                 CliError::new("Output of the computer-use driver was lost; try again.").into(),
             );
@@ -257,27 +360,97 @@ impl Session {
         for chunk in reply["output"].as_array().into_iter().flatten() {
             received = true;
             self.seen = self.seen.max(chunk["seq"].as_u64().unwrap_or(0));
-            let bytes = chunk["data"]
+            let bytes: Vec<u8> = chunk["data"]
                 .as_array()
                 .into_iter()
                 .flatten()
-                .filter_map(|byte| byte.as_u64().map(|byte| byte as u8));
+                .filter_map(|byte| byte.as_u64().map(|byte| byte as u8))
+                .collect();
             if chunk["stream"] == "stderr" {
-                let room = STDERR_KEEP.saturating_sub(self.stderr.len());
-                self.stderr.extend(bytes.take(room));
+                self.stderr.extend(bytes);
+                if self.stderr.len() > STDERR_KEEP {
+                    let excess = self.stderr.len() - STDERR_KEEP;
+                    self.stderr.drain(..excess);
+                }
             } else {
                 self.buffer.extend(bytes);
-                if self.buffer.len() > MAX_LINE && !self.buffer.contains(&b'\n') {
-                    self.buffer.clear();
-                    return Err(
-                        CliError::new("The driver sent an answer that is too large.").into(),
-                    );
-                }
             }
         }
         if reply["state"].as_str() != Some("running") && !received {
             return Err(Failure::Exited);
         }
         Ok(received)
+    }
+}
+
+fn guest(computer: &Computer, argv: Vec<String>) -> ExecArgs {
+    ExecArgs {
+        computer: computer.name.clone(),
+        argv,
+        cwd: None,
+        timeout_secs: 30,
+    }
+}
+
+fn sh(computer: &Computer, script: &str, args: &[String]) -> ExecArgs {
+    let mut argv = vec!["sh".to_owned(), "-c".into(), script.to_owned(), "sh".into()];
+    argv.extend(args.iter().cloned());
+    guest(computer, argv)
+}
+
+/// A file the driver wrote in the computer, read in parts of at most `PART` bytes.
+async fn read_file(engine: &Engine, computer: &Computer, path: &str) -> Result<Vec<u8>, CliError> {
+    if !path.starts_with(SCREENSHOT_PREFIX) {
+        return Err(CliError::new("Refusing to read that file."));
+    }
+    let size = ops::exec_with_input(
+        engine,
+        computer.clone(),
+        &sh(computer, r#"wc -c < "$1""#, &[path.to_owned()]),
+        None,
+        None,
+    )
+    .await?;
+    let size: u64 = String::from_utf8_lossy(&size.stdout)
+        .trim()
+        .parse()
+        .map_err(|_| CliError::new("The driver did not leave a screenshot."))?;
+    if size == 0 || size > MAX_SCREENSHOT_BYTES {
+        return Err(CliError::new("The screenshot has an unusable size."));
+    }
+    let mut data = Vec::with_capacity(size as usize);
+    while (data.len() as u64) < size {
+        let args = [
+            (data.len() + 1).to_string(),
+            path.to_owned(),
+            PART.to_string(),
+        ];
+        let part = ops::exec_with_input(
+            engine,
+            computer.clone(),
+            &sh(computer, r#"tail -c +"$1" "$2" | head -c "$3""#, &args),
+            None,
+            Some(700_000),
+        )
+        .await?;
+        if part.process_exit_code() != 0 || part.stdout.is_empty() {
+            return Err(CliError::new("Could not read the screenshot back."));
+        }
+        data.extend(part.stdout);
+    }
+    data.truncate(size as usize);
+    Ok(data)
+}
+
+async fn remove_file(engine: &Engine, computer: &Computer, path: &str) {
+    if path.starts_with(SCREENSHOT_PREFIX) {
+        let _ = ops::exec_with_input(
+            engine,
+            computer.clone(),
+            &guest(computer, vec!["rm".into(), "-f".into(), path.to_owned()]),
+            None,
+            None,
+        )
+        .await;
     }
 }

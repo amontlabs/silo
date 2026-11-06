@@ -571,6 +571,10 @@ impl SiloMcp {
             async {
                 if params.promote && !params.request {
                     let engine = self.engine().await?;
+                    // The computers swap roles: their driver sessions end first.
+                    if !params.dry_run {
+                        self.close_sessions(None).await;
+                    }
                     let mut value = ops::promote(
                         &engine,
                         &params.fork,
@@ -755,8 +759,14 @@ impl SiloMcp {
         Parameters(ComputerParam { computer }): Parameters<ComputerParam>,
     ) -> Result<String, String> {
         show(
-            async { ops::drop_computer(&self.engine().await?, &computer, false, &|_| {}).await }
-                .await,
+            async {
+                let engine = self.engine().await?;
+                if let Ok(found) = engine.computer(&computer).await {
+                    self.close_sessions(Some(&found.id)).await;
+                }
+                ops::drop_computer(&engine, &computer, false, &|_| {}).await
+            }
+            .await,
         )
     }
 
@@ -902,13 +912,19 @@ impl SiloMcp {
         method: &str,
         params: Value,
     ) -> Result<Value, CliError> {
+        self.session_call(computer, Some((method, params)), 0).await
+    }
+
+    /// A request (`Some`) or, with `None`, a screenshot of at most `max_side` pixels.
+    async fn session_call(
+        &self,
+        computer: &str,
+        request: Option<(&str, Value)>,
+        max_side: u32,
+    ) -> Result<Value, CliError> {
         let engine = self.engine().await?;
         let found = engine.computer(computer).await?;
-        if found.name == ops::MAIN {
-            return Err(CliError::new(
-                "The computer_use tools drive forks, not main. Fork main (fork_gui) and drive the fork.",
-            ));
-        }
+        crate::gui::ensure_fork(&engine, &found).await?;
         let session = self
             .sessions
             .lock()
@@ -917,9 +933,38 @@ impl SiloMcp {
             .or_default()
             .clone();
         let mut session = session.lock().await;
-        session
-            .request(&engine, &found, method, params, Duration::from_secs(60))
-            .await
+        let timeout = Duration::from_secs(60);
+        match request {
+            Some((method, params)) => {
+                session
+                    .request(&engine, &found, method, params, timeout)
+                    .await
+            }
+            None => session.screenshot(&engine, &found, max_side, timeout).await,
+        }
+    }
+
+    /// Ends every driver session this server holds (or the one of `only`, by computer id).
+    async fn close_sessions(&self, only: Option<&str>) {
+        let held: Vec<(String, _)> = {
+            let mut sessions = self.sessions.lock().unwrap();
+            let ids: Vec<String> = sessions
+                .keys()
+                .filter(|id| only.is_none_or(|only| only == id.as_str()))
+                .cloned()
+                .collect();
+            ids.into_iter()
+                .filter_map(|id| sessions.remove(&id).map(|session| (id, session)))
+                .collect()
+        };
+        if held.is_empty() {
+            return;
+        }
+        if let Ok(engine) = self.engine().await {
+            for (_, session) in held {
+                session.lock().await.close(&engine).await;
+            }
+        }
     }
 
     /// Runs one driver tool in the computer and shapes its answer for the agent.
@@ -929,14 +974,25 @@ impl SiloMcp {
         tool: &str,
         arguments: Value,
     ) -> Result<CallToolResult, String> {
-        self.session_request(
-            computer,
-            "tools/call",
-            serde_json::json!({"name": tool, "arguments": arguments}),
-        )
-        .await
-        .map(|result| drive_result(crate::usetools::answer_of(&result)))
-        .map_err(|error| error.message)
+        // Screenshots come back through a file, never on the driver's output.
+        let result = if tool == "get_desktop_state" {
+            let side = arguments["max_image_dimension"]
+                .as_u64()
+                .map_or(crate::usetools::DEFAULT_MAX_SIDE, |side| {
+                    side.min(8192) as u32
+                });
+            self.session_call(computer, None, side).await
+        } else {
+            self.session_request(
+                computer,
+                "tools/call",
+                serde_json::json!({"name": tool, "arguments": arguments}),
+            )
+            .await
+        };
+        result
+            .map(|result| drive_result(crate::usetools::answer_of(&result)))
+            .map_err(|error| error.message)
     }
 
     async fn act(
@@ -1020,9 +1076,10 @@ impl SiloMcp {
         Parameters(params): Parameters<ScreenshotParams>,
     ) -> Result<CallToolResult, String> {
         let max_side = params.max_side.unwrap_or(crate::usetools::DEFAULT_MAX_SIDE);
-        self.act(
+        self.drive(
             &params.computer,
-            crate::usetools::Action::Screenshot { max_side },
+            "get_desktop_state",
+            serde_json::json!({"max_image_dimension": max_side}),
         )
         .await
     }
@@ -1183,14 +1240,14 @@ pub async fn serve(
     working_directory: PathBuf,
     agent: Option<String>,
 ) -> Result<(), CliError> {
-    let service = SiloMcp::new(socket, working_directory)
-        .with_agent(agent)
+    let server = SiloMcp::new(socket, working_directory).with_agent(agent);
+    let service = server
+        .clone()
         .serve(rmcp::transport::stdio())
         .await
         .map_err(|error| CliError::new(format!("The MCP server could not start: {error}")))?;
-    service
-        .waiting()
-        .await
-        .map_err(|error| CliError::new(format!("The MCP server stopped: {error}")))?;
+    let stopped = service.waiting().await;
+    server.close_sessions(None).await;
+    stopped.map_err(|error| CliError::new(format!("The MCP server stopped: {error}")))?;
     Ok(())
 }

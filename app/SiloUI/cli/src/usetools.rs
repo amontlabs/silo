@@ -113,16 +113,49 @@ pub struct Answer {
     pub is_error: bool,
 }
 
-/// An MCP `tools/call` result as parts. A screenshot is followed by a line saying what it is.
+/// What a driver answer may hold: at most this many content blocks, text cut to this many
+/// bytes, images of these types.
+const MAX_BLOCKS: usize = 16;
+const MAX_TEXT: usize = 64 * 1024;
+const MAX_FALLBACK: usize = 16 * 1024;
+const IMAGE_TYPES: [&str; 3] = ["image/png", "image/jpeg", "image/webp"];
+
+fn cut(text: &str, limit: usize) -> String {
+    if text.len() <= limit {
+        return text.to_owned();
+    }
+    let mut end = limit;
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}... (cut)", &text[..end])
+}
+
+/// An MCP `tools/call` result as parts. Blocks beyond the sixteenth, images of other types and
+/// unknown blocks are dropped, long text is cut. A screenshot is followed by a line saying what
+/// it is.
 pub fn answer_of(result: &Value) -> Answer {
     let mut parts = Vec::new();
-    for item in result["content"].as_array().into_iter().flatten() {
+    for item in result["content"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .take(MAX_BLOCKS)
+    {
         match item["type"].as_str() {
-            Some("image") => parts.push(Part::Image {
-                data: item["data"].as_str().unwrap_or_default().to_owned(),
-                mime: item["mimeType"].as_str().unwrap_or("image/png").to_owned(),
-            }),
-            Some("text") => parts.push(Part::Text(item["text"].as_str().unwrap_or("").to_owned())),
+            Some("image") => {
+                let mime = item["mimeType"].as_str().unwrap_or("image/png");
+                if let (true, Some(data)) = (IMAGE_TYPES.contains(&mime), item["data"].as_str()) {
+                    parts.push(Part::Image {
+                        data: data.to_owned(),
+                        mime: mime.to_owned(),
+                    });
+                }
+            }
+            Some("text") => parts.push(Part::Text(cut(
+                item["text"].as_str().unwrap_or(""),
+                MAX_TEXT,
+            ))),
             _ => {}
         }
     }
@@ -143,7 +176,7 @@ pub fn answer_of(result: &Value) -> Answer {
         )));
     }
     if parts.is_empty() {
-        parts.push(Part::Text(result.to_string()));
+        parts.push(Part::Text(cut(&result.to_string(), MAX_FALLBACK)));
     }
     Answer {
         parts,
@@ -176,6 +209,28 @@ mod tests {
             (tool, args["max_image_dimension"].as_u64()),
             ("get_desktop_state", Some(1000))
         );
+    }
+
+    #[test]
+    fn an_answer_is_bounded_and_only_carries_known_blocks() {
+        let blocks: Vec<Value> = (0..40)
+            .map(|n| json!({"type": "text", "text": format!("{n}")}))
+            .collect();
+        let answer = answer_of(&json!({"content": blocks}));
+        assert_eq!(answer.parts.len(), 16);
+        let odd = json!({"content": [
+            {"type": "image", "mimeType": "image/svg+xml", "data": "AAAA"},
+            {"type": "resource", "uri": "file:///etc/passwd"},
+            {"type": "text", "text": "x".repeat(200_000)}]});
+        let Part::Text(text) = &answer_of(&odd).parts[0] else {
+            panic!("text expected")
+        };
+        assert!(text.len() < 70_000, "long text is cut");
+        let unknown = answer_of(&json!({"weird": "y".repeat(100_000)}));
+        let Part::Text(text) = &unknown.parts[0] else {
+            panic!("text expected")
+        };
+        assert!(text.len() < 20_000);
     }
 
     #[test]

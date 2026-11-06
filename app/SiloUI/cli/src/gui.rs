@@ -62,6 +62,30 @@ fn target(computer: &Computer) -> ComputerTargetParams {
     }
 }
 
+/// Whether `computer` is a fork: it has a source in the engine's tree and is not the computer
+/// holding the `main` role. An archived `main-before-*` has no source, so it is not one either.
+pub async fn ensure_fork(engine: &Engine, computer: &Computer) -> Result<(), CliError> {
+    let tree = engine
+        .call(requests::computers_tree(
+            silo_api::methods::common::EmptyParams {},
+        ))
+        .await?;
+    let fork = computer.name != MAIN
+        && tree["nodes"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(|node| node["id"] == computer.id.as_str() && node["parent"].is_string());
+    if fork {
+        Ok(())
+    } else {
+        Err(CliError::new(format!(
+            "{} is not a fork. Computer-use tools and the unattended approval are for forks; fork main (fork_gui) and use the fork.",
+            computer.name
+        )))
+    }
+}
+
 /// Sets the approval mode of a fork. `main` never takes this path: its mode stays what the
 /// user chose in the app.
 pub async fn set_fork_approval(
@@ -74,6 +98,7 @@ pub async fn set_fork_approval(
             "main keeps asking for computer-use approval; change it in the app. Only forks can run unattended.",
         ));
     }
+    ensure_fork(engine, fork).await?;
     engine
         .call(requests::computer_use_approval(ComputerUseApprovalParams {
             computer_id: fork.id.clone(),

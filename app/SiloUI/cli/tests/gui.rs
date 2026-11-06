@@ -18,6 +18,14 @@ fn ignore(_: &str) {}
 
 /// An engine with `main` running and a `t1` fork that appears when it is forked, whose
 /// desktop reports `starting` for the first poll and ready after.
+
+fn tree() -> Value {
+    json!({"nodes": [
+        {"id": "id-main", "name": "main", "parent": null},
+        {"id": "id-t1", "name": "t1", "parent": "id-main"},
+        {"id": "id-old", "name": "main-before-1", "parent": null}]})
+}
+
 fn fork_engine() -> (FakeEngine, Arc<Mutex<Vec<String>>>) {
     let forked = Arc::new(Mutex::new(Vec::<String>::new()));
     let order = Arc::new(Mutex::new(Vec::<String>::new()));
@@ -40,6 +48,7 @@ fn fork_engine() -> (FakeEngine, Arc<Mutex<Vec<String>>>) {
                 Ok(json!({"jobId": "job:1"}))
             }
             "computers.start" => Ok(json!({"jobId": "job:1"})),
+            "computers.tree" => Ok(tree()),
             "operations.job.get" => Ok(finished(json!({}))),
             "operations.job.acknowledge" => Ok(Value::Null),
             "computerUse.approval" => {
@@ -141,6 +150,8 @@ async fn a_desktop_that_never_gets_ready_times_out_and_says_where_it_stands() {
 struct Driver {
     started: usize,
     exited: bool,
+    /// A tool that makes the driver exit without answering.
+    die_on: Option<String>,
     output: Vec<(u64, String, Vec<u8>)>,
     requests: Vec<Value>,
 }
@@ -149,7 +160,23 @@ fn driver_engine(driver: Arc<Mutex<Driver>>, screenshot: Value) -> FakeEngine {
     FakeEngine::start(move |method, params| {
         let mut state = driver.lock().unwrap();
         match method {
-            "computers.list" => Ok(listing(&[("main", "running"), ("t1", "running")])),
+            "computers.list" => Ok(listing(&[
+                ("main", "running"),
+                ("t1", "running"),
+                ("main-before-1", "stopped"),
+            ])),
+            "computers.tree" => Ok(tree()),
+            "guest.exec" => {
+                let script = params["argv"][2].as_str().unwrap_or_default();
+                let stdout: Vec<u8> = if script.contains("wc -c") {
+                    b"9\n".to_vec()
+                } else if script.contains("tail -c") {
+                    b"PNG-bytes".to_vec()
+                } else {
+                    Vec::new()
+                };
+                Ok(json!({"exitCode": 0, "stdout": stdout, "stderr": []}))
+            }
             "guest.exec.start" => {
                 state.started += 1;
                 state.exited = false;
@@ -166,7 +193,11 @@ fn driver_engine(driver: Arc<Mutex<Driver>>, screenshot: Value) -> FakeEngine {
                     .unwrap_or_default();
                 if let Ok(message) = serde_json::from_slice::<Value>(&raw) {
                     state.requests.push(message.clone());
-                    if let Some(id) = message.get("id") {
+                    let dies = message["method"] == "tools/call"
+                        && state.die_on.as_deref() == message["params"]["name"].as_str();
+                    if dies {
+                        state.exited = true;
+                    } else if let Some(id) = message.get("id") {
                         let result = if message["method"] == "tools/call"
                             && message["params"]["name"] == "get_desktop_state"
                         {
@@ -202,7 +233,7 @@ fn driver_engine(driver: Arc<Mutex<Driver>>, screenshot: Value) -> FakeEngine {
 }
 
 fn screenshot_result() -> Value {
-    json!({"content": [{"type": "image", "mimeType": "image/png", "data": "AAAA"}],
+    json!({"content": [{"type": "text", "text": "captured"}],
            "structuredContent": {"screenshot_width": 1280, "screenshot_height": 800,
                                  "screen_width": 2560, "screen_height": 1600}})
 }
@@ -221,7 +252,13 @@ async fn call(
         .await
         .unwrap();
     let mut line = String::new();
-    read.read_line(&mut line).await.unwrap();
+    tokio::time::timeout(
+        std::time::Duration::from_secs(20),
+        read.read_line(&mut line),
+    )
+    .await
+    .unwrap_or_else(|_| panic!("no answer to {name}"))
+    .unwrap();
     serde_json::from_str(&line).unwrap()
 }
 
@@ -273,9 +310,28 @@ async fn the_mcp_server_keeps_one_driver_session_per_fork_and_refuses_main() {
         json!({"computer": "t1"}),
     )
     .await;
-    let content = &screenshot["result"]["content"];
-    assert_eq!(content[0]["type"], "image", "{screenshot}");
-    assert!(content[1]["text"].as_str().unwrap().contains("1280x800"));
+    let content = screenshot["result"]["content"].as_array().unwrap();
+    let image = content.iter().find(|part| part["type"] == "image").unwrap();
+    assert_eq!(
+        image["data"], "UE5HLWJ5dGVz",
+        "the file's bytes, base64: {screenshot}"
+    );
+    assert!(content.last().unwrap()["text"]
+        .as_str()
+        .unwrap()
+        .contains("1280x800"));
+    // The picture travelled through a temporary file, which was removed again.
+    let calls = engine.calls("guest.exec");
+    assert_eq!(calls.last().unwrap()["argv"][0], "rm");
+    let asked = driver.lock().unwrap().requests.clone();
+    let args = &asked
+        .iter()
+        .find(|r| r["params"]["name"] == "get_desktop_state")
+        .unwrap()["params"]["arguments"];
+    assert!(args["screenshot_out_file"]
+        .as_str()
+        .unwrap()
+        .starts_with("/tmp/silo-cu.shot-"));
 
     let clicked = call(
         &mut write,
@@ -314,7 +370,16 @@ async fn the_mcp_server_keeps_one_driver_session_per_fork_and_refuses_main() {
     assert!(refused["result"]["content"][0]["text"]
         .as_str()
         .unwrap()
-        .contains("not main"));
+        .contains("not a fork"));
+    let archived = call(
+        &mut write,
+        &mut read,
+        8,
+        "computer_use_screenshot",
+        json!({"computer": "main-before-1"}),
+    )
+    .await;
+    assert_eq!(archived["result"]["isError"], true, "{archived}");
     assert_eq!(driver.lock().unwrap().started, 1);
 
     let auto = call(
@@ -434,4 +499,45 @@ fn every_call_matches_the_pinned_driver_contract() {
             );
         }
     }
+}
+
+#[tokio::test]
+async fn an_action_is_not_repeated_on_a_new_driver_after_the_driver_died_handling_it() {
+    let driver = Arc::new(Mutex::new(Driver::default()));
+    driver.lock().unwrap().die_on = Some("click".into());
+    let engine = driver_engine(driver.clone(), screenshot_result());
+    let (mut write, mut read) = connect_mcp(&engine).await;
+    let clicked = call(
+        &mut write,
+        &mut read,
+        3,
+        "computer_use_click",
+        json!({"computer": "t1", "x": 1, "y": 2}),
+    )
+    .await;
+    assert_eq!(clicked["result"]["isError"], true, "{clicked}");
+    assert!(clicked["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap()
+        .contains("may or may not"));
+    let clicks = driver
+        .lock()
+        .unwrap()
+        .requests
+        .iter()
+        .filter(|r| r["params"]["name"] == "click")
+        .count();
+    assert_eq!(clicks, 1, "the click was not replayed");
+    assert_eq!(driver.lock().unwrap().started, 1);
+    // The session was closed, so the next request starts a new driver.
+    let typed = call(
+        &mut write,
+        &mut read,
+        4,
+        "computer_use_type",
+        json!({"computer": "t1", "text": "a"}),
+    )
+    .await;
+    assert!(typed["result"]["isError"] != true, "{typed}");
+    assert_eq!(driver.lock().unwrap().started, 2);
 }
