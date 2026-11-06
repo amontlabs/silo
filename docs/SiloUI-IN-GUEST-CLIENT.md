@@ -72,10 +72,10 @@ silo guest-client install main --agent openclaw --binary ~/.silo/guest/silo
 
 `silo guest-client status main` and `silo guest-client revoke main` read and remove the token.
 
-The guest binary is the `silo` crate built for the guest's architecture, for example
-`cargo build -p silo-cli --release --target aarch64-unknown-linux-musl` from `app/SiloUI` with the
-musl target and a linker installed. It is not built by Silo's release scripts yet; give `--binary`
-any build you made. Without `--binary` the computer must already have a `silo`.
+The guest binary is the `silo` crate built for the guest's architecture as a static musl binary.
+On an Apple silicon Mac, `app/SiloUI/scripts/build-guest-silo.sh` builds it with Zig as the C
+compiler and linker (needs `rustup target add aarch64-unknown-linux-musl` and `zig`) and prints its
+path. It is not built by Silo's release scripts yet; give `--binary` any build you made. Without `--binary` the computer must already have a `silo`.
 
 ## What the client runs
 
