@@ -31,6 +31,88 @@ pub const MAX_WAITING: usize = 64;
 /// How long an unread response stays.
 pub const RESPONSE_TTL: Duration = Duration::from_secs(600);
 const SWEEP_LIMIT: usize = 4096;
+/// The most directory entries examined in one look at `req/` or `resp/`; more than this is
+/// backpressure, not something to read on.
+pub const SCAN_LIMIT: usize = 256;
+/// A request being written (`<id>.json.tmp`) older than this is abandoned and removed.
+pub const TMP_AGE: Duration = Duration::from_secs(10);
+
+/// The runtime's stat virtualization: the guest sees the owner, group and type this 20-byte
+/// attribute names instead of the host file's (`user.msb.override_stat`, version 1, in
+/// MicroSandbox's `passthroughfs/stat_override.rs`).
+const OVERRIDE_KEY: &std::ffi::CStr = c"user.msb.override_stat";
+const S_IFREG: u32 = 0o100_000;
+const S_IFDIR: u32 = 0o040_000;
+
+fn override_bytes(uid: u32, gid: u32, mode: u32) -> [u8; 20] {
+    let mut bytes = [0u8; 20];
+    bytes[0] = 1;
+    bytes[4..8].copy_from_slice(&uid.to_ne_bytes());
+    bytes[8..12].copy_from_slice(&gid.to_ne_bytes());
+    bytes[12..16].copy_from_slice(&mode.to_ne_bytes());
+    bytes
+}
+
+/// The owner a guest user's file carries in its override, when it has one.
+fn read_owner(fd: &OwnedFd) -> Option<(u32, u32)> {
+    use rustix::fd::AsRawFd;
+    let mut buf = [0u8; 20];
+    // SAFETY: the buffer is 20 bytes and the descriptor is open.
+    #[cfg(target_os = "macos")]
+    let read = unsafe {
+        libc::fgetxattr(
+            fd.as_raw_fd(),
+            OVERRIDE_KEY.as_ptr(),
+            buf.as_mut_ptr().cast(),
+            20,
+            0,
+            0,
+        )
+    };
+    #[cfg(not(target_os = "macos"))]
+    let read = unsafe {
+        libc::fgetxattr(
+            fd.as_raw_fd(),
+            OVERRIDE_KEY.as_ptr(),
+            buf.as_mut_ptr().cast(),
+            20,
+        )
+    };
+    if read != 20 || buf[0] != 1 {
+        return None;
+    }
+    let word = |at: usize| u32::from_ne_bytes([buf[at], buf[at + 1], buf[at + 2], buf[at + 3]]);
+    Some((word(4), word(8)))
+}
+
+/// Makes the guest see `fd` as owned by `uid:gid` with `mode`. Best effort: a host file system
+/// without extended attributes keeps the runtime's default owner.
+fn write_override(fd: &OwnedFd, uid: u32, gid: u32, mode: u32) {
+    use rustix::fd::AsRawFd;
+    let bytes = override_bytes(uid, gid, mode);
+    // SAFETY: the value is 20 bytes and the descriptor is open.
+    #[cfg(target_os = "macos")]
+    unsafe {
+        libc::fsetxattr(
+            fd.as_raw_fd(),
+            OVERRIDE_KEY.as_ptr(),
+            bytes.as_ptr().cast(),
+            20,
+            0,
+            0,
+        );
+    }
+    #[cfg(not(target_os = "macos"))]
+    unsafe {
+        libc::fsetxattr(
+            fd.as_raw_fd(),
+            OVERRIDE_KEY.as_ptr(),
+            bytes.as_ptr().cast(),
+            20,
+            0,
+        );
+    }
+}
 
 /// The host path of a computer's bridge folder.
 pub fn spool_dir(runtime_home: &Path, computer_name: &str) -> PathBuf {
@@ -49,6 +131,9 @@ pub struct Spool {
 pub struct Taken {
     pub id: String,
     pub frame: Result<GuestRequestFrame, String>,
+    /// The guest user that wrote the request, when the share says so: the answer is made
+    /// readable to that user.
+    pub owner: Option<(u32, u32)>,
 }
 
 pub fn valid_id(id: &str) -> bool {
@@ -78,6 +163,8 @@ fn sub(parent: &OwnedFd, name: &str, create: Option<u16>) -> Result<OwnedFd, Str
         .map_err(|_| format!("{name} in the bridge folder is not a real folder."))?;
     if let Some(mode) = create {
         fchmod(&fd, Mode::from_raw_mode(mode)).map_err(io)?;
+        // The guest sees these folders as root's, so its sticky bit and modes mean what they say.
+        write_override(&fd, 0, 0, S_IFDIR | u32::from(mode));
     }
     Ok(fd)
 }
@@ -144,10 +231,18 @@ impl Spool {
         let Ok(dir) = Dir::read_from(resp) else {
             return MAX_WAITING;
         };
-        dir.flatten()
-            .filter(|entry| entry.file_name().to_bytes().ends_with(b".json"))
-            .take(MAX_WAITING + 1)
-            .count()
+        // Looks at a bounded number of entries; running out of them counts as full.
+        let (mut seen, mut waiting) = (0usize, 0usize);
+        for entry in dir.flatten() {
+            seen += 1;
+            if seen > SCAN_LIMIT {
+                return MAX_WAITING;
+            }
+            if entry.file_name().to_bytes().ends_with(b".json") {
+                waiting += 1;
+            }
+        }
+        waiting
     }
 
     /// Takes request files, removing each one first. Looks at no more than [`MAX_PER_PASS`]
@@ -162,36 +257,48 @@ impl Spool {
         };
         let full = Self::count(&dirs.resp) >= MAX_WAITING;
         let mut taken = Vec::new();
-        for entry in listing.flatten().take(MAX_PER_PASS + 2) {
+        let mut examined = 0usize;
+        for entry in listing.flatten() {
             let bytes = entry.file_name().to_bytes();
             if bytes == b"." || bytes == b".." {
                 continue;
+            }
+            // Every entry counts against the budget; what is left waits for the next pass.
+            examined += 1;
+            if examined > SCAN_LIMIT || taken.len() >= MAX_PER_PASS {
+                break;
             }
             let name = String::from_utf8_lossy(bytes).into_owned();
             let id = Self::name_id(&name);
             let (Some(id), false) = (id, full) else {
                 // Not a request, or no room for its answer: removed without a reply. A
-                // `.tmp` being written is left to finish.
-                if !name.ends_with(".json.tmp") {
+                // `.tmp` being written is left to finish unless it was abandoned.
+                let writing = name.ends_with(".json.tmp") && !tmp_abandoned(&dirs.req, &name);
+                if !writing {
                     let _ = unlinkat(&dirs.req, name.as_str(), AtFlags::empty());
                 }
                 continue;
             };
-            let frame = read_frame(&dirs.req, &name).and_then(|frame| {
-                if frame.id == id {
-                    Ok(frame)
-                } else {
-                    Err("The request id does not match its file name.".into())
-                }
-            });
+            let (frame, owner) = match read_frame(&dirs.req, &name) {
+                Ok((frame, owner)) if frame.id == id => (Ok(frame), owner),
+                Ok((_, owner)) => (
+                    Err("The request id does not match its file name.".to_owned()),
+                    owner,
+                ),
+                Err(error) => (Err(error), None),
+            };
             let _ = unlinkat(&dirs.req, name.as_str(), AtFlags::empty());
-            taken.push(Taken { id, frame });
+            taken.push(Taken { id, frame, owner });
         }
         taken
     }
 
     /// Writes the answer atomically, readable by the owner only.
-    pub fn respond(&self, frame: &GuestResponseFrame) -> Result<(), String> {
+    pub fn respond(
+        &self,
+        frame: &GuestResponseFrame,
+        owner: Option<(u32, u32)>,
+    ) -> Result<(), String> {
         if !valid_id(&frame.id) {
             return Err("Not a request id.".into());
         }
@@ -219,6 +326,10 @@ impl Spool {
             Mode::from_raw_mode(0o600),
         )
         .map_err(io)?;
+        if let Some((uid, gid)) = owner {
+            // Mode 0600 for the user that asked, so no other guest user reads the answer.
+            write_override(&fd, uid, gid, S_IFREG | 0o600);
+        }
         std::io::Write::write_all(&mut File::from(fd), &bytes)
             .map_err(|error| format!("Cannot write the answer: {error}"))?;
         renameat(&dirs.resp, temporary.as_str(), &dirs.resp, target.as_str()).map_err(io)
@@ -256,7 +367,20 @@ impl Spool {
     }
 }
 
-fn read_frame(req: &OwnedFd, name: &str) -> Result<GuestRequestFrame, String> {
+/// Whether a half-written request has sat longer than [`TMP_AGE`].
+fn tmp_abandoned(req: &OwnedFd, name: &str) -> bool {
+    statat(req, name, AtFlags::SYMLINK_NOFOLLOW).is_ok_and(|stat| {
+        let modified =
+            SystemTime::UNIX_EPOCH + Duration::from_secs(u64::try_from(stat.st_mtime).unwrap_or(0));
+        SystemTime::now()
+            .duration_since(modified)
+            .is_ok_and(|age| age > TMP_AGE)
+    })
+}
+
+type Owner = Option<(u32, u32)>;
+
+fn read_frame(req: &OwnedFd, name: &str) -> Result<(GuestRequestFrame, Owner), String> {
     let fd = openat(
         req,
         name,
@@ -271,6 +395,7 @@ fn read_frame(req: &OwnedFd, name: &str) -> Result<GuestRequestFrame, String> {
     if usize::try_from(stat.st_size).unwrap_or(usize::MAX) > MAX_FRAME_BYTES {
         return Err("The request is larger than the bridge allows.".into());
     }
+    let owner = read_owner(&fd);
     let mut bytes = Vec::new();
     File::from(fd)
         .take(MAX_FRAME_BYTES as u64 + 1)
@@ -284,7 +409,7 @@ fn read_frame(req: &OwnedFd, name: &str) -> Result<GuestRequestFrame, String> {
     if frame.v != 1 {
         return Err("Unsupported bridge version.".into());
     }
-    Ok(frame)
+    Ok((frame, owner))
 }
 
 #[cfg(test)]
@@ -339,7 +464,7 @@ mod tests {
         assert_eq!(taken.len(), 1);
         assert_eq!(taken[0].frame.as_ref().unwrap().method, "computers.list");
         assert!(spool.take().is_empty());
-        spool.respond(&reply(ID)).unwrap();
+        spool.respond(&reply(ID), None).unwrap();
         let answer = spool.dir.join("resp").join(format!("{ID}.json"));
         assert_eq!(
             fs::metadata(answer).unwrap().permissions().mode() & 0o777,
@@ -372,7 +497,7 @@ mod tests {
         let (_dir, spool) = spool();
         let mut huge = reply(ID);
         huge.result = Some(serde_json::json!("x".repeat(MAX_FRAME_BYTES)));
-        spool.respond(&huge).unwrap();
+        spool.respond(&huge, None).unwrap();
         let written =
             fs::read_to_string(spool.dir.join("resp").join(format!("{ID}.json"))).unwrap();
         assert!(written.contains("too_large"));
@@ -396,7 +521,7 @@ mod tests {
                 std::os::unix::fs::symlink(outside.join(linked), &path).unwrap();
             }
             assert!(spool.take().is_empty(), "{linked}");
-            assert!(spool.respond(&reply(ID)).is_err(), "{linked}");
+            assert!(spool.respond(&reply(ID), None).is_err(), "{linked}");
             assert!(spool.ensure().is_err(), "{linked}");
             spool.sweep(SystemTime::now() + RESPONSE_TTL * 2);
             assert!(
@@ -428,5 +553,54 @@ mod tests {
         fs::write(spool.dir.join("resp").join("junk"), "x").unwrap();
         spool.sweep(SystemTime::now() + RESPONSE_TTL * 2);
         assert_eq!(fs::read_dir(spool.dir.join("resp")).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn a_fresh_tmp_is_left_alone_an_old_one_goes_and_a_flood_of_entries_is_bounded() {
+        let (_dir, spool) = spool();
+        let req = spool.dir.join("req");
+        let fresh = req.join(format!("{ID}.json.tmp"));
+        fs::write(&fresh, "{").unwrap();
+        assert!(spool.take().is_empty());
+        assert!(fresh.exists());
+        let old = SystemTime::now() - TMP_AGE * 3;
+        File::options()
+            .write(true)
+            .open(&fresh)
+            .unwrap()
+            .set_modified(old)
+            .unwrap();
+        assert!(spool.take().is_empty());
+        assert!(!fresh.exists());
+        for number in 0..SCAN_LIMIT + 50 {
+            fs::write(req.join(format!("junk{number}")), "x").unwrap();
+        }
+        spool.take();
+        let left = fs::read_dir(&req).unwrap().count();
+        assert!(left >= 50 && left < SCAN_LIMIT + 50, "{left}");
+        // More entries in resp/ than a pass may look at is a full folder.
+        for number in 0..SCAN_LIMIT + 1 {
+            fs::write(spool.dir.join("resp").join(format!("x{number}")), "").unwrap();
+        }
+        fs::write(req.join(format!("{ID}.json")), request(ID)).unwrap();
+        assert!(spool.take().is_empty());
+    }
+
+    #[test]
+    fn the_override_names_the_owner_the_guest_sees() {
+        let bytes = override_bytes(1000, 1001, S_IFREG | 0o600);
+        assert_eq!(bytes[0], 1);
+        assert_eq!(u32::from_ne_bytes(bytes[4..8].try_into().unwrap()), 1000);
+        assert_eq!(u32::from_ne_bytes(bytes[8..12].try_into().unwrap()), 1001);
+        // Round trip through a real file when the host file system keeps the attribute.
+        let (dir, spool) = spool();
+        let path = dir.path().join("probe");
+        fs::write(&path, "x").unwrap();
+        let fd = openat(CWD, &path, OFlags::RDONLY, Mode::empty()).unwrap();
+        write_override(&fd, 1000, 1001, S_IFREG | 0o600);
+        if let Some(owner) = read_owner(&fd) {
+            assert_eq!(owner, (1000, 1001));
+        }
+        drop(spool);
     }
 }
