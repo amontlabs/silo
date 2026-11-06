@@ -1265,6 +1265,8 @@ async fn begin_delete(
     params: ComputerDeleteParams,
 ) -> Result<HandlerOutput, DispatchError> {
     require_local_device(context, params.device_id.as_deref())?;
+    // A computer that is being deleted keeps no token.
+    super::guest_client::revoke_for(context, &[params.computer_id.as_str()]);
     let host = SilodRuntimeHost::new(context);
     match resolve(&host, &params.computer_id)? {
         Resolved::Macos => {

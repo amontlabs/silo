@@ -8,6 +8,9 @@ use crate::{
     methods::access::tests::{request_context, COMPUTER},
 };
 
+/// The tests share one token file.
+static TOKENS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 pub(super) fn snapshot() -> crate::guest_bridge::Snapshot {
     crate::guest_bridge::Snapshot::from_values(
         &json!({"linux": {"computers": [{"configuration": {"id": COMPUTER}}]}}),
@@ -23,11 +26,14 @@ async fn call(method: MethodName, params: Value) -> Result<Value, DispatchError>
 }
 
 fn policy() -> Value {
-    json!({"fold": "ask", "forkSecrets": [], "agent": "openclaw"})
+    json!({"forkSecrets": ["github"], "agent": "openclaw"})
 }
 
 #[tokio::test]
 async fn enable_returns_the_token_once_and_the_engine_keeps_only_its_hash() {
+    let _held = TOKENS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let enabled = call(
         MethodName::GuestClientEnable,
         json!({"computerId": COMPUTER, "policy": policy()}),
@@ -46,7 +52,7 @@ async fn enable_returns_the_token_once_and_the_engine_keeps_only_its_hash() {
     .await
     .unwrap();
     assert_eq!(status["enabled"], true);
-    assert_eq!(status["policy"]["fold"], "ask");
+    assert_eq!(status["policy"]["forkSecrets"], json!(["github"]));
     assert!(!status.to_string().contains(&token));
 
     let app_data = request_context().silod_context().paths().app_data.clone();
@@ -71,7 +77,7 @@ async fn enable_returns_the_token_once_and_the_engine_keeps_only_its_hash() {
 }
 
 #[tokio::test]
-async fn enable_refuses_an_unknown_computer_and_an_unknown_fold_mode() {
+async fn enable_refuses_an_unknown_computer() {
     let unknown = call(
         MethodName::GuestClientEnable,
         json!({"computerId": "no-such-computer", "policy": policy()}),
@@ -79,11 +85,25 @@ async fn enable_refuses_an_unknown_computer_and_an_unknown_fold_mode() {
     .await
     .unwrap_err();
     assert!(unknown.message.contains("Linux computers only"));
-    let bad = call(
+}
+
+#[tokio::test]
+async fn a_delete_promote_or_undo_revokes_through_the_same_helper() {
+    let _held = TOKENS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    call(
         MethodName::GuestClientEnable,
-        json!({"computerId": COMPUTER, "policy": {"fold": "always"}}),
+        json!({"computerId": COMPUTER, "policy": policy()}),
     )
     .await
-    .unwrap_err();
-    assert!(bad.message.contains("ask or auto-code"));
+    .unwrap();
+    super::revoke_for(&request_context(), &[COMPUTER]);
+    let status = call(
+        MethodName::GuestClientStatus,
+        json!({"computerId": COMPUTER}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(status["enabled"], false);
 }

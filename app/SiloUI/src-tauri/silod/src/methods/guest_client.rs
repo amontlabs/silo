@@ -76,11 +76,6 @@ async fn snapshot_for(
 
 async fn enable(params: &Value, context: &HandlerContext) -> Result<HandlerOutput, DispatchError> {
     let params: GuestClientEnableParams = context.decode_params(params)?;
-    if !matches!(params.policy.fold.as_str(), "ask" | "auto-code") {
-        return Err(DispatchError::internal(
-            "Invalid params: policy.fold is ask or auto-code.",
-        ));
-    }
     let snapshot = snapshot_for(context).await?;
     let name = snapshot
         .names

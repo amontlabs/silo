@@ -48,6 +48,7 @@ pub struct Snapshot {
     pub names: HashMap<String, String>,
     pub linux: HashSet<String>,
     pub parents: HashMap<String, Option<String>>,
+    pub states: HashMap<String, String>,
 }
 
 impl Snapshot {
@@ -83,8 +84,19 @@ impl Snapshot {
                 .and_then(Value::as_str)
                 .map(str::to_owned);
             snapshot.parents.insert(id.to_owned(), parent);
+            if let Some(state) = node.get("state").and_then(Value::as_str) {
+                snapshot.states.insert(id.to_owned(), state.to_owned());
+            }
         }
         snapshot
+    }
+
+    /// The forks of `root` whose names are in `asked`.
+    pub fn created_by(&self, root: &str, asked: &[String]) -> HashSet<String> {
+        self.descendants_of(root)
+            .into_iter()
+            .filter(|id| self.names.get(id).is_some_and(|name| asked.contains(name)))
+            .collect()
     }
 
     pub fn descendants_of(&self, root: &str) -> HashSet<String> {
@@ -132,11 +144,27 @@ struct World<'a> {
     snapshot: &'a Snapshot,
     requests: &'a dyn Fn(&str) -> Option<String>,
     jobs: &'a Jobs,
+    /// The names the caller's token asked for.
+    asked: Vec<String>,
 }
 
 impl Topology for World<'_> {
-    fn descendants(&self, computer: &str) -> HashSet<String> {
-        self.snapshot.descendants_of(computer)
+    fn created(&self, computer: &str) -> HashSet<String> {
+        self.snapshot.created_by(computer, &self.asked)
+    }
+    fn running(&self, computer: &str) -> usize {
+        self.created(computer)
+            .iter()
+            .filter(|id| {
+                self.snapshot
+                    .states
+                    .get(*id)
+                    .is_some_and(|state| state == "running")
+            })
+            .count()
+    }
+    fn forks_asked(&self, _computer: &str) -> usize {
+        self.asked.len()
     }
     fn request_fork(&self, request_id: &str) -> Option<String> {
         (self.requests)(request_id)
@@ -171,20 +199,24 @@ pub async fn handle_frame(
 ) -> GuestResponseFrame {
     let id = frame.id.clone();
     let Some(record) = store.verify(&frame.token, computer) else {
-        eprintln!(
-            "silod: guest client of {computer}: refused {} (token not valid)",
-            frame.method
-        );
+        eprintln!("silod: guest client of {computer}: refused a call (token not valid)");
         return failure(
             &id,
             "permission_denied",
             "This token is not valid for this computer. Ask the person who runs Silo to install it again.",
         );
     };
+    // Only a method of the allow-list is ever written to the log; the guest chose the rest.
+    let method = guest_client::ALLOWED
+        .iter()
+        .find(|allowed| **allowed == frame.method)
+        .copied()
+        .unwrap_or("(a method that is not offered)");
     let world = World {
         snapshot,
         requests,
         jobs,
+        asked: record.fork_names.clone(),
     };
     let authorized = match guest_client::authorize(
         computer,
@@ -195,14 +227,17 @@ pub async fn handle_frame(
     ) {
         Ok(authorized) => authorized,
         Err(refusal) => {
-            eprintln!(
-                "silod: guest client of {computer}: refused {}",
-                frame.method
-            );
+            eprintln!("silod: guest client of {computer}: refused {method}");
             return failure(&id, "permission_denied", refusal.0);
         }
     };
-    eprintln!("silod: guest client of {computer}: {}", frame.method);
+    if frame.method == "checkpoints.fork" {
+        let name = authorized.params["newName"].as_str().unwrap_or_default();
+        if let Err(message) = store.note_fork(computer, name) {
+            return failure(&id, "permission_denied", message);
+        }
+    }
+    eprintln!("silod: guest client of {computer}: {method}");
     match runner.run(&frame.method, authorized.params).await {
         Ok(mut result) => {
             if authorized.starts_job {
@@ -321,42 +356,61 @@ fn serve(context: &Arc<SilodContext>, handle: &tokio::runtime::Handle) {
         else {
             continue;
         };
-        if refreshed.is_none_or(|at| at.elapsed() > REFRESH) {
+        // The engine is asked about computers only to find a folder's name (at most every
+        // few seconds) or when some folder has a request, so an idle bridge asks nothing.
+        let nameless = records
+            .iter()
+            .any(|record| !snapshot.names.contains_key(&record.computer_id));
+        if nameless && refreshed.is_none_or(|at| at.elapsed() > REFRESH) {
             if let Ok(fresh) = handle.block_on(runner.snapshot()) {
                 snapshot = fresh;
             }
             refreshed = Some(Instant::now());
         }
-        for record in &records {
-            let Some(name) = snapshot.names.get(&record.computer_id) else {
-                continue;
-            };
-            if !snapshot.linux.contains(&record.computer_id) {
-                continue;
+        let spools: Vec<(&str, Spool)> = records
+            .iter()
+            .filter(|record| snapshot.linux.contains(&record.computer_id))
+            .filter_map(|record| {
+                let name = snapshot.names.get(&record.computer_id)?;
+                let spool = Spool::new(guest_client::spool_dir(&home, name));
+                Some((record.computer_id.as_str(), spool))
+            })
+            .collect();
+        let busy: Vec<_> = spools
+            .iter()
+            .filter(|(_, spool)| spool.has_work())
+            .collect();
+        if !busy.is_empty() {
+            // A fresh look before anything is refused, so a fork made a moment ago is known.
+            if let Ok(fresh) = handle.block_on(runner.snapshot()) {
+                snapshot = fresh;
             }
-            let spool = Spool::new(guest_client::spool_dir(&home, name));
-            for taken in spool.take() {
-                let reply = match taken.frame {
-                    Ok(frame) => handle.block_on(handle_frame(
-                        &runner,
-                        &store,
-                        &jobs,
-                        &snapshot,
-                        &requests,
-                        &record.computer_id,
-                        frame,
-                    )),
-                    Err(message) => failure(&taken.id, "invalid", message),
-                };
-                if let Err(error) = spool.respond(&reply) {
-                    eprintln!("silod: guest client of {}: {error}", record.computer_id);
+            refreshed = Some(Instant::now());
+            // One slow call does not hold up the other computers.
+            std::thread::scope(|scope| {
+                for (computer, spool) in &busy {
+                    let (runner, store, jobs, snapshot, requests) =
+                        (&runner, &store, &jobs, &snapshot, &requests);
+                    scope.spawn(move || {
+                        for taken in spool.take() {
+                            let reply = match taken.frame {
+                                Ok(frame) => handle.block_on(handle_frame(
+                                    runner, store, jobs, snapshot, requests, computer, frame,
+                                )),
+                                Err(message) => failure(&taken.id, "invalid", message),
+                            };
+                            if let Err(error) = spool.respond(&reply) {
+                                eprintln!("silod: guest client of {computer}: {error}");
+                            }
+                        }
+                    });
                 }
-            }
-            if swept.elapsed() > Duration::from_secs(60) {
-                spool.sweep(SystemTime::now());
-            }
+            });
         }
         if swept.elapsed() > Duration::from_secs(60) {
+            for (_, spool) in &spools {
+                spool.sweep(SystemTime::now());
+            }
             swept = Instant::now();
         }
     }

@@ -66,7 +66,6 @@ fn setup(fork_secrets: &[&str]) -> Setup {
         .mint(
             "main",
             GuestClientPolicy {
-                fold: "ask".into(),
                 fork_secrets: fork_secrets.iter().map(|name| (*name).to_owned()).collect(),
                 agent: None,
             },
@@ -238,4 +237,25 @@ async fn secrets_are_refused_unless_the_settings_name_them() {
         .await
         .ok
     );
+}
+
+#[tokio::test]
+async fn only_forks_the_token_asked_for_can_be_started() {
+    let setup = setup(&[]);
+    let (fake, jobs) = (Fake::default(), Jobs::default());
+    let start = |id: &str| frame(&setup.token, "computers.start", json!({"computerId": id}));
+    // fork-1 and grand exist, but the person made them: the token has not asked for them.
+    assert!(!ask(&setup, &fake, &jobs, "main", start("fork-1")).await.ok);
+    let fork = frame(
+        &setup.token,
+        "checkpoints.fork",
+        json!({"computerId": "main", "newName": "main-a1"}),
+    );
+    assert!(ask(&setup, &fake, &jobs, "main", fork).await.ok);
+    assert_eq!(
+        setup.store.status("main").unwrap().unwrap().fork_names,
+        ["main-a1"]
+    );
+    assert!(ask(&setup, &fake, &jobs, "main", start("fork-1")).await.ok);
+    assert!(!ask(&setup, &fake, &jobs, "main", start("grand")).await.ok);
 }
