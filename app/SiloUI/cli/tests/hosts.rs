@@ -83,8 +83,29 @@ impl EngineDirectory {
             vm: kvm_ok(),
             ssh,
             engine_wait: Duration::from_millis(300),
+            opener: PathBuf::from("/nonexistent/open"),
+            launchctl: PathBuf::from("/nonexistent/launchctl"),
         }
     }
+}
+
+/// A script at `path` that appends its arguments to `path.calls` and exits with `code`.
+fn recorder(path: &Path, code: i32) -> PathBuf {
+    fs::write(
+        path,
+        format!("#!/bin/sh\necho \"$@\" >> \"$0.calls\"\nexit {code}\n"),
+    )
+    .unwrap();
+    fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+    path.to_owned()
+}
+
+fn recorded(path: &Path) -> Vec<String> {
+    fs::read_to_string(path.with_extension("calls"))
+        .unwrap_or_default()
+        .lines()
+        .map(str::to_owned)
+        .collect()
 }
 
 fn kvm_ok() -> VmProbe {
@@ -138,7 +159,14 @@ fn host_engine() -> FakeEngine {
             keys.lock().unwrap().retain(|known| known != key);
             Ok(Value::Null)
         }
-        "connections.keys.list" => Ok(json!({"publicKeys": *keys.lock().unwrap()})),
+        "connections.keys.list" => {
+            let keys = keys.lock().unwrap();
+            let rows: Vec<Value> = keys
+                .iter()
+                .map(|key| json!({"publicKey": key, "fingerprint": hosts::fingerprint(key), "canonical": true, "identified": true}))
+                .collect();
+            Ok(json!({"publicKeys": *keys, "keys": rows}))
+        }
         other => Err(("internal", format!("unexpected {other}"))),
     })
 }
@@ -244,6 +272,27 @@ async fn init_checks_the_account_vm_support_and_keys_before_changing_anything() 
         "{}",
         error.message
     );
+    // A key that is not an Ed25519 key, given after a good one, still changes nothing.
+    let truncated = &KEY[..60];
+    let error = hosts::init(&setup, &[KEY.to_owned(), truncated.to_owned()])
+        .await
+        .unwrap_err();
+    assert!(
+        error.message.contains("not an Ed25519 public key"),
+        "{}",
+        error.message
+    );
+    // So does a file with one bad line among good ones.
+    let file = unpacked.home.join("ssh-keys.pub");
+    fs::write(
+        &file,
+        format!("{KEY}\nssh-ed25519 AAAAC3NzaC1lZDI1NTE5 short\n"),
+    )
+    .unwrap();
+    let error = hosts::init(&setup, &[file.to_str().unwrap().to_owned()])
+        .await
+        .unwrap_err();
+    assert!(error.message.contains("Line 2 of"), "{}", error.message);
 
     assert!(unpacked.calls().is_empty());
     assert!(fs::symlink_metadata(unpacked.home.join(".local/bin/silo-dev")).is_err());
@@ -315,11 +364,19 @@ async fn init_replaces_only_its_own_link() {
     fs::create_dir_all(&bin).unwrap();
     let link = bin.join("silo-dev");
 
-    // A link to a silo that is gone (an engine directory replaced since) is Silo's.
-    std::os::unix::fs::symlink(unpacked.home.join("old-engine/silo"), &link).unwrap();
+    // A link to a silo that is gone from an engine directory (replaced since) is Silo's.
+    std::os::unix::fs::symlink(unpacked.home.join("silo-engine-0.1.0/silo"), &link).unwrap();
     let value = hosts::init(&setup, &[]).await.unwrap();
     assert_eq!(value["cli"]["state"], "linked");
     assert_eq!(fs::read_link(&link).unwrap(), setup.cli);
+
+    // A link to a missing silo anywhere else may be the person's own: it stays.
+    fs::remove_file(&link).unwrap();
+    let elsewhere = unpacked.home.join("tools/silo");
+    std::os::unix::fs::symlink(&elsewhere, &link).unwrap();
+    let value = hosts::init(&setup, &[]).await.unwrap();
+    assert_eq!(value["cli"]["state"], "notLinked");
+    assert_eq!(fs::read_link(&link).unwrap(), elsewhere);
 
     // Anything else is the user's own and stays.
     fs::remove_file(&link).unwrap();
@@ -390,6 +447,54 @@ async fn revoke_removes_the_key_and_lists_what_is_left() {
     assert_eq!(
         engine.calls("connections.keys.revoke"),
         vec![json!({"publicKey": KEY})]
+    );
+    // Again: nothing was there, and it says so instead of claiming a revoke.
+    let value = hosts::revoke(&client, KEY).await.unwrap();
+    assert_eq!(value["revoked"], json!([]));
+    assert_eq!(value["notAuthorized"][0]["fingerprint"], FINGERPRINT);
+    let text = hosts::render_host(&value);
+    assert!(!text.contains("Revoked"), "{text}");
+    assert!(text.contains("Not authorized here"), "{text}");
+}
+
+#[tokio::test]
+async fn revoke_by_fingerprint_removes_a_line_silo_did_not_write() {
+    // An RSA key a person gave the bridge's forced command by hand.
+    let rsa = "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAAAgQC0 by-hand";
+    let print = hosts::fingerprint(rsa).unwrap();
+    let rows = Arc::new(Mutex::new(vec![
+        json!({"publicKey": rsa, "fingerprint": print, "canonical": false, "identified": false}),
+    ]));
+    let engine = {
+        let rows = rows.clone();
+        FakeEngine::start(move |method, params| match method {
+            "connections.keys.list" => Ok(json!({"publicKeys": [], "keys": *rows.lock().unwrap()})),
+            "connections.keys.revoke" => {
+                rows.lock()
+                    .unwrap()
+                    .retain(|row| row["publicKey"] != params["publicKey"]);
+                Ok(Value::Null)
+            }
+            other => Err(("internal", format!("unexpected {other}"))),
+        })
+    };
+    let client = Engine::connect(&engine.socket).await.unwrap();
+    let error = hosts::revoke(
+        &client,
+        "SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        error.message.contains("No controller key"),
+        "{}",
+        error.message
+    );
+    let value = hosts::revoke(&client, &print).await.unwrap();
+    assert_eq!(value["revoked"][0]["fingerprint"], print);
+    assert_eq!(
+        engine.calls("connections.keys.revoke"),
+        vec![json!({"publicKey": rsa})]
     );
 }
 
@@ -595,21 +700,34 @@ async fn list_remove_and_key() {
 }
 
 #[tokio::test]
-async fn host_and_devices_refuse_another_device() {
+async fn host_and_devices_refuse_another_device_and_another_channel() {
     let engine = controller(vec![]);
     let socket = engine.socket.to_str().unwrap();
+    let parse = |all: Vec<&str>| <silo_cli::cli::Cli as clap::Parser>::try_parse_from(all).unwrap();
     for args in [["host", "status"], ["devices", "list"]] {
-        let mut all = vec![
-            "silo",
-            "--socket",
-            socket,
-            "--allow-other-channel",
-            "--device",
-            "box",
-        ];
+        // Another channel's engine, by flag or by a socket outside this build's home.
+        let mut all = vec!["silo", "--socket", socket, "--allow-other-channel"];
         all.extend_from_slice(&args);
-        let cli = <silo_cli::cli::Cli as clap::Parser>::try_parse_from(all).unwrap();
-        let error = silo_cli::cli::run(cli, std::env::temp_dir().as_path())
+        let error = silo_cli::cli::run(parse(all), std::env::temp_dir().as_path())
+            .await
+            .unwrap_err();
+        assert!(
+            error
+                .message
+                .contains("--allow-other-channel cannot be used"),
+            "{}",
+            error.message
+        );
+        let mut all = vec!["silo", "--socket", socket];
+        all.extend_from_slice(&args);
+        let error = silo_cli::cli::run(parse(all), std::env::temp_dir().as_path())
+            .await
+            .unwrap_err();
+        assert!(error.message.contains("is not under"), "{}", error.message);
+
+        let mut all = vec!["silo", "--device", "box"];
+        all.extend_from_slice(&args);
+        let error = silo_cli::cli::run_connections(parse(all), engine.socket.clone())
             .await
             .unwrap_err();
         assert!(
@@ -619,21 +737,15 @@ async fn host_and_devices_refuse_another_device() {
         );
     }
     for args in [["devices", "list"], ["devices", "remove"]] {
-        let mut all = vec![
-            "silo",
-            "--socket",
-            socket,
-            "--allow-other-channel",
-            "--json",
-        ];
+        let mut all = vec!["silo", "--json"];
         all.extend_from_slice(&args);
         if args[1] == "remove" {
             all.push("box");
         }
-        let cli = <silo_cli::cli::Cli as clap::Parser>::try_parse_from(all).unwrap();
+        let cli = parse(all);
         assert!(cli.device.is_none());
         assert_eq!(
-            silo_cli::cli::run(cli, std::env::temp_dir().as_path())
+            silo_cli::cli::run_connections(cli, engine.socket.clone())
                 .await
                 .unwrap(),
             0
@@ -643,6 +755,88 @@ async fn host_and_devices_refuse_another_device() {
         engine.calls("connections.devices.remove"),
         vec![json!({"deviceId": "dev-1"})]
     );
+}
+
+#[tokio::test]
+async fn a_mac_without_an_engine_opens_the_app_once_and_says_why_it_did_not_start() {
+    let engine = host_engine();
+    let unpacked = EngineDirectory::new(REGISTERED, "", 0);
+    let (_ssh, ssh) = listening();
+    let root = unpacked.home.parent().unwrap().to_owned();
+    let app = root.join("Applications/Silo Dev.app");
+    let nested =
+        app.join("Contents/Resources/SiloEngineDistribution/Silo Engine.app/Contents/MacOS");
+    fs::create_dir_all(&nested).unwrap();
+    fs::create_dir_all(app.join("Contents/MacOS")).unwrap();
+    let mut setup = unpacked.setup(&unpacked.home.join("engine.sock"), ssh);
+    setup.platform = Platform::Mac;
+    setup.vm = VmProbe::Mac {
+        apple_silicon: true,
+    };
+    setup.opener = recorder(&root.join("open"), 0);
+    setup.launchctl = recorder(&root.join("launchctl"), 113);
+    // The app's own silo, and the engine bundle's: both find the app around them.
+    for cli in [app.join("Contents/MacOS/silo"), nested.join("silo")] {
+        setup.cli = cli;
+        assert_eq!(setup.app_bundle().as_deref(), Some(app.as_path()));
+    }
+    let error = hosts::init(&setup, &[]).await.unwrap_err();
+    assert!(error.message.contains("Login Items"), "{}", error.message);
+    assert!(error.message.contains("was opened"), "{}", error.message);
+    assert_eq!(
+        recorded(&setup.opener),
+        vec![format!("-g -j -a {}", app.display())]
+    );
+    // It never registers a login item from the engine bundle.
+    assert!(unpacked.calls().is_empty());
+
+    // An engine that answers is the app's: nothing is opened, and a missing login item is named.
+    setup.socket = engine.socket.clone();
+    let value = hosts::init(&setup, &[]).await.unwrap();
+    assert_eq!(recorded(&setup.opener).len(), 1);
+    assert_eq!(value["service"]["status"], "running");
+    assert_eq!(value["service"]["loginItem"], "notLoaded");
+    assert!(
+        value["advice"].to_string().contains("no login item"),
+        "{}",
+        value["advice"]
+    );
+    assert_eq!(
+        recorded(&setup.launchctl).last().unwrap(),
+        &format!(
+            "print gui/1000/{}.engine",
+            Channel::Development.identifier()
+        )
+    );
+    let status = hosts::status(&setup).await.unwrap();
+    assert!(status["advice"].to_string().contains("no login item"));
+
+    // Outside an app there is nothing to open.
+    setup.socket = unpacked.home.join("engine.sock");
+    setup.cli = unpacked.directory.join("silo");
+    let error = hosts::init(&setup, &[]).await.unwrap_err();
+    assert!(
+        error.message.contains("not inside a Silo app"),
+        "{}",
+        error.message
+    );
+}
+
+#[tokio::test]
+async fn status_advises_registering_a_service_that_is_not_and_strict_modes() {
+    let engine = host_engine();
+    let unpacked = EngineDirectory::new("notRegistered\nunit: /h/unit\n", "", 0);
+    let (_ssh, ssh) = listening();
+    let setup = unpacked.setup(&engine.socket, ssh);
+    fs::set_permissions(&unpacked.home, fs::Permissions::from_mode(0o777)).unwrap();
+    let value = hosts::status(&setup).await.unwrap();
+    fs::set_permissions(&unpacked.home, fs::Permissions::from_mode(0o755)).unwrap();
+    let advice = value["advice"].to_string();
+    assert!(advice.contains("is notRegistered"), "{advice}");
+    assert!(advice.contains("Run silo host init"), "{advice}");
+    assert!(advice.contains("StrictModes"), "{advice}");
+    let value = hosts::status(&setup).await.unwrap();
+    assert!(!value["advice"].to_string().contains("StrictModes"));
 }
 
 #[tokio::test]
@@ -729,4 +923,38 @@ fn a_host_key_pin_never_trusts_what_it_does_not_name() {
         error.message
     );
     assert!(hosts::pin_host_key(&known_hosts, "ada@box", "nonsense", &terminal).is_err());
+
+    // A hashed entry (`ssh-keygen -H`, HashKnownHosts) for the name is found too.
+    let hashed = home.path().join("hashed_known_hosts");
+    fs::write(&hashed, format!("[box]:2222 {other}\n")).unwrap();
+    let status = std::process::Command::new("ssh-keygen")
+        .arg("-H")
+        .arg("-f")
+        .arg(&hashed)
+        .output()
+        .unwrap();
+    assert!(status.status.success());
+    assert!(fs::read_to_string(&hashed).unwrap().starts_with("|1|"));
+    let error = hosts::pin_host_key(&hashed, "ada@box:2222", file.to_str().unwrap(), &terminal)
+        .unwrap_err();
+    assert!(
+        error.message.contains("ssh-keygen -R '[box]:2222'"),
+        "{}",
+        error.message
+    );
+    // A key known_hosts marks revoked is never trusted.
+    let revoked = home.path().join("revoked_known_hosts");
+    fs::write(&revoked, format!("@revoked box {HOST_KEY}\n")).unwrap();
+    let error =
+        hosts::pin_host_key(&revoked, "ada@box", file.to_str().unwrap(), &terminal).unwrap_err();
+    assert!(error.message.contains("revoked"), "{}", error.message);
+
+    // An address the engine would refuse never reaches ssh-keyscan.
+    for address in ["ada@box,evil", "-oProxyCommand=x", "ada@box x"] {
+        assert!(
+            hosts::pin_host_key(&known_hosts, address, FINGERPRINT, &terminal).is_err(),
+            "{address}"
+        );
+    }
+    assert!(!terminal.ran.borrow().iter().any(|ran| ran.contains("evil")));
 }

@@ -470,13 +470,20 @@ pub async fn run(cli: Cli, working_directory: &Path) -> Result<i32, CliError> {
         let link = crate::guest_client::Link::load(&crate::guest_client::token_path())?;
         return crate::guest_client::run(cli.command, cli.json, &link).await;
     }
+    if matches!(cli.command, Command::Host(_) | Command::Devices(_)) {
+        // They change this build's own engine and its SSH access, never another channel's.
+        if cli.allow_other_channel {
+            return Err(CliError::new(
+                "silo host and silo devices work on this build's own engine, so --allow-other-channel cannot be used with them.",
+            ));
+        }
+        let socket = default_socket(cli.socket.clone(), false)?;
+        return run_connections(cli, socket).await;
+    }
     let socket = default_socket(cli.socket.clone(), cli.allow_other_channel)?;
     if matches!(cli.command, Command::Mcp) {
         crate::mcp::serve(socket, working_directory.to_owned(), cli.agent.clone()).await?;
         return Ok(0);
-    }
-    if matches!(cli.command, Command::Host(_) | Command::Devices(_)) {
-        return run_connections(cli, socket).await;
     }
     let project = Project::discover(working_directory);
     // Read before connecting so a bad file is reported without the engine.
@@ -580,7 +587,8 @@ pub async fn run(cli: Cli, working_directory: &Path) -> Result<i32, CliError> {
 }
 
 /// `silo host` and `silo devices`: this machine's own Connections, never another device's.
-async fn run_connections(cli: Cli, socket: PathBuf) -> Result<i32, CliError> {
+/// `run` gives it the build channel's own socket; tests give it theirs.
+pub async fn run_connections(cli: Cli, socket: PathBuf) -> Result<i32, CliError> {
     use crate::hosts::{self, DevicesCommand, HostCommand};
     if cli.device.is_some() {
         return Err(CliError::new(
@@ -639,9 +647,11 @@ async fn run_connections(cli: Cli, socket: PathBuf) -> Result<i32, CliError> {
                 ),
                 DevicesCommand::Remove { name } => {
                     let value = hosts::remove_device(&engine, &name).await?;
+                    // The engine forgets a device only after the owner removed every Silo key this
+                    // device installed there, or found none: it does not say which.
                     emit(json, &value, |value| {
                         format!(
-                            "Removed {}; its key was revoked there.",
+                            "Removed {}. No Silo key of this device is left there.",
                             value["removed"].as_str().unwrap_or_default()
                         )
                     });

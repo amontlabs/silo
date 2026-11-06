@@ -4,7 +4,8 @@
 //! A host is any machine with a Silo engine: a Mac (Linux and macOS computers) or a Linux server
 //! (Linux computers over KVM). `silo host init` checks that the machine can run computers,
 //! installs the engine as a service that starts on its own (a systemd user unit through
-//! `silod --service register` on Linux; on a Mac the engine's login item), links the command on
+//! `silod --service register` on Linux; on a Mac the login item the app registers, by opening
+//! the app once when no engine answers), links the command on
 //! PATH, turns Connections on, authorizes the controller keys it is given and prints the address
 //! a controller uses. Everything it changes goes through the engine's own methods and
 //! `silod --service`; it never writes `authorized_keys` or a unit file itself.
@@ -44,9 +45,11 @@ pub enum HostCommand {
     /// Show whether this machine hosts computers: the engine service, VM support,
     /// Connections, the controller keys it accepts and its address.
     Status,
-    /// Stop accepting a controller's Silo key (`ssh-ed25519 ...`, or a file of them).
+    /// Stop accepting a controller key: its fingerprint as `silo host status` lists it
+    /// (`SHA256:...`), the key (`ssh-ed25519 ...`), or a file of keys. Every line for the key
+    /// whose forced command is Silo's bridge is removed, whatever else it says.
     Revoke {
-        #[arg(value_name = "KEY|FILE")]
+        #[arg(value_name = "FINGERPRINT|KEY|FILE")]
         key: String,
     },
 }
@@ -323,6 +326,10 @@ pub struct HostSetup {
     pub ssh: SocketAddr,
     /// How long to wait for the engine's socket after starting the service.
     pub engine_wait: Duration,
+    /// `open` on a Mac, which starts the app when no engine answers.
+    pub opener: PathBuf,
+    /// `launchctl` on a Mac, which says whether launchd has the engine's login item.
+    pub launchctl: PathBuf,
 }
 
 impl HostSetup {
@@ -343,28 +350,38 @@ impl HostSetup {
             vm: VmProbe::detect(platform, Path::new("/dev/kvm")),
             ssh: SocketAddr::from(([127, 0, 0, 1], 22)),
             engine_wait: Duration::from_secs(60),
+            opener: PathBuf::from("/usr/bin/open"),
+            launchctl: PathBuf::from("/bin/launchctl"),
         })
     }
 
-    /// The `silod` that serves this `silo`: beside it in a Linux engine directory, or in the
-    /// engine bundle of the app that holds it on a Mac.
+    /// The `silod` beside this `silo` in a Linux engine directory. A Mac engine is never run
+    /// from here: the app registers it.
     pub fn silod(&self) -> Option<PathBuf> {
-        let directory = self.cli.parent()?;
-        let candidates = match self.platform {
-            Platform::Linux => vec![directory.join("silod")],
-            Platform::Mac => {
-                let contents = directory.parent()?;
-                vec![
-                    // `Silo Engine.app/Contents/MacOS/silo`
-                    directory.join("silod"),
-                    // `Silo.app/Contents/MacOS/silo`
-                    contents.join(
-                        "Resources/SiloEngineDistribution/Silo Engine.app/Contents/MacOS/silod",
-                    ),
-                ]
-            }
-        };
-        candidates.into_iter().find(|path| path.is_file())
+        match self.platform {
+            Platform::Linux => Some(self.cli.parent()?.join("silod")).filter(|path| path.is_file()),
+            Platform::Mac => None,
+        }
+    }
+
+    /// The Silo app that holds this `silo` (`Silo.app/Contents/MacOS/silo`, or the `silo` of
+    /// the engine bundle inside it): the nearest enclosing `.app` that carries an engine.
+    pub fn app_bundle(&self) -> Option<PathBuf> {
+        self.cli
+            .ancestors()
+            .skip(1)
+            .find(|path| {
+                path.extension().is_some_and(|extension| extension == "app")
+                    && path
+                        .join("Contents/Resources/SiloEngineDistribution")
+                        .is_dir()
+            })
+            .map(Path::to_owned)
+    }
+
+    /// The launchd label of the engine's login item (the plist's name without `.plist`).
+    fn engine_label(&self) -> String {
+        format!("{}.engine", self.channel.identifier())
     }
 
     fn cli_link(&self) -> PathBuf {
@@ -482,7 +499,8 @@ pub enum LinkOutcome {
 
 /// Points `~/.local/bin/<silo or silo-dev>` at this `silo`, only when nothing is there or the
 /// link there is ours: a link to a `silo` with a `silod` beside it, or to a `silo` that is gone
-/// (an engine directory that was replaced).
+/// from a directory named like an unpacked engine archive (`silo-engine...`, an engine directory
+/// that was replaced). Any other link, a dangling one included, and any file stay.
 pub fn link_cli(setup: &HostSetup) -> LinkOutcome {
     let link = setup.cli_link();
     match fs::symlink_metadata(&link) {
@@ -493,11 +511,16 @@ pub fn link_cli(setup: &HostSetup) -> LinkOutcome {
             }
             let ours = metadata.file_type().is_symlink()
                 && previous.as_deref().is_some_and(|target| {
+                    let directory = target.parent();
                     target.file_name().is_some_and(|name| name == "silo")
-                        && (!target.exists()
-                            || target
-                                .parent()
-                                .is_some_and(|dir| dir.join("silod").is_file()))
+                        && if target.exists() {
+                            directory.is_some_and(|dir| dir.join("silod").is_file())
+                        } else {
+                            directory
+                                .and_then(Path::file_name)
+                                .and_then(|name| name.to_str())
+                                .is_some_and(|name| name.starts_with("silo-engine"))
+                        }
                 });
             if !ours {
                 return LinkOutcome::Foreign(format!(
@@ -567,18 +590,29 @@ fn ssh_state(setup: &HostSetup) -> Value {
     value
 }
 
-/// The keys `--authorize` and `revoke` take: the argument itself when it is a key, else each
-/// key line of the file it names.
+/// The controller keys `--authorize` takes: the argument itself when it is a key, else each
+/// key line of the file it names. Every key is checked here, so a typo changes nothing.
 pub fn read_keys(argument: &str) -> Result<Vec<String>, CliError> {
+    read_keys_with(argument, controller_key)
+}
+
+/// `argument` as one key when `parse` takes it, else as a file of keys, each of which `parse`
+/// must take.
+fn read_keys_with(
+    argument: &str,
+    parse: fn(&str) -> Option<String>,
+) -> Result<Vec<String>, CliError> {
     let argument = argument.trim();
-    if argument.starts_with("ssh-") {
-        return Ok(vec![argument.to_owned()]);
+    if let Some(key) = parse(argument) {
+        return Ok(vec![key]);
     }
     let path = Path::new(argument);
     let metadata = fs::metadata(path).map_err(|error| {
-        CliError::new(format!(
-            "{argument} is neither a key (ssh-ed25519 ...) nor a readable file: {error}"
-        ))
+        CliError::new(if argument.starts_with("ssh-") {
+            format!("{argument} is not an Ed25519 public key (ssh-ed25519 and its base64 key, as silo devices key prints it).")
+        } else {
+            format!("{argument} is neither a key (ssh-ed25519 ...) nor a readable file: {error}")
+        })
     })?;
     if !metadata.is_file() || metadata.len() > 64 * 1024 {
         return Err(CliError::new(format!(
@@ -587,16 +621,47 @@ pub fn read_keys(argument: &str) -> Result<Vec<String>, CliError> {
     }
     let contents = fs::read_to_string(path)
         .map_err(|error| CliError::new(format!("Cannot read {argument}: {error}")))?;
-    let keys: Vec<String> = contents
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty() && !line.starts_with('#'))
-        .map(str::to_owned)
-        .collect();
+    let mut keys = Vec::new();
+    for (number, line) in contents.lines().enumerate() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        keys.push(parse(line).ok_or_else(|| {
+            CliError::new(format!(
+                "Line {} of {argument} is not an Ed25519 public key (ssh-ed25519 and its base64 key).",
+                number + 1
+            ))
+        })?);
+    }
     if keys.is_empty() {
         return Err(CliError::new(format!("{argument} holds no key.")));
     }
     Ok(keys)
+}
+
+/// `ssh-ed25519 <blob> [comment]` whose blob is an Ed25519 key in OpenSSH wire form: the
+/// length-prefixed type `ssh-ed25519` and a length-prefixed 32-byte key, nothing more.
+pub fn controller_key(text: &str) -> Option<String> {
+    use base64::{engine::general_purpose, Engine as _};
+    let mut words = text.split_whitespace();
+    if words.next()? != "ssh-ed25519" {
+        return None;
+    }
+    let bytes = general_purpose::STANDARD.decode(words.next()?).ok()?;
+    let mut expected = Vec::with_capacity(51);
+    expected.extend_from_slice(&11u32.to_be_bytes());
+    expected.extend_from_slice(b"ssh-ed25519");
+    expected.extend_from_slice(&32u32.to_be_bytes());
+    (bytes.len() == 51 && bytes.starts_with(&expected)).then(|| text.trim().to_owned())
+}
+
+/// Any `<type> <base64> [comment]` public key, as a line Silo did not write may hold.
+fn any_public_key(text: &str) -> Option<String> {
+    let mut words = text.split_whitespace();
+    let kind = words.next()?;
+    let known = kind.starts_with("ssh-") || kind.starts_with("ecdsa-") || kind.starts_with("sk-");
+    (known && fingerprint(text).is_some()).then(|| text.trim().to_owned())
 }
 
 /// The key's OpenSSH fingerprint (`SHA256:...`), which `ssh-keygen -lf` prints for it too.
@@ -619,13 +684,43 @@ fn key_rows(keys: &[String]) -> Value {
     )
 }
 
-fn controller_keys(listed: &Value) -> Vec<String> {
+/// One row per `authorized_keys` line that runs the bridge, from `connections.keys.list`.
+fn controller_rows(listed: &Value) -> Vec<Value> {
+    if let Some(keys) = listed["keys"].as_array() {
+        return keys
+            .iter()
+            .map(|key| {
+                json!({
+                    "publicKey": key["publicKey"],
+                    "fingerprint": key["fingerprint"],
+                    "canonical": key["canonical"],
+                    "identified": key["identified"],
+                })
+            })
+            .collect();
+    }
+    // An engine without `keys` listed Silo's exact lines only.
     listed["publicKeys"]
         .as_array()
         .into_iter()
         .flatten()
         .filter_map(Value::as_str)
-        .map(str::to_owned)
+        .map(|key| json!({"publicKey": key, "fingerprint": fingerprint(key), "canonical": true}))
+        .collect()
+}
+
+/// What to say about lines Silo did not write in its current form.
+fn controller_advice(rows: &[Value]) -> Vec<String> {
+    rows.iter()
+        .filter(|row| row["canonical"] == false)
+        .map(|row| {
+            let print = row["fingerprint"].as_str().unwrap_or("a key that is not base64");
+            if row["identified"] == true {
+                format!("The line for {print} runs Silo's bridge with options Silo did not write; it works, and silo host revoke {print} removes it.")
+            } else {
+                format!("The line for {print} runs Silo's bridge without the key's fingerprint (an earlier Silo or a person wrote it), so that controller cannot revoke its own key from there. It is updated when that controller connects again; silo host revoke {print} removes it.")
+            }
+        })
         .collect()
 }
 
@@ -648,13 +743,13 @@ fn engine_reachable(socket: &Path) -> bool {
 }
 
 /// Starts the engine as a service. Linux: `silod --service register` (idempotent: it rewrites
-/// the unit only when it changed and starts it). Mac: an engine that answers already runs
-/// as the login item the app registered; otherwise the engine bundle registers its own.
+/// the unit only when it changed and starts it). Mac: an engine that answers already runs as
+/// the login item the app registered; otherwise the app is opened once, in the background, so it
+/// registers and starts its own (the engine bundle inside it never registers a second one).
 fn install_service(setup: &HostSetup) -> Result<ServiceReport, CliError> {
-    let silod = setup.silod();
     match setup.platform {
         Platform::Linux => {
-            let silod = silod.ok_or_else(|| {
+            let silod = setup.silod().ok_or_else(|| {
                 CliError::new(format!(
                     "There is no silod beside {}. Run silo host init with the silo of an unpacked Silo engine archive (silo-engine-<version>-linux-<arch>.tar.gz), for example ~/.local/opt/silo-engine/silo host init.",
                     setup.cli.display()
@@ -664,13 +759,9 @@ fn install_service(setup: &HostSetup) -> Result<ServiceReport, CliError> {
         }
         Platform::Mac => {
             if engine_reachable(&setup.socket) {
-                return Ok(ServiceReport {
-                    status: "running".into(),
-                    details: Vec::new(),
-                    advice: Vec::new(),
-                });
+                return Ok(mac_running_report(setup));
             }
-            let silod = silod.ok_or_else(|| {
+            let app = setup.app_bundle().ok_or_else(|| {
                 CliError::new(format!(
                     "{} is not inside a Silo app, so there is no engine to start. Open {} once, or run the silo inside it ({}.app/Contents/MacOS/silo).",
                     setup.cli.display(),
@@ -678,21 +769,103 @@ fn install_service(setup: &HostSetup) -> Result<ServiceReport, CliError> {
                     setup.channel.product_name()
                 ))
             })?;
-            let report = silod_service(&silod, "register")?;
-            match report.status.as_str() {
-                "enabled" => Ok(report),
-                "requiresApproval" => Err(CliError::new(format!(
-                    "Allow the {} engine in System Settings > General > Login Items, then run silo host init again.",
-                    setup.channel.product_name()
-                ))),
-                other => Err(CliError::new(format!(
-                    "The {} engine could not be registered as a login item ({other}). Open {} once and run silo host init again.",
-                    setup.channel.product_name(),
-                    setup.channel.product_name()
-                ))),
+            let opened = Command::new(&setup.opener)
+                .args(["-g", "-j", "-a"])
+                .arg(&app)
+                .stdin(Stdio::null())
+                .status()
+                .map_err(|error| {
+                    CliError::new(format!("Could not open {}: {error}", app.display()))
+                })?;
+            if !opened.success() {
+                return Err(CliError::new(format!(
+                    "Could not open {} ({opened}).",
+                    app.display()
+                )));
             }
+            Ok(ServiceReport {
+                status: "opened".into(),
+                details: vec![("app".into(), app.display().to_string())],
+                advice: Vec::new(),
+            })
         }
     }
+}
+
+/// Whether launchd has the engine's login item, from `launchctl print` (read only): `Some(true)`
+/// when it has the job, `Some(false)` when it reports none, `None` when it cannot say.
+fn mac_login_item(setup: &HostSetup) -> Option<bool> {
+    let target = format!("gui/{}/{}", setup.euid, setup.engine_label());
+    let status = Command::new(&setup.launchctl)
+        .args(["print", &target])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .ok()?;
+    // launchctl exits 113 ("Could not find service") for a job it does not have.
+    match status.code() {
+        Some(0) => Some(true),
+        Some(113) => Some(false),
+        _ => None,
+    }
+}
+
+/// A Mac engine that answers, and whether it starts again after a restart. `silod --service
+/// status` is not asked: run from the engine bundle it reports that bundle's own registration,
+/// not the app's.
+fn mac_running_report(setup: &HostSetup) -> ServiceReport {
+    let login_item = mac_login_item(setup);
+    let mut advice = Vec::new();
+    if login_item == Some(false) {
+        advice.push(format!(
+            "The engine answers, but launchd has no login item for it ({}), so it does not start again after you log out or restart. Open {} once so it registers it, and allow it in System Settings > General > Login Items if asked.",
+            setup.engine_label(),
+            setup.channel.product_name()
+        ));
+    }
+    ServiceReport {
+        status: "running".into(),
+        details: vec![(
+            "loginItem".into(),
+            match login_item {
+                Some(true) => "loaded",
+                Some(false) => "notLoaded",
+                None => "unknown",
+            }
+            .into(),
+        )],
+        advice,
+    }
+}
+
+/// What `silo host status` advises about a Linux service that is not set to start on its own.
+fn linux_service_advice(report: &ServiceReport) -> Option<String> {
+    (report.status != "enabled").then(|| {
+        format!(
+            "The engine service is {}, so the engine does not start on its own. Run silo host init.",
+            report.status
+        )
+    })
+}
+
+/// sshd's `StrictModes` (on by default) ignores `~/.ssh/authorized_keys` when the home or
+/// `~/.ssh` can be changed by other accounts, and a controller's key is then refused.
+fn ssh_directory_advice(home: &Path) -> Vec<String> {
+    use std::os::unix::fs::PermissionsExt;
+    [home.to_owned(), home.join(".ssh")]
+        .into_iter()
+        .filter_map(|path| {
+            let mode = fs::metadata(&path).ok()?.permissions().mode() & 0o7777;
+            (mode & 0o022 != 0).then(|| {
+                format!(
+                    "{} can be changed by other accounts (mode {mode:o}), so sshd (StrictModes) ignores this account's authorized_keys and refuses every controller key. Run chmod go-w {}.",
+                    path.display(),
+                    path.display()
+                )
+            })
+        })
+        .collect()
 }
 
 fn service_name(channel: Channel) -> String {
@@ -732,15 +905,29 @@ pub async fn init(setup: &HostSetup, authorize: &[String]) -> Result<Value, CliE
         Platform::Mac => (cli_link_state(setup), Vec::new()),
     };
     if !wait_for_engine(&setup.socket, setup.engine_wait).await {
-        let logs = match setup.platform {
-            Platform::Linux => format!("journalctl --user -u {}", service_name(setup.channel)),
-            Platform::Mac => "Console, process silod".to_owned(),
-        };
-        return Err(CliError::new(format!(
-            "The engine service is registered but the engine does not answer at {}. See its log ({logs}).",
-            setup.socket.display()
-        )));
+        return Err(CliError::new(match setup.platform {
+            Platform::Linux => format!(
+                "The engine service is registered but the engine does not answer at {}. See its log (journalctl --user -u {}).",
+                setup.socket.display(),
+                service_name(setup.channel)
+            ),
+            Platform::Mac => format!(
+                "{} was opened, but its engine did not answer at {} within {} s. If System Settings > General > Login Items shows the {} engine as off or waiting for approval, allow it; then run silo host init again. Its log is in Console (process silod).",
+                service.details.first().map_or("Silo", |(_, app)| app.as_str()),
+                setup.socket.display(),
+                setup.engine_wait.as_secs(),
+                setup.channel.product_name()
+            ),
+        }));
     }
+    // The app's engine was not answering before; its login item is in place only now.
+    let service = if service.status == "opened" {
+        let mut report = mac_running_report(setup);
+        report.details.extend(service.details);
+        report
+    } else {
+        service
+    };
     let engine = Engine::connect(&setup.socket).await?;
     let status = engine
         .call(requests::connections_set_enabled(
@@ -774,7 +961,9 @@ pub async fn init(setup: &HostSetup, authorize: &[String]) -> Result<Value, CliE
         advice.push(text.to_owned());
     }
     advice.extend(service.advice.iter().cloned());
-    let controllers = controller_keys(&listed);
+    advice.extend(ssh_directory_advice(&setup.home));
+    let controllers = controller_rows(&listed);
+    advice.extend(controller_advice(&controllers));
     if controllers.is_empty() {
         advice.push(
             "No controller key is authorized yet. On the controlling device run silo devices add with the address below (it installs its key over SSH), or run silo devices key there and then silo host init --authorize '<key>' here."
@@ -789,7 +978,7 @@ pub async fn init(setup: &HostSetup, authorize: &[String]) -> Result<Value, CliE
         "cli": cli,
         "connections": connections_json(&status),
         "authorized": authorized,
-        "controllers": key_rows(&controllers),
+        "controllers": controllers,
         "ssh": ssh,
         "advice": advice,
     }))
@@ -820,16 +1009,29 @@ pub async fn status(setup: &HostSetup) -> Result<Value, CliError> {
         Err(detail) => json!({"ok": false, "detail": detail}),
     };
     let running = engine_reachable(&setup.socket);
+    let mut advice: Vec<String> = Vec::new();
     let service = match (setup.platform, setup.silod()) {
-        (Platform::Mac, _) if running => json!({"status": "running"}),
-        (_, Some(silod)) => match silod_service(&silod, "status") {
-            Ok(report) => report.to_json(),
+        (Platform::Mac, _) if running => {
+            let report = mac_running_report(setup);
+            advice.extend(report.advice.iter().cloned());
+            report.to_json()
+        }
+        (Platform::Mac, _) => json!({
+            "status": "notRunning",
+            "error": format!("No engine answers. Open {} (or run silo host init).", setup.channel.product_name()),
+        }),
+        (Platform::Linux, Some(silod)) => match silod_service(&silod, "status") {
+            Ok(report) => {
+                advice.extend(linux_service_advice(&report));
+                report.to_json()
+            }
             Err(error) => json!({"status": "unknown", "error": error.message}),
         },
-        (_, None) => {
+        (Platform::Linux, None) => {
             json!({"status": "unknown", "error": format!("There is no silod beside {}.", setup.cli.display())})
         }
     };
+    advice.extend(ssh_directory_advice(&setup.home));
     let mut value = json!({
         "platform": platform_name(setup.platform),
         "kinds": setup.platform.kinds(),
@@ -853,15 +1055,46 @@ pub async fn status(setup: &HostSetup) -> Result<Value, CliError> {
         let listed = engine
             .call(requests::connections_keys_list(EmptyParams {}))
             .await?;
-        value["controllers"] = key_rows(&controller_keys(&listed));
+        let controllers = controller_rows(&listed);
+        advice.extend(controller_advice(&controllers));
+        value["controllers"] = json!(controllers);
     }
+    value["advice"] = json!(advice);
     Ok(value)
 }
 
-/// `silo host revoke`.
+/// `silo host revoke`: the keys a fingerprint, a key or a file names, each removed with every
+/// line of it that runs the bridge. Only keys that had such a line are reported as revoked.
 pub async fn revoke(engine: &Engine, argument: &str) -> Result<Value, CliError> {
-    let keys = read_keys(argument)?;
+    let list = || async {
+        engine
+            .call(requests::connections_keys_list(EmptyParams {}))
+            .await
+            .map(|listed| controller_rows(&listed))
+    };
+    let before = list().await?;
+    let argument = argument.trim();
+    let keys = if argument.starts_with("SHA256:") {
+        let named: Vec<String> = before
+            .iter()
+            .filter(|row| row["fingerprint"] == argument)
+            .filter_map(|row| row["publicKey"].as_str().map(str::to_owned))
+            .take(1)
+            .collect();
+        if named.is_empty() {
+            return Err(CliError::new(format!(
+                "No controller key with the fingerprint {argument} is authorized here (silo host status lists them)."
+            )));
+        }
+        named
+    } else {
+        read_keys_with(argument, any_public_key)?
+    };
+    let mut revoked = Vec::new();
+    let mut absent = Vec::new();
     for key in &keys {
+        let print = fingerprint(key);
+        let present = before.iter().any(|row| row["fingerprint"] == json!(print));
         engine
             .call(requests::connections_keys_revoke(
                 connections::RevokeKeyParams {
@@ -870,13 +1103,17 @@ pub async fn revoke(engine: &Engine, argument: &str) -> Result<Value, CliError> 
                 },
             ))
             .await?;
+        if present {
+            revoked.push(key.clone());
+        } else {
+            absent.push(key.clone());
+        }
     }
-    let listed = engine
-        .call(requests::connections_keys_list(EmptyParams {}))
-        .await?;
+    let after = list().await?;
     Ok(json!({
-        "revoked": key_rows(&keys),
-        "controllers": key_rows(&controller_keys(&listed)),
+        "revoked": key_rows(&revoked),
+        "notAuthorized": key_rows(&absent),
+        "controllers": after,
     }))
 }
 
@@ -979,15 +1216,26 @@ pub fn render_host(value: &Value) -> String {
             row["fingerprint"].as_str().unwrap_or_default()
         ));
     }
+    for row in value["notAuthorized"].as_array().into_iter().flatten() {
+        out.push(format!(
+            "Not authorized here: {}",
+            row["fingerprint"].as_str().unwrap_or_default()
+        ));
+    }
     if let Some(controllers) = value["controllers"].as_array() {
         if controllers.is_empty() {
             out.push("Controllers: none".to_owned());
         } else {
             out.push("Controllers:".to_owned());
             for row in controllers {
+                let mark = if row["canonical"] == false {
+                    " (a line Silo did not write in this form)"
+                } else {
+                    ""
+                };
                 out.push(format!(
-                    "  {}",
-                    row["fingerprint"].as_str().unwrap_or_default()
+                    "  {}{mark}",
+                    row["fingerprint"].as_str().unwrap_or("(not base64)")
                 ));
             }
         }
@@ -1089,9 +1337,33 @@ pub fn normalize_address(address: &str) -> String {
     }
 }
 
-/// The host and port SSH connects to for `address` (port 22 when it names none). An SSH alias
-/// is returned as it is; its `HostName` in ssh_config is not read.
+/// The engine's rules for a Connections address (`remote.rs` `validate_address`), checked
+/// before anything here runs a command with it.
+fn check_address(address: &str) -> Result<(), CliError> {
+    let allowed: &[u8] = if address.starts_with("ssh://") {
+        b"@._-:[]/"
+    } else {
+        b"@._-:[]"
+    };
+    if address.is_empty()
+        || address.len() > 255
+        || address.starts_with('-')
+        || !address
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || allowed.contains(&b))
+    {
+        return Err(CliError::new(format!(
+            "{address} is not an address Silo connects to. Enter an SSH alias, hostname, IP address, user@hostname, user@host:port, or ssh://user@host:port."
+        )));
+    }
+    Ok(())
+}
+
+/// The host and port SSH connects to for `address` (`user@host`, `user@host:port`,
+/// `ssh://user@host:port`, an alias; port 22 when it names none). An SSH alias is returned as
+/// it is; its `HostName` in ssh_config is not read.
 pub fn ssh_target(address: &str) -> Result<(String, u16), CliError> {
+    check_address(address)?;
     let invalid = || CliError::new(format!("Cannot read a host from {address}."));
     let rest = address.strip_prefix("ssh://").unwrap_or(address);
     let rest = rest.trim_end_matches('/');
@@ -1110,12 +1382,53 @@ pub fn ssh_target(address: &str) -> Result<(String, u16), CliError> {
             None => (rest.to_owned(), 22),
         }
     } else {
-        (rest.to_owned(), 22)
+        // `host:port` with one colon; more colons are a bare IPv6 address.
+        match rest.split_once(':') {
+            Some((host, port)) if !port.contains(':') => {
+                (host.to_owned(), port.parse().map_err(|_| invalid())?)
+            }
+            _ => (rest.to_owned(), 22),
+        }
     };
-    if host.is_empty() || port == 0 {
+    if host.is_empty()
+        || host.starts_with('-')
+        || port == 0
+        || !host
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"._-:".contains(&b))
+    {
         return Err(invalid());
     }
     Ok((host, port))
+}
+
+/// The lines of `known_hosts` for `name`, as `ssh-keygen -F` finds them.
+fn known_host_entries(known_hosts: &Path, name: &str) -> Result<Vec<String>, CliError> {
+    if !known_hosts.exists() {
+        return Ok(Vec::new());
+    }
+    let output = Command::new("ssh-keygen")
+        .arg("-F")
+        .arg(name)
+        .arg("-f")
+        .arg(known_hosts)
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|error| CliError::new(format!("Could not run ssh-keygen: {error}")))?;
+    match output.status.code() {
+        Some(0) => Ok(String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .filter(|line| !line.starts_with('#') && !line.trim().is_empty())
+            .map(str::to_owned)
+            .collect()),
+        // Not found.
+        Some(1) => Ok(Vec::new()),
+        _ => Err(CliError::new(format!(
+            "ssh-keygen could not read {}: {}",
+            known_hosts.display(),
+            String::from_utf8_lossy(&output.stderr).trim()
+        ))),
+    }
 }
 
 /// The name `known_hosts` lists `host` under: the host itself on port 22, else `[host]:port`.
@@ -1216,14 +1529,27 @@ pub fn pin_host_key(
         }
     };
     let mut added = true;
-    for line in existing.lines() {
-        let mut words = line.split_whitespace();
-        let (Some(names), Some(listed_kind), Some(listed_key)) =
+    // ssh-keygen finds hashed names (`|1|...`) and `[host]:port` entries as ssh does.
+    for line in known_host_entries(known_hosts, &name)? {
+        let mut words = line.split_whitespace().peekable();
+        let marker = words.next_if(|word| word.starts_with('@'));
+        let (Some(_names), Some(listed_kind), Some(listed_key)) =
             (words.next(), words.next(), words.next())
         else {
             continue;
         };
-        if !names.split(',').any(|listed| listed == name) || listed_kind != kind {
+        match marker {
+            Some("@revoked") if listed_key == key => {
+                return Err(CliError::new(format!(
+                    "{} marks this host key revoked for {name}; Silo does not trust it.",
+                    known_hosts.display()
+                )));
+            }
+            // A certificate authority or a revoked other key says nothing about this key.
+            Some(_) => continue,
+            None => {}
+        }
+        if listed_kind != kind {
             continue;
         }
         if listed_key == key {
@@ -1574,30 +1900,50 @@ mod tests {
         assert_eq!(ServiceReport::parse("", "").status, "unknown");
     }
 
+    const KEY: &str =
+        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKVyZDGnacgUkbjXHi/TsIZ+GxIgprlkfONi9t33BGz3";
+
     #[test]
     fn keys_come_from_the_argument_or_a_file() {
         let directory = tempfile::tempdir().unwrap();
         assert_eq!(
-            read_keys(" ssh-ed25519 AAAA laptop ").unwrap(),
-            vec!["ssh-ed25519 AAAA laptop".to_owned()]
+            read_keys(&format!(" {KEY} laptop ")).unwrap(),
+            vec![format!("{KEY} laptop")]
         );
-        let file = directory.path().join("keys.pub");
-        fs::write(
-            &file,
-            "# controllers\nssh-ed25519 AAAA one\n\nssh-ed25519 BBBB two\n",
-        )
-        .unwrap();
+        // A file whose name starts like a key is still a file.
+        let file = directory.path().join("ssh-keys.pub");
+        fs::write(&file, format!("# controllers\n{KEY} one\n\n{KEY} two\n")).unwrap();
         assert_eq!(
             read_keys(file.to_str().unwrap()).unwrap(),
-            vec![
-                "ssh-ed25519 AAAA one".to_owned(),
-                "ssh-ed25519 BBBB two".to_owned()
-            ]
+            vec![format!("{KEY} one"), format!("{KEY} two")]
         );
         fs::write(&file, "# nothing\n").unwrap();
         assert!(read_keys(file.to_str().unwrap()).is_err());
         assert!(read_keys("missing-file").is_err());
         assert!(read_keys(directory.path().to_str().unwrap()).is_err());
+        let error = read_keys("ssh-ed25519 AAAA laptop").unwrap_err();
+        assert!(
+            error.message.contains("not an Ed25519 public key"),
+            "{}",
+            error.message
+        );
+    }
+
+    #[test]
+    fn a_controller_key_is_an_ed25519_key() {
+        assert!(controller_key(KEY).is_some());
+        for wrong in [
+            // An RSA key, a truncated key, a key with bytes after it, another type's name.
+            "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAAAgQC0",
+            "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKVyZDGnacgUkbjXHi",
+            "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKVyZDGnacgUkbjXHi/TsIZ+GxIgprlkfONi9t33BGz3AAAA",
+            "ssh-ed25519 AAAAB3NzaC1yc2EAAAADAQABAAAAgQC0",
+            "ssh-ed25519",
+        ] {
+            assert!(controller_key(wrong).is_none(), "{wrong}");
+        }
+        assert!(any_public_key("ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAAAgQC0 x").is_some());
+        assert!(any_public_key("ssh-rsa !!!").is_none());
     }
 
     #[test]
@@ -1637,7 +1983,14 @@ mod tests {
             ("::1".into(), 2200)
         );
         assert_eq!(ssh_target("ssh://box").unwrap(), ("box".into(), 22));
+        assert_eq!(ssh_target("ada@box:2222").unwrap(), ("box".into(), 2222));
+        assert_eq!(ssh_target("box:2222").unwrap(), ("box".into(), 2222));
+        assert_eq!(ssh_target("ada@fe80::1").unwrap(), ("fe80::1".into(), 22));
         assert!(ssh_target("ssh://ada@box:0").is_err());
+        assert!(ssh_target("ada@box:x").is_err());
+        for refused in ["ada@box,other", "-box", "ada@box/x", "", "ada@b\u{7f}x"] {
+            assert!(ssh_target(refused).is_err(), "{refused}");
+        }
         assert_eq!(known_hosts_name("box", 22), "box");
         assert_eq!(known_hosts_name("127.0.0.1", 2222), "[127.0.0.1]:2222");
     }
