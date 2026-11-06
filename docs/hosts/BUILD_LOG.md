@@ -156,3 +156,43 @@ Plan: [PLAN.md](PLAN.md).
 - **Only CI can prove:** the Linux archives with the real Git runtime, the arm64 build, the
   systemd user service under a real user manager, and a Linux computer created, started,
   forked and dropped over KVM.
+- **Review fixes:**
+  - A Linux session end that should have stopped computers asks the runtime what still runs.
+    When anything does, or it cannot tell, silod logs the names and exits with 70
+    (`SESSION_END_INCOMPLETE_EXIT_CODE`), not 0 and not the restart code 75: systemd records
+    the stop as failed and never restarts a unit whose stop it was asked for. A prepared
+    update's released set still exits 0. `KillMode=process` stays.
+  - `unregister` reads the unit's cgroup before `disable --now` and afterwards names every
+    process left in it, with how to take them back (start the engine again).
+  - The lingering advice and the docs say the last logout ends the user manager, which kills
+    computers still running under it (`user@.service` uses `KillMode=mixed`; check the
+    distribution's).
+  - `loginctl show-user` gets the UID; the advice names the account from `getpwuid_r`, with the
+    UID as fallback, never `$USER`.
+  - The unit sets `StartLimitIntervalSec=0` in `[Unit]`; the trade-off is in the engine guide.
+  - Reading the unit opens it with `O_NOFOLLOW | O_NONBLOCK` and checks the open handle; a
+    FIFO is refused without blocking. A temporary file a crashed run left under the same name
+    is replaced only when it carries silod's marker.
+  - Linux archives require `resources/git-support/ssl/cacert.pem`, which both Linux Git builds
+    need; the layouts in the engine and release guides list `git-support/ssl/`.
+  - `engine-release.yml`: a `tag` job before both builds, the Linux archive names checked
+    against its tag, and the release only after every build passed. `libssl-dev` dropped from
+    it and from `linux-host.yml`: neither `Cargo.lock` nor MicroSandbox's lists `openssl-sys`,
+    and the cached `msb` links no libssl.
+  - `warm-release-caches.yml` saves the runtime and Cargo download caches for
+    `ubuntu-24.04` / `x86_64-unknown-linux-gnu` and `ubuntu-24.04-arm` /
+    `aarch64-unknown-linux-gnu`; the app dependency cache stays macOS only.
+  - `linux-host.yml`: no `rust-cache` (pull requests never saved it), `$(id -un)` for
+    lingering, `DBUS_SESSION_BUS_ADDRESS` exported with `XDG_RUNTIME_DIR`, and the stop step
+    runs after a failure too (stopping only, asserting only after a passing run).
+  - `linux-host-e2e.sh` fails when it cannot list computers before it starts, and stops both
+    computers before dropping them (also in its cleanup).
+  - Docs: an engine already running outside systemd makes the unit's engine defer and exit 0;
+    the symlink-flip upgrade needs `--service register` again; the release needs both Linux
+    builds; the journal is readable by host administrators (for phase 6's threat model); the
+    GitHub App client secret in the Linux binaries is accepted, as on macOS; the Linux
+    verification guide's header no longer reads as if all Linux support were discontinued.
+  - Tests (same container, as root): `silod` 333 unit tests (5 new) and its 12 other tests
+    passed; `run-script-tests.py` 45 of 45 modules; actionlint 1.7.7 (no shellcheck here)
+    found nothing in the three changed workflows. Not run: any workflow, and a session end
+    against real computers.
