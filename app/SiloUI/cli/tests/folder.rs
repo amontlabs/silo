@@ -569,6 +569,50 @@ async fn a_review_request_records_the_fork_its_digest_and_a_summary() {
     assert!(backup_refs(&lab.host).is_empty());
 }
 
+async fn request_digest(lab: &Lab, engine: &Engine, fork: &str) -> String {
+    flows::fold(
+        engine,
+        fork,
+        None,
+        None,
+        FoldOptions::default(),
+        true,
+        &ignore,
+    )
+    .await
+    .unwrap();
+    let sent = lab.requests.lock().unwrap().last().unwrap().clone();
+    sent["reviewDigest"].as_str().unwrap().to_owned()
+}
+
+#[tokio::test]
+async fn the_review_digest_follows_untracked_and_binary_contents_and_pins_the_fold() {
+    let lab = lab();
+    let engine = lab.connect().await;
+    let (fork, guest) = lab.fork(&engine).await;
+    git(&guest, &["config", "diff.external", "true"]);
+    std::fs::write(guest.join("blob.bin"), [0u8, 1, 2, 3]).unwrap();
+    let first = request_digest(&lab, &engine, &fork).await;
+    assert_eq!(first, request_digest(&lab, &engine, &fork).await);
+    std::fs::write(guest.join("blob.bin"), [0u8, 1, 2, 4]).unwrap();
+    let second = request_digest(&lab, &engine, &fork).await;
+    assert_ne!(first, second, "an untracked file's contents change the digest");
+    let pinned = |digest: String| FoldOptions {
+        reviewed: Some(digest),
+        ..FoldOptions::default()
+    };
+    let stale = flows::fold(&engine, &fork, None, None, pinned(first), false, &ignore)
+        .await
+        .unwrap();
+    assert_eq!(stale["status"], "refused");
+    assert_eq!(stale["refusal"]["reason"], "changed");
+    let kept = flows::fold(&engine, &fork, None, None, pinned(second), false, &ignore)
+        .await
+        .unwrap();
+    assert_ne!(kept["status"], "refused", "{kept}");
+    assert!(lab.host.join("blob.bin").exists());
+}
+
 #[tokio::test]
 async fn folding_a_stopped_fork_starts_it_and_stops_it_again() {
     let lab = lab();
