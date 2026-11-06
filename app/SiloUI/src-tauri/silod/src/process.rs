@@ -17,6 +17,26 @@ pub const RESTART_EXIT_CODE: i32 = 75;
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub const SESSION_END_INCOMPLETE_EXIT_CODE: i32 = 70;
 
+/// Whether a runtime state word (`msb list`) means the computer's VM may still be up: it is
+/// starting, running, draining (stopping) or paused. Created, stopped, crashed and any word
+/// this engine does not know count as not running.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub fn state_is_live(state: &str) -> bool {
+    ["starting", "running", "draining", "stopping", "paused"]
+        .iter()
+        .any(|live| state.eq_ignore_ascii_case(live))
+}
+
+/// The names in `listed` (name, state word) whose VM may still be up.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub fn live_names(listed: Vec<(String, String)>) -> Vec<String> {
+    listed
+        .into_iter()
+        .filter(|(_, state)| state_is_live(state))
+        .map(|(name, _)| name)
+        .collect()
+}
+
 /// The exit code of a session end that stopped computers, from what the runtime still lists
 /// as running afterwards, and the line to log when that is not nothing.
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
@@ -84,6 +104,26 @@ impl ProcessControl for AppProcessControl {
 mod tests {
     use super::*;
     use std::sync::{atomic::AtomicUsize, Arc};
+
+    #[test]
+    fn only_states_whose_vm_may_be_up_count_as_running() {
+        let listed = [
+            ("a", "Running"),
+            ("b", "Draining"),
+            ("c", "Stopped"),
+            ("d", "Crashed"),
+            ("e", "Created"),
+            ("f", "Starting"),
+            ("g", "Paused"),
+            ("h", ""),
+            ("i", "Something new"),
+        ]
+        .into_iter()
+        .map(|(name, state)| (name.to_owned(), state.to_owned()))
+        .collect();
+        assert_eq!(live_names(listed), ["a", "b", "f", "g"]);
+        assert!(state_is_live("stopping"));
+    }
 
     #[test]
     fn a_session_end_that_left_computers_running_exits_with_a_failure_that_is_not_a_restart() {

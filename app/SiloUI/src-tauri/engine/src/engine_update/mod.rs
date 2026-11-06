@@ -678,6 +678,11 @@ impl UpdateState {
             .is_some_and(|active| active.mode == ShutdownMode::Stop)
     }
 
+    /// Whether the shutdown under way is, or has become, a session end.
+    pub fn session_ending(&self) -> bool {
+        self.lock().session_ending
+    }
+
     /// The absolute deadline of a session-end shutdown, if one is under way.
     pub fn deadline(&self) -> Option<Instant> {
         self.lock().deadline

@@ -173,6 +173,28 @@ pub(super) fn running(
     }
     Ok(result)
 }
+/// Every managed computer the runtime lists, by name with its state word (empty when the
+/// runtime gives none), from one `msb list` call. Unlike `running_names` it inspects nothing
+/// and never refuses for a computer's saved state, so a session end can ask it quickly.
+pub fn listed_states(host: &dyn RuntimeHost) -> Result<Vec<(String, String)>, String> {
+    let Some(paths) = runtime_paths_if_in_use(host)? else {
+        return Ok(Vec::new());
+    };
+    // With no saved computers there is nothing the runtime could be running for this engine.
+    if read_metadata(&paths.metadata)
+        .map_err(|e| e.to_string())?
+        .computers
+        .is_empty()
+    {
+        return Ok(Vec::new());
+    }
+    Ok(list_managed(&ProcessRunner, &paths)
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .map(|entry| (entry.name, entry.status.unwrap_or_default()))
+        .collect())
+}
+
 pub fn running_names(host: &dyn RuntimeHost) -> Result<Vec<String>, String> {
     // An unfinished storage migration holds the runtime back: nothing is running, and
     // it must not stop an update from installing.

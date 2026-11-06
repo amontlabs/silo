@@ -835,6 +835,9 @@ enum Freshness {
 #[derive(Debug, Deserialize)]
 struct ListedSandbox {
     name: String,
+    /// The runtime's state word (`Running`, `Draining`, `Stopped`, ...), when it gives one.
+    #[serde(default)]
+    status: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

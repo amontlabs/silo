@@ -270,17 +270,18 @@ fn engine_shutdown(
     state.shutdown_job(job.clone());
     publish_shutdown_changed(context.engine_context(), true);
     let engine = arc_context(context);
-    tokio::task::spawn_blocking(move || run_shutdown(&engine, &state, Some(job)));
+    // A session end can attach to this shutdown while it runs; the exit code is then its.
+    tokio::task::spawn_blocking(move || {
+        run_shutdown_then(&engine, &state, Some(job), || {
+            session_end_exit_code(&engine, &state)
+        })
+    });
     encode(&started).map(output)
 }
 
 /// The shutdown job: the outcome is durable before the process exits, and the process exits
-/// only after a shutdown that succeeded (or a session end, which never cancels).
-fn run_shutdown(context: &Arc<SilodContext>, state: &UpdateState, job: Option<JobId>) {
-    run_shutdown_then(context, state, job, || 0)
-}
-
-/// `run_shutdown`, exiting with the code `exit_code` returns once the shutdown has finished.
+/// only after a shutdown that succeeded (or a session end, which never cancels), with the
+/// code `exit_code` returns once it has finished.
 fn run_shutdown_then(
     context: &Arc<SilodContext>,
     state: &UpdateState,
@@ -367,9 +368,13 @@ pub(crate) const SURVIVOR_CHECK: Duration = Duration::from_secs(3);
 
 /// On Linux, computers run in their own processes and outlive an engine that exits (the unit
 /// sends SIGTERM to silod alone). A session end that should have stopped them but left some
-/// running says which and exits with a failure, so systemd and the journal record it.
+/// running says which and exits with a failure, so systemd and the journal record it. Any
+/// other shutdown, a client's included, exits 0 unless a session end attached to it.
 #[cfg(target_os = "linux")]
 fn session_end_exit_code(context: &Arc<SilodContext>, state: &UpdateState) -> i32 {
+    if !state.session_ending() {
+        return 0;
+    }
     if !state.shutdown_stops_computers() {
         // A prepared update releases its saved set on purpose; the next engine resumes it.
         return 0;
@@ -379,7 +384,10 @@ fn session_end_exit_code(context: &Arc<SilodContext>, state: &UpdateState) -> i3
     let spawned = std::thread::Builder::new()
         .name("silod-session-end-check".into())
         .spawn(move || {
-            let _ = sender.send(silo_engine::runtime::update_recovery::running_names(&host));
+            // One runtime list: no inspection per computer, and no refusal for a computer's
+            // saved state, which the engine's next start deals with.
+            let listed = silo_engine::runtime::update_recovery::listed_states(&host);
+            let _ = sender.send(listed.map(crate::process::live_names));
         });
     let running = match spawned {
         Ok(_) => receiver
