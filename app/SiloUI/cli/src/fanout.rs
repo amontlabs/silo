@@ -413,11 +413,11 @@ pub async fn fork_many(
         )));
     }
     Settings::check_fork_secrets(settings, &args.fork.secrets)?;
-    let (_, forked) = tokio::join!(
-        ops::sweep_throwaways(engine, progress),
-        fork_many_now(engine, args, settings, progress, output)
-    );
-    forked
+    ops::fork_then_sweep(
+        engine,
+        fork_many_now(engine, args, settings, progress, output),
+    )
+    .await
 }
 
 async fn fork_many_now(

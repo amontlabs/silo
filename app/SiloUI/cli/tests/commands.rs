@@ -678,6 +678,8 @@ struct Baseline {
     computers: Vec<(String, String)>,
     measured: bool,
     fail_baseline: bool,
+    /// The job-starting methods, in order.
+    started: Vec<String>,
 }
 
 fn baseline_engine(
@@ -694,11 +696,15 @@ fn baseline_engine(
         computers,
         measured: false,
         fail_baseline,
+        started: Vec::new(),
     }));
     let shared = state.clone();
     let engine = FakeEngine::start(move |method, params| {
         let mut state = shared.lock().unwrap();
         let named = |id: &str| id.trim_start_matches("id-").to_owned();
+        if params.get("jobId").is_none() && method != "computers.list" {
+            state.started.push(method.to_owned());
+        }
         match method {
             "computers.list" => {
                 let pairs: Vec<(&str, &str)> = state
@@ -1086,4 +1092,29 @@ async fn only_stopped_throwaways_older_than_an_hour_are_swept() {
         names_in(&state),
         ["try", fresh.as_str(), "silo-baseline-bbbbbb"]
     );
+    // Its jobs are never the one Ctrl-C names.
+    assert_eq!(connected.last_job(), None);
+}
+
+#[tokio::test]
+async fn a_fork_sweeps_after_it_returns_silently_and_keeps_its_own_job() {
+    let (engine, state) = baseline_engine(false, &[("silo-baseline-8fa22f", "stopped")]);
+    let connected = Engine::connect(&engine.socket).await.unwrap();
+    let lines = Mutex::new(Vec::new());
+    let progress = |line: &str| lines.lock().unwrap().push(line.to_owned());
+    let args = ForkArgs {
+        source: "try".into(),
+        checkpoint: Some("cp1".into()),
+        ..ForkArgs::default()
+    };
+    ops::fork(&connected, &args, None, &progress).await.unwrap();
+    // The fork's job, and everything it reads, comes before the sweep's drop.
+    let started = state.lock().unwrap().started.clone();
+    assert_eq!(started.first().map(String::as_str), Some("checkpoints.fork"));
+    assert_eq!(started.last().map(String::as_str), Some("computers.delete"));
+    assert!(!names_in(&state).contains(&"silo-baseline-8fa22f".to_owned()));
+    // The job Ctrl-C names is the fork's (the sweep alone records none: see above).
+    assert_eq!(connected.last_job().as_deref(), Some("job:3"));
+    let lines = lines.into_inner().unwrap();
+    assert!(lines.iter().all(|line| !line.contains("baseline")), "{lines:?}");
 }

@@ -452,6 +452,15 @@ impl Engine {
         self.last_job.lock().unwrap().clone()
     }
 
+    /// The same connection, but the jobs it starts are not recorded for Ctrl-C: background
+    /// housekeeping never becomes the job an interrupted command names.
+    pub fn without_job_notes(&self) -> Self {
+        Self {
+            last_job: Arc::new(Mutex::new(None)),
+            ..self.clone()
+        }
+    }
+
     /// What to tell someone whose wait ended before the job did.
     pub fn reattach_hint(job_id: &str) -> String {
         format!("The job {job_id} keeps running in the engine. Re-attach with `silo job {job_id}`.")

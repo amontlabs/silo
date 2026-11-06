@@ -133,10 +133,22 @@ pub fn stale_throwaways(all: &[Computer], now: i64) -> Vec<&Computer> {
 /// sign-in it may not read) is tried again by a later command.
 pub const SWEEP_LIMIT: Duration = Duration::from_secs(20);
 
+/// How long a fork that has finished lets the sweep run before the command ends. The engine
+/// finishes a drop it has started either way; a later command sweeps the rest.
+pub const SWEEP_GRACE: Duration = Duration::from_secs(5);
+
 /// Drops the stale throwaways, for at most [`SWEEP_LIMIT`]. Best effort; returns the names
-/// dropped. A fork runs it alongside its own work, so a throwaway that cannot be dropped does
-/// not hold the fork up.
+/// dropped. Its jobs are never the one Ctrl-C names.
 pub async fn sweep_throwaways(engine: &Engine, progress: Progress<'_>) -> Vec<String> {
+    sweep_throwaways_within(engine, SWEEP_LIMIT, progress).await
+}
+
+async fn sweep_throwaways_within(
+    engine: &Engine,
+    limit: Duration,
+    progress: Progress<'_>,
+) -> Vec<String> {
+    let engine = &engine.without_job_notes();
     let dropped = std::sync::Mutex::new(Vec::new());
     let sweep = async {
         let Ok(all) = engine.all_computers().await else {
@@ -148,8 +160,19 @@ pub async fn sweep_throwaways(engine: &Engine, progress: Progress<'_>) -> Vec<St
             }
         }
     };
-    let _ = tokio::time::timeout(SWEEP_LIMIT, sweep).await;
+    let _ = tokio::time::timeout(limit, sweep).await;
     dropped.into_inner().unwrap_or_default()
+}
+
+/// Runs `fork`, then sweeps silently for at most [`SWEEP_GRACE`]: the fork never waits on a
+/// sweep, and no sweep line comes between its progress lines.
+pub async fn fork_then_sweep<T>(
+    engine: &Engine,
+    fork: impl std::future::Future<Output = Result<T, CliError>>,
+) -> Result<T, CliError> {
+    let forked = fork.await;
+    sweep_throwaways_within(engine, SWEEP_GRACE, &|_| {}).await;
+    forked
 }
 
 /// One computer with its checkpoints, its recorded quiet state, the Silo secrets assigned to
@@ -690,11 +713,7 @@ pub async fn fork(
     progress: Progress<'_>,
 ) -> Result<Value, CliError> {
     Settings::check_fork_secrets(settings, &args.secrets)?;
-    let (_, forked) = tokio::join!(
-        sweep_throwaways(engine, progress),
-        fork_now(engine, args, settings, progress)
-    );
-    forked
+    fork_then_sweep(engine, fork_now(engine, args, settings, progress)).await
 }
 
 async fn fork_now(
