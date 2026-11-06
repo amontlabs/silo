@@ -105,3 +105,54 @@ Plan: [PLAN.md](PLAN.md).
     `engine.sock` appeared ended the session with exit 0 in three of three runs. The bridge
     through a `~/.local/bin` link reported that Silo was not running. No runtime was
     installed, so the hash check reported its absence; its failures are covered by unit tests.
+
+## Phase 3: Linux engine packaging (6 Nov 2026)
+
+- **Found:** `silod --service` refused on Linux. The engine release built only the macOS archive,
+  which holds `silod` and the files an app needs to make a bundle, not a runnable engine. No
+  workflow started a Linux computer: the KVM jobs went with `be300f4f`.
+- **Built:**
+  - `silod --service register|unregister|status` on Linux (`silod/src/service_linux.rs`): a
+    systemd user unit `~/.config/systemd/user/<channel>.engine.service` that runs the canonical
+    `silod --agent` with `Restart=on-failure` (exit code 75 restarts, a clean exit does not),
+    `RestartSec=10`, `UMask=0077`, `KillMode=process`, `KillSignal=SIGTERM`,
+    `TimeoutStopSec=30`, `WantedBy=default.target`; then `daemon-reload` and `enable --now`.
+    `status` prints the macOS status word, then state, unit, program and linger. Lingering is
+    reported with the command an administrator runs; silod never calls `sudo`. A file at the
+    unit's path that silod did not write is never replaced or removed. `KillMode=process`
+    because the runtime's VM processes are detached on purpose and an update keeps them running;
+    silod's own session end stops them on SIGTERM.
+  - `package-engine.py --platform linux-x64|linux-arm64 [--channel development]`: the
+    `silo-engine/` directory with `silod`, `silo`, `msb` and the Git tools beside it, and
+    `resources/` with the manifest, the MicroSandbox manifest, licenses and `libkrunfw`, and
+    `git-support/` (Git manifest, templates, licenses, the guest's `git-lfs-transfer`). The
+    staged runtime is checked against its manifests and every executable's ELF machine against
+    the platform. The macOS archive is byte-identical to before (same SHA-256 for the same
+    stub binary).
+  - `engine-release.yml`: a `build-linux` job on `ubuntu-24.04` and `ubuntu-24.04-arm`, in
+    parallel with the macOS build; the release carries all three archives. Not run.
+  - `linux-host.yml` (pull requests touching native app sources, and by hand): KVM through
+    GitHub's udev rule and a KVM API probe, the Dev archive, a user service under a lingering
+    runner account, then `scripts/linux-host-e2e.sh` (create `e2e-hosts-ci`, start, exec
+    `uname -a`, checkpoint, fork, exec in the fork, drop both, with cleanup on failure), a
+    `systemctl --user stop` that must end with exit code 0, and `--service unregister`. Logs
+    are uploaded on failure. Not run yet.
+- **Tests (Linux x86_64 container, as root):** `silod` 328 unit tests (12 new for the service)
+  and its 12 other tests passed. `run-script-tests.py`: 45 of 45 modules passed, among them
+  the package, engine release workflow, new Linux host workflow, workflow pin and native-change
+  tests. actionlint 1.7.7 found nothing in the two workflows without shellcheck, and only
+  info-level SC2012/SC2153 notes with it (one is in the existing macOS step).
+  `systemd-analyze verify` accepted the generated unit, including a path with a space.
+- **Live (same container, no systemd as PID 1, no `/dev/kvm`):** `silod --service register`,
+  `status` and `unregister`, started through a link, wrote, reported and removed the unit with
+  fake `systemctl` and `loginctl` on `PATH`. `runtime:prepare` built the patched `msb` and
+  staged MicroSandbox, then stopped at the bundled Git download (the proxy here refuses
+  `www.mozilla.org`). With stub Git and LFS files in the ignored staging directories,
+  `package-engine.py --platform linux-x64 --channel development` built release `silod` and
+  `silo` and wrote the archive; its checksum verified, the unpacked `silo` printed
+  `org.silo.dev`, `msb --version` printed `msb 0.7.6` with the bundled `libkrunfw`, the
+  unpacked `silod --agent` served a fixture HOME, `silo list` answered with no computers, and
+  SIGTERM ended it with exit code 0. No computer was created: there is no KVM here.
+- **Only CI can prove:** the Linux archives with the real Git runtime, the arm64 build, the
+  systemd user service under a real user manager, and a Linux computer created, started,
+  forked and dropped over KVM.
