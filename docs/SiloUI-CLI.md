@@ -169,6 +169,26 @@ default to what it has. A secret cannot be left with no computer, and a secret f
 destination (`*`) is created in the app. `set` reads all of stdin and drops one final newline:
 `printf %s "$VALUE" | silo secrets set NAME --computer main --domain api.example.com`.
 
+## Another device
+
+`silo --device <name>` runs a command on a connected device instead of this one, over
+Connections (the device's name, its id or an id prefix; `local` is this device). Every request
+that device's engine can answer goes to it, so `silo --device mini fork main`, `diff`,
+`fold`, `requests`, `steps`, `tree`, `checkpoints` and `list` work on the Mac mini's computers.
+The first form is used rather than an `@device` prefix on computer names, so names stay plain.
+`up`, `exec`, `ports`, `publish`, `unpublish`, `ssh-setup`, `secrets`, folder forks and
+`fold --pr` use this device's files, SSH configuration or secrets and refuse `--device`.
+The routing is described in [Connections](SiloUI-CONNECTIONS.md#driving-another-devices-main-v1-methods).
+
+- `silo list --all-devices` lists this device's computers and every connected device's, with a
+  `DEVICE` column, and a line for each device it could not reach.
+- `silo requests --all-devices` is one list of pending changes across devices (`[Mac mini] fr-...`).
+  `requests show`, `keep`, `throw-away` and `open` find the device a request is on by its id
+  (this device first, then the merged list) and act there; `--device` skips the search.
+- MCP: `device` on `list`, `status`, `fork`, `fold`, `diff`, `undo`, `steps_list`, `tree`,
+  `checkpoints`, `requests_list` and the request tools, and `allDevices` on `list` and
+  `requests_list`.
+
 ## Project files
 
 `silo` looks upward from the working directory for a `.silo/` that holds `recipe.yaml` or
