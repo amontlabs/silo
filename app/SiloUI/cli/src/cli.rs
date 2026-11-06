@@ -334,7 +334,7 @@ fn emit(json: bool, value: &Value, human: impl FnOnce(&Value) -> String) {
 pub async fn run(cli: Cli, working_directory: &Path) -> Result<i32, CliError> {
     let socket = default_socket(cli.socket.clone(), cli.allow_other_channel)?;
     if matches!(cli.command, Command::Mcp) {
-        crate::mcp::serve(socket, working_directory.to_owned()).await?;
+        crate::mcp::serve(socket, working_directory.to_owned(), cli.agent.clone()).await?;
         return Ok(0);
     }
     let project = Project::discover(working_directory);
@@ -1021,6 +1021,19 @@ mod tests {
         assert_eq!(trim_newline("abc\r\n".into()), "abc");
         assert_eq!(trim_newline("abc\n\n".into()), "abc\n");
         assert_eq!(trim_newline("abc".into()), "abc");
+    }
+
+    #[test]
+    fn pr_cannot_be_combined_with_request_into_or_dry_run() {
+        for extra in [["--request"], ["--dry-run"]] {
+            assert!(Cli::try_parse_from(["silo", "fold", "try", "--pr", extra[0]]).is_err());
+        }
+        assert!(Cli::try_parse_from(["silo", "fold", "try", "--pr", "--into", "main"]).is_err());
+        assert!(Cli::try_parse_from(["silo", "fold", "try", "--repo", "a/b"]).is_err());
+        assert!(Cli::try_parse_from(["silo", "fold", "try", "--pr", "--repo", "a/b"]).is_ok());
+        // The agent comes from the option, which wins over the environment.
+        let cli = parse(&["--agent", "careful", "list"]);
+        assert_eq!(cli.agent.as_deref(), Some("careful"));
     }
 
     #[test]

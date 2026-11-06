@@ -384,6 +384,33 @@ impl Settings {
                     "agents.{agent}.fork_secrets: names may not be empty"
                 ));
             }
+            // An agent's entry may only narrow what the top level allows; the client name an
+            // agent is matched by is self-reported, so it must not be a way to widen.
+            if let Some(recipes) = &entry.recipes {
+                if recipes.is_empty() && !self.recipes.is_empty() {
+                    return Err(format!(
+                        "agents.{agent}.recipes: an empty list would allow every recipe; list the ones to allow from recipes"
+                    ));
+                }
+                if let Some(name) = recipes
+                    .iter()
+                    .find(|name| !self.recipes.is_empty() && !self.recipes.contains(name))
+                {
+                    return Err(format!(
+                        "agents.{agent}.recipes: {name} is not in recipes; an agent can only narrow the top-level list"
+                    ));
+                }
+            }
+            if let Some(name) = entry
+                .fork_secrets
+                .iter()
+                .flatten()
+                .find(|name| !self.fork_secrets.contains(name))
+            {
+                return Err(format!(
+                    "agents.{agent}.fork_secrets: {name} is not in fork_secrets; an agent can only narrow the top-level list"
+                ));
+            }
             if let Some(rules) = &entry.auto_keep {
                 validate_rules(&format!("agents.{agent}.auto_keep"), rules)?;
             }
@@ -883,7 +910,7 @@ mod tests {
         assert!(Settings::check_recipe(Some(&open), "any").is_ok());
     }
 
-    const AGENTS: &str = "recipes: [linux-dev]\nfork_secrets: [A]\nfold: ask\nstep_checkpoints: true\nstep_checkpoints_keep: 5\nauto_keep:\n  - when: { only: [code] }\nagents:\n  openclaw:\n    recipes: [web]\n    fork_secrets: []\n    fold: auto-code\n    step_checkpoints: false\n  claude-code:\n    fold: ask\n";
+    const AGENTS: &str = "recipes: [linux-dev, web]\nfork_secrets: [A]\nfold: ask\nstep_checkpoints: true\nstep_checkpoints_keep: 5\nauto_keep:\n  - when: { only: [code] }\nagents:\n  openclaw:\n    recipes: [web]\n    fork_secrets: []\n    fold: auto-code\n    step_checkpoints: false\n  claude-code:\n    fold: ask\n";
 
     #[test]
     fn an_agents_entry_replaces_the_top_level_settings() {
@@ -902,12 +929,12 @@ mod tests {
         // `fold: ask` for an agent turns the top-level rules off for it.
         let asks = Settings::resolve(loaded(), Some("claude-code")).unwrap();
         assert!(asks.auto_keep.is_empty());
-        assert_eq!(asks.recipes, ["linux-dev"]);
+        assert_eq!(asks.recipes, ["linux-dev", "web"]);
 
         // Unknown or no agent: the top level, untouched.
         for agent in [Some("nobody"), None, Some("  ")] {
             let top = Settings::resolve(loaded(), agent).unwrap();
-            assert_eq!(top.recipes, ["linux-dev"]);
+            assert_eq!(top.recipes, ["linux-dev", "web"]);
             assert_eq!(top.fork_secrets, ["A"]);
             assert_eq!(top.auto_keep.len(), 1);
             assert!(top.step_checkpoints);
@@ -925,6 +952,26 @@ mod tests {
         assert!(Settings::check_recipe(open.as_ref(), "web").is_ok());
         assert!(Settings::check_recipe(open.as_ref(), "linux-dev").is_err());
         assert!(Settings::check_fork_secrets(open.as_ref(), &["A".into()]).is_err());
+    }
+
+    #[test]
+    fn an_agents_entry_may_only_narrow_recipes_and_secrets() {
+        let top = "recipes: [linux-dev]\nfork_secrets: [A]\nagents:\n";
+        for (entry, key) in [
+            ("  x: { recipes: [web] }\n", "agents.x.recipes"),
+            ("  x: { recipes: [] }\n", "agents.x.recipes"),
+            ("  x: { fork_secrets: [B] }\n", "agents.x.fork_secrets"),
+        ] {
+            let error = parse_settings(&format!("{top}{entry}")).unwrap_err();
+            assert!(error.contains(key), "{error}");
+        }
+        // No top-level secrets: no agent can name one.
+        assert!(parse_settings("agents:\n  x: { fork_secrets: [B] }\n").is_err());
+        // Narrowing, and rules and fold, are allowed.
+        let fine = format!("{top}  x: {{ recipes: [linux-dev], fork_secrets: [], fold: auto-code }}\n");
+        assert!(parse_settings(&fine).is_ok());
+        // With no top-level recipes (any), an agent may list some.
+        assert!(parse_settings("agents:\n  x: { recipes: [web] }\n").is_ok());
     }
 
     #[test]

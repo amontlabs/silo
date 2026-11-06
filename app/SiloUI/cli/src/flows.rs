@@ -70,7 +70,14 @@ pub async fn run(
     progress: Progress<'_>,
 ) -> Result<Value, CliError> {
     match mode {
-        Mode::PullRequest(args, env) => pr::open(engine, fork, &args, &env, progress).await,
+        Mode::PullRequest(args, env) => {
+            if into.is_some() || options.dry_run {
+                return Err(CliError::new(
+                    "--pr opens a pull request from the fork's code; it cannot be combined with --into or --dry-run.",
+                ));
+            }
+            pr::open(engine, fork, &args, &env, progress).await
+        }
         Mode::Request => ask_or_keep(engine, fork, into, context, progress).await,
         Mode::Keep => {
             let id = engine.computer(fork).await?.id;

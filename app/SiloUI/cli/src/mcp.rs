@@ -28,6 +28,8 @@ pub struct SiloMcp {
     engine: Arc<tokio::sync::Mutex<Option<Engine>>>,
     /// The client's name from `initialize`, lowercase: which `agents:` entry applies.
     agent: Arc<std::sync::Mutex<Option<String>>>,
+    /// Set when `--agent` or `SILO_AGENT` named the agent: the client's name is then ignored.
+    agent_named: bool,
     tool_router: ToolRouter<Self>,
 }
 
@@ -131,14 +133,6 @@ pub struct FoldParams {
     /// an auto_keep rule of the project covers every change, the changes are kept instead.
     #[serde(default)]
     pub request: bool,
-    /// Push the fork's code to a new branch and open a pull request (needs GITHUB_TOKEN or a
-    /// signed-in `gh` on the device running silo); keeps nothing.
-    #[serde(default)]
-    pub pr: bool,
-    /// With `pr`: the GitHub repository, OWNER/NAME.
-    pub repo: Option<String>,
-    /// With `pr`: the branch to merge into.
-    pub base: Option<String>,
     /// Do not append kept packages and settings files to the recipe the computer came from.
     #[serde(default)]
     pub no_write_back: bool,
@@ -169,15 +163,25 @@ impl SiloMcp {
             socket,
             working_directory,
             engine: Arc::new(tokio::sync::Mutex::new(None)),
-            agent: Arc::new(std::sync::Mutex::new(crate::config::normalize_agent(
-                std::env::var("SILO_AGENT").ok().as_deref(),
-            ))),
+            agent: Arc::new(std::sync::Mutex::new(None)),
+            agent_named: false,
             tool_router: Self::tool_router(),
         }
+        .with_agent(std::env::var("SILO_AGENT").ok())
     }
 
-    /// The agent whose settings apply: the connected client's name, else `SILO_AGENT`.
-    fn agent(&self) -> Option<String> {
+    /// Names the agent (from `--agent` or `SILO_AGENT`); the client's own name is then not used.
+    pub fn with_agent(mut self, agent: Option<String>) -> Self {
+        if let Some(name) = crate::config::normalize_agent(agent.as_deref()) {
+            self.agent = Arc::new(std::sync::Mutex::new(Some(name)));
+            self.agent_named = true;
+        }
+        self
+    }
+
+    /// The agent whose settings apply: `--agent` or `SILO_AGENT`, else the connected client's
+    /// name (self-reported, so `agents:` entries may only narrow the top level).
+    pub fn agent(&self) -> Option<String> {
         self.agent.lock().unwrap().clone()
     }
 
@@ -409,15 +413,7 @@ impl SiloMcp {
                     recipe: recipe.as_ref(),
                     write_back: !params.no_write_back,
                 };
-                let mode = if params.pr {
-                    flows::Mode::PullRequest(
-                        crate::pr::PrArgs {
-                            repo: params.repo,
-                            base: params.base,
-                        },
-                        crate::pr::PrEnv::from_process(),
-                    )
-                } else if params.request {
+                let mode = if params.request {
                     flows::Mode::Request
                 } else {
                     flows::Mode::Keep
@@ -642,8 +638,10 @@ impl ServerHandler for SiloMcp {
         request: rmcp::model::InitializeRequestParams,
         context: rmcp::service::RequestContext<rmcp::RoleServer>,
     ) -> Result<rmcp::model::InitializeResult, rmcp::ErrorData> {
-        if let Some(name) = crate::config::normalize_agent(Some(&request.client_info.name)) {
-            *self.agent.lock().unwrap() = Some(name);
+        if !self.agent_named {
+            if let Some(name) = crate::config::normalize_agent(Some(&request.client_info.name)) {
+                *self.agent.lock().unwrap() = Some(name);
+            }
         }
         context.peer.set_peer_info(request.clone());
         self.negotiate_initialize(&request)
@@ -651,8 +649,13 @@ impl ServerHandler for SiloMcp {
 }
 
 /// Serves the tools on stdin and stdout until the client closes them.
-pub async fn serve(socket: PathBuf, working_directory: PathBuf) -> Result<(), CliError> {
+pub async fn serve(
+    socket: PathBuf,
+    working_directory: PathBuf,
+    agent: Option<String>,
+) -> Result<(), CliError> {
     let service = SiloMcp::new(socket, working_directory)
+        .with_agent(agent)
         .serve(rmcp::transport::stdio())
         .await
         .map_err(|error| CliError::new(format!("The MCP server could not start: {error}")))?;

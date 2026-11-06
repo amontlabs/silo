@@ -152,3 +152,43 @@ async fn initialize_list_and_call_round_trip() {
         .unwrap()
         .contains("--force"));
 }
+
+async fn agent_after_initialize(server: SiloMcp, client: &str) -> Option<String> {
+    let (server_side, client_side) = tokio::io::duplex(64 * 1024);
+    let (server_read, server_write) = tokio::io::split(server_side);
+    let held = server.clone();
+    tokio::spawn(async move {
+        let running = server.serve((server_read, server_write)).await.unwrap();
+        let _ = running.waiting().await;
+    });
+    let (read, mut write) = tokio::io::split(client_side);
+    let mut read = BufReader::new(read);
+    exchange(
+        &mut write,
+        &mut read,
+        json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+            "protocolVersion": "2025-06-18", "capabilities": {},
+            "clientInfo": {"name": client, "version": "0"}}}),
+    )
+    .await;
+    held.agent()
+}
+
+#[tokio::test]
+async fn the_client_name_is_the_agent_only_when_none_was_named() {
+    let engine = FakeEngine::start(|_, _| Ok(Value::Null));
+    // `new` reads SILO_AGENT, so the first case only holds when it is not set.
+    if std::env::var("SILO_AGENT").is_err() {
+        let unnamed = SiloMcp::new(engine.socket.clone(), std::env::temp_dir());
+        assert_eq!(
+            agent_after_initialize(unnamed, "Claude Code").await.as_deref(),
+            Some("claude-code")
+        );
+    }
+    let named =
+        SiloMcp::new(engine.socket.clone(), std::env::temp_dir()).with_agent(Some("Careful".into()));
+    assert_eq!(
+        agent_after_initialize(named, "Claude Code").await.as_deref(),
+        Some("careful")
+    );
+}
