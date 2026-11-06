@@ -64,6 +64,9 @@ pub struct Session {
     stderr: Vec<u8>,
     next_id: u64,
     shots: u64,
+    /// Names this session's screenshot files, so two controllers driving one computer (on
+    /// different machines, where process ids can repeat) never read or remove each other's.
+    nonce: String,
     /// Whether this driver has taken a screenshot, which is what it maps coordinates from.
     mapped: bool,
     /// Whether the request being handled has been written to the driver.
@@ -110,6 +113,13 @@ fn repeatable(method: &str, params: &Value) -> bool {
 }
 
 impl Session {
+    fn nonce(&mut self) -> String {
+        if self.nonce.is_empty() {
+            self.nonce = uuid::Uuid::new_v4().simple().to_string();
+        }
+        self.nonce.clone()
+    }
+
     /// Sends one MCP request and returns its `result`. Starts the driver first when none runs.
     /// A failure closes the session.
     pub async fn request(
@@ -166,11 +176,7 @@ impl Session {
     ) -> Result<Value, CliError> {
         self.shots += 1;
         self.last_side = Some(max_side);
-        let path = format!(
-            "{SCREENSHOT_PREFIX}{}-{}.png",
-            std::process::id(),
-            self.shots
-        );
+        let path = format!("{SCREENSHOT_PREFIX}{}-{}.png", self.nonce(), self.shots);
         let result = self
             .request(
                 engine,
@@ -242,11 +248,7 @@ impl Session {
             // The first coordinate call before any screenshot: take one now, so coordinates
             // read off the screenshots the agent sees map the same way as later ones.
             self.shots += 1;
-            let path = format!(
-                "{SCREENSHOT_PREFIX}{}-{}.png",
-                std::process::id(),
-                self.shots
-            );
+            let path = format!("{SCREENSHOT_PREFIX}{}-{}.png", self.nonce(), self.shots);
             let side = self.last_side.unwrap_or(crate::usetools::DEFAULT_MAX_SIDE);
             let mapping = json!({"name": "get_desktop_state",
                 "arguments": {"max_image_dimension": side, "screenshot_out_file": path}});
