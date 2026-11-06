@@ -61,3 +61,47 @@ Plan: [PLAN.md](PLAN.md).
   its connection-ended message, and SIGTERM and SIGINT each ended the engine
   with exit 0 and removed the socket. No computer was created: there is no `/dev/kvm` here.
   A build of `silod` in a fresh target with `pkg-config` refusing every GTK package succeeded.
+- **Phase 2 review fixes:**
+  - SIGINT: the engine starts `msb` (lifecycle commands, backups, SSH access and remote
+    connections, guest commands) in its own process group on Linux, so a terminal's Ctrl-C
+    reaches `silod` alone; after the first SIGINT or SIGTERM the handlers keep listening and a
+    second one exits at once with status 1. The handlers are registered before the socket is
+    bound, so a signal sent as soon as `engine.sock` appears no longer kills the engine with
+    the socket left behind.
+  - Account: `silod --agent`, `--remote-bridge` and `--remote-guest` refuse euid 0 and 65534
+    ("use a dedicated account in the kvm group").
+  - Engine directory (`silod/src/install_trust.rs`): every ancestor from `/`, the directory,
+    `silod`, its siblings and everything under `resources/` must be owned by the account or root
+    with no group or other write bit (sticky `/tmp` refused); links must stay inside. The
+    refusal names the path. The agent then checks the MicroSandbox manifest against the
+    compiled-in runtime inputs and the SHA-256 of `msb` and `libkrunfw`
+    (`dependencies::verify_bundled_runtime`) before the first `msb` launch; an engine without
+    the runtime still starts.
+  - File credential store: directory descriptors for every step after the root (`openat`,
+    `renameat`, `unlinkat`, `fsync` through `rustix`), ancestors checked from `$XDG_DATA_HOME`
+    down, staged leftovers swept at engine start and on delete, refusals reported as
+    `credential_access_denied` with the path (`credential_store::file_store_refusal_message`)
+    and as refused in `engine.credentials.status`. The bridge and guest helper install the same
+    store. The first start records the store in `<data>/credential-store`; a different explicit
+    `SILO_CREDENTIAL_STORE` later stops startup.
+  - A unit test that the credential directory is never a runtime mount source or inside or
+    above one; the peer-credential test no longer hangs when its child cannot `setuid`.
+  - Docs: [Linux hosts](../THREAT-MODEL.md#linux-hosts) in the threat model; the Secrets and
+    engine guides; the install example no longer uses `/tmp`.
+  - Not done: the hash check runs once at start, not before each launch (anyone who can swap
+    the files afterwards could also swap `silod`), and `msb`'s expected hash comes from the
+    manifest the ownership check covers, since it is built from patched source; signed
+    archives stay roadmap milestone 11. Other engine children (SSH, Git, editors) keep the
+    engine's process group.
+  - Tests (same container, as root, `cargo test`): `silod` 327 unit tests and its 10 socket
+    tests passed; `silo-cli` 305 passed; `silo-host` 84 with `desktop` and 67 without passed.
+    `silo-engine`: 3037 passed, 19 failed, 45 ignored; the failures are the same 19 as above.
+  - Live (same container, Dev manifest, a test account made with `useradd`): `silod` as root
+    and the bridge as root were refused; as the test account from a root-owned
+    `/opt/silo-engine` it served, recorded `file` in `credential-store`, and `silo list`
+    answered. An engine under `/tmp`, a group-writable `engine-manifest.json` and
+    `SILO_CREDENTIAL_STORE=secret-service` after a `file` start were each refused with the path.
+    Two SIGINTs 20 ms apart exited 1 after the second; a SIGTERM sent as soon as
+    `engine.sock` appeared ended the session with exit 0 in three of three runs. The bridge
+    through a `~/.local/bin` link reported that Silo was not running. No runtime was
+    installed, so the hash check reported its absence; its failures are covered by unit tests.
