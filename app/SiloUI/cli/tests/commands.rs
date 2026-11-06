@@ -1110,11 +1110,17 @@ async fn a_fork_sweeps_after_it_returns_silently_and_keeps_its_own_job() {
     ops::fork(&connected, &args, None, &progress).await.unwrap();
     // The fork's job, and everything it reads, comes before the sweep's drop.
     let started = state.lock().unwrap().started.clone();
-    assert_eq!(started.first().map(String::as_str), Some("checkpoints.fork"));
+    assert_eq!(
+        started.first().map(String::as_str),
+        Some("checkpoints.fork")
+    );
     assert_eq!(started.last().map(String::as_str), Some("computers.delete"));
     assert!(!names_in(&state).contains(&"silo-baseline-8fa22f".to_owned()));
     // The job Ctrl-C names is the fork's (the sweep alone records none: see above).
     assert_eq!(connected.last_job().as_deref(), Some("job:3"));
     let lines = lines.into_inner().unwrap();
-    assert!(lines.iter().all(|line| !line.contains("baseline")), "{lines:?}");
+    assert!(
+        lines.iter().all(|line| !line.contains("baseline")),
+        "{lines:?}"
+    );
 }
