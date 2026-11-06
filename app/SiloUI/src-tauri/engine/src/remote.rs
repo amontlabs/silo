@@ -1572,6 +1572,9 @@ fn connection_failure(code: Option<i32>, stderr: &str) -> String {
     if code == Some(127) || missing_bridge {
         return "Silo's remote bridge is missing on the other device. Turn Connections off and on again there.".into();
     }
+    if has("unsupported silod argument: --remote-bridge") {
+        return "The other device runs a Silo version that cannot accept connections. Update Silo there.".into();
+    }
     CONNECTION_HELP.into()
 }
 /// The command the bridge runs on the other device (also forced by Silo's restricted key).
@@ -5162,6 +5165,12 @@ mod setup_tests {
 #[cfg(test)]
 mod connection_failure_tests {
     use super::*;
+    #[test]
+    fn a_bridge_that_rejects_its_flag_is_named_an_old_silo() {
+        let stderr = "silod: unsupported silod argument: --remote-bridge\n";
+        assert!(connection_failure(Some(1), stderr).contains("Update Silo there"));
+    }
+
     #[test]
     fn missing_bridge_stderr_recognizes_both_channels_without_exit_127() {
         for channel in [

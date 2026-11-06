@@ -42,6 +42,21 @@ pub fn run_remote_guest(args: &[String]) -> Result<i32, String> {
     })
 }
 
+/// Runs the Connections bridge that a controller's forced SSH command starts through the
+/// `~/.local/bin` link. It relays one request to this channel's `control.sock` and writes
+/// nothing to stdout before the reply, which the controller reads as a framed stream.
+pub fn run_remote_bridge(args: &[String]) -> Result<i32, String> {
+    autoreleasepool(|_| {
+        if !args.is_empty() {
+            return Err("usage: silod --remote-bridge".to_owned());
+        }
+        let manifest = service::current_bundle_manifest()?;
+        silo_engine::channel::init(&manifest.channel_identifier);
+        silo_engine::remote::run_bridge()?;
+        Ok(0)
+    })
+}
+
 pub fn run_agent() -> Result<i32, String> {
     set_private_umask();
     let executable = std::env::current_exe().map_err(|error| error.to_string())?;
