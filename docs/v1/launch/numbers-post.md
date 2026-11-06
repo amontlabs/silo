@@ -24,7 +24,7 @@ forks of the first `-n 4` run). `main` was a Linux computer with 2 CPUs and 4 Gi
 - **Machine:** Apple M4 Max, 64 GiB RAM, 16 cores, macOS 26.5 (25F71). One machine.
 - **Build:** a Dev-channel build of commit `09677470` in the release profile, with the same
   runtime binaries a release ships (MicroSandbox 0.7.6 with 24 Silo patches, libkrunfw 5.6.1,
-  guest image ubuntu-24.04-v5). It is not the signed production app. The `silo` command is the one
+  guest image ubuntu-24.04-v5). It is not the production app. The `silo` command is the one
   bundled in that app (release profile, Dev channel).
 - **Runs:** N=3 for each time; we report the median with min and max, and every run.
 - **Clock:** monotonic wall time of the `silo fork` process from start to exit. Each fork ran
@@ -47,7 +47,7 @@ forks of the first `-n 4` run). `main` was a Linux computer with 2 CPUs and 4 Gi
 - One machine, three runs each. Treat the medians as one data point, not a distribution.
 - The first run of the slow path (12.49 s) and the third of the fast path (19.69 s) were the
   slow ones; we did not look into why.
-- The production app is signed and notarized differently; we did not measure it.
+- We did not measure the production app (0.13.0, signed ad hoc, not notarized).
 - Memory is what `footprint` reports for the fork's VM processes on the Mac, 20 s after ready, with
   nothing running in the fork but the recipe's web server. It will differ under a real workload.
 
@@ -57,5 +57,5 @@ forks of the first `-n 4` run). `main` was a Linux computer with 2 CPUs and 4 Gi
 - Keep (`silo fold`), undo, Make this main, and `silo diff`.
 - Memory of a macOS fork; disk used by a fork or a checkpoint.
 - A fork while an agent or a heavy workload runs in `main`.
-- Larger `-n` values, other Macs, the signed production app.
+- Larger `-n` values, other Macs, the production app.
 - The first run on a new Mac (guest image download).
