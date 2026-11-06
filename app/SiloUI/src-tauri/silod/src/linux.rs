@@ -284,7 +284,10 @@ fn write_store_record(path: &Path, store: CredentialStore) -> Result<(), String>
         .parent()
         .ok_or_else(|| "The credential store record has no directory".to_owned())?;
     fs::create_dir_all(directory).map_err(failed)?;
-    let staged = directory.join(format!(".{CREDENTIAL_STORE_RECORD}.{}", std::process::id()));
+    let staged = directory.join(format!(
+        ".{CREDENTIAL_STORE_RECORD}.{}",
+        uuid::Uuid::new_v4().simple()
+    ));
     let written = (|| {
         let mut file = fs::File::options()
             .write(true)

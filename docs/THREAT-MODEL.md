@@ -84,7 +84,7 @@ Silo passes no `--net-*` rule when it creates a Linux computer, so the computer 
 default policy, the `Public` profile
 ([MicroSandbox `types.rs`](https://github.com/superradcompany/microsandbox/blob/09df3d4b9d832adaede1fb9a198cfc660bfab8cd/crates/network/lib/model/policy/types.rs#L823)).
 The `--net-strict=true` flag
-([`runtime/mod.rs#L6307`](../app/SiloUI/src-tauri/engine/src/runtime/mod.rs#L6307)) only pins
+([`runtime/mod.rs#L6533`](../app/SiloUI/src-tauri/engine/src/runtime/mod.rs#L6307)) only pins
 hostname-rule enforcement and has no effect while no hostname rule exists. On checkpoint restore,
 Silo re-passes the same rules from the computer's recorded policy
 ([`checkpoints.rs#L467`](../app/SiloUI/src-tauri/engine/src/runtime/checkpoints.rs#L467)). The resulting
@@ -154,7 +154,7 @@ placeholder in outbound requests ([docs/SiloUI-SECRETS.md](SiloUI-SECRETS.md)):
   the value delivered to the runtime process on standard input (`MSB_SECRET_VALUES_STDIN`), never
   in arguments, the configuration file or the host environment; the stored configuration holds
   only an opaque source name `SILO_SECRET_<hash>`
-  ([`runtime/mod.rs#L1803`](../app/SiloUI/src-tauri/engine/src/runtime/mod.rs#L1803),
+  ([`runtime/mod.rs#L1841`](../app/SiloUI/src-tauri/engine/src/runtime/mod.rs#L1803),
   [`microsandbox-secret-values-stdin-0.7.6.patch`](../app/SiloUI/patches/microsandbox-secret-values-stdin-0.7.6.patch)). MicroSandbox's parser then sets
   substitution to **headers only** (no query, no body) and, on Linux computers, lets the unchanged
   placeholder go to any host, `passthrough=*` ([MicroSandbox `common.rs` `parse_secret`](https://github.com/superradcompany/microsandbox/blob/09df3d4b9d832adaede1fb9a198cfc660bfab8cd/crates/cli/lib/commands/common.rs#L2893)).
@@ -279,7 +279,7 @@ Limits:
 
 Each Linux computer's `/workspace` is an owned disk image attached as a block device
 (`--mount-owned /workspace:kind=disk`,
-[`runtime/mod.rs#L6292`](../app/SiloUI/src-tauri/engine/src/runtime/mod.rs#L6292)), and its root
+[`runtime/mod.rs#L6518`](../app/SiloUI/src-tauri/engine/src/runtime/mod.rs#L6292)), and its root
 filesystem is a separate disk. No host folder of the user's is shared into a computer. A Linux
 computer sees one host folder, and a computer created with built-in computer use sees up to two
 more. macOS computers get none.
@@ -460,7 +460,7 @@ where this section says otherwise.
 | | Mac | Linux host |
 | --- | --- | --- |
 | Hypervisor | Hypervisor.framework under libkrun, in the signed `msb` | KVM under libkrun, in `msb` running as the engine's account. Silo adds no seccomp filter or namespace around it. |
-| Which binary serves the socket | The bundle's code signature | Location and ownership: before it reads anything, `silod` refuses an engine directory, any directory above it, `silod`, any entry beside it, or anything under `resources/` that an account other than its own or root owns or can change, and links that leave the directory ([`install_trust.rs#L46`](../app/SiloUI/src-tauri/silod/src/install_trust.rs#L46), called from [`linux.rs#L38`](../app/SiloUI/src-tauri/silod/src/linux.rs#L38)). Before the first `msb` launch the agent checks the MicroSandbox manifest against the runtime inputs compiled into the build and hashes `msb` and `libkrunfw` against it ([`dependencies.rs#L923`](../app/SiloUI/src-tauri/engine/src/dependencies.rs#L923), [`linux.rs#L123`](../app/SiloUI/src-tauri/silod/src/linux.rs#L123)); `libkrunfw`'s hash is compiled in, `msb`'s comes from that manifest, which the ownership check covers. Nothing is signed: signed archives are roadmap milestone 11. |
+| Which binary serves the socket | The bundle's code signature | Location and ownership: before it reads anything, `silod` refuses an engine directory, any directory above it, `silod`, any entry beside it, or anything under `resources/` that an account other than its own or root owns or can change, and links that leave the directory ([`install_trust.rs#L46`](../app/SiloUI/src-tauri/silod/src/install_trust.rs#L46), called from [`linux.rs#L38`](../app/SiloUI/src-tauri/silod/src/linux.rs#L38)). Before the first `msb` launch the agent checks the MicroSandbox manifest against the runtime inputs compiled into the build and hashes `msb` and `libkrunfw` against it ([`dependencies.rs#L933`](../app/SiloUI/src-tauri/engine/src/dependencies.rs#L923), [`linux.rs#L123`](../app/SiloUI/src-tauri/silod/src/linux.rs#L123)); `libkrunfw`'s hash is compiled in, `msb`'s comes from that manifest, which the ownership check covers. Nothing is signed: signed archives are roadmap milestone 11. |
 | Credential values | Keychain items whose access list names the engine | One 0600 file per item under 0700 directories at `$XDG_DATA_HOME/<identifier>/credentials/<service>/<account>` ([`credential_file_store.rs#L105`](../app/SiloUI/src-tauri/engine/src/credential_file_store.rs#L105)). Every process of the engine's account and root can read them, and a backup of the home directory copies them. `SILO_CREDENTIAL_STORE=secret-service` is untested. |
 | Client check | `getpeereid` | `SO_PEERCRED` ([`socket.rs#L76`](../app/SiloUI/src-tauri/silod/src/socket.rs#L76)); the same effective-UID comparison |
 | Paths | `~/Library/...` | XDG data, cache and state directories ([`paths.rs#L36`](../app/SiloUI/src-tauri/silod/src/paths.rs#L36)); `~/.silo` and `~/.silo-dev` hold the socket on both |
@@ -510,7 +510,8 @@ Not defended on a Linux host:
 - **Root**, which can read and change everything above.
 - **A writable install directory.** The ownership check makes `silod` refuse one, but only at
   start: an account that can change the directory later, or a writable directory the check does
-  not cover, can still replace what the engine runs next. Nothing is signed.
+  not cover, can still replace what the engine runs next. The check reads mode bits only, so
+  write access granted by a POSIX ACL is not seen. Nothing is signed.
 - **Other local users reaching loopback listeners.** Published ports, SSH access to a computer and
   host-push listen on the host's loopback, which every account on the host can reach. Use a
   single-tenant host.
@@ -530,7 +531,7 @@ These follow from the design today, not from bugs:
   compromise; a restore replaces the disk, not what the agent already sent or did with its
   credentials.
 - **Resource abuse.** CPU, memory and disk are capped per computer
-  ([`runtime/mod.rs#L6282`](../app/SiloUI/src-tauri/engine/src/runtime/mod.rs#L6282),
+  ([`runtime/mod.rs#L6508`](../app/SiloUI/src-tauri/engine/src/runtime/mod.rs#L6282),
   [`engine.rs#L546`](../app/SiloUI/src-tauri/engine/src/macos_computers/engine.rs#L546)). Outbound bandwidth and the
   number of connections are not: `max_connections` is null in
   [`github-network-default.json`](../app/SiloUI/src-tauri/guest/github-network-default.json), no rate limiter is set,

@@ -206,7 +206,9 @@ behind `cfg(target_os = "linux")`.
   ```
 
   A root-owned `/opt/silo-engine` works the same way. An engine under `/tmp`, or in a directory
-  another account can write to, does not start.
+  another account can write to, does not start. Group write counts even for a group only you are
+  in, so a directory made under a umask of `002` needs the `chmod` above, and Debian's group-writable
+  `/usr/local` is refused.
 
   This proves the daemon serves; creating or starting a computer also needs `/dev/kvm`, the
   runtime resources above and the guest image.

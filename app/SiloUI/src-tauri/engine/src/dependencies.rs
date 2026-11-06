@@ -22,6 +22,8 @@ const SYSTEM_BUDGET: Duration = Duration::from_secs(4);
 const MICROSANDBOX_BUDGET: Duration = Duration::from_secs(15);
 const GIT_BUDGET: Duration = Duration::from_secs(10);
 const PROCESS_TIMEOUT: Duration = Duration::from_secs(3);
+#[cfg(target_os = "linux")]
+const STARTUP_HASH_BUDGET: Duration = Duration::from_secs(120);
 #[cfg(any(target_os = "linux", test))]
 const MAX_HASH_BYTES: u64 = 128 * 1024 * 1024;
 const MAX_OUTPUT: u64 = 8 * 1024;
@@ -318,6 +320,11 @@ fn readable_file(path: &Path) -> Result<(), ProbeError> {
 
 #[cfg(any(target_os = "linux", test))]
 fn sha256_file(path: &Path, deadline: Instant) -> Result<String, ProbeError> {
+    sha256_file_until(path, deadline.min(Instant::now() + PROCESS_TIMEOUT))
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn sha256_file_until(path: &Path, deadline: Instant) -> Result<String, ProbeError> {
     let mut file = open_regular_file(path)?;
     let length = file
         .metadata()
@@ -334,7 +341,6 @@ fn sha256_file(path: &Path, deadline: Instant) -> Result<String, ProbeError> {
             path.display()
         )));
     }
-    let deadline = deadline.min(Instant::now() + PROCESS_TIMEOUT);
     let mut hasher = Sha256::new();
     let mut buffer = [0_u8; 64 * 1024];
     loop {
@@ -880,7 +886,11 @@ fn verify_macos_signature(path: &Path, deadline: Instant) -> Result<(), ProbeErr
 
 #[cfg(target_os = "linux")]
 fn verify_linux_hash(path: &Path, expected: &str, deadline: Instant) -> Result<(), ProbeError> {
-    let actual = sha256_file(path, deadline)?;
+    linux_hash_matches(path, expected, sha256_file(path, deadline)?)
+}
+
+#[cfg(target_os = "linux")]
+fn linux_hash_matches(path: &Path, expected: &str, actual: String) -> Result<(), ProbeError> {
     if actual == expected {
         Ok(())
     } else {
@@ -960,12 +970,15 @@ fn verify_runtime_hashes(
             ));
         }
     }
-    let deadline = Instant::now() + PROCESS_TIMEOUT;
+    // A refusal here stops the engine, so this one-off check gets a budget of its own,
+    // generous enough for a cold disk, rather than the dependency report's.
+    let deadline = Instant::now() + STARTUP_HASH_BUDGET;
     for (path, expected) in [
         (executable, manifest.executable.sha256.as_str()),
         (library, manifest.library.sha256.as_str()),
     ] {
-        verify_linux_hash(path, expected, deadline)
+        sha256_file_until(path, deadline)
+            .and_then(|actual| linux_hash_matches(path, expected, actual))
             .map_err(|error| format!("{}: {}", path.display(), probe_message(error)))?;
     }
     Ok(())
