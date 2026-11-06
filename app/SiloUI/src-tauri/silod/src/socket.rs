@@ -2227,7 +2227,36 @@ mod peer_credential_tests {
             }
         };
 
-        let (stream, _) = listener.accept().unwrap();
+        // A child that cannot become the other account exits instead of connecting, so the
+        // accept is bounded and reports the child's status rather than waiting forever.
+        listener.set_nonblocking(true).unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+        let stream = loop {
+            match listener.accept() {
+                Ok((stream, _)) => break stream,
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock => {}
+                Err(error) => panic!("accept failed: {error}"),
+            }
+            let mut status = 0;
+            // SAFETY: `child` is this test's own child; WNOHANG never blocks.
+            let waited = unsafe { libc::waitpid(child, &mut status, libc::WNOHANG) };
+            if waited == child {
+                panic!(
+                    "the child exited before connecting (status {status:#x}: 2 means setgid or \
+                     setuid to {OTHER} failed, 3 that it could not connect)"
+                );
+            }
+            if std::time::Instant::now() >= deadline {
+                // SAFETY: as above; the child is ours and is reaped here.
+                unsafe {
+                    libc::kill(child, libc::SIGKILL);
+                    libc::waitpid(child, &mut status, 0);
+                }
+                panic!("the child did not connect within 15 seconds");
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        };
+        stream.set_nonblocking(false).unwrap();
         let provider = SystemPeerEuidProvider;
         assert_eq!(provider.peer_euid(stream.as_raw_fd()).unwrap(), OTHER);
         let error = check_peer_euid(&provider, stream.as_raw_fd(), 0).unwrap_err();
