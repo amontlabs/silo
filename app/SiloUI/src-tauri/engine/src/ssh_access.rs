@@ -8,10 +8,10 @@ use silo_engine::{Audience, Event};
 use std::{
     collections::{BTreeMap, BTreeSet},
     io::{BufRead, BufReader},
-    sync::mpsc::SyncSender,
     net::Ipv4Addr,
     path::PathBuf,
     process::{Child, Command, Stdio},
+    sync::mpsc::SyncSender,
     sync::{Mutex, OnceLock},
     time::{Duration, Instant},
 };
@@ -1182,7 +1182,8 @@ mod tests {
         let id = "00000000-0000-4000-8000-0000000000cc";
         let (mut runtime, output) = UnixStream::pair().unwrap();
         let (ready, readied) = std::sync::mpsc::sync_channel(1);
-        let reader = std::thread::spawn(move || follow_listener(BufReader::new(output), id, &ready));
+        let reader =
+            std::thread::spawn(move || follow_listener(BufReader::new(output), id, &ready));
         // Waits until the reader has handled everything written so far.
         let settle = |busy: bool| {
             let until = Instant::now() + Duration::from_secs(5);
@@ -1507,7 +1508,9 @@ sys.stdin.buffer.read()
         fs::write(&p.executable, script).unwrap();
         let c = config();
         let mut owned = Owners::default();
-        owned.listeners.insert(c.computer.clone(), Listener::new(&c));
+        owned
+            .listeners
+            .insert(c.computer.clone(), Listener::new(&c));
         for _ in 0..2 {
             let observed = inspect_running(&p, &c);
             assert_eq!(

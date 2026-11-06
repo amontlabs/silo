@@ -489,8 +489,7 @@ fn status(config: &Config) -> ConnectionsStatus {
         addresses,
         name,
         error: crate::sync::lock_or_recover(&START_ERROR, "connections status").clone(),
-        cli_link_error: crate::sync::lock_or_recover(&CLI_LINK_ERROR, "connections status")
-            .clone(),
+        cli_link_error: crate::sync::lock_or_recover(&CLI_LINK_ERROR, "connections status").clone(),
     }
 }
 /// Why the `silo` command is not on PATH, from the engine's start. Changes to Connections
@@ -685,12 +684,7 @@ fn link_cli(home: &Path, engine: &Path) -> Result<(), String> {
             channel.cli_link_name()
         ));
     }
-    link_owned(
-        home,
-        channel.cli_link_name(),
-        &cli,
-        &is_bundled_cli,
-    )
+    link_owned(home, channel.cli_link_name(), &cli, &is_bundled_cli)
 }
 pub async fn set_connections_enabled(enabled: bool) -> Result<ConnectionsStatus, String> {
     settings_io(move || {

@@ -6,10 +6,10 @@ Tracker: Linear project "Silo v1: git for agent computers" (P-AMO-8).
 
 ## Resume
 
-- **Phase:** 6 on branch `claude/silo-v1-phase-6`, PR open. Phases 0-5 merged (#60-#65).
-- **Done in phase 6:** OpenClaw and Hermes recipes (OpenClaw values measured; Hermes unverified), final run 25/25 plus OpenClaw 9/9 on a release-profile Dev build (`docs/v1/evidence/final/`), release prep (`docs/v1/release/`), the `silo` CLI shipped in the app, launch drafts (`docs/v1/launch/`, owner approves).
-- **Owner steps:** approve the launch drafts; Keychain repair (phase 4 credentials check, phase 1/3 secret checks); drop leftovers `e2e-p3-macsrc`, `e2e-p3-macsrc-before-20261105-2253`, `silo-baseline-8fa22f` (the last fails on the Keychain); the release steps in `docs/v1/release/README.md`; post `docs/v1/upstream/` drafts.
-- **Next action:** merge the phase 6 PR when CI is green; then phase 7 assessment (AMO-90).
+- **Phase:** 7 on branch `claude/silo-v1-phase-7`, PR open. Phases 0-6 merged (#60-#65, #70).
+- **Done in phase 7:** app screens for pending changes, review (keep / throw away / open fork) and steps (fork from step, fork tree), driven once in the real app (`docs/v1/evidence/phase-7/app-check.txt`).
+- **Owner steps:** approve `docs/v1/launch/` drafts; Keychain repair (phase 4 credentials check; phase 1/3 secret checks); release steps in `docs/v1/release/README.md`; post `docs/v1/upstream/` drafts; drop leftovers `e2e-p3-macsrc`, `e2e-p3-macsrc-before-20261105-2253` and `silo-baseline-8fa22f` (the last needs the Keychain repair).
+- **Next action:** merge the phase 7 PR when CI is green; v1 build complete.
 
 ## Start
 
@@ -109,6 +109,14 @@ VM checks: in-guest client from inside a Linux main; computer use on Linux and m
 ## Spec changes
 
 ## Status
+
+### 6 Nov 2026: phase 7 passed
+
+- **Assessment re-checked:** the app built, its 2820 frontend tests passed, and the backend already had every method the screens need; the screens only add to the app.
+- **Shipped:** Tauri commands for review requests, steps and the fork tree; Pending changes page (all devices, unreachable devices shown); review page (buckets, diff text, credentials line, stale state, keep with a confirmation naming the target, throw away, open fork with copyable URLs); steps panel with fork from a step and a fork tree. Also: requests of deleted forks or targets are closed (`closedReason`).
+- **Reviews:** Opus; findings fixed (stale wording, keep confirmation, no undo claim without an undo control, URL opening, error messages, contract test types).
+- **Real-app check:** each screen driven once in Silo Dev with LCU against live data: keep carried the fork's file into main (CLI confirms), fork from step 1 created the fork. Evidence: `docs/v1/evidence/phase-7/app-check.txt` (screenshots could not be saved; texts recorded).
+- **Tests:** frontend 2854 passed; Rust command and permission tests pass.
 
 ### 6 Nov 2026: phase 6 final run passed
 
