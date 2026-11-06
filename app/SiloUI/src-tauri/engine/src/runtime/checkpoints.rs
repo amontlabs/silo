@@ -879,7 +879,11 @@ fn capture_with_kind(
             "Verification failed",
         ),
         Err(failure) => (
-            Err(explain_rejected_capture(paths, configuration.name(), failure)),
+            Err(explain_rejected_capture(
+                paths,
+                configuration.name(),
+                failure,
+            )),
             "Checkpoint failed",
         ),
     };
