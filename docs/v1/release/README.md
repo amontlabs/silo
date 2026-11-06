@@ -17,13 +17,19 @@ The `silo` CLI is built with the app (`build_desktop.py` locally; `-p silo-cli` 
 
 ## Version
 
-`npm run release:version` was run: `silo-ui` is now **0.13.0** (from 0.12.0; 34 changesets consumed, 22 `minor`, 12 `patch`). It updated `package.json`, `package-lock.json`, `src-tauri/Cargo.toml`, `Cargo.lock` and `CHANGELOG.md`, and wrote [`docs/releases/0.13.0.md`](../../releases/0.13.0.md), the update notes. An "Opening this version" paragraph at the top of those notes tells users how to open an app that is not notarized. "v1" is the product milestone, not the version number. A draft of the user-facing text is in [notes-draft.md](notes-draft.md).
+`npm run release:version` was run: `silo-ui` is now **0.13.0** (from 0.12.0; 38 changesets consumed, 24 `minor`, 14 `patch`). It updated `package.json`, `package-lock.json`, `src-tauri/Cargo.toml`, `Cargo.lock` and `CHANGELOG.md`, and wrote [`docs/releases/0.13.0.md`](../../releases/0.13.0.md), the update notes. An "Opening this version" paragraph at the top of those notes tells users how to open an app that is not notarized. "v1" is the product milestone, not the version number. A draft of the user-facing text is in [notes-draft.md](notes-draft.md).
 
 The engine has its own version (`silod/Cargo.toml` and `engineVersion` in the engine manifests). Whether to cut an `engine-v<version>` release is the owner's call; this slice did not change it.
 
 ## Release without Apple signing
 
-With none of the seven Apple secrets set in `release-signing`, a tag push or `draft` dispatch of **Build Silo release** now signs the app and DMG ad hoc and skips notarization; the run shows a warning. A partial set of secrets fails the run. Adding all seven later brings back Developer ID signing and notarization without a workflow change. The updater key `TAURI_SIGNING_PRIVATE_KEY` (and its password) is still required in `release-signing`. Details: [Releases without Developer ID signing](../../SiloUI-RELEASES.md#releases-without-developer-id-signing).
+The fallback is opt-in. Set the repository variable once:
+
+```sh
+gh variable set SILO_RELEASE_ALLOW_UNNOTARIZED --body true
+```
+
+With it, and none of the seven Apple secrets set in `release-signing`, a tag push or `draft` dispatch of **Build Silo release** signs the app and DMG ad hoc and skips notarization; the run shows a warning. Without the variable, missing secrets fail the run as before; a partial set always fails. The resolved mode is uploaded as the `signing-mode-<asset>` artifact, printed by `publish-release.py`, and stated at the top of the draft page. Publication refuses an ad hoc draft after a notarized release unless **Publish verified Silo draft** is dispatched with `allow_unnotarized` (earlier release pages carry no signing marker and count as not notarized, so 0.13.0 needs no flag). Adding all seven later brings back Developer ID signing and notarization without a workflow change. The updater key `TAURI_SIGNING_PRIVATE_KEY` (and its password) is still required in `release-signing`. Details: [Releases without Developer ID signing](../../SiloUI-RELEASES.md#releases-without-developer-id-signing).
 
 What someone installing it sees: the first open of `Silo.app` says macOS cannot verify the app, with no Open button. They open System Settings → Privacy & Security and click **Open Anyway**, or run `xattr -dr com.apple.quarantine /Applications/Silo.app` after copying it to Applications. Expected, not yet checked on a real update: in-app updates open without that dialog, and macOS may ask again for Keychain access after an update because the ad-hoc signature changes.
 
@@ -43,11 +49,11 @@ Tests: `python3 -m unittest discover -s scripts -p 'test_*release*.py'` exit 0, 
 
 ## Owner's remaining steps, in order
 
-1. **Apple signing: skipped for 0.13.0.** Leave the seven Apple secrets unset in `release-signing`; check that `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` are set there. For a later notarized release: Developer ID Application certificate as `.p12` and an App Store Connect API key, added as `APPLE_CERTIFICATE_P12_BASE64`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_DEVELOPER_ID_IDENTITY`, `APPLE_TEAM_ID`, `APPLE_API_KEY_P8`, `APPLE_API_KEY_ID`, `APPLE_API_ISSUER_ID` (checklist: `SiloUI-RELEASES.md#owner-checklist`).
+1. **Apple signing: skipped for 0.13.0.** Run `gh variable set SILO_RELEASE_ALLOW_UNNOTARIZED --body true` and leave the seven Apple secrets unset in `release-signing`; check that `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` are set there. For a later notarized release: Developer ID Application certificate as `.p12` and an App Store Connect API key, added as `APPLE_CERTIFICATE_P12_BASE64`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_DEVELOPER_ID_IDENTITY`, `APPLE_TEAM_ID`, `APPLE_API_KEY_P8`, `APPLE_API_KEY_ID`, `APPLE_API_ISSUER_ID` (checklist: `SiloUI-RELEASES.md#owner-checklist`).
 2. **Push and merge.** `git push -u origin claude/silo-v1-release`, open a pull request to `main`, let CI pass, merge.
 3. **Guest image.** If `guest-image/image-lock.json` changed since the last published image, publish the guest release first (**Publish Silo guest image**, environment `guest-image-publish` with required reviewers), because the app downloads the pinned assets directly.
 4. **Review the version commit** (done on the branch): version files, `CHANGELOG.md`, `docs/releases/0.13.0.md`, removed changesets. Edit the wording before merging if needed.
-5. **Draft.** From the clean, up-to-date `main` checkout in `app/SiloUI`: `npm run release:draft` pushes the `v0.13.0` tag, which starts **Build Silo release**; approve `release-signing`. The macOS job warns that it signs ad hoc. Check the draft on a downloaded copy: `codesign -dv Silo.app` shows `Signature=adhoc`; `spctl --assess` rejects it, as expected without notarization.
+5. **Draft.** From the clean, up-to-date `main` checkout in `app/SiloUI`: `npm run release:draft` pushes the `v0.13.0` tag, which starts **Build Silo release**; approve `release-signing`. The macOS job warns that it signs ad hoc, and the draft page says it is not notarized. Check the draft on a downloaded copy: `codesign -dv Silo.app` shows `Signature=adhoc`; `spctl --assess` rejects it, as expected without notarization.
 6. **Acceptance evidence** (`SiloUI-RELEASES.md#required-release-acceptance-evidence`): clean install from the DMG, a real update from the previous version, the failure cases listed there, and the computer-use live tests. No public-release claim without it.
 7. **GitHub release.** `npm run release:publish`; approve `release-publish`. Publication is done only when **Publish verified Silo draft** succeeds.
 8. **Engine release** (if the engine version was raised): run **Publish Silo engine** from `main`.

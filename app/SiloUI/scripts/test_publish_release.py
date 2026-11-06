@@ -51,11 +51,14 @@ class ReleaseTests(unittest.TestCase):
             for name in publish.EXPECTED:
                 (assets/name).write_text('signedfixture' if name.endswith('.sig') else 'package')
             Path('release-notes.md').write_text('# Silo 0.1.0\n\n### Patch Changes\n\n- abc: Fix.\n')
+            Path('signing-mode.txt').write_text('adhoc\n')
             with patch.dict(os.environ,GH_REPO='test/repo',GITHUB_SHA='sha'), patch('sys.argv',['publish','0.1.0']), patch.object(publish,'gh',side_effect=['[]','sha','']) as gh:
                 publish.main()
             create = gh.call_args_list[-1].args
             self.assertEqual(create[create.index('--notes-file')+1], 'release-page.md')
-            self.assertTrue(Path('release-page.md').read_text().startswith('| Download | |'))
+            page = Path('release-page.md').read_text()
+            self.assertTrue(page.startswith('<!-- silo-signing: adhoc -->\n'))
+            self.assertIn('\n\n| Download | |', page)
             self.assertEqual(json.loads((assets/'latest.json').read_text())['notes'], Path('release-notes.md').read_text())
 
     def test_missing_updater_archive_fails_before_feed(self):
@@ -125,5 +128,37 @@ class ReleaseTests(unittest.TestCase):
         with patch.dict(os.environ,GH_REPO='test/repo',GITHUB_SHA='built-sha'), patch('sys.argv',['publish','0.1.0']), patch.object(publish,'gh',side_effect=['[]','other-sha']) as gh:
             with self.assertRaisesRegex(RuntimeError,'tag'): publish.main()
             self.assertEqual(gh.call_count,2)
+
+    def test_draft_page_states_the_signing_mode_with_a_marker(self):
+        for mode, phrase in (('adhoc', 'not notarized'), ('developer-id', 'notarized by Apple')):
+            page = publish.release_page('0.1.0', 'test/repo', '# Silo 0.1.0\n\nNotes', mode)
+            self.assertTrue(page.startswith(f'<!-- silo-signing: {mode} -->\n'))
+            self.assertIn(phrase, page.splitlines()[1])
+            self.assertEqual(publish.signing_mode_of({'body': page}), mode)
+        self.assertIsNone(publish.signing_mode_of({'body': None}))
+        self.assertIsNone(publish.signing_mode_of(None))
+        self.assertNotIn('silo-signing', publish.release_page('0.1.0', 'test/repo', 'Notes'))
+
+    def test_signing_mode_file_must_name_a_release_mode(self):
+        path = self.root / 'signing-mode.txt'
+        with self.assertRaisesRegex(RuntimeError, 'missing'):
+            publish.read_signing_mode(path)
+        for mode in ('dry-run', 'yes', ''):
+            path.write_text(mode)
+            with self.assertRaisesRegex(RuntimeError, 'names no release signing mode'):
+                publish.read_signing_mode(path)
+        path.write_text('adhoc\n')
+        self.assertEqual(publish.read_signing_mode(path), 'adhoc')
+
+    def test_draft_is_refused_before_creation_without_a_signing_mode(self):
+        cwd = os.getcwd()
+        os.chdir(self.root)
+        self.addCleanup(os.chdir, cwd)
+        Path('release-notes.md').write_text('Notes')
+        with patch.dict(os.environ, GH_REPO='test/repo', GITHUB_SHA='sha'), patch('sys.argv', ['publish', '0.1.0']), \
+                patch.object(publish, 'gh', side_effect=['[]', 'sha']) as gh:
+            with self.assertRaisesRegex(RuntimeError, 'signing-mode.txt'):
+                publish.main()
+            self.assertEqual(gh.call_count, 2)
 
 if __name__=='__main__': unittest.main()

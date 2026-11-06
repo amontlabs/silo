@@ -10,7 +10,8 @@
   docs/SiloUI-RELEASES.md#apple-signing-and-notarization).
 
 `resolve-mode` turns a requested `developer-id` into `adhoc` when none of the Apple credentials
-is configured (an unsigned release); a partial set is an error.
+is configured and `SILO_RELEASE_ALLOW_UNNOTARIZED` is `true` (an unsigned release). Otherwise every
+credential is required.
 
 Printed commands show placeholders for credential values, never the values.
 """
@@ -43,17 +44,22 @@ def release_mode(environ=os.environ):
 APPLE_CREDENTIALS = (IDENTITY_ENV, *NOTARY_ENV, *CERTIFICATE_ENV)
 
 
+ALLOW_UNNOTARIZED_ENV = 'SILO_RELEASE_ALLOW_UNNOTARIZED'
+
+
 def resolve_mode(environ=os.environ, warn=None):
     """The mode a release build uses. A requested `developer-id` with no Apple credentials at all
-    becomes `adhoc`: signed ad hoc and not notarized. Any credential present requires all of them."""
+    becomes `adhoc` (signed ad hoc, not notarized) only when `SILO_RELEASE_ALLOW_UNNOTARIZED` is
+    `true`. Otherwise every credential is required."""
     mode = release_mode(environ)
     if mode != 'developer-id':
         return mode
     present = [name for name in APPLE_CREDENTIALS if environ.get(name, '').strip()]
-    if not present:
+    if not present and environ.get(ALLOW_UNNOTARIZED_ENV, '').strip() == 'true':
         if warn:
-            warn('::warning::No Apple Developer ID credentials are configured: this release is signed '
-                 'ad hoc and is not notarized. See docs/SiloUI-RELEASES.md#releases-without-developer-id-signing.')
+            warn('::warning::No Apple Developer ID credentials are configured and '
+                 f'{ALLOW_UNNOTARIZED_ENV} is true: this release is signed ad hoc and is not notarized. '
+                 'See docs/SiloUI-RELEASES.md#releases-without-developer-id-signing.')
         return 'adhoc'
     require_environment(APPLE_CREDENTIALS, environ)
     return mode

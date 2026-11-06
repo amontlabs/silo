@@ -62,13 +62,29 @@ class ResolveModeTests(unittest.TestCase):
         self.assertEqual(resolve_mode(self.CREDENTIALS, warnings.append), 'developer-id')
         self.assertEqual(warnings, [])
 
-    def test_a_developer_id_request_without_any_credential_signs_ad_hoc_and_warns(self):
+    def test_a_developer_id_request_without_credentials_signs_ad_hoc_only_when_allowed(self):
         warnings = []
-        environ = {'SILO_RELEASE_SIGNING': 'developer-id', 'APPLE_TEAM_ID': '  '}
+        environ = {'SILO_RELEASE_SIGNING': 'developer-id', 'APPLE_TEAM_ID': '  ',
+                   'SILO_RELEASE_ALLOW_UNNOTARIZED': 'true'}
         self.assertEqual(resolve_mode(environ, warnings.append), 'adhoc')
         self.assertEqual(len(warnings), 1)
         self.assertTrue(warnings[0].startswith('::warning::'))
         self.assertIn('not notarized', warnings[0])
+
+    def test_a_developer_id_request_without_credentials_fails_unless_allowed(self):
+        for allowed in (None, '', 'false', 'TRUE', '1'):
+            environ = {'SILO_RELEASE_SIGNING': 'developer-id'}
+            if allowed is not None:
+                environ['SILO_RELEASE_ALLOW_UNNOTARIZED'] = allowed
+            with self.subTest(allowed=allowed), self.assertRaisesRegex(RuntimeError, 'APPLE_TEAM_ID'):
+                resolve_mode(environ)
+
+    def test_the_allowance_never_replaces_a_partial_set_of_credentials(self):
+        environ = {**self.CREDENTIALS, 'SILO_RELEASE_ALLOW_UNNOTARIZED': 'true'}
+        del environ['APPLE_API_KEY_P8']
+        with self.assertRaisesRegex(RuntimeError, 'APPLE_API_KEY_P8'):
+            resolve_mode(environ)
+        self.assertEqual(resolve_mode({**self.CREDENTIALS, 'SILO_RELEASE_ALLOW_UNNOTARIZED': 'true'}), 'developer-id')
 
     def test_a_partial_set_of_credentials_fails_and_names_only_what_is_missing(self):
         for name in APPLE_CREDENTIALS:
@@ -349,6 +365,8 @@ class WorkflowTests(unittest.TestCase):
         resolve = build[build.index('- name: Resolve the macOS signing mode'):
                         build.index('- name: Import the Developer ID certificate')]
         self.assertIn('macos_notarization.py resolve-mode', resolve)
+        self.assertIn('SILO_RELEASE_ALLOW_UNNOTARIZED: ${{ vars.SILO_RELEASE_ALLOW_UNNOTARIZED }}', resolve)
+        self.assertIn('signing-mode-${{ inputs.asset }}', build)
         for name in APPLE_CREDENTIALS:
             self.assertIn(f"{name}: ${{{{ inputs.signing == 'developer-id' && secrets.{name} || '' }}}}", resolve)
         after = build[build.index('- name: Import the Developer ID certificate'):]

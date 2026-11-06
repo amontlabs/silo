@@ -437,7 +437,7 @@ described in the [workflow fix audit](research/micro-reviews/workflows-fixes.md)
 
 Drafts are Developer ID signed and notarized once the owner steps in
 [Apple signing and notarization](#apple-signing-and-notarization) are done;
-until then they are signed ad hoc
+until then they fail, or are signed ad hoc when the owner opts in
 ([Releases without Developer ID signing](#releases-without-developer-id-signing)).
 Artifact-only builds, local builds and a dry run stay ad-hoc signed and are not
 notarized; such an installation can require System Settings → Privacy & Security
@@ -458,33 +458,44 @@ signatures are separate and always checked.
 The `validate` job derives the requested mode: a draft requests `developer-id`,
 and `dry_run` together with `draft` is refused. The macOS build job then runs
 `macos_notarization.py resolve-mode`: with all seven Apple secrets present the
-draft stays `developer-id`; with none of them it becomes `adhoc` and the log
+draft stays `developer-id`; with none of them and the repository variable
+`SILO_RELEASE_ALLOW_UNNOTARIZED` set to `true` it becomes `adhoc` and the log
 shows a warning (see
 [Releases without Developer ID signing](#releases-without-developer-id-signing));
-with only some of them the run fails and names the missing ones. Credentials are
+otherwise the run fails and names the missing ones. Credentials are
 read only from the environment. A `developer-id` run stops before signing if the
 identity is not a `Developer ID Application:` certificate.
 
 #### Releases without Developer ID signing
 
 Without an Apple Developer ID, leave the seven Apple secrets unset in
-`release-signing`. Tag pushes and `draft` dispatches then build the same assets
-signed ad hoc and not notarized; the updater key (`TAURI_SIGNING_PRIVATE_KEY`)
-is still required, and update signatures are still checked. Adding all seven
+`release-signing` and opt in with the repository variable
+`SILO_RELEASE_ALLOW_UNNOTARIZED`:
+
+```sh
+gh variable set SILO_RELEASE_ALLOW_UNNOTARIZED --body true
+```
+
+Tag pushes and `draft` dispatches then build the same assets signed ad hoc and
+not notarized, with a warning in the log. Without the variable, missing Apple
+secrets fail the run as before; a partial set always fails. The updater key
+(`TAURI_SIGNING_PRIVATE_KEY`) is still required, and update signatures are still
+checked. The macOS job uploads the resolved mode as the `signing-mode-<asset>`
+artifact; `publish-release.py` prints it, states it on the draft page (with a
+`<!-- silo-signing: <mode> -->` marker) and, on publication, refuses an ad hoc
+draft when the previous published release was notarized unless **Publish
+verified Silo draft** is dispatched with `allow_unnotarized`. Adding all seven
 secrets later switches drafts back to Developer ID signing with no workflow
-change. Locally, `npm run desktop:build` produces the same kind of app and
+change; delete the variable then (`gh variable delete SILO_RELEASE_ALLOW_UNNOTARIZED`). Locally, `npm run desktop:build` produces the same kind of app and
 `SILO_RELEASE_SIGNING=adhoc python3 scripts/package-macos-release.py <Silo.app> <output> --engine <silod> --cli <silo>`
 the DMG and update archive.
 
 What users see: macOS quarantines the downloaded DMG, and the first open of
-`Silo.app` shows a dialog saying Apple could not verify it, with no Open button.
-They can either
-
-- open System Settings → Privacy & Security, find the message about Silo and
-  click **Open Anyway** (macOS 15 no longer offers this from right-click → Open
-  alone, but right-click → Open followed by Open Anyway works), or
-- after copying Silo to Applications, run
-  `xattr -dr com.apple.quarantine /Applications/Silo.app`.
+`Silo.app` shows a dialog saying Apple could not verify it. On macOS 15, after
+that first attempt they open System Settings → Privacy & Security and click
+**Open Anyway** next to the message about Silo. Alternatively, after copying
+Silo to Applications, they run
+`xattr -dr com.apple.quarantine /Applications/Silo.app`.
 
 Do not tell users to disable Gatekeeper globally. The Tauri updater does not
 set the quarantine attribute, so in-app updates are expected to open without

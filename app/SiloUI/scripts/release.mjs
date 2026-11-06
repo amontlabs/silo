@@ -46,7 +46,7 @@ export function release(action, root = app, run = (command, args) => execFileSyn
     if (!localTag) run(process.execPath, [resolve(root, "node_modules/@changesets/cli/bin.js"), "git-tag"])
     if (run("git", ["rev-parse", `${tag}^{commit}`]) !== head) throw new Error(`${tag} does not identify this commit.`)
     run("git", ["push", "origin", `refs/tags/${tag}`])
-    console.log(`Pushed ${tag}. GitHub Actions builds a signed draft; approve release-signing if requested. A repeated push does not restart a build. To retry, run Build Silo release on ${tag} with draft enabled.`)
+    console.log(`Pushed ${tag}. GitHub Actions builds a draft, Developer ID signed and notarized, or signed ad hoc when no Apple credentials are set and SILO_RELEASE_ALLOW_UNNOTARIZED is true; approve release-signing if requested. A repeated push does not restart a build. To retry, run Build Silo release on ${tag} with draft enabled.`)
   } else {
     // Dispatch against the immutable remote tag, not an unpushed local checkout.
     const remote = run("git", ["ls-remote", "origin", `refs/tags/${tag}`, `refs/tags/${tag}^{}`]).split("\n")

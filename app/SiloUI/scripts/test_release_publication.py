@@ -34,12 +34,15 @@ class PublicationGateTests(unittest.TestCase):
                  for line in checksum_file.read_text().splitlines()]
         checksum_file.write_text('\n'.join(lines) + '\n')
 
+    draft_body = None
+    previous = []
+
     def gh(self, *args):
         self.calls.append(args)
         if args[:1] == ('api',):
-            return json.dumps([[{'tag_name': 'v0.2.0', 'draft': True, 'prerelease': False,
+            return json.dumps([[{'tag_name': 'v0.2.0', 'draft': True, 'prerelease': False, 'body': self.draft_body,
                                 'assets': [{'name': path.name, 'size': path.stat().st_size}
-                                           for path in self.assets.iterdir()]}]])
+                                           for path in self.assets.iterdir()]}, *self.previous]])
         if args[:2] == ('release', 'download'):
             for path in self.assets.iterdir():
                 shutil.copyfile(path, Path(args[4]) / path.name)
@@ -49,7 +52,7 @@ class PublicationGateTests(unittest.TestCase):
             return ''
         self.fail(f'Unexpected GitHub action: {args}')
 
-    def run_publish(self, fail_verifier=None):
+    def run_publish(self, fail_verifier=None, extra=()):
         def verify(command, *, check):
             self.assertTrue(check)
             name = Path(command[1]).name
@@ -60,7 +63,7 @@ class PublicationGateTests(unittest.TestCase):
             return subprocess.CompletedProcess(command, 0)
 
         with patch.dict(os.environ, GH_REPO='test/repository'), \
-                patch('sys.argv', ['publish-release', '0.2.0', '--publish']), \
+                patch('sys.argv', ['publish-release', '0.2.0', '--publish', *extra]), \
                 patch.object(publish, 'gh', side_effect=self.gh), \
                 patch.object(publish.subprocess, 'run', side_effect=verify):
             publish.main()
@@ -74,6 +77,35 @@ class PublicationGateTests(unittest.TestCase):
         self.assertEqual(self.verifiers, ['verify-release-signatures.py', 'verify-release-metadata.py'])
         self.assertEqual(self.calls[-1], ('release', 'edit', 'v0.2.0', '--draft=false', '--latest', '--prerelease=false'))
         self.assertEqual(sum(call[:2] == ('release', 'edit') for call in self.calls), 1)
+
+    def release(self, tag, mode):
+        body = publish.release_page(tag[1:], 'test/repository', 'Notes', mode) if mode else 'Older notes'
+        return {'tag_name': tag, 'draft': False, 'prerelease': False, 'body': body}
+
+    def test_an_ad_hoc_draft_after_a_notarized_release_needs_the_explicit_flag(self):
+        self.draft_body = publish.release_page('0.2.0', 'test/repository', 'Notes', 'adhoc')
+        self.previous = [self.release('v0.0.9', 'adhoc'), self.release('v0.1.0', 'developer-id')]
+        with self.assertRaisesRegex(RuntimeError, 'v0.1.0 was notarized.*--allow-unnotarized'):
+            self.run_publish()
+        self.assertFalse(any(call[:2] in (('release', 'download'), ('release', 'edit')) for call in self.calls))
+        self.calls.clear()
+        self.run_publish(extra=['--allow-unnotarized'])
+        self.assertEqual(self.calls[-1][:2], ('release', 'edit'))
+
+    def test_an_unrecorded_draft_mode_after_a_notarized_release_is_refused(self):
+        self.previous = [self.release('v0.1.0', 'developer-id')]
+        with self.assertRaisesRegex(RuntimeError, 'not; refusing'):
+            self.run_publish()
+
+    def test_ad_hoc_after_ad_hoc_or_unrecorded_and_notarized_drafts_publish(self):
+        for draft, previous in (('adhoc', 'adhoc'), ('adhoc', None), ('developer-id', 'developer-id'), ('developer-id', 'adhoc')):
+            with self.subTest(draft=draft, previous=previous):
+                self.calls.clear()
+                self.verifiers.clear()
+                self.draft_body = publish.release_page('0.2.0', 'test/repository', 'Notes', draft)
+                self.previous = [self.release('v0.1.0', previous)]
+                self.run_publish()
+                self.assertEqual(self.calls[-1][:2], ('release', 'edit'))
 
     def test_empty_unexpected_draft_asset_cannot_publish(self):
         (self.assets / 'unreviewed-placeholder.zip').write_bytes(b'')

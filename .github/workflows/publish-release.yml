@@ -10,6 +10,10 @@ on:
         description: Owner-approved publication of version 1.0.0 or later
         type: boolean
         default: false
+      allow_unnotarized:
+        description: Owner-approved publication of an ad hoc signed draft after a notarized release
+        type: boolean
+        default: false
 concurrency:
   group: silo-release-publish
   queue: max
@@ -37,11 +41,15 @@ jobs:
           RELEASE_VERSION: ${{ inputs.version }}
           RELEASE_REF: ${{ github.ref }}
           ALLOW_STABLE: ${{ inputs.allow_stable }}
+          ALLOW_UNNOTARIZED: ${{ inputs.allow_unnotarized }}
         run: |
           set -euo pipefail
           test "$RELEASE_REF" = "refs/tags/v$RELEASE_VERSION"
           set --
           if [[ "$ALLOW_STABLE" == true ]]; then
             set -- --allow-stable
+          fi
+          if [[ "${ALLOW_UNNOTARIZED:-}" == true ]]; then
+            set -- "$@" --allow-unnotarized
           fi
           python3 app/SiloUI/scripts/publish-release.py "$RELEASE_VERSION" --publish "$@"

@@ -123,8 +123,9 @@ jobs:
             echo '::error::A dry run is artifact-only; it cannot create a draft.'
             exit 1
           fi
-          # Drafts request Developer ID signing and notarization; the macOS build signs ad hoc when
-          # no Apple credentials are configured (release-platform.yml). A dry run is never notarized.
+          # Drafts request Developer ID signing and notarization; the macOS build signs ad hoc only
+          # when no Apple credentials are set and SILO_RELEASE_ALLOW_UNNOTARIZED is true
+          # (release-platform.yml). A dry run is never notarized.
           signing=adhoc
           if [[ "$CREATE_DRAFT" == true ]]; then
             signing=developer-id
@@ -234,6 +235,11 @@ jobs:
           pattern: release-*
           merge-multiple: true
           path: release-assets
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: signing-mode-*
+          merge-multiple: true
+          path: .
       - name: Test release publication
         run: python3 -m unittest discover -s app/SiloUI/scripts -p 'test_*release*.py'
       - name: Read version and release notes
