@@ -980,6 +980,30 @@ fn a_full_capture_drops_the_guests_cached_entries_first_only_when_a_bridge_folde
 }
 
 #[test]
+fn a_capture_the_share_rejects_says_to_restart_and_releases_the_bridge_hold() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let paths = paths(&directory);
+    let rejected = || RuntimeError::Failed {
+        operation: "snapshot".into(),
+        exit_code: Some(1),
+        detail: "control operation rejected by peer".into(),
+    };
+    // Without a bridge folder the failure is reported as it is.
+    assert!(matches!(
+        explain_rejected_capture(&paths, "dev", rejected()),
+        RuntimeError::Failed { .. }
+    ));
+    std::fs::create_dir_all(crate::guest_client::spool_dir(&paths.home, "dev")).unwrap();
+    let explained = explain_rejected_capture(&paths, "dev", rejected()).to_string();
+    assert!(explained.contains("Restart the computer"), "{explained}");
+    let hold = crate::guest_client::hold_bridge("dev");
+    assert!(crate::guest_client::bridge_held("dev"));
+    drop(hold);
+    assert!(!crate::guest_client::bridge_held("dev"));
+}
+
+#[test]
 fn every_fork_scrubs_the_guest_client_token_once() {
     let token = silo_api::methods::guest_client::GUEST_TOKEN_PATH;
     let mut options = ForkOptions::default();

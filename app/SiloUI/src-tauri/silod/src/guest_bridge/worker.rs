@@ -166,6 +166,10 @@ fn work(shared: &Shared, computer: &str) {
         };
         let spool = Spool::new(guest_client::spool_dir(&home, name));
         spool.seal();
+        if guest_client::bridge_held(name) {
+            // A full capture of the running computer is being made.
+            continue;
+        }
         if spool.has_work() {
             let snapshot = shared.fresh(FRESH);
             let requests = |id: &str| shared.requests(id);
