@@ -29,6 +29,7 @@ use super::operations;
 use super::preparation;
 use super::push;
 use super::recipes;
+use super::review_requests;
 use super::secrets;
 use super::settings;
 use super::ssh_access;
@@ -57,6 +58,35 @@ pub fn changes_promote(params: keep::ChangesPromoteParams) -> Request<kind::Job>
 /// `changes.request`
 pub fn changes_request(params: keep::ChangesRequestParams) -> Request<kind::Command> {
     Request::new(MethodParams::ChangesRequest(params))
+}
+
+/// `changes.requests.list`
+pub fn changes_requests_list(
+    params: review_requests::ChangesRequestsListParams,
+) -> Request<kind::Query> {
+    Request::new(MethodParams::ChangesRequestsList(params))
+}
+
+/// `changes.requests.show`
+pub fn changes_requests_show(params: review_requests::RequestIdParams) -> Request<kind::Job> {
+    Request::new(MethodParams::ChangesRequestsShow(params))
+}
+
+/// `changes.requests.keep`
+pub fn changes_requests_keep(
+    params: review_requests::ChangesRequestsKeepParams,
+) -> Request<kind::Job> {
+    Request::new(MethodParams::ChangesRequestsKeep(params))
+}
+
+/// `changes.requests.throwAway`
+pub fn changes_requests_throw_away(params: review_requests::RequestIdParams) -> Request<kind::Job> {
+    Request::new(MethodParams::ChangesRequestsThrowAway(params))
+}
+
+/// `changes.requests.open`
+pub fn changes_requests_open(params: review_requests::RequestIdParams) -> Request<kind::Job> {
+    Request::new(MethodParams::ChangesRequestsOpen(params))
 }
 
 /// `changes.undo`

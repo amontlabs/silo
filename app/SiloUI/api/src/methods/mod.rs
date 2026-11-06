@@ -41,6 +41,7 @@ pub mod registry;
 pub mod request;
 #[rustfmt::skip]
 pub mod requests;
+pub mod review_requests;
 pub mod secrets;
 pub mod settings;
 pub mod ssh_access;

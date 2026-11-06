@@ -16,7 +16,7 @@ use crate::{
     fanout::{self, ManyArgs},
     flows, folder,
     ops::{self, CreateArgs, DiffArgs, ExecArgs, ForkArgs, Platform},
-    pr, render, steps,
+    pr, render, review, steps,
 };
 
 #[derive(Parser, Debug)]
@@ -69,6 +69,8 @@ pub enum Command {
     Fork(ForkCommand),
     /// Keep a fork's changes into the computer it came from.
     Fold(FoldCommand),
+    /// List review requests, or show, keep, throw away or open one.
+    Requests(RequestsCommand),
     /// Put a computer back to before its latest keep, or a folder back to before its latest fold.
     Undo {
         /// A computer, a fork made from a folder, or the folder's path.
@@ -251,6 +253,36 @@ pub struct FoldCommand {
 }
 
 #[derive(Args, Debug)]
+#[command(args_conflicts_with_subcommands = true)]
+pub struct RequestsCommand {
+    #[command(subcommand)]
+    pub action: Option<RequestsAction>,
+    /// Which requests to list: open (default), kept, thrown-away or all.
+    #[arg(long, value_name = "STATUS")]
+    pub status: Option<String>,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum RequestsAction {
+    /// A request with a fresh diff of its fork and the credentials the fork used.
+    Show { id: String },
+    /// Keep the request's fork into its target, pinned to the digest the request was made from.
+    Keep {
+        id: String,
+        /// Carry database changes even though no migrate step covers them.
+        #[arg(long)]
+        data_ok: bool,
+        /// A recipe whose keep: section applies.
+        #[arg(long, value_name = "PATH")]
+        recipe_file: Option<PathBuf>,
+    },
+    /// Drop the request's fork without keeping it. main and the target are never dropped.
+    ThrowAway { id: String },
+    /// Start the request's fork if it is stopped and say how to reach it.
+    Open { id: String },
+}
+
+#[derive(Args, Debug)]
 pub struct DiffCommand {
     pub computer: String,
     /// Cut the text to this many lines (default 15).
@@ -357,6 +389,10 @@ pub async fn run(cli: Cli, working_directory: &Path) -> Result<i32, CliError> {
         ),
         Command::Recipe(RecipeCommand::Build { name, .. }) => Some(project.named_recipe(name)?),
         Command::Fold(fold) => ops::resolve_recipe(fold.recipe_file.as_deref(), &project)?,
+        Command::Requests(RequestsCommand {
+            action: Some(RequestsAction::Keep { recipe_file, .. }),
+            ..
+        }) => ops::resolve_recipe(recipe_file.as_deref(), &project)?,
         _ => None,
     };
     let engine = Engine::connect(&socket).await?;
@@ -570,6 +606,35 @@ async fn dispatch(
             emit(json, &value, render::fold);
             return Ok(if value["status"] == "refused" { 2 } else { 0 });
         }
+        Command::Requests(requests) => match requests.action {
+            None => {
+                let status = requests
+                    .status
+                    .as_deref()
+                    .map(review::parse_filter)
+                    .transpose()?;
+                let value = review::list(engine, status).await?;
+                emit(json, &value, render::requests_list);
+            }
+            Some(RequestsAction::Show { id }) => {
+                let value = review::show(engine, &id, progress).await?;
+                emit(json, &value, render::request_show);
+            }
+            Some(RequestsAction::Keep { id, data_ok, .. }) => {
+                let hooks = ops::keep_hooks(recipe.as_ref());
+                let value = review::keep(engine, &id, hooks, data_ok, progress).await?;
+                emit(json, &value, render::fold);
+                return Ok(if value["status"] == "refused" { 2 } else { 0 });
+            }
+            Some(RequestsAction::ThrowAway { id }) => {
+                let value = review::throw_away(engine, &id, progress).await?;
+                emit(json, &value, render::request_thrown_away);
+            }
+            Some(RequestsAction::Open { id }) => {
+                let value = review::open(engine, &id, progress).await?;
+                emit(json, &value, render::request_open);
+            }
+        },
         Command::Undo { computer } => {
             let mut value = flows::undo(engine, &computer, working_directory, progress).await?;
             if let Ok(home) = access::home_dir() {

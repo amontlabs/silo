@@ -606,9 +606,7 @@ async fn publish(
             .await
             .map_err(|_| CliError::new("The repository lookup stopped unexpectedly."))?
             .map_err(|message| {
-                CliError::new(format!(
-                    "{message} Nothing was pushed; pass --base BRANCH."
-                ))
+                CliError::new(format!("{message} Nothing was pushed; pass --base BRANCH."))
             })?
         }
     };
@@ -687,10 +685,7 @@ mod tests {
     }
 
     /// Answers one request with `status` and `reply`; returns the URL and the request line.
-    fn serve_once(
-        status: u16,
-        reply: Value,
-    ) -> (String, std::sync::mpsc::Receiver<String>) {
+    fn serve_once(status: u16, reply: Value) -> (String, std::sync::mpsc::Receiver<String>) {
         use std::io::{Read, Write};
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let url = format!("http://{}", listener.local_addr().unwrap());
@@ -724,14 +719,23 @@ mod tests {
     #[test]
     fn the_default_branch_is_read_from_the_repository() {
         let (url, request) = serve_once(200, json!({"default_branch": "trunk"}));
-        assert_eq!(default_branch(&env_for(url), "tok", "acme/app").unwrap(), "trunk");
+        assert_eq!(
+            default_branch(&env_for(url), "tok", "acme/app").unwrap(),
+            "trunk"
+        );
         let head = request.recv().unwrap();
         assert!(head.starts_with("GET /repos/acme/app "), "{head}");
-        assert!(head.to_lowercase().contains("authorization: bearer tok"), "{head}");
+        assert!(
+            head.to_lowercase().contains("authorization: bearer tok"),
+            "{head}"
+        );
 
         let (url, _) = serve_once(404, json!({"message": "Not Found"}));
         let error = default_branch(&env_for(url), "tok", "acme/app").unwrap_err();
-        assert!(error.contains("404") && error.contains("Not Found"), "{error}");
+        assert!(
+            error.contains("404") && error.contains("Not Found"),
+            "{error}"
+        );
         let (url, _) = serve_once(200, json!({}));
         assert!(default_branch(&env_for(url), "tok", "acme/app").is_err());
     }

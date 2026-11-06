@@ -43,6 +43,12 @@ pub struct Record {
     /// When the keep succeeded (milliseconds since the epoch); orders it against a promote.
     #[serde(default)]
     pub undoable_at: u128,
+    /// The fork whose keep took the checkpoint; empty in a record from before it was kept.
+    #[serde(default)]
+    pub fork: String,
+    /// The review digest the keep was pinned to, when it was.
+    #[serde(default)]
+    pub review_digest: String,
 }
 
 #[derive(Clone, Debug)]
@@ -117,6 +123,8 @@ impl Journal {
             checkpoint: checkpoint.clone(),
             state: State::Pending,
             undoable_at: 0,
+            fork: String::new(),
+            review_digest: String::new(),
         });
         self.save_records(target, &all)
     }
@@ -130,6 +138,37 @@ impl Journal {
             }
         }
         self.save_records(target, &all)
+    }
+
+    /// Notes which fork and review digest the keep that took checkpoint `id` was for.
+    pub fn tag(&self, target: &str, id: &str, fork: &str, digest: &str) -> Result<(), String> {
+        let mut all = self.records(target);
+        for record in all.iter_mut().filter(|r| r.checkpoint.id == id) {
+            record.fork = fork.to_owned();
+            record.review_digest = digest.to_owned();
+        }
+        self.save_records(target, &all)
+    }
+
+    /// The before-keep checkpoint of a keep of `fork` into `target`, pinned to `digest`, that
+    /// succeeded at or after `since_ms`: the keep happened and can still be undone.
+    pub fn finished_keep(
+        &self,
+        target: &str,
+        fork: &str,
+        digest: &str,
+        since_ms: u128,
+    ) -> Option<CheckpointRef> {
+        self.records(target)
+            .into_iter()
+            .rev()
+            .find(|r| {
+                r.state == State::Undoable
+                    && r.fork == fork
+                    && r.review_digest == digest
+                    && r.undoable_at >= since_ms
+            })
+            .map(|r| r.checkpoint)
     }
 
     /// The newest checkpoint an undo may restore.

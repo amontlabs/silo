@@ -94,6 +94,41 @@ pub async fn record(
     }
 }
 
+/// [`record`] under the computer's step lock when a checkpoint is taken, so checkpoint and
+/// record of one step are not interleaved with another's and the numbers follow the
+/// checkpoints' order. Without step checkpoints there is nothing to order and no lock. When
+/// the lock cannot be taken the step is recorded anyway, with a warning on stderr.
+#[allow(clippy::too_many_arguments)]
+pub async fn record_in_order(
+    engine: &Engine,
+    computer: &Computer,
+    argv: &[String],
+    exit_code: i32,
+    started: i64,
+    finished: i64,
+    settings: StepSettings,
+    progress: Progress<'_>,
+) -> Value {
+    let _held = if settings.checkpoints {
+        match engine.lock_steps(&computer.id).await {
+            Ok(lock) => Some(lock),
+            Err(error) => {
+                eprintln!(
+                    "Warning: steps of {} may be numbered out of order: {}",
+                    computer.name, error.message
+                );
+                None
+            }
+        }
+    } else {
+        None
+    };
+    record(
+        engine, computer, argv, exit_code, started, finished, settings, progress,
+    )
+    .await
+}
+
 /// A step's one-line note for a person: `step 3`, with its checkpoint when it has one.
 pub fn note(step: &Value) -> String {
     if let Some(error) = step["error"].as_str() {
@@ -116,11 +151,16 @@ pub async fn run_exec(
     settings: StepSettings,
     progress: Progress<'_>,
 ) -> Result<(ExecOutput, Value), CliError> {
-    let started = clock::now_unix();
-    let output = ops::exec_raw(engine, args).await?;
-    let finished = clock::now_unix();
+    if args.argv.is_empty() {
+        return Err(CliError::new("Give a command to run after --."));
+    }
+    // The target is fixed before anything runs: a promote or undo while the command runs must
+    // not move the step onto the computer that now has the name.
     let computer = engine.computer(&args.computer).await?;
-    let step = record(
+    let started = clock::now_unix();
+    let output = ops::exec_on(engine, computer.clone(), args).await?;
+    let finished = clock::now_unix();
+    let step = record_in_order(
         engine,
         &computer,
         &args.argv,

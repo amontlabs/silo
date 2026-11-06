@@ -376,7 +376,7 @@ async fn one(
         Ok(ran) => {
             entry["exitCode"] = json!(ran.exit_code);
             entry["signal"] = json!(ran.signal);
-            entry["step"] = crate::steps::record(
+            entry["step"] = crate::steps::record_in_order(
                 engine,
                 &fork,
                 &args.command,

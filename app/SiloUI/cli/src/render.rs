@@ -811,3 +811,156 @@ pub fn pull_request(value: &Value) -> String {
     }
     out
 }
+
+/// `code 2, settings 1`: the buckets of a request that hold changes.
+fn counts_line(counts: &Value) -> String {
+    let parts: Vec<String> = counts
+        .as_object()
+        .into_iter()
+        .flatten()
+        .filter_map(|(bucket, count)| {
+            count
+                .as_u64()
+                .filter(|n| *n > 0)
+                .map(|n| format!("{bucket} {n}"))
+        })
+        .collect();
+    if parts.is_empty() {
+        "no changes counted".to_owned()
+    } else {
+        parts.join(", ")
+    }
+}
+
+/// `silo requests`.
+pub fn requests_list(value: &Value) -> String {
+    let entries = list_of(value, "requests");
+    if entries.is_empty() {
+        return "No review requests. Ask for one with `silo fold <fork> --request`.".to_owned();
+    }
+    let mut out = String::new();
+    for entry in &entries {
+        let request = &entry["request"];
+        let fork = entry.get("forkName").and_then(Value::as_str).map_or_else(
+            || "(fork gone)".to_owned(),
+            |name| format!("{name} ({})", text(entry, "forkState")),
+        );
+        let target = match text(request, "target") {
+            folder if folder.starts_with("folder:") => folder.to_owned(),
+            _ => entry
+                .get("targetName")
+                .and_then(Value::as_str)
+                .unwrap_or("(computer gone)")
+                .to_owned(),
+        };
+        out.push_str(&format!(
+            "{}  {}  into {}  {}  [{}]\n",
+            text(request, "id"),
+            fork,
+            target,
+            counts_line(&request["counts"]),
+            text(request, "status"),
+        ));
+    }
+    out.trim_end().to_owned()
+}
+
+/// The `Credentials used: ...` line, then a line for what was refused.
+pub fn credentials_lines(credentials: &Value) -> String {
+    let used: Vec<String> = list_of(credentials, "used")
+        .iter()
+        .map(|item| {
+            format!(
+                "{} to {} ({} x{})",
+                text(item, "secret"),
+                text(item, "host"),
+                text(item, "method"),
+                number(item, "count")
+            )
+        })
+        .collect();
+    let mut out = if used.is_empty() {
+        "Credentials used: none".to_owned()
+    } else {
+        format!("Credentials used: {}", used.join(", "))
+    };
+    let blocked: Vec<String> = list_of(credentials, "blocked")
+        .iter()
+        .map(|item| {
+            format!(
+                "{} {} x{} ({})",
+                text(item, "method"),
+                text(item, "host"),
+                number(item, "count"),
+                text(item, "reason")
+            )
+        })
+        .collect();
+    if !blocked.is_empty() {
+        out.push_str(&format!("\nBlocked: {}", blocked.join(", ")));
+    }
+    out
+}
+
+/// `silo requests show`: the same buckets as `silo diff`, then the credentials line.
+pub fn request_show(value: &Value) -> String {
+    let request = &value["request"];
+    let mut out = format!(
+        "Request {}: {} ({}) into {} [{}]\n\n{}\n\n{}",
+        text(request, "id"),
+        text(value, "forkName"),
+        text(value, "forkState"),
+        text(request, "target"),
+        text(request, "status"),
+        text(value, "text"),
+        credentials_lines(&value["credentials"]),
+    );
+    if value["fresh"] == false {
+        out.push_str("\nThe fork is stopped, so this is its last look, not its state now.");
+    }
+    if value["stale"] == true {
+        out.push_str(&format!(
+            "\nThis fork changed since the request was made, so a keep refuses. Ask again with `silo fold {} --request`.",
+            text(value, "forkName")
+        ));
+    }
+    out
+}
+
+/// `silo requests throw-away`.
+pub fn request_thrown_away(value: &Value) -> String {
+    match text(value, "dropped") {
+        "" => format!(
+            "The fork was already gone. Closed {}.",
+            text(&value["request"], "id")
+        ),
+        name => format!(
+            "Threw away {name} and closed {}.",
+            text(&value["request"], "id")
+        ),
+    }
+}
+
+/// `silo requests open`.
+pub fn request_open(value: &Value) -> String {
+    let mut out = format!(
+        "{} is {}{}.",
+        text(value, "name"),
+        text(value, "state"),
+        if value["started"] == true {
+            " (started now)"
+        } else {
+            ""
+        }
+    );
+    if let Some(alias) = value.get("sshAlias").and_then(Value::as_str) {
+        out.push_str(&format!(
+            "\nssh {alias} (after `silo ssh-setup {}`)",
+            text(value, "name")
+        ));
+    }
+    for url in list_of(value, "urls").iter().filter_map(Value::as_str) {
+        out.push_str(&format!("\n{url}"));
+    }
+    out
+}

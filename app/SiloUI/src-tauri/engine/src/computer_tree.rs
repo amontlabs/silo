@@ -47,21 +47,31 @@ fn from_of(
     all: &HashMap<&str, &Computer>,
     sources: &Sources<'_>,
 ) -> TreeFrom {
-    if parent.is_none() {
-        return TreeFrom::Root;
-    }
     if sources.promoted.contains(&computer.id) {
-        return TreeFrom::Main;
+        return if parent.is_none() {
+            TreeFrom::Root
+        } else {
+            TreeFrom::Main
+        };
     }
-    let Some(source) = link.source.as_deref() else {
-        return TreeFrom::Main;
-    };
-    if let Some(hash) = source.strip_prefix(crate::changes::fork_base::RECIPE_KEY_PREFIX) {
+    // A recipe fork comes from a hidden build computer, so its provenance does not depend on
+    // a parent being shown.
+    if let Some(hash) = link
+        .source
+        .as_deref()
+        .and_then(|source| source.strip_prefix(crate::changes::fork_base::RECIPE_KEY_PREFIX))
+    {
         return TreeFrom::Recipe {
             hash: hash.to_owned(),
         };
     }
-    if let Some(number) = (sources.step_of)(source) {
+    if parent.is_none() {
+        return TreeFrom::Root;
+    }
+    let Some(source) = link.source.as_deref() else {
+        return TreeFrom::Main;
+    };
+    if let Some(number) = link.step.or_else(|| (sources.step_of)(source)) {
         return TreeFrom::Step {
             number,
             checkpoint_id: source.to_owned(),
@@ -223,6 +233,7 @@ mod tests {
         ForkLink {
             origin: origin.map(str::to_owned),
             source: source.map(str::to_owned),
+            step: None,
         }
     }
 
@@ -352,6 +363,43 @@ mod tests {
             node(&nodes, "d").from,
             TreeFrom::Recipe {
                 hash: "ab12".into()
+            }
+        );
+    }
+
+    #[test]
+    fn a_recipe_fork_is_a_recipe_fork_even_though_its_build_parent_is_hidden() {
+        let mut fixture = Fixture::new();
+        fixture
+            .links
+            .insert("r".into(), link(Some("b"), Some("recipe:ab12cd")));
+        let nodes = fixture.build(&[
+            computer("b", "silo-build-linux-dev", &[("cp", "manual")]),
+            computer("r", "fork-r", &[]),
+        ]);
+        assert_eq!(nodes.len(), 1);
+        assert_eq!(nodes[0].parent, None);
+        assert_eq!(
+            nodes[0].from,
+            TreeFrom::Recipe {
+                hash: "ab12cd".into()
+            }
+        );
+    }
+
+    #[test]
+    fn the_step_a_fork_came_from_survives_the_step_records_being_trimmed() {
+        let mut fixture = Fixture::new();
+        let mut recorded = link(Some("m"), Some("cp-step"));
+        recorded.step = Some(7);
+        fixture.links.insert("a".into(), recorded);
+        // No step record names the checkpoint any more.
+        let nodes = fixture.build(&[computer("m", "main", &[]), computer("a", "a", &[])]);
+        assert_eq!(
+            node(&nodes, "a").from,
+            TreeFrom::Step {
+                number: 7,
+                checkpoint_id: "cp-step".into()
             }
         );
     }

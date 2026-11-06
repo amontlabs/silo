@@ -241,6 +241,7 @@ pub(crate) async fn checkpoint_action(
             device_id,
             name: name.ok_or_else(|| EngineError::internal("Missing checkpoint name."))?,
             kind: None,
+            keep_newest: None,
         }),
         "fork" => requests::checkpoints_fork(CheckpointForkParams {
             computer_id,
