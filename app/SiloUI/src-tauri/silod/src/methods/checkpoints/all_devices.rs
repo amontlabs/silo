@@ -33,7 +33,7 @@ fn tag(rows: &mut [RequestEntry], device: &Peer) {
 }
 
 /// Merges `local` with the list each connected device returns for `params`.
-pub(super) async fn merge(
+pub(crate) async fn merge(
     context: &HandlerContext,
     params: &Value,
     mut local: ChangesRequestsListResult,

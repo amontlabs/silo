@@ -495,6 +495,224 @@ mod tests {
         assert_eq!(seen.lock().unwrap()[0].0, "notifications.list");
     }
 
+    fn fold_request(id: &str) -> Value {
+        json!({
+            "id": id, "forkId": "fork-1", "target": COMPUTER, "createdAt": "2026-11-06T10:00:00Z",
+            "reviewDigest": "d1", "summary": "two files", "status": "open", "counts": {}
+        })
+    }
+
+    #[tokio::test]
+    async fn every_v1_owner_method_is_routed_to_the_owner_without_the_device_id() {
+        const OWNER: &str = "88888888-8888-4888-8888-888888888820";
+        let step = json!({
+            "id": "s1", "computerId": COMPUTER, "number": 1, "command": "ls",
+            "startedAt": "2026-11-06T10:00:00Z", "finishedAt": "2026-11-06T10:00:01Z"
+        });
+        let request = fold_request("req-1");
+        let (seen, _owner) = canned_owner(OWNER, {
+            let (step, request) = (step.clone(), request.clone());
+            move |method, _| {
+                Ok(match method {
+                    "changes.request" => json!({ "request": request }),
+                    "changes.requests.list" => json!({ "requests": [] }),
+                    "changes.requests.markKept" => json!({ "requests": [request] }),
+                    "computers.tree" => json!({ "nodes": [] }),
+                    "recipes.list" => json!({ "recipes": [] }),
+                    "recipes.remove" => Value::Null,
+                    "steps.list" => json!({ "steps": [] }),
+                    "steps.record" => json!({ "step": step }),
+                    _ => json!({ "jobId": "job:1" }),
+                })
+            }
+        });
+        let record = json!({
+            "computerId": COMPUTER, "command": ["ls"],
+            "startedAt": "2026-11-06T10:00:00Z", "finishedAt": "2026-11-06T10:00:01Z"
+        });
+        let fork = json!({ "computerId": COMPUTER, "checkpointId": "c", "newName": "n" });
+        let build = json!({ "name": "r", "spec": { "os": "linux" } });
+        let by_request = json!({ "requestId": "r" });
+        let by_computer = json!({ "computerId": COMPUTER });
+        let by_fork = json!({ "forkId": "f" });
+        let calls: Vec<(MethodName, &str, Value)> = vec![
+            (MethodName::ChangesKeep, "changes.keep", by_fork.clone()),
+            (
+                MethodName::ChangesPromote,
+                "changes.promote",
+                by_fork.clone(),
+            ),
+            (MethodName::ChangesRequest, "changes.request", by_fork),
+            (MethodName::ChangesUndo, "changes.undo", by_computer.clone()),
+            (MethodName::ChangesDiff, "changes.diff", by_computer.clone()),
+            (
+                MethodName::ChangesRequestsList,
+                "changes.requests.list",
+                json!({}),
+            ),
+            (
+                MethodName::ChangesRequestsShow,
+                "changes.requests.show",
+                by_request.clone(),
+            ),
+            (
+                MethodName::ChangesRequestsKeep,
+                "changes.requests.keep",
+                by_request.clone(),
+            ),
+            (
+                MethodName::ChangesRequestsMarkKept,
+                "changes.requests.markKept",
+                json!({ "forkId": "f", "target": "folder:/x" }),
+            ),
+            (
+                MethodName::ChangesRequestsThrowAway,
+                "changes.requests.throwAway",
+                by_request.clone(),
+            ),
+            (
+                MethodName::ChangesRequestsOpen,
+                "changes.requests.open",
+                by_request,
+            ),
+            (MethodName::StepsList, "steps.list", by_computer),
+            (MethodName::StepsRecord, "steps.record", record),
+            (MethodName::ComputersTree, "computers.tree", json!({})),
+            (MethodName::CheckpointsFork, "checkpoints.fork", fork),
+            (MethodName::RecipesBuild, "recipes.build", build),
+            (MethodName::RecipesList, "recipes.list", json!({})),
+            (
+                MethodName::RecipesRemove,
+                "recipes.remove",
+                json!({ "name": "r" }),
+            ),
+        ];
+        for (method, name, params) in &calls {
+            as_controller(*method, with_device(OWNER, params.clone()))
+                .await
+                .unwrap_or_else(|error| panic!("{name}: {error:?}"));
+            let seen = seen.lock().unwrap();
+            let (asked, sent) = seen.last().unwrap();
+            assert_eq!(asked, name);
+            assert!(sent.get("deviceId").is_none(), "{name}: {sent}");
+            assert_eq!(sent, params, "{name}");
+        }
+        assert_eq!(seen.lock().unwrap().len(), calls.len());
+    }
+
+    /// Serializes the tests that set the connected devices a merged list asks.
+    static PEERS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn set_peers(peers: Option<&[(&str, &str)]>) {
+        *crate::methods::checkpoints::all_devices::TEST_PEERS
+            .lock()
+            .unwrap() = peers.map(|peers| {
+            peers
+                .iter()
+                .map(|(id, name)| ((*id).to_owned(), (*name).to_owned()))
+                .collect()
+        });
+    }
+
+    #[tokio::test]
+    async fn requests_of_every_device_are_one_list_and_an_unreachable_device_is_reported() {
+        const MINI: &str = "88888888-8888-4888-8888-888888888821";
+        const DOWN: &str = "88888888-8888-4888-8888-888888888822";
+        let _peers = PEERS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let entry = json!({ "request": fold_request("req-mini"), "forkName": "try", "forkState": "running" });
+        let (seen, _mini) = canned_owner(MINI, move |method, _| match method {
+            "changes.requests.list" => Ok(json!({ "requests": [entry.clone()] })),
+            "changes.requests.throwAway" => Ok(json!({ "jobId": "job:5" })),
+            other => panic!("unexpected owner request {other}"),
+        });
+        let _down = stub_owner(DOWN, |_, _| {
+            Err(BridgeError::from("This device is no longer connected."))
+        });
+        set_peers(Some(&[(MINI, "Mac mini"), (DOWN, "Old laptop")]));
+
+        // The local list is the engine's own; its computers are not read in this test.
+        let local = serde_json::from_value(json!({ "requests": [
+            { "request": fold_request("req-local") }
+        ] }))
+        .unwrap();
+        let listed = serde_json::to_value(
+            crate::methods::checkpoints::all_devices::merge(
+                &request_context(),
+                &json!({ "allDevices": true, "status": "all" }),
+                local,
+            )
+            .await,
+        )
+        .unwrap();
+        let rows = listed["requests"].as_array().unwrap();
+        let mini: Vec<_> = rows.iter().filter(|row| row["deviceId"] == MINI).collect();
+        assert_eq!(rows.len(), 2, "{listed}");
+        let own = rows.iter().find(|row| row["request"]["id"] == "req-local");
+        assert_eq!(own.unwrap()["deviceId"], LOCAL_DEVICE, "{listed}");
+        assert_eq!(mini.len(), 1, "{listed}");
+        assert_eq!(mini[0]["deviceName"], "Mac mini");
+        assert_eq!(mini[0]["request"]["id"], "req-mini");
+        assert_eq!(
+            listed["unreachable"].as_array().unwrap().len(),
+            1,
+            "{listed}"
+        );
+        assert_eq!(listed["unreachable"][0]["deviceId"], DOWN);
+        assert_eq!(listed["unreachable"][0]["deviceName"], "Old laptop");
+        // The owner is asked for its own requests only, with the same filter.
+        assert_eq!(
+            seen.lock().unwrap()[0],
+            (
+                "changes.requests.list".to_owned(),
+                json!({ "status": "all" })
+            )
+        );
+
+        // Acting on the row goes to the row's device, which is told nothing of devices.
+        let thrown = as_controller(
+            MethodName::ChangesRequestsThrowAway,
+            json!({ "requestId": mini[0]["request"]["id"], "deviceId": mini[0]["deviceId"] }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(thrown["jobId"], "job:5");
+        assert_eq!(
+            seen.lock().unwrap()[1],
+            (
+                "changes.requests.throwAway".to_owned(),
+                json!({ "requestId": "req-mini" })
+            )
+        );
+        set_peers(None);
+    }
+
+    #[tokio::test]
+    async fn a_list_across_devices_with_every_device_down_is_still_the_local_list() {
+        const DOWN: &str = "88888888-8888-4888-8888-888888888823";
+        let _peers = PEERS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _down = stub_owner(DOWN, |_, _| Err(BridgeError::from("Unreachable.")));
+        set_peers(Some(&[(DOWN, "Old laptop")]));
+        let listed = serde_json::to_value(
+            crate::methods::checkpoints::all_devices::merge(
+                &request_context(),
+                &json!({ "allDevices": true }),
+                serde_json::from_value(json!({ "requests": [] })).unwrap(),
+            )
+            .await,
+        )
+        .unwrap();
+        assert!(
+            listed["requests"].as_array().unwrap().is_empty(),
+            "{listed}"
+        );
+        assert_eq!(listed["unreachable"][0]["deviceId"], DOWN);
+        set_peers(None);
+    }
+
     /// Whether the canonical params of `method` have a top-level `deviceId`.
     fn names_a_device(schema: &Value, method: &str) -> bool {
         fn properties(schema: &Value, node: &Value, found: &mut BTreeSet<String>) {

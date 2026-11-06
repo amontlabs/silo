@@ -39,6 +39,40 @@ pub async fn list_all(engine: &Engine) -> Result<Value, CliError> {
     Ok(json!({ "computers": computers.iter().map(Computer::to_json).collect::<Vec<_>>() }))
 }
 
+/// `silo list --all-devices`: this device's computers and every connected device's, each with
+/// the device it is on. A device that cannot be read is listed in `unreachable`.
+pub async fn list_everywhere(engine: &Engine, hidden: bool) -> Result<Value, CliError> {
+    let read = |engine: Engine| async move {
+        if hidden {
+            engine.all_computers().await
+        } else {
+            engine.computers().await
+        }
+    };
+    let mut rows = Vec::new();
+    let mut unreachable = Vec::new();
+    for computer in read(engine.on_device(None)).await? {
+        let mut row = computer.to_json();
+        row["deviceName"] = json!("this device");
+        rows.push(row);
+    }
+    for (id, name) in engine.devices().await? {
+        match read(engine.on_device(Some(id.clone()))).await {
+            Ok(computers) => {
+                for computer in computers {
+                    let mut row = computer.to_json();
+                    row["deviceId"] = json!(id);
+                    row["deviceName"] = json!(name);
+                    rows.push(row);
+                }
+            }
+            Err(error) => unreachable
+                .push(json!({ "deviceId": id, "deviceName": name, "reason": error.message })),
+        }
+    }
+    Ok(json!({ "computers": rows, "unreachable": unreachable }))
+}
+
 /// How long a throwaway baseline computer may exist before it counts as left behind.
 pub const THROWAWAY_MAX_AGE_SECONDS: i64 = 3600;
 

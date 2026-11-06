@@ -48,6 +48,49 @@ pub async fn list(engine: &Engine, status: Option<RequestFilter>) -> Result<Valu
         .await
 }
 
+/// Every device's requests, each row with the device it is on (`deviceId`, `deviceName`), and
+/// the devices that could not be read (`unreachable`).
+pub async fn list_all(engine: &Engine, status: Option<RequestFilter>) -> Result<Value, CliError> {
+    engine
+        .on_device(None)
+        .call(requests::changes_requests_list(ChangesRequestsListParams {
+            status,
+            device_id: None,
+            all_devices: Some(true),
+        }))
+        .await
+}
+
+/// The engine a request's actions go to: the device it is on. This device's own requests are
+/// found first; a request on a connected device is found through the merged list. Naming a
+/// device with `--device` skips the search.
+pub async fn locate(engine: &Engine, id: &str) -> Result<Engine, CliError> {
+    if engine.device().is_some() {
+        return Ok(engine.clone());
+    }
+    let has = |value: &Value, id: &str| {
+        value["requests"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(|row| row["request"]["id"] == id)
+    };
+    if has(&list(engine, Some(RequestFilter::All)).await?, id) {
+        return Ok(engine.clone());
+    }
+    let merged = list_all(engine, Some(RequestFilter::All)).await?;
+    let device = merged["requests"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|row| row["request"]["id"] == id)
+        .and_then(|row| row["deviceId"].as_str());
+    Ok(match device {
+        Some(device) => engine.on_device(Some(device.to_owned())),
+        None => engine.clone(),
+    })
+}
+
 /// A request with a fresh diff of its fork and the credentials the fork used.
 pub async fn show(engine: &Engine, id: &str, progress: Progress<'_>) -> Result<Value, CliError> {
     let mut value = engine
@@ -60,7 +103,7 @@ pub async fn show(engine: &Engine, id: &str, progress: Progress<'_>) -> Result<V
     let from_folder = value["request"]["target"]
         .as_str()
         .is_some_and(|target| target.starts_with("folder:"));
-    if from_folder {
+    if from_folder && engine.device().is_none() {
         let name = value["forkName"].as_str().unwrap_or_default().to_owned();
         let fork = engine.computer(&name).await?;
         if let Some(record) = folder::record_for(engine, &fork.id) {
