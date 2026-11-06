@@ -66,8 +66,7 @@ fn run_from_bundle(args: &[String]) -> Result<(), String> {
     use std::os::unix::process::CommandExt;
     let invoked = std::env::current_exe().map_err(|error| error.to_string())?;
     let canonical = std::fs::canonicalize(&invoked).map_err(|error| error.to_string())?;
-    let named = args.first().map(std::path::Path::new);
-    if invoked == canonical && named.is_none_or(|named| named == canonical) {
+    if invoked == canonical {
         return Ok(());
     }
     let error = std::process::Command::new(&canonical)
