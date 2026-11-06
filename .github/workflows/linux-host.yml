@@ -158,14 +158,15 @@ jobs:
           test ! -e "$HOME/.config/systemd/user/$UNIT"
       # Two devices on this machine: silo-host is prepared with `silo host init`, and
       # silo-controller runs its own engine and adds the host over the local SSH server.
-      # The engine is copied to a root-owned directory, which both accounts may run.
+      # The engine is copied to a root-owned directory, which both accounts may run. Its
+      # parent is root's and 0755: the runner's /opt is world-writable, which silod refuses.
       - name: Prepare a host and a controller account
         run: |
           set -euo pipefail
-          sudo mkdir -p /opt
-          sudo cp -a "$ENGINE" /opt/silo-engine
-          sudo chown -R root:root /opt/silo-engine
-          sudo chmod -R go-w /opt/silo-engine
+          sudo install -d -o root -g root -m 0755 /var/lib/silo-ci
+          sudo cp -a "$ENGINE" /var/lib/silo-ci/silo-engine
+          sudo chown -R root:root /var/lib/silo-ci/silo-engine
+          sudo chmod -R go-w /var/lib/silo-ci/silo-engine
           sudo ssh-keygen -A
           sudo systemctl start ssh
           for account in silo-host silo-controller; do
@@ -187,14 +188,14 @@ jobs:
         timeout-minutes: 40
         env:
           SILO_E2E_REMOTE_EXEC: '1'
-        run: bash scripts/hosts-e2e.sh /opt/silo-engine silo-host silo-controller
+        run: bash scripts/hosts-e2e.sh /var/lib/silo-ci/silo-engine silo-host silo-controller
       - name: Stop both accounts' engines
         if: always() && env.HOSTS_E2E == '1'
         run: |
           for account in silo-host silo-controller; do
             uid=$(id -u "$account")
             sudo -u "$account" -H env XDG_RUNTIME_DIR="/run/user/$uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" \
-              /opt/silo-engine/silod --service unregister || true
+              /var/lib/silo-ci/silo-engine/silod --service unregister || true
           done
       - name: Collect logs
         if: failure()

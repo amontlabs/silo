@@ -201,11 +201,12 @@ class LinuxHostWorkflowTests(unittest.TestCase):
         self.assertEqual(positions, sorted(positions))
         prepare = steps.split('- name: Prepare a host and a controller account\n', 1)[1].split('      - ', 1)[0]
         # Both accounts run one engine directory that neither can change.
-        for needle in ('sudo chown -R root:root /opt/silo-engine', 'sudo chmod -R go-w /opt/silo-engine',
+        for needle in ('sudo install -d -o root -g root -m 0755 /var/lib/silo-ci',
+                       'sudo chown -R root:root /var/lib/silo-ci/silo-engine', 'sudo chmod -R go-w /var/lib/silo-ci/silo-engine',
                        'sudo systemctl start ssh', 'sudo loginctl enable-linger "$account"',
                        "sudo usermod --password '*' \"$account\""):
             self.assertIn(needle, prepare)
-        self.assertIn('bash scripts/hosts-e2e.sh /opt/silo-engine silo-host silo-controller', steps)
+        self.assertIn('bash scripts/hosts-e2e.sh /var/lib/silo-ci/silo-engine silo-host silo-controller', steps)
         stop = steps.split("- name: Stop both accounts' engines\n", 1)[1].split('      - ', 1)[0]
         self.assertTrue(stop.startswith("        if: always() && env.HOSTS_E2E == '1'\n"), stop)
         self.assertIn('--service unregister', stop)

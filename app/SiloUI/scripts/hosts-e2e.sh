@@ -151,6 +151,8 @@ print(added["device"]["id"])' "$key_dir/added.json" "$fingerprint")
 controller list --all-devices
 
 step "Creating and starting $name on the host"
+# The guest image and the computer's disk need room; log it so a full disk is plain.
+df -h
 controller --device "$device" create "$name" --linux --cpus 1 --memory 2 --disk 2
 controller --device "$device" start "$name"
 [[ "$(listed_on_host "$name")" == "$name" ]] || { echo "$name is not on the host" >&2; exit 1; }

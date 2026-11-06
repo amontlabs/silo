@@ -302,7 +302,9 @@ behind `cfg(target_os = "linux")`.
   target/debug/silo list
   ```
 
-  A root-owned `/opt/silo-engine` works the same way. An engine under `/tmp`, or in a directory
+  A root-owned `/opt/silo-engine` works the same way when `/opt` itself cannot be changed by
+  other accounts: some images, GitHub's runners among them, make `/opt` world-writable, and then
+  silod refuses the engine under it. An engine under `/tmp`, or in a directory
   another account can write to, does not start. Group write counts even for a group only you are
   in, so a directory made under a umask of `002` needs the `chmod` above, and Debian's group-writable
   `/usr/local` is refused.
