@@ -549,8 +549,11 @@ fn link_helper(home: &Path, name: &str, target: &Path) -> Result<(), String> {
     link_owned(home, name, target, &|previous| {
         !previous.exists()
             || previous.file_name() == target.file_name()
-            || std::env::current_exe().is_ok_and(|current| previous.file_name() == current.file_name())
-            || (previous.extension().is_some_and(|extension| extension == "AppImage")
+            || std::env::current_exe()
+                .is_ok_and(|current| previous.file_name() == current.file_name())
+            || (previous
+                .extension()
+                .is_some_and(|extension| extension == "AppImage")
                 && previous
                     .file_stem()
                     .and_then(|stem| stem.to_str())
@@ -558,12 +561,19 @@ fn link_helper(home: &Path, name: &str, target: &Path) -> Result<(), String> {
                         let product = crate::channel::current().product_name();
                         [product.to_owned(), product.replace(' ', "_")]
                             .iter()
-                            .any(|product| stem == product || stem.starts_with(&format!("{product}_")))
+                            .any(|product| {
+                                stem == product || stem.starts_with(&format!("{product}_"))
+                            })
                     }))
     })
 }
 /// Points `~/.local/bin/<name>` at `target`, replacing only a link `owns` accepts.
-fn link_owned(home: &Path, name: &str, target: &Path, owns: &dyn Fn(&Path) -> bool) -> Result<(), String> {
+fn link_owned(
+    home: &Path,
+    name: &str,
+    target: &Path,
+    owns: &dyn Fn(&Path) -> bool,
+) -> Result<(), String> {
     let path = home.join(".local/bin").join(name);
     fs::create_dir_all(path.parent().ok_or("Home unavailable.")?).map_err(|e| e.to_string())?;
     if let Ok(existing) = fs::symlink_metadata(&path) {
@@ -618,7 +628,12 @@ fn link_cli(home: &Path, engine: &Path) -> Result<(), String> {
     else {
         return Ok(());
     };
-    link_owned(home, crate::channel::current().cli_link_name(), &cli, &is_bundled_cli)
+    link_owned(
+        home,
+        crate::channel::current().cli_link_name(),
+        &cli,
+        &is_bundled_cli,
+    )
 }
 pub async fn set_connections_enabled(enabled: bool) -> Result<ConnectionsStatus, String> {
     settings_io(move || {
@@ -5772,7 +5787,9 @@ mod bridge_link_tests {
         executable(&foreign);
         for previous in [foreign.clone(), apps.path().join("gone/silo")] {
             symlink(&previous, &link).unwrap();
-            assert!(link_cli(home.path(), &engine).unwrap_err().contains("already exists"));
+            assert!(link_cli(home.path(), &engine)
+                .unwrap_err()
+                .contains("already exists"));
             assert_eq!(fs::read_link(&link).unwrap(), previous);
             fs::remove_file(&link).unwrap();
         }
