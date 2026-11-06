@@ -185,6 +185,8 @@ jobs:
           echo "HOSTS_E2E=1" >> "$GITHUB_ENV"
       - name: Manage a computer on another device
         timeout-minutes: 40
+        env:
+          SILO_E2E_REMOTE_EXEC: '1'
         run: bash scripts/hosts-e2e.sh /opt/silo-engine silo-host silo-controller
       - name: Stop both accounts' engines
         if: always() && env.HOSTS_E2E == '1'
