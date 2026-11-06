@@ -4844,6 +4844,17 @@
     "FoldRequest": {
       "description": "A recorded request to review a fork. The engine keeps it until it is answered.",
       "properties": {
+        "closedReason": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FoldRequestClosedReason"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Why a `thrown-away` request was closed when no one answered it: the fork or the\ntarget computer was deleted."
+        },
         "counts": {
           "additionalProperties": {
             "format": "uint64",
@@ -4911,6 +4922,21 @@
         "status"
       ],
       "type": "object"
+    },
+    "FoldRequestClosedReason": {
+      "description": "Why a request was closed without being answered.",
+      "oneOf": [
+        {
+          "const": "fork-deleted",
+          "description": "The fork was deleted.",
+          "type": "string"
+        },
+        {
+          "const": "target-deleted",
+          "description": "The computer the fork would be kept into was deleted.",
+          "type": "string"
+        }
+      ]
     },
     "FoldRequestStatus": {
       "oneOf": [

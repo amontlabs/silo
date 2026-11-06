@@ -259,6 +259,7 @@ export function parseBackupState(input: unknown): BackupState {
 // Review requests (`changes.requests.*`), steps, the computer tree and credentials used.
 // Tolerant like checkpoints: unknown statuses and origins fall back, bad rows are dropped.
 const requestStatuses = ["open", "keeping", "kept", "thrown-away"] as const
+const requestClosedReasons = ["fork-deleted", "target-deleted"] as const
 const countsShape = z.record(z.string(), z.number().int().nonnegative()).catch({})
 
 export const foldRequestShape = z.object({
@@ -268,6 +269,7 @@ export const foldRequestShape = z.object({
   keepId: z.string().nullish().transform(value => value ?? undefined),
   resolvedAt: z.string().nullish().transform(value => value ?? undefined),
   keepingSinceMs: z.number().nonnegative().nullish().transform(value => value ?? undefined),
+  closedReason: z.string().nullish().transform(value => (requestClosedReasons as readonly string[]).includes(value ?? "") ? (value as (typeof requestClosedReasons)[number]) : undefined),
 })
 export type FoldRequest = z.infer<typeof foldRequestShape>
 

@@ -987,6 +987,16 @@ fn counts_line(counts: &Value) -> String {
     }
 }
 
+/// A request's status, with why it was closed when its fork or target was deleted.
+fn status_label(request: &Value) -> String {
+    let status = text(request, "status");
+    match request.get("closedReason").and_then(Value::as_str) {
+        Some("fork-deleted") => format!("closed: fork deleted ({status})"),
+        Some("target-deleted") => format!("closed: target deleted ({status})"),
+        _ => status.to_owned(),
+    }
+}
+
 /// `silo requests`.
 pub fn requests_list(value: &Value) -> String {
     let entries = list_of(value, "requests");
@@ -1024,7 +1034,7 @@ pub fn requests_list(value: &Value) -> String {
             fork,
             target,
             counts_line(&request["counts"]),
-            text(request, "status"),
+            status_label(request),
         ));
     }
     out.push_str(&unreachable_lines(value));

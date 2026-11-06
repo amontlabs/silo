@@ -42,6 +42,8 @@ it("forks from the step's checkpoint with the trimmed name", async () => {
   await user.type(screen.getByRole("textbox", { name: "New computer name" }), " retry ")
   await user.click(within(document.querySelector<HTMLElement>("[data-slot=popover-content]")!).getByRole("button", { name: "Fork" }))
   await waitFor(() => expect(forkCheckpoint).toHaveBeenCalledWith("dev", "step-cp-2", "retry"))
+  await waitFor(() => expect(document.querySelector("[data-slot=popover-content]")).toBeNull())
+  expect(screen.queryByText(/already exists/)).toBeNull()
 })
 
 it("disables the fork action with a reason when the step has no checkpoint", async () => {

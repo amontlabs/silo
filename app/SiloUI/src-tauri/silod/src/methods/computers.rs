@@ -539,6 +539,7 @@ fn run_macos_action(host: &SilodRuntimeHost, job_id: JobId, computer_id: String,
     let macos = host.macos_context();
     let engine = host.context.clone();
     let method = method_for(&action);
+    let delete = matches!(action, Action::Delete).then(|| computer_id.clone());
     tokio::spawn(async move {
         let result = silo_engine::macos_computers::macos_computer_action_with_job(
             macos,
@@ -548,10 +549,18 @@ fn run_macos_action(host: &SilodRuntimeHost, job_id: JobId, computer_id: String,
             method,
         )
         .await;
-        if let Err(message) = result {
-            finish_job_error(&engine, job_id, message);
+        match result {
+            Ok(()) => close_requests_of(&engine, delete.as_deref()),
+            Err(message) => finish_job_error(&engine, job_id, message),
         }
     });
+}
+
+/// Closes the open review requests of a computer that was deleted.
+fn close_requests_of(context: &SilodContext, computer_id: Option<&str>) {
+    if let Some(id) = computer_id {
+        silo_engine::fold_requests::Store::new(&context.paths().app_data).close_for_computer(id);
+    }
 }
 
 fn method_for(action: &Action) -> &'static str {
@@ -1123,6 +1132,12 @@ fn run_linux_change(
     let worker = host.clone();
     let worker_job = job_id.clone();
     run_engine_job(host.context.clone(), job_id, move || {
+        let deleted = match &change {
+            silo_engine::runtime::ComputerConfigurationChange::Delete { computer_id, .. } => {
+                Some(computer_id.clone())
+            }
+            _ => None,
+        };
         silo_engine::runtime::change_computer_configuration_with_host_and_job(
             &worker,
             change,
@@ -1130,7 +1145,9 @@ fn run_linux_change(
             retry_name,
             Some(worker_job),
         )
-        .map(|_| ())
+        .map(|_| {
+            close_requests_of(&worker.context, deleted.as_deref());
+        })
     });
 }
 

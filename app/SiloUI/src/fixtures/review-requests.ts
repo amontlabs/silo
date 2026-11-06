@@ -3,7 +3,7 @@ import type { ReviewRequestActions } from "@/features/application/components/rev
 
 const request = (id: string, forkId: string) => ({
   id, forkId, target: "main", createdAt: "2026-11-05T09:30:00Z", reviewDigest: "d1", summary: "", status: "open" as const, counts: {},
-  keepId: undefined, resolvedAt: undefined, keepingSinceMs: undefined,
+  keepId: undefined, resolvedAt: undefined, keepingSinceMs: undefined, closedReason: undefined,
 })
 
 const text = [

@@ -42,6 +42,7 @@ export function StepsPanel({ computer, target, actions, disabled, takenNames, fo
   function fork(step: ComputerStep, newName: string) {
     if (disabled || !step.checkpointId || !actions.forkCheckpoint) return
     const checkpointId = step.checkpointId
+    setOpenStep(null)
     void runCheckpointOperation({
       id: `step:${target}:${step.number}:fork`,
       kind: "fork",
