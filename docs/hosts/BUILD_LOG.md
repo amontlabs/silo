@@ -192,7 +192,16 @@ Plan: [PLAN.md](PLAN.md).
     builds; the journal is readable by host administrators (for phase 6's threat model); the
     GitHub App client secret in the Linux binaries is accepted, as on macOS; the Linux
     verification guide's header no longer reads as if all Linux support were discontinued.
-  - Tests (same container, as root): `silod` 333 unit tests (5 new) and its 12 other tests
+  - Second review: the survivor check is one `msb list` (`update_recovery::listed_states`)
+    counting starting, running, draining and paused computers; it no longer inspects each
+    computer or refuses for an unfinished configuration, a removed computer or a transitional
+    state, which made a clean stop exit 70. A client's `engine.shutdown` that a SIGTERM
+    attaches to takes the same exit code (`UpdateState::session_ending`); any other shutdown,
+    and every shutdown on macOS, still exits 0. `unregister` runs `reset-failed` before the
+    reload, and finds the cgroup of an already inactive unit from its slice's.
+    `linux-host.yml` runs `chmod -R go-w` on the unpacked engine for phase 2's
+    engine-directory trust check.
+  - Tests (same container, as root): `silod` 334 unit tests and its 12 other tests
     passed; `run-script-tests.py` 45 of 45 modules; actionlint 1.7.7 (no shellcheck here)
     found nothing in the three changed workflows. Not run: any workflow, and a session end
     against real computers.
