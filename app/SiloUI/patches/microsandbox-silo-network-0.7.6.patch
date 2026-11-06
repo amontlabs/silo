@@ -233,7 +233,7 @@ index e078fb9a..a0c55755 100644
              })
              .await?;
          if args.stdio {
-@@ -226,18 +297,26 @@ async fn run_serve(args: SshServeArgs) -> anyhow::Result<()> {
+@@ -226,18 +297,34 @@ async fn run_serve(args: SshServeArgs) -> anyhow::Result<()> {
          } else {
              let listener = TcpListener::bind((host.as_str(), port)).await?;
              let addr = listener.local_addr()?;
@@ -245,6 +245,8 @@ index e078fb9a..a0c55755 100644
 +                ui::success("SSH listening", &addr.to_string());
 +            }
 +            let mut sessions = tokio::task::JoinSet::new();
++            // Silo counts open sessions from these lines: a session can change the sandbox.
++            let report_sessions = args.exit_on_stdin_close;
              loop {
                  tokio::select! {
 +                    biased;
@@ -252,17 +254,23 @@ index e078fb9a..a0c55755 100644
                          let (stream, _) = accepted?;
                          let server = server.clone();
 -                        tokio::spawn(async move {
++                        if report_sessions {
++                            silo_report_session("SILO_SSH_SESSION_OPEN");
++                        }
 +                        sessions.spawn(async move {
                              if let Err(error) = server.serve_connection(stream).await {
                                  tracing::debug!(%error, "SSH connection failed");
                              }
++                            if report_sessions {
++                                silo_report_session("SILO_SSH_SESSION_CLOSED");
++                            }
                          });
                      }
 +                    _ = sessions.join_next(), if !sessions.is_empty() => {}
                      signal = tokio::signal::ctrl_c() => {
                          signal?;
                          break Ok(());
-@@ -251,6 +330,14 @@ async fn run_serve(args: SshServeArgs) -> anyhow::Result<()> {
+@@ -251,6 +338,21 @@ async fn run_serve(args: SshServeArgs) -> anyhow::Result<()> {
      result.map_err(Into::into)
  }
  
@@ -272,6 +280,13 @@ index e078fb9a..a0c55755 100644
 +        "sandbox identity changed; SSH access refused"
 +    );
 +    Ok(())
++}
++
++/// One line on stdout for Silo; ignored once Silo stops reading.
++fn silo_report_session(line: &str) {
++    let mut stdout = std::io::stdout().lock();
++    let _ = writeln!(stdout, "{line}");
++    let _ = stdout.flush();
 +}
 +
  async fn run_authorize(args: SshAuthorizeArgs) -> anyhow::Result<()> {

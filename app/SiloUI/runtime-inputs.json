@@ -62,7 +62,7 @@
   "patches": [
     {
       "path": "patches/microsandbox-silo-network-0.7.6.patch",
-      "sha256": "45b890b9c2a095e4b0dde6da6341e856e06efb11307231547c5778407cff0eeb"
+      "sha256": "e576f1bc50aa495f2f8a75147d7501baa50abcfab6bb67cf4db89cd88b2830f4"
     },
     {
       "path": "patches/microsandbox-restore-policy-0.7.6.patch",
