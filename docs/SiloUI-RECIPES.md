@@ -43,8 +43,12 @@ commands are shell text. Services start at boot through an XDG autostart entry o
 launcher file named `<name>`; for a plain command (a program and arguments, no shell syntax)
 the launcher `exec`s it, so the process runs under its own name. A `quiet:` entry that names
 the service stops its entry or label and also the name the command runs under: the script after
-an interpreter (`python3 /opt/app/poller.py` is `poller.py`), else the program (`openclaw
-gateway` is `openclaw`). The fork's `silo status` lists both names.
+an interpreter, by its full file name, when it names a file with an extension (`python3
+/opt/app/poller.py` is `poller.py`; `node server` and `python3 -m app` name none), else the
+program (`openclaw gateway` is `openclaw`). A launcher (`env`, `sudo`, `nohup`, `nice`, `exec`,
+`timeout`, `java`, `npm`, `npx`, `yarn`, `pnpm`, `uv`, `docker`, `make`, `bun`, `deno`, `bash`,
+`sh`) names none either. When no name can be derived, `silo fork` warns: add the program or
+script to `quiet:` yourself. The fork's `silo status` lists both names.
 
 On macOS, a recipe that needs Homebrew (brew packages, or pip, pipx, npm or cargo when their
 tool is missing) installs it first as the account with the official non-interactive

@@ -565,10 +565,49 @@ fn quiet_names(recipe: &Recipe) -> Vec<String> {
     names
 }
 
+/// One line per quiet service whose running process name cannot be derived: only the service's
+/// own name is stopped for it, which its process does not carry.
+pub fn quiet_warnings(recipe: &Recipe) -> Vec<String> {
+    recipe
+        .quiet
+        .iter()
+        .filter_map(|entry| Some((entry, recipe.services.get(entry)?)))
+        .filter(|(_, command)| service_program(command).is_none())
+        .map(|(entry, _)| {
+            format!(
+                "quiet: cannot tell which process service {entry} runs; name its program or script in quiet: too."
+            )
+        })
+        .collect()
+}
+
+/// Programs that run some other program; their name says nothing about the service.
+const LAUNCHERS: [&str; 18] = [
+    "env", "sudo", "nohup", "nice", "exec", "timeout", "java", "npm", "npx", "yarn", "pnpm", "uv",
+    "docker", "make", "bun", "deno", "bash", "sh",
+];
+
+/// Interpreters whose process name is matched by the script they run.
+const INTERPRETERS: [&str; 6] = ["python", "node", "nodejs", "perl", "ruby", "php"];
+
+/// Interpreter options that run code or a module instead of a script file.
+const NO_SCRIPT: [&str; 8] = [
+    "-m",
+    "-c",
+    "-e",
+    "-p",
+    "-r",
+    "--eval",
+    "--print",
+    "--require",
+];
+
 /// The program or script name a service command runs under, as the guest's quiet step matches
-/// it: the script after an interpreter (`python3 -u /opt/app/poller.py` is `poller.py`), else
-/// the program (`openclaw gateway` is `openclaw`). `None` when the command is not a plain
-/// command line the launcher `exec`s.
+/// it: the script after an interpreter, by its full file name, when the script is a specific
+/// file (`python3 -u /opt/app/poller.py` is `poller.py`; `node server` says too little), else
+/// the program (`openclaw gateway` is `openclaw`). `None` for a launcher (`npm start`,
+/// `sudo x`, `bash run.sh`) and when the command is not a plain command line the launcher
+/// `exec`s.
 fn service_program(command: &str) -> Option<String> {
     let plain = |c: char| c.is_ascii_alphanumeric() || "-_./:=@%+, ".contains(c);
     if !command.chars().all(plain) {
@@ -579,12 +618,26 @@ fn service_program(command: &str) -> Option<String> {
     let base = |word: &str| word.rsplit('/').next().unwrap_or(word).to_owned();
     let program = base(first);
     let family = program.trim_end_matches(|c: char| c.is_ascii_digit() || c == '.');
-    let name = if [
-        "python", "node", "nodejs", "bash", "sh", "perl", "ruby", "php",
-    ]
-    .contains(&family)
-    {
-        base(words.find(|word| !word.starts_with('-'))?)
+    if LAUNCHERS.contains(&family) {
+        return None;
+    }
+    let name = if INTERPRETERS.contains(&family) {
+        let mut options = Vec::new();
+        let script = words.find(|word| {
+            options.push(*word);
+            !word.starts_with('-')
+        })?;
+        if options.iter().any(|option| NO_SCRIPT.contains(option)) {
+            return None;
+        }
+        let name = base(script);
+        let specific = name
+            .split_once('.')
+            .is_some_and(|(stem, extension)| !stem.is_empty() && !extension.is_empty());
+        if !specific {
+            return None;
+        }
+        name
     } else {
         program
     };
@@ -696,6 +749,9 @@ async fn fork_now(
         &mut params,
         &fork_extras(args.recipe.as_ref(), &args.secrets),
     )?;
+    for warning in args.recipe.iter().flat_map(quiet_warnings) {
+        progress(&warning);
+    }
     engine
         .run_job(
             &format!("Forking {} into {name}", source.name),
@@ -1566,6 +1622,59 @@ mod tests {
         );
         assert_eq!(service_program("PORT=1 node app.js"), None);
         assert_eq!(service_program("python3"), None);
+    }
+
+    #[test]
+    fn launchers_and_unspecific_scripts_name_no_process_and_warn() {
+        for command in [
+            "env FOO=1 poller",
+            "sudo -u bot poller",
+            "nohup poller",
+            "nice -n 5 poller",
+            "exec poller",
+            "timeout 60 poller",
+            "java -jar /opt/app.jar",
+            "npm start",
+            "npx serve",
+            "yarn dev",
+            "pnpm run bot",
+            "uv run bot.py",
+            "docker run app",
+            "make serve",
+            "bun run index.ts",
+            "deno run main.ts",
+            "bash run.sh",
+            "/bin/sh -c poller",
+            "node server",
+            "python3 -m http.server",
+            "python3 -c pass",
+            "node -e 1",
+            "python3 -u /opt/app/.env",
+        ] {
+            assert_eq!(service_program(command), None, "{command}");
+        }
+        assert_eq!(
+            service_program("python3.12 -u /opt/app/poller.py").as_deref(),
+            Some("poller.py")
+        );
+        assert_eq!(
+            service_program("node /srv/bot/index.mjs").as_deref(),
+            Some("index.mjs")
+        );
+        let recipe = parse_recipe(concat!(
+            "services:\n",
+            "  web: npm start\n",
+            "  poller: python3 /opt/poller.py\n",
+            "quiet: [web, poller, cron]\n",
+        ))
+        .unwrap();
+        assert_eq!(
+            fork_extras(Some(&recipe), &[]).quiet.unwrap().stop,
+            ["web", "poller", "poller.py", "cron"]
+        );
+        let warnings = quiet_warnings(&recipe);
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("service web"), "{}", warnings[0]);
     }
 
     #[test]

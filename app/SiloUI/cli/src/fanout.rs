@@ -460,6 +460,9 @@ async fn fork_many_now(
         checkpoint = made["id"].as_str().map(str::to_owned);
     }
     let extras = ops::fork_extras(args.fork.recipe.as_ref(), &args.fork.secrets);
+    for warning in args.fork.recipe.iter().flat_map(ops::quiet_warnings) {
+        progress(&warning);
+    }
     let step_settings = Settings::step_settings(settings);
     let forks = futures::future::join_all(names.iter().map(|name| {
         one(
