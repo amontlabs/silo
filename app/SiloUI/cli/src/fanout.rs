@@ -347,6 +347,7 @@ async fn one(
         Err(error) => entry["portsError"] = json!(error.message),
     }
     entry["id"] = json!(fork.id);
+    crate::flows::inherit_recipe(engine, &source.id, &fork.id);
     entry["state"] = json!(fork.state);
     entry["kind"] = json!(fork.kind);
     entry["urls"] = json!(urls(engine, &fork).await);
@@ -446,7 +447,7 @@ pub async fn fork_many(
         checkpoint = made["id"].as_str().map(str::to_owned);
     }
     let extras = ops::fork_extras(args.fork.recipe.as_ref(), &args.fork.secrets);
-    let step_settings = Settings::step_settings(settings, None);
+    let step_settings = Settings::step_settings(settings);
     let forks = futures::future::join_all(names.iter().map(|name| {
         one(
             engine,

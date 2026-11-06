@@ -32,6 +32,8 @@ quiet: [poller]        # fork rules (see SiloUI-CLI.md); not part of the build
 scrub: [/root/.env]
 keep:
   after: [make test]
+test: make test        # run in a fork by auto_keep rules with tests: pass
+files: [/etc/app.conf] # settings files kept into the computer (silo fold appends them)
 ```
 
 Package names are single words (a version suffix such as `name@1.2` or `name==1.0` is

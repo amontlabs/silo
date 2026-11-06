@@ -2,6 +2,7 @@
 //! requests in `silo-api`.
 
 pub mod access;
+pub mod autokeep;
 pub mod cli;
 pub mod clock;
 pub mod config;
@@ -12,5 +13,8 @@ pub mod flows;
 pub mod folder;
 pub mod mcp;
 pub mod ops;
+pub mod pr;
 pub mod render;
 pub mod steps;
+pub mod summary;
+pub mod writeback;

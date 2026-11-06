@@ -21,7 +21,7 @@ use crate::{
 const MEMORY_FILE: &str = "cli-folders.json";
 /// The guest folder the transfer API allows besides Downloads; bundles pass through a
 /// folder of their own below it, which is removed afterwards.
-const TRANSFER_ROOT: &str = "/workspace";
+pub(crate) const TRANSFER_ROOT: &str = "/workspace";
 /// A folder of the repository's git directory that holds bundles in transit.
 const TRANSIT: &str = "silo";
 
@@ -103,18 +103,18 @@ const HARDENING: [&str; 6] = [
     "protocol.ext.allow=never",
 ];
 
-struct Git {
-    dir: PathBuf,
+pub(crate) struct Git {
+    pub(crate) dir: PathBuf,
 }
 
-struct GitOutput {
-    code: i32,
-    out: String,
-    err: String,
+pub(crate) struct GitOutput {
+    pub(crate) code: i32,
+    pub(crate) out: String,
+    pub(crate) err: String,
 }
 
 impl Git {
-    async fn run(&self, args: &[&str]) -> Result<GitOutput, CliError> {
+    pub(crate) async fn run(&self, args: &[&str]) -> Result<GitOutput, CliError> {
         let mut output = self.run_untrimmed(args).await?;
         output.out.truncate(output.out.trim_end().len());
         output.err.truncate(output.err.trim_end().len());
@@ -122,7 +122,17 @@ impl Git {
     }
 
     async fn run_untrimmed(&self, args: &[&str]) -> Result<GitOutput, CliError> {
+        self.run_env(args, &[]).await
+    }
+
+    /// Runs the command with extra environment variables (the push credential header).
+    pub(crate) async fn run_env(
+        &self,
+        args: &[&str],
+        env: &[(String, String)],
+    ) -> Result<GitOutput, CliError> {
         let dir = self.dir.clone();
+        let env = env.to_vec();
         let args: Vec<String> = args.iter().map(|arg| (*arg).to_owned()).collect();
         tokio::task::spawn_blocking(move || {
             let mut command = std::process::Command::new("git");
@@ -137,7 +147,8 @@ impl Git {
                 .env_remove("GIT_ASKPASS")
                 .env_remove("GIT_WORK_TREE")
                 .env_remove("GIT_INDEX_FILE")
-                .env("GIT_TERMINAL_PROMPT", "0");
+                .env("GIT_TERMINAL_PROMPT", "0")
+                .envs(env);
             command.output().map(|output| GitOutput {
                 code: output.status.code().unwrap_or(-1),
                 out: String::from_utf8_lossy(&output.stdout).into_owned(),
@@ -150,7 +161,7 @@ impl Git {
     }
 
     /// The output of a git command that must succeed.
-    async fn ok(&self, args: &[&str]) -> Result<String, CliError> {
+    pub(crate) async fn ok(&self, args: &[&str]) -> Result<String, CliError> {
         let output = self.run(args).await?;
         if output.code == 0 {
             Ok(output.out)
@@ -181,7 +192,7 @@ impl Git {
         }
     }
 
-    async fn succeeds(&self, args: &[&str]) -> Result<bool, CliError> {
+    pub(crate) async fn succeeds(&self, args: &[&str]) -> Result<bool, CliError> {
         Ok(self.run(args).await?.code == 0)
     }
 }
@@ -249,7 +260,7 @@ impl Repo {
     }
 }
 
-fn clean_up(path: &Path) {
+pub(crate) fn clean_up(path: &Path) {
     let _ = std::fs::remove_file(path);
     if let Some(parent) = path.parent() {
         // Only an empty transit folder goes.
@@ -270,7 +281,7 @@ fn exec(computer: &str, script: &str, args: &[&str], cwd: Option<&str>) -> ops::
     }
 }
 
-async fn guest(
+pub(crate) async fn guest(
     engine: &Engine,
     computer: &str,
     script: &str,
@@ -288,7 +299,7 @@ async fn guest(
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
 }
 
-fn transfer_id() -> String {
+pub(crate) fn transfer_id() -> String {
     format!("silo-{}", uuid::Uuid::new_v4().simple())
 }
 
@@ -325,7 +336,7 @@ async fn upload(
     }
 }
 
-async fn download(
+pub(crate) async fn download(
     engine: &Engine,
     computer: &Computer,
     path: &str,
@@ -541,7 +552,7 @@ fn refused(fork: &str, target: &str, reason: &str, message: String, hint: &str) 
     })
 }
 
-fn ref_label(fork: &str) -> String {
+pub(crate) fn ref_label(fork: &str) -> String {
     fork.chars()
         .map(|c| {
             if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' {
@@ -598,6 +609,58 @@ pub async fn fold_folder(
     Ok(value)
 }
 
+/// Commits the fork's uncommitted work, bundles the commits since the folder's, and fetches
+/// them into `refs/silo/<fork>/head` of the folder; that reference, or `None` when the fork
+/// has nothing beyond the commit it started from.
+async fn gather_commits(
+    engine: &Engine,
+    fork: &Computer,
+    record: &Record,
+    repo: &Repo,
+    progress: Progress<'_>,
+) -> Result<Option<String>, CliError> {
+    // Uncommitted work in the fork is committed first, so the fork's files are not left out.
+    let outbox = format!("{TRANSFER_ROOT}/silo-out-{}", uuid::Uuid::new_v4().simple());
+    let remote_bundle = format!("{outbox}/out.bundle");
+    let gather = "set -e; cd \"$1\"; git add -A; \
+                  git diff --cached --quiet || git commit -q -m \"silo: uncommitted changes in $3\"; \
+                  head=$(git rev-parse HEAD); \
+                  if [ \"$head\" = \"$2\" ]; then echo unchanged; else \
+                  mkdir -p \"$4\"; git bundle create --quiet \"$4/out.bundle\" \"$2..HEAD\"; echo \"$head\"; fi";
+    let produced = guest(
+        engine,
+        &fork.name,
+        gather,
+        &[&record.guest_path, &record.base, &fork.name, &outbox],
+        "Collecting the commits",
+    )
+    .await?;
+    if produced == "unchanged" {
+        return Ok(None);
+    }
+    let bundle = repo.transit(&format!("{}.bundle", transfer_id()))?;
+    let fetched = fetch_into(
+        engine,
+        fork,
+        repo,
+        &remote_bundle,
+        &bundle,
+        &ref_label(&fork.name),
+        progress,
+    )
+    .await;
+    clean_up(&bundle);
+    let _ = guest(
+        engine,
+        &fork.name,
+        "rm -rf \"$1\"",
+        &[&outbox],
+        "Cleaning up",
+    )
+    .await;
+    Ok(Some(fetched?))
+}
+
 async fn fold_running_folder(
     engine: &Engine,
     fork: &Computer,
@@ -630,51 +693,14 @@ async fn fold_running_folder(
             "Commit or stash them, then fold again.",
         ));
     }
-    // Uncommitted work in the fork is committed first, so the fork's files are not left out.
-    let outbox = format!("{TRANSFER_ROOT}/silo-out-{}", uuid::Uuid::new_v4().simple());
-    let remote_bundle = format!("{outbox}/out.bundle");
-    let gather = "set -e; cd \"$1\"; git add -A; \
-                  git diff --cached --quiet || git commit -q -m \"silo: uncommitted changes in $3\"; \
-                  head=$(git rev-parse HEAD); \
-                  if [ \"$head\" = \"$2\" ]; then echo unchanged; else \
-                  mkdir -p \"$4\"; git bundle create --quiet \"$4/out.bundle\" \"$2..HEAD\"; echo \"$head\"; fi";
-    let produced = guest(
-        engine,
-        &fork.name,
-        gather,
-        &[&record.guest_path, &record.base, &fork.name, &outbox],
-        "Collecting the commits",
-    )
-    .await?;
-    if produced == "unchanged" {
+    let Some(reference) = gather_commits(engine, fork, &record, &repo, progress).await? else {
         return Ok(json!({
             "status": "unchanged",
             "report": {"fork": fork.name, "target": target, "summary": [],
                        "steps": ["The fork has no commits beyond the folder's; nothing to bring back."],
                        "notes": [], "checkpoint": null},
         }));
-    }
-    let bundle = repo.transit(&format!("{}.bundle", transfer_id()))?;
-    let fetched = fetch_into(
-        engine,
-        fork,
-        &repo,
-        &remote_bundle,
-        &bundle,
-        &ref_label(&fork.name),
-        progress,
-    )
-    .await;
-    clean_up(&bundle);
-    let _ = guest(
-        engine,
-        &fork.name,
-        "rm -rf \"$1\"",
-        &[&outbox],
-        "Cleaning up",
-    )
-    .await;
-    let reference = fetched?;
+    };
 
     let count = repo
         .git
@@ -1090,6 +1116,105 @@ pub async fn review_summary(
         "Reading the repository",
     )
     .await
+}
+
+/// Whether the fork has commits beyond the ones it started from or uncommitted changes.
+pub async fn has_changes(
+    engine: &Engine,
+    fork: &Computer,
+    record: &Record,
+) -> Result<bool, CliError> {
+    let script = "cd \"$1\" && if [ \"$(git rev-list --count \"$2..HEAD\")\" != 0 ] \
+                  || [ -n \"$(git status --porcelain)\" ]; then echo yes; else echo no; fi";
+    let answer = guest(
+        engine,
+        &fork.name,
+        script,
+        &[&record.guest_path, &record.base],
+        "Reading the repository",
+    )
+    .await?;
+    Ok(answer == "yes")
+}
+
+/// The host folder with the fork's work on a branch, ready to push.
+pub struct PrSource {
+    pub directory: PathBuf,
+    pub branch: String,
+    /// The branch the folder is on: where a pull request would merge.
+    pub base: Option<String>,
+    /// The folder's `origin` URL.
+    pub remote: String,
+}
+
+/// Puts the fork's commits (its uncommitted work committed first, as a fold does) on a new
+/// branch `branch` of the host folder. Nothing else in the folder changes: the checked-out
+/// branch and the working tree stay as they are. A stopped fork is started for this and put
+/// back to stopped.
+pub async fn branch_for_pr(
+    engine: &Engine,
+    fork: &Computer,
+    record: &Record,
+    branch: &str,
+    progress: Progress<'_>,
+) -> Result<PrSource, CliError> {
+    let started_here = match fork.state.as_str() {
+        "running" => false,
+        "stopped" => {
+            ops::start(engine, &fork.name, progress).await?;
+            true
+        }
+        other => {
+            return Err(CliError::new(format!(
+                "{} is {other}; wait until it is running or stopped, then try again.",
+                fork.name
+            )))
+        }
+    };
+    let current = engine.computer(&fork.name).await?;
+    let made = make_branch(engine, &current, record, branch, progress).await;
+    if started_here {
+        let stopped = ops::stop(engine, &fork.name, progress).await;
+        let source = made?;
+        stopped?;
+        return Ok(source);
+    }
+    made
+}
+
+async fn make_branch(
+    engine: &Engine,
+    fork: &Computer,
+    record: &Record,
+    branch: &str,
+    progress: Progress<'_>,
+) -> Result<PrSource, CliError> {
+    let repo = Repo::open(Path::new(&record.path)).await.map_err(|error| {
+        CliError::new(format!(
+            "The folder {} that {} was made from cannot be used: {}",
+            record.path, fork.name, error.message
+        ))
+    })?;
+    let remote = repo.git.run(&["remote", "get-url", "origin"]).await?;
+    if remote.code != 0 || remote.out.is_empty() {
+        return Err(CliError::new(format!(
+            "{} has no origin remote to push the branch to.",
+            record.path
+        )));
+    }
+    let Some(reference) = gather_commits(engine, fork, record, &repo, progress).await? else {
+        return Err(CliError::new(format!(
+            "{} has no commits beyond the folder's; there is nothing to open a pull request for.",
+            fork.name
+        )));
+    };
+    repo.git.ok(&["branch", branch, &reference]).await?;
+    Ok(PrSource {
+        directory: repo.git.dir.clone(),
+        branch: branch.to_owned(),
+        base: repo.branch.clone(),
+        remote: remote.out,
+    })
 }
 
 #[cfg(test)]

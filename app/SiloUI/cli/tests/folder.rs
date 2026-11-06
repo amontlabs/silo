@@ -578,3 +578,191 @@ async fn folding_a_stopped_fork_starts_it_and_stops_it_again() {
     lab.fold(&engine, &fork, false).await;
     assert_eq!(state(), "running");
 }
+
+/// A one-request HTTP server that answers `status` with `reply` and hands back the request
+/// it got (head, then body).
+fn mock_github(status: u16, reply: Value) -> (String, std::sync::mpsc::Receiver<(String, String)>) {
+    use std::io::{Read, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let (send, receive) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut bytes = Vec::new();
+        let mut chunk = [0u8; 4096];
+        let (head, body) = loop {
+            let read = stream.read(&mut chunk).unwrap();
+            bytes.extend_from_slice(&chunk[..read]);
+            let text = String::from_utf8_lossy(&bytes).into_owned();
+            if let Some((head, body)) = text.split_once("\r\n\r\n") {
+                let length = head
+                    .lines()
+                    .find_map(|line| {
+                        line.to_lowercase()
+                            .strip_prefix("content-length:")
+                            .map(|v| v.trim().parse::<usize>().unwrap())
+                    })
+                    .unwrap_or(0);
+                if body.len() >= length {
+                    break (head.to_owned(), body.to_owned());
+                }
+            }
+            assert!(read > 0, "the request ended early");
+        };
+        let payload = reply.to_string();
+        write!(
+            stream,
+            "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{payload}",
+            payload.len()
+        )
+        .unwrap();
+        send.send((head, body)).unwrap();
+    });
+    (url, receive)
+}
+
+fn pr_context(project: &Project) -> flows::Context<'_> {
+    flows::Context {
+        project,
+        settings: None,
+        recipe: None,
+        write_back: true,
+    }
+}
+
+/// A bare repository that is the host folder's `origin`, holding its `main`.
+fn with_origin(lab: &Lab) -> PathBuf {
+    let remote = lab.host.parent().unwrap().join("remote.git");
+    std::fs::create_dir_all(&remote).unwrap();
+    git(&remote, &["init", "-q", "--bare", "-b", "main"]);
+    git(
+        &lab.host,
+        &["remote", "add", "origin", remote.to_str().unwrap()],
+    );
+    git(&lab.host, &["push", "-q", "origin", "main"]);
+    remote
+}
+
+fn pr_mode(token: Option<&str>, api: String) -> flows::Mode {
+    flows::Mode::PullRequest(
+        silo_cli::pr::PrArgs::default(),
+        silo_cli::pr::PrEnv {
+            token: token.map(str::to_owned),
+            api_url: api,
+            repository: Some("acme/app".into()),
+        },
+    )
+}
+
+#[tokio::test]
+async fn fold_pr_pushes_a_branch_and_opens_a_pull_request_with_the_summary() {
+    let lab = lab();
+    let remote = with_origin(&lab);
+    let engine = lab.connect().await;
+    let (name, guest) = lab.fork(&engine).await;
+    commit(&guest, "b.txt", "two\n", "second");
+    let (api, request) = mock_github(
+        201,
+        json!({"html_url": "https://github.com/acme/app/pull/7", "number": 7}),
+    );
+    let project = Project::default();
+    let value = flows::run(
+        &engine,
+        &name,
+        None,
+        &pr_context(&project),
+        FoldOptions::default(),
+        pr_mode(Some("tok"), api),
+        &ignore,
+    )
+    .await
+    .unwrap();
+    assert_eq!(value["status"], "pull-request");
+    assert_eq!(value["prUrl"], "https://github.com/acme/app/pull/7");
+    assert_eq!(
+        value["pullRequest"]["url"],
+        "https://github.com/acme/app/pull/7"
+    );
+    let branch = value["branch"].as_str().unwrap().to_owned();
+    assert!(branch.starts_with(&format!("silo/{name}-")), "{branch}");
+    // The bare remote received the branch with the fork's commit; main there is unchanged.
+    assert_eq!(
+        git(&remote, &["rev-parse", &format!("refs/heads/{branch}")]),
+        git(&guest, &["rev-parse", "HEAD"])
+    );
+    assert_eq!(git(&remote, &["log", "--format=%s", "main"]), "first");
+    // The host folder keeps its branch and tree.
+    assert_eq!(
+        git(&lab.host, &["rev-parse", "--abbrev-ref", "HEAD"]),
+        "main"
+    );
+    assert_eq!(git(&lab.host, &["status", "--porcelain"]), "");
+    assert!(!lab.host.join("b.txt").exists());
+    // The API call.
+    let (head, body) = request.recv().unwrap();
+    assert!(head.starts_with("POST /repos/acme/app/pulls "), "{head}");
+    assert!(
+        head.to_lowercase().contains("authorization: bearer tok"),
+        "{head}"
+    );
+    let sent: Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(sent["head"], branch.as_str());
+    assert_eq!(sent["base"], "main");
+    let text = sent["body"].as_str().unwrap();
+    assert!(
+        text.starts_with("Code\n") && text.contains("second"),
+        "{text}"
+    );
+    assert!(silo_cli::render::pull_request(&value).contains("pull/7"));
+}
+
+#[tokio::test]
+async fn fold_pr_without_a_token_pushes_nothing_and_a_refused_call_names_the_branch() {
+    let lab = lab();
+    let remote = with_origin(&lab);
+    let engine = lab.connect().await;
+    let (name, guest) = lab.fork(&engine).await;
+    commit(&guest, "b.txt", "two\n", "second");
+    let project = Project::default();
+    let error = flows::run(
+        &engine,
+        &name,
+        None,
+        &pr_context(&project),
+        FoldOptions::default(),
+        pr_mode(None, "http://127.0.0.1:1".into()),
+        &ignore,
+    )
+    .await
+    .unwrap_err();
+    assert!(error.message.contains("GITHUB_TOKEN"), "{}", error.message);
+    assert_eq!(
+        git(
+            &remote,
+            &["for-each-ref", "--format=%(refname:short)", "refs/heads"]
+        ),
+        "main"
+    );
+
+    let (api, _request) = mock_github(
+        422,
+        json!({"message": "Validation Failed", "errors": [{"message": "A pull request already exists"}]}),
+    );
+    let error = flows::run(
+        &engine,
+        &name,
+        None,
+        &pr_context(&project),
+        FoldOptions::default(),
+        pr_mode(Some("tok"), api),
+        &ignore,
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        error.message.contains("422") && error.message.contains("already exists"),
+        "{}",
+        error.message
+    );
+    assert!(error.message.contains("was pushed"), "{}", error.message);
+}

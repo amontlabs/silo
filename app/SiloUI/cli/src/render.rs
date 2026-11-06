@@ -581,6 +581,14 @@ pub fn fold(value: &Value) -> String {
     for note in lines(report, "notes") {
         out.push_str(&format!("\nnote: {note}"));
     }
+    if let Some(rule) = value["autoKeep"]["rule"].as_str() {
+        out.push_str(&format!(
+            "\nKept without asking: the auto_keep rule {rule} matched."
+        ));
+    }
+    if value["writeBack"].is_object() {
+        out.push_str(&write_back(&value["writeBack"]));
+    }
     if text(value, "status") == "kept" {
         out.push_str(&format!("\nUndo with `silo undo {target}`."));
     }
@@ -702,9 +710,99 @@ pub fn folder_fork(value: &Value) -> String {
 /// `silo fold --request`.
 pub fn requested(value: &Value) -> String {
     let request = &value["request"];
-    format!(
+    let mut out = format!(
         "Requested a review of {} (request {}).",
         text(value, "fork"),
         text(request, "id")
-    )
+    );
+    if let Some(reason) = value["autoKeep"]["declined"].as_str() {
+        out.push_str(&format!("\nNot kept without asking: {reason}."));
+    }
+    out
+}
+
+/// What a keep appended to a recipe file (or why it could not).
+fn write_back(report: &Value) -> String {
+    let file = text(report, "file");
+    let mut parts: Vec<String> = Vec::new();
+    for (manager, names) in report["packages"].as_object().into_iter().flatten() {
+        let names: Vec<&str> = names
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .collect();
+        if !names.is_empty() {
+            parts.push(format!("{manager}: {}", names.join(", ")));
+        }
+    }
+    let files: Vec<&str> = report["files"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .collect();
+    if !files.is_empty() {
+        parts.push(format!("files: {}", files.join(", ")));
+    }
+    let mut out = String::new();
+    if let Some(error) = report["error"].as_str() {
+        out.push_str(&format!("\nnote: {file} was not changed ({error})."));
+        if !parts.is_empty() {
+            out.push_str(&format!(" Add by hand: {}.", parts.join("; ")));
+        }
+    } else if report["written"] == true {
+        out.push_str(&format!("\nAppended to {file}: {}.", parts.join("; ")));
+    }
+    for skipped in report["skipped"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+    {
+        out.push_str(&format!(
+            "\nnote: {skipped} has no list in a recipe; not written."
+        ));
+    }
+    out
+}
+
+/// One line for what the `auto_keep` rules did to a fork at the end of its command.
+pub fn auto_keep(value: &Value) -> String {
+    let fork = text(value, "fork");
+    if let Some(error) = value["error"].as_str() {
+        return format!("{fork}: could not check the auto_keep rules: {error}");
+    }
+    match value["autoKeep"]["rule"].as_str() {
+        Some(rule) => format!(
+            "Kept {fork} without asking: the auto_keep rule {rule} matched. Undo with `silo undo {}`.",
+            text(&value["report"], "target")
+        ),
+        None => format!(
+            "{fork} was not kept without asking ({}); left a review request ({}).",
+            text(&value["autoKeep"], "declined"),
+            text(&value["request"], "id")
+        ),
+    }
+}
+
+/// `silo fold --pr`.
+pub fn pull_request(value: &Value) -> String {
+    let mut out = format!(
+        "Pushed {} to {} and opened a pull request into {} of {}:\n{}",
+        text(value, "branch"),
+        text(value, "remote"),
+        text(value, "base"),
+        text(value, "repository"),
+        text(&value["pullRequest"], "url"),
+    );
+    for note in value["notes"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+    {
+        out.push_str(&format!("\nnote: {note}"));
+    }
+    out
 }
