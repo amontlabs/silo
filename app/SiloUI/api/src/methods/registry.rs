@@ -73,7 +73,7 @@ define_registry! {
     ChangesRequestsKeep => ("changes.requests.keep", Job, review_requests::ChangesRequestsKeepParams, common::JobStartResult);
     ChangesRequestsThrowAway => ("changes.requests.throwAway", Job, review_requests::RequestIdParams, common::JobStartResult);
     ChangesRequestsOpen => ("changes.requests.open", Job, review_requests::RequestIdParams, common::JobStartResult);
-    ChangesUndo =>("changes.undo", Job, keep::ChangesUndoParams, common::JobStartResult);
+    ChangesUndo => ("changes.undo", Job, keep::ChangesUndoParams, common::JobStartResult);
     ChangesBaseline => ("changes.baseline", Job, changes::ChangesBaselineParams, common::JobStartResult);
     ChangesCapture => ("changes.capture", Job, changes::ChangesCaptureParams, common::JobStartResult);
     ChangesDiff => ("changes.diff", Job, changes::ChangesDiffParams, common::JobStartResult);

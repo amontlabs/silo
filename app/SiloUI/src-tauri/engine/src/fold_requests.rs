@@ -122,6 +122,7 @@ impl Store {
             counts: new.counts,
             keep_id: None,
             resolved_at: None,
+            keeping_since_ms: None,
         };
         self.put(&request)?;
         Ok(request)
@@ -133,49 +134,110 @@ impl Store {
             .into_iter()
             .filter(|request| match filter {
                 RequestFilter::All => true,
-                RequestFilter::Open => request.status == FoldRequestStatus::Open,
+                RequestFilter::Open => matches!(
+                    request.status,
+                    FoldRequestStatus::Open | FoldRequestStatus::Keeping
+                ),
                 RequestFilter::Kept => request.status == FoldRequestStatus::Kept,
                 RequestFilter::ThrownAway => request.status == FoldRequestStatus::ThrownAway,
             })
             .collect()
     }
 
-    /// An open request that is now kept; `keep_id` is the target's checkpoint from before.
+    /// A request that is now kept; `keep_id` is the target's checkpoint from before. It was
+    /// open, or its keep was under way.
     pub fn mark_kept(&self, id: &str, keep_id: Option<String>) -> Result<FoldRequest, String> {
-        self.resolve(id, FoldRequestStatus::Kept, keep_id)
-    }
-
-    /// An open request whose fork was dropped.
-    pub fn mark_thrown_away(&self, id: &str) -> Result<FoldRequest, String> {
-        self.resolve(id, FoldRequestStatus::ThrownAway, None)
-    }
-
-    fn resolve(
-        &self,
-        id: &str,
-        status: FoldRequestStatus,
-        keep_id: Option<String>,
-    ) -> Result<FoldRequest, String> {
-        let mut request = self.open_request(id)?;
-        request.status = status;
+        let mut request = self.keepable_request(id)?;
+        request.status = FoldRequestStatus::Kept;
         request.keep_id = keep_id;
+        request.keeping_since_ms = None;
         request.resolved_at = Some(now());
         self.put(&request)?;
         Ok(request)
     }
 
+    /// An open request whose fork was dropped.
+    pub fn mark_thrown_away(&self, id: &str) -> Result<FoldRequest, String> {
+        let mut request = self.open_request(id)?;
+        request.status = FoldRequestStatus::ThrownAway;
+        request.resolved_at = Some(now());
+        self.put(&request)?;
+        Ok(request)
+    }
+
+    /// Records, before a keep starts, that one is under way since `since_ms`.
+    pub fn mark_keeping(&self, id: &str, since_ms: u64) -> Result<FoldRequest, String> {
+        let mut request = self.keepable_request(id)?;
+        request.status = FoldRequestStatus::Keeping;
+        request.keeping_since_ms = Some(since_ms);
+        self.put(&request)?;
+        Ok(request)
+    }
+
+    /// A keep that changed nothing: the request is open again.
+    pub fn reopen(&self, id: &str) -> Result<FoldRequest, String> {
+        let mut request = self.keepable_request(id)?;
+        request.status = FoldRequestStatus::Open;
+        request.keeping_since_ms = None;
+        self.put(&request)?;
+        Ok(request)
+    }
+
+    /// Marks every open request for the fork and target kept, for a keep made without the
+    /// request. A request another job holds is left to that job.
+    pub fn mark_kept_for(
+        &self,
+        fork: &str,
+        target: &str,
+        keep_id: Option<&str>,
+    ) -> Vec<FoldRequest> {
+        self.list()
+            .into_iter()
+            .filter(|request| {
+                request.fork_id == fork
+                    && request.target == target
+                    && matches!(
+                        request.status,
+                        FoldRequestStatus::Open | FoldRequestStatus::Keeping
+                    )
+            })
+            .filter_map(|request| {
+                let _claim = claim(&request.id).ok()?;
+                self.mark_kept(&request.id, keep_id.map(str::to_owned)).ok()
+            })
+            .collect()
+    }
+
     /// The request, which must still be open.
     pub fn open_request(&self, id: &str) -> Result<FoldRequest, String> {
-        let request = self
-            .get(id)?
-            .ok_or_else(|| format!("There is no review request {id}."))?;
+        let request = self.existing(id)?;
         match request.status {
             FoldRequestStatus::Open => Ok(request),
+            FoldRequestStatus::Keeping => Err(format!(
+                "A keep of the request {id} was started and is not settled. Keep it again to settle it."
+            )),
             FoldRequestStatus::Kept => Err(format!("The request {id} was already kept.")),
             FoldRequestStatus::ThrownAway => {
                 Err(format!("The request {id} was already thrown away."))
             }
         }
+    }
+
+    /// The request, open or with a keep that was started.
+    pub fn keepable_request(&self, id: &str) -> Result<FoldRequest, String> {
+        let request = self.existing(id)?;
+        match request.status {
+            FoldRequestStatus::Open | FoldRequestStatus::Keeping => Ok(request),
+            FoldRequestStatus::Kept => Err(format!("The request {id} was already kept.")),
+            FoldRequestStatus::ThrownAway => {
+                Err(format!("The request {id} was already thrown away."))
+            }
+        }
+    }
+
+    fn existing(&self, id: &str) -> Result<FoldRequest, String> {
+        self.get(id)?
+            .ok_or_else(|| format!("There is no review request {id}."))
     }
 
     /// Writes the request whole: a reader sees the old file or the new one.
@@ -205,7 +267,10 @@ pub fn folder_path(target: &str) -> Option<&str> {
 /// Whether the request can be kept by the engine: it is open, its target is a computer, and
 /// it carries the digest the keep is pinned to.
 pub fn check_keepable(request: &FoldRequest) -> Result<(), String> {
-    if request.status != FoldRequestStatus::Open {
+    if !matches!(
+        request.status,
+        FoldRequestStatus::Open | FoldRequestStatus::Keeping
+    ) {
         return Err(format!("The request {} is not open.", request.id));
     }
     if let Some(path) = folder_path(&request.target) {
@@ -239,6 +304,75 @@ pub fn check_throwable(
         ));
     }
     Ok(())
+}
+
+/// Whether `fork` really is a fork whose changes the request may keep or throw away: its
+/// fork-time record names the request's target, so main and unrelated computers are not
+/// forks of it. A folder target needs the folder record the CLI keeps for its fork.
+pub fn check_fork_belongs(
+    fork_id: &str,
+    target: &str,
+    fork_source: Option<&str>,
+    state_dir: &Path,
+) -> Result<(), String> {
+    if let Some(path) = folder_path(target) {
+        let recorded = fs::read(state_dir.join("cli-folders.json"))
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+            .and_then(|all| all.get(fork_id).cloned())
+            .and_then(|record| {
+                record
+                    .get("path")
+                    .and_then(|p| p.as_str().map(str::to_owned))
+            });
+        return match recorded {
+            Some(recorded) if recorded == path => Ok(()),
+            _ => Err(format!(
+                "{fork_id} is not a fork of the folder {path}, so it cannot have a review request for it."
+            )),
+        };
+    }
+    if fork_id == target || fork_source != Some(target) {
+        return Err(format!(
+            "{fork_id} was not forked from {target}, so it cannot have a review request for it."
+        ));
+    }
+    Ok(())
+}
+
+/// Requests that are being kept or thrown away right now, in this process.
+fn held() -> &'static Mutex<std::collections::HashSet<String>> {
+    static HELD: OnceLock<Mutex<std::collections::HashSet<String>>> = OnceLock::new();
+    HELD.get_or_init(Mutex::default)
+}
+
+/// The hold on one request while a job keeps or throws it away; released when dropped.
+#[derive(Debug)]
+pub struct Claim(String);
+
+impl Drop for Claim {
+    fn drop(&mut self) {
+        held()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&self.0);
+    }
+}
+
+/// Takes the request for one job. A second job for the same request is refused, so a keep
+/// and a throw away, or two keeps, never run together.
+pub fn claim(id: &str) -> Result<Claim, String> {
+    if held()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .insert(id.to_owned())
+    {
+        Ok(Claim(id.to_owned()))
+    } else {
+        Err(format!(
+            "The request {id} is being kept or thrown away right now."
+        ))
+    }
 }
 
 /// Whether the fork's changes now differ from the ones the request was made from. A request
@@ -406,6 +540,79 @@ mod tests {
         assert!(check_throwable(&done, "f1", "try")
             .unwrap_err()
             .contains("not open"));
+    }
+
+    #[test]
+    fn a_keep_under_way_is_recorded_and_either_settles_or_reopens() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(dir.path());
+        let made = store.create(new("f1", "s")).unwrap();
+        let keeping = store.mark_keeping(&made.id, 42).unwrap();
+        assert_eq!(keeping.status, FoldRequestStatus::Keeping);
+        assert_eq!(keeping.keeping_since_ms, Some(42));
+        // It still lists as open work and can be kept again, but not thrown away.
+        assert_eq!(store.list_matching(RequestFilter::Open).len(), 1);
+        assert!(check_keepable(&keeping).is_ok());
+        assert!(store
+            .open_request(&made.id)
+            .unwrap_err()
+            .contains("not settled"));
+        assert!(check_throwable(&keeping, "f1", "try").is_err());
+        let reopened = store.reopen(&made.id).unwrap();
+        assert_eq!(reopened.status, FoldRequestStatus::Open);
+        assert_eq!(reopened.keeping_since_ms, None);
+        store.mark_keeping(&made.id, 43).unwrap();
+        let kept = store.mark_kept(&made.id, Some("cp".into())).unwrap();
+        assert_eq!(kept.status, FoldRequestStatus::Kept);
+        assert_eq!(kept.keeping_since_ms, None);
+    }
+
+    #[test]
+    fn a_request_is_held_by_one_job_at_a_time() {
+        let first = claim("fr-claim-test").unwrap();
+        assert!(claim("fr-claim-test").unwrap_err().contains("right now"));
+        drop(first);
+        assert!(claim("fr-claim-test").is_ok());
+    }
+
+    #[test]
+    fn a_keep_made_without_the_request_marks_its_open_requests_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(dir.path());
+        let one = store.create(new("f1", "s")).unwrap();
+        let other = store.create(new("f2", "s")).unwrap();
+        let held = claim(&one.id).unwrap();
+        // A request another job holds is left to that job.
+        assert!(store.mark_kept_for("f1", "main-id", Some("cp")).is_empty());
+        drop(held);
+        let marked = store.mark_kept_for("f1", "main-id", Some("cp"));
+        assert_eq!(marked.len(), 1);
+        assert_eq!(marked[0].keep_id.as_deref(), Some("cp"));
+        assert_eq!(
+            store.get(&other.id).unwrap().unwrap().status,
+            FoldRequestStatus::Open
+        );
+        assert!(store.mark_kept_for("f1", "main-id", None).is_empty());
+    }
+
+    #[test]
+    fn only_a_fork_of_the_target_can_have_a_request() {
+        let state = tempfile::tempdir().unwrap();
+        assert!(check_fork_belongs("f1", "main-id", Some("main-id"), state.path()).is_ok());
+        // main has no fork-time record; another computer was forked from elsewhere.
+        assert!(check_fork_belongs("main-id", "main-id", None, state.path()).is_err());
+        assert!(check_fork_belongs("f1", "main-id", Some("other"), state.path()).is_err());
+        assert!(check_fork_belongs("f1", "f1", Some("f1"), state.path()).is_err());
+        // A folder target needs the record the CLI keeps for that fork and that folder.
+        assert!(check_fork_belongs("f1", "folder:/work/app", None, state.path()).is_err());
+        fs::write(
+            state.path().join("cli-folders.json"),
+            r#"{"f1": {"path": "/work/app"}}"#,
+        )
+        .unwrap();
+        assert!(check_fork_belongs("f1", "folder:/work/app", None, state.path()).is_ok());
+        assert!(check_fork_belongs("f1", "folder:/other", None, state.path()).is_err());
+        assert!(check_fork_belongs("f2", "folder:/work/app", None, state.path()).is_err());
     }
 
     #[test]

@@ -194,6 +194,8 @@ wire_struct! {
 pub enum FoldRequestStatus {
     /// Waiting for a review.
     Open,
+    /// A keep of it started and has not been recorded as finished.
+    Keeping,
     /// Kept into its target.
     Kept,
     /// The fork was dropped without keeping it.
@@ -223,6 +225,10 @@ wire_struct! {
         /// When the request was kept or thrown away.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         resolved_at: Option<String>,
+        /// When a keep of the request started, in milliseconds since the epoch; set while the
+        /// status is `keeping`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        keeping_since_ms: Option<u64>,
     }
 }
 
