@@ -1,10 +1,11 @@
 //! `silo mcp`: the commands as MCP tools over stdio. Every tool makes the same engine calls
 //! as its command and answers with the same JSON as `--json`.
 
-use std::{path::PathBuf, sync::Arc};
+use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
 
 use rmcp::{
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
+    model::{CallToolResult, ContentBlock},
     schemars, tool, tool_handler, tool_router, ServerHandler, ServiceExt,
 };
 use serde::Deserialize;
@@ -30,7 +31,36 @@ pub struct SiloMcp {
     agent: Arc<std::sync::Mutex<Option<String>>>,
     /// Set when `--agent` or `SILO_AGENT` named the agent: the client's name is then ignored.
     agent_named: bool,
+    /// The driver session of each computer driven through this server, by computer id.
+    sessions:
+        Arc<std::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<crate::driver::Session>>>>>,
     tool_router: ToolRouter<Self>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ListParams {
+    /// A connected device (name or id) to list instead of this one.
+    pub device: Option<String>,
+    /// List this device's computers and every connected device's.
+    #[serde(default)]
+    pub all_devices: bool,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DeviceParam {
+    /// A connected device (name or id) to read instead of this one.
+    pub device: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DeviceComputerParam {
+    /// The computer's name.
+    pub computer: String,
+    /// The connected device (name or id) the computer is on; default this device.
+    pub device: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -82,6 +112,8 @@ pub struct ForkParams {
     pub secrets: Vec<String>,
     /// Path of a recipe whose quiet and scrub lists apply to the fork.
     pub recipe_file: Option<String>,
+    /// A connected device (name or id) to run this on instead of this one.
+    pub device: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -89,6 +121,12 @@ pub struct ForkParams {
 pub struct RequestsListParams {
     /// open (default), kept, thrown-away or all.
     pub status: Option<String>,
+    /// List this device's requests and every connected device's; each has `deviceName`, and
+    /// `unreachable` names the devices that could not be read.
+    #[serde(default)]
+    pub all_devices: bool,
+    /// A connected device (name or id) to run this on instead of this one.
+    pub device: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -96,6 +134,9 @@ pub struct RequestsListParams {
 pub struct RequestIdParam {
     /// The request's id, such as fr-ab12cd34.
     pub id: String,
+    /// The device the request is on. Needed for a request on another device, and the agent's
+    /// `devices:` entry in `.silo/silo.yaml` must list it.
+    pub device: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -108,6 +149,18 @@ pub struct RequestKeepParams {
     pub data_ok: bool,
     /// Path of a recipe whose keep: section applies.
     pub recipe_file: Option<String>,
+    /// The device the request is on. Needed for a request on another device, and the agent's
+    /// `devices:` entry in `.silo/silo.yaml` must list it.
+    pub device: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ReviewParams {
+    /// A computer, or a review request id such as fr-ab12cd34.
+    pub target: String,
+    /// general, packages, code or all (default).
+    pub lens: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -169,6 +222,8 @@ pub struct FoldParams {
     /// Do not append kept packages and settings files to the recipe the computer came from.
     #[serde(default)]
     pub no_write_back: bool,
+    /// A connected device (name or id) to run this on instead of this one.
+    pub device: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -181,6 +236,152 @@ pub struct DiffParams {
     /// Include the idle fork's own background changes.
     #[serde(default)]
     pub no_baseline: bool,
+    /// A connected device (name or id) to run this on instead of this one.
+    pub device: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ScreenshotParams {
+    /// The computer's name.
+    pub computer: String,
+    /// The longest side of the picture in pixels (default 1280); larger screens are scaled down.
+    pub max_side: Option<u32>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ClickParams {
+    /// The computer's name.
+    pub computer: String,
+    /// Pixels from the left of the last screenshot.
+    pub x: f64,
+    /// Pixels from the top of the last screenshot.
+    pub y: f64,
+    /// `left` (default), `right` or `middle`.
+    pub button: Option<String>,
+    /// Double-click.
+    #[serde(default)]
+    pub double: bool,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TypeParams {
+    /// The computer's name.
+    pub computer: String,
+    /// The text to type into the focused window.
+    pub text: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct KeyParams {
+    /// The computer's name.
+    pub computer: String,
+    /// One key, like `Return` or `Tab`.
+    pub key: String,
+    /// Modifiers held with it, like `["ctrl"]`.
+    #[serde(default)]
+    pub modifiers: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct HotkeyParams {
+    /// The computer's name.
+    pub computer: String,
+    /// A chord of at least two keys, like `["ctrl", "l"]`.
+    pub keys: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ScrollParams {
+    /// The computer's name.
+    pub computer: String,
+    /// Where to scroll, in pixels of the latest screenshot.
+    pub x: f64,
+    pub y: f64,
+    /// `up`, `down`, `left` or `right`.
+    pub direction: String,
+    /// How much, 1 to 50 (default 3).
+    pub amount: Option<u32>,
+    /// `line` (default) or `page`.
+    pub by: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct MoveParams {
+    /// The computer's name.
+    pub computer: String,
+    pub x: f64,
+    pub y: f64,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DragParams {
+    /// The computer's name.
+    pub computer: String,
+    pub from_x: f64,
+    pub from_y: f64,
+    pub to_x: f64,
+    pub to_y: f64,
+    /// `left` (default), `right` or `middle`.
+    pub button: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WaitParams {
+    /// The computer's name.
+    pub computer: String,
+    /// Seconds to wait, at most 30.
+    pub seconds: f64,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DriverCallParams {
+    /// The computer's name.
+    pub computer: String,
+    /// A tool of the computer's Cua Driver (see `computer_use_tools`).
+    pub tool: String,
+    /// The tool's arguments.
+    #[serde(default)]
+    pub arguments: Option<Value>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ForkGuiParams {
+    /// The computer to copy (default `main`).
+    pub source: Option<String>,
+    /// The fork's name.
+    pub name: Option<String>,
+    /// `ask` (default) or `auto`: the approval for agents running inside the fork. `auto` needs
+    /// computer_use_auto: true in .silo/silo.yaml.
+    pub computer_use: Option<String>,
+    /// How long to wait for the desktop and the driver (default 300).
+    pub timeout_secs: Option<u64>,
+}
+
+fn drive_result(answer: crate::usetools::Answer) -> CallToolResult {
+    let content = answer
+        .parts
+        .into_iter()
+        .map(|part| match part {
+            crate::usetools::Part::Text(text) => ContentBlock::text(text),
+            crate::usetools::Part::Image { data, mime } => ContentBlock::image(data, mime),
+        })
+        .collect();
+    if answer.is_error {
+        CallToolResult::error(content)
+    } else {
+        CallToolResult::success(content)
+    }
 }
 
 fn show(result: Result<Value, CliError>) -> Result<String, String> {
@@ -199,6 +400,7 @@ impl SiloMcp {
             engine: Arc::new(tokio::sync::Mutex::new(None)),
             agent: Arc::new(std::sync::Mutex::new(None)),
             agent_named: false,
+            sessions: Arc::new(std::sync::Mutex::new(HashMap::new())),
             tool_router: Self::tool_router(),
         }
         .with_agent(std::env::var("SILO_AGENT").ok())
@@ -221,6 +423,49 @@ impl SiloMcp {
     }
 
     /// The one connection this server keeps, opened again when it has ended.
+    /// The engine acting on `device` (a name or id), or on this device when none is given.
+    async fn engine_on(&self, device: Option<&str>) -> Result<Engine, CliError> {
+        let engine = self.engine().await?;
+        match device {
+            None | Some("local") => Ok(engine),
+            Some(name) => {
+                let id = engine.resolve_device(name).await?;
+                Ok(engine.on_device(Some(id)))
+            }
+        }
+    }
+
+    /// The engine for a change on `device`. Another device is acted on only when the call names
+    /// it, and only when the agent's `devices:` entry in `.silo/silo.yaml` lists it.
+    async fn engine_acting_on(&self, device: Option<&str>) -> Result<Engine, CliError> {
+        let engine = self.engine_on(device).await?;
+        let Some(id) = engine.device().map(str::to_owned) else {
+            return Ok(engine);
+        };
+        let project = Project::discover(&self.working_directory);
+        let settings = project.load_settings_as(self.agent().as_deref(), self.agent_named)?;
+        let allowed = settings
+            .map(|settings| settings.devices)
+            .unwrap_or_default();
+        let name = engine
+            .devices()
+            .await?
+            .into_iter()
+            .find(|(known, _)| *known == id)
+            .map(|(_, name)| name)
+            .unwrap_or_default();
+        if allowed
+            .iter()
+            .any(|entry| entry.eq_ignore_ascii_case(&name) || *entry == id)
+        {
+            Ok(engine)
+        } else {
+            Err(CliError::new(format!(
+                "This agent may not act on {name}. List it under devices: in the agent's entry of agents: in .silo/silo.yaml."
+            )))
+        }
+    }
+
     async fn engine(&self) -> Result<Engine, CliError> {
         let mut held = self.engine.lock().await;
         if let Some(engine) = held.as_ref().filter(|engine| !engine.is_closed()) {
@@ -232,16 +477,28 @@ impl SiloMcp {
     }
 
     #[tool(description = "List computers and their state.")]
-    async fn list(&self) -> Result<String, String> {
-        show(async { ops::list(&self.engine().await?).await }.await)
+    async fn list(&self, Parameters(params): Parameters<ListParams>) -> Result<String, String> {
+        show(
+            async {
+                let engine = self.engine_on(params.device.as_deref()).await?;
+                if params.all_devices {
+                    ops::list_everywhere(&engine, false).await
+                } else {
+                    ops::list(&engine).await
+                }
+            }
+            .await,
+        )
     }
 
     #[tool(description = "Show one computer: state, size and checkpoints.")]
     async fn status(
         &self,
-        Parameters(ComputerParam { computer }): Parameters<ComputerParam>,
+        Parameters(DeviceComputerParam { computer, device }): Parameters<DeviceComputerParam>,
     ) -> Result<String, String> {
-        show(async { ops::status(&self.engine().await?, &computer).await }.await)
+        show(
+            async { ops::status(&self.engine_on(device.as_deref()).await?, &computer).await }.await,
+        )
     }
 
     #[tool(
@@ -302,7 +559,17 @@ impl SiloMcp {
                     .as_deref()
                     .map(|path| self.working_directory.join(path));
                 let source = params.source.unwrap_or_else(|| ops::MAIN.to_owned());
-                let engine = self.engine().await?;
+                if params.device.is_some() && folder::is_folder(&source) {
+                    return Err(CliError::new(
+                        "A folder is on this device, so `device` cannot be used with it.",
+                    ));
+                }
+                let engine = self.engine_acting_on(params.device.as_deref()).await?;
+                if engine.device().is_some() && !params.command.is_empty() {
+                    return Err(CliError::new(
+                        "A command runs on this device, so `device` cannot be used with `command`.",
+                    ));
+                }
                 let checkpoint = match params.from_step {
                     Some(number) => {
                         if params.recipe.is_some()
@@ -420,8 +687,12 @@ impl SiloMcp {
     async fn fold(&self, Parameters(params): Parameters<FoldParams>) -> Result<String, String> {
         show(
             async {
+                let engine = self.engine_acting_on(params.device.as_deref()).await?;
                 if params.promote && !params.request {
-                    let engine = self.engine().await?;
+                    // The computers swap roles: their driver sessions end first.
+                    if !params.dry_run {
+                        self.close_sessions(None).await;
+                    }
                     let mut value = ops::promote(
                         &engine,
                         &params.fork,
@@ -447,7 +718,7 @@ impl SiloMcp {
                     project: &project,
                     settings: settings.as_ref(),
                     recipe: recipe.as_ref(),
-                    write_back: !params.no_write_back,
+                    write_back: !params.no_write_back && engine.device().is_none(),
                 };
                 let mode = if params.request {
                     flows::Mode::Request
@@ -455,7 +726,7 @@ impl SiloMcp {
                     flows::Mode::Keep
                 };
                 flows::run(
-                    &self.engine().await?,
+                    &engine,
                     &params.fork,
                     params.into.as_deref(),
                     &context,
@@ -487,7 +758,12 @@ impl SiloMcp {
                     .as_deref()
                     .map(review::parse_filter)
                     .transpose()?;
-                review::list(&self.engine().await?, status).await
+                let engine = self.engine_on(params.device.as_deref()).await?;
+                if params.all_devices {
+                    review::list_all(&engine, status).await
+                } else {
+                    review::list(&engine, status).await
+                }
             }
             .await,
         )
@@ -498,9 +774,15 @@ impl SiloMcp {
     )]
     async fn request_show(
         &self,
-        Parameters(RequestIdParam { id }): Parameters<RequestIdParam>,
+        Parameters(RequestIdParam { id, device }): Parameters<RequestIdParam>,
     ) -> Result<String, String> {
-        show(async { review::show(&self.engine().await?, &id, &|_| {}).await }.await)
+        show(
+            async {
+                let engine = self.engine_on(device.as_deref()).await?;
+                review::show(&engine, &id, &|_| {}).await
+            }
+            .await,
+        )
     }
 
     #[tool(
@@ -518,8 +800,9 @@ impl SiloMcp {
                     .as_deref()
                     .map(|path| self.working_directory.join(path));
                 let recipe = ops::resolve_recipe(explicit.as_deref(), &project)?;
+                let engine = self.engine_acting_on(params.device.as_deref()).await?;
                 review::keep(
-                    &self.engine().await?,
+                    &engine,
                     &params.id,
                     ops::keep_hooks(recipe.as_ref()),
                     params.data_ok,
@@ -536,9 +819,15 @@ impl SiloMcp {
     )]
     async fn request_throw_away(
         &self,
-        Parameters(RequestIdParam { id }): Parameters<RequestIdParam>,
+        Parameters(RequestIdParam { id, device }): Parameters<RequestIdParam>,
     ) -> Result<String, String> {
-        show(async { review::throw_away(&self.engine().await?, &id, &|_| {}).await }.await)
+        show(
+            async {
+                let engine = self.engine_acting_on(device.as_deref()).await?;
+                review::throw_away(&engine, &id, &|_| {}).await
+            }
+            .await,
+        )
     }
 
     #[tool(
@@ -546,9 +835,15 @@ impl SiloMcp {
     )]
     async fn request_open(
         &self,
-        Parameters(RequestIdParam { id }): Parameters<RequestIdParam>,
+        Parameters(RequestIdParam { id, device }): Parameters<RequestIdParam>,
     ) -> Result<String, String> {
-        show(async { review::open(&self.engine().await?, &id, &|_| {}).await }.await)
+        show(
+            async {
+                let engine = self.engine_acting_on(device.as_deref()).await?;
+                review::open(&engine, &id, &|_| {}).await
+            }
+            .await,
+        )
     }
 
     #[tool(
@@ -558,12 +853,36 @@ impl SiloMcp {
         show(
             async {
                 let args = DiffArgs {
-                    computer: params.computer,
+                    computer: params.computer.clone(),
                     max_lines: params.max_lines,
                     no_baseline: params.no_baseline,
                     compute_baseline: false,
                 };
-                ops::diff(&self.engine().await?, &args, &|_| {}).await
+                let engine = self.engine_on(params.device.as_deref()).await?;
+                ops::diff(&engine, &args, &|_| {}).await
+            }
+            .await,
+        )
+    }
+
+    #[tool(
+        description = "Ask the hosted reviewer (needs reviewer.url or SILO_REVIEWER_URL) to read the diff of a fork or review request through the general, packages and code lenses. Only the diff is sent. Returns findings with severity, file and message under an advisory note; it can miss things, so the person decides what to keep."
+    )]
+    async fn review(&self, Parameters(params): Parameters<ReviewParams>) -> Result<String, String> {
+        show(
+            async {
+                let project = Project::discover(&self.working_directory);
+                let settings =
+                    project.load_settings_as(self.agent().as_deref(), self.agent_named)?;
+                let lenses = crate::hosted::parse_lenses(params.lens.as_deref())?;
+                crate::hosted::review_target(
+                    &self.engine().await?,
+                    settings.as_ref(),
+                    &params.target,
+                    &lenses,
+                    &|_| {},
+                )
+                .await
             }
             .await,
         )
@@ -574,11 +893,16 @@ impl SiloMcp {
     )]
     async fn undo(
         &self,
-        Parameters(ComputerParam { computer }): Parameters<ComputerParam>,
+        Parameters(DeviceComputerParam { computer, device }): Parameters<DeviceComputerParam>,
     ) -> Result<String, String> {
         show(
             async {
-                let engine = self.engine().await?;
+                let engine = self.engine_acting_on(device.as_deref()).await?;
+                if engine.device().is_some() && folder::is_folder(&computer) {
+                    return Err(CliError::new(
+                        "A folder is on this device, so `device` cannot be used with it.",
+                    ));
+                }
                 let mut value =
                     flows::undo(&engine, &computer, &self.working_directory, &|_| {}).await?;
                 if let Ok(home) = access::home_dir() {
@@ -606,8 +930,14 @@ impl SiloMcp {
         Parameters(ComputerParam { computer }): Parameters<ComputerParam>,
     ) -> Result<String, String> {
         show(
-            async { ops::drop_computer(&self.engine().await?, &computer, false, &|_| {}).await }
-                .await,
+            async {
+                let engine = self.engine().await?;
+                if let Ok(found) = engine.computer(&computer).await {
+                    self.close_sessions(Some(&found.id)).await;
+                }
+                ops::drop_computer(&engine, &computer, false, &|_| {}).await
+            }
+            .await,
         )
     }
 
@@ -642,16 +972,18 @@ impl SiloMcp {
     )]
     async fn steps_list(
         &self,
-        Parameters(ComputerParam { computer }): Parameters<ComputerParam>,
+        Parameters(DeviceComputerParam { computer, device }): Parameters<DeviceComputerParam>,
     ) -> Result<String, String> {
-        show(async { steps::list(&self.engine().await?, &computer).await }.await)
+        show(
+            async { steps::list(&self.engine_on(device.as_deref()).await?, &computer).await }.await,
+        )
     }
 
     #[tool(
         description = "Show how the computers descend from each other: each has a parent, what it was forked from (main, a checkpoint, a step, a recipe or a folder), its state and its pending changes (the open review request)."
     )]
-    async fn tree(&self) -> Result<String, String> {
-        show(async { steps::tree(&self.engine().await?).await }.await)
+    async fn tree(&self, Parameters(params): Parameters<DeviceParam>) -> Result<String, String> {
+        show(async { steps::tree(&self.engine_on(params.device.as_deref()).await?).await }.await)
     }
 
     #[tool(description = "Save a checkpoint of a computer.")]
@@ -740,9 +1072,324 @@ impl SiloMcp {
     #[tool(description = "List a computer's checkpoints.")]
     async fn checkpoints(
         &self,
+        Parameters(DeviceComputerParam { computer, device }): Parameters<DeviceComputerParam>,
+    ) -> Result<String, String> {
+        show(
+            async { ops::checkpoints(&self.engine_on(device.as_deref()).await?, &computer).await }
+                .await,
+        )
+    }
+
+    /// One request to the computer's driver session. The host tools are for forks: `main` is
+    /// refused, like `drop`.
+    async fn session_request(
+        &self,
+        computer: &str,
+        method: &str,
+        params: Value,
+    ) -> Result<Value, CliError> {
+        self.session_call(computer, Some((method, params)), 0).await
+    }
+
+    /// A request (`Some`) or, with `None`, a screenshot of at most `max_side` pixels.
+    async fn session_call(
+        &self,
+        computer: &str,
+        request: Option<(&str, Value)>,
+        max_side: u32,
+    ) -> Result<Value, CliError> {
+        let engine = self.engine().await?;
+        let found = engine.computer(computer).await?;
+        crate::gui::ensure_fork(&engine, &found).await?;
+        let session = self
+            .sessions
+            .lock()
+            .unwrap()
+            .entry(found.id.clone())
+            .or_default()
+            .clone();
+        let mut session = session.lock().await;
+        let timeout = Duration::from_secs(60);
+        match request {
+            Some((method, params)) => {
+                session
+                    .request(&engine, &found, method, params, timeout)
+                    .await
+            }
+            None => session.screenshot(&engine, &found, max_side, timeout).await,
+        }
+    }
+
+    /// Ends every driver session this server holds (or the one of `only`, by computer id).
+    async fn close_sessions(&self, only: Option<&str>) {
+        let held: Vec<(String, _)> = {
+            let mut sessions = self.sessions.lock().unwrap();
+            let ids: Vec<String> = sessions
+                .keys()
+                .filter(|id| only.is_none_or(|only| only == id.as_str()))
+                .cloned()
+                .collect();
+            ids.into_iter()
+                .filter_map(|id| sessions.remove(&id).map(|session| (id, session)))
+                .collect()
+        };
+        if held.is_empty() {
+            return;
+        }
+        if let Ok(engine) = self.engine().await {
+            for (_, session) in held {
+                session.lock().await.close(&engine).await;
+            }
+        }
+    }
+
+    /// Runs one driver tool in the computer and shapes its answer for the agent.
+    async fn drive(
+        &self,
+        computer: &str,
+        tool: &str,
+        arguments: Value,
+    ) -> Result<CallToolResult, String> {
+        // Screenshots come back through a file, never on the driver's output.
+        let result = if tool == "get_desktop_state" {
+            let side = arguments["max_image_dimension"]
+                .as_u64()
+                .map_or(crate::usetools::DEFAULT_MAX_SIDE, |side| {
+                    side.min(8192) as u32
+                });
+            self.session_call(computer, None, side).await
+        } else {
+            self.session_request(
+                computer,
+                "tools/call",
+                serde_json::json!({"name": tool, "arguments": arguments}),
+            )
+            .await
+        };
+        result
+            .map(|result| drive_result(crate::usetools::answer_of(&result)))
+            .map_err(|error| error.message)
+    }
+
+    async fn act(
+        &self,
+        computer: &str,
+        action: crate::usetools::Action,
+    ) -> Result<CallToolResult, String> {
+        let (tool, arguments) = crate::usetools::driver_call(&action);
+        self.drive(computer, tool, arguments).await
+    }
+
+    #[tool(
+        description = "Fork a computer (default main), start the fork and wait until its desktop and computer-use driver are ready. Returns the fork's name and its computer-use status. computer_use sets the approval mode for agents running inside the fork: ask (default) or auto (no prompts; needs computer_use_auto in .silo/silo.yaml, which is a convenience, not a gate). main keeps its own mode. The computer_use_* tools on this server then drive the fork; they are gated by this client's tool prompts, not by that mode. Only computers of this device; a folder is not accepted."
+    )]
+    async fn fork_gui(
+        &self,
+        Parameters(params): Parameters<ForkGuiParams>,
+    ) -> Result<String, String> {
+        show(
+            async {
+                let project = Project::discover(&self.working_directory);
+                let settings =
+                    project.load_settings_as(self.agent().as_deref(), self.agent_named)?;
+                let approval = params
+                    .computer_use
+                    .as_deref()
+                    .map(crate::gui::parse_approval)
+                    .transpose()?;
+                if let Some(mode) = approval {
+                    crate::gui::check_auto(mode, settings.as_ref(), true)?;
+                }
+                let source = params.source.unwrap_or_else(|| ops::MAIN.to_owned());
+                if folder::is_folder(&source) {
+                    return Err(CliError::new(
+                        "fork_gui forks a computer; a folder is copied into a Linux fork with fork.",
+                    ));
+                }
+                let engine = self.engine().await?;
+                let args = crate::gui::GuiArgs {
+                    fork: ForkArgs {
+                        source,
+                        name: params.name,
+                        ..ForkArgs::default()
+                    },
+                    approval,
+                    timeout: std::time::Duration::from_secs(
+                        params
+                            .timeout_secs
+                            .unwrap_or(crate::gui::DEFAULT_TIMEOUT_SECS)
+                            .max(1),
+                    ),
+                };
+                crate::gui::fork_gui(&engine, &args, settings.as_ref(), &|_| {}).await
+            }
+            .await,
+        )
+    }
+
+    #[tool(
+        description = "Say whether a computer's desktop and computer-use driver are ready now, without waiting: ready, what it is waiting for, and the computer-use state and approval mode."
+    )]
+    async fn computer_use_ready(
+        &self,
         Parameters(ComputerParam { computer }): Parameters<ComputerParam>,
     ) -> Result<String, String> {
-        show(async { ops::checkpoints(&self.engine().await?, &computer).await }.await)
+        show(
+            async {
+                let engine = self.engine().await?;
+                let found = engine.computer(&computer).await?;
+                crate::gui::ready_status(&engine, &found).await
+            }
+            .await,
+        )
+    }
+
+    #[tool(
+        description = "Take a screenshot of a fork's desktop. The driver scales it so its longest side is at most max_side (default 1280); give coordinates to the other computer_use tools in the pixels of the latest screenshot and the driver maps them to the screen. Not for main."
+    )]
+    async fn computer_use_screenshot(
+        &self,
+        Parameters(params): Parameters<ScreenshotParams>,
+    ) -> Result<CallToolResult, String> {
+        let max_side = params.max_side.unwrap_or(crate::usetools::DEFAULT_MAX_SIDE);
+        self.drive(
+            &params.computer,
+            "get_desktop_state",
+            serde_json::json!({"max_image_dimension": max_side}),
+        )
+        .await
+    }
+
+    #[tool(description = "Click (or double-click) at a point of the latest screenshot of a fork.")]
+    async fn computer_use_click(
+        &self,
+        Parameters(p): Parameters<ClickParams>,
+    ) -> Result<CallToolResult, String> {
+        let action = crate::usetools::Action::Click {
+            x: p.x,
+            y: p.y,
+            button: p.button.unwrap_or_else(|| "left".into()),
+            double: p.double,
+        };
+        self.act(&p.computer, action).await
+    }
+
+    #[tool(description = "Type text into the focused window of a fork.")]
+    async fn computer_use_type(
+        &self,
+        Parameters(p): Parameters<TypeParams>,
+    ) -> Result<CallToolResult, String> {
+        self.act(&p.computer, crate::usetools::Action::Type { text: p.text })
+            .await
+    }
+
+    #[tool(description = "Press one key, with optional modifiers, in a fork.")]
+    async fn computer_use_key(
+        &self,
+        Parameters(p): Parameters<KeyParams>,
+    ) -> Result<CallToolResult, String> {
+        self.act(
+            &p.computer,
+            crate::usetools::Action::Key {
+                key: p.key,
+                modifiers: p.modifiers,
+            },
+        )
+        .await
+    }
+
+    #[tool(
+        description = "Press a key chord of two or more keys, like [\"ctrl\", \"l\"], in a fork."
+    )]
+    async fn computer_use_hotkey(
+        &self,
+        Parameters(p): Parameters<HotkeyParams>,
+    ) -> Result<CallToolResult, String> {
+        self.act(
+            &p.computer,
+            crate::usetools::Action::Hotkey { keys: p.keys },
+        )
+        .await
+    }
+
+    #[tool(description = "Scroll at a point of the latest screenshot of a fork.")]
+    async fn computer_use_scroll(
+        &self,
+        Parameters(p): Parameters<ScrollParams>,
+    ) -> Result<CallToolResult, String> {
+        self.act(
+            &p.computer,
+            crate::usetools::Action::Scroll {
+                x: p.x,
+                y: p.y,
+                direction: p.direction,
+                amount: p.amount.unwrap_or(3),
+                by: p.by,
+            },
+        )
+        .await
+    }
+
+    #[tool(description = "Move the pointer to a point of the latest screenshot of a fork.")]
+    async fn computer_use_move(
+        &self,
+        Parameters(p): Parameters<MoveParams>,
+    ) -> Result<CallToolResult, String> {
+        self.act(
+            &p.computer,
+            crate::usetools::Action::Move { x: p.x, y: p.y },
+        )
+        .await
+    }
+
+    #[tool(description = "Drag from one point of the latest screenshot of a fork to another.")]
+    async fn computer_use_drag(
+        &self,
+        Parameters(p): Parameters<DragParams>,
+    ) -> Result<CallToolResult, String> {
+        let action = crate::usetools::Action::Drag {
+            from: (p.from_x, p.from_y),
+            to: (p.to_x, p.to_y),
+            button: p.button,
+        };
+        self.act(&p.computer, action).await
+    }
+
+    #[tool(
+        description = "Wait up to 30 seconds (a pause on the host; nothing runs in the computer)."
+    )]
+    async fn computer_use_wait(
+        &self,
+        Parameters(p): Parameters<WaitParams>,
+    ) -> Result<String, String> {
+        tokio::time::sleep(Duration::from_secs_f64(p.seconds.clamp(0.0, 30.0))).await;
+        Ok(format!("Waited {} seconds.", p.seconds.clamp(0.0, 30.0)))
+    }
+
+    #[tool(description = "List the tools of a fork's Cua Driver with their arguments.")]
+    async fn computer_use_tools(
+        &self,
+        Parameters(ComputerParam { computer }): Parameters<ComputerParam>,
+    ) -> Result<String, String> {
+        show(
+            self.session_request(&computer, "tools/list", serde_json::json!({}))
+                .await,
+        )
+    }
+
+    #[tool(
+        description = "Run any tool of a fork's Cua Driver by name with its own arguments. Coordinates are in the pixels of the latest get_desktop_state image."
+    )]
+    async fn computer_use_call(
+        &self,
+        Parameters(p): Parameters<DriverCallParams>,
+    ) -> Result<CallToolResult, String> {
+        self.drive(
+            &p.computer,
+            &p.tool,
+            p.arguments.unwrap_or_else(|| serde_json::json!({})),
+        )
+        .await
     }
 }
 
@@ -769,14 +1416,14 @@ pub async fn serve(
     working_directory: PathBuf,
     agent: Option<String>,
 ) -> Result<(), CliError> {
-    let service = SiloMcp::new(socket, working_directory)
-        .with_agent(agent)
+    let server = SiloMcp::new(socket, working_directory).with_agent(agent);
+    let service = server
+        .clone()
         .serve(rmcp::transport::stdio())
         .await
         .map_err(|error| CliError::new(format!("The MCP server could not start: {error}")))?;
-    service
-        .waiting()
-        .await
-        .map_err(|error| CliError::new(format!("The MCP server stopped: {error}")))?;
+    let stopped = service.waiting().await;
+    server.close_sessions(None).await;
+    stopped.map_err(|error| CliError::new(format!("The MCP server stopped: {error}")))?;
     Ok(())
 }

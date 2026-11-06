@@ -166,6 +166,14 @@ impl ForkOptions {
             .collect()
     }
 
+    /// A fork never carries its parent's in-guest client token, whoever made the fork.
+    pub(super) fn scrub_guest_client_token(&mut self) {
+        let path = silo_api::methods::guest_client::GUEST_TOKEN_PATH;
+        if !self.scrub.iter().any(|existing| existing == path) {
+            self.scrub.push(path.into());
+        }
+    }
+
     pub(super) fn validate(&self) -> Result<(), RuntimeError> {
         let invalid = |message: &str| Err(RuntimeError::Invalid(message.into()));
         if self.secrets.len() > 64 || self.stop.len() > 64 || self.scrub.len() > 64 {
@@ -853,6 +861,11 @@ fn capture_with_kind(
         "--group".into(),
         snapshot_group.clone(),
     ];
+    let _bridge_hold = (scope == "full").then(|| {
+        let hold = crate::guest_client::hold_bridge(configuration.name());
+        release_stale_share_entries(runner, paths, configuration.name());
+        hold
+    });
     if scope == "full" {
         args.extend(["--full".into(), "--guest-flush".into(), "required".into()]);
     }
@@ -865,7 +878,14 @@ fn capture_with_kind(
             }),
             "Verification failed",
         ),
-        Err(failure) => (Err(failure), "Checkpoint failed"),
+        Err(failure) => (
+            Err(explain_rejected_capture(
+                paths,
+                configuration.name(),
+                failure,
+            )),
+            "Checkpoint failed",
+        ),
     };
     match result {
         Ok(_) => {
@@ -2053,6 +2073,49 @@ fn quiet_labels(name: &str, quiet: &QuietRecord) -> Vec<String> {
     ]
 }
 
+/// Script run in a running guest before a full capture: writes back, then drops the kernel's
+/// cached directory entries.
+const RELEASE_ENTRIES_SCRIPT: &str = "sync; echo 2 > /proc/sys/vm/drop_caches";
+
+/// The arguments that run [`RELEASE_ENTRIES_SCRIPT`] as root in the computer.
+fn release_entries_args(name: &str) -> Vec<String> {
+    root_exec(name, "30s", &["sh", "-c", RELEASE_ENTRIES_SCRIPT])
+}
+
+/// A full capture of a running computer serializes the runtime share's open entries and is
+/// refused when the host removed a file the guest had looked up, which is what the engine does
+/// with every request and answer in the in-guest client's bridge folder. Dropping the guest's
+/// cached entries first lets the share forget them. Best effort, and only for a computer that has
+/// a bridge folder; a capture that still fails reports its own error.
+fn release_stale_share_entries(runner: &dyn RuntimeRunner, paths: &RuntimePaths, name: &str) {
+    if !crate::guest_client::spool_dir(&paths.home, name).exists() {
+        return;
+    }
+    let _ = runner.run(paths, &release_entries_args(name), Duration::from_secs(40));
+}
+
+/// What MicroSandbox says when the guest holds a file of the runtime share that the host removed
+/// and the guest cannot drop it (an open file keeps it): the capture cannot be made until the
+/// computer restarts.
+const REJECTED_BY_PEER: &str = "control operation rejected by peer";
+
+fn explain_rejected_capture(
+    paths: &RuntimePaths,
+    name: &str,
+    failure: RuntimeError,
+) -> RuntimeError {
+    let rejected = matches!(
+        &failure,
+        RuntimeError::Failed { detail, .. } if detail.contains(REJECTED_BY_PEER)
+    );
+    if rejected && crate::guest_client::spool_dir(&paths.home, name).exists() {
+        return error(
+            "The computer holds a file of the in-guest client that Silo has since removed, so its memory cannot be captured. Restart the computer and try again.",
+        );
+    }
+    failure
+}
+
 fn root_exec(name: &str, timeout: &str, command: &[&str]) -> Vec<String> {
     let mut args: Vec<String> = [
         "exec",
@@ -2440,7 +2503,7 @@ fn fork_in_lanes(
     computer_id: &str,
     checkpoint_id: Option<&str>,
     new_name: &str,
-    options: ForkOptions,
+    mut options: ForkOptions,
     macos_names: &dyn Fn() -> Vec<String>,
     job: Option<(
         silo_api::jobs::JobId,
@@ -2449,6 +2512,7 @@ fn fork_in_lanes(
 ) -> Result<(), RuntimeError> {
     use super::operation_gate::{OperationKind, Scope};
     options.validate()?;
+    options.scrub_guest_client_token();
     let computer_name = computer_configuration(paths, computer_id)?
         .name()
         .to_owned();
@@ -2800,6 +2864,11 @@ fn restore_steps(
     }
     let mut journal = record.restore_journal.clone().unwrap();
     if journal.phase == "capturing" {
+        let _bridge_hold = (journal.prior_running && inspected.status == "Running")
+            .then(|| crate::guest_client::hold_bridge(configuration.name()));
+        if journal.prior_running && inspected.status == "Running" {
+            release_stale_share_entries(runner, paths, configuration.name());
+        }
         if journal.prior_running
             && matches!(inspected.status.as_str(), "Stopped" | "Created" | "Crashed")
         {
@@ -2858,6 +2927,7 @@ fn restore_steps(
         args.push("--integrity".into());
         let capture = runner
             .run(paths, &args, Duration::from_secs(900))
+            .map_err(|failure| explain_rejected_capture(paths, configuration.name(), failure))
             .and_then(|_| {
                 verify_snapshot(runner, paths, &lineage_group, &journal.recovery_checkpoint)
             });

@@ -663,6 +663,35 @@ fn after_boot_runs_the_helper_to_completion_with_the_computers_chosen_mode() {
 }
 
 #[test]
+fn a_keep_into_a_computer_applies_the_computers_own_mode_again() {
+    let directory = tempfile::tempdir().unwrap();
+    let paths = paths(&directory);
+    let id = computer();
+    write_computers_of(&paths, &id);
+    set_approval(&paths, &id, Approval::Ask).unwrap();
+    let guest = Guest::new(&id);
+    // The first apply settles the mode as applied; a keep then changes nothing in the policy.
+    boot_of(test_gate(), &guest, &paths)
+        .unwrap()
+        .join()
+        .unwrap();
+    assert!(!policy_for_apply(&paths, &id).needs_apply());
+    // The id, not the name, as a keep may name the computer.
+    reapply_in(test_gate(), guest.clone(), &paths, &id)
+        .unwrap()
+        .join()
+        .unwrap();
+    let runs = guest.runs.lock().unwrap().clone();
+    assert_eq!(
+        runs.len(),
+        2,
+        "the helper ran again although nothing was pending"
+    );
+    assert_eq!(runs[1].0.as_str(), "ask");
+    assert!(reapply_in(test_gate(), guest.clone(), &paths, "no-such-computer").is_none());
+}
+
+#[test]
 fn a_computer_booted_by_its_pending_restore_still_gets_its_apply() {
     // Imports and forks boot inside the restore, while Silo still records them as pending.
     let directory = tempfile::tempdir().unwrap();

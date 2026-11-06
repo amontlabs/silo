@@ -51,6 +51,7 @@ the engine's message.
 | `silo fork <source> [--name N] [--checkpoint ID] [--secret NAME]... [--recipe-file PATH]` | copy a computer; the name defaults to `<source>-<6 hex>` |
 | `silo fork <source> -n N [--name PREFIX]` | N forks of the same checkpoint, made at once and started; each fork's name and URLs are printed ([details](#several-forks-and-commands)) |
 | `silo fork <source> [-n N] -- <cmd...>` | fork, start, run the command in the fork (output streams, the exit code is passed through) and leave the fork for review |
+| `silo fork <source> --gui [--computer-use ask\|auto] [--gui-timeout SECS]` | fork, start the fork and wait until its desktop and computer-use driver are ready; prints the name and computer-use status ([details](SiloUI-COMPUTER-USE.md)). `--computer-use auto` sets the approval of agents running inside the fork to no prompts; it applies to forks only (also without `--gui`), `main` keeps its mode |
 | `silo fork ./dir` | copy a host folder's git repository into a fresh Linux fork ([details](#folder-forks)) |
 | `silo fold <fork> --request` | record a review request for the fork and print its id; nothing is kept |
 | `silo diff <computer> [--json] [--max-lines N] [--no-baseline] [--baseline]` | what changed since the fork (captures the computer now, compares with the record `silo fork` took); `--baseline` measures a missing baseline first, on a throwaway idle fork of the same checkpoint (also for a fork that has been used), and a baseline measured on one fork of a computer applies to its other forks; `silo fold --dry-run` ignores review digests |
@@ -65,6 +66,8 @@ the engine's message.
 | `silo tree` | the computers as a tree: what each was forked from, its state and pending review |
 
 A fork publishes the ports its source publishes (a recipe fork, the recipe's `ports`), each on a host port of its own. The engine does not copy published ports when it forks a computer, so `silo fork` does it with the same `publish` calls. The MCP server has `ports`, `publish`, `unpublish` and `ssh_name` tools.
+| `silo guest-client install <computer> [--binary PATH] [--group G]` / `revoke` / `status` | give a running Linux computer's own agent a scoped token, remove it, or read it; the token carries the agent's `fold` and `fork_secrets` settings ([in-guest client](SiloUI-IN-GUEST-CLIENT.md)) |
+| `silo --in-guest <list\|tree\|status\|fork\|diff\|fold --request\|requests\|steps>` | run inside a computer with its token: fork itself, diff and request review of its forks; never keeps, promotes, undoes or drops |
 | `silo job <id>` | wait for a job that is already running |
 | `silo mcp` | serve the MCP tools on stdio |
 
@@ -169,6 +172,85 @@ default to what it has. A secret cannot be left with no computer, and a secret f
 destination (`*`) is created in the app. `set` reads all of stdin and drops one final newline:
 `printf %s "$VALUE" | silo secrets set NAME --computer main --domain api.example.com`.
 
+## Hosted reviewer
+
+`silo review <computer|request-id> [--lens general|packages|code|all] [--json]` sends the diff of
+a fork to a reviewing service and prints what it finds. The MCP tool is `review`
+(`target`, `lens`), and `silo requests show <id> --review [--lens ...]` adds the review to a
+request's text. It is a Pro feature and off until a service is configured.
+
+| Setting | Where |
+| --- | --- |
+| Service URL | `SILO_REVIEWER_URL`, or `url:` in `~/.config/silo/reviewer.yaml` (the variable wins). `https://` only, except `http://` to exactly `localhost`, `127.0.0.1` or `[::1]`; an address with a user name or password is refused. |
+| Token | `SILO_REVIEWER_TOKEN` only, sent as a bearer token. It is not read from a file or the Keychain. |
+
+A `reviewer.url` in a project's `.silo/silo.yaml` is **ignored** (the command says so) unless it is
+the same address as the one above: a project file comes with the repository, and the token does not
+belong to whoever wrote the repository.
+
+**What is sent.** The diff document of [`silo diff --json`](SiloUI-CHANGES.md) rebuilt from an
+allowlist (`cli/src/hosted/document.rs`): file names, packages, settings, databases and what is
+not kept. Left out: the engine's readable summary, names and changes of credential, key and
+environment files (counted, not named), hashes, sizes and digests, crontab and launch agent texts,
+background changes, and the home directory name (paths show as `~/`). With the code lens, the text
+of the Code bucket's changes is added as `code_diff` (`cli/src/hosted/codediff.rs`): the commits
+since the fork and the uncommitted changes of each repo, read inside the computer, at most 300
+lines per file and 120 KiB in all. Credential and environment files, binary changes and
+untracked or ignored files are not included (names only), and token-shaped strings are replaced
+by `[redacted]`. This is pattern based and can miss a value. The output says when code was sent.
+A body over 256 KiB is not sent; the service gets 90 seconds to answer and its answer is read up to 1 MiB.
+
+**What is shown.** A fixed line, `Advisory review of the diff only. It can miss things; you
+decide what to keep.`, then the three lenses, each with a summary and findings (severity `info`,
+`low`, `medium` or `high`, file, message). The answer is normalised and each use of a word the
+product does not claim (listed in `cli/src/hosted/filter.rs`, matched by stem, through look-alike
+letters and invisible characters) is replaced by `[wording removed]`; the output says how many
+(`filtered` in `--json`). The filter runs on this device whatever the service does.
+
+The service is in [`reviewer-service/`](../reviewer-service/README.md), with its data handling
+(no retention) and deploy steps.
+
+## Another device
+
+`silo --device <name>` runs a command on a connected device instead of this one, over
+Connections (the device's name, its id or an id prefix; `local` is this device). Every request
+that device's engine can answer goes to it, so `silo --device mini fork main`, `diff`,
+`fold`, `requests`, `steps`, `tree`, `checkpoints` and `list` work on the Mac mini's computers.
+The first form is used rather than an `@device` prefix on computer names, so names stay plain.
+`up`, `exec`, `ports`, `publish`, `unpublish`, `ssh-setup`, `secrets`, folder forks and
+`fold --pr` use this device's files, SSH configuration or secrets and refuse `--device`.
+The routing is described in [Connections](SiloUI-CONNECTIONS.md#driving-another-devices-main-v1-methods).
+
+Settings, recipes (`keep:` hooks), `auto_keep:` rules and write-back are read on this device and
+applied to the other device's computers: a `fold` on `--device mini` runs the keep hooks and
+auto-keep rules of this project, and does not append kept packages to a recipe file here.
+`fork -- <command>` runs the command on this device's terminal path and refuses `--device`; run
+the fork and `exec` on the device itself. `requests open` on another device prints that
+device's URLs as `(as the other device sees it)` and no SSH name, since both belong to its own
+network. An id found on this device and another device (or two devices) is refused until
+`--device` says which. `list --all-devices` asks each device for at most 15 seconds, at once,
+and skips one whose last health check failed.
+
+- `silo list --all-devices` lists this device's computers and every connected device's, with a
+  `DEVICE` column, and a line for each device it could not reach.
+- `silo requests --all-devices` is one list of pending changes across devices (`[Mac mini] fr-...`).
+  `requests show`, `keep`, `throw-away` and `open` find the device a request is on by its id
+  (this device first, then the merged list) and act there; `--device` skips the search.
+- MCP: a change on another device (`fork`, `fold`, `undo`, `request_keep`, `request_throw_away`,
+  `request_open`) happens only when the call names `device`, and only when the agent's entry in
+  `.silo/silo.yaml` lists it (default none; the agent must be named with `--agent` or
+  `SILO_AGENT`, not just the client's own name). The command line is not gated.
+
+  ```yaml
+  agents:
+    openclaw:
+      devices: [Mac mini]
+  ```
+
+- MCP: `device` on `list`, `status`, `fork`, `fold`, `diff`, `undo`, `steps_list`, `tree`,
+  `checkpoints`, `requests_list` and the request tools, and `allDevices` on `list` and
+  `requests_list`.
+
 ## Project files
 
 `silo` looks upward from the working directory for a `.silo/` that holds `recipe.yaml` or
@@ -213,7 +295,9 @@ agents:
 | `fork_secrets` | Secret names `--secret` may name. |
 | `fold` | `ask` (default) or `auto-code`, which is `auto_keep: [{when: {only: [code], tests: pass}}]`. Explicit `auto_keep` rules win over `fold: auto-code`. |
 | `auto_keep` | Rules that keep a fork without asking (below). |
+| `reviewer` | `url:` is ignored here; the [hosted reviewer](#hosted-reviewer) takes its address from `SILO_REVIEWER_URL` or `~/.config/silo/reviewer.yaml`. |
 | `fork_ram_budget`, `warm_max_age` | Top level only. |
+| `computer_use_auto` | `true` lets agents (MCP clients, or the CLI run with `--agent`/`SILO_AGENT`) make forks whose in-computer agents use computer use without asking (`--computer-use auto`, `fork_gui` with `computer_use: auto`). Top level only, default `false`; a person typing `--computer-use auto` needs no setting. The setting is project-wide, not per agent or per fork, and an agent can edit the file: it is a convenience, not an access control. |
 | `step_checkpoints`, `step_checkpoints_keep` | Step checkpoints (see [steps](SiloUI-CHANGES.md#steps-and-the-fork-tree)). |
 | `agents.<name>` | Per-agent overrides of `recipes`, `fork_secrets`, `fold`, `auto_keep`, `step_checkpoints` and `step_checkpoints_keep`. |
 
@@ -295,7 +379,7 @@ gets the named secrets (`github` gives read-only GitHub access) and the recipe's
 claude mcp add silo -- silo mcp
 ```
 
-Tools: `up`, `recipe_list`, `list`, `status`, `steps_list`, `tree`, `fork` (with `recipe`, `count`, `command`, `fromStep`, or a repository path as `source`), `fold` (with `promote` or `request`), `undo`, `drop`, `exec`, `checkpoint`, `checkpoints`, `secrets_list`. They make the
+Tools: `up`, `recipe_list`, `list`, `status`, `steps_list`, `tree`, `fork` (with `recipe`, `count`, `command`, `fromStep`, or a repository path as `source`), `fold` (with `promote` or `request`), `undo`, `drop`, `exec`, `checkpoint`, `checkpoints`, `secrets_list`, and the computer-use tools (they drive forks and refuse `main`) `fork_gui`, `computer_use_ready`, `computer_use_screenshot`, `computer_use_click`, `computer_use_type`, `computer_use_key`, `computer_use_hotkey`, `computer_use_scroll`, `computer_use_move`, `computer_use_drag`, `computer_use_wait`, `computer_use_tools` and `computer_use_call` ([computer use](SiloUI-COMPUTER-USE.md)); `silo status` shows a computer's computer-use state and approval. They make the
 same engine calls as the commands and return the same JSON as `--json`. `drop` cannot
 drop `main` through MCP. No tool sets or assigns secrets; values are never sent over MCP.
 

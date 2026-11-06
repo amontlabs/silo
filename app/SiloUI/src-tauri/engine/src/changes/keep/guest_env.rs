@@ -133,6 +133,21 @@ impl KeepEnv for GuestEnv {
         })
     }
 
+    fn after_kept(&self, computer: &str) {
+        let Ok(target) = self.target(computer) else {
+            return;
+        };
+        if target.is_macos() {
+            if let Some(macos) = self.host.macos_context() {
+                let _ =
+                    crate::macos_computers::reapply_macos_computer_use_approval(&macos, computer);
+            }
+        } else if let Ok(paths) = runtime::runtime_paths(self.host.as_ref()) {
+            // `computer` may be the computer's id; the apply is keyed by its name.
+            crate::computer_use::reapply_after_keep(&paths, target.name());
+        }
+    }
+
     fn checkpoint_before_keep(&self, computer: &str, name: &str) -> Result<CheckpointRef, String> {
         // A running Linux computer is captured with its memory (`--full --guest-flush
         // required`) and a running Mac with its saved state, so an undo resumes it.

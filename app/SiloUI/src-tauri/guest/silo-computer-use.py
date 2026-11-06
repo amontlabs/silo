@@ -49,6 +49,7 @@ import platform
 import pwd
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tarfile
@@ -671,6 +672,56 @@ def as_user():
         os.setegid(0)
 
 
+def repair_agent_files():
+    """As root: gives the working account back the agent configuration files it manages (and the
+    directories holding them) when something running as root, such as a keep, left them root-owned.
+    The account controls everything below HOME, so each step goes through directory descriptors
+    opened without following links: a parent that is a link, or not a directory directly below HOME,
+    is left alone."""
+    if os.geteuid() != 0:
+        return
+    try:
+        account = pwd.getpwnam(USER)
+    except KeyError:
+        return
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+    try:
+        home_fd = os.open(HOME, flags)
+    except OSError:
+        return
+    try:
+        for path in (CLAUDE_STATE, CLAUDE_SETTINGS, CODEX_CONFIG):
+            parts = path.relative_to(HOME).parts
+            if len(parts) == 1:
+                repair_entry(home_fd, parts[0], account)
+            elif len(parts) == 2:
+                try:
+                    parent_fd = os.open(parts[0], flags, dir_fd=home_fd)
+                except OSError:
+                    continue
+                try:
+                    if stat.S_ISDIR(os.fstat(parent_fd).st_mode):
+                        if os.fstat(parent_fd).st_uid == 0:
+                            os.fchown(parent_fd, account.pw_uid, account.pw_gid)
+                        repair_entry(parent_fd, parts[1], account)
+                except OSError:
+                    pass
+                finally:
+                    os.close(parent_fd)
+    finally:
+        os.close(home_fd)
+
+
+def repair_entry(dir_fd, name, account):
+    """Chowns `name` below `dir_fd` to the account when it is a root-owned file or folder."""
+    try:
+        info = os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
+        if info.st_uid == 0 and not stat.S_ISLNK(info.st_mode):
+            os.chown(name, account.pw_uid, account.pw_gid, dir_fd=dir_fd, follow_symlinks=False)
+    except OSError:
+        pass
+
+
 def write_text(path, text, mode=0o600):
     """Atomically replaces `path` (an existing file keeps its permissions)."""
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -851,6 +902,11 @@ def edit_codex(entry, approval):
         if name is not None:
             if LEGACY_SERVER.match(name) or (entry is not None and OWN_SERVER.match(name)):
                 continue
+            if entry is None and approval == 'ask' and OWN_SERVER.match(name):
+                # No registration to write (the agent is not installed), but an auto line
+                # that came with a kept fork must not outlive the ask mode.
+                lines = [line for line in lines
+                         if not re.match(r'\s*default_tools_approval_mode\s*=', line)]
             if name.split('.')[0] == 'hooks' and name != 'hooks' and LEGACY.search('\n'.join([name, *lines])):
                 continue
             if name == 'hooks':
@@ -893,9 +949,17 @@ def configure(names, approval):
     `(registered, pending, failed)`: pending agents are not installed yet."""
     entry = server_entry()
     registered, pending, failed = [], [], []
+    repair_agent_files()
     for name in names:
         if not binary_installed(AGENTS[name]):
             pending.append(name)
+            if approval == 'ask':
+                # Registers nothing; only removes the auto approval a kept fork may have left.
+                try:
+                    with as_user():
+                        EDITORS[name](None, 'ask')
+                except (Failure, OSError, ValueError, TypeError, tomllib.TOMLDecodeError) as error:
+                    log(f'could not clear the auto approval for {name}: {type(error).__name__}: {error}')
             continue
         try:
             with as_user():
@@ -938,6 +1002,7 @@ def remove_legacy():
     """Removes what the earlier LCU setup left: its agent entries (a file that does not exist
     is not created; Silo's own registration and approval stay as they are), its skills, data
     and Pi package, /opt/lcu, its launchers and its receipt."""
+    repair_agent_files()
     for name, editor in EDITORS.items():
         try:
             with as_user():

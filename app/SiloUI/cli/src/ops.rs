@@ -39,6 +39,70 @@ pub async fn list_all(engine: &Engine) -> Result<Value, CliError> {
     Ok(json!({ "computers": computers.iter().map(Computer::to_json).collect::<Vec<_>>() }))
 }
 
+/// How long one device may take to list its computers.
+pub const DEVICE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+
+/// `silo list --all-devices`: this device's computers and every connected device's, each with
+/// the device it is on. Devices are asked at once, each for at most `DEVICE_TIMEOUT`; one that
+/// is known to be offline, fails or is too slow is listed in `unreachable`.
+pub async fn list_everywhere(engine: &Engine, hidden: bool) -> Result<Value, CliError> {
+    list_everywhere_within(engine, hidden, DEVICE_TIMEOUT).await
+}
+
+pub async fn list_everywhere_within(
+    engine: &Engine,
+    hidden: bool,
+    timeout: std::time::Duration,
+) -> Result<Value, CliError> {
+    engine.require_routing()?;
+    let read = |engine: Engine| async move {
+        if hidden {
+            engine.all_computers().await
+        } else {
+            engine.computers().await
+        }
+    };
+    let mut rows = Vec::new();
+    for computer in read(engine.on_device(None)).await? {
+        let mut row = computer.to_json();
+        row["deviceName"] = json!("this device");
+        rows.push(row);
+    }
+    let offline = engine.known_offline().await;
+    let asked = engine.devices().await?.into_iter().map(|(id, name)| {
+        let known = offline.get(&id).cloned();
+        let remote = engine.on_device(Some(id.clone()));
+        async move {
+            let result = match known {
+                Some(reason) => Err(reason),
+                None => match tokio::time::timeout(timeout, read(remote)).await {
+                    Ok(Ok(computers)) => Ok(computers),
+                    Ok(Err(error)) => Err(error.message),
+                    Err(_) => Err("It did not answer in time.".to_owned()),
+                },
+            };
+            (id, name, result)
+        }
+    });
+    let mut unreachable = Vec::new();
+    for (id, name, result) in futures::future::join_all(asked).await {
+        match result {
+            Ok(computers) => {
+                for computer in computers {
+                    let mut row = computer.to_json();
+                    row["deviceId"] = json!(id);
+                    row["deviceName"] = json!(name);
+                    rows.push(row);
+                }
+            }
+            Err(reason) => {
+                unreachable.push(json!({ "deviceId": id, "deviceName": name, "reason": reason }))
+            }
+        }
+    }
+    Ok(json!({ "computers": rows, "unreachable": unreachable }))
+}
+
 /// How long a throwaway baseline computer may exist before it counts as left behind.
 pub const THROWAWAY_MAX_AGE_SECONDS: i64 = 3600;
 
@@ -86,7 +150,11 @@ pub async fn status(engine: &Engine, name: &str) -> Result<Value, CliError> {
     let mut value = computer.to_json();
     value["quiet"] = computer.quiet.clone().unwrap_or(Value::Null);
     value["boots"] = computer.boots.map_or(Value::Null, Value::from);
+    // Secrets and GitHub access are read from this device's engine, so a computer on another
+    // device shows neither.
+    let on_other_device = engine.device().is_some();
     value["secrets"] = match fetch_secrets(engine).await {
+        _ if on_other_device => Value::Null,
         Ok(secrets) => json!(secrets
             .iter()
             .filter(|secret| secret["removing"] != true)
@@ -95,10 +163,13 @@ pub async fn status(engine: &Engine, name: &str) -> Result<Value, CliError> {
             .collect::<Vec<_>>()),
         Err(_) => Value::Null,
     };
-    value["github"] = match engine
-        .call(requests::github_state(DeviceParams { device_id: None }))
-        .await
-    {
+    value["github"] = match if on_other_device {
+        Err(CliError::new("another device"))
+    } else {
+        engine
+            .call(requests::github_state(DeviceParams { device_id: None }))
+            .await
+    } {
         Ok(state) => state
             .get("computers")
             .and_then(Value::as_array)
@@ -119,8 +190,22 @@ pub async fn status(engine: &Engine, name: &str) -> Result<Value, CliError> {
         Err(_) => Value::Null,
     };
     value["credentialsUsed"] = credentials_used(engine, &computer.id).await;
+    value["computerUse"] = computer_use(engine, &computer.id).await;
     value["checkpointList"] = Value::Array(computer.checkpoints);
     Ok(value)
+}
+
+/// The computer's computer-use state and approval mode; `null` when the engine cannot say.
+pub async fn computer_use(engine: &Engine, computer_id: &str) -> Value {
+    engine
+        .call(requests::computer_use_state(
+            silo_api::methods::computer_use::ComputerUseStateParams {
+                computer_id: computer_id.to_owned(),
+                device_id: None,
+            },
+        ))
+        .await
+        .unwrap_or(Value::Null)
 }
 
 /// Which Silo secrets a computer used and which attempts were blocked. `null` when the
@@ -771,7 +856,9 @@ async fn measure_baseline(
     let (owner, checkpoint, recipe_hash) = match source.strip_prefix(RECIPE_KEY_PREFIX) {
         Some(hash) => {
             let listed = engine
-                .call(requests::recipes_list(silo_api::methods::EmptyParams {}))
+                .call(requests::recipes_list(
+                    silo_api::methods::common::DeviceParams { device_id: None },
+                ))
                 .await?;
             let entry = listed["recipes"]
                 .as_array()
@@ -1103,6 +1190,17 @@ pub async fn exec_on(
     computer: crate::engine::Computer,
     args: &ExecArgs,
 ) -> Result<ExecOutput, CliError> {
+    exec_with_input(engine, computer, args, None, None).await
+}
+
+/// `exec_on` with bytes on the command's standard input and a larger output cap.
+pub async fn exec_with_input(
+    engine: &Engine,
+    computer: crate::engine::Computer,
+    args: &ExecArgs,
+    stdin: Option<Vec<u8>>,
+    max_output_bytes: Option<u64>,
+) -> Result<ExecOutput, CliError> {
     if args.argv.is_empty() {
         return Err(CliError::new("Give a command to run after --."));
     }
@@ -1119,9 +1217,9 @@ pub async fn exec_on(
             cwd: args.cwd.clone(),
             env: None,
             as_user: None,
-            stdin: None,
+            stdin,
             timeout_ms: args.timeout_secs.saturating_mul(1000),
-            max_output_bytes: None,
+            max_output_bytes,
         }))
         .await?;
     let bytes = |key: &str| -> Vec<u8> {
@@ -1264,6 +1362,7 @@ pub async fn fold(
         .run_job(
             &format!("{label} {}", fork.name),
             requests::changes_keep(ChangesKeepParams {
+                device_id: None,
                 fork_id: fork.id,
                 target_id,
                 keep,
@@ -1301,6 +1400,7 @@ pub async fn promote(
         .run_job(
             &format!("{label} {}", fork.name),
             requests::changes_promote(ChangesPromoteParams {
+                device_id: None,
                 fork_id: fork.id,
                 target_id,
                 dry_run: dry_run.then_some(true),
@@ -1321,6 +1421,7 @@ pub async fn undo(
         .run_job(
             &format!("Undoing the latest keep or promote of {}", target.name),
             requests::changes_undo(ChangesUndoParams {
+                device_id: None,
                 computer_id: target.id,
             }),
             progress,
@@ -1452,6 +1553,7 @@ pub async fn build_recipe(
         .run_job(
             &format!("Building the recipe {name}"),
             requests::recipes_build(RecipeBuildParams {
+                device_id: None,
                 name: name.to_owned(),
                 spec: recipe.spec(),
                 force: force.then_some(true),
@@ -1467,7 +1569,9 @@ pub async fn recipe_list(
     project: &crate::config::Project,
 ) -> Result<Value, CliError> {
     let built = engine
-        .call(requests::recipes_list(silo_api::methods::EmptyParams {}))
+        .call(requests::recipes_list(
+            silo_api::methods::common::DeviceParams { device_id: None },
+        ))
         .await?;
     let built = built["recipes"].as_array().cloned().unwrap_or_default();
     let recipes: Vec<Value> = project
@@ -1490,6 +1594,7 @@ pub async fn recipe_list(
 pub async fn recipe_remove(engine: &Engine, name: &str) -> Result<Value, CliError> {
     engine
         .call(requests::recipes_remove(RecipeRemoveParams {
+            device_id: None,
             name: name.to_owned(),
         }))
         .await?;

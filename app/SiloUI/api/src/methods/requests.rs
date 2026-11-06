@@ -21,6 +21,7 @@ use super::exports;
 use super::files;
 use super::github;
 use super::guest;
+use super::guest_client;
 use super::keep;
 use super::logs;
 use super::macos;
@@ -650,6 +651,27 @@ pub fn guest_prepare(params: guest::GuestPrepareParams) -> Request<kind::Command
     Request::new(MethodParams::GuestPrepare(params))
 }
 
+/// `guestClient.enable`
+pub fn guest_client_enable(
+    params: guest_client::GuestClientEnableParams,
+) -> Request<kind::Command> {
+    Request::new(MethodParams::GuestClientEnable(params))
+}
+
+/// `guestClient.revoke`
+pub fn guest_client_revoke(
+    params: guest_client::GuestClientComputerParams,
+) -> Request<kind::Command> {
+    Request::new(MethodParams::GuestClientRevoke(params))
+}
+
+/// `guestClient.status`
+pub fn guest_client_status(
+    params: guest_client::GuestClientComputerParams,
+) -> Request<kind::Query> {
+    Request::new(MethodParams::GuestClientStatus(params))
+}
+
 /// `guest.ssh`
 pub fn guest_ssh(params: guest::GuestSshParams) -> Request<kind::Stream> {
     Request::new(MethodParams::GuestSsh(params))
@@ -820,7 +842,7 @@ pub fn recipes_build(params: recipes::RecipeBuildParams) -> Request<kind::Job> {
 }
 
 /// `recipes.list`
-pub fn recipes_list(params: common::EmptyParams) -> Request<kind::Query> {
+pub fn recipes_list(params: common::DeviceParams) -> Request<kind::Query> {
     Request::new(MethodParams::RecipesList(params))
 }
 

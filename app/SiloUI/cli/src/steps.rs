@@ -74,6 +74,7 @@ pub async fn record(
     }
     let recorded = engine
         .call(requests::steps_record(StepsRecordParams {
+            device_id: None,
             computer_id: computer.id.clone(),
             command: argv.to_vec(),
             exit_code: Some(exit_code),
@@ -179,6 +180,7 @@ pub async fn list(engine: &Engine, computer: &str) -> Result<Value, CliError> {
     let computer = engine.computer(computer).await?;
     let listed = engine
         .call(requests::steps_list(StepsListParams {
+            device_id: None,
             computer_id: computer.id,
         }))
         .await?;
@@ -227,7 +229,9 @@ pub async fn checkpoint_for(
 /// The fork tree, with the folders `silo fork ./dir` copied named as the origin of those forks.
 pub async fn tree(engine: &Engine) -> Result<Value, CliError> {
     let mut tree = engine
-        .call(requests::computers_tree(ComputersTreeParams {}))
+        .call(requests::computers_tree(ComputersTreeParams {
+            device_id: None,
+        }))
         .await?;
     let folders = engine.recall_all(FOLDER_MEMORY);
     if let Some(nodes) = tree["nodes"].as_array_mut() {

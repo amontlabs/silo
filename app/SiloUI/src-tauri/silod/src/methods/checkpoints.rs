@@ -6,6 +6,7 @@
 //! the domain's catalogue topic (`checkpoints.changed`, `exports.changed`, ...).
 //! Requests naming another device belong to the Connections router and are refused here.
 
+pub(crate) mod all_devices;
 mod changes;
 mod device;
 mod exports;
@@ -76,7 +77,7 @@ async fn dispatch(
 ) -> Result<HandlerOutput, DispatchError> {
     match method {
         MethodName::RecipesBuild => recipes::build(context, params).await,
-        MethodName::RecipesList => recipes::list(context).await,
+        MethodName::RecipesList => recipes::list(context, params).await,
         MethodName::StepsList => steps::list(context, params).await,
         MethodName::StepsRecord => steps::record(context, params).await,
         MethodName::RecipesRemove => recipes::remove(context, params).await,

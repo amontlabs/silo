@@ -368,6 +368,66 @@ binary serves the socket, not who connects to it.
 | Guest agent | In every Linux computer, MicroSandbox's `agentd` talks to the `msb` process on the Mac over virtio-serial (CBOR) for readiness, exec and heartbeats. Silo parses `msb exec` output (repository discovery, directory listings). Silo configures no virtio-vsock routes. | [`runtime/mod.rs`](../app/SiloUI/src-tauri/engine/src/runtime/mod.rs), [MicroSandbox `protocol/lib.rs`](https://github.com/superradcompany/microsandbox/blob/09df3d4b9d832adaede1fb9a198cfc660bfab8cd/crates/protocol/lib/lib.rs) |
 | Published ports | Guest services appear on Mac loopback; opening one in a browser runs guest content at a per-computer `.localhost` origin; a page there can still send cross-site requests to other loopback services ([`network.rs#L87`](../app/SiloUI/src-tauri/engine/src/network.rs#L87)). | [`network.rs`](../app/SiloUI/src-tauri/engine/src/network.rs) |
 
+### 9. The in-guest client: a scoped token for a computer's own agent
+
+Design and install steps: [the in-guest client](SiloUI-IN-GUEST-CLIENT.md). A Linux computer can be
+given a token (`silo guest-client install`) that lets an agent in it call a short list of engine
+methods through the `/.msb/silo-bridge` folder. The engine serves it from
+[`guest_bridge.rs`](../app/SiloUI/src-tauri/silod/src/guest_bridge.rs) and checks each call in
+[`guest_client/scope.rs`](../app/SiloUI/src-tauri/engine/src/guest_client/scope.rs).
+
+What the token can do: fork its own computer (secrets only those the settings list for that agent,
+none by default; at most 32 forks per token and 3 running or starting), start, stop and diff the
+forks it made, ask for review of those forks, read the review requests and steps of itself and those
+forks, and follow the jobs it started. Forks the person made, or another token made, are not
+reachable, and list results hold only the computer and its own forks.
+
+What it cannot do, and the engine refuses before any handler runs: keep, promote, undo, throw away
+or drop (`changes.keep`, `changes.promote`, `changes.undo`, `changes.requests.keep`,
+`changes.requests.throwAway`, `computers.delete`), change secrets or GitHub access, run commands or
+move files in any computer, publish ports, act for another device, act on a computer that is
+neither itself nor a fork it made, or mint, revoke or read tokens. It cannot make checkpoints,
+capture or baseline either. `fold` and `auto_keep` are not part of its policy: nothing is kept from
+inside.
+
+What a compromised guest gains: the agent already controls the computer, so the token adds the
+ability to make up to 32 forks of it, 3 running at once (a disk and CPU cost; the engine adds no
+total RAM limit, each running fork uses the memory it was created with, and `fork_ram_budget`
+applies only to forks the host CLI makes) and to put review requests in front of
+the person, whose summary text the agent wrote. A fork, request or summary can be flooded or
+misleading; a keep still shows the engine's own diff, pinned to its digest. It gains no host file,
+secret, GitHub token or other computer's data.
+
+- **Replay and theft.** Frames are files the guest writes, so anything in the guest that can read
+  the token file can use the token, and a copy of it elsewhere is refused unless it is in the
+  folder of the computer it was minted for. There is no per-request signature or nonce check; the
+  folder is the identity, and the token is the installer's intent. Request ids are consumed when
+  read, and answers expire after ten minutes.
+- **Forks.** A token verifies only for its own computer, so a fork that kept the file cannot use it
+  and forks made from inside also have the file scrubbed.
+- **Promote and undo.** Both revoke the tokens of the computers they swap, so the agent in a former
+  main stops; a new token is installed on purpose.
+- **Parsing and links.** The guest can replace `silo-bridge`, `req` or `resp` with links, and on a
+  macOS host a guest symlink is a real host symlink. The engine opens each component with
+  `openat(O_NOFOLLOW | O_DIRECTORY)` through directory descriptors (`rustix`), afresh each pass,
+  and stops serving a computer whose folder is a link. Request files are regular files only
+  (checked after opening), at most 256 KiB, `<32 hex>.json` names only; answers are written `0600`
+  by rename. At most 64 answers wait unread and a full folder drops new requests; a call with no
+  valid token gets no answer; at most 256 directory entries are examined per look. The share itself
+  still has no security review (boundary 6); this adds a parser of guest-written JSON on the Mac.
+- **Other guest users.** `req/` is `1733` and `resp/` `0711`, requests and answers `0600`; the
+  engine gives each answer the stat override of the user that wrote the request, so that user
+  (and root) reads it and no other guest user does. The override format is taken from MicroSandbox
+  0.7.6 source and is not yet checked in a running guest.
+- **Forks and jobs.** A fork is the token's only after its job finished and the fork exists below
+  the computer (recorded by id); forks the person made are never reachable, and a failed fork
+  never claims a computer. A token holds at most 32 forks, 3 running or starting, and 16
+  unacknowledged jobs.
+- **Logging.** The engine writes one line per call to its log: the computer, the method (only a
+  name from the allow-list; anything else is logged as "not offered"), and whether it was refused.
+  Parameters and tokens are not logged, and a call with a bad token is logged without its method.
+  There is no audit trail beyond that.
+
 The 2026-10-02 security review checked these surfaces in source
 ([report](SiloUI-CODE-REVIEW-PASS-3-SECURITY-2026-10-02.md)); it was not a live exploit campaign.
 

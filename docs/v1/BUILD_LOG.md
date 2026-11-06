@@ -6,10 +6,10 @@ Tracker: Linear project "Silo v1: git for agent computers" (P-AMO-8).
 
 ## Resume
 
-- **Phase:** 4 on branch `claude/silo-v1-phase-4`, PR #64 (CI running). Phases 0-3 merged (#60-#63).
-- **Done in phase 4 (reviewed, merged into the branch):** review requests (`changes.requests.*`, `silo requests`, MCP), steps + `--from-step` + `silo tree`, credentials-used line (msb patch `microsandbox-secret-usage-events`, macOS gateway, `computers.credentials`), `agents:` + auto-keep + recipe write-back + `silo fold --pr`, `silo-action/`.
-- **Blocked on the owner:** the credentials VM check (`docs/v1/checks/phase4_credentials_check.sh`) needs Keychain repair for the Dev engine (`engine.credentials.repair`, owner clicks Always Allow); same for the secret carry-over checks of phases 1 and 3. Leftover computers to drop: `silo-baseline-8fa22f`, `e2e-p3-macsrc`, `e2e-p3-macsrc-before-20261105-2253`.
-- **Next action:** merge #64 when CI is green; after the Keychain repair, re-run the phase 4 credentials check (and phase 1/3 secret checks); then phase 5.
+- **Phase:** 5 on branch `claude/silo-v1-phase-5`, PR open. Phases 0-4 merged (#60-#64).
+- **Done in phase 5 (reviewed, VM-checked):** in-guest client (AMO-85), Mac mini remote + one pending-changes list (AMO-86), hosted reviewer (AMO-87, service not deployed), host computer use for forks (AMO-70).
+- **Blocked on the owner:** Keychain repair for the Dev engine (phase 4 credentials check; phase 1/3 secret carry-over). Leftover computers to drop: `silo-baseline-8fa22f`, `e2e-p3-macsrc`, `e2e-p3-macsrc-before-20261105-2253`. Upstream drafts to post: `docs/v1/upstream/`.
+- **Next action:** merge the phase 5 PR when CI is green; then phase 6 (OpenClaw/Hermes recipes, final run, README/demo/numbers drafts, release prep).
 - **macOS slots:** free.
 
 ## Start
@@ -64,6 +64,28 @@ VM check (Linux and macOS): a macOS fork boots once; a source with a boot-persis
 
 All tests use the mock GitHub API, a local bare git remote and a loopback HTTP endpoint with a fake secret. VM check: only the credentials line (Linux and macOS).
 
+### Phase 5 (AMO-85, AMO-86, AMO-87, AMO-70)
+
+| Slice | What | Review |
+|---|---|---|
+| 5a | In-guest client: guest-to-host endpoint with a scoped credential enforcing the settings file (`fold: ask` agents fork and request, never keep, promote or grant secrets); threat-model doc | reviewer + Argon |
+| 5b | Mac mini remote: new `OWNER_METHODS`, one pending-changes list across engines, actions routed to the right machine; tests with a second Dev engine | reviewer |
+| 5c | Hosted reviewer: engine/CLI send only the diff to a configurable endpoint, three lenses, advisory banner, forbidden-word filter; service folder tested as a local mock, nothing deployed | reviewer |
+| 5d | Native computer use on AMO-70: Cua Linux image built locally if unpublished, host MCP bridge, "fork, start, wait until ready", `auto` approval for unattended forks, diff ignore entries, macOS port with permissions pre-granted | reviewer + Argon |
+
+VM checks: in-guest client from inside a Linux main; computer use on Linux and macOS (drive a fork's GUI from the host).
+
+5a VM check (in-guest client, Dev build, Linux main, a throwaway `e2e-*` computer; see `docs/SiloUI-IN-GUEST-CLIENT.md`):
+
+1. Build a guest `silo` (`cargo build -p silo-cli --release --target aarch64-unknown-linux-musl`) or reuse a Linux build.
+2. On the Mac, in a project whose `.silo/silo.yaml` has `agents: { openclaw: { fold: ask, fork_secrets: [] } }`: `silo guest-client install <main> --agent openclaw --binary <silo>`; `silo guest-client status <main>`.
+3. Confirm `ls <runtime home>/sandboxes/<main>/runtime/silo-bridge/{req,resp}` exists on the Mac and that inside the guest `ls -ld /.msb/silo-bridge/req` shows the same folder, writable by the agent's user, and `/etc/silo/guest-client.json` is readable by it.
+4. Inside the guest: `silo --in-guest list` (only main and its forks), `silo --in-guest fork main --name e2e-in-1`, `silo --in-guest diff e2e-in-1` after changing a file in the fork, `silo --in-guest fold e2e-in-1 --request`; then on the Mac `silo requests` shows it.
+5. Refusals, inside: `silo --in-guest fold e2e-in-1`, `--promote`, `undo main`, `drop e2e-in-1`, `secrets list` all print "not available from inside a computer". Hand-write a frame for `changes.keep` and `guest.exec` into `req/` and confirm `permission_denied` answers.
+6. In the fork `e2e-in-1`: `/etc/silo/guest-client.json` is gone; copying the parent's file there and calling `silo --in-guest list` is refused.
+7. `silo fold e2e-in-1 --promote` on the Mac, then inside the old main: `silo --in-guest list` is refused (token revoked).
+8. Clean up: `silo drop` the e2e computers, `silo guest-client revoke <main>`.
+
 ## Decisions
 - 2026-11-06, steps (AMO-69): a step is one command an agent runs on a computer through Silo (CLI exec/run, MCP run). Per-step checkpoints are off by default (`step_checkpoints: true` turns them on; the last `step_checkpoints_keep`, default 20, are kept per computer). `--from-step N` forks from the checkpoint taken after step N.
 
@@ -78,6 +100,15 @@ All tests use the mock GitHub API, a local bare git remote and a loopback HTTP e
 ## Spec changes
 
 ## Status
+
+### 6 Nov 2026: phase 5 passed
+
+- **Shipped:** in-guest `silo` client (spool on the `/.msb` share read through directory fds, per-computer token stored as a hash, allow-list scoped to forks the token made, caps, revoke on promote/undo/delete, runtime folder sealed except `silo-bridge`, static guest binary via `app/SiloUI/scripts/build-guest-silo.sh`); Mac mini remote (v1 methods routed over Connections, `--device`, `--all-devices`, one request list across devices, MCP device actions gated by `agents.<name>.devices`); hosted reviewer (`silo review`, three lenses, advisory banner, wording filter, only a reduced diff and a capped, redacted code diff sent; `reviewer-service/` tested offline, not deployed); computer use from the host (one driver session per fork on the Cua driver 0.38.0 contract, `fork --gui`, `auto` approval for forks only, re-applied after keep and promote, ignore entries).
+- **Reviews:** every slice by Opus, two or three rounds; second reviews by Argon (until its quota ran out) and gpt-6.1-sol. Main finds fixed: the guest could redirect the spool to host files; fork ownership by name; a remote fanning out past one hop; reviewer URL from a project file receiving the token; driver tool names guessed wrong; root-run chowns following guest symlinks; a guest user reaching `root-disk.json` on the runtime share.
+- **VM checks (Dev engine, live):** in-guest client from inside a Linux main, 59/59 (`docs/v1/evidence/phase-5/inguest-check.txt`, earlier runs beside it); computer use 32 passed, 1 blocked (Linux and macOS forks driven from the host: typed into a GUI terminal, file appeared; keep and approval checks), the blocked one needs a computer named main (`computer-use-check.txt`). Live runs found and fixed: non-root bridge access, a msb refusal to checkpoint a running computer after the host removed share files (worked around with a guest cache drop; upstream draft in `docs/v1/upstream/msb-virtiofs-unlinked-checkpoint.md`), promote archive names over 32 characters, keep writing agent config as root, macOS readiness and approval.
+- **Tests:** workspace suites pass (engine 3083).
+- **Wording:** clean over added lines (remaining matches are git's `safe.directory`, rustc's `link-self-contained`, and the reviewer filter's own word list).
+- **Next:** phase 6.
 
 ### 6 Nov 2026: phase 4 built; credentials VM check blocked on the owner
 

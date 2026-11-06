@@ -941,6 +941,87 @@ fn captures_full_state_only_with_an_owned_workspace_disk() {
 }
 
 #[test]
+fn a_full_capture_drops_the_guests_cached_entries_first_only_when_a_bridge_folder_exists() {
+    let _test_state = crate::test_support::global_state();
+    for bridge in [false, true] {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = paths(&directory);
+        write_metadata(
+            &paths.metadata,
+            &ComputerConfigurationRequest {
+                schema_version: 1,
+                computers: vec![computer_configuration()],
+            },
+        )
+        .unwrap();
+        if bridge {
+            std::fs::create_dir_all(crate::guest_client::spool_dir(&paths.home, "dev")).unwrap();
+        }
+        let runner = Runner {
+            mount_type: "Owned",
+            calls: Mutex::new(Vec::new()),
+        };
+        capture_with(&runner, &paths, ID, "Before work", "manual").unwrap();
+        let calls = runner.calls.lock().unwrap();
+        let release = calls.iter().position(|call| {
+            call[0] == "exec" && call.iter().any(|arg| arg.contains("drop_caches"))
+        });
+        let create = calls
+            .iter()
+            .position(|call| call[..2] == ["snapshot", "create"])
+            .unwrap();
+        if bridge {
+            assert!(release.unwrap() < create);
+            assert!(calls[release.unwrap()]
+                .windows(2)
+                .any(|pair| pair == ["--user", "root"]));
+        } else {
+            assert!(release.is_none());
+        }
+    }
+}
+
+#[test]
+fn a_capture_the_share_rejects_says_to_restart_and_releases_the_bridge_hold() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let paths = paths(&directory);
+    let rejected = || RuntimeError::Failed {
+        operation: "snapshot".into(),
+        exit_code: Some(1),
+        detail: "control operation rejected by peer".into(),
+    };
+    // Without a bridge folder the failure is reported as it is.
+    assert!(matches!(
+        explain_rejected_capture(&paths, "dev", rejected()),
+        RuntimeError::Failed { .. }
+    ));
+    std::fs::create_dir_all(crate::guest_client::spool_dir(&paths.home, "dev")).unwrap();
+    let explained = explain_rejected_capture(&paths, "dev", rejected()).to_string();
+    assert!(explained.contains("Restart the computer"), "{explained}");
+    let hold = crate::guest_client::hold_bridge("dev");
+    assert!(crate::guest_client::bridge_held("dev"));
+    drop(hold);
+    assert!(!crate::guest_client::bridge_held("dev"));
+}
+
+#[test]
+fn every_fork_scrubs_the_guest_client_token_once() {
+    let token = silo_api::methods::guest_client::GUEST_TOKEN_PATH;
+    let mut options = ForkOptions::default();
+    options.scrub_guest_client_token();
+    options.scrub_guest_client_token();
+    assert_eq!(options.scrub, [token]);
+    let mut named = ForkOptions {
+        scrub: vec!["/root/.bot.env".into(), token.into()],
+        ..ForkOptions::default()
+    };
+    named.scrub_guest_client_token();
+    assert_eq!(named.scrub, ["/root/.bot.env", token]);
+    assert!(named.validate().is_ok());
+}
+
+#[test]
 fn pending_restore_checkpoint_creation_aliases_immutable_full_snapshot() {
     let _test_state = crate::test_support::global_state();
     struct SnapshotInventory {

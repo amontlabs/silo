@@ -200,11 +200,17 @@ pub struct AgentOverride {
     pub step_checkpoints: Option<bool>,
     #[serde(default)]
     pub step_checkpoints_keep: Option<u32>,
+    /// Connected devices (names) the agent may act on through MCP; none by default.
+    #[serde(default)]
+    pub devices: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Settings {
+    /// The devices the resolved agent may act on through MCP (from its `agents:` entry).
+    #[serde(skip)]
+    pub devices: Vec<String>,
     #[serde(default)]
     pub recipes: Vec<String>,
     #[serde(default)]
@@ -226,8 +232,23 @@ pub struct Settings {
     pub step_checkpoints_keep: Option<u32>,
     #[serde(default)]
     pub auto_keep: Vec<AutoKeepRule>,
+    /// Let agents (MCP clients, or the CLI run with `--agent`) make forks with computer-use
+    /// approval `auto`. A person typing `--computer-use auto` needs no setting.
+    #[serde(default)]
+    pub computer_use_auto: bool,
     #[serde(default)]
     pub agents: BTreeMap<String, AgentOverride>,
+    /// The hosted reviewer (`silo review`); off without a URL.
+    #[serde(default)]
+    pub reviewer: Option<ReviewerSettings>,
+}
+
+/// `reviewer:` of `.silo/silo.yaml`. The token is never kept here: it is SILO_REVIEWER_TOKEN.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReviewerSettings {
+    #[serde(default)]
+    pub url: Option<String>,
 }
 
 /// How many step checkpoints a computer keeps when `step_checkpoints_keep` is not set.
@@ -323,7 +344,11 @@ impl Settings {
         if !named {
             entry.fold = None;
             entry.auto_keep = None;
+            // A device is opened to an agent by the file or the command line, not by what
+            // the client calls itself.
+            entry.devices = None;
         }
+        settings.devices = entry.devices.take().unwrap_or_default();
         let fold = entry.fold.unwrap_or(settings.fold);
         let rules = match (entry.auto_keep, entry.fold) {
             (Some(rules), _) => rules,
@@ -994,6 +1019,20 @@ mod tests {
         assert!(Settings::check_recipe(open.as_ref(), "web").is_ok());
         assert!(Settings::check_recipe(open.as_ref(), "linux-dev").is_err());
         assert!(Settings::check_fork_secrets(open.as_ref(), &["A".into()]).is_err());
+    }
+
+    #[test]
+    fn an_agents_devices_apply_only_to_a_named_agent() {
+        let text = "agents:\n  bot:\n    devices: [Mac mini]\n";
+        let named = Settings::resolve_as(Some(parse_settings(text).unwrap()), Some("bot"), true);
+        assert_eq!(named.unwrap().devices, vec!["Mac mini".to_owned()]);
+        let reported =
+            Settings::resolve_as(Some(parse_settings(text).unwrap()), Some("bot"), false);
+        assert!(reported.unwrap().devices.is_empty());
+        let none = Settings::resolve(Some(parse_settings("recipes: []\n").unwrap()), Some("bot"));
+        assert!(none.unwrap().devices.is_empty());
+        // `devices:` is an agent setting, not a top-level one.
+        assert!(parse_settings("devices: [x]\n").is_err());
     }
 
     #[test]

@@ -343,6 +343,11 @@ fn unix_seconds() -> u64 {
 
 /// Stores a new approval choice and returns the stored policy. The last attempt is kept:
 /// it is compared with the choice, never rewritten by it.
+/// The approval mode the user chose for the computer.
+pub(crate) fn approval_of(paths: &RuntimePaths, id: &str) -> Approval {
+    read_policy(paths, id).approval
+}
+
 pub(crate) fn set_approval(
     paths: &RuntimePaths,
     id: &str,
@@ -1008,6 +1013,40 @@ pub fn after_boot(
     name: &str,
 ) -> Option<std::thread::JoinHandle<()>> {
     apply_with(&runtime::OPERATIONS, runner, paths, name, Trigger::Boot)
+}
+
+/// After a keep into `name`: drives the computer's guest back to its own recorded approval
+/// mode. A fork made with `auto` carries the `mcp__cua-driver` rule of Claude Code's settings
+/// and Codex's approval line in its own files, and a keep brings changed settings files into
+/// the target; the apply rewrites both from the target's mode. Linux computers only; the thread
+/// is returned for tests.
+pub fn reapply_after_keep(paths: &RuntimePaths, name: &str) -> Option<std::thread::JoinHandle<()>> {
+    reapply_in(
+        &runtime::OPERATIONS,
+        Arc::new(runtime::ProcessRunner),
+        paths,
+        name,
+    )
+}
+
+fn reapply_in(
+    gate: &'static runtime::operation_gate::OperationGate,
+    runner: SharedRunner,
+    paths: &RuntimePaths,
+    name_or_id: &str,
+) -> Option<std::thread::JoinHandle<()>> {
+    // A keep names the computer by whatever the engine was given, often its id.
+    let name = runtime::read_metadata(&paths.metadata)
+        .ok()?
+        .computers
+        .into_iter()
+        .find(|configuration| {
+            (configuration.name() == name_or_id || configuration.id() == name_or_id)
+                && is_built_in(configuration)
+        })?
+        .name()
+        .to_owned();
+    apply_with(gate, runner, paths, &name, Trigger::Boot)
 }
 
 /// Drives a running built-in computer's guest toward the computer's chosen approval mode on a host

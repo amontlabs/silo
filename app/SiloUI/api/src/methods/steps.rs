@@ -6,6 +6,9 @@ use serde::{Deserialize, Serialize};
 
 wire_struct! {
     StepsListParams {
+        /// The device that owns this; absent or `local` is this device.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        device_id: Option<String>,
         computer_id: String,
     }
 }
@@ -20,6 +23,9 @@ wire_struct! {
     /// Records a finished command as the computer's next step. The engine numbers it and
     /// links it to the step (and checkpoint) it follows.
     StepsRecordParams {
+        /// The device that owns this; absent or `local` is this device.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        device_id: Option<String>,
         computer_id: String,
         /// The command as an argument vector; the engine joins and shortens it.
         command: Vec<String>,
@@ -62,8 +68,8 @@ wire_struct! {
     }
 }
 
-/// `computers.tree` takes no parameters.
-pub type ComputersTreeParams = crate::methods::common::EmptyParams;
+/// `computers.tree` reads this device, or the one `deviceId` names.
+pub type ComputersTreeParams = crate::methods::common::DeviceParams;
 
 wire_struct! {
     ComputersTreeResult {

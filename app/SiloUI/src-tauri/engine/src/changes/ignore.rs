@@ -82,6 +82,29 @@ pub const BUILTIN_IGNORE: &str = "\
 *.abcddb-shm
 *.abcddb-wal
 
+# computer use: the driver's identity files (written even with telemetry off) and recordings,
+# the guest helper's receipt, the desktop service's streamer receipt, package download and
+# install lock, helper staging and the bridge's temporary files (macOS keeps /tmp at
+# /private/tmp), and the macOS helper's receipt and screen recordings
+/home/*/.cua-driver/.telemetry_id
+/home/*/.cua-driver/.telemetry_identity.lock
+/Users/*/.cua-driver/.telemetry_id
+/Users/*/.cua-driver/.telemetry_identity.lock
+/home/*/.local/share/cua-driver
+/home/*/.config/cua-driver/recordings
+/var/lib/silo-computer-use
+/var/lib/silo-desktop/streamer.json
+/var/lib/silo-desktop/selkies.deb
+/var/lib/silo-desktop/install.lock
+/tmp/silo-cu.*
+/tmp/cua-driver
+/tmp/cua-driver.*
+/private/tmp/silo-cu.*
+/private/tmp/cua-driver
+/private/tmp/cua-driver.*
+/Users/*/Library/Application Support/Silo/computer-use-receipt.json
+/Users/*/Library/Application Support/Silo/Recordings
+
 # agent session data
 */.claude/projects
 .claude.json.backup*
@@ -255,6 +278,8 @@ const CREDENTIAL_PATHS: &[&str] = &[
     "/etc/gshadow",
     "/etc/master.passwd",
     "/etc/sudoers",
+    // The desktop's connection password.
+    "/var/lib/silo-desktop/connection.json",
 ];
 
 /// Glob patterns matched against the whole path (host keys and the like).
@@ -357,6 +382,42 @@ mod tests {
         let list = IgnoreList::builtin();
         assert!(list.matches("/Users/a/Movies/TV/TV Library.tvlibrary/library.tvdb"));
         assert!(!list.matches("/Users/a/Movies/film.mov"));
+    }
+
+    #[test]
+    fn computer_use_state_is_not_a_change() {
+        let list = IgnoreList::builtin();
+        for path in [
+            "/var/lib/silo-computer-use/receipt.json",
+            "/var/lib/silo-desktop/streamer.json",
+            "/private/tmp/silo-cu.AbCd1234/helper",
+            "/var/log/silo-computer-use.log",
+            "/home/silo/.cache/cua-driver/shots/1.png",
+            "/home/silo/.local/share/cua-driver/trajectories/a/step.json",
+            "/home/silo/.cua-driver/.telemetry_id",
+            "/Users/silo/.cua-driver/.telemetry_identity.lock",
+            "/var/lib/silo-desktop/selkies.deb",
+            "/var/lib/silo-desktop/install.lock",
+            "/tmp/cua-driver.1234",
+            "/home/silo/.Xauthority",
+            "/tmp/silo-cu.AbCd1234/helper",
+            "/Users/silo/Library/Application Support/Silo/computer-use-receipt.json",
+            "/Users/silo/Library/Application Support/Silo/Recordings/guest-screen.mov",
+            "/Users/silo/Library/Logs/silo-computer-use.log",
+            "/Users/silo/Library/Group Containers/group.com.apple.replayd/ScreenCaptureApprovals.plist",
+        ] {
+            assert!(list.matches(path), "{path} should be ignored");
+        }
+        assert!(!list.matches("/home/silo/project/src/main.rs"));
+        assert!(!list.matches("/home/silo/.config/Code/settings.json"));
+        // Settings a person may have changed stay reviewable.
+        assert!(!list.matches("/var/lib/silo-desktop/config.json"));
+        assert!(!list.matches("/home/silo/.cua-driver/config.json"));
+        assert!(!list.matches("/tmp/cua-driver-notes.txt"));
+        // The desktop password is a credential, reported under Not kept.
+        assert!(credential_group("/var/lib/silo-desktop/connection.json").is_some());
+        assert!(!list.matches("/home/silo/.config/xfce4/xfconf/xfce-perchannel-xml/displays.xml"));
+        assert!(!list.matches("/Users/silo/Library/Application Support/Silo/notes.txt"));
     }
 
     #[test]

@@ -169,6 +169,7 @@ impl Provision<'_> {
         finished: impl FnOnce(&mut SetupProgress),
     ) -> Result<(), Stop> {
         finished(&mut record.setup);
+        self.keep_chosen_approval(record);
         self.log(&format!(
             "setup step finished: {}",
             setup_summary(&record.setup)
@@ -177,6 +178,13 @@ impl Provision<'_> {
         let saved = record.clone();
         super::update(self.app, &self.id, |entry| entry.record = saved);
         Ok(())
+    }
+
+    /// Takes the approval chosen since this setup read the record, so saving it does not undo it.
+    fn keep_chosen_approval(&self, record: &mut Record) {
+        if let Some(chosen) = super::registry().desired_approval_of(&self.id) {
+            record.computer_use_desired_approval = Some(chosen);
+        }
     }
 
     fn steps(&self, record: &mut Record) -> Result<(), Stop> {
@@ -308,11 +316,10 @@ impl Provision<'_> {
         }
         // A copy of a template made with another computer use brings it up to date here,
         // before the computer is handed over.
+        self.keep_chosen_approval(record);
         if record.setup.computer_use && record.computer_use_stale() {
             self.say("Updating Computer Use")?;
-            let approval = record
-                .computer_use_approval
-                .unwrap_or_else(crate::computer_use::initial_approval);
+            let approval = record.computer_use_wanted_approval();
             guest_computer_use::install(self.app, &self.id, approval)?;
             record.computer_use_version = Some(templates::computer_use_version_for(approval));
             record.computer_use_approval = Some(approval);

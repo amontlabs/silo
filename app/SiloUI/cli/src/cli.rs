@@ -14,7 +14,7 @@ use crate::{
     engine::{build_channel, default_socket, Engine},
     error::CliError,
     fanout::{self, ManyArgs},
-    flows, folder,
+    flows, folder, hosted,
     ops::{self, CreateArgs, DiffArgs, ExecArgs, ForkArgs, Platform},
     pr, render, review, steps,
 };
@@ -38,8 +38,34 @@ pub struct Cli {
     /// The agent the settings in `agents:` of `.silo/silo.yaml` are read for (default: SILO_AGENT).
     #[arg(long, global = true, value_name = "NAME", env = "SILO_AGENT")]
     pub agent: Option<String>,
+    /// Run inside a computer: reach the engine through the bridge folder with the token the
+    /// person who runs Silo installed (default: SILO_IN_GUEST).
+    #[arg(long, global = true, env = "SILO_IN_GUEST", hide_env_values = true)]
+    pub in_guest: bool,
+    /// Run the command on a connected device (its name or id) instead of this one, over
+    /// Connections. Folders, ports, SSH names, secrets and `exec` stay on this device.
+    #[arg(long, global = true, value_name = "DEVICE")]
+    pub device: Option<String>,
     #[command(subcommand)]
     pub command: Command,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum GuestClientCommand {
+    /// Mint a token for a Linux computer and write it into the computer (it must be running).
+    Install {
+        computer: String,
+        /// A `silo` binary built for the guest to copy to /usr/local/bin/silo.
+        #[arg(long, value_name = "PATH")]
+        binary: Option<PathBuf>,
+        /// The guest group that may read the token file.
+        #[arg(long, default_value = "silo")]
+        group: String,
+    },
+    /// Remove a computer's token; its agent can no longer reach the engine.
+    Revoke { computer: String },
+    /// Say whether a computer has a token and the settings it was minted with.
+    Status { computer: String },
 }
 
 #[derive(Subcommand, Debug)]
@@ -49,6 +75,9 @@ pub enum Command {
         /// Also show the hidden throwaway computers (baselines, recipe builders).
         #[arg(long)]
         all: bool,
+        /// List this device's computers and every connected device's.
+        #[arg(long)]
+        all_devices: bool,
     },
     /// Show one computer.
     Status { computer: String },
@@ -78,6 +107,14 @@ pub enum Command {
     },
     /// Show what changed in a computer since it was forked.
     Diff(DiffCommand),
+    /// Ask the hosted reviewer to read a fork's diff (needs reviewer.url or SILO_REVIEWER_URL).
+    Review {
+        /// A computer or a review request id (fr-...).
+        target: String,
+        /// general, packages, code or all (default).
+        #[arg(long, value_name = "LENS")]
+        lens: Option<String>,
+    },
     /// Throw a computer away.
     Drop(DropCommand),
     /// Run a command in a computer.
@@ -108,6 +145,9 @@ pub enum Command {
     /// Manage the Silo secrets and which computers have them.
     #[command(subcommand)]
     Secrets(SecretsCommand),
+    /// Install, remove or read the token a computer's own agent uses (`silo --in-guest`).
+    #[command(subcommand)]
+    GuestClient(GuestClientCommand),
     /// Wait for a job that is already running, by id.
     Job { id: String },
     /// Serve the MCP tools on stdio.
@@ -208,6 +248,21 @@ pub struct ForkCommand {
     /// A recipe file whose quiet: and scrub: lists apply to the fork.
     #[arg(long, value_name = "PATH")]
     pub recipe_file: Option<PathBuf>,
+    /// Start the fork and wait until its desktop and computer-use driver are ready, then
+    /// print its name and computer-use status.
+    #[arg(long, conflicts_with_all = ["count", "command", "recipe"])]
+    pub gui: bool,
+    /// The fork's computer-use approval: ask (the default) or auto, which lets an agent in
+    /// the fork drive its desktop without asking. Only forks; main keeps asking.
+    #[arg(
+        long,
+        value_name = "ask|auto",
+        conflicts_with_all = ["count", "command", "recipe"]
+    )]
+    pub computer_use: Option<String>,
+    /// How long --gui waits for the desktop and the driver.
+    #[arg(long, value_name = "SECONDS", default_value_t = crate::gui::DEFAULT_TIMEOUT_SECS, requires = "gui")]
+    pub gui_timeout: u64,
 }
 
 #[derive(Args, Debug)]
@@ -260,12 +315,24 @@ pub struct RequestsCommand {
     /// Which requests to list: open (default), kept, thrown-away or all.
     #[arg(long, value_name = "STATUS")]
     pub status: Option<String>,
+    /// List this device's requests and every connected device's. `show`, `keep`,
+    /// `throw-away` and `open` find the device a request is on by themselves.
+    #[arg(long)]
+    pub all_devices: bool,
 }
 
 #[derive(Subcommand, Debug)]
 pub enum RequestsAction {
     /// A request with a fresh diff of its fork and the credentials the fork used.
-    Show { id: String },
+    Show {
+        id: String,
+        /// Also send the diff to the hosted reviewer and print what it finds.
+        #[arg(long)]
+        review: bool,
+        /// With --review: general, packages, code or all (default).
+        #[arg(long, value_name = "LENS", requires = "review")]
+        lens: Option<String>,
+    },
     /// Keep the request's fork into its target, pinned to the digest the request was made from.
     Keep {
         id: String,
@@ -347,6 +414,35 @@ fn trim_newline(mut value: String) -> String {
     value
 }
 
+fn render_guest_client(result: &Value) -> String {
+    if let Some(enabled) = result["enabled"].as_bool() {
+        let name = result["computerId"].as_str().unwrap_or_default();
+        let line = match (enabled, result["mintedAt"].as_str()) {
+            (true, Some(at)) => format!(
+                "{name}: token minted {at}; fork_secrets: {}",
+                result["policy"]["forkSecrets"]
+            ),
+            _ => format!("{name}: no token"),
+        };
+        return match result["warning"].as_str() {
+            Some(warning) => format!("{line}\nwarning: {warning}"),
+            None => line,
+        };
+    }
+    format!(
+        "Installed in {}: {}. Inside it, run: silo --in-guest list",
+        result["computer"].as_str().unwrap_or_default(),
+        result["installed"]
+            .as_array()
+            .map(|items| items
+                .iter()
+                .filter_map(Value::as_str)
+                .collect::<Vec<_>>()
+                .join(", "))
+            .unwrap_or_default()
+    )
+}
+
 fn stderr_progress(line: &str) {
     eprintln!("{line}");
 }
@@ -364,6 +460,10 @@ fn emit(json: bool, value: &Value, human: impl FnOnce(&Value) -> String) {
 
 /// Runs one command and returns the process exit code.
 pub async fn run(cli: Cli, working_directory: &Path) -> Result<i32, CliError> {
+    if cli.in_guest {
+        let link = crate::guest_client::Link::load(&crate::guest_client::token_path())?;
+        return crate::guest_client::run(cli.command, cli.json, &link).await;
+    }
     let socket = default_socket(cli.socket.clone(), cli.allow_other_channel)?;
     if matches!(cli.command, Command::Mcp) {
         crate::mcp::serve(socket, working_directory.to_owned(), cli.agent.clone()).await?;
@@ -372,6 +472,17 @@ pub async fn run(cli: Cli, working_directory: &Path) -> Result<i32, CliError> {
     let project = Project::discover(working_directory);
     // Read before connecting so a bad file is reported without the engine.
     let settings = project.load_settings(cli.agent.as_deref())?;
+    if let Command::Fork(fork) = &cli.command {
+        if let Some(mode) = fork
+            .computer_use
+            .as_deref()
+            .map(crate::gui::parse_approval)
+            .transpose()?
+        {
+            // A named agent (`--agent` or SILO_AGENT) is asking like an MCP client would.
+            crate::gui::check_auto(mode, settings.as_ref(), cli.agent.is_some())?;
+        }
+    }
     let recipe = match &cli.command {
         Command::Fork(fork) => match &fork.recipe {
             Some(name) => Some(project.named_recipe(name)?),
@@ -396,7 +507,57 @@ pub async fn run(cli: Cli, working_directory: &Path) -> Result<i32, CliError> {
         _ => None,
     };
     let engine = Engine::connect(&socket).await?;
+    let engine = match cli.device.as_deref() {
+        None | Some("local") => engine,
+        Some(name) => {
+            let id = engine.resolve_device(name).await?;
+            engine.on_device(Some(id))
+        }
+    };
+    refuse_on_device(&cli.command, &engine)?;
     let json = cli.json;
+    if let Command::GuestClient(action) = &cli.command {
+        let result = match action {
+            GuestClientCommand::Install {
+                computer,
+                binary,
+                group,
+            } => {
+                let policy =
+                    crate::guest_install::policy_from(settings.as_ref(), cli.agent.as_deref());
+                crate::guest_install::install(
+                    &engine,
+                    computer,
+                    policy,
+                    binary.as_deref(),
+                    group,
+                    &stderr_progress,
+                )
+                .await?
+            }
+            GuestClientCommand::Revoke { computer } => {
+                crate::guest_install::revoke(&engine, computer).await?
+            }
+            GuestClientCommand::Status { computer } => {
+                let mut status = crate::guest_install::status(&engine, computer).await?;
+                let current =
+                    crate::guest_install::policy_from(settings.as_ref(), cli.agent.as_deref());
+                if let Some(warning) = crate::guest_install::stale_warning(&status, &current) {
+                    status["warning"] = serde_json::json!(warning);
+                }
+                status
+            }
+        };
+        println!(
+            "{}",
+            if json {
+                serde_json::to_string_pretty(&result).unwrap_or_default()
+            } else {
+                render_guest_client(&result)
+            }
+        );
+        return Ok(0);
+    }
     tokio::select! {
         result = dispatch(&engine, cli.command, json, settings, recipe, &project, working_directory) => result,
         _ = tokio::signal::ctrl_c() => {
@@ -407,6 +568,32 @@ pub async fn run(cli: Cli, working_directory: &Path) -> Result<i32, CliError> {
             Ok(130)
         }
     }
+}
+
+/// The commands that work on this device's own files, ports, SSH names or secrets.
+fn refuse_on_device(command: &Command, engine: &Engine) -> Result<(), CliError> {
+    if engine.device().is_none() {
+        return Ok(());
+    }
+    let what = match command {
+        Command::Up(_) => "up",
+        Command::Exec(_) => "exec",
+        Command::Ports { .. } => "ports",
+        Command::Publish { .. } => "publish",
+        Command::Unpublish { .. } => "unpublish",
+        Command::SshSetup { .. } => "ssh-setup",
+        Command::Secrets(_) => "secrets",
+        Command::Fork(fork) if fork.recipe.is_none() && folder::is_folder(&fork.source) => {
+            "fork of a folder"
+        }
+        Command::Fork(fork) if !fork.command.is_empty() => "fork with a command",
+        Command::Fold(fold) if fold.pr => "fold --pr",
+        Command::Undo { computer } if folder::is_folder(computer) => "undo of a folder",
+        _ => return Ok(()),
+    };
+    Err(CliError::new(format!(
+        "{what} works on this device, so --device cannot be used with it."
+    )))
 }
 
 async fn dispatch(
@@ -451,8 +638,10 @@ async fn dispatch(
                 )
             });
         }
-        Command::List { all } => {
-            let value = if all {
+        Command::List { all, all_devices } => {
+            let value = if all_devices {
+                ops::list_everywhere(engine, all).await?
+            } else if all {
                 ops::list_all(engine).await?
             } else {
                 ops::list(engine).await?
@@ -496,6 +685,14 @@ async fn dispatch(
                 }
                 fork.checkpoint = Some(steps::checkpoint_for(engine, &fork.source, number).await?);
             }
+            if fork.recipe.is_none()
+                && folder::is_folder(&fork.source)
+                && (fork.gui || fork.computer_use.is_some())
+            {
+                return Err(CliError::new(
+                    "--gui and --computer-use fork a computer; a folder is copied into a Linux fork that has no desktop.",
+                ));
+            }
             if fork.recipe.is_none() && folder::is_folder(&fork.source) {
                 return fork_folder(
                     engine,
@@ -537,7 +734,25 @@ async fn dispatch(
                 recipe,
                 recipe_name,
             };
-            let value = ops::fork(engine, &args, settings.as_ref(), progress).await?;
+            let approval = fork
+                .computer_use
+                .as_deref()
+                .map(crate::gui::parse_approval)
+                .transpose()?;
+            if fork.gui {
+                let gui = crate::gui::GuiArgs {
+                    fork: args,
+                    approval,
+                    timeout: std::time::Duration::from_secs(fork.gui_timeout.max(1)),
+                };
+                let value = crate::gui::fork_gui(engine, &gui, settings.as_ref(), progress).await?;
+                emit(json, &value, render::forked_gui);
+                return Ok(0);
+            }
+            let mut value = ops::fork(engine, &args, settings.as_ref(), progress).await?;
+            if let Some(mode) = approval {
+                crate::gui::apply_to_fork(engine, &mut value, mode).await?;
+            }
             emit(json, &value, render::forked);
         }
         Command::Fold(fold) if fold.promote => {
@@ -560,7 +775,7 @@ async fn dispatch(
                 project,
                 settings: settings.as_ref(),
                 recipe: recipe.as_ref(),
-                write_back: !fold.no_write_back,
+                write_back: !fold.no_write_back && engine.device().is_none(),
             };
             let mode = if fold.pr {
                 flows::Mode::PullRequest(
@@ -612,24 +827,45 @@ async fn dispatch(
                     .as_deref()
                     .map(review::parse_filter)
                     .transpose()?;
-                let value = review::list(engine, status).await?;
+                let value = if requests.all_devices {
+                    review::list_all(engine, status).await?
+                } else {
+                    review::list(engine, status).await?
+                };
                 emit(json, &value, render::requests_list);
             }
-            Some(RequestsAction::Show { id }) => {
-                let value = review::show(engine, &id, progress).await?;
-                emit(json, &value, render::request_show);
+            Some(RequestsAction::Show { id, review, lens }) => {
+                let engine = &review::locate(engine, &id).await?;
+                let mut value = review::show(engine, &id, progress).await?;
+                if review {
+                    let lenses = hosted::parse_lenses(lens.as_deref())?;
+                    let reviewed =
+                        hosted::review_target(engine, settings.as_ref(), &id, &lenses, progress)
+                            .await?;
+                    value["review"] = reviewed;
+                }
+                emit(json, &value, |v| {
+                    let mut text = render::request_show(v);
+                    if v["review"].is_object() {
+                        text.push_str(&format!("\n\n{}", hosted::render(&v["review"])));
+                    }
+                    text
+                });
             }
             Some(RequestsAction::Keep { id, data_ok, .. }) => {
+                let engine = &review::locate(engine, &id).await?;
                 let hooks = ops::keep_hooks(recipe.as_ref());
                 let value = review::keep(engine, &id, hooks, data_ok, progress).await?;
                 emit(json, &value, render::fold);
                 return Ok(if value["status"] == "refused" { 2 } else { 0 });
             }
             Some(RequestsAction::ThrowAway { id }) => {
+                let engine = &review::locate(engine, &id).await?;
                 let value = review::throw_away(engine, &id, progress).await?;
                 emit(json, &value, render::request_thrown_away);
             }
             Some(RequestsAction::Open { id }) => {
+                let engine = &review::locate(engine, &id).await?;
                 let value = review::open(engine, &id, progress).await?;
                 emit(json, &value, render::request_open);
             }
@@ -641,6 +877,13 @@ async fn dispatch(
             }
             emit(json, &value, render::undo);
             return Ok(if value["status"] == "refused" { 2 } else { 0 });
+        }
+        Command::Review { target, lens } => {
+            let lenses = hosted::parse_lenses(lens.as_deref())?;
+            let value =
+                hosted::review_target(engine, settings.as_ref(), &target, &lenses, progress)
+                    .await?;
+            emit(json, &value, hosted::render);
         }
         Command::Diff(diff) => {
             let args = DiffArgs {
@@ -765,7 +1008,7 @@ async fn dispatch(
                 serde_json::to_string_pretty(v).unwrap_or_default()
             });
         }
-        Command::Mcp => unreachable!("handled above"),
+        Command::Mcp | Command::GuestClient(_) => unreachable!("handled above"),
     }
     Ok(0)
 }

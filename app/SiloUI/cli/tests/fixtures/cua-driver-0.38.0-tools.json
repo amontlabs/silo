@@ -1,0 +1,122 @@
+{
+  "contractVersion": "0.8.0",
+  "source": "trycua/cua cua-driver-rs-v0.38.0 libs/cua-driver/contract/manifest.json",
+  "tools": {
+    "click": {
+      "properties": [
+        "button",
+        "capture_id",
+        "count",
+        "delivery_mode",
+        "element_token",
+        "session",
+        "target",
+        "x",
+        "y"
+      ],
+      "required": [
+        "delivery_mode",
+        "target"
+      ]
+    },
+    "drag": {
+      "properties": [
+        "button",
+        "duration_ms",
+        "from_x",
+        "from_y",
+        "modifier",
+        "scope",
+        "session",
+        "steps",
+        "target",
+        "to_x",
+        "to_y"
+      ],
+      "required": [
+        "from_x",
+        "from_y",
+        "to_x",
+        "to_y"
+      ]
+    },
+    "get_desktop_state": {
+      "properties": [
+        "max_image_dimension",
+        "screenshot_out_file",
+        "session"
+      ],
+      "required": []
+    },
+    "get_screen_size": {
+      "properties": [
+        "session"
+      ],
+      "required": []
+    },
+    "hotkey": {
+      "properties": [
+        "keys",
+        "scope",
+        "session",
+        "target"
+      ],
+      "required": [
+        "keys"
+      ]
+    },
+    "move_cursor": {
+      "properties": [
+        "scope",
+        "session",
+        "target",
+        "x",
+        "y"
+      ],
+      "required": [
+        "x",
+        "y"
+      ]
+    },
+    "press_key": {
+      "properties": [
+        "key",
+        "modifiers",
+        "scope",
+        "session",
+        "target"
+      ],
+      "required": [
+        "key"
+      ]
+    },
+    "scroll": {
+      "properties": [
+        "amount",
+        "by",
+        "direction",
+        "scope",
+        "session",
+        "target",
+        "x",
+        "y"
+      ],
+      "required": [
+        "direction",
+        "x",
+        "y"
+      ]
+    },
+    "type_text": {
+      "properties": [
+        "scope",
+        "session",
+        "target",
+        "text"
+      ],
+      "required": [
+        "text"
+      ]
+    }
+  }
+}

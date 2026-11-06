@@ -4976,20 +4976,24 @@ dependencies = [
 name = "silo-cli"
 version = "0.1.0"
 dependencies = [
+ "base64 0.23.1",
  "clap",
  "futures",
  "libc",
+ "regex",
  "reqwest 0.12.28",
  "rmcp",
  "schemars 1.2.3",
  "serde",
  "serde_json",
  "serde_yaml_ng",
+ "sha2 0.10.9",
  "silo-api",
  "silo-client",
  "tempfile",
  "time",
  "tokio",
+ "unicode-normalization",
  "uuid",
 ]
 
@@ -5030,6 +5034,7 @@ dependencies = [
  "plist",
  "reqwest 0.12.28",
  "rusqlite",
+ "rustix",
  "security-framework 2.11.1",
  "security-framework 3.7.0",
  "security-framework-sys",

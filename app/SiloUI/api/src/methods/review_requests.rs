@@ -26,6 +26,13 @@ wire_struct! {
         /// Defaults to `open`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         status: Option<RequestFilter>,
+        /// The device whose requests are listed; absent or `local` is this device.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        device_id: Option<String>,
+        /// Also list the requests of every connected device. Each row says which device it
+        /// belongs to; a device that cannot be reached is reported in `unreachable`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        all_devices: Option<bool>,
     }
 }
 
@@ -42,18 +49,40 @@ wire_struct! {
         /// The target computer's name; `None` for a folder or a computer that is gone.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         target_name: Option<String>,
+        /// The device the request lives on. Set when the list spans devices; actions on the
+        /// row pass it as their `deviceId`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        device_id: Option<String>,
+        /// The name of that device.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        device_name: Option<String>,
+    }
+}
+
+wire_struct! {
+    /// A device a merged list could not read, and why.
+    UnreachableDevice {
+        device_id: String,
+        device_name: String,
+        reason: String,
     }
 }
 
 wire_struct! {
     ChangesRequestsListResult {
         requests: Vec<RequestEntry>,
+        /// Devices a list across devices could not read.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        unreachable: Vec<UnreachableDevice>,
     }
 }
 
 wire_struct! {
     /// A request named by its id.
     RequestIdParams {
+        /// The device that owns this; absent or `local` is this device.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        device_id: Option<String>,
         request_id: String,
     }
 }
@@ -115,6 +144,9 @@ wire_struct! {
 
 wire_struct! {
     ChangesRequestsKeepParams {
+        /// The device that owns this; absent or `local` is this device.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        device_id: Option<String>,
         request_id: String,
         /// Carry database changes even though no migration step covers them.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -142,6 +174,9 @@ wire_struct! {
     /// Closes the open requests for a fork and target that were kept outside the engine: a
     /// folder fork folded into its folder by the CLI.
     ChangesRequestsMarkKeptParams {
+        /// The device that owns this; absent or `local` is this device.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        device_id: Option<String>,
         fork_id: String,
         /// The request's target, `folder:<path>` for a folder fork.
         target: String,

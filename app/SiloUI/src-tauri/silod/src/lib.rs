@@ -9,6 +9,7 @@ pub mod code_signature;
 pub mod context;
 pub mod dispatcher;
 pub mod framing;
+pub mod guest_bridge;
 pub mod identity;
 pub mod manifest;
 pub mod methods;

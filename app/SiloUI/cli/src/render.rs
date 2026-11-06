@@ -21,11 +21,31 @@ pub fn list(value: &Value) -> String {
         .max()
         .unwrap_or(4)
         .max(4);
-    let mut out = format!(
+    // A list across devices says where each computer is.
+    let across = computers
+        .iter()
+        .any(|computer| computer.get("deviceName").is_some());
+    let device_width = computers
+        .iter()
+        .map(|computer| text(computer, "deviceName").len())
+        .max()
+        .unwrap_or(6)
+        .max(6);
+    let mut out = String::new();
+    if across {
+        out.push_str(&format!("{:<device_width$}  ", "DEVICE"));
+    }
+    out.push_str(&format!(
         "{:<width$}  {:<9}  {:<6}  {}\n",
         "NAME", "STATE", "KIND", "SIZE"
-    );
+    ));
     for computer in &computers {
+        if across {
+            out.push_str(&format!(
+                "{:<device_width$}  ",
+                text(computer, "deviceName")
+            ));
+        }
         out.push_str(&format!(
             "{:<width$}  {:<9}  {:<6}  {} cpu, {} GiB\n",
             text(computer, "name"),
@@ -35,7 +55,22 @@ pub fn list(value: &Value) -> String {
             number(computer, "memoryGiB"),
         ));
     }
+    out.push_str(&unreachable_lines(value));
     out.trim_end().to_owned()
+}
+
+/// A line for each device a list across devices could not read.
+fn unreachable_lines(value: &Value) -> String {
+    list_of(value, "unreachable")
+        .iter()
+        .map(|device| {
+            format!(
+                "Could not reach {}: {}\n",
+                text(device, "deviceName"),
+                text(device, "reason")
+            )
+        })
+        .collect()
 }
 
 pub fn status(value: &Value) -> String {
@@ -66,7 +101,43 @@ pub fn status(value: &Value) -> String {
     if let Some(used) = value.get("credentialsUsed").filter(|used| used.is_object()) {
         out.push_str(&format!("\n{}", credentials_line(used)));
     }
+    if let Some(computer_use) = value.get("computerUse").filter(|c| c.is_object()) {
+        out.push_str(&format!("\n{}", computer_use_line(computer_use)));
+    }
     out
+}
+
+fn or_unknown(text: &str) -> &str {
+    if text.is_empty() {
+        "unknown"
+    } else {
+        text
+    }
+}
+
+/// `computer use: ready, approval auto, driver 0.38.0`.
+pub fn computer_use_line(value: &Value) -> String {
+    let mut line = format!(
+        "computer use: {}, approval {}",
+        or_unknown(text(value, "state")),
+        or_unknown(text(value, "approval"))
+    );
+    if let Some(version) = value.get("driverVersion").and_then(Value::as_str) {
+        line.push_str(&format!(", driver {version}"));
+    }
+    if let Some(reason) = value.get("reason").and_then(Value::as_str) {
+        line.push_str(&format!(" ({reason})"));
+    }
+    line
+}
+
+/// `Forked try-1 (running), desktop and computer use ready` and the computer-use line.
+pub fn forked_gui(value: &Value) -> String {
+    format!(
+        "{}\n{}",
+        forked(value),
+        computer_use_line(&value["computerUse"])
+    )
 }
 
 /// `credentials used: KEY → host (POST ×3); blocked: 1 (TOKEN → evil.example GET)`, or
@@ -920,10 +991,20 @@ fn counts_line(counts: &Value) -> String {
 pub fn requests_list(value: &Value) -> String {
     let entries = list_of(value, "requests");
     if entries.is_empty() {
-        return "No review requests. Ask for one with `silo fold <fork> --request`.".to_owned();
+        let mut out =
+            "No review requests. Ask for one with `silo fold <fork> --request`.".to_owned();
+        let missed = unreachable_lines(value);
+        if !missed.is_empty() {
+            out.push('\n');
+            out.push_str(missed.trim_end());
+        }
+        return out;
     }
     let mut out = String::new();
     for entry in &entries {
+        if let Some(device) = entry.get("deviceName").and_then(Value::as_str) {
+            out.push_str(&format!("[{device}] "));
+        }
         let request = &entry["request"];
         let fork = entry.get("forkName").and_then(Value::as_str).map_or_else(
             || "(fork gone)".to_owned(),
@@ -946,6 +1027,7 @@ pub fn requests_list(value: &Value) -> String {
             text(request, "status"),
         ));
     }
+    out.push_str(&unreachable_lines(value));
     out.trim_end().to_owned()
 }
 
@@ -1045,6 +1127,12 @@ pub fn request_open(value: &Value) -> String {
     }
     for url in list_of(value, "urls").iter().filter_map(Value::as_str) {
         out.push_str(&format!("\n{url}"));
+    }
+    for url in list_of(value, "deviceUrls")
+        .iter()
+        .filter_map(Value::as_str)
+    {
+        out.push_str(&format!("\n{url} (as the other device sees it)"));
     }
     out
 }

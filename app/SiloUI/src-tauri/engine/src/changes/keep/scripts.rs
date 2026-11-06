@@ -30,8 +30,8 @@ fn stat_mode(os: Os) -> &'static str {
 
 fn stat_owner(os: Os) -> &'static str {
     match os {
-        Os::Linux => "stat -c %u:%g",
-        Os::Macos => "stat -f %u:%g",
+        Os::Linux => "stat -L -c %u:%g",
+        Os::Macos => "stat -L -f %u:%g",
     }
 }
 
@@ -104,8 +104,11 @@ pub fn file_read(path: &str) -> GuestCmd {
 }
 
 pub fn file_write(os: Os, path: &str, mode: &str, data: &[u8]) -> GuestCmd {
+    // The parents are the account's to replace, so a link is never chowned and the temporary file
+    // is made exclusively inside the parent. Ownership is set before the mode, which would
+    // otherwise lose a setuid or setgid bit.
     let body = format!(
-        "set -e\nd=$(dirname -- \"$A_path\")\nmkdir -p -- \"$d\"\nt=\"$A_path.silo-keep.$$\"\ntrap 'rm -f \"$t\"' EXIT\ncat > \"$t\"\nchmod \"$A_mode\" \"$t\"\nif [ -e \"$A_path\" ] && [ ! -L \"$A_path\" ]; then o=$({owner} -- \"$A_path\"); else o=$({owner} -- \"$d\"); fi\nchown \"$o\" \"$t\" 2>/dev/null || true\nmv -f -- \"$t\" \"$A_path\"\ntrap - EXIT",
+        "set -e\nd=$(dirname -- \"$A_path\")\na=\"$d\"; while [ ! -d \"$a\" ]; do a=$(dirname -- \"$a\"); done\nao=$({owner} -- \"$a\")\nmkdir -p -- \"$d\"\nx=\"$d\"; while [ \"$x\" != \"$a\" ]; do if [ -d \"$x\" ] && [ ! -L \"$x\" ]; then chown -h \"$ao\" \"$x\" 2>/dev/null || true; fi; x=$(dirname -- \"$x\"); done\nt=$(mktemp \"$d/.silo-keep.XXXXXX\")\ntrap 'rm -f \"$t\"' EXIT\ncat > \"$t\"\nif [ -e \"$A_path\" ] && [ ! -L \"$A_path\" ]; then o=$({owner} -- \"$A_path\"); else o=\"$ao\"; fi\nchown -h \"$o\" \"$t\" 2>/dev/null || true\nchmod \"$A_mode\" \"$t\"\nmv -f -- \"$t\" \"$A_path\"\ntrap - EXIT",
         owner = stat_owner(os)
     );
     cmd("file_write", &body)
