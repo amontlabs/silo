@@ -330,10 +330,12 @@ impl Dispatcher {
     }
 
     pub fn capabilities(&self) -> Vec<String> {
+        // `device.routing.v1`: the v1 methods take a `deviceId` and are served for a controller.
         self.registry
             .capabilities()
             .iter()
             .map(|descriptor| descriptor.name.to_owned())
+            .chain(std::iter::once("device.routing.v1".to_owned()))
             .collect()
     }
 

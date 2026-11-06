@@ -211,7 +211,7 @@ define_registry! {
     PushStart => ("push.start", Job, push::PushStartParams, common::JobStartResult);
     PushStatus => ("push.status", Query, push::PushStatusParams, Option<push::PushOperation>);
     RecipesBuild => ("recipes.build", Job, recipes::RecipeBuildParams, common::JobStartResult);
-    RecipesList => ("recipes.list", Query, common::EmptyParams, recipes::RecipesListResult);
+    RecipesList => ("recipes.list", Query, common::DeviceParams, recipes::RecipesListResult);
     RecipesRemove => ("recipes.remove", Command, recipes::RecipeRemoveParams, ());
     SecretsList => ("secrets.list", Query, common::DeviceParams, Vec<secrets::Secret>);
     SecretsRemove => ("secrets.remove", Command, secrets::SecretsRemoveParams, Vec<secrets::Secret>);

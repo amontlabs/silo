@@ -710,6 +710,13 @@
             "null"
           ]
         },
+        "deviceId": {
+          "description": "The device that owns this; absent or `local` is this device.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "dryRun": {
           "description": "Check and report what a keep would do, changing nothing.",
           "type": [
@@ -779,6 +786,13 @@
     },
     "ChangesPromoteParams": {
       "properties": {
+        "deviceId": {
+          "description": "The device that owns this; absent or `local` is this device.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "dryRun": {
           "description": "Check and report what a promote would do, changing nothing.",
           "type": [
@@ -844,6 +858,13 @@
             "null"
           ]
         },
+        "deviceId": {
+          "description": "The device that owns this; absent or `local` is this device.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "forkId": {
           "description": "The fork to be reviewed.",
           "type": "string"
@@ -892,6 +913,13 @@
           "description": "Carry database changes even though no migration step covers them.",
           "type": [
             "boolean",
+            "null"
+          ]
+        },
+        "deviceId": {
+          "description": "The device that owns this; absent or `local` is this device.",
+          "type": [
+            "string",
             "null"
           ]
         },
@@ -948,6 +976,20 @@
     },
     "ChangesRequestsListParams": {
       "properties": {
+        "allDevices": {
+          "description": "Also list the requests of every connected device. Each row says which device it\nbelongs to; a device that cannot be reached is reported in `unreachable`.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "deviceId": {
+          "description": "The device whose requests are listed; absent or `local` is this device.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "status": {
           "anyOf": [
             {
@@ -969,6 +1011,13 @@
             "$ref": "#/$defs/RequestEntry"
           },
           "type": "array"
+        },
+        "unreachable": {
+          "description": "Devices a list across devices could not read.",
+          "items": {
+            "$ref": "#/$defs/UnreachableDevice"
+          },
+          "type": "array"
         }
       },
       "required": [
@@ -979,6 +1028,13 @@
     "ChangesRequestsMarkKeptParams": {
       "description": "Closes the open requests for a fork and target that were kept outside the engine: a\nfolder fork folded into its folder by the CLI.",
       "properties": {
+        "deviceId": {
+          "description": "The device that owns this; absent or `local` is this device.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "forkId": {
           "type": "string"
         },
@@ -1155,6 +1211,13 @@
         "computerId": {
           "description": "The computer a keep changed.",
           "type": "string"
+        },
+        "deviceId": {
+          "description": "The device that owns this; absent or `local` is this device.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
@@ -8685,7 +8748,7 @@
               "type": "string"
             },
             "params": {
-              "$ref": "#/$defs/EmptyParams"
+              "$ref": "#/$defs/DeviceParams"
             }
           },
           "required": [
@@ -10365,7 +10428,7 @@
               "type": "string"
             },
             "params": {
-              "$ref": "#/$defs/EmptyParams"
+              "$ref": "#/$defs/DeviceParams"
             }
           },
           "required": [
@@ -14757,6 +14820,13 @@
     },
     "RecipeBuildParams": {
       "properties": {
+        "deviceId": {
+          "description": "The device that owns this; absent or `local` is this device.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "force": {
           "description": "Build again even when the cache holds this spec.",
           "type": [
@@ -14897,6 +14967,13 @@
     },
     "RecipeRemoveParams": {
       "properties": {
+        "deviceId": {
+          "description": "The device that owns this; absent or `local` is this device.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "name": {
           "type": "string"
         }
@@ -15052,6 +15129,20 @@
     "RequestEntry": {
       "description": "One request with the fork it is about.",
       "properties": {
+        "deviceId": {
+          "description": "The device the request lives on. Set when the list spans devices; actions on the\nrow pass it as their `deviceId`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "deviceName": {
+          "description": "The name of that device.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "forkName": {
           "description": "The fork's name; `None` when the fork no longer exists.",
           "type": [
@@ -15127,6 +15218,13 @@
     "RequestIdParams": {
       "description": "A request named by its id.",
       "properties": {
+        "deviceId": {
+          "description": "The device that owns this; absent or `local` is this device.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "requestId": {
           "type": "string"
         }
@@ -15787,6 +15885,13 @@
       "properties": {
         "computerId": {
           "type": "string"
+        },
+        "deviceId": {
+          "description": "The device that owns this; absent or `local` is this device.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
@@ -15827,6 +15932,13 @@
         },
         "computerId": {
           "type": "string"
+        },
+        "deviceId": {
+          "description": "The device that owns this; absent or `local` is this device.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "exitCode": {
           "format": "int32",
@@ -16274,6 +16386,26 @@
       "required": [
         "checkpointId",
         "phase"
+      ],
+      "type": "object"
+    },
+    "UnreachableDevice": {
+      "description": "A device a merged list could not read, and why.",
+      "properties": {
+        "deviceId": {
+          "type": "string"
+        },
+        "deviceName": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "deviceId",
+        "deviceName",
+        "reason"
       ],
       "type": "object"
     },
@@ -17742,7 +17874,7 @@
     {
       "kind": "query",
       "name": "recipes.list",
-      "paramsType": "common::EmptyParams",
+      "paramsType": "common::DeviceParams",
       "resultType": "recipes::RecipesListResult"
     },
     {

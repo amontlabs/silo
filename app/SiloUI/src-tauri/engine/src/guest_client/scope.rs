@@ -79,6 +79,16 @@ fn text<'a>(params: &'a Value, key: &str) -> Option<&'a str> {
 
 /// A request for another device is not served here.
 fn local_only(params: &Value) -> Result<(), Refusal> {
+    // `allDevices` and `deviceIds` route a call to other devices; nothing from a guest does.
+    let routes_elsewhere = params
+        .get("allDevices")
+        .is_some_and(|value| !matches!(value, Value::Null | Value::Bool(false)))
+        || params
+            .get("deviceIds")
+            .is_some_and(|value| !matches!(value, Value::Null) && value != &json!([]));
+    if routes_elsewhere {
+        return refuse("The in-guest client reaches this computer's engine only.");
+    }
     match params.get("deviceId") {
         None | Some(Value::Null) => Ok(()),
         Some(Value::String(device)) if device == "local" => Ok(()),
@@ -175,7 +185,15 @@ pub fn authorize(
             }
             allowed(params, Filter::None, false)
         }
-        "changes.requests.list" => allowed(params, Filter::Requests, false),
+        "changes.requests.list" => {
+            let status = params.get("status").cloned().unwrap_or(Value::Null);
+            let list = if status.is_null() {
+                json!({})
+            } else {
+                json!({ "status": status })
+            };
+            allowed(list, Filter::Requests, false)
+        }
         "changes.requests.show" => {
             let fork = text(&params, "requestId").and_then(|id| topology.request_fork(id));
             match fork {
@@ -447,6 +465,26 @@ mod tests {
             &World,
         );
         assert!(allowed.is_ok());
+    }
+
+    #[test]
+    fn nothing_routes_a_call_to_another_device() {
+        for params in [
+            json!({"allDevices": true}),
+            json!({"deviceIds": ["other"]}),
+            json!({"deviceId": "other"}),
+        ] {
+            assert!(
+                check("changes.requests.list", params.clone()).is_err(),
+                "{params}"
+            );
+            assert!(check("computers.list", params).is_err());
+        }
+        let list = check(
+            "changes.requests.list",
+            json!({"status": "open", "allDevices": false}),
+        );
+        assert_eq!(list.unwrap().params, json!({"status": "open"}));
     }
 
     #[test]

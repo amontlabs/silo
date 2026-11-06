@@ -430,7 +430,10 @@ async fn requests_command(
             });
             Ok(0)
         }
-        Some(RequestsAction::Show { id }) => {
+        Some(RequestsAction::Show { review: true, .. }) => {
+            Err(not_here("Sending a diff to the hosted reviewer"))
+        }
+        Some(RequestsAction::Show { id, .. }) => {
             let shown = link
                 .job(
                     "changes.requests.show",

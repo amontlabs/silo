@@ -14,7 +14,7 @@ use crate::{
     engine::{build_channel, default_socket, Engine},
     error::CliError,
     fanout::{self, ManyArgs},
-    flows, folder,
+    flows, folder, hosted,
     ops::{self, CreateArgs, DiffArgs, ExecArgs, ForkArgs, Platform},
     pr, render, review, steps,
 };
@@ -42,6 +42,10 @@ pub struct Cli {
     /// person who runs Silo installed (default: SILO_IN_GUEST).
     #[arg(long, global = true, env = "SILO_IN_GUEST", hide_env_values = true)]
     pub in_guest: bool,
+    /// Run the command on a connected device (its name or id) instead of this one, over
+    /// Connections. Folders, ports, SSH names, secrets and `exec` stay on this device.
+    #[arg(long, global = true, value_name = "DEVICE")]
+    pub device: Option<String>,
     #[command(subcommand)]
     pub command: Command,
 }
@@ -71,6 +75,9 @@ pub enum Command {
         /// Also show the hidden throwaway computers (baselines, recipe builders).
         #[arg(long)]
         all: bool,
+        /// List this device's computers and every connected device's.
+        #[arg(long)]
+        all_devices: bool,
     },
     /// Show one computer.
     Status { computer: String },
@@ -100,6 +107,14 @@ pub enum Command {
     },
     /// Show what changed in a computer since it was forked.
     Diff(DiffCommand),
+    /// Ask the hosted reviewer to read a fork's diff (needs reviewer.url or SILO_REVIEWER_URL).
+    Review {
+        /// A computer or a review request id (fr-...).
+        target: String,
+        /// general, packages, code or all (default).
+        #[arg(long, value_name = "LENS")]
+        lens: Option<String>,
+    },
     /// Throw a computer away.
     Drop(DropCommand),
     /// Run a command in a computer.
@@ -285,12 +300,24 @@ pub struct RequestsCommand {
     /// Which requests to list: open (default), kept, thrown-away or all.
     #[arg(long, value_name = "STATUS")]
     pub status: Option<String>,
+    /// List this device's requests and every connected device's. `show`, `keep`,
+    /// `throw-away` and `open` find the device a request is on by themselves.
+    #[arg(long)]
+    pub all_devices: bool,
 }
 
 #[derive(Subcommand, Debug)]
 pub enum RequestsAction {
     /// A request with a fresh diff of its fork and the credentials the fork used.
-    Show { id: String },
+    Show {
+        id: String,
+        /// Also send the diff to the hosted reviewer and print what it finds.
+        #[arg(long)]
+        review: bool,
+        /// With --review: general, packages, code or all (default).
+        #[arg(long, value_name = "LENS", requires = "review")]
+        lens: Option<String>,
+    },
     /// Keep the request's fork into its target, pinned to the digest the request was made from.
     Keep {
         id: String,
@@ -454,6 +481,14 @@ pub async fn run(cli: Cli, working_directory: &Path) -> Result<i32, CliError> {
         _ => None,
     };
     let engine = Engine::connect(&socket).await?;
+    let engine = match cli.device.as_deref() {
+        None | Some("local") => engine,
+        Some(name) => {
+            let id = engine.resolve_device(name).await?;
+            engine.on_device(Some(id))
+        }
+    };
+    refuse_on_device(&cli.command, &engine)?;
     let json = cli.json;
     if let Command::GuestClient(action) = &cli.command {
         let result = match action {
@@ -509,6 +544,32 @@ pub async fn run(cli: Cli, working_directory: &Path) -> Result<i32, CliError> {
     }
 }
 
+/// The commands that work on this device's own files, ports, SSH names or secrets.
+fn refuse_on_device(command: &Command, engine: &Engine) -> Result<(), CliError> {
+    if engine.device().is_none() {
+        return Ok(());
+    }
+    let what = match command {
+        Command::Up(_) => "up",
+        Command::Exec(_) => "exec",
+        Command::Ports { .. } => "ports",
+        Command::Publish { .. } => "publish",
+        Command::Unpublish { .. } => "unpublish",
+        Command::SshSetup { .. } => "ssh-setup",
+        Command::Secrets(_) => "secrets",
+        Command::Fork(fork) if fork.recipe.is_none() && folder::is_folder(&fork.source) => {
+            "fork of a folder"
+        }
+        Command::Fork(fork) if !fork.command.is_empty() => "fork with a command",
+        Command::Fold(fold) if fold.pr => "fold --pr",
+        Command::Undo { computer } if folder::is_folder(computer) => "undo of a folder",
+        _ => return Ok(()),
+    };
+    Err(CliError::new(format!(
+        "{what} works on this device, so --device cannot be used with it."
+    )))
+}
+
 async fn dispatch(
     engine: &Engine,
     command: Command,
@@ -551,8 +612,10 @@ async fn dispatch(
                 )
             });
         }
-        Command::List { all } => {
-            let value = if all {
+        Command::List { all, all_devices } => {
+            let value = if all_devices {
+                ops::list_everywhere(engine, all).await?
+            } else if all {
                 ops::list_all(engine).await?
             } else {
                 ops::list(engine).await?
@@ -660,7 +723,7 @@ async fn dispatch(
                 project,
                 settings: settings.as_ref(),
                 recipe: recipe.as_ref(),
-                write_back: !fold.no_write_back,
+                write_back: !fold.no_write_back && engine.device().is_none(),
             };
             let mode = if fold.pr {
                 flows::Mode::PullRequest(
@@ -712,24 +775,45 @@ async fn dispatch(
                     .as_deref()
                     .map(review::parse_filter)
                     .transpose()?;
-                let value = review::list(engine, status).await?;
+                let value = if requests.all_devices {
+                    review::list_all(engine, status).await?
+                } else {
+                    review::list(engine, status).await?
+                };
                 emit(json, &value, render::requests_list);
             }
-            Some(RequestsAction::Show { id }) => {
-                let value = review::show(engine, &id, progress).await?;
-                emit(json, &value, render::request_show);
+            Some(RequestsAction::Show { id, review, lens }) => {
+                let engine = &review::locate(engine, &id).await?;
+                let mut value = review::show(engine, &id, progress).await?;
+                if review {
+                    let lenses = hosted::parse_lenses(lens.as_deref())?;
+                    let reviewed =
+                        hosted::review_target(engine, settings.as_ref(), &id, &lenses, progress)
+                            .await?;
+                    value["review"] = reviewed;
+                }
+                emit(json, &value, |v| {
+                    let mut text = render::request_show(v);
+                    if v["review"].is_object() {
+                        text.push_str(&format!("\n\n{}", hosted::render(&v["review"])));
+                    }
+                    text
+                });
             }
             Some(RequestsAction::Keep { id, data_ok, .. }) => {
+                let engine = &review::locate(engine, &id).await?;
                 let hooks = ops::keep_hooks(recipe.as_ref());
                 let value = review::keep(engine, &id, hooks, data_ok, progress).await?;
                 emit(json, &value, render::fold);
                 return Ok(if value["status"] == "refused" { 2 } else { 0 });
             }
             Some(RequestsAction::ThrowAway { id }) => {
+                let engine = &review::locate(engine, &id).await?;
                 let value = review::throw_away(engine, &id, progress).await?;
                 emit(json, &value, render::request_thrown_away);
             }
             Some(RequestsAction::Open { id }) => {
+                let engine = &review::locate(engine, &id).await?;
                 let value = review::open(engine, &id, progress).await?;
                 emit(json, &value, render::request_open);
             }
@@ -741,6 +825,13 @@ async fn dispatch(
             }
             emit(json, &value, render::undo);
             return Ok(if value["status"] == "refused" { 2 } else { 0 });
+        }
+        Command::Review { target, lens } => {
+            let lenses = hosted::parse_lenses(lens.as_deref())?;
+            let value =
+                hosted::review_target(engine, settings.as_ref(), &target, &lenses, progress)
+                    .await?;
+            emit(json, &value, hosted::render);
         }
         Command::Diff(diff) => {
             let args = DiffArgs {

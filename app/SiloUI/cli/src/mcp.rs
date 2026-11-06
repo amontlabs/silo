@@ -35,6 +35,32 @@ pub struct SiloMcp {
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
+pub struct ListParams {
+    /// A connected device (name or id) to list instead of this one.
+    pub device: Option<String>,
+    /// List this device's computers and every connected device's.
+    #[serde(default)]
+    pub all_devices: bool,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DeviceParam {
+    /// A connected device (name or id) to read instead of this one.
+    pub device: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DeviceComputerParam {
+    /// The computer's name.
+    pub computer: String,
+    /// The connected device (name or id) the computer is on; default this device.
+    pub device: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ComputerParam {
     /// The computer's name.
     pub computer: String,
@@ -82,6 +108,8 @@ pub struct ForkParams {
     pub secrets: Vec<String>,
     /// Path of a recipe whose quiet and scrub lists apply to the fork.
     pub recipe_file: Option<String>,
+    /// A connected device (name or id) to run this on instead of this one.
+    pub device: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -89,6 +117,12 @@ pub struct ForkParams {
 pub struct RequestsListParams {
     /// open (default), kept, thrown-away or all.
     pub status: Option<String>,
+    /// List this device's requests and every connected device's; each has `deviceName`, and
+    /// `unreachable` names the devices that could not be read.
+    #[serde(default)]
+    pub all_devices: bool,
+    /// A connected device (name or id) to run this on instead of this one.
+    pub device: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -96,6 +130,9 @@ pub struct RequestsListParams {
 pub struct RequestIdParam {
     /// The request's id, such as fr-ab12cd34.
     pub id: String,
+    /// The device the request is on. Needed for a request on another device, and the agent's
+    /// `devices:` entry in `.silo/silo.yaml` must list it.
+    pub device: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -108,6 +145,18 @@ pub struct RequestKeepParams {
     pub data_ok: bool,
     /// Path of a recipe whose keep: section applies.
     pub recipe_file: Option<String>,
+    /// The device the request is on. Needed for a request on another device, and the agent's
+    /// `devices:` entry in `.silo/silo.yaml` must list it.
+    pub device: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ReviewParams {
+    /// A computer, or a review request id such as fr-ab12cd34.
+    pub target: String,
+    /// general, packages, code or all (default).
+    pub lens: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -169,6 +218,8 @@ pub struct FoldParams {
     /// Do not append kept packages and settings files to the recipe the computer came from.
     #[serde(default)]
     pub no_write_back: bool,
+    /// A connected device (name or id) to run this on instead of this one.
+    pub device: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -181,6 +232,8 @@ pub struct DiffParams {
     /// Include the idle fork's own background changes.
     #[serde(default)]
     pub no_baseline: bool,
+    /// A connected device (name or id) to run this on instead of this one.
+    pub device: Option<String>,
 }
 
 fn show(result: Result<Value, CliError>) -> Result<String, String> {
@@ -221,6 +274,49 @@ impl SiloMcp {
     }
 
     /// The one connection this server keeps, opened again when it has ended.
+    /// The engine acting on `device` (a name or id), or on this device when none is given.
+    async fn engine_on(&self, device: Option<&str>) -> Result<Engine, CliError> {
+        let engine = self.engine().await?;
+        match device {
+            None | Some("local") => Ok(engine),
+            Some(name) => {
+                let id = engine.resolve_device(name).await?;
+                Ok(engine.on_device(Some(id)))
+            }
+        }
+    }
+
+    /// The engine for a change on `device`. Another device is acted on only when the call names
+    /// it, and only when the agent's `devices:` entry in `.silo/silo.yaml` lists it.
+    async fn engine_acting_on(&self, device: Option<&str>) -> Result<Engine, CliError> {
+        let engine = self.engine_on(device).await?;
+        let Some(id) = engine.device().map(str::to_owned) else {
+            return Ok(engine);
+        };
+        let project = Project::discover(&self.working_directory);
+        let settings = project.load_settings_as(self.agent().as_deref(), self.agent_named)?;
+        let allowed = settings
+            .map(|settings| settings.devices)
+            .unwrap_or_default();
+        let name = engine
+            .devices()
+            .await?
+            .into_iter()
+            .find(|(known, _)| *known == id)
+            .map(|(_, name)| name)
+            .unwrap_or_default();
+        if allowed
+            .iter()
+            .any(|entry| entry.eq_ignore_ascii_case(&name) || *entry == id)
+        {
+            Ok(engine)
+        } else {
+            Err(CliError::new(format!(
+                "This agent may not act on {name}. List it under devices: in the agent's entry of agents: in .silo/silo.yaml."
+            )))
+        }
+    }
+
     async fn engine(&self) -> Result<Engine, CliError> {
         let mut held = self.engine.lock().await;
         if let Some(engine) = held.as_ref().filter(|engine| !engine.is_closed()) {
@@ -232,16 +328,28 @@ impl SiloMcp {
     }
 
     #[tool(description = "List computers and their state.")]
-    async fn list(&self) -> Result<String, String> {
-        show(async { ops::list(&self.engine().await?).await }.await)
+    async fn list(&self, Parameters(params): Parameters<ListParams>) -> Result<String, String> {
+        show(
+            async {
+                let engine = self.engine_on(params.device.as_deref()).await?;
+                if params.all_devices {
+                    ops::list_everywhere(&engine, false).await
+                } else {
+                    ops::list(&engine).await
+                }
+            }
+            .await,
+        )
     }
 
     #[tool(description = "Show one computer: state, size and checkpoints.")]
     async fn status(
         &self,
-        Parameters(ComputerParam { computer }): Parameters<ComputerParam>,
+        Parameters(DeviceComputerParam { computer, device }): Parameters<DeviceComputerParam>,
     ) -> Result<String, String> {
-        show(async { ops::status(&self.engine().await?, &computer).await }.await)
+        show(
+            async { ops::status(&self.engine_on(device.as_deref()).await?, &computer).await }.await,
+        )
     }
 
     #[tool(
@@ -302,7 +410,17 @@ impl SiloMcp {
                     .as_deref()
                     .map(|path| self.working_directory.join(path));
                 let source = params.source.unwrap_or_else(|| ops::MAIN.to_owned());
-                let engine = self.engine().await?;
+                if params.device.is_some() && folder::is_folder(&source) {
+                    return Err(CliError::new(
+                        "A folder is on this device, so `device` cannot be used with it.",
+                    ));
+                }
+                let engine = self.engine_acting_on(params.device.as_deref()).await?;
+                if engine.device().is_some() && !params.command.is_empty() {
+                    return Err(CliError::new(
+                        "A command runs on this device, so `device` cannot be used with `command`.",
+                    ));
+                }
                 let checkpoint = match params.from_step {
                     Some(number) => {
                         if params.recipe.is_some()
@@ -420,8 +538,8 @@ impl SiloMcp {
     async fn fold(&self, Parameters(params): Parameters<FoldParams>) -> Result<String, String> {
         show(
             async {
+                let engine = self.engine_acting_on(params.device.as_deref()).await?;
                 if params.promote && !params.request {
-                    let engine = self.engine().await?;
                     let mut value = ops::promote(
                         &engine,
                         &params.fork,
@@ -447,7 +565,7 @@ impl SiloMcp {
                     project: &project,
                     settings: settings.as_ref(),
                     recipe: recipe.as_ref(),
-                    write_back: !params.no_write_back,
+                    write_back: !params.no_write_back && engine.device().is_none(),
                 };
                 let mode = if params.request {
                     flows::Mode::Request
@@ -455,7 +573,7 @@ impl SiloMcp {
                     flows::Mode::Keep
                 };
                 flows::run(
-                    &self.engine().await?,
+                    &engine,
                     &params.fork,
                     params.into.as_deref(),
                     &context,
@@ -487,7 +605,12 @@ impl SiloMcp {
                     .as_deref()
                     .map(review::parse_filter)
                     .transpose()?;
-                review::list(&self.engine().await?, status).await
+                let engine = self.engine_on(params.device.as_deref()).await?;
+                if params.all_devices {
+                    review::list_all(&engine, status).await
+                } else {
+                    review::list(&engine, status).await
+                }
             }
             .await,
         )
@@ -498,9 +621,15 @@ impl SiloMcp {
     )]
     async fn request_show(
         &self,
-        Parameters(RequestIdParam { id }): Parameters<RequestIdParam>,
+        Parameters(RequestIdParam { id, device }): Parameters<RequestIdParam>,
     ) -> Result<String, String> {
-        show(async { review::show(&self.engine().await?, &id, &|_| {}).await }.await)
+        show(
+            async {
+                let engine = self.engine_on(device.as_deref()).await?;
+                review::show(&engine, &id, &|_| {}).await
+            }
+            .await,
+        )
     }
 
     #[tool(
@@ -518,8 +647,9 @@ impl SiloMcp {
                     .as_deref()
                     .map(|path| self.working_directory.join(path));
                 let recipe = ops::resolve_recipe(explicit.as_deref(), &project)?;
+                let engine = self.engine_acting_on(params.device.as_deref()).await?;
                 review::keep(
-                    &self.engine().await?,
+                    &engine,
                     &params.id,
                     ops::keep_hooks(recipe.as_ref()),
                     params.data_ok,
@@ -536,9 +666,15 @@ impl SiloMcp {
     )]
     async fn request_throw_away(
         &self,
-        Parameters(RequestIdParam { id }): Parameters<RequestIdParam>,
+        Parameters(RequestIdParam { id, device }): Parameters<RequestIdParam>,
     ) -> Result<String, String> {
-        show(async { review::throw_away(&self.engine().await?, &id, &|_| {}).await }.await)
+        show(
+            async {
+                let engine = self.engine_acting_on(device.as_deref()).await?;
+                review::throw_away(&engine, &id, &|_| {}).await
+            }
+            .await,
+        )
     }
 
     #[tool(
@@ -546,9 +682,15 @@ impl SiloMcp {
     )]
     async fn request_open(
         &self,
-        Parameters(RequestIdParam { id }): Parameters<RequestIdParam>,
+        Parameters(RequestIdParam { id, device }): Parameters<RequestIdParam>,
     ) -> Result<String, String> {
-        show(async { review::open(&self.engine().await?, &id, &|_| {}).await }.await)
+        show(
+            async {
+                let engine = self.engine_acting_on(device.as_deref()).await?;
+                review::open(&engine, &id, &|_| {}).await
+            }
+            .await,
+        )
     }
 
     #[tool(
@@ -558,12 +700,36 @@ impl SiloMcp {
         show(
             async {
                 let args = DiffArgs {
-                    computer: params.computer,
+                    computer: params.computer.clone(),
                     max_lines: params.max_lines,
                     no_baseline: params.no_baseline,
                     compute_baseline: false,
                 };
-                ops::diff(&self.engine().await?, &args, &|_| {}).await
+                let engine = self.engine_on(params.device.as_deref()).await?;
+                ops::diff(&engine, &args, &|_| {}).await
+            }
+            .await,
+        )
+    }
+
+    #[tool(
+        description = "Ask the hosted reviewer (needs reviewer.url or SILO_REVIEWER_URL) to read the diff of a fork or review request through the general, packages and code lenses. Only the diff is sent. Returns findings with severity, file and message under an advisory note; it can miss things, so the person decides what to keep."
+    )]
+    async fn review(&self, Parameters(params): Parameters<ReviewParams>) -> Result<String, String> {
+        show(
+            async {
+                let project = Project::discover(&self.working_directory);
+                let settings =
+                    project.load_settings_as(self.agent().as_deref(), self.agent_named)?;
+                let lenses = crate::hosted::parse_lenses(params.lens.as_deref())?;
+                crate::hosted::review_target(
+                    &self.engine().await?,
+                    settings.as_ref(),
+                    &params.target,
+                    &lenses,
+                    &|_| {},
+                )
+                .await
             }
             .await,
         )
@@ -574,11 +740,16 @@ impl SiloMcp {
     )]
     async fn undo(
         &self,
-        Parameters(ComputerParam { computer }): Parameters<ComputerParam>,
+        Parameters(DeviceComputerParam { computer, device }): Parameters<DeviceComputerParam>,
     ) -> Result<String, String> {
         show(
             async {
-                let engine = self.engine().await?;
+                let engine = self.engine_acting_on(device.as_deref()).await?;
+                if engine.device().is_some() && folder::is_folder(&computer) {
+                    return Err(CliError::new(
+                        "A folder is on this device, so `device` cannot be used with it.",
+                    ));
+                }
                 let mut value =
                     flows::undo(&engine, &computer, &self.working_directory, &|_| {}).await?;
                 if let Ok(home) = access::home_dir() {
@@ -642,16 +813,18 @@ impl SiloMcp {
     )]
     async fn steps_list(
         &self,
-        Parameters(ComputerParam { computer }): Parameters<ComputerParam>,
+        Parameters(DeviceComputerParam { computer, device }): Parameters<DeviceComputerParam>,
     ) -> Result<String, String> {
-        show(async { steps::list(&self.engine().await?, &computer).await }.await)
+        show(
+            async { steps::list(&self.engine_on(device.as_deref()).await?, &computer).await }.await,
+        )
     }
 
     #[tool(
         description = "Show how the computers descend from each other: each has a parent, what it was forked from (main, a checkpoint, a step, a recipe or a folder), its state and its pending changes (the open review request)."
     )]
-    async fn tree(&self) -> Result<String, String> {
-        show(async { steps::tree(&self.engine().await?).await }.await)
+    async fn tree(&self, Parameters(params): Parameters<DeviceParam>) -> Result<String, String> {
+        show(async { steps::tree(&self.engine_on(params.device.as_deref()).await?).await }.await)
     }
 
     #[tool(description = "Save a checkpoint of a computer.")]
@@ -740,9 +913,12 @@ impl SiloMcp {
     #[tool(description = "List a computer's checkpoints.")]
     async fn checkpoints(
         &self,
-        Parameters(ComputerParam { computer }): Parameters<ComputerParam>,
+        Parameters(DeviceComputerParam { computer, device }): Parameters<DeviceComputerParam>,
     ) -> Result<String, String> {
-        show(async { ops::checkpoints(&self.engine().await?, &computer).await }.await)
+        show(
+            async { ops::checkpoints(&self.engine_on(device.as_deref()).await?, &computer).await }
+                .await,
+        )
     }
 }
 

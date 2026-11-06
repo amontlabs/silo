@@ -105,6 +105,10 @@ pub struct Engine {
     last_job: Arc<Mutex<Option<String>>>,
     /// Where the CLI keeps what it remembers between commands (beside the socket).
     memory: std::path::PathBuf,
+    /// The connected device the commands act on; `None` is this device.
+    device: Option<String>,
+    /// Whether the engine serves requests for another device (older engines ignore `deviceId`).
+    routes_devices: bool,
     _closer: Arc<Closer>,
 }
 
@@ -252,12 +256,93 @@ impl Engine {
         })?;
         // The commands read replies only; the event feed is dropped.
         drop(events);
+        let routes_devices = client.supports("device.routing.v1");
         Ok(Self {
             _closer: Arc::new(Closer(client.clone())),
             client,
             last_job: Arc::new(Mutex::new(None)),
             memory: socket.parent().map(Path::to_path_buf).unwrap_or_default(),
+            device: None,
+            routes_devices,
         })
+    }
+
+    /// Refuses to go on when the engine would answer a request for another device itself.
+    pub fn require_routing(&self) -> Result<(), CliError> {
+        if self.routes_devices {
+            Ok(())
+        } else {
+            Err(CliError::new(
+                "This Silo engine is older than the command line and cannot work on another device. Update Silo.",
+            ))
+        }
+    }
+
+    pub fn routes_devices(&self) -> bool {
+        self.routes_devices
+    }
+
+    /// The same connection, acting on another device (`None`: this one). Commands that run
+    /// on it send the device with every request the other device's engine can answer.
+    pub fn on_device(&self, device: Option<String>) -> Engine {
+        Engine {
+            device,
+            ..self.clone()
+        }
+    }
+
+    /// The device the commands act on, when it is not this one.
+    pub fn device(&self) -> Option<&str> {
+        self.device.as_deref()
+    }
+
+    /// The id of the connected device called `name` (its name, its id, or an id prefix).
+    pub async fn resolve_device(&self, name: &str) -> Result<String, CliError> {
+        self.require_routing()?;
+        let listed = self
+            .on_device(None)
+            .call(requests::connections_devices_list(
+                silo_api::methods::EmptyParams {},
+            ))
+            .await?;
+        pick_device(&listed, name)
+    }
+
+    /// Devices whose last health probe failed (not merely busy), with the reason. Empty when
+    /// the engine cannot say.
+    pub async fn known_offline(&self) -> std::collections::HashMap<String, String> {
+        let Ok(health) = self
+            .on_device(None)
+            .call(requests::connections_devices_health(
+                silo_api::methods::EmptyParams {},
+            ))
+            .await
+        else {
+            return Default::default();
+        };
+        health["devices"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|device| device["connected"] == false && device["busy"] == false)
+            .filter_map(|device| {
+                Some((
+                    device["deviceId"].as_str()?.to_owned(),
+                    device["error"].as_str()?.to_owned(),
+                ))
+            })
+            .collect()
+    }
+
+    /// The devices this one is connected to, as `(id, name)`.
+    pub async fn devices(&self) -> Result<Vec<(String, String)>, CliError> {
+        let listed = self
+            .on_device(None)
+            .call(requests::connections_devices_list(
+                silo_api::methods::EmptyParams {},
+            ))
+            .await?;
+        Ok(device_rows(&listed))
     }
 
     /// Holds the computer's step lock until the guard is dropped. A step (the command, the
@@ -364,10 +449,17 @@ impl Engine {
     }
 
     pub async fn call<K: Kind>(&self, request: Request<K>) -> Result<Value, CliError> {
-        Ok(self
-            .client
-            .request(request.name(), request.params_value())
-            .await?)
+        if self.device.is_some()
+            && !is_routed(request.name())
+            && !request.name().starts_with("connections.")
+        {
+            return Err(CliError::new(format!(
+                "{} cannot run on another device.",
+                request.name()
+            )));
+        }
+        let params = routed_params(request.name(), request.params_value(), self.device());
+        Ok(self.client.request(request.name(), params).await?)
     }
 
     /// The computers a person works with: the throwaway computers that measure baselines are
@@ -492,6 +584,85 @@ impl Engine {
     }
 }
 
+/// The methods a command sends to another device's engine when it acts on that device: the
+/// ones `silod` routes through Connections (`silo_engine::remote::OWNER_METHODS`), and the
+/// job reads that follow them. Everything else (secrets, ports, SSH access, GitHub, pushes)
+/// has controller-side steps that stay on this device.
+const ROUTED_PREFIXES: &[&str] = &[
+    "changes.",
+    "checkpoints.",
+    "computers.",
+    "macos.setup.",
+    "operations.job.",
+    "recipes.",
+    "steps.",
+];
+
+fn is_routed(method: &str) -> bool {
+    ROUTED_PREFIXES
+        .iter()
+        .any(|prefix| method.starts_with(prefix))
+}
+
+/// `params` with the `deviceId` of `device` added when `method` is routed.
+pub fn routed_params(method: &str, mut params: Value, device: Option<&str>) -> Value {
+    let routed = is_routed(method);
+    if let (Some(device), true, Some(object)) = (device, routed, params.as_object_mut()) {
+        object
+            .entry("deviceId")
+            .or_insert_with(|| Value::String(device.to_owned()));
+    }
+    params
+}
+
+fn device_rows(listed: &Value) -> Vec<(String, String)> {
+    listed
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|device| {
+            Some((
+                device.get("id")?.as_str()?.to_owned(),
+                device.get("name")?.as_str()?.to_owned(),
+            ))
+        })
+        .collect()
+}
+
+/// The device `name` means among the connected ones: an exact id, else a name (ignoring case),
+/// else an id prefix. Several matches are an error.
+pub fn pick_device(listed: &Value, name: &str) -> Result<String, CliError> {
+    let devices = device_rows(listed);
+    let by = |test: &dyn Fn(&(String, String)) -> bool| -> Vec<&(String, String)> {
+        devices.iter().filter(|device| test(device)).collect()
+    };
+    let lower = name.to_lowercase();
+    for found in [
+        by(&|device| device.0 == name),
+        by(&|device| device.1.to_lowercase() == lower),
+        by(&|device| !name.is_empty() && device.0.starts_with(name)),
+    ] {
+        match found.as_slice() {
+            [] => continue,
+            [one] => return Ok(one.0.clone()),
+            _ => {
+                return Err(CliError::new(format!(
+                    "More than one connected device matches {name}. Use its id."
+                )))
+            }
+        }
+    }
+    let known: Vec<_> = devices.iter().map(|device| device.1.as_str()).collect();
+    Err(CliError::new(if known.is_empty() {
+        format!("No device is called {name}: this device has no connections. Add one in Silo.")
+    } else {
+        format!(
+            "No device is called {name}. Connected devices: {}.",
+            known.join(", ")
+        )
+    }))
+}
+
 fn outcome_result(outcome: &Value) -> Result<Value, CliError> {
     if let Some(error) = outcome.get("error").filter(|error| !error.is_null()) {
         return Err(CliError::new(
@@ -559,6 +730,42 @@ mod tests {
         assert!(check_socket(own, home, Production, false).is_err());
         let sneaky = Path::new("/h/.silo-dev/../.silo/engine.sock");
         assert!(check_socket(sneaky, home, Development, false).is_err());
+    }
+
+    #[test]
+    fn the_device_is_added_to_routed_methods_only() {
+        let routed = routed_params("changes.diff", json!({ "computerId": "c" }), Some("d1"));
+        assert_eq!(routed["deviceId"], "d1");
+        let job = routed_params("operations.job.get", json!({ "jobId": "j" }), Some("d1"));
+        assert_eq!(job["deviceId"], "d1");
+        for local in ["connections.devices.list", "secrets.list", "network.state"] {
+            assert!(routed_params(local, json!({}), Some("d1"))
+                .get("deviceId")
+                .is_none());
+        }
+        assert!(routed_params("steps.list", json!({}), None)
+            .get("deviceId")
+            .is_none());
+        // A request that already names a device keeps it.
+        let named = routed_params("steps.list", json!({ "deviceId": "d2" }), Some("d1"));
+        assert_eq!(named["deviceId"], "d2");
+    }
+
+    #[test]
+    fn a_device_is_found_by_name_id_or_prefix() {
+        let listed = json!([
+            {"id": "aaaa-1", "name": "Mac mini", "address": "a"},
+            {"id": "bbbb-2", "name": "Laptop", "address": "b"},
+            {"id": "bbbc-3", "name": "laptop", "address": "c"}
+        ]);
+        assert_eq!(pick_device(&listed, "mac MINI").unwrap(), "aaaa-1");
+        assert_eq!(pick_device(&listed, "bbbb-2").unwrap(), "bbbb-2");
+        assert_eq!(pick_device(&listed, "aaa").unwrap(), "aaaa-1");
+        assert!(pick_device(&listed, "laptop").is_err());
+        assert!(pick_device(&listed, "bbb").is_err());
+        let error = pick_device(&listed, "nas").unwrap_err();
+        assert!(error.message.contains("Mac mini"), "{}", error.message);
+        assert!(pick_device(&json!([]), "nas").is_err());
     }
 
     #[test]

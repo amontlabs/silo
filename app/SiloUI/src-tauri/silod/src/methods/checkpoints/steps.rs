@@ -12,7 +12,7 @@ use silo_engine::{
 
 use crate::dispatcher::{DispatchError, HandlerOutput};
 
-use super::{message_error, output, service, HandlerContext};
+use super::{message_error, output, require_local_device, service, HandlerContext};
 
 /// `steps.list`: the computer's steps, oldest first.
 pub(super) async fn list(
@@ -20,6 +20,7 @@ pub(super) async fn list(
     params: &Value,
 ) -> Result<HandlerOutput, DispatchError> {
     let params: StepsListParams = context.decode_params(params)?;
+    require_local_device(context, params.device_id.as_deref())?;
     let steps = StepStore::for_engine(context.engine_context())
         .list(&params.computer_id)
         .map_err(DispatchError::internal)?;
@@ -32,6 +33,7 @@ pub(super) async fn record(
     params: &Value,
 ) -> Result<HandlerOutput, DispatchError> {
     let params: StepsRecordParams = context.decode_params(params)?;
+    require_local_device(context, params.device_id.as_deref())?;
     let engine = context.engine_context();
     service(context)
         .platform(&params.computer_id)
