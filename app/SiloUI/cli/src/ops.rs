@@ -788,6 +788,8 @@ async fn fork_now(
     // The fork reaches the same ports its source publishes (a recipe fork, those the recipe
     // names), each on a host port of its own.
     let published = match (&args.recipe_name, &args.recipe) {
+        // Ports are published by this device's engine (`network.*` is not routed).
+        _ if engine.device().is_some() => Ok(Vec::new()),
         (Some(_), Some(recipe)) => {
             crate::access::publish_recipe_ports(engine, &forked, &recipe.ports).await
         }

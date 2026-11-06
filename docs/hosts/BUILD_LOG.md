@@ -205,3 +205,33 @@ Plan: [PLAN.md](PLAN.md).
     passed; `run-script-tests.py` 45 of 45 modules; actionlint 1.7.7 (no shellcheck here)
     found nothing in the three changed workflows. Not run: any workflow, and a session end
     against real computers.
+
+## Phase 5: exec, fork with a command and computer use on another device (6 Nov 2026)
+
+- **Found:** silod already routes `guest.exec`, `guest.exec.start`/`get`/`input`,
+  `desktop.status`, `desktop.action` and `computerUse.*` to the owning device. The CLI did not
+  send them there: they were missing from `ROUTED_PREFIXES` (`cli/src/engine.rs`), so
+  `Engine::call` refused them under `--device`; `refuse_on_device` refused `exec` and
+  `fork -- <cmd>`; the MCP `fork` refused `device` with `command`, and `exec`, `fork_gui` and
+  the `computer_use_*` tools had no `device`.
+- **Changed:**
+  - The CLI adds `deviceId` to `guest.exec`, `guest.exec.start`/`get`/`input`,
+    `desktop.status`, `desktop.action` and `computerUse.*` (named exactly; the other `guest.*`
+    methods and `desktop.connect` stay local).
+  - `silo --device X exec` and `fork -- <cmd>` (with `-n`) run there; their steps are recorded
+    there. A fork on another device publishes no ports and reads no URLs here (`network.*` is
+    not routed), instead of reporting a ports error. Write-back to recipe files is off for
+    forks with a command on another device, as for `fold`.
+  - MCP: `device` on `exec`, `drop`, `fork_gui`, `computer_use_ready` (a read) and the other
+    `computer_use_*` tools; changes need the device in the agent's `devices:`. Driver sessions
+    are keyed by (device, computer id) and closed on their own device on `drop`, `promote`
+    (sessions of that device) and shutdown.
+  - The driver polls every 250 ms instead of 50 ms on another device.
+  - `auto_keep` `tests: pass` runs the recipe's `test:` on the fork's device.
+- **Tests:** fake-engine cases for CLI `exec` and `fork -- <cmd>` under `--device`
+  (`cli/tests/devices.rs`), `fork -n` with a command on a device (`fanout.rs`), `fork_gui`,
+  a remote screenshot, separate local and remote sessions and the close on `drop` (`gui.rs`),
+  MCP `exec` and `fork` with `command` allowed and refused (`mcp_devices.rs`, `gui.rs`), and
+  auto-keep tests on a device (`policy.rs`). `cargo test -p silo-cli`: 315 passed.
+- **Not checked live** in this phase: controller to host exec, fork with a command and a
+  screenshot.

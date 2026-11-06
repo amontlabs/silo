@@ -43,7 +43,7 @@ pub struct Cli {
     #[arg(long, global = true, env = "SILO_IN_GUEST", hide_env_values = true)]
     pub in_guest: bool,
     /// Run the command on a connected device (its name or id) instead of this one, over
-    /// Connections. Folders, ports, SSH names, secrets and `exec` stay on this device.
+    /// Connections. Folders, ports, SSH names and secrets stay on this device.
     #[arg(long, global = true, value_name = "DEVICE")]
     pub device: Option<String>,
     #[command(subcommand)]
@@ -577,7 +577,6 @@ fn refuse_on_device(command: &Command, engine: &Engine) -> Result<(), CliError> 
     }
     let what = match command {
         Command::Up(_) => "up",
-        Command::Exec(_) => "exec",
         Command::Ports { .. } => "ports",
         Command::Publish { .. } => "publish",
         Command::Unpublish { .. } => "unpublish",
@@ -586,7 +585,6 @@ fn refuse_on_device(command: &Command, engine: &Engine) -> Result<(), CliError> 
         Command::Fork(fork) if fork.recipe.is_none() && folder::is_folder(&fork.source) => {
             "fork of a folder"
         }
-        Command::Fork(fork) if !fork.command.is_empty() => "fork with a command",
         Command::Fold(fold) if fold.pr => "fold --pr",
         Command::Undo { computer } if folder::is_folder(computer) => "undo of a folder",
         _ => return Ok(()),
@@ -1080,7 +1078,9 @@ async fn fork_many(
         project,
         settings,
         recipe: args.fork.recipe.as_ref(),
-        write_back: true,
+        // Recipe files are this device's; a keep on another device leaves them alone, as
+        // `fold` does.
+        write_back: engine.device().is_none(),
     };
     let kept = keep_after_commands(engine, &mut value, &context, json).await;
     if json {

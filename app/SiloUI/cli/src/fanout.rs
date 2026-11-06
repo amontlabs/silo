@@ -141,8 +141,12 @@ pub fn check_capacity(
     )))
 }
 
-/// The URLs of a computer's published websites.
+/// The URLs of a computer's published websites. None for a computer on another device: its
+/// ports are published on that device, which this one does not read.
 pub async fn urls(engine: &Engine, computer: &Computer) -> Vec<String> {
+    if engine.device().is_some() {
+        return Vec::new();
+    }
     engine
         .call(requests::network_urls(NetworkTargetParams {
             computer_id: computer.id.clone(),
@@ -300,12 +304,17 @@ async fn make_one(
 }
 
 /// Publishes on a new fork the ports its recipe names, else those its source publishes.
+/// Nothing for a fork on another device: ports are published by the device they are reached
+/// from, and `network.*` stays on this one.
 pub async fn publish_for_fork(
     engine: &Engine,
     source: &Computer,
     fork: &Computer,
     recipe: Option<&crate::config::Recipe>,
 ) -> Result<Vec<u16>, CliError> {
+    if engine.device().is_some() {
+        return Ok(Vec::new());
+    }
     match recipe {
         Some(recipe) => crate::access::publish_recipe_ports(engine, fork, &recipe.ports).await,
         None => crate::access::inherit_ports(engine, source, fork).await,

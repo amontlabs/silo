@@ -603,12 +603,15 @@ impl Engine {
 }
 
 /// The methods a command sends to another device's engine when it acts on that device: the
-/// ones `silod` routes through Connections (`silo_engine::remote::OWNER_METHODS`), and the
-/// job reads that follow them. Everything else (secrets, ports, SSH access, GitHub, pushes)
-/// has controller-side steps that stay on this device.
+/// ones `silod` routes through Connections (`silo_engine::remote::OWNER_METHODS`), the
+/// commands, desktop and computer-use methods it routes to the owner's own jobs, and the job
+/// reads that follow them. Everything else (secrets, ports, SSH access and names, GitHub,
+/// pushes, the guest client, `desktop.connect`) has controller-side steps that stay on this
+/// device.
 const ROUTED_PREFIXES: &[&str] = &[
     "changes.",
     "checkpoints.",
+    "computerUse.",
     "computers.",
     "macos.setup.",
     "operations.job.",
@@ -616,10 +619,22 @@ const ROUTED_PREFIXES: &[&str] = &[
     "steps.",
 ];
 
+/// Routed methods named exactly: `guest.exec` and its job (`.start`, `.get`, `.input`), and
+/// the desktop's status and actions. Other `guest.` and `desktop.` methods stay here.
+const ROUTED_METHODS: &[&str] = &[
+    "desktop.action",
+    "desktop.status",
+    "guest.exec",
+    "guest.exec.get",
+    "guest.exec.input",
+    "guest.exec.start",
+];
+
 fn is_routed(method: &str) -> bool {
-    ROUTED_PREFIXES
-        .iter()
-        .any(|prefix| method.starts_with(prefix))
+    ROUTED_METHODS.contains(&method)
+        || ROUTED_PREFIXES
+            .iter()
+            .any(|prefix| method.starts_with(prefix))
 }
 
 /// `params` with the `deviceId` of `device` added when `method` is routed.
@@ -770,7 +785,32 @@ mod tests {
         assert_eq!(routed["deviceId"], "d1");
         let job = routed_params("operations.job.get", json!({ "jobId": "j" }), Some("d1"));
         assert_eq!(job["deviceId"], "d1");
-        for local in ["connections.devices.list", "secrets.list", "network.state"] {
+        for routed in [
+            "guest.exec",
+            "guest.exec.start",
+            "guest.exec.get",
+            "guest.exec.input",
+            "desktop.status",
+            "desktop.action",
+            "computerUse.state",
+            "computerUse.approval",
+        ] {
+            assert_eq!(
+                routed_params(routed, json!({}), Some("d1"))["deviceId"],
+                "d1",
+                "{routed}"
+            );
+        }
+        for local in [
+            "connections.devices.list",
+            "secrets.list",
+            "network.state",
+            "network.urls",
+            "guest.sshAlias.ensure",
+            "guest.client.enable",
+            "guest.client.status",
+            "desktop.connect",
+        ] {
             assert!(routed_params(local, json!({}), Some("d1"))
                 .get("deviceId")
                 .is_none());
