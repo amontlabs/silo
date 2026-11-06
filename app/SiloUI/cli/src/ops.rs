@@ -849,8 +849,9 @@ async fn new_checkpoint(engine: &Engine, computer_id: &str, before: &[Value]) ->
 /// The newest warm checkpoint of `source`, when it was taken no more than `max_age` seconds
 /// before `now`, `source` runs, and the engine can tell `source` is unchanged since: the
 /// checkpoint records the generation `source` has now. A fork with no named checkpoint starts
-/// from it; otherwise the engine takes a new one. A change made over a plain `ssh` session
-/// that does not go through the engine is not seen, which is what the age limit is for.
+/// from it; otherwise the engine takes a new one. A change made over an `ssh` session
+/// that goes through neither the engine nor SSH access is not seen, which is what the age
+/// limit is for.
 pub fn fresh_warm(source: &Computer, now: i64, max_age: u64) -> Option<&Value> {
     let generation = source.generation?;
     if source.state != "running" {
