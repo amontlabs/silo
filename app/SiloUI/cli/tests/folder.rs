@@ -596,7 +596,10 @@ async fn the_review_digest_follows_untracked_and_binary_contents_and_pins_the_fo
     assert_eq!(first, request_digest(&lab, &engine, &fork).await);
     std::fs::write(guest.join("blob.bin"), [0u8, 1, 2, 4]).unwrap();
     let second = request_digest(&lab, &engine, &fork).await;
-    assert_ne!(first, second, "an untracked file's contents change the digest");
+    assert_ne!(
+        first, second,
+        "an untracked file's contents change the digest"
+    );
     let pinned = |digest: String| FoldOptions {
         reviewed: Some(digest),
         ..FoldOptions::default()
@@ -894,7 +897,7 @@ async fn a_computer_fork_never_chooses_where_the_token_goes() {
     .await
     .unwrap_err();
     assert!(
-        error.message.contains("https://127.0.0.1:1/acme/app.git"),
+        error.message.contains("origin is evil/app") && error.message.contains("acme/app"),
         "{}",
         error.message
     );
@@ -902,6 +905,113 @@ async fn a_computer_fork_never_chooses_where_the_token_goes() {
     assert!(
         listener.accept().is_err(),
         "the fork's remote was contacted"
+    );
+}
+
+#[tokio::test]
+async fn a_computer_fork_with_a_matching_origin_pushes_to_the_host_built_url() {
+    let lab = lab();
+    let guest = computer_fork(&lab, "https://github.com/acme/app.git");
+    std::fs::write(guest.join("new.txt"), "x\n").unwrap();
+    let engine = lab.connect().await;
+    let project = Project::default();
+    let error = flows::run(
+        &engine,
+        "plain",
+        None,
+        &pr_context(&project),
+        FoldOptions::default(),
+        flows::Mode::PullRequest(
+            silo_cli::pr::PrArgs {
+                base: Some("main".into()),
+                ..Default::default()
+            },
+            pr_env(Some("acme/app")),
+        ),
+        &ignore,
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        error.message.contains("https://127.0.0.1:1/acme/app.git"),
+        "{}",
+        error.message
+    );
+}
+
+#[tokio::test]
+async fn an_untracked_credential_file_in_a_computer_fork_stops_the_pull_request() {
+    let lab = lab();
+    let guest = computer_fork(&lab, "https://github.com/acme/app.git");
+    std::fs::write(guest.join("deploy.pem"), "key\n").unwrap();
+    let engine = lab.connect().await;
+    let project = Project::default();
+    let error = flows::run(
+        &engine,
+        "plain",
+        None,
+        &pr_context(&project),
+        FoldOptions::default(),
+        flows::Mode::PullRequest(
+            silo_cli::pr::PrArgs {
+                base: Some("main".into()),
+                ..Default::default()
+            },
+            pr_env(Some("acme/app")),
+        ),
+        &ignore,
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        error.message.contains("deploy.pem") && error.message.contains("credentials"),
+        "{}",
+        error.message
+    );
+    assert_eq!(git(&guest, &["log", "--format=%s"]), "first");
+}
+
+#[tokio::test]
+async fn fold_pr_for_a_folder_refuses_a_repository_other_than_its_origin() {
+    let lab = lab();
+    git(
+        &lab.host,
+        &["remote", "add", "origin", "https://github.com/acme/app.git"],
+    );
+    git(
+        &lab.host,
+        &["update-ref", "refs/remotes/origin/main", "HEAD"],
+    );
+    let engine = lab.connect().await;
+    let (name, guest) = lab.fork(&engine).await;
+    commit(&guest, "b.txt", "two\n", "second");
+    let project = Project::default();
+    let error = flows::run(
+        &engine,
+        &name,
+        None,
+        &pr_context(&project),
+        FoldOptions::default(),
+        flows::Mode::PullRequest(
+            silo_cli::pr::PrArgs {
+                repo: Some("other/thing".into()),
+                ..Default::default()
+            },
+            silo_cli::pr::PrEnv {
+                token: Some("tok".into()),
+                api_url: "http://127.0.0.1:1".into(),
+                repository: None,
+                git_base: "https://github.com".into(),
+            },
+        ),
+        &ignore,
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        error.message.contains("origin is acme/app") && error.message.contains("other/thing"),
+        "{}",
+        error.message
     );
 }
 
@@ -949,9 +1059,9 @@ async fn fold_pr_refuses_host_commits_that_origin_does_not_have() {
     let lab = lab();
     let remote = with_origin(&lab);
     let engine = lab.connect().await;
+    commit(&lab.host, "private.txt", "x\n", "not pushed yet");
     let (name, guest) = lab.fork(&engine).await;
     commit(&guest, "b.txt", "two\n", "second");
-    commit(&lab.host, "private.txt", "x\n", "not pushed yet");
     let project = Project::default();
     let error = flows::run(
         &engine,
@@ -976,6 +1086,34 @@ async fn fold_pr_refuses_host_commits_that_origin_does_not_have() {
         ),
         "main"
     );
+}
+
+#[tokio::test]
+async fn fold_pr_ignores_host_commits_made_after_the_fork_started() {
+    let lab = lab();
+    let remote = with_origin(&lab);
+    let engine = lab.connect().await;
+    let (name, guest) = lab.fork(&engine).await;
+    commit(&guest, "b.txt", "two\n", "second");
+    commit(&lab.host, "later.txt", "x\n", "made later");
+    let project = Project::default();
+    let error = flows::run(
+        &engine,
+        &name,
+        None,
+        &pr_context(&project),
+        FoldOptions::default(),
+        pr_mode(Some("tok"), "http://127.0.0.1:1".into()),
+        &ignore,
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        !error.message.contains("does not, and the pull request"),
+        "{}",
+        error.message
+    );
+    drop(remote);
 }
 
 #[tokio::test]

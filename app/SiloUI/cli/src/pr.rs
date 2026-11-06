@@ -40,7 +40,7 @@ pub struct PrArgs {
 pub struct PrEnv {
     pub token: Option<String>,
     pub api_url: String,
-    /// `GITHUB_REPOSITORY` (set on a CI runner).
+    /// `GITHUB_REPOSITORY`, read only when `GITHUB_ACTIONS` is `true` (a CI runner sets both).
     pub repository: Option<String>,
     /// Where repositories are pushed to, like `https://github.com`; follows `api_url`.
     pub git_base: String,
@@ -68,7 +68,8 @@ impl PrEnv {
             token: set("GITHUB_TOKEN").or_else(gh_token),
             git_base: git_base_for(&api_url),
             api_url,
-            repository: set("GITHUB_REPOSITORY"),
+            repository: set("GITHUB_REPOSITORY")
+                .filter(|_| std::env::var("GITHUB_ACTIONS").is_ok_and(|value| value == "true")),
         }
     }
 }
@@ -135,14 +136,23 @@ fn base64(bytes: &[u8]) -> String {
     out
 }
 
+/// The host of an `https://` URL, without credentials.
+fn https_host(url: &str) -> Option<&str> {
+    let rest = url.strip_prefix("https://")?;
+    let host = rest.split('/').next().unwrap_or("");
+    Some(host.rsplit('@').next().unwrap_or(host))
+}
+
 /// Environment for a push to an `https` remote: the token goes in an HTTP header scoped to
-/// that remote's origin, never in an argument or the URL.
-fn auth_env(remote: &str, token: &str) -> Vec<(String, String)> {
-    let Some(rest) = remote.strip_prefix("https://") else {
+/// that remote's origin, never in an argument or the URL, and only for a remote on the host
+/// the token belongs to (that of `git_base`).
+fn auth_env(remote: &str, token: &str, git_base: &str) -> Vec<(String, String)> {
+    let Some(host) = https_host(remote) else {
         return Vec::new();
     };
-    let host = rest.split('/').next().unwrap_or("");
-    let host = host.rsplit('@').next().unwrap_or(host);
+    if !https_host(git_base).is_some_and(|base| base.eq_ignore_ascii_case(host)) {
+        return Vec::new();
+    }
     vec![
         ("GIT_CONFIG_COUNT".into(), "1".into()),
         (
@@ -159,12 +169,12 @@ fn auth_env(remote: &str, token: &str) -> Vec<(String, String)> {
     ]
 }
 
-async fn push(source: &PrSource, token: &str) -> Result<(), CliError> {
+async fn push(source: &PrSource, token: &str, git_base: &str) -> Result<(), CliError> {
     let git = Git {
         dir: source.directory.clone(),
     };
     let refspec = format!("refs/heads/{0}:refs/heads/{0}", source.branch);
-    let env = auth_env(&source.remote, token);
+    let env = auth_env(&source.remote, token, git_base);
     if source.remote.starts_with('-') {
         return Err(CliError::new(
             "The push destination is not a repository URL.",
@@ -317,8 +327,72 @@ fn valid_repository(repository: &str) -> bool {
         .is_some_and(|(owner, name)| part(owner) && part(name))
 }
 
+/// Whether an absolute path names key material or a credential file, by the patterns the
+/// diff uses to keep credentials out of what is carried (engine `changes/ignore.rs`).
+fn credential_like(path: &str) -> bool {
+    const DIRS: &[&str] = &[
+        "/.ssh/",
+        "/.gnupg/",
+        "/Library/Keychains/",
+        "/Library/Application Support/com.apple.TCC/",
+        "/.openclaw/credentials/",
+        "/.config/gcloud/",
+        "/.azure/",
+        "/etc/ssl/private/",
+        "/etc/letsencrypt/",
+    ];
+    const NAMES: &[&str] = &[
+        ".netrc",
+        ".git-credentials",
+        ".pypirc",
+        ".npmrc",
+        "id_rsa",
+        "id_dsa",
+        "id_ecdsa",
+        "id_ed25519",
+        "id_ecdsa_sk",
+        "id_ed25519_sk",
+    ];
+    const SUFFIXES: &[&str] = &[
+        "/gh/hosts.yml",
+        "/.docker/config.json",
+        "/.aws/credentials",
+        "/.kube/config",
+        "_rsa_key",
+        "_ed25519_key",
+    ];
+    const EXTENSIONS: &[&str] = &[
+        ".pem",
+        ".key",
+        ".p12",
+        ".pfx",
+        ".p8",
+        ".ppk",
+        ".jks",
+        ".keystore",
+        ".keychain",
+        ".keychain-db",
+    ];
+    const PACKAGE_TREES: &[&str] = &[
+        "/site-packages/",
+        "/dist-packages/",
+        "/node_modules/",
+        "/share/ca-certificates/",
+        "/etc/ssl/certs/",
+    ];
+    let base = path.rsplit('/').next().unwrap_or(path);
+    let ssh_host_key = base.starts_with("ssh_host_") && base.ends_with("_key");
+    DIRS.iter().any(|dir| path.contains(dir))
+        || NAMES.contains(&base)
+        || SUFFIXES.iter().any(|suffix| path.ends_with(suffix))
+        || ssh_host_key
+        || (!PACKAGE_TREES.iter().any(|tree| path.contains(tree))
+            && EXTENSIONS.iter().any(|extension| base.ends_with(extension)))
+}
+
 /// The repository and push URL for a fork of a computer, decided on this device: `--repo`,
-/// else `GITHUB_REPOSITORY`, else the `origin` of the host project; never what the fork says.
+/// else `GITHUB_REPOSITORY` (on a CI runner only), else the `origin` of the host project;
+/// never what the fork says (its `origin` is only checked against the choice).
 async fn computer_destination(
     args: &PrArgs,
     env: &PrEnv,
@@ -365,9 +439,10 @@ async fn computer_source(
     fork: &str,
     diff: &Value,
     branch: &str,
-    url: &str,
+    destination: (&str, &str),
     progress: Progress<'_>,
 ) -> Result<(PrSource, Vec<String>, Vec<String>), CliError> {
+    let (repository, url) = destination;
     let repos: Vec<&str> = diff["code"]
         .as_array()
         .into_iter()
@@ -405,7 +480,7 @@ async fn computer_source(
             )))
         }
     };
-    let made = computer_bundle(engine, fork, repo, branch, url, progress).await;
+    let made = computer_bundle(engine, fork, repo, branch, (repository, url), progress).await;
     if started_here {
         let stopped = ops::stop(engine, fork, progress).await;
         let (source, untracked) = made?;
@@ -421,37 +496,73 @@ async fn computer_bundle(
     fork: &str,
     repo: &str,
     branch: &str,
-    url: &str,
+    destination: (&str, &str),
     progress: Progress<'_>,
 ) -> Result<(PrSource, Vec<String>), CliError> {
+    let (repository, url) = destination;
     let computer = engine.computer(fork).await?;
     let outbox = format!(
         "{}/silo-out-{}",
         folder::TRANSFER_ROOT,
         uuid::Uuid::new_v4().simple()
     );
-    // Prints how many untracked files there are and their names, then commits everything.
-    let gather = "set -e; cd \"$1\"; git ls-files -o --exclude-standard | wc -l | tr -d ' '; \
-                  git ls-files -o --exclude-standard; git add -A; \
+    // The fork's own `origin` and untracked files are read first: the origin only has to
+    // agree with the repository chosen on this device, and an untracked credential file is
+    // never committed.
+    let listing = "set -e; cd \"$1\"; git remote get-url origin 2>/dev/null || true; \
+                   git ls-files -o --exclude-standard -z | tr '\\0' '\\037'";
+    let before = folder::guest(engine, fork, listing, &[repo], "Reading the repository").await?;
+    let (origin, names) = before.split_once('\n').unwrap_or((before.as_str(), ""));
+    if let Some(named) = repository_of(origin.trim()) {
+        if !named.eq_ignore_ascii_case(repository) {
+            return Err(CliError::new(format!(
+                "{fork}'s own origin is {named}, but the pull request goes to {repository}; nothing was pushed. Pass --repo {named}, or fix the fork's origin."
+            )));
+        }
+    }
+    let untracked: Vec<String> = names
+        .split('\u{1f}')
+        .filter(|name| !name.is_empty())
+        .map(str::to_owned)
+        .collect();
+    let credentials: Vec<&String> = untracked
+        .iter()
+        .filter(|name| credential_like(&format!("{}/{name}", repo.trim_end_matches('/'))))
+        .collect();
+    if !credentials.is_empty() {
+        return Err(CliError::new(format!(
+            "{fork} has untracked files that look like credentials, which a pull request would publish: {}. Remove them from the fork, then try again.",
+            credentials
+                .iter()
+                .map(|name| name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )));
+    }
+    // Commits everything, unless the untracked files changed since they were read.
+    let gather = "set -e; cd \"$1\"; \
+                  now=$(git ls-files -o --exclude-standard -z | tr '\\0' '\\037'); \
+                  [ \"$now\" = \"$4\" ] || { echo changed; exit 0; }; \
+                  git add -A; \
                   git diff --cached --quiet || git \
                   -c user.name=\"$(git config user.name || echo Silo)\" \
                   -c user.email=\"$(git config user.email || echo silo@localhost)\" \
                   commit -q -m \"silo: uncommitted changes in $2\"; \
-                  mkdir -p \"$3\"; git bundle create --quiet \"$3/out.bundle\" HEAD";
-    let found = folder::guest(
+                  mkdir -p \"$3\"; git bundle create --quiet \"$3/out.bundle\" HEAD; echo bundled";
+    let made = folder::guest(
         engine,
         fork,
         gather,
-        &[repo, fork, &outbox],
+        &[repo, fork, &outbox, names],
         "Collecting the commits",
     )
     .await?;
-    let mut lines = found.lines();
-    let count: usize = lines
-        .next()
-        .and_then(|line| line.trim().parse().ok())
-        .unwrap_or(0);
-    let untracked: Vec<String> = lines.take(count).map(str::to_owned).collect();
+    if made != "bundled" {
+        let _ = folder::guest(engine, fork, "rm -rf \"$1\"", &[&outbox], "Cleaning up").await;
+        return Err(CliError::new(
+            "The fork's untracked files changed while the pull request was prepared; try again.",
+        ));
+    }
     let cleanup = |outbox: String| async move {
         let _ = folder::guest(engine, fork, "rm -rf \"$1\"", &[&outbox], "Cleaning up").await;
     };
@@ -547,9 +658,15 @@ pub async fn open(
             .await?;
             let (repository, url) =
                 computer_destination(args, env, args.host_root.as_deref()).await?;
-            let _ = repository;
-            let (source, untracked, mut notes) =
-                computer_source(engine, &computer.name, &seen, &branch, &url, progress).await?;
+            let (source, untracked, mut notes) = computer_source(
+                engine,
+                &computer.name,
+                &seen,
+                &branch,
+                (&repository, &url),
+                progress,
+            )
+            .await?;
             let mut text = summary::review(&seen);
             if !untracked.is_empty() {
                 let list = untracked.join(", ");
@@ -559,7 +676,16 @@ pub async fn open(
             (source, text, notes)
         }
     };
-    let outcome = publish(&source, args, env, &token, &computer.name, &text).await;
+    let outcome = publish(
+        &source,
+        args,
+        env,
+        &token,
+        &computer.name,
+        &text,
+        record.is_some(),
+    )
+    .await;
     if record.is_none() {
         let _ = std::fs::remove_dir_all(&source.directory);
     } else {
@@ -583,18 +709,30 @@ async fn publish(
     token: &str,
     fork: &str,
     text: &str,
+    folder: bool,
 ) -> Result<Value, CliError> {
-    let repository = args
-        .repo
-        .clone()
-        .or_else(|| env.repository.clone())
-        .or_else(|| repository_of(&source.remote))
-        .ok_or_else(|| {
-            CliError::new(format!(
-                "Cannot tell which GitHub repository {} is; pass --repo OWNER/NAME.",
-                redact(&source.remote)
-            ))
-        })?;
+    let stated = args.repo.clone().or_else(|| env.repository.clone());
+    let from_origin = repository_of(&source.remote);
+    // A folder's pull request goes to the repository its origin names; a different one
+    // asked for is refused rather than followed.
+    if let (true, Some(origin), Some(asked)) = (folder, &from_origin, &stated) {
+        if !origin.eq_ignore_ascii_case(asked) {
+            return Err(CliError::new(format!(
+                "The folder's origin is {origin}, not {asked}; nothing was pushed. Drop --repo, or point the folder's origin at {asked}."
+            )));
+        }
+    }
+    let repository = (if folder {
+        from_origin.or(stated)
+    } else {
+        stated.or(from_origin)
+    })
+    .ok_or_else(|| {
+        CliError::new(format!(
+            "Cannot tell which GitHub repository {} is; pass --repo OWNER/NAME.",
+            redact(&source.remote)
+        ))
+    })?;
     let base = match args.base.clone().or_else(|| source.base.clone()) {
         Some(base) => base,
         None => {
@@ -610,7 +748,7 @@ async fn publish(
             })?
         }
     };
-    push(source, token).await?;
+    push(source, token, &env.git_base).await?;
     let title = format!("Changes from {fork}");
     let body = format!("{text}\n\n---\nOpened by `silo fold --pr` from the fork {fork}.");
     let env = env.clone();
@@ -659,6 +797,22 @@ mod tests {
     }
 
     #[test]
+    fn credential_like_paths_are_recognised() {
+        for path in [
+            "/w/repo/.env.d/../.npmrc",
+            "/w/repo/keys/server.pem",
+            "/w/repo/.ssh/config",
+            "/w/repo/id_ed25519",
+            "/w/repo/.aws/credentials",
+        ] {
+            assert!(credential_like(path), "{path}");
+        }
+        for path in ["/w/repo/src/main.rs", "/w/repo/node_modules/x/ca.pem"] {
+            assert!(!credential_like(path), "{path}");
+        }
+    }
+
+    #[test]
     fn base64_matches_the_standard_alphabet() {
         assert_eq!(base64(b""), "");
         assert_eq!(base64(b"f"), "Zg==");
@@ -669,14 +823,30 @@ mod tests {
 
     #[test]
     fn the_token_travels_in_a_header_for_https_remotes_only() {
-        let env = auth_env("https://github.com/acme/app.git", "tok");
+        let env = auth_env(
+            "https://github.com/acme/app.git",
+            "tok",
+            "https://github.com",
+        );
         assert_eq!(env[1].1, "http.https://github.com/.extraheader");
         assert!(env[2].1.starts_with("Authorization: Basic "));
         assert!(!env
             .iter()
             .any(|(_, value)| value.contains("tok") && !value.starts_with("Authorization")));
-        assert!(auth_env("git@github.com:acme/app.git", "tok").is_empty());
-        assert!(auth_env("/tmp/remote.git", "tok").is_empty());
+        assert!(auth_env("git@github.com:acme/app.git", "tok", "https://github.com").is_empty());
+        assert!(auth_env("/tmp/remote.git", "tok", "https://github.com").is_empty());
+        assert!(auth_env(
+            "https://evil.example/acme/app.git",
+            "tok",
+            "https://github.com"
+        )
+        .is_empty());
+        assert!(!auth_env(
+            "https://GitHub.com/acme/app.git",
+            "tok",
+            "https://github.com"
+        )
+        .is_empty());
         assert_eq!(
             redact("https://x-access-token:abc@github.com/acme/app.git"),
             "https://github.com/acme/app.git"

@@ -571,8 +571,7 @@ async fn dispatch(
                             .directory
                             .as_ref()
                             .and_then(|silo| silo.parent())
-                            .map(std::path::Path::to_path_buf)
-                            .or_else(|| Some(working_directory.to_path_buf())),
+                            .map(std::path::Path::to_path_buf),
                     },
                     pr::PrEnv::from_process(),
                 )

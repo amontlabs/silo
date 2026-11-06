@@ -1288,8 +1288,8 @@ async fn make_branch(
                 record.path
             ))
         })?;
-    // The pull request is the host's base plus the fork's commits: commits the host has not
-    // pushed would be published with it.
+    // The pull request is the fork's starting commit plus the fork's commits: commits up to
+    // that start that the host has not pushed would be published with it.
     let upstream = format!("origin/{base}");
     if !repo
         .git
@@ -1307,7 +1307,7 @@ async fn make_branch(
             "log",
             "--oneline",
             "--max-count=20",
-            &format!("{upstream}..HEAD"),
+            &format!("{upstream}..{}", record.base),
         ])
         .await?;
     if !unpushed.is_empty() {
