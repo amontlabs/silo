@@ -19,19 +19,16 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  build:
-    runs-on: macos-15
-    timeout-minutes: 60
+  # The release's tag, checked once before any build starts: every build needs it.
+  tag:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
     outputs:
-      archive: ${{ steps.package.outputs.archive }}
       tag: ${{ steps.tag.outputs.tag }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
-        with:
-          python-version: '3.12'
       - name: Determine the engine tag
         id: tag
         env:
@@ -58,6 +55,20 @@ jobs:
             exit 1
           fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: tag
+    runs-on: macos-15
+    timeout-minutes: 60
+    outputs:
+      archive: ${{ steps.package.outputs.archive }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
       - name: Install pinned Rust toolchain for Apple Silicon
         run: |
           set -euo pipefail
@@ -78,7 +89,7 @@ jobs:
           echo "archive=$(basename "$RUNNER_TEMP"/engine-release/*.tar.gz)" >> "$GITHUB_OUTPUT"
       - name: Verify the archive
         env:
-          TAG: ${{ steps.tag.outputs.tag }}
+          TAG: ${{ needs.tag.outputs.tag }}
           ARCHIVE: ${{ steps.package.outputs.archive }}
         run: |
           set -euo pipefail
@@ -112,6 +123,7 @@ jobs:
   # directory (docs/SiloUI-ENGINE.md#silod-on-a-linux-host). Each architecture
   # builds natively, because runtime:prepare builds MicroSandbox for the host.
   build-linux:
+    needs: tag
     strategy:
       fail-fast: true
       matrix:
@@ -139,7 +151,7 @@ jobs:
       # The MicroSandbox build needs libclang and libcap-ng; silod links D-Bus for
       # keyring's optional Secret Service backend.
       - name: Install Linux build dependencies
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends build-essential pkg-config libclang-dev libcap-ng-dev libdbus-1-dev libssl-dev cmake
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends build-essential pkg-config libclang-dev libcap-ng-dev libdbus-1-dev cmake
       - name: Install pinned Rust toolchain
         run: |
           set -euo pipefail
@@ -166,16 +178,16 @@ jobs:
           set -euo pipefail
           python3 scripts/package-engine.py --platform "$PLATFORM" --out-dir "$RUNNER_TEMP/engine-release" --source-commit "$GITHUB_SHA"
           echo "archive=$(basename "$RUNNER_TEMP"/engine-release/*.tar.gz)" >> "$GITHUB_OUTPUT"
-      # The build job checks the tag; publishing checks these names against it.
       - name: Verify the Linux archive
         env:
+          TAG: ${{ needs.tag.outputs.tag }}
           ARCHIVE: ${{ steps.package.outputs.archive }}
           PLATFORM: ${{ matrix.platform }}
           TARGET: ${{ matrix.target }}
           MACHINE: ${{ matrix.machine }}
         run: |
           set -euo pipefail
-          version=$(python3 -c "import tomllib; print(tomllib.load(open('app/SiloUI/src-tauri/silod/Cargo.toml', 'rb'))['package']['version'])")
+          version="${TAG#engine-v}"
           test "$ARCHIVE" = "silo-engine-$version-$PLATFORM.tar.gz"
           cd "$RUNNER_TEMP/engine-release"
           test "$(ls | wc -l)" -eq 2
@@ -208,7 +220,8 @@ jobs:
           retention-days: 7
 
   publish:
-    needs: [build, build-linux]
+    # Both Linux builds and the macOS build must succeed: a release is never partial.
+    needs: [tag, build, build-linux]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -224,7 +237,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
           EVENT: ${{ github.event_name }}
-          TAG: ${{ needs.build.outputs.tag }}
+          TAG: ${{ needs.tag.outputs.tag }}
           ARCHIVE: ${{ needs.build.outputs.archive }}
         run: |
           set -euo pipefail

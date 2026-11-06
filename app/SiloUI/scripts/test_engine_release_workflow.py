@@ -32,7 +32,7 @@ class EngineReleaseWorkflowTests(unittest.TestCase):
         self.assertRegex(WORKFLOW, r'(?m)^permissions:\n  contents: read\n')
         self.assertEqual(WORKFLOW.count('contents: write'), 1)
         self.assertIn('contents: write', job('publish'))
-        for name in ('build', 'build-linux'):
+        for name in ('tag', 'build', 'build-linux'):
             self.assertNotIn('permissions:', job(name))
             self.assertNotIn('secrets.GITHUB_TOKEN', job(name))
         # The publishing job never runs repository code.
@@ -60,11 +60,17 @@ class EngineReleaseWorkflowTests(unittest.TestCase):
             self.assertNotIn(forbidden, job('publish'))
         self.assertIn('package-engine.py --out-dir', WORKFLOW)
 
-    def test_the_tag_is_computed_once_and_shared_by_both_jobs(self):
+    def test_the_tag_is_checked_once_before_every_build(self):
         self.assertEqual(WORKFLOW.count('engine-v$version'), 1)
-        self.assertIn('tag: ${{ steps.tag.outputs.tag }}', job('build'))
-        self.assertIn('TAG: ${{ needs.build.outputs.tag }}', job('publish'))
+        self.assertIn('engine-v$version', step(job('tag'), 'Determine the engine tag'))
+        self.assertIn('tag: ${{ steps.tag.outputs.tag }}', job('tag'))
+        self.assertRegex(job('tag'), r'(?s)uses: actions/checkout@[0-9a-f]{40} # v[\d.]+\n        with:\n          persist-credentials: false')
+        for name in ('build', 'build-linux'):
+            self.assertIn('    needs: tag\n', job(name).split('steps:', 1)[0], name)
+            self.assertIn('TAG: ${{ needs.tag.outputs.tag }}', job(name), name)
+        self.assertIn('TAG: ${{ needs.tag.outputs.tag }}', job('publish'))
         self.assertNotIn('github.ref_name', job('publish'))
+        self.assertNotIn('needs.build.outputs.tag', WORKFLOW)
 
     def test_the_release_does_not_displace_the_apps_latest_release(self):
         publish = step(job('publish'), 'Create the engine release')
@@ -87,7 +93,8 @@ class EngineReleaseWorkflowTests(unittest.TestCase):
 
     def test_linux_engines_build_natively_for_both_architectures(self):
         linux = job('build-linux')
-        self.assertNotIn('needs:', linux.split('steps:', 1)[0])
+        # It waits for the tag check only, not for the macOS build.
+        self.assertIn('    needs: tag\n', linux.split('steps:', 1)[0])
         self.assertIn('runs-on: ${{ matrix.runner }}', linux)
         matrix = re.findall(r'- runner: (\S+)\n\s+platform: (\S+)\n\s+target: (\S+)\n\s+machine: (\S+)', linux)
         self.assertEqual(matrix, [
@@ -97,6 +104,9 @@ class EngineReleaseWorkflowTests(unittest.TestCase):
         self.assertRegex(linux, r'(?s)uses: actions/checkout@[0-9a-f]{40} # v[\d.]+\n        with:\n          persist-credentials: false')
         for dependency in ('libclang-dev', 'libcap-ng-dev', 'libdbus-1-dev'):
             self.assertIn(dependency, step(linux, 'Install Linux build dependencies'))
+        # Nothing links OpenSSL: reqwest uses rustls, and Cargo.lock has no openssl-sys.
+        self.assertNotIn('libssl-dev', WORKFLOW)
+        self.assertNotIn('name = "openssl-sys"', (ROOT / 'app/SiloUI/Cargo.lock').read_text())
         self.assertIn('runtime-inputs.json', step(linux, 'Install pinned Rust toolchain'))
         runtime = step(linux, 'Prepare the runtime')
         self.assertIn('uses: ./.github/actions/prepare-release-runtime', runtime)
@@ -112,7 +122,11 @@ class EngineReleaseWorkflowTests(unittest.TestCase):
 
     def test_the_release_carries_every_archive_and_checksum(self):
         publish = job('publish')
-        self.assertIn('needs: [build, build-linux]', publish)
+        # Every build, both Linux architectures included, must succeed before anything is published.
+        self.assertIn('needs: [tag, build, build-linux]', publish)
+        self.assertIn('fail-fast: true', job('build-linux'))
+        self.assertNotIn('continue-on-error', WORKFLOW)
+        self.assertNotIn('if:', publish.split('steps:', 1)[0])
         self.assertIn('pattern: silo-engine*\n          merge-multiple: true', publish)
         create = step(publish, 'Create the engine release')
         self.assertIn('linux=("silo-engine-$version-linux-x64.tar.gz" "silo-engine-$version-linux-arm64.tar.gz")', create)
@@ -120,7 +134,7 @@ class EngineReleaseWorkflowTests(unittest.TestCase):
         self.assertIn('"${linux[0]}" "${linux[0]}.sha256" "${linux[1]}" "${linux[1]}.sha256"', create)
 
     def run_tag_step(self, event, ref, existing=False):
-        script = textwrap.dedent(step(job('build'), 'Determine the engine tag').split('        run: |\n', 1)[1])
+        script = textwrap.dedent(step(job('tag'), 'Determine the engine tag').split('        run: |\n', 1)[1])
         with tempfile.TemporaryDirectory() as temporary:
             bin_dir, output = Path(temporary, 'bin'), Path(temporary, 'output')
             bin_dir.mkdir()
