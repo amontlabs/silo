@@ -105,7 +105,7 @@ pub fn file_read(path: &str) -> GuestCmd {
 
 pub fn file_write(os: Os, path: &str, mode: &str, data: &[u8]) -> GuestCmd {
     let body = format!(
-        "set -e\nd=$(dirname -- \"$A_path\")\nmkdir -p -- \"$d\"\nt=\"$A_path.silo-keep.$$\"\ntrap 'rm -f \"$t\"' EXIT\ncat > \"$t\"\nchmod \"$A_mode\" \"$t\"\nif [ -e \"$A_path\" ] && [ ! -L \"$A_path\" ]; then o=$({owner} -- \"$A_path\"); else o=$({owner} -- \"$d\"); fi\nchown \"$o\" \"$t\" 2>/dev/null || true\nmv -f -- \"$t\" \"$A_path\"\ntrap - EXIT",
+        "set -e\nd=$(dirname -- \"$A_path\")\na=\"$d\"; while [ ! -d \"$a\" ]; do a=$(dirname -- \"$a\"); done\nao=$({owner} -- \"$a\")\nmkdir -p -- \"$d\"\nx=\"$d\"; while [ \"$x\" != \"$a\" ]; do chown \"$ao\" \"$x\" 2>/dev/null || true; x=$(dirname -- \"$x\"); done\nt=\"$A_path.silo-keep.$$\"\ntrap 'rm -f \"$t\"' EXIT\ncat > \"$t\"\nchmod \"$A_mode\" \"$t\"\nif [ -e \"$A_path\" ] && [ ! -L \"$A_path\" ]; then o=$({owner} -- \"$A_path\"); else o=\"$ao\"; fi\nchown \"$o\" \"$t\" 2>/dev/null || true\nmv -f -- \"$t\" \"$A_path\"\ntrap - EXIT",
         owner = stat_owner(os)
     );
     cmd("file_write", &body)

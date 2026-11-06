@@ -75,6 +75,69 @@ fn updates() -> std::sync::MutexGuard<'static, Option<HashMap<String, Slot>>> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
+/// Where the guest script keeps its receipt, relative to the working account's home.
+const RECEIPT_PATH: &str = "$HOME/Library/Application Support/Silo/computer-use-receipt.json";
+/// Longest the receipt read waits; a status poll must not hang on a guest that is busy.
+const RECEIPT_READ: Duration = Duration::from_secs(8);
+
+/// The guest's computer-use receipt, or `None` when the guest cannot be reached or has none.
+pub(super) fn read_receipt(
+    layout: &Layout,
+    record: &super::store::Record,
+) -> Option<serde_json::Value> {
+    let output = access::run(
+        layout,
+        record,
+        &format!("cat \"{RECEIPT_PATH}\""),
+        None,
+        RECEIPT_READ,
+    )
+    .ok()?;
+    if output.status != 0 {
+        return None;
+    }
+    serde_json::from_str(output.stdout.trim()).ok()
+}
+
+/// Fills the receipt fields of a projection from the guest's `receipt`. While the guest still
+/// has to be brought to the chosen approval (`approvalApply` is not `applied`), the state stays
+/// `installing`: the receipt describes the earlier approval, and a ready answer now would
+/// hand the computer over before the mode is in place.
+pub(super) fn merge_receipt(
+    projection: &mut serde_json::Value,
+    receipt: Option<&serde_json::Value>,
+) {
+    let Some(receipt) = receipt.filter(|receipt| receipt.is_object()) else {
+        return;
+    };
+    let state = receipt["state"]
+        .as_str()
+        .filter(|state| matches!(*state, "installing" | "ready" | "failed" | "unavailable"));
+    let Some(state) = state else {
+        return;
+    };
+    let applied = projection["approvalApply"] == "applied";
+    projection["schemaVersion"] = receipt["schemaVersion"]
+        .as_u64()
+        .filter(|version| *version <= u8::MAX as u64)
+        .map_or(serde_json::Value::Null, |version| version.into());
+    projection["state"] = if state == "ready" && !applied {
+        "installing".into()
+    } else {
+        state.into()
+    };
+    let text = |key: &str| receipt[key].as_str().filter(|text| !text.is_empty());
+    projection["reason"] = text("reason").map_or(serde_json::Value::Null, Into::into);
+    projection["at"] = text("at").map_or(serde_json::Value::Null, Into::into);
+    if let Some(agents) = receipt["agents"].as_array() {
+        projection["agents"] = agents
+            .iter()
+            .filter_map(|agent| agent.as_str())
+            .collect::<Vec<_>>()
+            .into();
+    }
+}
+
 /// Whether an update of computer `id`'s computer use is running or waiting to run.
 pub(super) fn update_running(id: &str) -> bool {
     updates().as_ref().is_some_and(|map| map.contains_key(id))
@@ -812,6 +875,44 @@ fn matches_pin(path: &Path, asset: &Asset) -> Result<bool, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_ready_receipt_makes_the_projection_ready_once_the_approval_is_applied() {
+        let receipt = serde_json::json!({"schemaVersion":2,"state":"ready","reason":"","driverVersion":"0.38.0","approval":"ask","agents":["claude-code","codex"],"pending":[],"at":"2026-11-05T00:54:07Z"});
+        let mut projection = serde_json::json!({"schemaVersion":null,"state":null,"reason":null,"approvalApply":"applied","agents":null,"at":null});
+        merge_receipt(&mut projection, Some(&receipt));
+        assert_eq!(projection["state"], "ready");
+        assert_eq!(projection["schemaVersion"], 2);
+        assert!(projection["reason"].is_null());
+        assert_eq!(
+            projection["agents"],
+            serde_json::json!(["claude-code", "codex"])
+        );
+        assert_eq!(projection["at"], "2026-11-05T00:54:07Z");
+        let mut pending = serde_json::json!({"state":null,"approvalApply":"pending"});
+        merge_receipt(&mut pending, Some(&receipt));
+        assert_eq!(pending["state"], "installing");
+    }
+
+    #[test]
+    fn a_missing_or_unreadable_receipt_leaves_the_projection_alone() {
+        for receipt in [
+            None,
+            Some(serde_json::json!({"state":"none"})),
+            Some(serde_json::json!([])),
+        ] {
+            let mut projection = serde_json::json!({"state":null,"approvalApply":"applied"});
+            merge_receipt(&mut projection, receipt.as_ref());
+            assert!(projection["state"].is_null());
+        }
+        let mut failed = serde_json::json!({"state":null,"approvalApply":"applied"});
+        merge_receipt(
+            &mut failed,
+            Some(&serde_json::json!({"state":"failed","reason":"could not register"})),
+        );
+        assert_eq!(failed["state"], "failed");
+        assert_eq!(failed["reason"], "could not register");
+    }
 
     #[test]
     fn the_bundled_pins_are_valid_and_agree() {

@@ -2148,8 +2148,18 @@ pub async fn macos_computer_use_state(
 ) -> Result<serde_json::Value, String> {
     blocking(move || {
         ensure_loaded(&app)?;
-        let (record, _) = computer(&id)?;
-        Ok(computer_use_projection(&record))
+        let (record, state) = computer(&id)?;
+        let mut projection = computer_use_projection(&record);
+        // The guest's receipt says whether the driver is installed and the agents are set
+        // up; it is read only from a running computer that no update is rewriting.
+        if state == State::Running && !guest_computer_use::update_running(&id) {
+            let layout = Layout::new(&app_data(&app)?, &id);
+            guest_computer_use::merge_receipt(
+                &mut projection,
+                guest_computer_use::read_receipt(&layout, &record).as_ref(),
+            );
+        }
+        Ok(projection)
     })
     .await
 }
