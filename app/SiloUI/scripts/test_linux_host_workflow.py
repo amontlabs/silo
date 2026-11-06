@@ -95,6 +95,9 @@ class LinuxHostWorkflowTests(unittest.TestCase):
         self.assertEqual(positions, sorted(positions))
         self.assertIn('package-engine.py --platform linux-x64 --channel development', steps)
         self.assertIn('sha256sum -c', steps)
+        install = steps.split('- name: Install the engine from its archive\n', 1)[1].split('      - ', 1)[0]
+        # The engine-directory trust check refuses group- or world-writable paths.
+        self.assertLess(install.index('tar -xzf'), install.index('chmod -R go-w "$RUNNER_TEMP/prefix"'))
         self.assertIn('--print-channel-identifier)" = org.silo.dev', steps)
         self.assertIn('sudo loginctl enable-linger "$(id -un)"', steps)
         self.assertNotIn('$USER', WORKFLOW)

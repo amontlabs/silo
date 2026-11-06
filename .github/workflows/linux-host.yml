@@ -97,6 +97,9 @@ jobs:
           mkdir -p "$RUNNER_TEMP/prefix"
           tar -xzf ./*.tar.gz -C "$RUNNER_TEMP/prefix"
           engine="$RUNNER_TEMP/prefix/silo-engine"
+          # silod refuses an engine directory that others can write to; the runner's umask
+          # or temp directory may leave it group-writable.
+          chmod -R go-w "$RUNNER_TEMP/prefix"
           test "$("$engine/silo" --print-channel-identifier)" = org.silo.dev
           echo "ENGINE=$engine" >> "$GITHUB_ENV"
       # Lingering starts the runner account's systemd user manager without a login session,
