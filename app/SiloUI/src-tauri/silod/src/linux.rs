@@ -44,6 +44,13 @@ fn trusted_engine() -> Result<(PathBuf, PathBuf), String> {
     Ok((executable, resources))
 }
 
+/// The manifest of this engine, after the same account and directory checks the engine runs,
+/// so `--service register` never points a unit at a directory the engine would refuse.
+pub(crate) fn trusted_manifest() -> Result<EngineManifest, String> {
+    let (_, resources) = trusted_engine()?;
+    EngineManifest::load_unbundled(&resources)
+}
+
 /// The channel and paths of a helper process (the bridge and the guest helper), with the
 /// credential store the engine chose installed, so nothing they call reaches `keyring`'s
 /// default backend. A helper never records a choice or sweeps the store: the engine does.

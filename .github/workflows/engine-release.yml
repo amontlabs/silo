@@ -1,9 +1,10 @@
 name: Publish Silo engine
 
-# Publishes the prebuilt silod (Apple Silicon) that other apps embed, as the
-# release engine-v<version>. <version> is the silod crate version, also
-# engineVersion in the production engine manifest. Push a tag engine-v<version>,
-# or run this workflow from main to create the tag and release at that commit.
+# Publishes the prebuilt engine as the release engine-v<version>: the silod
+# (Apple Silicon) that other apps embed, and the Linux host engines (x86-64 and
+# arm64). <version> is the silod crate version, also engineVersion in the
+# production engine manifest. Push a tag engine-v<version>, or run this workflow
+# from main to create the tag and release at that commit.
 # See docs/SiloUI-RELEASES.md#engine-releases.
 on:
   push:
@@ -18,19 +19,16 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  build:
-    runs-on: macos-15
-    timeout-minutes: 60
+  # The release's tag, checked once before any build starts: every build needs it.
+  tag:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
     outputs:
-      archive: ${{ steps.package.outputs.archive }}
       tag: ${{ steps.tag.outputs.tag }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
-        with:
-          python-version: '3.12'
       - name: Determine the engine tag
         id: tag
         env:
@@ -57,6 +55,20 @@ jobs:
             exit 1
           fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: tag
+    runs-on: macos-15
+    timeout-minutes: 60
+    outputs:
+      archive: ${{ steps.package.outputs.archive }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
       - name: Install pinned Rust toolchain for Apple Silicon
         run: |
           set -euo pipefail
@@ -77,7 +89,7 @@ jobs:
           echo "archive=$(basename "$RUNNER_TEMP"/engine-release/*.tar.gz)" >> "$GITHUB_OUTPUT"
       - name: Verify the archive
         env:
-          TAG: ${{ steps.tag.outputs.tag }}
+          TAG: ${{ needs.tag.outputs.tag }}
           ARCHIVE: ${{ steps.package.outputs.archive }}
         run: |
           set -euo pipefail
@@ -107,8 +119,109 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  # A Linux host engine: silod, the silo command and the bundled runtime in one
+  # directory (docs/SiloUI-ENGINE.md#silod-on-a-linux-host). Each architecture
+  # builds natively, because runtime:prepare builds MicroSandbox for the host.
+  build-linux:
+    needs: tag
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            platform: linux-x64
+            target: x86_64-unknown-linux-gnu
+            machine: X86-64
+          - runner: ubuntu-24.04-arm
+            platform: linux-arm64
+            target: aarch64-unknown-linux-gnu
+            machine: AArch64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+      # The MicroSandbox build needs libclang and libcap-ng; silod links D-Bus for
+      # keyring's optional Secret Service backend.
+      - name: Install Linux build dependencies
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends build-essential pkg-config libclang-dev libcap-ng-dev libdbus-1-dev cmake
+      - name: Install pinned Rust toolchain
+        run: |
+          set -euo pipefail
+          toolchain=$(python3 -c "import json; print(json.load(open('app/SiloUI/runtime-inputs.json'))['toolchain'])")
+          rustup toolchain install "$toolchain" --profile minimal
+          rustup default "$toolchain"
+      # Pinned, checksummed MicroSandbox, libkrunfw and Git; restores the caches
+      # that main populates and never saves from here.
+      - name: Prepare the runtime
+        timeout-minutes: 45
+        uses: ./.github/actions/prepare-release-runtime
+        with:
+          runner: ${{ matrix.runner }}
+          target: ${{ matrix.target }}
+      - name: Build and package the Linux engine
+        id: package
+        working-directory: app/SiloUI
+        env:
+          PLATFORM: ${{ matrix.platform }}
+          SILO_GITHUB_APP_SLUG: ${{ secrets.SILO_GITHUB_APP_SLUG }}
+          SILO_GITHUB_CLIENT_ID: ${{ secrets.SILO_GITHUB_CLIENT_ID }}
+          SILO_GITHUB_CLIENT_SECRET: ${{ secrets.SILO_GITHUB_CLIENT_SECRET }}
+        run: |
+          set -euo pipefail
+          python3 scripts/package-engine.py --platform "$PLATFORM" --out-dir "$RUNNER_TEMP/engine-release" --source-commit "$GITHUB_SHA"
+          echo "archive=$(basename "$RUNNER_TEMP"/engine-release/*.tar.gz)" >> "$GITHUB_OUTPUT"
+      - name: Verify the Linux archive
+        env:
+          TAG: ${{ needs.tag.outputs.tag }}
+          ARCHIVE: ${{ steps.package.outputs.archive }}
+          PLATFORM: ${{ matrix.platform }}
+          TARGET: ${{ matrix.target }}
+          MACHINE: ${{ matrix.machine }}
+        run: |
+          set -euo pipefail
+          version="${TAG#engine-v}"
+          test "$ARCHIVE" = "silo-engine-$version-$PLATFORM.tar.gz"
+          cd "$RUNNER_TEMP/engine-release"
+          test "$(ls | wc -l)" -eq 2
+          sha256sum -c "$ARCHIVE.sha256"
+          mkdir extracted
+          tar -xzf "$ARCHIVE" -C extracted
+          engine=extracted/silo-engine
+          for executable in silod silo msb git; do
+            readelf -h "$engine/$executable" | grep -q "Machine:.*$MACHINE" || { echo "::error::$executable is not $MACHINE"; exit 1; }
+          done
+          # The silo command is the production channel's, like the manifest.
+          test "$("$engine/silo" --print-channel-identifier)" = org.silo.preview
+          python3 - "$engine" "$version" "$GITHUB_SHA" "$TARGET" <<'PY'
+          import json, sys
+          engine, version, commit, target = sys.argv[1:]
+          info = json.load(open(f'{engine}/release.json'))
+          assert info['engineVersion'] == version and info['sourceCommit'] == commit, info
+          assert info['targets'] == [target], info
+          manifest = json.load(open(f'{engine}/resources/engine-manifest.json'))
+          assert manifest['channelIdentifier'] == 'org.silo.preview', manifest
+          assert manifest['engineBuild'] == f'silo-{commit}', manifest
+          PY
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: silo-engine-${{ matrix.platform }}
+          path: |
+            ${{ runner.temp }}/engine-release/*.tar.gz
+            ${{ runner.temp }}/engine-release/*.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 7
+
   publish:
-    needs: build
+    # Both Linux builds and the macOS build must succeed: a release is never partial.
+    needs: [tag, build, build-linux]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -116,19 +229,25 @@ jobs:
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: silo-engine
+          pattern: silo-engine*
+          merge-multiple: true
           path: engine-release
       - name: Create the engine release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
           EVENT: ${{ github.event_name }}
-          TAG: ${{ needs.build.outputs.tag }}
+          TAG: ${{ needs.tag.outputs.tag }}
           ARCHIVE: ${{ needs.build.outputs.archive }}
         run: |
           set -euo pipefail
           cd engine-release
-          sha256sum -c "$ARCHIVE.sha256"
+          version="${TAG#engine-v}"
+          linux=("silo-engine-$version-linux-x64.tar.gz" "silo-engine-$version-linux-arm64.tar.gz")
+          test "$(ls | wc -l)" -eq 6
+          for archive in "$ARCHIVE" "${linux[@]}"; do
+            sha256sum -c "$archive.sha256"
+          done
           # A tag push already has its tag; a dispatch creates it at the built commit.
           if [[ "$EVENT" == workflow_dispatch ]]; then
             tag_flag=(--target "$GITHUB_SHA")
@@ -137,5 +256,6 @@ jobs:
           fi
           # Not "latest": the Silo app's update feed reads releases/latest.
           gh release create "$TAG" "$ARCHIVE" "$ARCHIVE.sha256" \
+            "${linux[0]}" "${linux[0]}.sha256" "${linux[1]}" "${linux[1]}.sha256" \
             "${tag_flag[@]}" --latest=false --title "Silo engine ${TAG#engine-v}" \
-            --notes "Prebuilt silod for macOS (arm64), built from $GITHUB_SHA. The binary is not code signed: the app that embeds it sets SiloEngineCodeRequirement in the engine Info.plist and signs it. See docs/SiloUI-RELEASES.md#engine-releases."
+            --notes "Prebuilt silod for macOS (arm64) and Linux host engines (x64, arm64), built from $GITHUB_SHA. The macOS binary is not code signed: the app that embeds it sets SiloEngineCodeRequirement in the engine Info.plist and signs it. The Linux archives are not signed either. See docs/SiloUI-RELEASES.md#engine-releases."

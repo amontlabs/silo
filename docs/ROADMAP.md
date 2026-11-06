@@ -150,8 +150,12 @@ Secret Service or file store).
 ([remote hosts](hosts/PLAN.md) phase 2): the Apple code is behind `cfg`, a plain main-thread
 loop replaces AppKit, the manifest sits beside the binary, data, cache and logs follow XDG, the
 socket checks `SO_PEERCRED`, credentials go to a file store, and the daemon needs no GTK. CI
-runs the silod, CLI and client tests on Linux. Still open: the systemd unit, the Linux archives,
-the KVM job and the threat model section.
+runs the silod, CLI and client tests on Linux. Phase 3 added `silod --service`, which installs a
+systemd user unit, the `linux-x64` and `linux-arm64` archives in the engine release workflow
+(built natively on `ubuntu-24.04` and `ubuntu-24.04-arm`), and `.github/workflows/linux-host.yml`,
+which installs the Dev archive on a KVM runner and creates, starts, runs a command in, forks and
+drops a Linux computer through the `silo` command. Still open: an engine release that carries the
+Linux archives, a green run of the KVM job, and the threat model section.
 
 ## 7. Protocol reference and examples
 

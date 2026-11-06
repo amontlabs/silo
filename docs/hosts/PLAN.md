@@ -17,7 +17,7 @@ One pull request per phase, merged when CI is green and the reviews pass.
 | 3 | Linux engine packaging: `silod --service` installs a systemd user unit, `silo-engine-<v>-linux-x64` and `-linux-arm64` archives, a CI job that starts a real Linux computer on a KVM runner | KVM runner: create, start, exec, fork, drop |
 | 4 | `silo host init`: checks the machine can run VMs, installs the engine as a service that starts on boot, turns on Connections, authorizes a controller key, prints the address. `silo host status`. The controller adds the host by address from the CLI or the app | Linux and Mac: init, then add from another engine |
 | 5 | `exec`, `fork -- <cmd>` and the computer-use tools reach computers on other machines (the engine already routes them; the CLI and MCP refuse) | Controller to host: exec, fork with a command, a screenshot |
-| 6 | Threat model: Linux host section (KVM, the socket, the file secret store, the bridge). End-to-end two-machine run and docs | Mac to Linux host, whole flow |
+| 6 | Threat model: Linux host section (KVM, the socket, the file secret store, the bridge, the journal host administrators can read). End-to-end two-machine run and docs | Mac to Linux host, whole flow |
 
 Live checks use the Dev build only, never the production app or its data. Test computers are
 named `e2e-hosts-*` and dropped at the end of each check.
