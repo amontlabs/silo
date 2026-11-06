@@ -1,6 +1,7 @@
 import type { LifecycleStep } from "./lifecycle-progress"
 import type { OperationQueue } from "./operation-queue"
 import type { WorkspaceStorageState } from "./workspace-storage"
+import type { ComputerStep, ComputerTreeNode } from "@/desktop/production-schemas"
 import type { QuietState } from "../../macos-computers/model/macos-computers"
 import type { CheckpointUsage, PendingCheckpointRestore, UnfinishedRestore, ComputerCheckpoint, ComputerCheckpointOperation } from "./checkpoint-source"
 import type { LogLoader, LogQuery } from "./logs"
@@ -333,6 +334,10 @@ export interface ApplicationActions {
   deleteCheckpoint?: (computer: string, checkpointId: string) => Promise<void>
   /** Checkpoint sizes and Delete availability for a computer on this device, by its ID. */
   readCheckpointUsage?: (computerId: string) => Promise<CheckpointUsage>
+  /** The recorded steps of a computer (oldest first); `deviceId` for a computer on another device. */
+  listComputerSteps?: (computerId: string, deviceId?: string) => Promise<ComputerStep[]>
+  /** Every computer on a device with what it was forked from and its pending changes. */
+  readComputerTree?: (deviceId?: string) => Promise<ComputerTreeNode[]>
   readWorkspaceStorage?: (computerId: string) => Promise<WorkspaceStorageState>
   reclaimWorkspaceStorage?: (computerId: string) => Promise<WorkspaceStorageState>
   refreshRepositories?: () => Promise<void>
