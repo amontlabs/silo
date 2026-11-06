@@ -55,7 +55,9 @@ returns the owner's `jobId`, followed with `(deviceId, jobId)` through `operatio
 | `steps.list`, `steps.record`, `computers.tree` | that device | Steps and the fork tree are per engine. |
 | `checkpoints.fork` (and the other `checkpoints.*`), `computers.credentials` | that device | A fork is made next to its source. |
 | `recipes.build`, `list`, `remove` | that device | A recipe's build is a hidden computer and a checkpoint on that device. |
-| Folder forks, `fold --pr`, `ssh-setup`, `ports`, `publish`, `secrets`, `exec` | this device | They read or write this device's folders, SSH configuration, tunnels, Keychain or terminal; the CLI refuses `--device` for them. |
+| `guest.exec`, `guest.exec.start`, `get`, `input` | that device | The command runs in the computer: the owner answers `guest.exec` with its own handler and runs `guest.exec.start` as its own job, which the controller follows by `(deviceId, jobId)`. `silo exec`, `fork -- <command>` and the computer-use driver use them. |
+| `desktop.status`, `desktop.action`, `computerUse.*` | that device | The desktop and the computer-use driver run with the computer; actions are the owner's jobs through `desktop.job`. |
+| Folder forks, `fold --pr`, `ssh-setup`, `ports`, `publish`, `secrets` | this device | They read or write this device's folders, SSH configuration, tunnels or Keychain; the CLI refuses `--device` for them. |
 
 A connected controller can therefore keep, promote and undo changes in the owner's `main` and
 manage its review requests, steps and recipes, with the same access as the controller's other

@@ -451,3 +451,49 @@ async fn every_fork_publishes_the_ports_its_source_publishes() {
         assert!(fork["urls"][0].as_str().unwrap().starts_with("http://"));
     }
 }
+
+#[tokio::test]
+async fn forks_on_another_device_run_their_command_there_and_publish_nothing_here() {
+    const MINI: &str = "mini-0000";
+    let (engine, _) = engine(2, false, &[("try-1", 0, "ok\n"), ("try-2", 3, "no\n")]);
+    let connected = Engine::connect(&engine.socket)
+        .await
+        .unwrap()
+        .on_device(Some(MINI.to_owned()));
+    let sink = |_: &str, _: bool, _: &[u8]| {};
+    let args = many(2, Some("try"), &["make", "test"]);
+    let result = tokio::time::timeout(
+        Duration::from_secs(20),
+        fanout::fork_many(&connected, &args, None, &ignore, &sink),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    for method in [
+        "checkpoints.create",
+        "checkpoints.fork",
+        "computers.start",
+        "guest.exec.start",
+        "guest.exec.get",
+        "operations.job.get",
+    ] {
+        let calls = engine.calls(method);
+        assert!(!calls.is_empty(), "{method} was not sent");
+        assert!(
+            calls.iter().all(|params| params["deviceId"] == MINI),
+            "{method}: {calls:?}"
+        );
+    }
+    let forks = result["forks"].as_array().unwrap();
+    assert_eq!(forks[0]["exitCode"], 0);
+    assert_eq!(forks[0]["stdout"], "ok\n");
+    assert_eq!(forks[1]["exitCode"], 3);
+    for fork in forks {
+        assert!(fork.get("portsError").is_none(), "{fork}");
+        assert_eq!(fork["ports"], json!([]));
+        assert_eq!(fork["urls"], json!([]));
+    }
+    for local in ["network.state", "network.publish", "network.urls"] {
+        assert!(engine.calls(local).is_empty(), "{local} was sent");
+    }
+}

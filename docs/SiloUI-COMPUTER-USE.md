@@ -60,7 +60,13 @@ refreshing the fixture and the table in `usetools::driver_call`):
 The host tools drive forks. They refuse any computer that is not a fork, judged from the
 engine's tree (a source computer exists and the name is not `main`): `main` and an archived
 `main-before-*` are refused like `drop` refuses `main`. Fork `main` with `fork_gui` and drive the
-fork. They only reach computers of this device. Who may call them is decided by the MCP
+fork. With `device` they drive a fork on a connected device: the driver runs there, each
+`guest.exec.*` call goes to that device's engine over Connections (the session polls every
+250 ms instead of 50 ms, since each read is an SSH exchange), and the session is keyed by the
+device and the computer, so it is closed there when the fork is dropped. A call that names a
+device needs it in the agent's `devices:` entry in `.silo/silo.yaml`, like the other MCP changes
+on another device; `computer_use_ready` only reads. `fork_gui` and `silo --device X fork --gui`
+fork, start and wait on that device the same way. Who may call the tools is decided by the MCP
 client's own tool prompts; the `ask`/`auto` mode below is something else.
 
 ## Fork, start, wait

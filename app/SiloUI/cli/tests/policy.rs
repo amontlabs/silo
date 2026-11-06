@@ -114,6 +114,24 @@ async fn a_code_only_change_with_passing_tests_is_kept_without_asking() {
 }
 
 #[tokio::test]
+async fn the_tests_of_a_fork_on_another_device_run_on_that_device() {
+    const MINI: &str = "mini-0000";
+    let (fake, _) = engine(code_diff(), 0, kept());
+    let project_dir = project_with("", RULE);
+    let project = Project::discover(project_dir.path());
+    let connected = Engine::connect(&fake.socket)
+        .await
+        .unwrap()
+        .on_device(Some(MINI.to_owned()));
+    let value = request(&connected, &project, None).await;
+    assert_eq!(value["status"], "kept", "{value}");
+    let exec = &fake.calls("guest.exec")[0];
+    assert_eq!(exec["deviceId"], MINI);
+    assert_eq!(exec["argv"], json!(["sh", "-c", "make test"]));
+    assert_eq!(fake.calls("changes.keep")[0]["deviceId"], MINI);
+}
+
+#[tokio::test]
 async fn failing_tests_leave_a_review_request() {
     let (fake, _) = engine(code_diff(), 1, kept());
     let project_dir = project_with("", RULE);

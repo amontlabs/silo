@@ -9,6 +9,10 @@
 //! nothing (`tools/list`, `get_desktop_state`) are repeated on a new session after the driver
 //! exited. Screenshots never travel on the driver's standard output: the driver writes the PNG
 //! to a temporary file in the computer, which is read back in parts and removed.
+//!
+//! A computer on another device is driven the same way: the `Engine` acting on that device
+//! adds its `deviceId` to each of these calls, and the controller's engine sends them to the
+//! owner, whose job ids the session follows.
 
 use std::time::{Duration, Instant};
 
@@ -35,6 +39,16 @@ pub fn driver_argv(kind: &str) -> Vec<String> {
 
 const RETAIN_OUTPUT_BYTES: u64 = 960 * 1024;
 const POLL: Duration = Duration::from_millis(50);
+/// The poll on a computer of another device, where every read is an SSH exchange.
+const REMOTE_POLL: Duration = Duration::from_millis(250);
+
+fn poll(engine: &Engine) -> Duration {
+    if engine.device().is_some() {
+        REMOTE_POLL
+    } else {
+        POLL
+    }
+}
 const STDERR_KEEP: usize = 4096;
 /// The longest JSON-RPC line read back; a screenshot never travels in one.
 pub const MAX_LINE: usize = 256 * 1024;
@@ -376,7 +390,7 @@ impl Session {
                 .into());
             }
             if !self.pull(engine).await? {
-                tokio::time::sleep(POLL).await;
+                tokio::time::sleep(poll(engine)).await;
             }
         }
     }

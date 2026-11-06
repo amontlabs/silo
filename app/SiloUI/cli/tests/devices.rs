@@ -113,7 +113,6 @@ async fn an_unknown_device_names_the_connected_ones() {
 async fn commands_that_work_on_this_device_refuse_a_device() {
     let engine = engine();
     for args in [
-        vec!["--device", "mac mini", "exec", "main", "--", "ls"],
         vec!["--device", "mac mini", "secrets", "list"],
         vec!["--device", "mac mini", "fork", "./repo"],
         vec!["--device", "mac mini", "ports", "main"],
@@ -291,4 +290,84 @@ async fn nothing_that_would_run_here_is_sent_under_device() {
     .await;
     assert!(engine.calls("secrets.list").is_empty());
     assert!(engine.calls("github.state").is_empty());
+}
+
+/// An engine connected to the Mac mini whose computers live there: `main`, and `t1` once
+/// it is forked. Commands run in them exit 0 with `hi` on stdout.
+fn host_engine() -> FakeEngine {
+    let forked = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    FakeEngine::start(move |method, _| {
+        use std::sync::atomic::Ordering;
+        match method {
+            "connections.devices.list" => Ok(json!([
+                {"id": MINI, "name": "Mac mini", "address": "ssh://mini"}
+            ])),
+            "computers.list" if forked.load(Ordering::SeqCst) => {
+                Ok(listing(&[("main", "running"), ("t1", "running")]))
+            }
+            "computers.list" => Ok(listing(&[("main", "running")])),
+            "guest.exec" => Ok(json!({"exitCode": 0, "signal": null,
+                "stdout": b"hi\n".to_vec(), "stderr": []})),
+            "steps.record" => Ok(json!({"step": {"number": 1}})),
+            "checkpoints.fork" => {
+                forked.store(true, Ordering::SeqCst);
+                Ok(json!({"jobId": "job:1"}))
+            }
+            "computers.start" => Ok(json!({"jobId": "job:1"})),
+            "guest.exec.start" => Ok(json!({"jobId": "job:2"})),
+            "guest.exec.get" => Ok(
+                json!({"state": "exited", "exitCode": 0, "firstRetainedSeq": 1,
+                "output": [{"seq": 1, "stream": "stdout", "data": b"hi\n".to_vec()}]}),
+            ),
+            "operations.job.get" => Ok(fake_engine::finished(json!({"exitCode": 0}))),
+            "operations.job.acknowledge" => Ok(Value::Null),
+            other => Err(("internal", format!("unexpected {other}"))),
+        }
+    })
+}
+
+#[tokio::test]
+async fn exec_runs_the_command_on_the_device_the_computer_is_on() {
+    let engine = host_engine();
+    let args = ["--device", "mac mini", "exec", "main", "--", "ls", "-l"];
+    assert_eq!(exit_code(&engine, &args).await, 0);
+    let ran = engine.calls("guest.exec");
+    assert_eq!(ran.len(), 1);
+    assert_eq!(ran[0]["deviceId"], MINI);
+    assert_eq!(ran[0]["computerId"], "id-main");
+    assert_eq!(ran[0]["argv"], json!(["ls", "-l"]));
+    // The step is recorded on that device too.
+    assert_eq!(engine.calls("steps.record")[0]["deviceId"], MINI);
+}
+
+#[tokio::test]
+async fn fork_with_a_command_forks_and_runs_on_the_device() {
+    let engine = host_engine();
+    let args = [
+        "--device", "mac mini", "--json", "fork", "main", "--name", "t1", "--", "make", "test",
+    ];
+    assert_eq!(exit_code(&engine, &args).await, 0);
+    for method in [
+        "checkpoints.fork",
+        "computers.start",
+        "guest.exec.start",
+        "guest.exec.get",
+        "operations.job.get",
+        "steps.record",
+    ] {
+        let calls = engine.calls(method);
+        assert!(!calls.is_empty(), "{method} was not sent");
+        assert!(
+            calls.iter().all(|params| params["deviceId"] == MINI),
+            "{method}: {calls:?}"
+        );
+    }
+    assert_eq!(
+        engine.calls("guest.exec.start")[0]["argv"],
+        json!(["make", "test"])
+    );
+    // Ports and URLs are this device's: nothing is published or read for a fork there.
+    for local in ["network.state", "network.publish", "network.urls"] {
+        assert!(engine.calls(local).is_empty(), "{local} was sent");
+    }
 }
