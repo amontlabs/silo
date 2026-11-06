@@ -2278,3 +2278,34 @@ fn every_commit_is_checked_for_credentials_even_when_a_later_one_deletes_the_fil
     assert!(list("").contains(&".env".to_owned()));
     assert!(list("").contains(&"a.txt".to_owned()));
 }
+
+#[test]
+fn file_write_creates_missing_parents_and_applies_the_mode() {
+    use std::{io::Write, os::unix::fs::PermissionsExt, process::Stdio};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join(".claude/nested/settings.json");
+    let os = if cfg!(target_os = "macos") {
+        Os::Macos
+    } else {
+        Os::Linux
+    };
+    let cmd = scripts::file_write(os, path.to_str().unwrap(), "600", b"{}");
+    // The script chowns new directories and the file to the owner of the nearest existing
+    // parent, found before anything is created.
+    assert!(cmd.script.contains("ao=$("), "{}", cmd.script);
+    assert!(cmd.script.contains("chown \"$ao\" \"$x\""));
+    assert!(cmd.script.contains("else o=\"$ao\"; fi"));
+    let mut child = std::process::Command::new("bash")
+        .arg("-c")
+        .arg(&cmd.script)
+        .env("A_path", path.to_str().unwrap())
+        .env("A_mode", "600")
+        .stdin(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child.stdin.take().unwrap().write_all(b"{}").unwrap();
+    assert!(child.wait().unwrap().success());
+    assert_eq!(std::fs::read(&path).unwrap(), b"{}");
+    let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o600);
+}

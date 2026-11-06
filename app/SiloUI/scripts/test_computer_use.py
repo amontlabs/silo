@@ -737,6 +737,29 @@ class Registration(Guest):
             'type': 'stdio', 'command': str(cu.LAUNCHER), 'args': [],
             'env': {'CUA_DRIVER_RS_TELEMETRY_ENABLED': '0', 'CUA_DRIVER_RS_UPDATE_CHECK': 'false'}})
 
+    def test_root_owned_agent_files_and_directories_are_given_back_to_the_account(self):
+        self.claude_settings.parent.mkdir(parents=True)
+        self.claude_settings.write_text('{}')
+        self.codex.parent.mkdir(parents=True)
+        self.codex.write_text('')
+        owner = mock.Mock(pw_uid=1000, pw_gid=1000)
+        real = os.lstat
+        class Root:
+            def __init__(self, info):
+                self.st_uid, self.st_mode = 0, info.st_mode
+        chowned = []
+        with mock.patch.object(cu.os, 'geteuid', return_value=0), \
+                mock.patch.object(cu.pwd, 'getpwnam', return_value=owner), \
+                mock.patch.object(cu, 'HOME', str(self.claude_state.parent)), \
+                mock.patch.object(Path, 'lstat', lambda path: Root(real(path))), \
+                mock.patch.object(cu.os, 'lchown', lambda path, uid, gid: chowned.append((Path(path), uid, gid))):
+            cu.repair_agent_files()
+        paths = {path for path, _, _ in chowned}
+        for expected in (self.claude_settings, self.claude_settings.parent, self.codex, self.codex.parent):
+            self.assertIn(expected, paths)
+        self.assertNotIn(self.claude_state.parent, paths)
+        self.assertTrue(all((uid, gid) == (1000, 1000) for _, uid, gid in chowned))
+
     def test_codex_gets_the_same_server_in_its_own_section(self):
         cu.apply('auto')
         server = self.codex_config()['mcp_servers']['cua-driver']

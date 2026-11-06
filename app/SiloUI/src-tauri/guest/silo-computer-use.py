@@ -49,6 +49,7 @@ import platform
 import pwd
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tarfile
@@ -671,6 +672,27 @@ def as_user():
         os.setegid(0)
 
 
+def repair_agent_files():
+    """As root: gives the working account back the agent configuration files it manages (and the
+    directories holding them) when something running as root, such as a keep, left them root-owned."""
+    if os.geteuid() != 0:
+        return
+    try:
+        account = pwd.getpwnam(USER)
+    except KeyError:
+        return
+    for path in (CLAUDE_STATE, CLAUDE_SETTINGS, CODEX_CONFIG):
+        for target in (path, path.parent):
+            if target == Path(HOME):
+                continue
+            try:
+                info = target.lstat()
+                if info.st_uid == 0 and not stat.S_ISLNK(info.st_mode):
+                    os.lchown(target, account.pw_uid, account.pw_gid)
+            except OSError:
+                continue
+
+
 def write_text(path, text, mode=0o600):
     """Atomically replaces `path` (an existing file keeps its permissions)."""
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -898,6 +920,7 @@ def configure(names, approval):
     `(registered, pending, failed)`: pending agents are not installed yet."""
     entry = server_entry()
     registered, pending, failed = [], [], []
+    repair_agent_files()
     for name in names:
         if not binary_installed(AGENTS[name]):
             pending.append(name)
@@ -950,6 +973,7 @@ def remove_legacy():
     """Removes what the earlier LCU setup left: its agent entries (a file that does not exist
     is not created; Silo's own registration and approval stay as they are), its skills, data
     and Pi package, /opt/lcu, its launchers and its receipt."""
+    repair_agent_files()
     for name, editor in EDITORS.items():
         try:
             with as_user():
