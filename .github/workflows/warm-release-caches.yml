@@ -39,6 +39,12 @@ jobs:
         include:
           - runner: macos-15
             target: aarch64-apple-darwin
+          # The Linux host engines' runtimes (engine-release.yml, linux-host.yml). These
+          # warm the runtime and Cargo download caches only: no Linux app is built.
+          - runner: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     env:
@@ -61,6 +67,10 @@ jobs:
           python-version: '3.12'
       - name: Validate runtime inputs before installation or downloads
         run: node app/SiloUI/scripts/preflight.mjs
+      # What the MicroSandbox build needs on Linux, as in engine-release.yml.
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends build-essential pkg-config libclang-dev libcap-ng-dev libdbus-1-dev cmake
       - name: Install pinned Rust toolchain
         shell: bash
         run: |
@@ -75,12 +85,15 @@ jobs:
           target: ${{ matrix.target }}
           save: 'true'
       - name: Install frontend toolchain
+        if: runner.os == 'macOS'
         run: npm --prefix app/SiloUI ci
       - name: Resolve exact public dependency identity
+        if: runner.os == 'macOS'
         id: dependencies
         working-directory: app/SiloUI
         run: python3 scripts/release-dependency-cache.py prepare --target '${{ matrix.target }}' --state "$RUNNER_TEMP/release-dependencies" >> "$GITHUB_OUTPUT"
       - name: Check existing public dependency cache
+        if: runner.os == 'macOS'
         id: dependency-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -88,15 +101,15 @@ jobs:
           key: ${{ steps.dependencies.outputs.key }}
           lookup-only: true
       - name: Compile with synthetic configuration on cache miss
-        if: steps.dependency-cache.outputs.cache-hit != 'true'
+        if: runner.os == 'macOS' && steps.dependency-cache.outputs.cache-hit != 'true'
         working-directory: app/SiloUI
         run: python3 scripts/measure-command.py dependency-warm-build -- python3 scripts/release-dependency-cache.py build --target '${{ matrix.target }}' --state "$RUNNER_TEMP/release-dependencies"
       - name: Export and audit reviewed public dependencies only
-        if: steps.dependency-cache.outputs.cache-hit != 'true'
+        if: runner.os == 'macOS' && steps.dependency-cache.outputs.cache-hit != 'true'
         working-directory: app/SiloUI
         run: python3 scripts/release-dependency-cache.py export --target '${{ matrix.target }}' --state "$RUNNER_TEMP/release-dependencies"
       - name: Save audited public dependency cache from main only
-        if: github.ref == 'refs/heads/main' && steps.dependency-cache.outputs.cache-hit != 'true'
+        if: runner.os == 'macOS' && github.ref == 'refs/heads/main' && steps.dependency-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/release-dependencies/cache

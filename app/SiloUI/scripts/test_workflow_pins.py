@@ -93,7 +93,19 @@ class WorkflowInputTests(unittest.TestCase):
         self.assertNotIn('unknown-linux-gnu', rust)
         self.assertIn('runner: macos-15', release)
         self.assertNotIn('unknown-linux-gnu', release)
-        self.assertNotIn('unknown-linux-gnu', warm)
+        # The warmer fills the Linux host engines' runtime caches, and builds no Linux app.
+        self.assertEqual(re.findall(r'- runner: (\S+)\n\s+target: (\S+)', warm), [
+            ('macos-15', 'aarch64-apple-darwin'),
+            ('ubuntu-24.04', 'x86_64-unknown-linux-gnu'),
+            ('ubuntu-24.04-arm', 'aarch64-unknown-linux-gnu'),
+        ])
+        self.assertIn("save: 'true'", warm)
+        for name in ('Install frontend toolchain', 'Resolve exact public dependency identity',
+                     'Check existing public dependency cache', 'Compile with synthetic configuration on cache miss',
+                     'Export and audit reviewed public dependencies only', 'Save audited public dependency cache from main only'):
+            guard = re.search(rf'(?m)^      - name: {re.escape(name)}\n        if: (.+)$', warm)
+            self.assertIsNotNone(guard, name)
+            self.assertTrue(guard[1].startswith("runner.os == 'macOS'"), name)
         self.assertNotIn('unknown-linux-gnu', benchmark)
         self.assertNotIn('Collect and verify Linux assets', platform)
         self.assertFalse((GITHUB / 'workflows/linux-verification.yml').exists())
