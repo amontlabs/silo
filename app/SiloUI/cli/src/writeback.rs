@@ -317,6 +317,29 @@ pub fn edit(text: &str, wanted: &Additions) -> Result<String, String> {
     Ok(edited)
 }
 
+/// Replaces the file's contents through a temporary file next to it, so a reader never sees
+/// half a file. A symlink is followed (its target is replaced, the link stays) and the
+/// original permissions are kept.
+fn replace_file(path: &Path, text: &str) -> std::io::Result<()> {
+    let target = fs::canonicalize(path)?;
+    let permissions = fs::metadata(&target)?.permissions();
+    let name = target
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let temporary = target.with_file_name(format!(
+        ".{name}.silo-tmp-{}",
+        uuid::Uuid::new_v4().simple()
+    ));
+    let wrote = fs::write(&temporary, text)
+        .and_then(|()| fs::set_permissions(&temporary, permissions))
+        .and_then(|()| fs::rename(&temporary, &target));
+    if wrote.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    wrote
+}
+
 /// Appends what a keep brought to the recipe file and says what happened:
 /// `{file, packages, files, skipped}` or `{file, error, packages, files}` (nothing written).
 pub fn apply(path: &Path, wanted: &Additions) -> Result<Value, CliError> {
@@ -336,10 +359,7 @@ pub fn apply(path: &Path, wanted: &Additions) -> Result<Value, CliError> {
     }
     match edit(&text, &fresh) {
         Ok(edited) => {
-            let temporary = path.with_extension("yaml.silo-tmp");
-            let wrote = fs::write(&temporary, edited).and_then(|()| fs::rename(&temporary, path));
-            if let Err(error) = wrote {
-                let _ = fs::remove_file(&temporary);
+            if let Err(error) = replace_file(path, &edited) {
                 return Err(CliError::new(format!(
                     "Cannot write {}: {error}",
                     path.display()
@@ -460,6 +480,31 @@ mod tests {
         assert!(edit(multi, &wanted(&["jq"], &[])).is_err());
         let inline = "packages: {apt: [git]}\n";
         assert!(edit(inline, &wanted(&["jq"], &[])).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn apply_writes_through_a_symlink_and_keeps_the_mode() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("real.yaml");
+        let link = dir.path().join("web.yaml");
+        fs::write(&real, "packages:\n  apt: [git]\n").unwrap();
+        fs::set_permissions(&real, fs::Permissions::from_mode(0o640)).unwrap();
+        symlink(&real, &link).unwrap();
+        let report = apply(&link, &wanted(&["jq"], &[])).unwrap();
+        assert_eq!(report["written"], true);
+        assert!(fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert!(fs::read_to_string(&real).unwrap().contains("jq"));
+        assert_eq!(
+            fs::metadata(&real).unwrap().permissions().mode() & 0o777,
+            0o640
+        );
+        let leftovers = fs::read_dir(dir.path()).unwrap().count();
+        assert_eq!(leftovers, 2, "no temporary file stays");
     }
 
     #[test]

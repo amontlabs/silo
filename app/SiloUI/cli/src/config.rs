@@ -296,9 +296,21 @@ impl Settings {
     /// top-level settings. `auto_keep` of the result is the full rule list (`fold: auto-code`
     /// with no rules is expanded), and `agents` is emptied, so resolving again changes nothing.
     pub fn resolve(settings: Option<Settings>, agent: Option<&str>) -> Option<Settings> {
+        Self::resolve_as(settings, agent, true)
+    }
+
+    /// Like [`Settings::resolve`]. `named` says `--agent` or `SILO_AGENT` named the agent; when
+    /// the name is only the MCP client's self-report, `fold` and `auto_keep` of its entry do
+    /// not apply (what keeps a fork without asking comes from the top level or a named agent),
+    /// while `recipes`, `fork_secrets` and the step settings, which only narrow, still do.
+    pub fn resolve_as(
+        settings: Option<Settings>,
+        agent: Option<&str>,
+        named: bool,
+    ) -> Option<Settings> {
         let mut settings = settings?;
         let agents = std::mem::take(&mut settings.agents);
-        let entry = normalize_agent(agent)
+        let mut entry = normalize_agent(agent)
             .and_then(|wanted| {
                 agents
                     .into_iter()
@@ -308,6 +320,10 @@ impl Settings {
                     .map(|(_, entry)| entry)
             })
             .unwrap_or_default();
+        if !named {
+            entry.fold = None;
+            entry.auto_keep = None;
+        }
         let fold = entry.fold.unwrap_or(settings.fold);
         let rules = match (entry.auto_keep, entry.fold) {
             (Some(rules), _) => rules,
@@ -659,8 +675,18 @@ impl Project {
     /// The settings file as they apply to `agent` (see [`Settings::resolve`]); the only way
     /// the commands and the MCP server read settings.
     pub fn load_settings(&self, agent: Option<&str>) -> Result<Option<Settings>, CliError> {
+        self.load_settings_as(agent, true)
+    }
+
+    /// [`Project::load_settings`] for an agent that may be only the MCP client's self-reported
+    /// name (`named` false); see [`Settings::resolve_as`].
+    pub fn load_settings_as(
+        &self,
+        agent: Option<&str>,
+        named: bool,
+    ) -> Result<Option<Settings>, CliError> {
         let loaded = self.settings.as_deref().map(load_settings).transpose()?;
-        Ok(Settings::resolve(loaded, agent))
+        Ok(Settings::resolve_as(loaded, agent, named))
     }
 
     /// A named recipe: `.silo/recipes/<name>.yaml` of the project, else a built-in one.
@@ -942,6 +968,22 @@ mod tests {
         assert_eq!(Settings::resolve(None, Some("openclaw")), None);
         let again = Settings::resolve(Some(open.clone()), Some("claude-code")).unwrap();
         assert_eq!(again, open);
+    }
+
+    #[test]
+    fn a_client_reported_agent_name_does_not_pick_fold_or_auto_keep() {
+        let loaded = || Some(parse_settings(AGENTS).unwrap());
+        // openclaw says `fold: auto-code`, but only a named agent gets it.
+        let reported = Settings::resolve_as(loaded(), Some("openclaw"), false).unwrap();
+        assert_eq!(reported.fold, Fold::Ask);
+        assert_eq!(reported.auto_keep.len(), 1);
+        assert_eq!(reported.recipes, ["web"]);
+        assert!(reported.fork_secrets.is_empty());
+        // claude-code says `fold: ask`, which would drop the top-level rules for a named one.
+        let asks = Settings::resolve_as(loaded(), Some("claude-code"), false).unwrap();
+        assert_eq!(asks.auto_keep.len(), 1);
+        let named = Settings::resolve_as(loaded(), Some("claude-code"), true).unwrap();
+        assert!(named.auto_keep.is_empty());
     }
 
     #[test]

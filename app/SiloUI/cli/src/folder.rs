@@ -573,6 +573,15 @@ async fn send(
 
 // MARK: Fold
 
+/// Shell that names the fork's working state without touching its index: the tree git would
+/// commit after `add -A`, built in a copy of the index. It sets `$h` (HEAD) and `$tree`.
+/// Hooks are off, and file contents, binary or not, decide the tree.
+const STATE_TREE: &str = "idx=$(git rev-parse --git-path index); \
+    t=$(mktemp \"${TMPDIR:-/tmp}/silo-index.XXXXXX\"); trap 'rm -f \"$t\"' EXIT; \
+    if [ -f \"$idx\" ]; then cp \"$idx\" \"$t\"; else rm -f \"$t\"; fi; \
+    GIT_INDEX_FILE=$t git -c core.hooksPath=/dev/null add -A >/dev/null; \
+    tree=$(GIT_INDEX_FILE=$t git write-tree); h=$(git rev-parse HEAD); ";
+
 fn refused(fork: &str, target: &str, reason: &str, message: String, hint: &str) -> Value {
     json!({
         "status": "refused",
@@ -655,20 +664,22 @@ async fn gather_commits(
     // commits it, so nothing that changed in between is brought along.
     let outbox = format!("{TRANSFER_ROOT}/silo-out-{}", uuid::Uuid::new_v4().simple());
     let remote_bundle = format!("{outbox}/out.bundle");
-    let gather = "set -e; cd \"$1\"; \
-                  if [ -n \"$5\" ]; then \
-                  h=$(git rev-parse HEAD); \
-                  d=$( (git diff HEAD; git ls-files -o --exclude-standard) | { sha256sum 2>/dev/null || shasum -a 256; } | cut -c1-16); \
-                  [ \"$h-$d\" = \"$5\" ] || { echo changed; exit 0; }; fi; \
-                  git add -A; \
-                  git diff --cached --quiet || git commit -q -m \"silo: uncommitted changes in $3\"; \
-                  head=$(git rev-parse HEAD); \
-                  if [ \"$head\" = \"$2\" ]; then echo unchanged; else \
-                  mkdir -p \"$4\"; git bundle create --quiet \"$4/out.bundle\" \"$2..HEAD\"; echo \"$head\"; fi";
+    let gather = format!(
+        "set -e; cd \"$1\"; {STATE_TREE} \
+         if [ -n \"$5\" ]; then [ \"$h-$tree\" = \"$5\" ] || {{ echo changed; exit 0; }}; fi; \
+         if [ \"$tree\" != \"$(git rev-parse 'HEAD^{{tree}}')\" ]; then \
+         c=$(git -c user.name=\"$(git config user.name || echo Silo)\" \
+         -c user.email=\"$(git config user.email || echo silo@localhost)\" \
+         commit-tree \"$tree\" -p HEAD -m \"silo: uncommitted changes in $3\"); \
+         git update-ref HEAD \"$c\"; git reset -q; fi; \
+         head=$(git rev-parse HEAD); \
+         if [ \"$head\" = \"$2\" ]; then echo unchanged; else \
+         mkdir -p \"$4\"; git bundle create --quiet \"$4/out.bundle\" \"$2..HEAD\"; echo \"$head\"; fi"
+    );
     let produced = guest(
         engine,
         &fork.name,
-        gather,
+        &gather,
         &[
             &record.guest_path,
             &record.base,
@@ -1152,13 +1163,11 @@ pub async fn review_digest(
     fork: &Computer,
     record: &Record,
 ) -> Result<String, CliError> {
-    let script = "cd \"$1\" && h=$(git rev-parse HEAD) && \
-                  d=$( (git diff HEAD; git ls-files -o --exclude-standard) | { sha256sum 2>/dev/null || shasum -a 256; } | cut -c1-16) && \
-                  printf '%s-%s' \"$h\" \"$d\"";
+    let script = format!("set -e; cd \"$1\"; {STATE_TREE} printf '%s-%s' \"$h\" \"$tree\"");
     guest(
         engine,
         &fork.name,
-        script,
+        &script,
         &[&record.guest_path],
         "Reading the repository",
     )
@@ -1279,8 +1288,8 @@ async fn make_branch(
                 record.path
             ))
         })?;
-    // The pull request is the host's base plus the fork's commits: commits the host has not
-    // pushed would be published with it.
+    // The pull request is the fork's starting commit plus the fork's commits: commits up to
+    // that start that the host has not pushed would be published with it.
     let upstream = format!("origin/{base}");
     if !repo
         .git
@@ -1298,7 +1307,7 @@ async fn make_branch(
             "log",
             "--oneline",
             "--max-count=20",
-            &format!("{upstream}..HEAD"),
+            &format!("{upstream}..{}", record.base),
         ])
         .await?;
     if !unpushed.is_empty() {

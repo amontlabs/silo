@@ -221,8 +221,10 @@ agents:
 client's name from `initialize` (`clientInfo.name`) is used only when neither is set. The client
 name is self-reported, so `agents:` picks per-agent defaults and is not an access control: an
 entry can only narrow what the top level allows (`recipes` and `fork_secrets` must be subsets of
-the top-level lists, a validation error names the key otherwise), while `fold` and `auto_keep`
-may be set freely. Names are matched in
+the top-level lists, a validation error names the key otherwise). `fold` and `auto_keep` of an
+entry apply only when `--agent` or `SILO_AGENT` names the agent; a client name alone still picks
+the narrowing keys (`recipes`, `fork_secrets`, step settings) but never what is kept without
+asking. Names are matched in
 lowercase with spaces as `-`, so the client `Claude Code` uses `agents.claude-code`. An agent's
 keys replace the top-level ones; keys it leaves out keep the top-level value, and an agent with
 `fold: ask` and no `auto_keep` of its own gets no automatic keep. An unknown agent gets the
@@ -269,15 +271,18 @@ a `Credentials not kept:` line when the diff found credential paths; the review 
 same renderer). The token is `GITHUB_TOKEN`, else the one `gh auth token` prints, and goes in an
 HTTP header for `https` remotes, never in an argument; without one, nothing is pushed. The push
 destination never comes from a fork: for a computer fork it is `https://<git host>/<repo>.git`,
-built here from `--repo`, else `GITHUB_REPOSITORY`, else the `origin` of the host project (the
-git host follows `SILO_GITHUB_API_URL`: `github.com` for the default, the host of a
+built here from `--repo`, else `GITHUB_REPOSITORY` (read only when `GITHUB_ACTIONS` is `true`,
+as on a CI runner), else the `origin` of the host project's `.silo` root; without one of them
+`--repo` is required. The fork's own `origin`, when it names a different OWNER/NAME, is
+refused, and so is an untracked file in the fork that looks like a credential (the patterns of
+the diff's Not kept credentials). The git host follows `SILO_GITHUB_API_URL`: `github.com` for the default, the host of a
 `/api/v3` base otherwise), and anything but `https` is refused. For a folder fork it is the host
-folder's own `origin`, compared with `origin/<base>`: host commits `origin` does not have are
-refused and listed, and the local `silo/<fork>-<id>` branch is deleted after the push.
+folder's own `origin`, and the repository is the one that origin names (a different `--repo` or
+`GITHUB_REPOSITORY` is refused): the commits up to the fork's starting commit are compared with
+`origin/<base>`, host commits `origin` does not have are refused and listed, and the local `silo/<fork>-<id>` branch is deleted after the push.
 `--pr` cannot be combined with `--request`, `--into` or `--dry-run`, and is not an MCP option. The result prints the pull request URL (`prUrl` with `--json`). A fork's
 own credentials are never used and its GitHub access stays read-only. `SILO_GITHUB_API_URL`
-changes the REST base (default `https://api.github.com`; the GitHub Action sets it from `github.api_url`, and tests point it at a local server). The repository is `--repo`, else
-`GITHUB_REPOSITORY`, else parsed from the host's `origin` URL. `silo fold <fork> --pr --json` prints `prUrl` (also in `pullRequest.url`), `branch`, `base` and `repository`; `silo fold <fork> --request --json` prints the request as `request.id`.
+changes the REST base (default `https://api.github.com`; the GitHub Action sets it from `github.api_url`, and tests point it at a local server). The token header goes only to a push whose `https` host is the git host of that base. `silo fold <fork> --pr --json` prints `prUrl` (also in `pullRequest.url`), `branch`, `base` and `repository`; `silo fold <fork> --request --json` prints the request as `request.id`.
 
 When `silo.yaml` exists, `--secret` accepts only names in `fork_secrets`. `silo fork` reads
 `--recipe-file`, else the nearest `.silo/recipe.yaml` (a malformed file is an error). The fork
