@@ -14,7 +14,7 @@ use crate::{
     engine::{build_channel, default_socket, Engine},
     error::CliError,
     fanout::{self, ManyArgs},
-    flows, folder,
+    flows, folder, hosted,
     ops::{self, CreateArgs, DiffArgs, ExecArgs, ForkArgs, Platform},
     pr, render, review, steps,
 };
@@ -78,6 +78,14 @@ pub enum Command {
     },
     /// Show what changed in a computer since it was forked.
     Diff(DiffCommand),
+    /// Ask the hosted reviewer to read a fork's diff (needs reviewer.url or SILO_REVIEWER_URL).
+    Review {
+        /// A computer or a review request id (fr-...).
+        target: String,
+        /// general, packages, code or all (default).
+        #[arg(long, value_name = "LENS")]
+        lens: Option<String>,
+    },
     /// Throw a computer away.
     Drop(DropCommand),
     /// Run a command in a computer.
@@ -265,7 +273,15 @@ pub struct RequestsCommand {
 #[derive(Subcommand, Debug)]
 pub enum RequestsAction {
     /// A request with a fresh diff of its fork and the credentials the fork used.
-    Show { id: String },
+    Show {
+        id: String,
+        /// Also send the diff to the hosted reviewer and print what it finds.
+        #[arg(long)]
+        review: bool,
+        /// With --review: general, packages, code or all (default).
+        #[arg(long, value_name = "LENS", requires = "review")]
+        lens: Option<String>,
+    },
     /// Keep the request's fork into its target, pinned to the digest the request was made from.
     Keep {
         id: String,
@@ -615,9 +631,22 @@ async fn dispatch(
                 let value = review::list(engine, status).await?;
                 emit(json, &value, render::requests_list);
             }
-            Some(RequestsAction::Show { id }) => {
-                let value = review::show(engine, &id, progress).await?;
-                emit(json, &value, render::request_show);
+            Some(RequestsAction::Show { id, review, lens }) => {
+                let mut value = review::show(engine, &id, progress).await?;
+                if review {
+                    let lenses = hosted::parse_lenses(lens.as_deref())?;
+                    let reviewed =
+                        hosted::review_target(engine, settings.as_ref(), &id, &lenses, progress)
+                            .await?;
+                    value["review"] = reviewed;
+                }
+                emit(json, &value, |v| {
+                    let mut text = render::request_show(v);
+                    if v["review"].is_object() {
+                        text.push_str(&format!("\n\n{}", hosted::render(&v["review"])));
+                    }
+                    text
+                });
             }
             Some(RequestsAction::Keep { id, data_ok, .. }) => {
                 let hooks = ops::keep_hooks(recipe.as_ref());
@@ -641,6 +670,13 @@ async fn dispatch(
             }
             emit(json, &value, render::undo);
             return Ok(if value["status"] == "refused" { 2 } else { 0 });
+        }
+        Command::Review { target, lens } => {
+            let lenses = hosted::parse_lenses(lens.as_deref())?;
+            let value =
+                hosted::review_target(engine, settings.as_ref(), &target, &lenses, progress)
+                    .await?;
+            emit(json, &value, hosted::render);
         }
         Command::Diff(diff) => {
             let args = DiffArgs {

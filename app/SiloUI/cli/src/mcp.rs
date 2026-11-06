@@ -112,6 +112,15 @@ pub struct RequestKeepParams {
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
+pub struct ReviewParams {
+    /// A computer, or a review request id such as fr-ab12cd34.
+    pub target: String,
+    /// general, packages, code or all (default).
+    pub lens: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct UpParams {
     /// The recipe `main` is made from when it does not exist (default linux-dev).
     pub recipe: Option<String>,
@@ -564,6 +573,29 @@ impl SiloMcp {
                     compute_baseline: false,
                 };
                 ops::diff(&self.engine().await?, &args, &|_| {}).await
+            }
+            .await,
+        )
+    }
+
+    #[tool(
+        description = "Ask the hosted reviewer (needs reviewer.url or SILO_REVIEWER_URL) to read the diff of a fork or review request through the general, packages and code lenses. Only the diff is sent. Returns findings with severity, file and message under an advisory note; it can miss things, so the person decides what to keep."
+    )]
+    async fn review(&self, Parameters(params): Parameters<ReviewParams>) -> Result<String, String> {
+        show(
+            async {
+                let project = Project::discover(&self.working_directory);
+                let settings =
+                    project.load_settings_as(self.agent().as_deref(), self.agent_named)?;
+                let lenses = crate::hosted::parse_lenses(params.lens.as_deref())?;
+                crate::hosted::review_target(
+                    &self.engine().await?,
+                    settings.as_ref(),
+                    &params.target,
+                    &lenses,
+                    &|_| {},
+                )
+                .await
             }
             .await,
         )

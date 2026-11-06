@@ -228,6 +228,17 @@ pub struct Settings {
     pub auto_keep: Vec<AutoKeepRule>,
     #[serde(default)]
     pub agents: BTreeMap<String, AgentOverride>,
+    /// The hosted reviewer (`silo review`); off without a URL.
+    #[serde(default)]
+    pub reviewer: Option<ReviewerSettings>,
+}
+
+/// `reviewer:` of `.silo/silo.yaml`. The token is never kept here: it is SILO_REVIEWER_TOKEN.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReviewerSettings {
+    #[serde(default)]
+    pub url: Option<String>,
 }
 
 /// How many step checkpoints a computer keeps when `step_checkpoints_keep` is not set.

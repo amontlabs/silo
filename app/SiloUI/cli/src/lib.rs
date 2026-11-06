@@ -11,6 +11,7 @@ pub mod error;
 pub mod fanout;
 pub mod flows;
 pub mod folder;
+pub mod hosted;
 pub mod mcp;
 pub mod ops;
 pub mod pr;
