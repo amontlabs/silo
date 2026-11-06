@@ -428,8 +428,16 @@ impl silo_engine::runtime::RuntimeHost for SilodRuntimeHost {
         self.migration.ensure_ready()
     }
 
+    #[cfg(target_os = "macos")]
     fn runtime_package_kind(&self) -> silo_engine::runtime::RuntimePackageKind {
         silo_engine::runtime::RuntimePackageKind::MacApp
+    }
+
+    /// A Linux engine directory: the runtime library is under the resources
+    /// (`<resources>/microsandbox/<target>/lib`), the tools beside silod.
+    #[cfg(not(target_os = "macos"))]
+    fn runtime_package_kind(&self) -> silo_engine::runtime::RuntimePackageKind {
+        silo_engine::runtime::RuntimePackageKind::Other
     }
 }
 

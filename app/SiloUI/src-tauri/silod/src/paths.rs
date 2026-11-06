@@ -24,6 +24,47 @@ impl SilodPaths {
         Ok(Self::for_home(channel, home, resources))
     }
 
+    #[cfg(target_os = "linux")]
+    pub fn for_home(channel: Channel, home: PathBuf, resources: PathBuf) -> Self {
+        Self::for_home_with(channel, home, resources, |name| env::var_os(name))
+    }
+
+    /// The XDG base directories (data, cache, state for logs), from `variable` or their
+    /// defaults under `home`. The state directory and engine socket stay at
+    /// `Channel::state_dir`, where every client looks on both platforms.
+    #[cfg(target_os = "linux")]
+    pub fn for_home_with(
+        channel: Channel,
+        home: PathBuf,
+        resources: PathBuf,
+        variable: impl Fn(&str) -> Option<std::ffi::OsString>,
+    ) -> Self {
+        // The specification ignores a relative or empty value.
+        let base = |name: &str, default: &str| {
+            variable(name)
+                .map(PathBuf::from)
+                .filter(|path| path.is_absolute())
+                .unwrap_or_else(|| home.join(default))
+        };
+        let data = base("XDG_DATA_HOME", ".local/share").join(channel.identifier());
+        let engine = EnginePaths {
+            app_data: data.clone(),
+            app_config: data,
+            app_cache: base("XDG_CACHE_HOME", ".cache").join(channel.identifier()),
+            app_log: base("XDG_STATE_HOME", ".local/state")
+                .join(channel.identifier())
+                .join("logs"),
+            resources,
+            home: home.clone(),
+        };
+        Self {
+            channel,
+            engine,
+            state_dir: channel.state_dir(&home),
+        }
+    }
+
+    #[cfg(not(target_os = "linux"))]
     pub fn for_home(channel: Channel, home: PathBuf, resources: PathBuf) -> Self {
         let support = home
             .join("Library/Application Support")
@@ -59,11 +100,29 @@ impl SilodPaths {
         EngineIdentity {
             channel: self.channel,
             version: version.to_owned(),
+            #[cfg(target_os = "macos")]
             package_kind: PackageKind::MacApp,
+            #[cfg(not(target_os = "macos"))]
+            package_kind: PackageKind::Other,
         }
     }
 }
 
+/// On Linux the engine is a plain directory: `<dir>/silod` beside its bundled tools, and
+/// `<dir>/resources/` holding `engine-manifest.json` and the runtime resources.
+#[cfg(target_os = "linux")]
+pub fn default_resource_dir(executable: &Path) -> Result<PathBuf, String> {
+    let directory = executable
+        .parent()
+        .ok_or_else(|| "silod executable has no parent directory".to_owned())?;
+    Ok(directory.join(LINUX_RESOURCES_DIR))
+}
+
+/// The resources directory beside a Linux `silod`.
+#[cfg(target_os = "linux")]
+pub const LINUX_RESOURCES_DIR: &str = "resources";
+
+#[cfg(not(target_os = "linux"))]
 pub fn default_resource_dir(executable: &Path) -> Result<PathBuf, String> {
     let macos_dir = executable
         .parent()
@@ -282,6 +341,80 @@ mod tests {
         );
     }
 
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_paths_follow_xdg_and_keep_the_state_dir_where_clients_look() {
+        let home = PathBuf::from("/home/tester");
+        let defaults = |channel| {
+            SilodPaths::for_home_with(channel, home.clone(), PathBuf::from("/r"), |_| None)
+        };
+        let development = defaults(Channel::Development);
+        assert_eq!(
+            development.socket_path(),
+            Path::new("/home/tester/.silo-dev/engine.sock")
+        );
+        assert_eq!(
+            development.engine.app_data,
+            Path::new("/home/tester/.local/share/org.silo.dev")
+        );
+        assert_eq!(development.engine.app_config, development.engine.app_data);
+        assert_eq!(
+            development.engine.app_cache,
+            Path::new("/home/tester/.cache/org.silo.dev")
+        );
+        assert_eq!(
+            development.engine.app_log,
+            Path::new("/home/tester/.local/state/org.silo.dev/logs")
+        );
+        let production = defaults(Channel::Production);
+        assert_eq!(
+            production.socket_path(),
+            Path::new("/home/tester/.silo/engine.sock")
+        );
+        assert_eq!(
+            production.engine.app_data,
+            Path::new("/home/tester/.local/share/org.silo.preview")
+        );
+        assert_eq!(
+            production.identity("0.1.0").package_kind,
+            PackageKind::Other
+        );
+
+        let set =
+            SilodPaths::for_home_with(Channel::Development, home.clone(), PathBuf::new(), |name| {
+                match name {
+                    "XDG_DATA_HOME" => Some("/data".into()),
+                    "XDG_CACHE_HOME" => Some("relative/cache".into()),
+                    "XDG_STATE_HOME" => Some("".into()),
+                    _ => None,
+                }
+            });
+        assert_eq!(set.engine.app_data, Path::new("/data/org.silo.dev"));
+        assert_eq!(
+            set.engine.app_cache,
+            Path::new("/home/tester/.cache/org.silo.dev")
+        );
+        assert_eq!(
+            set.engine.app_log,
+            Path::new("/home/tester/.local/state/org.silo.dev/logs")
+        );
+        assert_eq!(
+            set.state_dir,
+            Path::new("/home/tester/.silo-dev"),
+            "XDG never moves the state directory"
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_resources_sit_beside_the_executable() {
+        assert_eq!(
+            default_resource_dir(Path::new("/opt/silo-engine/silod")).unwrap(),
+            Path::new("/opt/silo-engine/resources")
+        );
+    }
+
+    #[cfg(target_os = "macos")]
     #[test]
     fn channel_paths_are_isolated_and_use_the_engine_socket_name() {
         let home = PathBuf::from("/Users/tester");

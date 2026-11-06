@@ -29,28 +29,28 @@ pub(super) async fn dependencies(
     let params: DependencyReportParams = context.decode_params(params)?;
     require_local_device(context, params.device_id.as_deref())?;
     dependencies::validate_request_id(&params.request_id).map_err(message_error)?;
-    let executable_dir = context
-        .silod_context()
-        .runtime_host()
+    let runtime_host = context.silod_context().runtime_host();
+    let executable_dir = runtime_host
         .bundled_tools_directory()
         .map_err(message_error)?;
     let resource_dir = context.engine_context().paths().resources.clone();
     let frameworks_dir = executable_dir
         .parent()
         .map(|contents| contents.join("Frameworks"));
+    let paths = ProbePaths::new(executable_dir, resource_dir, frameworks_dir);
+    // The runtime library on Linux lives under the resources, where the runtime loads it.
+    #[cfg(target_os = "linux")]
+    let paths = {
+        let library = silo_engine::runtime::bundled_runtime_library(
+            &paths.executable_dir.join("msb"),
+            &paths.resource_dir,
+            runtime_host.runtime_package_kind(),
+        );
+        paths.with_runtime_library(library)
+    };
     // Three probe groups run one after another, each under its own budget, so a report can
     // take close to a minute.
-    let report = blocking(move || {
-        Ok(dependencies::read_report(
-            params.request_id,
-            ProbePaths {
-                executable_dir,
-                resource_dir,
-                frameworks_dir,
-            },
-        ))
-    })
-    .await?;
+    let report = blocking(move || Ok(dependencies::read_report(params.request_id, paths))).await?;
     let report: silo_api::methods::device::DependencyReport = serde_json::to_value(report)
         .and_then(serde_json::from_value)
         .map_err(|error| DispatchError::internal(error.to_string()))?;

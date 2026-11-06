@@ -104,6 +104,7 @@ impl Platform for ServicesPlatform {
 }
 
 /// The Mac's own build (`kern.osversion`), which a saved machine state is tied to.
+#[cfg(target_os = "macos")]
 fn host_build() -> String {
     let name = c"kern.osversion";
     let mut buffer = [0u8; 64];
@@ -124,6 +125,13 @@ fn host_build() -> String {
     String::from_utf8_lossy(&buffer[..size.min(buffer.len())])
         .trim_end_matches('\0')
         .to_owned()
+}
+
+/// Only a macOS computer's saved state is tied to the host build, and a Linux host runs none,
+/// so the journal records no build there (as the engine's own checkpoints do).
+#[cfg(not(target_os = "macos"))]
+fn host_build() -> String {
+    String::new()
 }
 
 /// Runtime access for stopping computers and saving Linux ones.
