@@ -23,16 +23,23 @@ x main 'ps -eo pid,user,comm,args | grep -i "[o]penclaw" | cut -c1-150'
 x main 'pgrep -fc "[o]penclaw-gateway"' | sed 's/^/gateway processes in main: /'
 check "O1 the gateway runs in main as openclaw-gateway" $([ "$(x main 'pgrep -c -f "[o]penclaw-gateway"' | tail -1)" -ge 1 ]; echo $?) ""
 echo "== O2 control fork of main (no recipe lists): the gateway comes up again, the files stay"
-c=e2e-final-claw-ctl; "$SILO" fork main --name $c > "$RAW/claw-ctl.out" 2>&1; "$SILO" start $c >/dev/null 2>&1; say "waiting up to 150 s for the gateway to appear in the control fork"
-for i in $(seq 30); do [ "$(x $c 'pgrep -c -f "[o]penclaw-gateway"' | tail -1)" -ge 1 ] && break; sleep 5; done; say "control fork: gateway seen after ~$((i*5)) s (30 loops = not seen)"
-x $c 'ps -eo pid,comm,args | grep -i "[o]penclaw" | cut -c1-110'; "$SILO" status $c | grep -i quiet
-check "O2 control: gateway runs in the fork (what quiet must prevent)" $([ "$(x $c 'pgrep -c -f "[o]penclaw-gateway"' | tail -1)" -ge 1 ]; echo $?) ""
+echo "-- OpenClaw keeps a single-gateway lock in ~/.openclaw/state/openclaw.sqlite; a fork copies main's fresh heartbeat,"
+echo "-- so the fork's first boot start is refused until the heartbeat is 90 s old and nothing retries it. The check"
+echo "-- therefore restarts each fork once the copied heartbeat is stale and looks at the gateway after that boot."
+gw() { x $1 'pgrep -c -f "[o]penclaw-gateway"' | tail -1; }
+# restart_stale C T0: stop and start C once at least 95 s have passed since T0 (the fork), then wait up to 60 s for a gateway
+restart_stale() { local w; w=$(python3 -c "print(max(0, int(95 - ($(now) - $2))))"); say "waiting ${w} s until main's copied heartbeat is stale, then restarting $1"; sleep "$w"
+  "$SILO" stop $1 >/dev/null 2>&1; "$SILO" start $1 >/dev/null 2>&1; for i in $(seq 12); do [ "$(gw $1)" -ge 1 ] && break; sleep 5; done; }
+c=e2e-final-claw-ctl; t0=$(now); "$SILO" fork main --name $c > "$RAW/claw-ctl.out" 2>&1; "$SILO" start $c >/dev/null 2>&1; sleep 20
+echo "first boot: gateway processes $(gw $c); $(xs $c 'grep -ho "GatewayLockNamespaceError[^.]*\.[^.]*\. holder [^,]*" /tmp/openclaw/*.log | tail -1')"
+restart_stale $c "$t0"; x $c 'ps -eo pid,comm,args | grep -i "[o]penclaw" | cut -c1-110'; "$SILO" status $c | grep -i quiet
+check "O2 control: gateway runs in the fork after a restart (what quiet must prevent)" $([ "$(gw $c)" -ge 1 ]; echo $?) ""
 xs $c 'test -e ~/.openclaw/.env'; check "O2 control: .env is carried (no scrub list)" $? ""
 drop_one $c
 echo "== O3 quiet fork: --recipe-file with quiet [openclaw-gateway, openclaw], scrub [/home/silo/.openclaw/credentials, /home/silo/.openclaw/.env]"
-q=e2e-final-claw; "$SILO" fork main --name $q --recipe-file "$PROJ/.silo/recipes/openclaw.yaml" > "$RAW/claw-fork.out" 2>&1; "$SILO" start $q >/dev/null 2>&1
+q=e2e-final-claw; t0=$(now); "$SILO" fork main --name $q --recipe-file "$PROJ/.silo/recipes/openclaw.yaml" > "$RAW/claw-fork.out" 2>&1; "$SILO" start $q >/dev/null 2>&1
 check "O3 fork started" $([ "$(state $q)" = running ]; echo $?) ""
-say "settle 45 s"; sleep 45
+restart_stale $q "$t0"
 echo "-- processes matching openclaw in the quiet fork:"; x $q 'ps -eo pid,comm,args | grep -i "[o]penclaw" | cut -c1-110; echo count=$(pgrep -c -f "[o]penclaw")'
 "$SILO" status $q | grep -i quiet; "$SILO" status $q --json > "$RAW/claw-status.json"
 check "O3 no openclaw gateway process in the fork" $([ "$(x $q 'pgrep -c -f "[o]penclaw-gateway"' | tail -1)" = 0 ]; echo $?) ""

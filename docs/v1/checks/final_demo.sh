@@ -57,8 +57,8 @@ echo "fork $fh: before [$b1] after [$b2]"; echo "main $mh (control): before [$m1
 "$SILO" status $q | grep -i quiet; "$SILO" status $q --json > "$RAW/quiet-status.json"
 python3 -c "
 import json;q=json.load(open('$RAW/quiet-status.json')).get('quiet') or {}
-raise SystemExit(0 if q.get('applied') and 'final-poller' in json.dumps(q.get('stop')) else 1)"
-check "Q1 status quiet record: applied, final-poller stopped" $? "$(python3 -c "import json;print(json.dumps(json.load(open('$RAW/quiet-status.json')).get('quiet')))")"
+raise SystemExit(0 if q.get('applied') and {'final-poller', 'poller.py'} <= set(q.get('stop') or []) else 1)"
+check "Q1 status quiet record: applied, the final-poller service and its poller.py process stopped" $? "$(python3 -c "import json;print(json.dumps(json.load(open('$RAW/quiet-status.json')).get('quiet')))")"
 x $q 'ls /etc/cron.d; crontab -l 2>&1 | head -2; ls /etc/xdg/autostart | grep -i final'
 drop_one $q
 }
