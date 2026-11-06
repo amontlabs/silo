@@ -2142,8 +2142,15 @@ mod tests {
             .call("a", MethodName::DisplayShow, json!({"computerId": id}))
             .await
             .unwrap_err();
+        // Only an Apple silicon Mac shows a macOS computer; any other host refuses them all.
+        #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
         assert!(
             matches!(stopped.code, ErrorCode::NotRunning) || stopped.message.contains("signed"),
+            "{stopped:?}"
+        );
+        #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+        assert_eq!(
+            stopped.message, "macOS computers need a Mac with Apple silicon.",
             "{stopped:?}"
         );
     }

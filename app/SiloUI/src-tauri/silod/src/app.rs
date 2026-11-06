@@ -1,31 +1,12 @@
-use std::{
-    ffi::c_void,
-    sync::{
-        atomic::{AtomicI32, Ordering},
-        Arc,
-    },
-    thread,
-    time::Duration,
-};
+use std::{ffi::c_void, sync::Arc};
 
 use objc2::{rc::autoreleasepool, MainThreadMarker};
 use objc2_app_kit::{
     NSApplication, NSApplicationActivationPolicy, NSEvent, NSEventModifierFlags, NSEventType,
 };
-use silo_engine::context::{self, EngineContext, MainThread, ProcessControl};
-use tokio::{runtime::Builder, sync::oneshot};
+use silo_engine::context::MainThread;
 
-use crate::{
-    context::SilodContext,
-    dispatcher::Dispatcher,
-    identity,
-    ownership::{OwnerAcquisition, OwnerLease},
-    paths::{default_resource_dir, ensure_private_directory, SilodPaths},
-    service,
-    socket::{EngineServer, SystemPeerEuidProvider},
-};
-
-pub const RESTART_EXIT_CODE: i32 = 75;
+use crate::{agent, paths::default_resource_dir, process::AppProcessControl, service};
 
 /// Runs the alias ProxyCommand helper from the bundled silod binary. The bundle manifest
 /// selects its channel before the engine-socket client reads channel-specific state.
@@ -60,51 +41,17 @@ pub fn run_remote_bridge(args: &[String]) -> Result<i32, String> {
 }
 
 pub fn run_agent() -> Result<i32, String> {
-    set_private_umask();
+    agent::set_private_umask();
     let executable = std::env::current_exe().map_err(|error| error.to_string())?;
     let resources = default_resource_dir(&executable)?;
     let manifest = service::current_bundle_manifest()?;
-    let channel = initialize_channel(&manifest)?;
-    let paths = SilodPaths::resolve(channel, resources)?;
-    let euid = unsafe { libc::geteuid() };
-    ensure_private_directory(&paths.state_dir, euid).map_err(|error| error.to_string())?;
-
-    // The lock and version record are established before the engine touches state
-    // or accepts connections. A losing instance exits without unlinking anything.
-    let owner = OwnerLease::acquire(
-        &paths,
-        &manifest.engine_version,
-        &manifest.engine_build,
-        euid,
-    )?;
-    let owner = match owner {
-        OwnerAcquisition::Acquired(owner) => owner,
-        OwnerAcquisition::NotOwner(reason) => {
-            eprintln!("silod: {reason}");
-            return Ok(0);
-        }
+    let Some(owned) = agent::acquire(&manifest, resources)? else {
+        return Ok(0);
     };
-    let local_device = identity::load_or_create(&paths.state_dir, euid)?;
-
-    let engine_version = manifest.engine_version;
-    autoreleasepool(|_| run_appkit(paths, local_device, owner, euid, engine_version))
+    autoreleasepool(|_| run_appkit(owned))
 }
 
-fn initialize_channel(
-    manifest: &crate::manifest::EngineManifest,
-) -> Result<silo_engine::channel::Channel, String> {
-    let channel = manifest.channel()?;
-    silo_engine::channel::init(&manifest.channel_identifier);
-    Ok(channel)
-}
-
-fn run_appkit(
-    paths: SilodPaths,
-    local_device: identity::LocalDeviceIdentity,
-    owner: OwnerLease,
-    euid: u32,
-    engine_version: String,
-) -> Result<i32, String> {
+fn run_appkit(owned: agent::Owned) -> Result<i32, String> {
     let mtm = MainThreadMarker::new()
         .ok_or_else(|| "silod must initialize AppKit on the process main thread".to_owned())?;
     let application = NSApplication::sharedApplication(mtm);
@@ -142,268 +89,22 @@ fn run_appkit(
         }))
         .unwrap_or_else(|error| eprintln!("silod: could not schedule AppKit shutdown: {error}"));
     }));
-    let context = Arc::new(SilodContext::new(
-        paths.engine.clone(),
-        paths.identity(&engine_version),
-        local_device,
-        Arc::new(AppKitMainThread),
-        process.clone(),
-    ));
-    context.job_registry()?;
-    context::install(context.clone())?;
-    // Saved files are converted to the current vocabulary before anything reads them.
-    crate::startup::prepare_stored_data()?;
-    context.install_queue_events();
-    // Checkpoint records written before automatic checkpoints existed become manual ones,
-    // once, before anything reads them.
-    silo_engine::checkpoints::upgrade_layouts(context.as_ref(), &context.migration_controller())?;
-    // Computers made before the network bootstrap existed are converted once per launch. Start
-    // and computer-changing work stay closed until the pass ends; the pass boots guests, so it
-    // runs on its own thread and waits for the AppKit loop below to start.
-    silo_engine::macos_computers::begin_proxy_bootstrap_migration();
-    start_proxy_bootstrap_migration(context.clone());
-    // Resumes computers a previous engine update saved, before anything else advances them,
-    // and starts the engine's own update schedule.
-    let update_recovery = crate::methods::services::start(context.clone());
-    // The engine watches its computers whether or not a client is connected (95 A-26).
-    crate::methods::computers::install_health_watch(context.clone());
-    crate::methods::access::install(context.clone())?;
-    crate::methods::access::start_connections(context.clone())?;
-
-    let storage = silo_engine::runtime_migration::selected_runtime_storage(&paths.engine.app_data)?;
-    let runtime_home =
-        silo_engine::runtime::runtime_home_alias(&paths.engine.home, &storage.join("microsandbox"));
-    silo_engine::host_push_operations::reconcile_jobs_before_serving(
-        context.as_ref(),
-        &runtime_home,
-    )?;
-    silo_engine::backup_controller::reconcile_jobs_before_serving(context.as_ref())?;
-
-    let runtime = Builder::new_multi_thread()
-        .enable_all()
-        .thread_name("silod-io")
-        .build()
-        .map_err(|error| format!("Could not create Tokio runtime: {error}"))?;
-    // `UnixListener::from_std` registers its fd with the current Tokio reactor.
-    // Bind while the runtime is entered, even though the listener is later
-    // driven on the dedicated I/O thread.
-    let _runtime_context = runtime.enter();
-    crate::methods::remote::install_runtime(runtime.handle().clone());
-    silo_engine::changes::fork_base::install(context.clone());
-    // The exports controller is installed at boot: it settles an interrupted operation's
-    // journal before any client can start a new one.
-    let exports = crate::startup::install_exports(&context);
-    let server = EngineServer::bind(
-        paths.socket_path(),
-        euid,
-        Arc::new(SystemPeerEuidProvider),
-        Arc::new(Dispatcher::core(context.clone())),
-    )?;
-    drop(_runtime_context);
-    let (shutdown_tx, shutdown_rx) = oneshot::channel();
-    let signal_context = context.clone();
-    let server_thread = thread::Builder::new()
-        .name("silod-runtime".to_owned())
-        .spawn(move || {
-            runtime.spawn(async move {
-                match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
-                    Ok(mut terminate) => {
-                        if terminate.recv().await.is_some() {
-                            // SIGTERM is a session end: no prompt, bounded, never cancelled.
-                            crate::methods::services::session_end(signal_context);
-                        }
-                    }
-                    Err(error) => eprintln!("silod: could not install SIGTERM handler: {error}"),
-                }
-            });
-            runtime.block_on(server.run(shutdown_rx));
-        })
-        .map_err(|error| format!("Could not start the I/O runtime: {error}"))?;
-
-    // Launch migration, computer-use pass, engine timers and the launch pass (05 §7).
-    crate::startup::start_background(context.clone(), exports, update_recovery);
+    let serving = agent::serve(owned, Arc::new(AppKitMainThread), process.clone())?;
 
     // The delegate keeps the process alive when the last VM window closes and sends every
     // AppKit quit request (Dock Quit while a VM window is open, logout, shutdown) through the
     // engine's session-end shutdown. AppKit holds its delegate weakly: keep it for the run.
-    let terminate_context = context.clone();
+    let terminate_context = serving.context.clone();
     let _delegate = crate::app_delegate::install(
         mtm,
         Box::new(move || crate::methods::services::session_end(terminate_context.clone())),
     );
 
     application.run();
-    let exit_code = process.exit_code.load(Ordering::SeqCst);
-    let _ = shutdown_tx.send(());
-    server_thread
-        .join()
-        .map_err(|_| "The silod I/O runtime panicked".to_owned())?;
-    drop(owner);
+    let exit_code = process.exit_code();
+    serving.finish()?;
     Ok(exit_code)
 }
-
-/// How long a launch migration that the Keychain refused waits before it tries again.
-const MIGRATION_RETRY: Duration = Duration::from_secs(15 * 60);
-
-/// What one run of the launch migration thread ended with.
-#[derive(Debug, PartialEq, Eq)]
-pub(crate) enum MigrationEnd {
-    /// Every computer was visited and none failed.
-    Completed,
-    /// Some computers were left for later and the thread was asked to stop retrying.
-    Skipped,
-    /// A failure that waiting does not fix; computers without a bootstrap refuse Start.
-    Failed(String),
-}
-
-/// Runs `pass` (the launch migration) until it completes. A pass the Keychain refused
-/// (`credential_access_denied`) skips and runs again after `wait`, which returns false to stop.
-/// macOS Start opens after the first pass whatever its result, so a refusal never holds the
-/// launch closed.
-pub(crate) fn drive_proxy_bootstrap_migration(
-    mut pass: impl FnMut() -> Result<(), String>,
-    mut wait: impl FnMut() -> bool,
-) -> MigrationEnd {
-    loop {
-        let result = pass();
-        silo_engine::macos_computers::end_proxy_bootstrap_migration();
-        match result {
-            Ok(()) => return MigrationEnd::Completed,
-            Err(message) if silo_engine::credential_store::is_access_denied_message(&message) => {
-                eprintln!("silod: the macOS network migration was skipped, the Keychain asked for approval: {message}");
-                if !wait() {
-                    return MigrationEnd::Skipped;
-                }
-            }
-            Err(message) => return MigrationEnd::Failed(message),
-        }
-    }
-}
-
-/// Runs the launch migration of macOS computers that predate the proxy bootstrap.
-fn start_proxy_bootstrap_migration(context: Arc<SilodContext>) {
-    let spawned = thread::Builder::new()
-        .name("silod-proxy-migration".to_owned())
-        .spawn(move || {
-            let end = drive_proxy_bootstrap_migration(
-                || {
-                    silo_engine::macos_computers::migrate_proxy_bootstraps_at_launch(
-                        &context.macos_context(),
-                    )
-                },
-                || {
-                    thread::sleep(MIGRATION_RETRY);
-                    true
-                },
-            );
-            if let MigrationEnd::Failed(error) = end {
-                eprintln!("silod: the macOS network migration reported: {error}");
-            }
-        });
-    if let Err(error) = spawned {
-        // Nothing converted: computers without a bootstrap stay not set up and refuse Start.
-        eprintln!("silod: could not start the macOS network migration: {error}");
-        silo_engine::macos_computers::end_proxy_bootstrap_migration();
-    }
-}
-
-fn set_private_umask() {
-    unsafe {
-        libc::umask(0o077);
-    }
-}
-
-#[cfg(test)]
-mod channel_startup_tests {
-    use std::{path::PathBuf, process::Command};
-
-    use super::*;
-    use crate::{manifest::EngineManifest, paths::SilodPaths};
-    use silo_engine::{channel, context::EngineIdentity};
-
-    const CHANNEL_IDENTIFIER_ENV: &str = "SILOD_TEST_CHANNEL_IDENTIFIER";
-
-    #[test]
-    fn channel_startup_subprocess() {
-        let Ok(identifier) = std::env::var(CHANNEL_IDENTIFIER_ENV) else {
-            return;
-        };
-        let manifest = EngineManifest {
-            channel_identifier: identifier.clone(),
-            engine_version: "0.1.0".to_owned(),
-            engine_build: "test".to_owned(),
-            protocol_min: 7,
-            protocol_max: 7,
-        };
-        let channel = initialize_channel(&manifest).unwrap();
-        let identity: EngineIdentity =
-            SilodPaths::for_home(channel, PathBuf::from("/fixture-home"), PathBuf::new())
-                .identity(&manifest.engine_version);
-
-        assert_eq!(channel::current(), identity.channel);
-        assert_eq!(identity.channel, manifest.channel().unwrap());
-    }
-
-    #[test]
-    fn startup_initializes_the_global_channel_for_both_builds() {
-        for identifier in [
-            silo_engine::channel::PRODUCTION_IDENTIFIER,
-            silo_engine::channel::DEVELOPMENT_IDENTIFIER,
-        ] {
-            let _spawning = crate::FORK_LOCK
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            let output = Command::new(std::env::current_exe().unwrap())
-                .args([
-                    "--exact",
-                    "app::channel_startup_tests::channel_startup_subprocess",
-                    "--nocapture",
-                ])
-                .env(CHANNEL_IDENTIFIER_ENV, identifier)
-                .output()
-                .unwrap();
-            assert!(
-                output.status.success(),
-                "channel startup failed for {identifier}:\n{}\n{}",
-                String::from_utf8_lossy(&output.stdout),
-                String::from_utf8_lossy(&output.stderr)
-            );
-        }
-    }
-}
-
-pub struct AppProcessControl {
-    exit_code: AtomicI32,
-    request_appkit_stop: Box<dyn Fn() + Send + Sync>,
-}
-
-impl AppProcessControl {
-    fn new(request_appkit_stop: impl Fn() + Send + Sync + 'static) -> Self {
-        Self {
-            exit_code: AtomicI32::new(0),
-            request_appkit_stop: Box::new(request_appkit_stop),
-        }
-    }
-}
-
-impl ProcessControl for AppProcessControl {
-    fn exit(&self, code: i32) {
-        self.exit_code.store(code, Ordering::SeqCst);
-        (self.request_appkit_stop)();
-    }
-
-    fn restart(&self) -> ! {
-        self.exit(RESTART_EXIT_CODE);
-        // ProcessControl's non-returning contract is used from engine worker
-        // tasks. Unwind that task after scheduling AppKit shutdown; parking the
-        // Tokio worker would prevent the server from draining and releasing its
-        // socket and ownership lock.
-        std::panic::resume_unwind(Box::new(RestartScheduled))
-    }
-}
-
-#[derive(Debug)]
-pub struct RestartScheduled;
 
 pub struct AppKitMainThread;
 
@@ -458,76 +159,6 @@ pub(crate) fn activation_policy(any_window_open: bool) -> NSApplicationActivatio
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::AtomicUsize;
-
-    /// The migration gate is process-wide: tests that open and close it take turns.
-    static MIGRATION_GATE: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-    #[test]
-    fn the_launch_migration_runs_once_completes_and_opens_start() {
-        let _gate = MIGRATION_GATE.lock().unwrap_or_else(|e| e.into_inner());
-        silo_engine::macos_computers::begin_proxy_bootstrap_migration();
-        let mut passes = 0;
-        let end = drive_proxy_bootstrap_migration(
-            || {
-                passes += 1;
-                Ok(())
-            },
-            || panic!("a completed migration does not wait"),
-        );
-        assert_eq!(end, MigrationEnd::Completed);
-        assert_eq!(passes, 1);
-        assert!(silo_engine::macos_computers::proxy_bootstrap_migration_ready());
-    }
-
-    #[test]
-    fn a_keychain_refusal_skips_opens_start_and_retries_until_it_completes() {
-        let _gate = MIGRATION_GATE.lock().unwrap_or_else(|e| e.into_inner());
-        silo_engine::macos_computers::begin_proxy_bootstrap_migration();
-        let mut passes = 0;
-        let mut waits = 0;
-        let end = drive_proxy_bootstrap_migration(
-            || {
-                passes += 1;
-                if passes < 3 {
-                    Err(format!(
-                        "Computer 1: {}",
-                        silo_engine::credential_store::ACCESS_DENIED_MESSAGE
-                    ))
-                } else {
-                    Ok(())
-                }
-            },
-            || {
-                waits += 1;
-                true
-            },
-        );
-        assert_eq!(end, MigrationEnd::Completed);
-        assert_eq!((passes, waits), (3, 2));
-        assert!(silo_engine::macos_computers::proxy_bootstrap_migration_ready());
-    }
-
-    #[test]
-    fn a_refused_migration_stops_when_asked_to_and_other_failures_do_not_retry() {
-        let _gate = MIGRATION_GATE.lock().unwrap_or_else(|e| e.into_inner());
-        silo_engine::macos_computers::begin_proxy_bootstrap_migration();
-        let denied = silo_engine::credential_store::ACCESS_DENIED_MESSAGE.to_owned();
-        let end = drive_proxy_bootstrap_migration(|| Err(denied.clone()), || false);
-        assert_eq!(end, MigrationEnd::Skipped);
-        assert!(silo_engine::macos_computers::proxy_bootstrap_migration_ready());
-
-        let mut passes = 0;
-        let end = drive_proxy_bootstrap_migration(
-            || {
-                passes += 1;
-                Err("disk full".to_owned())
-            },
-            || panic!("only a refusal waits"),
-        );
-        assert_eq!(end, MigrationEnd::Failed("disk full".to_owned()));
-        assert_eq!(passes, 1);
-    }
 
     #[test]
     fn the_policy_is_regular_only_while_a_window_is_open() {
@@ -539,24 +170,5 @@ mod tests {
             activation_policy(true),
             NSApplicationActivationPolicy::Regular
         );
-    }
-
-    #[tokio::test]
-    async fn restart_unwinds_the_worker_after_scheduling_appkit_exit() {
-        let requested = Arc::new(AtomicUsize::new(0));
-        let requested_in_callback = requested.clone();
-        let process = Arc::new(AppProcessControl::new(move || {
-            requested_in_callback.fetch_add(1, Ordering::SeqCst);
-        }));
-        let worker_process = process.clone();
-
-        let worker = tokio::spawn(async move {
-            worker_process.restart();
-        });
-        let error = worker.await.unwrap_err();
-
-        assert!(error.is_panic());
-        assert_eq!(process.exit_code.load(Ordering::SeqCst), RESTART_EXIT_CODE);
-        assert_eq!(requested.load(Ordering::SeqCst), 1);
     }
 }

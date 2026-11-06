@@ -4145,12 +4145,13 @@ mod stream_tests {
             .set_read_timeout(Some(Duration::from_millis(500)))
             .unwrap();
         let worker = thread::spawn(move || {
-            let mut output = std::io::BufWriter::new(server);
-            write_reply(&mut output, &json!({"result":{}})).unwrap();
-            output
-                .get_mut()
+            // Set the timeout before replying: macOS refuses it with EINVAL once the
+            // client has written its bytes and closed.
+            server
                 .set_read_timeout(Some(Duration::from_secs(2)))
                 .unwrap();
+            let mut output = std::io::BufWriter::new(server);
+            write_reply(&mut output, &json!({"result":{}})).unwrap();
             let mut banner = [0; 4];
             output.get_mut().read_exact(&mut banner).map(|_| banner)
         });

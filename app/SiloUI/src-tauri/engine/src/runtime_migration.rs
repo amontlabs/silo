@@ -17,6 +17,9 @@ const FILE: &str = "runtime-migration.json";
 const GENERATION: &str = "runtime-generation.json";
 const CLEAN: &str = "runtime-checkpoints-clean";
 const CONVERTED: &str = "runtime-checkpoints-converted";
+/// Every folder under the engine data directory that can hold the runtime storage.
+#[cfg(test)]
+pub(crate) const STORAGE_FOLDERS: [&str; 3] = ["runtime", CLEAN, CONVERTED];
 const MISSING_GENERATION: &str = "Completed migration has no saved computer storage selection. Existing data was preserved. Report this problem before using computers.";
 
 #[derive(Deserialize, Serialize)]

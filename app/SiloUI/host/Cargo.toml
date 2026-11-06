@@ -7,6 +7,13 @@ repository = "https://github.com/amontlabs/silo"
 edition = "2021"
 publish = false
 
+[features]
+# Linux desktop integrations (GIO and GTK: application discovery, autostart entries,
+# notifications). The app keeps it; the engine daemon builds without it so a headless
+# Linux host needs no GTK. No effect on macOS.
+default = ["desktop"]
+desktop = ["dep:base64", "dep:gio", "dep:gtk"]
+
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -23,9 +30,9 @@ objc2-user-notifications = { version = "0.3.2", features = ["UNNotificationSetti
 block2 = "0.6"
 
 [target.'cfg(target_os = "linux")'.dependencies]
-base64 = "0.23"
-gio = "0.18"
-gtk = "0.18"
+base64 = { version = "0.23", optional = true }
+gio = { version = "0.18", optional = true }
+gtk = { version = "0.18", optional = true }
 
 [dev-dependencies]
 image = { version = "0.25", default-features = false, features = ["png"] }

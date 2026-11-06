@@ -10,7 +10,7 @@ use sha2::{Digest, Sha256};
 use super::{
     cron::{self, Merge},
     env::{KeepEnv, Live, ManifestStore, Os, RunAs},
-    plan::{self, Base, Conflict, Decision, FileAction, FileOp, PkgOp, Plan},
+    plan::{self, Conflict, Decision, FileAction, FileOp, PkgOp, Plan},
     scripts, Refusal, Report, Request,
 };
 use crate::changes::{

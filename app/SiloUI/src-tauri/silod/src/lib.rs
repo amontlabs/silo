@@ -1,21 +1,36 @@
 #![cfg_attr(not(target_os = "macos"), allow(dead_code))]
 
-#[cfg(not(target_os = "macos"))]
-compile_error!("silod is a macOS-host engine process");
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+compile_error!("silod is an engine for macOS and Linux hosts");
 
+pub mod agent;
+#[cfg(target_os = "macos")]
 pub mod app;
+/// The Linux run loop, under the name `entry` dispatches to on both platforms.
+#[cfg(target_os = "linux")]
+#[path = "linux.rs"]
+pub mod app;
+#[cfg(target_os = "macos")]
 pub mod app_delegate;
+#[cfg(target_os = "macos")]
 pub mod code_signature;
 pub mod context;
 pub mod dispatcher;
 pub mod framing;
 pub mod guest_bridge;
 pub mod identity;
+#[cfg(target_os = "linux")]
+pub mod install_trust;
 pub mod manifest;
 pub mod methods;
 pub mod ownership;
 pub mod paths;
+pub mod process;
 pub mod relay;
+#[cfg(target_os = "macos")]
+pub mod service;
+#[cfg(target_os = "linux")]
+#[path = "service_linux.rs"]
 pub mod service;
 pub mod socket;
 pub mod startup;

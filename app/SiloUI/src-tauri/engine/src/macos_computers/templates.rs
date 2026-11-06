@@ -21,7 +21,7 @@ use std::{
     collections::HashMap,
     fs,
     io::Write,
-    os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt},
+    os::unix::fs::{DirBuilderExt, OpenOptionsExt},
     path::{Path, PathBuf},
     sync::Mutex,
 };
@@ -719,6 +719,7 @@ fn reserve_in(
 mod tests {
     use super::*;
     use crate::macos_computers_engine::store::{CreateRequest, RestoreImageInfo, SetupProgress};
+    use std::os::unix::fs::PermissionsExt;
 
     fn record(disk_gib: u64) -> (Record, Layout, tempfile::TempDir) {
         let data = tempfile::tempdir().unwrap();

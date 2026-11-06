@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 #[cfg(any(target_os = "linux", test))]
 use sha2::{Digest, Sha256};
-#[cfg(test)]
+#[cfg(any(target_os = "linux", test))]
 use std::fs;
 use std::{
     fs::File,
@@ -22,6 +22,8 @@ const SYSTEM_BUDGET: Duration = Duration::from_secs(4);
 const MICROSANDBOX_BUDGET: Duration = Duration::from_secs(15);
 const GIT_BUDGET: Duration = Duration::from_secs(10);
 const PROCESS_TIMEOUT: Duration = Duration::from_secs(3);
+#[cfg(target_os = "linux")]
+const STARTUP_HASH_BUDGET: Duration = Duration::from_secs(120);
 #[cfg(any(target_os = "linux", test))]
 const MAX_HASH_BYTES: u64 = 128 * 1024 * 1024;
 const MAX_OUTPUT: u64 = 8 * 1024;
@@ -233,6 +235,31 @@ pub struct ProbePaths {
     pub(crate) runtime_library: Option<PathBuf>,
 }
 
+impl ProbePaths {
+    /// The probe inputs of a host. On Linux the runtime library is not beside the tools, so
+    /// the host also names it with [`ProbePaths::with_runtime_library`].
+    pub fn new(
+        executable_dir: PathBuf,
+        resource_dir: PathBuf,
+        frameworks_dir: Option<PathBuf>,
+    ) -> Self {
+        Self {
+            executable_dir,
+            resource_dir,
+            frameworks_dir,
+            #[cfg(target_os = "linux")]
+            runtime_library: None,
+        }
+    }
+
+    /// The `libkrunfw` the runtime loads (`runtime::bundled_runtime_library`).
+    #[cfg(target_os = "linux")]
+    pub fn with_runtime_library(mut self, library: PathBuf) -> Self {
+        self.runtime_library = Some(library);
+        self
+    }
+}
+
 fn expected_target() -> Option<&'static str> {
     match (std::env::consts::OS, std::env::consts::ARCH) {
         ("macos", "aarch64") => Some("aarch64-apple-darwin"),
@@ -293,6 +320,11 @@ fn readable_file(path: &Path) -> Result<(), ProbeError> {
 
 #[cfg(any(target_os = "linux", test))]
 fn sha256_file(path: &Path, deadline: Instant) -> Result<String, ProbeError> {
+    sha256_file_until(path, deadline.min(Instant::now() + PROCESS_TIMEOUT))
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn sha256_file_until(path: &Path, deadline: Instant) -> Result<String, ProbeError> {
     let mut file = open_regular_file(path)?;
     let length = file
         .metadata()
@@ -309,7 +341,6 @@ fn sha256_file(path: &Path, deadline: Instant) -> Result<String, ProbeError> {
             path.display()
         )));
     }
-    let deadline = deadline.min(Instant::now() + PROCESS_TIMEOUT);
     let mut hasher = Sha256::new();
     let mut buffer = [0_u8; 64 * 1024];
     loop {
@@ -855,7 +886,11 @@ fn verify_macos_signature(path: &Path, deadline: Instant) -> Result<(), ProbeErr
 
 #[cfg(target_os = "linux")]
 fn verify_linux_hash(path: &Path, expected: &str, deadline: Instant) -> Result<(), ProbeError> {
-    let actual = sha256_file(path, deadline)?;
+    linux_hash_matches(path, expected, sha256_file(path, deadline)?)
+}
+
+#[cfg(target_os = "linux")]
+fn linux_hash_matches(path: &Path, expected: &str, actual: String) -> Result<(), ProbeError> {
     if actual == expected {
         Ok(())
     } else {
@@ -864,6 +899,89 @@ fn verify_linux_hash(path: &Path, expected: &str, deadline: Instant) -> Result<(
             path.file_name().unwrap_or_default().to_string_lossy()
         )))
     }
+}
+
+/// What [`verify_bundled_runtime`] found.
+#[cfg(target_os = "linux")]
+#[derive(Debug, PartialEq, Eq)]
+pub enum BundledRuntime {
+    /// The manifest matches this build and both files hash to what it names.
+    Verified,
+    /// None of the manifest, `msb` and `libkrunfw` exist: no computer can start.
+    Absent,
+}
+
+#[cfg(target_os = "linux")]
+fn probe_message(error: ProbeError) -> String {
+    match error {
+        ProbeError::Missing(message)
+        | ProbeError::Unreadable(message)
+        | ProbeError::Malformed(message)
+        | ProbeError::Unsupported(message)
+        | ProbeError::Unavailable(message) => message,
+        ProbeError::Timeout => "The bundled runtime could not be checked in time.".into(),
+    }
+}
+
+/// The integrity check a Linux engine runs once, before its first `msb` launch: the
+/// MicroSandbox manifest must match the runtime inputs compiled into this build (versions,
+/// source, patches, toolchain and the `libkrunfw` release hash), and `executable` and
+/// `library` must hash to it. `msb` is built from patched source, so its hash comes from the
+/// manifest, which the engine-directory ownership check covers; `libkrunfw`'s also equals
+/// the compiled-in release hash. Linux has no code signature to check instead.
+#[cfg(target_os = "linux")]
+pub fn verify_bundled_runtime(
+    executable: &Path,
+    library: &Path,
+    resource_dir: &Path,
+) -> Result<BundledRuntime, String> {
+    let manifest_path = resource_dir.join("microsandbox/manifest.json");
+    if [manifest_path.as_path(), executable, library]
+        .iter()
+        .all(|path| fs::symlink_metadata(path).is_err())
+    {
+        return Ok(BundledRuntime::Absent);
+    }
+    let manifest: MicrosandboxManifest = read_json(&manifest_path).map_err(probe_message)?;
+    if !runtime_manifest_matches(&manifest) {
+        return Err(format!(
+            "{} does not match this Silo build.",
+            manifest_path.display()
+        ));
+    }
+    verify_runtime_hashes(&manifest, executable, library)?;
+    Ok(BundledRuntime::Verified)
+}
+
+#[cfg(target_os = "linux")]
+fn verify_runtime_hashes(
+    manifest: &MicrosandboxManifest,
+    executable: &Path,
+    library: &Path,
+) -> Result<(), String> {
+    for (path, bundled_name) in [
+        (executable, &manifest.executable.bundled_name),
+        (library, &manifest.library.bundled_name),
+    ] {
+        if path.file_name().and_then(|name| name.to_str()) != Some(bundled_name.as_str()) {
+            return Err(format!(
+                "{} is not the {bundled_name} the MicroSandbox manifest names.",
+                path.display()
+            ));
+        }
+    }
+    // A refusal here stops the engine, so this one-off check gets a budget of its own,
+    // generous enough for a cold disk, rather than the dependency report's.
+    let deadline = Instant::now() + STARTUP_HASH_BUDGET;
+    for (path, expected) in [
+        (executable, manifest.executable.sha256.as_str()),
+        (library, manifest.library.sha256.as_str()),
+    ] {
+        sha256_file_until(path, deadline)
+            .and_then(|actual| linux_hash_matches(path, expected, actual))
+            .map_err(|error| format!("{}: {}", path.display(), probe_message(error)))?;
+    }
+    Ok(())
 }
 
 fn microsandbox_check(paths: &ProbePaths, deadline: Instant) -> DependencyCheck {
@@ -888,10 +1006,10 @@ fn microsandbox_check(paths: &ProbePaths, deadline: Instant) -> DependencyCheck 
         .expect("macOS frameworks path")
         .join(&manifest.library.bundled_name);
     #[cfg(target_os = "linux")]
-    let library = paths
-        .runtime_library
-        .as_ref()
-        .expect("Linux dependency probes receive the resolved runtime library");
+    let Some(library) = paths.runtime_library.as_ref() else {
+        return ProbeError::Missing("The MicroSandbox runtime library was not located.".into())
+            .to_check(id, title, true);
+    };
     for candidate in [executable.as_path(), library.as_path()] {
         if let Err(error) = readable_file(candidate) {
             return error.to_check(id, title, true);
@@ -1409,6 +1527,108 @@ mod tests {
             read_json::<serde_json::Value>(&manifest).unwrap(),
             serde_json::json!({"schemaVersion":2})
         );
+    }
+
+    /// A MicroSandbox manifest this build approves, except for the two hashes given.
+    #[cfg(target_os = "linux")]
+    fn runtime_manifest_json(executable_sha: &str, library_sha: &str) -> serde_json::Value {
+        let target = expected_target().unwrap();
+        let approved = &RUNTIME_INPUTS.targets[target];
+        let patches = RUNTIME_INPUTS
+            .patches
+            .iter()
+            .map(|patch| patch.sha256.clone())
+            .collect::<Vec<_>>();
+        serde_json::json!({
+            "schemaVersion": 2,
+            "microsandboxVersion": RUNTIME_INPUTS.microsandbox_version,
+            "libkrunfwVersion": RUNTIME_INPUTS.libkrunfw_version,
+            "targetTriple": target,
+            "executable": {
+                "bundledName": "msb",
+                "sha256": executable_sha,
+                "sourceCommit": RUNTIME_INPUTS.source_commit,
+                "sourceArchiveSha256": RUNTIME_INPUTS.source_archive_sha256,
+                "patchSha256s": patches,
+                "toolchain": RUNTIME_INPUTS.toolchain,
+                "features": RUNTIME_INPUTS.features,
+                "officialReleaseAsset": approved.executable_asset,
+                "officialReleaseSha256": approved.executable_sha256,
+                "embeddedAgentdReleaseAsset": approved.agentd_asset,
+                "embeddedAgentdReleaseSha256": approved.agentd_sha256,
+            },
+            "library": {
+                "bundledName": approved.library_name,
+                "releaseAsset": approved.library_asset,
+                "sha256": library_sha,
+            },
+        })
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn the_bundled_runtime_is_verified_against_this_build_before_it_runs() {
+        let directory = tempfile::tempdir().unwrap();
+        let resources = directory.path().join("resources");
+        let executable = directory.path().join("msb");
+        let target = expected_target().unwrap();
+        let approved = &RUNTIME_INPUTS.targets[target];
+        let library = resources.join(format!(
+            "microsandbox/{target}/lib/{}",
+            approved.library_name
+        ));
+        assert_eq!(
+            verify_bundled_runtime(&executable, &library, &resources).unwrap(),
+            BundledRuntime::Absent
+        );
+
+        fs::create_dir_all(library.parent().unwrap()).unwrap();
+        fs::write(&executable, b"msb").unwrap();
+        fs::write(&library, b"libkrunfw").unwrap();
+        let hash = |path: &Path| sha256_file(path, Instant::now() + PROCESS_TIMEOUT).unwrap();
+        let (msb_sha, library_sha) = (hash(&executable), hash(&library));
+        let parsed = |value: serde_json::Value| -> MicrosandboxManifest {
+            serde_json::from_value(value).unwrap()
+        };
+        verify_runtime_hashes(
+            &parsed(runtime_manifest_json(&msb_sha, &library_sha)),
+            &executable,
+            &library,
+        )
+        .unwrap();
+        // A replaced msb or library fails, naming the file.
+        for (msb, lib, named) in [
+            (&library_sha, &library_sha, "msb"),
+            (&msb_sha, &msb_sha, approved.library_name.as_str()),
+        ] {
+            let error = verify_runtime_hashes(
+                &parsed(runtime_manifest_json(msb, lib)),
+                &executable,
+                &library,
+            )
+            .unwrap_err();
+            assert!(error.contains(named), "{error}");
+        }
+
+        // Present files need a manifest, and one this build approves.
+        let error = verify_bundled_runtime(&executable, &library, &resources).unwrap_err();
+        assert!(error.contains("manifest.json"), "{error}");
+        let manifest_path = resources.join("microsandbox/manifest.json");
+        fs::write(
+            &manifest_path,
+            runtime_manifest_json(&msb_sha, &library_sha).to_string(),
+        )
+        .unwrap();
+        let error = verify_bundled_runtime(&executable, &library, &resources).unwrap_err();
+        assert!(error.contains("does not match this Silo build"), "{error}");
+        // This build's manifest: the fixture is not the approved libkrunfw.
+        fs::write(
+            &manifest_path,
+            runtime_manifest_json(&msb_sha, &approved.library_sha256).to_string(),
+        )
+        .unwrap();
+        let error = verify_bundled_runtime(&executable, &library, &resources).unwrap_err();
+        assert!(error.contains("checksum"), "{error}");
     }
 
     #[test]

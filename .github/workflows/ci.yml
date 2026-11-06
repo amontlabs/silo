@@ -150,16 +150,16 @@ jobs:
           'app/SiloUI/src-tauri/guest/**/*.md' 'app/SiloUI/src-tauri/macos-gateway/*.md' 'app/SiloUI/.changeset/*.md'
           'artifacts/**/*.md' 'website/*.md' 'demo/*.md' 'silo-action/*.md' 'reviewer-service/*.md'
 
-  # The engine is embeddable, so it must keep building and passing its tests on a
-  # Linux host even though the shipped daemon is macOS only. macOS computers are
-  # stubbed there and their host-only tests are ignored.
+  # The engine and its daemon run on Linux hosts (Linux computers over KVM), so the
+  # engine, silod, the CLI and the client crates build and pass their tests there.
+  # macOS computers are stubbed on Linux and their host-only tests are gated off.
   engine-linux:
     name: Engine tests (Linux)
     needs: changes
     # Fails open: pushes skip detection, and a failed detection has an empty output.
     if: ${{ !cancelled() && needs.changes.outputs.native != 'false' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 60
     defaults:
       run:
         working-directory: app/SiloUI
@@ -179,9 +179,10 @@ jobs:
         with:
           node-version-file: .nvmrc
       - run: node scripts/preflight.mjs
-      # silo-host links GTK on Linux; the tests also run OpenSSH and zsh.
+      # silo-host's desktop feature (the app's) links GTK on Linux and its tests run with
+      # it; the keyring Secret Service backend needs D-Bus. The tests also run OpenSSH and zsh.
       - name: Install Linux build and test dependencies
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libgtk-3-dev pkg-config openssh-client zsh
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libgtk-3-dev libdbus-1-dev pkg-config openssh-client zsh
       - name: Install pinned Rust toolchain
         run: |
           runtime_toolchain=$(node -p "require(process.env.GITHUB_WORKSPACE + '/app/SiloUI/runtime-inputs.json').toolchain")
@@ -221,6 +222,23 @@ jobs:
       - name: Run engine tests
         timeout-minutes: 30
         run: cargo nextest run -p silo-engine --locked --profile ci
+      # The headless daemon must not need GTK: silo-host's desktop feature stays off.
+      - name: Check that silod does not depend on GTK
+        run: |
+          if cargo tree -p silod -e normal --locked --prefix none | grep -E '^(gtk|gdk|gio|glib|webkit2gtk)(-sys)? v'; then
+            echo "silod depends on the GTK stack" >&2
+            exit 1
+          fi
+      # One run for the daemon side, so silo-host builds without its desktop feature as in
+      # silod; silo-host's own tests run with its default (desktop) feature, then without.
+      - name: Run daemon, CLI and client tests
+        timeout-minutes: 30
+        run: cargo nextest run -p silod -p silo-cli -p silo-client -p silo-api --locked --profile ci
+      - name: Run host helper tests
+        timeout-minutes: 15
+        run: |
+          cargo nextest run -p silo-host --locked --profile ci
+          cargo nextest run -p silo-host --no-default-features --locked --profile ci
 
   rust:
     name: Rust tests

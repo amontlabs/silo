@@ -2,7 +2,9 @@
 
 mod endpoints;
 
-pub(super) use endpoints::{endpoint, mark_unavailable, publish, remove};
+pub(super) use endpoints::endpoint;
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+pub(super) use endpoints::{mark_unavailable, publish, remove};
 
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 mod supervisor;

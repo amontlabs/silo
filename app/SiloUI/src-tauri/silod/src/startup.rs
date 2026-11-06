@@ -123,7 +123,7 @@ fn run_launch_migration(
     match result {
         Ok(silo_engine::runtime_migration::LaunchDrive::Converted) => {
             std::thread::sleep(RESTART_AFTER_MIGRATION);
-            context.process().exit(crate::app::RESTART_EXIT_CODE);
+            context.process().exit(crate::process::RESTART_EXIT_CODE);
         }
         Ok(silo_engine::runtime_migration::LaunchDrive::Nothing) => {}
         Err(error) => eprintln!("silod: the launch migration failed: {error}"),

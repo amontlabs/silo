@@ -31,7 +31,7 @@ pub(crate) const CHATGPT_GUEST_MOUNT: &str = "/opt/silo/chatgpt";
 pub(crate) const LCU_GUEST_MOUNT: &str = "/opt/silo/lcu";
 const GUEST_MOUNTS: [&str; 2] = [CHATGPT_GUEST_MOUNT, LCU_GUEST_MOUNT];
 /// The folders under the application data directory that held the downloads.
-const ROOT_FOLDERS: [&str; 2] = ["chatgpt", "lcu"];
+pub(crate) const ROOT_FOLDERS: [&str; 2] = ["chatgpt", "lcu"];
 const READ_TIMEOUT: Duration = Duration::from_secs(10);
 
 fn is_legacy_mount(mount: &Value) -> bool {

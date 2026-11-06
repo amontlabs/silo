@@ -37,7 +37,6 @@ use silo_engine::context::{Audience, EngineContext, Event};
 use std::collections::VecDeque;
 use std::{
     collections::{HashMap, HashSet},
-    ffi::CString,
     fs::{self, File},
     io::{Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
@@ -1774,6 +1773,18 @@ fn runtime_worker_lock(
     configuration_recovery::command_lock(paths, timeout)
 }
 
+/// A command that starts the bundled runtime. A terminal's Ctrl-C goes to its whole
+/// foreground process group; on a Linux host, where silod may run in a terminal, every
+/// runtime child gets its own group, so only silod sees the signal and its session end
+/// stops the computers in order. macOS starts the engine from launchd, never a terminal.
+pub(crate) fn runtime_command(executable: &Path) -> Command {
+    #[allow(unused_mut)]
+    let mut command = Command::new(executable);
+    #[cfg(target_os = "linux")]
+    std::os::unix::process::CommandExt::process_group(&mut command, 0);
+    command
+}
+
 fn spawn_runtime(
     paths: &RuntimePaths,
     launch: RuntimeLaunch<'_>,
@@ -1803,7 +1814,7 @@ fn spawn_runtime(
     } else {
         None
     };
-    let mut command = Command::new(&paths.executable);
+    let mut command = runtime_command(&paths.executable);
     if let Some(lock) = &worker_lock {
         use std::os::{fd::AsRawFd, unix::process::CommandExt};
         let fd = lock.as_raw_fd();
@@ -2086,7 +2097,7 @@ fn device_resources() -> Result<DeviceResources, RuntimeError> {
 
 #[cfg(target_os = "macos")]
 fn physical_memory_bytes() -> Result<Option<u64>, RuntimeError> {
-    let name = CString::new("hw.memsize").expect("static sysctl name");
+    let name = std::ffi::CString::new("hw.memsize").expect("static sysctl name");
     let mut value = 0_u64;
     let mut length = std::mem::size_of::<u64>();
     // SAFETY: `name` is NUL-terminated and both output pointers refer to

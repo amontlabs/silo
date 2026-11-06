@@ -236,17 +236,21 @@ async fn every_checkpoint_method_refuses_a_request_for_another_device() {
 #[tokio::test]
 async fn checkpoints_usage_returns_the_canonical_shape_for_both_platforms() {
     let fixture = fixture();
-    let macos = call(
-        &fixture,
-        MethodName::CheckpointsUsage,
-        json!({"computerId": fixture.macos_id}),
-    )
-    .await
-    .unwrap();
-    let macos: silo_api::methods::checkpoints::CheckpointUsage =
-        serde_json::from_value(macos).unwrap();
-    assert_eq!(macos.total_bytes, None);
-    assert_eq!(macos.checkpoints[0].id, fixture.macos_checkpoint);
+    // macOS computers are loaded only on an Apple silicon host.
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    {
+        let macos = call(
+            &fixture,
+            MethodName::CheckpointsUsage,
+            json!({"computerId": fixture.macos_id}),
+        )
+        .await
+        .unwrap();
+        let macos: silo_api::methods::checkpoints::CheckpointUsage =
+            serde_json::from_value(macos).unwrap();
+        assert_eq!(macos.total_bytes, None);
+        assert_eq!(macos.checkpoints[0].id, fixture.macos_checkpoint);
+    }
 
     let linux = call(
         &fixture,
@@ -311,6 +315,8 @@ async fn an_automatic_create_is_refused_while_the_retention_setting_is_zero() {
     }
 }
 
+// macOS computers are loaded only on an Apple silicon host.
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 #[tokio::test]
 async fn an_automatic_create_with_the_default_setting_starts_a_job() {
     let fixture = fixture();
@@ -326,6 +332,7 @@ async fn an_automatic_create_with_the_default_setting_starts_a_job() {
     finished(&fixture, &id).await;
 }
 
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 #[tokio::test]
 async fn macos_restore_delete_and_abandon_each_start_a_job() {
     let fixture = fixture();
@@ -375,27 +382,31 @@ async fn linux_restore_delete_and_abandon_each_start_a_job_that_ends_in_the_runt
 #[tokio::test]
 async fn checkpoints_fork_starts_a_job_on_both_platforms_with_or_without_a_checkpoint() {
     let fixture = fixture();
-    let id = job_id(
-        call(
-            &fixture,
-            MethodName::CheckpointsFork,
-            json!({"computerId": fixture.macos_id, "checkpointId": null, "newName": "current"}),
-        )
-        .await
-        .unwrap(),
-    );
-    finished(&fixture, &id).await;
+    // macOS computers are loaded only on an Apple silicon host.
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    {
+        let id = job_id(
+            call(
+                &fixture,
+                MethodName::CheckpointsFork,
+                json!({"computerId": fixture.macos_id, "checkpointId": null, "newName": "current"}),
+            )
+            .await
+            .unwrap(),
+        );
+        finished(&fixture, &id).await;
 
-    let id = job_id(
-        call(
-            &fixture,
-            MethodName::CheckpointsFork,
-            json!({"computerId": fixture.macos_id, "checkpointId": fixture.macos_checkpoint, "newName": "branch"}),
-        )
-        .await
-        .unwrap(),
-    );
-    finished(&fixture, &id).await;
+        let id = job_id(
+            call(
+                &fixture,
+                MethodName::CheckpointsFork,
+                json!({"computerId": fixture.macos_id, "checkpointId": fixture.macos_checkpoint, "newName": "branch"}),
+            )
+            .await
+            .unwrap(),
+        );
+        finished(&fixture, &id).await;
+    }
 
     let id = job_id(
         call(

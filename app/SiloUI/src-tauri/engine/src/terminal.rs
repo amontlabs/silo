@@ -1,6 +1,7 @@
 //! Open the selected terminal on MicroSandbox's existing interactive exec path.
 use crate::runtime::{self, RuntimePaths};
 pub use silo_host::terminal::quote;
+#[cfg(test)]
 use std::process::Command;
 
 pub fn command(paths: &RuntimePaths, name: &str) -> Result<String, String> {

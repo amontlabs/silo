@@ -8,9 +8,13 @@ use std::{
         fs::{FileTypeExt, MetadataExt},
         net::UnixStream,
     },
-    path::{Path, PathBuf},
-    process::Command,
+    path::Path,
     sync::{Mutex, OnceLock},
+};
+#[cfg(test)]
+use std::{
+    path::PathBuf,
+    process::Command,
     time::{Duration, Instant},
 };
 

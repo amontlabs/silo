@@ -1,8 +1,8 @@
 # Secrets
 
-Silo stores general secret values in the macOS Keychain, the only supported host today.
-The engine's credential store also builds against the Linux Secret Service, but no Linux
-host build ships yet and that backend is untested. `secrets.json` contains names, immutable value references,
+Silo stores general secret values in the macOS Keychain on a Mac. On a Linux host the engine
+stores them as files (see [Linux hosts](#linux-hosts)); no Linux engine release ships yet.
+`secrets.json` contains names, immutable value references,
 computer assignments, allowed hosts, pending updates, safe failures, and bounded activity
 history. Values are never returned in application snapshots. The editor sends a
 value only when adding or replacing one, then discards its draft on successful save.
@@ -73,6 +73,42 @@ commands. The FIFO regression supplies a blocked file in a temporary directory
 and requires an independent future to run before releasing the read. This uses
 [Tauri's async command execution](https://v2.tauri.app/develop/calling-rust/#async-commands)
 and the supported [blocking-work boundary](https://docs.rs/tokio/latest/tokio/task/fn.spawn_blocking.html).
+
+## Linux hosts
+
+A Linux server has no desktop session, so there is no Secret Service (or unlocked login keyring)
+for the engine to use. On Linux, `silod` installs a file store as the `keyring` default at
+startup, before anything reads a credential: every item the engine keeps in the Keychain on a
+Mac (GitHub sign-in, token ledger, personal token, secret values) is one file,
+`<data>/credentials/<service>/<account>`, where `<data>` is `$XDG_DATA_HOME/<identifier>`
+(`~/.local/share/org.silo.dev` for Dev). The bridge and the guest helper install the same store,
+so nothing reaches `keyring`'s default backend.
+
+- **Files.** The directories are mode 0700 and the files 0600, owned by the engine's account.
+  Every directory from `$XDG_DATA_HOME` down to `credentials/` must belong to that account or root
+  and be writable by nobody else, or startup stops. After the store's directory is opened, every
+  step goes through directory descriptors without following links (`openat`, `renameat`,
+  `unlinkat`, `fsync`). A file is written whole: a new `.staged-*` file, `fsync`, `renameat` over
+  the old one, then `fsync` of the directory. Staged files a crash left behind are removed when
+  the engine starts and when it deletes a credential.
+- **Refusals.** A link, a file or directory of another account, or a file others can read is
+  refused instead of used. The refusal is `credential_access_denied` with the message
+  "Silo's engine refused its credential file `<path>` `<reason>`", which names the file, never
+  the value, and `engine.credentials.status` lists that item as refused.
+- **Choosing the store.** `SILO_CREDENTIAL_STORE=secret-service` uses the desktop Secret
+  Service instead, for a Linux machine that has one; that backend is still untested. The engine
+  records the store it used first in `<data>/credential-store`. Later starts, and the helpers, use
+  the recorded store when the variable is unset and refuse a different value, naming the record:
+  move the credentials yourself, then delete the record.
+
+What this means: on a Linux host the values are plain bytes on disk, readable by that account
+and by root. That is the same trust the engine already gives its own state there (computer
+disks, `secrets.json`, Connections keys), but weaker than the Keychain: nothing asks before a
+process of the same account reads a value, nothing is encrypted at rest beyond the disk's
+own encryption, and a backup of the home directory copies the values. `silod` refuses to run as
+root or `nobody`; run it as a dedicated account in the `kvm` group, and use full-disk
+encryption on a host that holds real credentials. See
+[Linux hosts in the threat model](THREAT-MODEL.md#linux-hosts).
 
 ## Boundary
 
@@ -160,7 +196,7 @@ Use disposable values and computers. Never use a real credential for an echo-ser
   edited domains without reentering the value, and removed it. A second check
   started dev through Silo, verified its placeholder, removed access live, and
   stopped dev again. Metadata had no plaintext value. Secrets was left empty.
-- Linux hosts are not supported today; the Secret Service backend has never been exercised.
+- Linux hosts were not supported on this date; the Secret Service backend has never been exercised.
 
 Run the opt-in runtime test with the signed bundled `msb` and library paths in
 `SILO_TEST_MSB` and `SILO_TEST_LIBKRUNFW`, with the explicit confirmation below:

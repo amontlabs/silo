@@ -131,3 +131,84 @@ The engine bundle's `Info.plist` has no `LSUIElement`: `silod` sets its own acti
 (accessory, regular while a VM window is open), and AppKit refuses that call for a bundle that
 is already an agent app. If AppKit still refuses the accessory policy, `silod` logs it and runs
 on.
+
+## `silod` on a Linux host
+
+`silod` also builds and runs as a headless daemon on Linux (x86_64 and aarch64), where it runs
+Linux computers over KVM. The Silo app stays Mac-only; a Linux host is managed from another
+device's engine through Connections. The macOS code paths are unchanged: everything below is
+behind `cfg(target_os = "linux")`.
+
+- **Build.** `cargo build -p silod` (from `app/SiloUI`, toolchain 1.94.0). It needs
+  `pkg-config` and `libdbus-1-dev` (for keyring's optional Secret Service backend) but no
+  GTK: the engine depends on `silo-host` without its `desktop` feature, which holds the GIO
+  and GTK integrations the app uses (application discovery, autostart, notifications). Without
+  it, application discovery lists nothing and system integrations read as unavailable. CI
+  checks that `cargo tree -p silod -e normal` lists no GTK crate.
+- **Layout.** A Linux engine is one directory: `<dir>/silod`, its bundled tools beside it
+  (`msb`, Git), and `<dir>/resources/` with `engine-manifest.json` and the runtime resources
+  (`microsandbox/manifest.json`, `microsandbox/<target>/lib/libkrunfw.so.5.6.1`).
+  `paths::default_resource_dir` resolves `<dir>/resources` from the running executable, so a
+  link such as `~/.local/bin/silo-remote-dev` finds the same directory. The release archive
+  that produces this layout is phase 3 of the [remote hosts plan](hosts/PLAN.md).
+- **Identity.** The channel comes from `resources/engine-manifest.json`, validated as strictly
+  as a bundle's (regular file under 64 KiB, known channel, semver version, non-empty build,
+  protocol range) except for the bundle identifier, which a Linux engine has none of. There is
+  no code-signature check on Linux: nothing seals the directory yet. Signed Linux archives
+  (for example Sigstore) are roadmap milestone 11.
+- **Account and directory checks.** Before it reads anything from its directory, every entry
+  point (`--agent`, `--remote-bridge`, `--remote-guest`) refuses to run as root or `nobody`
+  (use a dedicated account in the `kvm` group) and checks the engine directory
+  (`silod::install_trust`): every directory from `/` down to it, `silod`, every entry beside it
+  and everything under `resources/` must belong to this account or root and be writable by
+  nobody else (a sticky `/tmp` is refused too), and a link must stay inside the directory. The
+  refusal names the path. Before its first `msb` launch, the agent checks
+  `resources/microsandbox/manifest.json` against the runtime inputs compiled into the build and
+  the SHA-256 of `msb` and `libkrunfw` against it
+  (`silo_engine::dependencies::verify_bundled_runtime`); an engine without the runtime starts
+  and reports that computers cannot start.
+- **Paths.** Data and configuration: `$XDG_DATA_HOME/<identifier>` (default
+  `~/.local/share/org.silo.dev` for Dev). Cache: `$XDG_CACHE_HOME/<identifier>`. Logs:
+  `$XDG_STATE_HOME/<identifier>/logs`. A relative or empty XDG value is ignored, as the
+  specification says. The private state directory and the engine socket stay where every
+  client already looks on both platforms, `~/.silo` and `~/.silo-dev` (`engine.sock`,
+  `engine.lock`, the owner record, Connections state), so `silo-host`, `silo-client` and the
+  CLI need no Linux-specific socket path and the two channels stay apart.
+- **Peer check.** The socket accepts only clients of the engine's own account. On Linux the
+  check reads `SO_PEERCRED`, the effective UID the client had when it connected, which is what
+  `getpeereid` returns on macOS.
+- **Credentials.** The engine's `keyring` entries (GitHub sign-in, token ledger, personal
+  token, secret values) go to a file store, `silo_engine::credential_file_store`, under
+  `<data>/credentials/` (see [Secrets](SiloUI-SECRETS.md#linux-hosts)).
+  `SILO_CREDENTIAL_STORE=secret-service` uses the desktop Secret Service instead; any other
+  value except `file` stops startup. The first start records the store in
+  `<data>/credential-store`, and a later start with a different value stops with a message
+  naming that record.
+- **Running it.** `silod --agent` (or no argument) serves until it is stopped. The process main
+  thread runs the queue that `MainThread` work goes to, in place of the AppKit loop. SIGTERM
+  and SIGINT both start the engine's bounded session-end shutdown, as SIGTERM and logout do
+  on macOS; a second one of either exits at once with status 1. `msb` and guest commands run in
+  their own process group, so a terminal's Ctrl-C reaches `silod` alone. Exit code 75 still
+  means "restart me" for a supervisor. `--remote-bridge` and
+  `--remote-guest` work through the `~/.local/bin` link. `silod --service` reports that it is
+  not available yet: the systemd user unit is phase 3. Until then, start it by hand or from
+  your own unit, for example a Dev engine run by a dedicated account (in the `kvm` group to
+  start computers), installed where only that account can change it:
+
+  ```sh
+  mkdir -p ~/silo-engine/resources
+  cp target/debug/silod ~/silo-engine/
+  cp src-tauri/silod/macos/resources/engine-manifest.development.json \
+    ~/silo-engine/resources/engine-manifest.json
+  chmod -R go-w ~/silo-engine
+  ~/silo-engine/silod --agent &
+  target/debug/silo list
+  ```
+
+  A root-owned `/opt/silo-engine` works the same way. An engine under `/tmp`, or in a directory
+  another account can write to, does not start. Group write counts even for a group only you are
+  in, so a directory made under a umask of `002` needs the `chmod` above, and Debian's group-writable
+  `/usr/local` is refused.
+
+  This proves the daemon serves; creating or starting a computer also needs `/dev/kvm`, the
+  runtime resources above and the guest image.

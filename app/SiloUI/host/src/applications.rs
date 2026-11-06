@@ -1,15 +1,20 @@
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, path::Path};
 
+#[cfg(all(target_os = "linux", not(feature = "desktop")))]
+#[path = "applications/headless.rs"]
+mod headless;
 #[path = "applications/launch.rs"]
 pub mod launch;
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", feature = "desktop"))]
 #[path = "applications/linux.rs"]
 mod linux;
 #[cfg(target_os = "macos")]
 #[path = "applications/macos.rs"]
 mod macos;
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", not(feature = "desktop")))]
+use headless as platform;
+#[cfg(all(target_os = "linux", feature = "desktop"))]
 use linux as platform;
 #[cfg(target_os = "macos")]
 use macos as platform;

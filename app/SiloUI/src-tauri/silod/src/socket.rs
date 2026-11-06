@@ -32,10 +32,10 @@ use tokio::{
 };
 
 use crate::{
-    app::RestartScheduled,
     dispatcher::{Dispatcher, PreparedRequest, SessionState},
     framing::{read_json_frame, write_json_frame},
     paths::ensure_private_directory,
+    process::RestartScheduled,
 };
 
 const FIRST_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(15);
@@ -58,6 +58,7 @@ pub trait PeerEuidProvider: Send + Sync + 'static {
 pub struct SystemPeerEuidProvider;
 
 impl PeerEuidProvider for SystemPeerEuidProvider {
+    #[cfg(target_os = "macos")]
     fn peer_euid(&self, fd: i32) -> io::Result<u32> {
         let mut euid = 0;
         let mut egid = 0;
@@ -67,6 +68,38 @@ impl PeerEuidProvider for SystemPeerEuidProvider {
         } else {
             Err(io::Error::last_os_error())
         }
+    }
+
+    /// `SO_PEERCRED` holds the effective UID the peer had when it connected, as
+    /// `getpeereid` does on macOS.
+    #[cfg(target_os = "linux")]
+    fn peer_euid(&self, fd: i32) -> io::Result<u32> {
+        let mut credentials = libc::ucred {
+            pid: 0,
+            uid: u32::MAX,
+            gid: u32::MAX,
+        };
+        let mut length = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
+        // SAFETY: the pointer and length describe the live `ucred` above.
+        let status = unsafe {
+            libc::getsockopt(
+                fd,
+                libc::SOL_SOCKET,
+                libc::SO_PEERCRED,
+                (&mut credentials as *mut libc::ucred).cast(),
+                &mut length,
+            )
+        };
+        if status != 0 {
+            return Err(io::Error::last_os_error());
+        }
+        if length as usize != std::mem::size_of::<libc::ucred>() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "SO_PEERCRED returned a short credential",
+            ));
+        }
+        Ok(credentials.uid)
     }
 }
 
@@ -2117,5 +2150,120 @@ mod tests {
             origins.push(frame["deviceId"].as_str().unwrap().to_owned());
         }
         assert_eq!(origins, ["local-device", "owner-device"]);
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod peer_credential_tests {
+    use super::*;
+    use std::os::unix::{ffi::OsStrExt, net::UnixListener as StdListener};
+
+    #[test]
+    fn so_peercred_reads_this_process_and_rejects_another_expected_euid() {
+        let (left, _right) = StdUnixStream::pair().unwrap();
+        let euid = unsafe { libc::geteuid() };
+        let provider = SystemPeerEuidProvider;
+        assert_eq!(provider.peer_euid(left.as_raw_fd()).unwrap(), euid);
+        check_peer_euid(&provider, left.as_raw_fd(), euid).unwrap();
+        let error = check_peer_euid(&provider, left.as_raw_fd(), euid.wrapping_add(1)).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+    }
+
+    #[test]
+    fn so_peercred_on_a_closed_descriptor_is_an_error() {
+        assert!(SystemPeerEuidProvider.peer_euid(-1).is_err());
+    }
+
+    /// A client running as another account is refused. Only root can start one, so the
+    /// test runs where it can (CI containers and this check's own runs as root).
+    #[test]
+    fn a_peer_of_another_account_is_refused() {
+        if unsafe { libc::geteuid() } != 0 {
+            return;
+        }
+        const OTHER: u32 = 65534;
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::set_permissions(directory.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
+        let path = directory.path().join("engine.sock");
+        let listener = StdListener::bind(&path).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o777)).unwrap();
+
+        let bytes = path.as_os_str().as_bytes();
+        let mut address: libc::sockaddr_un = unsafe { std::mem::zeroed() };
+        address.sun_family = libc::AF_UNIX as libc::sa_family_t;
+        assert!(bytes.len() < address.sun_path.len());
+        for (slot, byte) in address.sun_path.iter_mut().zip(bytes) {
+            *slot = *byte as libc::c_char;
+        }
+
+        let child = {
+            let _spawning = crate::FORK_LOCK
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            // SAFETY: the child only makes raw system calls before `_exit`.
+            unsafe {
+                let child = libc::fork();
+                assert!(child >= 0);
+                if child == 0 {
+                    if libc::setgid(OTHER) != 0 || libc::setuid(OTHER) != 0 {
+                        libc::_exit(2);
+                    }
+                    let fd = libc::socket(libc::AF_UNIX, libc::SOCK_STREAM, 0);
+                    if fd < 0
+                        || libc::connect(
+                            fd,
+                            (&address as *const libc::sockaddr_un).cast(),
+                            std::mem::size_of::<libc::sockaddr_un>() as libc::socklen_t,
+                        ) != 0
+                    {
+                        libc::_exit(3);
+                    }
+                    // Wait for the engine side to close.
+                    let mut byte = 0_u8;
+                    libc::read(fd, (&mut byte as *mut u8).cast(), 1);
+                    libc::_exit(0);
+                }
+                child
+            }
+        };
+
+        // A child that cannot become the other account exits instead of connecting, so the
+        // accept is bounded and reports the child's status rather than waiting forever.
+        listener.set_nonblocking(true).unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+        let stream = loop {
+            match listener.accept() {
+                Ok((stream, _)) => break stream,
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock => {}
+                Err(error) => panic!("accept failed: {error}"),
+            }
+            let mut status = 0;
+            // SAFETY: `child` is this test's own child; WNOHANG never blocks.
+            let waited = unsafe { libc::waitpid(child, &mut status, libc::WNOHANG) };
+            if waited == child {
+                panic!(
+                    "the child exited before connecting (status {status:#x}: 2 means setgid or \
+                     setuid to {OTHER} failed, 3 that it could not connect)"
+                );
+            }
+            if std::time::Instant::now() >= deadline {
+                // SAFETY: as above; the child is ours and is reaped here.
+                unsafe {
+                    libc::kill(child, libc::SIGKILL);
+                    libc::waitpid(child, &mut status, 0);
+                }
+                panic!("the child did not connect within 15 seconds");
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        };
+        stream.set_nonblocking(false).unwrap();
+        let provider = SystemPeerEuidProvider;
+        assert_eq!(provider.peer_euid(stream.as_raw_fd()).unwrap(), OTHER);
+        let error = check_peer_euid(&provider, stream.as_raw_fd(), 0).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+        drop(stream);
+        let mut status = 0;
+        assert_eq!(unsafe { libc::waitpid(child, &mut status, 0) }, child);
+        assert!(libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 0);
     }
 }

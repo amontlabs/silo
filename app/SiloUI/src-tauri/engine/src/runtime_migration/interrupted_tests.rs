@@ -229,7 +229,7 @@ impl runtime::RuntimeRunner for ConvertedRuntime {
                 serde_json::json!({"name": name, "status": row[2], "config": {"labels": {"silo.managed": "true", "silo.machine-id": row[1]}}})
             }
             ["remove", "--force", "--quiet", name] => {
-                let row = db["computers"]
+                let _row = db["computers"]
                     .as_array()
                     .unwrap()
                     .iter()

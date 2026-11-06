@@ -200,12 +200,25 @@ async fn the_computers_domain_over_the_engine_socket() {
         .await;
     assert!(subscription["subscription"].is_string());
 
+    // Only an Apple silicon Mac loads macOS computers; elsewhere the saved record is not
+    // listed and the macOS-computer checks below do not apply.
+    let macos_host = cfg!(all(target_os = "macos", target_arch = "aarch64"));
+    if !macos_host {
+        // The lookup of another device below makes the channel directory in this home, which
+        // must exist. The macOS checks this host skips run first on a Mac.
+        std::fs::create_dir_all(path("home")).unwrap();
+    }
+
     // Reads: both kinds in one list, with the saved macOS computer and its kind.
     let list = engine.result("computers.list", json!({})).await;
     assert_eq!(list["linux"]["computers"], json!([]));
-    assert_eq!(list["macos"]["computers"][0]["id"], MACOS);
-    assert_eq!(list["macos"]["computers"][0]["kind"], "macos");
-    assert_eq!(list["macos"]["computers"][0]["state"], "stopped");
+    if macos_host {
+        assert_eq!(list["macos"]["computers"][0]["id"], MACOS);
+        assert_eq!(list["macos"]["computers"][0]["kind"], "macos");
+        assert_eq!(list["macos"]["computers"][0]["state"], "stopped");
+    } else {
+        assert_eq!(list["macos"]["computers"], json!([]));
+    }
     assert_eq!(
         engine
             .result("computers.configuration.read", json!({}))
@@ -231,33 +244,36 @@ async fn the_computers_domain_over_the_engine_socket() {
         .filter(|row| row["state"] == "running")
         .collect();
     assert!(running.is_empty());
-    let stop = engine
-        .result("computers.stop", json!({"computerId": MACOS}))
-        .await;
-    let stop_job = stop["jobId"].as_str().unwrap().to_owned();
-    assert!(stop_job.starts_with("job:"));
-    let stopped = engine.finished(&stop_job).await;
-    assert_eq!(stopped["error"]["code"], "not_running", "{stopped}");
+    if macos_host {
+        let stop = engine
+            .result("computers.stop", json!({"computerId": MACOS}))
+            .await;
+        let stop_job = stop["jobId"].as_str().unwrap().to_owned();
+        assert!(stop_job.starts_with("job:"));
+        let stopped = engine.finished(&stop_job).await;
+        assert_eq!(stopped["error"]["code"], "not_running", "{stopped}");
 
-    // Typed refusals that need no job.
-    assert_eq!(
-        engine
-            .error_code("computers.forceStop", json!({"computerId": MACOS}))
-            .await,
-        "not_running"
-    );
-    assert_eq!(
-        engine
-            .error_code("computers.restart", json!({"computerId": MACOS}))
-            .await,
-        "unsupported_remote_operation"
-    );
-    assert_eq!(
-        engine
-            .error_code("computers.dismissError", json!({"computerId": MACOS}))
-            .await,
-        "unsupported_remote_operation"
-    );
+        // Typed refusals that need no job.
+        assert_eq!(
+            engine
+                .error_code("computers.forceStop", json!({"computerId": MACOS}))
+                .await,
+            "not_running"
+        );
+        assert_eq!(
+            engine
+                .error_code("computers.restart", json!({"computerId": MACOS}))
+                .await,
+            "unsupported_remote_operation"
+        );
+        assert_eq!(
+            engine
+                .error_code("computers.dismissError", json!({"computerId": MACOS}))
+                .await,
+            "unsupported_remote_operation"
+        );
+    }
+
     assert_eq!(
         engine
             .error_code("computers.start", json!({"computerId": UNKNOWN}))
@@ -271,38 +287,42 @@ async fn the_computers_domain_over_the_engine_socket() {
         "not_found"
     );
     assert_eq!(
-        engine
-            .error_code("macos.display.stream", json!({"computerId": MACOS}))
-            .await,
-        "unsupported_remote_operation"
-    );
-    assert_eq!(
-        engine
-            .error_code("storage.read", json!({"computerId": MACOS}))
-            .await,
-        "unsupported_remote_operation"
-    );
-    assert_eq!(
         engine.error_code("computers.start", json!({})).await,
         "internal"
     );
+    if macos_host {
+        assert_eq!(
+            engine
+                .error_code("macos.display.stream", json!({"computerId": MACOS}))
+                .await,
+            "unsupported_remote_operation"
+        );
+        assert_eq!(
+            engine
+                .error_code("storage.read", json!({"computerId": MACOS}))
+                .await,
+            "unsupported_remote_operation"
+        );
+    }
 
-    // The CPU and memory edit is a `job:` like every macOS job, not a `setup:` job; this
-    // test engine cannot run macOS computers, and the refusal ends the job.
-    let edit = engine
-        .result(
-            "computers.configuration.change",
-            json!({"change": {
-                "kind": "macosResources", "computerId": MACOS,
-                "expected": {"cpus": 4, "memoryGiB": 8, "diskGiB": 64},
-                "cpus": 6, "memoryGiB": 12, "requestId": "resources-1"
-            }}),
-        )
-        .await;
-    let edit_job = edit["jobId"].as_str().unwrap().to_owned();
-    assert!(edit_job.starts_with("job:"), "{edit_job}");
-    let edited = engine.finished(&edit_job).await;
-    assert!(edited["error"]["message"].is_string(), "{edited}");
+    if macos_host {
+        // The CPU and memory edit is a `job:` like every macOS job, not a `setup:` job; this
+        // test engine cannot run macOS computers, and the refusal ends the job.
+        let edit = engine
+            .result(
+                "computers.configuration.change",
+                json!({"change": {
+                    "kind": "macosResources", "computerId": MACOS,
+                    "expected": {"cpus": 4, "memoryGiB": 8, "diskGiB": 64},
+                    "cpus": 6, "memoryGiB": 12, "requestId": "resources-1"
+                }}),
+            )
+            .await;
+        let edit_job = edit["jobId"].as_str().unwrap().to_owned();
+        assert!(edit_job.starts_with("job:"), "{edit_job}");
+        let edited = engine.finished(&edit_job).await;
+        assert!(edited["error"]["message"].is_string(), "{edited}");
+    }
 
     // A Linux computer that is not saved is not found, before any job exists.
     assert_eq!(
@@ -320,30 +340,32 @@ async fn the_computers_domain_over_the_engine_socket() {
         "not_found"
     );
 
-    // Deleting the macOS computer is a job that removes its folder, then the list is empty.
-    let removal = engine
-        .result("computers.delete", json!({"computerId": MACOS}))
-        .await;
-    let removal_job = removal["jobId"].as_str().unwrap().to_owned();
-    let removed = engine.finished(&removal_job).await;
-    assert!(removed["error"].is_null(), "{removed}");
-    let after = engine.result("computers.list", json!({})).await;
-    assert_eq!(after["macos"]["computers"], json!([]));
-    assert!(!root
-        .path()
-        .join("data/macos-computers")
-        .join(MACOS)
-        .exists());
-    // The outcome stays until acknowledged.
-    let queue = engine.result("operations.list", json!({})).await;
-    assert!(queue["unacknowledgedJobIds"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|id| *id == removal_job));
-    engine
-        .result("operations.job.acknowledge", json!({"jobId": removal_job}))
-        .await;
+    if macos_host {
+        // Deleting the macOS computer is a job that removes its folder, then the list is empty.
+        let removal = engine
+            .result("computers.delete", json!({"computerId": MACOS}))
+            .await;
+        let removal_job = removal["jobId"].as_str().unwrap().to_owned();
+        let removed = engine.finished(&removal_job).await;
+        assert!(removed["error"].is_null(), "{removed}");
+        let after = engine.result("computers.list", json!({})).await;
+        assert_eq!(after["macos"]["computers"], json!([]));
+        assert!(!root
+            .path()
+            .join("data/macos-computers")
+            .join(MACOS)
+            .exists());
+        // The outcome stays until acknowledged.
+        let queue = engine.result("operations.list", json!({})).await;
+        assert!(queue["unacknowledgedJobIds"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|id| *id == removal_job));
+        engine
+            .result("operations.job.acknowledge", json!({"jobId": removal_job}))
+            .await;
+    }
 
     drop(engine);
     let _ = shutdown.send(());

@@ -7,8 +7,9 @@ and this document disagree, the code is right and this document has a bug.
 
 Scope: the Silo engine (`silod`, `silo-engine`, the bundled MicroSandbox runtime and the macOS
 network gateway) on its only supported host today, an Apple Silicon Mac. Linux computers and
-macOS computers both run as guests on that Mac. A Linux host daemon is not shipped, so nothing here
-claims Linux-host behaviour.
+macOS computers both run as guests on that Mac. `silod` also builds for Linux hosts; no Linux
+release ships yet, and what changes there is in [Linux hosts](#linux-hosts). Everything else
+describes the Mac.
 
 ## Summary
 
@@ -83,7 +84,7 @@ Silo passes no `--net-*` rule when it creates a Linux computer, so the computer 
 default policy, the `Public` profile
 ([MicroSandbox `types.rs`](https://github.com/superradcompany/microsandbox/blob/09df3d4b9d832adaede1fb9a198cfc660bfab8cd/crates/network/lib/model/policy/types.rs#L823)).
 The `--net-strict=true` flag
-([`runtime/mod.rs#L6307`](../app/SiloUI/src-tauri/engine/src/runtime/mod.rs#L6307)) only pins
+([`runtime/mod.rs#L6533`](../app/SiloUI/src-tauri/engine/src/runtime/mod.rs#L6307)) only pins
 hostname-rule enforcement and has no effect while no hostname rule exists. On checkpoint restore,
 Silo re-passes the same rules from the computer's recorded policy
 ([`checkpoints.rs#L467`](../app/SiloUI/src-tauri/engine/src/runtime/checkpoints.rs#L467)). The resulting
@@ -153,7 +154,7 @@ placeholder in outbound requests ([docs/SiloUI-SECRETS.md](SiloUI-SECRETS.md)):
   the value delivered to the runtime process on standard input (`MSB_SECRET_VALUES_STDIN`), never
   in arguments, the configuration file or the host environment; the stored configuration holds
   only an opaque source name `SILO_SECRET_<hash>`
-  ([`runtime/mod.rs#L1803`](../app/SiloUI/src-tauri/engine/src/runtime/mod.rs#L1803),
+  ([`runtime/mod.rs#L1841`](../app/SiloUI/src-tauri/engine/src/runtime/mod.rs#L1803),
   [`microsandbox-secret-values-stdin-0.7.6.patch`](../app/SiloUI/patches/microsandbox-secret-values-stdin-0.7.6.patch)). MicroSandbox's parser then sets
   substitution to **headers only** (no query, no body) and, on Linux computers, lets the unchanged
   placeholder go to any host, `passthrough=*` ([MicroSandbox `common.rs` `parse_secret`](https://github.com/superradcompany/microsandbox/blob/09df3d4b9d832adaede1fb9a198cfc660bfab8cd/crates/cli/lib/commands/common.rs#L2893)).
@@ -278,7 +279,7 @@ Limits:
 
 Each Linux computer's `/workspace` is an owned disk image attached as a block device
 (`--mount-owned /workspace:kind=disk`,
-[`runtime/mod.rs#L6292`](../app/SiloUI/src-tauri/engine/src/runtime/mod.rs#L6292)), and its root
+[`runtime/mod.rs#L6518`](../app/SiloUI/src-tauri/engine/src/runtime/mod.rs#L6292)), and its root
 filesystem is a separate disk. No host folder of the user's is shared into a computer. A Linux
 computer sees one host folder, and a computer created with built-in computer use sees up to two
 more. macOS computers get none.
@@ -448,6 +449,74 @@ secret, GitHub token or other computer's data.
 The 2026-10-02 security review checked these surfaces in source
 ([report](SiloUI-CODE-REVIEW-PASS-3-SECURITY-2026-10-02.md)); it was not a live exploit campaign.
 
+## Linux hosts
+
+Scope: `silod` built for Linux (x86_64, aarch64), running Linux computers over KVM with the same
+patched MicroSandbox runtime, and managed from another device through Connections
+([`silod` on a Linux host](SiloUI-ENGINE.md#silod-on-a-linux-host)). There is no app, no macOS
+computer, no viewer and no clipboard on the host. The boundaries above apply unchanged except
+where this section says otherwise.
+
+| | Mac | Linux host |
+| --- | --- | --- |
+| Hypervisor | Hypervisor.framework under libkrun, in the signed `msb` | KVM under libkrun, in `msb` running as the engine's account. Silo adds no seccomp filter or namespace around it. |
+| Which binary serves the socket | The bundle's code signature | Location and ownership: before it reads anything, `silod` refuses an engine directory, any directory above it, `silod`, any entry beside it, or anything under `resources/` that an account other than its own or root owns or can change, and links that leave the directory ([`install_trust.rs#L46`](../app/SiloUI/src-tauri/silod/src/install_trust.rs#L46), called from [`linux.rs#L38`](../app/SiloUI/src-tauri/silod/src/linux.rs#L38)). Before the first `msb` launch the agent checks the MicroSandbox manifest against the runtime inputs compiled into the build and hashes `msb` and `libkrunfw` against it ([`dependencies.rs#L933`](../app/SiloUI/src-tauri/engine/src/dependencies.rs#L923), [`linux.rs#L123`](../app/SiloUI/src-tauri/silod/src/linux.rs#L123)); `libkrunfw`'s hash is compiled in, `msb`'s comes from that manifest, which the ownership check covers. Nothing is signed: signed archives are roadmap milestone 11. |
+| Credential values | Keychain items whose access list names the engine | One 0600 file per item under 0700 directories at `$XDG_DATA_HOME/<identifier>/credentials/<service>/<account>` ([`credential_file_store.rs#L105`](../app/SiloUI/src-tauri/engine/src/credential_file_store.rs#L105)). Every process of the engine's account and root can read them, and a backup of the home directory copies them. `SILO_CREDENTIAL_STORE=secret-service` is untested. |
+| Client check | `getpeereid` | `SO_PEERCRED` ([`socket.rs#L76`](../app/SiloUI/src-tauri/silod/src/socket.rs#L76)); the same effective-UID comparison |
+| Paths | `~/Library/...` | XDG data, cache and state directories ([`paths.rs#L36`](../app/SiloUI/src-tauri/silod/src/paths.rs#L36)); `~/.silo` and `~/.silo-dev` hold the socket on both |
+| Management | The app, or Connections | Connections only (the bridge of boundary 7) |
+
+**The VM.** Run the engine as a dedicated account in the `kvm` group, never as root: `silod`
+refuses euid 0 and `nobody` (uid 65534) for the agent, the bridge and the guest helper
+([`install_trust.rs#L34`](../app/SiloUI/src-tauri/silod/src/install_trust.rs#L34)). A libkrun or virtio escape then
+gives the attacker that account, as on a Mac, and on a dedicated account that is the engine's
+data and credentials, not a person's files. The engine starts `msb` in its own process group
+([`runtime/mod.rs#L1780`](../app/SiloUI/src-tauri/engine/src/runtime/mod.rs#L1780),
+[`guest/process.rs#L27`](../app/SiloUI/src-tauri/engine/src/guest/process.rs#L27)), so a terminal's Ctrl-C reaches
+`silod` alone and its session end stops the computers in order; a second SIGINT or SIGTERM exits at
+once ([`agent.rs#L233`](../app/SiloUI/src-tauri/silod/src/agent.rs#L233)).
+
+**Egress.** The computers get the same network profile and MicroSandbox policy as on a Mac
+(boundary 2), now in front of the host's network. It has not been evaluated on KVM: that eval comes
+with the KVM CI job, and until then this document claims nothing stronger for a Linux host than the
+code reading of boundary 2.
+
+**Host folders a guest sees.** The same as boundary 6: the read-write runtime share at `/.msb`
+(served from the runtime's per-computer directory,
+[`guest_client/spool.rs#L123`](../app/SiloUI/src-tauri/engine/src/guest_client/spool.rs#L123) for the bridge folder in
+it), the two empty read-only legacy folders on older computers, and `/workspace` as a disk image.
+The credential directory is never a mount source or inside or above one; a unit test checks that
+against the storage, share, guest-image and legacy paths
+([`credential_file_store.rs#L809`](../app/SiloUI/src-tauri/engine/src/credential_file_store.rs#L809)).
+
+**Secrets and GitHub.** The placeholder and token logic of boundaries 3 and 5 is unchanged; only
+where the values rest differs. The file store opens every directory and file without following
+links, through directory descriptors, checks every directory from the XDG data directory down,
+and refuses a link, another account's file, or a file others can read
+([`credential_file_store.rs#L133`](../app/SiloUI/src-tauri/engine/src/credential_file_store.rs#L133),
+[`#L359`](../app/SiloUI/src-tauri/engine/src/credential_file_store.rs#L359)). A refusal is reported as
+`credential_access_denied`, naming the file and never the value
+([`credential_store.rs#L50`](../app/SiloUI/src-tauri/engine/src/credential_store.rs#L50)). The engine records the store
+it used first and refuses a different `SILO_CREDENTIAL_STORE` later
+([`linux.rs#L185`](../app/SiloUI/src-tauri/silod/src/linux.rs#L185)).
+
+**Engine socket and in-guest client.** Boundaries 7 and 9 unchanged, with `SO_PEERCRED` in place of
+`getpeereid`.
+
+Not defended on a Linux host:
+
+- **Processes of the engine's account.** They have the engine's full authority (boundary 7) and can
+  read every credential file. Nothing asks first, as the Keychain can on a Mac.
+- **Root**, which can read and change everything above.
+- **A writable install directory.** The ownership check makes `silod` refuse one, but only at
+  start: an account that can change the directory later, or a writable directory the check does
+  not cover, can still replace what the engine runs next. The check reads mode bits only, so
+  write access granted by a POSIX ACL is not seen. Nothing is signed.
+- **Other local users reaching loopback listeners.** Published ports, SSH access to a computer and
+  host-push listen on the host's loopback, which every account on the host can reach. Use a
+  single-tenant host.
+- **The Secret Service backend**, which has never been exercised.
+
 ## What Silo does not protect
 
 These follow from the design today, not from bugs:
@@ -462,7 +531,7 @@ These follow from the design today, not from bugs:
   compromise; a restore replaces the disk, not what the agent already sent or did with its
   credentials.
 - **Resource abuse.** CPU, memory and disk are capped per computer
-  ([`runtime/mod.rs#L6282`](../app/SiloUI/src-tauri/engine/src/runtime/mod.rs#L6282),
+  ([`runtime/mod.rs#L6508`](../app/SiloUI/src-tauri/engine/src/runtime/mod.rs#L6282),
   [`engine.rs#L546`](../app/SiloUI/src-tauri/engine/src/macos_computers/engine.rs#L546)). Outbound bandwidth and the
   number of connections are not: `max_connections` is null in
   [`github-network-default.json`](../app/SiloUI/src-tauri/guest/github-network-default.json), no rate limiter is set,
@@ -500,7 +569,8 @@ its own Keychain prompts. Silo does not
 - Per-computer egress policy (block public addresses by default, or an allowlist, with a DNS log).
 - Per-client socket authentication (macOS code signature, Linux `SO_PEERCRED`) and an audit log of
   client, method and computer.
-- A Linux host daemon, which will need its own boundary review.
+- On a Linux host: signed engine archives (roadmap milestone 11), and the KVM isolation eval that
+  comes with the KVM CI job.
 - A security review of the read-write `/.msb` share (boundary 6).
 - A public, re-runnable isolation eval in `docs/evals/` whose results back each "cannot" above.
 

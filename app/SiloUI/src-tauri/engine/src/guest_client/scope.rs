@@ -152,7 +152,7 @@ fn authorize_call(
         params.clone()
     };
     local_only(&params)?;
-    let mut allowed = |params: Value, filter: Filter, starts_job: bool| {
+    let allowed = |params: Value, filter: Filter, starts_job: bool| {
         Ok(Authorized {
             params,
             filter,
