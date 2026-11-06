@@ -1100,7 +1100,7 @@ fn check_bridged_revoke(path: &Path, request: &Value) -> Result<(), BridgeError>
             "The other device accepts a revoke from a connected device only for the key that device connects with, and {target} is another key. Remove it on that device with silo host revoke."
         ))),
         None => Err(refused(format!(
-            "The other device cannot tell which key this device connected with (its authorized_keys line comes from an earlier Silo version, or the connection used a key without Silo's forced command), so it does not revoke {target} for it. Connect the device again so Silo updates its line, or remove the key on that device with silo host revoke."
+            "The other device cannot tell which key this device connected with (its authorized_keys line comes from an earlier Silo version, or the connection used a key without Silo's forced command), so it does not revoke {target} for it. A line Silo wrote is updated when the device connects again; otherwise remove the key on that device with silo host revoke."
         ))),
     }
 }

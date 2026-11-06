@@ -90,7 +90,8 @@ fn split_options(line: &str) -> (&str, &str) {
     for (index, character) in line.char_indices() {
         match character {
             _ if escaped => escaped = false,
-            '\\' if quoted => escaped = true,
+            // sshd unescapes only `\"` inside quotes; any other backslash is literal.
+            '\\' if quoted && line[index + 1..].starts_with('"') => escaped = true,
             '"' => quoted = !quoted,
             c if c.is_whitespace() && !quoted => {
                 return (&line[..index], line[index..].trim_start());
@@ -114,7 +115,7 @@ fn forced_command(options: &str) -> Option<String> {
     for (index, character) in options.char_indices() {
         match character {
             _ if escaped => escaped = false,
-            '\\' if quoted => escaped = true,
+            '\\' if quoted && options[index + 1..].starts_with('"') => escaped = true,
             '"' => quoted = !quoted,
             ',' if !quoted => {
                 parts.push(&options[start..index]);

@@ -718,7 +718,7 @@ fn controller_advice(rows: &[Value]) -> Vec<String> {
             if row["identified"] == true {
                 format!("The line for {print} runs Silo's bridge with options Silo did not write; it works, and silo host revoke {print} removes it.")
             } else {
-                format!("The line for {print} runs Silo's bridge without the key's fingerprint (an earlier Silo or a person wrote it), so that controller cannot revoke its own key from there. It is updated when that controller connects again; silo host revoke {print} removes it.")
+                format!("The line for {print} runs Silo's bridge without the key's fingerprint (an earlier Silo or a person wrote it), so that controller cannot revoke its own key from there. A line Silo wrote is updated when that controller connects again; silo host revoke {print} removes any such line.")
             }
         })
         .collect()
