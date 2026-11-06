@@ -243,8 +243,8 @@ a `Credentials not kept:` line when the diff found credential paths; the review 
 same renderer). The token is `GITHUB_TOKEN`, else the one `gh auth token` prints, and goes in an
 HTTP header for `https` remotes, never in an argument; without one, nothing is pushed. The result prints the pull request URL (`prUrl` with `--json`). A fork's
 own credentials are never used and its GitHub access stays read-only. `SILO_GITHUB_API_URL`
-changes the API base (tests point it at a local server). The repository is `--repo`, else
-`GITHUB_REPOSITORY`, else parsed from the `origin` URL.
+changes the REST base (default `https://api.github.com`; the GitHub Action sets it from `github.api_url`, and tests point it at a local server). The repository is `--repo`, else
+`GITHUB_REPOSITORY`, else parsed from the `origin` URL. `silo fold <fork> --pr --json` prints `prUrl` (also in `pullRequest.url`), `branch`, `base` and `repository`; `silo fold <fork> --request --json` prints the request as `request.id`.
 
 When `silo.yaml` exists, `--secret` accepts only names in `fork_secrets`. `silo fork` reads
 `--recipe-file`, else the nearest `.silo/recipe.yaml` (a malformed file is an error). The fork
