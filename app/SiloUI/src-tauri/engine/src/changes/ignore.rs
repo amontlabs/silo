@@ -82,20 +82,19 @@ pub const BUILTIN_IGNORE: &str = "\
 *.abcddb-shm
 *.abcddb-wal
 
-# computer use: the driver's own state and caches, the guest helpers' receipts and logs, the
-# desktop session's settings and the macOS helper's receipt and recordings
+# computer use: the driver's caches and recordings, the guest helper's receipt, the desktop
+# service's streamer receipt, helper staging and the bridge's temporary files (macOS keeps /tmp
+# at /private/tmp), and the macOS helper's receipt and screen recordings
 */.local/share/cua-driver
-*/.cache/cua-driver
 */.config/cua-driver/recordings
 /var/lib/silo-computer-use
-/var/lib/silo-desktop
+/var/lib/silo-desktop/streamer.json
 /tmp/silo-cu.*
 /tmp/cua-driver*
-*/.config/xfce4/xfconf
-*/.config/dconf/user
-*/Library/Application Support/Silo
-*/Library/Application Support/CuaDriver
-*/Library/Application Support/Cua Driver
+/private/tmp/silo-cu.*
+/private/tmp/cua-driver*
+/Users/*/Library/Application Support/Silo/computer-use-receipt.json
+/Users/*/Library/Application Support/Silo/Recordings
 
 # agent session data
 */.claude/projects
@@ -379,12 +378,11 @@ mod tests {
         let list = IgnoreList::builtin();
         for path in [
             "/var/lib/silo-computer-use/receipt.json",
-            "/var/lib/silo-desktop/config.json",
+            "/var/lib/silo-desktop/streamer.json",
+            "/private/tmp/silo-cu.AbCd1234/helper",
             "/var/log/silo-computer-use.log",
             "/home/silo/.cache/cua-driver/shots/1.png",
             "/home/silo/.local/share/cua-driver/trajectories/a/step.json",
-            "/home/silo/.config/xfce4/xfconf/xfce-perchannel-xml/displays.xml",
-            "/home/silo/.config/dconf/user",
             "/home/silo/.Xauthority",
             "/tmp/silo-cu.AbCd1234/helper",
             "/Users/silo/Library/Application Support/Silo/computer-use-receipt.json",
@@ -396,6 +394,10 @@ mod tests {
         }
         assert!(!list.matches("/home/silo/project/src/main.rs"));
         assert!(!list.matches("/home/silo/.config/Code/settings.json"));
+        // Settings a person may have changed stay reviewable.
+        assert!(!list.matches("/var/lib/silo-desktop/config.json"));
+        assert!(!list.matches("/home/silo/.config/xfce4/xfconf/xfce-perchannel-xml/displays.xml"));
+        assert!(!list.matches("/Users/silo/Library/Application Support/Silo/notes.txt"));
     }
 
     #[test]
