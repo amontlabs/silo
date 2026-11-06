@@ -43,10 +43,12 @@ as() {
     "$run_as" "$user" "$@"
     return
   fi
-  local uid
+  local uid home
   uid=$(id -u "$user")
-  sudo -u "$user" -H env XDG_RUNTIME_DIR="/run/user/$uid" \
-    DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" "$@"
+  home=$(getent passwd "$user" | cut -d: -f6)
+  # A clean environment: the runner's XDG_CONFIG_HOME and friends name its own home.
+  sudo -u "$user" env -i HOME="$home" USER="$user" LOGNAME="$user" PATH="/usr/local/bin:/usr/bin:/bin" \
+    XDG_RUNTIME_DIR="/run/user/$uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" "$@"
 }
 host() { as "$host_user" "$engine/silo" "$@"; }
 controller() { as "$controller_user" "$engine/silo" "$@"; }

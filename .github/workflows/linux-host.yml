@@ -194,7 +194,7 @@ jobs:
         run: |
           for account in silo-host silo-controller; do
             uid=$(id -u "$account")
-            sudo -u "$account" -H env XDG_RUNTIME_DIR="/run/user/$uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" \
+            sudo -u "$account" env -i HOME="$(getent passwd "$account" | cut -d: -f6)" PATH=/usr/bin:/bin XDG_RUNTIME_DIR="/run/user/$uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" \
               /var/lib/silo-ci/silo-engine/silod --service unregister || true
           done
       - name: Collect logs
