@@ -162,6 +162,10 @@ pub(crate) fn serve(
     // The exports controller is installed at boot: it settles an interrupted operation's
     // journal before any client can start a new one.
     let exports = crate::startup::install_exports(&context);
+    // On Linux the handlers are registered before the socket exists, so a signal sent once
+    // a client can reach the engine always gets the session end, never the default exit.
+    #[cfg(target_os = "linux")]
+    let signals = ending_signals();
     let server = EngineServer::bind(
         paths.socket_path(),
         euid,
@@ -179,11 +183,10 @@ pub(crate) fn serve(
             // the engine starts `msb` in its own process group there, so the terminal's
             // SIGINT reaches silod alone and the session end stops the computers in order.
             #[cfg(target_os = "linux")]
-            runtime.spawn(end_session_on_signal(
-                tokio::signal::unix::SignalKind::interrupt(),
-                "SIGINT",
-                signal_context.clone(),
-            ));
+            for (signal, name) in signals {
+                runtime.spawn(end_session_on_signal(signal, name, signal_context.clone()));
+            }
+            #[cfg(not(target_os = "linux"))]
             runtime.spawn(end_session_on_signal(
                 tokio::signal::unix::SignalKind::terminate(),
                 "SIGTERM",
@@ -228,29 +231,46 @@ async fn end_session_on_signal(
 /// waiting) exits at once with status 1, leaving running computers to the next start.
 #[cfg(target_os = "linux")]
 async fn end_session_on_signal(
-    kind: tokio::signal::unix::SignalKind,
-    name: &str,
+    mut signal: tokio::signal::unix::Signal,
+    name: &'static str,
     context: Arc<SilodContext>,
 ) {
     use std::sync::atomic::AtomicBool;
     static SESSION_ENDING: AtomicBool = AtomicBool::new(false);
-    match tokio::signal::unix::signal(kind) {
-        Ok(mut signal) => {
-            while signal.recv().await.is_some() {
-                match signal_action(&SESSION_ENDING) {
-                    SignalAction::EndSession => {
-                        eprintln!("silod: {name} received, ending the session (send it again to exit at once)");
-                        crate::methods::services::session_end(context.clone());
-                    }
-                    SignalAction::ExitNow => {
-                        eprintln!("silod: {name} received again, exiting now");
-                        std::process::exit(1);
-                    }
-                }
+    while signal.recv().await.is_some() {
+        match signal_action(&SESSION_ENDING) {
+            SignalAction::EndSession => {
+                eprintln!(
+                    "silod: {name} received, ending the session (send it again to exit at once)"
+                );
+                crate::methods::services::session_end(context.clone());
+            }
+            SignalAction::ExitNow => {
+                eprintln!("silod: {name} received again, exiting now");
+                std::process::exit(1);
             }
         }
-        Err(error) => eprintln!("silod: could not install {name} handler: {error}"),
     }
+}
+
+/// SIGINT and SIGTERM, registered with the entered Tokio runtime. A signal that cannot be
+/// registered is reported and keeps its default action.
+#[cfg(target_os = "linux")]
+fn ending_signals() -> Vec<(tokio::signal::unix::Signal, &'static str)> {
+    use tokio::signal::unix::{signal, SignalKind};
+    [
+        (SignalKind::interrupt(), "SIGINT"),
+        (SignalKind::terminate(), "SIGTERM"),
+    ]
+    .into_iter()
+    .filter_map(|(kind, name)| match signal(kind) {
+        Ok(signal) => Some((signal, name)),
+        Err(error) => {
+            eprintln!("silod: could not install {name} handler: {error}");
+            None
+        }
+    })
+    .collect()
 }
 
 /// What one ending signal does on Linux.
