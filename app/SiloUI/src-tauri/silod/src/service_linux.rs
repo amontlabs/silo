@@ -13,13 +13,19 @@
 //! is a failure to systemd, so a requested restart starts a new engine), sends SIGTERM to
 //! `silod` alone with 30 seconds to end its session, and runs with umask 077.
 //!
+//! The engine's computers run in their own processes. The engine stops them in its session
+//! end; one it could not stop in time stays in the unit's cgroup after silod exits, the engine
+//! exits with `SESSION_END_INCOMPLETE_EXIT_CODE`, and `unregister` names what survived.
+//!
 //! Without lingering, the user manager, and so the engine, starts at the first login and stops
-//! at the last logout. Turning lingering on needs privileges (`loginctl enable-linger`), so
+//! at the last logout, and the user manager ending then kills whatever still runs under it,
+//! computers included. Turning lingering on needs privileges (`loginctl enable-linger`), so
 //! silod only reports it and says how.
 
 use std::{
+    ffi::CStr,
     fs,
-    io::{self, Write},
+    io::{self, Read, Write},
     os::unix::fs::{OpenOptionsExt, PermissionsExt},
     path::{Path, PathBuf},
     process::Command,
@@ -79,8 +85,15 @@ pub struct ServiceSetup {
     pub executable: PathBuf,
     /// `$XDG_CONFIG_HOME/systemd/user`, by default `~/.config/systemd/user`.
     pub unit_dir: PathBuf,
-    /// The account's name for `loginctl` and the lingering advice (its UID when unknown).
+    /// The account's UID, which `loginctl` is asked about.
+    pub uid: u32,
+    /// The account's name from the user database for the lingering advice (its UID when the
+    /// database has none).
     pub user: String,
+    /// Where the cgroup hierarchy is mounted (`/sys/fs/cgroup`).
+    pub cgroup_root: PathBuf,
+    /// Where `/proc` is mounted.
+    pub proc_root: PathBuf,
 }
 
 impl ServiceSetup {
@@ -111,11 +124,15 @@ pub fn run_command(args: &[String]) -> Result<i32, String> {
     let executable = std::env::current_exe()
         .and_then(fs::canonicalize)
         .map_err(|error| format!("Cannot locate silod: {error}"))?;
+    let uid = unsafe { libc::getuid() };
     let setup = ServiceSetup {
         channel,
         executable,
         unit_dir: user_unit_dir(|name| std::env::var_os(name))?,
-        user: account_name(),
+        uid,
+        user: account_name(uid),
+        cgroup_root: PathBuf::from("/sys/fs/cgroup"),
+        proc_root: PathBuf::from("/proc"),
     };
     run_with(
         command,
@@ -145,11 +162,40 @@ pub fn user_unit_dir(
     Ok(config.join("systemd/user"))
 }
 
-fn account_name() -> String {
-    std::env::var("USER")
-        .ok()
-        .filter(|name| !name.is_empty() && !name.contains(char::is_whitespace))
-        .unwrap_or_else(|| unsafe { libc::getuid() }.to_string())
+/// The name the user database (`getpwuid_r`) gives `uid`, or the UID itself. The environment
+/// (`$USER`) is never consulted: `su` and `sudo` keep or change it.
+pub fn account_name(uid: u32) -> String {
+    let mut buffer = vec![0 as libc::c_char; 1024];
+    loop {
+        let mut entry: libc::passwd = unsafe { std::mem::zeroed() };
+        let mut result: *mut libc::passwd = std::ptr::null_mut();
+        let code = unsafe {
+            libc::getpwuid_r(
+                uid,
+                &mut entry,
+                buffer.as_mut_ptr(),
+                buffer.len(),
+                &mut result,
+            )
+        };
+        if code == libc::ERANGE && buffer.len() < 1 << 20 {
+            let larger = buffer.len() * 2;
+            buffer.resize(larger, 0);
+            continue;
+        }
+        if code != 0 || result.is_null() || entry.pw_name.is_null() {
+            return uid.to_string();
+        }
+        // The entry's strings live in `buffer`, which outlives this borrow.
+        let name = unsafe { CStr::from_ptr(entry.pw_name) };
+        return name
+            .to_str()
+            .ok()
+            .filter(|name| {
+                !name.is_empty() && !name.chars().any(|c| c.is_whitespace() || c.is_control())
+            })
+            .map_or_else(|| uid.to_string(), str::to_owned);
+    }
 }
 
 /// Runs one service command against `tools`, writing the status to `out` and advice to `err`.
@@ -163,7 +209,7 @@ pub fn run_with(
     match command {
         "status" => {}
         "register" => register(setup, tools, err)?,
-        "unregister" => unregister(setup, tools)?,
+        "unregister" => unregister(setup, tools, err)?,
         _ => return Err(format!("unsupported service command: {command}")),
     }
     report(setup, tools, out, err)?;
@@ -178,6 +224,8 @@ pub fn unit_file(channel: Channel, executable: &Path) -> Result<String, String> 
 [Unit]
 Description={product} engine (silod)
 Documentation=https://github.com/amontlabs/silo/blob/main/docs/SiloUI-ENGINE.md#silod-on-a-linux-host
+# A failed engine is restarted however often it fails, never left stopped by a rate limit.
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
@@ -233,27 +281,52 @@ enum UnitFile {
     Silo(String),
 }
 
+/// The largest unit file silod reads; its own are far smaller.
+const UNIT_LIMIT: u64 = 64 * 1024;
+
 fn read_unit(path: &Path) -> Result<UnitFile, String> {
-    let metadata = match fs::symlink_metadata(path) {
-        Ok(metadata) => metadata,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(UnitFile::Missing),
-        Err(error) => return Err(format!("Cannot read {}: {error}", path.display())),
-    };
     let foreign = || {
         format!(
             "{} exists and was not written by silod; move it away to register the Silo engine",
             path.display()
         )
     };
-    if !metadata.file_type().is_file() || metadata.len() > 64 * 1024 {
-        return Err(foreign());
+    match read_marked(path) {
+        Ok(Some(contents)) => Ok(UnitFile::Silo(contents)),
+        Ok(None) => Err(foreign()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(UnitFile::Missing),
+        Err(error) => Err(format!("Cannot read {}: {error}", path.display())),
     }
-    let contents = fs::read_to_string(path)
-        .map_err(|error| format!("Cannot read {}: {error}", path.display()))?;
-    if contents.lines().next() != Some(MARKER) {
-        return Err(foreign());
+}
+
+/// The contents of the regular file at `path` when its first line is silod's marker, `None`
+/// for anything else there (a link, a directory, a FIFO, a large or foreign file). The file is
+/// opened without following a link and checked through the open handle, so what is read is
+/// what was checked.
+fn read_marked(path: &Path) -> io::Result<Option<String>> {
+    let file = match fs::OpenOptions::new()
+        .read(true)
+        // A FIFO must not block the open; a link is refused (ELOOP).
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(path)
+    {
+        Ok(file) => file,
+        Err(error) if error.raw_os_error() == Some(libc::ELOOP) => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    let metadata = file.metadata()?;
+    if !metadata.file_type().is_file() || metadata.len() > UNIT_LIMIT {
+        return Ok(None);
     }
-    Ok(UnitFile::Silo(contents))
+    let mut bytes = Vec::new();
+    file.take(UNIT_LIMIT + 1).read_to_end(&mut bytes)?;
+    let Ok(contents) = String::from_utf8(bytes) else {
+        return Ok(None);
+    };
+    if contents.len() as u64 > UNIT_LIMIT || contents.lines().next() != Some(MARKER) {
+        return Ok(None);
+    }
+    Ok(Some(contents))
 }
 
 /// Writes `contents` to `path` through a new file in the same directory and a rename.
@@ -268,12 +341,27 @@ fn write_unit(path: &Path, contents: &str) -> Result<(), String> {
             .to_string_lossy(),
         std::process::id()
     ));
-    let written = (|| {
-        let mut file = fs::OpenOptions::new()
+    let create = || {
+        fs::OpenOptions::new()
             .write(true)
             .create_new(true)
             .mode(0o644)
-            .open(&temporary)?;
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(&temporary)
+    };
+    let written = (|| -> io::Result<()> {
+        let mut file = match create() {
+            // A run that crashed between create and rename under a PID now reused left this
+            // file; it is silod's when it carries the marker, and only then is it replaced.
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                if read_marked(&temporary)?.is_none() {
+                    return Err(error);
+                }
+                fs::remove_file(&temporary)?;
+                create()?
+            }
+            other => other?,
+        };
         file.write_all(contents.as_bytes())?;
         // The engine's umask is 077; the user manager only needs to read the file.
         file.set_permissions(fs::Permissions::from_mode(0o644))?;
@@ -281,7 +369,9 @@ fn write_unit(path: &Path, contents: &str) -> Result<(), String> {
         fs::rename(&temporary, path)
     })();
     if let Err(error) = written {
-        let _ = fs::remove_file(&temporary);
+        if error.kind() != io::ErrorKind::AlreadyExists {
+            let _ = fs::remove_file(&temporary);
+        }
         return Err(format!("Cannot write {}: {error}", path.display()));
     }
     Ok(())
@@ -343,15 +433,92 @@ fn register(
     Ok(())
 }
 
-fn unregister(setup: &ServiceSetup, tools: &dyn ServiceTools) -> Result<(), String> {
+fn unregister(
+    setup: &ServiceSetup,
+    tools: &dyn ServiceTools,
+    err: &mut dyn Write,
+) -> Result<(), String> {
     let path = setup.unit_path();
     if read_unit(&path)? == UnitFile::Missing {
         return Ok(());
     }
+    let unit = unit_name(setup.channel);
+    // Asked while the unit runs: systemd may forget the path once the unit is inactive, but
+    // the cgroup itself stays while anything is left in it.
+    let cgroup = control_group(tools, &unit);
     // Stopping waits for the engine's session end, which stops its computers.
-    systemctl_checked(tools, &["disable", "--now", &unit_name(setup.channel)])?;
+    systemctl_checked(tools, &["disable", "--now", &unit])?;
+    if let Some(cgroup) = cgroup {
+        let survivors = remaining_processes(setup, &cgroup);
+        if !survivors.is_empty() {
+            let names: Vec<String> = survivors
+                .iter()
+                .map(|(pid, name)| format!("{name} (PID {pid})"))
+                .collect();
+            let _ = writeln!(
+                err,
+                "The engine stopped, but its session end left these processes of its computers \
+                 running: {}. They keep running without the engine. Starting the engine again \
+                 (silod --service register, or silod --agent) takes them back, and it can stop \
+                 them then.",
+                names.join(", ")
+            );
+        }
+    }
     fs::remove_file(&path).map_err(|error| format!("Cannot remove {}: {error}", path.display()))?;
     systemctl_checked(tools, &["daemon-reload"])
+}
+
+/// The unit's cgroup (`/user.slice/.../<unit>`), when systemd names one.
+fn control_group(tools: &dyn ServiceTools, unit: &str) -> Option<String> {
+    let output = systemctl(tools, &["show", "--property=ControlGroup", "--value", unit]).ok()?;
+    let path = output.stdout.trim();
+    (output.success && path.starts_with('/') && !path.contains("..")).then(|| path.to_owned())
+}
+
+/// The processes left in `cgroup` and below it, by PID with their command names. The unified
+/// hierarchy is read first, then systemd's own on a legacy (v1) layout.
+fn remaining_processes(setup: &ServiceSetup, cgroup: &str) -> Vec<(u32, String)> {
+    let relative = cgroup.trim_start_matches('/');
+    let mut pids = Vec::new();
+    for root in [
+        setup.cgroup_root.join(relative),
+        setup.cgroup_root.join("systemd").join(relative),
+    ] {
+        collect_pids(&root, &mut pids);
+        if !pids.is_empty() {
+            break;
+        }
+    }
+    pids.sort_unstable();
+    pids.dedup();
+    pids.into_iter()
+        .map(|pid| {
+            let name = fs::read_to_string(setup.proc_root.join(pid.to_string()).join("comm"))
+                .map(|name| name.trim().to_owned())
+                .ok()
+                .filter(|name| !name.is_empty())
+                .unwrap_or_else(|| "unknown".to_owned());
+            (pid, name)
+        })
+        .collect()
+}
+
+fn collect_pids(directory: &Path, pids: &mut Vec<u32>) {
+    if let Ok(text) = fs::read_to_string(directory.join("cgroup.procs")) {
+        pids.extend(
+            text.lines()
+                .filter_map(|line| line.trim().parse::<u32>().ok()),
+        );
+    }
+    let Ok(entries) = fs::read_dir(directory) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        if entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+            collect_pids(&entry.path(), pids);
+        }
+    }
 }
 
 /// `systemctl --user is-active`: `active`, `inactive`, `failed`, `activating`, ...
@@ -367,7 +534,8 @@ fn first_word(text: &str) -> Option<&str> {
 
 /// `yes`, `no`, or `unknown` when logind does not answer.
 pub fn linger(setup: &ServiceSetup, tools: &dyn ServiceTools) -> &'static str {
-    let Ok(output) = tools.run("loginctl", &["show-user", &setup.user, "--property=Linger"]) else {
+    let uid = setup.uid.to_string();
+    let Ok(output) = tools.run("loginctl", &["show-user", &uid, "--property=Linger"]) else {
         return "unknown";
     };
     if !output.success {
@@ -427,9 +595,11 @@ fn report(
         };
         let _ = writeln!(
             err,
-            "{known}: the engine starts at login and stops after the last logout. To start it \
-             at boot and keep it running without a session, an administrator runs: sudo \
-             loginctl enable-linger {}",
+            "{known}: the engine starts at login and stops after the last logout. The last \
+             logout also ends the user manager, which kills any computer still running under it \
+             (systemd's user@.service uses KillMode=mixed; check your distribution's). To start \
+             the engine at boot and keep it and its computers running without a session, an \
+             administrator runs: sudo loginctl enable-linger {}",
             setup.user
         );
     }
@@ -449,6 +619,8 @@ mod tests {
         active: RefCell<HashMap<String, &'static str>>,
         linger: Option<&'static str>,
         refuse: Option<&'static str>,
+        /// What `systemctl show --property=ControlGroup` answers for an active unit.
+        cgroup: Option<String>,
     }
 
     impl ServiceTools for FakeTools {
@@ -470,11 +642,18 @@ mod tests {
                 });
             }
             match (program, args) {
-                ("loginctl", ["show-user", _, "--property=Linger"]) => match self.linger {
+                ("loginctl", ["show-user", "1000", "--property=Linger"]) => match self.linger {
                     Some(value) => answer(&format!("Linger={value}"), true),
                     None => answer("", false),
                 },
                 ("systemctl", ["--user", "daemon-reload"]) => answer("", true),
+                ("systemctl", ["--user", "show", "--property=ControlGroup", "--value", unit]) => {
+                    let active = self.active.borrow().get(*unit).copied() == Some("active");
+                    match &self.cgroup {
+                        Some(cgroup) if active => answer(cgroup, true),
+                        _ => answer("", true),
+                    }
+                }
                 ("systemctl", ["--user", "enable", "--now", unit]) => {
                     self.enabled.borrow_mut().insert(unit.to_string(), true);
                     self.active.borrow_mut().insert(unit.to_string(), "active");
@@ -513,7 +692,10 @@ mod tests {
             channel,
             executable: PathBuf::from("/opt/silo engine/silod"),
             unit_dir: root.join(".config/systemd/user"),
+            uid: 1000,
             user: "runner".into(),
+            cgroup_root: root.join("cgroup"),
+            proc_root: root.join("proc"),
         }
     }
 
@@ -557,6 +739,7 @@ mod tests {
             "Description=Silo Dev engine (silod)",
             "ExecStart=\"/opt/silo engine/silod\" --agent",
             "Restart=on-failure",
+            "StartLimitIntervalSec=0",
             "UMask=0077",
             "KillMode=process",
             "KillSignal=SIGTERM",
@@ -570,8 +753,21 @@ mod tests {
         assert_ne!(crate::process::RESTART_EXIT_CODE, 0);
         assert!(!unit.contains("SuccessExitStatus"));
         assert!(!unit.contains("RestartPreventExitStatus"));
-        // The session-end shutdown fits in the stop timeout.
-        assert!(silo_engine::engine_update::SESSION_END_BUDGET.as_secs() < 30);
+        // The rate limit is off, in [Unit] where systemd reads it.
+        let unit_section = unit.split("[Service]").next().unwrap();
+        assert!(
+            unit_section.contains("\nStartLimitIntervalSec=0\n"),
+            "{unit}"
+        );
+        // The session-end shutdown, and the check for computers it left running, fit in the
+        // stop timeout, after which systemd sends SIGKILL to silod alone.
+        assert!(
+            (silo_engine::engine_update::SESSION_END_BUDGET
+                + crate::methods::services::SURVIVOR_CHECK
+                + std::time::Duration::from_secs(1))
+            .as_secs()
+                < 30
+        );
         assert!(unit_file(Channel::Production, Path::new("/opt/silod"))
             .unwrap()
             .contains("Description=Silo engine (silod)\n"));
@@ -667,6 +863,16 @@ mod tests {
         assert_eq!(result, Ok(0));
         assert!(out.ends_with("linger: no\n"), "{out}");
         assert!(err.contains("sudo loginctl enable-linger runner"), "{err}");
+        assert!(
+            err.contains("kills any computer still running under it"),
+            "{err}"
+        );
+        assert!(err.contains("KillMode=mixed"), "{err}");
+        // logind is asked about the UID, never a name from the environment.
+        assert!(tools
+            .calls
+            .borrow()
+            .contains(&"loginctl show-user 1000 --property=Linger".to_owned()));
         assert!(tools
             .calls
             .borrow()
@@ -764,8 +970,10 @@ mod tests {
         assert!(!setup.unit_path().exists());
         let calls = tools.calls.borrow().clone();
         assert_eq!(
-            calls[..2],
+            calls[..3],
             [
+                "systemctl --user show --property=ControlGroup --value \
+                 org.silo.dev.engine.service",
                 "systemctl --user disable --now org.silo.dev.engine.service",
                 "systemctl --user daemon-reload"
             ]
@@ -833,5 +1041,92 @@ mod tests {
             run_command(&["start".into()]).unwrap_err(),
             "unsupported service command: start"
         );
+    }
+
+    #[test]
+    fn unregister_names_the_computer_processes_the_session_end_left_running() {
+        let root = tempfile::tempdir().unwrap();
+        let setup = setup(root.path(), Channel::Development);
+        let cgroup =
+            "/user.slice/user-1000.slice/user@1000.service/app.slice/org.silo.dev.engine.service";
+        let tools = FakeTools {
+            linger: Some("yes"),
+            cgroup: Some(cgroup.into()),
+            ..Default::default()
+        };
+        assert_eq!(run("register", &setup, &tools).0, Ok(0));
+        // Nothing left behind: nothing to say.
+        let (result, _, err) = run("unregister", &setup, &tools);
+        assert_eq!(result, Ok(0));
+        assert_eq!(err, "");
+
+        assert_eq!(run("register", &setup, &tools).0, Ok(0));
+        let directory = setup.cgroup_root.join(cgroup.trim_start_matches('/'));
+        fs::create_dir_all(directory.join("nested")).unwrap();
+        fs::write(directory.join("cgroup.procs"), "4242\n").unwrap();
+        fs::write(directory.join("nested/cgroup.procs"), "4343\n").unwrap();
+        fs::create_dir_all(setup.proc_root.join("4242")).unwrap();
+        fs::write(setup.proc_root.join("4242/comm"), "msb\n").unwrap();
+        let (result, out, err) = run("unregister", &setup, &tools);
+        assert_eq!(result, Ok(0));
+        assert!(out.starts_with("notRegistered\n"), "{out}");
+        assert!(err.contains("msb (PID 4242), unknown (PID 4343)"), "{err}");
+        assert!(err.contains("silod --service register"), "{err}");
+        assert!(!setup.unit_path().exists());
+    }
+
+    #[test]
+    fn the_account_name_comes_from_the_user_database() {
+        let uid = unsafe { libc::getuid() };
+        let name = account_name(uid);
+        assert!(
+            !name.is_empty() && !name.contains(char::is_whitespace),
+            "{name}"
+        );
+        let expected = Command::new("id").arg("-un").output().unwrap();
+        if expected.status.success() {
+            assert_eq!(name, String::from_utf8_lossy(&expected.stdout).trim());
+        }
+        // A UID the database does not know is named by its number.
+        assert_eq!(account_name(3_999_999_999), "3999999999");
+    }
+
+    #[test]
+    fn a_fifo_at_the_unit_path_is_refused_without_blocking() {
+        let root = tempfile::tempdir().unwrap();
+        let setup = setup(root.path(), Channel::Development);
+        fs::create_dir_all(&setup.unit_dir).unwrap();
+        let path = std::ffi::CString::new(setup.unit_path().to_str().unwrap()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(path.as_ptr(), 0o600) }, 0);
+        let error = run("status", &setup, &FakeTools::default()).0.unwrap_err();
+        assert!(error.contains("was not written by silod"), "{error}");
+    }
+
+    #[test]
+    fn a_temporary_file_a_crashed_run_left_is_replaced_only_when_it_is_silods() {
+        let root = tempfile::tempdir().unwrap();
+        let setup = setup(root.path(), Channel::Development);
+        fs::create_dir_all(&setup.unit_dir).unwrap();
+        let temporary = setup.unit_dir.join(format!(
+            ".{}.{}.tmp",
+            unit_name(Channel::Development),
+            std::process::id()
+        ));
+        fs::write(&temporary, format!("{MARKER}\n[Unit]\n")).unwrap();
+        let tools = FakeTools {
+            linger: Some("yes"),
+            ..Default::default()
+        };
+        assert_eq!(run("register", &setup, &tools).0, Ok(0));
+        assert!(!temporary.exists());
+        assert_eq!(fs::read_dir(&setup.unit_dir).unwrap().count(), 1);
+
+        // Someone else's file under that name is left alone, and nothing is written.
+        fs::remove_file(setup.unit_path()).unwrap();
+        fs::write(&temporary, "not silod's\n").unwrap();
+        let error = run("register", &setup, &tools).0.unwrap_err();
+        assert!(error.starts_with("Cannot write"), "{error}");
+        assert_eq!(fs::read_to_string(&temporary).unwrap(), "not silod's\n");
+        assert!(!setup.unit_path().exists());
     }
 }
