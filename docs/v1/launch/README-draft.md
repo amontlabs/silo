@@ -270,7 +270,7 @@ command, and links the command into `~/.local/bin` each time the engine starts (
 > **Owner:** download link and signing status to fill in at release (the next release is not
 > notarized yet; see `docs/v1/release/README.md`).
 
-To build from source, see [the source-build guide](docs/SiloUI-BUILD-FROM-SOURCE.md); the
+To build from source, see [the source-build guide](../../SiloUI-BUILD-FROM-SOURCE.md); the
 command alone builds with `cargo build --release -p silo-cli`.
 
 ## Numbers
@@ -288,7 +288,7 @@ production app. Each time is the median of N=3 runs, with min–max. Source: `do
 
 Memory of one Linux fork (its VM processes, measured with `footprint` 20 s after ready): about
 500 MiB, 497.7–502.2 MiB over 5 forks. Method, caveats and what was not measured:
-[numbers post draft](docs/v1/launch/numbers-post.md).
+[numbers post draft](numbers-post.md).
 
 ## Not there yet
 
