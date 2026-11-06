@@ -464,12 +464,14 @@ fn request_fixture() -> Fixture {
             name: "linux-dev".into(),
             state: "stopped".into(),
             configuration: Some(json!({"id": LINUX_ID, "name": "linux-dev"})),
+            checkpoints: Vec::new(),
         },
         Row {
             id: "main-id".into(),
             name: "main".into(),
             state: "running".into(),
             configuration: None,
+            checkpoints: vec!["cp-main".into()],
         },
     ]);
     // Both forks were forked from main; the CLI recorded a folder for the first.
@@ -709,6 +711,7 @@ async fn open_starts_only_a_stopped_fork_and_gives_up_on_one_that_never_runs() {
         name: "linux-dev".into(),
         state: state.into(),
         configuration: None,
+        checkpoints: Vec::new(),
     };
     let request = make_request(&fixture, LINUX_ID, "main-id", "d1").await;
     // Already running: reported as is, nothing started.
@@ -813,6 +816,58 @@ async fn requests_show_a_folder_fork_with_its_own_summary_and_no_credentials() {
     assert_eq!(result["credentials"], json!({"used": [], "blocked": []}));
     assert_eq!(result["forkName"], "linux-dev");
     assert_eq!(result["request"]["id"], request["id"]);
+}
+
+#[tokio::test]
+async fn a_fork_whose_source_is_a_checkpoint_of_the_target_may_have_a_request() {
+    let fixture = request_fixture();
+    // The record names a checkpoint of main (no origin was stored): it stands for main.
+    super::requests::tests_rows::set_sources(&[("fork-cp", "cp-main"), ("fork-x", "cp-other")]);
+    let made = call(
+        &fixture,
+        MethodName::ChangesRequest,
+        json!({"forkId": "fork-cp", "targetId": "main-id", "reviewDigest": "d1"}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(made["request"]["target"], "main-id");
+    let error = call(
+        &fixture,
+        MethodName::ChangesRequest,
+        json!({"forkId": "fork-x", "targetId": "main-id", "reviewDigest": "d1"}),
+    )
+    .await
+    .expect_err("a checkpoint no computer owns is not main");
+    assert!(error.message.contains("was not forked from"));
+}
+
+#[tokio::test]
+async fn mark_kept_closes_the_requests_of_a_folder_fork_folded_by_the_cli() {
+    let fixture = request_fixture();
+    let folder = make_request(&fixture, LINUX_ID, "folder:/work/app", "d1").await;
+    let other = make_request(&fixture, LINUX_ID, "main-id", "d1").await;
+    let marked = call(
+        &fixture,
+        MethodName::ChangesRequestsMarkKept,
+        json!({"forkId": LINUX_ID, "target": "folder:/work/app", "keepId": "refs/silo/backup/1"}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(marked["requests"][0]["id"], folder["id"]);
+    assert_eq!(marked["requests"][0]["status"], "kept");
+    assert_eq!(marked["requests"][0]["keepId"], "refs/silo/backup/1");
+    // The request for the computer target stays open; a pair that is no fork is refused.
+    let listed = call(&fixture, MethodName::ChangesRequestsList, json!({}))
+        .await
+        .unwrap();
+    assert_eq!(listed["requests"][0]["request"]["id"], other["id"]);
+    assert!(call(
+        &fixture,
+        MethodName::ChangesRequestsMarkKept,
+        json!({"forkId": "main-id", "target": "folder:/work/app"}),
+    )
+    .await
+    .is_err());
 }
 
 // MARK: steps.*

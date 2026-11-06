@@ -116,9 +116,38 @@ pub fn request_keep_result(
     Ok(result)
 }
 
-/// Marks a request whose keep was started kept when the keep journal shows that keep
-/// finished: a keep of its fork into its target, pinned to its digest, that succeeded after
-/// the request's keep began. The request is left as it is when another job holds it.
+/// Settles a request whose keep was started, for the job that already holds the request.
+/// When the keep journal shows that keep finished (a keep of its fork into its target, pinned
+/// to its digest, that succeeded after the request's keep began, even if it was undone since),
+/// the request is marked kept and returned. When no such keep exists and none is pending for
+/// the target, the keep was rolled back or never got going, so the request is open again.
+pub fn settle_held(
+    requests: &Store,
+    journal: &Journal,
+    request: &FoldRequest,
+) -> Option<FoldRequest> {
+    if request.status != FoldRequestStatus::Keeping {
+        return None;
+    }
+    let since = u128::from(request.keeping_since_ms.unwrap_or(0));
+    match journal.finished_keep(
+        &request.target,
+        &request.fork_id,
+        &request.review_digest,
+        since,
+    ) {
+        Some(checkpoint) => requests.mark_kept(&request.id, Some(checkpoint.id)).ok(),
+        None => {
+            if !journal.has_pending(&request.target) {
+                let _ = requests.reopen(&request.id);
+            }
+            None
+        }
+    }
+}
+
+/// [`settle_held`] for a request no job holds: it is taken for the duration, and left as it
+/// is when another job has it.
 pub fn settle_request(
     requests: &Store,
     journal: &Journal,
@@ -127,15 +156,32 @@ pub fn settle_request(
     if request.status != FoldRequestStatus::Keeping {
         return None;
     }
-    let since = u128::from(request.keeping_since_ms?);
-    let checkpoint = journal.finished_keep(
-        &request.target,
-        &request.fork_id,
-        &request.review_digest,
-        since,
-    )?;
     let _claim = claim(&request.id).ok()?;
-    requests.mark_kept(&request.id, Some(checkpoint.id)).ok()
+    settle_held(requests, journal, request)
+}
+
+/// What a keep of a request starts from.
+#[derive(Debug, PartialEq)]
+pub enum Start {
+    /// The request's keep had finished; it is now kept and nothing is kept again.
+    Settled(FoldRequest),
+    /// Keep now.
+    Keep,
+}
+
+/// The first step of a request's keep job, which holds the request: it must be keepable, and
+/// a keep of it that already finished is settled instead of being run a second time.
+pub fn begin_request_keep(
+    requests: &Store,
+    journal: &Journal,
+    request_id: &str,
+) -> Result<Start, String> {
+    let current = requests.keepable_request(request_id)?;
+    check_keepable(&current)?;
+    Ok(match settle_held(requests, journal, &current) {
+        Some(settled) => Start::Settled(settled),
+        None => Start::Keep,
+    })
 }
 
 /// [`settle_request`] for every request whose keep was started.
@@ -169,9 +215,8 @@ pub fn start_request_keep(
         let journal = journal_for(context.as_ref());
         let requests = Store::new(&context.paths().app_data);
         let current = requests.keepable_request(&request_id)?;
-        check_keepable(&current)?;
         let target = current.target.clone();
-        if let Some(settled) = settle_request(&requests, &journal, &current) {
+        if let Start::Settled(settled) = begin_request_keep(&requests, &journal, &request_id)? {
             let report = super::Report {
                 fork: settled.fork_id.clone(),
                 target,

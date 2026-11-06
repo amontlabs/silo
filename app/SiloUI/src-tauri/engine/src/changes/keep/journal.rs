@@ -151,7 +151,10 @@ impl Journal {
     }
 
     /// The before-keep checkpoint of a keep of `fork` into `target`, pinned to `digest`, that
-    /// succeeded at or after `since_ms`: the keep happened and can still be undone.
+    /// succeeded at or after `since_ms`. The keep happened; it may have been undone since (a
+    /// record that was undoable and is consumed), which still counts: changes the user undid
+    /// are not kept again for the same request. A keep that was rolled back never succeeded
+    /// and is not found.
     pub fn finished_keep(
         &self,
         target: &str,
@@ -163,7 +166,7 @@ impl Journal {
             .into_iter()
             .rev()
             .find(|r| {
-                r.state == State::Undoable
+                (r.state == State::Undoable || (r.state == State::Consumed && r.undoable_at > 0))
                     && r.fork == fork
                     && r.review_digest == digest
                     && r.undoable_at >= since_ms

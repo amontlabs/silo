@@ -79,6 +79,13 @@ pub fn changes_requests_keep(
     Request::new(MethodParams::ChangesRequestsKeep(params))
 }
 
+/// `changes.requests.markKept`
+pub fn changes_requests_mark_kept(
+    params: review_requests::ChangesRequestsMarkKeptParams,
+) -> Request<kind::Command> {
+    Request::new(MethodParams::ChangesRequestsMarkKept(params))
+}
+
 /// `changes.requests.throwAway`
 pub fn changes_requests_throw_away(params: review_requests::RequestIdParams) -> Request<kind::Job> {
     Request::new(MethodParams::ChangesRequestsThrowAway(params))

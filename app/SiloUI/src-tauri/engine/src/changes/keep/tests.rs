@@ -1653,36 +1653,162 @@ fn a_request_keep_result_has_the_typed_shape_for_kept_and_refused_outcomes() {
     assert_eq!(typed.refusal.unwrap().reason, "changed");
 }
 
-#[test]
-fn a_keeping_request_settles_from_the_journal_only_when_its_keep_finished() {
+/// A request whose keep started, and the keep journal that keep wrote to.
+struct Settling {
+    _dirs: (tempfile::TempDir, tempfile::TempDir),
+    requests: crate::fold_requests::Store,
+    journal: Journal,
+    checkpoint: CheckpointRef,
+    request: silo_api::methods::keep::FoldRequest,
+}
+
+fn settling(id: &str) -> Settling {
     use silo_api::methods::keep::FoldRequestStatus;
     let dir = tempfile::tempdir().unwrap();
     let requests = crate::fold_requests::Store::new(dir.path());
-    let (_journal_dir, journal) = journal();
-    let world = World::new(Os::Linux, &["fork", "main"]);
-    let env = Fake(world);
+    let (journal_dir, journal) = journal();
+    let env = Fake(World::new(Os::Linux, &["fork", "main"]));
     let checkpoint = env
         .checkpoint_before_keep("main", "Before keep of fork")
         .unwrap();
     journal.record_pending("main", &checkpoint).unwrap();
     journal.tag("main", &checkpoint.id, "fork", "d1").unwrap();
-    let mut keeping = fold_request(FoldRequestStatus::Keeping);
-    keeping.keeping_since_ms = Some(0);
-    requests.put(&keeping).unwrap();
-    // The keep has not succeeded: nothing to settle, the request is still being kept.
-    assert!(super::service::settle_request(&requests, &journal, &keeping).is_none());
-    journal
-        .set_state("main", &checkpoint.id, super::journal::State::Undoable)
-        .unwrap();
-    let settled = super::service::settle_request(&requests, &journal, &keeping).unwrap();
-    assert_eq!(settled.status, FoldRequestStatus::Kept);
-    assert_eq!(settled.keep_id.as_deref(), Some(checkpoint.id.as_str()));
-    assert_eq!(requests.get("fr-1").unwrap().unwrap(), settled);
-    // An open request is never settled this way.
-    let open = fold_request(FoldRequestStatus::Open);
-    assert!(super::service::settle_request(&requests, &journal, &open).is_none());
+    let mut request = fold_request(FoldRequestStatus::Keeping);
+    request.id = id.into();
+    request.keeping_since_ms = Some(0);
+    requests.put(&request).unwrap();
+    Settling {
+        _dirs: (dir, journal_dir),
+        requests,
+        journal,
+        checkpoint,
+        request,
+    }
 }
 
+fn status_of(world: &Settling) -> silo_api::methods::keep::FoldRequestStatus {
+    world
+        .requests
+        .get(&world.request.id)
+        .unwrap()
+        .unwrap()
+        .status
+}
+
+#[test]
+fn a_keeping_request_is_left_alone_while_its_keep_is_pending_and_settled_when_it_finished() {
+    use silo_api::methods::keep::FoldRequestStatus;
+    let world = settling("fr-settle-a");
+    world
+        .journal
+        .begin(&Entry {
+            fork: "fork".into(),
+            target: "main".into(),
+            checkpoint_id: world.checkpoint.id.clone(),
+            checkpoint_name: world.checkpoint.name.clone(),
+            checkpoint_scope: "full".into(),
+        })
+        .unwrap();
+    let settle = || super::service::settle_request(&world.requests, &world.journal, &world.request);
+    assert!(settle().is_none());
+    assert_eq!(status_of(&world), FoldRequestStatus::Keeping);
+    world.journal.clear("main");
+    world
+        .journal
+        .set_state(
+            "main",
+            &world.checkpoint.id,
+            super::journal::State::Undoable,
+        )
+        .unwrap();
+    let settled = settle().unwrap();
+    assert_eq!(settled.status, FoldRequestStatus::Kept);
+    assert_eq!(
+        settled.keep_id.as_deref(),
+        Some(world.checkpoint.id.as_str())
+    );
+    assert_eq!(world.requests.get("fr-settle-a").unwrap().unwrap(), settled);
+    // An open request is never settled this way.
+    let open = fold_request(FoldRequestStatus::Open);
+    assert!(super::service::settle_request(&world.requests, &world.journal, &open).is_none());
+}
+
+#[test]
+fn a_keep_that_was_undone_before_settling_closes_the_request_and_is_not_kept_again() {
+    use silo_api::methods::keep::FoldRequestStatus;
+    let world = settling("fr-settle-b");
+    for state in [
+        super::journal::State::Undoable,
+        super::journal::State::Consumed,
+    ] {
+        world
+            .journal
+            .set_state("main", &world.checkpoint.id, state)
+            .unwrap();
+    }
+    let settled =
+        super::service::settle_request(&world.requests, &world.journal, &world.request).unwrap();
+    assert_eq!(settled.status, FoldRequestStatus::Kept);
+    assert_eq!(
+        settled.keep_id.as_deref(),
+        Some(world.checkpoint.id.as_str())
+    );
+}
+
+#[test]
+fn a_keep_that_was_rolled_back_reopens_the_request() {
+    use silo_api::methods::keep::FoldRequestStatus;
+    let world = settling("fr-settle-c");
+    // Rolled back: the checkpoint was consumed without the keep ever succeeding.
+    world
+        .journal
+        .set_state(
+            "main",
+            &world.checkpoint.id,
+            super::journal::State::Consumed,
+        )
+        .unwrap();
+    assert!(
+        super::service::settle_request(&world.requests, &world.journal, &world.request).is_none()
+    );
+    let after = world.requests.get("fr-settle-c").unwrap().unwrap();
+    assert_eq!(after.status, FoldRequestStatus::Open);
+    assert_eq!(after.keeping_since_ms, None);
+}
+
+#[test]
+fn the_keep_job_settles_a_finished_keep_while_it_holds_the_request() {
+    use super::service::{begin_request_keep, Start};
+    use silo_api::methods::keep::FoldRequestStatus;
+    let world = settling("fr-settle-d");
+    world
+        .journal
+        .set_state(
+            "main",
+            &world.checkpoint.id,
+            super::journal::State::Undoable,
+        )
+        .unwrap();
+    // The job holds the claim; settling through it must not need a second one.
+    let _held = crate::fold_requests::claim("fr-settle-d").unwrap();
+    assert!(
+        super::service::settle_request(&world.requests, &world.journal, &world.request).is_none(),
+        "the claiming settle leaves a held request alone"
+    );
+    assert_eq!(status_of(&world), FoldRequestStatus::Keeping);
+    match begin_request_keep(&world.requests, &world.journal, "fr-settle-d").unwrap() {
+        Start::Settled(settled) => assert_eq!(settled.status, FoldRequestStatus::Kept),
+        Start::Keep => panic!("the finished keep was about to run a second time"),
+    }
+    // A request with no earlier keep starts a new one.
+    let mut open = fold_request(FoldRequestStatus::Open);
+    open.id = "fr-settle-e".into();
+    world.requests.put(&open).unwrap();
+    assert_eq!(
+        begin_request_keep(&world.requests, &world.journal, "fr-settle-e").unwrap(),
+        Start::Keep
+    );
+}
 #[test]
 fn a_finished_keep_is_found_by_its_fork_digest_and_start_time() {
     let world = World::new(Os::Linux, &["fork", "main"]);

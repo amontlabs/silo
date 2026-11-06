@@ -193,6 +193,7 @@ fn lab() -> Lab {
                     "summary": params["summary"], "status": "open"
                 }}))
             }
+            "changes.requests.markKept" => Ok(json!({"requests": []})),
             "operations.job.get" => Ok(finished(Value::Null)),
             "operations.job.acknowledge" => Ok(Value::Null),
             other => Err(("internal", format!("unexpected {other}"))),
@@ -349,9 +350,21 @@ async fn folding_fast_forwards_the_folder_and_undo_puts_it_back() {
     assert_eq!(planned["status"], "dry-run");
     assert_eq!(git(&lab.host, &["rev-parse", "HEAD"]), before);
     assert!(backup_refs(&lab.host).is_empty());
+    // Looking does not close the fork's review requests.
+    assert!(lab.engine.calls("changes.requests.markKept").is_empty());
 
     let kept = lab.fold(&engine, &fork, false).await;
     assert_eq!(kept["status"], "kept", "{kept}");
+    // The fold closes the requests for that fork and folder, naming the folder's backup ref.
+    let closed = &lab.engine.calls("changes.requests.markKept")[0];
+    assert_eq!(
+        closed["target"],
+        format!("folder:{}", lab.host.to_string_lossy())
+    );
+    assert!(closed["keepId"]
+        .as_str()
+        .unwrap()
+        .starts_with("refs/silo/backup/"));
     assert_eq!(
         kept["report"]["target"],
         lab.host.to_string_lossy().as_ref()

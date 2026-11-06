@@ -976,6 +976,45 @@
       ],
       "type": "object"
     },
+    "ChangesRequestsMarkKeptParams": {
+      "description": "Closes the open requests for a fork and target that were kept outside the engine: a\nfolder fork folded into its folder by the CLI.",
+      "properties": {
+        "forkId": {
+          "type": "string"
+        },
+        "keepId": {
+          "description": "What `undo` goes back to, such as the folder's backup ref.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "target": {
+          "description": "The request's target, `folder:<path>` for a folder fork.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "forkId",
+        "target"
+      ],
+      "type": "object"
+    },
+    "ChangesRequestsMarkKeptResult": {
+      "properties": {
+        "requests": {
+          "description": "The requests that are now `kept`.",
+          "items": {
+            "$ref": "#/$defs/FoldRequest"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "requests"
+      ],
+      "type": "object"
+    },
     "ChangesRequestsOpenResult": {
       "properties": {
         "computerId": {
@@ -7573,6 +7612,7 @@
         "changes.requests.list",
         "changes.requests.show",
         "changes.requests.keep",
+        "changes.requests.markKept",
         "changes.requests.throwAway",
         "changes.requests.open",
         "changes.undo",
@@ -7839,6 +7879,22 @@
             },
             "params": {
               "$ref": "#/$defs/ChangesRequestsKeepParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "changes.requests.markKept",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/ChangesRequestsMarkKeptParams"
             }
           },
           "required": [
@@ -10470,6 +10526,22 @@
             },
             "result": {
               "$ref": "#/$defs/JobStartResult"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "changes.requests.markKept",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/ChangesRequestsMarkKeptResult"
             }
           },
           "required": [
@@ -16467,6 +16539,12 @@
       "name": "changes.requests.keep",
       "paramsType": "review_requests::ChangesRequestsKeepParams",
       "resultType": "common::JobStartResult"
+    },
+    {
+      "kind": "command",
+      "name": "changes.requests.markKept",
+      "paramsType": "review_requests::ChangesRequestsMarkKeptParams",
+      "resultType": "review_requests::ChangesRequestsMarkKeptResult"
     },
     {
       "kind": "job",

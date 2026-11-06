@@ -13,7 +13,8 @@ use silo_api::{
         keep::{FoldRequest, FoldRequestStatus},
         review_requests::{
             bucket_counts, ChangesRequestsKeepParams, ChangesRequestsListParams,
-            ChangesRequestsListResult, ChangesRequestsOpenResult, ChangesRequestsShowResult,
+            ChangesRequestsListResult, ChangesRequestsMarkKeptParams,
+            ChangesRequestsMarkKeptResult, ChangesRequestsOpenResult, ChangesRequestsShowResult,
             ChangesRequestsThrowAwayResult, RequestEntry, RequestIdParams,
         },
         MethodName,
@@ -52,6 +53,30 @@ pub(super) struct Row {
     pub state: String,
     /// What `computers.delete` needs for a Linux computer.
     pub configuration: Option<Value>,
+    /// The ids of the computer's checkpoints: a fork's source may be one of them.
+    pub checkpoints: Vec<String>,
+}
+
+fn checkpoint_ids(computer: &Value) -> Vec<String> {
+    computer
+        .get("checkpoints")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|checkpoint| checkpoint.get("id").and_then(Value::as_str))
+        .map(str::to_owned)
+        .collect()
+}
+
+/// The computer a fork's recorded source stands for: the source itself when it is a
+/// computer, or the computer that owns it when it is one of its checkpoints.
+pub(super) fn source_computer(rows: &[Row], source: &str) -> String {
+    if rows.iter().any(|row| row.id == source) {
+        return source.to_owned();
+    }
+    rows.iter()
+        .find(|row| row.checkpoints.iter().any(|id| id == source))
+        .map_or_else(|| source.to_owned(), |row| row.id.clone())
 }
 
 /// The computers out of a `computers.list` reply.
@@ -76,6 +101,7 @@ pub(super) fn rows(listed: &Value) -> Vec<Row> {
                 name: text(configuration, "name"),
                 state: text(computer, "state"),
                 configuration: Some(configuration.clone()),
+                checkpoints: checkpoint_ids(computer),
             });
         }
     }
@@ -90,6 +116,7 @@ pub(super) fn rows(listed: &Value) -> Vec<Row> {
             name: text(computer, "name"),
             state: text(computer, "state"),
             configuration: None,
+            checkpoints: checkpoint_ids(computer),
         });
     }
     found
@@ -185,7 +212,10 @@ pub(super) async fn fork_source(
     fork_id: &str,
 ) -> Result<Option<String>, DispatchError> {
     #[cfg(test)]
-    return Ok(tests_rows::source(fork_id));
+    {
+        let _ = context;
+        return Ok(tests_rows::source(fork_id));
+    }
     #[cfg(not(test))]
     {
         let manifests = store::production(context.silod_context().runtime_host());
@@ -204,7 +234,11 @@ pub(super) async fn verify_fork(
     let source = if fold_requests::folder_path(target).is_some() {
         None
     } else {
-        fork_source(context, fork_id).await?
+        match fork_source(context, fork_id).await? {
+            // A record without an origin names a checkpoint: it counts as its computer.
+            Some(source) => Some(source_computer(&listing(context).await?.rows, &source)),
+            None => None,
+        }
     };
     let state_dir = context
         .silod_context()
@@ -263,6 +297,22 @@ pub(super) async fn list(
         })
         .collect();
     output(ChangesRequestsListResult { requests })
+}
+
+/// `changes.requests.markKept`: closes the open requests for a fork whose changes were kept
+/// outside the engine (the CLI folding a folder fork into its folder).
+pub(super) async fn mark_kept(
+    context: &HandlerContext,
+    params: &Value,
+) -> Result<HandlerOutput, DispatchError> {
+    let params: ChangesRequestsMarkKeptParams = context.decode_params(params)?;
+    verify_fork(context, &params.fork_id, &params.target).await?;
+    let store = store_for(context);
+    let requests = blocking(move || {
+        Ok(store.mark_kept_for(&params.fork_id, &params.target, params.keep_id.as_deref()))
+    })
+    .await?;
+    output(ChangesRequestsMarkKeptResult { requests })
 }
 
 /// Accepts a job that this module finishes itself.
@@ -697,6 +747,7 @@ async fn reach(context: &HandlerContext, request: FoldRequest, fork: Row) -> Res
 }
 
 /// The computers the handlers see in a test, where no Linux runtime can list them.
+#[cfg(test)]
 pub(super) mod tests_rows {
     use super::Row;
     use std::sync::Mutex;

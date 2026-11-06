@@ -72,7 +72,34 @@ fn save(engine: &Engine, record: &Record) -> Result<(), CliError> {
         MEMORY_FILE,
         &record.fork_id,
         serde_json::to_value(record).unwrap_or_default(),
-    )
+    )?;
+    // The engine reads the record from its channel's state directory, whichever socket this
+    // command was given, to know which forks hold a folder.
+    if let Ok(home) = crate::access::home_dir() {
+        let _ = mirror_record(&crate::engine::build_channel().state_dir(&home), record);
+    }
+    Ok(())
+}
+
+/// Writes the fork's folder record into `state_dir`'s copy of the memory file, when that
+/// directory exists (it is the engine's own; a missing one is not made).
+pub fn mirror_record(state_dir: &Path, record: &Record) -> Result<(), CliError> {
+    if !state_dir.is_dir() {
+        return Ok(());
+    }
+    let file = state_dir.join(MEMORY_FILE);
+    let mut all: serde_json::Map<String, Value> = std::fs::read(&file)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or_default();
+    all.insert(
+        record.fork_id.clone(),
+        serde_json::to_value(record).unwrap_or_default(),
+    );
+    let bytes = serde_json::to_vec_pretty(&all)
+        .map_err(|error| CliError::new(format!("Cannot save {MEMORY_FILE}: {error}")))?;
+    std::fs::write(&file, bytes)
+        .map_err(|error| CliError::new(format!("Cannot save {}: {error}", file.display())))
 }
 
 /// The record of the fork that holds `path`, the most recently folded first.
@@ -1096,6 +1123,31 @@ pub async fn review_summary(
 mod tests {
     use super::*;
     use std::process::Command;
+
+    #[test]
+    fn the_folder_record_is_mirrored_into_an_existing_channel_state_directory_only() {
+        let record: Record = serde_json::from_value(json!({
+            "forkId": "f1", "fork": "try", "path": "/work/app", "guestPath": "/root/app",
+            "base": "abc", "branch": "main", "backup": null
+        }))
+        .unwrap();
+        let state = tempfile::tempdir().unwrap();
+        std::fs::write(
+            state.path().join(MEMORY_FILE),
+            r#"{"other": {"path": "/x"}}"#,
+        )
+        .unwrap();
+        mirror_record(state.path(), &record).unwrap();
+        let written: Value =
+            serde_json::from_slice(&std::fs::read(state.path().join(MEMORY_FILE)).unwrap())
+                .unwrap();
+        assert_eq!(written["f1"]["path"], "/work/app");
+        assert_eq!(written["other"]["path"], "/x");
+        // A directory that does not exist is not made.
+        let missing = state.path().join("nowhere");
+        mirror_record(&missing, &record).unwrap();
+        assert!(!missing.exists());
+    }
 
     fn run_git(dir: &Path, args: &[&str]) {
         let status = Command::new("git")

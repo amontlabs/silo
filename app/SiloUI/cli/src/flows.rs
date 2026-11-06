@@ -36,9 +36,38 @@ pub async fn fold(
                 record.path
             )));
         }
-        return folder::fold_folder(engine, &computer, record, options.dry_run, progress).await;
+        let mut value =
+            folder::fold_folder(engine, &computer, record, options.dry_run, progress).await?;
+        if value["status"] == "kept" {
+            close_requests(engine, &computer.id, &mut value).await;
+        }
+        return Ok(value);
     }
     ops::fold(engine, fork, into, keep, options, progress).await
+}
+
+/// After a folder fold, closes the review requests for the fork and its folder. The fold is
+/// done whether or not this works, so a failure is a note in the result.
+async fn close_requests(engine: &Engine, fork_id: &str, value: &mut Value) {
+    let Some(record) = folder::record_for(engine, fork_id) else {
+        return;
+    };
+    let closed = engine
+        .call(requests::changes_requests_mark_kept(
+            silo_api::methods::review_requests::ChangesRequestsMarkKeptParams {
+                fork_id: fork_id.to_owned(),
+                target: format!("folder:{}", record.path),
+                keep_id: record.backup.map(|backup| backup.reference),
+            },
+        ))
+        .await;
+    if let Err(error) = closed {
+        if let Some(notes) = value["report"]["notes"].as_array_mut() {
+            notes.push(json!(format!(
+                "The review request for this fork could not be closed: {error}"
+            )));
+        }
+    }
 }
 
 /// Puts back what the latest keep changed: a fork's host folder (named by the fork or by the

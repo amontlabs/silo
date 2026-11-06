@@ -90,6 +90,7 @@ async fn dispatch(
         MethodName::ChangesRequestsList => requests::list(context, params).await,
         MethodName::ChangesRequestsShow => requests::show(context, params).await,
         MethodName::ChangesRequestsKeep => requests::keep(context, params).await,
+        MethodName::ChangesRequestsMarkKept => requests::mark_kept(context, params).await,
         MethodName::ChangesRequestsThrowAway => requests::throw_away(context, params).await,
         MethodName::ChangesRequestsOpen => requests::open(context, params).await,
         MethodName::CheckpointsCreate => create(context, params).await,

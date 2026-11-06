@@ -71,6 +71,7 @@ define_registry! {
     ChangesRequestsList => ("changes.requests.list", Query, review_requests::ChangesRequestsListParams, review_requests::ChangesRequestsListResult);
     ChangesRequestsShow => ("changes.requests.show", Job, review_requests::RequestIdParams, common::JobStartResult);
     ChangesRequestsKeep => ("changes.requests.keep", Job, review_requests::ChangesRequestsKeepParams, common::JobStartResult);
+    ChangesRequestsMarkKept => ("changes.requests.markKept", Command, review_requests::ChangesRequestsMarkKeptParams, review_requests::ChangesRequestsMarkKeptResult);
     ChangesRequestsThrowAway => ("changes.requests.throwAway", Job, review_requests::RequestIdParams, common::JobStartResult);
     ChangesRequestsOpen => ("changes.requests.open", Job, review_requests::RequestIdParams, common::JobStartResult);
     ChangesUndo => ("changes.undo", Job, keep::ChangesUndoParams, common::JobStartResult);
@@ -240,7 +241,7 @@ mod tests {
 
     #[test]
     fn registry_covers_every_canonical_method_and_kind() {
-        assert_eq!(METHOD_REGISTRY.len(), 164);
+        assert_eq!(METHOD_REGISTRY.len(), 165);
         assert_eq!(
             METHOD_REGISTRY
                 .iter()
@@ -253,7 +254,7 @@ mod tests {
                 .iter()
                 .filter(|m| m.kind == MethodKind::Command)
                 .count(),
-            67
+            68
         );
         assert_eq!(
             METHOD_REGISTRY

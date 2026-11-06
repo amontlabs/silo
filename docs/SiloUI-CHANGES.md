@@ -299,8 +299,14 @@ A request is `open`, `keeping` (a keep of it started and is not recorded as fini
 (with `keepId`, the target's before-keep checkpoint, and `resolvedAt`) or `thrown-away`. A request
 is made only for a fork of its target: `changes.request` refuses a fork whose fork-time record does
 not name the target (so main and unrelated computers cannot be named), and a folder target needs
-the folder record the CLI keeps for that fork. A keep made without the request (`changes.keep`,
-`silo fold`) marks the open requests for that fork and target kept.
+the folder record the CLI keeps for that fork. A fork's source may be recorded as a checkpoint
+(no origin was stored); it counts as the computer that owns the checkpoint. The CLI writes the
+folder record into its channel's state directory (`~/.silo` or `~/.silo-dev`), where the engine
+reads it, even when it was given another socket. A keep made without the request
+(`changes.keep`) marks the open requests for that fork and target kept. A folder fold by the CLI
+does the same through `changes.requests.markKept` (`forkId`, `target: "folder:<path>"`, optional
+`keepId`, the folder's backup ref); the engine checks the fork is the folder's fork first, and a
+failure to close the request is a note in the fold's result, not a failed fold.
 
 Five more methods work on one: `list` takes an optional `status` (`open` includes `keeping`);
 `show`, `keep`, `throwAway` and `open` take `requestId`. `keep` accepts an open or `keeping`
@@ -309,7 +315,10 @@ One job at a time works on a request: a second keep or throw away of it is refus
 runs. A keep marks the request `keeping` before it starts. When the engine stops between the keep
 and the mark, the next keep of the request (or the next `list`) finds the finished keep in the keep
 journal (the same fork, target and digest, succeeded after the keep started) and marks the request
-kept instead of keeping again.
+kept instead of keeping again. A keep that was undone since still counts as kept: changes the user
+undid are not applied again for the same request (ask for a new review). A keep that was rolled
+back, or never got going, with none pending for the target, makes the request `open` again. A new
+`changes.request` for a fork whose keep is `keeping` is refused until it is settled.
 
 - `changes.requests.list` (a query): `status` is `open` (default), `kept`, `thrown-away` or `all`.
   Each entry is the request with `forkName`, `forkState` (absent when the fork is gone) and

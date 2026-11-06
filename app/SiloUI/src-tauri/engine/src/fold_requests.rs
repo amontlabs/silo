@@ -106,8 +106,20 @@ impl Store {
         let existing = self.list().into_iter().find(|request| {
             request.fork_id == new.fork_id
                 && request.target == new.target
-                && request.status == FoldRequestStatus::Open
+                && matches!(
+                    request.status,
+                    FoldRequestStatus::Open | FoldRequestStatus::Keeping
+                )
         });
+        if let Some(under_way) = existing
+            .as_ref()
+            .filter(|request| request.status == FoldRequestStatus::Keeping)
+        {
+            return Err(format!(
+                "A keep of the request {} was started and is not settled. Keep it again to settle it before asking for another review.",
+                under_way.id
+            ));
+        }
         let request = FoldRequest {
             id: existing.as_ref().map_or_else(
                 || format!("fr-{}", &uuid::Uuid::new_v4().simple().to_string()[..8]),
@@ -147,38 +159,57 @@ impl Store {
     /// A request that is now kept; `keep_id` is the target's checkpoint from before. It was
     /// open, or its keep was under way.
     pub fn mark_kept(&self, id: &str, keep_id: Option<String>) -> Result<FoldRequest, String> {
-        let mut request = self.keepable_request(id)?;
-        request.status = FoldRequestStatus::Kept;
-        request.keep_id = keep_id;
-        request.keeping_since_ms = None;
-        request.resolved_at = Some(now());
-        self.put(&request)?;
-        Ok(request)
+        self.modify(id, true, |request| {
+            request.status = FoldRequestStatus::Kept;
+            request.keep_id = keep_id;
+            request.keeping_since_ms = None;
+            request.resolved_at = Some(now());
+        })
     }
 
     /// An open request whose fork was dropped.
     pub fn mark_thrown_away(&self, id: &str) -> Result<FoldRequest, String> {
-        let mut request = self.open_request(id)?;
-        request.status = FoldRequestStatus::ThrownAway;
-        request.resolved_at = Some(now());
-        self.put(&request)?;
-        Ok(request)
+        self.modify(id, false, |request| {
+            request.status = FoldRequestStatus::ThrownAway;
+            request.resolved_at = Some(now());
+        })
     }
 
     /// Records, before a keep starts, that one is under way since `since_ms`.
     pub fn mark_keeping(&self, id: &str, since_ms: u64) -> Result<FoldRequest, String> {
-        let mut request = self.keepable_request(id)?;
-        request.status = FoldRequestStatus::Keeping;
-        request.keeping_since_ms = Some(since_ms);
-        self.put(&request)?;
-        Ok(request)
+        self.modify(id, true, |request| {
+            request.status = FoldRequestStatus::Keeping;
+            request.keeping_since_ms = Some(since_ms);
+        })
     }
 
     /// A keep that changed nothing: the request is open again.
     pub fn reopen(&self, id: &str) -> Result<FoldRequest, String> {
-        let mut request = self.keepable_request(id)?;
-        request.status = FoldRequestStatus::Open;
-        request.keeping_since_ms = None;
+        self.modify(id, true, |request| {
+            request.status = FoldRequestStatus::Open;
+            request.keeping_since_ms = None;
+        })
+    }
+
+    /// Reads, changes and writes one request under the lock `create` takes for its fork and
+    /// target, so neither overwrites the other.
+    fn modify(
+        &self,
+        id: &str,
+        allow_keeping: bool,
+        change: impl FnOnce(&mut FoldRequest),
+    ) -> Result<FoldRequest, String> {
+        let first = self.existing(id)?;
+        let lock = pair_lock(&first.fork_id, &first.target);
+        let _held = lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut request = if allow_keeping {
+            self.keepable_request(id)?
+        } else {
+            self.open_request(id)?
+        };
+        change(&mut request);
         self.put(&request)?;
         Ok(request)
     }
@@ -565,6 +596,48 @@ mod tests {
         let kept = store.mark_kept(&made.id, Some("cp".into())).unwrap();
         assert_eq!(kept.status, FoldRequestStatus::Kept);
         assert_eq!(kept.keeping_since_ms, None);
+    }
+
+    #[test]
+    fn asking_again_while_a_keep_is_unsettled_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(dir.path());
+        let made = store.create(new("f1", "s")).unwrap();
+        store.mark_keeping(&made.id, 1).unwrap();
+        let error = store.create(new("f1", "again")).unwrap_err();
+        assert!(
+            error.contains("not settled") && error.contains(&made.id),
+            "{error}"
+        );
+        // Another fork is not affected, and once settled the pair can ask again.
+        assert!(store.create(new("f2", "s")).is_ok());
+        store.reopen(&made.id).unwrap();
+        assert_eq!(store.create(new("f1", "again")).unwrap().id, made.id);
+    }
+
+    #[test]
+    fn concurrent_updates_of_one_request_all_land_and_leave_it_whole() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(Store::new(dir.path()));
+        let made = store.create(new("f1", "s")).unwrap();
+        let handles: Vec<_> = (0..8)
+            .map(|n| {
+                let store = store.clone();
+                let id = made.id.clone();
+                std::thread::spawn(move || {
+                    for _ in 0..10 {
+                        store.mark_keeping(&id, n).unwrap();
+                        store.reopen(&id).unwrap();
+                    }
+                })
+            })
+            .collect();
+        for handle in handles {
+            handle.join().unwrap();
+        }
+        let after = store.get(&made.id).unwrap().unwrap();
+        assert_eq!(after.status, FoldRequestStatus::Open);
+        assert_eq!(after.keeping_since_ms, None);
     }
 
     #[test]

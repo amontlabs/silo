@@ -139,6 +139,26 @@ wire_struct! {
 }
 
 wire_struct! {
+    /// Closes the open requests for a fork and target that were kept outside the engine: a
+    /// folder fork folded into its folder by the CLI.
+    ChangesRequestsMarkKeptParams {
+        fork_id: String,
+        /// The request's target, `folder:<path>` for a folder fork.
+        target: String,
+        /// What `undo` goes back to, such as the folder's backup ref.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        keep_id: Option<String>,
+    }
+}
+
+wire_struct! {
+    ChangesRequestsMarkKeptResult {
+        /// The requests that are now `kept`.
+        requests: Vec<FoldRequest>,
+    }
+}
+
+wire_struct! {
     ChangesRequestsThrowAwayResult {
         request: FoldRequest,
         /// The name of the fork that was dropped.
