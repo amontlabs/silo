@@ -149,8 +149,9 @@ behind `cfg(target_os = "linux")`.
   bundled tools beside it (`msb`, `git`, `git-lfs`, `git-remote-http`, `git-remote-https`), and
   `<dir>/resources/` with `engine-manifest.json` and the runtime resources:
   `microsandbox/manifest.json`, `microsandbox/<target>/lib/libkrunfw.so.5.6.1`,
-  `microsandbox/licenses/`, and `git-support/` (the Git manifest, templates and licenses, and
-  the guest's `lfs-transfer/git-lfs-transfer`). `paths::default_resource_dir` resolves
+  `microsandbox/licenses/`, and `git-support/` (the Git manifest, templates and licenses,
+  `ssl/cacert.pem`, the certificate bundle the Linux Git build verifies HTTPS with, and the
+  guest's `lfs-transfer/git-lfs-transfer`). `paths::default_resource_dir` resolves
   `<dir>/resources` from the running executable, so a link such as
   `~/.local/bin/silo-remote-dev` finds the same directory; `bundled_tools::resolve` is the
   executable's directory, where the runtime finds `msb` and Git. The release archives
@@ -220,28 +221,66 @@ behind `cfg(target_os = "linux")`.
   `systemctl --user daemon-reload` and `systemctl --user enable --now` on it. The unit starts
   the canonical path of the `silod` that registered it, with `--agent`, and sets
   `Restart=on-failure` (exit code 75 is a failure to systemd, so a requested restart starts a
-  new engine, and a clean exit stays stopped), `RestartSec=10`, `UMask=0077`,
-  `KillMode=process` and `KillSignal=SIGTERM` (only `silod` is signalled: its session end stops
-  its computers, and computers it leaves running on purpose, for an update, are not killed),
-  `TimeoutStopSec=30`, and `WantedBy=default.target`. `register` never replaces a file at that
-  path that silod did not write (the first line marks silod's), and leaves an engine that is
-  already running as it is: after registering from another directory it says to run
-  `systemctl --user restart <unit>`. `silod --service unregister` runs `disable --now` (which
-  waits for the engine's session end), removes the file and reloads. `silod --service status`
+  new engine, and a clean exit stays stopped), `RestartSec=10`, `StartLimitIntervalSec=0` in
+  `[Unit]`, `UMask=0077`, `KillMode=process` and `KillSignal=SIGTERM` (only `silod` is
+  signalled: its session end stops its computers, and computers it leaves running on purpose,
+  for an update, are not killed), `TimeoutStopSec=30`, and `WantedBy=default.target`.
+  `StartLimitIntervalSec=0` turns systemd's start rate limit off, so an engine that keeps
+  failing is restarted every `RestartSec` for as long as it fails rather than left stopped;
+  the trade-off is that a crash loop keeps running and fills the journal until someone stops
+  the unit. `register` never replaces a file at that path that silod did not write (the first
+  line marks silod's), and leaves an engine that is already running as it is: after
+  registering from another directory it says to run `systemctl --user restart <unit>`.
+  `ExecStart` names the canonical path, with links resolved, so an upgrade that installs a new
+  directory and flips a link such as `~/.local/opt/silo-engine` to it keeps starting the old
+  `silod`: run the new one's `silod --service register` (then the restart it asks for).
+  `silod --service unregister` runs `disable --now` (which waits for the engine's session end),
+  then names any process of the engine's computers still left in the unit's cgroup, removes the
+  file and reloads. `silod --service status`
   prints, as on macOS, `enabled`, `disabled` or `notRegistered` on its first line, then
   `state:` (the unit's active state), `unit:` (its path), `program:` (whether it starts this
   `silod`) and `linger:`. `systemctl --user` needs the account's user manager: run the commands
   from a login session, not through `su` or `sudo`, or set
   `XDG_RUNTIME_DIR=/run/user/$(id -u)`. The engine's output goes to the journal
   (`journalctl --user -u org.silo.preview.engine.service`) and its logs to the XDG log
-  directory above.
+  directory above. The journal is also readable by the host's administrators (root and,
+  depending on the distribution, members of groups such as `adm` or `systemd-journal`), so
+  what silod writes there is not private to the account; the threat model for a Linux host
+  must account for that.
+- **One engine per channel.** The unit's engine takes the channel's ownership lock like any
+  other. If an engine of the same channel already runs outside systemd (started by hand from a
+  terminal, or from your own unit), the unit's engine defers to it and exits 0 (the journal
+  says `An engine already owns this user/channel`), so systemd
+  shows the unit as inactive rather than failed and does not restart it. Stop the hand-started
+  engine first, then `systemctl --user start <unit>` (or `silod --service register` again).
+- **Session end.** Stopping the unit (`systemctl --user stop`, `unregister`, the user
+  manager ending) sends SIGTERM to `silod`, which stops this device's computers within a
+  bounded budget (`SESSION_END_BUDGET`) and exits. The computers run in their own processes,
+  and `KillMode=process` leaves them alone, so a computer that does not stop within the budget
+  keeps running after `silod` exits. The engine then checks what the runtime still lists as
+  running; when anything is (or it cannot tell), it logs the names to the journal and exits
+  with code 70 instead of 0, so the unit's stop is recorded as failed. systemd never restarts
+  a unit whose stop it was asked for; after a SIGTERM from anywhere else, `Restart=on-failure`
+  starts a new engine. `unregister` names the surviving processes from the unit's cgroup.
+  Starting the engine again (`systemctl --user start <unit>`, `silod --service register`, or
+  `silod --agent`) takes the surviving computers back, and they can then be stopped from it.
+  If the session end itself overruns `TimeoutStopSec`, systemd's SIGKILL reaches `silod` only,
+  by design (`KillMode=process`): the computers are left running as above, not killed by the
+  unit's stop. A prepared engine update is the exception: its saved computers are released on
+  purpose, the exit is 0, and the next engine resumes them.
 - **Lingering.** Without it, systemd starts the account's user manager, and so the engine, at
-  the account's first login and stops it after the last logout. On a headless host, turn it on
-  so the engine starts at boot and keeps running without a session. That needs an
-  administrator; silod never asks for privileges, it reports `linger: no` and says how:
+  the account's first login and stops it after the last logout. The last logout ends the user
+  manager itself, and with it everything still running under it: systemd's own
+  `user@.service` uses `KillMode=mixed`, which signals every process left in the manager's
+  cgroup, so a computer that outlived the engine's session end is killed then, not just
+  detached. Distributions can change that unit; check yours
+  (`systemctl cat user@.service`). On a headless host, turn lingering on so the engine and its
+  computers start at boot and keep running without a session. That needs an administrator;
+  silod never asks for privileges, it reports `linger: no` and says how (it names the account
+  from the user database, not from `$USER`):
 
   ```sh
-  sudo loginctl enable-linger "$USER"
+  sudo loginctl enable-linger "$(id -un)"
   ```
 
 - **Trying it by hand.** To run a Dev engine in a test home without installing it, assemble
@@ -270,4 +309,6 @@ behind `cfg(target_os = "linux")`.
   runner, installs it, registers it as a user service of the lingering runner account, and
   drives a Linux computer over KVM through the `silo` command
   (`app/SiloUI/scripts/linux-host-e2e.sh`): create, start, exec, checkpoint, fork, exec in the
-  fork, drop both. It then stops the service, expects exit code 0, and unregisters it.
+  fork, stop and drop both. It then stops the service, expects exit code 0 (a session end that
+  left a computer running fails it), and unregisters it. After a failed step it still stops
+  the engine, and keeps the unit for the logs it uploads.

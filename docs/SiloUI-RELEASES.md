@@ -693,18 +693,26 @@ archive. The Linux engines are built for x86-64 and arm64.
 3. `.github/workflows/engine-release.yml` builds `silod` with Rust 1.94.0 for
    `aarch64-apple-darwin` on `macos-15`, packages it with
    `app/SiloUI/scripts/package-engine.py`, and checks that the binary is `arm64`
-   and the checksum. In parallel, its `build-linux` job builds on `ubuntu-24.04`
+   and the checksum. A `tag` job checks the tag before either build starts. In
+   parallel with the macOS build, its `build-linux` job builds on `ubuntu-24.04`
    (`linux-x64`) and `ubuntu-24.04-arm` (`linux-arm64`): it prepares the pinned
    runtime with the shared `prepare-release-runtime` action, builds `silod` and
    the production `silo` command for the runner's architecture
    (`package-engine.py --platform linux-x64|linux-arm64`), and checks the
    checksum, the ELF architecture of `silod`, `silo`, `msb` and `git`, that
    `silo --print-channel-identifier` prints `org.silo.preview`, and
-   `release.json` and the manifest. When all three pass, it creates the GitHub
-   release `engine-v<version>` with the three archives. The release is not
+   `release.json` and the manifest. Only when all three builds pass, both Linux
+   architectures included, does it create the GitHub release `engine-v<version>`
+   with the three archives; a failed Linux build stops the whole release, and
+   none is published with fewer archives. The release is not
    marked latest, so `releases/latest/download/latest.json` keeps pointing at
    the app. Each build compiles in the GitHub App configuration, like the app,
-   from the same three repository secrets as the release workflow.
+   from the same three repository secrets as the release workflow. The Linux
+   binaries therefore carry the GitHub App client secret, as the macOS app and
+   engine do. That is accepted: it is a public client's secret, extractable
+   from any distributed binary, and GitHub treats the client secret of a native
+   app as public (see [GitHub App configuration](#local-setup) above). It never
+   authenticates a Silo installation to a backend.
 
 Assets, at `https://github.com/amontlabs/silo/releases/download/engine-v<version>/`:
 
@@ -743,7 +751,9 @@ resources/microsandbox/manifest.json
 resources/microsandbox/licenses/
 resources/microsandbox/<target>/lib/libkrunfw.so.5.6.1
 resources/git-support/        Git manifest, licenses, share/git-core/templates,
-                              lfs-transfer/ (the guest's git-lfs-transfer)
+                              ssl/ (cacert.pem, the certificate bundle Linux Git
+                              verifies HTTPS with), lfs-transfer/ (the guest's
+                              git-lfs-transfer)
 api/silo-api.schema.json
 THIRD-PARTY-NOTICES.md
 LICENSE
