@@ -6,10 +6,10 @@ Tracker: Linear project "Silo v1: git for agent computers" (P-AMO-8).
 
 ## Resume
 
-- **Phase:** 5 on branch `claude/silo-v1-phase-5`. Phases 0-4 merged (#60-#64).
-- **Done in phase 4 (reviewed, merged into the branch):** review requests (`changes.requests.*`, `silo requests`, MCP), steps + `--from-step` + `silo tree`, credentials-used line (msb patch `microsandbox-secret-usage-events`, macOS gateway, `computers.credentials`), `agents:` + auto-keep + recipe write-back + `silo fold --pr`, `silo-action/`.
-- **Blocked on the owner:** the credentials VM check (`docs/v1/checks/phase4_credentials_check.sh`) needs Keychain repair for the Dev engine (`engine.credentials.repair`, owner clicks Always Allow); same for the secret carry-over checks of phases 1 and 3. Leftover computers to drop: `silo-baseline-8fa22f`, `e2e-p3-macsrc`, `e2e-p3-macsrc-before-20261105-2253`.
-- **Next action:** phase 5 slices; after the Keychain repair, re-run the phase 4 credentials check (and phase 1/3 secret checks); then phase 5.
+- **Phase:** 5 on branch `claude/silo-v1-phase-5`, PR open. Phases 0-4 merged (#60-#64).
+- **Done in phase 5 (reviewed, VM-checked):** in-guest client (AMO-85), Mac mini remote + one pending-changes list (AMO-86), hosted reviewer (AMO-87, service not deployed), host computer use for forks (AMO-70).
+- **Blocked on the owner:** Keychain repair for the Dev engine (phase 4 credentials check; phase 1/3 secret carry-over). Leftover computers to drop: `silo-baseline-8fa22f`, `e2e-p3-macsrc`, `e2e-p3-macsrc-before-20261105-2253`. Upstream drafts to post: `docs/v1/upstream/`.
+- **Next action:** merge the phase 5 PR when CI is green; then phase 6 (OpenClaw/Hermes recipes, final run, README/demo/numbers drafts, release prep).
 - **macOS slots:** free.
 
 ## Start
@@ -100,6 +100,15 @@ VM checks: in-guest client from inside a Linux main; computer use on Linux and m
 ## Spec changes
 
 ## Status
+
+### 6 Nov 2026: phase 5 passed
+
+- **Shipped:** in-guest `silo` client (spool on the `/.msb` share read through directory fds, per-computer token stored as a hash, allow-list scoped to forks the token made, caps, revoke on promote/undo/delete, runtime folder sealed except `silo-bridge`, static guest binary via `app/SiloUI/scripts/build-guest-silo.sh`); Mac mini remote (v1 methods routed over Connections, `--device`, `--all-devices`, one request list across devices, MCP device actions gated by `agents.<name>.devices`); hosted reviewer (`silo review`, three lenses, advisory banner, wording filter, only a reduced diff and a capped, redacted code diff sent; `reviewer-service/` tested offline, not deployed); computer use from the host (one driver session per fork on the Cua driver 0.38.0 contract, `fork --gui`, `auto` approval for forks only, re-applied after keep and promote, ignore entries).
+- **Reviews:** every slice by Opus, two or three rounds; second reviews by Argon (until its quota ran out) and gpt-6.1-sol. Main finds fixed: the guest could redirect the spool to host files; fork ownership by name; a remote fanning out past one hop; reviewer URL from a project file receiving the token; driver tool names guessed wrong; root-run chowns following guest symlinks; a guest user reaching `root-disk.json` on the runtime share.
+- **VM checks (Dev engine, live):** in-guest client from inside a Linux main, 59/59 (`docs/v1/evidence/phase-5/inguest-check.txt`, earlier runs beside it); computer use 32 passed, 1 blocked (Linux and macOS forks driven from the host: typed into a GUI terminal, file appeared; keep and approval checks), the blocked one needs a computer named main (`computer-use-check.txt`). Live runs found and fixed: non-root bridge access, a msb refusal to checkpoint a running computer after the host removed share files (worked around with a guest cache drop; upstream draft in `docs/v1/upstream/msb-virtiofs-unlinked-checkpoint.md`), promote archive names over 32 characters, keep writing agent config as root, macOS readiness and approval.
+- **Tests:** workspace suites pass (engine 3083).
+- **Wording:** clean over added lines (remaining matches are git's `safe.directory`, rustc's `link-self-contained`, and the reviewer filter's own word list).
+- **Next:** phase 6.
 
 ### 6 Nov 2026: phase 4 built; credentials VM check blocked on the owner
 
