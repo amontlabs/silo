@@ -102,6 +102,8 @@ fn engine() -> FakeEngine {
         "computers.list" => Ok(listing(&[("main", "running"), ("try", "running")])),
         "changes.diff" => Ok(json!({"jobId": "job:1"})),
         "changes.requests.show" => Ok(json!({"jobId": "job:2"})),
+        // `requests show` first looks for the request on this device.
+        "changes.requests.list" => Ok(json!({"requests": [{"request": {"id": "fr-ab12cd34"}}]})),
         "operations.job.get" => Ok(json!({"jobId": "job:1", "state": "finished", "outcome": {
             "result": {"diff": diff_document(), "text": "a text", "reviewDigest": "d1",
                        "request": {"id": "fr-ab12cd34", "target": "id-main"}, "forkName": "try"}}})),
