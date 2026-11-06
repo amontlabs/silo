@@ -4538,6 +4538,81 @@ fn trim_before_keep(store: &dyn RuntimeRunner, paths: &RuntimePaths, count: u32)
     );
 }
 
+fn step_entry(id: &str, created_at: u64) -> Checkpoint {
+    Checkpoint {
+        created_at,
+        kind: "step".into(),
+        ..entry(id, &format!("Step {created_at}"), "manual")
+    }
+}
+
+#[test]
+fn step_retention_keeps_the_newest_step_checkpoints_and_leaves_other_kinds() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let mut entries: Vec<Checkpoint> = (1..=4).map(|n| step_entry(&native_id(n), n * 10)).collect();
+    entries.push(entry(&native_id(9), "Mine", "manual"));
+    entries.push(before_keep_entry(&native_id(8), 5));
+    let paths = delete_fixture(&directory, entries, None);
+    let store = Store::new(vec![("dev", None)])
+        .with("dev", &native_id(1), "snap_1", None)
+        .with("dev", &native_id(2), "snap_2", None)
+        .with("dev", &native_id(3), "snap_3", None)
+        .with("dev", &native_id(4), "snap_4", None)
+        .with("dev", &native_id(9), "snap_9", None)
+        .with("dev", &native_id(8), "snap_8", None);
+    let gate = super::super::operation_gate::OperationGate::new();
+    trim_kind_with(
+        &gate,
+        &store,
+        &paths,
+        ID,
+        "step",
+        "Removing an older step checkpoint",
+        &|| Ok(2),
+        silo_api::jobs::JobId::new("job:9").unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        store.removals(),
+        [
+            format!("dev:{}", native_id(1)),
+            format!("dev:{}", native_id(2)),
+        ]
+    );
+    let left: Vec<_> = load(&paths, ID)
+        .unwrap()
+        .checkpoints
+        .iter()
+        .map(|checkpoint| checkpoint.id.clone())
+        .collect();
+    assert_eq!(
+        left,
+        [native_id(3), native_id(4), native_id(9), native_id(8)]
+    );
+    // Zero keeps every step checkpoint.
+    let keep_all = delete_fixture(
+        &tempfile::tempdir().unwrap(),
+        vec![step_entry(&native_id(1), 10), step_entry(&native_id(2), 20)],
+        None,
+    );
+    let untouched = Store::new(vec![("dev", None)])
+        .with("dev", &native_id(1), "snap_1", None)
+        .with("dev", &native_id(2), "snap_2", None);
+    trim_kind_with(
+        &gate,
+        &untouched,
+        &keep_all,
+        ID,
+        "step",
+        "Removing an older step checkpoint",
+        &|| Ok(0),
+        silo_api::jobs::JobId::new("job:9").unwrap(),
+    )
+    .unwrap();
+    assert!(untouched.removals().is_empty());
+}
+
 #[test]
 fn before_keep_retention_removes_a_chain_oldest_first_with_force() {
     let _test_state = crate::test_support::global_state();

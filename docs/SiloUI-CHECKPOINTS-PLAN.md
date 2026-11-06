@@ -324,7 +324,7 @@ chain and capture staging still carry their layers. The two Silo MicroSandbox pa
 `msb snapshot remove --force` return that disk; the live probe returned about
 807 MiB.
 
-When an automatic or before-keep capture leaves more than the kind's count (the
+When an automatic, before-keep or step capture leaves more than the kind's count (the
 retention settings; 0 keeps all), the engine runs one pass as its own job
 (`checkpoints.reclaim`) on that computer's lane, after the capture job has reported
 its result (`runtime/checkpoints/reclaim.rs`):

@@ -81,6 +81,8 @@ async fn initialize_list_and_call_round_trip() {
         "retry_setup",
         "fold",
         "undo",
+        "steps_list",
+        "tree",
     ] {
         assert!(
             names.contains(&expected),
@@ -101,6 +103,7 @@ async fn initialize_list_and_call_round_trip() {
         .find(|tool| tool["name"] == "fork")
         .unwrap();
     assert!(fork["inputSchema"]["properties"]["source"].is_object());
+    assert!(fork["inputSchema"]["properties"]["fromStep"].is_object());
 
     let called = exchange(
         &mut write,

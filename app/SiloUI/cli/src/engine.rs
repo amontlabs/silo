@@ -108,6 +108,9 @@ pub struct Engine {
     _closer: Arc<Closer>,
 }
 
+/// A computer's step lock; released when dropped.
+pub struct StepLock(#[allow(dead_code)] std::fs::File);
+
 struct Closer(Client);
 
 impl Drop for Closer {
@@ -255,6 +258,48 @@ impl Engine {
             last_job: Arc::new(Mutex::new(None)),
             memory: socket.parent().map(Path::to_path_buf).unwrap_or_default(),
         })
+    }
+
+    /// Holds the computer's step lock until the guard is dropped. A step (the command, the
+    /// checkpoint after it and its record) runs under it, so on one computer step N's
+    /// checkpoint is always taken after step N-1's and the numbers follow that order, whichever
+    /// `silo` process runs the step. The lock is a file beside the socket.
+    pub async fn lock_steps(&self, computer_id: &str) -> Result<StepLock, CliError> {
+        if self.memory.as_os_str().is_empty() {
+            return Err(CliError::new(
+                "There is no folder beside the socket for the lock.",
+            ));
+        }
+        let fine = !computer_id.is_empty()
+            && computer_id
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+        if !fine {
+            return Err(CliError::new(
+                "The computer id is not usable as a lock name.",
+            ));
+        }
+        let path = self.memory.join(format!("cli-steps-{computer_id}.lock"));
+        let locked = tokio::task::spawn_blocking(move || -> std::io::Result<std::fs::File> {
+            let file = std::fs::OpenOptions::new()
+                .create(true)
+                .truncate(false)
+                .write(true)
+                .open(path)?;
+            file.lock()?;
+            Ok(file)
+        })
+        .await
+        .map_err(|_| CliError::new("The step lock could not be taken."))?
+        .map_err(|error| CliError::new(format!("Cannot lock the computer's steps: {error}")))?;
+        Ok(StepLock(locked))
+    }
+
+    /// Removes the step lock file of a computer that no longer exists.
+    pub fn forget_step_lock(&self, computer_id: &str) {
+        if !self.memory.as_os_str().is_empty() {
+            let _ = std::fs::remove_file(self.memory.join(format!("cli-steps-{computer_id}.lock")));
+        }
     }
 
     /// Remembers the review digest of the last `silo diff` of a computer.

@@ -449,6 +449,63 @@ async fn changes_request_records_an_open_request_and_answers_with_it() {
     .is_err());
 }
 
+// MARK: steps.*
+
+#[tokio::test]
+async fn steps_are_numbered_per_computer_and_listed_oldest_first() {
+    let fixture = fixture();
+    let record = |command: Value, checkpoint: Option<&str>| {
+        json!({"computerId": LINUX_ID, "command": command, "exitCode": 2,
+            "startedAt": "2026-01-01T00:00:00Z", "finishedAt": "2026-01-01T00:00:01Z",
+            "checkpointId": checkpoint})
+    };
+    let first = call(
+        &fixture,
+        MethodName::StepsRecord,
+        record(json!(["make", "test"]), Some("cp-1")),
+    )
+    .await
+    .unwrap();
+    assert_eq!(first["step"]["number"], 1);
+    assert_eq!(first["step"]["command"], "make test");
+    assert_eq!(first["step"]["exitCode"], 2);
+    let second = call(
+        &fixture,
+        MethodName::StepsRecord,
+        record(json!(["ls"]), None),
+    )
+    .await
+    .unwrap();
+    assert_eq!(second["step"]["number"], 2);
+    assert_eq!(second["step"]["parentStep"], 1);
+    let listed = call(
+        &fixture,
+        MethodName::StepsList,
+        json!({"computerId": LINUX_ID}),
+    )
+    .await
+    .unwrap();
+    let numbers: Vec<u64> = listed["steps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|step| step["number"].as_u64().unwrap())
+        .collect();
+    assert_eq!(numbers, [1, 2]);
+    assert_eq!(listed["steps"][0]["checkpointId"], "cp-1");
+    // A computer that does not exist, and a record with no command, are refused.
+    let missing = json!({"computerId": "22222222-2222-4222-8222-222222222222",
+        "command": ["ls"], "startedAt": "a", "finishedAt": "b"});
+    assert!(call(&fixture, MethodName::StepsRecord, missing)
+        .await
+        .is_err());
+    assert!(
+        call(&fixture, MethodName::StepsRecord, record(json!([]), None))
+            .await
+            .is_err()
+    );
+}
+
 // MARK: exports.*
 
 #[tokio::test]

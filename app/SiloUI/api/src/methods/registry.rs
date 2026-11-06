@@ -99,6 +99,7 @@ define_registry! {
     ComputersShell => ("computers.shell", Query, computers::ComputerShellParams, computers::ApplicationSource);
     ComputersStart => ("computers.start", Job, common::ComputerTargetParams, common::JobStartResult);
     ComputersStop => ("computers.stop", Job, common::ComputerTargetParams, common::JobStartResult);
+    ComputersTree => ("computers.tree", Query, steps::ComputersTreeParams, steps::ComputersTreeResult);
     ConnectionsDevicesConnect => ("connections.devices.connect", Command, connections::ConnectDeviceParams, connections::Device);
     ConnectionsDevicesHealth => ("connections.devices.health", Query, connections::DeviceHealthParams, connections::DeviceHealthResult);
     ConnectionsDevicesList => ("connections.devices.list", Query, common::EmptyParams, Vec<connections::Device>);
@@ -212,7 +213,9 @@ define_registry! {
     SshAccessConnection => ("sshAccess.connection", Command, ssh_access::SshAccessConnectionParams, ssh_access::SshAccessConnectionResult);
     SshAccessSave => ("sshAccess.save", Command, ssh_access::SshAccessSaveParams, ssh_access::SshAccessState);
     SshAccessState => ("sshAccess.state", Query, common::DeviceParams, ssh_access::SshAccessState);
-    StorageRead => ("storage.read", Query, storage::StorageParams, storage::StorageState);
+    StepsList => ("steps.list", Query, steps::StepsListParams, steps::StepsListResult);
+    StepsRecord => ("steps.record", Command, steps::StepsRecordParams, steps::StepsRecordResult);
+    StorageRead =>("storage.read", Query, storage::StorageParams, storage::StorageState);
     StorageReclaim => ("storage.reclaim", Job, storage::StorageParams, common::JobStartResult);
     TerminalCommand => ("terminal.command", Query, terminal::TerminalCommandParams, terminal::CommandResult);
     UpdatesCheck => ("updates.check", Command, updates::UpdatesCheckParams, updates::UpdateSnapshot);
@@ -232,20 +235,20 @@ mod tests {
 
     #[test]
     fn registry_covers_every_canonical_method_and_kind() {
-        assert_eq!(METHOD_REGISTRY.len(), 156);
+        assert_eq!(METHOD_REGISTRY.len(), 159);
         assert_eq!(
             METHOD_REGISTRY
                 .iter()
                 .filter(|m| m.kind == MethodKind::Query)
                 .count(),
-            48
+            50
         );
         assert_eq!(
             METHOD_REGISTRY
                 .iter()
                 .filter(|m| m.kind == MethodKind::Command)
                 .count(),
-            66
+            67
         );
         assert_eq!(
             METHOD_REGISTRY
