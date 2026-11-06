@@ -138,10 +138,10 @@ class DesktopBuildTests(unittest.TestCase):
         tauri = next(command for command, _ in self.calls if command[0] == 'node')
         self.assertEqual(tauri[3:], ['--bundles', 'app', '--config', 'src-tauri/tauri.dev.conf.json'])
         self.assertNotIn('--debug', tauri)
-        self.assertIn(['cargo', 'build', '--locked', '--release', '-p', 'silod'], [command for command, _ in self.calls])
+        self.assertIn(['cargo', 'build', '--locked', '--release', '-p', 'silod', '-p', 'silo-cli'], [command for command, _ in self.calls])
         self.assertEqual(self.embed.call_args.args[:2], (expected, self.target / 'release/silod'))
         self.assertEqual(self.embed.call_args.kwargs['identifier'], 'org.silo.dev')
-        self.assertEqual(self.finalization(), ['embed_engine', 'seal_app', 'verify_engine_contents'])
+        self.assertEqual(self.finalization(), ['bundle_cli', 'embed_engine', 'seal_app', 'verify_engine_contents'])
         self.steps.seal_app.assert_called_once_with(expected, hardened=False)
         with self.assertRaises(ValueError):
             build(['--dev-release', '--debug'], root=self.root, platform='darwin', run=self.command)
