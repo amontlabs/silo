@@ -9,6 +9,10 @@
   assesses. Credentials come only from the environment (see
   docs/SiloUI-RELEASES.md#apple-signing-and-notarization).
 
+`resolve-mode` turns a requested `developer-id` into `adhoc` when none of the Apple credentials
+is configured and `SILO_RELEASE_ALLOW_UNNOTARIZED` is `true` (an unsigned release). Otherwise every
+credential is required.
+
 Printed commands show placeholders for credential values, never the values.
 """
 import argparse
@@ -34,6 +38,30 @@ def release_mode(environ=os.environ):
     mode = environ.get(MODE_ENV, '').strip() or 'adhoc'
     if mode not in MODES:
         raise RuntimeError(f'{MODE_ENV} must be one of {", ".join(MODES)}, not {mode!r}.')
+    return mode
+
+
+APPLE_CREDENTIALS = (IDENTITY_ENV, *NOTARY_ENV, *CERTIFICATE_ENV)
+
+
+ALLOW_UNNOTARIZED_ENV = 'SILO_RELEASE_ALLOW_UNNOTARIZED'
+
+
+def resolve_mode(environ=os.environ, warn=None):
+    """The mode a release build uses. A requested `developer-id` with no Apple credentials at all
+    becomes `adhoc` (signed ad hoc, not notarized) only when `SILO_RELEASE_ALLOW_UNNOTARIZED` is
+    `true`. Otherwise every credential is required."""
+    mode = release_mode(environ)
+    if mode != 'developer-id':
+        return mode
+    present = [name for name in APPLE_CREDENTIALS if environ.get(name, '').strip()]
+    if not present and environ.get(ALLOW_UNNOTARIZED_ENV, '').strip() == 'true':
+        if warn:
+            warn('::warning::No Apple Developer ID credentials are configured and '
+                 f'{ALLOW_UNNOTARIZED_ENV} is true: this release is signed ad hoc and is not notarized. '
+                 'See docs/SiloUI-RELEASES.md#releases-without-developer-id-signing.')
+        return 'adhoc'
+    require_environment(APPLE_CREDENTIALS, environ)
     return mode
 
 
@@ -199,13 +227,15 @@ def delete_keychain(keychain, run=subprocess.run):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command', choices=('import-certificate', 'delete-keychain', 'mode'))
+    parser.add_argument('command', choices=('import-certificate', 'delete-keychain', 'mode', 'resolve-mode'))
     parser.add_argument('keychain', nargs='?')
     args = parser.parse_args(argv)
     if args.command == 'import-certificate':
         print(import_certificate())
     elif args.command == 'delete-keychain':
         delete_keychain(args.keychain)
+    elif args.command == 'resolve-mode':
+        print(resolve_mode(warn=lambda line: print(line, file=sys.stderr)))
     else:
         print(release_mode())
     return 0

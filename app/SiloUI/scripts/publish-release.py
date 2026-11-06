@@ -27,9 +27,30 @@ DOWNLOADS = (
     ("macOS (Apple Silicon)", (("DMG", "Silo-macos-arm64.dmg"),)),
 )
 CHANGE_LISTS = re.compile(r"^### (Major|Minor|Patch) Changes$", re.M)
+SIGNING_MODE_FILE = Path("signing-mode.txt")
+SIGNING_MARKER = re.compile(r"<!-- silo-signing: (adhoc|developer-id) -->")
+SIGNING_LINES = {
+    "developer-id": "Signed with an Apple Developer ID and notarized by Apple.",
+    "adhoc": "Not signed with an Apple Developer ID and not notarized: macOS asks for confirmation "
+             "the first time Silo is opened from the DMG. See \"Opening this version\" below.",
+}
 
 
-def release_page(version, repository, notes):
+def read_signing_mode(path=SIGNING_MODE_FILE):
+    """The signing mode the macOS build resolved (release-platform.yml writes it)."""
+    mode = path.read_text().strip() if path.is_file() else ""
+    if mode not in SIGNING_LINES:
+        raise RuntimeError(f"{path} is missing or names no release signing mode (adhoc or developer-id).")
+    return mode
+
+
+def signing_mode_of(release):
+    """The signing mode recorded on a release page, or None for pages written before it was recorded."""
+    match = SIGNING_MARKER.search((release or {}).get("body") or "")
+    return match.group(1) if match else None
+
+
+def release_page(version, repository, notes, signing=None):
     """GitHub release body: downloads first, then the notes with the full change lists collapsed.
 
     The update feed keeps the plain notes; Silo shows them as text.
@@ -44,6 +65,8 @@ def release_page(version, repository, notes):
         count = len(re.findall(r"^- ", changes, re.M))
         collapsed = f"<details>\n<summary>All changes ({count})</summary>\n\n{changes}\n\n</details>"
         body = f"{summary}\n\n{collapsed}" if summary else collapsed
+    if signing:
+        downloads = f"<!-- silo-signing: {signing} -->\n{SIGNING_LINES[signing]}\n\n{downloads}"
     return f"{downloads}\n\n{body}\n"
 
 
@@ -72,6 +95,8 @@ def main():
     parser.add_argument("version")
     parser.add_argument("--publish", action="store_true")
     parser.add_argument("--allow-stable", action="store_true")
+    parser.add_argument("--allow-unnotarized", action="store_true",
+                        help="publish an ad hoc signed draft although the previous release was notarized")
     args = parser.parse_args()
     version = args.version
     current = validate_version(version)
@@ -91,6 +116,12 @@ def main():
         assets = {a["name"] for a in existing["assets"]}
         if assets != EXPECTED | {"latest.json", "SHA256SUMS"} or any(a["size"] <= 0 for a in existing["assets"]):
             raise RuntimeError("Draft is incomplete; refusing to publish.")
+        signing = signing_mode_of(existing)
+        print(f"Draft signing mode: {signing or 'not recorded'}")
+        previous = max(published, key=lambda r: validate_version(r["tag_name"][1:]), default=None)
+        if signing != "developer-id" and signing_mode_of(previous) == "developer-id" and not args.allow_unnotarized:
+            raise RuntimeError(f"{previous['tag_name']} was notarized and this draft is not; refusing to publish "
+                               "without --allow-unnotarized (workflow input allow_unnotarized).")
         # Download and verify every byte again after draft storage and before public cutover.
         import tempfile
         with tempfile.TemporaryDirectory() as directory:
@@ -138,9 +169,11 @@ def main():
         notes = Path("release-notes.md")
         if not notes.is_file() or not notes.read_text().strip():
             raise RuntimeError("Release notes are required.")
+        signing = read_signing_mode()
+        print(f"Signing mode: {signing}")
         prepare(root, version, repository, notes.read_text())
         page = Path("release-page.md")
-        page.write_text(release_page(version, repository, notes.read_text()))
+        page.write_text(release_page(version, repository, notes.read_text(), signing))
         gh("release", "create", tag, *[str(root / name) for name in sorted(EXPECTED | {"latest.json", "SHA256SUMS"})], "--verify-tag", "--draft", "--title", f"Silo {version}", "--notes-file", str(page))
 
 

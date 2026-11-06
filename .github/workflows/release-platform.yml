@@ -309,10 +309,40 @@ jobs:
           # The silo command's channel comes from this identifier; without it, it is Silo Dev's.
           SILO_CHANNEL_IDENTIFIER: org.silo.preview
         run: cargo build --locked --release -p silod -p silo-cli --target "$RUNTIME_TARGET"
-      # Only a draft imports the Developer ID certificate, into a temporary keychain that the
+      # A draft with no Apple credentials is signed ad hoc and not notarized only when the
+      # repository variable SILO_RELEASE_ALLOW_UNNOTARIZED is true; otherwise every credential is
+      # required. Other modes pass through unchanged.
+      - name: Resolve the macOS signing mode
+        id: signing
+        if: runner.os == 'macOS'
+        env:
+          SILO_RELEASE_SIGNING: ${{ inputs.signing }}
+          SILO_RELEASE_ALLOW_UNNOTARIZED: ${{ vars.SILO_RELEASE_ALLOW_UNNOTARIZED }}
+          APPLE_CERTIFICATE_P12_BASE64: ${{ inputs.signing == 'developer-id' && secrets.APPLE_CERTIFICATE_P12_BASE64 || '' }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ inputs.signing == 'developer-id' && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
+          APPLE_DEVELOPER_ID_IDENTITY: ${{ inputs.signing == 'developer-id' && secrets.APPLE_DEVELOPER_ID_IDENTITY || '' }}
+          APPLE_TEAM_ID: ${{ inputs.signing == 'developer-id' && secrets.APPLE_TEAM_ID || '' }}
+          APPLE_API_KEY_P8: ${{ inputs.signing == 'developer-id' && secrets.APPLE_API_KEY_P8 || '' }}
+          APPLE_API_KEY_ID: ${{ inputs.signing == 'developer-id' && secrets.APPLE_API_KEY_ID || '' }}
+          APPLE_API_ISSUER_ID: ${{ inputs.signing == 'developer-id' && secrets.APPLE_API_ISSUER_ID || '' }}
+        run: |
+          mode=$(python3 scripts/macos_notarization.py resolve-mode)
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
+          mkdir -p "$RUNNER_TEMP/signing-mode"
+          echo "$mode" > "$RUNNER_TEMP/signing-mode/signing-mode.txt"
+      # The draft job reads the resolved mode to label the draft page.
+      - name: Upload the resolved signing mode
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: signing-mode-${{ inputs.asset }}
+          path: ${{ runner.temp }}/signing-mode/signing-mode.txt
+          if-no-files-found: error
+          retention-days: 7
+      # Only a Developer ID draft imports the certificate, into a temporary keychain that the
       # cleanup step below deletes. Dry runs and artifact-only builds never see it.
       - name: Import the Developer ID certificate
-        if: runner.os == 'macOS' && inputs.signing == 'developer-id'
+        if: runner.os == 'macOS' && steps.signing.outputs.mode == 'developer-id'
         env:
           APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -324,12 +354,12 @@ jobs:
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ inputs.draft && secrets.TAURI_SIGNING_PRIVATE_KEY || env.SILO_TEST_SIGNING_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ inputs.draft && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
-          SILO_RELEASE_SIGNING: ${{ inputs.signing }}
-          APPLE_DEVELOPER_ID_IDENTITY: ${{ inputs.signing == 'developer-id' && secrets.APPLE_DEVELOPER_ID_IDENTITY || '' }}
-          APPLE_TEAM_ID: ${{ inputs.signing == 'developer-id' && secrets.APPLE_TEAM_ID || '' }}
-          APPLE_API_KEY_P8: ${{ inputs.signing == 'developer-id' && secrets.APPLE_API_KEY_P8 || '' }}
-          APPLE_API_KEY_ID: ${{ inputs.signing == 'developer-id' && secrets.APPLE_API_KEY_ID || '' }}
-          APPLE_API_ISSUER_ID: ${{ inputs.signing == 'developer-id' && secrets.APPLE_API_ISSUER_ID || '' }}
+          SILO_RELEASE_SIGNING: ${{ steps.signing.outputs.mode }}
+          APPLE_DEVELOPER_ID_IDENTITY: ${{ steps.signing.outputs.mode == 'developer-id' && secrets.APPLE_DEVELOPER_ID_IDENTITY || '' }}
+          APPLE_TEAM_ID: ${{ steps.signing.outputs.mode == 'developer-id' && secrets.APPLE_TEAM_ID || '' }}
+          APPLE_API_KEY_P8: ${{ steps.signing.outputs.mode == 'developer-id' && secrets.APPLE_API_KEY_P8 || '' }}
+          APPLE_API_KEY_ID: ${{ steps.signing.outputs.mode == 'developer-id' && secrets.APPLE_API_KEY_ID || '' }}
+          APPLE_API_ISSUER_ID: ${{ steps.signing.outputs.mode == 'developer-id' && secrets.APPLE_API_ISSUER_ID || '' }}
         run: python3 scripts/package-macos-release.py "src-tauri/target/release-compile/$RUNTIME_TARGET/release/bundle/macos/Silo.app" release-assets --engine "src-tauri/target/release-compile/$RUNTIME_TARGET/release/silod" --cli "src-tauri/target/release-compile/$RUNTIME_TARGET/release/silo"
       - name: Verify macOS library constraints
         if: runner.os == 'macOS'
@@ -337,8 +367,8 @@ jobs:
       - name: Collect and verify macOS assets
         if: runner.os == 'macOS'
         env:
-          SILO_RELEASE_SIGNING: ${{ inputs.signing }}
-          APPLE_DEVELOPER_ID_IDENTITY: ${{ inputs.signing == 'developer-id' && secrets.APPLE_DEVELOPER_ID_IDENTITY || '' }}
+          SILO_RELEASE_SIGNING: ${{ steps.signing.outputs.mode }}
+          APPLE_DEVELOPER_ID_IDENTITY: ${{ steps.signing.outputs.mode == 'developer-id' && secrets.APPLE_DEVELOPER_ID_IDENTITY || '' }}
         run: |
           mkdir -p release-assets
           bundle="src-tauri/target/release-compile/$RUNTIME_TARGET/release/bundle"
@@ -348,7 +378,7 @@ jobs:
           test -s release-assets/Silo-macos-arm64.app.tar.gz.sig
           test -s release-assets/Silo-macos-arm64.dmg
       - name: Delete the temporary signing keychain
-        if: always() && runner.os == 'macOS' && inputs.signing == 'developer-id'
+        if: always() && runner.os == 'macOS' && steps.signing.outputs.mode == 'developer-id'
         run: python3 scripts/macos_notarization.py delete-keychain "$SILO_SIGNING_KEYCHAIN"
       - name: Verify update signatures
         run: python3 scripts/verify-release-signatures.py release-assets

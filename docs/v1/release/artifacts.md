@@ -23,7 +23,7 @@ Workflow artifacts (7-day retention, not release assets):
 | `runtime-timings-<target>`, `native-timings-<target>`, `package-timings-<target>` (timing metrics only) | CI |
 | `macos-15-library-constraints` (`results.json`) | CI |
 
-The DMG and archive are Developer ID signed and notarized only in `developer-id` mode (every draft). Local builds and `dry_run` stay ad-hoc signed.
+The DMG and archive are Developer ID signed and notarized only in `developer-id` mode: a draft with all seven Apple secrets configured. A draft without any of them, local builds and `dry_run` are signed ad hoc and not notarized ([unsigned releases](../../SiloUI-RELEASES.md#releases-without-developer-id-signing)).
 
 ## The `silo` command in the app
 
