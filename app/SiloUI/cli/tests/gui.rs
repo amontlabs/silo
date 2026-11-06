@@ -156,6 +156,9 @@ fn driver_engine(driver: Arc<Mutex<Driver>>, screenshot: Value) -> FakeEngine {
                 state.output.clear();
                 Ok(json!({"jobId": format!("job:{}", state.started)}))
             }
+            "guest.exec.input" if state.exited => {
+                Err(("internal", "the command has exited".into()))
+            }
             "guest.exec.input" => {
                 let raw: Vec<u8> = params["data"]
                     .as_array()
