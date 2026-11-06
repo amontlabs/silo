@@ -97,6 +97,11 @@ impl Channel {
         self.pick("silo-remote", "silo-remote-dev")
     }
 
+    /// The link under `~/.local/bin` that puts the bundled `silo` command on PATH.
+    pub fn cli_link_name(self) -> &'static str {
+        self.pick("silo", "silo-dev")
+    }
+
     /// The forced command of an installed connections key.
     pub fn remote_bridge_command(self) -> String {
         format!(
@@ -165,6 +170,7 @@ mod tests {
             "org.silo.Silo.proxy-ca"
         );
         assert_eq!(production.remote_bridge_name(), "silo-remote");
+        assert_eq!(production.cli_link_name(), "silo");
         assert_eq!(
             production.remote_bridge_command(),
             "exec ~/.local/bin/silo-remote --remote-bridge"
@@ -216,6 +222,8 @@ mod tests {
         for (production, development) in pairs {
             assert_ne!(production, development);
         }
+        assert_ne!(p.cli_link_name(), d.cli_link_name());
+        assert_eq!(d.cli_link_name(), "silo-dev");
         assert_ne!(p.remote_bridge_command(), d.remote_bridge_command());
         assert_eq!(
             d.remote_bridge_command(),

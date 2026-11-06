@@ -1,0 +1,93 @@
+== O1 silo up --recipe openclaw (needs a fresh main)
+Building the recipe openclaw...
+Making main from openclaw...
+Starting main...
+Starting main: 5s
+Checkpointing main...
+Checkpointing main: 5s
+main is running (made from openclaw). Warm checkpoint c41ac2d6191bc4718b74910ab58952a1 saved. ssh main.silo-dev reaches it.
+[10:21:19] PASS  O1 silo up --recipe openclaw  -- 16.24s, includes the install (not a measurement)
+-- install
+PATH=/.msb/scripts:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+/usr/bin/openclaw
+OpenClaw 2026.11.1 (4ffdd20)
+v24.22.2
+ls: cannot access '/home/silo/.openclaw': No such file or directory
+[10:21:21] PASS  O1 openclaw is installed (on the working account's PATH)  -- 
+-- gateway service: unconfigured it exits (no account needed for the baseline config below)
+-rw-r--r-- 1 root root  141 Nov  6 05:49 openclaw-gateway.desktop
+#!/bin/sh
+exec openclaw gateway
+Missing config. Run `openclaw setup` or set gateway.mode=local (or pass --allow-unconfigured).
+Next guided path: openclaw onboard.
+Next targeted changes: openclaw configure for models, channels, Gateway, plugins, skills, and health checks.
+Add a chat channel later: openclaw channels add.
+No change
+/home/silo/.openclaw
+/home/silo/.openclaw/.env
+/home/silo/.openclaw/agents
+/home/silo/.openclaw/agents/main
+/home/silo/.openclaw/config-journal-fingerprint.key
+/home/silo/.openclaw/credentials
+/home/silo/.openclaw/credentials/final-test.json
+/home/silo/.openclaw/openclaw.json
+/home/silo/.openclaw/openclaw.json.bak
+/home/silo/.openclaw/state
+/home/silo/.openclaw/state/openclaw-quarantine.sqlite
+/home/silo/.openclaw/state/openclaw.sqlite
+/home/silo/.openclaw/state/openclaw.sqlite-shm
+/home/silo/.openclaw/state/openclaw.sqlite-wal
+/home/silo/.openclaw/state/openclaw.sqlite.seal
+/home/silo/.openclaw/tmp
+/home/silo/.openclaw/tmp/openclaw-1001
+/home/silo/.openclaw/workspace
+/home/silo/.openclaw/workspace/.git
+/home/silo/.openclaw/workspace/AGENTS.md
+/home/silo/.openclaw/workspace/BOOTSTRAP.md
+/home/silo/.openclaw/workspace/IDENTITY.md
+/home/silo/.openclaw/workspace/SOUL.md
+/home/silo/.openclaw/workspace/USER.md
+-- restart main so the autostart entry starts the gateway at boot
+[10:21:30] waiting 40 s
+  323 silo     openclaw-gatewa openclaw-gateway
+  395 silo     MainThread      /usr/bin/node /usr/lib/node_modules/openclaw/dist/process/spawn-broker/worker.js
+  460 silo     MainThread      /usr/bin/node /usr/lib/node_modules/openclaw/dist/process/spawn-broker/worker.js
+  512 silo     MainThread      /usr/bin/node /usr/lib/node_modules/openclaw/dist/infra/sqlite-readonly-location.worker.js --openclaw-sqlite-readonly-c
+gateway processes in main: 1
+[10:22:11] PASS  O1 the gateway runs in main as openclaw-gateway  -- 
+== O2 control fork of main (no recipe lists): the gateway comes up again, the files stay
+-- OpenClaw keeps a single-gateway lock in ~/.openclaw/state/openclaw.sqlite; a fork copies main's fresh heartbeat,
+-- so the fork's first boot start is refused until the heartbeat is 90 s old and nothing retries it. The check
+-- therefore restarts each fork once the copied heartbeat is stale and looks at the gateway after that boot.
+first boot: gateway processes 0; GatewayLockNamespaceError: cannot verify Gateway ownership from this process (different PID namespace); the owner heartbeat is fresh — run this command inside the Gateway container or with a shared PID namespace. If the previous Gateway stopped, wait up to 90 seconds after its last heartbeat. holder 323 at main/pid-ns 4026531836
+[10:22:45] waiting 61 s until main's copied heartbeat is stale, then restarting e2e-final-claw-ctl
+  326 openclaw-gatewa openclaw-gateway
+  385 MainThread      /usr/bin/node /usr/lib/node_modules/openclaw/dist/process/spawn-broker/worker.js
+  479 MainThread      /usr/bin/node /usr/lib/node_modules/openclaw/dist/process/spawn-broker/worker.js
+  494 MainThread      /usr/bin/node /usr/lib/node_modules/openclaw/dist/infra/sqlite-readonly-location.worker.
+  509 MainThread      /usr/bin/node /usr/lib/node_modules/openclaw/dist/infra/sqlite-readonly-location.worker.
+quiet: applied; stopped: none; scrubbed: /etc/silo/guest-client.json; secrets: none
+[10:23:58] PASS  O2 control: gateway runs in the fork after a restart (what quiet must prevent)  -- 
+[10:23:58] PASS  O2 control: .env is carried (no scrub list)  -- 
+== O3 quiet fork: --recipe-file with quiet [openclaw-gateway, openclaw], scrub [/home/silo/.openclaw/credentials, /home/silo/.openclaw/.env]
+[10:24:16] PASS  O3 fork started  -- 
+[10:24:16] waiting 80 s until main's copied heartbeat is stale, then restarting e2e-final-claw
+-- processes matching openclaw in the quiet fork:
+count=0
+quiet: applied; stopped: openclaw-gateway, openclaw; scrubbed: /home/silo/.openclaw/credentials, /home/silo/.openclaw/.env, /etc/silo/guest-client.json; secrets: none
+[10:26:47] PASS  O3 no openclaw gateway process in the fork  -- 
+[10:26:47] PASS  O3 scrub: credentials/ file and .env are gone in the fork  -- 
+[10:26:48] PASS  O3 main still has both  -- 
+-- the fork keeps the install and the baseline config: /usr/bin/openclaw config-present 
+[10:26:51] cleanup (e2e-final-*; main is stopped, not dropped)
+OWNER: main is left stopped (made by this run: 1); please drop it: silo drop main --force
+NAME                                STATE      KIND    SIZE
+workspace-1                         stopped    linux   8 cpu, 32 GiB
+e2e-relay                           stopped    linux   8 cpu, 32 GiB
+silo-eval-a                         stopped    linux   2 cpu, 2 GiB
+silo-eval-b                         stopped    linux   2 cpu, 2 GiB
+main                                stopped    linux   2 cpu, 4 GiB
+e2e-p3-macsrc-before-20261105-2253  stopped    macos   4 cpu, 8 GiB
+e2e-p3-macsrc                       stopped    macos   4 cpu, 8 GiB
+macOS VMs running: 0
+== summary (claw): 9 passed, 0 failed, 0 blocked

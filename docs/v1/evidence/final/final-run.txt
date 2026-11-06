@@ -1,0 +1,181 @@
+== header (2026-11-06T10:23:46Z)
+commit: 096774709d1e48c203cedfaf5780b386f6f9d2f3; tracked changes under app/: []
+machine: Apple M4 Max, 64 GiB RAM, 16 cores, macOS 26.5 (25F71), arm64
+bundle: /Users/polarzero/code/projects/microsandbox-workspaces/app/SiloUI/target/release/bundle/macos/Silo Dev.app; engine pid 36824; silo CLI silo 0.1.0 (release profile, debug assertions on, Dev channel)
+msb: msb 0.7.6; microsandboxVersion 0.7.6 (source commit 09df3d4b9d83); Silo patches on it: 24
+libkrunfw: 5.6.1 (commit cf4c22b9f05c); libkrun (msb_krun crate, macOS gateway lock): version = "0.1.39"
+guest image arm64: ubuntu-24.04-v5 digest sha256:520ac2e08002da7b9996d3d09c096c6e5edf9dee3ddadd2291769cce786eb2ff archive sha256 70b6a50a7004aa91c811949e483060768b8b82e40684d080ce117ae0afe6410b (352275811 bytes, 1103616512 unpacked)
+guest image amd64: ubuntu-24.04-v5 digest sha256:cff964f375ea328f4f40211e312fe3d3cf80d041449e47ebe047600ddb955d2c archive sha256 1f10405e9e30a916dce48ec6e9ca49d896d62a892ee8d3ea19b55d7773012dfc (361611981 bytes, 1192738816 unpacked)
+computers: NAME STATE KIND SIZE;workspace-1 stopped linux 8 cpu, 32 GiB;e2e-relay stopped linux 8 cpu, 32 GiB;silo-eval-a stopped linux 2 cpu, 2 GiB;silo-eval-b stopped linux 2 cpu, 2 GiB;e2e-p3-macsrc-before-20261105-2253 stopped macos 4 cpu, 8 GiB;e2e-p3-macsrc stopped macos 4 cpu, 8 GiB;
+== D1 silo up --recipe demo (main is ours only if it is absent)
+Making main from demo...
+Starting main...
+Checkpointing main...
+main is running (made from demo). Warm checkpoint ce98450cf947345daa545bfece3e3188 saved. ssh main.silo-dev reaches it.
+[11:24:00] PASS  D1 silo up --recipe demo  -- 13.53s, includes the recipe build (not a measurement)
+[11:24:01] PASS  D1 main running  -- main (linux): running 2 cpu, 4 GiB memory, 10 GiB disk 1 checkpoints 
+main
+906 python3 /opt/final/web.py
+907 python3 /opt/final/poller.py
+3000  http  reachable  http://3000.main.silo.localhost:47383
+ssh -G main.silo-dev: hostname 127.0.0.1 port 2222 
+ssh-ok silo
+[11:24:02] PASS  D1 ssh main.silo-dev reaches main  -- 
+== D2 silo fork main -n 4 (each fork writes a note named after its own host)
+demo -n 4: rc=0 19.72s
+e2e-final-demo-1  exit 0  http://3000.e2e-final-demo-1.silo.localhost:47383
+e2e-final-demo-2  exit 0  http://3000.e2e-final-demo-2.silo.localhost:47383
+e2e-final-demo-3  exit 0  http://3000.e2e-final-demo-3.silo.localhost:47383
+e2e-final-demo-4  exit 0  http://3000.e2e-final-demo-4.silo.localhost:47383
+4 forks of main; review with `silo diff <fork>`, keep with `silo fold <fork>`.
+[11:24:22] PASS  D2 four forks running  -- 4 running
+== D3 review: silo diff e2e-final-demo-1
+Comparing e2e-final-demo-1 with when it was forked...
+Other changed
+  + /home/silo/final-note.txt
+Ignored: 2 paths (caches, logs, build output)
+credentials used: none
+review: 50e7343c704c606923c078b714cdfe7da35d002c69e099986c40352c4b382374
+[11:24:24] PASS  D3 silo diff lists final-note.txt  -- rc=0,        6 lines
+== D4 keep: silo fold e2e-final-demo-1
+Keeping e2e-final-demo-1...
+Keeping e2e-final-demo-1: 5s
+Keeping e2e-final-demo-1: 10s
+Comparing e2e-final-demo-1 with when it was forked...
+Kept 6d67de6e-7d7c-404f-b5d7-ea78d474504b into 1dad2e6f-4d57-4a4f-8088-ce701813ba05.
+  files: 1 written, 0 already identical
+Undo with `silo undo 1dad2e6f-4d57-4a4f-8088-ce701813ba05`.
+[11:24:43] PASS  D4 silo fold exits 0  -- 
+main note after keep: kept-from-e2e-final-demo-1
+[11:24:43] PASS  D4 main has the fork's note  -- kept-from-e2e-final-demo-1
+== D5 undo: silo undo main
+Undoing the latest keep or promote of main...
+Put 1dad2e6f-4d57-4a4f-8088-ce701813ba05 back to Before keep of 6d67de6e-7d7c-404f-b5d7-ea78d474504b. 1dad2e6f-4d57-4a4f-8088-ce701813ba05 is running again, as it was.
+[11:24:54] PASS  D5 silo undo main exits 0  -- 
+[11:24:54] PASS  D5 the note is gone from main  -- 
+== D6 throw away the four forks
+[11:25:07] PASS  D6 no e2e-final-demo forks left  -- 
+== Q1 quiet fork of main: no scheduled runs in the fork (main is the control)
+-- main gets a cron job (every minute) and a boot-time cron start, like the phase 1 check; the poller is a recipe service
+ * Starting periodic command scheduler cron
+   ...done.
+main Fri Nov  6 10:26:01 UTC 2026 cron
+[11:26:32] PASS  Q1 fork started  -- 
+[11:26:32] settling 45 s, then watching 90 s
+fork e2e-final-quiet: before [poll=0 cron=0 pollers=0 crond=1] after [poll=0 cron=0 pollers=0 crond=1]
+main main (control): before [poll=19 cron=2 pollers=1 crond=1] after [poll=29 cron=3 pollers=1 crond=1]
+[11:28:53] PASS  Q1 fork wrote no poll or cron line and runs no poller  -- [poll=0 cron=0 pollers=0 crond=1]
+[11:28:53] PASS  Q1 main (control) kept writing  -- [poll=19 cron=2 pollers=1 crond=1] -> [poll=29 cron=3 pollers=1 crond=1]
+e2e-final-quiet (linux): running
+quiet: applied; stopped: final-poller, poller.py; scrubbed: /etc/silo/guest-client.json; secrets: none
+[11:28:55] PASS  Q1 status quiet record: applied, the final-poller service and its poller.py process stopped  -- {"applied": true, "newIdentity": true, "scheduledJobsDisabled": true, "scrub": ["/etc/silo/guest-client.json"], "secrets": [], "stop": ["final-poller", "poller.py"]}
+no crontab for root
+final-cron.desktop
+== C1 stub agent binaries on main (so the guest helper registers an agent), then fork --gui --computer-use auto
+[11:28:58] main desktop settle 60 s
+main: computer use: ready, approval ask, driver 0.38.0
+Forking main into e2e-final-gui...
+Starting e2e-final-gui...
+Starting e2e-final-gui: 5s
+[11:30:15] PASS  C1 fork --gui auto is ready  -- rc=0 15.85s state=ready approval=auto
+== C2 MCP: screenshot, open a terminal, type, verify the file from the host
+  step 0 computer_use_ready isError= False [] { |   "computer": "e2e-final-gui", |   "computerUse": { |     "appliedApproval": "auto", |     "approval": "auto", |     "driverVersion": "0.38.0", |     "reaso
+  step 1 computer_use_screenshot isError= False [([1280, 800], 47034)] ✅ Desktop screenshot 1280x800 written to /tmp/silo-cu.shot-42919-1.png (screen 1440x900; x/y for scope:"desktop" actions are pixels of THIS screenshot (mapped ×
+  step 2 computer_use_hotkey isError= False [] Pressed desktop hotkey ctrl+alt+t.
+  step 3  isError= None [] 
+  step 4 computer_use_screenshot isError= False [([1280, 800], 69656)] ✅ Desktop screenshot 1280x800 written to /tmp/silo-cu.shot-42919-2.png (screen 1440x900; x/y for scope:"desktop" actions are pixels of THIS screenshot (mapped ×
+  step 5 computer_use_click isError= False [] ✅ Sent screen-absolute click at (338,281) (desktop scope).
+  step 6 computer_use_type isError= False [] Typed text into the focused desktop application.
+  step 7 computer_use_key isError= False [] Pressed desktop key 'Return'.
+  step 8  isError= None [] 
+  step 9 computer_use_screenshot isError= False [([1280, 800], 84292)] ✅ Desktop screenshot 1280x800 written to /tmp/silo-cu.shot-42919-3.png (screen 1440x900; x/y for scope:"desktop" actions are pixels of THIS screenshot (mapped ×
+tool calls without error: 8
+silo exec e2e-final-gui -- cat /tmp/finalcu.txt -> final-cu-ok
+[11:30:28] PASS  C2 typing into the fork's GUI terminal wrote a file the host reads  -- final-cu-ok
+  screenshot: /Users/polarzero/code/projects/microsandbox-workspaces/docs/v1/evidence/final/raw/final-cu-1-desktop-0.png
+  screenshot: /Users/polarzero/code/projects/microsandbox-workspaces/docs/v1/evidence/final/raw/final-cu-2-terminal-0.png
+  screenshot: /Users/polarzero/code/projects/microsandbox-workspaces/docs/v1/evidence/final/raw/final-cu-3-after-typing-0.png
+== P1 promote the auto fork e2e-final-gui over main (approval ask)
+main before: computer use: ready, approval ask, driver 0.38.0
+Promoting e2e-final-gui...
+Promoting e2e-final-gui: 5s
+Promoting e2e-final-gui: 10s
+[11:30:41] PASS  P1 silo fold --promote exits 0  -- 
+archive: main-before-20261106-1030
+[11:30:42] PASS  P1 the fork is now main; old main archived  -- main-before-20261106-1030
+marker on new main: promoted-final
+main after: computer use: ready, approval ask, driver 0.38.0
+[11:30:44] PASS  P1 promoted main keeps computer-use approval ask (not the fork's auto)  -- 
+== P2 silo undo main
+Undoing the latest keep or promote of main...
+Undoing the latest keep or promote of main: 5s
+Undid the promote: main is main again, and e2e-final-gui has its own name back.
+[11:30:54] PASS  P2 silo undo main exits 0  -- 
+[11:30:55] PASS  P2 original main is back, no archive left  -- 
+[11:30:56] PASS  P2 main has no promoted marker  -- 
+main size: main                                running    linux   2 cpu, 4 GiB
+[11:30:59] cold run 1: waiting 70 s so no warm checkpoint is usable
+cold1 rc=0 12.49s: 
+-- footprint of cold fork 1 (20 s after ready)
+pid 44545: 492.0 MiB  /Users/polarzero/code/projects/microsandbox-workspaces/app/SiloUI/target/release/bundle/macos/Silo Dev.app/Con
+pid 44649: 5.7 MiB  /Users/polarzero/code/projects/microsandbox-workspaces/app/SiloUI/target/release/bundle/macos/Silo Dev.app/Con
+TOTAL 497.7
+[11:32:44] cold run 2: waiting 70 s so no warm checkpoint is usable
+cold2 rc=0 9.80s: 
+[11:34:07] cold run 3: waiting 70 s so no warm checkpoint is usable
+cold3 rc=0 9.47s: 
+Linux fork of a running main, cold, to running+ready: N=3 median=9.80s min=9.47s max=12.49s runs=[12.49, 9.8, 9.47]
+warm4-1 rc=0 17.06s: 
+  run 1 forked from the warm checkpoint (no new checkpoint)
+-- footprint of e2e-final-w1-1
+pid 46847: 493.0 MiB  /Users/polarzero/code/projects/microsandbox-workspaces/app/SiloUI/target/release/bundle/macos/Silo Dev.app/Con
+pid 46959: 6.0 MiB  /Users/polarzero/code/projects/microsandbox-workspaces/app/SiloUI/target/release/bundle/macos/Silo Dev.app/Con
+TOTAL 499.0
+-- footprint of e2e-final-w1-2
+pid 46919: 492.0 MiB  /Users/polarzero/code/projects/microsandbox-workspaces/app/SiloUI/target/release/bundle/macos/Silo Dev.app/Con
+pid 47132: 6.1 MiB  /Users/polarzero/code/projects/microsandbox-workspaces/app/SiloUI/target/release/bundle/macos/Silo Dev.app/Con
+TOTAL 498.1
+-- footprint of e2e-final-w1-3
+pid 47063: 496.0 MiB  /Users/polarzero/code/projects/microsandbox-workspaces/app/SiloUI/target/release/bundle/macos/Silo Dev.app/Con
+pid 47240: 6.1 MiB  /Users/polarzero/code/projects/microsandbox-workspaces/app/SiloUI/target/release/bundle/macos/Silo Dev.app/Con
+TOTAL 502.1
+-- footprint of e2e-final-w1-4
+pid 46874: 496.0 MiB  /Users/polarzero/code/projects/microsandbox-workspaces/app/SiloUI/target/release/bundle/macos/Silo Dev.app/Con
+pid 46960: 6.2 MiB  /Users/polarzero/code/projects/microsandbox-workspaces/app/SiloUI/target/release/bundle/macos/Silo Dev.app/Con
+TOTAL 502.2
+warm4-2 rc=0 16.45s: 
+  run 2 forked from the warm checkpoint (no new checkpoint)
+warm4-3 rc=0 19.69s: 
+  run 3 forked from the warm checkpoint (no new checkpoint)
+-n 4 from the warm checkpoint, to 4 running+ready: N=3 median=17.06s min=16.45s max=19.69s runs=[17.06, 16.45, 19.69]
+== X1 create the macOS source (needs the engine's Keychain access; the owner's Keychain repair is open)
+Creating e2e-final-msrc...
+Created e2e-final-msrc (stopped)
+create rc=0 79.42s
+source: ProductName:		macOS ProductVersion:		26.6.2 BuildVersion:		25G83 
+macOS fork 1: rc=0 60.35s computerUse=ready state=running macOS VMs running=2
+Starting e2e-final-mfork1: 36s
+e2e-final-mfork1: waiting for desktop running, computer use unknown
+[11:40:13] PASS  X1 macOS fork 1 reaches ready  -- 60.35s
+ProductName:		macOS ProductVersion:		26.6.2 BuildVersion:		25G83 silo
+macOS fork 2: rc=0 58.97s computerUse=ready state=running macOS VMs running=2
+Starting e2e-final-mfork2: 36s
+e2e-final-mfork2: waiting for desktop running, computer use unknown
+[11:41:28] PASS  X1 macOS fork 2 reaches ready  -- 58.97s
+macOS fork 3: rc=0 59.19s computerUse=ready state=running macOS VMs running=2
+Starting e2e-final-mfork3: 35s
+e2e-final-mfork3: waiting for desktop running, computer use unknown
+[11:42:43] PASS  X1 macOS fork 3 reaches ready  -- 59.19s
+macOS fork to ready (fork --gui returns ready): N=3 median=59.19s min=58.97s max=60.35s runs=[60.35, 58.97, 59.19]
+[11:43:10] cleanup (e2e-final-*; main is stopped, not dropped)
+OWNER: main is left stopped (made by this run: 1); please drop it: silo drop main --force
+NAME                                STATE      KIND    SIZE
+workspace-1                         stopped    linux   8 cpu, 32 GiB
+e2e-relay                           stopped    linux   8 cpu, 32 GiB
+silo-eval-a                         stopped    linux   2 cpu, 2 GiB
+silo-eval-b                         stopped    linux   2 cpu, 2 GiB
+main                                stopped    linux   2 cpu, 4 GiB
+e2e-p3-macsrc-before-20261105-2253  stopped    macos   4 cpu, 8 GiB
+e2e-p3-macsrc                       stopped    macos   4 cpu, 8 GiB
+macOS VMs running: 0
+== summary (header demo quiet cu promote cold warm4 macos): 25 passed, 0 failed, 0 blocked

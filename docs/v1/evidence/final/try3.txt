@@ -1,0 +1,27 @@
+== Q1 quiet fork of main: no scheduled runs in the fork (main is the control)
+-- main gets a cron job (every minute) and a boot-time cron start, like the phase 1 check; the poller is a recipe service
+ * Starting periodic command scheduler cron
+   ...done.
+main Fri Nov  6 05:44:01 UTC 2026 cron
+[06:45:07] PASS  Q1 fork started  -- 
+[06:45:07] settling 45 s, then watching 90 s
+fork e2e-final-quiet: before [poll=0 cron=0 pollers=3 crond=1] after [poll=0 cron=0 pollers=3 crond=1]
+main main (control): before [poll=53 cron=2 pollers=4 crond=1] after [poll=62 cron=4 pollers=4 crond=1]
+[06:47:28] FAIL  Q1 fork wrote no poll or cron line and runs no poller  -- [poll=0 cron=0 pollers=3 crond=1]
+[06:47:28] PASS  Q1 main (control) kept writing  -- [poll=53 cron=2 pollers=4 crond=1] -> [poll=62 cron=4 pollers=4 crond=1]
+e2e-final-quiet (linux): running
+quiet: applied; stopped: final-poller; scrubbed: /etc/silo/guest-client.json; secrets: none
+[06:47:29] PASS  Q1 status quiet record: applied, final-poller stopped  -- {"applied": true, "newIdentity": true, "scheduledJobsDisabled": true, "scrub": ["/etc/silo/guest-client.json"], "secrets": [], "stop": ["final-poller"]}
+no crontab for root
+final-cron.desktop
+[06:47:33] cleanup (e2e-final-* and main if this run made it)
+NAME                                STATE      KIND    SIZE
+workspace-1                         stopped    linux   8 cpu, 32 GiB
+e2e-relay                           stopped    linux   8 cpu, 32 GiB
+silo-eval-a                         stopped    linux   2 cpu, 2 GiB
+silo-eval-b                         stopped    linux   2 cpu, 2 GiB
+main                                running    linux   2 cpu, 4 GiB
+e2e-p3-macsrc-before-20261105-2253  stopped    macos   4 cpu, 8 GiB
+e2e-p3-macsrc                       stopped    macos   4 cpu, 8 GiB
+macOS VMs running: 0
+== summary (quiet): 3 passed, 1 failed, 0 blocked

@@ -42,7 +42,13 @@ commands are shell text. Services start at boot through an XDG autostart entry o
 (`/etc/xdg/autostart/<name>.desktop`) and a LaunchAgent labelled `<name>` on macOS. Each runs a
 launcher file named `<name>`; for a plain command (a program and arguments, no shell syntax)
 the launcher `exec`s it, so the process runs under its own name. A `quiet:` entry that names
-the service, or the command's program, therefore finds the entry, the label and the process.
+the service stops its entry or label and also the name the command runs under: the script after
+an interpreter, by its full file name, when it names a file with an extension (`python3
+/opt/app/poller.py` is `poller.py`; `node server` and `python3 -m app` name none), else the
+program (`openclaw gateway` is `openclaw`). A launcher (`env`, `sudo`, `nohup`, `nice`, `exec`,
+`timeout`, `java`, `npm`, `npx`, `yarn`, `pnpm`, `uv`, `docker`, `make`, `bun`, `deno`, `bash`,
+`sh`) names none either. When no name can be derived, `silo fork` warns: add the program or
+script to `quiet:` yourself. The fork's `silo status` lists both names.
 
 On macOS, a recipe that needs Homebrew (brew packages, or pip, pipx, npm or cargo when their
 tool is missing) installs it first as the account with the official non-interactive
@@ -53,6 +59,7 @@ Built-in recipes, minimal on purpose:
 | Name | What it is |
 | --- | --- |
 | `linux-dev` | Linux with `build-essential`, `jq` and `ripgrep` |
+| `openclaw`, `hermes` | Linux with the agent installed and its gateway started as a service; `quiet:` and `scrub:` set for a fork ([resident agents](SiloUI-CLI.md#resident-agents)) |
 | `macos-xcode` | macOS that must already have Xcode: the build runs `xcode-select -p` and `xcodebuild -version`, and fails if they do not |
 
 ## Build and cache
@@ -101,15 +108,17 @@ takes a new checkpoint.
 The engine keeps a "changed since" generation per computer (`generation` in `silo status`
 and in `computers.list`). Every operation the engine performs that can change a computer
 moves it: commands and command streams, file uploads and writes, keep, undo and promote,
-restore, start, stop and restart, ssh sessions opened through the engine, and terminal,
-editor, desktop and display sessions. Network and port changes do not. A warm checkpoint
+restore, start, stop and restart, ssh sessions opened through the engine, sessions over
+`ssh main.silo` (the SSH access listener reports each one it opens and closes, and the computer
+counts as changing while one is open), and terminal, editor, desktop and display sessions.
+Network and port changes do not. A warm checkpoint
 records the generation `main` had when its capture began (and records none if the engine was
 working on `main` then). A fork reuses the checkpoint only while `main` still has that
 generation. The generation lives in the engine process, so after an engine restart no warm
 checkpoint is reused until the next `silo up`.
 
-The limit: a change made over a plain `ssh` session that does not go through the engine
-cannot be seen. That is why a warm checkpoint is reused for at most `warm_max_age`, one
+The limit: a change made over an `ssh` session that goes through neither the engine nor SSH
+access (another SSH server you run in the computer) cannot be seen. That is why a warm checkpoint is reused for at most `warm_max_age`, one
 minute by default; a fork made after editing `main` over such a session, within that minute,
 can start without the edit. Name a checkpoint (`--checkpoint`) or take one first when that
 matters.

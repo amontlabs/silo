@@ -6,11 +6,10 @@ Tracker: Linear project "Silo v1: git for agent computers" (P-AMO-8).
 
 ## Resume
 
-- **Phase:** 5 on branch `claude/silo-v1-phase-5`, PR open. Phases 0-4 merged (#60-#64).
-- **Done in phase 5 (reviewed, VM-checked):** in-guest client (AMO-85), Mac mini remote + one pending-changes list (AMO-86), hosted reviewer (AMO-87, service not deployed), host computer use for forks (AMO-70).
-- **Blocked on the owner:** Keychain repair for the Dev engine (phase 4 credentials check; phase 1/3 secret carry-over). Leftover computers to drop: `silo-baseline-8fa22f`, `e2e-p3-macsrc`, `e2e-p3-macsrc-before-20261105-2253`. Upstream drafts to post: `docs/v1/upstream/`.
-- **Next action:** merge the phase 5 PR when CI is green; then phase 6 (OpenClaw/Hermes recipes, final run, README/demo/numbers drafts, release prep).
-- **macOS slots:** free.
+- **Phase:** 6 on branch `claude/silo-v1-phase-6`, PR open. Phases 0-5 merged (#60-#65).
+- **Done in phase 6:** OpenClaw and Hermes recipes (OpenClaw values measured; Hermes unverified), final run 25/25 plus OpenClaw 9/9 on a release-profile Dev build (`docs/v1/evidence/final/`), release prep (`docs/v1/release/`), the `silo` CLI shipped in the app, launch drafts (`docs/v1/launch/`, owner approves).
+- **Owner steps:** approve the launch drafts; Keychain repair (phase 4 credentials check, phase 1/3 secret checks); drop leftovers `e2e-p3-macsrc`, `e2e-p3-macsrc-before-20261105-2253`, `silo-baseline-8fa22f` (the last fails on the Keychain); the release steps in `docs/v1/release/README.md`; post `docs/v1/upstream/` drafts.
+- **Next action:** merge the phase 6 PR when CI is green; then phase 7 assessment (AMO-90).
 
 ## Start
 
@@ -86,7 +85,17 @@ VM checks: in-guest client from inside a Linux main; computer use on Linux and m
 7. `silo fold e2e-in-1 --promote` on the Mac, then inside the old main: `silo --in-guest list` is refused (token revoked).
 8. Clean up: `silo drop` the e2e computers, `silo guest-client revoke <main>`.
 
+### Phase 6 (AMO-71, AMO-80; final run)
+
+| Slice | What |
+|---|---|
+| 6a | OpenClaw and Hermes recipes with quiet and scrub presets (done; lines marked CONFIRM are checked in the final run) |
+| 6b | Final run on the finished Dev build, Linux and macOS, evidence in `docs/v1/evidence/final/`: demo flow (up, fork -n 4, review, keep, undo, throw away), quiet forks, a macOS fork, one OpenClaw recipe, computer use, promote over main; measurements (Linux fork of a running main, 3 cold runs; -n 4 from the warm checkpoint; fork RAM with `footprint`; macOS fork-to-ready) |
+| 6c | Release prep under `docs/v1/release/`: workflow dry run, artifacts, notes, the owner's remaining steps |
+| 6d | README, 60-s demo script and numbers post drafts from the 6b numbers only (owner approves public text) |
+
 ## Decisions
+- 2026-11-06, measurement build (Fable): numbers come from a Dev-identity, release-profile bundle (`build_desktop.py --dev-release`) of the same commit, with the same runtime binaries as a release; not the production app, which agents may not drive. The post states machine, runtime versions, N runs with median/min/max, and what stops the clock. One Linux cold fork is also run on the debug bundle as a cross-check.
 - 2026-11-06, steps (AMO-69): a step is one command an agent runs on a computer through Silo (CLI exec/run, MCP run). Per-step checkpoints are off by default (`step_checkpoints: true` turns them on; the last `step_checkpoints_keep`, default 20, are kept per computer). `--from-step N` forks from the checkpoint taken after step N.
 
 - **4 Nov, checkpoint disk (phase 0b), advised by Fable:** a live probe on the pinned runtime (`docs/v1/evidence/phase-0/raw/checkpoint-disk-probe.txt`) showed a computer's checkpoints form one linear msb chain, the engine refuses every checkpoint delete while the computer exists, disk comes back only when the computer is deleted, and images do not leak. The pinned msb 0.7.6 has no top-level `msb prune` (the validation's prune figures came from upstream 0.7.13). Two reviews (gpt-6.1-sol, Opus; Argon failed to run) found that retention by deletion frees nothing on a linear chain and that `msb image prune` can drop layers a loaded, not yet started snapshot needs. Fable read the msb source: each checkpoint holds its whole layer closure, so parent links are lineage only, and msb ships `msb modify --compact`, which merges old sealed layers into a new base. Decision: no automatic image prune; retention = compact the computer's oldest layers, then remove the pruned Silo-owned checkpoints with `--force`, always keeping the newest. Spec change pending the measurement in the phase 0 VM check.
@@ -100,6 +109,14 @@ VM checks: in-guest client from inside a Linux main; computer use on Linux and m
 ## Spec changes
 
 ## Status
+
+### 6 Nov 2026: phase 6 final run passed
+
+- **Final run** (commit `09677470`, Dev-identity release-profile build, M4 Max 64 GiB, macOS 26.5, MicroSandbox 0.7.6 with 24 Silo patches): demo flow (up, fork -n 4, review, keep, undo, throw away), quiet forks, computer use, promote over main and undo, cold and warm measurements, macOS forks: 25 passed. OpenClaw recipe: 9 passed. Measurements (N=3, median, min–max): cold Linux fork of a running main 9.80 s (9.47–12.49); `-n 4` from the warm checkpoint 17.06 s (16.45–19.69); macOS fork to ready 59.19 s (58.97–60.35); RAM per Linux fork about 500 MiB (497.7–502.2 over 5). Evidence and method: `docs/v1/evidence/final/README.md`.
+- **Fixed during the run:** quiet entries naming a recipe service; `up` invalidating its own warm checkpoint; the throwaway sweep slowing forks; a `--dev-release` bundle's CLI believing it was production (it now takes its channel from the bundle, and the engine links only a CLI of its own channel); warm reuse after sessions over `ssh main.silo` (MicroSandbox patch reports SSH sessions); quiet names for launchers; SSH listener retry backoff; CLI link errors reported apart from Connections.
+- **Release prep:** dry runs pass; changesets plan 0.12.0 → 0.13.0; the `silo` CLI is now built, signed and bundled on the real release path.
+- **Drafts for approval:** `docs/v1/launch/` (README, 60-s demo script, numbers post).
+- **Next:** phase 7 assessment.
 
 ### 6 Nov 2026: phase 5 passed
 

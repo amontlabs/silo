@@ -36,7 +36,7 @@ Ordered source patch pins (all `-0.7.6.patch`; "Feature" is a Silo-specific capa
 
 | Patch | SHA-256 | Kind | Purpose |
 | --- | --- | --- | --- |
-| `microsandbox-silo-network-0.7.6.patch` | `45b890b9c2a095e4b0dde6da6341e856e06efb11307231547c5778407cff0eeb` | Feature | GitHub credential profile in the secrets handler; `ssh serve` and `exec` `--no-start`, managed authorized keys, machine-identity check and stdin-owned lifetime; the five original Silo protocol probes; SSH login directory is the user's home. |
+| `microsandbox-silo-network-0.7.6.patch` | `e576f1bc50aa495f2f8a75147d7501baa50abcfab6bb67cf4db89cd88b2830f4` | Feature | GitHub credential profile in the secrets handler; `ssh serve` and `exec` `--no-start`, managed authorized keys, machine-identity check, stdin-owned lifetime and a stdout line per session opened and closed; the five original Silo protocol probes; SSH login directory is the user's home. |
 | `microsandbox-restore-policy-0.7.6.patch` | `46294a8e6a2b4913795f268b936b536721a21f33f32f7e3834a06d0480ef9555` | Feature | Restore-time labels, environment defaults, host-sourced secrets and asymmetric network defaults, applied before restored execution. |
 | `microsandbox-create-stopped-0.7.6.patch` | `ae9c061a6124a998f10f6ec3fb58b86209c8533f24b89e6d603c32aff812da7b` | Feature | `create --no-start` and `--progress-json`: persist prepared storage as `Created` without running guest code, with credential-free progress. |
 | `microsandbox-adopt-owned-disk-0.7.6.patch` | `0ddba4cb88627548ffbace1c0bd041bb5c86eba99ebe81279fe934d62b75dbcb` | Feature | `adopt-disk`: convert a stopped sandbox's disk-image mount to an owned managed volume. |

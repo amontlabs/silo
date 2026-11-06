@@ -19,7 +19,7 @@ class DesktopBuildTests(unittest.TestCase):
         # Embedding and signing are covered by test_embed_engine.py and test_macos_release.py;
         # here they only have to be asked, in order. `self.steps` records that order.
         self.steps = Mock()
-        for name in ('sign_helpers', 'embed_engine', 'seal_app', 'verify_bundle', 'verify_engine',
+        for name in ('bundle_cli', 'sign_helpers', 'embed_engine', 'seal_app', 'verify_bundle', 'verify_engine',
                      'verify_engine_contents'):
             patcher = patch(f'build_desktop.{name}')
             self.steps.attach_mock(patcher.start(), name)
@@ -42,14 +42,15 @@ class DesktopBuildTests(unittest.TestCase):
         self.assertEqual(result, expected)
         # The tools are signed before the engine copies them, and the app is sealed around it.
         self.assertEqual(self.finalization(),
-                         ['sign_helpers', 'embed_engine', 'seal_app', 'verify_bundle', 'verify_engine'])
+                         ['bundle_cli', 'sign_helpers', 'embed_engine', 'seal_app', 'verify_bundle', 'verify_engine'])
+        self.steps.bundle_cli.assert_called_once_with(expected, self.target / 'aarch64-apple-darwin/release/silo')
         self.steps.sign_helpers.assert_called_once_with(expected)
         self.steps.seal_app.assert_called_once_with(expected)
         self.steps.verify_bundle.assert_called_once_with(expected)
         self.steps.verify_engine.assert_called_once_with(expected, 'org.silo.preview')
         command = next(args for args, _ in self.calls if args[0] == 'node')
         self.assertIn('--bundles', command)
-        self.assertIn((['cargo', 'build', '--locked', '--release', '-p', 'silod', '--target', 'aarch64-apple-darwin']),
+        self.assertIn((['cargo', 'build', '--locked', '--release', '-p', 'silod', '-p', 'silo-cli', '--target', 'aarch64-apple-darwin']),
                       [args for args, _ in self.calls])
         self.embed.assert_called_once()
         self.assertEqual(self.embed.call_args.args[:2], (expected, self.target / 'aarch64-apple-darwin/release/silod'))
@@ -58,6 +59,17 @@ class DesktopBuildTests(unittest.TestCase):
         self.assertEqual(json.loads(command[-1])['bundle'], {
             'active': True, 'createUpdaterArtifacts': False, 'macOS': {'hardenedRuntime': True},
         })
+
+    def test_the_silo_command_is_built_with_the_bundle_identifier(self):
+        # A `--dev-release` command is a release profile build, yet a development one.
+        for args, identifier in (([], 'org.silo.preview'), (['--debug'], 'org.silo.dev'),
+                                 (['--dev-release'], 'org.silo.dev')):
+            self.calls.clear()
+            with self.subTest(args=args):
+                build(args, root=self.root, platform='darwin', run=self.command)
+                [kwargs] = [kwargs for command, kwargs in self.calls
+                            if command[:2] == ['cargo', 'build'] and 'silo-cli' in command]
+                self.assertEqual(kwargs['env']['SILO_CHANNEL_IDENTIFIER'], identifier)
 
     def test_failed_compilation_never_signs_a_stale_bundle(self):
         def fail(args, **kwargs):
@@ -120,15 +132,30 @@ class DesktopBuildTests(unittest.TestCase):
                 tauri = next(command for command, _ in self.calls if command[0] == 'node')
                 self.assertEqual(tauri[3:], args + ['--config', 'src-tauri/tauri.dev.conf.json']
                                  + ([] if '--bundles' in args else ['--bundles', 'app']))
-                self.assertIn(['cargo', 'build', '--locked', '-p', 'silod'], [command for command, _ in self.calls])
+                self.assertIn(['cargo', 'build', '--locked', '-p', 'silod', '-p', 'silo-cli'], [command for command, _ in self.calls])
                 self.assertEqual(self.embed.call_args.args[:2], (expected, self.target / 'debug/silod'))
                 self.assertEqual(self.embed.call_args.kwargs['identifier'], 'org.silo.dev')
                 # Development signatures stay as Tauri made them: no helper re-signing and no
                 # hardened runtime on the outer seal.
-                self.assertEqual(self.finalization(), ['embed_engine', 'seal_app', 'verify_engine_contents'])
+                self.assertEqual(self.finalization(), ['bundle_cli', 'embed_engine', 'seal_app', 'verify_engine_contents'])
                 self.steps.seal_app.assert_called_once_with(expected, hardened=False)
                 self.assertIn(['codesign', '--verify', '--deep', '--strict', str(expected)],
                               [command for command, _ in self.calls])
+
+    def test_a_dev_release_app_is_a_release_build_with_the_development_identity(self):
+        result = build(['--dev-release', '--bundles', 'app'], root=self.root, platform='darwin', run=self.command)
+        expected = self.target / 'release/bundle/macos/Silo Dev.app'
+        self.assertEqual(result, expected)
+        tauri = next(command for command, _ in self.calls if command[0] == 'node')
+        self.assertEqual(tauri[3:], ['--bundles', 'app', '--config', 'src-tauri/tauri.dev.conf.json'])
+        self.assertNotIn('--debug', tauri)
+        self.assertIn(['cargo', 'build', '--locked', '--release', '-p', 'silod', '-p', 'silo-cli'], [command for command, _ in self.calls])
+        self.assertEqual(self.embed.call_args.args[:2], (expected, self.target / 'release/silod'))
+        self.assertEqual(self.embed.call_args.kwargs['identifier'], 'org.silo.dev')
+        self.assertEqual(self.finalization(), ['bundle_cli', 'embed_engine', 'seal_app', 'verify_engine_contents'])
+        self.steps.seal_app.assert_called_once_with(expected, hardened=False)
+        with self.assertRaises(ValueError):
+            build(['--dev-release', '--debug'], root=self.root, platform='darwin', run=self.command)
 
     def test_debug_unbundled_help_and_other_platforms_pass_through(self):
         cases = [('darwin', ['--debug', '--no-bundle']), ('darwin', ['--no-bundle', '--ci']),

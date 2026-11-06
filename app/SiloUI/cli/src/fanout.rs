@@ -413,7 +413,20 @@ pub async fn fork_many(
         )));
     }
     Settings::check_fork_secrets(settings, &args.fork.secrets)?;
-    ops::sweep_throwaways(engine, progress).await;
+    ops::fork_then_sweep(
+        engine,
+        fork_many_now(engine, args, settings, progress, output),
+    )
+    .await
+}
+
+async fn fork_many_now(
+    engine: &Engine,
+    args: &ManyArgs,
+    settings: Option<&Settings>,
+    progress: Progress<'_>,
+    output: Output<'_>,
+) -> Result<Value, CliError> {
     let all = engine.computers().await?;
     let source = find(&all, &args.fork.source)?.clone();
     let names = fork_names(
@@ -447,6 +460,9 @@ pub async fn fork_many(
         checkpoint = made["id"].as_str().map(str::to_owned);
     }
     let extras = ops::fork_extras(args.fork.recipe.as_ref(), &args.fork.secrets);
+    for warning in args.fork.recipe.iter().flat_map(ops::quiet_warnings) {
+        progress(&warning);
+    }
     let step_settings = Settings::step_settings(settings);
     let forks = futures::future::join_all(names.iter().map(|name| {
         one(

@@ -1,0 +1,57 @@
+== D1 silo up --recipe demo (main is ours only if it is absent)
+main exists already: using it, not creating it
+[10:19:38] PASS  D1 main running  -- main (linux): running 2 cpu, 4 GiB memory, 10 GiB disk 28 checkpoints 
+main
+324 python3 /opt/final/web.py
+325 python3 /opt/final/poller.py
+3000  http  reachable  http://3000.main.silo.localhost:47383
+ssh -G main.silo-dev: hostname 127.0.0.1 port 2222 
+ssh-ok silo
+[10:19:39] PASS  D1 ssh main.silo-dev reaches main  -- 
+== D2 silo fork main -n 4 (each fork writes a note named after its own host)
+demo -n 4: rc=0 21.75s
+e2e-final-demo-1  exit 0  http://3000.e2e-final-demo-1.silo.localhost:47383
+e2e-final-demo-2  exit 0  http://3000.e2e-final-demo-2.silo.localhost:47383
+e2e-final-demo-3  exit 0  http://3000.e2e-final-demo-3.silo.localhost:47383
+e2e-final-demo-4  exit 0  http://3000.e2e-final-demo-4.silo.localhost:47383
+4 forks of main; review with `silo diff <fork>`, keep with `silo fold <fork>`.
+[10:20:01] PASS  D2 four forks running  -- 4 running
+== D3 review: silo diff e2e-final-demo-1
+Comparing e2e-final-demo-1 with when it was forked...
+Other changed
+  + /home/silo/final-note.txt
+Ignored: 2 paths (caches, logs, build output)
+credentials used: none
+review: 50e7343c704c606923c078b714cdfe7da35d002c69e099986c40352c4b382374
+[10:20:03] PASS  D3 silo diff lists final-note.txt  -- rc=0,        6 lines
+== D4 keep: silo fold e2e-final-demo-1
+Keeping e2e-final-demo-1...
+Keeping e2e-final-demo-1: 5s
+Keeping e2e-final-demo-1: 10s
+Keeping e2e-final-demo-1: 15s
+Comparing e2e-final-demo-1 with when it was forked...
+Kept 8fc7fc84-7527-4ccc-9097-6ebe6d5e9f5a into 7f1d5e34-cdf7-4ffa-a43f-b2ec10f71671.
+  files: 1 written, 0 already identical
+Undo with `silo undo 7f1d5e34-cdf7-4ffa-a43f-b2ec10f71671`.
+[10:20:25] PASS  D4 silo fold exits 0  -- 
+main note after keep: kept-from-e2e-final-demo-1
+[10:20:26] PASS  D4 main has the fork's note  -- kept-from-e2e-final-demo-1
+== D5 undo: silo undo main
+Undoing the latest keep or promote of main...
+Put 7f1d5e34-cdf7-4ffa-a43f-b2ec10f71671 back to Before keep of 8fc7fc84-7527-4ccc-9097-6ebe6d5e9f5a. 7f1d5e34-cdf7-4ffa-a43f-b2ec10f71671 is running again, as it was.
+[10:20:37] PASS  D5 silo undo main exits 0  -- 
+[10:20:38] PASS  D5 the note is gone from main  -- 
+== D6 throw away the four forks
+[10:20:52] PASS  D6 no e2e-final-demo forks left  -- 
+[10:20:52] cleanup (e2e-final-*; main is stopped, not dropped)
+OWNER: main is left stopped (made by this run: 0); please drop it: silo drop main --force
+NAME                                STATE      KIND    SIZE
+workspace-1                         stopped    linux   8 cpu, 32 GiB
+e2e-relay                           stopped    linux   8 cpu, 32 GiB
+silo-eval-a                         stopped    linux   2 cpu, 2 GiB
+silo-eval-b                         stopped    linux   2 cpu, 2 GiB
+main                                stopped    linux   2 cpu, 4 GiB
+e2e-p3-macsrc-before-20261105-2253  stopped    macos   4 cpu, 8 GiB
+e2e-p3-macsrc                       stopped    macos   4 cpu, 8 GiB
+macOS VMs running: 0
+== summary (demo): 9 passed, 0 failed, 0 blocked

@@ -303,9 +303,12 @@ jobs:
           python3 scripts/measure-command.py release-bundle -- python3 scripts/retry-bundle.py --log "$RUNNER_TEMP/silo-bundle.log" -- npx tauri bundle --target "$RUNTIME_TARGET" --bundles "$RELEASE_BUNDLES" --ci --verbose
       # The verbose bundle log stays on the runner: it can contain signing and
       # build configuration details (see scripts/retry-bundle.py).
-      - name: Build the engine (silod) for the macOS bundle
+      - name: Build the engine (silod) and the silo command for the macOS bundle
         if: runner.os == 'macOS'
-        run: cargo build --locked --release -p silod --target "$RUNTIME_TARGET"
+        env:
+          # The silo command's channel comes from this identifier; without it, it is Silo Dev's.
+          SILO_CHANNEL_IDENTIFIER: org.silo.preview
+        run: cargo build --locked --release -p silod -p silo-cli --target "$RUNTIME_TARGET"
       # Only a draft imports the Developer ID certificate, into a temporary keychain that the
       # cleanup step below deletes. Dry runs and artifact-only builds never see it.
       - name: Import the Developer ID certificate
@@ -327,7 +330,7 @@ jobs:
           APPLE_API_KEY_P8: ${{ inputs.signing == 'developer-id' && secrets.APPLE_API_KEY_P8 || '' }}
           APPLE_API_KEY_ID: ${{ inputs.signing == 'developer-id' && secrets.APPLE_API_KEY_ID || '' }}
           APPLE_API_ISSUER_ID: ${{ inputs.signing == 'developer-id' && secrets.APPLE_API_ISSUER_ID || '' }}
-        run: python3 scripts/package-macos-release.py "src-tauri/target/release-compile/$RUNTIME_TARGET/release/bundle/macos/Silo.app" release-assets --engine "src-tauri/target/release-compile/$RUNTIME_TARGET/release/silod"
+        run: python3 scripts/package-macos-release.py "src-tauri/target/release-compile/$RUNTIME_TARGET/release/bundle/macos/Silo.app" release-assets --engine "src-tauri/target/release-compile/$RUNTIME_TARGET/release/silod" --cli "src-tauri/target/release-compile/$RUNTIME_TARGET/release/silo"
       - name: Verify macOS library constraints
         if: runner.os == 'macOS'
         run: python3 scripts/test-macos-library-constraints.py --constraints-only --output "$RUNNER_TEMP/library-constraints"

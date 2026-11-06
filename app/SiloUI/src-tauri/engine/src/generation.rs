@@ -8,8 +8,10 @@
 //! computer's generation is still the recorded one.
 //!
 //! The generation lives in this process. After an engine restart no warm checkpoint has a
-//! recorded generation, so none is reused. Changes made over a plain `ssh` session that does
-//! not go through the engine cannot be seen here.
+//! recorded generation, so none is reused. Sessions over SSH access (`ssh main.silo`) count
+//! too: the runtime's listener reports each session it opens and closes, and the computer is
+//! in flight while one is open (`ssh_access`). Changes made over any other `ssh` session
+//! that does not go through Silo cannot be seen here.
 
 use std::{
     collections::HashMap,

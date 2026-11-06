@@ -9,6 +9,7 @@ from embed_engine import SIGNING_IDENTITY_ENV, embed_engine
 from macos_notarization import Release
 from macos_release_signing import seal_app, sign_helpers, verify_bundle, verify_engine
 from channel_names import channel_names
+from build_desktop import bundle_cli
 
 
 def engine_build():
@@ -26,6 +27,8 @@ def main():
     parser.add_argument('output', type=Path)
     parser.add_argument('--engine', type=Path, required=True,
                         help='the release-built silod binary to embed and sign')
+    parser.add_argument('--cli', type=Path, required=True,
+                        help='the release-built silo command to bundle and sign')
     parser.add_argument('--engine-build', default=None,
                         help='the engine build name (default: silo-<GITHUB_SHA or git HEAD>)')
     args = parser.parse_args()
@@ -62,6 +65,9 @@ def package(app, output, archive, dmg, args, key, identifier, release, engine_en
     identity = release.identity
     bundle_name = app.name
     product_name = app.stem
+    if not args.cli.is_file():
+        raise RuntimeError(f'The silo command is missing: {args.cli}. Build it with cargo build -p silo-cli.')
+    bundle_cli(app, args.cli.resolve())
     sign_helpers(app, identity)
     embed_engine(app, args.engine.resolve(), identifier=identifier, build=args.engine_build or engine_build(),
                  environ=engine_environ)

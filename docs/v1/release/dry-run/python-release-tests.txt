@@ -1,0 +1,19 @@
+....................................................................................Created verified release assets in /private/var/folders/bq/fnyn1bq95d37b4q3lrwc_f600000gn/T/silo-signer-env-cuuesyi6/output
+Created verified release assets in /private/var/folders/bq/fnyn1bq95d37b4q3lrwc_f600000gn/T/silo-signer-env-n_lb_xxt/output
+Created verified release assets in /private/var/folders/bq/fnyn1bq95d37b4q3lrwc_f600000gn/T/silo-signer-env-f82v3z4e/output
+Dependency benchmark fixture: eligible=False, net reduction=None
+{"reason": "compiler-artifact"}
+..........................................ss..............................................
+----------------------------------------------------------------------
+Ran 174 tests in 10.607s
+
+OK (skipped=2)
+Dependency benchmark fixture: eligible=True, net reduction=0.35
+Dependency benchmark fixture: eligible=False, net reduction=0.19999999999999996
+Dependency benchmark fixture: eligible=False, net reduction=0.4
+Dependency benchmark fixture: eligible=False, net reduction=0.6
+Release application freshly compiled.
+Public dependency cache miss; compiling normally.
+Public dependency cache rejected; compiling normally with an empty target.
+Created verified release assets in /private/var/folders/bq/fnyn1bq95d37b4q3lrwc_f600000gn/T/silo-dry-run-sc5ocdgs/out
+exit=0

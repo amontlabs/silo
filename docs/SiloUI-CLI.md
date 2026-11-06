@@ -4,6 +4,25 @@
 `app/SiloUI/cli` (crate `silo-cli`, binary `silo`) and talks to `engine.sock` with
 `silo-client`, using the typed request constructors from `silo-api`.
 
+## Install
+
+The Silo app carries `silo` at `Contents/MacOS/silo` (built from this crate in the same
+profile as the app and copied next to the engine). Production builds sign it with hardened
+runtime and no entitlements (notarized in `developer-id` mode); Dev builds keep Tauri's ad hoc
+signature. Every time the engine starts from an app bundle, whether or not Connections are on,
+it links the command into `~/.local/bin`:
+
+| Build | Link in `~/.local/bin` |
+| --- | --- |
+| Silo (production) | `silo` |
+| Silo Dev | `silo-dev` |
+
+The names come from `host/src/channel.rs` (`cli_link_name`); a Dev build never touches the
+production link. Silo replaces only a link whose target is a `silo` inside a Silo, Silo Dev or Silo Engine
+app. A file or link of your own with the same name (including one to another `silo` or a
+dangling link) is left alone, and Connections's status shows that the command is not on PATH. Put `~/.local/bin` on `PATH`. Without
+the app, build the crate with `cargo build --release -p silo-cli`.
+
 ## Choices
 
 | Need | Choice |
@@ -42,7 +61,7 @@ the engine's message.
 | `silo create <name> [--linux\|--macos] [--cpus N --memory GiB --disk GiB]` | create a computer |
 | `silo start <computer>` / `silo stop <computer>` | lifecycle |
 | `silo retry-setup <computer>` | finish the setup of a macOS computer that ended `failed` before it was ready |
-| `silo up [--recipe R]` | make `main` from a recipe if needed, start it, publish the recipe's ports on it, make `ssh main.silo` work (`main.silo-dev` from a development build), keep a warm checkpoint ([recipes](SiloUI-RECIPES.md)) |
+| `silo up [--recipe R]` | make `main` from a recipe if needed, start it, publish the recipe's ports on it, make `ssh main.silo` work (`main.silo-dev` from a development build), then keep a warm checkpoint, last, so nothing `up` does afterwards marks main as changed ([recipes](SiloUI-RECIPES.md)) |
 | `silo ports <computer>` | list the published ports with their host port and URL |
 | `silo publish <computer> <port> [--http]` / `silo unpublish <computer> <port>` | publish or stop publishing a guest port; `--http` serves it as a website with a URL per computer ([URL proxy](SiloUI-URL-PROXY.md)) |
 | `silo ssh-setup <computer>` | make `ssh <computer>.silo` reach a computer. A Linux computer gets SSH access turned on and an entry in `~/.silo/ssh-hosts.conf` (`~/.silo-dev/` for a development build), which `~/.ssh/config` includes; a macOS computer's saved entry also answers to the name. After `silo fold --promote` or its undo the name is written again for the computer that now has it (a macOS entry follows on its own) |
@@ -57,7 +76,7 @@ the engine's message.
 | `silo diff <computer> [--json] [--max-lines N] [--no-baseline] [--baseline]` | what changed since the fork (captures the computer now, compares with the record `silo fork` took); `--baseline` measures a missing baseline first, on a throwaway idle fork of the same checkpoint (also for a fork that has been used), and a baseline measured on one fork of a computer applies to its other forks; `silo fold --dry-run` ignores review digests |
 | `silo fold <fork> --promote [--into C] [--dry-run]` | make the fork main: it takes main's name, ports, secrets and GitHub access, and the old main is archived as `main-before-<time>`; `silo undo main` swaps back ([details](SiloUI-CHANGES.md#making-a-fork-main-silo-fold-fork---promote)) |
 | `silo undo <computer\|fork\|./dir>` | put a computer back to before its latest keep, or a folder back to before its latest fold |
-| `silo drop <computer> [--force]` | throw a computer away (a hidden throwaway too, by name or id); `main` needs `--force`. A stopped `silo-baseline-*` copy more than an hour old is dropped by the next fork or `silo diff --baseline` |
+| `silo drop <computer> [--force]` | throw a computer away (a hidden throwaway too, by name or id); `main` needs `--force`. A stopped or failed `silo-baseline-*` copy more than an hour old is dropped by the next fork (alongside the fork, for at most 20 s; one the engine cannot drop is tried again next time) or `silo diff --baseline` |
 | `silo exec <computer> [--cwd DIR] [--timeout SECS] -- <cmd...>` | run a command; the exit code is passed through |
 | `silo checkpoint <computer> [--name N] [--kind manual\|automatic\|before-keep\|warm\|step]` | save a checkpoint |
 | `silo checkpoints <computer>` | list checkpoints |
@@ -259,7 +278,7 @@ and skips one whose last health check failed.
 `.silo/recipe.yaml` (recipes can also name an OS, packages, setup commands, services and ports, and live in `.silo/recipes/`; see [recipes](SiloUI-RECIPES.md)):
 
 ```yaml
-quiet: [poller]          # processes stopped in a fork
+quiet: [poller]          # processes, or recipe services, stopped in a fork
 scrub: [/root/.env]      # paths removed from a fork
 keep:
   restart: [web]         # services restarted after a keep
@@ -372,6 +391,41 @@ When `silo.yaml` exists, `--secret` accepts only names in `fork_secrets`. `silo 
 `--recipe-file`, else the nearest `.silo/recipe.yaml` (a malformed file is an error). The fork
 gets the named secrets (`github` gives read-only GitHub access) and the recipe's `quiet:` and
 `scrub:` lists; with neither, the fork gets none of the credentials Silo manages.
+
+## Resident agents
+
+`openclaw` and `hermes` are built-in recipes for an agent that lives inside `main` and keeps
+running there. Each installs the agent with its own installer, starts its messaging gateway as a
+service, and lists that gateway under `quiet:` and its token file under `scrub:`, so a fork of
+`main` does not answer the same chat channels a second time or carry the agent's credentials.
+
+| Recipe | Install step | Source |
+| --- | --- | --- |
+| `openclaw` | `curl -fsSL https://openclaw.ai/install.sh \| bash -s -- --no-onboard` | [docs.openclaw.ai/install](https://docs.openclaw.ai/install) |
+| `hermes` | `curl -fsSL https://hermes-agent.nousresearch.com/install.sh \| bash` | [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent) |
+
+Set up, from the project folder, on the Mac:
+
+```sh
+silo up --recipe openclaw      # or hermes: builds main, starts it, makes ssh main.silo work
+ssh main.silo                  # the agent's host harness reaches main this way
+silo guest-client install main --agent openclaw --binary ~/.silo/guest/silo
+```
+
+`silo guest-client install` is a follow-up because it runs on the Mac, against a running
+computer, and needs the guest `silo` binary ([in-guest client](SiloUI-IN-GUEST-CLIENT.md)).
+Onboarding (model keys, chat channel logins) is interactive and happens once in `main` over
+`ssh main.silo`; it is not part of the recipe.
+
+Comments in the recipe text say which entries were checked against a running install in the v1
+final run. For `openclaw` they were: `openclaw gateway` stays in the foreground, its process is
+named `openclaw-gateway` (its node workers are its children), and a fork with the recipe's lists
+has no gateway and neither `credentials/` nor `.env`. OpenClaw keeps a single-gateway lock in
+`~/.openclaw/state/openclaw.sqlite`, so a fork made without `quiet:` starts a second gateway only
+on a boot more than 90 s after main's last heartbeat. The `hermes` entries are unverified: the
+gateway process names and `~/.hermes/.env`, which is a guess. Copy a recipe to
+`.silo/recipes/<name>.yaml` to change it. Neither recipe sets `keep:` hooks. Hermes
+also has a built-in cron scheduler, which runs inside its gateway and so stops with it.
 
 ## MCP setup
 

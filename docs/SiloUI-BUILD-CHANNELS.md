@@ -6,14 +6,21 @@ Only two Silo builds exist, and they never share state.
 |---|---|---|
 | Identifier | `org.silo.preview` | `org.silo.dev` |
 | Product name | Silo | Silo Dev |
-| Built by | `desktop:build`, the release workflows, installed packages | `npm run desktop` (`tauri dev`), `npm run desktop:build:debug`, any `--debug` build |
+| Built by | `desktop:build`, the release workflows, installed packages | `npm run desktop` (`tauri dev`), `npm run desktop:build:debug`, any `--debug` build, `npm run desktop:build:dev-release` |
 | Configuration | `src-tauri/tauri.conf.json` | `src-tauri/tauri.conf.json` merged with `src-tauri/tauri.dev.conf.json` |
 | Updates | Release feed | None. Silo Dev never updates itself or installs a production release |
 
 `scripts/build_desktop.py` adds the development configuration whenever `--debug`
 (or `-d`) is passed and never otherwise. The previous `tauri.debug.conf.json` was
 folded into `tauri.dev.conf.json` (ad-hoc signing included), so there is no third
-identity. A production identifier, path, or name must never change: existing
+identity.
+
+`--dev-release` (`npm run desktop:build:dev-release`) builds the release profile with
+that same development configuration: the Dev names, ad-hoc signing and no hardened runtime,
+sealed like a debug bundle. It is for measuring on optimized binaries without driving the
+production app. The bundle is `Silo Dev.app` under the release target directory
+(`bundle/macos/`), and it shares state with every other Dev build. It cannot be
+combined with `--debug`. A production identifier, path, or name must never change: existing
 users' data lives there.
 
 ## One source of truth

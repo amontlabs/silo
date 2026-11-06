@@ -226,6 +226,7 @@ class PackagerDryRunTests(unittest.TestCase):
             app = root / 'Silo.app'
             (app / 'Contents/MacOS').mkdir(parents=True)
             (app / 'Contents/MacOS/msb').write_bytes(b'x')
+            (root / 'silo').write_bytes(b'cli')
             events = []
 
             def record(name):
@@ -241,7 +242,9 @@ class PackagerDryRunTests(unittest.TestCase):
             original = module.Release.from_environ
             with patch.dict(os.environ, environment), \
                     patch.object(sys, 'argv', [str(script), str(app), str(root / 'out'),
-                                               '--engine', str(root / 'silod'), '--engine-build', 'silo-abc']), \
+                                               '--engine', str(root / 'silod'), '--cli', str(root / 'silo'),
+                                               '--engine-build', 'silo-abc']), \
+                    patch.object(module, 'bundle_cli', side_effect=record('bundle_cli')), \
                     patch.object(module, 'sign_helpers', side_effect=record('sign_helpers')), \
                     patch.object(module, 'embed_engine', side_effect=record('embed')), \
                     patch.object(module, 'seal_app', side_effect=record('seal')), \
@@ -253,10 +256,10 @@ class PackagerDryRunTests(unittest.TestCase):
                     patch.object(module, 'channel_names', return_value=names), \
                     patch.object(module.subprocess, 'run', side_effect=command):
                 module.main()
-        order = [e for e in events if e in ('sign_helpers', 'embed', 'seal', 'verify', 'verify_engine', 'npx', 'hdiutil')
+        order = [e for e in events if e in ('bundle_cli', 'sign_helpers', 'embed', 'seal', 'verify', 'verify_engine', 'npx', 'hdiutil')
                  or e.startswith('stub:')]
         stubs = [e for e in order if e.startswith('stub:')]
-        self.assertEqual(order[:5], ['sign_helpers', 'embed', 'seal', 'verify', 'verify_engine'])
+        self.assertEqual(order[:6], ['bundle_cli', 'sign_helpers', 'embed', 'seal', 'verify', 'verify_engine'])
         # The app is notarized and stapled before it is archived and signed for updates;
         # the image is built from the stapled app, then notarized.
         self.assertEqual(order.index('npx') > order.index(stubs[0]), True)

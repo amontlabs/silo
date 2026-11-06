@@ -1,0 +1,64 @@
+== Q1 quiet fork of main: no scheduled runs in the fork (main is the control)
+-- main gets a cron job (every minute) and a boot-time cron start, like the phase 1 check; the poller is a recipe service
+ * Starting periodic command scheduler cron
+   ...done.
+main Fri Nov  6 08:37:01 UTC 2026 cron
+[09:38:01] PASS  Q1 fork started  -- 
+[09:38:01] settling 45 s, then watching 90 s
+fork e2e-final-quiet: before [poll=0 cron=0 pollers=0 crond=1] after [poll=0 cron=0 pollers=0 crond=1]
+main main (control): before [poll=20 cron=2 pollers=1 crond=1] after [poll=29 cron=4 pollers=1 crond=1]
+[09:40:21] PASS  Q1 fork wrote no poll or cron line and runs no poller  -- [poll=0 cron=0 pollers=0 crond=1]
+[09:40:21] PASS  Q1 main (control) kept writing  -- [poll=20 cron=2 pollers=1 crond=1] -> [poll=29 cron=4 pollers=1 crond=1]
+e2e-final-quiet (linux): running
+quiet: applied; stopped: final-poller, poller.py; scrubbed: /etc/silo/guest-client.json; secrets: none
+[09:40:23] PASS  Q1 status quiet record: applied, the final-poller service and its poller.py process stopped  -- {"applied": true, "newIdentity": true, "scheduledJobsDisabled": true, "scrub": ["/etc/silo/guest-client.json"], "secrets": [], "stop": ["final-poller", "poller.py"]}
+no crontab for root
+final-cron.desktop
+== C1 stub agent binaries on main (so the guest helper registers an agent), then fork --gui --computer-use auto
+[09:40:26] main desktop settle 60 s
+main: computer use: ready, approval ask, driver 0.38.0
+Dropping silo-baseline-8fa22f...
+Forking main into e2e-final-gui...
+Starting e2e-final-gui...
+[09:41:42] PASS  C1 fork --gui auto is ready  -- rc=0 14.81s state=ready approval=auto
+== C2 MCP: screenshot, open a terminal, type, verify the file from the host
+  step 0 computer_use_ready isError= False [] { |   "computer": "e2e-final-gui", |   "computerUse": { |     "appliedApproval": "auto", |     "approval": "auto", |     "driverVersion": "0.38.0", |     "reaso
+  step 1 computer_use_screenshot isError= False [([1280, 800], 47028)] ✅ Desktop screenshot 1280x800 written to /tmp/silo-cu.shot-80666-1.png (screen 1440x900; x/y for scope:"desktop" actions are pixels of THIS screenshot (mapped ×
+  step 2 computer_use_hotkey isError= False [] Pressed desktop hotkey ctrl+alt+t.
+  step 3  isError= None [] 
+  step 4 computer_use_screenshot isError= False [([1280, 800], 69591)] ✅ Desktop screenshot 1280x800 written to /tmp/silo-cu.shot-80666-2.png (screen 1440x900; x/y for scope:"desktop" actions are pixels of THIS screenshot (mapped ×
+  step 5 computer_use_click isError= False [] ✅ Sent screen-absolute click at (338,281) (desktop scope).
+  step 6 computer_use_type isError= False [] Typed text into the focused desktop application.
+  step 7 computer_use_key isError= False [] Pressed desktop key 'Return'.
+  step 8  isError= None [] 
+  step 9 computer_use_screenshot isError= False [([1280, 800], 84228)] ✅ Desktop screenshot 1280x800 written to /tmp/silo-cu.shot-80666-3.png (screen 1440x900; x/y for scope:"desktop" actions are pixels of THIS screenshot (mapped ×
+tool calls without error: 8
+silo exec e2e-final-gui -- cat /tmp/finalcu.txt -> final-cu-ok
+[09:41:55] PASS  C2 typing into the fork's GUI terminal wrote a file the host reads  -- final-cu-ok
+  screenshot: /Users/polarzero/code/projects/microsandbox-workspaces/docs/v1/evidence/final/raw/final-cu-1-desktop-0.png
+  screenshot: /Users/polarzero/code/projects/microsandbox-workspaces/docs/v1/evidence/final/raw/final-cu-2-terminal-0.png
+  screenshot: /Users/polarzero/code/projects/microsandbox-workspaces/docs/v1/evidence/final/raw/final-cu-3-after-typing-0.png
+== P1 promote the auto fork e2e-final-gui over main (approval ask)
+main before: computer use: ready, approval ask, driver 0.38.0
+Promoting e2e-final-gui...
+Promoting e2e-final-gui: 5s
+[09:42:08] PASS  P1 silo fold --promote exits 0  -- 
+archive: main-before-20261106-0841
+[09:42:09] PASS  P1 the fork is now main; old main archived  -- main-before-20261106-0841
+marker on new main: promoted-final
+main after: computer use: ready, approval ask, driver 0.38.0
+[09:42:11] PASS  P1 promoted main keeps computer-use approval ask (not the fork's auto)  -- 
+== P2 silo undo main
+[09:42:13] cleanup (e2e-final-*; main is stopped, not dropped)
+docs/v1/checks/final_lib.sh: line 25: 81359 Terminated: 15          "$SILO" undo main > "$RAW/promote-undo.txt" 2>&1
+NAME                                STATE      KIND    SIZE
+e2e-relay                           stopped    linux   8 cpu, 32 GiB
+main                                running    linux   2 cpu, 4 GiB
+main-before-20261106-0841           stopped    linux   2 cpu, 4 GiB
+silo-eval-a                         stopped    linux   2 cpu, 2 GiB
+silo-eval-b                         stopped    linux   2 cpu, 2 GiB
+workspace-1                         stopped    linux   8 cpu, 32 GiB
+e2e-p3-macsrc-before-20261105-2253  stopped    macos   4 cpu, 8 GiB
+e2e-p3-macsrc                       stopped    macos   4 cpu, 8 GiB
+macOS VMs running: 0
+== summary (quiet cu promote): 9 passed, 0 failed, 0 blocked

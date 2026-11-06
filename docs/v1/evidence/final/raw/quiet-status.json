@@ -1,0 +1,45 @@
+{
+  "boots": null,
+  "checkpointList": [],
+  "checkpoints": 0,
+  "computerUse": {
+    "agents": [],
+    "appliedApproval": "ask",
+    "approval": "ask",
+    "approvalApply": "applied",
+    "approvalApplyReason": null,
+    "at": null,
+    "driverVersion": "0.38.0",
+    "reason": null,
+    "schemaVersion": null,
+    "state": "ready"
+  },
+  "cpus": 2,
+  "credentialsUsed": {
+    "blocked": [],
+    "used": []
+  },
+  "detail": "Running",
+  "diskGiB": 10,
+  "generation": 24,
+  "github": null,
+  "id": "72fd43e7-d885-41ef-9847-e6d3c39916cd",
+  "kind": "linux",
+  "memoryGiB": 4,
+  "name": "e2e-final-quiet",
+  "quiet": {
+    "applied": true,
+    "newIdentity": true,
+    "scheduledJobsDisabled": true,
+    "scrub": [
+      "/etc/silo/guest-client.json"
+    ],
+    "secrets": [],
+    "stop": [
+      "final-poller",
+      "poller.py"
+    ]
+  },
+  "secrets": [],
+  "state": "running"
+}

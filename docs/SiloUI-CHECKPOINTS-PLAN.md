@@ -27,6 +27,11 @@ The user accepted:
 - A fork inherits the source computer's currently approved secret/GitHub
   assignments, gets a fresh identity, and has independent assignment changes.
   Historical grants cannot override current revocations.
+- A fork of a computer that runs a resident agent (`openclaw`, `hermes`) also
+  inherits that agent's installed files. The recipe's `quiet:` list stops its
+  gateway and scheduler in the fork and `scrub:` removes its token files, so
+  the fork does not answer the same chat channels or reuse the agent's
+  credentials ([resident agents](SiloUI-CLI.md#resident-agents)).
 
 Upgrade existing computer data once into the new runtime format. Keep the original
 data recoverable through conversion and verification, then use the new format

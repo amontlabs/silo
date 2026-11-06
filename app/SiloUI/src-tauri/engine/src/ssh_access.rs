@@ -8,11 +8,12 @@ use silo_engine::{Audience, Event};
 use std::{
     collections::{BTreeMap, BTreeSet},
     io::{BufRead, BufReader},
+    sync::mpsc::SyncSender,
     net::Ipv4Addr,
     path::PathBuf,
     process::{Child, Command, Stdio},
     sync::{Mutex, OnceLock},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 const FAILED: &str = "Could not read SSH access settings.";
@@ -53,6 +54,14 @@ struct Listener {
     children: Vec<Child>,
     config: Configuration,
 }
+impl Listener {
+    fn new(config: &Configuration) -> Self {
+        Self {
+            children: vec![],
+            config: config.clone(),
+        }
+    }
+}
 impl Drop for Listener {
     fn drop(&mut self) {
         for child in &mut self.children {
@@ -71,10 +80,52 @@ struct Owners {
     generation: u64,
     closed: BTreeMap<String, u64>,
     all_closed: u64,
+    /// Computer id to when a background pass may next try a listener that failed to start.
+    retries: BTreeMap<String, Retry>,
+    /// Computer id to its change generation (`crate::generation`) when a pass last inspected
+    /// it and found it stopped, and when. A background pass does not inspect it again until
+    /// that generation moves or [`RETRY_LIMIT`] passes (a start outside Silo).
+    stopped: BTreeMap<String, (u64, Instant)>,
 }
 impl Owners {
     fn closed_since(&self, computer: &str, generation: u64) -> bool {
         self.all_closed > generation || self.closed.get(computer).is_some_and(|g| *g > generation)
+    }
+    /// Found stopped recently, and nothing has started or stopped it since.
+    fn still_stopped(&self, config: &Configuration, now: Instant) -> bool {
+        self.stopped
+            .get(&config.computer_id)
+            .is_some_and(|(generation, at)| {
+                *generation == crate::generation::generation(&config.computer_id)
+                    && now.duration_since(*at) < RETRY_LIMIT
+            })
+    }
+    /// The retry that keeps a background pass from starting this computer's listener now.
+    fn waiting_retry(&self, config: &Configuration, now: Instant) -> Option<&Retry> {
+        self.retries
+            .get(&config.computer_id)
+            .filter(|retry| retry.next > now)
+    }
+}
+/// The longest a background pass waits before trying a failed listener again.
+const RETRY_LIMIT: Duration = Duration::from_secs(300);
+/// A listener that failed to start: the wait doubles with every failure, up to
+/// [`RETRY_LIMIT`]. A save or lifecycle command tries again at once.
+struct Retry {
+    delay: Duration,
+    next: Instant,
+    error: String,
+}
+impl Retry {
+    fn after(previous: Option<&Retry>, error: String, now: Instant) -> Self {
+        let delay = previous.map_or(MONITOR_INTERVAL * 2, |retry| {
+            (retry.delay * 2).min(RETRY_LIMIT)
+        });
+        Self {
+            delay,
+            next: now + delay,
+            error,
+        }
     }
 }
 /// The listeners and their errors. Held only briefly, never across runtime
@@ -218,6 +269,23 @@ fn fingerprint(paths: &RuntimePaths, name: &str) -> Result<String, String> {
         base64::engine::general_purpose::STANDARD_NO_PAD.encode(Sha256::digest(bytes))
     ))
 }
+/// Reads a listener's output until it ends: `SILO_SSH_READY` once it listens, then a line
+/// per session opened and closed. Each open session keeps the computer in flight
+/// (`crate::generation`), so a warm checkpoint taken across it is never reused; the
+/// listener's exit ends them all.
+fn follow_listener(output: impl BufRead, computer_id: &str, ready: &SyncSender<()>) {
+    let mut sessions = Vec::new();
+    for line in output.lines().map_while(Result::ok) {
+        match line.as_str() {
+            "SILO_SSH_READY" => {
+                let _ = ready.try_send(());
+            }
+            "SILO_SSH_SESSION_OPEN" => sessions.push(crate::generation::touch(Some(computer_id))),
+            "SILO_SSH_SESSION_CLOSED" => drop(sessions.pop()),
+            _ => {}
+        }
+    }
+}
 fn spawn(paths: &RuntimePaths, config: &Configuration) -> Result<Listener, String> {
     let root = paths.home.join("ssh/managed-access");
     editor::private_directory(&paths.home.join("ssh"))?;
@@ -236,10 +304,7 @@ fn spawn(paths: &RuntimePaths, config: &Configuration) -> Result<Listener, Strin
     editor::private_directory(&host_root)?;
     editor::key(&host_root.join("host_ed25519"))?;
     fingerprint(paths, &config.computer)?;
-    let mut listener = Listener {
-        children: vec![],
-        config: config.clone(),
-    };
+    let mut listener = Listener::new(config);
     let mut hosts = vec!["127.0.0.1"];
     if config.bind_address != "127.0.0.1" {
         hosts.push(&config.bind_address);
@@ -272,13 +337,8 @@ fn spawn(paths: &RuntimePaths, config: &Configuration) -> Result<Listener, Strin
             .ok_or("Could not read SSH listener readiness.")?;
         listener.children.push(child);
         let (tx, rx) = std::sync::mpsc::sync_channel(1);
-        std::thread::spawn(move || {
-            for line in BufReader::new(stdout).lines().map_while(Result::ok) {
-                if line == "SILO_SSH_READY" {
-                    let _ = tx.try_send(());
-                }
-            }
-        });
+        let computer_id = config.computer_id.clone();
+        std::thread::spawn(move || follow_listener(BufReader::new(stdout), &computer_id, &tx));
         rx.recv_timeout(Duration::from_secs(8)).map_err(|_| "SSH could not listen. Check whether the port is in use, the network address is available, and the bundled runtime is current.")?;
         if listener
             .children
@@ -316,6 +376,11 @@ fn inspect_running(paths: &RuntimePaths, config: &Configuration) -> Result<bool,
 /// state. Runtime inspection and listener start-up (up to 8 s each) run without the
 /// `owners()` lock, so state reads and closes never wait behind a pass (C-10).
 pub(crate) fn reconcile(paths: &RuntimePaths) {
+    reconcile_pass(paths, false)
+}
+/// A `background` pass (the monitor, a read's repair) does not inspect a computer that
+/// stayed stopped since the last pass, and waits out a failed listener's retry delay.
+fn reconcile_pass(paths: &RuntimePaths, background: bool) {
     if paths.metadata.as_os_str().is_empty() {
         return;
     }
@@ -347,7 +412,11 @@ pub(crate) fn reconcile(paths: &RuntimePaths) {
                 .iter()
                 .any(|m| m.name() == config.computer && m.id() == config.computer_id)
             {
-                inspect_running(paths, config)
+                if background && owned().still_stopped(config, Instant::now()) {
+                    Ok(false)
+                } else {
+                    inspect_running(paths, config)
+                }
             } else {
                 Err("The computer identity changed. Configure SSH access again.".into())
             };
@@ -371,9 +440,33 @@ pub(crate) fn reconcile(paths: &RuntimePaths) {
             .collect();
         retired.extend(stale.iter().filter_map(|name| owned.listeners.remove(name)));
         owned.errors.clear();
+        let now = Instant::now();
         observed
             .into_iter()
             .filter_map(|(config, observed)| {
+                if matches!(observed, Ok(false)) {
+                    // A skipped inspection keeps the time of the one that found it stopped.
+                    if !owned.still_stopped(config, now) {
+                        let generation = crate::generation::generation(&config.computer_id);
+                        owned
+                            .stopped
+                            .insert(config.computer_id.clone(), (generation, now));
+                    }
+                } else {
+                    owned.stopped.remove(&config.computer_id);
+                }
+                if background
+                    && matches!(observed, Ok(true))
+                    && !owned.listeners.contains_key(&config.computer)
+                {
+                    if let Some(error) = owned
+                        .waiting_retry(config, now)
+                        .map(|retry| retry.error.clone())
+                    {
+                        owned.errors.insert(config.computer.clone(), error);
+                        return None;
+                    }
+                }
                 prepare_one(&mut owned, config, observed, &addresses, &mut retired)
                     .then_some(config)
             })
@@ -400,6 +493,19 @@ pub(crate) fn reconcile(paths: &RuntimePaths) {
             && !owned.closed_since(&config.computer, generation)
             && current.contains(config)
         {
+            match &listener {
+                Ok(_) => {
+                    owned.retries.remove(&config.computer_id);
+                }
+                Err(error) => {
+                    let retry = Retry::after(
+                        owned.retries.get(&config.computer_id),
+                        error.clone(),
+                        Instant::now(),
+                    );
+                    owned.retries.insert(config.computer_id.clone(), retry);
+                }
+            }
             finish_one(&mut owned, config, listener, &mut retired);
         } else {
             // Closed or changed while starting: the next pass decides from fresh state.
@@ -520,7 +626,7 @@ fn reconcile_if_idle(paths: &RuntimePaths) {
     // Background listener reconcile touches shared SSH state; skip when busy.
     if let Ok(_guard) = runtime::OPERATIONS.try_device_hidden("Reconciling SSH access") {
         if runtime::shutdown::ensure_accepting_operations().is_ok() {
-            reconcile(paths);
+            reconcile_pass(paths, true);
         }
     }
 }
@@ -541,7 +647,7 @@ fn schedule_reconcile(paths: RuntimePaths) {
 /// Background safety net for changes nothing reports: a computer stopping outside
 /// Silo, a listener exiting, a network interface going away. Lifecycle commands,
 /// saves, backups and checkpoints reconcile directly, so this runs rarely (C-10).
-const MONITOR_INTERVAL: Duration = Duration::from_secs(15);
+pub const MONITOR_INTERVAL: Duration = Duration::from_secs(15);
 /// Whether a background pass has anything to open, check or close. Without any
 /// enabled SSH access and without owned listeners or errors, a pass would only take
 /// the device gate and inspect nothing, so it is skipped.
@@ -1018,6 +1124,92 @@ mod tests {
             managed_key: None,
         }
     }
+    #[test]
+    fn a_failed_listener_waits_twice_as_long_each_time_up_to_five_minutes() {
+        let c = config();
+        let now = Instant::now();
+        let mut owned = Owners::default();
+        let mut delays = Vec::new();
+        for _ in 0..6 {
+            let retry = Retry::after(owned.retries.get(&c.computer_id), "no".into(), now);
+            delays.push(retry.delay.as_secs());
+            owned.retries.insert(c.computer_id.clone(), retry);
+        }
+        assert_eq!(delays, [30, 60, 120, 240, 300, 300]);
+        assert_eq!(owned.waiting_retry(&c, now).unwrap().error, "no");
+        assert!(owned
+            .waiting_retry(&c, now + Duration::from_secs(301))
+            .is_none());
+    }
+    #[test]
+    fn a_stopped_computer_is_inspected_again_only_after_a_lifecycle_change_or_a_while() {
+        let mut c = config();
+        c.computer_id = "00000000-0000-4000-8000-0000000000bb".into();
+        let now = Instant::now();
+        let mut owned = Owners::default();
+        assert!(!owned.still_stopped(&c, now));
+        let at = crate::generation::generation(&c.computer_id);
+        owned.stopped.insert(c.computer_id.clone(), (at, now));
+        assert!(owned.still_stopped(&c, now + MONITOR_INTERVAL));
+        assert!(!owned.still_stopped(&c, now + RETRY_LIMIT));
+        // A start or stop through the engine moves the generation.
+        crate::generation::bump(&c.computer_id);
+        assert!(!owned.still_stopped(&c, now));
+    }
+    #[test]
+    fn a_listener_with_no_session_leaves_warm_checkpoints_reusable() {
+        use crate::generation;
+        let mut c = config();
+        c.computer_id = "00000000-0000-4000-8000-0000000000aa".into();
+        let id = c.computer_id.clone();
+        let before = generation::generation(&id);
+        let listener = Listener::new(&c);
+        assert_eq!(generation::generation(&id), before);
+        assert!(generation::idle(&id));
+        generation::note_warm_job("job:ssh-access-warm", generation::warm_baseline(&id));
+        generation::job_finished("job:ssh-access-warm", Some("cp-ssh-access-warm"));
+        assert_eq!(
+            generation::warm_generation("cp-ssh-access-warm"),
+            Some(before)
+        );
+        drop(listener);
+        assert_eq!(generation::generation(&id), before);
+    }
+    #[test]
+    fn each_reported_session_keeps_the_computer_in_flight_until_it_closes() {
+        use crate::generation;
+        use std::os::unix::net::UnixStream;
+        let id = "00000000-0000-4000-8000-0000000000cc";
+        let (mut runtime, output) = UnixStream::pair().unwrap();
+        let (ready, readied) = std::sync::mpsc::sync_channel(1);
+        let reader = std::thread::spawn(move || follow_listener(BufReader::new(output), id, &ready));
+        // Waits until the reader has handled everything written so far.
+        let settle = |busy: bool| {
+            let until = Instant::now() + Duration::from_secs(5);
+            while generation::idle(id) == busy && Instant::now() < until {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        };
+        writeln!(runtime, "SILO_SSH_READY").unwrap();
+        readied.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert!(generation::idle(id));
+        // A warm checkpoint taken while no session ran keeps its generation.
+        let quiet = generation::generation(id);
+        writeln!(runtime, "SILO_SSH_SESSION_OPEN\nSILO_SSH_SESSION_OPEN").unwrap();
+        settle(true);
+        assert!(!generation::idle(id));
+        assert!(generation::generation(id) > quiet);
+        generation::note_warm_job("job:ssh-session-warm", generation::warm_baseline(id));
+        generation::job_finished("job:ssh-session-warm", Some("cp-ssh-session-warm"));
+        assert_eq!(generation::warm_generation("cp-ssh-session-warm"), None);
+        writeln!(runtime, "SILO_SSH_SESSION_CLOSED").unwrap();
+        std::thread::sleep(Duration::from_millis(50));
+        assert!(!generation::idle(id), "one session is still open");
+        // The listener exiting ends the session it never reported closed.
+        drop(runtime);
+        reader.join().unwrap();
+        assert!(generation::idle(id));
+    }
     fn paths(dir: &tempfile::TempDir) -> RuntimePaths {
         crate::test_support::paths(dir.path())
     }
@@ -1315,13 +1507,7 @@ sys.stdin.buffer.read()
         fs::write(&p.executable, script).unwrap();
         let c = config();
         let mut owned = Owners::default();
-        owned.listeners.insert(
-            c.computer.clone(),
-            Listener {
-                children: vec![],
-                config: c.clone(),
-            },
-        );
+        owned.listeners.insert(c.computer.clone(), Listener::new(&c));
         for _ in 0..2 {
             let observed = inspect_running(&p, &c);
             assert_eq!(

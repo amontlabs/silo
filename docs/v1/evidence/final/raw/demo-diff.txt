@@ -1,0 +1,6 @@
+Comparing e2e-final-demo-1 with when it was forked...
+Other changed
+  + /home/silo/final-note.txt
+Ignored: 2 paths (caches, logs, build output)
+credentials used: none
+review: 50e7343c704c606923c078b714cdfe7da35d002c69e099986c40352c4b382374

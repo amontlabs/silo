@@ -612,10 +612,14 @@ async fn dispatch(
                 .recipe
                 .unwrap_or_else(|| crate::config::DEFAULT_RECIPE.to_owned());
             let recipe = recipe.ok_or_else(|| CliError::new("No recipe was loaded."))?;
-            let mut value = ops::up(engine, &name, &recipe, progress).await?;
-            match access::home_dir() {
-                Ok(home) => access::ssh_for_up(engine, &mut value, &home, build_channel()).await,
-                Err(error) => value["ssh"] = serde_json::json!({ "error": error.message }),
+            let home = access::home_dir();
+            let ssh = home
+                .as_ref()
+                .ok()
+                .map(|home| (home.as_path(), build_channel()));
+            let mut value = ops::up(engine, &name, &recipe, ssh, progress).await?;
+            if let Err(error) = home {
+                value["ssh"] = serde_json::json!({ "error": error.message });
             }
             emit(json, &value, render::up);
         }

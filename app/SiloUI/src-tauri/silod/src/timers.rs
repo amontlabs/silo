@@ -15,6 +15,13 @@
 //! failure, up to five minutes. The results are recorded and published as
 //! `connections.devices.changed` when something visible changed.
 //!
+//! A fifth pass reopens the SSH listeners of running computers every 15 s
+//! (`silo_engine::ssh_access::monitor`): a listener ends with the engine that started it, so
+//! a computer still running after an engine restart, or one stopped and started outside
+//! Silo, has none until this pass (or a lifecycle command) opens it again. The pass does not
+//! inspect a computer it found stopped until a lifecycle change or five minutes, and a
+//! listener that failed to start waits 30 s, doubling to five minutes, before the next try.
+//!
 //! The intervals are not sourced in the decisions (05 §10 OQ23); they are chosen here:
 //! revocations every minute (the pass returns at once when none is pending), ports every 30 s
 //! (macOS repair also keeps its own 10 s floor per computer), logs every 10 minutes (the
@@ -36,6 +43,7 @@ pub const START_DELAY: Duration = Duration::from_secs(30);
 pub const REVOCATION_INTERVAL: Duration = Duration::from_secs(60);
 pub const PORT_REPAIR_INTERVAL: Duration = Duration::from_secs(30);
 pub const LOG_EXPIRY_INTERVAL: Duration = Duration::from_secs(10 * 60);
+pub const SSH_REPAIR_INTERVAL: Duration = silo_engine::ssh_access::MONITOR_INTERVAL;
 /// How often the device pass looks for devices that are due. Each device answers to its own
 /// schedule inside the pass: [`DEVICE_QUIET_FOR`], doubling after each failure.
 pub const DEVICE_PROBE_INTERVAL: Duration = Duration::from_secs(10);
@@ -51,6 +59,8 @@ pub trait Upkeep: Send + Sync + 'static {
     fn repair_ports(&self);
     /// Asks the saved devices that are due whether they still answer.
     fn probe_devices(&self);
+    /// Opens, checks or closes the SSH listeners to match the settings and running computers.
+    fn repair_ssh(&self);
     /// True while the engine is shutting down or the storage migration blocks operations.
     fn paused(&self) -> bool;
 }
@@ -63,6 +73,7 @@ pub struct Schedule {
     pub ports: Duration,
     pub logs: Duration,
     pub devices: Duration,
+    pub ssh: Duration,
 }
 
 impl Schedule {
@@ -72,6 +83,7 @@ impl Schedule {
         ports: PORT_REPAIR_INTERVAL,
         logs: LOG_EXPIRY_INTERVAL,
         devices: DEVICE_PROBE_INTERVAL,
+        ssh: SSH_REPAIR_INTERVAL,
     };
 }
 
@@ -85,7 +97,7 @@ impl Timers {
     /// Starts one thread per pass, so a slow pass never delays another.
     pub fn start(upkeep: Arc<dyn Upkeep>, schedule: Schedule) -> Timers {
         let stop = Arc::new(AtomicBool::new(false));
-        let passes: [(&str, Duration, fn(&dyn Upkeep)); 4] = [
+        let passes: [(&str, Duration, fn(&dyn Upkeep)); 5] = [
             ("silod-timer-revocations", schedule.revocations, |upkeep| {
                 upkeep.retry_revocations()
             }),
@@ -97,6 +109,9 @@ impl Timers {
             }),
             ("silod-timer-devices", schedule.devices, |upkeep| {
                 upkeep.probe_devices()
+            }),
+            ("silod-timer-ssh", schedule.ssh, |upkeep| {
+                upkeep.repair_ssh()
             }),
         ];
         let mut threads = Vec::new();
@@ -202,6 +217,12 @@ impl Upkeep for SilodUpkeep {
         });
     }
 
+    fn repair_ssh(&self) {
+        if let Ok(paths) = silo_engine::runtime::runtime_paths(&self.host()) {
+            silo_engine::ssh_access::monitor(&paths);
+        }
+    }
+
     fn paused(&self) -> bool {
         use silo_engine::runtime::RuntimeHost;
         self.context.engine_state().shutting_down || self.host().blocks_operations()
@@ -233,6 +254,7 @@ mod tests {
         logs: AtomicUsize,
         ports: AtomicUsize,
         devices: AtomicUsize,
+        ssh: AtomicUsize,
         paused: AtomicBool,
         panic_in_logs: AtomicBool,
     }
@@ -253,6 +275,9 @@ mod tests {
         fn probe_devices(&self) {
             self.devices.fetch_add(1, Ordering::SeqCst);
         }
+        fn repair_ssh(&self) {
+            self.ssh.fetch_add(1, Ordering::SeqCst);
+        }
         fn paused(&self) -> bool {
             self.paused.load(Ordering::SeqCst)
         }
@@ -264,6 +289,7 @@ mod tests {
         ports: Duration::from_millis(20),
         logs: Duration::from_millis(20),
         devices: Duration::from_millis(20),
+        ssh: Duration::from_millis(20),
     };
 
     fn wait_until(condition: impl Fn() -> bool) {
@@ -285,6 +311,7 @@ mod tests {
                 && upkeep.logs.load(Ordering::SeqCst) >= 2
                 && upkeep.ports.load(Ordering::SeqCst) >= 2
                 && upkeep.devices.load(Ordering::SeqCst) >= 2
+                && upkeep.ssh.load(Ordering::SeqCst) >= 2
         });
         timers.stop();
     }
@@ -299,6 +326,7 @@ mod tests {
         assert_eq!(upkeep.logs.load(Ordering::SeqCst), 0);
         assert_eq!(upkeep.ports.load(Ordering::SeqCst), 0);
         assert_eq!(upkeep.devices.load(Ordering::SeqCst), 0);
+        assert_eq!(upkeep.ssh.load(Ordering::SeqCst), 0);
         upkeep.paused.store(false, Ordering::SeqCst);
         wait_until(|| upkeep.revocations.load(Ordering::SeqCst) >= 1);
         timers.stop();
@@ -377,5 +405,6 @@ mod tests {
         upkeep.repair_ports();
         upkeep.expire_logs();
         upkeep.probe_devices();
+        upkeep.repair_ssh();
     }
 }

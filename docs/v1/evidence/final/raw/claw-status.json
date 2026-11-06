@@ -1,0 +1,47 @@
+{
+  "boots": null,
+  "checkpointList": [],
+  "checkpoints": 0,
+  "computerUse": {
+    "agents": [],
+    "appliedApproval": "ask",
+    "approval": "ask",
+    "approvalApply": "applied",
+    "approvalApplyReason": null,
+    "at": null,
+    "driverVersion": "0.38.0",
+    "reason": null,
+    "schemaVersion": null,
+    "state": "ready"
+  },
+  "cpus": 2,
+  "credentialsUsed": {
+    "blocked": [],
+    "used": []
+  },
+  "detail": "Running",
+  "diskGiB": 10,
+  "generation": 61,
+  "github": null,
+  "id": "032ffdd3-9887-4ac6-a248-a9a22101f1b0",
+  "kind": "linux",
+  "memoryGiB": 4,
+  "name": "e2e-final-claw",
+  "quiet": {
+    "applied": true,
+    "newIdentity": true,
+    "scheduledJobsDisabled": true,
+    "scrub": [
+      "/home/silo/.openclaw/credentials",
+      "/home/silo/.openclaw/.env",
+      "/etc/silo/guest-client.json"
+    ],
+    "secrets": [],
+    "stop": [
+      "openclaw-gateway",
+      "openclaw"
+    ]
+  },
+  "secrets": [],
+  "state": "running"
+}

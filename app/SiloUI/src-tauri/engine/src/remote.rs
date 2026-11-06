@@ -122,6 +122,9 @@ pub struct ConnectionsStatus {
     addresses: Vec<ConnectionAddress>,
     /// Why Connections does not work on this device right now, if it does not.
     error: Option<String>,
+    /// Why the `silo` command could not be linked on PATH at the engine's start, if it could
+    /// not. Unrelated to Connections, and kept until the next start.
+    cli_link_error: Option<String>,
 }
 #[derive(Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -486,7 +489,23 @@ fn status(config: &Config) -> ConnectionsStatus {
         addresses,
         name,
         error: crate::sync::lock_or_recover(&START_ERROR, "connections status").clone(),
+        cli_link_error: crate::sync::lock_or_recover(&CLI_LINK_ERROR, "connections status")
+            .clone(),
     }
+}
+/// Why the `silo` command is not on PATH, from the engine's start. Changes to Connections
+/// never clear it.
+static CLI_LINK_ERROR: Mutex<Option<String>> = Mutex::new(None);
+/// Links the `silo` command for this engine and records the outcome for the status.
+fn link_cli_for_this_account() {
+    let linked = std::env::current_exe()
+        .map_err(|e| e.to_string())
+        .and_then(|engine| link_cli(&current_home()?, &engine))
+        .map_err(|error| format!("The silo command is not on PATH: {error}"));
+    if let Err(error) = &linked {
+        eprintln!("{error}");
+    }
+    *crate::sync::lock_or_recover(&CLI_LINK_ERROR, "connections status") = linked.err();
 }
 /// Why Connections is not working although Silo runs, such as another Silo
 /// process owning it or a file in the way of the bridge link. Cleared once fixed.
@@ -542,35 +561,46 @@ fn select_bridge_target(app_image: Option<PathBuf>, current: PathBuf) -> Result<
 /// Silo made earlier: one to an executable with the same name, a Silo AppImage, or a
 /// link whose target is gone (an old AppImage mount or a moved app).
 fn link_bridge(home: &Path, target: &Path) -> Result<(), String> {
-    let name = crate::channel::current().remote_bridge_name();
+    link_helper(home, crate::channel::current().remote_bridge_name(), target)
+}
+/// The bridge link: replaced when it names the same executable, a Silo AppImage, or nothing.
+fn link_helper(home: &Path, name: &str, target: &Path) -> Result<(), String> {
+    link_owned(home, name, target, &|previous| {
+        !previous.exists()
+            || previous.file_name() == target.file_name()
+            || std::env::current_exe()
+                .is_ok_and(|current| previous.file_name() == current.file_name())
+            || (previous
+                .extension()
+                .is_some_and(|extension| extension == "AppImage")
+                && previous
+                    .file_stem()
+                    .and_then(|stem| stem.to_str())
+                    .is_some_and(|stem| {
+                        let product = crate::channel::current().product_name();
+                        [product.to_owned(), product.replace(' ', "_")]
+                            .iter()
+                            .any(|product| {
+                                stem == product || stem.starts_with(&format!("{product}_"))
+                            })
+                    }))
+    })
+}
+/// Points `~/.local/bin/<name>` at `target`, replacing only a link `owns` accepts.
+fn link_owned(
+    home: &Path,
+    name: &str,
+    target: &Path,
+    owns: &dyn Fn(&Path) -> bool,
+) -> Result<(), String> {
     let path = home.join(".local/bin").join(name);
     fs::create_dir_all(path.parent().ok_or("Home unavailable.")?).map_err(|e| e.to_string())?;
     if let Ok(existing) = fs::symlink_metadata(&path) {
         let previous = fs::read_link(&path).ok();
-        let ours = existing.file_type().is_symlink()
-            && previous.as_deref().is_some_and(|previous| {
-                !previous.exists()
-                    || previous.file_name() == target.file_name()
-                    || std::env::current_exe()
-                        .is_ok_and(|current| previous.file_name() == current.file_name())
-                    || (previous
-                        .extension()
-                        .is_some_and(|extension| extension == "AppImage")
-                        && previous
-                            .file_stem()
-                            .and_then(|stem| stem.to_str())
-                            .is_some_and(|stem| {
-                                let product = crate::channel::current().product_name();
-                                [product.to_owned(), product.replace(' ', "_")].iter().any(
-                                    |product| {
-                                        stem == product || stem.starts_with(&format!("{product}_"))
-                                    },
-                                )
-                            }))
-            });
+        let ours = existing.file_type().is_symlink() && previous.as_deref().is_some_and(owns);
         if !ours {
             return Err(format!(
-                "~/.local/bin/{name} already exists. Choose a different name for that file before turning on Connections."
+                "~/.local/bin/{name} already exists and is not Silo's. Choose a different name for that file before Silo links it."
             ));
         }
         if previous.as_deref() == Some(target) {
@@ -587,6 +617,80 @@ fn link_bridge(home: &Path, target: &Path) -> Result<(), String> {
 }
 fn link_bridge_for_this_account() -> Result<(), String> {
     link_bridge(&current_home()?, &bridge_target()?)
+}
+/// A `silo` inside a Silo, Silo Dev or Silo Engine app bundle, existing or not.
+fn is_bundled_cli(path: &Path) -> bool {
+    let mut parts = path.ancestors();
+    let (Some(cli), Some(macos), Some(contents), Some(app)) =
+        (parts.next(), parts.next(), parts.next(), parts.next())
+    else {
+        return false;
+    };
+    cli.file_name().is_some_and(|name| name == "silo")
+        && macos.file_name().is_some_and(|name| name == "MacOS")
+        && contents.file_name().is_some_and(|name| name == "Contents")
+        && app.extension().is_some_and(|extension| extension == "app")
+        && app
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .is_some_and(|stem| ["Silo", "Silo Dev", "Silo Engine"].contains(&stem))
+}
+/// The bundle identifier a `silo` command was built for, as it prints it for the hidden
+/// `--print-channel-identifier` argument (silo-cli `engine::CHANNEL_FLAG`). `None` when it
+/// says nothing usable within a few seconds.
+fn cli_channel_identifier(cli: &Path) -> Option<String> {
+    let mut child = Command::new(cli)
+        .arg("--print-channel-identifier")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) if status.success() => break,
+            Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(20)),
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+        }
+    }
+    let mut output = String::new();
+    child.stdout.take()?.read_to_string(&mut output).ok()?;
+    Some(output.trim().to_owned()).filter(|identifier| !identifier.is_empty())
+}
+/// Links the channel's `silo` name (`silo` in production, `silo-dev` in development) to the
+/// `silo` in this app's `Contents/MacOS`. Only an engine running from an app bundle has one.
+/// Replaces only a link into a Silo bundle; anything else is the user's own.
+fn link_cli(home: &Path, engine: &Path) -> Result<(), String> {
+    let Some(cli) = engine
+        .parent()
+        .filter(|dir| dir.ends_with("Contents/MacOS"))
+        .map(|dir| dir.join("silo"))
+        .filter(|cli| is_bundled_cli(cli) && cli.is_file())
+    else {
+        return Ok(());
+    };
+    let channel = crate::channel::current();
+    let identifier = cli_channel_identifier(&cli);
+    if identifier.as_deref() != Some(channel.identifier()) {
+        return Err(format!(
+            "{} was built for {}, not {}; Silo did not link it as {}.",
+            cli.display(),
+            identifier.as_deref().unwrap_or("an unknown channel"),
+            channel.product_name(),
+            channel.cli_link_name()
+        ));
+    }
+    link_owned(
+        home,
+        channel.cli_link_name(),
+        &cli,
+        &is_bundled_cli,
+    )
 }
 pub async fn set_connections_enabled(enabled: bool) -> Result<ConnectionsStatus, String> {
     settings_io(move || {
@@ -2815,6 +2919,8 @@ pub fn start(
         macos,
         local_access,
     }));
+    // The command line links on every start, whatever the state of Connections.
+    link_cli_for_this_account();
     let enabled = match read_config() {
         Ok(config) => config.enabled,
         Err(error) => return record_start_error(Some(error)),
@@ -5691,6 +5797,111 @@ mod bridge_link_tests {
         assert_eq!(fs::read(&link).unwrap(), b"mine");
     }
 
+    fn bundle_engine(root: &Path, app: &str) -> PathBuf {
+        let macos = root.join(app).join("Contents/MacOS");
+        fs::create_dir_all(&macos).unwrap();
+        executable(&macos.join("silod"));
+        cli_for(&macos.join("silo"), crate::channel::current().identifier());
+        macos.join("silod")
+    }
+
+    /// A `silo` that answers `--print-channel-identifier` with `identifier`.
+    fn cli_for(path: &Path, identifier: &str) {
+        fs::write(
+            path,
+            format!("#!/bin/sh\n[ \"$1\" = --print-channel-identifier ] && echo {identifier}\n"),
+        )
+        .unwrap();
+        fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    #[test]
+    fn the_cli_link_refuses_a_silo_built_for_the_other_channel() {
+        let _test_state = crate::test_support::global_state();
+        let home = tempfile::tempdir().unwrap();
+        let apps = tempfile::tempdir().unwrap();
+        let engine = bundle_engine(apps.path(), "Silo.app");
+        let cli = engine.with_file_name("silo");
+        let link = home
+            .path()
+            .join(".local/bin")
+            .join(crate::channel::current().cli_link_name());
+        let other = match crate::channel::current() {
+            crate::channel::Channel::Production => crate::channel::Channel::Development,
+            crate::channel::Channel::Development => crate::channel::Channel::Production,
+        };
+        cli_for(&cli, other.identifier());
+        let error = link_cli(home.path(), &engine).unwrap_err();
+        assert!(error.contains(other.identifier()), "{error}");
+        // One that prints nothing (an older `silo`) is refused too.
+        executable(&cli);
+        assert!(link_cli(home.path(), &engine)
+            .unwrap_err()
+            .contains("an unknown channel"));
+        assert!(fs::symlink_metadata(&link).is_err());
+        cli_for(&cli, crate::channel::current().identifier());
+        link_cli(home.path(), &engine).unwrap();
+        assert_eq!(fs::read_link(&link).unwrap(), cli);
+    }
+
+    #[test]
+    fn the_cli_link_uses_the_channel_name_and_only_an_app_bundle_provides_it() {
+        let _test_state = crate::test_support::global_state();
+        let home = tempfile::tempdir().unwrap();
+        let apps = tempfile::tempdir().unwrap();
+        // A plain folder with a `silo` beside the engine (a cargo build, an AppImage folder) links nothing.
+        let loose = apps.path().join("silod");
+        executable(&loose);
+        executable(&apps.path().join("silo"));
+        link_cli(home.path(), &loose).unwrap();
+        assert!(!home.path().join(".local/bin").exists());
+        let engine = bundle_engine(apps.path(), "Silo.app");
+        link_cli(home.path(), &engine).unwrap();
+        let link = home
+            .path()
+            .join(".local/bin")
+            .join(crate::channel::current().cli_link_name());
+        assert_eq!(fs::read_link(&link).unwrap(), engine.with_file_name("silo"));
+    }
+
+    #[test]
+    fn the_cli_link_replaces_only_a_link_into_a_silo_bundle() {
+        let _test_state = crate::test_support::global_state();
+        let home = tempfile::tempdir().unwrap();
+        let apps = tempfile::tempdir().unwrap();
+        let engine = bundle_engine(apps.path(), "Silo.app");
+        let link = home
+            .path()
+            .join(".local/bin")
+            .join(crate::channel::current().cli_link_name());
+        fs::create_dir_all(link.parent().unwrap()).unwrap();
+        let foreign = apps.path().join("x/silo");
+        fs::create_dir_all(foreign.parent().unwrap()).unwrap();
+        executable(&foreign);
+        for previous in [foreign.clone(), apps.path().join("gone/silo")] {
+            symlink(&previous, &link).unwrap();
+            assert!(link_cli(home.path(), &engine)
+                .unwrap_err()
+                .contains("already exists"));
+            assert_eq!(fs::read_link(&link).unwrap(), previous);
+            fs::remove_file(&link).unwrap();
+        }
+        fs::write(&link, b"mine").unwrap();
+        assert!(link_cli(home.path(), &engine).is_err());
+        assert_eq!(fs::read(&link).unwrap(), b"mine");
+        fs::remove_file(&link).unwrap();
+        // Our own earlier links: a moved (missing) Silo app and a Silo Dev app.
+        for old in [
+            apps.path().join("Old/Silo.app/Contents/MacOS/silo"),
+            bundle_engine(apps.path(), "Silo Dev.app").with_file_name("silo"),
+        ] {
+            symlink(&old, &link).unwrap();
+            link_cli(home.path(), &engine).unwrap();
+            assert_eq!(fs::read_link(&link).unwrap(), engine.with_file_name("silo"));
+            fs::remove_file(&link).unwrap();
+        }
+    }
+
     #[test]
     fn unrelated_appimage_bridge_link_is_preserved() {
         let _test_state = crate::test_support::global_state();
@@ -5775,6 +5986,14 @@ mod bridge_link_tests {
         );
         record_start_error(None);
         assert_eq!(status(&config).error, None);
+        // A refused `silo` link is its own field, and Connections changes leave it alone.
+        *crate::sync::lock_or_recover(&CLI_LINK_ERROR, "test") = Some("not linked".into());
+        record_start_error(Some("Another Silo instance owns Connections.".into()));
+        record_start_error(None);
+        let status = status(&config);
+        assert_eq!(status.error, None);
+        assert_eq!(status.cli_link_error.as_deref(), Some("not linked"));
+        *crate::sync::lock_or_recover(&CLI_LINK_ERROR, "test") = None;
     }
 }
 

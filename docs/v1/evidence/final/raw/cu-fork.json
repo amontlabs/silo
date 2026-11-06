@@ -1,0 +1,35 @@
+{
+  "checkpoint": {
+    "ageSeconds": 0,
+    "createdAt": "2026-11-06T10:29:59Z",
+    "id": "c0114b0b963d54104a5f964e9a67fa88",
+    "kind": "manual",
+    "name": "Fork point",
+    "reused": false,
+    "unchanged": false
+  },
+  "checkpoints": 0,
+  "computerUse": {
+    "appliedApproval": "auto",
+    "approval": "auto",
+    "driverVersion": "0.38.0",
+    "reason": null,
+    "session": "running",
+    "state": "ready"
+  },
+  "cpus": 2,
+  "detail": "Ready to start from checkpoint",
+  "diskGiB": 10,
+  "forkedAsOf": "11:29:59",
+  "generation": 3,
+  "gui": true,
+  "id": "71bc09a7-cc90-4642-b701-a3e98e4b0483",
+  "kind": "linux",
+  "memoryGiB": 4,
+  "name": "e2e-final-gui",
+  "ports": [
+    3000
+  ],
+  "source": "main",
+  "state": "running"
+}

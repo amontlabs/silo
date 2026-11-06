@@ -515,6 +515,11 @@ impl Recipe {
                 return Err(format!("{key}: entries may not be empty"));
             }
         }
+        if let Some(path) = self.scrub.iter().find(|path| !path.starts_with('/')) {
+            return Err(format!(
+                "scrub: {path} must be an absolute path (the engine does not expand ~)"
+            ));
+        }
         if self
             .test
             .as_deref()
@@ -651,6 +656,45 @@ const BUILT_IN: &[(&str, &str)] = &[
         "linux-dev",
         "os: linux\npackages:\n  apt: [build-essential, jq, ripgrep]\n",
     ),
+    // Resident agents: the install lines come from each project's own docs (see
+    // SiloUI-CLI.md, "Resident agents"). Lines marked measured were checked against a running
+    // install in the v1 final run; lines marked unverified were not.
+    (
+        "openclaw",
+        concat!(
+            "os: linux\n",
+            "packages:\n",
+            "  apt: [build-essential, ca-certificates, curl, git, jq, ripgrep]\n",
+            "setup:\n",
+            "  # https://docs.openclaw.ai/install (installer script; --no-onboard skips the prompts)\n",
+            "  - curl -fsSL https://openclaw.ai/install.sh | bash -s -- --no-onboard\n",
+            "services:\n",
+            "  # measured: `openclaw gateway` stays in the foreground (docs.openclaw.ai/linux documents a systemd user unit instead)\n",
+            "  openclaw-gateway: openclaw gateway\n",
+            "# measured: the gateway process is named openclaw-gateway, its node workers are its children; a fork stops it so it does not answer chat channels twice\n",
+            "quiet: [openclaw-gateway, openclaw]\n",
+            "# credentials/ holds channel logins and .env the channel tokens (both checked in the final run); the engine needs absolute paths\n",
+            "scrub: [/home/silo/.openclaw/credentials, /home/silo/.openclaw/.env]\n",
+        ),
+    ),
+    (
+        "hermes",
+        concat!(
+            "os: linux\n",
+            "packages:\n",
+            "  apt: [build-essential, ca-certificates, curl, git, jq, ripgrep]\n",
+            "setup:\n",
+            "  # https://github.com/NousResearch/hermes-agent (README: Linux, macOS, WSL2)\n",
+            "  - curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash\n",
+            "services:\n",
+            "  # README: `hermes gateway` starts the messaging gateway\n",
+            "  hermes-gateway: hermes gateway\n",
+            "# unverified: the process names; Hermes also has a built-in cron scheduler that the gateway runs\n",
+            "quiet: [hermes-gateway, hermes]\n",
+            "# unverified: ~/.hermes is the install folder; the README does not say where API keys live (the engine needs absolute paths)\n",
+            "scrub: [/home/silo/.hermes/.env]\n",
+        ),
+    ),
     (
         "macos-xcode",
         "os: macos\nsetup:\n  - xcode-select -p\n  - xcodebuild -version\n",
@@ -772,14 +816,41 @@ mod tests {
     #[test]
     fn a_full_recipe_parses() {
         let recipe = parse_recipe(
-            "quiet: [poller, cron]\nscrub: [~/.env]\nkeep:\n  restart: [web]\n  migrate: [make migrate]\n  after: [make test]\n",
+            "quiet: [poller, cron]\nscrub: [/root/.env]\nkeep:\n  restart: [web]\n  migrate: [make migrate]\n  after: [make test]\n",
         )
         .unwrap();
         assert_eq!(recipe.quiet, ["poller", "cron"]);
-        assert_eq!(recipe.scrub, ["~/.env"]);
+        assert_eq!(recipe.scrub, ["/root/.env"]);
+        assert!(parse_recipe("scrub: [~/.env]\n")
+            .unwrap_err()
+            .contains("absolute"));
         assert_eq!(recipe.keep.restart, ["web"]);
         assert_eq!(recipe.keep.migrate, ["make migrate"]);
         assert_eq!(recipe.keep.after, ["make test"]);
+    }
+
+    #[test]
+    fn resident_agent_recipes_are_valid_and_quiet_their_gateway() {
+        for (name, program, token_path) in [
+            ("openclaw", "openclaw", "/home/silo/.openclaw/credentials"),
+            ("hermes", "hermes", "/home/silo/.hermes/.env"),
+        ] {
+            let recipe = built_in(name).unwrap();
+            let service = format!("{program}-gateway");
+            assert!(
+                recipe.quiet.contains(&service),
+                "{name}: {:?}",
+                recipe.quiet
+            );
+            assert!(recipe.quiet.iter().any(|entry| entry == program), "{name}");
+            assert!(recipe.scrub.iter().any(|path| path == token_path), "{name}");
+            assert!(recipe.services.contains_key(&service), "{name}");
+            assert!(
+                recipe.setup.iter().any(|line| line.contains("install.sh")),
+                "{name}"
+            );
+            assert!(built_in_names().contains(&name));
+        }
     }
 
     #[test]

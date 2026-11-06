@@ -1,0 +1,67 @@
+== header (2026-11-06T08:35:09Z)
+commit: dcd93be033e7a5740f7ccc44f14c6c87272c16d9; tracked changes under app/: []
+machine: Apple M4 Max, 64 GiB RAM, 16 cores, macOS 26.5 (25F71), arm64
+bundle: /Users/polarzero/code/projects/microsandbox-workspaces/app/SiloUI/target/release/bundle/macos/Silo Dev.app; engine pid 75798; silo CLI silo 0.1.0 (release profile, debug assertions on, Dev channel)
+msb: msb 0.7.6; microsandboxVersion 0.7.6 (source commit 09df3d4b9d83); Silo patches on it: 24
+libkrunfw: 5.6.1 (commit cf4c22b9f05c); libkrun (msb_krun crate, macOS gateway lock): version = "0.1.39"
+guest image arm64: ubuntu-24.04-v5 digest sha256:520ac2e08002da7b9996d3d09c096c6e5edf9dee3ddadd2291769cce786eb2ff archive sha256 70b6a50a7004aa91c811949e483060768b8b82e40684d080ce117ae0afe6410b (352275811 bytes, 1103616512 unpacked)
+guest image amd64: ubuntu-24.04-v5 digest sha256:cff964f375ea328f4f40211e312fe3d3cf80d041449e47ebe047600ddb955d2c archive sha256 1f10405e9e30a916dce48ec6e9ca49d896d62a892ee8d3ea19b55d7773012dfc (361611981 bytes, 1192738816 unpacked)
+computers: NAME STATE KIND SIZE;workspace-1 stopped linux 8 cpu, 32 GiB;e2e-relay stopped linux 8 cpu, 32 GiB;silo-eval-a stopped linux 2 cpu, 2 GiB;silo-eval-b stopped linux 2 cpu, 2 GiB;e2e-p3-macsrc-before-20261105-2253 stopped macos 4 cpu, 8 GiB;e2e-p3-macsrc stopped macos 4 cpu, 8 GiB;
+== D1 silo up --recipe demo (main is ours only if it is absent)
+Making main from demo...
+Starting main...
+Checkpointing main...
+main is running (made from demo). Warm checkpoint c6801edc784c34c6aa9f71845d935cca saved. ssh main.silo-dev reaches it.
+[09:35:23] PASS  D1 silo up --recipe demo  -- 13.15s, includes the recipe build (not a measurement)
+[09:35:24] PASS  D1 main running  -- main (linux): running 2 cpu, 4 GiB memory, 10 GiB disk 1 checkpoints 
+main
+914 python3 /opt/final/web.py
+915 python3 /opt/final/poller.py
+3000  http  reachable  http://3000.main.silo.localhost:47383
+ssh-ok silo
+[09:35:25] PASS  D1 ssh main.silo-dev reaches main  -- 
+== D2 silo fork main -n 4 (each fork writes a note named after its own host)
+demo -n 4: rc=0 18.12s
+e2e-final-demo-1  exit 0  http://3000.e2e-final-demo-1.silo.localhost:47383
+e2e-final-demo-2  exit 0  http://3000.e2e-final-demo-2.silo.localhost:47383
+e2e-final-demo-3  exit 0  http://3000.e2e-final-demo-3.silo.localhost:47383
+e2e-final-demo-4  exit 0  http://3000.e2e-final-demo-4.silo.localhost:47383
+4 forks of main; review with `silo diff <fork>`, keep with `silo fold <fork>`.
+[09:35:44] PASS  D2 four forks running  -- 4 running
+== D3 review: silo diff e2e-final-demo-1
+Comparing e2e-final-demo-1 with when it was forked...
+Other changed
+  + /home/silo/final-note.txt
+Ignored: 2 paths (caches, logs, build output)
+credentials used: none
+review: 50e7343c704c606923c078b714cdfe7da35d002c69e099986c40352c4b382374
+[09:35:46] PASS  D3 silo diff lists final-note.txt  -- rc=0,        6 lines
+== D4 keep: silo fold e2e-final-demo-1
+Keeping e2e-final-demo-1...
+Keeping e2e-final-demo-1: 5s
+Keeping e2e-final-demo-1: 10s
+Comparing e2e-final-demo-1 with when it was forked...
+Kept 772963c2-221d-4d49-bec9-e6a1053f4607 into 7f1d5e34-cdf7-4ffa-a43f-b2ec10f71671.
+  files: 1 written, 0 already identical
+Undo with `silo undo 7f1d5e34-cdf7-4ffa-a43f-b2ec10f71671`.
+[09:36:04] PASS  D4 silo fold exits 0  -- 
+main note after keep: kept-from-e2e-final-demo-1
+[09:36:05] PASS  D4 main has the fork's note  -- kept-from-e2e-final-demo-1
+== D5 undo: silo undo main
+Undoing the latest keep or promote of main...
+Put 7f1d5e34-cdf7-4ffa-a43f-b2ec10f71671 back to Before keep of 772963c2-221d-4d49-bec9-e6a1053f4607. 7f1d5e34-cdf7-4ffa-a43f-b2ec10f71671 is running again, as it was.
+[09:36:15] PASS  D5 silo undo main exits 0  -- 
+[09:36:15] PASS  D5 the note is gone from main  -- 
+== D6 throw away the four forks
+[09:36:28] PASS  D6 no e2e-final-demo forks left  -- 
+[09:36:28] cleanup (e2e-final-*; main is stopped, not dropped)
+NAME                                STATE      KIND    SIZE
+workspace-1                         stopped    linux   8 cpu, 32 GiB
+e2e-relay                           stopped    linux   8 cpu, 32 GiB
+silo-eval-a                         stopped    linux   2 cpu, 2 GiB
+silo-eval-b                         stopped    linux   2 cpu, 2 GiB
+main                                running    linux   2 cpu, 4 GiB
+e2e-p3-macsrc-before-20261105-2253  stopped    macos   4 cpu, 8 GiB
+e2e-p3-macsrc                       stopped    macos   4 cpu, 8 GiB
+macOS VMs running: 0
+== summary (header demo): 10 passed, 0 failed, 0 blocked
