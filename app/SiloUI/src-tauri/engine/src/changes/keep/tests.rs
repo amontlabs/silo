@@ -2293,7 +2293,11 @@ fn file_write_creates_missing_parents_and_applies_the_mode() {
     // The script chowns new directories and the file to the owner of the nearest existing
     // parent, found before anything is created.
     assert!(cmd.script.contains("ao=$("), "{}", cmd.script);
-    assert!(cmd.script.contains("chown \"$ao\" \"$x\""));
+    assert!(cmd.script.contains("chown -h \"$ao\" \"$x\""));
+    assert!(cmd.script.contains("[ ! -L \"$x\" ]"));
+    assert!(cmd.script.contains("mktemp \"$d/.silo-keep."));
+    // Ownership is set before the mode so setuid and setgid bits survive.
+    assert!(cmd.script.find("chown -h \"$o\"") < cmd.script.find("chmod \"$A_mode\""));
     assert!(cmd.script.contains("else o=\"$ao\"; fi"));
     let mut child = std::process::Command::new("bash")
         .arg("-c")

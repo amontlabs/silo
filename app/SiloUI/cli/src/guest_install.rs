@@ -171,6 +171,12 @@ pub async fn install(
     }))
 }
 
+/// Makes the upload folder as root, directly in the sticky `/tmp` where the working account
+/// cannot rename or replace entries it does not own: `mkdir` fails on a name that exists (a link
+/// included), and the folder is handed to the owner of `$2` and checked to be a real folder.
+const UPLOAD_FOLDER_SCRIPT: &str = "set -e; mkdir -m 700 -- \"$1\"; \
+     chown -h \"$(stat -L -c %u:%g -- \"$2\")\" \"$1\"; [ -d \"$1\" ] && [ ! -L \"$1\" ]";
+
 async fn upload_binary(
     engine: &Engine,
     computer_id: &str,
@@ -184,15 +190,15 @@ async fn upload_binary(
         .filter(|name| !name.contains('/') && !name.is_empty())
         .ok_or_else(|| CliError::new("--binary must name a file."))?;
     let directory = format!(
-        "/workspace/silo-in-{}",
+        "/tmp/silo-in-{}",
         &uuid::Uuid::new_v4().simple().to_string()[..12]
     );
     // The transfer needs the folder to exist and the account that receives it to own it.
     as_root(
         engine,
         computer_id,
-        "set -e; mkdir -p \"$1\"; chown \"$(stat -c %u:%g /workspace)\" \"$1\"; chmod 700 \"$1\"",
-        &[&directory],
+        UPLOAD_FOLDER_SCRIPT,
+        &[&directory, "/workspace"],
         None,
     )
     .await?;
@@ -249,4 +255,35 @@ pub async fn status(engine: &Engine, computer: &str) -> Result<Value, CliError> 
             computer_id: target.id,
         }))
         .await
+}
+
+#[cfg(test)]
+mod upload_folder_tests {
+    use super::UPLOAD_FOLDER_SCRIPT;
+    use std::process::Command;
+
+    fn run(folder: &std::path::Path, owner: &std::path::Path) -> bool {
+        Command::new("sh")
+            .args(["-c", UPLOAD_FOLDER_SCRIPT, "silo-install"])
+            .arg(folder)
+            .arg(owner)
+            .status()
+            .unwrap()
+            .success()
+    }
+
+    #[test]
+    fn the_upload_folder_is_new_private_and_never_a_link() {
+        let base = std::env::temp_dir().join(format!("silo-up-{}", std::process::id()));
+        std::fs::create_dir_all(&base).unwrap();
+        let folder = base.join("silo-in-1");
+        assert!(run(&folder, &base));
+        assert!(std::fs::metadata(&folder).unwrap().is_dir());
+        // A name that already exists, as a folder or as a link, is refused.
+        assert!(!run(&folder, &base));
+        let link = base.join("silo-in-2");
+        std::os::unix::fs::symlink(&base, &link).unwrap();
+        assert!(!run(&link, &base));
+        std::fs::remove_dir_all(&base).unwrap();
+    }
 }
