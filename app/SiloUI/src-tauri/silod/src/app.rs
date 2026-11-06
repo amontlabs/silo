@@ -34,10 +34,27 @@ pub fn run_remote_guest(args: &[String]) -> Result<i32, String> {
         if args.len() != 2 && args.len() != 3 {
             return Err("usage: silod --remote-guest DEVICE_ID COMPUTER_ID [PORT]".to_owned());
         }
+        crate::run_from_bundle(&std::env::args().collect::<Vec<_>>())?;
         let manifest = service::current_bundle_manifest()?;
         silo_engine::channel::init(&manifest.channel_identifier);
         let params = silo_engine::remote::guest_stream_params(args)?;
         silo_engine::remote::run_remote_stream(&args[0], "guest.ssh", params)?;
+        Ok(0)
+    })
+}
+
+/// Runs the Connections bridge that a controller's forced SSH command starts through the
+/// `~/.local/bin` link. It relays one request to this channel's `control.sock` and writes
+/// nothing to stdout before the reply, which the controller reads as a framed stream.
+pub fn run_remote_bridge(args: &[String]) -> Result<i32, String> {
+    autoreleasepool(|_| {
+        if !args.is_empty() {
+            return Err("usage: silod --remote-bridge".to_owned());
+        }
+        crate::run_from_bundle(&std::env::args().collect::<Vec<_>>())?;
+        let manifest = service::current_bundle_manifest()?;
+        silo_engine::channel::init(&manifest.channel_identifier);
+        silo_engine::remote::run_bridge()?;
         Ok(0)
     })
 }

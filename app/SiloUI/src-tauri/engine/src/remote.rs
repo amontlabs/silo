@@ -1142,6 +1142,16 @@ fn copy_raw_stream(mut reader: impl Read, mut writer: impl Write) -> std::io::Re
     }
 }
 /// Bounds the whole frame, including peers that keep sending partial bytes.
+/// macOS refuses to set a timeout (`EINVAL`) on a socket whose peer has already closed it. The
+/// owner closes `control.sock` right after writing its reply, so the reply can be buffered and
+/// still unread; the read that follows returns it, then the end of the stream.
+fn set_timeout_unless_closed(result: std::io::Result<()>) -> std::io::Result<()> {
+    match result {
+        Err(error) if error.raw_os_error() == Some(libc::EINVAL) => Ok(()),
+        other => other,
+    }
+}
+
 fn read_socket_frame(socket: &mut UnixStream, timeout: Duration) -> Result<Value, String> {
     struct DeadlineReader<'a> {
         socket: &'a mut UnixStream,
@@ -1156,7 +1166,7 @@ fn read_socket_frame(socket: &mut UnixStream, timeout: Duration) -> Result<Value
                     "Remote operation timed out while receiving its frame.",
                 ));
             }
-            self.socket.set_read_timeout(Some(remaining))?;
+            set_timeout_unless_closed(self.socket.set_read_timeout(Some(remaining)))?;
             self.socket.read(bytes)
         }
     }
@@ -1571,6 +1581,9 @@ fn connection_failure(code: Option<i32>, stderr: &str) -> String {
     });
     if code == Some(127) || missing_bridge {
         return "Silo's remote bridge is missing on the other device. Turn Connections off and on again there.".into();
+    }
+    if has("unsupported silod argument: --remote-bridge") {
+        return "The other device runs a Silo version that cannot accept connections. Update Silo there.".into();
     }
     CONNECTION_HELP.into()
 }
@@ -2498,8 +2511,8 @@ pub fn run_bridge() -> Result<(), String> {
     let response = read_socket_frame(&mut socket, request_timeout(&request))?;
     write_reply(std::io::stdout().lock(), &response)?;
     if streaming && response.get("error").is_none() {
-        socket.set_read_timeout(None).map_err(|e| e.to_string())?;
-        socket.set_write_timeout(None).map_err(|e| e.to_string())?;
+        set_timeout_unless_closed(socket.set_read_timeout(None)).map_err(|e| e.to_string())?;
+        set_timeout_unless_closed(socket.set_write_timeout(None)).map_err(|e| e.to_string())?;
         let mut input = socket.try_clone().map_err(|e| e.to_string())?;
         thread::spawn(move || {
             let _ = std::io::copy(&mut std::io::stdin().lock(), &mut input);
@@ -5163,6 +5176,12 @@ mod setup_tests {
 mod connection_failure_tests {
     use super::*;
     #[test]
+    fn a_bridge_that_rejects_its_flag_is_named_an_old_silo() {
+        let stderr = "silod: unsupported silod argument: --remote-bridge\n";
+        assert!(connection_failure(Some(1), stderr).contains("Update Silo there"));
+    }
+
+    #[test]
     fn missing_bridge_stderr_recognizes_both_channels_without_exit_127() {
         for channel in [
             crate::channel::Channel::Production,
@@ -6167,6 +6186,30 @@ mod identity_tests {
 #[cfg(test)]
 mod reply_tests {
     use super::*;
+
+    /// The owner writes its reply and closes `control.sock` at once; macOS then refuses new
+    /// timeouts on the bridge's end with `EINVAL` although the reply is still buffered.
+    #[test]
+    fn a_reply_written_just_before_the_owner_closes_is_still_read() {
+        for _ in 0..50 {
+            let (mut bridge, mut owner) = UnixStream::pair().unwrap();
+            let value = json!({"result":{"deviceId":"office"}});
+            write_frame(&mut owner, &value).unwrap();
+            drop(owner);
+            assert_eq!(
+                read_socket_frame(&mut bridge, Duration::from_secs(5)).unwrap(),
+                value
+            );
+        }
+    }
+
+    #[test]
+    fn only_a_closed_socket_refusing_a_timeout_is_ignored() {
+        let einval = std::io::Error::from_raw_os_error(libc::EINVAL);
+        assert!(set_timeout_unless_closed(Err(einval)).is_ok());
+        let other = std::io::Error::from_raw_os_error(libc::EBADF);
+        assert!(set_timeout_unless_closed(Err(other)).is_err());
+    }
     fn reply(value: &Value) -> Vec<u8> {
         let mut bytes = Vec::new();
         write_reply(&mut bytes, value).unwrap();
