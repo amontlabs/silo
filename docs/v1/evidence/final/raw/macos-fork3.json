@@ -1,0 +1,33 @@
+{
+  "checkpoint": {
+    "ageSeconds": 0,
+    "createdAt": "2026-11-06T09:44:45Z",
+    "id": "e2d3e1d6-f218-4273-812a-2649ba9125a8",
+    "kind": "fork-point",
+    "name": "Fork point",
+    "reused": false,
+    "unchanged": false
+  },
+  "checkpoints": 0,
+  "computerUse": {
+    "appliedApproval": "ask",
+    "approval": "ask",
+    "driverVersion": "0.38.0",
+    "reason": null,
+    "session": "running",
+    "state": "ready"
+  },
+  "cpus": 4,
+  "detail": "Personalizing the computer",
+  "diskGiB": 40,
+  "forkedAsOf": "10:44:45",
+  "generation": 52,
+  "gui": true,
+  "id": "8b813885-5ecd-4336-ba60-1beb834b86fc",
+  "kind": "macos",
+  "memoryGiB": 8,
+  "name": "e2e-final-mfork3",
+  "ports": [],
+  "source": "e2e-final-msrc",
+  "state": "running"
+}

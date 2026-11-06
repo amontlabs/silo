@@ -40,7 +40,7 @@ cd "$PROJ" || return
 for i in 1 2 3; do
   "$SILO" up --recipe demo > "$RAW/up-warm$i.out" 2>&1; sleep 3
   timed_fork warm4-$i "$RAW/warm4.txt" main -n 4 --name e2e-final-w$i -- true
-  grep -iq 'warm checkpoint' "$RAW/fork-warm4-$i.err" "$RAW/fork-warm4-$i.out" || echo "  NOTE: run $i did not report a warm checkpoint"
+  if grep -q 'Checkpointing main' "$RAW/fork-warm4-$i.err"; then echo "  NOTE: run $i took a new checkpoint (warm checkpoint not used)"; else echo "  run $i forked from the warm checkpoint (no new checkpoint)"; fi
   if [ $i = 1 ]; then sleep 20; for k in 1 2 3 4; do echo "-- footprint of e2e-final-w1-$k"; fp e2e-final-w1-$k | tee -a "$RAW/warm4-fp.txt"; done; fi
   for k in 1 2 3 4; do drop_one e2e-final-w$i-$k; done
 done

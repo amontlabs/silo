@@ -1,0 +1,112 @@
+== O1 silo up --recipe openclaw (replaces our demo main)
+Building the recipe openclaw...
+Making main from openclaw...
+Starting main...
+Starting main: 5s
+Checkpointing main...
+Checkpointing main: 5s
+main is running (made from openclaw). Warm checkpoint c0fa242b510c54e55a239c9b4f5f4122 saved. ssh main.silo-dev reaches it.
+[07:04:44] PASS  O1 silo up --recipe openclaw  -- 16.24s, includes the install (not a measurement)
+-- install
+PATH=/.msb/scripts:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+/usr/bin/openclaw
+OpenClaw 2026.11.1 (4ffdd20)
+v24.22.2
+ls: cannot access '/home/silo/.openclaw': No such file or directory
+[07:04:45] PASS  O1 openclaw is installed (on the working account's PATH)  -- 
+-- gateway service: unconfigured it exits (no account needed for the baseline config below)
+-rw-r--r-- 1 root root  141 Nov  6 05:49 openclaw-gateway.desktop
+#!/bin/sh
+exec openclaw gateway
+Missing config. Run `openclaw setup` or set gateway.mode=local (or pass --allow-unconfigured).
+Next guided path: openclaw onboard.
+Next targeted changes: openclaw configure for models, channels, Gateway, plugins, skills, and health checks.
+Add a chat channel later: openclaw channels add.
+No change
+/home/silo/.openclaw
+/home/silo/.openclaw/.env
+/home/silo/.openclaw/agents
+/home/silo/.openclaw/agents/main
+/home/silo/.openclaw/config-journal-fingerprint.key
+/home/silo/.openclaw/credentials
+/home/silo/.openclaw/credentials/final-test.json
+/home/silo/.openclaw/openclaw.json
+/home/silo/.openclaw/openclaw.json.bak
+/home/silo/.openclaw/state
+/home/silo/.openclaw/state/openclaw-quarantine.sqlite
+/home/silo/.openclaw/state/openclaw.sqlite
+/home/silo/.openclaw/state/openclaw.sqlite-shm
+/home/silo/.openclaw/state/openclaw.sqlite-wal
+/home/silo/.openclaw/state/openclaw.sqlite.seal
+/home/silo/.openclaw/tmp
+/home/silo/.openclaw/tmp/openclaw-1001
+/home/silo/.openclaw/workspace
+/home/silo/.openclaw/workspace/.git
+/home/silo/.openclaw/workspace/AGENTS.md
+/home/silo/.openclaw/workspace/BOOTSTRAP.md
+/home/silo/.openclaw/workspace/IDENTITY.md
+/home/silo/.openclaw/workspace/SOUL.md
+/home/silo/.openclaw/workspace/USER.md
+-- restart main so the autostart entry starts the gateway at boot
+[07:04:56] waiting 40 s
+  325 silo     openclaw-gatewa openclaw-gateway
+  384 silo     MainThread      /usr/bin/node /usr/lib/node_modules/openclaw/dist/process/spawn-broker/worker.js
+  461 silo     MainThread      /usr/bin/node /usr/lib/node_modules/openclaw/dist/process/spawn-broker/worker.js
+  513 silo     MainThread      /usr/bin/node /usr/lib/node_modules/openclaw/dist/infra/sqlite-readonly-location.worker.js --openclaw-sqlite-readonly-c
+gateway processes in main: 1
+[07:05:37] PASS  O1 the gateway runs in main as openclaw-gateway  -- 
+== O2 control fork of main (no recipe lists): the gateway comes up again, the files stay
+[07:05:52] waiting up to 150 s for the gateway to appear in the control fork
+[07:08:34] control fork: gateway seen after ~150 s (30 loops = not seen)
+quiet: applied; stopped: none; scrubbed: /etc/silo/guest-client.json; secrets: none
+[07:08:36] FAIL  O2 control: gateway runs in the fork (what quiet must prevent)  -- 
+-- control fork diagnostics
+ 06:08:36 up 2 min,  0 user,  load average: 0.03, 0.04, 0.01
+e2e-final-claw-ctl
+  802 silo     /usr/bin/dbus-daemon --syslog-only --fork --print-pid 5 --print-address 7 --session
+  803 silo     dbus-run-session -- startxfce4
+  804 silo     dbus-daemon --nofork --print-address 4 --session
+  805 silo     xfce4-session
+  824 silo     /usr/lib/aarch64-linux-gnu/xfce4/xfconf/xfconfd
+  831 silo     /usr/libexec/at-spi2-registryd --use-gnome-session
+  858 silo     xfce4-panel
+  912 silo     /usr/lib/aarch64-linux-gnu/xfce4/panel/wrapper-2.0 /usr/lib/aarch64-linux-gnu/xfce4/panel/plugins/libsystray.so 6 1
+  918 silo     /usr/lib/aarch64-linux-gnu/xfce4/panel/wrapper-2.0 /usr/lib/aarch64-linux-gnu/xfce4/panel/plugins/libactions.so 14 
+ 1953 silo     perl -e # Silo guest process supervisor. Arguments: TOKEN CWD PROGRAM [ARGUMENT...]. # Runs PROGRAM as the leader o
+ 1954 root     sudo bash -c uptime; hostname; ps -eo pid,user,args | grep -iE "[x]org|[x]vnc|session|[l]ightdm|[g]dm|[a]utostart|[
+ 1955 root     bash -c uptime; hostname; ps -eo pid,user,args | grep -iE "[x]org|[x]vnc|session|[l]ightdm|[g]dm|[a]utostart|[x]fce
+ 1959 root     grep -iE [x]org|[x]vnc|session|[l]ightdm|[g]dm|[a]utostart|[x]fce|[g]nome
+#!/bin/sh
+exec openclaw gateway
+
+/var/lib/silo-quiet:
+81ff7192-73cb-48a7-b9a3-fd07098bae63.machine-id
+81ff7192-73cb-48a7-b9a3-fd07098bae63.masked-timers.list
+81ff7192-73cb-48a7-b9a3-fd07098bae63.old-hostname
+applied-81ff7192-73cb-48a7-b9a3-fd07098bae63
+applied-dc80dc17-180a-4ba6-9b9d-8d2a1de2b1a7
+dc80dc17-180a-4ba6-9b9d-8d2a1de2b1a7.machine-id
+dc80dc17-180a-4ba6-9b9d-8d2a1de2b1a7.old-hostname
+disabled
+
+[07:08:36] PASS  O2 control: .env is carried (no scrub list)  -- 
+== O3 quiet fork: --recipe-file with quiet [openclaw-gateway, openclaw], scrub [/home/silo/.openclaw/credentials, /home/silo/.openclaw/.env]
+[07:08:55] PASS  O3 fork started  -- 
+[07:08:55] settle 45 s
+-- processes matching openclaw in the quiet fork:
+count=0
+quiet: applied; stopped: openclaw-gateway, openclaw; scrubbed: /home/silo/.openclaw/credentials, /home/silo/.openclaw/.env, /etc/silo/guest-client.json; secrets: none
+[07:09:42] PASS  O3 no openclaw gateway process in the fork  -- 
+[07:09:42] PASS  O3 scrub: credentials/ file and .env are gone in the fork  -- 
+[07:09:43] PASS  O3 main still has both  -- 
+-- the fork keeps the install and the baseline config: /usr/bin/openclaw config-present 
+[07:09:46] cleanup (e2e-final-* and main if this run made it)
+NAME                                STATE      KIND    SIZE
+workspace-1                         stopped    linux   8 cpu, 32 GiB
+e2e-relay                           stopped    linux   8 cpu, 32 GiB
+silo-eval-a                         stopped    linux   2 cpu, 2 GiB
+silo-eval-b                         stopped    linux   2 cpu, 2 GiB
+e2e-p3-macsrc-before-20261105-2253  stopped    macos   4 cpu, 8 GiB
+e2e-p3-macsrc                       stopped    macos   4 cpu, 8 GiB
+macOS VMs running: 0
+== summary (claw): 8 passed, 1 failed, 0 blocked

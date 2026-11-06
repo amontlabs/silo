@@ -19,6 +19,7 @@ cleanup() {
 }
 KEEP_MAIN=${KEEP_MAIN:-}
 trap cleanup EXIT
+for c in $(final_names); do say "dropping leftover $c"; drop_one "$c"; done
 for s in $SECTIONS; do
   case $s in
     header) echo "== header ($(date -u +%FT%TZ))"; header_facts;;

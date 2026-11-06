@@ -1,0 +1,5 @@
+e2e-final-demo-1  exit 0  http://3000.e2e-final-demo-1.silo.localhost:47383
+e2e-final-demo-2  exit 0  http://3000.e2e-final-demo-2.silo.localhost:47383
+e2e-final-demo-3  exit 0  http://3000.e2e-final-demo-3.silo.localhost:47383
+e2e-final-demo-4  exit 0  http://3000.e2e-final-demo-4.silo.localhost:47383
+4 forks of main; review with `silo diff <fork>`, keep with `silo fold <fork>`.

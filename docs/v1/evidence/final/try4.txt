@@ -1,0 +1,69 @@
+== O1 silo up --recipe openclaw (replaces our demo main)
+Building the recipe openclaw: 72s
+Building the recipe openclaw: 77s
+Making main from openclaw...
+Starting main...
+Starting main: 5s
+Checkpointing main...
+Checkpointing main: 5s
+main is running (made from openclaw). Warm checkpoint c24c05c7eb07a4e32a8ad15413ca76d9 saved. ssh main.silo-dev reaches it.
+[06:49:34] PASS  O1 silo up --recipe openclaw  -- 95.20s, includes the install (not a measurement)
+-- install
+PATH=/.msb/scripts:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+/usr/bin/openclaw
+OpenClaw 2026.11.1 (4ffdd20)
+v24.22.2
+ls: cannot access '/home/silo/.openclaw': No such file or directory
+[06:49:35] PASS  O1 openclaw is installed (on the working account's PATH)  -- 
+-- gateway service
+-rw-r--r-- 1 root root  141 Nov  6 05:49 openclaw-gateway.desktop
+[Desktop Entry]
+Type=Application
+Name=openclaw-gateway
+Exec=/usr/local/libexec/silo-services/openclaw-gateway
+X-GNOME-Autostart-enabled=true
+cat: /usr/local/bin/openclaw-gateway: No such file or directory
+[06:49:36] waiting 40 s for the autostart
+openclaw-matching processes: 0
+-- what the gateway says when run in the foreground (10 s)
+[gateway] startup phase: cli.bootstrap.admission.session-runtime-import 177.1ms total=856.5ms start=679.4ms
+[gateway] startup phase: cli.bootstrap.admission.agent-inventory starting total=856.5ms
+[gateway] startup phase: cli.bootstrap.admission.agent-inventory 0.4ms total=856.9ms start=856.5ms
+[gateway] startup phase: cli.bootstrap.admission.session-targets starting total=856.9ms
+[gateway] startup phase: cli.bootstrap.admission.session-targets 0.6ms total=857.6ms start=856.9ms agentCount=1 registeredDatabaseCount=0
+[gateway] startup phase: cli.bootstrap.admission.session-readiness starting total=857.6ms
+[gateway] startup phase: cli.bootstrap.admission.session-readiness 0.1ms total=857.7ms start=857.6ms targetCount=1
+[gateway] startup phase: cli.bootstrap.admission.workspace-runtime-import starting total=857.7ms
+[gateway] startup phase: cli.bootstrap.admission.workspace-runtime-import 2.1ms total=859.9ms start=857.7ms
+[gateway] startup phase: cli.bootstrap.admission.workspace-readiness starting total=859.9ms
+[gateway] startup phase: cli.bootstrap.admission.workspace-readiness 1.0ms total=861.0ms start=859.9ms agentCount=1
+Missing config. Run `openclaw setup` or set gateway.mode=local (or pass --allow-unconfigured).
+[gateway] startup phase: cli.bootstrap.admission.state-snapshot 352.1ms total=868.2ms start=516.0ms
+[gateway] startup phase: cli.command.config-ready 395.5ms total=894.1ms start=498.7ms
+[gateway] startup phase: cli.main.gateway-run-bootstrap 396.1ms total=894.2ms start=498.1ms failed
+exit=0
+-- where credentials and state live (names only)
+total 12
+drwxr-xr-x 2 silo silo 4096 Nov  6 05:50 .
+drwxr-xr-x 3 silo silo 4096 Nov  6 05:50 ..
+-rw-r--r-- 1 silo silo   28 Nov  6 05:50 final-test.json
+== O2 plain fork of main: quiet and scrub from the recipe main was made from
+[06:50:32] PASS  O2 fork started  -- 
+[06:50:32] fork settle 40 s
+-- fork processes matching openclaw:
+count=0
+quiet: applied; stopped: none; scrubbed: /etc/silo/guest-client.json; secrets: none
+[06:51:14] PASS  O2 no gateway process in the fork  -- 
+[06:51:14] FAIL  O2 scrub: ~/.openclaw/credentials/final-test.json is gone in the fork  -- 
+[06:51:14] PASS  O2 main still has it  -- 
+-- the fork keeps the install: /usr/bin/openclaw
+[06:51:18] cleanup (e2e-final-* and main if this run made it)
+NAME                                STATE      KIND    SIZE
+workspace-1                         stopped    linux   8 cpu, 32 GiB
+e2e-relay                           stopped    linux   8 cpu, 32 GiB
+silo-eval-a                         stopped    linux   2 cpu, 2 GiB
+silo-eval-b                         stopped    linux   2 cpu, 2 GiB
+e2e-p3-macsrc-before-20261105-2253  stopped    macos   4 cpu, 8 GiB
+e2e-p3-macsrc                       stopped    macos   4 cpu, 8 GiB
+macOS VMs running: 0
+== summary (claw): 5 passed, 1 failed, 0 blocked

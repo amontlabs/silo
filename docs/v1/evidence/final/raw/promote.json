@@ -1,0 +1,25 @@
+{
+  "report": {
+    "archive": "main-before-20261106-0933",
+    "checkpoint": "c2900e2ff840c4d9f84f47072cbc9600",
+    "fork": "e2e-final-gui",
+    "notes": [
+      "e2e-final-gui is now main. main was archived as main-before-20261106-0933; `silo undo main` swaps them back."
+    ],
+    "steps": [
+      "names",
+      "name-keyed settings",
+      "SSH access",
+      "lineage",
+      "quiet parking"
+    ],
+    "target": "main"
+  },
+  "ssh": {
+    "computer": "main",
+    "config": "/Users/polarzero/.silo-dev/ssh-hosts.conf",
+    "connect": "ssh main.silo-dev",
+    "host": "main.silo-dev"
+  },
+  "status": "promoted"
+}

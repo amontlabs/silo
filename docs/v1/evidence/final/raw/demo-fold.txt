@@ -1,0 +1,7 @@
+Keeping e2e-final-demo-1...
+Keeping e2e-final-demo-1: 5s
+Keeping e2e-final-demo-1: 10s
+Comparing e2e-final-demo-1 with when it was forked...
+Kept ea43ea10-2bc3-415c-89d8-db0c9b459e55 into fa3fb981-d9f4-4bfc-ba37-e373a46f3c52.
+  files: 1 written, 0 already identical
+Undo with `silo undo fa3fb981-d9f4-4bfc-ba37-e373a46f3c52`.
