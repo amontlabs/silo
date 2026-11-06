@@ -49,7 +49,7 @@ printf "[Desktop Entry]\nType=Application\nName=final-cron\nExec=sudo -n /usr/sb
 "$SILO" fork main --name $q --recipe-file "$PROJ/.silo/recipes/demo.yaml" > "$RAW/quiet-fork.out" 2>&1; "$SILO" start $q >/dev/null 2>&1; check "Q1 fork started" $([ "$(state $q)" = running ]; echo $?) ""
 say "settling 45 s, then watching 90 s"; sleep 45
 fh=$(xs $q hostname | head -1); mh=$(xs main hostname | head -1)
-cnt() { echo "poll=$(x $1 "grep -c '^$2 ' /var/tmp/final-poll.log 2>/dev/null || true") cron=$(x $1 "grep -c '^$2 ' /var/log/final-cron.log 2>/dev/null || true") pollers=$(x $1 'pgrep -fc "final/poller.py" || true') crond=$(x $1 'pgrep -xc cron || true')"; }
+cnt() { echo "poll=$(x $1 "grep -c '^$2 ' /var/tmp/final-poll.log 2>/dev/null || true") cron=$(x $1 "grep -c '^$2 ' /var/log/final-cron.log 2>/dev/null || true") pollers=$(x $1 'pgrep -fc "[f]inal/poller.py" || true') crond=$(x $1 'pgrep -xc cron || true')"; }
 b1=$(cnt $q "$fh"); m1=$(cnt main "$mh"); sleep 90; b2=$(cnt $q "$fh"); m2=$(cnt main "$mh")
 echo "fork $fh: before [$b1] after [$b2]"; echo "main $mh (control): before [$m1] after [$m2]"
 [ "$b1" = "$b2" ] && echo "$b2" | grep -q 'poll=0 cron=0 pollers=0'; check "Q1 fork wrote no poll or cron line and runs no poller" $? "[$b2]"
