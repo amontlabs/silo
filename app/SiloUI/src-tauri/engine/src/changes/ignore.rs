@@ -82,6 +82,21 @@ pub const BUILTIN_IGNORE: &str = "\
 *.abcddb-shm
 *.abcddb-wal
 
+# computer use: the driver's own state and caches, the guest helpers' receipts and logs, the
+# desktop session's settings and the macOS helper's receipt and recordings
+*/.local/share/cua-driver
+*/.cache/cua-driver
+*/.config/cua-driver/recordings
+/var/lib/silo-computer-use
+/var/lib/silo-desktop
+/tmp/silo-cu.*
+/tmp/cua-driver*
+*/.config/xfce4/xfconf
+*/.config/dconf/user
+*/Library/Application Support/Silo
+*/Library/Application Support/CuaDriver
+*/Library/Application Support/Cua Driver
+
 # agent session data
 */.claude/projects
 .claude.json.backup*
@@ -357,6 +372,30 @@ mod tests {
         let list = IgnoreList::builtin();
         assert!(list.matches("/Users/a/Movies/TV/TV Library.tvlibrary/library.tvdb"));
         assert!(!list.matches("/Users/a/Movies/film.mov"));
+    }
+
+    #[test]
+    fn computer_use_state_is_not_a_change() {
+        let list = IgnoreList::builtin();
+        for path in [
+            "/var/lib/silo-computer-use/receipt.json",
+            "/var/lib/silo-desktop/config.json",
+            "/var/log/silo-computer-use.log",
+            "/home/silo/.cache/cua-driver/shots/1.png",
+            "/home/silo/.local/share/cua-driver/trajectories/a/step.json",
+            "/home/silo/.config/xfce4/xfconf/xfce-perchannel-xml/displays.xml",
+            "/home/silo/.config/dconf/user",
+            "/home/silo/.Xauthority",
+            "/tmp/silo-cu.AbCd1234/helper",
+            "/Users/silo/Library/Application Support/Silo/computer-use-receipt.json",
+            "/Users/silo/Library/Application Support/Silo/Recordings/guest-screen.mov",
+            "/Users/silo/Library/Logs/silo-computer-use.log",
+            "/Users/silo/Library/Group Containers/group.com.apple.replayd/ScreenCaptureApprovals.plist",
+        ] {
+            assert!(list.matches(path), "{path} should be ignored");
+        }
+        assert!(!list.matches("/home/silo/project/src/main.rs"));
+        assert!(!list.matches("/home/silo/.config/Code/settings.json"));
     }
 
     #[test]
