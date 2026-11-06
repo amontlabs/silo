@@ -55,7 +55,7 @@ const MAX_ROWS: usize = 512;
 /// Longest text kept for a name, host, method or reason.
 const MAX_TEXT_CHARS: usize = 253;
 
-/// Text safe to show: control characters become `?` and the length is capped.
+/// Text for display: control characters become `?` and the length is capped.
 fn tidy(text: &str) -> String {
     text.chars()
         .take(MAX_TEXT_CHARS)
