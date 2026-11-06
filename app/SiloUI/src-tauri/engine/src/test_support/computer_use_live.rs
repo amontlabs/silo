@@ -152,7 +152,10 @@ impl Drop for Fixture {
     }
 }
 
+// Only tests: nothing in them is part of the `test-support` feature's API.
+#[cfg(test)]
 #[path = "computer_use_live/approval.rs"]
 mod approval;
+#[cfg(test)]
 #[path = "computer_use_live/driver.rs"]
 mod driver;

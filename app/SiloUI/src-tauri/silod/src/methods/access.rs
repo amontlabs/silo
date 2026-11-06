@@ -2807,6 +2807,8 @@ pub(crate) mod tests {
         assert_eq!(state["computers"], json!([{"computerId": MACOS_COMPUTER}]));
     }
 
+    // macOS computers are loaded only on an Apple silicon host.
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     #[tokio::test]
     async fn network_calls_for_a_macos_computer_go_to_the_macos_store() {
         const MACOS: &str = "66666666-6666-4666-8666-666666666666";

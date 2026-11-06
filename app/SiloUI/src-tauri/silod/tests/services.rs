@@ -149,7 +149,7 @@ impl SaveAdapter for Adapter {
 
     fn probe_original(
         &self,
-        computer: &RunningComputer,
+        _computer: &RunningComputer,
         _: &RuntimeIdentity,
     ) -> Result<OriginalState, String> {
         Ok(OriginalState::Held)
