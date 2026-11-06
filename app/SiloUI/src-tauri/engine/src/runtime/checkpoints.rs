@@ -861,8 +861,12 @@ fn capture_with_kind(
         "--group".into(),
         snapshot_group.clone(),
     ];
-    if scope == "full" {
+    let _bridge_hold = (scope == "full").then(|| {
+        let hold = crate::guest_client::hold_bridge(configuration.name());
         release_stale_share_entries(runner, paths, configuration.name());
+        hold
+    });
+    if scope == "full" {
         args.extend(["--full".into(), "--guest-flush".into(), "required".into()]);
     }
     args.push("--integrity".into());
@@ -874,7 +878,14 @@ fn capture_with_kind(
             }),
             "Verification failed",
         ),
-        Err(failure) => (Err(failure), "Checkpoint failed"),
+        Err(failure) => (
+            Err(explain_rejected_capture(
+                paths,
+                configuration.name(),
+                failure,
+            )),
+            "Checkpoint failed",
+        ),
     };
     match result {
         Ok(_) => {
@@ -2083,6 +2094,28 @@ fn release_stale_share_entries(runner: &dyn RuntimeRunner, paths: &RuntimePaths,
     let _ = runner.run(paths, &release_entries_args(name), Duration::from_secs(40));
 }
 
+/// What MicroSandbox says when the guest holds a file of the runtime share that the host removed
+/// and the guest cannot drop it (an open file keeps it): the capture cannot be made until the
+/// computer restarts.
+const REJECTED_BY_PEER: &str = "control operation rejected by peer";
+
+fn explain_rejected_capture(
+    paths: &RuntimePaths,
+    name: &str,
+    failure: RuntimeError,
+) -> RuntimeError {
+    let rejected = matches!(
+        &failure,
+        RuntimeError::Failed { detail, .. } if detail.contains(REJECTED_BY_PEER)
+    );
+    if rejected && crate::guest_client::spool_dir(&paths.home, name).exists() {
+        return error(
+            "The computer holds a file of the in-guest client that Silo has since removed, so its memory cannot be captured. Restart the computer and try again.",
+        );
+    }
+    failure
+}
+
 fn root_exec(name: &str, timeout: &str, command: &[&str]) -> Vec<String> {
     let mut args: Vec<String> = [
         "exec",
@@ -2831,6 +2864,11 @@ fn restore_steps(
     }
     let mut journal = record.restore_journal.clone().unwrap();
     if journal.phase == "capturing" {
+        let _bridge_hold = (journal.prior_running && inspected.status == "Running")
+            .then(|| crate::guest_client::hold_bridge(configuration.name()));
+        if journal.prior_running && inspected.status == "Running" {
+            release_stale_share_entries(runner, paths, configuration.name());
+        }
         if journal.prior_running
             && matches!(inspected.status.as_str(), "Stopped" | "Created" | "Crashed")
         {
@@ -2889,6 +2927,7 @@ fn restore_steps(
         args.push("--integrity".into());
         let capture = runner
             .run(paths, &args, Duration::from_secs(900))
+            .map_err(|failure| explain_rejected_capture(paths, configuration.name(), failure))
             .and_then(|_| {
                 verify_snapshot(runner, paths, &lineage_group, &journal.recovery_checkpoint)
             });

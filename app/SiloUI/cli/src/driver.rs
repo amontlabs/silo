@@ -54,6 +54,18 @@ pub struct Session {
     mapped: bool,
     /// Whether the request being handled has been written to the driver.
     sent: bool,
+    /// The longest side the agent last asked a screenshot for; a restarted driver maps with it.
+    last_side: Option<u32>,
+}
+
+/// Said in the answer of a click sent without the screenshot that maps its coordinates.
+const UNMAPPED_NOTE: &str = "Silo could not take the screenshot that maps coordinates before this call, so it was sent as it was. Take a screenshot and check the screen.";
+
+fn with_note(mut result: Value, note: &str) -> Value {
+    if let Some(content) = result.get_mut("content").and_then(Value::as_array_mut) {
+        content.push(json!({"type": "text", "text": note}));
+    }
+    result
 }
 
 enum Failure {
@@ -68,7 +80,6 @@ impl From<CliError> for Failure {
     }
 }
 
-/// Requests that change nothing, so repeating one on a new driver is harmless.
 /// Tools whose coordinates the driver maps from its latest screenshot back to the screen; a
 /// driver that has taken none reads them as screen pixels.
 fn needs_mapping(method: &str, params: &Value) -> bool {
@@ -79,6 +90,7 @@ fn needs_mapping(method: &str, params: &Value) -> bool {
         )
 }
 
+/// Requests that change nothing, so repeating one on a new driver is harmless.
 fn repeatable(method: &str, params: &Value) -> bool {
     method == "tools/list" || (method == "tools/call" && params["name"] == "get_desktop_state")
 }
@@ -139,6 +151,7 @@ impl Session {
         timeout: Duration,
     ) -> Result<Value, CliError> {
         self.shots += 1;
+        self.last_side = Some(max_side);
         let path = format!(
             "{SCREENSHOT_PREFIX}{}-{}.png",
             std::process::id(),
@@ -210,6 +223,7 @@ impl Session {
         if self.job.is_none() {
             self.start(engine, computer, timeout).await?;
         }
+        let mut unmapped = false;
         if needs_mapping(method, params) && !self.mapped {
             // The first coordinate call before any screenshot: take one now, so coordinates
             // read off the screenshots the agent sees map the same way as later ones.
@@ -219,21 +233,34 @@ impl Session {
                 std::process::id(),
                 self.shots
             );
+            let side = self.last_side.unwrap_or(crate::usetools::DEFAULT_MAX_SIDE);
             let mapping = json!({"name": "get_desktop_state",
-                "arguments": {"max_image_dimension": crate::usetools::DEFAULT_MAX_SIDE, "screenshot_out_file": path}});
+                "arguments": {"max_image_dimension": side, "screenshot_out_file": path}});
             let taken = self
                 .call(engine, computer, "tools/call", &mapping, timeout)
                 .await;
             remove_file(engine, computer, &path).await;
-            taken?;
-            self.mapped = true;
+            match taken {
+                Ok(_) => self.mapped = true,
+                // The driver is gone: the caller starts it again. Anything else leaves the click
+                // to be sent unmapped, with a note in its answer.
+                Err(Failure::Exited) => return Err(Failure::Exited),
+                Err(Failure::Other(_)) => unmapped = true,
+            }
         }
         self.sent = false;
         let result = self.call(engine, computer, method, params, timeout).await?;
         if method == "tools/call" && params["name"] == "get_desktop_state" {
             self.mapped = true;
+            if let Some(side) = params["arguments"]["max_image_dimension"].as_u64() {
+                self.last_side = u32::try_from(side).ok();
+            }
         }
-        Ok(result)
+        Ok(if unmapped {
+            with_note(result, UNMAPPED_NOTE)
+        } else {
+            result
+        })
     }
 
     async fn start(
@@ -494,6 +521,13 @@ async fn remove_file(engine: &Engine, computer: &Computer, path: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_note_is_added_to_the_text_of_a_result() {
+        let result = with_note(json!({"content": [{"type": "text", "text": "ok"}]}), "note");
+        assert_eq!(result["content"][1]["text"], "note");
+        assert_eq!(with_note(json!({}), "note"), json!({}));
+    }
 
     #[test]
     fn only_coordinate_tools_need_a_screenshot_first() {

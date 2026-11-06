@@ -737,28 +737,52 @@ class Registration(Guest):
             'type': 'stdio', 'command': str(cu.LAUNCHER), 'args': [],
             'env': {'CUA_DRIVER_RS_TELEMETRY_ENABLED': '0', 'CUA_DRIVER_RS_UPDATE_CHECK': 'false'}})
 
+    def repaired(self):
+        """Runs the root repair with every owner reported as root; returns the chown calls."""
+        owner = mock.Mock(pw_uid=1000, pw_gid=1000)
+        real_stat, real_fstat = os.stat, os.fstat
+        class Root:
+            def __init__(self, info):
+                self.st_uid, self.st_mode = 0, info.st_mode
+        calls = []
+        def stat_as_root(path, *args, **kwargs):
+            return Root(real_stat(path, *args, **kwargs))
+        with mock.patch.object(cu.os, 'geteuid', return_value=0), \
+                mock.patch.object(cu.pwd, 'getpwnam', return_value=owner), \
+                mock.patch.object(cu, 'HOME', str(self.claude_state.parent)), \
+                mock.patch.object(cu.os, 'stat', stat_as_root), \
+                mock.patch.object(cu.os, 'fstat', lambda fd: Root(real_fstat(fd))), \
+                mock.patch.object(cu.os, 'fchown', lambda fd, uid, gid: calls.append(('dir', uid, gid))), \
+                mock.patch.object(cu.os, 'chown', lambda name, uid, gid, **kw: calls.append((name, uid, gid, kw))):
+            cu.repair_agent_files()
+        return calls
+
     def test_root_owned_agent_files_and_directories_are_given_back_to_the_account(self):
         self.claude_settings.parent.mkdir(parents=True)
         self.claude_settings.write_text('{}')
         self.codex.parent.mkdir(parents=True)
         self.codex.write_text('')
-        owner = mock.Mock(pw_uid=1000, pw_gid=1000)
-        real = os.lstat
-        class Root:
-            def __init__(self, info):
-                self.st_uid, self.st_mode = 0, info.st_mode
-        chowned = []
-        with mock.patch.object(cu.os, 'geteuid', return_value=0), \
-                mock.patch.object(cu.pwd, 'getpwnam', return_value=owner), \
-                mock.patch.object(cu, 'HOME', str(self.claude_state.parent)), \
-                mock.patch.object(Path, 'lstat', lambda path: Root(real(path))), \
-                mock.patch.object(cu.os, 'lchown', lambda path, uid, gid: chowned.append((Path(path), uid, gid))):
-            cu.repair_agent_files()
-        paths = {path for path, _, _ in chowned}
-        for expected in (self.claude_settings, self.claude_settings.parent, self.codex, self.codex.parent):
-            self.assertIn(expected, paths)
-        self.assertNotIn(self.claude_state.parent, paths)
-        self.assertTrue(all((uid, gid) == (1000, 1000) for _, uid, gid in chowned))
+        calls = self.repaired()
+        self.assertEqual([call for call in calls if call[0] == 'dir'], [('dir', 1000, 1000)] * 2)
+        files = [call for call in calls if call[0] != 'dir']
+        self.assertEqual({call[0] for call in files}, {'settings.json', 'config.toml'})
+        for _, uid, gid, kwargs in files:
+            self.assertEqual((uid, gid), (1000, 1000))
+            self.assertIs(kwargs['follow_symlinks'], False)
+            self.assertIsInstance(kwargs['dir_fd'], int)
+
+    def test_a_symlinked_parent_is_not_followed_by_the_root_repair(self):
+        outside = Path(tempfile.mkdtemp())
+        (outside / 'config.toml').write_text('')
+        self.claude_settings.parent.mkdir(parents=True)
+        self.claude_settings.write_text('{}')
+        self.codex.parent.symlink_to(outside, target_is_directory=True)
+        calls = self.repaired()
+        names = {call[0] for call in calls}
+        self.assertNotIn('config.toml', names)
+        self.assertEqual([call for call in calls if call[0] == 'dir'], [('dir', 1000, 1000)])
+        self.assertIn('settings.json', names)
+        self.assertEqual((outside / 'config.toml').stat().st_uid, os.getuid())
 
     def test_codex_gets_the_same_server_in_its_own_section(self):
         cu.apply('auto')

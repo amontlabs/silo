@@ -67,8 +67,8 @@ silo guest-client install main --agent openclaw --binary ~/.silo/guest/silo
 3. With `--binary`, the binary goes first (below); a failed upload stops the install before any token exists.
    The CLI then writes `/etc/silo/guest-client.json` as root in the computer (`0640`, group `silo`, or
    `0600` when there is no such group; `--group` names another). If writing the file fails the
-   token is revoked. The binary is uploaded to a new folder under `/workspace` that root creates for
-   the working account, copied into a folder only root can enter, checked there and installed at
+   token is revoked. The binary is uploaded to a new folder in the sticky `/tmp` that root creates (`mkdir` fails on an
+   existing name, a link included) and hands to the working account, copied into a folder only root can enter, checked there and installed at
    `/usr/local/bin/silo` from there.
 
 `silo guest-client status main` and `silo guest-client revoke main` read and remove the token.
@@ -164,11 +164,15 @@ user's, so a guest user other than root could not reach `silo-bridge`. The engin
 stat override (`user.msb.override_stat`, 20 bytes: version 1, uid, gid, mode, rdev, as in
 MicroSandbox's `passthroughfs/stat_override.rs`) on the runtime folder to root, `0711`, so any guest user
 can search it but not list it, and on `silo-bridge` (`0755`), `req/` (`1733`) and `resp/` (`0711`) so
-the guest sees them owned by root. Everything else in the runtime folder keeps the mode the guest
-already saw. The override changes what the guest is shown, not what the host file allows, and it is
-set only on folders the engine created; nothing on the host follows a path the guest names. The
-runtime folder's search permission also lets a non-root user reach `/.msb/rootfs/...`, which is the
-same files the guest's own root file system already shows it.
+the guest sees them owned by root. Every other entry in the runtime folder (`root-disk.json`, `rootfs`, scripts,
+certificates) is shown as root's too, `0700` for folders and `0600` for files, so the search permission reaches nothing
+but the bridge. MicroSandbox writes `root-disk.json` with the host umask (`0666`) and replaces it
+at start, restore and rename, so the bridge worker applies the overrides again on every pass (about
+every 300 ms), and a guest user could in principle touch a file during the moments before that.
+Making the runtime create it `0600` is an upstream request
+([draft](v1/upstream/msb-virtiofs-unlinked-checkpoint.md)); a separate share for the bridge would
+need a mount a running computer cannot get without a restart, so it was not chosen. The override changes what the guest is shown, not what the host file allows, and it is
+set only on the runtime folder, its entries and the bridge folders; nothing on the host follows a path the guest names.
 Host files otherwise show the host user's identity, so an answer would not be readable to a non-root
 agent. The engine therefore reads the override the guest wrote on the request file (the agent user's
 uid and gid) and writes the answer with an override naming that user, mode `0600`. The client writes
@@ -186,8 +190,12 @@ rejected by peer") when the host removed one of them, so a fork or a promote of 
 failed after its first bridge call, until the computer restarted. Before a full checkpoint of a
 running computer that has a bridge folder, the engine runs `sync; echo 2 > /proc/sys/vm/drop_caches`
 in it as root, which makes the guest forget its cached entries; the call is best effort, and a
-checkpoint that still fails reports its own error. Disk-only checkpoints of a stopped computer are not
-affected.
+checkpoint that still fails reports its own error. The same runs before the full capture a Restore
+makes of a running computer, before it pauses. While either capture runs the bridge worker neither takes
+requests nor answers (a per-computer hold), so no file is removed after the guest dropped its entries.
+A guest process that holds a removed file open pins it; the capture then fails and the message says to
+restart the computer. Disk-only checkpoints of a stopped computer are not affected. The upstream issue is
+drafted in [msb-virtiofs-unlinked-checkpoint.md](v1/upstream/msb-virtiofs-unlinked-checkpoint.md).
 
 ## Open items
 

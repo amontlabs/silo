@@ -207,24 +207,33 @@ fn plan_steps(macos: bool) -> Vec<Step> {
 /// The longest a computer name may be.
 const NAME_LIMIT: usize = 32;
 
-/// `main-before-<stamp>`, with a number added when the name is taken. A long name is shortened
-/// so the result is still a valid computer name.
+/// `main-before-<stamp>`, with a number added when the name is taken. The target's part is
+/// shortened as far as it takes, whatever the number, so the result is at most [`NAME_LIMIT`]
+/// characters; a target name with nothing left of it (only dashes, or empty) becomes `computer`.
 fn archive_name(env: &dyn PromoteEnv, target_name: &str) -> String {
     let tail = format!("-before-{}", env.stamp());
-    // Room for a `-NN` that tells two archives apart.
-    let room = NAME_LIMIT.saturating_sub(tail.len() + 3).max(1);
-    let head = target_name
-        .chars()
-        .take(room)
-        .collect::<String>()
-        .trim_end_matches('-')
-        .to_owned();
-    let base = format!("{head}{tail}");
-    let mut name = base.clone();
+    let build = |suffix: &str| {
+        let room = NAME_LIMIT.saturating_sub(tail.len() + suffix.len());
+        let shorten = |text: &str| {
+            text.chars()
+                .take(room)
+                .collect::<String>()
+                .trim_end_matches('-')
+                .to_owned()
+        };
+        let mut head = shorten(target_name);
+        if head.is_empty() {
+            head = shorten("computer");
+        }
+        let name = format!("{head}{tail}{suffix}");
+        let name: String = name.chars().take(NAME_LIMIT).collect();
+        name.trim_start_matches('-').to_owned()
+    };
+    let mut name = build("");
     let mut n = 1;
     while env.name_in_use(&name) {
         n += 1;
-        name = format!("{base}-{n}");
+        name = build(&format!("-{n}"));
     }
     name
 }

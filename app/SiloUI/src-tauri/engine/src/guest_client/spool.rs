@@ -55,6 +55,11 @@ fn override_bytes(uid: u32, gid: u32, mode: u32) -> [u8; 20] {
 
 /// The owner a guest user's file carries in its override, when it has one.
 fn read_owner(fd: &OwnedFd) -> Option<(u32, u32)> {
+    read_override(fd).map(|(uid, gid, _)| (uid, gid))
+}
+
+/// The owner, group and mode an override names, when the file has one.
+fn read_override(fd: &OwnedFd) -> Option<(u32, u32, u32)> {
     use rustix::fd::AsRawFd;
     let mut buf = [0u8; 20];
     // SAFETY: the buffer is 20 bytes and the descriptor is open.
@@ -82,7 +87,7 @@ fn read_owner(fd: &OwnedFd) -> Option<(u32, u32)> {
         return None;
     }
     let word = |at: usize| u32::from_ne_bytes([buf[at], buf[at + 1], buf[at + 2], buf[at + 3]]);
-    Some((word(4), word(8)))
+    Some((word(4), word(8), word(12)))
 }
 
 /// Makes the guest see `fd` as owned by `uid:gid` with `mode`. Best effort: a host file system
@@ -169,6 +174,42 @@ fn sub(parent: &OwnedFd, name: &str, create: Option<u16>) -> Result<OwnedFd, Str
     Ok(fd)
 }
 
+/// The most runtime entries sealed in one pass.
+const SEAL_LIMIT: usize = 256;
+
+/// The runtime folder is `0700` on the host and the guest sees it as that user's, so a guest user
+/// other than root could not reach `silo-bridge`. Show it as root's with search permission only,
+/// and show every other entry in it as root's and private (`0700` folders, `0600` files), so the
+/// search permission reaches nothing but the bridge. MicroSandbox writes files here with the host
+/// umask (`root-disk.json` is `0666`) and replaces them, so this runs again whenever it may have.
+fn seal_runtime(root: &OwnedFd) {
+    write_override(root, 0, 0, S_IFDIR | 0o711);
+    let Ok(listing) = Dir::read_from(root) else {
+        return;
+    };
+    for entry in listing.flatten().take(SEAL_LIMIT) {
+        let bytes = entry.file_name().to_bytes();
+        if matches!(bytes, b"." | b"..") || bytes == BRIDGE_NAME.as_bytes() {
+            continue;
+        }
+        let Ok(fd) = openat(
+            root,
+            entry.file_name(),
+            OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC,
+            Mode::empty(),
+        ) else {
+            continue;
+        };
+        match fstat(&fd).map(|stat| FileType::from_raw_mode(stat.st_mode)) {
+            Ok(FileType::Directory) => write_override(&fd, 0, 0, S_IFDIR | 0o700),
+            Ok(FileType::RegularFile) => write_override(&fd, 0, 0, S_IFREG | 0o600),
+            _ => {}
+        }
+    }
+}
+
+const BRIDGE_NAME: &str = "silo-bridge";
+
 struct Dirs {
     req: OwnedFd,
     resp: OwnedFd,
@@ -197,10 +238,7 @@ impl Spool {
         let root = openat(CWD, runtime, dir_flags(), Mode::empty())
             .map_err(|error| format!("Cannot open the runtime folder: {error}"))?;
         if create {
-            // The runtime folder is `0700` on the host and the guest sees it as that user's, so a
-            // guest user other than root could not reach `silo-bridge`. Show it as root's with
-            // search permission only: everything else in it keeps its own mode and is not listed.
-            write_override(&root, 0, 0, S_IFDIR | 0o711);
+            seal_runtime(&root);
         }
         let bridge = sub(&root, name, create.then_some(0o755))?;
         // The guest writes requests it cannot list (sticky, no read); answers are named by the
@@ -209,6 +247,18 @@ impl Spool {
             req: sub(&bridge, "req", create.then_some(0o1733))?,
             resp: sub(&bridge, "resp", create.then_some(0o711))?,
         })
+    }
+
+    /// Shows the runtime folder's other entries as private to root again. Cheap; the worker runs
+    /// it every pass, since MicroSandbox recreates the folder and rewrites its files at start,
+    /// restore and rename. Does nothing for a runtime folder that does not exist.
+    pub fn seal(&self) {
+        let Some(runtime) = self.dir.parent() else {
+            return;
+        };
+        if let Ok(root) = openat(CWD, runtime, dir_flags(), Mode::empty()) {
+            seal_runtime(&root);
+        }
     }
 
     /// Creates `silo-bridge/{req,resp}` when missing with their modes. Each must be a real folder.
@@ -461,15 +511,65 @@ mod tests {
             use rustix::fd::AsRawFd;
             #[cfg(target_os = "macos")]
             let read = unsafe {
-                libc::fgetxattr(runtime.as_raw_fd(), OVERRIDE_KEY.as_ptr(), buf.as_mut_ptr().cast(), 20, 0, 0)
+                libc::fgetxattr(
+                    runtime.as_raw_fd(),
+                    OVERRIDE_KEY.as_ptr(),
+                    buf.as_mut_ptr().cast(),
+                    20,
+                    0,
+                    0,
+                )
             };
             #[cfg(not(target_os = "macos"))]
             let read = unsafe {
-                libc::fgetxattr(runtime.as_raw_fd(), OVERRIDE_KEY.as_ptr(), buf.as_mut_ptr().cast(), 20)
+                libc::fgetxattr(
+                    runtime.as_raw_fd(),
+                    OVERRIDE_KEY.as_ptr(),
+                    buf.as_mut_ptr().cast(),
+                    20,
+                )
             };
             assert_eq!(read, 20);
-            assert_eq!(u32::from_ne_bytes(buf[12..16].try_into().unwrap()), S_IFDIR | 0o711);
+            assert_eq!(
+                u32::from_ne_bytes(buf[12..16].try_into().unwrap()),
+                S_IFDIR | 0o711
+            );
         }
+    }
+
+    #[test]
+    fn sealing_makes_every_other_runtime_entry_private_to_root_and_leaves_the_bridge() {
+        let (dir, spool) = spool();
+        let runtime = dir.path().join("runtime");
+        fs::write(runtime.join("root-disk.json"), "{}").unwrap();
+        fs::set_permissions(
+            runtime.join("root-disk.json"),
+            fs::Permissions::from_mode(0o666),
+        )
+        .unwrap();
+        fs::create_dir(runtime.join("rootfs")).unwrap();
+        std::os::unix::fs::symlink("/etc", runtime.join("link")).unwrap();
+        spool.seal();
+        let shown = |part: &str| {
+            let fd = openat(CWD, runtime.join(part), OFlags::RDONLY, Mode::empty()).unwrap();
+            read_override(&fd)
+        };
+        // Skips on a file system without extended attributes, where nothing is overridden.
+        if shown("rootfs").is_none() {
+            return;
+        }
+        assert_eq!(shown("root-disk.json"), Some((0, 0, S_IFREG | 0o600)));
+        assert_eq!(shown("rootfs"), Some((0, 0, S_IFDIR | 0o700)));
+        assert_eq!(shown("silo-bridge"), Some((0, 0, S_IFDIR | 0o755)));
+        assert!(
+            read_override(&openat(CWD, "/etc", OFlags::RDONLY, Mode::empty()).unwrap()).is_none()
+        );
+        // A file MicroSandbox replaced is sealed again by the next pass.
+        fs::remove_file(runtime.join("root-disk.json")).unwrap();
+        fs::write(runtime.join("root-disk.json"), "{}").unwrap();
+        assert_eq!(shown("root-disk.json"), None);
+        spool.seal();
+        assert_eq!(shown("root-disk.json"), Some((0, 0, S_IFREG | 0o600)));
     }
 
     #[test]

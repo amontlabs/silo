@@ -86,6 +86,9 @@ pub(super) fn complete_with(
 pub(super) fn apply_outcome(record: &mut store::Record, outcome: &Outcome) {
     record.first_boot = false;
     record.inherited_access = false;
+    // The guest's receipt is the source's. The next update writes the fork's own, and the
+    // computer is not reported ready before it.
+    record.computer_use_version = None;
     record.secure_token_missing = outcome.secure_token_missing;
     if let Some(quiet) = record.quiet.as_mut() {
         quiet.applied = true;
@@ -430,6 +433,8 @@ mod tests {
             saved.setup_version.as_deref(),
             Some("changed while the boot ran")
         );
+        // The source's receipt is not the fork's: its own update runs after the first Start.
+        assert!(saved.computer_use_stale());
         let quiet = saved.quiet.unwrap();
         assert!(quiet.applied);
         assert_eq!(quiet.parked, ["/Library/LaunchAgents/a.plist"]);
