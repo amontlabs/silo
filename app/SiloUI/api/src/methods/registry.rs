@@ -175,6 +175,9 @@ define_registry! {
     GuestFilesWatch => ("guest.files.watch", Subscription, guest::GuestFilesWatchParams, guest::GuestFilesWatchResult);
     GuestFilesWrite => ("guest.files.write", Command, guest::GuestFilesWriteParams, guest::GuestFilesWriteResult);
     GuestPrepare => ("guest.prepare", Command, guest::GuestPrepareParams, guest::GuestPrepareResult);
+    GuestClientEnable => ("guestClient.enable", Command, guest_client::GuestClientEnableParams, guest_client::GuestClientEnableResult);
+    GuestClientRevoke => ("guestClient.revoke", Command, guest_client::GuestClientComputerParams, guest_client::GuestClientStatus);
+    GuestClientStatus => ("guestClient.status", Query, guest_client::GuestClientComputerParams, guest_client::GuestClientStatus);
     GuestSsh => ("guest.ssh", Stream, guest::GuestSshParams, ());
     GuestSshAliasEnsure => ("guest.sshAlias.ensure", Command, guest::GuestSshAliasEnsureParams, guest::GuestSshAliasEnsureResult);
     GuestSshAliasRemove => ("guest.sshAlias.remove", Command, guest::GuestSshAliasRemoveParams, ());
@@ -242,20 +245,20 @@ mod tests {
 
     #[test]
     fn registry_covers_every_canonical_method_and_kind() {
-        assert_eq!(METHOD_REGISTRY.len(), 166);
+        assert_eq!(METHOD_REGISTRY.len(), 169);
         assert_eq!(
             METHOD_REGISTRY
                 .iter()
                 .filter(|m| m.kind == MethodKind::Query)
                 .count(),
-            52
+            53
         );
         assert_eq!(
             METHOD_REGISTRY
                 .iter()
                 .filter(|m| m.kind == MethodKind::Command)
                 .count(),
-            68
+            70
         );
         assert_eq!(
             METHOD_REGISTRY

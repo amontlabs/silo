@@ -5346,6 +5346,119 @@
       ],
       "type": "object"
     },
+    "GuestClientComputerParams": {
+      "properties": {
+        "computerId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "computerId"
+      ],
+      "type": "object"
+    },
+    "GuestClientEnableParams": {
+      "properties": {
+        "computerId": {
+          "type": "string"
+        },
+        "policy": {
+          "$ref": "#/$defs/GuestClientPolicy"
+        }
+      },
+      "required": [
+        "computerId",
+        "policy"
+      ],
+      "type": "object"
+    },
+    "GuestClientEnableResult": {
+      "description": "The token is shown here once; the engine keeps only its hash.",
+      "properties": {
+        "computerId": {
+          "type": "string"
+        },
+        "mintedAt": {
+          "type": "string"
+        },
+        "spoolDir": {
+          "type": "string"
+        },
+        "token": {
+          "type": "string"
+        },
+        "tokenPath": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "computerId",
+        "token",
+        "tokenPath",
+        "spoolDir",
+        "mintedAt"
+      ],
+      "type": "object"
+    },
+    "GuestClientPolicy": {
+      "description": "What the project settings allow the agent, resolved on the host when the token is\nminted (the engine has no project folder of its own).",
+      "properties": {
+        "agent": {
+          "description": "The agent name the settings were resolved for.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "fold": {
+          "description": "`ask` or `auto-code`. The in-guest client never keeps either way.",
+          "type": "string"
+        },
+        "forkSecrets": {
+          "default": [],
+          "description": "Secret names (`github` included) a fork made from inside may name. Empty by default.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "fold"
+      ],
+      "type": "object"
+    },
+    "GuestClientStatus": {
+      "properties": {
+        "computerId": {
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "mintedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "policy": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GuestClientPolicy"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "computerId",
+        "enabled"
+      ],
+      "type": "object"
+    },
     "GuestEnvVar": {
       "properties": {
         "name": {
@@ -7837,6 +7950,9 @@
         "guest.files.watch",
         "guest.files.write",
         "guest.prepare",
+        "guestClient.enable",
+        "guestClient.revoke",
+        "guestClient.status",
         "guest.ssh",
         "guest.sshAlias.ensure",
         "guest.sshAlias.remove",
@@ -9665,6 +9781,54 @@
             },
             "params": {
               "$ref": "#/$defs/GuestPrepareParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "guestClient.enable",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/GuestClientEnableParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "guestClient.revoke",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/GuestClientComputerParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "guestClient.status",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/GuestClientComputerParams"
             }
           },
           "required": [
@@ -12334,6 +12498,54 @@
             },
             "result": {
               "$ref": "#/$defs/GuestPrepareResult"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "guestClient.enable",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/GuestClientEnableResult"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "guestClient.revoke",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/GuestClientStatus"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "guestClient.status",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/GuestClientStatus"
             }
           },
           "required": [
@@ -17317,6 +17529,24 @@
       "name": "guest.prepare",
       "paramsType": "guest::GuestPrepareParams",
       "resultType": "guest::GuestPrepareResult"
+    },
+    {
+      "kind": "command",
+      "name": "guestClient.enable",
+      "paramsType": "guest_client::GuestClientEnableParams",
+      "resultType": "guest_client::GuestClientEnableResult"
+    },
+    {
+      "kind": "command",
+      "name": "guestClient.revoke",
+      "paramsType": "guest_client::GuestClientComputerParams",
+      "resultType": "guest_client::GuestClientStatus"
+    },
+    {
+      "kind": "query",
+      "name": "guestClient.status",
+      "paramsType": "guest_client::GuestClientComputerParams",
+      "resultType": "guest_client::GuestClientStatus"
     },
     {
       "kind": "stream",
