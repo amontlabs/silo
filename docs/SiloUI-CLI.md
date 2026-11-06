@@ -4,6 +4,23 @@
 `app/SiloUI/cli` (crate `silo-cli`, binary `silo`) and talks to `engine.sock` with
 `silo-client`, using the typed request constructors from `silo-api`.
 
+## Install
+
+The Silo app carries `silo` at `Contents/MacOS/silo` (built from this crate in the same
+profile as the app, signed with hardened runtime and no entitlements, and copied next to the
+engine). When Silo links its helpers into `~/.local/bin` (the step that turns on Connections,
+repeated at every launch while Connections are on), it also links the command there:
+
+| Build | Link in `~/.local/bin` |
+| --- | --- |
+| Silo (production) | `silo` |
+| Silo Dev | `silo-dev` |
+
+The names come from `host/src/channel.rs` (`cli_link_name`); a Dev build never touches the
+production link. Silo replaces only a link it made earlier. A file or link of your own with the
+same name is left alone, and Connections still turn on. Put `~/.local/bin` on `PATH`. Without
+the app, build the crate with `cargo build --release -p silo-cli`.
+
 ## Choices
 
 | Need | Choice |

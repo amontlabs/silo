@@ -542,7 +542,10 @@ fn select_bridge_target(app_image: Option<PathBuf>, current: PathBuf) -> Result<
 /// Silo made earlier: one to an executable with the same name, a Silo AppImage, or a
 /// link whose target is gone (an old AppImage mount or a moved app).
 fn link_bridge(home: &Path, target: &Path) -> Result<(), String> {
-    let name = crate::channel::current().remote_bridge_name();
+    link_helper(home, crate::channel::current().remote_bridge_name(), target)
+}
+/// The same link for any helper under `~/.local/bin`, such as the bridge or the `silo` command.
+fn link_helper(home: &Path, name: &str, target: &Path) -> Result<(), String> {
     let path = home.join(".local/bin").join(name);
     fs::create_dir_all(path.parent().ok_or("Home unavailable.")?).map_err(|e| e.to_string())?;
     if let Ok(existing) = fs::symlink_metadata(&path) {
@@ -570,7 +573,7 @@ fn link_bridge(home: &Path, target: &Path) -> Result<(), String> {
             });
         if !ours {
             return Err(format!(
-                "~/.local/bin/{name} already exists. Choose a different name for that file before turning on Connections."
+                "~/.local/bin/{name} already exists. Choose a different name for that file before Silo links it."
             ));
         }
         if previous.as_deref() == Some(target) {
@@ -586,7 +589,22 @@ fn link_bridge(home: &Path, target: &Path) -> Result<(), String> {
     Ok(())
 }
 fn link_bridge_for_this_account() -> Result<(), String> {
-    link_bridge(&current_home()?, &bridge_target()?)
+    let home = current_home()?;
+    link_bridge(&home, &bridge_target()?)?;
+    // The command line is a convenience: a file of the user's own named `silo` must not stop Connections.
+    if let Err(error) = link_cli(&home, &bridge_target()?) {
+        eprintln!("The silo command is not on PATH: {error}");
+    }
+    Ok(())
+}
+/// Links the channel's `silo` name (`silo` in production, `silo-dev` in development) to the
+/// command line the app carries beside the engine; an engine without one (a plain
+/// `cargo run`) links nothing.
+fn link_cli(home: &Path, engine: &Path) -> Result<(), String> {
+    let Some(cli) = engine.parent().map(|dir| dir.join("silo")).filter(|cli| cli.is_file()) else {
+        return Ok(());
+    };
+    link_helper(home, crate::channel::current().cli_link_name(), &cli)
 }
 pub async fn set_connections_enabled(enabled: bool) -> Result<ConnectionsStatus, String> {
     settings_io(move || {
@@ -5688,6 +5706,30 @@ mod bridge_link_tests {
         assert!(link_bridge(home.path(), &target)
             .unwrap_err()
             .contains("already exists"));
+        assert_eq!(fs::read(&link).unwrap(), b"mine");
+    }
+
+    #[test]
+    fn the_cli_link_uses_the_channel_name_and_keeps_a_users_own_silo() {
+        let _test_state = crate::test_support::global_state();
+        let home = tempfile::tempdir().unwrap();
+        let apps = tempfile::tempdir().unwrap();
+        let engine = apps.path().join("silod");
+        executable(&engine);
+        // An engine without a command line beside it links nothing.
+        link_cli(home.path(), &engine).unwrap();
+        assert!(!home.path().join(".local/bin").exists());
+        let cli = apps.path().join("silo");
+        executable(&cli);
+        link_cli(home.path(), &engine).unwrap();
+        let link = home
+            .path()
+            .join(".local/bin")
+            .join(crate::channel::current().cli_link_name());
+        assert_eq!(fs::read_link(&link).unwrap(), cli);
+        fs::remove_file(&link).unwrap();
+        fs::write(&link, b"mine").unwrap();
+        assert!(link_cli(home.path(), &engine).is_err());
         assert_eq!(fs::read(&link).unwrap(), b"mine");
     }
 

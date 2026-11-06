@@ -25,6 +25,10 @@ Workflow artifacts (7-day retention, not release assets):
 
 The DMG and archive are Developer ID signed and notarized only in `developer-id` mode (every draft). Local builds and `dry_run` stay ad-hoc signed.
 
+## The `silo` command in the app
+
+`build_desktop.py` builds `silo-cli` with `silod` (same profile) and copies `silo` to `Silo.app/Contents/MacOS/silo`. `sign_helpers` signs it (hardened runtime, no entitlements, identifier `org.silo.cli`), `embed_engine.py` copies it beside `silod`, and `verify_bundle` and `verify_engine_contents` fail the build when it is missing, unsigned for the hardened runtime, or carries entitlements. The app links it as `~/.local/bin/silo` (`silo-dev` for Silo Dev); see [the CLI guide](../../SiloUI-CLI.md#install). It is inside the DMG and the updater archive, not a separate release asset.
+
 ## Publish Silo engine (`engine-release.yml`, tag `engine-v*` or dispatch from `main`)
 
 Workflow artifact `silo-engine`, then GitHub release `engine-v<version>` (not marked latest):
