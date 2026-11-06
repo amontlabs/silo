@@ -669,6 +669,15 @@ impl UpdateState {
         inner.deadline = None;
     }
 
+    /// Whether the shutdown under way stops this device's computers (rather than releasing a
+    /// prepared update's saved set or leaving runtimes detached).
+    pub fn shutdown_stops_computers(&self) -> bool {
+        self.lock()
+            .shutdown
+            .as_ref()
+            .is_some_and(|active| active.mode == ShutdownMode::Stop)
+    }
+
     /// The absolute deadline of a session-end shutdown, if one is under way.
     pub fn deadline(&self) -> Option<Instant> {
         self.lock().deadline

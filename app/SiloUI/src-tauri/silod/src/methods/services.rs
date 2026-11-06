@@ -277,14 +277,25 @@ fn engine_shutdown(
 /// The shutdown job: the outcome is durable before the process exits, and the process exits
 /// only after a shutdown that succeeded (or a session end, which never cancels).
 fn run_shutdown(context: &Arc<SilodContext>, state: &UpdateState, job: Option<JobId>) {
+    run_shutdown_then(context, state, job, || 0)
+}
+
+/// `run_shutdown`, exiting with the code `exit_code` returns once the shutdown has finished.
+fn run_shutdown_then(
+    context: &Arc<SilodContext>,
+    state: &UpdateState,
+    job: Option<JobId>,
+    exit_code: impl FnOnce() -> i32,
+) {
     match state.run_shutdown() {
         Ok(()) => {
             if let Some(job) = job {
                 finish_result(context, job, Value::Null);
             }
+            let code = exit_code();
             // Let the reply and the final events leave before the listeners go away.
             std::thread::sleep(EXIT_DRAIN);
-            context.process().exit(0);
+            context.process().exit(code);
         }
         Err(message) => {
             if let Err(error) = state.reopen_after_failed_shutdown() {
@@ -332,7 +343,11 @@ pub fn session_end(context: Arc<SilodContext>) {
                 .name("silod-session-end".into())
                 .spawn({
                     let (context, state) = (context.clone(), state.clone());
-                    move || run_shutdown(&context, &state, job)
+                    move || {
+                        run_shutdown_then(&context, &state, job, || {
+                            session_end_exit_code(&context, &state)
+                        })
+                    }
                 });
             if let Err(error) = spawned {
                 eprintln!("silod: could not start the session-end shutdown: {error}");
@@ -344,6 +359,44 @@ pub fn session_end(context: Arc<SilodContext>) {
             context.process().exit(0);
         }
     }
+}
+
+/// How long a finished session end waits to learn which computers are still running.
+#[cfg(target_os = "linux")]
+pub(crate) const SURVIVOR_CHECK: Duration = Duration::from_secs(3);
+
+/// On Linux, computers run in their own processes and outlive an engine that exits (the unit
+/// sends SIGTERM to silod alone). A session end that should have stopped them but left some
+/// running says which and exits with a failure, so systemd and the journal record it.
+#[cfg(target_os = "linux")]
+fn session_end_exit_code(context: &Arc<SilodContext>, state: &UpdateState) -> i32 {
+    if !state.shutdown_stops_computers() {
+        // A prepared update releases its saved set on purpose; the next engine resumes it.
+        return 0;
+    }
+    let host = super::computers::SilodRuntimeHost::for_engine(context.clone());
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let spawned = std::thread::Builder::new()
+        .name("silod-session-end-check".into())
+        .spawn(move || {
+            let _ = sender.send(silo_engine::runtime::update_recovery::running_names(&host));
+        });
+    let running = match spawned {
+        Ok(_) => receiver
+            .recv_timeout(SURVIVOR_CHECK)
+            .unwrap_or_else(|_| Err("the runtime did not answer in time".into())),
+        Err(error) => Err(format!("could not start the check: {error}")),
+    };
+    let (code, message) = crate::process::session_end_outcome(running);
+    if let Some(message) = message {
+        eprintln!("silod: {message}");
+    }
+    code
+}
+
+#[cfg(not(target_os = "linux"))]
+fn session_end_exit_code(_context: &Arc<SilodContext>, _state: &UpdateState) -> i32 {
+    0
 }
 
 fn engine_update_prepare(

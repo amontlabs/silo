@@ -8,6 +8,38 @@ use silo_engine::context::ProcessControl;
 /// The exit code that asks the supervisor to start the engine again (`EX_TEMPFAIL`).
 pub const RESTART_EXIT_CODE: i32 = 75;
 
+/// The exit code of a session end that left computers running (`EX_SOFTWARE`), on Linux.
+///
+/// Not 0, so systemd records the stop as failed and the journal says why. Not
+/// `RESTART_EXIT_CODE`: systemd never restarts a unit whose stop it was asked for (a logout or
+/// `systemctl --user stop`), and after a SIGTERM from anywhere else `Restart=on-failure` starts
+/// a new engine, which takes the surviving computers back.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub const SESSION_END_INCOMPLETE_EXIT_CODE: i32 = 70;
+
+/// The exit code of a session end that stopped computers, from what the runtime still lists
+/// as running afterwards, and the line to log when that is not nothing.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub fn session_end_outcome(running: Result<Vec<String>, String>) -> (i32, Option<String>) {
+    match running {
+        Ok(names) if names.is_empty() => (0, None),
+        Ok(names) => (
+            SESSION_END_INCOMPLETE_EXIT_CODE,
+            Some(format!(
+                "the session ended with computers still running: {}. They keep running without \
+                 the engine until it starts again and takes them back.",
+                names.join(", ")
+            )),
+        ),
+        Err(error) => (
+            SESSION_END_INCOMPLETE_EXIT_CODE,
+            Some(format!(
+                "the session ended, but whether computers are still running is unknown: {error}"
+            )),
+        ),
+    }
+}
+
 /// The panic payload a restart unwinds its worker with; the socket server recognizes it.
 #[derive(Debug)]
 pub struct RestartScheduled;
@@ -52,6 +84,21 @@ impl ProcessControl for AppProcessControl {
 mod tests {
     use super::*;
     use std::sync::{atomic::AtomicUsize, Arc};
+
+    #[test]
+    fn a_session_end_that_left_computers_running_exits_with_a_failure_that_is_not_a_restart() {
+        assert_eq!(session_end_outcome(Ok(Vec::new())), (0, None));
+        let (code, message) = session_end_outcome(Ok(vec!["alpha".into(), "beta".into()]));
+        assert_eq!(code, SESSION_END_INCOMPLETE_EXIT_CODE);
+        assert!(message.unwrap().contains("still running: alpha, beta"));
+        let (code, message) = session_end_outcome(Err("runtime unavailable".into()));
+        assert_eq!(code, SESSION_END_INCOMPLETE_EXIT_CODE);
+        assert!(message.unwrap().contains("runtime unavailable"));
+        // systemd's Restart=on-failure treats any non-zero code as a failure; the engine's own
+        // restart request keeps its own code.
+        assert_ne!(SESSION_END_INCOMPLETE_EXIT_CODE, 0);
+        assert_ne!(SESSION_END_INCOMPLETE_EXIT_CODE, RESTART_EXIT_CODE);
+    }
 
     #[tokio::test]
     async fn restart_unwinds_the_worker_after_scheduling_appkit_exit() {
