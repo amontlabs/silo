@@ -8,6 +8,10 @@ Cua Driver's entries in place of LCU's. This plan replaced the optional, per-com
 installation described in [Linux desktop](SiloUI-DESKTOP.md) for new computers, and replaced
 Luda.
 
+Phase 5 of Silo v1 adds host-side driving of a fork's desktop (MCP tools, "fork, start, wait
+until ready", `auto` approval for unattended forks, change-review ignore entries):
+[driving a fork's desktop from the host](SiloUI-COMPUTER-USE.md).
+
 ## Cua Driver (2026-11-03)
 
 Owner decision 2026-11-03: Silo drops the ChatGPT for Linux download and LCU on Linux guests.

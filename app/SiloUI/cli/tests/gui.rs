@@ -278,3 +278,134 @@ async fn a_driver_that_is_missing_is_reported_in_words() {
         error.message
     );
 }
+
+async fn call(
+    write: &mut (impl tokio::io::AsyncWriteExt + Unpin),
+    read: &mut (impl tokio::io::AsyncBufReadExt + Unpin),
+    id: u64,
+    name: &str,
+    arguments: Value,
+) -> Value {
+    let request = json!({"jsonrpc": "2.0", "id": id, "method": "tools/call",
+                         "params": {"name": name, "arguments": arguments}});
+    write
+        .write_all(format!("{request}\n").as_bytes())
+        .await
+        .unwrap();
+    let mut line = String::new();
+    read.read_line(&mut line).await.unwrap();
+    serde_json::from_str(&line).unwrap()
+}
+
+#[tokio::test]
+async fn the_mcp_server_drives_a_computer_and_maps_clicks_to_the_screen() {
+    use rmcp::ServiceExt;
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+    let shot = json!({"content": [{"type": "image", "data": png_base64(2560, 1600), "mimeType": "image/png"}]});
+    let engine = FakeEngine::start(move |method, _| match method {
+        "computers.list" => Ok(listing(&[("t1", "running")])),
+        "guest.exec" => {
+            Ok(json!({"exitCode": 0, "stdout": bytes(&shot.to_string()), "stderr": []}))
+        }
+        other => Err(("internal", format!("unexpected {other}"))),
+    });
+    let (server_side, client_side) = tokio::io::duplex(8 * 1024 * 1024);
+    let (server_read, server_write) = tokio::io::split(server_side);
+    let server = silo_cli::mcp::SiloMcp::new(engine.socket.clone(), std::env::temp_dir());
+    tokio::spawn(async move {
+        let running = server.serve((server_read, server_write)).await.unwrap();
+        let _ = running.waiting().await;
+    });
+    let (read, mut write) = tokio::io::split(client_side);
+    let mut read = BufReader::new(read);
+    let init = json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+        "protocolVersion": "2025-06-18", "capabilities": {},
+        "clientInfo": {"name": "test", "version": "0"}}});
+    write
+        .write_all(format!("{init}\n").as_bytes())
+        .await
+        .unwrap();
+    let mut line = String::new();
+    read.read_line(&mut line).await.unwrap();
+    write
+        .write_all(b"{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}\n")
+        .await
+        .unwrap();
+    let list = json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"});
+    write
+        .write_all(format!("{list}\n").as_bytes())
+        .await
+        .unwrap();
+    line.clear();
+    read.read_line(&mut line).await.unwrap();
+    let tools: Value = serde_json::from_str(&line).unwrap();
+    let names: Vec<&str> = tools["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|tool| tool["name"].as_str().unwrap())
+        .collect();
+    for expected in [
+        "fork_gui",
+        "computer_use_ready",
+        "computer_use_screenshot",
+        "computer_use_click",
+        "computer_use_type",
+        "computer_use_key",
+        "computer_use_scroll",
+        "computer_use_move",
+        "computer_use_drag",
+        "computer_use_wait",
+        "computer_use_tools",
+        "computer_use_call",
+    ] {
+        assert!(
+            names.contains(&expected),
+            "{expected} missing from {names:?}"
+        );
+    }
+
+    let screenshot = call(
+        &mut write,
+        &mut read,
+        3,
+        "computer_use_screenshot",
+        json!({"computer": "t1"}),
+    )
+    .await;
+    let content = &screenshot["result"]["content"];
+    assert_eq!(content[0]["type"], "image", "{screenshot}");
+    assert_eq!(content[0]["mimeType"], "image/png");
+    assert!(content[1]["text"].as_str().unwrap().contains("1280x800"));
+
+    let clicked = call(
+        &mut write,
+        &mut read,
+        4,
+        "computer_use_click",
+        json!({"computer": "t1", "x": 100, "y": 50}),
+    )
+    .await;
+    assert!(clicked["result"].is_object(), "{clicked}");
+    let sent = engine.calls("guest.exec");
+    let args = &exec_stdin(sent.last().unwrap())["params"];
+    assert_eq!(args["name"], "click");
+    assert_eq!(args["arguments"]["x"], 200.0);
+    assert_eq!(args["arguments"]["y"], 100.0);
+
+    let refused = call(
+        &mut write,
+        &mut read,
+        5,
+        "fork_gui",
+        json!({"computer_use": "auto"}),
+    )
+    .await;
+    assert_eq!(refused["result"]["isError"], true, "{refused}");
+    assert!(refused["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap()
+        .contains("computer_use_auto"));
+    assert!(engine.calls("checkpoints.fork").is_empty());
+}

@@ -937,7 +937,7 @@ impl SiloMcp {
     }
 
     #[tool(
-        description = "Fork a computer (default main), start the fork and wait until its desktop and computer-use driver are ready. Returns the fork's name and its computer-use status. computerUse auto lets the fork's agent drive the desktop without asking (needs computer_use_auto in the project settings); main always keeps asking."
+        description = "Fork a computer (default main), start the fork and wait until its desktop and computer-use driver are ready. Returns the fork's name and its computer-use status. computer_use auto lets the fork's agent drive the desktop without asking (needs computer_use_auto in the project settings); main always keeps asking."
     )]
     async fn fork_gui(
         &self,

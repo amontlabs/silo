@@ -24,7 +24,7 @@ use crate::{
 pub const DEFAULT_TIMEOUT_SECS: u64 = 300;
 const POLL: Duration = Duration::from_secs(2);
 
-/// The approval mode named by `--computer-use` or `computerUse`.
+/// The approval mode named by `--computer-use` or `computer_use`.
 pub fn parse_approval(text: &str) -> Result<ApprovalMode, CliError> {
     match text {
         "ask" => Ok(ApprovalMode::Ask),
