@@ -34,6 +34,34 @@ wire_struct! {
 }
 
 wire_struct! {
+    #[doc = "A controller's Connections public key (`ssh-ed25519 <key> [comment]`) for this device to accept."]
+    AuthorizeKeyParams {
+        public_key: String,
+    }
+}
+
+wire_struct! {
+    AuthorizeKeyResult {
+        #[doc = "False when the key was already authorized."]
+        added: bool,
+    }
+}
+
+wire_struct! {
+    #[doc = "The controller keys this device's account accepts for Connections: the Silo lines of `~/.ssh/authorized_keys` that may only run the bridge."]
+    AuthorizedKeysResult {
+        public_keys: Vec<String>,
+    }
+}
+
+wire_struct! {
+    #[doc = "This device's own Connections public key, created when it had none."]
+    OwnKeyResult {
+        public_key: String,
+    }
+}
+
+wire_struct! {
     ConnectionsSetEnabledParams {
         enabled: bool,
     }
@@ -60,6 +88,9 @@ wire_struct! {
         address: String,
         addresses: Vec<DeviceAddress>,
         error: Option<String>,
+        #[doc = "Why the engine could not link the `silo` command on PATH when it started."]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cli_link_error: Option<String>,
     }
 }
 

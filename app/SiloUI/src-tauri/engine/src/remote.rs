@@ -990,6 +990,95 @@ fn revoke_connections_key_in(path: &Path, public_key: &str) -> Result<(), String
     }
     Ok(())
 }
+/// This channel's Connections public key, created first when this device has none. A
+/// controller hands it to a device that should accept it (`connections.keys.authorize`).
+pub fn ensure_connections_public_key() -> Result<String, String> {
+    let key = directory()?.join("id_ed25519");
+    crate::editor::key(&key)?;
+    crate::editor::public_key(&key)
+}
+
+/// Owner side: lets the controller whose Silo key is `public_key` reach this account's
+/// bridge, with the same restricted line a controller's key setup installs (`restrict` and
+/// the bridge as the forced command). Returns false when the line is already there. An
+/// older unrestricted line for the key is tightened, as a handshake does. A symlinked or
+/// otherwise managed `authorized_keys` is left alone and reported.
+pub fn authorize_connections_key(public_key: &str) -> Result<bool, String> {
+    authorize_connections_key_in(&current_home()?.join(".ssh/authorized_keys"), public_key)
+}
+fn authorize_connections_key_in(path: &Path, public_key: &str) -> Result<bool, String> {
+    use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+    let expected = authorized_key_line(public_key.trim())?;
+    let ssh = path.parent().ok_or("SSH key directory is unavailable.")?;
+    if fs::symlink_metadata(ssh).is_err() {
+        fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(ssh)
+            .map_err(|e| e.to_string())?;
+    }
+    match fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(path)
+    {
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(error) => return Err(error.to_string()),
+    }
+    if !fs::symlink_metadata(path)
+        .map_err(|e| e.to_string())?
+        .file_type()
+        .is_file()
+    {
+        return Err(format!(
+            "{} is not a regular file, so Silo does not change it. Add this line where it is managed: {expected}",
+            path.display()
+        ));
+    }
+    restrict_authorized_keys_file(path, public_key.trim())?;
+    rewrite_authorized_keys_file(path, |contents| {
+        if contents.lines().any(|line| line.trim() == expected) {
+            return None;
+        }
+        let mut rewritten = contents.to_owned();
+        if !rewritten.is_empty() && !rewritten.ends_with('\n') {
+            rewritten.push('\n');
+        }
+        rewritten.push_str(&expected);
+        rewritten.push('\n');
+        Some(rewritten)
+    })
+}
+
+/// Owner side: the controller keys this account accepts for Connections, as
+/// `ssh-ed25519 <key> <comment>`, from the exact restricted lines Silo installs. Other lines,
+/// including the same key with other options, are not Silo's and are not listed.
+pub fn authorized_connections_keys() -> Result<Vec<String>, String> {
+    authorized_connections_keys_in(&current_home()?.join(".ssh/authorized_keys"))
+}
+fn authorized_connections_keys_in(path: &Path) -> Result<Vec<String>, String> {
+    let contents = match fs::read_to_string(path) {
+        Ok(contents) => contents,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(format!("Cannot read {}: {error}", path.display())),
+    };
+    let prefix = format!("{} ", authorized_key_options());
+    let mut keys: Vec<String> = Vec::new();
+    for line in contents.lines() {
+        let Some(public) = line.trim().strip_prefix(&prefix) else {
+            continue;
+        };
+        let silo_line =
+            authorized_key_line(public).is_ok_and(|line| line == format!("{prefix}{public}"));
+        if silo_line && !keys.iter().any(|known| known == public) {
+            keys.push(public.to_owned());
+        }
+    }
+    Ok(keys)
+}
 fn validate_address(address: &str) -> Result<(), String> {
     let invalid = || {
         "Enter an SSH alias, hostname, IP address, user@hostname, or ssh://user@host:port."
@@ -5456,6 +5545,119 @@ mod authorized_key_tests {
         assert!(restrict_authorized_keys_file(&link, &public).is_err());
         assert_eq!(fs::read_to_string(&target).unwrap(), format!("{public}\n"));
         assert!(!restrict_authorized_keys_file(&home.path().join("missing"), &public).unwrap());
+    }
+
+    #[test]
+    fn authorizing_a_controller_key_adds_one_restricted_line_and_lists_it() {
+        let _test_state = crate::test_support::global_state();
+        let home = tempfile::tempdir().unwrap();
+        let ssh = home.path().join(".ssh");
+        let path = ssh.join("authorized_keys");
+        // The controller's comment is replaced by this channel's, as a key setup does.
+        let offered = format!("ssh-ed25519 {BLOB} laptop\n");
+        assert_eq!(
+            authorized_connections_keys_in(&path).unwrap(),
+            Vec::<String>::new()
+        );
+        assert!(authorize_connections_key_in(&path, &offered).unwrap());
+        assert_eq!(
+            fs::metadata(&ssh).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        let line = authorized_key_line(&offered).unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), format!("{line}\n"));
+        assert!(!authorize_connections_key_in(&path, &offered).unwrap());
+        assert_eq!(fs::read_to_string(&path).unwrap(), format!("{line}\n"));
+        let public = format!("ssh-ed25519 {BLOB} {}", silo_key_comment());
+        assert_eq!(
+            authorized_connections_keys_in(&path).unwrap(),
+            vec![public.clone()]
+        );
+        // Revoking removes exactly that line.
+        revoke_connections_key_in(&path, &public).unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "");
+        assert!(authorized_connections_keys_in(&path).unwrap().is_empty());
+        for invalid in ["", "ssh-rsa AAAA x", "command=\"sh\" ssh-ed25519 AAAA"] {
+            assert!(
+                authorize_connections_key_in(&path, invalid).is_err(),
+                "{invalid}"
+            );
+        }
+    }
+
+    #[test]
+    fn authorizing_keeps_other_lines_and_tightens_an_older_silo_line() {
+        let _test_state = crate::test_support::global_state();
+        let home = tempfile::tempdir().unwrap();
+        let path = home.path().join("authorized_keys");
+        let public = format!("ssh-ed25519 {BLOB} {}", silo_key_comment());
+        let personal = format!("ssh-ed25519 {BLOB} personal");
+        let custom = format!(r#"from="192.0.2.1" {public}"#);
+        // No final newline: the new line still starts on its own line.
+        fs::write(
+            &path,
+            format!("ssh-ed25519 AAAAother user\n{personal}\n{custom}"),
+        )
+        .unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).unwrap();
+        assert!(authorize_connections_key_in(&path, &public).unwrap());
+        let line = authorized_key_line(&public).unwrap();
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            format!("ssh-ed25519 AAAAother user\n{personal}\n{custom}\n{line}\n")
+        );
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o640
+        );
+        // Lines with other options or another comment are not listed as Silo's.
+        assert_eq!(
+            authorized_connections_keys_in(&path).unwrap(),
+            vec![public.clone()]
+        );
+
+        let older = home.path().join("older");
+        fs::write(&older, format!("{public}\n")).unwrap();
+        assert!(!authorize_connections_key_in(&older, &public).unwrap());
+        assert_eq!(fs::read_to_string(&older).unwrap(), format!("{line}\n"));
+    }
+
+    #[test]
+    fn the_bridge_never_serves_key_authorization() {
+        // A connected controller must not be able to let another key in.
+        for method in [
+            "connections.keys.authorize",
+            "connections.keys.list",
+            "connections.keys.own",
+        ] {
+            assert!(access(method).is_none(), "{method}");
+            assert!(!is_owner_method(method), "{method}");
+        }
+    }
+
+    #[test]
+    fn authorizing_leaves_a_linked_authorized_keys_alone() {
+        let _test_state = crate::test_support::global_state();
+        let home = tempfile::tempdir().unwrap();
+        let target = home.path().join("managed");
+        fs::write(&target, "ssh-ed25519 AAAAother user\n").unwrap();
+        let link = home.path().join("authorized_keys");
+        symlink(&target, &link).unwrap();
+        let public = format!("ssh-ed25519 {BLOB} {}", silo_key_comment());
+        let error = authorize_connections_key_in(&link, &public).unwrap_err();
+        assert!(error.contains("is not a regular file"), "{error}");
+        assert!(
+            error.contains(&authorized_key_line(&public).unwrap()),
+            "{error}"
+        );
+        assert_eq!(
+            fs::read_to_string(&target).unwrap(),
+            "ssh-ed25519 AAAAother user\n"
+        );
     }
 }
 
