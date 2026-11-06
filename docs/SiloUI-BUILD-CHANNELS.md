@@ -26,10 +26,10 @@ users' data lives there.
 ## One source of truth
 
 `src-tauri/src/channel.rs` derives every device-visible name from the bundle
-identifier embedded in the running binary (`channel::init` runs first in silod's
-`entry`, including for the `--remote-bridge` and `--remote-guest` modes that run
-without a window; the bridge is started through the `~/.local/bin` link, so silod
-resolves the link before reading its bundle). Only the exact production identifier selects
+identifier embedded in the running binary (`channel::init` runs right after silod
+reads its bundle manifest, including in the `--remote-bridge` and `--remote-guest`
+modes that run without a window; SSH starts the bridge through the `~/.local/bin`
+link, so silod first restarts itself from the real file in its bundle). Only the exact production identifier selects
 production; any other identifier is treated as development, so a stray build can
 never touch production data. Unit tests pin every production name to its released
 value and require every development name to differ.

@@ -34,6 +34,7 @@ pub fn run_remote_guest(args: &[String]) -> Result<i32, String> {
         if args.len() != 2 && args.len() != 3 {
             return Err("usage: silod --remote-guest DEVICE_ID COMPUTER_ID [PORT]".to_owned());
         }
+        crate::run_from_bundle(&std::env::args().collect::<Vec<_>>())?;
         let manifest = service::current_bundle_manifest()?;
         silo_engine::channel::init(&manifest.channel_identifier);
         let params = silo_engine::remote::guest_stream_params(args)?;
@@ -50,6 +51,7 @@ pub fn run_remote_bridge(args: &[String]) -> Result<i32, String> {
         if !args.is_empty() {
             return Err("usage: silod --remote-bridge".to_owned());
         }
+        crate::run_from_bundle(&std::env::args().collect::<Vec<_>>())?;
         let manifest = service::current_bundle_manifest()?;
         silo_engine::channel::init(&manifest.channel_identifier);
         silo_engine::remote::run_bridge()?;

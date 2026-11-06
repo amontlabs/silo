@@ -1,6 +1,6 @@
 # Connections
 
-Connections link devices, so Silo on one device can manage the computers of another device while Silo is running on that device. The Tauri application at `app/SiloUI` owns this implementation. It does not install an independent management daemon.
+Connections link devices, so Silo on one device can manage the computers of another device while Silo is running on that device. The engine daemon `silod` owns this implementation: its `--remote-bridge` mode serves the forced SSH command of a paired device's key and relays each request to the running engine.
 
 ## User behavior
 

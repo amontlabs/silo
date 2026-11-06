@@ -44,12 +44,6 @@ pub(crate) fn serialize_gate_jobs() -> std::sync::MutexGuard<'static, ()> {
 pub const REMOTE_BRIDGE_FLAG: &str = "--remote-bridge";
 
 pub fn entry(args: &[String]) -> Result<i32, String> {
-    if matches!(
-        args.get(1).map(String::as_str),
-        Some(REMOTE_BRIDGE_FLAG | "--remote-guest")
-    ) {
-        run_from_bundle(args)?;
-    }
     match args.get(1).map(String::as_str) {
         Some("--service") => service::run_command(&args[2..]),
         Some("--remote-guest") => app::run_remote_guest(&args[2..]),
@@ -62,7 +56,8 @@ pub fn entry(args: &[String]) -> Result<i32, String> {
 /// SSH starts the bridge through the `~/.local/bin` link, and macOS then finds no main bundle
 /// (it looks beside the link), so silod cannot read its own identity. The process replaces
 /// itself with the real file inside the bundle, keeping its arguments and standard streams.
-fn run_from_bundle(args: &[String]) -> Result<(), String> {
+/// Callers check their arguments first, so a refused call never replaces the process.
+pub(crate) fn run_from_bundle(args: &[String]) -> Result<(), String> {
     use std::os::unix::process::CommandExt;
     let invoked = std::env::current_exe().map_err(|error| error.to_string())?;
     let canonical = std::fs::canonicalize(&invoked).map_err(|error| error.to_string())?;

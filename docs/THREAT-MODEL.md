@@ -342,13 +342,30 @@ process: the socket is on the Mac's filesystem, which the guest cannot see.
 
 A second path exists for Connections. With **Allow connections from other devices** on, a paired
 device reaches this engine over the Mac's SSH server. Its key is installed with
-`restrict,command=` limited to the `silo-remote --remote-bridge` command
-([`remote.rs#L28`](../app/SiloUI/src-tauri/engine/src/remote.rs#L28)), which connects to
-`~/.silo/desktop-remote/control.sock` (`0600` in a `0700` directory, no peer-UID check;
-[`remote.rs#L2767`](../app/SiloUI/src-tauri/engine/src/remote.rs#L2767)) and relays one request. The owner serves the
-methods in `OWNER_METHODS` for it ([`remote.rs#L364`](../app/SiloUI/src-tauri/engine/src/remote.rs#L364)), including
-delete, checkpoint restore, guest exec and file reads. A device that holds that key, or a
-same-user process that connects to `control.sock`, has that authority.
+`restrict,command="exec ~/.local/bin/silo-remote --remote-bridge"`
+([`remote.rs#L26`](../app/SiloUI/src-tauri/engine/src/remote.rs#L26),
+[`channel.rs#L106`](../app/SiloUI/host/src/channel.rs#L106)): no pty, forwarding or agent, and
+only that command whatever the client asked for (`SSH_ORIGINAL_COMMAND` is never read). The link
+names `silod` inside the app bundle. Started through it, `silod` accepts no further arguments,
+replaces itself with the file in its bundle
+([`lib.rs#L60`](../app/SiloUI/src-tauri/silod/src/lib.rs#L60)), verifies that bundle's signature
+as the engine does ([`app.rs#L49`](../app/SiloUI/src-tauri/silod/src/app.rs#L49)), reads one framed
+request from its input and relays it to `~/.silo/desktop-remote/control.sock` (`0600` in a `0700`
+directory, no peer-UID check;
+[`remote.rs#L2893`](../app/SiloUI/src-tauri/engine/src/remote.rs#L2893)). The owner refuses the
+request unless Connections are on, the protocol version matches and, except for the handshake,
+the request names this device's id
+([`remote.rs#L3136`](../app/SiloUI/src-tauri/engine/src/remote.rs#L3136)); the id is not a secret
+(the handshake returns it), so the key is the whole check. The owner then serves the methods in
+`METHODS` and `OWNER_METHODS`
+([`remote.rs#L295`](../app/SiloUI/src-tauri/engine/src/remote.rs#L295),
+[`#L365`](../app/SiloUI/src-tauri/engine/src/remote.rs#L365)), including delete, checkpoint
+restore, guest exec, file reads and writes, exports, and the `guest.ssh` and macOS display byte
+streams. Turning Connections off refuses every request but leaves installed keys in
+`authorized_keys`; removing a device revokes its key. A device that holds that key, or a
+same-user process that connects to `control.sock`, has that authority. The same-user link under
+`~/.local/bin` is part of that trust: a same-user process can repoint it, which is a non-goal
+below.
 
 At start, `silod` verifies its own bundle signature against `SiloEngineCodeRequirement`, and a
 production engine refuses to run without one
