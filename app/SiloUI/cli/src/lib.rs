@@ -11,6 +11,8 @@ pub mod error;
 pub mod fanout;
 pub mod flows;
 pub mod folder;
+pub mod guest_client;
+pub mod guest_install;
 pub mod mcp;
 pub mod ops;
 pub mod pr;

@@ -38,8 +38,30 @@ pub struct Cli {
     /// The agent the settings in `agents:` of `.silo/silo.yaml` are read for (default: SILO_AGENT).
     #[arg(long, global = true, value_name = "NAME", env = "SILO_AGENT")]
     pub agent: Option<String>,
+    /// Run inside a computer: reach the engine through the bridge folder with the token the
+    /// person who runs Silo installed (default: SILO_IN_GUEST).
+    #[arg(long, global = true, env = "SILO_IN_GUEST", hide_env_values = true)]
+    pub in_guest: bool,
     #[command(subcommand)]
     pub command: Command,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum GuestClientCommand {
+    /// Mint a token for a Linux computer and write it into the computer (it must be running).
+    Install {
+        computer: String,
+        /// A `silo` binary built for the guest to copy to /usr/local/bin/silo.
+        #[arg(long, value_name = "PATH")]
+        binary: Option<PathBuf>,
+        /// The guest group that may read the token file.
+        #[arg(long, default_value = "silo")]
+        group: String,
+    },
+    /// Remove a computer's token; its agent can no longer reach the engine.
+    Revoke { computer: String },
+    /// Say whether a computer has a token and the settings it was minted with.
+    Status { computer: String },
 }
 
 #[derive(Subcommand, Debug)]
@@ -108,6 +130,9 @@ pub enum Command {
     /// Manage the Silo secrets and which computers have them.
     #[command(subcommand)]
     Secrets(SecretsCommand),
+    /// Install, remove or read the token a computer's own agent uses (`silo --in-guest`).
+    #[command(subcommand)]
+    GuestClient(GuestClientCommand),
     /// Wait for a job that is already running, by id.
     Job { id: String },
     /// Serve the MCP tools on stdio.
@@ -347,6 +372,31 @@ fn trim_newline(mut value: String) -> String {
     value
 }
 
+fn render_guest_client(result: &Value) -> String {
+    if let Some(enabled) = result["enabled"].as_bool() {
+        let name = result["computerId"].as_str().unwrap_or_default();
+        return match (enabled, result["mintedAt"].as_str()) {
+            (true, Some(at)) => format!(
+                "{name}: token minted {at}; fold: {}",
+                result["policy"]["fold"].as_str().unwrap_or("ask")
+            ),
+            _ => format!("{name}: no token"),
+        };
+    }
+    format!(
+        "Installed in {}: {}. Inside it, run: silo --in-guest list",
+        result["computer"].as_str().unwrap_or_default(),
+        result["installed"]
+            .as_array()
+            .map(|items| items
+                .iter()
+                .filter_map(Value::as_str)
+                .collect::<Vec<_>>()
+                .join(", "))
+            .unwrap_or_default()
+    )
+}
+
 fn stderr_progress(line: &str) {
     eprintln!("{line}");
 }
@@ -364,6 +414,10 @@ fn emit(json: bool, value: &Value, human: impl FnOnce(&Value) -> String) {
 
 /// Runs one command and returns the process exit code.
 pub async fn run(cli: Cli, working_directory: &Path) -> Result<i32, CliError> {
+    if cli.in_guest {
+        let link = crate::guest_client::Link::load(&crate::guest_client::token_path())?;
+        return crate::guest_client::run(cli.command, cli.json, &link).await;
+    }
     let socket = default_socket(cli.socket.clone(), cli.allow_other_channel)?;
     if matches!(cli.command, Command::Mcp) {
         crate::mcp::serve(socket, working_directory.to_owned(), cli.agent.clone()).await?;
@@ -397,6 +451,42 @@ pub async fn run(cli: Cli, working_directory: &Path) -> Result<i32, CliError> {
     };
     let engine = Engine::connect(&socket).await?;
     let json = cli.json;
+    if let Command::GuestClient(action) = &cli.command {
+        let result = match action {
+            GuestClientCommand::Install {
+                computer,
+                binary,
+                group,
+            } => {
+                let policy =
+                    crate::guest_install::policy_from(settings.as_ref(), cli.agent.as_deref());
+                crate::guest_install::install(
+                    &engine,
+                    computer,
+                    policy,
+                    binary.as_deref(),
+                    group,
+                    &stderr_progress,
+                )
+                .await?
+            }
+            GuestClientCommand::Revoke { computer } => {
+                crate::guest_install::revoke(&engine, computer).await?
+            }
+            GuestClientCommand::Status { computer } => {
+                crate::guest_install::status(&engine, computer).await?
+            }
+        };
+        println!(
+            "{}",
+            if json {
+                serde_json::to_string_pretty(&result).unwrap_or_default()
+            } else {
+                render_guest_client(&result)
+            }
+        );
+        return Ok(0);
+    }
     tokio::select! {
         result = dispatch(&engine, cli.command, json, settings, recipe, &project, working_directory) => result,
         _ = tokio::signal::ctrl_c() => {
@@ -765,7 +855,7 @@ async fn dispatch(
                 serde_json::to_string_pretty(v).unwrap_or_default()
             });
         }
-        Command::Mcp => unreachable!("handled above"),
+        Command::Mcp | Command::GuestClient(_) => unreachable!("handled above"),
     }
     Ok(0)
 }
