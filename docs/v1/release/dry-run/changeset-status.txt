@@ -1,0 +1,10 @@
+
+> silo-ui@0.12.0 release:status
+> changeset status
+
+🦋 changeset v3.0.3
+
+Packages to be bumped:
+- minor
+  - silo-ui
+🦋 changeset v3.0.3
