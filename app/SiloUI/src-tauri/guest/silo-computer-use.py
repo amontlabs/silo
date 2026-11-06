@@ -674,23 +674,52 @@ def as_user():
 
 def repair_agent_files():
     """As root: gives the working account back the agent configuration files it manages (and the
-    directories holding them) when something running as root, such as a keep, left them root-owned."""
+    directories holding them) when something running as root, such as a keep, left them root-owned.
+    The account controls everything below HOME, so each step goes through directory descriptors
+    opened without following links: a parent that is a link, or not a directory directly below HOME,
+    is left alone."""
     if os.geteuid() != 0:
         return
     try:
         account = pwd.getpwnam(USER)
     except KeyError:
         return
-    for path in (CLAUDE_STATE, CLAUDE_SETTINGS, CODEX_CONFIG):
-        for target in (path, path.parent):
-            if target == Path(HOME):
-                continue
-            try:
-                info = target.lstat()
-                if info.st_uid == 0 and not stat.S_ISLNK(info.st_mode):
-                    os.lchown(target, account.pw_uid, account.pw_gid)
-            except OSError:
-                continue
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+    try:
+        home_fd = os.open(HOME, flags)
+    except OSError:
+        return
+    try:
+        for path in (CLAUDE_STATE, CLAUDE_SETTINGS, CODEX_CONFIG):
+            parts = path.relative_to(HOME).parts
+            if len(parts) == 1:
+                repair_entry(home_fd, parts[0], account)
+            elif len(parts) == 2:
+                try:
+                    parent_fd = os.open(parts[0], flags, dir_fd=home_fd)
+                except OSError:
+                    continue
+                try:
+                    if stat.S_ISDIR(os.fstat(parent_fd).st_mode):
+                        if os.fstat(parent_fd).st_uid == 0:
+                            os.fchown(parent_fd, account.pw_uid, account.pw_gid)
+                        repair_entry(parent_fd, parts[1], account)
+                except OSError:
+                    pass
+                finally:
+                    os.close(parent_fd)
+    finally:
+        os.close(home_fd)
+
+
+def repair_entry(dir_fd, name, account):
+    """Chowns `name` below `dir_fd` to the account when it is a root-owned file or folder."""
+    try:
+        info = os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
+        if info.st_uid == 0 and not stat.S_ISLNK(info.st_mode):
+            os.chown(name, account.pw_uid, account.pw_gid, dir_fd=dir_fd, follow_symlinks=False)
+    except OSError:
+        pass
 
 
 def write_text(path, text, mode=0o600):
