@@ -23,7 +23,7 @@ const WHOLE: &[(&str, &str)] = &[("con", "tained")];
 pub const REPLACEMENT: &str = "[wording removed]";
 
 fn is_word_char(c: char) -> bool {
-    c.is_alphanumeric() || c == '_'
+    c.is_alphanumeric() || c == '_' || is_invisible(c) || is_combining_mark(c)
 }
 
 /// Characters with no visible form: zero-width and bidirectional controls, soft hyphen,
@@ -103,12 +103,12 @@ pub fn count(text: &str) -> usize {
     clean(text).1
 }
 
-/// `text` normalised with each filtered word replaced, and how many were replaced.
+/// `text` with each filtered word replaced, and how many were replaced. The rest keeps its own
+/// characters: each word is normalised only to be checked.
 pub fn clean(text: &str) -> (String, usize) {
-    let text = normalise(text);
     let (mut out, mut found, mut token) = (String::new(), 0, String::new());
     let mut flush = |token: &mut String, out: &mut String| {
-        if matches_word(token) {
+        if matches_word(&normalise(token)) {
             found += 1;
             out.push_str(REPLACEMENT);
         } else {
@@ -225,6 +225,16 @@ mod tests {
         assert_eq!(count("sаfe"), 1);
         assert_eq!(count("ѕесurе"), 1);
         assert_eq!(count("привет"), 0);
+    }
+
+    #[test]
+    fn displayed_text_keeps_its_own_characters() {
+        let text = "Une idée naïve: café, 日本語の文章です。";
+        assert_eq!(clean(text), (text.to_owned(), 0));
+        let word = format!("{}\u{0301}", make("sa", "fe"));
+        let (out, found) = clean(&format!("Ce café est {word} et naïve 日本語。"));
+        assert_eq!(found, 1);
+        assert_eq!(out, format!("Ce café est {REPLACEMENT} et naïve 日本語。"));
     }
 
     #[test]
