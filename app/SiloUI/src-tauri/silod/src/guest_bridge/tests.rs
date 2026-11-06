@@ -79,8 +79,23 @@ fn setup(fork_secrets: &[&str]) -> Setup {
     }
 }
 
-async fn ask(setup: &Setup, fake: &Fake, jobs: &Jobs, computer: &str, request: GuestRequestFrame) -> GuestResponseFrame {
-    handle_frame(fake, &setup.store, jobs, &snapshot(), &|_| Some("fork-1".into()), computer, request).await
+async fn ask(
+    setup: &Setup,
+    fake: &Fake,
+    jobs: &Jobs,
+    computer: &str,
+    request: GuestRequestFrame,
+) -> GuestResponseFrame {
+    handle_frame(
+        fake,
+        &setup.store,
+        jobs,
+        &snapshot(),
+        &|_| Some("fork-1".into()),
+        computer,
+        request,
+    )
+    .await
 }
 
 #[test]
@@ -94,14 +109,50 @@ fn descendants_follow_forks_of_forks_and_never_include_the_root() {
 async fn a_fork_of_self_runs_without_the_token_file_and_its_job_is_followable() {
     let setup = setup(&[]);
     let (fake, jobs) = (Fake::default(), Jobs::default());
-    let reply = ask(&setup, &fake, &jobs, "main", frame(&setup.token, "checkpoints.fork", json!({"computerId": "main", "newName": "x"}))).await;
+    let reply = ask(
+        &setup,
+        &fake,
+        &jobs,
+        "main",
+        frame(
+            &setup.token,
+            "checkpoints.fork",
+            json!({"computerId": "main", "newName": "x"}),
+        ),
+    )
+    .await;
     assert!(reply.ok, "{:?}", reply.error);
     let calls = fake.calls.lock().unwrap();
-    assert_eq!(calls[0].1["quiet"]["scrub"], json!(["/etc/silo/guest-client.json"]));
+    assert_eq!(
+        calls[0].1["quiet"]["scrub"],
+        json!(["/etc/silo/guest-client.json"])
+    );
     drop(calls);
-    let followed = ask(&setup, &fake, &jobs, "main", frame(&setup.token, "operations.job.get", json!({"jobId": "job:fork-1"}))).await;
+    let followed = ask(
+        &setup,
+        &fake,
+        &jobs,
+        "main",
+        frame(
+            &setup.token,
+            "operations.job.get",
+            json!({"jobId": "job:fork-1"}),
+        ),
+    )
+    .await;
     assert!(followed.ok);
-    let other = ask(&setup, &fake, &jobs, "main", frame(&setup.token, "operations.job.get", json!({"jobId": "job:other"}))).await;
+    let other = ask(
+        &setup,
+        &fake,
+        &jobs,
+        "main",
+        frame(
+            &setup.token,
+            "operations.job.get",
+            json!({"jobId": "job:other"}),
+        ),
+    )
+    .await;
     assert_eq!(other.error.unwrap().code, "permission_denied");
 }
 
@@ -109,8 +160,26 @@ async fn a_fork_of_self_runs_without_the_token_file_and_its_job_is_followable() 
 async fn keep_promote_undo_and_drop_never_reach_the_engine() {
     let setup = setup(&[]);
     let (fake, jobs) = (Fake::default(), Jobs::default());
-    for method in ["changes.keep", "changes.promote", "changes.undo", "computers.delete", "changes.requests.keep", "secrets.save"] {
-        let reply = ask(&setup, &fake, &jobs, "main", frame(&setup.token, method, json!({"computerId": "fork-1", "forkId": "fork-1"}))).await;
+    for method in [
+        "changes.keep",
+        "changes.promote",
+        "changes.undo",
+        "computers.delete",
+        "changes.requests.keep",
+        "secrets.save",
+    ] {
+        let reply = ask(
+            &setup,
+            &fake,
+            &jobs,
+            "main",
+            frame(
+                &setup.token,
+                method,
+                json!({"computerId": "fork-1", "forkId": "fork-1"}),
+            ),
+        )
+        .await;
         assert!(!reply.ok, "{method}");
         assert_eq!(reply.error.unwrap().code, "permission_denied");
     }
@@ -125,7 +194,14 @@ async fn a_token_is_valid_only_for_its_own_computer_and_stops_when_revoked() {
     // The token file copied into a fork: the fork's folder is served as the fork.
     let in_fork = ask(&setup, &fake, &jobs, "fork-1", list()).await;
     assert_eq!(in_fork.error.unwrap().code, "permission_denied");
-    let forged = ask(&setup, &fake, &jobs, "main", frame("silo_gc_forged", "computers.list", json!({}))).await;
+    let forged = ask(
+        &setup,
+        &fake,
+        &jobs,
+        "main",
+        frame("silo_gc_forged", "computers.list", json!({})),
+    )
+    .await;
     assert!(!forged.ok);
     let allowed = ask(&setup, &fake, &jobs, "main", list()).await;
     let listed = allowed.result.unwrap();
@@ -139,7 +215,27 @@ async fn secrets_are_refused_unless_the_settings_name_them() {
     let denied = setup(&[]);
     let (fake, jobs) = (Fake::default(), Jobs::default());
     let params = json!({"computerId": "main", "newName": "x", "secrets": ["github"]});
-    assert!(!ask(&denied, &fake, &jobs, "main", frame(&denied.token, "checkpoints.fork", params.clone())).await.ok);
+    assert!(
+        !ask(
+            &denied,
+            &fake,
+            &jobs,
+            "main",
+            frame(&denied.token, "checkpoints.fork", params.clone())
+        )
+        .await
+        .ok
+    );
     let allowed = setup(&["github"]);
-    assert!(ask(&allowed, &fake, &jobs, "main", frame(&allowed.token, "checkpoints.fork", params)).await.ok);
+    assert!(
+        ask(
+            &allowed,
+            &fake,
+            &jobs,
+            "main",
+            frame(&allowed.token, "checkpoints.fork", params)
+        )
+        .await
+        .ok
+    );
 }

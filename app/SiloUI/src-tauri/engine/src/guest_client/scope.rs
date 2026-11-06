@@ -107,7 +107,11 @@ pub fn authorize(
     if !params.is_object() && !params.is_null() {
         return refuse("The parameters must be an object.");
     }
-    let params = if params.is_null() { json!({}) } else { params.clone() };
+    let params = if params.is_null() {
+        json!({})
+    } else {
+        params.clone()
+    };
     local_only(&params)?;
     let mut allowed = |params: Value, filter: Filter, starts_job: bool| {
         Ok(Authorized {
@@ -164,9 +168,7 @@ pub fn authorize(
         _ => {
             // The job methods: only a job this caller started.
             match text(&params, "jobId") {
-                Some(job) if topology.owns_job(caller, job) => {
-                    allowed(params, Filter::None, false)
-                }
+                Some(job) if topology.owns_job(caller, job) => allowed(params, Filter::None, false),
                 _ => refuse("That job was not started by this computer's client."),
             }
         }
@@ -317,18 +319,34 @@ mod tests {
             "network.publish",
             "engine.shutdown",
         ] {
-            let refusal = check(method, json!({"computerId": "fork-1", "forkId": "fork-1"}))
-                .unwrap_err();
+            let refusal =
+                check(method, json!({"computerId": "fork-1", "forkId": "fork-1"})).unwrap_err();
             assert!(refusal.0.contains(method), "{method}: {}", refusal.0);
         }
     }
 
     #[test]
     fn a_fork_of_self_is_allowed_and_another_computer_is_refused() {
-        assert!(check("checkpoints.fork", json!({"computerId": "main", "newName": "x"})).is_ok());
-        assert!(check("checkpoints.fork", json!({"computerId": "fork-1", "newName": "x"})).is_err());
-        assert!(check("checkpoints.fork", json!({"computerId": "stranger", "newName": "x"})).is_err());
-        assert!(check("checkpoints.create", json!({"computerId": "fork-1", "name": "x"})).is_err());
+        assert!(check(
+            "checkpoints.fork",
+            json!({"computerId": "main", "newName": "x"})
+        )
+        .is_ok());
+        assert!(check(
+            "checkpoints.fork",
+            json!({"computerId": "fork-1", "newName": "x"})
+        )
+        .is_err());
+        assert!(check(
+            "checkpoints.fork",
+            json!({"computerId": "stranger", "newName": "x"})
+        )
+        .is_err());
+        assert!(check(
+            "checkpoints.create",
+            json!({"computerId": "fork-1", "name": "x"})
+        )
+        .is_err());
         assert!(check("changes.diff", json!({"computerId": "fork-2"})).is_ok());
         assert!(check("changes.diff", json!({"computerId": "main"})).is_err());
         assert!(check("changes.diff", json!({"computerId": "stranger"})).is_err());
@@ -341,8 +359,16 @@ mod tests {
     #[test]
     fn a_request_is_for_own_forks_and_targets_only_the_caller() {
         assert!(check("changes.request", json!({"forkId": "fork-1"})).is_ok());
-        assert!(check("changes.request", json!({"forkId": "fork-1", "targetId": "main"})).is_ok());
-        assert!(check("changes.request", json!({"forkId": "fork-1", "targetId": "other"})).is_err());
+        assert!(check(
+            "changes.request",
+            json!({"forkId": "fork-1", "targetId": "main"})
+        )
+        .is_ok());
+        assert!(check(
+            "changes.request",
+            json!({"forkId": "fork-1", "targetId": "other"})
+        )
+        .is_err());
         assert!(check("changes.request", json!({"forkId": "stranger"})).is_err());
         assert!(check("changes.requests.show", json!({"requestId": "fr-mine"})).is_ok());
         assert!(check("changes.requests.show", json!({"requestId": "fr-other"})).is_err());
@@ -355,7 +381,14 @@ mod tests {
         assert!(check("computers.list", json!({"deviceId": "local"})).is_ok());
         assert!(check("operations.job.get", json!({"jobId": "job:mine"})).is_ok());
         assert!(check("operations.job.get", json!({"jobId": "job:theirs"})).is_err());
-        assert!(authorize("fork-1", &policy(&[]), "operations.job.get", &json!({"jobId": "job:mine"}), &World).is_err());
+        assert!(authorize(
+            "fork-1",
+            &policy(&[]),
+            "operations.job.get",
+            &json!({"jobId": "job:mine"}),
+            &World
+        )
+        .is_err());
     }
 
     #[test]
@@ -367,7 +400,13 @@ mod tests {
         assert!(granted.starts_job);
         let with_secret = json!({"computerId": "main", "newName": "x", "secrets": ["github"]});
         assert!(check("checkpoints.fork", with_secret.clone()).is_err());
-        let allowed = authorize("main", &policy(&["github"]), "checkpoints.fork", &with_secret, &World);
+        let allowed = authorize(
+            "main",
+            &policy(&["github"]),
+            "checkpoints.fork",
+            &with_secret,
+            &World,
+        );
         assert!(allowed.is_ok());
     }
 
@@ -381,7 +420,10 @@ mod tests {
         });
         filter_result(Filter::Computers, &mut computers, "main", &World);
         assert_eq!(computers["linux"]["computers"].as_array().unwrap().len(), 2);
-        assert!(computers["macos"]["computers"].as_array().unwrap().is_empty());
+        assert!(computers["macos"]["computers"]
+            .as_array()
+            .unwrap()
+            .is_empty());
         let mut requests = json!({"requests": [
             {"request": {"forkId": "fork-2"}}, {"request": {"forkId": "stranger"}}]});
         filter_result(Filter::Requests, &mut requests, "main", &World);

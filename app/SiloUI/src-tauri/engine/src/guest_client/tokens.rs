@@ -38,7 +38,8 @@ pub struct TokenStore {
 static LOCK: Mutex<()> = Mutex::new(());
 
 fn lock() -> std::sync::MutexGuard<'static, ()> {
-    LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    LOCK.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 fn hash_of(token: &str) -> String {
@@ -103,7 +104,9 @@ impl TokenStore {
             .mode(0o600)
             .open(&temporary)
             .map_err(io)?;
-        file.write_all(&text).and_then(|()| file.sync_all()).map_err(io)?;
+        file.write_all(&text)
+            .and_then(|()| file.sync_all())
+            .map_err(io)?;
         fs::rename(&temporary, self.file()).map_err(io)
     }
 
@@ -197,7 +200,10 @@ mod tests {
         assert!(store.verify(&minted.token, "fork-1").is_none());
         assert!(store.verify("silo_gc_nope", "main").is_none());
         let mode = fs::metadata(store.file()).unwrap();
-        assert_eq!(std::os::unix::fs::PermissionsExt::mode(&mode.permissions()) & 0o777, 0o600);
+        assert_eq!(
+            std::os::unix::fs::PermissionsExt::mode(&mode.permissions()) & 0o777,
+            0o600
+        );
     }
 
     #[test]

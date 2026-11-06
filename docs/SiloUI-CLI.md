@@ -65,6 +65,8 @@ the engine's message.
 | `silo tree` | the computers as a tree: what each was forked from, its state and pending review |
 
 A fork publishes the ports its source publishes (a recipe fork, the recipe's `ports`), each on a host port of its own. The engine does not copy published ports when it forks a computer, so `silo fork` does it with the same `publish` calls. The MCP server has `ports`, `publish`, `unpublish` and `ssh_name` tools.
+| `silo guest-client install <computer> [--binary PATH] [--group G]` / `revoke` / `status` | give a running Linux computer's own agent a scoped token, remove it, or read it; the token carries the agent's `fold` and `fork_secrets` settings ([in-guest client](SiloUI-IN-GUEST-CLIENT.md)) |
+| `silo --in-guest <list\|tree\|status\|fork\|diff\|fold --request\|requests\|steps>` | run inside a computer with its token: fork itself, diff and request review of its forks; never keeps, promotes, undoes or drops |
 | `silo job <id>` | wait for a job that is already running |
 | `silo mcp` | serve the MCP tools on stdio |
 

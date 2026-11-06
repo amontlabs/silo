@@ -38,7 +38,10 @@ pub struct Taken {
 }
 
 pub fn valid_id(id: &str) -> bool {
-    id.len() == 32 && id.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    id.len() == 32
+        && id
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
 impl Spool {
@@ -53,7 +56,9 @@ impl Spool {
             let path = self.dir.join(part);
             match fs::symlink_metadata(&path) {
                 Ok(meta) if meta.is_dir() => {}
-                Ok(_) => return Err("The bridge folder holds something that is not a folder.".into()),
+                Ok(_) => {
+                    return Err("The bridge folder holds something that is not a folder.".into())
+                }
                 Err(_) => fs::DirBuilder::new()
                     .recursive(true)
                     .mode(0o755)
@@ -192,18 +197,30 @@ mod tests {
     }
 
     fn request(id: &str) -> String {
-        format!(r#"{{"v":1,"id":"{id}","token":"silo_gc_x","method":"computers.list","params":{{}}}}"#)
+        format!(
+            r#"{{"v":1,"id":"{id}","token":"silo_gc_x","method":"computers.list","params":{{}}}}"#
+        )
     }
 
     #[test]
     fn a_request_is_taken_once_and_answered_atomically() {
         let (_dir, spool) = spool();
-        fs::write(spool.dir.join("req").join(format!("{ID}.json")), request(ID)).unwrap();
+        fs::write(
+            spool.dir.join("req").join(format!("{ID}.json")),
+            request(ID),
+        )
+        .unwrap();
         let taken = spool.take();
         assert_eq!(taken.len(), 1);
         assert_eq!(taken[0].frame.as_ref().unwrap().method, "computers.list");
         assert!(spool.take().is_empty());
-        let reply = GuestResponseFrame { v: 1, id: ID.into(), ok: true, result: Some(serde_json::json!({})), error: None };
+        let reply = GuestResponseFrame {
+            v: 1,
+            id: ID.into(),
+            ok: true,
+            result: Some(serde_json::json!({})),
+            error: None,
+        };
         spool.respond(&reply).unwrap();
         assert!(spool.dir.join("resp").join(format!("{ID}.json")).is_file());
     }
@@ -217,7 +234,11 @@ mod tests {
         let other = "fedcba9876543210fedcba9876543210";
         fs::write(req.join(format!("{other}.json")), request(ID)).unwrap();
         let big = "1111111111111111aaaaaaaaaaaaaaaa";
-        fs::write(req.join(format!("{big}.json")), vec![b' '; MAX_FRAME_BYTES + 1]).unwrap();
+        fs::write(
+            req.join(format!("{big}.json")),
+            vec![b' '; MAX_FRAME_BYTES + 1],
+        )
+        .unwrap();
         let taken = spool.take();
         assert_eq!(taken.len(), 3);
         assert!(taken.iter().all(|item| item.frame.is_err()));
@@ -228,9 +249,16 @@ mod tests {
     fn an_oversize_answer_is_replaced_by_an_error() {
         let (_dir, spool) = spool();
         let huge = serde_json::json!("x".repeat(MAX_FRAME_BYTES));
-        let reply = GuestResponseFrame { v: 1, id: ID.into(), ok: true, result: Some(huge), error: None };
+        let reply = GuestResponseFrame {
+            v: 1,
+            id: ID.into(),
+            ok: true,
+            result: Some(huge),
+            error: None,
+        };
         spool.respond(&reply).unwrap();
-        let written = fs::read_to_string(spool.dir.join("resp").join(format!("{ID}.json"))).unwrap();
+        let written =
+            fs::read_to_string(spool.dir.join("resp").join(format!("{ID}.json"))).unwrap();
         assert!(written.contains("too_large"));
     }
 }

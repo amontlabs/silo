@@ -75,6 +75,17 @@ All tests use the mock GitHub API, a local bare git remote and a loopback HTTP e
 
 VM checks: in-guest client from inside a Linux main; computer use on Linux and macOS (drive a fork's GUI from the host).
 
+5a VM check (in-guest client, Dev build, Linux main, a throwaway `e2e-*` computer; see `docs/SiloUI-IN-GUEST-CLIENT.md`):
+
+1. Build a guest `silo` (`cargo build -p silo-cli --release --target aarch64-unknown-linux-musl`) or reuse a Linux build.
+2. On the Mac, in a project whose `.silo/silo.yaml` has `agents: { openclaw: { fold: ask, fork_secrets: [] } }`: `silo guest-client install <main> --agent openclaw --binary <silo>`; `silo guest-client status <main>`.
+3. Confirm `ls <runtime home>/sandboxes/<main>/runtime/silo-bridge/{req,resp}` exists on the Mac and that inside the guest `ls -ld /.msb/silo-bridge/req` shows the same folder, writable by the agent's user, and `/etc/silo/guest-client.json` is readable by it.
+4. Inside the guest: `silo --in-guest list` (only main and its forks), `silo --in-guest fork main --name e2e-in-1`, `silo --in-guest diff e2e-in-1` after changing a file in the fork, `silo --in-guest fold e2e-in-1 --request`; then on the Mac `silo requests` shows it.
+5. Refusals, inside: `silo --in-guest fold e2e-in-1`, `--promote`, `undo main`, `drop e2e-in-1`, `secrets list` all print "not available from inside a computer". Hand-write a frame for `changes.keep` and `guest.exec` into `req/` and confirm `permission_denied` answers.
+6. In the fork `e2e-in-1`: `/etc/silo/guest-client.json` is gone; copying the parent's file there and calling `silo --in-guest list` is refused.
+7. `silo fold e2e-in-1 --promote` on the Mac, then inside the old main: `silo --in-guest list` is refused (token revoked).
+8. Clean up: `silo drop` the e2e computers, `silo guest-client revoke <main>`.
+
 ## Decisions
 - 2026-11-06, steps (AMO-69): a step is one command an agent runs on a computer through Silo (CLI exec/run, MCP run). Per-step checkpoints are off by default (`step_checkpoints: true` turns them on; the last `step_checkpoints_keep`, default 20, are kept per computer). `--from-step N` forks from the checkpoint taken after step N.
 

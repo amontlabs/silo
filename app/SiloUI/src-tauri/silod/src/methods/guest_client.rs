@@ -15,9 +15,7 @@ use silo_engine::{
     guest_client::{spool_dir, Spool, TokenStore},
 };
 
-use crate::{
-    dispatcher::{DispatchError, HandlerOutput},
-};
+use crate::dispatcher::{DispatchError, HandlerOutput};
 #[cfg(not(test))]
 use crate::guest_bridge::EngineRunner;
 
@@ -51,10 +49,7 @@ fn output(value: impl serde::Serialize) -> Result<HandlerOutput, DispatchError> 
         .map_err(|error| DispatchError::internal(error.to_string()))
 }
 
-fn status_of(
-    store: &TokenStore,
-    computer_id: &str,
-) -> Result<GuestClientStatus, DispatchError> {
+fn status_of(store: &TokenStore, computer_id: &str) -> Result<GuestClientStatus, DispatchError> {
     let record = store.status(computer_id).map_err(DispatchError::internal)?;
     Ok(GuestClientStatus {
         computer_id: computer_id.to_owned(),
@@ -65,7 +60,9 @@ fn status_of(
 }
 
 /// The computers as the engine lists them; the handler tests supply their own.
-async fn snapshot_for(context: &HandlerContext) -> Result<crate::guest_bridge::Snapshot, DispatchError> {
+async fn snapshot_for(
+    context: &HandlerContext,
+) -> Result<crate::guest_bridge::Snapshot, DispatchError> {
     #[cfg(test)]
     {
         let _ = context;
@@ -77,10 +74,7 @@ async fn snapshot_for(context: &HandlerContext) -> Result<crate::guest_bridge::S
     }
 }
 
-async fn enable(
-    params: &Value,
-    context: &HandlerContext,
-) -> Result<HandlerOutput, DispatchError> {
+async fn enable(params: &Value, context: &HandlerContext) -> Result<HandlerOutput, DispatchError> {
     let params: GuestClientEnableParams = context.decode_params(params)?;
     if !matches!(params.policy.fold.as_str(), "ask" | "auto-code") {
         return Err(DispatchError::internal(
@@ -98,8 +92,9 @@ async fn enable(
                 "The in-guest client is available for Linux computers only; that computer was not found.",
             )
         })?;
-    let paths = silo_engine::runtime::runtime_paths(context.silod_context().runtime_host().as_ref())
-        .map_err(DispatchError::internal)?;
+    let paths =
+        silo_engine::runtime::runtime_paths(context.silod_context().runtime_host().as_ref())
+            .map_err(DispatchError::internal)?;
     let app_data = context.silod_context().paths().app_data.clone();
     let result = tokio::task::spawn_blocking(move || {
         Spool::new(spool_dir(&paths.home, &name)).ensure()?;
@@ -118,10 +113,7 @@ async fn enable(
     output(result)
 }
 
-async fn revoke(
-    params: &Value,
-    context: &HandlerContext,
-) -> Result<HandlerOutput, DispatchError> {
+async fn revoke(params: &Value, context: &HandlerContext) -> Result<HandlerOutput, DispatchError> {
     let params: GuestClientComputerParams = context.decode_params(params)?;
     let store = TokenStore::new(&context.silod_context().paths().app_data);
     store
@@ -130,10 +122,7 @@ async fn revoke(
     output(status_of(&store, &params.computer_id)?)
 }
 
-async fn status(
-    params: &Value,
-    context: &HandlerContext,
-) -> Result<HandlerOutput, DispatchError> {
+async fn status(params: &Value, context: &HandlerContext) -> Result<HandlerOutput, DispatchError> {
     let params: GuestClientComputerParams = context.decode_params(params)?;
     let store = TokenStore::new(&context.silod_context().paths().app_data);
     output(status_of(&store, &params.computer_id)?)

@@ -20,7 +20,7 @@ use silo_api::{
 };
 use silo_engine::{
     context::EngineContext,
-    guest_client::{self, Filter, Spool, Topology, TokenStore},
+    guest_client::{self, Filter, Spool, TokenStore, Topology},
 };
 
 use crate::{
@@ -59,18 +59,29 @@ impl Snapshot {
             .into_iter()
             .flatten()
         {
-            if let Some(id) = computer.pointer("/configuration/id").and_then(Value::as_str) {
+            if let Some(id) = computer
+                .pointer("/configuration/id")
+                .and_then(Value::as_str)
+            {
                 snapshot.linux.insert(id.to_owned());
             }
         }
-        for node in tree.get("nodes").and_then(Value::as_array).into_iter().flatten() {
+        for node in tree
+            .get("nodes")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
             let Some(id) = node.get("id").and_then(Value::as_str) else {
                 continue;
             };
             if let Some(name) = node.get("name").and_then(Value::as_str) {
                 snapshot.names.insert(id.to_owned(), name.to_owned());
             }
-            let parent = node.get("parent").and_then(Value::as_str).map(str::to_owned);
+            let parent = node
+                .get("parent")
+                .and_then(Value::as_str)
+                .map(str::to_owned);
             snapshot.parents.insert(id.to_owned(), parent);
         }
         snapshot
@@ -81,7 +92,8 @@ impl Snapshot {
         let mut frontier = vec![root.to_owned()];
         while let Some(parent) = frontier.pop() {
             for (id, of) in &self.parents {
-                if of.as_deref() == Some(parent.as_str()) && id != root && found.insert(id.clone()) {
+                if of.as_deref() == Some(parent.as_str()) && id != root && found.insert(id.clone())
+                {
                     frontier.push(id.clone());
                 }
             }
@@ -96,7 +108,10 @@ pub struct Jobs(Mutex<HashMap<String, VecDeque<String>>>);
 
 impl Jobs {
     fn note(&self, computer: &str, job: &str) {
-        let mut all = self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut all = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let list = all.entry(computer.to_owned()).or_default();
         list.push_back(job.to_owned());
         while list.len() > KEPT_JOBS {
@@ -156,7 +171,10 @@ pub async fn handle_frame(
 ) -> GuestResponseFrame {
     let id = frame.id.clone();
     let Some(record) = store.verify(&frame.token, computer) else {
-        eprintln!("silod: guest client of {computer}: refused {} (token not valid)", frame.method);
+        eprintln!(
+            "silod: guest client of {computer}: refused {} (token not valid)",
+            frame.method
+        );
         return failure(
             &id,
             "permission_denied",
@@ -177,7 +195,10 @@ pub async fn handle_frame(
     ) {
         Ok(authorized) => authorized,
         Err(refusal) => {
-            eprintln!("silod: guest client of {computer}: refused {}", frame.method);
+            eprintln!(
+                "silod: guest client of {computer}: refused {}",
+                frame.method
+            );
             return failure(&id, "permission_denied", refusal.0);
         }
     };

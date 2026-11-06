@@ -368,6 +368,48 @@ binary serves the socket, not who connects to it.
 | Guest agent | In every Linux computer, MicroSandbox's `agentd` talks to the `msb` process on the Mac over virtio-serial (CBOR) for readiness, exec and heartbeats. Silo parses `msb exec` output (repository discovery, directory listings). Silo configures no virtio-vsock routes. | [`runtime/mod.rs`](../app/SiloUI/src-tauri/engine/src/runtime/mod.rs), [MicroSandbox `protocol/lib.rs`](https://github.com/superradcompany/microsandbox/blob/09df3d4b9d832adaede1fb9a198cfc660bfab8cd/crates/protocol/lib/lib.rs) |
 | Published ports | Guest services appear on Mac loopback; opening one in a browser runs guest content at a per-computer `.localhost` origin; a page there can still send cross-site requests to other loopback services ([`network.rs#L87`](../app/SiloUI/src-tauri/engine/src/network.rs#L87)). | [`network.rs`](../app/SiloUI/src-tauri/engine/src/network.rs) |
 
+### 9. The in-guest client: a scoped token for a computer's own agent
+
+Design and install steps: [the in-guest client](SiloUI-IN-GUEST-CLIENT.md). A Linux computer can be
+given a token (`silo guest-client install`) that lets an agent in it call a short list of engine
+methods through the `/.msb/silo-bridge` folder. The engine serves it from
+[`guest_bridge.rs`](../app/SiloUI/src-tauri/silod/src/guest_bridge.rs) and checks each call in
+[`guest_client/scope.rs`](../app/SiloUI/src-tauri/engine/src/guest_client/scope.rs).
+
+What the token can do: fork its own computer (secrets only those the settings list for that agent,
+none by default), start, stop and diff that computer's forks, ask for review of a fork, read the
+review requests and steps of itself and its forks, and follow the jobs it started. Results of the
+list methods are cut to the computer and its forks.
+
+What it cannot do, and the engine refuses before any handler runs: keep, promote, undo, throw away
+or drop (`changes.keep`, `changes.promote`, `changes.undo`, `changes.requests.keep`,
+`changes.requests.throwAway`, `computers.delete`), change secrets or GitHub access, run commands or
+move files in any computer, publish ports, act for another device, act on a computer that is
+neither itself nor its own fork, or mint, revoke or read tokens. `fold: ask` and `fold: auto-code`
+behave the same here: nothing is kept from inside.
+
+What a compromised guest gains: the agent already controls the computer, so the token adds the
+ability to make forks of it (a disk and CPU cost, bounded only by the settings' `fork_ram_budget`
+when the host CLI makes them, not for forks made from inside) and to put review requests in front of
+the person, whose summary text the agent wrote. A fork, request or summary can be flooded or
+misleading; a keep still shows the engine's own diff, pinned to its digest. It gains no host file,
+secret, GitHub token or other computer's data.
+
+- **Replay and theft.** Frames are files the guest writes, so anything in the guest that can read
+  the token file can use the token, and a copy of it elsewhere is refused unless it is in the
+  folder of the computer it was minted for. There is no per-request signature or nonce check; the
+  folder is the identity, and the token is the installer's intent. Request ids are consumed when
+  read, and answers expire after ten minutes.
+- **Forks.** A token verifies only for its own computer, so a fork that kept the file cannot use it
+  and forks made from inside also have the file scrubbed.
+- **Promote and undo.** Both revoke the tokens of the computers they swap, so the agent in a former
+  main stops; a new token is installed on purpose.
+- **Parsing.** The engine reads each request file with `O_NOFOLLOW`, regular files only, at most
+  256 KiB, valid names only, and writes answers by rename. The share itself still has no security
+  review (boundary 6); this adds a parser of guest-written JSON on the Mac.
+- **Logging.** The engine writes one line per call to its log: the computer, the method, and
+  whether it was refused. Parameters and tokens are not logged. There is no audit trail beyond that.
+
 The 2026-10-02 security review checked these surfaces in source
 ([report](SiloUI-CODE-REVIEW-PASS-3-SECURITY-2026-10-02.md)); it was not a live exploit campaign.
 

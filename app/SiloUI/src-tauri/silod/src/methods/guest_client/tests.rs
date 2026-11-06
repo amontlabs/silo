@@ -39,9 +39,12 @@ async fn enable_returns_the_token_once_and_the_engine_keeps_only_its_hash() {
     assert_eq!(enabled["tokenPath"], "/etc/silo/guest-client.json");
     assert_eq!(enabled["spoolDir"], "/.msb/silo-bridge");
 
-    let status = call(MethodName::GuestClientStatus, json!({"computerId": COMPUTER}))
-        .await
-        .unwrap();
+    let status = call(
+        MethodName::GuestClientStatus,
+        json!({"computerId": COMPUTER}),
+    )
+    .await
+    .unwrap();
     assert_eq!(status["enabled"], true);
     assert_eq!(status["policy"]["fold"], "ask");
     assert!(!status.to_string().contains(&token));
@@ -58,9 +61,12 @@ async fn enable_returns_the_token_once_and_the_engine_keeps_only_its_hash() {
     .unwrap();
     assert_ne!(again["token"], enabled["token"]);
 
-    let revoked = call(MethodName::GuestClientRevoke, json!({"computerId": COMPUTER}))
-        .await
-        .unwrap();
+    let revoked = call(
+        MethodName::GuestClientRevoke,
+        json!({"computerId": COMPUTER}),
+    )
+    .await
+    .unwrap();
     assert_eq!(revoked["enabled"], false);
 }
 
