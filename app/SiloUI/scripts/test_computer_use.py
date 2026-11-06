@@ -763,6 +763,17 @@ class Registration(Guest):
         cu.apply('ask')
         self.assertNotIn('permissions', json.loads(self.claude_settings.read_text()))
 
+    def test_ask_clears_auto_approval_even_when_the_agent_is_not_installed(self):
+        self.installed_agents = set()
+        self.claude_settings.parent.mkdir(parents=True)
+        self.claude_settings.write_text(json.dumps({'permissions': {'allow': ['Bash(ls)', 'mcp__cua-driver']}}))
+        self.codex.parent.mkdir(parents=True)
+        self.codex.write_text('[mcp_servers.cua-driver]\ncommand = "x"\ndefault_tools_approval_mode = "approve"\n')
+        cu.apply('ask')
+        self.assertEqual(json.loads(self.claude_settings.read_text())['permissions'], {'allow': ['Bash(ls)']})
+        self.assertNotIn('approve', self.codex.read_text())
+        self.assertIn('command = "x"', self.codex.read_text())
+
     def test_ask_keeps_other_rules(self):
         self.claude_settings.parent.mkdir(parents=True)
         self.claude_settings.write_text(json.dumps({'permissions': {'allow': ['Bash(ls)', 'mcp__cua-driver']}}))

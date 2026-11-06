@@ -851,6 +851,11 @@ def edit_codex(entry, approval):
         if name is not None:
             if LEGACY_SERVER.match(name) or (entry is not None and OWN_SERVER.match(name)):
                 continue
+            if entry is None and approval == 'ask' and OWN_SERVER.match(name):
+                # No registration to write (the agent is not installed), but an auto line
+                # that came with a kept fork must not outlive the ask mode.
+                lines = [line for line in lines
+                         if not re.match(r'\s*default_tools_approval_mode\s*=', line)]
             if name.split('.')[0] == 'hooks' and name != 'hooks' and LEGACY.search('\n'.join([name, *lines])):
                 continue
             if name == 'hooks':
@@ -896,6 +901,13 @@ def configure(names, approval):
     for name in names:
         if not binary_installed(AGENTS[name]):
             pending.append(name)
+            if approval == 'ask':
+                # Registers nothing; only removes the auto approval a kept fork may have left.
+                try:
+                    with as_user():
+                        EDITORS[name](None, 'ask')
+                except (Failure, OSError, ValueError, TypeError, tomllib.TOMLDecodeError) as error:
+                    log(f'could not clear the auto approval for {name}: {type(error).__name__}: {error}')
             continue
         try:
             with as_user():
