@@ -373,6 +373,14 @@ struct Registry {
 }
 
 impl Registry {
+    /// The approval chosen for computer `id` as the registry holds it now.
+    fn desired_approval_of(&self, id: &str) -> Option<crate::computer_use::Approval> {
+        self.entries
+            .iter()
+            .find(|entry| entry.record.id == id)
+            .and_then(|entry| entry.record.computer_use_desired_approval)
+    }
+
     fn entry(&mut self, id: &str) -> Option<&mut Entry> {
         self.entries.iter_mut().find(|entry| entry.record.id == id)
     }
@@ -537,7 +545,13 @@ impl Registry {
         let Some(entry) = self.entry(id) else {
             return false;
         };
-        entry.record = record.clone();
+        let mut record = record.clone();
+        // The approval chosen while the fork was being made (the CLI sets it right after the
+        // fork command) is newer than the copy the setup holds.
+        if entry.record.computer_use_desired_approval.is_some() {
+            record.computer_use_desired_approval = entry.record.computer_use_desired_approval;
+        }
+        entry.record = record;
         entry.state = next;
         entry.detail = None;
         entry.progress = None;
@@ -6785,6 +6799,9 @@ fn copy_for_fork(
     record.installed = true;
     record.inherited_access = true;
     fork_setup(&mut record, checkpoint);
+    if let Some(chosen) = registry().desired_approval_of(fork_id) {
+        record.computer_use_desired_approval = Some(chosen);
+    }
     // Persist while the fork is still in its creation state, where nothing else can start it.
     if !registry().creation_continues(fork_id) {
         return Err(Stop::Cancelled);
@@ -11667,6 +11684,39 @@ mod tests {
         registry()
             .set_desired_approval(id, approval, |_| Ok(()))
             .unwrap();
+    }
+
+    #[test]
+    fn an_approval_chosen_while_a_fork_is_made_survives_publishing_and_applies_at_first_start() {
+        use crate::computer_use::Approval;
+        let (mut registry, id) = registry_with(State::Copying);
+        // The fork carries its source's approval and fingerprint.
+        let mut copy = registry.entries[0].record.clone();
+        copy.installed = true;
+        copy.setup.computer_use = true;
+        copy.computer_use_approval = Some(Approval::Ask);
+        copy.computer_use_desired_approval = Some(Approval::Ask);
+        copy.computer_use_version = Some(templates::computer_use_version_for(Approval::Ask));
+        registry.entries[0].record = copy.clone();
+        // `--computer-use auto` sets it on the fork record before its setup publishes.
+        registry
+            .set_desired_approval(&id, Approval::Auto, |_| Ok(()))
+            .unwrap();
+        assert_eq!(registry.desired_approval_of(&id), Some(Approval::Auto));
+        assert!(registry.publish_installed(&id, &copy, State::SettingUp));
+        let record = registry.entries[0].record.clone();
+        assert_eq!(record.computer_use_desired_approval, Some(Approval::Auto));
+        // The first start's update applies the chosen mode, not the copied one.
+        assert!(record.computer_use_stale());
+        assert_eq!(record.computer_use_wanted_approval(), Approval::Auto);
+        registry.entries[0].state = State::Running;
+        let version = templates::computer_use_version_for(Approval::Auto);
+        assert!(registry
+            .finish_computer_use_update(&id, 1, &version, Approval::Auto, |_| Ok(()))
+            .unwrap());
+        let projection = computer_use_projection(&registry.entries[0].record);
+        assert_eq!(projection["approval"], "auto");
+        assert_eq!(projection["appliedApproval"], "auto");
     }
 
     #[test]
