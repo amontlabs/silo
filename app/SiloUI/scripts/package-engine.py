@@ -224,7 +224,10 @@ def linux_runtime_files(target, tauri=TAURI):
     for source, destination in LINUX_RESOURCE_TREES:
         if (runtime / source).is_dir():
             files.update(tree_files(runtime / source, f'resources/{destination}'))
+    # Every Linux Git build verifies HTTPS against the bundled bundle (git-runtime.mjs,
+    # needsCertificateBundle; host_push reads git-support/ssl/cacert.pem).
     for required in ('resources/git-support/share/git-core/templates', 'resources/git-support/lfs-transfer/git-lfs-transfer',
+                     'resources/git-support/ssl/cacert.pem',
                      'resources/microsandbox/licenses', 'resources/git-support/licenses'):
         if not any(name == required or name.startswith(f'{required}/') for name in files):
             raise RuntimeError(f'The staged runtime has no {required}. Run `npm run runtime:prepare` again.')

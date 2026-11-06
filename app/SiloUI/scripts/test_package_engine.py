@@ -221,6 +221,8 @@ class LinuxPackageTests(unittest.TestCase):
         hook = git / 'share/git-core/templates/hooks/pre-commit.sample'
         hook.write_text('#!/bin/sh\n')
         hook.chmod(0o755)
+        (git / 'ssl').mkdir(exist_ok=True)
+        (git / 'ssl/cacert.pem').write_text('certificates')
         (git / 'bin').mkdir(exist_ok=True)
         (git / 'bin/git').write_bytes(b'not shipped from here')
         (git / 'manifest.json').write_text(json.dumps({'targetTriple': target}))
@@ -262,6 +264,7 @@ class LinuxPackageTests(unittest.TestCase):
             'resources/git-support/licenses/git-GPL-2.0.txt': 0o644,
             'resources/git-support/share/git-core/templates/description': 0o644,
             'resources/git-support/share/git-core/templates/hooks/pre-commit.sample': 0o755,
+            'resources/git-support/ssl/cacert.pem': 0o644,
             'resources/git-support/lfs-transfer/manifest.json': 0o644,
             'resources/git-support/lfs-transfer/LICENSE-MIT.txt': 0o644,
             'resources/git-support/lfs-transfer/licenses/Go-LICENSE': 0o644,
@@ -274,6 +277,14 @@ class LinuxPackageTests(unittest.TestCase):
         self.assertEqual(self.read(archive, 'silo'), self.cli.read_bytes())
         self.assertEqual(self.read(archive, 'msb'), (self.tauri / f'binaries/msb-{X64}').read_bytes())
         self.assertEqual(checksum.read_text(), f'{hashlib.sha256(archive.read_bytes()).hexdigest()}  {LINUX_ARCHIVE}\n')
+
+    def test_the_certificate_bundle_linux_git_needs_is_required(self):
+        self.assertIn('needsCertificateBundle: true', (engine.APP / 'scripts/git-runtime.mjs').read_text())
+        self.assertIn('support.join("ssl/cacert.pem")', (engine.TAURI / 'engine/src/host_push.rs').read_text())
+        (self.tauri / 'runtime/git/ssl/cacert.pem').unlink()
+        with self.assertRaisesRegex(RuntimeError, 'has no resources/git-support/ssl/cacert.pem'):
+            self.package()
+        self.assertFalse(self.out.exists() and any(self.out.iterdir()))
 
     def test_the_paths_are_where_the_engine_looks(self):
         # bundled_tools::resolve: the executable's directory; bundled_runtime_library:
