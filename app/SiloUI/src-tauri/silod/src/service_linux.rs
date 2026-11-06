@@ -443,8 +443,9 @@ fn unregister(
         return Ok(());
     }
     let unit = unit_name(setup.channel);
-    // Asked while the unit runs: systemd may forget the path once the unit is inactive, but
-    // the cgroup itself stays while anything is left in it.
+    // Asked before the stop: systemd may forget the path once the unit is inactive, but the
+    // cgroup itself stays while anything is left in it. For a unit already inactive, the path
+    // is rebuilt from its slice's.
     let cgroup = control_group(tools, &unit);
     // Stopping waits for the engine's session end, which stops its computers.
     systemctl_checked(tools, &["disable", "--now", &unit])?;
@@ -465,15 +466,36 @@ fn unregister(
             );
         }
     }
+    // A session end that left computers running exits with a failure; the unit going away
+    // should not stay listed as failed.
+    let _ = systemctl(tools, &["reset-failed", &unit]);
     fs::remove_file(&path).map_err(|error| format!("Cannot remove {}: {error}", path.display()))?;
     systemctl_checked(tools, &["daemon-reload"])
 }
 
-/// The unit's cgroup (`/user.slice/.../<unit>`), when systemd names one.
+/// The unit's cgroup (`/user.slice/.../<unit>`): the one systemd names, or, for an inactive
+/// unit it names none for, its slice's cgroup joined with the unit's name.
 fn control_group(tools: &dyn ServiceTools, unit: &str) -> Option<String> {
-    let output = systemctl(tools, &["show", "--property=ControlGroup", "--value", unit]).ok()?;
-    let path = output.stdout.trim();
-    (output.success && path.starts_with('/') && !path.contains("..")).then(|| path.to_owned())
+    if let Some(path) = show_value(tools, unit, "ControlGroup").filter(|path| valid_cgroup(path)) {
+        return Some(path);
+    }
+    let slice = show_value(tools, unit, "Slice")?;
+    if !slice.ends_with(".slice") || slice.contains('/') {
+        return None;
+    }
+    let parent = show_value(tools, &slice, "ControlGroup").filter(|path| valid_cgroup(path))?;
+    Some(format!("{}/{unit}", parent.trim_end_matches('/')))
+}
+
+fn show_value(tools: &dyn ServiceTools, unit: &str, property: &str) -> Option<String> {
+    let property = format!("--property={property}");
+    let output = systemctl(tools, &["show", &property, "--value", unit]).ok()?;
+    let value = output.stdout.trim();
+    (output.success && !value.is_empty()).then(|| value.to_owned())
+}
+
+fn valid_cgroup(path: &str) -> bool {
+    path.starts_with('/') && !path.split('/').any(|part| part == "..")
 }
 
 /// The processes left in `cgroup` and below it, by PID with their command names. The unified
@@ -647,13 +669,22 @@ mod tests {
                     None => answer("", false),
                 },
                 ("systemctl", ["--user", "daemon-reload"]) => answer("", true),
+                // Like systemd: an active unit names its cgroup, an inactive one does not, and
+                // every unit is in app.slice, whose cgroup is the parent of `cgroup`.
                 ("systemctl", ["--user", "show", "--property=ControlGroup", "--value", unit]) => {
                     let active = self.active.borrow().get(*unit).copied() == Some("active");
                     match &self.cgroup {
+                        Some(cgroup) if *unit == "app.slice" => {
+                            answer(cgroup.rsplit_once('/').unwrap().0, true)
+                        }
                         Some(cgroup) if active => answer(cgroup, true),
                         _ => answer("", true),
                     }
                 }
+                ("systemctl", ["--user", "show", "--property=Slice", "--value", _]) => {
+                    answer("app.slice", true)
+                }
+                ("systemctl", ["--user", "reset-failed", _]) => answer("", true),
                 ("systemctl", ["--user", "enable", "--now", unit]) => {
                     self.enabled.borrow_mut().insert(unit.to_string(), true);
                     self.active.borrow_mut().insert(unit.to_string(), "active");
@@ -970,11 +1001,14 @@ mod tests {
         assert!(!setup.unit_path().exists());
         let calls = tools.calls.borrow().clone();
         assert_eq!(
-            calls[..3],
+            calls[..6],
             [
                 "systemctl --user show --property=ControlGroup --value \
                  org.silo.dev.engine.service",
+                "systemctl --user show --property=Slice --value org.silo.dev.engine.service",
+                "systemctl --user show --property=ControlGroup --value app.slice",
                 "systemctl --user disable --now org.silo.dev.engine.service",
+                "systemctl --user reset-failed org.silo.dev.engine.service",
                 "systemctl --user daemon-reload"
             ]
         );
@@ -1073,6 +1107,21 @@ mod tests {
         assert!(err.contains("msb (PID 4242), unknown (PID 4343)"), "{err}");
         assert!(err.contains("silod --service register"), "{err}");
         assert!(!setup.unit_path().exists());
+        assert!(tools
+            .calls
+            .borrow()
+            .contains(&"systemctl --user reset-failed org.silo.dev.engine.service".to_owned()));
+
+        // A unit that is already inactive (its stop failed, the survivors stayed) names no
+        // cgroup; the path comes from its slice, and the survivors are still named.
+        assert_eq!(run("register", &setup, &tools).0, Ok(0));
+        tools
+            .active
+            .borrow_mut()
+            .insert(unit_name(Channel::Development), "failed");
+        let (result, _, err) = run("unregister", &setup, &tools);
+        assert_eq!(result, Ok(0));
+        assert!(err.contains("msb (PID 4242), unknown (PID 4343)"), "{err}");
     }
 
     #[test]
