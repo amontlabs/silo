@@ -23,12 +23,13 @@ x main 'ps -eo pid,user,comm,args | grep -i "[o]penclaw" | cut -c1-150'
 x main 'pgrep -fc "[o]penclaw-gateway"' | sed 's/^/gateway processes in main: /'
 check "O1 the gateway runs in main as openclaw-gateway" $([ "$(x main 'pgrep -c -f "[o]penclaw-gateway"' | tail -1)" -ge 1 ]; echo $?) ""
 echo "== O2 control fork of main (no recipe lists): the gateway comes up again, the files stay"
-c=e2e-final-claw-ctl; "$SILO" fork main --name $c > "$RAW/claw-ctl.out" 2>&1; "$SILO" start $c >/dev/null 2>&1; say "settle 45 s"; sleep 45
+c=e2e-final-claw-ctl; "$SILO" fork main --name $c > "$RAW/claw-ctl.out" 2>&1; "$SILO" start $c >/dev/null 2>&1; say "waiting up to 150 s for the gateway to appear in the control fork"
+for i in $(seq 30); do [ "$(x $c 'pgrep -c -f "[o]penclaw-gateway"' | tail -1)" -ge 1 ] && break; sleep 5; done; say "control fork: gateway seen after ~$((i*5)) s (30 loops = not seen)"
 x $c 'ps -eo pid,comm,args | grep -i "[o]penclaw" | cut -c1-110'; "$SILO" status $c | grep -i quiet
 check "O2 control: gateway runs in the fork (what quiet must prevent)" $([ "$(x $c 'pgrep -c -f "[o]penclaw-gateway"' | tail -1)" -ge 1 ]; echo $?) ""
 xs $c 'test -e ~/.openclaw/.env'; check "O2 control: .env is carried (no scrub list)" $? ""
 drop_one $c
-echo "== O3 quiet fork: --recipe-file with quiet [openclaw-gateway, openclaw], scrub [~/.openclaw/credentials, ~/.openclaw/.env]"
+echo "== O3 quiet fork: --recipe-file with quiet [openclaw-gateway, openclaw], scrub [/home/silo/.openclaw/credentials, /home/silo/.openclaw/.env]"
 q=e2e-final-claw; "$SILO" fork main --name $q --recipe-file "$PROJ/.silo/recipes/openclaw.yaml" > "$RAW/claw-fork.out" 2>&1; "$SILO" start $q >/dev/null 2>&1
 check "O3 fork started" $([ "$(state $q)" = running ]; echo $?) ""
 say "settle 45 s"; sleep 45

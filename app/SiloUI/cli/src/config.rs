@@ -515,6 +515,11 @@ impl Recipe {
                 return Err(format!("{key}: entries may not be empty"));
             }
         }
+        if let Some(path) = self.scrub.iter().find(|path| !path.starts_with('/')) {
+            return Err(format!(
+                "scrub: {path} must be an absolute path (the engine does not expand ~)"
+            ));
+        }
         if self
             .test
             .as_deref()
@@ -668,8 +673,8 @@ const BUILT_IN: &[(&str, &str)] = &[
             "  openclaw-gateway: openclaw gateway\n",
             "# CONFIRM the process names; a fork stops the gateway so it does not answer chat channels twice\n",
             "quiet: [openclaw-gateway, openclaw]\n",
-            "# credentials/ is the folder Silo already keeps out of reviews; CONFIRM where channel logins live\n",
-            "scrub: [~/.openclaw/credentials]\n",
+            "# credentials/ holds channel logins and .env the channel tokens (both checked in the final run); the engine needs absolute paths\n",
+            "scrub: [/home/silo/.openclaw/credentials, /home/silo/.openclaw/.env]\n",
         ),
     ),
     (
@@ -686,8 +691,8 @@ const BUILT_IN: &[(&str, &str)] = &[
             "  hermes-gateway: hermes gateway\n",
             "# CONFIRM the process names; Hermes also has a built-in cron scheduler that the gateway runs\n",
             "quiet: [hermes-gateway, hermes]\n",
-            "# CONFIRM: ~/.hermes is the install folder; the README does not say where API keys live\n",
-            "scrub: [~/.hermes/.env]\n",
+            "# CONFIRM: ~/.hermes is the install folder; the README does not say where API keys live (the engine needs absolute paths)\n",
+            "scrub: [/home/silo/.hermes/.env]\n",
         ),
     ),
     (
@@ -811,11 +816,12 @@ mod tests {
     #[test]
     fn a_full_recipe_parses() {
         let recipe = parse_recipe(
-            "quiet: [poller, cron]\nscrub: [~/.env]\nkeep:\n  restart: [web]\n  migrate: [make migrate]\n  after: [make test]\n",
+            "quiet: [poller, cron]\nscrub: [/root/.env]\nkeep:\n  restart: [web]\n  migrate: [make migrate]\n  after: [make test]\n",
         )
         .unwrap();
         assert_eq!(recipe.quiet, ["poller", "cron"]);
-        assert_eq!(recipe.scrub, ["~/.env"]);
+        assert_eq!(recipe.scrub, ["/root/.env"]);
+        assert!(parse_recipe("scrub: [~/.env]\n").unwrap_err().contains("absolute"));
         assert_eq!(recipe.keep.restart, ["web"]);
         assert_eq!(recipe.keep.migrate, ["make migrate"]);
         assert_eq!(recipe.keep.after, ["make test"]);
@@ -824,8 +830,8 @@ mod tests {
     #[test]
     fn resident_agent_recipes_are_valid_and_quiet_their_gateway() {
         for (name, program, token_path) in [
-            ("openclaw", "openclaw", "~/.openclaw/credentials"),
-            ("hermes", "hermes", "~/.hermes/.env"),
+            ("openclaw", "openclaw", "/home/silo/.openclaw/credentials"),
+            ("hermes", "hermes", "/home/silo/.hermes/.env"),
         ] {
             let recipe = built_in(name).unwrap();
             let service = format!("{program}-gateway");

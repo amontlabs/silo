@@ -7,4 +7,4 @@ setup:
 services:
   openclaw-gateway: openclaw gateway
 quiet: [openclaw-gateway, openclaw]
-scrub: [~/.openclaw/credentials, ~/.openclaw/.env]
+scrub: [/home/silo/.openclaw/credentials, /home/silo/.openclaw/.env]
