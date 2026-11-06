@@ -19,6 +19,8 @@ pub mod computer_use;
 pub mod context;
 pub mod creation_inputs;
 pub mod credential_access;
+#[cfg(target_os = "linux")]
+pub mod credential_file_store;
 pub mod credential_store;
 pub mod credentials_usage;
 pub mod dependencies;
