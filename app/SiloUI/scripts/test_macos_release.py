@@ -242,6 +242,30 @@ int main(int argc, char **argv) {
         self.seal(virtualization=False)
         self.verify(False)
 
+    def test_silo_command_missing_entitled_or_not_hardened_rejected(self):
+        cli = self.binaries / 'silo'
+        self.sign(cli, entitlements={'com.apple.security.cs.disable-library-validation': True})
+        self.seal()
+        self.verify(False)
+        self.sign(cli, hardened=False)
+        self.seal()
+        self.verify(False)
+        cli.unlink()
+        self.seal()
+        self.verify(False)
+
+    def test_bundle_cli_copies_the_command_as_an_executable(self):
+        from build_desktop import bundle_cli
+        source = self.root / 'built-silo'
+        source.write_bytes(b'cli')
+        source.chmod(0o600)
+        app = self.case / 'Copy.app'
+        (app / 'Contents/MacOS').mkdir(parents=True)
+        bundle_cli(app, source)
+        copy = app / 'Contents/MacOS/silo'
+        self.assertEqual(copy.read_bytes(), b'cli')
+        self.assertEqual(copy.stat().st_mode & 0o777, 0o755)
+
     def test_non_hardened_helper_rejected(self):
         self.sign(self.binaries / 'git', hardened=False)
         self.seal()
@@ -266,12 +290,14 @@ class MacOSReleaseSignerEnvironmentTests(unittest.TestCase):
             app = root / 'Silo.app'
             (app / 'Contents/MacOS').mkdir(parents=True)
             (app / 'Contents/MacOS/msb').write_bytes(b'x')
+            (root / 'silo').write_bytes(b'cli')
             calls = []
             def record(name):
                 return lambda *args, **kwargs: calls.append((name, args, kwargs))
             with patch.dict(os.environ, {'TAURI_SIGNING_PRIVATE_KEY': 'k'}), \
                     patch.object(sys, 'argv', [str(script), str(app), str(root / 'out'), '--engine', str(root / 'silod'),
-                                               '--engine-build', 'silo-abc']), \
+                                               '--cli', str(root / 'silo'), '--engine-build', 'silo-abc']), \
+                    patch.object(module, 'bundle_cli', side_effect=record('bundle_cli')), \
                     patch.object(module, 'sign_helpers', side_effect=record('sign_helpers')), \
                     patch.object(module, 'embed_engine', side_effect=record('embed')), \
                     patch.object(module, 'seal_app', side_effect=record('seal')), \
@@ -283,16 +309,50 @@ class MacOSReleaseSignerEnvironmentTests(unittest.TestCase):
                     module.main()
             # The engine copies the finally signed tools, then the app is sealed around it.
             self.assertEqual([name for name, *_ in calls],
-                             ['sign_helpers', 'embed', 'seal', 'verify', 'verify_engine'])
-            _, args, kwargs = calls[1]
+                             ['bundle_cli', 'sign_helpers', 'embed', 'seal', 'verify', 'verify_engine'])
+            _, args, kwargs = calls[2]
             self.assertEqual(args[1], (root / 'silod').resolve())
             self.assertEqual((kwargs['identifier'], kwargs['build']), ('org.silo.preview', 'silo-abc'))
 
+    def test_the_packager_puts_the_silo_command_in_the_app_before_signing_or_fails(self):
+        script = SCRIPT.with_name('package-macos-release.py')
+        with patch.object(sys, 'path', [str(script.parent), *sys.path]):
+            spec = importlib.util.spec_from_file_location('package_macos_release_cli', script)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+        with tempfile.TemporaryDirectory(prefix='silo-cli-package-') as temporary:
+            root = Path(temporary)
+            app = root / 'Silo.app'
+            (app / 'Contents/MacOS').mkdir(parents=True)
+            (app / 'Contents/MacOS/msb').write_bytes(b'x')
+            seen = []
+
+            def signing(bundle, identity='-'):
+                copy = bundle / 'Contents/MacOS/silo'
+                seen.append((copy.read_bytes(), copy.stat().st_mode & 0o777))
+                raise RuntimeError('stop')
+
+            def run(cli):
+                argv = [str(script), str(app), str(root / 'out'), '--engine', str(root / 'silod'), '--cli', str(cli)]
+                with patch.dict(os.environ, {'TAURI_SIGNING_PRIVATE_KEY': 'k'}), \
+                        patch.object(sys, 'argv', argv), \
+                        patch.object(module, 'sign_helpers', side_effect=signing):
+                    module.main()
+
+            with self.assertRaisesRegex(RuntimeError, 'silo command is missing'):
+                run(root / 'absent')
+            self.assertEqual(seen, [])
+            (root / 'silo').write_bytes(b'cli')
+            with self.assertRaisesRegex(RuntimeError, 'stop'):
+                run(root / 'silo')
+            self.assertEqual(seen, [(b'cli', 0o755)])
+
     def test_the_release_workflow_builds_silod_and_passes_it_to_the_packager(self):
         workflow = (SCRIPT.parent.parent.parent.parent / '.github/workflows/release-platform.yml').read_text()
-        self.assertIn('cargo build --locked --release -p silod --target "$RUNTIME_TARGET"', workflow)
+        self.assertIn('cargo build --locked --release -p silod -p silo-cli --target "$RUNTIME_TARGET"', workflow)
         line = next(l for l in workflow.splitlines() if 'package-macos-release.py' in l)
         self.assertIn('--engine "src-tauri/target/release-compile/$RUNTIME_TARGET/release/silod"', line)
+        self.assertIn('--cli "src-tauri/target/release-compile/$RUNTIME_TARGET/release/silo"', line)
 
     def run_packager(self, file_key, signer_exit=0, product_name="Silo"):
         from channel_names import channel_names
@@ -303,6 +363,7 @@ class MacOSReleaseSignerEnvironmentTests(unittest.TestCase):
             app = root / f'{product_name}.app'
             (app / 'Contents/MacOS').mkdir(parents=True)
             (app / 'Contents/MacOS/msb').write_bytes(b'fixture runtime')
+            (root / 'silo').write_bytes(b'cli')
             key = 'disposable-inline-fixture'
             if file_key:
                 key_file = root / 'fixture.key'
@@ -326,8 +387,9 @@ class MacOSReleaseSignerEnvironmentTests(unittest.TestCase):
                            'TAURI_SIGNING_PRIVATE_KEY_PASSWORD': 'disposable-password-sentinel'}
             with patch.dict(os.environ, environment), \
                     patch.object(sys, 'argv', [str(script), str(app), str(root / 'output'),
-                                               '--engine', str(root / 'silod'), '--engine-build', 'silo-test']), \
-                    patch.object(module, 'sign_helpers'), patch.object(module, 'seal_app'), \
+                                               '--engine', str(root / 'silod'), '--cli', str(root / 'silo'),
+                                               '--engine-build', 'silo-test']), \
+                    patch.object(module, 'bundle_cli'), patch.object(module, 'sign_helpers'), patch.object(module, 'seal_app'), \
                     patch.object(module, 'verify_bundle'), \
                     patch.object(module, 'verify_engine'), patch.object(module, 'embed_engine'), \
                     patch.object(module, 'channel_names', return_value=names, create=True), \
