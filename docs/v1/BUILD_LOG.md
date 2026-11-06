@@ -6,7 +6,7 @@ Tracker: Linear project "Silo v1: git for agent computers" (P-AMO-8).
 
 ## Resume
 
-- **Phase:** 5 on branch `claude/silo-v1-phase-5`, PR open. Phases 0-4 merged (#60-#64).
+- **Phase:** 6 on branch `claude/silo-v1-phase-6`. Phases 0-5 merged (#60-#65).
 - **Done in phase 5 (reviewed, VM-checked):** in-guest client (AMO-85), Mac mini remote + one pending-changes list (AMO-86), hosted reviewer (AMO-87, service not deployed), host computer use for forks (AMO-70).
 - **Blocked on the owner:** Keychain repair for the Dev engine (phase 4 credentials check; phase 1/3 secret carry-over). Leftover computers to drop: `silo-baseline-8fa22f`, `e2e-p3-macsrc`, `e2e-p3-macsrc-before-20261105-2253`. Upstream drafts to post: `docs/v1/upstream/`.
 - **Next action:** merge the phase 5 PR when CI is green; then phase 6 (OpenClaw/Hermes recipes, final run, README/demo/numbers drafts, release prep).
@@ -85,6 +85,15 @@ VM checks: in-guest client from inside a Linux main; computer use on Linux and m
 6. In the fork `e2e-in-1`: `/etc/silo/guest-client.json` is gone; copying the parent's file there and calling `silo --in-guest list` is refused.
 7. `silo fold e2e-in-1 --promote` on the Mac, then inside the old main: `silo --in-guest list` is refused (token revoked).
 8. Clean up: `silo drop` the e2e computers, `silo guest-client revoke <main>`.
+
+### Phase 6 (AMO-71, AMO-80; final run)
+
+| Slice | What |
+|---|---|
+| 6a | OpenClaw and Hermes recipes with quiet and scrub presets (done; lines marked CONFIRM are checked in the final run) |
+| 6b | Final run on the finished Dev build, Linux and macOS, evidence in `docs/v1/evidence/final/`: demo flow (up, fork -n 4, review, keep, undo, throw away), quiet forks, a macOS fork, one OpenClaw recipe, computer use, promote over main; measurements (Linux fork of a running main, 3 cold runs; -n 4 from the warm checkpoint; fork RAM with `footprint`; macOS fork-to-ready) |
+| 6c | Release prep under `docs/v1/release/`: workflow dry run, artifacts, notes, the owner's remaining steps |
+| 6d | README, 60-s demo script and numbers post drafts from the 6b numbers only (owner approves public text) |
 
 ## Decisions
 - 2026-11-06, steps (AMO-69): a step is one command an agent runs on a computer through Silo (CLI exec/run, MCP run). Per-step checkpoints are off by default (`step_checkpoints: true` turns them on; the last `step_checkpoints_keep`, default 20, are kept per computer). `--from-step N` forks from the checkpoint taken after step N.
