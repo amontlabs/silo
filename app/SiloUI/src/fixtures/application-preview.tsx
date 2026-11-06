@@ -3,6 +3,7 @@ import { fixtureLogPage, type LogLoader } from "@/features/application/model/log
 import { useMemo, useState } from "react"
 import { fixtureDirectoryLoader } from "./directory-loader"
 import { fixtureFileTransfers } from "./file-transfers"
+import { fixtureListReviewRequests } from "./pending-changes"
 import { useApplicationFixture } from "@/fixtures/application-state"
 import { ApplicationApp } from "@/features/application/application-app"
 import type { ApplicationActions, ApplicationSource, SshAccessRequest, SshAccessComputer } from "@/features/application/model/application-source"
@@ -97,6 +98,7 @@ function FixtureApplicationPreview({ source, actions, backupPreviewMode, initial
       restoreCheckpoint: fixture.restoreCheckpoint,
       deleteCheckpoint: fixture.deleteCheckpoint,
       listComputerDirectory,
+      listReviewRequests: fixtureListReviewRequests,
       fileTransfers,
       queryLogs,
       ...actions,

@@ -1,4 +1,4 @@
-import { Activity, Bell, Boxes, CircleAlert, Code, Download, File, GitFork, History, KeyRound, Monitor, Network, Play, Plus, RotateCw, Settings2, Square, Terminal, Trash2, Upload, type LucideIcon } from "lucide-react"
+import { Activity, Bell, Boxes, CircleAlert, Code, Download, File, GitFork, GitPullRequestArrow, History, KeyRound, Monitor, Network, Play, Plus, RotateCw, Settings2, Square, Terminal, Trash2, Upload, type LucideIcon } from "lucide-react"
 
 import type { ApplicationActions, ApplicationSource } from "@/features/application/model/application-source"
 import type { ApplicationInitialRoute } from "@/features/application/model/use-application-navigation"
@@ -52,6 +52,7 @@ export function applicationCommands(source: ApplicationSource, actions: Applicat
   const destinations: { label: string; icon: LucideIcon; route: ApplicationInitialRoute; keywords?: string[] }[] = [
     { label: "All computers", icon: Boxes, route: { computerSection: "overview" }, keywords: ["overview", "computers", "configurations"] },
     ...computerSections.map(({ section, label, icon, keywords }) => ({ label, icon, route: { computerSection: section }, keywords: [...keywords] })),
+    { label: "Pending changes", icon: GitPullRequestArrow, route: { tab: "changes" }, keywords: ["review", "requests", "forks", "keep"] },
     { label: "GitHub", icon: GitFork, route: { tab: "github" }, keywords: ["git", "account", "access"] },
     { label: "Secrets", icon: KeyRound, route: { tab: "secrets" }, keywords: ["tokens", "credentials"] },
     { label: "Settings", icon: Settings2, route: { settingsSection: "general" }, keywords: ["general", "preferences", "applications", "computer use", "agents", "approval"] },

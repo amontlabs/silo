@@ -14,9 +14,10 @@ import type {
   SiloProgressEvent,
   SiloProtocolError,
 } from "@/contracts/silo"
+import type { RequestList } from "@/desktop/production-schemas"
 import type { ApplicationPreferenceSelection } from "@/features/preferences/model/application-preferences"
 
-export type ApplicationTab = "computers" | "github" | "secrets" | "system" | "settings"
+export type ApplicationTab = "computers" | "changes" | "github" | "secrets" | "system" | "settings"
 export type SettingsSection = "general" | "connections" | "notifications"
 export type ComputerSection = "overview" | "files" | "logs" | "network" | "activity"
 export type ComputerDetailSection = Exclude<ComputerSection, "overview">
@@ -321,6 +322,8 @@ export interface ApplicationSource {
 }
 
 export interface ApplicationActions {
+  /** The review requests of this device and, with `allDevices`, every connected device. */
+  listReviewRequests?: (options?: { status?: "open" | "kept" | "thrown-away" | "all"; allDevices?: boolean }) => Promise<RequestList>
   createCheckpoint?: (computer: string, name: string) => Promise<void>
   forkCheckpoint?: (computer: string, checkpointId: string | null, newName: string) => Promise<void>
   restoreCheckpoint?: (computer: string, checkpointId: string) => Promise<void>

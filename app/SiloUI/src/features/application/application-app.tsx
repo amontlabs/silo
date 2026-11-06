@@ -31,6 +31,7 @@ import { lazyPage, preloadWhenIdle } from "@/features/application/components/laz
 import { PanelContent } from "@/features/application/components/panel-content"
 import { SystemIssuePage } from "@/features/application/pages/system-issue-page"
 import { FileTransfersProvider } from "@/features/application/components/use-file-transfers"
+import { PendingChangesPage } from "@/features/application/pages/pending-changes-page"
 import { ComputersPage, computerSectionPages } from "@/features/application/pages/computers-page"
 import { applicationPreferenceChanges, type ApplicationPreferenceSelection } from "@/features/preferences/model/application-preferences"
 import { useStableCallback } from "@/lib/use-stable-callback"
@@ -120,6 +121,8 @@ type ApplicationAppProps = {
   routeRequest?: ApplicationInitialRoute
   /** The desktop main window's Quit confirmation hook-up (`connectQuitConfirmation`). */
   connectQuitConfirmation?: ConnectQuitConfirmation
+  /** Opens the review screen for a pending change, naming its device when it is not this one. Until the review screen exists, nothing opens. */
+  onOpenRequest?: (requestId: string, deviceId?: string) => void
 }
 
 export function ApplicationApp(props: ApplicationAppProps) {
@@ -131,7 +134,7 @@ export function ApplicationApp(props: ApplicationAppProps) {
   return <SettingsProvider initialSettings={initialSettings}><ApplicationContent {...props} /></SettingsProvider>
 }
 
-function ApplicationContent({ source, actions, backup, initialRoute, routeRequest, connectQuitConfirmation }: ApplicationAppProps) {
+function ApplicationContent({ source, actions, backup, initialRoute, routeRequest, connectQuitConfirmation, onOpenRequest }: ApplicationAppProps) {
   useBackendNotices()
   useEffect(() => preloadWhenIdle(secondaryPages), [])
   const updates = useUpdates()
@@ -450,6 +453,11 @@ function ApplicationContent({ source, actions, backup, initialRoute, routeReques
             onCreateComputer={canCreateComputer && !installingUpdate ? requestNewComputer : undefined}
           />
         )}
+      </section>
+      <section id="application-panel-changes" role="region" aria-labelledby="application-nav-changes" hidden={visibleTab !== "changes"}>
+        <PanelContent active={visibleTab === "changes"}>
+          <PendingChangesPage listReviewRequests={actions.listReviewRequests} active={visibleTab === "changes"} onOpenRequest={(requestId, deviceId) => onOpenRequest?.(requestId, deviceId)} />
+        </PanelContent>
       </section>
       <section id="application-panel-github" role="region" aria-labelledby="application-nav-github" hidden={visibleTab !== "github"} className="h-full min-h-0 overflow-hidden">
         <PanelContent active={visibleTab === "github"}>
