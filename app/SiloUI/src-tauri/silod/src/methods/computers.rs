@@ -33,6 +33,7 @@ use silo_api::{
             ComputerIdentitiesParams, ComputerIdentity, ComputerListParams, ComputerShellParams,
             ComputersListResult, LaunchStatus,
         },
+        credentials_used::ComputerCredentialsParams,
         logs::{LogSource, LogsExportParams, LogsQueryParams},
         macos::{
             MacosDisplayConnectParams, MacosDisplayConnectResult, MacosDisplayResizeParams,
@@ -901,6 +902,83 @@ fn canonical_storage(state: impl Serialize) -> Result<Value, String> {
     serde_json::to_value(state).map_err(|error| error.to_string())
 }
 
+/// `computers.credentials`: the secrets this computer used and the attempts that were blocked.
+async fn read_credentials(
+    context: &HandlerContext,
+    params: ComputerCredentialsParams,
+) -> Result<HandlerOutput, DispatchError> {
+    require_local_device(context, params.device_id.as_deref())?;
+    let host = SilodRuntimeHost::new(context);
+    let file = usage_file(&host, &params.computer_id)?;
+    let usage = tokio::task::spawn_blocking(move || {
+        silo_engine::credentials_usage::read_usage(&[file], params.since)
+    })
+    .await
+    .map_err(join_failure)?;
+    Ok(plain(encode(usage)?))
+}
+
+/// The proxy's event file for a computer of either kind.
+fn usage_file(host: &SilodRuntimeHost, computer_id: &str) -> Result<PathBuf, DispatchError> {
+    match resolve(host, computer_id)? {
+        Resolved::Linux(name) => {
+            let paths = silo_engine::runtime::runtime_paths(host).map_err(invalid)?;
+            Ok(silo_engine::credentials_usage::linux_usage_file(
+                &paths.home,
+                &name,
+            ))
+        }
+        Resolved::Macos => Ok(silo_engine::macos_computers::usage_file(
+            &host.context.paths().app_data,
+            computer_id,
+        )),
+    }
+}
+
+/// What the review-request `credentials` line reads: the proxy's files for the fork.
+struct ProxyCredentials {
+    host: SilodRuntimeHost,
+}
+
+impl silo_engine::fold_requests::CredentialSource for ProxyCredentials {
+    fn for_fork(&self, fork_id: &str) -> silo_api::methods::review_requests::CredentialUsage {
+        use silo_api::methods::review_requests::{CredentialBlock, CredentialUsage, CredentialUse};
+        let Ok(file) = usage_file(&self.host, fork_id) else {
+            return CredentialUsage::default();
+        };
+        let usage = silo_engine::credentials_usage::read_usage(&[file], None);
+        CredentialUsage {
+            used: usage
+                .used
+                .into_iter()
+                .map(|row| CredentialUse {
+                    secret: row.secret,
+                    host: row.host,
+                    method: row.method,
+                    count: row.count,
+                })
+                .collect(),
+            blocked: usage
+                .blocked
+                .into_iter()
+                .map(|row| CredentialBlock {
+                    host: row.host,
+                    method: row.method,
+                    count: row.count,
+                    reason: row.reason,
+                })
+                .collect(),
+        }
+    }
+}
+
+/// Installs the proxy's files as the source of the review requests' credentials line.
+pub fn install_credential_source(context: Arc<SilodContext>) {
+    silo_engine::fold_requests::set_credential_source(Box::new(ProxyCredentials {
+        host: SilodRuntimeHost::for_engine(context),
+    }));
+}
+
 // MARK: Lifecycle
 
 /// Linux start/stop/restart, and macOS start/stop, as jobs.
@@ -1685,6 +1763,7 @@ async fn route(
             read_setup_activity(context).await
         }
         MethodName::ComputersLaunch => read_launch_status(context, decoded!()).await,
+        MethodName::ComputersCredentials => read_credentials(context, decoded!()).await,
         MethodName::LogsQuery => read_logs(context, decoded!()).await,
         MethodName::LogsExport => begin_logs_export(context, decoded!()).await,
         MethodName::StorageRead => read_storage(context, decoded!()).await,
@@ -1942,6 +2021,61 @@ pub(crate) mod tests {
                 .unwrap(),
             json!({"enabled": false, "computerIds": [], "lastPass": null})
         );
+    }
+
+    #[tokio::test]
+    async fn credentials_reads_the_sandbox_event_file_without_values() {
+        let f = fixture();
+        seed_linux(&f);
+        let host = SilodRuntimeHost::new(&f.context);
+        let paths = silo_engine::runtime::runtime_paths(&host).unwrap();
+        let file = silo_engine::credentials_usage::linux_usage_file(&paths.home, "dev");
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(
+            &file,
+            "{\"v\":1,\"at\":5,\"kind\":\"used\",\"secret\":\"K\",\"host\":\"h.example\",\"method\":\"GET\",\"value\":\"sekret\"}\nbroken\n",
+        )
+        .unwrap();
+        let value = f
+            .call(
+                MethodName::ComputersCredentials,
+                json!({"computerId": LINUX}),
+            )
+            .await
+            .unwrap();
+        assert_eq!(value["used"][0]["secret"], "K");
+        assert_eq!(value["used"][0]["count"], 1);
+        assert_eq!(value["blocked"], json!([]));
+        assert!(!value.to_string().contains("sekret"));
+    }
+
+    #[tokio::test]
+    async fn the_review_request_credentials_line_reads_the_proxy_files() {
+        use silo_engine::fold_requests::CredentialSource;
+        let f = fixture();
+        seed_linux(&f);
+        let host = SilodRuntimeHost::new(&f.context);
+        let paths = silo_engine::runtime::runtime_paths(&host).unwrap();
+        let file = silo_engine::credentials_usage::linux_usage_file(&paths.home, "dev");
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(
+            &file,
+            concat!(
+                "{\"v\":1,\"at\":5,\"kind\":\"used\",\"secret\":\"K\",\"host\":\"h.example\",\"method\":\"GET\"}\n",
+                "{\"v\":1,\"at\":6,\"kind\":\"used\",\"secret\":\"K\",\"host\":\"h.example\",\"method\":\"GET\"}\n",
+                "{\"v\":1,\"at\":7,\"kind\":\"blocked\",\"secret\":\"T\",\"host\":\"evil.example\",\"method\":\"POST\",\"reason\":\"host_not_allowed\"}\n",
+            ),
+        )
+        .unwrap();
+        let source = ProxyCredentials { host };
+        let usage = source.for_fork(LINUX);
+        assert_eq!(usage.used.len(), 1);
+        assert_eq!(usage.used[0].secret, "K");
+        assert_eq!(usage.used[0].count, 2);
+        assert_eq!(usage.blocked[0].host, "evil.example");
+        assert_eq!(usage.blocked[0].reason, "host_not_allowed");
+        // A computer the engine does not know has nothing to show.
+        assert!(source.for_fork("missing").used.is_empty());
     }
 
     #[tokio::test]

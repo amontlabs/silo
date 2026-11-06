@@ -2214,6 +2214,32 @@
       ],
       "type": "object"
     },
+    "ComputerCredentialsParams": {
+      "description": "`computers.credentials` parameters. `since` (epoch milliseconds) drops older events.",
+      "properties": {
+        "computerId": {
+          "type": "string"
+        },
+        "deviceId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "since": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "computerId"
+      ],
+      "type": "object"
+    },
     "ComputerDeleteParams": {
       "properties": {
         "computerId": {
@@ -2652,6 +2678,46 @@
       ],
       "type": "object"
     },
+    "CredentialBlocked": {
+      "description": "A placeholder sent to a host its secret is not allowed for.",
+      "properties": {
+        "count": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "host": {
+          "type": "string"
+        },
+        "lastAt": {
+          "description": "Epoch milliseconds of the latest attempt.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "method": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "secret": {
+          "description": "The secret's name when the proxy named it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "host",
+        "method",
+        "count",
+        "reason",
+        "lastAt"
+      ],
+      "type": "object"
+    },
     "CredentialItem": {
       "properties": {
         "computerId": {
@@ -2794,7 +2860,7 @@
         "used": {
           "default": [],
           "items": {
-            "$ref": "#/$defs/CredentialUse"
+            "$ref": "#/$defs/CredentialUse2"
           },
           "type": "array"
         }
@@ -2802,6 +2868,39 @@
       "type": "object"
     },
     "CredentialUse": {
+      "description": "A secret that was substituted for requests to one host with one method.",
+      "properties": {
+        "count": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "host": {
+          "type": "string"
+        },
+        "lastAt": {
+          "description": "Epoch milliseconds of the latest request.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "method": {
+          "type": "string"
+        },
+        "secret": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "secret",
+        "host",
+        "method",
+        "count",
+        "lastAt"
+      ],
+      "type": "object"
+    },
+    "CredentialUse2": {
       "description": "A secret a fork's agent used: which one, towards which host, and how many times.",
       "properties": {
         "count": {
@@ -2864,6 +2963,28 @@
       "required": [
         "items",
         "deniedCount"
+      ],
+      "type": "object"
+    },
+    "CredentialsUsage": {
+      "description": "Credentials a computer used, and attempts that were blocked.",
+      "properties": {
+        "blocked": {
+          "items": {
+            "$ref": "#/$defs/CredentialBlocked"
+          },
+          "type": "array"
+        },
+        "used": {
+          "items": {
+            "$ref": "#/$defs/CredentialUse"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "used",
+        "blocked"
       ],
       "type": "object"
     },
@@ -7635,6 +7756,7 @@
         "computers.configuration.read",
         "computers.configuration.retry",
         "computers.create",
+        "computers.credentials",
         "computers.delete",
         "computers.dismissError",
         "computers.forceStop",
@@ -8247,6 +8369,22 @@
             },
             "params": {
               "$ref": "#/$defs/ComputerCreateParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "computers.credentials",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/ComputerCredentialsParams"
             }
           },
           "required": [
@@ -10894,6 +11032,22 @@
             },
             "result": {
               "$ref": "#/$defs/ComputerCreateResult"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "computers.credentials",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/CredentialsUsage"
             }
           },
           "required": [
@@ -16677,6 +16831,12 @@
       "name": "computers.create",
       "paramsType": "computers::ComputerCreateParams",
       "resultType": "computers::ComputerCreateResult"
+    },
+    {
+      "kind": "query",
+      "name": "computers.credentials",
+      "paramsType": "credentials_used::ComputerCredentialsParams",
+      "resultType": "credentials_used::CredentialsUsage"
     },
     {
       "kind": "job",

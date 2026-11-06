@@ -94,6 +94,7 @@ define_registry! {
     ComputersConfigurationRead => ("computers.configuration.read", Query, computers::ComputerConfigurationReadParams, computers::ComputerConfigurationRequest);
     ComputersConfigurationRetry => ("computers.configuration.retry", Job, computers::ComputerConfigurationRetryParams, common::JobStartResult);
     ComputersCreate => ("computers.create", Job, computers::ComputerCreateParams, computers::ComputerCreateResult);
+    ComputersCredentials => ("computers.credentials", Query, credentials_used::ComputerCredentialsParams, credentials_used::CredentialsUsage);
     ComputersDelete => ("computers.delete", Job, computers::ComputerDeleteParams, common::JobStartResult);
     ComputersDismissError => ("computers.dismissError", Command, computers::ComputerDismissErrorParams, computers::ApplicationSource);
     ComputersForceStop => ("computers.forceStop", Command, computers::ComputerForceStopParams, ());
@@ -247,7 +248,7 @@ mod tests {
                 .iter()
                 .filter(|m| m.kind == MethodKind::Query)
                 .count(),
-            51
+            52
         );
         assert_eq!(
             METHOD_REGISTRY

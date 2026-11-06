@@ -377,6 +377,7 @@ pub const OWNER_METHODS: &[(&str, bool)] = &[
     ("computers.configuration.read", false),
     ("computers.configuration.retry", true),
     ("computers.create", true),
+    ("computers.credentials", false),
     ("computers.delete", true),
     ("computers.dismissError", true),
     ("computers.forceStop", true),

@@ -653,6 +653,12 @@ async fn dispatch(
             let value = ops::diff(engine, &args, progress).await?;
             emit(json, &value, |v| {
                 let mut text = v["text"].as_str().unwrap_or_default().to_owned();
+                if v["credentialsUsed"].is_object() {
+                    text.push_str(&format!(
+                        "\n{}",
+                        render::credentials_line(&v["credentialsUsed"])
+                    ));
+                }
                 if let Some(digest) = v["reviewDigest"].as_str().filter(|d| !d.is_empty()) {
                     text.push_str(&format!("\nreview: {digest}"));
                 }

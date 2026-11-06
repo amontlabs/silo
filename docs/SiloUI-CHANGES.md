@@ -427,3 +427,15 @@ appends kept packages and settings files to the recipe the computer came from, a
   request. A fork made from a folder has only code changes (commits or uncommitted work).
 - **Pull request.** Reads the fork; changes nothing in the fork except committing its
   uncommitted work, which a folder fold does as well.
+
+
+## Credentials used: `computers.credentials`
+
+`computers.credentials` (a query; params `computerId`, optional `since` in epoch milliseconds)
+returns `{used, blocked}` read from the proxy's `secret-usage.jsonl` (see
+[secrets](SiloUI-SECRETS.md#credentials-a-fork-used)). `silo status` and `silo diff` print the
+`credentials used:` line and carry `credentialsUsed` in `--json`; the value is `null` when an
+older engine does not know the method. The Linux events come from the
+`microsandbox-secret-usage-events` patch, the macOS ones from the same patched network crate
+inside `silo-macos-gateway`. `changes.requests.show` fills its `credentials` field from the same
+files: silod installs that source at startup.

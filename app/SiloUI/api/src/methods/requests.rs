@@ -12,6 +12,7 @@ use super::computer_use;
 use super::computers;
 use super::connections;
 use super::credentials;
+use super::credentials_used;
 use super::desktop;
 use super::device;
 use super::display;
@@ -202,6 +203,13 @@ pub fn computers_configuration_retry(
 /// `computers.create`
 pub fn computers_create(params: computers::ComputerCreateParams) -> Request<kind::Job> {
     Request::new(MethodParams::ComputersCreate(params))
+}
+
+/// `computers.credentials`
+pub fn computers_credentials(
+    params: credentials_used::ComputerCredentialsParams,
+) -> Request<kind::Query> {
+    Request::new(MethodParams::ComputersCredentials(params))
 }
 
 /// `computers.delete`
