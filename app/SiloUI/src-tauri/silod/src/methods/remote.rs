@@ -46,6 +46,11 @@ pub fn install_runtime(handle: tokio::runtime::Handle) {
     let _ = RUNTIME.set(handle);
 }
 
+/// The engine's I/O runtime, once installed.
+pub(crate) fn runtime_handle() -> Option<tokio::runtime::Handle> {
+    RUNTIME.get().cloned()
+}
+
 /// Whether the owner serves `method` for a controller.
 pub(crate) fn is_passthrough(method: MethodName) -> bool {
     silo_engine::remote::is_owner_method(method_name(method))

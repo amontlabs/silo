@@ -59,6 +59,7 @@ pub(super) async fn undo(
     params: &Value,
 ) -> Result<HandlerOutput, DispatchError> {
     let params: ChangesUndoParams = context.decode_params(params)?;
+    crate::methods::guest_client::revoke_for(context, &[params.computer_id.as_str()]);
     let host = context.silod_context().runtime_host();
     let checkpoints = checkpoint_service(context);
     let manifests = store::production(host.clone());
@@ -78,6 +79,12 @@ pub(super) async fn promote(
     params: &Value,
 ) -> Result<HandlerOutput, DispatchError> {
     let params: ChangesPromoteParams = context.decode_params(params)?;
+    // Which computer is main changes, so the agents of both computers get new tokens on purpose.
+    let source = super::requests::fork_source(context, &params.fork_id).await?;
+    let target = params.target_id.clone().or(source);
+    let mut swapped = vec![params.fork_id.as_str()];
+    swapped.extend(target.as_deref());
+    crate::methods::guest_client::revoke_for(context, &swapped);
     let host = context.silod_context().runtime_host();
     let request = promote::Request {
         fork: params.fork_id,

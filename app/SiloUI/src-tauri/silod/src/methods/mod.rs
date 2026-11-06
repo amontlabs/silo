@@ -7,6 +7,7 @@ pub mod checkpoints;
 pub mod computers;
 pub mod display;
 pub mod guest;
+pub mod guest_client;
 pub mod guest_remote;
 pub mod operations;
 pub mod remote;
@@ -228,6 +229,7 @@ pub fn serves(method: MethodName) -> bool {
         || computers::owns(method)
         || checkpoints::owns(method)
         || guest::owns(method)
+        || guest_client::owns(method)
         || access::owns(method)
         || display::owns(method)
         || services::owns(method)
@@ -324,6 +326,9 @@ async fn route(
     if let Some(result) = guest::handle(method, params, context).await {
         return result;
     }
+    if let Some(result) = guest_client::handle(method, params, context).await {
+        return result;
+    }
     if let Some(result) = access::handle(method, params, context).await {
         return result;
     }
@@ -341,8 +346,8 @@ mod tests {
     use silo_api::methods::{method_registry, MethodName};
 
     use super::{
-        access, changed_computer, changes_computer, checkpoints, computers, display, guest, serves,
-        services,
+        access, changed_computer, changes_computer, checkpoints, computers, display, guest,
+        guest_client, serves, services,
     };
 
     #[test]
@@ -423,6 +428,7 @@ mod tests {
             computers::owns as fn(MethodName) -> bool,
             checkpoints::owns,
             guest::owns,
+            guest_client::owns,
             access::owns,
             display::owns,
             services::owns,
