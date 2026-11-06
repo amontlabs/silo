@@ -24,6 +24,8 @@ const MEMORY_FILE: &str = "cli-folders.json";
 pub(crate) const TRANSFER_ROOT: &str = "/workspace";
 /// A folder of the repository's git directory that holds bundles in transit.
 const TRANSIT: &str = "silo";
+/// Said when the fork moved after it was reviewed.
+pub const CHANGED: &str = "The fork changed since it was reviewed; review it again.";
 
 /// Whether `source` names a folder rather than a computer: computer names have no `/`.
 pub fn is_folder(source: &str) -> bool {
@@ -587,12 +589,13 @@ pub async fn fold_folder(
     fork: &Computer,
     record: Record,
     dry_run: bool,
+    reviewed: Option<&str>,
     progress: Progress<'_>,
 ) -> Result<Value, CliError> {
     // The commits are read from the running fork: a stopped one is started for this and put
     // back to stopped afterwards.
     if fork.state == "running" {
-        return fold_running_folder(engine, fork, record, dry_run, progress).await;
+        return fold_running_folder(engine, fork, record, dry_run, reviewed, progress).await;
     }
     if fork.state != "stopped" {
         return Err(CliError::new(format!(
@@ -602,7 +605,7 @@ pub async fn fold_folder(
     }
     ops::start(engine, &fork.name, progress).await?;
     let started = engine.computer(&fork.name).await?;
-    let result = fold_running_folder(engine, &started, record, dry_run, progress).await;
+    let result = fold_running_folder(engine, &started, record, dry_run, reviewed, progress).await;
     let stopped = ops::stop(engine, &fork.name, progress).await;
     let value = result?;
     stopped?;
@@ -617,12 +620,20 @@ async fn gather_commits(
     fork: &Computer,
     record: &Record,
     repo: &Repo,
+    expect: Option<&str>,
     progress: Progress<'_>,
 ) -> Result<Option<String>, CliError> {
     // Uncommitted work in the fork is committed first, so the fork's files are not left out.
+    // With `expect`, the state is compared with the reviewed digest in the same script that
+    // commits it, so nothing that changed in between is brought along.
     let outbox = format!("{TRANSFER_ROOT}/silo-out-{}", uuid::Uuid::new_v4().simple());
     let remote_bundle = format!("{outbox}/out.bundle");
-    let gather = "set -e; cd \"$1\"; git add -A; \
+    let gather = "set -e; cd \"$1\"; \
+                  if [ -n \"$5\" ]; then \
+                  h=$(git rev-parse HEAD); \
+                  d=$( (git diff HEAD; git ls-files -o --exclude-standard) | { sha256sum 2>/dev/null || shasum -a 256; } | cut -c1-16); \
+                  [ \"$h-$d\" = \"$5\" ] || { echo changed; exit 0; }; fi; \
+                  git add -A; \
                   git diff --cached --quiet || git commit -q -m \"silo: uncommitted changes in $3\"; \
                   head=$(git rev-parse HEAD); \
                   if [ \"$head\" = \"$2\" ]; then echo unchanged; else \
@@ -631,10 +642,27 @@ async fn gather_commits(
         engine,
         &fork.name,
         gather,
-        &[&record.guest_path, &record.base, &fork.name, &outbox],
+        &[
+            &record.guest_path,
+            &record.base,
+            &fork.name,
+            &outbox,
+            expect.unwrap_or(""),
+        ],
         "Collecting the commits",
     )
     .await?;
+    if produced == "changed" {
+        let _ = guest(
+            engine,
+            &fork.name,
+            "rm -rf \"$1\"",
+            &[&outbox],
+            "Cleaning up",
+        )
+        .await;
+        return Err(CliError::new(CHANGED));
+    }
     if produced == "unchanged" {
         return Ok(None);
     }
@@ -666,6 +694,7 @@ async fn fold_running_folder(
     fork: &Computer,
     mut record: Record,
     dry_run: bool,
+    reviewed: Option<&str>,
     progress: Progress<'_>,
 ) -> Result<Value, CliError> {
     let target = record.path.clone();
@@ -693,7 +722,17 @@ async fn fold_running_folder(
             "Commit or stash them, then fold again.",
         ));
     }
-    let Some(reference) = gather_commits(engine, fork, &record, &repo, progress).await? else {
+    let gathered = gather_commits(engine, fork, &record, &repo, reviewed, progress).await;
+    if matches!(&gathered, Err(error) if error.message == CHANGED) {
+        return Ok(refused(
+            &fork.name,
+            &target,
+            "changed",
+            CHANGED.into(),
+            "Run `silo diff` again, then keep.",
+        ));
+    }
+    let Some(reference) = gathered? else {
         return Ok(json!({
             "status": "unchanged",
             "report": {"fork": fork.name, "target": target, "summary": [],
@@ -1156,6 +1195,7 @@ pub async fn branch_for_pr(
     fork: &Computer,
     record: &Record,
     branch: &str,
+    base: Option<&str>,
     progress: Progress<'_>,
 ) -> Result<PrSource, CliError> {
     let started_here = match fork.state.as_str() {
@@ -1172,7 +1212,7 @@ pub async fn branch_for_pr(
         }
     };
     let current = engine.computer(&fork.name).await?;
-    let made = make_branch(engine, &current, record, branch, progress).await;
+    let made = make_branch(engine, &current, record, branch, base, progress).await;
     if started_here {
         let stopped = ops::stop(engine, &fork.name, progress).await;
         let source = made?;
@@ -1187,6 +1227,7 @@ async fn make_branch(
     fork: &Computer,
     record: &Record,
     branch: &str,
+    base: Option<&str>,
     progress: Progress<'_>,
 ) -> Result<PrSource, CliError> {
     let repo = Repo::open(Path::new(&record.path)).await.map_err(|error| {
@@ -1202,7 +1243,44 @@ async fn make_branch(
             record.path
         )));
     }
-    let Some(reference) = gather_commits(engine, fork, record, &repo, progress).await? else {
+    let base = base
+        .map(str::to_owned)
+        .or_else(|| repo.branch.clone())
+        .ok_or_else(|| {
+            CliError::new(format!(
+                "{} has no branch checked out; pass --base.",
+                record.path
+            ))
+        })?;
+    // The pull request is the host's base plus the fork's commits: commits the host has not
+    // pushed would be published with it.
+    let upstream = format!("origin/{base}");
+    if !repo
+        .git
+        .succeeds(&["rev-parse", "--verify", "-q", &upstream])
+        .await?
+    {
+        return Err(CliError::new(format!(
+            "{} has no {upstream} to compare with; fetch it first, or pass --base.",
+            record.path
+        )));
+    }
+    let unpushed = repo
+        .git
+        .ok(&[
+            "log",
+            "--oneline",
+            "--max-count=20",
+            &format!("{upstream}..HEAD"),
+        ])
+        .await?;
+    if !unpushed.is_empty() {
+        return Err(CliError::new(format!(
+            "{} has commits that {upstream} does not, and the pull request would carry them:\n{unpushed}\nPush or drop them first.",
+            record.path
+        )));
+    }
+    let Some(reference) = gather_commits(engine, fork, record, &repo, None, progress).await? else {
         return Err(CliError::new(format!(
             "{} has no commits beyond the folder's; there is nothing to open a pull request for.",
             fork.name
@@ -1212,7 +1290,7 @@ async fn make_branch(
     Ok(PrSource {
         directory: repo.git.dir.clone(),
         branch: branch.to_owned(),
-        base: repo.branch.clone(),
+        base: Some(base),
         remote: remote.out,
     })
 }

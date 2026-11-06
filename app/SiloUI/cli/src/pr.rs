@@ -166,7 +166,9 @@ async fn push(source: &PrSource, token: &str) -> Result<(), CliError> {
     let refspec = format!("refs/heads/{0}:refs/heads/{0}", source.branch);
     let env = auth_env(&source.remote, token);
     if source.remote.starts_with('-') {
-        return Err(CliError::new("The push destination is not a repository URL."));
+        return Err(CliError::new(
+            "The push destination is not a repository URL.",
+        ));
     }
     let output = git
         .run_env(&["push", "--quiet", "--", &source.remote, &refspec], &env)
@@ -251,7 +253,11 @@ fn credentials_in(diff: &Value, repo: &str) -> Vec<String> {
         .into_iter()
         .flatten()
     {
-        let listed = paths.as_array().into_iter().flatten().filter_map(Value::as_str);
+        let listed = paths
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str);
         for path in std::iter::once(group.as_str()).chain(listed) {
             if within(path, repo) && !found.iter().any(|f| f == path) {
                 found.push(path.to_owned());
@@ -272,7 +278,9 @@ fn valid_repository(repository: &str) -> bool {
                 .chars()
                 .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
     };
-    repository.split_once('/').is_some_and(|(owner, name)| part(owner) && part(name))
+    repository
+        .split_once('/')
+        .is_some_and(|(owner, name)| part(owner) && part(name))
 }
 
 /// The repository and push URL for a fork of a computer, decided on this device: `--repo`,
@@ -413,8 +421,7 @@ async fn computer_bundle(
     let cleanup = |outbox: String| async move {
         let _ = folder::guest(engine, fork, "rm -rf \"$1\"", &[&outbox], "Cleaning up").await;
     };
-    let directory =
-        std::env::temp_dir().join(format!("silo-pr-{}", uuid::Uuid::new_v4().simple()));
+    let directory = std::env::temp_dir().join(format!("silo-pr-{}", uuid::Uuid::new_v4().simple()));
     let result = async {
         std::fs::create_dir_all(&directory).map_err(|error| {
             CliError::new(format!("Cannot create {}: {error}", directory.display()))
@@ -481,8 +488,15 @@ pub async fn open(
     let (source, text, notes) = match &record {
         Some(record) => {
             let text = folder::review_summary(engine, &computer, record).await?;
-            let source =
-                folder::branch_for_pr(engine, &computer, record, &branch, progress).await?;
+            let source = folder::branch_for_pr(
+                engine,
+                &computer,
+                record,
+                &branch,
+                args.base.as_deref(),
+                progress,
+            )
+            .await?;
             (source, format!("Code\n{text}"), Vec::new())
         }
         None => {
@@ -514,6 +528,13 @@ pub async fn open(
     let outcome = publish(&source, args, env, &token, &computer.name, &text).await;
     if record.is_none() {
         let _ = std::fs::remove_dir_all(&source.directory);
+    } else {
+        // The branch only existed to be pushed; the host folder keeps no trace of it.
+        let _ = Git {
+            dir: source.directory.clone(),
+        }
+        .run(&["branch", "-D", &source.branch])
+        .await;
     }
     let mut value = outcome?;
     value["fork"] = json!(computer.name);

@@ -336,9 +336,15 @@ pub fn apply(path: &Path, wanted: &Additions) -> Result<Value, CliError> {
     }
     match edit(&text, &fresh) {
         Ok(edited) => {
-            fs::write(path, edited).map_err(|error| {
-                CliError::new(format!("Cannot write {}: {error}", path.display()))
-            })?;
+            let temporary = path.with_extension("yaml.silo-tmp");
+            let wrote = fs::write(&temporary, edited).and_then(|()| fs::rename(&temporary, path));
+            if let Err(error) = wrote {
+                let _ = fs::remove_file(&temporary);
+                return Err(CliError::new(format!(
+                    "Cannot write {}: {error}",
+                    path.display()
+                )));
+            }
         }
         Err(reason) => {
             report["error"] = json!(reason);

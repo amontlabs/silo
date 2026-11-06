@@ -130,10 +130,10 @@ async fn ask_or_keep(
     )
     .await?
     {
-        Outcome::Kept(mut value) => {
+        Outcome::Kept(mut value, digest) => {
             if context.write_back {
                 if let Some(report) =
-                    write_back(engine, fork, &value, context, None, progress).await
+                    write_back(engine, fork, &value, context, Some(digest), progress).await
                 {
                     value["writeBack"] = report;
                 }
@@ -205,11 +205,10 @@ async fn write_back(
     }
     let target = kept["report"]["target"].as_str().unwrap_or_default();
     let named = recipe_of(engine, target).or_else(|| recipe_of(engine, &computer.id));
-    let path = match named {
-        Some(name) => Some(directory.join("recipes").join(format!("{name}.yaml"))),
-        None => context.project.recipe.clone(),
-    }
-    .filter(|path| path.is_file())?;
+    let path = named
+        .as_deref()
+        .map(|name| directory.join("recipes").join(format!("{name}.yaml")))
+        .filter(|path| path.is_file());
     let seen = ops::diff(
         engine,
         &DiffArgs {
@@ -226,6 +225,20 @@ async fn write_back(
     if wanted.is_empty() {
         return None;
     }
+    let file = path.as_ref().map(|path| path.display().to_string());
+    // Only a recipe this computer is known to come from is written; otherwise say what to add.
+    let Some(path) = path else {
+        let mut report = json!({
+            "file": null,
+            "error": "no recipe is recorded for this computer",
+            "written": false,
+            "packages": wanted.packages,
+            "files": wanted.files,
+            "skipped": wanted.skipped,
+        });
+        report["file"] = json!(file);
+        return Some(report);
+    };
     if let Some(pinned) = pinned {
         if seen["reviewDigest"].as_str() != Some(pinned.as_str()) {
             return Some(json!({
@@ -268,7 +281,15 @@ pub async fn fold(
                 record.path
             )));
         }
-        return folder::fold_folder(engine, &computer, record, options.dry_run, progress).await;
+        return folder::fold_folder(
+            engine,
+            &computer,
+            record,
+            options.dry_run,
+            options.reviewed.as_deref(),
+            progress,
+        )
+        .await;
     }
     ops::fold(engine, fork, into, keep, options, progress).await
 }

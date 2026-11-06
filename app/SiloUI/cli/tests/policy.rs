@@ -309,10 +309,38 @@ async fn no_write_back_a_refused_keep_and_unknown_recipes_change_nothing() {
     let (text, _) = fold_with_write_back(original, Some("web"), true, refused).await;
     assert_eq!(text, original);
 
-    // main was not made from a project recipe: nothing to write to.
+    // main is not known to come from a project recipe: nothing is written, and the output
+    // says what to add.
     let (text, value) = fold_with_write_back(original, None, true, kept()).await;
     assert_eq!(text, original);
-    assert!(value["writeBack"].is_null());
+    assert_eq!(value["writeBack"]["written"], false);
+    assert_eq!(value["writeBack"]["packages"]["apt"], json!(["jq"]));
+    assert!(silo_cli::render::fold(&value).contains("Add by hand: apt: jq"));
+}
+
+#[tokio::test]
+async fn an_auto_kept_fork_writes_back_pinned_to_the_kept_digest() {
+    let (fake, _) = engine(packages_diff(), 0, kept());
+    let project_dir = project_with(
+        "packages:\n  apt: [git]\n",
+        "auto_keep:\n  - when: { only: [packages, settings] }\n",
+    );
+    let project = Project::discover(project_dir.path());
+    let connected = Engine::connect(&fake.socket).await.unwrap();
+    flows::remember_recipe(&connected, "id-main", "web");
+    let value = request(&connected, &project, None).await;
+    assert_eq!(value["status"], "kept");
+    assert_eq!(value["writeBack"]["written"], true);
+    assert_eq!(fake.calls("changes.keep")[0]["reviewDigest"], "d2");
+    let text = std::fs::read_to_string(project_dir.path().join(".silo/recipes/web.yaml")).unwrap();
+    assert_eq!(
+        text,
+        "packages:\n  apt: [git, jq]\nfiles: [/etc/app.conf]\n"
+    );
+    let left: Vec<_> = std::fs::read_dir(project_dir.path().join(".silo/recipes"))
+        .unwrap()
+        .collect();
+    assert_eq!(left.len(), 1, "{left:?}");
 }
 
 #[tokio::test]

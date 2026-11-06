@@ -186,8 +186,9 @@ pub fn decide(
 
 /// What an attempt came to.
 pub enum Outcome {
-    /// Kept without asking; carries the keep result with `autoKeep` added.
-    Kept(Value),
+    /// Kept without asking; carries the keep result with `autoKeep` added and the digest the
+    /// keep was pinned to.
+    Kept(Value, String),
     /// Nothing to keep.
     Nothing,
     /// Not kept, for this reason; the caller leaves a review request.
@@ -269,10 +270,7 @@ pub async fn attempt(
                 FoldOptions {
                     dry_run: false,
                     data_ok: false,
-                    reviewed: record
-                        .is_none()
-                        .then(|| changes.digest.clone())
-                        .filter(|digest| !digest.is_empty()),
+                    reviewed: Some(changes.digest.clone()).filter(|digest| !digest.is_empty()),
                 },
                 false,
                 progress,
@@ -285,7 +283,7 @@ pub async fn attempt(
                 return Ok(Outcome::Declined(format!("the keep was refused: {reason}")));
             }
             kept["autoKeep"] = json!({ "rule": rule, "tests": tests });
-            Ok(Outcome::Kept(kept))
+            Ok(Outcome::Kept(kept, changes.digest.clone()))
         }
     }
 }

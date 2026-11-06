@@ -747,7 +747,12 @@ fn write_back(report: &Value) -> String {
     }
     let mut out = String::new();
     if let Some(error) = report["error"].as_str() {
-        out.push_str(&format!("\nnote: {file} was not changed ({error})."));
+        let what = if file.is_empty() {
+            "No recipe file".to_owned()
+        } else {
+            file.to_owned()
+        };
+        out.push_str(&format!("\nnote: {what} was not changed ({error})."));
         if !parts.is_empty() {
             out.push_str(&format!(" Add by hand: {}.", parts.join("; ")));
         }

@@ -13,7 +13,7 @@ use std::{
 use fake_engine::{finished, FakeEngine};
 use serde_json::{json, Value};
 use silo_cli::{
-    config::Project,
+    config::{parse_recipe, parse_settings, Project},
     engine::Engine,
     flows,
     folder::{self, is_folder},
@@ -704,6 +704,8 @@ async fn fold_pr_pushes_a_branch_and_opens_a_pull_request_with_the_summary() {
         git(&guest, &["rev-parse", "HEAD"])
     );
     assert_eq!(git(&remote, &["log", "--format=%s", "main"]), "first");
+    // The local branch made for the push is gone.
+    assert_eq!(git(&lab.host, &["branch", "--list", "silo/*"]), "");
     // The host folder keeps its branch and tree.
     assert_eq!(
         git(&lab.host, &["rev-parse", "--abbrev-ref", "HEAD"]),
@@ -834,7 +836,10 @@ async fn a_computer_fork_never_chooses_where_the_token_goes() {
         error.message
     );
     assert!(!error.message.contains("secret-token"));
-    assert!(listener.accept().is_err(), "the fork's remote was contacted");
+    assert!(
+        listener.accept().is_err(),
+        "the fork's remote was contacted"
+    );
 }
 
 #[tokio::test]
@@ -847,16 +852,19 @@ async fn a_computer_fork_needs_a_host_named_repository_and_no_credentials_in_it(
     let run = |repository: Option<&str>| {
         let repository = repository.map(str::to_owned);
         async move {
-        flows::run(
-            engine,
-            "plain",
-            None,
-            &pr_context(project),
-            FoldOptions::default(),
-            flows::Mode::PullRequest(silo_cli::pr::PrArgs::default(), pr_env(repository.as_deref())),
-            &ignore,
-        )
-        .await
+            flows::run(
+                engine,
+                "plain",
+                None,
+                &pr_context(project),
+                FoldOptions::default(),
+                flows::Mode::PullRequest(
+                    silo_cli::pr::PrArgs::default(),
+                    pr_env(repository.as_deref()),
+                ),
+                &ignore,
+            )
+            .await
         }
     };
     let error = run(None).await.unwrap_err();
@@ -871,4 +879,74 @@ async fn a_computer_fork_needs_a_host_named_repository_and_no_credentials_in_it(
     });
     let error = run(Some("acme/app")).await.unwrap_err();
     assert!(error.message.contains("credential"), "{}", error.message);
+}
+
+#[tokio::test]
+async fn fold_pr_refuses_host_commits_that_origin_does_not_have() {
+    let lab = lab();
+    let remote = with_origin(&lab);
+    let engine = lab.connect().await;
+    let (name, guest) = lab.fork(&engine).await;
+    commit(&guest, "b.txt", "two\n", "second");
+    commit(&lab.host, "private.txt", "x\n", "not pushed yet");
+    let project = Project::default();
+    let error = flows::run(
+        &engine,
+        &name,
+        None,
+        &pr_context(&project),
+        FoldOptions::default(),
+        pr_mode(Some("tok"), "http://127.0.0.1:1".into()),
+        &ignore,
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        error.message.contains("not pushed yet"),
+        "{}",
+        error.message
+    );
+    assert_eq!(
+        git(
+            &remote,
+            &["for-each-ref", "--format=%(refname:short)", "refs/heads"]
+        ),
+        "main"
+    );
+}
+
+#[tokio::test]
+async fn an_auto_keep_test_that_changes_the_fork_leaves_a_request_for_a_folder_fork() {
+    let lab = lab();
+    let engine = lab.connect().await;
+    let (name, guest) = lab.fork(&engine).await;
+    commit(&guest, "b.txt", "two\n", "second");
+    let settings = parse_settings("auto_keep:\n  - when: { only: [code], tests: pass }\n").unwrap();
+    // The test command passes, and leaves an untracked file in the fork.
+    let recipe = parse_recipe("test: echo late > repo/late.txt\n").unwrap();
+    let project = Project::default();
+    let context = flows::Context {
+        project: &project,
+        settings: Some(&settings),
+        recipe: Some(&recipe),
+        write_back: true,
+    };
+    let value = flows::run(
+        &engine,
+        &name,
+        None,
+        &context,
+        FoldOptions::default(),
+        flows::Mode::Request,
+        &ignore,
+    )
+    .await
+    .unwrap();
+    assert_eq!(value["status"], "requested", "{value}");
+    assert!(value["autoKeep"]["declined"]
+        .as_str()
+        .unwrap()
+        .contains("changed since"));
+    // Nothing came back to the host folder.
+    assert_eq!(git(&lab.host, &["log", "--format=%s"]), "first");
 }

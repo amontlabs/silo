@@ -181,14 +181,18 @@ async fn the_client_name_is_the_agent_only_when_none_was_named() {
     if std::env::var("SILO_AGENT").is_err() {
         let unnamed = SiloMcp::new(engine.socket.clone(), std::env::temp_dir());
         assert_eq!(
-            agent_after_initialize(unnamed, "Claude Code").await.as_deref(),
+            agent_after_initialize(unnamed, "Claude Code")
+                .await
+                .as_deref(),
             Some("claude-code")
         );
     }
-    let named =
-        SiloMcp::new(engine.socket.clone(), std::env::temp_dir()).with_agent(Some("Careful".into()));
+    let named = SiloMcp::new(engine.socket.clone(), std::env::temp_dir())
+        .with_agent(Some("Careful".into()));
     assert_eq!(
-        agent_after_initialize(named, "Claude Code").await.as_deref(),
+        agent_after_initialize(named, "Claude Code")
+            .await
+            .as_deref(),
         Some("careful")
     );
 }

@@ -863,11 +863,10 @@ async fn fork_folder(
         },
     )
     .await?;
-    let project_recipe = project.load_recipe().ok().flatten();
     let context = flows::Context {
         project,
         settings,
-        recipe: project_recipe.as_ref().or(Some(&recipe)),
+        recipe: Some(&recipe),
         write_back: true,
     };
     let kept = flows::after_command(

@@ -968,7 +968,8 @@ mod tests {
         // No top-level secrets: no agent can name one.
         assert!(parse_settings("agents:\n  x: { fork_secrets: [B] }\n").is_err());
         // Narrowing, and rules and fold, are allowed.
-        let fine = format!("{top}  x: {{ recipes: [linux-dev], fork_secrets: [], fold: auto-code }}\n");
+        let fine =
+            format!("{top}  x: {{ recipes: [linux-dev], fork_secrets: [], fold: auto-code }}\n");
         assert!(parse_settings(&fine).is_ok());
         // With no top-level recipes (any), an agent may list some.
         assert!(parse_settings("agents:\n  x: { recipes: [web] }\n").is_ok());
