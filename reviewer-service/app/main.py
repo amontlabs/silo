@@ -180,7 +180,7 @@ def create_app(
         outcomes = await asyncio.gather(*(one(n) for n in lenses), return_exceptions=True)
         results, failed = {}, []
         for name, outcome in zip(lenses, outcomes):
-            if isinstance(outcome, (LLMError, ValueError)):
+            if isinstance(outcome, Exception):
                 failed.append(name)
                 results[name] = {
                     "summary": "",
@@ -188,7 +188,7 @@ def create_app(
                     "error": "this lens could not be produced",
                 }
             elif isinstance(outcome, BaseException):
-                raise outcome
+                raise outcome  # cancellation is not a failed lens
             else:
                 results[name] = outcome
         status = 502 if len(failed) == len(lenses) else 200

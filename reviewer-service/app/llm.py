@@ -1,15 +1,14 @@
 """The LLM behind the service. `LLMClient` is the seam; `AnthropicClient` is the default."""
 
-import asyncio
+import json
 from typing import Protocol
 
+import anthropic
 import httpx
-
-RETRY_STATUSES = (429, 529)
 
 
 class LLMError(Exception):
-    """The provider failed or answered something unusable."""
+    """The provider failed, refused, or answered something unusable."""
 
 
 class LLMClient(Protocol):
@@ -19,8 +18,9 @@ class LLMClient(Protocol):
 
 
 class AnthropicClient:
-    """The Anthropic Messages API over HTTPS, with no SDK. The answer is forced through a
-    tool whose input schema is the result shape, so it is structured rather than parsed."""
+    """The Anthropic Messages API through the official SDK. The answer is constrained by a
+    JSON schema (structured outputs); no tool choice is forced. The SDK retries once on
+    connection errors, 429 and 5xx (including 529) and waits as long as retry-after asks."""
 
     def __init__(
         self,
@@ -29,68 +29,45 @@ class AnthropicClient:
         base_url: str = "https://api.anthropic.com",
         max_tokens: int = 4096,
         timeout: float = 60.0,
-        retry_delay: float = 1.0,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self._model = model
         self._max_tokens = max_tokens
-        self._retry_delay = retry_delay
-        self._http = httpx.AsyncClient(
+        self._sdk = anthropic.AsyncAnthropic(
+            api_key=api_key,
             base_url=base_url,
             timeout=timeout,
-            transport=transport,
-            headers={
-                "x-api-key": api_key,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json",
-            },
+            max_retries=1,
+            http_client=httpx.AsyncClient(transport=transport, timeout=timeout)
+            if transport
+            else None,
         )
-
-    async def _post(self, body: dict) -> httpx.Response:
-        for attempt in (0, 1):
-            try:
-                response = await self._http.post("/v1/messages", json=body)
-            except httpx.HTTPError as error:
-                raise LLMError(f"provider unreachable: {type(error).__name__}") from error
-            if response.status_code in RETRY_STATUSES and attempt == 0:
-                await asyncio.sleep(self._retry_delay)
-                continue
-            return response
-        raise AssertionError("unreachable")
 
     async def complete(self, system: str, user: str, schema: dict) -> dict:
-        response = await self._post(
-            {
-                "model": self._model,
-                "max_tokens": self._max_tokens,
-                "system": system,
-                "messages": [{"role": "user", "content": user}],
-                "tools": [
-                    {
-                        "name": "report",
-                        "description": "Report the review of the diff.",
-                        "input_schema": schema,
-                    }
-                ],
-                "tool_choice": {"type": "tool", "name": "report"},
-            }
-        )
-        if response.status_code != 200:
-            raise LLMError(f"provider answered {response.status_code}")
         try:
-            data = response.json()
-        except ValueError as error:
-            raise LLMError("provider answer was not JSON") from error
-        if not isinstance(data, dict):
-            raise LLMError("provider answer was not an object")
-        if data.get("stop_reason") == "max_tokens":
+            message = await self._sdk.messages.create(
+                model=self._model,
+                max_tokens=self._max_tokens,
+                system=system,
+                messages=[{"role": "user", "content": user}],
+                output_config={"format": {"type": "json_schema", "schema": schema}},
+            )
+        except anthropic.APIStatusError as error:
+            raise LLMError(f"provider answered {error.status_code}") from error
+        except anthropic.APIError as error:
+            raise LLMError(f"provider unreachable: {type(error).__name__}") from error
+        if message.stop_reason == "refusal":
+            raise LLMError("the provider refused")
+        if message.stop_reason == "max_tokens":
             raise LLMError("the answer was cut off")
-        for block in data.get("content") or []:
-            if isinstance(block, dict) and block.get("type") == "tool_use":
-                result = block.get("input")
-                if isinstance(result, dict):
-                    return result
-        raise LLMError("the provider returned no structured answer")
+        text = "".join(b.text for b in message.content if b.type == "text")
+        try:
+            result = json.loads(text)
+        except ValueError as error:
+            raise LLMError("the answer was not JSON") from error
+        if not isinstance(result, dict):
+            raise LLMError("the answer was not an object")
+        return result
 
     async def aclose(self) -> None:
-        await self._http.aclose()
+        await self._sdk.close()

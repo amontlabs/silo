@@ -1,14 +1,13 @@
-# Build with the base image pinned by digest (see README, "Deploy"):
+# The image needs a hash-locked requirements.lock and a base image pinned by digest (README,
+# "Deploy"). The build stops without them:
 #   docker build --build-arg PYTHON_IMAGE=python:3.12-slim@sha256:<digest> -t silo-reviewer .
 ARG PYTHON_IMAGE
 FROM ${PYTHON_IMAGE:?pass --build-arg PYTHON_IMAGE=python:3.12-slim@sha256:<digest>}
 
 ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
 WORKDIR /srv
-# requirements.lock (with hashes, see README) wins when it exists.
-COPY requirements.tx[t] requirements.loc[k] ./
-RUN if [ -f requirements.lock ]; then pip install --no-cache-dir --require-hashes -r requirements.lock; \
-    else pip install --no-cache-dir -r requirements.txt; fi
+COPY requirements.lock ./
+RUN pip install --no-cache-dir --require-hashes -r requirements.lock
 COPY app ./app
 RUN useradd --system --no-create-home reviewer
 USER reviewer

@@ -4,6 +4,7 @@ The words the reviewer must not use are written in halves so this file does not 
 """
 
 import json
+import re
 
 LENSES = ("general", "packages", "code")
 
@@ -20,26 +21,30 @@ FILTERED_WORDS = tuple(a + b for a, b in _HALVES)
 
 SEVERITIES = ("info", "low", "medium", "high")
 
+# Structured outputs accept no length limits; parse_answer cuts the lengths instead.
 RESULT_SCHEMA = {
     "type": "object",
     "properties": {
-        "summary": {"type": "string", "maxLength": 800},
+        "summary": {"type": "string"},
         "findings": {
             "type": "array",
-            "maxItems": 20,
             "items": {
                 "type": "object",
                 "properties": {
                     "severity": {"type": "string", "enum": list(SEVERITIES)},
-                    "file": {"type": "string", "maxLength": 300},
-                    "message": {"type": "string", "maxLength": 300},
+                    "file": {"type": "string"},
+                    "message": {"type": "string"},
                 },
                 "required": ["severity", "file", "message"],
+                "additionalProperties": False,
             },
         },
     },
     "required": ["summary", "findings"],
+    "additionalProperties": False,
 }
+
+_CLOSING = re.compile(r"<\s*/\s*(?:diff|code_diff)\s*>", re.IGNORECASE)
 
 _FOCUS = {
     "general": (
@@ -75,7 +80,7 @@ SYSTEM_PROMPT = (
     "- Never use these words in any form of the answer: "
     + ", ".join(FILTERED_WORDS)
     + ".\n"
-    "- Report only by calling the report tool. Use an empty file string when a finding is not "
+    "- Answer only with the JSON object of the required schema. Use an empty file string when a finding is not "
     "about one file. At most 20 findings; messages under 300 characters. The lens "
     "instruction comes after the data."
 )
@@ -83,9 +88,7 @@ SYSTEM_PROMPT = (
 
 def _data(text: str, tag: str) -> str:
     """`text` with the closing tags of the delimited blocks made harmless."""
-    for closing in ("</diff>", "</code_diff>"):
-        text = text.replace(closing, "[closing tag removed]")
-    return text
+    return _CLOSING.sub("[closing tag removed]", text)
 
 
 def user_prompt(lens: str, diff: dict) -> str:

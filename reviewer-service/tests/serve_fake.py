@@ -1,10 +1,12 @@
-"""Runs the service on a local port with a fake LLM, for the CLI's end-to-end test.
+"""Runs the service on a free local port with a fake LLM, for the CLI's end-to-end test.
 
-Usage: python serve_fake.py PORT TOKEN [ANSWERS_JSON]. Prints `ready` once it listens.
+Usage: python serve_fake.py TOKEN [ANSWERS_JSON]. Prints `ready PORT` once it listens. The
+socket is bound here, so the port cannot be taken between choosing it and listening.
 """
 
 import json
 import os
+import socket
 import sys
 
 import uvicorn
@@ -16,8 +18,11 @@ from app.main import create_app  # noqa: E402
 from fake_llm import FakeLLM  # noqa: E402
 
 if __name__ == "__main__":
-    port, token = int(sys.argv[1]), sys.argv[2]
-    answers = json.loads(sys.argv[3]) if len(sys.argv) > 3 else None
+    token = sys.argv[1]
+    answers = json.loads(sys.argv[2]) if len(sys.argv) > 2 else None
+    sock = socket.socket()
+    sock.bind(("127.0.0.1", 0))
+    sock.listen(16)
+    print("ready", sock.getsockname()[1], flush=True)
     app = create_app(FakeLLM(answers), [token])
-    print("ready", flush=True)
-    uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")
+    uvicorn.Server(uvicorn.Config(app, log_level="warning")).run(sockets=[sock])
