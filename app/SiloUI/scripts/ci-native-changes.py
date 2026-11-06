@@ -8,7 +8,7 @@ an empty or unreadable list, keeps the native jobs running.
 import sys
 
 # Top-level trees that only the website, demo films and documentation use.
-SKIPPABLE_PREFIXES = ('website/', 'demo/', 'docs/', 'artifacts/', 'assets/')
+SKIPPABLE_PREFIXES = ('website/', 'demo/', 'docs/', 'artifacts/', 'assets/', 'silo-action/')
 
 # Frontend sources. Rust tests read only these two locations inside them.
 FRONTEND_PREFIX = 'app/SiloUI/src/'

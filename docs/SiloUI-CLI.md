@@ -300,3 +300,7 @@ A debug build of the engine sends its `api.github.com` requests to the URL in
 `SILO_GITHUB_API_BASE` when it is a loopback `http` or `https` origin (`localhost`,
 `127.0.0.1` or `[::1]`, with an optional port and no path). Anything else is ignored. A
 release build never reads the variable.
+
+## GitHub Action
+
+`silo-action/` holds a ready-made composite action (`action.yml` and `run.sh`, no build step) for a self-hosted Mac runner that has Silo installed. It forks a recipe or a computer, runs a command, writes the `silo diff --json` buckets and the credentials line to the job summary, then calls `silo fold --pr` (reads `GITHUB_TOKEN` and `SILO_GITHUB_API_URL`) or `silo fold --request`, drops the fork unless `keep-fork` is set, and fails the job with the command's exit code. Forks get none of the credentials Silo manages unless `secrets` names them; files on disk are copied. See `silo-action/README.md`; test with `sh silo-action/test/run.sh`.
