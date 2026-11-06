@@ -156,6 +156,17 @@ behind `cfg(target_os = "linux")`.
   protocol range) except for the bundle identifier, which a Linux engine has none of. There is
   no code-signature check on Linux: nothing seals the directory yet. Signed Linux archives
   (for example Sigstore) are roadmap milestone 11.
+- **Account and directory checks.** Before it reads anything from its directory, every entry
+  point (`--agent`, `--remote-bridge`, `--remote-guest`) refuses to run as root or `nobody`
+  (use a dedicated account in the `kvm` group) and checks the engine directory
+  (`silod::install_trust`): every directory from `/` down to it, `silod`, every entry beside it
+  and everything under `resources/` must belong to this account or root and be writable by
+  nobody else (a sticky `/tmp` is refused too), and a link must stay inside the directory. The
+  refusal names the path. Before its first `msb` launch, the agent checks
+  `resources/microsandbox/manifest.json` against the runtime inputs compiled into the build and
+  the SHA-256 of `msb` and `libkrunfw` against it
+  (`silo_engine::dependencies::verify_bundled_runtime`); an engine without the runtime starts
+  and reports that computers cannot start.
 - **Paths.** Data and configuration: `$XDG_DATA_HOME/<identifier>` (default
   `~/.local/share/org.silo.dev` for Dev). Cache: `$XDG_CACHE_HOME/<identifier>`. Logs:
   `$XDG_STATE_HOME/<identifier>/logs`. A relative or empty XDG value is ignored, as the
@@ -168,24 +179,34 @@ behind `cfg(target_os = "linux")`.
   `getpeereid` returns on macOS.
 - **Credentials.** The engine's `keyring` entries (GitHub sign-in, token ledger, personal
   token, secret values) go to a file store, `silo_engine::credential_file_store`, under
-  `<data>/credentials/` (see [Secrets](SiloUI-SECRETS.md)). `SILO_CREDENTIAL_STORE=secret-service`
-  uses the desktop Secret Service instead; any other value except `file` stops startup.
+  `<data>/credentials/` (see [Secrets](SiloUI-SECRETS.md#linux-hosts)).
+  `SILO_CREDENTIAL_STORE=secret-service` uses the desktop Secret Service instead; any other
+  value except `file` stops startup. The first start records the store in
+  `<data>/credential-store`, and a later start with a different value stops with a message
+  naming that record.
 - **Running it.** `silod --agent` (or no argument) serves until it is stopped. The process main
   thread runs the queue that `MainThread` work goes to, in place of the AppKit loop. SIGTERM
   and SIGINT both start the engine's bounded session-end shutdown, as SIGTERM and logout do
-  on macOS; exit code 75 still means "restart me" for a supervisor. `--remote-bridge` and
+  on macOS; a second one of either exits at once with status 1. `msb` and guest commands run in
+  their own process group, so a terminal's Ctrl-C reaches `silod` alone. Exit code 75 still
+  means "restart me" for a supervisor. `--remote-bridge` and
   `--remote-guest` work through the `~/.local/bin` link. `silod --service` reports that it is
   not available yet: the systemd user unit is phase 3. Until then, start it by hand or from
-  your own unit, for example a Dev engine in a test home:
+  your own unit, for example a Dev engine run by a dedicated account (in the `kvm` group to
+  start computers), installed where only that account can change it:
 
   ```sh
-  mkdir -p /tmp/silo-engine/resources
-  cp target/debug/silod /tmp/silo-engine/
+  mkdir -p ~/silo-engine/resources
+  cp target/debug/silod ~/silo-engine/
   cp src-tauri/silod/macos/resources/engine-manifest.development.json \
-    /tmp/silo-engine/resources/engine-manifest.json
-  HOME=/tmp/silo-test-home /tmp/silo-engine/silod --agent &
-  HOME=/tmp/silo-test-home target/debug/silo list
+    ~/silo-engine/resources/engine-manifest.json
+  chmod -R go-w ~/silo-engine
+  ~/silo-engine/silod --agent &
+  target/debug/silo list
   ```
+
+  A root-owned `/opt/silo-engine` works the same way. An engine under `/tmp`, or in a directory
+  another account can write to, does not start.
 
   This proves the daemon serves; creating or starting a computer also needs `/dev/kvm`, the
   runtime resources above and the guest image.
