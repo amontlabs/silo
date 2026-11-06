@@ -205,16 +205,22 @@ behind `cfg(target_os = "linux")`.
   sha256sum -c silo-engine-<version>-linux-x64.tar.gz.sha256
   mkdir -p ~/.local/opt && tar -xzf silo-engine-<version>-linux-x64.tar.gz -C ~/.local/opt
   chmod -R go-w ~/.local/opt/silo-engine
-  ~/.local/opt/silo-engine/silod --service register
-  ~/.local/opt/silo-engine/silo list
+  ~/.local/opt/silo-engine/silo host init
+  silo list
   ```
+
+  `silo host init` ([CLI guide](SiloUI-CLI.md#hosting-computers-for-other-devices)) checks
+  `/dev/kvm` and the account, runs `silod --service register` (below) from the `silod` beside it,
+  links `~/.local/bin/silo` to the archive's `silo` when nothing else is there, turns Connections
+  on, accepts the controller keys given with `--authorize`, and prints the address another
+  device adds this host by. `silod --service register` alone still installs just the service.
 
   The archive is not signed (roadmap milestone 11); the `.sha256` beside it on the release
   only shows that the download is whole. The host needs `/dev/kvm` readable and writable by the
   account (usually through the `kvm` group), `ssh` for Connections, and network access for the
   guest image the engine downloads on first use. The archive's `silo` is the production
-  channel's and talks to `~/.silo/engine.sock`; put it on `PATH` yourself for now
-  (`silo host init`, phase 4 of the [remote hosts plan](hosts/PLAN.md), will).
+  channel's and talks to `~/.silo/engine.sock` (a Dev archive's, `~/.silo-dev`, linked as
+  `silo-dev`); `silo host init` puts it on `PATH`.
 - **Service.** `silod --service register` writes the systemd user unit
   `~/.config/systemd/user/<channel>.engine.service` (`org.silo.preview.engine.service`, or
   `org.silo.dev.engine.service` for Silo Dev; `$XDG_CONFIG_HOME` is honored), then runs
@@ -311,4 +317,9 @@ behind `cfg(target_os = "linux")`.
   (`app/SiloUI/scripts/linux-host-e2e.sh`): create, start, exec, checkpoint, fork, exec in the
   fork, stop and drop both. It then stops the service, expects exit code 0 (a session end that
   left a computer running fails it), and unregisters it. After a failed step it still stops
-  the engine, and keeps the unit for the logs it uploads.
+  the engine, and keeps the unit for the logs it uploads. Then two new accounts on the same
+  runner act as two devices (`app/SiloUI/scripts/hosts-e2e.sh`): `silo-host` runs
+  `silo host init --authorize` from a root-owned copy of the engine, and `silo-controller`, with
+  its own engine, adds it with `silo devices add silo-host@127.0.0.1:22 --host-key <fingerprint>`
+  over the runner's SSH server, and creates, starts, stops and drops an `e2e-hosts-*` computer on
+  it with `--device` before removing it.

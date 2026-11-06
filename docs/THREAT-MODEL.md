@@ -363,7 +363,11 @@ the request names this device's id
 [`#L365`](../app/SiloUI/src-tauri/engine/src/remote.rs#L365)), including delete, checkpoint
 restore, guest exec, file reads and writes, exports, and the `guest.ssh` and macOS display byte
 streams. Turning Connections off refuses every request but leaves installed keys in
-`authorized_keys`; removing a device revokes its key. A device that holds that key, or a
+`authorized_keys`; removing a device revokes its key. On a host, `silo host init --authorize`
+installs a controller's key with the same restricted line through `connections.keys.authorize`,
+which `engine.sock` serves and the bridge does not (it is in neither list), so a connected
+controller cannot let another key in; a same-user process could, as it could edit
+`authorized_keys` itself. A device that holds that key, or a
 same-user process that connects to `control.sock`, has that authority. The same-user link under
 `~/.local/bin` is part of that trust: a same-user process can repoint it, which is a non-goal
 below.

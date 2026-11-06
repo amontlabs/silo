@@ -11,7 +11,38 @@ Connections link devices, so Silo on one device can manage the computers of anot
 5. **Run on** selects the owning device when creating a computer. Existing computer ownership cannot be changed by editing its configuration. Start, stop, restart, edit, and delete operate on that device. A device may have no computers.
 6. Terminals and editors launch on the controlling device and connect to the guest through the owner. Files, logs, repository push, and network connections route to the owning device.
 
+A host without the app (a Linux server, or a Mac used only as a host) is set up and added from
+the command line: `silo host init` on the host turns Connections on and prints the address, and
+`silo devices add <address>` on the controller does what **Connect device…** does, running the
+same SSH authorization and key setup commands in the terminal when SSH asks for them
+([CLI guide](SiloUI-CLI.md#hosting-computers-for-other-devices)). The app's **Connect device…**
+adds such a host by its address too. When the controller has no SSH access to the host at all,
+its key goes the other way: `silo devices key` on the controller prints its Silo key, and
+`silo host init --authorize '<key>'` on the host installs the same restricted line the key setup
+would.
+
 A controller can connect during onboarding without creating a local computer. Local backup/restore, account configuration, secrets, runtime repair, and application updates retain their existing local ownership; the UI labels those settings **This device**. Remote account configuration and backups are managed on the owning device. They are not copied or synchronized by connecting it. Per-computer sharing, computer migration, internet discovery, and automatic SSH-server installation are outside this change.
+
+## Controller keys on the host
+
+The controller's key setup appends the restricted line from the controller over SSH. The host
+side has three methods of its own, served on `engine.sock` and never through the bridge (they
+are in neither `METHODS` nor `OWNER_METHODS`; a unit test checks it), so a connected controller
+cannot add or list keys:
+
+| Method | Class | Params | Result |
+| --- | --- | --- | --- |
+| `connections.keys.authorize` | command | `publicKey` (`ssh-ed25519 <key> [comment]`) | `added`: false when the line was already there |
+| `connections.keys.list` | query | none | `publicKeys`: the Silo lines of `~/.ssh/authorized_keys` that may only run the bridge, as `ssh-ed25519 <key> <comment>` |
+| `connections.keys.own` | command | none | `publicKey`: this device's own Connections key, made first when it has none |
+
+`authorize` writes exactly the line the key setup writes (`restrict`, the bridge as the forced
+command, this channel's comment), creating `~/.ssh` (0700) and `authorized_keys` (0600) when they
+are missing, and tightens an older unrestricted Silo line for the key as a handshake does. A
+symlinked `authorized_keys` is not changed: the error names the line to add where the file is
+managed. `connections.keys.revoke` removes the line again. `connections.status` now also carries
+`cliLinkError`, which the engine already computed and the app already shows, but which the typed
+reply dropped.
 
 ## Close and Quit
 
