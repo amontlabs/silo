@@ -825,7 +825,13 @@ async fn a_computer_fork_never_chooses_where_the_token_goes() {
         None,
         &pr_context(&project),
         FoldOptions::default(),
-        flows::Mode::PullRequest(silo_cli::pr::PrArgs::default(), pr_env(Some("acme/app"))),
+        flows::Mode::PullRequest(
+            silo_cli::pr::PrArgs {
+                base: Some("main".into()),
+                ..Default::default()
+            },
+            pr_env(Some("acme/app")),
+        ),
         &ignore,
     )
     .await

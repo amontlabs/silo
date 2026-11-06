@@ -189,6 +189,40 @@ struct Opened {
     number: u64,
 }
 
+fn api_client() -> Result<reqwest::blocking::Client, String> {
+    reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|error| error.to_string())
+}
+
+/// `GET /repos/{repo}`: the branch pull requests go to when none was named.
+fn default_branch(env: &PrEnv, token: &str, repo: &str) -> Result<String, String> {
+    let url = format!("{}/repos/{repo}", env.api_url.trim_end_matches('/'));
+    let response = api_client()?
+        .get(&url)
+        .header("Authorization", format!("Bearer {token}"))
+        .header("Accept", "application/vnd.github+json")
+        .header("X-GitHub-Api-Version", "2022-11-28")
+        .header("User-Agent", "silo-cli")
+        .send()
+        .map_err(|error| format!("Could not reach {}: {}", env.api_url, error.without_url()))?;
+    let status = response.status();
+    let reply: Value = response.json().unwrap_or(Value::Null);
+    if !status.is_success() {
+        return Err(format!(
+            "GitHub answered {status} when reading {repo}: {}.",
+            reply["message"].as_str().unwrap_or("no message")
+        ));
+    }
+    reply["default_branch"]
+        .as_str()
+        .filter(|name| !name.is_empty())
+        .map(str::to_owned)
+        .ok_or_else(|| format!("GitHub did not name a default branch for {repo}."))
+}
+
 /// `POST /repos/{repo}/pulls`.
 fn create_pull_request(
     env: &PrEnv,
@@ -561,11 +595,23 @@ async fn publish(
                 redact(&source.remote)
             ))
         })?;
-    let base = args
-        .base
-        .clone()
-        .or_else(|| source.base.clone())
-        .unwrap_or_else(|| "main".to_owned());
+    let base = match args.base.clone().or_else(|| source.base.clone()) {
+        Some(base) => base,
+        None => {
+            let (lookup_env, lookup_token, lookup_repo) =
+                (env.clone(), token.to_owned(), repository.clone());
+            tokio::task::spawn_blocking(move || {
+                default_branch(&lookup_env, &lookup_token, &lookup_repo)
+            })
+            .await
+            .map_err(|_| CliError::new("The repository lookup stopped unexpectedly."))?
+            .map_err(|message| {
+                CliError::new(format!(
+                    "{message} Nothing was pushed; pass --base BRANCH."
+                ))
+            })?
+        }
+    };
     push(source, token).await?;
     let title = format!("Changes from {fork}");
     let body = format!("{text}\n\n---\nOpened by `silo fold --pr` from the fork {fork}.");
@@ -638,5 +684,55 @@ mod tests {
             "https://github.com/acme/app.git"
         );
         assert_eq!(redact("/tmp/remote.git"), "/tmp/remote.git");
+    }
+
+    /// Answers one request with `status` and `reply`; returns the URL and the request line.
+    fn serve_once(
+        status: u16,
+        reply: Value,
+    ) -> (String, std::sync::mpsc::Receiver<String>) {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let (send, receive) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut buffer = [0u8; 4096];
+            let read = stream.read(&mut buffer).unwrap();
+            let head = String::from_utf8_lossy(&buffer[..read]).into_owned();
+            let payload = reply.to_string();
+            write!(
+                stream,
+                "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{payload}",
+                payload.len()
+            )
+            .unwrap();
+            send.send(head).unwrap();
+        });
+        (url, receive)
+    }
+
+    fn env_for(api_url: String) -> PrEnv {
+        PrEnv {
+            token: Some("tok".into()),
+            git_base: git_base_for(&api_url),
+            api_url,
+            repository: None,
+        }
+    }
+
+    #[test]
+    fn the_default_branch_is_read_from_the_repository() {
+        let (url, request) = serve_once(200, json!({"default_branch": "trunk"}));
+        assert_eq!(default_branch(&env_for(url), "tok", "acme/app").unwrap(), "trunk");
+        let head = request.recv().unwrap();
+        assert!(head.starts_with("GET /repos/acme/app "), "{head}");
+        assert!(head.to_lowercase().contains("authorization: bearer tok"), "{head}");
+
+        let (url, _) = serve_once(404, json!({"message": "Not Found"}));
+        let error = default_branch(&env_for(url), "tok", "acme/app").unwrap_err();
+        assert!(error.contains("404") && error.contains("Not Found"), "{error}");
+        let (url, _) = serve_once(200, json!({}));
+        assert!(default_branch(&env_for(url), "tok", "acme/app").is_err());
     }
 }
