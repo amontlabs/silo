@@ -26,9 +26,18 @@ a command started with `guest.exec.start` as the working account (Linux:
 `/usr/local/libexec/silo-cua-driver-mcp`, which finds the live desktop session; macOS:
 `/usr/local/bin/cua-driver mcp`) with its standard input open. JSON-RPC lines go in through
 `guest.exec.input` and come back through `guest.exec.get`. When the driver exits, the next
-request starts it again. Nothing is installed in the computer for this and no files are left in
-it. The session ends when the command does; `silo mcp` does not stop it when it exits (the
-driver stops with its fork).
+request starts it again. Any failure (timeout, lost or oversized output, a write that fails)
+closes the session: its standard input is closed and its state cleared, so the next request
+starts a new driver. After the driver exited, only requests that change nothing (`tools/list`,
+`get_desktop_state`) are repeated on the new one; a click or a key that may have been carried out
+is reported, not replayed. `silo mcp` closes every session when it stops, and a session when its
+computer is dropped or a promote runs. A driver answer is limited to 256 KiB per line, 16 content
+blocks, and PNG, JPEG or WebP images.
+
+A screenshot never travels on the driver's output: `get_desktop_state` is called with
+`screenshot_out_file` set to `/tmp/silo-cu.shot-<pid>-<n>.png` in the computer, and the host
+reads the file in parts of 500 KB with `guest.exec` (`tail | head`), then removes it. Nothing
+else is installed in the computer for this.
 
 The tools follow the driver contract of the pinned release
 (`cli/tests/fixtures/cua-driver-0.38.0-tools.json`, extracted from `contract/manifest.json` of
@@ -48,8 +57,10 @@ refreshing the fixture and the table in `usetools::driver_call`):
 | `computer_use_ready` | one look: `ready`, what it waits for, computer-use state and approval |
 | `fork_gui` | fork, start, wait until ready (below) |
 
-The host tools drive forks. They refuse `main` (like `drop`): fork it with `fork_gui` and drive
-the fork. They only reach computers of this device. Who may call them is decided by the MCP
+The host tools drive forks. They refuse any computer that is not a fork, judged from the
+engine's tree (a source computer exists and the name is not `main`): `main` and an archived
+`main-before-*` are refused like `drop` refuses `main`. Fork `main` with `fork_gui` and drive the
+fork. They only reach computers of this device. Who may call them is decided by the MCP
 client's own tool prompts; the `ask`/`auto` mode below is something else.
 
 ## Fork, start, wait
@@ -76,9 +87,10 @@ forks nobody watches:
   `silo` refuses to change it;
 - a person typing `--computer-use auto` has made the choice. An agent needs
   `computer_use_auto: true` in `.silo/silo.yaml`: that applies to MCP clients and to the CLI
-  when `--agent` or `SILO_AGENT` names an agent. The file is one an agent can edit, so this is a
-  convenience that stops a casual `auto`, not a gate; the real choice is the one the user makes
-  by setting it;
+  when `--agent` or `SILO_AGENT` names an agent. The setting is project-wide: once set, every
+  agent that makes forks may use `auto` for them. The file is one an agent can edit, and Silo does
+  not try to tell an agent's shell from a person's, so this is a convenience that stops a casual
+  `auto`, not an access control; the real choice is the one the user makes by setting it;
 - the mode is recorded on the fork (the engine's per-computer computer-use settings) and shown
   by `silo status` as `computer use: ready, approval auto, driver 0.38.0`;
 - in `auto` the agent controls the desktop and, through it, anything the working account can
@@ -87,8 +99,12 @@ forks nobody watches:
 Keeping an `auto` fork into main brings the fork's changed settings files with it, including
 the `mcp__cua-driver` rule in `~/.claude/settings.json` and the approval line in
 `~/.codex/config.toml`. After a keep, the engine applies the target's own recorded mode again
-(`computer_use::reapply_after_keep`, Linux computers; the guest helper rewrites both files).
-A macOS target is not re-applied yet: the VM check below looks at its files after a keep.
+(`computer_use::reapply_after_keep`, by name or id; the guest helper rewrites both files and,
+when the mode is `ask`, removes the auto lines even for an agent that is not installed). A
+macOS target forgets its recorded computer-use version, so the guest update runs again with the
+computer's own approval (`reapply_macos_computer_use_approval`). A promote moves main's approval
+to the computer taking the main role and puts the fork's own back on undo; the next start applies
+it.
 
 ## Change review
 
@@ -146,6 +162,7 @@ macOS (Apple Silicon host):
 3. `computer_use_screenshot`, `_click` and `_type` work (the session runs
    `/usr/local/bin/cua-driver mcp` through `guest.exec.start`).
 4. Keep an `auto` macOS fork into its `ask` main and read the Claude Code and Codex files as in
-   Linux step 6; if the rule or line is there, the macOS re-apply is still to do.
+   Linux step 6 (the guest update runs again after the keep). Promote an `auto` fork over an
+   `ask` main: `silo status main` says `ask`; undo and the fork says `auto` again.
 5. If the permissions are not granted in the fork, run `silo-computer-use.zsh` apply in the
    guest once and record why the clone lost them.

@@ -215,7 +215,7 @@ agents:
 | `fold` | `ask` (default) or `auto-code`, which is `auto_keep: [{when: {only: [code], tests: pass}}]`. Explicit `auto_keep` rules win over `fold: auto-code`. |
 | `auto_keep` | Rules that keep a fork without asking (below). |
 | `fork_ram_budget`, `warm_max_age` | Top level only. |
-| `computer_use_auto` | `true` lets agents (MCP clients, or the CLI run with `--agent`/`SILO_AGENT`) make forks whose in-computer agents use computer use without asking (`--computer-use auto`, `fork_gui` with `computer_use: auto`). Top level only, default `false`; a person typing `--computer-use auto` needs no setting. An agent can edit this file, so it is a convenience, not a gate. |
+| `computer_use_auto` | `true` lets agents (MCP clients, or the CLI run with `--agent`/`SILO_AGENT`) make forks whose in-computer agents use computer use without asking (`--computer-use auto`, `fork_gui` with `computer_use: auto`). Top level only, default `false`; a person typing `--computer-use auto` needs no setting. The setting is project-wide, not per agent or per fork, and an agent can edit the file: it is a convenience, not an access control. |
 | `step_checkpoints`, `step_checkpoints_keep` | Step checkpoints (see [steps](SiloUI-CHANGES.md#steps-and-the-fork-tree)). |
 | `agents.<name>` | Per-agent overrides of `recipes`, `fork_secrets`, `fold`, `auto_keep`, `step_checkpoints` and `step_checkpoints_keep`. |
 
