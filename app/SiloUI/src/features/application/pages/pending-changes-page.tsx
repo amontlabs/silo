@@ -5,18 +5,12 @@ import { ListCard, ListRow, ListRowIcon, ListRowSkeleton } from "@/components/li
 import { PageContainer, PageHeader } from "@/components/page"
 import { Button } from "@/components/ui/button"
 import type { RequestEntry } from "@/desktop/production-schemas"
-import { usePendingChanges } from "@/features/application/model/use-pending-changes"
+import { bucketSummary, usePendingChanges } from "@/features/application/model/use-pending-changes"
 import type { ApplicationActions } from "@/features/application/model/application-source"
 import { formatLocalTimestamp } from "@/lib/format-date"
 
 const statusLabels: Record<RequestEntry["request"]["status"], string> = {
   open: "Open", keeping: "Keeping…", kept: "Kept", "thrown-away": "Thrown away",
-}
-
-/** "2 added · 5 modified", in the order the bucket counts arrive; "No changes" when every bucket is empty. */
-export function bucketSummary(counts: Record<string, number>): string {
-  const parts = Object.entries(counts).filter(([, count]) => count > 0).map(([bucket, count]) => `${count} ${bucket}`)
-  return parts.length ? parts.join(" · ") : "No changes"
 }
 
 const badgeClass = "inline-flex shrink-0 items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 text-caption font-medium text-muted-foreground"

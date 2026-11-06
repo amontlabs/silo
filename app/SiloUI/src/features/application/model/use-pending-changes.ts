@@ -12,6 +12,12 @@ export function pendingChangesDelay(failures: number): number {
   return Math.min(PENDING_CHANGES_INTERVAL_MS * 2 ** failures, PENDING_CHANGES_MAX_INTERVAL_MS)
 }
 
+/** "2 added · 5 modified", in the order the bucket counts arrive; "No changes" when every bucket is empty. */
+export function bucketSummary(counts: Record<string, number>): string {
+  const parts = Object.entries(counts).filter(([, count]) => count > 0).map(([bucket, count]) => `${count} ${bucket}`)
+  return parts.length ? parts.join(" · ") : "No changes"
+}
+
 export interface PendingChangesState {
   /** The last list read, kept while a later read fails. */
   list: RequestList | null

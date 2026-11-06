@@ -1,0 +1,77 @@
+import { act, render, screen, within } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+import { afterEach, expect, it, vi } from "vitest"
+import { requestListSchema } from "@/desktop/production-schemas"
+import { fixtureListReviewRequests, fixtureReviewRequests } from "@/fixtures/pending-changes"
+import { bucketSummary, PENDING_CHANGES_INTERVAL_MS, pendingChangesDelay } from "../model/use-pending-changes"
+import { PendingChangesPage } from "./pending-changes-page"
+
+afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks() })
+
+it("lists the requests of every device with target, device, counts and status", async () => {
+  const load = vi.fn(fixtureListReviewRequests)
+  render(<PendingChangesPage listReviewRequests={load} onOpenRequest={vi.fn()} />)
+  const rows = await screen.findAllByRole("button", { name: /login-fix|docs-pass|cache-tune/ })
+  expect(rows).toHaveLength(3)
+  expect(load).toHaveBeenCalledWith({ status: "open", allDevices: true })
+  const login = screen.getByRole("button", { name: "login-fix" }).closest("[data-slot='list-row-content']") as HTMLElement
+  expect(login).toHaveTextContent("into main")
+  expect(login).toHaveTextContent("This device")
+  expect(login).toHaveTextContent("2 added · 5 modified · 1 removed")
+  const remote = screen.getByRole("button", { name: "cache-tune" }).closest("[data-slot='list-row-content']") as HTMLElement
+  expect(remote).toHaveTextContent("Mac mini")
+  expect(remote).toHaveTextContent("No changes")
+  expect(screen.getByText("Keeping…")).toBeInTheDocument()
+})
+
+it("shows an unreachable device as an unavailable row with its reason", async () => {
+  render(<PendingChangesPage listReviewRequests={fixtureListReviewRequests} onOpenRequest={vi.fn()} />)
+  const row = (await screen.findByText("Office")).closest("[data-slot='list-row-content']") as HTMLElement
+  expect(within(row).getByText("Unavailable")).toBeInTheDocument()
+  expect(row).toHaveTextContent(fixtureReviewRequests.unreachable[0]!.reason)
+})
+
+it("shows an empty state when nothing is pending", async () => {
+  render(<PendingChangesPage listReviewRequests={async () => requestListSchema.parse({ requests: [], unreachable: [] })} onOpenRequest={vi.fn()} />)
+  expect(await screen.findByText("No pending changes")).toBeInTheDocument()
+})
+
+it("opens a request with its device from the title or the row", async () => {
+  const open = vi.fn()
+  const user = userEvent.setup()
+  render(<PendingChangesPage listReviewRequests={fixtureListReviewRequests} onOpenRequest={open} />)
+  await user.click(await screen.findByRole("button", { name: "cache-tune" }))
+  expect(open).toHaveBeenLastCalledWith("req-cache-tune", "mac-mini")
+  await user.click(screen.getByText(/2 added/))
+  expect(open).toHaveBeenLastCalledWith("req-login-fix", undefined)
+  expect(open).toHaveBeenCalledTimes(2)
+})
+
+it("polls, backs off while reads fail, keeps the last list, and recovers", async () => {
+  vi.useFakeTimers()
+  let failing = false
+  const load = vi.fn(async () => { if (failing) throw new Error("Device unavailable"); return fixtureReviewRequests })
+  render(<PendingChangesPage listReviewRequests={load} onOpenRequest={vi.fn()} />)
+  await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+  expect(load).toHaveBeenCalledTimes(1)
+  failing = true
+  await act(async () => { await vi.advanceTimersByTimeAsync(PENDING_CHANGES_INTERVAL_MS) })
+  expect(load).toHaveBeenCalledTimes(2)
+  expect(screen.getByRole("alert")).toHaveTextContent("Device unavailable")
+  expect(screen.getByRole("button", { name: "login-fix" })).toBeInTheDocument()
+  // After one failure the wait doubles.
+  await act(async () => { await vi.advanceTimersByTimeAsync(PENDING_CHANGES_INTERVAL_MS) })
+  expect(load).toHaveBeenCalledTimes(2)
+  failing = false
+  await act(async () => { await vi.advanceTimersByTimeAsync(PENDING_CHANGES_INTERVAL_MS) })
+  expect(load).toHaveBeenCalledTimes(3)
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+  await act(async () => { await vi.advanceTimersByTimeAsync(PENDING_CHANGES_INTERVAL_MS) })
+  expect(load).toHaveBeenCalledTimes(4)
+})
+
+it("caps the backoff and summarizes buckets", () => {
+  expect([0, 1, 2, 10].map(pendingChangesDelay)).toEqual([5_000, 10_000, 20_000, 60_000])
+  expect(bucketSummary({ added: 1, removed: 0 })).toBe("1 added")
+  expect(bucketSummary({})).toBe("No changes")
+})

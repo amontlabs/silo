@@ -400,7 +400,7 @@ it("opens on the nested computer Overview with compact navigation", () => {
 
   const navigation = appNavigation()
   const primaryItems = [...navigation.querySelectorAll<HTMLElement>("[data-navigation-level='primary']")]
-  expect(primaryItems).toEqual(["Computers", "GitHub", "Secrets", "Settings"].map(name => within(navigation).getByRole("button", { name })))
+  expect(primaryItems).toEqual(["Computers", "Pending changes", "GitHub", "Secrets", "Settings"].map(name => within(navigation).getByRole("button", { name })))
   for (const item of primaryItems) expect(item).toHaveClass("flex-none", "w-full")
 
   expect(within(navigation).getByRole("button", { name: "Computers" })).toHaveAttribute("aria-current", "page")
