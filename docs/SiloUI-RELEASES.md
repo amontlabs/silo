@@ -669,12 +669,15 @@ guest computers on Mac hosts remain supported.
 
 The engine (`silod`) has its own releases, independent of the Silo app's `v*`
 tags. An app that embeds the engine, such as Fjord, downloads a pinned release
-instead of compiling Silo.
+instead of compiling Silo. The same release carries the Linux host engines,
+which run Linux computers on a Linux machine
+([`silod` on a Linux host](SiloUI-ENGINE.md#silod-on-a-linux-host)).
 
 ### Cut an engine release
 
-The engine is Apple Silicon only, like every Silo host: its macOS VM code does
-not build for Intel, so there is no `x86_64` or universal archive.
+The macOS engine is Apple Silicon only, like every Silo Mac host: its macOS VM
+code does not build for Intel, so there is no `x86_64` or universal macOS
+archive. The Linux engines are built for x86-64 and arm64.
 
 1. Raise `version` in `app/SiloUI/src-tauri/silod/Cargo.toml` and
    `engineVersion` in
@@ -688,20 +691,31 @@ not build for Intel, so there is no `x86_64` or universal archive.
    `engine-v<version>` and push the tag; the workflow then fails unless the tag
    equals `engine-v<version>` of the Cargo version.
 3. `.github/workflows/engine-release.yml` builds `silod` with Rust 1.94.0 for
-   `aarch64-apple-darwin`, packages it with `app/SiloUI/scripts/package-engine.py`,
-   checks that the binary is `arm64` and the checksum, and creates the GitHub
-   release `engine-v<version>`. The release is not marked latest, so
-   `releases/latest/download/latest.json` keeps pointing at the app. The build
-   compiles in the GitHub App configuration, like the app, from the same three
-   repository secrets as the release workflow.
+   `aarch64-apple-darwin` on `macos-15`, packages it with
+   `app/SiloUI/scripts/package-engine.py`, and checks that the binary is `arm64`
+   and the checksum. In parallel, its `build-linux` job builds on `ubuntu-24.04`
+   (`linux-x64`) and `ubuntu-24.04-arm` (`linux-arm64`): it prepares the pinned
+   runtime with the shared `prepare-release-runtime` action, builds `silod` and
+   the production `silo` command for the runner's architecture
+   (`package-engine.py --platform linux-x64|linux-arm64`), and checks the
+   checksum, the ELF architecture of `silod`, `silo`, `msb` and `git`, that
+   `silo --print-channel-identifier` prints `org.silo.preview`, and
+   `release.json` and the manifest. When all three pass, it creates the GitHub
+   release `engine-v<version>` with the three archives. The release is not
+   marked latest, so `releases/latest/download/latest.json` keeps pointing at
+   the app. Each build compiles in the GitHub App configuration, like the app,
+   from the same three repository secrets as the release workflow.
 
 Assets, at `https://github.com/amontlabs/silo/releases/download/engine-v<version>/`:
 
 - `silo-engine-<version>-macos-arm64.tar.gz`
 - `silo-engine-<version>-macos-arm64.tar.gz.sha256`, one line:
   `<sha256>  silo-engine-<version>-macos-arm64.tar.gz`
+- `silo-engine-<version>-linux-x64.tar.gz` and
+  `silo-engine-<version>-linux-arm64.tar.gz`, each with its `.sha256` in the
+  same form
 
-The tarball has one top-level directory, `silo-engine-<version>/`:
+The macOS tarball has one top-level directory, `silo-engine-<version>/`:
 
 ```text
 release.json                  engineVersion, sourceCommit, targets (aarch64-apple-darwin),
@@ -713,6 +727,32 @@ macos/LaunchAgents/org.silo.preview.engine.plist
 macos/resources/engine-manifest.production.json   engineBuild = silo-<source commit>
 api/silo-api.schema.json
 ```
+
+Each Linux tarball is a complete engine directory, `silo-engine/`, that runs
+where it is unpacked (`silod --service register` installs the systemd user
+unit):
+
+```text
+release.json                  as above, targets x86_64- or aarch64-unknown-linux-gnu
+silod                         not signed
+silo                          the production silo command
+msb, git, git-lfs,            bundled tools, beside silod where the engine looks
+git-remote-http, git-remote-https
+resources/engine-manifest.json                      production, engineBuild = silo-<source commit>
+resources/microsandbox/manifest.json
+resources/microsandbox/licenses/
+resources/microsandbox/<target>/lib/libkrunfw.so.5.6.1
+resources/git-support/        Git manifest, licenses, share/git-core/templates,
+                              lfs-transfer/ (the guest's git-lfs-transfer)
+api/silo-api.schema.json
+THIRD-PARTY-NOTICES.md
+LICENSE
+```
+
+The runtime files are the ones `npm run runtime:prepare` stages for that
+architecture; the script checks them against the MicroSandbox, Git and LFS
+transfer manifests and checks every executable's ELF machine before it writes
+the archive.
 
 ### Embedding the engine: the signer requirement
 
@@ -754,6 +794,18 @@ This writes `silo-engine-<version>-macos-arm64.tar.gz` and its `.sha256`.
 with the `aarch64-apple-darwin` target installed, and the local GitHub build
 configuration from [Local setup](#local-setup). The script refuses a Cargo
 version that differs from the production manifest's `engineVersion`.
+
+A Linux engine builds on a Linux machine of the same architecture, after
+`npm --prefix app/SiloUI run runtime:prepare` (see [Local setup](#local-setup);
+the MicroSandbox build also needs `libclang-dev` and `libcap-ng-dev`):
+
+```sh
+python3 app/SiloUI/scripts/package-engine.py --platform linux-x64 --out-dir /tmp/silo-engine
+```
+
+`--platform linux-arm64` on arm64. `--channel development` packages a Silo Dev
+engine (the development manifest and a development `silo`) for tests, as
+`.github/workflows/linux-host.yml` does; never publish one.
 
 ## Primary references
 

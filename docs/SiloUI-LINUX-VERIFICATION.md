@@ -3,7 +3,10 @@
 > Historical Linux-host evidence only. Linux host support is discontinued and
 > the Linux build and packaging workflows have been removed. This guide is not
 > a current build, test, or release procedure. Linux guest computers on Mac hosts
-> remain supported.
+> remain supported. The headless Linux host engine (`silod`) is current: see
+> [`silod` on a Linux host](SiloUI-ENGINE.md#silod-on-a-linux-host). Its KVM check
+> is `.github/workflows/linux-host.yml`, which reuses the KVM probe of
+> `scripts/test-linux-runtime.py`.
 
 Linux parity needs separate evidence for each layer. Compilation alone does
 not prove the WebKit UI, desktop services, or hardware virtualization works.

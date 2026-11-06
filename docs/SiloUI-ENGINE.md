@@ -145,12 +145,17 @@ behind `cfg(target_os = "linux")`.
   and GTK integrations the app uses (application discovery, autostart, notifications). Without
   it, application discovery lists nothing and system integrations read as unavailable. CI
   checks that `cargo tree -p silod -e normal` lists no GTK crate.
-- **Layout.** A Linux engine is one directory: `<dir>/silod`, its bundled tools beside it
-  (`msb`, Git), and `<dir>/resources/` with `engine-manifest.json` and the runtime resources
-  (`microsandbox/manifest.json`, `microsandbox/<target>/lib/libkrunfw.so.5.6.1`).
-  `paths::default_resource_dir` resolves `<dir>/resources` from the running executable, so a
-  link such as `~/.local/bin/silo-remote-dev` finds the same directory. The release archive
-  that produces this layout is phase 3 of the [remote hosts plan](hosts/PLAN.md).
+- **Layout.** A Linux engine is one directory: `<dir>/silod` with the `silo` command and the
+  bundled tools beside it (`msb`, `git`, `git-lfs`, `git-remote-http`, `git-remote-https`), and
+  `<dir>/resources/` with `engine-manifest.json` and the runtime resources:
+  `microsandbox/manifest.json`, `microsandbox/<target>/lib/libkrunfw.so.5.6.1`,
+  `microsandbox/licenses/`, and `git-support/` (the Git manifest, templates and licenses, and
+  the guest's `lfs-transfer/git-lfs-transfer`). `paths::default_resource_dir` resolves
+  `<dir>/resources` from the running executable, so a link such as
+  `~/.local/bin/silo-remote-dev` finds the same directory; `bundled_tools::resolve` is the
+  executable's directory, where the runtime finds `msb` and Git. The release archives
+  `silo-engine-<version>-linux-x64.tar.gz` and `-linux-arm64.tar.gz` hold exactly this
+  directory as `silo-engine/` (see [Engine releases](SiloUI-RELEASES.md#engine-releases)).
 - **Identity.** The channel comes from `resources/engine-manifest.json`, validated as strictly
   as a bundle's (regular file under 64 KiB, known channel, semver version, non-empty build,
   protocol range) except for the bundle identifier, which a Linux engine has none of. There is
@@ -189,11 +194,58 @@ behind `cfg(target_os = "linux")`.
   and SIGINT both start the engine's bounded session-end shutdown, as SIGTERM and logout do
   on macOS; a second one of either exits at once with status 1. `msb` and guest commands run in
   their own process group, so a terminal's Ctrl-C reaches `silod` alone. Exit code 75 still
-  means "restart me" for a supervisor. `--remote-bridge` and
-  `--remote-guest` work through the `~/.local/bin` link. `silod --service` reports that it is
-  not available yet: the systemd user unit is phase 3. Until then, start it by hand or from
-  your own unit, for example a Dev engine run by a dedicated account (in the `kvm` group to
-  start computers), installed where only that account can change it:
+  means "restart me" for a supervisor. `--remote-bridge` and `--remote-guest` work through the
+  `~/.local/bin` link. Run the engine as a dedicated account (in the `kvm` group to start
+  computers), installed where only that account can change it.
+- **Install from an archive.** Unpack the archive in a directory the account owns, for example
+  `~/.local/opt`, check it first, and register the service:
+
+  ```sh
+  sha256sum -c silo-engine-<version>-linux-x64.tar.gz.sha256
+  mkdir -p ~/.local/opt && tar -xzf silo-engine-<version>-linux-x64.tar.gz -C ~/.local/opt
+  chmod -R go-w ~/.local/opt/silo-engine
+  ~/.local/opt/silo-engine/silod --service register
+  ~/.local/opt/silo-engine/silo list
+  ```
+
+  The archive is not signed (roadmap milestone 11); the `.sha256` beside it on the release
+  only shows that the download is whole. The host needs `/dev/kvm` readable and writable by the
+  account (usually through the `kvm` group), `ssh` for Connections, and network access for the
+  guest image the engine downloads on first use. The archive's `silo` is the production
+  channel's and talks to `~/.silo/engine.sock`; put it on `PATH` yourself for now
+  (`silo host init`, phase 4 of the [remote hosts plan](hosts/PLAN.md), will).
+- **Service.** `silod --service register` writes the systemd user unit
+  `~/.config/systemd/user/<channel>.engine.service` (`org.silo.preview.engine.service`, or
+  `org.silo.dev.engine.service` for Silo Dev; `$XDG_CONFIG_HOME` is honored), then runs
+  `systemctl --user daemon-reload` and `systemctl --user enable --now` on it. The unit starts
+  the canonical path of the `silod` that registered it, with `--agent`, and sets
+  `Restart=on-failure` (exit code 75 is a failure to systemd, so a requested restart starts a
+  new engine, and a clean exit stays stopped), `RestartSec=10`, `UMask=0077`,
+  `KillMode=process` and `KillSignal=SIGTERM` (only `silod` is signalled: its session end stops
+  its computers, and computers it leaves running on purpose, for an update, are not killed),
+  `TimeoutStopSec=30`, and `WantedBy=default.target`. `register` never replaces a file at that
+  path that silod did not write (the first line marks silod's), and leaves an engine that is
+  already running as it is: after registering from another directory it says to run
+  `systemctl --user restart <unit>`. `silod --service unregister` runs `disable --now` (which
+  waits for the engine's session end), removes the file and reloads. `silod --service status`
+  prints, as on macOS, `enabled`, `disabled` or `notRegistered` on its first line, then
+  `state:` (the unit's active state), `unit:` (its path), `program:` (whether it starts this
+  `silod`) and `linger:`. `systemctl --user` needs the account's user manager: run the commands
+  from a login session, not through `su` or `sudo`, or set
+  `XDG_RUNTIME_DIR=/run/user/$(id -u)`. The engine's output goes to the journal
+  (`journalctl --user -u org.silo.preview.engine.service`) and its logs to the XDG log
+  directory above.
+- **Lingering.** Without it, systemd starts the account's user manager, and so the engine, at
+  the account's first login and stops it after the last logout. On a headless host, turn it on
+  so the engine starts at boot and keeps running without a session. That needs an
+  administrator; silod never asks for privileges, it reports `linger: no` and says how:
+
+  ```sh
+  sudo loginctl enable-linger "$USER"
+  ```
+
+- **Trying it by hand.** To run a Dev engine in a test home without installing it, assemble
+  the directory by hand:
 
   ```sh
   mkdir -p ~/silo-engine/resources
@@ -211,4 +263,11 @@ behind `cfg(target_os = "linux")`.
   `/usr/local` is refused.
 
   This proves the daemon serves; creating or starting a computer also needs `/dev/kvm`, the
-  runtime resources above and the guest image.
+  runtime resources above and the guest image. After `npm run runtime:prepare`,
+  `python3 scripts/package-engine.py --platform linux-x64 --channel development` builds a
+  complete Dev engine archive instead.
+- **CI.** `.github/workflows/linux-host.yml` builds that Dev archive on an `ubuntu-24.04`
+  runner, installs it, registers it as a user service of the lingering runner account, and
+  drives a Linux computer over KVM through the `silo` command
+  (`app/SiloUI/scripts/linux-host-e2e.sh`): create, start, exec, checkpoint, fork, exec in the
+  fork, drop both. It then stops the service, expects exit code 0, and unregisters it.
