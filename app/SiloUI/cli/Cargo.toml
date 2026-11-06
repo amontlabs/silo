@@ -16,6 +16,7 @@ base64 = "0.23"
 clap = { version = "4", features = ["derive", "env"] }
 futures = "0.3"
 libc = "0.2"
+regex = "1"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 rmcp = { version = "3.8", features = ["server", "transport-io", "macros"] }
 schemars = "1.2.2"
@@ -26,6 +27,7 @@ silo-api = { path = "../api" }
 silo-client = { path = "../client" }
 time = "0.3"
 tokio = { version = "1", features = ["io-util", "macros", "net", "rt-multi-thread", "signal", "sync", "time", "io-std"] }
+unicode-normalization = "0.1"
 uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]

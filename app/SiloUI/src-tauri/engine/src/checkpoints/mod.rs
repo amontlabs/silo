@@ -345,6 +345,11 @@ impl Service {
         options: ForkOptions,
         recipe_hash: Option<&str>,
     ) -> Result<JobId, Failure> {
+        // A name that is already a computer's gets no note: the note would be taken for that
+        // computer's own record, and a fork that fails would leave it looking like a descendant.
+        if self.platform(new_name).is_ok() {
+            return Err(Failure::from_message(crate::computer_names::TAKEN));
+        }
         // Noted first: the fork's source is resolved on the job and replaces the key.
         crate::changes::fork_base::expect(
             self.context(),
@@ -382,12 +387,14 @@ impl Service {
                 let checkpoint_id = checkpoint_id.map(str::to_owned);
                 let new_name = new_name.to_owned();
                 let macos = self.macos.clone();
+                let context = self.context().clone();
                 self.start_linux_job(
                     "checkpoints.fork",
                     false,
                     JobResult::State,
                     move |paths, job_id, cancellation| {
-                        runtime::checkpoints::fork_for_job(
+                        let name_for_note = new_name.clone();
+                        let made = runtime::checkpoints::fork_for_job(
                             paths,
                             &EngineForkAssignments,
                             &computer_id,
@@ -397,8 +404,12 @@ impl Service {
                             &|| macos_computers::names(&macos),
                             job_id,
                             cancellation,
-                        )
-                        .map(|()| Value::Null)
+                        );
+                        // A fork that was not made leaves no note behind.
+                        if made.is_err() {
+                            crate::changes::fork_base::withdraw(context.as_ref(), &name_for_note);
+                        }
+                        made.map(|()| Value::Null)
                     },
                 )
             }

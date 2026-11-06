@@ -36,7 +36,7 @@ pub struct Sources<'a> {
 }
 
 /// Names of the throwaway computers Silo makes for its own measurements.
-fn hidden(name: &str) -> bool {
+pub fn hidden(name: &str) -> bool {
     name.starts_with("silo-baseline-") || name.starts_with("silo-build-")
 }
 

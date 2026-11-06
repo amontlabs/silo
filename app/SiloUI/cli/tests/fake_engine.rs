@@ -28,6 +28,15 @@ impl FakeEngine {
     pub fn start(
         handler: impl FnMut(&str, &Value) -> Result<Value, (&'static str, String)> + Send + 'static,
     ) -> Self {
+        Self::start_with(&["device.routing.v1"], handler)
+    }
+
+    /// An engine that advertises exactly these capabilities in its handshake.
+    pub fn start_with(
+        capabilities: &[&str],
+        handler: impl FnMut(&str, &Value) -> Result<Value, (&'static str, String)> + Send + 'static,
+    ) -> Self {
+        let capabilities: Vec<String> = capabilities.iter().map(|c| (*c).to_owned()).collect();
         let directory = tempfile::tempdir().unwrap();
         let socket = directory.path().join("engine.sock");
         let listener = UnixListener::bind(&socket).unwrap();
@@ -45,8 +54,9 @@ impl FakeEngine {
                 counted.fetch_add(1, Ordering::SeqCst);
                 live.fetch_add(1, Ordering::SeqCst);
                 let (handler, log, live) = (handler.clone(), log.clone(), live.clone());
+                let capabilities = capabilities.clone();
                 tokio::spawn(async move {
-                    serve(stream, handler, log).await;
+                    serve(stream, handler, log, capabilities).await;
                     live.fetch_sub(1, Ordering::SeqCst);
                 });
             }
@@ -83,6 +93,7 @@ async fn serve(
     stream: tokio::net::UnixStream,
     handler: Arc<Mutex<Handler>>,
     log: Arc<Mutex<Vec<(String, Value)>>>,
+    capabilities: Vec<String>,
 ) {
     let (mut reader, mut writer) = tokio::io::split(stream);
     let Ok(Some(first)) = read_frame::<_, Value>(&mut reader).await else {
@@ -91,7 +102,7 @@ async fn serve(
     let reply = json!({"id": first["id"], "result": {
         "deviceId": "fake", "name": "Fake Mac",
         "protocol": silo_api::transport::PROTOCOL_VERSION,
-        "capabilities": [], "clientId": "fake-client"}});
+        "capabilities": capabilities, "clientId": "fake-client"}});
     if write_frame(&mut writer, &reply).await.is_err() {
         return;
     }

@@ -329,7 +329,7 @@ fn valid_repository(repository: &str) -> bool {
 
 /// Whether an absolute path names key material or a credential file, by the patterns the
 /// diff uses to keep credentials out of what is carried (engine `changes/ignore.rs`).
-fn credential_like(path: &str) -> bool {
+pub(crate) fn credential_like(path: &str) -> bool {
     const DIRS: &[&str] = &[
         "/.ssh/",
         "/.gnupg/",

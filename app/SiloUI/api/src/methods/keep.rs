@@ -17,6 +17,9 @@ wire_struct! {
 
 wire_struct! {
     ChangesKeepParams {
+        /// The device that owns this; absent or `local` is this device.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        device_id: Option<String>,
         /// The fork whose changes are kept.
         fork_id: String,
         /// The computer to keep into; defaults to the one the fork was made from.
@@ -39,6 +42,9 @@ wire_struct! {
 
 wire_struct! {
     ChangesUndoParams {
+        /// The device that owns this; absent or `local` is this device.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        device_id: Option<String>,
         /// The computer a keep changed.
         computer_id: String,
     }
@@ -46,6 +52,9 @@ wire_struct! {
 
 wire_struct! {
     ChangesPromoteParams {
+        /// The device that owns this; absent or `local` is this device.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        device_id: Option<String>,
         /// The fork that replaces main.
         fork_id: String,
         /// The computer it replaces; defaults to the one the fork was made from.
@@ -170,6 +179,9 @@ wire_struct! {
     /// Ask for a fork to be reviewed without keeping it: `changes.request` stores a
     /// [`FoldRequest`] and changes nothing else.
     ChangesRequestParams {
+        /// The device that owns this; absent or `local` is this device.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        device_id: Option<String>,
         /// The fork to be reviewed.
         fork_id: String,
         /// The computer it would be kept into; defaults to the one the fork was made from.

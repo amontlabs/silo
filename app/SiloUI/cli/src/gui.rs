@@ -67,7 +67,7 @@ fn target(computer: &Computer) -> ComputerTargetParams {
 pub async fn ensure_fork(engine: &Engine, computer: &Computer) -> Result<(), CliError> {
     let tree = engine
         .call(requests::computers_tree(
-            silo_api::methods::common::EmptyParams {},
+            silo_api::methods::common::DeviceParams { device_id: None },
         ))
         .await?;
     let fork = computer.name != MAIN

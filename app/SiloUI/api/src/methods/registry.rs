@@ -175,6 +175,9 @@ define_registry! {
     GuestFilesWatch => ("guest.files.watch", Subscription, guest::GuestFilesWatchParams, guest::GuestFilesWatchResult);
     GuestFilesWrite => ("guest.files.write", Command, guest::GuestFilesWriteParams, guest::GuestFilesWriteResult);
     GuestPrepare => ("guest.prepare", Command, guest::GuestPrepareParams, guest::GuestPrepareResult);
+    GuestClientEnable => ("guestClient.enable", Command, guest_client::GuestClientEnableParams, guest_client::GuestClientEnableResult);
+    GuestClientRevoke => ("guestClient.revoke", Command, guest_client::GuestClientComputerParams, guest_client::GuestClientStatus);
+    GuestClientStatus => ("guestClient.status", Query, guest_client::GuestClientComputerParams, guest_client::GuestClientStatus);
     GuestSsh => ("guest.ssh", Stream, guest::GuestSshParams, ());
     GuestSshAliasEnsure => ("guest.sshAlias.ensure", Command, guest::GuestSshAliasEnsureParams, guest::GuestSshAliasEnsureResult);
     GuestSshAliasRemove => ("guest.sshAlias.remove", Command, guest::GuestSshAliasRemoveParams, ());
@@ -208,7 +211,7 @@ define_registry! {
     PushStart => ("push.start", Job, push::PushStartParams, common::JobStartResult);
     PushStatus => ("push.status", Query, push::PushStatusParams, Option<push::PushOperation>);
     RecipesBuild => ("recipes.build", Job, recipes::RecipeBuildParams, common::JobStartResult);
-    RecipesList => ("recipes.list", Query, common::EmptyParams, recipes::RecipesListResult);
+    RecipesList => ("recipes.list", Query, common::DeviceParams, recipes::RecipesListResult);
     RecipesRemove => ("recipes.remove", Command, recipes::RecipeRemoveParams, ());
     SecretsList => ("secrets.list", Query, common::DeviceParams, Vec<secrets::Secret>);
     SecretsRemove => ("secrets.remove", Command, secrets::SecretsRemoveParams, Vec<secrets::Secret>);
@@ -242,20 +245,20 @@ mod tests {
 
     #[test]
     fn registry_covers_every_canonical_method_and_kind() {
-        assert_eq!(METHOD_REGISTRY.len(), 166);
+        assert_eq!(METHOD_REGISTRY.len(), 169);
         assert_eq!(
             METHOD_REGISTRY
                 .iter()
                 .filter(|m| m.kind == MethodKind::Query)
                 .count(),
-            52
+            53
         );
         assert_eq!(
             METHOD_REGISTRY
                 .iter()
                 .filter(|m| m.kind == MethodKind::Command)
                 .count(),
-            68
+            70
         );
         assert_eq!(
             METHOD_REGISTRY
