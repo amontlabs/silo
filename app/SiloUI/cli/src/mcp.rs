@@ -1,7 +1,7 @@
 //! `silo mcp`: the commands as MCP tools over stdio. Every tool makes the same engine calls
 //! as its command and answers with the same JSON as `--json`.
 
-use std::{collections::HashMap, path::PathBuf, sync::Arc};
+use std::{collections::HashMap, path::PathBuf, sync::Arc, time::Duration};
 
 use rmcp::{
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
@@ -31,8 +31,9 @@ pub struct SiloMcp {
     agent: Arc<std::sync::Mutex<Option<String>>>,
     /// Set when `--agent` or `SILO_AGENT` named the agent: the client's name is then ignored.
     agent_named: bool,
-    /// Screen pixels per pixel of the last screenshot returned, by computer id.
-    scales: Arc<std::sync::Mutex<HashMap<String, f64>>>,
+    /// The driver session of each computer driven through this server, by computer id.
+    sessions:
+        Arc<std::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<crate::driver::Session>>>>>,
     tool_router: ToolRouter<Self>,
 }
 
@@ -225,8 +226,20 @@ pub struct TypeParams {
 pub struct KeyParams {
     /// The computer's name.
     pub computer: String,
-    /// A key or combination, like `Return` or `ctrl+l`.
+    /// One key, like `Return` or `Tab`.
     pub key: String,
+    /// Modifiers held with it, like `["ctrl"]`.
+    #[serde(default)]
+    pub modifiers: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct HotkeyParams {
+    /// The computer's name.
+    pub computer: String,
+    /// A chord of at least two keys, like `["ctrl", "l"]`.
+    pub keys: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -234,15 +247,15 @@ pub struct KeyParams {
 pub struct ScrollParams {
     /// The computer's name.
     pub computer: String,
-    /// Where to scroll, in pixels of the last screenshot.
+    /// Where to scroll, in pixels of the latest screenshot.
     pub x: f64,
     pub y: f64,
-    /// Horizontal amount (default 0).
-    #[serde(default)]
-    pub dx: f64,
-    /// Vertical amount; positive scrolls down (default 0).
-    #[serde(default)]
-    pub dy: f64,
+    /// `up`, `down`, `left` or `right`.
+    pub direction: String,
+    /// How much, 1 to 50 (default 3).
+    pub amount: Option<u32>,
+    /// `line` (default) or `page`.
+    pub by: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -263,6 +276,8 @@ pub struct DragParams {
     pub from_y: f64,
     pub to_x: f64,
     pub to_y: f64,
+    /// `left` (default), `right` or `middle`.
+    pub button: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -293,8 +308,8 @@ pub struct ForkGuiParams {
     pub source: Option<String>,
     /// The fork's name.
     pub name: Option<String>,
-    /// `ask` (default) or `auto`. `auto` lets the fork's agent drive its desktop without asking;
-    /// it needs computer_use_auto: true in .silo/settings.yaml.
+    /// `ask` (default) or `auto`: the approval for agents running inside the fork. `auto` needs
+    /// computer_use_auto: true in .silo/silo.yaml.
     pub computer_use: Option<String>,
     /// How long to wait for the desktop and the driver (default 300).
     pub timeout_secs: Option<u64>,
@@ -332,7 +347,7 @@ impl SiloMcp {
             engine: Arc::new(tokio::sync::Mutex::new(None)),
             agent: Arc::new(std::sync::Mutex::new(None)),
             agent_named: false,
-            scales: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            sessions: Arc::new(std::sync::Mutex::new(HashMap::new())),
             tool_router: Self::tool_router(),
         }
         .with_agent(std::env::var("SILO_AGENT").ok())
@@ -879,51 +894,49 @@ impl SiloMcp {
         show(async { ops::checkpoints(&self.engine().await?, &computer).await }.await)
     }
 
+    /// One request to the computer's driver session. The host tools are for forks: `main` is
+    /// refused, like `drop`.
+    async fn session_request(
+        &self,
+        computer: &str,
+        method: &str,
+        params: Value,
+    ) -> Result<Value, CliError> {
+        let engine = self.engine().await?;
+        let found = engine.computer(computer).await?;
+        if found.name == ops::MAIN {
+            return Err(CliError::new(
+                "The computer_use tools drive forks, not main. Fork main (fork_gui) and drive the fork.",
+            ));
+        }
+        let session = self
+            .sessions
+            .lock()
+            .unwrap()
+            .entry(found.id.clone())
+            .or_default()
+            .clone();
+        let mut session = session.lock().await;
+        session
+            .request(&engine, &found, method, params, Duration::from_secs(60))
+            .await
+    }
+
     /// Runs one driver tool in the computer and shapes its answer for the agent.
     async fn drive(
         &self,
         computer: &str,
         tool: &str,
         arguments: Value,
-        max_side: Option<u32>,
     ) -> Result<CallToolResult, String> {
-        let run = async {
-            let engine = self.engine().await?;
-            let found = engine.computer(computer).await?;
-            let result = crate::bridge::driver_request(
-                &engine,
-                &found,
-                "tools/call",
-                serde_json::json!({"name": tool, "arguments": arguments}),
-                60,
-            )
-            .await?;
-            let answer = crate::usetools::answer_of(
-                &result,
-                max_side.unwrap_or(crate::usetools::DEFAULT_MAX_SIDE),
-            )?;
-            if let Some(scale) = answer.scale {
-                self.scales.lock().unwrap().insert(found.id.clone(), scale);
-            }
-            Ok::<_, CliError>(answer)
-        };
-        run.await.map(drive_result).map_err(|error| error.message)
-    }
-
-    /// The scale of the last screenshot returned for `computer` (1 before any).
-    async fn scale_of(&self, computer: &str) -> f64 {
-        let Ok(engine) = self.engine().await else {
-            return 1.0;
-        };
-        let Ok(found) = engine.computer(computer).await else {
-            return 1.0;
-        };
-        self.scales
-            .lock()
-            .unwrap()
-            .get(&found.id)
-            .copied()
-            .unwrap_or(1.0)
+        self.session_request(
+            computer,
+            "tools/call",
+            serde_json::json!({"name": tool, "arguments": arguments}),
+        )
+        .await
+        .map(|result| drive_result(crate::usetools::answer_of(&result)))
+        .map_err(|error| error.message)
     }
 
     async fn act(
@@ -931,13 +944,12 @@ impl SiloMcp {
         computer: &str,
         action: crate::usetools::Action,
     ) -> Result<CallToolResult, String> {
-        let scale = self.scale_of(computer).await;
-        let (tool, arguments) = crate::usetools::driver_call(&action, scale);
-        self.drive(computer, tool, arguments, None).await
+        let (tool, arguments) = crate::usetools::driver_call(&action);
+        self.drive(computer, tool, arguments).await
     }
 
     #[tool(
-        description = "Fork a computer (default main), start the fork and wait until its desktop and computer-use driver are ready. Returns the fork's name and its computer-use status. computer_use auto lets the fork's agent drive the desktop without asking (needs computer_use_auto in the project settings); main always keeps asking."
+        description = "Fork a computer (default main), start the fork and wait until its desktop and computer-use driver are ready. Returns the fork's name and its computer-use status. computer_use sets the approval mode for agents running inside the fork: ask (default) or auto (no prompts; needs computer_use_auto in .silo/silo.yaml, which is a convenience, not a gate). main keeps its own mode. The computer_use_* tools on this server then drive the fork; they are gated by this client's tool prompts, not by that mode. Only computers of this device; a folder is not accepted."
     )]
     async fn fork_gui(
         &self,
@@ -956,10 +968,16 @@ impl SiloMcp {
                 if let Some(mode) = approval {
                     crate::gui::check_auto(mode, settings.as_ref(), true)?;
                 }
+                let source = params.source.unwrap_or_else(|| ops::MAIN.to_owned());
+                if folder::is_folder(&source) {
+                    return Err(CliError::new(
+                        "fork_gui forks a computer; a folder is copied into a Linux fork with fork.",
+                    ));
+                }
                 let engine = self.engine().await?;
                 let args = crate::gui::GuiArgs {
                     fork: ForkArgs {
-                        source: params.source.unwrap_or_else(|| ops::MAIN.to_owned()),
+                        source,
                         name: params.name,
                         ..ForkArgs::default()
                     },
@@ -995,22 +1013,21 @@ impl SiloMcp {
     }
 
     #[tool(
-        description = "Take a screenshot of a computer's desktop. Large screens are scaled down; give coordinates to the other computer_use tools in the pixels of the latest screenshot."
+        description = "Take a screenshot of a fork's desktop. The driver scales it so its longest side is at most max_side (default 1280); give coordinates to the other computer_use tools in the pixels of the latest screenshot and the driver maps them to the screen. Not for main."
     )]
     async fn computer_use_screenshot(
         &self,
         Parameters(params): Parameters<ScreenshotParams>,
     ) -> Result<CallToolResult, String> {
-        self.drive(
+        let max_side = params.max_side.unwrap_or(crate::usetools::DEFAULT_MAX_SIDE);
+        self.act(
             &params.computer,
-            "screenshot",
-            serde_json::json!({}),
-            params.max_side,
+            crate::usetools::Action::Screenshot { max_side },
         )
         .await
     }
 
-    #[tool(description = "Click (or double-click) at a point of the latest screenshot.")]
+    #[tool(description = "Click (or double-click) at a point of the latest screenshot of a fork.")]
     async fn computer_use_click(
         &self,
         Parameters(p): Parameters<ClickParams>,
@@ -1024,7 +1041,7 @@ impl SiloMcp {
         self.act(&p.computer, action).await
     }
 
-    #[tool(description = "Type text into the focused window of a computer.")]
+    #[tool(description = "Type text into the focused window of a fork.")]
     async fn computer_use_type(
         &self,
         Parameters(p): Parameters<TypeParams>,
@@ -1033,16 +1050,36 @@ impl SiloMcp {
             .await
     }
 
-    #[tool(description = "Press a key or combination (like Return or ctrl+l) in a computer.")]
+    #[tool(description = "Press one key, with optional modifiers, in a fork.")]
     async fn computer_use_key(
         &self,
         Parameters(p): Parameters<KeyParams>,
     ) -> Result<CallToolResult, String> {
-        self.act(&p.computer, crate::usetools::Action::Key { key: p.key })
-            .await
+        self.act(
+            &p.computer,
+            crate::usetools::Action::Key {
+                key: p.key,
+                modifiers: p.modifiers,
+            },
+        )
+        .await
     }
 
-    #[tool(description = "Scroll at a point of the latest screenshot.")]
+    #[tool(
+        description = "Press a key chord of two or more keys, like [\"ctrl\", \"l\"], in a fork."
+    )]
+    async fn computer_use_hotkey(
+        &self,
+        Parameters(p): Parameters<HotkeyParams>,
+    ) -> Result<CallToolResult, String> {
+        self.act(
+            &p.computer,
+            crate::usetools::Action::Hotkey { keys: p.keys },
+        )
+        .await
+    }
+
+    #[tool(description = "Scroll at a point of the latest screenshot of a fork.")]
     async fn computer_use_scroll(
         &self,
         Parameters(p): Parameters<ScrollParams>,
@@ -1052,14 +1089,15 @@ impl SiloMcp {
             crate::usetools::Action::Scroll {
                 x: p.x,
                 y: p.y,
-                dx: p.dx,
-                dy: p.dy,
+                direction: p.direction,
+                amount: p.amount.unwrap_or(3),
+                by: p.by,
             },
         )
         .await
     }
 
-    #[tool(description = "Move the pointer to a point of the latest screenshot.")]
+    #[tool(description = "Move the pointer to a point of the latest screenshot of a fork.")]
     async fn computer_use_move(
         &self,
         Parameters(p): Parameters<MoveParams>,
@@ -1071,7 +1109,7 @@ impl SiloMcp {
         .await
     }
 
-    #[tool(description = "Drag from one point of the latest screenshot to another.")]
+    #[tool(description = "Drag from one point of the latest screenshot of a fork to another.")]
     async fn computer_use_drag(
         &self,
         Parameters(p): Parameters<DragParams>,
@@ -1079,6 +1117,7 @@ impl SiloMcp {
         let action = crate::usetools::Action::Drag {
             from: (p.from_x, p.from_y),
             to: (p.to_x, p.to_y),
+            button: p.button,
         };
         self.act(&p.computer, action).await
     }
@@ -1090,34 +1129,23 @@ impl SiloMcp {
         &self,
         Parameters(p): Parameters<WaitParams>,
     ) -> Result<String, String> {
-        crate::bridge::pause(p.seconds).await;
+        tokio::time::sleep(Duration::from_secs_f64(p.seconds.clamp(0.0, 30.0))).await;
         Ok(format!("Waited {} seconds.", p.seconds.clamp(0.0, 30.0)))
     }
 
-    #[tool(description = "List the tools of the computer's Cua Driver with their arguments.")]
+    #[tool(description = "List the tools of a fork's Cua Driver with their arguments.")]
     async fn computer_use_tools(
         &self,
         Parameters(ComputerParam { computer }): Parameters<ComputerParam>,
     ) -> Result<String, String> {
         show(
-            async {
-                let engine = self.engine().await?;
-                let found = engine.computer(&computer).await?;
-                crate::bridge::driver_request(
-                    &engine,
-                    &found,
-                    "tools/list",
-                    serde_json::json!({}),
-                    60,
-                )
-                .await
-            }
-            .await,
+            self.session_request(&computer, "tools/list", serde_json::json!({}))
+                .await,
         )
     }
 
     #[tool(
-        description = "Run any tool of the computer's Cua Driver by name, with its own arguments in screen pixels."
+        description = "Run any tool of a fork's Cua Driver by name with its own arguments. Coordinates are in the pixels of the latest get_desktop_state image."
     )]
     async fn computer_use_call(
         &self,
@@ -1127,7 +1155,6 @@ impl SiloMcp {
             &p.computer,
             &p.tool,
             p.arguments.unwrap_or_else(|| serde_json::json!({})),
-            None,
         )
         .await
     }

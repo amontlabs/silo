@@ -226,8 +226,8 @@ pub struct Settings {
     pub step_checkpoints_keep: Option<u32>,
     #[serde(default)]
     pub auto_keep: Vec<AutoKeepRule>,
-    /// Let forks made through MCP run computer use without asking (`computer_use: auto`).
-    /// A person typing `--computer-use auto` needs no setting.
+    /// Let agents (MCP clients, or the CLI run with `--agent`) make forks with computer-use
+    /// approval `auto`. A person typing `--computer-use auto` needs no setting.
     #[serde(default)]
     pub computer_use_auto: bool,
     #[serde(default)]

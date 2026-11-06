@@ -1,24 +1,21 @@
-//! The computer-use tools of `silo mcp`: what each asks of the driver, and how its screenshots
-//! are scaled before an agent sees them.
+//! The computer-use tools of `silo mcp`: which Cua Driver tool and arguments each asks for, and
+//! how a driver answer is shaped for an agent.
 //!
-//! The driver tool names and argument names below are Cua Driver's; `computer_use_tools` lists
-//! what the pinned driver really offers and `computer_use_call` runs any of its tools by name,
-//! so a rename at a driver bump does not strand an agent.
+//! Names and arguments follow the driver contract of the pinned release
+//! (`tests/fixtures/cua-driver-0.38.0-tools.json`, extracted from its `contract/manifest.json`);
+//! a test fails when a call stops matching it. The driver scales a screenshot itself
+//! (`max_image_dimension`) and maps coordinates taken from it back to the screen.
 
-use std::io::Cursor;
-
-use base64::{engine::general_purpose::STANDARD, Engine as _};
-use image::{imageops::FilterType, ImageFormat};
 use serde_json::{json, Value};
-
-use crate::error::CliError;
 
 /// The longest side of a screenshot an agent receives.
 pub const DEFAULT_MAX_SIDE: u32 = 1280;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Action {
-    Screenshot,
+    Screenshot {
+        max_side: u32,
+    },
     Click {
         x: f64,
         y: f64,
@@ -30,12 +27,17 @@ pub enum Action {
     },
     Key {
         key: String,
+        modifiers: Vec<String>,
+    },
+    Hotkey {
+        keys: Vec<String>,
     },
     Scroll {
         x: f64,
         y: f64,
-        dx: f64,
-        dy: f64,
+        direction: String,
+        amount: u32,
+        by: Option<String>,
     },
     Move {
         x: f64,
@@ -44,35 +46,58 @@ pub enum Action {
     Drag {
         from: (f64, f64),
         to: (f64, f64),
+        button: Option<String>,
     },
 }
 
-/// The driver tool and arguments for `action`; coordinates arrive in the pixels of the last
-/// screenshot the agent saw and leave in screen pixels (`scale` screen pixels per image pixel).
-pub fn driver_call(action: &Action, scale: f64) -> (&'static str, Value) {
-    let at = |value: f64| (value * scale).round();
+fn desktop() -> Value {
+    json!({"kind": "desktop", "display_id": "primary"})
+}
+
+/// The driver tool and arguments for `action`.
+pub fn driver_call(action: &Action) -> (&'static str, Value) {
     match action {
-        Action::Screenshot => ("screenshot", json!({})),
+        Action::Screenshot { max_side } => (
+            "get_desktop_state",
+            json!({"max_image_dimension": max_side}),
+        ),
         Action::Click {
             x,
             y,
             button,
             double,
         } => (
-            if *double { "double_click" } else { "click" },
-            json!({"x": at(*x), "y": at(*y), "button": button}),
+            "click",
+            json!({"x": x, "y": y, "button": button, "count": if *double { 2 } else { 1 },
+                   "target": desktop(), "delivery_mode": "foreground"}),
         ),
-        Action::Type { text } => ("type_text", json!({"text": text})),
-        Action::Key { key } => ("press_key", json!({"key": key})),
-        Action::Scroll { x, y, dx, dy } => (
-            "scroll",
-            json!({"x": at(*x), "y": at(*y), "delta_x": dx, "delta_y": dy}),
+        Action::Type { text } => ("type_text", json!({"text": text, "target": desktop()})),
+        Action::Key { key, modifiers } => (
+            "press_key",
+            json!({"key": key, "modifiers": modifiers, "target": desktop()}),
         ),
-        Action::Move { x, y } => ("move_cursor", json!({"x": at(*x), "y": at(*y)})),
-        Action::Drag { from, to } => (
-            "drag",
-            json!({"start_x": at(from.0), "start_y": at(from.1), "end_x": at(to.0), "end_y": at(to.1)}),
-        ),
+        Action::Hotkey { keys } => ("hotkey", json!({"keys": keys, "target": desktop()})),
+        Action::Scroll {
+            x,
+            y,
+            direction,
+            amount,
+            by,
+        } => {
+            let mut args = json!({"x": x, "y": y, "direction": direction, "amount": amount, "target": desktop()});
+            if let Some(by) = by {
+                args["by"] = json!(by);
+            }
+            ("scroll", args)
+        }
+        Action::Move { x, y } => ("move_cursor", json!({"x": x, "y": y, "target": desktop()})),
+        Action::Drag { from, to, button } => {
+            let mut args = json!({"from_x": from.0, "from_y": from.1, "to_x": to.0, "to_y": to.1, "target": desktop()});
+            if let Some(button) = button {
+                args["button"] = json!(button);
+            }
+            ("drag", args)
+        }
     }
 }
 
@@ -83,79 +108,46 @@ pub enum Part {
     Image { data: String, mime: String },
 }
 
-/// The answer of a driver tool: its parts, with images scaled so the longest side is at most
-/// `max_side`, and the scale (screen pixels per image pixel) of the last image, if any.
 pub struct Answer {
     pub parts: Vec<Part>,
     pub is_error: bool,
-    pub scale: Option<f64>,
 }
 
-pub fn answer_of(result: &Value, max_side: u32) -> Result<Answer, CliError> {
+/// An MCP `tools/call` result as parts. A screenshot is followed by a line saying what it is.
+pub fn answer_of(result: &Value) -> Answer {
     let mut parts = Vec::new();
-    let mut scale = None;
     for item in result["content"].as_array().into_iter().flatten() {
         match item["type"].as_str() {
-            Some("image") => {
-                let data = item["data"].as_str().unwrap_or_default();
-                let (data, mime, factor, note) = scaled(data, max_side)?;
-                scale = Some(factor);
-                parts.push(Part::Image { data, mime });
-                parts.push(Part::Text(note));
-            }
+            Some("image") => parts.push(Part::Image {
+                data: item["data"].as_str().unwrap_or_default().to_owned(),
+                mime: item["mimeType"].as_str().unwrap_or("image/png").to_owned(),
+            }),
             Some("text") => parts.push(Part::Text(item["text"].as_str().unwrap_or("").to_owned())),
             _ => {}
         }
     }
+    let state = &result["structuredContent"];
+    if let (Some(w), Some(h)) = (
+        state["screenshot_width"].as_u64(),
+        state["screenshot_height"].as_u64(),
+    ) {
+        let screen = match (
+            state["screen_width"].as_u64(),
+            state["screen_height"].as_u64(),
+        ) {
+            (Some(sw), Some(sh)) if (sw, sh) != (w, h) => format!(" (the screen is {sw}x{sh})"),
+            _ => String::new(),
+        };
+        parts.push(Part::Text(format!(
+            "Screenshot {w}x{h}{screen}; give coordinates in this image's pixels."
+        )));
+    }
     if parts.is_empty() {
         parts.push(Part::Text(result.to_string()));
     }
-    Ok(Answer {
+    Answer {
         parts,
         is_error: result["isError"].as_bool().unwrap_or(false),
-        scale,
-    })
-}
-
-/// Scales a base64 PNG or JPEG down to `max_side`. Returns the new base64 PNG, its type, the
-/// screen pixels per image pixel, and a line telling the agent what the image is.
-pub fn scaled(base64: &str, max_side: u32) -> Result<(String, String, f64, String), CliError> {
-    let bytes = STANDARD
-        .decode(base64.trim())
-        .map_err(|_| CliError::new("The screenshot was not valid base64."))?;
-    let picture = image::load_from_memory(&bytes)
-        .map_err(|_| CliError::new("The screenshot could not be read as an image."))?;
-    let (width, height) = (picture.width(), picture.height());
-    let longest = width.max(height);
-    let max_side = max_side.max(64);
-    if longest <= max_side {
-        let note = format!("Screenshot {width}x{height}; coordinates are in this image's pixels.");
-        return Ok((STANDARD.encode(&bytes), mime_of(&bytes), 1.0, note));
-    }
-    let factor = f64::from(longest) / f64::from(max_side);
-    let new_width = ((f64::from(width) / factor).round() as u32).max(1);
-    let new_height = ((f64::from(height) / factor).round() as u32).max(1);
-    let small = picture.resize_exact(new_width, new_height, FilterType::Triangle);
-    let mut out = Cursor::new(Vec::new());
-    small
-        .write_to(&mut out, ImageFormat::Png)
-        .map_err(|_| CliError::new("The scaled screenshot could not be encoded."))?;
-    let note = format!(
-        "Screenshot scaled to {new_width}x{new_height} (the screen is {width}x{height}); give coordinates in this image's pixels."
-    );
-    Ok((
-        STANDARD.encode(out.into_inner()),
-        "image/png".into(),
-        factor,
-        note,
-    ))
-}
-
-fn mime_of(bytes: &[u8]) -> String {
-    if bytes.starts_with(&[0xff, 0xd8]) {
-        "image/jpeg".into()
-    } else {
-        "image/png".into()
     }
 }
 
@@ -163,67 +155,43 @@ fn mime_of(bytes: &[u8]) -> String {
 mod tests {
     use super::*;
 
-    fn png(width: u32, height: u32) -> String {
-        let mut out = Cursor::new(Vec::new());
-        image::DynamicImage::new_rgb8(width, height)
-            .write_to(&mut out, ImageFormat::Png)
-            .unwrap();
-        STANDARD.encode(out.into_inner())
+    #[test]
+    fn a_double_click_is_a_count_of_two_on_the_desktop() {
+        let (tool, args) = driver_call(&Action::Click {
+            x: 1.0,
+            y: 2.0,
+            button: "left".into(),
+            double: true,
+        });
+        assert_eq!(tool, "click");
+        assert_eq!(args["count"], 2);
+        assert_eq!(args["delivery_mode"], "foreground");
+        assert_eq!(args["target"]["display_id"], "primary");
     }
 
     #[test]
-    fn big_screenshots_are_scaled_and_report_the_factor() {
-        let (data, mime, factor, note) = scaled(&png(2560, 1600), 1280).unwrap();
-        assert_eq!(factor, 2.0);
-        assert_eq!(mime, "image/png");
-        assert!(note.contains("1280x800") && note.contains("2560x1600"));
-        let decoded = image::load_from_memory(&STANDARD.decode(data).unwrap()).unwrap();
-        assert_eq!((decoded.width(), decoded.height()), (1280, 800));
-    }
-
-    #[test]
-    fn small_screenshots_pass_through() {
-        let (_, _, factor, _) = scaled(&png(800, 600), 1280).unwrap();
-        assert_eq!(factor, 1.0);
-    }
-
-    #[test]
-    fn coordinates_are_mapped_back_to_the_screen() {
-        let (tool, args) = driver_call(
-            &Action::Click {
-                x: 100.0,
-                y: 50.0,
-                button: "left".into(),
-                double: false,
-            },
-            2.0,
-        );
+    fn a_screenshot_asks_the_driver_to_scale() {
+        let (tool, args) = driver_call(&Action::Screenshot { max_side: 1000 });
         assert_eq!(
-            (tool, args["x"].as_f64(), args["y"].as_f64()),
-            ("click", Some(200.0), Some(100.0))
+            (tool, args["max_image_dimension"].as_u64()),
+            ("get_desktop_state", Some(1000))
         );
-        let (tool, _) = driver_call(
-            &Action::Click {
-                x: 1.0,
-                y: 1.0,
-                button: "left".into(),
-                double: true,
-            },
-            1.0,
-        );
-        assert_eq!(tool, "double_click");
     }
 
     #[test]
-    fn an_answer_keeps_text_and_flags_errors() {
-        let result = json!({"isError": true, "content": [{"type": "text", "text": "no window"}]});
-        let answer = answer_of(&result, 1280).unwrap();
+    fn an_answer_keeps_text_images_and_errors() {
+        let result = json!({"isError": true, "content": [{"type": "text", "text": "refused"}]});
+        let answer = answer_of(&result);
         assert!(answer.is_error);
-        assert_eq!(answer.parts, vec![Part::Text("no window".into())]);
-        assert_eq!(answer.scale, None);
-        let image = json!({"content": [{"type": "image", "data": png(2000, 1000), "mimeType": "image/png"}]});
-        let answer = answer_of(&image, 1000).unwrap();
-        assert_eq!(answer.scale, Some(2.0));
+        assert_eq!(answer.parts, vec![Part::Text("refused".into())]);
+        let shot = json!({"content": [{"type": "image", "mimeType": "image/png", "data": "AAAA"}],
+            "structuredContent": {"screenshot_width": 1280, "screenshot_height": 800,
+                                  "screen_width": 2560, "screen_height": 1600}});
+        let answer = answer_of(&shot);
         assert!(matches!(answer.parts[0], Part::Image { .. }));
+        let Part::Text(note) = &answer.parts[1] else {
+            panic!("a note follows the image")
+        };
+        assert!(note.contains("1280x800") && note.contains("2560x1600"));
     }
 }

@@ -387,6 +387,17 @@ pub async fn run(cli: Cli, working_directory: &Path) -> Result<i32, CliError> {
     let project = Project::discover(working_directory);
     // Read before connecting so a bad file is reported without the engine.
     let settings = project.load_settings(cli.agent.as_deref())?;
+    if let Command::Fork(fork) = &cli.command {
+        if let Some(mode) = fork
+            .computer_use
+            .as_deref()
+            .map(crate::gui::parse_approval)
+            .transpose()?
+        {
+            // A named agent (`--agent` or SILO_AGENT) is asking like an MCP client would.
+            crate::gui::check_auto(mode, settings.as_ref(), cli.agent.is_some())?;
+        }
+    }
     let recipe = match &cli.command {
         Command::Fork(fork) => match &fork.recipe {
             Some(name) => Some(project.named_recipe(name)?),

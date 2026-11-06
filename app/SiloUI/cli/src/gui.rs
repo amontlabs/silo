@@ -36,7 +36,9 @@ pub fn parse_approval(text: &str) -> Result<ApprovalMode, CliError> {
 }
 
 /// `auto` is a choice the user makes for unattended forks. A person typing the flag has made
-/// it; an agent asking through MCP needs the project's settings to allow it.
+/// it; an agent (MCP, or the CLI run with `--agent`/`SILO_AGENT`) needs `computer_use_auto` in
+/// the project's settings. That file is one an agent can edit, so this is a convenience that
+/// stops a casual `auto`, not a gate.
 pub fn check_auto(
     mode: ApprovalMode,
     settings: Option<&Settings>,
@@ -47,7 +49,7 @@ pub fn check_auto(
         && !settings.is_some_and(|settings| settings.computer_use_auto)
     {
         return Err(CliError::new(
-            "Forks made through MCP keep asking for computer-use approval. To let them run without asking, set computer_use_auto: true in .silo/settings.yaml.",
+            "A fork made by an agent keeps asking for computer-use approval. To let agents make forks that run without asking, set computer_use_auto: true in .silo/silo.yaml.",
         ));
     }
     Ok(())

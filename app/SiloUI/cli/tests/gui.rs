@@ -1,45 +1,20 @@
 mod fake_engine;
 
 use std::{
-    io::Cursor,
     sync::{Arc, Mutex},
     time::Duration,
 };
 
-use base64::{engine::general_purpose::STANDARD, Engine as _};
 use fake_engine::{finished, listing, FakeEngine};
 use serde_json::{json, Value};
 use silo_api::methods::computer_use::ApprovalMode;
 use silo_cli::{
-    bridge,
     engine::Engine,
     gui::{self, GuiArgs},
     ops::ForkArgs,
 };
 
 fn ignore(_: &str) {}
-
-fn png_base64(width: u32, height: u32) -> String {
-    let mut out = Cursor::new(Vec::new());
-    image::DynamicImage::new_rgb8(width, height)
-        .write_to(&mut out, image::ImageFormat::Png)
-        .unwrap();
-    STANDARD.encode(out.into_inner())
-}
-
-fn bytes(text: &str) -> Value {
-    json!(text.bytes().collect::<Vec<u8>>())
-}
-
-fn exec_stdin(params: &Value) -> Value {
-    let raw: Vec<u8> = params["stdin"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|byte| byte.as_u64().unwrap() as u8)
-        .collect();
-    serde_json::from_slice(&raw).unwrap()
-}
 
 /// An engine with `main` running and a `t1` fork that appears when it is forked, whose
 /// desktop reports `starting` for the first poll and ready after.
@@ -160,123 +135,73 @@ async fn a_desktop_that_never_gets_ready_times_out_and_says_where_it_stands() {
     );
 }
 
-#[tokio::test]
-async fn a_screenshot_runs_the_driver_through_guest_exec_and_comes_back_scaled() {
-    let shot = png_base64(2560, 1600);
-    let reply = json!({"content": [{"type": "image", "data": shot, "mimeType": "image/png"}]});
-    let engine = FakeEngine::start(move |method, _| match method {
-        "computers.list" => Ok(listing(&[("t1", "running")])),
-        "guest.exec" => {
-            Ok(json!({"exitCode": 0, "stdout": bytes(&reply.to_string()), "stderr": []}))
-        }
-        other => Err(("internal", format!("unexpected {other}"))),
-    });
-    let connected = Engine::connect(&engine.socket).await.unwrap();
-    let t1 = connected.computer("t1").await.unwrap();
-    let result = bridge::driver_request(
-        &connected,
-        &t1,
-        "tools/call",
-        json!({"name": "screenshot", "arguments": {}}),
-        60,
-    )
-    .await
-    .unwrap();
-    let answer = silo_cli::usetools::answer_of(&result, 1280).unwrap();
-    assert_eq!(answer.scale, Some(2.0));
-    let call = &engine.calls("guest.exec")[0];
-    assert_eq!(call["argv"][0], "python3");
-    assert_eq!(call["argv"][4], "/usr/local/libexec/silo-cua-driver-mcp");
-    assert_eq!(exec_stdin(call)["params"]["name"], "screenshot");
+/// A fake driver behind `guest.exec.start`, `.input` and `.get`: answers each JSON-RPC line
+/// written to it with one line of output.
+#[derive(Default)]
+struct Driver {
+    started: usize,
+    exited: bool,
+    output: Vec<(u64, String, Vec<u8>)>,
+    requests: Vec<Value>,
 }
 
-#[tokio::test]
-async fn a_result_left_in_a_file_is_read_in_parts_and_removed() {
-    let result = json!({"content": [{"type": "text", "text": "x".repeat(1_100_000)}]}).to_string();
-    let data = result.clone().into_bytes();
-    let total = data.len();
-    let header = json!({"silo_result_file": "/tmp/silo-cu.bridge-77", "bytes": total}).to_string();
-    let engine = FakeEngine::start(move |method, params| match method {
-        "computers.list" => Ok(listing(&[("t1", "running")])),
-        "guest.exec" => {
-            let argv: Vec<&str> = params["argv"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .map(|word| word.as_str().unwrap())
-                .collect();
-            let stdout = match argv[0] {
-                "rm" => json!([]),
-                _ if argv[2].contains("f.seek") => {
-                    let offset: usize = argv[4].parse().unwrap();
-                    let length: usize = argv[5].parse().unwrap();
-                    json!(data[offset..(offset + length).min(total)].to_vec())
+fn driver_engine(driver: Arc<Mutex<Driver>>, screenshot: Value) -> FakeEngine {
+    FakeEngine::start(move |method, params| {
+        let mut state = driver.lock().unwrap();
+        match method {
+            "computers.list" => Ok(listing(&[("main", "running"), ("t1", "running")])),
+            "guest.exec.start" => {
+                state.started += 1;
+                state.exited = false;
+                state.output.clear();
+                Ok(json!({"jobId": format!("job:{}", state.started)}))
+            }
+            "guest.exec.input" => {
+                let raw: Vec<u8> = params["data"]
+                    .as_array()
+                    .map(|bytes| bytes.iter().map(|b| b.as_u64().unwrap() as u8).collect())
+                    .unwrap_or_default();
+                if let Ok(message) = serde_json::from_slice::<Value>(&raw) {
+                    state.requests.push(message.clone());
+                    if let Some(id) = message.get("id") {
+                        let result = if message["method"] == "tools/call"
+                            && message["params"]["name"] == "get_desktop_state"
+                        {
+                            screenshot.clone()
+                        } else {
+                            json!({"content": [{"type": "text", "text": "ok"}]})
+                        };
+                        let line = format!(
+                            "{}\n",
+                            json!({"jsonrpc": "2.0", "id": id, "result": result})
+                        );
+                        let seq = state.output.len() as u64 + 1;
+                        state.output.push((seq, "stdout".into(), line.into_bytes()));
+                    }
                 }
-                _ => bytes(&header),
-            };
-            Ok(json!({"exitCode": 0, "stdout": stdout, "stderr": []}))
+                Ok(Value::Null)
+            }
+            "guest.exec.get" => {
+                let since = params["sinceSeq"].as_u64().unwrap_or(0);
+                let output: Vec<Value> = state
+                    .output
+                    .iter()
+                    .filter(|(seq, _, _)| *seq > since)
+                    .map(|(seq, stream, data)| json!({"seq": seq, "stream": stream, "data": data}))
+                    .collect();
+                let running = !state.exited;
+                Ok(json!({"state": if running { "running" } else { "exited" },
+                          "exitCode": null, "output": output, "firstRetainedSeq": 1}))
+            }
+            other => Err(("internal", format!("unexpected {other}"))),
         }
-        other => Err(("internal", format!("unexpected {other}"))),
-    });
-    let connected = Engine::connect(&engine.socket).await.unwrap();
-    let t1 = connected.computer("t1").await.unwrap();
-    let got = bridge::driver_request(
-        &connected,
-        &t1,
-        "tools/call",
-        json!({"name": "screenshot"}),
-        60,
-    )
-    .await
-    .unwrap();
-    assert_eq!(got.to_string(), result);
-    let calls = engine.calls("guest.exec");
-    assert_eq!(calls.len(), 1 + 3 + 1, "bridge, three parts, removal");
-    assert_eq!(calls.last().unwrap()["argv"][0], "rm");
+    })
 }
 
-#[tokio::test]
-async fn a_result_file_outside_the_bridge_prefix_is_refused() {
-    let header = json!({"silo_result_file": "/etc/passwd", "bytes": 10}).to_string();
-    let engine = FakeEngine::start(move |method, _| match method {
-        "computers.list" => Ok(listing(&[("t1", "running")])),
-        "guest.exec" => Ok(json!({"exitCode": 0, "stdout": bytes(&header), "stderr": []})),
-        other => Err(("internal", format!("unexpected {other}"))),
-    });
-    let connected = Engine::connect(&engine.socket).await.unwrap();
-    let t1 = connected.computer("t1").await.unwrap();
-    let error = bridge::driver_request(
-        &connected,
-        &t1,
-        "tools/call",
-        json!({"name": "screenshot"}),
-        60,
-    )
-    .await
-    .unwrap_err();
-    assert!(error.message.contains("cannot be read"));
-    assert_eq!(engine.calls("guest.exec").len(), 1);
-}
-
-#[tokio::test]
-async fn a_driver_that_is_missing_is_reported_in_words() {
-    let engine = FakeEngine::start(|method, _| match method {
-        "computers.list" => Ok(listing(&[("t1", "running")])),
-        "guest.exec" => Ok(json!({
-            "exitCode": 2, "stdout": [], "stderr": bytes("cannot start the driver: No such file\n")
-        })),
-        other => Err(("internal", format!("unexpected {other}"))),
-    });
-    let connected = Engine::connect(&engine.socket).await.unwrap();
-    let t1 = connected.computer("t1").await.unwrap();
-    let error = bridge::driver_request(&connected, &t1, "tools/list", json!({}), 60)
-        .await
-        .unwrap_err();
-    assert!(
-        error.message.contains("no computer-use driver"),
-        "{}",
-        error.message
-    );
+fn screenshot_result() -> Value {
+    json!({"content": [{"type": "image", "mimeType": "image/png", "data": "AAAA"}],
+           "structuredContent": {"screenshot_width": 1280, "screenshot_height": 800,
+                                 "screen_width": 2560, "screen_height": 1600}})
 }
 
 async fn call(
@@ -297,19 +222,15 @@ async fn call(
     serde_json::from_str(&line).unwrap()
 }
 
-#[tokio::test]
-async fn the_mcp_server_drives_a_computer_and_maps_clicks_to_the_screen() {
+async fn connect_mcp(
+    engine: &FakeEngine,
+) -> (
+    tokio::io::WriteHalf<tokio::io::DuplexStream>,
+    tokio::io::BufReader<tokio::io::ReadHalf<tokio::io::DuplexStream>>,
+) {
     use rmcp::ServiceExt;
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
-    let shot = json!({"content": [{"type": "image", "data": png_base64(2560, 1600), "mimeType": "image/png"}]});
-    let engine = FakeEngine::start(move |method, _| match method {
-        "computers.list" => Ok(listing(&[("t1", "running")])),
-        "guest.exec" => {
-            Ok(json!({"exitCode": 0, "stdout": bytes(&shot.to_string()), "stderr": []}))
-        }
-        other => Err(("internal", format!("unexpected {other}"))),
-    });
     let (server_side, client_side) = tokio::io::duplex(8 * 1024 * 1024);
     let (server_read, server_write) = tokio::io::split(server_side);
     let server = silo_cli::mcp::SiloMcp::new(engine.socket.clone(), std::env::temp_dir());
@@ -332,39 +253,14 @@ async fn the_mcp_server_drives_a_computer_and_maps_clicks_to_the_screen() {
         .write_all(b"{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}\n")
         .await
         .unwrap();
-    let list = json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"});
-    write
-        .write_all(format!("{list}\n").as_bytes())
-        .await
-        .unwrap();
-    line.clear();
-    read.read_line(&mut line).await.unwrap();
-    let tools: Value = serde_json::from_str(&line).unwrap();
-    let names: Vec<&str> = tools["result"]["tools"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|tool| tool["name"].as_str().unwrap())
-        .collect();
-    for expected in [
-        "fork_gui",
-        "computer_use_ready",
-        "computer_use_screenshot",
-        "computer_use_click",
-        "computer_use_type",
-        "computer_use_key",
-        "computer_use_scroll",
-        "computer_use_move",
-        "computer_use_drag",
-        "computer_use_wait",
-        "computer_use_tools",
-        "computer_use_call",
-    ] {
-        assert!(
-            names.contains(&expected),
-            "{expected} missing from {names:?}"
-        );
-    }
+    (write, read)
+}
+
+#[tokio::test]
+async fn the_mcp_server_keeps_one_driver_session_per_fork_and_refuses_main() {
+    let driver = Arc::new(Mutex::new(Driver::default()));
+    let engine = driver_engine(driver.clone(), screenshot_result());
+    let (mut write, mut read) = connect_mcp(&engine).await;
 
     let screenshot = call(
         &mut write,
@@ -376,7 +272,6 @@ async fn the_mcp_server_drives_a_computer_and_maps_clicks_to_the_screen() {
     .await;
     let content = &screenshot["result"]["content"];
     assert_eq!(content[0]["type"], "image", "{screenshot}");
-    assert_eq!(content[0]["mimeType"], "image/png");
     assert!(content[1]["text"].as_str().unwrap().contains("1280x800"));
 
     let clicked = call(
@@ -384,28 +279,156 @@ async fn the_mcp_server_drives_a_computer_and_maps_clicks_to_the_screen() {
         &mut read,
         4,
         "computer_use_click",
-        json!({"computer": "t1", "x": 100, "y": 50}),
+        json!({"computer": "t1", "x": 100, "y": 50, "double": true}),
     )
     .await;
     assert!(clicked["result"].is_object(), "{clicked}");
-    let sent = engine.calls("guest.exec");
-    let args = &exec_stdin(sent.last().unwrap())["params"];
-    assert_eq!(args["name"], "click");
-    assert_eq!(args["arguments"]["x"], 200.0);
-    assert_eq!(args["arguments"]["y"], 100.0);
+    {
+        let state = driver.lock().unwrap();
+        assert_eq!(state.started, 1, "one driver process serves both calls");
+        let calls: Vec<&Value> = state
+            .requests
+            .iter()
+            .filter(|r| r["method"] == "tools/call")
+            .collect();
+        assert_eq!(calls[0]["params"]["name"], "get_desktop_state");
+        assert_eq!(calls[0]["params"]["arguments"]["max_image_dimension"], 1280);
+        assert_eq!(calls[1]["params"]["name"], "click");
+        assert_eq!(calls[1]["params"]["arguments"]["count"], 2);
+        assert_eq!(calls[1]["params"]["arguments"]["x"], 100.0);
+        assert_eq!(state.requests[0]["method"], "initialize");
+    }
 
     let refused = call(
         &mut write,
         &mut read,
         5,
-        "fork_gui",
-        json!({"computer_use": "auto"}),
+        "computer_use_screenshot",
+        json!({"computer": "main"}),
     )
     .await;
     assert_eq!(refused["result"]["isError"], true, "{refused}");
     assert!(refused["result"]["content"][0]["text"]
         .as_str()
         .unwrap()
+        .contains("not main"));
+    assert_eq!(driver.lock().unwrap().started, 1);
+
+    let auto = call(
+        &mut write,
+        &mut read,
+        6,
+        "fork_gui",
+        json!({"computer_use": "auto"}),
+    )
+    .await;
+    assert_eq!(auto["result"]["isError"], true, "{auto}");
+    assert!(auto["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap()
         .contains("computer_use_auto"));
+    let folder = call(
+        &mut write,
+        &mut read,
+        7,
+        "fork_gui",
+        json!({"source": "./some/dir"}),
+    )
+    .await;
+    assert!(folder["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap()
+        .contains("folder"));
     assert!(engine.calls("checkpoints.fork").is_empty());
+}
+
+#[tokio::test]
+async fn an_exited_driver_is_started_again() {
+    let driver = Arc::new(Mutex::new(Driver::default()));
+    let engine = driver_engine(driver.clone(), screenshot_result());
+    let (mut write, mut read) = connect_mcp(&engine).await;
+    let first = call(
+        &mut write,
+        &mut read,
+        3,
+        "computer_use_type",
+        json!({"computer": "t1", "text": "a"}),
+    )
+    .await;
+    assert!(first["result"].is_object(), "{first}");
+    driver.lock().unwrap().exited = true;
+    let second = call(
+        &mut write,
+        &mut read,
+        4,
+        "computer_use_type",
+        json!({"computer": "t1", "text": "b"}),
+    )
+    .await;
+    assert!(
+        second["result"].is_object() && second["result"]["isError"] != true,
+        "{second}"
+    );
+    assert_eq!(driver.lock().unwrap().started, 2);
+}
+
+#[test]
+fn every_call_matches_the_pinned_driver_contract() {
+    use silo_cli::usetools::{driver_call, Action};
+
+    let fixture: Value =
+        serde_json::from_str(include_str!("fixtures/cua-driver-0.38.0-tools.json")).unwrap();
+    let actions = [
+        Action::Screenshot { max_side: 800 },
+        Action::Click {
+            x: 1.0,
+            y: 2.0,
+            button: "left".into(),
+            double: false,
+        },
+        Action::Type { text: "x".into() },
+        Action::Key {
+            key: "Return".into(),
+            modifiers: vec!["ctrl".into()],
+        },
+        Action::Hotkey {
+            keys: vec!["ctrl".into(), "l".into()],
+        },
+        Action::Scroll {
+            x: 1.0,
+            y: 2.0,
+            direction: "down".into(),
+            amount: 3,
+            by: Some("page".into()),
+        },
+        Action::Move { x: 1.0, y: 2.0 },
+        Action::Drag {
+            from: (1.0, 2.0),
+            to: (3.0, 4.0),
+            button: Some("left".into()),
+        },
+    ];
+    for action in actions {
+        let (tool, args) = driver_call(&action);
+        let spec = &fixture["tools"][tool];
+        assert!(spec.is_object(), "the pinned driver has no tool {tool}");
+        let allowed: Vec<&str> = spec["properties"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| p.as_str().unwrap())
+            .collect();
+        for key in args.as_object().unwrap().keys() {
+            assert!(
+                allowed.contains(&key.as_str()),
+                "{tool} has no argument {key}"
+            );
+        }
+        for key in spec["required"].as_array().unwrap() {
+            assert!(
+                args.get(key.as_str().unwrap()).is_some(),
+                "{tool} needs {key}"
+            );
+        }
+    }
 }
