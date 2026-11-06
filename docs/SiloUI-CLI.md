@@ -7,9 +7,10 @@
 ## Install
 
 The Silo app carries `silo` at `Contents/MacOS/silo` (built from this crate in the same
-profile as the app, signed with hardened runtime and no entitlements, and copied next to the
-engine). When Silo links its helpers into `~/.local/bin` (the step that turns on Connections,
-repeated at every launch while Connections are on), it also links the command there:
+profile as the app and copied next to the engine). Production builds sign it with hardened
+runtime and no entitlements (notarized in `developer-id` mode); Dev builds keep Tauri's ad hoc
+signature. Every time the engine starts from an app bundle, whether or not Connections are on,
+it links the command into `~/.local/bin`:
 
 | Build | Link in `~/.local/bin` |
 | --- | --- |
@@ -17,8 +18,9 @@ repeated at every launch while Connections are on), it also links the command th
 | Silo Dev | `silo-dev` |
 
 The names come from `host/src/channel.rs` (`cli_link_name`); a Dev build never touches the
-production link. Silo replaces only a link it made earlier. A file or link of your own with the
-same name is left alone, and Connections still turn on. Put `~/.local/bin` on `PATH`. Without
+production link. Silo replaces only a link whose target is a `silo` inside a Silo, Silo Dev or Silo Engine
+app. A file or link of your own with the same name (including one to another `silo` or a
+dangling link) is left alone, and Connections's status shows that the command is not on PATH. Put `~/.local/bin` on `PATH`. Without
 the app, build the crate with `cargo build --release -p silo-cli`.
 
 ## Choices

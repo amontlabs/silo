@@ -13,7 +13,7 @@ Nothing here was released, tagged, pushed or published. This is what the owner n
 | `silo-action` | Composite GitHub Action: fork, run, review, open a pull request | `silo-action/`, to be published as `amontlabs/silo-action` |
 | Reviewer service | The hosted reviewer behind `silo review` (Pro) | `reviewer-service/`, not deployed by any workflow |
 
-The `silo` CLI is built with the app (`build_desktop.py`), signed like the other helpers and linked on PATH by the app (slice 6e); it is not a separate release asset. See [artifacts.md](artifacts.md).
+The `silo` CLI is built with the app (`build_desktop.py` locally; `-p silo-cli` and `package-macos-release.py --cli` in the release workflow), signed like the other helpers and linked on PATH by the app (slice 6e); it is not a separate release asset. See [artifacts.md](artifacts.md).
 
 ## Version
 
