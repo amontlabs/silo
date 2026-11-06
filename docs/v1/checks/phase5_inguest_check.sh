@@ -94,6 +94,11 @@ as_account() { # label, runner (xr|xu)
   echo "== inside the guest as $who"
   out=$($run $MAIN 'ls -ld /.msb /.msb/silo-bridge /.msb/silo-bridge/req /.msb/silo-bridge/resp; id -un; ls -l /etc/silo/guest-client.json; test -r /etc/silo/guest-client.json && echo token-readable; test -x /.msb/silo-bridge && test -w /.msb/silo-bridge/req && test -x /.msb/silo-bridge/resp && echo folders-reachable' 2>&1); echo "$out"
   echo "$out" | grep -q 'token-readable' && echo "$out" | grep -q 'folders-reachable'; check "[$who] bridge folders reachable (search silo-bridge, write req, enter resp), token file readable" $? ""
+  if [ $who = silo ]; then
+    out=$($run $MAIN 'ls -ld /.msb; cat /.msb/root-disk.json >/dev/null 2>&1 && echo ROOTDISK-READABLE; ls /.msb >/dev/null 2>&1 && echo MSB-LISTABLE; test -x /.msb/silo-bridge && test -w /.msb/silo-bridge/req && echo bridge-reachable' 2>&1); echo "$out"
+    ! echo "$out" | grep -qE 'ROOTDISK-READABLE|MSB-LISTABLE'; check "[silo] sealed runtime: cannot read /.msb/root-disk.json or list /.msb" $? ""
+    echo "$out" | grep -q bridge-reachable; check "[silo] sealed runtime: still reaches /.msb/silo-bridge" $? ""
+  fi
   out=$($run $MAIN 'silo --in-guest list' 2>&1); rc=$?; echo "$out"
   [ $rc = 0 ] && echo "$out" | grep -q "$MAIN"; check "[$who] silo --in-guest list shows $MAIN" $? "rc=$rc"
   [ $rc = 0 ] && [ $who = silo ] && SILO_OK=1
