@@ -52,6 +52,19 @@ pub struct State {
 struct Listener {
     children: Vec<Child>,
     config: Configuration,
+    /// Sessions are served inside the runtime's `ssh serve`, out of the engine's sight, so
+    /// the computer counts as being changed for as long as one can be open: a warm checkpoint
+    /// taken meanwhile is never reused (see `generation`).
+    _sessions: crate::generation::Touch,
+}
+impl Listener {
+    fn new(config: &Configuration) -> Self {
+        Self {
+            children: vec![],
+            config: config.clone(),
+            _sessions: crate::generation::touch(Some(&config.computer_id)),
+        }
+    }
 }
 impl Drop for Listener {
     fn drop(&mut self) {
@@ -236,10 +249,7 @@ fn spawn(paths: &RuntimePaths, config: &Configuration) -> Result<Listener, Strin
     editor::private_directory(&host_root)?;
     editor::key(&host_root.join("host_ed25519"))?;
     fingerprint(paths, &config.computer)?;
-    let mut listener = Listener {
-        children: vec![],
-        config: config.clone(),
-    };
+    let mut listener = Listener::new(config);
     let mut hosts = vec!["127.0.0.1"];
     if config.bind_address != "127.0.0.1" {
         hosts.push(&config.bind_address);
@@ -1018,6 +1028,25 @@ mod tests {
             managed_key: None,
         }
     }
+    #[test]
+    fn a_warm_checkpoint_is_not_reused_while_a_listener_can_serve_sessions() {
+        use crate::generation;
+        let mut c = config();
+        c.computer_id = "00000000-0000-4000-8000-0000000000aa".into();
+        let id = c.computer_id.clone();
+        let before = generation::generation(&id);
+        let listener = Listener::new(&c);
+        assert!(generation::generation(&id) > before);
+        assert!(!generation::idle(&id));
+        // A capture taken while sessions can be open records no generation, so no fork reuses it.
+        generation::note_warm_job("job:ssh-access-warm", generation::warm_baseline(&id));
+        generation::job_finished("job:ssh-access-warm", Some("cp-ssh-access-warm"));
+        assert_eq!(generation::warm_generation("cp-ssh-access-warm"), None);
+        let during = generation::generation(&id);
+        drop(listener);
+        assert!(generation::idle(&id));
+        assert!(generation::generation(&id) > during);
+    }
     fn paths(dir: &tempfile::TempDir) -> RuntimePaths {
         crate::test_support::paths(dir.path())
     }
@@ -1315,13 +1344,7 @@ sys.stdin.buffer.read()
         fs::write(&p.executable, script).unwrap();
         let c = config();
         let mut owned = Owners::default();
-        owned.listeners.insert(
-            c.computer.clone(),
-            Listener {
-                children: vec![],
-                config: c.clone(),
-            },
-        );
+        owned.listeners.insert(c.computer.clone(), Listener::new(&c));
         for _ in 0..2 {
             let observed = inspect_running(&p, &c);
             assert_eq!(
