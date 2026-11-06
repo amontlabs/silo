@@ -86,6 +86,8 @@ async fn forward(
     let mut owner_params = params.clone();
     if let Some(object) = owner_params.as_object_mut() {
         object.remove("deviceId");
+        // The owner answers for itself; it does not ask the devices it knows.
+        object.remove("allDevices");
     }
     let reply = tokio::task::spawn_blocking(move || call_owner(&device, name, owner_params))
         .await

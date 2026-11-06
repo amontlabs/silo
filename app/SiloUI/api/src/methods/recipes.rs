@@ -78,6 +78,9 @@ wire_struct! {
 
 wire_struct! {
     RecipeBuildParams {
+        /// The device that owns this; absent or `local` is this device.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        device_id: Option<String>,
         /// The recipe's name (`linux-dev`, or a file under `.silo/recipes/`).
         name: String,
         spec: RecipeSpec,
@@ -122,6 +125,9 @@ wire_struct! {
 
 wire_struct! {
     RecipeRemoveParams {
+        /// The device that owns this; absent or `local` is this device.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        device_id: Option<String>,
         name: String,
     }
 }

@@ -588,7 +588,7 @@ fn remote_target(context: &HandlerContext, device_id: Option<&str>) -> Option<St
         .map(str::to_owned)
 }
 
-fn without_device(params: &Value) -> Value {
+pub(crate) fn without_device(params: &Value) -> Value {
     let mut params = params.clone();
     if let Some(object) = params.as_object_mut() {
         object.remove("deviceId");

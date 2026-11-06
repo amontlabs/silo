@@ -307,6 +307,7 @@ async fn close_requests(engine: &Engine, fork_id: &str, value: &mut Value) {
     let closed = engine
         .call(requests::changes_requests_mark_kept(
             silo_api::methods::review_requests::ChangesRequestsMarkKeptParams {
+                device_id: None,
                 fork_id: fork_id.to_owned(),
                 target: format!("folder:{}", record.path),
                 keep_id: record.backup.map(|backup| backup.reference),
@@ -385,6 +386,7 @@ pub async fn request(
     let mut value = engine
         .call(requests::changes_request(
             silo_api::methods::keep::ChangesRequestParams {
+                device_id: None,
                 fork_id: computer.id.clone(),
                 target_id,
                 review_digest: (!digest.is_empty()).then_some(digest),

@@ -771,7 +771,9 @@ async fn measure_baseline(
     let (owner, checkpoint, recipe_hash) = match source.strip_prefix(RECIPE_KEY_PREFIX) {
         Some(hash) => {
             let listed = engine
-                .call(requests::recipes_list(silo_api::methods::EmptyParams {}))
+                .call(requests::recipes_list(
+                    silo_api::methods::common::DeviceParams { device_id: None },
+                ))
                 .await?;
             let entry = listed["recipes"]
                 .as_array()
@@ -1264,6 +1266,7 @@ pub async fn fold(
         .run_job(
             &format!("{label} {}", fork.name),
             requests::changes_keep(ChangesKeepParams {
+                device_id: None,
                 fork_id: fork.id,
                 target_id,
                 keep,
@@ -1301,6 +1304,7 @@ pub async fn promote(
         .run_job(
             &format!("{label} {}", fork.name),
             requests::changes_promote(ChangesPromoteParams {
+                device_id: None,
                 fork_id: fork.id,
                 target_id,
                 dry_run: dry_run.then_some(true),
@@ -1321,6 +1325,7 @@ pub async fn undo(
         .run_job(
             &format!("Undoing the latest keep or promote of {}", target.name),
             requests::changes_undo(ChangesUndoParams {
+                device_id: None,
                 computer_id: target.id,
             }),
             progress,
@@ -1452,6 +1457,7 @@ pub async fn build_recipe(
         .run_job(
             &format!("Building the recipe {name}"),
             requests::recipes_build(RecipeBuildParams {
+                device_id: None,
                 name: name.to_owned(),
                 spec: recipe.spec(),
                 force: force.then_some(true),
@@ -1467,7 +1473,9 @@ pub async fn recipe_list(
     project: &crate::config::Project,
 ) -> Result<Value, CliError> {
     let built = engine
-        .call(requests::recipes_list(silo_api::methods::EmptyParams {}))
+        .call(requests::recipes_list(
+            silo_api::methods::common::DeviceParams { device_id: None },
+        ))
         .await?;
     let built = built["recipes"].as_array().cloned().unwrap_or_default();
     let recipes: Vec<Value> = project
@@ -1490,6 +1498,7 @@ pub async fn recipe_list(
 pub async fn recipe_remove(engine: &Engine, name: &str) -> Result<Value, CliError> {
     engine
         .call(requests::recipes_remove(RecipeRemoveParams {
+            device_id: None,
             name: name.to_owned(),
         }))
         .await?;

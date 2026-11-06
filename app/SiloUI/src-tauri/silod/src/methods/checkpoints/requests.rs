@@ -276,9 +276,9 @@ fn target_name(rows: &[Row], request: &FoldRequest) -> Option<String> {
 
 pub(super) async fn list(
     context: &HandlerContext,
-    params: &Value,
+    raw: &Value,
 ) -> Result<HandlerOutput, DispatchError> {
-    let params: ChangesRequestsListParams = context.decode_params(params)?;
+    let params: ChangesRequestsListParams = context.decode_params(raw)?;
     let filter = params.status.unwrap_or_default();
     settle(context).await;
     let store = store_for(context);
@@ -292,11 +292,20 @@ pub(super) async fn list(
                 fork_name: fork.map(|row| row.name.clone()),
                 fork_state: fork.map(|row| row.state.clone()),
                 target_name: target_name(&computers, &request),
+                device_id: None,
+                device_name: None,
                 request,
             }
         })
         .collect();
-    output(ChangesRequestsListResult { requests })
+    let local = ChangesRequestsListResult {
+        requests,
+        unreachable: Vec::new(),
+    };
+    if params.all_devices == Some(true) {
+        return output(super::all_devices::merge(context, raw, local).await);
+    }
+    output(local)
 }
 
 /// `changes.requests.markKept`: closes the open requests for a fork whose changes were kept

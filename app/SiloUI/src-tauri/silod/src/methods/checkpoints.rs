@@ -6,6 +6,7 @@
 //! the domain's catalogue topic (`checkpoints.changed`, `exports.changed`, ...).
 //! Requests naming another device belong to the Connections router and are refused here.
 
+mod all_devices;
 mod changes;
 mod device;
 mod exports;

@@ -32,6 +32,7 @@ pub fn parse_filter(text: &str) -> Result<RequestFilter, CliError> {
 
 fn id_params(id: &str) -> RequestIdParams {
     RequestIdParams {
+        device_id: None,
         request_id: id.to_owned(),
     }
 }
@@ -41,6 +42,8 @@ pub async fn list(engine: &Engine, status: Option<RequestFilter>) -> Result<Valu
     engine
         .call(requests::changes_requests_list(ChangesRequestsListParams {
             status,
+            device_id: None,
+            all_devices: None,
         }))
         .await
 }
@@ -88,6 +91,7 @@ pub async fn keep(
         .run_job(
             &format!("Keeping {id}"),
             requests::changes_requests_keep(ChangesRequestsKeepParams {
+                device_id: None,
                 request_id: id.to_owned(),
                 data_ok: data_ok.then_some(true),
                 keep: hooks,
