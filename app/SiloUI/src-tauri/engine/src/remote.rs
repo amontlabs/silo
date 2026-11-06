@@ -616,6 +616,33 @@ fn is_bundled_cli(path: &Path) -> bool {
             .and_then(|stem| stem.to_str())
             .is_some_and(|stem| ["Silo", "Silo Dev", "Silo Engine"].contains(&stem))
 }
+/// The bundle identifier a `silo` command was built for, as it prints it for the hidden
+/// `--print-channel-identifier` argument (silo-cli `engine::CHANNEL_FLAG`). `None` when it
+/// says nothing usable within a few seconds.
+fn cli_channel_identifier(cli: &Path) -> Option<String> {
+    let mut child = Command::new(cli)
+        .arg("--print-channel-identifier")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) if status.success() => break,
+            Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(20)),
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+        }
+    }
+    let mut output = String::new();
+    child.stdout.take()?.read_to_string(&mut output).ok()?;
+    Some(output.trim().to_owned()).filter(|identifier| !identifier.is_empty())
+}
 /// Links the channel's `silo` name (`silo` in production, `silo-dev` in development) to the
 /// `silo` in this app's `Contents/MacOS`. Only an engine running from an app bundle has one.
 /// Replaces only a link into a Silo bundle; anything else is the user's own.
@@ -628,9 +655,20 @@ fn link_cli(home: &Path, engine: &Path) -> Result<(), String> {
     else {
         return Ok(());
     };
+    let channel = crate::channel::current();
+    let identifier = cli_channel_identifier(&cli);
+    if identifier.as_deref() != Some(channel.identifier()) {
+        return Err(format!(
+            "{} was built for {}, not {}; Silo did not link it as {}.",
+            cli.display(),
+            identifier.as_deref().unwrap_or("an unknown channel"),
+            channel.product_name(),
+            channel.cli_link_name()
+        ));
+    }
     link_owned(
         home,
-        crate::channel::current().cli_link_name(),
+        channel.cli_link_name(),
         &cli,
         &is_bundled_cli,
     )
@@ -5747,8 +5785,47 @@ mod bridge_link_tests {
         let macos = root.join(app).join("Contents/MacOS");
         fs::create_dir_all(&macos).unwrap();
         executable(&macos.join("silod"));
-        executable(&macos.join("silo"));
+        cli_for(&macos.join("silo"), crate::channel::current().identifier());
         macos.join("silod")
+    }
+
+    /// A `silo` that answers `--print-channel-identifier` with `identifier`.
+    fn cli_for(path: &Path, identifier: &str) {
+        fs::write(
+            path,
+            format!("#!/bin/sh\n[ \"$1\" = --print-channel-identifier ] && echo {identifier}\n"),
+        )
+        .unwrap();
+        fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    #[test]
+    fn the_cli_link_refuses_a_silo_built_for_the_other_channel() {
+        let _test_state = crate::test_support::global_state();
+        let home = tempfile::tempdir().unwrap();
+        let apps = tempfile::tempdir().unwrap();
+        let engine = bundle_engine(apps.path(), "Silo.app");
+        let cli = engine.with_file_name("silo");
+        let link = home
+            .path()
+            .join(".local/bin")
+            .join(crate::channel::current().cli_link_name());
+        let other = match crate::channel::current() {
+            crate::channel::Channel::Production => crate::channel::Channel::Development,
+            crate::channel::Channel::Development => crate::channel::Channel::Production,
+        };
+        cli_for(&cli, other.identifier());
+        let error = link_cli(home.path(), &engine).unwrap_err();
+        assert!(error.contains(other.identifier()), "{error}");
+        // One that prints nothing (an older `silo`) is refused too.
+        executable(&cli);
+        assert!(link_cli(home.path(), &engine)
+            .unwrap_err()
+            .contains("an unknown channel"));
+        assert!(fs::symlink_metadata(&link).is_err());
+        cli_for(&cli, crate::channel::current().identifier());
+        link_cli(home.path(), &engine).unwrap();
+        assert_eq!(fs::read_link(&link).unwrap(), cli);
     }
 
     #[test]

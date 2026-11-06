@@ -8,6 +8,7 @@ identity.
 """
 import argparse
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -19,6 +20,8 @@ from embed_engine import embed_engine
 
 APP = Path(__file__).resolve().parent.parent
 DEVELOPMENT_CONFIG = 'src-tauri/tauri.dev.conf.json'
+# Read by `silo-cli` at compile time (engine.rs `build_channel`).
+CLI_CHANNEL_VARIABLE = 'SILO_CHANNEL_IDENTIFIER'
 
 
 def bundle_cli(bundle, binary):
@@ -88,8 +91,10 @@ def build(arguments, *, root=APP, platform=sys.platform, run=subprocess.run):
     run(tauri + args, cwd=root, check=True)
     # The app is a client of the engine and carries its own copy for Service Management. The
     # engine runs computers itself, so it needs the app's tools too (embed_engine copies them).
+    # The `silo` command takes its channel from the bundle identifier, not from the profile.
     run(['cargo', 'build', '--locked'] + ([] if options.debug else ['--release']) + ['-p', 'silod', '-p', 'silo-cli']
-        + (['--target', options.target] if options.target else []), cwd=root, check=True)
+        + (['--target', options.target] if options.target else []), cwd=root, check=True,
+        env={**os.environ, CLI_CHANNEL_VARIABLE: names['identifier']})
     commit = (run(['git', 'rev-parse', 'HEAD'], cwd=root, check=False, capture_output=True, text=True).stdout or '').strip() or 'unknown'
     silod = target / profile / 'silod'
     bundle_cli(bundle, target / profile / 'silo')

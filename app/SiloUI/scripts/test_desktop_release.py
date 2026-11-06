@@ -60,6 +60,17 @@ class DesktopBuildTests(unittest.TestCase):
             'active': True, 'createUpdaterArtifacts': False, 'macOS': {'hardenedRuntime': True},
         })
 
+    def test_the_silo_command_is_built_with_the_bundle_identifier(self):
+        # A `--dev-release` command is a release profile build, yet a development one.
+        for args, identifier in (([], 'org.silo.preview'), (['--debug'], 'org.silo.dev'),
+                                 (['--dev-release'], 'org.silo.dev')):
+            self.calls.clear()
+            with self.subTest(args=args):
+                build(args, root=self.root, platform='darwin', run=self.command)
+                [kwargs] = [kwargs for command, kwargs in self.calls
+                            if command[:2] == ['cargo', 'build'] and 'silo-cli' in command]
+                self.assertEqual(kwargs['env']['SILO_CHANNEL_IDENTIFIER'], identifier)
+
     def test_failed_compilation_never_signs_a_stale_bundle(self):
         def fail(args, **kwargs):
             if args[0] == 'node':

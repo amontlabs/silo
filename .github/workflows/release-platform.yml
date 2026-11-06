@@ -305,6 +305,9 @@ jobs:
       # build configuration details (see scripts/retry-bundle.py).
       - name: Build the engine (silod) and the silo command for the macOS bundle
         if: runner.os == 'macOS'
+        env:
+          # The silo command's channel comes from this identifier; without it, it is Silo Dev's.
+          SILO_CHANNEL_IDENTIFIER: org.silo.preview
         run: cargo build --locked --release -p silod -p silo-cli --target "$RUNTIME_TARGET"
       # Only a draft imports the Developer ID certificate, into a temporary keychain that the
       # cleanup step below deletes. Dry runs and artifact-only builds never see it.

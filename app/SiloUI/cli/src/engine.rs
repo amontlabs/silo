@@ -28,13 +28,22 @@ const PROGRESS_EVERY: Duration = Duration::from_secs(5);
 /// Where progress lines go (stderr in the CLI, nowhere for MCP).
 pub type Progress<'a> = &'a (dyn Fn(&str) + Sync);
 
-/// The channel this binary belongs to: a debug build is the development build, like the app.
+/// The hidden argument that prints the build channel's bundle identifier, so the engine links
+/// only a `silo` of its own channel.
+pub const CHANNEL_FLAG: &str = "--print-channel-identifier";
+
+/// The channel this binary belongs to, fixed at build time by the bundle identifier the build
+/// script passes in `SILO_CHANNEL_IDENTIFIER`. Only the exact production identifier selects
+/// production, so a plain `cargo build` (either profile) is the development build.
 pub fn build_channel() -> channel::Channel {
-    if cfg!(debug_assertions) {
-        channel::Channel::Development
-    } else {
-        channel::Channel::Production
-    }
+    channel_for(option_env!("SILO_CHANNEL_IDENTIFIER"))
+}
+
+fn channel_for(identifier: Option<&str>) -> channel::Channel {
+    identifier.map_or(
+        channel::Channel::Development,
+        channel::Channel::from_identifier,
+    )
 }
 
 /// `--socket`, then `SILO_SOCKET`, then the channel's own `engine.sock` under `home`.
@@ -679,6 +688,20 @@ fn outcome_result(outcome: &Value) -> Result<Value, CliError> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn the_channel_is_development_unless_built_with_the_production_identifier() {
+        use channel::Channel::{Development, Production};
+        assert_eq!(channel_for(None), Development);
+        assert_eq!(channel_for(Some("")), Development);
+        assert_eq!(channel_for(Some("org.silo.dev")), Development);
+        assert_eq!(channel_for(Some("org.silo.preview.x")), Development);
+        assert_eq!(channel_for(Some("org.silo.preview")), Production);
+        // A test build gets no identifier from the build script.
+        if option_env!("SILO_CHANNEL_IDENTIFIER").is_none() {
+            assert_eq!(build_channel(), Development);
+        }
+    }
 
     #[test]
     fn socket_precedence_is_flag_then_environment_then_channel_home() {
