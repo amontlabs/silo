@@ -11,6 +11,7 @@ from embed_engine import ENGINE_FRAMEWORKS, ENGINE_RESOURCES, ENGINE_TOOLS, REQU
 TOOLS = (
     'silo-ui', 'msb', 'silo-macos-gateway', 'silo-network-bootstrap',
     'git', 'git-lfs', 'git-remote-http', 'git-remote-https',
+    'silo',
 )
 # macOS computers run Virtualization.framework inside the app process itself.
 APP_REQUIRED_ENTITLEMENTS = ('com.apple.security.virtualization',)
@@ -61,7 +62,7 @@ def sign_helper(helper, entitlements, constraint, identity='-'):
 
 MACH_O_MAGIC = {bytes.fromhex(h) for h in ('feedfacf', 'cffaedfe', 'cafebabe', 'bebafeca')}
 # Signed on their own below (helpers with constraints) or by `seal_app` (the main executable).
-SIGNED_SEPARATELY = ('msb', 'silo-macos-gateway', 'silo-network-bootstrap', 'silo-ui')
+SIGNED_SEPARATELY = ('msb', 'silo-macos-gateway', 'silo-network-bootstrap', 'silo', 'silo-ui')
 
 
 def is_mach_o(path):
@@ -101,6 +102,9 @@ def sign_helpers(app, identity='-'):
         command('codesign', '--force', '--sign', identity, *timestamp(identity), '--options', 'runtime',
                 '--preserve-metadata=identifier,runtime',
                 app / 'Contents/MacOS/silo-network-bootstrap')
+        # The command line is a client of the engine: hardened runtime, no entitlements.
+        command('codesign', '--force', '--sign', identity, *timestamp(identity), '--options', 'runtime',
+                '--identifier', 'org.silo.cli', app / 'Contents/MacOS/silo')
 
 
 def seal_app(app, *, hardened=True, identity='-'):
@@ -176,6 +180,9 @@ def verify_bundle(app, identity='-'):
         elif name == 'silo-network-bootstrap':
             if entitlements:
                 raise RuntimeError('The guest network bootstrap must not carry host entitlements.')
+        elif name == 'silo':
+            if entitlements:
+                raise RuntimeError('The silo command must not carry host entitlements.')
         elif entitlements.get('com.apple.security.cs.disable-library-validation'):
             raise RuntimeError('Only the constrained VM helper may have the library-loading exception.')
         if name == 'silo-ui':

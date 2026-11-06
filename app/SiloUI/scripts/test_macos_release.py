@@ -17,6 +17,7 @@ SCRIPT = Path(__file__).with_name('verify-macos-signing.py')
 TOOLS = (
     'silo-ui', 'msb', 'silo-macos-gateway', 'silo-network-bootstrap',
     'git', 'git-lfs', 'git-remote-http', 'git-remote-https',
+    'silo',
 )
 GATEWAY_ENTITLEMENTS = {
     'com.apple.security.cs.disable-library-validation': True,
@@ -165,6 +166,7 @@ int main(int argc, char **argv) {
                          f'if "build" in sys.argv:\n'
                          f'    pathlib.Path({str(silod)!r}).parent.mkdir(parents=True, exist_ok=True)\n'
                          f'    shutil.copy({str(self.root / "executable")!r}, {str(silod)!r})\n'
+                         f'    shutil.copy({str(self.root / "executable")!r}, {str(silod.with_name("silo"))!r})\n'
                          f'else:\n    print({metadata!r})\n')
         cargo.chmod(0o755)
         result = subprocess.run(['npm', 'run', 'desktop:build'], cwd=self.case,

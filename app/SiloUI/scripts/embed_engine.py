@@ -27,6 +27,7 @@ DISTRIBUTION = 'Contents/Resources/SiloEngineDistribution/Silo Engine.app'
 ENGINE_TOOLS = (
     'msb', 'silo-macos-gateway', 'silo-network-bootstrap',
     'git', 'git-lfs', 'git-remote-http', 'git-remote-https',
+    'silo',
 )
 ENGINE_FRAMEWORKS = ('libkrunfw.5.dylib',)
 ENGINE_RESOURCES = ('microsandbox', 'git-support', 'THIRD-PARTY-NOTICES.md')

@@ -9,6 +9,7 @@ identity.
 import argparse
 import json
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 
@@ -18,6 +19,13 @@ from embed_engine import embed_engine
 
 APP = Path(__file__).resolve().parent.parent
 DEVELOPMENT_CONFIG = 'src-tauri/tauri.dev.conf.json'
+
+
+def bundle_cli(bundle, binary):
+    """Puts the `silo` command in the app next to the other helpers, for the app to link on PATH."""
+    destination = Path(bundle) / 'Contents/MacOS/silo'
+    shutil.copy2(binary, destination)
+    destination.chmod(0o755)
 
 
 def build(arguments, *, root=APP, platform=sys.platform, run=subprocess.run):
@@ -80,10 +88,11 @@ def build(arguments, *, root=APP, platform=sys.platform, run=subprocess.run):
     run(tauri + args, cwd=root, check=True)
     # The app is a client of the engine and carries its own copy for Service Management. The
     # engine runs computers itself, so it needs the app's tools too (embed_engine copies them).
-    run(['cargo', 'build', '--locked'] + ([] if options.debug else ['--release']) + ['-p', 'silod']
+    run(['cargo', 'build', '--locked'] + ([] if options.debug else ['--release']) + ['-p', 'silod', '-p', 'silo-cli']
         + (['--target', options.target] if options.target else []), cwd=root, check=True)
     commit = (run(['git', 'rev-parse', 'HEAD'], cwd=root, check=False, capture_output=True, text=True).stdout or '').strip() or 'unknown'
     silod = target / profile / 'silod'
+    bundle_cli(bundle, target / profile / 'silo')
     if development:
         # A development bundle keeps Tauri's signatures (no hardened runtime), so its tools are
         # copied as they are; only the outer seal is renewed around the new engine.
