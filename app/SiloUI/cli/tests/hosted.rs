@@ -70,7 +70,7 @@ fn diff_document() -> Value {
         "format": 2,
         "home": "/home/dev",
         "summary": [{"bucket": "not kept", "lines": ["Not kept: credentials: ~/.ssh/id_ed25519 (gitignored)"]}],
-        "code": [{"repo": "/home/dev/app", "commits": ["abc", "def"],
+        "code": [{"repo": "/home/dev/app", "commits": ["abc1234", "def5678"],
                   "dirty_new": {"run.sh": "M", "deploy.key": "??", ".env.local": "??"},
                   "renamed_from": {"keys/new.pem": "old.txt"},
                   "dirty_identity": {"run.sh": {"kind": "file", "size": "12", "hash": "HASH1"}},
@@ -201,13 +201,22 @@ async fn sends_only_the_diff_and_renders_the_answer_under_the_banner() {
         .unwrap()
         .contains("+echo new KEY=[redacted]"));
     assert_eq!(body["diff"]["packages"][0]["owned_files"]["jq"]["count"], 7);
-    assert_eq!(engine.calls("guest.exec").len(), 1);
-    let script = engine.calls("guest.exec")[0]["argv"][2]
-        .as_str()
+    // One call reads the rename names, one the diff; both run bash with the hardening.
+    let calls = engine.calls("guest.exec");
+    assert_eq!(calls.len(), 2);
+    assert_eq!(calls[0]["argv"][6], "names");
+    assert_eq!(calls[1]["argv"][6], "diff");
+    assert_eq!(calls[1]["argv"][4], "/home/dev/app");
+    assert_eq!(calls[1]["argv"][5], "abc1234");
+    let script = calls[1]["argv"][2].as_str().unwrap();
+    assert!(script.contains("--no-textconv") && script.contains("core.hooksPath=/dev/null"));
+    let specs: Vec<&str> = calls[1]["argv"]
+        .as_array()
         .unwrap()
-        .to_owned();
-    assert!(script.contains("--no-textconv") && script.contains("\"$2..HEAD\""));
-    assert_eq!(engine.calls("guest.exec")[0]["argv"][5], "abc");
+        .iter()
+        .filter_map(Value::as_str)
+        .collect();
+    assert!(specs.contains(&":(exclude,glob)**/.env"));
 }
 
 #[tokio::test]
@@ -359,12 +368,12 @@ impl Drop for Service {
 
 /// The real service with its fake LLM client, on a local port; None when Python lacks its
 /// dependencies (SILO_TEST_PYTHON names another interpreter).
-fn start_service(port: u16) -> Option<Service> {
+fn start_service() -> Option<(Service, u16)> {
     let script = service_dir().join("tests/serve_fake.py");
     let python = std::env::var("SILO_TEST_PYTHON").unwrap_or_else(|_| "python3".to_owned());
     let mut child = Command::new(python)
         .arg(script)
-        .args([port.to_string(), "tok-1".to_owned()])
+        .arg("tok-1")
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
@@ -373,10 +382,15 @@ fn start_service(port: u16) -> Option<Service> {
     BufReader::new(child.stdout.take()?)
         .read_line(&mut line)
         .ok()?;
-    if line.trim() != "ready" {
+    let Some(port) = line
+        .trim()
+        .strip_prefix("ready ")
+        .and_then(|p| p.parse::<u16>().ok())
+    else {
+        let _ = child.kill();
         let _ = child.wait();
         return None;
-    }
+    };
     let service = Service(child);
     for _ in 0..100 {
         let up = std::net::TcpStream::connect(("127.0.0.1", port)).and_then(|mut stream| {
@@ -386,7 +400,7 @@ fn start_service(port: u16) -> Option<Service> {
             Ok(reply.contains("200"))
         });
         if up.unwrap_or(false) {
-            return Some(service);
+            return Some((service, port));
         }
         std::thread::sleep(std::time::Duration::from_millis(50));
     }
@@ -396,12 +410,7 @@ fn start_service(port: u16) -> Option<Service> {
 #[tokio::test]
 async fn the_cli_reviews_through_the_real_service_with_a_fake_llm() {
     let _guard = ENV.lock().unwrap_or_else(|e| e.into_inner());
-    let port = TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port();
-    let Some(service) = start_service(port) else {
+    let Some((service, port)) = start_service() else {
         assert!(
             std::env::var("SILO_REVIEWER_E2E_REQUIRED").is_err(),
             "the reviewer service did not start"
@@ -519,4 +528,43 @@ async fn the_mcp_review_tool_returns_the_shaped_review() {
         service.seen.lock().unwrap()[0].1["lenses"],
         json!(["packages"])
     );
+}
+
+#[test]
+fn a_failed_lens_is_shown_as_one_and_file_names_are_not_filtered() {
+    let word = forbidden(0);
+    let answer = json!({"lenses": {
+        "code": {"summary": "", "findings": [], "error": "this lens could not be produced"},
+        "general": {"summary": "ok", "findings": [
+            {"severity": "low", "file": format!("src/{word}.rs"), "message": "m"}]}
+    }});
+    let shaped = hosted::shape(&answer, &["general".to_owned(), "code".to_owned()]);
+    assert_eq!(
+        shaped["lenses"]["code"]["summary"],
+        "this lens could not be produced"
+    );
+    assert_eq!(
+        shaped["lenses"]["general"]["findings"][0]["file"],
+        format!("src/{word}.rs")
+    );
+    assert_eq!(shaped["filtered"], 0);
+    assert!(hosted::render(&shaped).contains("code: this lens could not be produced"));
+}
+
+#[test]
+fn the_review_address_keeps_the_query_and_the_user_file_is_read_only_without_the_variable() {
+    let _guard = ENV.lock().unwrap_or_else(|e| e.into_inner());
+    let _home = home_with(Some("url: [not yaml\n"));
+    std::env::set_var(
+        "SILO_REVIEWER_URL",
+        "https://reviewer.example.com/base/?team=1",
+    );
+    std::env::set_var("SILO_REVIEWER_TOKEN", "t");
+    let reviewer = hosted::Reviewer::resolve(None).unwrap();
+    assert_eq!(
+        reviewer.endpoint().unwrap().as_str(),
+        "https://reviewer.example.com/base/v1/review?team=1"
+    );
+    std::env::remove_var("SILO_REVIEWER_URL");
+    assert!(hosted::Reviewer::resolve(None).is_err());
 }

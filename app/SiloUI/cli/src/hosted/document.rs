@@ -37,6 +37,22 @@ pub fn hidden(repo: &str, path: &str) -> bool {
         || base.starts_with(".env.")
         || base.ends_with(".env")
         || base.ends_with(".tfvars")
+        || base.contains(".tfstate")
+        || base.ends_with(".kdbx")
+        || base.ends_with(".ovpn")
+        || base.ends_with("-sa.json")
+        || base.starts_with("firebase-adminsdk")
+        || ["id_rsa", "id_dsa", "id_ecdsa", "id_ed25519"]
+            .iter()
+            .any(|name| base.starts_with(name))
+        || [
+            ".pgpass",
+            ".htpasswd",
+            ".vault-token",
+            ".dockercfg",
+            "kubeconfig",
+        ]
+        .contains(&base)
         || base.starts_with("credentials")
         || base == "secrets.yaml"
         || base == "secrets.json"

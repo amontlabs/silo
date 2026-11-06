@@ -5,7 +5,7 @@
 //! Text is normalised first (NFKC, invisible format characters removed, look-alike Cyrillic
 //! and Greek letters folded to Latin), so spacing tricks and homoglyphs do not get past it.
 
-use unicode_normalization::UnicodeNormalization;
+use unicode_normalization::{char::is_combining_mark, UnicodeNormalization};
 
 /// Prefixes: any word that starts with one is replaced (`safe`, `safely`, `safety`).
 const STEMS: &[(&str, &str)] = &[
@@ -36,22 +36,6 @@ fn is_invisible(c: char) -> bool {
         | '\u{FFA0}' | '\u{FFF9}'..='\u{FFFB}' | '\u{E0000}'..='\u{E0FFF}')
 }
 
-#[derive(PartialEq, Clone, Copy)]
-enum Script {
-    Latin,
-    Cyrillic,
-    Greek,
-}
-
-fn script(c: char) -> Option<Script> {
-    match c {
-        'a'..='z' | 'A'..='Z' => Some(Script::Latin),
-        '\u{0400}'..='\u{052F}' => Some(Script::Cyrillic),
-        '\u{0370}'..='\u{03FF}' | '\u{1F00}'..='\u{1FFF}' => Some(Script::Greek),
-        _ => None,
-    }
-}
-
 /// The Latin letter a Cyrillic or Greek letter is mistaken for.
 fn fold(c: char) -> char {
     match c {
@@ -59,7 +43,8 @@ fn fold(c: char) -> char {
         'е' | 'ε' | 'є' => 'e',
         'о' | 'ο' | 'σ' => 'o',
         'р' | 'ρ' => 'p',
-        'с' | 'ѕ' => 's',
+        'с' | 'ϲ' => 'c',
+        'ѕ' => 's',
         'і' | 'ι' | 'ї' | 'ј' => 'i',
         'к' | 'κ' => 'k',
         'х' | 'χ' => 'x',
@@ -79,31 +64,28 @@ fn fold(c: char) -> char {
     }
 }
 
-/// `text` without invisible characters, in NFKC form.
+/// `text` without invisible characters or accents, in compatibility-decomposed form.
 fn normalise(text: &str) -> String {
     text.chars()
         .filter(|c| !is_invisible(*c))
-        .nfkc()
-        .filter(|c| !is_invisible(*c))
+        .nfkd()
+        .filter(|c| !is_invisible(*c) && !is_combining_mark(*c))
         .collect()
 }
 
-fn mixed_script(token: &str) -> bool {
-    let mut seen: Vec<Script> = Vec::new();
-    for s in token.chars().filter_map(script) {
-        if !seen.contains(&s) {
-            seen.push(s);
-        }
-    }
-    seen.len() > 1
+/// A code identifier (`preventDefault`, `sandbox_id`, `sha256sum`) rather than a prose word.
+fn identifier_like(token: &str) -> bool {
+    let chars: Vec<char> = token.chars().collect();
+    token.contains('_')
+        || chars.iter().any(char::is_ascii_digit)
+        || chars
+            .windows(2)
+            .any(|pair| pair[0].is_lowercase() && pair[1].is_uppercase())
 }
 
 fn matches_word(token: &str) -> bool {
-    if token.is_empty() {
+    if token.is_empty() || identifier_like(token) {
         return false;
-    }
-    if mixed_script(token) {
-        return true;
     }
     let folded: String = token
         .chars()
@@ -134,8 +116,15 @@ pub fn clean(text: &str) -> (String, usize) {
         }
         token.clear();
     };
+    let mut in_code = false;
     for c in text.chars() {
-        if is_word_char(c) {
+        if c == '`' {
+            flush(&mut token, &mut out);
+            in_code = !in_code;
+            out.push(c);
+        } else if in_code {
+            out.push(c);
+        } else if is_word_char(c) {
             token.push(c);
         } else {
             flush(&mut token, &mut out);
@@ -187,7 +176,7 @@ mod tests {
             count(&format!(
                 "{} and {}",
                 make("con", "tained"),
-                make("Con", "Tained")
+                make("CON", "TAINED")
             )),
             2
         );
@@ -236,5 +225,27 @@ mod tests {
         assert_eq!(count("sаfe"), 1);
         assert_eq!(count("ѕесurе"), 1);
         assert_eq!(count("привет"), 0);
+    }
+
+    #[test]
+    fn accents_do_not_hide_a_word() {
+        assert_eq!(count(&format!("{}\u{0301}", make("sa", "fe"))), 1);
+        assert_eq!(count("s\u{00E1}fe"), 1);
+    }
+
+    #[test]
+    fn code_spans_and_identifiers_are_left_alone() {
+        let word = make("pre", "vent");
+        assert_eq!(count(&format!("Call `{word}` here")), 0);
+        assert_eq!(
+            count(&format!(
+                "{word}Default and {}_id and sha256sum",
+                make("sand", "box")
+            )),
+            0
+        );
+        let (out, found) = clean(&format!("It will {word} the call; see `{word}`."));
+        assert_eq!(found, 1);
+        assert!(out.contains(&format!("`{word}`")) && out.contains(REPLACEMENT));
     }
 }

@@ -28,14 +28,15 @@ and a failed lens carries `error` with an empty `findings`. `GET /healthz` answe
 ## Choice of stack
 
 AGENTS.md asks for established tools. This is FastAPI (MIT, widely deployed, maintained) on uvicorn
-(BSD) with httpx (BSD) calling the Anthropic Messages API directly. Considered and left out:
+(BSD) calling the Anthropic Messages API through the official `anthropic` SDK (MIT), which handles
+retries and `retry-after`. Answers use structured outputs (`output_config.format` with a JSON
+schema), not a forced tool choice, which the default model rejects. A `refusal` or `max_tokens`
+stop reason makes that lens fail. The `LLMClient` seam (`app/llm.py`) is where another provider
+goes. A Rust axum binary was considered; the service is a thin prompt layer, so Python's smaller
+code and easier prompt iteration win. Nothing is shared with the CLI except the JSON above.
 
-- The `anthropic` SDK: the service needs one POST; a direct call keeps three dependencies instead of
-  a larger tree, and the pluggable `LLMClient` seam (`app/llm.py`) is where another provider goes.
-- A Rust axum binary: the CLI is Rust, but the service is a thin prompt layer, so Python's smaller
-  code and easier prompt iteration win. Nothing is shared with the CLI except the JSON above.
-
-Dependencies are pinned in `requirements.txt`.
+Direct dependencies are in `requirements.in`; every version, transitive ones included, is pinned in
+`requirements.txt` (the set the tests ran with).
 
 ## Data handling
 
@@ -84,10 +85,10 @@ fake client and runs `silo review` against it; it skips when the dependencies ar
 
 1. Pin the base image by digest. Nothing here contacts the network, so the digest is yours to read:
    `docker buildx imagetools inspect python:3.12-slim --format '{{.Manifest.Digest}}'`.
-2. Optional but recommended, lock the dependencies with hashes (the tested versions are pinned in
-   `requirements.txt`, without hashes):
-   `pip-compile --generate-hashes --output-file requirements.lock requirements.in`. The Dockerfile
-   installs from `requirements.lock` with `--require-hashes` when the file exists.
+2. Lock the dependencies with hashes; the image build stops without `requirements.lock`:
+   `pip-compile --generate-hashes --output-file reviewer-service/requirements.lock reviewer-service/requirements.in`
+   (run it where the network is available, and commit the file). The Dockerfile installs it with
+   `--require-hashes`.
 3. Build: `docker build --build-arg PYTHON_IMAGE=python:3.12-slim@sha256:<digest> -t silo-reviewer reviewer-service`.
 4. Pick a host that terminates TLS (the CLI requires `https://` except on localhost) and keeps
    secrets in its secret store, such as Fly.io, Cloud Run or a small VM behind a reverse proxy.

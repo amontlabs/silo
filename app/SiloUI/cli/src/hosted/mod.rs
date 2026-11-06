@@ -96,7 +96,10 @@ impl Reviewer {
         let project = settings
             .and_then(|s| s.reviewer.as_ref())
             .and_then(|r| r.url.clone());
-        let trusted = from_env("SILO_REVIEWER_URL").or(user_url()?);
+        let trusted = match from_env("SILO_REVIEWER_URL") {
+            Some(url) => Some(url),
+            None => user_url()?,
+        };
         let mut notes = Vec::new();
         if let Some(project) = &project {
             let same = trusted.as_deref().map(|t| t.trim().trim_end_matches('/'))
@@ -121,8 +124,16 @@ impl Reviewer {
         })
     }
 
-    fn endpoint(&self) -> String {
-        format!("{}/v1/review", self.url.trim_end_matches('/'))
+    /// The review address: the URL's path with `v1/review` added, and its query kept.
+    pub fn endpoint(&self) -> Result<reqwest::Url, CliError> {
+        let mut url = reqwest::Url::parse(&self.url)
+            .map_err(|_| CliError::new("The reviewer URL is not a valid address."))?;
+        url.set_fragment(None);
+        url.path_segments_mut()
+            .map_err(|_| CliError::new("The reviewer URL cannot take a path."))?
+            .pop_if_empty()
+            .extend(["v1", "review"]);
+        Ok(url)
     }
 }
 
@@ -142,7 +153,7 @@ fn send(reviewer: &Reviewer, document: &Value, lenses: &[String]) -> Result<Valu
         .build()
         .map_err(|error| CliError::new(error.to_string()))?;
     let mut request = client
-        .post(reviewer.endpoint())
+        .post(reviewer.endpoint()?)
         .header("Content-Type", "application/json")
         .body(body);
     if let Some(token) = &reviewer.token {
@@ -196,6 +207,13 @@ pub fn shape(answer: &Value, lenses: &[String]) -> Value {
     let mut out = serde_json::Map::new();
     for lens in lenses {
         let entry = &answer["lenses"][lens.as_str()];
+        if entry.get("error").is_some_and(|e| !e.is_null()) {
+            out.insert(
+                lens.clone(),
+                json!({"summary": "this lens could not be produced", "findings": [], "error": true}),
+            );
+            continue;
+        }
         if !entry.is_object() {
             out.insert(
                 lens.clone(),
@@ -215,7 +233,7 @@ pub fn shape(answer: &Value, lenses: &[String]) -> Value {
                 };
                 json!({
                     "severity": severity,
-                    "file": clean(finding["file"].as_str().unwrap_or_default()),
+                    "file": cut(finding["file"].as_str().unwrap_or_default()),
                     "message": clean(finding["message"].as_str().unwrap_or_default()),
                 })
             })
