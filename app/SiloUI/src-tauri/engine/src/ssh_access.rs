@@ -10,7 +10,7 @@ use std::{
     io::{BufRead, BufReader},
     net::Ipv4Addr,
     path::PathBuf,
-    process::{Child, Command, Stdio},
+    process::{Child, Stdio},
     sync::mpsc::SyncSender,
     sync::{Mutex, OnceLock},
     time::{Duration, Instant},
@@ -310,7 +310,7 @@ fn spawn(paths: &RuntimePaths, config: &Configuration) -> Result<Listener, Strin
         hosts.push(&config.bind_address);
     }
     for host in hosts {
-        let mut child = Command::new(&paths.executable)
+        let mut child = crate::runtime::runtime_command(&paths.executable)
             .args([
                 "ssh",
                 "serve",

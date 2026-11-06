@@ -154,7 +154,7 @@ fn run_msb_process(
     } else {
         None
     };
-    let mut process = Command::new(&command.executable);
+    let mut process = crate::runtime::runtime_command(&command.executable);
     if let Some(lock) = &worker_lock {
         inherit_worker_lock(&mut process, lock);
     }

@@ -2,7 +2,7 @@
 //! cross devices; editor and terminal applications always launch locally.
 use crate::{bridge_error::BridgeError, remote, runtime};
 use serde_json::{json, Value};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Stdio};
 
 pub fn target(value: &str) -> Result<Option<(String, String)>, String> {
     let Some(rest) = value.strip_prefix("silo-remote:") else {
@@ -264,7 +264,7 @@ pub(crate) fn spawn_stream(
     runtime::shutdown::ensure_accepting_operations()?;
     crate::terminal::running_computer(paths, &name)?;
     crate::working_account::require_runtime(paths)?;
-    Command::new(&paths.executable)
+    runtime::runtime_command(&paths.executable)
         .env("MSB_HOME", &paths.home)
         .env("MSB_PATH", &paths.executable)
         .env("MSB_LIBKRUNFW_PATH", &paths.library)
@@ -349,6 +349,7 @@ pub(crate) fn prepare(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::process::Command;
     fn save_guest_target(paths: &runtime::RuntimePaths, id: &str, name: &str) {
         runtime::write_metadata(
             &paths.metadata,
