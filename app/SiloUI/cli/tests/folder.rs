@@ -48,6 +48,10 @@ fn host_repo(root: &Path) -> PathBuf {
     let dir = root.join("repo");
     std::fs::create_dir_all(&dir).unwrap();
     git(&dir, &["init", "-q", "-b", "main"]);
+    // Keep merges made by the code under test independent of the machine's git identity:
+    // a Linux runner's account has no name, so git refuses to commit without one.
+    git(&dir, &["config", "user.name", "Host"]);
+    git(&dir, &["config", "user.email", "host@example.com"]);
     std::fs::write(dir.join("a.txt"), "one\n").unwrap();
     git(&dir, &["add", "."]);
     git(&dir, &["commit", "-q", "-m", "first"]);
