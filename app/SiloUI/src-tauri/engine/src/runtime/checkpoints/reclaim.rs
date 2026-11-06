@@ -523,7 +523,10 @@ fn reclaim_inner(
             continue;
         };
         if Some(&checkpoint.id) == newest.as_ref()
-            || !matches!(checkpoint.kind.as_str(), "automatic" | "before-keep")
+            || !matches!(
+                checkpoint.kind.as_str(),
+                "automatic" | "before-keep" | "step"
+            )
         {
             continue;
         }

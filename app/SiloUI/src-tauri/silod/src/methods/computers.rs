@@ -38,6 +38,7 @@ use silo_api::{
             MacosDisplayConnectParams, MacosDisplayConnectResult, MacosDisplayResizeParams,
             MacosDisplayResizeResult, MacosDisplaySessionParams, MacosDisplaySessionResult,
         },
+        steps::{ComputersTreeParams, ComputersTreeResult},
         storage::StorageParams,
         MethodName,
     },
@@ -608,6 +609,55 @@ async fn read_computers(
         value: encode(result)?,
         event_barrier: barrier,
     })
+}
+
+/// The lowercase word a unit enum serializes to.
+fn wire_word<T: Serialize>(value: &T) -> String {
+    serde_json::to_value(value)
+        .ok()
+        .and_then(|value| value.as_str().map(str::to_owned))
+        .unwrap_or_default()
+}
+
+/// `computers.tree`: how the computers descend from each other (see `silo_engine::computer_tree`).
+async fn read_tree(
+    context: &HandlerContext,
+    _params: ComputersTreeParams,
+) -> Result<HandlerOutput, DispatchError> {
+    let listed = read_computers(
+        context,
+        ComputerListParams {
+            device_id: None,
+            refresh_repositories: None,
+        },
+    )
+    .await?;
+    let listed: ComputersListResult = serde_json::from_value(listed.value)
+        .map_err(|error| DispatchError::internal(error.to_string()))?;
+    let checkpoints = |list: &[silo_api::methods::checkpoints::Checkpoint]| {
+        list.iter()
+            .map(|checkpoint| (checkpoint.id.clone(), wire_word(&checkpoint.kind)))
+            .collect::<Vec<_>>()
+    };
+    let mut computers: Vec<silo_engine::computer_tree::Computer> = Vec::new();
+    for computer in &listed.linux.computers {
+        computers.push(silo_engine::computer_tree::Computer {
+            id: computer.configuration.id.clone(),
+            name: computer.configuration.name.clone(),
+            state: wire_word(&computer.state),
+            checkpoints: checkpoints(&computer.checkpoints),
+        });
+    }
+    for computer in &listed.macos.computers {
+        computers.push(silo_engine::computer_tree::Computer {
+            id: computer.id.clone(),
+            name: computer.name.clone(),
+            state: wire_word(&computer.state),
+            checkpoints: checkpoints(&computer.checkpoints),
+        });
+    }
+    let nodes = silo_engine::computer_tree::read(context.engine_context(), &computers);
+    Ok(plain(encode(ComputersTreeResult { nodes })?))
 }
 
 /// Adds each computer's `generation`, and to each warm checkpoint the generation it was taken
@@ -1626,6 +1676,7 @@ async fn route(
     }
     match method {
         MethodName::ComputersList => read_computers(context, decoded!()).await,
+        MethodName::ComputersTree => read_tree(context, decoded!()).await,
         MethodName::ComputersShell => read_shell(context, decoded!()).await,
         MethodName::ComputersConfigurationRead => read_configuration(context, decoded!()).await,
         MethodName::ActivitySetupRead => {
@@ -1841,6 +1892,13 @@ pub(crate) mod tests {
         assert!(result.linux.computers.is_empty());
         assert!(result.macos.computers.is_empty());
         assert!(output.event_barrier.is_some());
+    }
+
+    #[tokio::test]
+    async fn the_tree_of_an_empty_inventory_is_empty() {
+        let f = fixture();
+        let tree = f.call(MethodName::ComputersTree, json!({})).await.unwrap();
+        assert_eq!(tree, json!({"nodes": []}));
     }
 
     #[tokio::test]

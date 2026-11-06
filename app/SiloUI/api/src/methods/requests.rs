@@ -33,6 +33,7 @@ use super::review_requests;
 use super::secrets;
 use super::settings;
 use super::ssh_access;
+use super::steps;
 use super::storage;
 use super::terminal;
 use super::updates;
@@ -255,6 +256,11 @@ pub fn computers_start(params: common::ComputerTargetParams) -> Request<kind::Jo
 /// `computers.stop`
 pub fn computers_stop(params: common::ComputerTargetParams) -> Request<kind::Job> {
     Request::new(MethodParams::ComputersStop(params))
+}
+
+/// `computers.tree`
+pub fn computers_tree(params: steps::ComputersTreeParams) -> Request<kind::Query> {
+    Request::new(MethodParams::ComputersTree(params))
 }
 
 /// `connections.devices.connect`
@@ -858,6 +864,16 @@ pub fn ssh_access_save(params: ssh_access::SshAccessSaveParams) -> Request<kind:
 /// `sshAccess.state`
 pub fn ssh_access_state(params: common::DeviceParams) -> Request<kind::Query> {
     Request::new(MethodParams::SshAccessState(params))
+}
+
+/// `steps.list`
+pub fn steps_list(params: steps::StepsListParams) -> Request<kind::Query> {
+    Request::new(MethodParams::StepsList(params))
+}
+
+/// `steps.record`
+pub fn steps_record(params: steps::StepsRecordParams) -> Request<kind::Command> {
+    Request::new(MethodParams::StepsRecord(params))
 }
 
 /// `storage.read`

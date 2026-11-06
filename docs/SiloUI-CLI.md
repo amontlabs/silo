@@ -58,8 +58,11 @@ the engine's message.
 | `silo undo <computer\|fork\|./dir>` | put a computer back to before its latest keep, or a folder back to before its latest fold |
 | `silo drop <computer> [--force]` | throw a computer away (a hidden throwaway too, by name or id); `main` needs `--force`. A stopped `silo-baseline-*` copy more than an hour old is dropped by the next fork or `silo diff --baseline` |
 | `silo exec <computer> [--cwd DIR] [--timeout SECS] -- <cmd...>` | run a command; the exit code is passed through |
-| `silo checkpoint <computer> [--name N] [--kind manual\|automatic\|before-keep\|warm]` | save a checkpoint |
+| `silo checkpoint <computer> [--name N] [--kind manual\|automatic\|before-keep\|warm\|step]` | save a checkpoint |
 | `silo checkpoints <computer>` | list checkpoints |
+| `silo steps <computer>` | the commands run in the computer through Silo, numbered, with exit code and the checkpoint each left ([steps](SiloUI-CHANGES.md#steps-and-the-fork-tree)) |
+| `silo fork <computer> --from-step N` | fork from the checkpoint taken after step N |
+| `silo tree` | the computers as a tree: what each was forked from, its state and pending review |
 
 A fork publishes the ports its source publishes (a recipe fork, the recipe's `ports`), each on a host port of its own. The engine does not copy published ports when it forks a computer, so `silo fork` does it with the same `publish` calls. The MCP server has `ports`, `publish`, `unpublish` and `ssh_name` tools.
 | `silo job <id>` | wait for a job that is already running |
@@ -189,6 +192,8 @@ recipes: [linux-dev]
 fork_secrets: [OPENAI_API_KEY]   # what --secret may name
 fold: ask                        # or auto-code
 fork_ram_budget: 8G
+step_checkpoints: true           # checkpoint a computer after each step (default false)
+step_checkpoints_keep: 20        # step checkpoints kept per computer (default 20; 0 keeps all)
 warm_max_age: 60s               # how old main's warm checkpoint may be for a fork to use it (and only if main is unchanged)
 auto_keep:
   - when: { only: [code], tests: pass }
@@ -207,7 +212,7 @@ gets the named secrets (`github` gives read-only GitHub access) and the recipe's
 claude mcp add silo -- silo mcp
 ```
 
-Tools: `up`, `recipe_list`, `list`, `status`, `fork` (with `recipe`, `count`, `command`, or a repository path as `source`), `fold` (with `promote` or `request`), `undo`, `drop`, `exec`, `checkpoint`, `checkpoints`, `secrets_list`. They make the
+Tools: `up`, `recipe_list`, `list`, `status`, `steps_list`, `tree`, `fork` (with `recipe`, `count`, `command`, `fromStep`, or a repository path as `source`), `fold` (with `promote` or `request`), `undo`, `drop`, `exec`, `checkpoint`, `checkpoints`, `secrets_list`. They make the
 same engine calls as the commands and return the same JSON as `--json`. `drop` cannot
 drop `main` through MCP. No tool sets or assigns secrets; values are never sent over MCP.
 

@@ -341,3 +341,60 @@ engine's `changes.requests.keep` refuses them with "Keep folder forks with `silo
 `changes.requests.show` returns `diff: null`, the request's own summary as `text` and
 `stale: null`; `silo requests show` reads the folder itself and fills the text, digest and `stale`.
 `throwAway` and `open` work for them like for any fork.
+
+## Steps and the fork tree
+
+A step is one command run on a computer through Silo: `silo exec`, the MCP `exec` tool, or the
+command of `silo fork ... -- <cmd>` (the folder-fork command is not recorded).
+
+**Choice.** Recording is a separate engine command, `steps.record`, called by the CLI and MCP
+server after the command (and the checkpoint, when one is taken) finishes. The alternative,
+putting step fields on `checkpoints.create`, would have made steps exist only when step
+checkpoints are on, and would have tied one record to one job. A step is recorded whether or
+not a checkpoint is taken; a failure to record never fails the command (the result carries
+`step.error`).
+
+- `steps.record` (command): `computerId`, `command` (argv), `exitCode`, `startedAt`,
+  `finishedAt`, optional `checkpointId`. The engine numbers the step (1-based per computer,
+  never reused, also after old records are dropped) and returns `{step}`: `id` (`st-` and 8
+  hex), `computerId`, `number`, `command` (argv joined, arguments with spaces single-quoted,
+  cut to 200 characters, ending in an ellipsis), `exitCode`, `startedAt`, `finishedAt`,
+  `checkpointId`, `parentStep` (the previous step's number) and, for a fork's first step,
+  `parentCheckpoint` (the checkpoint the fork was made from, from its fork-time record).
+- `steps.list` (query): `computerId` to `{steps}`, oldest first. The records are one JSON file
+  per computer under `<engine data>/steps/` (`steps.rs`); the newest 500 are kept and the file
+  goes with the computer. Command lines are stored as typed, so keep secrets out of them.
+- `silo steps <computer>` prints a table (`--json` the same data); the MCP tool is `steps_list`.
+
+**Step checkpoints.** `.silo/silo.yaml` has `step_checkpoints: true|false` (default false) and
+`step_checkpoints_keep` (default 20; 0 keeps every one). Both resolve through
+`Settings::step_settings` in the CLI, the one place a per-agent override will take effect.
+When on, the CLI saves a checkpoint of the computer after each step with the existing
+`checkpoints.create` job, kind `step` and `keepNewest` set to the keep count. `step` is a
+checkpoint kind like `automatic` and `before-keep` (`silo checkpoint --kind step` makes one by
+hand): after each step capture the engine runs the same retention pass as its own job, keeping
+the newest N of the computer's `step` checkpoints and never touching other kinds, the newest
+checkpoint of any kind, or one a fork or another operation builds on (so the checkpoint a fork
+was made from stays). A removed checkpoint stays in the step list.
+
+**Fork from a step.** `silo fork <computer> --from-step N` (MCP `fork` with `fromStep`) looks up
+the step and forks from its `checkpointId` (`checkpoints.fork` with that checkpoint). It stops
+before forking when there is no step N, when the step has no checkpoint (step checkpoints were
+off), or when the checkpoint was removed by retention.
+
+**Fork tree.** `computers.tree` (query, no parameters) returns `{nodes}` with `id`, `name`,
+`parent` (a computer id or null), `from`, `state` and `pendingChanges`, parents before their
+children. `from` is `{kind: "root"}`, `main` (the parent's state when the fork was made, from a
+fork-point or warm checkpoint), `checkpoint` (`checkpointId`), `step` (`number`,
+`checkpointId`), `recipe` (`hash`) or `folder` (`path`; the CLI fills this from its folder
+record, the engine does not know folders). Parent and origin come from the fork-time record
+the engine already keeps (the changes store: the checkpoint and computer noted when the fork
+was created and kept in the base record once it starts), read through the promote journal
+(`lineage.rs`): after `silo fold --promote` the promoted fork is a root, or has the old main's own
+parent, and the old main's forks hang under it; `silo undo main` ends the record and every
+answer goes back. `pendingChanges` is `{requestId, buckets}`: the open review request of the
+fork, and `buckets` is always null for now (counting needs a capture). The hidden throwaways
+(`silo-baseline-*`, `silo-build-*`) are left out. `silo tree` prints it indented with state, origin and
+pending review; `--json` is the same data; the MCP tool is `tree`. Computers on other devices
+are not included.
+

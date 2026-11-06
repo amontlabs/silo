@@ -55,6 +55,14 @@ pub fn source_of(journal: &Journal, fork: &str, raw: Option<String>) -> Option<S
     raw.map(|source| redirect(&records, &source))
 }
 
+/// The forks that have replaced a computer and are main now.
+pub fn promoted_forks(journal: &Journal) -> std::collections::HashSet<String> {
+    promoted(journal)
+        .into_iter()
+        .map(|record| record.swap.fork_id)
+        .collect()
+}
+
 /// A manifest store whose sources follow the promotes in force.
 pub struct Lineage {
     inner: Arc<dyn ManifestStore>,

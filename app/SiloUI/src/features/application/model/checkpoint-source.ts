@@ -8,7 +8,7 @@ export interface ComputerCheckpoint {
   scope: "full" | "disk"
   reason: "manual" | "before-restore"
   /** Who made it: you (`manual`) or an unattended run (`automatic`, deleted by the engine). */
-  kind?: "manual" | "automatic" | "before-keep" | "fork-point"
+  kind?: "manual" | "automatic" | "before-keep" | "fork-point" | "warm" | "step"
   sizeBytes?: number
 }
 

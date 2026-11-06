@@ -45,6 +45,7 @@ pub mod review_requests;
 pub mod secrets;
 pub mod settings;
 pub mod ssh_access;
+pub mod steps;
 pub mod storage;
 pub mod terminal;
 pub mod updates;

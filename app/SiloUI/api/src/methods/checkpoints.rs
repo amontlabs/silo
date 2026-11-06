@@ -12,6 +12,10 @@ wire_struct! {
         name: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         kind: Option<CheckpointKind>,
+        /// For a `step` checkpoint: how many of the computer's step checkpoints to keep (the
+        /// newest ones). The engine keeps 20 when it is left out.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        keep_newest: Option<u32>,
     }
 }
 
@@ -201,6 +205,8 @@ pub enum CheckpointKind {
     // The checkpoint `silo up` keeps of main so a fork of an unchanged main starts without
     // taking a new one; replaced on every `up`, never trimmed by retention.
     Warm,
+    // Taken after a step (a command an agent ran through Silo); trimmed by its own count.
+    Step,
 }
 
 wire_struct! {

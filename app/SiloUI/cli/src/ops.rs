@@ -989,6 +989,7 @@ pub async fn drop_computer(
             progress,
         )
         .await?;
+    engine.forget_step_lock(&computer.id);
     Ok(json!({ "dropped": computer.name }))
 }
 
@@ -1068,12 +1069,24 @@ pub async fn exec_raw(engine: &Engine, args: &ExecArgs) -> Result<ExecOutput, Cl
     if args.argv.is_empty() {
         return Err(CliError::new("Give a command to run after --."));
     }
+    let computer = engine.computer(&args.computer).await?;
+    exec_on(engine, computer, args).await
+}
+
+/// Runs the command on this exact computer (by id), whatever its name has become.
+pub async fn exec_on(
+    engine: &Engine,
+    computer: crate::engine::Computer,
+    args: &ExecArgs,
+) -> Result<ExecOutput, CliError> {
+    if args.argv.is_empty() {
+        return Err(CliError::new("Give a command to run after --."));
+    }
     if args.timeout_secs == 0 || args.timeout_secs > MAX_EXEC_SECS {
         return Err(CliError::new(format!(
             "The timeout must be 1 to {MAX_EXEC_SECS} seconds; the engine does not run longer commands yet."
         )));
     }
-    let computer = engine.computer(&args.computer).await?;
     let reply = engine
         .call(requests::guest_exec(GuestExecParams {
             computer_id: computer.id,
@@ -1083,7 +1096,7 @@ pub async fn exec_raw(engine: &Engine, args: &ExecArgs) -> Result<ExecOutput, Cl
             env: None,
             as_user: None,
             stdin: None,
-            timeout_ms: args.timeout_secs * 1000,
+            timeout_ms: args.timeout_secs.saturating_mul(1000),
             max_output_bytes: None,
         }))
         .await?;
@@ -1142,8 +1155,9 @@ pub fn parse_checkpoint_kind(text: &str) -> Result<CheckpointKind, CliError> {
         "manual" => Ok(CheckpointKind::Manual),
         "automatic" => Ok(CheckpointKind::Automatic),
         "before-keep" => Ok(CheckpointKind::BeforeKeep),
+        "step" => Ok(CheckpointKind::Step),
         other => Err(CliError::new(format!(
-            "Unknown checkpoint kind {other}; use manual, automatic, before-keep or warm."
+            "Unknown checkpoint kind {other}; use manual, automatic, before-keep, warm or step."
         ))),
     }
 }
@@ -1167,6 +1181,7 @@ pub async fn checkpoint(
                 device_id: None,
                 name,
                 kind,
+                keep_newest: None,
             }),
             progress,
         )

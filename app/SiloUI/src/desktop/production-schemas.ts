@@ -48,7 +48,7 @@ export const secretShape = z.object({
   error: z.string().nullish().transform((value) => value ?? undefined), removing: z.boolean().optional(),
 })
 
-const checkpointShape = z.object({
+export const checkpointShape = z.object({
   id: z.string().min(1), name: z.string().min(1),
   // The Rust checkpoint journal stores Unix milliseconds (the same u64
   // contract as activity timestamps); normalize at the native boundary for
@@ -58,7 +58,7 @@ const checkpointShape = z.object({
     z.number().int().nonnegative().max(8.64e15).transform(value => new Date(value).toISOString()),
   ]),
   scope: z.enum(["full", "disk"]), reason: z.enum(["manual", "before-restore"]),
-  kind: z.enum(["manual", "automatic", "before-keep", "fork-point"]).optional(),
+  kind: z.enum(["manual", "automatic", "before-keep", "fork-point", "warm", "step"]).optional(),
   sizeBytes: z.number().int().nonnegative().optional(),
 })
 const checkpointOperationShape = z.object({

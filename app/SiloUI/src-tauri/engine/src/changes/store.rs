@@ -45,8 +45,24 @@ pub struct Meta {
     /// The computer a fork was made from, set on a base capture.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub origin: Option<String>,
+    /// The step number the source checkpoint was taken for, when it was a step's; kept here so
+    /// the fork still says which step it came from after the step record is trimmed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_step: Option<u32>,
     pub records: u64,
     pub bytes: u64,
+}
+
+/// What the fork-time record says about where a fork came from.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ForkLink {
+    /// The computer it was made from.
+    pub origin: Option<String>,
+    /// The checkpoint it was made from (a `recipe:` key for a recipe fork; the computer
+    /// itself while the fork's own checkpoint is not yet known).
+    pub source: Option<String>,
+    /// The step number of that checkpoint, when it was a step's.
+    pub step: Option<u32>,
 }
 
 #[derive(Clone, Debug)]
@@ -86,6 +102,39 @@ impl Store {
         Self::new(engine_data.join("changes"))
     }
 
+    /// A folder beside this store under the engine's data directory (the step records live
+    /// in one).
+    pub fn sibling_dir(&self, name: &str) -> PathBuf {
+        self.root.parent().unwrap_or(&self.root).join(name)
+    }
+
+    /// Where a computer was forked from, read from the fork-time record (`id`) once the fork
+    /// has started, and from the note made when it was created (`name`) until then.
+    pub fn fork_link(&self, id: &str, name: &str) -> Option<ForkLink> {
+        let recorded = self
+            .computer_dir(id)
+            .ok()
+            .and_then(|directory| fs::read(directory.join("base.json")).ok())
+            .and_then(|bytes| serde_json::from_slice::<Meta>(&bytes).ok());
+        if let Some(meta) = recorded {
+            if meta.source.is_some() || meta.origin.is_some() {
+                return Some(ForkLink {
+                    origin: meta.origin,
+                    source: meta.source,
+                    step: meta.source_step,
+                });
+            }
+        }
+        let source = fs::read_to_string(self.pending_path(name)).ok()?;
+        Some(ForkLink {
+            origin: fs::read_to_string(self.origin_path(name)).ok(),
+            source: Some(source),
+            step: fs::read_to_string(self.step_path(name))
+                .ok()
+                .and_then(|text| text.trim().parse().ok()),
+        })
+    }
+
     fn computer_dir(&self, computer: &str) -> Result<PathBuf, String> {
         if computer.is_empty()
             || !computer
@@ -121,11 +170,24 @@ impl Store {
         source: Option<&str>,
         origin: Option<&str>,
     ) -> Result<Meta, String> {
+        self.put_with_link(computer, slot, manifest, source, origin, None)
+    }
+
+    pub fn put_with_link(
+        &self,
+        computer: &str,
+        slot: Slot,
+        manifest: &str,
+        source: Option<&str>,
+        origin: Option<&str>,
+        step: Option<u32>,
+    ) -> Result<Meta, String> {
         let directory = self.computer_dir(computer)?;
         let meta = Meta {
             captured_at: now(),
             source: source.map(str::to_owned),
             origin: origin.map(str::to_owned),
+            source_step: step,
             records: manifest.lines().count() as u64,
             bytes: manifest.len() as u64,
         };
@@ -159,6 +221,7 @@ impl Store {
             captured_at: now(),
             source: Some(source.to_owned()),
             origin: None,
+            source_step: None,
             records: idle.lines().count() as u64,
             bytes: idle.len() as u64,
         };
@@ -235,6 +298,22 @@ impl Store {
         self.pending_path(name).with_extension("origin")
     }
 
+    fn step_path(&self, name: &str) -> PathBuf {
+        self.pending_path(name).with_extension("step")
+    }
+
+    /// Notes the step number of the checkpoint the fork `name` is made from.
+    pub fn put_pending_step(&self, name: &str, step: u32) -> Result<(), String> {
+        write_atomic(&self.step_path(name), step.to_string().as_bytes())
+    }
+
+    pub fn take_pending_step(&self, name: &str) -> Option<u32> {
+        let path = self.step_path(name);
+        let step = fs::read_to_string(&path).ok()?.trim().parse().ok();
+        let _ = fs::remove_file(&path);
+        step
+    }
+
     /// Notes the computer the fork `name` is being made from.
     pub fn put_pending_origin(&self, name: &str, computer: &str) -> Result<(), String> {
         write_atomic(&self.origin_path(name), computer.as_bytes())
@@ -278,8 +357,10 @@ impl Store {
 /// Drops everything kept for computers that no longer exist.
 pub fn forget(context: &dyn EngineContext, computers: &[String]) {
     let store = Store::for_engine(context);
+    let steps = crate::steps::StepStore::for_engine(context);
     for id in computers {
         let _ = store.remove_computer(id);
+        let _ = steps.remove_computer(id);
     }
 }
 
