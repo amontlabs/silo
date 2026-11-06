@@ -226,6 +226,10 @@ pub struct Settings {
     pub step_checkpoints_keep: Option<u32>,
     #[serde(default)]
     pub auto_keep: Vec<AutoKeepRule>,
+    /// Let forks made through MCP run computer use without asking (`computerUse: auto`).
+    /// A person typing `--computer-use auto` needs no setting.
+    #[serde(default)]
+    pub computer_use_auto: bool,
     #[serde(default)]
     pub agents: BTreeMap<String, AgentOverride>,
 }

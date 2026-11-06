@@ -3,6 +3,7 @@
 
 pub mod access;
 pub mod autokeep;
+pub mod bridge;
 pub mod cli;
 pub mod clock;
 pub mod config;
@@ -11,6 +12,7 @@ pub mod error;
 pub mod fanout;
 pub mod flows;
 pub mod folder;
+pub mod gui;
 pub mod mcp;
 pub mod ops;
 pub mod pr;
@@ -18,4 +20,5 @@ pub mod render;
 pub mod review;
 pub mod steps;
 pub mod summary;
+pub mod usetools;
 pub mod writeback;

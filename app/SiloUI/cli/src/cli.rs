@@ -208,6 +208,21 @@ pub struct ForkCommand {
     /// A recipe file whose quiet: and scrub: lists apply to the fork.
     #[arg(long, value_name = "PATH")]
     pub recipe_file: Option<PathBuf>,
+    /// Start the fork and wait until its desktop and computer-use driver are ready, then
+    /// print its name and computer-use status.
+    #[arg(long, conflicts_with_all = ["count", "command", "recipe"])]
+    pub gui: bool,
+    /// The fork's computer-use approval: ask (the default) or auto, which lets an agent in
+    /// the fork drive its desktop without asking. Only forks; main keeps asking.
+    #[arg(
+        long,
+        value_name = "ask|auto",
+        conflicts_with_all = ["count", "command", "recipe"]
+    )]
+    pub computer_use: Option<String>,
+    /// How long --gui waits for the desktop and the driver.
+    #[arg(long, value_name = "SECONDS", default_value_t = crate::gui::DEFAULT_TIMEOUT_SECS, requires = "gui")]
+    pub gui_timeout: u64,
 }
 
 #[derive(Args, Debug)]
@@ -496,6 +511,14 @@ async fn dispatch(
                 }
                 fork.checkpoint = Some(steps::checkpoint_for(engine, &fork.source, number).await?);
             }
+            if fork.recipe.is_none()
+                && folder::is_folder(&fork.source)
+                && (fork.gui || fork.computer_use.is_some())
+            {
+                return Err(CliError::new(
+                    "--gui and --computer-use fork a computer; a folder is copied into a Linux fork that has no desktop.",
+                ));
+            }
             if fork.recipe.is_none() && folder::is_folder(&fork.source) {
                 return fork_folder(
                     engine,
@@ -537,7 +560,25 @@ async fn dispatch(
                 recipe,
                 recipe_name,
             };
-            let value = ops::fork(engine, &args, settings.as_ref(), progress).await?;
+            let approval = fork
+                .computer_use
+                .as_deref()
+                .map(crate::gui::parse_approval)
+                .transpose()?;
+            if fork.gui {
+                let gui = crate::gui::GuiArgs {
+                    fork: args,
+                    approval,
+                    timeout: std::time::Duration::from_secs(fork.gui_timeout.max(1)),
+                };
+                let value = crate::gui::fork_gui(engine, &gui, settings.as_ref(), progress).await?;
+                emit(json, &value, render::forked_gui);
+                return Ok(0);
+            }
+            let mut value = ops::fork(engine, &args, settings.as_ref(), progress).await?;
+            if let Some(mode) = approval {
+                crate::gui::apply_to_fork(engine, &mut value, mode).await?;
+            }
             emit(json, &value, render::forked);
         }
         Command::Fold(fold) if fold.promote => {

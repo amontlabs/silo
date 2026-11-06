@@ -119,8 +119,22 @@ pub async fn status(engine: &Engine, name: &str) -> Result<Value, CliError> {
         Err(_) => Value::Null,
     };
     value["credentialsUsed"] = credentials_used(engine, &computer.id).await;
+    value["computerUse"] = computer_use(engine, &computer.id).await;
     value["checkpointList"] = Value::Array(computer.checkpoints);
     Ok(value)
+}
+
+/// The computer's computer-use state and approval mode; `null` when the engine cannot say.
+pub async fn computer_use(engine: &Engine, computer_id: &str) -> Value {
+    engine
+        .call(requests::computer_use_state(
+            silo_api::methods::computer_use::ComputerUseStateParams {
+                computer_id: computer_id.to_owned(),
+                device_id: None,
+            },
+        ))
+        .await
+        .unwrap_or(Value::Null)
 }
 
 /// Which Silo secrets a computer used and which attempts were blocked. `null` when the
@@ -1103,6 +1117,17 @@ pub async fn exec_on(
     computer: crate::engine::Computer,
     args: &ExecArgs,
 ) -> Result<ExecOutput, CliError> {
+    exec_with_input(engine, computer, args, None, None).await
+}
+
+/// `exec_on` with bytes on the command's standard input and a larger output cap.
+pub async fn exec_with_input(
+    engine: &Engine,
+    computer: crate::engine::Computer,
+    args: &ExecArgs,
+    stdin: Option<Vec<u8>>,
+    max_output_bytes: Option<u64>,
+) -> Result<ExecOutput, CliError> {
     if args.argv.is_empty() {
         return Err(CliError::new("Give a command to run after --."));
     }
@@ -1119,9 +1144,9 @@ pub async fn exec_on(
             cwd: args.cwd.clone(),
             env: None,
             as_user: None,
-            stdin: None,
+            stdin,
             timeout_ms: args.timeout_secs.saturating_mul(1000),
-            max_output_bytes: None,
+            max_output_bytes,
         }))
         .await?;
     let bytes = |key: &str| -> Vec<u8> {

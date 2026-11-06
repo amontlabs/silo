@@ -12,8 +12,10 @@ name = "silo"
 path = "src/main.rs"
 
 [dependencies]
+base64 = "0.23"
 clap = { version = "4", features = ["derive", "env"] }
 futures = "0.3"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 libc = "0.2"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 rmcp = { version = "3.8", features = ["server", "transport-io", "macros"] }

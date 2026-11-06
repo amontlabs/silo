@@ -1,10 +1,11 @@
 //! `silo mcp`: the commands as MCP tools over stdio. Every tool makes the same engine calls
 //! as its command and answers with the same JSON as `--json`.
 
-use std::{path::PathBuf, sync::Arc};
+use std::{collections::HashMap, path::PathBuf, sync::Arc};
 
 use rmcp::{
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
+    model::{CallToolResult, ContentBlock},
     schemars, tool, tool_handler, tool_router, ServerHandler, ServiceExt,
 };
 use serde::Deserialize;
@@ -30,6 +31,8 @@ pub struct SiloMcp {
     agent: Arc<std::sync::Mutex<Option<String>>>,
     /// Set when `--agent` or `SILO_AGENT` named the agent: the client's name is then ignored.
     agent_named: bool,
+    /// Screen pixels per pixel of the last screenshot returned, by computer id.
+    scales: Arc<std::sync::Mutex<HashMap<String, f64>>>,
     tool_router: ToolRouter<Self>,
 }
 
@@ -183,6 +186,136 @@ pub struct DiffParams {
     pub no_baseline: bool,
 }
 
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ScreenshotParams {
+    /// The computer's name.
+    pub computer: String,
+    /// The longest side of the picture in pixels (default 1280); larger screens are scaled down.
+    pub max_side: Option<u32>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ClickParams {
+    /// The computer's name.
+    pub computer: String,
+    /// Pixels from the left of the last screenshot.
+    pub x: f64,
+    /// Pixels from the top of the last screenshot.
+    pub y: f64,
+    /// `left` (default), `right` or `middle`.
+    pub button: Option<String>,
+    /// Double-click.
+    #[serde(default)]
+    pub double: bool,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TypeParams {
+    /// The computer's name.
+    pub computer: String,
+    /// The text to type into the focused window.
+    pub text: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct KeyParams {
+    /// The computer's name.
+    pub computer: String,
+    /// A key or combination, like `Return` or `ctrl+l`.
+    pub key: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ScrollParams {
+    /// The computer's name.
+    pub computer: String,
+    /// Where to scroll, in pixels of the last screenshot.
+    pub x: f64,
+    pub y: f64,
+    /// Horizontal amount (default 0).
+    #[serde(default)]
+    pub dx: f64,
+    /// Vertical amount; positive scrolls down (default 0).
+    #[serde(default)]
+    pub dy: f64,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct MoveParams {
+    /// The computer's name.
+    pub computer: String,
+    pub x: f64,
+    pub y: f64,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DragParams {
+    /// The computer's name.
+    pub computer: String,
+    pub from_x: f64,
+    pub from_y: f64,
+    pub to_x: f64,
+    pub to_y: f64,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WaitParams {
+    /// The computer's name.
+    pub computer: String,
+    /// Seconds to wait, at most 30.
+    pub seconds: f64,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DriverCallParams {
+    /// The computer's name.
+    pub computer: String,
+    /// A tool of the computer's Cua Driver (see `computer_use_tools`).
+    pub tool: String,
+    /// The tool's arguments.
+    #[serde(default)]
+    pub arguments: Option<Value>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ForkGuiParams {
+    /// The computer to copy (default `main`).
+    pub source: Option<String>,
+    /// The fork's name.
+    pub name: Option<String>,
+    /// `ask` (default) or `auto`. `auto` lets the fork's agent drive its desktop without asking;
+    /// it needs computer_use_auto: true in .silo/settings.yaml.
+    pub computer_use: Option<String>,
+    /// How long to wait for the desktop and the driver (default 300).
+    pub timeout_secs: Option<u64>,
+}
+
+fn drive_result(answer: crate::usetools::Answer) -> CallToolResult {
+    let content = answer
+        .parts
+        .into_iter()
+        .map(|part| match part {
+            crate::usetools::Part::Text(text) => ContentBlock::text(text),
+            crate::usetools::Part::Image { data, mime } => ContentBlock::image(data, mime),
+        })
+        .collect();
+    if answer.is_error {
+        CallToolResult::error(content)
+    } else {
+        CallToolResult::success(content)
+    }
+}
+
 fn show(result: Result<Value, CliError>) -> Result<String, String> {
     match result {
         Ok(value) => Ok(serde_json::to_string_pretty(&value).unwrap_or_default()),
@@ -199,6 +332,7 @@ impl SiloMcp {
             engine: Arc::new(tokio::sync::Mutex::new(None)),
             agent: Arc::new(std::sync::Mutex::new(None)),
             agent_named: false,
+            scales: Arc::new(std::sync::Mutex::new(HashMap::new())),
             tool_router: Self::tool_router(),
         }
         .with_agent(std::env::var("SILO_AGENT").ok())
@@ -743,6 +877,259 @@ impl SiloMcp {
         Parameters(ComputerParam { computer }): Parameters<ComputerParam>,
     ) -> Result<String, String> {
         show(async { ops::checkpoints(&self.engine().await?, &computer).await }.await)
+    }
+
+    /// Runs one driver tool in the computer and shapes its answer for the agent.
+    async fn drive(
+        &self,
+        computer: &str,
+        tool: &str,
+        arguments: Value,
+        max_side: Option<u32>,
+    ) -> Result<CallToolResult, String> {
+        let run = async {
+            let engine = self.engine().await?;
+            let found = engine.computer(computer).await?;
+            let result = crate::bridge::driver_request(
+                &engine,
+                &found,
+                "tools/call",
+                serde_json::json!({"name": tool, "arguments": arguments}),
+                60,
+            )
+            .await?;
+            let answer = crate::usetools::answer_of(
+                &result,
+                max_side.unwrap_or(crate::usetools::DEFAULT_MAX_SIDE),
+            )?;
+            if let Some(scale) = answer.scale {
+                self.scales.lock().unwrap().insert(found.id.clone(), scale);
+            }
+            Ok::<_, CliError>(answer)
+        };
+        run.await.map(drive_result).map_err(|error| error.message)
+    }
+
+    /// The scale of the last screenshot returned for `computer` (1 before any).
+    async fn scale_of(&self, computer: &str) -> f64 {
+        let Ok(engine) = self.engine().await else {
+            return 1.0;
+        };
+        let Ok(found) = engine.computer(computer).await else {
+            return 1.0;
+        };
+        self.scales
+            .lock()
+            .unwrap()
+            .get(&found.id)
+            .copied()
+            .unwrap_or(1.0)
+    }
+
+    async fn act(
+        &self,
+        computer: &str,
+        action: crate::usetools::Action,
+    ) -> Result<CallToolResult, String> {
+        let scale = self.scale_of(computer).await;
+        let (tool, arguments) = crate::usetools::driver_call(&action, scale);
+        self.drive(computer, tool, arguments, None).await
+    }
+
+    #[tool(
+        description = "Fork a computer (default main), start the fork and wait until its desktop and computer-use driver are ready. Returns the fork's name and its computer-use status. computerUse auto lets the fork's agent drive the desktop without asking (needs computer_use_auto in the project settings); main always keeps asking."
+    )]
+    async fn fork_gui(
+        &self,
+        Parameters(params): Parameters<ForkGuiParams>,
+    ) -> Result<String, String> {
+        show(
+            async {
+                let project = Project::discover(&self.working_directory);
+                let settings =
+                    project.load_settings_as(self.agent().as_deref(), self.agent_named)?;
+                let approval = params
+                    .computer_use
+                    .as_deref()
+                    .map(crate::gui::parse_approval)
+                    .transpose()?;
+                if let Some(mode) = approval {
+                    crate::gui::check_auto(mode, settings.as_ref(), true)?;
+                }
+                let engine = self.engine().await?;
+                let args = crate::gui::GuiArgs {
+                    fork: ForkArgs {
+                        source: params.source.unwrap_or_else(|| ops::MAIN.to_owned()),
+                        name: params.name,
+                        ..ForkArgs::default()
+                    },
+                    approval,
+                    timeout: std::time::Duration::from_secs(
+                        params
+                            .timeout_secs
+                            .unwrap_or(crate::gui::DEFAULT_TIMEOUT_SECS)
+                            .max(1),
+                    ),
+                };
+                crate::gui::fork_gui(&engine, &args, settings.as_ref(), &|_| {}).await
+            }
+            .await,
+        )
+    }
+
+    #[tool(
+        description = "Say whether a computer's desktop and computer-use driver are ready now, without waiting: ready, what it is waiting for, and the computer-use state and approval mode."
+    )]
+    async fn computer_use_ready(
+        &self,
+        Parameters(ComputerParam { computer }): Parameters<ComputerParam>,
+    ) -> Result<String, String> {
+        show(
+            async {
+                let engine = self.engine().await?;
+                let found = engine.computer(&computer).await?;
+                crate::gui::ready_status(&engine, &found).await
+            }
+            .await,
+        )
+    }
+
+    #[tool(
+        description = "Take a screenshot of a computer's desktop. Large screens are scaled down; give coordinates to the other computer_use tools in the pixels of the latest screenshot."
+    )]
+    async fn computer_use_screenshot(
+        &self,
+        Parameters(params): Parameters<ScreenshotParams>,
+    ) -> Result<CallToolResult, String> {
+        self.drive(
+            &params.computer,
+            "screenshot",
+            serde_json::json!({}),
+            params.max_side,
+        )
+        .await
+    }
+
+    #[tool(description = "Click (or double-click) at a point of the latest screenshot.")]
+    async fn computer_use_click(
+        &self,
+        Parameters(p): Parameters<ClickParams>,
+    ) -> Result<CallToolResult, String> {
+        let action = crate::usetools::Action::Click {
+            x: p.x,
+            y: p.y,
+            button: p.button.unwrap_or_else(|| "left".into()),
+            double: p.double,
+        };
+        self.act(&p.computer, action).await
+    }
+
+    #[tool(description = "Type text into the focused window of a computer.")]
+    async fn computer_use_type(
+        &self,
+        Parameters(p): Parameters<TypeParams>,
+    ) -> Result<CallToolResult, String> {
+        self.act(&p.computer, crate::usetools::Action::Type { text: p.text })
+            .await
+    }
+
+    #[tool(description = "Press a key or combination (like Return or ctrl+l) in a computer.")]
+    async fn computer_use_key(
+        &self,
+        Parameters(p): Parameters<KeyParams>,
+    ) -> Result<CallToolResult, String> {
+        self.act(&p.computer, crate::usetools::Action::Key { key: p.key })
+            .await
+    }
+
+    #[tool(description = "Scroll at a point of the latest screenshot.")]
+    async fn computer_use_scroll(
+        &self,
+        Parameters(p): Parameters<ScrollParams>,
+    ) -> Result<CallToolResult, String> {
+        self.act(
+            &p.computer,
+            crate::usetools::Action::Scroll {
+                x: p.x,
+                y: p.y,
+                dx: p.dx,
+                dy: p.dy,
+            },
+        )
+        .await
+    }
+
+    #[tool(description = "Move the pointer to a point of the latest screenshot.")]
+    async fn computer_use_move(
+        &self,
+        Parameters(p): Parameters<MoveParams>,
+    ) -> Result<CallToolResult, String> {
+        self.act(
+            &p.computer,
+            crate::usetools::Action::Move { x: p.x, y: p.y },
+        )
+        .await
+    }
+
+    #[tool(description = "Drag from one point of the latest screenshot to another.")]
+    async fn computer_use_drag(
+        &self,
+        Parameters(p): Parameters<DragParams>,
+    ) -> Result<CallToolResult, String> {
+        let action = crate::usetools::Action::Drag {
+            from: (p.from_x, p.from_y),
+            to: (p.to_x, p.to_y),
+        };
+        self.act(&p.computer, action).await
+    }
+
+    #[tool(
+        description = "Wait up to 30 seconds (a pause on the host; nothing runs in the computer)."
+    )]
+    async fn computer_use_wait(
+        &self,
+        Parameters(p): Parameters<WaitParams>,
+    ) -> Result<String, String> {
+        crate::bridge::pause(p.seconds).await;
+        Ok(format!("Waited {} seconds.", p.seconds.clamp(0.0, 30.0)))
+    }
+
+    #[tool(description = "List the tools of the computer's Cua Driver with their arguments.")]
+    async fn computer_use_tools(
+        &self,
+        Parameters(ComputerParam { computer }): Parameters<ComputerParam>,
+    ) -> Result<String, String> {
+        show(
+            async {
+                let engine = self.engine().await?;
+                let found = engine.computer(&computer).await?;
+                crate::bridge::driver_request(
+                    &engine,
+                    &found,
+                    "tools/list",
+                    serde_json::json!({}),
+                    60,
+                )
+                .await
+            }
+            .await,
+        )
+    }
+
+    #[tool(
+        description = "Run any tool of the computer's Cua Driver by name, with its own arguments in screen pixels."
+    )]
+    async fn computer_use_call(
+        &self,
+        Parameters(p): Parameters<DriverCallParams>,
+    ) -> Result<CallToolResult, String> {
+        self.drive(
+            &p.computer,
+            &p.tool,
+            p.arguments.unwrap_or_else(|| serde_json::json!({})),
+            None,
+        )
+        .await
     }
 }
 

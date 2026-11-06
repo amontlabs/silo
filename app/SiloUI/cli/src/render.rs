@@ -66,7 +66,43 @@ pub fn status(value: &Value) -> String {
     if let Some(used) = value.get("credentialsUsed").filter(|used| used.is_object()) {
         out.push_str(&format!("\n{}", credentials_line(used)));
     }
+    if let Some(computer_use) = value.get("computerUse").filter(|c| c.is_object()) {
+        out.push_str(&format!("\n{}", computer_use_line(computer_use)));
+    }
     out
+}
+
+fn or_unknown(text: &str) -> &str {
+    if text.is_empty() {
+        "unknown"
+    } else {
+        text
+    }
+}
+
+/// `computer use: ready, approval auto, driver 0.38.0`.
+pub fn computer_use_line(value: &Value) -> String {
+    let mut line = format!(
+        "computer use: {}, approval {}",
+        or_unknown(text(value, "state")),
+        or_unknown(text(value, "approval"))
+    );
+    if let Some(version) = value.get("driverVersion").and_then(Value::as_str) {
+        line.push_str(&format!(", driver {version}"));
+    }
+    if let Some(reason) = value.get("reason").and_then(Value::as_str) {
+        line.push_str(&format!(" ({reason})"));
+    }
+    line
+}
+
+/// `Forked try-1 (running), desktop and computer use ready` and the computer-use line.
+pub fn forked_gui(value: &Value) -> String {
+    format!(
+        "{}\n{}",
+        forked(value),
+        computer_use_line(&value["computerUse"])
+    )
 }
 
 /// `credentials used: KEY → host (POST ×3); blocked: 1 (TOKEN → evil.example GET)`, or
