@@ -20,7 +20,7 @@ use silo_engine::{
 
 use crate::dispatcher::{DispatchError, HandlerOutput};
 
-use super::{failure, output, service as checkpoint_service, HandlerContext};
+use super::{failure, message_error, output, service as checkpoint_service, HandlerContext};
 
 pub(super) async fn keep(
     context: &HandlerContext,
@@ -103,19 +103,21 @@ pub(super) async fn request(
     params: &Value,
 ) -> Result<HandlerOutput, DispatchError> {
     let params: ChangesRequestParams = context.decode_params(params)?;
-    let host = context.silod_context().runtime_host();
-    let app_data = context.silod_context().paths().app_data.clone();
-    let manifests = store::production(host);
-    let request = tokio::task::spawn_blocking(move || -> Result<_, String> {
-        let target = match params.target_id.filter(|id| !id.is_empty()) {
-            Some(target) => target,
-            None => manifests.source(&params.fork_id)?.ok_or_else(|| {
-                format!(
+    let target = match params.target_id.filter(|id| !id.is_empty()) {
+        Some(target) => target,
+        None => super::requests::fork_source(context, &params.fork_id)
+            .await?
+            .ok_or_else(|| {
+                message_error(format!(
                     "{} has no recorded source; name the computer it would be kept into.",
                     params.fork_id
-                )
+                ))
             })?,
-        };
+    };
+    // A request is made only for a fork of its target: a later keep or throw away acts on it.
+    super::requests::verify_fork(context, &params.fork_id, &target).await?;
+    let app_data = context.silod_context().paths().app_data.clone();
+    let request = tokio::task::spawn_blocking(move || {
         fold_requests::Store::new(&app_data).create(fold_requests::NewRequest {
             fork_id: params.fork_id,
             target,

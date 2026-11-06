@@ -295,9 +295,21 @@ the same fork and target updates the open one and keeps its id. The CLI and the 
 (`request: true`) call it after a fresh diff, and pass `counts` (the number of changes in each
 bucket) so a list can show them without a diff.
 
-A request is `open`, `kept` (with `keepId`, the target's before-keep checkpoint, and `resolvedAt`)
-or `thrown-away`. Five more methods answer one; all take `requestId` and refuse a request that is
-not open, except `list` and `show`:
+A request is `open`, `keeping` (a keep of it started and is not recorded as finished), `kept`
+(with `keepId`, the target's before-keep checkpoint, and `resolvedAt`) or `thrown-away`. A request
+is made only for a fork of its target: `changes.request` refuses a fork whose fork-time record does
+not name the target (so main and unrelated computers cannot be named), and a folder target needs
+the folder record the CLI keeps for that fork. A keep made without the request (`changes.keep`,
+`silo fold`) marks the open requests for that fork and target kept.
+
+Five more methods work on one: `list` takes an optional `status` (`open` includes `keeping`);
+`show`, `keep`, `throwAway` and `open` take `requestId`. `keep` accepts an open or `keeping`
+request, `throwAway` and `open` only an open one; `show` also reads a kept or thrown-away request.
+One job at a time works on a request: a second keep or throw away of it is refused while the first
+runs. A keep marks the request `keeping` before it starts. When the engine stops between the keep
+and the mark, the next keep of the request (or the next `list`) finds the finished keep in the keep
+journal (the same fork, target and digest, succeeded after the keep started) and marks the request
+kept instead of keeping again.
 
 - `changes.requests.list` (a query): `status` is `open` (default), `kept`, `thrown-away` or `all`.
   Each entry is the request with `forkName`, `forkState` (absent when the fork is gone) and
@@ -315,11 +327,14 @@ not open, except `list` and `show`:
   and returns the keep's result with the updated `request`. A request without a digest is refused
   (there is nothing to pin the keep to), as is a request whose fork is gone.
 - `changes.requests.throwAway` (a job): stops the fork if it runs and deletes it the way
-  `computers.delete` does, then marks the request `thrown-away`. It refuses `main` and the
-  request's target. A request whose fork is already gone is only closed.
-- `changes.requests.open` (a job): starts the fork when it is stopped (`computers.start`) and
-  returns `computerId`, `name`, `state`, `started`, `sshAlias` (`<name>.silo`, or `.silo-dev` from
-  the development build; it works after `silo ssh-setup`) and `urls` from the URL proxy.
+  `computers.delete` does, then marks the request `thrown-away`. Before it drops anything it
+  checks again that the fork is a fork of the request's target, so it never drops main, the target
+  or an unrelated computer. A request whose fork is gone is only closed, and only when the list of
+  computers is complete (both platforms read, no runtime repair pending).
+- `changes.requests.open` (a job): starts the fork when it is `stopped` (`computers.start`), waits
+  up to two minutes for it to report `running`, and returns `computerId`, `name`, `state`,
+  `started`, `sshAlias` (`<name>.silo`, or `.silo-dev` from the development build; it works after
+  `silo ssh-setup`) and `urls` from the URL proxy.
 
 Folder forks (`target: "folder:<path>"`): only the CLI reads the folder's git history, so the
 engine's `changes.requests.keep` refuses them with "Keep folder forks with `silo fold`", and

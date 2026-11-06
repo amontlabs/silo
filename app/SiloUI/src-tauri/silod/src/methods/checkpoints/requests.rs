@@ -10,7 +10,7 @@ use silo_api::{
     jobs::JobId,
     methods::{
         common::JobStartResult,
-        keep::FoldRequest,
+        keep::{FoldRequest, FoldRequestStatus},
         review_requests::{
             bucket_counts, ChangesRequestsKeepParams, ChangesRequestsListParams,
             ChangesRequestsListResult, ChangesRequestsOpenResult, ChangesRequestsShowResult,
@@ -106,40 +106,128 @@ async fn call_computers(
         .map(|output| output.value)
 }
 
+/// The computers and whether the list is complete: both platforms were read and the Linux
+/// runtime reported no repair that hides computers.
+struct Listing {
+    rows: Vec<Row>,
+    complete: bool,
+}
+
+fn parse_listing(listed: &Value) -> Listing {
+    Listing {
+        rows: rows(listed),
+        complete: listed
+            .pointer("/linux/runtimeRepair")
+            .is_none_or(Value::is_null)
+            && listed.pointer("/macos/computers").is_some(),
+    }
+}
+
 /// Every computer. The read has no event barrier of its own: it is not a subscription's
 /// snapshot, so a client that has not subscribed to `computers.*` can still ask.
-async fn all_rows(context: &HandlerContext) -> Result<Vec<Row>, DispatchError> {
+async fn listing(context: &HandlerContext) -> Result<Listing, DispatchError> {
     #[cfg(test)]
-    if let Some(rows) = tests_rows::get() {
-        return Ok(rows);
+    if let Some((rows, complete)) = tests_rows::get() {
+        return Ok(Listing { rows, complete });
     }
     let reader = HandlerContext::for_owner_bridge(context.engine.clone(), context.client.clone());
-    Ok(rows(
+    Ok(parse_listing(
         &call_computers(&reader, MethodName::ComputersList, json!({})).await?,
     ))
+}
+
+/// Every computer, refusing a list that may leave some out: a fork missing from it is not
+/// known to be gone.
+async fn all_rows(context: &HandlerContext) -> Result<Vec<Row>, DispatchError> {
+    let found = listing(context).await?;
+    if !found.complete {
+        return Err(message_error(
+            "The list of computers is incomplete (the runtime needs repair), so nothing is changed.",
+        ));
+    }
+    Ok(found.rows)
 }
 
 fn store_for(context: &HandlerContext) -> Store {
     Store::new(&context.silod_context().paths().app_data)
 }
 
+/// What a handler needs a request to be.
+#[derive(Clone, Copy)]
+enum Need {
+    Any,
+    Open,
+    Keepable,
+}
+
 async fn open_request(
     context: &HandlerContext,
     id: String,
-    open_only: bool,
+    need: Need,
 ) -> Result<FoldRequest, DispatchError> {
     let store = store_for(context);
     blocking(move || {
-        if open_only {
-            store.open_request(&id)
-        } else {
-            store
+        match need {
+            Need::Open => store.open_request(&id),
+            Need::Keepable => store.keepable_request(&id),
+            Need::Any => store
                 .get(&id)
-                .and_then(|found| found.ok_or_else(|| format!("There is no review request {id}.")))
+                .and_then(|found| found.ok_or_else(|| format!("There is no review request {id}."))),
         }
         .map_err(message_error)
     })
     .await
+}
+
+/// The computer a fork was forked from, from its fork-time record.
+pub(super) async fn fork_source(
+    context: &HandlerContext,
+    fork_id: &str,
+) -> Result<Option<String>, DispatchError> {
+    #[cfg(test)]
+    return Ok(tests_rows::source(fork_id));
+    #[cfg(not(test))]
+    {
+        let manifests = store::production(context.silod_context().runtime_host());
+        let fork = fork_id.to_owned();
+        blocking(move || manifests.source(&fork).map_err(message_error)).await
+    }
+}
+
+/// Refuses a fork that is not a fork of `target` (or, for a folder, the CLI's fork of it):
+/// a request names only computers it may keep into or drop.
+pub(super) async fn verify_fork(
+    context: &HandlerContext,
+    fork_id: &str,
+    target: &str,
+) -> Result<(), DispatchError> {
+    let source = if fold_requests::folder_path(target).is_some() {
+        None
+    } else {
+        fork_source(context, fork_id).await?
+    };
+    let state_dir = context
+        .silod_context()
+        .identity()
+        .channel
+        .state_dir(&context.silod_context().paths().home);
+    fold_requests::check_fork_belongs(fork_id, target, source.as_deref(), &state_dir)
+        .map_err(message_error)
+}
+
+/// Keeps the claim for a job's whole run.
+fn claim(id: &str) -> Result<fold_requests::Claim, DispatchError> {
+    fold_requests::claim(id).map_err(message_error)
+}
+
+/// Marks requests whose keep started and finished kept (see `settle_request`).
+async fn settle(context: &HandlerContext) {
+    let engine = engine_context(context);
+    let _ = blocking(move || {
+        keep_service::settle_all(engine.as_ref());
+        Ok(())
+    })
+    .await;
 }
 
 fn fork_row<'a>(rows: &'a [Row], request: &FoldRequest) -> Option<&'a Row> {
@@ -158,9 +246,10 @@ pub(super) async fn list(
 ) -> Result<HandlerOutput, DispatchError> {
     let params: ChangesRequestsListParams = context.decode_params(params)?;
     let filter = params.status.unwrap_or_default();
+    settle(context).await;
     let store = store_for(context);
     let requests = blocking(move || Ok(store.list_matching(filter))).await?;
-    let computers = all_rows(context).await?;
+    let computers = listing(context).await?.rows;
     let requests = requests
         .into_iter()
         .map(|request| {
@@ -238,11 +327,32 @@ pub(super) async fn show(
     params: &Value,
 ) -> Result<HandlerOutput, DispatchError> {
     let params: RequestIdParams = context.decode_params(params)?;
-    let request = open_request(context, params.request_id, false).await?;
+    let request = open_request(context, params.request_id, Need::Any).await?;
     let computers = all_rows(context).await?;
-    let fork = fork_row(&computers, &request)
-        .cloned()
-        .ok_or_else(|| message_error("The fork of this request no longer exists."))?;
+    let Some(fork) = fork_row(&computers, &request).cloned() else {
+        // A request that was answered stays readable after its fork is gone.
+        if matches!(
+            request.status,
+            FoldRequestStatus::Kept | FoldRequestStatus::ThrownAway
+        ) {
+            let result = ChangesRequestsShowResult {
+                stale: None,
+                review_digest: request.review_digest.clone(),
+                fresh: false,
+                counts: request.counts.clone(),
+                diff: Value::Null,
+                text: request.summary.clone(),
+                credentials: fold_requests::credentials_for(&request.fork_id),
+                fork_name: String::new(),
+                fork_state: "gone".to_owned(),
+                request,
+            };
+            let job_id = begin(context, "changes.requests.show")?;
+            finish(context.silod_context(), job_id.clone(), encode(result));
+            return started(job_id);
+        }
+        return Err(message_error("The fork of this request no longer exists."));
+    };
     if fold_requests::folder_path(&request.target).is_some() {
         // A folder fork's changes are its git commits, which only the CLI reads.
         let result = ChangesRequestsShowResult {
@@ -298,7 +408,9 @@ pub(super) async fn keep(
     params: &Value,
 ) -> Result<HandlerOutput, DispatchError> {
     let params: ChangesRequestsKeepParams = context.decode_params(params)?;
-    let request = open_request(context, params.request_id, true).await?;
+    // One job per request: taken before anything is read, held until the keep job ends.
+    let hold = claim(&params.request_id)?;
+    let request = open_request(context, params.request_id, Need::Keepable).await?;
     fold_requests::check_keepable(&request).map_err(message_error)?;
     let computers = all_rows(context).await?;
     if fork_row(&computers, &request).is_none() {
@@ -306,6 +418,7 @@ pub(super) async fn keep(
             "The fork of this request no longer exists, so there is nothing to keep.",
         ));
     }
+    verify_fork(context, &request.fork_id, &request.target).await?;
     let host = context.silod_context().runtime_host();
     let hooks = params.keep.map(|h| Hooks {
         restart: h.restart,
@@ -324,7 +437,7 @@ pub(super) async fn keep(
     let manifests = store::production(host.clone());
     let id = request.id;
     let job_id = tokio::task::spawn_blocking(move || {
-        keep_service::start_request_keep(host, checkpoints, manifests, keep_request, id)
+        keep_service::start_request_keep(host, checkpoints, manifests, keep_request, id, hold)
     })
     .await
     .map_err(|_| DispatchError::internal("The keep could not start."))?
@@ -338,23 +451,35 @@ fn detached(context: &HandlerContext) -> HandlerContext {
 }
 
 /// Waits for a job another handler started and returns its result.
-async fn wait_for(silod: &SilodContext, job_id: &str) -> Result<Value, String> {
+pub(super) async fn wait_for(
+    silod: &SilodContext,
+    job_id: &str,
+    limit: Duration,
+) -> Result<Value, String> {
+    let deadline = std::time::Instant::now() + limit;
     let id = JobId::new(job_id).map_err(|_| "The engine returned an invalid job id.".to_owned())?;
     let registry = silo_engine::context::EngineContext::job_registry(silod)?;
     loop {
-        let found = registry.get(&id).map_err(|error| error.to_string())?;
-        if let Some(found) = found {
-            if found.state == silo_api::jobs::JobState::Finished {
-                let _ = registry.acknowledge(&id);
-                let outcome = found.outcome.unwrap_or(silo_api::jobs::JobOutcome {
-                    result: None,
-                    error: None,
-                });
-                return match outcome.error {
-                    Some(error) => Err(error.message),
-                    None => Ok(outcome.result.unwrap_or(Value::Null)),
-                };
-            }
+        let found = registry
+            .get(&id)
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| format!("The record of the job {job_id} is gone."))?;
+        if found.state == silo_api::jobs::JobState::Finished {
+            let _ = registry.acknowledge(&id);
+            let outcome = found.outcome.unwrap_or(silo_api::jobs::JobOutcome {
+                result: None,
+                error: None,
+            });
+            return match outcome.error {
+                Some(error) => Err(error.message),
+                None => Ok(outcome.result.unwrap_or(Value::Null)),
+            };
+        }
+        if std::time::Instant::now() >= deadline {
+            return Err(format!(
+                "The job {job_id} did not finish within {} seconds.",
+                limit.as_secs()
+            ));
         }
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
@@ -372,10 +497,17 @@ async fn run_sub_job(
         .as_str()
         .ok_or_else(|| "The engine did not accept the job.".to_owned())?
         .to_owned();
-    wait_for(context.silod_context(), &job_id).await
+    wait_for(context.silod_context(), &job_id, JOB_WAIT).await
 }
 
 const STOP_WAIT: Duration = Duration::from_secs(120);
+/// The longest a stop, delete or start job is waited for.
+const JOB_WAIT: Duration = Duration::from_secs(600);
+/// The longest a started fork is waited for to report running.
+#[cfg(not(test))]
+const RUNNING_WAIT: Duration = Duration::from_secs(120);
+#[cfg(test)]
+const RUNNING_WAIT: Duration = Duration::from_secs(2);
 const DROP_RETRIES: u32 = 10;
 
 /// Stops the fork when it is not stopped, then deletes it, as `silo drop` does.
@@ -423,7 +555,10 @@ pub(super) async fn throw_away(
     params: &Value,
 ) -> Result<HandlerOutput, DispatchError> {
     let params: RequestIdParams = context.decode_params(params)?;
-    let request = open_request(context, params.request_id, true).await?;
+    // One job per request: held until the drop job ends, so a keep cannot start meanwhile.
+    let hold = claim(&params.request_id)?;
+    let request = open_request(context, params.request_id, Need::Open).await?;
+    // A listing that may leave computers out does not show that a fork is gone.
     let computers = all_rows(context).await?;
     let job_id = begin(context, "changes.requests.throwAway")?;
     let Some(fork) = fork_row(&computers, &request).cloned() else {
@@ -441,13 +576,20 @@ pub(super) async fn throw_away(
         finish(context.silod_context(), job_id.clone(), outcome);
         return started(job_id);
     };
-    if let Err(message) = fold_requests::check_throwable(&request, &fork.id, &fork.name) {
+    // Only a fork of the request's target is dropped, however the request was made.
+    let allowed = match verify_fork(context, &fork.id, &request.target).await {
+        Ok(()) => fold_requests::check_throwable(&request, &fork.id, &fork.name),
+        Err(error) => Err(error.message),
+    };
+    if let Err(message) = allowed {
         finish(context.silod_context(), job_id.clone(), Err(message));
         return started(job_id);
     }
     let owned = detached(context);
     let finishing = job_id.clone();
     tokio::spawn(async move {
+        let _hold = hold;
+        let _touch = silo_engine::generation::touch(Some(&fork.id));
         let outcome = match drop_fork(&owned, &fork).await {
             Ok(()) => store_for(&owned)
                 .mark_thrown_away(&request.id)
@@ -487,7 +629,7 @@ pub(super) async fn open(
     params: &Value,
 ) -> Result<HandlerOutput, DispatchError> {
     let params: RequestIdParams = context.decode_params(params)?;
-    let request = open_request(context, params.request_id, true).await?;
+    let request = open_request(context, params.request_id, Need::Open).await?;
     let computers = all_rows(context).await?;
     let fork = fork_row(&computers, &request)
         .cloned()
@@ -504,9 +646,11 @@ pub(super) async fn open(
 
 /// Starts the fork when it is stopped and says how to reach it.
 async fn reach(context: &HandlerContext, request: FoldRequest, fork: Row) -> Result<Value, String> {
+    let _touch = silo_engine::generation::touch(Some(&fork.id));
     let mut state = fork.state.clone();
     let mut started = false;
-    if state != "running" {
+    // Only a stopped fork is started; one that is starting is waited for.
+    if state == "stopped" {
         run_sub_job(
             context,
             MethodName::ComputersStart,
@@ -514,11 +658,25 @@ async fn reach(context: &HandlerContext, request: FoldRequest, fork: Row) -> Res
         )
         .await?;
         started = true;
+    }
+    let begun = std::time::Instant::now();
+    while state != "running" {
         let listed = all_rows(context).await.map_err(|error| error.message)?;
         state = listed
             .iter()
             .find(|row| row.id == fork.id)
-            .map_or_else(|| "running".to_owned(), |row| row.state.clone());
+            .map(|row| row.state.clone())
+            .ok_or_else(|| format!("{} is gone.", fork.name))?;
+        if state != "running" {
+            if begun.elapsed() >= RUNNING_WAIT {
+                return Err(format!(
+                    "{} did not reach running within {} seconds (it is {state}).",
+                    fork.name,
+                    RUNNING_WAIT.as_secs()
+                ));
+            }
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
     }
     let id = fork.id.clone();
     let urls = silo_engine::url_proxy::shared()
@@ -539,19 +697,57 @@ async fn reach(context: &HandlerContext, request: FoldRequest, fork: Row) -> Res
 }
 
 /// The computers the handlers see in a test, where no Linux runtime can list them.
-#[cfg(test)]
 pub(super) mod tests_rows {
     use super::Row;
     use std::sync::Mutex;
 
-    static ROWS: Mutex<Option<Vec<Row>>> = Mutex::new(None);
-
-    pub fn set(rows: Vec<Row>) {
-        *ROWS.lock().unwrap_or_else(|p| p.into_inner()) = Some(rows);
+    struct State {
+        rows: Option<Vec<Row>>,
+        complete: bool,
+        sources: Vec<(String, String)>,
     }
 
-    pub fn get() -> Option<Vec<Row>> {
-        ROWS.lock().unwrap_or_else(|p| p.into_inner()).clone()
+    static STATE: Mutex<State> = Mutex::new(State {
+        rows: None,
+        complete: true,
+        sources: Vec::new(),
+    });
+
+    fn state() -> std::sync::MutexGuard<'static, State> {
+        STATE.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
+    /// The computers, a complete list, and no fork-time records.
+    pub fn set(rows: Vec<Row>) {
+        let mut state = state();
+        state.rows = Some(rows);
+        state.complete = true;
+        state.sources.clear();
+    }
+
+    /// The fork-time source of each `(fork, target)` pair.
+    pub fn set_sources(sources: &[(&str, &str)]) {
+        state().sources = sources
+            .iter()
+            .map(|(fork, target)| ((*fork).to_owned(), (*target).to_owned()))
+            .collect();
+    }
+
+    pub fn set_complete(complete: bool) {
+        state().complete = complete;
+    }
+
+    pub fn get() -> Option<(Vec<Row>, bool)> {
+        let state = state();
+        state.rows.clone().map(|rows| (rows, state.complete))
+    }
+
+    pub fn source(fork: &str) -> Option<String> {
+        state()
+            .sources
+            .iter()
+            .find(|(candidate, _)| candidate == fork)
+            .map(|(_, target)| target.clone())
     }
 }
 

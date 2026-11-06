@@ -915,6 +915,37 @@
       ],
       "type": "object"
     },
+    "ChangesRequestsKeepResult": {
+      "description": "The result of `changes.requests.keep`: the keep's own result and the request after it.\nA refused keep leaves the request open.",
+      "properties": {
+        "refusal": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/KeepRefusal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "report": {
+          "$ref": "#/$defs/KeepReport"
+        },
+        "request": {
+          "$ref": "#/$defs/FoldRequest"
+        },
+        "status": {
+          "description": "`kept` or `refused`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "status",
+        "report",
+        "request"
+      ],
+      "type": "object"
+    },
     "ChangesRequestsListParams": {
       "properties": {
         "status": {
@@ -942,6 +973,126 @@
       },
       "required": [
         "requests"
+      ],
+      "type": "object"
+    },
+    "ChangesRequestsOpenResult": {
+      "properties": {
+        "computerId": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "request": {
+          "$ref": "#/$defs/FoldRequest"
+        },
+        "sshAlias": {
+          "description": "The SSH alias that reaches the fork, when one is set up.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "started": {
+          "description": "Whether this call started the fork.",
+          "type": "boolean"
+        },
+        "state": {
+          "description": "The state after the call: `running` unless the fork could not be started.",
+          "type": "string"
+        },
+        "urls": {
+          "default": [],
+          "description": "The URLs the fork's published ports answer on.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "request",
+        "computerId",
+        "name",
+        "state",
+        "started"
+      ],
+      "type": "object"
+    },
+    "ChangesRequestsShowResult": {
+      "description": "A request, a fresh diff of its fork and the credentials the fork used.",
+      "properties": {
+        "counts": {
+          "additionalProperties": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "description": "The number of changes in each bucket of `diff`.",
+          "type": "object"
+        },
+        "credentials": {
+          "$ref": "#/$defs/CredentialUsage"
+        },
+        "diff": {
+          "description": "The `silo diff --json` document; `null` for a folder fork."
+        },
+        "forkName": {
+          "type": "string"
+        },
+        "forkState": {
+          "type": "string"
+        },
+        "fresh": {
+          "description": "Whether the fork was looked at now (`true`) or the last look was used (the fork\nis stopped).",
+          "type": "boolean"
+        },
+        "request": {
+          "$ref": "#/$defs/FoldRequest"
+        },
+        "reviewDigest": {
+          "description": "The digest of the fork's changes now.",
+          "type": "string"
+        },
+        "stale": {
+          "description": "`true` when the fork's changes differ from the ones the request was made from; a\nkeep of the request refuses. `None` when this cannot be told (a folder fork).",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "text": {
+          "description": "The readable form of `diff`, or the request's own summary for a folder fork.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "request",
+        "forkName",
+        "forkState",
+        "reviewDigest",
+        "fresh",
+        "diff",
+        "text",
+        "counts",
+        "credentials"
+      ],
+      "type": "object"
+    },
+    "ChangesRequestsThrowAwayResult": {
+      "properties": {
+        "dropped": {
+          "description": "The name of the fork that was dropped.",
+          "type": "string"
+        },
+        "request": {
+          "$ref": "#/$defs/FoldRequest"
+        }
+      },
+      "required": [
+        "request",
+        "dropped"
       ],
       "type": "object"
     },
@@ -2412,6 +2563,32 @@
       ],
       "type": "object"
     },
+    "CredentialBlock": {
+      "description": "A request the proxy refused because a secret was not allowed for it.",
+      "properties": {
+        "count": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "host": {
+          "type": "string"
+        },
+        "method": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "host",
+        "method",
+        "count",
+        "reason"
+      ],
+      "type": "object"
+    },
     "CredentialItem": {
       "properties": {
         "computerId": {
@@ -2540,6 +2717,52 @@
           "type": "string"
         }
       ]
+    },
+    "CredentialUsage": {
+      "description": "The credentials a fork's agent used and the ones it was refused.",
+      "properties": {
+        "blocked": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/CredentialBlock"
+          },
+          "type": "array"
+        },
+        "used": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/CredentialUse"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "CredentialUse": {
+      "description": "A secret a fork's agent used: which one, towards which host, and how many times.",
+      "properties": {
+        "count": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "host": {
+          "type": "string"
+        },
+        "method": {
+          "type": "string"
+        },
+        "secret": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "secret",
+        "host",
+        "method",
+        "count"
+      ],
+      "type": "object"
     },
     "CredentialsRepairResult": {
       "description": "`status` is read again after the repair, with Keychain prompts off again.",
@@ -4400,6 +4623,15 @@
             "null"
           ]
         },
+        "keepingSinceMs": {
+          "description": "When a keep of the request started, in milliseconds since the epoch; set while the\nstatus is `keeping`.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "resolvedAt": {
           "description": "When the request was kept or thrown away.",
           "type": [
@@ -4438,6 +4670,11 @@
         {
           "const": "open",
           "description": "Waiting for a review.",
+          "type": "string"
+        },
+        {
+          "const": "keeping",
+          "description": "A keep of it started and has not been recorded as finished.",
           "type": "string"
         },
         {
@@ -6370,6 +6607,18 @@
         "recipe_build": {
           "$ref": "#/$defs/RecipeBuildResult"
         },
+        "requests_keep": {
+          "$ref": "#/$defs/ChangesRequestsKeepResult"
+        },
+        "requests_open": {
+          "$ref": "#/$defs/ChangesRequestsOpenResult"
+        },
+        "requests_show": {
+          "$ref": "#/$defs/ChangesRequestsShowResult"
+        },
+        "requests_throw_away": {
+          "$ref": "#/$defs/ChangesRequestsThrowAwayResult"
+        },
         "storage": {
           "$ref": "#/$defs/StorageState"
         },
@@ -6391,6 +6640,10 @@
         "recipe_build",
         "promote",
         "undo",
+        "requests_keep",
+        "requests_open",
+        "requests_show",
+        "requests_throw_away",
         "desktop",
         "backup",
         "archive_inspection",
@@ -15605,6 +15858,22 @@
     {
       "method": "changes.promote",
       "resultType": "ChangesPromoteResult"
+    },
+    {
+      "method": "changes.requests.keep",
+      "resultType": "ChangesRequestsKeepResult"
+    },
+    {
+      "method": "changes.requests.open",
+      "resultType": "ChangesRequestsOpenResult"
+    },
+    {
+      "method": "changes.requests.show",
+      "resultType": "ChangesRequestsShowResult"
+    },
+    {
+      "method": "changes.requests.throwAway",
+      "resultType": "ChangesRequestsThrowAwayResult"
     },
     {
       "method": "changes.undo",
