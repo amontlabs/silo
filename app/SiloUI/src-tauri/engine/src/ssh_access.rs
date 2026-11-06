@@ -53,17 +53,12 @@ pub struct State {
 struct Listener {
     children: Vec<Child>,
     config: Configuration,
-    /// Sessions are served inside the runtime's `ssh serve`, out of the engine's sight, so
-    /// the computer counts as being changed for as long as one can be open: a warm checkpoint
-    /// taken meanwhile is never reused (see `generation`).
-    _sessions: crate::generation::Touch,
 }
 impl Listener {
     fn new(config: &Configuration) -> Self {
         Self {
             children: vec![],
             config: config.clone(),
-            _sessions: crate::generation::touch(Some(&config.computer_id)),
         }
     }
 }
@@ -1162,23 +1157,23 @@ mod tests {
         assert!(!owned.still_stopped(&c, now));
     }
     #[test]
-    fn a_warm_checkpoint_is_not_reused_while_a_listener_can_serve_sessions() {
+    fn a_listener_with_no_session_leaves_warm_checkpoints_reusable() {
         use crate::generation;
         let mut c = config();
         c.computer_id = "00000000-0000-4000-8000-0000000000aa".into();
         let id = c.computer_id.clone();
         let before = generation::generation(&id);
         let listener = Listener::new(&c);
-        assert!(generation::generation(&id) > before);
-        assert!(!generation::idle(&id));
-        // A capture taken while sessions can be open records no generation, so no fork reuses it.
+        assert_eq!(generation::generation(&id), before);
+        assert!(generation::idle(&id));
         generation::note_warm_job("job:ssh-access-warm", generation::warm_baseline(&id));
         generation::job_finished("job:ssh-access-warm", Some("cp-ssh-access-warm"));
-        assert_eq!(generation::warm_generation("cp-ssh-access-warm"), None);
-        let during = generation::generation(&id);
+        assert_eq!(
+            generation::warm_generation("cp-ssh-access-warm"),
+            Some(before)
+        );
         drop(listener);
-        assert!(generation::idle(&id));
-        assert!(generation::generation(&id) > during);
+        assert_eq!(generation::generation(&id), before);
     }
     #[test]
     fn each_reported_session_keeps_the_computer_in_flight_until_it_closes() {
