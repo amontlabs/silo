@@ -651,6 +651,45 @@ const BUILT_IN: &[(&str, &str)] = &[
         "linux-dev",
         "os: linux\npackages:\n  apt: [build-essential, jq, ripgrep]\n",
     ),
+    // Resident agents: the install lines come from each project's own docs (see
+    // SiloUI-CLI.md, "Resident agents"). Lines marked CONFIRM are not in those docs and the
+    // owner checks them before relying on them.
+    (
+        "openclaw",
+        concat!(
+            "os: linux\n",
+            "packages:\n",
+            "  apt: [build-essential, ca-certificates, curl, git, jq, ripgrep]\n",
+            "setup:\n",
+            "  # https://docs.openclaw.ai/install (installer script; --no-onboard skips the prompts)\n",
+            "  - curl -fsSL https://openclaw.ai/install.sh | bash -s -- --no-onboard\n",
+            "services:\n",
+            "  # CONFIRM: the foreground gateway command; docs.openclaw.ai/linux documents the systemd user unit instead\n",
+            "  openclaw-gateway: openclaw gateway\n",
+            "# CONFIRM the process names; a fork stops the gateway so it does not answer chat channels twice\n",
+            "quiet: [openclaw-gateway, openclaw]\n",
+            "# credentials/ is the folder Silo already keeps out of reviews; CONFIRM where channel logins live\n",
+            "scrub: [~/.openclaw/credentials]\n",
+        ),
+    ),
+    (
+        "hermes",
+        concat!(
+            "os: linux\n",
+            "packages:\n",
+            "  apt: [build-essential, ca-certificates, curl, git, jq, ripgrep]\n",
+            "setup:\n",
+            "  # https://github.com/NousResearch/hermes-agent (README: Linux, macOS, WSL2)\n",
+            "  - curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash\n",
+            "services:\n",
+            "  # README: `hermes gateway` starts the messaging gateway\n",
+            "  hermes-gateway: hermes gateway\n",
+            "# CONFIRM the process names; Hermes also has a built-in cron scheduler that the gateway runs\n",
+            "quiet: [hermes-gateway, hermes]\n",
+            "# CONFIRM: ~/.hermes is the install folder; the README does not say where API keys live\n",
+            "scrub: [~/.hermes/.env]\n",
+        ),
+    ),
     (
         "macos-xcode",
         "os: macos\nsetup:\n  - xcode-select -p\n  - xcodebuild -version\n",
@@ -780,6 +819,30 @@ mod tests {
         assert_eq!(recipe.keep.restart, ["web"]);
         assert_eq!(recipe.keep.migrate, ["make migrate"]);
         assert_eq!(recipe.keep.after, ["make test"]);
+    }
+
+    #[test]
+    fn resident_agent_recipes_are_valid_and_quiet_their_gateway() {
+        for (name, program, token_path) in [
+            ("openclaw", "openclaw", "~/.openclaw/credentials"),
+            ("hermes", "hermes", "~/.hermes/.env"),
+        ] {
+            let recipe = built_in(name).unwrap();
+            let service = format!("{program}-gateway");
+            assert!(
+                recipe.quiet.contains(&service),
+                "{name}: {:?}",
+                recipe.quiet
+            );
+            assert!(recipe.quiet.iter().any(|entry| entry == program), "{name}");
+            assert!(recipe.scrub.iter().any(|path| path == token_path), "{name}");
+            assert!(recipe.services.contains_key(&service), "{name}");
+            assert!(
+                recipe.setup.iter().any(|line| line.contains("install.sh")),
+                "{name}"
+            );
+            assert!(built_in_names().contains(&name));
+        }
     }
 
     #[test]

@@ -53,6 +53,7 @@ Built-in recipes, minimal on purpose:
 | Name | What it is |
 | --- | --- |
 | `linux-dev` | Linux with `build-essential`, `jq` and `ripgrep` |
+| `openclaw`, `hermes` | Linux with the agent installed and its gateway started as a service; `quiet:` and `scrub:` set for a fork ([resident agents](SiloUI-CLI.md#resident-agents)) |
 | `macos-xcode` | macOS that must already have Xcode: the build runs `xcode-select -p` and `xcodebuild -version`, and fails if they do not |
 
 ## Build and cache

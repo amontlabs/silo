@@ -373,6 +373,39 @@ When `silo.yaml` exists, `--secret` accepts only names in `fork_secrets`. `silo 
 gets the named secrets (`github` gives read-only GitHub access) and the recipe's `quiet:` and
 `scrub:` lists; with neither, the fork gets none of the credentials Silo manages.
 
+## Resident agents
+
+`openclaw` and `hermes` are built-in recipes for an agent that lives inside `main` and keeps
+running there. Each installs the agent with its own installer, starts its messaging gateway as a
+service, and lists that gateway under `quiet:` and its token file under `scrub:`, so a fork of
+`main` does not answer the same chat channels a second time or carry the agent's credentials.
+
+| Recipe | Install step | Source |
+| --- | --- | --- |
+| `openclaw` | `curl -fsSL https://openclaw.ai/install.sh \| bash -s -- --no-onboard` | [docs.openclaw.ai/install](https://docs.openclaw.ai/install) |
+| `hermes` | `curl -fsSL https://hermes-agent.nousresearch.com/install.sh \| bash` | [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent) |
+
+Set up, from the project folder, on the Mac:
+
+```sh
+silo up --recipe openclaw      # or hermes: builds main, starts it, makes ssh main.silo work
+ssh main.silo                  # the agent's host harness reaches main this way
+silo guest-client install main --agent openclaw --binary ~/.silo/guest/silo
+```
+
+`silo guest-client install` is a follow-up because it runs on the Mac, against a running
+computer, and needs the guest `silo` binary ([in-guest client](SiloUI-IN-GUEST-CLIENT.md)).
+Onboarding (model keys, chat channel logins) is interactive and happens once in `main` over
+`ssh main.silo`; it is not part of the recipe.
+
+Entries marked `CONFIRM` in the recipe text are not stated in the agents' own docs and are
+unverified: the foreground gateway command (`openclaw gateway`; `hermes gateway` is in the
+Hermes README), the gateway process names that `quiet:` matches, and the credential paths in
+`scrub:` (`~/.openclaw/credentials` is the folder Silo already keeps out of reviews;
+`~/.hermes/.env` is a guess for Hermes). Confirm them against a running install, and copy the
+recipe to `.silo/recipes/<name>.yaml` to change it. Neither recipe sets `keep:` hooks. Hermes
+also has a built-in cron scheduler, which runs inside its gateway and so stops with it.
+
 ## MCP setup
 
 ```sh
