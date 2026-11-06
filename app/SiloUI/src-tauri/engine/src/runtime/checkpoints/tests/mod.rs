@@ -972,7 +972,9 @@ fn a_full_capture_drops_the_guests_cached_entries_first_only_when_a_bridge_folde
             .unwrap();
         if bridge {
             assert!(release.unwrap() < create);
-            assert!(calls[release.unwrap()].windows(2).any(|pair| pair == ["--user", "root"]));
+            assert!(calls[release.unwrap()]
+                .windows(2)
+                .any(|pair| pair == ["--user", "root"]));
         } else {
             assert!(release.is_none());
         }

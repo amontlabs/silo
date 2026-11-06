@@ -501,20 +501,30 @@ fn the_archive_name_stays_within_the_limit_for_any_number_of_collisions_and_an_e
     assert!(!fake.name_in_use(&name), "{name}");
     for empty in ["", "---"] {
         let name = super::archive_name(&*fake, empty);
-        assert!(name.len() <= 32 && !name.starts_with('-') && name.contains("-before-"), "{name}");
+        assert!(
+            name.len() <= 32 && !name.starts_with('-') && name.contains("-before-"),
+            "{name}"
+        );
     }
 }
 
 #[test]
 fn the_archive_name_of_a_long_name_is_still_a_valid_computer_name() {
     let fake = Fake::new(Os::Linux);
-    for name in ["e2e-p5fix-main", "a-computer-with-a-name-of-exactly-32", "x--------------------------------"] {
+    for name in [
+        "e2e-p5fix-main",
+        "a-computer-with-a-name-of-exactly-32",
+        "x--------------------------------",
+    ] {
         let archive = super::archive_name(&*fake, name);
         assert!(archive.len() <= 32, "{archive}");
         assert!(archive.ends_with("-before-20261105-1432"), "{archive}");
         assert!(!archive.starts_with('-'), "{archive}");
     }
-    assert_eq!(super::archive_name(&*fake, "main"), "main-before-20261105-1432");
+    assert_eq!(
+        super::archive_name(&*fake, "main"),
+        "main-before-20261105-1432"
+    );
 }
 
 #[test]
