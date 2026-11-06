@@ -1129,37 +1129,40 @@ pub fn render_host(value: &Value) -> String {
                 .join(" and ")
         })
         .unwrap_or_default();
-    out.push(format!(
-        "Computers: {kinds} ({})",
-        value["vm"]["detail"].as_str().unwrap_or_default()
-    ));
-    if value["vm"]["ok"] == false {
-        out.push("  This machine cannot run computers yet.".to_owned());
-    }
-    let service = &value["service"];
-    let mut line = format!(
-        "Engine service: {}",
-        service["status"].as_str().unwrap_or("unknown")
-    );
-    if let Some(state) = service["state"].as_str() {
-        line.push_str(&format!(", {state}"));
-    }
-    if let Some(linger) = service["linger"].as_str() {
-        line.push_str(&format!(
-            ", starts at boot: {}",
-            if linger == "yes" {
-                "yes"
-            } else {
-                "no (lingering is off)"
-            }
+    // `silo host revoke` reports keys only.
+    if value.get("vm").is_some() {
+        out.push(format!(
+            "Computers: {kinds} ({})",
+            value["vm"]["detail"].as_str().unwrap_or_default()
         ));
-    }
-    out.push(line);
-    if let Some(unit) = service["unit"].as_str() {
-        out.push(format!("  unit: {unit}"));
-    }
-    if let Some(error) = service["error"].as_str() {
-        out.push(format!("  {error}"));
+        if value["vm"]["ok"] == false {
+            out.push("  This machine cannot run computers yet.".to_owned());
+        }
+        let service = &value["service"];
+        let mut line = format!(
+            "Engine service: {}",
+            service["status"].as_str().unwrap_or("unknown")
+        );
+        if let Some(state) = service["state"].as_str() {
+            line.push_str(&format!(", {state}"));
+        }
+        if let Some(linger) = service["linger"].as_str() {
+            line.push_str(&format!(
+                ", starts at boot: {}",
+                if linger == "yes" {
+                    "yes"
+                } else {
+                    "no (lingering is off)"
+                }
+            ));
+        }
+        out.push(line);
+        if let Some(unit) = service["unit"].as_str() {
+            out.push(format!("  unit: {unit}"));
+        }
+        if let Some(error) = service["error"].as_str() {
+            out.push(format!("  {error}"));
+        }
     }
     if value["engine"]["running"] == false {
         out.push("Engine: not running".to_owned());

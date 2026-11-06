@@ -455,6 +455,7 @@ async fn revoke_removes_the_key_and_lists_what_is_left() {
     let text = hosts::render_host(&value);
     assert!(!text.contains("Revoked"), "{text}");
     assert!(text.contains("Not authorized here"), "{text}");
+    assert!(!text.contains("Engine service"), "{text}");
 }
 
 #[tokio::test]
