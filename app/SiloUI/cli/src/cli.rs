@@ -148,6 +148,12 @@ pub enum Command {
     /// Install, remove or read the token a computer's own agent uses (`silo --in-guest`).
     #[command(subcommand)]
     GuestClient(GuestClientCommand),
+    /// Prepare this machine to host computers that other devices manage, or show its state.
+    #[command(subcommand)]
+    Host(crate::hosts::HostCommand),
+    /// Add, list or remove the devices whose computers this one manages (Connections).
+    #[command(subcommand)]
+    Devices(crate::hosts::DevicesCommand),
     /// Wait for a job that is already running, by id.
     Job { id: String },
     /// Serve the MCP tools on stdio.
@@ -469,6 +475,9 @@ pub async fn run(cli: Cli, working_directory: &Path) -> Result<i32, CliError> {
         crate::mcp::serve(socket, working_directory.to_owned(), cli.agent.clone()).await?;
         return Ok(0);
     }
+    if matches!(cli.command, Command::Host(_) | Command::Devices(_)) {
+        return run_connections(cli, socket).await;
+    }
     let project = Project::discover(working_directory);
     // Read before connecting so a bad file is reported without the engine.
     let settings = project.load_settings(cli.agent.as_deref())?;
@@ -568,6 +577,74 @@ pub async fn run(cli: Cli, working_directory: &Path) -> Result<i32, CliError> {
             Ok(130)
         }
     }
+}
+
+/// `silo host` and `silo devices`: this machine's own Connections, never another device's.
+async fn run_connections(cli: Cli, socket: PathBuf) -> Result<i32, CliError> {
+    use crate::hosts::{self, DevicesCommand, HostCommand};
+    if cli.device.is_some() {
+        return Err(CliError::new(
+            "silo host and silo devices work on this device, so --device cannot be used with them.",
+        ));
+    }
+    let json = cli.json;
+    match cli.command {
+        Command::Host(HostCommand::Init { authorize }) => {
+            let setup = hosts::HostSetup::detect(socket, build_channel())?;
+            emit(
+                json,
+                &hosts::init(&setup, &authorize).await?,
+                hosts::render_host,
+            );
+        }
+        Command::Host(HostCommand::Status) => {
+            let setup = hosts::HostSetup::detect(socket, build_channel())?;
+            emit(json, &hosts::status(&setup).await?, hosts::render_host);
+        }
+        Command::Host(HostCommand::Revoke { key }) => {
+            let engine = Engine::connect(&socket).await?;
+            emit(
+                json,
+                &hosts::revoke(&engine, &key).await?,
+                hosts::render_host,
+            );
+        }
+        Command::Devices(command) => {
+            let engine = Engine::connect(&socket).await?;
+            match command {
+                DevicesCommand::Add { address, replace } => {
+                    let value = hosts::add_device(
+                        &engine,
+                        &address,
+                        replace,
+                        &hosts::SystemTerminal,
+                        &stderr_progress,
+                    )
+                    .await?;
+                    emit(json, &value, hosts::render_added);
+                }
+                DevicesCommand::List => emit(
+                    json,
+                    &hosts::list_devices(&engine).await?,
+                    hosts::render_devices,
+                ),
+                DevicesCommand::Remove { device } => {
+                    let value = hosts::remove_device(&engine, &device).await?;
+                    emit(json, &value, |value| {
+                        format!(
+                            "Removed {}; its key was revoked there.",
+                            value["removed"].as_str().unwrap_or_default()
+                        )
+                    });
+                }
+                DevicesCommand::Key => {
+                    emit(json, &hosts::own_key(&engine).await?, hosts::render_key)
+                }
+            }
+        }
+        _ => unreachable!("only host and devices commands come here"),
+    }
+    Ok(0)
 }
 
 /// The commands that work on this device's own files, ports, SSH names or secrets.
@@ -1010,7 +1087,9 @@ async fn dispatch(
                 serde_json::to_string_pretty(v).unwrap_or_default()
             });
         }
-        Command::Mcp | Command::GuestClient(_) => unreachable!("handled above"),
+        Command::Mcp | Command::GuestClient(_) | Command::Host(_) | Command::Devices(_) => {
+            unreachable!("handled above")
+        }
     }
     Ok(0)
 }

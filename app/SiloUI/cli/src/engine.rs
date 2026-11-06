@@ -687,7 +687,7 @@ pub fn pick_device(listed: &Value, name: &str) -> Result<String, CliError> {
     }
     let known: Vec<_> = devices.iter().map(|device| device.1.as_str()).collect();
     Err(CliError::new(if known.is_empty() {
-        format!("No device is called {name}: this device has no connections. Add one in Silo.")
+        format!("No device is called {name}: this device has no connections. Add one with silo devices add <user@host>.")
     } else {
         format!(
             "No device is called {name}. Connected devices: {}.",
