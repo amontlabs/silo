@@ -19,6 +19,8 @@ pub mod dispatcher;
 pub mod framing;
 pub mod guest_bridge;
 pub mod identity;
+#[cfg(target_os = "linux")]
+pub mod install_trust;
 pub mod manifest;
 pub mod methods;
 pub mod ownership;
