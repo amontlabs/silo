@@ -140,7 +140,6 @@ fn main() {
             "open_review_request",
             "list_computer_steps",
             "read_computer_tree",
-            "read_computer_credentials",
             "remote_checkpoint_action",
             "list_computer_directory",
             "choose_upload_files",

@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event"
 import { afterEach, expect, it, vi } from "vitest"
 import { toast } from "sonner"
 import { Toaster } from "@/components/ui/sonner"
+import { TooltipProvider } from "@/components/ui/tooltip"
 import { SettingsProvider } from "@/features/preferences/settings-store"
 import { fixtureComputerSteps, fixtureComputerTree } from "@/fixtures/computer-steps"
 import { StepsPanel, noCheckpointReason, type StepsActions } from "./steps-panel"
@@ -13,7 +14,7 @@ const computer = { configuration: { id: "vm-dev", name: "dev" } }
 afterEach(() => { toast.dismiss() })
 
 function renderPanel(actions: StepsActions, disabled = false) {
-  return render(<SettingsProvider initialSettings={{ theme: "light" }}><Toaster /><StepsPanel computer={computer} target="dev" actions={actions} disabled={disabled} /></SettingsProvider>)
+  return render(<SettingsProvider initialSettings={{ theme: "light" }}><Toaster /><TooltipProvider><StepsPanel computer={computer} target="dev" actions={actions} disabled={disabled} /></TooltipProvider></SettingsProvider>)
 }
 
 it("lists steps newest first with command, exit code and checkpoint", async () => {
@@ -48,7 +49,7 @@ it("disables the fork action with a reason when the step has no checkpoint", asy
   await screen.findByText(/#3 git status/)
   const button = screen.getByRole("button", { name: "Fork from step 3" })
   expect((button as HTMLButtonElement).disabled).toBe(true)
-  expect(button.parentElement?.getAttribute("title")).toBe(noCheckpointReason)
+  expect(button.parentElement).toHaveAttribute("aria-label", noCheckpointReason)
   expect((screen.getByRole("button", { name: "Fork from step 1" }) as HTMLButtonElement).disabled).toBe(false)
 })
 

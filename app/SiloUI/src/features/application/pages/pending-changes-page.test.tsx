@@ -18,7 +18,7 @@ it("lists the requests of every device with target, device, counts and status", 
   const login = screen.getByRole("button", { name: "login-fix" }).closest("[data-slot='list-row-content']") as HTMLElement
   expect(login).toHaveTextContent("into main")
   expect(login).toHaveTextContent("This device")
-  expect(login).toHaveTextContent("2 added · 5 modified · 1 removed")
+  expect(login).toHaveTextContent("2 code · 1 packages · 1 settings")
   const remote = screen.getByRole("button", { name: "cache-tune" }).closest("[data-slot='list-row-content']") as HTMLElement
   expect(remote).toHaveTextContent("Mac mini")
   expect(remote).toHaveTextContent("No changes")
@@ -49,7 +49,7 @@ it("opens the review from a row, names the device, and goes back to a refreshed 
   const user = userEvent.setup()
   const load = vi.fn(fixtureListReviewRequests)
   render(<PendingChangesPage listReviewRequests={load} reviewActions={createReviewRequestFixtureActions()} />)
-  await user.click(await screen.findByText(/2 added/))
+  await user.click(await screen.findByText(/2 code/))
   expect(await screen.findByText("login-fix → main")).toBeInTheDocument()
   expect(screen.queryByLabelText("Pending changes")).toBeNull()
   await user.click(screen.getByRole("button", { name: "Back" }))
@@ -89,6 +89,6 @@ it("polls, backs off while reads fail, keeps the last list, and recovers", async
 
 it("caps the backoff and summarizes buckets", () => {
   expect([0, 1, 2, 10].map(pendingChangesDelay)).toEqual([5_000, 10_000, 20_000, 60_000])
-  expect(bucketSummary({ added: 1, removed: 0 })).toBe("1 added")
+  expect(bucketSummary({ code: 1, packages: 0, settings: 2 })).toBe("1 code · 2 settings & files")
   expect(bucketSummary({})).toBe("No changes")
 })

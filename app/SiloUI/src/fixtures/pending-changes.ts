@@ -6,14 +6,14 @@ export const fixtureReviewRequests: RequestList = requestListSchema.parse({
     {
       request: {
         id: "req-login-fix", forkId: "fork-login-fix", target: "main", createdAt: "2026-09-03T09:12:00Z",
-        summary: "Fix the login redirect", status: "open", counts: { added: 2, modified: 5, removed: 1 },
+        summary: "Fix the login redirect", status: "open", counts: { code: 2, packages: 1, settings: 1 },
       },
       forkName: "login-fix", forkState: "running", targetName: "main",
     },
     {
       request: {
         id: "req-docs-pass", forkId: "fork-docs-pass", target: "main", createdAt: "2026-09-02T16:40:00Z",
-        summary: "Rewrite the setup guide", status: "keeping", counts: { modified: 3 },
+        summary: "Rewrite the setup guide", status: "keeping", counts: { code: 3 },
       },
       forkName: "docs-pass", forkState: "stopped", targetName: "main",
     },

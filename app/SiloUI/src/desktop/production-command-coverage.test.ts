@@ -4,7 +4,7 @@ import type { BackupState } from "@/features/application/model/backup-source"
 import { remoteComputerTarget } from "@/features/application/model/connections"
 import { assertNativeBridgeMocksHandled, nativeBridgeMock, type NativeCommandHandlers } from "@/test/native-bridge-mock"
 import contracts from "@/test/contracts/review-requests.json"
-import { createProductionSource, keepReviewRequest, listComputerSteps, listReviewRequests, openReviewRequest, readComputerCredentials, readComputerTree, showReviewRequest, throwAwayReviewRequest, type ProductionBridge } from "./production-source"
+import { createProductionSource, keepReviewRequest, listComputerSteps, listReviewRequests, openReviewRequest, readComputerTree, showReviewRequest, throwAwayReviewRequest, type ProductionBridge } from "./production-source"
 
 afterEach(assertNativeBridgeMocksHandled)
 
@@ -400,17 +400,14 @@ describe("review request commands", () => {
     ])
   })
 
-  it("reads steps, the tree and credentials", async () => {
+  it("reads steps and the tree", async () => {
     const native = bridge({
       list_computer_steps: () => fixtures.steps,
       read_computer_tree: () => fixtures.tree,
-      read_computer_credentials: () => fixtures.credentials,
     })
     expect((await listComputerSteps("fork-1", undefined, native)).map(step => [step.number, step.exitCode, step.parentStep])).toEqual([[1, 0, undefined], [2, undefined, 1]])
     const nodes = await readComputerTree(undefined, native)
     expect(nodes[1]).toMatchObject({ parent: "main-1", from: { kind: "step", number: 2 }, pendingChanges: { requestId: "req-1" } })
-    expect((await readComputerCredentials("fork-1", { since: 5 }, native)).used).toHaveLength(1)
-    expect(native.invoke.mock.calls[2]).toEqual(["read_computer_credentials", { computerId: "fork-1", since: 5 }])
   })
 
   it("keeps a refused keep and tolerates rows and origins it cannot read", async () => {

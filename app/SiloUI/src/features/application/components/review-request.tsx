@@ -5,6 +5,9 @@ import { Button } from "@/components/ui/button"
 import { formatAbsoluteTime } from "@/lib/relative-time"
 import { keepReviewRequest, openReviewRequest, showReviewRequest, throwAwayReviewRequest } from "@/desktop/production-source"
 import type { KeepRequestResult, OpenRequestResult, RequestDetail } from "@/desktop/production-schemas"
+import { CopyButton } from "@/components/copy-button"
+import { statusLabels } from "@/features/application/model/use-pending-changes"
+import { errorMessage } from "@/lib/error-message"
 import { BucketCounts, CredentialsUsed } from "./review-request-parts"
 
 export type ReviewRequestActions = {
@@ -15,15 +18,16 @@ export type ReviewRequestActions = {
 }
 const productionActions: ReviewRequestActions = { show: showReviewRequest, keep: keepReviewRequest, throwAway: throwAwayReviewRequest, open: openReviewRequest }
 
-export const staleReason = "The fork or its target changed since this request was made. Refresh to review the current changes before keeping."
-const message = (error: unknown) => error instanceof Error ? error.message : String(error)
+export const staleReason = "This request no longer matches the fork's current changes. Throw it away; the agent can request again."
 
 /** One review request: what the fork changed, the credentials it used, and Keep, Throw away and Open fork. */
-export function ReviewRequest({ requestId, deviceId, deviceName, onBack, onClose, actions = productionActions }: {
+export function ReviewRequest({ requestId, deviceId, deviceName, targetName, onBack, onClose, actions = productionActions }: {
   requestId: string
   deviceId?: string
   /** Shown in the header instead of the device id. */
   deviceName?: string
+  /** Shown in the header instead of the request's target id. */
+  targetName?: string
   /** Called from the Back button. */
   onClose?: () => void
   /** Called after the fork is thrown away. */
@@ -44,19 +48,20 @@ export function ReviewRequest({ requestId, deviceId, deviceName, onBack, onClose
     let current = true
     actions.show({ requestId, deviceId }).then(
       next => { if (current) setDetail(next) },
-      error => { if (current) setLoadError(message(error)) },
+      error => { if (current) setLoadError(errorMessage(error)) },
     )
     return () => { current = false }
   }, [requestId, deviceId, reload, actions])
 
   async function run(work: () => Promise<void>) {
     setBusy(true); setActionError(null)
-    try { await work() } catch (error) { setActionError(message(error)) } finally { setBusy(false) }
+    try { await work() } catch (error) { setActionError(errorMessage(error)) } finally { setBusy(false) }
   }
   const keep = (dataOk?: boolean) => run(async () => {
     setDataConfirm(false)
     const result = await actions.keep(dataOk ? { ...target, dataOk } : target)
     setKept(result)
+    if (!result.refusal) setReload(value => value + 1)
   })
   const throwAway = () => run(async () => { await actions.throwAway(target); onBack?.() })
   const open = () => run(async () => { setOpened(await actions.open(target)) })
@@ -71,30 +76,34 @@ export function ReviewRequest({ requestId, deviceId, deviceName, onBack, onClose
   }
   if (!detail) return <PageContainer><p role="status" className="text-sm text-muted-foreground">Loading request…</p></PageContainer>
 
-  const { request } = detail
   const refusal = kept?.refusal
   const keptNow = kept && !refusal ? kept : null
+  const request = keptNow?.request ?? detail.request
+  const targetLabel = targetName ?? request.target
+  const resolved = request.status !== "open"
   const stale = detail.stale === true
-  const keepDisabledReason = stale ? staleReason : request.status !== "open" ? `This request is ${request.status}.` : keptNow ? "Already kept." : undefined
-  const subtitle = [deviceId ? `on ${deviceName ?? deviceId}` : "this device", `created ${formatAbsoluteTime(request.createdAt)}`, request.status].join(" · ")
+  const keepDisabledReason = stale ? staleReason : resolved ? `This request is ${statusLabels[request.status].toLowerCase()}.` : keptNow ? "Already kept." : undefined
+  const subtitle = [deviceId ? `on ${deviceName ?? deviceId}` : "this device", `created ${formatAbsoluteTime(request.createdAt)}`, statusLabels[request.status]].join(" · ")
 
   return (
     <PageContainer className="grid gap-4">
-      <PageHeader title={`${detail.forkName} → ${request.target}`} subtitle={subtitle} actions={
+      <PageHeader title={`${detail.forkName} → ${targetLabel}`} subtitle={subtitle} actions={
         <div className="flex flex-wrap gap-2">
           {onClose && <Button variant="ghost" size="sm" onClick={onClose}>Back</Button>}
-          <Button variant="outline" size="sm" disabled={busy} onClick={open}>Open fork</Button>
+          <Button variant="outline" size="sm" disabled={busy || request.status === "thrown-away"} onClick={open}>Open fork</Button>
           <ConfirmPopover title={`Throw away ${detail.forkName}?`} description="The fork and its changes are removed. Nothing is kept into the target." confirmLabel="Throw away" tone="destructive" onConfirm={throwAway}>
-            <Button variant="outline" size="sm" disabled={busy}>Throw away</Button>
+            <Button variant="outline" size="sm" disabled={busy || resolved}>Throw away</Button>
           </ConfirmPopover>
-          <Button size="sm" disabled={busy || keepDisabledReason !== undefined} onClick={() => keep()}>Keep</Button>
+          <ConfirmPopover title={`Keep into ${targetLabel}?`} description={`The changes in ${detail.forkName} are carried into ${targetLabel}.`} confirmLabel="Keep" onConfirm={() => keep()}>
+            <Button size="sm" disabled={busy || keepDisabledReason !== undefined}>Keep</Button>
+          </ConfirmPopover>
         </div>
       } />
       {keepDisabledReason && <p role={stale ? "alert" : undefined} className="text-caption text-muted-foreground">{stale ? `Stale: ${keepDisabledReason}` : keepDisabledReason}</p>}
-      {stale && <Button variant="outline" size="sm" className="w-fit" onClick={() => { setDetail(null); setReload(value => value + 1) }}>Refresh</Button>}
+      {stale && <Button variant="outline" size="sm" className="w-fit" onClick={() => { setDetail(null); setReload(value => value + 1) }}>Reload</Button>}
       {keptNow && (
         <p role="status" className="text-sm">
-          Kept into {keptNow.report.target}. Keep id {keptNow.request.keepId ?? keptNow.report.checkpoint ?? "unknown"}. Undo is available from the computer.
+          Kept into {targetLabel}. Undo with <code>silo undo {targetLabel}</code>.
         </p>
       )}
       {refusal && (
@@ -113,7 +122,12 @@ export function ReviewRequest({ requestId, deviceId, deviceName, onBack, onClose
         <section className="grid gap-1 text-sm" aria-label="Open fork">
           <p>{opened.name} is {opened.started ? "started" : opened.state}.</p>
           {opened.sshAlias && <p>SSH: <code>{opened.sshAlias}</code></p>}
-          {opened.urls.map(url => <p key={url}><a className="underline" href={url} target="_blank" rel="noreferrer">{url}</a></p>)}
+          {opened.urls.map(url => (
+            <p key={url} className="flex items-center gap-2">
+              <code>{url}</code>
+              <CopyButton size="xs" variant="ghost" value={url} labels={{ idle: `Copy ${url}`, copied: "Copied", failed: "Copy failed" }} text={{ idle: "Copy", copied: "Copied", failed: "Copy failed" }} />
+            </p>
+          ))}
         </section>
       )}
       <BucketCounts counts={detail.counts} />
@@ -127,13 +141,14 @@ export function ReviewRequest({ requestId, deviceId, deviceName, onBack, onClose
 }
 
 /** The page slice B renders for `onOpenRequest(requestId, deviceId?)`. */
-export function ReviewRequestPage({ requestId, deviceId, deviceName, onBack, actions }: {
+export function ReviewRequestPage({ requestId, deviceId, deviceName, targetName, onBack, actions }: {
   requestId: string
   deviceId?: string
   deviceName?: string
+  targetName?: string
   /** Returns to the list; also called after the fork is thrown away. */
   onBack?: () => void
   actions?: ReviewRequestActions
 }) {
-  return <ReviewRequest key={`${deviceId ?? ""}:${requestId}`} requestId={requestId} deviceId={deviceId} deviceName={deviceName} onBack={onBack} onClose={onBack} actions={actions} />
+  return <ReviewRequest key={`${deviceId ?? ""}:${requestId}`} requestId={requestId} deviceId={deviceId} deviceName={deviceName} targetName={targetName} onBack={onBack} onClose={onBack} actions={actions} />
 }

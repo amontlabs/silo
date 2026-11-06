@@ -89,7 +89,7 @@
     ]
   },
   "credentials": {
-    "used": [{ "secret": "GITHUB_TOKEN", "host": "api.github.com", "method": "GET", "count": 4 }],
+    "used": [{ "secret": "GITHUB_TOKEN", "host": "api.github.com", "method": "GET", "count": 4, "lastAt": 1793000000000 }],
     "blocked": []
   }
 }

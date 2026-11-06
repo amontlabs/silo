@@ -19,7 +19,7 @@ const text = [
 
 const base = (id: string, forkName: string): RequestDetail => ({
   request: request(id, `${forkName}-id`), forkName, forkState: "running", stale: false, reviewDigest: "d1", fresh: true,
-  diff: null, text, counts: { Code: 1, Packages: 1, "Settings & files": 1 }, credentials: { used: [], blocked: [] },
+  diff: null, text, counts: { code: 1, packages: 1, settings: 1 }, credentials: { used: [], blocked: [] },
 })
 
 /** Three requests for the browser preview: one fresh, one stale, one whose fork was refused credentials. */
@@ -38,7 +38,7 @@ export const reviewRequestFixtures: Record<string, RequestDetail> = {
 /** The ids of the pending changes fixture open the matching requests: same fork names, same ids. */
 Object.assign(reviewRequestFixtures, {
   "req-login-fix": { ...reviewRequestFixtures["req-fresh"], request: request("req-login-fix", "fork-login-fix") },
-  "req-docs-pass": { ...base("req-docs-pass", "docs-pass"), forkState: "stopped", counts: { Code: 3 }, request: { ...request("req-docs-pass", "fork-docs-pass"), status: "keeping" as const } },
+  "req-docs-pass": { ...base("req-docs-pass", "docs-pass"), forkState: "stopped", counts: { code: 3 }, request: { ...request("req-docs-pass", "fork-docs-pass"), status: "keeping" as const } },
   "req-cache-tune": { ...base("req-cache-tune", "cache-tune"), forkState: "stopped", text: "", counts: {} },
 })
 

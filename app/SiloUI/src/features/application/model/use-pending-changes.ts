@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 
-import type { RequestList } from "@/desktop/production-schemas"
+import { errorMessage } from "@/lib/error-message"
+import type { RequestEntry, RequestList } from "@/desktop/production-schemas"
 import type { ApplicationActions } from "./application-source"
 
 /** The normal polling interval, and the ceiling a failing read backs off to. */
@@ -12,9 +13,18 @@ export function pendingChangesDelay(failures: number): number {
   return Math.min(PENDING_CHANGES_INTERVAL_MS * 2 ** failures, PENDING_CHANGES_MAX_INTERVAL_MS)
 }
 
-/** "2 added · 5 modified", in the order the bucket counts arrive; "No changes" when every bucket is empty. */
+/** How a request's status reads in the UI. */
+export const statusLabels: Record<RequestEntry["request"]["status"], string> = {
+  open: "Open", keeping: "Keeping…", kept: "Kept", "thrown-away": "Thrown away",
+}
+
+/** The engine's change buckets and the names the UI shows for them. */
+const bucketLabels: Record<string, string> = { code: "Code", packages: "Packages", settings: "Settings & files", database: "Database", other: "Other" }
+export const bucketLabel = (bucket: string) => bucketLabels[bucket] ?? bucket
+
+/** "2 code · 1 packages", in the order the bucket counts arrive; "No changes" when every bucket is empty. */
 export function bucketSummary(counts: Record<string, number>): string {
-  const parts = Object.entries(counts).filter(([, count]) => count > 0).map(([bucket, count]) => `${count} ${bucket}`)
+  const parts = Object.entries(counts).filter(([, count]) => count > 0).map(([bucket, count]) => `${count} ${bucketLabel(bucket).toLowerCase()}`)
   return parts.length ? parts.join(" · ") : "No changes"
 }
 
@@ -53,7 +63,7 @@ export function usePendingChanges(load: ApplicationActions["listReviewRequests"]
       } catch (cause) {
         if (disposed) return
         failures += 1
-        setError(cause instanceof Error ? cause.message : "Silo could not read the pending changes. Retry; if it fails again, relaunch Silo.")
+        setError(errorMessage(cause, { fallback: "Silo could not read the pending changes. Retry; if it fails again, relaunch Silo." }))
       } finally {
         reading = false
         if (!disposed) {

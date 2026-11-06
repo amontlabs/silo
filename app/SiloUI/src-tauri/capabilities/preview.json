@@ -77,7 +77,6 @@
     "allow-open-review-request",
     "allow-list-computer-steps",
     "allow-read-computer-tree",
-    "allow-read-computer-credentials",
     "allow-remote-checkpoint-action",
     "allow-query-computer-logs",
     "allow-export-computer-logs",

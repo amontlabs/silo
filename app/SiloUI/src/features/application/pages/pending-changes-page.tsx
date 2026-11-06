@@ -7,13 +7,9 @@ import { PageContainer, PageHeader } from "@/components/page"
 import { Button } from "@/components/ui/button"
 import { ReviewRequestPage, type ReviewRequestActions } from "@/features/application/components/review-request"
 import type { RequestEntry } from "@/desktop/production-schemas"
-import { bucketSummary, usePendingChanges } from "@/features/application/model/use-pending-changes"
+import { bucketSummary, statusLabels, usePendingChanges } from "@/features/application/model/use-pending-changes"
 import type { ApplicationActions } from "@/features/application/model/application-source"
 import { formatLocalTimestamp } from "@/lib/format-date"
-
-const statusLabels: Record<RequestEntry["request"]["status"], string> = {
-  open: "Open", keeping: "Keeping…", kept: "Kept", "thrown-away": "Thrown away",
-}
 
 const badgeClass = "inline-flex shrink-0 items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 text-caption font-medium text-muted-foreground"
 
@@ -48,7 +44,7 @@ export function PendingChangesPage({ listReviewRequests, reviewActions, active =
   /** Told when a request is opened, naming the device when it is not this one. */
   onOpenRequest?: (requestId: string, deviceId?: string) => void
 }) {
-  const [opened, setOpened] = useState<{ requestId: string, deviceId?: string, deviceName?: string } | null>(null)
+  const [opened, setOpened] = useState<{ requestId: string, deviceId?: string, deviceName?: string, targetName?: string } | null>(null)
   const { list, error, loading, refresh } = usePendingChanges(listReviewRequests, active && !opened)
   const requests = list?.requests ?? []
   const unreachable = list?.unreachable ?? []
@@ -73,7 +69,7 @@ export function PendingChangesPage({ listReviewRequests, reviewActions, active =
         <ListCard divided aria-label="Pending changes">
           {requests.map(entry => (
             <RequestRow key={`${entry.deviceId ?? ""}:${entry.request.id}`} entry={entry} onOpen={() => {
-              setOpened({ requestId: entry.request.id, deviceId: entry.deviceId, deviceName: entry.deviceName })
+              setOpened({ requestId: entry.request.id, deviceId: entry.deviceId, deviceName: entry.deviceName, targetName: entry.targetName })
               onOpenRequest?.(entry.request.id, entry.deviceId)
             }} />
           ))}

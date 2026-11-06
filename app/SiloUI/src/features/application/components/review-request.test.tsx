@@ -4,6 +4,13 @@ import { expect, it, vi } from "vitest"
 import { createReviewRequestFixtureActions, reviewRequestFixtures } from "@/fixtures/review-requests"
 import { ReviewRequest, staleReason, type ReviewRequestActions } from "./review-request"
 
+async function keepConfirmed() {
+  await userEvent.click(await screen.findByRole("button", { name: "Keep" }))
+  const popover = document.querySelector<HTMLElement>("[data-slot=popover-content]")!
+  expect(popover).toHaveTextContent("Keep into main?")
+  await userEvent.click(within(popover).getByRole("button", { name: "Keep" }))
+}
+
 function setup(requestId: string, overrides: Partial<ReviewRequestActions> = {}, onBack?: () => void) {
   const actions = createReviewRequestFixtureActions(overrides)
   render(<ReviewRequest requestId={requestId} deviceId="dev-2" actions={actions} onBack={onBack} />)
@@ -28,6 +35,12 @@ it("shows loading, then the header, buckets, diff text and credentials", async (
   expect(screen.getByRole("button", { name: "Keep" })).toBeEnabled()
 })
 
+it("names the target and status in the header when the list row knows them", async () => {
+  render(<ReviewRequest requestId="req-fresh" deviceId="dev-2" deviceName="Mac mini" targetName="Main computer" actions={createReviewRequestFixtureActions()} />)
+  expect(await screen.findByText("login-fix → Main computer")).toBeInTheDocument()
+  expect(screen.getByText(/on Mac mini · created .* · Open/)).toBeInTheDocument()
+})
+
 it("shows an error with a retry, and none for credentials", async () => {
   const show = vi.fn().mockRejectedValueOnce(new Error("device offline")).mockImplementation(createReviewRequestFixtureActions().show)
   setup("req-fresh", { show })
@@ -48,20 +61,26 @@ it("disables Keep with the reason when the request is stale", async () => {
   await screen.findByText("billing-fix → main")
   expect(screen.getByRole("button", { name: "Keep" })).toBeDisabled()
   expect(screen.getByRole("alert")).toHaveTextContent(staleReason)
+  expect(staleReason).toMatch(/no longer matches.*request again/)
+  expect(screen.queryByRole("button", { name: "Refresh" })).toBeNull()
+  expect(screen.getByRole("button", { name: "Throw away" })).toBeEnabled()
   expect(keep).not.toHaveBeenCalled()
 })
 
-it("reports a kept request with its keep id and the undo hint", async () => {
+it("reports a kept request with the undo command and disables Keep and Throw away", async () => {
   const keep = vi.fn().mockImplementation(createReviewRequestFixtureActions().keep)
   setup("req-fresh", { keep })
-  await userEvent.click(await screen.findByRole("button", { name: "Keep" }))
-  expect(await screen.findByRole("status")).toHaveTextContent("Keep id cp-before-keep. Undo is available from the computer.")
+  await keepConfirmed()
+  expect(await screen.findByRole("status")).toHaveTextContent("Kept into main. Undo with silo undo main.")
   expect(keep).toHaveBeenCalledWith({ requestId: "req-fresh", deviceId: "dev-2" })
+  expect(screen.getByRole("button", { name: "Throw away" })).toBeDisabled()
+  expect(screen.getByRole("button", { name: "Keep" })).toBeDisabled()
+  expect(screen.getByText(/created .* · Kept/)).toBeInTheDocument()
 })
 
 it("shows a refusal verbatim without offering the data option", async () => {
   setup("req-fresh", { keep: refusal("divergent", "main changed README.md. main was not changed.") })
-  await userEvent.click(await screen.findByRole("button", { name: "Keep" }))
+  await keepConfirmed()
   expect(await screen.findByRole("alert")).toHaveTextContent("main changed README.md. main was not changed.")
   expect(screen.queryByRole("button", { name: "Keep with data changes" })).toBeNull()
 })
@@ -69,7 +88,7 @@ it("shows a refusal verbatim without offering the data option", async () => {
 it("offers dataOk as a second confirmation when the refusal is about data", async () => {
   const keep = refusal("database", "Database changed (postgres app) and no migration covers it. main was not changed.")
   setup("req-fresh", { keep })
-  await userEvent.click(await screen.findByRole("button", { name: "Keep" }))
+  await keepConfirmed()
   await userEvent.click(await screen.findByRole("button", { name: "Keep with data changes" }))
   expect(keep).toHaveBeenCalledTimes(1)
   const popover = document.querySelector<HTMLElement>("[data-slot=popover-content]")!
@@ -95,5 +114,7 @@ it("opens the fork and shows its URLs and SSH name", async () => {
   await userEvent.click(await screen.findByRole("button", { name: "Open fork" }))
   const section = await screen.findByLabelText("Open fork", { selector: "section" })
   expect(section).toHaveTextContent("silo-login-fix")
-  expect(within(section).getByRole("link")).toHaveAttribute("href", "http://login-fix-3000.localhost")
+  expect(within(section).getByText("http://login-fix-3000.localhost")).toBeInTheDocument()
+  expect(within(section).queryByRole("link")).toBeNull()
+  expect(within(section).getByRole("button", { name: "Copy http://login-fix-3000.localhost" })).toBeInTheDocument()
 })

@@ -6,8 +6,8 @@ import { listen } from "@tauri-apps/api/event"
 import { useMemo, useSyncExternalStore } from "react"
 import { z } from "zod"
 import { showOperationFailure } from "@/lib/operation-toast"
-import { computerTreeSchema, credentialUsageSchema, directoryPageShape, githubStateShape, keepRequestResultSchema, openRequestResultSchema, parseApplicationSource, parseBackupState, parseRemoteApplicationSource, requestDetailSchema, requestListSchema, secretShape, stepListSchema, throwAwayResultSchema } from "./production-schemas"
-import type { ComputerStep, ComputerTreeNode, CredentialUsage, KeepRequestResult, OpenRequestResult, RequestDetail, RequestList, ThrowAwayResult } from "./production-schemas"
+import { computerTreeSchema, directoryPageShape, githubStateShape, keepRequestResultSchema, openRequestResultSchema, parseApplicationSource, parseBackupState, parseRemoteApplicationSource, requestDetailSchema, requestListSchema, secretShape, stepListSchema, throwAwayResultSchema } from "./production-schemas"
+import type { ComputerStep, ComputerTreeNode, KeepRequestResult, OpenRequestResult, RequestDetail, RequestList, ThrowAwayResult } from "./production-schemas"
 export { parseApplicationSource, parseBackupState, parseNetworkState, parseRemoteApplicationSource, parseSshAccessState } from "./production-schemas"
 
 import { siloProgressEventSchema, setupComputerConfigurationSchema, type SetupComputerConfiguration, type SiloProgressEvent, type SetupComputerConfigurationRequest, type SetupQueueItemID } from "@/contracts/silo"
@@ -78,11 +78,6 @@ export async function listComputerSteps(computerId: string, deviceId?: string, n
 /** Every computer with what it was forked from and its pending changes. */
 export async function readComputerTree(deviceId?: string, native: ProductionBridge = bridge): Promise<ComputerTreeNode[]> {
   return computerTreeSchema.parse(await native.invoke("read_computer_tree", { deviceId })).nodes
-}
-
-/** The credentials a computer's agent used and the ones it was refused; `since` is epoch milliseconds. */
-export async function readComputerCredentials(computerId: string, options: { deviceId?: string, since?: number } = {}, native: ProductionBridge = bridge): Promise<CredentialUsage> {
-  return credentialUsageSchema.parse(await native.invoke("read_computer_credentials", { computerId, ...options }))
 }
 
 export const localUpdatingNotice = "Computers on this device are updating. They appear here when the update finishes."

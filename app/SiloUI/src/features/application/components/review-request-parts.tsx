@@ -1,5 +1,6 @@
 import { SectionHeading } from "@/components/page"
 import type { CredentialUsage } from "@/desktop/production-schemas"
+import { bucketLabel } from "@/features/application/model/use-pending-changes"
 
 export const credentialsNote = "Forks get none of the credentials Silo manages unless you name them; files on disk are copied."
 
@@ -30,7 +31,7 @@ export function CredentialsUsed({ credentials }: { credentials: CredentialUsage 
   )
 }
 
-/** The count of changes in each bucket, e.g. "code 2". */
+/** The count of changes in each bucket, e.g. "Code 2". */
 export function BucketCounts({ counts }: { counts: Record<string, number> }) {
   const entries = Object.entries(counts)
   return (
@@ -38,7 +39,7 @@ export function BucketCounts({ counts }: { counts: Record<string, number> }) {
       <SectionHeading>Changes</SectionHeading>
       {entries.length === 0 ? <p className="text-sm">No changes</p> : (
         <ul className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
-          {entries.map(([bucket, count]) => <li key={bucket}><span className="text-muted-foreground">{bucket}</span> {count}</li>)}
+          {entries.map(([bucket, count]) => <li key={bucket}><span className="text-muted-foreground">{bucketLabel(bucket)}</span> {count}</li>)}
         </ul>
       )}
     </section>

@@ -3,6 +3,7 @@ import { GitFork, Terminal } from "lucide-react"
 import { SectionHeading } from "@/components/page"
 import { ListCard, ListRow, ListRowIcon } from "@/components/list-row"
 import { Button } from "@/components/ui/button"
+import { DisabledReason } from "./disabled-reason"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { formatAbsoluteTime, formatRelativeTime } from "@/lib/relative-time"
 import { runCheckpointOperation } from "@/features/application/model/checkpoint-operation-toast"
@@ -42,7 +43,7 @@ export function StepsPanel({ computer, target, actions, disabled, takenNames, fo
     if (disabled || !step.checkpointId || !actions.forkCheckpoint) return
     const checkpointId = step.checkpointId
     void runCheckpointOperation({
-      id: `checkpoint:${target}:fork`,
+      id: `step:${target}:${step.number}:fork`,
       kind: "fork",
       target,
       computer: [computer.configuration.name, newName],
@@ -82,9 +83,11 @@ export function StepsPanel({ computer, target, actions, disabled, takenNames, fo
               {" · "}{step.checkpointId ? "Checkpoint saved" : "No checkpoint"}
             </>}
             actions={<Popover open={openStep === step.number} onOpenChange={open => setOpenStep(open ? step.number : null)}>
-              <PopoverTrigger asChild>
-                <span title={reason}><Button size="xs" variant="outline" disabled={disabled || !step.checkpointId || !actions.forkCheckpoint} aria-label={`Fork from step ${step.number}`}><GitFork className="size-3" />Fork from this step</Button></span>
-              </PopoverTrigger>
+              <DisabledReason reason={reason}>
+                <PopoverTrigger asChild>
+                  <Button size="xs" variant="outline" disabled={disabled || !step.checkpointId || !actions.forkCheckpoint} aria-label={`Fork from step ${step.number}`}><GitFork className="size-3" />Fork from this step</Button>
+                </PopoverTrigger>
+              </DisabledReason>
               <PopoverContent align="end" className="w-72">
                 <ForkBody computerName={computer.configuration.name} title={`Fork from step ${step.number}`} description="Creates a new stopped computer with a copy of this computer’s files after this step." disabled={disabled} takenNames={takenNames} onFork={name => fork(step, name)} onClose={() => setOpenStep(null)} />
               </PopoverContent>

@@ -211,7 +211,6 @@ fn main() {
             commands::review_requests::open_review_request,
             commands::review_requests::list_computer_steps,
             commands::review_requests::read_computer_tree,
-            commands::review_requests::read_computer_credentials,
             commands::runtime::read_setup_activity,
             commands::runtime::read_operation_queue,
             commands::runtime::cancel_operation,

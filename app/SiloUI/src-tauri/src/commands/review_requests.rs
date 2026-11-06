@@ -1,9 +1,8 @@
-//! Tauri adapters for review requests: `changes.requests.*`, `steps.list`, `computers.tree`
-//! and `computers.credentials`. Job methods wait for their outcome and return its result.
+//! Tauri adapters for review requests: `changes.requests.*`, `steps.list` and `computers.tree`.
+//! Job methods wait for their outcome and return its result.
 use crate::engine_client::{params::device, Engine, EngineClient, EngineError};
 use serde_json::Value;
 use silo_api::methods::{
-    credentials_used::ComputerCredentialsParams,
     requests,
     review_requests::{
         ChangesRequestsKeepParams, ChangesRequestsListParams, RequestFilter, RequestIdParams,
@@ -103,21 +102,6 @@ pub(crate) async fn tree(
         .await
 }
 
-pub(crate) async fn credentials(
-    engine: &EngineClient,
-    device_id: Option<&str>,
-    computer_id: &str,
-    since: Option<u64>,
-) -> Result<Value, EngineError> {
-    engine
-        .call(requests::computers_credentials(ComputerCredentialsParams {
-            computer_id: computer_id.to_owned(),
-            device_id: device_id.map(str::to_owned),
-            since,
-        }))
-        .await
-}
-
 #[tauri::command]
 pub(crate) async fn list_review_requests(
     engine: Engine<'_>,
@@ -198,18 +182,6 @@ pub(crate) async fn read_computer_tree(
         .map_err(String::from)
 }
 
-#[tauri::command]
-pub(crate) async fn read_computer_credentials(
-    engine: Engine<'_>,
-    computer_id: String,
-    device_id: Option<String>,
-    since: Option<u64>,
-) -> Result<Value, String> {
-    credentials(&engine, device_id.as_deref(), &computer_id, since)
-        .await
-        .map_err(String::from)
-}
-
 #[cfg(test)]
 mod forwarding_tests {
     use super::*;
@@ -245,7 +217,6 @@ mod forwarding_tests {
         list(&engine, all, None, true).await.unwrap();
         steps(&engine, Some("d2"), DEV).await.unwrap();
         tree(&engine, None).await.unwrap();
-        credentials(&engine, None, DEV, Some(7)).await.unwrap();
         assert_eq!(
             fake.calls(MethodName::ChangesRequestsList),
             vec![json!({"status": "all", "allDevices": true})]
@@ -255,10 +226,6 @@ mod forwarding_tests {
             vec![json!({"deviceId": "d2", "computerId": DEV})]
         );
         assert_eq!(fake.calls(MethodName::ComputersTree), vec![json!({})]);
-        assert_eq!(
-            fake.calls(MethodName::ComputersCredentials),
-            vec![json!({"computerId": DEV, "since": 7})]
-        );
     }
 
     #[tokio::test]
@@ -296,7 +263,7 @@ mod forwarding_tests {
 
     #[test]
     fn the_contract_fixtures_are_what_the_typed_results_read() {
-        use silo_api::methods::{review_requests as rr, steps};
+        use silo_api::methods::{credentials_used, review_requests as rr, steps};
         let fixtures: Value = serde_json::from_str(include_str!(
             "../../../src/test/contracts/review-requests.json"
         ))
@@ -338,7 +305,7 @@ mod forwarding_tests {
             2
         );
         assert_eq!(
-            read::<rr::CredentialUsage>(&fixtures, "credentials")
+            read::<credentials_used::CredentialsUsage>(&fixtures, "credentials")
                 .used
                 .len(),
             1
