@@ -144,7 +144,7 @@ jobs:
           '*.md' 'docs/**/*.md' 'app/SiloUI/*.md' 'app/SiloUI/api/**/*.md' 'app/SiloUI/tests/**/*.md'
           'app/SiloUI/docs/**/*.html' 'app/SiloUI/src/**/*.md'
           'app/SiloUI/src-tauri/guest/**/*.md' 'app/SiloUI/src-tauri/macos-gateway/*.md' 'app/SiloUI/.changeset/*.md'
-          'artifacts/**/*.md' 'website/*.md' 'demo/*.md'
+          'artifacts/**/*.md' 'website/*.md' 'demo/*.md' 'silo-action/*.md'
 
   # The engine is embeddable, so it must keep building and passing its tests on a
   # Linux host even though the shipped daemon is macOS only. macOS computers are

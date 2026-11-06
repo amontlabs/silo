@@ -12345,6 +12345,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        not(all(target_os = "macos", target_arch = "aarch64")),
+        ignore = "macOS computers are loaded only on an Apple silicon host"
+    )]
     fn macos_step_retention_keeps_a_checkpoint_a_fork_was_made_from() {
         use checkpoints::{PolicyKind::*, Reason};
         let _test_state = crate::test_support::global_state();
