@@ -1,9 +1,9 @@
 # Section 4 of final_run.sh (sourced): the OpenClaw recipe, resolving the CONFIRM lines of the built-in recipe.
-# main is replaced by an OpenClaw main for this section (dropped first when this run made it).
+# Needs a fresh main made from the openclaw recipe: when main exists the section stops (agents never drop main).
 claw_linux() {
 cd "$PROJ" || return
-echo "== O1 silo up --recipe openclaw (replaces our demo main)"
-if exists main && [ "$MADE_MAIN" = 1 ]; then drop_one main; elif exists main; then blocked "OpenClaw" "main exists and is not ours"; return; fi
+echo "== O1 silo up --recipe openclaw (needs a fresh main)"
+if exists main; then blocked "OpenClaw" "needs a fresh main and main exists; agents do not drop main: the owner drops it, then runs final_run.sh claw"; return; fi
 t0=$(now); "$SILO" up --recipe openclaw > "$RAW/claw-up.out" 2>&1; rc=$?; MADE_MAIN=1
 tail -8 "$RAW/claw-up.out"; check "O1 silo up --recipe openclaw" $rc "$(elapsed "$t0")s, includes the install (not a measurement)"
 [ $rc = 0 ] || { blocked "OpenClaw" "recipe build failed: $(grep -iE 'error|fail' "$RAW/claw-up.out" | head -2 | tr '\n' ' ')"; return; }

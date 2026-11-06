@@ -24,8 +24,8 @@ print(d)" "$1" 2>/dev/null; }
 state() { "$SILO" status "$1" --json 2>/dev/null | jfield state; }
 exists() { "$SILO" status "$1" >/dev/null 2>&1; }
 nvms() { "$SILO" list | awk '$2=="running" && $3=="macos"' | wc -l | tr -d ' '; }
-# drop_all PREFIX-or-names...: stop then drop only e2e-final-* names (and main when we made it)
-drop_one() { local c=$1; case $c in e2e-final-*|main) ;; *) echo "refusing to drop $c"; return 1;; esac
+# drop_one NAME: stop then drop an e2e-final-* computer. Never main: agents may not drop it, the owner does.
+drop_one() { local c=$1; case $c in e2e-final-*) ;; *) echo "refusing to drop $c"; return 1;; esac
   exists "$c" || return 0; "$SILO" stop "$c" >/dev/null 2>&1
   for i in $(seq 20); do "$SILO" drop "$c" --force >/dev/null 2>&1 && return 0; exists "$c" || return 0; sleep 3; done; }
 final_names() { "$SILO" list --json | python3 -c "
