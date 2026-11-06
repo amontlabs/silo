@@ -87,7 +87,7 @@ the engine's message.
 A fork publishes the ports its source publishes (a recipe fork, the recipe's `ports`), each on a host port of its own. The engine does not copy published ports when it forks a computer, so `silo fork` does it with the same `publish` calls. The MCP server has `ports`, `publish`, `unpublish` and `ssh_name` tools.
 | `silo guest-client install <computer> [--binary PATH] [--group G]` / `revoke` / `status` | give a running Linux computer's own agent a scoped token, remove it, or read it; the token carries the agent's `fold` and `fork_secrets` settings ([in-guest client](SiloUI-IN-GUEST-CLIENT.md)) |
 | `silo --in-guest <list\|tree\|status\|fork\|diff\|fold --request\|requests\|steps>` | run inside a computer with its token: fork itself, diff and request review of its forks; never keeps, promotes, undoes or drops |
-| `silo host init [--authorize KEY\|FILE]...` / `silo host status` / `silo host revoke KEY\|FILE` | prepare this machine to host computers for other devices, show how it is set up, or stop accepting a controller's key ([details](#hosting-computers-for-other-devices)) |
+| `silo host init [--authorize KEY\|FILE]...` / `silo host status` / `silo host revoke FINGERPRINT\|KEY\|FILE` | prepare this machine to host computers for other devices, show how it is set up, or stop accepting a controller's key ([details](#hosting-computers-for-other-devices)) |
 | `silo devices add <address> [--host-key FINGERPRINT\|KEY\|FILE] [--replace]` / `list` / `remove <device>` / `key` | connect, list or remove the devices this one manages, or print this device's Silo key ([details](#hosting-computers-for-other-devices)) |
 | `silo job <id>` | wait for a job that is already running |
 | `silo mcp` | serve the MCP tools on stdio |
@@ -306,35 +306,58 @@ On the host, as the account that will own the computers (not root):
    user unit and checks the engine directory the way the engine does
    ([engine guide](SiloUI-ENGINE.md#silod-on-a-linux-host)); its refusals and its lingering
    advice are printed as they are. Without lingering the engine starts at the first login, not
-   at boot (`sudo loginctl enable-linger "$(id -un)"`). Mac: an engine that answers already runs
-   as the login item Silo registered. Otherwise the `Silo Engine.app` inside the app registers
-   its own login item (`silod --service register`, the Service Management path the engine has),
-   and an approval waiting in System Settings > General > Login Items is reported. A Mac login
-   item runs in a logged-in session.
+   at boot (`sudo loginctl enable-linger "$(id -un)"`); `silo host init` runs nothing as root and
+   never turns lingering on itself. Mac: an engine that answers already runs as the login item
+   the app registered; `launchctl print gui/<uid>/<identifier>.engine` (read only) tells whether
+   launchd has that item, and when it has none the advice is to open the app once. When no
+   engine answers, the app that holds this `silo` is opened once in the background
+   (`open -g -j -a <Silo.app>`), so the app registers and starts its own login item, and the
+   engine's socket is awaited for a bounded time (`engine_wait`, 60 s). If it does not answer,
+   the message names System Settings > General > Login Items, where the engine may be off or
+   waiting for approval. The `Silo Engine.app` inside the app never registers a login item of
+   its own: that would be a second registration with the same launchd label. A Mac login item
+   runs in a logged-in session.
 4. **`silo` on PATH.** Linux: `~/.local/bin/silo` (`silo-dev` for a Dev engine) is linked to this
-   `silo` when nothing is there or the link there points at a `silo` with a `silod` beside it, or
-   at one that is gone. Anything else is left alone and reported, and a `~/.local/bin` missing
-   from `PATH` is reported. On a Mac the engine links the app's `silo` itself when it starts, and
+   `silo` when nothing is there, or the link there points at a `silo` with a `silod` beside it,
+   or at a `silo` that is gone from a directory whose name starts with `silo-engine` (an unpacked
+   engine archive that was replaced). Anything else, a link to a missing file elsewhere
+   included, is left alone and reported, and a `~/.local/bin` missing from `PATH` is reported. On a Mac the engine links the app's `silo` itself when it starts, and
    its error, if any, is reported.
 5. **Connections on** (`connections.setEnabled`), which also links the bridge
    `~/.local/bin/silo-remote` that a controller's forced SSH command runs.
 6. **Controller keys.** Each `--authorize` key (`ssh-ed25519 ...`, as `silo devices key` prints it
    on the controller, or a file of such lines) is added to `~/.ssh/authorized_keys` by the engine
-   (`connections.keys.authorize`) with the same restricted line a controller's key setup installs:
-   `restrict,command="exec ~/.local/bin/silo-remote --remote-bridge"` and this channel's
-   comment. The key can only run the bridge. Every key is read before anything changes.
-7. **The address.** It prints the addresses Connections offers (`user@host.local`, the host
+   (`connections.keys.authorize`) with Silo's restricted line:
+   `restrict,command="exec ~/.local/bin/silo-remote --remote-bridge --key SHA256:..."` (the key's
+   own fingerprint) and this channel's comment. The key can only run the bridge. An argument is a
+   key only when it is one (`ssh-ed25519` and a base64 blob that decodes to the type string
+   `ssh-ed25519` and a 32-byte key); anything else is read as a file, every line of which must be
+   such a key. Every key is checked before anything changes, and the engine checks it again.
+   This is an out-of-band key install with the same authority as a paired device's key; keys do
+   not expire, and `authorized_keys` is the only place one is revoked.
+7. **SSH's view of the account.** sshd's `StrictModes` (on by default) ignores
+   `~/.ssh/authorized_keys` when the home or `~/.ssh` can be changed by group or others; that is
+   reported, with the `chmod go-w` that fixes it.
+8. **The address.** It prints the addresses Connections offers (`user@host.local`, the host
    name, Tailscale and other interface addresses) and whether anything answers on port 22.
    Controllers reach the host over SSH: turn on Remote Login on a Mac, or run an SSH server on
    Linux. Use `ssh://user@host:port` for another port.
 
 `silo host status` reads the same things without changing any: VM support, the service
-(`silod --service status`), whether the engine answers, the command link, Connections, the
-bridge link, the controller keys (with their `SHA256:` fingerprints, as `ssh-keygen -lf` prints
-them) and SSH. `silo host revoke KEY|FILE` removes a controller's line
-(`connections.keys.revoke`). `connections.keys.authorize` and `connections.keys.list` are this
-device's own: the Connections bridge does not serve them, so a connected controller cannot add a
-key.
+(`silod --service status` on Linux, with advice when it is not `enabled`; the launchd check
+above on a Mac), whether the engine answers, the command link, Connections, the bridge link, the
+controller keys and SSH. The controller keys are every line of `~/.ssh/authorized_keys` whose
+forced command is this channel's bridge, whatever its other options or comment and whichever
+Silo version or person wrote it, each with its `SHA256:` fingerprint (as `ssh-keygen -lf` prints
+it); a line that is not exactly Silo's current one is marked, and one without `--key` is named
+in the advice. Lines for the same key without the bridge's forced command (a personal login) are
+not listed. `silo host revoke FINGERPRINT|KEY|FILE` removes every bridge line for the key
+(`connections.keys.revoke`) and says which keys had none. `connections.keys.authorize` and
+`connections.keys.list` are this device's own: the Connections bridge does not serve them, so a
+connected controller cannot add a key. Through the bridge, a controller can revoke only the key
+it connected with (see [Connections](SiloUI-CONNECTIONS.md#controller-keys-on-the-host)).
+`silo host` and `silo devices` work on this build's own engine only: they refuse
+`--allow-other-channel` and a `--socket` outside this channel's home.
 
 On the controller:
 
@@ -361,8 +384,11 @@ under the name ssh looks up (`host`, or `[host]:port` off port 22) before connec
 `SHA256:` fingerprint, as `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` prints it on the
 host, is matched against the keys the host offers (`ssh-keyscan`); a key or a `.pub` file is
 taken as given. A fingerprint that matches nothing is refused with the fingerprints the host
-does offer, and a different key already listed for that name is reported, never replaced
-(`ssh-keygen -R`). It does not read `ssh_config`, so for an alias whose `HostName` differs, pin
+does offer, and a different key of that type already listed for that name, found with
+`ssh-keygen -F` (so hashed `|1|` names count), is reported, never replaced (`ssh-keygen -R`); a
+key `known_hosts` marks `@revoked` is refused. The address is checked with the engine's rules
+before `ssh-keyscan` runs. The fingerprint you type is the trust root: Silo checks the host only
+against it. It does not read `ssh_config`, so for an alias whose `HostName` differs, pin
 the key yourself or use the host's name.
 
 When the host accepts no password and none of your keys, authorize this device's key on the
@@ -385,8 +411,11 @@ silo --json devices add ada@build-box:22 --host-key SHA256:... < /dev/null
 removes the host again, cleaning up after a failure.
 
 `silo devices list` shows the saved devices with their last health check, and
-`silo devices remove <device>` removes one (its key is revoked there first, as in the app).
-`silo host` and `silo devices` refuse `--device`.
+`silo devices remove <device>` removes one, as in the app: the engine forgets it only after the
+host removed every Silo key this device installed there or found none left. A key this device
+used before (a rotated one) is refused by a host that can tell keys apart, and the removal stops
+with that message; remove such a key on the host with `silo host revoke`. `silo host` and
+`silo devices` refuse `--device`.
 
 ## Project files
 

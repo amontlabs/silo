@@ -18,8 +18,8 @@ same SSH authorization and key setup commands in the terminal when SSH asks for 
 ([CLI guide](SiloUI-CLI.md#hosting-computers-for-other-devices)). The app's **Connect device…**
 adds such a host by its address too. When the controller has no SSH access to the host at all,
 its key goes the other way: `silo devices key` on the controller prints its Silo key, and
-`silo host init --authorize '<key>'` on the host installs the same restricted line the key setup
-would.
+`silo host init --authorize '<key>'` on the host installs Silo's restricted line for it (see
+[controller keys](#controller-keys-on-the-host)).
 
 A controller can connect during onboarding without creating a local computer. Local backup/restore, account configuration, secrets, runtime repair, and application updates retain their existing local ownership; the UI labels those settings **This device**. Remote account configuration and backups are managed on the owning device. They are not copied or synchronized by connecting it. Per-computer sharing, computer migration, internet discovery, and automatic SSH-server installation are outside this change.
 
@@ -33,14 +33,38 @@ cannot add or list keys:
 | Method | Class | Params | Result |
 | --- | --- | --- | --- |
 | `connections.keys.authorize` | command | `publicKey` (`ssh-ed25519 <key> [comment]`) | `added`: false when the line was already there |
-| `connections.keys.list` | query | none | `publicKeys`: the Silo lines of `~/.ssh/authorized_keys` that may only run the bridge, as `ssh-ed25519 <key> <comment>` |
+| `connections.keys.list` | query | none | `keys`: every line of `~/.ssh/authorized_keys` whose forced command is this channel's bridge (any other options or comment, written by any Silo version or a person), in file order, each with `publicKey` (`<type> <key> [comment]`), `fingerprint`, `canonical` (exactly Silo's current line) and `identified` (the forced command passes the line's own fingerprint); `publicKeys`: those keys, each once |
 | `connections.keys.own` | command | none | `publicKey`: this device's own Connections key, made first when it has none |
 
-`authorize` writes exactly the line the key setup writes (`restrict`, the bridge as the forced
-command, this channel's comment), creating `~/.ssh` (0700) and `authorized_keys` (0600) when they
-are missing, and tightens an older unrestricted Silo line for the key as a handshake does. A
-symlinked `authorized_keys` is not changed: the error names the line to add where the file is
-managed. `connections.keys.revoke` removes the line again. `connections.status` now also carries
+`authorize` takes an Ed25519 key only (the blob must decode to the type string `ssh-ed25519` and
+a 32-byte key) and writes Silo's line: `restrict`, the bridge with `--key` and the key's
+`SHA256:` fingerprint as the forced command, and this channel's comment, creating `~/.ssh` (0700) and `authorized_keys` (0600) when they
+are missing, and rewrites an older Silo line for the key (unrestricted, forwarding, or without `--key`) as a
+handshake does. A symlinked `authorized_keys` is not changed: the error names the line to add
+where the file is managed. `connections.keys.revoke` removes every bridge line for the key, in
+any of those forms; lines for the key without the bridge's forced command stay.
+
+**Which key connected.** The forced command tells the bridge the fingerprint of the key it
+belongs to (`silod --remote-bridge --key SHA256:...`; any other argument is refused with the
+usage line). The bridge removes any `authenticatedKey` the controller put in its request and
+sets it to that fingerprint, and the owner allows a bridged `connections.keys.revoke` only for
+that key, so a connected controller cannot revoke another controller's key. A line without
+`--key` (an earlier Silo wrote it, or a session used a key with no forced command) cannot be told
+apart from any other controller's: a bridged revoke through it is refused with
+`permission_denied` while the key still has a bridge line; everything else works as before. A
+key with no bridge line left is nothing to revoke, so a retry succeeds for anyone. On a refusal
+for its own key, a controller removing the device sends a handshake (which has the host add
+`--key` to that key's line) and tries once more; keys it used before are refused, and the user
+removes them on the host with `silo host revoke`.
+
+**Versions.** A controller's key setup still writes the line without `--key`, because a host
+with an earlier Silo refuses any bridge argument (`usage: silod --remote-bridge`, which a
+controller reports as an earlier Silo on the other device). A host with this version rewrites
+that line with `--key` at the first handshake, which **Connect device…** and `silo devices add`
+send. So an earlier controller and a newer host, and the reverse, still connect; the bridge
+protocol version is unchanged. The bridge trusts its own argument and the owner trusts the
+bridge, which relies on the bridge link pointing at this engine's `silod` (the engine points it
+there at every start). `connections.status` now also carries
 `cliLinkError`, which the engine already computed and the app already shows, but which the typed
 reply dropped.
 

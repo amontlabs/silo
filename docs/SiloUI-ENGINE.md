@@ -321,7 +321,8 @@ behind `cfg(target_os = "linux")`.
   left a computer running fails it), and unregisters it. After a failed step it still stops
   the engine, and keeps the unit for the logs it uploads. Then two new accounts on the same
   runner act as two devices (`app/SiloUI/scripts/hosts-e2e.sh`): `silo-host` runs
-  `silo host init --authorize` from a root-owned copy of the engine, and `silo-controller`, with
+  `silo host init --authorize` from a root-owned copy of the engine (under
+  `/var/lib/silo-ci`, root-owned 0755: the runner's `/opt` is world-writable), and `silo-controller`, with
   its own engine, adds it with `silo devices add silo-host@127.0.0.1:22 --host-key <fingerprint>`
   over the runner's SSH server, and creates, starts, stops and drops an `e2e-hosts-*` computer on
   it with `--device` before removing it.

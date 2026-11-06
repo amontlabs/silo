@@ -343,31 +343,46 @@ process: the socket is on the Mac's filesystem, which the guest cannot see.
 
 A second path exists for Connections. With **Allow connections from other devices** on, a paired
 device reaches this engine over the Mac's SSH server. Its key is installed with
-`restrict,command="exec ~/.local/bin/silo-remote --remote-bridge"`
-([`remote.rs#L26`](../app/SiloUI/src-tauri/engine/src/remote.rs#L26),
+`restrict,command="exec ~/.local/bin/silo-remote --remote-bridge --key SHA256:..."`, the key's own
+fingerprint ([`remote.rs#L49`](../app/SiloUI/src-tauri/engine/src/remote.rs#L49),
 [`channel.rs#L106`](../app/SiloUI/host/src/channel.rs#L106)): no pty, forwarding or agent, and
-only that command whatever the client asked for (`SSH_ORIGINAL_COMMAND` is never read). The link
-names `silod` inside the app bundle. Started through it, `silod` accepts no further arguments,
-replaces itself with the file in its bundle
-([`lib.rs#L60`](../app/SiloUI/src-tauri/silod/src/lib.rs#L60)), verifies that bundle's signature
-as the engine does ([`app.rs#L49`](../app/SiloUI/src-tauri/silod/src/app.rs#L49)), reads one framed
-request from its input and relays it to `~/.silo/desktop-remote/control.sock` (`0600` in a `0700`
-directory, no peer-UID check;
-[`remote.rs#L2893`](../app/SiloUI/src-tauri/engine/src/remote.rs#L2893)). The owner refuses the
+only that command whatever the client asked for (`SSH_ORIGINAL_COMMAND` is never read). A
+controller's key setup writes the line without `--key`, which a host with an earlier Silo also
+runs ([`#L59`](../app/SiloUI/src-tauri/engine/src/remote.rs#L59)); a host with this version adds it at the first handshake
+([`#L1655`](../app/SiloUI/src-tauri/engine/src/remote.rs#L1655)). The link names `silod` inside the app bundle. Started through it,
+`silod` takes the `--remote-bridge` flag ([`lib.rs#L65`](../app/SiloUI/src-tauri/silod/src/lib.rs#L65))
+and accepts no other argument than `--key` and a fingerprint
+([`remote.rs#L32`](../app/SiloUI/src-tauri/engine/src/remote.rs#L32)), replaces itself with the file in its bundle
+([`lib.rs#L75`](../app/SiloUI/src-tauri/silod/src/lib.rs#L75)), verifies that bundle's signature
+as the engine does ([`app.rs#L36`](../app/SiloUI/src-tauri/silod/src/app.rs#L36),
+[`service.rs#L24`](../app/SiloUI/src-tauri/silod/src/service.rs#L24)), reads one framed request
+from its input, replaces any `authenticatedKey` in it with its own `--key`
+([`remote.rs#L2785`](../app/SiloUI/src-tauri/engine/src/remote.rs#L2785)) and relays it to `~/.silo/desktop-remote/control.sock` (`0600` in
+a `0700` directory, no peer-UID check; [`remote.rs#L3161`](../app/SiloUI/src-tauri/engine/src/remote.rs#L3161)). The owner refuses the
 request unless Connections are on, the protocol version matches and, except for the handshake,
 the request names this device's id
-([`remote.rs#L3136`](../app/SiloUI/src-tauri/engine/src/remote.rs#L3136)); the id is not a secret
+([`remote.rs#L3404`](../app/SiloUI/src-tauri/engine/src/remote.rs#L3404)); the id is not a secret
 (the handshake returns it), so the key is the whole check. The owner then serves the methods in
 `METHODS` and `OWNER_METHODS`
-([`remote.rs#L295`](../app/SiloUI/src-tauri/engine/src/remote.rs#L295),
-[`#L365`](../app/SiloUI/src-tauri/engine/src/remote.rs#L365)), including delete, checkpoint
+([`remote.rs#L328`](../app/SiloUI/src-tauri/engine/src/remote.rs#L328),
+[`#L398`](../app/SiloUI/src-tauri/engine/src/remote.rs#L398)), including delete, checkpoint
 restore, guest exec, file reads and writes, exports, and the `guest.ssh` and macOS display byte
 streams. Turning Connections off refuses every request but leaves installed keys in
-`authorized_keys`; removing a device revokes its key. On a host, `silo host init --authorize`
-installs a controller's key with the same restricted line through `connections.keys.authorize`,
-which `engine.sock` serves and the bridge does not (it is in neither list), so a connected
-controller cannot let another key in; a same-user process could, as it could edit
-`authorized_keys` itself. A device that holds that key, or a
+`authorized_keys`; removing a device revokes its key. `authorized_keys` is the only place a
+controller key is revoked, and keys do not expire. Through the bridge, `connections.keys.revoke`
+is allowed only for the key the forced command names
+([`remote.rs#L1078`](../app/SiloUI/src-tauri/engine/src/remote.rs#L1078), called from [`#L3527`](../app/SiloUI/src-tauri/engine/src/remote.rs#L3527)), so one connected controller
+cannot revoke another's; a request through a line without `--key` (an earlier Silo's) is refused
+while that key still has a bridge line. The key list (`connections.keys.list`, `silo host
+status`) covers every line whose forced command is Silo's bridge, in any form; a line for the same
+key without it is a login of its own and is not Silo's to list. On a host, `silo host init
+--authorize` installs a controller's key out of band, with the same authority as a paired
+device's key, through `connections.keys.authorize`, which `engine.sock` serves and the bridge
+does not (it is in neither list), so a connected controller cannot let another key in; a
+same-user process could, as it could edit `authorized_keys` itself. `silo host init` runs no
+privileged step and never turns lingering on. On the controller, `silo devices add --host-key`
+writes the host's key to `~/.ssh/known_hosts`; the fingerprint the person typed is the trust
+root, and a different key already listed for the name is never replaced. A device that holds that key, or a
 same-user process that connects to `control.sock`, has that authority. The same-user link under
 `~/.local/bin` is part of that trust: a same-user process can repoint it, which is a non-goal
 below.
@@ -468,7 +483,7 @@ where this section says otherwise.
 | Credential values | Keychain items whose access list names the engine | One 0600 file per item under 0700 directories at `$XDG_DATA_HOME/<identifier>/credentials/<service>/<account>` ([`credential_file_store.rs#L105`](../app/SiloUI/src-tauri/engine/src/credential_file_store.rs#L105)). Every process of the engine's account and root can read them, and a backup of the home directory copies them. `SILO_CREDENTIAL_STORE=secret-service` is untested. |
 | Client check | `getpeereid` | `SO_PEERCRED` ([`socket.rs#L76`](../app/SiloUI/src-tauri/silod/src/socket.rs#L76)); the same effective-UID comparison |
 | Paths | `~/Library/...` | XDG data, cache and state directories ([`paths.rs#L36`](../app/SiloUI/src-tauri/silod/src/paths.rs#L36)); `~/.silo` and `~/.silo-dev` hold the socket on both |
-| Management | The app, or Connections | Connections only (the bridge of boundary 7) |
+| Management | The app, or Connections | Connections (the bridge of boundary 7), and the host-local `silo host` commands on `engine.sock` |
 
 **The VM.** Run the engine as a dedicated account in the `kvm` group, never as root: `silod`
 refuses euid 0 and `nobody` (uid 65534) for the agent, the bridge and the guest helper
