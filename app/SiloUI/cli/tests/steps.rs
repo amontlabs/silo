@@ -66,13 +66,13 @@ fn engine(
 }
 
 fn settings(yaml: &str) -> StepSettings {
-    Settings::step_settings(Some(&parse_settings(yaml).unwrap()), None)
+    Settings::step_settings(Some(&parse_settings(yaml).unwrap()))
 }
 
 #[test]
 fn step_settings_default_off_with_twenty_kept_and_resolve_in_one_place() {
     assert_eq!(
-        Settings::step_settings(None, None),
+        Settings::step_settings(None),
         StepSettings {
             checkpoints: false,
             keep: 20

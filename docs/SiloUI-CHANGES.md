@@ -407,3 +407,23 @@ fork, and `buckets` is always null for now (counting needs a capture). The hidde
 pending review; `--json` is the same data; the MCP tool is `tree`. Computers on other devices
 are not included.
 
+## Agent settings, auto-keep, recipe write-back and pull requests
+
+`silo.yaml` takes `agents:` overrides, `auto_keep:` rules and `fold: auto-code`; `silo fold`
+appends kept packages and settings files to the recipe the computer came from, and
+`silo fold --pr` opens a pull request. The settings and rule semantics are in the
+[CLI reference](SiloUI-CLI.md#settings-file-reference); this is how a keep behaves with them.
+
+- **Keep.** Write-back happens only after `changes.keep` returned `kept` (never for a dry run,
+  a refusal or a folder fork). The packages and files come from a diff of the fork taken after
+  the keep (a keep does not change the fork); when the keep was pinned to a review digest and
+  the new digest differs, the recipe is left alone and the result says so.
+  Packages are the diff's top-level added packages per manager (`dpkg` is `apt`, `npm -g` is
+  `npm`); dependencies are not listed.
+- **Auto-keep.** The rules read the diff document: a bucket counts as non-empty when it has
+  entries (`code`, `packages` with added, removed or upgraded names, any `settings` list,
+  `database`, `other`). The keep passes the digest of the diff just taken as `reviewDigest`, so
+  a fork that moves after the decision is refused by the engine; that refusal becomes a review
+  request. A fork made from a folder has only code changes (commits or uncommitted work).
+- **Pull request.** Reads the fork; changes nothing in the fork except committing its
+  uncommitted work, which a folder fold does as well.

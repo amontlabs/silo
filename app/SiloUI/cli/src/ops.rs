@@ -533,6 +533,10 @@ pub async fn fork(
         )
         .await?;
     let forked = engine.computer(&name).await?;
+    match &args.recipe_name {
+        Some(recipe_name) => crate::flows::remember_recipe(engine, &forked.id, recipe_name),
+        None => crate::flows::inherit_recipe(engine, &source.id, &forked.id),
+    }
     let mut fork = forked.to_json();
     fork["source"] = json!(source.name);
     // The fork reaches the same ports its source publishes (a recipe fork, those the recipe
@@ -1512,6 +1516,7 @@ pub async fn up(
                 )
                 .await?;
             created = true;
+            crate::flows::remember_recipe(engine, &engine.computer(MAIN).await?.id, recipe_name);
             engine.computer(MAIN).await?
         }
     };

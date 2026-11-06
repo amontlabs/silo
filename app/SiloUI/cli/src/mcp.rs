@@ -26,6 +26,10 @@ pub struct SiloMcp {
     socket: PathBuf,
     working_directory: PathBuf,
     engine: Arc<tokio::sync::Mutex<Option<Engine>>>,
+    /// The client's name from `initialize`, lowercase: which `agents:` entry applies.
+    agent: Arc<std::sync::Mutex<Option<String>>>,
+    /// Set when `--agent` or `SILO_AGENT` named the agent: the client's name is then ignored.
+    agent_named: bool,
     tool_router: ToolRouter<Self>,
 }
 
@@ -148,9 +152,13 @@ pub struct FoldParams {
     pub reviewed: Option<String>,
     /// Path of a recipe whose keep: section applies.
     pub recipe_file: Option<String>,
-    /// Record a review request for the fork instead of keeping it; returns the request.
+    /// Record a review request for the fork instead of keeping it; returns the request. When
+    /// an auto_keep rule of the project covers every change, the changes are kept instead.
     #[serde(default)]
     pub request: bool,
+    /// Do not append kept packages and settings files to the recipe the computer came from.
+    #[serde(default)]
+    pub no_write_back: bool,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -178,8 +186,26 @@ impl SiloMcp {
             socket,
             working_directory,
             engine: Arc::new(tokio::sync::Mutex::new(None)),
+            agent: Arc::new(std::sync::Mutex::new(None)),
+            agent_named: false,
             tool_router: Self::tool_router(),
         }
+        .with_agent(std::env::var("SILO_AGENT").ok())
+    }
+
+    /// Names the agent (from `--agent` or `SILO_AGENT`); the client's own name is then not used.
+    pub fn with_agent(mut self, agent: Option<String>) -> Self {
+        if let Some(name) = crate::config::normalize_agent(agent.as_deref()) {
+            self.agent = Arc::new(std::sync::Mutex::new(Some(name)));
+            self.agent_named = true;
+        }
+        self
+    }
+
+    /// The agent whose settings apply: `--agent` or `SILO_AGENT`, else the connected client's
+    /// name (self-reported, so `agents:` entries may only narrow the top level).
+    pub fn agent(&self) -> Option<String> {
+        self.agent.lock().unwrap().clone()
     }
 
     /// The one connection this server keeps, opened again when it has ended.
@@ -258,7 +284,7 @@ impl SiloMcp {
         show(
             async {
                 let project = Project::discover(&self.working_directory);
-                let settings = project.load_settings()?;
+                let settings = project.load_settings(self.agent().as_deref())?;
                 let explicit = params
                     .recipe_file
                     .as_deref()
@@ -338,14 +364,37 @@ impl SiloMcp {
                         command: params.command,
                         cwd: None,
                     };
-                    return fanout::fork_many(
+                    let mut value = fanout::fork_many(
                         &engine,
                         &many,
                         settings.as_ref(),
                         &|_| {},
                         &|_, _, _| {},
                     )
-                    .await;
+                    .await?;
+                    let context = flows::Context {
+                        project: &project,
+                        settings: settings.as_ref(),
+                        recipe: many.fork.recipe.as_ref(),
+                        write_back: true,
+                    };
+                    let mut results = Vec::new();
+                    for fork in value["forks"].as_array().cloned().unwrap_or_default() {
+                        if fork.get("exitCode").is_none() {
+                            continue;
+                        }
+                        let ok = fork.get("error").is_none() && fork["exitCode"] == 0;
+                        let name = fork["name"].as_str().unwrap_or_default();
+                        if let Some(result) =
+                            flows::after_command(&engine, name, ok, &context, &|_| {}).await
+                        {
+                            results.push(result);
+                        }
+                    }
+                    if !results.is_empty() {
+                        value["autoKeep"] = Value::Array(results);
+                    }
+                    return Ok(value);
                 }
                 ops::fork(&engine, &args, settings.as_ref(), &|_| {}).await
             }
@@ -380,17 +429,29 @@ impl SiloMcp {
                     .as_deref()
                     .map(|path| self.working_directory.join(path));
                 let recipe = ops::resolve_recipe(explicit.as_deref(), &project)?;
-                flows::fold(
+                let settings = project.load_settings(self.agent().as_deref())?;
+                let context = flows::Context {
+                    project: &project,
+                    settings: settings.as_ref(),
+                    recipe: recipe.as_ref(),
+                    write_back: !params.no_write_back,
+                };
+                let mode = if params.request {
+                    flows::Mode::Request
+                } else {
+                    flows::Mode::Keep
+                };
+                flows::run(
                     &self.engine().await?,
                     &params.fork,
                     params.into.as_deref(),
-                    ops::keep_hooks(recipe.as_ref()),
+                    &context,
                     ops::FoldOptions {
                         dry_run: params.dry_run,
                         data_ok: params.data_ok,
                         reviewed: params.reviewed,
                     },
-                    params.request,
+                    mode,
                     &|_| {},
                 )
                 .await
@@ -550,8 +611,8 @@ impl SiloMcp {
                     timeout_secs: params.timeout_secs.unwrap_or(ops::MAX_EXEC_SECS),
                 };
                 let project = Project::discover(&self.working_directory);
-                let settings = project.load_settings()?;
-                let step_settings = crate::config::Settings::step_settings(settings.as_ref(), None);
+                let settings = project.load_settings(self.agent().as_deref())?;
+                let step_settings = crate::config::Settings::step_settings(settings.as_ref());
                 let (output, step) =
                     steps::run_exec(&self.engine().await?, &args, step_settings, &|_| {}).await?;
                 let mut value = output.to_json();
@@ -672,11 +733,30 @@ impl SiloMcp {
 }
 
 #[tool_handler(router = self.tool_router)]
-impl ServerHandler for SiloMcp {}
+impl ServerHandler for SiloMcp {
+    async fn initialize(
+        &self,
+        request: rmcp::model::InitializeRequestParams,
+        context: rmcp::service::RequestContext<rmcp::RoleServer>,
+    ) -> Result<rmcp::model::InitializeResult, rmcp::ErrorData> {
+        if !self.agent_named {
+            if let Some(name) = crate::config::normalize_agent(Some(&request.client_info.name)) {
+                *self.agent.lock().unwrap() = Some(name);
+            }
+        }
+        context.peer.set_peer_info(request.clone());
+        self.negotiate_initialize(&request)
+    }
+}
 
 /// Serves the tools on stdin and stdout until the client closes them.
-pub async fn serve(socket: PathBuf, working_directory: PathBuf) -> Result<(), CliError> {
+pub async fn serve(
+    socket: PathBuf,
+    working_directory: PathBuf,
+    agent: Option<String>,
+) -> Result<(), CliError> {
     let service = SiloMcp::new(socket, working_directory)
+        .with_agent(agent)
         .serve(rmcp::transport::stdio())
         .await
         .map_err(|error| CliError::new(format!("The MCP server could not start: {error}")))?;

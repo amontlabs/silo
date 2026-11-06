@@ -16,7 +16,7 @@ use crate::{
     fanout::{self, ManyArgs},
     flows, folder,
     ops::{self, CreateArgs, DiffArgs, ExecArgs, ForkArgs, Platform},
-    render, review, steps,
+    pr, render, review, steps,
 };
 
 #[derive(Parser, Debug)]
@@ -35,6 +35,9 @@ pub struct Cli {
     /// Use a socket outside this build's own home (never the production home from a debug build).
     #[arg(long, global = true)]
     pub allow_other_channel: bool,
+    /// The agent the settings in `agents:` of `.silo/silo.yaml` are read for (default: SILO_AGENT).
+    #[arg(long, global = true, value_name = "NAME", env = "SILO_AGENT")]
+    pub agent: Option<String>,
     #[command(subcommand)]
     pub command: Command,
 }
@@ -231,8 +234,22 @@ pub struct FoldCommand {
     #[arg(long, value_name = "PATH")]
     pub recipe_file: Option<PathBuf>,
     /// Ask for a review instead of keeping: records a fold request for the fork and prints its id.
-    #[arg(long, conflicts_with_all = ["promote", "dry_run"])]
+    #[arg(long, conflicts_with_all = ["promote", "dry_run", "pr"])]
     pub request: bool,
+    /// Push the fork's code to a new branch `silo/<fork>-<id>` and open a pull request; keeps
+    /// nothing. Needs GITHUB_TOKEN or `gh auth login` on this device.
+    #[arg(long, conflicts_with_all = ["promote", "dry_run", "into"])]
+    pub pr: bool,
+    /// With --pr: the GitHub repository (OWNER/NAME; default GITHUB_REPOSITORY, else origin).
+    #[arg(long, value_name = "OWNER/NAME", requires = "pr")]
+    pub repo: Option<String>,
+    /// With --pr: the branch to merge into (default: the branch the folder is on, or the
+    /// repository's default branch).
+    #[arg(long, value_name = "BRANCH", requires = "pr")]
+    pub base: Option<String>,
+    /// Do not append kept packages and settings files to the recipe the computer came from.
+    #[arg(long)]
+    pub no_write_back: bool,
 }
 
 #[derive(Args, Debug)]
@@ -349,12 +366,12 @@ fn emit(json: bool, value: &Value, human: impl FnOnce(&Value) -> String) {
 pub async fn run(cli: Cli, working_directory: &Path) -> Result<i32, CliError> {
     let socket = default_socket(cli.socket.clone(), cli.allow_other_channel)?;
     if matches!(cli.command, Command::Mcp) {
-        crate::mcp::serve(socket, working_directory.to_owned()).await?;
+        crate::mcp::serve(socket, working_directory.to_owned(), cli.agent.clone()).await?;
         return Ok(0);
     }
     let project = Project::discover(working_directory);
     // Read before connecting so a bad file is reported without the engine.
-    let settings = project.load_settings()?;
+    let settings = project.load_settings(cli.agent.as_deref())?;
     let recipe = match &cli.command {
         Command::Fork(fork) => match &fork.recipe {
             Some(name) => Some(project.named_recipe(name)?),
@@ -486,6 +503,7 @@ async fn dispatch(
                     json,
                     settings.as_ref(),
                     recipe,
+                    project,
                     working_directory,
                 )
                 .await;
@@ -504,7 +522,7 @@ async fn dispatch(
                     command: fork.command,
                     cwd: None,
                 };
-                return fork_many(engine, &args, json, settings.as_ref()).await;
+                return fork_many(engine, &args, json, settings.as_ref(), project).await;
             }
             let recipe_name = fork.recipe;
             let (source, name) = match &recipe_name {
@@ -538,21 +556,49 @@ async fn dispatch(
             return Ok(if value["status"] == "refused" { 2 } else { 0 });
         }
         Command::Fold(fold) => {
-            let keep = ops::keep_hooks(recipe.as_ref());
-            let value = flows::fold(
+            let context = flows::Context {
+                project,
+                settings: settings.as_ref(),
+                recipe: recipe.as_ref(),
+                write_back: !fold.no_write_back,
+            };
+            let mode = if fold.pr {
+                flows::Mode::PullRequest(
+                    pr::PrArgs {
+                        repo: fold.repo,
+                        base: fold.base,
+                        host_root: project
+                            .directory
+                            .as_ref()
+                            .and_then(|silo| silo.parent())
+                            .map(std::path::Path::to_path_buf)
+                            .or_else(|| Some(working_directory.to_path_buf())),
+                    },
+                    pr::PrEnv::from_process(),
+                )
+            } else if fold.request {
+                flows::Mode::Request
+            } else {
+                flows::Mode::Keep
+            };
+            let value = flows::run(
                 engine,
                 &fold.fork,
                 fold.into.as_deref(),
-                keep,
+                &context,
                 ops::FoldOptions {
                     dry_run: fold.dry_run,
                     data_ok: fold.data_ok,
                     reviewed: fold.reviewed,
                 },
-                fold.request,
+                mode,
                 progress,
             )
             .await?;
+            if value["status"] == "pull-request" {
+                emit(json, &value, render::pull_request);
+                return Ok(0);
+            }
             if value["status"] == "requested" {
                 emit(json, &value, render::requested);
                 return Ok(0);
@@ -629,7 +675,7 @@ async fn dispatch(
                 cwd: exec.cwd,
                 timeout_secs: exec.timeout,
             };
-            let step_settings = Settings::step_settings(settings.as_ref(), None);
+            let step_settings = Settings::step_settings(settings.as_ref());
             let (output, step) = steps::run_exec(engine, &args, step_settings, progress).await?;
             return Ok(print_exec(json, &output, &step));
         }
@@ -772,11 +818,19 @@ async fn fork_many(
     args: &ManyArgs,
     json: bool,
     settings: Option<&Settings>,
+    project: &Project,
 ) -> Result<i32, CliError> {
     let several = args.count > 1;
     let (sink, prefixer) = output_sink(json, several);
-    let value = fanout::fork_many(engine, args, settings, &stderr_progress, &sink).await?;
+    let mut value = fanout::fork_many(engine, args, settings, &stderr_progress, &sink).await?;
     flush_partial(json, &prefixer);
+    let context = flows::Context {
+        project,
+        settings,
+        recipe: args.fork.recipe.as_ref(),
+        write_back: true,
+    };
+    let kept = keep_after_commands(engine, &mut value, &context, json).await;
     if json {
         emit(true, &value, |_| String::new());
     } else if args.command.is_empty() || several {
@@ -785,7 +839,39 @@ async fn fork_many(
         // A single command's output is on stdout, so the summary goes to stderr.
         eprintln!("{}", render::forks(&value));
     }
+    if !json {
+        for line in kept {
+            eprintln!("{line}");
+        }
+    }
     Ok(fanout::exit_code(&value))
+}
+
+/// Applies the `auto_keep` rules to each fork whose command ran (see
+/// [`flows::after_command`]); the results go to `autoKeep` of the JSON, the text lines are
+/// returned.
+async fn keep_after_commands(
+    engine: &Engine,
+    value: &mut Value,
+    context: &flows::Context<'_>,
+    json: bool,
+) -> Vec<String> {
+    let mut results = Vec::new();
+    let mut lines = Vec::new();
+    let forks = value["forks"].as_array().cloned().unwrap_or_default();
+    for fork in forks.iter().filter(|fork| fork.get("exitCode").is_some()) {
+        let name = fork["name"].as_str().unwrap_or_default();
+        let ok = fork.get("error").is_none() && fork["exitCode"].as_i64() == Some(0);
+        if let Some(result) = flows::after_command(engine, name, ok, context, &|_| {}).await {
+            lines.push(render::auto_keep(&result));
+            results.push(result);
+        }
+    }
+    if !results.is_empty() {
+        value["autoKeep"] = Value::Array(results);
+    }
+    let _ = json;
+    lines
 }
 
 async fn fork_folder(
@@ -794,6 +880,7 @@ async fn fork_folder(
     json: bool,
     settings: Option<&Settings>,
     recipe: Option<Recipe>,
+    project: &Project,
     working_directory: &Path,
 ) -> Result<i32, CliError> {
     if fork.count.unwrap_or(1) != 1 {
@@ -841,8 +928,25 @@ async fn fork_folder(
         },
     )
     .await?;
+    let context = flows::Context {
+        project,
+        settings,
+        recipe: Some(&recipe),
+        write_back: true,
+    };
+    let kept = flows::after_command(
+        engine,
+        &computer.name,
+        ran.exit_code == 0,
+        &context,
+        &|_| {},
+    )
+    .await;
     if json {
         let mut value = value;
+        if let Some(kept) = &kept {
+            value["autoKeep"] = serde_json::json!([kept]);
+        }
         value["exitCode"] = serde_json::json!(ran.exit_code);
         value["signal"] = serde_json::json!(ran.signal);
         value["stdout"] = serde_json::json!(String::from_utf8_lossy(&out.bytes));
@@ -851,6 +955,9 @@ async fn fork_folder(
         emit(true, &value, |_| String::new());
     } else {
         eprintln!("{}", render::folder_fork(&value));
+        if let Some(kept) = &kept {
+            eprintln!("{}", render::auto_keep(kept));
+        }
     }
     Ok(ran.exit_code)
 }
@@ -984,6 +1091,19 @@ mod tests {
         assert_eq!(trim_newline("abc\r\n".into()), "abc");
         assert_eq!(trim_newline("abc\n\n".into()), "abc\n");
         assert_eq!(trim_newline("abc".into()), "abc");
+    }
+
+    #[test]
+    fn pr_cannot_be_combined_with_request_into_or_dry_run() {
+        for extra in [["--request"], ["--dry-run"]] {
+            assert!(Cli::try_parse_from(["silo", "fold", "try", "--pr", extra[0]]).is_err());
+        }
+        assert!(Cli::try_parse_from(["silo", "fold", "try", "--pr", "--into", "main"]).is_err());
+        assert!(Cli::try_parse_from(["silo", "fold", "try", "--repo", "a/b"]).is_err());
+        assert!(Cli::try_parse_from(["silo", "fold", "try", "--pr", "--repo", "a/b"]).is_ok());
+        // The agent comes from the option, which wins over the environment.
+        let cli = parse(&["--agent", "careful", "list"]);
+        assert_eq!(cli.agent.as_deref(), Some("careful"));
     }
 
     #[test]
