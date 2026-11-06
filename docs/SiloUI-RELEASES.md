@@ -436,7 +436,9 @@ Actionlint 1.7.12's unsupported-key diagnostic is a known
 described in the [workflow fix audit](research/micro-reviews/workflows-fixes.md).
 
 Drafts are Developer ID signed and notarized once the owner steps in
-[Apple signing and notarization](#apple-signing-and-notarization) are done.
+[Apple signing and notarization](#apple-signing-and-notarization) are done;
+until then they are signed ad hoc
+([Releases without Developer ID signing](#releases-without-developer-id-signing)).
 Artifact-only builds, local builds and a dry run stay ad-hoc signed and are not
 notarized; such an installation can require System Settings → Privacy & Security
 → Open Anyway. Do not instruct users to disable Gatekeeper globally. Update
@@ -451,13 +453,45 @@ signatures are separate and always checked.
 | --- | --- | --- | --- |
 | `adhoc` | local builds, artifact-only runs | ad hoc | none |
 | `dry-run` | release workflow dispatched with `dry_run` | ad hoc | every notarization, stapling and Gatekeeper command is printed with a `[dry-run]` prefix, not run |
-| `developer-id` | every draft (version tag push or `draft` dispatch) | Developer ID Application, hardened runtime, timestamp | `notarytool submit --wait`, `stapler staple`, `spctl --assess` |
+| `developer-id` | every draft (version tag push or `draft` dispatch) with the Apple credentials configured | Developer ID Application, hardened runtime, timestamp | `notarytool submit --wait`, `stapler staple`, `spctl --assess` |
 
-The `validate` job derives the mode: a draft is always `developer-id`, and
-`dry_run` together with `draft` is refused, so an unnotarized build cannot become
-a draft. Credentials are read only from the environment. A `developer-id` run
-stops before signing if any of them is missing, or if the identity is not a
-`Developer ID Application:` certificate.
+The `validate` job derives the requested mode: a draft requests `developer-id`,
+and `dry_run` together with `draft` is refused. The macOS build job then runs
+`macos_notarization.py resolve-mode`: with all seven Apple secrets present the
+draft stays `developer-id`; with none of them it becomes `adhoc` and the log
+shows a warning (see
+[Releases without Developer ID signing](#releases-without-developer-id-signing));
+with only some of them the run fails and names the missing ones. Credentials are
+read only from the environment. A `developer-id` run stops before signing if the
+identity is not a `Developer ID Application:` certificate.
+
+#### Releases without Developer ID signing
+
+Without an Apple Developer ID, leave the seven Apple secrets unset in
+`release-signing`. Tag pushes and `draft` dispatches then build the same assets
+signed ad hoc and not notarized; the updater key (`TAURI_SIGNING_PRIVATE_KEY`)
+is still required, and update signatures are still checked. Adding all seven
+secrets later switches drafts back to Developer ID signing with no workflow
+change. Locally, `npm run desktop:build` produces the same kind of app and
+`SILO_RELEASE_SIGNING=adhoc python3 scripts/package-macos-release.py <Silo.app> <output> --engine <silod> --cli <silo>`
+the DMG and update archive.
+
+What users see: macOS quarantines the downloaded DMG, and the first open of
+`Silo.app` shows a dialog saying Apple could not verify it, with no Open button.
+They can either
+
+- open System Settings → Privacy & Security, find the message about Silo and
+  click **Open Anyway** (macOS 15 no longer offers this from right-click → Open
+  alone, but right-click → Open followed by Open Anyway works), or
+- after copying Silo to Applications, run
+  `xattr -dr com.apple.quarantine /Applications/Silo.app`.
+
+Do not tell users to disable Gatekeeper globally. The Tauri updater does not
+set the quarantine attribute, so in-app updates are expected to open without
+the dialog; an ad-hoc signature changes with every build, so macOS can ask
+again for Keychain access after an update. Both belong to the acceptance
+evidence below and were not checked on a real update. State the first-open
+steps in the release notes of every ad-hoc release.
 
 Order of one `developer-id` run:
 

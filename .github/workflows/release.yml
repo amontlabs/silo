@@ -123,7 +123,8 @@ jobs:
             echo '::error::A dry run is artifact-only; it cannot create a draft.'
             exit 1
           fi
-          # Drafts are signed with the Developer ID certificate and notarized; a dry run never is.
+          # Drafts request Developer ID signing and notarization; the macOS build signs ad hoc when
+          # no Apple credentials are configured (release-platform.yml). A dry run is never notarized.
           signing=adhoc
           if [[ "$CREATE_DRAFT" == true ]]; then
             signing=developer-id

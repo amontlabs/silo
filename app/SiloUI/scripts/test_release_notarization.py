@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 SCRIPTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPTS))
-from macos_notarization import Release, import_certificate, release_mode  # noqa: E402
+from macos_notarization import APPLE_CREDENTIALS, Release, import_certificate, release_mode, resolve_mode  # noqa: E402
 
 REPOSITORY = SCRIPTS.parent.parent.parent
 NOTARY = {
@@ -52,6 +52,36 @@ class ModeTests(unittest.TestCase):
             release = Release.from_environ({'SILO_RELEASE_SIGNING': mode,
                                             'APPLE_DEVELOPER_ID_IDENTITY': 'Developer ID Application: Ignored'})
             self.assertEqual(release.identity, '-')
+
+
+class ResolveModeTests(unittest.TestCase):
+    CREDENTIALS = {**DEVELOPER_ID, 'APPLE_CERTIFICATE_P12_BASE64': 'cDEy', 'APPLE_CERTIFICATE_PASSWORD': 'pw-sentinel'}
+
+    def test_a_developer_id_request_with_every_credential_stays_developer_id(self):
+        warnings = []
+        self.assertEqual(resolve_mode(self.CREDENTIALS, warnings.append), 'developer-id')
+        self.assertEqual(warnings, [])
+
+    def test_a_developer_id_request_without_any_credential_signs_ad_hoc_and_warns(self):
+        warnings = []
+        environ = {'SILO_RELEASE_SIGNING': 'developer-id', 'APPLE_TEAM_ID': '  '}
+        self.assertEqual(resolve_mode(environ, warnings.append), 'adhoc')
+        self.assertEqual(len(warnings), 1)
+        self.assertTrue(warnings[0].startswith('::warning::'))
+        self.assertIn('not notarized', warnings[0])
+
+    def test_a_partial_set_of_credentials_fails_and_names_only_what_is_missing(self):
+        for name in APPLE_CREDENTIALS:
+            environ = {key: value for key, value in self.CREDENTIALS.items() if key != name}
+            with self.assertRaisesRegex(RuntimeError, name) as raised:
+                resolve_mode(environ)
+            for value in ('p8-secret-sentinel', 'pw-sentinel'):
+                self.assertNotIn(value, str(raised.exception))
+
+    def test_other_modes_pass_through_and_ignore_credentials(self):
+        self.assertEqual(resolve_mode({}), 'adhoc')
+        self.assertEqual(resolve_mode({**self.CREDENTIALS, 'SILO_RELEASE_SIGNING': 'dry-run'}), 'dry-run')
+        self.assertEqual(resolve_mode({**self.CREDENTIALS, 'SILO_RELEASE_SIGNING': 'adhoc'}), 'adhoc')
 
 
 class StepTests(unittest.TestCase):
@@ -314,7 +344,15 @@ class WorkflowTests(unittest.TestCase):
         self.assertNotIn('APPLE_CERTIFICATE', header)
         # The mode is set per step: the tooling tests run the packager before credentials exist.
         self.assertNotIn('SILO_RELEASE_SIGNING', header)
-        self.assertEqual(build.count('SILO_RELEASE_SIGNING: ${{ inputs.signing }}'), 2)
+        self.assertEqual(build.count('SILO_RELEASE_SIGNING: ${{ inputs.signing }}'), 1)
+        self.assertEqual(build.count('SILO_RELEASE_SIGNING: ${{ steps.signing.outputs.mode }}'), 2)
+        resolve = build[build.index('- name: Resolve the macOS signing mode'):
+                        build.index('- name: Import the Developer ID certificate')]
+        self.assertIn('macos_notarization.py resolve-mode', resolve)
+        for name in APPLE_CREDENTIALS:
+            self.assertIn(f"{name}: ${{{{ inputs.signing == 'developer-id' && secrets.{name} || '' }}}}", resolve)
+        after = build[build.index('- name: Import the Developer ID certificate'):]
+        self.assertNotIn('inputs.signing', after)
         self.assertNotIn('$(python3 scripts/macos_notarization.py import-certificate)" >>', build)
         verify = build[build.index('- name: Collect and verify macOS assets'):
                        build.index('- name: Delete the temporary signing keychain')]
