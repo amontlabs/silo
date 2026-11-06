@@ -146,6 +146,13 @@ Done when both Linux archives are on an engine release, the KVM job is green, an
 has a Linux host section (it needs its own boundary review: KVM, the socket, Keychain replaced by a
 Secret Service or file store).
 
+**Progress (Nov 2026).** `silod` builds, passes its tests and serves on Linux
+([remote hosts](hosts/PLAN.md) phase 2): the Apple code is behind `cfg`, a plain main-thread
+loop replaces AppKit, the manifest sits beside the binary, data, cache and logs follow XDG, the
+socket checks `SO_PEERCRED`, credentials go to a file store, and the daemon needs no GTK. CI
+runs the silod, CLI and client tests on Linux. Still open: the systemd unit, the Linux archives,
+the KVM job and the threat model section.
+
 ## 7. Protocol reference and examples
 
 A reference for every method, error, job and event, and the versioning policy (how protocol

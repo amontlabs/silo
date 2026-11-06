@@ -1,8 +1,8 @@
 # Secrets
 
-Silo stores general secret values in the macOS Keychain, the only supported host today.
-The engine's credential store also builds against the Linux Secret Service, but no Linux
-host build ships yet and that backend is untested. `secrets.json` contains names, immutable value references,
+Silo stores general secret values in the macOS Keychain on a Mac. On a Linux host the engine
+stores them as files (see [Linux hosts](#linux-hosts)); no Linux engine release ships yet.
+`secrets.json` contains names, immutable value references,
 computer assignments, allowed hosts, pending updates, safe failures, and bounded activity
 history. Values are never returned in application snapshots. The editor sends a
 value only when adding or replacing one, then discards its draft on successful save.
@@ -73,6 +73,27 @@ commands. The FIFO regression supplies a blocked file in a temporary directory
 and requires an independent future to run before releasing the read. This uses
 [Tauri's async command execution](https://v2.tauri.app/develop/calling-rust/#async-commands)
 and the supported [blocking-work boundary](https://docs.rs/tokio/latest/tokio/task/fn.spawn_blocking.html).
+
+## Linux hosts
+
+A Linux server has no desktop session, so there is no Secret Service (or unlocked login keyring)
+for the engine to use. On Linux, `silod` installs a file store as the `keyring` default at
+startup, before anything reads a credential: every item the engine keeps in the Keychain on a
+Mac (GitHub sign-in, token ledger, personal token, secret values) is one file,
+`<data>/credentials/<service>/<account>`, where `<data>` is `$XDG_DATA_HOME/<identifier>`
+(`~/.local/share/org.silo.dev` for Dev). The directories are mode 0700 and the files 0600,
+owned by the engine's account; a file is written whole (a new file, `fsync`, then `rename`).
+A link, a file of another account, or a file others can read is refused instead of used.
+Errors name the file, never the value. `SILO_CREDENTIAL_STORE=secret-service` uses the desktop
+Secret Service instead, for a Linux machine that has one; that backend is still untested.
+
+What this means: on a Linux host the values are plain bytes on disk, readable by that account
+and by root. That is the same trust the engine already gives its own state there (computer
+disks, `secrets.json`, Connections keys), but weaker than the Keychain: nothing asks before a
+process of the same account reads a value, nothing is encrypted at rest beyond the disk's
+own encryption, and a backup of the home directory copies the values. Run the engine as a
+dedicated account on a Linux host that holds real credentials, and use full-disk encryption.
+The Linux host section of the threat model is phase 6 of the [remote hosts plan](hosts/PLAN.md).
 
 ## Boundary
 
@@ -160,7 +181,7 @@ Use disposable values and computers. Never use a real credential for an echo-ser
   edited domains without reentering the value, and removed it. A second check
   started dev through Silo, verified its placeholder, removed access live, and
   stopped dev again. Metadata had no plaintext value. Secrets was left empty.
-- Linux hosts are not supported today; the Secret Service backend has never been exercised.
+- Linux hosts were not supported on this date; the Secret Service backend has never been exercised.
 
 Run the opt-in runtime test with the signed bundled `msb` and library paths in
 `SILO_TEST_MSB` and `SILO_TEST_LIBKRUNFW`, with the explicit confirmation below:

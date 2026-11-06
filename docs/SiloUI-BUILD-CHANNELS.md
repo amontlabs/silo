@@ -66,6 +66,8 @@ configuration and documentation examples remain pinned by channel tests.
 | Linux autostart entry and desktop id | `org.silo.preview.desktop` ("Silo Preview") | `org.silo.dev.desktop` ("Silo Dev") |
 | Linux tray id, notification desktop entry | `org.silo.preview`, `Silo` | `org.silo.dev`, `Silo Dev` |
 | macOS login item, notification permission, single-instance lock | keyed by bundle identifier | keyed by bundle identifier (verified: the plugin's socket and D-Bus name include it) |
+| Engine data, cache and logs on a Linux host (XDG) | `~/.local/share`, `~/.cache`, `~/.local/state/…/logs` under `org.silo.preview` | the same under `org.silo.dev` |
+| Engine credential files on a Linux host | `~/.local/share/org.silo.preview/credentials/org.silo.Silo.*` | `~/.local/share/org.silo.dev/credentials/org.silo.dev.*` |
 | Updater | release feed | disabled |
 
 Left shared on purpose: the `.silo-backup` archive format (so Dev can import
