@@ -1,0 +1,165 @@
+
+> silo-ui@0.12.0 test:release
+> node --test "scripts/**/*.test.mjs"
+
+✔ metadata CLI works through a symlink to the script (50.679417ms)
+✔ guest archive publication preserves complete outputs for docker save exit 1 (558.025417ms)
+✔ guest archive publication preserves complete outputs for docker save exit 0 (516.654791ms)
+✔ guest archive publication preserves complete outputs for an archive write failure (397.959541ms)
+✔ publication names derive from the recipe version and the publishing repository (0.4585ms)
+✔ the publication workflow repeats neither the image version nor the owner (0.154708ms)
+✔ the recipe matches the version and never leaves package files in a layer (0.299708ms)
+✔ the image ships the third-party notices that THIRD-PARTY-NOTICES.md repeats (0.148209ms)
+✔ the release attaches every guest input the image build consumes (0.149625ms)
+✔ the pinned Cua Driver is installed from one lock, hash-checked, binary only, telemetry off (0.567791ms)
+✔ no Linux guest file refers to the removed LCU or ChatGPT downloads (0.060458ms)
+✔ offline image validation rejects unsupported platforms before invoking Docker (0.090708ms)
+✔ offline validation forbids image pulls and preserves tool-check failures (0.142834ms)
+﹣ bundled guest tools and unprivileged SFTP work without network (0.015333ms) # SKIP
+﹣ offline image check rejects missing sudo (0.01275ms) # SKIP
+﹣ offline image check rejects missing Python (0.010125ms) # SKIP
+﹣ offline image check rejects SFTP executable unavailable to normal users (0.011542ms) # SKIP
+﹣ offline image check rejects preinstalled working account (0.02025ms) # SKIP
+﹣ offline image check rejects missing dconf user profile (0.011083ms) # SKIP
+﹣ offline image check rejects invalid accessibility poller (0.011541ms) # SKIP
+﹣ offline image check rejects autostart entry naming a missing program (0.009417ms) # SKIP
+﹣ offline image check rejects leftover package file (0.012208ms) # SKIP
+﹣ offline image check rejects a different Cua Driver binary (0.0105ms) # SKIP
+﹣ offline image check rejects a link in place of the telemetry-off shim (0.010666ms) # SKIP
+﹣ offline image check rejects a shim that keeps telemetry on (0.009209ms) # SKIP
+﹣ offline image check rejects an extra file beside Cua Driver (0.010625ms) # SKIP
+﹣ offline image check rejects telemetry on system-wide (0.010542ms) # SKIP
+﹣ offline image check rejects missing MCP launcher (0.010834ms) # SKIP
+﹣ offline image check rejects LCU installed in the image (0.009375ms) # SKIP
+✔ an oversized stream stops early and keeps the published input (10.561917ms)
+✔ stream verification rejects a bad exact length even when the hash matches (3.629542ms)
+✔ file write failure closes the source and removes staging files (5.217875ms)
+✔ HTTP headers obeys the deadline and publication policy (17.985875ms)
+✔ HTTP body obeys the deadline and publication policy (9.957416ms)
+✔ HTTP status obeys the deadline and publication policy (4.44775ms)
+✔ HTTP chunked obeys the deadline and publication policy (5.976292ms)
+✔ the guest image lock pins one checksummed, sized archive per architecture (7.754791ms)
+✔ installers do not bundle the guest image and runtime preparation does not stage it (2.85425ms)
+✔ the app embeds the lock it downloads the image from (1.603584ms)
+▶ import refuses linked Dev destination directories before writing files or credentials
+  ✔ channel (15.419583ms)
+  ✔ file (8.3445ms)
+  ✔ remote (7.753833ms)
+  ✔ dangling-remote (7.966125ms)
+✔ import refuses linked Dev destination directories before writing files or credentials (40.354166ms)
+✔ import rechecks all destination links after confirmation before applying any copy (7.136375ms)
+✔ file sync failure preserves Dev settings and removes private staging files (7.826209ms)
+✔ interrupted import removes partially written private backup staging (6.871333ms)
+✔ import syncs final file permissions before rename and rejects directory sync failure (22.514167ms)
+✔ copies the intended configuration into dev and nothing about sandboxes (72.748791ms)
+✔ production files and keychain entries are never modified and only dev services are written (63.503625ms)
+✔ refuses to run while Silo Dev is running and changes nothing (3.118833ms)
+✔ refuses an import when Dev starts while replacement confirmation is open (7.787584ms)
+✔ dry run changes nothing and prints no secret values (3.658166ms)
+✔ existing dev configuration needs confirmation, is backed up, and keeps its device identity (151.784667ms)
+✔ a device id Dev saved before the rename is kept under its new name (63.817125ms)
+✔ when Dev holds both the earlier and the current device id the earlier one wins (59.996084ms)
+✔ when production holds both the earlier and the current device list the earlier one is imported (51.931875ms)
+✔ production data already in the current names imports the same as the earlier names (92.299542ms)
+✔ the Dev saved-data conversion record is cleared so the conversion runs again (51.982666ms)
+✔ the record is left alone when nothing is imported (0.590833ms)
+✔ running twice with --yes is idempotent (144.69175ms)
+✔ backups of private Dev files use private modes even when the old files were readable (154.407625ms)
+✔ missing or damaged production state is skipped, not fatal (0.932458ms)
+✔ keychain writes outside the dev services are refused by the guard (24.148458ms)
+✔ sanitizers keep only intended fields (0.095208ms)
+✔ Linux layout uses the XDG directories and the same state directory names (0.058375ms)
+✔ detects Silo Dev processes but not production (0.128458ms)
+✔ changed effective Go flags reject a previously compiled executable (30.771791ms)
+✔ matching compiler identity still rejects changed source digest (11.946958ms)
+✔ matching compiler identity still rejects changed binary digest (11.603458ms)
+✔ legacy manifest invalidates runtime/lfs-transfer (8.894209ms)
+✔ compiler upgrade invalidates runtime/lfs-transfer (7.190333ms)
+✔ requested toolchain invalidates runtime/lfs-transfer (5.822959ms)
+✔ build recipe invalidates runtime/lfs-transfer (4.671333ms)
+✔ build flags invalidates runtime/lfs-transfer (5.174458ms)
+✔ legacy manifest invalidates target/runtime-cache/git-lfs-transfer/971c0284dc33b1ed3f7ed9dde5d4fc0cee62db6b/builds/linux-arm64 (4.624833ms)
+✔ compiler upgrade invalidates target/runtime-cache/git-lfs-transfer/971c0284dc33b1ed3f7ed9dde5d4fc0cee62db6b/builds/linux-arm64 (4.453958ms)
+✔ requested toolchain invalidates target/runtime-cache/git-lfs-transfer/971c0284dc33b1ed3f7ed9dde5d4fc0cee62db6b/builds/linux-arm64 (4.171709ms)
+✔ build recipe invalidates target/runtime-cache/git-lfs-transfer/971c0284dc33b1ed3f7ed9dde5d4fc0cee62db6b/builds/linux-arm64 (3.853375ms)
+✔ build flags invalidates target/runtime-cache/git-lfs-transfer/971c0284dc33b1ed3f7ed9dde5d4fc0cee62db6b/builds/linux-arm64 (6.697208ms)
+✔ compiler selection changes reject both caches even when their binary digests match (6.852208ms)
+✔ Debian Go uses the copyright notice of the package owning its compiler (2.082208ms)
+✔ official and Homebrew Go license layouts do not need a package manager (1.793958ms)
+✔ Go license discovery refuses package output that does not own the compiler (0.2445ms)
+✔ host target selects Linux guest architecture and rejects unsupported hosts (0.076ms)
+✔ unverified source is rejected before any Go build can execute (3.876958ms)
+✔ cached module licenses stay writable across repeated native resource copies (18.423625ms)
+✔ missing dependency license invalidates runtime/lfs-transfer (11.91ms)
+✔ changed dependency license invalidates runtime/lfs-transfer (8.117083ms)
+✔ missing dependency license invalidates target/runtime-cache/git-lfs-transfer/971c0284dc33b1ed3f7ed9dde5d4fc0cee62db6b/builds/linux-arm64 (5.299709ms)
+✔ changed dependency license invalidates target/runtime-cache/git-lfs-transfer/971c0284dc33b1ed3f7ed9dde5d4fc0cee62db6b/builds/linux-arm64 (3.873375ms)
+✔ a missing Linux package input preserves the complete previous tool directory (34.282416ms)
+✔ failed Linux tool staging preserves the previous complete package inputs (12.362708ms)
+✔ Linux package tools preserve exact staged bytes and executable modes (10.879125ms)
+✔ Linux package overlay preserves non-tool resources and places tools outside scanned roots (1.0415ms)
+✔ a completed preparation cannot remove another process's active source (1666.209625ms)
+✔ a failed preparation removes its own extracted source (326.039417ms)
+✔ failed capability verification removes staging files and preserves the published runtime (391.025541ms)
+✔ a checksum-valid cached executable with invalid permissions is rebuilt (1112.933375ms)
+✔ a checksum-valid cached executable with invalid probe exit is rebuilt (1312.179958ms)
+✔ clean inputs validate without external commands or generated files (21.275125ms)
+✔ patch bytes fails before tagging, native tools or downloads (89.086416ms)
+✔ patch pin fails before tagging, native tools or downloads (75.131375ms)
+✔ asset pin fails before tagging, native tools or downloads (76.261958ms)
+✔ missing target fails before tagging, native tools or downloads (75.785125ms)
+✔ unsupported target fails before tagging, native tools or downloads (76.386625ms)
+✔ source revision fails before tagging, native tools or downloads (78.070334ms)
+✔ feature set fails before tagging, native tools or downloads (69.849292ms)
+✔ schema fails before tagging, native tools or downloads (67.817916ms)
+✔ unknown field fails before tagging, native tools or downloads (71.67ms)
+✔ unsafe patch path fails before tagging, native tools or downloads (144.398333ms)
+✔ mismatched asset fails before tagging, native tools or downloads (285.370834ms)
+✔ inconsistent shared pin fails before tagging, native tools or downloads (281.626ms)
+✔ symlinked patch cannot escape the checkout (61.838666ms)
+✔ runtime preparation rejects a bad patch before invoking rustc or downloading (237.620792ms)
+✔ preflight.mjs executes its rejecting gate through a symlink (57.870125ms)
+✔ release.mjs executes its rejecting gate through a symlink (63.887833ms)
+✔ sync-release.mjs executes its rejecting gate through a symlink (57.74225ms)
+Pushed v0.98.7. GitHub Actions builds a signed draft; approve release-signing if requested. A repeated push does not restart a build. To retry, run Build Silo release on v0.98.7 with draft enabled.
+Pushed v0.98.7. GitHub Actions builds a signed draft; approve release-signing if requested. A repeated push does not restart a build. To retry, run Build Silo release on v0.98.7 with draft enabled.
+Requested verified publication of v0.98.7. Approve release-publish if requested; publication is complete only when the workflow succeeds.
+Pushed v1.0.0. GitHub Actions builds a signed draft; approve release-signing if requested. A repeated push does not restart a build. To retry, run Build Silo release on v1.0.0 with draft enabled.
+Requested verified publication of v1.0.0. Approve release-publish if requested; publication is complete only when the workflow succeeds.
+✔ real Changesets versions a private app, consumes notes, and syncs desktop metadata without changing dependencies (609.915042ms)
+✔ sync rejects invalid stable version before writing any metadata (159.675125ms)
+✔ sync rejects missing changelog version before writing any metadata (470.355209ms)
+✔ sync rejects empty notes before writing any metadata (424.252459ms)
+✔ sync rejects malformed Rust metadata before writing any metadata (177.208208ms)
+✔ sync rejects malformed npm lock before writing any metadata (137.912458ms)
+✔ sync rejects conflicting existing notes before writing any metadata (126.976167ms)
+✔ release:version checks the planned version, then versions with Changesets and synchronizes metadata (302.570792ms)
+✔ release:version refuses a planned 1.0.0 release before Changesets consumes anything (220.391292ms)
+✔ release:version refuses stale notes for the planned version before Changesets consumes anything (219.945042ms)
+✔ release:version refuses malformed Rust metadata before Changesets consumes anything (221.063791ms)
+✔ release:version refuses no pending changesets before Changesets consumes anything (242.957125ms)
+✔ draft uses Changesets to tag and pushes only the exact release tag (132.703625ms)
+✔ draft retries an existing matching tag without retagging (125.491ms)
+✔ publish verifies the peeled remote tag and explicitly dispatches the existing workflow (132.066916ms)
+✔ release rejects dirty checkout without pushing or dispatching (127.490417ms)
+✔ release rejects pending changeset without pushing or dispatching (128.549709ms)
+✔ release rejects missing release notes without pushing or dispatching (131.927792ms)
+✔ release rejects mismatched local tag without pushing or dispatching (132.455625ms)
+✔ release rejects incorrect generated tag without pushing or dispatching (129.823666ms)
+✔ release rejects mismatched remote tag without pushing or dispatching (137.632542ms)
+✔ release rejects a commit that is not on origin/main without pushing or dispatching (137.477958ms)
+✔ release rejects a newer release tag on origin without pushing or dispatching (142.827625ms)
+✔ release rejects this release tag on origin at another commit without pushing or dispatching (130.201541ms)
+✔ sync refuses a 1.0.0 or later version unless the stable release is explicitly allowed (126.476584ms)
+✔ release refuses to tag or publish a 1.0.0 or later version unless explicitly allowed (133.772167ms)
+✔ explicit stable publication passes the opt-in to the final workflow (141.303625ms)
+﹣ ZCode TLS: server launch boundary and provider CA selection (0.402334ms) # SKIP
+ℹ tests 146
+ℹ suites 0
+ℹ pass 129
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 17
+ℹ todo 0
+ℹ duration_ms 5377.610417
+exit=0

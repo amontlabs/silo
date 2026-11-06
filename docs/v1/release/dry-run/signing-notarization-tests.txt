@@ -1,0 +1,7 @@
+..............
+----------------------------------------------------------------------
+Ran 14 tests in 0.222s
+
+OK
+Created verified release assets in /private/var/folders/bq/fnyn1bq95d37b4q3lrwc_f600000gn/T/silo-dry-run-y21vcpmo/out
+exit=0
