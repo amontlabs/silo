@@ -1,7 +1,7 @@
 # Silo
 
 > **DRAFT for the owner's approval. Not public text yet.** Proposed top-level README for Silo v1.
-> It does not replace `README.md` until approved. Every number in it comes from
+> It does not replace `README.md` until approved, and not before the `v0.13.0` release is published. Every number in it comes from
 > `docs/v1/evidence/final/` and names its file. Commands are the ones the final run used
 > (`docs/v1/evidence/final/final-run.txt`), with the production names: the run used a Dev build,
 > so it printed `silo-dev`-style names such as `ssh main.silo-dev`.
@@ -122,6 +122,9 @@ quiet: applied; stopped: final-poller, poller.py; scrubbed: /etc/silo/guest-clie
 buckets: Code, Packages, Settings & files, Database changed and Other changed. Caches, logs and build output are
 counted as ignored. Credential paths, new listening ports, processes and services are listed under Not kept: a keep never brings them back.
 The last line says which Silo-managed secrets the fork used, per host and method, never values.
+It records a secret where Silo put its value in: a named secret's placeholder sent to a host it is
+not allowed for goes out unchanged and is not recorded. Attempts are listed as blocked only for
+the GitHub profile and a few edge cases, such as a placeholder where Silo does not substitute.
 
 `silo fold <fork> --request` records a review request instead of keeping; `silo requests` lists
 them, and `silo requests show|keep|throw-away|open <id>` acts on one. A keep from a request is
@@ -193,7 +196,7 @@ Built in: `linux-dev`, `macos-xcode`, and two for agents that live in `main`:
 
 - `openclaw` installs OpenClaw and runs its gateway as a service. Its `quiet:` and `scrub:` lists
   were checked in the final run: a fork had no gateway process and neither the `credentials/`
-  folder nor `.env`, while `main` kept both (`final-run-part4-claw.txt`, section O3).
+  folder nor `.env`, while `main` kept both (`final-run-claw.txt`, section O3).
 - `hermes` does the same for Hermes. Its process names and `.env` path are not checked yet.
 
 Onboarding (model keys, chat logins) happens once in `main` over `ssh main.silo`.
@@ -263,12 +266,40 @@ SSH configuration or secrets (`up`, `exec`, `publish`, `secrets`) refuse `--devi
 
 ## Install
 
-Silo is a Mac app for Apple Silicon. It carries the engine, the VM runtime and the `silo`
-command, and links the command into `~/.local/bin` each time the engine starts (put
-`~/.local/bin` on your `PATH`). The Linux guest image downloads once before the first computer.
+Silo needs a Mac with Apple silicon and macOS 15 or later.
 
-> **Owner:** download link and signing status to fill in at release (the next release is not
-> notarized yet; see `docs/v1/release/README.md`).
+> **DRAFT:** the `v0.13.0` release is pending publication; the link below works once the owner
+> publishes it.
+
+1. Download `Silo-macos-arm64.dmg` from the
+   [`v0.13.0` release](https://github.com/amontlabs/silo/releases/tag/v0.13.0).
+2. Open the DMG and drag Silo to Applications.
+3. Open Silo. This version is signed ad hoc and not notarized, so the first time macOS says it
+   cannot verify the app. Open System Settings → Privacy & Security and click **Open Anyway** next
+   to the message about Silo, or run:
+
+   ```sh
+   xattr -dr com.apple.quarantine /Applications/Silo.app
+   ```
+
+   You do this once. After an in-app update, macOS may ask again for Keychain access or for
+   permissions you granted before, because each unsigned build has a different signature.
+
+The app carries the engine, the VM runtime and the `silo` command. Each time Silo starts, it
+links the command into `~/.local/bin` as `silo`; put `~/.local/bin` on your `PATH`. If a `silo`
+of your own is already there, Silo leaves it alone and Connections shows that the command is not
+on PATH. The Linux guest image downloads once, before the first computer.
+
+Then add the MCP server to your agent ([MCP setup](#mcp-setup)):
+
+```sh
+claude mcp add silo -- silo mcp
+```
+
+The app shows your computers and, in this version, a Pending changes screen: the review requests
+of this Mac and every connected one, each opened to review its changes, keep it, throw it away or
+open the fork. A computer's Checkpoints tab lists the steps run in it and forks a new computer
+from a step.
 
 To build from source, see [the source-build guide](../../SiloUI-BUILD-FROM-SOURCE.md); the
 command alone builds with `cargo build --release -p silo-cli`.
@@ -276,7 +307,7 @@ command alone builds with `cargo build --release -p silo-cli`.
 ## Numbers
 
 Measured once, on one Mac (Apple M4 Max, 64 GiB RAM, macOS 26.5), on a Dev-channel build of the
-same commit (`09677470`) in the release profile with the release runtime binaries, not the signed
+same commit (`09677470`) in the release profile with the release runtime binaries, not the
 production app. Each time is the median of N=3 runs, with min–max. Source: `docs/v1/evidence/final/final-run.txt`
 (summary in `docs/v1/evidence/final/README.md`).
 
@@ -292,8 +323,10 @@ Memory of one Linux fork (its VM processes, measured with `footprint` 20 s after
 
 ## Not there yet
 
-- **The Silo app** has no screens yet for review, keep, Make this main or pending requests; use
+- **The Silo app** has screens for pending changes, review, keep and steps (checked once
+  in the real app, `docs/v1/evidence/phase-7/app-check.txt`); Make this main and undo still need
   `silo` or MCP.
+- **Signing:** 0.13.0 is signed ad hoc and not notarized (see [Install](#install)).
 - **Hosts:** Apple Silicon Macs only. A Linux host is the next milestone; Intel Macs are not planned.
 - **macOS forks:** Apple allows two macOS VMs at once, so `silo fork -n` on a Mac is limited to
   the free slots; fork a Linux computer for more.
