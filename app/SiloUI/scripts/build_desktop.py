@@ -2,7 +2,9 @@
 
 Two channels exist and never share state: production (`org.silo.preview`, "Silo")
 and development (`org.silo.dev`, "Silo Dev"). A build is production unless it is
-a debug build (`--debug`), which always gets the development identity.
+a debug build (`--debug`) or a development release build (`--dev-release`: the release
+profile with the development identity, for measurements), which always get the development
+identity.
 """
 import argparse
 import json
@@ -27,13 +29,19 @@ def build(arguments, *, root=APP, platform=sys.platform, run=subprocess.run):
         arguments, cargo_arguments = arguments[:separator], arguments[separator:]
     parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
     parser.add_argument('--debug', '-d', action='store_true')
+    parser.add_argument('--dev-release', action='store_true')
     parser.add_argument('--no-bundle', action='store_true')
     parser.add_argument('--help', '-h', action='store_true')
     parser.add_argument('--version', '-V', action='store_true')
     parser.add_argument('--target', '-t')
     parser.add_argument('--bundles', '-b', nargs='+')
     options, _ = parser.parse_known_args(arguments)
-    if options.debug:
+    if options.dev_release:
+        if options.debug:
+            raise ValueError('--dev-release is the release profile; do not combine it with --debug.')
+        arguments = [argument for argument in arguments if argument != '--dev-release']
+    development = options.debug or options.dev_release
+    if development:
         arguments = arguments + ['--config', DEVELOPMENT_CONFIG]
     if (platform == 'linux' and not options.no_bundle
             and not options.help and not options.version
@@ -59,13 +67,13 @@ def build(arguments, *, root=APP, platform=sys.platform, run=subprocess.run):
     target = Path(json.loads(metadata.stdout)['target_directory'])
     if options.target:
         target /= options.target
-    names = channel_names()['development' if options.debug else 'production']
+    names = channel_names()['development' if development else 'production']
     profile = 'debug' if options.debug else 'release'
     bundle = target / profile / 'bundle/macos' / f"{names['productName']}.app"
     # Generate only the app here. Installers and updater archives must be made
     # after runtime finalization by package-macos-release.py.
     args = arguments + ([] if options.bundles else ['--bundles', 'app'])
-    if not options.debug:
+    if not development:
         args += ['--config', json.dumps({
             'identifier': names['identifier'], 'productName': names['productName'],
             'bundle': {'active': True, 'createUpdaterArtifacts': False, 'macOS': {'hardenedRuntime': True}}})]
@@ -76,7 +84,7 @@ def build(arguments, *, root=APP, platform=sys.platform, run=subprocess.run):
         + (['--target', options.target] if options.target else []), cwd=root, check=True)
     commit = (run(['git', 'rev-parse', 'HEAD'], cwd=root, check=False, capture_output=True, text=True).stdout or '').strip() or 'unknown'
     silod = target / profile / 'silod'
-    if options.debug:
+    if development:
         # A development bundle keeps Tauri's signatures (no hardened runtime), so its tools are
         # copied as they are; only the outer seal is renewed around the new engine.
         embed_engine(bundle, silod, identifier=names['identifier'], build=f'silo-{commit}')

@@ -32,6 +32,7 @@
     "desktop": "tauri dev --config src-tauri/tauri.dev.conf.json",
     "desktop:build": "python3 scripts/build_desktop.py",
     "desktop:build:debug": "python3 scripts/build_desktop.py --debug --bundles app",
+    "desktop:build:dev-release": "python3 scripts/build_desktop.py --dev-release --bundles app",
     "guest:image:build": "node scripts/build-guest-image.mjs",
     "changeset": "changeset",
     "release:status": "changeset status",

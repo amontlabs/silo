@@ -130,6 +130,21 @@ class DesktopBuildTests(unittest.TestCase):
                 self.assertIn(['codesign', '--verify', '--deep', '--strict', str(expected)],
                               [command for command, _ in self.calls])
 
+    def test_a_dev_release_app_is_a_release_build_with_the_development_identity(self):
+        result = build(['--dev-release', '--bundles', 'app'], root=self.root, platform='darwin', run=self.command)
+        expected = self.target / 'release/bundle/macos/Silo Dev.app'
+        self.assertEqual(result, expected)
+        tauri = next(command for command, _ in self.calls if command[0] == 'node')
+        self.assertEqual(tauri[3:], ['--bundles', 'app', '--config', 'src-tauri/tauri.dev.conf.json'])
+        self.assertNotIn('--debug', tauri)
+        self.assertIn(['cargo', 'build', '--locked', '--release', '-p', 'silod'], [command for command, _ in self.calls])
+        self.assertEqual(self.embed.call_args.args[:2], (expected, self.target / 'release/silod'))
+        self.assertEqual(self.embed.call_args.kwargs['identifier'], 'org.silo.dev')
+        self.assertEqual(self.finalization(), ['embed_engine', 'seal_app', 'verify_engine_contents'])
+        self.steps.seal_app.assert_called_once_with(expected, hardened=False)
+        with self.assertRaises(ValueError):
+            build(['--dev-release', '--debug'], root=self.root, platform='darwin', run=self.command)
+
     def test_debug_unbundled_help_and_other_platforms_pass_through(self):
         cases = [('darwin', ['--debug', '--no-bundle']), ('darwin', ['--no-bundle', '--ci']),
                  ('darwin', ['--help']), ('darwin', ['--version']),
