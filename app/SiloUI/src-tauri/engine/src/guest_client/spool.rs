@@ -196,6 +196,12 @@ impl Spool {
         }
         let root = openat(CWD, runtime, dir_flags(), Mode::empty())
             .map_err(|error| format!("Cannot open the runtime folder: {error}"))?;
+        if create {
+            // The runtime folder is `0700` on the host and the guest sees it as that user's, so a
+            // guest user other than root could not reach `silo-bridge`. Show it as root's with
+            // search permission only: everything else in it keeps its own mode and is not listed.
+            write_override(&root, 0, 0, S_IFDIR | 0o711);
+        }
         let bridge = sub(&root, name, create.then_some(0o755))?;
         // The guest writes requests it cannot list (sticky, no read); answers are named by the
         // request's random id, in a folder it can enter but not list.
@@ -441,6 +447,28 @@ mod tests {
             ok: true,
             result: Some(serde_json::json!({})),
             error: None,
+        }
+    }
+
+    #[test]
+    fn the_runtime_folder_is_shown_to_the_guest_as_roots_with_search_permission() {
+        let (dir, _spool) = spool();
+        let runtime = openat(CWD, dir.path().join("runtime"), dir_flags(), Mode::empty()).unwrap();
+        // Skips on a file system without extended attributes, where nothing is overridden.
+        if let Some(owner) = read_owner(&runtime) {
+            assert_eq!(owner, (0, 0));
+            let mut buf = [0u8; 20];
+            use rustix::fd::AsRawFd;
+            #[cfg(target_os = "macos")]
+            let read = unsafe {
+                libc::fgetxattr(runtime.as_raw_fd(), OVERRIDE_KEY.as_ptr(), buf.as_mut_ptr().cast(), 20, 0, 0)
+            };
+            #[cfg(not(target_os = "macos"))]
+            let read = unsafe {
+                libc::fgetxattr(runtime.as_raw_fd(), OVERRIDE_KEY.as_ptr(), buf.as_mut_ptr().cast(), 20)
+            };
+            assert_eq!(read, 20);
+            assert_eq!(u32::from_ne_bytes(buf[12..16].try_into().unwrap()), S_IFDIR | 0o711);
         }
     }
 

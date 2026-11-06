@@ -204,9 +204,22 @@ fn plan_steps(macos: bool) -> Vec<Step> {
         .collect()
 }
 
-/// `main-before-<stamp>`, with a number added when the name is taken.
+/// The longest a computer name may be.
+const NAME_LIMIT: usize = 32;
+
+/// `main-before-<stamp>`, with a number added when the name is taken. A long name is shortened
+/// so the result is still a valid computer name.
 fn archive_name(env: &dyn PromoteEnv, target_name: &str) -> String {
-    let base = format!("{target_name}-before-{}", env.stamp());
+    let tail = format!("-before-{}", env.stamp());
+    // Room for a `-NN` that tells two archives apart.
+    let room = NAME_LIMIT.saturating_sub(tail.len() + 3).max(1);
+    let head = target_name
+        .chars()
+        .take(room)
+        .collect::<String>()
+        .trim_end_matches('-')
+        .to_owned();
+    let base = format!("{head}{tail}");
     let mut name = base.clone();
     let mut n = 1;
     while env.name_in_use(&name) {

@@ -484,6 +484,18 @@ fn the_archive_name_avoids_a_taken_name() {
 }
 
 #[test]
+fn the_archive_name_of_a_long_name_is_still_a_valid_computer_name() {
+    let fake = Fake::new(Os::Linux);
+    for name in ["e2e-p5fix-main", "a-computer-with-a-name-of-exactly-32", "x--------------------------------"] {
+        let archive = super::archive_name(&*fake, name);
+        assert!(archive.len() <= 32, "{archive}");
+        assert!(archive.ends_with("-before-20261105-1432"), "{archive}");
+        assert!(!archive.starts_with('-'), "{archive}");
+    }
+    assert_eq!(super::archive_name(&*fake, "main"), "main-before-20261105-1432");
+}
+
+#[test]
 fn undo_swaps_everything_back_exactly() {
     let fake = Fake::new(Os::Linux);
     let (_dir, journal) = scratch_journal();

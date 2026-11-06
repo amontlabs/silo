@@ -64,11 +64,12 @@ silo guest-client install main --agent openclaw --binary ~/.silo/guest/silo
    own, so the policy is stored with the token and read from there; run `install` again after
    changing the settings (it mints a new token and the old one stops working).
 2. The engine creates `sandboxes/<name>/runtime/silo-bridge/{req,resp}` and returns the token once.
-3. The CLI writes `/etc/silo/guest-client.json` as root in the computer (`0640`, group `silo`, or
-   `0600` when there is no such group; `--group` names another) and, with `--binary`, installs the
-   binary at `/usr/local/bin/silo`. If writing the file fails the token is revoked. The binary is
-   uploaded to a folder of the working account, copied into a folder only root can enter, checked
-   there and installed from there.
+3. With `--binary`, the binary goes first (below); a failed upload stops the install before any token exists.
+   The CLI then writes `/etc/silo/guest-client.json` as root in the computer (`0640`, group `silo`, or
+   `0600` when there is no such group; `--group` names another). If writing the file fails the
+   token is revoked. The binary is uploaded to a new folder under `/workspace` that root creates for
+   the working account, copied into a folder only root can enter, checked there and installed at
+   `/usr/local/bin/silo` from there.
 
 `silo guest-client status main` and `silo guest-client revoke main` read and remove the token.
 
@@ -138,7 +139,7 @@ runs; each running fork uses the memory it was created with and the engine adds 
   at the computers, so it ends after the delete succeeded, not before.
 - **Forks**: a fork's own bridge folder is checked against the fork's id, and a token verifies only
   for the computer it was minted for. A copy of the token file in a fork is therefore refused, and
-  forks made from inside also have the file scrubbed.
+  every fork, made from inside or on the host, has the file scrubbed when it first starts.
 
 ## Folder handling and modes
 
@@ -158,21 +159,39 @@ requests are removed without an answer. A request with a bad token or one that c
 no answer at all, so a guest without a valid token cannot fill `resp/`; the client then reports that
 Silo did not answer.
 
-Modes and owners: `silo-bridge` is `0755`, `req/` is `1733` and `resp/` is `0711`, and the engine
-sets the runtime's stat override (`user.msb.override_stat`, 20 bytes: version 1, uid, gid, mode,
-rdev, as in MicroSandbox's `passthroughfs/stat_override.rs`) on each so the guest sees them owned by
-root. Host files otherwise show the host user's identity, so an answer would not be readable to a
-non-root agent. The engine therefore reads the override the guest wrote on the request file (the
-agent user's uid and gid) and writes the answer with an override naming that user, mode `0600`. The
-client writes requests `0600`. A guest user other than the requester cannot read the answer, and
-`1733` keeps users from removing each other's requests. If the host file system keeps no extended
-attributes, the setting is skipped and answers show the runtime's default owner (root's), which is
-the root-only case. The override format is read from MicroSandbox 0.7.6 source; it is not yet
-checked in a running guest.
+Modes and owners: the runtime folder itself is `0700` on the host and the guest sees it as the host
+user's, so a guest user other than root could not reach `silo-bridge`. The engine sets the runtime's
+stat override (`user.msb.override_stat`, 20 bytes: version 1, uid, gid, mode, rdev, as in
+MicroSandbox's `passthroughfs/stat_override.rs`) on the runtime folder to root, `0711`, so any guest user
+can search it but not list it, and on `silo-bridge` (`0755`), `req/` (`1733`) and `resp/` (`0711`) so
+the guest sees them owned by root. Everything else in the runtime folder keeps the mode the guest
+already saw. The override changes what the guest is shown, not what the host file allows, and it is
+set only on folders the engine created; nothing on the host follows a path the guest names. The
+runtime folder's search permission also lets a non-root user reach `/.msb/rootfs/...`, which is the
+same files the guest's own root file system already shows it.
+Host files otherwise show the host user's identity, so an answer would not be readable to a non-root
+agent. The engine therefore reads the override the guest wrote on the request file (the agent user's
+uid and gid) and writes the answer with an override naming that user, mode `0600`. The client writes
+requests `0600`. A guest user other than the requester cannot read the answer, and `1733` keeps users
+from removing each other's requests. If the host file system keeps no extended attributes, the
+setting is skipped and answers show the runtime's default owner (root's), which is the root-only case.
+Checked in a running Linux guest on MicroSandbox 0.7.6: `/.msb` shows as `drwx--x--x root root`, and the
+`silo` user reads its answers.
+
+## Checkpoints of a running computer
+
+The engine removes every request and answer it has served. A running computer's full checkpoint
+serializes the share's entries the guest has looked up, and MicroSandbox refuses it ("control operation
+rejected by peer") when the host removed one of them, so a fork or a promote of a running computer
+failed after its first bridge call, until the computer restarted. Before a full checkpoint of a
+running computer that has a bridge folder, the engine runs `sync; echo 2 > /proc/sys/vm/drop_caches`
+in it as root, which makes the guest forget its cached entries; the call is best effort, and a
+checkpoint that still fails reports its own error. Disk-only checkpoints of a stopped computer are not
+affected.
 
 ## Open items
 
 - Auto-keep for requests made from inside runs host-side only, in a later slice.
 - Mac computers: no transport yet.
-- The runtime path of the `/.msb` share on the host (`sandboxes/<name>/runtime`) and the mode the
-  guest sees on `req/` and `resp/` need a VM check; see the steps in `docs/v1/BUILD_LOG.md`.
+- The VM check is `docs/v1/checks/phase5_inguest_check.sh`, with its output in
+  `docs/v1/evidence/phase-5/inguest-check.txt`.

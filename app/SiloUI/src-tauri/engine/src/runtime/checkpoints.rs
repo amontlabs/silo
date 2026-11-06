@@ -166,6 +166,14 @@ impl ForkOptions {
             .collect()
     }
 
+    /// A fork never carries its parent's in-guest client token, whoever made the fork.
+    pub(super) fn scrub_guest_client_token(&mut self) {
+        let path = silo_api::methods::guest_client::GUEST_TOKEN_PATH;
+        if !self.scrub.iter().any(|existing| existing == path) {
+            self.scrub.push(path.into());
+        }
+    }
+
     pub(super) fn validate(&self) -> Result<(), RuntimeError> {
         let invalid = |message: &str| Err(RuntimeError::Invalid(message.into()));
         if self.secrets.len() > 64 || self.stop.len() > 64 || self.scrub.len() > 64 {
@@ -854,6 +862,7 @@ fn capture_with_kind(
         snapshot_group.clone(),
     ];
     if scope == "full" {
+        release_stale_share_entries(runner, paths, configuration.name());
         args.extend(["--full".into(), "--guest-flush".into(), "required".into()]);
     }
     args.push("--integrity".into());
@@ -2053,6 +2062,27 @@ fn quiet_labels(name: &str, quiet: &QuietRecord) -> Vec<String> {
     ]
 }
 
+/// Script run in a running guest before a full capture: writes back, then drops the kernel's
+/// cached directory entries.
+const RELEASE_ENTRIES_SCRIPT: &str = "sync; echo 2 > /proc/sys/vm/drop_caches";
+
+/// The arguments that run [`RELEASE_ENTRIES_SCRIPT`] as root in the computer.
+fn release_entries_args(name: &str) -> Vec<String> {
+    root_exec(name, "30s", &["sh", "-c", RELEASE_ENTRIES_SCRIPT])
+}
+
+/// A full capture of a running computer serializes the runtime share's open entries and is
+/// refused when the host removed a file the guest had looked up, which is what the engine does
+/// with every request and answer in the in-guest client's bridge folder. Dropping the guest's
+/// cached entries first lets the share forget them. Best effort, and only for a computer that has
+/// a bridge folder; a capture that still fails reports its own error.
+fn release_stale_share_entries(runner: &dyn RuntimeRunner, paths: &RuntimePaths, name: &str) {
+    if !crate::guest_client::spool_dir(&paths.home, name).exists() {
+        return;
+    }
+    let _ = runner.run(paths, &release_entries_args(name), Duration::from_secs(40));
+}
+
 fn root_exec(name: &str, timeout: &str, command: &[&str]) -> Vec<String> {
     let mut args: Vec<String> = [
         "exec",
@@ -2440,7 +2470,7 @@ fn fork_in_lanes(
     computer_id: &str,
     checkpoint_id: Option<&str>,
     new_name: &str,
-    options: ForkOptions,
+    mut options: ForkOptions,
     macos_names: &dyn Fn() -> Vec<String>,
     job: Option<(
         silo_api::jobs::JobId,
@@ -2449,6 +2479,7 @@ fn fork_in_lanes(
 ) -> Result<(), RuntimeError> {
     use super::operation_gate::{OperationKind, Scope};
     options.validate()?;
+    options.scrub_guest_client_token();
     let computer_name = computer_configuration(paths, computer_id)?
         .name()
         .to_owned();

@@ -122,6 +122,10 @@ pub async fn install(
             "Start {computer} first; the token is written into it."
         )));
     }
+    // The binary goes first, so an upload that fails leaves no token behind.
+    if let Some(binary) = binary {
+        upload_binary(engine, &target.id, &target.name, binary, progress).await?;
+    }
     let enabled = engine
         .call(requests::guest_client_enable(GuestClientEnableParams {
             computer_id: target.id.clone(),
@@ -156,8 +160,7 @@ pub async fn install(
         return Err(error);
     }
     let mut installed = vec!["token"];
-    if let Some(binary) = binary {
-        upload_binary(engine, &target.id, &target.name, binary, progress).await?;
+    if binary.is_some() {
         installed.push("silo binary at /usr/local/bin/silo");
     }
     Ok(json!({
@@ -184,7 +187,16 @@ async fn upload_binary(
         "/workspace/silo-in-{}",
         &uuid::Uuid::new_v4().simple().to_string()[..12]
     );
-    engine
+    // The transfer needs the folder to exist and the account that receives it to own it.
+    as_root(
+        engine,
+        computer_id,
+        "set -e; mkdir -p \"$1\"; chown \"$(stat -c %u:%g /workspace)\" \"$1\"; chmod 700 \"$1\"",
+        &[&directory],
+        None,
+    )
+    .await?;
+    let uploaded = engine
         .run_job(
             &format!("Sending the silo binary to {name}"),
             requests::files_upload(FileUploadParams {
@@ -200,7 +212,12 @@ async fn upload_binary(
             }),
             progress,
         )
-        .await?;
+        .await;
+    if let Err(error) = uploaded {
+        // The folder is removed whether or not the transfer got anywhere.
+        let _ = as_root(engine, computer_id, "rm -rf \"$1\"", &[&directory], None).await;
+        return Err(error);
+    }
     as_root(
         engine,
         computer_id,

@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 # Silo v1 phase 5 VM check: the in-guest client against the Dev engine (Linux computer). Run:
 #   bash docs/v1/checks/phase5_inguest_check.sh 2>&1 | tee docs/v1/evidence/phase-5/inguest-check.txt
-# Only `silo` (incl. `silo exec` in e2e-p5-* computers) plus read-only host commands.
+# Only `silo` (incl. `silo exec` in e2e-p5fix-* computers) plus read-only host commands.
 # Steps follow docs/SiloUI-IN-GUEST-CLIENT.md and docs/v1/BUILD_LOG.md (5a).
 set -uo pipefail
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
 SILO="$REPO/app/SiloUI/target/debug/silo"
 GUESTBIN="$REPO/app/SiloUI/target/aarch64-unknown-linux-musl/release/silo"
 BUNDLE="$REPO/app/SiloUI/target/debug/bundle/macos/Silo Dev.app"
-ENGINE_LOG="$REPO/app/SiloUI/src-tauri/target/verification/silod-dev-p5.log"
+ENGINE_LOG="$REPO/app/SiloUI/src-tauri/target/verification/silod-dev-p5fix.log"
 RUNTIME="$HOME/Library/Application Support/org.silo.dev/runtime/microsandbox"
 SILO_OK=0; HOSTMADE=0
-MAIN=e2e-p5-main; IN1=e2e-p5-in1; IN2=e2e-p5-in2; HOST1=e2e-p5-host1
+MAIN=e2e-p5fix-main; IN1=e2e-p5fix-in1; IN2=e2e-p5fix-in2; HOST1=e2e-p5fix-host1
 ARCH=""
 PASS=0; FAILN=0; BLOCKED=0
 TMPD=$(mktemp -d "${TMPDIR:-/tmp}/e2e-p5.XXXXXX")
@@ -26,7 +26,7 @@ BEFORE=$(names)
 cleanup() {
   say "cleanup (drops only computers this run created)"
   local made c
-  made=$(comm -13 <(echo "$BEFORE") <(names) | grep -E '^e2e-p5-' ; [ -n "$ARCH" ] && echo "$ARCH")
+  made=$(comm -13 <(echo "$BEFORE") <(names) | grep -E '^e2e-p5fix-' ; [ -n "$ARCH" ] && echo "$ARCH")
   made=$(echo "$made" | sort -u | grep -v '^$')
   for c in $made; do "$SILO" stop "$c" >/dev/null 2>&1; done
   for round in 1 2 3 4; do
@@ -72,16 +72,18 @@ echo "== create, start, install"
 echo "guest: $(xr $MAIN '. /etc/os-release; echo $PRETTY_NAME; uname -m' | tr '\n' ' ')"
 out=$("$SILO" guest-client install $MAIN --agent openclaw --binary "$GUESTBIN" 2>&1); rc=$?; echo "$out"; check "guest-client install --binary (upload of the guest binary)" $rc ""
 if [ $rc -ne 0 ]; then
-  echo "-- install --binary failed; token file after the failed install: $(xr $MAIN 'ls -l /etc/silo/guest-client.json 2>&1')"
-  echo "-- retrying the same upload once: $("$SILO" guest-client install $MAIN --agent openclaw --binary "$GUESTBIN" 2>&1 | tr '\n' ' ')"
-  xr $MAIN 'test -e /etc/silo/guest-client.json' || "$SILO" guest-client install $MAIN --agent openclaw
-  echo "-- workaround for the rest of the check: pushing the binary through silo exec (gzip+base64 chunks), not a product path"
-  gzip -9c "$GUESTBIN" | base64 | tr -d '\n' | fold -w 90000 > "$TMPD/chunks"
-  xr $MAIN 'rm -f /tmp/silo.gz.b64'
-  while IFS= read -r chunk || [ -n "$chunk" ]; do "$SILO" exec $MAIN --timeout 60 -- sudo bash -c "printf %s $chunk >> /tmp/silo.gz.b64" >/dev/null || break; done < "$TMPD/chunks"
-  xr $MAIN 'base64 -d /tmp/silo.gz.b64 | gunzip > /tmp/silo.bin && install -m 0755 -o root -g root /tmp/silo.bin /usr/local/bin/silo && rm -f /tmp/silo.bin /tmp/silo.gz.b64'
-  check "guest binary pushed by chunks (workaround)" $? "sha256 in guest $(xr $MAIN 'sha256sum /usr/local/bin/silo' | cut -c1-16)"
+  echo "-- token file after the failed install: $(xr $MAIN 'ls -l /etc/silo/guest-client.json 2>&1')"
+  echo "-- guest-client status after the failed install: $("$SILO" guest-client status $MAIN 2>&1 | tr '\n' ' ')"
 fi
+out=$(xr $MAIN 'sha256sum /usr/local/bin/silo | cut -c1-16'); echo "guest binary sha256 prefix: $out (host: $(shasum -a 256 "$GUESTBIN" | cut -c1-16))"
+[ "$out" = "$(shasum -a 256 "$GUESTBIN" | cut -c1-16)" ]; check "installed binary matches the uploaded one" $? ""
+echo "-- install with a missing file leaves no token (atomic):"
+xr $MAIN 'rm -f /etc/silo/guest-client.json'; "$SILO" guest-client revoke $MAIN >/dev/null 2>&1
+out=$("$SILO" guest-client install $MAIN --agent openclaw --binary "$TMPD/does-not-exist" 2>&1); rc2=$?; echo "$out"
+[ $rc2 -ne 0 ]; check "install --binary with a missing file fails" $? ""
+xr $MAIN 'test ! -e /etc/silo/guest-client.json'; check "no token file after the failed install" $? ""
+"$SILO" guest-client status $MAIN 2>&1 | head -3
+out=$("$SILO" guest-client install $MAIN --agent openclaw --binary "$GUESTBIN" 2>&1); rc=$?; echo "$out"; check "guest-client install --binary (second, real install)" $rc ""
 "$SILO" guest-client status $MAIN
 xr $MAIN "echo $FRAME_B64 | base64 -d > /usr/local/bin/p5frame.py; command -v python3; ls -l /usr/local/bin/silo /etc/silo/guest-client.json; /usr/local/bin/silo --version"
 MAIN_ID=$("$SILO" status $MAIN --json | python3 -c "import json,sys;print(json.load(sys.stdin)['id'])")
@@ -90,8 +92,8 @@ echo "host bridge folder: $(ls -ld "$RUNTIME/sandboxes/$MAIN/runtime/silo-bridge
 as_account() { # label, runner (xr|xu)
   local who=$1 run=$2
   echo "== inside the guest as $who"
-  out=$($run $MAIN 'ls -ld /.msb/silo-bridge /.msb/silo-bridge/req /.msb/silo-bridge/resp; id -un; ls -l /etc/silo/guest-client.json; test -r /etc/silo/guest-client.json && echo token-readable' 2>&1); echo "$out"
-  echo "$out" | grep -q 'token-readable'; check "[$who] bridge folders exist, token file readable" $([ "$(echo "$out" | grep -c 'silo-bridge')" -ge 3 ] && echo "$out" | grep -q token-readable; echo $?) ""
+  out=$($run $MAIN 'ls -ld /.msb /.msb/silo-bridge /.msb/silo-bridge/req /.msb/silo-bridge/resp; id -un; ls -l /etc/silo/guest-client.json; test -r /etc/silo/guest-client.json && echo token-readable; test -x /.msb/silo-bridge && test -w /.msb/silo-bridge/req && test -x /.msb/silo-bridge/resp && echo folders-reachable' 2>&1); echo "$out"
+  echo "$out" | grep -q 'token-readable' && echo "$out" | grep -q 'folders-reachable'; check "[$who] bridge folders reachable (search silo-bridge, write req, enter resp), token file readable" $? ""
   out=$($run $MAIN 'silo --in-guest list' 2>&1); rc=$?; echo "$out"
   [ $rc = 0 ] && echo "$out" | grep -q "$MAIN"; check "[$who] silo --in-guest list shows $MAIN" $? "rc=$rc"
   [ $rc = 0 ] && [ $who = silo ] && SILO_OK=1
@@ -102,22 +104,7 @@ as_account silo xu
 
 echo "== fork from inside (root), change, diff, request"
 out=$(xr $MAIN "silo --in-guest fork $MAIN --name $IN1" 2>&1); rc=$?; echo "$out"
-if [ $rc -ne 0 ]; then
-  check "[root] in-guest fork $IN1 (first attempt)" $rc ""
-  say "retrying once after 30 s; engine log tail:"; tail -n 5 "$ENGINE_LOG" | cut -c1-300; sleep 30
-  "$SILO" list | grep -q "$IN1" && { say "$IN1 exists after the failed attempt; dropping the leftover"; "$SILO" stop $IN1 >/dev/null 2>&1; "$SILO" drop $IN1 --force 2>&1; }
-  out=$(xr $MAIN "silo --in-guest fork $MAIN --name $IN1" 2>&1); rc=$?; echo "$out"
-  check "[root] in-guest fork $IN1 (retry)" $rc ""
-  if [ $rc -ne 0 ]; then
-    echo "-- diagnosis: does a plain host fork of the running $MAIN work after a bridge call?"
-    out=$("$SILO" fork $MAIN --name $HOST1 2>&1); echo "host fork of running $MAIN: rc=$? $out"
-    say "workaround for the remaining steps: stop $MAIN, fork it on the host (stopped forks work), start all"
-    "$SILO" stop $MAIN >/dev/null 2>&1
-    "$SILO" fork $MAIN --name $IN1 2>&1 | tail -1; "$SILO" fork $MAIN --name $HOST1 2>&1 | tail -1
-    "$SILO" start $MAIN >/dev/null 2>&1; "$SILO" start $IN1 >/dev/null 2>&1; "$SILO" start $HOST1 >/dev/null 2>&1; "$SILO" list | grep p5-
-    HOSTMADE=1
-  fi
-else check "[root] in-guest fork $IN1" $rc ""; fi
+check "[root] in-guest fork $IN1" $rc ""
 "$SILO" list | grep "$IN1"
 out=$(xr $MAIN 'silo --in-guest list' 2>&1); echo "$out"; echo "$out" | grep -q "$IN1"; check "[root] list now shows $IN1" $? ""
 "$SILO" exec $IN1 --timeout 60 -- sudo touch /root/p5-in-guest; check "change in fork ($IN1: /root/p5-in-guest)" $? ""
@@ -129,7 +116,7 @@ REQ_ID=$(echo "$out" | awk -v f="$IN1" '$0 ~ f {print $1; exit}')
 echo "== fork from inside as the non-root silo user"
 if [ $SILO_OK = 1 ]; then
 out=$(xu $MAIN "silo --in-guest fork $MAIN --name $IN2" 2>&1); rc=$?; echo "$out"; check "[silo] in-guest fork $IN2" $rc ""
-out=$(xu $MAIN "silo --in-guest diff $IN2; silo --in-guest status" 2>&1); rc=$?; echo "$out" | head -20; check "[silo] in-guest diff/status of own fork" $rc ""
+out=$(xu $MAIN "silo --in-guest diff $IN2; silo --in-guest status $MAIN" 2>&1); rc=$?; echo "$out" | head -20; check "[silo] in-guest diff/status of own fork" $rc ""
 out=$(xu $MAIN "silo --in-guest fold $IN2 --request" 2>&1); rc=$?; echo "$out"; check "[silo] fold --request" $rc ""
 else echo "skipped: the silo user cannot reach the bridge (FAIL above); the remaining silo-user checks stop here"; fi
 
@@ -160,11 +147,12 @@ for run in xr xu; do
 done
 
 echo "== ownership: a fork made on the host"
-if "$SILO" list | grep -q "$HOST1"; then rc=0; out="(already made by the workaround above)"; else out=$("$SILO" fork $MAIN --name $HOST1 2>&1); rc=$?; fi; echo "$out"
-[ $rc -ne 0 ] && { sleep 20; out=$("$SILO" fork $MAIN --name $HOST1 2>&1); rc=$?; echo "retry: $out"; }
-check "host fork $HOST1" $rc ""
+out=$("$SILO" fork $MAIN --name $HOST1 2>&1); rc=$?; echo "$out"
+check "host fork of running $MAIN after bridge calls (checkpoint of a running computer)" $rc ""
 "$SILO" start $HOST1 >/dev/null 2>&1; HOST1_ID=$("$SILO" status $HOST1 --json | python3 -c "import json,sys;print(json.load(sys.stdin)['id'])")
 echo "$HOST1 id $HOST1_ID"
+out=$(xr $HOST1 'ls -l /etc/silo/ 2>&1; test ! -e /etc/silo/guest-client.json && echo token-file-absent' 2>&1); echo "$out"
+echo "$out" | grep -q token-file-absent; check "token file gone in the host-made fork $HOST1" $? ""
 out=$(xr $MAIN 'silo --in-guest list' 2>&1); echo "$out" | grep -q "$HOST1"; [ $? -ne 0 ]; check "[root] list does not show the host's fork" $? ""
 out=$(xr $MAIN "silo --in-guest diff $HOST1" 2>&1); rc=$?; echo "diff $HOST1 -> rc=$rc: $out"; [ $rc -ne 0 ]; check "diff of host fork refused/not found" $? ""
 for m in computers.stop computers.start changes.diff; do
@@ -197,20 +185,18 @@ echo "== the fork's token"
 out=$(xr $IN1 'ls -l /etc/silo/ 2>&1; test ! -e /etc/silo/guest-client.json && echo token-file-absent' 2>&1); echo "$out"
 echo "$out" | grep -q token-file-absent; check "token file gone in $IN1" $? ""
 CP=$(xr $MAIN 'base64 -w0 /etc/silo/guest-client.json')
-xr $IN1 "install -d -m 0755 /etc/silo && echo $CP | base64 -d > /etc/silo/guest-client.json && chgrp silo /etc/silo/guest-client.json && chmod 0640 /etc/silo/guest-client.json && ls -l /etc/silo/guest-client.json"
-out=$(xr $IN1 'silo --in-guest list' 2>&1); rc=$?; echo "parent's token copied into $IN1: rc=$rc: $out"
-[ $rc -ne 0 ] && ! echo "$out" | grep -q "$MAIN"; check "copied parent token refused in the fork (vacuous for a host-made fork: it has no bridge folder)" $? "rc=$rc"
+out=$("$SILO" guest-client install $IN1 --agent openclaw 2>&1); rc=$?; echo "$out"; check "install the client into $IN1 (gives it a bridge folder and its own token)" $rc ""
+xr $IN1 'ls -ld /.msb/silo-bridge'
+out=$(xr $IN1 'silo --in-guest list' 2>&1); rc=$?; echo "$IN1 with its own token: rc=$rc: $out"
+[ $rc = 0 ] && echo "$out" | grep -q "$IN1"; check "$IN1's own token works there" $? ""
+xr $IN1 "echo $CP | base64 -d > /etc/silo/guest-client.json && chgrp silo /etc/silo/guest-client.json && chmod 0640 /etc/silo/guest-client.json && ls -l /etc/silo/guest-client.json"
+out=$(xr $IN1 'W=20 silo --in-guest list' 2>&1); rc=$?; echo "parent's token copied into $IN1: rc=$rc: $out"
+[ $rc -ne 0 ] && ! echo "$out" | grep -q "$MAIN"; check "copied parent token refused in the fork (which has a bridge folder)" $? "rc=$rc"
 xr $IN1 'rm -f /etc/silo/guest-client.json'
 
 echo "== promote on the host: the old main's token ends"
 N0=$(names); "$SILO" list
 out=$("$SILO" fold $IN1 --promote 2>&1); rc=$?; echo "$out"; check "silo fold $IN1 --promote (computers running)" $rc ""
-if [ $rc -ne 0 ]; then
-  say "retry with $MAIN, $IN1 and $HOST1 stopped (workaround)"
-  for c in $HOST1 $IN1 $MAIN; do "$SILO" stop $c >/dev/null 2>&1; done
-  out=$("$SILO" fold $IN1 --promote 2>&1); rc=$?; echo "$out"; check "silo fold $IN1 --promote (computers stopped)" $rc ""
-  "$SILO" start $IN1 >/dev/null 2>&1; "$SILO" start $MAIN >/dev/null 2>&1
-fi
 N1=$(names); "$SILO" list
 ARCH=$(comm -13 <(echo "$N0") <(echo "$N1") | head -1); echo "archived old main is named: [$ARCH]"
 "$SILO" guest-client status $MAIN 2>&1 | head -5   # the name now belongs to the promoted fork
