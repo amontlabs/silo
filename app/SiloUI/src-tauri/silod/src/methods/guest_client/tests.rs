@@ -88,7 +88,7 @@ async fn enable_refuses_an_unknown_computer() {
 }
 
 #[tokio::test]
-async fn a_delete_promote_or_undo_revokes_through_the_same_helper() {
+async fn a_promote_or_undo_revokes_through_one_helper_that_reports_failure() {
     let _held = TOKENS
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -98,7 +98,7 @@ async fn a_delete_promote_or_undo_revokes_through_the_same_helper() {
     )
     .await
     .unwrap();
-    super::revoke_for(&request_context(), &[COMPUTER]);
+    super::revoke_for(&request_context(), &[COMPUTER]).unwrap();
     let status = call(
         MethodName::GuestClientStatus,
         json!({"computerId": COMPUTER}),

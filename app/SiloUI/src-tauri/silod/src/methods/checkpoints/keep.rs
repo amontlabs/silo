@@ -64,7 +64,10 @@ pub(super) async fn undo(
 ) -> Result<HandlerOutput, DispatchError> {
     let params: ChangesUndoParams = context.decode_params(params)?;
     require_local_device(context, params.device_id.as_deref())?;
-    crate::methods::guest_client::revoke_for(context, &[params.computer_id.as_str()]);
+    // An undo swaps two computers, so both lose their tokens.
+    let swapped = crate::methods::guest_client::swap_participants(context, &params.computer_id);
+    let swapped: Vec<&str> = swapped.iter().map(String::as_str).collect();
+    crate::methods::guest_client::revoke_for(context, &swapped)?;
     let host = context.silod_context().runtime_host();
     let checkpoints = checkpoint_service(context);
     let manifests = store::production(host.clone());
@@ -90,7 +93,7 @@ pub(super) async fn promote(
     let target = params.target_id.clone().or(source);
     let mut swapped = vec![params.fork_id.as_str()];
     swapped.extend(target.as_deref());
-    crate::methods::guest_client::revoke_for(context, &swapped);
+    crate::methods::guest_client::revoke_for(context, &swapped)?;
     let host = context.silod_context().runtime_host();
     let request = promote::Request {
         fork: params.fork_id,

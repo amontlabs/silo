@@ -115,7 +115,7 @@ impl Link {
             }
             if begun.elapsed() > CALL_WAIT {
                 return Err(CliError::new(
-                    "Silo did not answer in time. Is the computer running with its engine open?",
+                    "Silo did not answer in time. Is Silo's engine running, and is this computer's token current? (A call with a token the engine does not know is dropped without an answer; `silo guest-client status` on the Mac says.)",
                 ));
             }
             tokio::time::sleep(POLL).await;

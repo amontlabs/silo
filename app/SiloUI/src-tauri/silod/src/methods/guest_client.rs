@@ -125,11 +125,31 @@ async fn status(params: &Value, context: &HandlerContext) -> Result<HandlerOutpu
 
 /// Removes the tokens of computers whose standing changed: a promote or undo swaps which
 /// computer is main, so the agent that held a token must be given a new one on purpose.
-pub(super) fn revoke_for(context: &HandlerContext, computers: &[&str]) {
+/// A revoke that fails fails the operation that asked for it.
+pub(super) fn revoke_for(
+    context: &HandlerContext,
+    computers: &[&str],
+) -> Result<(), DispatchError> {
     let store = TokenStore::new(&context.silod_context().paths().app_data);
-    if let Err(error) = store.revoke(computers) {
-        eprintln!("silod: could not revoke guest client tokens: {error}");
+    store.revoke(computers).map(|_| ()).map_err(|error| {
+        DispatchError::internal(format!(
+            "The guest client tokens could not be revoked, so nothing was changed: {error}"
+        ))
+    })
+}
+
+/// Every computer the promotes in force tie to `id`, and `id` itself: an undo swaps two.
+pub(super) fn swap_participants(context: &HandlerContext, id: &str) -> Vec<String> {
+    let journal = silo_engine::changes::promote::service::journal_for(context.engine_context());
+    let mut found = vec![id.to_owned()];
+    for record in journal.live_for(id) {
+        for other in [record.swap.fork_id, record.swap.target_id] {
+            if !found.contains(&other) {
+                found.push(other);
+            }
+        }
     }
+    found
 }
 
 #[cfg(test)]
