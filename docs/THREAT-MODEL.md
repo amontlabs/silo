@@ -377,8 +377,8 @@ methods through the `/.msb/silo-bridge` folder. The engine serves it from
 [`guest_client/scope.rs`](../app/SiloUI/src-tauri/engine/src/guest_client/scope.rs).
 
 What the token can do: fork its own computer (secrets only those the settings list for that agent,
-none by default; at most 32 forks per token and 3 running), start, stop and diff the forks it
-asked for, ask for review of those forks, read the review requests and steps of itself and those
+none by default; at most 32 forks per token and 3 running or starting), start, stop and diff the
+forks it made, ask for review of those forks, read the review requests and steps of itself and those
 forks, and follow the jobs it started. Forks the person made, or another token made, are not
 reachable, and list results hold only the computer and its own forks.
 
@@ -386,7 +386,7 @@ What it cannot do, and the engine refuses before any handler runs: keep, promote
 or drop (`changes.keep`, `changes.promote`, `changes.undo`, `changes.requests.keep`,
 `changes.requests.throwAway`, `computers.delete`), change secrets or GitHub access, run commands or
 move files in any computer, publish ports, act for another device, act on a computer that is
-neither itself nor a fork it asked for, or mint, revoke or read tokens. It cannot make checkpoints,
+neither itself nor a fork it made, or mint, revoke or read tokens. It cannot make checkpoints,
 capture or baseline either. `fold` and `auto_keep` are not part of its policy: nothing is kept from
 inside.
 
@@ -412,11 +412,17 @@ secret, GitHub token or other computer's data.
   `openat(O_NOFOLLOW | O_DIRECTORY)` through directory descriptors (`rustix`), afresh each pass,
   and stops serving a computer whose folder is a link. Request files are regular files only
   (checked after opening), at most 256 KiB, `<32 hex>.json` names only; answers are written `0600`
-  by rename. At most 64 answers wait unread and a full folder drops new requests. The share itself
+  by rename. At most 64 answers wait unread and a full folder drops new requests; a call with no
+  valid token gets no answer; at most 256 directory entries are examined per look. The share itself
   still has no security review (boundary 6); this adds a parser of guest-written JSON on the Mac.
-- **Other guest users.** `req/` is `1733` and `resp/` `0711`, requests and answers `0600`, so a
-  guest user other than the token's owner cannot list or read them (VM check pending for the
-  share's uid mapping).
+- **Other guest users.** `req/` is `1733` and `resp/` `0711`, requests and answers `0600`; the
+  engine gives each answer the stat override of the user that wrote the request, so that user
+  (and root) reads it and no other guest user does. The override format is taken from MicroSandbox
+  0.7.6 source and is not yet checked in a running guest.
+- **Forks and jobs.** A fork is the token's only after its job finished and the fork exists below
+  the computer (recorded by id); forks the person made are never reachable, and a failed fork
+  never claims a computer. A token holds at most 32 forks, 3 running or starting, and 16
+  unacknowledged jobs.
 - **Logging.** The engine writes one line per call to its log: the computer, the method (only a
   name from the allow-list; anything else is logged as "not offered"), and whether it was refused.
   Parameters and tokens are not logged, and a call with a bad token is logged without its method.

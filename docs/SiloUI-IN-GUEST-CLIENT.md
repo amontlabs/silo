@@ -101,13 +101,19 @@ method. Per call:
 | Method | Allowed when |
 | --- | --- |
 | `computers.list`, `computers.tree`, `changes.requests.list` | always; the parameters are dropped, and the result holds only this computer and the forks its token asked for (`computers.list` returns just `linux.computers` and `macos.computers`) |
-| `checkpoints.fork` | `computerId` is the caller, the token has asked for fewer than 32 forks and fewer than 3 of them run. Only `computerId`, `newName` and `secrets` are passed on: `secrets` may name only what the agent's `fork_secrets` lists; the current state is forked (no checkpoint, no recipe hash); `quiet` is fixed to scrubbing the token file. The fork's name is recorded for the token. |
-| `computers.start` | the computer is a fork this token asked for, and fewer than 3 of them run |
-| `computers.stop`, `computers.credentials`, `changes.diff` | the computer is a fork this token asked for (never the caller, never a fork the person or another token made) |
-| `steps.list` | the caller or a fork this token asked for |
-| `changes.request` | `forkId` is a fork this token asked for and `targetId` is absent or the caller |
-| `changes.requests.show` | the request is about a fork this token asked for |
-| `operations.job.get`, `operations.job.acknowledge` | the job was started by this computer's client since the engine started |
+| `checkpoints.fork` | `computerId` is the caller; the token holds fewer than 32 forks (made and being made) and fewer than 3 are running or starting (a fork being made counts); `newName` is not a computer's name, not being made, and not one Silo reserves (`silo-build-`, `silo-baseline-`). Only `computerId`, `newName` and `secrets` are passed on: `secrets` may name only what the agent's `fork_secrets` lists; the current state is forked (no checkpoint, no recipe hash); `quiet` is fixed to scrubbing the token file. |
+| `computers.start` | the computer is a fork this token made, and fewer than 3 are running or starting (the start is held against the cap at once, until the fork shows running, is stopped, or five minutes pass) |
+| `computers.stop`, `computers.credentials`, `changes.diff` | the computer is a fork this token made (never the caller, never a fork the person or another token made) |
+| `steps.list` | the caller or a fork this token made |
+| `changes.request` | `forkId` is a fork this token made and `targetId` is absent or the caller |
+| `changes.requests.show` | the request is about a fork this token made |
+| `operations.job.get`, `operations.job.acknowledge` | the job was started by this token, which stays on record with the token (so it survives an engine restart) |
+
+A fork is the token's only once its job finished without error and a computer of that name exists
+below the caller; the token records the fork by id then. A fork that failed, never got a job (after
+two minutes), or whose computer is gone is dropped from the record. A token holds at most 16 jobs it
+has not acknowledged; a job over half an hour old that the client never acknowledged is
+acknowledged for it once it has finished.
 
 Not offered: `checkpoints.create`, `changes.capture` and `changes.baseline` (the guest CLI does not
 use them). A `deviceId` other than the local device is refused. Nothing is kept from inside whatever
@@ -124,9 +130,12 @@ runs; each running fork uses the memory it was created with and the engine adds 
   It does show the `fork_secrets` the token was minted with, and `silo guest-client status`
   warns when the settings now say something else.
 - **Revoke**: `guestClient.revoke`, or any promote, undo or delete that involves the computer
-  (`changes.promote` revokes the fork's and its target's tokens, `changes.undo` and
-  `computers.delete` the computer's). The agent in the old main loses access on purpose; run
-  `install` again for the computer that should have it.
+  (`changes.promote` revokes the fork's and its target's tokens; `changes.undo` revokes both
+  computers of the promote it takes back, read from the promote journal). A revoke that fails
+  fails the promote or undo before anything changes. The agent in the old main loses access on
+  purpose; run `install` again for the computer that should have it.
+- **Delete**: a token whose computer is no longer listed is removed the next time the bridge looks
+  at the computers, so it ends after the delete succeeded, not before.
 - **Forks**: a fork's own bridge folder is checked against the fork's id, and a token verifies only
   for the computer it was minted for. A copy of the token file in a fork is therefore refused, and
   forks made from inside also have the file scrubbed.
@@ -140,15 +149,26 @@ because the workspace already builds `rustix`, and it needs only `openat`, `unli
 and `statat`), afresh in every pass. A guest that replaces one of them with a link makes the
 bridge stop serving that computer; it does not reach outside the folder. Each request file is
 opened without following links and checked with `fstat` (regular, at most 256 KiB). In `req/` only
-`<32 hex>.json` names are served and anything else is removed; in `resp/` the sweep removes every
-answer older than ten minutes and anything that is not `<id>.json` or `<id>.tmp`. At most 64 answers
-may wait unread, after which new requests are removed without an answer.
+`<32 hex>.json` names are served; a `<id>.json.tmp` still being written is left for ten seconds and
+then removed, and anything else is removed. No more than 256 entries of `req/` or `resp/` are looked
+at in a pass, and every one counts: more than that in `resp/` counts as full, and in `req/` the rest
+waits for the next pass. In `resp/` the sweep removes every answer older than ten minutes and
+anything that is not `<id>.json` or `<id>.tmp`. At most 64 answers may wait unread, after which new
+requests are removed without an answer. A request with a bad token or one that cannot be read gets
+no answer at all, so a guest without a valid token cannot fill `resp/`; the client then reports that
+Silo did not answer.
 
-Modes: `silo-bridge` is `0755`; `req/` is `1733` (any guest user can create a request and cannot
-list or remove another's); `resp/` is `0711` (entered by name, not listed; the name is the
-request's random id). The client writes requests `0600` and the engine writes answers `0600`, so a
-guest user other than the token's owner cannot read either. Whether a non-root agent can create in
-`req/` and read its answer through the share's uid mapping is part of the VM check.
+Modes and owners: `silo-bridge` is `0755`, `req/` is `1733` and `resp/` is `0711`, and the engine
+sets the runtime's stat override (`user.msb.override_stat`, 20 bytes: version 1, uid, gid, mode,
+rdev, as in MicroSandbox's `passthroughfs/stat_override.rs`) on each so the guest sees them owned by
+root. Host files otherwise show the host user's identity, so an answer would not be readable to a
+non-root agent. The engine therefore reads the override the guest wrote on the request file (the
+agent user's uid and gid) and writes the answer with an override naming that user, mode `0600`. The
+client writes requests `0600`. A guest user other than the requester cannot read the answer, and
+`1733` keeps users from removing each other's requests. If the host file system keeps no extended
+attributes, the setting is skipped and answers show the runtime's default owner (root's), which is
+the root-only case. The override format is read from MicroSandbox 0.7.6 source; it is not yet
+checked in a running guest.
 
 ## Open items
 
