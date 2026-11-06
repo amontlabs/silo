@@ -550,6 +550,9 @@ pub async fn refresh_ssh_name(
 
 /// `silo up`: makes `ssh main.silo` work. A failure is reported in the result, not raised.
 pub async fn ssh_for_up(engine: &Engine, value: &mut Value, home: &Path, channel: Channel) {
+    if engine.device().is_some() {
+        return;
+    }
     value["ssh"] = match ssh_setup(engine, crate::ops::MAIN, home, channel).await {
         Ok(ssh) => ssh,
         Err(error) => json!({ "error": error.message }),
@@ -559,6 +562,9 @@ pub async fn ssh_for_up(engine: &Engine, value: &mut Value, home: &Path, channel
 /// After a promote or an undo of one: the name `main.silo` is written again for the
 /// computer that now has the name, when it was written before.
 pub async fn ssh_after_change(engine: &Engine, value: &mut Value, home: &Path, channel: Channel) {
+    if engine.device().is_some() {
+        return;
+    }
     let name = match value["status"].as_str() {
         Some("promoted") => value["report"]["target"].as_str(),
         Some("undone") if value["kind"] == "promote" => value["computer"].as_str(),

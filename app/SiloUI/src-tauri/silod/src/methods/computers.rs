@@ -623,8 +623,9 @@ fn wire_word<T: Serialize>(value: &T) -> String {
 /// `computers.tree`: how the computers descend from each other (see `silo_engine::computer_tree`).
 async fn read_tree(
     context: &HandlerContext,
-    _params: ComputersTreeParams,
+    params: ComputersTreeParams,
 ) -> Result<HandlerOutput, DispatchError> {
+    require_local_device(context, params.device_id.as_deref())?;
     let listed = read_computers(
         context,
         ComputerListParams {

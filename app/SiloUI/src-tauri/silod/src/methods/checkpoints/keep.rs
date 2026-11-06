@@ -20,13 +20,17 @@ use silo_engine::{
 
 use crate::dispatcher::{DispatchError, HandlerOutput};
 
-use super::{failure, message_error, output, service as checkpoint_service, HandlerContext};
+use super::{
+    failure, message_error, output, require_local_device, service as checkpoint_service,
+    HandlerContext,
+};
 
 pub(super) async fn keep(
     context: &HandlerContext,
     params: &Value,
 ) -> Result<HandlerOutput, DispatchError> {
     let params: ChangesKeepParams = context.decode_params(params)?;
+    require_local_device(context, params.device_id.as_deref())?;
     let host = context.silod_context().runtime_host();
     let hooks = params.keep.map(|h| Hooks {
         restart: h.restart,
@@ -59,6 +63,7 @@ pub(super) async fn undo(
     params: &Value,
 ) -> Result<HandlerOutput, DispatchError> {
     let params: ChangesUndoParams = context.decode_params(params)?;
+    require_local_device(context, params.device_id.as_deref())?;
     let host = context.silod_context().runtime_host();
     let checkpoints = checkpoint_service(context);
     let manifests = store::production(host.clone());
@@ -78,6 +83,7 @@ pub(super) async fn promote(
     params: &Value,
 ) -> Result<HandlerOutput, DispatchError> {
     let params: ChangesPromoteParams = context.decode_params(params)?;
+    require_local_device(context, params.device_id.as_deref())?;
     let host = context.silod_context().runtime_host();
     let request = promote::Request {
         fork: params.fork_id,
@@ -103,6 +109,7 @@ pub(super) async fn request(
     params: &Value,
 ) -> Result<HandlerOutput, DispatchError> {
     let params: ChangesRequestParams = context.decode_params(params)?;
+    require_local_device(context, params.device_id.as_deref())?;
     let target = match params.target_id.filter(|id| !id.is_empty()) {
         Some(target) => target,
         None => super::requests::fork_source(context, &params.fork_id)

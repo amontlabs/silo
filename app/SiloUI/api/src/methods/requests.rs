@@ -820,7 +820,7 @@ pub fn recipes_build(params: recipes::RecipeBuildParams) -> Request<kind::Job> {
 }
 
 /// `recipes.list`
-pub fn recipes_list(params: common::EmptyParams) -> Request<kind::Query> {
+pub fn recipes_list(params: common::DeviceParams) -> Request<kind::Query> {
     Request::new(MethodParams::RecipesList(params))
 }
 
