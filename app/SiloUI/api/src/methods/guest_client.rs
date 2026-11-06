@@ -11,10 +11,9 @@ pub const MAX_FRAME_BYTES: usize = 256 * 1024;
 
 wire_struct! {
     /// What the project settings allow the agent, resolved on the host when the token is
-    /// minted (the engine has no project folder of its own).
+    /// minted (the engine has no project folder of its own). The in-guest client never keeps,
+    /// so `fold` and `auto_keep` are not part of it.
     GuestClientPolicy {
-        /// `ask` or `auto-code`. The in-guest client never keeps either way.
-        fold: String,
         /// Secret names (`github` included) a fork made from inside may name. Empty by default.
         #[serde(default)]
         fork_secrets: Vec<String>,

@@ -7,10 +7,21 @@ use std::collections::HashSet;
 use serde_json::{json, Value};
 use silo_api::methods::guest_client::{GuestClientPolicy, GUEST_TOKEN_PATH};
 
+use super::tokens::MAX_FORKS;
+
+/// The most of its forks one token may have running at once. Each counts as the memory it was
+/// created with; the engine does not limit their total.
+pub const MAX_RUNNING: usize = 3;
+
 /// What the scope check needs to know about the machine.
 pub trait Topology {
-    /// Every computer made from `computer`, directly or through other forks (not `computer`).
-    fn descendants(&self, computer: &str) -> HashSet<String>;
+    /// The forks of `caller` that its token asked for and that still exist. Forks the person
+    /// made, or that another token made, are not among them.
+    fn created(&self, caller: &str) -> HashSet<String>;
+    /// How many of those are running.
+    fn running(&self, caller: &str) -> usize;
+    /// How many forks this token has asked for in all.
+    fn forks_asked(&self, caller: &str) -> usize;
     /// The fork a review request is about.
     fn request_fork(&self, request_id: &str) -> Option<String>;
     /// Whether this caller started the job.
@@ -49,10 +60,7 @@ pub const ALLOWED: &[&str] = &[
     "computers.start",
     "computers.stop",
     "computers.credentials",
-    "checkpoints.create",
     "checkpoints.fork",
-    "changes.capture",
-    "changes.baseline",
     "changes.diff",
     "changes.request",
     "changes.requests.list",
@@ -120,15 +128,21 @@ pub fn authorize(
             starts_job,
         })
     };
-    let forks = topology.descendants(caller);
+    let forks = topology.created(caller);
     match method {
-        "computers.list" => allowed(params, Filter::Computers, false),
-        "computers.tree" => allowed(params, Filter::Tree, false),
+        // Only the two lists the client reads; nothing else the caller sends is passed on.
+        "computers.list" => allowed(json!({}), Filter::Computers, false),
+        "computers.tree" => allowed(json!({}), Filter::Tree, false),
         "computers.start" | "computers.stop" | "computers.credentials" => {
             fork_of_caller(&params, "computerId", &forks, "That computer")?;
+            if method == "computers.start" && topology.running(caller) >= MAX_RUNNING {
+                return refuse(format!(
+                    "{MAX_RUNNING} of this computer's forks are running; stop one first."
+                ));
+            }
             allowed(params, Filter::None, method != "computers.credentials")
         }
-        "changes.capture" | "changes.baseline" | "changes.diff" => {
+        "changes.diff" => {
             fork_of_caller(&params, "computerId", &forks, "That computer")?;
             allowed(params, Filter::None, true)
         }
@@ -138,17 +152,21 @@ pub fn authorize(
             }
             allowed(params, Filter::None, false)
         }
-        "checkpoints.create" => {
-            if text(&params, "computerId") != Some(caller) {
-                return refuse("A checkpoint can be made of this computer only.");
-            }
-            allowed(params, Filter::None, true)
-        }
         "checkpoints.fork" => {
             if text(&params, "computerId") != Some(caller) {
                 return refuse("A fork can be made from this computer only.");
             }
-            fork_rewrite(params, policy)
+            if topology.forks_asked(caller) >= MAX_FORKS {
+                return refuse(format!(
+                    "This token has asked for {MAX_FORKS} forks already."
+                ));
+            }
+            if topology.running(caller) >= MAX_RUNNING {
+                return refuse(format!(
+                    "{MAX_RUNNING} of this computer's forks are running; stop one first."
+                ));
+            }
+            fork_rewrite(&params, policy)
         }
         "changes.request" => {
             fork_of_caller(&params, "forkId", &forks, "That fork")?;
@@ -177,7 +195,7 @@ pub fn authorize(
 
 /// A fork made from inside gets no secret or GitHub access the settings did not name, and
 /// loses the token file.
-fn fork_rewrite(mut params: Value, policy: &GuestClientPolicy) -> Result<Authorized, Refusal> {
+fn fork_rewrite(params: &Value, policy: &GuestClientPolicy) -> Result<Authorized, Refusal> {
     if let Some(secrets) = params.get("secrets").and_then(Value::as_array) {
         for secret in secrets {
             let name = secret.as_str().unwrap_or_default();
@@ -188,48 +206,59 @@ fn fork_rewrite(mut params: Value, policy: &GuestClientPolicy) -> Result<Authori
             }
         }
     }
-    let object = params.as_object_mut().expect("checked to be an object");
-    let quiet = object
-        .entry("quiet")
-        .or_insert_with(|| json!({ "stop": [], "scrub": [] }));
-    let quiet = quiet
-        .as_object_mut()
-        .ok_or_else(|| Refusal("quiet must be an object.".into()))?;
-    let scrub = quiet.entry("scrub").or_insert_with(|| json!([]));
-    let scrub = scrub
-        .as_array_mut()
-        .ok_or_else(|| Refusal("quiet.scrub must be a list.".into()))?;
-    if !scrub.iter().any(|path| path == GUEST_TOKEN_PATH) {
-        scrub.push(json!(GUEST_TOKEN_PATH));
+    if params
+        .get("newName")
+        .and_then(Value::as_str)
+        .is_none_or(str::is_empty)
+    {
+        return refuse("A fork needs a name.");
+    }
+    // Built from the fields the client may set: the name and the secrets. The current state is
+    // forked (no checkpoint, no recipe hash), and the quiet list is fixed.
+    let mut fork = json!({
+        "computerId": params["computerId"],
+        "newName": params.get("newName").cloned().unwrap_or(Value::Null),
+        "quiet": { "stop": [], "scrub": [GUEST_TOKEN_PATH] },
+    });
+    if let Some(secrets) = params.get("secrets").filter(|secrets| !secrets.is_null()) {
+        fork["secrets"] = secrets.clone();
     }
     Ok(Authorized {
-        params,
+        params: fork,
         filter: Filter::None,
         starts_job: true,
     })
 }
 
-/// Cuts a result down to the caller and its forks.
+/// Cuts a result down to the caller and the forks its token asked for.
 pub fn filter_result(filter: Filter, result: &mut Value, caller: &str, topology: &dyn Topology) {
-    let mut visible = topology.descendants(caller);
+    let mut visible = topology.created(caller);
     visible.insert(caller.to_owned());
     match filter {
         Filter::None => {}
         Filter::Computers => {
+            // Only the two lists of computers go back, never the rest of the listing.
+            let mut kept = json!({"linux": {"computers": []}, "macos": {"computers": []}});
             for (list, id) in [("linux", "/configuration/id"), ("macos", "/id")] {
                 if let Some(computers) = result
-                    .get_mut(list)
-                    .and_then(|group| group.get_mut("computers"))
-                    .and_then(Value::as_array_mut)
+                    .pointer(&format!("/{list}/computers"))
+                    .and_then(Value::as_array)
                 {
-                    computers.retain(|computer| {
-                        computer
-                            .pointer(id)
-                            .and_then(Value::as_str)
-                            .is_some_and(|found| visible.contains(found))
-                    });
+                    kept[list]["computers"] = Value::Array(
+                        computers
+                            .iter()
+                            .filter(|computer| {
+                                computer
+                                    .pointer(id)
+                                    .and_then(Value::as_str)
+                                    .is_some_and(|found| visible.contains(found))
+                            })
+                            .cloned()
+                            .collect(),
+                    );
                 }
             }
+            *result = kept;
         }
         Filter::Tree => {
             if let Some(nodes) = result.get_mut("nodes").and_then(Value::as_array_mut) {
@@ -260,11 +289,21 @@ mod tests {
     struct World;
 
     impl Topology for World {
-        fn descendants(&self, computer: &str) -> HashSet<String> {
+        fn created(&self, computer: &str) -> HashSet<String> {
             if computer == "main" {
                 ["fork-1", "fork-2"].map(String::from).into()
             } else {
                 HashSet::new()
+            }
+        }
+        fn running(&self, computer: &str) -> usize {
+            usize::from(computer == "busy") * MAX_RUNNING
+        }
+        fn forks_asked(&self, computer: &str) -> usize {
+            if computer == "greedy" {
+                MAX_FORKS
+            } else {
+                2
             }
         }
         fn request_fork(&self, request_id: &str) -> Option<String> {
@@ -281,7 +320,6 @@ mod tests {
 
     fn policy(secrets: &[&str]) -> GuestClientPolicy {
         GuestClientPolicy {
-            fold: "ask".into(),
             fork_secrets: secrets.iter().map(|name| (*name).to_owned()).collect(),
             agent: Some("openclaw".into()),
         }
@@ -342,11 +380,9 @@ mod tests {
             json!({"computerId": "stranger", "newName": "x"})
         )
         .is_err());
-        assert!(check(
-            "checkpoints.create",
-            json!({"computerId": "fork-1", "name": "x"})
-        )
-        .is_err());
+        for method in ["checkpoints.create", "changes.capture", "changes.baseline"] {
+            assert!(check(method, json!({"computerId": "main", "name": "x"})).is_err());
+        }
         assert!(check("changes.diff", json!({"computerId": "fork-2"})).is_ok());
         assert!(check("changes.diff", json!({"computerId": "main"})).is_err());
         assert!(check("changes.diff", json!({"computerId": "stranger"})).is_err());
@@ -393,10 +429,13 @@ mod tests {
 
     #[test]
     fn a_fork_loses_the_token_file_and_gets_only_the_secrets_the_settings_name() {
-        let params = json!({"computerId": "main", "newName": "x", "quiet": {"stop": ["poller"]}});
+        let params = json!({"computerId": "main", "newName": "x", "recipeHash": "h",
+            "checkpointId": "cp", "quiet": {"stop": ["poller"], "scrub": ["/home/x"]}});
         let granted = check("checkpoints.fork", params).unwrap();
-        assert_eq!(granted.params["quiet"]["stop"], json!(["poller"]));
+        assert_eq!(granted.params["quiet"]["stop"], json!([]));
         assert_eq!(granted.params["quiet"]["scrub"], json!([GUEST_TOKEN_PATH]));
+        assert!(granted.params.get("recipeHash").is_none());
+        assert!(granted.params.get("checkpointId").is_none());
         assert!(granted.starts_job);
         let with_secret = json!({"computerId": "main", "newName": "x", "secrets": ["github"]});
         assert!(check("checkpoints.fork", with_secret.clone()).is_err());
@@ -411,9 +450,20 @@ mod tests {
     }
 
     #[test]
+    fn forks_and_running_forks_are_capped_and_only_the_two_lists_are_asked_for() {
+        let fork = json!({"computerId": "greedy", "newName": "x"});
+        assert!(authorize("greedy", &policy(&[]), "checkpoints.fork", &fork, &World).is_err());
+        let fork = json!({"computerId": "busy", "newName": "x"});
+        assert!(authorize("busy", &policy(&[]), "checkpoints.fork", &fork, &World).is_err());
+        let list = check("computers.list", json!({"refreshRepositories": true})).unwrap();
+        assert_eq!(list.params, json!({}));
+    }
+
+    #[test]
     fn lists_are_cut_to_the_caller_and_its_forks() {
         let mut computers = json!({
-            "linux": {"computers": [
+            "extra": "dropped",
+            "linux": {"other": 1, "computers": [
                 {"configuration": {"id": "main"}}, {"configuration": {"id": "fork-1"}},
                 {"configuration": {"id": "stranger"}}]},
             "macos": {"computers": [{"id": "stranger"}]}

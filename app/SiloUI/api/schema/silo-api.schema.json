@@ -5401,7 +5401,7 @@
       "type": "object"
     },
     "GuestClientPolicy": {
-      "description": "What the project settings allow the agent, resolved on the host when the token is\nminted (the engine has no project folder of its own).",
+      "description": "What the project settings allow the agent, resolved on the host when the token is\nminted (the engine has no project folder of its own). The in-guest client never keeps,\nso `fold` and `auto_keep` are not part of it.",
       "properties": {
         "agent": {
           "description": "The agent name the settings were resolved for.",
@@ -5409,10 +5409,6 @@
             "string",
             "null"
           ]
-        },
-        "fold": {
-          "description": "`ask` or `auto-code`. The in-guest client never keeps either way.",
-          "type": "string"
         },
         "forkSecrets": {
           "default": [],
@@ -5423,9 +5419,6 @@
           "type": "array"
         }
       },
-      "required": [
-        "fold"
-      ],
       "type": "object"
     },
     "GuestClientStatus": {

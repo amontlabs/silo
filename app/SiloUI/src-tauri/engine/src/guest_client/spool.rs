@@ -102,6 +102,11 @@ impl Spool {
             .file_name()
             .and_then(|name| name.to_str())
             .ok_or("The bridge folder has no name.")?;
+        if create && !runtime.exists() {
+            // A computer that has not started yet has no runtime folder; the runtime accepts it.
+            std::fs::create_dir_all(runtime)
+                .map_err(|error| format!("Cannot create the runtime folder: {error}"))?;
+        }
         let root = openat(CWD, runtime, dir_flags(), Mode::empty())
             .map_err(|error| format!("Cannot open the runtime folder: {error}"))?;
         let bridge = sub(&root, name, create.then_some(0o755))?;
@@ -116,6 +121,18 @@ impl Spool {
     /// Creates `silo-bridge/{req,resp}` when missing with their modes. Each must be a real folder.
     pub fn ensure(&self) -> Result<(), String> {
         self.open(true).map(|_| ())
+    }
+
+    /// Whether `req/` holds anything at all (a cheap look, before the engine is asked anything).
+    pub fn has_work(&self) -> bool {
+        self.open(false)
+            .ok()
+            .and_then(|dirs| Dir::read_from(&dirs.req).ok())
+            .is_some_and(|listing| {
+                listing
+                    .flatten()
+                    .any(|entry| !matches!(entry.file_name().to_bytes(), b"." | b".."))
+            })
     }
 
     fn name_id(name: &str) -> Option<String> {
@@ -220,12 +237,15 @@ impl Spool {
             if name == "." || name == ".." {
                 continue;
             }
-            let ours = name.strip_suffix(".json").or_else(|| name.strip_suffix(".tmp"));
+            let ours = name
+                .strip_suffix(".json")
+                .or_else(|| name.strip_suffix(".tmp"));
             let expired = statat(&dirs.resp, name.as_str(), AtFlags::SYMLINK_NOFOLLOW)
                 .map(|stat| {
                     let modified = SystemTime::UNIX_EPOCH
                         + Duration::from_secs(u64::try_from(stat.st_mtime).unwrap_or(0));
-                    now.duration_since(modified).is_ok_and(|age| age > RESPONSE_TTL)
+                    now.duration_since(modified)
+                        .is_ok_and(|age| age > RESPONSE_TTL)
                 })
                 .unwrap_or(true);
             // Anything that is not an answer of ours goes at once; an answer goes when old.
@@ -303,17 +323,28 @@ mod tests {
     fn folders_get_their_modes_and_a_request_is_taken_once_and_answered_privately() {
         let (_dir, spool) = spool();
         let mode = |part: &str| {
-            fs::metadata(spool.dir.join(part)).unwrap().permissions().mode() & 0o7777
+            fs::metadata(spool.dir.join(part))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o7777
         };
         assert_eq!((mode("req"), mode("resp")), (0o1733, 0o711));
-        fs::write(spool.dir.join("req").join(format!("{ID}.json")), request(ID)).unwrap();
+        fs::write(
+            spool.dir.join("req").join(format!("{ID}.json")),
+            request(ID),
+        )
+        .unwrap();
         let taken = spool.take();
         assert_eq!(taken.len(), 1);
         assert_eq!(taken[0].frame.as_ref().unwrap().method, "computers.list");
         assert!(spool.take().is_empty());
         spool.respond(&reply(ID)).unwrap();
         let answer = spool.dir.join("resp").join(format!("{ID}.json"));
-        assert_eq!(fs::metadata(answer).unwrap().permissions().mode() & 0o777, 0o600);
+        assert_eq!(
+            fs::metadata(answer).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
     }
 
     #[test]
@@ -325,7 +356,11 @@ mod tests {
         let other = "fedcba9876543210fedcba9876543210";
         fs::write(req.join(format!("{other}.json")), request(ID)).unwrap();
         let big = "1111111111111111aaaaaaaaaaaaaaaa";
-        fs::write(req.join(format!("{big}.json")), vec![b' '; MAX_FRAME_BYTES + 1]).unwrap();
+        fs::write(
+            req.join(format!("{big}.json")),
+            vec![b' '; MAX_FRAME_BYTES + 1],
+        )
+        .unwrap();
         let taken = spool.take();
         assert_eq!(taken.len(), 3);
         assert!(taken.iter().all(|item| item.frame.is_err()));
@@ -338,7 +373,8 @@ mod tests {
         let mut huge = reply(ID);
         huge.result = Some(serde_json::json!("x".repeat(MAX_FRAME_BYTES)));
         spool.respond(&huge).unwrap();
-        let written = fs::read_to_string(spool.dir.join("resp").join(format!("{ID}.json"))).unwrap();
+        let written =
+            fs::read_to_string(spool.dir.join("resp").join(format!("{ID}.json"))).unwrap();
         assert!(written.contains("too_large"));
     }
 
@@ -363,9 +399,15 @@ mod tests {
             assert!(spool.respond(&reply(ID)).is_err(), "{linked}");
             assert!(spool.ensure().is_err(), "{linked}");
             spool.sweep(SystemTime::now() + RESPONSE_TTL * 2);
-            assert!(outside.join("req").join(format!("{ID}.json")).exists(), "{linked}");
+            assert!(
+                outside.join("req").join(format!("{ID}.json")).exists(),
+                "{linked}"
+            );
             assert!(outside.join("resp").join("keep.me").exists(), "{linked}");
-            assert!(!outside.join("resp").join(format!("{ID}.json")).exists(), "{linked}");
+            assert!(
+                !outside.join("resp").join(format!("{ID}.json")).exists(),
+                "{linked}"
+            );
         }
     }
 
@@ -376,7 +418,11 @@ mod tests {
             let id = format!("{number:032x}");
             fs::write(spool.dir.join("resp").join(format!("{id}.json")), "{}").unwrap();
         }
-        fs::write(spool.dir.join("req").join(format!("{ID}.json")), request(ID)).unwrap();
+        fs::write(
+            spool.dir.join("req").join(format!("{ID}.json")),
+            request(ID),
+        )
+        .unwrap();
         assert!(spool.take().is_empty());
         assert!(!spool.dir.join("req").join(format!("{ID}.json")).exists());
         fs::write(spool.dir.join("resp").join("junk"), "x").unwrap();

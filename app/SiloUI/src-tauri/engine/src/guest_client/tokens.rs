@@ -23,6 +23,23 @@ pub struct Record {
     pub hash: String,
     pub minted_at: String,
     pub policy: GuestClientPolicy,
+    /// Names of the forks this token asked for. Only these are the agent's to start, stop,
+    /// diff or ask review for.
+    #[serde(default)]
+    pub fork_names: Vec<String>,
+}
+
+/// The most forks one token may ask for.
+pub const MAX_FORKS: usize = 32;
+
+/// 32 bytes from the operating system's random source.
+fn random_hex() -> Result<String, String> {
+    let mut bytes = [0u8; 32];
+    // SAFETY: the buffer is 32 bytes, the most getentropy accepts.
+    if unsafe { libc::getentropy(bytes.as_mut_ptr().cast(), bytes.len()) } != 0 {
+        return Err("The system random source is not available.".into());
+    }
+    Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
 }
 
 pub struct Minted {
@@ -117,16 +134,13 @@ impl TokenStore {
             return Err("A guest client token needs a computer.".into());
         }
         let _held = lock();
-        let token = format!(
-            "{PREFIX}{}{}",
-            uuid::Uuid::new_v4().simple(),
-            uuid::Uuid::new_v4().simple()
-        );
+        let token = format!("{PREFIX}{}", random_hex()?);
         let record = Record {
             computer_id: computer_id.to_owned(),
             hash: hash_of(&token),
             minted_at: now(),
             policy,
+            fork_names: Vec::new(),
         };
         let mut records = self.read()?;
         records.retain(|existing| existing.computer_id != computer_id);
@@ -147,6 +161,28 @@ impl TokenStore {
             .ok()?
             .into_iter()
             .find(|record| record.computer_id == computer_id && same(&record.hash, &hash))
+    }
+
+    /// Records that this computer's token asked for a fork named `name`.
+    pub fn note_fork(&self, computer_id: &str, name: &str) -> Result<(), String> {
+        let _held = lock();
+        let mut records = self.read()?;
+        let record = records
+            .iter_mut()
+            .find(|record| record.computer_id == computer_id)
+            .ok_or("This computer has no token.")?;
+        if record.fork_names.iter().any(|known| known == name) {
+            return Ok(());
+        }
+        if record.fork_names.len() >= MAX_FORKS {
+            return Err(format!(
+                "This token has asked for {MAX_FORKS} forks already."
+            ));
+        }
+        if !record.fork_names.iter().any(|known| known == name) {
+            record.fork_names.push(name.to_owned());
+        }
+        self.write(&records)
     }
 
     pub fn status(&self, computer_id: &str) -> Result<Option<Record>, String> {
@@ -182,10 +218,33 @@ mod tests {
 
     fn policy() -> GuestClientPolicy {
         GuestClientPolicy {
-            fold: "ask".into(),
             fork_secrets: vec![],
             agent: None,
         }
+    }
+
+    #[test]
+    fn a_token_is_32_random_bytes_and_remembers_the_forks_it_asked_for_up_to_a_cap() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = TokenStore::new(dir.path());
+        let minted = store.mint("main", policy()).unwrap();
+        assert_eq!(minted.token.len(), PREFIX.len() + 64);
+        assert!(store.note_fork("other", "x").is_err());
+        for number in 0..MAX_FORKS {
+            store.note_fork("main", &format!("f{number}")).unwrap();
+        }
+        store.note_fork("main", "f0").unwrap();
+        assert!(store.note_fork("main", "one-more").is_err());
+        assert_eq!(
+            store.status("main").unwrap().unwrap().fork_names.len(),
+            MAX_FORKS
+        );
+        assert!(store
+            .mint("main", policy())
+            .unwrap()
+            .record
+            .fork_names
+            .is_empty());
     }
 
     #[test]
