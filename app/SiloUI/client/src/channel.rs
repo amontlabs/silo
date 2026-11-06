@@ -120,6 +120,22 @@ impl Channel {
 mod tests {
     use super::*;
 
+    /// The CLI links and checks these names; the engine writes them (`silo_host::channel`).
+    #[test]
+    fn link_names_match_the_engines() {
+        for (client, host) in [
+            (Channel::Production, silo_host::channel::Channel::Production),
+            (
+                Channel::Development,
+                silo_host::channel::Channel::Development,
+            ),
+        ] {
+            assert_eq!(client.identifier(), host.identifier());
+            assert_eq!(client.cli_link_name(), host.cli_link_name());
+            assert_eq!(client.remote_bridge_name(), host.remote_bridge_name());
+        }
+    }
+
     #[test]
     fn names_match_the_released_channels() {
         let (p, d) = (Channel::Production, Channel::Development);
