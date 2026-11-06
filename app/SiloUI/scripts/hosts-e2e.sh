@@ -79,6 +79,15 @@ cleanup() {
   exit "$status"
 }
 
+# What the account's engine printed, for a run whose logs cannot be downloaded.
+engine_log() {
+  [[ -n "$run_as" ]] && return 0
+  local user
+  if [[ $1 == host ]]; then user=$host_user; else user=$controller_user; fi
+  as "$user" systemctl --user status --no-pager --lines=0 >&2 || true
+  sudo journalctl --no-pager -n 80 _UID="$(id -u "$user")" >&2 || true
+}
+
 wait_for() {
   local who=$1
   local deadline=$((SECONDS + ready_timeout))
@@ -86,6 +95,7 @@ wait_for() {
     if ((SECONDS >= deadline)); then
       echo "The $who engine did not answer within $ready_timeout s" >&2
       "$who" list || true
+      engine_log "$who"
       exit 1
     fi
     sleep 2
