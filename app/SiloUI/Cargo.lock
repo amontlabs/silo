@@ -5030,6 +5030,7 @@ dependencies = [
  "plist",
  "reqwest 0.12.28",
  "rusqlite",
+ "rustix",
  "security-framework 2.11.1",
  "security-framework 3.7.0",
  "security-framework-sys",
