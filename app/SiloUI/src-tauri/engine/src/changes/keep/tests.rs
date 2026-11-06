@@ -1606,6 +1606,106 @@ fn a_failing_step_puts_main_back_and_its_checkpoint_is_not_undoable() {
     );
 }
 
+fn fold_request(
+    status: silo_api::methods::keep::FoldRequestStatus,
+) -> silo_api::methods::keep::FoldRequest {
+    silo_api::methods::keep::FoldRequest {
+        id: "fr-1".into(),
+        fork_id: "fork".into(),
+        target: "main".into(),
+        created_at: "t".into(),
+        review_digest: "d1".into(),
+        summary: "s".into(),
+        status,
+        counts: Default::default(),
+        keep_id: None,
+        resolved_at: None,
+        keeping_since_ms: None,
+    }
+}
+
+#[test]
+fn a_request_keep_result_has_the_typed_shape_for_kept_and_refused_outcomes() {
+    use silo_api::methods::{keep::FoldRequestStatus, review_requests::ChangesRequestsKeepResult};
+    let request = fold_request(FoldRequestStatus::Kept);
+    let kept = super::Outcome::Kept(super::Report {
+        fork: "fork".into(),
+        target: "main".into(),
+        checkpoint: Some("cp1".into()),
+        review_digest: Some("d1".into()),
+        ..Default::default()
+    });
+    let value = super::service::request_keep_result(&kept, &request).unwrap();
+    let typed: ChangesRequestsKeepResult = serde_json::from_value(value).unwrap();
+    assert_eq!((typed.status.as_str(), typed.request), ("kept", request));
+    let refused = super::refused_early(
+        &Request {
+            fork: "fork".into(),
+            ..Default::default()
+        },
+        "main",
+        "d2",
+    );
+    let open = fold_request(FoldRequestStatus::Open);
+    let value = super::service::request_keep_result(&refused, &open).unwrap();
+    let typed: ChangesRequestsKeepResult = serde_json::from_value(value).unwrap();
+    assert_eq!(typed.status, "refused");
+    assert_eq!(typed.refusal.unwrap().reason, "changed");
+}
+
+#[test]
+fn a_keeping_request_settles_from_the_journal_only_when_its_keep_finished() {
+    use silo_api::methods::keep::FoldRequestStatus;
+    let dir = tempfile::tempdir().unwrap();
+    let requests = crate::fold_requests::Store::new(dir.path());
+    let (_journal_dir, journal) = journal();
+    let world = World::new(Os::Linux, &["fork", "main"]);
+    let env = Fake(world);
+    let checkpoint = env
+        .checkpoint_before_keep("main", "Before keep of fork")
+        .unwrap();
+    journal.record_pending("main", &checkpoint).unwrap();
+    journal.tag("main", &checkpoint.id, "fork", "d1").unwrap();
+    let mut keeping = fold_request(FoldRequestStatus::Keeping);
+    keeping.keeping_since_ms = Some(0);
+    requests.put(&keeping).unwrap();
+    // The keep has not succeeded: nothing to settle, the request is still being kept.
+    assert!(super::service::settle_request(&requests, &journal, &keeping).is_none());
+    journal
+        .set_state("main", &checkpoint.id, super::journal::State::Undoable)
+        .unwrap();
+    let settled = super::service::settle_request(&requests, &journal, &keeping).unwrap();
+    assert_eq!(settled.status, FoldRequestStatus::Kept);
+    assert_eq!(settled.keep_id.as_deref(), Some(checkpoint.id.as_str()));
+    assert_eq!(requests.get("fr-1").unwrap().unwrap(), settled);
+    // An open request is never settled this way.
+    let open = fold_request(FoldRequestStatus::Open);
+    assert!(super::service::settle_request(&requests, &journal, &open).is_none());
+}
+
+#[test]
+fn a_finished_keep_is_found_by_its_fork_digest_and_start_time() {
+    let world = World::new(Os::Linux, &["fork", "main"]);
+    let env = Fake(world);
+    let (_dir, journal) = journal();
+    let checkpoint = env
+        .checkpoint_before_keep("main", "Before keep of fork")
+        .unwrap();
+    journal.record_pending("main", &checkpoint).unwrap();
+    journal.tag("main", &checkpoint.id, "fork", "d1").unwrap();
+    // Pending: the keep has not succeeded, so it did not finish.
+    assert_eq!(journal.finished_keep("main", "fork", "d1", 0), None);
+    journal
+        .set_state("main", &checkpoint.id, super::journal::State::Undoable)
+        .unwrap();
+    let found = journal.finished_keep("main", "fork", "d1", 0).unwrap();
+    assert_eq!(found.id, checkpoint.id);
+    assert_eq!(journal.finished_keep("main", "fork", "d2", 0), None);
+    assert_eq!(journal.finished_keep("main", "other", "d1", 0), None);
+    // A keep that finished before the request's keep started is not its keep.
+    assert_eq!(journal.finished_keep("main", "fork", "d1", u128::MAX), None);
+}
+
 #[test]
 fn an_interrupted_keep_is_recovered_by_restoring_its_checkpoint_which_is_then_not_undoable() {
     let world = World::new(Os::Linux, &["fork", "main"]);

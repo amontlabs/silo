@@ -30,9 +30,11 @@ use super::operations;
 use super::preparation;
 use super::push;
 use super::recipes;
+use super::review_requests;
 use super::secrets;
 use super::settings;
 use super::ssh_access;
+use super::steps;
 use super::storage;
 use super::terminal;
 use super::updates;
@@ -57,6 +59,35 @@ pub fn changes_promote(params: keep::ChangesPromoteParams) -> Request<kind::Job>
 /// `changes.request`
 pub fn changes_request(params: keep::ChangesRequestParams) -> Request<kind::Command> {
     Request::new(MethodParams::ChangesRequest(params))
+}
+
+/// `changes.requests.list`
+pub fn changes_requests_list(
+    params: review_requests::ChangesRequestsListParams,
+) -> Request<kind::Query> {
+    Request::new(MethodParams::ChangesRequestsList(params))
+}
+
+/// `changes.requests.show`
+pub fn changes_requests_show(params: review_requests::RequestIdParams) -> Request<kind::Job> {
+    Request::new(MethodParams::ChangesRequestsShow(params))
+}
+
+/// `changes.requests.keep`
+pub fn changes_requests_keep(
+    params: review_requests::ChangesRequestsKeepParams,
+) -> Request<kind::Job> {
+    Request::new(MethodParams::ChangesRequestsKeep(params))
+}
+
+/// `changes.requests.throwAway`
+pub fn changes_requests_throw_away(params: review_requests::RequestIdParams) -> Request<kind::Job> {
+    Request::new(MethodParams::ChangesRequestsThrowAway(params))
+}
+
+/// `changes.requests.open`
+pub fn changes_requests_open(params: review_requests::RequestIdParams) -> Request<kind::Job> {
+    Request::new(MethodParams::ChangesRequestsOpen(params))
 }
 
 /// `changes.undo`
@@ -233,6 +264,11 @@ pub fn computers_start(params: common::ComputerTargetParams) -> Request<kind::Jo
 /// `computers.stop`
 pub fn computers_stop(params: common::ComputerTargetParams) -> Request<kind::Job> {
     Request::new(MethodParams::ComputersStop(params))
+}
+
+/// `computers.tree`
+pub fn computers_tree(params: steps::ComputersTreeParams) -> Request<kind::Query> {
+    Request::new(MethodParams::ComputersTree(params))
 }
 
 /// `connections.devices.connect`
@@ -836,6 +872,16 @@ pub fn ssh_access_save(params: ssh_access::SshAccessSaveParams) -> Request<kind:
 /// `sshAccess.state`
 pub fn ssh_access_state(params: common::DeviceParams) -> Request<kind::Query> {
     Request::new(MethodParams::SshAccessState(params))
+}
+
+/// `steps.list`
+pub fn steps_list(params: steps::StepsListParams) -> Request<kind::Query> {
+    Request::new(MethodParams::StepsList(params))
+}
+
+/// `steps.record`
+pub fn steps_record(params: steps::StepsRecordParams) -> Request<kind::Command> {
+    Request::new(MethodParams::StepsRecord(params))
 }
 
 /// `storage.read`

@@ -8,7 +8,6 @@ use std::{
     collections::BTreeMap,
     fs,
     path::{Path, PathBuf},
-    sync::{Mutex, OnceLock},
 };
 
 use serde::Deserialize;
@@ -49,6 +48,21 @@ pub const SUMMARY_FILE: &str = "secret-usage-summary.tsv";
 /// Host shown when the proxy had none to name.
 pub const UNKNOWN_HOST: &str = "(unknown host)";
 
+/// Longest event line read; a longer one is skipped, not parsed.
+const MAX_LINE_BYTES: usize = 4096;
+/// Most distinct rows kept per list; later keys are not added (existing ones keep counting).
+const MAX_ROWS: usize = 512;
+/// Longest text kept for a name, host, method or reason.
+const MAX_TEXT_CHARS: usize = 253;
+
+/// Text safe to show: control characters become `?` and the length is capped.
+fn tidy(text: &str) -> String {
+    text.chars()
+        .take(MAX_TEXT_CHARS)
+        .map(|c| if c.is_control() { '?' } else { c })
+        .collect()
+}
+
 type UsedKey = (String, String, String);
 type BlockedKey = (Option<String>, String, String, String);
 
@@ -64,18 +78,29 @@ impl Totals {
         let host = if row.host.is_empty() {
             UNKNOWN_HOST.to_owned()
         } else {
-            row.host
+            tidy(&row.host)
         };
-        let secret = row.secret.filter(|name| !name.is_empty());
+        let secret = row
+            .secret
+            .filter(|name| !name.is_empty())
+            .map(|name| tidy(&name));
+        let method = tidy(&row.method);
         let slot = match row.kind.as_str() {
             "used" => {
                 let Some(secret) = secret else { return };
-                self.used.entry((secret, host, row.method)).or_insert((0, 0))
+                let key = (secret, host, method);
+                if !self.used.contains_key(&key) && self.used.len() >= MAX_ROWS {
+                    return;
+                }
+                self.used.entry(key).or_insert((0, 0))
             }
-            "blocked" => self
-                .blocked
-                .entry((secret, host, row.method, row.reason.unwrap_or_default()))
-                .or_insert((0, 0)),
+            "blocked" => {
+                let key = (secret, host, method, tidy(&row.reason.unwrap_or_default()));
+                if !self.blocked.contains_key(&key) && self.blocked.len() >= MAX_ROWS {
+                    return;
+                }
+                self.blocked.entry(key).or_insert((0, 0))
+            }
             _ => return,
         };
         slot.0 += count;
@@ -133,15 +158,39 @@ pub fn read_usage(files: &[PathBuf], since: Option<u64>) -> CredentialsUsage {
                 continue;
             }
         }
-        let mut older = file.clone().into_os_string();
-        older.push(".1");
-        for path in [PathBuf::from(older), file.clone()] {
-            if let Ok(bytes) = fs::read(&path) {
-                add_events(&mut totals, &String::from_utf8_lossy(&bytes), since);
-            }
-        }
+        add_events(&mut totals, &read_generations(file), since);
     }
     totals.finish()
+}
+
+/// The older generation followed by the current file. A rotation between the two reads would
+/// move the current file to `.1` unseen, so the read is repeated until the current file is
+/// the same one before and after.
+fn read_generations(file: &Path) -> String {
+    let mut older = file.to_path_buf().into_os_string();
+    older.push(".1");
+    let older = PathBuf::from(older);
+    let mut text = String::new();
+    for _ in 0..4 {
+        let before = identity(file);
+        text.clear();
+        for path in [&older, &file.to_path_buf()] {
+            if let Ok(bytes) = fs::read(path) {
+                text.push_str(&String::from_utf8_lossy(&bytes));
+                text.push('\n');
+            }
+        }
+        if identity(file) == before {
+            break;
+        }
+    }
+    text
+}
+
+/// Which file is at `path` right now (a rotation changes it).
+fn identity(path: &Path) -> Option<(u64, u64)> {
+    use std::os::unix::fs::MetadataExt;
+    fs::metadata(path).ok().map(|meta| (meta.dev(), meta.ino()))
 }
 
 /// Aggregates JSON-lines text; malformed or incomplete lines are skipped.
@@ -153,6 +202,9 @@ pub fn aggregate(text: &str, since: Option<u64>) -> CredentialsUsage {
 
 fn add_events(totals: &mut Totals, text: &str, since: Option<u64>) {
     for line in text.lines() {
+        if line.len() > MAX_LINE_BYTES {
+            continue;
+        }
         let Ok(event) = serde_json::from_str::<Event>(line) else {
             continue;
         };
@@ -176,6 +228,9 @@ fn add_events(totals: &mut Totals, text: &str, since: Option<u64>) {
 /// Counter lines: `kind  secret  host  method  reason  count  lastAt`, tab separated.
 fn add_summary(totals: &mut Totals, text: &str) {
     for line in text.lines() {
+        if line.len() > MAX_LINE_BYTES {
+            continue;
+        }
         let fields: Vec<&str> = line.split('\t').collect();
         let [kind, secret, host, method, reason, count, last] = fields[..] else {
             continue;
@@ -195,29 +250,6 @@ fn add_summary(totals: &mut Totals, text: &str) {
             last,
         );
     }
-}
-
-type Locator = Box<dyn Fn(&str) -> Vec<PathBuf> + Send + Sync>;
-
-fn locator() -> &'static Mutex<Option<Locator>> {
-    static LOCATOR: OnceLock<Mutex<Option<Locator>>> = OnceLock::new();
-    LOCATOR.get_or_init(|| Mutex::new(None))
-}
-
-/// Registers how a computer id maps to its event files.
-pub fn set_locator(locate: impl Fn(&str) -> Vec<PathBuf> + Send + Sync + 'static) {
-    *locator().lock().unwrap_or_else(|e| e.into_inner()) = Some(Box::new(locate));
-}
-
-/// Credentials a computer used since it was created; empty when nothing is registered.
-pub fn credentials_for(computer_id: &str) -> CredentialsUsage {
-    let files = locator()
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .as_ref()
-        .map(|locate| locate(computer_id))
-        .unwrap_or_default();
-    read_usage(&files, None)
 }
 
 /// Moves `path` to `<path>.1` when it is at least `cap` bytes, then opens it for appending.
@@ -308,6 +340,37 @@ mod tests {
         assert_eq!(usage.blocked[0].count, 2);
         // With `since`, the retained events answer instead.
         assert_eq!(read_usage(&[events], Some(1)).used[0].count, 1);
+    }
+
+    #[test]
+    fn long_lines_are_skipped_keys_are_capped_and_text_is_tidied() {
+        let long = format!(
+            "{{\"at\":1,\"kind\":\"used\",\"secret\":\"K\",\"host\":\"{}\",\"method\":\"GET\"}}\n",
+            "a".repeat(5000)
+        );
+        assert!(aggregate(&long, None).used.is_empty());
+        let mut many = String::new();
+        for i in 0..(MAX_ROWS + 50) {
+            many.push_str(&format!(
+                "{{\"at\":1,\"kind\":\"used\",\"secret\":\"K\",\"host\":\"h{i}.example\",\"method\":\"GET\"}}\n"
+            ));
+        }
+        assert_eq!(aggregate(&many, None).used.len(), MAX_ROWS);
+        let control = aggregate(
+            "{\"at\":1,\"kind\":\"used\",\"secret\":\"K\\u001b[2J\",\"host\":\"h\",\"method\":\"GET\"}\n",
+            None,
+        );
+        assert!(!control.used[0].secret.contains('\u{1b}'));
+    }
+
+    #[test]
+    fn rotation_between_reads_is_followed() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join(USAGE_FILE);
+        fs::write(&file, LINUX).unwrap();
+        let text = read_generations(&file);
+        assert_eq!(text.matches("kind").count(), 4);
+        assert!(identity(&file).is_some());
     }
 
     #[test]

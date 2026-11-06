@@ -154,7 +154,7 @@
     },
     {
       "path": "patches/microsandbox-secret-usage-events-0.7.6.patch",
-      "sha256": "5d8cf9e27ce4b4b1dfe60ec7da5f0220e9e6399b916c4fa1c41c1f1f5df73138"
+      "sha256": "246ca45a30f5580e3bdacace3fa9e896b712afaff1f22e03dc651c25a505c4ac"
     }
   ]
 }

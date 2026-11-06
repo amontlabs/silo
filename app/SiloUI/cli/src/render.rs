@@ -72,6 +72,13 @@ pub fn status(value: &Value) -> String {
 /// `credentials used: KEY → host (POST ×3); blocked: 1 (TOKEN → evil.example GET)`, or
 /// `credentials used: none`.
 pub fn credentials_line(usage: &Value) -> String {
+    let line = credentials_text(usage);
+    line.chars()
+        .map(|c| if c.is_control() { '?' } else { c })
+        .collect()
+}
+
+fn credentials_text(usage: &Value) -> String {
     let used: Vec<String> = list_of(usage, "used")
         .iter()
         .map(|entry| {
@@ -283,6 +290,165 @@ pub fn checkpoints(value: &Value) -> String {
         .join("\n")
 }
 
+/// The steps of a computer as a table, oldest first.
+pub fn steps(value: &Value) -> String {
+    let items = value["steps"].as_array().cloned().unwrap_or_default();
+    if items.is_empty() {
+        return format!("{} has no steps yet.", text(value, "computer"));
+    }
+    let checkpoint_width = items
+        .iter()
+        .map(|step| text(step, "checkpointId").len())
+        .max()
+        .unwrap_or(0)
+        .max(10);
+    let mut out = format!(
+        "{:<5}  {:<4}  {:<checkpoint_width$}  {:<20}  {}\n",
+        "STEP", "EXIT", "CHECKPOINT", "FINISHED", "COMMAND"
+    );
+    for step in &items {
+        let exit = step
+            .get("exitCode")
+            .and_then(Value::as_i64)
+            .map_or_else(|| "-".to_owned(), |code| code.to_string());
+        let checkpoint = match text(step, "checkpointId") {
+            "" => "-",
+            id => id,
+        };
+        out.push_str(&format!(
+            "{:<5}  {:<4}  {:<checkpoint_width$}  {:<20}  {}\n",
+            number(step, "number"),
+            exit,
+            checkpoint,
+            text(step, "finishedAt"),
+            text(step, "command"),
+        ));
+    }
+    out.trim_end().to_owned()
+}
+
+fn from_text(node: &Value, names: &std::collections::HashMap<&str, &str>) -> String {
+    let parent = node["parent"]
+        .as_str()
+        .and_then(|id| names.get(id).copied())
+        .unwrap_or("its parent");
+    let from = &node["from"];
+    match text(from, "kind") {
+        "main" => format!("from {parent}"),
+        "checkpoint" => format!("from {parent} checkpoint {}", text(from, "checkpointId")),
+        "step" => format!("from {parent} step {}", number(from, "number")),
+        "recipe" => format!(
+            "from recipe {}",
+            text(from, "hash").chars().take(8).collect::<String>()
+        ),
+        "folder" => format!("from folder {}", text(from, "path")),
+        _ => String::new(),
+    }
+}
+
+fn pending_text(node: &Value) -> String {
+    let pending = &node["pendingChanges"];
+    let mut parts = Vec::new();
+    if let Some(request) = pending["requestId"].as_str() {
+        parts.push(format!("review {request}"));
+    }
+    if let Some(buckets) = pending["buckets"].as_object() {
+        let counts: Vec<String> = buckets
+            .iter()
+            .filter(|(_, count)| count.as_u64().unwrap_or(0) > 0)
+            .map(|(bucket, count)| format!("{bucket} {count}"))
+            .collect();
+        if !counts.is_empty() {
+            parts.push(format!("changed: {}", counts.join(", ")));
+        }
+    }
+    parts.join("; ")
+}
+
+/// The fork tree: each computer under the one it was forked from, with its state, what it
+/// came from and its pending changes.
+pub fn tree(value: &Value) -> String {
+    let nodes = value["nodes"].as_array().cloned().unwrap_or_default();
+    if nodes.is_empty() {
+        return "No computers yet. Create one with `silo create <name>`.".to_owned();
+    }
+    let names: std::collections::HashMap<&str, &str> = nodes
+        .iter()
+        .map(|node| (text(node, "id"), text(node, "name")))
+        .collect();
+    let known = |node: &Value| {
+        node["parent"]
+            .as_str()
+            .is_some_and(|parent| names.contains_key(parent))
+    };
+    let mut out = Vec::new();
+    fn walk(
+        nodes: &[Value],
+        names: &std::collections::HashMap<&str, &str>,
+        id: &str,
+        prefix: &str,
+        last: bool,
+        top: bool,
+        out: &mut Vec<String>,
+        depth: usize,
+    ) {
+        let Some(node) = nodes.iter().find(|node| text(node, "id") == id) else {
+            return;
+        };
+        let mut line = format!("{}  [{}]", text(node, "name"), text(node, "state"));
+        for extra in [from_text(node, names), pending_text(node)] {
+            if !extra.is_empty() {
+                line.push_str(&format!("  {extra}"));
+            }
+        }
+        if top {
+            out.push(line);
+        } else {
+            out.push(format!(
+                "{prefix}{}{line}",
+                if last { "└─ " } else { "├─ " }
+            ));
+        }
+        if depth > 32 {
+            return;
+        }
+        let children: Vec<&Value> = nodes
+            .iter()
+            .filter(|child| child["parent"].as_str() == Some(id))
+            .collect();
+        let below = if top {
+            String::new()
+        } else {
+            format!("{prefix}{}", if last { "   " } else { "│  " })
+        };
+        for (index, child) in children.iter().enumerate() {
+            walk(
+                nodes,
+                names,
+                text(child, "id"),
+                &below,
+                index + 1 == children.len(),
+                false,
+                out,
+                depth + 1,
+            );
+        }
+    }
+    for node in nodes.iter().filter(|node| !known(node)) {
+        walk(
+            &nodes,
+            &names,
+            text(node, "id"),
+            "",
+            true,
+            true,
+            &mut out,
+            0,
+        );
+    }
+    out.join("\n")
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -297,6 +463,14 @@ mod tests {
             credentials_line(&json!({"used": [], "blocked": []})),
             "credentials used: none"
         );
+    }
+
+    #[test]
+    fn credentials_line_escapes_control_characters() {
+        let usage = json!({"used": [{"secret": "K\u{1b}[2J", "host": "h\nx", "method": "GET", "count": 1}], "blocked": []});
+        let line = credentials_line(&usage);
+        assert!(!line.chars().any(char::is_control));
+        assert!(line.contains("K?[2J"));
     }
 
     #[test]
@@ -319,6 +493,46 @@ mod tests {
         assert!(out.contains("main  running"));
         assert!(out.contains("2 cpu, 4 GiB"));
         assert!(list(&json!({"computers": []})).contains("silo create"));
+    }
+
+    #[test]
+    fn steps_are_a_table_with_the_checkpoint_each_left() {
+        let out = steps(&json!({"computer": "main", "steps": [
+            {"number": 1, "exitCode": 0, "checkpointId": "cp-aaa", "finishedAt": "2026-01-01T00:00:01Z", "command": "make test"},
+            {"number": 2, "exitCode": 2, "finishedAt": "2026-01-01T00:00:09Z", "command": "ls 'a b'"},
+        ]}));
+        let lines: Vec<&str> = out.lines().collect();
+        assert!(lines[0].starts_with("STEP") && lines[0].ends_with("COMMAND"));
+        assert!(
+            lines[1].starts_with("1 ")
+                && lines[1].contains("cp-aaa")
+                && lines[1].ends_with("make test")
+        );
+        assert!(lines[2].contains("  2  ") && lines[2].contains("  -  "));
+        assert!(steps(&json!({"computer": "main", "steps": []})).contains("no steps"));
+    }
+
+    #[test]
+    fn the_tree_indents_forks_under_their_parent() {
+        let out = tree(&json!({"nodes": [
+            {"id": "m", "name": "main", "parent": null, "from": {"kind": "root"}, "state": "running",
+             "pendingChanges": {"requestId": null, "buckets": null}},
+            {"id": "a", "name": "try-a", "parent": "m", "from": {"kind": "step", "number": 3, "checkpointId": "cp"},
+             "state": "stopped", "pendingChanges": {"requestId": "fr-1", "buckets": {"code": 2, "config": 0}}},
+            {"id": "c", "name": "deeper", "parent": "a", "from": {"kind": "main"}, "state": "running",
+             "pendingChanges": {"requestId": null, "buckets": null}},
+            {"id": "b", "name": "try-b", "parent": "m", "from": {"kind": "folder", "path": "/r"}, "state": "running",
+             "pendingChanges": {"requestId": null, "buckets": null}},
+        ]}));
+        let lines: Vec<&str> = out.lines().collect();
+        assert_eq!(lines[0], "main  [running]");
+        assert_eq!(
+            lines[1],
+            "├─ try-a  [stopped]  from main step 3  review fr-1; changed: code 2"
+        );
+        assert_eq!(lines[2], "│  └─ deeper  [running]  from try-a");
+        assert_eq!(lines[3], "└─ try-b  [running]  from folder /r");
+        assert!(tree(&json!({"nodes": []})).contains("silo create"));
     }
 }
 
@@ -577,4 +791,157 @@ pub fn requested(value: &Value) -> String {
         text(value, "fork"),
         text(request, "id")
     )
+}
+
+/// `code 2, settings 1`: the buckets of a request that hold changes.
+fn counts_line(counts: &Value) -> String {
+    let parts: Vec<String> = counts
+        .as_object()
+        .into_iter()
+        .flatten()
+        .filter_map(|(bucket, count)| {
+            count
+                .as_u64()
+                .filter(|n| *n > 0)
+                .map(|n| format!("{bucket} {n}"))
+        })
+        .collect();
+    if parts.is_empty() {
+        "no changes counted".to_owned()
+    } else {
+        parts.join(", ")
+    }
+}
+
+/// `silo requests`.
+pub fn requests_list(value: &Value) -> String {
+    let entries = list_of(value, "requests");
+    if entries.is_empty() {
+        return "No review requests. Ask for one with `silo fold <fork> --request`.".to_owned();
+    }
+    let mut out = String::new();
+    for entry in &entries {
+        let request = &entry["request"];
+        let fork = entry.get("forkName").and_then(Value::as_str).map_or_else(
+            || "(fork gone)".to_owned(),
+            |name| format!("{name} ({})", text(entry, "forkState")),
+        );
+        let target = match text(request, "target") {
+            folder if folder.starts_with("folder:") => folder.to_owned(),
+            _ => entry
+                .get("targetName")
+                .and_then(Value::as_str)
+                .unwrap_or("(computer gone)")
+                .to_owned(),
+        };
+        out.push_str(&format!(
+            "{}  {}  into {}  {}  [{}]\n",
+            text(request, "id"),
+            fork,
+            target,
+            counts_line(&request["counts"]),
+            text(request, "status"),
+        ));
+    }
+    out.trim_end().to_owned()
+}
+
+/// The `Credentials used: ...` line, then a line for what was refused.
+pub fn credentials_lines(credentials: &Value) -> String {
+    let used: Vec<String> = list_of(credentials, "used")
+        .iter()
+        .map(|item| {
+            format!(
+                "{} to {} ({} x{})",
+                text(item, "secret"),
+                text(item, "host"),
+                text(item, "method"),
+                number(item, "count")
+            )
+        })
+        .collect();
+    let mut out = if used.is_empty() {
+        "Credentials used: none".to_owned()
+    } else {
+        format!("Credentials used: {}", used.join(", "))
+    };
+    let blocked: Vec<String> = list_of(credentials, "blocked")
+        .iter()
+        .map(|item| {
+            format!(
+                "{} {} x{} ({})",
+                text(item, "method"),
+                text(item, "host"),
+                number(item, "count"),
+                text(item, "reason")
+            )
+        })
+        .collect();
+    if !blocked.is_empty() {
+        out.push_str(&format!("\nBlocked: {}", blocked.join(", ")));
+    }
+    out
+}
+
+/// `silo requests show`: the same buckets as `silo diff`, then the credentials line.
+pub fn request_show(value: &Value) -> String {
+    let request = &value["request"];
+    let mut out = format!(
+        "Request {}: {} ({}) into {} [{}]\n\n{}\n\n{}",
+        text(request, "id"),
+        text(value, "forkName"),
+        text(value, "forkState"),
+        text(request, "target"),
+        text(request, "status"),
+        text(value, "text"),
+        credentials_lines(&value["credentials"]),
+    );
+    if value["fresh"] == false {
+        out.push_str("\nThe fork is stopped, so this is its last look, not its state now.");
+    }
+    if value["stale"] == true {
+        out.push_str(&format!(
+            "\nThis fork changed since the request was made, so a keep refuses. Ask again with `silo fold {} --request`.",
+            text(value, "forkName")
+        ));
+    }
+    out
+}
+
+/// `silo requests throw-away`.
+pub fn request_thrown_away(value: &Value) -> String {
+    match text(value, "dropped") {
+        "" => format!(
+            "The fork was already gone. Closed {}.",
+            text(&value["request"], "id")
+        ),
+        name => format!(
+            "Threw away {name} and closed {}.",
+            text(&value["request"], "id")
+        ),
+    }
+}
+
+/// `silo requests open`.
+pub fn request_open(value: &Value) -> String {
+    let mut out = format!(
+        "{} is {}{}.",
+        text(value, "name"),
+        text(value, "state"),
+        if value["started"] == true {
+            " (started now)"
+        } else {
+            ""
+        }
+    );
+    if let Some(alias) = value.get("sshAlias").and_then(Value::as_str) {
+        out.push_str(&format!(
+            "\nssh {alias} (after `silo ssh-setup {}`)",
+            text(value, "name")
+        ));
+    }
+    for url in list_of(value, "urls").iter().filter_map(Value::as_str) {
+        out.push_str(&format!("\n{url}"));
+    }
+    out
 }

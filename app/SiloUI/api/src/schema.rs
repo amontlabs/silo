@@ -55,6 +55,10 @@ struct JobTerminalResultsSchema {
     recipe_build: crate::methods::recipes::RecipeBuildResult,
     promote: crate::methods::keep::ChangesPromoteResult,
     undo: crate::methods::keep::ChangesUndoResult,
+    requests_keep: crate::methods::review_requests::ChangesRequestsKeepResult,
+    requests_open: crate::methods::review_requests::ChangesRequestsOpenResult,
+    requests_show: crate::methods::review_requests::ChangesRequestsShowResult,
+    requests_throw_away: crate::methods::review_requests::ChangesRequestsThrowAwayResult,
     desktop: crate::methods::desktop::DesktopStatus,
     backup: crate::methods::exports::BackupOperation,
     archive_inspection: crate::methods::exports::ArchiveInspectionResult,
@@ -73,6 +77,13 @@ struct JobTerminalResultsSchema {
 pub const JOB_FINISHED_RESULT_REGISTRY: &[(&str, &str)] = &[
     ("changes.keep", "ChangesKeepResult"),
     ("changes.promote", "ChangesPromoteResult"),
+    ("changes.requests.keep", "ChangesRequestsKeepResult"),
+    ("changes.requests.open", "ChangesRequestsOpenResult"),
+    ("changes.requests.show", "ChangesRequestsShowResult"),
+    (
+        "changes.requests.throwAway",
+        "ChangesRequestsThrowAwayResult",
+    ),
     ("changes.undo", "ChangesUndoResult"),
     ("checkpoints.abandonRestore", "ApplicationSource | null"),
     ("checkpoints.create", "CheckpointCreatedResult"),
@@ -182,8 +193,8 @@ mod tests {
             schema_json().unwrap()
         );
         let schema: serde_json::Value = serde_json::from_str(&schema_json().unwrap()).unwrap();
-        assert_eq!(schema["x-silo-methods"].as_array().unwrap().len(), 157);
-        assert_eq!(schema["x-silo-job-results"].as_array().unwrap().len(), 33);
+        assert_eq!(schema["x-silo-methods"].as_array().unwrap().len(), 165);
+        assert_eq!(schema["x-silo-job-results"].as_array().unwrap().len(), 37);
         assert_eq!(
             schema["$schema"],
             "https://json-schema.org/draft/2020-12/schema"

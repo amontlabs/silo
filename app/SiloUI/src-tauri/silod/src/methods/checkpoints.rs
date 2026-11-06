@@ -13,6 +13,8 @@ mod keep;
 mod migration;
 pub(crate) mod preparation;
 mod recipes;
+mod requests;
+mod steps;
 
 use std::sync::Arc;
 
@@ -49,6 +51,7 @@ pub(super) fn owns(method: MethodName) -> bool {
             "migration.",
             "preparation.",
             "recipes.",
+            "steps.",
             "device.",
         ],
     )
@@ -74,6 +77,8 @@ async fn dispatch(
     match method {
         MethodName::RecipesBuild => recipes::build(context, params).await,
         MethodName::RecipesList => recipes::list(context).await,
+        MethodName::StepsList => steps::list(context, params).await,
+        MethodName::StepsRecord => steps::record(context, params).await,
         MethodName::RecipesRemove => recipes::remove(context, params).await,
         MethodName::ChangesCapture => changes::capture(context, params).await,
         MethodName::ChangesDiff => changes::diff(context, params).await,
@@ -82,6 +87,11 @@ async fn dispatch(
         MethodName::ChangesPromote => keep::promote(context, params).await,
         MethodName::ChangesUndo => keep::undo(context, params).await,
         MethodName::ChangesRequest => keep::request(context, params).await,
+        MethodName::ChangesRequestsList => requests::list(context, params).await,
+        MethodName::ChangesRequestsShow => requests::show(context, params).await,
+        MethodName::ChangesRequestsKeep => requests::keep(context, params).await,
+        MethodName::ChangesRequestsThrowAway => requests::throw_away(context, params).await,
+        MethodName::ChangesRequestsOpen => requests::open(context, params).await,
         MethodName::CheckpointsCreate => create(context, params).await,
         MethodName::CheckpointsRestore => restore(context, params).await,
         MethodName::CheckpointsFork => fork(context, params).await,
@@ -211,7 +221,12 @@ async fn create(context: &HandlerContext, params: &Value) -> Result<HandlerOutpu
     let warm = (params.kind == Some(silo_api::methods::checkpoints::CheckpointKind::Warm))
         .then(|| silo_engine::generation::warm_baseline(&params.computer_id));
     let started = blocking_failure(move || {
-        service.start_create(&params.computer_id, &params.name, params.kind)
+        service.start_create_keeping(
+            &params.computer_id,
+            &params.name,
+            params.kind,
+            params.keep_newest,
+        )
     })
     .await;
     if let (Some(baseline), Ok(job_id)) = (warm, &started) {

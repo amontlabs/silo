@@ -21,6 +21,14 @@ describe("macOS computers payload", () => {
     expect(parseMacosComputersState({ supported: false, unsupportedReason: "Requires Apple silicon.", computers: [], template: null, minDiskGiB: 32 }).supported).toBe(false)
   })
 
+  it("parses every checkpoint kind the engine reports, step included", () => {
+    for (const kind of ["manual", "automatic", "before-keep", "fork-point", "warm", "step"]) {
+      const checkpoints = [{ id: "c", name: "n", createdAt: "2026-01-01T00:00:00Z", scope: "disk", reason: "manual", kind }]
+      const parsed = parseMacosComputersState({ ...state, computers: [{ ...computer, checkpoints }] })
+      expect(parsed.computers[0].checkpoints?.[0].kind).toBe(kind)
+    }
+  })
+
   it("rejects unknown states and out-of-range progress", () => {
     expect(() => parseMacosComputersState({ ...state, computers: [{ ...computer, state: "paused" }] })).toThrow()
     expect(() => parseMacosComputersState({ ...state, computers: [{ ...computer, progress: 1.5 }] })).toThrow()

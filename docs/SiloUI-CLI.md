@@ -58,8 +58,11 @@ the engine's message.
 | `silo undo <computer\|fork\|./dir>` | put a computer back to before its latest keep, or a folder back to before its latest fold |
 | `silo drop <computer> [--force]` | throw a computer away (a hidden throwaway too, by name or id); `main` needs `--force`. A stopped `silo-baseline-*` copy more than an hour old is dropped by the next fork or `silo diff --baseline` |
 | `silo exec <computer> [--cwd DIR] [--timeout SECS] -- <cmd...>` | run a command; the exit code is passed through |
-| `silo checkpoint <computer> [--name N] [--kind manual\|automatic\|before-keep\|warm]` | save a checkpoint |
+| `silo checkpoint <computer> [--name N] [--kind manual\|automatic\|before-keep\|warm\|step]` | save a checkpoint |
 | `silo checkpoints <computer>` | list checkpoints |
+| `silo steps <computer>` | the commands run in the computer through Silo, numbered, with exit code and the checkpoint each left ([steps](SiloUI-CHANGES.md#steps-and-the-fork-tree)) |
+| `silo fork <computer> --from-step N` | fork from the checkpoint taken after step N |
+| `silo tree` | the computers as a tree: what each was forked from, its state and pending review |
 
 A fork publishes the ports its source publishes (a recipe fork, the recipe's `ports`), each on a host port of its own. The engine does not copy published ports when it forks a computer, so `silo fork` does it with the same `publish` calls. The MCP server has `ports`, `publish`, `unpublish` and `ssh_name` tools.
 | `silo job <id>` | wait for a job that is already running |
@@ -133,8 +136,24 @@ and uncommitted files) and calls `changes.request`, which stores a fold request 
 (`fold-requests/<id>.json` under the app data folder): `id` (`fr-` and 8 hex), `forkId`, `target`
 (the computer id; `folder:<path>` for a folder fork), `createdAt`, `reviewDigest`, `summary` and
 `status: open`. Asking again for the same fork and target updates that open request. The id is
-printed. Listing, showing, keeping and throwing away requests come with phase 4; CI or cron call
-`silo fork main -- <cmd>` then `silo fold --request`.
+printed. CI or cron call `silo fork main -- <cmd>` then `silo fold --request`.
+
+- `silo requests [--status open|kept|thrown-away|all]` lists requests (default open) with the
+  fork, its state, the computer it would be kept into and the count of changes per bucket.
+- `silo requests show <id>` prints the same buckets as `silo diff` for a fresh look at the fork,
+  then `Credentials used: ...` (`none` when the fork used no secret; a `Blocked:` line follows
+  when the proxy refused something). It says when the fork changed since the request, which makes
+  a keep refuse.
+- `silo requests keep <id> [--data-ok] [--recipe-file PATH]` keeps the fork pinned to the
+  request's digest and exits 2 when refused (the request stays open). A folder fork is kept with
+  `silo fold`.
+- `silo requests throw-away <id>` drops the fork and closes the request; `main` and the
+  request's target are refused.
+- `silo requests open <id>` starts the fork if it is stopped and prints its name, SSH name and
+  URLs.
+
+Each takes `--json`. The MCP tools are `requests_list`, `request_show`, `request_keep`,
+`request_throw_away` and `request_open`, on the same engine methods.
 
 `silo status` prints, for a fork, a line such as
 `quiet: applied; stopped: poller; scrubbed: /root/.env; secrets: none` (on macOS it adds the
@@ -173,6 +192,8 @@ recipes: [linux-dev]
 fork_secrets: [OPENAI_API_KEY]   # what --secret may name
 fold: ask                        # or auto-code
 fork_ram_budget: 8G
+step_checkpoints: true           # checkpoint a computer after each step (default false)
+step_checkpoints_keep: 20        # step checkpoints kept per computer (default 20; 0 keeps all)
 warm_max_age: 60s               # how old main's warm checkpoint may be for a fork to use it (and only if main is unchanged)
 auto_keep:
   - when: { only: [code], tests: pass }
@@ -191,7 +212,7 @@ gets the named secrets (`github` gives read-only GitHub access) and the recipe's
 claude mcp add silo -- silo mcp
 ```
 
-Tools: `up`, `recipe_list`, `list`, `status`, `fork` (with `recipe`, `count`, `command`, or a repository path as `source`), `fold` (with `promote` or `request`), `undo`, `drop`, `exec`, `checkpoint`, `checkpoints`, `secrets_list`. They make the
+Tools: `up`, `recipe_list`, `list`, `status`, `steps_list`, `tree`, `fork` (with `recipe`, `count`, `command`, `fromStep`, or a repository path as `source`), `fold` (with `promote` or `request`), `undo`, `drop`, `exec`, `checkpoint`, `checkpoints`, `secrets_list`. They make the
 same engine calls as the commands and return the same JSON as `--json`. `drop` cannot
 drop `main` through MCP. No tool sets or assigns secrets; values are never sent over MCP.
 

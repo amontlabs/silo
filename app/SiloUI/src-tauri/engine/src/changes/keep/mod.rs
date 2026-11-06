@@ -308,6 +308,12 @@ pub fn keep(
     let checkpoint =
         env.checkpoint_before_keep(&target, &format!("Before keep of {}", request.fork))?;
     journal.record_pending(&target, &checkpoint)?;
+    journal.tag(
+        &target,
+        &checkpoint.id,
+        &request.fork,
+        request.reviewed.as_deref().unwrap_or_default(),
+    )?;
     journal.begin(&journal::Entry {
         fork: request.fork.clone(),
         target: target.clone(),

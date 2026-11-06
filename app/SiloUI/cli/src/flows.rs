@@ -4,7 +4,7 @@
 use std::path::Path;
 
 use serde_json::{json, Value};
-use silo_api::methods::{keep::KeepHooks, requests};
+use silo_api::methods::{keep::KeepHooks, requests, review_requests::bucket_counts};
 
 use crate::{
     engine::{Engine, Progress},
@@ -70,11 +70,12 @@ pub async fn request(
     progress: Progress<'_>,
 ) -> Result<Value, CliError> {
     let computer = engine.computer(fork).await?;
-    let (digest, summary, target_id) = match folder::record_for(engine, &computer.id) {
+    let (digest, summary, target_id, counts) = match folder::record_for(engine, &computer.id) {
         Some(record) => (
             folder::review_digest(engine, &computer, &record).await?,
             folder::review_summary(engine, &computer, &record).await?,
             Some(format!("folder:{}", record.path)),
+            None,
         ),
         None => {
             let seen = ops::diff(
@@ -96,6 +97,7 @@ pub async fn request(
                 seen["reviewDigest"].as_str().unwrap_or_default().to_owned(),
                 seen["text"].as_str().unwrap_or_default().to_owned(),
                 target_id,
+                Some(bucket_counts(&seen)),
             )
         }
     };
@@ -106,6 +108,7 @@ pub async fn request(
                 target_id,
                 review_digest: (!digest.is_empty()).then_some(digest),
                 summary: Some(summary),
+                counts,
             },
         ))
         .await?;

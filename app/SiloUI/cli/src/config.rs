@@ -146,10 +146,35 @@ pub struct Settings {
     /// How old `main`'s warm checkpoint may be for a fork to start from it, like `90s`.
     #[serde(default)]
     pub warm_max_age: Option<String>,
+    /// Save a checkpoint of a computer after each step (each command run through Silo).
+    #[serde(default)]
+    pub step_checkpoints: bool,
+    /// How many step checkpoints a computer keeps (the newest ones; 0 keeps every one).
+    #[serde(default)]
+    pub step_checkpoints_keep: Option<u32>,
     #[serde(default)]
     pub auto_keep: Vec<AutoKeepRule>,
     #[serde(default)]
     pub agents: BTreeMap<String, AgentOverride>,
+}
+
+/// How many step checkpoints a computer keeps when `step_checkpoints_keep` is not set.
+pub const DEFAULT_STEP_CHECKPOINTS_KEEP: u32 = 20;
+
+/// What to do after a step, resolved from the project settings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StepSettings {
+    pub checkpoints: bool,
+    pub keep: u32,
+}
+
+impl Default for StepSettings {
+    fn default() -> Self {
+        Self {
+            checkpoints: false,
+            keep: DEFAULT_STEP_CHECKPOINTS_KEEP,
+        }
+    }
 }
 
 fn blank(names: &[String]) -> bool {
@@ -170,6 +195,17 @@ impl Settings {
             .and_then(|settings| settings.warm_max_age.as_deref())
             .and_then(|text| crate::clock::parse_duration_secs(text).ok())
             .unwrap_or(DEFAULT_WARM_MAX_AGE_SECS)
+    }
+
+    /// The step settings that apply: every caller resolves them here, so a per-agent override
+    /// has one place to take effect.
+    pub fn step_settings(settings: Option<&Settings>, _agent: Option<&str>) -> StepSettings {
+        settings.map_or_else(StepSettings::default, |settings| StepSettings {
+            checkpoints: settings.step_checkpoints,
+            keep: settings
+                .step_checkpoints_keep
+                .unwrap_or(DEFAULT_STEP_CHECKPOINTS_KEEP),
+        })
     }
 
     fn validate(&self) -> Result<(), String> {
