@@ -29,6 +29,10 @@ impl Plan {
         command
             .args(self.args.iter().map(OsString::from))
             .envs(self.envs.iter().map(|(key, value)| (key, value)));
+        // Like every runtime child on a Linux host (`runtime::runtime_command`): a terminal's
+        // Ctrl-C reaches silod alone.
+        #[cfg(target_os = "linux")]
+        std::os::unix::process::CommandExt::process_group(&mut command, 0);
         command
     }
 }
