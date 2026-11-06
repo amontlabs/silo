@@ -1,4 +1,4 @@
-# Final-run recipe: a web app on :3000, a poller service and a cron job (what a quiet fork must not run).
+# Final-run recipe: a web app on :3000, a poller service (the quiet section adds a cron job to main).
 os: linux
 packages:
   apt: [build-essential, jq, ripgrep, python3, cron, git]
@@ -20,7 +20,6 @@ setup:
         open("/var/tmp/final-poll.log", "a").write("%s %d poll\n" % (socket.gethostname(), time.time()))
         time.sleep(10)
     PY
-    echo '* * * * * root echo "$(hostname) $(date +\%s) cron" >> /var/log/final-cron.log' > /etc/cron.d/final-job
 services:
   web: python3 /opt/final/web.py
   final-poller: python3 /opt/final/poller.py

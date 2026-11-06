@@ -9,7 +9,7 @@ else
 fi
 [ "$(state main)" = running ] || "$SILO" start main >/dev/null 2>&1
 check "D1 main running" $([ "$(state main)" = running ]; echo $?) "$("$SILO" status main | head -3 | tr '\n' ' ')"
-x main 'rm -f /root/final-note.txt /home/silo/final-note.txt; hostname; cat /etc/cron.d/final-job; pgrep -af "final/(web|poller).py" | cut -c1-80'
+x main 'rm -f /root/final-note.txt /home/silo/final-note.txt; hostname; pgrep -af "final/(web|poller).py" | cut -c1-80'
 "$SILO" ports main
 ssh -o BatchMode=yes -o ConnectTimeout=15 main.silo-dev 'echo ssh-ok $(whoami)' 2>&1 | head -2
 check "D1 ssh main.silo-dev reaches main" $([ "$(ssh -o BatchMode=yes -o ConnectTimeout=15 main.silo-dev echo ok 2>/dev/null)" = ok ]; echo $?) ""
@@ -35,7 +35,7 @@ check "D5 silo undo main exits 0" $rc ""
 xs main 'test ! -e ~/final-note.txt'; check "D5 the note is gone from main" $? ""
 
 echo "== D6 throw away the four forks"
-for i in 1 2 3 4; do "$SILO" drop e2e-final-demo-$i --force >/dev/null 2>&1; done
+for i in 1 2 3 4; do drop_one e2e-final-demo-$i; done
 check "D6 no e2e-final-demo forks left" $([ -z "$("$SILO" list | grep e2e-final-demo)" ]; echo $?) ""
 }
 
@@ -43,6 +43,9 @@ quiet_linux() {
 cd "$PROJ" || return
 echo "== Q1 quiet fork of main: no scheduled runs in the fork (main is the control)"
 q=e2e-final-quiet
+echo "-- main gets a cron job (every minute) and a boot-time cron start, like the phase 1 check; the poller is a recipe service"
+x main 'echo "* * * * * root echo \"\$(hostname) \$(date +%s) cron\" >> /var/log/final-cron.log" > /etc/cron.d/final-job; chmod 644 /etc/cron.d/final-job
+printf "[Desktop Entry]\nType=Application\nName=final-cron\nExec=sudo -n /usr/sbin/service cron start\n" > /etc/xdg/autostart/final-cron.desktop; service cron start; sleep 70; cat /var/log/final-cron.log | tail -2'
 "$SILO" fork main --name $q > "$RAW/quiet-fork.out" 2>&1; "$SILO" start $q >/dev/null 2>&1; check "Q1 fork started" $([ "$(state $q)" = running ]; echo $?) ""
 say "settling 45 s, then watching 90 s"; sleep 45
 fh=$(xs $q hostname | head -1); mh=$(xs main hostname | head -1)
