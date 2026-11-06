@@ -80,23 +80,57 @@ const RECEIPT_PATH: &str = "$HOME/Library/Application Support/Silo/computer-use-
 /// Longest the receipt read waits; a status poll must not hang on a guest that is busy.
 const RECEIPT_READ: Duration = Duration::from_secs(8);
 
+/// The most bytes of the receipt that are read; a larger one is not a receipt.
+const RECEIPT_MAX_BYTES: usize = 64 * 1024;
+/// How long a read receipt answers status polls without another login.
+const RECEIPT_CACHE: Duration = Duration::from_secs(3);
+const MAX_AGENTS: usize = 16;
+const MAX_TEXT: usize = 512;
+
+type ReceiptCache = HashMap<String, (std::time::Instant, Option<serde_json::Value>)>;
+static RECEIPTS: Mutex<Option<ReceiptCache>> = Mutex::new(None);
+
+fn receipts() -> std::sync::MutexGuard<'static, Option<ReceiptCache>> {
+    RECEIPTS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// Drops the receipt remembered for computer `id` (its update just ran).
+pub(super) fn forget_receipt(id: &str) {
+    if let Some(map) = receipts().as_mut() {
+        map.remove(id);
+    }
+}
+
 /// The guest's computer-use receipt, or `None` when the guest cannot be reached or has none.
+/// At most [`RECEIPT_MAX_BYTES`] are read, and the answer is kept for [`RECEIPT_CACHE`] so
+/// status polls do not log in each time.
 pub(super) fn read_receipt(
     layout: &Layout,
     record: &super::store::Record,
 ) -> Option<serde_json::Value> {
-    let output = access::run(
+    if let Some((at, value)) = receipts().as_ref().and_then(|map| map.get(&record.id)) {
+        if at.elapsed() < RECEIPT_CACHE {
+            return value.clone();
+        }
+    }
+    let value = access::run_capped(
         layout,
         record,
         &format!("cat \"{RECEIPT_PATH}\""),
         None,
         RECEIPT_READ,
+        Some(RECEIPT_MAX_BYTES),
     )
-    .ok()?;
-    if output.status != 0 {
-        return None;
-    }
-    serde_json::from_str(output.stdout.trim()).ok()
+    .ok()
+    .filter(|output| output.status == 0)
+    .and_then(|output| serde_json::from_str(output.stdout.trim()).ok());
+    receipts().get_or_insert_with(HashMap::new).insert(
+        record.id.clone(),
+        (std::time::Instant::now(), value.clone()),
+    );
+    value
 }
 
 /// Fills the receipt fields of a projection from the guest's `receipt`. While the guest still
@@ -126,13 +160,19 @@ pub(super) fn merge_receipt(
     } else {
         state.into()
     };
-    let text = |key: &str| receipt[key].as_str().filter(|text| !text.is_empty());
+    let text = |key: &str| {
+        receipt[key]
+            .as_str()
+            .filter(|text| !text.is_empty() && text.len() <= MAX_TEXT)
+    };
     projection["reason"] = text("reason").map_or(serde_json::Value::Null, Into::into);
     projection["at"] = text("at").map_or(serde_json::Value::Null, Into::into);
     if let Some(agents) = receipt["agents"].as_array() {
         projection["agents"] = agents
             .iter()
             .filter_map(|agent| agent.as_str())
+            .filter(|agent| agent.len() <= 64)
+            .take(MAX_AGENTS)
             .collect::<Vec<_>>()
             .into();
     }
@@ -698,6 +738,7 @@ fn run_update(app: &MacosContext, id: &str, attempt: u64, steps: &dyn UpdateStep
             "computer use update failed: {message}; it runs again at the next start"
         )),
     }
+    forget_receipt(id);
     clear(app);
     again
 }
@@ -892,6 +933,20 @@ mod tests {
         let mut pending = serde_json::json!({"state":null,"approvalApply":"pending"});
         merge_receipt(&mut pending, Some(&receipt));
         assert_eq!(pending["state"], "installing");
+    }
+
+    #[test]
+    fn a_receipt_with_too_many_or_too_long_fields_is_cut_down() {
+        let agents: Vec<String> = (0..40).map(|n| format!("agent-{n}")).collect();
+        let receipt = serde_json::json!({
+            "state": "ready", "reason": "x".repeat(MAX_TEXT + 1),
+            "at": "2026-11-05T00:54:07Z", "agents": agents,
+        });
+        let mut projection = serde_json::json!({"approvalApply": "applied"});
+        merge_receipt(&mut projection, Some(&receipt));
+        assert_eq!(projection["agents"].as_array().unwrap().len(), MAX_AGENTS);
+        assert!(projection["reason"].is_null());
+        assert_eq!(projection["at"], "2026-11-05T00:54:07Z");
     }
 
     #[test]
