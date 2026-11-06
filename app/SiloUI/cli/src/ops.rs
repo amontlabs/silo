@@ -118,8 +118,24 @@ pub async fn status(engine: &Engine, name: &str) -> Result<Value, CliError> {
             .unwrap_or(Value::Null),
         Err(_) => Value::Null,
     };
+    value["credentialsUsed"] = credentials_used(engine, &computer.id).await;
     value["checkpointList"] = Value::Array(computer.checkpoints);
     Ok(value)
+}
+
+/// Which Silo secrets a computer used and which attempts were blocked. `null` when the
+/// engine cannot say (an older engine does not know the method).
+pub async fn credentials_used(engine: &Engine, computer_id: &str) -> Value {
+    engine
+        .call(requests::computers_credentials(
+            silo_api::methods::credentials_used::ComputerCredentialsParams {
+                computer_id: computer_id.to_owned(),
+                device_id: None,
+                since: None,
+            },
+        ))
+        .await
+        .unwrap_or(Value::Null)
 }
 
 fn assigned_ids(secret: &Value) -> impl Iterator<Item = &str> {
@@ -533,6 +549,10 @@ pub async fn fork(
         )
         .await?;
     let forked = engine.computer(&name).await?;
+    match &args.recipe_name {
+        Some(recipe_name) => crate::flows::remember_recipe(engine, &forked.id, recipe_name),
+        None => crate::flows::inherit_recipe(engine, &source.id, &forked.id),
+    }
     let mut fork = forked.to_json();
     fork["source"] = json!(source.name);
     // The fork reaches the same ports its source publishes (a recipe fork, those the recipe
@@ -708,6 +728,10 @@ pub async fn diff(
         if let Some(seconds) = baseline_seconds {
             object.insert("baselineIdleSeconds".to_owned(), json!(seconds));
         }
+        object.insert(
+            "credentialsUsed".to_owned(),
+            credentials_used(engine, &target.id).await,
+        );
         if let Some(digest) = result["reviewDigest"].as_str().filter(|d| !d.is_empty()) {
             engine.remember_review(&target.id, digest);
         }
@@ -989,6 +1013,7 @@ pub async fn drop_computer(
             progress,
         )
         .await?;
+    engine.forget_step_lock(&computer.id);
     Ok(json!({ "dropped": computer.name }))
 }
 
@@ -1068,12 +1093,24 @@ pub async fn exec_raw(engine: &Engine, args: &ExecArgs) -> Result<ExecOutput, Cl
     if args.argv.is_empty() {
         return Err(CliError::new("Give a command to run after --."));
     }
+    let computer = engine.computer(&args.computer).await?;
+    exec_on(engine, computer, args).await
+}
+
+/// Runs the command on this exact computer (by id), whatever its name has become.
+pub async fn exec_on(
+    engine: &Engine,
+    computer: crate::engine::Computer,
+    args: &ExecArgs,
+) -> Result<ExecOutput, CliError> {
+    if args.argv.is_empty() {
+        return Err(CliError::new("Give a command to run after --."));
+    }
     if args.timeout_secs == 0 || args.timeout_secs > MAX_EXEC_SECS {
         return Err(CliError::new(format!(
             "The timeout must be 1 to {MAX_EXEC_SECS} seconds; the engine does not run longer commands yet."
         )));
     }
-    let computer = engine.computer(&args.computer).await?;
     let reply = engine
         .call(requests::guest_exec(GuestExecParams {
             computer_id: computer.id,
@@ -1083,7 +1120,7 @@ pub async fn exec_raw(engine: &Engine, args: &ExecArgs) -> Result<ExecOutput, Cl
             env: None,
             as_user: None,
             stdin: None,
-            timeout_ms: args.timeout_secs * 1000,
+            timeout_ms: args.timeout_secs.saturating_mul(1000),
             max_output_bytes: None,
         }))
         .await?;
@@ -1142,8 +1179,9 @@ pub fn parse_checkpoint_kind(text: &str) -> Result<CheckpointKind, CliError> {
         "manual" => Ok(CheckpointKind::Manual),
         "automatic" => Ok(CheckpointKind::Automatic),
         "before-keep" => Ok(CheckpointKind::BeforeKeep),
+        "step" => Ok(CheckpointKind::Step),
         other => Err(CliError::new(format!(
-            "Unknown checkpoint kind {other}; use manual, automatic, before-keep or warm."
+            "Unknown checkpoint kind {other}; use manual, automatic, before-keep, warm or step."
         ))),
     }
 }
@@ -1167,6 +1205,7 @@ pub async fn checkpoint(
                 device_id: None,
                 name,
                 kind,
+                keep_newest: None,
             }),
             progress,
         )
@@ -1497,6 +1536,7 @@ pub async fn up(
                 )
                 .await?;
             created = true;
+            crate::flows::remember_recipe(engine, &engine.computer(MAIN).await?.id, recipe_name);
             engine.computer(MAIN).await?
         }
     };

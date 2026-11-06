@@ -1159,6 +1159,41 @@ fn the_new_main_takes_the_old_mains_own_source() {
     assert_eq!(lineage.source(MAIN).unwrap().as_deref(), Some("id-origin"));
 }
 
+#[test]
+fn the_ownership_check_follows_the_lineage_after_a_promote() {
+    use crate::fold_requests::check_fork_belongs;
+    let fake = Fake::new(Os::Linux);
+    add_third(&fake);
+    let sources = Arc::new(Source(
+        [
+            (FORK.to_owned(), MAIN.to_owned()),
+            (THIRD.to_owned(), MAIN.to_owned()),
+            (MAIN.to_owned(), "id-origin".to_owned()),
+        ]
+        .into(),
+    ));
+    let (_dir, journal) = scratch_journal();
+    let lineage = Lineage::new(sources, journal.clone());
+    let state = tempfile::tempdir().unwrap();
+    let owns = |fork: &str, target: &str| {
+        let source = lineage.source(fork).unwrap();
+        check_fork_belongs(fork, target, source.as_deref(), state.path()).is_ok()
+    };
+    assert!(owns(THIRD, MAIN) && owns(FORK, MAIN));
+    promote(
+        fake.as_ref(),
+        &lineage,
+        &journal,
+        &request(),
+        Duration::from_secs(1),
+    )
+    .unwrap();
+    // A fork of the old main belongs to the computer that is main now, not to the archive.
+    assert!(owns(THIRD, FORK) && !owns(THIRD, MAIN));
+    // The promoted fork is main: a fork of main's own source, no longer of the archive.
+    assert!(owns(FORK, "id-origin") && !owns(FORK, MAIN));
+}
+
 // MARK: Recovery holds the computers
 
 #[test]

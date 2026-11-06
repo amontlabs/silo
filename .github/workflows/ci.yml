@@ -101,6 +101,8 @@ jobs:
         run: python3 scripts/run-script-tests.py
       - name: Run the isolation eval self-tests
         run: python3 -m unittest discover -s ../../docs/evals -p 'test_*.py'
+      - name: Run the Silo GitHub Action tests
+        run: sh ../../silo-action/test/run.sh
       - name: Check the website demo
         working-directory: website
         run: |
@@ -142,7 +144,7 @@ jobs:
           '*.md' 'docs/**/*.md' 'app/SiloUI/*.md' 'app/SiloUI/api/**/*.md' 'app/SiloUI/tests/**/*.md'
           'app/SiloUI/docs/**/*.html' 'app/SiloUI/src/**/*.md'
           'app/SiloUI/src-tauri/guest/**/*.md' 'app/SiloUI/src-tauri/macos-gateway/*.md' 'app/SiloUI/.changeset/*.md'
-          'artifacts/**/*.md' 'website/*.md' 'demo/*.md'
+          'artifacts/**/*.md' 'website/*.md' 'demo/*.md' 'silo-action/*.md'
 
   # The engine is embeddable, so it must keep building and passing its tests on a
   # Linux host even though the shipped daemon is macOS only. macOS computers are

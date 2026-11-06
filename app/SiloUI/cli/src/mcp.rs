@@ -18,6 +18,7 @@ use crate::{
     fanout::{self, ManyArgs},
     flows, folder,
     ops::{self, DiffArgs, ExecArgs, ForkArgs},
+    review, steps,
 };
 
 #[derive(Clone)]
@@ -25,16 +26,22 @@ pub struct SiloMcp {
     socket: PathBuf,
     working_directory: PathBuf,
     engine: Arc<tokio::sync::Mutex<Option<Engine>>>,
+    /// The client's name from `initialize`, lowercase: which `agents:` entry applies.
+    agent: Arc<std::sync::Mutex<Option<String>>>,
+    /// Set when `--agent` or `SILO_AGENT` named the agent: the client's name is then ignored.
+    agent_named: bool,
     tool_router: ToolRouter<Self>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ComputerParam {
     /// The computer's name.
     pub computer: String,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct PublishParams {
     /// The computer's name.
     pub computer: String,
@@ -46,6 +53,7 @@ pub struct PublishParams {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ForkParams {
     /// The computer to copy, usually `main` (the default), or a path to a git repository on
     /// this machine (`./repo`) to copy into a new Linux fork. Ignored when `recipe` is set.
@@ -65,6 +73,10 @@ pub struct ForkParams {
     pub name: Option<String>,
     /// Fork from this checkpoint id instead of the current state.
     pub checkpoint: Option<String>,
+    /// Fork from the checkpoint taken after this step number of the computer (see
+    /// `steps_list`); it needs step checkpoints turned on when the step ran.
+    #[serde(rename = "fromStep", alias = "from_step")]
+    pub from_step: Option<u32>,
     /// Silo-managed secrets the fork may use; each must be in fork_secrets in `.silo/silo.yaml`.
     #[serde(default)]
     pub secrets: Vec<String>,
@@ -73,12 +85,40 @@ pub struct ForkParams {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RequestsListParams {
+    /// open (default), kept, thrown-away or all.
+    pub status: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RequestIdParam {
+    /// The request's id, such as fr-ab12cd34.
+    pub id: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RequestKeepParams {
+    /// The request's id, such as fr-ab12cd34.
+    pub id: String,
+    /// Carry database changes even though no migrate step covers them.
+    #[serde(default)]
+    pub data_ok: bool,
+    /// Path of a recipe whose keep: section applies.
+    pub recipe_file: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct UpParams {
     /// The recipe `main` is made from when it does not exist (default linux-dev).
     pub recipe: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ExecParams {
     /// The computer to run in.
     pub computer: String,
@@ -91,6 +131,7 @@ pub struct ExecParams {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct CheckpointParams {
     /// The computer to checkpoint.
     pub computer: String,
@@ -101,6 +142,7 @@ pub struct CheckpointParams {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct FoldParams {
     /// The fork whose changes are kept.
     pub fork: String,
@@ -120,12 +162,17 @@ pub struct FoldParams {
     pub reviewed: Option<String>,
     /// Path of a recipe whose keep: section applies.
     pub recipe_file: Option<String>,
-    /// Record a review request for the fork instead of keeping it; returns the request.
+    /// Record a review request for the fork instead of keeping it; returns the request. When
+    /// an auto_keep rule of the project covers every change, the changes are kept instead.
     #[serde(default)]
     pub request: bool,
+    /// Do not append kept packages and settings files to the recipe the computer came from.
+    #[serde(default)]
+    pub no_write_back: bool,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct DiffParams {
     /// The fork to look at.
     pub computer: String,
@@ -150,8 +197,27 @@ impl SiloMcp {
             socket,
             working_directory,
             engine: Arc::new(tokio::sync::Mutex::new(None)),
+            agent: Arc::new(std::sync::Mutex::new(None)),
+            agent_named: false,
             tool_router: Self::tool_router(),
         }
+        .with_agent(std::env::var("SILO_AGENT").ok())
+    }
+
+    /// Names the agent (from `--agent` or `SILO_AGENT`); the client's own name is then not used.
+    pub fn with_agent(mut self, agent: Option<String>) -> Self {
+        if let Some(name) = crate::config::normalize_agent(agent.as_deref()) {
+            self.agent = Arc::new(std::sync::Mutex::new(Some(name)));
+            self.agent_named = true;
+        }
+        self
+    }
+
+    /// The agent whose settings apply: `--agent` or `SILO_AGENT`, else the connected client's
+    /// name (self-reported: its entry then narrows `recipes` and `fork_secrets` but sets no `fold` or
+    /// `auto_keep`).
+    pub fn agent(&self) -> Option<String> {
+        self.agent.lock().unwrap().clone()
     }
 
     /// The one connection this server keeps, opened again when it has ended.
@@ -230,13 +296,27 @@ impl SiloMcp {
         show(
             async {
                 let project = Project::discover(&self.working_directory);
-                let settings = project.load_settings()?;
+                let settings = project.load_settings_as(self.agent().as_deref(), self.agent_named)?;
                 let explicit = params
                     .recipe_file
                     .as_deref()
                     .map(|path| self.working_directory.join(path));
                 let source = params.source.unwrap_or_else(|| ops::MAIN.to_owned());
                 let engine = self.engine().await?;
+                let checkpoint = match params.from_step {
+                    Some(number) => {
+                        if params.recipe.is_some()
+                            || params.checkpoint.is_some()
+                            || folder::is_folder(&source)
+                        {
+                            return Err(CliError::new(
+                                "fromStep names a step of a computer; it cannot be combined with recipe, checkpoint or a folder.",
+                            ));
+                        }
+                        Some(steps::checkpoint_for(&engine, &source, number).await?)
+                    }
+                    None => params.checkpoint.clone(),
+                };
                 if params.recipe.is_none() && folder::is_folder(&source) {
                     if params.count.unwrap_or(1) != 1 {
                         return Err(CliError::new(
@@ -283,7 +363,7 @@ impl SiloMcp {
                 let args = ForkArgs {
                     source,
                     name: params.name,
-                    checkpoint: params.checkpoint,
+                    checkpoint,
                     secrets: params.secrets,
                     recipe,
                     recipe_name: params.recipe.clone(),
@@ -296,14 +376,37 @@ impl SiloMcp {
                         command: params.command,
                         cwd: None,
                     };
-                    return fanout::fork_many(
+                    let mut value = fanout::fork_many(
                         &engine,
                         &many,
                         settings.as_ref(),
                         &|_| {},
                         &|_, _, _| {},
                     )
-                    .await;
+                    .await?;
+                    let context = flows::Context {
+                        project: &project,
+                        settings: settings.as_ref(),
+                        recipe: many.fork.recipe.as_ref(),
+                        write_back: true,
+                    };
+                    let mut results = Vec::new();
+                    for fork in value["forks"].as_array().cloned().unwrap_or_default() {
+                        if fork.get("exitCode").is_none() {
+                            continue;
+                        }
+                        let ok = fork.get("error").is_none() && fork["exitCode"] == 0;
+                        let name = fork["name"].as_str().unwrap_or_default();
+                        if let Some(result) =
+                            flows::after_command(&engine, name, ok, &context, &|_| {}).await
+                        {
+                            results.push(result);
+                        }
+                    }
+                    if !results.is_empty() {
+                        value["autoKeep"] = Value::Array(results);
+                    }
+                    return Ok(value);
                 }
                 ops::fork(&engine, &args, settings.as_ref(), &|_| {}).await
             }
@@ -338,23 +441,114 @@ impl SiloMcp {
                     .as_deref()
                     .map(|path| self.working_directory.join(path));
                 let recipe = ops::resolve_recipe(explicit.as_deref(), &project)?;
-                flows::fold(
+                let settings =
+                    project.load_settings_as(self.agent().as_deref(), self.agent_named)?;
+                let context = flows::Context {
+                    project: &project,
+                    settings: settings.as_ref(),
+                    recipe: recipe.as_ref(),
+                    write_back: !params.no_write_back,
+                };
+                let mode = if params.request {
+                    flows::Mode::Request
+                } else {
+                    flows::Mode::Keep
+                };
+                flows::run(
                     &self.engine().await?,
                     &params.fork,
                     params.into.as_deref(),
-                    ops::keep_hooks(recipe.as_ref()),
+                    &context,
                     ops::FoldOptions {
                         dry_run: params.dry_run,
                         data_ok: params.data_ok,
                         reviewed: params.reviewed,
                     },
-                    params.request,
+                    mode,
                     &|_| {},
                 )
                 .await
             }
             .await,
         )
+    }
+
+    #[tool(
+        description = "List the review requests recorded with `fold` and `request`: each with its fork's name and state, the computer it would be kept into and how many changes each bucket held. Defaults to the open ones."
+    )]
+    async fn requests_list(
+        &self,
+        Parameters(params): Parameters<RequestsListParams>,
+    ) -> Result<String, String> {
+        show(
+            async {
+                let status = params
+                    .status
+                    .as_deref()
+                    .map(review::parse_filter)
+                    .transpose()?;
+                review::list(&self.engine().await?, status).await
+            }
+            .await,
+        )
+    }
+
+    #[tool(
+        description = "Show a review request: a fresh diff of its fork by bucket, the credentials the fork used (`credentials.used`) and was refused (`credentials.blocked`), and `stale: true` when the fork changed since the request was made (a keep then refuses)."
+    )]
+    async fn request_show(
+        &self,
+        Parameters(RequestIdParam { id }): Parameters<RequestIdParam>,
+    ) -> Result<String, String> {
+        show(async { review::show(&self.engine().await?, &id, &|_| {}).await }.await)
+    }
+
+    #[tool(
+        description = "Keep a review request's fork into the computer it would be kept into, pinned to the digest the request was made from. Returns status kept or refused; a refusal (the fork changed, divergent changes, a database change nothing migrates) leaves the request open and the target unchanged. A fork made from a folder is kept with `fold`."
+    )]
+    async fn request_keep(
+        &self,
+        Parameters(params): Parameters<RequestKeepParams>,
+    ) -> Result<String, String> {
+        show(
+            async {
+                let project = Project::discover(&self.working_directory);
+                let explicit = params
+                    .recipe_file
+                    .as_deref()
+                    .map(|path| self.working_directory.join(path));
+                let recipe = ops::resolve_recipe(explicit.as_deref(), &project)?;
+                review::keep(
+                    &self.engine().await?,
+                    &params.id,
+                    ops::keep_hooks(recipe.as_ref()),
+                    params.data_ok,
+                    &|_| {},
+                )
+                .await
+            }
+            .await,
+        )
+    }
+
+    #[tool(
+        description = "Throw away a review request's fork without keeping its changes. main and the computer the changes would be kept into are never dropped."
+    )]
+    async fn request_throw_away(
+        &self,
+        Parameters(RequestIdParam { id }): Parameters<RequestIdParam>,
+    ) -> Result<String, String> {
+        show(async { review::throw_away(&self.engine().await?, &id, &|_| {}).await }.await)
+    }
+
+    #[tool(
+        description = "Start a review request's fork if it is stopped and return how to reach it: its name and id, the SSH name (after `ssh-setup`) and the URLs of its published ports."
+    )]
+    async fn request_open(
+        &self,
+        Parameters(RequestIdParam { id }): Parameters<RequestIdParam>,
+    ) -> Result<String, String> {
+        show(async { review::open(&self.engine().await?, &id, &|_| {}).await }.await)
     }
 
     #[tool(
@@ -429,10 +623,35 @@ impl SiloMcp {
                     cwd: params.cwd,
                     timeout_secs: params.timeout_secs.unwrap_or(ops::MAX_EXEC_SECS),
                 };
-                ops::exec(&self.engine().await?, &args).await
+                let project = Project::discover(&self.working_directory);
+                let settings =
+                    project.load_settings_as(self.agent().as_deref(), self.agent_named)?;
+                let step_settings = crate::config::Settings::step_settings(settings.as_ref());
+                let (output, step) =
+                    steps::run_exec(&self.engine().await?, &args, step_settings, &|_| {}).await?;
+                let mut value = output.to_json();
+                value["step"] = step;
+                Ok(value)
             }
             .await,
         )
+    }
+
+    #[tool(
+        description = "List the steps of a computer: the commands run in it through Silo (`exec`, or `fork` with a command), numbered from 1, with exit code, times and the checkpoint taken after each when step checkpoints are on. Fork from one with `fork` and `fromStep`."
+    )]
+    async fn steps_list(
+        &self,
+        Parameters(ComputerParam { computer }): Parameters<ComputerParam>,
+    ) -> Result<String, String> {
+        show(async { steps::list(&self.engine().await?, &computer).await }.await)
+    }
+
+    #[tool(
+        description = "Show how the computers descend from each other: each has a parent, what it was forked from (main, a checkpoint, a step, a recipe or a folder), its state and its pending changes (the open review request)."
+    )]
+    async fn tree(&self) -> Result<String, String> {
+        show(async { steps::tree(&self.engine().await?).await }.await)
     }
 
     #[tool(description = "Save a checkpoint of a computer.")]
@@ -528,11 +747,30 @@ impl SiloMcp {
 }
 
 #[tool_handler(router = self.tool_router)]
-impl ServerHandler for SiloMcp {}
+impl ServerHandler for SiloMcp {
+    async fn initialize(
+        &self,
+        request: rmcp::model::InitializeRequestParams,
+        context: rmcp::service::RequestContext<rmcp::RoleServer>,
+    ) -> Result<rmcp::model::InitializeResult, rmcp::ErrorData> {
+        if !self.agent_named {
+            if let Some(name) = crate::config::normalize_agent(Some(&request.client_info.name)) {
+                *self.agent.lock().unwrap() = Some(name);
+            }
+        }
+        context.peer.set_peer_info(request.clone());
+        self.negotiate_initialize(&request)
+    }
+}
 
 /// Serves the tools on stdin and stdout until the client closes them.
-pub async fn serve(socket: PathBuf, working_directory: PathBuf) -> Result<(), CliError> {
+pub async fn serve(
+    socket: PathBuf,
+    working_directory: PathBuf,
+    agent: Option<String>,
+) -> Result<(), CliError> {
     let service = SiloMcp::new(socket, working_directory)
+        .with_agent(agent)
         .serve(rmcp::transport::stdio())
         .await
         .map_err(|error| CliError::new(format!("The MCP server could not start: {error}")))?;

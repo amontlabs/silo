@@ -832,6 +832,18 @@
     "ChangesRequestParams": {
       "description": "Ask for a fork to be reviewed without keeping it: `changes.request` stores a\n[`FoldRequest`] and changes nothing else.",
       "properties": {
+        "counts": {
+          "additionalProperties": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "description": "The bucket counts of the diff the request was made from.",
+          "type": [
+            "object",
+            "null"
+          ]
+        },
         "forkId": {
           "description": "The fork to be reviewed.",
           "type": "string"
@@ -871,6 +883,255 @@
       },
       "required": [
         "request"
+      ],
+      "type": "object"
+    },
+    "ChangesRequestsKeepParams": {
+      "properties": {
+        "dataOk": {
+          "description": "Carry database changes even though no migration step covers them.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "keep": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/KeepHooks"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The recipe's `keep:` steps to run around the keep."
+        },
+        "requestId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "requestId"
+      ],
+      "type": "object"
+    },
+    "ChangesRequestsKeepResult": {
+      "description": "The result of `changes.requests.keep`: the keep's own result and the request after it.\nA refused keep leaves the request open.",
+      "properties": {
+        "refusal": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/KeepRefusal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "report": {
+          "$ref": "#/$defs/KeepReport"
+        },
+        "request": {
+          "$ref": "#/$defs/FoldRequest"
+        },
+        "status": {
+          "description": "`kept` or `refused`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "status",
+        "report",
+        "request"
+      ],
+      "type": "object"
+    },
+    "ChangesRequestsListParams": {
+      "properties": {
+        "status": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RequestFilter"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Defaults to `open`."
+        }
+      },
+      "type": "object"
+    },
+    "ChangesRequestsListResult": {
+      "properties": {
+        "requests": {
+          "items": {
+            "$ref": "#/$defs/RequestEntry"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "requests"
+      ],
+      "type": "object"
+    },
+    "ChangesRequestsMarkKeptParams": {
+      "description": "Closes the open requests for a fork and target that were kept outside the engine: a\nfolder fork folded into its folder by the CLI.",
+      "properties": {
+        "forkId": {
+          "type": "string"
+        },
+        "keepId": {
+          "description": "What `undo` goes back to, such as the folder's backup ref.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "target": {
+          "description": "The request's target, `folder:<path>` for a folder fork.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "forkId",
+        "target"
+      ],
+      "type": "object"
+    },
+    "ChangesRequestsMarkKeptResult": {
+      "properties": {
+        "requests": {
+          "description": "The requests that are now `kept`.",
+          "items": {
+            "$ref": "#/$defs/FoldRequest"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "requests"
+      ],
+      "type": "object"
+    },
+    "ChangesRequestsOpenResult": {
+      "properties": {
+        "computerId": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "request": {
+          "$ref": "#/$defs/FoldRequest"
+        },
+        "sshAlias": {
+          "description": "The SSH alias that reaches the fork, when one is set up.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "started": {
+          "description": "Whether this call started the fork.",
+          "type": "boolean"
+        },
+        "state": {
+          "description": "The state after the call: `running` unless the fork could not be started.",
+          "type": "string"
+        },
+        "urls": {
+          "default": [],
+          "description": "The URLs the fork's published ports answer on.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "request",
+        "computerId",
+        "name",
+        "state",
+        "started"
+      ],
+      "type": "object"
+    },
+    "ChangesRequestsShowResult": {
+      "description": "A request, a fresh diff of its fork and the credentials the fork used.",
+      "properties": {
+        "counts": {
+          "additionalProperties": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "description": "The number of changes in each bucket of `diff`.",
+          "type": "object"
+        },
+        "credentials": {
+          "$ref": "#/$defs/CredentialUsage"
+        },
+        "diff": {
+          "description": "The `silo diff --json` document; `null` for a folder fork."
+        },
+        "forkName": {
+          "type": "string"
+        },
+        "forkState": {
+          "type": "string"
+        },
+        "fresh": {
+          "description": "Whether the fork was looked at now (`true`) or the last look was used (the fork\nis stopped).",
+          "type": "boolean"
+        },
+        "request": {
+          "$ref": "#/$defs/FoldRequest"
+        },
+        "reviewDigest": {
+          "description": "The digest of the fork's changes now.",
+          "type": "string"
+        },
+        "stale": {
+          "description": "`true` when the fork's changes differ from the ones the request was made from; a\nkeep of the request refuses. `None` when this cannot be told (a folder fork).",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "text": {
+          "description": "The readable form of `diff`, or the request's own summary for a folder fork.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "request",
+        "forkName",
+        "forkState",
+        "reviewDigest",
+        "fresh",
+        "diff",
+        "text",
+        "counts",
+        "credentials"
+      ],
+      "type": "object"
+    },
+    "ChangesRequestsThrowAwayResult": {
+      "properties": {
+        "dropped": {
+          "description": "The name of the fork that was dropped.",
+          "type": "string"
+        },
+        "request": {
+          "$ref": "#/$defs/FoldRequest"
+        }
+      },
+      "required": [
+        "request",
+        "dropped"
       ],
       "type": "object"
     },
@@ -1023,6 +1284,15 @@
             "null"
           ]
         },
+        "keepNewest": {
+          "description": "For a `step` checkpoint: how many of the computer's step checkpoints to keep (the\nnewest ones). The engine keeps 20 when it is left out.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "kind": {
           "anyOf": [
             {
@@ -1112,7 +1382,8 @@
         "automatic",
         "before-keep",
         "fork-point",
-        "warm"
+        "warm",
+        "step"
       ],
       "type": "string"
     },
@@ -1943,6 +2214,32 @@
       ],
       "type": "object"
     },
+    "ComputerCredentialsParams": {
+      "description": "`computers.credentials` parameters. `since` (epoch milliseconds) drops older events.",
+      "properties": {
+        "computerId": {
+          "type": "string"
+        },
+        "deviceId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "since": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "computerId"
+      ],
+      "type": "object"
+    },
     "ComputerDeleteParams": {
       "properties": {
         "computerId": {
@@ -2268,6 +2565,20 @@
       ],
       "type": "object"
     },
+    "ComputersTreeResult": {
+      "properties": {
+        "nodes": {
+          "items": {
+            "$ref": "#/$defs/TreeNode"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "nodes"
+      ],
+      "type": "object"
+    },
     "ConflictPolicy": {
       "enum": [
         "ask",
@@ -2338,6 +2649,72 @@
         "name",
         "address",
         "addresses"
+      ],
+      "type": "object"
+    },
+    "CredentialBlock": {
+      "description": "A request the proxy refused because a secret was not allowed for it.",
+      "properties": {
+        "count": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "host": {
+          "type": "string"
+        },
+        "method": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "host",
+        "method",
+        "count",
+        "reason"
+      ],
+      "type": "object"
+    },
+    "CredentialBlocked": {
+      "description": "A placeholder sent to a host its secret is not allowed for.",
+      "properties": {
+        "count": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "host": {
+          "type": "string"
+        },
+        "lastAt": {
+          "description": "Epoch milliseconds of the latest attempt.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "method": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "secret": {
+          "description": "The secret's name when the proxy named it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "host",
+        "method",
+        "count",
+        "reason",
+        "lastAt"
       ],
       "type": "object"
     },
@@ -2470,6 +2847,85 @@
         }
       ]
     },
+    "CredentialUsage": {
+      "description": "The credentials a fork's agent used and the ones it was refused.",
+      "properties": {
+        "blocked": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/CredentialBlock"
+          },
+          "type": "array"
+        },
+        "used": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/CredentialUse2"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "CredentialUse": {
+      "description": "A secret that was substituted for requests to one host with one method.",
+      "properties": {
+        "count": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "host": {
+          "type": "string"
+        },
+        "lastAt": {
+          "description": "Epoch milliseconds of the latest request.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "method": {
+          "type": "string"
+        },
+        "secret": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "secret",
+        "host",
+        "method",
+        "count",
+        "lastAt"
+      ],
+      "type": "object"
+    },
+    "CredentialUse2": {
+      "description": "A secret a fork's agent used: which one, towards which host, and how many times.",
+      "properties": {
+        "count": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "host": {
+          "type": "string"
+        },
+        "method": {
+          "type": "string"
+        },
+        "secret": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "secret",
+        "host",
+        "method",
+        "count"
+      ],
+      "type": "object"
+    },
     "CredentialsRepairResult": {
       "description": "`status` is read again after the repair, with Keychain prompts off again.",
       "properties": {
@@ -2507,6 +2963,28 @@
       "required": [
         "items",
         "deniedCount"
+      ],
+      "type": "object"
+    },
+    "CredentialsUsage": {
+      "description": "Credentials a computer used, and attempts that were blocked.",
+      "properties": {
+        "blocked": {
+          "items": {
+            "$ref": "#/$defs/CredentialBlocked"
+          },
+          "type": "array"
+        },
+        "used": {
+          "items": {
+            "$ref": "#/$defs/CredentialUse"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "used",
+        "blocked"
       ],
       "type": "object"
     },
@@ -4303,6 +4781,16 @@
     "FoldRequest": {
       "description": "A recorded request to review a fork. The engine keeps it until it is answered.",
       "properties": {
+        "counts": {
+          "additionalProperties": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "default": {},
+          "description": "How many changes each bucket (`code`, `packages`, `settings`, `database`, `other`)\nheld when the request was made; empty when it was not given.",
+          "type": "object"
+        },
         "createdAt": {
           "type": "string"
         },
@@ -4311,6 +4799,29 @@
         },
         "id": {
           "type": "string"
+        },
+        "keepId": {
+          "description": "The checkpoint of the target taken before the keep, once the request is `kept`;\n`changes.undo` goes back to it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "keepingSinceMs": {
+          "description": "When a keep of the request started, in milliseconds since the epoch; set while the\nstatus is `keeping`.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "resolvedAt": {
+          "description": "When the request was kept or thrown away.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "reviewDigest": {
           "description": "The digest of the changes the requester reviewed; empty when none was given.",
@@ -4343,6 +4854,21 @@
         {
           "const": "open",
           "description": "Waiting for a review.",
+          "type": "string"
+        },
+        {
+          "const": "keeping",
+          "description": "A keep of it started and has not been recorded as finished.",
+          "type": "string"
+        },
+        {
+          "const": "kept",
+          "description": "Kept into its target.",
+          "type": "string"
+        },
+        {
+          "const": "thrown-away",
+          "description": "The fork was dropped without keeping it.",
           "type": "string"
         }
       ]
@@ -6265,6 +6791,18 @@
         "recipe_build": {
           "$ref": "#/$defs/RecipeBuildResult"
         },
+        "requests_keep": {
+          "$ref": "#/$defs/ChangesRequestsKeepResult"
+        },
+        "requests_open": {
+          "$ref": "#/$defs/ChangesRequestsOpenResult"
+        },
+        "requests_show": {
+          "$ref": "#/$defs/ChangesRequestsShowResult"
+        },
+        "requests_throw_away": {
+          "$ref": "#/$defs/ChangesRequestsThrowAwayResult"
+        },
         "storage": {
           "$ref": "#/$defs/StorageState"
         },
@@ -6286,6 +6824,10 @@
         "recipe_build",
         "promote",
         "undo",
+        "requests_keep",
+        "requests_open",
+        "requests_show",
+        "requests_throw_away",
         "desktop",
         "backup",
         "archive_inspection",
@@ -7188,6 +7730,12 @@
         "changes.keep",
         "changes.promote",
         "changes.request",
+        "changes.requests.list",
+        "changes.requests.show",
+        "changes.requests.keep",
+        "changes.requests.markKept",
+        "changes.requests.throwAway",
+        "changes.requests.open",
         "changes.undo",
         "changes.baseline",
         "changes.capture",
@@ -7208,6 +7756,7 @@
         "computers.configuration.read",
         "computers.configuration.retry",
         "computers.create",
+        "computers.credentials",
         "computers.delete",
         "computers.dismissError",
         "computers.forceStop",
@@ -7219,6 +7768,7 @@
         "computers.shell",
         "computers.start",
         "computers.stop",
+        "computers.tree",
         "connections.devices.connect",
         "connections.devices.health",
         "connections.devices.list",
@@ -7332,6 +7882,8 @@
         "sshAccess.connection",
         "sshAccess.save",
         "sshAccess.state",
+        "steps.list",
+        "steps.record",
         "storage.read",
         "storage.reclaim",
         "terminal.command",
@@ -7401,6 +7953,102 @@
             },
             "params": {
               "$ref": "#/$defs/ChangesRequestParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "changes.requests.list",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/ChangesRequestsListParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "changes.requests.show",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/RequestIdParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "changes.requests.keep",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/ChangesRequestsKeepParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "changes.requests.markKept",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/ChangesRequestsMarkKeptParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "changes.requests.throwAway",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/RequestIdParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "changes.requests.open",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/RequestIdParams"
             }
           },
           "required": [
@@ -7732,6 +8380,22 @@
         {
           "properties": {
             "method": {
+              "const": "computers.credentials",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/ComputerCredentialsParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
               "const": "computers.delete",
               "type": "string"
             },
@@ -7897,6 +8561,22 @@
             },
             "params": {
               "$ref": "#/$defs/ComputerTargetParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "computers.tree",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/EmptyParams"
             }
           },
           "required": [
@@ -9716,6 +10396,38 @@
         {
           "properties": {
             "method": {
+              "const": "steps.list",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/StepsListParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "steps.record",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/StepsRecordParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
               "const": "storage.read",
               "type": "string"
             },
@@ -9904,6 +10616,102 @@
             },
             "result": {
               "$ref": "#/$defs/ChangesRequestResult"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "changes.requests.list",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/ChangesRequestsListResult"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "changes.requests.show",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/JobStartResult"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "changes.requests.keep",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/JobStartResult"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "changes.requests.markKept",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/ChangesRequestsMarkKeptResult"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "changes.requests.throwAway",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/JobStartResult"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "changes.requests.open",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/JobStartResult"
             }
           },
           "required": [
@@ -10235,6 +11043,22 @@
         {
           "properties": {
             "method": {
+              "const": "computers.credentials",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/CredentialsUsage"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
               "const": "computers.delete",
               "type": "string"
             },
@@ -10400,6 +11224,22 @@
             },
             "result": {
               "$ref": "#/$defs/JobStartResult"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "computers.tree",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/ComputersTreeResult"
             }
           },
           "required": [
@@ -12265,6 +13105,38 @@
         {
           "properties": {
             "method": {
+              "const": "steps.list",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/StepsListResult"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "steps.record",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/StepsRecordResult"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
               "const": "storage.read",
               "type": "string"
             },
@@ -13117,6 +13989,30 @@
       },
       "type": "object"
     },
+    "PendingChanges": {
+      "properties": {
+        "buckets": {
+          "additionalProperties": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "description": "Changed paths by bucket, when cheaply known.",
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "requestId": {
+          "description": "The open review request for this fork, if there is one.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
     "PendingRestore": {
       "anyOf": [
         {
@@ -13948,6 +14844,39 @@
       ],
       "type": "string"
     },
+    "RequestEntry": {
+      "description": "One request with the fork it is about.",
+      "properties": {
+        "forkName": {
+          "description": "The fork's name; `None` when the fork no longer exists.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "forkState": {
+          "description": "`running`, `stopped`, and so on; `None` when the fork no longer exists.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "request": {
+          "$ref": "#/$defs/FoldRequest"
+        },
+        "targetName": {
+          "description": "The target computer's name; `None` for a folder or a computer that is gone.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "request"
+      ],
+      "type": "object"
+    },
     "RequestEnvelope": {
       "description": "A canonical multiplexed request. `operationId` and `startWithinMs` are\npresent only for methods that use change admission semantics.",
       "properties": {
@@ -13977,6 +14906,28 @@
         "id",
         "method",
         "params"
+      ],
+      "type": "object"
+    },
+    "RequestFilter": {
+      "description": "Which requests `changes.requests.list` returns.",
+      "enum": [
+        "open",
+        "kept",
+        "thrown-away",
+        "all"
+      ],
+      "type": "string"
+    },
+    "RequestIdParams": {
+      "description": "A request named by its id.",
+      "properties": {
+        "requestId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "requestId"
       ],
       "type": "object"
     },
@@ -14563,6 +15514,148 @@
       ],
       "type": "object"
     },
+    "Step": {
+      "properties": {
+        "checkpointId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "command": {
+          "description": "The command, joined and cut to 200 characters.",
+          "type": "string"
+        },
+        "computerId": {
+          "type": "string"
+        },
+        "exitCode": {
+          "format": "int32",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "finishedAt": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "number": {
+          "description": "1-based per computer and never reused.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "parentCheckpoint": {
+          "description": "For a fork's first step: the checkpoint the fork was made from.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "parentStep": {
+          "description": "The step before this one on the same computer.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "startedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "computerId",
+        "number",
+        "command",
+        "startedAt",
+        "finishedAt"
+      ],
+      "type": "object"
+    },
+    "StepsListParams": {
+      "properties": {
+        "computerId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "computerId"
+      ],
+      "type": "object"
+    },
+    "StepsListResult": {
+      "properties": {
+        "steps": {
+          "items": {
+            "$ref": "#/$defs/Step"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "steps"
+      ],
+      "type": "object"
+    },
+    "StepsRecordParams": {
+      "description": "Records a finished command as the computer's next step. The engine numbers it and\nlinks it to the step (and checkpoint) it follows.",
+      "properties": {
+        "checkpointId": {
+          "description": "The `step` checkpoint taken after the command, when one was.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "command": {
+          "description": "The command as an argument vector; the engine joins and shortens it.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "computerId": {
+          "type": "string"
+        },
+        "exitCode": {
+          "format": "int32",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "finishedAt": {
+          "type": "string"
+        },
+        "startedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "computerId",
+        "command",
+        "startedAt",
+        "finishedAt"
+      ],
+      "type": "object"
+    },
+    "StepsRecordResult": {
+      "properties": {
+        "step": {
+          "$ref": "#/$defs/Step"
+        }
+      },
+      "required": [
+        "step"
+      ],
+      "type": "object"
+    },
     "StorageParams": {
       "properties": {
         "computerId": {
@@ -14782,6 +15875,142 @@
         "failed"
       ],
       "type": "string"
+    },
+    "TreeFrom": {
+      "description": "What a fork was made from.",
+      "oneOf": [
+        {
+          "description": "Not a fork, or a fork with no record.",
+          "properties": {
+            "kind": {
+              "const": "root",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "The parent's state when the fork was made.",
+          "properties": {
+            "kind": {
+              "const": "main",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "checkpointId": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "checkpoint",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "checkpointId"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "checkpointId": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "step",
+              "type": "string"
+            },
+            "number": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "kind",
+            "number",
+            "checkpointId"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "hash": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "recipe",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "hash"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A host folder; filled in by the `silo` command line, which keeps that record.",
+          "properties": {
+            "kind": {
+              "const": "folder",
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "path"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "TreeNode": {
+      "properties": {
+        "from": {
+          "$ref": "#/$defs/TreeFrom"
+        },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "parent": {
+          "description": "The computer this one was forked from, after any promote in force.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pendingChanges": {
+          "$ref": "#/$defs/PendingChanges"
+        },
+        "state": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "from",
+        "state",
+        "pendingChanges"
+      ],
+      "type": "object"
     },
     "UndoneCheckpoint": {
       "properties": {
@@ -15282,6 +16511,22 @@
       "resultType": "ChangesPromoteResult"
     },
     {
+      "method": "changes.requests.keep",
+      "resultType": "ChangesRequestsKeepResult"
+    },
+    {
+      "method": "changes.requests.open",
+      "resultType": "ChangesRequestsOpenResult"
+    },
+    {
+      "method": "changes.requests.show",
+      "resultType": "ChangesRequestsShowResult"
+    },
+    {
+      "method": "changes.requests.throwAway",
+      "resultType": "ChangesRequestsThrowAwayResult"
+    },
+    {
       "method": "changes.undo",
       "resultType": "ChangesUndoResult"
     },
@@ -15432,6 +16677,42 @@
       "resultType": "keep::ChangesRequestResult"
     },
     {
+      "kind": "query",
+      "name": "changes.requests.list",
+      "paramsType": "review_requests::ChangesRequestsListParams",
+      "resultType": "review_requests::ChangesRequestsListResult"
+    },
+    {
+      "kind": "job",
+      "name": "changes.requests.show",
+      "paramsType": "review_requests::RequestIdParams",
+      "resultType": "common::JobStartResult"
+    },
+    {
+      "kind": "job",
+      "name": "changes.requests.keep",
+      "paramsType": "review_requests::ChangesRequestsKeepParams",
+      "resultType": "common::JobStartResult"
+    },
+    {
+      "kind": "command",
+      "name": "changes.requests.markKept",
+      "paramsType": "review_requests::ChangesRequestsMarkKeptParams",
+      "resultType": "review_requests::ChangesRequestsMarkKeptResult"
+    },
+    {
+      "kind": "job",
+      "name": "changes.requests.throwAway",
+      "paramsType": "review_requests::RequestIdParams",
+      "resultType": "common::JobStartResult"
+    },
+    {
+      "kind": "job",
+      "name": "changes.requests.open",
+      "paramsType": "review_requests::RequestIdParams",
+      "resultType": "common::JobStartResult"
+    },
+    {
       "kind": "job",
       "name": "changes.undo",
       "paramsType": "keep::ChangesUndoParams",
@@ -15552,6 +16833,12 @@
       "resultType": "computers::ComputerCreateResult"
     },
     {
+      "kind": "query",
+      "name": "computers.credentials",
+      "paramsType": "credentials_used::ComputerCredentialsParams",
+      "resultType": "credentials_used::CredentialsUsage"
+    },
+    {
       "kind": "job",
       "name": "computers.delete",
       "paramsType": "computers::ComputerDeleteParams",
@@ -15616,6 +16903,12 @@
       "name": "computers.stop",
       "paramsType": "common::ComputerTargetParams",
       "resultType": "common::JobStartResult"
+    },
+    {
+      "kind": "query",
+      "name": "computers.tree",
+      "paramsType": "steps::ComputersTreeParams",
+      "resultType": "steps::ComputersTreeResult"
     },
     {
       "kind": "command",
@@ -16294,6 +17587,18 @@
       "name": "sshAccess.state",
       "paramsType": "common::DeviceParams",
       "resultType": "ssh_access::SshAccessState"
+    },
+    {
+      "kind": "query",
+      "name": "steps.list",
+      "paramsType": "steps::StepsListParams",
+      "resultType": "steps::StepsListResult"
+    },
+    {
+      "kind": "command",
+      "name": "steps.record",
+      "paramsType": "steps::StepsRecordParams",
+      "resultType": "steps::StepsRecordResult"
     },
     {
       "kind": "query",

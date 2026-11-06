@@ -65,6 +65,7 @@ pub fn start_background(
 ) {
     drive_launch_migration(context.clone(), exports.clone());
     install_creation_inputs(context.clone());
+    crate::methods::computers::install_credential_source(context.clone());
     start_computer_use(context.clone());
     start_keep_recovery(context.clone());
     // The timers are the engine's own upkeep with no client connected (95 A-26).

@@ -36,6 +36,8 @@ const START_TIMEOUT: Duration = Duration::from_secs(60);
 const UPDATE_TIMEOUT: Duration = Duration::from_secs(6);
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
 const GATEWAY_BINARY: &str = "silo-macos-gateway";
+/// Names the file the gateway appends credential-use events to.
+const USAGE_LOG_ENV: &str = "SILO_SECRET_USAGE_LOG";
 
 static NEXT_HELPER_GENERATION: AtomicU64 = AtomicU64::new(1);
 static ACTIVE: OnceLock<Mutex<HashMap<String, ActiveGateway>>> = OnceLock::new();
@@ -359,11 +361,23 @@ pub(in crate::macos_computers_engine) fn prepare(
     drop(frame_child);
     drop(control_child);
 
+    let computer_dir = super::super::store::Layout::new(&app.paths().app_data, &record.id).dir;
+    // The gateway's own output and its credential-use events stay on disk, capped.
+    let gateway_log = crate::credentials_usage::open_capped_log(
+        &computer_dir.join(crate::credentials_usage::GATEWAY_LOG_FILE),
+        crate::credentials_usage::LOG_CAP_BYTES,
+    )
+    .map(Stdio::from)
+    .unwrap_or_else(|_| Stdio::null());
     let mut command = Command::new(binary);
     command
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(gateway_log)
+        .env(
+            USAGE_LOG_ENV,
+            computer_dir.join(crate::credentials_usage::USAGE_FILE),
+        )
         .env("MSB_LIBKRUNFW_PATH", bundled_runtime_library(app)?);
     let frame_source = frame_child_fd.as_raw_fd();
     let control_source = control_child_fd.as_raw_fd();

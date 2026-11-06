@@ -190,6 +190,7 @@ async fn a_failed_job_surfaces_its_typed_error_and_a_chunked_outcome_is_reassemb
             device_id: None,
             name: "n".into(),
             kind: None,
+            keep_newest: None,
         }))
         .await
         .unwrap();

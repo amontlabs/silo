@@ -68,6 +68,12 @@ define_registry! {
     ChangesKeep => ("changes.keep", Job, keep::ChangesKeepParams, common::JobStartResult);
     ChangesPromote => ("changes.promote", Job, keep::ChangesPromoteParams, common::JobStartResult);
     ChangesRequest => ("changes.request", Command, keep::ChangesRequestParams, keep::ChangesRequestResult);
+    ChangesRequestsList => ("changes.requests.list", Query, review_requests::ChangesRequestsListParams, review_requests::ChangesRequestsListResult);
+    ChangesRequestsShow => ("changes.requests.show", Job, review_requests::RequestIdParams, common::JobStartResult);
+    ChangesRequestsKeep => ("changes.requests.keep", Job, review_requests::ChangesRequestsKeepParams, common::JobStartResult);
+    ChangesRequestsMarkKept => ("changes.requests.markKept", Command, review_requests::ChangesRequestsMarkKeptParams, review_requests::ChangesRequestsMarkKeptResult);
+    ChangesRequestsThrowAway => ("changes.requests.throwAway", Job, review_requests::RequestIdParams, common::JobStartResult);
+    ChangesRequestsOpen => ("changes.requests.open", Job, review_requests::RequestIdParams, common::JobStartResult);
     ChangesUndo => ("changes.undo", Job, keep::ChangesUndoParams, common::JobStartResult);
     ChangesBaseline => ("changes.baseline", Job, changes::ChangesBaselineParams, common::JobStartResult);
     ChangesCapture => ("changes.capture", Job, changes::ChangesCaptureParams, common::JobStartResult);
@@ -88,6 +94,7 @@ define_registry! {
     ComputersConfigurationRead => ("computers.configuration.read", Query, computers::ComputerConfigurationReadParams, computers::ComputerConfigurationRequest);
     ComputersConfigurationRetry => ("computers.configuration.retry", Job, computers::ComputerConfigurationRetryParams, common::JobStartResult);
     ComputersCreate => ("computers.create", Job, computers::ComputerCreateParams, computers::ComputerCreateResult);
+    ComputersCredentials => ("computers.credentials", Query, credentials_used::ComputerCredentialsParams, credentials_used::CredentialsUsage);
     ComputersDelete => ("computers.delete", Job, computers::ComputerDeleteParams, common::JobStartResult);
     ComputersDismissError => ("computers.dismissError", Command, computers::ComputerDismissErrorParams, computers::ApplicationSource);
     ComputersForceStop => ("computers.forceStop", Command, computers::ComputerForceStopParams, ());
@@ -99,6 +106,7 @@ define_registry! {
     ComputersShell => ("computers.shell", Query, computers::ComputerShellParams, computers::ApplicationSource);
     ComputersStart => ("computers.start", Job, common::ComputerTargetParams, common::JobStartResult);
     ComputersStop => ("computers.stop", Job, common::ComputerTargetParams, common::JobStartResult);
+    ComputersTree => ("computers.tree", Query, steps::ComputersTreeParams, steps::ComputersTreeResult);
     ConnectionsDevicesConnect => ("connections.devices.connect", Command, connections::ConnectDeviceParams, connections::Device);
     ConnectionsDevicesHealth => ("connections.devices.health", Query, connections::DeviceHealthParams, connections::DeviceHealthResult);
     ConnectionsDevicesList => ("connections.devices.list", Query, common::EmptyParams, Vec<connections::Device>);
@@ -212,7 +220,9 @@ define_registry! {
     SshAccessConnection => ("sshAccess.connection", Command, ssh_access::SshAccessConnectionParams, ssh_access::SshAccessConnectionResult);
     SshAccessSave => ("sshAccess.save", Command, ssh_access::SshAccessSaveParams, ssh_access::SshAccessState);
     SshAccessState => ("sshAccess.state", Query, common::DeviceParams, ssh_access::SshAccessState);
-    StorageRead => ("storage.read", Query, storage::StorageParams, storage::StorageState);
+    StepsList => ("steps.list", Query, steps::StepsListParams, steps::StepsListResult);
+    StepsRecord => ("steps.record", Command, steps::StepsRecordParams, steps::StepsRecordResult);
+    StorageRead =>("storage.read", Query, storage::StorageParams, storage::StorageState);
     StorageReclaim => ("storage.reclaim", Job, storage::StorageParams, common::JobStartResult);
     TerminalCommand => ("terminal.command", Query, terminal::TerminalCommandParams, terminal::CommandResult);
     UpdatesCheck => ("updates.check", Command, updates::UpdatesCheckParams, updates::UpdateSnapshot);
@@ -232,27 +242,27 @@ mod tests {
 
     #[test]
     fn registry_covers_every_canonical_method_and_kind() {
-        assert_eq!(METHOD_REGISTRY.len(), 156);
+        assert_eq!(METHOD_REGISTRY.len(), 166);
         assert_eq!(
             METHOD_REGISTRY
                 .iter()
                 .filter(|m| m.kind == MethodKind::Query)
                 .count(),
-            48
+            52
         );
         assert_eq!(
             METHOD_REGISTRY
                 .iter()
                 .filter(|m| m.kind == MethodKind::Command)
                 .count(),
-            66
+            68
         );
         assert_eq!(
             METHOD_REGISTRY
                 .iter()
                 .filter(|m| m.kind == MethodKind::Job)
                 .count(),
-            36
+            40
         );
         assert_eq!(
             METHOD_REGISTRY

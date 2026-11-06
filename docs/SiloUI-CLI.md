@@ -58,8 +58,11 @@ the engine's message.
 | `silo undo <computer\|fork\|./dir>` | put a computer back to before its latest keep, or a folder back to before its latest fold |
 | `silo drop <computer> [--force]` | throw a computer away (a hidden throwaway too, by name or id); `main` needs `--force`. A stopped `silo-baseline-*` copy more than an hour old is dropped by the next fork or `silo diff --baseline` |
 | `silo exec <computer> [--cwd DIR] [--timeout SECS] -- <cmd...>` | run a command; the exit code is passed through |
-| `silo checkpoint <computer> [--name N] [--kind manual\|automatic\|before-keep\|warm]` | save a checkpoint |
+| `silo checkpoint <computer> [--name N] [--kind manual\|automatic\|before-keep\|warm\|step]` | save a checkpoint |
 | `silo checkpoints <computer>` | list checkpoints |
+| `silo steps <computer>` | the commands run in the computer through Silo, numbered, with exit code and the checkpoint each left ([steps](SiloUI-CHANGES.md#steps-and-the-fork-tree)) |
+| `silo fork <computer> --from-step N` | fork from the checkpoint taken after step N |
+| `silo tree` | the computers as a tree: what each was forked from, its state and pending review |
 
 A fork publishes the ports its source publishes (a recipe fork, the recipe's `ports`), each on a host port of its own. The engine does not copy published ports when it forks a computer, so `silo fork` does it with the same `publish` calls. The MCP server has `ports`, `publish`, `unpublish` and `ssh_name` tools.
 | `silo job <id>` | wait for a job that is already running |
@@ -133,8 +136,24 @@ and uncommitted files) and calls `changes.request`, which stores a fold request 
 (`fold-requests/<id>.json` under the app data folder): `id` (`fr-` and 8 hex), `forkId`, `target`
 (the computer id; `folder:<path>` for a folder fork), `createdAt`, `reviewDigest`, `summary` and
 `status: open`. Asking again for the same fork and target updates that open request. The id is
-printed. Listing, showing, keeping and throwing away requests come with phase 4; CI or cron call
-`silo fork main -- <cmd>` then `silo fold --request`.
+printed. CI or cron call `silo fork main -- <cmd>` then `silo fold --request`.
+
+- `silo requests [--status open|kept|thrown-away|all]` lists requests (default open) with the
+  fork, its state, the computer it would be kept into and the count of changes per bucket.
+- `silo requests show <id>` prints the same buckets as `silo diff` for a fresh look at the fork,
+  then `Credentials used: ...` (`none` when the fork used no secret; a `Blocked:` line follows
+  when the proxy refused something). It says when the fork changed since the request, which makes
+  a keep refuse.
+- `silo requests keep <id> [--data-ok] [--recipe-file PATH]` keeps the fork pinned to the
+  request's digest and exits 2 when refused (the request stays open). A folder fork is kept with
+  `silo fold`.
+- `silo requests throw-away <id>` drops the fork and closes the request; `main` and the
+  request's target are refused.
+- `silo requests open <id>` starts the fork if it is stopped and prints its name, SSH name and
+  URLs.
+
+Each takes `--json`. The MCP tools are `requests_list`, `request_show`, `request_keep`,
+`request_throw_away` and `request_open`, on the same engine methods.
 
 `silo status` prints, for a fork, a line such as
 `quiet: applied; stopped: poller; scrubbed: /root/.env; secrets: none` (on macOS it adds the
@@ -173,12 +192,97 @@ recipes: [linux-dev]
 fork_secrets: [OPENAI_API_KEY]   # what --secret may name
 fold: ask                        # or auto-code
 fork_ram_budget: 8G
+step_checkpoints: true           # checkpoint a computer after each step (default false)
+step_checkpoints_keep: 20        # step checkpoints kept per computer (default 20; 0 keeps all)
 warm_max_age: 60s               # how old main's warm checkpoint may be for a fork to use it (and only if main is unchanged)
 auto_keep:
   - when: { only: [code], tests: pass }
 agents:
   openclaw: { fold: ask, fork_secrets: [] }
+  claude-code:
+    recipes: [linux-dev, web]
+    auto_keep:
+      - when: { only: [code, packages] }
 ```
+
+### Settings file reference
+
+| Key | Meaning |
+| --- | --- |
+| `recipes` | Recipe names `--recipe` and `silo up` may use (empty: any). |
+| `fork_secrets` | Secret names `--secret` may name. |
+| `fold` | `ask` (default) or `auto-code`, which is `auto_keep: [{when: {only: [code], tests: pass}}]`. Explicit `auto_keep` rules win over `fold: auto-code`. |
+| `auto_keep` | Rules that keep a fork without asking (below). |
+| `fork_ram_budget`, `warm_max_age` | Top level only. |
+| `step_checkpoints`, `step_checkpoints_keep` | Step checkpoints (see [steps](SiloUI-CHANGES.md#steps-and-the-fork-tree)). |
+| `agents.<name>` | Per-agent overrides of `recipes`, `fork_secrets`, `fold`, `auto_keep`, `step_checkpoints` and `step_checkpoints_keep`. |
+
+**Agents.** The agent is named by `--agent NAME` (global option), else `SILO_AGENT`; the MCP
+client's name from `initialize` (`clientInfo.name`) is used only when neither is set. The client
+name is self-reported, so `agents:` picks per-agent defaults and is not an access control: an
+entry can only narrow what the top level allows (`recipes` and `fork_secrets` must be subsets of
+the top-level lists, a validation error names the key otherwise). `fold` and `auto_keep` of an
+entry apply only when `--agent` or `SILO_AGENT` names the agent; a client name alone still picks
+the narrowing keys (`recipes`, `fork_secrets`, step settings) but never what is kept without
+asking. Names are matched in
+lowercase with spaces as `-`, so the client `Claude Code` uses `agents.claude-code`. An agent's
+keys replace the top-level ones; keys it leaves out keep the top-level value, and an agent with
+`fold: ask` and no `auto_keep` of its own gets no automatic keep. An unknown agent gets the
+top-level settings. `Project::load_settings(agent)` is the one function that reads settings (it
+resolves the agent), so every command and MCP tool sees the same values. Errors name the key
+(`agents.x.auto_keep[0].when.only`, `agents.x.recipes`).
+
+**`auto_keep`.** Each rule is `when: { only: [buckets], tests: pass }`. `only` lists the buckets
+that may hold changes (`code`, `packages`, `settings`, `database`, `other`; at least one); every
+other bucket must be empty. `tests: pass` runs the `test:` command of the recipe (the
+`--recipe-file`, else `.silo/recipe.yaml`; for a folder fork, the recipe it was made with) in the
+fork and needs exit code 0. That command is part of the fork, so the agent that works in the fork
+can change it or the files it runs; a passing run shows what the fork's own test command
+reported, not an independent check; a rule that asks for
+tests and has no command to run does not match. Rules apply in `silo fold <fork> --request` (and
+the MCP `fold` with `request`) and at the end of `silo fork ... -- cmd`: the first rule that
+covers every change keeps the fork without asking and the output says which rule matched;
+otherwise a review request is left with the reason. Never kept without asking, whatever the
+rules say: a fork that changed after the digest was taken (including by the test command; the
+decision is declined and a request is left), a database change no `keep: migrate:` step covers (or one that could not be
+compared), credential paths or service changes among the Not kept items, a diff without a review
+digest, a fork whose command failed, and a fork that changed between the diff and the keep (the
+keep is pinned to the digest and refuses). An empty diff does nothing.
+
+**Recipe write-back.** After a successful keep that brought packages or Settings & files, the
+recipe the target computer was made from (`silo up`, `silo fork --recipe`, remembered beside the
+engine socket; forks inherit it; else `.silo/recipe.yaml`) gets the added packages under
+`packages.<manager>` and the changed settings files under `files:`. The recipe is edited as
+text so comments and order stay; when its layout is one the editor does not understand (a
+multi-line `[...]` list, `packages: {...}`), nothing is written and the command prints what to
+add by hand. `--no-write-back` skips it. `files:` records the files; the build does not create
+them. Packages of a manager recipes have no list for (`brew cask`) are reported, not written.
+Recipes also take `test: <command>`.
+
+**`silo fold <fork> --pr [--repo OWNER/NAME] [--base BRANCH]`** keeps nothing. It puts the
+fork's code on a new branch `silo/<fork>-<id>` in the host repository (a folder fork: the folder,
+which keeps its branch and tree; a computer fork: the repository the diff's Code bucket names,
+bundled in the fork and fetched into a temporary repository on this device, with uncommitted
+work committed in the fork first; the untracked files that were committed are listed in the
+result and the PR body, and a repository holding credential paths is refused), pushes it from
+this device, and opens a pull
+request through the GitHub REST API whose body is the review summary (the diff's buckets, then
+a `Credentials not kept:` line when the diff found credential paths; the review request uses the
+same renderer). The token is `GITHUB_TOKEN`, else the one `gh auth token` prints, and goes in an
+HTTP header for `https` remotes, never in an argument; without one, nothing is pushed. The push
+destination never comes from a fork: for a computer fork it is `https://<git host>/<repo>.git`,
+built here from `--repo`, else `GITHUB_REPOSITORY` (read only when `GITHUB_ACTIONS` is `true`,
+as on a CI runner), else the `origin` of the host project's `.silo` root; without one of them
+`--repo` is required. The fork's own `origin`, when it names a different OWNER/NAME, is
+refused, and so is an untracked file in the fork that looks like a credential (the patterns of
+the diff's Not kept credentials). The git host follows `SILO_GITHUB_API_URL`: `github.com` for the default, the host of a
+`/api/v3` base otherwise), and anything but `https` is refused. For a folder fork it is the host
+folder's own `origin`, and the repository is the one that origin names (a different `--repo` or
+`GITHUB_REPOSITORY` is refused): the commits up to the fork's starting commit are compared with
+`origin/<base>`, host commits `origin` does not have are refused and listed, and the local `silo/<fork>-<id>` branch is deleted after the push.
+`--pr` cannot be combined with `--request`, `--into` or `--dry-run`, and is not an MCP option. The result prints the pull request URL (`prUrl` with `--json`). A fork's
+own credentials are never used and its GitHub access stays read-only. `SILO_GITHUB_API_URL`
+changes the REST base (default `https://api.github.com`; the GitHub Action sets it from `github.api_url`, and tests point it at a local server). The token header goes only to a push whose `https` host is the git host of that base. `silo fold <fork> --pr --json` prints `prUrl` (also in `pullRequest.url`), `branch`, `base` and `repository`; `silo fold <fork> --request --json` prints the request as `request.id`.
 
 When `silo.yaml` exists, `--secret` accepts only names in `fork_secrets`. `silo fork` reads
 `--recipe-file`, else the nearest `.silo/recipe.yaml` (a malformed file is an error). The fork
@@ -191,7 +295,7 @@ gets the named secrets (`github` gives read-only GitHub access) and the recipe's
 claude mcp add silo -- silo mcp
 ```
 
-Tools: `up`, `recipe_list`, `list`, `status`, `fork` (with `recipe`, `count`, `command`, or a repository path as `source`), `fold` (with `promote` or `request`), `undo`, `drop`, `exec`, `checkpoint`, `checkpoints`, `secrets_list`. They make the
+Tools: `up`, `recipe_list`, `list`, `status`, `steps_list`, `tree`, `fork` (with `recipe`, `count`, `command`, `fromStep`, or a repository path as `source`), `fold` (with `promote` or `request`), `undo`, `drop`, `exec`, `checkpoint`, `checkpoints`, `secrets_list`. They make the
 same engine calls as the commands and return the same JSON as `--json`. `drop` cannot
 drop `main` through MCP. No tool sets or assigns secrets; values are never sent over MCP.
 
@@ -201,3 +305,7 @@ A debug build of the engine sends its `api.github.com` requests to the URL in
 `SILO_GITHUB_API_BASE` when it is a loopback `http` or `https` origin (`localhost`,
 `127.0.0.1` or `[::1]`, with an optional port and no path). Anything else is ignored. A
 release build never reads the variable.
+
+## GitHub Action
+
+`silo-action/` holds a ready-made composite action (`action.yml` and `run.sh`, no build step) for a self-hosted Mac runner that has Silo installed. It forks a recipe or a computer, runs a command, writes the `silo diff --json` buckets and the credentials line to the job summary, then calls `silo fold --pr` (reads `GITHUB_TOKEN` and `SILO_GITHUB_API_URL`) or `silo fold --request`, drops the fork unless `keep-fork` is set, and fails the job with the command's exit code. Forks get none of the credentials Silo manages unless `secrets` names them; files on disk are copied. See `silo-action/README.md`; test with `sh silo-action/test/run.sh`.

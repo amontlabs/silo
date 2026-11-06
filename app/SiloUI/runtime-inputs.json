@@ -151,6 +151,10 @@
     {
       "path": "patches/microsandbox-rename-stopped-0.7.6.patch",
       "sha256": "07dff550951d356d484b3a6dc69354b85676465fcaf07e63a05c897a7cc494e1"
+    },
+    {
+      "path": "patches/microsandbox-secret-usage-events-0.7.6.patch",
+      "sha256": "246ca45a30f5580e3bdacace3fa9e896b712afaff1f22e03dc651c25a505c4ac"
     }
   ]
 }

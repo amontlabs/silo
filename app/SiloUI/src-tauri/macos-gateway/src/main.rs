@@ -89,6 +89,10 @@ fn generate_ca_mode() -> Result<(), GatewayError> {
 }
 
 fn run() -> Result<(), GatewayError> {
+    // Credential-use events (secret name, host, method; never a value) go to this file.
+    if let Some(path) = std::env::var_os("SILO_SECRET_USAGE_LOG") {
+        microsandbox_network::secret_usage::set_usage_log(std::path::Path::new(&path));
+    }
     let frame_socket = unsafe { UnixDatagram::from_raw_fd(FRAME_FD) };
     let mut control = unsafe { UnixStream::from_raw_fd(CONTROL_FD) };
 

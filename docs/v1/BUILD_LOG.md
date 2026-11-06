@@ -6,13 +6,11 @@ Tracker: Linear project "Silo v1: git for agent computers" (P-AMO-8).
 
 ## Resume
 
-- **Phase:** 3, checks in progress on branch `claude/silo-v1-phase-3`. Phases 0-2 merged (#60, #61, #62).
-- **Done in phase 3 (reviewed):** recipes + cache + `silo up` + warm checkpoint, Make this main (macOS and Linux, with the `microsandbox-rename-stopped` patch), `fork -n` with RAM budget, `fork -- cmd`, `fork ./dir` with fold/undo back to the host repo, fold requests, `silo ports/publish/unpublish`, `silo ssh-setup` (`ssh main.silo`), URL per fork (AMO-91).
-- **Open:** warm-checkpoint correctness fix (engine change generation + 60 s cap) in a worktree; then rebuild the Dev engine and re-run `docs/v1/checks/phase3_*` (urls, promote, folder). Evidence in `docs/v1/evidence/phase-3/`.
-- **Blocked on the owner:** Keychain approval for the Dev engine (secret carry-over checks in phases 1 and 3); a leaked hidden test computer `silo-baseline-8fa22f` (27 GB) to drop.
-- **Clean up:** Dev engine runs from the main checkout's bundle. Stale throwaways are swept by the CLI now.
-- **Next action:** after phase 3 checks pass, open the phase 3 PR, then phase 4.
-- **macOS slots:** free (no foreign VM since 5 Nov).
+- **Phase:** 4 on branch `claude/silo-v1-phase-4`, PR #64 (CI running). Phases 0-3 merged (#60-#63).
+- **Done in phase 4 (reviewed, merged into the branch):** review requests (`changes.requests.*`, `silo requests`, MCP), steps + `--from-step` + `silo tree`, credentials-used line (msb patch `microsandbox-secret-usage-events`, macOS gateway, `computers.credentials`), `agents:` + auto-keep + recipe write-back + `silo fold --pr`, `silo-action/`.
+- **Blocked on the owner:** the credentials VM check (`docs/v1/checks/phase4_credentials_check.sh`) needs Keychain repair for the Dev engine (`engine.credentials.repair`, owner clicks Always Allow); same for the secret carry-over checks of phases 1 and 3. Leftover computers to drop: `silo-baseline-8fa22f`, `e2e-p3-macsrc`, `e2e-p3-macsrc-before-20261105-2253`.
+- **Next action:** merge #64 when CI is green; after the Keychain repair, re-run the phase 4 credentials check (and phase 1/3 secret checks); then phase 5.
+- **macOS slots:** free.
 
 ## Start
 
@@ -53,7 +51,21 @@ VM check (Linux and macOS): a macOS fork boots once; a source with a boot-persis
 - **Risk to the backend:** medium-low if phase 7 stays deferred and additive. Shared churn points: `api/src/methods/*`, `schema.rs`, `src/contracts/silo.ts`, `src/test/contracts/*.json`.
 - **Recommendation:** bring the app back in phase 7; touch it before then only to keep CI green. Re-check at phase 7: the debug bundle builds and the Dev app connects at the then-current protocol; frontend checks and the command manifest pass; the review, step and tree methods are stable with typed constructors; the state shape is frozen for the phase; wording follows `docs/SiloUI-VOCABULARY.md` and `UI-PATTERNS.md`.
 
+### Phase 4 (AMO-79, AMO-69, AMO-92, AMO-84, AMO-93, AMO-94; credentials-used line)
+
+| Slice | What | Review |
+|---|---|---|
+| 4a | Review requests in the engine API: list, show, keep, throw away, open fork, with buckets and the credentials line; CLI and MCP on the same methods | reviewer |
+| 4b | Fork from step + fork tree: parent links, per-step checkpoints, step listing, `--from-step N`, `silo tree` + API | reviewer |
+| 4c | Credentials-used line: network-crate patch logging successful substitutions (Linux runtime rebuild), macOS proxy log capture, per-computer aggregator and method | reviewer + Argon |
+| 4d | Per-agent settings (`agents:`), recipe write-back on keep, `silo fold --pr` (host GitHub connection or runner `GITHUB_TOKEN`) | reviewer |
+| 4e | Auto-keep rules (`auto_keep:`, `fold: auto-code`) | reviewer |
+| 4f | GitHub Action `silo-action/` (not published), tested with a local runner | reviewer |
+
+All tests use the mock GitHub API, a local bare git remote and a loopback HTTP endpoint with a fake secret. VM check: only the credentials line (Linux and macOS).
+
 ## Decisions
+- 2026-11-06, steps (AMO-69): a step is one command an agent runs on a computer through Silo (CLI exec/run, MCP run). Per-step checkpoints are off by default (`step_checkpoints: true` turns them on; the last `step_checkpoints_keep`, default 20, are kept per computer). `--from-step N` forks from the checkpoint taken after step N.
 
 - **4 Nov, checkpoint disk (phase 0b), advised by Fable:** a live probe on the pinned runtime (`docs/v1/evidence/phase-0/raw/checkpoint-disk-probe.txt`) showed a computer's checkpoints form one linear msb chain, the engine refuses every checkpoint delete while the computer exists, disk comes back only when the computer is deleted, and images do not leak. The pinned msb 0.7.6 has no top-level `msb prune` (the validation's prune figures came from upstream 0.7.13). Two reviews (gpt-6.1-sol, Opus; Argon failed to run) found that retention by deletion frees nothing on a linear chain and that `msb image prune` can drop layers a loaded, not yet started snapshot needs. Fable read the msb source: each checkpoint holds its whole layer closure, so parent links are lineage only, and msb ships `msb modify --compact`, which merges old sealed layers into a new base. Decision: no automatic image prune; retention = compact the computer's oldest layers, then remove the pruned Silo-owned checkpoints with `--force`, always keeping the newest. Spec change pending the measurement in the phase 0 VM check.
 - **4 Nov, checkpoint disk follow-up, advised by Fable:** two compaction probes (`compact-probe.txt`) showed compaction (running or stopped) costs about 0.8-1.1 GB and removing every older snapshot afterwards returns about 0. Cause in the pinned msb: each capture's layer closure is staged in the sandbox's `runtime/checkpoints/<id>/` and never removed after publication, so those hard links hold the data until the sandbox is deleted. Separately, `publish_layer_closure` copies every qcow2 layer on each capture, so the first capture after a restore cost 1-5 GB. Decision: carry two Silo msb patches (release the staging dir after publication plus a crash sweep; link instead of copy when the backing name already matches), re-probe, then implement retention as compact + forced removal. Fallback if the copy patch fails: accept growth in v1, show checkpoint disk per computer, and record the spec change.
@@ -66,6 +78,16 @@ VM check (Linux and macOS): a macOS fork boots once; a source with a boot-persis
 ## Spec changes
 
 ## Status
+
+### 6 Nov 2026: phase 4 built; credentials VM check blocked on the owner
+
+- **Shipped (PR #64):** review requests in the engine API (list, show with buckets and the credentials line, keep pinned to the request's digest, throw away limited to the request's own fork, open, markKept), with `silo requests` and MCP tools; optional per-step checkpoints, `silo steps`, `silo fork --from-step N`, `silo tree`/`computers.tree`; the credentials-used line (MicroSandbox patch and macOS gateway write name, host, method and blocked reasons, never values; per-key counters survive log rotation; `computers.credentials`; shown in `silo status`, `silo diff`, `silo requests show`); `agents:` per-agent settings (entries may only narrow `recipes` and `fork_secrets`; `fold`/`auto_keep` overrides apply only when the agent is named by `--agent`/`SILO_AGENT`), `auto_keep:` rules and `fold: auto-code`, recipe write-back after a keep, `silo fold --pr`; `silo-action/` (not published).
+- **Reviews:** each slice reviewed by Opus (Codex quota ran out), the credentials slice also by Argon; three rounds on `--pr` (found: a fork could redirect the push and receive the host token; folder auto-keep not pinned; MCP client name widening settings) and two on review requests (ownership of throw away, double keep after a crash). All fixed with tests.
+- **Tests:** silo-api, silod, silo-cli and silo-engine pass locally (engine 3046 passed); frontend typecheck, lint and the schema tests; `silo-action/test/run.sh` 18 checks. All GitHub paths use a local mock API and bare remotes.
+- **VM check:** BLOCKED on Linux and macOS: `silo secrets set` returns `credential_access_denied` (the rebuilt Dev engine cannot read Keychain items an earlier build made). Computer create/start passed; the rest of the script has not run yet. Evidence: `docs/v1/evidence/phase-4/credentials-check.txt`.
+- **Decisions:** steps (see Decisions); `--pr` uses `GITHUB_TOKEN` or `gh auth token` on the host, never the fork's credentials, and builds the push URL on the host.
+- **Wording:** clean over added lines.
+- **Next:** merge #64 after CI; Keychain repair; re-run the credentials check; phase 5.
 
 ### 6 Nov 2026: phase 3 passed (secret carry-over blocked on the owner)
 

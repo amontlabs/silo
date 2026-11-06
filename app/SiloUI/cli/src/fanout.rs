@@ -320,6 +320,7 @@ async fn one(
     checkpoint: Option<String>,
     extras: &ops::ForkExtras,
     args: &ManyArgs,
+    steps: crate::config::StepSettings,
     progress: Progress<'_>,
     output: Output<'_>,
 ) -> Value {
@@ -346,6 +347,7 @@ async fn one(
         Err(error) => entry["portsError"] = json!(error.message),
     }
     entry["id"] = json!(fork.id);
+    crate::flows::inherit_recipe(engine, &source.id, &fork.id);
     entry["state"] = json!(fork.state);
     entry["kind"] = json!(fork.kind);
     entry["urls"] = json!(urls(engine, &fork).await);
@@ -353,6 +355,7 @@ async fn one(
         return entry;
     }
     let (mut out, mut err) = (Capture::default(), Capture::default());
+    let started = crate::clock::now_unix();
     let ran = exec_streaming(
         engine,
         &fork,
@@ -373,6 +376,17 @@ async fn one(
         Ok(ran) => {
             entry["exitCode"] = json!(ran.exit_code);
             entry["signal"] = json!(ran.signal);
+            entry["step"] = crate::steps::record_in_order(
+                engine,
+                &fork,
+                &args.command,
+                ran.exit_code,
+                started,
+                crate::clock::now_unix(),
+                steps,
+                progress,
+            )
+            .await;
         }
         Err(error) => entry["error"] = json!(error.message),
     }
@@ -433,6 +447,7 @@ pub async fn fork_many(
         checkpoint = made["id"].as_str().map(str::to_owned);
     }
     let extras = ops::fork_extras(args.fork.recipe.as_ref(), &args.fork.secrets);
+    let step_settings = Settings::step_settings(settings);
     let forks = futures::future::join_all(names.iter().map(|name| {
         one(
             engine,
@@ -441,6 +456,7 @@ pub async fn fork_many(
             checkpoint.clone(),
             &extras,
             args,
+            step_settings,
             progress,
             output,
         )

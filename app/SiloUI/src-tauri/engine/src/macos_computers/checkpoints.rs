@@ -75,6 +75,8 @@ pub(super) enum PolicyKind {
     ForkPoint,
     /// The checkpoint `silo up` keeps of main; replaced on every `up`, never trimmed.
     Warm,
+    /// Taken after a step (a command run through Silo); trimmed to the newest N.
+    Step,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

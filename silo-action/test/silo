@@ -1,0 +1,25 @@
+#!/bin/sh
+# Fake silo: logs argv to $FAKE_SILO_LOG, returns canned output.
+# FAKE_SILO_EXIT is the exit code of `fork ... -- cmd`; FAKE_SILO_ENGINE=down makes `list` fail.
+echo "$*" >> "$FAKE_SILO_LOG"
+case $1 in
+  list)
+    [ "$FAKE_SILO_ENGINE" = down ] && exit 1
+    echo '[]'
+    ;;
+  fork) exit "${FAKE_SILO_EXIT:-0}" ;;
+  status) echo '{}' ;;
+  diff)
+    cat << 'JSON'
+{"format":1,"summary":[{"bucket":"Code","lines":["~/app: 46cc034..e710c1a"]},{"bucket":"Packages","lines":["+ jq 1.7.1"]}],
+ "not_kept":{"credentials":{"/root/.ssh/":["/root/.ssh/id_ed25519"]}}}
+JSON
+    ;;
+  fold)
+    case $3 in
+      --pr) echo '{"url":"https://example.invalid/o/r/pull/7"}' ;;
+      --request) echo '{"request":{"id":"fr-0a1b2c3d"}}' ;;
+    esac
+    ;;
+esac
+exit 0

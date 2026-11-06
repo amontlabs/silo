@@ -92,6 +92,20 @@ source computer's cached grants and credentials held by historical checkpoint
 memory are not used. If the target has no current GitHub profile, restore starts
 without GitHub access.
 
+## Credentials a fork used
+
+Forks get none of the credentials Silo manages unless you name them; files on disk are copied.
+For the ones you do name, `silo status <fork>` and `silo diff <fork>` print a line such as
+`credentials used: OPENAI_API_KEY → api.openai.com (POST ×3); blocked: 1 (GITHUB_TOKEN → evil.example GET)`,
+or `credentials used: none`. The engine method `computers.credentials` returns the same data as
+`{used: [{secret, host, method, count, lastAt}], blocked: [{secret, host, method, count, reason, lastAt}]}`.
+
+The network proxy appends one JSON line per event to `secret-usage.jsonl`: in the sandbox's
+`logs/` directory for a Linux computer, in the computer's folder for a macOS computer (whose
+gateway output also goes to a `gateway.log` there, which moves to `gateway.log.1` at the next gateway start once it reaches 1 MiB). Lines hold names, hosts and
+methods, never a value or a placeholder. Substitution in headers, the request line and the body is recorded, as are the GitHub profile's uses and refusals. Blocked attempts carry a reason: `host_not_allowed`, `tls_identity_required`, `proxy_metadata`, `unsupported_location`, `placeholder_too_long`, or a `github_*` reason. A request with no host to name shows as `(unknown host)`. A file belongs to one computer, so a fork
+counts from its own first request. The event file is capped at 1 MiB with one older generation, so a very busy computer loses its oldest events; a small `secret-usage-summary.tsv` beside it keeps one counter per secret, host, method and reason (at most 512 of them, then an `(other)` row) and is never rotated. `computers.credentials` reads the counters, and the events only when `since` is given. Method and host are cleaned before they are written (a method that is not a short HTTP token becomes `other`, a host over 253 bytes `(invalid host)`), and a host that contains a configured placeholder is written as `(redacted host)`. Hosts are lowercased without port or trailing dot and methods are uppercased; a used event falls back to the HTTP `Host` when the connection has no name. When reading, lines over 4 KiB are skipped, each list keeps at most 512 rows, text is capped and control characters are shown as `?`. Aggregation is `credentials_usage.rs` in the engine.
+
 ## Sources
 
 - [MicroSandbox placeholder substitution](https://microsandbox.dev/blog/sandboxes-that-lie-about-their-secrets)

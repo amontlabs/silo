@@ -31,6 +31,7 @@ pub(crate) async fn create(
             device_id: None,
             name: name.to_owned(),
             kind: None,
+            keep_newest: None,
         }),
     )
     .await

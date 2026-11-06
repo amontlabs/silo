@@ -53,6 +53,14 @@ pub struct Recipe {
     pub scrub: Vec<String>,
     #[serde(default)]
     pub keep: Keep,
+    /// The command that tests the project, run in a fork by `auto_keep` rules with
+    /// `tests: pass`; exit code 0 passes.
+    #[serde(default)]
+    pub test: Option<String>,
+    /// Settings files kept into the computer from forks (`silo fold` appends them). A record
+    /// for people: the build does not create these files.
+    #[serde(default)]
+    pub files: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
@@ -104,13 +112,48 @@ pub enum Fold {
     AutoCode,
 }
 
+/// The kinds of change a diff holds, as `auto_keep` rules name them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
+pub enum Bucket {
+    #[serde(rename = "code")]
+    Code,
+    #[serde(rename = "packages")]
+    Packages,
+    #[serde(rename = "settings")]
+    Settings,
+    #[serde(rename = "database")]
+    Database,
+    #[serde(rename = "other")]
+    Other,
+}
+
+impl Bucket {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Code => "code",
+            Self::Packages => "packages",
+            Self::Settings => "settings",
+            Self::Database => "database",
+            Self::Other => "other",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+pub enum TestsRequirement {
+    #[serde(rename = "pass")]
+    Pass,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AutoKeepWhen {
+    /// The buckets that may hold changes; every other bucket must be empty.
     #[serde(default)]
-    pub only: Vec<String>,
+    pub only: Vec<Bucket>,
+    /// `pass`: the recipe's `test:` command must exit 0 in the fork.
     #[serde(default)]
-    pub tests: Option<String>,
+    pub tests: Option<TestsRequirement>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -119,6 +162,29 @@ pub struct AutoKeepRule {
     pub when: AutoKeepWhen,
 }
 
+impl AutoKeepRule {
+    /// What `fold: auto-code` stands for.
+    pub fn auto_code() -> Self {
+        Self {
+            when: AutoKeepWhen {
+                only: vec![Bucket::Code],
+                tests: Some(TestsRequirement::Pass),
+            },
+        }
+    }
+
+    /// The rule as it is written in `silo.yaml`, for messages.
+    pub fn describe(&self) -> String {
+        let only: Vec<&str> = self.when.only.iter().map(|bucket| bucket.name()).collect();
+        let mut text = format!("only: [{}]", only.join(", "));
+        if self.when.tests.is_some() {
+            text.push_str(", tests: pass");
+        }
+        format!("when: {{ {text} }}")
+    }
+}
+
+/// Per-agent overrides of the top-level settings.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AgentOverride {
@@ -128,6 +194,12 @@ pub struct AgentOverride {
     pub fork_secrets: Option<Vec<String>>,
     #[serde(default)]
     pub fold: Option<Fold>,
+    #[serde(default)]
+    pub auto_keep: Option<Vec<AutoKeepRule>>,
+    #[serde(default)]
+    pub step_checkpoints: Option<bool>,
+    #[serde(default)]
+    pub step_checkpoints_keep: Option<u32>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
@@ -146,10 +218,55 @@ pub struct Settings {
     /// How old `main`'s warm checkpoint may be for a fork to start from it, like `90s`.
     #[serde(default)]
     pub warm_max_age: Option<String>,
+    /// Save a checkpoint of a computer after each step (each command run through Silo).
+    #[serde(default)]
+    pub step_checkpoints: bool,
+    /// How many step checkpoints a computer keeps (the newest ones; 0 keeps every one).
+    #[serde(default)]
+    pub step_checkpoints_keep: Option<u32>,
     #[serde(default)]
     pub auto_keep: Vec<AutoKeepRule>,
     #[serde(default)]
     pub agents: BTreeMap<String, AgentOverride>,
+}
+
+/// How many step checkpoints a computer keeps when `step_checkpoints_keep` is not set.
+pub const DEFAULT_STEP_CHECKPOINTS_KEEP: u32 = 20;
+
+/// What to do after a step, resolved from the project settings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StepSettings {
+    pub checkpoints: bool,
+    pub keep: u32,
+}
+
+impl Default for StepSettings {
+    fn default() -> Self {
+        Self {
+            checkpoints: false,
+            keep: DEFAULT_STEP_CHECKPOINTS_KEEP,
+        }
+    }
+}
+
+/// The name an agent is matched by: trimmed, lowercase, spaces as `-`. `None` when empty.
+pub fn normalize_agent(name: Option<&str>) -> Option<String> {
+    let name = name?
+        .trim()
+        .to_lowercase()
+        .replace(char::is_whitespace, "-");
+    (!name.is_empty()).then_some(name)
+}
+
+fn validate_rules(key: &str, rules: &[AutoKeepRule]) -> Result<(), String> {
+    for (index, rule) in rules.iter().enumerate() {
+        if rule.when.only.is_empty() {
+            return Err(format!(
+                "{key}[{index}].when.only: list the buckets that may change (code, packages, settings, database, other)"
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn blank(names: &[String]) -> bool {
@@ -172,6 +289,84 @@ impl Settings {
             .unwrap_or(DEFAULT_WARM_MAX_AGE_SECS)
     }
 
+    /// The settings that apply to an agent, and the one place per-agent overrides take effect:
+    /// the commands and the MCP server resolve the loaded file here once and read the result.
+    /// `recipes`, `fork_secrets`, `fold`, `auto_keep` and the step settings of the agent's
+    /// entry in `agents:` replace the top-level ones; an unknown agent (or none) gets the
+    /// top-level settings. `auto_keep` of the result is the full rule list (`fold: auto-code`
+    /// with no rules is expanded), and `agents` is emptied, so resolving again changes nothing.
+    pub fn resolve(settings: Option<Settings>, agent: Option<&str>) -> Option<Settings> {
+        Self::resolve_as(settings, agent, true)
+    }
+
+    /// Like [`Settings::resolve`]. `named` says `--agent` or `SILO_AGENT` named the agent; when
+    /// the name is only the MCP client's self-report, `fold` and `auto_keep` of its entry do
+    /// not apply (what keeps a fork without asking comes from the top level or a named agent),
+    /// while `recipes`, `fork_secrets` and the step settings, which only narrow, still do.
+    pub fn resolve_as(
+        settings: Option<Settings>,
+        agent: Option<&str>,
+        named: bool,
+    ) -> Option<Settings> {
+        let mut settings = settings?;
+        let agents = std::mem::take(&mut settings.agents);
+        let mut entry = normalize_agent(agent)
+            .and_then(|wanted| {
+                agents
+                    .into_iter()
+                    .find(|(name, _)| {
+                        normalize_agent(Some(name)).as_deref() == Some(wanted.as_str())
+                    })
+                    .map(|(_, entry)| entry)
+            })
+            .unwrap_or_default();
+        if !named {
+            entry.fold = None;
+            entry.auto_keep = None;
+        }
+        let fold = entry.fold.unwrap_or(settings.fold);
+        let rules = match (entry.auto_keep, entry.fold) {
+            (Some(rules), _) => rules,
+            // An agent that asks for every fold gets no automatic keep from the top level.
+            (None, Some(Fold::Ask)) => Vec::new(),
+            (None, _) => settings.auto_keep,
+        };
+        settings.auto_keep = if rules.is_empty() && fold == Fold::AutoCode {
+            vec![AutoKeepRule::auto_code()]
+        } else {
+            rules
+        };
+        settings.fold = fold;
+        if let Some(recipes) = entry.recipes {
+            settings.recipes = recipes;
+        }
+        if let Some(secrets) = entry.fork_secrets {
+            settings.fork_secrets = secrets;
+        }
+        if let Some(checkpoints) = entry.step_checkpoints {
+            settings.step_checkpoints = checkpoints;
+        }
+        if let Some(keep) = entry.step_checkpoints_keep {
+            settings.step_checkpoints_keep = Some(keep);
+        }
+        Some(settings)
+    }
+
+    /// The rules that keep a fork without asking, after [`Settings::resolve`].
+    pub fn auto_keep_rules(settings: Option<&Settings>) -> &[AutoKeepRule] {
+        settings.map_or(&[], |settings| settings.auto_keep.as_slice())
+    }
+
+    /// The step settings that apply, after [`Settings::resolve`].
+    pub fn step_settings(settings: Option<&Settings>) -> StepSettings {
+        settings.map_or_else(StepSettings::default, |settings| StepSettings {
+            checkpoints: settings.step_checkpoints,
+            keep: settings
+                .step_checkpoints_keep
+                .unwrap_or(DEFAULT_STEP_CHECKPOINTS_KEEP),
+        })
+    }
+
     fn validate(&self) -> Result<(), String> {
         if let Some(text) = &self.fork_ram_budget {
             parse_size(text).map_err(|reason| format!("fork_ram_budget: {reason}"))?;
@@ -186,14 +381,54 @@ impl Settings {
         if blank(&self.fork_secrets) {
             return Err("fork_secrets: names may not be empty".into());
         }
+        validate_rules("auto_keep", &self.auto_keep)?;
+        let mut seen = BTreeMap::new();
         for (agent, entry) in &self.agents {
-            if agent.trim().is_empty() {
+            let Some(normal) = normalize_agent(Some(agent)) else {
                 return Err("agents: an agent name may not be empty".into());
+            };
+            if let Some(other) = seen.insert(normal, agent) {
+                return Err(format!(
+                    "agents.{agent}: the same agent as agents.{other} (names are lowercase)"
+                ));
+            }
+            if entry.recipes.as_deref().is_some_and(blank) {
+                return Err(format!("agents.{agent}.recipes: names may not be empty"));
             }
             if entry.fork_secrets.as_deref().is_some_and(blank) {
                 return Err(format!(
                     "agents.{agent}.fork_secrets: names may not be empty"
                 ));
+            }
+            // An agent's entry may only narrow what the top level allows; the client name an
+            // agent is matched by is self-reported, so it must not be a way to widen.
+            if let Some(recipes) = &entry.recipes {
+                if recipes.is_empty() && !self.recipes.is_empty() {
+                    return Err(format!(
+                        "agents.{agent}.recipes: an empty list would allow every recipe; list the ones to allow from recipes"
+                    ));
+                }
+                if let Some(name) = recipes
+                    .iter()
+                    .find(|name| !self.recipes.is_empty() && !self.recipes.contains(name))
+                {
+                    return Err(format!(
+                        "agents.{agent}.recipes: {name} is not in recipes; an agent can only narrow the top-level list"
+                    ));
+                }
+            }
+            if let Some(name) = entry
+                .fork_secrets
+                .iter()
+                .flatten()
+                .find(|name| !self.fork_secrets.contains(name))
+            {
+                return Err(format!(
+                    "agents.{agent}.fork_secrets: {name} is not in fork_secrets; an agent can only narrow the top-level list"
+                ));
+            }
+            if let Some(rules) = &entry.auto_keep {
+                validate_rules(&format!("agents.{agent}.auto_keep"), rules)?;
             }
         }
         Ok(())
@@ -243,6 +478,7 @@ impl Recipe {
             ("keep.migrate", &self.keep.migrate),
             ("keep.after", &self.keep.after),
             ("setup", &self.setup),
+            ("files", &self.files),
             ("packages.apt", &self.packages.apt),
             ("packages.brew", &self.packages.brew),
             ("packages.npm", &self.packages.npm),
@@ -253,6 +489,13 @@ impl Recipe {
             if blank(names) {
                 return Err(format!("{key}: entries may not be empty"));
             }
+        }
+        if self
+            .test
+            .as_deref()
+            .is_some_and(|test| test.trim().is_empty())
+        {
+            return Err("test: the command may not be empty".into());
         }
         for (name, command) in &self.services {
             if command.trim().is_empty() {
@@ -429,8 +672,21 @@ impl Project {
         Self::default()
     }
 
-    pub fn load_settings(&self) -> Result<Option<Settings>, CliError> {
-        self.settings.as_deref().map(load_settings).transpose()
+    /// The settings file as they apply to `agent` (see [`Settings::resolve`]); the only way
+    /// the commands and the MCP server read settings.
+    pub fn load_settings(&self, agent: Option<&str>) -> Result<Option<Settings>, CliError> {
+        self.load_settings_as(agent, true)
+    }
+
+    /// [`Project::load_settings`] for an agent that may be only the MCP client's self-reported
+    /// name (`named` false); see [`Settings::resolve_as`].
+    pub fn load_settings_as(
+        &self,
+        agent: Option<&str>,
+        named: bool,
+    ) -> Result<Option<Settings>, CliError> {
+        let loaded = self.settings.as_deref().map(load_settings).transpose()?;
+        Ok(Settings::resolve_as(loaded, agent, named))
     }
 
     /// A named recipe: `.silo/recipes/<name>.yaml` of the project, else a built-in one.
@@ -533,7 +789,7 @@ mod tests {
         .unwrap();
         assert_eq!(settings.fold, Fold::AutoCode);
         assert_eq!(settings.fork_ram_budget_bytes(), Some(8 << 30));
-        assert_eq!(settings.auto_keep[0].when.only, ["code"]);
+        assert_eq!(settings.auto_keep[0].when.only, [Bucket::Code]);
         assert_eq!(settings.agents["openclaw"].fold, Some(Fold::Ask));
         assert_eq!(settings.agents["openclaw"].fork_secrets, Some(vec![]));
         assert_eq!(parse_settings("").unwrap().fold, Fold::Ask);
@@ -678,5 +934,128 @@ mod tests {
         assert!(Settings::check_recipe(None, "macos-xcode").is_ok());
         let open = parse_settings("fold: ask\n").unwrap();
         assert!(Settings::check_recipe(Some(&open), "any").is_ok());
+    }
+
+    const AGENTS: &str = "recipes: [linux-dev, web]\nfork_secrets: [A]\nfold: ask\nstep_checkpoints: true\nstep_checkpoints_keep: 5\nauto_keep:\n  - when: { only: [code] }\nagents:\n  openclaw:\n    recipes: [web]\n    fork_secrets: []\n    fold: auto-code\n    step_checkpoints: false\n  claude-code:\n    fold: ask\n";
+
+    #[test]
+    fn an_agents_entry_replaces_the_top_level_settings() {
+        let loaded = || Some(parse_settings(AGENTS).unwrap());
+        let open = Settings::resolve(loaded(), Some("OpenClaw")).unwrap();
+        assert_eq!(open.recipes, ["web"]);
+        assert!(open.fork_secrets.is_empty());
+        assert_eq!(open.fold, Fold::AutoCode);
+        // No rules of its own: the top-level ones stay.
+        assert_eq!(open.auto_keep.len(), 1);
+        assert_eq!(open.auto_keep[0].when.tests, None);
+        assert!(!open.step_checkpoints);
+        assert_eq!(open.step_checkpoints_keep, Some(5));
+        assert!(open.agents.is_empty());
+
+        // `fold: ask` for an agent turns the top-level rules off for it.
+        let asks = Settings::resolve(loaded(), Some("claude-code")).unwrap();
+        assert!(asks.auto_keep.is_empty());
+        assert_eq!(asks.recipes, ["linux-dev", "web"]);
+
+        // Unknown or no agent: the top level, untouched.
+        for agent in [Some("nobody"), None, Some("  ")] {
+            let top = Settings::resolve(loaded(), agent).unwrap();
+            assert_eq!(top.recipes, ["linux-dev", "web"]);
+            assert_eq!(top.fork_secrets, ["A"]);
+            assert_eq!(top.auto_keep.len(), 1);
+            assert!(top.step_checkpoints);
+        }
+        assert_eq!(Settings::resolve(None, Some("openclaw")), None);
+        let again = Settings::resolve(Some(open.clone()), Some("claude-code")).unwrap();
+        assert_eq!(again, open);
+    }
+
+    #[test]
+    fn a_client_reported_agent_name_does_not_pick_fold_or_auto_keep() {
+        let loaded = || Some(parse_settings(AGENTS).unwrap());
+        // openclaw says `fold: auto-code`, but only a named agent gets it.
+        let reported = Settings::resolve_as(loaded(), Some("openclaw"), false).unwrap();
+        assert_eq!(reported.fold, Fold::Ask);
+        assert_eq!(reported.auto_keep.len(), 1);
+        assert_eq!(reported.recipes, ["web"]);
+        assert!(reported.fork_secrets.is_empty());
+        // claude-code says `fold: ask`, which would drop the top-level rules for a named one.
+        let asks = Settings::resolve_as(loaded(), Some("claude-code"), false).unwrap();
+        assert_eq!(asks.auto_keep.len(), 1);
+        let named = Settings::resolve_as(loaded(), Some("claude-code"), true).unwrap();
+        assert!(named.auto_keep.is_empty());
+    }
+
+    #[test]
+    fn step_settings_and_checks_read_the_resolved_settings() {
+        let loaded = Some(parse_settings(AGENTS).unwrap());
+        let open = Settings::resolve(loaded, Some("openclaw"));
+        assert!(!Settings::step_settings(open.as_ref()).checkpoints);
+        assert!(Settings::check_recipe(open.as_ref(), "web").is_ok());
+        assert!(Settings::check_recipe(open.as_ref(), "linux-dev").is_err());
+        assert!(Settings::check_fork_secrets(open.as_ref(), &["A".into()]).is_err());
+    }
+
+    #[test]
+    fn an_agents_entry_may_only_narrow_recipes_and_secrets() {
+        let top = "recipes: [linux-dev]\nfork_secrets: [A]\nagents:\n";
+        for (entry, key) in [
+            ("  x: { recipes: [web] }\n", "agents.x.recipes"),
+            ("  x: { recipes: [] }\n", "agents.x.recipes"),
+            ("  x: { fork_secrets: [B] }\n", "agents.x.fork_secrets"),
+        ] {
+            let error = parse_settings(&format!("{top}{entry}")).unwrap_err();
+            assert!(error.contains(key), "{error}");
+        }
+        // No top-level secrets: no agent can name one.
+        assert!(parse_settings("agents:\n  x: { fork_secrets: [B] }\n").is_err());
+        // Narrowing, and rules and fold, are allowed.
+        let fine =
+            format!("{top}  x: {{ recipes: [linux-dev], fork_secrets: [], fold: auto-code }}\n");
+        assert!(parse_settings(&fine).is_ok());
+        // With no top-level recipes (any), an agent may list some.
+        assert!(parse_settings("agents:\n  x: { recipes: [web] }\n").is_ok());
+    }
+
+    #[test]
+    fn agent_names_are_matched_in_lowercase() {
+        assert_eq!(
+            normalize_agent(Some(" Claude Code ")).as_deref(),
+            Some("claude-code")
+        );
+        assert_eq!(normalize_agent(Some("")), None);
+        assert_eq!(normalize_agent(None), None);
+    }
+
+    #[test]
+    fn auto_keep_rules_are_checked_with_their_key() {
+        let error =
+            parse_settings("auto_keep:\n  - when: { only: [code, secrets] }\n").unwrap_err();
+        assert!(error.contains("secrets"), "{error}");
+        let error =
+            parse_settings("auto_keep:\n  - when: { only: [code], tests: maybe }\n").unwrap_err();
+        assert!(error.contains("maybe"), "{error}");
+        let error = parse_settings("auto_keep:\n  - when: {}\n").unwrap_err();
+        assert!(error.contains("auto_keep[0].when.only"), "{error}");
+        let error =
+            parse_settings("agents:\n  x:\n    auto_keep:\n      - when: { tests: pass }\n")
+                .unwrap_err();
+        assert!(error.contains("agents.x.auto_keep[0].when.only"), "{error}");
+        let error = parse_settings("agents:\n  x: { recipes: [''] }\n").unwrap_err();
+        assert!(error.contains("agents.x.recipes"), "{error}");
+        let error = parse_settings("agents:\n  x: { speed: 1 }\n").unwrap_err();
+        assert!(error.contains("speed"), "{error}");
+        let error = parse_settings("agents:\n  Claude: {}\n  claude: {}\n").unwrap_err();
+        assert!(error.contains("agents.claude"), "{error}");
+    }
+
+    #[test]
+    fn a_recipe_declares_its_test_command_and_files() {
+        let recipe = parse_recipe("test: make test\nfiles: [/etc/app.conf]\n").unwrap();
+        assert_eq!(recipe.test.as_deref(), Some("make test"));
+        assert_eq!(recipe.files, ["/etc/app.conf"]);
+        assert!(parse_recipe("test: ' '\n").unwrap_err().contains("test"));
+        // Neither is part of the build.
+        assert_eq!(recipe.spec(), Recipe::default().spec());
     }
 }

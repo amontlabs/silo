@@ -289,6 +289,7 @@ pub(crate) async fn create_macos_checkpoint(
             device_id: None,
             name,
             kind: None,
+            keep_newest: None,
         }),
     )
     .await

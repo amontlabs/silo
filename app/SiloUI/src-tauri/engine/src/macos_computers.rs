@@ -96,6 +96,13 @@ use std::{
     time::{Duration, Instant},
 };
 pub use store::{Action, CreateRequest, ExpectedResources};
+
+/// Where a macOS computer's gateway appends credential-use events.
+pub fn usage_file(app_data: &std::path::Path, computer_id: &str) -> std::path::PathBuf {
+    store::Layout::new(app_data, computer_id)
+        .dir
+        .join(crate::credentials_usage::USAGE_FILE)
+}
 use store::{DeleteMode, Layout, Record, State};
 
 const CHANGED_EVENT: &str = "silo://macos-computers-changed";
@@ -1547,6 +1554,8 @@ fn prune_macos_checkpoints_with(
             None,
             if kind == checkpoints::PolicyKind::BeforeKeep {
                 "Removing an older before-keep checkpoint"
+            } else if kind == checkpoints::PolicyKind::Step {
+                "Removing an older step checkpoint"
             } else {
                 "Removing an older automatic checkpoint"
             },
@@ -1584,6 +1593,7 @@ fn prune_macos_checkpoints_with(
                 .is_some_and(|restore| restore.checkpoint_id == candidate)
                 || entry.operation.is_some()
                 || entry.deleting
+                || fork_point_in_use(&computers.entries, computer_id, &candidate)
         };
         if pinned || checkpoints::journal_pins(&layout, &candidate) {
             continue;
@@ -1668,7 +1678,8 @@ pub fn macos_checkpoint_usage(
                     &layout,
                     entry.record.pending_restore.as_ref(),
                     &checkpoint.id,
-                    forked.contains(&checkpoint.id),
+                    checkpoint.policy_kind == checkpoints::PolicyKind::ForkPoint
+                        && forked.contains(&checkpoint.id),
                 )
                 .map(str::to_owned),
             }
@@ -2277,7 +2288,10 @@ pub fn start_macos_checkpoint_job(
     automatic: bool,
     warm: bool,
     retention: RetentionPolicy,
-    before_keep_retention: Option<RetentionPolicy>,
+    trimmed: Option<(
+        silo_api::methods::checkpoints::CheckpointKind,
+        RetentionPolicy,
+    )>,
 ) -> Result<silo_api::jobs::JobId, String> {
     runtime::shutdown::ensure_accepting_operations()?;
     if automatic && retention()? == 0 {
@@ -2285,8 +2299,11 @@ pub fn start_macos_checkpoint_job(
     }
     let policy_kind = if automatic {
         checkpoints::PolicyKind::Automatic
-    } else if before_keep_retention.is_some() {
-        checkpoints::PolicyKind::BeforeKeep
+    } else if let Some((kind, _)) = &trimmed {
+        match kind {
+            silo_api::methods::checkpoints::CheckpointKind::Step => checkpoints::PolicyKind::Step,
+            _ => checkpoints::PolicyKind::BeforeKeep,
+        }
     } else if warm {
         checkpoints::PolicyKind::Warm
     } else {
@@ -2322,13 +2339,13 @@ pub fn start_macos_checkpoint_job(
                 job_id.clone(),
             );
         }
-        if let (true, Some(before_keep)) = (result.is_ok(), before_keep_retention.as_ref()) {
+        if let (true, Some((_, count))) = (result.is_ok(), trimmed.as_ref()) {
             prune_macos_checkpoints_with(
                 &runtime::OPERATIONS,
-                checkpoints::PolicyKind::BeforeKeep,
+                policy_kind,
                 &worker_app,
                 &worker_id,
-                before_keep.as_ref(),
+                count.as_ref(),
                 job_id.clone(),
             );
         }
@@ -2495,6 +2512,7 @@ fn checkpoint_created_job_result(
                 checkpoints::PolicyKind::BeforeKeep => CheckpointKind::BeforeKeep,
                 checkpoints::PolicyKind::ForkPoint => CheckpointKind::ForkPoint,
                 checkpoints::PolicyKind::Warm => CheckpointKind::Warm,
+                checkpoints::PolicyKind::Step => CheckpointKind::Step,
             },
             size_bytes: meta.size_bytes,
             generation: None,
@@ -6365,7 +6383,10 @@ fn delete_checkpoint(
     let held = begin_operation(app, id, checkpoints::OperationKind::Delete, &job)?;
     let layout = Layout::new(&data, id);
     let target = checkpoints::find(&layout, checkpoint_id)?;
-    let forked = fork_point_in_use(&registry().entries, id, &target.id);
+    // Only a fork point is held for its forks. A named checkpoint a fork was made from is the
+    // owner's to delete; retention alone leaves it while the fork exists.
+    let forked = target.policy_kind == checkpoints::PolicyKind::ForkPoint
+        && fork_point_in_use(&registry().entries, id, &target.id);
     if let Some(blocker) = checkpoint_delete_blocker(
         &layout,
         held.record.pending_restore.as_ref(),
@@ -6539,8 +6560,17 @@ fn fork_checkpoint_with_workflow(
     if let Err(message) = validated {
         return Err(message);
     }
-    let (checkpoint, origin) = match named {
-        Some(checkpoint) => (checkpoint, None),
+    // The fork depends on the checkpoint it was made from, a named one included: retention
+    // and deletion leave it while the fork exists. Only a fork point taken for this fork is
+    // removed again when the fork fails to start.
+    let (checkpoint, origin, took_fork_point) = match named {
+        Some(checkpoint) => {
+            let origin = store::ForkOrigin {
+                computer_id: id.to_owned(),
+                checkpoint_id: checkpoint.id.clone(),
+            };
+            (checkpoint, Some(origin), false)
+        }
         // The current state: a disk checkpoint of the source, taken under this same operation.
         None => match capture_held(
             app,
@@ -6555,7 +6585,7 @@ fn fork_checkpoint_with_workflow(
                     computer_id: id.to_owned(),
                     checkpoint_id: point.id.clone(),
                 };
-                (point, Some(origin))
+                (point, Some(origin), true)
             }
             Err(message) => {
                 if copied_assignments {
@@ -6588,7 +6618,7 @@ fn fork_checkpoint_with_workflow(
         Ok((record, cancel))
     })();
     let take_back_fork_point = |layout: &Layout| {
-        if let Some(origin) = &origin {
+        if let (Some(origin), true) = (&origin, took_fork_point) {
             let _ = checkpoints::remove(layout, &origin.checkpoint_id);
             refresh_checkpoints(app, id, layout);
         }
@@ -7161,6 +7191,7 @@ pub fn seed_check_policy(app_data: &std::path::Path, computer_id: &str) -> Vec<S
             checkpoints::PolicyKind::BeforeKeep => "before-keep".to_owned(),
             checkpoints::PolicyKind::ForkPoint => "fork-point".to_owned(),
             checkpoints::PolicyKind::Warm => "warm".to_owned(),
+            checkpoints::PolicyKind::Step => "step".to_owned(),
         })
         .collect()
 }
@@ -12311,6 +12342,82 @@ mod tests {
         assert!(checkpoints::dir(&layout, &newest).exists());
         assert!(checkpoints::dir(&layout, &automatic).exists());
         assert!(seed_check_policy(data, &source.id).contains(&"before-keep".to_owned()));
+    }
+
+    #[test]
+    #[cfg_attr(
+        not(all(target_os = "macos", target_arch = "aarch64")),
+        ignore = "macOS computers are loaded only on an Apple silicon host"
+    )]
+    fn macos_step_retention_keeps_a_checkpoint_a_fork_was_made_from() {
+        use checkpoints::{PolicyKind::*, Reason};
+        let _test_state = crate::test_support::global_state();
+        reopen_after_quit();
+        reopen_after_update();
+        let directory = tempfile::tempdir().unwrap();
+        let context = Arc::new(JobTestContext::new(directory.path().to_path_buf()));
+        let app = macos_context(context);
+        fresh_registry();
+        let (source, _) = checkpoint_fixture(directory.path(), false);
+        let data = directory.path();
+        let forked_from = add_checkpoint(
+            data,
+            &source.id,
+            "2026-01-01T00:00:01Z",
+            Step,
+            Reason::Manual,
+        );
+        let unused = add_checkpoint(
+            data,
+            &source.id,
+            "2026-01-01T00:00:02Z",
+            Step,
+            Reason::Manual,
+        );
+        let newest = add_checkpoint(
+            data,
+            &source.id,
+            "2026-01-01T00:00:03Z",
+            Step,
+            Reason::Manual,
+        );
+        ensure_loaded(&app).unwrap();
+        // A fork made from the oldest step checkpoint by name.
+        let mut fork = source.clone();
+        fork.id = "fork-of-step".into();
+        fork.forked_from = Some(store::ForkOrigin {
+            computer_id: source.id.clone(),
+            checkpoint_id: forked_from.clone(),
+        });
+        registry()
+            .entries
+            .push(Entry::new(fork, State::Stopped, None));
+
+        prune_macos_checkpoints_with(
+            &runtime::OPERATIONS,
+            Step,
+            &app,
+            &source.id,
+            &|| Ok(1),
+            silo_api::jobs::JobId::new("job:9").unwrap(),
+        );
+
+        let layout = Layout::new(data, &source.id);
+        assert!(
+            checkpoints::dir(&layout, &forked_from).exists(),
+            "a fork depends on it"
+        );
+        assert!(!checkpoints::dir(&layout, &unused).exists());
+        assert!(checkpoints::dir(&layout, &newest).exists());
+        // Retention leaves it, but the owner may still delete a checkpoint they named or
+        // kept: only a fork point is held for its forks.
+        let usage = macos_checkpoint_usage(&app, &source.id).unwrap();
+        let row = usage
+            .checkpoints
+            .iter()
+            .find(|row| row.id == forked_from)
+            .unwrap();
+        assert_eq!(row.delete_blocker, None);
     }
 
     #[test]
