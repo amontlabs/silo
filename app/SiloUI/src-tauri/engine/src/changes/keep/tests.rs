@@ -1631,6 +1631,7 @@ fn fold_request(
         keep_id: None,
         resolved_at: None,
         keeping_since_ms: None,
+        closed_reason: None,
     }
 }
 

@@ -10,7 +10,7 @@ use std::{
 };
 
 use silo_api::methods::{
-    keep::{FoldRequest, FoldRequestStatus},
+    keep::{FoldRequest, FoldRequestClosedReason, FoldRequestStatus},
     review_requests::{CredentialUsage, RequestFilter},
 };
 
@@ -135,6 +135,7 @@ impl Store {
             keep_id: None,
             resolved_at: None,
             keeping_since_ms: None,
+            closed_reason: None,
         };
         self.put(&request)?;
         Ok(request)
@@ -173,6 +174,47 @@ impl Store {
             request.status = FoldRequestStatus::ThrownAway;
             request.resolved_at = Some(now());
         })
+    }
+
+    /// An open request whose fork or target computer was deleted.
+    pub fn close_deleted(
+        &self,
+        id: &str,
+        reason: FoldRequestClosedReason,
+    ) -> Result<FoldRequest, String> {
+        self.modify(id, false, |request| {
+            request.status = FoldRequestStatus::ThrownAway;
+            request.closed_reason = Some(reason);
+            request.resolved_at = Some(now());
+        })
+    }
+
+    /// Closes the open requests that involve a deleted computer, as fork or as target. A
+    /// request being kept stays as it is: its keep settles it.
+    pub fn close_for_computer(&self, computer_id: &str) -> Vec<FoldRequest> {
+        self.close_where(|request| deleted_reason(request, |id| id != computer_id))
+    }
+
+    /// Closes the open requests whose fork or target computer is not among `existing`. Call
+    /// it only with a complete list of computers: a computer missing from a partial list is
+    /// not known to be gone.
+    pub fn close_missing(&self, existing: &[String]) -> Vec<FoldRequest> {
+        self.close_where(|request| deleted_reason(request, |id| existing.iter().any(|e| e == id)))
+    }
+
+    fn close_where(
+        &self,
+        reason: impl Fn(&FoldRequest) -> Option<FoldRequestClosedReason>,
+    ) -> Vec<FoldRequest> {
+        self.list()
+            .into_iter()
+            .filter(|request| request.status == FoldRequestStatus::Open)
+            .filter_map(|request| {
+                let why = reason(&request)?;
+                let _claim = claim(&request.id).ok()?;
+                self.close_deleted(&request.id, why).ok()
+            })
+            .collect()
     }
 
     /// Records, before a keep starts, that one is under way since `since_ms`.
@@ -284,6 +326,21 @@ impl Store {
                 let _ = fs::remove_file(&temporary);
                 format!("Cannot save the request {}: {error}", request.id)
             })
+    }
+}
+
+/// Why an open request is closed: its fork, or a computer target, is not `present`. A folder
+/// target is not a computer and is never judged by the list.
+fn deleted_reason(
+    request: &FoldRequest,
+    present: impl Fn(&str) -> bool,
+) -> Option<FoldRequestClosedReason> {
+    if !present(&request.fork_id) {
+        Some(FoldRequestClosedReason::ForkDeleted)
+    } else if folder_path(&request.target).is_none() && !present(&request.target) {
+        Some(FoldRequestClosedReason::TargetDeleted)
+    } else {
+        None
     }
 }
 
@@ -742,5 +799,64 @@ mod tests {
             .filter(|e| e.path().extension().is_some_and(|x| x == "tmp"))
             .count();
         assert_eq!(leftovers, 0);
+    }
+
+    #[test]
+    fn deleting_a_computer_closes_its_open_requests_with_a_reason() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(dir.path());
+        let as_fork = store.create(new("fork-a", "a")).unwrap();
+        let as_target = store
+            .create(NewRequest {
+                target: "other-id".into(),
+                ..new("fork-b", "b")
+            })
+            .unwrap();
+        let unrelated = store.create(new("fork-c", "c")).unwrap();
+        let keeping = store.create(new("fork-d", "d")).unwrap();
+        store.mark_keeping(&keeping.id, 1).unwrap();
+
+        let closed = store.close_for_computer("fork-a");
+        assert_eq!(closed.len(), 1);
+        assert_eq!(closed[0].id, as_fork.id);
+        assert_eq!(closed[0].status, FoldRequestStatus::ThrownAway);
+        assert_eq!(
+            closed[0].closed_reason,
+            Some(FoldRequestClosedReason::ForkDeleted)
+        );
+        let closed = store.close_for_computer("other-id");
+        assert_eq!(closed[0].id, as_target.id);
+        assert_eq!(
+            closed[0].closed_reason,
+            Some(FoldRequestClosedReason::TargetDeleted)
+        );
+        assert!(store.close_for_computer("main-id").len() == 1);
+        let status = |id: &str| store.get(id).unwrap().unwrap().status;
+        assert_eq!(status(&unrelated.id), FoldRequestStatus::ThrownAway);
+        assert_eq!(status(&keeping.id), FoldRequestStatus::Keeping);
+    }
+
+    #[test]
+    fn requests_of_missing_computers_close_only_from_a_list_that_has_them_all() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(dir.path());
+        let gone = store.create(new("fork-gone", "g")).unwrap();
+        let live = store.create(new("fork-live", "l")).unwrap();
+        let folder = store
+            .create(NewRequest {
+                target: "folder:/work".into(),
+                ..new("fork-folder", "f")
+            })
+            .unwrap();
+        let existing: Vec<String> = ["main-id", "fork-live", "fork-folder"]
+            .map(String::from)
+            .into();
+        let closed = store.close_missing(&existing);
+        assert_eq!(closed.len(), 1);
+        assert_eq!(closed[0].id, gone.id);
+        let status = |id: &str| store.get(id).unwrap().unwrap().status;
+        assert_eq!(status(&live.id), FoldRequestStatus::Open);
+        assert_eq!(status(&folder.id), FoldRequestStatus::Open);
+        assert!(store.close_missing(&existing).is_empty());
     }
 }

@@ -191,6 +191,14 @@ fn list_renders_each_request_with_its_fork_target_and_counts() {
         "fr-ab12cd34  try (running)  into main  code 2, settings 1  [open]"
     );
     assert!(lines.next().unwrap().contains("(fork gone)"));
+    let closed = render::requests_list(&json!({"requests": [{
+        "request": {"id": "fr-1", "target": "m", "status": "thrown-away",
+            "closedReason": "fork-deleted", "counts": {}}
+    }]}));
+    assert!(
+        closed.ends_with("[closed: fork deleted (thrown-away)]"),
+        "{closed}"
+    );
     assert!(render::requests_list(&json!({"requests": []})).starts_with("No review requests"));
 }
 

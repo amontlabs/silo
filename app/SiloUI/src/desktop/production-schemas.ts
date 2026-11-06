@@ -255,3 +255,106 @@ export function parseRemoteApplicationSource(input: unknown): ApplicationSource 
 export function parseBackupState(input: unknown): BackupState {
   return backupStateShape.parse(input) as BackupState
 }
+
+// Review requests (`changes.requests.*`), steps, the computer tree and credentials used.
+// Tolerant like checkpoints: unknown statuses and origins fall back, bad rows are dropped.
+const requestStatuses = ["open", "keeping", "kept", "thrown-away"] as const
+const requestClosedReasons = ["fork-deleted", "target-deleted"] as const
+const countsShape = z.record(z.string(), z.number().int().nonnegative()).catch({})
+
+export const foldRequestShape = z.object({
+  id: z.string().min(1), forkId: z.string(), target: z.string(), createdAt: z.string(),
+  reviewDigest: z.string().catch(""), summary: z.string().catch(""),
+  status: tolerantEnum(requestStatuses, "open"), counts: countsShape,
+  keepId: z.string().nullish().transform(value => value ?? undefined),
+  resolvedAt: z.string().nullish().transform(value => value ?? undefined),
+  keepingSinceMs: z.number().nonnegative().nullish().transform(value => value ?? undefined),
+  closedReason: z.string().nullish().transform(value => (requestClosedReasons as readonly string[]).includes(value ?? "") ? (value as (typeof requestClosedReasons)[number]) : undefined),
+})
+export type FoldRequest = z.infer<typeof foldRequestShape>
+
+const optionalText = z.string().nullish().transform(value => value ?? undefined)
+export const requestEntryShape = z.object({
+  request: foldRequestShape, forkName: optionalText, forkState: optionalText, targetName: optionalText,
+  deviceId: optionalText, deviceName: optionalText,
+})
+export type RequestEntry = z.infer<typeof requestEntryShape>
+
+export const requestListSchema = z.object({
+  requests: tolerantArray(requestEntryShape),
+  unreachable: tolerantArray(z.object({ deviceId: z.string(), deviceName: z.string(), reason: z.string() })).catch([]),
+})
+export type RequestList = z.infer<typeof requestListSchema>
+
+const credentialUseShape = z.object({ secret: z.string(), host: z.string(), method: z.string(), count: z.number().int().nonnegative() })
+const credentialBlockShape = z.object({ host: z.string(), method: z.string(), count: z.number().int().nonnegative(), reason: z.string() })
+export const credentialUsageSchema = z.object({
+  used: tolerantArray(credentialUseShape).catch([]), blocked: tolerantArray(credentialBlockShape).catch([]),
+})
+export type CredentialUsage = z.infer<typeof credentialUsageSchema>
+
+export const requestDetailSchema = z.object({
+  request: foldRequestShape, forkName: z.string(), forkState: z.string(),
+  stale: z.boolean().nullish().transform(value => value ?? undefined),
+  reviewDigest: z.string(), fresh: z.boolean(),
+  /** The `silo diff --json` document; null for a folder fork. */
+  diff: z.unknown(), text: z.string().catch(""), counts: countsShape,
+  credentials: credentialUsageSchema.catch({ used: [], blocked: [] }),
+})
+export type RequestDetail = z.infer<typeof requestDetailSchema>
+
+export const keepRefusalShape = z.object({
+  reason: z.string(), message: z.string(), hint: z.string().catch(""), conflicts: z.array(z.unknown()).catch([]),
+})
+export const keepRequestResultSchema = z.object({
+  status: z.string(),
+  report: z.object({
+    fork: z.string(), target: z.string(), summary: z.array(z.string()).catch([]), steps: z.array(z.string()).catch([]),
+    notes: z.array(z.string()).catch([]), checkpoint: optionalText, reviewDigest: optionalText,
+  }),
+  refusal: keepRefusalShape.nullish().transform(value => value ?? undefined),
+  request: foldRequestShape,
+})
+export type KeepRequestResult = z.infer<typeof keepRequestResultSchema>
+
+export const throwAwayResultSchema = z.object({ request: foldRequestShape, dropped: z.string().catch("") })
+export type ThrowAwayResult = z.infer<typeof throwAwayResultSchema>
+
+export const openRequestResultSchema = z.object({
+  request: foldRequestShape, computerId: z.string(), name: z.string(), state: z.string(), started: z.boolean(),
+  sshAlias: optionalText, urls: z.array(z.string()).catch([]),
+})
+export type OpenRequestResult = z.infer<typeof openRequestResultSchema>
+
+export const stepShape = z.object({
+  id: z.string(), computerId: z.string(), number: z.number().int().nonnegative(), command: z.string(),
+  exitCode: z.number().int().nullish().transform(value => value ?? undefined),
+  startedAt: z.string(), finishedAt: z.string(),
+  checkpointId: optionalText,
+  parentStep: z.number().int().nullish().transform(value => value ?? undefined),
+  parentCheckpoint: optionalText,
+})
+export type ComputerStep = z.infer<typeof stepShape>
+export const stepListSchema = z.object({ steps: tolerantArray(stepShape) })
+
+/** What a fork was made from; an origin from a newer Silo reads as `root`. */
+export const treeFromShape = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("root") }),
+  z.object({ kind: z.literal("main") }),
+  z.object({ kind: z.literal("checkpoint"), checkpointId: z.string() }),
+  z.object({ kind: z.literal("step"), number: z.number().int().nonnegative(), checkpointId: z.string() }),
+  z.object({ kind: z.literal("recipe"), hash: z.string() }),
+  z.object({ kind: z.literal("folder"), path: z.string() }),
+]).catch({ kind: "root" })
+export type TreeFrom = z.infer<typeof treeFromShape>
+
+export const treeNodeShape = z.object({
+  id: z.string().min(1), name: z.string(), parent: z.string().nullish().transform(value => value ?? null),
+  from: treeFromShape, state: z.string(),
+  pendingChanges: z.object({
+    requestId: z.string().nullish().transform(value => value ?? null),
+    buckets: countsShape.nullish().transform(value => value ?? null),
+  }).catch({ requestId: null, buckets: null }),
+})
+export type ComputerTreeNode = z.infer<typeof treeNodeShape>
+export const computerTreeSchema = z.object({ nodes: tolerantArray(treeNodeShape) })

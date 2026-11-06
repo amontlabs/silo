@@ -1,0 +1,88 @@
+import { useState } from "react"
+import { GitPullRequestArrow, TriangleAlert } from "lucide-react"
+
+import { EmptyState } from "@/components/empty-state"
+import { ListCard, ListRow, ListRowIcon, ListRowSkeleton } from "@/components/list-row"
+import { PageContainer, PageHeader } from "@/components/page"
+import { Button } from "@/components/ui/button"
+import { ReviewRequestPage, type ReviewRequestActions } from "@/features/application/components/review-request"
+import type { RequestEntry } from "@/desktop/production-schemas"
+import { bucketSummary, statusLabels, usePendingChanges } from "@/features/application/model/use-pending-changes"
+import type { ApplicationActions } from "@/features/application/model/application-source"
+import { formatLocalTimestamp } from "@/lib/format-date"
+
+const badgeClass = "inline-flex shrink-0 items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 text-caption font-medium text-muted-foreground"
+
+function RequestRow({ entry, onOpen }: { entry: RequestEntry; onOpen: () => void }) {
+  const { request } = entry
+  const name = entry.forkName ?? request.forkId
+  const target = entry.targetName ?? request.target
+  return (
+    <ListRow
+      icon={<ListRowIcon><GitPullRequestArrow aria-hidden="true" className="size-3.5" /></ListRowIcon>}
+      onOpen={onOpen}
+      title={<>
+        <button type="button" className="truncate text-left outline-none focus-visible:underline" onClick={onOpen}>{name}</button>
+        <span className="shrink-0 font-normal text-muted-foreground">into {target}</span>
+        <span className={badgeClass}>{entry.deviceName ?? "This device"}</span>
+      </>}
+      detail={`${bucketSummary(request.counts)} · ${formatLocalTimestamp(Date.parse(request.createdAt))}`}
+      actions={<span className="shrink-0 text-caption text-muted-foreground">{statusLabels[request.status]}</span>}
+    />
+  )
+}
+
+/**
+ * Pending changes: the review requests of this device and every connected device in one list.
+ * Selecting a row calls `onOpenRequest`, which opens the review screen.
+ */
+export function PendingChangesPage({ listReviewRequests, reviewActions, active = true, onOpenRequest }: {
+  listReviewRequests: ApplicationActions["listReviewRequests"]
+  /** What the review screen runs; the desktop's by default. */
+  reviewActions?: ReviewRequestActions
+  active?: boolean
+  /** Told when a request is opened, naming the device when it is not this one. */
+  onOpenRequest?: (requestId: string, deviceId?: string) => void
+}) {
+  const [opened, setOpened] = useState<{ requestId: string, deviceId?: string, deviceName?: string, targetName?: string } | null>(null)
+  const { list, error, loading, refresh } = usePendingChanges(listReviewRequests, active && !opened)
+  const requests = list?.requests ?? []
+  const unreachable = list?.unreachable ?? []
+  if (opened) {
+    const back = () => { setOpened(null); refresh() }
+    return <ReviewRequestPage {...opened} actions={reviewActions} onBack={back} />
+  }
+  return (
+    <PageContainer className="grid gap-2">
+      <PageHeader title="Pending changes" subtitle="Changes in forks, waiting for review" />
+      {error && (
+        <div role="alert" className="flex items-center justify-between gap-2 text-xs text-destructive">
+          <span>{error}</span>
+          <Button type="button" variant="ghost" size="xs" onClick={refresh}>Retry</Button>
+        </div>
+      )}
+      {loading && !list && <ListCard><ListRowSkeleton label="Loading pending changes" /></ListCard>}
+      {list && !requests.length && !unreachable.length && (
+        <EmptyState icon={<GitPullRequestArrow />} title="No pending changes" description="When a fork has changes to review, they appear here." />
+      )}
+      {(requests.length > 0 || unreachable.length > 0) && (
+        <ListCard divided aria-label="Pending changes">
+          {requests.map(entry => (
+            <RequestRow key={`${entry.deviceId ?? ""}:${entry.request.id}`} entry={entry} onOpen={() => {
+              setOpened({ requestId: entry.request.id, deviceId: entry.deviceId, deviceName: entry.deviceName, targetName: entry.targetName })
+              onOpenRequest?.(entry.request.id, entry.deviceId)
+            }} />
+          ))}
+          {unreachable.map(device => (
+            <ListRow
+              key={`unavailable:${device.deviceId}`}
+              icon={<ListRowIcon><TriangleAlert aria-hidden="true" className="size-3.5" /></ListRowIcon>}
+              title={<><span className="truncate">{device.deviceName}</span><span className={badgeClass}>Unavailable</span></>}
+              detail={device.reason}
+            />
+          ))}
+        </ListCard>
+      )}
+    </PageContainer>
+  )
+}

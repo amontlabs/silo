@@ -282,9 +282,20 @@ pub(super) async fn list(
     require_local_device(context, params.device_id.as_deref())?;
     let filter = params.status.unwrap_or_default();
     settle(context).await;
+    let found = listing(context).await?;
     let store = store_for(context);
-    let requests = blocking(move || Ok(store.list_matching(filter))).await?;
-    let computers = listing(context).await?.rows;
+    // Only a list that has every computer shows that a fork or target is gone.
+    let present: Option<Vec<String>> = found
+        .complete
+        .then(|| found.rows.iter().map(|row| row.id.clone()).collect());
+    let requests = blocking(move || {
+        if let Some(present) = present {
+            store.close_missing(&present);
+        }
+        Ok(store.list_matching(filter))
+    })
+    .await?;
+    let computers = found.rows;
     let requests = requests
         .into_iter()
         .map(|request| {
