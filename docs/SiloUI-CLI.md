@@ -169,6 +169,37 @@ default to what it has. A secret cannot be left with no computer, and a secret f
 destination (`*`) is created in the app. `set` reads all of stdin and drops one final newline:
 `printf %s "$VALUE" | silo secrets set NAME --computer main --domain api.example.com`.
 
+## Hosted reviewer
+
+`silo review <computer|request-id> [--lens general|packages|code|all] [--json]` sends the diff of
+a fork to a reviewing service and prints what it finds. The MCP tool is `review`
+(`target`, `lens`), and `silo requests show <id> --review [--lens ...]` adds the review to a
+request's text. It is a Pro feature and off until a service is configured.
+
+| Setting | Where |
+| --- | --- |
+| Service URL | `reviewer: {url: https://...}` in `.silo/silo.yaml`, or `SILO_REVIEWER_URL` (the variable wins). `https://` only, except `http://localhost`, `127.0.0.1` and `[::1]`. |
+| Token | `SILO_REVIEWER_TOKEN` only, sent as a bearer token. It is not read from `silo.yaml` and not from the Keychain. |
+
+**What is sent.** The diff document of [`silo diff --json`](SiloUI-CHANGES.md) rebuilt from an
+allowlist (`cli/src/hosted/document.rs`): the bucket summary, repos with their changed file
+names, packages, settings file names, databases and what is not kept. Left out: crontab and
+launch agent texts, file-change entries for credential files (counted, not named), the details
+behind not-kept credentials, background changes, the home directory name (paths show as `~/`),
+the digest and the credentials-used record. No file contents and no secret values are in the
+diff to begin with. A body over 256 KiB is not sent (the command says so); the service gets 90
+seconds to answer.
+
+**What is shown.** A fixed line, `Advisory review of the diff only. It can miss things; you
+decide what to keep.`, then the three lenses, each with a summary and findings (severity `info`,
+`low`, `medium` or `high`, file, message). Before anything is shown, the answer goes through a
+wording filter: a sentence that uses one of a fixed list of claim words (`cli/src/hosted/
+filter.rs`) is dropped, and the output says how many words were filtered (`filtered` in
+`--json`). The filter runs on this device whatever the service does.
+
+The service is in [`reviewer-service/`](../reviewer-service/README.md), with its data handling
+(no retention) and deploy steps.
+
 ## Project files
 
 `silo` looks upward from the working directory for a `.silo/` that holds `recipe.yaml` or
@@ -213,6 +244,7 @@ agents:
 | `fork_secrets` | Secret names `--secret` may name. |
 | `fold` | `ask` (default) or `auto-code`, which is `auto_keep: [{when: {only: [code], tests: pass}}]`. Explicit `auto_keep` rules win over `fold: auto-code`. |
 | `auto_keep` | Rules that keep a fork without asking (below). |
+| `reviewer` | `url:` of the [hosted reviewer](#hosted-reviewer); top level only. |
 | `fork_ram_budget`, `warm_max_age` | Top level only. |
 | `step_checkpoints`, `step_checkpoints_keep` | Step checkpoints (see [steps](SiloUI-CHANGES.md#steps-and-the-fork-tree)). |
 | `agents.<name>` | Per-agent overrides of `recipes`, `fork_secrets`, `fold`, `auto_keep`, `step_checkpoints` and `step_checkpoints_keep`. |

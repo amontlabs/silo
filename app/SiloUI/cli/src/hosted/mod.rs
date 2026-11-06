@@ -218,7 +218,11 @@ fn is_request_id(text: &str) -> bool {
 /// The review as text: the banner, then each lens with its findings.
 pub fn render(value: &Value) -> String {
     let mut out = format!("{}\n", value["advisory"].as_str().unwrap_or(BANNER));
-    for (lens, entry) in value["lenses"].as_object().into_iter().flatten() {
+    for lens in LENSES {
+        let entry = &value["lenses"][*lens];
+        if !entry.is_object() {
+            continue;
+        }
         out.push_str(&format!(
             "\n{lens}: {}\n",
             entry["summary"].as_str().unwrap_or_default()
