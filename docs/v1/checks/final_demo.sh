@@ -11,8 +11,13 @@ fi
 check "D1 main running" $([ "$(state main)" = running ]; echo $?) "$("$SILO" status main | head -3 | tr '\n' ' ')"
 x main 'rm -f /root/final-note.txt /home/silo/final-note.txt; hostname; pgrep -af "final/(web|poller).py" | cut -c1-80'
 "$SILO" ports main
-ssh -o BatchMode=yes -o ConnectTimeout=15 main.silo-dev 'echo ssh-ok $(whoami)' 2>&1 | head -2
-check "D1 ssh main.silo-dev reaches main" $([ "$(ssh -o BatchMode=yes -o ConnectTimeout=15 main.silo-dev echo ok 2>/dev/null)" = ok ]; echo $?) ""
+echo "ssh -G main.silo-dev: $(ssh -G main.silo-dev 2>&1 | awk '$1=="hostname"||$1=="port"' | tr '\n' ' ')"
+if ! grep -qF "Include \"$HOME/.silo-dev/ssh-hosts.conf\"" ~/.ssh/config 2>/dev/null || ! grep -q '^Host main.silo-dev' ~/.silo-dev/ssh-hosts.conf 2>/dev/null; then
+  blocked "D1 ssh main.silo-dev reaches main" "this Mac has no Dev SSH name for main: the owner runs \`silo ssh-setup main\` once (it edits ~/.ssh/config)"
+else
+  ssh -o BatchMode=yes -o ConnectTimeout=15 main.silo-dev 'echo ssh-ok $(whoami)' 2>&1 | head -2
+  check "D1 ssh main.silo-dev reaches main" $([ "$(ssh -o BatchMode=yes -o ConnectTimeout=15 main.silo-dev echo ok 2>/dev/null)" = ok ]; echo $?) ""
+fi
 
 echo "== D2 silo fork main -n 4 (each fork writes a note named after its own host)"
 t0=$(now); "$SILO" fork main -n 4 --name e2e-final-demo -- bash -c 'echo kept-from-$(hostname) > ~/final-note.txt' > "$RAW/demo-fork4.out" 2> "$RAW/demo-fork4.err"; rc=$?

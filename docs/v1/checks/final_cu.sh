@@ -13,6 +13,7 @@ echo "== C1 stub agent binaries on main (so the guest helper registers an agent)
 xs main 'install -d ~/.local/bin; for a in claude codex; do printf "#!/bin/sh\nexit 0\n" > ~/.local/bin/$a; chmod +x ~/.local/bin/$a; done'
 say "main desktop settle 60 s"; sleep 60
 echo "main: $("$SILO" status main | grep -i 'computer use')"
+drop_one $F  # left by an earlier run
 t0=$(now); "$SILO" fork main --name $F --gui --computer-use auto --json > "$RAW/cu-fork.json" 2> "$RAW/cu-fork.err"; rc=$?; secs=$(elapsed "$t0")
 tail -3 "$RAW/cu-fork.err"; cu=$(jfield computerUse.state < "$RAW/cu-fork.json"); ap=$(jfield computerUse.approval < "$RAW/cu-fork.json")
 [ $rc = 0 ] && [ "$cu" = ready ] && [ "$ap" = auto ]; check "C1 fork --gui auto is ready" $? "rc=$rc ${secs}s state=$cu approval=$ap"

@@ -413,7 +413,20 @@ pub async fn fork_many(
         )));
     }
     Settings::check_fork_secrets(settings, &args.fork.secrets)?;
-    ops::sweep_throwaways(engine, progress).await;
+    let (_, forked) = tokio::join!(
+        ops::sweep_throwaways(engine, progress),
+        fork_many_now(engine, args, settings, progress, output)
+    );
+    forked
+}
+
+async fn fork_many_now(
+    engine: &Engine,
+    args: &ManyArgs,
+    settings: Option<&Settings>,
+    progress: Progress<'_>,
+    output: Output<'_>,
+) -> Result<Value, CliError> {
     let all = engine.computers().await?;
     let source = find(&all, &args.fork.source)?.clone();
     let names = fork_names(

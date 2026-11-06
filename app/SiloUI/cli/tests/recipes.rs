@@ -47,11 +47,17 @@ fn ago(seconds: i64) -> String {
 /// An engine that keeps its computers: forks and starts change them and `recipes.build` makes
 /// the hidden builder. A checkpoint taken for a fork without one is added to the source.
 fn world_engine(start: Vec<Computer>) -> (FakeEngine, World) {
-    world_engine_with(start, false)
+    world_engine_with(start, false, false)
 }
 
-/// As [`world_engine`]; with `fail_checkpoint`, saving a checkpoint fails.
-fn world_engine_with(start: Vec<Computer>, fail_checkpoint: bool) -> (FakeEngine, World) {
+/// As [`world_engine`]; with `fail_checkpoint`, saving a checkpoint fails. With `ssh`, the
+/// engine answers SSH access requests (only for a test that passes its own home directory:
+/// `up` through MCP writes the SSH entry under the real one).
+fn world_engine_with(
+    start: Vec<Computer>,
+    fail_checkpoint: bool,
+    ssh: bool,
+) -> (FakeEngine, World) {
     let world: World = Arc::new(Mutex::new(start));
     let shared = world.clone();
     let engine = FakeEngine::start(move |method, params| {
@@ -176,6 +182,17 @@ fn world_engine_with(start: Vec<Computer>, fail_checkpoint: bool) -> (FakeEngine
                 world.retain(|c| format!("id-{}", c.name) != id);
                 Ok(json!({"jobId": "job:1"}))
             }
+            "sshAccess.state" if ssh => Ok(json!({"computers": [{
+                "computer": "main", "computerId": "id-main", "enabled": true, "port": 2222,
+                "bindAddress": "127.0.0.1", "keys": [], "state": "listening"
+            }]})),
+            "sshAccess.connection" if ssh => {
+                // The engine counts the SSH connection it prepares as a change to the computer.
+                for c in world.iter_mut().filter(|c| c.name == "main") {
+                    c.generation += 1;
+                }
+                Ok(json!("ssh -i '/state/ssh/id-main' -p 2222 silo@127.0.0.1"))
+            }
             other => Err(("internal", format!("unexpected {other}"))),
         }
     });
@@ -190,7 +207,7 @@ fn linux_dev() -> silo_cli::config::Recipe {
 async fn up_makes_main_from_the_recipe_and_keeps_a_warm_checkpoint() {
     let (engine, world) = world_engine(vec![]);
     let connected = Engine::connect(&engine.socket).await.unwrap();
-    let value = ops::up(&connected, "linux-dev", &linux_dev(), &ignore)
+    let value = ops::up(&connected, "linux-dev", &linux_dev(), None, &ignore)
         .await
         .unwrap();
     assert_eq!(value["created"], true);
@@ -220,7 +237,7 @@ async fn up_on_an_existing_main_builds_nothing_and_replaces_the_warm_checkpoint(
     );
     let (engine, world) = world_engine(vec![main]);
     let connected = Engine::connect(&engine.socket).await.unwrap();
-    let value = ops::up(&connected, "linux-dev", &linux_dev(), &ignore)
+    let value = ops::up(&connected, "linux-dev", &linux_dev(), None, &ignore)
         .await
         .unwrap();
     assert_eq!(value["created"], false);
@@ -243,10 +260,31 @@ async fn up_on_an_existing_main_builds_nothing_and_replaces_the_warm_checkpoint(
 async fn up_starts_a_stopped_main() {
     let (engine, _) = world_engine(vec![computer("main", "stopped", vec![])]);
     let connected = Engine::connect(&engine.socket).await.unwrap();
-    ops::up(&connected, "linux-dev", &linux_dev(), &ignore)
+    ops::up(&connected, "linux-dev", &linux_dev(), None, &ignore)
         .await
         .unwrap();
     assert_eq!(engine.calls("computers.start")[0]["computerId"], "id-main");
+}
+
+#[tokio::test]
+async fn up_sets_up_ssh_before_the_warm_checkpoint_so_the_next_fork_uses_it() {
+    let (engine, _) = world_engine_with(vec![computer("main", "running", vec![])], false, true);
+    let connected = Engine::connect(&engine.socket).await.unwrap();
+    let home = tempfile::tempdir().unwrap();
+    let ssh = Some((home.path(), silo_client::channel::Channel::Development));
+    let value = ops::up(&connected, "linux-dev", &linux_dev(), ssh, &ignore)
+        .await
+        .unwrap();
+    assert_eq!(value["ssh"]["host"], "main.silo-dev");
+    assert_eq!(engine.calls("sshAccess.connection").len(), 1);
+    let fork = ops::fork(&connected, &fork_main(), None, &ignore)
+        .await
+        .unwrap();
+    assert_eq!(
+        engine.calls("checkpoints.fork")[0]["checkpointId"],
+        "cp-new"
+    );
+    assert_eq!(fork["checkpoint"]["unchanged"], true);
 }
 
 fn main_with_warm(age_seconds: i64) -> Computer {
@@ -422,9 +460,9 @@ async fn a_failed_up_keeps_the_previous_warm_checkpoint() {
         "running",
         vec![checkpoint("cp-old-warm", "warm", &ago(100))],
     );
-    let (engine, world) = world_engine_with(vec![main], true);
+    let (engine, world) = world_engine_with(vec![main], true, false);
     let connected = Engine::connect(&engine.socket).await.unwrap();
-    let error = ops::up(&connected, "linux-dev", &linux_dev(), &ignore)
+    let error = ops::up(&connected, "linux-dev", &linux_dev(), None, &ignore)
         .await
         .unwrap_err();
     assert!(error.message.contains("No room"), "{}", error.message);

@@ -129,18 +129,27 @@ pub fn stale_throwaways(all: &[Computer], now: i64) -> Vec<&Computer> {
         .collect()
 }
 
-/// Drops the stale throwaways. Best effort; returns the names dropped.
+/// The longest a sweep runs; one the engine cannot drop (a macOS throwaway whose Keychain
+/// sign-in it may not read) is tried again by a later command.
+pub const SWEEP_LIMIT: Duration = Duration::from_secs(20);
+
+/// Drops the stale throwaways, for at most [`SWEEP_LIMIT`]. Best effort; returns the names
+/// dropped. A fork runs it alongside its own work, so a throwaway that cannot be dropped does
+/// not hold the fork up.
 pub async fn sweep_throwaways(engine: &Engine, progress: Progress<'_>) -> Vec<String> {
-    let Ok(all) = engine.all_computers().await else {
-        return Vec::new();
-    };
-    let mut dropped = Vec::new();
-    for stale in stale_throwaways(&all, crate::clock::now_unix()) {
-        if remove_computer(engine, stale, progress).await.is_ok() {
-            dropped.push(stale.name.clone());
+    let dropped = std::sync::Mutex::new(Vec::new());
+    let sweep = async {
+        let Ok(all) = engine.all_computers().await else {
+            return;
+        };
+        for stale in stale_throwaways(&all, crate::clock::now_unix()) {
+            if remove_computer(engine, stale, progress).await.is_ok() {
+                dropped.lock().unwrap().push(stale.name.clone());
+            }
         }
-    }
-    dropped
+    };
+    let _ = tokio::time::timeout(SWEEP_LIMIT, sweep).await;
+    dropped.into_inner().unwrap_or_default()
 }
 
 /// One computer with its checkpoints, its recorded quiet state, the Silo secrets assigned to
@@ -628,7 +637,19 @@ pub async fn fork(
     progress: Progress<'_>,
 ) -> Result<Value, CliError> {
     Settings::check_fork_secrets(settings, &args.secrets)?;
-    sweep_throwaways(engine, progress).await;
+    let (_, forked) = tokio::join!(
+        sweep_throwaways(engine, progress),
+        fork_now(engine, args, settings, progress)
+    );
+    forked
+}
+
+async fn fork_now(
+    engine: &Engine,
+    args: &ForkArgs,
+    settings: Option<&Settings>,
+    progress: Progress<'_>,
+) -> Result<Value, CliError> {
     let mut recipe_hash = None;
     let mut checkpoint = args.checkpoint.clone();
     let mut warm_reused = false;
@@ -1077,7 +1098,9 @@ pub async fn remove_computer(
             while started.elapsed() < STOP_WAIT {
                 let listed = engine.all_computers().await?;
                 match listed.iter().find(|c| c.id == computer.id) {
-                    Some(now) if now.state != "stopped" => tokio::time::sleep(STOP_POLL).await,
+                    Some(now) if !matches!(now.state.as_str(), "stopped" | "failed") => {
+                        tokio::time::sleep(STOP_POLL).await
+                    }
                     _ => break,
                 }
             }
@@ -1691,11 +1714,15 @@ const WARM_NAME: &str = "silo-warm";
 /// Makes sure the engine answers, `main` exists (made from the recipe) and runs, and keeps a
 /// warm checkpoint of it. The previous warm checkpoint is replaced only after the new one has
 /// been saved; a fork that names no checkpoint uses the warm one while it is young enough
-/// (`warm_max_age`, five minutes by default; see [`fresh_warm`]).
+/// (`warm_max_age`, one minute by default; see [`fresh_warm`]). With `ssh` (the home
+/// directory and channel), `ssh main.silo` is set up first: the engine counts the SSH
+/// connection it prepares as a change to main, so done after the checkpoint it would leave
+/// the checkpoint unusable.
 pub async fn up(
     engine: &Engine,
     recipe_name: &str,
     recipe: &Recipe,
+    ssh: Option<(&std::path::Path, silo_client::channel::Channel)>,
     progress: Progress<'_>,
 ) -> Result<Value, CliError> {
     let mut created = false;
@@ -1738,6 +1765,10 @@ pub async fn up(
             Ok(ports) => (json!(ports), Value::Null),
             Err(error) => (Value::Null, json!(error.message)),
         };
+    let ssh = match ssh {
+        Some((home, channel)) => crate::access::ssh_for_up(engine, home, channel).await,
+        None => Value::Null,
+    };
     let previous: Vec<String> = main
         .checkpoints
         .iter()
@@ -1775,5 +1806,6 @@ pub async fn up(
         "warmCheckpoint": warm["id"],
         "publishedPorts": ports,
         "portsError": ports_error,
+        "ssh": ssh,
     }))
 }
