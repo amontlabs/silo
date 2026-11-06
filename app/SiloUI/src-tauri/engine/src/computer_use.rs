@@ -343,6 +343,11 @@ fn unix_seconds() -> u64 {
 
 /// Stores a new approval choice and returns the stored policy. The last attempt is kept:
 /// it is compared with the choice, never rewritten by it.
+/// The approval mode the user chose for the computer.
+pub(crate) fn approval_of(paths: &RuntimePaths, id: &str) -> Approval {
+    read_policy(paths, id).approval
+}
+
 pub(crate) fn set_approval(
     paths: &RuntimePaths,
     id: &str,
@@ -1028,9 +1033,20 @@ fn reapply_in(
     gate: &'static runtime::operation_gate::OperationGate,
     runner: SharedRunner,
     paths: &RuntimePaths,
-    name: &str,
+    name_or_id: &str,
 ) -> Option<std::thread::JoinHandle<()>> {
-    apply_with(gate, runner, paths, name, Trigger::Boot)
+    // A keep names the computer by whatever the engine was given, often its id.
+    let name = runtime::read_metadata(&paths.metadata)
+        .ok()?
+        .computers
+        .into_iter()
+        .find(|configuration| {
+            (configuration.name() == name_or_id || configuration.id() == name_or_id)
+                && is_built_in(configuration)
+        })?
+        .name()
+        .to_owned();
+    apply_with(gate, runner, paths, &name, Trigger::Boot)
 }
 
 /// Drives a running built-in computer's guest toward the computer's chosen approval mode on a host

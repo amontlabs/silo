@@ -676,7 +676,8 @@ fn a_keep_into_a_computer_applies_the_computers_own_mode_again() {
         .join()
         .unwrap();
     assert!(!policy_for_apply(&paths, &id).needs_apply());
-    reapply_in(test_gate(), guest.clone(), &paths, "dev")
+    // The id, not the name, as a keep may name the computer.
+    reapply_in(test_gate(), guest.clone(), &paths, &id)
         .unwrap()
         .join()
         .unwrap();
@@ -687,6 +688,7 @@ fn a_keep_into_a_computer_applies_the_computers_own_mode_again() {
         "the helper ran again although nothing was pending"
     );
     assert_eq!(runs[1].0.as_str(), "ask");
+    assert!(reapply_in(test_gate(), guest.clone(), &paths, "no-such-computer").is_none());
 }
 
 #[test]

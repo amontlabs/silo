@@ -134,8 +134,17 @@ impl KeepEnv for GuestEnv {
     }
 
     fn after_kept(&self, computer: &str) {
-        if let Ok(paths) = runtime::runtime_paths(self.host.as_ref()) {
-            crate::computer_use::reapply_after_keep(&paths, computer);
+        let Ok(target) = self.target(computer) else {
+            return;
+        };
+        if target.is_macos() {
+            if let Some(macos) = self.host.macos_context() {
+                let _ =
+                    crate::macos_computers::reapply_macos_computer_use_approval(&macos, computer);
+            }
+        } else if let Ok(paths) = runtime::runtime_paths(self.host.as_ref()) {
+            // `computer` may be the computer's id; the apply is keyed by its name.
+            crate::computer_use::reapply_after_keep(&paths, target.name());
         }
     }
 

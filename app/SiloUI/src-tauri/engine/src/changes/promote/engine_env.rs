@@ -38,6 +38,19 @@ fn field<'a>(bindings: &'a Value, name: &str) -> &'a Value {
     bindings.get(name).unwrap_or(&Value::Null)
 }
 
+/// Sets a Linux computer's approval to the one in `bindings`, when it names one.
+fn set_linux_approval(paths: &RuntimePaths, id: &str, bindings: &Value) -> Result<(), String> {
+    let Some(mode) = bindings["approval"]
+        .as_str()
+        .and_then(crate::computer_use::Approval::parse)
+    else {
+        return Ok(());
+    };
+    crate::computer_use::set_approval(paths, id, mode)
+        .map(|_| ())
+        .map_err(|error| error.to_string())
+}
+
 /// Runs `work` with the Linux steps wired to the real runtime and guest.
 fn with_linux<T>(
     host: &dyn RuntimeHost,
@@ -142,6 +155,9 @@ impl EngineEnv {
                 // fork's own grants under its old name are dropped, never added to main's.
                 crate::secrets::computer_removed(&swap.fork_name)?;
                 crate::github::forget_fork_assignment(&swap.fork_name)?;
+                // The computer taking the main role takes main's computer-use approval; the
+                // next start applies it in the guest.
+                set_linux_approval(linux.paths, &swap.fork_id, &swap.target_bindings)?;
                 linux.ports_apply(swap)
             }
             // The saved SSH entries connect by name, so they follow the names step.
@@ -157,6 +173,7 @@ impl EngineEnv {
             Step::Names => linux.names_revert(swap),
             Step::Bindings => {
                 linux.ports_revert(swap)?;
+                set_linux_approval(linux.paths, &swap.fork_id, &swap.fork_bindings)?;
                 let names: Vec<String> = swap
                     .fork_bindings
                     .get("secrets")
@@ -309,6 +326,9 @@ impl PromoteEnv for EngineEnv {
                 "github": crate::github::export_computer(name)?,
                 "ports": linux["ports"],
                 "quiet": linux["quiet"],
+                "approval": with_linux(self.host.as_ref(), |linux| {
+                    Ok(crate::computer_use::approval_of(linux.paths, id).as_str())
+                })?,
             }));
         }
         let macos = self.macos()?;
@@ -318,6 +338,7 @@ impl PromoteEnv for EngineEnv {
             "ports": macos_computers::promote_export_ports(&macos, id)?,
             "hostnames": macos_computers::promote_read_hostnames(&macos, id)?,
             "quiet": macos_computers::promote_export_quiet(id)?,
+            "approval": macos_computers::promote_export_approval(id)?,
         }))
     }
 
@@ -336,6 +357,9 @@ impl PromoteEnv for EngineEnv {
                 // fork's own grants under its old name are dropped, never added to main's.
                 crate::secrets::computer_removed(&swap.fork_name)?;
                 crate::github::forget_fork_assignment(&swap.fork_name)?;
+                if let Some(mode) = swap.target_bindings["approval"].as_str() {
+                    macos_computers::promote_set_approval(&macos, &swap.fork_id, mode)?;
+                }
                 macos_computers::promote_replace_ports(
                     &macos,
                     &swap.fork_id,
@@ -391,6 +415,9 @@ impl PromoteEnv for EngineEnv {
                 // Ports changed while the fork was main belong to the main role, so they go
                 // back to the old main with it; the fork gets the ports it had. A repeat
                 // after a crash finds the fork's own ports already back and moves nothing.
+                if let Some(mode) = swap.fork_bindings["approval"].as_str() {
+                    macos_computers::promote_set_approval(&macos, &swap.fork_id, mode)?;
+                }
                 let mine = ports(&swap.fork_bindings);
                 let now = macos_computers::promote_export_ports(&macos, &swap.fork_id)?;
                 if now != mine {

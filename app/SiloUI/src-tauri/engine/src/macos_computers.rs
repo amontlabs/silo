@@ -487,6 +487,24 @@ impl Registry {
         Ok((entry.attempt, entry.state, record))
     }
 
+    /// Forgets which computer-use version the guest has, so the next update runs again with the
+    /// computer's own approval. Returns the attempt and state the update needs.
+    fn mark_computer_use_stale(
+        &mut self,
+        id: &str,
+        save: impl FnOnce(&Record) -> Result<(), String>,
+    ) -> Result<(u64, State), String> {
+        let entry = self
+            .entry(id)
+            .filter(|entry| !entry.deleting)
+            .ok_or("This computer no longer exists.")?;
+        let mut record = entry.record.clone();
+        record.computer_use_version = None;
+        save(&record)?;
+        entry.record = record;
+        Ok((entry.attempt, entry.state))
+    }
+
     /// Computers stopping whose machine the framework no longer holds: the stop callback was
     /// missed or came before the state was set, so nothing else will ever finish them.
     fn stopping_without_machine(&self, held: &[String]) -> Vec<String> {
@@ -2169,6 +2187,19 @@ pub async fn set_macos_computer_use_approval(
     .await
 }
 
+/// After a keep into a macOS computer: runs the guest update again with the computer's own
+/// approval. A kept fork may carry an `auto` rule in its agent settings; the update rewrites them.
+pub fn reapply_macos_computer_use_approval(app: &MacosContext, id: &str) -> Result<(), String> {
+    ensure_loaded(app)?;
+    let layout = Layout::new(&app_data(app)?, id);
+    let (attempt, state) =
+        registry().mark_computer_use_stale(id, |record| store::save(&layout, record))?;
+    if state == State::Running {
+        guest_computer_use::update_in_background(app, id, attempt);
+    }
+    Ok(())
+}
+
 /// The blocking part of [`set_macos_computer_use_approval`]. Only the desired approval of the
 /// record as it is when the registry is held changes; see `Registry::set_desired_approval`.
 fn apply_desired_approval(
@@ -2851,6 +2882,25 @@ pub fn promote_write_hostnames(
 }
 
 /// What a fork was made quiet with (null for a computer that is not a quiet fork).
+/// The computer-use approval the user chose for a macOS computer.
+pub fn promote_export_approval(id: &str) -> Result<String, String> {
+    let (record, _) = computer(id)?;
+    Ok(record
+        .computer_use_desired_approval
+        .or(record.computer_use_approval)
+        .unwrap_or_else(crate::computer_use::initial_approval)
+        .as_str()
+        .to_owned())
+}
+
+/// Sets a macOS computer's approval for the role it takes over in a promote. The guest is
+/// brought to it by the update at its next start.
+pub fn promote_set_approval(app: &MacosContext, id: &str, approval: &str) -> Result<(), String> {
+    let approval =
+        crate::computer_use::Approval::parse(approval).ok_or("Unknown approval mode.")?;
+    apply_desired_approval(app, id, approval).map(|_| ())
+}
+
 pub fn promote_export_quiet(id: &str) -> Result<serde_json::Value, String> {
     let (record, _) = computer(id)?;
     serde_json::to_value(&record.quiet).map_err(|e| e.to_string())
@@ -11659,6 +11709,21 @@ mod tests {
             registry.entries[0].record.computer_use_desired_approval,
             Some(Approval::Auto)
         );
+    }
+
+    #[test]
+    fn a_reapply_forgets_the_guests_version_and_keeps_the_approval() {
+        use crate::computer_use::Approval;
+        let (mut registry, id) = registry_with(State::Running);
+        registry
+            .finish_computer_use_update(&id, 1, "v-ask", Approval::Ask, |_| Ok(()))
+            .unwrap();
+        let (attempt, state) = registry.mark_computer_use_stale(&id, |_| Ok(())).unwrap();
+        assert_eq!((attempt, state), (1, State::Running));
+        let record = &registry.entries[0].record;
+        assert_eq!(record.computer_use_version, None);
+        assert_eq!(record.computer_use_approval, Some(Approval::Ask));
+        assert!(record.computer_use_stale());
     }
 
     #[test]
