@@ -1,0 +1,24 @@
+time=2026-11-08T00:34:22.402+01:00 level=INFO msg="silo-runner is serving" scaleSets=1
+time=2026-11-08T00:34:23.306+01:00 level=INFO msg="Handling initial session statistics" label=silo-linux-r1 listener.totalAssignedJobs=0
+time=2026-11-08T00:34:23.306+01:00 level=INFO msg="Getting next message" label=silo-linux-r1 listener.lastMessageID=0
+time=2026-11-08T00:34:23.503+01:00 level=INFO msg="job completed" runner="" result=canceled request=0
+time=2026-11-08T00:34:23.653+01:00 level=INFO msg="Getting next message" label=silo-linux-r1 listener.lastMessageID=100000006
+time=2026-11-08T00:34:32.187+01:00 level=INFO msg="Getting next message" label=silo-linux-r1 listener.lastMessageID=100000007
+time=2026-11-08T00:34:43.441+01:00 level=INFO msg="runner ready" runner=ci-silo-linux-r1-60abd0c4 label=silo-linux-r1
+time=2026-11-08T00:34:50.076+01:00 level=INFO msg="job started" runner=ci-silo-linux-r1-60abd0c4 job=j request=0
+time=2026-11-08T00:34:50.086+01:00 level=INFO msg="job completed" runner=ci-silo-linux-r1-60abd0c4 result=succeeded request=0
+time=2026-11-08T00:34:50.239+01:00 level=INFO msg="Getting next message" label=silo-linux-r1 listener.lastMessageID=100000008
+time=2026-11-08T00:34:50.295+01:00 level=INFO msg="runner command ended" runner=ci-silo-linux-r1-60abd0c4
+time=2026-11-08T00:34:53.490+01:00 level=INFO msg="a computer is gone" computer=ci-silo-linux-r1-60abd0c4
+time=2026-11-08T00:35:02.817+01:00 level=INFO msg="Getting next message" label=silo-linux-r1 listener.lastMessageID=100000009
+time=2026-11-08T00:35:14.093+01:00 level=INFO msg="runner ready" runner=ci-silo-linux-r1-7ec9fe77 label=silo-linux-r1
+time=2026-11-08T00:35:19.941+01:00 level=INFO msg="job started" runner=ci-silo-linux-r1-7ec9fe77 job=j request=0
+time=2026-11-08T00:35:19.958+01:00 level=INFO msg="job completed" runner=ci-silo-linux-r1-7ec9fe77 result=failed request=0
+time=2026-11-08T00:35:20.106+01:00 level=INFO msg="Getting next message" label=silo-linux-r1 listener.lastMessageID=100000010
+time=2026-11-08T00:35:20.148+01:00 level=INFO msg="runner command ended" runner=ci-silo-linux-r1-7ec9fe77
+time=2026-11-08T00:35:21.923+01:00 level=INFO msg="kept a computer after a job that did not succeed" computer=ci-silo-linux-r1-7ec9fe77 result=failed
+time=2026-11-08T00:35:53.759+01:00 level=INFO msg="listener stopped" label=silo-linux-r1
+time=2026-11-08T00:35:55.085+01:00 level=INFO msg="silo-runner is serving" scaleSets=1
+time=2026-11-08T00:35:55.384+01:00 level=INFO msg="Handling initial session statistics" label=silo-linux-r1 listener.totalAssignedJobs=0
+time=2026-11-08T00:35:55.384+01:00 level=INFO msg="Getting next message" label=silo-linux-r1 listener.lastMessageID=0
+time=2026-11-08T00:36:12.048+01:00 level=INFO msg="listener stopped" label=silo-linux-r1

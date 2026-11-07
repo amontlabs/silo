@@ -1,0 +1,68 @@
+time=2026-11-08T01:13:16.780+01:00 level=INFO msg="silo-runner is serving" scaleSets=1
+time=2026-11-08T01:13:17.063+01:00 level=INFO msg="Handling initial session statistics" label=silo-macos-r1 listener.totalAssignedJobs=0
+time=2026-11-08T01:13:17.063+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=0
+time=2026-11-08T01:13:17.252+01:00 level=INFO msg="job completed" runner="" result=canceled request=0
+time=2026-11-08T01:13:17.384+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000006
+time=2026-11-08T01:13:26.782+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000007
+time=2026-11-08T01:14:09.302+01:00 level=WARN msg="runner did not come up" computer=ci-silo-macos-r1-b7ca4973 error="the runner ended before it was ready: exit status 127: silo: cannot run /Users/Shared/actions-runner/silo-run-jit: No such file or directory | Finishing the command on ci-silo-macos-r1-b7ca4973..."
+time=2026-11-08T01:14:09.302+01:00 level=ERROR msg="no runner could be started; waiting before trying again" label=silo-macos-r1 wait=1m0s
+time=2026-11-08T01:14:11.781+01:00 level=WARN msg="cannot delete the computer" computer=ci-silo-macos-r1-b7ca4973 error="silo drop c3da4ab4-fcd5-44a8-add3-5d35028414ee: exit status 1: Dropping ci-silo-macos-r1-b7ca4973...\nsilo: Stop the computer first."
+time=2026-11-08T01:14:16.964+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000007
+time=2026-11-08T01:14:49.117+01:00 level=INFO msg="a computer is gone" computer=ci-silo-macos-r1-b7ca4973
+time=2026-11-08T01:15:07.161+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000007
+time=2026-11-08T01:15:55.885+01:00 level=WARN msg="runner did not come up" computer=ci-silo-macos-r1-84819c5d error="the runner ended before it was ready: exit status 127: silo: cannot run /Users/Shared/actions-runner/silo-run-jit: No such file or directory | Finishing the command on ci-silo-macos-r1-84819c5d..."
+time=2026-11-08T01:15:55.885+01:00 level=ERROR msg="no runner could be started; waiting before trying again" label=silo-macos-r1 wait=2m0s
+time=2026-11-08T01:15:57.350+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000007
+time=2026-11-08T01:15:58.375+01:00 level=WARN msg="cannot delete the computer" computer=ci-silo-macos-r1-84819c5d error="silo drop 647c1633-2c8d-4ddb-8211-db39bebddca0: exit status 1: Dropping ci-silo-macos-r1-84819c5d...\nsilo: Stop the computer first."
+time=2026-11-08T01:16:47.550+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000007
+time=2026-11-08T01:16:49.417+01:00 level=INFO msg="a computer is gone" computer=ci-silo-macos-r1-84819c5d
+time=2026-11-08T01:17:37.776+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000007
+time=2026-11-08T01:18:26.802+01:00 level=INFO msg="job completed" runner="" result=canceled request=0
+time=2026-11-08T01:18:26.939+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000008
+time=2026-11-08T01:18:27.254+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000009
+time=2026-11-08T01:18:59.165+01:00 level=WARN msg="runner did not come up" computer=ci-silo-macos-r1-08c8d04f error="the runner ended before it was ready: exit status 127: silo: cannot run /Users/Shared/actions-runner/silo-run-jit: No such file or directory | Finishing the command on ci-silo-macos-r1-08c8d04f..."
+time=2026-11-08T01:18:59.165+01:00 level=ERROR msg="no runner could be started; waiting before trying again" label=silo-macos-r1 wait=4m0s
+time=2026-11-08T01:19:01.562+01:00 level=WARN msg="cannot delete the computer" computer=ci-silo-macos-r1-08c8d04f error="silo drop 1b8393dd-8987-4aec-adfd-d35453972810: exit status 1: Dropping ci-silo-macos-r1-08c8d04f...\nsilo: Stop the computer first."
+time=2026-11-08T01:19:17.447+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000009
+time=2026-11-08T01:19:49.067+01:00 level=INFO msg="a computer is gone" computer=ci-silo-macos-r1-08c8d04f
+time=2026-11-08T01:20:07.631+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000009
+time=2026-11-08T01:20:57.811+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000009
+time=2026-11-08T01:21:48.005+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000009
+time=2026-11-08T01:22:38.205+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000009
+time=2026-11-08T01:23:26.970+01:00 level=INFO msg="job completed" runner="" result=canceled request=0
+time=2026-11-08T01:23:27.098+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000010
+time=2026-11-08T01:23:27.425+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000011
+time=2026-11-08T01:23:54.638+01:00 level=WARN msg="runner did not come up" computer=ci-silo-macos-r1-6035ecf7 error="the runner ended before it was ready: exit status 127: silo: cannot run /Users/Shared/actions-runner/silo-run-jit: No such file or directory | Finishing the command on ci-silo-macos-r1-6035ecf7..."
+time=2026-11-08T01:23:54.638+01:00 level=ERROR msg="no runner could be started; waiting before trying again" label=silo-macos-r1 wait=8m0s
+time=2026-11-08T01:23:57.015+01:00 level=WARN msg="cannot delete the computer" computer=ci-silo-macos-r1-6035ecf7 error="silo drop aeebbdf0-e6cd-4850-9ab2-f31e88c725fb: exit status 1: Dropping ci-silo-macos-r1-6035ecf7...\nsilo: Stop the computer first."
+time=2026-11-08T01:24:17.605+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000011
+time=2026-11-08T01:24:49.102+01:00 level=INFO msg="a computer is gone" computer=ci-silo-macos-r1-6035ecf7
+time=2026-11-08T01:25:07.801+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000011
+time=2026-11-08T01:25:57.988+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000011
+time=2026-11-08T01:26:48.206+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000011
+time=2026-11-08T01:27:38.403+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000011
+time=2026-11-08T01:28:28.579+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000011
+time=2026-11-08T01:29:18.763+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000011
+time=2026-11-08T01:30:08.948+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000011
+time=2026-11-08T01:30:59.133+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000011
+time=2026-11-08T01:31:49.331+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000011
+time=2026-11-08T01:32:39.529+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000011
+time=2026-11-08T01:32:56.960+01:00 level=WARN msg="runner did not come up" computer=ci-silo-macos-r1-7b0f97ce error="the runner ended before it was ready: exit status 127: silo: cannot run /Users/Shared/actions-runner/silo-run-jit: No such file or directory | Finishing the command on ci-silo-macos-r1-7b0f97ce..."
+time=2026-11-08T01:32:56.960+01:00 level=ERROR msg="no runner could be started; waiting before trying again" label=silo-macos-r1 wait=16m0s
+time=2026-11-08T01:32:59.378+01:00 level=WARN msg="cannot delete the computer" computer=ci-silo-macos-r1-7b0f97ce error="silo drop 5c4797aa-c8d4-435c-a75a-041bd553741c: exit status 1: Dropping ci-silo-macos-r1-7b0f97ce...\nsilo: Stop the computer first."
+time=2026-11-08T01:33:29.723+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000011
+time=2026-11-08T01:33:32.033+01:00 level=INFO msg="a computer is gone" computer=ci-silo-macos-r1-7b0f97ce
+time=2026-11-08T01:34:19.904+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000011
+time=2026-11-08T01:35:10.112+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000011
+time=2026-11-08T01:36:00.311+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000011
+time=2026-11-08T01:36:50.495+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000011
+time=2026-11-08T01:37:40.696+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000011
+time=2026-11-08T01:38:30.884+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000011
+time=2026-11-08T01:39:21.068+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000011
+time=2026-11-08T01:40:11.269+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000011
+time=2026-11-08T01:41:01.478+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000011
+time=2026-11-08T01:41:51.678+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000011
+time=2026-11-08T01:42:41.879+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000011
+time=2026-11-08T01:43:32.072+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000011
+time=2026-11-08T01:44:22.258+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000011
+time=2026-11-08T01:44:52.615+01:00 level=INFO msg="listener stopped" label=silo-macos-r1

@@ -22,11 +22,11 @@ call (7 Nov); its Mac live checks stay open there.
 
 | Phase | Part | What | Status |
 |---|---|---|---|
-| F1 | 1 | Fork measurements, before: one script that times a fork and measures its memory on a Mac and on a Linux KVM host (cold fork, `-n 4` from the warm checkpoint, macOS fork, RAM per fork) | Planned |
-| F2 | 1 | Cheaper forks: a fork starts from the source as it is, captured disks-only; forks without a desktop. Measured after with the F1 script | Built |
+| F1 | 1 | Fork measurements, before: one script that times a fork and measures its memory on a Mac and on a Linux KVM host (cold fork, `-n 4` from the warm checkpoint, macOS fork, RAM per fork) | Merged, PR #84 |
+| F2 | 1 | Cheaper forks: a fork starts from the source as it is, captured disks-only; forks without a desktop. Measured after with the F1 script | Merged, PR #88 |
 | F3 | 1 | Sharing: `silo export` / `silo import`, the guest image by reference, a warning for logins found on the computer, keep an imported computer into main | Planned |
 | F4 | 1 | Sharing a computer that lives on another machine | Planned |
-| R1 | 2 | CI runner on the Mac: delete `silo-action/`, the Go helper on actions/scaleset, a Linux and a macOS runner recipe, a fresh computer per job, delete on success, keep on failure, private repositories only, example workflow | Planned |
+| R1 | 2 | CI runner on the Mac: delete `silo-action/`, the Go helper on actions/scaleset, a Linux and a macOS runner recipe, a fresh computer per job, delete on success, keep on failure, private repositories only, example workflow | Built; live check open |
 | R2 | 2 | Linux hosts as runner machines | Planned |
 | C1 | 3 | Container computers with crun: measurements only, reported to the owner before any build | Measured; [evidence](evidence/c1-containers/README.md), the owner decides on a build |
 

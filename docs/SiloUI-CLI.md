@@ -44,7 +44,7 @@ asks you to open Silo.
 
 If a wait ends before its job does (connection lost, Ctrl-C), the job id is printed and
 `silo job <id>` waits for it again. `exec` accepts at most 180 seconds (the engine's
-limit) and returns the command's exit code, or 128 plus the signal number.
+limit; `exec --stream` has none) and returns the command's exit code, or 128 plus the signal number.
 
 ## Commands
 
@@ -79,6 +79,7 @@ the engine's message.
 | `silo undo <computer\|fork\|./dir>` | put a computer back to before its latest keep, or a folder back to before its latest fold |
 | `silo drop <computer> [--force]` | throw a computer away (a hidden throwaway too, by name or id); `main` needs `--force`. A stopped or failed `silo-baseline-*` copy more than an hour old is dropped by the next fork (alongside the fork, for at most 20 s; one the engine cannot drop is tried again next time) or `silo diff --baseline` |
 | `silo exec <computer> [--cwd DIR] [--timeout SECS] -- <cmd...>` | run a command; the exit code is passed through |
+| `silo exec <computer> --stream [--stdin] [--cwd DIR] -- <cmd...>` | run a command with no time limit and print its output as it arrives; `--stdin` reads this process's standard input to its end (at most 1 MiB) and gives it to the command as its own, so a value travels in the request to the engine and appears in no command line or environment. The command is not recorded as a step. `silo-runner` starts GitHub's runner this way ([CI runner](SiloUI-CI-RUNNER.md)) |
 | `silo checkpoint <computer> [--name N] [--kind manual\|automatic\|before-keep\|step]` | save a checkpoint |
 | `silo checkpoints <computer>` | list checkpoints |
 | `silo steps <computer>` | the commands run in the computer through Silo, numbered, with exit code and the checkpoint each left ([steps](SiloUI-CHANGES.md#steps-and-the-fork-tree)) |
@@ -551,7 +552,7 @@ folder's own `origin`, and the repository is the one that origin names (a differ
 `origin/<base>`, host commits `origin` does not have are refused and listed, and the local `silo/<fork>-<id>` branch is deleted after the push.
 `--pr` cannot be combined with `--request`, `--into` or `--dry-run`, and is not an MCP option. The result prints the pull request URL (`prUrl` with `--json`). A fork's
 own credentials are never used and its GitHub access stays read-only. `SILO_GITHUB_API_URL`
-changes the REST base (default `https://api.github.com`; the GitHub Action sets it from `github.api_url`, and tests point it at a local server). The token header goes only to a push whose `https` host is the git host of that base. `silo fold <fork> --pr --json` prints `prUrl` (also in `pullRequest.url`), `branch`, `base` and `repository`; `silo fold <fork> --request --json` prints the request as `request.id`.
+changes the REST base (default `https://api.github.com`; tests point it at a local server). The token header goes only to a push whose `https` host is the git host of that base. `silo fold <fork> --pr --json` prints `prUrl` (also in `pullRequest.url`), `branch`, `base` and `repository`; `silo fold <fork> --request --json` prints the request as `request.id`.
 
 When `silo.yaml` exists, `--secret` accepts only names in `fork_secrets`. `silo fork` reads
 `--recipe-file`, else the nearest `.silo/recipe.yaml` (a malformed file is an error). The fork
@@ -609,7 +610,3 @@ A debug build of the engine sends its `api.github.com` requests to the URL in
 `SILO_GITHUB_API_BASE` when it is a loopback `http` or `https` origin (`localhost`,
 `127.0.0.1` or `[::1]`, with an optional port and no path). Anything else is ignored. A
 release build never reads the variable.
-
-## GitHub Action
-
-`silo-action/` holds a ready-made composite action (`action.yml` and `run.sh`, no build step) for a self-hosted Mac runner that has Silo installed. It forks a recipe or a computer, runs a command, writes the `silo diff --json` buckets and the credentials line to the job summary, then calls `silo fold --pr` (reads `GITHUB_TOKEN` and `SILO_GITHUB_API_URL`) or `silo fold --request`, drops the fork unless `keep-fork` is set, and fails the job with the command's exit code. Forks get none of the credentials Silo manages unless `secrets` names them; files on disk are copied. See `silo-action/README.md`; test with `sh silo-action/test/run.sh`.

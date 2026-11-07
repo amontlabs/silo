@@ -10,7 +10,6 @@ Nothing here was released, tagged, pushed or published. This is what the owner n
 | `silod` | The engine, shipped inside the app and as its own release `engine-v<version>` | `app/SiloUI/src-tauri/silod`, workflow **Publish Silo engine** |
 | CLI | The `silo` command and MCP server (`silo mcp`) | `app/SiloUI/cli` (crate `silo-cli`, binary `silo`) |
 | Guest images | Linux guest image (arm64 and amd64) the app downloads on first use | `app/SiloUI/guest-image`, workflow **Publish Silo guest image** |
-| `silo-action` | Composite GitHub Action: fork, run, review, open a pull request | `silo-action/`, to be published as `amontlabs/silo-action` |
 | Reviewer service | The hosted reviewer behind `silo review` (Pro) | `reviewer-service/`, not deployed by any workflow |
 
 The `silo` CLI is built with the app (`build_desktop.py` locally; `-p silo-cli` and `package-macos-release.py --cli` in the release workflow), signed like the other helpers and linked on PATH by the app (slice 6e); it is not a separate release asset. See [artifacts.md](artifacts.md).
@@ -57,10 +56,9 @@ Tests: `python3 -m unittest discover -s scripts -p 'test_*release*.py'` exit 0, 
 6. **Acceptance evidence** (`SiloUI-RELEASES.md#required-release-acceptance-evidence`): clean install from the DMG, a real update from the previous version, the failure cases listed there, and the computer-use live tests. No public-release claim without it.
 7. **GitHub release.** `npm run release:publish`; approve `release-publish`. Publication is done only when **Publish verified Silo draft** succeeds.
 8. **Engine release** (if the engine version was raised): run **Publish Silo engine** from `main`.
-9. **Publish `silo-action`.** Create the `amontlabs/silo-action` repository from `silo-action/`; the `uses: amontlabs/silo-action@v1` example in its README needs a `v1` tag there.
-10. **Deploy the reviewer service.** Follow `reviewer-service/README.md` ("Deploy (for the owner)"): pin the Python image digest, lock the requirements, build, set `ANTHROPIC_API_KEY` as a secret, hand each user a URL and token.
-11. **Post the upstream drafts** in [`docs/v1/upstream/`](../upstream/): `msb-reclaim-capture-dirs`, `msb-rename-stopped`, `msb-retired-layer-cleanup`, `msb-secret-usage-events`, `msb-virtiofs-unlinked-checkpoint`.
-12. **Approve public text**: the release notes, the credentials sentence, and the README, demo and numbers drafts (slice 6d).
+9. **Deploy the reviewer service.** Follow `reviewer-service/README.md` ("Deploy (for the owner)"): pin the Python image digest, lock the requirements, build, set `ANTHROPIC_API_KEY` as a secret, hand each user a URL and token.
+10. **Post the upstream drafts** in [`docs/v1/upstream/`](../upstream/): `msb-reclaim-capture-dirs`, `msb-rename-stopped`, `msb-retired-layer-cleanup`, `msb-secret-usage-events`, `msb-virtiofs-unlinked-checkpoint`.
+11. **Approve public text**: the release notes, the credentials sentence, and the README, demo and numbers drafts (slice 6d).
 
 Also open from the build log: Keychain repair for the Dev engine (the phase 1, 3 and 4 checks that needed it) and the leftover test computers to drop.
 
@@ -75,7 +73,6 @@ Outputs are in [dry-run/](dry-run/).
 | `python3 -m unittest discover -s scripts -p 'test_*release*.py'` (the set the draft job runs; includes `package-macos-release.py` in `dry-run` mode with notarization stubbed) | 174 tests, OK, 2 skipped |
 | `python3 -m unittest discover -s scripts -p 'test_release_notarization.py'` (AMO-63) | 14 tests, OK |
 | `reviewer-service` tests (`python3 -m pytest -q`) | 32 passed |
-| `silo-action/test/run.sh` | **not run**: this session's shell guard refused to run it (it runs `sh` on a nested script). Run `sh silo-action/test/run.sh` |
 | `SILO_RELEASE_SIGNING=dry-run python3 scripts/package-macos-release.py <Silo.app> …` on a real bundle | **not run**: needs a built `Silo.app` and `silod`, and there is no native build in this worktree (a native build needs the GitHub App configuration, which this task leaves alone). The unit tests above cover the step order and the dry-run stubs; the CI `dry_run` dispatch (step 2) covers the real bundle |
 | `release:version`, `release:draft`, `release:publish` | deliberately not run (they consume changesets, tag or publish) |
 

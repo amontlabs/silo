@@ -1,0 +1,61 @@
+time=2026-11-08T00:41:16.584+01:00 level=INFO msg="silo-runner is serving" scaleSets=1
+time=2026-11-08T00:41:16.872+01:00 level=INFO msg="Handling initial session statistics" label=silo-macos-r1 listener.totalAssignedJobs=0
+time=2026-11-08T00:41:16.872+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=0
+time=2026-11-08T00:41:25.811+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000001
+time=2026-11-08T00:41:27.344+01:00 level=WARN msg="cannot fork a computer" computer=ci-silo-macos-r1-f32089ba error="silo fork: no computer id in the output: ...ion\": 12,\n  \"id\": \"8d450adc-ef5c-4780-a119-b8186f70893d\",\n  \"kind\": \"macos\",\n  \"memoryGiB\": 8,\n  \"name\": \"ci-silo-macos-r1-f32089ba\",\n  \"ports\": [],\n  \"source\": \"silo-macos\",\n  \"state\": \"setting-up\"\n}"
+time=2026-11-08T00:41:27.344+01:00 level=ERROR msg="no runner could be started; waiting before trying again" label=silo-macos-r1 wait=1m0s
+time=2026-11-08T00:41:33.535+01:00 level=INFO msg="a computer is gone" computer=ci-silo-macos-r1-f32089ba
+time=2026-11-08T00:42:16.011+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000001
+time=2026-11-08T00:42:48.291+01:00 level=WARN msg="cannot fork a computer" computer=ci-silo-macos-r1-e58d5b8e error="silo fork: no computer id in the output: ...ion\": 12,\n  \"id\": \"9990ffe6-39dc-4fe7-83e8-ff9ef0e980b0\",\n  \"kind\": \"macos\",\n  \"memoryGiB\": 8,\n  \"name\": \"ci-silo-macos-r1-e58d5b8e\",\n  \"ports\": [],\n  \"source\": \"silo-macos\",\n  \"state\": \"setting-up\"\n}"
+time=2026-11-08T00:42:48.291+01:00 level=ERROR msg="no runner could be started; waiting before trying again" label=silo-macos-r1 wait=2m0s
+time=2026-11-08T00:42:52.943+01:00 level=INFO msg="a computer is gone" computer=ci-silo-macos-r1-e58d5b8e
+time=2026-11-08T00:43:06.195+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000001
+time=2026-11-08T00:43:56.375+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000001
+time=2026-11-08T00:44:46.560+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000001
+time=2026-11-08T00:45:18.234+01:00 level=WARN msg="cannot fork a computer" computer=ci-silo-macos-r1-4843e0d0 error="silo fork: no computer id in the output: ...ion\": 12,\n  \"id\": \"e8013bd4-e6e4-4fb5-b156-3fe29dbc9a0a\",\n  \"kind\": \"macos\",\n  \"memoryGiB\": 8,\n  \"name\": \"ci-silo-macos-r1-4843e0d0\",\n  \"ports\": [],\n  \"source\": \"silo-macos\",\n  \"state\": \"setting-up\"\n}"
+time=2026-11-08T00:45:18.234+01:00 level=ERROR msg="no runner could be started; waiting before trying again" label=silo-macos-r1 wait=4m0s
+time=2026-11-08T00:45:22.833+01:00 level=INFO msg="a computer is gone" computer=ci-silo-macos-r1-4843e0d0
+time=2026-11-08T00:45:36.741+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000001
+time=2026-11-08T00:46:26.121+01:00 level=INFO msg="job completed" runner="" result=canceled request=0
+time=2026-11-08T00:46:26.261+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000002
+time=2026-11-08T00:46:26.605+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000003
+time=2026-11-08T00:47:16.806+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000003
+time=2026-11-08T00:48:06.985+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000003
+time=2026-11-08T00:48:57.163+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000003
+time=2026-11-08T00:49:47.348+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000003
+time=2026-11-08T00:49:48.227+01:00 level=WARN msg="cannot fork a computer" computer=ci-silo-macos-r1-d1211546 error="silo fork: no computer id in the output: ...ion\": 12,\n  \"id\": \"67111830-58dd-43d9-8db3-5571be57f239\",\n  \"kind\": \"macos\",\n  \"memoryGiB\": 8,\n  \"name\": \"ci-silo-macos-r1-d1211546\",\n  \"ports\": [],\n  \"source\": \"silo-macos\",\n  \"state\": \"setting-up\"\n}"
+time=2026-11-08T00:49:48.227+01:00 level=ERROR msg="no runner could be started; waiting before trying again" label=silo-macos-r1 wait=8m0s
+time=2026-11-08T00:49:53.179+01:00 level=INFO msg="a computer is gone" computer=ci-silo-macos-r1-d1211546
+time=2026-11-08T00:50:37.529+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000003
+time=2026-11-08T00:51:26.272+01:00 level=INFO msg="job completed" runner="" result=canceled request=0
+time=2026-11-08T00:51:26.402+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000004
+time=2026-11-08T00:51:26.739+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000005
+time=2026-11-08T00:52:16.915+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000005
+time=2026-11-08T00:53:07.099+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000005
+time=2026-11-08T00:53:57.286+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000005
+time=2026-11-08T00:54:47.465+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000005
+time=2026-11-08T00:55:37.652+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000005
+time=2026-11-08T00:56:27.850+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000005
+time=2026-11-08T00:57:18.058+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000005
+time=2026-11-08T00:58:08.247+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000005
+time=2026-11-08T00:58:09.912+01:00 level=WARN msg="cannot fork a computer" computer=ci-silo-macos-r1-086519c3 error="silo fork: no computer id in the output: ...ion\": 12,\n  \"id\": \"19c29d9a-8b08-45fd-b167-eede1a497d9d\",\n  \"kind\": \"macos\",\n  \"memoryGiB\": 8,\n  \"name\": \"ci-silo-macos-r1-086519c3\",\n  \"ports\": [],\n  \"source\": \"silo-macos\",\n  \"state\": \"setting-up\"\n}"
+time=2026-11-08T00:58:09.912+01:00 level=ERROR msg="no runner could be started; waiting before trying again" label=silo-macos-r1 wait=16m0s
+time=2026-11-08T00:58:16.167+01:00 level=INFO msg="a computer is gone" computer=ci-silo-macos-r1-086519c3
+time=2026-11-08T00:58:58.424+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000005
+time=2026-11-08T00:59:48.609+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000005
+time=2026-11-08T01:00:38.796+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000005
+time=2026-11-08T01:01:28.986+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000005
+time=2026-11-08T01:02:19.192+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000005
+time=2026-11-08T01:03:09.386+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000005
+time=2026-11-08T01:03:59.572+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000005
+time=2026-11-08T01:04:49.758+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000005
+time=2026-11-08T01:05:39.928+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000005
+time=2026-11-08T01:06:30.089+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000005
+time=2026-11-08T01:07:20.304+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000005
+time=2026-11-08T01:08:10.509+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000005
+time=2026-11-08T01:09:00.689+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000005
+time=2026-11-08T01:09:50.890+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000005
+time=2026-11-08T01:10:41.078+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000005
+time=2026-11-08T01:11:31.272+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000005
+time=2026-11-08T01:12:21.489+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000005
+time=2026-11-08T01:12:52.667+01:00 level=INFO msg="listener stopped" label=silo-macos-r1

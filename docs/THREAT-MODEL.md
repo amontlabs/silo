@@ -644,6 +644,88 @@ Not defended on a Linux host:
   single-tenant host.
 - **The Secret Service backend**, which has never been exercised.
 
+## CI runner (`silo-runner`)
+
+Scope: the Go helper `silo-runner` ([CI runner](SiloUI-CI-RUNNER.md)) on a Mac, giving every job of a
+private repository a fresh computer and deleting it afterwards. The boundaries above apply to the
+computer; this section covers what the runner adds.
+
+- **What a job can reach.** The job runs as the computer's working account, which is root-equivalent
+  inside the computer: it has passwordless `sudo` on Linux
+  ([`working-account.py#L276`](../app/SiloUI/src-tauri/guest/working-account.py#L276)) and on a Mac
+  ([`offline_setup.rs#L1094`](../app/SiloUI/src-tauri/engine/src/macos_computers/offline_setup.rs#L1094)).
+  A job can change anything in its computer, including the runner program and the recipe's tools. The
+  wall is the virtual machine (boundary 1), not the account. The computer has its own network profile
+  (boundary 2). Everything GitHub sends
+  to a job is in the computer in the clear: `GITHUB_TOKEN`, repository and organization secrets the
+  workflow uses, the repository contents and OIDC tokens it asks for. Silo's placeholder proxy
+  (boundary 3) cannot protect those, because GitHub delivers them to the runner program itself; only
+  secrets that Silo manages are placeholders. A workflow author who can push a workflow can read every
+  secret that workflow can name, which is why the runner serves private repositories only.
+- **Kept failed computers may hold credentials.** A failed job's computer is stopped, not deleted, so
+  its disk keeps the repository, build output, the runner's work folder and any secret the job wrote
+  to a file or printed into a log in the computer. It is deleted after `keepFailed.days` or beyond
+  `keepFailed.count`, whichever comes first, but only while `silo-runner` is running: a stopped helper
+  cleans nothing, so kept computers stay until it runs again. `keepFailed.count: 0` keeps nothing. Retention only deletes a computer that is already kept, never one whose runner is still being deregistered.
+  Whoever can run `silo` on the Mac can start and read it
+  (boundary 7). The runner never takes a checkpoint of a computer after a job ran in it, and a
+  one-time runner registration is already spent by then.
+- **The helper's GitHub credential.** `silo-runner` holds a GitHub App key or a personal access
+  token with the right to register runners for the repository (or organization). That credential is
+  on the Mac, not in any computer, and the one-time JIT configuration it hands each computer is
+  scoped to a single runner and can be used once. The JIT configuration reaches the computer on the standard
+  input of `silo exec --stream --stdin`: it is in no command line on the Mac, and in none in the
+  computer. The engine does not store it: the `guest.exec.start` request is held in memory only to write
+  the bytes to the command's input pipe
+  ([`session.rs#L143`](../app/SiloUI/src-tauri/engine/src/guest/session.rs#L143)), and the job registry
+  records only the job id, method, state, progress and the exit result, never the request
+  ([`registry.rs#L217`](../app/SiloUI/src-tauri/engine/src/jobs/registry.rs#L217)). In the computer it is
+  in the memory and environment of GitHub's runner program, so the job (same account) can read it; it is
+  useless after the one job. Prefer a GitHub App over a token, and keep the key file `0600`.
+- **Why public repositories are refused.** GitHub's guidance is that self-hosted runners "should
+  almost never be used for public repositories" because anyone can open a pull request whose workflow
+  runs on the runner. `silo-runner` refuses to start for a public repository, and for an organization
+  when the runner group allows public repositories (`allows_public_repositories`), and when it cannot
+  find out. Isolation by VM makes the Mac safer than a bare runner, but a job in a public repository
+  can still use the network, abuse resources and read whatever the workflow gives it; the refusal
+  stays.
+- **A job can attack the next one only through the host.** Each job has its own computer, forked from
+  the recipe's cached checkpoint, so nothing a job writes reaches another job's disk. The shared
+  pieces are the recipe cache (written only by recipe builds and the runner refresh) and the Mac's
+  CPU, memory, disk and network.
+- **Runner updates.** The runner program updates itself never; the helper refreshes the recipe from
+  GitHub's release digest within the 30 days GitHub allows. The refresh reads the latest release from
+  the GitHub API without authentication, rewrites the pin in the recipe file under
+  `<projectDir>/.silo/recipes` and runs `silo recipe build` unattended, with no one to approve the
+  change. The version and the SHA-256 come from the same release, so a compromised release feed could
+  swap the runner and its digest together; the only bound is the SHA-256 the recipe checks when it
+  downloads the archive, which matches whatever that release publishes. Set `runnerRefresh.disabled` and
+  update the pin by hand to remove this step.
+- **The Linux budget is opt-in.** `linuxBudget` (memory and count) defaults to unbounded: with it unset,
+  only `maxRunners` and the free-disk guard limit how many Linux computers the helper starts, so a burst
+  of jobs can use the host's memory. macOS is always limited to Apple's two running computers.
+- **The helper only deletes what it made.** It records every computer in `<stateDir>/computers.json`:
+  by name before `silo fork` (the engine has not made it yet), and by the engine's computer id once
+  the fork answers. After the fork every
+  engine call goes by that id, and the helper acts on a computer only while its id is in a record. A
+  computer that merely has a `ci-*` name, one renamed since, and one that took the name of a computer
+  that is gone are never touched. A fork the engine refuses because the name is taken
+  (`Computer names must be unique.`) made nothing: the record is forgotten at once and nothing is
+  deleted, even if a computer has that name. The one exception is a record whose fork did not answer
+  or failed some other way, where the engine may have made the computer (a timeout, a killed command,
+  unreadable output) or the run stopped between writing the name and learning the id: the record stays
+  until a list that started afterwards shows a computer with exactly that name, which only the helper
+  chose (`ci-<label>-<random>`, checked against the list and the record), and binds it, or shows none.
+  A helper killed during a fork whose computer appears only after
+  the next start's first list leaves that computer, named `ci-...`, for the owner to delete. A computer is
+  forgotten, and its record removed, only when a fresh, successful `silo list` lacks its id, and it is
+  deleted only after its runner is deregistered (or GitHub says it is gone) or once it is kept.
+  Writes flush the file and its directory. If the ledger is lost or edited, the helper loses track of
+  computers it made; it never gains control of others.
+- **A job in flight across a helper restart is kept.** The restarted helper cannot know how the job
+  ended, even when it ended while the helper was down, so when GitHub no longer has the runner it
+  stops and keeps the computer with the result `unknown` (unless the job's result reaches it first). That computer holds the job's files and
+  secrets like any kept failure and is subject to the same limits.
 ## What Silo does not protect
 
 These follow from the design today, not from bugs:

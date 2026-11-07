@@ -49,6 +49,5 @@ CI (needs QEMU for the arm64 build). Locally: `node app/SiloUI/scripts/build-gue
 | Part | How it is built today |
 | --- | --- |
 | `silo` CLI and MCP server (`app/SiloUI/cli`) | Locally with Cargo; no release asset and not in the DMG (see [README](README.md)). The guest build, `build-guest-silo.sh`, compiles it for Linux guests |
-| `silo-action` | No build step. Published by copying `silo-action/` to the `amontlabs/silo-action` repository and tagging `v1` (owner) |
 | Reviewer service | `docker build` of `reviewer-service/` by the owner at deploy time |
 | `docs/releases/<version>.md` and `CHANGELOG.md` | Locally, by `npm run release:version` |

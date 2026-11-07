@@ -1,0 +1,35 @@
+# silo-runner configuration. Run: silo-runner run -config config.yaml
+github:
+  # A private repository (https://github.com/OWNER/REPO) or an organization (https://github.com/ORG).
+  configUrl: https://github.com/OWNER/REPO
+  runnerGroup: default
+  auth:
+    # Either a GitHub App ...
+    app:
+      clientId: Iv23liXXXXXXXXXXXXXX
+      installationId: 12345678
+      privateKeyFile: /Users/you/.silo-runner/app.private-key.pem
+    # ... or a personal access token read from this environment variable (remove `app` above):
+    # tokenEnv: SILO_RUNNER_TOKEN
+
+silo:
+  path: silo            # silo-dev for a development build
+  projectDir: ~/.silo-runner/project   # holds .silo/recipes (silo-runner install-recipes writes them)
+
+limits:
+  minFreeDiskGiB: 20
+  readyTimeout: 3m
+  startAttempts: 3
+  idleTimeout: 10m
+  listenerStall: 5m
+
+# Linux computers on this host; macOS is always limited to Apple's two.
+linuxBudget: {memoryGiB: 24, count: 4}
+
+runnerRefresh:
+  checkEvery: 24h
+  afterDays: 3
+
+scaleSets:
+  - {label: silo-linux, recipe: silo-linux, os: linux, maxRunners: 2, keepFailed: {count: 5, days: 7}}
+  - {label: silo-macos, recipe: silo-macos, os: macos, maxRunners: 1, keepFailed: {count: 1, days: 3}}

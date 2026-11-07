@@ -1,0 +1,19 @@
+set -eu
+RUNNER_VERSION=2.338.2
+RUNNER_SHA256=25a065af409ffa317ab4d5a3b614dd15fc9c40f2172bc1b35a1b1258e919a388
+dir=/Users/Shared/actions-runner
+archive=$(mktemp /tmp/actions-runner.XXXXXX)
+mkdir -p "$dir"
+curl -fsSL -o "$archive" "https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/actions-runner-osx-arm64-${RUNNER_VERSION}.tar.gz"
+echo "${RUNNER_SHA256}  ${archive}" | shasum -a 256 -c -
+tar -xzf "$archive" -C "$dir"
+rm -f "$archive"
+# Reads the one-time JIT configuration from standard input so it is never in a command line.
+cat > "$dir/silo-run-jit" <<'SCRIPT'
+#!/bin/sh
+IFS= read -r ACTIONS_RUNNER_INPUT_JITCONFIG || exit 1
+export ACTIONS_RUNNER_INPUT_JITCONFIG
+cd "$(dirname "$0")" || exit 1
+exec ./run.sh
+SCRIPT
+chmod 755 "$dir/silo-run-jit"

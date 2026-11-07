@@ -46,7 +46,8 @@ class ClassificationTests(unittest.TestCase):
         for paths in (['README.md'], ['website/package.json', 'website/package-lock.json'],
                       ['demo/src/film.ts', 'docs/SiloUI-APP.md', 'assets/silo-logo.svg', 'SECURITY.md'],
                       ['artifacts/silo-logo-system.html'], ['app/SiloUI/src/App.tsx', 'README.md'],
-                      ['app/SiloUI/src/features/x/view.tsx']):
+                      ['app/SiloUI/src/features/x/view.tsx'],
+                      ['app/SiloUI/runner/main.go', 'app/SiloUI/runner/go.mod', 'app/SiloUI/runner/README.md']):
             with self.subTest(paths=paths):
                 self.assertFalse(changes.needs_native(paths))
 
@@ -55,6 +56,7 @@ class ClassificationTests(unittest.TestCase):
                       ['app/SiloUI/README.md'], ['.github/workflows/ci.yml'], ['LICENSE'],
                       ['app/SiloUI/src/test/contracts/backup-state.json'],
                       ['app/SiloUI/src/features/application/model/reserved-secret-names.json'],
+                      ['app/SiloUI/runner/recipes/silo-linux.yaml'], ['app/SiloUI/runnerx/a.go'],
                       ['app/SiloUI/srcx/a.ts'], ['docsy/file.md'], ['websites/x']):
             with self.subTest(paths=paths):
                 self.assertTrue(changes.needs_native(paths))
