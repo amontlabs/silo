@@ -1321,6 +1321,16 @@ pub fn render_host(value: &Value) -> String {
             connections["name"].as_str().unwrap_or_default(),
             connections["deviceId"].as_str().unwrap_or_default()
         ));
+        if let Some(present) = connections["bridgeLink"].as_bool() {
+            out.push(format!(
+                "  bridge link: {}",
+                if present {
+                    "present"
+                } else {
+                    "missing (silo host init creates it)"
+                }
+            ));
+        }
     }
     if value["ssh"]["listening"] == false {
         out.push(format!(
