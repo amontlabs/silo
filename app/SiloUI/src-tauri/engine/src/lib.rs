@@ -55,6 +55,8 @@ pub mod log_export;
 pub mod log_retention;
 #[path = "macos_computers.rs"]
 pub mod macos_computers_engine;
+#[cfg(target_os = "linux")]
+pub mod safe_directories;
 pub use macos_computers_engine as macos_computers;
 pub mod macos_display_gateway;
 #[path = "macos_remote.rs"]

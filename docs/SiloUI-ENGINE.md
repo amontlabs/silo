@@ -167,8 +167,13 @@ behind `cfg(target_os = "linux")`.
   (use a dedicated account in the `kvm` group) and checks the engine directory
   (`silod::install_trust`): every directory from `/` down to it, `silod`, every entry beside it
   and everything under `resources/` must belong to this account or root and be writable by
-  nobody else (a sticky `/tmp` is refused too), and a link must stay inside the directory. The
-  refusal names the path. Before its first `msb` launch, the agent checks
+  nobody else (a sticky `/tmp` is refused too), and a link must stay inside the directory.
+  Write access for the owner's user-private group is allowed, the rule Debian's OpenSSH applies
+  for `StrictModes`: the group is the owner's primary group, lists no member but the owner, and
+  is no other `/etc/passwd` account's primary group (`silo_engine::safe_directories`; only
+  `/etc/passwd` is read for that last part, since `getpwent` is not thread-safe, so an account
+  only LDAP or SSSD gives that primary group is not seen). The refusal names the path, its mode
+  and group, and the `chmod g-w` or `chmod go-w` that fixes it. Before its first `msb` launch, the agent checks
   `resources/microsandbox/manifest.json` against the runtime inputs compiled into the build and
   the SHA-256 of `msb` and `libkrunfw` against it
   (`silo_engine::dependencies::verify_bundled_runtime`); an engine without the runtime starts
@@ -305,9 +310,9 @@ behind `cfg(target_os = "linux")`.
   A root-owned `/opt/silo-engine` works the same way when `/opt` itself cannot be changed by
   other accounts: some images, GitHub's runners among them, make `/opt` world-writable, and then
   silod refuses the engine under it. An engine under `/tmp`, or in a directory
-  another account can write to, does not start. Group write counts even for a group only you are
-  in, so a directory made under a umask of `002` needs the `chmod` above, and Debian's group-writable
-  `/usr/local` is refused.
+  another account can write to, does not start. Group write is allowed only for the owner's
+  user-private group, so a home made under a umask of `002` on Debian or Ubuntu works, while a
+  shared group (Debian's group-writable `/usr/local`, group `staff`) is refused.
 
   This proves the daemon serves; creating or starting a computer also needs `/dev/kvm`, the
   runtime resources above and the guest image. After `npm run runtime:prepare`,

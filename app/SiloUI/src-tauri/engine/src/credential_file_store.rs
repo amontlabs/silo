@@ -9,7 +9,11 @@
 //! each service directory are mode 0700 and owned by this account; each credential file is
 //! mode 0600. [`install`] also checks every directory from the XDG data directory down to
 //! `<root>`: each must belong to this account or root and be writable by nobody else, so no
-//! other account can move the store. Every step after opening `<root>` goes through directory
+//! other account can move the store. A directory its owner's user-private group can write to
+//! counts as writable by nobody else (`crate::safe_directories`, Debian's `StrictModes`
+//! rule), since `~/.local/share` is mode 0775 in that group for accounts with umask 002.
+//! Missing directories are created with fixed modes: 0755 up to the XDG data directory, 0700
+//! below it. Every step after opening `<root>` goes through directory
 //! descriptors (`openat`, `renameat`, `unlinkat`, `fsync` with `O_NOFOLLOW`), so a link
 //! planted in a path is never followed. A file is written whole (a new `.staged-*` file,
 //! `fsync`, then `renameat` over the old one, then `fsync` of the directory), so a reader sees
@@ -24,12 +28,13 @@
 use std::{
     any::Any,
     fmt,
-    fs::{self, File},
+    fs::File,
     io::{self, Read, Write},
     path::{Path, PathBuf},
     sync::Mutex,
 };
 
+use crate::safe_directories::{self, AccountDatabase, SystemAccounts};
 use keyring::credential::{Credential, CredentialApi, CredentialBuilderApi, CredentialPersistence};
 use rustix::{
     fd::{AsFd, OwnedFd},
@@ -103,20 +108,25 @@ impl FileCredentialBuilder {
 /// instead of every later credential call. `owner` is true in the engine that owns this
 /// channel, the only process that writes: it also removes staged files a crash left behind.
 pub fn install(root: PathBuf, checked_from: &Path, owner: bool) -> Result<(), String> {
-    prepare(&root, checked_from, owner)?;
+    prepare(&root, checked_from, owner, &SystemAccounts)?;
     keyring::set_default_credential_builder(Box::new(FileCredentialBuilder::new(root)));
     Ok(())
 }
 
 /// Everything [`install`] does but setting the `keyring` default.
-fn prepare(root: &Path, checked_from: &Path, owner: bool) -> Result<(), String> {
+fn prepare(
+    root: &Path,
+    checked_from: &Path,
+    owner: bool,
+    accounts: &dyn AccountDatabase,
+) -> Result<(), String> {
     let unusable = |error: io::Error| {
         format!(
             "The credential directory {} is unusable: {error}",
             root.display()
         )
     };
-    check_ancestors(root, checked_from).map_err(unusable)?;
+    check_ancestors(root, checked_from, accounts).map_err(unusable)?;
     let directory = open_root(root, true)
         .map_err(unusable)?
         .ok_or_else(|| unusable(io::ErrorKind::NotFound.into()))?;
@@ -128,9 +138,15 @@ fn prepare(root: &Path, checked_from: &Path, owner: bool) -> Result<(), String> 
 }
 
 /// Creates the directories from `checked_from` down to `root`'s parent when they are missing
-/// (mode 0700) and requires each to be a real directory of this account or root that nobody
-/// else can write to. `root` itself is checked (and narrowed to 0700) by [`open_root`].
-fn check_ancestors(root: &Path, checked_from: &Path) -> io::Result<()> {
+/// (`checked_from` and the directories above it mode 0755, those below it 0700) and requires
+/// each from `checked_from` down to be a real directory of this account or root that nobody
+/// else can write to (its owner's private group may: [`safe_directories::others_can_change`]).
+/// `root` itself is checked (and narrowed to 0700) by [`open_root`].
+fn check_ancestors(
+    root: &Path,
+    checked_from: &Path,
+    accounts: &dyn AccountDatabase,
+) -> io::Result<()> {
     let parent = root
         .parent()
         .ok_or_else(|| refused(root, "has no parent directory"))?;
@@ -145,11 +161,18 @@ fn check_ancestors(root: &Path, checked_from: &Path) -> io::Result<()> {
         .take_while(|ancestor| ancestor.starts_with(checked_from))
         .collect::<Vec<_>>();
     chain.reverse();
+    if let Some(above) = checked_from.parent() {
+        safe_directories::create_directories(above, above)?;
+    }
     for directory in chain {
-        match mkdirat(CWD, directory, Mode::from_bits_truncate(0o700)) {
-            Ok(()) | Err(rustix::io::Errno::EXIST) => {}
-            Err(error) => return Err(error.into()),
-        }
+        // One level at a time, after the level above passed, so nothing is made through a
+        // link.
+        let mode = if directory == checked_from {
+            0o755
+        } else {
+            0o700
+        };
+        safe_directories::create_directory(directory, mode)?;
         let stat = statat(CWD, directory, AtFlags::SYMLINK_NOFOLLOW)?;
         if FileType::from_raw_mode(stat.st_mode) != FileType::Directory {
             return Err(refused(directory, "is not a directory"));
@@ -160,8 +183,14 @@ fn check_ancestors(root: &Path, checked_from: &Path) -> io::Result<()> {
                 "belongs to another account, not this one or root",
             ));
         }
-        if stat.st_mode & 0o022 != 0 {
-            return Err(refused(directory, "can be changed by other accounts"));
+        if let Some(reason) = safe_directories::others_can_change(
+            directory,
+            stat.st_mode,
+            stat.st_uid,
+            stat.st_gid,
+            accounts,
+        ) {
+            return Err(refused(directory, &reason));
         }
     }
     Ok(())
@@ -347,7 +376,7 @@ fn dir_flags() -> OFlags {
 fn open_root(root: &Path, create: bool) -> io::Result<Option<OwnedFd>> {
     if create {
         if let Some(parent) = root.parent() {
-            fs::create_dir_all(parent)?;
+            safe_directories::create_directories(parent, parent.parent().unwrap_or(parent))?;
         }
     }
     open_directory(CWD, root, root, create)
@@ -555,6 +584,8 @@ pub fn credential_path(entry: &keyring::Entry) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::safe_directories::tests::FakeAccounts;
+    use std::fs;
     use std::os::unix::fs::{MetadataExt, PermissionsExt};
 
     fn entry(root: &Path, service: &str, user: &str) -> keyring::Entry {
@@ -562,6 +593,12 @@ mod tests {
             .build(None, service, user)
             .unwrap();
         keyring::Entry::new_with_credential(credential)
+    }
+
+    /// Accounts with no private groups, so every group-writable directory is refused
+    /// whoever runs the tests.
+    fn no_private_groups() -> FakeAccounts {
+        FakeAccounts::default()
     }
 
     fn mode(path: &Path) -> u32 {
@@ -711,14 +748,15 @@ mod tests {
         fs::set_permissions(home.path(), fs::Permissions::from_mode(0o700)).unwrap();
         let data = home.path().join("share");
         let root = data.join("org.silo.dev").join(DIRECTORY_NAME);
-        prepare(&root, &data, true).unwrap();
+        prepare(&root, &data, true, &no_private_groups()).unwrap();
         assert_eq!(mode(&root), 0o700);
         assert_eq!(mode(root.parent().unwrap()), 0o700);
+        assert_eq!(mode(&data), 0o755);
 
         // A directory between the data directory and the store that others can change.
         for wide in [0o775, 0o757, 0o1777] {
             fs::set_permissions(root.parent().unwrap(), fs::Permissions::from_mode(wide)).unwrap();
-            let error = prepare(&root, &data, true).unwrap_err();
+            let error = prepare(&root, &data, true, &no_private_groups()).unwrap_err();
             assert!(
                 error.contains(&format!(
                     "{} can be changed by other accounts",
@@ -728,9 +766,9 @@ mod tests {
             );
         }
         fs::set_permissions(root.parent().unwrap(), fs::Permissions::from_mode(0o755)).unwrap();
-        prepare(&root, &data, true).unwrap();
+        prepare(&root, &data, true, &no_private_groups()).unwrap();
         fs::set_permissions(&data, fs::Permissions::from_mode(0o777)).unwrap();
-        assert!(prepare(&root, &data, true).is_err());
+        assert!(prepare(&root, &data, true, &no_private_groups()).is_err());
         fs::set_permissions(&data, fs::Permissions::from_mode(0o700)).unwrap();
 
         // A link on the way, or a store outside the data directory.
@@ -738,14 +776,60 @@ mod tests {
         fs::create_dir(&elsewhere).unwrap();
         let linked = data.join("linked");
         std::os::unix::fs::symlink(&elsewhere, &linked).unwrap();
-        let error = prepare(&linked.join(DIRECTORY_NAME), &data, true).unwrap_err();
+        let error = prepare(
+            &linked.join(DIRECTORY_NAME),
+            &data,
+            true,
+            &no_private_groups(),
+        )
+        .unwrap_err();
         assert!(error.contains("is not a directory"), "{error}");
         assert_eq!(fs::read_dir(&elsewhere).unwrap().count(), 0);
-        assert!(prepare(&home.path().join("credentials"), &data, true).is_err());
+        assert!(prepare(
+            &home.path().join("credentials"),
+            &data,
+            true,
+            &no_private_groups()
+        )
+        .is_err());
 
         let file = data.join("file");
         fs::write(&file, "").unwrap();
-        assert!(prepare(&file, &data, true).is_err());
+        assert!(prepare(&file, &data, true, &no_private_groups()).is_err());
+    }
+
+    /// `~/.local/share` of an account with umask 002 and a user-private group (Debian,
+    /// Ubuntu) is mode 0775 in that group, and the store accepts it; a shared group, or
+    /// write access for everyone, is still refused with the mode, the group and a fix.
+    #[test]
+    fn a_data_directory_in_the_owners_private_group_is_accepted() {
+        let home = tempfile::tempdir().unwrap();
+        fs::set_permissions(home.path(), fs::Permissions::from_mode(0o700)).unwrap();
+        let data = home.path().join("share");
+        fs::create_dir(&data).unwrap();
+        fs::set_permissions(&data, fs::Permissions::from_mode(0o775)).unwrap();
+        let root = data.join("org.silo.dev").join(DIRECTORY_NAME);
+        let stat = fs::metadata(&data).unwrap();
+        let private = FakeAccounts::private(stat.uid(), "silo-controller", stat.gid());
+        prepare(&root, &data, true, &private).unwrap();
+
+        let mut shared = FakeAccounts::private(stat.uid(), "silo-controller", stat.gid());
+        shared.add_group(stat.gid(), "staff", &["silo-controller", "ben"]);
+        let error = prepare(&root, &data, true, &shared).unwrap_err();
+        assert!(
+            error.contains(&format!(
+                "{} can be changed by other accounts (mode 775, writable by group staff, which \
+                 is not a private group of its owner): run chmod g-w {}",
+                data.display(),
+                data.display()
+            )),
+            "{error}"
+        );
+
+        fs::set_permissions(&data, fs::Permissions::from_mode(0o777)).unwrap();
+        let error = prepare(&root, &data, true, &private).unwrap_err();
+        assert!(error.contains("writable by everyone"), "{error}");
+        assert!(error.contains("chmod go-w"), "{error}");
     }
 
     #[test]
@@ -771,9 +855,9 @@ mod tests {
         };
 
         let crashed = leftover(".staged-0123");
-        prepare(&root, home.path(), false).unwrap();
+        prepare(&root, home.path(), false, &no_private_groups()).unwrap();
         assert!(crashed.exists(), "only the owner sweeps");
-        prepare(&root, home.path(), true).unwrap();
+        prepare(&root, home.path(), true, &no_private_groups()).unwrap();
         assert_eq!(names(), ["account"]);
         assert_eq!(item.get_password().unwrap(), "value");
 

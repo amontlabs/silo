@@ -8,7 +8,10 @@
 //! credentials and computers. So, as OpenSSH's `safe_path` does for `authorized_keys`, every
 //! directory from `/` down to the engine directory, `silod` itself, every entry of the engine
 //! directory and everything under `resources/` must be owned by this account or root and
-//! must not be writable by group or others. A sticky world-writable directory such as `/tmp`
+//! must not be writable by group or others. Write access for the owner's user-private group
+//! is allowed (`silo_engine::safe_directories`, the rule Debian's OpenSSH applies for
+//! `StrictModes`): with umask 002 a home's directories are mode 0775 in a group that only
+//! their owner is in. A sticky world-writable directory such as `/tmp`
 //! is refused: its other users cannot replace the engine's files, but they can make the
 //! names the engine looks for before the engine does. Links inside the directory must point
 //! inside it, where the walk checks their targets.
@@ -18,6 +21,8 @@ use std::{
     os::unix::fs::{MetadataExt, PermissionsExt},
     path::{Path, PathBuf},
 };
+
+use silo_engine::safe_directories::{self, AccountDatabase, SystemAccounts};
 
 use crate::paths::LINUX_RESOURCES_DIR;
 
@@ -44,15 +49,16 @@ pub fn check_engine_account(euid: u32) -> Result<(), String> {
 
 /// Checks the engine directory of `executable` (the running `silod`) for `euid`.
 pub fn verify_engine_directory(executable: &Path, euid: u32) -> Result<(), String> {
-    verify_engine_directory_below(executable, euid, Path::new("/"))
+    verify_engine_directory_below(executable, euid, Path::new("/"), &SystemAccounts)
 }
 
 /// [`verify_engine_directory`], checking ancestors only from `trusted` down (tests, whose
-/// temporary directories sit under `/tmp`).
+/// temporary directories sit under `/tmp`), with `accounts` for the private-group rule.
 fn verify_engine_directory_below(
     executable: &Path,
     euid: u32,
     trusted: &Path,
+    accounts: &dyn AccountDatabase,
 ) -> Result<(), String> {
     let refuse = |path: &Path, reason: &str| {
         format!(
@@ -73,6 +79,7 @@ fn verify_engine_directory_below(
     }
     let mut walk = Walk {
         euid,
+        accounts,
         root: directory.clone(),
         entries: 0,
     };
@@ -124,14 +131,15 @@ impl From<io::Error> for Refusal {
     }
 }
 
-struct Walk {
+struct Walk<'a> {
     euid: u32,
+    accounts: &'a dyn AccountDatabase,
     /// The canonical engine directory; links must resolve inside it.
     root: PathBuf,
     entries: usize,
 }
 
-impl Walk {
+impl Walk<'_> {
     /// `path` (described by `metadata`, never followed) is a directory (when `directory`) or
     /// a file of this account or root, and nobody else may write to it.
     fn owned(&self, path: &Path, metadata: &fs::Metadata, directory: bool) -> Result<(), Refusal> {
@@ -151,17 +159,16 @@ impl Walk {
                 ),
             ));
         }
-        let mode = metadata.permissions().mode();
-        if mode & 0o022 != 0 {
-            return Err(Refusal::Path(
-                path.to_path_buf(),
-                format!(
-                    "can be changed by other accounts (mode {:o})",
-                    mode & 0o7777
-                ),
-            ));
+        match safe_directories::others_can_change(
+            path,
+            metadata.permissions().mode(),
+            metadata.uid(),
+            metadata.gid(),
+            self.accounts,
+        ) {
+            Some(reason) => Err(Refusal::Path(path.to_path_buf(), reason)),
+            None => Ok(()),
         }
-        Ok(())
     }
 
     /// Checks every entry of `directory`, descending `depth - 1` more levels.
@@ -248,8 +255,44 @@ mod tests {
         (top, directory)
     }
 
+    /// Accounts for the private-group rule: `private` maps an owner uid to the gid that is
+    /// its private group; every other group is shared.
+    #[derive(Default)]
+    struct Accounts {
+        private: Vec<(u32, u32)>,
+    }
+
+    impl AccountDatabase for Accounts {
+        fn account(&self, uid: u32) -> Option<safe_directories::Account> {
+            let (_, gid) = self.private.iter().find(|(owner, _)| *owner == uid)?;
+            Some(safe_directories::Account {
+                name: format!("user{uid}"),
+                primary_gid: *gid,
+            })
+        }
+
+        fn group(&self, gid: u32) -> Option<safe_directories::Group> {
+            let members = match self.private.iter().find(|(_, private)| *private == gid) {
+                Some(_) => Vec::new(),
+                None => vec!["someone".to_owned(), "else".to_owned()],
+            };
+            Some(safe_directories::Group {
+                name: format!("group{gid}"),
+                members,
+            })
+        }
+
+        fn other_account_has_primary_group(&self, _gid: u32, _uid: u32) -> bool {
+            false
+        }
+    }
+
     fn check(top: &Path, directory: &Path) -> Result<(), String> {
-        verify_engine_directory_below(&directory.join("silod"), euid(), top)
+        check_with(top, directory, &Accounts::default())
+    }
+
+    fn check_with(top: &Path, directory: &Path, accounts: &Accounts) -> Result<(), String> {
+        verify_engine_directory_below(&directory.join("silod"), euid(), top, accounts)
     }
 
     #[test]
@@ -307,6 +350,42 @@ mod tests {
                 "{relative}: {error}"
             );
         }
+    }
+
+    /// A home directory made with umask 002 is mode 0775 in its owner's private group: the
+    /// engine directory and its ancestors are accepted then, and refused (naming the mode,
+    /// the group and `chmod g-w`) when the group is shared.
+    #[test]
+    fn group_write_for_the_owners_private_group_is_accepted() {
+        let (top, directory) = engine();
+        set_mode(top.path(), 0o775);
+        set_mode(&directory, 0o775);
+        set_mode(&directory.join("resources/engine-manifest.json"), 0o664);
+        let metadata = fs::metadata(&directory).unwrap();
+        let private = Accounts {
+            private: vec![(metadata.uid(), metadata.gid())],
+        };
+        check_with(top.path(), &directory, &private).unwrap();
+
+        let error = check(top.path(), &directory).unwrap_err();
+        assert!(
+            error.contains(&format!(
+                "{} can be changed by other accounts (mode 775, writable by group group{}, \
+                 which is not a private group of its owner): run chmod g-w {}",
+                top.path().display(),
+                metadata.gid(),
+                top.path().display()
+            )),
+            "{error}"
+        );
+
+        // Write access for everyone, and a sticky directory, stay refused.
+        set_mode(&directory, 0o777);
+        let error = check_with(top.path(), &directory, &private).unwrap_err();
+        assert!(error.contains("writable by everyone"), "{error}");
+        set_mode(&directory, 0o1775);
+        let error = check_with(top.path(), &directory, &private).unwrap_err();
+        assert!(error.contains("sticky"), "{error}");
     }
 
     #[test]

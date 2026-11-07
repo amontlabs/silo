@@ -86,7 +86,12 @@ so nothing reaches `keyring`'s default backend.
 
 - **Files.** The directories are mode 0700 and the files 0600, owned by the engine's account.
   Every directory from `$XDG_DATA_HOME` down to `credentials/` must belong to that account or root
-  and be writable by nobody else, or startup stops. After the store's directory is opened, every
+  and be writable by nobody else, or startup stops; the message names the directory, its mode and
+  group, and the `chmod g-w` (or `go-w`) that fixes it. Write access for the owner's user-private
+  group counts as nobody else (Debian's `StrictModes` rule: the owner's primary group, no member
+  but the owner, and no other `/etc/passwd` account with it as primary group), so a
+  `~/.local/share` of mode 0775 made under umask 002 is accepted. Missing directories are created
+  with fixed modes whatever the umask: 0755 up to `$XDG_DATA_HOME`, 0700 below it. After the store's directory is opened, every
   step goes through directory descriptors without following links (`openat`, `renameat`,
   `unlinkat`, `fsync`). A file is written whole: a new `.staged-*` file, `fsync`, `renameat` over
   the old one, then `fsync` of the directory. Staged files a crash left behind are removed when

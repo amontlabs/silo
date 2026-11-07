@@ -280,6 +280,11 @@ fn group_entry(gid: libc::gid_t) -> (Option<String>, Option<Vec<String>>) {
 
 /// The account's name from the user database, never from `$USER`.
 fn account_name(uid: libc::uid_t) -> Option<String> {
+    account_entry(uid).map(|(name, _)| name)
+}
+
+/// The account's name and primary group from the user database.
+fn account_entry(uid: libc::uid_t) -> Option<(String, libc::gid_t)> {
     let mut buffer = vec![0 as libc::c_char; 4096];
     loop {
         let mut entry: libc::passwd = unsafe { std::mem::zeroed() };
@@ -301,11 +306,12 @@ fn account_name(uid: libc::uid_t) -> Option<String> {
         if code != 0 || result.is_null() || entry.pw_name.is_null() {
             return None;
         }
-        return Some(
+        return Some((
             unsafe { std::ffi::CStr::from_ptr(entry.pw_name) }
                 .to_string_lossy()
                 .into_owned(),
-        );
+            entry.pw_gid,
+        ));
     }
 }
 
@@ -851,21 +857,89 @@ fn linux_service_advice(report: &ServiceReport) -> Option<String> {
 
 /// sshd's `StrictModes` (on by default) ignores `~/.ssh/authorized_keys` when the home or
 /// `~/.ssh` can be changed by other accounts, and a controller's key is then refused.
+/// Debian's and Ubuntu's sshd let the owner's user-private group write (see
+/// [`is_private_group`]); upstream OpenSSH, which other distributions ship, does not.
 fn ssh_directory_advice(home: &Path) -> Vec<String> {
-    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::fs::MetadataExt;
+    let debian_sshd = Path::new("/etc/debian_version").exists();
     [home.to_owned(), home.join(".ssh")]
         .into_iter()
         .filter_map(|path| {
-            let mode = fs::metadata(&path).ok()?.permissions().mode() & 0o7777;
-            (mode & 0o022 != 0).then(|| {
-                format!(
-                    "{} can be changed by other accounts (mode {mode:o}), so sshd (StrictModes) ignores this account's authorized_keys and refuses every controller key. Run chmod go-w {}.",
-                    path.display(),
-                    path.display()
-                )
-            })
+            let metadata = fs::metadata(&path).ok()?;
+            let (group, members) = group_entry(metadata.gid());
+            let private = is_private_group(
+                account_entry(metadata.uid()),
+                metadata.gid(),
+                members.as_deref(),
+                || other_primary_group(metadata.gid(), metadata.uid()),
+            );
+            let group = group.unwrap_or_else(|| metadata.gid().to_string());
+            strict_modes_advice(&path, metadata.mode(), &group, private && debian_sshd)
         })
         .collect()
+}
+
+/// The `StrictModes` advice for `path` with `mode` and group `group`, or `None` when sshd
+/// accepts it. `private_group_allowed` is true when `group` is the owner's private group and
+/// this sshd (Debian's) accepts write access for it.
+fn strict_modes_advice(
+    path: &Path,
+    mode: u32,
+    group: &str,
+    private_group_allowed: bool,
+) -> Option<String> {
+    let shown = mode & 0o7777;
+    let fix = if mode & 0o002 != 0 {
+        "go-w"
+    } else if mode & 0o020 != 0 && !private_group_allowed {
+        "g-w"
+    } else {
+        return None;
+    };
+    Some(format!(
+        "{} can be changed by other accounts (mode {shown:o}, group {group}), so sshd (StrictModes) ignores this account's authorized_keys and refuses every controller key. Run chmod {fix} {}.",
+        path.display(),
+        path.display()
+    ))
+}
+
+/// Whether `gid` is a user-private group of the owner (`owner`: its name and primary group),
+/// the rule Debian's OpenSSH applies for `StrictModes`: it is the owner's primary group, it
+/// lists no member but the owner, and (`other_primary`) no other account has it as its
+/// primary group. The engine applies the same rule (`silo_engine::safe_directories`), which
+/// the CLI does not depend on.
+fn is_private_group(
+    owner: Option<(String, libc::gid_t)>,
+    gid: libc::gid_t,
+    members: Option<&[String]>,
+    other_primary: impl FnOnce() -> bool,
+) -> bool {
+    let Some((name, primary)) = owner else {
+        return false;
+    };
+    let only_owner = match members {
+        Some([]) => true,
+        Some([member]) => *member == name,
+        _ => false,
+    };
+    primary == gid && only_owner && !other_primary()
+}
+
+/// Whether an account other than `uid` in `/etc/passwd` has `gid` as its primary group. Only
+/// that file is read, because `getpwent` is not thread-safe; an unreadable file answers
+/// true.
+fn other_primary_group(gid: libc::gid_t, uid: libc::uid_t) -> bool {
+    match fs::read_to_string("/etc/passwd") {
+        Ok(passwd) => passwd.lines().any(|line| {
+            let fields = line.split(':').collect::<Vec<_>>();
+            fields.len() >= 4
+                && fields[3].parse() == Ok(gid)
+                && fields[2]
+                    .parse::<libc::uid_t>()
+                    .is_ok_and(|other| other != uid)
+        }),
+        Err(_) => true,
+    }
 }
 
 fn service_name(channel: Channel) -> String {
@@ -1831,6 +1905,38 @@ pub fn render_key(value: &Value) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn strict_modes_accepts_only_the_owners_private_group_on_debian() {
+        let owner = || Some(("ana".to_owned(), 1000));
+        let none: &[String] = &[];
+        let ana = ["ana".to_owned()];
+        let shared = ["ana".to_owned(), "ben".to_owned()];
+        assert!(super::is_private_group(owner(), 1000, Some(none), || false));
+        assert!(super::is_private_group(owner(), 1000, Some(&ana), || false));
+        assert!(!super::is_private_group(
+            owner(),
+            1000,
+            Some(&shared),
+            || false
+        ));
+        assert!(!super::is_private_group(owner(), 100, Some(none), || false));
+        assert!(!super::is_private_group(owner(), 1000, None, || false));
+        assert!(!super::is_private_group(None, 1000, Some(none), || false));
+        assert!(!super::is_private_group(owner(), 1000, Some(none), || true));
+
+        let path = std::path::Path::new("/home/ana");
+        assert_eq!(super::strict_modes_advice(path, 0o40775, "ana", true), None);
+        assert_eq!(
+            super::strict_modes_advice(path, 0o40755, "ana", false),
+            None
+        );
+        let advice = super::strict_modes_advice(path, 0o40775, "ana", false).unwrap();
+        assert!(advice.contains("(mode 775, group ana)"), "{advice}");
+        assert!(advice.ends_with("Run chmod g-w /home/ana."), "{advice}");
+        let advice = super::strict_modes_advice(path, 0o40777, "ana", true).unwrap();
+        assert!(advice.ends_with("Run chmod go-w /home/ana."), "{advice}");
+    }
+
     use super::*;
 
     #[test]

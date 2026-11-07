@@ -290,7 +290,13 @@ fn write_store_record(path: &Path, store: CredentialStore) -> Result<(), String>
     let directory = path
         .parent()
         .ok_or_else(|| "The credential store record has no directory".to_owned())?;
-    fs::create_dir_all(directory).map_err(failed)?;
+    // The XDG data directory and its parents 0755, the engine data directory 0700, whatever
+    // the umask: the credential store refuses directories other accounts can change.
+    silo_engine::safe_directories::create_directories(
+        directory,
+        directory.parent().unwrap_or(directory),
+    )
+    .map_err(failed)?;
     let staged = directory.join(format!(
         ".{CREDENTIAL_STORE_RECORD}.{}",
         uuid::Uuid::new_v4().simple()

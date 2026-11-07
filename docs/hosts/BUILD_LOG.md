@@ -308,6 +308,21 @@ Plan: [PLAN.md](PLAN.md).
   - CI: the shared engine copy is under `/var/lib/silo-ci` (root, 0755): the KVM runner's `/opt`
     is mode 777, which the engine's trust check refuses. `hosts-e2e.sh` logs `df -h` before
     creating the computer.
+  - Private groups: the KVM job for PR #79 stopped with "`~/.local/share` can be changed by
+    other accounts" because `silo-controller`'s `~/.local/share` was 0775 in its own group
+    (umask 002, as on every Debian or Ubuntu account with a user-private group). The credential
+    store's ancestor check, `install_trust` and the CLI's `StrictModes` advice now accept group
+    write for the owner's user-private group, Debian OpenSSH's rule (the owner's primary group,
+    no member but the owner, and no other `/etc/passwd` account with it as primary group;
+    `/etc/passwd` only, as `getpwent` is not thread-safe), in
+    `silo_engine::safe_directories` (the CLI keeps a copy, as it does not depend on the engine,
+    and applies it only where `/etc/debian_version` says sshd is Debian's). World-writable and
+    sticky directories stay refused; the refusal names the mode and group and gives
+    `chmod g-w` or `chmod go-w`. Missing directories get fixed modes whatever the umask (0755 to
+    `$XDG_DATA_HOME`, 0700 below; 0755 for `~/.config/systemd/user`). Live: a `useradd` account
+    with a 0775 `~/.local/share` in its private group served from a root-owned engine copy and
+    `silo list` answered; the same directory in a shared group was refused with the new
+    message; a fresh home under umask 002 got 755/755/700/700. The account was removed after.
   - Tests (Linux x86_64 container, as root): `silo-engine` `remote::` 169 passed, 1 failed (the
     pre-existing root-only `handshake_reports_failed_key_upgrade_and_preserves_managed_files`);
     `silod` 346 unit tests and its other binaries passed; `silo-cli`, `silo-api`, `silo-client`
