@@ -411,7 +411,9 @@ async fn status_reads_without_changing_anything() {
     assert_eq!(value["controllers"], json!([]));
     assert!(engine.calls("connections.setEnabled").is_empty());
     assert!(fs::symlink_metadata(unpacked.home.join(".local/bin/silo-dev")).is_err());
-    assert!(hosts::render_host(&value).contains("Controllers: none"));
+    let text = hosts::render_host(&value);
+    assert!(text.contains("Controllers: none"), "{text}");
+    assert!(text.contains("bridge link: missing"), "{text}");
 
     let mut stopped = unpacked.setup(&unpacked.home.join("engine.sock"), ssh);
     stopped.vm = VmProbe::Linux {
