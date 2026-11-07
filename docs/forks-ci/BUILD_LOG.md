@@ -90,3 +90,19 @@ Design questions: [DESIGN-QUESTIONS.md](DESIGN-QUESTIONS.md). Advised by Fable 5
   credential patterns; the export check scans the computer's files and its fork-time record.
 
 ## Status
+
+### 7 Nov 2026: phase F1 measured (before)
+
+- **Script:** `docs/forks-ci/checks/measure_forks.sh` (Mac and Linux), run on the Mac by hand and on the
+  KVM runner by the `Fork measurements on KVM` job of `linux-host.yml`.
+- **Mac** (M4 Max, Dev engine at 620a4683; [evidence](evidence/f1-before/mac-m4max-dev/README.md)): cold
+  fork 9.28 s, warm single fork 8.13 s, `-n 4` 16.01 s, RAM per fork 498 MiB (footprint), `-n 10` 36.76 s
+  with 4997 MiB in total. macOS fork not measured: creating a macOS source failed ("did not accept SSH
+  logins in time").
+- **Linux KVM** (GitHub runner, 4-core Xeon, 15.6 GiB, nested KVM; [evidence](evidence/f1-before/linux-kvm-gh/README.md)):
+  cold fork 11.03 s, warm single fork 10.14 s, `-n 4` 36.20 s, RAM per fork 1027 MiB (PSS); `-n 10` not
+  measured (not enough memory on the runner).
+- **Result:** the warm checkpoint saves about 1 s on one fork on both hosts, which decided Q1.
+- **Reviews:** Fable (method, numbers traced to raw files, Linux portability, the CI job's triggers and
+  permissions): no blocking finding; the two medium findings (median of the RAM gate, the script commit
+  in the evidence) fixed in `d8ca5985`.
