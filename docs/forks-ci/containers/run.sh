@@ -183,9 +183,13 @@ section_net() {
   cp "$CTR/net1/out" "$RAW/net.txt"; cat "$RAW/net.txt"
   sudo nsenter -t "$(cat "$CTR/net1/pid")" -n nft list ruleset > "$RAW/net-container-nft.txt" 2>&1; cat "$RAW/net-container-nft.txt"
   { echo "-- same 50 MB range direct from the host (no container, no proxy)"
-    curl -sS -m 120 -r 0-52428799 -o /dev/null -w 'bytes=%{size_download} seconds=%{time_total} bytes_per_s=%{speed_download}\n' http://archive.ubuntu.com/ubuntu/ls-lR.gz; } | tee "$RAW/net-throughput-host.txt"
+    curl -sS -m 120 -r 0-52428799 -o /dev/null -w 'bytes=%{size_download} seconds=%{time_total} bytes_per_s=%{speed_download}\n' http://archive.ubuntu.com/ubuntu/ls-lR.gz
+    echo "-- the same 40 small requests direct from the host, one curl process (keep-alive)"
+    local t0; t0=$(now); curl -sS -m 120 -o /dev/null $(for i in $(seq 40); do echo http://archive.ubuntu.com/ubuntu/dists/noble/InRelease; done); echo "seconds=$(sub "$t0" "$(now)")"
+    echo "-- the same 40 small requests direct from the host, a new curl process each (no keep-alive)"
+    t0=$(now); for i in $(seq 40); do curl -sS -m 30 -o /dev/null http://archive.ubuntu.com/ubuntu/dists/noble/InRelease; done; echo "seconds=$(sub "$t0" "$(now)")"; } | tee "$RAW/net-throughput-host.txt"
   sudo nft list table inet silo_c1 > "$RAW/net-host-nft.txt" 2>&1; cat "$RAW/net-host-nft.txt"
-  { echo "-- tinyproxy log (container address 10.200.1.2)"; grep -E '10\.200\.1\.2' "$WORK/tinyproxy.log" | tail -n 15
+  { echo "-- tinyproxy log (container address 10.200.1.2)"; grep -E 'CONNECT|Request|GET' "$WORK/tinyproxy.log" | tail -n 12
     echo "-- canary log (the host service; nothing from 10.200.1.2 may appear)"; grep -c '10\.200\.1\.2' "$WORK/canary.log"; } | tee "$RAW/net-proxy-log.txt"
   stop_ctr net1; sudo rm -rf "$CTR/net1"
 }

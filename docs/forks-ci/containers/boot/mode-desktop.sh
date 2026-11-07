@@ -15,6 +15,15 @@ wait_for() { # SECONDS COMMAND...
   done
 }
 mkdir -p /tmp/c1-logs-ubuntu
+pss_now() { python3 -c "
+import glob
+t = 0
+for p in glob.glob('/proc/[0-9]*/smaps_rollup'):
+    try:
+        t += sum(int(l.split()[1]) for l in open(p) if l.startswith('Pss:'))
+    except OSError:
+        pass
+print(f'{t/1024:.1f} MiB')"; }
 
 t=$(now)
 Xvfb :1 -screen 0 1440x900x24 +extension RANDR -noreset -nolisten tcp >/tmp/c1-logs-ubuntu/xvfb.log 2>&1 &
@@ -42,6 +51,8 @@ fi
 sleep 5
 if kill -0 "$selkies_pid" 2>/dev/null; then step selkies-alive ok "5s after serving"; else step selkies-alive FAIL "$(tail -c 400 /tmp/c1-logs-ubuntu/selkies.log | tr '\n' ' ')"; fi
 
+sleep 10
+step pss-desktop-before-cua-and-browser "$(pss_now)" "(all processes in the container, read inside it: Xvfb, PulseAudio, Xfce, Selkies)"
 t=$(now)
 step cua-version "$(cua-driver --version 2>&1 | head -1)" ""
 timeout 150 python3 /silo/cua_probe.py 2>&1 | sed 's/^/STEP /'
@@ -61,5 +72,7 @@ if [ -x /opt/google/chrome/chrome ]; then
 else
   step chrome NOT_INSTALLED "no browser in the image; the preparation step did not install one"
 fi
+sleep 10
+step pss-desktop-with-chrome-window "$(pss_now)" "(the same, plus a headed Chrome with --no-sandbox on about:blank)"
 cp -r /tmp/c1-logs-ubuntu /tmp/c1-logs-keep 2>/dev/null
 echo "DESKTOP_DONE"
