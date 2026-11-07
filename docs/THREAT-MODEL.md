@@ -569,10 +569,11 @@ files and commands, secrets, GitHub, published ports and guest SSH on the host. 
 controller's Silo private key, or runs as the controller's account (boundary 7 there), has that
 authority over the host until `silo host revoke` on the host; the key does not expire. A revoke
 only rewrites `authorized_keys`, which sshd reads when a connection starts: a bridge already
-running, such as an open guest SSH stream, keeps going until it ends, and so does turning
-Connections off ([`#L1043`](../app/SiloUI/src-tauri/engine/src/remote.rs#L1043)). To cut open
-connections too, restart the engine's service after the revoke. It is less
-than a login: the forced command runs no shell, and the engine's account, not root, answers. Silo
+running, such as an open guest SSH stream, keeps going until it ends
+([`#L1043`](../app/SiloUI/src-tauri/engine/src/remote.rs#L1043)). To cut open connections too,
+turn Connections off, which ends open streams
+([`#L4305`](../app/SiloUI/src-tauri/engine/src/remote.rs#L4305)), or restart the engine's service
+after the revoke. It is less than a login: the forced command runs no shell, and the engine's account, not root, answers. Silo
 does not configure sshd. The host's sshd must accept that account's keys: `StrictModes` ignores an
 `authorized_keys` under a home or `~/.ssh` that others can write, which `init` and `status` report
 ([`hosts.rs#L862`](../app/SiloUI/cli/src/hosts.rs#L862)), and an account sshd does not let in cannot
