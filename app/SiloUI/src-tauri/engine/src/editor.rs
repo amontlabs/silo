@@ -314,7 +314,17 @@ pub(crate) fn key(path: &Path) -> Result<(), String> {
             "-f",
         ])
         .arg(path);
-    run(&mut command, Duration::from_secs(5))
+    run(&mut command, Duration::from_secs(5))?;
+    // ssh-keygen relies on its umask for the key's mode, which a default ACL on the directory
+    // overrides (the file then gets the ACL's 0644, and ssh-keygen -y refuses to read it).
+    let metadata = fs::symlink_metadata(path).map_err(|_| FAILED)?;
+    if !metadata.is_file() || metadata.file_type().is_symlink() {
+        return Err(FAILED.into());
+    }
+    if metadata.permissions().mode() & 0o077 != 0 {
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600)).map_err(|_| FAILED)?;
+    }
+    Ok(())
 }
 
 pub(crate) fn public_key(path: &Path) -> Result<String, String> {
@@ -1712,6 +1722,43 @@ mod tests {
             fs::read_to_string(dir.path().join("id_ed25519.pub")).unwrap(),
             public
         );
+    }
+
+    /// A default ACL on the directory overrides ssh-keygen's umask, so the new key starts
+    /// out 0644 and would be refused by ssh-keygen -y.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_key_generated_under_a_default_acl_is_private() {
+        use std::os::unix::ffi::OsStrExt;
+        let dir = tempfile::tempdir().unwrap();
+        // posix_acl_xattr v2: user::rw-, group::r--, other::r--.
+        let mut acl = 2u32.to_le_bytes().to_vec();
+        for (tag, perm) in [(0x01u16, 6u16), (0x04, 4), (0x20, 4)] {
+            acl.extend(tag.to_le_bytes());
+            acl.extend(perm.to_le_bytes());
+            acl.extend(u32::MAX.to_le_bytes());
+        }
+        let directory = std::ffi::CString::new(dir.path().as_os_str().as_bytes()).unwrap();
+        let set = unsafe {
+            libc::setxattr(
+                directory.as_ptr(),
+                c"system.posix_acl_default".as_ptr(),
+                acl.as_ptr().cast(),
+                acl.len(),
+                0,
+            )
+        };
+        if set != 0 {
+            eprintln!("skipped: this file system takes no default ACL");
+            return;
+        }
+        let path = dir.path().join("id_ed25519");
+        key(&path).unwrap();
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        validate_public_key(&public_key(&path).unwrap()).unwrap();
     }
 
     #[test]
