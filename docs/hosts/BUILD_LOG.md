@@ -323,6 +323,15 @@ Plan: [PLAN.md](PLAN.md).
     with a 0775 `~/.local/share` in its private group served from a root-owned engine copy and
     `silo list` answered; the same directory in a shared group was refused with the new
     message; a fresh home under umask 002 got 755/755/700/700. The account was removed after.
+  - Security review of the private-group change: directories are created through descriptors
+    (`openat` with `O_NOFOLLOW` of the deepest existing one, then `mkdirat`, `openat`, `fstat`
+    and `fchmod` per level), and only inside an existing directory of the account or root that
+    nobody else can change, so a link swapped in cannot make `chmod` widen another file. Root
+    (uid 0) and gid 0 get no exemption; only a local account and group count (the owner's
+    `/etc/passwd` line and the group's single `/etc/group` line must agree with the lookups);
+    `/etc/passwd` or `/etc/group` over 16 MiB counts as unreadable and refuses. The threat model
+    names what the rule cannot see (network memberships, `pam_group`, gshadow passwords, setgid
+    programs).
   - Tests (Linux x86_64 container, as root): `silo-engine` `remote::` 169 passed, 1 failed (the
     pre-existing root-only `handshake_reports_failed_key_upgrade_and_preserves_managed_files`);
     `silod` 346 unit tests and its other binaries passed; `silo-cli`, `silo-api`, `silo-client`

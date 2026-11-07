@@ -479,7 +479,7 @@ where this section says otherwise.
 | | Mac | Linux host |
 | --- | --- | --- |
 | Hypervisor | Hypervisor.framework under libkrun, in the signed `msb` | KVM under libkrun, in `msb` running as the engine's account. Silo adds no seccomp filter or namespace around it. |
-| Which binary serves the socket | The bundle's code signature | Location and ownership: before it reads anything, `silod` refuses an engine directory, any directory above it, `silod`, any entry beside it, or anything under `resources/` that an account other than its own or root owns or can change, and links that leave the directory; write access for the owner's user-private group (its primary group, with no other member and no other account in `/etc/passwd` whose primary group it is, Debian's `StrictModes` rule) does not count, while write access for everyone and sticky directories are always refused ([`safe_directories.rs#L205`](../app/SiloUI/src-tauri/engine/src/safe_directories.rs#L205), [`install_trust.rs#L51`](../app/SiloUI/src-tauri/silod/src/install_trust.rs#L51), called from [`linux.rs#L38`](../app/SiloUI/src-tauri/silod/src/linux.rs#L38)). Before the first `msb` launch the agent checks the MicroSandbox manifest against the runtime inputs compiled into the build and hashes `msb` and `libkrunfw` against it ([`dependencies.rs#L933`](../app/SiloUI/src-tauri/engine/src/dependencies.rs#L923), [`linux.rs#L123`](../app/SiloUI/src-tauri/silod/src/linux.rs#L123)); `libkrunfw`'s hash is compiled in, `msb`'s comes from that manifest, which the ownership check covers. Nothing is signed: signed archives are roadmap milestone 11. |
+| Which binary serves the socket | The bundle's code signature | Location and ownership: before it reads anything, `silod` refuses an engine directory, any directory above it, `silod`, any entry beside it, or anything under `resources/` that an account other than its own or root owns or can change, and links that leave the directory. Write access for the owner's user-private group does not count (Debian's `StrictModes` rule: the owner's primary group, no member but the owner; Silo also requires that the owner's `/etc/passwd` line and the group's single `/etc/group` line agree with the lookups and that no other `/etc/passwd` account has that primary group). Root-owned paths and gid 0 get no exemption, and write access for everyone and sticky directories are always refused ([`safe_directories.rs#L332`](../app/SiloUI/src-tauri/engine/src/safe_directories.rs#L332), [`#L359`](../app/SiloUI/src-tauri/engine/src/safe_directories.rs#L359), [`install_trust.rs#L51`](../app/SiloUI/src-tauri/silod/src/install_trust.rs#L51), called from [`linux.rs#L38`](../app/SiloUI/src-tauri/silod/src/linux.rs#L38)). Before the first `msb` launch the agent checks the MicroSandbox manifest against the runtime inputs compiled into the build and hashes `msb` and `libkrunfw` against it ([`dependencies.rs#L933`](../app/SiloUI/src-tauri/engine/src/dependencies.rs#L933), [`linux.rs#L103`](../app/SiloUI/src-tauri/silod/src/linux.rs#L103)); `libkrunfw`'s hash is compiled in, `msb`'s comes from that manifest, which the ownership check covers. Nothing is signed: signed archives are roadmap milestone 11. Residual risk of the private-group exemption: the check cannot see memberships a network directory (LDAP, SSSD, NIS) adds to a local group, groups `pam_group` grants at login, a group password in `/etc/gshadow` that lets `newgrp` join, or setgid programs of the owner; any of those gives another account write access the check treats as the owner's alone. |
 | Credential values | Keychain items whose access list names the engine | One 0600 file per item under 0700 directories at `$XDG_DATA_HOME/<identifier>/credentials/<service>/<account>` ([`credential_file_store.rs#L110`](../app/SiloUI/src-tauri/engine/src/credential_file_store.rs#L110)). Every process of the engine's account and root can read them, and a backup of the home directory copies them. `SILO_CREDENTIAL_STORE=secret-service` is untested. |
 | Client check | `getpeereid` | `SO_PEERCRED` ([`socket.rs#L76`](../app/SiloUI/src-tauri/silod/src/socket.rs#L76)); the same effective-UID comparison |
 | Paths | `~/Library/...` | XDG data, cache and state directories ([`paths.rs#L36`](../app/SiloUI/src-tauri/silod/src/paths.rs#L36)); `~/.silo` and `~/.silo-dev` hold the socket on both |
@@ -506,19 +506,21 @@ code reading of boundary 2.
 it), the two empty read-only legacy folders on older computers, and `/workspace` as a disk image.
 The credential directory is never a mount source or inside or above one; a unit test checks that
 against the storage, share, guest-image and legacy paths
-([`credential_file_store.rs#L893`](../app/SiloUI/src-tauri/engine/src/credential_file_store.rs#L893)).
+([`credential_file_store.rs#L942`](../app/SiloUI/src-tauri/engine/src/credential_file_store.rs#L942)).
 
 **Secrets and GitHub.** The placeholder and token logic of boundaries 3 and 5 is unchanged; only
 where the values rest differs. The file store opens every directory and file without following
 links, through directory descriptors, checks every directory from the XDG data directory down
 (the same ownership rule as the engine directory, owner's private group included), creates missing
-ones with fixed modes (0755 up to the XDG data directory, 0700 below), and refuses a link, another account's file, or a file others can read
-([`credential_file_store.rs#L145`](../app/SiloUI/src-tauri/engine/src/credential_file_store.rs#L145),
-[`#L388`](../app/SiloUI/src-tauri/engine/src/credential_file_store.rs#L388)). A refusal is reported as
+ones through descriptors with fixed modes (0755 up to the XDG data directory, 0700 below) and only
+inside a directory nobody else can change
+([`safe_directories.rs#L408`](../app/SiloUI/src-tauri/engine/src/safe_directories.rs#L408)), and refuses a link, another account's file, or a file others can read
+([`credential_file_store.rs#L147`](../app/SiloUI/src-tauri/engine/src/credential_file_store.rs#L147),
+[`#L386`](../app/SiloUI/src-tauri/engine/src/credential_file_store.rs#L386)). A refusal is reported as
 `credential_access_denied`, naming the file and never the value
 ([`credential_store.rs#L50`](../app/SiloUI/src-tauri/engine/src/credential_store.rs#L50)). The engine records the store
 it used first and refuses a different `SILO_CREDENTIAL_STORE` later
-([`linux.rs#L185`](../app/SiloUI/src-tauri/silod/src/linux.rs#L185)).
+([`linux.rs#L192`](../app/SiloUI/src-tauri/silod/src/linux.rs#L192)).
 
 **Engine socket and in-guest client.** Boundaries 7 and 9 unchanged, with `SO_PEERCRED` in place of
 `getpeereid`.

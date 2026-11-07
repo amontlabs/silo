@@ -169,10 +169,13 @@ behind `cfg(target_os = "linux")`.
   and everything under `resources/` must belong to this account or root and be writable by
   nobody else (a sticky `/tmp` is refused too), and a link must stay inside the directory.
   Write access for the owner's user-private group is allowed, the rule Debian's OpenSSH applies
-  for `StrictModes`: the group is the owner's primary group, lists no member but the owner, and
-  is no other `/etc/passwd` account's primary group (`silo_engine::safe_directories`; only
-  `/etc/passwd` is read for that last part, since `getpwent` is not thread-safe, so an account
-  only LDAP or SSSD gives that primary group is not seen). The refusal names the path, its mode
+  for `StrictModes`: the group is the owner's primary group and lists no member but the owner
+  (`silo_engine::safe_directories`). Silo adds that the owner is not root and the group not
+  gid 0, that only local accounts count (the owner's `/etc/passwd` line and the group's single
+  `/etc/group` line must agree with `getpwuid_r` and `getgrgid_r`, so an LDAP or SSSD account
+  is refused), and that no other `/etc/passwd` account has the group as its primary group. The
+  files are parsed directly, since `getpwent` is not thread-safe; an unreadable file, or one over
+  16 MiB, refuses. The refusal names the path, its mode
   and group, and the `chmod g-w` or `chmod go-w` that fixes it. Before its first `msb` launch, the agent checks
   `resources/microsandbox/manifest.json` against the runtime inputs compiled into the build and
   the SHA-256 of `msb` and `libkrunfw` against it

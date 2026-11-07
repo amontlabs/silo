@@ -339,7 +339,8 @@ On the host, as the account that will own the computers (not root):
    `~/.ssh/authorized_keys` when the home or `~/.ssh` can be changed by group or others; that is
    reported with the mode, the group and the `chmod g-w` or `chmod go-w` that fixes it. Debian's
    and Ubuntu's sshd (detected by `/etc/debian_version`) let the owner's user-private group
-   write, so a home made under umask 002 is not reported there.
+   write (a local, non-root account and group, as the engine checks), so a home made under
+   umask 002 is not reported there.
 8. **The address.** It prints the addresses Connections offers (`user@host.local`, the host
    name, Tailscale and other interface addresses) and whether anything answers on port 22.
    Controllers reach the host over SSH: turn on Remote Login on a Mac, or run an SSH server on
