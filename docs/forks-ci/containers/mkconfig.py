@@ -79,7 +79,6 @@ def main():
             'env': env,
             'cwd': '/',
             'capabilities': {k: caps for k in ('bounding', 'effective', 'inheritable', 'permitted', 'ambient')},
-            'rlimits': [{'type': 'RLIMIT_NOFILE', 'hard': 1048576, 'soft': 1048576}],
             'noNewPrivileges': True,
         },
         'root': {'path': a.rootfs, 'readonly': False},

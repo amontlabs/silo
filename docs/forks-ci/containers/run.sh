@@ -87,7 +87,7 @@ section_ten() {
       count=$((count+1)); local ts; ts=$(marker_ts "$CTR/ten$r-$k/out" READY)
       last=$(awk -v a="$last" -v b="$ts" 'BEGIN{print (b>a)?b:a}')
     done
-    echo "ten$r $(sub "$t0" "$last")" >> "$RAW/ten-total.txt"
+    [ "$count" -gt 0 ] && echo "ten$r $(sub "$t0" "$last")" >> "$RAW/ten-total.txt"
     echo "run $r: $count of $TEN ready, $fail failed"
     sleep 5
     local sum=0
@@ -95,7 +95,7 @@ section_ten() {
       [ -s "$CTR/ten$r-$k/timing" ] || continue
       local p; p=$(pss_mib ten$r-$k); echo "ten$r-$k $p" >> "$RAW/ten-pss-each.txt"; sum=$(awk -v a="$sum" -v b="$p" 'BEGIN{print a+b}')
     done
-    echo "ten$r $sum" >> "$RAW/ten-pss.txt"
+    [ "$count" -gt 0 ] && echo "ten$r $sum" >> "$RAW/ten-pss.txt"
     for k in $(seq "$TEN"); do stop_ctr ten$r-$k; sudo rm -rf "$CTR/ten$r-$k"; done
   done
   summ "container: $TEN started at once, start to the last ready shell" "$RAW/ten-total.txt"
@@ -152,12 +152,12 @@ section_fork() {
       count=$((count+1)); local ts; ts=$(marker_ts "$CTR/fkt$r-$k/out" READY)
       last=$(awk -v a="$last" -v b="$ts" 'BEGIN{print (b>a)?b:a}')
     done
-    echo "fkt$r $(sub "$t0" "$last")" >> "$RAW/forkten-total.txt"
+    [ "$count" -gt 0 ] && echo "fkt$r $(sub "$t0" "$last")" >> "$RAW/forkten-total.txt"
     echo "run $r: $count of $TEN forks ready"
     sleep 5
     local sum=0
     for k in $(seq "$TEN"); do [ -s "$CTR/fkt$r-$k/timing" ] || continue; sum=$(awk -v a="$sum" -v b="$(pss_mib fkt$r-$k)" 'BEGIN{print a+b}'); done
-    echo "fkt$r $sum" >> "$RAW/forkten-pss.txt"
+    [ "$count" -gt 0 ] && echo "fkt$r $sum" >> "$RAW/forkten-pss.txt"
     for k in $(seq "$TEN"); do stop_ctr fkt$r-$k; sudo rm -rf "$CTR/fkt$r-$k"; done
   done
   summ "container fork: $TEN disk-only copies in parallel" "$RAW/forkten-copy.txt"
