@@ -220,10 +220,10 @@ impl Service {
             Arc::new(move || Ok(keep))
         };
         let automatic = kind == Some(CheckpointKind::Automatic);
-        if kind == Some(CheckpointKind::ForkPoint) {
+        if kind == Some(CheckpointKind::Warm) {
             return Err(Failure::new(
                 ErrorCode::Internal,
-                "A fork point is made by Fork, not saved as a checkpoint.",
+                "A warm checkpoint is no longer made; a fork starts from the computer as it is.",
             ));
         }
         if automatic && (self.retention)().map_err(Failure::from_message)? == 0 {
@@ -235,7 +235,7 @@ impl Service {
                 computer_id.to_owned(),
                 name.to_owned(),
                 automatic,
-                kind == Some(CheckpointKind::Warm),
+                kind == Some(CheckpointKind::ForkPoint),
                 self.retention.clone(),
                 match kind {
                     Some(CheckpointKind::BeforeKeep) => Some((
@@ -286,7 +286,7 @@ impl Service {
                         )
                         .map(|checkpoint| json!({ "checkpoint": checkpoint }))
                     },
-                    (kind != CheckpointKind::Manual).then_some(follow_up),
+                    trims_older_checkpoints(kind).then_some(follow_up),
                 )
             }
         }
@@ -575,6 +575,12 @@ impl Service {
 /// Work that runs as its own job once the job that started it has finished.
 type FollowUp = Box<dyn FnOnce(&RuntimePaths, JobId) -> Result<(), String> + Send>;
 
+/// Whether a Linux capture of `kind` is followed by a job trimming older checkpoints of its
+/// kind. A manual checkpoint and a fork point are never trimmed.
+fn trims_older_checkpoints(kind: CheckpointKind) -> bool {
+    !matches!(kind, CheckpointKind::Manual | CheckpointKind::ForkPoint)
+}
+
 fn run_follow_up(host: &dyn RuntimeHost, paths: &RuntimePaths, follow_up: FollowUp) {
     let context = host.engine_context();
     let Ok(accepted) = jobs::allocate(context.as_ref(), "checkpoints.reclaim") else {
@@ -677,6 +683,15 @@ impl runtime::checkpoints::ForkAssignments for EngineForkAssignments {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_kinds_with_a_retention_queue_a_trim_after_their_capture() {
+        assert!(!trims_older_checkpoints(CheckpointKind::Manual));
+        assert!(!trims_older_checkpoints(CheckpointKind::ForkPoint));
+        assert!(trims_older_checkpoints(CheckpointKind::Automatic));
+        assert!(trims_older_checkpoints(CheckpointKind::BeforeKeep));
+        assert!(trims_older_checkpoints(CheckpointKind::Step));
+    }
     use crate::{
         context::{
             EngineIdentity, EnginePaths, EngineRuntimeState, MainThread, PackageKind,

@@ -1,0 +1,8 @@
+e2e-forks-plain-src (linux): running
+2 cpu, 4 GiB memory, 10 GiB disk
+0 checkpoints
+Running
+quiet: applied; stopped: none; scrubbed: /etc/silo/guest-client.json; secrets: none
+secrets assigned: none
+credentials used: none
+computer use: ready, approval ask, driver 0.38.0

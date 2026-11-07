@@ -941,6 +941,105 @@ fn captures_full_state_only_with_an_owned_workspace_disk() {
 }
 
 #[test]
+fn a_fork_point_of_a_running_computer_saves_disks_only_after_a_guest_flush() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let paths = paths(&directory);
+    write_metadata(
+        &paths.metadata,
+        &ComputerConfigurationRequest {
+            schema_version: 1,
+            computers: vec![computer_configuration()],
+        },
+    )
+    .unwrap();
+    // A bridge folder makes a capture with memory drop the guest's cached entries first.
+    std::fs::create_dir_all(crate::guest_client::spool_dir(&paths.home, "dev")).unwrap();
+    let runner = Runner {
+        mount_type: "Owned",
+        calls: Mutex::new(Vec::new()),
+    };
+    capture_fork_point(&runner, &paths, ID).unwrap();
+    let calls = runner.calls.lock().unwrap();
+    let create = calls
+        .iter()
+        .find(|call| call[..2] == ["snapshot", "create"])
+        .unwrap();
+    assert!(!create.iter().any(|arg| arg == "--full"), "{create:?}");
+    assert!(create
+        .windows(2)
+        .any(|pair| pair == ["--guest-flush", "required"]));
+    assert!(!calls
+        .iter()
+        .any(|call| call.iter().any(|arg| arg.contains("drop_caches"))));
+    let record = load(&paths, ID).unwrap();
+    assert_eq!(record.checkpoints[0].scope, "disk");
+    assert_eq!(record.checkpoints[0].name, "Fork point");
+}
+
+#[test]
+fn only_a_fork_point_checkpoint_saves_disks_only_and_a_warm_one_is_refused() {
+    use silo_api::methods::checkpoints::CheckpointKind;
+    for kind in [
+        CheckpointKind::Manual,
+        CheckpointKind::Automatic,
+        CheckpointKind::BeforeKeep,
+        CheckpointKind::Step,
+    ] {
+        assert_eq!(capture_policy(kind).unwrap().1, CaptureDepth::WithMemory);
+    }
+    assert_eq!(
+        capture_policy(CheckpointKind::ForkPoint).unwrap(),
+        ("manual", CaptureDepth::DisksOnly)
+    );
+    assert!(capture_policy(CheckpointKind::Warm).is_err());
+}
+
+#[test]
+fn a_fork_point_of_a_stopped_computer_asks_for_no_guest_flush() {
+    let _test_state = crate::test_support::global_state();
+    struct Stopped(Runner);
+    impl RuntimeRunner for Stopped {
+        fn run(
+            &self,
+            paths: &RuntimePaths,
+            args: &[String],
+            timeout: Duration,
+        ) -> Result<CommandOutput, RuntimeError> {
+            let mut output = self.0.run(paths, args, timeout)?;
+            if args[0] == "inspect" {
+                output.stdout = output.stdout.replace("Running", "Stopped");
+            }
+            Ok(output)
+        }
+    }
+    let directory = tempfile::tempdir().unwrap();
+    let paths = paths(&directory);
+    write_metadata(
+        &paths.metadata,
+        &ComputerConfigurationRequest {
+            schema_version: 1,
+            computers: vec![computer_configuration()],
+        },
+    )
+    .unwrap();
+    let runner = Stopped(Runner {
+        mount_type: "Owned",
+        calls: Mutex::new(Vec::new()),
+    });
+    capture_fork_point(&runner, &paths, ID).unwrap();
+    let calls = runner.0.calls.lock().unwrap();
+    let create = calls
+        .iter()
+        .find(|call| call[..2] == ["snapshot", "create"])
+        .unwrap();
+    assert!(!create
+        .iter()
+        .any(|arg| arg == "--full" || arg == "--guest-flush"));
+    assert_eq!(load(&paths, ID).unwrap().checkpoints[0].scope, "disk");
+}
+
+#[test]
 fn a_full_capture_drops_the_guests_cached_entries_first_only_when_a_bridge_folder_exists() {
     let _test_state = crate::test_support::global_state();
     for bridge in [false, true] {
@@ -4828,8 +4927,16 @@ fn a_before_keep_capture_persists_its_policy_kind_and_reaches_the_api() {
     let paths = delete_fixture(&directory, Vec::new(), None);
     let store = Store::new(vec![("dev", None)]);
 
-    let captured =
-        capture_with_kind(&store, &paths, ID, "Before keep", "manual", "before-keep").unwrap();
+    let captured = capture_with_kind(
+        &store,
+        &paths,
+        ID,
+        "Before keep",
+        "manual",
+        "before-keep",
+        CaptureDepth::WithMemory,
+    )
+    .unwrap();
 
     assert_eq!(load(&paths, ID).unwrap().checkpoints[0].kind, "before-keep");
     assert_eq!(
@@ -4855,6 +4962,7 @@ fn an_automatic_capture_returns_its_record_and_persists_its_policy_kind() {
         "Before run: tests, deleted automatically",
         "manual",
         "automatic",
+        CaptureDepth::WithMemory,
     )
     .unwrap();
 

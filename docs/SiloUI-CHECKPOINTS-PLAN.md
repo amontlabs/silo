@@ -203,7 +203,7 @@ login, and secrets stored in files (use `scrub`).
 | Action | Proposed behaviour |
 | --- | --- |
 | Create checkpoint | Name an immutable point in this computer's history. Running computers capture memory and both owned disks; stopped computers capture disks. Show the scope clearly. Preserve the source's lifecycle state. |
-| Fork current state | Capture a live source or reuse a pending immutable reference, choose a new name, and create a stopped sibling computer. No child guest execution until Start. |
+| Fork current state | Capture the source's disks, or reuse a pending immutable reference, choose a new name, and create a stopped sibling computer. A running Linux source is paused briefly after a guest flush and captured disk-only (MicroSandbox's own running disk snapshot, `--guest-flush required`, no memory), because a fork always cold-boots from the disks; a macOS source copies its disk the same way. No child guest execution until Start. |
 | Fork checkpoint | Same stopped-sibling flow using the selected point. Copy current source assignments, never historical grants. |
 | Start pending fork | Resolve current policy, validate compatibility, restore the selected state and open the normal computer. Reconnect desktop/terminal/LCU sessions as available. |
 | Restore checkpoint | Secure the current state as recovery, then atomically select the target immutable reference. Keep the computer stopped; explicit Start performs full-memory restore or disk boot under current device policy. |

@@ -172,14 +172,7 @@ fn publish_finished_with_recovery_placeholder(
         audience.clone(),
         recovery_placeholder,
     )? {
-        crate::generation::job_finished(
-            finished.job_id.as_str(),
-            finished
-                .result
-                .as_ref()
-                .and_then(|result| result.pointer("/checkpoint/id"))
-                .and_then(serde_json::Value::as_str),
-        );
+        crate::generation::job_finished(finished.job_id.as_str());
         context.publish(Event::new("operations.job.finished", payload), audience);
         context.job_queue_changed();
     }

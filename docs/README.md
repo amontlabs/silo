@@ -27,7 +27,7 @@ that every platform or live VM workflow has been exercised.
 | Build and release | [Build from source](SiloUI-BUILD-FROM-SOURCE.md), [build channels (production and Dev)](SiloUI-BUILD-CHANNELS.md), [release workflow and CI](SiloUI-RELEASES.md), [historical Linux system updates](SiloUI-LINUX-UPDATES.md), [historical distribution acceptance](SiloUI-DISTRIBUTION-PLAN.md), [release history](releases/) |
 | Command line | [`silo` CLI and MCP server](SiloUI-CLI.md): commands, `.silo/` files, and MCP setup |
 | In-guest client | [`silo --in-guest`](SiloUI-IN-GUEST-CLIENT.md): a scoped token and bridge folder so an agent inside a computer can fork and ask for review; what it may and may not do |
-| Recipes | [Recipes and `silo up`](SiloUI-RECIPES.md): the recipe format, the build cache, the warm checkpoint |
+| Recipes | [Recipes and `silo up`](SiloUI-RECIPES.md): the recipe format, the build cache, forks and the desktop setting |
 | Change review | [Reviewing a fork's changes](SiloUI-CHANGES.md): diff buckets and the `silo diff --json` shape |
 | Using the app | [Using the Silo app](SiloUI-APP.md): create a computer, open a project and development server, open the desktop, and connect another device |
 | Engine | [Engine crate extraction](SiloUI-ENGINE.md): workspace location, host context boundary, and macOS VM-window seam for `silod` |

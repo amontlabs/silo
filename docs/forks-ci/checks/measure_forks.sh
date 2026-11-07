@@ -1,18 +1,23 @@
 #!/usr/bin/env bash
-# Fork measurements ("before"), phase F1 of docs/forks-ci/PLAN.md. Runs on a Mac host and on a Linux KVM host.
+# Fork measurements, phases F1 ("before") and F2 ("after") of docs/forks-ci/PLAN.md. Runs on a Mac host and on a
+# Linux KVM host. F1 ran it with a warm checkpoint from `silo up` and a 70 s wait (WAIT_COLD=70); since F2 a fork
+# always captures its source's disks first, so there is no warm path and sections cold and warm1 measure the same thing.
 #
-#   SILO=/path/to/silo [MACHINE=name] [SECTIONS="cold warm1 warm4 ten macos"] bash docs/forks-ci/checks/measure_forks.sh
+#   SILO=/path/to/silo [MACHINE=name] [SECTIONS="cold warm1 warm4 ten plain nodesk macos"] bash docs/forks-ci/checks/measure_forks.sh
 #
 # Environment:
 #   SILO            the silo CLI of the engine to measure (default on a Mac: ~/.local/bin/silo-dev; required on Linux).
 #                   Its engine must already be running. Never a production CLI on a developer Mac.
 #   MACHINE         label of the evidence directory (default: hostname)
-#   OUT             evidence directory (default: docs/forks-ci/evidence/f1-before/$MACHINE)
-#   SECTIONS        measurements to run, in this order (default: cold warm1 warm4 ten, plus macos on a Mac when
-#                   SILO_MACOS_SOURCE is set). cold = (a), warm1 = (c), warm4 = (b) and (d), ten = (f), macos = (e).
+#   OUT             evidence directory (default: docs/forks-ci/evidence/f2-after/$MACHINE)
+#   SECTIONS        measurements to run, in this order (default: cold warm1 warm4 ten plain nodesk, plus macos on a Mac
+#                   when SILO_MACOS_SOURCE is set). cold = (a), warm1 = (c), warm4 = (b) and (d), ten = (f), macos = (e),
+#                   plain = (g) one fork of a recipe computer that has a desktop, nodesk = (h) one fork of a recipe
+#                   computer with `desktop: false` (time and RAM; the same recipe otherwise, without services).
 #   SILO_MACOS_SOURCE  name of a macOS computer to fork for (e); Mac only.
-#   SILO_PROJECT    project folder holding .silo/recipes/demo.yaml (default: docs/v1/checks/final-proj)
-#   WAIT_COLD       seconds to wait before each cold run (default 70 > warm_max_age 60)
+#   SILO_PROJECT    project folder holding .silo/recipes/demo.yaml, demo-plain.yaml and demo-nodesk.yaml
+#                   (default: docs/forks-ci/checks/proj)
+#   WAIT_COLD       seconds to wait before each cold run (default 0; F1 used 70 to outlast warm_max_age 60)
 #   RUNS            runs per measurement (default 3)
 #   TEN             how many forks "at once" (default 10)
 #
@@ -32,14 +37,14 @@ if [ -z "${SILO:-}" ]; then
   if [ "$OS" = Darwin ]; then SILO="$HOME/.local/bin/silo-dev"; else echo "SILO must name the silo CLI on Linux" >&2; exit 2; fi
 fi
 MACHINE=${MACHINE:-$(hostname -s)}
-OUT=${OUT:-$REPO/docs/forks-ci/evidence/f1-before/$MACHINE}
+OUT=${OUT:-$REPO/docs/forks-ci/evidence/f2-after/$MACHINE}
 RAW=$OUT/raw
-PROJ=${SILO_PROJECT:-$REPO/docs/v1/checks/final-proj}
-WAIT_COLD=${WAIT_COLD:-70}
+PROJ=${SILO_PROJECT:-$REPO/docs/forks-ci/checks/proj}
+WAIT_COLD=${WAIT_COLD:-0}
 RUNS=${RUNS:-3}
 TEN=${TEN:-10}
 MACOS_SOURCE=${SILO_MACOS_SOURCE:-}
-DEFAULT_SECTIONS="cold warm1 warm4 ten"
+DEFAULT_SECTIONS="cold warm1 warm4 ten plain nodesk"
 [ "$OS" = Darwin ] && [ -n "$MACOS_SOURCE" ] && DEFAULT_SECTIONS="$DEFAULT_SECTIONS macos"
 SECTIONS=${SECTIONS:-$DEFAULT_SECTIONS}
 mkdir -p "$RAW"
@@ -66,17 +71,17 @@ import json,sys
 d=json.load(sys.stdin); d=d if isinstance(d,list) else d.get('computers',d)
 print(' '.join(c['name'] for c in d if c['name'].startswith('e2e-forks-')))"; }
 # timed_fork LABEL OUTFILE ARGS...: runs `silo fork ARGS` in the project, appends "label seconds" to OUTFILE.
-timed_fork() { local label=$1 out=$2; shift 2; local t0 before after; before=$(fork_points); t0=$(now)
+timed_fork() { local label=$1 out=$2; shift 2; local t0 before after; before=$(fork_points "${FORK_SOURCE:-main}"); t0=$(now)
   (cd "$PROJ" && "$SILO" fork "$@" > "$RAW/fork-$label.out" 2> "$RAW/fork-$label.err"); local rc=$?
   local s; s=$(elapsed "$t0"); echo "$label $s" >> "$out"
-  after=$(fork_points)
-  if [ "$after" -gt "$before" ]; then echo "  $label: captured a Fork point of main (no usable warm checkpoint)" > "$RAW/fork-$label.note"
-  else echo "  $label: no new checkpoint (warm checkpoint used)" > "$RAW/fork-$label.note"; fi
+  after=$(fork_points "${FORK_SOURCE:-main}")
+  if [ "$after" -gt "$before" ]; then echo "  $label: captured $((after - before)) new fork point(s) of ${FORK_SOURCE:-main} (${CAPTURE_NOTE:-disks only})" > "$RAW/fork-$label.note"
+  else echo "  $label: no new checkpoint" > "$RAW/fork-$label.note"; fi
   echo "$label rc=$rc ${s}s"; return $rc; }
 up_main() { (cd "$PROJ" && "$SILO" up --recipe demo > "$RAW/up-$1.out" 2>&1); }
-# The fork captures a "Fork point" checkpoint of main when no warm checkpoint is usable, and prints nothing
-# about it; so count main's "Fork point" checkpoints around each fork.
-fork_points() { "$SILO" checkpoints main 2>/dev/null | grep -c 'Fork point'; }
+# A fork captures a "Fork point" of its source (one `silo-fork-*` checkpoint for -n) and prints nothing about it; so
+# count the source's such checkpoints around each fork.
+fork_points() { "$SILO" checkpoints "$1" 2>/dev/null | grep -c 'Fork point\|silo-fork-'; }
 # timed_fork notes the result in $RAW/fork-LABEL.note and echoes it.
 note_checkpoint() { cat "$RAW/fork-$1.note"; }
 
@@ -111,12 +116,12 @@ ensure_main() {
 measure_cold() { # (a)
   : > "$RAW/cold.txt"; : > "$RAW/cold-fp.txt"
   for i in $(seq "$RUNS"); do
-    say "cold run $i: waiting ${WAIT_COLD}s so no warm checkpoint is usable"; sleep "$WAIT_COLD"
+    say "cold run $i: waiting ${WAIT_COLD}s"; [ "$WAIT_COLD" -gt 0 ] && sleep "$WAIT_COLD"
     timed_fork cold$i "$RAW/cold.txt" main --name e2e-forks-cold$i -- true; note_checkpoint cold$i
     if [ "$i" = 1 ]; then sleep 20; echo "-- RAM of cold fork 1 (20 s after ready)"; fp e2e-forks-cold1 | tee -a "$RAW/cold-fp.txt"; fi
     drop_one e2e-forks-cold$i
   done
-  stats "(a) Linux fork of a running idle main, cold, to running+ready" "$RAW/cold.txt"
+  stats "(a) Linux fork of a running idle main, to running+ready" "$RAW/cold.txt"
 }
 
 measure_warm1() { # (c)
@@ -126,7 +131,7 @@ measure_warm1() { # (c)
     timed_fork warm1-$i "$RAW/warm1.txt" main --name e2e-forks-w1x$i -- true; note_checkpoint warm1-$i
     drop_one e2e-forks-w1x$i
   done
-  stats "(c) one fork right after silo up (warm checkpoint), to running+ready" "$RAW/warm1.txt"
+  stats "(c) one fork right after silo up, to running+ready" "$RAW/warm1.txt"
 }
 
 measure_warm4() { # (b) and (d)
@@ -142,7 +147,7 @@ measure_warm4() { # (b) and (d)
     done
     for k in 1 2 3 4; do drop_one e2e-forks-w4x$i-$k; done
   done
-  stats "(b) silo fork main -n 4 right after silo up (warm checkpoint), to 4 running+ready" "$RAW/warm4.txt"
+  stats "(b) silo fork main -n 4 right after silo up, to 4 running+ready" "$RAW/warm4.txt"
   stats "(d) RAM per fork, 20 s after ready, over the forks of ${RUNS} runs of -n 4 (MiB)" "$RAW/ram-per-fork.txt" MiB
 }
 
@@ -168,9 +173,32 @@ measure_ten() { # (f)
   done
   total=$(awk '{s+=$2} END{printf "%.1f", s}' "$RAW/ten-fp.txt")
   echo "(f) $up of $TEN forks exist; total RAM of them 20 s after ready: ${total} MiB (per fork $(awk '{s+=$2;n++} END{if(n) printf "%.1f", s/n}' "$RAW/ten-fp.txt") MiB)"
-  stats "(f) -n $TEN from the warm checkpoint, to $TEN running+ready (one run)" "$RAW/ten.txt"
+  stats "(f) -n $TEN, to $TEN running+ready (one run)" "$RAW/ten.txt"
   for k in $(seq "$TEN"); do drop_one e2e-forks-ten-$k; done
 }
+
+# measure_variant LABEL RECIPE: a source computer made from RECIPE, running and idle, then RUNS single forks of it
+# (the same command as (a)), with the RAM of the first fork 20 s after ready.
+measure_variant() {
+  local label=$1 recipe=$2 src=e2e-forks-$1-src
+  : > "$RAW/$label.txt"; : > "$RAW/$label-fp.txt"
+  say "$label: making the source $src from the recipe $recipe"
+  (cd "$PROJ" && "$SILO" fork "$src" --recipe "$recipe" > "$RAW/$label-src.out" 2>&1) || { echo "($label) NOT MEASURED: the source could not be made"; tail -n 3 "$RAW/$label-src.out"; return; }
+  "$SILO" start "$src" >> "$RAW/$label-src.out" 2>&1
+  echo "-- status of $src"; "$SILO" status "$src" | tee "$RAW/$label-status.txt"
+  sleep 20
+  export FORK_SOURCE=$src
+  for i in $(seq "$RUNS"); do
+    timed_fork $label$i "$RAW/$label.txt" "$src" --name e2e-forks-$label$i -- true; note_checkpoint $label$i
+    if [ "$i" = 1 ]; then sleep 20; echo "-- RAM of e2e-forks-${label}1 (20 s after ready)"; fp e2e-forks-${label}1 | tee -a "$RAW/$label-fp.txt"; fi
+    drop_one e2e-forks-$label$i
+  done
+  unset FORK_SOURCE
+  stats "($label) Linux fork of a running idle $recipe computer, to running+ready" "$RAW/$label.txt"
+  drop_one "$src"
+}
+measure_plain() { measure_variant plain demo-plain; }
+measure_nodesk() { measure_variant nodesk demo-nodesk; }
 
 measure_macos() { # (e), Mac only
   if [ "$OS" != Darwin ]; then echo "(e) NOT MEASURED: macOS forks run on a Mac only"; return; fi
@@ -193,7 +221,7 @@ ensure_main
 for s in $SECTIONS; do
   echo; echo "== $s"
   case $s in
-    cold) measure_cold;; warm1) measure_warm1;; warm4) measure_warm4;; ten) measure_ten;; macos) measure_macos;;
+    cold) measure_cold;; warm1) measure_warm1;; warm4) measure_warm4;; ten) measure_ten;; plain) measure_plain;; nodesk) measure_nodesk;; macos) measure_macos;;
     *) echo "unknown section $s";;
   esac
 done

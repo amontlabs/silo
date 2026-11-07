@@ -86,6 +86,12 @@ pub fn status(value: &Value) -> String {
         out.push_str(&format!(", {disk} GiB disk"));
     }
     out.push_str(&format!("\n{} checkpoints", number(value, "checkpoints")));
+    if value["desktop"] == false {
+        out.push_str(&format!(
+            "\n{}",
+            crate::gui::no_desktop_message(text(value, "name"))
+        ));
+    }
     if let Some(detail) = value.get("detail").and_then(Value::as_str) {
         out.push_str(&format!("\n{detail}"));
     }
@@ -101,7 +107,10 @@ pub fn status(value: &Value) -> String {
     if let Some(used) = value.get("credentialsUsed").filter(|used| used.is_object()) {
         out.push_str(&format!("\n{}", credentials_line(used)));
     }
-    if let Some(computer_use) = value.get("computerUse").filter(|c| c.is_object()) {
+    if let Some(computer_use) = value
+        .get("computerUse")
+        .filter(|c| c.is_object() && value["desktop"] != false)
+    {
         out.push_str(&format!("\n{}", computer_use_line(computer_use)));
     }
     out
@@ -274,7 +283,7 @@ pub fn computer_line(verb: &str, value: &Value) -> String {
     format!("{verb} {} ({})", text(value, "name"), text(value, "state"))
 }
 
-/// `Forked try (stopped): main as of 14:02:31 (warm checkpoint, unchanged since, 40s old)`.
+/// `Forked try (stopped): main as of 14:02:31 (new checkpoint)`.
 pub fn forked(value: &Value) -> String {
     let line = computer_line("Forked", value);
     let checkpoint = &value["checkpoint"];
@@ -282,14 +291,9 @@ pub fn forked(value: &Value) -> String {
         return line;
     }
     let what = if checkpoint["reused"] == true {
-        let named = match text(checkpoint, "kind") {
+        match text(checkpoint, "kind") {
             "" => "checkpoint".to_owned(),
             kind => format!("{kind} checkpoint"),
-        };
-        if checkpoint["unchanged"] == true {
-            format!("{named}, unchanged since")
-        } else {
-            named
         }
     } else {
         "new checkpoint".to_owned()
@@ -625,11 +629,7 @@ pub fn up(value: &Value) -> String {
     } else {
         String::new()
     };
-    let mut out = format!(
-        "main is {}{made}. Warm checkpoint {} saved.",
-        text(main, "state"),
-        text(value, "warmCheckpoint")
-    );
+    let mut out = format!("main is {}{made}.", text(main, "state"));
     if let Some(host) = value["ssh"]["host"].as_str() {
         out.push_str(&format!(" ssh {host} reaches it."));
     } else if let Some(error) = value["ssh"]["error"].as_str() {

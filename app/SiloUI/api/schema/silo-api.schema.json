@@ -133,15 +133,6 @@
         "freshness": {
           "$ref": "#/$defs/Freshness"
         },
-        "generation": {
-          "description": "Moves whenever the engine sees something that can change the computer.",
-          "format": "uint64",
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
         "githubRepositories": {
           "items": {
             "type": "string"
@@ -1370,15 +1361,6 @@
       "properties": {
         "createdAt": {
           "type": "string"
-        },
-        "generation": {
-          "description": "A warm checkpoint: the generation its computer had when it was taken, when the engine\nrecorded one. A fork reuses the checkpoint only while the computer's generation is\nstill this one.",
-          "format": "uint64",
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
         },
         "id": {
           "type": "string"
@@ -7587,15 +7569,6 @@
         },
         "displayOpen": {
           "type": "boolean"
-        },
-        "generation": {
-          "description": "Moves whenever the engine sees something that can change the computer.",
-          "format": "uint64",
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
         },
         "id": {
           "type": "string"
@@ -15229,6 +15202,13 @@
           "minimum": 0,
           "type": [
             "integer",
+            "null"
+          ]
+        },
+        "desktop": {
+          "description": "`false`: the computer, and every fork of it, starts no desktop (a Linux recipe;\nabsent or `true` keeps the desktop on).",
+          "type": [
+            "boolean",
             "null"
           ]
         },

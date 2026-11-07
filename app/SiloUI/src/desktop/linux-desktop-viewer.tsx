@@ -43,6 +43,11 @@ export function LinuxDesktopViewer({ name, state, busy, error, onAction, onRetry
     && (state.updateRequired === true || state.updateAvailable === true || state.backend === "kasm")
   const computerUse = state?.computerUse
   const problem = error ?? menuError
+  // The built-in desktop is turned off for this computer (and so for its forks), not just stopped.
+  // An older computer, whose desktop was installed by hand, has no such setting; only a built-in
+  // desktop reports computer use.
+  const turnedOff = state != null && state.computerUse != null && state.state !== "uninstalled" && state.autoStart === false
+    && (state.state === "stopped" || state.state === "computer-stopped")
   const actionLabel = updateRequired ? "Update desktop" : state?.state === "computer-stopped" ? state.autoStart ? "Start computer" : "Start computer and desktop" : state?.state === "failed" ? "Restart desktop" : "Start desktop"
   const primaryAction: DesktopAction = updateRequired ? "update-streamer" : state?.state === "failed" ? "restart" : "start"
   return <TooltipProvider><main className="flex h-dvh min-h-0 flex-col bg-background text-foreground">
@@ -82,12 +87,13 @@ export function LinuxDesktopViewer({ name, state, busy, error, onAction, onRetry
     </section> : <div className="grid min-h-0 flex-1 place-items-center p-6 text-center" aria-busy={busy}>
       <div className="grid max-w-sm justify-items-center gap-3">
         <Monitor aria-hidden="true" className="size-8 text-muted-foreground" />
-        <p className="text-sm">{busy || state?.state === "starting" ? "Connecting to desktop…" : !state ? "Desktop unavailable" : state.state === "uninstalled" ? computerUse ? "Desktop unavailable" : "Desktop is not installed" : state.state === "failed" ? "Desktop needs attention" : state.state === "computer-stopped" ? "Computer is stopped" : "Desktop is stopped"}</p>
+        <p className="text-sm">{busy || state?.state === "starting" ? "Connecting to desktop…" : !state ? "Desktop unavailable" : turnedOff ? `${name} has no desktop` : state.state === "uninstalled" ? computerUse ? "Desktop unavailable" : "Desktop is not installed" : state.state === "failed" ? "Desktop needs attention" : state.state === "computer-stopped" ? "Computer is stopped" : "Desktop is stopped"}</p>
         {state && state.state !== "uninstalled" && state.state !== "starting" && <Button disabled={busy} size="sm" onClick={() => onAction(primaryAction)}>{actionLabel}</Button>}
         {updateAvailable && !updateRequired && <>
           <Button disabled={busy} size="sm" variant="ghost" onClick={() => onAction("update-streamer")}>Update desktop</Button>
           {state?.backend === "selkies" && <p className="text-xs text-muted-foreground">Updating adds a sharp display at your screen's full resolution, clipboard sharing, sound control and a screen that follows the window. It needs a network connection. You can start the desktop without updating.</p>}
         </>}
+        {turnedOff && <p className="text-xs text-muted-foreground">Turn on Desktop in the computer's settings, or start it here for now. Computer use is not applied while Desktop is off.</p>}
         {state?.state === "uninstalled" && !computerUse && <p className="text-xs text-muted-foreground">Choose Add Linux desktop in the computer’s actions menu.</p>}
       </div>
     </div>}

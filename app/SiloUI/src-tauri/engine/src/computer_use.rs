@@ -1081,6 +1081,11 @@ fn apply_with_delays(
     delays: &'static [Duration],
 ) -> Option<std::thread::JoinHandle<()>> {
     let configuration = built_in_computer(paths, name)?;
+    // The helper waits for the desktop session before it configures anything, so a computer
+    // that starts no desktop would hold its turn for minutes. Turning the desktop on applies it.
+    if desktop::configuration(&configuration).is_some_and(|desktop| !desktop.start_with_computer) {
+        return None;
+    }
     let id = configuration.id().to_owned();
     let instance = running_identity(runner.as_ref(), paths, name, &id)?;
     // A new apply (a boot, a change of the switch) takes over from a retry still waiting.

@@ -22,7 +22,7 @@
 | Edit time | On screen | Command | What the viewer sees (from the run) | Caption |
 |---|---|---|---|---|
 | 0–4 s | Title card | — | "Silo" | git for your agent's computer |
-| 4–10 s | Terminal | `silo up --recipe demo` | `main is running (made from demo). Warm checkpoint … saved. ssh main.silo reaches it.` | One computer: `main`. (time cut) |
+| 4–10 s | Terminal | `silo up --recipe demo` | `main is running (made from demo). ssh main.silo reaches it.` | One computer: `main`. (time cut) |
 | 10–20 s | Terminal | `silo fork main -n 4 --name try -- bash -c 'echo kept-from-$(hostname) > ~/final-note.txt'` | four lines `try-N  exit 0  http://3000.try-N.silo.localhost:47383`, then `4 forks of main; review with …` | Four forks, each ran a command. Measured: median 17.06 s, N=3 (final-run.txt). (time cut) |
 | 20–27 s | Browser, four tabs | open the four printed URLs | each page shows `host=` and that fork's hostname | A URL per fork. |
 | 27–35 s | Terminal | `silo diff try-1` | `Other changed` / `+ /home/silo/final-note.txt` / `Ignored: 2 paths (caches, logs, build output)` / `credentials used: none` | What the agent changed. |

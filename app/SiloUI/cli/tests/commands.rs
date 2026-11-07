@@ -5,7 +5,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use fake_engine::{finished, listing, FakeEngine};
+use fake_engine::{finished, listing, listing_without_desktop, FakeEngine};
 use serde_json::{json, Value};
 use silo_cli::{
     cli::{run, Cli},
@@ -550,6 +550,183 @@ async fn retry_setup_runs_the_engines_setup_retry_for_the_computer() {
     assert!(
         matches!(cli.command, silo_cli::cli::Command::RetrySetup { ref computer } if computer == "mac")
     );
+}
+
+fn desktop_engine(off: bool, state: &'static str) -> FakeEngine {
+    FakeEngine::start(move |method, _| match method {
+        "computers.list" => {
+            let off: &[&str] = if off { &["main"] } else { &[] };
+            Ok(listing_without_desktop(&[("main", state)], off))
+        }
+        "computers.configuration.change" | "desktop.action" => Ok(json!({"jobId": "job:7"})),
+        "operations.job.get" => Ok(finished(Value::Null)),
+        "operations.job.acknowledge" => Ok(Value::Null),
+        other => Err(("internal", format!("unexpected {other}"))),
+    })
+}
+
+#[tokio::test]
+async fn desktop_on_changes_the_setting_once_and_lets_the_guest_start_it() {
+    let engine = desktop_engine(true, "running");
+    let connected = Engine::connect(&engine.socket).await.unwrap();
+    let value = ops::desktop_set(&connected, "main", true, &ignore)
+        .await
+        .unwrap();
+    assert_eq!(value["desktop"], true);
+    let change = &engine.calls("computers.configuration.change")[0]["change"];
+    assert_eq!(change["kind"], "upsert");
+    assert_eq!(
+        change["configuration"]["desktop"],
+        json!({"startWithComputer": true, "builtIn": true})
+    );
+    assert_eq!(
+        change["expected"]["desktop"],
+        json!({"startWithComputer": false, "builtIn": true})
+    );
+    assert!(engine.calls("desktop.action").is_empty());
+}
+
+#[tokio::test]
+async fn desktop_off_turns_the_setting_off_and_stops_the_running_desktop() {
+    let engine = desktop_engine(false, "running");
+    let connected = Engine::connect(&engine.socket).await.unwrap();
+    ops::desktop_set(&connected, "main", false, &ignore)
+        .await
+        .unwrap();
+    let change = &engine.calls("computers.configuration.change")[0]["change"];
+    assert_eq!(
+        change["configuration"]["desktop"]["startWithComputer"],
+        false
+    );
+    assert_eq!(change["configuration"]["desktop"]["builtIn"], true);
+    assert_eq!(engine.calls("desktop.action")[0]["action"], "stop");
+}
+
+#[tokio::test]
+async fn desktop_on_for_a_desktop_that_is_on_only_starts_it_and_off_for_one_that_is_off_does_nothing(
+) {
+    let engine = desktop_engine(false, "running");
+    let connected = Engine::connect(&engine.socket).await.unwrap();
+    ops::desktop_set(&connected, "main", true, &ignore)
+        .await
+        .unwrap();
+    assert!(engine.calls("computers.configuration.change").is_empty());
+    assert_eq!(engine.calls("desktop.action")[0]["action"], "start");
+    let engine = desktop_engine(true, "running");
+    let connected = Engine::connect(&engine.socket).await.unwrap();
+    ops::desktop_set(&connected, "main", false, &ignore)
+        .await
+        .unwrap();
+    assert!(engine.calls("computers.configuration.change").is_empty());
+    assert!(engine.calls("desktop.action").is_empty());
+}
+
+#[tokio::test]
+async fn desktop_needs_a_running_linux_computer() {
+    let engine = desktop_engine(true, "stopped");
+    let connected = Engine::connect(&engine.socket).await.unwrap();
+    let error = ops::desktop_set(&connected, "main", true, &ignore)
+        .await
+        .unwrap_err();
+    assert!(
+        error.message.contains("silo start main"),
+        "{}",
+        error.message
+    );
+    assert!(engine.calls("computers.configuration.change").is_empty());
+
+    let mac = FakeEngine::start(|method, _| match method {
+        "computers.list" => Ok(json!({
+            "linux": {"computers": []},
+            "macos": {"computers": [{
+                "id": "id-mac", "name": "mac", "state": "running", "detail": "",
+                "cpus": 4, "memoryGiB": 8, "diskGiB": 64, "boots": 1, "checkpoints": []
+            }]}
+        })),
+        other => Err(("internal", format!("unexpected {other}"))),
+    });
+    let connected = Engine::connect(&mac.socket).await.unwrap();
+    let error = ops::desktop_set(&connected, "mac", false, &ignore)
+        .await
+        .unwrap_err();
+    assert!(
+        error.message.contains("macOS computer"),
+        "{}",
+        error.message
+    );
+}
+
+/// An older computer: its desktop was installed by hand, or it has none, and `startWithComputer`
+/// does not mean "no desktop" there.
+fn legacy_desktop_engine(desktop: Value) -> FakeEngine {
+    FakeEngine::start(move |method, _| match method {
+        "computers.list" => {
+            let mut listed = listing(&[("old", "running")]);
+            let configuration = &mut listed["linux"]["computers"][0]["configuration"];
+            if desktop.is_null() {
+                configuration.as_object_mut().unwrap().remove("desktop");
+            } else {
+                configuration["desktop"] = desktop.clone();
+            }
+            Ok(listed)
+        }
+        other => Err(("internal", format!("unexpected {other}"))),
+    })
+}
+
+#[tokio::test]
+async fn a_computer_without_a_built_in_desktop_is_never_said_to_have_no_desktop() {
+    for desktop in [json!({"startWithComputer": false}), Value::Null] {
+        let engine = legacy_desktop_engine(desktop);
+        let connected = Engine::connect(&engine.socket).await.unwrap();
+        let computer = connected.computer("old").await.unwrap();
+        assert_eq!(computer.desktop_on(), None);
+        assert!(silo_cli::gui::ensure_desktop(&computer).is_ok());
+        let value = ops::status(&connected, "old").await.unwrap();
+        assert!(value["desktop"].is_null());
+        assert!(!silo_cli::render::status(&value).contains("no desktop"));
+        let error = ops::desktop_set(&connected, "old", true, &ignore)
+            .await
+            .unwrap_err();
+        assert!(
+            error.message.contains("does not have a built-in desktop"),
+            "{}",
+            error.message
+        );
+        assert!(engine.calls("computers.configuration.change").is_empty());
+    }
+}
+
+#[test]
+fn the_desktop_command_takes_on_or_off_and_a_computer() {
+    let cli = <Cli as clap::Parser>::try_parse_from(["silo", "desktop", "off", "main"]).unwrap();
+    assert!(matches!(
+        cli.command,
+        silo_cli::cli::Command::Desktop { state: silo_cli::cli::DesktopState::Off, ref computer }
+            if computer == "main"
+    ));
+    assert!(<Cli as clap::Parser>::try_parse_from(["silo", "desktop", "main"]).is_err());
+}
+
+#[tokio::test]
+async fn status_says_when_a_computer_has_no_desktop() {
+    let engine = desktop_engine(true, "running");
+    let connected = Engine::connect(&engine.socket).await.unwrap();
+    let value = ops::status(&connected, "main").await.unwrap();
+    assert_eq!(value["desktop"], false);
+    assert!(silo_cli::render::status(&value)
+        .contains("main has no desktop; turn it on with `silo desktop on main`."));
+}
+
+#[test]
+fn status_leaves_out_computer_use_for_a_computer_with_no_desktop() {
+    let computer_use = json!({"state": "failed", "approval": "ask", "driverVersion": "0.38.0"});
+    let value = |desktop: bool| {
+        json!({"name": "main", "kind": "linux", "state": "running", "cpus": 2, "memoryGiB": 4,
+               "checkpoints": 0, "desktop": desktop, "computerUse": computer_use})
+    };
+    assert!(silo_cli::render::status(&value(true)).contains("computer use: failed"));
+    assert!(!silo_cli::render::status(&value(false)).contains("computer use"));
 }
 
 fn keep_engine(result: Value) -> FakeEngine {

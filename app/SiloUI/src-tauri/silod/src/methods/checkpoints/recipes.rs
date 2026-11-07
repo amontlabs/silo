@@ -168,23 +168,25 @@ impl BuildEnv for DispatchEnv {
         cpus: u32,
         memory_gib: u32,
         disk_gib: u32,
+        desktop: bool,
     ) -> Result<Created, String> {
         let params = match os {
             RecipeOs::Linux => {
                 let cpus = u8::try_from(cpus).map_err(|_| "cpus is too large.".to_owned())?;
-                json!({
-                    "kind": "linux",
-                    "configuration": {
-                        "id": uuid::Uuid::new_v4().to_string(),
-                        "name": name,
-                        "cpus": cpus,
-                        "maxCPUs": cpus,
-                        "memoryGiB": memory_gib,
-                        "maxMemoryGiB": memory_gib,
-                        "workspaceStorageGiB": disk_gib,
-                        "runtimeStorageGiB": 10,
-                    },
-                })
+                let mut configuration = json!({
+                    "id": uuid::Uuid::new_v4().to_string(),
+                    "name": name,
+                    "cpus": cpus,
+                    "maxCPUs": cpus,
+                    "memoryGiB": memory_gib,
+                    "maxMemoryGiB": memory_gib,
+                    "workspaceStorageGiB": disk_gib,
+                    "runtimeStorageGiB": 10,
+                });
+                if !desktop {
+                    configuration["desktop"] = json!({"startWithComputer": false});
+                }
+                json!({"kind": "linux", "configuration": configuration})
             }
             RecipeOs::Macos => json!({
                 "kind": "macos",

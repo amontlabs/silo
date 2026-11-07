@@ -104,6 +104,10 @@ impl RuntimeRunner for FailedCaptureRunner {
 }
 
 fn failed_full_capture_settles_its_paused_source(failure: &'static str) {
+    failed_capture_settles_its_paused_source(failure, CaptureDepth::WithMemory);
+}
+
+fn failed_capture_settles_its_paused_source(failure: &'static str, depth: CaptureDepth) {
     let _test_state = crate::test_support::global_state();
     for resume_failure in ["", "resume"] {
         let directory = tempfile::tempdir().unwrap();
@@ -114,9 +118,12 @@ fn failed_full_capture_settles_its_paused_source(failure: &'static str) {
             .computer(ID, "dev", "Creating checkpoint")
             .unwrap();
         guard.allow_cancel();
-        let reported = capture_with(&runner, &paths, ID, "Failed", "manual")
-            .unwrap_err()
-            .to_string();
+        let reported = match depth {
+            CaptureDepth::WithMemory => capture_with(&runner, &paths, ID, "Failed", "manual"),
+            CaptureDepth::DisksOnly => capture_fork_point(&runner, &paths, ID),
+        }
+        .unwrap_err()
+        .to_string();
         drop(guard);
         assert_eq!(
             *runner.runtime.state.lock().unwrap(),
@@ -164,6 +171,45 @@ fn full_capture_cancellation_settles_its_paused_source() {
 #[test]
 fn full_capture_verification_failure_settles_its_paused_source() {
     failed_full_capture_settles_its_paused_source("verify");
+}
+
+#[test]
+fn disk_only_capture_error_settles_its_paused_source() {
+    failed_capture_settles_its_paused_source("error", CaptureDepth::DisksOnly);
+}
+
+#[test]
+fn disk_only_capture_timeout_settles_its_paused_source() {
+    failed_capture_settles_its_paused_source("timeout", CaptureDepth::DisksOnly);
+}
+
+#[test]
+fn disk_only_capture_cancellation_settles_its_paused_source() {
+    failed_capture_settles_its_paused_source("cancel", CaptureDepth::DisksOnly);
+}
+
+#[test]
+fn disk_only_capture_verification_failure_settles_its_paused_source() {
+    failed_capture_settles_its_paused_source("verify", CaptureDepth::DisksOnly);
+}
+
+#[test]
+fn a_paused_source_left_by_a_disk_only_capture_is_recovered_before_the_next_capture() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let paths = restore_fixture(&directory, None);
+    let runner = FailedCaptureRunner::new("error", "resume|stop");
+    capture_fork_point(&runner, &paths, ID).unwrap_err();
+    assert_eq!(*runner.runtime.state.lock().unwrap(), "Paused");
+    assert_eq!(
+        load(&paths, ID).unwrap().inflight_checkpoint.unwrap().scope,
+        "disk"
+    );
+    let retry = FailedCaptureRunner::new("success", "resume");
+    *retry.runtime.state.lock().unwrap() = "Paused";
+    capture_fork_point(&retry, &paths, ID).unwrap();
+    assert_eq!(*retry.runtime.state.lock().unwrap(), "Stopped");
+    assert!(load(&paths, ID).unwrap().inflight_checkpoint.is_none());
 }
 
 #[test]

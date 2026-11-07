@@ -292,9 +292,6 @@ pub struct ApplicationComputer {
     pub pending_secret_revocations: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub checkpoints: Vec<super::checkpoints::Checkpoint>,
-    /// Moves whenever the engine sees something that can change the computer.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub generation: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pending_checkpoint_restore: Option<super::checkpoints::PendingRestore>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -407,9 +404,6 @@ pub struct MacosComputer {
     /// How many times the engine has booted the computer.
     #[serde(default)]
     pub boots: u32,
-    /// Moves whenever the engine sees something that can change the computer.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub generation: Option<u64>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize, schemars::JsonSchema)]

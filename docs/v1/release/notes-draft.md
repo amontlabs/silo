@@ -27,7 +27,7 @@ Forks get none of the credentials Silo manages unless you name them; files on di
 ## Recipes, URLs and speed
 
 - Recipes describe a clean computer in `.silo/recipes/<name>.yaml` (OS, packages, setup commands, services, ports). Build one with `silo recipe build` and fork from it. `linux-dev` and `macos-xcode` come built in.
-- `silo up` makes `main` from a recipe, starts it and keeps a warm checkpoint. A fork of `main` starts from that checkpoint only if main has not changed since and the checkpoint is under a minute old (`warm_max_age` in `.silo/silo.yaml`); Silo says which checkpoint it used. Changes made over a plain `ssh` session are not seen.
+- `silo up` makes `main` from a recipe and starts it. A fork of `main` starts from `main` as it is when the fork is made, from a disk-only capture; Silo says which checkpoint it used.
 - Each computer's websites open at their own local name, such as `http://3000.my-computer.silo.localhost:47383`, so several computers serving the same port can be opened side by side. Forks made with `silo fork -n` publish their source's ports and print their URLs. `silo up` makes `ssh main.silo` work.
 - Forking a macOS checkpoint is faster: the fork's first start is its only boot, and it no longer reinstalls developer tools the checkpoint already had. Forking a Mac without choosing a checkpoint forks its current state from a "Fork point" checkpoint.
 
@@ -54,5 +54,5 @@ Forks get none of the credentials Silo manages unless you name them; files on di
 ## Notes for the owner (delete before publishing)
 
 - Source changesets cover everything above; check wording against them.
-- Before release: confirm the macOS "promote" and the 11-character name limit text still match the final behavior, and that the "less than a minute" warm-checkpoint age is the shipped default.
+- Before release: confirm the macOS "promote" and the 11-character name limit text still match the final behavior,.
 - No timings, sizes or counts are claimed here. Add numbers only from the final run (slice 6b) with their source.

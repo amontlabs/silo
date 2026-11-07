@@ -109,11 +109,6 @@ pub struct Checkpoint {
     pub kind: CheckpointKind,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub size_bytes: Option<u64>,
-    /// A warm checkpoint: the generation its computer had when it was taken, when the engine
-    /// recorded one. A fork reuses the checkpoint only while the computer's generation is
-    /// still this one.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub generation: Option<u64>,
 }
 
 /// The Linux and macOS forms described in 20 §1.4. Their field names and
@@ -198,12 +193,13 @@ pub enum CheckpointKind {
     // Taken before changes are applied to main; trimmed by its own retention count.
     #[serde(rename = "before-keep")]
     BeforeKeep,
-    // The disk a Fork of a computer's current state starts from; made by Fork, kept while a
-    // fork made from it exists.
+    // The disks (not the memory) of a computer's current state, which forks start from: made
+    // by Fork, or by a create of this kind when several forks share one; kept while a fork
+    // made from it exists.
     #[serde(rename = "fork-point")]
     ForkPoint,
-    // The checkpoint `silo up` keeps of main so a fork of an unchanged main starts without
-    // taking a new one; replaced on every `up`, never trimmed by retention.
+    // Read-only: a checkpoint `silo up` of an earlier version kept of main. Nothing makes
+    // one now and a create with this kind is refused; it stays so saved ones still load.
     Warm,
     // Taken after a step (a command an agent ran through Silo); trimmed by its own count.
     Step,

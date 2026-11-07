@@ -525,13 +525,6 @@ pub(crate) fn change_computer(
                 crate::desktop::configuration(&computers[index]),
             ) {
                 next.built_in = was.built_in;
-                // A built-in desktop always starts with its computer: computer use needs the
-                // session. A controller from before `builtIn` existed (the compatibility
-                // path) may still send `startWithComputer: false`; only legacy computers keep a
-                // manual choice.
-                if was.built_in {
-                    next.start_with_computer = true;
-                }
             }
             computers[index] = configuration;
         }
@@ -6321,6 +6314,7 @@ fn apply_whole_configuration_with_progress(
             progress("computer-removal", configuration.name(), 1);
         }
         for configuration in &request.computers {
+            let mut desktop_turned_on = false;
             match previous_by_id.get(configuration.id()) {
                 None => {
                     progress("computer-configuration", configuration.name(), 0);
@@ -6337,6 +6331,8 @@ fn apply_whole_configuration_with_progress(
                 Some(old) => {
                     progress("computer-configuration", configuration.name(), 0);
                     update_computer(runner, paths, old, configuration)?;
+                    desktop_turned_on =
+                        crate::desktop::turns_built_in_desktop_on(old, configuration);
                 }
             }
             changed = true;
@@ -6350,6 +6346,15 @@ fn apply_whole_configuration_with_progress(
             progress("computer-verification", configuration.name(), 0);
             verify_computer_configuration(runner, paths, configuration)?;
             progress("computer-verification", configuration.name(), 1);
+            if desktop_turned_on {
+                // Computer use was skipped while the desktop was off, and the saved
+                // configuration now says it is on; this never fails the save.
+                let _ = crate::computer_use::after_boot(
+                    std::sync::Arc::new(Booted),
+                    paths,
+                    configuration.name(),
+                );
+            }
         }
         write_metadata(&paths.metadata, &request)?;
         configuration_recovery::finish(paths)
@@ -6576,7 +6581,11 @@ fn create_computer_with_progress(
         progress("desktop-installation", name, 1);
     }
     crate::computer_use::start_with(paths, id, crate::computer_use::initial_approval());
-    if crate::computer_use::is_built_in(configuration) {
+    // The setup boots the desktop session, which a computer with its desktop off does not have;
+    // turning the desktop on applies computer use.
+    let desktop_starts = crate::desktop::configuration(configuration)
+        .is_some_and(|desktop| desktop.start_with_computer);
+    if crate::computer_use::is_built_in(configuration) && desktop_starts {
         progress("computer-use-setup", name, 0);
         let finished = crate::computer_use::finish_in_creation(runner, paths, id, name)
             .map_err(|reason| {
@@ -9819,7 +9828,7 @@ esac
     }
 
     #[test]
-    fn an_older_controller_cannot_stop_a_built_in_desktop_from_starting_with_its_computer() {
+    fn a_built_in_desktop_can_be_turned_off_and_on_again_and_keeps_built_in() {
         let built_in = |start| {
             let mut configuration = computer();
             {
@@ -9846,18 +9855,7 @@ esac
             crate::desktop::configuration(&computers[0])
                 .map(|d| (d.start_with_computer, d.built_in))
         };
-        // The older controller does not know `builtIn`: its expected and replacement carry
-        // `false` and `startWithComputer: false`.
         let mut computers = vec![built_in(true)];
-        change_computer(
-            &mut computers,
-            computer().id(),
-            Some(&legacy(true)),
-            Some(&legacy(false)),
-        )
-        .unwrap();
-        assert_eq!(started(&computers), Some((true, true)));
-        // A controller that knows the field cannot turn it off either.
         change_computer(
             &mut computers,
             computer().id(),
@@ -9865,7 +9863,24 @@ esac
             Some(&built_in(false)),
         )
         .unwrap();
+        assert_eq!(started(&computers), Some((false, true)));
+        change_computer(
+            &mut computers,
+            computer().id(),
+            Some(&built_in(false)),
+            Some(&built_in(true)),
+        )
+        .unwrap();
         assert_eq!(started(&computers), Some((true, true)));
+        // A controller that cannot see `builtIn` changes the choice and cannot clear the flag.
+        change_computer(
+            &mut computers,
+            computer().id(),
+            Some(&legacy(true)),
+            Some(&legacy(false)),
+        )
+        .unwrap();
+        assert_eq!(started(&computers), Some((false, true)));
         // A legacy computer keeps its manual choice.
         let mut computers = vec![legacy(true)];
         change_computer(
@@ -12231,6 +12246,50 @@ exit 9
                 Some(crate::computer_use::Outcome::Applied)
             );
         }
+    }
+
+    #[test]
+    fn a_computer_created_with_its_desktop_off_is_not_booted_to_set_up_computer_use() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let paths = paths(&directory);
+        let runner = StubRunner::successful_json(vec![
+            json!([]),
+            json!(1),
+            json!(1),
+            json!(null),
+            inspect(&paths, "Created"),
+            json!(null),
+            inspect(&paths, "Stopped"),
+            inspect(&paths, "Stopped"),
+            json!(1),
+            json!(null),
+            inspect(&paths, "Stopped"),
+        ]);
+        let mut configuration = built_in_computer();
+        {
+            let ComputerConfiguration { desktop, .. } = &mut configuration;
+            *desktop = Some(crate::desktop::DesktopConfiguration {
+                start_with_computer: false,
+                built_in: true,
+            });
+        }
+        let events = Mutex::new(Vec::new());
+        create_computer_with_progress(&runner, &paths, &configuration, &|step, _, _| {
+            events.lock().unwrap().push(step.to_owned())
+        })
+        .unwrap();
+        assert!(!events
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|step| step.starts_with("computer-use")));
+        assert!(!runner.calls.lock().unwrap().iter().any(|call| call
+            .last()
+            .is_some_and(|last| last.contains("apply --approval"))));
+        assert!(crate::computer_use::settings(&paths, configuration.id())
+            .last
+            .is_none());
     }
 
     #[test]

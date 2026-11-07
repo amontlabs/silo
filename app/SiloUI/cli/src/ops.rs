@@ -9,9 +9,11 @@ use silo_api::methods::{
     checkpoints::{CheckpointCreateParams, CheckpointForkParams, CheckpointKind},
     common::{ComputerTargetParams, DeviceParams},
     computers::{
-        ComputerConfiguration, ComputerCreateParams, ComputerDeleteParams,
+        ComputerConfiguration, ComputerConfigurationChange, ComputerConfigurationChangeParams,
+        ComputerCreateParams, ComputerDeleteParams, DesktopConfiguration,
         MacosComputerCreateRequest,
     },
+    desktop::{DesktopAction, DesktopActionParams},
     guest::GuestExecParams,
     keep::{ChangesKeepParams, ChangesPromoteParams, ChangesUndoParams, KeepHooks},
     recipes::{RecipeBuildParams, RecipeRemoveParams},
@@ -511,6 +513,91 @@ pub async fn stop(engine: &Engine, name: &str, progress: Progress<'_>) -> Result
     Ok(engine.computer(name).await?.to_json())
 }
 
+/// `silo desktop on|off`: whether a Linux computer starts a desktop, which its forks inherit.
+/// Turning it on starts the desktop now; turning it off stops it. The computer must be running,
+/// because the choice is written inside it.
+pub async fn desktop_set(
+    engine: &Engine,
+    name: &str,
+    on: bool,
+    progress: Progress<'_>,
+) -> Result<Value, CliError> {
+    let computer = engine.computer(name).await?;
+    let Some(current) = &computer.configuration else {
+        return Err(CliError::new(format!(
+            "{name} is a macOS computer; its display is the computer itself, so there is no desktop to turn on or off."
+        )));
+    };
+    if computer.desktop_on().is_none() {
+        return Err(CliError::new(format!(
+            "{name} does not have a built-in desktop, so it has no desktop setting for `silo desktop`; change its desktop in the app's computer settings."
+        )));
+    }
+    if computer.state != "running" {
+        return Err(CliError::new(format!(
+            "{name} is {}; start it with `silo start {name}` first.",
+            computer.state
+        )));
+    }
+    let current: ComputerConfiguration =
+        serde_json::from_value(current.clone()).map_err(|error| {
+            CliError::new(format!("{name}'s configuration is not readable: {error}"))
+        })?;
+    let was_on = computer.desktop_on() == Some(true);
+    if was_on != on {
+        let mut next = current.clone();
+        next.desktop = Some(DesktopConfiguration {
+            start_with_computer: on,
+            built_in: current
+                .desktop
+                .as_ref()
+                .is_some_and(|desktop| desktop.built_in),
+        });
+        engine
+            .run_job(
+                &format!(
+                    "Turning the desktop of {name} {}",
+                    if on { "on" } else { "off" }
+                ),
+                requests::computers_configuration_change(ComputerConfigurationChangeParams {
+                    change: ComputerConfigurationChange::Upsert {
+                        configuration: next,
+                        expected: Some(current),
+                    },
+                    request_id: None,
+                    retry_computer_id: None,
+                    device_id: None,
+                }),
+                progress,
+            )
+            .await?;
+    }
+    // Turning the choice on has started the desktop; one that was already on may have been
+    // stopped by hand. Turning it off stops the running one.
+    let action = match (on, was_on) {
+        (true, true) => Some(DesktopAction::Start),
+        (false, true) => Some(DesktopAction::Stop),
+        _ => None,
+    };
+    if let Some(action) = action {
+        engine
+            .run_job(
+                &format!(
+                    "{} the desktop of {name}",
+                    if on { "Starting" } else { "Stopping" }
+                ),
+                requests::desktop_action(DesktopActionParams {
+                    computer_id: computer.id.clone(),
+                    device_id: None,
+                    action,
+                }),
+                progress,
+            )
+            .await?;
+    }
+    Ok(json!({ "computer": name, "desktop": on }))
+}
+
 pub async fn retry_setup(
     engine: &Engine,
     name: &str,
@@ -724,7 +811,6 @@ async fn fork_now(
 ) -> Result<Value, CliError> {
     let mut recipe_hash = None;
     let mut checkpoint = args.checkpoint.clone();
-    let mut warm_reused = false;
     let source = match &args.recipe_name {
         Some(recipe_name) => {
             Settings::check_recipe(settings, recipe_name)?;
@@ -748,12 +834,6 @@ async fn fork_now(
         (None, _) => default_fork_name(&source.name, &short_id()),
     };
     let started = crate::clock::now_unix();
-    if checkpoint.is_none() {
-        let max_age = Settings::warm_max_age_secs(settings);
-        checkpoint = fresh_warm(&source, started, max_age)
-            .and_then(|warm| warm["id"].as_str().map(str::to_owned));
-        warm_reused = checkpoint.is_some();
-    }
     let known_before: Vec<Value> = source.checkpoints.clone();
     let mut params = CheckpointForkParams {
         computer_id: source.id.clone(),
@@ -825,7 +905,6 @@ async fn fork_now(
         "createdAt": crate::clock::format_rfc3339_utc(at),
         "ageSeconds": (started - at).max(0),
         "reused": reused,
-        "unchanged": warm_reused,
     });
     fork["forkedAsOf"] = json!(crate::clock::local_clock(at));
     Ok(fork)
@@ -846,31 +925,6 @@ async fn new_checkpoint(engine: &Engine, computer_id: &str, before: &[Value]) ->
                 .unwrap_or(0)
         })
         .cloned()
-}
-
-/// The newest warm checkpoint of `source`, when it was taken no more than `max_age` seconds
-/// before `now`, `source` runs, and the engine can tell `source` is unchanged since: the
-/// checkpoint records the generation `source` has now. A fork with no named checkpoint starts
-/// from it; otherwise the engine takes a new one. A change made over an `ssh` session
-/// that goes through neither the engine nor SSH access is not seen, which is what the age
-/// limit is for.
-pub fn fresh_warm(source: &Computer, now: i64, max_age: u64) -> Option<&Value> {
-    let generation = source.generation?;
-    if source.state != "running" {
-        return None;
-    }
-    source
-        .checkpoints
-        .iter()
-        .filter(|cp| cp["kind"] == "warm")
-        .filter(|cp| cp["generation"].as_u64() == Some(generation))
-        .filter_map(|cp| {
-            let at = crate::clock::parse_rfc3339(cp["createdAt"].as_str()?)?;
-            Some((at, cp))
-        })
-        .max_by_key(|(at, _)| *at)
-        .filter(|(at, _)| now - at <= max_age as i64)
-        .map(|(_, cp)| cp)
 }
 
 pub struct DiffArgs {
@@ -1423,13 +1477,12 @@ pub fn resolve_recipe(
 
 pub fn parse_checkpoint_kind(text: &str) -> Result<CheckpointKind, CliError> {
     match text {
-        "warm" => Ok(CheckpointKind::Warm),
         "manual" => Ok(CheckpointKind::Manual),
         "automatic" => Ok(CheckpointKind::Automatic),
         "before-keep" => Ok(CheckpointKind::BeforeKeep),
         "step" => Ok(CheckpointKind::Step),
         other => Err(CliError::new(format!(
-            "Unknown checkpoint kind {other}; use manual, automatic, before-keep, warm or step."
+            "Unknown checkpoint kind {other}; use manual, automatic, before-keep or step."
         ))),
     }
 }
@@ -1840,15 +1893,10 @@ pub async fn recipe_remove(engine: &Engine, name: &str) -> Result<Value, CliErro
 
 // MARK: Up
 
-const WARM_NAME: &str = "silo-warm";
-
-/// Makes sure the engine answers, `main` exists (made from the recipe) and runs, and keeps a
-/// warm checkpoint of it. The previous warm checkpoint is replaced only after the new one has
-/// been saved; a fork that names no checkpoint uses the warm one while it is young enough
-/// (`warm_max_age`, one minute by default; see [`fresh_warm`]). With `ssh` (the home
-/// directory and channel), `ssh main.silo` is set up first: the engine counts the SSH
-/// connection it prepares as a change to main, so done after the checkpoint it would leave
-/// the checkpoint unusable.
+/// Makes sure the engine answers, `main` exists (made from the recipe) and runs. It saves no
+/// checkpoint: a fork starts from `main` as it is when the fork is made. The warm checkpoint
+/// an earlier `up` saved is removed, so it does not keep a memory snapshot on disk. With
+/// `ssh` (the home directory and channel), `ssh main.silo` is set up.
 pub async fn up(
     engine: &Engine,
     recipe_name: &str,
@@ -1900,25 +1948,17 @@ pub async fn up(
         Some((home, channel)) => crate::access::ssh_for_up(engine, home, channel).await,
         None => Value::Null,
     };
-    let previous: Vec<String> = main
+    let left_by_earlier_versions: Vec<String> = main
         .checkpoints
         .iter()
         .filter(|cp| cp["kind"] == "warm")
         .filter_map(|cp| cp["id"].as_str().map(str::to_owned))
         .collect();
-    let warm = checkpoint(
-        engine,
-        MAIN,
-        Some(WARM_NAME),
-        Some(CheckpointKind::Warm),
-        progress,
-    )
-    .await?;
-    for id in previous {
+    for id in left_by_earlier_versions {
         // A checkpoint a fork still depends on stays until a later `up`.
         let _ = engine
             .run_job(
-                "Removing the previous warm checkpoint",
+                "Removing the warm checkpoint of an earlier version",
                 requests::checkpoints_delete(
                     silo_api::methods::checkpoints::CheckpointTargetParams {
                         computer_id: main.id.clone(),
@@ -1934,7 +1974,6 @@ pub async fn up(
         "main": engine.computer(MAIN).await?.to_json(),
         "created": created,
         "recipe": recipe_name,
-        "warmCheckpoint": warm["id"],
         "publishedPorts": ports,
         "portsError": ports_error,
         "ssh": ssh,

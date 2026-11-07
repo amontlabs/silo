@@ -269,20 +269,12 @@ fn fingerprint(paths: &RuntimePaths, name: &str) -> Result<String, String> {
         base64::engine::general_purpose::STANDARD_NO_PAD.encode(Sha256::digest(bytes))
     ))
 }
-/// Reads a listener's output until it ends: `SILO_SSH_READY` once it listens, then a line
-/// per session opened and closed. Each open session keeps the computer in flight
-/// (`crate::generation`), so a warm checkpoint taken across it is never reused; the
-/// listener's exit ends them all.
-fn follow_listener(output: impl BufRead, computer_id: &str, ready: &SyncSender<()>) {
-    let mut sessions = Vec::new();
+/// Reads a listener's output until it ends and signals `ready` on `SILO_SSH_READY`, which the
+/// listener prints once it listens.
+fn follow_listener(output: impl BufRead, ready: &SyncSender<()>) {
     for line in output.lines().map_while(Result::ok) {
-        match line.as_str() {
-            "SILO_SSH_READY" => {
-                let _ = ready.try_send(());
-            }
-            "SILO_SSH_SESSION_OPEN" => sessions.push(crate::generation::touch(Some(computer_id))),
-            "SILO_SSH_SESSION_CLOSED" => drop(sessions.pop()),
-            _ => {}
+        if line == "SILO_SSH_READY" {
+            let _ = ready.try_send(());
         }
     }
 }
@@ -337,8 +329,7 @@ fn spawn(paths: &RuntimePaths, config: &Configuration) -> Result<Listener, Strin
             .ok_or("Could not read SSH listener readiness.")?;
         listener.children.push(child);
         let (tx, rx) = std::sync::mpsc::sync_channel(1);
-        let computer_id = config.computer_id.clone();
-        std::thread::spawn(move || follow_listener(BufReader::new(stdout), &computer_id, &tx));
+        std::thread::spawn(move || follow_listener(BufReader::new(stdout), &tx));
         rx.recv_timeout(Duration::from_secs(8)).map_err(|_| "SSH could not listen. Check whether the port is in use, the network address is available, and the bundled runtime is current.")?;
         if listener
             .children
@@ -1155,61 +1146,6 @@ mod tests {
         // A start or stop through the engine moves the generation.
         crate::generation::bump(&c.computer_id);
         assert!(!owned.still_stopped(&c, now));
-    }
-    #[test]
-    fn a_listener_with_no_session_leaves_warm_checkpoints_reusable() {
-        use crate::generation;
-        let mut c = config();
-        c.computer_id = "00000000-0000-4000-8000-0000000000aa".into();
-        let id = c.computer_id.clone();
-        let before = generation::generation(&id);
-        let listener = Listener::new(&c);
-        assert_eq!(generation::generation(&id), before);
-        assert!(generation::idle(&id));
-        generation::note_warm_job("job:ssh-access-warm", generation::warm_baseline(&id));
-        generation::job_finished("job:ssh-access-warm", Some("cp-ssh-access-warm"));
-        assert_eq!(
-            generation::warm_generation("cp-ssh-access-warm"),
-            Some(before)
-        );
-        drop(listener);
-        assert_eq!(generation::generation(&id), before);
-    }
-    #[test]
-    fn each_reported_session_keeps_the_computer_in_flight_until_it_closes() {
-        use crate::generation;
-        use std::os::unix::net::UnixStream;
-        let id = "00000000-0000-4000-8000-0000000000cc";
-        let (mut runtime, output) = UnixStream::pair().unwrap();
-        let (ready, readied) = std::sync::mpsc::sync_channel(1);
-        let reader =
-            std::thread::spawn(move || follow_listener(BufReader::new(output), id, &ready));
-        // Waits until the reader has handled everything written so far.
-        let settle = |busy: bool| {
-            let until = Instant::now() + Duration::from_secs(5);
-            while generation::idle(id) == busy && Instant::now() < until {
-                std::thread::sleep(Duration::from_millis(5));
-            }
-        };
-        writeln!(runtime, "SILO_SSH_READY").unwrap();
-        readied.recv_timeout(Duration::from_secs(5)).unwrap();
-        assert!(generation::idle(id));
-        // A warm checkpoint taken while no session ran keeps its generation.
-        let quiet = generation::generation(id);
-        writeln!(runtime, "SILO_SSH_SESSION_OPEN\nSILO_SSH_SESSION_OPEN").unwrap();
-        settle(true);
-        assert!(!generation::idle(id));
-        assert!(generation::generation(id) > quiet);
-        generation::note_warm_job("job:ssh-session-warm", generation::warm_baseline(id));
-        generation::job_finished("job:ssh-session-warm", Some("cp-ssh-session-warm"));
-        assert_eq!(generation::warm_generation("cp-ssh-session-warm"), None);
-        writeln!(runtime, "SILO_SSH_SESSION_CLOSED").unwrap();
-        std::thread::sleep(Duration::from_millis(50));
-        assert!(!generation::idle(id), "one session is still open");
-        // The listener exiting ends the session it never reported closed.
-        drop(runtime);
-        reader.join().unwrap();
-        assert!(generation::idle(id));
     }
     fn paths(dir: &tempfile::TempDir) -> RuntimePaths {
         crate::test_support::paths(dir.path())

@@ -62,6 +62,21 @@ fn target(computer: &Computer) -> ComputerTargetParams {
     }
 }
 
+/// What `--gui`, the computer-use tools and `silo status` say about a Linux computer that
+/// starts no desktop.
+pub fn no_desktop_message(name: &str) -> String {
+    format!("{name} has no desktop; turn it on with `silo desktop on {name}`.")
+}
+
+/// Refuses a Linux computer whose desktop is off. A macOS computer is its own display and
+/// always passes.
+pub fn ensure_desktop(computer: &Computer) -> Result<(), CliError> {
+    if computer.desktop_on() == Some(false) {
+        return Err(CliError::new(no_desktop_message(&computer.name)));
+    }
+    Ok(())
+}
+
 /// Whether `computer` is a fork: it has a source in the engine's tree and is not the computer
 /// holding the `main` role. An archived `main-before-*` has no source, so it is not one either.
 pub async fn ensure_fork(engine: &Engine, computer: &Computer) -> Result<(), CliError> {
@@ -158,6 +173,7 @@ pub async fn wait_ready(
     timeout: Duration,
     progress: Progress<'_>,
 ) -> Result<Value, CliError> {
+    ensure_desktop(computer)?;
     let begun = Instant::now();
     let (mut last, mut desktop_started) = (String::new(), computer.kind != "linux");
     loop {
@@ -211,6 +227,16 @@ pub async fn wait_ready(
 /// One look at whether `computer` can be driven now (no waiting): `ready`, what it waits for,
 /// and the computer-use summary.
 pub async fn ready_status(engine: &Engine, computer: &Computer) -> Result<Value, CliError> {
+    if computer.desktop_on() == Some(false) {
+        return Ok(json!({
+            "computer": computer.name,
+            "state": computer.state,
+            "ready": false,
+            "waitingFor": Value::Null,
+            "failed": no_desktop_message(&computer.name),
+            "computerUse": Value::Null,
+        }));
+    }
     let status = engine
         .call(requests::desktop_status(target(computer)))
         .await?;
@@ -242,6 +268,16 @@ pub async fn fork_gui(
     settings: Option<&Settings>,
     progress: Progress<'_>,
 ) -> Result<Value, CliError> {
+    // A fork starts the desktop its source has, so refuse before making one that cannot show it.
+    match (&args.fork.recipe_name, &args.fork.recipe) {
+        (Some(recipe_name), Some(recipe)) if recipe.desktop == Some(false) => {
+            return Err(CliError::new(format!(
+                "The recipe {recipe_name} has desktop: false, so its computers have no desktop; remove that line to use --gui."
+            )))
+        }
+        (Some(_), _) => {}
+        (None, _) => ensure_desktop(&engine.computer(&args.fork.source).await?)?,
+    }
     let mut fork = ops::fork(engine, &args.fork, settings, progress).await?;
     let name = fork["name"].as_str().unwrap_or_default().to_owned();
     let computer = engine.computer(&name).await?;

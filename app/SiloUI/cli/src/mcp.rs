@@ -547,7 +547,7 @@ impl SiloMcp {
     }
 
     #[tool(
-        description = "Start `main` (made from a recipe the first time, default linux-dev) and keep a warm checkpoint of it, so forks of an unchanged main start without a new checkpoint."
+        description = "Start `main` (made from a recipe the first time, default linux-dev). A fork of `main` starts from it as it is when the fork is made."
     )]
     async fn up(&self, Parameters(params): Parameters<UpParams>) -> Result<String, String> {
         show(
@@ -1144,6 +1144,7 @@ impl SiloMcp {
         let engine = self.engine_acting_on(device).await?;
         let found = engine.computer(computer).await?;
         crate::gui::ensure_fork(&engine, &found).await?;
+        crate::gui::ensure_desktop(&found)?;
         let key = (engine.device().map(str::to_owned), found.id.clone());
         let session = self
             .sessions

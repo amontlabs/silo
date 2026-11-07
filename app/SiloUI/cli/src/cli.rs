@@ -68,6 +68,12 @@ pub enum GuestClientCommand {
     Status { computer: String },
 }
 
+#[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DesktopState {
+    On,
+    Off,
+}
+
 #[derive(Subcommand, Debug)]
 pub enum Command {
     /// List computers and their state.
@@ -89,7 +95,14 @@ pub enum Command {
     Stop { computer: String },
     /// Finish the setup of a computer that stopped before it was ready.
     RetrySetup { computer: String },
-    /// Start `main` (made from a recipe the first time) and keep a warm checkpoint of it.
+    /// Turn a Linux computer's desktop on or off. Its forks start with the same choice.
+    Desktop {
+        /// `on` starts the desktop now and with the computer; `off` stops it.
+        #[arg(value_enum)]
+        state: DesktopState,
+        computer: String,
+    },
+    /// Start `main` (made from a recipe the first time).
     Up(UpCommand),
     /// List, build or remove recipes.
     #[command(subcommand)]
@@ -771,6 +784,17 @@ async fn dispatch(
         Command::Stop { computer } => {
             let value = ops::stop(engine, &computer, progress).await?;
             emit(json, &value, |v| render::computer_line("Stopped", v));
+        }
+        Command::Desktop { state, computer } => {
+            let on = state == DesktopState::On;
+            let value = ops::desktop_set(engine, &computer, on, progress).await?;
+            emit(json, &value, |v| {
+                format!(
+                    "The desktop of {} is {}.",
+                    v["computer"].as_str().unwrap_or_default(),
+                    if on { "on" } else { "off" }
+                )
+            });
         }
         Command::RetrySetup { computer } => {
             let value = ops::retry_setup(engine, &computer, progress).await?;

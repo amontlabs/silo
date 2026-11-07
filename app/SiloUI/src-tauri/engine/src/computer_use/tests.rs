@@ -726,6 +726,37 @@ fn after_boot_does_nothing_for_computers_without_built_in_computer_use() {
 }
 
 #[test]
+fn a_computer_that_starts_no_desktop_is_not_set_up_at_boot_and_is_when_it_is_turned_on() {
+    let directory = tempfile::tempdir().unwrap();
+    let paths = paths(&directory);
+    for start_with_computer in [false, true] {
+        let mut configuration = computer_configuration(true);
+        configuration.desktop = Some(desktop::DesktopConfiguration {
+            start_with_computer,
+            built_in: true,
+        });
+        runtime::write_metadata(
+            &paths.metadata,
+            &runtime::ComputerConfigurationRequest {
+                schema_version: 1,
+                computers: vec![configuration],
+            },
+        )
+        .unwrap();
+        let guest = Guest::new(COMPUTER_ID);
+        let started = boot_of(test_gate(), &guest, &paths);
+        assert_eq!(started.is_some(), start_with_computer);
+        if let Some(handle) = started {
+            handle.join().unwrap();
+        }
+        assert_eq!(
+            guest.runs.lock().unwrap().len(),
+            usize::from(start_with_computer)
+        );
+    }
+}
+
+#[test]
 fn a_boot_that_cannot_start_computer_use_still_succeeds() {
     struct Failing;
     impl RuntimeRunner for Failing {
