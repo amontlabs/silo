@@ -1,0 +1,4 @@
+method: footprint -p PID (physical footprint)
+pid 22536: 499.0 MiB  <repo>/app/SiloUI/target/release/bundle/macos/Silo Dev.app/Con
+pid 22691: 6.0 MiB  <repo>/app/SiloUI/target/release/bundle/macos/Silo Dev.app/Con
+TOTAL 505.0

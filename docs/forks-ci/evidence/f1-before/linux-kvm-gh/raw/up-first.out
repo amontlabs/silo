@@ -1,0 +1,17 @@
+Building the recipe demo...
+Building the recipe demo: 5s
+Building the recipe demo: 10s
+Building the recipe demo: 15s
+Building the recipe demo: 20s
+Building the recipe demo: 25s
+Building the recipe demo: 30s
+Building the recipe demo: 35s
+Building the recipe demo: 41s
+Building the recipe demo: 46s
+Building the recipe demo: 51s
+Making main from demo...
+Starting main...
+Starting main: 5s
+Checkpointing main...
+Checkpointing main: 5s
+main is running (made from demo). Warm checkpoint c010cc5dce2064f81a5a40850a4e7461 saved. ssh main.silo-dev reaches it.
