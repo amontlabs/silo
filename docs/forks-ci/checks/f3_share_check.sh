@@ -6,9 +6,6 @@
 # a second fork of it, so the base itself is never changed.
 # Optional: BEFORE_BYTES=<size of an export of the same computer made before F3> prints the
 # size change. DEVICE=<connected device> also checks that --device is refused.
-# CLEAR_SESSION_BUS=1 removes ~/.dbus/session-bus on the fold target and the imported copy before S7:
-# every started computer rewrites that per-session file, so two computers that both started
-# since their common ancestor conflict on it (a probe of the rest of the fold, not a fix).
 # Output goes to $OUT (default: ./f3-share-out).
 set -u
 SILO=${SILO:-$HOME/.local/bin/silo-dev}
@@ -80,9 +77,9 @@ echo "== S6 fold --into without a target says it does not know"
 check "S6 refused" $([ $rc != 0 ]; echo $?)
 grep -qi "does not know where" "$OUT/s6.err" "$OUT/s6.out"; check "S6 says where it was forked from is unknown" $?
 
-if [ "${CLEAR_SESSION_BUS:-}" = 1 ]; then
-  xs e2e-share-target 'rm -rf ~/.dbus/session-bus'; xs e2e-share-copy 'rm -rf ~/.dbus/session-bus'; sleep 3
-fi
+# Review the copy again right before keeping it: a keep is pinned to the digest of the last
+# `silo diff` of the fork, and the copy has run since S5 reviewed it.
+"$SILO" diff e2e-share-copy --json > "$OUT/s7-review.json" 2> "$OUT/s7-review.err"
 echo "== S7 fold into the receiver's main (e2e-share-target): kept three-way"
 "$SILO" fold e2e-share-copy --into e2e-share-target --dry-run --json > "$OUT/s7a.json" 2> "$OUT/s7a.err"
 check "S7 the dry run reports a plan" $(json 'd["status"]=="dry-run"' < "$OUT/s7a.json" | grep -q True; echo $?)

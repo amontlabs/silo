@@ -130,7 +130,9 @@ not a fork (a `main`) imports as its own computer and has nothing to keep.
 agent and tool logins Silo knows (a Claude Code login, `~/.claude/.credentials.json`; a Codex
 login, `~/.codex/auth.json`; a Gemini CLI login, `~/.gemini/gemini-credentials.json` or the older `~/.gemini/oauth_creds.json`; a GitHub CLI login,
 `gh/hosts.yml`), cloud and registry credentials, SSH private keys and key files, found on the
-computer's disk and in its fork-time record. When it finds any it asks:
+computer's disk and in its fork-time record. What every computer has is not named: the system
+password files, the machine's own SSH host keys, the desktop's connection password and Silo's own
+certificate authority. When it finds any login it asks:
 
 ```text
 This computer contains a Claude Code login (/root/.claude/.credentials.json). Share anyway? [y/N]
@@ -153,6 +155,13 @@ use them. The disk is listed with one change capture (the same walk `silo diff` 
 `/etc`, `/root`, `/home`, `/usr/local`, `/opt` and `/srv`; a macOS computer's home folder).
 `--json` prints `{computer, archive, size, checkpoint, logins, unchecked}`; `unchecked` is the
 reason when Silo could not check (also with `--yes`) and `null` when it did.
+
+**Free space.** Before it captures anything, `silo export` checks that the volume of Silo's working
+copy and the volume of the destination can hold what this export writes: the computer's own
+checkpoints and disk once (plus the guest image cache when the file carries the image), a small
+margin and the 1 GiB Silo always keeps free. Other computers' checkpoints and caches are not counted.
+Ancestors that live in another computer's group are not counted either; the check that follows the
+write uses the file's real size.
 
 `--device` is refused for now: export and import work on this device. The MCP server has no export
 or import tool: both read and write files at paths the caller chooses, and the file can hold the

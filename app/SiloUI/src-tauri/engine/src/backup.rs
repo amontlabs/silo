@@ -1025,33 +1025,42 @@ impl<R: MsbRunner> BackupService<R> {
         })
     }
 
-    /// Estimate the self-contained archive before capture/save writes anything.
-    /// Include the native snapshot store (parents may be in another group) and
-    /// image cache, plus source disks for new captures. Counting unrelated native
-    /// data is conservative; the final destination check uses the actual archive.
+    /// Estimate what this export writes before capture/save writes anything: each
+    /// computer's own payload once (its snapshot group, plus its disk when a new capture
+    /// is taken, plus the guest image cache once when any computer carries the image),
+    /// and a margin for the manifest and tar/zstd overhead. The payload is staged in the
+    /// working copy and then written to the destination, so each of those needs it; the
+    /// capture is part of the payload, not counted again. Other computers' snapshots and
+    /// caches are not written by this export. Ancestors kept in another computer's
+    /// group are not counted; the final destination check uses the actual archive.
     fn check_export_space(
         &self,
         request: &BackupRequest,
         cancellation: &Cancellation,
     ) -> Result<(), BackupError> {
         let store = self.native_store_root();
-        let mut capture_bytes = 0_u64;
+        let mut payload_bytes = 0_u64;
+        let mut carries_image = false;
         for source in &request.sources {
             validate_computer_name(&source.name)?;
+            validate_group_name(&source.snapshot_group)?;
+            payload_bytes = payload_bytes.saturating_add(estimated_tree_bytes(
+                &store.join("snapshots").join(&source.snapshot_group),
+                cancellation,
+            )?);
             if source.existing_member.is_none() {
-                capture_bytes = capture_bytes.saturating_add(estimated_tree_bytes(
+                payload_bytes = payload_bytes.saturating_add(estimated_tree_bytes(
                     &store.join("sandboxes").join(&source.name),
                     cancellation,
                 )?);
             }
+            carries_image |= !leaves_image_out(request.pinned_image.as_ref(), &source.runtime_config);
         }
-        let existing = estimated_tree_bytes(&store.join("snapshots"), cancellation)?
-            .saturating_add(estimated_tree_bytes(&store.join("cache"), cancellation)?);
-        // Multiple selected computers can include the same ancestors/image.
-        let estimate = existing
-            .saturating_mul(request.sources.len() as u64)
-            .saturating_add(capture_bytes)
-            .saturating_add(MAX_MANIFEST_BYTES);
+        if carries_image {
+            payload_bytes = payload_bytes
+                .saturating_add(estimated_tree_bytes(&store.join("cache"), cancellation)?);
+        }
+        let estimate = payload_bytes.saturating_add(MAX_MANIFEST_BYTES);
         let estimate = estimate.saturating_add(estimate / 100); // tar/zstd overhead
         let destination = request.destination.parent().ok_or_else(|| {
             BackupError::InvalidRequest("The export destination has no parent directory.".into())
@@ -1063,7 +1072,6 @@ impl<R: MsbRunner> BackupService<R> {
                 "Silo's export working copy",
             ),
             (destination, estimate, "the export destination"),
-            (store, capture_bytes, "Silo's checkpoint storage"),
         ];
         for (index, (path, _, label)) in writes.iter().enumerate() {
             let needed = writes
@@ -3393,6 +3401,20 @@ fn validate_computer_name(name: &str) -> Result<(), BackupError> {
     if !valid {
         return Err(BackupError::InvalidRequest(
             "Computer names must start with a letter and contain only lowercase letters, numbers, and hyphens.".into(),
+        ));
+    }
+    Ok(())
+}
+
+/// A snapshot group is one directory name under the native store's `snapshots`.
+fn validate_group_name(group: &str) -> Result<(), BackupError> {
+    let valid = !group.is_empty()
+        && group != "."
+        && group != ".."
+        && !group.contains(['/', '\\', '\0']);
+    if !valid {
+        return Err(BackupError::InvalidRequest(
+            "The computer's checkpoint group is not a valid name.".into(),
         ));
     }
     Ok(())
@@ -8309,6 +8331,51 @@ mod tests {
         assert!(matches!(error, BackupError::InsufficientSpace(_)));
         assert!(error.to_string().contains("working copy"), "{error}");
         assert!(service.runner.calls.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn export_space_counts_the_computers_own_payload_once() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut service = service(&temp, FakeRunner::default());
+        // Room for the reserve and a few MiB: far less than the engine's other data.
+        service.free_space = |_| Ok(FREE_SPACE_RESERVE + 6 * 1024 * 1024);
+        let write = |path: PathBuf, mebibytes: usize| {
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, vec![7_u8; mebibytes * 1024 * 1024]).unwrap();
+        };
+        let store = temp.path().join("home");
+        // Other computers' snapshots and the image cache are not written by this export.
+        write(store.join("snapshots/other/snap_1/disk.raw"), 24);
+        write(store.join("cache/layers/base.erofs"), 24);
+        write(store.join("snapshots/dev/snap_2/disk.raw"), 1);
+        let request = |destination: PathBuf| BackupRequest {
+            destination,
+            sources: vec![BackupSource {
+                name: "dev".into(),
+                snapshot_group: "dev".into(),
+                was_running: false,
+                runtime_config: managed_config("dev"),
+                computer_configuration: computer_configuration("dev"),
+                existing_member: Some("silo-backup-0-x".into()),
+            }],
+            fork_records: Vec::new(),
+            pinned_image: Some(PinnedImageRef {
+                reference: "alpine:3.20".into(),
+                manifest_digest: format!("sha256:{}", "a".repeat(64)),
+            }),
+        };
+        let cancellation = Cancellation::default();
+        let destination = temp.path().join("dev.silo-backup");
+        service
+            .check_export_space(&request(destination.clone()), &cancellation)
+            .expect("only the computer's own 1 MiB payload counts");
+
+        // The same computer's own data counts: 4 MiB staged and written needs more than 6 MiB.
+        write(store.join("snapshots/dev/snap_3/disk.raw"), 3);
+        let error = service
+            .check_export_space(&request(destination), &cancellation)
+            .unwrap_err();
+        assert!(matches!(error, BackupError::InsufficientSpace(_)), "{error}");
     }
 
     #[test]

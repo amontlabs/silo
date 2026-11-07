@@ -3621,6 +3621,62 @@ fn deleting_a_computer_removes_members_only_it_used_and_keeps_what_a_fork_builds
     assert_eq!(store.names(), [A, C]);
 }
 
+const IMPORT_GROUP: &str = "silo-import-0123456789abcdef0123456789abcdef";
+const OTHER_IMPORT_GROUP: &str = "silo-import-fedcba9876543210fedcba9876543210";
+
+#[test]
+fn deleting_an_imported_computer_removes_its_whole_import_group() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let mut imported = Record::default();
+    imported.snapshot_group = Some(IMPORT_GROUP.into());
+    let paths = delete_fixture(&directory, Vec::new(), None);
+    save(&paths, ID, &imported).unwrap();
+    write_metadata(
+        &paths.metadata,
+        &ComputerConfigurationRequest {
+            schema_version: 1,
+            computers: Vec::new(),
+        },
+    )
+    .unwrap();
+    // The archive carried the head and an ancestor named after the exporting computer's
+    // fork point; neither is a name Silo gives its own captures.
+    let store = Store::new(Vec::new())
+        .with(IMPORT_GROUP, "fork-point-7", "snap_p", None)
+        .with(IMPORT_GROUP, "silo-backup-0-1-2", "snap_h", Some("snap_p"))
+        .with("elsewhere", C, "snap_c", None);
+
+    remove_deleted_snapshots(&store, &paths, ID, "dev").unwrap();
+
+    assert_eq!(store.names(), [C]);
+}
+
+#[test]
+fn the_sweep_removes_import_groups_no_computer_owns() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let mut owner = Record::default();
+    owner.snapshot_group = Some(OTHER_IMPORT_GROUP.into());
+    let paths = delete_fixture(&directory, Vec::new(), Some(owner));
+    let store = Store::new(Vec::new())
+        .with(IMPORT_GROUP, "fork-point-7", "snap_p", None)
+        .with(IMPORT_GROUP, "silo-backup-0-1-2", "snap_h", Some("snap_p"))
+        .with(OTHER_IMPORT_GROUP, "silo-backup-0-1-2", "snap_o", None)
+        .with("elsewhere", C, "snap_c", None);
+
+    recover_interrupted(&store, &paths).unwrap();
+
+    // The group a record names, and groups that are not imports, stay.
+    assert_eq!(store.names(), ["silo-backup-0-1-2", C]);
+    assert!(store
+        .members
+        .lock()
+        .unwrap()
+        .iter()
+        .all(|member| member.0 != IMPORT_GROUP));
+}
+
 /// `dev` is deleted: its configuration is gone and the group directory holds `files`.
 fn deleted_dev_with_group_files(
     directory: &tempfile::TempDir,

@@ -58,6 +58,11 @@ pub const BUILTIN_IGNORE: &str = "\
 .Xauthority
 */.local/share/recently-used.xbel
 
+# the session bus address file D-Bus writes for each login (named by machine id and display),
+# and the X session's error log
+*/.dbus/session-bus
+.xsession-errors*
+
 # macOS background churn, from the files an idle macOS fork rewrites within minutes of its
 # first start (preference caches, contacts and knowledge databases with their write-ahead
 # files, system management state, Spotlight and Biome event stores)
@@ -404,6 +409,10 @@ const SYSTEM_CREDENTIALS: &[&str] = &[
     "/var/lib/silo-desktop/connection.json",
     "/etc/ssh/ssh_host_",
     "/etc/ssl/private/",
+    // Silo's own CA, which every computer trusts: the MicroSandbox one on Linux, the proxy
+    // CA and its trust-probe leaf on macOS. Public certificates, not a person's login.
+    "/etc/pki/ca-trust/source/anchors/microsandbox-ca.pem",
+    "/Library/Application Support/Silo/NetworkBootstrap/",
 ];
 
 /// Files of `.ssh` folders that hold no private key.
@@ -480,6 +489,20 @@ mod tests {
         assert!(credential_group("/var/lib/silo-desktop/connection.json").is_some());
         assert!(!list.matches("/home/silo/.config/xfce4/xfconf/xfce-perchannel-xml/displays.xml"));
         assert!(!list.matches("/Users/silo/Library/Application Support/Silo/notes.txt"));
+    }
+
+    #[test]
+    fn per_login_runtime_files_are_not_a_change() {
+        let list = IgnoreList::builtin();
+        for path in [
+            "/home/silo/.dbus/session-bus/11c2687859234b8cb26058b223401bb8-1",
+            "/root/.dbus/session-bus/a58639137b9771e322faf1aa6aeae96f-0",
+            "/home/silo/.xsession-errors",
+            "/home/silo/.xsession-errors.old",
+        ] {
+            assert!(list.matches(path), "{path} should be ignored");
+        }
+        assert!(!list.matches("/home/silo/.dbus/notes.txt"));
     }
 
     #[test]
@@ -614,11 +637,18 @@ mod tests {
             login_label("/home/dev/certs/server.pem").as_deref(),
             Some("/home/dev/certs/server.pem")
         );
+        // a CA anchor a person added is still named
+        assert_eq!(
+            login_label("/etc/pki/ca-trust/source/anchors/corp.pem").as_deref(),
+            Some("/etc/pki/ca-trust/source/anchors/corp.pem")
+        );
         for path in [
             "/etc/shadow",
             "/etc/ssh/ssh_host_ed25519_key",
             "/etc/ssl/private/ssl-cert-snakeoil.key",
             "/var/lib/silo-desktop/connection.json",
+            "/etc/pki/ca-trust/source/anchors/microsandbox-ca.pem",
+            "/Library/Application Support/Silo/NetworkBootstrap/proxy-ca.pem",
             "/home/dev/.ssh/authorized_keys",
             "/home/dev/.ssh/known_hosts",
             "/home/dev/.ssh/id_ed25519.pub",

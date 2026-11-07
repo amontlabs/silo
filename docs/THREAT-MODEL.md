@@ -340,7 +340,9 @@ one `.silo-backup` file, and `silo import` reads one. What the file holds, and d
   agent could read could already leave through the computer's network, and the export is no
   stricter. A login on the disk is a secret in the file. Before an export Silo lists the logins it
   recognises, on the disk and in the fork-time record (Claude Code, Codex, Gemini CLI, GitHub CLI,
-  cloud and registry credentials, SSH private keys), and asks; the CLI refuses without a terminal
+  cloud and registry credentials, SSH private keys; not what every computer has: system password
+  files, its SSH host keys, the desktop's connection password and Silo's own certificate authority),
+  and asks; the CLI refuses without a terminal
   unless `--yes` is passed, and the app asks in a dialog. When Silo could not check (a stopped
   computer, whose disk is not listed, an export of a checkpoint, or a check that failed) it asks
   too: "Silo could not check <name> for logins (<reason>). Share anyway?", in the CLI and in the

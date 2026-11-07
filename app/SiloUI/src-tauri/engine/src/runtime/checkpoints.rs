@@ -4046,7 +4046,12 @@ pub(crate) fn remove_deleted_snapshots(
     let inventory = native::inventory(runner, paths)?;
     for member in inventory {
         let Some(key) = member.key() else { continue };
-        if (referenced.contains(&key) || (key.0 == group && native::silo_member(&key)))
+        // An import's group holds only that computer's lineage, including ancestors the
+        // archive carried under the names of the computer it was exported from.
+        let owned_by_import = key.0 == group && crate::backup::valid_import_group(group);
+        if (referenced.contains(&key)
+            || (key.0 == group && native::silo_member(&key))
+            || (owned_by_import && valid_native_id(&key.1)))
             && !queued
                 .iter()
                 .any(|entry| entry.snapshot_id == member.snapshot_id && entry.key() == member.key())
@@ -4060,6 +4065,68 @@ pub(crate) fn remove_deleted_snapshots(
         eprintln!("Kept checkpoint data of deleted computer {computer}: {failure}");
     }
     remove_empty_group_directory(runner, paths, group);
+    Ok(())
+}
+
+/// Queues the members of import groups (`silo-import-<hex>`) that no checkpoint record names:
+/// the computer they were imported for is gone. Every record on disk counts as an owner,
+/// also one whose computer is not in the configuration yet (an import that is still being
+/// saved), and a record that cannot be read stops the sweep. The queue is then removed
+/// like any deleted computer's members, which keeps what a record or a live computer's
+/// lineage still uses.
+fn queue_unowned_import_groups(
+    runner: &dyn RuntimeRunner,
+    paths: &RuntimePaths,
+) -> Result<(), RuntimeError> {
+    let mut owned: HashSet<String> = HashSet::new();
+    match fs::read_dir(directory(paths)) {
+        Ok(entries) => {
+            for entry in entries {
+                let entry = entry.map_err(|_| error("Checkpoint history could not be listed."))?;
+                let name = entry.file_name();
+                let Some(id) = name.to_str().and_then(|name| name.strip_suffix(".json")) else {
+                    continue;
+                };
+                if uuid::Uuid::parse_str(id).is_err() {
+                    continue;
+                }
+                let record = load(paths, id)?;
+                owned.extend(record.snapshot_group.clone());
+                owned.extend(
+                    record
+                        .pending_checkpoint_restore
+                        .iter()
+                        .map(|pending| pending.source_computer.clone()),
+                );
+                owned.extend(
+                    native::record_uses(&record, "")
+                        .into_iter()
+                        .map(|((group, _), _)| group),
+                );
+            }
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(_) => return Err(error("Checkpoint history could not be listed.")),
+    }
+    let mut queued = load_cleanup(paths)?;
+    let mut added = false;
+    for member in native::inventory(runner, paths)? {
+        let Some(key) = member.key() else { continue };
+        if !crate::backup::valid_import_group(&key.0)
+            || owned.contains(&key.0)
+            || !valid_native_id(&key.1)
+            || queued
+                .iter()
+                .any(|entry| entry.snapshot_id == member.snapshot_id && entry.key() == member.key())
+        {
+            continue;
+        }
+        queued.push(member);
+        added = true;
+    }
+    if added {
+        save_cleanup(paths, &queued)?;
+    }
     Ok(())
 }
 
@@ -4159,6 +4226,9 @@ pub(crate) fn recover_interrupted(
     paths: &RuntimePaths,
 ) -> Result<Recovery, RuntimeError> {
     let metadata = read_metadata(&paths.metadata)?;
+    if let Err(failure) = queue_unowned_import_groups(runner, paths) {
+        eprintln!("Unowned imported checkpoint data was kept: {failure}");
+    }
     let mut recovery = Recovery {
         unresolved: HashMap::new(),
         cleanup_error: retry_deleted_snapshots(runner, paths).err(),

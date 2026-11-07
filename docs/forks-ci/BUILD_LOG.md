@@ -397,3 +397,42 @@ unit + 12 `share` tests, all passing; silo-client 16; silo-api 49. Frontend: typ
 (existing warnings), Vitest 287 files / 2863 tests. `demo/` `tsc --noEmit` clean (node_modules deleted
 afterwards). `cargo fmt --all --check` clean. New tests were written with their fixes, not run failing
 first, except where a changed assertion shows the old behaviour (the CLI check-failure test).
+
+**F3 live check (7 Nov, Dev engine, Mac) and the fixes it led to.** Evidence:
+[f3-share](evidence/f3-share/README.md) (`raw-1-default/`, `raw-2-clear-session-bus/`). 18 of 22 and 19 of 21
+checks passed; the failures were four product problems, all fixed afterwards (tests, not a second live run):
+
+1. *Keep of an imported computer into the receiver's computer.* (a) `/home/silo/.dbus/session-bus/<machine-id>-1`
+   is rewritten by every started computer, so any two computers started since their common ancestor
+   conflicted on it ("divergent"). `changes/ignore.rs` now ignores `*/.dbus/session-bus` and
+   `.xsession-errors*` (the X session's error log, the same kind of per-login file); test
+   `per_login_runtime_files_are_not_a_change`. The other per-boot files under the home directory that the
+   evidence shows (`.config/pulse/<machine-id>-*`, `.Xauthority`, `.ICEauthority`) were already ignored.
+   (b) The `changed` refusal in run 2 was not a product fault: `silo fold` without `--reviewed` pins the keep to
+   the digest of the last `silo diff` of the fork (`Engine::recall_review`, `ops::fold`), and that was S5's,
+   before the probe deleted the session-bus files in the copy. The refusal's `report.reviewDigest`
+   (`f70af3…`) equals the dry run's, while S5's `s5.json` has `142494…`: the fork did not change between the dry
+   run and the keep, it changed after the review the keep was pinned to, and the refusal is the designed
+   answer. `f3_share_check.sh` now runs `silo diff` on the copy right before S7 (the `CLEAR_SESSION_BUS` probe
+   is gone). Not yet seen live: that the keep then succeeds; the probe is a rerun of the script on the Dev
+   engine.
+2. *The Silo CA named as a login.* `/etc/pki/ca-trust/source/anchors/microsandbox-ca.pem` is in
+   `SYSTEM_CREDENTIALS`, as is the macOS equivalent, the proxy CA and its trust-probe leaf under
+   `/Library/Application Support/Silo/NetworkBootstrap/` (written by `macos_computers/proxy/bootstrap.rs`; not
+   checked live). A CA anchor a person adds is still named (test).
+3. *Export free-space check.* `check_export_space` counted every snapshot and cache of the engine, once per
+   selected computer, plus the computer's disk twice (in the estimate and as a capture on the store). It now
+   counts, once per computer, its own snapshot group, its disk when a new capture is taken, and the image cache
+   once when a file carries the image, plus the manifest margin and 1 %, for the working copy and the
+   destination (and the 1 GiB reserve per volume). Ancestors kept in another computer's group are not counted
+   (the check on the finished file uses its real size). Test `export_space_counts_the_computers_own_payload_once`
+   (24 MiB of other snapshots and cache do not matter; the computer's own data does).
+4. *`snapshots/silo-import-*` left behind.* An imported computer's group holds the archive's ancestors under
+   the exporting computer's names, and dropping the computer queued only members named like Silo's own
+   captures (`silo_member`), so the others stayed. `remove_deleted_snapshots` now queues every member of an
+   import group (names valid for the journal; the planner still keeps what a record or a live computer's lineage
+   uses). The startup/maintenance sweep (`recover_interrupted`) also queues the members of import groups that
+   no checkpoint record on disk names, which clears the groups earlier drops left. Discarding an unfinished
+   import already removed its whole group (`discard_import_group`). Tests (both failed before the change):
+   `deleting_an_imported_computer_removes_its_whole_import_group`,
+   `the_sweep_removes_import_groups_no_computer_owns`. The cause is from reading the code, not observed live.
