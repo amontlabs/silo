@@ -174,3 +174,42 @@ jobs:
             ${{ runner.temp }}/microvm.log
           if-no-files-found: warn
           retention-days: 30
+      # The containers again, on this same runner (same CPU model, same day), so the two kinds compare directly.
+      - name: Prepare the containers on this runner
+        timeout-minutes: 30
+        working-directory: ${{ github.workspace }}
+        env:
+          C1_OUT: ${{ runner.temp }}/c1-evidence-same-runner
+        shell: bash
+        run: |
+          rc=0
+          bash docs/forks-ci/containers/setup.sh > "$RUNNER_TEMP/setup2.log" 2>&1 || rc=$?
+          cat "$RUNNER_TEMP/setup2.log"
+          exit "$rc"
+      - name: Measure the containers on this runner
+        timeout-minutes: 60
+        working-directory: ${{ github.workspace }}
+        env:
+          C1_OUT: ${{ runner.temp }}/c1-evidence-same-runner
+        shell: bash
+        run: |
+          rc=0
+          bash docs/forks-ci/containers/run.sh > "$RUNNER_TEMP/run2.log" 2>&1 || rc=$?
+          cat "$RUNNER_TEMP/run2.log"
+          exit "$rc"
+      - name: Collect the container logs
+        if: always()
+        working-directory: ${{ github.workspace }}
+        run: |
+          out="$RUNNER_TEMP/c1-evidence-same-runner"
+          mkdir -p "$out/logs"
+          cp "$RUNNER_TEMP"/setup2.log "$RUNNER_TEMP"/run2.log "$out/" 2>/dev/null || true
+          cp /mnt/c1/tinyproxy.log "$out/logs/" 2>/dev/null || true
+          find "$out" -type f -size +5M -delete
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: containers-c1-evidence-same-runner
+          path: ${{ runner.temp }}/c1-evidence-same-runner/
+          if-no-files-found: warn
+          retention-days: 30

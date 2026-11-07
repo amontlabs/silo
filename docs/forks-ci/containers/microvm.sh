@@ -68,16 +68,22 @@ summ "microVM: first silo exec after start" "$RAW/exec.txt"
 summ "microVM: start + first exec = cold start to a ready shell" "$RAW/start-ready.txt"
 summ "microVM: PSS of a new computer 20 s after ready (MiB)" "$RAW/newvm-ram.txt" MiB
 
-# The developer workload, fresh fork of main each run.
+# The developer workload, fresh fork of main each run. silo exec allows 180 s at most, so the script runs in the
+# background in the guest and is polled; every time in it is measured inside the guest.
 B64=$(base64 < "$C1/boot/workload.sh" | tr -d '\n')
 : > "$RAW/work-total.txt"
 for i in $(seq "$RUNS"); do
   n=e2e-c1-w$i
   (cd "$PROJ" && "$SILO" fork main --name "$n" -- true > "$RAW/fork-w$i.out" 2>&1)
-  t0=$(now)
-  "$SILO" exec "$n" --timeout 2400 -- bash -c "echo $B64 | base64 -d > /tmp/workload.sh; if [ \$(id -u) = 0 ]; then HOME=/root bash /tmp/workload.sh; else sudo -n -H bash /tmp/workload.sh; fi" > "$RAW/work-$i.txt" 2> "$RAW/work-$i.err"
-  echo "work$i $(sub "$t0" "$(now)")" >> "$RAW/work-total.txt"
-  grep -E '^(PHASE|PHASE_TAIL|WORKLOAD_DONE)' "$RAW/work-$i.txt" | cut -c1-300
+  "$SILO" exec "$n" --timeout 120 -- bash -c "echo $B64 | base64 -d > /tmp/workload.sh; if [ \$(id -u) = 0 ]; then S=; else S='sudo -n -H'; fi; HOME=/root setsid nohup \$S bash /tmp/workload.sh > /tmp/workload.out 2>&1 < /dev/null & sleep 1; echo started" > "$RAW/work-$i.start" 2>&1
+  deadline=$(( $(date +%s) + 3000 ))
+  while [ "$(date +%s)" -lt "$deadline" ]; do
+    "$SILO" exec "$n" --timeout 60 -- bash -c 'cat /tmp/workload.out' > "$RAW/work-$i.txt" 2> "$RAW/work-$i.err"
+    grep -q '^WORKLOAD_END' "$RAW/work-$i.txt" && break
+    sleep 10
+  done
+  echo "work$i $(awk '$1=="WORKLOAD_TOTAL"{print $2}' "$RAW/work-$i.txt")" >> "$RAW/work-total.txt"
+  grep -E '^(PHASE|PHASE_TAIL|WORKLOAD_DONE|WORKLOAD_TOTAL)' "$RAW/work-$i.txt" | cut -c1-300
   drop_one "$n"
 done
 for phase in git_clone_express apt_update apt_download apt_unpack_configure npm_install rustup_install cargo_install_hexyl git_clone_zlib make_zlib; do

@@ -7,6 +7,8 @@ mkdir -p /tmp/c1-logs /workspace
 APT_OPTS=(-o APT::Sandbox::User=root)
 if [ -n "${http_proxy:-}" ]; then APT_OPTS+=(-o "Acquire::http::Proxy=$http_proxy" -o "Acquire::https::Proxy=$http_proxy"); fi
 now() { date +%s.%N; }
+T_START=$(now)
+trap 'echo "WORKLOAD_TOTAL $(awk -v a="$T_START" -v b="$(now)" '"'"'BEGIN{printf "%.2f", b-a}'"'"')"; echo WORKLOAD_END' EXIT
 phase() { # NAME COMMAND...
   local name=$1; shift
   local t; t=$(now)
