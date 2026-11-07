@@ -1,0 +1,123 @@
+== header (2026-11-07T18:31:11Z)
+commit of the scripts: e526eb51bca17984b088b42d698361e20ac10a61
+machine: Apple M4 Max, 64 GiB RAM (30.3 GiB free+inactive+purgeable), 16 cores, macOS 26.5 (25F71), arm64
+silo CLI: /Users/polarzero/.local/bin/silo-dev (silo 0.1.0; channel org.silo.dev)
+silo CLI resolves to: /Users/polarzero/code/projects/microsandbox-workspaces/app/SiloUI/target/release/bundle/macos/Silo Dev.app/Contents/Resources/SiloEngineDistribution/Silo Engine.app/Contents/MacOS/silo
+computers: NAME STATE KIND SIZE;workspace-1 stopped linux 8 cpu, 32 GiB;e2e-relay stopped linux 8 cpu, 32 GiB;silo-eval-a stopped linux 2 cpu, 2 GiB;silo-eval-b stopped linux 2 cpu, 2 GiB;
+sections: cold warm1 warm4 ten; runs 3; ten = 10; wait before a cold run 70s
+clock: wall clock (monotonic) of the silo process; the CLI polls jobs every 300 ms
+[19:31:12] main absent: creating it with silo up --recipe demo
+Checkpointing main...
+Removing the previous warm checkpoint...
+main is running. Warm checkpoint cadc4b0bd078f42a4823f62b88ee99e9 saved. ssh main.silo-dev reaches it.
+main: main         running    linux   2 cpu, 4 GiB
+
+== cold
+[19:31:29] cold run 1: waiting 70s so no warm checkpoint is usable
+cold1 rc=0 10.49s
+  cold1: captured a Fork point of main (no usable warm checkpoint)
+-- RAM of cold fork 1 (20 s after ready)
+method: footprint -p PID (physical footprint)
+pid 697: 492.0 MiB  /Users/polarzero/code/projects/microsandbox-workspaces/app/SiloUI/target/release/bundle/macos/Silo Dev.app/Con
+pid 945: 6.0 MiB  /Users/polarzero/code/projects/microsandbox-workspaces/app/SiloUI/target/release/bundle/macos/Silo Dev.app/Con
+TOTAL 498.0
+[19:33:13] cold run 2: waiting 70s so no warm checkpoint is usable
+cold2 rc=0 8.93s
+  cold2: captured a Fork point of main (no usable warm checkpoint)
+[19:34:36] cold run 3: waiting 70s so no warm checkpoint is usable
+cold3 rc=0 9.28s
+  cold3: captured a Fork point of main (no usable warm checkpoint)
+(a) Linux fork of a running idle main, cold, to running+ready: N=3 median=9.28s min=8.93s max=10.49s runs=[10.49, 8.93, 9.28]
+
+== warm1
+warm1-1 rc=0 8.13s
+  warm1-1: no new checkpoint (warm checkpoint used)
+warm1-2 rc=0 9.56s
+  warm1-2: no new checkpoint (warm checkpoint used)
+warm1-3 rc=0 7.44s
+  warm1-3: no new checkpoint (warm checkpoint used)
+(c) one fork right after silo up (warm checkpoint), to running+ready: N=3 median=8.13s min=7.44s max=9.56s runs=[8.13, 9.56, 7.44]
+
+== warm4
+warm4-1 rc=0 16.04s
+  warm4-1: no new checkpoint (warm checkpoint used)
+-- RAM of e2e-forks-w4x1-1
+method: footprint -p PID (physical footprint)
+pid 13779: 489.0 MiB  /Users/polarzero/code/projects/microsandbox-workspaces/app/SiloUI/target/release/bundle/macos/Silo Dev.app/Con
+pid 13865: 5.8 MiB  /Users/polarzero/code/projects/microsandbox-workspaces/app/SiloUI/target/release/bundle/macos/Silo Dev.app/Con
+TOTAL 494.8
+-- RAM of e2e-forks-w4x1-2
+method: footprint -p PID (physical footprint)
+pid 14056: 493.0 MiB  /Users/polarzero/code/projects/microsandbox-workspaces/app/SiloUI/target/release/bundle/macos/Silo Dev.app/Con
+pid 14156: 5.8 MiB  /Users/polarzero/code/projects/microsandbox-workspaces/app/SiloUI/target/release/bundle/macos/Silo Dev.app/Con
+TOTAL 498.8
+-- RAM of e2e-forks-w4x1-3
+method: footprint -p PID (physical footprint)
+pid 13589: 491.0 MiB  /Users/polarzero/code/projects/microsandbox-workspaces/app/SiloUI/target/release/bundle/macos/Silo Dev.app/Con
+pid 13866: 5.9 MiB  /Users/polarzero/code/projects/microsandbox-workspaces/app/SiloUI/target/release/bundle/macos/Silo Dev.app/Con
+TOTAL 496.9
+-- RAM of e2e-forks-w4x1-4
+method: footprint -p PID (physical footprint)
+pid 13891: 486.0 MiB  /Users/polarzero/code/projects/microsandbox-workspaces/app/SiloUI/target/release/bundle/macos/Silo Dev.app/Con
+pid 14012: 6.0 MiB  /Users/polarzero/code/projects/microsandbox-workspaces/app/SiloUI/target/release/bundle/macos/Silo Dev.app/Con
+TOTAL 492.0
+warm4-2 rc=0 15.92s
+  warm4-2: no new checkpoint (warm checkpoint used)
+-- RAM of e2e-forks-w4x2-1
+method: footprint -p PID (physical footprint)
+pid 16204: 492.0 MiB  /Users/polarzero/code/projects/microsandbox-workspaces/app/SiloUI/target/release/bundle/macos/Silo Dev.app/Con
+pid 16392: 5.7 MiB  /Users/polarzero/code/projects/microsandbox-workspaces/app/SiloUI/target/release/bundle/macos/Silo Dev.app/Con
+TOTAL 497.7
+-- RAM of e2e-forks-w4x2-2
+method: footprint -p PID (physical footprint)
+pid 16409: 490.0 MiB  /Users/polarzero/code/projects/microsandbox-workspaces/app/SiloUI/target/release/bundle/macos/Silo Dev.app/Con
+pid 16513: 5.9 MiB  /Users/polarzero/code/projects/microsandbox-workspaces/app/SiloUI/target/release/bundle/macos/Silo Dev.app/Con
+TOTAL 495.9
+-- RAM of e2e-forks-w4x2-3
+method: footprint -p PID (physical footprint)
+pid 16534: 493.0 MiB  /Users/polarzero/code/projects/microsandbox-workspaces/app/SiloUI/target/release/bundle/macos/Silo Dev.app/Con
+pid 16654: 6.0 MiB  /Users/polarzero/code/projects/microsandbox-workspaces/app/SiloUI/target/release/bundle/macos/Silo Dev.app/Con
+TOTAL 499.0
+-- RAM of e2e-forks-w4x2-4
+method: footprint -p PID (physical footprint)
+pid 16278: 500.0 MiB  /Users/polarzero/code/projects/microsandbox-workspaces/app/SiloUI/target/release/bundle/macos/Silo Dev.app/Con
+pid 16393: 6.0 MiB  /Users/polarzero/code/projects/microsandbox-workspaces/app/SiloUI/target/release/bundle/macos/Silo Dev.app/Con
+TOTAL 506.0
+warm4-3 rc=0 16.01s
+  warm4-3: no new checkpoint (warm checkpoint used)
+-- RAM of e2e-forks-w4x3-1
+method: footprint -p PID (physical footprint)
+pid 19243: 493.0 MiB  /Users/polarzero/code/projects/microsandbox-workspaces/app/SiloUI/target/release/bundle/macos/Silo Dev.app/Con
+pid 19375: 6.0 MiB  /Users/polarzero/code/projects/microsandbox-workspaces/app/SiloUI/target/release/bundle/macos/Silo Dev.app/Con
+TOTAL 499.0
+-- RAM of e2e-forks-w4x3-2
+method: footprint -p PID (physical footprint)
+pid 19276: 494.0 MiB  /Users/polarzero/code/projects/microsandbox-workspaces/app/SiloUI/target/release/bundle/macos/Silo Dev.app/Con
+pid 19508: 5.9 MiB  /Users/polarzero/code/projects/microsandbox-workspaces/app/SiloUI/target/release/bundle/macos/Silo Dev.app/Con
+TOTAL 499.9
+-- RAM of e2e-forks-w4x3-3
+method: footprint -p PID (physical footprint)
+pid 19410: 492.0 MiB  /Users/polarzero/code/projects/microsandbox-workspaces/app/SiloUI/target/release/bundle/macos/Silo Dev.app/Con
+pid 19507: 6.1 MiB  /Users/polarzero/code/projects/microsandbox-workspaces/app/SiloUI/target/release/bundle/macos/Silo Dev.app/Con
+TOTAL 498.1
+-- RAM of e2e-forks-w4x3-4
+method: footprint -p PID (physical footprint)
+pid 19546: 493.0 MiB  /Users/polarzero/code/projects/microsandbox-workspaces/app/SiloUI/target/release/bundle/macos/Silo Dev.app/Con
+pid 19650: 6.0 MiB  /Users/polarzero/code/projects/microsandbox-workspaces/app/SiloUI/target/release/bundle/macos/Silo Dev.app/Con
+TOTAL 499.0
+(b) silo fork main -n 4 right after silo up (warm checkpoint), to 4 running+ready: N=3 median=16.01s min=15.92s max=16.04s runs=[16.04, 15.92, 16.01]
+(d) RAM per fork, 20 s after ready, over the forks of 3 runs of -n 4 (MiB): N=12 median=498.45MiB min=492.00MiB max=506.00MiB runs=[494.8, 498.8, 496.9, 492.0, 497.7, 495.9, 499.0, 506.0, 499.0, 499.9, 498.1, 499.0]
+
+== ten
+(f) 10 forks at once: per-fork RAM median 495.9 MiB from (d); available 29112 MiB; needed 8246 MiB (per fork x 10 x 1.25 + 2 GiB)
+ten rc=0 36.76s
+  ten: no new checkpoint (warm checkpoint used)
+(f) 10 of 10 forks exist; total RAM of them 20 s after ready: 4996.7 MiB (per fork 499.7 MiB)
+(f) -n 10 from the warm checkpoint, to 10 running+ready (one run): N=1 median=36.76s min=36.76s max=36.76s runs=[36.76]
+[19:41:59] cleanup
+main (made by this run) dropped
+NAME         STATE      KIND    SIZE
+workspace-1  stopped    linux   8 cpu, 32 GiB
+e2e-relay    stopped    linux   8 cpu, 32 GiB
+silo-eval-a  stopped    linux   2 cpu, 2 GiB
+silo-eval-b  stopped    linux   2 cpu, 2 GiB

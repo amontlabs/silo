@@ -1,0 +1,48 @@
+method: footprint -p PID (physical footprint)
+pid 13779: 489.0 MiB  /Users/polarzero/code/projects/microsandbox-workspaces/app/SiloUI/target/release/bundle/macos/Silo Dev.app/Con
+pid 13865: 5.8 MiB  /Users/polarzero/code/projects/microsandbox-workspaces/app/SiloUI/target/release/bundle/macos/Silo Dev.app/Con
+TOTAL 494.8
+method: footprint -p PID (physical footprint)
+pid 14056: 493.0 MiB  /Users/polarzero/code/projects/microsandbox-workspaces/app/SiloUI/target/release/bundle/macos/Silo Dev.app/Con
+pid 14156: 5.8 MiB  /Users/polarzero/code/projects/microsandbox-workspaces/app/SiloUI/target/release/bundle/macos/Silo Dev.app/Con
+TOTAL 498.8
+method: footprint -p PID (physical footprint)
+pid 13589: 491.0 MiB  /Users/polarzero/code/projects/microsandbox-workspaces/app/SiloUI/target/release/bundle/macos/Silo Dev.app/Con
+pid 13866: 5.9 MiB  /Users/polarzero/code/projects/microsandbox-workspaces/app/SiloUI/target/release/bundle/macos/Silo Dev.app/Con
+TOTAL 496.9
+method: footprint -p PID (physical footprint)
+pid 13891: 486.0 MiB  /Users/polarzero/code/projects/microsandbox-workspaces/app/SiloUI/target/release/bundle/macos/Silo Dev.app/Con
+pid 14012: 6.0 MiB  /Users/polarzero/code/projects/microsandbox-workspaces/app/SiloUI/target/release/bundle/macos/Silo Dev.app/Con
+TOTAL 492.0
+method: footprint -p PID (physical footprint)
+pid 16204: 492.0 MiB  /Users/polarzero/code/projects/microsandbox-workspaces/app/SiloUI/target/release/bundle/macos/Silo Dev.app/Con
+pid 16392: 5.7 MiB  /Users/polarzero/code/projects/microsandbox-workspaces/app/SiloUI/target/release/bundle/macos/Silo Dev.app/Con
+TOTAL 497.7
+method: footprint -p PID (physical footprint)
+pid 16409: 490.0 MiB  /Users/polarzero/code/projects/microsandbox-workspaces/app/SiloUI/target/release/bundle/macos/Silo Dev.app/Con
+pid 16513: 5.9 MiB  /Users/polarzero/code/projects/microsandbox-workspaces/app/SiloUI/target/release/bundle/macos/Silo Dev.app/Con
+TOTAL 495.9
+method: footprint -p PID (physical footprint)
+pid 16534: 493.0 MiB  /Users/polarzero/code/projects/microsandbox-workspaces/app/SiloUI/target/release/bundle/macos/Silo Dev.app/Con
+pid 16654: 6.0 MiB  /Users/polarzero/code/projects/microsandbox-workspaces/app/SiloUI/target/release/bundle/macos/Silo Dev.app/Con
+TOTAL 499.0
+method: footprint -p PID (physical footprint)
+pid 16278: 500.0 MiB  /Users/polarzero/code/projects/microsandbox-workspaces/app/SiloUI/target/release/bundle/macos/Silo Dev.app/Con
+pid 16393: 6.0 MiB  /Users/polarzero/code/projects/microsandbox-workspaces/app/SiloUI/target/release/bundle/macos/Silo Dev.app/Con
+TOTAL 506.0
+method: footprint -p PID (physical footprint)
+pid 19243: 493.0 MiB  /Users/polarzero/code/projects/microsandbox-workspaces/app/SiloUI/target/release/bundle/macos/Silo Dev.app/Con
+pid 19375: 6.0 MiB  /Users/polarzero/code/projects/microsandbox-workspaces/app/SiloUI/target/release/bundle/macos/Silo Dev.app/Con
+TOTAL 499.0
+method: footprint -p PID (physical footprint)
+pid 19276: 494.0 MiB  /Users/polarzero/code/projects/microsandbox-workspaces/app/SiloUI/target/release/bundle/macos/Silo Dev.app/Con
+pid 19508: 5.9 MiB  /Users/polarzero/code/projects/microsandbox-workspaces/app/SiloUI/target/release/bundle/macos/Silo Dev.app/Con
+TOTAL 499.9
+method: footprint -p PID (physical footprint)
+pid 19410: 492.0 MiB  /Users/polarzero/code/projects/microsandbox-workspaces/app/SiloUI/target/release/bundle/macos/Silo Dev.app/Con
+pid 19507: 6.1 MiB  /Users/polarzero/code/projects/microsandbox-workspaces/app/SiloUI/target/release/bundle/macos/Silo Dev.app/Con
+TOTAL 498.1
+method: footprint -p PID (physical footprint)
+pid 19546: 493.0 MiB  /Users/polarzero/code/projects/microsandbox-workspaces/app/SiloUI/target/release/bundle/macos/Silo Dev.app/Con
+pid 19650: 6.0 MiB  /Users/polarzero/code/projects/microsandbox-workspaces/app/SiloUI/target/release/bundle/macos/Silo Dev.app/Con
+TOTAL 499.0

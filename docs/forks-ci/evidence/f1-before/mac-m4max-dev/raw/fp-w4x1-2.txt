@@ -1,0 +1,4 @@
+method: footprint -p PID (physical footprint)
+pid 14056: 493.0 MiB  /Users/polarzero/code/projects/microsandbox-workspaces/app/SiloUI/target/release/bundle/macos/Silo Dev.app/Con
+pid 14156: 5.8 MiB  /Users/polarzero/code/projects/microsandbox-workspaces/app/SiloUI/target/release/bundle/macos/Silo Dev.app/Con
+TOTAL 498.8
