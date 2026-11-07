@@ -416,8 +416,8 @@ Plan: [PLAN.md](PLAN.md).
 - **Docs:** [PLAN.md](PLAN.md) has a status per phase; the roadmap's milestone 6 progress names
   phase 4, the green KVM job with its two-account run, and the one open item (an engine release
   with the Linux archives); the CLI guide shows the Linux host end to end (unpack the archive,
-  `silo host init --authorize controller.pub`, then `silo devices key` and `silo devices add` on
-  the controller) and the Connections guide points at that order.
+  `silo devices key` on the controller, `silo host init --authorize controller.pub` on the host,
+  then `silo devices add` on the controller) and the Connections guide points at that order.
 - **Checked:** every `file#Lline` anchor in the Linux hosts section against the current tree, and
   the CI link check (`lychee --offline` with `ci.yml`'s globs) passes.
 - **Remaining:** the Mac live checks: `silo host init` on a Mac, adding it from another engine,

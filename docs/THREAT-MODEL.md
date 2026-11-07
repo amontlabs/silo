@@ -541,8 +541,8 @@ the same line without `--key`, and the host's first handshake adds it. Only an E
 [`remote.rs#L1126`](../app/SiloUI/src-tauri/engine/src/remote.rs#L1126)). `restrict` turns off
 forwarding, the pty and the agent, so the key runs only the bridge, which relays one framed request to
 the engine's `control.sock` ([`linux.rs#L91`](../app/SiloUI/src-tauri/silod/src/linux.rs#L91),
-[`remote.rs#L2754`](../app/SiloUI/src-tauri/engine/src/remote.rs#L2754)). The bridge accepts exactly
-`--key` and a fingerprint, else prints its usage and exits
+[`remote.rs#L2754`](../app/SiloUI/src-tauri/engine/src/remote.rs#L2754)). The bridge accepts no argument
+(a line from an earlier Silo) or `--key` and a fingerprint, else prints its usage and exits
 ([`#L32`](../app/SiloUI/src-tauri/engine/src/remote.rs#L32)), and replaces any `authenticatedKey` the
 controller put in the request with that fingerprint
 ([`#L2785`](../app/SiloUI/src-tauri/engine/src/remote.rs#L2785)), so the host's `authorized_keys`
@@ -567,12 +567,23 @@ command or none (a personal login) is neither listed nor touched. What a control
 everything the bridge serves, `METHODS` and `OWNER_METHODS` together: computers, checkpoints, guest
 files and commands, secrets, GitHub, published ports and guest SSH on the host. Whoever holds a
 controller's Silo private key, or runs as the controller's account (boundary 7 there), has that
-authority over the host until `silo host revoke` on the host; the key does not expire. It is less
+authority over the host until `silo host revoke` on the host; the key does not expire. A revoke
+only rewrites `authorized_keys`, which sshd reads when a connection starts: a bridge already
+running, such as an open guest SSH stream, keeps going until it ends, and so does turning
+Connections off ([`#L1045`](../app/SiloUI/src-tauri/engine/src/remote.rs#L1043)). To cut open
+connections too, restart the engine's service after the revoke. It is less
 than a login: the forced command runs no shell, and the engine's account, not root, answers. Silo
 does not configure sshd. The host's sshd must accept that account's keys: `StrictModes` ignores an
 `authorized_keys` under a home or `~/.ssh` that others can write, which `init` and `status` report
 ([`hosts.rs#L862`](../app/SiloUI/cli/src/hosts.rs#L862)), and an account sshd does not let in cannot
 be a host.
+
+The other direction: a controller trusts the host it adds. Secrets and a GitHub personal token
+saved for computers on a host are sent to that host and stored there
+([`#L352`](../app/SiloUI/src-tauri/engine/src/remote.rs#L352)), and what the host returns (files,
+command output, screenshots) is the host's word. The controller's only check of the host is the
+pinned SSH host key of boundary 7, so a compromised host gets what is saved for it and can answer
+anything, but it reaches nothing on the controller beyond what boundary 7 describes.
 
 **Logs.** The unit sets no `StandardOutput`, so under systemd `silod`'s stdout and stderr go to the
 journal ([`service_linux.rs#L225`](../app/SiloUI/src-tauri/silod/src/service_linux.rs#L225)). silod

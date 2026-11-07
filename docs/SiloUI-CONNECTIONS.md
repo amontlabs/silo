@@ -12,9 +12,10 @@ Connections link devices, so Silo on one device can manage the computers of anot
 6. Terminals and editors launch on the controlling device and connect to the guest through the owner. Files, logs, repository push, and network connections route to the owning device.
 
 A host without the app (a Linux server, or a Mac used only as a host) is set up and added from
-the command line. On a Linux server the order is: unpack the engine archive
-([engine guide](SiloUI-ENGINE.md#silod-on-a-linux-host)), `silo host init` (which registers
-`silod --service`), then `silo devices add` on the controller. `silo host init` on the host
+the command line. On a Linux server the order is: `silo devices key` on the controller, unpack
+the engine archive on the server ([engine guide](SiloUI-ENGINE.md#silod-on-a-linux-host)),
+`silo host init --authorize` with that key (it runs `silod --service register`), then
+`silo devices add` on the controller ([CLI guide](SiloUI-CLI.md#hosting-computers-for-other-devices)). `silo host init` on the host
 starts the engine as a service, turns Connections on and prints the address, and
 `silo devices add <address>` on the controller does what **Connect device…** does, running the
 same SSH authorization and key setup commands in the terminal when SSH asks for them
