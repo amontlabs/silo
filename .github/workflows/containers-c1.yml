@@ -35,11 +35,20 @@ jobs:
       - name: Prepare the host, the image and the proxy
         timeout-minutes: 30
         shell: bash
-        run: bash docs/forks-ci/containers/setup.sh 2>&1 | tee "$RUNNER_TEMP/setup.log"
+        # Not piped through tee: a daemon started by the script (the proxy) would keep the pipe, and the step, open.
+        run: |
+          rc=0
+          bash docs/forks-ci/containers/setup.sh > "$RUNNER_TEMP/setup.log" 2>&1 || rc=$?
+          cat "$RUNNER_TEMP/setup.log"
+          exit "$rc"
       - name: Measure
         timeout-minutes: 110
         shell: bash
-        run: bash docs/forks-ci/containers/run.sh 2>&1 | tee "$RUNNER_TEMP/run.log"
+        run: |
+          rc=0
+          bash docs/forks-ci/containers/run.sh > "$RUNNER_TEMP/run.log" 2>&1 || rc=$?
+          cat "$RUNNER_TEMP/run.log"
+          exit "$rc"
       - name: Collect logs
         if: always()
         run: |
