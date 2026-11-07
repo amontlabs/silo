@@ -63,6 +63,7 @@ jobs:
             cp "$d/out" "$d/err" "$d/net.log" "$d/exit" "$d/bundle/config.json" "$C1_OUT/logs/left-$n/" 2>/dev/null || true
           done
           # Stay below the artifact size limit even if a container filled its log.
+          gzip -f "$C1_OUT/run.log" 2>/dev/null || true
           find "$C1_OUT" -type f -size +5M -delete
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
@@ -205,6 +206,7 @@ jobs:
           mkdir -p "$out/logs"
           cp "$RUNNER_TEMP"/setup2.log "$RUNNER_TEMP"/run2.log "$out/" 2>/dev/null || true
           cp /mnt/c1/tinyproxy.log "$out/logs/" 2>/dev/null || true
+          gzip -f "$out/run2.log" 2>/dev/null || true
           find "$out" -type f -size +5M -delete
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()

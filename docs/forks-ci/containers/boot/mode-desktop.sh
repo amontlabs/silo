@@ -53,6 +53,7 @@ if kill -0 "$selkies_pid" 2>/dev/null; then step selkies-alive ok "5s after serv
 
 sleep 10
 step pss-desktop-before-cua-and-browser "$(pss_now)" "(all processes in the container, read inside it: Xvfb, PulseAudio, Xfce, Selkies)"
+if [ "${C1_MIN:-}" = 1 ]; then echo "DESKTOP_DONE"; exit 0; fi
 t=$(now)
 step cua-version "$(cua-driver --version 2>&1 | head -1)" ""
 timeout 150 python3 /silo/cua_probe.py 2>&1 | sed 's/^/STEP /'

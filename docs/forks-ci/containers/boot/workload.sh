@@ -22,6 +22,7 @@ phase git_clone_express git clone --quiet https://github.com/expressjs/express.g
 phase apt_update apt-get "${APT_OPTS[@]}" update
 phase apt_download apt-get "${APT_OPTS[@]}" install -y -d --no-install-recommends build-essential nodejs npm || exit 1
 phase apt_unpack_configure apt-get "${APT_OPTS[@]}" install -y --no-install-recommends build-essential nodejs npm || exit 1
+[ "${C1_ONLY:-}" = apt ] && exit 0
 phase npm_install bash -c 'cd /workspace/express && npm install --no-audit --no-fund --loglevel=error'
 phase rustup_install bash -c 'curl -fsSL --proto "=https" https://sh.rustup.rs | sh -s -- -y --profile minimal --no-modify-path'
 phase cargo_install_hexyl "$HOME/.cargo/bin/cargo" install --locked hexyl

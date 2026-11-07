@@ -91,23 +91,10 @@ table inet silo_c1 {
 NFT
 echo "ip_forward: $(sysctl -n net.ipv4.ip_forward)"
 
-say "the host-side HTTP(S) proxy: tinyproxy $(tinyproxy -v 2>&1 | head -1), CONNECT to port 443 only, clients 10.200.0.0/16"
-sudo systemctl disable --now tinyproxy >/dev/null 2>&1 || true
-cat > "$WORK/tinyproxy.conf" <<CONF
-Port 3128
-Listen 0.0.0.0
-Timeout 600
-LogFile "$WORK/tinyproxy.log"
-LogLevel Info
-PidFile "$WORK/tinyproxy.pid"
-MaxClients 256
-Allow 10.200.0.0/16
-ConnectPort 443
-DisableViaHeader Yes
-CONF
-tinyproxy -c "$WORK/tinyproxy.conf" </dev/null >"$WORK/tinyproxy.out" 2>&1
-sleep 1
-echo "proxy listening: $(ss -ltn 'sport = :3128' | tail -n +2)"
+say "the host-side HTTP(S) proxies (proxy.sh starts one on port 3128 at a time)"
+sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends squid
+sudo systemctl disable --now tinyproxy squid >/dev/null 2>&1 || true
+bash "$C1/proxy.sh" tinyproxy
 
 say "a canary service on the host that a container must not reach"
 mkdir -p "$WORK/canary"
