@@ -496,9 +496,12 @@ data and credentials, not a person's files. The engine starts `msb` in its own p
 once ([`agent.rs#L233`](../app/SiloUI/src-tauri/silod/src/agent.rs#L233)).
 
 **Egress.** The computers get the same network profile and MicroSandbox policy as on a Mac
-(boundary 2), now in front of the host's network. It has not been evaluated on KVM: that eval comes
-with the KVM CI job, and until then this document claims nothing stronger for a Linux host than the
-code reading of boundary 2.
+(boundary 2), now in front of the host's network. It has not been evaluated on KVM. The KVM CI job
+(`.github/workflows/linux-host.yml`) is green, but it exercises the computer lifecycle (create, start,
+exec, checkpoint, fork, drop) and the two-account Connections run, not an isolation scenario, and the
+[evals](evals/README.md) have only run on a Mac. Running them on a KVM host is roadmap milestone 9;
+until a scenario has run there, this document claims nothing stronger for a Linux host than the code
+reading of boundary 2.
 
 **Host folders a guest sees.** The same as boundary 6: the read-write runtime share at `/.msb`
 (served from the runtime's per-computer directory,
@@ -525,6 +528,101 @@ it used first and refuses a different `SILO_CREDENTIAL_STORE` later
 **Engine socket and in-guest client.** Boundaries 7 and 9 unchanged, with `SO_PEERCRED` in place of
 `getpeereid`.
 
+**Connections on the host.** A controller reaches the host through the host's sshd, as the engine's
+account, with the Ed25519 key its own engine made. `silo host init --authorize <key>` has the engine
+(`connections.keys.authorize`, [`hosts.rs#L1002`](../app/SiloUI/cli/src/hosts.rs#L1002)) write Silo's
+line to `~/.ssh/authorized_keys`:
+`restrict,command="exec ~/.local/bin/silo-remote[-dev] --remote-bridge --key SHA256:<fingerprint>"`,
+the key's own fingerprint, and this channel's comment
+([`remote.rs#L49`](../app/SiloUI/src-tauri/engine/src/remote.rs#L49),
+[`#L1120`](../app/SiloUI/src-tauri/engine/src/remote.rs#L1120)). A controller's own key setup writes
+the same line without `--key`, and the host's first handshake adds it. Only an Ed25519 key is taken
+([`hosts.rs#L651`](../app/SiloUI/cli/src/hosts.rs#L651),
+[`remote.rs#L1126`](../app/SiloUI/src-tauri/engine/src/remote.rs#L1126)). `restrict` turns off
+forwarding, the pty and the agent, so the key runs only the bridge, which relays one framed request to
+the engine's `control.sock` ([`linux.rs#L91`](../app/SiloUI/src-tauri/silod/src/linux.rs#L91),
+[`remote.rs#L2754`](../app/SiloUI/src-tauri/engine/src/remote.rs#L2754)). The bridge accepts no argument
+(a line from an earlier Silo) or `--key` and a fingerprint, else prints its usage and exits
+([`#L32`](../app/SiloUI/src-tauri/engine/src/remote.rs#L32)), and replaces any `authenticatedKey` the
+controller put in the request with that fingerprint
+([`#L2785`](../app/SiloUI/src-tauri/engine/src/remote.rs#L2785)), so the host's `authorized_keys`
+alone says which key connected. The owner uses that for one thing: a bridged
+`connections.keys.revoke` is allowed for the caller's own key only, and refused with
+`permission_denied` for another key, or through a line without `--key` while the key still has a
+bridge line ([`#L1078`](../app/SiloUI/src-tauri/engine/src/remote.rs#L1078), called from
+[`#L3527`](../app/SiloUI/src-tauri/engine/src/remote.rs#L3527)). `connections.keys.authorize`,
+`connections.keys.list` and `connections.keys.own` are in neither `METHODS`
+([`#L328`](../app/SiloUI/src-tauri/engine/src/remote.rs#L328)) nor `OWNER_METHODS`
+([`#L398`](../app/SiloUI/src-tauri/engine/src/remote.rs#L398)), so the bridge refuses them and only a
+client of `engine.sock` (boundary 7) adds or lists a key
+([`access.rs#L2403`](../app/SiloUI/src-tauri/silod/src/methods/access.rs#L2403); the test is
+[`remote.rs#L5994`](../app/SiloUI/src-tauri/engine/src/remote.rs#L5994)). Lines Silo did not write are
+left alone: `authorize` and `revoke` refuse a symlinked or otherwise managed `authorized_keys` and
+name the line to change there ([`#L1068`](../app/SiloUI/src-tauri/engine/src/remote.rs#L1068),
+[`#L1119`](../app/SiloUI/src-tauri/engine/src/remote.rs#L1119)), `revoke` removes only lines whose
+forced command is the bridge ([`#L1040`](../app/SiloUI/src-tauri/engine/src/remote.rs#L1040)), and
+`silo host status` lists every such line and marks one that is not exactly Silo's or has no `--key`
+([`hosts.rs#L719`](../app/SiloUI/cli/src/hosts.rs#L719)); a line for the same key with another forced
+command or none (a personal login) is neither listed nor touched. What a controller's key gives is
+everything the bridge serves, `METHODS` and `OWNER_METHODS` together: computers, checkpoints, guest
+files and commands, secrets, GitHub, published ports and guest SSH on the host. Whoever holds a
+controller's Silo private key, or runs as the controller's account (boundary 7 there), has that
+authority over the host until `silo host revoke` on the host; the key does not expire. A revoke
+only rewrites `authorized_keys`, which sshd reads when a connection starts: a bridge already
+running, such as an open guest SSH stream, keeps going until it ends
+([`#L1043`](../app/SiloUI/src-tauri/engine/src/remote.rs#L1043)). To cut open connections too,
+turn Connections off, which ends open streams
+([`#L4305`](../app/SiloUI/src-tauri/engine/src/remote.rs#L4305)), or restart the engine's service
+after the revoke. It is less than a login: the forced command runs no shell, and the engine's account, not root, answers. Silo
+does not configure sshd. The host's sshd must accept that account's keys: `StrictModes` ignores an
+`authorized_keys` under a home or `~/.ssh` that others can write, which `init` and `status` report
+([`hosts.rs#L862`](../app/SiloUI/cli/src/hosts.rs#L862)), and an account sshd does not let in cannot
+be a host.
+
+The other direction: a controller trusts the host it adds. Secrets and a GitHub personal token
+saved for computers on a host are sent to that host and stored there
+([`#L352`](../app/SiloUI/src-tauri/engine/src/remote.rs#L352)), and what the host returns (files,
+command output, screenshots) is the host's word. The controller's only check of the host is the
+pinned SSH host key of boundary 7, so a compromised host gets what is saved for it and can answer
+anything, but it reaches nothing on the controller beyond what boundary 7 describes.
+
+**Logs.** The unit sets no `StandardOutput`, so under systemd `silod`'s stdout and stderr go to the
+journal ([`service_linux.rs#L225`](../app/SiloUI/src-tauri/silod/src/service_linux.rs#L225)). silod
+uses no log framework; the journal holds what it prints: why it did not become the owner and what it
+does on SIGTERM and SIGINT ([`agent.rs#L58`](../app/SiloUI/src-tauri/silod/src/agent.rs#L58),
+[`#L243`](../app/SiloUI/src-tauri/silod/src/agent.rs#L243)), an engine directory without the runtime
+([`linux.rs#L143`](../app/SiloUI/src-tauri/silod/src/linux.rs#L143)), why Connections are unavailable
+and accept errors ([`remote.rs#L549`](../app/SiloUI/src-tauri/engine/src/remote.rs#L549),
+[`#L3136`](../app/SiloUI/src-tauri/engine/src/remote.rs#L3136)), the `silo` link error
+([`#L538`](../app/SiloUI/src-tauri/engine/src/remote.rs#L538)), image cache repair and update
+recovery ([`startup.rs#L395`](../app/SiloUI/src-tauri/silod/src/startup.rs#L395),
+[`#L447`](../app/SiloUI/src-tauri/silod/src/startup.rs#L447)), and the names of computers a session
+end left running ([`process.rs#L47`](../app/SiloUI/src-tauri/silod/src/process.rs#L47)). None of
+those lines carries a credential or token value: the file store's refusal names the file
+([`credential_store.rs#L50`](../app/SiloUI/src-tauri/engine/src/credential_store.rs#L50)), a guest
+client's rejected call is logged without its token
+([`frames.rs#L220`](../app/SiloUI/src-tauri/silod/src/guest_bridge/frames.rs#L220)), and `msb`'s
+output is captured by the engine or discarded, never inherited
+([`runtime/mod.rs#L1846`](../app/SiloUI/src-tauri/engine/src/runtime/mod.rs#L1846),
+[`#L1863`](../app/SiloUI/src-tauri/engine/src/runtime/mod.rs#L1863)). Error texts do carry paths,
+computer and device names and addresses. journald lets root and, on typical distributions, the
+`systemd-journal` or `adm` group read every account's journal, so these lines are not private to the
+engine's account: a host administrator reads them without the account's credentials. Computer logs
+under the data directory ([`runtime_logs.rs#L661`](../app/SiloUI/src-tauri/engine/src/runtime_logs.rs#L661))
+and the XDG state log directory ([`paths.rs#L54`](../app/SiloUI/src-tauri/silod/src/paths.rs#L54)) are
+the account's and root's.
+
+**Lingering.** The unit is wanted by the user manager's `default.target`
+([`service_linux.rs#L244`](../app/SiloUI/src-tauri/silod/src/service_linux.rs#L244)). With lingering
+on (`loginctl enable-linger`, run by an administrator; silod only reports it,
+[`#L564`](../app/SiloUI/src-tauri/silod/src/service_linux.rs#L564)), that manager starts at boot and
+outlives every logout, so the engine, its socket, its computers and the bridge for every authorized
+key are up whenever the host is, with nobody logged in. Without it the engine runs only between the
+account's first login and last logout, and the manager's end kills what the session end left
+([engine guide](SiloUI-ENGINE.md#silod-on-a-linux-host)). A lingering host answers every authorized
+controller key at all times, which is what a host is for: revoke keys on the host rather than
+counting on a logout.
+
 Not defended on a Linux host:
 
 - **Processes of the engine's account.** They have the engine's full authority (boundary 7) and can
@@ -533,7 +631,14 @@ Not defended on a Linux host:
 - **A writable install directory.** The ownership check makes `silod` refuse one, but only at
   start: an account that can change the directory later, or a writable directory the check does
   not cover, can still replace what the engine runs next. The check reads mode bits only, so
-  write access granted by a POSIX ACL is not seen. Nothing is signed.
+  write access granted by a POSIX ACL is not seen. A default ACL on a directory also overrides the
+  umask a tool relies on: on the KVM runner `ssh-keygen` wrote the Connections key 0644, so the
+  engine now sets a new key to 0600 itself
+  ([`editor.rs#L295`](../app/SiloUI/src-tauri/engine/src/editor.rs#L295)); files the engine writes
+  with explicit modes (the credential store, the unit, `authorized_keys`) are not affected. Nothing is
+  signed.
+- **A controller's key.** It is as good as the controller's engine: whoever holds it has the host
+  engine's authority (above) until the host revokes it. Silo cannot tell a stolen key from its owner.
 - **Other local users reaching loopback listeners.** Published ports, SSH access to a computer and
   host-push listen on the host's loopback, which every account on the host can reach. Use a
   single-tenant host.
@@ -591,8 +696,8 @@ its own Keychain prompts. Silo does not
 - Per-computer egress policy (block public addresses by default, or an allowlist, with a DNS log).
 - Per-client socket authentication (macOS code signature, Linux `SO_PEERCRED`) and an audit log of
   client, method and computer.
-- On a Linux host: signed engine archives (roadmap milestone 11), and the KVM isolation eval that
-  comes with the KVM CI job.
+- On a Linux host: signed engine archives (roadmap milestone 11), and the isolation evals run on a
+  KVM host (roadmap milestone 9); the KVM CI job runs the computer lifecycle, not an eval.
 - A security review of the read-write `/.msb` share (boundary 6).
 - A public, re-runnable isolation eval in `docs/evals/` whose results back each "cannot" above.
 

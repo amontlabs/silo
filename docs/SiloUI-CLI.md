@@ -285,14 +285,30 @@ macOS computers (macOS allows two macOS computers running at once on one Mac), a
 runs Linux computers over KVM. Another device manages them through
 [Connections](SiloUI-CONNECTIONS.md); each host keeps its own secrets and GitHub sign-in.
 
-On the host, as the account that will own the computers (not root):
+First, on the controller (its engine running), print its Silo key and copy it to the host as
+`controller.pub`. The output also shows the `silo host init` line to run there:
 
 ```sh
-# Linux: from the unpacked engine archive (see the engine guide)
-~/.local/opt/silo-engine/silo host init
+silo devices key
+```
+
+Then on the host, as the account that will own the computers (not root):
+
+```sh
+# Linux: check and unpack the engine archive (see the engine guide), then init
+sha256sum -c silo-engine-<version>-linux-x64.tar.gz.sha256
+mkdir -p ~/.local/opt && tar -xzf silo-engine-<version>-linux-x64.tar.gz -C ~/.local/opt
+chmod -R go-w ~/.local/opt/silo-engine
+~/.local/opt/silo-engine/silo host init --authorize controller.pub
 # Mac: the app's silo (linked as ~/.local/bin/silo once Silo has run)
 /Applications/Silo.app/Contents/MacOS/silo host init
 ```
+
+The Linux order end to end: `silo devices key` on the controller, unpack the archive on the host
+([engine guide](SiloUI-ENGINE.md#silod-on-a-linux-host)), `silo host init --authorize` with that
+key on the host (it runs `silod --service register` for you; `silod --service register` alone
+installs just the service), then `silo devices add <address>` on the controller. Without `--authorize`, `silo devices add` installs the controller's
+key over SSH instead, when SSH lets it in.
 
 `silo host init` changes nothing until its checks pass, and running it again is safe:
 
