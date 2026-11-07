@@ -528,6 +528,11 @@ pub async fn desktop_set(
             "{name} is a macOS computer; its display is the computer itself, so there is no desktop to turn on or off."
         )));
     };
+    if computer.desktop_on().is_none() {
+        return Err(CliError::new(format!(
+            "{name} does not have a built-in desktop, so it has no desktop setting for `silo desktop`; change its desktop in the app's computer settings."
+        )));
+    }
     if computer.state != "running" {
         return Err(CliError::new(format!(
             "{name} is {}; start it with `silo start {name}` first.",

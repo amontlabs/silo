@@ -205,9 +205,15 @@ describe("v3 and v4 desktop viewer", () => {
     expect(screen.getByText("Desktop unavailable")).toBeVisible()
   })
   it("says a computer whose desktop is off has no desktop and where to turn it on", () => {
-    viewer({ installed: true, autoStart: false, state: "stopped" })
+    viewer({ ...fixtureDesktopState("ready"), autoStart: false, state: "stopped" })
     expect(screen.getByText("dev has no desktop")).toBeVisible()
     expect(screen.getByText(/Turn on Desktop in the computer's settings/)).toBeVisible()
+    expect(screen.queryByText(/Computer use needs it/)).not.toBeInTheDocument()
+  })
+  it("keeps saying the desktop is stopped on an older computer that starts it by hand", () => {
+    viewer({ installed: true, autoStart: false, state: "stopped" })
+    expect(screen.getByText("Desktop is stopped")).toBeVisible()
+    expect(screen.queryByText(/has no desktop/)).not.toBeInTheDocument()
   })
   it("still points an older computer to Add Linux desktop", () => {
     viewer({ installed: false, autoStart: false, state: "uninstalled" })

@@ -43,8 +43,10 @@ export function LinuxDesktopViewer({ name, state, busy, error, onAction, onRetry
     && (state.updateRequired === true || state.updateAvailable === true || state.backend === "kasm")
   const computerUse = state?.computerUse
   const problem = error ?? menuError
-  // The desktop is turned off for this computer (and so for its forks), not just stopped.
-  const turnedOff = state != null && state.state !== "uninstalled" && state.autoStart === false
+  // The built-in desktop is turned off for this computer (and so for its forks), not just stopped.
+  // An older computer, whose desktop was installed by hand, has no such setting; only a built-in
+  // desktop reports computer use.
+  const turnedOff = state != null && state.computerUse != null && state.state !== "uninstalled" && state.autoStart === false
     && (state.state === "stopped" || state.state === "computer-stopped")
   const actionLabel = updateRequired ? "Update desktop" : state?.state === "computer-stopped" ? state.autoStart ? "Start computer" : "Start computer and desktop" : state?.state === "failed" ? "Restart desktop" : "Start desktop"
   const primaryAction: DesktopAction = updateRequired ? "update-streamer" : state?.state === "failed" ? "restart" : "start"
@@ -91,7 +93,7 @@ export function LinuxDesktopViewer({ name, state, busy, error, onAction, onRetry
           <Button disabled={busy} size="sm" variant="ghost" onClick={() => onAction("update-streamer")}>Update desktop</Button>
           {state?.backend === "selkies" && <p className="text-xs text-muted-foreground">Updating adds a sharp display at your screen's full resolution, clipboard sharing, sound control and a screen that follows the window. It needs a network connection. You can start the desktop without updating.</p>}
         </>}
-        {turnedOff && <p className="text-xs text-muted-foreground">Turn on Desktop in the computer's settings, or start it here for now. Computer use needs it.</p>}
+        {turnedOff && <p className="text-xs text-muted-foreground">Turn on Desktop in the computer's settings, or start it here for now. Computer use is not applied while Desktop is off.</p>}
         {state?.state === "uninstalled" && !computerUse && <p className="text-xs text-muted-foreground">Choose Add Linux desktop in the computer’s actions menu.</p>}
       </div>
     </div>}

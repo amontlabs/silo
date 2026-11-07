@@ -156,11 +156,16 @@ pub struct Computer {
 }
 
 impl Computer {
-    /// Whether this Linux computer starts a desktop with itself: the setting `silo desktop`
-    /// changes. `None` for macOS, whose display is the computer itself.
+    /// Whether this Linux computer starts its built-in desktop with itself: the setting
+    /// `silo desktop` changes. `None` for macOS, whose display is the computer itself, and for
+    /// a Linux computer whose desktop is not built in (installed by hand, or none), which has no
+    /// such setting.
     pub fn desktop_on(&self) -> Option<bool> {
-        let configuration = self.configuration.as_ref()?;
-        Some(configuration["desktop"]["startWithComputer"] == true)
+        let desktop = &self.configuration.as_ref()?["desktop"];
+        if desktop["builtIn"] != true {
+            return None;
+        }
+        Some(desktop["startWithComputer"] == true)
     }
 
     pub fn to_json(&self) -> Value {

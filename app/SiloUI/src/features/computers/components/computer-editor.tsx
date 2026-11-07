@@ -311,7 +311,7 @@ export function ComputerEditor({ saving, blockedReason, editorHeader, editor, fo
 
       {builtIn && <section aria-label="Linux desktop" className="grid gap-2 border-t border-border pt-3">
         <label className="flex items-center justify-between gap-3 text-xs">
-          <span>Desktop<span className="mt-1 block text-caption text-muted-foreground">When off, this computer starts no desktop, and neither do its forks. Computer use needs it.</span></span>
+          <span>Desktop<span className="mt-1 block text-caption text-muted-foreground">When off, this computer has no desktop, and neither do its forks. Computer use is not applied.</span></span>
           <Switch aria-label="Desktop" checked={draft.desktop?.startWithComputer ?? true} disabled={saving} onCheckedChange={startWithComputer => update({ desktop: { startWithComputer } })} />
         </label>
       </section>}

@@ -623,7 +623,17 @@ pub fn parse_recipe(text: &str) -> Result<Recipe, String> {
 }
 
 pub fn parse_settings(text: &str) -> Result<Settings, String> {
-    parse_text(text, Settings::validate)
+    parse_text(text, Settings::validate).map_err(|reason| {
+        if reason.contains("unknown field `warm_max_age`") {
+            // The key was a setting until forks stopped using a warm checkpoint.
+            let place = reason.find(" at line").map_or("", |at| &reason[at..]);
+            format!(
+                "`warm_max_age` is no longer a setting (a fork starts from the computer as it is now); delete that line{place}"
+            )
+        } else {
+            reason
+        }
+    })
 }
 
 pub fn load_recipe(path: &Path) -> Result<Recipe, CliError> {
@@ -878,9 +888,10 @@ mod tests {
 
     #[test]
     fn the_removed_warm_max_age_setting_is_rejected() {
-        assert!(parse_settings("warm_max_age: 90s\n")
-            .unwrap_err()
-            .contains("warm_max_age"));
+        let message = parse_settings("fold: ask\nwarm_max_age: 90s\n").unwrap_err();
+        assert!(message.contains("`warm_max_age`"), "{message}");
+        assert!(message.contains("delete that line"), "{message}");
+        assert!(message.contains("line 2"), "{message}");
     }
 
     #[test]

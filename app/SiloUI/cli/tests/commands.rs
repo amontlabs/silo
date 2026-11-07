@@ -656,6 +656,47 @@ async fn desktop_needs_a_running_linux_computer() {
     );
 }
 
+/// An older computer: its desktop was installed by hand, or it has none, and `startWithComputer`
+/// does not mean "no desktop" there.
+fn legacy_desktop_engine(desktop: Value) -> FakeEngine {
+    FakeEngine::start(move |method, _| match method {
+        "computers.list" => {
+            let mut listed = listing(&[("old", "running")]);
+            let configuration = &mut listed["linux"]["computers"][0]["configuration"];
+            if desktop.is_null() {
+                configuration.as_object_mut().unwrap().remove("desktop");
+            } else {
+                configuration["desktop"] = desktop.clone();
+            }
+            Ok(listed)
+        }
+        other => Err(("internal", format!("unexpected {other}"))),
+    })
+}
+
+#[tokio::test]
+async fn a_computer_without_a_built_in_desktop_is_never_said_to_have_no_desktop() {
+    for desktop in [json!({"startWithComputer": false}), Value::Null] {
+        let engine = legacy_desktop_engine(desktop);
+        let connected = Engine::connect(&engine.socket).await.unwrap();
+        let computer = connected.computer("old").await.unwrap();
+        assert_eq!(computer.desktop_on(), None);
+        assert!(silo_cli::gui::ensure_desktop(&computer).is_ok());
+        let value = ops::status(&connected, "old").await.unwrap();
+        assert!(value["desktop"].is_null());
+        assert!(!silo_cli::render::status(&value).contains("no desktop"));
+        let error = ops::desktop_set(&connected, "old", true, &ignore)
+            .await
+            .unwrap_err();
+        assert!(
+            error.message.contains("does not have a built-in desktop"),
+            "{}",
+            error.message
+        );
+        assert!(engine.calls("computers.configuration.change").is_empty());
+    }
+}
+
 #[test]
 fn the_desktop_command_takes_on_or_off_and_a_computer() {
     let cli = <Cli as clap::Parser>::try_parse_from(["silo", "desktop", "off", "main"]).unwrap();
