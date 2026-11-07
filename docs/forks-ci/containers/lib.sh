@@ -9,6 +9,7 @@ BASE=$WORK/base/rootfs
 BOOT=$WORK/boot
 CTR=$WORK/ctr
 CGROOT=/sys/fs/cgroup/silo-c1
+[ -d "$WORK" ] || { sudo mkdir -p "$WORK" && sudo chown "$(id -u):$(id -g)" "$WORK"; }
 mkdir -p "$RAW" "$CTR"
 
 now() { date +%s.%N; }

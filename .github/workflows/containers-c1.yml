@@ -26,17 +26,19 @@ jobs:
     if: github.event_name != 'pull_request' || github.event.action != 'labeled'
     runs-on: ubuntu-24.04
     timeout-minutes: 150
-    env:
-      C1_OUT: ${{ github.workspace }}/../c1-evidence
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Evidence directory
+        run: echo "C1_OUT=$RUNNER_TEMP/c1-evidence" >> "$GITHUB_ENV"
       - name: Prepare the host, the image and the proxy
         timeout-minutes: 30
+        shell: bash
         run: bash docs/forks-ci/containers/setup.sh 2>&1 | tee "$RUNNER_TEMP/setup.log"
       - name: Measure
         timeout-minutes: 110
+        shell: bash
         run: bash docs/forks-ci/containers/run.sh 2>&1 | tee "$RUNNER_TEMP/run.log"
       - name: Collect logs
         if: always()
@@ -57,7 +59,7 @@ jobs:
         if: always()
         with:
           name: containers-c1-evidence
-          path: ${{ github.workspace }}/../c1-evidence/
+          path: ${{ runner.temp }}/c1-evidence/
           if-no-files-found: warn
           retention-days: 30
 
@@ -149,6 +151,7 @@ jobs:
         env:
           SILO: ${{ env.ENGINE }}/silo
           OUT: ${{ runner.temp }}/microvm-evidence
+        shell: bash
         run: bash docs/forks-ci/containers/microvm.sh 2>&1 | tee "$RUNNER_TEMP/microvm.log"
       - name: Stop the engine
         if: always() && env.ENGINE != ''
