@@ -767,7 +767,8 @@ fn first_error_line(file: &mut fs::File) -> Option<String> {
     let line: String = text
         .lines()
         .map(str::trim)
-        .find(|line| !line.is_empty())?
+        // Skip OpenSSH's banner frame (lines of `@`) to reach the line that says what failed.
+        .find(|line| !line.is_empty() && !line.starts_with('@'))?
         .chars()
         .filter(|character| !character.is_control())
         .take(300)
