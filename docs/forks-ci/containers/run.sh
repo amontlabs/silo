@@ -182,6 +182,8 @@ section_net() {
   wait_marker "$CTR/net1/out" NET_DONE 180
   cp "$CTR/net1/out" "$RAW/net.txt"; cat "$RAW/net.txt"
   sudo nsenter -t "$(cat "$CTR/net1/pid")" -n nft list ruleset > "$RAW/net-container-nft.txt" 2>&1; cat "$RAW/net-container-nft.txt"
+  { echo "-- same 50 MB range direct from the host (no container, no proxy)"
+    curl -sS -m 120 -r 0-52428799 -o /dev/null -w 'bytes=%{size_download} seconds=%{time_total} bytes_per_s=%{speed_download}\n' http://archive.ubuntu.com/ubuntu/ls-lR.gz; } | tee "$RAW/net-throughput-host.txt"
   sudo nft list table inet silo_c1 > "$RAW/net-host-nft.txt" 2>&1; cat "$RAW/net-host-nft.txt"
   { echo "-- tinyproxy log (container address 10.200.1.2)"; grep -E '10\.200\.1\.2' "$WORK/tinyproxy.log" | tail -n 15
     echo "-- canary log (the host service; nothing from 10.200.1.2 may appear)"; grep -c '10\.200\.1\.2' "$WORK/canary.log"; } | tee "$RAW/net-proxy-log.txt"
@@ -221,7 +223,7 @@ section_work() {
     echo "upper layer after the workload: $(sudo du -sm "$CTR/work$i/upper" | cut -f1) MiB"
     stop_ctr work$i; sudo rm -rf "$CTR/work$i"
   done
-  for phase in git_clone_express apt_update apt_install npm_install rustup_install cargo_install_hexyl git_clone_zlib make_zlib; do
+  for phase in git_clone_express apt_update apt_download apt_unpack_configure npm_install rustup_install cargo_install_hexyl git_clone_zlib make_zlib; do
     grep -h "^PHASE $phase " "$RAW"/work-[0-9].txt 2>/dev/null | awk '$4==0{print $2, $3}' > "$RAW/work-phase-$phase.txt"
     [ -s "$RAW/work-phase-$phase.txt" ] && summ "container workload: $phase" "$RAW/work-phase-$phase.txt"
   done

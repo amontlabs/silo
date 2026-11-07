@@ -5,8 +5,7 @@
 
 Without BASE_UPPER the manifest is the upper layer against the lower layers (the image): A added, M modified,
 D deleted (an overlay whiteout). With BASE_UPPER, the upper layer of a fork against the upper layer it was
-copied from, which is how a fork's own changes would be listed. Overlay in a user namespace marks whiteouts with
-the xattr user.overlay.whiteout and opaque directories with user.overlay.opaque. Directories only copied up as
+copied from, which is how a fork's own changes would be listed. A whiteout is a 0/0 character device. Directories only copied up as
 the parent of a change are not listed. Prints the counts and the time it took.
 """
 import argparse
@@ -24,11 +23,13 @@ p.add_argument('--tsv')
 a = p.parse_args()
 
 
-def xattr(path, name):
+def is_whiteout(path):
+    """An overlay whiteout is a 0/0 character device (also when the overlay is mounted in a user namespace)."""
     try:
-        return os.getxattr(path, name, follow_symlinks=False)
+        st = os.lstat(path)
     except OSError:
-        return None
+        return False
+    return stat.S_ISCHR(st.st_mode) and st.st_rdev == 0
 
 
 def digest(path):
@@ -66,9 +67,9 @@ for directory, dirs, files in os.walk(a.upper):
         full = os.path.join(directory, name)
         rel = os.path.normpath(os.path.join(rel_dir, name))
         st = os.lstat(full)
-        whiteout = xattr(full, 'user.overlay.whiteout') is not None
+        whiteout = is_whiteout(full)
         previous = find_in([a.base_upper] if a.base_upper else a.lower, rel)
-        previous_whiteout = previous is not None and xattr(previous, 'user.overlay.whiteout') is not None
+        previous_whiteout = previous is not None and is_whiteout(previous)
         if whiteout:
             if not previous_whiteout:
                 rows.append(('D', rel, 0))
@@ -91,7 +92,7 @@ if a.base_upper:
         for name in sorted(files):
             rel = os.path.normpath(os.path.join(rel_dir, name))
             base_entry = os.path.join(directory, name)
-            if xattr(base_entry, 'user.overlay.whiteout') is not None:
+            if is_whiteout(base_entry):
                 continue
             if not os.path.lexists(os.path.join(a.upper, rel)):
                 rows.append(('D', rel, 0))

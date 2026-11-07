@@ -98,7 +98,7 @@ Port 3128
 Listen 0.0.0.0
 Timeout 600
 LogFile "$WORK/tinyproxy.log"
-LogLevel Connect
+LogLevel Info
 PidFile "$WORK/tinyproxy.pid"
 MaxClients 256
 Allow 10.200.0.0/16

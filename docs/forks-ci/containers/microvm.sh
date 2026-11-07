@@ -80,7 +80,7 @@ for i in $(seq "$RUNS"); do
   grep -E '^(PHASE|PHASE_TAIL|WORKLOAD_DONE)' "$RAW/work-$i.txt" | cut -c1-300
   drop_one "$n"
 done
-for phase in git_clone_express apt_update apt_install npm_install rustup_install cargo_install_hexyl git_clone_zlib make_zlib; do
+for phase in git_clone_express apt_update apt_download apt_unpack_configure npm_install rustup_install cargo_install_hexyl git_clone_zlib make_zlib; do
   grep -h "^PHASE $phase " "$RAW"/work-[0-9].txt 2>/dev/null | awk '$4==0{print $2, $3}' > "$RAW/work-phase-$phase.txt"
   [ -s "$RAW/work-phase-$phase.txt" ] && summ "microVM workload: $phase" "$RAW/work-phase-$phase.txt"
 done

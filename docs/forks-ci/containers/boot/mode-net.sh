@@ -7,9 +7,10 @@ t direct-https curl -sS -m 8 --noproxy '*' -o /dev/null -w 'http=%{http_code}' h
 t direct-ip curl -sS -m 8 --noproxy '*' -o /dev/null -w 'http=%{http_code}' http://1.1.1.1/
 t direct-dns getent hosts example.com
 t host-canary-8000 curl -sS -m 8 --noproxy '*' -o /dev/null -w 'http=%{http_code}' "http://$C1_HOSTIP:8000/"
-t host-proxy-direct-port curl -sS -m 8 --noproxy '*' -o /dev/null -w 'http=%{http_code}' "http://$C1_HOSTIP:3128/"
-t host-ssh nc -zv -w 3 "$C1_HOSTIP" 22
+t host-proxy-port-plain-request-expected-reachable curl -sS -m 8 --noproxy '*' -o /dev/null -w 'http=%{http_code}' "http://$C1_HOSTIP:3128/"
+t host-ssh-22 timeout 4 bash -c "echo > /dev/tcp/$C1_HOSTIP/22"
 t other-container-subnet curl -sS -m 5 --noproxy '*' -o /dev/null -w 'http=%{http_code}' http://10.200.99.2:3128/
+t proxy-download-50MB curl -sS -m 120 -r 0-52428799 -o /dev/null -w 'bytes=%{size_download} seconds=%{time_total} bytes_per_s=%{speed_download}' http://archive.ubuntu.com/ubuntu/ls-lR.gz
 python3 -m http.server 8080 --bind 127.0.0.1 >/dev/null 2>&1 &
 sleep 1
 t loopback-server curl -sS -m 5 --noproxy '*' -o /dev/null -w 'http=%{http_code}' http://127.0.0.1:8080/
