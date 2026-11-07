@@ -28,6 +28,7 @@ setup:                 # run once, in order: as root on Linux, as the account on
 services:              # started at boot
   web: python3 -m http.server 8080
 ports: [8080]          # published (as websites) on main by `silo up` and on each recipe fork
+desktop: false         # optional; Linux only. No desktop in this computer or its forks (default: true)
 quiet: [poller]        # fork rules (see SiloUI-CLI.md); not part of the build
 scrub: [/root/.env]
 keep:
@@ -96,38 +97,38 @@ MCP tools `recipe_list`, `up` and `fork` (with `recipe`) use the same calls.
 ## `silo up`
 
 `silo up [--recipe <r>]` checks that the engine answers, makes `main` from the recipe
-(default `linux-dev`) when it does not exist, starts it if it is stopped, and saves a
-checkpoint of kind `warm`. Each `up` replaces the previous warm checkpoint (one that a fork
-still depends on stays until a later `up`); retention never removes it.
+(default `linux-dev`) when it does not exist, starts it if it is stopped, publishes the
+recipe's ports on it and, with `ssh`, makes `ssh main.silo` work. It saves no checkpoint. A
+warm checkpoint that an earlier version saved is removed by the next `up` (one that a fork still
+depends on stays until a later `up`).
 
-A fork with no `--checkpoint` starts from the newest warm checkpoint only when the engine can
-tell `main` is unchanged since it was taken, `main` is running, and the checkpoint is at most a
-minute old (`warm_max_age` in `.silo/silo.yaml`, such as `90s` or `5m`); otherwise the engine
-takes a new checkpoint.
+A fork starts from the computer as it is when the fork is made. A fork with no `--checkpoint`
+takes a "Fork point" of the source first: on Linux its disks only, flushed from the running
+guest while it is briefly paused, never its memory, because a fork always cold-boots from the
+disks. On macOS a fork point is a disk copy too. `silo fork main -n N` takes one such capture and
+all N forks start from it. Name a checkpoint (`--checkpoint`) to fork from an earlier state
+instead.
 
-The engine keeps a "changed since" generation per computer (`generation` in `silo status`
-and in `computers.list`). Every operation the engine performs that can change a computer
-moves it: commands and command streams, file uploads and writes, keep, undo and promote,
-restore, start, stop and restart, ssh sessions opened through the engine, sessions over
-`ssh main.silo` (the SSH access listener reports each one it opens and closes, and the computer
-counts as changing while one is open), and terminal, editor, desktop and display sessions.
-Network and port changes do not. A warm checkpoint
-records the generation `main` had when its capture began (and records none if the engine was
-working on `main` then). A fork reuses the checkpoint only while `main` still has that
-generation. The generation lives in the engine process, so after an engine restart no warm
-checkpoint is reused until the next `silo up`.
+The fork reports which checkpoint it used, for example
+`Forked try (stopped): main as of 14:02:31 (new checkpoint)`; `--json` carries `checkpoint`
+(`id`, `kind`, `createdAt`, `ageSeconds`, `reused`) and `forkedAsOf`. The MCP `fork` tool
+behaves the same.
 
-The limit: a change made over an `ssh` session that goes through neither the engine nor SSH
-access (another SSH server you run in the computer) cannot be seen. That is why a warm checkpoint is reused for at most `warm_max_age`, one
-minute by default; a fork made after editing `main` over such a session, within that minute,
-can start without the edit. Name a checkpoint (`--checkpoint`) or take one first when that
-matters.
+## The desktop
 
-The fork reports which checkpoint it used and its age, for example
-`Forked try (stopped): main as of 14:02:31 (warm checkpoint, unchanged since, 40s old)`;
-`--json` carries `checkpoint` (`id`, `kind`, `createdAt`, `ageSeconds`, `reused`, `unchanged`)
-and `forkedAsOf`. The rule lives in the shared operations, so the MCP `fork` tool applies it
-too. `up` replaces the warm checkpoint only after the new one has been saved.
+A Linux computer has a desktop by default (the guest image ships it, and computer use needs
+it). `desktop: false` in a recipe builds a computer that starts none, and every fork of it
+starts none either: the choice is part of the computer, and forks inherit it. It saves the
+desktop's memory and boot time in each fork. A Linux recipe with `desktop: false` cannot also have
+`services:`, because Linux services start with the desktop session. A macOS recipe cannot say
+`desktop: false`: a macOS computer is its own display and always has one, so computer use there
+is unaffected.
+
+`silo fork --gui`, the computer-use tools (CLI and MCP) and `silo status` say
+`<name> has no desktop; turn it on with silo desktop on <name>` for a computer whose desktop is
+off. Turn the desktop on or off later with `silo desktop on|off <computer>` on a running
+computer (the app's **Desktop** switch in the computer's settings does the same). `on` also
+starts the desktop now; `off` stops it. Forks made afterwards inherit the new setting.
 
 ## Fork baselines
 

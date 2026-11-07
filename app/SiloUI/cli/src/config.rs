@@ -16,10 +16,6 @@ use crate::error::CliError;
 const RECIPE_FILE: &str = "recipe.yaml";
 const SETTINGS_FILE: &str = "silo.yaml";
 
-/// How old `main`'s warm checkpoint may be for a fork to start from it. The engine sees what
-/// it does to a computer, not what happens over a plain `ssh` session, so the age is capped.
-pub const DEFAULT_WARM_MAX_AGE_SECS: u64 = 60;
-
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Recipe {
@@ -45,6 +41,10 @@ pub struct Recipe {
     /// Ports a fork publishes.
     #[serde(default)]
     pub ports: Vec<u16>,
+    /// `false`: the computer and its forks start no desktop (Linux; on when left out). Turn it
+    /// on later with `silo desktop on`.
+    #[serde(default)]
+    pub desktop: Option<bool>,
     /// Process names stopped in a fork.
     #[serde(default)]
     pub quiet: Vec<String>,
@@ -221,9 +221,6 @@ pub struct Settings {
     /// [`Settings::fork_ram_budget_bytes`].
     #[serde(default)]
     pub fork_ram_budget: Option<String>,
-    /// How old `main`'s warm checkpoint may be for a fork to start from it, like `90s`.
-    #[serde(default)]
-    pub warm_max_age: Option<String>,
     /// Save a checkpoint of a computer after each step (each command run through Silo).
     #[serde(default)]
     pub step_checkpoints: bool,
@@ -299,15 +296,6 @@ impl Settings {
         self.fork_ram_budget
             .as_deref()
             .and_then(|text| parse_size(text).ok())
-    }
-
-    /// The longest a warm checkpoint may be and still be used by a fork that names no
-    /// checkpoint: `warm_max_age`, else one minute.
-    pub fn warm_max_age_secs(settings: Option<&Settings>) -> u64 {
-        settings
-            .and_then(|settings| settings.warm_max_age.as_deref())
-            .and_then(|text| crate::clock::parse_duration_secs(text).ok())
-            .unwrap_or(DEFAULT_WARM_MAX_AGE_SECS)
     }
 
     /// The settings that apply to an agent, and the one place per-agent overrides take effect:
@@ -395,10 +383,6 @@ impl Settings {
     fn validate(&self) -> Result<(), String> {
         if let Some(text) = &self.fork_ram_budget {
             parse_size(text).map_err(|reason| format!("fork_ram_budget: {reason}"))?;
-        }
-        if let Some(text) = &self.warm_max_age {
-            crate::clock::parse_duration_secs(text)
-                .map_err(|reason| format!("warm_max_age: {reason}"))?;
         }
         if blank(&self.recipes) {
             return Err("recipes: names may not be empty".into());
@@ -585,6 +569,7 @@ impl Recipe {
                 })
                 .collect(),
             ports: self.ports.clone(),
+            desktop: self.desktop,
         }
     }
 }
@@ -892,15 +877,8 @@ mod tests {
     }
 
     #[test]
-    fn warm_max_age_defaults_to_a_minute_and_reads_units() {
-        assert_eq!(Settings::warm_max_age_secs(None), 60);
-        let empty = parse_settings("").unwrap();
-        assert_eq!(Settings::warm_max_age_secs(Some(&empty)), 60);
-        let set = parse_settings("warm_max_age: 90s\n").unwrap();
-        assert_eq!(Settings::warm_max_age_secs(Some(&set)), 90);
-        let set = parse_settings("warm_max_age: 1h\n").unwrap();
-        assert_eq!(Settings::warm_max_age_secs(Some(&set)), 3600);
-        assert!(parse_settings("warm_max_age: soon\n")
+    fn the_removed_warm_max_age_setting_is_rejected() {
+        assert!(parse_settings("warm_max_age: 90s\n")
             .unwrap_err()
             .contains("warm_max_age"));
     }

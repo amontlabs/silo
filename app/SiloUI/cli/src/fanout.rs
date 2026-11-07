@@ -452,17 +452,13 @@ async fn fork_many_now(
         settings.and_then(Settings::fork_ram_budget_bytes),
     )?;
     let mut checkpoint = args.fork.checkpoint.clone();
-    if checkpoint.is_none() {
-        let max_age = Settings::warm_max_age_secs(settings);
-        checkpoint = ops::fresh_warm(&source, crate::clock::now_unix(), max_age)
-            .and_then(|warm| warm["id"].as_str().map(str::to_owned));
-    }
     if checkpoint.is_none() && args.count > 1 {
+        // The forks share one capture of the source as it is now: its disks, not its memory.
         let made = ops::checkpoint(
             engine,
             &source.name,
             Some(&format!("silo-fork-{}", ops::short_id())),
-            Some(CheckpointKind::Manual),
+            Some(CheckpointKind::ForkPoint),
             progress,
         )
         .await?;

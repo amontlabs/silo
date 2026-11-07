@@ -154,23 +154,13 @@ export function ComputerEditor({ saving, blockedReason, editorHeader, editor, fo
   const deletedElsewhere = Boolean(editor.originalID) && baselineComputer !== undefined && !original
   const divergent = Boolean(baselineComputer && original && !sameComputerConfiguration(baselineComputer, original))
   const changedFields = divergent && baselineComputer && original ? divergentComputerFields(baselineComputer, original) : []
-  // A computer whose desktop is built into its image always starts it; only older computers are configured here.
+  // A computer whose desktop is built into its image has it unless it is turned off; older computers install theirs here.
   const builtInDesktop = created && original?.desktop?.builtIn === true
   const computerUse = useComputerUseBridge()
   // Every Linux computer on a build with computer use gets the built-in desktop.
   const newVmSupport = computerUse ? "yes" : "no"
   const builtInNewVm = !created && newVmSupport === "yes"
-  const startsWithComputer = draft.desktop?.startWithComputer === false
-  // Computer use needs the session running: a new built-in computer always starts it, so a
-  // duplicate or saved draft that chose to start it by hand is corrected.
-  useEffect(() => {
-    if (builtInNewVm && startsWithComputer) {
-      const next = { ...draft, desktop: { startWithComputer: true } } as SetupComputerConfiguration
-      setDraft(next)
-      onDraftChange(next)
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [builtInNewVm, startsWithComputer])
+  const builtIn = builtInDesktop || builtInNewVm
   const desktopInstalled = created && Boolean(original?.desktop)
   const desktopOnlyChange = Boolean(original)
     && JSON.stringify(original?.desktop) !== JSON.stringify(draft.desktop)
@@ -241,7 +231,7 @@ export function ComputerEditor({ saving, blockedReason, editorHeader, editor, fo
     }
     // Stopping a running computer is always confirmed first (decision 8).
     else if (requiresStop && !stopConfirmed) setConfirmingStop(true)
-    else onSave(builtInNewVm && startsWithComputer ? { ...draft, desktop: { startWithComputer: true } } : draft)
+    else onSave(draft)
   }
 
   // Escape cancels only an untouched editor, so a keystroke never discards typed changes.
@@ -319,7 +309,13 @@ export function ComputerEditor({ saving, blockedReason, editorHeader, editor, fo
         <SelectField custom readOnly={created} label="Runtime disk" value={draft.runtimeStorageGiB} values={supportedStorageGiB} max={runtimeLimits.storageGiB} suffix="GiB" error={errors.runtimeStorageGiB} onChange={(runtimeStorageGiB) => update({ runtimeStorageGiB } as Partial<SetupComputerConfiguration>)} />
       </div>
 
-      {!builtInDesktop && !builtInNewVm && <section aria-label="Linux desktop" className="grid gap-2 border-t border-border pt-3">
+      {builtIn && <section aria-label="Linux desktop" className="grid gap-2 border-t border-border pt-3">
+        <label className="flex items-center justify-between gap-3 text-xs">
+          <span>Desktop<span className="mt-1 block text-caption text-muted-foreground">When off, this computer starts no desktop, and neither do its forks. Computer use needs it.</span></span>
+          <Switch aria-label="Desktop" checked={draft.desktop?.startWithComputer ?? true} disabled={saving} onCheckedChange={startWithComputer => update({ desktop: { startWithComputer } })} />
+        </label>
+      </section>}
+      {!builtIn && <section aria-label="Linux desktop" className="grid gap-2 border-t border-border pt-3">
         {desktopInstalled ? <label className="flex items-center justify-between gap-3 text-xs">
           <span>Start desktop with computer<span className="mt-1 block text-caption text-muted-foreground">When off, start the desktop from its viewer.</span></span>
           <Switch aria-label="Start desktop with computer" checked={draft.desktop?.startWithComputer ?? true} disabled={saving} onCheckedChange={startWithComputer => update({ desktop: { startWithComputer } })} />

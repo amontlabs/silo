@@ -1,0 +1,36 @@
+# silo desktop on|off on a computer from the demo-nodesk recipe (engine build b696d9e3)
+$ silo status e2e-forks-tg
+2 cpu, 4 GiB memory, 10 GiB disk
+1 checkpoints
+e2e-forks-tg has no desktop; turn it on with `silo desktop on e2e-forks-tg`.
+Running
+quiet: applied; stopped: none; scrubbed: /etc/silo/guest-client.json; secrets: none
+secrets assigned: none
+credentials used: none
+$ silo fork e2e-forks-tg --gui --name e2e-forks-tg-gui
+silo: e2e-forks-tg has no desktop; turn it on with `silo desktop on e2e-forks-tg`.
+$ silo desktop on e2e-forks-tg
+Turning the desktop of e2e-forks-tg on...
+The desktop of e2e-forks-tg is on.
+computer use: ready, approval ask, driver 0.38.0
+computer use: ready, approval ask, driver 0.38.0
+computer use: ready, approval ask, driver 0.38.0
+computer use: ready, approval ask, driver 0.38.0
+computer use: ready, approval ask, driver 0.38.0
+computer use: ready, approval ask, driver 0.38.0
+$ silo fork e2e-forks-tg --name e2e-forks-tg-on
+Forked e2e-forks-tg-on (stopped): e2e-forks-tg as of 22:45:40 (new checkpoint)
+$ silo desktop off e2e-forks-tg
+Turning the desktop of e2e-forks-tg off...
+Stopping the desktop of e2e-forks-tg...
+The desktop of e2e-forks-tg is off.
+$ silo desktop on mac
+silo: No computer is called mac.
+
+# forks inherit the setting: tg-on was forked while the desktop was on, tg is off now
+$ silo list --json (desktop field)
+e2e-forks-tg desktop = False
+e2e-forks-tg-on desktop = True
+$ silo fork e2e-forks-tg --name e2e-forks-tg-off  (source has its desktop off)
+Forked e2e-forks-tg-off (stopped): e2e-forks-tg as of 22:45:54 (new checkpoint)
+e2e-forks-tg-off desktop = False

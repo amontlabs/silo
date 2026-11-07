@@ -1,0 +1,3 @@
+plain1 8.82
+plain2 8.40
+plain3 8.61

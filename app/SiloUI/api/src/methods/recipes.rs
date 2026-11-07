@@ -73,6 +73,10 @@ wire_struct! {
         /// Ports a fork publishes.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         ports: Vec<u16>,
+        /// `false`: the computer, and every fork of it, starts no desktop (a Linux recipe;
+        /// absent or `true` keeps the desktop on).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        desktop: Option<bool>,
     }
 }
 

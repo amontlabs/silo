@@ -2341,7 +2341,7 @@ pub fn start_macos_checkpoint_job(
     id: String,
     name: String,
     automatic: bool,
-    warm: bool,
+    fork_point: bool,
     retention: RetentionPolicy,
     trimmed: Option<(
         silo_api::methods::checkpoints::CheckpointKind,
@@ -2359,8 +2359,8 @@ pub fn start_macos_checkpoint_job(
             silo_api::methods::checkpoints::CheckpointKind::Step => checkpoints::PolicyKind::Step,
             _ => checkpoints::PolicyKind::BeforeKeep,
         }
-    } else if warm {
-        checkpoints::PolicyKind::Warm
+    } else if fork_point {
+        checkpoints::PolicyKind::ForkPoint
     } else {
         checkpoints::PolicyKind::Manual
     };
@@ -2570,7 +2570,6 @@ fn checkpoint_created_job_result(
                 checkpoints::PolicyKind::Step => CheckpointKind::Step,
             },
             size_bytes: meta.size_bytes,
-            generation: None,
         },
     }
 }

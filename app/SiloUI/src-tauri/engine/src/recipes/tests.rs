@@ -21,6 +21,7 @@ fn spec() -> RecipeSpec {
             run: "python3 -m http.server 8080".into(),
         }],
         ports: vec![8080],
+        desktop: None,
     }
 }
 
@@ -51,6 +52,53 @@ fn the_hash_changes_with_anything_that_changes_the_build() {
     let mut changed = spec();
     changed.os = RecipeOs::Macos;
     assert_ne!(base, hash(&changed, "v5"));
+}
+
+#[test]
+fn only_an_off_desktop_changes_the_build() {
+    let base = hash(&spec(), "v5");
+    let mut on = spec();
+    on.desktop = Some(true);
+    assert_eq!(base, hash(&on, "v5"), "an on desktop is the default");
+    let mut off = spec();
+    off.desktop = Some(false);
+    assert_ne!(base, hash(&off, "v5"));
+    assert_eq!(normalize(&off).desktop, Some(false));
+}
+
+#[test]
+fn a_recipe_without_a_desktop_builds_its_computer_without_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let cache = Cache::new(dir.path());
+    let env = Fake::default();
+    let mut lean = spec();
+    lean.services.clear();
+    lean.desktop = Some(false);
+    build(&env, &cache, "lean", &lean, false).unwrap();
+    assert!(env.log.lock().unwrap()[0].ends_with(" 2/4/10 no-desktop"));
+    let with = Fake::default();
+    build(&with, &cache, "dev", &spec(), false).unwrap();
+    assert!(with.log.lock().unwrap()[0].ends_with(" 2/4/10"));
+}
+
+#[test]
+fn a_macos_recipe_cannot_turn_the_desktop_off() {
+    let mut mac = spec();
+    mac.os = RecipeOs::Macos;
+    mac.packages = RecipePackages::default();
+    mac.desktop = Some(false);
+    assert!(validate(&mac).unwrap_err().contains("macOS"));
+    mac.desktop = Some(true);
+    assert!(validate(&mac).is_ok());
+}
+
+#[test]
+fn a_linux_recipe_without_a_desktop_cannot_have_services() {
+    let mut lean = spec();
+    lean.desktop = Some(false);
+    assert!(validate(&lean).unwrap_err().contains("services"));
+    lean.services.clear();
+    assert!(validate(&lean).is_ok());
 }
 
 #[test]
@@ -131,8 +179,12 @@ impl BuildEnv for Fake {
         cpus: u32,
         memory: u32,
         disk: u32,
+        desktop: bool,
     ) -> Result<Created, String> {
-        self.log(format!("create {name} {cpus}/{memory}/{disk}"));
+        self.log(format!(
+            "create {name} {cpus}/{memory}/{disk}{}",
+            if desktop { "" } else { " no-desktop" }
+        ));
         if self.slow {
             std::thread::sleep(std::time::Duration::from_millis(100));
         }
@@ -406,6 +458,7 @@ fn service_spec(os: RecipeOs, run: &str) -> RecipeSpec {
             run: run.into(),
         }],
         ports: Vec::new(),
+        desktop: None,
     }
 }
 

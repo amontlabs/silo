@@ -1,0 +1,11 @@
+e2e-forks-ten-1   exit 0  http://3000.e2e-forks-ten-1.silo.localhost:47383
+e2e-forks-ten-2   exit 0  http://3000.e2e-forks-ten-2.silo.localhost:47383
+e2e-forks-ten-3   exit 0  http://3000.e2e-forks-ten-3.silo.localhost:47383
+e2e-forks-ten-4   exit 0  http://3000.e2e-forks-ten-4.silo.localhost:47383
+e2e-forks-ten-5   exit 0  http://3000.e2e-forks-ten-5.silo.localhost:47383
+e2e-forks-ten-6   exit 0  http://3000.e2e-forks-ten-6.silo.localhost:47383
+e2e-forks-ten-7   exit 0  http://3000.e2e-forks-ten-7.silo.localhost:47383
+e2e-forks-ten-8   exit 0  http://3000.e2e-forks-ten-8.silo.localhost:47383
+e2e-forks-ten-9   exit 0  http://3000.e2e-forks-ten-9.silo.localhost:47383
+e2e-forks-ten-10  exit 0  http://3000.e2e-forks-ten-10.silo.localhost:47383
+10 forks of main; review with `silo diff <fork>`, keep with `silo fold <fork>`.

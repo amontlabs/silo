@@ -5,7 +5,7 @@ use std::{
     time::Duration,
 };
 
-use fake_engine::{finished, listing, FakeEngine};
+use fake_engine::{finished, listing, listing_without_desktop, FakeEngine};
 use serde_json::{json, Value};
 use silo_api::methods::computer_use::ApprovalMode;
 use silo_cli::{
@@ -718,4 +718,86 @@ async fn an_agent_may_not_drive_a_fork_on_a_device_its_settings_do_not_list() {
     }
     assert!(engine.calls("guest.exec.start").is_empty());
     assert!(engine.calls("checkpoints.fork").is_empty());
+}
+
+#[tokio::test]
+async fn fork_gui_refuses_a_source_without_a_desktop_before_forking() {
+    let engine = FakeEngine::start(|method, _| match method {
+        "computers.list" => Ok(listing_without_desktop(&[("main", "running")], &["main"])),
+        other => Err(("internal", format!("unexpected {other}"))),
+    });
+    let connected = Engine::connect(&engine.socket).await.unwrap();
+    let args = GuiArgs {
+        fork: ForkArgs {
+            source: "main".into(),
+            ..ForkArgs::default()
+        },
+        approval: None,
+        timeout: Duration::from_secs(60),
+    };
+    let error = gui::fork_gui(&connected, &args, None, &ignore)
+        .await
+        .unwrap_err();
+    assert_eq!(
+        error.message,
+        "main has no desktop; turn it on with `silo desktop on main`."
+    );
+    assert!(engine.calls("checkpoints.fork").is_empty());
+}
+
+#[tokio::test]
+async fn fork_gui_refuses_a_recipe_that_starts_no_desktop() {
+    let engine = FakeEngine::start(|method, _| Err(("internal", format!("unexpected {method}"))));
+    let connected = Engine::connect(&engine.socket).await.unwrap();
+    let recipe = silo_cli::config::parse_recipe("desktop: false\n").unwrap();
+    let args = GuiArgs {
+        fork: ForkArgs {
+            source: "main".into(),
+            recipe: Some(recipe),
+            recipe_name: Some("lean".into()),
+            ..ForkArgs::default()
+        },
+        approval: None,
+        timeout: Duration::from_secs(60),
+    };
+    let error = gui::fork_gui(&connected, &args, None, &ignore)
+        .await
+        .unwrap_err();
+    assert!(
+        error.message.contains("The recipe lean has desktop: false"),
+        "{}",
+        error.message
+    );
+    assert!(engine.calls("recipes.build").is_empty());
+}
+
+#[tokio::test]
+async fn the_computer_use_tools_say_a_fork_has_no_desktop() {
+    let engine = FakeEngine::start(|method, _| match method {
+        "computers.list" => Ok(listing_without_desktop(
+            &[("main", "running"), ("t1", "running")],
+            &["t1"],
+        )),
+        "computers.tree" => Ok(tree()),
+        "desktop.status" => Ok(json!({
+            "state": "running", "sessionState": "running",
+            "computerUse": {"state": "ready", "approval": "ask"}
+        })),
+        other => Err(("internal", format!("unexpected {other}"))),
+    });
+    let (mut write, mut read) = connect_mcp(&engine).await;
+    let screenshot = call(
+        &mut write,
+        &mut read,
+        3,
+        "computer_use_screenshot",
+        json!({"computer": "t1"}),
+    )
+    .await;
+    let text = screenshot.to_string();
+    assert!(
+        text.contains("t1 has no desktop; turn it on with `silo desktop on t1`."),
+        "{text}"
+    );
+    assert!(engine.calls("guest.exec.start").is_empty());
 }

@@ -54,14 +54,15 @@ the engine's message.
 | Command | What it does |
 | --- | --- |
 | `silo list [--all]` | computers and their state; `--all` also shows the hidden throwaways (`silo-baseline-*`, `silo-build-*`) |
-| `silo status <computer>` | one computer: size, checkpoints, its `generation` (moves when the engine sees a change), a fork's quiet state, assigned secrets and GitHub access |
+| `silo status <computer>` | one computer: size, checkpoints, whether its desktop is on, a fork's quiet state, assigned secrets and GitHub access |
 | `silo secrets list` | secret names and the computers they are assigned to (never values) |
 | `silo secrets set NAME [--computer C]... [--domain D]...` | add a secret or replace its value; the value is read from stdin, never an argument |
 | `silo secrets assign NAME COMPUTER` / `silo secrets unassign NAME COMPUTER` | change which computers have a secret |
 | `silo create <name> [--linux\|--macos] [--cpus N --memory GiB --disk GiB]` | create a computer |
 | `silo start <computer>` / `silo stop <computer>` | lifecycle |
+| `silo desktop on\|off <computer>` | turn a running Linux computer's desktop on (and start it) or off (and stop it); forks made later inherit the choice, and `--gui` and the computer-use tools refuse a computer with it off. A macOS computer is its own display and has no such setting |
 | `silo retry-setup <computer>` | finish the setup of a macOS computer that ended `failed` before it was ready |
-| `silo up [--recipe R]` | make `main` from a recipe if needed, start it, publish the recipe's ports on it, make `ssh main.silo` work (`main.silo-dev` from a development build), then keep a warm checkpoint, last, so nothing `up` does afterwards marks main as changed ([recipes](SiloUI-RECIPES.md)) |
+| `silo up [--recipe R]` | make `main` from a recipe if needed, start it, publish the recipe's ports on it, make `ssh main.silo` work (`main.silo-dev` from a development build), ([recipes](SiloUI-RECIPES.md)); it saves no checkpoint, a fork starts from `main` as it is |
 | `silo ports <computer>` | list the published ports with their host port and URL |
 | `silo publish <computer> <port> [--http]` / `silo unpublish <computer> <port>` | publish or stop publishing a guest port; `--http` serves it as a website with a URL per computer ([URL proxy](SiloUI-URL-PROXY.md)) |
 | `silo ssh-setup <computer>` | make `ssh <computer>.silo` reach a computer. A Linux computer gets SSH access turned on and an entry in `~/.silo/ssh-hosts.conf` (`~/.silo-dev/` for a development build), which `~/.ssh/config` includes; a macOS computer's saved entry also answers to the name. After `silo fold --promote` or its undo the name is written again for the computer that now has it (a macOS entry follows on its own) |
@@ -78,7 +79,7 @@ the engine's message.
 | `silo undo <computer\|fork\|./dir>` | put a computer back to before its latest keep, or a folder back to before its latest fold |
 | `silo drop <computer> [--force]` | throw a computer away (a hidden throwaway too, by name or id); `main` needs `--force`. A stopped or failed `silo-baseline-*` copy more than an hour old is dropped by the next fork (alongside the fork, for at most 20 s; one the engine cannot drop is tried again next time) or `silo diff --baseline` |
 | `silo exec <computer> [--cwd DIR] [--timeout SECS] -- <cmd...>` | run a command; the exit code is passed through |
-| `silo checkpoint <computer> [--name N] [--kind manual\|automatic\|before-keep\|warm\|step]` | save a checkpoint |
+| `silo checkpoint <computer> [--name N] [--kind manual\|automatic\|before-keep\|step]` | save a checkpoint |
 | `silo checkpoints <computer>` | list checkpoints |
 | `silo steps <computer>` | the commands run in the computer through Silo, numbered, with exit code and the checkpoint each left ([steps](SiloUI-CHANGES.md#steps-and-the-fork-tree)) |
 | `silo fork <computer> --from-step N` | fork from the checkpoint taken after step N |
@@ -94,9 +95,9 @@ A fork publishes the ports its source publishes (a recipe fork, the recipe's `po
 
 ## Several forks and commands
 
-`-n N` (1 to 32) makes N forks of one checkpoint concurrently: the warm checkpoint from
-`silo up` when the engine can tell `main` has not changed since (and it is under a minute old; see [recipes](SiloUI-RECIPES.md#silo-up)), else one new checkpoint (`silo-fork-<id>`, kept,
-because `silo diff --baseline` forks from it) that all N share. Names are `<source>-<6 hex>`,
+`-n N` (1 to 32) makes N forks of one checkpoint concurrently: one new fork point of the
+source as it is now (`silo-fork-<id>`, disks only and kept, because `silo diff --baseline` forks
+from it; see [recipes](SiloUI-RECIPES.md#silo-up)) that all N share. Names are `<source>-<6 hex>`,
 or `<prefix>-1` to `<prefix>-N` with `--name`. Each fork is started and its URLs
 (`network.urls`) are printed. Without `-n` or a command, `silo fork` makes one stopped fork
 as before.
@@ -461,7 +462,6 @@ fold: ask                        # or auto-code
 fork_ram_budget: 8G
 step_checkpoints: true           # checkpoint a computer after each step (default false)
 step_checkpoints_keep: 20        # step checkpoints kept per computer (default 20; 0 keeps all)
-warm_max_age: 60s               # how old main's warm checkpoint may be for a fork to use it (and only if main is unchanged)
 auto_keep:
   - when: { only: [code], tests: pass }
 agents:
@@ -481,7 +481,7 @@ agents:
 | `fold` | `ask` (default) or `auto-code`, which is `auto_keep: [{when: {only: [code], tests: pass}}]`. Explicit `auto_keep` rules win over `fold: auto-code`. |
 | `auto_keep` | Rules that keep a fork without asking (below). |
 | `reviewer` | `url:` is ignored here; the [hosted reviewer](#hosted-reviewer) takes its address from `SILO_REVIEWER_URL` or `~/.config/silo/reviewer.yaml`. |
-| `fork_ram_budget`, `warm_max_age` | Top level only. |
+| `fork_ram_budget` | Top level only. |
 | `computer_use_auto` | `true` lets agents (MCP clients, or the CLI run with `--agent`/`SILO_AGENT`) make forks whose in-computer agents use computer use without asking (`--computer-use auto`, `fork_gui` with `computer_use: auto`). Top level only, default `false`; a person typing `--computer-use auto` needs no setting. The setting is project-wide, not per agent or per fork, and an agent can edit the file: it is a convenience, not an access control. |
 | `step_checkpoints`, `step_checkpoints_keep` | Step checkpoints (see [steps](SiloUI-CHANGES.md#steps-and-the-fork-tree)). |
 | `agents.<name>` | Per-agent overrides of `recipes`, `fork_secrets`, `fold`, `auto_keep`, `step_checkpoints` and `step_checkpoints_keep`. |

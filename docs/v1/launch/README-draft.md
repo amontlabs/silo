@@ -33,8 +33,7 @@ silo up --recipe demo
 ```text
 Making main from demo...
 Starting main...
-Checkpointing main...
-main is running (made from demo). Warm checkpoint cb7140498337c47b5886ea3578002be6 saved. ssh main.silo reaches it.
+main is running (made from demo). ssh main.silo reaches it.
 ```
 
 Four forks, each running a command (here: write a note named after the fork's own host):
@@ -188,9 +187,9 @@ keep:
 ```
 
 `silo up --recipe <name>` builds it (cached), makes `main` from it, starts it, publishes its ports,
-makes `ssh main.silo` work and saves a warm checkpoint. A fork of `main` starts from that
-checkpoint when `main` has not changed since and the checkpoint is under a minute old; otherwise
-it checkpoints `main` first. Changes made over a plain `ssh` session are not seen by that check.
+and makes `ssh main.silo` work. A fork of `main` starts from `main` as it is when the fork is made: it
+takes a disk-only capture of `main` first (never its memory), and `fork -n` shares one capture
+among its forks. Add `desktop: false` to a Linux recipe for computers that start no desktop.
 
 Built in: `linux-dev`, `macos-xcode`, and two for agents that live in `main`:
 
@@ -317,6 +316,9 @@ production app. Each time is the median of N=3 runs, with min–max. Source: `do
 | `silo fork main -n 4` from the warm checkpoint | all four forks running and a command answered in each | 17.06 s | 16.45–19.69 s |
 | macOS fork to ready | `silo fork --gui` returns with the desktop and computer use ready | 59.19 s | 58.97–60.35 s |
 
+These times were measured before forks captured disks only and before `desktop: false` existed;
+the later numbers are in `docs/forks-ci/evidence/`.
+
 Memory of one Linux fork (its VM processes, measured with `footprint` 20 s after ready): about
 500 MiB, 497.7–502.2 MiB over 5 forks. Method, caveats and what was not measured:
 [numbers post draft](numbers-post.md).
@@ -337,8 +339,6 @@ Memory of one Linux fork (its VM processes, measured with `footprint` 20 s after
 - **Hosted review** (`silo review`) works against a reviewer you run; no hosted service is
   deployed.
 - **GitHub Action** (`silo-action/`) is in this repository and not published.
-- **Changes over plain `ssh`** are not seen by the warm-checkpoint check; a fork may start from a
-  checkpoint that misses them. Use `silo exec`, or fork after the checkpoint ages out.
 - **Outbound network:** there is no allowlist of hosts a computer may reach.
 
 ## License

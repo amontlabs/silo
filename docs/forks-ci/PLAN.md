@@ -23,7 +23,7 @@ call (7 Nov); its Mac live checks stay open there.
 | Phase | Part | What | Status |
 |---|---|---|---|
 | F1 | 1 | Fork measurements, before: one script that times a fork and measures its memory on a Mac and on a Linux KVM host (cold fork, `-n 4` from the warm checkpoint, macOS fork, RAM per fork) | Planned |
-| F2 | 1 | Cheaper forks: fork from a saved checkpoint by default; forks without a desktop. Measured after with the F1 script | Planned |
+| F2 | 1 | Cheaper forks: a fork starts from the source as it is, captured disks-only; forks without a desktop. Measured after with the F1 script | Built |
 | F3 | 1 | Sharing: `silo export` / `silo import`, the guest image by reference, a warning for logins found on the computer, keep an imported computer into main | Planned |
 | F4 | 1 | Sharing a computer that lives on another machine | Planned |
 | R1 | 2 | CI runner on the Mac: delete `silo-action/`, the Go helper on actions/scaleset, a Linux and a macOS runner recipe, a fresh computer per job, delete on success, keep on failure, private repositories only, example workflow | Planned |

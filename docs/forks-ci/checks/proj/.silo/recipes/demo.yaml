@@ -1,0 +1,27 @@
+# Final-run recipe: a web app on :3000, a poller service (the quiet section adds a cron job to main).
+os: linux
+packages:
+  apt: [build-essential, jq, ripgrep, python3, cron, git]
+setup:
+  - |
+    mkdir -p /opt/final
+    cat > /opt/final/web.py <<'PY'
+    import socket, http.server
+    class H(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            body = ("host=%s\n" % socket.gethostname()).encode()
+            self.send_response(200); self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
+        def log_message(self, *a): pass
+    http.server.ThreadingHTTPServer(("0.0.0.0", 3000), H).serve_forever()
+    PY
+    cat > /opt/final/poller.py <<'PY'
+    import socket, time
+    while True:
+        open("/var/tmp/final-poll.log", "a").write("%s %d poll\n" % (socket.gethostname(), time.time()))
+        time.sleep(10)
+    PY
+services:
+  web: python3 /opt/final/web.py
+  final-poller: python3 /opt/final/poller.py
+ports: [3000]
+quiet: [final-poller]

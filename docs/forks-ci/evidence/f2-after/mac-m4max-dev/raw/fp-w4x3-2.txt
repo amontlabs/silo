@@ -1,0 +1,4 @@
+method: footprint -p PID (physical footprint)
+pid 3535: 490.0 MiB  /Users/polarzero/code/projects/silo-dev-target/release/bundle/macos/Silo Dev.app/Contents/Resources/SiloEngine
+pid 3744: 6.0 MiB  /Users/polarzero/code/projects/silo-dev-target/release/bundle/macos/Silo Dev.app/Contents/Resources/SiloEngine
+TOTAL 496.0

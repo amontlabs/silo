@@ -9,9 +9,10 @@ use std::time::Duration;
 pub struct DesktopConfiguration {
     #[serde(default = "default_start")]
     pub start_with_computer: bool,
-    /// The desktop and computer use come with the guest image (v4 and later) and always
-    /// start with the computer. Silo decides this when it creates the computer; a value sent with a
-    /// saved configuration is ignored (see `keep_built_in`).
+    /// The desktop and computer use come with the guest image (v4 and later). Silo decides
+    /// this when it creates the computer; a value sent with a saved configuration is ignored
+    /// (see `keep_built_in`). Whether the desktop starts with the computer stays the owner's
+    /// choice, on by default.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub built_in: bool,
 }
@@ -32,12 +33,13 @@ pub(crate) fn image_includes_desktop(image_version: &str) -> bool {
         .is_some_and(|revision| revision >= 4)
 }
 
-/// On such an image the desktop is part of every new computer, started with it (computer use
-/// needs a running session). Existing computers and explicit choices are left alone (an
-/// existing computer's request without desktop settings keeps its saved ones), except
-/// that `built_in` is Silo's to decide: an existing computer keeps what it had and a new computer
-/// has it exactly when it is created from such an image, whatever a request says; a new
-/// built-in computer also always starts its desktop with the computer.
+/// On such an image the desktop is part of every new computer, started with it unless the
+/// request says otherwise (`start_with_computer: false`: the computer, and the forks made from
+/// it, start no desktop; computer use needs a running session). Existing computers and
+/// explicit choices are left alone (an existing computer's request without desktop settings
+/// keeps its saved ones), except that `built_in` is Silo's to decide: an existing computer
+/// keeps what it had and a new computer has it exactly when it is created from such an image,
+/// whatever a request says.
 pub(crate) fn default_new_computer_desktops(
     computers: &mut [ComputerConfiguration],
     previous: &[ComputerConfiguration],
@@ -59,15 +61,11 @@ pub(crate) fn default_new_computer_desktops(
                 }
             }
             None if built_in_image => {
-                // Computer use needs the session running, so a new built-in computer always
-                // starts it, including settings duplicated from a legacy computer that chose
-                // to start its desktop by hand.
                 let configuration = desktop.get_or_insert(DesktopConfiguration {
                     start_with_computer: true,
                     built_in: true,
                 });
                 configuration.built_in = true;
-                configuration.start_with_computer = true;
             }
             None => {
                 if let Some(configuration) = desktop {
@@ -76,6 +74,19 @@ pub(crate) fn default_new_computer_desktops(
             }
         }
     }
+}
+
+/// Whether saving `next` over `previous` turns a built-in computer's desktop on, which is when
+/// computer use has to be applied: its boot skipped that while the desktop was off.
+pub(crate) fn turns_built_in_desktop_on(
+    previous: &ComputerConfiguration,
+    next: &ComputerConfiguration,
+) -> bool {
+    let started = |configuration| {
+        self::configuration(configuration)
+            .is_some_and(|desktop| desktop.built_in && desktop.start_with_computer)
+    };
+    crate::computer_use::is_built_in(previous) && !started(previous) && started(next)
 }
 
 pub(crate) fn only_desktop_changed(
@@ -994,7 +1005,7 @@ mod tests {
     }
 
     #[test]
-    fn new_computers_on_a_v4_image_get_an_autostarting_desktop() {
+    fn new_computers_on_a_v4_image_get_an_autostarting_desktop_unless_the_request_turns_it_off() {
         let manual = DesktopConfiguration {
             start_with_computer: false,
             built_in: false,
@@ -1025,11 +1036,44 @@ mod tests {
         assert_eq!(
             configuration(&computers[2]),
             Some(&DesktopConfiguration {
-                start_with_computer: true,
+                start_with_computer: false,
                 built_in: true,
             }),
-            "a new built-in computer always starts its desktop, even from duplicated manual settings"
+            "a new built-in computer keeps a request not to start its desktop"
         );
+    }
+
+    #[test]
+    fn only_turning_a_built_in_desktop_on_asks_for_computer_use_to_be_applied() {
+        let desktop = |start, built_in| {
+            computer(
+                "a",
+                Some(DesktopConfiguration {
+                    start_with_computer: start,
+                    built_in,
+                }),
+            )
+        };
+        assert!(turns_built_in_desktop_on(
+            &desktop(false, true),
+            &desktop(true, true)
+        ));
+        assert!(!turns_built_in_desktop_on(
+            &desktop(true, true),
+            &desktop(false, true)
+        ));
+        assert!(!turns_built_in_desktop_on(
+            &desktop(true, true),
+            &desktop(true, true)
+        ));
+        assert!(!turns_built_in_desktop_on(
+            &desktop(false, false),
+            &desktop(true, false)
+        ));
+        assert!(!turns_built_in_desktop_on(
+            &computer("a", None),
+            &desktop(true, false)
+        ));
     }
 
     #[test]

@@ -204,6 +204,11 @@ describe("v3 and v4 desktop viewer", () => {
     expect(screen.queryByText(/Add Linux desktop/)).not.toBeInTheDocument()
     expect(screen.getByText("Desktop unavailable")).toBeVisible()
   })
+  it("says a computer whose desktop is off has no desktop and where to turn it on", () => {
+    viewer({ installed: true, autoStart: false, state: "stopped" })
+    expect(screen.getByText("dev has no desktop")).toBeVisible()
+    expect(screen.getByText(/Turn on Desktop in the computer's settings/)).toBeVisible()
+  })
   it("still points an older computer to Add Linux desktop", () => {
     viewer({ installed: false, autoStart: false, state: "uninstalled" })
     expect(screen.getByText(/Add Linux desktop/)).toBeVisible()
@@ -218,8 +223,9 @@ describe("computer settings for v3 and v4", () => {
       initialEditorDraft={{ draft, originalID: created ? draft.id : undefined, insertAt: 0 }} /></TooltipProvider>
     render(provider ? wrap(backend(), list) : list)
   }
-  it("shows no desktop controls or note for a built-in computer", () => {
+  it("offers one Desktop switch, on, for a built-in computer, and no install controls or note", () => {
     editor({ ...configuration, desktop: { startWithComputer: true, builtIn: true } }, true, true)
+    expect(screen.getByRole("switch", { name: "Desktop" })).toBeChecked()
     expect(screen.queryByRole("switch", { name: "Start desktop with computer" })).not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "Add Linux desktop" })).not.toBeInTheDocument()
     expect(screen.queryByText(/Built in/)).not.toBeInTheDocument()
@@ -255,12 +261,22 @@ describe("creating a computer on the selected device", () => {
     return onConfigurationsChange
   }
 
-  it("starts the desktop of a new built-in computer even when duplicated settings chose to start it by hand", async () => {
+  it("keeps a new built-in computer's desktop off when its settings chose that", async () => {
     const onConfigurationsChange = creating({ ...configuration, desktop: { startWithComputer: false } })
+    expect(screen.getByRole("switch", { name: "Desktop" })).not.toBeChecked()
     const user = userEvent.setup()
     await user.click(screen.getByRole("button", { name: "Create" }))
     await waitFor(() => expect(onConfigurationsChange).toHaveBeenCalled())
-    expect(onConfigurationsChange.mock.lastCall?.[0]).toEqual([expect.objectContaining({ desktop: { startWithComputer: true } })])
+    expect(onConfigurationsChange.mock.lastCall?.[0]).toEqual([expect.objectContaining({ desktop: { startWithComputer: false } })])
+  })
+  it("turns the desktop of a new built-in computer off with the Desktop switch", async () => {
+    const onConfigurationsChange = creating()
+    expect(screen.getByRole("switch", { name: "Desktop" })).toBeChecked()
+    const user = userEvent.setup()
+    await user.click(screen.getByRole("switch", { name: "Desktop" }))
+    await user.click(screen.getByRole("button", { name: "Create" }))
+    await waitFor(() => expect(onConfigurationsChange).toHaveBeenCalled())
+    expect(onConfigurationsChange.mock.lastCall?.[0]).toEqual([expect.objectContaining({ desktop: { startWithComputer: false } })])
   })
   it("keeps a manual desktop start for a computer created before the built-in desktop", () => {
     const draft = { ...configuration, desktop: { startWithComputer: false } }

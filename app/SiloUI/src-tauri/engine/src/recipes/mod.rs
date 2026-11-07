@@ -78,6 +78,8 @@ pub fn normalize(spec: &RecipeSpec) -> RecipeSpec {
             .collect(),
         services,
         ports,
+        // Only an off desktop changes what is built.
+        desktop: spec.desktop.filter(|on| !on),
     }
 }
 
@@ -163,6 +165,12 @@ pub fn validate(spec: &RecipeSpec) -> Result<(), String> {
     }
     if spec.ports.contains(&0) {
         return Err("ports: 0 is not a port.".into());
+    }
+    if macos && spec.desktop == Some(false) {
+        return Err("desktop: false applies to a Linux recipe; a macOS computer is its own display and always has one.".into());
+    }
+    if linux && spec.desktop == Some(false) && !spec.services.is_empty() {
+        return Err("desktop: false cannot be combined with services: a Linux service starts with the desktop session.".into());
     }
     for (what, value) in [
         ("cpus", spec.cpus),

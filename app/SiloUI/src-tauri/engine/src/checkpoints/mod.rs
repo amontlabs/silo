@@ -220,10 +220,10 @@ impl Service {
             Arc::new(move || Ok(keep))
         };
         let automatic = kind == Some(CheckpointKind::Automatic);
-        if kind == Some(CheckpointKind::ForkPoint) {
+        if kind == Some(CheckpointKind::Warm) {
             return Err(Failure::new(
                 ErrorCode::Internal,
-                "A fork point is made by Fork, not saved as a checkpoint.",
+                "A warm checkpoint is no longer made; a fork starts from the computer as it is.",
             ));
         }
         if automatic && (self.retention)().map_err(Failure::from_message)? == 0 {
@@ -235,7 +235,7 @@ impl Service {
                 computer_id.to_owned(),
                 name.to_owned(),
                 automatic,
-                kind == Some(CheckpointKind::Warm),
+                kind == Some(CheckpointKind::ForkPoint),
                 self.retention.clone(),
                 match kind {
                     Some(CheckpointKind::BeforeKeep) => Some((

@@ -153,11 +153,16 @@ pub struct Computer {
     pub quiet: Option<Value>,
     /// How many times the engine has booted this macOS computer.
     pub boots: Option<u64>,
-    /// The engine's "changed since" count for the computer.
-    pub generation: Option<u64>,
 }
 
 impl Computer {
+    /// Whether this Linux computer starts a desktop with itself: the setting `silo desktop`
+    /// changes. `None` for macOS, whose display is the computer itself.
+    pub fn desktop_on(&self) -> Option<bool> {
+        let configuration = self.configuration.as_ref()?;
+        Some(configuration["desktop"]["startWithComputer"] == true)
+    }
+
     pub fn to_json(&self) -> Value {
         serde_json::json!({
             "id": self.id,
@@ -169,7 +174,7 @@ impl Computer {
             "memoryGiB": self.memory_gib,
             "diskGiB": self.disk_gib,
             "checkpoints": self.checkpoints.len(),
-            "generation": self.generation,
+            "desktop": self.desktop_on(),
         })
     }
 }
@@ -214,7 +219,6 @@ pub fn computers_from(listed: &Value) -> Vec<Computer> {
             configuration: Some(configuration.clone()),
             quiet: quiet(computer),
             boots: None,
-            generation: number(computer, "generation"),
         });
     }
     for computer in listed
@@ -236,7 +240,6 @@ pub fn computers_from(listed: &Value) -> Vec<Computer> {
             configuration: None,
             quiet: quiet(computer),
             boots: number(computer, "boots"),
-            generation: number(computer, "generation"),
         });
     }
     found

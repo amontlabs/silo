@@ -128,6 +128,11 @@ async fn serve(
 
 /// A `computers.list` reply with these Linux computers (name, state).
 pub fn listing(computers: &[(&str, &str)]) -> Value {
+    listing_without_desktop(computers, &[])
+}
+
+/// As [`listing`], with the desktop of the computers named in `off` turned off.
+pub fn listing_without_desktop(computers: &[(&str, &str)], off: &[&str]) -> Value {
     let linux: Vec<Value> = computers
         .iter()
         .map(|(name, state)| {
@@ -135,7 +140,8 @@ pub fn listing(computers: &[(&str, &str)]) -> Value {
                 "configuration": {
                     "id": format!("id-{name}"), "name": name, "cpus": 2, "maxCPUs": 2,
                     "memoryGiB": 4, "maxMemoryGiB": 4,
-                    "workspaceStorageGiB": 10, "runtimeStorageGiB": 10
+                    "workspaceStorageGiB": 10, "runtimeStorageGiB": 10,
+                    "desktop": {"startWithComputer": !off.contains(name), "builtIn": true}
                 },
                 "state": state, "stateDetail": "",
                 "checkpoints": [{"id": "cp1", "name": "base", "kind": "manual", "createdAt": "now"}]

@@ -713,7 +713,42 @@ fn capture_with(
     display_name: &str,
     reason: &str,
 ) -> Result<(), RuntimeError> {
-    capture_with_kind(runner, paths, id, display_name, reason, "manual").map(|_| ())
+    capture_with_kind(
+        runner,
+        paths,
+        id,
+        display_name,
+        reason,
+        "manual",
+        CaptureDepth::WithMemory,
+    )
+    .map(|_| ())
+}
+
+/// The stored kind and the depth of the capture a checkpoint of `kind` makes.
+fn capture_policy(
+    kind: silo_api::methods::checkpoints::CheckpointKind,
+) -> Result<(&'static str, CaptureDepth), String> {
+    use silo_api::methods::checkpoints::CheckpointKind;
+    Ok(match kind {
+        CheckpointKind::Manual => ("manual", CaptureDepth::WithMemory),
+        CheckpointKind::Automatic => ("automatic", CaptureDepth::WithMemory),
+        CheckpointKind::BeforeKeep => ("before-keep", CaptureDepth::WithMemory),
+        CheckpointKind::Step => ("step", CaptureDepth::WithMemory),
+        // Stored like the fork point a fork takes for itself.
+        CheckpointKind::ForkPoint => ("manual", CaptureDepth::DisksOnly),
+        CheckpointKind::Warm => return Err("A warm checkpoint is no longer made.".into()),
+    })
+}
+
+/// What a capture of a running computer saves. A stopped computer always saves its disks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CaptureDepth {
+    /// Disks, memory and running processes: a restore resumes where the capture was taken.
+    WithMemory,
+    /// Disks only, flushed from the running guest while it is briefly paused: a start from it
+    /// is a cold boot. A fork never uses memory, so its fork point takes this one.
+    DisksOnly,
 }
 
 fn capture_with_kind(
@@ -723,6 +758,7 @@ fn capture_with_kind(
     display_name: &str,
     reason: &str,
     policy_kind: &str,
+    depth: CaptureDepth,
 ) -> Result<Checkpoint, RuntimeError> {
     let label = display_name.trim();
     if label.is_empty() || label.chars().count() > 80 || label.chars().any(char::is_control) {
@@ -789,9 +825,10 @@ fn capture_with_kind(
     {
         inspected = inspect_capture_source(runner, paths, id, configuration.name())?;
     }
+    let source_running = inspected.status == "Running";
     let scope = match inspected.status.as_str() {
-        "Running" => "full",
-        "Created" | "Stopped" => "disk",
+        "Running" if depth == CaptureDepth::WithMemory => "full",
+        "Running" | "Created" | "Stopped" => "disk",
         _ => {
             return Err(RuntimeError::Invalid(
                 "Wait until the computer is running or stopped before creating a checkpoint."
@@ -867,7 +904,10 @@ fn capture_with_kind(
         hold
     });
     if scope == "full" {
-        args.extend(["--full".into(), "--guest-flush".into(), "required".into()]);
+        args.push("--full".into());
+    }
+    if source_running {
+        args.extend(["--guest-flush".into(), "required".into()]);
     }
     args.push("--integrity".into());
     let (result, failure_stage) = match runner.run(paths, &args, Duration::from_secs(900)) {
@@ -897,7 +937,7 @@ fn capture_with_kind(
             Ok(checkpoint)
         }
         Err(failure) => {
-            let (settled, failure) = if scope == "full" {
+            let (settled, failure) = if source_running {
                 settle_capture_failure(runner, paths, id, configuration.name(), failure)
             } else {
                 (true, failure)
@@ -922,6 +962,24 @@ fn capture_with_kind(
             Err(save_failure(paths, id, &record, failure))
         }
     }
+}
+
+/// The checkpoint a fork starts from when none was chosen: the source as it is now, disks only.
+fn capture_fork_point(
+    runner: &dyn RuntimeRunner,
+    paths: &RuntimePaths,
+    id: &str,
+) -> Result<(), RuntimeError> {
+    capture_with_kind(
+        runner,
+        paths,
+        id,
+        "Fork point",
+        "manual",
+        "manual",
+        CaptureDepth::DisksOnly,
+    )
+    .map(|_| ())
 }
 
 fn ensure_no_unfinished_restore(record: &Record, action: &str) -> Result<(), RuntimeError> {
@@ -1074,16 +1132,7 @@ pub fn create_for_job(
     if kind == CheckpointKind::Automatic && retention()? == 0 {
         return Err(crate::checkpoints::AUTOMATIC_OFF.into());
     }
-    let policy_kind = match kind {
-        CheckpointKind::Manual => "manual",
-        CheckpointKind::Automatic => "automatic",
-        CheckpointKind::BeforeKeep => "before-keep",
-        CheckpointKind::Warm => "warm",
-        CheckpointKind::Step => "step",
-        CheckpointKind::ForkPoint => {
-            return Err("A fork point is made by Fork, not saved as a checkpoint.".into())
-        }
-    };
+    let (policy_kind, depth) = capture_policy(kind)?;
     let checkpoint = capture_with_kind(
         &ProcessRunner,
         paths,
@@ -1091,6 +1140,7 @@ pub fn create_for_job(
         name,
         "manual",
         policy_kind,
+        depth,
     )
     .map_err(|error| error.to_string())?;
     drop(guard);
@@ -1164,7 +1214,6 @@ fn api_checkpoint(checkpoint: Checkpoint) -> silo_api::methods::checkpoints::Che
             _ => CheckpointKind::Manual,
         },
         size_bytes: None,
-        generation: None,
     }
 }
 
@@ -2296,7 +2345,7 @@ pub(super) fn fork_source(
         let selected_id = match checkpoint_id {
             Some(id) => id.to_owned(),
             None => {
-                capture_with(runner, paths, computer_id, "Fork point", "manual")?;
+                capture_fork_point(runner, paths, computer_id)?;
                 load(paths, computer_id)?
                     .checkpoints
                     .first()
@@ -3160,7 +3209,8 @@ fn settle_capture_failure(
     }
 }
 
-/// The in-flight full member also owns source recovery until settlement succeeds.
+/// The in-flight member of a capture of a running computer also owns source recovery until
+/// settlement succeeds: the runtime pauses the guest for the capture, whatever it saves.
 /// This lets ordinary lifecycle controls recover a capture without a Restore journal.
 pub(super) fn recover_paused_capture(
     runner: &dyn RuntimeRunner,
@@ -3169,11 +3219,7 @@ pub(super) fn recover_paused_capture(
     computer_name: &str,
 ) -> Result<bool, RuntimeError> {
     let record = load(paths, computer_id)?;
-    if !record
-        .inflight_checkpoint
-        .as_ref()
-        .is_some_and(|capture| capture.scope == "full")
-    {
+    if record.inflight_checkpoint.is_none() {
         return Ok(false);
     }
     settle_capture_source(runner, paths, computer_id, computer_name).map(|_| true)

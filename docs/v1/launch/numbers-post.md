@@ -1,5 +1,8 @@
 # How long a fork takes in Silo v1
 
+> **Measured before forks captured disks only (phase F2 of `docs/forks-ci/PLAN.md`); the "warm
+> checkpoint" paths below no longer exist.**
+>
 > **DRAFT for the owner's approval.** Every number below is copied from
 > `docs/v1/evidence/final/final-run.txt` (summary table in `docs/v1/evidence/final/README.md`;
 > per-run logs in `docs/v1/evidence/final/raw/`). Nothing is rounded except where marked "about".

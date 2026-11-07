@@ -31,7 +31,6 @@ fn computer(name: &str, kind: &'static str, state: &str, memory_gib: u64) -> Com
         configuration: None,
         quiet: None,
         boots: None,
-        generation: None,
     }
 }
 
@@ -123,6 +122,7 @@ fn lines_of_several_forks_are_prefixed_and_partial_lines_wait() {
 #[derive(Default)]
 struct World {
     computers: Vec<(String, String)>,
+    /// Whether main lists a warm checkpoint left by an earlier version.
     warm: bool,
     forks_seen: usize,
     exec: HashMap<String, (i32, &'static str)>,
@@ -130,14 +130,9 @@ struct World {
 
 /// An engine that keeps its computers. A fork job only finishes once `expected` fork requests
 /// have arrived, so forks made one after another would never finish.
-fn engine(
-    expected: usize,
-    warm: bool,
-    exec: &[(&str, i32, &'static str)],
-) -> (FakeEngine, Arc<Mutex<World>>) {
+fn engine(expected: usize, exec: &[(&str, i32, &'static str)]) -> (FakeEngine, Arc<Mutex<World>>) {
     let world = Arc::new(Mutex::new(World {
         computers: vec![("main".into(), "running".into())],
-        warm,
         exec: exec
             .iter()
             .map(|(name, code, out)| ((*name).to_owned(), (*code, *out)))
@@ -154,7 +149,7 @@ fn engine(
                     .iter()
                     .map(|(name, state)| {
                         let checkpoints = if name == "main" && world.warm {
-                            json!([{"id": "cp-warm", "name": "silo-warm", "kind": "warm", "generation": 0,
+                            json!([{"id": "cp-warm", "name": "silo-warm", "kind": "warm",
                                 "createdAt": silo_cli::clock::format_rfc3339_utc(silo_cli::clock::now_unix() - 30)}])
                         } else {
                             json!([])
@@ -165,7 +160,7 @@ fn engine(
                                 "memoryGiB": 2, "maxMemoryGiB": 2,
                                 "workspaceStorageGiB": 10, "runtimeStorageGiB": 10
                             },
-                            "state": state, "stateDetail": "", "generation": 0, "checkpoints": checkpoints,
+                            "state": state, "stateDetail": "", "checkpoints": checkpoints,
                         })
                     })
                     .collect();
@@ -244,11 +239,6 @@ fn engine(
             }
             "operations.job.get" => Ok(finished(Value::Null)),
             "operations.job.acknowledge" => Ok(Value::Null),
-            "guest.exec" => {
-                // The "unchanged since the warm checkpoint" probe.
-                Ok(json!({"exitCode": 0, "signal": null,
-                    "stdout": b"unchanged\n".to_vec(), "stderr": []}))
-            }
             other => Err(("internal", format!("unexpected {other}"))),
         }
     });
@@ -297,7 +287,7 @@ async fn run(
 
 #[tokio::test]
 async fn forks_are_made_at_the_same_time_from_one_new_checkpoint() {
-    let (engine, world) = engine(3, false, &[]);
+    let (engine, world) = engine(3, &[]);
     let result = run(&engine, &many(3, Some("try"), &[]), None)
         .await
         .unwrap();
@@ -311,7 +301,7 @@ async fn forks_are_made_at_the_same_time_from_one_new_checkpoint() {
     // One checkpoint, shared by all three.
     let created = engine.calls("checkpoints.create");
     assert_eq!(created.len(), 1);
-    assert_eq!(created[0]["kind"], "manual");
+    assert_eq!(created[0]["kind"], "fork-point");
     let forks = engine.calls("checkpoints.fork");
     assert_eq!(forks.len(), 3);
     assert!(forks.iter().all(|f| f["checkpointId"] == "cp-shared"));
@@ -333,17 +323,18 @@ async fn forks_are_made_at_the_same_time_from_one_new_checkpoint() {
 }
 
 #[tokio::test]
-async fn an_unchanged_main_gives_its_warm_checkpoint_to_every_fork() {
-    let (engine, _) = engine(2, true, &[]);
+async fn a_warm_checkpoint_of_an_earlier_version_is_not_given_to_the_forks() {
+    let (engine, world) = engine(2, &[]);
+    world.lock().unwrap().warm = true;
     run(&engine, &many(2, None, &[]), None).await.unwrap();
-    assert!(engine.calls("checkpoints.create").is_empty());
+    assert_eq!(engine.calls("checkpoints.create").len(), 1);
     let forks = engine.calls("checkpoints.fork");
-    assert!(forks.iter().all(|f| f["checkpointId"] == "cp-warm"));
+    assert!(forks.iter().all(|f| f["checkpointId"] == "cp-shared"));
 }
 
 #[tokio::test]
 async fn one_fork_with_no_count_takes_no_checkpoint_of_its_own() {
-    let (engine, _) = engine(1, false, &[]);
+    let (engine, _) = engine(1, &[]);
     let result = run(&engine, &many(1, Some("solo"), &[]), None)
         .await
         .unwrap();
@@ -357,7 +348,7 @@ async fn one_fork_with_no_count_takes_no_checkpoint_of_its_own() {
 
 #[tokio::test]
 async fn the_budget_refuses_before_anything_is_made() {
-    let (engine, _) = engine(2, false, &[]);
+    let (engine, _) = engine(2, &[]);
     let settings = parse_settings("fork_ram_budget: 3G\n").unwrap();
     let error = run(&engine, &many(2, None, &[]), Some(&settings))
         .await
@@ -376,7 +367,7 @@ async fn the_budget_refuses_before_anything_is_made() {
 
 #[tokio::test]
 async fn too_many_or_zero_forks_are_refused() {
-    let (engine, _) = engine(1, false, &[]);
+    let (engine, _) = engine(1, &[]);
     assert!(run(&engine, &many(0, None, &[]), None).await.is_err());
     assert!(run(&engine, &many(fanout::MAX_FORKS + 1, None, &[]), None)
         .await
@@ -385,7 +376,7 @@ async fn too_many_or_zero_forks_are_refused() {
 
 #[tokio::test]
 async fn a_command_runs_in_each_fork_and_its_exit_code_comes_back() {
-    let (engine, _) = engine(2, false, &[("try-1", 0, "ok\n"), ("try-2", 5, "boom\n")]);
+    let (engine, _) = engine(2, &[("try-1", 0, "ok\n"), ("try-2", 5, "boom\n")]);
     let seen: Mutex<Vec<(String, bool, Vec<u8>)>> = Mutex::new(Vec::new());
     let connected = Engine::connect(&engine.socket).await.unwrap();
     let sink = |name: &str, is_err: bool, bytes: &[u8]| {
@@ -420,7 +411,7 @@ async fn a_command_runs_in_each_fork_and_its_exit_code_comes_back() {
 
 #[tokio::test]
 async fn a_signal_exit_is_passed_as_128_plus_the_signal() {
-    let (engine, _) = engine(1, false, &[]);
+    let (engine, _) = engine(1, &[]);
     let _ = &engine;
     // A killed command reports no exit code and the signal name.
     assert_eq!(silo_cli::ops::exit_code_for(None, Some("KILL")), 137);
@@ -436,7 +427,7 @@ async fn a_signal_exit_is_passed_as_128_plus_the_signal() {
 
 #[tokio::test]
 async fn every_fork_publishes_the_ports_its_source_publishes() {
-    let (engine, _) = engine(3, false, &[]);
+    let (engine, _) = engine(3, &[]);
     let result = run(&engine, &many(3, Some("web"), &[]), None)
         .await
         .unwrap();
@@ -455,7 +446,7 @@ async fn every_fork_publishes_the_ports_its_source_publishes() {
 #[tokio::test]
 async fn forks_on_another_device_run_their_command_there_and_publish_nothing_here() {
     const MINI: &str = "mini-0000";
-    let (engine, _) = engine(2, false, &[("try-1", 0, "ok\n"), ("try-2", 3, "no\n")]);
+    let (engine, _) = engine(2, &[("try-1", 0, "ok\n"), ("try-2", 3, "no\n")]);
     let connected = Engine::connect(&engine.socket)
         .await
         .unwrap()

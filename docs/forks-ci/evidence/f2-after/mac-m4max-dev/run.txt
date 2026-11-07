@@ -1,0 +1,169 @@
+== header (2026-11-07T21:27:42Z)
+commit of the scripts: eeeb49b696239fba4940a64a28fe5cf9d36fb5f2
+machine: Apple M4 Max, 64 GiB RAM (26.2 GiB free+inactive+purgeable), 16 cores, macOS 26.5 (25F71), arm64
+silo CLI: /Users/polarzero/code/projects/silo-dev-target/release/bundle/macos/Silo Dev.app/Contents/Resources/SiloEngineDistribution/Silo Engine.app/Contents/MacOS/silo (silo 0.1.0; channel org.silo.dev)
+silo CLI resolves to: /Users/polarzero/code/projects/silo-dev-target/release/bundle/macos/Silo Dev.app/Contents/Resources/SiloEngineDistribution/Silo Engine.app/Contents/MacOS/silo
+computers: NAME STATE KIND SIZE;workspace-1 stopped linux 8 cpu, 32 GiB;e2e-relay stopped linux 8 cpu, 32 GiB;silo-eval-a stopped linux 2 cpu, 2 GiB;silo-eval-b stopped linux 2 cpu, 2 GiB;
+sections: cold warm1 warm4 ten plain nodesk; runs 3; ten = 10; wait before a cold run 0s
+clock: wall clock (monotonic) of the silo process; the CLI polls jobs every 300 ms
+[22:27:42] main absent: creating it with silo up --recipe demo
+main is running. ssh main.silo-dev reaches it.
+main: main         running    linux   2 cpu, 4 GiB
+
+== cold
+[22:27:54] cold run 1: waiting 0s
+cold1 rc=0 9.65s
+  cold1: captured 1 new fork point(s) of main (disks only)
+-- RAM of cold fork 1 (20 s after ready)
+method: footprint -p PID (physical footprint)
+pid 90032: 493.0 MiB  /Users/polarzero/code/projects/silo-dev-target/release/bundle/macos/Silo Dev.app/Contents/Resources/SiloEngine
+pid 90276: 6.1 MiB  /Users/polarzero/code/projects/silo-dev-target/release/bundle/macos/Silo Dev.app/Contents/Resources/SiloEngine
+TOTAL 499.1
+[22:28:28] cold run 2: waiting 0s
+cold2 rc=0 8.47s
+  cold2: captured 1 new fork point(s) of main (disks only)
+[22:28:41] cold run 3: waiting 0s
+cold3 rc=0 8.39s
+  cold3: captured 1 new fork point(s) of main (disks only)
+(a) Linux fork of a running idle main, to running+ready: N=3 median=8.47s min=8.39s max=9.65s runs=[9.65, 8.47, 8.39]
+
+== warm1
+warm1-1 rc=0 8.64s
+  warm1-1: captured 1 new fork point(s) of main (disks only)
+warm1-2 rc=0 8.63s
+  warm1-2: captured 1 new fork point(s) of main (disks only)
+warm1-3 rc=0 8.63s
+  warm1-3: captured 1 new fork point(s) of main (disks only)
+(c) one fork right after silo up, to running+ready: N=3 median=8.63s min=8.63s max=8.64s runs=[8.64, 8.63, 8.63]
+
+== warm4
+warm4-1 rc=0 18.34s
+  warm4-1: captured 1 new fork point(s) of main (disks only)
+-- RAM of e2e-forks-w4x1-1
+method: footprint -p PID (physical footprint)
+pid 96341: 491.0 MiB  /Users/polarzero/code/projects/silo-dev-target/release/bundle/macos/Silo Dev.app/Contents/Resources/SiloEngine
+pid 96523: 6.5 MiB  /Users/polarzero/code/projects/silo-dev-target/release/bundle/macos/Silo Dev.app/Contents/Resources/SiloEngine
+TOTAL 497.5
+-- RAM of e2e-forks-w4x1-2
+method: footprint -p PID (physical footprint)
+pid 96292: 488.0 MiB  /Users/polarzero/code/projects/silo-dev-target/release/bundle/macos/Silo Dev.app/Contents/Resources/SiloEngine
+pid 96522: 6.2 MiB  /Users/polarzero/code/projects/silo-dev-target/release/bundle/macos/Silo Dev.app/Contents/Resources/SiloEngine
+TOTAL 494.2
+-- RAM of e2e-forks-w4x1-3
+method: footprint -p PID (physical footprint)
+pid 96664: 493.0 MiB  /Users/polarzero/code/projects/silo-dev-target/release/bundle/macos/Silo Dev.app/Contents/Resources/SiloEngine
+pid 97142: 6.2 MiB  /Users/polarzero/code/projects/silo-dev-target/release/bundle/macos/Silo Dev.app/Contents/Resources/SiloEngine
+TOTAL 499.2
+-- RAM of e2e-forks-w4x1-4
+method: footprint -p PID (physical footprint)
+pid 96399: 491.0 MiB  /Users/polarzero/code/projects/silo-dev-target/release/bundle/macos/Silo Dev.app/Contents/Resources/SiloEngine
+pid 96846: 6.1 MiB  /Users/polarzero/code/projects/silo-dev-target/release/bundle/macos/Silo Dev.app/Contents/Resources/SiloEngine
+TOTAL 497.1
+warm4-2 rc=0 17.78s
+  warm4-2: captured 1 new fork point(s) of main (disks only)
+-- RAM of e2e-forks-w4x2-1
+method: footprint -p PID (physical footprint)
+pid 141: 6.1 MiB  /Users/polarzero/code/projects/silo-dev-target/release/bundle/macos/Silo Dev.app/Contents/Resources/SiloEngine
+pid 99874: 490.0 MiB  /Users/polarzero/code/projects/silo-dev-target/release/bundle/macos/Silo Dev.app/Contents/Resources/SiloEngine
+TOTAL 496.1
+-- RAM of e2e-forks-w4x2-2
+method: footprint -p PID (physical footprint)
+pid 301: 491.0 MiB  /Users/polarzero/code/projects/silo-dev-target/release/bundle/macos/Silo Dev.app/Contents/Resources/SiloEngine
+pid 807: 6.0 MiB  /Users/polarzero/code/projects/silo-dev-target/release/bundle/macos/Silo Dev.app/Contents/Resources/SiloEngine
+TOTAL 497.0
+-- RAM of e2e-forks-w4x2-3
+method: footprint -p PID (physical footprint)
+pid 140: 6.2 MiB  /Users/polarzero/code/projects/silo-dev-target/release/bundle/macos/Silo Dev.app/Contents/Resources/SiloEngine
+pid 99813: 490.0 MiB  /Users/polarzero/code/projects/silo-dev-target/release/bundle/macos/Silo Dev.app/Contents/Resources/SiloEngine
+TOTAL 496.2
+-- RAM of e2e-forks-w4x2-4
+method: footprint -p PID (physical footprint)
+pid 504: 6.0 MiB  /Users/polarzero/code/projects/silo-dev-target/release/bundle/macos/Silo Dev.app/Contents/Resources/SiloEngine
+pid 99954: 492.0 MiB  /Users/polarzero/code/projects/silo-dev-target/release/bundle/macos/Silo Dev.app/Contents/Resources/SiloEngine
+TOTAL 498.0
+warm4-3 rc=0 17.42s
+  warm4-3: captured 1 new fork point(s) of main (disks only)
+-- RAM of e2e-forks-w4x3-1
+method: footprint -p PID (physical footprint)
+pid 3966: 492.0 MiB  /Users/polarzero/code/projects/silo-dev-target/release/bundle/macos/Silo Dev.app/Contents/Resources/SiloEngine
+pid 4335: 6.2 MiB  /Users/polarzero/code/projects/silo-dev-target/release/bundle/macos/Silo Dev.app/Contents/Resources/SiloEngine
+TOTAL 498.2
+-- RAM of e2e-forks-w4x3-2
+method: footprint -p PID (physical footprint)
+pid 3535: 490.0 MiB  /Users/polarzero/code/projects/silo-dev-target/release/bundle/macos/Silo Dev.app/Contents/Resources/SiloEngine
+pid 3744: 6.0 MiB  /Users/polarzero/code/projects/silo-dev-target/release/bundle/macos/Silo Dev.app/Contents/Resources/SiloEngine
+TOTAL 496.0
+-- RAM of e2e-forks-w4x3-3
+method: footprint -p PID (physical footprint)
+pid 3584: 493.0 MiB  /Users/polarzero/code/projects/silo-dev-target/release/bundle/macos/Silo Dev.app/Contents/Resources/SiloEngine
+pid 3745: 6.1 MiB  /Users/polarzero/code/projects/silo-dev-target/release/bundle/macos/Silo Dev.app/Contents/Resources/SiloEngine
+TOTAL 499.1
+-- RAM of e2e-forks-w4x3-4
+method: footprint -p PID (physical footprint)
+pid 3685: 492.0 MiB  /Users/polarzero/code/projects/silo-dev-target/release/bundle/macos/Silo Dev.app/Contents/Resources/SiloEngine
+pid 4025: 6.1 MiB  /Users/polarzero/code/projects/silo-dev-target/release/bundle/macos/Silo Dev.app/Contents/Resources/SiloEngine
+TOTAL 498.1
+(b) silo fork main -n 4 right after silo up, to 4 running+ready: N=3 median=17.78s min=17.42s max=18.34s runs=[18.34, 17.78, 17.42]
+(d) RAM per fork, 20 s after ready, over the forks of 3 runs of -n 4 (MiB): N=12 median=497.30MiB min=494.20MiB max=499.20MiB runs=[497.5, 494.2, 499.2, 497.1, 496.1, 497.0, 496.2, 498.0, 498.2, 496.0, 499.1, 498.1]
+
+== ten
+(f) 10 forks at once: per-fork RAM median 497.0 MiB from (d); available 28134 MiB; needed 8260 MiB (per fork x 10 x 1.25 + 2 GiB)
+ten rc=0 37.77s
+  ten: captured 1 new fork point(s) of main (disks only)
+(f) 10 of 10 forks exist; total RAM of them 20 s after ready: 5010.1 MiB (per fork 501.0 MiB)
+(f) -n 10, to 10 running+ready (one run): N=1 median=37.77s min=37.77s max=37.77s runs=[37.77]
+
+== plain
+[22:34:44] plain: making the source e2e-forks-plain-src from the recipe demo-plain
+-- status of e2e-forks-plain-src
+e2e-forks-plain-src (linux): running
+2 cpu, 4 GiB memory, 10 GiB disk
+0 checkpoints
+Running
+quiet: applied; stopped: none; scrubbed: /etc/silo/guest-client.json; secrets: none
+secrets assigned: none
+credentials used: none
+computer use: ready, approval ask, driver 0.38.0
+plain1 rc=0 8.82s
+  plain1: captured 1 new fork point(s) of e2e-forks-plain-src (disks only)
+-- RAM of e2e-forks-plain1 (20 s after ready)
+method: footprint -p PID (physical footprint)
+pid 17205: 488.0 MiB  /Users/polarzero/code/projects/silo-dev-target/release/bundle/macos/Silo Dev.app/Contents/Resources/SiloEngine
+pid 17421: 6.3 MiB  /Users/polarzero/code/projects/silo-dev-target/release/bundle/macos/Silo Dev.app/Contents/Resources/SiloEngine
+TOTAL 494.3
+plain2 rc=0 8.40s
+  plain2: captured 1 new fork point(s) of e2e-forks-plain-src (disks only)
+plain3 rc=0 8.61s
+  plain3: captured 1 new fork point(s) of e2e-forks-plain-src (disks only)
+(plain) Linux fork of a running idle demo-plain computer, to running+ready: N=3 median=8.61s min=8.40s max=8.82s runs=[8.82, 8.4, 8.61]
+
+== nodesk
+[22:36:16] nodesk: making the source e2e-forks-nodesk-src from the recipe demo-nodesk
+-- status of e2e-forks-nodesk-src
+e2e-forks-nodesk-src (linux): running
+2 cpu, 4 GiB memory, 10 GiB disk
+0 checkpoints
+e2e-forks-nodesk-src has no desktop; turn it on with `silo desktop on e2e-forks-nodesk-src`.
+Running
+quiet: applied; stopped: none; scrubbed: /etc/silo/guest-client.json; secrets: none
+secrets assigned: none
+credentials used: none
+nodesk1 rc=0 6.97s
+  nodesk1: captured 1 new fork point(s) of e2e-forks-nodesk-src (disks only)
+-- RAM of e2e-forks-nodesk1 (20 s after ready)
+method: footprint -p PID (physical footprint)
+pid 21115: 205.0 MiB  /Users/polarzero/code/projects/silo-dev-target/release/bundle/macos/Silo Dev.app/Contents/Resources/SiloEngine
+pid 21295: 6.0 MiB  /Users/polarzero/code/projects/silo-dev-target/release/bundle/macos/Silo Dev.app/Contents/Resources/SiloEngine
+TOTAL 211.0
+nodesk2 rc=0 7.76s
+  nodesk2: captured 1 new fork point(s) of e2e-forks-nodesk-src (disks only)
+nodesk3 rc=0 8.36s
+  nodesk3: captured 1 new fork point(s) of e2e-forks-nodesk-src (disks only)
+(nodesk) Linux fork of a running idle demo-nodesk computer, to running+ready: N=3 median=7.76s min=6.97s max=8.36s runs=[6.97, 7.76, 8.36]
+[22:37:43] cleanup
+main (made by this run) dropped
+NAME         STATE      KIND    SIZE
+workspace-1  stopped    linux   8 cpu, 32 GiB
+e2e-relay    stopped    linux   8 cpu, 32 GiB
+silo-eval-a  stopped    linux   2 cpu, 2 GiB
+silo-eval-b  stopped    linux   2 cpu, 2 GiB

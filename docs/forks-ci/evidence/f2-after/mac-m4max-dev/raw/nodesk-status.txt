@@ -1,0 +1,8 @@
+e2e-forks-nodesk-src (linux): running
+2 cpu, 4 GiB memory, 10 GiB disk
+0 checkpoints
+e2e-forks-nodesk-src has no desktop; turn it on with `silo desktop on e2e-forks-nodesk-src`.
+Running
+quiet: applied; stopped: none; scrubbed: /etc/silo/guest-client.json; secrets: none
+secrets assigned: none
+credentials used: none

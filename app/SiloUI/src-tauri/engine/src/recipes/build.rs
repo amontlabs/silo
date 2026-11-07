@@ -99,6 +99,7 @@ pub trait BuildEnv {
         cpus: u32,
         memory_gib: u32,
         disk_gib: u32,
+        desktop: bool,
     ) -> Result<Created, String>;
     fn run(
         &self,
@@ -184,6 +185,7 @@ pub fn build(
         spec.cpus.unwrap_or(cpus),
         spec.memory_gib.unwrap_or(memory),
         spec.disk_gib.unwrap_or(disk),
+        spec.desktop != Some(false),
     );
     let created = match created {
         Ok(created) => created,
