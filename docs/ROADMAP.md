@@ -224,6 +224,19 @@ These gaps are in the threat model and stay there. Each would need its own desig
   finishes and can reach the Mac and the LAN in that window.
 - **Bandwidth and connection limits** per computer.
 
+## Ideas to revisit
+
+Product ideas that are not gaps in the threat model. Each needs its own design first.
+
+- **Exact rebuilds with Nix.** Forks, checkpoints and shared computers are exact copies, but
+  rebuilding a recipe from scratch is equivalent, not identical, because apt, brew, npm and other
+  installs download whatever is current at build time. An optional recipe list
+  (`nix: [nodejs_22, jq]`) could install from a Nix package catalogue revision recorded in a lock
+  file next to the recipe, so a rebuild later or on another machine gets the same tools on Linux
+  and macOS computers; an update moves the lock forward. Users would not write Nix. Ruled out for
+  now: Nix as the default list, mapping apt or brew names to Nix names, and a host `/nix/store`
+  shared between computers (it breaks disk-only forks and whole-computer export).
+
 ## Done
 
 - 2026-11: `silo-engine` builds and passes its tests on Linux in CI.
