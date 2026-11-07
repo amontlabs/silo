@@ -8,7 +8,7 @@
 # C1_OUT (evidence directory, default $C1_WORK/evidence).
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
-SECTIONS=${SECTIONS:-facts sec cold ten fork net desktop work}
+SECTIONS=${SECTIONS:-facts debug}
 RUNS=${RUNS:-3}
 TEN=${TEN:-10}
 : > "$OUT/results.tsv"
@@ -38,6 +38,12 @@ section_facts() {
     echo "image: $(python3 -c "import json;i=json.load(open('$REPO/app/SiloUI/guest-image/image-lock.json'))['images']['amd64'];print(i['imageReference'],i['imageDigest'],i['architecture'])")"
     echo "scripts commit: $(git -C "$REPO" rev-parse HEAD 2>/dev/null)"
   } | tee "$RAW/facts.txt"
+}
+
+# Diagnostics for the outer user namespace (what a nested user namespace may map).
+section_debug() {
+  in_userns bash -c 'id; grep -E "^(Cap|NoNewPrivs|Seccomp)" /proc/self/status; cat /proc/self/uid_map /proc/self/gid_map /proc/self/setgroups' | tee "$RAW/debug-outer.txt"
+  in_userns python3 "$C1/mapstest.py" | tee "$RAW/debug-maps.txt"
 }
 
 # The baseline from inside, and whether apt works with every capability dropped.
@@ -220,7 +226,7 @@ section_work() {
 for s in $SECTIONS; do
   echo; echo "== $s"
   case $s in
-    facts) section_facts;; sec) section_sec;; cold) section_cold;; ten) section_ten;; fork) section_fork;;
+    facts) section_facts;; debug) section_debug;; sec) section_sec;; cold) section_cold;; ten) section_ten;; fork) section_fork;;
     net) section_net;; desktop) section_desktop;; work) section_work;;
     *) echo "unknown section $s";;
   esac || say "section $s returned $?"
