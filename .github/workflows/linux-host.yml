@@ -4,8 +4,11 @@ name: Linux host
 # archive (package-engine.py), unpacks it, registers it as a systemd user
 # service and drives a computer through its silo command
 # (scripts/linux-host-e2e.sh): create, start, exec, checkpoint, fork, exec in
-# the fork, drop both. GitHub's ubuntu-24.04 runners have /dev/kvm. Build values
-# are synthetic; this workflow gets no secrets and never signs in to GitHub.
+# the fork, drop both. Then two accounts act as two devices (scripts/hosts-e2e.sh):
+# one prepared with `silo host init`, the other adding it by address over the local
+# SSH server and managing a computer on it. GitHub's ubuntu-24.04 runners have
+# /dev/kvm. Build values are synthetic; this workflow gets no secrets and never
+# signs in to GitHub.
 on:
   workflow_dispatch:
   pull_request:
@@ -32,7 +35,7 @@ jobs:
   computer:
     name: Linux computer on KVM
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    timeout-minutes: 180
     defaults:
       run:
         working-directory: app/SiloUI
@@ -153,6 +156,47 @@ jobs:
           "$ENGINE/silod" --service unregister | tee "$RUNNER_TEMP/service-status.txt"
           test "$(head -n 1 "$RUNNER_TEMP/service-status.txt")" = notRegistered
           test ! -e "$HOME/.config/systemd/user/$UNIT"
+      # Two devices on this machine: silo-host is prepared with `silo host init`, and
+      # silo-controller runs its own engine and adds the host over the local SSH server.
+      # The engine is copied to a root-owned directory, which both accounts may run. Its
+      # parent is root's and 0755: the runner's /opt is world-writable, which silod refuses.
+      - name: Prepare a host and a controller account
+        run: |
+          set -euo pipefail
+          sudo install -d -o root -g root -m 0755 /var/lib/silo-ci
+          sudo cp -a "$ENGINE" /var/lib/silo-ci/silo-engine
+          sudo chown -R root:root /var/lib/silo-ci/silo-engine
+          sudo chmod -R go-w /var/lib/silo-ci/silo-engine
+          sudo ssh-keygen -A
+          sudo systemctl start ssh
+          for account in silo-host silo-controller; do
+            sudo useradd --create-home --shell /bin/bash "$account"
+            # No password, but not locked: sshd still accepts the account's keys.
+            sudo usermod --password '*' "$account"
+            sudo loginctl enable-linger "$account"
+          done
+          for account in silo-host silo-controller; do
+            bus="/run/user/$(id -u "$account")/bus"
+            for _ in $(seq 30); do
+              sudo test -S "$bus" && break
+              sleep 1
+            done
+            sudo test -S "$bus"
+          done
+          echo "HOSTS_E2E=1" >> "$GITHUB_ENV"
+      - name: Manage a computer on another device
+        timeout-minutes: 40
+        env:
+          SILO_E2E_REMOTE_EXEC: '1'
+        run: bash scripts/hosts-e2e.sh /var/lib/silo-ci/silo-engine silo-host silo-controller
+      - name: Stop both accounts' engines
+        if: always() && env.HOSTS_E2E == '1'
+        run: |
+          for account in silo-host silo-controller; do
+            uid=$(id -u "$account")
+            sudo -u "$account" env -i HOME="$(getent passwd "$account" | cut -d: -f6)" PATH=/usr/bin:/bin XDG_RUNTIME_DIR="/run/user/$uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" \
+              /var/lib/silo-ci/silo-engine/silod --service unregister || true
+          done
       - name: Collect logs
         if: failure()
         run: |
@@ -165,6 +209,11 @@ jobs:
           "$ENGINE/silo" --json list --all > "$logs/computers.json" 2>&1 || true
           ls -l /dev/kvm > "$logs/kvm.txt" 2>&1 || true
           df -h > "$logs/disk.txt" 2>&1 || true
+          for account in silo-host silo-controller; do
+            id -u "$account" >/dev/null 2>&1 || continue
+            sudo journalctl _UID="$(id -u "$account")" --no-pager > "$logs/$account-journal.txt" 2>&1 || true
+          done
+          sudo journalctl --unit ssh --no-pager > "$logs/sshd-journal.txt" 2>&1 || true
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: failure()
         with:

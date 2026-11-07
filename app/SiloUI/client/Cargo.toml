@@ -15,5 +15,7 @@ tokio = { version = "1", features = ["io-util", "macros", "net", "rt", "sync", "
 uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
+# Only to check that the names here match the engine's (`Channel` in silo-host).
+silo-host = { path = "../host", default-features = false }
 tempfile = "3.27"
 tokio = { version = "1", features = ["io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }

@@ -509,6 +509,9 @@ pub async fn handle(
         MethodName::ConnectionsDevicesConnect => connections_devices_connect(params, context).await,
         MethodName::ConnectionsDevicesRemove => connections_devices_remove(params, context).await,
         MethodName::ConnectionsKeysRevoke => connections_keys_revoke(params, context).await,
+        MethodName::ConnectionsKeysAuthorize => connections_keys_authorize(params, context).await,
+        MethodName::ConnectionsKeysList => connections_keys_list(context).await,
+        MethodName::ConnectionsKeysOwn => connections_keys_own().await,
         MethodName::ConnectionsDevicesHealth => connections_devices_health(context).await,
         MethodName::ConnectionsSshAuthorizationCommand => {
             connections_ssh_command(params, context, false).await
@@ -2394,6 +2397,49 @@ async fn connections_keys_revoke(
     Ok(output(Value::Null))
 }
 
+/// Lets a controller's Silo key run this account's bridge (`silo host init --authorize`). Only
+/// this device's own clients reach it: the bridge does not serve it, so a connected controller
+/// cannot authorize another key.
+async fn connections_keys_authorize(
+    params: &Value,
+    context: &HandlerContext,
+) -> Result<HandlerOutput, DispatchError> {
+    let typed = context.decode_params::<connections::AuthorizeKeyParams>(params)?;
+    let added =
+        blocking(move || silo_engine::remote::authorize_connections_key(&typed.public_key)).await?;
+    to_output(connections::AuthorizeKeyResult { added })
+}
+
+async fn connections_keys_list(context: &HandlerContext) -> Result<HandlerOutput, DispatchError> {
+    let barrier = read_barrier(context, "connections");
+    let listed = blocking(silo_engine::remote::authorized_connections_keys).await?;
+    let mut public_keys: Vec<String> = Vec::new();
+    for key in &listed {
+        if !public_keys.contains(&key.public_key) {
+            public_keys.push(key.public_key.clone());
+        }
+    }
+    let keys = listed
+        .into_iter()
+        .map(|key| connections::AuthorizedKey {
+            public_key: key.public_key,
+            fingerprint: key.fingerprint,
+            canonical: key.canonical,
+            identified: key.identified,
+        })
+        .collect();
+    Ok(HandlerOutput {
+        value: serde_json::to_value(connections::AuthorizedKeysResult { public_keys, keys })
+            .map_err(serialization)?,
+        event_barrier: barrier,
+    })
+}
+
+async fn connections_keys_own() -> Result<HandlerOutput, DispatchError> {
+    let public_key = blocking(silo_engine::remote::ensure_connections_public_key).await?;
+    to_output(connections::OwnKeyResult { public_key })
+}
+
 /// The recorded health of each saved device. It reads memory only; it opens no SSH
 /// connection and probes nothing.
 async fn connections_devices_health(
@@ -3727,9 +3773,11 @@ pub(crate) mod tests {
 
     #[tokio::test]
     async fn keys_revoke_leaves_unrelated_keys_alone_and_succeeds_when_absent() {
+        // The authorize test writes the same authorized_keys.
+        let _key = KEY_LOCK.lock().await;
         let path = fixture().home.join(".ssh/authorized_keys");
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        let blob = "AAAAC3NzaC1lZDI1NTE5AAAAIFakeFakeFakeFakeFakeFakeFakeFakeFakeFakeFake";
+        let blob = "AAAAC3NzaC1lZDI1NTE5AAAAIFakeFakeFakeFakeFakeFakeFakeFakeFakeFakeFak";
         let public_key = format!("ssh-ed25519 {blob} Silo remote management");
         let original = format!(
             "ssh-ed25519 AAAAother user@laptop\nssh-ed25519 {blob} someone@elsewhere\n# comment\n"
@@ -3755,8 +3803,90 @@ pub(crate) mod tests {
             json!({"publicKey": "garbage"}),
         )
         .await;
-        assert_eq!(error.message, "Invalid Silo SSH public key.");
+        assert_eq!(error.message, "Invalid SSH public key.");
         expect_invalid_params(MethodName::ConnectionsKeysRevoke, json!({})).await;
+    }
+
+    #[tokio::test]
+    async fn keys_authorize_and_list_are_this_devices_own() {
+        let _key = KEY_LOCK.lock().await;
+        let path = fixture().home.join(".ssh/authorized_keys");
+        let blob = "AAAAC3NzaC1lZDI1NTE5AAAAIAuthAuthAuthAuthAuthAuthAuthAuthAuthAuthAut";
+        let offered = format!("ssh-ed25519 {blob} laptop");
+        let first = call(
+            MethodName::ConnectionsKeysAuthorize,
+            json!({"publicKey": offered}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(first, json!({"added": true}));
+        let again = call(
+            MethodName::ConnectionsKeysAuthorize,
+            json!({"publicKey": offered}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(again, json!({"added": false}));
+        let comment = silo_engine::channel::current().remote_key_comment();
+        let listed = call(MethodName::ConnectionsKeysList, json!({}))
+            .await
+            .unwrap();
+        let installed = format!("ssh-ed25519 {blob} {comment}");
+        assert!(
+            listed["publicKeys"]
+                .as_array()
+                .unwrap()
+                .contains(&json!(installed)),
+            "{listed}"
+        );
+        let key = listed["keys"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|key| key["publicKey"] == json!(installed))
+            .unwrap();
+        assert_eq!(key["canonical"], true, "{listed}");
+        assert_eq!(key["identified"], true, "{listed}");
+        let fingerprint = key["fingerprint"].as_str().unwrap();
+        let contents = std::fs::read_to_string(&path).unwrap();
+        assert!(contents.contains(&format!(
+            r#"restrict,command="{} --key {fingerprint}" {installed}"#,
+            silo_engine::channel::current().remote_bridge_command()
+        )));
+        call(
+            MethodName::ConnectionsKeysRevoke,
+            json!({"publicKey": installed}),
+        )
+        .await
+        .unwrap();
+        let listed = call(MethodName::ConnectionsKeysList, json!({}))
+            .await
+            .unwrap();
+        assert!(!listed["publicKeys"]
+            .as_array()
+            .unwrap()
+            .contains(&json!(installed)));
+        let error = expect_error(
+            MethodName::ConnectionsKeysAuthorize,
+            json!({"publicKey": "ssh-rsa AAAA x"}),
+        )
+        .await;
+        assert!(
+            error.message.starts_with("Not an Ed25519 public key"),
+            "{}",
+            error.message
+        );
+        expect_invalid_params(MethodName::ConnectionsKeysAuthorize, json!({})).await;
+
+        let own = call(MethodName::ConnectionsKeysOwn, json!({}))
+            .await
+            .unwrap();
+        let own = own["publicKey"].as_str().unwrap().to_owned();
+        assert!(own.starts_with("ssh-ed25519 "), "{own}");
+        let same = call(MethodName::ConnectionsKeysOwn, json!({}))
+            .await
+            .unwrap();
+        assert_eq!(same["publicKey"], own.as_str());
     }
 
     #[tokio::test]

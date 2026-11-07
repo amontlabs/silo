@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -14,6 +15,7 @@ SCRIPTS = Path(__file__).resolve().parent
 ROOT = SCRIPTS.parents[2]
 WORKFLOW = (ROOT / '.github/workflows/linux-host.yml').read_text()
 E2E = SCRIPTS / 'linux-host-e2e.sh'
+HOSTS_E2E = SCRIPTS / 'hosts-e2e.sh'
 
 # A `silo` that keeps its computers in a JSON file and records every call.
 FAKE_SILO = textwrap.dedent('''\
@@ -48,6 +50,81 @@ FAKE_SILO = textwrap.dedent('''\
         print(os.environ.get('FAKE_UNAME', 'Linux e2e 6.12.0 x86_64 GNU/Linux'))
     elif command == 'checkpoint':
         pass
+    elif command == 'drop':
+        if computers[rest[0]] == 'running':
+            sys.exit(f'{{rest[0]}} is still running')
+        computers.pop(rest[0]); save()
+    else:
+        sys.exit(f'unexpected command {{args}}')
+''')
+
+# Runs a command "as" an account: records the account for the fake silo and silod.
+FAKE_RUN_AS = textwrap.dedent('''\
+    #!/bin/sh
+    user=$1
+    shift
+    FAKE_USER=$user exec "$@"
+''')
+
+# The host's and the controller's `silo`, sharing one JSON state with the host's computers,
+# the host's authorized keys and the controller's saved devices.
+FAKE_TWO_SILOS = textwrap.dedent('''\
+    #!{python}
+    import json, os, sys
+    from pathlib import Path
+    state_path = Path(os.environ['FAKE_STATE'])
+    state = json.loads(state_path.read_text()) if state_path.exists() else {{'computers': {{}}, 'keys': [], 'devices': []}}
+    user, args = os.environ['FAKE_USER'], sys.argv[1:]
+    with open(os.environ['FAKE_CALLS'], 'a') as calls:
+        calls.write(user + ': ' + ' '.join(args) + '\\n')
+    def save():
+        state_path.write_text(json.dumps(state))
+    as_json = '--json' in args
+    args = [a for a in args if a != '--json']
+    device = None
+    if args[:1] == ['--device']:
+        device, args = args[1], args[2:]
+        assert user == 'ctl' and device in state['devices'], (user, device)
+    remote = user == 'host' or device is not None
+    command, rest = args[0], args[1:]
+    key = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKVyZDGnacgUkbjXHi/TsIZ+GxIgprlkfONi9t33BGz3 ctl'
+    print_ = 'SHA256:LH9ifkGkEurhEj7pgiSwRedJtKQomUQeevYOdCTeGWw'
+    computers = state['computers']
+    if command == 'list':
+        listed = computers if remote or '--all-devices' in rest else {{}}
+        print(json.dumps({{'computers': [{{'name': n, 'state': s}} for n, s in listed.items()]}}))
+    elif command == 'devices' and rest[0] == 'key':
+        print(json.dumps({{'publicKey': key, 'fingerprint': print_}}))
+    elif command == 'host' and rest[0] == 'init':
+        added = key not in state['keys']
+        given = open(rest[rest.index('--authorize') + 1]).read().strip()
+        assert given == key, given
+        if added:
+            state['keys'].append(key); save()
+        print(json.dumps({{'vm': {{'ok': True}}, 'service': {{'status': 'enabled', 'linger': 'yes'}},
+                          'connections': {{'enabled': True}},
+                          'authorized': [{{'fingerprint': print_, 'added': added}}],
+                          'controllers': [{{'fingerprint': print_}} for _ in state['keys']]}}))
+    elif command == 'host' and rest[0] == 'status':
+        print(json.dumps({{'controllers': [{{'fingerprint': print_}} for _ in state['keys']]}}))
+    elif command == 'devices' and rest[0] == 'add':
+        assert rest[1] == 'host@127.0.0.1:22', rest
+        pin = rest[rest.index('--host-key') + 1]
+        state['devices'].append('dev-host'); save()
+        print(json.dumps({{'device': {{'id': 'dev-host', 'name': 'box'}}, 'repaired': [], 'hostKey': {{'fingerprint': pin}}}}))
+    elif command == 'devices' and rest[0] == 'remove':
+        state['devices'].remove(rest[1]); state['keys'] = []; save()
+    elif command == 'create':
+        computers[rest[0]] = 'stopped'; save()
+    elif command == 'start':
+        computers[rest[0]] = 'running'; save()
+    elif command == 'stop':
+        computers[rest[0]] = 'stopped'; save()
+    elif command == 'exec':
+        print(os.environ.get('FAKE_UNAME', 'Linux e2e 6.12.0 x86_64 GNU/Linux'))
+    elif command == 'fork':
+        computers[rest[rest.index('--name') + 1]] = 'running'; save()
+        print('Linux e2e 6.12.0 x86_64 GNU/Linux')
     elif command == 'drop':
         if computers[rest[0]] == 'running':
             sys.exit(f'{{rest[0]}} is still running')
@@ -115,6 +192,24 @@ class LinuxHostWorkflowTests(unittest.TestCase):
         for needle in ('systemctl --user stop "$UNIT"', 'test "$result" = success', 'test "$status" = 0',
                        'engine.sock', '--service unregister', '= notRegistered'):
             self.assertIn(needle, stop)
+
+    def test_two_accounts_manage_a_computer_on_each_other_after_the_first_run(self):
+        steps = WORKFLOW.split('    steps:\n', 1)[1]
+        order = ['Stop the engine and remove the service', 'Prepare a host and a controller account',
+                 'Manage a computer on another device', "Stop both accounts' engines", 'Collect logs']
+        positions = [steps.index(f'- name: {name}\n') for name in order]
+        self.assertEqual(positions, sorted(positions))
+        prepare = steps.split('- name: Prepare a host and a controller account\n', 1)[1].split('      - ', 1)[0]
+        # Both accounts run one engine directory that neither can change.
+        for needle in ('sudo install -d -o root -g root -m 0755 /var/lib/silo-ci',
+                       'sudo chown -R root:root /var/lib/silo-ci/silo-engine', 'sudo chmod -R go-w /var/lib/silo-ci/silo-engine',
+                       'sudo systemctl start ssh', 'sudo loginctl enable-linger "$account"',
+                       "sudo usermod --password '*' \"$account\""):
+            self.assertIn(needle, prepare)
+        self.assertIn('bash scripts/hosts-e2e.sh /var/lib/silo-ci/silo-engine silo-host silo-controller', steps)
+        stop = steps.split("- name: Stop both accounts' engines\n", 1)[1].split('      - ', 1)[0]
+        self.assertTrue(stop.startswith("        if: always() && env.HOSTS_E2E == '1'\n"), stop)
+        self.assertIn('--service unregister', stop)
 
     def test_it_saves_no_caches_and_installs_no_openssl(self):
         # Pull requests never write caches; prepare-release-runtime only restores here.
@@ -206,6 +301,93 @@ class LinuxHostEndToEndScriptTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('did not answer', result.stderr)
         self.assertEqual(calls, [])
+
+
+class HostsEndToEndScriptTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        self.engine = self.root / 'silo-engine'
+        self.engine.mkdir()
+        for name, text in (('silo', FAKE_TWO_SILOS.format(python=sys.executable)),
+                           ('silod', '#!/bin/sh\necho "$FAKE_USER: silod $*" >> "$FAKE_CALLS"\necho enabled\n')):
+            (self.engine / name).write_text(text)
+            (self.engine / name).chmod(0o755)
+        self.run_as = self.root / 'run-as'
+        self.run_as.write_text(FAKE_RUN_AS)
+        self.run_as.chmod(0o755)
+        self.host_key = self.root / 'ssh_host_ed25519_key.pub'
+        self.host_key.write_text('ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKVyZDGnacgUkbjXHi/TsIZ+GxIgprlkfONi9t33BGz3 root@box\n')
+        self.state, self.calls = self.root / 'state.json', self.root / 'calls.txt'
+
+    def run_script(self, **environment):
+        env = {**os.environ, 'FAKE_STATE': str(self.state), 'FAKE_CALLS': str(self.calls),
+               'SILO_E2E_RUN_AS': str(self.run_as), 'SILO_E2E_HOST_KEY_FILE': str(self.host_key),
+               'SILO_E2E_READY_TIMEOUT': '1', **environment}
+        result = subprocess.run(['bash', str(HOSTS_E2E), str(self.engine), 'host', 'ctl'], env=env,
+                                capture_output=True, text=True, timeout=60)
+        calls = [line for line in self.calls.read_text().splitlines() if ' list' not in line] \
+            if self.calls.exists() else []
+        return result, calls
+
+    def state_now(self):
+        return json.loads(self.state.read_text())
+
+    @unittest.skipUnless(shutil.which('ssh-keygen'), 'needs ssh-keygen')
+    def test_it_prepares_the_host_adds_it_and_drives_a_computer_there(self):
+        result, calls = self.run_script(SILO_E2E_REMOTE_EXEC='1')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        fingerprint = 'SHA256:LH9ifkGkEurhEj7pgiSwRedJtKQomUQeevYOdCTeGWw'
+        self.assertEqual(calls[:5], [
+            'ctl: silod --service register',
+            'ctl: --json devices key',
+            f'host: --json host init --authorize {calls[2].split()[-1]}',
+            f'host: --json host init --authorize {calls[2].split()[-1]}',
+            'host: host status',
+        ])
+        self.assertIn(f'ctl: --json devices add host@127.0.0.1:22 --host-key {fingerprint}', calls)
+        tail = calls[calls.index(f'ctl: --json devices add host@127.0.0.1:22 --host-key {fingerprint}') + 1:]
+        self.assertEqual(tail, [
+            'ctl: --device dev-host create e2e-hosts-remote --linux --cpus 1 --memory 2 --disk 2',
+            'ctl: --device dev-host start e2e-hosts-remote',
+            'ctl: --device dev-host exec e2e-hosts-remote -- uname -a',
+            'ctl: --device dev-host fork e2e-hosts-remote --name e2e-hosts-remote-fork -- uname -a',
+            'ctl: --device dev-host stop e2e-hosts-remote-fork',
+            'ctl: --device dev-host drop e2e-hosts-remote-fork',
+            'ctl: --device dev-host stop e2e-hosts-remote',
+            'ctl: --device dev-host drop e2e-hosts-remote',
+            'ctl: devices remove dev-host',
+            'host: --json host status',
+        ])
+        self.assertEqual(self.state_now(), {'computers': {}, 'keys': [], 'devices': []})
+        self.assertIn('== Passed', result.stdout)
+
+    @unittest.skipUnless(shutil.which('ssh-keygen'), 'needs ssh-keygen')
+    def test_without_remote_exec_it_skips_exec_and_fork(self):
+        result, calls = self.run_script()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertFalse([call for call in calls if ' exec ' in call or ' fork ' in call])
+
+    @unittest.skipUnless(shutil.which('ssh-keygen'), 'needs ssh-keygen')
+    def test_a_failed_step_drops_what_it_made_and_removes_the_host(self):
+        result, calls = self.run_script(SILO_E2E_REMOTE_EXEC='1', FAKE_UNAME='Darwin')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('did not print a Linux kernel', result.stderr)
+        self.assertEqual(calls[-3:], ['host: stop e2e-hosts-remote', 'host: drop e2e-hosts-remote',
+                                      'ctl: devices remove dev-host'])
+        self.assertEqual(self.state_now(), {'computers': {}, 'keys': [], 'devices': []})
+
+    def test_it_never_touches_a_computer_it_did_not_make(self):
+        self.state.write_text(json.dumps({'computers': {'e2e-hosts-remote': 'running'}, 'keys': [], 'devices': []}))
+        result, calls = self.run_script()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('already exists', result.stderr)
+        self.assertFalse([call for call in calls if 'devices add' in call or ' drop ' in call])
+        self.assertEqual(self.state_now()['computers'], {'e2e-hosts-remote': 'running'})
+        result, _ = self.run_script(SILO_E2E_COMPUTER='main')
+        self.assertEqual(result.returncode, 2)
+        self.assertIn('named e2e-hosts-*', result.stderr)
 
 
 if __name__ == '__main__':

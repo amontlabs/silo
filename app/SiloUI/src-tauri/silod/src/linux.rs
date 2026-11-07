@@ -84,15 +84,15 @@ pub fn run_remote_guest(args: &[String]) -> Result<i32, String> {
 }
 
 /// Runs the Connections bridge that a controller's forced SSH command starts through the
-/// `~/.local/bin` link. It relays one request to this channel's `control.sock` and writes
-/// nothing to stdout before the reply, which the controller reads as a framed stream.
+/// `~/.local/bin` link, with `--key` and the fingerprint of the key it belongs to when Silo
+/// wrote the line (see `silo_engine::remote::bridge_key_argument`). It relays one request to
+/// this channel's `control.sock` and writes nothing to stdout before the reply, which the
+/// controller reads as a framed stream.
 pub fn run_remote_bridge(args: &[String]) -> Result<i32, String> {
-    if !args.is_empty() {
-        return Err("usage: silod --remote-bridge".to_owned());
-    }
+    let key = silo_engine::remote::bridge_key_argument(args)?;
     crate::run_from_bundle(&std::env::args().collect::<Vec<_>>())?;
     helper_paths()?;
-    silo_engine::remote::run_bridge()?;
+    silo_engine::remote::run_bridge(key.as_deref())?;
     Ok(0)
 }
 
@@ -290,7 +290,15 @@ fn write_store_record(path: &Path, store: CredentialStore) -> Result<(), String>
     let directory = path
         .parent()
         .ok_or_else(|| "The credential store record has no directory".to_owned())?;
-    fs::create_dir_all(directory).map_err(failed)?;
+    // The XDG data directory and its parents 0755, the engine data directory 0700, whatever
+    // the umask: the credential store refuses directories other accounts can change.
+    silo_engine::safe_directories::create_directories(
+        directory,
+        directory.parent().unwrap_or(directory),
+        unsafe { libc::geteuid() },
+        &silo_engine::safe_directories::SystemAccounts,
+    )
+    .map_err(failed)?;
     let staged = directory.join(format!(
         ".{CREDENTIAL_STORE_RECORD}.{}",
         uuid::Uuid::new_v4().simple()

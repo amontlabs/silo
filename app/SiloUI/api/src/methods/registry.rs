@@ -111,6 +111,9 @@ define_registry! {
     ConnectionsDevicesHealth => ("connections.devices.health", Query, connections::DeviceHealthParams, connections::DeviceHealthResult);
     ConnectionsDevicesList => ("connections.devices.list", Query, common::EmptyParams, Vec<connections::Device>);
     ConnectionsDevicesRemove => ("connections.devices.remove", Command, connections::DeviceIdParams, ());
+    ConnectionsKeysAuthorize => ("connections.keys.authorize", Command, connections::AuthorizeKeyParams, connections::AuthorizeKeyResult);
+    ConnectionsKeysList => ("connections.keys.list", Query, common::EmptyParams, connections::AuthorizedKeysResult);
+    ConnectionsKeysOwn => ("connections.keys.own", Command, common::EmptyParams, connections::OwnKeyResult);
     ConnectionsKeysRevoke => ("connections.keys.revoke", Command, connections::RevokeKeyParams, ());
     ConnectionsSetEnabled => ("connections.setEnabled", Command, connections::ConnectionsSetEnabledParams, connections::ConnectionsStatus);
     ConnectionsSshAuthorizationCommand => ("connections.ssh.authorizationCommand", Query, connections::SshAddressParams, connections::SshCommandResult);
@@ -245,20 +248,20 @@ mod tests {
 
     #[test]
     fn registry_covers_every_canonical_method_and_kind() {
-        assert_eq!(METHOD_REGISTRY.len(), 169);
+        assert_eq!(METHOD_REGISTRY.len(), 172);
         assert_eq!(
             METHOD_REGISTRY
                 .iter()
                 .filter(|m| m.kind == MethodKind::Query)
                 .count(),
-            53
+            54
         );
         assert_eq!(
             METHOD_REGISTRY
                 .iter()
                 .filter(|m| m.kind == MethodKind::Command)
                 .count(),
-            70
+            72
         );
         assert_eq!(
             METHOD_REGISTRY

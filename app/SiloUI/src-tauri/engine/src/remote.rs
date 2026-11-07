@@ -16,14 +16,47 @@ use std::{
     thread,
     time::{Duration, Instant, SystemTime},
 };
+#[path = "remote/authorized_lines.rs"]
+mod authorized_lines;
 #[path = "remote/operations.rs"]
 mod operations;
+pub use authorized_lines::is_key_fingerprint;
+/// The request field the bridge sets to the `--key` argument of the forced command that started
+/// it: the fingerprint of the key that authenticated. The bridge removes whatever the controller
+/// put there, so only the owner's `authorized_keys` decides it.
+pub const AUTHENTICATED_KEY: &str = "authenticatedKey";
+/// What `silod --remote-bridge` accepts.
+pub const BRIDGE_USAGE: &str = "usage: silod --remote-bridge [--key SHA256:<fingerprint>]";
+/// The bridge's arguments after `--remote-bridge`: nothing (a line an earlier Silo wrote, or a
+/// session with a key that has no forced command), or `--key` and a key fingerprint.
+pub fn bridge_key_argument(args: &[String]) -> Result<Option<String>, String> {
+    match args {
+        [] => Ok(None),
+        [flag, fingerprint]
+            if flag == authorized_lines::KEY_FLAG && is_key_fingerprint(fingerprint) =>
+        {
+            Ok(Some(fingerprint.clone()))
+        }
+        _ => Err(BRIDGE_USAGE.to_owned()),
+    }
+}
 /// Appends the key read from input to `authorized_keys` once. sshd runs this with the
 /// account's login shell, so the POSIX script is handed to `sh` in single quotes, which
 /// fish, csh and nushell also pass through unchanged; the script itself has no single quote.
 const INSTALL_PUBLIC_KEY: &str = r#"sh -c 'umask 077; mkdir -p ~/.ssh && chmod 700 ~/.ssh && touch ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys && key=$(cat) && { grep -qxF -- "$key" ~/.ssh/authorized_keys || printf "\n%s\n" "$key" >> ~/.ssh/authorized_keys; }'"#;
-/// Silo's owner key may only run the bridge; forwarding uses the pinned guest transport.
-fn authorized_key_options() -> String {
+/// Silo's owner key may only run the bridge; forwarding uses the pinned guest transport. The
+/// bridge is told the key's fingerprint, so the owner knows which key a request came with.
+fn authorized_key_options(fingerprint: &str) -> String {
+    format!(
+        r#"restrict,command="{} {} {fingerprint}""#,
+        crate::channel::current().remote_bridge_command(),
+        authorized_lines::KEY_FLAG
+    )
+}
+/// The options an earlier Silo wrote, without the key's fingerprint. A controller's key setup
+/// still writes them, because a host with an earlier Silo refuses any bridge argument; the
+/// host's first handshake rewrites them with the fingerprint.
+fn setup_key_options() -> String {
     format!(
         r#"restrict,command="{}""#,
         crate::channel::current().remote_bridge_command()
@@ -735,17 +768,34 @@ pub async fn remove_device(device_id: String) -> Result<(), BridgeError> {
             &device_id,
             silo_public_key_in(&dir),
             &|device, key| {
-                call_remote_typed(
-                    device,
-                    "connections.keys.revoke",
-                    json!({ "publicKey": key }),
-                )
-                .map(|_| ())
+                let revoke = || {
+                    call_remote_typed(
+                        device,
+                        "connections.keys.revoke",
+                        json!({ "publicKey": key }),
+                    )
+                    .map(|_| ())
+                };
+                match revoke() {
+                    // The owner could not tell which key this Mac connected with: a line an
+                    // earlier Silo wrote. A handshake has it add the key's fingerprint, and the
+                    // next connection is identified.
+                    Err(error) if refused_revoke(&error) => {
+                        call_remote_typed(device, "handshake", json!({ "sshKey": key }))?;
+                        revoke()
+                    }
+                    other => other,
+                }
             },
         )
     })
     .await
     .map_err(|_| BridgeError::from("Could not remove the device."))?
+}
+
+/// The owner refused a bridged key revoke (see `check_bridged_revoke`).
+fn refused_revoke(error: &BridgeError) -> bool {
+    error.api_code.as_deref() == Some("permission_denied")
 }
 
 /// Devices whose removal runs in this process, so two requests never interleave.
@@ -956,27 +1006,57 @@ pub fn connections_public_key() -> Result<Option<String>, String> {
     crate::editor::public_key(&key).map(Some)
 }
 
-/// Removes only this channel's restricted Connections line for `public_key`.
-/// An absent line is a successful retry; unrelated entries sharing the blob remain.
+/// The key type and base64 blob of `public` (`<type> <blob> [comment]`).
+fn public_key_parts(public: &str) -> Result<(&str, &str), String> {
+    let mut words = public.split_whitespace();
+    match (words.next(), words.next()) {
+        (Some(kind), Some(blob))
+            if (kind.starts_with("ssh-")
+                || kind.starts_with("ecdsa-")
+                || kind.starts_with("sk-"))
+                && authorized_lines::blob_fingerprint(blob).is_some() =>
+        {
+            Ok((kind, blob))
+        }
+        _ => Err("Invalid SSH public key.".into()),
+    }
+}
+/// The lines of `contents` whose forced command is this channel's bridge. `path` is the
+/// `authorized_keys` they come from, whose home a line may name in full.
+fn bridge_lines<'a>(
+    contents: &'a str,
+    path: &Path,
+) -> impl Iterator<Item = (&'a str, authorized_lines::BridgeLine)> + 'a {
+    let home = path.parent().and_then(Path::parent).map(Path::to_owned);
+    let bridge = crate::channel::current().remote_bridge_name();
+    contents.split_inclusive('\n').filter_map(move |line| {
+        authorized_lines::bridge_line(line, bridge, home.as_deref()).map(|parsed| (line, parsed))
+    })
+}
+
+/// Removes every line for `public_key` whose forced command is this channel's bridge, in any
+/// form Silo or a person wrote it. An absent line is a successful retry; lines for the same key
+/// that do not run the bridge (a personal login) remain.
 pub fn revoke_connections_key(public_key: &str) -> Result<(), String> {
     revoke_connections_key_in(&current_home()?.join(".ssh/authorized_keys"), public_key)
 }
 fn revoke_connections_key_in(path: &Path, public_key: &str) -> Result<(), String> {
-    let expected = authorized_key_line(public_key)?;
+    let (kind, blob) = public_key_parts(public_key)?;
+    let matches = |line: &authorized_lines::BridgeLine| line.kind == kind && line.blob == blob;
     let changed = rewrite_authorized_keys_file(path, |contents| {
-        let mut removed = false;
-        let rewritten = contents
-            .split_inclusive('\n')
-            .filter(|line| {
-                if line.trim() == expected {
-                    removed = true;
-                    false
-                } else {
-                    true
-                }
-            })
-            .collect::<String>();
-        removed.then_some(rewritten)
+        let doomed: Vec<&str> = bridge_lines(contents, path)
+            .filter(|(_, line)| matches(line))
+            .map(|(text, _)| text)
+            .collect();
+        if doomed.is_empty() {
+            return None;
+        }
+        Some(
+            contents
+                .split_inclusive('\n')
+                .filter(|line| !doomed.iter().any(|gone| std::ptr::eq(*gone, *line)))
+                .collect::<String>(),
+        )
     })?;
     if !changed {
         let contents = match fs::read_to_string(path) {
@@ -984,11 +1064,153 @@ fn revoke_connections_key_in(path: &Path, public_key: &str) -> Result<(), String
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
             Err(error) => return Err(error.to_string()),
         };
-        if contents.lines().any(|line| line.trim() == expected) {
-            return Err("The matching Silo SSH key is in an externally managed authorized_keys file and cannot be revoked safely.".into());
+        if bridge_lines(&contents, path).any(|(_, line)| matches(&line)) {
+            return Err(format!("The matching Silo SSH key is in an externally managed authorized_keys file ({}), so Silo cannot revoke it safely. Remove its line where that file is managed.", path.display()));
         }
     }
     Ok(())
+}
+/// Owner side, for a bridged `connections.keys.revoke`: a connected device may revoke only the
+/// key it connected with, which the bridge reports from the forced command's `--key`. A line an
+/// earlier Silo wrote has no `--key`, so a request through it cannot be told apart from any
+/// other controller's and is refused while the key still has a line. A key with no bridge line
+/// left is nothing to revoke, so its retry succeeds whoever asks.
+fn check_bridged_revoke(path: &Path, request: &Value) -> Result<(), BridgeError> {
+    let refused = |message: String| {
+        BridgeError::new(ErrorCode::Internal, message).with_api_code("permission_denied")
+    };
+    // A request without a key the revoke can read is refused by the revoke itself.
+    let Some(Ok((kind, blob))) = request["params"]["publicKey"]
+        .as_str()
+        .map(public_key_parts)
+    else {
+        return Ok(());
+    };
+    let Ok(contents) = fs::read_to_string(path) else {
+        // Nothing to read is nothing to revoke; the revoke itself reports any other problem.
+        return Ok(());
+    };
+    if !bridge_lines(&contents, path).any(|(_, line)| line.kind == kind && line.blob == blob) {
+        return Ok(());
+    }
+    let target = authorized_lines::blob_fingerprint(blob).unwrap_or_default();
+    match request[AUTHENTICATED_KEY].as_str() {
+        Some(caller) if caller == target => Ok(()),
+        Some(_) => Err(refused(format!(
+            "The other device accepts a revoke from a connected device only for the key that device connects with, and {target} is another key. Remove it on that device with silo host revoke."
+        ))),
+        None => Err(refused(format!(
+            "The other device cannot tell which key this device connected with (its authorized_keys line comes from an earlier Silo version, or the connection used a key without Silo's forced command), so it does not revoke {target} for it. A line Silo wrote is updated when the device connects again; otherwise remove the key on that device with silo host revoke."
+        ))),
+    }
+}
+/// This channel's Connections public key, created first when this device has none. A
+/// controller hands it to a device that should accept it (`connections.keys.authorize`).
+pub fn ensure_connections_public_key() -> Result<String, String> {
+    let key = directory()?.join("id_ed25519");
+    crate::editor::key(&key)?;
+    crate::editor::public_key(&key)
+}
+
+/// Owner side: lets the controller whose Silo key is `public_key` (an Ed25519 key) reach this
+/// account's bridge, with the restricted line Silo writes (`restrict` and the bridge, told the
+/// key's fingerprint, as the forced command). Returns false when the line is already there.
+/// An earlier line for the key (unrestricted, or without the fingerprint) is rewritten, as a
+/// handshake does. A symlinked or otherwise managed `authorized_keys` is left alone and reported.
+pub fn authorize_connections_key(public_key: &str) -> Result<bool, String> {
+    authorize_connections_key_in(&current_home()?.join(".ssh/authorized_keys"), public_key)
+}
+fn authorize_connections_key_in(path: &Path, public_key: &str) -> Result<bool, String> {
+    use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+    let public_key = public_key.trim();
+    if !silo_key_blob(public_key).is_ok_and(authorized_lines::is_ed25519_blob) {
+        return Err(
+            "Not an Ed25519 public key (ssh-ed25519 followed by its base64 key, as silo devices key prints it)."
+                .into(),
+        );
+    }
+    let expected = authorized_key_line(public_key)?;
+    let ssh = path.parent().ok_or("SSH key directory is unavailable.")?;
+    if fs::symlink_metadata(ssh).is_err() {
+        fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(ssh)
+            .map_err(|e| e.to_string())?;
+    }
+    match fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(path)
+    {
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(error) => return Err(error.to_string()),
+    }
+    if !fs::symlink_metadata(path)
+        .map_err(|e| e.to_string())?
+        .file_type()
+        .is_file()
+    {
+        return Err(format!(
+            "{} is not a regular file, so Silo does not change it. Add this line where it is managed: {expected}",
+            path.display()
+        ));
+    }
+    restrict_authorized_keys_file(path, public_key)?;
+    rewrite_authorized_keys_file(path, |contents| {
+        if contents.lines().any(|line| line.trim() == expected) {
+            return None;
+        }
+        let mut rewritten = contents.to_owned();
+        if !rewritten.is_empty() && !rewritten.ends_with('\n') {
+            rewritten.push('\n');
+        }
+        rewritten.push_str(&expected);
+        rewritten.push('\n');
+        Some(rewritten)
+    })
+}
+
+/// One `authorized_keys` line whose forced command is this channel's bridge.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AuthorizedConnectionsKey {
+    /// `<type> <key> [comment]`.
+    pub public_key: String,
+    pub fingerprint: Option<String>,
+    /// Exactly the line Silo writes now.
+    pub canonical: bool,
+    /// The forced command passes this line's own key fingerprint to the bridge.
+    pub identified: bool,
+}
+
+/// Owner side: every line of this account's `authorized_keys` whose forced command is this
+/// channel's bridge, whatever its other options or comment, including lines earlier Silo
+/// versions or a person wrote. Lines for other commands, or none, are not Connections' and are
+/// not listed.
+pub fn authorized_connections_keys() -> Result<Vec<AuthorizedConnectionsKey>, String> {
+    authorized_connections_keys_in(&current_home()?.join(".ssh/authorized_keys"))
+}
+fn authorized_connections_keys_in(path: &Path) -> Result<Vec<AuthorizedConnectionsKey>, String> {
+    let contents = match fs::read_to_string(path) {
+        Ok(contents) => contents,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(format!("Cannot read {}: {error}", path.display())),
+    };
+    Ok(bridge_lines(&contents, path)
+        .map(|(text, line)| {
+            let public_key = line.public_key();
+            AuthorizedConnectionsKey {
+                canonical: authorized_key_line(&public_key)
+                    .is_ok_and(|expected| expected == text.trim()),
+                fingerprint: line.fingerprint(),
+                identified: line.identified(),
+                public_key,
+            }
+        })
+        .collect())
 }
 fn validate_address(address: &str) -> Result<(), String> {
     let invalid = || {
@@ -1368,7 +1590,7 @@ fn key_setup_command(dir: &Path, address: &str) -> Result<String, String> {
     let key = dir.join("id_ed25519");
     crate::editor::key(&key)?;
     let public = crate::editor::public_key(&key)?;
-    let line = authorized_key_line(&public)?;
+    let line = setup_key_line(&public)?;
 
     let args = [
         "/usr/bin/ssh",
@@ -1406,32 +1628,58 @@ fn silo_key_blob(public: &str) -> Result<&str, String> {
         _ => Err("Invalid Silo SSH public key.".into()),
     }
 }
-/// The `authorized_keys` line Silo installs for its connections key.
+/// The `authorized_keys` line Silo writes for a Connections key: its forced command tells the
+/// bridge the key's fingerprint. The blob must be base64.
 fn authorized_key_line(public: &str) -> Result<String, String> {
     let blob = silo_key_blob(public)?;
+    let fingerprint =
+        authorized_lines::blob_fingerprint(blob).ok_or("Invalid Silo SSH public key.")?;
     Ok(format!(
         "{} ssh-ed25519 {blob} {}",
-        authorized_key_options(),
+        authorized_key_options(&fingerprint),
         silo_key_comment()
     ))
 }
-/// Rewrites Silo's earlier unrestricted and forwarding-enabled lines; other lines are untouched.
+/// The line a controller's key setup installs, which a host with an earlier Silo also runs; a
+/// host with this version rewrites it as `authorized_key_line` at the first handshake.
+fn setup_key_line(public: &str) -> Result<String, String> {
+    let blob = silo_key_blob(public)?;
+    Ok(format!(
+        "{} ssh-ed25519 {blob} {}",
+        setup_key_options(),
+        silo_key_comment()
+    ))
+}
+/// Rewrites Silo's earlier lines for the key (unrestricted, forwarding-enabled, or without the
+/// key's fingerprint) as the current one; other lines are untouched.
 fn restrict_authorized_keys(contents: &str, blob: &str) -> Option<String> {
     let unrestricted = format!("ssh-ed25519 {blob} {}", silo_key_comment());
     let legacy = format!(
         r#"restrict,port-forwarding,permitopen="127.0.0.1:*",command="{}" {unrestricted}"#,
         crate::channel::current().remote_bridge_command()
     );
+    let unidentified = format!("{} {unrestricted}", setup_key_options());
+    // A blob that is not base64 has no fingerprint: it keeps the line without one.
+    let current = authorized_key_line(&unrestricted).ok();
     let mut changed = false;
     let rewritten = contents
         .split_inclusive('\n')
         .map(|line| {
-            if line.trim() == unrestricted || line.trim() == legacy {
-                changed = true;
-                let ending = if line.ends_with('\n') { "\n" } else { "" };
-                format!("{} {unrestricted}{ending}", authorized_key_options())
+            let trimmed = line.trim();
+            let replacement = if trimmed == unrestricted || trimmed == legacy {
+                Some(current.clone().unwrap_or_else(|| unidentified.clone()))
+            } else if trimmed == unidentified {
+                current.clone()
             } else {
-                line.to_owned()
+                None
+            };
+            match replacement {
+                Some(replacement) => {
+                    changed = true;
+                    let ending = if line.ends_with('\n') { "\n" } else { "" };
+                    format!("{replacement}{ending}")
+                }
+                None => line.to_owned(),
             }
         })
         .collect::<String>();
@@ -1584,6 +1832,11 @@ fn connection_failure(code: Option<i32>, stderr: &str) -> String {
     }
     if has("unsupported silod argument: --remote-bridge") {
         return "The other device runs a Silo version that cannot accept connections. Update Silo there.".into();
+    }
+    // An earlier bridge takes no arguments, and the line for this device's key passes `--key`
+    // (a newer Silo wrote it there).
+    if has("usage: silod --remote-bridge") {
+        return "The other device runs an earlier Silo version than the one that set up this device's key there. Update Silo there.".into();
     }
     CONNECTION_HELP.into()
 }
@@ -2496,10 +2749,16 @@ pub async fn remote_delete_computer(
     result
 }
 /// Called before constructing the host app. A bridge never launches the GUI or runtime.
-pub fn run_bridge() -> Result<(), String> {
+/// `key` is the forced command's `--key` (see `bridge_key_argument`), which the owner is told
+/// as the key that authenticated this connection.
+pub fn run_bridge(key: Option<&str>) -> Result<(), String> {
+    if key.is_some_and(|key| !is_key_fingerprint(key)) {
+        return Err(BRIDGE_USAGE.to_owned());
+    }
     let mut socket = UnixStream::connect(existing_directory()?.join("control.sock"))
         .map_err(|_| "Silo is not running on this device.".to_string())?;
-    let request = read_frame(std::io::stdin().lock())?;
+    let mut request = read_frame(std::io::stdin().lock())?;
+    mark_authenticated_key(&mut request, key);
     let streaming = is_stream_method(request["method"].as_str());
     write_bridge_request(&mut socket, &request, Duration::from_secs(30))?;
     if !streaming {
@@ -2521,6 +2780,15 @@ pub fn run_bridge() -> Result<(), String> {
         copy_raw_stream(&mut socket, &mut std::io::stdout().lock()).map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+/// Replaces whatever the controller sent as the authenticated key with the forced command's.
+fn mark_authenticated_key(request: &mut Value, key: Option<&str>) {
+    if let Some(object) = request.as_object_mut() {
+        object.remove(AUTHENTICATED_KEY);
+        if let Some(key) = key {
+            object.insert(AUTHENTICATED_KEY.to_owned(), json!(key));
+        }
+    }
 }
 fn write_bridge_request(
     socket: &mut UnixStream,
@@ -3255,6 +3523,9 @@ fn handle(
         }
         Some(Access::Read) => execute(method, params),
         Some(Access::Change) => {
+            if method == "connections.keys.revoke" {
+                check_bridged_revoke(&current_home()?.join(".ssh/authorized_keys"), request)?;
+            }
             // Earlier controllers treated key authorization as a read and sent no identity.
             let legacy_key_request = method == "ssh.access.connection"
                 && request.get("operationId").is_none()
@@ -4962,7 +5233,7 @@ mod setup_tests {
         assert_eq!(fs::metadata(&key).unwrap().permissions().mode() & 0o077, 0);
         let public = fs::read_to_string(key.with_extension("pub")).unwrap();
         assert!(command.starts_with("printf '%s\n' "));
-        assert!(command.contains(&authorized_key_line(&public).unwrap()));
+        assert!(command.contains(&setup_key_line(&public).unwrap()));
         assert!(command.contains("sh -c"));
         assert!(command.contains("me@office"));
         // A second setup reuses the key.
@@ -5064,7 +5335,7 @@ mod setup_tests {
             0o600
         );
         assert_eq!(fs::read(&key).unwrap(), private);
-        assert!(repaired.contains(&authorized_key_line(&public).unwrap()));
+        assert!(repaired.contains(&setup_key_line(&public).unwrap()));
         assert!(!repaired.contains("AAAAstale"));
         fs::remove_file(key.with_extension("pub")).unwrap();
         assert_eq!(
@@ -5279,6 +5550,14 @@ mod accept_tests {
 mod authorized_key_tests {
     use super::*;
     const BLOB: &str = "AAAAC3NzaC1lZDI1NTE5AAAAIHk8t0ahm+m4Qf9wTQ2xV1Vv2Qb2QeQ3bE8m0l2a6y5Z";
+    const SECOND: &str = "AAAAC3NzaC1lZDI1NTE5AAAAIKVyZDGnacgUkbjXHi/TsIZ+GxIgprlkfONi9t33BGz3";
+    fn listed(path: &Path) -> Vec<String> {
+        authorized_connections_keys_in(path)
+            .unwrap()
+            .into_iter()
+            .map(|key| key.public_key)
+            .collect()
+    }
 
     #[test]
     fn handshake_reports_failed_key_upgrade_and_preserves_managed_files() {
@@ -5309,7 +5588,7 @@ mod authorized_key_tests {
         assert!(handshake_key_in(&path, Some(&public)).is_ok());
         assert!(fs::read_to_string(&path)
             .unwrap()
-            .starts_with(&authorized_key_options()));
+            .starts_with(&authorized_key_line(&public).unwrap()));
         assert!(handshake_key_in(&link, Some(&public)).is_ok());
         assert!(handshake_key_in(&link, Some("ssh-ed25519 AAAAabsent personal")).is_ok());
         assert!(handshake_key_in(&link, None).is_ok());
@@ -5320,8 +5599,16 @@ mod authorized_key_tests {
         let _test_state = crate::test_support::global_state();
         let line =
             authorized_key_line(&format!("ssh-ed25519 {BLOB} Silo remote management\n")).unwrap();
+        let print = authorized_lines::blob_fingerprint(BLOB).unwrap();
         assert_eq!(
             line,
+            format!(
+                r#"restrict,command="exec ~/.local/bin/silo-remote --remote-bridge --key {print}" ssh-ed25519 {BLOB} Silo remote management"#
+            )
+        );
+        // A controller's key setup writes the line a host with an earlier Silo also runs.
+        assert_eq!(
+            setup_key_line(&format!("ssh-ed25519 {BLOB} laptop")).unwrap(),
             format!(
                 r#"restrict,command="exec ~/.local/bin/silo-remote --remote-bridge" ssh-ed25519 {BLOB} Silo remote management"#
             )
@@ -5352,10 +5639,7 @@ mod authorized_key_tests {
         let custom = format!(r#"from="192.0.2.1" {public}"#);
         fs::write(&path, format!("{legacy}\n{personal}\n{custom}\n{public}")).unwrap();
         handshake_key_in(&path, Some(&public)).unwrap();
-        let restricted = format!(
-            r#"restrict,command="{}" {public}"#,
-            crate::channel::current().remote_bridge_command()
-        );
+        let restricted = authorized_key_line(&public).unwrap();
         let expected = format!("{restricted}\n{personal}\n{custom}\n{restricted}");
         assert_eq!(fs::read_to_string(&path).unwrap(), expected);
         handshake_key_in(&path, Some(&public)).unwrap();
@@ -5370,7 +5654,7 @@ mod authorized_key_tests {
             "ssh-ed25519 AAAAother user@laptop\n{own}\nfrom=\"10.0.0.1\" {own}\nssh-ed25519 {BLOB} personal\n{own}"
         );
         let rewritten = restrict_authorized_keys(&contents, BLOB).unwrap();
-        let restricted = format!("{} {own}", authorized_key_options());
+        let restricted = authorized_key_line(&own).unwrap();
         assert_eq!(
             rewritten,
             format!(
@@ -5387,7 +5671,7 @@ mod authorized_key_tests {
         let home = tempfile::tempdir().unwrap();
         let path = home.path().join("authorized_keys");
         let first = format!("ssh-ed25519 {BLOB} {}", silo_key_comment());
-        let second = format!("ssh-ed25519 AAAAsecond {}", silo_key_comment());
+        let second = format!("ssh-ed25519 {SECOND} {}", silo_key_comment());
         let sentinel = "ssh-ed25519 AAAApersonal personal";
         fs::write(&path, format!("{first}\n{second}\n{sentinel}\n")).unwrap();
         let (read_tx, read_rx) = std::sync::mpsc::channel();
@@ -5406,7 +5690,7 @@ mod authorized_key_tests {
         let second_worker = thread::spawn(move || {
             let result = restrict_authorized_keys_file(
                 &second_path,
-                "ssh-ed25519 AAAAsecond ignored-comment",
+                &format!("ssh-ed25519 {SECOND} ignored-comment"),
             );
             done_tx.send(()).unwrap();
             result
@@ -5419,9 +5703,9 @@ mod authorized_key_tests {
         assert_eq!(
             fs::read_to_string(&path).unwrap(),
             format!(
-                "{} {first}\n{} {second}\n{sentinel}\n",
-                authorized_key_options(),
-                authorized_key_options()
+                "{}\n{}\n{sentinel}\n",
+                authorized_key_line(&first).unwrap(),
+                authorized_key_line(&second).unwrap()
             )
         );
     }
@@ -5438,8 +5722,8 @@ mod authorized_key_tests {
         assert_eq!(
             fs::read_to_string(&path).unwrap(),
             format!(
-                "ssh-ed25519 AAAAother user\n{} {public}\n",
-                authorized_key_options()
+                "ssh-ed25519 AAAAother user\n{}\n",
+                authorized_key_line(&public).unwrap()
             )
         );
         assert_eq!(
@@ -5456,6 +5740,288 @@ mod authorized_key_tests {
         assert!(restrict_authorized_keys_file(&link, &public).is_err());
         assert_eq!(fs::read_to_string(&target).unwrap(), format!("{public}\n"));
         assert!(!restrict_authorized_keys_file(&home.path().join("missing"), &public).unwrap());
+    }
+
+    #[test]
+    fn authorizing_a_controller_key_adds_one_restricted_line_and_lists_it() {
+        let _test_state = crate::test_support::global_state();
+        let home = tempfile::tempdir().unwrap();
+        let ssh = home.path().join(".ssh");
+        let path = ssh.join("authorized_keys");
+        // The controller's comment is replaced by this channel's, as a key setup does.
+        let offered = format!("ssh-ed25519 {BLOB} laptop\n");
+        assert_eq!(listed(&path), Vec::<String>::new());
+        assert!(authorize_connections_key_in(&path, &offered).unwrap());
+        assert_eq!(
+            fs::metadata(&ssh).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        let line = authorized_key_line(&offered).unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), format!("{line}\n"));
+        assert!(!authorize_connections_key_in(&path, &offered).unwrap());
+        assert_eq!(fs::read_to_string(&path).unwrap(), format!("{line}\n"));
+        let public = format!("ssh-ed25519 {BLOB} {}", silo_key_comment());
+        assert_eq!(
+            authorized_connections_keys_in(&path).unwrap(),
+            vec![AuthorizedConnectionsKey {
+                public_key: public.clone(),
+                fingerprint: authorized_lines::blob_fingerprint(BLOB),
+                canonical: true,
+                identified: true,
+            }]
+        );
+        // Revoking removes exactly that line.
+        revoke_connections_key_in(&path, &public).unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "");
+        assert!(authorized_connections_keys_in(&path).unwrap().is_empty());
+        for invalid in ["", "ssh-rsa AAAA x", "command=\"sh\" ssh-ed25519 AAAA"] {
+            assert!(
+                authorize_connections_key_in(&path, invalid).is_err(),
+                "{invalid}"
+            );
+        }
+    }
+
+    #[test]
+    fn authorizing_keeps_other_lines_and_tightens_an_older_silo_line() {
+        let _test_state = crate::test_support::global_state();
+        let home = tempfile::tempdir().unwrap();
+        let path = home.path().join("authorized_keys");
+        let public = format!("ssh-ed25519 {BLOB} {}", silo_key_comment());
+        let personal = format!("ssh-ed25519 {BLOB} personal");
+        let custom = format!(r#"from="192.0.2.1" {public}"#);
+        // No final newline: the new line still starts on its own line.
+        fs::write(
+            &path,
+            format!("ssh-ed25519 AAAAother user\n{personal}\n{custom}"),
+        )
+        .unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).unwrap();
+        assert!(authorize_connections_key_in(&path, &public).unwrap());
+        let line = authorized_key_line(&public).unwrap();
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            format!("ssh-ed25519 AAAAother user\n{personal}\n{custom}\n{line}\n")
+        );
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o640
+        );
+        // Lines that do not run the bridge are not listed.
+        assert_eq!(listed(&path), vec![public.clone()]);
+
+        let older = home.path().join("older");
+        fs::write(&older, format!("{public}\n")).unwrap();
+        assert!(!authorize_connections_key_in(&older, &public).unwrap());
+        assert_eq!(fs::read_to_string(&older).unwrap(), format!("{line}\n"));
+    }
+
+    #[test]
+    fn a_handshake_adds_the_fingerprint_to_the_line_a_key_setup_wrote() {
+        let _test_state = crate::test_support::global_state();
+        let home = tempfile::tempdir().unwrap();
+        let path = home.path().join("authorized_keys");
+        let public = format!("ssh-ed25519 {BLOB} {}", silo_key_comment());
+        let setup = setup_key_line(&public).unwrap();
+        fs::write(&path, format!("{setup}\n")).unwrap();
+        let before = authorized_connections_keys_in(&path).unwrap();
+        assert!(!before[0].canonical && !before[0].identified, "{before:?}");
+        handshake_key_in(&path, Some(&public)).unwrap();
+        let line = authorized_key_line(&public).unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), format!("{line}\n"));
+        let after = authorized_connections_keys_in(&path).unwrap();
+        assert!(after[0].canonical && after[0].identified, "{after:?}");
+        // Authorizing upgrades it the same way, and adds nothing beside it.
+        fs::write(&path, format!("{setup}\n")).unwrap();
+        assert!(!authorize_connections_key_in(&path, &public).unwrap());
+        assert_eq!(fs::read_to_string(&path).unwrap(), format!("{line}\n"));
+    }
+
+    #[test]
+    fn authorizing_takes_only_an_ed25519_key() {
+        let _test_state = crate::test_support::global_state();
+        let home = tempfile::tempdir().unwrap();
+        let path = home.path().join("authorized_keys");
+        for invalid in [
+            // Base64, but not an Ed25519 key: too short, an RSA key, another type's name.
+            format!("ssh-ed25519 {}", &BLOB[..40]),
+            "ssh-ed25519 AAAAB3NzaC1yc2EAAAADAQABAAAAgQC0".to_owned(),
+            "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5".to_owned(),
+            "ssh-ed25519 AAAAnot+base64!".to_owned(),
+        ] {
+            let error = authorize_connections_key_in(&path, &invalid).unwrap_err();
+            assert!(
+                error.starts_with("Not an Ed25519 public key"),
+                "{invalid}: {error}"
+            );
+        }
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn every_bridge_line_is_listed_and_revoked_whatever_its_form() {
+        let _test_state = crate::test_support::global_state();
+        let home = tempfile::tempdir().unwrap();
+        let ssh = home.path().join(".ssh");
+        fs::create_dir(&ssh).unwrap();
+        let path = ssh.join("authorized_keys");
+        let bridge = crate::channel::current().remote_bridge_command();
+        let public = format!("ssh-ed25519 {BLOB} {}", silo_key_comment());
+        let current = authorized_key_line(&public).unwrap();
+        let setup = setup_key_line(&public).unwrap();
+        let custom =
+            format!(r#"from="192.0.2.1",command="{bridge}",no-pty ssh-ed25519 {BLOB} by hand"#);
+        let absolute = format!(
+            r#"command="{}/.local/bin/{} --remote-bridge" ssh-ed25519 {SECOND} other"#,
+            home.path().display(),
+            crate::channel::current().remote_bridge_name()
+        );
+        let personal = format!("ssh-ed25519 {BLOB} personal");
+        let other = format!(r#"command="/usr/bin/true" ssh-ed25519 {BLOB} x"#);
+        fs::write(
+            &path,
+            format!("{current}\n{setup}\n{custom}\n{absolute}\n{personal}\n{other}\n"),
+        )
+        .unwrap();
+        let listed = authorized_connections_keys_in(&path).unwrap();
+        let summary: Vec<(String, bool, bool)> = listed
+            .iter()
+            .map(|key| (key.public_key.clone(), key.canonical, key.identified))
+            .collect();
+        assert_eq!(
+            summary,
+            vec![
+                (public.clone(), true, true),
+                (public.clone(), false, false),
+                (format!("ssh-ed25519 {BLOB} by hand"), false, false),
+                (format!("ssh-ed25519 {SECOND} other"), false, false),
+            ]
+        );
+        // Every bridge line for the key goes; its personal login and other commands stay.
+        revoke_connections_key_in(&path, &format!("ssh-ed25519 {BLOB}")).unwrap();
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            format!("{absolute}\n{personal}\n{other}\n")
+        );
+    }
+
+    #[test]
+    fn a_bridged_revoke_is_only_for_the_key_that_connected() {
+        let _test_state = crate::test_support::global_state();
+        let home = tempfile::tempdir().unwrap();
+        let ssh = home.path().join(".ssh");
+        fs::create_dir(&ssh).unwrap();
+        let path = ssh.join("authorized_keys");
+        let first = format!("ssh-ed25519 {BLOB} {}", silo_key_comment());
+        let second = format!("ssh-ed25519 {SECOND} {}", silo_key_comment());
+        fs::write(
+            &path,
+            format!(
+                "{}\n{}\n",
+                authorized_key_line(&first).unwrap(),
+                setup_key_line(&second).unwrap()
+            ),
+        )
+        .unwrap();
+        let first_print = authorized_lines::blob_fingerprint(BLOB).unwrap();
+        let request = |key: &str, caller: Option<&str>| {
+            let mut request =
+                json!({"method": "connections.keys.revoke", "params": {"publicKey": key}});
+            if let Some(caller) = caller {
+                request[AUTHENTICATED_KEY] = json!(caller);
+            }
+            request
+        };
+        assert!(check_bridged_revoke(&path, &request(&first, Some(&first_print))).is_ok());
+        let error = check_bridged_revoke(&path, &request(&second, Some(&first_print))).unwrap_err();
+        assert_eq!(error.api_code.as_deref(), Some("permission_denied"));
+        assert!(
+            error.message.contains("silo host revoke"),
+            "{}",
+            error.message
+        );
+        assert!(refused_revoke(&error));
+        // A line without `--key` cannot say who connected.
+        let error = check_bridged_revoke(&path, &request(&first, None)).unwrap_err();
+        assert!(
+            error.message.contains("cannot tell which key"),
+            "{}",
+            error.message
+        );
+        // A key with no bridge line left is nothing to revoke, for anyone.
+        let gone =
+            "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOwn0K1FAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEF";
+        assert!(check_bridged_revoke(&path, &request(gone, None)).is_ok());
+    }
+
+    #[test]
+    fn the_bridge_reports_only_the_forced_commands_key() {
+        let print = authorized_lines::blob_fingerprint(BLOB).unwrap();
+        let forged =
+            json!({"method": "connections.keys.revoke", AUTHENTICATED_KEY: "SHA256:forged"});
+        let mut request = forged.clone();
+        mark_authenticated_key(&mut request, None);
+        assert!(request.get(AUTHENTICATED_KEY).is_none(), "{request}");
+        let mut request = forged;
+        mark_authenticated_key(&mut request, Some(&print));
+        assert_eq!(request[AUTHENTICATED_KEY], json!(print));
+        let args = |words: &[&str]| words.iter().map(|w| w.to_string()).collect::<Vec<_>>();
+        assert_eq!(bridge_key_argument(&[]).unwrap(), None);
+        assert_eq!(
+            bridge_key_argument(&args(&["--key", &print])).unwrap(),
+            Some(print.clone())
+        );
+        for wrong in [
+            &["--key"][..],
+            &["--key", "SHA256:x"],
+            &["x"],
+            &["--key", &print, "x"],
+        ] {
+            assert_eq!(bridge_key_argument(&args(wrong)).unwrap_err(), BRIDGE_USAGE);
+        }
+        // A host with an earlier bridge refuses the argument with its usage line.
+        assert!(
+            connection_failure(Some(1), "silod: usage: silod --remote-bridge\n")
+                .contains("earlier Silo version")
+        );
+    }
+
+    #[test]
+    fn the_bridge_never_serves_key_authorization() {
+        // A connected controller must not be able to let another key in.
+        for method in [
+            "connections.keys.authorize",
+            "connections.keys.list",
+            "connections.keys.own",
+        ] {
+            assert!(access(method).is_none(), "{method}");
+            assert!(!is_owner_method(method), "{method}");
+        }
+    }
+
+    #[test]
+    fn authorizing_leaves_a_linked_authorized_keys_alone() {
+        let _test_state = crate::test_support::global_state();
+        let home = tempfile::tempdir().unwrap();
+        let target = home.path().join("managed");
+        fs::write(&target, "ssh-ed25519 AAAAother user\n").unwrap();
+        let link = home.path().join("authorized_keys");
+        symlink(&target, &link).unwrap();
+        let public = format!("ssh-ed25519 {BLOB} {}", silo_key_comment());
+        let error = authorize_connections_key_in(&link, &public).unwrap_err();
+        assert!(error.contains("is not a regular file"), "{error}");
+        assert!(
+            error.contains(&authorized_key_line(&public).unwrap()),
+            "{error}"
+        );
+        assert_eq!(
+            fs::read_to_string(&target).unwrap(),
+            "ssh-ed25519 AAAAother user\n"
+        );
     }
 }
 

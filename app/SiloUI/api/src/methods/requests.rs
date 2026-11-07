@@ -301,6 +301,23 @@ pub fn connections_devices_remove(params: connections::DeviceIdParams) -> Reques
     Request::new(MethodParams::ConnectionsDevicesRemove(params))
 }
 
+/// `connections.keys.authorize`
+pub fn connections_keys_authorize(
+    params: connections::AuthorizeKeyParams,
+) -> Request<kind::Command> {
+    Request::new(MethodParams::ConnectionsKeysAuthorize(params))
+}
+
+/// `connections.keys.list`
+pub fn connections_keys_list(params: common::EmptyParams) -> Request<kind::Query> {
+    Request::new(MethodParams::ConnectionsKeysList(params))
+}
+
+/// `connections.keys.own`
+pub fn connections_keys_own(params: common::EmptyParams) -> Request<kind::Command> {
+    Request::new(MethodParams::ConnectionsKeysOwn(params))
+}
+
 /// `connections.keys.revoke`
 pub fn connections_keys_revoke(params: connections::RevokeKeyParams) -> Request<kind::Command> {
     Request::new(MethodParams::ConnectionsKeysRevoke(params))

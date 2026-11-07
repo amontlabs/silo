@@ -343,27 +343,46 @@ process: the socket is on the Mac's filesystem, which the guest cannot see.
 
 A second path exists for Connections. With **Allow connections from other devices** on, a paired
 device reaches this engine over the Mac's SSH server. Its key is installed with
-`restrict,command="exec ~/.local/bin/silo-remote --remote-bridge"`
-([`remote.rs#L26`](../app/SiloUI/src-tauri/engine/src/remote.rs#L26),
+`restrict,command="exec ~/.local/bin/silo-remote --remote-bridge --key SHA256:..."`, the key's own
+fingerprint ([`remote.rs#L49`](../app/SiloUI/src-tauri/engine/src/remote.rs#L49),
 [`channel.rs#L106`](../app/SiloUI/host/src/channel.rs#L106)): no pty, forwarding or agent, and
-only that command whatever the client asked for (`SSH_ORIGINAL_COMMAND` is never read). The link
-names `silod` inside the app bundle. Started through it, `silod` accepts no further arguments,
-replaces itself with the file in its bundle
-([`lib.rs#L60`](../app/SiloUI/src-tauri/silod/src/lib.rs#L60)), verifies that bundle's signature
-as the engine does ([`app.rs#L49`](../app/SiloUI/src-tauri/silod/src/app.rs#L49)), reads one framed
-request from its input and relays it to `~/.silo/desktop-remote/control.sock` (`0600` in a `0700`
-directory, no peer-UID check;
-[`remote.rs#L2893`](../app/SiloUI/src-tauri/engine/src/remote.rs#L2893)). The owner refuses the
+only that command whatever the client asked for (`SSH_ORIGINAL_COMMAND` is never read). A
+controller's key setup writes the line without `--key`, which a host with an earlier Silo also
+runs ([`#L59`](../app/SiloUI/src-tauri/engine/src/remote.rs#L59)); a host with this version adds it at the first handshake
+([`#L1655`](../app/SiloUI/src-tauri/engine/src/remote.rs#L1655)). The link names `silod` inside the app bundle. Started through it,
+`silod` takes the `--remote-bridge` flag ([`lib.rs#L65`](../app/SiloUI/src-tauri/silod/src/lib.rs#L65))
+and accepts no other argument than `--key` and a fingerprint
+([`remote.rs#L32`](../app/SiloUI/src-tauri/engine/src/remote.rs#L32)), replaces itself with the file in its bundle
+([`lib.rs#L75`](../app/SiloUI/src-tauri/silod/src/lib.rs#L75)), verifies that bundle's signature
+as the engine does ([`app.rs#L36`](../app/SiloUI/src-tauri/silod/src/app.rs#L36),
+[`service.rs#L24`](../app/SiloUI/src-tauri/silod/src/service.rs#L24)), reads one framed request
+from its input, replaces any `authenticatedKey` in it with its own `--key`
+([`remote.rs#L2785`](../app/SiloUI/src-tauri/engine/src/remote.rs#L2785)) and relays it to `~/.silo/desktop-remote/control.sock` (`0600` in
+a `0700` directory, no peer-UID check; [`remote.rs#L3161`](../app/SiloUI/src-tauri/engine/src/remote.rs#L3161)). The owner refuses the
 request unless Connections are on, the protocol version matches and, except for the handshake,
 the request names this device's id
-([`remote.rs#L3136`](../app/SiloUI/src-tauri/engine/src/remote.rs#L3136)); the id is not a secret
+([`remote.rs#L3404`](../app/SiloUI/src-tauri/engine/src/remote.rs#L3404)); the id is not a secret
 (the handshake returns it), so the key is the whole check. The owner then serves the methods in
 `METHODS` and `OWNER_METHODS`
-([`remote.rs#L295`](../app/SiloUI/src-tauri/engine/src/remote.rs#L295),
-[`#L365`](../app/SiloUI/src-tauri/engine/src/remote.rs#L365)), including delete, checkpoint
+([`remote.rs#L328`](../app/SiloUI/src-tauri/engine/src/remote.rs#L328),
+[`#L398`](../app/SiloUI/src-tauri/engine/src/remote.rs#L398)), including delete, checkpoint
 restore, guest exec, file reads and writes, exports, and the `guest.ssh` and macOS display byte
 streams. Turning Connections off refuses every request but leaves installed keys in
-`authorized_keys`; removing a device revokes its key. A device that holds that key, or a
+`authorized_keys`; removing a device revokes its key. `authorized_keys` is the only place a
+controller key is revoked, and keys do not expire. Through the bridge, `connections.keys.revoke`
+is allowed only for the key the forced command names
+([`remote.rs#L1078`](../app/SiloUI/src-tauri/engine/src/remote.rs#L1078), called from [`#L3527`](../app/SiloUI/src-tauri/engine/src/remote.rs#L3527)), so one connected controller
+cannot revoke another's; a request through a line without `--key` (an earlier Silo's) is refused
+while that key still has a bridge line. The key list (`connections.keys.list`, `silo host
+status`) covers every line whose forced command is Silo's bridge, in any form; a line for the same
+key without it is a login of its own and is not Silo's to list. On a host, `silo host init
+--authorize` installs a controller's key out of band, with the same authority as a paired
+device's key, through `connections.keys.authorize`, which `engine.sock` serves and the bridge
+does not (it is in neither list), so a connected controller cannot let another key in; a
+same-user process could, as it could edit `authorized_keys` itself. `silo host init` runs no
+privileged step and never turns lingering on. On the controller, `silo devices add --host-key`
+writes the host's key to `~/.ssh/known_hosts`; the fingerprint the person typed is the trust
+root, and a different key already listed for the name is never replaced. A device that holds that key, or a
 same-user process that connects to `control.sock`, has that authority. The same-user link under
 `~/.local/bin` is part of that trust: a same-user process can repoint it, which is a non-goal
 below.
@@ -460,15 +479,15 @@ where this section says otherwise.
 | | Mac | Linux host |
 | --- | --- | --- |
 | Hypervisor | Hypervisor.framework under libkrun, in the signed `msb` | KVM under libkrun, in `msb` running as the engine's account. Silo adds no seccomp filter or namespace around it. |
-| Which binary serves the socket | The bundle's code signature | Location and ownership: before it reads anything, `silod` refuses an engine directory, any directory above it, `silod`, any entry beside it, or anything under `resources/` that an account other than its own or root owns or can change, and links that leave the directory ([`install_trust.rs#L46`](../app/SiloUI/src-tauri/silod/src/install_trust.rs#L46), called from [`linux.rs#L38`](../app/SiloUI/src-tauri/silod/src/linux.rs#L38)). Before the first `msb` launch the agent checks the MicroSandbox manifest against the runtime inputs compiled into the build and hashes `msb` and `libkrunfw` against it ([`dependencies.rs#L933`](../app/SiloUI/src-tauri/engine/src/dependencies.rs#L923), [`linux.rs#L123`](../app/SiloUI/src-tauri/silod/src/linux.rs#L123)); `libkrunfw`'s hash is compiled in, `msb`'s comes from that manifest, which the ownership check covers. Nothing is signed: signed archives are roadmap milestone 11. |
-| Credential values | Keychain items whose access list names the engine | One 0600 file per item under 0700 directories at `$XDG_DATA_HOME/<identifier>/credentials/<service>/<account>` ([`credential_file_store.rs#L105`](../app/SiloUI/src-tauri/engine/src/credential_file_store.rs#L105)). Every process of the engine's account and root can read them, and a backup of the home directory copies them. `SILO_CREDENTIAL_STORE=secret-service` is untested. |
+| Which binary serves the socket | The bundle's code signature | Location and ownership: before it reads anything, `silod` refuses an engine directory, any directory above it, `silod`, any entry beside it, or anything under `resources/` that an account other than its own or root owns or can change, and links that leave the directory. Write access for the owner's user-private group does not count (Debian's `StrictModes` rule: the owner's primary group, no member but the owner; Silo also requires that the owner's `/etc/passwd` line and the group's single `/etc/group` line agree with the lookups and that no other `/etc/passwd` account has that primary group). Root-owned paths and gid 0 get no exemption, and write access for everyone and sticky directories are always refused ([`safe_directories.rs#L332`](../app/SiloUI/src-tauri/engine/src/safe_directories.rs#L332), [`#L359`](../app/SiloUI/src-tauri/engine/src/safe_directories.rs#L359), [`install_trust.rs#L51`](../app/SiloUI/src-tauri/silod/src/install_trust.rs#L51), called from [`linux.rs#L38`](../app/SiloUI/src-tauri/silod/src/linux.rs#L38)). Before the first `msb` launch the agent checks the MicroSandbox manifest against the runtime inputs compiled into the build and hashes `msb` and `libkrunfw` against it ([`dependencies.rs#L933`](../app/SiloUI/src-tauri/engine/src/dependencies.rs#L933), [`linux.rs#L103`](../app/SiloUI/src-tauri/silod/src/linux.rs#L103)); `libkrunfw`'s hash is compiled in, `msb`'s comes from that manifest, which the ownership check covers. Nothing is signed: signed archives are roadmap milestone 11. Residual risk of the private-group exemption: the check cannot see memberships a network directory (LDAP, SSSD, NIS) adds to a local group, groups `pam_group` grants at login, a group password in `/etc/gshadow` that lets `newgrp` join, or setgid programs of the owner; any of those gives another account write access the check treats as the owner's alone. |
+| Credential values | Keychain items whose access list names the engine | One 0600 file per item under 0700 directories at `$XDG_DATA_HOME/<identifier>/credentials/<service>/<account>` ([`credential_file_store.rs#L110`](../app/SiloUI/src-tauri/engine/src/credential_file_store.rs#L110)). Every process of the engine's account and root can read them, and a backup of the home directory copies them. `SILO_CREDENTIAL_STORE=secret-service` is untested. |
 | Client check | `getpeereid` | `SO_PEERCRED` ([`socket.rs#L76`](../app/SiloUI/src-tauri/silod/src/socket.rs#L76)); the same effective-UID comparison |
 | Paths | `~/Library/...` | XDG data, cache and state directories ([`paths.rs#L36`](../app/SiloUI/src-tauri/silod/src/paths.rs#L36)); `~/.silo` and `~/.silo-dev` hold the socket on both |
-| Management | The app, or Connections | Connections only (the bridge of boundary 7) |
+| Management | The app, or Connections | Connections (the bridge of boundary 7), and the host-local `silo host` commands on `engine.sock` |
 
 **The VM.** Run the engine as a dedicated account in the `kvm` group, never as root: `silod`
 refuses euid 0 and `nobody` (uid 65534) for the agent, the bridge and the guest helper
-([`install_trust.rs#L34`](../app/SiloUI/src-tauri/silod/src/install_trust.rs#L34)). A libkrun or virtio escape then
+([`install_trust.rs#L39`](../app/SiloUI/src-tauri/silod/src/install_trust.rs#L39)). A libkrun or virtio escape then
 gives the attacker that account, as on a Mac, and on a dedicated account that is the engine's
 data and credentials, not a person's files. The engine starts `msb` in its own process group
 ([`runtime/mod.rs#L1780`](../app/SiloUI/src-tauri/engine/src/runtime/mod.rs#L1780),
@@ -487,18 +506,21 @@ code reading of boundary 2.
 it), the two empty read-only legacy folders on older computers, and `/workspace` as a disk image.
 The credential directory is never a mount source or inside or above one; a unit test checks that
 against the storage, share, guest-image and legacy paths
-([`credential_file_store.rs#L809`](../app/SiloUI/src-tauri/engine/src/credential_file_store.rs#L809)).
+([`credential_file_store.rs#L942`](../app/SiloUI/src-tauri/engine/src/credential_file_store.rs#L942)).
 
 **Secrets and GitHub.** The placeholder and token logic of boundaries 3 and 5 is unchanged; only
 where the values rest differs. The file store opens every directory and file without following
-links, through directory descriptors, checks every directory from the XDG data directory down,
-and refuses a link, another account's file, or a file others can read
-([`credential_file_store.rs#L133`](../app/SiloUI/src-tauri/engine/src/credential_file_store.rs#L133),
-[`#L359`](../app/SiloUI/src-tauri/engine/src/credential_file_store.rs#L359)). A refusal is reported as
+links, through directory descriptors, checks every directory from the XDG data directory down
+(the same ownership rule as the engine directory, owner's private group included), creates missing
+ones through descriptors with fixed modes (0755 up to the XDG data directory, 0700 below) and only
+inside a directory nobody else can change
+([`safe_directories.rs#L408`](../app/SiloUI/src-tauri/engine/src/safe_directories.rs#L408)), and refuses a link, another account's file, or a file others can read
+([`credential_file_store.rs#L147`](../app/SiloUI/src-tauri/engine/src/credential_file_store.rs#L147),
+[`#L386`](../app/SiloUI/src-tauri/engine/src/credential_file_store.rs#L386)). A refusal is reported as
 `credential_access_denied`, naming the file and never the value
 ([`credential_store.rs#L50`](../app/SiloUI/src-tauri/engine/src/credential_store.rs#L50)). The engine records the store
 it used first and refuses a different `SILO_CREDENTIAL_STORE` later
-([`linux.rs#L185`](../app/SiloUI/src-tauri/silod/src/linux.rs#L185)).
+([`linux.rs#L192`](../app/SiloUI/src-tauri/silod/src/linux.rs#L192)).
 
 **Engine socket and in-guest client.** Boundaries 7 and 9 unchanged, with `SO_PEERCRED` in place of
 `getpeereid`.

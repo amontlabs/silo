@@ -206,6 +206,146 @@ Plan: [PLAN.md](PLAN.md).
     found nothing in the three changed workflows. Not run: any workflow, and a session end
     against real computers.
 
+## Phase 4: `silo host init` and adding a host by address (6 Nov 2026)
+
+- **Found:** the CLI had no command for Connections; the app's Connect device was the only way
+  to add a device. Pairing was controller-driven only: the controller installs its restricted
+  key over SSH (`connections.ssh.keySetupCommand`), so a host that accepts neither a password nor
+  one of the controller's keys could not be added. The engine had no method to install, list or
+  return a key on the owner's side. On macOS the engine registers as a login item only from the
+  app (`SMAppService` from `Silo.app`) or `silod --service register` from `Silo Engine.app`.
+  `connections.status` dropped the engine's `cliLinkError` through its typed reply, so the
+  message the app shows for an unlinked `silo` never arrived.
+- **Built:**
+  - Engine methods `connections.keys.authorize`, `connections.keys.list` and
+    `connections.keys.own` (`remote.rs`, `silod` `methods/access.rs`, `silo-api`, schema and
+    request constructors regenerated). They are served on `engine.sock` and not through the
+    bridge; a unit test checks that. `authorize` writes the key setup's exact line and leaves a
+    symlinked `authorized_keys` alone. `cliLinkError` is in the typed status.
+  - `silo host init [--authorize KEY|FILE]...`, `silo host status`, `silo host revoke`
+    (`cli/src/hosts.rs`): account and VM checks (`/dev/kvm` and its group on Linux, Apple silicon
+    on a Mac), `silod --service register` from beside `silo` (Linux) or from the app's
+    `Silo Engine.app` when no engine answers (Mac), the `~/.local/bin/silo[-dev]` link (Linux,
+    only when absent or Silo's), Connections on, the keys, the addresses, and whether anything
+    answers on port 22. Keys are read and checks run before anything changes.
+  - `silo devices add <address> [--host-key ...] [--replace]`, `list`, `remove`, `key`:
+    `connections.devices.connect`, with the host-key and key-setup commands run in the terminal
+    when SSH needs them (each at most once, never for a changed host key, printed instead
+    without a terminal). `user@host:port` becomes `ssh://user@host:port`. `--host-key` pins the
+    host's key in `~/.ssh/known_hosts` by fingerprint (matched against `ssh-keyscan`), key or
+    key file.
+  - `scripts/hosts-e2e.sh` and a second part of `linux-host.yml`: accounts `silo-host` and
+    `silo-controller` on the KVM runner, a root-owned copy of the engine, the runner's sshd;
+    host init, add by `127.0.0.1` with a pinned fingerprint, create, start, stop and drop an
+    `e2e-hosts-remote` computer with `--device`, remove the host, unregister both services.
+    `SILO_E2E_REMOTE_EXEC=1` adds `exec` and `fork -- uname -a` through `--device`, which need
+    phase 5; the workflow does not set it yet. Not run.
+  - The app: Connect device already adds a host by address, and its Set up Silo SSH key action
+    is the same key setup; no UI change.
+- **Tests (Linux x86_64 container, as root):** `silo-cli` 328 passed (15 new in
+  `tests/hosts.rs`, 8 new unit tests), `silo-api` 49, `silo-client` 15; `silod` 346 unit tests
+  (1 new) and its other test binaries passed; `silo-engine` `remote::` 162 passed, 1 failed:
+  `handshake_reports_failed_key_upgrade_and_preserves_managed_files`, which also fails at the
+  phase 3 head in this container (its read-only directory does not stop root). 4 of the new
+  engine tests are in that module. `run-script-tests.py`: 45 of 45 modules (4 new hosts-e2e
+  tests and 1 workflow test). No actionlint or shellcheck here.
+- **Live (same container, no systemd, no KVM):** two accounts made with `useradd`, a Dev engine
+  in a root-owned directory, fake `systemctl` (starting `silod --agent`) and `loginctl` on
+  `PATH`, a user-run sshd on 127.0.0.1:2222, and a character device made with `mknod` at
+  `/dev/kvm` so the access check could pass (it cannot run a VM). Root was refused; the host
+  account without the device's group was refused with the `usermod -aG` advice. After it joined
+  the group, `silo host init --authorize controller.pub` registered the unit, linked
+  `~/.local/bin/silo-dev`, turned Connections on (and the bridge link), wrote the restricted
+  line, listed the controller's fingerprint and printed the addresses; a second run reported
+  `alreadyLinked` and `added: false`. On the controller, `silo devices add
+  silohost@127.0.0.1:2222` without a pin failed with the host-key command and no prompt, a wrong
+  fingerprint was refused with the one offered, and the right one pinned `[127.0.0.1]:2222` and
+  connected through the forced command. `silo --device <id> list` answered from the host;
+  `silo devices remove` revoked the line and `host status` listed no controllers. `hosts-e2e.sh`
+  against the same setup passed every step before computer creation, which stopped at the
+  guest image download (no network for it here), then removed the host. The first live run found
+  that `silo devices remove <name>` filled the global `--device`; the argument was renamed and a
+  test added.
+- **Needs a live check:** the KVM runner workflow; a Mac host (`silo host init` with the app's
+  engine running, and with none, where `Silo Engine.app` registers its own login item next to
+  the app's; Remote Login; macOS computers on a Mac host from a Linux controller); a real
+  systemd user manager with lingering; the app's Connect device against a Linux host.
+
+- **Review fixes (PR #79):**
+  - Mac: `silo host init` no longer runs `silod --service register` from `Silo Engine.app`, which
+    registered a second login item with the app's launchd label. With no engine answering it
+    opens the app that holds this `silo` once (`open -g -j -a`), waits for the socket for
+    `engine_wait` and names System Settings > General > Login Items when nothing answers. With
+    an engine answering, `launchctl print gui/<uid>/<identifier>.engine` (read only) says
+    whether launchd has the login item; `silod --service status` is not used there because,
+    run from the engine bundle, it reports that bundle's registration, not the app's. Linux
+    `host status` advises when the service is not `enabled`. `silo host` and `silo devices`
+    refuse `--allow-other-channel` and a `--socket` outside this channel's home.
+  - Bridged revoke: Silo's line passes the bridge `--key` and the key's `SHA256:` fingerprint;
+    `silod --remote-bridge` accepts exactly that argument (else `usage: silod --remote-bridge
+    [--key SHA256:<fingerprint>]`), the bridge replaces any `authenticatedKey` in the request
+    with it, and the owner allows a bridged `connections.keys.revoke` only for that key. A line
+    without `--key` is refused for a bridged revoke while the key has a bridge line. The
+    controller's key setup still writes the line without `--key`, so an earlier host keeps
+    accepting it; a handshake and `keys.authorize` rewrite it with `--key`. A controller removing
+    a device sends a handshake and retries once when its own key is refused. A controller that
+    reads the usage line reports an earlier Silo on the other device. The protocol version is
+    unchanged.
+  - `connections.keys.list` lists every line whose forced command is this channel's bridge (any
+    options or comment, `~/`, `$HOME` or the home's path), with `canonical` and `identified`;
+    `revoke` removes all of them, and `silo host revoke` also takes a fingerprint and reports
+    only keys it removed.
+  - Keys: `--authorize` takes an argument as a key only when it is an Ed25519 key (base64 blob
+    with the `ssh-ed25519` type string and a 32-byte key), else as a file whose every line must
+    be one; the engine's `authorize` checks the same.
+  - `--host-key` looks the name up with `ssh-keygen -F` (hashed entries; `@revoked` refused,
+    `@cert-authority` ignored) and checks the address with the engine's rules before
+    `ssh-keyscan`; `ssh_target` reads `user@host:port`.
+  - A dangling `~/.local/bin/silo` link is replaced only when its target was in a directory
+    named `silo-engine*`. `init` and `status` warn when the home or `~/.ssh` is group- or
+    world-writable (sshd `StrictModes`). `devices remove` no longer claims a key was revoked.
+    A cross-crate test checks silo-client's link names against silo-host's.
+  - CI: the shared engine copy is under `/var/lib/silo-ci` (root, 0755): the KVM runner's `/opt`
+    is mode 777, which the engine's trust check refuses. `hosts-e2e.sh` logs `df -h` before
+    creating the computer.
+  - Private groups: the KVM job for PR #79 stopped with "`~/.local/share` can be changed by
+    other accounts" because `silo-controller`'s `~/.local/share` was 0775 in its own group
+    (umask 002, as on every Debian or Ubuntu account with a user-private group). The credential
+    store's ancestor check, `install_trust` and the CLI's `StrictModes` advice now accept group
+    write for the owner's user-private group, Debian OpenSSH's rule (the owner's primary group,
+    no member but the owner, and no other `/etc/passwd` account with it as primary group;
+    `/etc/passwd` only, as `getpwent` is not thread-safe), in
+    `silo_engine::safe_directories` (the CLI keeps a copy, as it does not depend on the engine,
+    and applies it only where `/etc/debian_version` says sshd is Debian's). World-writable and
+    sticky directories stay refused; the refusal names the mode and group and gives
+    `chmod g-w` or `chmod go-w`. Missing directories get fixed modes whatever the umask (0755 to
+    `$XDG_DATA_HOME`, 0700 below; 0755 for `~/.config/systemd/user`). Live: a `useradd` account
+    with a 0775 `~/.local/share` in its private group served from a root-owned engine copy and
+    `silo list` answered; the same directory in a shared group was refused with the new
+    message; a fresh home under umask 002 got 755/755/700/700. The account was removed after.
+  - Security review of the private-group change: directories are created through descriptors
+    (`openat` with `O_NOFOLLOW` of the deepest existing one, then `mkdirat`, `openat`, `fstat`
+    and `fchmod` per level), and only inside an existing directory of the account or root that
+    nobody else can change, so a link swapped in cannot make `chmod` widen another file. Root
+    (uid 0) and gid 0 get no exemption; only a local account and group count (the owner's
+    `/etc/passwd` line and the group's single `/etc/group` line must agree with the lookups);
+    `/etc/passwd` or `/etc/group` over 16 MiB counts as unreadable and refuses. The threat model
+    names what the rule cannot see (network memberships, `pam_group`, gshadow passwords, setgid
+    programs).
+  - Tests (Linux x86_64 container, as root): `silo-engine` `remote::` 169 passed, 1 failed (the
+    pre-existing root-only `handshake_reports_failed_key_upgrade_and_preserves_managed_files`);
+    `silod` 346 unit tests and its other binaries passed; `silo-cli`, `silo-api`, `silo-client`
+    passed; `run-script-tests.py` 45 of 45.
+  - Live (same container, as before: two `useradd` accounts, root-run sshd on 127.0.0.1:2222,
+    fake `systemctl`/`loginctl`, `/dev/kvm` from `mknod`): a non-Ed25519 `--authorize` changed
+    nothing; init wrote two `--key` lines; `devices add` with the pinned fingerprint connected,
+    a wrong one was refused; `silo --device <id> list` answered from the host; a bridged revoke
+    of the other controller's key over the controller's Silo key was refused with
+    `permission_denied`, also with a forged `authenticatedKey` in the request; with the
+    controller's line rewritten without `--key`, a bridged revoke was refused, `host status`
+    marked the line, and `devices remove` upgraded it by handshake and removed it; `host revoke
+    SHA256:...` removed the other key. Accounts, files and the device node were removed after.
+
 ## Phase 5: exec, fork with a command and computer use on another device (6 Nov 2026)
 
 - **Found:** silod already routes `guest.exec`, `guest.exec.start`/`get`/`input`,

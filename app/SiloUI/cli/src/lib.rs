@@ -16,6 +16,7 @@ pub mod guest_client;
 pub mod guest_install;
 pub mod gui;
 pub mod hosted;
+pub mod hosts;
 pub mod mcp;
 pub mod ops;
 pub mod pr;

@@ -367,6 +367,84 @@
       ],
       "type": "string"
     },
+    "AuthorizeKeyParams": {
+      "description": "A controller's Connections public key (`ssh-ed25519 <key> [comment]`) for this device to accept.",
+      "properties": {
+        "publicKey": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "publicKey"
+      ],
+      "type": "object"
+    },
+    "AuthorizeKeyResult": {
+      "properties": {
+        "added": {
+          "description": "False when the key was already authorized.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "added"
+      ],
+      "type": "object"
+    },
+    "AuthorizedKey": {
+      "description": "One line of `~/.ssh/authorized_keys` whose forced command is this channel's Connections bridge.",
+      "properties": {
+        "canonical": {
+          "description": "The line is exactly the one Silo writes now (`restrict`, the bridge with `--key` and the key's fingerprint).",
+          "type": "boolean"
+        },
+        "fingerprint": {
+          "description": "`SHA256:...`, as `ssh-keygen -l` prints it; absent when the key is not base64.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "identified": {
+          "description": "The forced command passes the bridge this line's own key fingerprint, so a request through it can revoke that key.",
+          "type": "boolean"
+        },
+        "publicKey": {
+          "description": "`<type> <key> [comment]`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "publicKey",
+        "canonical",
+        "identified"
+      ],
+      "type": "object"
+    },
+    "AuthorizedKeysResult": {
+      "description": "The controller keys this device's account accepts for Connections: every line of `~/.ssh/authorized_keys` whose forced command is the bridge, whatever its other options, comment or the Silo version that wrote it.",
+      "properties": {
+        "keys": {
+          "default": [],
+          "description": "Each line, in file order.",
+          "items": {
+            "$ref": "#/$defs/AuthorizedKey"
+          },
+          "type": "array"
+        },
+        "publicKeys": {
+          "description": "The keys of `keys`, each once.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "publicKeys"
+      ],
+      "type": "object"
+    },
     "BackupAvailability": {
       "enum": [
         "available",
@@ -2689,6 +2767,13 @@
             "$ref": "#/$defs/DeviceAddress"
           },
           "type": "array"
+        },
+        "cliLinkError": {
+          "description": "Why the engine could not link the `silo` command on PATH when it started.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "deviceId": {
           "type": "string"
@@ -7968,6 +8053,9 @@
         "connections.devices.health",
         "connections.devices.list",
         "connections.devices.remove",
+        "connections.keys.authorize",
+        "connections.keys.list",
+        "connections.keys.own",
         "connections.keys.revoke",
         "connections.setEnabled",
         "connections.ssh.authorizationCommand",
@@ -8839,6 +8927,54 @@
             },
             "params": {
               "$ref": "#/$defs/DeviceIdParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "connections.keys.authorize",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/AuthorizeKeyParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "connections.keys.list",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/EmptyParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "connections.keys.own",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/EmptyParams"
             }
           },
           "required": [
@@ -11553,6 +11689,54 @@
             },
             "result": {
               "type": "null"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "connections.keys.authorize",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/AuthorizeKeyResult"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "connections.keys.list",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/AuthorizedKeysResult"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "connections.keys.own",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/OwnKeyResult"
             }
           },
           "required": [
@@ -14281,6 +14465,18 @@
           ]
         }
       },
+      "type": "object"
+    },
+    "OwnKeyResult": {
+      "description": "This device's own Connections public key, created when it had none.",
+      "properties": {
+        "publicKey": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "publicKey"
+      ],
       "type": "object"
     },
     "PendingChanges": {
@@ -17296,6 +17492,24 @@
       "name": "connections.devices.remove",
       "paramsType": "connections::DeviceIdParams",
       "resultType": "()"
+    },
+    {
+      "kind": "command",
+      "name": "connections.keys.authorize",
+      "paramsType": "connections::AuthorizeKeyParams",
+      "resultType": "connections::AuthorizeKeyResult"
+    },
+    {
+      "kind": "query",
+      "name": "connections.keys.list",
+      "paramsType": "common::EmptyParams",
+      "resultType": "connections::AuthorizedKeysResult"
+    },
+    {
+      "kind": "command",
+      "name": "connections.keys.own",
+      "paramsType": "common::EmptyParams",
+      "resultType": "connections::OwnKeyResult"
     },
     {
       "kind": "command",

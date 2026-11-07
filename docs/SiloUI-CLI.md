@@ -87,6 +87,8 @@ the engine's message.
 A fork publishes the ports its source publishes (a recipe fork, the recipe's `ports`), each on a host port of its own. The engine does not copy published ports when it forks a computer, so `silo fork` does it with the same `publish` calls. The MCP server has `ports`, `publish`, `unpublish` and `ssh_name` tools.
 | `silo guest-client install <computer> [--binary PATH] [--group G]` / `revoke` / `status` | give a running Linux computer's own agent a scoped token, remove it, or read it; the token carries the agent's `fold` and `fork_secrets` settings ([in-guest client](SiloUI-IN-GUEST-CLIENT.md)) |
 | `silo --in-guest <list\|tree\|status\|fork\|diff\|fold --request\|requests\|steps>` | run inside a computer with its token: fork itself, diff and request review of its forks; never keeps, promotes, undoes or drops |
+| `silo host init [--authorize KEY\|FILE]...` / `silo host status` / `silo host revoke FINGERPRINT\|KEY\|FILE` | prepare this machine to host computers for other devices, show how it is set up, or stop accepting a controller's key ([details](#hosting-computers-for-other-devices)) |
+| `silo devices add <address> [--host-key FINGERPRINT\|KEY\|FILE] [--replace]` / `list` / `remove <device>` / `key` | connect, list or remove the devices this one manages, or print this device's Silo key ([details](#hosting-computers-for-other-devices)) |
 | `silo job <id>` | wait for a job that is already running |
 | `silo mcp` | serve the MCP tools on stdio |
 
@@ -275,6 +277,148 @@ and skips one whose last health check failed.
   `steps_list`, `tree`, `checkpoints`, `requests_list`, the request tools, `fork_gui`,
   `computer_use_ready` and the other `computer_use_*` tools (not `computer_use_wait`), and
   `allDevices` on `list` and `requests_list`.
+
+## Hosting computers for other devices
+
+Any machine with a Silo engine hosts computers of the kinds it can run: a Mac runs Linux and
+macOS computers (macOS allows two macOS computers running at once on one Mac), a Linux server
+runs Linux computers over KVM. Another device manages them through
+[Connections](SiloUI-CONNECTIONS.md); each host keeps its own secrets and GitHub sign-in.
+
+On the host, as the account that will own the computers (not root):
+
+```sh
+# Linux: from the unpacked engine archive (see the engine guide)
+~/.local/opt/silo-engine/silo host init
+# Mac: the app's silo (linked as ~/.local/bin/silo once Silo has run)
+/Applications/Silo.app/Contents/MacOS/silo host init
+```
+
+`silo host init` changes nothing until its checks pass, and running it again is safe:
+
+1. **The account.** Root and `nobody` are refused, as the engine refuses them.
+2. **Computers can run here.** Linux: `/dev/kvm` must exist and be readable and writable by this
+   account. When it is not, the message says what to do: an administrator adds the account to
+   the device's group (`sudo usermod -aG kvm "$(id -un)"`), or, when the user database already
+   lists it there, log out and back in. Mac: Apple silicon.
+3. **The engine as a service.** Linux: `silod --service register` of the `silod` beside this
+   `silo` (a `silo` outside an engine directory is refused). It writes and starts the systemd
+   user unit and checks the engine directory the way the engine does
+   ([engine guide](SiloUI-ENGINE.md#silod-on-a-linux-host)); its refusals and its lingering
+   advice are printed as they are. Without lingering the engine starts at the first login, not
+   at boot (`sudo loginctl enable-linger "$(id -un)"`); `silo host init` runs nothing as root and
+   never turns lingering on itself. Mac: an engine that answers already runs as the login item
+   the app registered; `launchctl print gui/<uid>/<identifier>.engine` (read only) tells whether
+   launchd has that item, and when it has none the advice is to open the app once. When no
+   engine answers, the app that holds this `silo` is opened once in the background
+   (`open -g -j -a <Silo.app>`), so the app registers and starts its own login item, and the
+   engine's socket is awaited for a bounded time (`engine_wait`, 60 s). If it does not answer,
+   the message names System Settings > General > Login Items, where the engine may be off or
+   waiting for approval. The `Silo Engine.app` inside the app never registers a login item of
+   its own: that would be a second registration with the same launchd label. A Mac login item
+   runs in a logged-in session.
+4. **`silo` on PATH.** Linux: `~/.local/bin/silo` (`silo-dev` for a Dev engine) is linked to this
+   `silo` when nothing is there, or the link there points at a `silo` with a `silod` beside it,
+   or at a `silo` that is gone from a directory whose name starts with `silo-engine` (an unpacked
+   engine archive that was replaced). Anything else, a link to a missing file elsewhere
+   included, is left alone and reported, and a `~/.local/bin` missing from `PATH` is reported. On a Mac the engine links the app's `silo` itself when it starts, and
+   its error, if any, is reported.
+5. **Connections on** (`connections.setEnabled`), which also links the bridge
+   `~/.local/bin/silo-remote` that a controller's forced SSH command runs.
+6. **Controller keys.** Each `--authorize` key (`ssh-ed25519 ...`, as `silo devices key` prints it
+   on the controller, or a file of such lines) is added to `~/.ssh/authorized_keys` by the engine
+   (`connections.keys.authorize`) with Silo's restricted line:
+   `restrict,command="exec ~/.local/bin/silo-remote --remote-bridge --key SHA256:..."` (the key's
+   own fingerprint) and this channel's comment. The key can only run the bridge. An argument is a
+   key only when it is one (`ssh-ed25519` and a base64 blob that decodes to the type string
+   `ssh-ed25519` and a 32-byte key); anything else is read as a file, every line of which must be
+   such a key. Every key is checked before anything changes, and the engine checks it again.
+   This is an out-of-band key install with the same authority as a paired device's key; keys do
+   not expire, and `authorized_keys` is the only place one is revoked.
+7. **SSH's view of the account.** sshd's `StrictModes` (on by default) ignores
+   `~/.ssh/authorized_keys` when the home or `~/.ssh` can be changed by group or others; that is
+   reported with the mode, the group and the `chmod g-w` or `chmod go-w` that fixes it. Debian's
+   and Ubuntu's sshd (detected by `/etc/debian_version`) let the owner's user-private group
+   write (a local, non-root account and group, as the engine checks), so a home made under
+   umask 002 is not reported there.
+8. **The address.** It prints the addresses Connections offers (`user@host.local`, the host
+   name, Tailscale and other interface addresses) and whether anything answers on port 22.
+   Controllers reach the host over SSH: turn on Remote Login on a Mac, or run an SSH server on
+   Linux. Use `ssh://user@host:port` for another port.
+
+`silo host status` reads the same things without changing any: VM support, the service
+(`silod --service status` on Linux, with advice when it is not `enabled`; the launchd check
+above on a Mac), whether the engine answers, the command link, Connections, the bridge link, the
+controller keys and SSH. The controller keys are every line of `~/.ssh/authorized_keys` whose
+forced command is this channel's bridge, whatever its other options or comment and whichever
+Silo version or person wrote it, each with its `SHA256:` fingerprint (as `ssh-keygen -lf` prints
+it); a line that is not exactly Silo's current one is marked, and one without `--key` is named
+in the advice. Lines for the same key without the bridge's forced command (a personal login) are
+not listed. `silo host revoke FINGERPRINT|KEY|FILE` removes every bridge line for the key
+(`connections.keys.revoke`) and says which keys had none. `connections.keys.authorize` and
+`connections.keys.list` are this device's own: the Connections bridge does not serve them, so a
+connected controller cannot add a key. Through the bridge, a controller can revoke only the key
+it connected with (see [Connections](SiloUI-CONNECTIONS.md#controller-keys-on-the-host)).
+`silo host` and `silo devices` work on this build's own engine only: they refuse
+`--allow-other-channel` and a `--socket` outside this channel's home.
+
+On the controller:
+
+```sh
+silo devices add ada@build-box.local
+silo list --all-devices
+silo --device build-box create e2e --linux
+```
+
+`silo devices add` is the app's Connect device (`connections.devices.connect`). The address is
+`user@host`, an SSH alias, `ssh://user@host:port`, or `user@host:port`, which is saved as
+`ssh://user@host:port` (the form ssh reads a port from). The first time,
+SSH may not know the host's key yet: it runs the engine's own `ssh` command in this terminal
+(`connections.ssh.authorizationCommand`, `StrictHostKeyChecking=ask`) so you can compare the
+fingerprint with the host's (`ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` there), then
+tries again. When no key this device offers is accepted, it runs the key setup
+(`connections.ssh.keySetupCommand`), which installs this device's Silo key there over SSH (SSH may
+ask for the password), then tries again. Each repair runs at most once, a changed host key is
+never trusted from here, and without a terminal the command is printed instead. A device that
+already accepts one of your own SSH keys connects without either step, as in the app.
+
+`--host-key` trusts the host's SSH key without asking: it is added to `~/.ssh/known_hosts`
+under the name ssh looks up (`host`, or `[host]:port` off port 22) before connecting. A
+`SHA256:` fingerprint, as `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` prints it on the
+host, is matched against the keys the host offers (`ssh-keyscan`); a key or a `.pub` file is
+taken as given. A fingerprint that matches nothing is refused with the fingerprints the host
+does offer, and a different key of that type already listed for that name, found with
+`ssh-keygen -F` (so hashed `|1|` names count), is reported, never replaced (`ssh-keygen -R`); a
+key `known_hosts` marks `@revoked` is refused. The address is checked with the engine's rules
+before `ssh-keyscan` runs. The fingerprint you type is the trust root: Silo checks the host only
+against it. It does not read `ssh_config`, so for an alias whose `HostName` differs, pin
+the key yourself or use the host's name.
+
+When the host accepts no password and none of your keys, authorize this device's key on the
+host instead: `silo devices key` prints it (`connections.keys.own`, made on first use), then
+on the host `silo host init --authorize '<key>'`, then `silo devices add` here. With both,
+nothing asks a question, which is how a script adds a host:
+
+```sh
+# controller
+silo --json devices key | python3 -c 'import json,sys; print(json.load(sys.stdin)["publicKey"])' > controller.pub
+# host (controller.pub copied there)
+silo --json host init --authorize controller.pub
+# controller (the fingerprint read on the host)
+silo --json devices add ada@build-box:22 --host-key SHA256:... < /dev/null
+```
+
+`app/SiloUI/scripts/hosts-e2e.sh` does this with two accounts on one Linux machine (the
+`linux-host.yml` workflow runs it on its KVM runner): it prepares the host, adds it by
+`127.0.0.1`, makes, starts and drops an `e2e-hosts-*` computer there with `--device`, and
+removes the host again, cleaning up after a failure.
+
+`silo devices list` shows the saved devices with their last health check, and
+`silo devices remove <device>` removes one, as in the app: the engine forgets it only after the
+host removed every Silo key this device installed there or found none left. A key this device
+used before (a rotated one) is refused by a host that can tell keys apart, and the removal stops
+with that message; remove such a key on the host with `silo host revoke`. `silo host` and
+`silo devices` refuse `--device`.
 
 ## Project files
 

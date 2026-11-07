@@ -314,7 +314,17 @@ pub(crate) fn key(path: &Path) -> Result<(), String> {
             "-f",
         ])
         .arg(path);
-    run(&mut command, Duration::from_secs(5))
+    run(&mut command, Duration::from_secs(5))?;
+    // ssh-keygen relies on its umask for the key's mode, which a default ACL on the directory
+    // overrides (the file then gets the ACL's 0644, and ssh-keygen -y refuses to read it).
+    let metadata = fs::symlink_metadata(path).map_err(|_| FAILED)?;
+    if !metadata.is_file() || metadata.file_type().is_symlink() {
+        return Err(FAILED.into());
+    }
+    if metadata.permissions().mode() & 0o077 != 0 {
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600)).map_err(|_| FAILED)?;
+    }
+    Ok(())
 }
 
 pub(crate) fn public_key(path: &Path) -> Result<String, String> {
@@ -719,10 +729,20 @@ fn run(command: &mut Command, timeout: Duration) -> Result<(), String> {
 }
 
 fn run_with_stdout(command: &mut Command, timeout: Duration, stdout: Stdio) -> Result<(), String> {
+    // On Linux, where no app shows a log, the tool's first error line goes with the failure.
+    #[cfg(target_os = "linux")]
+    let mut errors = tempfile::tempfile().ok();
+    #[cfg(target_os = "linux")]
+    let stderr = errors
+        .as_ref()
+        .and_then(|file| file.try_clone().ok())
+        .map_or_else(Stdio::null, Stdio::from);
+    #[cfg(not(target_os = "linux"))]
+    let stderr = Stdio::null();
     let mut child = applications::launch::sanitize_child(command)
         .stdin(Stdio::null())
         .stdout(stdout)
-        .stderr(Stdio::null())
+        .stderr(stderr)
         .spawn()
         .map_err(|_| FAILED)?;
     let deadline = Instant::now() + timeout;
@@ -732,6 +752,10 @@ fn run_with_stdout(command: &mut Command, timeout: Duration, stdout: Stdio) -> R
                 return if status.success() {
                     Ok(())
                 } else {
+                    #[cfg(target_os = "linux")]
+                    if let Some(line) = errors.as_mut().and_then(first_error_line) {
+                        return Err(format!("{FAILED} {line}"));
+                    }
                     Err(FAILED.into())
                 }
             }
@@ -743,6 +767,23 @@ fn run_with_stdout(command: &mut Command, timeout: Duration, stdout: Stdio) -> R
             }
         }
     }
+}
+
+#[cfg(target_os = "linux")]
+fn first_error_line(file: &mut fs::File) -> Option<String> {
+    let mut text = String::new();
+    file.seek(SeekFrom::Start(0)).ok()?;
+    file.take(4096).read_to_string(&mut text).ok()?;
+    let line: String = text
+        .lines()
+        .map(str::trim)
+        // Skip OpenSSH's banner frame (lines of `@`) to reach the line that says what failed.
+        .find(|line| !line.is_empty() && !line.starts_with('@'))?
+        .chars()
+        .filter(|character| !character.is_control())
+        .take(300)
+        .collect();
+    Some(line)
 }
 
 pub(crate) fn validate_public_key(public: &str) -> Result<(), String> {
@@ -1681,6 +1722,43 @@ mod tests {
             fs::read_to_string(dir.path().join("id_ed25519.pub")).unwrap(),
             public
         );
+    }
+
+    /// A default ACL on the directory overrides ssh-keygen's umask, so the new key starts
+    /// out 0644 and would be refused by ssh-keygen -y.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_key_generated_under_a_default_acl_is_private() {
+        use std::os::unix::ffi::OsStrExt;
+        let dir = tempfile::tempdir().unwrap();
+        // posix_acl_xattr v2: user::rw-, group::r--, other::r--.
+        let mut acl = 2u32.to_le_bytes().to_vec();
+        for (tag, perm) in [(0x01u16, 6u16), (0x04, 4), (0x20, 4)] {
+            acl.extend(tag.to_le_bytes());
+            acl.extend(perm.to_le_bytes());
+            acl.extend(u32::MAX.to_le_bytes());
+        }
+        let directory = std::ffi::CString::new(dir.path().as_os_str().as_bytes()).unwrap();
+        let set = unsafe {
+            libc::setxattr(
+                directory.as_ptr(),
+                c"system.posix_acl_default".as_ptr(),
+                acl.as_ptr().cast(),
+                acl.len(),
+                0,
+            )
+        };
+        if set != 0 {
+            eprintln!("skipped: this file system takes no default ACL");
+            return;
+        }
+        let path = dir.path().join("id_ed25519");
+        key(&path).unwrap();
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        validate_public_key(&public_key(&path).unwrap()).unwrap();
     }
 
     #[test]

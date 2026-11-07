@@ -99,6 +99,17 @@ impl Channel {
         format!("{}.engine", self.identifier())
     }
 
+    /// The link under `~/.local/bin` that puts this channel's `silo` command on PATH (the
+    /// engine's `Channel::cli_link_name`).
+    pub fn cli_link_name(self) -> &'static str {
+        self.pick("silo", "silo-dev")
+    }
+
+    /// The link under `~/.local/bin` that a controller's forced SSH command runs.
+    pub fn remote_bridge_name(self) -> &'static str {
+        self.pick("silo-remote", "silo-remote-dev")
+    }
+
     /// The LaunchAgent plist name inside the calling bundle.
     pub fn launch_agent_plist(self) -> String {
         format!("{}.plist", self.engine_bundle_identifier())
@@ -109,6 +120,22 @@ impl Channel {
 mod tests {
     use super::*;
 
+    /// The CLI links and checks these names; the engine writes them (`silo_host::channel`).
+    #[test]
+    fn link_names_match_the_engines() {
+        for (client, host) in [
+            (Channel::Production, silo_host::channel::Channel::Production),
+            (
+                Channel::Development,
+                silo_host::channel::Channel::Development,
+            ),
+        ] {
+            assert_eq!(client.identifier(), host.identifier());
+            assert_eq!(client.cli_link_name(), host.cli_link_name());
+            assert_eq!(client.remote_bridge_name(), host.remote_bridge_name());
+        }
+    }
+
     #[test]
     fn names_match_the_released_channels() {
         let (p, d) = (Channel::Production, Channel::Development);
@@ -117,6 +144,11 @@ mod tests {
         assert_eq!(d.product_name(), "Silo Dev");
         assert_eq!(p.launch_agent_plist(), "org.silo.preview.engine.plist");
         assert_eq!(d.launch_agent_plist(), "org.silo.dev.engine.plist");
+        assert_eq!((p.cli_link_name(), d.cli_link_name()), ("silo", "silo-dev"));
+        assert_eq!(
+            (p.remote_bridge_name(), d.remote_bridge_name()),
+            ("silo-remote", "silo-remote-dev")
+        );
         let home = Path::new("/h");
         assert_eq!(p.engine_socket(home), Path::new("/h/.silo/engine.sock"));
         assert_eq!(p.engine_directory(home), Path::new("/h/.silo/engine"));

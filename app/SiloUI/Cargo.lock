@@ -5004,6 +5004,7 @@ dependencies = [
  "serde",
  "serde_json",
  "silo-api",
+ "silo-host",
  "tempfile",
  "tokio",
  "uuid",
