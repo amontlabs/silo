@@ -56,4 +56,39 @@ Plan: [PLAN.md](PLAN.md).
 
 ## Decisions
 
+Design questions: [DESIGN-QUESTIONS.md](DESIGN-QUESTIONS.md). Advised by Fable 5.1 and the advisor
+(gemini-4-argon), 7 Nov 2026.
+
+- **Q1, fork source (open, waits for F1 numbers and the owner).** Both advisors: forks never use
+  memory, so fork and warm checkpoints become disk-only, and `fresh_warm`, the 60 s limit and the
+  generation counter go (a guess at whether main changed, wrong for plain `ssh`). They differ on the
+  default: Fable says "fork = main as it is now" with a disk-only capture each time; the advisor says
+  "fork = main's newest saved checkpoint" with a line naming its age and `--now` to capture. The
+  owner's brief asks for the saved checkpoint by default. F1 measures what a capture costs; the
+  choice goes to the owner with those numbers.
+- **Q2, desktop (open, with Q1).** Fable: `desktop: false` is a property of the computer (recipe
+  field), inherited by forks; `--gui` and computer use refuse a computer without one. Advisor: forks
+  boot without a desktop and start it on demand when `--gui` or computer use asks.
+- **Q3, keeping an imported computer:** the export carries the computer's fork-time record when it
+  has one; import stores it as the imported computer's fork-time record, so `silo fold --into main` is
+  an ordinary three-way keep. A computer without one (a main) imports as its own computer and cannot be
+  kept into another. Both advisors.
+- **Q4, guest image:** exports stop embedding the guest image (no `--with-image`); import already
+  refuses an archive whose image digest differs from this Silo's pinned image (`backup.rs` import
+  checks), so the embedded copy is never used. The receiver needs the same pinned image, prepared as for
+  a new computer. Fable; the advisor's "pull any digest from the registry" adds an offline failure mode
+  for a case import refuses anyway.
+- **Q5, export from another machine:** export on the owning machine into a Silo-owned temporary file,
+  copy it over the existing Connections SSH link, then remove the remote file; leftovers are named so a
+  later run removes them. Both advisors.
+- **Q6, runner helper:** shell out to `silo --json` (it already handles the protocol, job polling,
+  channels and `--device` routing); one scale set per recipe label; the runner is named after its
+  computer (GitHub shows the runner name on every job page, so no hook is needed); the JIT config goes in
+  through the environment (`ACTIONS_RUNNER_INPUT_JITCONFIG`), never the command line; on success
+  deregister then delete, on failure deregister then stop and keep, with a cap on how many failed
+  computers are kept and for how long; macOS capacity counts every running macOS VM on the Mac. Both
+  advisors (the advisor's job-started hook is dropped for the runner name).
+- **Login warning:** add Claude Code (`~/.claude/.credentials.json`) and other agent logins to the
+  credential patterns; the export check scans the computer's files and its fork-time record.
+
 ## Status
