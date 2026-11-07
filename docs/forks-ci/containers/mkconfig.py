@@ -6,7 +6,7 @@
         [--memory BYTES] [--cpus N] [--pids N]
 
 crun runs inside the outer user namespace of userns.py, so the ids below are that namespace's: container
-0..65535 maps to 0..65535 there (the caller's uid, then its sub-id range).
+0 maps to 0 there (the caller's uid) and 1..65535 to 1..65535 (its sub-id range), as two ranges.
 """
 import argparse
 import json
@@ -98,8 +98,9 @@ def main():
         ],
         'linux': {
             'namespaces': [{'type': t} for t in ('pid', 'network', 'ipc', 'uts', 'mount', 'user', 'cgroup')],
-            'uidMappings': [{'containerID': 0, 'hostID': 0, 'size': 65536}],
-            'gidMappings': [{'containerID': 0, 'hostID': 0, 'size': 65536}],
+            # Split at the outer namespace's own boundary: the kernel maps a range only inside one extent of the parent.
+            'uidMappings': [{'containerID': 0, 'hostID': 0, 'size': 1}, {'containerID': 1, 'hostID': 1, 'size': 65535}],
+            'gidMappings': [{'containerID': 0, 'hostID': 0, 'size': 1}, {'containerID': 1, 'hostID': 1, 'size': 65535}],
             'cgroupsPath': a.cgroup,
             'resources': {'memory': {'limit': a.memory},
                           'cpu': {'quota': int(a.cpus * 100000), 'period': 100000},

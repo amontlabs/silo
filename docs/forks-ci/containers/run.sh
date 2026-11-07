@@ -8,7 +8,7 @@
 # C1_OUT (evidence directory, default $C1_WORK/evidence).
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
-SECTIONS=${SECTIONS:-facts debug}
+SECTIONS=${SECTIONS:-facts sec cold ten fork net desktop work}
 RUNS=${RUNS:-3}
 TEN=${TEN:-10}
 : > "$OUT/results.tsv"
