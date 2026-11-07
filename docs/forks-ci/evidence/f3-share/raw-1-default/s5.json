@@ -1,0 +1,133 @@
+{
+  "baseCapturedAt": "2026-11-07T22:19:08.707699Z",
+  "baselineApplied": false,
+  "baselineAvailable": false,
+  "capturedAt": "2026-11-07T22:19:50.805596Z",
+  "code": [],
+  "credentialsUsed": {
+    "blocked": [],
+    "used": []
+  },
+  "database": [],
+  "format": 1,
+  "home": "/root",
+  "idle_noise": [],
+  "ignored": {
+    "paths": [
+      "/etc/hostname",
+      "/etc/hosts",
+      "/etc/resolv.conf",
+      "/home/silo/.config/pulse/dd8e791f03504d36b746bb39f70b8e8f-default-sink",
+      "/home/silo/.config/pulse/dd8e791f03504d36b746bb39f70b8e8f-default-source"
+    ],
+    "pruned_trees": []
+  },
+  "not_kept": {
+    "credential_details": {
+      "/home/silo/.claude/.credentials.json": [
+        {
+          "after": {
+            "hash": "13a08d54e2e83980e1e4c3e01d7cacbe2915005725c0de5147fdf66b5166ea82",
+            "kind": "file",
+            "size": "28"
+          },
+          "before": null,
+          "change": "added",
+          "path": "/home/silo/.claude/.credentials.json"
+        }
+      ]
+    },
+    "credentials": {
+      "/home/silo/.claude/.credentials.json": [
+        "/home/silo/.claude/.credentials.json"
+      ]
+    },
+    "listening": [],
+    "processes": [],
+    "services": []
+  },
+  "other": [
+    {
+      "after": {
+        "hash": "befcea71d2c552fd60ebfd7772b087de5148061f12f635353241c495576c933f",
+        "kind": "file",
+        "size": "7"
+      },
+      "before": null,
+      "change": "added",
+      "path": "/home/silo/share-conflict.txt"
+    },
+    {
+      "after": {
+        "hash": "b9ef9055297503d2e428ebbbffd236a7986ec15f9e9b7c7e5bd206162766d3f0",
+        "kind": "file",
+        "size": "16"
+      },
+      "before": null,
+      "change": "added",
+      "path": "/home/silo/share-marker.txt"
+    }
+  ],
+  "packages": [],
+  "repo_changes": [],
+  "repo_files": [],
+  "reviewDigest": "708ebaf656360ac79ab1fb7ea22006fa07f23dd62058225aa47032ee94953455",
+  "settings": {
+    "cron": [],
+    "files": [
+      {
+        "after": {
+          "hash": "be2ac262b3c465f5d3badd1301f324090c882774f0da6a026bd961295bc9246c",
+          "kind": "file",
+          "size": "184554"
+        },
+        "before": {
+          "hash": "1e656e3fe938c9ccca6e738464b43cfc9377b1129e6502382c3be63652d43031",
+          "kind": "file",
+          "size": "183919"
+        },
+        "change": "modified",
+        "path": "/etc/ssl/certs/ca-certificates.crt"
+      },
+      {
+        "after": {
+          "hash": "d8e06f085737f97b07c0994e6a2c0dc4a89d0b0a323467e73dd3b8f288e33ed6",
+          "kind": "file",
+          "size": "460"
+        },
+        "before": {
+          "hash": "c8ffe6bff24301d4af54587d870cbbc10b81b70eefa1c012756d80ebb0a3a677",
+          "kind": "file",
+          "size": "460"
+        },
+        "change": "modified",
+        "path": "/home/silo/.dbus/session-bus/dd8e791f03504d36b746bb39f70b8e8f-1"
+      }
+    ],
+    "launch_agents": [],
+    "services": []
+  },
+  "summary": [
+    {
+      "bucket": "Settings & files",
+      "lines": [
+        "~ /etc/ssl/certs/ca-certificates.crt",
+        "~ /home/silo/.dbus/session-bus/dd8e791f03504d36b746bb39f70b8e8f-1"
+      ]
+    },
+    {
+      "bucket": "Other changed",
+      "lines": [
+        "+ /home/silo/share-conflict.txt",
+        "+ /home/silo/share-marker.txt"
+      ]
+    },
+    {
+      "bucket": "Not kept",
+      "lines": [
+        "credentials: /home/silo/.claude/.credentials.json"
+      ]
+    }
+  ],
+  "text": "Settings & files\n  ~ /etc/ssl/certs/ca-certificates.crt\n  ~ /home/silo/.dbus/session-bus/dd8e791f03504d36b746bb39f70b8e8f-1\nOther changed\n  + /home/silo/share-conflict.txt\n  + /home/silo/share-marker.txt\nNot kept\n  credentials: /home/silo/.claude/.credentials.json\nIgnored: 5 paths (caches, logs, build output)"
+}

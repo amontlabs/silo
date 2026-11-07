@@ -181,3 +181,27 @@ describe("export file check", () => {
     production.dispose()
   })
 })
+
+describe("logins found before an export", () => {
+  it("asks the engine for the computer and its checkpoint and returns the list", async () => {
+    const native = bridge(async () => "op-1")
+    const reply = { logins: ["a Claude Code login (/root/.claude/.credentials.json)"], checked: ["disk"] }
+    const invoke = native.invoke.getMockImplementation()!
+    native.invoke.mockImplementation(async (command, args) => command === "check_export_logins" ? reply : invoke(command, args))
+    const production = createProductionSource(native.bridge)
+    await production.initialize()
+    await expect(production.backupActions.checkLogins("dev", "cp-1")).resolves.toEqual({ logins: reply.logins })
+    expect(native.invoke).toHaveBeenCalledWith("check_export_logins", { computer: "dev", checkpointId: "cp-1" })
+    production.dispose()
+  })
+
+  it("refuses an answer in an unknown shape", async () => {
+    const native = bridge(async () => "op-1")
+    const invoke = native.invoke.getMockImplementation()!
+    native.invoke.mockImplementation(async (command, args) => command === "check_export_logins" ? { logins: "none" } : invoke(command, args))
+    const production = createProductionSource(native.bridge)
+    await production.initialize()
+    await expect(production.backupActions.checkLogins("dev")).rejects.toThrow()
+    production.dispose()
+  })
+})

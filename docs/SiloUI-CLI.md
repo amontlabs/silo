@@ -91,8 +91,72 @@ A fork publishes the ports its source publishes (a recipe fork, the recipe's `po
 | `silo --in-guest <list\|tree\|status\|fork\|diff\|fold --request\|requests\|steps>` | run inside a computer with its token: fork itself, diff and request review of its forks; never keeps, promotes, undoes or drops |
 | `silo host init [--authorize KEY\|FILE]...` / `silo host status` / `silo host revoke FINGERPRINT\|KEY\|FILE` | prepare this machine to host computers for other devices, show how it is set up, or stop accepting a controller's key ([details](#hosting-computers-for-other-devices)) |
 | `silo devices add <address> [--host-key FINGERPRINT\|KEY\|FILE] [--replace]` / `list` / `remove <device>` / `key` | connect, list or remove the devices this one manages, or print this device's Silo key ([details](#hosting-computers-for-other-devices)) |
+| `silo export <computer> [-o FILE] [--checkpoint ID\|NAME] [--yes]` | save a whole computer as a `.silo-backup` file to share; logins found on it are named first ([details](#sharing-a-computer-as-a-file)) |
+| `silo import FILE [--name NAME]` | add the computer in an export file as a new, stopped computer |
 | `silo job <id>` | wait for a job that is already running |
 | `silo mcp` | serve the MCP tools on stdio |
+
+## Sharing a computer as a file
+
+```sh
+silo export main -o ~/Desktop/main.silo-backup       # a Linux or macOS computer, running or stopped
+silo import ~/Desktop/main.silo-backup --name friend-main
+silo start friend-main
+silo fold friend-main --into main                    # bring its work into your own main
+```
+
+`silo export` writes the whole computer: its disks, settings and (for a fork) the fork-time
+record. Without `-o` the file is `<computer>-<date>.silo-backup` in the current folder, and an
+existing file is never replaced. `--checkpoint` exports a saved point of the computer (its id or
+name) instead of its current state. A running computer is captured in place; it is not stopped.
+
+The receiver gets a **new computer** with its own id, stopped, on a deny-all network policy, with
+no secrets, ports or published URLs. `silo import` names it after the sender's computer, or with
+`-imported` added when that name is taken; `--name` chooses. The guest image is not in the file
+when the computer uses the image this Silo pins: the receiving Silo prepares the same image the
+way it does for a new computer (a download when it is not on the device), and refuses a file that
+names another image than its own. Files made before this change carry their image and import as
+before.
+
+**Bringing the work into your main.** If the exported computer was a fork, the file carries its
+fork-time record, so the imported computer keeps the way any fork does: `silo diff` shows what
+the sender changed since forking, and `silo fold <imported> --into main` is an ordinary
+three-way keep against your main (a file changed on both sides is a conflict and nothing is
+kept). The record does not say which computer it was forked from on your side, so `silo fold`
+without `--into` answers that Silo does not know where it was forked from. A computer that was
+not a fork (a `main`) imports as its own computer and has nothing to keep.
+
+**Logins.** Before it writes anything, `silo export` lists the logins on the computer: the
+agent and tool logins Silo knows (a Claude Code login, `~/.claude/.credentials.json`; a Codex
+login, `~/.codex/auth.json`; a Gemini CLI login, `~/.gemini/gemini-credentials.json` or the older `~/.gemini/oauth_creds.json`; a GitHub CLI login,
+`gh/hosts.yml`), cloud and registry credentials, SSH private keys and key files, found on the
+computer's disk and in its fork-time record. When it finds any it asks:
+
+```text
+This computer contains a Claude Code login (/root/.claude/.credentials.json). Share anyway? [y/N]
+```
+
+It asks the same question when it **could not check**: the computer is stopped (a check never
+starts it, so its disk is not listed; only its fork-time record is), the export is of a
+checkpoint (the live disk is not the checkpoint's, so only the record is checked), or the check
+failed. Then the question names the reason:
+
+```text
+Silo could not check main for logins (the computer is stopped, so its files were not listed; start it to check them). Share anyway? [y/N]
+```
+
+If logins were found and part of the computer could not be checked, both are in one question
+("... Silo could not check main for other logins (...)"). The app asks the same in a dialog
+before the folder picker. Without a terminal `silo export` refuses unless `--yes` is passed.
+Nothing is filtered or removed: a yes puts the files in the export, and anyone with the file can
+use them. The disk is listed with one change capture (the same walk `silo diff` does, over
+`/etc`, `/root`, `/home`, `/usr/local`, `/opt` and `/srv`; a macOS computer's home folder).
+`--json` prints `{computer, archive, size, checkpoint, logins, unchecked}`; `unchecked` is the
+reason when Silo could not check (also with `--yes`) and `null` when it did.
+
+`--device` is refused for now: export and import work on this device. The MCP server has no export
+or import tool: both read and write files at paths the caller chooses, and the file can hold the
+computer's logins, so they stay a decision of the person at the terminal.
 
 ## Several forks and commands
 

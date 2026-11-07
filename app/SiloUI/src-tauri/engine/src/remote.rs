@@ -438,6 +438,7 @@ pub const OWNER_METHODS: &[(&str, bool)] = &[
     ("device.dependencies", false),
     ("device.facts", false),
     ("exports.acknowledge", true),
+    ("exports.check", true),
     ("exports.create", true),
     ("exports.destination.set", true),
     ("exports.dismiss", true),

@@ -5,7 +5,7 @@ import type { ApplicationSource } from "@/features/application/model/application
 
 export const backupFixtureModes = [
   "success", "backup-failed", "invalid-archive", "restore-failed",
-  "unsupported-storage", "space-blocked", "stop-failed", "capture-failed", "cancel-backup",
+  "unsupported-storage", "space-blocked", "stop-failed", "capture-failed", "cancel-backup", "logins-found",
   "restore-conflict", "restore-storage", "cancel-restore",
 ] as const
 export type BackupFixtureMode = (typeof backupFixtureModes)[number]
@@ -123,6 +123,11 @@ export function useBackupFixture({ source, previewMode = "success", onRestoreCom
       operation: running ? { kind: "running", operation: running.operation, archive: running.archive, runningNames: running.runningNames, ...(running.targetName && { targetName: running.targetName }), progress: 18 + running.step * 25, phases: phasesFor(running.operation, running.step) } : result,
     },
     actions: {
+      async checkLogins() {
+        return previewMode === "logins-found"
+          ? { logins: ["a Claude Code login (/root/.claude/.credentials.json)", "a GitHub CLI login (/root/.config/gh/hosts.yml)"] }
+          : { logins: [] }
+      },
       async chooseDestination() { return source.backup.destination },
       async chooseArchive() {
         const archive = { ...initialBackupArchive(source), name: "dev.silo-backup", archivePath: "/selected/dev.silo-backup", destination: "Selected file", completedLabel: "Selected export file", size: "12.4 GiB" }
@@ -159,6 +164,7 @@ export function useUnavailableBackup(source: ApplicationSource): BackupControlle
   return {
     state: { snapshotId: JSON.stringify(source.backup), availability: "unavailable", availabilityMessage: "Export and import are not available in this Silo build. No computer data was changed.", requiredSpaceGB: 0, archives: [], operation: null },
     actions: {
+      checkLogins: async () => ({ logins: [] }),
       chooseDestination: async () => null,
       chooseArchive: async () => null,
       inspectArchive: async (selection) => ({ archive: selection, valid: false, reason: "Import validation is unavailable in this Silo build." }),

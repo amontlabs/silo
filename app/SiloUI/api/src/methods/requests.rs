@@ -492,6 +492,11 @@ pub fn exports_acknowledge(params: exports::ExportAcknowledgeParams) -> Request<
     Request::new(MethodParams::ExportsAcknowledge(params))
 }
 
+/// `exports.check`
+pub fn exports_check(params: exports::ExportCheckParams) -> Request<kind::Job> {
+    Request::new(MethodParams::ExportsCheck(params))
+}
+
 /// `exports.create`
 pub fn exports_create(params: exports::ExportCreateParams) -> Request<kind::Job> {
     Request::new(MethodParams::ExportsCreate(params))

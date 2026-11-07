@@ -167,6 +167,10 @@ pub enum Command {
     /// Add, list or remove the devices whose computers this one manages (Connections).
     #[command(subcommand)]
     Devices(crate::hosts::DevicesCommand),
+    /// Save a whole computer as a file to share. Logins found on it are named first.
+    Export(ExportCommand),
+    /// Add the computer in an export file as a new, stopped computer.
+    Import(ImportCommand),
     /// Wait for a job that is already running, by id.
     Job { id: String },
     /// Serve the MCP tools on stdio.
@@ -217,6 +221,29 @@ pub struct UpCommand {
     /// The recipe `main` is made from when it does not exist (default linux-dev).
     #[arg(long, value_name = "NAME")]
     pub recipe: Option<String>,
+}
+
+#[derive(Args, Debug)]
+pub struct ExportCommand {
+    pub computer: String,
+    /// Where to write the file (default: <computer>-<date>.silo-backup here).
+    #[arg(short = 'o', long, value_name = "FILE")]
+    pub output: Option<PathBuf>,
+    /// Export this checkpoint of the computer (its id or name) instead of its current state.
+    #[arg(long, value_name = "CHECKPOINT")]
+    pub checkpoint: Option<String>,
+    /// Share without asking when logins are found or Silo could not check for them.
+    #[arg(long)]
+    pub yes: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct ImportCommand {
+    /// The .silo-backup file.
+    pub file: PathBuf,
+    /// The new computer's name (default: the sender's, else with -imported added).
+    #[arg(long, value_name = "NAME")]
+    pub name: Option<String>,
 }
 
 #[derive(Subcommand, Debug)]
@@ -711,6 +738,11 @@ fn refuse_on_device(command: &Command, engine: &Engine) -> Result<(), CliError> 
     if engine.device().is_none() {
         return Ok(());
     }
+    if matches!(command, Command::Export(_) | Command::Import(_)) {
+        return Err(CliError::new(
+            "silo export and silo import work on this device for now, so --device cannot be used with them yet.",
+        ));
+    }
     let what = match command {
         Command::Up(_) => "up",
         Command::Ports { .. } => "ports",
@@ -1162,6 +1194,34 @@ async fn dispatch(
             let home = access::home_dir()?;
             let value = access::ssh_setup(engine, &computer, &home, build_channel()).await?;
             emit(json, &value, render::ssh);
+        }
+        Command::Export(export) => {
+            let args = crate::share::ExportArgs {
+                computer: export.computer,
+                output: export.output,
+                checkpoint: export.checkpoint,
+                yes: export.yes,
+            };
+            let value = crate::share::export(
+                engine,
+                &args,
+                working_directory,
+                &crate::share::Terminal,
+                progress,
+            )
+            .await?;
+            emit(json, &value, render::exported);
+        }
+        Command::Import(import) => {
+            let value = crate::share::import(
+                engine,
+                &import.file,
+                import.name.as_deref(),
+                working_directory,
+                progress,
+            )
+            .await?;
+            emit(json, &value, render::imported);
         }
         Command::Checkpoints { computer } => emit(
             json,

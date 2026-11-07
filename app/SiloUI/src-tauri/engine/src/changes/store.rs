@@ -76,6 +76,17 @@ pub fn now() -> String {
         .unwrap_or_default()
 }
 
+/// `text` when it is an RFC 3339 time from 2020 to a day from now, else now: what an archive
+/// says about when its record was captured is only the sender's word.
+fn plausible_capture_time(text: &str) -> String {
+    const FROM_2020: i64 = 1_577_836_800;
+    let now_seconds = time::OffsetDateTime::now_utc().unix_timestamp();
+    match unix_seconds(text) {
+        Some(seconds) if (FROM_2020..=now_seconds + 86_400).contains(&seconds) => text.to_owned(),
+        _ => now(),
+    }
+}
+
 /// Seconds since the Unix epoch of an RFC 3339 time.
 pub fn unix_seconds(text: &str) -> Option<i64> {
     time::OffsetDateTime::parse(text, &time::format_description::well_known::Rfc3339)
@@ -211,6 +222,49 @@ impl Store {
             .map_err(|e| e.to_string())
             .and_then(|bytes| serde_json::from_slice(&bytes).map_err(|e| e.to_string()))?;
         Ok(Some((manifest, meta)))
+    }
+
+    /// The stored fork-time record of `computer` as the file it is kept in, with what is
+    /// recorded beside it; `None` when there is none.
+    pub fn stored_base(&self, computer: &str) -> Result<Option<(PathBuf, Meta)>, String> {
+        let directory = self.computer_dir(computer)?;
+        let path = directory.join("base.tsv.gz");
+        if !path.is_file() {
+            return Ok(None);
+        }
+        let meta = fs::read(directory.join("base.json"))
+            .map_err(|e| e.to_string())
+            .and_then(|bytes| serde_json::from_slice(&bytes).map_err(|e| e.to_string()))?;
+        Ok(Some((path, meta)))
+    }
+
+    /// Stores a fork-time record that came with an imported computer. It names no source and
+    /// no origin: where it is kept to is the receiver's to say. The record counts come from the
+    /// parsed manifest, never from the file's metadata, and a time that is not a plausible
+    /// capture time is replaced by now.
+    pub fn put_imported_base(
+        &self,
+        computer: &str,
+        gzipped: &Path,
+        captured_at: &str,
+    ) -> Result<(), String> {
+        let directory = self.computer_dir(computer)?;
+        let manifest = read_gz_limited(gzipped, MAX_IMPORTED_BYTES)?;
+        super::manifest::Manifest::parse(&manifest).map_err(|e| e.to_string())?;
+        let meta = Meta {
+            captured_at: plausible_capture_time(captured_at),
+            source: None,
+            origin: None,
+            source_step: None,
+            records: manifest.lines().count() as u64,
+            bytes: manifest.len() as u64,
+        };
+        let _ = fs::remove_file(directory.join("base-error.txt"));
+        write_gz(&directory.join("base.tsv.gz"), &manifest)?;
+        write_atomic(
+            &directory.join("base.json"),
+            &serde_json::to_vec(&meta).map_err(|e| e.to_string())?,
+        )
     }
 
     /// Caches the manifests of an idle fork under its source: the base it was forked from and
@@ -381,6 +435,24 @@ fn write_gz(path: &Path, text: &str) -> Result<(), String> {
     write_atomic(path, &encoder.finish().map_err(|e| e.to_string())?)
 }
 
+/// The most an imported fork-time record may hold once decompressed. A capture of a computer
+/// accepts the same (`collect::Options::max_manifest_bytes`), so a lower limit would refuse
+/// records the engine itself made.
+const MAX_IMPORTED_BYTES: u64 = 512 * 1024 * 1024;
+
+fn read_gz_limited(path: &Path, limit: u64) -> Result<String, String> {
+    let file = fs::File::open(path).map_err(|e| e.to_string())?;
+    let mut text = String::new();
+    let read = flate2::read::GzDecoder::new(file)
+        .take(limit + 1)
+        .read_to_string(&mut text)
+        .map_err(|_| "The fork-time record in the file is not readable.".to_owned())?;
+    if read as u64 > limit {
+        return Err("The fork-time record in the file is too large.".into());
+    }
+    Ok(text)
+}
+
 fn read_gz(path: &Path) -> Result<Option<String>, String> {
     let bytes = match fs::read(path) {
         Ok(bytes) => bytes,
@@ -425,6 +497,76 @@ mod tests {
         store.remove_computer("c1").unwrap();
         assert_eq!(store.get("c1", Slot::Base).unwrap(), None);
         assert!(store.get("c2", Slot::Base).unwrap().is_some());
+    }
+
+    #[test]
+    fn an_imported_record_is_stored_without_a_source_and_read_back_as_the_stored_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(dir.path().join("store"));
+        let sender = Store::new(dir.path().join("sender"));
+        sender
+            .put(
+                "s1",
+                Slot::Base,
+                "META\tformat\t2\nF\t/a\t1\t1\tx\n",
+                Some("cp1"),
+            )
+            .unwrap();
+        let (file, meta) = sender.stored_base("s1").unwrap().unwrap();
+        assert_eq!(sender.stored_base("none").unwrap(), None);
+        store
+            .put_imported_base("r1", &file, &meta.captured_at)
+            .unwrap();
+        let (text, read) = store.get("r1", Slot::Base).unwrap().unwrap();
+        assert_eq!(text, "META\tformat\t2\nF\t/a\t1\t1\tx\n");
+        assert_eq!((read.source, read.origin, read.records), (None, None, 2));
+        assert_eq!(read.captured_at, meta.captured_at);
+    }
+
+    #[test]
+    fn an_imported_record_is_counted_from_its_manifest_and_a_wild_capture_time_is_replaced() {
+        use std::io::Write;
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(dir.path().join("store"));
+        let file = dir.path().join("base.tsv.gz");
+        let text = "META\tformat\t2\nF\t/a\t1\t1\tx\nF\t/b\t1\t1\ty\n";
+        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        encoder.write_all(text.as_bytes()).unwrap();
+        std::fs::write(&file, encoder.finish().unwrap()).unwrap();
+        for (given, kept) in [
+            ("2026-11-07T10:00:00Z", true),
+            ("1970-01-01T00:00:00Z", false),
+            ("9999-01-01T00:00:00Z", false),
+            ("yesterday", false),
+            ("", false),
+        ] {
+            store.put_imported_base("r1", &file, given).unwrap();
+            let (_, meta) = store.get("r1", Slot::Base).unwrap().unwrap();
+            assert_eq!((meta.records, meta.bytes), (3, text.len() as u64));
+            assert_eq!(
+                meta.captured_at == given,
+                kept,
+                "{given}: {}",
+                meta.captured_at
+            );
+            assert!(unix_seconds(&meta.captured_at).is_some());
+        }
+    }
+
+    #[test]
+    fn an_imported_record_that_is_not_a_manifest_is_refused_and_stores_nothing() {
+        use std::io::Write;
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(dir.path().join("store"));
+        let bad = dir.path().join("bad.gz");
+        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        encoder.write_all(b"F\t/only-one-field\n").unwrap();
+        std::fs::write(&bad, encoder.finish().unwrap()).unwrap();
+        assert!(store.put_imported_base("r1", &bad, "t").is_err());
+        std::fs::write(&bad, b"not gzip").unwrap();
+        assert!(store.put_imported_base("r1", &bad, "t").is_err());
+        assert_eq!(store.get("r1", Slot::Base).unwrap(), None);
+        assert!(store.put_imported_base("../x", &bad, "t").is_err());
     }
 
     #[test]

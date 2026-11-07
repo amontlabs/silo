@@ -873,6 +873,61 @@ fn a_divergent_keep_stops_before_anything_changes() {
     assert_eq!(journal.pending("main").unwrap(), None);
 }
 
+/// The fork-time record an export carried, stored for an imported computer and read back the way
+/// a keep reads it, as the base of a store whose fork and main are the given captures.
+fn store_from_imported_record(sender_base: &str, fork: &str, main: &str) -> Store {
+    use crate::changes::store::{Slot, Store as Stored};
+    use std::io::Write;
+    let dir = tempfile::tempdir().unwrap();
+    let archive_copy = dir.path().join("base.tsv.gz");
+    let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    encoder.write_all(mt(sender_base).as_bytes()).unwrap();
+    std::fs::write(&archive_copy, encoder.finish().unwrap()).unwrap();
+    let receiver = Stored::new(dir.path().join("receiver"));
+    receiver
+        .put_imported_base("imported-id", &archive_copy, "2026-11-07T10:00:00Z")
+        .unwrap();
+    let (base, meta) = receiver.get("imported-id", Slot::Base).unwrap().unwrap();
+    assert_eq!((meta.source, meta.origin), (None, None));
+    assert_eq!(receiver.fork_link("imported-id", "imported"), None);
+    Store {
+        base,
+        manifests: BTreeMap::from([("fork".to_owned(), mt(fork)), ("main".to_owned(), mt(main))]),
+        fork_later: None,
+        fork_captures: AtomicUsize::new(0),
+        main_later: None,
+        main_captures: AtomicUsize::new(0),
+    }
+}
+
+#[test]
+fn an_imported_computer_is_kept_into_the_receivers_main_three_way() {
+    let world = simple_world();
+    let (_dir, journal) = journal();
+    // The sender's fork changed .bashrc; the receiver's main still has what the fork started from.
+    let st = store_from_imported_record(SIMPLE_BASE, SIMPLE_FORK, SIMPLE_BASE);
+    let outcome = run(&world, &st, &journal, &request(Hooks::default())).unwrap();
+    assert!(matches!(outcome, Outcome::Kept(_)), "{outcome:?}");
+    world.with("main", |c| {
+        assert_eq!(c.files["/root/.bashrc"].0, b"export X=1\n")
+    });
+}
+
+#[test]
+fn a_file_the_receiver_changed_on_main_conflicts_with_the_imported_computers_change() {
+    let world = simple_world();
+    world.put("main", "/root/.bashrc", "the receiver edited it");
+    let (_dir, journal) = journal();
+    let st = store_from_imported_record(SIMPLE_BASE, SIMPLE_FORK, "F\t/root/.bashrc\t21\t9\tdd\n");
+    let refusal = refused(run(&world, &st, &journal, &request(Hooks::default())).unwrap());
+    assert_eq!(refusal.reason, "divergent");
+    assert_eq!(refusal.conflicts[0].item, "/root/.bashrc");
+    assert_eq!(world.logged("checkpoint"), 0);
+    world.with("main", |c| {
+        assert_eq!(c.files["/root/.bashrc"].0, b"the receiver edited it")
+    });
+}
+
 #[test]
 fn a_file_the_collector_could_not_hash_is_a_conflict_when_main_differs() {
     let world = simple_world();

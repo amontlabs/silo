@@ -121,6 +121,7 @@ Both owner decisions:
   - **Open:** on Linux a `silo fork -n N` shares a manual-kind "silo-fork-<id>" checkpoint that stays on the source. It cannot be removed after the forks exist (they use the snapshot member, so deletion is refused as in use), and a fork-point kind removed with its last fork would need the macOS `release_fork_point` machinery rebuilt on Linux's snapshot lineage; not done here.
   - **Not done:** a macOS fork timing (no macOS computer on Dev), the Linux KVM host.
   - **Reviews:** Fable LGTM, Opus LGTM.
+
 ### 8 Nov 2026: phase C1 measured (crun containers against the microVM)
 
 - **Question and scope.** Is an opt-in container computer on Linux hosts (crun, rootless, all capabilities
@@ -279,3 +280,120 @@ Both owner decisions:
   written in a running macOS computer, a manual checkpoint right after, a fork of that checkpoint: the file (and a 4 KiB blob) is
   in the fork. Cleaned up: 0 runners, no `ci-*`/`e2e-*` computer, recipe build removed. Evidence:
   [`evidence/r1-runner/run-4-macos.txt`](evidence/r1-runner/run-4-macos.txt), `runner-4-macos.log`, `config-macos-4.yaml`.
+### Phase F3: sharing a computer as a file (branch `claude/forks-phase-3`, 7 Nov 2026)
+
+What changed, with the evidence for each claim. Test counts are from `cargo test --locked` (synthetic
+GitHub configuration, shared target dir) and Vitest, run on 7 Nov 2026 on the Mac; none of it touched a
+computer, the Dev engine or an app bundle.
+
+- **`silo export` / `silo import`** (`cli/src/share.rs`, `cli.rs`, `render.rs`; `--json` like every
+  command; the same job waiting as the other commands, `Engine::run_job`). `exports.create` gained
+  `archivePath` (the exact file; the remembered-folder rule applies only without it) and there is a new
+  job `exports.check`. `--device` is refused for both with "…work on this device for now, so --device
+  cannot be used with them yet." No MCP tools: the MCP server has no owner-only tier, and both commands
+  read and write files at paths the caller picks and the file can hold the computer's logins; reasons
+  are in `docs/SiloUI-CLI.md`. Evidence: `cli/tests/share.rs` 10 tests (question text, no terminal
+  without `--yes`, `--yes`, failed check, checkpoint by name, failed export/import reported, default
+  import name, `--device`), 3 unit tests in `share.rs`.
+- **Guest image by reference.** Verified first, and the claim in Decision Q4 was not accurate:
+  `compare_loaded_descriptor` (`backup.rs`) compares the loaded snapshot's image with *the archive's own*
+  manifest, not with this Silo's pinned image, so import did not refuse an archive naming another image.
+  What replaces it: a Linux computer whose image reference (and recorded digest, when it has one) equals
+  the pinned image that the runtime cache holds is saved without `--with-image` (`--with-parents`
+  unchanged, including the retry without parents) and its manifest row says `imageEmbedded: false` and
+  carries `imageDigest`, **always the sender's pinned digest** (`PinnedImageRef.manifest_digest`), also when
+  the computer recorded none (before, such a row was matched by tag only). Validation requires a digest
+  exactly on the rows that leave the image out. Import of a lean row now prepares the image **before the
+  payload is extracted** (`prepare_restore_in_group` reads the manifest first, so an offline receiver fails
+  before copying gigabytes; the download checks its own space in `download_and_publish`, and the extraction
+  space check that follows sees what is left): the reference must be this Silo's pinned one (else "Update
+  Silo…"), `preparation::ensure_image` prepares it as computer creation does, and the cached manifest digest
+  must equal the row's `imageDigest`. **Format:** only an archive that needs format 5 (a lean row or a
+  fork-time record) is written as format 5; any other is written as format 4 (header and manifest), so older
+  Silo builds still read it and the changeset needs no warning. Format 4 files are still read; format 5
+  fields in a format 4 file are refused. Evidence: `backup.rs` tests for pinned/other/none image with the
+  digest and the format of each, digest required exactly on lean rows, prepare called first with the digest
+  and with nothing staged, the retry without parents, import calling the preparation only for a lean row
+  and stopping when it fails, format 4 written and read, format 5 fields refused in format 4;
+  `backup_controller.rs` test for another pinned image. **Size before/after: not measured** (the unit tests
+  use a fake runtime; the live check prints the size and takes `BEFORE_BYTES`).
+- **Fork-time record travels.** Archive manifest `forkRecords` (computer, size, sha256, capturedAt,
+  records, bytes), the gzipped stored manifest after the payloads; counted in the file length, hashed,
+  verified by every full check, extracted for the selected computer on import and stored by
+  `Store::put_imported_base` with no source and no origin (parsed first; a bad record is refused and
+  stores nothing). Linux and macOS (and mixed) archives carry it. A failed import removes it. A computer
+  without a record imports as its own, and `fold` without `--into` keeps its message. Evidence:
+  `backup.rs` round trip, tampered record fails check and import, record for an unknown computer refused;
+  `changes/store.rs` 2 tests; `backup_controller.rs` stores/forgets the record; `keep/tests.rs` two
+  tests that read the imported record back and keep three-way into the receiver's main (kept; and
+  refused as divergent with main untouched when the receiver changed the same file).
+  **Hardening after review (7 Nov):** `put_imported_base` counts `records` and `bytes` from the parsed
+  manifest and ignores the archive's numbers (the archive section keeps its fields; import no longer reads
+  them), and a `capturedAt` that is not an RFC 3339 time between 2020 and a day from now is replaced by
+  the import time (test with 1970, year 9999, text and empty). The compressed cap is 128 MiB, what a
+  capture reads back from a computer (`Options::max_compressed_bytes`); the 512 MiB decompressed cap stays
+  because a capture accepts the same (`Options::max_manifest_bytes`), so a lower one would refuse records
+  the engine itself made. **Orphan record:** the record is stored before the computer is saved, and
+  `discard_uncommitted_import` (also what relaunch recovery calls for a journaled identity) did not remove
+  it, so an interruption between the two, or a failed save of the settings, left a record under an id no
+  computer has; macOS relaunch recovery had the same gap. Both now call `forget_fork_record`, whose failure
+  keeps the identity journaled for the next launch. Test: a stored record is gone after
+  `discard_uncommitted_import`.
+- **Login warning.** `credential_group` now matches `.claude/.credentials.json`, `.codex/auth.json`,
+  `.gemini/oauth_creds.json` and `.gemini/gemini-credentials.json` (`gh/hosts.yml` was there). Claude Code and
+  Codex paths are from the tools' own docs (code.claude.com/docs/en/authentication: Linux, mode 0600;
+  developers.openai.com/codex/auth). **Gemini CLI, corrected after review:** `oauth_creds.json` is the legacy
+  file; current gemini-cli migrates it into keychain storage and, with no secret service, writes
+  `~/.gemini/gemini-credentials.json` (`fileKeychain.ts` in google-gemini/gemini-cli: `path.join(homedir(),
+  GEMINI_DIR)` + `gemini-credentials.json`, written encrypted with mode 0600). Both are matched; the earlier
+  claim that the path came only from third-party tools was wrong about the source, not about the legacy
+  file. `login_label` names a login ("a Claude Code login (path)") and leaves out what every computer has
+  (`/etc/shadow`, host keys, public keys, the desktop password). `changes::credentials::check` lists the disk
+  with one change manifest capture (the `silo diff` walk, which runs a bounded script in the guest and
+  reads a gzip back; cost = one capture of `/etc /root /home /usr/local /opt /srv`, seconds on a small
+  computer, proportional to the number of files, and the computer must be running) and the stored record.
+  Warn, never filter. **One "could not check" case (review):** a stopped computer (its disk is not listed;
+  a check never starts it), a checkpoint export (only the record is checked) and a failed check are the
+  same case, with the reason in `unchecked`. The CLI asks "Silo could not check <name> for logins
+  (<reason>). Share anyway? [y/N]" (with "other logins" and the found ones in the same question when both
+  apply), refuses without a terminal unless `--yes`, and with `--yes` reports the reason in `--json`
+  (`unchecked`) and in the text output; the app shows the same sentence in its dialog before the folder
+  picker, and a failed check asks too. Before, a stopped computer exported without a question and a failed
+  check under `--yes` was reported as clean. Evidence: engine tests `ignore.rs` 2, `credentials.rs` 3;
+  `cli/tests/share.rs` 12 (stopped computer asked and refused/accepted, failed check with `--yes` reported
+  in JSON and text); frontend `computer-transfer.test.tsx` (failed check, stopped computer with no logins
+  found, logins beside "other logins"), production bridge 2 new tests.
+  **Tauri command:** `check_export_logins` compiled and its forwarding test passed
+  (`cargo check -p silo-ui`, `cargo test -p silo-ui the_logins_check`) with empty placeholder files for the
+  resources `build.rs` requires (`binaries/*`, `runtime/*`, git-ignored, deleted afterwards);
+  `runtime:prepare` itself was not run (it builds MicroSandbox and Git from source with network access), so
+  this proves the Rust compiles and the forwarding, not a packaged app.
+- **Docs/changeset:** `docs/SiloUI-CLI.md` (commands table and a "Sharing a computer as a file"
+  section, with what the person sees when Silo could not check), `docs/THREAT-MODEL.md` (boundary 6, including
+  that an imported computer is untrusted until kept: `silo fold <imported> --into main` writes the sender's
+  shell files, agent settings and crontab into the computer that holds the receiver's secrets, so read
+  `silo diff` first), `app/SiloUI/.changeset/share-a-computer.md`.
+- **Export file name:** `-o FILE` must end in `.silo-backup`; checked up front for Linux and macOS in
+  `explicit_archive` (before, only the Linux write path checked, after the capture).
+- **Live check, not run:** `docs/forks-ci/checks/f3_share_check.sh` (Dev engine, `e2e-share-*`; keeps
+  the import into a second fork `e2e-share-target`, not the Dev main).
+
+**Final review fixes (7 Nov; reviews: Fable LGTM, Opus LGTM after these).** An import now computes the
+guest image to prepare a second time from the extracted archive and refuses ("the file changed while
+Silo was reading it") unless it equals the image that was described and prepared, so a file replaced
+between the two reads cannot load an unprepared image (test swaps the archive inside `prepare_image`).
+A macOS import that left no computer propagates a failed fork-record removal and keeps the restore
+identity for recovery instead of dropping the error (`settle_unsaved_macos_import`, with a test). `silo
+export --yes` says "other logins" when some were listed. A disk listing that fails after the fork-time
+record was read keeps the record's logins and reports the reason, and a Linux computer that cannot be
+reached is no longer reported as stopped (3 tests in `changes/credentials.rs`). Run: engine `backup`,
+`backup_controller` and `changes::credentials` tests (267 passed), `silo-cli --test share` (12 passed),
+render unit test, `cargo fmt --check`; no frontend file changed.
+
+Test results (7 Nov, after the review fixes): silo-engine 3123 passed, 8 failed, 31 ignored (the 8 are the
+same `host_push::protocol_tests::*`, which panic "prepare the bundled Git runtime before testing" in this
+checkout; none touches this change); silod 320 unit plus its integration tests, all passing; silo-cli 148
+unit + 12 `share` tests, all passing; silo-client 16; silo-api 49. Frontend: typecheck clean, lint 0 errors
+(existing warnings), Vitest 287 files / 2863 tests. `demo/` `tsc --noEmit` clean (node_modules deleted
+afterwards). `cargo fmt --all --check` clean. New tests were written with their fixes, not run failing
+first, except where a changed assertion shows the old behaviour (the CLI check-failure test).

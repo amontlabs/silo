@@ -6,6 +6,7 @@ import { type OperationStep, dismissOperationToast, showActionFailure, showOpera
 import type { ApplicationSource } from "@/features/application/model/application-source"
 import type { BackupController, BackupPhase, VerifiedExport } from "@/features/application/model/backup-source"
 import { ImportPopover, type ImportReview } from "@/features/application/components/import-popover"
+import { ShareLoginsConfirmation, type ShareLoginsRequest } from "@/features/application/components/share-logins-confirmation"
 
 /** One toast tracks the single in-flight export or import; updating it in place keeps the
  * notification tied to backend truth across navigation. */
@@ -27,6 +28,8 @@ export interface ComputerTransfer {
   beginImport: () => Promise<void>
   /** Wraps the computer list's Add button: the import review popover anchors to it. */
   importPopover: (anchor: ReactNode) => ReactNode
+  /** The confirmation shown before a computer that holds logins is exported; render it once. */
+  loginConfirmation: ReactNode
 }
 
 /**
@@ -42,6 +45,7 @@ export function useComputerTransfer(backup: BackupController, options: { source:
   // Retry handler for the current operation, replayed from a failure toast's Retry action.
   const retryRef = useRef<(() => void) | undefined>(undefined)
   const reviewDraftRef = useRef<Extract<ImportReview, { kind: "review" }> | null>(null)
+  const [loginRequest, setLoginRequest] = useState<ShareLoginsRequest | null>(null)
   const [review, setReview] = useState<ImportReview | null>(null)
   // A result already present when the app loads is from a previous session: never toast it, unless
   // the backend marks it unseen (an upgrade produced it, or an unreadable record was set aside).
@@ -61,6 +65,21 @@ export function useComputerTransfer(backup: BackupController, options: { source:
     if (controller.state.availability === "unavailable") {
       showOperationFailure(TRANSFER_TOAST_ID, "Export is unavailable", { description: controller.state.availabilityMessage ?? "Export is not available in this Silo build. No computer data was changed.", native: false })
       return null
+    }
+    // Logins are named before anything is chosen or written. A check that could not run (a stopped computer, a
+    // checkpoint, a failure) is one case and asks the same question.
+    let logins: string[] = []
+    let unchecked: string | undefined
+    try {
+      const found = await controller.actions.checkLogins(computerName, checkpoint?.id)
+      logins = found.logins
+      unchecked = found.unchecked
+    } catch (error) { unchecked = errorMessage(error) }
+    if (logins.length > 0 || unchecked) {
+      const share = await new Promise<boolean>((resolve) => {
+        setLoginRequest({ computerName, logins, unchecked, answer: (value) => { setLoginRequest(null); resolve(value) } })
+      })
+      if (!share) return null
     }
     let destination: string | null
     try { destination = await controller.actions.chooseDestination() }
@@ -189,5 +208,7 @@ export function useComputerTransfer(backup: BackupController, options: { source:
     }}
   />
 
-  return { exportComputer, beginImport, importPopover }
+  const loginConfirmation = <ShareLoginsConfirmation request={loginRequest} />
+
+  return { exportComputer, beginImport, importPopover, loginConfirmation }
 }

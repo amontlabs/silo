@@ -226,6 +226,8 @@ const backupStateShape = z.object({
 }).strict()
 export const archiveInspectionShape = z.object({ archive: backupArchiveShape, valid: z.boolean(), reason: z.string().optional(), warnings: z.array(z.string()).optional() }).strict()
 
+export const exportLoginsShape = z.object({ logins: z.array(z.string()), checked: z.array(z.string()).optional(), unchecked: z.string().optional() }).strict()
+
 const networkStateShape = z.object({ computers: z.array(z.object({
   computer: z.string(), error: z.string().nullable(), host: z.string().regex(/^[a-z0-9-]{1,63}\.localhost$/).nullable().optional(), ports: z.array(z.object({
     configuredHostPort: z.number().int().min(1).max(65535).nullable().optional(),

@@ -1,0 +1,11 @@
+{
+  "archive": "/Users/polarzero/.t3/worktrees/microsandbox-workspaces/t3-51f4af68/docs/forks-ci/evidence/f3-share/raw-2-clear-session-bus/e2e-share-src.silo-backup",
+  "checkpoint": null,
+  "computer": "e2e-share-src",
+  "logins": [
+    "/etc/pki/ca-trust/source/anchors/microsandbox-ca.pem",
+    "a Claude Code login (/home/silo/.claude/.credentials.json)"
+  ],
+  "size": "1.0 GiB",
+  "unchecked": null
+}

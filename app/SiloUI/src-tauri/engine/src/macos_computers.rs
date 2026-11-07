@@ -3051,6 +3051,7 @@ pub(crate) fn create_archive<R: crate::backup::MsbRunner>(
     destination: &std::path::Path,
     names: &[String],
     checkpoint_id: Option<&str>,
+    fork_records: &[(String, crate::backup::ForkRecordFile)],
     cancellation: &crate::backup::Cancellation,
     token: Option<&str>,
 ) -> Result<crate::backup::BackupResult, String> {
@@ -3282,7 +3283,7 @@ pub(crate) fn create_archive<R: crate::backup::MsbRunner>(
         drop(held);
     }
     let result = service
-        .create_macos_archive(destination, sources, cancellation, token)
+        .create_macos_archive(destination, sources, fork_records, cancellation, token)
         .map_err(|error| error.to_string());
     drop(captures);
     result

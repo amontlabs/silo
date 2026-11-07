@@ -415,6 +415,7 @@ function ApplicationContent({ source, actions, backup, initialRoute, routeReques
       <ComputerConfigurationToast operation={source.computerConfigurationOperation} computers={source.computers} onOpen={(id) => navigation.openComputer(id)} />
       <PreparationToast />
       <QuitRequestConfirmation connect={connectQuitConfirmation} />
+      {transfer.loginConfirmation}
       <section id="application-panel-computers" role="region" aria-labelledby="application-nav-computers" hidden={visibleTab !== "computers"} className="h-full min-h-0 overflow-hidden">
         {visibleComputerSection === "overview" ? (
           <OverviewPage notifyOperations={false} active={visibleTab === "computers"} newComputerRequest={newComputerRequest} onNewComputerRequestHandled={(id) => setNewComputerRequest(current => current === id ? 0 : current)}

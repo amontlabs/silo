@@ -325,6 +325,38 @@ launch agents and receipts from that volume with the `plist` crate, under a size
 ([`offline_setup.rs#L354`](../app/SiloUI/src-tauri/engine/src/macos_computers/offline_setup.rs#L354)). Import only
 archives you trust.
 
+**Sharing a computer as a file.** `silo export` and the app's Export write a computer's disks into
+one `.silo-backup` file, and `silo import` reads one. What the file holds, and does not:
+
+- **The guest image is not embedded** when the computer uses the image this Silo pins. The file
+  names it; the importing Silo prepares its own pinned copy the way it does for a new computer and
+  refuses a file naming another image or a different digest of the same one. A computer on any
+  other image still embeds it, and files made before this change keep theirs.
+- **The fork-time record travels** when the exported computer is a fork: the list of its files as
+  they were at the fork, which paths and digests, not contents. Import stores it as the new
+  computer's record, with no source and no origin, so the receiver names the target
+  (`silo fold <imported> --into main`).
+- **Files are never filtered.** Everything on the computer's disks is in the file: anything the
+  agent could read could already leave through the computer's network, and the export is no
+  stricter. A login on the disk is a secret in the file. Before an export Silo lists the logins it
+  recognises, on the disk and in the fork-time record (Claude Code, Codex, Gemini CLI, GitHub CLI,
+  cloud and registry credentials, SSH private keys), and asks; the CLI refuses without a terminal
+  unless `--yes` is passed, and the app asks in a dialog. When Silo could not check (a stopped
+  computer, whose disk is not listed, an export of a checkpoint, or a check that failed) it asks
+  too: "Silo could not check <name> for logins (<reason>). Share anyway?", in the CLI and in the
+  app, and `--json` reports the reason as `unchecked`. The list is a warning, not a guarantee: a
+  secret in a file Silo does not recognise (an `.env`, a token in a shell history) is not named.
+- **Secrets, published ports, the network policy and host-folder mounts are not carried**; an
+  imported computer starts stopped with a deny-all policy.
+- **An export is a plain file.** Keep it where you would keep the secrets in it. Importing one
+  from someone else adds a computer whose disk you did not make; it starts stopped and is as
+  untrusted as any new agent computer.
+- **An imported computer is untrusted until it is kept.** `silo fold <imported> --into main`
+  writes the sender's files into the computer that holds your secrets and network policy, and
+  that includes shell startup files, agent settings and instructions, and a crontab: whatever
+  the sender's agent changed runs in your main afterwards. Read `silo diff <imported>` before
+  you keep it, and do not keep what you would not run.
+
 ### 7. The engine socket: same user only
 
 `silod` listens on `~/.silo/engine.sock` (`~/.silo-dev` for Silo Dev). The directory must be owned

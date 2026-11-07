@@ -62,6 +62,7 @@ struct JobTerminalResultsSchema {
     desktop: crate::methods::desktop::DesktopStatus,
     backup: crate::methods::exports::BackupOperation,
     archive_inspection: crate::methods::exports::ArchiveInspectionResult,
+    export_check: crate::methods::exports::ExportCheckResult,
     upload: crate::methods::files::UploadOutcome,
     download: crate::methods::files::DownloadOutcome,
     github: crate::methods::github::GitHubState,
@@ -115,6 +116,7 @@ pub const JOB_FINISHED_RESULT_REGISTRY: &[(&str, &str)] = &[
     ("desktop.action", "DesktopStatus"),
     ("engine.shutdown", "null"),
     ("engine.update.prepare", "EngineUpdatePrepareFinishedResult"),
+    ("exports.check", "ExportCheckResult"),
     ("exports.create", "BackupOperation"),
     ("exports.import", "BackupOperation"),
     ("exports.inspect", "ArchiveInspectionResult"),
@@ -193,8 +195,8 @@ mod tests {
             schema_json().unwrap()
         );
         let schema: serde_json::Value = serde_json::from_str(&schema_json().unwrap()).unwrap();
-        assert_eq!(schema["x-silo-methods"].as_array().unwrap().len(), 172);
-        assert_eq!(schema["x-silo-job-results"].as_array().unwrap().len(), 37);
+        assert_eq!(schema["x-silo-methods"].as_array().unwrap().len(), 173);
+        assert_eq!(schema["x-silo-job-results"].as_array().unwrap().len(), 38);
         assert_eq!(
             schema["$schema"],
             "https://json-schema.org/draft/2020-12/schema"

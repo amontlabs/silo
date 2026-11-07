@@ -41,8 +41,34 @@ wire_struct! {
         computer_ids: Vec<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         checkpoint_id: Option<String>,
+        /// The exact file to write. When set, `destination` is not matched against the
+        /// remembered export folder and the file must not exist yet.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        archive_path: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         device_id: Option<String>,
+    }
+}
+
+wire_struct! {
+    ExportCheckParams {
+        computer_id: String,
+        /// The export packages this checkpoint rather than the live disk.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        checkpoint_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        device_id: Option<String>,
+    }
+}
+
+wire_struct! {
+    ExportCheckResult {
+        /// Logins found, by tool name and path.
+        logins: Vec<String>,
+        /// `disk` and `fork-time record`: the places that were listed.
+        checked: Vec<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        unchecked: Option<String>,
     }
 }
 
@@ -78,6 +104,7 @@ wire_struct! {
 pub type ExportCreateResult = JobStartResult;
 pub type ExportImportResult = JobStartResult;
 pub type ExportInspectResult = JobStartResult;
+pub type ExportCheckStartResult = JobStartResult;
 pub type ExportDismissResult = bool;
 pub type ExportAcknowledgeResult = bool;
 pub type ExportStateResult = BackupState;

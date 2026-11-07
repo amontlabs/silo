@@ -146,6 +146,7 @@ define_registry! {
     EventsSubscribe => ("events.subscribe", Subscription, engine::EventsSubscribeParams, engine::EventsSubscribeResult);
     EventsUnsubscribe => ("events.unsubscribe", Command, engine::EventsUnsubscribeParams, ());
     ExportsAcknowledge => ("exports.acknowledge", Command, exports::ExportAcknowledgeParams, bool);
+    ExportsCheck => ("exports.check", Job, exports::ExportCheckParams, common::JobStartResult);
     ExportsCreate => ("exports.create", Job, exports::ExportCreateParams, common::JobStartResult);
     ExportsDestinationSet => ("exports.destination.set", Command, exports::ExportDestinationSetParams, exports::ExportDestinationResult);
     ExportsDismiss => ("exports.dismiss", Command, exports::ExportDismissParams, bool);
@@ -248,7 +249,7 @@ mod tests {
 
     #[test]
     fn registry_covers_every_canonical_method_and_kind() {
-        assert_eq!(METHOD_REGISTRY.len(), 172);
+        assert_eq!(METHOD_REGISTRY.len(), 173);
         assert_eq!(
             METHOD_REGISTRY
                 .iter()
@@ -268,7 +269,7 @@ mod tests {
                 .iter()
                 .filter(|m| m.kind == MethodKind::Job)
                 .count(),
-            40
+            41
         );
         assert_eq!(
             METHOD_REGISTRY

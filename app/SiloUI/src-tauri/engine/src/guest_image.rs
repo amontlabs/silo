@@ -265,6 +265,21 @@ pub(crate) fn is_imported(paths: &RuntimePaths) -> bool {
     PinnedImage::host().is_ok_and(|pinned| is_imported_as(paths, &pinned.manifest))
 }
 
+/// The manifest digest of the image cached under `reference`, when the cache holds it.
+pub(crate) fn cached_manifest_digest(paths: &RuntimePaths, reference: &str) -> Option<String> {
+    let directory = paths.home.join("cache");
+    if !directory.is_dir() {
+        return None;
+    }
+    let cache = GlobalCache::new(&directory).ok()?;
+    let reference = reference.parse::<Reference>().ok()?;
+    cache
+        .read_image_metadata(&reference)
+        .ok()
+        .flatten()
+        .map(|metadata| metadata.manifest_digest)
+}
+
 pub fn is_imported_as(paths: &RuntimePaths, manifest: &GuestImageManifest) -> bool {
     // A read-only check must not create the runtime home: before the alias is prepared,
     // creating `cache` beneath it would make the alias a real directory.

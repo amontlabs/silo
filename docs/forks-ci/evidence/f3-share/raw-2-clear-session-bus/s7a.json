@@ -1,0 +1,24 @@
+{
+  "report": {
+    "checkpoint": null,
+    "fork": "7d953a9f-9a6c-43b2-916d-af9c585851a1",
+    "notes": [],
+    "reviewDigest": "f70af3f25e5a3d9a70e7dbc7953b58bedb272be58b07dcbe69a6ce1f3dea6175",
+    "steps": [],
+    "summary": [
+      "Settings & files",
+      "  ~ /etc/ssl/certs/ca-certificates.crt",
+      "  - /home/silo/.dbus/session-bus/11c2687859234b8cb26058b223401bb8-1",
+      "  - /home/silo/.dbus/session-bus/a58639137b9771e322faf1aa6aeae96f-1",
+      "Other changed",
+      "  + /home/silo/share-conflict.txt",
+      "  + /home/silo/share-marker.txt",
+      "Not kept",
+      "  credentials: /home/silo/.claude/.credentials.json",
+      "Ignored: 5 paths (caches, logs, build output)",
+      "will keep files: 5"
+    ],
+    "target": "d1c8ae4f-c854-4aa9-8ff2-b190a5b1be24"
+  },
+  "status": "dry-run"
+}

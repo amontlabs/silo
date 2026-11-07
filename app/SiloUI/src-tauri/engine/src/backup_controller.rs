@@ -571,6 +571,7 @@ pub fn begin_export_for_ids(
     destination: String,
     computer_ids: Vec<String>,
     checkpoint_id: Option<String>,
+    archive_path: Option<String>,
 ) -> Result<String, String> {
     let macos = controller.runtime_host()?.macos_context();
     // macOS computers are not in the Linux inventory; the Apple Virtualization registry
@@ -606,7 +607,7 @@ pub fn begin_export_for_ids(
             })
         })
         .collect::<Result<Vec<_>, _>>()?;
-    begin_export(controller, destination, names, checkpoint_id)
+    begin_export(controller, destination, names, checkpoint_id, archive_path)
 }
 
 /// Publishes the current backup operation through the durable job contract.
@@ -1253,26 +1254,68 @@ fn publish_and_finish(controller: &Controller, publication: impl FnOnce()) {
     finish(controller);
 }
 
+/// The folder and the exact file an export to `archive_path` writes. The file may not exist.
+fn explicit_archive(archive_path: &str) -> Result<(PathBuf, PathBuf), String> {
+    let path = Path::new(archive_path);
+    if !path.is_absolute() {
+        return Err("Choose the export file again.".into());
+    }
+    let name = path
+        .file_name()
+        .ok_or("The export file needs a name.")?
+        .to_owned();
+    if path.extension().and_then(|value| value.to_str()) != Some("silo-backup") {
+        return Err(
+            "The export filename must end in .silo-backup. Choose a filename with that extension."
+                .into(),
+        );
+    }
+    let folder = path
+        .parent()
+        .ok_or("The export file has no folder.")?
+        .canonicalize()
+        .map_err(|error| format!("Silo could not use the export folder: {error}"))?;
+    if !folder.is_dir() {
+        return Err("The export folder is not a folder.".into());
+    }
+    let file = folder.join(name);
+    if file.symlink_metadata().is_ok() {
+        return Err(format!("A file already exists at {}.", file.display()));
+    }
+    Ok((folder, file))
+}
+
 pub fn begin_export(
     controller: Arc<Controller>,
     destination: String,
     computers: Vec<String>,
     checkpoint_id: Option<String>,
+    archive_path: Option<String>,
 ) -> Result<String, String> {
-    let selected_destination = controller
-        .view
-        .lock()
-        .map_err(|_| {
-            "Export and import status could not be read. Relaunch Silo and retry.".to_string()
-        })?
-        .destination
-        .clone();
-    let canonical = PathBuf::from(&destination)
-        .canonicalize()
-        .map_err(|error| format!("Silo could not use the export destination: {error}"))?;
-    if selected_destination.as_deref() != Some(canonical.as_path()) {
-        return Err("Choose the export destination again before starting.".into());
-    }
+    let (canonical, explicit) = match archive_path.as_deref() {
+        Some(path) => {
+            let (folder, file) = explicit_archive(path)?;
+            (folder, Some(file))
+        }
+        None => {
+            let selected_destination = controller
+                .view
+                .lock()
+                .map_err(|_| {
+                    "Export and import status could not be read. Relaunch Silo and retry."
+                        .to_string()
+                })?
+                .destination
+                .clone();
+            let canonical = PathBuf::from(&destination)
+                .canonicalize()
+                .map_err(|error| format!("Silo could not use the export destination: {error}"))?;
+            if selected_destination.as_deref() != Some(canonical.as_path()) {
+                return Err("Choose the export destination again before starting.".into());
+            }
+            (canonical, None)
+        }
+    };
     // Computer names become part of the archive file name, so validate them before
     // building the path to keep the archive inside the chosen destination.
     for name in &computers {
@@ -1320,13 +1363,14 @@ pub fn begin_export(
         archive_path,
         archive: pending_archive,
         cancellation,
-    } = claim_export(
+    } = claim_export_at(
         &controller,
         &canonical,
         destination,
         &computers,
         checkpoint_id.clone(),
         checkpoint_name.as_deref(),
+        explicit,
     )?;
     if let Err(error) = register_backup_job(
         &controller,
@@ -1379,6 +1423,7 @@ struct ClaimedExport {
 /// Claims the transfer slot, saves the export's journal and publishes it as
 /// running. Everything after this point reports its outcome as this
 /// operation's result, under the returned operation id.
+#[cfg(test)]
 fn claim_export(
     controller: &Controller,
     destination_directory: &Path,
@@ -1387,11 +1432,35 @@ fn claim_export(
     checkpoint_id: Option<String>,
     checkpoint_name: Option<&str>,
 ) -> Result<ClaimedExport, String> {
+    claim_export_at(
+        controller,
+        destination_directory,
+        destination,
+        computers,
+        checkpoint_id,
+        checkpoint_name,
+        None,
+    )
+}
+
+/// Like [`claim_export`]; `explicit` is the exact file to write instead of a name chosen in
+/// the destination folder.
+fn claim_export_at(
+    controller: &Controller,
+    destination_directory: &Path,
+    destination: String,
+    computers: &[String],
+    checkpoint_id: Option<String>,
+    checkpoint_name: Option<&str>,
+    explicit: Option<PathBuf>,
+) -> Result<ClaimedExport, String> {
     controller
         .busy
         .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
         .map_err(|_| "Another export or import is running.".to_string())?;
-    let archive_path = unique_archive(destination_directory, computers, checkpoint_id.is_some());
+    let archive_path = explicit.unwrap_or_else(|| {
+        unique_archive(destination_directory, computers, checkpoint_id.is_some())
+    });
     let archive = Archive {
         name: archive_path
             .file_name()
@@ -1753,6 +1822,88 @@ fn mutation_guard(
     Ok(guard)
 }
 
+/// The guest image this Silo pins, when the runtime cache holds it: a computer that uses it is
+/// exported without the image.
+fn pinned_image(paths: &runtime::RuntimePaths) -> Option<backup::PinnedImageRef> {
+    let pinned = runtime::guest_image::PinnedImage::host().ok()?;
+    if !runtime::guest_image::is_imported_as(paths, &pinned.manifest) {
+        return None;
+    }
+    let reference = pinned.manifest.image_reference.clone();
+    let manifest_digest = runtime::guest_image::cached_manifest_digest(paths, &reference)?;
+    Some(backup::PinnedImageRef {
+        reference,
+        manifest_digest,
+    })
+}
+
+/// The stored fork-time records of the computers named, by name, for the archive to carry.
+fn stored_fork_records(
+    controller: &Controller,
+    names: &[String],
+) -> Result<Vec<(String, backup::ForkRecordFile)>, String> {
+    let host = controller.runtime_host()?;
+    let store = crate::changes::store::Store::for_engine(host.engine_context().as_ref());
+    let macos = host.macos_context();
+    let linux = match runtime::runtime_paths(host) {
+        Ok(paths) => runtime::read_metadata(&paths.metadata)
+            .map(|metadata| metadata.computers)
+            .unwrap_or_default(),
+        Err(_) => Vec::new(),
+    };
+    let mut records = Vec::new();
+    for name in names {
+        let id = linux
+            .iter()
+            .find(|configuration| configuration.name() == name)
+            .map(|configuration| configuration.id().to_owned())
+            .or_else(|| {
+                macos
+                    .as_ref()
+                    .and_then(|context| crate::macos_computers::id_for_name(context, name))
+            });
+        let Some(id) = id else { continue };
+        if let Some((path, meta)) = store.stored_base(&id)? {
+            records.push((
+                name.clone(),
+                backup::ForkRecordFile {
+                    path,
+                    captured_at: meta.captured_at,
+                    records: meta.records,
+                    bytes: meta.bytes,
+                },
+            ));
+        }
+    }
+    Ok(records)
+}
+
+/// Makes sure the runtime holds the guest image an archive left out: it must be the one this
+/// Silo pins, in the build the sender pinned, and it is prepared as a new computer's would be.
+fn prepare_archive_image(
+    paths: &runtime::RuntimePaths,
+    reference: &str,
+    digest: &str,
+) -> Result<(), backup::BackupError> {
+    let pinned =
+        runtime::guest_image::PinnedImage::host().map_err(backup::BackupError::InvalidRequest)?;
+    if pinned.manifest.image_reference != reference {
+        return Err(backup::BackupError::UnsupportedArchive(format!(
+            "This export needs the guest image {reference}, and this Silo carries {}. Update Silo, or import it with the Silo that exported it."
+            , pinned.manifest.image_reference
+        )));
+    }
+    crate::preparation::ensure_image(paths, &|_| {})
+        .map_err(backup::BackupError::InvalidRequest)?;
+    let cached = runtime::guest_image::cached_manifest_digest(paths, reference);
+    if cached.as_deref() != Some(digest) {
+        return Err(backup::BackupError::UnsupportedArchive(
+            "This computer was made with another build of the guest image than the one this Silo carries. Import it with the Silo that exported it.".into(),
+        ));
+    }
+    Ok(())
+}
+
 fn backup_work(
     controller: &Controller,
     archive_path: &Path,
@@ -1793,6 +1944,7 @@ fn backup_at_paths(
     checkpoint_id: Option<&str>,
     cancellation: &backup::Cancellation,
 ) -> Result<Archive, TransferError> {
+    let fork_records = stored_fork_records(controller, names)?;
     if let Some(context) = controller.runtime_host()?.macos_context() {
         let macos_count = names
             .iter()
@@ -1845,6 +1997,7 @@ fn backup_at_paths(
                     &macos_archive,
                     &macos_names,
                     None,
+                    &[],
                     cancellation,
                     recovery::token(controller)?.as_deref(),
                 )?;
@@ -1852,6 +2005,7 @@ fn backup_at_paths(
                     archive_path,
                     &[linux_archive, macos_archive],
                     names,
+                    &fork_records,
                     cancellation,
                     recovery::token(controller)?.as_deref(),
                 )?;
@@ -1869,6 +2023,7 @@ fn backup_at_paths(
                 archive_path,
                 names,
                 checkpoint_id,
+                &fork_records,
                 cancellation,
                 token.as_deref(),
             )?;
@@ -1945,6 +2100,8 @@ fn backup_at_paths(
         backup::BackupRequest {
             destination: archive_path.to_path_buf(),
             sources,
+            fork_records,
+            pinned_image: pinned_image(paths),
         },
         cancellation,
         recovery::token(controller)?.as_deref(),
@@ -2403,9 +2560,15 @@ fn restore_macos_work(
         .macos_context()
         .ok_or("Apple Virtualization import is unavailable on this Mac.")?;
     let identity = uuid::Uuid::new_v4().to_string();
+    let record = controller
+        .service
+        .extract_fork_record(archive, source_name, cancellation)?;
     recovery::save_macos_restore_identity(controller, &identity, source_name)?;
     progress("Rekeying imported account");
-    let before_publish = || enter_commit(controller, cancellation).map_err(|error| error.message);
+    let before_publish = || {
+        enter_commit(controller, cancellation).map_err(|error| error.message)?;
+        store_fork_record(controller, &identity, record.as_ref())
+    };
     match crate::macos_computers::import_archive(
         &context,
         &controller.service,
@@ -2422,17 +2585,30 @@ fn restore_macos_work(
             let message = failure.message.clone();
             match crate::macos_computers::recover_archive_import(&context, &identity) {
                 Ok(true) => Err(TransferError::from(message).uncertain_import()),
-                Ok(false) => {
-                    recovery::clear_restore_identity(controller).map_err(|cleanup| {
-                        TransferError::from(format!("{message} {cleanup}")).uncertain_import()
-                    })?;
-                    Err(failure)
-                }
+                Ok(false) => Err(settle_unsaved_macos_import(
+                    failure,
+                    &|| forget_fork_record(controller, &identity),
+                    &|| recovery::clear_restore_identity(controller),
+                )),
                 Err(cleanup) => {
                     Err(TransferError::from(format!("{message} {cleanup}")).uncertain_import())
                 }
             }
         }
+    }
+}
+
+/// Ends an import that left no computer: its fork-time record goes first and the restore
+/// identity last, so a record that could not be removed is still found by recovery.
+fn settle_unsaved_macos_import(
+    failure: TransferError,
+    forget_record: &dyn Fn() -> Result<(), String>,
+    clear_identity: &dyn Fn() -> Result<(), String>,
+) -> TransferError {
+    let message = failure.message.clone();
+    match forget_record().and_then(|()| clear_identity()) {
+        Ok(()) => failure,
+        Err(cleanup) => TransferError::from(format!("{message} {cleanup}")).uncertain_import(),
     }
 }
 
@@ -2562,6 +2738,10 @@ fn unpack_and_save(
     original: runtime::ComputerConfigurationRequest,
 ) -> Result<(), TransferError> {
     let group = backup::new_import_group();
+    let record =
+        controller
+            .service
+            .extract_fork_record(archive, Some(source_name), cancellation)?;
     let prepared = controller.service.prepare_restore_in_group(
         backup::RestoreRequest {
             archive: archive.to_path_buf(),
@@ -2574,6 +2754,7 @@ fn unpack_and_save(
             recovery::save_restore_group(controller, &group)
                 .map_err(backup::BackupError::InvalidRequest)
         },
+        &|reference, digest| prepare_archive_image(paths, reference, digest),
     )?;
     // Until the new computer is saved, a failure removes the loaded import
     // group instead of stranding it in the native store (E-23).
@@ -2609,6 +2790,7 @@ fn unpack_and_save(
         &prepared.snapshot_group,
         &prepared.snapshot_member,
         &prepared.runtime_config,
+        record.as_ref(),
     );
     finish_import_commit(import_group, committed)
 }
@@ -2637,6 +2819,7 @@ fn commit_import(
     group: &str,
     member: &str,
     runtime_config: &Value,
+    record: Option<&backup::ExtractedForkRecord>,
 ) -> Result<(), TransferError> {
     recovery::save_restore_identity(controller, id, group)?;
     let discard = |error: String| {
@@ -2651,6 +2834,9 @@ fn commit_import(
         runtime_config,
     ) {
         return discard(error.to_string());
+    }
+    if let Err(error) = store_fork_record(controller, id, record) {
+        return discard(error);
     }
     save_import_metadata(
         original,
@@ -2667,6 +2853,34 @@ fn commit_import(
         }
         error
     })
+}
+
+/// Stores the fork-time record an archive carried as the record of the imported computer `id`.
+fn store_fork_record(
+    controller: &Controller,
+    id: &str,
+    record: Option<&backup::ExtractedForkRecord>,
+) -> Result<(), String> {
+    let Some(record) = record else { return Ok(()) };
+    let host = controller.runtime_host()?;
+    let store = crate::changes::store::Store::for_engine(host.engine_context().as_ref());
+    store
+        .put_imported_base(id, &record.path, &record.captured_at)
+        .map_err(|error| {
+            format!("The fork-time record in the export file could not be saved: {error}")
+        })
+}
+
+/// Removes the fork-time record of an imported computer that was not saved. Every way an
+/// import is abandoned, including a relaunch after an interruption, ends here, so no record is
+/// left under an id that no computer has.
+fn forget_fork_record(controller: &Controller, id: &str) -> Result<(), String> {
+    // A controller without a runtime host stores no records either.
+    let Ok(host) = controller.runtime_host() else {
+        return Ok(());
+    };
+    let store = crate::changes::store::Store::for_engine(host.engine_context().as_ref());
+    store.remove_computer(id)
 }
 
 fn save_import_metadata(
@@ -4252,6 +4466,103 @@ mod tests {
     }
 
     #[test]
+    fn an_exported_computers_fork_time_record_is_stored_for_the_imported_one_and_forgotten_with_it()
+    {
+        use crate::changes::store::{Slot, Store};
+        use std::io::Write;
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let (controller, context) = hosted_test_controller(directory.path());
+        let store = Store::for_engine(context.as_ref());
+        let file = directory.path().join("base.tsv.gz");
+        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        encoder
+            .write_all(b"META\tformat\t2\nF\t/a\t1\t1\tx\n")
+            .unwrap();
+        fs::write(&file, encoder.finish().unwrap()).unwrap();
+        let record = backup::ExtractedForkRecord::for_test(file, "2026-11-07T10:00:00Z");
+        let id = uuid::Uuid::new_v4().to_string();
+
+        store_fork_record(&controller, &id, None).unwrap();
+        assert_eq!(store.get(&id, Slot::Base).unwrap(), None);
+        store_fork_record(&controller, &id, Some(&record)).unwrap();
+        let (text, meta) = store.get(&id, Slot::Base).unwrap().unwrap();
+        assert!(text.contains("/a"));
+        assert_eq!((meta.source, meta.origin), (None, None));
+        forget_fork_record(&controller, &id).unwrap();
+        assert_eq!(store.get(&id, Slot::Base).unwrap(), None);
+    }
+
+    #[test]
+    fn abandoning_an_import_after_its_record_was_stored_removes_the_record() {
+        use crate::changes::store::{Slot, Store};
+        use std::io::Write;
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let (controller, context) = hosted_test_controller(directory.path());
+        let store = Store::for_engine(context.as_ref());
+        let file = directory.path().join("base.tsv.gz");
+        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        encoder.write_all(b"META\tformat\t2\n").unwrap();
+        fs::write(&file, encoder.finish().unwrap()).unwrap();
+        let record = backup::ExtractedForkRecord::for_test(file, "2026-11-07T10:00:00Z");
+        let id = uuid::Uuid::new_v4().to_string();
+        // The record is stored before the computer is; an interruption or a failed save leaves
+        // the identity journaled, and relaunch recovery discards it through this call.
+        store_fork_record(&controller, &id, Some(&record)).unwrap();
+        assert!(store.get(&id, Slot::Base).unwrap().is_some());
+        let paths = runtime::RuntimePaths {
+            guest_image: directory.path().join("guest-image"),
+            executable: directory.path().join("missing-msb"),
+            home: directory.path().join("home"),
+            storage_home: None,
+            library: directory.path().join("library"),
+            metadata: directory.path().join("computers.json"),
+            volumes: directory.path().join("volumes"),
+        };
+        recovery::discard_uncommitted_import(&paths, &controller, &id, None).unwrap();
+        assert_eq!(store.get(&id, Slot::Base).unwrap(), None);
+    }
+
+    #[test]
+    fn an_explicit_export_file_must_be_new_absolute_and_in_a_folder_that_exists() {
+        let directory = tempfile::tempdir().unwrap();
+        let folder = directory.path().canonicalize().unwrap();
+        let file = folder.join("mine.silo-backup");
+        let (parent, path) = explicit_archive(file.to_str().unwrap()).unwrap();
+        assert_eq!((parent, path), (folder.clone(), file.clone()));
+        fs::write(&file, "x").unwrap();
+        let taken = explicit_archive(file.to_str().unwrap()).unwrap_err();
+        assert!(taken.starts_with("A file already exists at "), "{taken}");
+        assert!(explicit_archive("relative.silo-backup").is_err());
+        let wrong = explicit_archive(folder.join("mine.zip").to_str().unwrap()).unwrap_err();
+        assert!(wrong.contains(".silo-backup"), "{wrong}");
+        assert!(explicit_archive(folder.join("mine").to_str().unwrap()).is_err());
+        let missing = folder.join("gone").join("x.silo-backup");
+        assert!(explicit_archive(missing.to_str().unwrap()).is_err());
+    }
+
+    #[test]
+    fn an_archive_that_names_another_guest_image_than_this_silo_pins_is_refused() {
+        let paths = runtime::RuntimePaths {
+            guest_image: PathBuf::new(),
+            executable: PathBuf::new(),
+            home: PathBuf::new(),
+            storage_home: None,
+            library: PathBuf::new(),
+            metadata: PathBuf::new(),
+            volumes: PathBuf::new(),
+        };
+        let error = prepare_archive_image(&paths, "ghcr.io/amontlabs/silo-guest:old", "sha256:aa")
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("ghcr.io/amontlabs/silo-guest:old") && error.contains("Update Silo"),
+            "{error}"
+        );
+    }
+
+    #[test]
     fn additive_export_preferences_keep_the_folder_and_survive_an_explicit_change() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("backup-history.json");
@@ -5198,6 +5509,7 @@ mod tests {
             GROUP,
             MEMBER,
             &serde_json::json!({"env":[{"key":"PROJECT_MODE","value":"portable"}]}),
+            None,
         )
         .unwrap();
         assert!(runtime::read_metadata(&paths.metadata)
@@ -5287,6 +5599,33 @@ mod tests {
     }
 
     #[test]
+    fn a_macos_import_whose_record_cannot_be_removed_keeps_its_restore_identity() {
+        let cleared = std::cell::Cell::new(false);
+        let error = settle_unsaved_macos_import(
+            TransferError::from("The import failed.".to_string()),
+            &|| Err("The record is locked.".into()),
+            &|| {
+                cleared.set(true);
+                Ok(())
+            },
+        );
+        assert!(error.preserve_import);
+        assert!(error.message.contains("The record is locked."));
+        assert!(!cleared.get(), "the identity is what recovery retries from");
+
+        let error = settle_unsaved_macos_import(
+            TransferError::from("The import failed.".to_string()),
+            &|| Ok(()),
+            &|| {
+                cleared.set(true);
+                Ok(())
+            },
+        );
+        assert!(!error.preserve_import);
+        assert!(cleared.get());
+    }
+
+    #[test]
     fn an_uncertain_commit_keeps_its_import_group_and_recovery_identity() {
         let _test_state = crate::test_support::global_state();
         let directory = tempfile::tempdir().unwrap();
@@ -5341,6 +5680,7 @@ mod tests {
             GROUP,
             MEMBER,
             &Value::Null,
+            None,
         )
         .unwrap_err();
         assert!(error.preserve_import);
@@ -5922,6 +6262,7 @@ mod tests {
                             existing_member: None,
                         },
                     ],
+                    ..Default::default()
                 },
                 &backup::Cancellation::default(),
             )
@@ -6436,6 +6777,7 @@ mod tests {
                         computer_configuration: serde_json::to_value(&configuration).unwrap(),
                         existing_member: Some(member),
                     }],
+                    ..Default::default()
                 },
                 &backup::Cancellation::default(),
             )

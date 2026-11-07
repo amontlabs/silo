@@ -773,6 +773,8 @@ pub(super) fn discard_uncommitted_import(
                 format!("Silo could not remove the unfinished import {group}: {error}")
             })?;
     }
+    // The fork-time record an archive carried is stored before the computer is saved.
+    super::forget_fork_record(controller, identity)?;
     clear_restore_identity(controller)
 }
 /// Includes a load interrupted before Silo allocated the computer identity.
@@ -1080,6 +1082,9 @@ fn recover_macos_archive(controller: &Controller, journal: &Journal) -> Result<O
         Some(id) => crate::macos_computers::recover_archive_import(&context, id)?,
         None => false,
     };
+    if let (false, Some(id)) = (committed, id) {
+        super::forget_fork_record(controller, id)?;
+    }
     Ok(if committed {
         settled(
             journal,

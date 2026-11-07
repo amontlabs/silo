@@ -283,6 +283,46 @@ pub fn computer_line(verb: &str, value: &Value) -> String {
     format!("{verb} {} ({})", text(value, "name"), text(value, "state"))
 }
 
+/// `Exported main to /path/main-2026-11-07.silo-backup (3.1 GiB)`.
+pub fn exported(value: &Value) -> String {
+    let mut line = format!(
+        "Exported {} to {} ({})",
+        text(value, "computer"),
+        text(value, "archive"),
+        text(value, "size")
+    );
+    if let Some(logins) = value["logins"]
+        .as_array()
+        .filter(|logins| !logins.is_empty())
+    {
+        line.push_str(&format!(
+            "\nIt contains {} logins: anyone with this file can use them.",
+            logins.len()
+        ));
+    }
+    if let Some(why) = value["unchecked"].as_str() {
+        let other = if value["logins"].as_array().is_some_and(|l| !l.is_empty()) {
+            "other "
+        } else {
+            ""
+        };
+        line.push_str(&format!(
+            "\nSilo could not check it for {other}logins ({}).",
+            why.trim().trim_end_matches('.')
+        ));
+    }
+    line
+}
+
+/// `Imported main-imported (stopped). Start it with \`silo start main-imported\`.`
+pub fn imported(value: &Value) -> String {
+    let name = text(value, "name");
+    format!(
+        "{}\nStart it with `silo start {name}`. If it was a fork, bring its work into main with `silo fold {name} --into main`.",
+        computer_line("Imported", value)
+    )
+}
+
 /// `Forked try (stopped): main as of 14:02:31 (new checkpoint)`.
 pub fn forked(value: &Value) -> String {
     let line = computer_line("Forked", value);
@@ -537,6 +577,22 @@ mod tests {
         assert_eq!(
             credentials_line(&json!({"used": [], "blocked": []})),
             "credentials used: none"
+        );
+    }
+
+    #[test]
+    fn an_export_that_could_not_be_fully_checked_says_other_logins_only_when_some_were_listed() {
+        let with = json!({"computer": "main", "archive": "/a", "size": "1 GiB",
+            "logins": ["a GitHub CLI login (/root/.config/gh/hosts.yml)"], "unchecked": "the computer is stopped."});
+        let text = exported(&with);
+        assert!(
+            text.contains("could not check it for other logins (the computer is stopped)"),
+            "{text}"
+        );
+        let without = json!({"computer": "main", "archive": "/a", "size": "1 GiB",
+            "logins": [], "unchecked": "the computer is stopped."});
+        assert!(
+            exported(&without).contains("could not check it for logins (the computer is stopped)")
         );
     }
 

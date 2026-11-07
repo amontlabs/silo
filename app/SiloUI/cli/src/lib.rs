@@ -22,6 +22,7 @@ pub mod ops;
 pub mod pr;
 pub mod render;
 pub mod review;
+pub mod share;
 pub mod steps;
 pub mod summary;
 pub mod usetools;

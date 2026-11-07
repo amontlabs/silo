@@ -1,0 +1,39 @@
+{
+  "refusal": {
+    "conflicts": [
+      {
+        "detail": "changed on main since the fork was made, and differently in the fork",
+        "item": "/home/silo/.dbus/session-bus/dd8e791f03504d36b746bb39f70b8e8f-1",
+        "kind": "file"
+      },
+      {
+        "detail": "changed on main since the fork was made, and differently in the fork",
+        "item": "/home/silo/share-conflict.txt",
+        "kind": "file"
+      }
+    ],
+    "hint": "Bring main's change into the fork (or remove the file from the fork's commits) and keep again.",
+    "message": "Keep stopped: /home/silo/.dbus/session-bus/dd8e791f03504d36b746bb39f70b8e8f-1, /home/silo/share-conflict.txt clash on 075b8774-dd14-4808-9b14-da19daaeaea3 and in 73fc5495-c581-4c29-b5ac-c5cbeb281335. 075b8774-dd14-4808-9b14-da19daaeaea3 was not changed.",
+    "reason": "divergent"
+  },
+  "report": {
+    "checkpoint": null,
+    "fork": "73fc5495-c581-4c29-b5ac-c5cbeb281335",
+    "notes": [],
+    "reviewDigest": "86c0ce8d1ce30a0f592a86f3b4ade16e750044614ef7052537f4c4dcdb25afc5",
+    "steps": [],
+    "summary": [
+      "Settings & files",
+      "  ~ /etc/ssl/certs/ca-certificates.crt",
+      "  ~ /home/silo/.dbus/session-bus/dd8e791f03504d36b746bb39f70b8e8f-1",
+      "Other changed",
+      "  + /home/silo/share-conflict.txt",
+      "  + /home/silo/share-marker.txt",
+      "Not kept",
+      "  credentials: /home/silo/.claude/.credentials.json",
+      "Ignored: 5 paths (caches, logs, build output)"
+    ],
+    "target": "075b8774-dd14-4808-9b14-da19daaeaea3"
+  },
+  "status": "refused"
+}
