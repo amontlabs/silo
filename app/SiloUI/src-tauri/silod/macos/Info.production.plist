@@ -10,5 +10,7 @@
 	<string>Silo Engine</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Silo connects over SSH to the devices you add under Connections, including devices on your local network.</string>
 </dict>
 </plist>

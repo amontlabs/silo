@@ -1791,6 +1791,13 @@ fn request_timeout(request: &Value) -> Duration {
         Duration::from_secs(600)
     }
 }
+/// On a Mac, Local Network privacy turns the engine's connections to LAN addresses into
+/// "No route to host" until Silo Engine is allowed under Local Network.
+#[cfg(target_os = "macos")]
+const NO_ROUTE: &str = "This Mac cannot reach the other device (No route to host). If it is on your local network, allow Silo Engine in System Settings > Privacy & Security > Local Network, then try again; otherwise check the address and network.";
+#[cfg(not(target_os = "macos"))]
+const NO_ROUTE: &str =
+    "This device cannot reach the other device (No route to host). Check the address and network.";
 const CONNECTION_HELP: &str = "Cannot connect to Silo over SSH. Verify the address, authorize its host key using SSH, and configure an SSH key or agent. On the other device, keep Silo running with Connections turned on.";
 /// Names the cause of a failed connection from the ssh exit code and stderr, without echoing raw output.
 const AUTHENTICATION_FAILED: &str = "SSH authentication failed. Set up Silo's SSH key for this device, or configure an SSH key or agent.";
@@ -1809,6 +1816,8 @@ fn connection_failure(code: Option<i32>, stderr: &str) -> String {
             "The other device refused the SSH connection. Turn on Remote Login (SSH) there."
         } else if has("timed out") {
             "The SSH connection timed out. Check that the other device is awake and reachable."
+        } else if has("No route to host") || has("Network is unreachable") || has("Host is down") {
+            NO_ROUTE
         } else {
             CONNECTION_HELP
         };
@@ -5501,6 +5510,12 @@ mod connection_failure_tests {
             connection_failure(Some(255), "ssh: Could not resolve hostname office\n")
                 .contains("resolve")
         );
+        for stderr in [
+            "ssh: connect to host 10.77.77.2 port 22: No route to host\n",
+            "ssh: connect to host 10.77.77.2 port 22: Network is unreachable\n",
+        ] {
+            assert_eq!(connection_failure(Some(255), stderr), NO_ROUTE);
+        }
         assert_eq!(
             connection_failure(Some(255), "\x1b[31msecret banner"),
             CONNECTION_HELP
