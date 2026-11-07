@@ -22,6 +22,11 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# crun may only move the container into its cgroup from inside the delegated subtree (it needs write access to the
+# common ancestor's cgroup.procs), so this shell, and everything it starts, first moves into a leaf of it.
+mkdir -p "$CGROOT/ctl" && echo $$ | sudo tee "$CGROOT/ctl/cgroup.procs" > /dev/null
+echo "driver cgroup: $(cat /proc/self/cgroup)"
+
 section_facts() {
   {
     echo "date: $(date -u +%FT%TZ)"
