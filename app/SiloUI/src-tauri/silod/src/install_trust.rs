@@ -219,6 +219,7 @@ impl Walk<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use silo_engine::safe_directories::StaticAccounts;
     use std::os::unix::fs::symlink;
 
     fn euid() -> u32 {
@@ -255,44 +256,22 @@ mod tests {
         (top, directory)
     }
 
-    /// Accounts for the private-group rule: `private` maps an owner uid to the gid that is
-    /// its private group; every other group is shared.
-    #[derive(Default)]
-    struct Accounts {
-        private: Vec<(u32, u32)>,
-    }
-
-    impl AccountDatabase for Accounts {
-        fn account(&self, uid: u32) -> Option<safe_directories::Account> {
-            let (_, gid) = self.private.iter().find(|(owner, _)| *owner == uid)?;
-            Some(safe_directories::Account {
-                name: format!("user{uid}"),
-                primary_gid: *gid,
-            })
-        }
-
-        fn group(&self, gid: u32) -> Option<safe_directories::Group> {
-            let members = match self.private.iter().find(|(_, private)| *private == gid) {
-                Some(_) => Vec::new(),
-                None => vec!["someone".to_owned(), "else".to_owned()],
-            };
-            Some(safe_directories::Group {
-                name: format!("group{gid}"),
-                members,
-            })
-        }
-
-        fn other_account_has_primary_group(&self, _gid: u32, _uid: u32) -> bool {
-            false
-        }
-    }
-
     fn check(top: &Path, directory: &Path) -> Result<(), String> {
-        check_with(top, directory, &Accounts::default())
+        check_with(top, directory, &StaticAccounts::default(), euid())
     }
 
-    fn check_with(top: &Path, directory: &Path, accounts: &Accounts) -> Result<(), String> {
-        verify_engine_directory_below(&directory.join("silod"), euid(), top, accounts)
+    fn check_with(
+        top: &Path,
+        directory: &Path,
+        accounts: &StaticAccounts,
+        euid: u32,
+    ) -> Result<(), String> {
+        verify_engine_directory_below(&directory.join("silod"), euid, top, accounts)
+    }
+
+    fn lchown(path: &Path, id: u32) {
+        let path = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
+        assert_eq!(unsafe { libc::lchown(path.as_ptr(), id, id) }, 0);
     }
 
     #[test]
@@ -354,26 +333,57 @@ mod tests {
 
     /// A home directory made with umask 002 is mode 0775 in its owner's private group: the
     /// engine directory and its ancestors are accepted then, and refused (naming the mode,
-    /// the group and `chmod g-w`) when the group is shared.
+    /// the group and `chmod g-w`) when the group is shared or is root's.
     #[test]
     fn group_write_for_the_owners_private_group_is_accepted() {
         let (top, directory) = engine();
         set_mode(top.path(), 0o775);
         set_mode(&directory, 0o775);
         set_mode(&directory.join("resources/engine-manifest.json"), 0o664);
-        let metadata = fs::metadata(&directory).unwrap();
-        let private = Accounts {
-            private: vec![(metadata.uid(), metadata.gid())],
-        };
-        check_with(top.path(), &directory, &private).unwrap();
 
-        let error = check(top.path(), &directory).unwrap_err();
+        // Root gets no exemption: root:root 0775 is refused even when root's group looks
+        // private.
+        let (uid, gid) = if euid() == 0 {
+            let error = check_with(
+                top.path(),
+                &directory,
+                &StaticAccounts::private(0, "root", 0),
+                0,
+            )
+            .unwrap_err();
+            assert!(
+                error.contains(&format!(
+                    "{} can be changed by other accounts (mode 775, writable by group root",
+                    top.path().display()
+                )),
+                "{error}"
+            );
+            // The test plays account 4242, which root has no private group to stand in for.
+            let mut paths = vec![top.path().to_path_buf()];
+            while let Some(path) = paths.pop() {
+                lchown(&path, 4242);
+                if fs::symlink_metadata(&path).unwrap().is_dir() {
+                    for entry in fs::read_dir(&path).unwrap() {
+                        paths.push(entry.unwrap().path());
+                    }
+                }
+            }
+            (4242, 4242)
+        } else {
+            let metadata = fs::metadata(&directory).unwrap();
+            (metadata.uid(), metadata.gid())
+        };
+        let private = StaticAccounts::private(uid, "silo-controller", gid);
+        check_with(top.path(), &directory, &private, uid).unwrap();
+
+        let mut shared = StaticAccounts::private(uid, "silo-controller", gid);
+        shared.add_group(gid, "staff", &["silo-controller", "ben"]);
+        let error = check_with(top.path(), &directory, &shared, uid).unwrap_err();
         assert!(
             error.contains(&format!(
-                "{} can be changed by other accounts (mode 775, writable by group group{}, \
+                "{} can be changed by other accounts (mode 775, writable by group staff, \
                  which is not a private group of its owner): run chmod g-w {}",
                 top.path().display(),
-                metadata.gid(),
                 top.path().display()
             )),
             "{error}"
@@ -381,10 +391,10 @@ mod tests {
 
         // Write access for everyone, and a sticky directory, stay refused.
         set_mode(&directory, 0o777);
-        let error = check_with(top.path(), &directory, &private).unwrap_err();
+        let error = check_with(top.path(), &directory, &private, uid).unwrap_err();
         assert!(error.contains("writable by everyone"), "{error}");
         set_mode(&directory, 0o1775);
-        let error = check_with(top.path(), &directory, &private).unwrap_err();
+        let error = check_with(top.path(), &directory, &private, uid).unwrap_err();
         assert!(error.contains("sticky"), "{error}");
     }
 

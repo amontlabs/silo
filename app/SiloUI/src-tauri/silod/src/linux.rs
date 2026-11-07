@@ -295,6 +295,8 @@ fn write_store_record(path: &Path, store: CredentialStore) -> Result<(), String>
     silo_engine::safe_directories::create_directories(
         directory,
         directory.parent().unwrap_or(directory),
+        unsafe { libc::geteuid() },
+        &silo_engine::safe_directories::SystemAccounts,
     )
     .map_err(failed)?;
     let staged = directory.join(format!(

@@ -126,7 +126,7 @@ fn prepare(
             root.display()
         )
     };
-    check_ancestors(root, checked_from, accounts).map_err(unusable)?;
+    check_ancestors(root, checked_from, euid(), accounts).map_err(unusable)?;
     let directory = open_root(root, true)
         .map_err(unusable)?
         .ok_or_else(|| unusable(io::ErrorKind::NotFound.into()))?;
@@ -138,13 +138,16 @@ fn prepare(
 }
 
 /// Creates the directories from `checked_from` down to `root`'s parent when they are missing
-/// (`checked_from` and the directories above it mode 0755, those below it 0700) and requires
-/// each from `checked_from` down to be a real directory of this account or root that nobody
-/// else can write to (its owner's private group may: [`safe_directories::others_can_change`]).
-/// `root` itself is checked (and narrowed to 0700) by [`open_root`].
+/// (`checked_from` and the directories above it mode 0755, those below it 0700, through
+/// [`safe_directories::create_directories`], which also requires the directory it creates in
+/// to be safe) and requires each from `checked_from` down to be a real directory of `euid` or
+/// root that nobody else can write to (its owner's private group may:
+/// [`safe_directories::others_can_change`]). `root` itself is checked (and narrowed to 0700)
+/// by [`open_root`].
 fn check_ancestors(
     root: &Path,
     checked_from: &Path,
+    euid: u32,
     accounts: &dyn AccountDatabase,
 ) -> io::Result<()> {
     let parent = root
@@ -161,23 +164,13 @@ fn check_ancestors(
         .take_while(|ancestor| ancestor.starts_with(checked_from))
         .collect::<Vec<_>>();
     chain.reverse();
-    if let Some(above) = checked_from.parent() {
-        safe_directories::create_directories(above, above)?;
-    }
+    safe_directories::create_directories(parent, checked_from, euid, accounts)?;
     for directory in chain {
-        // One level at a time, after the level above passed, so nothing is made through a
-        // link.
-        let mode = if directory == checked_from {
-            0o755
-        } else {
-            0o700
-        };
-        safe_directories::create_directory(directory, mode)?;
         let stat = statat(CWD, directory, AtFlags::SYMLINK_NOFOLLOW)?;
         if FileType::from_raw_mode(stat.st_mode) != FileType::Directory {
             return Err(refused(directory, "is not a directory"));
         }
-        if stat.st_uid != 0 && stat.st_uid != euid() {
+        if stat.st_uid != 0 && stat.st_uid != euid {
             return Err(refused(
                 directory,
                 "belongs to another account, not this one or root",
@@ -376,7 +369,12 @@ fn dir_flags() -> OFlags {
 fn open_root(root: &Path, create: bool) -> io::Result<Option<OwnedFd>> {
     if create {
         if let Some(parent) = root.parent() {
-            safe_directories::create_directories(parent, parent.parent().unwrap_or(parent))?;
+            safe_directories::create_directories(
+                parent,
+                parent.parent().unwrap_or(parent),
+                euid(),
+                &SystemAccounts,
+            )?;
         }
     }
     open_directory(CWD, root, root, create)
@@ -584,7 +582,7 @@ pub fn credential_path(entry: &keyring::Entry) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::safe_directories::tests::FakeAccounts;
+    use crate::safe_directories::StaticAccounts;
     use std::fs;
     use std::os::unix::fs::{MetadataExt, PermissionsExt};
 
@@ -597,8 +595,8 @@ mod tests {
 
     /// Accounts with no private groups, so every group-writable directory is refused
     /// whoever runs the tests.
-    fn no_private_groups() -> FakeAccounts {
-        FakeAccounts::default()
+    fn no_private_groups() -> StaticAccounts {
+        StaticAccounts::default()
     }
 
     fn mode(path: &Path) -> u32 {
@@ -799,23 +797,49 @@ mod tests {
     }
 
     /// `~/.local/share` of an account with umask 002 and a user-private group (Debian,
-    /// Ubuntu) is mode 0775 in that group, and the store accepts it; a shared group, or
-    /// write access for everyone, is still refused with the mode, the group and a fix.
+    /// Ubuntu) is mode 0775 in that group, and the store accepts it; a shared group, root's
+    /// group, or write access for everyone is still refused with the mode, the group and a fix.
     #[test]
     fn a_data_directory_in_the_owners_private_group_is_accepted() {
         let home = tempfile::tempdir().unwrap();
         fs::set_permissions(home.path(), fs::Permissions::from_mode(0o700)).unwrap();
         let data = home.path().join("share");
-        fs::create_dir(&data).unwrap();
+        let store = data.join("org.silo.dev");
+        let root = store.join(DIRECTORY_NAME);
+        fs::create_dir_all(&store).unwrap();
         fs::set_permissions(&data, fs::Permissions::from_mode(0o775)).unwrap();
-        let root = data.join("org.silo.dev").join(DIRECTORY_NAME);
-        let stat = fs::metadata(&data).unwrap();
-        let private = FakeAccounts::private(stat.uid(), "silo-controller", stat.gid());
-        prepare(&root, &data, true, &private).unwrap();
+        fs::set_permissions(&store, fs::Permissions::from_mode(0o700)).unwrap();
 
-        let mut shared = FakeAccounts::private(stat.uid(), "silo-controller", stat.gid());
-        shared.add_group(stat.gid(), "staff", &["silo-controller", "ben"]);
-        let error = prepare(&root, &data, true, &shared).unwrap_err();
+        // Root gets no exemption: as root, the directories first stay root's.
+        if euid() == 0 {
+            let error = check_ancestors(&root, &data, 0, &StaticAccounts::private(0, "root", 0))
+                .unwrap_err()
+                .to_string();
+            assert!(
+                error.contains("can be changed by other accounts"),
+                "{error}"
+            );
+        }
+        // The account the test plays: this one, or (as root, which has no private group)
+        // 4242, which the directories are given.
+        let (uid, gid) = if euid() == 0 {
+            for path in [&data, &store] {
+                let path = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
+                assert_eq!(unsafe { libc::lchown(path.as_ptr(), 4242, 4242) }, 0);
+            }
+            (4242, 4242)
+        } else {
+            let stat = fs::metadata(&data).unwrap();
+            (stat.uid(), stat.gid())
+        };
+        let private = StaticAccounts::private(uid, "silo-controller", gid);
+        check_ancestors(&root, &data, uid, &private).unwrap();
+
+        let mut shared = StaticAccounts::private(uid, "silo-controller", gid);
+        shared.add_group(gid, "staff", &["silo-controller", "ben"]);
+        let error = check_ancestors(&root, &data, uid, &shared)
+            .unwrap_err()
+            .to_string();
         assert!(
             error.contains(&format!(
                 "{} can be changed by other accounts (mode 775, writable by group staff, which \
@@ -827,9 +851,34 @@ mod tests {
         );
 
         fs::set_permissions(&data, fs::Permissions::from_mode(0o777)).unwrap();
-        let error = prepare(&root, &data, true, &private).unwrap_err();
+        let error = check_ancestors(&root, &data, uid, &private)
+            .unwrap_err()
+            .to_string();
         assert!(error.contains("writable by everyone"), "{error}");
         assert!(error.contains("chmod go-w"), "{error}");
+    }
+
+    /// A missing XDG data directory is created only in a directory nobody else can change.
+    #[test]
+    fn a_data_directory_is_not_created_where_others_can_write() {
+        let home = tempfile::tempdir().unwrap();
+        fs::set_permissions(home.path(), fs::Permissions::from_mode(0o777)).unwrap();
+        let data = home.path().join("local/share");
+        let error = prepare(
+            &data.join("org.silo.dev").join(DIRECTORY_NAME),
+            &data,
+            true,
+            &no_private_groups(),
+        )
+        .unwrap_err();
+        assert!(
+            error.contains(&format!(
+                "{} can be changed by other accounts",
+                home.path().display()
+            )),
+            "{error}"
+        );
+        assert!(!home.path().join("local").exists());
     }
 
     #[test]

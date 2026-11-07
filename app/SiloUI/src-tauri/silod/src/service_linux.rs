@@ -333,8 +333,13 @@ fn read_marked(path: &Path) -> io::Result<Option<String>> {
 fn write_unit(path: &Path, contents: &str) -> Result<(), String> {
     let directory = path.parent().expect("the unit path has a directory");
     // `~/.config/systemd/user` and its parents get mode 0755, whatever the umask.
-    silo_engine::safe_directories::create_directories(directory, directory)
-        .map_err(|error| format!("Cannot create {}: {error}", directory.display()))?;
+    silo_engine::safe_directories::create_directories(
+        directory,
+        directory,
+        unsafe { libc::geteuid() },
+        &silo_engine::safe_directories::SystemAccounts,
+    )
+    .map_err(|error| format!("Cannot create {}: {error}", directory.display()))?;
     let temporary = directory.join(format!(
         ".{}.{}.tmp",
         path.file_name()

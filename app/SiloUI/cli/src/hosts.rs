@@ -868,10 +868,11 @@ fn ssh_directory_advice(home: &Path) -> Vec<String> {
             let metadata = fs::metadata(&path).ok()?;
             let (group, members) = group_entry(metadata.gid());
             let private = is_private_group(
-                account_entry(metadata.uid()),
+                metadata.uid(),
                 metadata.gid(),
-                members.as_deref(),
-                || other_primary_group(metadata.gid(), metadata.uid()),
+                account_entry(metadata.uid()),
+                group.as_deref().zip(members.as_deref()),
+                || local_account_files().ok_or(()),
             );
             let group = group.unwrap_or_else(|| metadata.gid().to_string());
             strict_modes_advice(&path, metadata.mode(), &group, private && debian_sshd)
@@ -903,43 +904,94 @@ fn strict_modes_advice(
     ))
 }
 
-/// Whether `gid` is a user-private group of the owner (`owner`: its name and primary group),
-/// the rule Debian's OpenSSH applies for `StrictModes`: it is the owner's primary group, it
-/// lists no member but the owner, and (`other_primary`) no other account has it as its
-/// primary group. The engine applies the same rule (`silo_engine::safe_directories`), which
-/// the CLI does not depend on.
+/// Whether `gid` is a user-private group of the owner `uid` (`owner`: its name and primary
+/// group from `getpwuid_r`; `group`: the group's name and members from `getgrgid_r`), the
+/// rule Debian's OpenSSH applies for `StrictModes` with the engine's additions
+/// (`silo_engine::safe_directories`, which the CLI does not depend on, so this is a copy):
+/// never for uid or gid 0; the group is the owner's primary group and lists no member but the
+/// owner; and `local` (`/etc/passwd`, `/etc/group`) agrees: the owner's own line gives the
+/// same name and primary group, no other account has the group as its primary group, and the
+/// group has exactly one line with the same name and members. Unreadable files refuse.
 fn is_private_group(
-    owner: Option<(String, libc::gid_t)>,
+    uid: libc::uid_t,
     gid: libc::gid_t,
-    members: Option<&[String]>,
-    other_primary: impl FnOnce() -> bool,
+    owner: Option<(String, libc::gid_t)>,
+    group: Option<(&str, &[String])>,
+    local: impl FnOnce() -> Result<(String, String), ()>,
 ) -> bool {
-    let Some((name, primary)) = owner else {
+    if uid == 0 || gid == 0 {
+        return false;
+    }
+    let (Some((name, primary)), Some((group_name, members))) = (owner, group) else {
         return false;
     };
     let only_owner = match members {
-        Some([]) => true,
-        Some([member]) => *member == name,
+        [] => true,
+        [member] => *member == name,
         _ => false,
     };
-    primary == gid && only_owner && !other_primary()
+    if primary != gid || !only_owner {
+        return false;
+    }
+    let Ok((passwd, groups)) = local() else {
+        return false;
+    };
+    let entries = |contents: &str| {
+        contents
+            .lines()
+            .map(|line| line.split(':').map(str::to_owned).collect::<Vec<_>>())
+            .filter(|fields| fields.len() >= 4 && fields[2].parse::<u32>().is_ok())
+            .collect::<Vec<_>>()
+    };
+    let mut own = false;
+    for fields in entries(&passwd) {
+        let (Ok(line_uid), Ok(line_gid)) = (fields[2].parse::<u32>(), fields[3].parse::<u32>())
+        else {
+            continue;
+        };
+        if line_uid == uid && fields[0] == name && line_gid == primary {
+            own = true;
+        } else if line_gid == gid && line_uid != uid {
+            return false;
+        }
+    }
+    let lines = entries(&groups)
+        .into_iter()
+        .filter(|fields| fields[2].parse::<u32>() == Ok(gid))
+        .collect::<Vec<_>>();
+    let [fields] = lines.as_slice() else {
+        return false;
+    };
+    let mut listed = fields[3]
+        .split(',')
+        .filter(|member| !member.is_empty())
+        .collect::<Vec<_>>();
+    let mut expected = members.iter().map(String::as_str).collect::<Vec<_>>();
+    listed.sort_unstable();
+    expected.sort_unstable();
+    own && fields[0] == group_name && listed == expected
 }
 
-/// Whether an account other than `uid` in `/etc/passwd` has `gid` as its primary group. Only
-/// that file is read, because `getpwent` is not thread-safe; an unreadable file answers
-/// true.
-fn other_primary_group(gid: libc::gid_t, uid: libc::uid_t) -> bool {
-    match fs::read_to_string("/etc/passwd") {
-        Ok(passwd) => passwd.lines().any(|line| {
-            let fields = line.split(':').collect::<Vec<_>>();
-            fields.len() >= 4
-                && fields[3].parse() == Ok(gid)
-                && fields[2]
-                    .parse::<libc::uid_t>()
-                    .is_ok_and(|other| other != uid)
-        }),
-        Err(_) => true,
-    }
+/// The largest `/etc/passwd` or `/etc/group` read; a larger one counts as unreadable.
+const MAX_LOCAL_FILE_BYTES: u64 = 16 * 1024 * 1024;
+
+/// `/etc/passwd` and `/etc/group`, read directly because `getpwent` is not thread-safe, or
+/// `None` when either cannot be read whole.
+fn local_account_files() -> Option<(String, String)> {
+    let read = |path: &str| {
+        use std::io::Read;
+        let mut contents = Vec::new();
+        fs::File::open(path)
+            .ok()?
+            .take(MAX_LOCAL_FILE_BYTES + 1)
+            .read_to_end(&mut contents)
+            .ok()?;
+        if contents.len() as u64 > MAX_LOCAL_FILE_BYTES {
+            return None;
+        }
+        String::from_utf8(contents).ok()
+    };
+    Some((read("/etc/passwd")?, read("/etc/group")?))
 }
 
 fn service_name(channel: Channel) -> String {
@@ -1911,18 +1963,54 @@ mod tests {
         let none: &[String] = &[];
         let ana = ["ana".to_owned()];
         let shared = ["ana".to_owned(), "ben".to_owned()];
-        assert!(super::is_private_group(owner(), 1000, Some(none), || false));
-        assert!(super::is_private_group(owner(), 1000, Some(&ana), || false));
-        assert!(!super::is_private_group(
-            owner(),
-            1000,
-            Some(&shared),
-            || false
+        let passwd = "root:x:0:0:root:/root:/bin/bash\nana:x:1000:1000::/home/ana:/bin/sh\n";
+        let local = || Ok((passwd.to_owned(), "root:x:0:\nana:x:1000:\n".to_owned()));
+        use super::is_private_group as private;
+        assert!(private(1000, 1000, owner(), Some(("ana", none)), local));
+        let local_ana = || Ok((passwd.to_owned(), "ana:x:1000:ana\n".to_owned()));
+        assert!(private(1000, 1000, owner(), Some(("ana", &ana)), local_ana));
+        assert!(!private(1000, 1000, owner(), Some(("ana", &shared)), local));
+        assert!(!private(1000, 100, owner(), Some(("ana", none)), local));
+        assert!(!private(1000, 1000, owner(), None, local));
+        assert!(!private(1000, 1000, None, Some(("ana", none)), local));
+        // Root, root's group, unreadable files, and accounts or groups the files do not list
+        // as the lookups give them.
+        let root = || {
+            Ok((
+                "root:x:0:0::/root:/bin/sh\n".to_owned(),
+                "root:x:0:\n".to_owned(),
+            ))
+        };
+        assert!(!private(
+            0,
+            0,
+            Some(("root".to_owned(), 0)),
+            Some(("root", none)),
+            root
         ));
-        assert!(!super::is_private_group(owner(), 100, Some(none), || false));
-        assert!(!super::is_private_group(owner(), 1000, None, || false));
-        assert!(!super::is_private_group(None, 1000, Some(none), || false));
-        assert!(!super::is_private_group(owner(), 1000, Some(none), || true));
+        assert!(!private(1000, 1000, owner(), Some(("ana", none)), || Err(
+            ()
+        )));
+        let other = format!("{passwd}ben:x:1001:1000::/home/ben:/bin/sh\n");
+        let local_other = || Ok((other.clone(), "ana:x:1000:\n".to_owned()));
+        assert!(!private(
+            1000,
+            1000,
+            owner(),
+            Some(("ana", none)),
+            local_other
+        ));
+        let ldap = || {
+            Ok((
+                "root:x:0:0::/root:/bin/sh\n".to_owned(),
+                "ana:x:1000:\n".to_owned(),
+            ))
+        };
+        assert!(!private(1000, 1000, owner(), Some(("ana", none)), ldap));
+        let members = || Ok((passwd.to_owned(), "ana:x:1000:ben\n".to_owned()));
+        assert!(!private(1000, 1000, owner(), Some(("ana", none)), members));
+        let missing = || Ok((passwd.to_owned(), "root:x:0:\n".to_owned()));
+        assert!(!private(1000, 1000, owner(), Some(("ana", none)), missing));
 
         let path = std::path::Path::new("/home/ana");
         assert_eq!(super::strict_modes_advice(path, 0o40775, "ana", true), None);
