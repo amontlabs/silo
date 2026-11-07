@@ -719,10 +719,20 @@ fn run(command: &mut Command, timeout: Duration) -> Result<(), String> {
 }
 
 fn run_with_stdout(command: &mut Command, timeout: Duration, stdout: Stdio) -> Result<(), String> {
+    // On Linux, where no app shows a log, the tool's first error line goes with the failure.
+    #[cfg(target_os = "linux")]
+    let mut errors = tempfile::tempfile().ok();
+    #[cfg(target_os = "linux")]
+    let stderr = errors
+        .as_ref()
+        .and_then(|file| file.try_clone().ok())
+        .map_or_else(Stdio::null, Stdio::from);
+    #[cfg(not(target_os = "linux"))]
+    let stderr = Stdio::null();
     let mut child = applications::launch::sanitize_child(command)
         .stdin(Stdio::null())
         .stdout(stdout)
-        .stderr(Stdio::null())
+        .stderr(stderr)
         .spawn()
         .map_err(|_| FAILED)?;
     let deadline = Instant::now() + timeout;
@@ -732,6 +742,10 @@ fn run_with_stdout(command: &mut Command, timeout: Duration, stdout: Stdio) -> R
                 return if status.success() {
                     Ok(())
                 } else {
+                    #[cfg(target_os = "linux")]
+                    if let Some(line) = errors.as_mut().and_then(first_error_line) {
+                        return Err(format!("{FAILED} {line}"));
+                    }
                     Err(FAILED.into())
                 }
             }
@@ -743,6 +757,22 @@ fn run_with_stdout(command: &mut Command, timeout: Duration, stdout: Stdio) -> R
             }
         }
     }
+}
+
+#[cfg(target_os = "linux")]
+fn first_error_line(file: &mut fs::File) -> Option<String> {
+    let mut text = String::new();
+    file.seek(SeekFrom::Start(0)).ok()?;
+    file.take(4096).read_to_string(&mut text).ok()?;
+    let line: String = text
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())?
+        .chars()
+        .filter(|character| !character.is_control())
+        .take(300)
+        .collect();
+    Some(line)
 }
 
 pub(crate) fn validate_public_key(public: &str) -> Result<(), String> {
