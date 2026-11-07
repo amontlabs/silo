@@ -3,7 +3,7 @@
 Run 7 Nov 2026 with `docs/forks-ci/checks/measure_forks.sh` (`MACHINE=mac-m4max-dev`). Full output: `run.txt`; raw files: `raw/`.
 
 - **Machine:** Apple M4 Max, 64 GiB RAM (about 30 GiB free+inactive at start), 16 cores, macOS 26.5 (25F71), arm64.
-- **Engine:** Dev engine silod PID 73199, from `app/SiloUI/target/release/bundle/macos/Silo Dev.app` in the main checkout, built at commit 620a4683. CLI `~/.local/bin/silo-dev`. Not rebuilt. Scripts at the commit named in `run.txt`.
+- **Engine:** Dev engine silod PID 73199, from `app/SiloUI/target/release/bundle/macos/Silo Dev.app` in the main checkout, built at commit 620a4683. CLI `~/.local/bin/silo-dev`. Not rebuilt. The scripts ran uncommitted on top of e526eb51 (the commit `run.txt` names) and were committed unchanged as 476d9c0e. The 10-fork RAM check printed a wrong "median from (d)" (495.9 MiB; the median is 498.45): it gates only whether (f) runs, and no figure here uses it. Fixed in the script since.
 - **Source computer:** `main` made by `silo up --recipe demo` (2 cpu, 4 GiB, project `docs/v1/checks/final-proj`); dropped at the end. Other computers untouched.
 - **Clock:** monotonic wall clock of the `silo fork` process, spawn to exit (every fork started and `true` run in it). The CLI polls jobs every 300 ms, so a value can read up to 0.3 s late.
 - **RAM:** macOS `footprint -p` over the computer's `msb` process tree, 20 s after ready.

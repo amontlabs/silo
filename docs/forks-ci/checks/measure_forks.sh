@@ -92,7 +92,7 @@ trap cleanup EXIT
 
 header() {
   echo "== header ($(date -u +%FT%TZ))"
-  echo "commit of the scripts: $(git -C "$REPO" rev-parse HEAD 2>/dev/null)"
+  echo "commit of the scripts: $(git -C "$REPO" rev-parse HEAD 2>/dev/null)$(git -C "$REPO" status --porcelain -- docs/forks-ci/checks | grep -q . && echo " (scripts modified in the working tree)")"
   python3 "$CHECKS/measure_facts.py"
   echo "silo CLI: $SILO ($("$SILO" --version 2>&1 | head -1); channel $("$SILO" --print-channel-identifier 2>/dev/null))"
   echo "silo CLI resolves to: $(python3 -c 'import os,sys;print(os.path.realpath(sys.argv[1]))' "$SILO")"
@@ -148,7 +148,7 @@ measure_warm4() { # (b) and (d)
 
 measure_ten() { # (f)
   local per avail need
-  per=$(sort -n "$RAW/ram-per-fork.txt" 2>/dev/null | awk '{v[NR]=$2} END{if(NR) print v[int((NR+1)/2)]; else print 0}')
+  per=$(sort -k2 -n "$RAW/ram-per-fork.txt" 2>/dev/null | awk '{v[NR]=$2} END{if(NR) print v[int((NR+1)/2)]; else print 0}')
   avail=$(python3 "$CHECKS/measure_facts.py" avail-mib)
   # Needs the per-fork median of (d) times TEN, plus 25 % and 2 GiB left for the host.
   need=$(python3 -c "print(int($per * $TEN * 1.25 + 2048))")
