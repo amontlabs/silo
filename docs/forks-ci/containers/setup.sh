@@ -105,13 +105,13 @@ Allow 10.200.0.0/16
 ConnectPort 443
 DisableViaHeader Yes
 CONF
-tinyproxy -c "$WORK/tinyproxy.conf"
+tinyproxy -c "$WORK/tinyproxy.conf" </dev/null >"$WORK/tinyproxy.out" 2>&1
 sleep 1
 echo "proxy listening: $(ss -ltn 'sport = :3128' | tail -n +2)"
 
 say "a canary service on the host that a container must not reach"
 mkdir -p "$WORK/canary"
-( cd "$WORK/canary" && echo canary > index.html && nohup python3 -m http.server 8000 --bind 0.0.0.0 > "$WORK/canary.log" 2>&1 & )
+( cd "$WORK/canary" && echo canary > index.html && setsid nohup python3 -m http.server 8000 --bind 0.0.0.0 </dev/null > "$WORK/canary.log" 2>&1 & )
 sleep 1
 echo "canary: $(curl -s --max-time 3 http://127.0.0.1:8000/)"
 say "setup done"
