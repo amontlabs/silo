@@ -4,7 +4,7 @@ This is the work planned after the current release, in order. It starts from wha
 do today, as stated in the [threat model](THREAT-MODEL.md) and measured by the [isolation evals](evals/README.md), and says which
 milestone closes or narrows each gap.
 
-Last updated 2026-11-03. When a milestone lands, its section here is shortened to a line under
+Last updated 2026-11-07. When a milestone lands, its section here is shortened to a line under
 [Done](#done) and the threat model and evals are updated in the same change.
 
 **Order.** *Next* is work that needs no funding and starts now. *Funded* is work that starts once
@@ -154,8 +154,15 @@ runs the silod, CLI and client tests on Linux. Phase 3 added `silod --service`, 
 systemd user unit, the `linux-x64` and `linux-arm64` archives in the engine release workflow
 (built natively on `ubuntu-24.04` and `ubuntu-24.04-arm`), and `.github/workflows/linux-host.yml`,
 which installs the Dev archive on a KVM runner and creates, starts, runs a command in, forks and
-drops a Linux computer through the `silo` command. Still open: an engine release that carries the
-Linux archives, a green run of the KVM job, and the threat model section.
+drops a Linux computer through the `silo` command. Phase 4 added `silo host init` (VM and account
+checks, the service, Connections on, `--authorize` for a controller's key, the address), `silo host
+status` and `revoke`, and `silo devices add` by address (with `list`, `remove` and `key`); phase 5
+routed `exec`, `fork -- <command>` and the computer-use tools to another device. The KVM job is
+green, including its two-account run: one account prepared with `silo host init --authorize`, the
+other adding it by address over the runner's sshd and creating, starting, running a command in and
+dropping a computer on it through Connections. The threat model's
+[Linux hosts](THREAT-MODEL.md#linux-hosts) section covers KVM, the socket, the file store, the
+bridge, the journal and lingering. Still open: an engine release that carries the Linux archives.
 
 ## 7. Protocol reference and examples
 

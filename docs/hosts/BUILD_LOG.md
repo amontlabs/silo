@@ -345,6 +345,23 @@ Plan: [PLAN.md](PLAN.md).
     controller's line rewritten without `--key`, a bridged revoke was refused, `host status`
     marked the line, and `devices remove` upgraded it by handshake and removed it; `host revoke
     SHA256:...` removed the other key. Accounts, files and the device node were removed after.
+- **KVM run:** the two-account job in `linux-host.yml` went green after four fixes, each found by
+  a failed run:
+  - The runner's `/opt` is world-writable, so the engine's trust check refused the shared copy
+    under it; the copy moved to a root-owned `/var/lib/silo-ci` (0755).
+  - The runner's `XDG_CONFIG_HOME` leaked through `sudo -u <account>` into the accounts'
+    `silod --service` commands, which then looked for the unit in the runner's home; the accounts
+    run under `env -i` with only `HOME`, `USER`, `LOGNAME`, `PATH`, `XDG_RUNTIME_DIR` and
+    `DBUS_SESSION_BUS_ADDRESS` (`hosts-e2e.sh`, `as`).
+  - Umask 002 made `~/.local/share` group-writable in each account's private group, which the
+    credential store refused; handled by the user-private-group rule above.
+  - A default ACL on the controller's directory overrode `ssh-keygen`'s umask, so the Connections
+    key came out 0644 and `ssh-keygen -y` refused it; the engine sets a new key to 0600 after
+    generation (`editor.rs`, `key`).
+  With those, the job prepares `silo-host`, adds it from `silo-controller` by `127.0.0.1` with a
+  pinned fingerprint, and creates, starts, runs `exec` and `fork -- uname -a` in, stops and drops
+  a computer on it through `--device` (`SILO_E2E_REMOTE_EXEC=1`), then removes the host and
+  unregisters both services.
 
 ## Phase 5: exec, fork with a command and computer use on another device (6 Nov 2026)
 
@@ -374,4 +391,34 @@ Plan: [PLAN.md](PLAN.md).
   MCP `exec` and `fork` with `command` allowed and refused (`mcp_devices.rs`, `gui.rs`), and
   auto-keep tests on a device (`policy.rs`). `cargo test -p silo-cli`: 315 passed.
 - **Not checked live** in this phase: controller to host exec, fork with a command and a
-  screenshot.
+  screenshot. The KVM job now runs exec and fork with a command through `--device`; the
+  screenshot is still open.
+
+## Phase 6: threat model and docs (7 Nov 2026)
+
+- **Threat model** ([Linux hosts](../THREAT-MODEL.md#linux-hosts)): three new paragraphs, each
+  claim checked against the code and anchored to it. Connections on the host: the restricted
+  `authorized_keys` line `silo host init --authorize` writes, Ed25519 only; the bridge accepts
+  exactly `--key SHA256:<fingerprint>` and replaces any `authenticatedKey` in the request with it;
+  a bridged revoke is limited to the caller's own key; `connections.keys.authorize`, `list` and
+  `own` are served on `engine.sock` only; lines Silo did not write are left alone and reported;
+  what a controller's key gives (every method the bridge serves, the authority of boundary 7 on
+  the host, until revoked) and that the host's sshd must accept the account's keys. Logs: silod
+  has no log framework; the journal holds the lines it prints (owner refusals, signals, the
+  runtime check, Connections start and accept errors, the link error, image cache repair, update
+  recovery, computers a session end left running), none with a credential or token value, and
+  root and the `systemd-journal` or `adm` group read them. Lingering: the unit starts at boot and
+  outlives logouts, so a lingering host answers every authorized key at all times. The egress
+  paragraph no longer says the eval "comes with the KVM CI job": the job is green but runs the
+  lifecycle and the two-account run, not an isolation scenario; the evals have run on a Mac only
+  (roadmap milestone 9 runs them on KVM). The ACL residual-risk note gains the `ssh-keygen` finding
+  and the 0600 fix, and "not defended" gains the controller's key.
+- **Docs:** [PLAN.md](PLAN.md) has a status per phase; the roadmap's milestone 6 progress names
+  phase 4, the green KVM job with its two-account run, and the one open item (an engine release
+  with the Linux archives); the CLI guide shows the Linux host end to end (unpack the archive,
+  `silo host init --authorize controller.pub`, then `silo devices key` and `silo devices add` on
+  the controller) and the Connections guide points at that order.
+- **Checked:** every `file#Lline` anchor in the Linux hosts section against the current tree, and
+  the CI link check (`lychee --offline` with `ci.yml`'s globs) passes.
+- **Remaining:** the Mac live checks: `silo host init` on a Mac, adding it from another engine,
+  a screenshot over `--device`, and a Mac controller managing a Linux host.

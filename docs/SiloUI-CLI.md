@@ -288,11 +288,21 @@ runs Linux computers over KVM. Another device manages them through
 On the host, as the account that will own the computers (not root):
 
 ```sh
-# Linux: from the unpacked engine archive (see the engine guide)
-~/.local/opt/silo-engine/silo host init
+# Linux: check and unpack the engine archive (see the engine guide), then init
+sha256sum -c silo-engine-<version>-linux-x64.tar.gz.sha256
+mkdir -p ~/.local/opt && tar -xzf silo-engine-<version>-linux-x64.tar.gz -C ~/.local/opt
+chmod -R go-w ~/.local/opt/silo-engine
+~/.local/opt/silo-engine/silo host init --authorize controller.pub
 # Mac: the app's silo (linked as ~/.local/bin/silo once Silo has run)
 /Applications/Silo.app/Contents/MacOS/silo host init
 ```
+
+The Linux order end to end: unpack the archive ([engine
+guide](SiloUI-ENGINE.md#silod-on-a-linux-host)), `silo host init` (it runs `silod --service
+register` for you; `silod --service register` alone installs just the service), with
+`--authorize` for the key `silo devices key` printed on the controller, then `silo devices add
+<address>` on the controller. Without `--authorize`, `silo devices add` installs the controller's
+key over SSH instead, when SSH lets it in.
 
 `silo host init` changes nothing until its checks pass, and running it again is safe:
 
