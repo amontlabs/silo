@@ -448,7 +448,10 @@ container_access_features() {
   local terminal=(/usr/bin/env "MSB_HOME=$home" "MSB_PATH=$engine_dir/msb" "MSB_LIBKRUNFW_PATH=$engine_dir/msb"
     "$engine_dir/silod" --container-runtime exec "$ctr" --user silo --env USER=silo --env LOGNAME=silo --no-start --workdir /workspace --tty)
   local typed
-  typed=$(printf 'tty; id -un; pwd; exit\n' | script -qec "${terminal[*]}" /dev/null | tr -d '\r')
+  local code=0
+  typed=$(printf 'tty; id -un; pwd; exit\n' | script -qec "${terminal[*]}" /dev/null 2>&1 | tr -d '\r') || code=$?
+  echo "terminal command output (status $code):"
+  printf '%s\n' "$typed"
   grep -q '^/dev/pts/[0-9]*$' <<<"$typed" || { echo "the terminal printed: $typed" >&2; exit 1; }
   grep -qx 'silo' <<<"$typed" || { echo "the terminal did not run as silo: $typed" >&2; exit 1; }
   grep -qx '/workspace' <<<"$typed" || { echo "the terminal did not start in /workspace: $typed" >&2; exit 1; }
