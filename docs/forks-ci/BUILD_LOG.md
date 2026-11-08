@@ -376,6 +376,16 @@ capability list (refused with the plain message, hidden in the app).
   `/etc/ssl/certs/ca-certificates.crt` plus the computer's CA to `state/ca-bundle.crt` and binds it read-only over
   that path (the image file is read without following a link, capped at 4 MiB). It is the third host file the
   container sees. Tools that ship their own bundle (Node, a browser) need their own setting.
+- **The probe runs off the pump's thread.** The first live run published a port but read it as `unknown`:
+  `port_probe` waits for the guest's reply to a connection attempt, and that reply reaches the network stack only
+  while the gateway's control loop, which is also its frame pump, keeps running. The probe now waits on its own
+  thread and answers on a clone of the control link (one request is outstanding at a time). `port_add`,
+  `port_remove` and `ports` need no frames and stay inline.
+- **Live result.** Pull request checks all pass, `Linux computer on KVM` included (run 42504501686): the
+  placeholder is what the guest sees, `api.github.com` answers "Bad credentials" with one `used` event and none for
+  `example.com`, a published port answers through `8080.<computer>.silo.localhost` and on its loopback port and is
+  closed after `unpublish`, and a secret taken from the running container records no further use. A secret must keep
+  one computer, so the check gives it to a second container as well.
 - **CT1 nit.** The CA handover moves the key (`std::mem::take`) instead of copying it with `to_string`, in
   `computer_ca` and in the macOS supervisor's `generate_ca`.
 - **Why SSH is stopped.** The guest image has `openssh-sftp-server` but no `sshd`. `msb ssh serve`, the host
