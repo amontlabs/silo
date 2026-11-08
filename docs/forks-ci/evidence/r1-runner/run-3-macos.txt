@@ -1,0 +1,75 @@
+== build silo-runner
+PASS: config is valid and the repository is private
+PASS: recipes install
+== build the recipe (slow the first time)
+Building the recipe silo-macos...
+Building the recipe silo-macos: 5s
+Building the recipe silo-macos: 10s
+Building the recipe silo-macos: 15s
+Building the recipe silo-macos: 20s
+Building the recipe silo-macos: 25s
+Building the recipe silo-macos: 30s
+Building the recipe silo-macos: 36s
+Building the recipe silo-macos: 41s
+Building the recipe silo-macos: 46s
+Building the recipe silo-macos: 51s
+Building the recipe silo-macos: 56s
+Building the recipe silo-macos: 61s
+Building the recipe silo-macos: 66s
+Building the recipe silo-macos: 72s
+Building the recipe silo-macos: 77s
+Building the recipe silo-macos: 82s
+Building the recipe silo-macos: 87s
+Building the recipe silo-macos: 92s
+Building the recipe silo-macos: 97s
+Building the recipe silo-macos: 102s
+Building the recipe silo-macos: 108s
+Building the recipe silo-macos: 113s
+Built silo-macos (3dc81febe879), checkpoint 561c9205-cfd0-419c-b298-c6743d3d4581.
+== start silo-runner
+PASS: silo-runner is running
+PASS: a second silo-runner on the same state is refused
+== a job that succeeds
+PASS: the job ran on a Silo computer and succeeded
+    the job page names the runner: ci-silo-macos-r1-c69eb916
+PASS: the runner is named like a ci-silo-macos-r1 computer
+PASS: the job's log shows the same runner name
+PASS: the successful job's computer was deleted
+PASS: its runner is gone from GitHub
+== a job that fails
+PASS: the failing job failed
+    the job page names the runner: ci-silo-macos-r1-b8d9ee73
+PASS: each job got its own computer (ci-silo-macos-r1-c69eb916, then ci-silo-macos-r1-b8d9ee73)
+PASS: the failed job's computer is kept, stopped
+PASS: the failed job's runner is gone from GitHub
+    ci-* computers now:
+    ci-silo-macos-r1-b8d9ee73       stopped    macos   4 cpu, 8 GiB
+== no JIT configuration in any process command line or in the log
+    the sampler saw the runner command 37 times
+PASS: the sampler saw the runner's exec --stdin command
+PASS: no JIT configuration on any silo or runner command line while the jobs ran
+PASS: the log has no encoded JIT config
+== restart reconcile
+PASS: the kept failure survives a restart, still stopped
+PASS: the restart made no other ci-* computer
+FAIL: no computer other than ci-* changed on the engine
+    1,7c1,8
+    < NAME                          STATE      KIND    SIZE
+    < e2e-relay                     stopped    linux   8 cpu, 32 GiB
+    < silo-build-demo-7cb168dc      stopped    linux   2 cpu, 4 GiB
+    < silo-build-openclaw-e58d4252  stopped    linux   2 cpu, 4 GiB
+    < silo-eval-a                   stopped    linux   2 cpu, 2 GiB
+    < silo-eval-b                   stopped    linux   2 cpu, 2 GiB
+    < workspace-1                   stopped    linux   8 cpu, 32 GiB
+    ---
+    > NAME                            STATE      KIND    SIZE
+    > e2e-relay                       stopped    linux   8 cpu, 32 GiB
+    > silo-build-demo-7cb168dc        stopped    linux   2 cpu, 4 GiB
+    > silo-build-openclaw-e58d4252    stopped    linux   2 cpu, 4 GiB
+    > silo-build-silo-macos-9e3ce756  stopped    macos   4 cpu, 8 GiB
+    > silo-eval-a                     stopped    linux   2 cpu, 2 GiB
+    > silo-eval-b                     stopped    linux   2 cpu, 2 GiB
+    > workspace-1                     stopped    linux   8 cpu, 32 GiB
+== clean up the test repository workflows and computers
+passed: 18, failed: 1; work dir: /tmp/r1mac
+script exit 1

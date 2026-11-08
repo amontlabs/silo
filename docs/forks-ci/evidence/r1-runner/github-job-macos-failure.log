@@ -1,0 +1,20 @@
+j	Set up job	﻿2026-11-08T01:17:44.0170910Z Current runner version: '2.338.2'
+j	Set up job	2026-11-08T01:17:44.0175390Z Runner name: 'ci-silo-macos-r1-b8d9ee73'
+j	Set up job	2026-11-08T01:17:44.0175870Z Runner group name: 'Default'
+j	Set up job	2026-11-08T01:17:44.0176490Z Machine name: 'ci-silo-macos-r1-b8d9ee73'
+j	Set up job	2026-11-08T01:17:44.0178200Z ##[group]GITHUB_TOKEN Permissions
+j	Set up job	2026-11-08T01:17:44.0179400Z Contents: read
+j	Set up job	2026-11-08T01:17:44.0179710Z Metadata: read
+j	Set up job	2026-11-08T01:17:44.0180020Z Packages: read
+j	Set up job	2026-11-08T01:17:44.0180330Z ##[endgroup]
+j	Set up job	2026-11-08T01:17:44.0181470Z Secret source: Actions
+j	Set up job	2026-11-08T01:17:44.0181970Z Cache mode: write
+j	Set up job	2026-11-08T01:17:44.0182350Z Prepare workflow directory
+j	Set up job	2026-11-08T01:17:44.0469870Z Prepare all required actions
+j	Set up job	2026-11-08T01:17:44.0543910Z Complete job name: j
+j	Run exit 3	﻿2026-11-08T01:17:44.1127620Z ##[group]Run exit 3
+j	Run exit 3	2026-11-08T01:17:44.1128010Z ^[[36;1mexit 3^[[0m
+j	Run exit 3	2026-11-08T01:17:44.1238280Z shell: /bin/bash -e {0}
+j	Run exit 3	2026-11-08T01:17:44.1238780Z ##[endgroup]
+j	Run exit 3	2026-11-08T01:17:44.1565050Z ##[error]Process completed with exit code 3.
+j	Complete job	﻿2026-11-08T01:17:44.1674970Z Cleaning up orphan processes

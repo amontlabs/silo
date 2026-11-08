@@ -7,6 +7,9 @@
 #
 #   R1_REPO=OWNER/PRIVATE_REPO R1_TOKEN_ENV=SILO_RUNNER_TOKEN sh docs/forks-ci/checks/r1_runner_check.sh
 #
+# R1_OS=macos checks the silo-macos recipe (label silo-macos-r1) instead of the default linux one. A
+# Mac runs two macOS virtual machines at most: stop other macOS computers first.
+#
 # SILO_RUNNER_TOKEN must hold a fine-grained personal access token for that repository
 # (Administration: read and write, Actions: read, Metadata: read). It takes 15-30 minutes: the
 # first recipe build downloads the Linux image and GitHub's runner.
@@ -14,6 +17,15 @@ set -eu
 
 : "${R1_REPO:?set R1_REPO to OWNER/REPO of a private test repository}"
 R1_TOKEN_ENV=${R1_TOKEN_ENV:-SILO_RUNNER_TOKEN}
+R1_OS=${R1_OS:-linux}
+case "$R1_OS" in
+  linux) max_runners=2; keep=2; os_step='run: |
+          printf "#include <stdio.h>\\nint main(void){puts(\"built on a Silo computer\");return 0;}\\n" > hello.c
+          cc -o hello hello.c && ./hello' ;;
+  macos) max_runners=1; keep=1; os_step='run: sw_vers' ;;
+  *) echo "R1_OS must be linux or macos" >&2; exit 1 ;;
+esac
+label=silo-$R1_OS-r1
 eval "token=\${$R1_TOKEN_ENV:-}"
 [ -n "$token" ] || { echo "the environment variable $R1_TOKEN_ENV is empty" >&2; exit 1; }
 unset token
@@ -45,7 +57,10 @@ visibility=$(gh api "repos/$R1_REPO" --jq .visibility)
 [ "$visibility" = private ] || { echo "$R1_REPO is $visibility; this check needs a private repository" >&2; exit 1; }
 
 others_before="$work/others-before.txt"
-"$silo" list --all 2> /dev/null | grep -v '^ci-' | sort > "$others_before"
+# not the header (its column widths follow the longest name) and not the recipe's builder computer,
+# which this script itself makes
+others() { "$silo" list --all 2> /dev/null | grep -v -e '^ci-' -e '^NAME' -e "^silo-build-silo-$R1_OS-" | sort; }
+others > "$others_before"
 
 echo "== build silo-runner"
 (cd "$root/app/SiloUI/runner" && go build -o "$work/silo-runner" .)
@@ -61,13 +76,13 @@ stateDir: $work/state
 limits: {readyTimeout: 5m}
 runnerRefresh: {disabled: true}
 scaleSets:
-  - {label: silo-linux-r1, recipe: silo-linux, os: linux, maxRunners: 2, keepFailed: {count: 2, days: 1}}
+  - {label: $label, recipe: silo-$R1_OS, os: $R1_OS, maxRunners: $max_runners, keepFailed: {count: $keep, days: 1}}
 YAML
 
 check "config is valid and the repository is private" "$work/silo-runner" check -config "$work/config.yaml"
 check "recipes install" "$work/silo-runner" install-recipes -config "$work/config.yaml"
 echo "== build the recipe (slow the first time)"
-(cd "$work/project" && "$silo" recipe build silo-linux)
+(cd "$work/project" && "$silo" recipe build "silo-$R1_OS")
 
 echo "== start silo-runner"
 "$work/silo-runner" run -config "$work/config.yaml" > "$runner_log" 2>&1 &
@@ -76,15 +91,16 @@ sleep 5
 check "silo-runner is running" kill -0 "$runner_pid"
 check "a second silo-runner on the same state is refused" sh -c "'$work/silo-runner' run -config '$work/config.yaml' 2>&1 | grep -q 'another silo-runner'"
 
-dispatch() { # name, script
+dispatch() { # name, script (@LABEL@ is the scale set's label)
+  body=$(printf '%s' "$2" | sed "s/@LABEL@/$label/g")
   # the sha of an existing file is needed to replace it; an empty repository or a new file has none
   sha=$(gh api "repos/$R1_REPO/contents/.github/workflows/$1.yml" --jq .sha 2> /dev/null) || sha=""
   if [ -n "$sha" ]; then
     gh api -X PUT "repos/$R1_REPO/contents/.github/workflows/$1.yml" -f message="R1 check: $1" \
-      -f content="$(printf '%s' "$2" | base64 | tr -d '\n')" -f sha="$sha" > /dev/null
+      -f content="$(printf '%s' "$body" | base64 | tr -d '\n')" -f sha="$sha" > /dev/null
   else
     gh api -X PUT "repos/$R1_REPO/contents/.github/workflows/$1.yml" -f message="R1 check: $1" \
-      -f content="$(printf '%s' "$2" | base64 | tr -d '\n')" > /dev/null
+      -f content="$(printf '%s' "$body" | base64 | tr -d '\n')" > /dev/null
   fi
 }
 run_workflow() { # name -> prints conclusion
@@ -99,29 +115,32 @@ run_workflow() { # name -> prints conclusion
 runner_name_of_last_run() { gh api "repos/$R1_REPO/actions/runs/$(cat "$work/last-run-id")/jobs" --jq '.jobs[0].runner_name'; }
 github_has_runner() { gh api "repos/$R1_REPO/actions/runners" --jq '.runners[].name' | grep -qx "$1"; }
 computer_line() { "$silo" list --all 2> /dev/null | awk -v n="$1" '$1 == n'; }
-wait_gone() { # computer name: wait up to 2 minutes for the computer to leave `silo list`
+wait_gone() { # computer name: wait up to 4 minutes for the computer to leave `silo list`
   n=0
-  while [ -n "$(computer_line "$1")" ] && [ $n -lt 24 ]; do sleep 5; n=$((n + 1)); done
+  while [ -n "$(computer_line "$1")" ] && [ $n -lt 48 ]; do sleep 5; n=$((n + 1)); done
   [ -z "$(computer_line "$1")" ]
+}
+wait_stopped() { # computer name: wait up to 4 minutes for the computer to be listed as stopped
+  n=0
+  while ! computer_line "$1" | grep -q stopped && [ $n -lt 48 ]; do sleep 5; n=$((n + 1)); done
+  computer_line "$1" | grep -q stopped
 }
 
 dispatch r1-ok 'name: r1-ok
 on: workflow_dispatch
 jobs:
   j:
-    runs-on: silo-linux-r1
+    runs-on: @LABEL@
     steps:
       - run: echo "hostname=$(hostname) runner=$RUNNER_NAME"
       - run: uname -a
-      - run: |
-          printf "#include <stdio.h>\\nint main(void){puts(\"built on a Silo computer\");return 0;}\\n" > hello.c
-          cc -o hello hello.c && ./hello
+      - '"$os_step"'
 '
 dispatch r1-fail 'name: r1-fail
 on: workflow_dispatch
 jobs:
   j:
-    runs-on: silo-linux-r1
+    runs-on: @LABEL@
     steps:
       - run: exit 3
 '
@@ -145,7 +164,7 @@ echo "== a job that succeeds"
 [ "$(run_workflow r1-ok)" = success ] && ok "the job ran on a Silo computer and succeeded" || bad "r1-ok did not succeed"
 ok_runner=$(runner_name_of_last_run)
 echo "    the job page names the runner: $ok_runner"
-case "$ok_runner" in ci-silo-linux-r1-*) ok "the runner is named like a ci-silo-linux-r1 computer" ;; *) bad "the runner name $ok_runner is not a ci-silo-linux-r1 computer name" ;; esac
+case "$ok_runner" in "ci-$label"-*) ok "the runner is named like a ci-$label computer" ;; *) bad "the runner name $ok_runner is not a ci-$label computer name" ;; esac
 check "the job's log shows the same runner name" sh -c "gh run view '$(cat "$work/last-run-id")' -R '$R1_REPO' --log | grep -q 'runner=$ok_runner'"
 check "the successful job's computer was deleted" wait_gone "$ok_runner"
 check "its runner is gone from GitHub" sh -c "! gh api 'repos/$R1_REPO/actions/runners' --jq '.runners[].name' | grep -qx '$ok_runner'"
@@ -155,8 +174,7 @@ echo "== a job that fails"
 fail_runner=$(runner_name_of_last_run)
 echo "    the job page names the runner: $fail_runner"
 [ "$fail_runner" != "$ok_runner" ] && ok "each job got its own computer ($ok_runner, then $fail_runner)" || bad "both jobs ran on $ok_runner"
-sleep 30
-check "the failed job's computer is kept, stopped" sh -c "'$silo' list --all | awk -v n='$fail_runner' '\$1 == n' | grep -q stopped"
+check "the failed job's computer is kept, stopped" wait_stopped "$fail_runner"
 check "the failed job's runner is gone from GitHub" sh -c "! gh api 'repos/$R1_REPO/actions/runners' --jq '.runners[].name' | grep -qx '$fail_runner'"
 echo "    ci-* computers now:"; "$silo" list --all | grep '^ci-' | sed 's/^/    /' || true
 
@@ -177,7 +195,7 @@ sleep 15
 check "the kept failure survives a restart, still stopped" sh -c "'$silo' list --all | awk -v n='$fail_runner' '\$1 == n' | grep -q stopped"
 check "the restart made no other ci-* computer" sh -c "[ \"\$('$silo' list --all | grep -c '^ci-')\" = 1 ]"
 
-"$silo" list --all 2> /dev/null | grep -v '^ci-' | sort > "$work/others-after.txt"
+others > "$work/others-after.txt"
 check "no computer other than ci-* changed on the engine" diff "$others_before" "$work/others-after.txt"
 
 echo "== clean up the test repository workflows and computers"
@@ -187,7 +205,7 @@ for name in r1-ok r1-fail; do
 done
 cleanup
 runner_pid=""
-for name in $("$silo" list --all --json | grep -o '"name": *"ci-silo-linux-r1-[^"]*"' | sed 's/.*"\(ci-[^"]*\)"/\1/'); do
+for name in $("$silo" list --all --json | grep -o "\"name\": *\"ci-$label-[^\"]*\"" | sed 's/.*"\(ci-[^"]*\)"/\1/'); do
   "$silo" drop "$name" > /dev/null 2>&1 || true
 done
 

@@ -1,0 +1,11 @@
+github:
+  configUrl: https://github.com/0xpolarzero/silo-runner-e2e
+  auth: {tokenEnv: SILO_RUNNER_TOKEN}
+silo:
+  path: /Users/polarzero/.local/bin/silo-dev
+  projectDir: /tmp/r1mac/project
+stateDir: /tmp/r1mac/state
+limits: {readyTimeout: 5m}
+runnerRefresh: {disabled: true}
+scaleSets:
+  - {label: silo-macos-r1, recipe: silo-macos, os: macos, maxRunners: 1, keepFailed: {count: 1, days: 1}}

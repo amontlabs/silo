@@ -1,0 +1,32 @@
+j	Set up job	﻿2026-11-08T01:15:57.4297910Z Current runner version: '2.338.2'
+j	Set up job	2026-11-08T01:15:57.4301830Z Runner name: 'ci-silo-macos-r1-c69eb916'
+j	Set up job	2026-11-08T01:15:57.4302280Z Runner group name: 'Default'
+j	Set up job	2026-11-08T01:15:57.4302840Z Machine name: 'ci-silo-macos-r1-c69eb916'
+j	Set up job	2026-11-08T01:15:57.4304720Z ##[group]GITHUB_TOKEN Permissions
+j	Set up job	2026-11-08T01:15:57.4305800Z Contents: read
+j	Set up job	2026-11-08T01:15:57.4306150Z Metadata: read
+j	Set up job	2026-11-08T01:15:57.4306460Z Packages: read
+j	Set up job	2026-11-08T01:15:57.4306790Z ##[endgroup]
+j	Set up job	2026-11-08T01:15:57.4307860Z Secret source: Actions
+j	Set up job	2026-11-08T01:15:57.4308390Z Cache mode: write
+j	Set up job	2026-11-08T01:15:57.4308780Z Prepare workflow directory
+j	Set up job	2026-11-08T01:15:57.4572230Z Prepare all required actions
+j	Set up job	2026-11-08T01:15:57.4636900Z Complete job name: j
+j	Run echo "hostname=$(hostname) runner=$RUNNER_NAME"	﻿2026-11-08T01:15:57.5303700Z ##[group]Run echo "hostname=$(hostname) runner=$RUNNER_NAME"
+j	Run echo "hostname=$(hostname) runner=$RUNNER_NAME"	2026-11-08T01:15:57.5304260Z ^[[36;1mecho "hostname=$(hostname) runner=$RUNNER_NAME"^[[0m
+j	Run echo "hostname=$(hostname) runner=$RUNNER_NAME"	2026-11-08T01:15:57.5425160Z shell: /bin/bash -e {0}
+j	Run echo "hostname=$(hostname) runner=$RUNNER_NAME"	2026-11-08T01:15:57.5425730Z ##[endgroup]
+j	Run echo "hostname=$(hostname) runner=$RUNNER_NAME"	2026-11-08T01:15:57.5702230Z hostname=ci-silo-macos-r1-c69eb916 runner=ci-silo-macos-r1-c69eb916
+j	Run uname -a	﻿2026-11-08T01:15:57.5779870Z ##[group]Run uname -a
+j	Run uname -a	2026-11-08T01:15:57.5780270Z ^[[36;1muname -a^[[0m
+j	Run uname -a	2026-11-08T01:15:57.5790860Z shell: /bin/bash -e {0}
+j	Run uname -a	2026-11-08T01:15:57.5791220Z ##[endgroup]
+j	Run uname -a	2026-11-08T01:15:57.6004990Z Darwin ci-silo-macos-r1-c69eb916 25.6.0 Darwin Kernel Version 25.6.0: Fri Jul 31 19:16:43 PDT 2026; root:xnu-12377.161.14~5/RELEASE_ARM64_VMAPPLE arm64
+j	Run sw_vers	﻿2026-11-08T01:15:57.6040140Z ##[group]Run sw_vers
+j	Run sw_vers	2026-11-08T01:15:57.6040490Z ^[[36;1msw_vers^[[0m
+j	Run sw_vers	2026-11-08T01:15:57.6049530Z shell: /bin/bash -e {0}
+j	Run sw_vers	2026-11-08T01:15:57.6049870Z ##[endgroup]
+j	Run sw_vers	2026-11-08T01:15:57.6267510Z ProductName:		macOS
+j	Run sw_vers	2026-11-08T01:15:57.6269700Z ProductVersion:		26.6.2
+j	Run sw_vers	2026-11-08T01:15:57.6270120Z BuildVersion:		25G83
+j	Complete job	﻿2026-11-08T01:15:57.6355720Z Cleaning up orphan processes
