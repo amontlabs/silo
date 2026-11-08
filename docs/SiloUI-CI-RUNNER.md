@@ -317,11 +317,10 @@ At start (and in `check`, with `-offline` for this part alone) the helper on a L
   machine's total memory** (`MemTotal` in `/proc/meminfo`; the rest is the host's own, the page cache
   and each virtual machine's overhead) and **count is the number of CPUs**. It uses the machine's
   size and not what is free right now, so a restart with computers running computes the same budget.
-  When the helper's own cgroup (cgroup v2 `memory.max`, or any parent's, such as `MemoryMax=` on the
-  unit) allows less than `MemTotal`, that smaller number is used and the log line says so. The count
-  is only the CPU count, and memory the host's other services use is not subtracted: **on a shared
-  or limited host (containers, a small virtual machine with other services, CPU quotas) set
-  `linuxBudget` yourself.** The log line says which fields came from the host;
+  The count is only the CPU count, and neither cgroup limits nor memory the host's other services
+  use are subtracted: **where the engine or your user slice has a memory limit (`MemoryMax=`), or in a
+  container or virtual machine that has less memory than it reports, or with CPU quotas or other
+  services on the host, set `linuxBudget` yourself.** The log line says which fields came from the host;
 - refuses a budget smaller than one computer of your largest recipe (the recipe's `memory:`, 8 GiB for
   the shipped `silo-linux`), because no job could ever start. Give the recipe less memory, or the
   host more;

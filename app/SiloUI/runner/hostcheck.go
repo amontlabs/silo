@@ -23,9 +23,6 @@ type Host struct {
 	CPUs int
 	// MemTotalKiB reads MemTotal from /proc/meminfo.
 	MemTotalKiB func() (int64, error)
-	// MemLimitKiB is the memory limit of the helper's own cgroup (cgroup v2 memory.max, the
-	// tightest of it and its ancestors), or 0 when there is none or it cannot be read.
-	MemLimitKiB func() int64
 	// OpenKVM opens /dev/kvm for reading and writing, the way the engine's virtual machines do.
 	OpenKVM func() error
 }
@@ -36,9 +33,6 @@ func RealHost() Host {
 		GOOS:   runtime.GOOS,
 		GOARCH: runtime.GOARCH,
 		CPUs:   runtime.NumCPU(),
-		MemLimitKiB: func() int64 {
-			return CgroupMemoryLimitKiB("/proc/self/cgroup", "/sys/fs/cgroup")
-		},
 		MemTotalKiB: func() (int64, error) {
 			file, err := os.Open("/proc/meminfo")
 			if err != nil {
@@ -81,43 +75,6 @@ func ParseMemTotalKiB(r io.Reader) (int64, error) {
 	return 0, errors.New("/proc/meminfo has no MemTotal line")
 }
 
-// CgroupMemoryLimitKiB reads the cgroup v2 memory.max that applies to this process: the smallest
-// number in memory.max of its cgroup (named by procCgroup, /proc/self/cgroup) and of every
-// ancestor up to root (the mounted cgroup tree). It is 0 when no level sets a limit, the host
-// uses cgroup v1, or the files cannot be read.
-func CgroupMemoryLimitKiB(procCgroup, root string) int64 {
-	raw, err := os.ReadFile(procCgroup)
-	if err != nil {
-		return 0
-	}
-	var rel string
-	found := false
-	for _, line := range strings.Split(string(raw), "\n") {
-		if path, ok := strings.CutPrefix(line, "0::"); ok {
-			rel, found = path, true
-		}
-	}
-	if !found {
-		return 0
-	}
-	root = filepath.Clean(root)
-	var limit int64
-	for dir := filepath.Join(root, filepath.Clean("/"+rel)); ; dir = filepath.Dir(dir) {
-		if data, err := os.ReadFile(filepath.Join(dir, "memory.max")); err == nil {
-			// "max" is no limit and does not parse.
-			if size, err := strconv.ParseInt(strings.TrimSpace(string(data)), 10, 64); err == nil && size > 0 {
-				if kib := size / 1024; limit == 0 || kib < limit {
-					limit = kib
-				}
-			}
-		}
-		if dir == root || dir == filepath.Dir(dir) {
-			break
-		}
-	}
-	return limit
-}
-
 // DefaultLinuxBudget is the budget a Linux host gets when linuxBudget does not set one: three
 // quarters of the host's memory (the rest is the host's own, the page cache and each virtual
 // machine's overhead) and at most one computer per CPU. It comes from the machine's size, not
@@ -142,8 +99,6 @@ type HostReport struct {
 	Budget LinuxBudget
 	// MemoryFromHost and CountFromHost say which fields came from the machine and not the file.
 	MemoryFromHost, CountFromHost bool
-	// MemoryCgroupLimited says the host default memory was capped by the helper's cgroup limit.
-	MemoryCgroupLimited bool
 }
 
 // ApplyHost checks a Linux host and fills in its Linux budget. On a Linux host it refuses a
@@ -174,11 +129,6 @@ func ApplyHost(cfg *Config, host Host) (HostReport, error) {
 		if err != nil {
 			return report, fmt.Errorf("cannot read this host's memory to size linuxBudget (set linuxBudget.memoryGiB and linuxBudget.count yourself): %w", err)
 		}
-		if host.MemLimitKiB != nil {
-			if limit := host.MemLimitKiB(); limit > 0 && limit < total {
-				total, report.MemoryCgroupLimited = limit, true
-			}
-		}
 		defaults := DefaultLinuxBudget(total, host.CPUs)
 		if budget.MemoryGiB == 0 {
 			budget.MemoryGiB, report.MemoryFromHost = defaults.MemoryGiB, true
@@ -198,8 +148,6 @@ func ApplyHost(cfg *Config, host Host) (HostReport, error) {
 
 func fromHost(report HostReport) string {
 	switch {
-	case report.MemoryFromHost && report.MemoryCgroupLimited:
-		return " (three quarters of the memory this service's cgroup may use)"
 	case report.MemoryFromHost:
 		return " (three quarters of this host's memory)"
 	}
@@ -263,10 +211,6 @@ func (r HostReport) Describe() string {
 		}
 		return "from the configuration"
 	}
-	memory := where(r.MemoryFromHost)
-	if r.MemoryCgroupLimited {
-		memory = "from this service's cgroup memory limit"
-	}
 	return fmt.Sprintf("Linux computers: at most %d at once (%s) using at most %d GiB (%s)",
-		r.Budget.Count, where(r.CountFromHost), r.Budget.MemoryGiB, memory)
+		r.Budget.Count, where(r.CountFromHost), r.Budget.MemoryGiB, where(r.MemoryFromHost))
 }
