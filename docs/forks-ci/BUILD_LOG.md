@@ -271,3 +271,11 @@ Both owner decisions:
   saved point over the speed of a few. The `quiet::processes_match_by_exact_name_not_by_prefix_or_pattern`
   failure seen in the engine suite also fails on main (`569f6fea`) at the same assertion and is not caused
   by this branch.
+- **R1 live check, run 4 (macOS, 8 Nov 2026): 19 of 19 pass**, with the engine sync of `0b29af74` and the JSON before/after
+  comparison. Integration build `silo-f799cb60` (local merge of `forks-phase-3` and `runner-phase-1` on `origin/main`, release
+  Dev bundle, engine started by hand), private repo `0xpolarzero/silo-runner-e2e`, `maxRunners: 1`, no macOS VM running before. The
+  success job ran on `ci-silo-macos-r1-0f3b3af8` (deleted, runner gone), the failing one on `ci-silo-macos-r1-c1f4b46e` (kept,
+  stopped, runner gone); no JIT on any command line (sampler: 26 sightings of `exec --stdin`). Direct check of the fix: a file
+  written in a running macOS computer, a manual checkpoint right after, a fork of that checkpoint: the file (and a 4 KiB blob) is
+  in the fork. Cleaned up: 0 runners, no `ci-*`/`e2e-*` computer, recipe build removed. Evidence:
+  [`evidence/r1-runner/run-4-macos.txt`](evidence/r1-runner/run-4-macos.txt), `runner-4-macos.log`, `config-macos-4.yaml`.

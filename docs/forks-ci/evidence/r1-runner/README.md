@@ -111,3 +111,18 @@ stays, private).
 
 Run 3 (macOS, 8 Nov 2026): silo-runner stopped; 0 runners registered; the `ci-silo-macos-r1-*` computers, the `silo-macos` recipe build and the
 test workflows removed from the repository (the runs stay).
+
+## Result: macOS recipe, run 4 (8 Nov 2026): 19 of 19 checks pass
+
+[run-4-macos.txt](run-4-macos.txt), [runner-4-macos.log](runner-4-macos.log), [config-macos-4.yaml](config-macos-4.yaml). Integration build
+`silo-f799cb60` (local merge of `claude/forks-phase-3` and `claude/runner-phase-1` at `4603c976` on `origin/main`, never pushed), release
+Dev bundle, Dev engine started by hand. Same script with `R1_OS=macos`, including the JSON before/after comparison; the token was
+`gh auth token` in `SILO_RUNNER_TOKEN` (a search of the three files for it, `eyJ`, `gho_`, `ghp_` and `github_pat` found nothing). No macOS VM was running
+before. Success job on `ci-silo-macos-r1-0f3b3af8` (deleted, runner gone), failing job on `ci-silo-macos-r1-c1f4b46e` (kept, stopped,
+runner gone), sampler saw `exec --stdin` 26 times and no `eyJ`. The recipe was rebuilt before the run (the builder changed).
+
+Direct check of the engine fix (end of `run-4-macos.txt`): a file and a 4 KiB blob written in a running macOS computer, a manual
+checkpoint taken right after, a fork of that checkpoint: both are in the fork.
+
+Cleaned up: silo-runner stopped, 0 runners registered, all `ci-*` and `e2e-macos-sync*` computers and the `silo-macos` build dropped,
+workflows removed from the repository.
