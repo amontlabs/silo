@@ -318,6 +318,17 @@
         },
         "size": {
           "type": "string"
+        },
+        "transfer": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TransferFile"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set when the export was written into the transfer area."
         }
       },
       "required": [
@@ -4671,6 +4682,13 @@
             "string",
             "null"
           ]
+        },
+        "transferArea": {
+          "description": "Write the export into this machine's transfer area, under a name the machine picks,\nso another machine can fetch it over Connections. `destination` and `archivePath`\nare then ignored; the finished job's `archive.transfer` names the file.",
+          "type": [
+            "boolean",
+            "null"
+          ]
         }
       },
       "required": [
@@ -4707,6 +4725,24 @@
       ],
       "type": "object"
     },
+    "ExportDiscardParams": {
+      "properties": {
+        "deviceId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "description": "A file of the transfer area, by the name the machine gave it.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
     "ExportDismissParams": {
       "properties": {
         "deviceId": {
@@ -4733,6 +4769,8 @@
     "ExportImportParams": {
       "properties": {
         "archivePath": {
+          "default": "",
+          "description": "The file to import. Empty when `transferName` names a file in the transfer area.",
           "type": "string"
         },
         "deviceId": {
@@ -4749,10 +4787,16 @@
             "string",
             "null"
           ]
+        },
+        "transferName": {
+          "description": "A file this machine received into its transfer area (`exports.transfer`), by the\nname the machine gave it.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
-        "archivePath",
         "newName"
       ],
       "type": "object"
@@ -4789,6 +4833,69 @@
           ]
         }
       },
+      "type": "object"
+    },
+    "ExportTransferDirection": {
+      "oneOf": [
+        {
+          "const": "receive",
+          "description": "Fetch an export file from the other machine into `path`.",
+          "type": "string"
+        },
+        {
+          "const": "send",
+          "description": "Send the file at `path` to the other machine, which keeps it for an import.",
+          "type": "string"
+        }
+      ]
+    },
+    "ExportTransferParams": {
+      "properties": {
+        "bytes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "computer": {
+          "description": "The computer the file belongs to, for progress text.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "deviceId": {
+          "description": "The other machine; the copy runs from this engine over Connections.",
+          "type": "string"
+        },
+        "direction": {
+          "$ref": "#/$defs/ExportTransferDirection"
+        },
+        "name": {
+          "description": "For `receive`: the export file in the other machine's transfer area, with the size\nand sha256 its export job reported.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "path": {
+          "description": "A path on this machine: where a received file is written (it must not exist) or\nthe file to send.",
+          "type": "string"
+        },
+        "sha256": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "deviceId",
+        "direction",
+        "path"
+      ],
       "type": "object"
     },
     "FileDownloadParams": {
@@ -7095,6 +7202,9 @@
         "export_check": {
           "$ref": "#/$defs/ExportCheckResult"
         },
+        "export_transfer": {
+          "$ref": "#/$defs/TransferFile"
+        },
         "github": {
           "$ref": "#/$defs/GitHubState"
         },
@@ -7157,6 +7267,7 @@
         "backup",
         "archive_inspection",
         "export_check",
+        "export_transfer",
         "upload",
         "download",
         "github",
@@ -8128,10 +8239,12 @@
         "exports.check",
         "exports.create",
         "exports.destination.set",
+        "exports.discard",
         "exports.dismiss",
         "exports.import",
         "exports.inspect",
         "exports.state",
+        "exports.transfer",
         "files.download",
         "files.list",
         "files.upload",
@@ -9584,6 +9697,22 @@
         {
           "properties": {
             "method": {
+              "const": "exports.discard",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/ExportDiscardParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
               "const": "exports.dismiss",
               "type": "string"
             },
@@ -9637,6 +9766,22 @@
             },
             "params": {
               "$ref": "#/$defs/ExportStateParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "exports.transfer",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/ExportTransferParams"
             }
           },
           "required": [
@@ -12365,6 +12510,22 @@
         {
           "properties": {
             "method": {
+              "const": "exports.discard",
+              "type": "string"
+            },
+            "result": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
               "const": "exports.dismiss",
               "type": "string"
             },
@@ -12418,6 +12579,22 @@
             },
             "result": {
               "$ref": "#/$defs/BackupState"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "exports.transfer",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/JobStartResult"
             }
           },
           "required": [
@@ -16431,6 +16608,28 @@
       ],
       "type": "string"
     },
+    "TransferFile": {
+      "description": "A file in a transfer area, as its owner reports it.",
+      "properties": {
+        "bytes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        },
+        "sha256": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "bytes",
+        "sha256"
+      ],
+      "type": "object"
+    },
     "TransferProgress": {
       "description": "Mirrors `app/SiloUI/src-tauri/engine/src/transfer.rs::Progress`; the serialized\nnames deliberately retain `id` and `computer`, not the surrounding job's\n`jobId` and `computerId`.",
       "properties": {
@@ -17255,6 +17454,10 @@
       "resultType": "ArchiveInspectionResult"
     },
     {
+      "method": "exports.transfer",
+      "resultType": "TransferFile"
+    },
+    {
       "method": "files.download",
       "resultType": "DownloadOutcome"
     },
@@ -17804,6 +18007,12 @@
     },
     {
       "kind": "command",
+      "name": "exports.discard",
+      "paramsType": "exports::ExportDiscardParams",
+      "resultType": "bool"
+    },
+    {
+      "kind": "command",
       "name": "exports.dismiss",
       "paramsType": "exports::ExportDismissParams",
       "resultType": "bool"
@@ -17825,6 +18034,12 @@
       "name": "exports.state",
       "paramsType": "exports::ExportStateParams",
       "resultType": "exports::BackupState"
+    },
+    {
+      "kind": "job",
+      "name": "exports.transfer",
+      "paramsType": "exports::ExportTransferParams",
+      "resultType": "common::JobStartResult"
     },
     {
       "kind": "job",

@@ -509,6 +509,11 @@ pub fn exports_destination_set(
     Request::new(MethodParams::ExportsDestinationSet(params))
 }
 
+/// `exports.discard`
+pub fn exports_discard(params: exports::ExportDiscardParams) -> Request<kind::Command> {
+    Request::new(MethodParams::ExportsDiscard(params))
+}
+
 /// `exports.dismiss`
 pub fn exports_dismiss(params: exports::ExportDismissParams) -> Request<kind::Command> {
     Request::new(MethodParams::ExportsDismiss(params))
@@ -527,6 +532,11 @@ pub fn exports_inspect(params: exports::ExportInspectParams) -> Request<kind::Jo
 /// `exports.state`
 pub fn exports_state(params: exports::ExportStateParams) -> Request<kind::Query> {
     Request::new(MethodParams::ExportsState(params))
+}
+
+/// `exports.transfer`
+pub fn exports_transfer(params: exports::ExportTransferParams) -> Request<kind::Job> {
+    Request::new(MethodParams::ExportsTransfer(params))
 }
 
 /// `files.download`

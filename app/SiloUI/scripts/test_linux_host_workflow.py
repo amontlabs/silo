@@ -98,8 +98,21 @@ FAKE_TWO_SILOS = textwrap.dedent('''\
     key = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKVyZDGnacgUkbjXHi/TsIZ+GxIgprlkfONi9t33BGz3 ctl'
     print_ = 'SHA256:LH9ifkGkEurhEj7pgiSwRedJtKQomUQeevYOdCTeGWw'
     computers = state['computers']
-    if command == 'list':
-        listed = computers if remote or '--all-devices' in rest else {{}}
+    local = state.setdefault('local', {{}})
+    transfer = Path(os.environ.get('FAKE_HOME', '/nonexistent')) / os.environ.get('FAKE_STATE_DIR', '.state') / 'engine' / 'transfer'
+    if command == 'export' and device is not None:
+        assert '--yes' in rest and computers[rest[0]] == 'running', rest
+        Path(rest[rest.index('-o') + 1]).write_bytes(b'archive')
+        if os.environ.get('FAKE_LEAVE_FILE'):
+            transfer.mkdir(parents=True, exist_ok=True)
+            (transfer / ('x-' + '0' * 32 + '.silo-backup')).write_bytes(b'left')
+    elif command == 'import':
+        assert Path(rest[0]).read_bytes() == b'archive', rest
+        (computers if device is not None else local)[rest[rest.index('--name') + 1]] = 'stopped'; save()
+    elif command == 'drop' and device is None and user == 'ctl':
+        local.pop(rest[0]); save()
+    elif command == 'list':
+        listed = computers if remote or '--all-devices' in rest else (local if user == 'ctl' else {{}})
         print(json.dumps({{'computers': [{{'name': n, 'state': s}} for n, s in listed.items()]}}))
     elif command == 'devices' and rest[0] == 'key':
         print(json.dumps({{'publicKey': key, 'fingerprint': print_}}))
@@ -378,6 +391,32 @@ class HostsEndToEndScriptTests(unittest.TestCase):
     def state_now(self):
         return json.loads(self.state.read_text())
 
+    def test_sharing_exports_to_the_controller_imports_both_ways_and_checks_the_transfer_areas(self):
+        home = self.root / 'home'
+        (home / '.state' / 'engine').mkdir(parents=True)
+        result, calls = self.run_script(SILO_E2E_SHARE='1', SILO_E2E_STATE_DIR='.state', FAKE_HOME=str(home),
+                                        HOME=str(home))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        share = [call for call in calls if ' export ' in call or ' import ' in call]
+        self.assertEqual(len(share), 3, share)
+        self.assertRegex(share[0], r'^ctl: --device dev-host export e2e-hosts-remote --yes -o \S+\.silo-backup$')
+        self.assertRegex(share[1], r'^ctl: import \S+\.silo-backup --name e2e-hosts-remote-imported$')
+        self.assertRegex(share[2], r'^ctl: --device dev-host import \S+\.silo-backup --name e2e-hosts-remote-sent$')
+        self.assertIn('ctl: drop e2e-hosts-remote-imported', calls)
+        self.assertIn('ctl: --device dev-host drop e2e-hosts-remote-sent', calls)
+        self.assertEqual(self.state_now()['local'], {})
+        self.assertEqual(self.state_now()['computers'], {})
+
+    def test_a_file_left_in_a_transfer_area_fails_the_run_and_everything_is_still_dropped(self):
+        home = self.root / 'home'
+        (home / '.state' / 'engine').mkdir(parents=True)
+        result, calls = self.run_script(SILO_E2E_SHARE='1', SILO_E2E_STATE_DIR='.state', FAKE_HOME=str(home),
+                                        HOME=str(home), FAKE_LEAVE_FILE='1')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('kept files after the export', result.stderr)
+        self.assertEqual(self.state_now()['computers'], {}, result.stdout[-1500:] + result.stderr[-1500:])
+        self.assertFalse([call for call in calls if ' import ' in call])
+
     @unittest.skipUnless(shutil.which('ssh-keygen'), 'needs ssh-keygen')
     def test_it_prepares_the_host_adds_it_and_drives_a_computer_there(self):
         result, calls = self.run_script(SILO_E2E_REMOTE_EXEC='1')
@@ -404,7 +443,7 @@ class HostsEndToEndScriptTests(unittest.TestCase):
             'ctl: devices remove dev-host',
             'host: --json host status',
         ])
-        self.assertEqual(self.state_now(), {'computers': {}, 'keys': [], 'devices': []})
+        self.assertEqual(self.state_now()['computers'], {})
         self.assertIn('== Passed', result.stdout)
 
     @unittest.skipUnless(shutil.which('ssh-keygen'), 'needs ssh-keygen')
@@ -420,7 +459,8 @@ class HostsEndToEndScriptTests(unittest.TestCase):
         self.assertIn('did not print a Linux kernel', result.stderr)
         self.assertEqual(calls[-3:], ['host: stop e2e-hosts-remote', 'host: drop e2e-hosts-remote',
                                       'ctl: devices remove dev-host'])
-        self.assertEqual(self.state_now(), {'computers': {}, 'keys': [], 'devices': []})
+        self.assertEqual({key: value for key, value in self.state_now().items() if key != 'local'},
+                         {'computers': {}, 'keys': [], 'devices': []})
 
     def test_it_never_touches_a_computer_it_did_not_make(self):
         self.state.write_text(json.dumps({'computers': {'e2e-hosts-remote': 'running'}, 'keys': [], 'devices': []}))

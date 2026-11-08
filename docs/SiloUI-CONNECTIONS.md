@@ -135,6 +135,36 @@ connected device is asked for its own requests only. `silo --device <name>`, `si
 use these. Tests: `silod` `methods::remote::tests` (routing of each method, the merged list
 with one device unreachable, acting on a remote row) and `cli/tests/devices.rs`.
 
+## Sharing a computer between devices
+
+`silo --device <name> export` and `import` ([CLI guide](SiloUI-CLI.md#sharing-a-computer-as-a-file))
+use the ordinary owner methods (`exports.check`, `exports.create`, `exports.import`) and two
+additions. The restricted Connections key cannot run `scp` or `sftp`, so the bytes go through a
+Stream method, `exports.file`, carried like `guest.ssh`, and the owner's files live in its
+*transfer area*, `<engine directory>/transfer/`.
+
+| Step | Where | What |
+| --- | --- | --- |
+| `exports.create` with `transferArea: true` | the owner | Writes the export to `x-<token>.silo-backup` in its area and reports `archive.transfer` (`name`, `bytes`, `sha256`) in the job result. |
+| `exports.transfer` (`receive`) | this device | A job that opens `exports.file` (`mode: read`), copies exactly `bytes` to the file the caller named, checks the sha256 and removes a partial file. |
+| `exports.discard` | the owner | Removes the file, its `.part` and its marker. Only names of the area are accepted. |
+| `exports.transfer` (`send`) | this device | Hashes the local file, opens `exports.file` (`mode: write` with `bytes` and `sha256`), sends it. The owner reserves space, names the file `i-<token>.silo-backup` and answers when size and hash match. |
+| `exports.import` with `transferName` | the owner | The ordinary import job on the received file. |
+
+The stream is a JSON header line from the owner, the bytes, and for a write a JSON verdict line.
+An export name can be read once; an import name cannot be read; a client never sends a path. A
+refusal (unknown name, already sent, not enough room, past the cap) arrives before the first
+byte. Each write reserves its declared size in a counter shared by the engine's writes and every
+check subtracts it from the free space, so concurrent writes cannot overfill the disk together;
+how many may run at once is bounded only by the engine's stream budget (192 streams), not by a
+rule of one transfer at a time. The reservation is released when the file is kept or the write
+ends. `exports.transfer` owns progress (`operations.job.progress`, the Files progress shape), cancel
+and the time budget (45 s plus the size at 64 KiB/s); raw bytes never cross `engine.sock`. The
+controller checks the owner's handshake for `exports.file` before an export or import that uses the
+area, and says plainly that the owner's Silo is too old. Leftovers are removed when the owner's
+engine starts and after a day. The security reasoning is in the
+[threat model](THREAT-MODEL.md#6-the-workspace-disk-and-host-folders).
+
 ## Checkpoint request deadlines
 
 Remote checkpoint creation, fork, and restore share a 122-minute complete-request

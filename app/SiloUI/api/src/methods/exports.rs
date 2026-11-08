@@ -45,6 +45,11 @@ wire_struct! {
         /// remembered export folder and the file must not exist yet.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         archive_path: Option<String>,
+        /// Write the export into this machine's transfer area, under a name the machine picks,
+        /// so another machine can fetch it over Connections. `destination` and `archivePath`
+        /// are then ignored; the finished job's `archive.transfer` names the file.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        transfer_area: Option<bool>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         device_id: Option<String>,
     }
@@ -74,10 +79,16 @@ wire_struct! {
 
 wire_struct! {
     ExportImportParams {
+        /// The file to import. Empty when `transferName` names a file in the transfer area.
+        #[serde(default)]
         archive_path: String,
         new_name: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         source_name: Option<String>,
+        /// A file this machine received into its transfer area (`exports.transfer`), by the
+        /// name the machine gave it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        transfer_name: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         device_id: Option<String>,
     }
@@ -101,6 +112,58 @@ wire_struct! {
     }
 }
 
+wire_struct! {
+    ExportDiscardParams {
+        /// A file of the transfer area, by the name the machine gave it.
+        name: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        device_id: Option<String>,
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum ExportTransferDirection {
+    /// Fetch an export file from the other machine into `path`.
+    Receive,
+    /// Send the file at `path` to the other machine, which keeps it for an import.
+    Send,
+}
+
+wire_struct! {
+    ExportTransferParams {
+        /// The other machine; the copy runs from this engine over Connections.
+        device_id: String,
+        direction: ExportTransferDirection,
+        /// A path on this machine: where a received file is written (it must not exist) or
+        /// the file to send.
+        path: String,
+        /// For `receive`: the export file in the other machine's transfer area, with the size
+        /// and sha256 its export job reported.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        bytes: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        sha256: Option<String>,
+        /// The computer the file belongs to, for progress text.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        computer: Option<String>,
+    }
+}
+
+wire_struct! {
+    /// A file in a transfer area, as its owner reports it.
+    TransferFile {
+        name: String,
+        bytes: u64,
+        sha256: String,
+    }
+}
+
+pub type ExportTransferResult = JobStartResult;
+pub type ExportTransferFinishedResult = TransferFile;
+pub type ExportDiscardResult = bool;
 pub type ExportCreateResult = JobStartResult;
 pub type ExportImportResult = JobStartResult;
 pub type ExportInspectResult = JobStartResult;
@@ -119,6 +182,9 @@ wire_struct! {
         computers: Vec<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         checkpoint_name: Option<String>,
+        /// Set when the export was written into the transfer area.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        transfer: Option<TransferFile>,
     }
 }
 

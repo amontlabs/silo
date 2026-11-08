@@ -94,10 +94,21 @@ async fn forward(
         // The owner answers for itself; it does not ask the devices it knows.
         object.remove("allDevices");
     }
-    let reply = tokio::task::spawn_blocking(move || call_owner(&device, name, owner_params))
-        .await
-        .map_err(|_| DispatchError::internal("The remote operation could not finish."))?
-        .map_err(HandlerContext::map_engine_error)?;
+    // A file moved through the owner's transfer area needs an owner that serves `exports.file`;
+    // an older one would reject the unknown fields in a confusing way.
+    let needs_file_sharing = (name == "exports.create" && params["transferArea"] == json!(true))
+        || (name == "exports.import" && params["transferName"].is_string());
+    let reply = tokio::task::spawn_blocking(move || {
+        if needs_file_sharing {
+            super::checkpoints::export_transfer::require_file_sharing(&device).map_err(
+                |error| BridgeError::new(BridgeCode::UnsupportedRemoteOperation, error.message),
+            )?;
+        }
+        call_owner(&device, name, owner_params)
+    })
+    .await
+    .map_err(|_| DispatchError::internal("The remote operation could not finish."))?
+    .map_err(HandlerContext::map_engine_error)?;
     // The owner's answer is shown only in the canonical shape.
     let typed: MethodResults = serde_json::from_value(json!({ "method": name, "result": reply }))
         .map_err(|error| {
@@ -237,6 +248,75 @@ mod tests {
     fn with_device(owner: &str, mut params: Value) -> Value {
         params["deviceId"] = json!(owner);
         params
+    }
+
+    /// An owner that answers its handshake with these capabilities and serves no stream.
+    struct Capable(Vec<&'static str>);
+
+    impl crate::methods::checkpoints::export_transfer::FileLink for Capable {
+        fn capabilities(&self, _device: &str) -> Result<Vec<String>, String> {
+            Ok(self.0.iter().map(|name| (*name).to_owned()).collect())
+        }
+        fn open(
+            &self,
+            _device: &str,
+            _params: Value,
+            _cancelled: &dyn Fn() -> bool,
+        ) -> Result<crate::methods::checkpoints::export_transfer::Opened, String> {
+            Err("no stream in this test".into())
+        }
+    }
+
+    #[tokio::test]
+    async fn sharing_through_the_transfer_area_needs_an_owner_that_serves_the_file_stream() {
+        const OWNER: &str = "88888888-8888-4888-8888-888888888811";
+        let (seen, _owner) = canned_owner(OWNER, |_, _| Ok(json!({ "jobId": "exports:op" })));
+        let old = crate::methods::checkpoints::export_transfer::install_test_link(Arc::new(
+            Capable(vec!["handshake", "guest.ssh"]),
+        ));
+        let create = with_device(
+            OWNER,
+            json!({"destination": "", "computerIds": ["c"], "transferArea": true}),
+        );
+        let import = with_device(
+            OWNER,
+            json!({"newName": "copy", "transferName": "i-00000000000000000000000000000000.silo-backup"}),
+        );
+        for (method, params) in [
+            (MethodName::ExportsCreate, create.clone()),
+            (MethodName::ExportsImport, import.clone()),
+        ] {
+            let refused = as_controller(method, params).await.unwrap_err();
+            assert_eq!(refused.code, ErrorCode::UnsupportedRemoteOperation);
+            assert!(
+                refused.message.contains("too old to share"),
+                "{}",
+                refused.message
+            );
+        }
+        assert!(
+            seen.lock().unwrap().is_empty(),
+            "the owner was asked anyway"
+        );
+        // An export to a folder needs no stream, so an older owner still serves it.
+        as_controller(
+            MethodName::ExportsCreate,
+            with_device(OWNER, json!({"destination": "/out", "computerIds": ["c"]})),
+        )
+        .await
+        .unwrap();
+        assert_eq!(seen.lock().unwrap().len(), 1);
+        drop(old);
+        let _new = crate::methods::checkpoints::export_transfer::install_test_link(Arc::new(
+            Capable(vec!["handshake", "exports.file"]),
+        ));
+        as_controller(MethodName::ExportsCreate, create)
+            .await
+            .unwrap();
+        let sent = seen.lock().unwrap().last().cloned().unwrap();
+        assert_eq!(sent.0, "exports.create");
+        assert_eq!(sent.1["transferArea"], true);
+        assert!(sent.1.get("deviceId").is_none());
     }
 
     #[tokio::test]
@@ -932,6 +1012,8 @@ mod tests {
         "files.upload",
         "files.download",
         "guest.files.watch",
+        // The controller's copy of an export file over the owner's `exports.file` stream.
+        "exports.transfer",
     ];
 
     /// Methods whose `deviceId` names the device itself, not where a computer lives.

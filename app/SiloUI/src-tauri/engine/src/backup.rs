@@ -457,6 +457,10 @@ pub(crate) struct BackupRequest {
     /// The guest image this Silo pins and its runtime cache holds. A computer that uses it
     /// travels without the image; the importing Silo prepares its own copy.
     pub(crate) pinned_image: Option<PinnedImageRef>,
+    /// The most the archive may hold. The export stops as soon as the computers it has
+    /// written exceed it, before the archive is assembled, so nothing is left at the
+    /// destination.
+    pub(crate) size_cap: Option<u64>,
 }
 
 /// The pinned guest image as the runtime cache holds it.
@@ -937,6 +941,15 @@ impl<R: MsbRunner> BackupService<R> {
                             .into(),
                     )
                 })?;
+            if let Some(cap) = request.size_cap.filter(|cap| total_payload_bytes > *cap) {
+                return Err(BackupError::InvalidRequest(format!(
+                    "The export of {} would be at least {}, more than the {} Silo shares \
+                     between devices. Run silo export on that device and copy the file yourself.",
+                    source.name,
+                    format_bytes(total_payload_bytes),
+                    format_bytes(cap),
+                )));
+            }
             payloads.push((
                 source,
                 runtime_config,
@@ -1015,11 +1028,12 @@ impl<R: MsbRunner> BackupService<R> {
     /// capture is part of the payload, not counted again. Other computers' snapshots and
     /// caches are not written by this export. Ancestors kept in another computer's
     /// group are not counted; the final destination check uses the actual archive.
-    fn check_export_space(
+    /// The result is before compression, so it is an upper bound of the archive.
+    pub(crate) fn estimate_export_bytes(
         &self,
         request: &BackupRequest,
         cancellation: &Cancellation,
-    ) -> Result<(), BackupError> {
+    ) -> Result<u64, BackupError> {
         let store = self.native_store_root();
         let mut payload_bytes = 0_u64;
         let mut carries_image = false;
@@ -1044,7 +1058,17 @@ impl<R: MsbRunner> BackupService<R> {
                 .saturating_add(estimated_tree_bytes(&store.join("cache"), cancellation)?);
         }
         let estimate = payload_bytes.saturating_add(MAX_MANIFEST_BYTES);
-        let estimate = estimate.saturating_add(estimate / 100); // tar/zstd overhead
+        Ok(estimate.saturating_add(estimate / 100)) // tar/zstd overhead
+    }
+
+    /// Whether the volumes that hold the working copy and the destination can take the
+    /// estimate from `estimate_export_bytes`.
+    fn check_export_space(
+        &self,
+        request: &BackupRequest,
+        cancellation: &Cancellation,
+    ) -> Result<(), BackupError> {
+        let estimate = self.estimate_export_bytes(request, cancellation)?;
         let destination = request.destination.parent().ok_or_else(|| {
             BackupError::InvalidRequest("The export destination has no parent directory.".into())
         })?;
@@ -4141,7 +4165,7 @@ fn same_volume(left: &Path, right: &Path) -> bool {
 
 /// `statvfs` of the nearest existing ancestor: space available to this
 /// account (f_bavail), so a path that is not created yet still resolves.
-fn available_bytes(path: &Path) -> io::Result<u64> {
+pub(crate) fn available_bytes(path: &Path) -> io::Result<u64> {
     use std::os::unix::ffi::OsStrExt;
     let existing = path
         .ancestors()
@@ -4162,7 +4186,7 @@ fn available_bytes(path: &Path) -> io::Result<u64> {
 }
 
 /// Binary units, labelled as such.
-fn format_bytes(bytes: u64) -> String {
+pub(crate) fn format_bytes(bytes: u64) -> String {
     const GIB: u64 = 1024 * 1024 * 1024;
     if bytes >= GIB {
         format!("{:.1} GiB", bytes as f64 / GIB as f64)
@@ -4273,7 +4297,7 @@ fn rename_without_replacing_with(
 }
 
 /// The kernel's exclusive rename: atomic, and never replaces an existing file.
-fn exclusive_rename(source: &Path, destination: &Path) -> io::Result<()> {
+pub(crate) fn exclusive_rename(source: &Path, destination: &Path) -> io::Result<()> {
     use std::{ffi::CString, os::unix::ffi::OsStrExt};
     let source = CString::new(source.as_os_str().as_bytes())
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid source path"))?;
@@ -5627,6 +5651,51 @@ mod tests {
     }
 
     #[test]
+    fn an_export_past_its_size_cap_stops_before_the_file_is_written() {
+        let temp = tempfile::tempdir().unwrap();
+        let destination = temp.path().join("dev.silo-backup");
+        let member = "c0123456789abcdef0123456789abcde";
+        let runner = FakeRunner::default();
+        runner
+            .existing_members
+            .lock()
+            .unwrap()
+            .push(("dev".into(), member.into()));
+        let service = service(&temp, runner);
+        let request = |size_cap| BackupRequest {
+            destination: destination.clone(),
+            sources: vec![BackupSource {
+                name: "dev".into(),
+                snapshot_group: "dev".into(),
+                was_running: false,
+                runtime_config: managed_config("dev"),
+                computer_configuration: computer_configuration("dev"),
+                existing_member: Some(member.into()),
+            }],
+            size_cap,
+            ..Default::default()
+        };
+        let error = service
+            .create_backup(request(Some(1)), &Cancellation::default())
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("The export of dev would be"), "{error}");
+        assert!(error.contains("more than"), "{error}");
+        assert!(!destination.exists());
+        let leftovers = fs::read_dir(temp.path())
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_name().to_string_lossy().starts_with(".silo-backup"))
+            .count();
+        assert_eq!(leftovers, 0);
+        // The same export under a roomy cap is written.
+        service
+            .create_backup(request(Some(1 << 30)), &Cancellation::default())
+            .unwrap();
+        assert!(destination.is_file());
+    }
+
+    #[test]
     fn checkpoint_export_reuses_the_existing_member_without_capturing() {
         let temp = tempfile::tempdir().unwrap();
         let destination = temp.path().join("dev-checkpoint.silo-backup");
@@ -6514,6 +6583,7 @@ mod tests {
                         reference: reference.to_owned(),
                         manifest_digest: format!("sha256:{}", "c".repeat(64)),
                     }),
+                    size_cap: None,
                 },
                 &Cancellation::default(),
             )
@@ -8309,6 +8379,7 @@ mod tests {
                 reference: "alpine:3.20".into(),
                 manifest_digest: format!("sha256:{}", "a".repeat(64)),
             }),
+            size_cap: None,
         };
         let cancellation = Cancellation::default();
         let destination = temp.path().join("dev.silo-backup");

@@ -738,11 +738,6 @@ fn refuse_on_device(command: &Command, engine: &Engine) -> Result<(), CliError> 
     if engine.device().is_none() {
         return Ok(());
     }
-    if matches!(command, Command::Export(_) | Command::Import(_)) {
-        return Err(CliError::new(
-            "silo export and silo import work on this device for now, so --device cannot be used with them yet.",
-        ));
-    }
     let what = match command {
         Command::Up(_) => "up",
         Command::Ports { .. } => "ports",

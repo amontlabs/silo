@@ -5,8 +5,9 @@ Plan: [PLAN.md](PLAN.md).
 ## Resume
 
 - **Merged (8 Nov 2026):** F1 (#84), F2 (#88), C1 (#87), R1 (#83), F3 (#86).
-- **Open phases:** F4 (export a computer that lives on another machine) and R2 (Linux hosts as runner
-  machines), both in progress; container computers (C2 onwards) being designed.
+- **Open phases:** F4 (export a computer that lives on another machine) is built on
+  `claude/forks-phase-4-transfer`, pull request open, its live check is the `linux-host.yml` two-account
+  job; R2 (Linux hosts as runner machines) is in progress; container computers (C2 onwards) are being designed.
 - **Open follow-ups found during the build:**
   - A Linux fork leaves its fork-point checkpoint on the source (it was a manual checkpoint before F2 too);
     macOS removes its fork point with the last fork. Fixing it means the macOS release machinery on Linux.
@@ -349,6 +350,94 @@ Branch `claude/containers-ct1`, pull request [#92](https://github.com/amontlabs/
   written in a running macOS computer, a manual checkpoint right after, a fork of that checkpoint: the file (and a 4 KiB blob) is
   in the fork. Cleaned up: 0 runners, no `ci-*`/`e2e-*` computer, recipe build removed. Evidence:
   [`evidence/r1-runner/run-4-macos.txt`](evidence/r1-runner/run-4-macos.txt), `runner-4-macos.log`, `config-macos-4.yaml`.
+### Phase F4: sharing a computer that lives on another machine (branch `claude/forks-phase-4-transfer`, 8 Nov 2026)
+
+Decision Q5 built as designed by the owner's brief and Fable: the export runs on the owning machine,
+its file is copied over Connections, the owner's copy is removed. Test counts are from `cargo test
+--locked` with synthetic GitHub configuration and a shared target dir, run on 8 Nov 2026 on the Mac;
+no computer, Dev engine or app bundle was touched.
+
+- **Why a stream.** The managed key is `restrict,command="... --remote-bridge"`, so `scp`/`sftp` cannot
+  reach the owner, and Files' `sftp` only reaches guests through `guest.ssh`. A new Stream method
+  `exports.file` carries one file, like `guest.ssh` (`engine/src/remote.rs` `METHODS`, served by
+  `serve_file_stream`; the handshake's capability list is the old-owner check).
+- **Transfer area** (`engine/src/transfer_area.rs`): `<engine dir>/transfer/`, 0700 and 0600. Names are
+  owner-made `x-<32 hex>.silo-backup` (export, read once through an exclusive `.used` marker, links not
+  followed) and `i-<32 hex>.silo-backup` (import, never readable); `parse_name` is the fixed pattern. A write
+  declares size and sha256, is refused at zero, past the cap or without room (`size + 64 MiB` beyond the
+  bytes other writes of the process have reserved; see "Review fixes"), goes to `.part`, reads exactly the declared bytes and is renamed only when the
+  hash matches; every other end deletes the `.part`. **Cap: 16 GiB.** Not the Files 4 GiB (a computer
+  export can exceed it) and not the engine's export limit, which is 8 TiB; 16 GiB is a deliberate middle
+  that keeps the time budget finite. Remove is `exports.discard`; the sweep empties the area when
+  `silod` starts and removes entries older than a day on the storage timer (`timers::sweep_transfer_area`).
+- **Owner jobs, one variant.** `exports.create` takes `transferArea` (the owner picks the name; the job's
+  `archive.transfer` holds `{name, bytes, sha256}`, hashed after the write: `backup_controller::describe_transfer`),
+  `exports.import` takes `transferName` (resolved to an import name that is in the area, otherwise the
+  ordinary import: the archive checks are the boundary). New API methods: `exports.discard` (owner command)
+  and `exports.transfer` (controller job, `deviceId` required). The check, create and import are asked on
+  the owner through the existing routing; the CLI's `ROUTED_METHODS` lists them.
+- **Controller job** (`silod/src/methods/checkpoints/export_transfer.rs`): `receive` writes a new 0600 `<path>.part`,
+  links it to the path when the hash matches and removes it on any failure; `send` hashes the local file, then sends. Progress is the Files
+  `TransferProgress`; cancel is the job's; the Files budget (45 s plus 64 KiB/s) is enforced by a watchdog
+  that closes the stream. An owner without `exports.file` is refused with "The other machine's Silo is too
+  old to share computers over Connections. Update Silo there." by the job and by the controller's routing of
+  `exports.create`/`exports.import` that use the area.
+- **Review fixes (8 Nov 2026).** Findings of the review of the first version, each with a test:
+  - *Disk overfill.* `begin_write` only read `statvfs`, so concurrent writes each passed. A
+    process-wide reserved-bytes counter per area folder is checked and raised under one lock and
+    released by the `Writer` on rename or drop. Writes are not serialized: the stream budget of 192
+    (`remote.rs` `STREAM_LIMIT`) bounds how many are open, the reservation bounds the disk. A write's full
+    size stays reserved while its `.part` grows, which errs on the side of refusing. Docs said "counting
+    writes already promised" and "one transfer at a time"; they now say what the code does.
+  - *Import file lost on a failed poll.* `import_to_device` discarded the `i-` file on any error. It now
+    discards when the import succeeded or `Engine::last_job_finished` says the job is finished; a failed
+    wait leaves the file (the sweep removes it) and the re-attach hint stays valid.
+  - *Over-cap export.* The owner removes the `x-` file when `describe_transfer` fails (too large,
+    cancelled, unreadable); the size is read from the file before it is hashed and the error names the
+    file and size. The up-front refusal from `estimate_export_bytes` (before compression, whole store
+    and cache when the image travels) is gone: it could refuse an export that would fit. Instead the
+    export stops itself: `BackupRequest::size_cap` (set to the area's 16 GiB for a file in the area)
+    is checked in `create_backup_with_token` after each computer's disks are written, and the error
+    names that computer and the cap. This is not a mid-write abort of the tool that writes a
+    computer's disks (an external command), so one oversized computer is still written to the
+    working copy before it is refused; nothing is assembled, no file is left at the destination, and
+    the working copy is dropped. The after-write check stays. The estimate still feeds the free-space check.
+  - *Export files 0600.* `describe_transfer` sets 0600 on the export, so "files 0600" is true for both
+    kinds.
+  - *Receive wrote to the final path.* `export_transfer::receive` writes `<path>.part` and puts it at the
+    path only when the hash matches; an existing file is refused before the copy and nothing is replaced.
+    The first cut used `hard_link`, which exFAT/FAT32/vfat and many SMB shares refuse, so every copy there
+    failed at the end. It now uses `transfer_area::publish_without_replacing`: the kernel's exclusive rename
+    (`renameatx_np` `RENAME_EXCL` / `renameat2` `RENAME_NOREPLACE`), else a hard link and removing the `.part`,
+    else an existence check and a plain rename. The fallbacks are tested with injected errors. A `.part`
+    left by a crash (a regular file of this account) is removed once and the copy starts again; anything
+    else there is named in the error.
+  - *Broken pipe.* `push` reads the owner's error line when a write fails and returns the owner's reason.
+  - *Client-chosen names.* `exports.create` refuses a destination or archive path inside the area
+    (`Area::contains`, links followed); only `transferArea: true` names a file there.
+  - *Marker on a failed open.* `open_for_read` removes the `.used` marker when the `O_NOFOLLOW` open fails.
+  - *Sweep order.* `silod` empties the area before `start_connections`, not after the bridge is up.
+  - *Why 16 GiB* is in `docs/SiloUI-CLI.md`.
+- **CLI** (`cli/src/share.rs`): `--device` export checks the output name first, creates the export in the
+  owner's area, copies it with a local `exports.transfer`, then discards the owner's copy whatever the copy
+  did; import sends first, imports from the received name, and discards once the import is finished. A failed
+  discard is a warning.
+- **Docs/changeset:** `docs/THREAT-MODEL.md` (boundary 6, "Sharing a computer that lives on another
+  device"), `docs/SiloUI-CLI.md`, `docs/SiloUI-CONNECTIONS.md`, `app/SiloUI/.changeset/share-across-devices.md`.
+- **Tests.** Engine `transfer_area` 19 (names and roles, single use, links, `.part`, hash and short/long
+  streams, abort, size/cap/free space, remove, sweep, the stream over socket pairs both ways), `remote`
+  170 (the method lists), `backup_controller` 1 (`describe_transfer`). `silod` `methods::` 244 (a controller
+  job against the real owner side over socket pairs: receive, send, bad hash, refused name, cancel of a
+  stalled copy, old owner, request validation; owner `exports.discard`, `exports.create` with the area,
+  `exports.import` from the area; the routing gate; the sweep). `silo-cli` 150 unit + `tests/share.rs`
+  17 (the device flows, the discard on every path, the order of requests and which job is followed on
+  which device). `hosts-e2e.sh` unit tests 18 (the sharing steps and a file left in a transfer area).
+  `silo-api` 49 (schema and requests regenerated).
+- **Live check:** `hosts-e2e.sh` with `SILO_E2E_SHARE=1` on the two-account KVM job
+  (`linux-host.yml`): see the pull request for the run. **Not covered by any test:** a real `ssh` hop with
+  the restricted key (the unit tests replace it with socket pairs), the Mac, and an exported computer
+  larger than the runner disk.
+
 ### Phase F3: sharing a computer as a file (branch `claude/forks-phase-3`, 7 Nov 2026)
 
 What changed, with the evidence for each claim. Test counts are from `cargo test --locked` (synthetic

@@ -1407,3 +1407,539 @@ async fn a_recipe_build_reads_the_computers_without_an_event_client() {
         assert!(!message.contains("event client"), "{message}");
     }
 }
+
+// MARK: exports.transfer, exports.discard and the transfer area
+
+mod transfer {
+    use super::super::export_transfer::{install_test_link, FileLink, Opened, TestLink, TOO_OLD};
+    use super::*;
+    use silo_engine::transfer_area::{self, Area};
+    use std::{
+        io::{BufReader, Read, Write},
+        os::unix::net::UnixStream,
+        sync::Mutex,
+    };
+
+    const DEVICE: &str = "mini-0000";
+
+    /// Shuts a socket down when the controller drops its half, as a killed ssh child does.
+    struct Closing(UnixStream);
+    impl Drop for Closing {
+        fn drop(&mut self) {
+            let _ = self.0.shutdown(std::net::Shutdown::Both);
+        }
+    }
+
+    /// The owner: its own transfer area, served through the real owner-side stream code.
+    struct Owner {
+        area: Area,
+        capabilities: Vec<String>,
+        /// Hold the owner's reply after the header, so a copy can be stopped mid-way.
+        stall: bool,
+        _directory: tempfile::TempDir,
+        opened: Mutex<Vec<serde_json::Value>>,
+    }
+
+    impl Owner {
+        fn new(capabilities: &[&str]) -> Arc<Self> {
+            let directory = tempfile::tempdir().unwrap();
+            Arc::new(Self {
+                area: Area::at(directory.path()).unwrap(),
+                capabilities: capabilities.iter().map(|c| (*c).to_owned()).collect(),
+                stall: false,
+                _directory: directory,
+                opened: Mutex::new(Vec::new()),
+            })
+        }
+
+        fn stalled(capabilities: &[&str]) -> Arc<Self> {
+            let directory = tempfile::tempdir().unwrap();
+            Arc::new(Self {
+                area: Area::at(directory.path()).unwrap(),
+                capabilities: capabilities.iter().map(|c| (*c).to_owned()).collect(),
+                stall: true,
+                _directory: directory,
+                opened: Mutex::new(Vec::new()),
+            })
+        }
+    }
+
+    impl FileLink for Owner {
+        fn capabilities(&self, _device: &str) -> Result<Vec<String>, String> {
+            Ok(self.capabilities.clone())
+        }
+
+        fn open(
+            &self,
+            _device: &str,
+            params: serde_json::Value,
+            _cancelled: &dyn Fn() -> bool,
+        ) -> Result<Opened, String> {
+            self.opened.lock().unwrap().push(params.clone());
+            let prepared = transfer_area::prepare(&self.area, &params)?;
+            let (near, far) = UnixStream::pair().unwrap();
+            let stall = self.stall;
+            let mut far = far;
+            std::thread::spawn(move || {
+                if stall {
+                    // The header, then nothing, until the controller leaves.
+                    let _ = far.write_all(b"{\"name\":\"x\",\"bytes\":100000000}\n");
+                    let mut sink = [0u8; 1];
+                    let _ = far.read(&mut sink);
+                    return;
+                }
+                let _ = prepared.run(&mut far, &mut |_| {}, &|| false);
+            });
+            Ok(Opened {
+                input: Box::new(near.try_clone().unwrap()),
+                output: Box::new(BufReader::new(near.try_clone().unwrap())),
+                guard: Box::new(Closing(near)),
+            })
+        }
+    }
+
+    /// Installs `owner` as the link for the test and removes it afterwards.
+    struct Installed(#[allow(dead_code)] TestLink);
+    impl Installed {
+        fn new(owner: Arc<Owner>) -> Self {
+            Self(install_test_link(owner))
+        }
+    }
+
+    fn sha(data: &[u8]) -> String {
+        // Through a file, as the engine hashes: the digest helper is the engine's own.
+        let file = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(file.path(), data).unwrap();
+        transfer_area::digest(file.path(), &|| false).unwrap().1
+    }
+
+    fn receive_params(path: &std::path::Path, name: &str, data: &[u8], sha256: &str) -> Value {
+        json!({
+            "deviceId": DEVICE, "direction": "receive", "path": path.to_str().unwrap(),
+            "name": name, "bytes": data.len(), "sha256": sha256, "computer": "main"
+        })
+    }
+
+    #[tokio::test]
+    async fn an_export_file_is_copied_here_whole_and_the_job_reports_what_the_owner_said() {
+        let fixture = fixture();
+        let owner = Owner::new(&["exports.file"]);
+        let data: Vec<u8> = (0..400_000u32).map(|n| (n % 253) as u8).collect();
+        let (name, staged) = owner.area.export_target();
+        std::fs::write(&staged, &data).unwrap();
+        let _installed = Installed::new(owner.clone());
+        let destination = fixture.directory.path().join("copy.silo-backup");
+        let started = call(
+            &fixture,
+            MethodName::ExportsTransfer,
+            receive_params(&destination, &name, &data, &sha(&data)),
+        )
+        .await
+        .unwrap();
+        let job = job_id(started);
+        assert!(job.as_str().starts_with("transfer:"));
+        let outcome = finished(&fixture, &job).await.outcome.unwrap();
+        assert_eq!(
+            outcome.result.unwrap(),
+            json!({"name": name, "bytes": data.len(), "sha256": sha(&data)})
+        );
+        assert_eq!(std::fs::read(&destination).unwrap(), data);
+        assert!(!fixture
+            .directory
+            .path()
+            .join("copy.silo-backup.part")
+            .exists());
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            std::fs::metadata(&destination)
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+        // The owner's file stays until the client discards it, and cannot be read twice.
+        assert!(staged.exists());
+        assert!(owner.area.open_for_read(&name).is_err());
+    }
+
+    #[tokio::test]
+    async fn a_copy_whose_hash_differs_fails_and_leaves_no_file_here() {
+        let fixture = fixture();
+        let owner = Owner::new(&["exports.file"]);
+        let data = b"archive bytes".to_vec();
+        let (name, staged) = owner.area.export_target();
+        std::fs::write(&staged, &data).unwrap();
+        let _installed = Installed::new(owner);
+        let destination = fixture.directory.path().join("copy.silo-backup");
+        let started = call(
+            &fixture,
+            MethodName::ExportsTransfer,
+            receive_params(&destination, &name, &data, &sha(b"something else")),
+        )
+        .await
+        .unwrap();
+        let outcome = finished(&fixture, &job_id(started)).await.outcome.unwrap();
+        assert!(outcome
+            .error
+            .unwrap()
+            .message
+            .contains("does not match what the other machine exported"));
+        assert!(!destination.exists());
+        assert!(!destination.with_extension("silo-backup.part").exists());
+    }
+
+    #[tokio::test]
+    async fn a_copy_never_replaces_a_file_that_is_already_at_the_path() {
+        let fixture = fixture();
+        let owner = Owner::new(&["exports.file"]);
+        let (name, staged) = owner.area.export_target();
+        std::fs::write(&staged, b"new").unwrap();
+        let _installed = Installed::new(owner);
+        let destination = fixture.directory.path().join("copy.silo-backup");
+        std::fs::write(&destination, b"mine").unwrap();
+        let started = call(
+            &fixture,
+            MethodName::ExportsTransfer,
+            receive_params(&destination, &name, b"new", &sha(b"new")),
+        )
+        .await;
+        // Refused when the request is made or when the job runs; either way the file is mine.
+        if let Ok(started) = started {
+            let outcome = finished(&fixture, &job_id(started)).await.outcome.unwrap();
+            assert!(outcome.error.is_some());
+        }
+        assert_eq!(std::fs::read(&destination).unwrap(), b"mine");
+        assert!(!destination.with_extension("silo-backup.part").exists());
+    }
+
+    #[tokio::test]
+    async fn a_file_is_sent_and_the_owner_names_it() {
+        let fixture = fixture();
+        let owner = Owner::new(&["exports.file"]);
+        let _installed = Installed::new(owner.clone());
+        let data: Vec<u8> = (0..300_000u32).map(|n| (n % 239) as u8).collect();
+        let source = fixture.directory.path().join("friend.silo-backup");
+        std::fs::write(&source, &data).unwrap();
+        let started = call(
+            &fixture,
+            MethodName::ExportsTransfer,
+            json!({"deviceId": DEVICE, "direction": "send", "path": source.to_str().unwrap()}),
+        )
+        .await
+        .unwrap();
+        let result = finished(&fixture, &job_id(started))
+            .await
+            .outcome
+            .unwrap()
+            .result
+            .unwrap();
+        let name = result["name"].as_str().unwrap();
+        assert_eq!(
+            transfer_area::parse_name(name),
+            Some(transfer_area::Role::Import)
+        );
+        assert_eq!(
+            std::fs::read(owner.area.import_path(name).unwrap()).unwrap(),
+            data
+        );
+        assert_eq!(result["sha256"], sha(&data));
+        // The declared size and hash were read from the file here, never taken from a caller.
+        let opened = owner.opened.lock().unwrap();
+        assert_eq!(opened[0]["bytes"], data.len());
+        assert_eq!(opened[0]["sha256"], sha(&data));
+    }
+
+    #[tokio::test]
+    async fn an_owner_that_refuses_the_file_is_the_reason_and_nothing_is_kept() {
+        let fixture = fixture();
+        let owner = Owner::new(&["exports.file"]);
+        let _installed = Installed::new(owner.clone());
+        let source = fixture.directory.path().join("big.silo-backup");
+        std::fs::write(&source, b"x").unwrap();
+        // A name the owner never handed out.
+        let destination = fixture.directory.path().join("copy.silo-backup");
+        let name = format!("x-{}.silo-backup", "a".repeat(32));
+        let started = call(
+            &fixture,
+            MethodName::ExportsTransfer,
+            receive_params(&destination, &name, b"x", &sha(b"x")),
+        )
+        .await
+        .unwrap();
+        let outcome = finished(&fixture, &job_id(started)).await.outcome.unwrap();
+        assert!(outcome.error.unwrap().message.contains("no longer here"));
+        assert!(!destination.exists());
+    }
+
+    #[tokio::test]
+    async fn an_owner_without_the_stream_is_too_old_and_nothing_starts() {
+        let fixture = fixture();
+        let owner = Owner::new(&["handshake", "guest.ssh"]);
+        let _installed = Installed::new(owner);
+        let source = fixture.directory.path().join("x.silo-backup");
+        std::fs::write(&source, b"x").unwrap();
+        let refused = call(
+            &fixture,
+            MethodName::ExportsTransfer,
+            json!({"deviceId": DEVICE, "direction": "send", "path": source.to_str().unwrap()}),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(refused.code, ErrorCode::UnsupportedRemoteOperation);
+        assert_eq!(refused.message, TOO_OLD);
+        assert!(super::super::export_transfer::require_file_sharing(DEVICE).is_err());
+    }
+
+    #[tokio::test]
+    async fn the_request_is_checked_before_a_job_exists() {
+        let fixture = fixture();
+        let owner = Owner::new(&["exports.file"]);
+        let _installed = Installed::new(owner);
+        let existing = fixture.directory.path().join("here.silo-backup");
+        std::fs::write(&existing, b"x").unwrap();
+        let name = format!("x-{}.silo-backup", "b".repeat(32));
+        let good = sha(b"x");
+        for (label, params) in [
+            (
+                "this device",
+                json!({"deviceId": "test-device", "direction": "send", "path": existing.to_str().unwrap()}),
+            ),
+            (
+                "relative path",
+                json!({"deviceId": DEVICE, "direction": "send", "path": "relative.silo-backup"}),
+            ),
+            (
+                "send with a name",
+                json!({"deviceId": DEVICE, "direction": "send", "path": existing.to_str().unwrap(), "name": name}),
+            ),
+            (
+                "not a file",
+                json!({"deviceId": DEVICE, "direction": "send", "path": fixture.directory.path().to_str().unwrap()}),
+            ),
+            (
+                "receive onto an existing file",
+                receive_params(&existing, &name, b"x", &good),
+            ),
+            (
+                "receive with an import name",
+                receive_params(
+                    &fixture.directory.path().join("a.silo-backup"),
+                    &format!("i-{}.silo-backup", "c".repeat(32)),
+                    b"x",
+                    &good,
+                ),
+            ),
+            (
+                "receive with a path outside the name",
+                receive_params(&fixture.directory.path().join("a.tar"), &name, b"x", &good),
+            ),
+            (
+                "receive over the cap",
+                json!({"deviceId": DEVICE, "direction": "receive",
+                "path": fixture.directory.path().join("b.silo-backup").to_str().unwrap(),
+                "name": name, "bytes": transfer_area::MAX_BYTES + 1, "sha256": good}),
+            ),
+            (
+                "receive with a bad hash",
+                receive_params(
+                    &fixture.directory.path().join("c.silo-backup"),
+                    &name,
+                    b"x",
+                    "nope",
+                ),
+            ),
+        ] {
+            let result = call(&fixture, MethodName::ExportsTransfer, params).await;
+            assert!(result.is_err(), "{label} was accepted");
+        }
+    }
+
+    #[tokio::test]
+    async fn cancelling_stops_a_copy_that_stalled_and_removes_the_partial_file() {
+        let fixture = fixture();
+        let owner = Owner::stalled(&["exports.file"]);
+        let (name, staged) = owner.area.export_target();
+        std::fs::write(&staged, b"x").unwrap();
+        let _installed = Installed::new(owner);
+        let destination = fixture.directory.path().join("copy.silo-backup");
+        let data = vec![1u8; 100_000_000];
+        let started = call(
+            &fixture,
+            MethodName::ExportsTransfer,
+            json!({"deviceId": DEVICE, "direction": "receive", "path": destination.to_str().unwrap(),
+                   "name": name, "bytes": data.len(), "sha256": sha(&[1u8])}),
+        )
+        .await
+        .unwrap();
+        let job = job_id(started);
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        // While it copies, the path the user chose does not exist: only the `.part` does.
+        let part = fixture.directory.path().join("copy.silo-backup.part");
+        assert!(!destination.exists() && part.exists());
+        silo_engine::context::EngineContext::job_registry(fixture.silod.as_ref())
+            .unwrap()
+            .cancel(&job)
+            .unwrap();
+        let outcome = finished(&fixture, &job).await.outcome.unwrap();
+        let error = outcome.error.unwrap();
+        assert_eq!(error.code, ErrorCode::Cancelled, "{}", error.message);
+        assert!(error.message.contains("cancelled"));
+        assert!(!destination.exists() && !part.exists());
+    }
+
+    fn area_of(fixture: &Fixture) -> Area {
+        Area::of_engine(fixture.silod.as_ref()).unwrap()
+    }
+
+    #[tokio::test]
+    async fn the_sweep_empties_the_area_at_start_and_later_only_removes_old_entries() {
+        let fixture = fixture();
+        let area = area_of(&fixture);
+        let old = area.dir().join(format!("i-{}.silo-backup", "1".repeat(32)));
+        let fresh = area.dir().join(format!("x-{}.silo-backup", "2".repeat(32)));
+        std::fs::write(&old, b"x").unwrap();
+        std::fs::write(&fresh, b"x").unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&old)
+            .unwrap()
+            .set_modified(std::time::SystemTime::now() - Duration::from_secs(25 * 3600))
+            .unwrap();
+        assert_eq!(crate::timers::sweep_transfer_area(&fixture.silod, false), 1);
+        assert!(!old.exists() && fresh.exists());
+        assert_eq!(crate::timers::sweep_transfer_area(&fixture.silod, true), 1);
+        assert!(!fresh.exists());
+    }
+
+    #[tokio::test]
+    async fn exports_discard_removes_one_file_of_the_area_and_only_those() {
+        let fixture = fixture();
+        let area = area_of(&fixture);
+        let (name, path) = area.export_target();
+        std::fs::write(&path, b"x").unwrap();
+        let removed = call(&fixture, MethodName::ExportsDiscard, json!({"name": name}))
+            .await
+            .unwrap();
+        assert_eq!(removed, json!(true));
+        assert!(!path.exists());
+        let again = call(&fixture, MethodName::ExportsDiscard, json!({"name": name}))
+            .await
+            .unwrap();
+        assert_eq!(again, json!(false));
+        for bad in ["../../etc/passwd", "notes.silo-backup", ""] {
+            assert!(
+                call(&fixture, MethodName::ExportsDiscard, json!({"name": bad}))
+                    .await
+                    .is_err(),
+                "{bad}"
+            );
+        }
+        let other = call(
+            &fixture,
+            MethodName::ExportsDiscard,
+            json!({"name": name, "deviceId": "some-other-device"}),
+        )
+        .await;
+        assert_eq!(error_code(other), ErrorCode::UnsupportedRemoteOperation);
+    }
+
+    #[tokio::test]
+    async fn an_export_to_the_transfer_area_is_named_by_the_machine_not_the_caller() {
+        let fixture = fixture();
+        let result = call(
+            &fixture,
+            MethodName::ExportsCreate,
+            json!({
+                "destination": "/somewhere/else", "computerIds": [fixture.macos_id],
+                "archivePath": "/somewhere/else/mine.silo-backup", "transferArea": true
+            }),
+        )
+        .await
+        .unwrap();
+        let outcome = finished(&fixture, &job_id(result)).await.outcome.unwrap();
+        let archive = outcome.result.unwrap()["archive"].clone();
+        let path = std::path::PathBuf::from(archive["archivePath"].as_str().unwrap());
+        let area = area_of(&fixture);
+        assert_eq!(path.parent().unwrap(), area.dir());
+        assert_eq!(
+            transfer_area::parse_name(path.file_name().unwrap().to_str().unwrap()),
+            Some(transfer_area::Role::Export)
+        );
+    }
+
+    #[tokio::test]
+    async fn an_export_cannot_be_aimed_into_the_transfer_area_by_a_caller() {
+        let fixture = fixture();
+        let area = area_of(&fixture);
+        let inside = area.dir().join(format!("x-{}.silo-backup", "c".repeat(32)));
+        for params in [
+            json!({
+                "destination": "/somewhere/else", "computerIds": [fixture.macos_id],
+                "archivePath": inside.to_str().unwrap()
+            }),
+            json!({
+                "destination": area.dir().to_str().unwrap(), "computerIds": [fixture.macos_id]
+            }),
+            json!({
+                "destination": area.dir().to_str().unwrap(), "computerIds": [fixture.macos_id],
+                "archivePath": area.dir().join("mine.silo-backup").to_str().unwrap()
+            }),
+        ] {
+            let error = call(&fixture, MethodName::ExportsCreate, params)
+                .await
+                .unwrap_err();
+            assert!(error.message.contains("transfer"), "{}", error.message);
+        }
+        assert_eq!(std::fs::read_dir(area.dir()).unwrap().count(), 0);
+    }
+
+    #[tokio::test]
+    async fn an_import_reads_only_a_file_this_machine_received_by_its_name() {
+        let fixture = fixture();
+        let area = area_of(&fixture);
+        let (export, staged) = area.export_target();
+        std::fs::write(staged, b"x").unwrap();
+        let missing = format!("i-{}.silo-backup", "e".repeat(32));
+        for (label, params) in [
+            (
+                "an export name",
+                json!({"newName": "copy", "transferName": export}),
+            ),
+            (
+                "a name with a path",
+                json!({"newName": "copy", "transferName": "../x.silo-backup"}),
+            ),
+            (
+                "a file that is not there",
+                json!({"newName": "copy", "transferName": missing}),
+            ),
+            (
+                "both a path and a name",
+                json!({"newName": "copy", "archivePath": "/a.silo-backup", "transferName": missing}),
+            ),
+        ] {
+            let result = call(&fixture, MethodName::ExportsImport, params).await;
+            assert!(result.is_err(), "{label} was accepted");
+        }
+        // A received file is imported like any file of unknown origin: the archive checks decide.
+        let writer = area.begin_write(5, &sha(b"hello")).unwrap();
+        let received = writer
+            .receive(
+                &mut std::io::Cursor::new(b"hello".to_vec()),
+                &mut |_| {},
+                &|| false,
+            )
+            .unwrap()
+            .name;
+        let started = call(
+            &fixture,
+            MethodName::ExportsImport,
+            json!({"newName": "copy", "transferName": received}),
+        )
+        .await
+        .unwrap();
+        let outcome = finished(&fixture, &job_id(started)).await.outcome.unwrap();
+        assert_eq!(outcome.result.unwrap()["outcome"], "failed");
+    }
+}

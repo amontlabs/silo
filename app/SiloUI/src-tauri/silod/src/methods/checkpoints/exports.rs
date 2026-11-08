@@ -10,8 +10,8 @@ use silo_api::{
         common::JobStartResult,
         exports::{
             ExportAcknowledgeParams, ExportCheckParams, ExportCreateParams,
-            ExportDestinationResult, ExportDestinationSetParams, ExportDismissParams,
-            ExportImportParams, ExportInspectParams, ExportStateParams,
+            ExportDestinationResult, ExportDestinationSetParams, ExportDiscardParams,
+            ExportDismissParams, ExportImportParams, ExportInspectParams, ExportStateParams,
         },
     },
 };
@@ -138,18 +138,64 @@ pub(super) async fn create(
     let params: ExportCreateParams = context.decode_params(params)?;
     require_local_device(context, params.device_id.as_deref())?;
     let controller = controller(context)?;
+    let (destination, archive_path) = if params.transfer_area == Some(true) {
+        // The machine picks the name, in its own transfer area; the caller's paths are not used.
+        let area = transfer_area(context)?;
+        let (_, path) = area.export_target();
+        (
+            area.dir().to_string_lossy().into_owned(),
+            Some(path.to_string_lossy().into_owned()),
+        )
+    } else {
+        // A name in the area is the machine's to give; a caller's own file there would be
+        // read like an export and removed by the sweep.
+        let area = transfer_area(context)?;
+        for path in [
+            Some(params.destination.as_str()),
+            params.archive_path.as_deref(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            if area.contains(std::path::Path::new(path)) {
+                return Err(DispatchError::internal(
+                    "That folder is Silo's transfer folder. Choose another place for the export.",
+                ));
+            }
+        }
+        (params.destination, params.archive_path)
+    };
     let operation_id = blocking(move || {
         engine::begin_export_for_ids(
             controller,
-            params.destination,
+            destination,
             params.computer_ids,
             params.checkpoint_id,
-            params.archive_path,
+            archive_path,
         )
         .map_err(message_error)
     })
     .await?;
     output(exports_job(&operation_id)?)
+}
+
+fn transfer_area(
+    context: &HandlerContext,
+) -> Result<silo_engine::transfer_area::Area, DispatchError> {
+    silo_engine::transfer_area::Area::of_engine(context.engine_context()).map_err(message_error)
+}
+
+/// `exports.discard`: removes a file of this machine's transfer area, once the other machine is
+/// done with it. A name that is not one of the area's is refused.
+pub(super) async fn discard(
+    context: &HandlerContext,
+    params: &Value,
+) -> Result<HandlerOutput, DispatchError> {
+    let params: ExportDiscardParams = context.decode_params(params)?;
+    require_local_device(context, params.device_id.as_deref())?;
+    let area = transfer_area(context)?;
+    let removed = blocking(move || area.remove(&params.name).map_err(message_error)).await?;
+    output(removed)
 }
 
 pub(super) async fn import(
@@ -159,10 +205,27 @@ pub(super) async fn import(
     let params: ExportImportParams = context.decode_params(params)?;
     require_local_device(context, params.device_id.as_deref())?;
     let controller = controller(context)?;
+    let archive_path = match params.transfer_name.as_deref() {
+        // A file this machine received: the archive checks are the only trust it gets, as for
+        // any file of unknown origin.
+        Some(name) => {
+            if !params.archive_path.is_empty() {
+                return Err(DispatchError::internal(
+                    "Invalid params: pass either archivePath or transferName.",
+                ));
+            }
+            let area = transfer_area(context)?;
+            area.import_path(name)
+                .map_err(message_error)?
+                .to_string_lossy()
+                .into_owned()
+        }
+        None => params.archive_path,
+    };
     let operation_id = blocking(move || {
         engine::begin_import(
             controller,
-            params.archive_path,
+            archive_path,
             params.new_name,
             params.source_name,
         )

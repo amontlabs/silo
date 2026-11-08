@@ -441,7 +441,7 @@ fn read_capped(mut source: impl Read + Send + 'static) -> std::thread::JoinHandl
 
 /// How long a transfer of `bytes` may run: the probe limit plus the time the file needs
 /// at the slowest allowed rate.
-fn transfer_limit(bytes: u64) -> Duration {
+pub(crate) fn transfer_limit(bytes: u64) -> Duration {
     PROBE_LIMIT + Duration::from_secs(bytes / SLOWEST_TRANSFER_BYTES_PER_SECOND)
 }
 

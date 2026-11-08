@@ -363,6 +363,7 @@ const METHODS: &[(&str, Access)] = &[
     ("guest.exec.get", Access::Read),
     ("guest.exec.input", Access::Change),
     ("guest.ssh", Access::Stream),
+    (crate::transfer_area::FILE_STREAM, Access::Stream),
     ("network.state", Access::Read),
     ("network.publish", Access::Change),
     ("network.unpublish", Access::Change),
@@ -441,6 +442,7 @@ pub const OWNER_METHODS: &[(&str, bool)] = &[
     ("exports.check", true),
     ("exports.create", true),
     ("exports.destination.set", true),
+    ("exports.discard", true),
     ("exports.dismiss", true),
     ("exports.import", true),
     ("exports.inspect", true),
@@ -3328,6 +3330,21 @@ fn listen() -> Result<(), String> {
                             )?;
                             return Ok(None);
                         }
+                        if request["method"] == crate::transfer_area::FILE_STREAM {
+                            authorize(&request)?;
+                            serve_file_stream(
+                                &mut stream,
+                                &mut permit,
+                                &STREAMS,
+                                &request["params"],
+                                &|| {
+                                    REMOTE_ENABLED.load(std::sync::atomic::Ordering::Acquire)
+                                        && crate::runtime::shutdown::ensure_accepting_operations()
+                                            .is_ok()
+                                },
+                            )?;
+                            return Ok(None);
+                        }
                         if request["method"] == "guest.ssh" {
                             authorize(&request)?;
                             let running = || {
@@ -4255,6 +4272,32 @@ fn serve_watch_stream(
         crate::remote_watch::HEARTBEAT,
     );
     drop(watching);
+    let _ = stream.shutdown(std::net::Shutdown::Both);
+    Ok(())
+}
+/// Serves one controller's `exports.file`: one file of the transfer area, read once or
+/// written once (`crate::transfer_area`). The area is checked and the file reserved before the
+/// reply, so a refusal (an unknown name, a file already sent, no room) comes back as one.
+fn serve_file_stream(
+    stream: &mut UnixStream,
+    permit: &mut Option<Permit>,
+    streams: &'static Budget,
+    params: &Value,
+    allowed: &dyn Fn() -> bool,
+) -> Result<(), BridgeError> {
+    let _stream_permit = admit_stream(permit, streams)?;
+    let context = crate::context::current().ok_or("The engine is not ready.")?;
+    let area = crate::transfer_area::Area::of_engine(context.as_ref())?;
+    let prepared = crate::transfer_area::prepare(&area, params)?;
+    write_frame(&mut *stream, &json!({"result":{}}))?;
+    stream
+        .set_read_timeout(Some(crate::transfer_area::IDLE_LIMIT))
+        .map_err(|e| e.to_string())?;
+    stream
+        .set_write_timeout(Some(crate::transfer_area::IDLE_LIMIT))
+        .map_err(|e| e.to_string())?;
+    // The outcome of a write is the verdict the controller reads; nothing else can be said now.
+    let _ = prepared.run(&mut *stream, &mut |_| {}, &|| !allowed());
     let _ = stream.shutdown(std::net::Shutdown::Both);
     Ok(())
 }
@@ -7339,6 +7382,7 @@ mod dispatch_tests {
                 "events.subscribe",
                 "guest.files.watch",
                 "guest.ssh",
+                "exports.file",
                 "macos.display.stream"
             ]
         );
@@ -7347,6 +7391,7 @@ mod dispatch_tests {
                 .into_iter()
                 .chain(method_literals(include_str!("runtime/remote_ops.rs")))
                 .chain(method_literals(include_str!("macos_remote.rs")))
+                .chain(method_literals(include_str!("transfer_area.rs")))
                 .collect();
         for method in &served {
             assert!(
