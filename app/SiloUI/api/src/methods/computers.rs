@@ -61,6 +61,16 @@ pub struct ComputerConfiguration {
     pub runtime_storage_gib: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub desktop: Option<DesktopConfiguration>,
+    /// What runs the computer; absent for the default runtime.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime: Option<ComputerRuntimeKind>,
+}
+
+/// The runtime of a Linux computer when it is not the default one.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum ComputerRuntimeKind {
+    Container,
 }
 
 /// Mirrors `app/SiloUI/src-tauri/engine/src/desktop.rs::DesktopConfiguration`.
@@ -340,6 +350,7 @@ pub enum AttentionLevel {
 pub enum ComputerKind {
     Linux,
     Macos,
+    Container,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize, schemars::JsonSchema)]
@@ -481,6 +492,40 @@ pub struct ComputerConfigurationProgress {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn configuration_wire() -> serde_json::Value {
+        serde_json::json!({
+            "id": "i", "name": "n", "cpus": 2, "maxCPUs": 2, "memoryGiB": 4, "maxMemoryGiB": 4,
+            "workspaceStorageGiB": 10, "runtimeStorageGiB": 10
+        })
+    }
+
+    #[test]
+    fn a_configuration_without_a_runtime_omits_it() {
+        let configuration: ComputerConfiguration =
+            serde_json::from_value(configuration_wire()).unwrap();
+        assert_eq!(configuration.runtime, None);
+        assert_eq!(
+            serde_json::to_value(&configuration).unwrap(),
+            configuration_wire()
+        );
+    }
+
+    #[test]
+    fn a_container_runtime_round_trips() {
+        let mut wire = configuration_wire();
+        wire["runtime"] = serde_json::json!("container");
+        let configuration: ComputerConfiguration = serde_json::from_value(wire.clone()).unwrap();
+        assert_eq!(configuration.runtime, Some(ComputerRuntimeKind::Container));
+        assert_eq!(serde_json::to_value(&configuration).unwrap(), wire);
+    }
+
+    #[test]
+    fn the_container_kind_parses() {
+        let kind: ComputerKind = serde_json::from_value(serde_json::json!("container")).unwrap();
+        assert_eq!(kind, ComputerKind::Container);
+        assert_eq!(serde_json::to_value(kind).unwrap(), "container");
+    }
 
     #[test]
     fn a_macos_row_keeps_its_boot_count() {

@@ -101,6 +101,7 @@ const configurationShape = z.object({
   cpus: z.number().int().positive(), maxCPUs: z.number().int().positive(), memoryGiB: z.number().int().positive(), maxMemoryGiB: z.number().int().positive(),
   workspaceStorageGiB: z.number().int().positive(), runtimeStorageGiB: z.number().int().positive(),
   desktop: z.object({ startWithComputer: z.boolean(), builtIn: z.boolean().optional() }).optional(),
+  runtime: z.literal("container").optional().catch(undefined),
 }).passthrough()
 
 const computerShape = z.object({

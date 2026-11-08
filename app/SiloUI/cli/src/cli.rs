@@ -201,11 +201,14 @@ pub enum SecretsCommand {
 pub struct CreateCommand {
     pub name: String,
     /// A Linux computer (the default).
-    #[arg(long, conflicts_with = "macos")]
+    #[arg(long, conflicts_with_all = ["macos", "container"])]
     pub linux: bool,
     /// A macOS computer.
-    #[arg(long)]
+    #[arg(long, conflicts_with = "container")]
     pub macos: bool,
+    /// A Linux computer that runs as a container: lighter than a VM but less isolated. Linux hosts only.
+    #[arg(long)]
+    pub container: bool,
     #[arg(long)]
     pub cpus: Option<u64>,
     /// Memory in GiB.
@@ -826,6 +829,8 @@ async fn dispatch(
                 name: create.name,
                 platform: if create.macos {
                     Platform::Macos
+                } else if create.container {
+                    Platform::Container
                 } else {
                     Platform::Linux
                 },
@@ -1567,6 +1572,15 @@ mod tests {
     #[test]
     fn create_flags_conflict() {
         assert!(Cli::try_parse_from(["silo", "create", "a", "--linux", "--macos"]).is_err());
+        assert!(Cli::try_parse_from(["silo", "create", "a", "--container", "--macos"]).is_err());
+        assert!(Cli::try_parse_from(["silo", "create", "a", "--container", "--linux"]).is_err());
+        let Command::Create(create) = Cli::try_parse_from(["silo", "create", "a", "--container"])
+            .unwrap()
+            .command
+        else {
+            panic!("expected create");
+        };
+        assert!(create.container && !create.macos && !create.linux);
         let cli = parse(&[
             "create", "a", "--macos", "--cpus", "6", "--memory", "12", "--disk", "80",
         ]);

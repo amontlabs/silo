@@ -1927,6 +1927,17 @@
         "name": {
           "type": "string"
         },
+        "runtime": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ComputerRuntimeKind"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "What runs the computer; absent for the default runtime."
+        },
         "runtimeStorageGiB": {
           "format": "uint32",
           "minimum": 0,
@@ -2442,7 +2453,8 @@
     "ComputerKind": {
       "enum": [
         "linux",
-        "macos"
+        "macos",
+        "container"
       ],
       "type": "string"
     },
@@ -2462,6 +2474,13 @@
         }
       },
       "type": "object"
+    },
+    "ComputerRuntimeKind": {
+      "description": "The runtime of a Linux computer when it is not the default one.",
+      "enum": [
+        "container"
+      ],
+      "type": "string"
     },
     "ComputerShellParams": {
       "properties": {

@@ -12,6 +12,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import type { SetupComputerConfiguration } from "@/contracts/silo"
+import { OsBadge } from "@/features/computers/components/os-badge"
 import { ComputerEditor } from "@/features/computers/components/computer-editor"
 import { useComputerEditing } from "@/features/computers/model/use-computer-editing"
 import { computerBusyReason } from "@/features/computers/model/computer-presentation"
@@ -406,6 +407,7 @@ export function ComputerDetailPage({ computer, source, actions, controls }: {
           <button type="button" className={cn(listHeadingClassName, "shrink-0 rounded-sm hover:underline focus-ring")} onClick={controls.onBack}>Computers</button>
           <ChevronRight className="size-3 shrink-0 text-muted-foreground" aria-hidden="true" />
           <span className={cn(listHeadingClassName, "truncate")} title={configuration.name}>{configuration.name}</span>
+          {configuration.runtime === "container" && <OsBadge os="container" />}
         </nav>}
         subtitle={<span data-slot="computer-detail-status"><DetailSubtitle computer={computer} source={source} readOnly={controls.readOnly} pendingSecrets={pendingSecrets} sshAccess={access} sshStale={sshStale} onCancel={actions.cancelOperation} onOpenSsh={showAccess ? () => controls.onSelectTab("access") : undefined} /></span>}
         actions={<div className="flex shrink-0 items-center gap-1">

@@ -175,7 +175,7 @@ pub async fn wait_ready(
 ) -> Result<Value, CliError> {
     ensure_desktop(computer)?;
     let begun = Instant::now();
-    let (mut last, mut desktop_started) = (String::new(), computer.kind != "linux");
+    let (mut last, mut desktop_started) = (String::new(), computer.kind == "macos");
     loop {
         let status = engine
             .call(requests::desktop_status(target(computer)))

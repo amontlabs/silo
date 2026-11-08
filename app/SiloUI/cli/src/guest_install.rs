@@ -112,7 +112,7 @@ pub async fn install(
         return Err(CliError::new("--group must be a Unix group name."));
     }
     let target = engine.computer(computer).await?;
-    if target.kind != "linux" {
+    if target.kind == "macos" {
         return Err(CliError::new(
             "The in-guest client is available for Linux computers only.",
         ));

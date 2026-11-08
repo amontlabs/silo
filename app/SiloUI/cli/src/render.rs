@@ -36,7 +36,7 @@ pub fn list(value: &Value) -> String {
         out.push_str(&format!("{:<device_width$}  ", "DEVICE"));
     }
     out.push_str(&format!(
-        "{:<width$}  {:<9}  {:<6}  {}\n",
+        "{:<width$}  {:<9}  {:<9}  {}\n",
         "NAME", "STATE", "KIND", "SIZE"
     ));
     for computer in &computers {
@@ -47,7 +47,7 @@ pub fn list(value: &Value) -> String {
             ));
         }
         out.push_str(&format!(
-            "{:<width$}  {:<9}  {:<6}  {} cpu, {} GiB\n",
+            "{:<width$}  {:<9}  {:<9}  {} cpu, {} GiB\n",
             text(computer, "name"),
             text(computer, "state"),
             text(computer, "kind"),
