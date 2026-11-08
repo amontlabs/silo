@@ -3714,6 +3714,26 @@ fn the_sweep_removes_the_empty_shell_of_an_import_group_no_computer_owns() {
     assert!(not_an_import.exists(), "only import groups are swept");
 }
 
+#[test]
+fn a_member_released_later_takes_its_empty_import_group_folder_with_it() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let paths = delete_fixture(&directory, Vec::new(), None);
+    let group = paths.home.join("snapshots").join(IMPORT_GROUP);
+    fs::create_dir_all(&group).unwrap();
+    for file in [".group.lock", "group.json"] {
+        fs::write(group.join(file), "").unwrap();
+    }
+    let store = Store::new(Vec::new()).with(IMPORT_GROUP, "fork-point-7", "snap_p", None);
+    // The member was queued when its computer was dropped and kept until now.
+    save_cleanup(&paths, &native::inventory(&store, &paths).unwrap()).unwrap();
+
+    retry_deleted_snapshots(&store, &paths).unwrap();
+
+    assert!(store.names().is_empty());
+    assert!(!group.exists());
+}
+
 /// `dev` is deleted: its configuration is gone and the group directory holds `files`.
 fn deleted_dev_with_group_files(
     directory: &tempfile::TempDir,

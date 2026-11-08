@@ -4015,6 +4015,20 @@ fn retry_queued_snapshots(
         .filter(|member| !removed.contains(member.snapshot_id.as_str()))
         .collect();
     save_cleanup(paths, &remaining)?;
+    // A member can be released long after its computer was dropped (an imported copy shares
+    // its snapshot ID with the computer it was exported from, and stays while that one lives),
+    // so the group's empty folder is only removable now.
+    let mut groups: Vec<&str> = plan
+        .remove
+        .iter()
+        .filter(|member| removed.contains(member.snapshot_id.as_str()))
+        .filter_map(|member| member.group.as_deref())
+        .collect();
+    groups.sort_unstable();
+    groups.dedup();
+    for group in groups {
+        remove_empty_group_directory(runner, paths, group);
+    }
     if let Some((_, failure)) = failures.into_iter().next() {
         return Err(failure);
     }
