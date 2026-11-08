@@ -21,10 +21,11 @@ on:
       - '!app/SiloUI/**/*.md'
       - '!app/SiloUI/.changeset/**'
       - '!app/SiloUI/docs/**'
-      # Frontend sources, except the two that Rust tests read (scripts/ci-native-changes.py).
+      # Frontend sources, except the ones that Rust tests read (scripts/ci-native-changes.py).
       - '!app/SiloUI/src/**'
       - 'app/SiloUI/src/test/contracts/**'
       - 'app/SiloUI/src/features/application/model/reserved-secret-names.json'
+      - 'app/SiloUI/src/features/computers/model/container-unavailable.json'
       - '.github/actions/prepare-release-runtime/**'
       - '.github/workflows/linux-host.yml'
       # The fork measurements (job `forks`); the other job runs on these pull requests too.
