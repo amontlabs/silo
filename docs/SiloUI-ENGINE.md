@@ -342,3 +342,45 @@ behind `cfg(target_os = "linux")`.
   the same engine and systemd user manager, without GitHub: `check -offline` on `/dev/kvm`,
   `service register` (a unit ordered after the engine's and starting it when it is down), the
   helper's log in the user journal, and `service unregister`.
+
+### Container computers (optional)
+
+A Linux host can also run container computers: rootless `crun` containers instead of VMs. The
+host must be set up for them, and Silo never sets host prerequisites itself. `silo host init`
+checks them on a Linux host, prints a "Container computers" section (and a `containerComputers`
+key in `--json`: `ready` and a list of `findings` with `id`, `level`, `ok`, `what` and `fix`),
+and names the command that fixes each one. It never changes the host, and it never fails
+because of them. The engine refuses to create a container computer with the same messages until
+every required item is met.
+
+On Ubuntu 24.04 the tools come from one line (it ships crun 1.14.1, skopeo 1.13.3 and umoci
+0.4.7):
+
+```sh
+sudo apt install crun skopeo umoci uidmap
+```
+
+The checks, by id:
+
+- `crun`, `skopeo`, `umoci` are on `PATH`; `uidmap`: `newuidmap` and `newgidmap` are installed
+  and setuid root.
+- `subuid`, `subgid`: `/etc/subuid` and `/etc/subgid` give this account at least 65536 ids.
+  Ubuntu's `adduser` creates them; otherwise `sudo usermod --add-subuids 100000-165535
+  --add-subgids 100000-165535 $USER`.
+- `tun`: `/dev/net/tun` exists and this account can open it for reading and writing.
+- `userns`, `apparmor-userns`: unprivileged user namespaces are allowed, and on Ubuntu
+  `kernel.apparmor_restrict_unprivileged_userns` is `0`.
+- `overlayfs`: the kernel supports overlay filesystems.
+- `cgroup-v2`, `cgroup-delegation`: the unified cgroup hierarchy, with the account's systemd
+  user manager delegating `memory` and `pids` (`loginctl enable-linger $USER`; if the controllers
+  are still missing, `Delegate=memory pids cpu cpuset` in
+  `/etc/systemd/system/user@.service.d/delegate.conf`).
+- `systemd-run` is installed and `XDG_RUNTIME_DIR` is set.
+- Advice only (nothing is refused, a limit stays off): `cpu-limit`, when `cpu` is not delegated,
+  so CPU limits are not enforced; `landlock`, when the kernel's `lsm=` list lacks it.
+
+**The AppArmor trade-off.** Ubuntu 24.04 blocks unprivileged user namespaces by default. The fix
+Silo names, `sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0` (kept after a reboot
+by a file in `/etc/sysctl.d`), relaxes that guard for every program on the host. The narrower
+alternative is an AppArmor profile that lets only Silo's helper create user namespaces; Silo does
+not install one.

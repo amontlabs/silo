@@ -4990,6 +4990,7 @@ dependencies = [
  "sha2 0.10.9",
  "silo-api",
  "silo-client",
+ "silo-host",
  "tempfile",
  "time",
  "tokio",

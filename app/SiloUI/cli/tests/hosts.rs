@@ -21,6 +21,7 @@ use silo_cli::{
     hosts::{self, HostSetup, Membership, Platform, Terminal, VmProbe},
 };
 use silo_client::channel::Channel;
+use silo_host::container_prerequisites;
 
 const KEY: &str =
     "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKVyZDGnacgUkbjXHi/TsIZ+GxIgprlkfONi9t33BGz3 laptop";
@@ -81,6 +82,7 @@ impl EngineDirectory {
             ),
             socket: socket.to_owned(),
             vm: kvm_ok(),
+            containers: None,
             ssh,
             engine_wait: Duration::from_millis(300),
             opener: PathBuf::from("/nonexistent/open"),
@@ -960,4 +962,66 @@ fn a_host_key_pin_never_trusts_what_it_does_not_name() {
         );
     }
     assert!(!terminal.ran.borrow().iter().any(|ran| ran.contains("evil")));
+}
+
+fn container_finding(
+    id: &'static str,
+    level: container_prerequisites::Level,
+    ok: bool,
+) -> container_prerequisites::Finding {
+    container_prerequisites::Finding {
+        id,
+        level,
+        ok,
+        what: format!("{id} is fine"),
+        fix: if ok {
+            String::new()
+        } else {
+            format!("fix {id}")
+        },
+    }
+}
+
+#[tokio::test]
+async fn init_reports_container_computers_without_failing_on_them() {
+    use container_prerequisites::Level::{Advice, Required};
+    let engine = host_engine();
+    let unpacked = EngineDirectory::new(REGISTERED, "", 0);
+    let (_ssh, ssh) = listening();
+    let mut setup = unpacked.setup(&engine.socket, ssh);
+    setup.containers = Some(container_prerequisites::Report {
+        findings: vec![
+            container_finding("crun", Required, false),
+            container_finding("skopeo", Required, true),
+            container_finding("cpu-limit", Advice, false),
+        ],
+    });
+    let value = hosts::init(&setup, &[]).await.unwrap();
+    let section = &value["containerComputers"];
+    assert_eq!(section["ready"], false);
+    assert_eq!(section["findings"].as_array().unwrap().len(), 3);
+    assert_eq!(section["findings"][0]["id"], "crun");
+    assert_eq!(section["findings"][0]["level"], "required");
+    assert_eq!(section["findings"][0]["ok"], false);
+    assert_eq!(section["findings"][0]["fix"], "fix crun");
+    assert_eq!(section["findings"][2]["level"], "advice");
+    let text = hosts::render_host(&value);
+    assert!(text.contains("Container computers: not ready"), "{text}");
+    assert!(text.contains("crun is fine: fix crun"), "{text}");
+    assert!(
+        text.contains("cpu-limit is fine (advice): fix cpu-limit"),
+        "{text}"
+    );
+    assert!(!text.contains("skopeo"), "{text}");
+
+    setup.containers = Some(container_prerequisites::Report {
+        findings: vec![container_finding("crun", Required, true)],
+    });
+    let value = hosts::init(&setup, &[]).await.unwrap();
+    assert_eq!(value["containerComputers"]["ready"], true);
+    assert!(hosts::render_host(&value).contains("Container computers: ready"));
+
+    setup.containers = None;
+    let value = hosts::init(&setup, &[]).await.unwrap();
+    assert!(value.get("containerComputers").is_none());
 }
