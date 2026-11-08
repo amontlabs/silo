@@ -74,10 +74,10 @@ fn terminal(paths: &RuntimePaths, exec: &args::Exec) -> Result<i32, String> {
         .map_err(|error| error.to_string())?;
     let mut with_socket = exec.clone();
     with_socket.console_socket = Some(socket);
-    let lifecycle::ExecPlan {
-        mut command,
-        group,
-    } = lifecycle::exec_command(paths, &tools, &exec.name, &with_socket, false)?;
+    let lifecycle::ExecPlan { command, group } =
+        lifecycle::exec_command(paths, &tools, &exec.name, &with_socket, false)?;
+    // A terminal is started from a login session, not from the engine's control group.
+    let mut command = lifecycle::in_user_scope(&tools, &command);
     let mut child = command
         .stdin(Stdio::null())
         .stdout(Stdio::null())

@@ -927,6 +927,19 @@ pub fn remove(paths: &RuntimePaths, tools: &Tools, name: &str) -> Result<(), Run
     Ok(())
 }
 
+/// `command` run in a scope of the user manager (`systemd-run --user --scope`). Joining the
+/// container's control group needs an ancestor this account may write, which a process started
+/// from a login session (a terminal, an editor's proxy) does not share with the container; the
+/// engine's own processes are inside the user manager already.
+pub fn in_user_scope(tools: &Tools, command: &Command) -> Command {
+    let mut scoped = Command::new(&tools.systemd_run);
+    scoped
+        .args(["--user", "--scope", "--quiet", "--"])
+        .arg(command.get_program())
+        .args(command.get_args());
+    scoped
+}
+
 /// A `crun exec` command and the handle that ends what it runs.
 pub struct ExecPlan {
     pub command: Command,

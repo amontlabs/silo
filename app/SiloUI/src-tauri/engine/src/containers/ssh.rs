@@ -512,6 +512,8 @@ mod server {
         let lifecycle::ExecPlan { command, group } =
             blocking(move || plan(&work, &request, None, None)).await?;
         let group = Arc::new(group);
+        // An editor's proxy runs in a login session, not the engine's control group.
+        let command = lifecycle::in_user_scope(&shared.tools, &command);
         let mut child = tokio::process::Command::from(command)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -571,6 +573,7 @@ mod server {
         let lifecycle::ExecPlan { command, group } =
             blocking(move || plan(&work, &request, Some(&term), Some(console))).await?;
         let group = Arc::new(group);
+        let command = lifecycle::in_user_scope(&shared.tools, &command);
         let mut child = tokio::process::Command::from(command)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
