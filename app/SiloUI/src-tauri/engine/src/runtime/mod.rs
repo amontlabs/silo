@@ -201,7 +201,7 @@ fn publish_configuration_progress(context: &dyn EngineContext, payload: Value) {
     }
     silo_engine::context::publish_to_main_window(context, Event::new(SOURCE, payload));
 }
-const DISABLED_GITHUB_PROFILE: &str = r#"{"version":1,"owners":[]}"#;
+pub(crate) const DISABLED_GITHUB_PROFILE: &str = r#"{"version":1,"owners":[]}"#;
 static GITHUB_PROFILES: OnceLock<Mutex<HashMap<(PathBuf, String), String>>> = OnceLock::new();
 const GITHUB_UPDATE_REPLACED: &str = "A newer GitHub access choice has replaced this update.";
 
@@ -282,6 +282,12 @@ fn accept_github_revision(current: &mut u64, revision: u64) -> Result<(), String
     }
     *current = revision;
     Ok(())
+}
+
+/// The runtime source name of a general secret, as the shared secret checks expect to read it
+/// back from an inspected computer.
+pub(crate) fn secret_source_name(name: &str) -> String {
+    secrets_runtime::source_name(name)
 }
 
 fn github_command_computer(args: &[String]) -> Option<&str> {
@@ -1549,13 +1555,11 @@ fn run_msb_process(
             crate::desktop_viewer_api::close_computer(computer);
         }
     }
-    match crate::containers::route(paths, args) {
-        crate::containers::Route::Container => return crate::containers::run(paths, args, timeout),
-        crate::containers::Route::MergeList => {
-            let answer = spawn_runtime_command(paths, args, timeout, report)?;
-            return crate::containers::merge_list(paths, args, answer);
-        }
-        crate::containers::Route::Runtime => {}
+    // A container computer is answered where the runtime is launched (`spawn_runtime`), so the
+    // secret material read for `start` and `modify` reaches it the way it reaches MicroSandbox.
+    if crate::containers::route(paths, args) == crate::containers::Route::MergeList {
+        let answer = spawn_runtime_command(paths, args, timeout, report)?;
+        return crate::containers::merge_list(paths, args, answer);
     }
     spawn_runtime_command(paths, args, timeout, report)
 }
@@ -1566,10 +1570,13 @@ fn spawn_runtime_command(
     timeout: Duration,
     report: &dyn Fn(Value),
 ) -> Result<CommandOutput, RuntimeError> {
-    ensure_runtime_files(paths)?;
-    if matches!(args.first().map(String::as_str), Some("start" | "restart")) {
-        if let Some(computer) = args.get(1).filter(|name| validate_name(name).is_ok()) {
-            crate::legacy_mounts::restore_missing_before_start(paths, computer);
+    let container = crate::containers::route(paths, args) == crate::containers::Route::Container;
+    if !container {
+        ensure_runtime_files(paths)?;
+        if matches!(args.first().map(String::as_str), Some("start" | "restart")) {
+            if let Some(computer) = args.get(1).filter(|name| validate_name(name).is_ok()) {
+                crate::legacy_mounts::restore_missing_before_start(paths, computer);
+            }
         }
     }
     let mut secret_revision = None;
@@ -1832,6 +1839,17 @@ fn spawn_runtime(
         capture,
         report,
     } = launch;
+    if crate::containers::route(paths, args) == crate::containers::Route::Container {
+        return crate::containers::run(
+            paths,
+            args,
+            timeout,
+            &crate::containers::Material {
+                secrets: material,
+                github_profile,
+            },
+        );
+    }
     ensure_runtime_files(paths)?;
     let captures = if capture {
         let stdout = tempfile::NamedTempFile::new().map_err(|error| {
@@ -6598,22 +6616,17 @@ fn create_computer_with_progress(
         "--label".into(),
         format!("silo.runtime-storage-gib={runtime_storage_gib}"),
     ];
-    // A container has no secrets until the network phase (CT3).
-    if runtime.is_none() {
-        args.extend([
-            "--secret".into(),
-            secrets_runtime::SILO_GITHUB_SECRET_SPEC.into(),
-        ]);
-    }
+    args.extend([
+        "--secret".into(),
+        secrets_runtime::SILO_GITHUB_SECRET_SPEC.into(),
+    ]);
     args.extend([
         // Explicit, so a computer does not depend on the runtime's default (off in
         // 0.7.2, on since 0.7.4). It matches `guest/github-network-default.json`,
         // which exports compare against; no hostname rule makes it observable.
         "--net-strict=true".into(),
     ]);
-    if runtime.is_none() {
-        args.extend(["--env".into(), "GH_TOKEN=$MSB_SILO_GITHUB".into()]);
-    }
+    args.extend(["--env".into(), "GH_TOKEN=$MSB_SILO_GITHUB".into()]);
     args.extend([
         "--label".into(),
         "silo.github-protocol=1".into(),
@@ -12199,8 +12212,14 @@ exit 9
         assert!(create
             .windows(2)
             .any(|pair| pair == ["--label", crate::containers::RUNTIME_LABEL]));
-        assert!(!create.iter().any(|arg| arg == "--secret" || arg.starts_with("GH_TOKEN")));
-        // The container side would refuse it too.
+        // The same GitHub access a virtual machine is created with.
+        assert!(create
+            .windows(2)
+            .any(|pair| pair == ["--secret", secrets_runtime::SILO_GITHUB_SECRET_SPEC]));
+        assert!(create
+            .windows(2)
+            .any(|pair| pair == ["--env", "GH_TOKEN=$MSB_SILO_GITHUB"]));
+        // General secrets are assigned after creation, never on it.
         let mut with_secret = create.clone();
         with_secret.extend(["--secret".to_owned(), "x".to_owned()]);
         assert!(crate::containers::args::parse(&with_secret).is_err());

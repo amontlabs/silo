@@ -27,6 +27,8 @@ pub enum Command {
         name: String,
     },
     Exec(Box<Exec>),
+    /// Secrets and GitHub access: the only `modify` a container computer answers.
+    Modify(Box<Modify>),
     /// A command only MicroSandbox computers answer yet.
     Unsupported {
         verb: String,
@@ -44,6 +46,28 @@ pub struct Create {
     pub workspace_mib: u64,
     pub labels: Vec<(String, String)>,
     pub env: Vec<(String, String)>,
+    /// Whether the create carries the GitHub access secret.
+    pub github: bool,
+}
+
+/// A secret named by `--secret NAME:passthrough=*@host,host`: the guest-visible name and the
+/// hosts the gateway may substitute it for.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SecretSpec {
+    pub name: String,
+    pub allowed_hosts: Vec<String>,
+}
+
+/// The secret changes of one `modify`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Modify {
+    pub name: String,
+    /// Secrets to add or update (`--secret`), the GitHub one included.
+    pub put: Vec<SecretSpec>,
+    /// Secrets to remove (`--secret-rm`).
+    pub remove: Vec<String>,
+    /// The change is recorded and applies at the next start (`--next-start`).
+    pub next_start: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -114,17 +138,43 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
         }
         "create" => parse_create(args).map(|create| Command::Create(Box::new(create))),
         "exec" => parse_exec(args).map(|exec| Command::Exec(Box::new(exec))),
+        "modify" => Ok(match parse_modify(args)? {
+            Some(modify) => Command::Modify(Box::new(modify)),
+            None => Command::Unsupported {
+                verb: "modify".into(),
+            },
+        }),
         other => Ok(Command::Unsupported {
             verb: other.to_owned(),
         }),
     }
 }
 
+/// The GitHub access secret every Silo computer is created with (the same text a virtual
+/// machine's create passes). Any other `--secret` on a create is refused: general secrets are
+/// assigned afterwards.
+pub const GITHUB_SECRET_NAME: &str = "SILO_GITHUB";
+
+/// `NAME:passthrough=*@host1,host2`.
+pub fn parse_secret_spec(text: &str) -> Option<SecretSpec> {
+    let (name, rest) = text.split_once(':')?;
+    let hosts = rest.strip_prefix("passthrough=*@")?;
+    let allowed_hosts: Vec<String> = hosts.split(',').map(str::to_owned).collect();
+    (!name.is_empty() && allowed_hosts.iter().all(|host| !host.is_empty())).then(|| SecretSpec {
+        name: name.to_owned(),
+        allowed_hosts,
+    })
+}
+
 fn parse_create(args: &[String]) -> Result<Create, String> {
-    if args
-        .iter()
-        .any(|arg| arg == "--secret" || arg.starts_with("--secret="))
-    {
+    let mut github = false;
+    for text in repeated_values(args, "--secret") {
+        match parse_secret_spec(text) {
+            Some(spec) if spec.name == GITHUB_SECRET_NAME && !github => github = true,
+            _ => return Err(crate::containers::capability::refusal("give secrets to")),
+        }
+    }
+    if args.iter().any(|arg| arg.starts_with("--secret=")) {
         return Err(crate::containers::capability::refusal("give secrets to"));
     }
     let name = flag_value(args, "--name")
@@ -165,7 +215,53 @@ fn parse_create(args: &[String]) -> Result<Create, String> {
         workspace_mib,
         labels: repeated_pairs(args, "--label"),
         env: repeated_pairs(args, "--env"),
+        github,
     })
+}
+
+fn repeated_values<'a>(args: &'a [String], flag: &str) -> Vec<&'a str> {
+    args.windows(2)
+        .filter(|pair| pair[0] == flag)
+        .map(|pair| pair[1].as_str())
+        .collect()
+}
+
+/// `modify NAME` with only secret flags; `None` when it asks for anything else (resources,
+/// labels, environment), which a container computer does not answer yet.
+fn parse_modify(args: &[String]) -> Result<Option<Modify>, String> {
+    let name = target_name(args)
+        .ok_or("modify needs a computer name.")?
+        .to_owned();
+    let mut modify = Modify {
+        name,
+        put: Vec::new(),
+        remove: Vec::new(),
+        next_start: false,
+    };
+    let mut index = 2;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--secret" => {
+                let text = args.get(index + 1).ok_or("--secret needs a value.")?;
+                modify
+                    .put
+                    .push(parse_secret_spec(text).ok_or("--secret needs NAME:passthrough=*@HOSTS.")?);
+                index += 2;
+            }
+            "--secret-rm" => {
+                let text = args.get(index + 1).ok_or("--secret-rm needs a name.")?;
+                modify.remove.push(text.clone());
+                index += 2;
+            }
+            "--next-start" => {
+                modify.next_start = true;
+                index += 1;
+            }
+            "--format" => index += 2,
+            _ => return Ok(None),
+        }
+    }
+    Ok(Some(modify))
 }
 
 fn repeated_pairs(args: &[String], flag: &str) -> Vec<(String, String)> {
@@ -299,9 +395,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn a_secret_on_create_is_refused_for_a_container() {
-        let mut create: Vec<String> = [
+    fn create_args() -> Vec<String> {
+        [
             "create",
             "img",
             "--name",
@@ -319,14 +414,91 @@ mod tests {
         ]
         .iter()
         .map(|part| part.to_string())
-        .collect();
-        assert!(parse(&create).is_ok());
-        create.extend(["--secret".to_owned(), "GITHUB=x@api.github.com".to_owned()]);
-        let error = parse(&create).unwrap_err();
-        assert!(
-            error.contains("cannot give secrets to a container computer yet"),
-            "{error}"
+        .collect()
+    }
+
+    #[test]
+    fn only_the_github_secret_is_accepted_on_create_and_any_other_is_refused() {
+        let mut create = create_args();
+        let Command::Create(plain) = parse(&create).unwrap() else {
+            panic!("a create")
+        };
+        assert!(!plain.github);
+        create.extend([
+            "--secret".to_owned(),
+            "SILO_GITHUB:passthrough=*@github.com,api.github.com,uploads.github.com".to_owned(),
+            "--env".to_owned(),
+            "GH_TOKEN=$MSB_SILO_GITHUB".to_owned(),
+        ]);
+        let Command::Create(github) = parse(&create).unwrap() else {
+            panic!("a create")
+        };
+        assert!(github.github);
+        assert_eq!(
+            github.env,
+            [("GH_TOKEN".to_owned(), "$MSB_SILO_GITHUB".to_owned())]
         );
+        for other in [
+            "TOKEN:passthrough=*@api.example.test",
+            "GITHUB=x@api.github.com",
+        ] {
+            let mut create = create_args();
+            create.extend(["--secret".to_owned(), other.to_owned()]);
+            let error = parse(&create).unwrap_err();
+            assert!(
+                error.contains("cannot give secrets to a container computer yet"),
+                "{error}"
+            );
+        }
+        let mut twice = create_args();
+        for _ in 0..2 {
+            twice.extend([
+                "--secret".to_owned(),
+                "SILO_GITHUB:passthrough=*@github.com,api.github.com".to_owned(),
+            ]);
+        }
+        assert!(parse(&twice).is_err());
+    }
+
+    #[test]
+    fn the_modify_commands_the_secret_code_issues_are_read() {
+        let command = parse(&args(&[
+            "modify",
+            "dev",
+            "--secret-rm",
+            "OLD",
+            "--secret",
+            "TOKEN:passthrough=*@a.example,b.example",
+            "--next-start",
+            "--format",
+            "json",
+        ]))
+        .unwrap();
+        assert_eq!(
+            command,
+            Command::Modify(Box::new(Modify {
+                name: "dev".into(),
+                put: vec![SecretSpec {
+                    name: "TOKEN".into(),
+                    allowed_hosts: vec!["a.example".into(), "b.example".into()],
+                }],
+                remove: vec!["OLD".into()],
+                next_start: true,
+            }))
+        );
+        // Resources, labels and environment are not secrets.
+        for other in [
+            args(&["modify", "dev", "--cpus", "2"]),
+            args(&["modify", "dev", "--env-rm", "GIT_AUTHOR_NAME"]),
+        ] {
+            assert_eq!(
+                parse(&other).unwrap(),
+                Command::Unsupported {
+                    verb: "modify".into()
+                }
+            );
+        }
+        assert!(parse(&args(&["modify", "dev", "--secret", "oops"])).is_err());
     }
 
     #[test]

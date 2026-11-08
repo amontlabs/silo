@@ -115,6 +115,8 @@ pub(crate) fn make_container(home: &Path, name: &str) {
         layers: Vec::new(),
         created_ms: 1,
         started_once: false,
+        secrets: Vec::new(),
+        github: false,
     })
     .unwrap();
 }

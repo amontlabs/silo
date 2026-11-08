@@ -16,13 +16,14 @@
 
 use super::{
     args::Exec,
+    Material,
     hold::{self, ExecGroup, Reaped, StartMark},
     layout::{ComputerDir, ComputerRecord, Layout},
     oci,
     tools::Tools,
     users,
 };
-use crate::computer_gateway::{computer_ca, Gateway, Params};
+use crate::computer_gateway::{computer_ca, Gateway, Params, Secret};
 use crate::runtime::{RuntimeError, RuntimePaths};
 use sha2::{Digest, Sha256};
 use std::{
@@ -35,9 +36,10 @@ use std::{
     },
     path::{Path, PathBuf},
     process::{Command, Stdio},
-    sync::Mutex,
+    sync::{Arc, Mutex, MutexGuard, PoisonError, TryLockError},
     time::{Duration, Instant},
 };
+use zeroize::Zeroizing;
 
 const GUEST_IPV4: Ipv4Addr = Ipv4Addr::new(172, 30, 0, 6);
 const GATEWAY_IPV4: Ipv4Addr = Ipv4Addr::new(172, 30, 0, 5);
@@ -45,8 +47,52 @@ const GUEST_MAC: [u8; 6] = [0x02, 0x53, 0x49, 0x4c, 0x4f, 0x01];
 const TASKS_MAX: u32 = 4096;
 const TERM_WAIT: Duration = Duration::from_secs(15);
 
-/// The gateways of the running containers of this engine, by computer name.
-static GATEWAYS: Mutex<Option<HashMap<String, Gateway>>> = Mutex::new(None);
+/// A running container's gateway and what it holds.
+pub struct Running {
+    gateway: Mutex<Gateway>,
+    /// The general secrets the gateway substitutes (their placeholders are in the guest's
+    /// environment). A secret assigned while the computer runs is recorded but not added here
+    /// until the next start, as for a virtual machine.
+    active: Mutex<Vec<String>>,
+}
+
+impl Running {
+    /// The gateway, for one exchange at a time. A poisoned lock is a gateway call that panicked:
+    /// the link is unknown, so the gateway is stopped and every later call answers unavailable.
+    pub fn gateway(&self) -> MutexGuard<'_, Gateway> {
+        self.gateway.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    pub fn active_secrets(&self) -> Vec<String> {
+        self.active
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
+    pub fn set_active(&self, names: Vec<String>) {
+        *self.active.lock().unwrap_or_else(PoisonError::into_inner) = names;
+    }
+}
+
+/// The gateways of the running containers of this engine, by computer name. The map is locked
+/// only to find or change an entry; a gateway exchange (up to seconds) takes the entry's own
+/// lock, so reading one computer's state never waits for another's update.
+static GATEWAYS: Mutex<Option<HashMap<String, Arc<Running>>>> = Mutex::new(None);
+
+fn registry() -> MutexGuard<'static, Option<HashMap<String, Arc<Running>>>> {
+    GATEWAYS.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// The gateway of a container this engine started, if it is registered.
+pub fn running(name: &str) -> Option<Arc<Running>> {
+    registry().as_ref().and_then(|map| map.get(name).cloned())
+}
+
+/// The general secrets the running gateway of `name` holds; none when it is not running.
+pub fn active_secrets(name: &str) -> Vec<String> {
+    running(name).map_or_else(Vec::new, |running| running.active_secrets())
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Status {
@@ -109,12 +155,20 @@ pub fn holder_alive(paths: &RuntimePaths, name: &str) -> bool {
     holder_alive_in(Path::new("/proc"), paths, name)
 }
 
+/// Whether this engine holds a live gateway for the computer. A gateway that stopped (a failed
+/// update stops it, and a refused or late answer must never look applied) is not tracked, so the
+/// computer reads as stopped and a start brings it back.
 fn gateway_tracked(name: &str) -> bool {
-    GATEWAYS
-        .lock()
-        .ok()
-        .and_then(|map| map.as_ref().map(|map| map.contains_key(name)))
-        .unwrap_or(false)
+    let Some(running) = running(name) else {
+        return false;
+    };
+    let alive = match running.gateway.try_lock() {
+        Ok(mut gateway) => gateway.is_running(),
+        // An exchange is in progress: the gateway is there.
+        Err(TryLockError::WouldBlock) => true,
+        Err(TryLockError::Poisoned(poisoned)) => poisoned.into_inner().is_running(),
+    };
+    alive
 }
 
 /// Whether the computer is running as this engine process knows it: a live holder and its gateway.
@@ -215,6 +269,16 @@ fn private_dir(path: &Path) -> Result<(), String> {
         .map_err(io)
 }
 
+/// The file the gateway appends its credential-use events to: where `computers.credentials`
+/// reads a Linux computer's events, so the credentials-used line needs no container case.
+fn usage_log_file(home: &Path, name: &str) -> Result<PathBuf, String> {
+    let file = crate::credentials_usage::linux_usage_file(home, name);
+    if let Some(parent) = file.parent() {
+        private_dir(parent)?;
+    }
+    Ok(file)
+}
+
 /// `recvmsg` of one file descriptor sent with `SCM_RIGHTS`.
 fn receive_descriptor(stream: &std::os::unix::net::UnixStream) -> Result<OwnedFd, String> {
     use std::os::fd::AsRawFd;
@@ -262,6 +326,7 @@ pub fn start(
     tools: &Tools,
     name: &str,
     timeout: Duration,
+    material: &Material<'_>,
 ) -> Result<(), RuntimeError> {
     let unavailable = |detail: String| {
         eprintln!("Starting container computer {name}: {detail}");
@@ -276,7 +341,7 @@ pub fn start(
     })?;
     let layout = Layout::new(&paths.home);
     let dir = layout.computer(name);
-    let mut record = dir.read_record().map_err(RuntimeError::Unavailable)?;
+    let record = dir.read_record().map_err(RuntimeError::Unavailable)?;
     if is_running(Path::new("/proc"), paths, name) {
         return Ok(());
     }
@@ -292,6 +357,7 @@ pub fn start(
         &record,
         &image.rootfs,
         timeout,
+        material,
     )
     .map_err(|detail| {
         let _ = stop(paths, tools, name, &record);
@@ -300,8 +366,8 @@ pub fn start(
     for warning in &started.warnings {
         eprintln!("Container computer {name}: {warning}");
     }
-    record.started_once = true;
-    dir.write_record(&record)
+    // Re-read: a secret may have been assigned while the computer was starting.
+    dir.update_record(|record| record.started_once = true)
         .map_err(RuntimeError::Unavailable)?;
     Ok(())
 }
@@ -315,6 +381,7 @@ fn launch(
     record: &ComputerRecord,
     rootfs: &Path,
     timeout: Duration,
+    material: &Material<'_>,
 ) -> Result<Started, String> {
     let state = dir.state();
     private_dir(&state)?;
@@ -460,6 +527,25 @@ fn launch(
     let id = record.label("silo.machine-id").unwrap_or(name).to_owned();
     let (ca_cert, ca_key) = computer_ca(&tools.gateway, &id)?;
     let gateway_log = std::fs::File::create(state.join("gateway.log")).map_err(io)?;
+    let usage_log = usage_log_file(&paths.home, name)?;
+    // The secrets this computer is assigned, with the values the engine read for this start. A
+    // value the engine does not hold is left out: nothing substitutes it.
+    let secrets: Vec<Secret> = record
+        .secrets
+        .iter()
+        .filter_map(|known| {
+            material
+                .secrets
+                .iter()
+                .find(|(secret, _, _)| secret == &known.name)
+        })
+        .map(|(name, value, hosts)| Secret {
+            name: name.clone(),
+            value: Zeroizing::new(value.clone()),
+            allowed_hosts: hosts.clone(),
+        })
+        .collect();
+    let active: Vec<String> = secrets.iter().map(|secret| secret.name.clone()).collect();
     let gateway = Gateway::start(
         &tools.gateway,
         tap,
@@ -472,10 +558,14 @@ fn launch(
             guest_mac: GUEST_MAC,
             mtu: 1500,
             published_ports: Vec::new(),
-            secrets: Vec::new(),
-            github_profile_json: None,
-            github_hosts: None,
-            usage_log: None,
+            secrets,
+            github_profile_json: record
+                .github
+                .then(|| Zeroizing::new(material.github_profile.to_owned())),
+            github_hosts: record
+                .github
+                .then(|| super::secrets::GITHUB_HOSTS.map(str::to_owned).to_vec()),
+            usage_log: Some(usage_log),
             log: Some(gateway_log),
         },
     )?;
@@ -503,11 +593,13 @@ fn launch(
             tail(&state)
         ));
     }
-    GATEWAYS
-        .lock()
-        .map_err(|_| "The gateway registry is unavailable.".to_owned())?
-        .get_or_insert_with(HashMap::new)
-        .insert(name.to_owned(), gateway);
+    registry().get_or_insert_with(HashMap::new).insert(
+        name.to_owned(),
+        Arc::new(Running {
+            gateway: Mutex::new(gateway),
+            active: Mutex::new(active),
+        }),
+    );
     wait_running(&tools.crun, &state, name, deadline)?;
     holder_pid(&state).ok_or("The container holder left no pid file.")?;
     // The holder runs on; dropping the guard hands its exit status to a thread.
@@ -627,17 +719,12 @@ pub fn stop(
         }
     }
     cleanup_stale(paths, tools, &dir, name);
-    let gateway = GATEWAYS
-        .lock()
-        .ok()
-        .and_then(|mut map| map.as_mut().and_then(|map| map.remove(name)));
-    if let Some(gateway) = gateway {
-        gateway.shutdown();
+    let gateway = registry().as_mut().and_then(|map| map.remove(name));
+    if let Some(running) = gateway {
+        running.gateway().close();
     }
     if !record.started_once {
-        let mut updated = record.clone();
-        updated.started_once = true;
-        let _ = dir.write_record(&updated);
+        let _ = dir.update_record(|record| record.started_once = true);
     }
     Ok(())
 }
@@ -650,10 +737,21 @@ pub fn remove(paths: &RuntimePaths, tools: &Tools, name: &str) -> Result<(), Run
             "Stop {name} before dropping it."
         )));
     }
+    let id = dir
+        .read_record()
+        .ok()
+        .and_then(|record| record.label("silo.machine-id").map(str::to_owned))
+        .unwrap_or_else(|| name.to_owned());
     super::image::remove_tree(tools, dir.path()).map_err(|detail| {
         eprintln!("Removing container computer {name}: {detail}");
         RuntimeError::Unavailable(format!("Silo could not remove container computer {name}."))
-    })
+    })?;
+    // The events the gateway wrote and the computer's certificate authority go with it.
+    let events = paths.home.join("sandboxes").join(name);
+    let _ = std::fs::remove_dir_all(events.join("logs"));
+    let _ = std::fs::remove_dir(&events);
+    let _ = crate::macos_computers::proxy_ca::retire(&id);
+    Ok(())
 }
 
 /// A `crun exec` command and the handle that ends what it runs.
@@ -731,9 +829,15 @@ pub fn exec_command(
         ("LANG".to_owned(), "C.UTF-8".to_owned()),
         ("SILO_RUNTIME".to_owned(), "container".to_owned()),
     ];
-    for (key, value) in &exec.env {
-        environment.retain(|(existing, _)| existing != key);
-        environment.push((key.clone(), value.clone()));
+    // The computer's own environment, then the placeholders of the secrets its gateway holds.
+    let own = record
+        .env
+        .iter()
+        .cloned()
+        .chain(super::secrets::placeholder_env(&active_secrets(name)));
+    for (key, value) in own.chain(exec.env.iter().cloned()) {
+        environment.retain(|(existing, _)| existing != &key);
+        environment.push((key, value));
     }
     let mut argv = vec![
         oci::INIT_PATH.to_owned(),
@@ -913,6 +1017,8 @@ mod tests {
             layers: Vec::new(),
             created_ms: 1,
             started_once: started,
+            secrets: Vec::new(),
+            github: false,
         }
     }
 

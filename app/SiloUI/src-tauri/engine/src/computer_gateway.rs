@@ -10,8 +10,8 @@
 //! `shutdown`).
 //!
 //! This module starts and drives one gateway for an already-open TAP descriptor. It creates no
-//! namespace and runs no container: the container runtime (a later phase) opens the TAP and
-//! calls [`Gateway::start`]. The macOS supervisor
+//! namespace and runs no container: the container runtime
+//! ([`crate::containers::lifecycle`]) opens the TAP and calls [`Gateway::start`]. The macOS supervisor
 //! (`macos_computers/proxy/supervisor.rs`) speaks the same protocol for VMs; the framing, the
 //! descriptor handoff, the readiness checks and the acknowledgement rule are shared in
 //! [`crate::gateway_control`].
@@ -20,11 +20,13 @@
 //! anything but its own acknowledgement, or hits a broken link stops the gateway, and every
 //! later call answers "unavailable": a refused or half-applied secret change must never look
 //! applied, and a late acknowledgement must never be read as the answer to the next request.
-//! A stopped gateway is not restarted here; restart on failure is planned for CT3.
+//! A stopped gateway is not restarted: the container's registry sees it is gone, the computer
+//! reads as stopped (its network is gone, which fails closed), and a start brings up a new
+//! gateway with the secrets and GitHub access the engine holds.
 //!
 //! Dropping a [`Gateway`], [`Gateway::shutdown`] and a failed update all wait for the process,
 //! and a gateway that hangs takes up to about 10 s to stop (5 s for the shutdown exchange and
-//! 5 s for the process to exit, then it is killed). CT3's caller must therefore not drop a
+//! 5 s for the process to exit, then it is killed). The caller must therefore not drop a
 //! `Gateway` on an async worker thread; stop it on a blocking thread.
 
 use crate::gateway_control::{
@@ -245,6 +247,12 @@ impl Gateway {
         self.stop();
     }
 
+    /// Stops the gateway like [`Gateway::shutdown`] without consuming it, for a gateway that is
+    /// shared. Every later call answers "unavailable".
+    pub fn close(&mut self) {
+        self.stop();
+    }
+
     fn stop(&mut self) {
         let Some(mut child) = self.child.take() else {
             return;
@@ -442,8 +450,9 @@ pub fn computer_ca(
 ) -> Result<(String, Zeroizing<String>), String> {
     use crate::macos_computers::proxy_ca;
     let material = proxy_ca::get_or_create(computer_id, || {
-        let (cert, key) = generate_ca(binary)?;
-        proxy_ca::CaMaterial::from_pem(cert, key.to_string())
+        let (cert, mut key) = generate_ca(binary)?;
+        // Moved, not copied: the generator's buffer is left empty.
+        proxy_ca::CaMaterial::from_pem(cert, std::mem::take(&mut *key))
     })?;
     Ok((
         material.certificate_pem().to_owned(),
