@@ -31,6 +31,10 @@ ensure_brew() {
 }
 "#;
 
+/// Writes the guest's cached file data and metadata out to its disk. The capture of a fork point
+/// does the same before it copies a running computer's disk.
+const MACOS_FLUSH: &str = "set -eu\n/bin/sync\n";
+
 /// Where pipx keeps its environments and links on Linux, set for the install and the check.
 const LINUX_PIPX_ENV: &str = "export PIPX_HOME=/opt/pipx PIPX_BIN_DIR=/usr/local/bin\n";
 
@@ -253,12 +257,30 @@ pub fn verify_steps(spec: &RecipeSpec) -> Vec<Step> {
     steps
 }
 
-/// Every step of a build, in order: packages, setup, services, then the checks.
+/// The last step of a macOS build: the guest writes its disk out. The builder is checkpointed
+/// while it runs, and a computer forked from that checkpoint boots from the copied disk without
+/// the builder's memory, so whatever the guest still held in memory (the last files a setup
+/// command wrote, or half of a large archive) would be missing from every fork. Linux
+/// checkpoints are consistent by themselves.
+pub fn flush_steps(spec: &RecipeSpec) -> Vec<Step> {
+    if spec.os == RecipeOs::Linux {
+        return Vec::new();
+    }
+    vec![step(
+        "Writing the disk",
+        RunAs::Account,
+        MACOS_FLUSH.to_owned(),
+        &[],
+    )]
+}
+
+/// Every step of a build, in order: packages, setup, services, the checks, then the disk flush.
 pub fn all_steps(spec: &RecipeSpec) -> Vec<Step> {
     let mut steps = install_steps(spec);
     steps.extend(setup_steps(spec));
     steps.extend(service_steps(spec));
     steps.extend(verify_steps(spec));
+    steps.extend(flush_steps(spec));
     steps
 }
 

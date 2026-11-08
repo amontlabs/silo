@@ -125,6 +125,8 @@ struct Fake {
     image: Mutex<String>,
     /// Slows `create` down, so builds that overlap would show.
     slow: bool,
+    /// The script of every `run`, in order.
+    scripts: Mutex<Vec<String>>,
 }
 
 static NEXT_ID: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(1);
@@ -202,6 +204,7 @@ impl BuildEnv for Fake {
         _args: &[(String, String)],
     ) -> Result<ExecOut, String> {
         self.log(format!("run {who:?}"));
+        self.scripts.lock().unwrap().push(script.to_owned());
         if self.fail_on.is_some_and(|needle| script.contains(needle)) {
             return Ok(ExecOut {
                 code: 7,
@@ -422,6 +425,52 @@ fn a_macos_build_needs_a_free_virtual_machine() {
     let error = build(&env, &cache, "mac", &mac, false).unwrap_err();
     assert!(error.contains("Two macOS"), "{error}");
     assert_eq!(env.calls("create"), 0);
+}
+
+/// A macOS builder is checkpointed while it runs and its forks boot from the copied disk alone,
+/// so the guest has to write its disk out as the last thing before the checkpoint. Without it
+/// the runner recipe lost its `silo-run-jit` script and half of the extracted runner.
+#[test]
+fn a_macos_build_writes_the_guest_disk_out_last_and_a_linux_build_does_not() {
+    let dir = tempfile::tempdir().unwrap();
+    let cache = Cache::new(dir.path());
+    let env = Fake::default();
+    let mut mac = spec();
+    mac.os = RecipeOs::Macos;
+    mac.packages = RecipePackages::default();
+    mac.services.clear();
+    mac.setup = vec!["cat > /Users/Shared/runner/script <<'EOF'\nx\nEOF".into()];
+    build(&env, &cache, "mac", &mac, false).unwrap();
+    let scripts = env.scripts.lock().unwrap().clone();
+    assert_eq!(scripts.len(), 2, "{scripts:?}");
+    assert!(scripts[0].contains("bash -c \"$A_CMD\""), "{scripts:?}");
+    assert!(scripts[1].contains("/bin/sync"), "{scripts:?}");
+    // The flush is the last guest command, and the checkpoint follows it.
+    let log = env.log.lock().unwrap().clone();
+    let run = log
+        .iter()
+        .rposition(|line| line.starts_with("run"))
+        .unwrap();
+    let checkpoint = log
+        .iter()
+        .position(|line| line.starts_with("checkpoint"))
+        .unwrap();
+    assert!(run < checkpoint, "{log:?}");
+
+    let linux = Fake::default();
+    build(&linux, &cache, "dev", &spec(), false).unwrap();
+    assert!(!linux
+        .scripts
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|script| script.contains("/bin/sync")));
+}
+
+/// The change to how a build runs retires builds made without the disk flush.
+#[test]
+fn the_build_version_retires_builds_made_before_the_disk_flush() {
+    assert_ne!(BUILD_VERSION, "silo-recipe-build-2");
 }
 
 #[test]
