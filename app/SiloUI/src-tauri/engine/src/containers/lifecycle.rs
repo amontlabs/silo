@@ -593,13 +593,14 @@ fn launch(
             tail(&state)
         ));
     }
-    registry().get_or_insert_with(HashMap::new).insert(
-        name.to_owned(),
-        Arc::new(Running {
-            gateway: Mutex::new(gateway),
-            active: Mutex::new(active),
-        }),
-    );
+    let running = Arc::new(Running {
+        gateway: Mutex::new(gateway),
+        active: Mutex::new(active),
+    });
+    registry()
+        .get_or_insert_with(HashMap::new)
+        .insert(name.to_owned(), running.clone());
+    super::ports::serve(paths, name, &running)?;
     wait_running(&tools.crun, &state, name, deadline)?;
     holder_pid(&state).ok_or("The container holder left no pid file.")?;
     // The holder runs on; dropping the guard hands its exit status to a thread.
@@ -720,6 +721,7 @@ pub fn stop(
     }
     cleanup_stale(paths, tools, &dir, name);
     let gateway = registry().as_mut().and_then(|map| map.remove(name));
+    super::ports::remove(paths, name);
     if let Some(running) = gateway {
         running.gateway().close();
     }

@@ -19,6 +19,8 @@ pub mod layout;
 #[cfg(target_os = "linux")]
 pub mod lifecycle;
 pub mod oci;
+#[cfg(target_os = "linux")]
+pub mod ports;
 pub mod secrets;
 pub mod tools;
 pub mod users;

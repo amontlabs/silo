@@ -241,6 +241,75 @@ impl Gateway {
         Ok(response.get("counters").cloned().unwrap_or(Value::Null))
     }
 
+    /// The TCP ports published on the host's loopback now: the ones named at start and the ones
+    /// added since, with the host port the gateway bound for each.
+    pub fn ports(&mut self) -> Result<Vec<PublishedPort>, String> {
+        self.port_request(serde_json::json!({"version": PROTOCOL_VERSION, "type": "ports"}))
+    }
+
+    /// Publishes a guest TCP port on the host's loopback (`host_port` 0 lets the gateway pick),
+    /// and returns the ports published after it.
+    pub fn add_port(
+        &mut self,
+        guest_port: u16,
+        host_port: u16,
+    ) -> Result<Vec<PublishedPort>, String> {
+        self.port_request(serde_json::json!({
+            "version": PROTOCOL_VERSION, "type": "port_add",
+            "guest_port": guest_port, "host_port": host_port,
+        }))
+    }
+
+    pub fn remove_port(&mut self, guest_port: u16) -> Result<Vec<PublishedPort>, String> {
+        self.port_request(serde_json::json!({
+            "version": PROTOCOL_VERSION, "type": "port_remove", "guest_port": guest_port,
+        }))
+    }
+
+    /// Whether the gateway can open a connection to the guest port through its listener.
+    pub fn probe_port(&mut self, guest_port: u16) -> Result<bool, String> {
+        self.ensure_running()?;
+        let request = serde_json::json!({
+            "version": PROTOCOL_VERSION, "type": "port_probe", "guest_port": guest_port,
+        });
+        let response = self.exchange(&request)?;
+        match (
+            response.get("type").and_then(Value::as_str),
+            response.get("reachable").and_then(Value::as_bool),
+        ) {
+            (Some("port_probe"), Some(reachable)) if has_version(&response) => Ok(reachable),
+            _ => self.unexpected(&response),
+        }
+    }
+
+    fn port_request(&mut self, request: Value) -> Result<Vec<PublishedPort>, String> {
+        self.ensure_running()?;
+        let response = self.exchange(&request)?;
+        if response.get("type").and_then(Value::as_str) != Some("ports") || !has_version(&response)
+        {
+            return self.unexpected(&response);
+        }
+        serde_json::from_value::<Vec<PublishedPort>>(
+            response.get("ports").cloned().unwrap_or(Value::Null),
+        )
+        .ok()
+        .filter(|ports| ports.iter().all(|port| port.protocol == "tcp"))
+        .map_or_else(|| self.unexpected(&response), Ok)
+    }
+
+    /// A refusal the gateway reports in order (`port_rejected`) leaves the link in step; any
+    /// other answer means it is no longer the answer to this request, so the gateway stops.
+    fn unexpected<T>(&mut self, response: &Value) -> Result<T, String> {
+        if response.get("type").and_then(Value::as_str) == Some("error")
+            && response.get("code").and_then(Value::as_str) == Some("port_rejected")
+            && has_version(response)
+        {
+            return Err("The computer network gateway refused the port.".into());
+        }
+        self.fail();
+        Err(UNAVAILABLE.into())
+    }
+
     /// Asks the gateway to stop, then makes sure it has. A hung gateway takes up to about 10 s;
     /// see the module documentation.
     pub fn shutdown(mut self) {
@@ -328,6 +397,10 @@ impl Drop for Gateway {
     fn drop(&mut self) {
         self.stop();
     }
+}
+
+fn has_version(response: &Value) -> bool {
+    response.get("version").and_then(Value::as_u64) == Some(u64::from(PROTOCOL_VERSION))
 }
 
 fn zeroize_value(value: &mut Value) {
@@ -639,6 +712,80 @@ mod tests {
                 loopback_ports: Vec::new(),
             },
         }
+    }
+
+    #[test]
+    fn ports_are_published_and_listed_through_the_control_link() {
+        let (control, mut peer) = UnixStream::pair().unwrap();
+        let server = thread::spawn(move || {
+            let mut seen = Vec::new();
+            for reply in [
+                serde_json::json!({"type": "ports", "version": 1, "ports": [
+                    {"host_port": 40001, "guest_port": 3000, "protocol": "tcp"}]}),
+                serde_json::json!({"type": "port_probe", "version": 1, "reachable": true}),
+                serde_json::json!({"type": "ports", "version": 1, "ports": []}),
+                serde_json::json!({"type": "ports", "version": 1, "ports": []}),
+            ] {
+                let request = read_response(&mut peer).unwrap();
+                write_frame(&mut peer, &serde_json::to_vec(&reply).unwrap()).unwrap();
+                seen.push(request);
+            }
+            seen
+        });
+        let mut gateway = with_sleeping_child(control);
+        let added = gateway.add_port(3000, 0).unwrap();
+        assert_eq!(added[0].host_port, 40001);
+        assert!(gateway.probe_port(3000).unwrap());
+        assert!(gateway.remove_port(3000).unwrap().is_empty());
+        assert!(gateway.ports().unwrap().is_empty());
+        let seen = server.join().unwrap();
+        assert_eq!(seen[0]["type"], "port_add");
+        assert_eq!(seen[0]["guest_port"], 3000);
+        assert_eq!(seen[0]["host_port"], 0);
+        assert_eq!(seen[1]["type"], "port_probe");
+        assert_eq!(seen[2]["type"], "port_remove");
+        assert_eq!(seen[3]["type"], "ports");
+        // Port requests are not policy updates: they use no revision.
+        assert_eq!(gateway.revision, 0);
+        assert!(gateway.is_running());
+    }
+
+    #[test]
+    fn a_refused_port_leaves_the_link_in_step_and_any_other_answer_stops_the_gateway() {
+        let (control, mut peer) = UnixStream::pair().unwrap();
+        let server = thread::spawn(move || {
+            for reply in [
+                serde_json::json!({"type": "error", "version": 1, "code": "port_rejected"}),
+                // The answer to a different request, or a port list with a UDP port.
+                serde_json::json!({"type": "ack", "version": 1, "revision": 1, "closed_previous_generation": true}),
+            ] {
+                read_response(&mut peer).unwrap();
+                write_frame(&mut peer, &serde_json::to_vec(&reply).unwrap()).unwrap();
+            }
+        });
+        let mut gateway = with_sleeping_child(control);
+        let refused = gateway.add_port(3000, 80).unwrap_err();
+        assert!(refused.contains("refused the port"), "{refused}");
+        assert!(gateway.is_running());
+        assert!(gateway.ports().is_err());
+        assert!(!gateway.is_running());
+        server.join().unwrap();
+        assert!(gateway.add_port(3000, 0).is_err());
+    }
+
+    #[test]
+    fn a_port_list_that_is_not_tcp_stops_the_gateway() {
+        let (control, mut peer) = UnixStream::pair().unwrap();
+        let server = thread::spawn(move || {
+            read_response(&mut peer).unwrap();
+            let reply = serde_json::json!({"type": "ports", "version": 1, "ports": [
+                {"host_port": 40001, "guest_port": 3000, "protocol": "udp"}]});
+            write_frame(&mut peer, &serde_json::to_vec(&reply).unwrap()).unwrap();
+        });
+        let mut gateway = with_sleeping_child(control);
+        assert!(gateway.ports().is_err());
+        server.join().unwrap();
+        assert!(!gateway.is_running());
     }
 
     #[test]

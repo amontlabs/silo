@@ -19,6 +19,17 @@ pub enum Request {
     Update(UpdateRequest),
     Stats { version: u16 },
     Shutdown { version: u16 },
+    /// The ports published on the host's loopback now (a container's gateway only).
+    Ports { version: u16 },
+    /// Publishes a guest TCP port on the host's loopback; `host_port` 0 lets the gateway pick.
+    PortAdd {
+        version: u16,
+        guest_port: u16,
+        host_port: u16,
+    },
+    PortRemove { version: u16, guest_port: u16 },
+    /// Whether a connection to the guest port can be made through its published listener.
+    PortProbe { version: u16, guest_port: u16 },
 }
 
 #[derive(Deserialize)]
@@ -154,6 +165,15 @@ pub enum Response {
     },
     Stopped {
         version: u16,
+    },
+    /// The ports published on the host's loopback, after a `ports`, `port_add` or `port_remove`.
+    Ports {
+        version: u16,
+        ports: Vec<LoopbackPort>,
+    },
+    PortProbe {
+        version: u16,
+        reachable: bool,
     },
 }
 
