@@ -52,7 +52,7 @@ when CI is green and the code and Fable reviews (with a threat-model review) pas
 
 | Phase | What | Live check | Status |
 |---|---|---|---|
-| CT1 | `silo-gateway` on Linux: lift the build and `cfg` gates, TAP carrier, CA in the Linux credential file store | A bare user+net namespace with a TAP: curl through the gateway reaches a public host; a private address is refused; a placeholder header is substituted for an allowed host | Planned |
+| CT1 | `silo-gateway` on Linux: lift the build and `cfg` gates, TAP carrier, CA in the Linux credential file store | A bare user+net namespace with a TAP: curl through the gateway reaches a public host; a private address is refused; a placeholder header is substituted for an allowed host | Built ([#92](https://github.com/amontlabs/silo/pull/92), [evidence](evidence/ct1-gateway/README.md)); the binary keeps the name `silo-macos-gateway` |
 | CT2 | Container runtime core: `engine/src/containers/`, image unpack, overlay chain, crun config (`oci-spec` crate), cgroup delegation, create/start/exec/stop/drop, `kind: container` in API, CLI and app list | `linux-host-e2e.sh` with a container computer | Planned |
 | CT3 | Network, secrets, GitHub access, ports and URLs, SSH, the in-guest client, for containers | The CT1 checks from inside a container; a published port answers; `ssh` works | Planned |
 | CT4 | Checkpoints, forks, quiet forks, diff, keep, undo, retention | Checkpoint, fork `-n 4`, exec, diff lists a change, keep, undo | Planned |

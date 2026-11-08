@@ -176,6 +176,36 @@ Both owner decisions:
   Silo's secrets proxy, the GitHub token boundary, the guest client, the isolation evals, a Cua Driver
   screenshot, a Selkies client session, bare metal. A PR with the `containers-microvm` label re-runs the long
   microVM job on every push. The decision is the owner's.
+### 8 Nov 2026: phase CT1 built (`silo-gateway` on Linux)
+
+Branch `claude/containers-ct1`, pull request [#92](https://github.com/amontlabs/silo/pull/92).
+
+- **Build.** The gateway (`silo-macos-gateway`) builds for Linux x86_64 and aarch64 next to macOS; the
+  `aarch64-apple-darwin` gate in `microsandbox-runtime.mjs` is lifted and the Linux engine archive carries
+  the binary. **The name is kept:** a rename would touch the macOS bundle, its signing, the engine's lookup
+  and the runtime cache keys for no gain. The engine side needed no `cfg` change in the macOS supervisor,
+  which is untouched; the container side is a new module, `silo_engine::computer_gateway`.
+- **TAP carrier.** For a container fd 3 is a TAP (`IFF_TAP | IFF_NO_PI`) opened inside the container's own
+  namespaces. `FramePump` takes a carrier: the datagram path (macOS) is unchanged; the TAP path reads with
+  `readv` (a spare byte shows a truncated frame) and writes with `write`. The gateway checks with
+  `TUNGETIFF` that the descriptor is a TAP without packet information and refuses anything else.
+- **Parameterised.** Init takes `profile: "container"`: the published ports are the computer's own (up to 32)
+  instead of the fixed 22/5900, and `github_hosts` may add `uploads.github.com`. A VM keeps both fixed
+  rules. CA storage needed no new code: it goes through `keyring`, which is the credential file store on a
+  Linux host; a test now proves it (0600 files in a 0700 directory, created once, retired).
+- **Tests.** Gateway: 30 on Linux (Docker; the same suite passed on the runner) and on macOS (TAP adapter on a datagram-pair
+  fixture, truncation, `TUNGETIFF` refusal, parameterised validation); `scripts/test-gateway.mjs` stages the
+  patched checkout and runs them. Engine: 9 tests for `computer_gateway` (init and `ready` handling, update
+  revisions and the close barrier, shutdown) and the file-store CA test. `cargo test --workspace` on macOS:
+  all pass except the 8 `host_push::protocol_tests`, which need the prepared Git runtime (also skipped for F2).
+- **Live check** on the KVM runner, no root step in the path: [evidence/ct1-gateway](evidence/ct1-gateway/README.md).
+  22 of 22 checks, with the script driving the gateway and with the engine starting it. Public HTTPS works,
+  private addresses and the host's own address are refused, a fake token is substituted for
+  `api.github.com` (401 "Bad credentials"), DNS works and a private answer is blocked.
+- **Found on the way.** TLS is intercepted only toward hosts a secret is allowed for (the existing rule);
+  the first version of the check expected interception everywhere and was wrong, not the gateway.
+- **Not done.** aarch64 live run, UDP published ports, the container runtime (CT2).
+
 ### R1: CI runner on the Mac (branch `claude/runner-phase-1`)
 
 - **Built:** `silo-action/` and every reference removed; `silo-runner` (Go, `app/SiloUI/runner`, on
