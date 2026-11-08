@@ -151,6 +151,14 @@ fn boot_layer(layout: &Layout, tools: &Tools) -> Result<PathBuf, String> {
     }
 }
 
+/// Writes a file the container's users read (it is bound into the container), whatever umask the
+/// engine runs with.
+fn write_readable(path: &Path, contents: &str) -> Result<(), String> {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::write(path, contents).map_err(io)?;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o644)).map_err(io)
+}
+
 fn private_dir(path: &Path) -> Result<(), String> {
     use std::os::unix::fs::DirBuilderExt;
     std::fs::DirBuilder::new()
@@ -280,16 +288,14 @@ fn launch(
         serde_json::to_vec_pretty(&spec).map_err(|e| e.to_string())?,
     )
     .map_err(io)?;
-    std::fs::write(
-        state.join("hosts"),
-        format!("127.0.0.1 localhost\n127.0.1.1 {name}\n::1 localhost\n"),
-    )
-    .map_err(io)?;
-    std::fs::write(
-        state.join("resolv.conf"),
-        format!("nameserver {GATEWAY_IPV4}\n"),
-    )
-    .map_err(io)?;
+    write_readable(
+        &state.join("hosts"),
+        &format!("127.0.0.1 localhost\n127.0.1.1 {name}\n::1 localhost\n"),
+    )?;
+    write_readable(
+        &state.join("resolv.conf"),
+        &format!("nameserver {GATEWAY_IPV4}\n"),
+    )?;
 
     let socket = state.join("ctl.sock");
     let _ = std::fs::remove_file(&socket);
@@ -412,11 +418,10 @@ fn launch(
         },
     )?;
     let ready = gateway.ready().clone();
-    std::fs::write(
-        state.join("resolv.conf"),
-        format!("nameserver {}\n", ready.dns_ipv4),
-    )
-    .map_err(io)?;
+    write_readable(
+        &state.join("resolv.conf"),
+        &format!("nameserver {}\n", ready.dns_ipv4),
+    )?;
     let mac = ready
         .guest_mac
         .iter()
@@ -685,6 +690,27 @@ mod tests {
         assert_ne!(a, unit_name(&paths("/b"), "dev"));
         assert_ne!(a, unit_name(&paths("/a"), "other"));
         assert!(a.starts_with("silo-ct-") && a.ends_with("-dev"));
+    }
+
+    #[test]
+    fn files_bound_into_the_container_are_readable_whatever_the_umask() {
+        use std::os::unix::fs::PermissionsExt;
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("resolv.conf");
+        // SAFETY: umask is process-wide; this test restores it before it ends.
+        let previous = unsafe { libc::umask(0o077) };
+        let written = write_readable(&path, "nameserver 1.2.3.4\n");
+        unsafe { libc::umask(previous) };
+        written.unwrap();
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o644
+        );
+        write_readable(&path, "nameserver 5.6.7.8\n").unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "nameserver 5.6.7.8\n"
+        );
     }
 
     #[test]
