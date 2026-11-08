@@ -208,6 +208,11 @@ mod linux {
     pub fn command(arguments: &[String]) -> Result<i32, String> {
         let args = parse_args(arguments)?;
         let options = overlay_options(&args.lower, &args.upper, &args.work)?;
+        // Once per start, here: `silo-init` stays quiet so a missing ruleset is not repeated on the
+        // standard error of every command. The engine reads it back from the holder log.
+        if let Some(warning) = crate::common::landlock_warning(&crate::common::landlock_abi()) {
+            eprintln!("silo-ctr: warning: {warning}");
+        }
         let spec = userns::resolve(args.sub_uid, args.sub_gid, true)?;
         let crun_root = Path::new(&args.state).join("crun");
         std::fs::create_dir_all(&crun_root)

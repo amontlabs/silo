@@ -4,6 +4,7 @@ import type { ApplicationActions, ApplicationSource } from "@/features/applicati
 import type { ApplicationInitialRoute } from "@/features/application/model/use-application-navigation"
 import { computerTarget } from "@/features/application/model/connections"
 import { computerAvailability } from "@/features/application/model/computer-availability"
+import { computerCan } from "@/features/computers/model/computer-capabilities"
 import { lifecycleGuard, type LifecycleAction } from "@/features/application/model/lifecycle-guard"
 
 /** A question the palette asks, in place, before running a command. */
@@ -89,9 +90,13 @@ export function applicationCommands(source: ApplicationSource, actions: Applicat
         keywords: [...computerKeywords, ...keywords], run: () => navigate({ computer: id, computerSection: section }),
       })
     }
-    if (availability.canOpen) {
+    if (availability.canOpen && computerCan(computer.configuration, "terminal")) {
       commands.push(
         { id: `${id}:terminal`, label: `Open ${name} in ${source.preferences.terminal}`, icon: Terminal, group: "Actions", keywords: [...computerKeywords, "terminal", "shell"], run: () => actions.openTerminal(target) },
+      )
+    }
+    if (availability.canOpen && computerCan(computer.configuration, "editor")) {
+      commands.push(
         // Like the editor buttons, the command asks which folder to open first.
         onComputerRequest
           ? { id: `${id}:editor`, label: `Open ${name} in ${source.preferences.editor}…`, icon: Code, group: "Actions", keywords: [...computerKeywords, "editor", "code", "folder"], opensPanel: true, run: () => onComputerRequest(id, "editor") }
@@ -103,7 +108,7 @@ export function applicationCommands(source: ApplicationSource, actions: Applicat
     if (actions.forkCheckpoint && onComputerRequest && !changing) {
       commands.push({ id: `${id}:fork`, label: `Fork ${name}…`, icon: GitFork, group: "Actions", keywords: [...computerKeywords, "fork", "copy", "clone"], opensPanel: true, run: () => onComputerRequest(id, "fork") })
     }
-    if (!computer.device && onExportComputer && !changing) {
+    if (!computer.device && onExportComputer && !changing && computerCan(computer.configuration, "export")) {
       commands.push({ id: `${id}:export`, label: `Export ${name}…`, icon: Download, group: "Actions", keywords: [...computerKeywords, "export", "backup", "archive"], run: () => onExportComputer(computer.configuration.name) })
     }
     const offline = Boolean(computer.device && !computer.device.connected)

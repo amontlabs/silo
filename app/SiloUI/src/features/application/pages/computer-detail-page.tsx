@@ -16,6 +16,7 @@ import { OsBadge } from "@/features/computers/components/os-badge"
 import { ComputerEditor } from "@/features/computers/components/computer-editor"
 import { useComputerEditing } from "@/features/computers/model/use-computer-editing"
 import { computerBusyReason } from "@/features/computers/model/computer-presentation"
+import { computerCan } from "@/features/computers/model/computer-capabilities"
 import { deviceCapacityFrom } from "@/features/computers/model/computer-limits"
 import type { ApplicationInitialRoute } from "@/features/application/model/use-application-navigation"
 import { DeleteComputerBody, type DeleteComputerDetails } from "@/features/computers/components/delete-computer-confirmation"
@@ -368,7 +369,7 @@ export function ComputerDetailPage({ computer, source, actions, controls }: {
   const menuActions = [...controls.menuActions, ...editMenuActions]
 
   const access = source.sshAccess?.computers.find(row => row.computer === target)
-  const sshAvailable = Boolean(source.sshAccess || actions.refreshSshAccess)
+  const sshAvailable = Boolean(source.sshAccess || actions.refreshSshAccess) && computerCan(configuration, "sshAccess")
   const sshStale = Boolean((source.sshAccessError && !computer.device) || computer.device?.connected === false || computer.freshness === "stale")
   const pendingSecrets = !computer.device
     ? source.secrets.filter(secret => secret.state === "restart-required" && secret.computers.includes(configuration.name)).map(secret => secret.name)
@@ -411,8 +412,8 @@ export function ComputerDetailPage({ computer, source, actions, controls }: {
         </nav>}
         subtitle={<span data-slot="computer-detail-status"><DetailSubtitle computer={computer} source={source} readOnly={controls.readOnly} pendingSecrets={pendingSecrets} sshAccess={access} sshStale={sshStale} onCancel={actions.cancelOperation} onOpenSsh={showAccess ? () => controls.onSelectTab("access") : undefined} /></span>}
         actions={<div className="flex shrink-0 items-center gap-1">
-          <DisabledReason reason={controls.canOpen ? undefined : reasons.open}><Button type="button" variant="outline" size="xs" aria-label={`Open ${configuration.name} in ${source.preferences.terminal}`} disabled={!controls.canOpen} onClick={controls.onTerminal}><Terminal aria-hidden="true" data-icon="inline-start" />Terminal</Button></DisabledReason>
-          <DisabledReason reason={controls.canOpen ? undefined : reasons.open}><Button type="button" variant="outline" size="xs" aria-label={`Open ${configuration.name} in ${source.preferences.editor}`} disabled={!controls.canOpen} onClick={controls.onEditor}><Code aria-hidden="true" data-icon="inline-start" />Editor</Button></DisabledReason>
+          {computerCan(configuration, "terminal") && <DisabledReason reason={controls.canOpen ? undefined : reasons.open}><Button type="button" variant="outline" size="xs" aria-label={`Open ${configuration.name} in ${source.preferences.terminal}`} disabled={!controls.canOpen} onClick={controls.onTerminal}><Terminal aria-hidden="true" data-icon="inline-start" />Terminal</Button></DisabledReason>}
+          {computerCan(configuration, "editor") && <DisabledReason reason={controls.canOpen ? undefined : reasons.open}><Button type="button" variant="outline" size="xs" aria-label={`Open ${configuration.name} in ${source.preferences.editor}`} disabled={!controls.canOpen} onClick={controls.onEditor}><Code aria-hidden="true" data-icon="inline-start" />Editor</Button></DisabledReason>}
           {controls.desktop && <Button type="button" variant="outline" size="xs" aria-label={`Open ${configuration.name} desktop`} disabled={controls.desktop.disabled} onClick={controls.desktop.onClick}><Monitor aria-hidden="true" data-icon="inline-start" />Desktop</Button>}
           {canStop
             ? <LifecycleControl guard={controls.lifecycleGuard} computer={computer} action="stop" disabled={!controls.canStop} reason={reasons.stop}>

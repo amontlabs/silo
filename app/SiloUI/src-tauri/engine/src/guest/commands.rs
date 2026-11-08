@@ -7,6 +7,7 @@ use super::{
     target::Target,
     GuestError,
 };
+use crate::containers::capability::{require, Capability};
 use serde_json::{json, Value};
 use std::{path::Path, time::Duration};
 
@@ -18,12 +19,22 @@ fn macos_adapter(what: &str) -> GuestError {
     ))
 }
 
+/// A container computer without `capability` is refused before anything else happens.
+fn refuse_container(
+    paths: &crate::runtime::RuntimePaths,
+    name: &str,
+    capability: Capability,
+) -> Result<(), GuestError> {
+    require(paths, name, capability).map_err(GuestError::invalid)
+}
+
 /// The argv a Mac terminal runs to open a shell in the computer: the bundled runtime's
 /// interactive exec as the working account, in `/workspace`. It never starts the computer.
 pub fn terminal_command(target: &Target) -> Result<Vec<String>, GuestError> {
     let Target::Linux { paths, name, .. } = target else {
         return Err(macos_adapter("Terminal commands"));
     };
+    refuse_container(paths, name, Capability::Terminal)?;
     target.ensure_running()?;
     let user = target.account_user()?;
     let text = |path: &Path| -> Result<String, GuestError> {
@@ -63,6 +74,9 @@ pub fn editor_command(
 ) -> Result<Vec<String>, GuestError> {
     if target.is_macos() {
         return Err(macos_adapter("Editor commands"));
+    }
+    if let Target::Linux { paths, name, .. } = target {
+        refuse_container(paths, name, Capability::Editor)?;
     }
     let path = path.unwrap_or("/workspace");
     crate::editor::validate_path(path)?;
@@ -229,6 +243,32 @@ mod tests {
             argv[5..].join(" "),
             "exec dev --user silo --env USER=silo --env LOGNAME=silo --no-start --workdir /workspace --tty"
         );
+    }
+
+    #[test]
+    fn a_container_computer_gets_no_terminal_or_editor_command_and_nothing_runs() {
+        let directory = tempfile::tempdir().unwrap();
+        let target = test_support::target(directory.path());
+        let paths = test_support::runtime(directory.path());
+        crate::containers::capability::make_container(&paths.home, "dev");
+        let home = directory.path().join("user");
+        let settings = serde_json::Map::new();
+        let terminal = terminal_command(&target).unwrap_err();
+        assert!(
+            terminal
+                .to_string()
+                .contains("cannot open a terminal in a container computer yet"),
+            "{terminal}"
+        );
+        let editor = editor_command(&target, &home, None, &settings).unwrap_err();
+        assert!(
+            editor
+                .to_string()
+                .contains("cannot connect an editor to a container computer yet"),
+            "{editor}"
+        );
+        assert!(!directory.path().join("msb.log").exists(), "the runtime ran");
+        assert!(!home.exists(), "an alias or include was written");
     }
 
     #[test]

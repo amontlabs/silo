@@ -49,6 +49,7 @@ import { ComputerAction } from "@/features/computers/components/computer-list"
 
 import { SecretChangesLabel } from "@/features/computers/components/secret-changes-label"
 import { computerIconState, computerRowTone } from "@/features/computers/model/computer-presentation"
+import { computerCan } from "@/features/computers/model/computer-capabilities"
 import { deviceCapacityFrom } from "@/features/computers/model/computer-limits"
 
 export type { ComputerPageRequest }
@@ -244,8 +245,8 @@ export function OverviewPage({ active = true, readOnly = false, notifyOperations
       ...(actions.forkCheckpoint ? [{ label: "Fork…", icon: GitFork, accessibleLabel: `Fork ${configuration.name}`, disabled: forkDisabled(computer), popover: "fork" }] : []),
       ...(local && actions.readWorkspaceStorage ? [{ label: "Storage", icon: HardDrive, accessibleLabel: `Storage for ${configuration.name}`, onSelect: () => openComputer(configuration.id, "storage") }] : []),
       // Shown whenever the page shows its SSH tab.
-      ...((source.sshAccess || actions.refreshSshAccess) ? [{ label: "SSH", icon: KeyRound, accessibleLabel: `SSH for ${configuration.name}`, onSelect: () => openComputer(configuration.id, "access") }] : []),
-      ...(local && exportComputer ? [{ label: "Export…", icon: Download, accessibleLabel: `Export ${configuration.name}`, disabled: configurationLocked || availability.busy || transferBusy || stale, onSelect: () => exportComputer(configuration.name) }] : []),
+      ...((source.sshAccess || actions.refreshSshAccess) && computerCan(configuration, "sshAccess") ? [{ label: "SSH", icon: KeyRound, accessibleLabel: `SSH for ${configuration.name}`, onSelect: () => openComputer(configuration.id, "access") }] : []),
+      ...(local && exportComputer && computerCan(configuration, "export") ? [{ label: "Export…", icon: Download, accessibleLabel: `Export ${configuration.name}`, disabled: configurationLocked || availability.busy || transferBusy || stale, onSelect: () => exportComputer(configuration.name) }] : []),
     ]
     const popovers: MenuPopovers = { ...forkPopovers(computer) }
     if (restartPrompt) popovers.restart = close => <ConfirmBody tone={restartPrompt.tone} title={restartPrompt.title} description={restartPrompt.description} confirmLabel={restartPrompt.confirmLabel} onClose={close} onConfirm={lifecycleLater(computer, "restart", true)} />
@@ -353,7 +354,7 @@ export function OverviewPage({ active = true, readOnly = false, notifyOperations
       onEditor: () => openFolderPicker(configuration.id),
       desktop: desktopAction(computer),
       lifecycleGuard: guard,
-      onCheckpointExport: exportComputer ? (checkpoint: ComputerCheckpoint) => exportComputer(configuration.name, { id: checkpoint.id, name: checkpoint.name }) : undefined,
+      onCheckpointExport: exportComputer && computerCan(configuration, "export") ? (checkpoint: ComputerCheckpoint) => exportComputer(configuration.name, { id: checkpoint.id, name: checkpoint.name }) : undefined,
       checkpointExportDisabled: transferBusy || backup?.state.availability === "unavailable",
       onCheckpointForkedAction: (name: string) => forkOpenAction(name, computer.device?.id),
       onCheckpointRestoredAction: () => ({ label: "Start", onClick: lifecycleLater(computer, "start", false) }),
@@ -472,8 +473,8 @@ export function OverviewPage({ active = true, readOnly = false, notifyOperations
                     </span>
                   ),
                   actions: <>
-                    <DisabledReason reason={openReason}><ComputerAction label={`Open ${configuration.name} in ${source.preferences.terminal}`} disabled={readOnly || !availability?.canOpen} onClick={() => computer && actions.openTerminal(computerTarget(computer))}><Terminal /></ComputerAction></DisabledReason>
-                    <DisabledReason reason={openReason}><ComputerAction label={`Open ${configuration.name} in ${source.preferences.editor}`} disabled={readOnly || !availability?.canOpen} onClick={() => openFolderPicker(configuration.id)}><Code /></ComputerAction></DisabledReason>
+                    {computerCan(configuration, "terminal") && <DisabledReason reason={openReason}><ComputerAction label={`Open ${configuration.name} in ${source.preferences.terminal}`} disabled={readOnly || !availability?.canOpen} onClick={() => computer && actions.openTerminal(computerTarget(computer))}><Terminal /></ComputerAction></DisabledReason>}
+                    {computerCan(configuration, "editor") && <DisabledReason reason={openReason}><ComputerAction label={`Open ${configuration.name} in ${source.preferences.editor}`} disabled={readOnly || !availability?.canOpen} onClick={() => openFolderPicker(configuration.id)}><Code /></ComputerAction></DisabledReason>}
                     {computer && desktopAction(computer) && <ComputerAction label={`Open ${configuration.name} desktop`} disabled={desktopAction(computer)!.disabled} onClick={desktopAction(computer)!.onClick}><Monitor /></ComputerAction>}
                     {computer && availability && <ComputerActions computer={computer} availability={availability} readOnly={readOnly} guard={guard} />}
                   </>,

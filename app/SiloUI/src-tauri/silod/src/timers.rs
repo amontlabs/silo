@@ -254,6 +254,9 @@ pub fn start(context: Arc<SilodContext>) -> Timers {
     let _ = std::thread::Builder::new()
         .name("silod-warm-inventory".into())
         .spawn(move || {
+            if let Ok(paths) = silo_engine::runtime::runtime_paths(&host) {
+                silo_engine::containers::reconcile_at_start(&paths);
+            }
             if let Err(error) = silo_engine::runtime::warm_settled_inventory(&host) {
                 eprintln!("silod: initial computer read skipped: {error}");
             }

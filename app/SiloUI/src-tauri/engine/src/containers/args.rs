@@ -121,6 +121,12 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
 }
 
 fn parse_create(args: &[String]) -> Result<Create, String> {
+    if args
+        .iter()
+        .any(|arg| arg == "--secret" || arg.starts_with("--secret="))
+    {
+        return Err(crate::containers::capability::refusal("give secrets to"));
+    }
     let name = flag_value(args, "--name")
         .ok_or("create needs a computer name.")?
         .to_owned();
@@ -290,6 +296,36 @@ mod tests {
         assert_eq!(
             target_name(&args(&["snapshot", "create", "--sandbox", "vm", "dev"])),
             Some("vm")
+        );
+    }
+
+    #[test]
+    fn a_secret_on_create_is_refused_for_a_container() {
+        let mut create: Vec<String> = [
+            "create",
+            "img",
+            "--name",
+            "c",
+            "--cpus",
+            "1",
+            "--memory",
+            "1G",
+            "--root-disk",
+            "1G",
+            "--mount-owned",
+            "/workspace:kind=disk,size=1G",
+            "--label",
+            RUNTIME_LABEL,
+        ]
+        .iter()
+        .map(|part| part.to_string())
+        .collect();
+        assert!(parse(&create).is_ok());
+        create.extend(["--secret".to_owned(), "GITHUB=x@api.github.com".to_owned()]);
+        let error = parse(&create).unwrap_err();
+        assert!(
+            error.contains("cannot give secrets to a container computer yet"),
+            "{error}"
         );
     }
 

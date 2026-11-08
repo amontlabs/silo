@@ -55,6 +55,8 @@ cleanup() {
 
 # Runs `silo exec` in the container computer and prints what the command printed.
 in_container() { "$silo" exec "$ctr" -- "$@"; }
+# The same with a timeout in seconds.
+in_container_for() { local seconds="$1"; shift; "$silo" exec "$ctr" --timeout "$seconds" -- "$@"; }
 
 expect() {
   local what="$1" got="$2" wanted="$3"
@@ -118,6 +120,15 @@ print(rows.get(sys.argv[1], "missing"))' "$ctr")
   expect "io_uring" "$(in_container python3 -c 'import ctypes; c = ctypes.CDLL(None, use_errno=True); print(c.syscall(425, 8, 0), ctypes.get_errno())')" "-1 1"
   expect "nested user namespace" "$(in_container sh -c 'unshare -U true >/dev/null 2>&1; echo $?' | sed 's/^[1-9][0-9]*$/refused/')" refused
   expect "interfaces" "$(in_container sh -c "tail -n +3 /proc/net/dev | cut -d: -f1 | tr -d ' ' | sort | tr '\\n' ' '")" "lo tap0 "
+
+  step "Ending a timed-out command in $ctr together with what it started"
+  # The command starts a background process and outlives its timeout; neither may remain.
+  if in_container_for 3 sh -c 'sleep 300 & echo $! > /tmp/e2e-leftover; wait' 2>/dev/null; then
+    echo "a command that outlived its timeout reported success" >&2
+    exit 1
+  fi
+  sleep 2
+  expect "timed-out command leftovers" "$(in_container sh -c 'kill -0 "$(cat /tmp/e2e-leftover)" 2>/dev/null && echo alive || echo gone')" gone
 
   step "Checking the network of $ctr"
   # A public host answers, so the refusals below mean something.

@@ -272,11 +272,39 @@ Branch `claude/containers-ct2`.
   - Silo's own root commands get seven capabilities (chown, file owner and mode, kill, setuid, setgid) inside
     the namespace, because creating the account needs them; other commands have none.
 - **Not in CT2:** secrets, GitHub, published ports, SSH, terminals, desktop, checkpoints, forks, export (all
-  refused with "cannot do '<verb>' yet"); CPU limits when the user manager does not delegate `cpu`;
-  a container surviving an engine restart; a root filesystem size limit (the configured disk is recorded and
-  reported, not enforced); the app learning a remote host's platform (its editor offers the kind only for a
+  refused with "Silo cannot <verb> a container computer yet"); CPU limits when the user manager does not
+  delegate `cpu`; a container surviving an engine restart; a root filesystem size limit (the configured disk
+  is recorded and reported, not enforced; planned in [CONTAINERS-PLAN](CONTAINERS-PLAN.md)); the app learning a remote host's platform (its editor offers the kind only for a
   device that reports `platform: linux`, which the Connections list does not report yet, so the CLI is the way
   to create one).
+- **Review fixes** (code review by Opus, threat-model review by Fable 5.1; one mechanism each):
+  - **Capabilities by kind** (`containers/capability.rs`). Terminal, editor (setup, key authorization,
+    transport), SSH access, export and desktop reach the runtime by their own paths, not the argument shape
+    `route` answers, so a container was handed to MicroSandbox. Each entry point now names its capability and
+    calls one check by kind before any side effect, with the same "Silo cannot <verb> a container computer yet"
+    message; the app hides the same actions from one list (`container-unavailable.json`, read by the engine
+    test and the frontend). A runtime update may not change a computer's kind, and a container's desktop may
+    not change (the installer would run inside it). A `--secret` on a container `create` is refused, and the
+    engine no longer adds the GitHub secret and `GH_TOKEN` to a container's create (CT3).
+  - **A read never mutates.** `status` only looks: a list refresh during a start used to stop the starting
+    container (its holder exists before its gateway) and wait up to 25 s. A computer is marked starting before
+    its holder is spawned; leftovers of an earlier engine are stopped once, by `reconcile` when the engine
+    starts. The holder is identified by pid and its cgroup scope, not by the name `silo-ctr`.
+  - **The recorded image.** Start and exec use the image digest in the computer's record, unpack it when it
+    is the pinned one, and otherwise refuse with a clear message; a computer's upper layer is never mounted
+    over another image. A partial unpack of another live engine is no longer deleted.
+  - **Nothing is left behind by a timeout.** The command runs as the leader of its own process group
+    (`silo-init --own-group`), `crun exec --pid-file` records it, and a timeout kills that group.
+    Streaming execs go through the guest supervisor, which already ends its group. `crun exec` now gets the
+    user's supplementary groups through `--process`. A `systemd-run` child is reaped on every error return.
+  - **Untrusted account files.** `/etc/passwd` and `/etc/group` of the writable layer are opened component by
+    component without following links, must be regular files, are capped at 1 MiB, and overlay whiteouts hide
+    lower files.
+  - **Hardening wording and details.** `setns` is denied outright; `systemctl` is located like the other
+    tools; the holder logs one Landlock warning per start (unavailable or ABI below 4) and `silo-init` no
+    longer repeats it on every command; the threat model states what Landlock covers, that an escape lands as
+    the engine's account (engine socket, every other computer), that the writable layer has no size limit
+    yet, and that CPU limits need a delegated `cpu` controller.
 - **Tests:** engine unit tests for the argument shapes, routing, the OCI baseline, the image cache, user
   resolution, the record and listing (macOS and Linux); 47 tests of `silo-container-shim`, including the real
   user namespace, overlay, TAP hand-over, PID 1 reaping and Landlock, run on Ubuntu 24.04; host prerequisite,

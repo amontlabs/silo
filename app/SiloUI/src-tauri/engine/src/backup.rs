@@ -805,6 +805,15 @@ impl<R: MsbRunner> BackupService<R> {
         }
         let _guard = self.begin()?;
         validate_backup_request(&request)?;
+        // The snapshots below go straight to MicroSandbox, which does not know a container.
+        for source in &request.sources {
+            crate::containers::capability::require_in(
+                &self.command.home,
+                &source.name,
+                crate::containers::capability::Capability::Export,
+            )
+            .map_err(BackupError::InvalidRequest)?;
+        }
         fs::create_dir_all(&self.scratch_root)?;
         self.check_export_space(&request, cancellation)?;
         let stage = self.staging_directory("backup-")?;
@@ -5218,6 +5227,23 @@ mod tests {
             temp.path().join("scratch"),
             runner,
         )
+    }
+
+    #[test]
+    fn exporting_a_container_computer_is_refused_before_anything_is_staged_or_run() {
+        let temp = tempfile::tempdir().unwrap();
+        let service = service(&temp, FakeRunner::default());
+        crate::containers::capability::make_container(&temp.path().join("home"), "dev");
+        let error = create_one(&service, temp.path().join("dev.silo-backup"), true).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("cannot export or back up a container computer yet"),
+            "{error}"
+        );
+        assert!(!service.scratch_root.exists(), "a staging folder was made");
+        assert!(!temp.path().join("dev.silo-backup").exists());
+        assert!(service.runner.calls.lock().unwrap().is_empty(), "the runtime ran");
     }
 
     #[test]

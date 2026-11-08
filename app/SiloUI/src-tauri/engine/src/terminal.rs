@@ -7,6 +7,7 @@ use std::process::Command;
 pub fn command(paths: &RuntimePaths, name: &str) -> Result<String, String> {
     let user = crate::working_account::USER;
     runtime::validate_name(name).map_err(|e| e.to_string())?;
+    crate::containers::capability::require(paths, name, crate::containers::capability::Capability::Terminal)?;
     let home = paths.home.to_str().ok_or("Invalid runtime home path.")?;
     let executable = paths.executable.to_str().ok_or("Invalid runtime path.")?;
     let library = paths
@@ -148,6 +149,19 @@ mod tests {
             "The bundled runtime returned invalid state for computer 'dev'."
         );
         malformed.assert_finished();
+    }
+
+    #[test]
+    fn a_container_computer_gets_no_terminal_command() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = crate::test_support::paths(dir.path());
+        crate::containers::capability::make_container(&paths.home, "box");
+        let error = command(&paths, "box").unwrap_err();
+        assert_eq!(
+            error,
+            "Silo cannot open a terminal in a container computer yet. Use a virtual machine computer for this."
+        );
+        assert!(command(&paths, "dev").is_ok());
     }
 
     #[test]

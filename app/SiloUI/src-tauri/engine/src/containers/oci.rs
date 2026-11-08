@@ -26,8 +26,10 @@ pub const ROOT_EXEC_CAPABILITIES: [&str; 7] = [
 ];
 
 const CLONE_NEWUSER: u64 = 0x1000_0000;
-/// Calls the seccomp deny-list refuses with EPERM.
-const DENIED_CALLS: [&str; 9] = [
+/// Calls the seccomp deny-list refuses with EPERM. `setns` is refused outright: nothing in a
+/// container joins another namespace (`crun exec` joins from outside, before the filter applies).
+const DENIED_CALLS: [&str; 10] = [
+    "setns",
     "io_uring_setup",
     "io_uring_enter",
     "io_uring_register",
@@ -65,6 +67,37 @@ fn new_user_rule(names: &[&str], index: u32) -> Value {
         "errnoRet": 1,
         "args": [{"index": index, "value": CLONE_NEWUSER, "valueTwo": CLONE_NEWUSER, "op": "SCMP_CMP_MASKED_EQ"}],
     })
+}
+
+/// The OCI process `crun exec --process` runs: the same as the `--user`, `--env`, `--cwd`,
+/// `--cap` and `--no-new-privs` flags give, plus the user's supplementary groups, which the flags
+/// cannot carry. `argv` is the command with its wrapper already in front.
+pub fn exec_process(
+    uid: u32,
+    gid: u32,
+    additional_gids: &[u32],
+    cwd: &str,
+    env: &[(String, String)],
+    argv: &[String],
+    capabilities: &[&str],
+) -> Value {
+    let mut process = json!({
+        "terminal": false,
+        "user": {"uid": uid, "gid": gid, "additionalGids": additional_gids},
+        "args": argv,
+        "env": env.iter().map(|(key, value)| format!("{key}={value}")).collect::<Vec<_>>(),
+        "cwd": cwd,
+        "noNewPrivileges": true,
+    });
+    if !capabilities.is_empty() {
+        process["capabilities"] = json!({
+            "effective": capabilities,
+            "bounding": capabilities,
+            "ambient": capabilities,
+            "permitted": capabilities,
+        });
+    }
+    process
 }
 
 pub fn build(params: &Params<'_>) -> Result<Spec, String> {
@@ -131,7 +164,6 @@ pub fn build(params: &Params<'_>) -> Result<Spec, String> {
                 "syscalls": [
                     {"names": DENIED_CALLS, "action": "SCMP_ACT_ERRNO", "errnoRet": 1},
                     new_user_rule(&["clone", "unshare"], 0),
-                    new_user_rule(&["setns"], 1),
                     // clone3 keeps its flags in a struct seccomp cannot read; ENOSYS makes libc use clone.
                     {"names": ["clone3"], "action": "SCMP_ACT_ERRNO", "errnoRet": 38},
                 ],
@@ -183,6 +215,59 @@ mod tests {
         }
         assert_eq!(process.args().as_ref().unwrap()[0], INIT_PATH);
         assert_eq!(process.user().uid(), 0);
+    }
+
+    #[test]
+    fn setns_is_denied_outright_and_unshare_only_for_user_namespaces() {
+        let spec = spec();
+        let seccomp = spec.linux().as_ref().unwrap().seccomp().as_ref().unwrap();
+        let rules = serde_json::to_value(seccomp).unwrap()["syscalls"].clone();
+        let rule = |call: &str| {
+            rules
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|rule| rule["names"].as_array().unwrap().iter().any(|n| n == call))
+                .unwrap()
+                .clone()
+        };
+        let setns = rule("setns");
+        assert_eq!(setns["action"], "SCMP_ACT_ERRNO");
+        assert!(setns
+            .get("args")
+            .is_none_or(|args| args.as_array().unwrap().is_empty()));
+        assert!(!rule("unshare")["args"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn an_exec_process_carries_the_supplementary_groups_and_the_flags_meaning() {
+        let process = exec_process(
+            1001,
+            1001,
+            &[27, 44],
+            "/workspace",
+            &[("A".into(), "b=c".into())],
+            &["/silo/init".into(), "--".into(), "id".into()],
+            &[],
+        );
+        assert_eq!(process["user"]["additionalGids"], json!([27, 44]));
+        assert_eq!(process["user"]["uid"], 1001);
+        assert_eq!(process["env"], json!(["A=b=c"]));
+        assert_eq!(process["noNewPrivileges"], true);
+        assert_eq!(process["terminal"], false);
+        assert!(process.get("capabilities").is_none());
+        let root = exec_process(0, 0, &[], "/", &[], &["x".into()], &ROOT_EXEC_CAPABILITIES);
+        assert_eq!(
+            root["capabilities"]["effective"].as_array().unwrap().len(),
+            7
+        );
+        assert_eq!(
+            root["capabilities"]["ambient"],
+            root["capabilities"]["bounding"]
+        );
+        // The shape is a valid OCI process.
+        let _: oci_spec::runtime::Process = serde_json::from_value(root).unwrap();
+        let _: oci_spec::runtime::Process = serde_json::from_value(process).unwrap();
     }
 
     #[test]

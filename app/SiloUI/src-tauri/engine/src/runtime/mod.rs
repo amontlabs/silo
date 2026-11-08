@@ -6433,6 +6433,21 @@ fn validate_computer_update(
             "Desktop removal is not supported. Turn off automatic startup instead.".into(),
         ));
     }
+    if previous.runtime != configuration.runtime {
+        return Err(RuntimeError::Invalid(
+            "A computer cannot change between a virtual machine and a container. Create a new computer instead.".into(),
+        ));
+    }
+    if configuration.is_container()
+        && crate::desktop::configuration(previous) != crate::desktop::configuration(configuration)
+    {
+        // The desktop installer would run inside the container.
+        return Err(RuntimeError::Invalid(
+            crate::containers::capability::refusal(
+                crate::containers::capability::Capability::Desktop.verb(),
+            ),
+        ));
+    }
     if previous.name() != configuration.name() {
         return Err(RuntimeError::Invalid(format!("Bundled MicroSandbox cannot rename computer '{}'. Keep its name or create a new computer.", previous.name())));
     }
@@ -6582,20 +6597,30 @@ fn create_computer_with_progress(
         format!("silo.workspace-storage-gib={workspace_storage_gib}"),
         "--label".into(),
         format!("silo.runtime-storage-gib={runtime_storage_gib}"),
-        "--secret".into(),
-        secrets_runtime::SILO_GITHUB_SECRET_SPEC.into(),
+    ];
+    // A container has no secrets until the network phase (CT3).
+    if runtime.is_none() {
+        args.extend([
+            "--secret".into(),
+            secrets_runtime::SILO_GITHUB_SECRET_SPEC.into(),
+        ]);
+    }
+    args.extend([
         // Explicit, so a computer does not depend on the runtime's default (off in
         // 0.7.2, on since 0.7.4). It matches `guest/github-network-default.json`,
         // which exports compare against; no hostname rule makes it observable.
         "--net-strict=true".into(),
-        "--env".into(),
-        "GH_TOKEN=$MSB_SILO_GITHUB".into(),
+    ]);
+    if runtime.is_none() {
+        args.extend(["--env".into(), "GH_TOKEN=$MSB_SILO_GITHUB".into()]);
+    }
+    args.extend([
         "--label".into(),
         "silo.github-protocol=1".into(),
         "--no-start".into(),
         "--quiet".into(),
         "--progress-json".into(),
-    ];
+    ]);
     if runtime.is_some() {
         args.extend(["--label".into(), crate::containers::RUNTIME_LABEL.into()]);
     }
@@ -9988,6 +10013,37 @@ esac
     }
 
     #[test]
+    fn a_container_computer_keeps_its_kind_and_gets_no_desktop_by_an_update() {
+        let mut container = computer();
+        container.runtime = Some(ComputerRuntimeKind::Container);
+        // Unchanged is fine.
+        validate_computer_update(&container, &container.clone()).unwrap();
+        // A desktop turned on, or changed, would run the desktop installer in the container.
+        let mut with_desktop = container.clone();
+        with_desktop.desktop = Some(crate::desktop::DesktopConfiguration {
+            start_with_computer: true,
+            built_in: false,
+        });
+        let error = validate_computer_update(&container, &with_desktop).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("cannot give a desktop to a container computer yet"),
+            "{error}"
+        );
+        // The kind never changes, in either direction.
+        let vm = computer();
+        for (from, to) in [(&vm, &container), (&container, &vm)] {
+            let error = validate_computer_update(from, to).unwrap_err();
+            assert!(error.to_string().contains("cannot change between"), "{error}");
+        }
+        // A virtual machine still takes a desktop.
+        let mut vm_with_desktop = vm.clone();
+        vm_with_desktop.desktop = with_desktop.desktop.clone();
+        validate_computer_update(&vm, &vm_with_desktop).unwrap();
+    }
+
+    #[test]
     fn resubmitted_failed_creation_without_desktop_matches_the_journaled_request() {
         let _test_state = crate::test_support::global_state();
         let directory = tempfile::tempdir().unwrap();
@@ -12119,6 +12175,36 @@ exit 9
 
         let error = read_application_state_with(&runner, &paths).unwrap_err();
         assert!(error.to_string().contains("does not match"));
+    }
+
+    #[test]
+    fn creating_a_container_computer_passes_no_secret_or_github_variable() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let paths = paths(&directory);
+        let runner = StubRunner::successful_json(vec![
+            json!([]),
+            json!(1),
+            json!(1),
+            json!(null),
+            inspect_owned_workspace(&paths, "Created"),
+            json!(null),
+            inspect_owned_workspace(&paths, "Stopped"),
+        ]);
+        let mut container = computer();
+        container.runtime = Some(ComputerRuntimeKind::Container);
+        create_computer(&runner, &paths, &container).unwrap();
+        let calls = runner.calls.lock().unwrap();
+        let create = calls.iter().find(|call| call[0] == "create").unwrap();
+        assert!(create
+            .windows(2)
+            .any(|pair| pair == ["--label", crate::containers::RUNTIME_LABEL]));
+        assert!(!create.iter().any(|arg| arg == "--secret" || arg.starts_with("GH_TOKEN")));
+        // The container side would refuse it too.
+        let mut with_secret = create.clone();
+        with_secret.extend(["--secret".to_owned(), "x".to_owned()]);
+        assert!(crate::containers::args::parse(&with_secret).is_err());
+        assert!(crate::containers::args::parse(create).is_ok());
     }
 
     #[test]

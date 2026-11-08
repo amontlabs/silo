@@ -33,15 +33,63 @@ pub(crate) fn pinned() -> Result<GuestImageManifest, RuntimeError> {
         .map_err(RuntimeError::Unavailable)
 }
 
-/// Where the image with `digest` is unpacked, when it is.
-pub(crate) fn unpacked(layout: &Layout, manifest: &GuestImageManifest) -> Option<Unpacked> {
-    let dir = layout.image(&manifest.image_digest);
+/// Where the image with config `digest` is unpacked, when it is. The marker file must name the
+/// same digest, so a half-made or swapped directory is not taken for the image.
+pub(crate) fn unpacked_digest(layout: &Layout, digest: &str, reference: &str) -> Option<Unpacked> {
+    let dir = layout.image(digest);
     let marker = std::fs::read_to_string(dir.join("digest")).ok()?;
-    (marker.trim() == manifest.image_digest && dir.join("rootfs").is_dir()).then(|| Unpacked {
+    (marker.trim() == digest && dir.join("rootfs").is_dir()).then(|| Unpacked {
         rootfs: dir.join("rootfs"),
-        digest: manifest.image_digest.clone(),
-        reference: manifest.image_reference.clone(),
+        digest: digest.to_owned(),
+        reference: reference.to_owned(),
     })
+}
+
+/// Where the pinned image is unpacked, when it is.
+pub(crate) fn unpacked(layout: &Layout, manifest: &GuestImageManifest) -> Option<Unpacked> {
+    unpacked_digest(layout, &manifest.image_digest, &manifest.image_reference)
+}
+
+/// The image a computer runs on is the one recorded when it was made, never whatever is pinned
+/// now: its writable layer holds changes against exactly that image.
+#[derive(Debug, PartialEq, Eq)]
+pub enum RecordedImage {
+    Ready(Unpacked),
+    /// Not unpacked, but it is the pinned image: unpack it.
+    UnpackPinned,
+    /// Not unpacked and no longer pinned: this Silo cannot make it again.
+    Missing,
+}
+
+pub fn recorded_image(
+    layout: &Layout,
+    record: &super::layout::ComputerRecord,
+    pinned_digest: &str,
+) -> RecordedImage {
+    match unpacked_digest(layout, &record.image_digest, &record.image_reference) {
+        Some(found) => RecordedImage::Ready(found),
+        None if record.image_digest == pinned_digest => RecordedImage::UnpackPinned,
+        None => RecordedImage::Missing,
+    }
+}
+
+/// The image of a computer's record, unpacking the pinned image when that is the one it needs.
+pub fn ensure_recorded(
+    paths: &RuntimePaths,
+    tools: &Tools,
+    name: &str,
+    record: &super::layout::ComputerRecord,
+) -> Result<Unpacked, RuntimeError> {
+    let layout = Layout::new(&paths.home);
+    match recorded_image(&layout, record, &pinned()?.image_digest) {
+        RecordedImage::Ready(found) => Ok(found),
+        RecordedImage::UnpackPinned => ensure(paths, tools),
+        RecordedImage::Missing => Err(RuntimeError::Unavailable(format!(
+            "Container computer {name} was made from an image ({}) that this Silo no longer carries and has not kept. \
+             Update Silo to the version that made it, or create a new computer.",
+            record.image_digest
+        ))),
+    }
 }
 
 pub fn ensure(paths: &RuntimePaths, tools: &Tools) -> Result<Unpacked, RuntimeError> {
@@ -67,7 +115,7 @@ pub fn ensure(paths: &RuntimePaths, tools: &Tools) -> Result<Unpacked, RuntimeEr
     crate::runtime::guest_image::check_space(&images, manifest.unpacked_bytes.saturating_mul(3))
         .map_err(RuntimeError::Unavailable)?;
     remove_partial(tools, &images);
-    let work = images.join(format!("partial-{}", std::process::id()));
+    let work = images.join(format!("{PARTIAL}{}", std::process::id()));
     let result = unpack_into(paths, tools, &manifest, &layout, &work);
     // A partial unpack holds files of sub-ids: only the namespace can remove them.
     let _ = remove_tree(tools, &work);
@@ -133,12 +181,53 @@ fn unpack_into(
     }
 }
 
-/// Removes earlier partial unpacks (an engine that stopped half-way).
+const PARTIAL: &str = "partial-";
+/// A partial unpack whose engine is gone is stale at once; one older than this is stale even if
+/// its process id has been reused.
+const PARTIAL_MAX_AGE: std::time::Duration = std::time::Duration::from_secs(24 * 3600);
+
+fn process_alive(pid: u32) -> bool {
+    // SAFETY: signal 0 only checks that the process exists.
+    let result = unsafe { libc::kill(pid as i32, 0) };
+    result == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+}
+
+/// The partial unpacks (`partial-<engine pid>`) in `images` that no running engine is working on.
+/// Another engine process of the same account may be unpacking right now: its directory is left.
+pub fn stale_partials(
+    images: &Path,
+    own_pid: u32,
+    alive: &dyn Fn(u32) -> bool,
+    now: std::time::SystemTime,
+) -> Vec<PathBuf> {
+    std::fs::read_dir(images)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|entry| {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let pid: u32 = name.strip_prefix(PARTIAL)?.parse().ok()?;
+            let old = entry
+                .metadata()
+                .and_then(|meta| meta.modified())
+                .ok()
+                .and_then(|modified| now.duration_since(modified).ok())
+                .is_some_and(|age| age > PARTIAL_MAX_AGE);
+            // Our own earlier attempt is ours to clear; anyone else's only when it is gone.
+            (pid == own_pid || !alive(pid) || old).then(|| entry.path())
+        })
+        .collect()
+}
+
+/// Removes earlier partial unpacks (an engine that stopped half-way), and no one else's.
 fn remove_partial(tools: &Tools, images: &Path) {
-    for entry in std::fs::read_dir(images).into_iter().flatten().flatten() {
-        if entry.file_name().to_string_lossy().starts_with("partial-") {
-            let _ = remove_tree(tools, &entry.path());
-        }
+    for stale in stale_partials(
+        images,
+        std::process::id(),
+        &process_alive,
+        std::time::SystemTime::now(),
+    ) {
+        let _ = remove_tree(tools, &stale);
     }
 }
 
@@ -242,6 +331,114 @@ mod tests {
         assert!(config_digest(dir.path())
             .unwrap_err()
             .contains("invalid digest"));
+    }
+
+    fn mark_unpacked(layout: &Layout, digest: &str) {
+        let dir = layout.image(digest);
+        std::fs::create_dir_all(dir.join("rootfs")).unwrap();
+        std::fs::write(dir.join("digest"), format!("{digest}\n")).unwrap();
+    }
+
+    fn record_with(digest: &str) -> super::super::layout::ComputerRecord {
+        super::super::layout::ComputerRecord {
+            schema_version: super::super::layout::RECORD_VERSION,
+            name: "dev".into(),
+            cpus: 1,
+            max_cpus: 1,
+            memory_mib: 1,
+            max_memory_mib: 1,
+            root_disk_mib: 1,
+            workspace_mib: 1,
+            labels: Vec::new(),
+            env: Vec::new(),
+            image_digest: digest.into(),
+            image_reference: "ref:1".into(),
+            layers: Vec::new(),
+            created_ms: 1,
+            started_once: true,
+        }
+    }
+
+    #[test]
+    fn a_computer_runs_on_the_image_it_was_made_from_not_the_pinned_one() {
+        let home = tempfile::tempdir().unwrap();
+        let layout = Layout::new(home.path());
+        let (old, pinned) = ("sha256:old", "sha256:new");
+        mark_unpacked(&layout, pinned);
+        // Both images are unpacked: the record's own is chosen.
+        mark_unpacked(&layout, old);
+        match recorded_image(&layout, &record_with(old), pinned) {
+            RecordedImage::Ready(found) => {
+                assert_eq!(found.digest, old);
+                assert_eq!(found.rootfs, layout.image(old).join("rootfs"));
+                assert_eq!(found.reference, "ref:1");
+            }
+            other => panic!("{other:?}"),
+        }
+        // Only the pinned image is unpacked and the record needs another: never the pinned one.
+        std::fs::remove_dir_all(layout.image(old)).unwrap();
+        assert_eq!(
+            recorded_image(&layout, &record_with(old), pinned),
+            RecordedImage::Missing
+        );
+        // The record needs the pinned image and it is gone: it can be unpacked again.
+        std::fs::remove_dir_all(layout.image(pinned)).unwrap();
+        assert_eq!(
+            recorded_image(&layout, &record_with(pinned), pinned),
+            RecordedImage::UnpackPinned
+        );
+    }
+
+    #[test]
+    fn a_missing_image_is_named_in_a_clear_refusal() {
+        let home = tempfile::tempdir().unwrap();
+        let paths = crate::test_support::paths(home.path());
+        let record = record_with("sha256:gone");
+        // Nothing is run: a missing, unpinned image fails before any tool is needed.
+        let tools = Tools {
+            ctr: "ctr".into(),
+            init: "init".into(),
+            gateway: "gateway".into(),
+            crun: "crun".into(),
+            skopeo: "skopeo".into(),
+            umoci: "umoci".into(),
+            systemd_run: "systemd-run".into(),
+            systemctl: "systemctl".into(),
+        };
+        let error = ensure_recorded(&paths, &tools, "dev", &record).unwrap_err();
+        let text = error.to_string();
+        assert!(
+            text.contains("sha256:gone") && text.contains("no longer carries"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn only_partial_unpacks_of_engines_that_are_gone_are_stale() {
+        let images = tempfile::tempdir().unwrap();
+        for name in [
+            "partial-100",
+            "partial-200",
+            "partial-300",
+            "abcdef",
+            "partial-x",
+        ] {
+            std::fs::create_dir(images.path().join(name)).unwrap();
+        }
+        let now = std::time::SystemTime::now();
+        // 100 is another live engine; 200 is gone; 300 is this process.
+        let alive = |pid: u32| pid == 100;
+        let mut stale: Vec<_> = stale_partials(images.path(), 300, &alive, now)
+            .into_iter()
+            .map(|path| path.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        stale.sort();
+        assert_eq!(stale, ["partial-200", "partial-300"]);
+        // A live pid that has not touched its directory for a day was reused: stale.
+        let later = now + std::time::Duration::from_secs(25 * 3600);
+        assert!(stale_partials(images.path(), 300, &alive, later)
+            .iter()
+            .any(|path| path.ends_with("partial-100")));
     }
 
     #[test]

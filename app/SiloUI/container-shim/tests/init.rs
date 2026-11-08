@@ -101,6 +101,24 @@ fn writes_are_allowed_under_the_rw_list_and_denied_elsewhere() {
 }
 
 #[test]
+fn own_group_makes_the_command_lead_a_group_of_its_own_and_is_off_by_default() {
+    let leads = |extra: &[&str]| {
+        let output = init()
+            .args(extra)
+            .args(["--", "sh", "-c", "ps -o pid=,pgid= -p $$"])
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{:?}", text(&output));
+        let out = text(&output).0;
+        let mut numbers = out.split_whitespace();
+        numbers.next() == numbers.next()
+    };
+    assert!(leads(&["--own-group"]));
+    // Without it the command stays in the group of whoever started it (the test harness).
+    assert!(!leads(&[]));
+}
+
+#[test]
 fn missing_paths_in_the_lists_are_skipped() {
     if !landlock_available() {
         eprintln!("skipped: Landlock is unavailable on this kernel");

@@ -45,6 +45,14 @@ the advisor (gemini-4-argon), 8 Nov 2026. Where they differed, the choice and th
   `/etc/subgid` entries, `/dev/net/tun`, Ubuntu's `kernel.apparmor_restrict_unprivileged_userns=0`, cgroup v2
   with user delegation.
 
+## Planned work not yet in a phase
+
+- **Writable-layer size limit.** `root_disk_mib` is recorded but not enforced: a container can fill the
+  filesystem holding the engine home (see the threat model). Enforce it with an XFS or ext4 project quota on
+  each computer's directory where the filesystem supports it, and a loop-mounted file of the configured size
+  where it does not; refuse to start with a clear message when neither is available. Lands with CT4, whose
+  checkpoints seal layers and need the same accounting.
+
 ## Phases
 
 One pull request each, with unit tests and a live check on the GitHub KVM runner (`linux-host.yml`), merged

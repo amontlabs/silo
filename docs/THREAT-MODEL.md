@@ -689,16 +689,20 @@ with nothing sensitive on it, and the app, the CLI and `silo list` label it as l
 - **Who the computer is on the host.** crun runs rootless inside a user namespace made with
   `newuidmap` and the account's `/etc/subuid` range. Container root is the account itself; every
   other id is a sub-id that owns no file of the account's. A process that escapes the container
-  therefore lands as the account that owns the engine, and nothing is added to that account.
+  therefore lands as the account that owns the engine, and says plainly what that means: the
+  engine socket, the engine's files and every other computer on the host (virtual machines and
+  containers alike) are within its reach. Nothing is added to that account, and nothing is taken
+  from it either.
 - **The baseline.** No capabilities in the container's first process or in a user's commands (Silo's
   own root commands, such as creating the working account, get seven file and ownership
   capabilities inside the namespace); `no_new_privs` (so `sudo` and setuid programs do not gain
   privileges); a seccomp deny-list over allow-all (io_uring, `keyctl`, `bpf`, `perf_event_open`,
-  `userfaultfd`, and `clone`, `unshare` and `setns` with a new user namespace, `clone3` answered
-  with ENOSYS); Landlock applied by Silo's init shim, which is also the container's first process
-  and reaps zombies, and which wraps every command run in the computer; a writable layer over a
-  read-only image; `/proc` and `/sys` masked or read-only; cgroup v2 limits (memory, tasks, CPU)
-  on the computer's transient user scope. No host folder, no Docker or Podman socket and not the
+  `userfaultfd`, `setns` outright, and `clone` and `unshare` with a new user namespace, `clone3`
+  answered with ENOSYS); Landlock applied by Silo's init shim, which is also the container's first
+  process and reaps zombies, and which wraps every command run in the computer; a writable layer
+  over a read-only image; `/proc` and `/sys` masked or read-only; cgroup v2 limits (memory and
+  tasks always; CPU only when the user manager delegates `cpu`, otherwise the computer is not
+  CPU-limited) on the computer's transient user scope. No host folder, no Docker or Podman socket and not the
   engine socket (boundary 7) are mounted; the engine's files are not in the container's mount
   namespace. The only host files the container sees are its own `resolv.conf` and `hosts`.
 - **Network.** The container's network namespace holds one TAP device and a loopback, and nothing
@@ -706,13 +710,30 @@ with nothing sensitive on it, and the app, the CLI and `silo list` label it as l
   out, with the Public policy and the gateway as resolver. A command run in the computer enters
   that namespace too. In this phase there are no secrets, GitHub access, published ports or SSH
   for a container computer; commands that would need them are refused.
-- **Known gaps.** `/sys` is a read-only bind of the host's, so it shows the host's network
-  interface names and hardware details. Chrome needs `--no-sandbox` in a container (the baseline
+- **What Landlock covers.** The ruleset grants the container's root read and execute everywhere and
+  write access to the directories a system normally writes (`/tmp`, `/var`, `/run`, `/home`,
+  `/root`, `/workspace`, `/dev`, `/usr`, `/etc`, `/opt`, `/srv`, `/mnt`). It therefore mainly protects
+  `/silo/init`, `/boot` and the root directory itself; the system directories stay writable to the
+  container's root, which is the point of a computer you install software in. It is a second layer
+  and **advisory where it is absent**: on a kernel without Landlock, or older than ABI 4, the
+  holder logs one warning per start (shown by the engine) and the container runs without it; the
+  namespaces, the missing capabilities, seccomp and the read-only masks still apply.
+- **Account files.** The engine reads the container's `/etc/passwd` and `/etc/group` on the host to
+  find a user's ids. Those files live in the writable layer, which the container controls, so they
+  are opened without following links, must be regular files and are capped at 1 MiB; overlay
+  whiteouts are honoured as inside the container.
+- **No disk limit yet.** The writable layer has no size limit. `root_disk_mib` is recorded and
+  reported but not enforced, so a container can fill the filesystem that holds the engine's home
+  and take the engine and every other computer on the host down with it. A project quota or a
+  loop file per computer is planned ([CONTAINERS-PLAN](forks-ci/CONTAINERS-PLAN.md)).
+- **Known gaps.** `/sys` is a fresh sysfs mounted read-only inside the container's own user and
+  network namespaces, so it shows the container's own devices (the TAP and loopback) and the
+  host's hardware, not the host's network interfaces. Chrome needs `--no-sandbox` in a container (the baseline
   blocks the user namespace its sandbox needs), so a web page that compromises the browser reaches
   everything in the computer. Ubuntu's `kernel.apparmor_restrict_unprivileged_userns` has to be 0
   on the host, which relaxes a host-wide guard; Silo checks and names it and never sets it. A
-  container does not survive an engine restart (its gateway is the engine's child): the first look
-  after a restart stops it. The evals of the isolation claims above have not been run against a
+  container does not survive an engine restart (its gateway is the engine's child): the engine
+  stops it when it starts, and reading a computer's state never changes it. The evals of the isolation claims above have not been run against a
   container computer.
 
 ## CI runner (`silo-runner`)

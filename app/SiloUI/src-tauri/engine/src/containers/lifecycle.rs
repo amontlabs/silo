@@ -11,11 +11,12 @@
 //!
 //! The holder hands the TAP to the engine, which gives it to one gateway process (CT1) and sends
 //! back the address, route and resolver the gateway answered with. The gateway belongs to this
-//! engine process, so a container does not outlive it: the first look after an engine restart
-//! stops a container whose gateway is gone.
+//! engine process, so a container does not outlive it: [`reconcile`] stops one whose gateway is
+//! gone when the engine starts. Reading a computer's state ([`status`]) never changes it.
 
 use super::{
     args::Exec,
+    hold::{self, ExecGroup, Reaped, StartMark},
     layout::{ComputerDir, ComputerRecord, Layout},
     oci,
     tools::Tools,
@@ -50,6 +51,8 @@ static GATEWAYS: Mutex<Option<HashMap<String, Gateway>>> = Mutex::new(None);
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Status {
     Created,
+    /// This engine is starting it: the holder may exist before the gateway does.
+    Starting,
     Stopped,
     Running,
 }
@@ -82,18 +85,28 @@ fn holder_pid(state: &Path) -> Option<u32> {
         .ok()
 }
 
-/// Whether `pid` is a live `silo-ctr` (a recycled pid is not).
-fn is_holder(pid: u32) -> bool {
-    std::fs::read(format!("/proc/{pid}/cmdline")).is_ok_and(|bytes| {
+/// Whether `pid` is the live holder of the computer whose scope is `unit`: a `silo-ctr` process in
+/// that scope's cgroup. A recycled pid, or another program that happens to be called `silo-ctr`,
+/// is not in the scope.
+fn is_holder(proc: &Path, pid: u32, unit: &str) -> bool {
+    let named = std::fs::read(proc.join(pid.to_string()).join("cmdline")).is_ok_and(|bytes| {
         bytes
             .split(|b| *b == 0)
             .next()
             .is_some_and(|argv0| argv0.ends_with(b"silo-ctr"))
-    })
+    });
+    named
+        && std::fs::read_to_string(proc.join(pid.to_string()).join("cgroup"))
+            .is_ok_and(|text| hold::in_scope(&text, unit))
 }
 
-pub fn holder_alive(dir: &ComputerDir) -> bool {
-    holder_pid(&dir.state()).is_some_and(is_holder)
+fn holder_alive_in(proc: &Path, paths: &RuntimePaths, name: &str) -> bool {
+    let state = Layout::new(&paths.home).computer(name).state();
+    holder_pid(&state).is_some_and(|pid| is_holder(proc, pid, &unit_name(paths, name)))
+}
+
+pub fn holder_alive(paths: &RuntimePaths, name: &str) -> bool {
+    holder_alive_in(Path::new("/proc"), paths, name)
 }
 
 fn gateway_tracked(name: &str) -> bool {
@@ -104,19 +117,48 @@ fn gateway_tracked(name: &str) -> bool {
         .unwrap_or(false)
 }
 
-pub fn status(paths: &RuntimePaths, tools: &Tools, name: &str, record: &ComputerRecord) -> Status {
-    let dir = Layout::new(&paths.home).computer(name);
-    if holder_alive(&dir) {
-        if gateway_tracked(name) {
-            return Status::Running;
-        }
-        // Left over from an earlier engine process, which took its gateway with it.
-        let _ = stop(paths, tools, name, record);
-    }
-    if record.started_once {
+/// Whether the computer is running as this engine process knows it: a live holder and its gateway.
+fn is_running(proc: &Path, paths: &RuntimePaths, name: &str) -> bool {
+    holder_alive_in(proc, paths, name) && gateway_tracked(name)
+}
+
+/// What a computer is doing. Only reads: it never stops, starts or cleans up anything, so a list
+/// refresh can never disturb a container (one being started has a holder before it has a
+/// gateway). A holder with no gateway of this engine is not running; [`reconcile`] stops it when
+/// the engine starts and [`start`] clears it.
+pub fn status(paths: &RuntimePaths, name: &str, record: &ComputerRecord) -> Status {
+    status_in(Path::new("/proc"), paths, name, record)
+}
+
+fn status_in(proc: &Path, paths: &RuntimePaths, name: &str, record: &ComputerRecord) -> Status {
+    if hold::is_starting(name) {
+        Status::Starting
+    } else if is_running(proc, paths, name) {
+        Status::Running
+    } else if record.started_once {
         Status::Stopped
     } else {
         Status::Created
+    }
+}
+
+/// Once, when the engine starts: stops the containers an earlier engine process left running.
+/// Their gateways died with that process, so they have no network and nothing to manage them.
+pub fn reconcile(paths: &RuntimePaths, tools: &Tools) {
+    let layout = Layout::new(&paths.home);
+    for name in layout.names() {
+        // Marked as starting while it is looked at, so a start that begins now is not mistaken for
+        // a leftover (and a reconcile never races a start).
+        let Some(_mark) = StartMark::begin(&name) else {
+            continue;
+        };
+        if holder_alive(paths, &name) && !gateway_tracked(&name) {
+            let Ok(record) = layout.computer(&name).read_record() else {
+                continue;
+            };
+            eprintln!("Container computer {name}: stopping a leftover of an earlier Silo engine.");
+            let _ = stop(paths, tools, &name, &record);
+        }
     }
 }
 
@@ -206,7 +248,8 @@ fn receive_descriptor(stream: &std::os::unix::net::UnixStream) -> Result<OwnedFd
 }
 
 struct Started {
-    pid: u32,
+    /// What the holder warned about while it started (`silo-ctr: warning: ...`).
+    warnings: Vec<String>,
 }
 
 pub fn start(
@@ -221,13 +264,19 @@ pub fn start(
             "Silo could not start container computer {name}. {detail}"
         ))
     };
+    // Marked first: from here until the end nothing may take this computer's holder, which exists
+    // before its gateway does, for a leftover.
+    let _mark = StartMark::begin(name).ok_or_else(|| {
+        RuntimeError::Unavailable(format!("Container computer {name} is already starting."))
+    })?;
     let layout = Layout::new(&paths.home);
     let dir = layout.computer(name);
     let mut record = dir.read_record().map_err(RuntimeError::Unavailable)?;
-    if status(paths, tools, name, &record) == Status::Running {
+    if is_running(Path::new("/proc"), paths, name) {
         return Ok(());
     }
-    let image = super::image::ensure(paths, tools)?;
+    // The image the computer was made from, not whatever is pinned now.
+    let image = super::image::ensure_recorded(paths, tools, name, &record)?;
     cleanup_stale(paths, tools, &dir, name);
     let started = launch(
         paths,
@@ -243,7 +292,9 @@ pub fn start(
         let _ = stop(paths, tools, name, &record);
         unavailable(detail)
     })?;
-    let _ = started.pid;
+    for warning in &started.warnings {
+        eprintln!("Container computer {name}: {warning}");
+    }
     record.started_once = true;
     dir.write_record(&record)
         .map_err(RuntimeError::Unavailable)?;
@@ -308,6 +359,9 @@ fn launch(
         .map(|path| path.to_string_lossy().into_owned())
         .collect::<Vec<_>>()
         .join(":");
+    // The holder appends to one log across starts: only what it writes from here is this start's.
+    let log_from =
+        std::fs::metadata(state.join("holder.log")).map_or(0, |meta| meta.len() as usize);
     let log = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -356,9 +410,12 @@ fn launch(
             Ok(())
         });
     }
-    let mut child = command
-        .spawn()
-        .map_err(|e| format!("systemd-run could not start: {e}"))?;
+    // Every way out below reaps the child: it is waited for even when the start fails.
+    let mut child = Reaped::new(
+        command
+            .spawn()
+            .map_err(|e| format!("systemd-run could not start: {e}"))?,
+    );
     let deadline = Instant::now() + timeout.min(Duration::from_secs(120));
     let tail = |state: &Path| {
         std::fs::read_to_string(state.join("holder.log"))
@@ -375,14 +432,14 @@ fn launch(
         match listener.accept() {
             Ok((stream, _)) => break stream,
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                if let Ok(Some(status)) = child.try_wait() {
+                if let Ok(Some(status)) = child.child().try_wait() {
                     return Err(format!(
                         "The container holder exited ({status}): {}",
                         tail(&state)
                     ));
                 }
                 if Instant::now() >= deadline {
-                    let _ = child.kill();
+                    let _ = child.child().kill();
                     return Err("The container holder did not start in time.".into());
                 }
                 std::thread::sleep(Duration::from_millis(20));
@@ -446,13 +503,13 @@ fn launch(
         .map_err(|_| "The gateway registry is unavailable.".to_owned())?
         .get_or_insert_with(HashMap::new)
         .insert(name.to_owned(), gateway);
-    // The holder runs on: a thread reaps systemd-run's exit status so no zombie is left.
-    std::thread::spawn(move || {
-        let _ = child.wait();
-    });
     wait_running(&tools.crun, &state, name, deadline)?;
-    let pid = holder_pid(&state).ok_or("The container holder left no pid file.")?;
-    Ok(Started { pid })
+    holder_pid(&state).ok_or("The container holder left no pid file.")?;
+    // The holder runs on; dropping the guard hands its exit status to a thread.
+    let log = std::fs::read_to_string(state.join("holder.log")).unwrap_or_default();
+    Ok(Started {
+        warnings: hold::warnings_since(&log, log_from),
+    })
 }
 
 fn crun(tools: &Tools, state: &Path) -> Command {
@@ -496,8 +553,8 @@ fn wait_running(
     }
 }
 
-fn systemctl(args: &[&str]) {
-    let _ = Command::new("systemctl")
+fn systemctl(tools: &Tools, args: &[&str]) {
+    let _ = Command::new(&tools.systemctl)
         .arg("--user")
         .args(args)
         .stdout(Stdio::null())
@@ -508,12 +565,15 @@ fn systemctl(args: &[&str]) {
 /// What an earlier run left: a scope, crun state, a socket.
 fn cleanup_stale(paths: &RuntimePaths, tools: &Tools, dir: &ComputerDir, name: &str) {
     let state = dir.state();
-    if holder_alive(dir) {
-        systemctl(&[
-            "kill",
-            "--signal=SIGKILL",
-            &format!("{}.scope", unit_name(paths, name)),
-        ]);
+    if holder_alive(paths, name) {
+        systemctl(
+            tools,
+            &[
+                "kill",
+                "--signal=SIGKILL",
+                &format!("{}.scope", unit_name(paths, name)),
+            ],
+        );
     }
     let _ = crun(tools, &state)
         .args(["delete", "--force", name])
@@ -534,25 +594,28 @@ pub fn stop(
     let layout = Layout::new(&paths.home);
     let dir = layout.computer(name);
     let state = dir.state();
-    if holder_alive(&dir) {
+    if holder_alive(paths, name) {
         let _ = crun(tools, &state)
             .args(["kill", name, "TERM"])
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .status();
         let deadline = Instant::now() + TERM_WAIT;
-        while holder_alive(&dir) && Instant::now() < deadline {
+        while holder_alive(paths, name) && Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(50));
         }
-        if holder_alive(&dir) {
+        if holder_alive(paths, name) {
             let unit = unit_name(paths, name);
-            systemctl(&["kill", "--signal=SIGKILL", &format!("{unit}.scope")]);
+            systemctl(
+                tools,
+                &["kill", "--signal=SIGKILL", &format!("{unit}.scope")],
+            );
             let deadline = Instant::now() + Duration::from_secs(10);
-            while holder_alive(&dir) && Instant::now() < deadline {
+            while holder_alive(paths, name) && Instant::now() < deadline {
                 std::thread::sleep(Duration::from_millis(50));
             }
         }
-        if holder_alive(&dir) {
+        if holder_alive(paths, name) {
             return Err(RuntimeError::Unavailable(format!(
                 "Container computer {name} did not stop."
             )));
@@ -577,7 +640,7 @@ pub fn stop(
 /// Deletes the computer's files, including the layers owned by sub-ids.
 pub fn remove(paths: &RuntimePaths, tools: &Tools, name: &str) -> Result<(), RuntimeError> {
     let dir = Layout::new(&paths.home).computer(name);
-    if holder_alive(&dir) {
+    if holder_alive(paths, name) {
         return Err(RuntimeError::Invalid(format!(
             "Stop {name} before dropping it."
         )));
@@ -588,51 +651,67 @@ pub fn remove(paths: &RuntimePaths, tools: &Tools, name: &str) -> Result<(), Run
     })
 }
 
-/// The `crun exec` command for `exec`, run as `uid`/`gid` with the given environment.
+/// A `crun exec` command and the handle that ends what it runs.
+pub struct ExecPlan {
+    pub command: Command,
+    /// Kills the command's whole process group inside the container.
+    pub group: ExecGroup,
+}
+
+/// Files older than this in a computer's `exec` directory are leftovers.
+const EXEC_FILE_MAX_AGE: Duration = Duration::from_secs(600);
+
+/// A new private file name in the computer's `exec` directory; stale ones are removed first.
+fn exec_file(dir: &ComputerDir, extension: &str) -> Result<PathBuf, String> {
+    let directory = dir.state().join("exec");
+    private_dir(&directory)?;
+    for entry in std::fs::read_dir(&directory)
+        .into_iter()
+        .flatten()
+        .flatten()
+    {
+        let old = entry
+            .metadata()
+            .and_then(|meta| meta.modified())
+            .ok()
+            .and_then(|modified| modified.elapsed().ok())
+            .is_some_and(|age| age > EXEC_FILE_MAX_AGE);
+        if old {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+    Ok(directory.join(format!("{}.{extension}", uuid::Uuid::new_v4().simple())))
+}
+
+/// The `crun exec` command for `exec`, run as `uid`/`gid` (and the user's other groups) with the
+/// given environment.
+///
+/// The command runs from the image the computer was made from (its `/etc/passwd` and
+/// `/etc/group` are read through the overlay's layers, never through a link the container could
+/// plant), as the leader of its own process group, so a timeout or a cancellation ends all of it
+/// ([`ExecPlan::group`]).
 pub fn exec_command(
     paths: &RuntimePaths,
     tools: &Tools,
     name: &str,
     exec: &Exec,
     with_timeout: bool,
-) -> Result<Command, String> {
+) -> Result<ExecPlan, String> {
     let layout = Layout::new(&paths.home);
     let dir = layout.computer(name);
     let record = dir.read_record()?;
     let image =
-        super::image::unpacked(&layout, &super::image::pinned().map_err(|e| e.to_string())?)
-            .ok_or("The container image is not unpacked.")?;
+        super::image::unpacked_digest(&layout, &record.image_digest, &record.image_reference)
+            .ok_or("The container image of this computer is not unpacked. Start it again.")?;
     let boot = boot_layer(&layout, tools)?;
     let mut layers = vec![dir.upper()];
     layers.extend(dir.lower_dirs(&record, &boot, &image.rootfs));
-    let passwd = users::read_from_layers(&layers, "etc/passwd").unwrap_or_default();
-    let group = users::read_from_layers(&layers, "etc/group").unwrap_or_default();
+    let passwd = users::read_from_layers(&layers, "etc/passwd")?.unwrap_or_default();
+    let group = users::read_from_layers(&layers, "etc/group")?.unwrap_or_default();
     let user = exec.user.as_deref().unwrap_or("root");
     let identity = users::resolve(user, &passwd, &group)
         .ok_or_else(|| format!("The user {user} does not exist in {name}."))?;
-    // Inside the holder's namespaces, so the command has the container's network.
-    let mut command = Command::new(&tools.ctr);
-    command
-        .arg("enter")
-        .arg("--state")
-        .arg(dir.state())
-        .arg("--")
-        .arg(&tools.crun)
-        .arg("--root")
-        .arg(dir.state().join("crun"))
-        .arg("--cgroup-manager=cgroupfs");
-    command.arg("exec").arg("--no-new-privs");
-    command
-        .arg("--cwd")
-        .arg(exec.workdir.as_deref().unwrap_or("/"));
-    command
-        .arg("--user")
-        .arg(format!("{}:{}", identity.uid, identity.gid));
-    if identity.uid == 0 {
-        for capability in oci::ROOT_EXEC_CAPABILITIES {
-            command.arg("--cap").arg(capability);
-        }
-    }
+
     let mut environment = vec![
         (
             "PATH".to_owned(),
@@ -647,20 +726,66 @@ pub fn exec_command(
         environment.retain(|(existing, _)| existing != key);
         environment.push((key.clone(), value.clone()));
     }
-    for (key, value) in environment {
-        command.arg("--env").arg(format!("{key}={value}"));
-    }
-    command.arg(name).arg(oci::INIT_PATH).arg("--");
+    let mut argv = vec![
+        oci::INIT_PATH.to_owned(),
+        "--own-group".to_owned(),
+        "--".to_owned(),
+    ];
     if with_timeout {
         if let Some(limit) = exec.timeout {
-            command
-                .arg("timeout")
-                .arg("--kill-after=5s")
-                .arg(format!("{}s", limit.as_secs().max(1)));
+            argv.extend([
+                "timeout".to_owned(),
+                "--kill-after=5s".to_owned(),
+                format!("{}s", limit.as_secs().max(1)),
+            ]);
         }
     }
-    command.args(&exec.argv);
-    Ok(command)
+    argv.extend(exec.argv.iter().cloned());
+    let capabilities: &[&str] = if identity.uid == 0 {
+        &oci::ROOT_EXEC_CAPABILITIES
+    } else {
+        &[]
+    };
+    let process = oci::exec_process(
+        identity.uid,
+        identity.gid,
+        &identity.groups,
+        exec.workdir.as_deref().unwrap_or("/"),
+        &environment,
+        &argv,
+        capabilities,
+    );
+    let process_file = exec_file(&dir, "json")?;
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&process_file)
+            .map_err(io)?;
+        file.write_all(&serde_json::to_vec(&process).map_err(|e| e.to_string())?)
+            .map_err(io)?;
+    }
+    let group = ExecGroup::new(exec_file(&dir, "pid")?);
+    // Inside the holder's namespaces, so the command has the container's network.
+    let mut command = Command::new(&tools.ctr);
+    command
+        .arg("enter")
+        .arg("--state")
+        .arg(dir.state())
+        .arg("--")
+        .arg(&tools.crun)
+        .arg("--root")
+        .arg(dir.state().join("crun"))
+        .arg("--cgroup-manager=cgroupfs")
+        .arg("exec")
+        .arg("--process")
+        .arg(&process_file)
+        .arg("--pid-file")
+        .arg(group.pid_file())
+        .arg(name);
+    Ok(ExecPlan { command, group })
 }
 
 #[cfg(test)]
@@ -713,9 +838,249 @@ mod tests {
         );
     }
 
+    fn test_paths(home: &Path) -> RuntimePaths {
+        crate::test_support::paths(home)
+    }
+
+    fn fake_process(proc: &Path, pid: u32, argv0: &str, cgroup: &str) {
+        let dir = proc.join(pid.to_string());
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("cmdline"), format!("{argv0}\0run\0")).unwrap();
+        std::fs::write(dir.join("cgroup"), cgroup).unwrap();
+    }
+
+    fn scope_of(unit: &str) -> String {
+        format!("0::/user.slice/user-1000.slice/user@1000.service/app.slice/{unit}.scope\n")
+    }
+
     #[test]
-    fn only_a_live_silo_ctr_counts_as_the_holder() {
-        assert!(!is_holder(std::process::id()));
-        assert!(!is_holder(u32::MAX));
+    fn the_holder_is_a_silo_ctr_in_the_computers_own_scope_not_any_process_of_that_name() {
+        let proc = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let paths = test_paths(home.path());
+        let unit = unit_name(&paths, "dev");
+        fake_process(proc.path(), 10, "/opt/silo/silo-ctr", &scope_of(&unit));
+        assert!(is_holder(proc.path(), 10, &unit));
+        // A recycled pid: another program in some other cgroup.
+        fake_process(proc.path(), 11, "/usr/bin/vim", &scope_of(&unit));
+        fake_process(
+            proc.path(),
+            12,
+            "/tmp/silo-ctr",
+            "0::/user.slice/session-1.scope\n",
+        );
+        fake_process(
+            proc.path(),
+            13,
+            "/opt/silo/silo-ctr",
+            &scope_of(&unit_name(&paths, "other")),
+        );
+        for pid in [11, 12, 13, 14] {
+            assert!(!is_holder(proc.path(), pid, &unit), "{pid}");
+        }
+        // The pid file decides which process is asked about.
+        let state = Layout::new(&paths.home).computer("dev").state();
+        std::fs::create_dir_all(&state).unwrap();
+        std::fs::write(state.join("holder.pid"), "12\n").unwrap();
+        assert!(!holder_alive_in(proc.path(), &paths, "dev"));
+        std::fs::write(state.join("holder.pid"), "10\n").unwrap();
+        assert!(holder_alive_in(proc.path(), &paths, "dev"));
+    }
+
+    fn record(started: bool) -> ComputerRecord {
+        ComputerRecord {
+            schema_version: super::super::layout::RECORD_VERSION,
+            name: "dev".into(),
+            cpus: 1,
+            max_cpus: 1,
+            memory_mib: 1024,
+            max_memory_mib: 1024,
+            root_disk_mib: 1024,
+            workspace_mib: 1024,
+            labels: Vec::new(),
+            env: Vec::new(),
+            image_digest: "sha256:made-from".into(),
+            image_reference: "ref:1".into(),
+            layers: Vec::new(),
+            created_ms: 1,
+            started_once: started,
+        }
+    }
+
+    #[test]
+    fn reading_the_state_of_a_live_holder_without_a_gateway_changes_nothing() {
+        let proc = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let paths = test_paths(home.path());
+        let unit = unit_name(&paths, "starting-box");
+        let dir = Layout::new(&paths.home).computer("starting-box");
+        let state = dir.state();
+        std::fs::create_dir_all(&state).unwrap();
+        std::fs::write(state.join("holder.pid"), "10\n").unwrap();
+        std::fs::write(state.join("ctl.sock"), "").unwrap();
+        fake_process(proc.path(), 10, "silo-ctr", &scope_of(&unit));
+        // A holder whose gateway this engine does not have is not running, and a read leaves it alone.
+        for started in [false, true] {
+            let expected = if started {
+                Status::Stopped
+            } else {
+                Status::Created
+            };
+            for _ in 0..3 {
+                assert_eq!(
+                    status_in(proc.path(), &paths, "starting-box", &record(started)),
+                    expected
+                );
+            }
+        }
+        assert!(state.join("holder.pid").exists() && state.join("ctl.sock").exists());
+        // While a start is in flight it says so.
+        let mark = StartMark::begin("starting-box").unwrap();
+        assert_eq!(
+            status_in(proc.path(), &paths, "starting-box", &record(false)),
+            Status::Starting
+        );
+        drop(mark);
+    }
+
+    fn fake_tools(directory: &Path) -> Tools {
+        let init = directory.join("silo-init");
+        std::fs::write(&init, b"init").unwrap();
+        let other = |name: &str| directory.join(name);
+        Tools {
+            ctr: other("silo-ctr"),
+            init,
+            gateway: other("gateway"),
+            crun: other("crun"),
+            skopeo: other("skopeo"),
+            umoci: other("umoci"),
+            systemd_run: other("systemd-run"),
+            systemctl: other("systemctl"),
+        }
+    }
+
+    fn exec_of(user: &str) -> Exec {
+        Exec {
+            name: "dev".into(),
+            user: Some(user.into()),
+            env: vec![("A".into(), "b".into())],
+            workdir: Some("/workspace".into()),
+            no_start: true,
+            timeout: Some(Duration::from_secs(7)),
+            argv: vec!["id".into()],
+        }
+    }
+
+    #[test]
+    fn a_command_runs_on_the_image_the_computer_was_made_from_with_the_users_groups_and_its_own_group(
+    ) {
+        let home = tempfile::tempdir().unwrap();
+        let paths = test_paths(home.path());
+        let layout = Layout::new(&paths.home);
+        let dir = layout.computer("dev");
+        std::fs::create_dir_all(dir.path()).unwrap();
+        dir.write_record(&record(true)).unwrap();
+        let tools = fake_tools(home.path());
+        // The recorded image is not unpacked (only some other one is): refused, not substituted.
+        let other = layout.image("sha256:pinned-now");
+        std::fs::create_dir_all(other.join("rootfs/etc")).unwrap();
+        std::fs::write(other.join("digest"), "sha256:pinned-now\n").unwrap();
+        std::fs::write(other.join("rootfs/etc/passwd"), "silo:x:5:5::/h:/bin/sh\n").unwrap();
+        let error = exec_command(&paths, &tools, "dev", &exec_of("silo"), true)
+            .err()
+            .unwrap();
+        assert!(error.contains("not unpacked"), "{error}");
+        // With the recorded image unpacked, its own account files are used.
+        let made = layout.image("sha256:made-from");
+        std::fs::create_dir_all(made.join("rootfs/etc")).unwrap();
+        std::fs::write(made.join("digest"), "sha256:made-from\n").unwrap();
+        std::fs::write(
+            made.join("rootfs/etc/passwd"),
+            "silo:x:1001:1001::/home/silo:/bin/sh\n",
+        )
+        .unwrap();
+        std::fs::write(
+            made.join("rootfs/etc/group"),
+            "silo:x:1001:\nvideo:x:44:silo\n",
+        )
+        .unwrap();
+        let plan = exec_command(&paths, &tools, "dev", &exec_of("silo"), true).unwrap();
+        let args: Vec<String> = plan
+            .command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        let at = |flag: &str| args.iter().position(|arg| arg == flag).unwrap();
+        assert_eq!(
+            args[at("--pid-file") + 1],
+            plan.group.pid_file().to_string_lossy()
+        );
+        assert_eq!(args.last().unwrap(), "dev");
+        let process: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&args[at("--process") + 1]).unwrap()).unwrap();
+        assert_eq!(process["user"]["uid"], 1001);
+        assert_eq!(process["user"]["additionalGids"], serde_json::json!([44]));
+        assert_eq!(process["cwd"], "/workspace");
+        let argv: Vec<&str> = process["args"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|a| a.as_str().unwrap())
+            .collect();
+        assert_eq!(
+            argv,
+            [
+                "/silo/init",
+                "--own-group",
+                "--",
+                "timeout",
+                "--kill-after=5s",
+                "7s",
+                "id"
+            ]
+        );
+        assert!(process.get("capabilities").is_none());
+        // Without a limit (a streaming command) there is no timeout wrapper.
+        let mut open = exec_of("silo");
+        open.timeout = None;
+        let streaming = exec_command(&paths, &tools, "dev", &open, false).unwrap();
+        let text = streaming
+            .command
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        let file = &text[text.iter().position(|a| a == "--process").unwrap() + 1];
+        assert!(!std::fs::read_to_string(file).unwrap().contains("timeout"));
+    }
+
+    #[test]
+    fn a_planted_link_in_the_writable_layer_makes_the_exec_refuse_instead_of_reading_a_host_file() {
+        let home = tempfile::tempdir().unwrap();
+        let paths = test_paths(home.path());
+        let layout = Layout::new(&paths.home);
+        let dir = layout.computer("dev");
+        std::fs::create_dir_all(dir.upper().join("etc")).unwrap();
+        dir.write_record(&record(true)).unwrap();
+        let made = layout.image("sha256:made-from");
+        std::fs::create_dir_all(made.join("rootfs/etc")).unwrap();
+        std::fs::write(made.join("digest"), "sha256:made-from\n").unwrap();
+        std::fs::write(
+            made.join("rootfs/etc/passwd"),
+            "root:x:0:0::/root:/bin/sh\n",
+        )
+        .unwrap();
+        let host_file = home.path().join("host-passwd");
+        std::fs::write(&host_file, "root:x:0:0::/host:/bin/sh\n").unwrap();
+        std::os::unix::fs::symlink(&host_file, dir.upper().join("etc/passwd")).unwrap();
+        let error = exec_command(
+            &paths,
+            &fake_tools(home.path()),
+            "dev",
+            &exec_of("root"),
+            false,
+        )
+        .err()
+        .unwrap();
+        assert!(error.contains("not a regular file"), "{error}");
     }
 }

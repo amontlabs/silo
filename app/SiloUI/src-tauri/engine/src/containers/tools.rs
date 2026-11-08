@@ -17,6 +17,7 @@ pub struct Tools {
     pub skopeo: PathBuf,
     pub umoci: PathBuf,
     pub systemd_run: PathBuf,
+    pub systemctl: PathBuf,
 }
 
 pub fn find_in_path(name: &str, path: &std::ffi::OsStr) -> Option<PathBuf> {
@@ -58,6 +59,7 @@ impl Tools {
             skopeo: system("skopeo")?,
             umoci: system("umoci")?,
             systemd_run: system("systemd-run")?,
+            systemctl: system("systemctl")?,
         })
     }
 }

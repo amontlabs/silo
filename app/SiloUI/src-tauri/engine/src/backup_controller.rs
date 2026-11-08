@@ -1285,6 +1285,18 @@ fn explicit_archive(archive_path: &str) -> Result<(PathBuf, PathBuf), String> {
     Ok((folder, file))
 }
 
+/// Before an export claims anything: a container computer has no export yet.
+fn refuse_container_exports(paths: &runtime::RuntimePaths, names: &[String]) -> Result<(), String> {
+    for name in names {
+        crate::containers::capability::require(
+            paths,
+            name,
+            crate::containers::capability::Capability::Export,
+        )?;
+    }
+    Ok(())
+}
+
 pub fn begin_export(
     controller: Arc<Controller>,
     destination: String,
@@ -1321,6 +1333,7 @@ pub fn begin_export(
     for name in &computers {
         runtime::validate_name(name).map_err(|error| error.to_string())?;
     }
+    refuse_container_exports(&runtime::runtime_paths(controller.runtime_host()?)?, &computers)?;
     // A checkpoint export packages one computer's stored checkpoint. Resolve its
     // name up front so the operation phase can name it and unknown ids fail early.
     let checkpoint_name = if let Some(checkpoint_id) = &checkpoint_id {
@@ -3031,6 +3044,19 @@ pub(crate) use tests::{
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn an_export_that_names_a_container_computer_is_refused_before_it_claims_anything() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = crate::test_support::paths(directory.path());
+        crate::containers::capability::make_container(&paths.home, "box");
+        let error = refuse_container_exports(&paths, &["dev".into(), "box".into()]).unwrap_err();
+        assert!(
+            error.contains("cannot export or back up a container computer yet"),
+            "{error}"
+        );
+        refuse_container_exports(&paths, &["dev".into()]).unwrap();
+    }
+
     use super::*;
     use crate::runtime::RuntimePackageKind;
     use silo_engine::channel::Channel;

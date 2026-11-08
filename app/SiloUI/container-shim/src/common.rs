@@ -45,6 +45,44 @@ pub fn status_code(status: i32) -> i32 {
     }
 }
 
+/// The kernel's Landlock ABI, or the errno text when Landlock is unavailable.
+#[cfg(target_os = "linux")]
+pub fn landlock_abi() -> Result<u32, String> {
+    const SYS_CREATE_RULESET: libc::c_long = 444;
+    const CREATE_RULESET_VERSION: u32 = 1;
+    // SAFETY: with the VERSION flag the attribute pointer must be null and its size 0.
+    let rc = unsafe {
+        libc::syscall(
+            SYS_CREATE_RULESET,
+            std::ptr::null::<u8>(),
+            0usize,
+            CREATE_RULESET_VERSION,
+        )
+    };
+    if rc < 0 {
+        Err(errno_text(last_errno()))
+    } else {
+        Ok(rc as u32)
+    }
+}
+
+/// The first Landlock ABI that also restricts network access (TCP bind and connect).
+pub const LANDLOCK_NETWORK_ABI: u32 = 4;
+
+/// What the holder logs once per start about the filesystem ruleset `silo-init` applies, or
+/// `None` when the kernel is new enough (ABI 4 or later) for everything the baseline asks for.
+pub fn landlock_warning(abi: &Result<u32, String>) -> Option<String> {
+    match abi {
+        Err(reason) => Some(format!(
+            "Landlock is unavailable ({reason}): the container runs without its filesystem ruleset, which protects only /silo/init, /boot and the root directory. The namespaces, capabilities, seccomp and read-only masks still apply."
+        )),
+        Ok(abi) if *abi < LANDLOCK_NETWORK_ABI => Some(format!(
+            "Landlock ABI {abi} is older than {LANDLOCK_NETWORK_ABI}: the filesystem ruleset applies, but this kernel is older than the baseline expects; update the host kernel."
+        )),
+        Ok(_) => None,
+    }
+}
+
 static TARGET: AtomicI32 = AtomicI32::new(0);
 
 extern "C" fn forward(signal: libc::c_int) {
@@ -101,6 +139,18 @@ mod tests {
     #[test]
     fn errno_text_names_the_error() {
         assert_eq!(errno_text(libc::ENOENT), "No such file or directory");
+    }
+
+    #[test]
+    fn a_missing_or_old_landlock_is_warned_about_and_a_current_one_is_not() {
+        let missing = landlock_warning(&Err("Function not implemented".into())).unwrap();
+        assert!(missing.contains("unavailable") && missing.contains("Function not implemented"));
+        for old in [1, 2, 3] {
+            let warning = landlock_warning(&Ok(old)).unwrap();
+            assert!(warning.contains(&format!("ABI {old}")), "{warning}");
+        }
+        assert_eq!(landlock_warning(&Ok(4)), None);
+        assert_eq!(landlock_warning(&Ok(7)), None);
     }
 
     #[test]

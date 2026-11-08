@@ -425,6 +425,7 @@ pub fn open_local(
     {
         return Err("This computer does not support local editor connections.".into());
     }
+    crate::containers::capability::require(paths, name, crate::containers::capability::Capability::Editor)?;
     crate::terminal::running_computer(paths, name)?;
     let user = crate::working_account::USER;
     runtime::run_msb(
@@ -814,6 +815,7 @@ pub(crate) fn authorize_remote(
     crate::runtime::shutdown::ensure_accepting_operations()?;
     validate_public_key(public)?;
     validate_path(path)?;
+    crate::containers::capability::require(paths, name, crate::containers::capability::Capability::Editor)?;
     crate::terminal::running_computer(paths, name)?;
     let user = crate::working_account::USER;
     runtime::run_msb(
@@ -1105,6 +1107,7 @@ fn proxy_command<S: AsRef<str>>(parts: &[S]) -> String {
 /// Silo call the AppImage file itself instead (G-12).
 fn local_proxy(paths: &RuntimePaths, name: &str) -> Result<String, String> {
     runtime::validate_name(name).map_err(|error| error.to_string())?;
+    crate::containers::capability::require(paths, name, crate::containers::capability::Capability::Editor)?;
     let home = paths.home.to_str().ok_or(FAILED)?;
     if applications::launch::tools_are_temporary() {
         let silo = applications::launch::stable_executable()?;
@@ -1167,6 +1170,11 @@ pub fn transport_args(args: &[String]) -> Result<(&str, &str), String> {
     if !Path::new(home).is_absolute() {
         return Err("Expected an absolute runtime home.".into());
     }
+    crate::containers::capability::require_in(
+        Path::new(home),
+        name,
+        crate::containers::capability::Capability::Editor,
+    )?;
     Ok((home, name))
 }
 
@@ -1621,6 +1629,34 @@ pub fn probe_alias(config: &Path, alias: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_container_computer_gets_no_editor_setup_key_or_transport_and_nothing_runs() {
+        const CONTAINER: &str = "box";
+        let directory = tempfile::tempdir().unwrap();
+        let paths = crate::guest::test_support::runtime(directory.path());
+        crate::containers::capability::make_container(&paths.home, "dev");
+        crate::containers::capability::make_container(&paths.home, CONTAINER);
+        let wanted = "cannot connect an editor to a container computer yet";
+        let user_home = directory.path().join("user");
+        let command = vscode("code");
+        let key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKaDgVuE9Eq4wyQDZgT0kPA3H";
+        let errors = [
+            open_local(&paths, &user_home, "dev", "/workspace", &command).unwrap_err(),
+            authorize_remote(&paths, "dev", key, "/workspace").unwrap_err(),
+            local_proxy(&paths, "dev").unwrap_err(),
+            transport_args(&[paths.home.to_string_lossy().into_owned(), CONTAINER.into()])
+                .map(|_| String::new())
+                .unwrap_err(),
+        ];
+        for error in errors {
+            assert!(error.contains(wanted), "{error}");
+        }
+        assert!(!directory.path().join("msb.log").exists(), "the runtime ran");
+        assert!(!user_home.exists(), "an editor configuration was written");
+        // A virtual machine's transport arguments still parse.
+        assert!(transport_args(&[paths.home.to_string_lossy().into_owned(), "vm".into()]).is_ok());
+    }
 
     #[test]
     fn ssh_file_writers_report_an_unreadable_parent_after_replacement() {

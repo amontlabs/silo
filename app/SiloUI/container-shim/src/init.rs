@@ -1,7 +1,7 @@
 //! silo-init: the container's first process and exec wrapper.
 //!
 //!   silo-init --probe
-//!   silo-init [--require] [--ro=P:P..] [--rw=P:P..] -- CMD ARGS...
+//!   silo-init [--require] [--own-group] [--ro=P:P..] [--rw=P:P..] -- CMD ARGS...
 //!
 //! It restricts the process with a Landlock ruleset (filesystem rights only), then runs the command.
 //! As PID 1 it runs the command as a child and stays behind as the reaper of every orphan.
@@ -68,6 +68,8 @@ mod fs {
 struct Args {
     probe: bool,
     require: bool,
+    /// Lead a new process group before running the command, so the whole command can be signalled.
+    own_group: bool,
     ro: Vec<String>,
     rw: Vec<String>,
     command: Vec<String>,
@@ -90,6 +92,7 @@ fn parse_args(args: &[String]) -> Result<Args, String> {
     let mut parsed = Args {
         probe: false,
         require: false,
+        own_group: false,
         ro: split_paths(DEFAULT_RO),
         rw: split_paths(DEFAULT_RW),
         command: Vec::new(),
@@ -105,6 +108,8 @@ fn parse_args(args: &[String]) -> Result<Args, String> {
             parsed.probe = true;
         } else if arg == "--require" {
             parsed.require = true;
+        } else if arg == "--own-group" {
+            parsed.own_group = true;
         } else if let Some(list) = arg.strip_prefix("--ro=") {
             parsed.ro = split_paths(list);
         } else if let Some(list) = arg.strip_prefix("--rw=") {
@@ -144,7 +149,7 @@ fn rights_for(access: Access, is_dir: bool, handled: u64) -> u64 {
 #[cfg(target_os = "linux")]
 mod landlock {
     use super::{fs, rights_for, Access};
-    use crate::common::{errno_text, last_errno, os_err};
+    use crate::common::{last_errno, os_err};
     use std::ffi::CString;
     use std::os::unix::ffi::OsStrExt;
 
@@ -165,23 +170,7 @@ mod landlock {
         parent_fd: i32,
     }
 
-    /// The kernel's Landlock ABI, or the errno text when Landlock is unavailable.
-    pub fn abi() -> Result<u32, String> {
-        // SAFETY: with the VERSION flag the attribute pointer must be null and its size 0.
-        let rc = unsafe {
-            libc::syscall(
-                SYS_CREATE_RULESET,
-                std::ptr::null::<RulesetAttr>(),
-                0usize,
-                CREATE_RULESET_VERSION,
-            )
-        };
-        if rc < 0 {
-            Err(errno_text(last_errno()))
-        } else {
-            Ok(rc as u32)
-        }
-    }
+    pub use crate::common::landlock_abi as abi;
 
     fn add_path(
         ruleset: libc::c_int,
@@ -294,9 +283,8 @@ mod run {
                 if args.require {
                     fail(&format!("landlock is required but unavailable: {reason}"));
                 }
-                eprintln!(
-                    "silo-init: warning: landlock unavailable ({reason}); running unrestricted"
-                );
+                // The holder (`silo-ctr run`) logs the missing ruleset once per start; saying it
+                // here would repeat it on the standard error of every command.
             }
         }
     }
@@ -371,6 +359,12 @@ mod run {
         if unsafe { libc::getpid() } == 1 {
             supervise(&parsed.command)
         } else {
+            if parsed.own_group {
+                // SAFETY: setpgid(0, 0) takes plain integers; the process leads no group yet.
+                if unsafe { libc::setpgid(0, 0) } != 0 {
+                    fail(&os_err("setpgid"));
+                }
+            }
             exec(&parsed.command)
         }
     }
@@ -423,6 +417,14 @@ mod tests {
         assert_eq!(parsed.ro, vec!["/usr", "/lib"]);
         assert_eq!(parsed.rw, vec!["/work"]);
         assert_eq!(parsed.command, vec!["sh", "-c", "--rw=x"]);
+    }
+
+    #[test]
+    fn own_group_is_an_option_of_silo_init_and_not_of_the_command() {
+        assert!(!parse_args(&args(&["--", "x"])).unwrap().own_group);
+        let parsed = parse_args(&args(&["--own-group", "--", "x", "--own-group"])).unwrap();
+        assert!(parsed.own_group);
+        assert_eq!(parsed.command, vec!["x", "--own-group"]);
     }
 
     #[test]

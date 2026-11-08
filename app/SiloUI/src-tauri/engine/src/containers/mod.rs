@@ -12,6 +12,8 @@
 //! unpacked once per digest) and [`lifecycle`] (the holder, the gateway and `crun`).
 
 pub mod args;
+pub mod capability;
+pub mod hold;
 pub mod image;
 pub mod layout;
 #[cfg(target_os = "linux")]
@@ -27,6 +29,19 @@ use args::{Command, Create};
 use layout::{ComputerRecord, Layout, RECORD_VERSION};
 use serde_json::{json, Value};
 use std::{path::PathBuf, time::Duration};
+
+/// Once, when the engine starts: stops the container computers an earlier engine process left
+/// running (their gateways went with it). Reading a computer's state never does this.
+pub fn reconcile_at_start(paths: &RuntimePaths) {
+    #[cfg(target_os = "linux")]
+    if !layout::Layout::new(&paths.home).names().is_empty() {
+        if let Ok(tools) = tools::Tools::locate(paths) {
+            lifecycle::reconcile(paths, &tools);
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = paths;
+}
 
 /// The reference the runtime is told to create from; the container runtime unpacks the pinned
 /// image itself.
@@ -74,9 +89,7 @@ fn require_host() -> Result<(), RuntimeError> {
 }
 
 fn not_yet(verb: &str) -> RuntimeError {
-    RuntimeError::Invalid(format!(
-        "A container computer cannot do '{verb}' yet. Use a virtual machine computer for this."
-    ))
+    RuntimeError::Invalid(capability::refusal(verb))
 }
 
 fn output(stdout: String) -> CommandOutput {
@@ -166,15 +179,14 @@ fn new_record(create: &Create, image: &image::Unpacked) -> ComputerRecord {
     }
 }
 
+/// The state a read reports. It only looks: a list or an inspect never changes a computer.
 #[cfg(target_os = "linux")]
 fn state_word(paths: &RuntimePaths, name: &str, record: &ComputerRecord) -> &'static str {
-    match tools::Tools::locate(paths) {
-        Ok(tools) => match lifecycle::status(paths, &tools, name, record) {
-            lifecycle::Status::Running => "Running",
-            lifecycle::Status::Stopped => "Stopped",
-            lifecycle::Status::Created => "Created",
-        },
-        Err(_) => stopped_word(record),
+    match lifecycle::status(paths, name, record) {
+        lifecycle::Status::Running => "Running",
+        lifecycle::Status::Starting => "Starting",
+        lifecycle::Status::Stopped => "Stopped",
+        lifecycle::Status::Created => "Created",
     }
 }
 
@@ -183,6 +195,7 @@ fn state_word(_: &RuntimePaths, _: &str, record: &ComputerRecord) -> &'static st
     stopped_word(record)
 }
 
+#[cfg(not(target_os = "linux"))]
 fn stopped_word(record: &ComputerRecord) -> &'static str {
     if record.started_once {
         "Stopped"
@@ -335,15 +348,22 @@ fn exec_and_wait(
     use std::process::Stdio;
     let record = record_of(paths, &exec.name)?;
     let tools = tools::Tools::locate(paths)?;
-    if lifecycle::status(paths, &tools, &exec.name, &record) != lifecycle::Status::Running {
+    if lifecycle::status(paths, &exec.name, &record) != lifecycle::Status::Running {
         return Err(RuntimeError::Unavailable(format!(
             "Start {} first.",
             exec.name
         )));
     }
-    let mut command = lifecycle::exec_command(paths, &tools, &exec.name, exec, true)
-        .map_err(RuntimeError::Invalid)?;
+    let lifecycle::ExecPlan { mut command, group } =
+        lifecycle::exec_command(paths, &tools, &exec.name, exec, true)
+            .map_err(RuntimeError::Invalid)?;
     let operation = "Running a command in the computer".to_owned();
+    // The crun process is only the carrier: when it is killed the command must be too.
+    let end = |child: &mut std::process::Child| {
+        group.kill();
+        let _ = child.kill();
+        let _ = child.wait();
+    };
     let mut child = command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -361,16 +381,16 @@ fn exec_and_wait(
                 std::thread::sleep(Duration::from_millis(20))
             }
             Ok(None) => {
-                let _ = child.kill();
-                let _ = child.wait();
+                end(&mut child);
                 return Err(RuntimeError::TimedOut { operation });
             }
             Err(error) => {
+                end(&mut child);
                 return Err(RuntimeError::Failed {
                     operation,
                     exit_code: None,
                     detail: error.to_string(),
-                })
+                });
             }
         }
     };
@@ -423,7 +443,8 @@ pub fn guest_plan(
             timeout: None,
             argv: argv.to_vec(),
         };
-        let command = lifecycle::exec_command(paths, &tools, name, &exec, false)?;
+        let lifecycle::ExecPlan { command, .. } =
+            lifecycle::exec_command(paths, &tools, name, &exec, false)?;
         Ok((
             PathBuf::from(command.get_program()),
             command
@@ -602,7 +623,7 @@ mod tests {
         )
         .unwrap_err();
         assert!(
-            error.to_string().contains("cannot do 'snapshot' yet"),
+            error.to_string().contains("cannot snapshot a container computer yet"),
             "{error}"
         );
     }
