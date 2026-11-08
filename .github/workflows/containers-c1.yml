@@ -55,7 +55,7 @@ jobs:
           mkdir -p "$C1_OUT/raw" "$C1_OUT/logs"
           cp "$RUNNER_TEMP"/setup.log "$RUNNER_TEMP"/run.log "$C1_OUT/" 2>/dev/null || true
           sudo dmesg 2>/dev/null | tail -n 300 > "$C1_OUT/logs/dmesg.txt" || true
-          cp /mnt/c1/tinyproxy.log "$C1_OUT/logs/" 2>/dev/null || true
+          cp /mnt/c1/squid-access.log /mnt/c1/tinyproxy.log "$C1_OUT/logs/" 2>/dev/null || true
           for d in /mnt/c1/ctr/*/; do
             [ -d "$d" ] || continue
             n=$(basename "$d")
@@ -205,7 +205,7 @@ jobs:
           out="$RUNNER_TEMP/c1-evidence-same-runner"
           mkdir -p "$out/logs"
           cp "$RUNNER_TEMP"/setup2.log "$RUNNER_TEMP"/run2.log "$out/" 2>/dev/null || true
-          cp /mnt/c1/tinyproxy.log "$out/logs/" 2>/dev/null || true
+          cp /mnt/c1/squid-access.log /mnt/c1/tinyproxy.log "$out/logs/" 2>/dev/null || true
           gzip -f "$out/run2.log" 2>/dev/null || true
           find "$out" -type f -size +5M -delete
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

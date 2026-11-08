@@ -91,10 +91,10 @@ table inet silo_c1 {
 NFT
 echo "ip_forward: $(sysctl -n net.ipv4.ip_forward)"
 
-say "the host-side HTTP(S) proxies (proxy.sh starts one on port 3128 at a time)"
+say "the host-side HTTP(S) proxies (proxy.sh starts one on port 3128 at a time; squid is the one the workloads use)"
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends squid
 sudo systemctl disable --now tinyproxy squid >/dev/null 2>&1 || true
-bash "$C1/proxy.sh" tinyproxy
+bash "$C1/proxy.sh" squid
 
 say "a canary service on the host that a container must not reach"
 mkdir -p "$WORK/canary"

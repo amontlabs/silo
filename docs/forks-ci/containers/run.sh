@@ -189,7 +189,7 @@ section_net() {
     echo "-- the same 40 small requests direct from the host, a new curl process each (no keep-alive)"
     t0=$(now); for i in $(seq 40); do curl -sS -m 30 -o /dev/null http://archive.ubuntu.com/ubuntu/dists/noble/InRelease; done; echo "seconds=$(sub "$t0" "$(now)")"; } | tee "$RAW/net-throughput-host.txt"
   sudo nft list table inet silo_c1 > "$RAW/net-host-nft.txt" 2>&1; cat "$RAW/net-host-nft.txt"
-  { echo "-- tinyproxy log (container address 10.200.1.2)"; grep -E 'CONNECT|Request|GET' "$WORK/tinyproxy.log" | tail -n 12
+  { echo "-- squid access log, requests from the container (10.200.1.2)"; grep ' 10.200.1.2 ' "$WORK/squid-access.log" | tail -n 12
     echo "-- canary log (the host service; nothing from 10.200.1.2 may appear)"; grep -c '10\.200\.1\.2' "$WORK/canary.log"; } | tee "$RAW/net-proxy-log.txt"
   stop_ctr net1; sudo rm -rf "$CTR/net1"
 }
@@ -267,7 +267,7 @@ section_work() {
 # The apt phases again through squid instead of tinyproxy: is the slow download the proxy's doing?
 section_proxycmp() {
   local caps; caps=$(cat "$OUT/work-caps.txt" 2>/dev/null || echo relaxed)
-  for kind in squid tinyproxy; do
+  for kind in tinyproxy squid; do
     bash "$C1/proxy.sh" $kind > "$RAW/proxycmp-$kind-start.txt" 2>&1; cat "$RAW/proxycmp-$kind-start.txt"
     : > "$RAW/proxycmp-$kind-download.txt"; : > "$RAW/proxycmp-$kind-update.txt"
     for i in $(seq "$RUNS"); do

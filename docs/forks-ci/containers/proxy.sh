@@ -45,6 +45,7 @@ coredump_dir $WORK
 via off
 forwarded_for delete
 visible_hostname silo-c1
+buffered_logs off
 CONF
     echo "squid $(squid -v | head -1)"
     squid -N -f "$WORK/squid.conf" </dev/null >"$WORK/squid.out" 2>&1 &
