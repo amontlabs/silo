@@ -680,9 +680,10 @@ Not defended on a Linux host:
 
 ## CI runner (`silo-runner`)
 
-Scope: the Go helper `silo-runner` ([CI runner](SiloUI-CI-RUNNER.md)) on a Mac, giving every job of a
-private repository a fresh computer and deleting it afterwards. The boundaries above apply to the
-computer; this section covers what the runner adds.
+Scope: the Go helper `silo-runner` ([CI runner](SiloUI-CI-RUNNER.md)) on a Mac or on a
+[Linux host](#linux-hosts), giving every job of a private repository a fresh computer and deleting it
+afterwards. The boundaries above apply to the computer; this section covers what the runner adds. The
+last bullets cover a runner on a Linux host.
 
 - **What a job can reach.** The job runs as the computer's working account, which is root-equivalent
   inside the computer: it has passwordless `sudo` on Linux
@@ -735,9 +736,12 @@ computer; this section covers what the runner adds.
   swap the runner and its digest together; the only bound is the SHA-256 the recipe checks when it
   downloads the archive, which matches whatever that release publishes. Set `runnerRefresh.disabled` and
   update the pin by hand to remove this step.
-- **The Linux budget is opt-in.** `linuxBudget` (memory and count) defaults to unbounded: with it unset,
+- **The Linux budget.** On a Mac, `linuxBudget` (memory and count) defaults to unbounded: with it unset,
   only `maxRunners` and the free-disk guard limit how many Linux computers the helper starts, so a burst
-  of jobs can use the host's memory. macOS is always limited to Apple's two running computers.
+  of jobs can use the Mac's memory. macOS is always limited to Apple's two running computers. On a Linux
+  host an unset field defaults to the host's: three quarters of its total memory and one computer per
+  CPU. That bounds a burst of jobs; it is a guard against running the host out of memory, not a
+  security limit, and it does not bound CPU time, disk beyond the free-disk guard, or network use.
 - **The helper only deletes what it made.** It records every computer in `<stateDir>/computers.json`:
   by name before `silo fork` (the engine has not made it yet), and by the engine's computer id once
   the fork answers. After the fork every
@@ -760,6 +764,37 @@ computer; this section covers what the runner adds.
   ended, even when it ended while the helper was down, so when GitHub no longer has the runner it
   stops and keeps the computer with the result `unknown` (unless the job's result reaches it first). That computer holds the job's files and
   secrets like any kept failure and is subject to the same limits.
+- **A runner host's GitHub credential is on that host, readable by the account.** On a Linux host the
+  helper's configuration holds the path of a GitHub App private key (a `0600` file) or a personal access
+  token (`github.auth.tokenEnv`, which under the service is read from `~/.config/silo-runner/env`, also
+  `0600`). Any process of the account can read them, and so can root; a backup of the home directory
+  copies them; the token is also in the helper's environment (`/proc/<pid>/environ`, readable by the
+  account and root). The account is the one that runs `silod`, so a libkrun or virtio escape from a
+  job's computer (boundary 1) lands in the account that holds the credential, the engine's credential
+  store and every kept computer. That credential can register runners for the repository (or
+  organization): with it, someone can attach their own machine as a runner and receive the workflows'
+  jobs and their secrets. Prefer a GitHub App with only the runner permission over a token, install it on
+  the one repository, and do not share the account with anything else. Run the helper on a dedicated
+  account, never root (`silo-runner` refuses euid 0, and the unit is a user unit).
+- **The journal and who reads it.** Under systemd the helper's log goes to the user journal. It names
+  computers, runner and job ids, repository, label, recipe versions and GitHub's error messages; never
+  the credential or a JIT configuration (the R1 live check greps the log for the encoded JIT
+  configuration). Root can read the journal, and so can members of `adm` and `systemd-journal`,
+  depending on the distribution (the same exposure as the engine's journal, see the Linux hosts
+  section): they learn which repository the host serves and when jobs ran, but not a credential. They
+  can also read everything else the account can, so they are inside this boundary anyway. A job's own
+  output goes to GitHub, not to the journal.
+- **Root and the host's administrators.** They can read the credential files, the helper's memory and
+  every kept computer's disk, and can start any computer. A Linux runner host is only as trustworthy as
+  the people with root on it; do not run it on a machine whose administrators should not see the
+  repository's secrets.
+- **KVM and the engine's account.** The account needs `/dev/kvm` (the `kvm` group). The helper checks it
+  at start and does not widen any permission. The unit sets `UMask=0077`, so files the helper creates
+  (such as the computer record in `stateDir`) are private to the account.
+- **Pins for both architectures.** The `silo-linux` recipe pins the runner's SHA-256 for `linux-arm64`
+  and `linux-x64` and checks the one for the computer's architecture (`uname -m`) when it builds. The
+  refresh reads both digests from the same release and rewrites the recipe only when both are there. It
+  has the same trust as before: whoever controls the release feed controls both digests.
 ## What Silo does not protect
 
 These follow from the design today, not from bugs:
@@ -821,4 +856,3 @@ Until the eval exists, the "cannot" column is supported by code reading, Silo's 
 the manual checks recorded in [docs/SiloUI-SECRETS.md](SiloUI-SECRETS.md) and
 [docs/SiloUI-NETWORK-PLAN.md](SiloUI-NETWORK-PLAN.md), not by an adversarial test suite. The `/.msb` eval result in boundary 6 is not yet recorded in the
 repository.
-

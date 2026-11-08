@@ -1,7 +1,8 @@
 # Runner recipe for the label silo-linux: a Linux computer with GitHub's runner program and
 # common build tools. The silo-runner helper reads RUNNER_VERSION and RUNNER_SHA256 below,
 # compares the version with the latest actions/runner release, and rewrites both lines when it
-# refreshes the recipe (the pin is for linux-arm64, the architecture of a Linux computer on a Mac).
+# refreshes the recipe. A computer has the architecture of its machine (arm64 on a Mac and on an
+# aarch64 Linux host, x64 on an x86_64 Linux host), so both digests are pinned and the build picks one.
 os: linux
 cpus: 4
 memory: 8
@@ -12,11 +13,17 @@ setup:
   - |
     set -eu
     RUNNER_VERSION=2.338.2
-    RUNNER_SHA256=670adb2f268fe21dcbb58b3db0e0aa9d5b3bddfe2c651481336e561ff86de945
+    RUNNER_SHA256_ARM64=670adb2f268fe21dcbb58b3db0e0aa9d5b3bddfe2c651481336e561ff86de945
+    RUNNER_SHA256_X64=baebf204307bac6193480852732f0aba2ae97b6c5597c244f4d5558390147c40
+    case "$(uname -m)" in
+      aarch64|arm64) arch=arm64; RUNNER_SHA256=$RUNNER_SHA256_ARM64 ;;
+      x86_64|amd64) arch=x64; RUNNER_SHA256=$RUNNER_SHA256_X64 ;;
+      *) echo "no GitHub runner for $(uname -m)" >&2; exit 1 ;;
+    esac
     dir=/opt/actions-runner
     archive=/tmp/actions-runner.tar.gz
     mkdir -p "$dir"
-    curl -fsSL -o "$archive" "https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/actions-runner-linux-arm64-${RUNNER_VERSION}.tar.gz"
+    curl -fsSL -o "$archive" "https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/actions-runner-linux-${arch}-${RUNNER_VERSION}.tar.gz"
     echo "${RUNNER_SHA256}  ${archive}" | sha256sum -c -
     tar -xzf "$archive" -C "$dir"
     rm -f "$archive"

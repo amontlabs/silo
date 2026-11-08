@@ -95,6 +95,11 @@ jobs:
         with:
           runner: ubuntu-24.04
           target: x86_64-unknown-linux-gnu
+      # silo-runner is a Go program of its own and goes in the archive (runner/go.mod pins Go).
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: app/SiloUI/runner/go.mod
+          cache-dependency-path: app/SiloUI/runner/go.sum
       - name: Build and package the Dev engine
         timeout-minutes: 40
         run: python3 scripts/package-engine.py --platform linux-x64 --channel development --out-dir "$RUNNER_TEMP/engine-release" --source-commit "$GITHUB_SHA"
@@ -136,6 +141,12 @@ jobs:
           assert 'program: this silod' in lines, lines
           assert 'linger: yes' in lines, lines
           PY
+      # silo-runner from the archive, against the running engine and the real systemd user manager. It
+      # never contacts GitHub (registering runners needs an admin token, which this workflow does not
+      # hold), so no job runs; the unit, KVM check, budget and journal are what is checked.
+      - name: Run silo-runner as a service next to the engine
+        timeout-minutes: 5
+        run: bash scripts/runner-host-e2e.sh "$ENGINE" "$UNIT"
       - name: Drive a Linux computer through the silo command
         timeout-minutes: 40
         run: bash scripts/linux-host-e2e.sh "$ENGINE"
@@ -314,6 +325,11 @@ jobs:
         with:
           runner: ubuntu-24.04
           target: x86_64-unknown-linux-gnu
+      # silo-runner is a Go program of its own and goes in the archive (runner/go.mod pins Go).
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: app/SiloUI/runner/go.mod
+          cache-dependency-path: app/SiloUI/runner/go.sum
       - name: Build and package the Dev engine
         timeout-minutes: 40
         run: python3 scripts/package-engine.py --platform linux-x64 --channel development --out-dir "$RUNNER_TEMP/engine-release" --source-commit "$GITHUB_SHA"

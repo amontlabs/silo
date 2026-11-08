@@ -1,0 +1,30 @@
+# silo-runner on a Linux host that runs silod. One helper per machine, one label per recipe.
+# Check: silo-runner check -offline -config config.yaml
+# Run as a service: silo-runner service register -config config.yaml
+github:
+  # A private repository (https://github.com/OWNER/REPO) or an organization (https://github.com/ORG).
+  configUrl: https://github.com/OWNER/REPO
+  runnerGroup: default
+  auth:
+    # A GitHub App (preferred) ...
+    app:
+      clientId: Iv23liXXXXXXXXXXXXXX
+      installationId: 12345678
+      privateKeyFile: /home/ci/.config/silo-runner/app.private-key.pem   # mode 0600
+    # ... or a personal access token. Under the service it comes from ~/.config/silo-runner/env
+    # (mode 0600, one line: SILO_RUNNER_TOKEN=...). Remove `app` above to use it.
+    # tokenEnv: SILO_RUNNER_TOKEN
+
+silo:
+  path: silo                            # the archive's silo, on PATH (silo host init links it)
+  projectDir: ~/.silo-runner/project    # holds .silo/recipes (silo-runner install-recipes writes them)
+
+limits:
+  minFreeDiskGiB: 20
+
+# Left out, the budget is this host's: three quarters of its memory and one computer per CPU.
+# Set either to choose your own.
+# linuxBudget: {memoryGiB: 24, count: 4}
+
+scaleSets:
+  - {label: silo-linux, recipe: silo-linux, os: linux, maxRunners: 2, keepFailed: {count: 3, days: 7}}

@@ -31,8 +31,10 @@ type Deps struct {
 	Checker  AccessChecker
 	Releases ReleaseSource
 	Disk     func(path string) (int, error)
-	Logger   *slog.Logger
-	Now      func() time.Time
+	// Host describes the machine; the zero value is not a Linux host and checks nothing.
+	Host   Host
+	Logger *slog.Logger
+	Now    func() time.Time
 }
 
 // tickEvery is how often the fleet plans on its own, retrying whatever failed.
@@ -46,6 +48,9 @@ func NewDeps(cfg *Config, logger *slog.Logger) (*Deps, error) {
 	target, err := ParseTarget(cfg.GitHub.ConfigURL)
 	if err != nil {
 		return nil, err
+	}
+	if env := cfg.GitHub.Auth.TokenEnv; env != "" && os.Getenv(env) == "" {
+		return nil, fmt.Errorf("github.auth.tokenEnv names %s, which is empty in this environment (under systemd, put %s=... in the file ~/.config/silo-runner/env, mode 0600)", env, env)
 	}
 	api, err := newScaleClient(cfg)
 	if err != nil {
@@ -63,6 +68,7 @@ func NewDeps(cfg *Config, logger *slog.Logger) (*Deps, error) {
 			Token:   token,
 		},
 		Releases: GitHubReleases{},
+		Host:     RealHost(),
 		Logger:   logger,
 		Now:      time.Now,
 	}, nil
@@ -103,6 +109,13 @@ func Run(ctx context.Context, cfg *Config, deps *Deps) error {
 	logger := deps.Logger
 	if deps.Now == nil {
 		deps.Now = time.Now
+	}
+	report, err := ApplyHost(cfg, deps.Host)
+	if err != nil {
+		return err
+	}
+	if report.LinuxHost {
+		logger.Info(report.Describe())
 	}
 	if err := CheckAccess(ctx, cfg, deps); err != nil {
 		return err

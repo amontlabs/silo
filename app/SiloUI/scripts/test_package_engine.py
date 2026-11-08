@@ -192,8 +192,13 @@ class LinuxPackageTests(unittest.TestCase):
         self.tauri = self.root / 'src-tauri'
         self.silod = self.root / 'silod-bin'
         self.cli = self.root / 'silo-bin'
+        self.runner = self.root / 'silo-runner-bin'
+        self.licenses = self.root / 'runner-licenses'
+        self.licenses.mkdir()
+        (self.licenses / 'scaleset-MIT.txt').write_text('MIT')
         self.silod.write_bytes(elf(62, 'silod'))
         self.cli.write_bytes(elf(62, 'silo'))
+        self.runner.write_bytes(elf(62, 'silo-runner'))
         self.stage(X64, 62, 'amd64')
 
     def stage(self, target, machine, guest):
@@ -236,7 +241,8 @@ class LinuxPackageTests(unittest.TestCase):
 
     def package(self, platform='linux-x64', channel='production', commit=COMMIT):
         return engine.package_linux(self.out, platform=platform, commit=commit, silod_binary=self.silod,
-                                    cli_binary=self.cli, toolchain='1.94.0', channel=channel, tauri=self.tauri)
+                                    cli_binary=self.cli, runner_binary=self.runner, toolchain='1.94.0',
+                                    channel=channel, tauri=self.tauri, runner_licenses=self.licenses)
 
     def members(self, archive):
         with tarfile.open(archive) as tar:
@@ -254,7 +260,8 @@ class LinuxPackageTests(unittest.TestCase):
         self.assertEqual(files, {
             'release.json': 0o644, 'LICENSE': 0o644, 'THIRD-PARTY-NOTICES.md': 0o644,
             'api/silo-api.schema.json': 0o644,
-            'silod': 0o755, 'silo': 0o755,
+            'silod': 0o755, 'silo': 0o755, 'silo-runner': 0o755,
+            'resources/silo-runner-licenses/scaleset-MIT.txt': 0o644,
             'msb': 0o755, 'git': 0o755, 'git-lfs': 0o755, 'git-remote-http': 0o755, 'git-remote-https': 0o755,
             'resources/engine-manifest.json': 0o644,
             'resources/microsandbox/manifest.json': 0o644,
@@ -275,6 +282,7 @@ class LinuxPackageTests(unittest.TestCase):
             self.assertEqual((member.uid, member.gid, member.mtime, member.uname), (0, 0, 0, ''))
         self.assertEqual(self.read(archive, 'silod'), self.silod.read_bytes())
         self.assertEqual(self.read(archive, 'silo'), self.cli.read_bytes())
+        self.assertEqual(self.read(archive, 'silo-runner'), self.runner.read_bytes())
         self.assertEqual(self.read(archive, 'msb'), (self.tauri / f'binaries/msb-{X64}').read_bytes())
         self.assertEqual(checksum.read_text(), f'{hashlib.sha256(archive.read_bytes()).hexdigest()}  {LINUX_ARCHIVE}\n')
 
@@ -332,6 +340,9 @@ class LinuxPackageTests(unittest.TestCase):
             self.package(platform='linux-arm64')
         self.silod.write_bytes(elf(183, 'silod'))
         self.cli.write_bytes(elf(183, 'silo'))
+        with self.assertRaisesRegex(RuntimeError, 'silo-runner is not a linux-arm64 executable'):
+            self.package(platform='linux-arm64')
+        self.runner.write_bytes(elf(183, 'silo-runner'))
         archive, _ = self.package(platform='linux-arm64')
         self.assertEqual(archive.name, f'silo-engine-{VERSION}-linux-arm64.tar.gz')
         self.assertIn('silo-engine/resources/microsandbox/aarch64-unknown-linux-gnu/lib/libkrunfw.so.5.6.1',
@@ -385,16 +396,54 @@ class LinuxPackageTests(unittest.TestCase):
 
         engine.package_linux = package_linux
         self.addCleanup(setattr, engine, 'package_linux', real)
+        runners = []
+
+        def build_runner(platform, version):
+            runners.append((platform, version))
+            return self.runner
+
+        real_licenses = engine.RUNNER_LICENSES
+        engine.RUNNER_LICENSES = self.licenses
+        self.addCleanup(setattr, engine, 'RUNNER_LICENSES', real_licenses)
         engine.main(['--out-dir', str(self.out), '--platform', 'linux-x64', '--channel', 'development'],
                     build=lambda *_: self.fail('the macOS build is not used'), build_linux=build_linux,
-                    commit_of=lambda: COMMIT)
+                    build_runner=build_runner, commit_of=lambda: COMMIT)
         self.assertEqual(built, [(X64, '1.94.0', 'development')])
         self.assertEqual(calls[0]['channel'], 'development')
+        self.assertEqual(runners, [('linux-x64', VERSION)])
         self.assertTrue((self.out / LINUX_ARCHIVE).is_file())
         with self.assertRaises(SystemExit):
             engine.main(['--channel', 'development'], build=None, build_linux=None)
         with self.assertRaises(SystemExit):
             engine.main(['--platform', 'linux-x86'], build=None, build_linux=None)
+
+    def test_silo_runner_is_built_static_for_the_platform_with_the_engine_version(self):
+        for platform, goarch in (('linux-x64', 'amd64'), ('linux-arm64', 'arm64')):
+            calls = []
+
+            def run(command, **options):
+                calls.append((command, options))
+
+            binary = engine.go_build_runner(platform, '0.9.1', run, self.root)
+            self.assertEqual(binary, self.root / 'silo-runner')
+            command, options = calls[0]
+            self.assertEqual(command[:3], ['go', 'build', '-trimpath'])
+            self.assertIn('-s -w -X main.version=0.9.1', command)
+            self.assertEqual(command[-3:-1], ['-o', str(binary)])
+            self.assertEqual((options['env']['GOOS'], options['env']['GOARCH'], options['env']['CGO_ENABLED']),
+                             ('linux', goarch, '0'))
+            self.assertEqual(options['cwd'], engine.RUNNER)
+            self.assertTrue(options['check'])
+
+    def test_the_checked_in_runner_licenses_cover_every_go_module_it_links(self):
+        names = {path.name for path in engine.RUNNER_LICENSES.iterdir()}
+        modules = (engine.RUNNER / 'go.mod').read_text()
+        for module, license_file in (('actions/scaleset', 'scaleset-MIT.txt'), ('golang-jwt/jwt', 'golang-jwt-MIT.txt'),
+                                     ('google/uuid', 'google-uuid-BSD-3-Clause.txt'), ('yaml.v3', 'yaml.v3-LICENSE.txt')):
+            self.assertIn(module, modules)
+            self.assertIn(license_file, names)
+        self.assertEqual(len(re.findall(r'^\t[a-z]\S+ v', modules.split('require (')[1].split(')')[0], re.M)), 4)
+        self.assertIn('go-LICENSE.txt', names)
 
     def test_the_cli_channel_is_compiled_in_for_production_only(self):
         for channel, expected in (('production', 'org.silo.preview'), ('development', None)):

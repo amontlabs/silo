@@ -16,6 +16,7 @@ ROOT = SCRIPTS.parents[2]
 WORKFLOW = (ROOT / '.github/workflows/linux-host.yml').read_text()
 E2E = SCRIPTS / 'linux-host-e2e.sh'
 HOSTS_E2E = SCRIPTS / 'hosts-e2e.sh'
+RUNNER_E2E = SCRIPTS / 'runner-host-e2e.sh'
 
 # A `silo` that keeps its computers in a JSON file and records every call.
 FAKE_SILO = textwrap.dedent('''\
@@ -192,6 +193,25 @@ class LinuxHostWorkflowTests(unittest.TestCase):
         for needle in ('systemctl --user stop "$UNIT"', 'test "$result" = success', 'test "$status" = 0',
                        'engine.sock', '--service unregister', '= notRegistered'):
             self.assertIn(needle, stop)
+
+    def test_silo_runner_runs_as_a_service_next_to_the_engine_without_contacting_github(self):
+        steps = WORKFLOW.split('    steps:\n', 1)[1]
+        step = steps.split('- name: Run silo-runner as a service next to the engine\n', 1)[1].split('      - ', 1)[0]
+        self.assertIn('bash scripts/runner-host-e2e.sh "$ENGINE" "$UNIT"', step)
+        self.assertLess(steps.index('--service register'), steps.index('- name: Run silo-runner as a service'))
+        self.assertLess(steps.index('- name: Run silo-runner as a service'), steps.index('- name: Drive a Linux computer'))
+        script = RUNNER_E2E.read_text()
+        for needle in ('check -offline', 'service register', '-engine-unit', 'service unregister', 'journalctl --user -u',
+                       'Machine:'):
+            self.assertIn(needle, script)
+        # No token is given to the helper: CI holds no GitHub admin credential.
+        self.assertNotIn('SILO_RUNNER_TOKEN=', script)
+        self.assertNotIn('api.github.com', script)
+        checked = subprocess.run(['bash', '-n', str(RUNNER_E2E)], capture_output=True, text=True)
+        self.assertEqual(checked.returncode, 0, checked.stderr)
+        usage = subprocess.run(['bash', str(RUNNER_E2E)], capture_output=True, text=True)
+        self.assertEqual(usage.returncode, 2)
+        self.assertIn('usage:', usage.stderr)
 
     def test_two_accounts_manage_a_computer_on_each_other_after_the_first_run(self):
         steps = WORKFLOW.split('    steps:\n', 1)[1]

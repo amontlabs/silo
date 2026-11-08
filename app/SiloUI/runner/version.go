@@ -19,36 +19,84 @@ import (
 
 var (
 	versionLine = regexp.MustCompile(`(?m)^(\s*RUNNER_VERSION=)(\d+\.\d+\.\d+)$`)
-	shaLine     = regexp.MustCompile(`(?m)^(\s*RUNNER_SHA256=)([0-9a-f]{64})$`)
-	archiveName = regexp.MustCompile(`actions-runner-(linux|osx)-(arm64|x64)-\$\{RUNNER_VERSION\}\.tar\.gz`)
+	// shaLine matches RUNNER_SHA256= (for the one architecture the download names) and
+	// RUNNER_SHA256_ARM64= or RUNNER_SHA256_X64= (for a download that picks its architecture).
+	shaLine     = regexp.MustCompile(`(?m)^(\s*RUNNER_SHA256(?:_(ARM64|X64))?=)([0-9a-f]{64})$`)
+	archiveName = regexp.MustCompile(`actions-runner-(linux|osx)-(arm64|x64|\$\{arch\})-\$\{RUNNER_VERSION\}\.tar\.gz`)
 )
+
+// chosenArch is the download's architecture when the recipe picks it at build time.
+const chosenArch = "${arch}"
 
 // Pin is the runner release a recipe installs.
 type Pin struct {
 	Version string
-	SHA256  string
-	// OS and Arch name the release asset: linux or osx, arm64 or x64.
-	OS, Arch string
+	// OS names the release assets: linux or osx.
+	OS string
+	// SHA256 maps an architecture (arm64 or x64) to the digest of that architecture's asset. A
+	// recipe for one architecture has one entry; the Linux recipe, which runs on a Mac (arm64)
+	// and on Linux hosts of either architecture, has both.
+	SHA256 map[string]string
 }
 
-// AssetName is the release asset for a version.
-func (p Pin) AssetName(version string) string {
-	return fmt.Sprintf("actions-runner-%s-%s-%s.tar.gz", p.OS, p.Arch, version)
+// AssetName is the release asset of an architecture for a version.
+func (p Pin) AssetName(arch, version string) string {
+	return fmt.Sprintf("actions-runner-%s-%s-%s.tar.gz", p.OS, arch, version)
 }
 
 // ParsePin reads the runner pin out of a recipe's text.
 func ParsePin(text string) (Pin, error) {
-	v, s, a := versionLine.FindStringSubmatch(text), shaLine.FindStringSubmatch(text), archiveName.FindStringSubmatch(text)
-	if v == nil || s == nil || a == nil {
+	v, a := versionLine.FindStringSubmatch(text), archiveName.FindStringSubmatch(text)
+	hashes := shaLine.FindAllStringSubmatch(text, -1)
+	if v == nil || a == nil || len(hashes) == 0 {
 		return Pin{}, errors.New("the recipe does not pin a runner (RUNNER_VERSION=, RUNNER_SHA256= and an actions-runner-<os>-<arch>-${RUNNER_VERSION}.tar.gz download)")
 	}
-	return Pin{Version: v[2], SHA256: s[2], OS: a[1], Arch: a[2]}, nil
+	pin := Pin{Version: v[2], OS: a[1], SHA256: map[string]string{}}
+	for _, hash := range hashes {
+		arch := shaArch(hash[2], a[2])
+		if arch == "" || pin.SHA256[arch] != "" {
+			return Pin{}, errors.New("the recipe's RUNNER_SHA256 lines do not match its download: use RUNNER_SHA256= for a download that names its architecture, and RUNNER_SHA256_ARM64= and RUNNER_SHA256_X64= (once each) for one that uses ${arch}")
+		}
+		pin.SHA256[arch] = hash[3]
+	}
+	if a[2] == chosenArch {
+		if len(pin.SHA256) != 2 {
+			return Pin{}, errors.New("a recipe that picks ${arch} needs both RUNNER_SHA256_ARM64= and RUNNER_SHA256_X64=")
+		}
+	} else if len(pin.SHA256) != 1 {
+		return Pin{}, errors.New("a recipe that downloads one architecture has exactly one RUNNER_SHA256= line")
+	}
+	return pin, nil
 }
 
-// WithPin returns the recipe text with the pin replaced.
-func WithPin(text, version, sha string) string {
+// shaArch is the architecture of a RUNNER_SHA256 line: its suffix, or for a bare line the one the
+// download names. It is empty when the line cannot belong to the download.
+func shaArch(suffix, download string) string {
+	switch {
+	case suffix == "ARM64" && download == chosenArch:
+		return "arm64"
+	case suffix == "X64" && download == chosenArch:
+		return "x64"
+	case suffix == "" && download != chosenArch:
+		return download
+	}
+	return ""
+}
+
+// WithPin returns the recipe text with the version and the digests (by architecture) replaced.
+func WithPin(text, version string, sha map[string]string) string {
+	a := archiveName.FindStringSubmatch(text)
 	text = versionLine.ReplaceAllString(text, "${1}"+version)
-	return shaLine.ReplaceAllString(text, "${1}"+sha)
+	return shaLine.ReplaceAllStringFunc(text, func(line string) string {
+		m := shaLine.FindStringSubmatch(line)
+		if a == nil {
+			return line
+		}
+		if digest, ok := sha[shaArch(m[2], a[2])]; ok {
+			return m[1] + digest
+		}
+		return line
+	})
 }
 
 // compareVersions compares dotted numeric versions.
@@ -198,9 +246,15 @@ func (r *Refresher) checkRecipe(ctx context.Context, recipe string, release Rele
 			"recipe", recipe, "have", pin.Version, "latest", release.Version, "ageDays", int(age.Hours()/24), "afterDays", r.AfterDays)
 		return nil
 	}
-	sha, ok := release.Digests[pin.AssetName(release.Version)]
-	if !ok || len(sha) != 64 {
-		return fmt.Errorf("the release %s has no digest for %s", release.Version, pin.AssetName(release.Version))
+	// Every architecture the recipe can run on is pinned to the digest of its own asset; one
+	// missing digest leaves the recipe as it is.
+	sha := map[string]string{}
+	for arch := range pin.SHA256 {
+		digest, ok := release.Digests[pin.AssetName(arch, release.Version)]
+		if !ok || len(digest) != 64 {
+			return fmt.Errorf("the release %s has no digest for %s", release.Version, pin.AssetName(arch, release.Version))
+		}
+		sha[arch] = digest
 	}
 	r.Logger.Info("refreshing the runner in a recipe", "recipe", recipe, "from", pin.Version, "to", release.Version,
 		"deadline", deadline.Format(time.DateOnly))
@@ -210,7 +264,7 @@ func (r *Refresher) checkRecipe(ctx context.Context, recipe string, release Rele
 	return nil
 }
 
-func (r *Refresher) refresh(ctx context.Context, recipe, oldText, version, sha string) error {
+func (r *Refresher) refresh(ctx context.Context, recipe, oldText, version string, sha map[string]string) error {
 	gate := r.Gates[recipe]
 	if gate == nil {
 		gate = &sync.RWMutex{}

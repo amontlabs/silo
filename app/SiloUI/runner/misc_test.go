@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -397,7 +398,14 @@ func TestNoDigestMeansNoRefresh(t *testing.T) {
 }
 
 func TestShippedRecipesCarryAParseablePin(t *testing.T) {
-	for _, name := range []string{"silo-linux", "silo-macos"} {
+	want := map[string]map[string]string{
+		"silo-linux": {
+			"arm64": "670adb2f268fe21dcbb58b3db0e0aa9d5b3bddfe2c651481336e561ff86de945",
+			"x64":   "baebf204307bac6193480852732f0aba2ae97b6c5597c244f4d5558390147c40",
+		},
+		"silo-macos": {"arm64": "25a065af409ffa317ab4d5a3b614dd15fc9c40f2172bc1b35a1b1258e919a388"},
+	}
+	for name, digests := range want {
 		data, err := shippedRecipes.ReadFile("recipes/" + name + ".yaml")
 		if err != nil {
 			t.Fatal(err)
@@ -406,12 +414,84 @@ func TestShippedRecipesCarryAParseablePin(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
-		if pin.Version != "2.338.2" || len(pin.SHA256) != 64 {
+		if pin.Version != "2.338.2" || !maps.Equal(pin.SHA256, digests) {
 			t.Fatalf("%s: %+v", name, pin)
 		}
 	}
 	if compareVersions("2.338.2", "2.339.0") >= 0 || compareVersions("2.10.0", "2.9.9") <= 0 || compareVersions("1.0", "1.0.0") != 0 {
 		t.Fatal("compareVersions")
+	}
+}
+
+func TestTheLinuxRecipePicksItsArchitectureAndChecksThatDigest(t *testing.T) {
+	data, err := shippedRecipes.ReadFile("recipes/silo-linux.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	recipe := string(data)
+	for _, want := range []string{
+		`aarch64|arm64) arch=arm64; RUNNER_SHA256=$RUNNER_SHA256_ARM64`,
+		`x86_64|amd64) arch=x64; RUNNER_SHA256=$RUNNER_SHA256_X64`,
+		`actions-runner-linux-${arch}-${RUNNER_VERSION}.tar.gz`,
+		`sha256sum -c -`,
+	} {
+		if !strings.Contains(recipe, want) {
+			t.Fatalf("the recipe lacks %q", want)
+		}
+	}
+	if strings.Contains(recipe, "linux-arm64-${RUNNER_VERSION}") {
+		t.Fatal("the recipe still downloads one fixed architecture")
+	}
+}
+
+func TestARefreshPinsEveryArchitectureToItsOwnAsset(t *testing.T) {
+	arm, x64 := strings.Repeat("c", 64), strings.Repeat("d", 64)
+	text := "setup:\n  - |\n    RUNNER_VERSION=2.338.2\n    RUNNER_SHA256_ARM64=" + strings.Repeat("a", 64) + "\n    RUNNER_SHA256_X64=" + strings.Repeat("b", 64) +
+		"\n    RUNNER_SHA256=$RUNNER_SHA256_ARM64\n    curl https://x/actions-runner-linux-${arch}-${RUNNER_VERSION}.tar.gz\n"
+	release := Release{Version: "2.339.0", Published: time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC), Digests: map[string]string{
+		"actions-runner-linux-arm64-2.339.0.tar.gz": arm, "actions-runner-linux-x64-2.339.0.tar.gz": x64,
+		"actions-runner-linux-arm-2.339.0.tar.gz": strings.Repeat("e", 64),
+	}}
+	r, silo, path := refresher(t, text, release, time.Date(2026, 11, 8, 0, 0, 0, 0, time.UTC))
+	if err := r.CheckOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := os.ReadFile(path)
+	pin, err := ParsePin(string(got))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pin.Version != "2.339.0" || pin.SHA256["arm64"] != arm || pin.SHA256["x64"] != x64 || !strings.Contains(string(got), "RUNNER_SHA256=$RUNNER_SHA256_ARM64") {
+		t.Fatalf("recipe = %s", got)
+	}
+	if len(silo.built) != 1 {
+		t.Fatalf("built = %v", silo.built)
+	}
+	// One architecture without a published digest leaves the recipe alone.
+	delete(release.Digests, "actions-runner-linux-x64-2.339.0.tar.gz")
+	r, silo, path = refresher(t, text, release, time.Date(2026, 11, 8, 0, 0, 0, 0, time.UTC))
+	if err := r.CheckOnce(context.Background()); err == nil || !strings.Contains(err.Error(), "linux-x64-2.339.0") || len(silo.built) != 0 {
+		t.Fatalf("err %v built %v", err, silo.built)
+	}
+	if again, _ := os.ReadFile(path); string(again) != text {
+		t.Fatal("the recipe changed although one digest was missing")
+	}
+}
+
+func TestARecipeWhoseDigestsDoNotMatchItsDownloadIsRefused(t *testing.T) {
+	sha := strings.Repeat("a", 64)
+	for name, text := range map[string]string{
+		"suffix with a fixed download": "RUNNER_VERSION=1.2.3\nRUNNER_SHA256_X64=" + sha + "\ncurl actions-runner-linux-arm64-${RUNNER_VERSION}.tar.gz",
+		"one digest for ${arch}":       "RUNNER_VERSION=1.2.3\nRUNNER_SHA256_X64=" + sha + "\ncurl actions-runner-linux-${arch}-${RUNNER_VERSION}.tar.gz",
+		"bare digest for ${arch}":      "RUNNER_VERSION=1.2.3\nRUNNER_SHA256=" + sha + "\ncurl actions-runner-linux-${arch}-${RUNNER_VERSION}.tar.gz",
+		"two bare digests":             "RUNNER_VERSION=1.2.3\nRUNNER_SHA256=" + sha + "\nRUNNER_SHA256=" + sha + "\ncurl actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz",
+	} {
+		if _, err := ParsePin(text); err == nil {
+			t.Fatalf("%s: accepted", name)
+		}
+	}
+	if pin, err := ParsePin("RUNNER_VERSION=1.2.3\nRUNNER_SHA256=" + sha + "\ncurl actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz"); err != nil || pin.SHA256["x64"] != sha {
+		t.Fatalf("pin %+v err %v", pin, err)
 	}
 }
 

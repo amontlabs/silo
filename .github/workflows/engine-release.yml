@@ -166,6 +166,11 @@ jobs:
         with:
           runner: ${{ matrix.runner }}
           target: ${{ matrix.target }}
+      # silo-runner is a Go program of its own and goes in the archive (runner/go.mod pins Go).
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: app/SiloUI/runner/go.mod
+          cache-dependency-path: app/SiloUI/runner/go.sum
       - name: Build and package the Linux engine
         id: package
         working-directory: app/SiloUI
@@ -195,11 +200,14 @@ jobs:
           mkdir extracted
           tar -xzf "$ARCHIVE" -C extracted
           engine=extracted/silo-engine
-          for executable in silod silo msb git; do
+          for executable in silod silo silo-runner msb git; do
             readelf -h "$engine/$executable" | grep -q "Machine:.*$MACHINE" || { echo "::error::$executable is not $MACHINE"; exit 1; }
           done
           # The silo command is the production channel's, like the manifest.
           test "$("$engine/silo" --print-channel-identifier)" = org.silo.preview
+          # silo-runner is built for the runner's architecture, so it can run here; it reports the engine version.
+          test "$("$engine/silo-runner" version)" = "$version"
+          test -s "$engine/resources/silo-runner-licenses/scaleset-MIT.txt"
           python3 - "$engine" "$version" "$GITHUB_SHA" "$TARGET" <<'PY'
           import json, sys
           engine, version, commit, target = sys.argv[1:]

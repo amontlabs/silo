@@ -744,6 +744,7 @@ unit):
 release.json                  as above, targets x86_64- or aarch64-unknown-linux-gnu
 silod                         not signed
 silo                          the production silo command
+silo-runner                   the CI runner helper (Go, static), version = the engine's
 msb, git, git-lfs,            bundled tools, beside silod where the engine looks
 git-remote-http, git-remote-https
 resources/engine-manifest.json                      production, engineBuild = silo-<source commit>
@@ -754,10 +755,19 @@ resources/git-support/        Git manifest, licenses, share/git-core/templates,
                               ssl/ (cacert.pem, the certificate bundle Linux Git
                               verifies HTTPS with), lfs-transfer/ (the guest's
                               git-lfs-transfer)
+resources/silo-runner-licenses/   licenses of the Go modules silo-runner links
 api/silo-api.schema.json
 THIRD-PARTY-NOTICES.md
 LICENSE
 ```
+
+`silo-runner` is built by `package-engine.py` itself (`go build` with `CGO_ENABLED=0`, `GOOS=linux`
+and `GOARCH` of the platform, with the Go version in `app/SiloUI/runner/go.mod`), so every job that
+packages a Linux archive installs Go first (`actions/setup-go`), and building one locally needs Go
+1.27.3 (a newer Go downloads it when `GOTOOLCHAIN` allows). The release verification runs
+`silo-runner version` and expects the engine version. The macOS engine archive does not carry it
+(a Mac builds the helper with `go build`). Setup:
+[CI runner, Linux hosts](SiloUI-CI-RUNNER.md#linux-hosts).
 
 The runtime files are the ones `npm run runtime:prepare` stages for that
 architecture; the script checks them against the MicroSandbox, Git and LFS
