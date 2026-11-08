@@ -1,0 +1,1 @@
+silo-init: landlock abi=8 fs=0x7fff net=0x3 enforced

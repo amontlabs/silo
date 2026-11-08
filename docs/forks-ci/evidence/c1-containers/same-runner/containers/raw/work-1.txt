@@ -1,0 +1,15 @@
+UP 1794099755.983828519
+READY 1794099756.052975666
+PHASE git_clone_express 1.29 0
+PHASE apt_update 4.21 0
+PHASE apt_download 64.76 0
+PHASE apt_unpack_configure 18.19 0
+PHASE npm_install 12.71 0
+PHASE rustup_install 8.03 0
+PHASE cargo_install_hexyl 15.03 0
+PHASE git_clone_zlib 0.67 0
+PHASE make_zlib 2.53 0
+WORKLOAD_DONE
+WORKLOAD_TOTAL 127.43
+WORKLOAD_END
+MODE_EXIT 0 1794099883.493986133

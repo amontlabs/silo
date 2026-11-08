@@ -1,0 +1,217 @@
+name: Containers C1
+
+# Phase C1 of docs/forks-ci/PLAN.md: measurements only, nothing is built into Silo. Runs crun containers under a
+# hardening baseline on the GitHub runner (docs/forks-ci/containers/) and, with the `containers-microvm` label or on a
+# manual run, the same workload in a Silo microVM on the same kind of runner. Triggered only by changes under
+# docs/forks-ci/containers/** and by hand; ordinary pull requests and pushes never start it. No secrets; the
+# runner is a cloud VM, so KVM here is nested and the containers run directly on the runner's kernel.
+on:
+  workflow_dispatch:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+    paths:
+      - 'docs/forks-ci/containers/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: containers-c1-${{ github.event_name == 'pull_request' && format('{0}-{1}', github.ref, github.event.action == 'labeled' && 'label' || 'push') || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  containers:
+    name: crun containers on the runner
+    # Labelling a pull request starts the microVM job only.
+    if: github.event_name != 'pull_request' || github.event.action != 'labeled'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Evidence directory
+        run: echo "C1_OUT=$RUNNER_TEMP/c1-evidence" >> "$GITHUB_ENV"
+      - name: Prepare the host, the image and the proxy
+        timeout-minutes: 30
+        shell: bash
+        # Not piped through tee: a daemon started by the script (the proxy) would keep the pipe, and the step, open.
+        run: |
+          rc=0
+          bash docs/forks-ci/containers/setup.sh > "$RUNNER_TEMP/setup.log" 2>&1 || rc=$?
+          cat "$RUNNER_TEMP/setup.log"
+          exit "$rc"
+      - name: Measure
+        timeout-minutes: 110
+        shell: bash
+        run: |
+          rc=0
+          bash docs/forks-ci/containers/run.sh > "$RUNNER_TEMP/run.log" 2>&1 || rc=$?
+          cat "$RUNNER_TEMP/run.log"
+          exit "$rc"
+      - name: Collect logs
+        if: always()
+        run: |
+          mkdir -p "$C1_OUT/raw" "$C1_OUT/logs"
+          cp "$RUNNER_TEMP"/setup.log "$RUNNER_TEMP"/run.log "$C1_OUT/" 2>/dev/null || true
+          sudo dmesg 2>/dev/null | tail -n 300 > "$C1_OUT/logs/dmesg.txt" || true
+          cp /mnt/c1/squid-access.log /mnt/c1/tinyproxy.log "$C1_OUT/logs/" 2>/dev/null || true
+          for d in /mnt/c1/ctr/*/; do
+            [ -d "$d" ] || continue
+            n=$(basename "$d")
+            mkdir -p "$C1_OUT/logs/left-$n"
+            cp "$d/out" "$d/err" "$d/net.log" "$d/exit" "$d/bundle/config.json" "$C1_OUT/logs/left-$n/" 2>/dev/null || true
+          done
+          # Stay below the artifact size limit even if a container filled its log.
+          gzip -f "$C1_OUT/run.log" 2>/dev/null || true
+          find "$C1_OUT" -type f -size +5M -delete
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: containers-c1-evidence
+          path: ${{ runner.temp }}/c1-evidence/
+          if-no-files-found: warn
+          retention-days: 30
+
+  microvm:
+    name: Silo microVM on the runner
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'containers-microvm')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    defaults:
+      run:
+        working-directory: app/SiloUI
+    env:
+      # Synthetic build values from the release guide, as in ci.yml and linux-host.yml.
+      SILO_GITHUB_APP_SLUG: silo-ci-test
+      SILO_GITHUB_CLIENT_ID: test-client
+      SILO_GITHUB_CLIENT_SECRET: test-secret
+      CARGO_INCREMENTAL: '0'
+      UNIT: org.silo.dev.engine.service
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Probe KVM
+        run: |
+          ls -l /dev/kvm
+          python3 - <<'PY'
+          import fcntl, os
+          with open('/dev/kvm', 'rb+', buffering=0) as device:
+              assert fcntl.ioctl(device, 0xAE00, 0) == 12, 'unsupported KVM API version'
+              os.close(fcntl.ioctl(device, 0xAE01, 0))
+          print('KVM API 12; a VM handle was created')
+          PY
+      - name: Install Linux build dependencies
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends build-essential pkg-config libclang-dev libcap-ng-dev libdbus-1-dev cmake
+      - name: Install pinned Rust toolchain
+        run: |
+          runtime_toolchain=$(node -p "require(process.env.GITHUB_WORKSPACE + '/app/SiloUI/runtime-inputs.json').toolchain")
+          rustup toolchain install "$runtime_toolchain" --profile minimal
+          rustup default "$runtime_toolchain"
+      - name: Prepare the runtime
+        timeout-minutes: 45
+        uses: ./.github/actions/prepare-release-runtime
+        with:
+          runner: ubuntu-24.04
+          target: x86_64-unknown-linux-gnu
+      - name: Build and package the Dev engine
+        timeout-minutes: 40
+        run: python3 scripts/package-engine.py --platform linux-x64 --channel development --out-dir "$RUNNER_TEMP/engine-release" --source-commit "$GITHUB_SHA"
+      - name: Install the engine from its archive
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/engine-release"
+          sha256sum -c ./*.tar.gz.sha256
+          mkdir -p "$RUNNER_TEMP/prefix"
+          tar -xzf ./*.tar.gz -C "$RUNNER_TEMP/prefix"
+          engine="$RUNNER_TEMP/prefix/silo-engine"
+          chmod -R go-w "$RUNNER_TEMP/prefix"
+          test "$("$engine/silo" --print-channel-identifier)" = org.silo.dev
+          echo "ENGINE=$engine" >> "$GITHUB_ENV"
+      - name: Start the engine as a systemd user service
+        run: |
+          set -euo pipefail
+          sudo loginctl enable-linger "$(id -un)"
+          runtime_dir="/run/user/$(id -u)"
+          echo "XDG_RUNTIME_DIR=$runtime_dir" >> "$GITHUB_ENV"
+          echo "DBUS_SESSION_BUS_ADDRESS=unix:path=$runtime_dir/bus" >> "$GITHUB_ENV"
+          export XDG_RUNTIME_DIR="$runtime_dir"
+          export DBUS_SESSION_BUS_ADDRESS="unix:path=$runtime_dir/bus"
+          for _ in $(seq 30); do
+            systemctl --user show-environment >/dev/null 2>&1 && break
+            sleep 1
+          done
+          systemctl --user show-environment >/dev/null
+          "$ENGINE/silod" --service register
+      - name: Measure the microVM
+        timeout-minutes: 120
+        working-directory: ${{ github.workspace }}
+        env:
+          SILO: ${{ env.ENGINE }}/silo
+          OUT: ${{ runner.temp }}/microvm-evidence
+        shell: bash
+        run: bash docs/forks-ci/containers/microvm.sh 2>&1 | tee "$RUNNER_TEMP/microvm.log"
+      - name: Stop the engine
+        if: always() && env.ENGINE != ''
+        run: systemctl --user stop "$UNIT" || true
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: microvm-c1-evidence
+          path: |
+            ${{ runner.temp }}/microvm-evidence/
+            ${{ runner.temp }}/microvm.log
+          if-no-files-found: warn
+          retention-days: 30
+      # The containers again, on this same runner (same CPU model, same day), so the two kinds compare directly.
+      - name: Prepare the containers on this runner
+        timeout-minutes: 30
+        working-directory: ${{ github.workspace }}
+        env:
+          C1_OUT: ${{ runner.temp }}/c1-evidence-same-runner
+        shell: bash
+        run: |
+          rc=0
+          bash docs/forks-ci/containers/setup.sh > "$RUNNER_TEMP/setup2.log" 2>&1 || rc=$?
+          cat "$RUNNER_TEMP/setup2.log"
+          exit "$rc"
+      - name: Measure the containers on this runner
+        timeout-minutes: 60
+        working-directory: ${{ github.workspace }}
+        env:
+          C1_OUT: ${{ runner.temp }}/c1-evidence-same-runner
+        shell: bash
+        run: |
+          rc=0
+          bash docs/forks-ci/containers/run.sh > "$RUNNER_TEMP/run2.log" 2>&1 || rc=$?
+          cat "$RUNNER_TEMP/run2.log"
+          exit "$rc"
+      - name: Collect the container logs
+        if: always()
+        working-directory: ${{ github.workspace }}
+        run: |
+          out="$RUNNER_TEMP/c1-evidence-same-runner"
+          mkdir -p "$out/logs"
+          cp "$RUNNER_TEMP"/setup2.log "$RUNNER_TEMP"/run2.log "$out/" 2>/dev/null || true
+          cp /mnt/c1/squid-access.log /mnt/c1/tinyproxy.log "$out/logs/" 2>/dev/null || true
+          gzip -f "$out/run2.log" 2>/dev/null || true
+          find "$out" -type f -size +5M -delete
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: containers-c1-evidence-same-runner
+          path: ${{ runner.temp }}/c1-evidence-same-runner/
+          if-no-files-found: warn
+          retention-days: 30

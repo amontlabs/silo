@@ -1,0 +1,13 @@
+date: 2026-11-08T00:56:32Z
+runner: Ubuntu 24.04.5 LTS, kernel 7.0.0-1017-azure, x86_64
+cpu: AMD EPYC 9V74 80-Core Processor, 4 cores; memory 15983 MiB total, 14914 MiB available
+virtualization: microsoft; /dev/kvm: /dev/kvm
+crun: crun version 1.14.1 commit: de537a7965bfbe9992e2cfae0baeb56a08128171 rundir: /run/user/1001/crun spec: 1.0.0 +SYSTEMD +SELINUX +APPARMOR +CAP +SECCOMP +EBPF +WASM:wasmedge +YAJL 
+podman (image fetch only): podman version 4.9.3
+proxies: Squid Cache: Version 6.14 (the workloads'); tinyproxy 1.11.1 (the comparison); nft: nftables v1.0.9 (Old Doc Yak #3)
+landlock: landlock abi 8; LSMs: lockdown,capability,landlock,yama,apparmor,ima,evm
+cgroup: cgroup2fs (cgroup2fs = v2); controllers: cpuset cpu io memory hugetlb pids rdma misc dmem
+overlay/upper filesystem: ext4; overlay in kernel: 1 
+sysctl apparmor_restrict_unprivileged_userns: 0
+image: ghcr.io/amontlabs/silo-guest:ubuntu-24.04-v5-amd64 sha256:cff964f375ea328f4f40211e312fe3d3cf80d041449e47ebe047600ddb955d2c x86_64
+scripts commit: 2b6afeb827012428a78ba65ea6756e0c454831de

@@ -1,0 +1,48 @@
+method: sum of Pss, /proc/PID/smaps_rollup
+pid 39782: 1019.6 MiB  /home/runner/work/_temp/prefix/silo-engine/msb machine --name e2e-forks-w4x1-1 --sandbox-id 15 --startup-fd 98
+pid 40593: 5.6 MiB  /home/runner/work/_temp/prefix/silo-engine/msb wait e2e-forks-w4x1-1 --timeout 600s
+TOTAL 1025.2
+method: sum of Pss, /proc/PID/smaps_rollup
+pid 40143: 1023.9 MiB  /home/runner/work/_temp/prefix/silo-engine/msb machine --name e2e-forks-w4x1-2 --sandbox-id 16 --startup-fd 98
+pid 41185: 5.7 MiB  /home/runner/work/_temp/prefix/silo-engine/msb wait e2e-forks-w4x1-2 --timeout 600s
+TOTAL 1029.6
+method: sum of Pss, /proc/PID/smaps_rollup
+pid 40794: 1030.3 MiB  /home/runner/work/_temp/prefix/silo-engine/msb machine --name e2e-forks-w4x1-3 --sandbox-id 17 --startup-fd 98
+pid 41911: 5.6 MiB  /home/runner/work/_temp/prefix/silo-engine/msb wait e2e-forks-w4x1-3 --timeout 600s
+TOTAL 1035.9
+method: sum of Pss, /proc/PID/smaps_rollup
+pid 41455: 1026.0 MiB  /home/runner/work/_temp/prefix/silo-engine/msb machine --name e2e-forks-w4x1-4 --sandbox-id 18 --startup-fd 98
+pid 42831: 5.4 MiB  /home/runner/work/_temp/prefix/silo-engine/msb wait e2e-forks-w4x1-4 --timeout 600s
+TOTAL 1031.4
+method: sum of Pss, /proc/PID/smaps_rollup
+pid 47329: 1021.6 MiB  /home/runner/work/_temp/prefix/silo-engine/msb machine --name e2e-forks-w4x2-1 --sandbox-id 19 --startup-fd 98
+pid 48263: 5.7 MiB  /home/runner/work/_temp/prefix/silo-engine/msb wait e2e-forks-w4x2-1 --timeout 600s
+TOTAL 1027.3
+method: sum of Pss, /proc/PID/smaps_rollup
+pid 47756: 1026.3 MiB  /home/runner/work/_temp/prefix/silo-engine/msb machine --name e2e-forks-w4x2-2 --sandbox-id 20 --startup-fd 98
+pid 48944: 5.6 MiB  /home/runner/work/_temp/prefix/silo-engine/msb wait e2e-forks-w4x2-2 --timeout 600s
+TOTAL 1032.0
+method: sum of Pss, /proc/PID/smaps_rollup
+pid 49109: 1031.8 MiB  /home/runner/work/_temp/prefix/silo-engine/msb machine --name e2e-forks-w4x2-3 --sandbox-id 22 --startup-fd 98
+pid 50448: 5.2 MiB  /home/runner/work/_temp/prefix/silo-engine/msb wait e2e-forks-w4x2-3 --timeout 600s
+TOTAL 1037.1
+method: sum of Pss, /proc/PID/smaps_rollup
+pid 48381: 1029.9 MiB  /home/runner/work/_temp/prefix/silo-engine/msb machine --name e2e-forks-w4x2-4 --sandbox-id 21 --startup-fd 98
+pid 49649: 5.7 MiB  /home/runner/work/_temp/prefix/silo-engine/msb wait e2e-forks-w4x2-4 --timeout 600s
+TOTAL 1035.7
+method: sum of Pss, /proc/PID/smaps_rollup
+pid 55014: 1022.1 MiB  /home/runner/work/_temp/prefix/silo-engine/msb machine --name e2e-forks-w4x3-1 --sandbox-id 23 --startup-fd 98
+pid 55763: 5.5 MiB  /home/runner/work/_temp/prefix/silo-engine/msb wait e2e-forks-w4x3-1 --timeout 600s
+TOTAL 1027.6
+method: sum of Pss, /proc/PID/smaps_rollup
+pid 56632: 1037.4 MiB  /home/runner/work/_temp/prefix/silo-engine/msb machine --name e2e-forks-w4x3-2 --sandbox-id 26 --startup-fd 98
+pid 58079: 5.1 MiB  /home/runner/work/_temp/prefix/silo-engine/msb wait e2e-forks-w4x3-2 --timeout 600s
+TOTAL 1042.5
+method: sum of Pss, /proc/PID/smaps_rollup
+pid 55936: 1012.5 MiB  /home/runner/work/_temp/prefix/silo-engine/msb machine --name e2e-forks-w4x3-3 --sandbox-id 25 --startup-fd 98
+pid 57171: 5.5 MiB  /home/runner/work/_temp/prefix/silo-engine/msb wait e2e-forks-w4x3-3 --timeout 600s
+TOTAL 1018.0
+method: sum of Pss, /proc/PID/smaps_rollup
+pid 55318: 1029.9 MiB  /home/runner/work/_temp/prefix/silo-engine/msb machine --name e2e-forks-w4x3-4 --sandbox-id 24 --startup-fd 98
+pid 56362: 5.5 MiB  /home/runner/work/_temp/prefix/silo-engine/msb wait e2e-forks-w4x3-4 --timeout 600s
+TOTAL 1035.4

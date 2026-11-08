@@ -1,0 +1,18 @@
+Building the recipe demo...
+Building the recipe demo: 5s
+Building the recipe demo: 10s
+Building the recipe demo: 15s
+Building the recipe demo: 20s
+Building the recipe demo: 25s
+Building the recipe demo: 30s
+Building the recipe demo: 35s
+Building the recipe demo: 41s
+Building the recipe demo: 46s
+Building the recipe demo: 51s
+Building the recipe demo: 56s
+Building the recipe demo: 61s
+Building the recipe demo: 66s
+Making main from demo...
+Starting main...
+Starting main: 5s
+main is running (made from demo). ssh main.silo-dev reaches it.

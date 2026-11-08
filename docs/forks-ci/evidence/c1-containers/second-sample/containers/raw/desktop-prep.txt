@@ -1,0 +1,6 @@
+UP 1794098015.563560814
+READY 1794098015.617089252
+PREP download rc=0 0.8s
+PREP apt-update rc=0
+PREP apt-install rc=0 12.3s Processing triggers for libc-bin (2.39-0ubuntu8.9) ... Processing triggers for fontconfig (2.15.0-1.1ubuntu2) ... Processing triggers for desktop-file-utils (0.27-2build1) ... 
+MODE_EXIT 0 1794098028.818435641

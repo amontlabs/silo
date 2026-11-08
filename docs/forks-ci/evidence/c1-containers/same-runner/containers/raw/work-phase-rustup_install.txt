@@ -1,0 +1,3 @@
+rustup_install 8.03
+rustup_install 8.65
+rustup_install 8.02

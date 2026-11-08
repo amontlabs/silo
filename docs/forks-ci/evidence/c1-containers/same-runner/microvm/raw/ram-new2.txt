@@ -1,0 +1,4 @@
+method: sum of Pss, /proc/PID/smaps_rollup
+pid 15690: 833.3 MiB  /home/runner/work/_temp/prefix/silo-engine/msb machine --name e2e-c1-new2 --sandbox-id 4 --startup-fd 98 --vcp
+pid 16105: 7.5 MiB  /home/runner/work/_temp/prefix/silo-engine/msb wait e2e-c1-new2 --timeout 600s
+TOTAL 840.8

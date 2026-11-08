@@ -1,0 +1,100 @@
+2026/11/08 00:31:16| Processing Configuration File: /mnt/c1/squid.conf (depth 0)
+2026/11/08 00:31:16| WARNING: HTTP requires the use of Via
+2026/11/08 00:31:16| Created PID file (/mnt/c1/squid.pid)
+2026/11/08 00:31:16| Set Current Directory to /mnt/c1
+2026/11/08 00:31:16| Starting Squid Cache version 6.14 for x86_64-pc-linux-gnu...
+2026/11/08 00:31:16| Service Name: squid
+2026/11/08 00:31:16| Process ID 3833
+2026/11/08 00:31:16| Process Roles: master worker
+2026/11/08 00:31:16| With 65536 file descriptors available
+2026/11/08 00:31:16| Initializing IP Cache...
+2026/11/08 00:31:16| DNS IPv6 socket created at [::], FD 8
+2026/11/08 00:31:16| DNS IPv4 socket created at 0.0.0.0, FD 9
+2026/11/08 00:31:16| Adding nameserver 127.0.0.53 from /etc/resolv.conf
+2026/11/08 00:31:16| Adding domain 5311fy12nqeefodcrewfusuvcb.gx.internal.cloudapp.net from /etc/resolv.conf
+2026/11/08 00:31:16| Logfile: opening log stdio:/mnt/c1/squid-access.log
+2026/11/08 00:31:16| Local cache digest enabled; rebuild/rewrite every 3600/3600 sec
+2026/11/08 00:31:16| Store logging disabled
+2026/11/08 00:31:16| Swap maxSize 0 + 262144 KB, estimated 20164 objects
+2026/11/08 00:31:16| Target number of buckets: 1008
+2026/11/08 00:31:16| Using 8192 Store buckets
+2026/11/08 00:31:16| Max Mem  size: 262144 KB
+2026/11/08 00:31:16| Max Swap size: 0 KB
+2026/11/08 00:31:16| Using Least Load store dir selection
+2026/11/08 00:31:16| Set Current Directory to /mnt/c1
+2026/11/08 00:31:16| Finished loading MIME types and icons.
+2026/11/08 00:31:16| HTCP Disabled.
+2026/11/08 00:31:16| WARNING: no_suid: setuid(0): (1) Operation not permitted
+2026/11/08 00:31:16| Pinger socket opened on FD 13
+2026/11/08 00:31:16| Squid plugin modules loaded: 0
+2026/11/08 00:31:16| Adaptation support is off.
+2026/11/08 00:31:16| Accepting HTTP Socket connections at conn3 local=[::]:3128 remote=[::] FD 11 flags=9
+    listening port: 3128
+2026/11/08 00:31:16 pinger| Initialising ICMP pinger ...
+2026/11/08 00:31:16 pinger| ICMP socket opened.
+2026/11/08 00:31:16 pinger| ICMPv6 socket opened
+2026/11/08 00:31:17| storeLateRelease: released 0 objects
+2026/11/08 00:31:18 pinger| SendEcho ERROR: sending to ICMPv6 packet to [2a06:bc80:0:1000::18]: (101) Network is unreachable
+2026/11/08 00:32:53 pinger| SendEcho ERROR: sending to ICMPv6 packet to [2606:4700:10::6814:179a]: (101) Network is unreachable
+2026/11/08 00:34:07 pinger| SendEcho ERROR: sending to ICMPv6 packet to [2607:f8b0:4001:c05::65]: (101) Network is unreachable
+2026/11/08 00:34:18 pinger| SendEcho ERROR: sending to ICMPv6 packet to [2001:4860:4843:400::]: (101) Network is unreachable
+2026/11/08 00:38:43 pinger| SendEcho ERROR: sending to ICMPv6 packet to [2a04:4e42:94::649]: (101) Network is unreachable
+2026/11/08 00:38:51 pinger| SendEcho ERROR: sending to ICMPv6 packet to [2a04:4e42:8a::649]: (101) Network is unreachable
+2026/11/08 00:42:46| Preparing for shutdown after 3672 requests
+2026/11/08 00:42:46| Waiting 30 seconds for active connections to finish
+2026/11/08 00:42:46| Closing HTTP(S) port [::]:3128
+    listening port: 3128
+2026/11/08 00:42:46| Closing Pinger socket on FD 13
+2026/11/08 00:42:57 pinger| Pinger exiting.
+2026/11/08 00:43:17| Shutdown: Negotiate authentication.
+2026/11/08 00:43:17| Shutdown: Digest authentication.
+2026/11/08 00:43:17| Shutdown: Basic authentication.
+2026/11/08 00:43:17| Shutting down...
+2026/11/08 00:43:17| storeDirWriteCleanLogs: Starting...
+2026/11/08 00:43:17|   Finished.  Wrote 0 entries.
+2026/11/08 00:43:17|   Took 0.00 seconds (  0.00 entries/sec).
+CPU Usage: 5.115 seconds = 1.176 user + 3.939 sys
+Maximum Resident Size: 303504 KB
+Page faults with physical i/o: 0
+2026/11/08 00:43:17| Logfile: closing log stdio:/mnt/c1/squid-access.log
+2026/11/08 00:43:17| Open FD UNSTARTED     0 stdin
+2026/11/08 00:43:17| Open FD UNSTARTED     1 stdout
+2026/11/08 00:43:17| Open FD UNSTARTED     2 stderr
+2026/11/08 00:43:17| Squid Cache (Version 6.14): Exiting normally.
+2026/11/08 00:43:17| Removing PID file (/mnt/c1/squid.pid)
+2026/11/08 00:52:08| Processing Configuration File: /mnt/c1/squid.conf (depth 0)
+2026/11/08 00:52:08| WARNING: HTTP requires the use of Via
+2026/11/08 00:52:08| Created PID file (/mnt/c1/squid.pid)
+2026/11/08 00:52:08| Set Current Directory to /mnt/c1
+2026/11/08 00:52:08| Starting Squid Cache version 6.14 for x86_64-pc-linux-gnu...
+2026/11/08 00:52:08| Service Name: squid
+2026/11/08 00:52:08| Process ID 102281
+2026/11/08 00:52:08| Process Roles: master worker
+2026/11/08 00:52:08| With 65536 file descriptors available
+2026/11/08 00:52:08| Initializing IP Cache...
+2026/11/08 00:52:08| DNS IPv6 socket created at [::], FD 8
+2026/11/08 00:52:08| DNS IPv4 socket created at 0.0.0.0, FD 9
+2026/11/08 00:52:08| Adding nameserver 127.0.0.53 from /etc/resolv.conf
+2026/11/08 00:52:08| Adding domain 5311fy12nqeefodcrewfusuvcb.gx.internal.cloudapp.net from /etc/resolv.conf
+2026/11/08 00:52:08| Logfile: opening log stdio:/mnt/c1/squid-access.log
+2026/11/08 00:52:08| Local cache digest enabled; rebuild/rewrite every 3600/3600 sec
+2026/11/08 00:52:08| Store logging disabled
+2026/11/08 00:52:08| Swap maxSize 0 + 262144 KB, estimated 20164 objects
+2026/11/08 00:52:08| Target number of buckets: 1008
+2026/11/08 00:52:08| Using 8192 Store buckets
+2026/11/08 00:52:08| Max Mem  size: 262144 KB
+2026/11/08 00:52:08| Max Swap size: 0 KB
+2026/11/08 00:52:08| Using Least Load store dir selection
+2026/11/08 00:52:08| Set Current Directory to /mnt/c1
+2026/11/08 00:52:08| Finished loading MIME types and icons.
+2026/11/08 00:52:08| HTCP Disabled.
+2026/11/08 00:52:08| WARNING: no_suid: setuid(0): (1) Operation not permitted
+2026/11/08 00:52:08| Pinger socket opened on FD 13
+2026/11/08 00:52:08| Squid plugin modules loaded: 0
+2026/11/08 00:52:08| Adaptation support is off.
+2026/11/08 00:52:08| Accepting HTTP Socket connections at conn3 local=[::]:3128 remote=[::] FD 11 flags=9
+    listening port: 3128
+2026/11/08 00:52:08 pinger| Initialising ICMP pinger ...
+2026/11/08 00:52:08 pinger| ICMP socket opened.
+2026/11/08 00:52:08 pinger| ICMPv6 socket opened
+2026/11/08 00:52:09| storeLateRelease: released 0 objects
