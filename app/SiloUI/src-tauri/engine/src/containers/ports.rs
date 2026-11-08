@@ -63,7 +63,10 @@ fn host_port_free(port: u16) -> bool {
 
 /// Answers one request line against the computer's gateway.
 pub fn answer(running: &Running, request: &Value) -> Value {
-    let op = request.get("op").and_then(Value::as_str).unwrap_or_default();
+    let op = request
+        .get("op")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
     let mut gateway = running.gateway();
     let ports = match op {
         "ports_list" => gateway.ports(),
@@ -80,9 +83,11 @@ pub fn answer(running: &Running, request: &Value) -> Value {
             if host != 0 && host < 1024 {
                 return error("Permission denied: choose a port above 1023.");
             }
-            let already = gateway
-                .ports()
-                .is_ok_and(|ports| ports.iter().any(|port| port.guest_port == guest && port.host_port == host));
+            let already = gateway.ports().is_ok_and(|ports| {
+                ports
+                    .iter()
+                    .any(|port| port.guest_port == guest && port.host_port == host)
+            });
             if !already && !host_port_free(host) {
                 return error("Address already in use.");
             }
@@ -181,7 +186,10 @@ mod tests {
 
     #[test]
     fn requests_name_ports_in_range_and_unknown_ones_are_refused() {
-        assert_eq!(port_of(&json!({"guest_port": 3000}), "guest_port"), Some(3000));
+        assert_eq!(
+            port_of(&json!({"guest_port": 3000}), "guest_port"),
+            Some(3000)
+        );
         assert_eq!(port_of(&json!({"guest_port": 70000}), "guest_port"), None);
         assert_eq!(port_of(&json!({"guest_port": "3000"}), "guest_port"), None);
         assert_eq!(port_of(&json!({}), "guest_port"), None);

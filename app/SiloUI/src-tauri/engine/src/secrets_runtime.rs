@@ -378,6 +378,34 @@ mod tests {
     use crate::test_support::runner::{ExpectedCommand, ScriptedRunner};
 
     #[test]
+    fn the_shared_update_assigns_and_revokes_secrets_on_a_container_computer() {
+        let home = tempfile::tempdir().unwrap();
+        let paths = crate::test_support::paths(home.path());
+        crate::containers::capability::make_container(&paths.home, "box");
+        let material: Material = vec![
+            ("TOKEN".into(), "synthetic-token".into(), vec!["api.example.test".into()]),
+            ("OTHER".into(), "synthetic-other".into(), vec!["*.example.test".into()]),
+        ];
+        // Nothing here is a container rule: the same validation, the same plan, the same
+        // verification of the saved and the active configuration as for a virtual machine.
+        assert!(apply(&paths, "box", &material, false).unwrap().is_empty());
+        let inspected = inspect_computer(&ProcessRunner, &paths, "box").unwrap();
+        assert_eq!(names(&inspected.config), ["OTHER", "TOKEN"].map(str::to_owned).into());
+        assert!(verify_config(&inspected.config, &material));
+        let reduced: Material = vec![material[1].clone()];
+        assert!(apply(&paths, "box", &reduced, false).unwrap().is_empty());
+        let inspected = inspect_computer(&ProcessRunner, &paths, "box").unwrap();
+        assert!(verify_config(&inspected.config, &reduced));
+        assert!(!names(&inspected.config).contains("TOKEN"));
+        // The reserved GitHub name is refused before the container is asked.
+        let reserved: Material = vec![("SILO_GITHUB".into(), "x".into(), vec!["*".into()])];
+        assert!(apply(&paths, "box", &reserved, false).is_err());
+        remove_name(&paths, "box", "OTHER").unwrap();
+        let inspected = inspect_computer(&ProcessRunner, &paths, "box").unwrap();
+        assert!(names(&inspected.config).is_empty());
+    }
+
+    #[test]
     fn material_validation_rejects_empty_duplicate_and_malformed_inputs() {
         for (name, value, domains) in [
             ("", "value", vec!["*"]),

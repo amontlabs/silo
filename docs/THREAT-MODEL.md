@@ -754,8 +754,28 @@ with nothing sensitive on it, and the app, the CLI and `silo list` label it as l
 - **Network.** The container's network namespace holds one TAP device and a loopback, and nothing
   else; a gateway process (the same network stack as macOS computers, boundary 2) is the only way
   out, with the Public policy and the gateway as resolver. A command run in the computer enters
-  that namespace too. In this phase there are no secrets, GitHub access, published ports or SSH
-  for a container computer; commands that would need them are refused.
+  that namespace too.
+- **Secrets and GitHub access (boundary 3).** The same mechanism and rules as for a virtual
+  machine: the guest's environment holds `$MSB_<name>`, and the gateway substitutes the value only
+  in request headers, only toward the hosts the secret allows, after verifying the upstream's TLS
+  certificate (TLS is intercepted only toward those hosts). The shared code validates the material
+  and removes a secret from the running computer at once; a failed or unconfirmed update stops
+  the gateway, so the computer loses its network instead of keeping a secret it was told to drop.
+  What differs: the values live in the memory of the gateway, a process of the engine's own
+  account, not in a virtual machine's process behind a hardware boundary. A process that escapes
+  the container lands as that account and can read the gateway's memory, the engine's credential
+  store and the GitHub tokens held for the computer; the account note above applies to every
+  secret given to a container computer. Give one only secrets you would give the account.
+  The usage events (names, hosts, methods; never values) are written under
+  `sandboxes/<name>/logs/`, which the container does not see.
+- **Published ports (boundary 8).** A guest TCP port is published on the host's IPv4 loopback by
+  the gateway, as for a virtual machine: any process of any user on the host can connect to it,
+  and the URL proxy serves it under `<port>.<computer>.silo.localhost`. The engine passes each
+  request to the gateway over a per-computer control socket in a private directory (socket
+  `0600`); a host port below 1024 is refused and at most 32 ports are published.
+- **Not yet for a container.** SSH access, the editor, a terminal, the in-guest client, export
+  and the desktop are refused with a plain message (see the capability list in
+  `containers/capability.rs`); the app hides them.
 - **What Landlock covers.** The ruleset grants the container's root read and execute everywhere and
   write access to the directories a system normally writes (`/tmp`, `/var`, `/run`, `/home`,
   `/root`, `/workspace`, `/dev`, `/usr`, `/etc`, `/opt`, `/srv`, `/mnt`). It therefore mainly protects

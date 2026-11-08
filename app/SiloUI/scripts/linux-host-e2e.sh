@@ -165,9 +165,125 @@ except OSError:
     expect "private address $target" "$result" refused
   done
 
+  container_network_features
+
   step "Stopping and dropping $ctr"
   "$silo" stop "$ctr"
   "$silo" drop "$ctr"
+}
+
+# How many times the gateway recorded using secret $1 toward host $2 (names and hosts, never
+# values; the file `computers.credentials` reads for any Linux computer).
+usage_count() {
+  local file
+  file=$(find "$HOME/.silo-dev" -path "*sandboxes/$ctr/logs/secret-usage.jsonl" 2>/dev/null | head -n 1)
+  if [[ -z "$file" ]]; then echo 0; return; fi
+  python3 - "$file" "$1" "$2" <<'PY'
+import json, sys
+count = 0
+for line in open(sys.argv[1]):
+    try:
+        event = json.loads(line)
+    except ValueError:
+        continue
+    if event.get("kind") == "used" and event.get("secret") == sys.argv[2] and event.get("host") == sys.argv[3]:
+        count += 1
+print(count)
+PY
+}
+
+# Waits up to $2 seconds for the number of recorded uses of secret $1 toward host $3 to be $4 or
+# more (the gateway writes its events a moment after the request).
+wait_for_usage() {
+  local secret="$1" seconds="$2" host="$3" wanted="$4" seen=0
+  for _ in $(seq 1 "$((seconds * 2))"); do
+    seen=$(usage_count "$secret" "$host")
+    ((seen >= wanted)) && break
+    sleep 0.5
+  done
+  echo "$seen"
+}
+
+# Secrets, published ports and the URL proxy in the container, through the same commands a virtual
+# machine uses. (SSH, the editor, a terminal and the in-guest client are refused for a container
+# computer for now.)
+container_network_features() {
+  step "Giving $ctr a fake secret"
+  # A random token shaped like a GitHub one: GitHub answers "Bad credentials" to it, and a
+  # request with no token at all "Requires authentication".
+  local fake placeholder='$MSB_E2E_FAKE_TOKEN'
+  fake="ghp_$(head -c 48 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 36)"
+  printf '%s' "$fake" | "$silo" secrets set E2E_FAKE_TOKEN --computer "$ctr" --domain api.github.com
+  # A secret assigned to a running computer takes effect at its next start, as for a VM.
+  "$silo" stop "$ctr"
+  "$silo" start "$ctr"
+
+  step "Checking what the guest sees"
+  expect "guest placeholder" "$(in_container sh -c 'printf %s "$E2E_FAKE_TOKEN"')" "$placeholder"
+  expect "GitHub placeholder" "$(in_container sh -c 'printf %s "$GH_TOKEN"')" '$MSB_SILO_GITHUB'
+  expect "the value inside the guest" "$(in_container sh -c "cat /proc/self/environ /proc/1/environ 2>/dev/null | grep -c '$fake' || true")" 0
+
+  step "Checking that the secret is substituted for its host and no other"
+  local reply status
+  for _ in 1 2 3; do
+    reply=$(in_container curl -sS --max-time 20 -H 'Authorization: Bearer $MSB_E2E_FAKE_TOKEN' -w '\n%{http_code}' https://api.github.com/user || true)
+    [[ "${reply##*$'\n'}" == 401 ]] && break
+    sleep 3
+  done
+  status="${reply##*$'\n'}"
+  expect "allowed host status" "$status" 401
+  if [[ "$reply" != *"Bad credentials"* ]]; then echo "allowed host: GitHub did not answer Bad credentials: $reply" >&2; exit 1; fi
+  echo "allowed host: Bad credentials"
+  local used
+  used=$(wait_for_usage E2E_FAKE_TOKEN 10 api.github.com 1)
+  if ((used < 1)); then echo "the gateway recorded no use of the secret toward api.github.com" >&2; exit 1; fi
+  echo "uses recorded toward api.github.com: $used"
+  in_container curl -sS --max-time 20 -o /dev/null -H 'Authorization: Bearer $MSB_E2E_FAKE_TOKEN' https://example.com/ || true
+  sleep 2
+  expect "uses recorded toward another host" "$(usage_count E2E_FAKE_TOKEN example.com)" 0
+
+  step "Publishing a port of $ctr and opening it through the URL proxy"
+  in_container sh -c 'mkdir -p /tmp/www && echo ct3-port-ok > /tmp/www/index.html && cd /tmp/www && (nohup python3 -m http.server 8080 --bind 0.0.0.0 >/dev/null 2>&1 &)'
+  "$silo" publish "$ctr" 8080 --http
+  local url="" host_port="" state=""
+  for _ in $(seq 1 40); do
+    read -r state host_port url < <("$silo" --json ports "$ctr" | python3 -c '
+import json, sys
+port = next((p for p in json.load(sys.stdin)["ports"] if p["port"] == 8080), {})
+print(port.get("state") or "-", port.get("hostPort") or "-", port.get("url") or "-")')
+    [[ "$state" == reachable && "$url" != - ]] && break
+    sleep 0.5
+  done
+  expect "published port state" "$state" reachable
+  echo "published at $url (host port $host_port)"
+  expect "page through the URL proxy" "$(curl -sS --max-time 20 "$url")" ct3-port-ok
+  expect "page on the loopback port" "$(curl -sS --max-time 20 "http://127.0.0.1:$host_port/")" ct3-port-ok
+  "$silo" unpublish "$ctr" 8080
+  for _ in $(seq 1 20); do
+    curl -sS --max-time 3 -o /dev/null "http://127.0.0.1:$host_port/" 2>/dev/null || break
+    sleep 0.5
+  done
+  if curl -sS --max-time 3 -o /dev/null "http://127.0.0.1:$host_port/" 2>/dev/null; then
+    echo "the unpublished port still answers on the loopback" >&2
+    exit 1
+  fi
+  echo "unpublished port: closed"
+
+  step "Taking the secret away from the running $ctr"
+  "$silo" secrets unassign E2E_FAKE_TOKEN "$ctr"
+  local before after assigned
+  before=$(usage_count E2E_FAKE_TOKEN api.github.com)
+  in_container curl -sS --max-time 20 -o /dev/null -H 'Authorization: Bearer $MSB_E2E_FAKE_TOKEN' https://api.github.com/user || true
+  sleep 3
+  after=$(usage_count E2E_FAKE_TOKEN api.github.com)
+  expect "uses recorded after the removal" "$after" "$before"
+  expect "placeholder after the removal" "$(in_container sh -c 'printf %s "${E2E_FAKE_TOKEN-}"')" ""
+  assigned=$("$silo" secrets list)
+  if grep -q "E2E_FAKE_TOKEN.*$ctr" <<<"$assigned"; then
+    echo "the secret is still assigned: $assigned" >&2
+    exit 1
+  fi
+  echo "secret removal: no longer assigned"
 }
 
 step "Waiting for the engine"

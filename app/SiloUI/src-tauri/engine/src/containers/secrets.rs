@@ -102,7 +102,11 @@ pub fn apply_to_record(record: &mut ComputerRecord, modify: &Modify) -> Result<(
             name: spec.name.clone(),
             allowed_hosts: spec.allowed_hosts.clone(),
         };
-        match record.secrets.iter_mut().find(|known| known.name == spec.name) {
+        match record
+            .secrets
+            .iter_mut()
+            .find(|known| known.name == spec.name)
+        {
             Some(known) => *known = secret,
             None => record.secrets.push(secret),
         }
@@ -160,7 +164,11 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            record.secrets.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(),
+            record
+                .secrets
+                .iter()
+                .map(|s| s.name.as_str())
+                .collect::<Vec<_>>(),
             ["ALPHA", "TOKEN"]
         );
         apply_to_record(
@@ -179,7 +187,10 @@ mod tests {
         let mut record = record();
         let error = apply_to_record(
             &mut record,
-            &modify(vec![put("SILO_GITHUB", &["github.com", "evil.example"])], &[]),
+            &modify(
+                vec![put("SILO_GITHUB", &["github.com", "evil.example"])],
+                &[],
+            ),
         )
         .unwrap_err();
         assert!(error.contains("GitHub hosts only"), "{error}");
@@ -199,7 +210,10 @@ mod tests {
         apply_to_record(
             &mut record,
             &modify(
-                vec![put("TOKEN", &["api.example.test", "*.cdn.example.test", "*"])],
+                vec![put(
+                    "TOKEN",
+                    &["api.example.test", "*.cdn.example.test", "*"],
+                )],
                 &[],
             ),
         )

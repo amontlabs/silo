@@ -325,6 +325,79 @@ Branch `claude/containers-ct2`.
   capabilities, `no_new_privs`, seccomp, io_uring refused, nested user namespace refused, only `lo` and the TAP,
   a public host reachable, link-local, private, gateway and loopback addresses refused, stop, drop.
 
+### 8 Nov 2026: phase CT3 built in part (network features for container computers)
+
+Branch `claude/containers-ct3`. Secrets, GitHub access, credential-use events, published ports and the URL proxy
+work for container computers through the existing commands, API methods and screens. **SSH access, the editor, a
+terminal and the in-guest client are not built**: each needs a container-specific branch outside
+`engine/src/containers/` and the capability list, which the brief said to stop and report. They stay on the
+capability list (refused with the plain message, hidden in the app).
+
+- **The seam moved one step.** CT2 routed a container at `run_msb_process`. Secrets and GitHub access reach the
+  runtime through `spawn_runtime` (the shared `modify` calls skip `run_msb_process`), and `start` needs the
+  secret material that `spawn_runtime_command` reads, so the route now sits in `spawn_runtime`, where every
+  runtime launch is made. `containers::run` takes the material (`containers::Material`: the general secrets'
+  values and the GitHub profile). The shared validation (`secrets_runtime::validate_material`), the plan
+  (which secrets apply now and which at the next start) and the verification (`verify_config` on the saved and
+  the active configuration) run unchanged: `containers/secrets.rs` answers the `modify --secret/--secret-rm
+  --next-start` they issue and reports the result in the `network.secrets` shape MicroSandbox inspects. No policy
+  was copied. A test runs `secrets_runtime::apply` against a container record.
+- **What is kept.** The record gains `secrets` (name, allowed hosts) and `github`; values are never stored.
+  The gateway gets the values at start and on each change, and the engine tracks which secrets the running
+  gateway holds (`Running.active`): a secret assigned to a running container is recorded and applies at the next
+  start, like a virtual machine's; a changed one and a removal apply at once. A removal asks the gateway only for
+  a secret it holds (the gateway stops on a refusal). The guest environment gets `NAME=$MSB_NAME` for each
+  active secret and the computer's own `--env` (so `GH_TOKEN=$MSB_SILO_GITHUB` from creation); CT2 had dropped
+  the creation environment.
+- **GitHub access.** A container is created with the same `--secret SILO_GITHUB:...` and `--env GH_TOKEN=...` as a
+  VM (the CT2 gates are gone). The gateway starts with the cached profile (disabled when none) and the three
+  GitHub hosts, and `apply_github_policy` reaches `Gateway::set_github_profile` through the same `modify`. Not run
+  live: it needs a GitHub App sign-in.
+- **Credential-use events.** The gateway writes to `sandboxes/<name>/logs/secret-usage.jsonl`, the file
+  `computers.credentials` already reads for a Linux computer, so no reader changed. Dropping the computer removes
+  the folder and retires its CA.
+- **Fail closed, and restart.** The registry holds `Arc<Running>` per computer with its own lock, so a slow
+  gateway exchange never blocks another computer's state read. `gateway_tracked` now asks the gateway whether it
+  is alive: one stopped by a failed update makes the computer read as stopped, and `start` (which clears the
+  leftover holder) brings up a new gateway. That is the restart: the holder gave its TAP descriptor away at start,
+  so a gateway cannot be re-attached to the same network; a start is the clean way. `Gateway::close` stops a shared
+  gateway without consuming it.
+- **Ports and URLs.** The gateway's container profile gained `ports`, `port_add`, `port_remove` and `port_probe`
+  (`macos-gateway/src/ports.rs`, over the network stack's `PortControlHandle`, which the MicroSandbox
+  live-public-ports patch added and the gateway's single-tenant stack exposes). They are queries answered in
+  order, not revisioned updates; a refusal (`port_rejected`) leaves the link in step, any other answer stops the
+  gateway. A host port below 1024 is refused and at most 32 are published. The engine serves, per running
+  container, the control socket MicroSandbox serves for a VM (`containers/ports.rs`, at the path `network.rs`
+  already uses, `0600` in a `0700` folder) and forwards to the gateway, so `network.rs` and the URL proxy needed no
+  change (only `socket_path` became `pub(crate)`).
+- **CT1 nit.** The CA handover moves the key (`std::mem::take`) instead of copying it with `to_string`, in
+  `computer_ca` and in the macOS supervisor's `generate_ca`.
+- **Why SSH is stopped.** The guest image has `openssh-sftp-server` but no `sshd`. `msb ssh serve`, the host
+  server behind `ssh <name>.silo` and the editor's ProxyCommand, speaks MicroSandbox's exec channel and does not
+  know containers; `ssh_access::spawn` and `editor` start it directly. Installing `openssh-server` in the image
+  would not work under the baseline: sshd needs `setuid`, which the dropped capabilities and `no_new_privs`
+  forbid, and the pinned image is shared with VMs. The simplest working design is a host-side SSH server for
+  containers (an established library such as `russh`, Apache-2.0) that runs the login shell, `exec` and
+  `sftp-server` through the container's `crun exec` plan, with the same managed keys. It also gives the terminal
+  (`crun exec --tty` through `silo-ctr enter`; `terminal::command` builds `msb exec --tty` today and `parse_exec`
+  refuses `--tty`). Both need a container branch in `ssh_access.rs`, `editor.rs`, `remote_access.rs` and
+  `terminal.rs`.
+- **Why the in-guest client is stopped.** The per-computer bridge folder can be bound into the container
+  (`<runtime home>/sandboxes/<name>/runtime/silo-bridge` at `/.msb/silo-bridge`, the path the spool already
+  uses), and a root agent would work: container root is the engine's account. A non-root agent writes request
+  files as a sub-id with mode 0600, which the engine, an ordinary account, cannot read, and the stat-override
+  sealing is a virtiofs feature a bind mount lacks. Fixing it means reading through the user namespace in
+  `guest_client/spool.rs`, or group-readable modes plus a client change: a container branch outside the module.
+- **Tests.** Engine (Linux in Docker and macOS): argument parsing of create and modify, record changes, the
+  inspect shape, `secrets_runtime::apply` on a container, the gateway client's port exchange (fake gateway:
+  ordering, refusal, wrong answer stops it), the gateway crate's `ports` module (32 gateway tests in the staged
+  checkout). Live: `linux-host-e2e.sh` with `SILO_E2E_CONTAINER=1` now assigns a fake secret, restarts, checks
+  the guest sees `$MSB_E2E_FAKE_TOKEN` and `$MSB_SILO_GITHUB` and never the value, gets GitHub's "Bad credentials"
+  from `api.github.com` with a gateway `used` event and no event for `example.com`, publishes a port, opens it
+  through the URL proxy and the loopback port, unpublishes it, and removes the secret from the running computer
+  (no further `used` event).
+- **Not done.** SSH, editor, terminal, in-guest client (above); GitHub access live; UDP ports; aarch64 live run.
+
 ### R1: CI runner on the Mac (branch `claude/runner-phase-1`)
 
 - **Built:** `silo-action/` and every reference removed; `silo-runner` (Go, `app/SiloUI/runner`, on

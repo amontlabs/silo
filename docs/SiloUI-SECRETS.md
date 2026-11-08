@@ -118,6 +118,29 @@ root or `nobody`; run it as a dedicated account in the `kvm` group, and use full
 encryption on a host that holds real credentials. See
 [Linux hosts in the threat model](THREAT-MODEL.md#linux-hosts).
 
+## Container computers
+
+A container computer (Linux hosts, opt-in) takes secrets through the same commands, API methods
+and screens as any Linux computer: `silo secrets set|assign|unassign`, the Secrets page, the
+`computers.credentials` line. Only the place that holds the values differs. The engine checks the
+material once with the shared rules (`secrets_runtime::validate_material`) and asks the runtime to
+`modify` the computer; for a container that request is answered by `engine/src/containers/`
+(`secrets.rs`), which keeps names and allowed hosts in the computer's record and hands the values
+to the computer's gateway (`silo-macos-gateway`, the network stack macOS computers also use),
+a host process of the engine's account. The gateway substitutes `$MSB_<name>` in request
+headers, only toward an allowed host and only after verifying that host's TLS certificate;
+other TLS keeps its public certificate. The guest's environment holds the placeholder.
+
+As for a virtual machine, a secret assigned to a running container applies at its next start;
+changing an assigned secret's hosts or value, and removing one, apply at once. The gateway fails
+closed: an update it does not confirm stops it, the computer then reads as stopped (its network is
+gone), and `silo start` brings up a new gateway with the current secrets. The gateway records the
+secrets it used and the attempts it blocked in `<runtime home>/sandboxes/<name>/logs/secret-usage.jsonl`,
+the file a Linux computer's events are read from, so the credentials-used line needs no
+container case. Differences from a virtual machine are in the
+[threat model](THREAT-MODEL.md#container-computers): a process that escapes the container lands as
+the engine's account, which holds the credential store and the gateway's memory.
+
 ## Boundary
 
 This mechanism supports credentials transmitted in proxied HTTPS requests. It does

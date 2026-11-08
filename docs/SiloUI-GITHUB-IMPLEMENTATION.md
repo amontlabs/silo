@@ -22,6 +22,16 @@ GraphQL permission engine. Queries and mutations use their corresponding narrow
 authority. The user accepts combined requests crossing credential boundaries can
 fail; never automatically replay or split mutations after partial success.
 
+## Container computers
+
+A container computer gets GitHub access like a virtual machine: it is created with the
+`SILO_GITHUB` secret and `GH_TOKEN=$MSB_SILO_GITHUB` in its environment, and the per-repository
+child tokens minted on the host reach the computer's gateway as that secret's value
+(`computer_gateway::Gateway::set_github_profile`, through the same `modify` request the engine
+sends a virtual machine). The gateway substitutes the right token per repository in requests to
+`github.com`, `api.github.com` and `uploads.github.com` only. Read-only is the default. The
+tokens are held by the gateway, a host process of the engine's account.
+
 ## Native implementation
 
 Silo connects directly to GitHub from its Rust backend. There is no hosted Silo
