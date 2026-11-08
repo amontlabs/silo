@@ -3677,6 +3677,43 @@ fn the_sweep_removes_import_groups_no_computer_owns() {
         .all(|member| member.0 != IMPORT_GROUP));
 }
 
+#[test]
+fn the_sweep_removes_the_empty_shell_of_an_import_group_no_computer_owns() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let mut owner = Record::default();
+    owner.snapshot_group = Some(OTHER_IMPORT_GROUP.into());
+    let paths = delete_fixture(&directory, Vec::new(), Some(owner));
+    let snapshots = paths.home.join("snapshots");
+    let shell = |name: &str, files: &[&str]| {
+        let group = snapshots.join(name);
+        fs::create_dir_all(&group).unwrap();
+        for file in files {
+            fs::write(group.join(file), "").unwrap();
+        }
+        group
+    };
+    // Members already removed by an earlier sweep leave only the lock and group.json.
+    let unowned = shell(IMPORT_GROUP, &[".group.lock", "group.json"]);
+    let owned = shell(OTHER_IMPORT_GROUP, &[".group.lock", "group.json"]);
+    let with_other_file = shell(
+        "silo-import-00000000000000000000000000000000",
+        &[".group.lock", "group.json", "extra"],
+    );
+    let not_an_import = shell("elsewhere", &[".group.lock", "group.json"]);
+    let store = Store::new(Vec::new());
+
+    recover_interrupted(&store, &paths).unwrap();
+
+    assert!(!unowned.exists());
+    assert!(owned.exists(), "a record names this group");
+    assert!(
+        with_other_file.exists(),
+        "an unknown file keeps the directory"
+    );
+    assert!(not_an_import.exists(), "only import groups are swept");
+}
+
 /// `dev` is deleted: its configuration is gone and the group directory holds `files`.
 fn deleted_dev_with_group_files(
     directory: &tempfile::TempDir,

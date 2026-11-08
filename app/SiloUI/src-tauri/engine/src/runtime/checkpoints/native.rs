@@ -6,7 +6,7 @@
 //! - any Silo record references (a checkpoint, a capture in progress, a Restore's
 //!   recovery point, or a fork or import that has not started yet);
 //! - is a live computer's lineage position: the snapshot its next capture names as parent.
-//!   Exports save captures `--with-parents`, which fails when an ancestor is missing.
+//!   Exports save a capture alone (without `--with-parents`); it holds all its layers.
 use super::*;
 use std::collections::{HashMap, HashSet};
 

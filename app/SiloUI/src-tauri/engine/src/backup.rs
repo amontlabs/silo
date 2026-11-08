@@ -905,43 +905,25 @@ impl<R: MsbRunner> BackupService<R> {
                     capture_intent(source, None)?;
                 }
                 let payload_path = stage.path().join(format!("{index}.msb"));
-                let save_arguments = |with_parents: bool| -> Vec<String> {
-                    let mut arguments = vec![
-                        "snapshot".into(),
-                        "save".into(),
-                        snapshot.to_string_lossy().into_owned(),
-                        payload_path.to_string_lossy().into_owned(),
-                    ];
-                    if with_parents {
-                        arguments.push("--with-parents".into());
-                    }
-                    if !leaves_image_out(request.pinned_image.as_ref(), &runtime_config) {
-                        arguments.push("--with-image".into());
-                    }
-                    arguments
-                };
-                match self.require_success_with(
+                // A capture holds every layer it needs, so the archive is written without its
+                // lineage. `--with-parents` writes a layer twice when the capture's chain already
+                // holds its parent's head (a computer exported or forked before), and
+                // `snapshot load` refuses such an archive as having a duplicate entry.
+                let mut save_arguments = vec![
+                    "snapshot".into(),
+                    "save".into(),
+                    snapshot.to_string_lossy().into_owned(),
+                    payload_path.to_string_lossy().into_owned(),
+                ];
+                if !leaves_image_out(request.pinned_image.as_ref(), &runtime_config) {
+                    save_arguments.push("--with-image".into());
+                }
+                self.require_success_with(
                     "Writing computer disks to the export file",
-                    &save_arguments(true),
+                    &save_arguments,
                     data_timeout,
                     cancellation,
-                ) {
-                    // Checkpoint retention removes old ancestors. A snapshot holds its own
-                    // complete layers, so the archive is written without the missing lineage.
-                    Err(BackupError::CommandFailed { detail, .. })
-                        if detail.contains("not in local index") =>
-                    {
-                        self.require_success_with(
-                            "Writing computer disks to the export file",
-                            &save_arguments(false),
-                            data_timeout,
-                            cancellation,
-                        )?;
-                    }
-                    other => {
-                        other?;
-                    }
-                }
+                )?;
                 Ok::<_, BackupError>(payload_path)
             })();
             let payload_path = capture_result?;
@@ -1054,7 +1036,8 @@ impl<R: MsbRunner> BackupService<R> {
                     cancellation,
                 )?);
             }
-            carries_image |= !leaves_image_out(request.pinned_image.as_ref(), &source.runtime_config);
+            carries_image |=
+                !leaves_image_out(request.pinned_image.as_ref(), &source.runtime_config);
         }
         if carries_image {
             payload_bytes = payload_bytes
@@ -3408,10 +3391,8 @@ fn validate_computer_name(name: &str) -> Result<(), BackupError> {
 
 /// A snapshot group is one directory name under the native store's `snapshots`.
 fn validate_group_name(group: &str) -> Result<(), BackupError> {
-    let valid = !group.is_empty()
-        && group != "."
-        && group != ".."
-        && !group.contains(['/', '\\', '\0']);
+    let valid =
+        !group.is_empty() && group != "." && group != ".." && !group.contains(['/', '\\', '\0']);
     if !valid {
         return Err(BackupError::InvalidRequest(
             "The computer's checkpoint group is not a valid name.".into(),
@@ -4826,7 +4807,6 @@ mod tests {
         timeouts: Mutex<Vec<(Vec<String>, Duration)>>,
         fail_load: AtomicBool,
         fail_save: AtomicBool,
-        ancestor_missing: AtomicBool,
         fail_import_verify: AtomicBool,
         cancel_during_load: AtomicBool,
         invalid_import_head: AtomicBool,
@@ -4888,21 +4868,8 @@ mod tests {
                     self.removed.lock().unwrap().push((*selector).to_owned());
                     Ok(success())
                 }
-                ["snapshot", "save", _, output, "--with-parents", "--with-image"]
-                | ["snapshot", "save", _, output, "--with-image"]
-                | ["snapshot", "save", _, output, "--with-parents"]
+                ["snapshot", "save", _, output, "--with-image"]
                 | ["snapshot", "save", _, output] => {
-                    if arguments
-                        .iter()
-                        .any(|argument| argument == "--with-parents")
-                        && self.ancestor_missing.load(Ordering::Acquire)
-                    {
-                        return Ok(CommandOutput {
-                            status: ExitStatus::from_raw(1 << 8),
-                            stderr: "parent snap_gone not in local index; ship it alongside or re-save with --with-parents".into(),
-                            ..success()
-                        });
-                    }
                     if self.fail_save.load(Ordering::Acquire) {
                         return Ok(CommandOutput {
                             status: ExitStatus::from_raw(1 << 8),
@@ -5656,36 +5623,7 @@ mod tests {
         let calls = service.runner.calls.lock().unwrap();
         assert!(calls
             .iter()
-            .any(|args| args.ends_with(&["--with-parents".into(), "--with-image".into()])));
-    }
-
-    #[test]
-    fn an_export_whose_ancestors_were_removed_saves_the_capture_alone_and_loads() {
-        let temp = tempfile::tempdir().unwrap();
-        let destination = temp.path().join("dev.silo-backup");
-        let runner = FakeRunner::default();
-        runner.ancestor_missing.store(true, Ordering::Release);
-        let service = service(&temp, runner);
-        create_one(&service, destination.clone(), false).unwrap();
-        {
-            let calls = service.runner.calls.lock().unwrap();
-            let saves: Vec<_> = calls
-                .iter()
-                .filter(|args| args.get(1).map(String::as_str) == Some("save"))
-                .collect();
-            assert_eq!(saves.len(), 2);
-            assert!(saves[0].contains(&"--with-parents".to_owned()));
-            assert!(!saves[1].contains(&"--with-parents".to_owned()));
-        }
-        // The fallback archive passes the same verification an import starts with.
-        let package = read_and_verify_package(
-            &destination,
-            DEFAULT_MAX_ARCHIVE_BYTES,
-            &Cancellation::default(),
-            PayloadMode::VerifyAll,
-        )
-        .unwrap();
-        assert_eq!(package.manifest.computers.len(), 1);
+            .any(|args| args.ends_with(&["--with-image".into()])));
     }
 
     #[test]
@@ -5730,7 +5668,7 @@ mod tests {
             .any(|args| matches!(args.as_slice(), [head, verb, ..] if head == "snapshot" && verb == "verify")));
         assert!(calls
             .iter()
-            .any(|args| args.ends_with(&["--with-parents".into(), "--with-image".into()])));
+            .any(|args| args.ends_with(&["--with-image".into()])));
     }
 
     fn export_checkpoint(
@@ -6624,7 +6562,6 @@ mod tests {
         let saves = saves(&service);
         assert_eq!(saves.len(), 3);
         assert!(!saves[0].contains(&"--with-image".to_owned()));
-        assert!(saves[0].contains(&"--with-parents".to_owned()));
         assert!(saves[1].contains(&"--with-image".to_owned()));
         assert!(saves[2].contains(&"--with-image".to_owned()));
         assert!(!manifest_of(&pinned).computers[0].image_embedded);
@@ -6714,23 +6651,32 @@ mod tests {
         assert!(!leaves_image_out(None, &managed_config("dev")));
     }
 
+    /// `msb snapshot save --with-parents` writes a layer twice when the capture's own layer chain
+    /// already holds its parent's head (a computer that was exported or forked before: the new
+    /// capture is a qcow2 layer backed by the raw layer that is its parent's head), and
+    /// `snapshot load` then refuses the archive with "archive contains duplicate entry:
+    /// layers/layer_<hash>.raw". Live repro: `silo export` of one computer four times. A capture
+    /// holds every layer it needs, so no export asks for the parents.
     #[test]
-    fn a_missing_ancestor_still_saves_the_capture_without_the_image() {
+    fn a_capture_is_saved_without_its_parents_so_no_layer_is_written_twice() {
         let temp = tempfile::tempdir().unwrap();
         let service = service(&temp, FakeRunner::default());
-        service
-            .runner
-            .ancestor_missing
-            .store(true, Ordering::SeqCst);
-        let destination = temp.path().join("pinned.silo-backup");
-        export_with(&service, destination, Some("alpine:3.20"), Vec::new());
+        for (index, image) in [
+            Some("alpine:3.20"),
+            Some("ghcr.io/x/silo-guest:other"),
+            None,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let destination = temp.path().join(format!("{index}.silo-backup"));
+            export_with(&service, destination, image, Vec::new());
+        }
         let saves = saves(&service);
-        assert_eq!(saves.len(), 2);
-        assert!(saves[0].contains(&"--with-parents".to_owned()));
-        assert!(!saves[1].contains(&"--with-parents".to_owned()));
+        assert_eq!(saves.len(), 3);
         assert!(saves
             .iter()
-            .all(|args| !args.contains(&"--with-image".to_owned())));
+            .all(|args| !args.contains(&"--with-parents".to_owned())));
     }
 
     #[test]
@@ -8375,7 +8321,10 @@ mod tests {
         let error = service
             .check_export_space(&request(destination), &cancellation)
             .unwrap_err();
-        assert!(matches!(error, BackupError::InsufficientSpace(_)), "{error}");
+        assert!(
+            matches!(error, BackupError::InsufficientSpace(_)),
+            "{error}"
+        );
     }
 
     #[test]

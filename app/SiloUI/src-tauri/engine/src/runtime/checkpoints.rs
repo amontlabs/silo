@@ -4068,16 +4068,11 @@ pub(crate) fn remove_deleted_snapshots(
     Ok(())
 }
 
-/// Queues the members of import groups (`silo-import-<hex>`) that no checkpoint record names:
-/// the computer they were imported for is gone. Every record on disk counts as an owner,
-/// also one whose computer is not in the configuration yet (an import that is still being
-/// saved), and a record that cannot be read stops the sweep. The queue is then removed
-/// like any deleted computer's members, which keeps what a record or a live computer's
-/// lineage still uses.
-fn queue_unowned_import_groups(
-    runner: &dyn RuntimeRunner,
-    paths: &RuntimePaths,
-) -> Result<(), RuntimeError> {
+/// The groups some checkpoint record on disk names: a computer's own group, a pending
+/// restore's source and every group a record's checkpoints use. Also a record whose computer
+/// is not in the configuration yet counts (an import that is still being saved), and a record
+/// that cannot be read stops the caller.
+fn owned_groups(paths: &RuntimePaths) -> Result<HashSet<String>, RuntimeError> {
     let mut owned: HashSet<String> = HashSet::new();
     match fs::read_dir(directory(paths)) {
         Ok(entries) => {
@@ -4108,6 +4103,17 @@ fn queue_unowned_import_groups(
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
         Err(_) => return Err(error("Checkpoint history could not be listed.")),
     }
+    Ok(owned)
+}
+
+/// Queues the members of import groups (`silo-import-<hex>`) that no checkpoint record names:
+/// the computer they were imported for is gone. The queue is then removed like any deleted
+/// computer's members, which keeps what a record or a live computer's lineage still uses.
+fn queue_unowned_import_groups(
+    runner: &dyn RuntimeRunner,
+    paths: &RuntimePaths,
+) -> Result<(), RuntimeError> {
+    let owned = owned_groups(paths)?;
     let mut queued = load_cleanup(paths)?;
     let mut added = false;
     for member in native::inventory(runner, paths)? {
@@ -4128,6 +4134,26 @@ fn queue_unowned_import_groups(
         save_cleanup(paths, &queued)?;
     }
     Ok(())
+}
+
+/// Removes the empty shells (`.group.lock`, `group.json`) of import groups no checkpoint record
+/// names, which MicroSandbox leaves behind once the last member is removed. A group that still
+/// lists a member, or holds any other file, stays.
+fn remove_unowned_import_group_shells(runner: &dyn RuntimeRunner, paths: &RuntimePaths) {
+    let Ok(owned) = owned_groups(paths) else {
+        return;
+    };
+    let Ok(entries) = fs::read_dir(paths.home.join("snapshots")) else {
+        return;
+    };
+    for entry in entries.filter_map(Result::ok) {
+        let Some(group) = entry.file_name().to_str().map(str::to_owned) else {
+            continue;
+        };
+        if crate::backup::valid_import_group(&group) && !owned.contains(&group) {
+            remove_empty_group_directory(runner, paths, &group);
+        }
+    }
 }
 
 /// MicroSandbox leaves `snapshots/<group>` with its lock and metadata files after the last
@@ -4233,6 +4259,7 @@ pub(crate) fn recover_interrupted(
         unresolved: HashMap::new(),
         cleanup_error: retry_deleted_snapshots(runner, paths).err(),
     };
+    remove_unowned_import_group_shells(runner, paths);
     for configuration in metadata.computers.iter() {
         let result = (|| {
             let mut record = load(paths, configuration.id())?;
