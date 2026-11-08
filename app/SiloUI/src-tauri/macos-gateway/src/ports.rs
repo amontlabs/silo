@@ -55,12 +55,37 @@ fn to_loopback(published: Vec<PublishedPort>) -> Option<Vec<LoopbackPort>> {
         .collect()
 }
 
+/// What `handle` asks of the network stack's port control (a trait so the order of its steps can
+/// be tested).
+trait Control {
+    fn list(&self) -> Result<Vec<PublishedPort>, String>;
+    fn add(&self, guest_port: u16, host_port: u16) -> Result<Vec<PublishedPort>, String>;
+    fn remove(&self, guest_port: u16) -> Result<Vec<PublishedPort>, String>;
+}
+
+impl Control for microsandbox_network::network::PortControlHandle {
+    fn list(&self) -> Result<Vec<PublishedPort>, String> {
+        Self::list(self)
+    }
+    fn add(&self, guest_port: u16, host_port: u16) -> Result<Vec<PublishedPort>, String> {
+        Self::add(self, guest_port, host_port)
+    }
+    fn remove(&self, guest_port: u16) -> Result<Vec<PublishedPort>, String> {
+        Self::remove(self, guest_port)
+    }
+}
+
 /// Answers a port request, or `None` when it is refused (the caller answers `port_rejected`).
 pub fn handle(network: &SmoltcpNetwork, request: &Request) -> Option<Response> {
     if !acceptable(request) {
         return None;
     }
-    let control = network.port_control_handle()?;
+    answer(&network.port_control_handle()?, request)
+}
+
+fn answer(control: &impl Control, request: &Request) -> Option<Response> {
+    // A port this request publishes, which it takes back if the result cannot be reported.
+    let mut added = None;
     let listed = match request {
         Request::Ports { .. } => control.list(),
         Request::PortAdd {
@@ -70,10 +95,12 @@ pub fn handle(network: &SmoltcpNetwork, request: &Request) -> Option<Response> {
         } => {
             // A port beyond the container's cap is refused before it is bound.
             let known = control.list().ok()?;
-            if known.len() >= MAX_LOOPBACK_PORTS
-                && !known.iter().any(|port| port.guest_port == *guest_port)
-            {
+            let published = known.iter().any(|port| port.guest_port == *guest_port);
+            if known.len() >= MAX_LOOPBACK_PORTS && !published {
                 return None;
+            }
+            if !published {
+                added = Some(*guest_port);
             }
             control.add(*guest_port, *host_port)
         }
@@ -82,10 +109,21 @@ pub fn handle(network: &SmoltcpNetwork, request: &Request) -> Option<Response> {
         // answered by `probe_in_background`, never here on the pump's thread.
         _ => return None,
     };
-    Some(Response::Ports {
-        version: PROTOCOL_VERSION,
-        ports: to_loopback(listed.ok()?)?,
-    })
+    let reported = listed.ok().and_then(to_loopback);
+    match reported {
+        Some(ports) => Some(Response::Ports {
+            version: PROTOCOL_VERSION,
+            ports,
+        }),
+        None => {
+            // The caller is told the request was refused, so the port must not stay published:
+            // a listener nobody was told about is one nobody can take down.
+            if let Some(guest_port) = added {
+                let _ = control.remove(guest_port);
+            }
+            None
+        }
+    }
 }
 
 /// Starts a probe of a guest port and answers it on `control` when it ends. The probe waits for
@@ -158,6 +196,80 @@ mod tests {
         assert!(!acceptable(&Request::Shutdown {
             version: PROTOCOL_VERSION
         }));
+    }
+
+    /// A port control that publishes what it is asked and lists it with the bind it was given.
+    struct Fake {
+        ports: std::cell::RefCell<Vec<PublishedPort>>,
+        bind: IpAddr,
+    }
+
+    impl Control for Fake {
+        fn list(&self) -> Result<Vec<PublishedPort>, String> {
+            Ok(self.ports.borrow().clone())
+        }
+        fn add(&self, guest_port: u16, host_port: u16) -> Result<Vec<PublishedPort>, String> {
+            self.ports
+                .borrow_mut()
+                .push(published(host_port.max(40000), guest_port, self.bind));
+            self.list()
+        }
+        fn remove(&self, guest_port: u16) -> Result<Vec<PublishedPort>, String> {
+            self.ports
+                .borrow_mut()
+                .retain(|port| port.guest_port != guest_port);
+            self.list()
+        }
+    }
+
+    fn add_request(guest_port: u16) -> Request {
+        Request::PortAdd {
+            version: PROTOCOL_VERSION,
+            guest_port,
+            host_port: 0,
+        }
+    }
+
+    #[test]
+    fn a_port_that_cannot_be_reported_is_taken_back() {
+        // The port is bound on all interfaces: the answer would be refused.
+        let control = Fake {
+            ports: Default::default(),
+            bind: Ipv4Addr::UNSPECIFIED.into(),
+        };
+        assert!(answer(&control, &add_request(3000)).is_none());
+        assert!(
+            control.ports.borrow().is_empty(),
+            "the port stayed published"
+        );
+        // A port that was already published is not taken away by a refused repeat.
+        control
+            .ports
+            .borrow_mut()
+            .push(published(40001, 3000, Ipv4Addr::LOCALHOST.into()));
+        control
+            .ports
+            .borrow_mut()
+            .push(published(40002, 4000, Ipv4Addr::UNSPECIFIED.into()));
+        assert!(answer(&control, &add_request(3000)).is_none());
+        assert!(control
+            .ports
+            .borrow()
+            .iter()
+            .any(|port| port.guest_port == 3000));
+    }
+
+    #[test]
+    fn a_port_on_the_loopback_is_published_and_reported() {
+        let control = Fake {
+            ports: Default::default(),
+            bind: Ipv4Addr::LOCALHOST.into(),
+        };
+        let Some(Response::Ports { ports, .. }) = answer(&control, &add_request(3000)) else {
+            panic!("a loopback port is reported");
+        };
+        assert_eq!(ports.len(), 1);
+        assert_eq!(control.ports.borrow().len(), 1);
     }
 
     #[test]

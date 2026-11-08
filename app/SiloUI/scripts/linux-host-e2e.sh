@@ -16,6 +16,7 @@ if [[ $# -ne 1 ]]; then
   echo "usage: $0 ENGINE_DIR" >&2
   exit 2
 fi
+engine_dir="$1"
 silo="$1/silo"
 name="${SILO_E2E_COMPUTER:-e2e-hosts-ci}"
 fork="$name-fork"
@@ -64,6 +65,33 @@ cleanup() {
 in_container() { "$silo" exec "$ctr" -- "$@"; }
 # The same with a timeout in seconds.
 in_container_for() { local seconds="$1"; shift; "$silo" exec "$ctr" --timeout "$seconds" -- "$@"; }
+
+# Runs a command as root in the container, the way Silo runs its own root commands: through the
+# engine's helper and `crun exec`, with the seven capabilities and the init shim in front. `silo
+# exec` runs as the working account, which cannot become root (no_new_privs), so the commands that
+# need root, such as a package install, use this.
+root_in_container() {
+  local state process status=0
+  state=$(engine_find -path "*containers/computers/$ctr/state" -type d | head -n 1)
+  [[ -n "$state" ]] || { echo "no state folder found for $ctr" >&2; return 1; }
+  process=$(mktemp)
+  python3 - "$process" /silo/init --own-group -- "$@" <<'PY'
+import json, sys
+caps = ["CAP_CHOWN", "CAP_DAC_OVERRIDE", "CAP_FOWNER", "CAP_FSETID", "CAP_KILL", "CAP_SETGID", "CAP_SETUID"]
+json.dump({
+    "terminal": False,
+    "user": {"uid": 0, "gid": 0},
+    "args": sys.argv[2:],
+    "env": ["PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "HOME=/root", "DEBIAN_FRONTEND=noninteractive"],
+    "cwd": "/",
+    "noNewPrivileges": True,
+    "capabilities": {k: caps for k in ("effective", "bounding", "inheritable", "ambient", "permitted")},
+}, open(sys.argv[1], "w"))
+PY
+  "$engine_dir/silo-ctr" enter --state "$state" -- crun --root "$state/crun" --cgroup-manager=cgroupfs exec --process "$process" "$ctr" || status=$?
+  rm -f "$process"
+  return "$status"
+}
 
 expect() {
   local what="$1" got="$2" wanted="$3"
@@ -254,6 +282,30 @@ container_network_features() {
   expect "guest placeholder" "$(in_container sh -c 'printf %s "$E2E_FAKE_TOKEN"')" "$placeholder"
   expect "GitHub placeholder" "$(in_container sh -c 'printf %s "$GH_TOKEN"')" '$MSB_SILO_GITHUB'
   expect "the value inside the guest" "$(in_container sh -c "cat /proc/self/environ /proc/1/environ 2>/dev/null | grep -c '$fake' || true")" 0
+
+  step "Reinstalling ca-certificates in $ctr, as an upgrade of it would"
+  # The guest's trust bundle is its own file: the package replaces it by renaming a new one over
+  # it, which fails with EBUSY when a mount sits on the path. Silo adds only the gateway's CA
+  # certificate, as a local one, and runs update-ca-certificates at each start. The substitution
+  # check below then shows HTTPS through the gateway still verifies after the reinstall, with no
+  # restart in between.
+  local installed=0
+  for _ in 1 2 3; do
+    if root_in_container apt-get update -qq && root_in_container apt-get install -y -qq --reinstall ca-certificates; then
+      installed=1
+      break
+    fi
+    sleep 5
+  done
+  [[ "$installed" == 1 ]] || { echo "reinstalling ca-certificates in $ctr failed" >&2; exit 1; }
+  root_in_container update-ca-certificates --fresh
+  expect "gateway CA in the trust store" "$(in_container sh -c 'test -s /etc/ssl/certs/silo-gateway.pem && echo linked')" linked
+  expect "bundle variable" "$(in_container sh -c 'printf %s "$SSL_CERT_FILE"')" /etc/ssl/certs/ca-certificates.crt
+  expect "node variable" "$(in_container sh -c 'printf %s "$NODE_EXTRA_CA_CERTS"')" /usr/local/share/ca-certificates/silo-gateway.crt
+  # The guest can add a CA of its own beside the gateway's.
+  root_in_container sh -c 'cp /usr/local/share/ca-certificates/silo-gateway.crt /usr/local/share/ca-certificates/e2e-extra.crt && update-ca-certificates' >/dev/null
+  expect "a CA the guest added" "$(in_container sh -c 'test -s /etc/ssl/certs/e2e-extra.pem && echo linked')" linked
+  root_in_container sh -c 'rm -f /usr/local/share/ca-certificates/e2e-extra.crt && update-ca-certificates --fresh' >/dev/null
 
   step "Checking that the secret is substituted for its host and no other"
   local reply status

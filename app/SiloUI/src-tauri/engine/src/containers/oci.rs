@@ -13,9 +13,15 @@ use std::path::Path;
 /// Where the shim binary sits inside the container.
 pub const INIT_PATH: &str = "/silo/init";
 
-/// The system trust bundle (Debian and Ubuntu), which the gateway's CA is added to so the guest
-/// accepts the certificates the gateway issues toward hosts a secret is allowed for.
+/// The system trust bundle (Debian and Ubuntu). It stays the guest's own writable file:
+/// `update-ca-certificates` rebuilds it, with the gateway CA below included.
 pub const CA_BUNDLE_PATH: &str = "/etc/ssl/certs/ca-certificates.crt";
+
+/// Where the computer's gateway CA certificate is bound (read-only), in the directory
+/// `update-ca-certificates` reads local certificates from. Silo runs it at start, so the guest
+/// accepts the certificates the gateway issues toward hosts a secret is allowed for, and a guest
+/// can add its own CA beside this one.
+pub const GATEWAY_CA_PATH: &str = "/usr/local/share/ca-certificates/silo-gateway.crt";
 
 /// What Silo's own root commands (account setup, installs) may use inside the container's user
 /// namespace; user processes and the container's first process have none.
@@ -53,8 +59,8 @@ pub struct Params<'a> {
     pub cgroup_path: &'a str,
     pub resolv_conf: &'a Path,
     pub hosts: &'a Path,
-    /// The system trust bundle with the computer's gateway CA added.
-    pub ca_bundle: &'a Path,
+    /// The computer's gateway CA certificate (PEM), bound at [`GATEWAY_CA_PATH`].
+    pub ca_cert: &'a Path,
     /// `std::env::consts::ARCH`.
     pub arch: &'a str,
 }
@@ -153,7 +159,7 @@ pub fn build(params: &Params<'_>) -> Result<Spec, String> {
              "options": ["rbind", "ro", "nosuid", "nodev", "noexec"]},
             {"destination": "/etc/hosts", "type": "bind", "source": params.hosts,
              "options": ["rbind", "ro", "nosuid", "nodev", "noexec"]},
-            {"destination": CA_BUNDLE_PATH, "type": "bind", "source": params.ca_bundle,
+            {"destination": GATEWAY_CA_PATH, "type": "bind", "source": params.ca_cert,
              "options": ["rbind", "ro", "nosuid", "nodev", "noexec"]},
         ],
         "linux": {
@@ -202,7 +208,7 @@ mod tests {
             cgroup_path: "/user.slice/x.scope/ctr",
             resolv_conf: Path::new("/r/state/resolv.conf"),
             hosts: Path::new("/r/state/hosts"),
-            ca_bundle: Path::new("/r/state/ca-bundle.crt"),
+            ca_cert: Path::new("/r/state/gateway-ca.crt"),
             arch: "x86_64",
         })
         .unwrap()
@@ -370,8 +376,21 @@ mod tests {
             .collect();
         assert_eq!(
             bound,
-            ["/etc/resolv.conf", "/etc/hosts", "/etc/ssl/certs/ca-certificates.crt"]
+            [
+                "/etc/resolv.conf",
+                "/etc/hosts",
+                "/usr/local/share/ca-certificates/silo-gateway.crt"
+            ]
         );
+        // The system bundle stays the guest's own writable file: `update-ca-certificates` replaces
+        // it by renaming over it, which fails on a mount point.
+        assert!(!bound.contains(&CA_BUNDLE_PATH.to_owned()));
+        let gateway_ca = mounts
+            .iter()
+            .find(|m| m.destination() == &PathBuf::from(GATEWAY_CA_PATH))
+            .unwrap();
+        let options = gateway_ca.options().as_ref().unwrap();
+        assert!(options.contains(&"ro".to_owned()), "{options:?}");
         let text = serde_json::to_string(&spec).unwrap();
         assert!(
             !text.contains("docker.sock")

@@ -51,8 +51,9 @@ const TERM_WAIT: Duration = Duration::from_secs(15);
 pub struct Running {
     gateway: Mutex<Gateway>,
     /// The general secrets the gateway substitutes (their placeholders are in the guest's
-    /// environment). A secret assigned while the computer runs is recorded but not added here
-    /// until the next start, as for a virtual machine.
+    /// environment). It follows the gateway: a change the plan applies at once (a changed value,
+    /// a removal) updates both together; a new assignment made while the computer runs is only
+    /// recorded (`--next-start`) and joins at the next start, as for a virtual machine.
     active: Mutex<Vec<String>>,
 }
 
@@ -87,6 +88,19 @@ fn registry() -> MutexGuard<'static, Option<HashMap<String, Arc<Running>>>> {
 /// The gateway of a container this engine started, if it is registered.
 pub fn running(name: &str) -> Option<Arc<Running>> {
     registry().as_ref().and_then(|map| map.get(name).cloned())
+}
+
+/// Registers `gateway` as the running gateway of `name`, as a start does.
+#[cfg(test)]
+pub fn register_for_test(name: &str, gateway: Gateway, active: Vec<String>) -> Arc<Running> {
+    let running = Arc::new(Running {
+        gateway: Mutex::new(gateway),
+        active: Mutex::new(active),
+    });
+    registry()
+        .get_or_insert_with(HashMap::new)
+        .insert(name.to_owned(), running.clone());
+    running
 }
 
 /// The general secrets the running gateway of `name` holds; none when it is not running.
@@ -269,24 +283,6 @@ fn private_dir(path: &Path) -> Result<(), String> {
         .map_err(io)
 }
 
-/// The image's system trust bundle followed by the computer's CA.
-fn ca_bundle(rootfs: &Path, ca_cert: &str) -> Result<String, String> {
-    const LIMIT: u64 = 4 * 1024 * 1024;
-    let path = rootfs.join(oci::CA_BUNDLE_PATH.trim_start_matches('/'));
-    let missing = || "The container image has no system trust bundle.".to_owned();
-    let meta = std::fs::symlink_metadata(&path).map_err(|_| missing())?;
-    if !meta.is_file() || meta.len() > LIMIT {
-        return Err(missing());
-    }
-    let mut bundle = std::fs::read_to_string(&path).map_err(|_| missing())?;
-    if !bundle.ends_with('\n') {
-        bundle.push('\n');
-    }
-    bundle.push_str(ca_cert.trim_end());
-    bundle.push('\n');
-    Ok(bundle)
-}
-
 /// The file the gateway appends its credential-use events to: where `computers.credentials`
 /// reads a Linux computer's events, so the credentials-used line needs no container case.
 fn usage_log_file(home: &Path, name: &str) -> Result<PathBuf, String> {
@@ -416,14 +412,17 @@ fn launch(
     let boot = boot_layer(layout, tools)?;
     let uid = unsafe { libc::getuid() };
     let unit = unit_name(paths, name);
-    // The computer's certificate authority joins the guest's trust bundle, as the runtime does
-    // for a virtual machine, so a guest accepts the certificate the gateway presents for a host
-    // a secret is allowed for.
+    // The computer's certificate authority is bound into the guest as one local certificate and
+    // joins the guest's trust bundle when Silo runs `update-ca-certificates` after the start (see
+    // `containers::install_gateway_ca`), as the runtime does for a virtual machine, so a guest
+    // accepts the certificate the gateway presents for a host a secret is allowed for. The
+    // bundle itself stays the guest's own file: nothing is bound over it, and nothing is read
+    // from the image here.
     let id = record.label("silo.machine-id").unwrap_or(name).to_owned();
     let (ca_cert, ca_key) = computer_ca(&tools.gateway, &id)?;
     write_readable(
-        &state.join("ca-bundle.crt"),
-        &ca_bundle(rootfs, &ca_cert)?,
+        &state.join("gateway-ca.crt"),
+        &format!("{}\n", ca_cert.trim_end()),
     )?;
     let spec = oci::build(&oci::Params {
         name,
@@ -431,7 +430,7 @@ fn launch(
         cgroup_path: &cgroup_path(uid, &unit),
         resolv_conf: &state.join("resolv.conf"),
         hosts: &state.join("hosts"),
-        ca_bundle: &state.join("ca-bundle.crt"),
+        ca_cert: &state.join("gateway-ca.crt"),
         arch: std::env::consts::ARCH,
     })?;
     std::fs::write(
@@ -818,6 +817,23 @@ fn exec_directory(dir: &ComputerDir) -> Result<PathBuf, String> {
     Ok(directory)
 }
 
+/// What points tools at the guest's trust, as the runtime's guest agent sets it in a virtual
+/// machine: the system bundle (which `update-ca-certificates` has added the gateway CA to) for
+/// OpenSSL, curl and Python's `requests`, and the gateway CA itself for Node, which adds a file
+/// to its built-in roots instead of replacing them.
+fn trust_environment() -> [(String, String); 4] {
+    let bundle = oci::CA_BUNDLE_PATH.to_owned();
+    [
+        ("SSL_CERT_FILE".to_owned(), bundle.clone()),
+        ("REQUESTS_CA_BUNDLE".to_owned(), bundle.clone()),
+        ("CURL_CA_BUNDLE".to_owned(), bundle),
+        (
+            "NODE_EXTRA_CA_CERTS".to_owned(),
+            oci::GATEWAY_CA_PATH.to_owned(),
+        ),
+    ]
+}
+
 /// The `crun exec` command for `exec`, run as `uid`/`gid` (and the user's other groups) with the
 /// given environment.
 ///
@@ -857,6 +873,7 @@ pub fn exec_command(
         ("LANG".to_owned(), "C.UTF-8".to_owned()),
         ("SILO_RUNTIME".to_owned(), "container".to_owned()),
     ];
+    environment.extend(trust_environment());
     // The computer's own environment, then the placeholders of the secrets its gateway holds.
     let own = record
         .env
@@ -932,21 +949,6 @@ pub fn exec_command(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn the_gateway_ca_follows_the_images_trust_bundle() {
-        let rootfs = tempfile::tempdir().unwrap();
-        let certs = rootfs.path().join("etc/ssl/certs");
-        std::fs::create_dir_all(&certs).unwrap();
-        std::fs::write(certs.join("ca-certificates.crt"), "PUBLIC-ROOTS").unwrap();
-        let bundle = ca_bundle(rootfs.path(), "GATEWAY-CA\n").unwrap();
-        assert_eq!(bundle, "PUBLIC-ROOTS\nGATEWAY-CA\n");
-        // A link in the image is not followed to a host file.
-        std::fs::remove_file(certs.join("ca-certificates.crt")).unwrap();
-        std::os::unix::fs::symlink("/etc/passwd", certs.join("ca-certificates.crt")).unwrap();
-        assert!(ca_bundle(rootfs.path(), "GATEWAY-CA").is_err());
-        assert!(ca_bundle(tempfile::tempdir().unwrap().path(), "GATEWAY-CA").is_err());
-    }
 
     #[test]
     fn the_cgroup_is_a_leaf_of_the_users_scope() {
@@ -1210,6 +1212,22 @@ mod tests {
             ]
         );
         assert!(process.get("capabilities").is_none());
+        // Tools trust the gateway CA the way they do in a virtual machine: OpenSSL, curl and
+        // `requests` through the system bundle, Node through the CA file itself.
+        let env: Vec<&str> = process["env"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| e.as_str().unwrap())
+            .collect();
+        for wanted in [
+            "SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt",
+            "REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt",
+            "CURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt",
+            "NODE_EXTRA_CA_CERTS=/usr/local/share/ca-certificates/silo-gateway.crt",
+        ] {
+            assert!(env.contains(&wanted), "{wanted} missing from {env:?}");
+        }
         // Without a limit (a streaming command) there is no timeout wrapper.
         let mut open = exec_of("silo");
         open.timeout = None;

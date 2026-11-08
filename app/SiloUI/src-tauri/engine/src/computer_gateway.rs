@@ -534,6 +534,36 @@ pub fn computer_ca(
 }
 
 #[cfg(test)]
+impl Gateway {
+    /// A gateway whose process is a long sleep: only the control link is real.
+    pub(crate) fn for_test(control: UnixStream) -> Gateway {
+        const CERT: &str = "-----BEGIN CERTIFICATE-----\nx\n-----END CERTIFICATE-----";
+        let child = Command::new("sleep").arg("30").spawn().unwrap();
+        control.set_read_timeout(Some(UPDATE_TIMEOUT)).unwrap();
+        control.set_write_timeout(Some(UPDATE_TIMEOUT)).unwrap();
+        Gateway {
+            child: Some(child),
+            control,
+            revision: 0,
+            ready: Ready {
+                version: 1,
+                kind: "ready".into(),
+                slot: 7,
+                guest_ipv4: Ipv4Addr::new(172, 30, 0, 6),
+                gateway_ipv4: Ipv4Addr::new(172, 30, 0, 5),
+                prefix_len: 30,
+                dns_ipv4: Ipv4Addr::new(172, 30, 0, 5),
+                guest_mac: [2, 0, 0, 0, 0, 7],
+                gateway_mac: [2, 0, 0, 0, 0, 8],
+                mtu: 1500,
+                ca_cert_pem: CERT.into(),
+                loopback_ports: Vec::new(),
+            },
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::{os::fd::FromRawFd, thread};
@@ -690,28 +720,7 @@ mod tests {
 
     /// A gateway whose process is a long sleep: only the control link is real.
     fn with_sleeping_child(control: UnixStream) -> Gateway {
-        let child = Command::new("sleep").arg("30").spawn().unwrap();
-        control.set_read_timeout(Some(UPDATE_TIMEOUT)).unwrap();
-        control.set_write_timeout(Some(UPDATE_TIMEOUT)).unwrap();
-        Gateway {
-            child: Some(child),
-            control,
-            revision: 0,
-            ready: Ready {
-                version: 1,
-                kind: "ready".into(),
-                slot: 7,
-                guest_ipv4: Ipv4Addr::new(172, 30, 0, 6),
-                gateway_ipv4: Ipv4Addr::new(172, 30, 0, 5),
-                prefix_len: 30,
-                dns_ipv4: Ipv4Addr::new(172, 30, 0, 5),
-                guest_mac: [2, 0, 0, 0, 0, 7],
-                gateway_mac: [2, 0, 0, 0, 0, 8],
-                mtu: 1500,
-                ca_cert_pem: CERT.into(),
-                loopback_ports: Vec::new(),
-            },
-        }
+        Gateway::for_test(control)
     }
 
     #[test]

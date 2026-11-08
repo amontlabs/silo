@@ -192,18 +192,39 @@ fn modify_computer(
 ) -> Result<(), RuntimeError> {
     let dir = Layout::new(&paths.home).computer(&modify.name);
     let before = record_of(paths, &modify.name)?;
-    let mut after = before.clone();
-    secrets::apply_to_record(&mut after, modify).map_err(RuntimeError::Invalid)?;
+    // The change is checked before anything is applied; it is written below, to the record as it
+    // is then, not to a copy read before the gateway exchange.
+    secrets::apply_to_record(&mut before.clone(), modify).map_err(RuntimeError::Invalid)?;
     #[cfg(target_os = "linux")]
     live_update(paths, &before, modify, material)?;
     #[cfg(not(target_os = "linux"))]
     let _ = material;
+    record_change(&dir, modify)
+}
+
+/// Writes a `modify` into the record as it is now, so a change another request made while this
+/// one waited on the gateway is kept.
+fn record_change(dir: &layout::ComputerDir, modify: &args::Modify) -> Result<(), RuntimeError> {
+    let mut refused = None;
     dir.update_record(|record| {
-        record.secrets = after.secrets.clone();
-        record.github = after.github;
+        refused = secrets::apply_to_record(record, modify).err();
     })
-    .map(|_| ())
-    .map_err(RuntimeError::Unavailable)
+    .map_err(RuntimeError::Unavailable)?;
+    // The check depends on the change alone, so it passed before; were it ever to fail the record
+    // would hold a half-applied change, so it is reported rather than hidden.
+    match refused {
+        Some(detail) => Err(RuntimeError::Invalid(detail)),
+        None => Ok(()),
+    }
+}
+
+/// Why a change to the running gateway did not apply.
+#[cfg(target_os = "linux")]
+enum LiveFailure {
+    /// Refused before the gateway was asked: the gateway is as it was.
+    Refused(RuntimeError),
+    /// An exchange with the gateway failed. The gateway fails closed: it has stopped.
+    Exchange(String),
 }
 
 #[cfg(target_os = "linux")]
@@ -213,8 +234,6 @@ fn live_update(
     modify: &args::Modify,
     material: &Material<'_>,
 ) -> Result<(), RuntimeError> {
-    use crate::computer_gateway::Secret;
-    use zeroize::Zeroizing;
     let name = modify.name.as_str();
     if lifecycle::status(paths, name, before) != lifecycle::Status::Running {
         return Ok(());
@@ -222,24 +241,67 @@ fn live_update(
     let Some(running) = lifecycle::running(name) else {
         return Ok(());
     };
-    let rejected = |detail: String| RuntimeError::Failed {
-        operation: "Updating the computer".into(),
-        exit_code: Some(1),
-        detail,
-    };
+    match apply_live(&running, before, modify, material) {
+        Ok(()) => Ok(()),
+        Err(LiveFailure::Refused(error)) => Err(error),
+        Err(LiveFailure::Exchange(detail)) => {
+            let tools = tools::Tools::locate(paths).ok();
+            Err(stopped_after_failed_exchange(
+                paths,
+                tools.as_ref(),
+                before,
+                detail,
+            ))
+        }
+    }
+}
+
+/// A gateway that failed an exchange has stopped and the computer has no network, but its
+/// processes run on: the computer is stopped too, so what the disk and the interface say matches
+/// what is true. The error names both.
+#[cfg(target_os = "linux")]
+fn stopped_after_failed_exchange(
+    paths: &RuntimePaths,
+    tools: Option<&tools::Tools>,
+    record: &ComputerRecord,
+    detail: String,
+) -> RuntimeError {
+    let stopped = tools.map(|tools| lifecycle::stop(paths, tools, &record.name, record));
+    eprintln!("Updating container computer {}: {detail}", record.name);
+    RuntimeError::Unavailable(match stopped {
+        Some(Ok(())) => format!(
+            "Silo could not update the network gateway of container computer {}, so it stopped the computer. Start it again.",
+            record.name
+        ),
+        _ => format!(
+            "Silo could not update the network gateway of container computer {}, and could not stop the computer. Stop it before using it.",
+            record.name
+        ),
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn apply_live(
+    running: &lifecycle::Running,
+    before: &ComputerRecord,
+    modify: &args::Modify,
+    material: &Material<'_>,
+) -> Result<(), LiveFailure> {
+    use crate::computer_gateway::Secret;
+    use zeroize::Zeroizing;
     let mut active = running.active_secrets();
     let mut gateway = running.gateway();
     for spec in modify.put.iter().filter(|_| !modify.next_start) {
         if spec.name == args::GITHUB_SECRET_NAME {
             if !before.github {
-                return Err(RuntimeError::Invalid(
+                return Err(LiveFailure::Refused(RuntimeError::Invalid(
                     "This computer was started without GitHub access. Restart it to turn GitHub access on."
                         .into(),
-                ));
+                )));
             }
             gateway
                 .set_github_profile(Some(material.github_profile))
-                .map_err(rejected)?;
+                .map_err(LiveFailure::Exchange)?;
             continue;
         }
         let Some((_, value, hosts)) = material
@@ -247,10 +309,10 @@ fn live_update(
             .iter()
             .find(|(secret, _, _)| secret == &spec.name)
         else {
-            return Err(RuntimeError::Invalid(format!(
+            return Err(LiveFailure::Refused(RuntimeError::Invalid(format!(
                 "The value of secret {} is not available to the engine.",
                 spec.name
-            )));
+            ))));
         };
         gateway
             .put_secret(&Secret {
@@ -258,7 +320,7 @@ fn live_update(
                 value: Zeroizing::new(value.clone()),
                 allowed_hosts: hosts.clone(),
             })
-            .map_err(rejected)?;
+            .map_err(LiveFailure::Exchange)?;
         if !active.contains(&spec.name) {
             active.push(spec.name.clone());
         }
@@ -267,7 +329,9 @@ fn live_update(
     for removed in &modify.remove {
         // The gateway refuses to remove a secret it does not hold, which would stop it.
         if active.contains(removed) {
-            gateway.remove_secret(removed).map_err(rejected)?;
+            gateway
+                .remove_secret(removed)
+                .map_err(LiveFailure::Exchange)?;
             active.retain(|name| name != removed);
             running.set_active(active.clone());
         }
@@ -435,7 +499,51 @@ fn start(
 ) -> Result<(), RuntimeError> {
     require_host()?;
     let tools = tools::Tools::locate(paths)?;
-    lifecycle::start(paths, &tools, name, timeout, material)
+    let running_before =
+        lifecycle::status(paths, name, &record_of(paths, name)?) == lifecycle::Status::Running;
+    lifecycle::start(paths, &tools, name, timeout, material)?;
+    if running_before {
+        return Ok(());
+    }
+    // A computer that cannot trust its gateway's certificates would fail every request to a host
+    // a secret is allowed for, so it does not stay up.
+    install_gateway_ca(paths, name).map_err(|error| {
+        eprintln!("Starting container computer {name}: the gateway certificate: {error:?}");
+        let _ = stop(paths, name);
+        RuntimeError::Unavailable(format!(
+            "Silo could not add its network gateway's certificate to the trust store of container computer {name}, so it did not start. The image needs update-ca-certificates."
+        ))
+    })
+}
+
+/// The root command that adds the gateway CA (bound at [`oci::GATEWAY_CA_PATH`]) to the guest's
+/// trust bundle. `--fresh` rebuilds the certificate links, so a CA an earlier start left in the
+/// computer's own files is dropped when it is no longer the one bound.
+#[cfg(target_os = "linux")]
+fn gateway_ca_command(name: &str) -> args::Exec {
+    args::Exec {
+        name: name.to_owned(),
+        user: Some("root".into()),
+        env: Vec::new(),
+        workdir: Some("/".into()),
+        no_start: true,
+        timeout: Some(GATEWAY_CA_TIMEOUT),
+        argv: vec!["update-ca-certificates".into(), "--fresh".into()],
+    }
+}
+
+/// How long `update-ca-certificates` may take, hooks (a Java trust store, say) included.
+#[cfg(target_os = "linux")]
+const GATEWAY_CA_TIMEOUT: Duration = Duration::from_secs(120);
+
+#[cfg(target_os = "linux")]
+fn install_gateway_ca(paths: &RuntimePaths, name: &str) -> Result<(), RuntimeError> {
+    exec_and_wait(
+        paths,
+        &gateway_ca_command(name),
+        GATEWAY_CA_TIMEOUT + Duration::from_secs(10),
+    )
+    .map(|_| ())
 }
 
 #[cfg(target_os = "linux")]
@@ -652,6 +760,147 @@ mod tests {
         let mut record = new_record(&create, &image);
         record.started_once = started;
         dir.write_record(&record).unwrap();
+    }
+
+    fn modification(name: &str, put: &[&str], remove: &[&str]) -> args::Modify {
+        args::Modify {
+            name: name.into(),
+            put: put
+                .iter()
+                .map(|secret| args::SecretSpec {
+                    name: (*secret).into(),
+                    allowed_hosts: vec!["api.example.test".into()],
+                })
+                .collect(),
+            remove: remove.iter().map(|secret| (*secret).to_owned()).collect(),
+            next_start: false,
+        }
+    }
+
+    #[test]
+    fn a_change_is_written_to_the_record_as_it_is_when_the_exchange_is_over() {
+        let home = tempfile::tempdir().unwrap();
+        make(home.path(), "box", true);
+        let dir = Layout::new(home.path()).computer("box");
+        let before = dir.read_record().unwrap();
+        // Another request assigns a secret while this one waits on the gateway.
+        dir.update_record(|record| {
+            record.secrets.push(layout::SecretRecord {
+                name: "OTHER".into(),
+                allowed_hosts: vec!["other.example.test".into()],
+            });
+            record.started_once = true;
+        })
+        .unwrap();
+        record_change(&dir, &modification("box", &["MINE"], &[])).unwrap();
+        let after = dir.read_record().unwrap();
+        let names: Vec<&str> = after.secrets.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(
+            names,
+            ["MINE", "OTHER"],
+            "the concurrent assignment was lost"
+        );
+        assert!(before.secrets.is_empty());
+        // A removal takes only what it names.
+        record_change(&dir, &modification("box", &[], &["MINE"])).unwrap();
+        let names: Vec<String> = dir
+            .read_record()
+            .unwrap()
+            .secrets
+            .into_iter()
+            .map(|s| s.name)
+            .collect();
+        assert_eq!(names, ["OTHER"]);
+    }
+
+    #[cfg(target_os = "linux")]
+    fn unreachable_tools(directory: &std::path::Path) -> tools::Tools {
+        let missing = |name: &str| directory.join(name);
+        tools::Tools {
+            ctr: missing("silo-ctr"),
+            init: missing("silo-init"),
+            gateway: missing("gateway"),
+            crun: missing("crun"),
+            skopeo: missing("skopeo"),
+            umoci: missing("umoci"),
+            systemd_run: missing("systemd-run"),
+            systemctl: missing("systemctl"),
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_failed_gateway_exchange_stops_the_computer_instead_of_leaving_it_looking_stopped() {
+        use std::os::unix::net::UnixStream;
+        let home = tempfile::tempdir().unwrap();
+        let paths = crate::test_support::paths(home.path());
+        make(&paths.home, "exchange-fails", true);
+        let record = record_of(&paths, "exchange-fails").unwrap();
+        // The gateway's control link is gone: its next exchange fails.
+        let (control, peer) = UnixStream::pair().unwrap();
+        drop(peer);
+        let running = lifecycle::register_for_test(
+            "exchange-fails",
+            crate::computer_gateway::Gateway::for_test(control),
+            vec!["TOKEN".into()],
+        );
+        let modify = modification("exchange-fails", &[], &["TOKEN"]);
+        let failure = apply_live(&running, &record, &modify, &Material::NONE)
+            .err()
+            .expect("the exchange should fail");
+        let LiveFailure::Exchange(detail) = failure else {
+            panic!("a refused exchange is not a failed one");
+        };
+        // The computer is still registered as running until the failure is handled.
+        assert!(lifecycle::running("exchange-fails").is_some());
+        let tools = unreachable_tools(home.path());
+        let error = stopped_after_failed_exchange(&paths, Some(&tools), &record, detail);
+        match error {
+            RuntimeError::Unavailable(message) => {
+                assert!(message.contains("stopped the computer"), "{message}");
+                assert!(!message.contains("could not stop"), "{message}");
+            }
+            other => panic!("{other:?}"),
+        }
+        // Stopped: no gateway is registered, so the computer reads as stopped on disk and in the UI.
+        assert!(lifecycle::running("exchange-fails").is_none());
+        assert!(lifecycle::active_secrets("exchange-fails").is_empty());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_change_refused_before_the_exchange_leaves_the_computer_running() {
+        use std::os::unix::net::UnixStream;
+        let home = tempfile::tempdir().unwrap();
+        let paths = crate::test_support::paths(home.path());
+        make(&paths.home, "refused", true);
+        let record = record_of(&paths, "refused").unwrap();
+        let (control, _peer) = UnixStream::pair().unwrap();
+        let running = lifecycle::register_for_test(
+            "refused",
+            crate::computer_gateway::Gateway::for_test(control),
+            Vec::new(),
+        );
+        // The engine holds no value for the secret: nothing is asked of the gateway.
+        let modify = modification("refused", &["MISSING"], &[]);
+        let failure = apply_live(&running, &record, &modify, &Material::NONE)
+            .err()
+            .expect("the change should be refused");
+        assert!(matches!(
+            failure,
+            LiveFailure::Refused(RuntimeError::Invalid(_))
+        ));
+        assert!(lifecycle::running("refused").is_some());
+        running.gateway().close();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn the_gateway_ca_is_added_by_a_root_update_of_the_trust_store() {
+        let exec = gateway_ca_command("dev");
+        assert_eq!(exec.user.as_deref(), Some("root"));
+        assert_eq!(exec.argv, ["update-ca-certificates", "--fresh"]);
+        assert!(exec.timeout.is_some());
     }
 
     #[test]
