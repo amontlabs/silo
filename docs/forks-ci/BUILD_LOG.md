@@ -71,7 +71,7 @@ Design questions: [DESIGN-QUESTIONS.md](DESIGN-QUESTIONS.md). Advised by Fable 5
   has one; import stores it as the imported computer's fork-time record, so `silo fold --into main` is
   an ordinary three-way keep. A computer without one (a main) imports as its own computer and cannot be
   kept into another. Both advisors.
-- **Q4, guest image:** exports stop embedding the guest image (no `--with-image`); import already
+- **Q4, guest image** (the import claim below was not accurate; see F3): exports stop embedding the guest image (no `--with-image`); import already
   refuses an archive whose image digest differs from this Silo's pinned image (`backup.rs` import
   checks), so the embedded copy is never used. The receiver needs the same pinned image, prepared as for
   a new computer. Fable; the advisor's "pull any digest from the registry" adds an offline failure mode
