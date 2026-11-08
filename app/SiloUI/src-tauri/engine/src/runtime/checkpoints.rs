@@ -5,6 +5,9 @@ use std::collections::{HashMap, HashSet};
 
 pub const RESTORE_EXPECTED_DURATION: Duration = Duration::from_secs(60 * 60);
 
+#[cfg(test)]
+#[path = "checkpoints/import_shell_sweep_tests.rs"]
+mod import_shell_sweep_tests;
 #[path = "checkpoints/native.rs"]
 mod native;
 #[path = "checkpoints/reclaim.rs"]
@@ -4150,9 +4153,16 @@ fn queue_unowned_import_groups(
     Ok(())
 }
 
+/// Most empty import folders one recovery pass removes; the rest wait for the next pass, so the
+/// pass never holds the device-wide gate for long however many leftovers there are.
+const SHELLS_PER_PASS: usize = 32;
+
 /// Removes the empty shells (`.group.lock`, `group.json`) of import groups no checkpoint record
 /// names, which MicroSandbox leaves behind once the last member is removed. A group that still
-/// lists a member, or holds any other file, stays.
+/// lists a member, or holds any other file, stays. One `snapshot list` decides every folder, and
+/// a pass stops at `SHELLS_PER_PASS` removals or when the maintenance budget is spent. The pass
+/// holds the gate as hidden housekeeping that only starts while nothing else waits (the gate has
+/// no cheaper "someone is waiting" check to stop on mid-pass), so the cap and budget bound it.
 fn remove_unowned_import_group_shells(runner: &dyn RuntimeRunner, paths: &RuntimePaths) {
     let Ok(owned) = owned_groups(paths) else {
         return;
@@ -4160,12 +4170,26 @@ fn remove_unowned_import_group_shells(runner: &dyn RuntimeRunner, paths: &Runtim
     let Ok(entries) = fs::read_dir(paths.home.join("snapshots")) else {
         return;
     };
-    for entry in entries.filter_map(Result::ok) {
-        let Some(group) = entry.file_name().to_str().map(str::to_owned) else {
-            continue;
-        };
-        if crate::backup::valid_import_group(&group) && !owned.contains(&group) {
-            remove_empty_group_directory(runner, paths, &group);
+    let mut candidates: Vec<String> = entries
+        .filter_map(Result::ok)
+        .filter_map(|entry| entry.file_name().to_str().map(str::to_owned))
+        .filter(|group| crate::backup::valid_import_group(group) && !owned.contains(group))
+        .collect();
+    if candidates.is_empty() {
+        return;
+    }
+    candidates.sort_unstable();
+    let Ok(inventory) = native::inventory(runner, paths) else {
+        return;
+    };
+    let deadline = Instant::now() + super::shutdown::maintenance_budget();
+    let mut removed = 0;
+    for group in candidates {
+        if removed >= SHELLS_PER_PASS || Instant::now() >= deadline {
+            return;
+        }
+        if remove_empty_group_directory_in(paths, &group, &inventory) {
+            removed += 1;
         }
     }
 }
@@ -4177,9 +4201,25 @@ fn remove_empty_group_directory(runner: &dyn RuntimeRunner, paths: &RuntimePaths
     if !valid_snapshot_group(group) {
         return;
     }
+    let Ok(inventory) = native::inventory(runner, paths) else {
+        return;
+    };
+    remove_empty_group_directory_in(paths, group, &inventory);
+}
+
+/// The removal behind `remove_empty_group_directory`, decided from an inventory the caller
+/// already read. Returns true when the folder was removed.
+fn remove_empty_group_directory_in(
+    paths: &RuntimePaths,
+    group: &str,
+    inventory: &[native::Member],
+) -> bool {
+    if !valid_snapshot_group(group) {
+        return false;
+    }
     let directory = paths.home.join("snapshots").join(group);
     let Ok(entries) = fs::read_dir(&directory) else {
-        return;
+        return false;
     };
     let names: Vec<_> = entries
         .filter_map(Result::ok)
@@ -4189,26 +4229,25 @@ fn remove_empty_group_directory(runner: &dyn RuntimeRunner, paths: &RuntimePaths
         .iter()
         .any(|name| name != ".group.lock" && name != "group.json")
     {
-        return;
+        return false;
     }
-    let Ok(inventory) = native::inventory(runner, paths) else {
-        return;
-    };
     if inventory
         .iter()
         .any(|member| member.group.as_deref() == Some(group))
     {
-        return;
+        return false;
     }
     for name in names {
         if let Err(failure) = fs::remove_file(directory.join(name)) {
             eprintln!("An empty checkpoint group was kept: {failure}");
-            return;
+            return false;
         }
     }
     if let Err(failure) = fs::remove_dir(&directory) {
         eprintln!("An empty checkpoint group was kept: {failure}");
+        return false;
     }
+    true
 }
 
 /// Remove the member a failed capture may have published, unless something already

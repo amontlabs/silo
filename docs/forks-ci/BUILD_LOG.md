@@ -458,3 +458,9 @@ checks passed; the failures were four product problems, all fixed afterwards (te
   takes its folder with it (`05992ceb`, test `a_member_released_later_takes_its_empty_import_group_folder_with_it`).
   **Still dead:** the trimming half of `start_monitor` (`periodic`, warm-computer trims) is not wired into `silod`; not
   changed here, it needs its own decision.
+- **Sweep bounded (review P2).** The shell sweep held the device gate while running one `snapshot list` per empty
+  `silo-import-*` folder. A pass now reads the inventory once and decides every folder from it, removes at most 32 folders
+  and stops at the maintenance budget; the rest wait for the next timer pass. The gate has no cheap "others are waiting"
+  check (its own hidden guard counts), so as with `start_monitor` the pass starts only while nothing waits. Tests in
+  `import_shell_sweep_tests.rs`: one runner call for many folders, the cap leaves the rest, a folder with a member or another
+  file stays.
