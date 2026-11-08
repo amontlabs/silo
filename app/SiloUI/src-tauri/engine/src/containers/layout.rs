@@ -1,16 +1,14 @@
 //! Where a container computer's files live, and the record that describes it.
 //!
-//! ```text
-//! <runtime home>/containers/
-//!   images/<config digest>/rootfs        the pinned guest image, unpacked once per digest
-//!   boot/<hash>/                         the shim layer: silo/init and an empty workspace
-//!   computers/<name>/
-//!     computer.json                      the record (ComputerRecord)
-//!     layers/<n>/                        sealed layers, oldest first (checkpoints, a later phase)
-//!     upper/ work/                       the current writable layer and its overlay work directory
-//!     bundle/config.json                 the OCI configuration crun runs
-//!     state/                             crun's state, the holder's pid files, logs, sockets
-//! ```
+//!     <runtime home>/containers/
+//!       images/<config digest>/rootfs        the pinned guest image, unpacked once per digest
+//!       boot/<hash>/                         the shim layer: silo/init and an empty workspace
+//!       computers/<name>/
+//!         computer.json                      the record (ComputerRecord)
+//!         layers/<n>/                        sealed layers, oldest first (checkpoints, a later phase)
+//!         upper/ work/                       the current writable layer and its overlay work directory
+//!         bundle/config.json                 the OCI configuration crun runs
+//!         state/                             crun's state, the holder's pid files, logs, sockets
 //!
 //! The overlay's lower directories, top first, are the sealed layers newest to oldest, the shim
 //! layer and the image: [`ComputerDir::lower_dirs`].

@@ -4,12 +4,10 @@
 //! delegated so crun can make the container's cgroup, with the computer's memory, task and CPU
 //! limits as scope properties):
 //!
-//! ```text
-//! silo-ctr run          the holder: user + mount + network namespaces, the overlay root, the TAP
-//!   crun run            the container runtime (same process, after exec)
-//!     /silo/init        the container's first process: Landlock, signal forwarding, zombie reaping
+//!     silo-ctr run          the holder: user + mount + network namespaces, the overlay root, the TAP
+//!       crun run            the container runtime (same process, after exec)
+//!         /silo/init        the container's first process: Landlock, signal forwarding, zombie reaping
 //!       sleep infinity
-//! ```
 //!
 //! The holder hands the TAP to the engine, which gives it to one gateway process (CT1) and sends
 //! back the address, route and resolver the gateway answered with. The gateway belongs to this

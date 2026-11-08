@@ -48,6 +48,8 @@ pub(crate) fn default_new_computer_desktops(
     let built_in_image = image_includes_desktop(image_version);
     for configuration in computers {
         let old = previous.iter().find(|old| old.id() == configuration.id());
+        // A container computer has no desktop yet, whatever its image includes.
+        let built_in_image = built_in_image && !configuration.is_container();
         let desktop = &mut configuration.desktop;
         match old {
             Some(old) => {
@@ -986,6 +988,16 @@ mod tests {
             runtime: None,
             desktop,
         }
+    }
+
+    #[test]
+    fn a_new_container_computer_gets_no_desktop_from_its_image() {
+        let mut container = computer("c", None);
+        container.runtime = Some(crate::runtime::ComputerRuntimeKind::Container);
+        let mut computers = vec![container, computer("v", None)];
+        default_new_computer_desktops(&mut computers, &[], "ubuntu-24.04-v5");
+        assert!(computers[0].desktop.is_none());
+        assert!(computers[1].desktop.is_some());
     }
 
     #[test]
