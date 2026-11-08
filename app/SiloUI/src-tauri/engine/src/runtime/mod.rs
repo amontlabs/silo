@@ -1827,6 +1827,27 @@ pub(crate) fn runtime_command(executable: &Path) -> Command {
     command
 }
 
+/// The runtime command for computer `name`, before its arguments: MicroSandbox's `msb` for a
+/// virtual machine, and for a container computer `silod --container-runtime`, which answers the
+/// same `ssh serve` and `exec --tty` arguments (`containers::cli`). Callers that open SSH or a
+/// terminal build their arguments once and take the program from here.
+pub(crate) fn runtime_invocation(paths: &RuntimePaths, name: &str) -> (PathBuf, Vec<String>) {
+    if crate::containers::capability::is_container(&paths.home, name) {
+        crate::containers::runtime_invocation(paths)
+    } else {
+        (paths.executable.clone(), Vec::new())
+    }
+}
+
+/// [`runtime_command`] for computer `name`: the `msb` command for a virtual machine and the
+/// container runtime command for a container.
+pub(crate) fn command_for(paths: &RuntimePaths, name: &str) -> Command {
+    let (program, leading) = runtime_invocation(paths, name);
+    let mut command = runtime_command(&program);
+    command.args(leading);
+    command
+}
+
 fn spawn_runtime(
     paths: &RuntimePaths,
     launch: RuntimeLaunch<'_>,

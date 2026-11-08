@@ -18,6 +18,10 @@ use std::path::{Path, PathBuf};
 
 pub const RECORD_VERSION: u8 = 1;
 
+/// Added to the name of what is unpacked in the id mapping of [`super::idmap`], so a directory an
+/// earlier build made with other file owners is never taken for it.
+pub const OWNERSHIP: &str = "-keepid";
+
 #[derive(Clone, Debug)]
 pub struct Layout {
     root: PathBuf,
@@ -40,7 +44,10 @@ impl Layout {
 
     /// The unpacked image with this config digest (`sha256:<hex>`).
     pub fn image(&self, digest: &str) -> PathBuf {
-        self.images().join(digest.trim_start_matches("sha256:"))
+        self.images().join(format!(
+            "{}{OWNERSHIP}",
+            digest.trim_start_matches("sha256:")
+        ))
     }
 
     pub fn boot(&self, hash: &str) -> PathBuf {
@@ -253,7 +260,7 @@ mod tests {
                 "/h/containers/computers/dev/layers/2",
                 "/h/containers/computers/dev/layers/1",
                 "/h/containers/boot/b",
-                "/h/containers/images/abc",
+                "/h/containers/images/abc-keepid",
             ]
             .map(PathBuf::from)
         );

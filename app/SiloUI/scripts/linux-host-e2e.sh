@@ -51,6 +51,7 @@ cleanup() {
   local status=$?
   trap - EXIT
   rm -f "${stderr_file:-}"
+  remove_editor_key
   for computer in "$ctr2" "$ctr" "$fork" "$name"; do
     if listed "$computer" 2>/dev/null | grep -qx -- "$computer"; then
       echo "Stopping and dropping $computer after a failed run"
@@ -203,6 +204,7 @@ except OSError:
   done
 
   container_network_features
+  container_access_features
 
   step "Stopping and dropping $ctr"
   "$silo" stop "$ctr"
@@ -266,8 +268,7 @@ PY
 }
 
 # Secrets, published ports and the URL proxy in the container, through the same commands a virtual
-# machine uses. (SSH, the editor, a terminal and the in-guest client are refused for a container
-# computer for now.)
+# machine uses.
 container_network_features() {
   step "Giving $ctr a fake secret"
   # A random token shaped like a GitHub one: GitHub answers "Bad credentials" to it, and a
@@ -377,6 +378,130 @@ print(port.get("state") or "-", port.get("hostPort") or "-", port.get("url") or 
   fi
   echo "secret removal: no longer assigned"
   "$silo" drop "$ctr2"
+}
+
+# The runtime home of the container computer: the folder that holds containers/ and sandboxes/.
+container_home() {
+  local computer
+  computer=$(engine_find -path "*containers/computers/$ctr" -type d | head -n 1)
+  [[ -n "$computer" ]] || { echo "no runtime home found for $ctr" >&2; return 1; }
+  dirname "$(dirname "$(dirname "$computer")")"
+}
+
+editor_key_file=""
+remove_editor_key() {
+  if [[ -n "$editor_key_file" && -f "${editor_home:-/nonexistent}/ssh/authorized_keys" ]]; then
+    sed -i '/ silo-e2e-editor$/d' "$editor_home/ssh/authorized_keys" || true
+  fi
+}
+
+# SSH, SFTP, a terminal, the editor's proxy and the in-guest client, which a container computer has
+# through the same commands as a virtual machine.
+container_access_features() {
+  local scratch host
+  scratch=$(mktemp -d)
+
+  step "Setting up SSH for $ctr and running commands over it"
+  host=$("$silo" --json ssh-setup "$ctr" | python3 -c 'import json, sys; print(json.load(sys.stdin)["host"])')
+  local ssh_opts=(-o BatchMode=yes -o ConnectTimeout=30)
+  # The listener is started by the engine when access is enabled; give it a moment.
+  local seen=""
+  for _ in $(seq 1 20); do
+    seen=$(ssh "${ssh_opts[@]}" "$host" uname -a 2>/dev/null || true)
+    [[ "$seen" == Linux* ]] && break
+    sleep 1
+  done
+  if [[ "$seen" != Linux* ]]; then
+    ssh -v "${ssh_opts[@]}" "$host" uname -a >&2 || true
+    echo "ssh $host uname -a did not print a Linux kernel" >&2
+    exit 1
+  fi
+  echo "ssh $host uname -a: $seen"
+  expect "ssh account" "$(ssh "${ssh_opts[@]}" "$host" id -un)" silo
+  expect "ssh exit status" "$(ssh "${ssh_opts[@]}" "$host" 'exit 7' >/dev/null 2>&1; echo $?)" 7
+  expect "ssh without a terminal" "$(ssh "${ssh_opts[@]}" "$host" 'tty' 2>/dev/null || true)" "not a tty"
+  expect "ssh standard input" "$(printf 'piped-input' | ssh "${ssh_opts[@]}" "$host" cat)" piped-input
+  expect "ssh working directory" "$(ssh "${ssh_opts[@]}" "$host" pwd)" /home/silo
+
+  step "Copying files to and from $ctr over SFTP"
+  head -c 300000 /dev/urandom > "$scratch/up.bin"
+  printf 'put %s /workspace/e2e-sftp.bin\nget /workspace/e2e-sftp.bin %s\nls -l /workspace\n' "$scratch/up.bin" "$scratch/down.bin" | sftp "${ssh_opts[@]}" -b - "$host"
+  cmp "$scratch/up.bin" "$scratch/down.bin"
+  expect "file written over sftp, read in the guest" "$(in_container sh -c 'wc -c < /workspace/e2e-sftp.bin | tr -d " "')" 300000
+  expect "file owner" "$(in_container stat -c %U /workspace/e2e-sftp.bin)" silo
+
+  step "Opening a terminal session in $ctr over SSH"
+  local tty_name
+  tty_name=$(ssh -tt "${ssh_opts[@]}" "$host" tty | tr -d '\r')
+  if [[ ! "$tty_name" =~ ^/dev/pts/[0-9]+$ ]]; then echo "ssh -tt tty printed '$tty_name'" >&2; exit 1; fi
+  echo "terminal: $tty_name"
+  local sized
+  sized=$(ssh -tt "${ssh_opts[@]}" "$host" 'stty size' | tr -d '\r')
+  [[ "$sized" =~ ^[0-9]+\ [0-9]+$ ]] || { echo "stty size printed '$sized'" >&2; exit 1; }
+  # A shell on a terminal reads the commands it is sent and ends with the connection.
+  expect "interactive shell" "$(printf 'echo shell-$((6*7))\nexit\n' | ssh -tt "${ssh_opts[@]}" "$host" | tr -d '\r' | grep -o 'shell-42' | head -n 1)" shell-42
+
+  step "Opening the terminal command of $ctr"
+  # The command the app and `silo` launch in a terminal emulator, run on a pseudo-terminal.
+  local home
+  home=$(container_home)
+  local terminal=(/usr/bin/env "MSB_HOME=$home" "MSB_PATH=$engine_dir/msb" "MSB_LIBKRUNFW_PATH=$engine_dir/msb"
+    "$engine_dir/silod" --container-runtime exec "$ctr" --user silo --env USER=silo --env LOGNAME=silo --no-start --workdir /workspace --tty)
+  local typed
+  typed=$(printf 'tty; id -un; pwd; exit\n' | script -qec "${terminal[*]}" /dev/null | tr -d '\r')
+  grep -q '^/dev/pts/[0-9]*$' <<<"$typed" || { echo "the terminal printed: $typed" >&2; exit 1; }
+  grep -qx 'silo' <<<"$typed" || { echo "the terminal did not run as silo: $typed" >&2; exit 1; }
+  grep -qx '/workspace' <<<"$typed" || { echo "the terminal did not start in /workspace: $typed" >&2; exit 1; }
+  echo "terminal command: ok"
+
+  step "Using the editor's proxy (ssh serve --stdio) in $ctr"
+  editor_home="$home"
+  mkdir -p "$home/ssh"
+  ssh-keygen -q -t ed25519 -N '' -f "$scratch/editor_key" -C silo-e2e-editor
+  editor_key_file="$scratch/editor_key"
+  cat "$scratch/editor_key.pub" >> "$home/ssh/authorized_keys"
+  local host_key="$home/sandboxes/$ctr/ssh/host_ed25519"
+  [[ -f "$host_key" ]] || { echo "no host key at $host_key" >&2; exit 1; }
+  printf 'silo-e2e-editor %s\n' "$(ssh-keygen -y -f "$host_key")" > "$scratch/known_hosts"
+  local proxy="/usr/bin/env MSB_HOME=$home MSB_PATH=$engine_dir/msb MSB_LIBKRUNFW_PATH=$engine_dir/msb $engine_dir/silod --container-runtime ssh serve $ctr --stdio --no-start --no-inactivity-timeout"
+  local editor_ssh=(ssh -F /dev/null -o BatchMode=yes -o IdentitiesOnly=yes -o IdentityAgent=none
+    -o "UserKnownHostsFile=$scratch/known_hosts" -o StrictHostKeyChecking=yes -o "ProxyCommand=$proxy")
+  expect "editor proxy" "$("${editor_ssh[@]}" -o "IdentityFile=$scratch/editor_key" -l silo silo-e2e-editor uname -s)" Linux
+  # A key that is not listed is refused, and so is a login for another account.
+  ssh-keygen -q -t ed25519 -N '' -f "$scratch/stranger" -C stranger
+  if "${editor_ssh[@]}" -o "IdentityFile=$scratch/stranger" -l silo silo-e2e-editor true 2>/dev/null; then
+    echo "a key that is not authorized logged in" >&2
+    exit 1
+  fi
+  if "${editor_ssh[@]}" -o "IdentityFile=$scratch/editor_key" -l root silo-e2e-editor true 2>/dev/null; then
+    echo "a login for another account succeeded" >&2
+    exit 1
+  fi
+  echo "editor proxy refuses an unlisted key and another account"
+  remove_editor_key
+  expect "authorized key removed" "$(grep -c silo-e2e-editor "$home/ssh/authorized_keys" || true)" 0
+
+  step "Installing the in-guest client in $ctr"
+  mkdir -p "$scratch/project"
+  (cd "$scratch/project" && "$silo" guest-client install "$ctr" --binary "$silo")
+  expect "client binary" "$(in_container sh -c 'test -x /usr/local/bin/silo && echo installed')" installed
+  expect "client account" "$(in_container id -u)" 1001
+  expect "bridge folder owner" "$(in_container stat -c %U /.msb/silo-bridge)" silo
+  local listed_inside
+  listed_inside=$(in_container silo --in-guest --json list)
+  if ! grep -q "\"$ctr\"" <<<"$listed_inside"; then
+    echo "the in-guest client did not list $ctr: $listed_inside" >&2
+    engine_find -path "*sandboxes/$ctr/runtime" -exec ls -lan {} \; >&2 || true
+    exit 1
+  fi
+  echo "in-guest list: ok"
+  # The client reaches only its own computer and forks; a keep is not offered at all.
+  if in_container silo --in-guest keep "$ctr" >/dev/null 2>&1; then
+    echo "the in-guest client ran a keep" >&2
+    exit 1
+  fi
+  (cd "$scratch/project" && "$silo" guest-client revoke "$ctr") >/dev/null
+  rm -rf "$scratch"
 }
 
 step "Waiting for the engine"

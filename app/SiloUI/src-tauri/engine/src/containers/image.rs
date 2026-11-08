@@ -156,6 +156,8 @@ fn unpack_into(
         &tools.ctr,
         &[
             "userns".as_ref(),
+            "--keep-id".as_ref(),
+            super::idmap::AGENT_ID.to_string().as_ref(),
             "--".as_ref(),
             tools.umoci.as_ref(),
             "unpack".as_ref(),
@@ -166,7 +168,21 @@ fn unpack_into(
     )?;
     let finished = work.join("done");
     std::fs::create_dir_all(&finished).map_err(|e| e.to_string())?;
-    std::fs::rename(bundle.join("rootfs"), finished.join("rootfs")).map_err(|e| e.to_string())?;
+    // The root file system's top directory is root's (a sub-id), which the engine may not move
+    // between folders: the namespace moves it.
+    run_checked(
+        &tools.ctr,
+        &[
+            "userns".as_ref(),
+            "--keep-id".as_ref(),
+            super::idmap::AGENT_ID.to_string().as_ref(),
+            "--".as_ref(),
+            "mv".as_ref(),
+            "--".as_ref(),
+            bundle.join("rootfs").as_ref(),
+            finished.join("rootfs").as_ref(),
+        ],
+    )?;
     std::fs::write(
         finished.join("digest"),
         format!("{}\n", manifest.image_digest),

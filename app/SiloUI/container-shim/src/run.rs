@@ -213,7 +213,7 @@ mod linux {
         if let Some(warning) = crate::common::landlock_warning(&crate::common::landlock_abi()) {
             eprintln!("silo-ctr: warning: {warning}");
         }
-        let spec = userns::resolve(args.sub_uid, args.sub_gid, true)?;
+        let spec = userns::resolve(args.sub_uid, args.sub_gid, true, None)?;
         let crun_root = Path::new(&args.state).join("crun");
         std::fs::create_dir_all(&crun_root)
             .map_err(|error| io_err(&format!("create {}", crun_root.display()), &error))?;

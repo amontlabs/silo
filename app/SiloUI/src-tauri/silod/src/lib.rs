@@ -63,6 +63,11 @@ pub fn entry(args: &[String]) -> Result<i32, String> {
         Some("--service") => service::run_command(&args[2..]),
         Some("--remote-guest") => app::run_remote_guest(&args[2..]),
         Some(REMOTE_BRIDGE_FLAG) => app::run_remote_bridge(&args[2..]),
+        // The runtime command of container computers (`ssh serve`, `exec --tty`), which the editor,
+        // SSH access and terminals start where they start `msb` for a virtual machine.
+        Some(silo_engine::containers::cli::FLAG) => {
+            silo_engine::containers::cli::run(&args[2..])
+        }
         Some("--agent") | None => app::run_agent(),
         Some(argument) => Err(format!("unsupported silod argument: {argument}")),
     }

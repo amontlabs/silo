@@ -1,9 +1,9 @@
 //! The OCI runtime configuration of a container computer: the hardening baseline.
 //!
-//! crun runs inside the holder's user namespace (see `silo-ctr run`), where container id 0 is
-//! the account that owns the computer and ids 1..65535 are its sub-id range, so the container's
-//! own user namespace maps ids to that range as two extents. The configuration omits the
-//! network namespace: the container joins the holder's, which holds only a TAP device that the
+//! crun runs inside the holder's user namespace (see `silo-ctr run`), where id 0 is the account
+//! that owns the computer and ids 1..65535 are its sub-id range. The container's own user
+//! namespace maps its ids onto those so that the working account is the engine's own user
+//! ([`super::idmap`]) and root is a sub-id. The configuration omits the network namespace: the container joins the holder's, which holds only a TAP device that the
 //! computer's gateway serves.
 
 use oci_spec::runtime::Spec;
@@ -22,6 +22,9 @@ pub const CA_BUNDLE_PATH: &str = "/etc/ssl/certs/ca-certificates.crt";
 /// accepts the certificates the gateway issues toward hosts a secret is allowed for, and a guest
 /// can add its own CA beside this one.
 pub const GATEWAY_CA_PATH: &str = "/usr/local/share/ca-certificates/silo-gateway.crt";
+
+/// Where the computer's per-computer share (the in-guest client's bridge folder) is bound.
+pub const SHARE_PATH: &str = "/.msb";
 
 /// What Silo's own root commands (account setup, installs) may use inside the container's user
 /// namespace; user processes and the container's first process have none.
@@ -61,6 +64,8 @@ pub struct Params<'a> {
     pub hosts: &'a Path,
     /// The computer's gateway CA certificate (PEM), bound at [`GATEWAY_CA_PATH`].
     pub ca_cert: &'a Path,
+    /// The host folder bound read-write at [`SHARE_PATH`].
+    pub share: &'a Path,
     /// `std::env::consts::ARCH`.
     pub arch: &'a str,
 }
@@ -91,10 +96,11 @@ pub fn exec_process(
     cwd: &str,
     env: &[(String, String)],
     argv: &[String],
+    terminal: bool,
     capabilities: &[&str],
 ) -> Value {
     let mut process = json!({
-        "terminal": false,
+        "terminal": terminal,
         "user": {"uid": uid, "gid": gid, "additionalGids": additional_gids},
         "args": argv,
         "env": env.iter().map(|(key, value)| format!("{key}={value}")).collect::<Vec<_>>(),
@@ -111,6 +117,14 @@ pub fn exec_process(
         });
     }
     process
+}
+
+/// The container's `uidMappings` and `gidMappings`: the keep-id layout of [`super::idmap`].
+fn id_mappings() -> Vec<Value> {
+    super::idmap::extents()
+        .iter()
+        .map(|e| json!({"containerID": e.container, "hostID": e.holder, "size": e.size}))
+        .collect()
 }
 
 pub fn build(params: &Params<'_>) -> Result<Spec, String> {
@@ -161,17 +175,13 @@ pub fn build(params: &Params<'_>) -> Result<Spec, String> {
              "options": ["rbind", "ro", "nosuid", "nodev", "noexec"]},
             {"destination": GATEWAY_CA_PATH, "type": "bind", "source": params.ca_cert,
              "options": ["rbind", "ro", "nosuid", "nodev", "noexec"]},
+            {"destination": SHARE_PATH, "type": "bind", "source": params.share,
+             "options": ["rbind", "rw", "nosuid", "nodev", "noexec"]},
         ],
         "linux": {
             "namespaces": namespaces,
-            "uidMappings": [
-                {"containerID": 0, "hostID": 0, "size": 1},
-                {"containerID": 1, "hostID": 1, "size": 65535},
-            ],
-            "gidMappings": [
-                {"containerID": 0, "hostID": 0, "size": 1},
-                {"containerID": 1, "hostID": 1, "size": 65535},
-            ],
+            "uidMappings": id_mappings(),
+            "gidMappings": id_mappings(),
             "cgroupsPath": params.cgroup_path,
             "seccomp": {
                 "defaultAction": "SCMP_ACT_ALLOW",
@@ -209,6 +219,7 @@ mod tests {
             resolv_conf: Path::new("/r/state/resolv.conf"),
             hosts: Path::new("/r/state/hosts"),
             ca_cert: Path::new("/r/state/gateway-ca.crt"),
+            share: Path::new("/r/runtime"),
             arch: "x86_64",
         })
         .unwrap()
@@ -264,6 +275,7 @@ mod tests {
             "/workspace",
             &[("A".into(), "b=c".into())],
             &["/silo/init".into(), "--".into(), "id".into()],
+            false,
             &[],
         );
         assert_eq!(process["user"]["additionalGids"], json!([27, 44]));
@@ -272,7 +284,18 @@ mod tests {
         assert_eq!(process["noNewPrivileges"], true);
         assert_eq!(process["terminal"], false);
         assert!(process.get("capabilities").is_none());
-        let root = exec_process(0, 0, &[], "/", &[], &["x".into()], &ROOT_EXEC_CAPABILITIES);
+        let root = exec_process(
+            0,
+            0,
+            &[],
+            "/",
+            &[],
+            &["x".into()],
+            false,
+            &ROOT_EXEC_CAPABILITIES,
+        );
+        let terminal = exec_process(1001, 1001, &[], "/", &[], &["x".into()], true, &[]);
+        assert_eq!(terminal["terminal"], true);
         assert_eq!(
             root["capabilities"]["effective"].as_array().unwrap().len(),
             7
@@ -284,6 +307,47 @@ mod tests {
         // The shape is a valid OCI process.
         let _: oci_spec::runtime::Process = serde_json::from_value(root).unwrap();
         let _: oci_spec::runtime::Process = serde_json::from_value(process).unwrap();
+    }
+
+    #[test]
+    fn the_working_account_is_the_engines_user_and_root_is_a_sub_id() {
+        let value = serde_json::to_value(spec()).unwrap();
+        let linux = &value["linux"];
+        for key in ["uidMappings", "gidMappings"] {
+            let maps = linux[key].as_array().unwrap();
+            let find = |container: u64| {
+                maps.iter()
+                    .find(|m| m["containerID"] == container)
+                    .unwrap()
+                    .clone()
+            };
+            // Container 0 (root) is holder id 1, never the holder's own root (the engine's user).
+            assert_eq!(find(0)["hostID"], 1, "{key}");
+            // The working account is the holder's root, the engine's own user.
+            assert_eq!((find(1001)["hostID"].as_u64(), find(1001)["size"].as_u64()), (Some(0), Some(1)));
+            assert_eq!(maps.iter().map(|m| m["size"].as_u64().unwrap()).sum::<u64>(), 65536);
+        }
+    }
+
+    #[test]
+    fn the_computers_share_is_bound_read_write_without_exec_or_devices() {
+        let value = serde_json::to_value(spec()).unwrap();
+        let mount = value["mounts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|m| m["destination"] == SHARE_PATH)
+            .unwrap();
+        assert_eq!(mount["source"], "/r/runtime");
+        let options: Vec<&str> = mount["options"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|o| o.as_str().unwrap())
+            .collect();
+        for wanted in ["rw", "nosuid", "nodev", "noexec"] {
+            assert!(options.contains(&wanted), "{wanted}");
+        }
     }
 
     #[test]
@@ -313,7 +377,7 @@ mod tests {
     }
 
     #[test]
-    fn the_ids_map_as_two_extents_of_the_holders_namespace() {
+    fn the_ids_map_as_three_extents_of_the_holders_namespace() {
         let spec = spec();
         let linux = spec.linux().as_ref().unwrap();
         let sizes: Vec<_> = linux
@@ -323,8 +387,8 @@ mod tests {
             .iter()
             .map(|m| (m.container_id(), m.host_id(), m.size()))
             .collect();
-        assert_eq!(sizes, [(0, 0, 1), (1, 1, 65535)]);
-        assert_eq!(linux.gid_mappings().as_ref().unwrap().len(), 2);
+        assert_eq!(sizes, [(0, 1, 1001), (1001, 0, 1), (1002, 1002, 64534)]);
+        assert_eq!(linux.gid_mappings().as_ref().unwrap().len(), 3);
     }
 
     #[test]
@@ -350,7 +414,7 @@ mod tests {
     }
 
     #[test]
-    fn proc_and_sys_are_masked_or_read_only_and_only_three_files_are_bound_from_the_host() {
+    fn proc_and_sys_are_masked_or_read_only_and_only_three_files_and_the_share_are_bound_from_the_host() {
         let spec = spec();
         let linux = spec.linux().as_ref().unwrap();
         assert!(linux
@@ -379,7 +443,8 @@ mod tests {
             [
                 "/etc/resolv.conf",
                 "/etc/hosts",
-                "/usr/local/share/ca-certificates/silo-gateway.crt"
+                "/usr/local/share/ca-certificates/silo-gateway.crt",
+                "/.msb"
             ]
         );
         // The system bundle stays the guest's own writable file: `update-ca-certificates` replaces

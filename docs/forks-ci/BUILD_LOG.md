@@ -431,6 +431,60 @@ the capability list (refused with the plain message, hidden in the app) until CT
 - **Not done.** SSH, editor, terminal and in-guest client (phase CT3b, above); GitHub access live; UDP ports;
   aarch64 live run.
 
+### 8 Nov 2026: phase CT3b built (SSH, the editor, the terminal and the in-guest client for container computers)
+
+Branch `claude/containers-ct3b`. A container computer has SSH access, an editor connection, a terminal and the in-guest
+client through the same commands, API methods and screens as a Linux VM. Fable's design, as decided:
+
+- **SSH, editor, terminal: one seam.** The callers already spawn `<runtime executable> ssh serve NAME [--stdio | --host
+  --port --authorized-keys --expected-machine-id ...]` (SSH access, the editor's `ProxyCommand`, Connections' remote
+  guest) or `<runtime executable> exec NAME ... --tty` (terminals). `runtime::command_for(paths, name)` returns the
+  `msb` command for a VM and `silod --container-runtime` for a container (`containers::runtime_invocation`; `silod`
+  sits beside `msb`, where `silo-ctr` already does); the four callers use it and no caller branches on the kind. The
+  capability gates for the terminal, editor and SSH access are gone from the shared list (it keeps export and the
+  desktop). `silod --container-runtime` (`containers/cli.rs`) parses the same arguments (`containers/args.rs` gained
+  `Command::SshServe` and `exec --tty`; a terminal with no command is `bash -l`) and runs either the server or
+  `crun exec` on the caller's terminal.
+- **The server** (`containers/ssh.rs`): russh 0.65.1 (Apache-2.0; the same library MicroSandbox's `msb ssh serve`
+  uses), `default-features = false, features = ["ring"]` so the `rsa` crate (RUSTSEC-2023-0071) is not built; 65 new
+  crates in `Cargo.lock`, none upgrading an existing one. `russh-sftp` is not needed: `sftp` is
+  `/usr/lib/openssh/sftp-server` (already in the guest image, `openssh-sftp-server`; no image change) piped to the
+  channel as the working account. Auth: public keys from the authorized-keys file the caller names (the editor's
+  shared `ssh/authorized_keys` by default), read at each attempt, plain key lines only (a line with options is skipped),
+  login `silo` only; host key `sandboxes/<name>/ssh/host_ed25519`; `--expected-machine-id` against the record's
+  `silo.machine-id`. Sessions are `crun exec` as `silo` through the existing exec path (`silo-ctr enter`, the init shim,
+  the process-group kill when a channel or connection ends); a pty is made by crun and handed to the server over a
+  private `--console-socket`; client environment, agent, X11 and forwarding are refused. The listener prints
+  `SILO_SSH_READY` (and the session lines) as MicroSandbox's does. The server runs apart from the engine, so the
+  engine now publishes a computer's active secret names to `state/secrets.active` and the sessions get the same
+  `NAME=$MSB_NAME` placeholders. A backend trait upstream (so both kinds share one server) is the better end state;
+  not done here.
+- **Keep-id.** The spool depended on virtiofs stat virtualization. In a container the working account (1001) is now
+  the engine's own user and group (`containers/idmap.rs`): crun's maps are container `0..1000` to holder `1..1001`,
+  `1001` to holder `0` (the engine's user), `1002..` to the same holder ids, so root is a sub-id and the agent's
+  `0600` request files are the engine's on disk. `silo-ctr userns --keep-id N` (new) makes the same layout for the
+  image unpack (umoci), and the boot layer and each upper directory are given to root through it (the agent must not
+  own `/` or `/silo`). `Spool` takes the owner from the file's real uid and gid through the mapping when the bridge
+  folder is a container's; it writes no override and keeps `0711` on the runtime folder instead. The unpacked image
+  and the boot layer have a new directory name (`-keepid`), and a computer whose upper directory is owned by the
+  engine's own user (an earlier build) is refused at start with "Recreate it". No migration (first container
+  release). The share is the computer's runtime folder bound at `/.msb`; Landlock's writable list gained `/.msb`.
+- **Found while reading** (not yet exercised live until the CI run): the engine can end a root-owned command's process
+  group because it owns the container's user namespace (capabilities in descendants); `silo-init --own-group` no
+  longer fails for a session leader (a terminal's command).
+- **Threat model**: the container section says the working account is now the engine's user (an escape as the agent
+  lands as the engine), why the namespaces still separate them, and describes the SSH server, SFTP, terminals and
+  the share. Guides: [managed SSH](../SiloUI-MANAGED-SSH.md#container-computers),
+  [in-guest client](../SiloUI-IN-GUEST-CLIENT.md#container-computers).
+- **Tests**: argument shapes (`ssh serve` flags and refusals, `exec --tty`), authorized keys and key matching, the
+  machine-identity refusal, term cleaning, the readiness line, an in-process russh client against the server (listed
+  key accepted, another key, another account and a removed key refused, a session on a stopped computer errors, an
+  environment and an unknown subsystem refused), the id extents and owner mapping, the OCI maps and `/.msb` mount, the
+  upper-directory ownership refusal, the boot-layer name, the share modes, the published secrets, `command_for` and
+  the proxy/terminal strings for both kinds, the spool's container owner and modes, `silo-ctr userns --keep-id` (maps
+  and a real namespace test), and the frontend (a container is offered terminal, editor and SSH, not export or the
+  desktop). Live: `linux-host-e2e.sh` (below).
+
 ### R1: CI runner on the Mac (branch `claude/runner-phase-1`)
 
 - **Built:** `silo-action/` and every reference removed; `silo-runner` (Go, `app/SiloUI/runner`, on

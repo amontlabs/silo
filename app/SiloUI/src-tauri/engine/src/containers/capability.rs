@@ -1,8 +1,8 @@
 //! What a container computer cannot do yet: one list, one check.
 //!
-//! Terminal, editor, SSH access, export and the desktop reach the runtime by their own paths
-//! (not the argument shape [`super::route`] answers), so a container would otherwise be handed to
-//! MicroSandbox, or to an installer, that does not know it. Every such entry point names its
+//! Export and the desktop reach the runtime by their own paths (not the argument shape
+//! [`super::route`] answers), so a container would otherwise be handed to MicroSandbox, or to an
+//! installer, that does not know it. Every such entry point names its
 //! [`Capability`] and calls [`require`] before it does anything; the app hides the same actions
 //! from [`unavailable`]. A later phase gives the container kind a capability by flipping
 //! [`Capability::container_has`] and adding the code behind it.
@@ -13,12 +13,6 @@ use std::path::Path;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Capability {
-    /// An interactive shell, locally or through a launcher.
-    Terminal,
-    /// An editor connection (the proxy and the key authorization behind it).
-    Editor,
-    /// A listener that serves SSH into the computer.
-    SshAccess,
     /// A portable export or backup of the computer.
     Export,
     /// The graphical desktop and what runs on it.
@@ -26,10 +20,7 @@ pub enum Capability {
 }
 
 impl Capability {
-    pub const ALL: [Capability; 5] = [
-        Capability::Terminal,
-        Capability::Editor,
-        Capability::SshAccess,
+    pub const ALL: [Capability; 2] = [
         Capability::Export,
         Capability::Desktop,
     ];
@@ -37,9 +28,6 @@ impl Capability {
     /// The name the app uses for the action.
     pub const fn id(self) -> &'static str {
         match self {
-            Capability::Terminal => "terminal",
-            Capability::Editor => "editor",
-            Capability::SshAccess => "sshAccess",
             Capability::Export => "export",
             Capability::Desktop => "desktop",
         }
@@ -48,9 +36,6 @@ impl Capability {
     /// The verb of the refusal: "Silo cannot <verb> a container computer yet."
     pub const fn verb(self) -> &'static str {
         match self {
-            Capability::Terminal => "open a terminal in",
-            Capability::Editor => "connect an editor to",
-            Capability::SshAccess => "serve SSH access to",
             Capability::Export => "export or back up",
             Capability::Desktop => "give a desktop to",
         }
@@ -140,9 +125,9 @@ mod tests {
                 )
             );
         }
-        assert!(require_in(home.path(), "box", Capability::Terminal)
+        assert!(require_in(home.path(), "box", Capability::Export)
             .unwrap_err()
-            .contains("cannot open a terminal in a container computer yet"));
+            .contains("cannot export or back up a container computer yet"));
     }
 
     #[test]
@@ -161,10 +146,7 @@ mod tests {
         for capability in Capability::ALL {
             assert_eq!(ids.contains(&capability.id()), !capability.container_has());
         }
-        assert_eq!(
-            ids,
-            ["terminal", "editor", "sshAccess", "export", "desktop"]
-        );
+        assert_eq!(ids, ["export", "desktop"]);
         // The app reads the same list from this file.
         let app: Vec<String> = serde_json::from_str(include_str!(
             "../../../../src/features/computers/model/container-unavailable.json"

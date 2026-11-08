@@ -171,6 +171,42 @@ agent transport's closure. Losing that transport ends the listener and active
 sessions without reconnecting to a replacement computer. `--no-start` refuses a stopped
 computer, and `--no-inactivity-timeout` disables the existing SSH inactivity timer.
 
+## Container computers
+
+A container computer ([threat model](THREAT-MODEL.md#container-computers)) has the same SSH access,
+editor connection and terminal as a virtual machine, through the same commands and the same
+screens. It has no `sshd` either: the callers above start `<runtime executable> ssh serve NAME ...`,
+and for a container the executable is `silod --container-runtime` instead of `msb`
+(`runtime::command_for` picks it, so no caller branches on the kind). The flags are the same
+(`--stdio`, `--no-start`, `--no-inactivity-timeout`, `--exit-on-stdin-close`, `--authorized-keys`,
+`--expected-machine-id`, `--host`, `--port`) and so is the readiness line, `SILO_SSH_READY`.
+
+The server is `engine/src/containers/ssh.rs`, built on the [russh](https://github.com/Eugeny/russh)
+library MicroSandbox's own server uses (Apache-2.0; version 0.65.1 is pinned, with the ring backend
+and no RSA support). It is not MicroSandbox's server because that one is written against its
+sandbox and agent types and cannot take another backend; a backend trait upstream would let both
+kinds share it, and that is the better end state. What it does:
+
+| SSH request | Inside the computer |
+| --- | --- |
+| public-key login | the authorized-keys file the caller names (`MSB_HOME/ssh/authorized_keys` when none), read at each attempt; the login name is `silo` |
+| shell | `/bin/bash -l` as `silo`, in its home |
+| exec | `/bin/bash -c COMMAND` |
+| `pty-req` | a pseudo-terminal made by `crun`; the window-change request resizes it |
+| `sftp` subsystem | `/usr/lib/openssh/sftp-server`, from the image's `openssh-sftp-server` (it is in the guest image already) |
+| anything else (environment, agent, X11, forwarding, other subsystems) | refused |
+
+Every command runs through the engine's own exec path (`silo-ctr enter`, `crun exec`, the init
+shim), so the hardening baseline, the process-group kill when a channel closes, and the
+placeholder environment of the computer's secrets apply to it. A terminal opened from Silo runs
+`silod --container-runtime exec NAME --tty ...`, which runs the same `crun exec` on the user's own
+terminal. Host-key pinning, the per-computer `known_hosts` and the editor's configuration are the
+same files as for a virtual machine.
+
+The live check (`scripts/linux-host-e2e.sh` with `SILO_E2E_CONTAINER=1`) runs `silo ssh-setup`, then
+`ssh NAME.silo-dev uname -a`, an SFTP put and get, a `ssh -tt ... tty` session, the terminal
+command, the editor proxy in `--stdio` mode under a scripted `ssh`, and the in-guest client.
+
 ## Reconciliation
 
 Silo reconciles after normal starts, restarts, temporary `exec` starts/stops,

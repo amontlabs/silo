@@ -20,6 +20,7 @@ use rustix::{
         OFlags, CWD,
     },
 };
+use crate::containers::idmap::KeepId;
 use silo_api::methods::guest_client::{
     GuestErrorBody, GuestRequestFrame, GuestResponseFrame, MAX_FRAME_BYTES,
 };
@@ -130,6 +131,10 @@ pub fn spool_dir(runtime_home: &Path, computer_name: &str) -> PathBuf {
 
 pub struct Spool {
     dir: PathBuf,
+    /// Set for a container computer, whose files carry real owners: the engine's own user is the
+    /// working account there (see `containers::idmap`), so the owner of a request comes from its
+    /// file's, and nothing is virtualized.
+    keep_id: Option<KeepId>,
 }
 
 /// A request file, parsed or refused.
@@ -157,7 +162,12 @@ fn dir_flags() -> OFlags {
 }
 
 /// Opens (creating, with `mode`, when `create`) a real directory below `parent`.
-fn sub(parent: &OwnedFd, name: &str, create: Option<u16>) -> Result<OwnedFd, String> {
+fn sub(
+    parent: &OwnedFd,
+    name: &str,
+    create: Option<u16>,
+    keep_id: Option<KeepId>,
+) -> Result<OwnedFd, String> {
     if let Some(mode) = create {
         match mkdirat(parent, name, Mode::from_bits_truncate(mode.into())) {
             Ok(()) | Err(rustix::io::Errno::EXIST) => {}
@@ -169,13 +179,22 @@ fn sub(parent: &OwnedFd, name: &str, create: Option<u16>) -> Result<OwnedFd, Str
     if let Some(mode) = create {
         fchmod(&fd, Mode::from_bits_truncate(mode.into())).map_err(io)?;
         // The guest sees these folders as root's, so its sticky bit and modes mean what they say.
-        write_override(&fd, 0, 0, S_IFDIR | u32::from(mode));
+        // (A container sees the real owner and mode: nothing to override.)
+        if keep_id.is_none() {
+            write_override(&fd, 0, 0, S_IFDIR | u32::from(mode));
+        }
     }
     Ok(fd)
 }
 
 /// The most runtime entries sealed in one pass.
 const SEAL_LIMIT: usize = 256;
+
+/// A container's runtime folder: the account that owns it (the working account) writes the bridge
+/// in it, and every other user of the container may only search it, as in a virtual machine.
+fn seal_container_runtime(root: &OwnedFd) {
+    let _ = fchmod(root, Mode::from_bits_truncate(0o711));
+}
 
 /// The runtime folder is `0700` on the host and the guest sees it as that user's, so a guest user
 /// other than root could not reach `silo-bridge`. Show it as root's with search permission only,
@@ -217,7 +236,15 @@ struct Dirs {
 
 impl Spool {
     pub fn new(dir: PathBuf) -> Self {
-        Self { dir }
+        let keep_id = crate::containers::keep_id_for_bridge(&dir);
+        Self { dir, keep_id }
+    }
+
+    fn seal_root(&self, root: &OwnedFd) {
+        match self.keep_id {
+            Some(_) => seal_container_runtime(root),
+            None => seal_runtime(root),
+        }
     }
 
     fn open(&self, create: bool) -> Result<Dirs, String> {
@@ -238,14 +265,14 @@ impl Spool {
         let root = openat(CWD, runtime, dir_flags(), Mode::empty())
             .map_err(|error| format!("Cannot open the runtime folder: {error}"))?;
         if create {
-            seal_runtime(&root);
+            self.seal_root(&root);
         }
-        let bridge = sub(&root, name, create.then_some(0o755))?;
+        let bridge = sub(&root, name, create.then_some(0o755), self.keep_id)?;
         // The guest writes requests it cannot list (sticky, no read); answers are named by the
         // request's random id, in a folder it can enter but not list.
         Ok(Dirs {
-            req: sub(&bridge, "req", create.then_some(0o1733))?,
-            resp: sub(&bridge, "resp", create.then_some(0o711))?,
+            req: sub(&bridge, "req", create.then_some(0o1733), self.keep_id)?,
+            resp: sub(&bridge, "resp", create.then_some(0o711), self.keep_id)?,
         })
     }
 
@@ -257,7 +284,7 @@ impl Spool {
             return;
         };
         if let Ok(root) = openat(CWD, runtime, dir_flags(), Mode::empty()) {
-            seal_runtime(&root);
+            self.seal_root(&root);
         }
     }
 
@@ -335,7 +362,7 @@ impl Spool {
                 }
                 continue;
             };
-            let (frame, owner) = match read_frame(&dirs.req, &name) {
+            let (frame, owner) = match read_frame(&dirs.req, &name, self.keep_id) {
                 Ok((frame, owner)) if frame.id == id => (Ok(frame), owner),
                 Ok((_, owner)) => (
                     Err("The request id does not match its file name.".to_owned()),
@@ -382,7 +409,7 @@ impl Spool {
             Mode::from_raw_mode(0o600),
         )
         .map_err(io)?;
-        if let Some((uid, gid)) = owner {
+        if let (Some((uid, gid)), None) = (owner, self.keep_id) {
             // Mode 0600 for the user that asked, so no other guest user reads the answer.
             write_override(&fd, uid, gid, S_IFREG | 0o600);
         }
@@ -436,7 +463,11 @@ fn tmp_abandoned(req: &OwnedFd, name: &str) -> bool {
 
 type Owner = Option<(u32, u32)>;
 
-fn read_frame(req: &OwnedFd, name: &str) -> Result<(GuestRequestFrame, Owner), String> {
+fn read_frame(
+    req: &OwnedFd,
+    name: &str,
+    keep_id: Option<KeepId>,
+) -> Result<(GuestRequestFrame, Owner), String> {
     let fd = openat(
         req,
         name,
@@ -451,7 +482,11 @@ fn read_frame(req: &OwnedFd, name: &str) -> Result<(GuestRequestFrame, Owner), S
     if usize::try_from(stat.st_size).unwrap_or(usize::MAX) > MAX_FRAME_BYTES {
         return Err("The request is larger than the bridge allows.".into());
     }
-    let owner = read_owner(&fd);
+    // A container's files carry their real owners; a virtual machine's are virtualized.
+    let owner = match keep_id {
+        Some(map) => map.guest_owner(stat.st_uid, stat.st_gid),
+        None => read_owner(&fd),
+    };
     let mut bytes = Vec::new();
     File::from(fd)
         .take(MAX_FRAME_BYTES as u64 + 1)
@@ -712,6 +747,36 @@ mod tests {
         }
         fs::write(req.join(format!("{ID}.json")), request(ID)).unwrap();
         assert!(spool.take().is_empty());
+    }
+
+    #[test]
+    fn a_containers_requests_are_owned_through_the_id_mapping_and_its_folders_are_sealed_by_mode() {
+        let home = tempfile::tempdir().unwrap();
+        crate::containers::capability::make_container(home.path(), "box");
+        let spool = Spool::new(spool_dir(home.path(), "box"));
+        assert!(spool.keep_id.is_some());
+        // A virtual machine's (or an unknown) bridge folder is not a container's.
+        assert!(Spool::new(spool_dir(home.path(), "vm")).keep_id.is_none());
+        spool.ensure().unwrap();
+        let mode = |path: &Path| fs::metadata(path).unwrap().permissions().mode() & 0o7777;
+        let runtime = spool.dir.parent().unwrap();
+        assert_eq!(mode(runtime), 0o711);
+        assert_eq!((mode(&spool.dir.join("req")), mode(&spool.dir.join("resp"))), (0o1733, 0o711));
+        // The runtime folder is made private again if the guest's account loosened it.
+        fs::set_permissions(runtime, fs::Permissions::from_mode(0o755)).unwrap();
+        spool.seal();
+        assert_eq!(mode(runtime), 0o711);
+        fs::write(
+            spool.dir.join("req").join(format!("{ID}.json")),
+            request(ID),
+        )
+        .unwrap();
+        let taken = spool.take();
+        // The file is the engine's own user's, which is the working account in the container.
+        assert_eq!(taken[0].owner, Some((1001, 1001)));
+        spool.respond(&reply(ID), taken[0].owner).unwrap();
+        let answer = spool.dir.join("resp").join(format!("{ID}.json"));
+        assert_eq!(mode(&answer) & 0o777, 0o600);
     }
 
     #[test]
