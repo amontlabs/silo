@@ -205,7 +205,7 @@ class LinuxPackageTests(unittest.TestCase):
         """What runtime:prepare leaves in src-tauri for `target`."""
         binaries, runtime = self.tauri / 'binaries', self.tauri / 'runtime'
         binaries.mkdir(parents=True, exist_ok=True)
-        for tool in engine.LINUX_TOOLS:
+        for tool in engine.LINUX_ENGINE_TOOLS:
             (binaries / f'{tool}-{target}').write_bytes(elf(machine, tool))
             (binaries / f'{tool}-{target}').chmod(0o755)
         library = runtime / 'microsandbox' / target / 'lib' / engine.LIBKRUNFW
@@ -263,6 +263,7 @@ class LinuxPackageTests(unittest.TestCase):
             'silod': 0o755, 'silo': 0o755, 'silo-runner': 0o755,
             'resources/silo-runner-licenses/scaleset-MIT.txt': 0o644,
             'msb': 0o755, 'git': 0o755, 'git-lfs': 0o755, 'git-remote-http': 0o755, 'git-remote-https': 0o755,
+            'silo-macos-gateway': 0o755,
             'resources/engine-manifest.json': 0o644,
             'resources/microsandbox/manifest.json': 0o644,
             'resources/microsandbox/licenses/microsandbox-Apache-2.0.txt': 0o644,

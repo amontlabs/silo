@@ -4,14 +4,15 @@ mod network;
 
 use std::ffi::OsStr;
 use std::io::{self, Write};
-use std::os::fd::{AsRawFd, FromRawFd};
-use std::os::unix::net::{UnixDatagram, UnixStream};
+use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+use std::os::unix::net::UnixStream;
 use std::time::Duration;
 
 use control::{ControlDecoder, ErrorResponse, Request, Response, UpdateOperation};
 use frames::{FramePump, FrameStats};
 use network::{
-    NetworkResources, SecretsHandle, SmoltcpNetwork, build_network, generate_ca, validate_init,
+    GithubHosts, NetworkResources, SecretsHandle, SmoltcpNetwork, build_network, generate_ca,
+    validate_init,
 };
 use serde::Serialize;
 use zeroize::Zeroize;
@@ -93,7 +94,8 @@ fn run() -> Result<(), GatewayError> {
     if let Some(path) = std::env::var_os("SILO_SECRET_USAGE_LOG") {
         microsandbox_network::secret_usage::set_usage_log(std::path::Path::new(&path));
     }
-    let frame_socket = unsafe { UnixDatagram::from_raw_fd(FRAME_FD) };
+    // SAFETY: the parent hands over fd 3 as the frame carrier, and nothing else here owns it.
+    let frame_socket = unsafe { OwnedFd::from_raw_fd(FRAME_FD) };
     let mut control = unsafe { UnixStream::from_raw_fd(CONTROL_FD) };
 
     let init = match control::read_init(&mut control) {
@@ -110,6 +112,18 @@ fn run() -> Result<(), GatewayError> {
         let _ = control::write_response(
             &mut control,
             &Response::Error(ErrorResponse::for_revision(None, "invalid_configuration")),
+        );
+        return Err(GatewayError::InvalidConfiguration);
+    }
+    let github_hosts =
+        GithubHosts::from_init(&init).map_err(|_| GatewayError::InvalidConfiguration)?;
+    let carrier = init.profile.carrier();
+    // A container's fd 3 must be a TAP device of the right kind; a descriptor of any other
+    // kind is refused before any frame is read.
+    if frames::prepare_carrier(frame_socket.as_raw_fd(), carrier).is_err() {
+        let _ = control::write_response(
+            &mut control,
+            &Response::Error(ErrorResponse::for_revision(None, "invalid_frame_carrier")),
         );
         return Err(GatewayError::InvalidConfiguration);
     }
@@ -157,6 +171,7 @@ fn run() -> Result<(), GatewayError> {
     let stats = FrameStats::default();
     let mut frame_pump = FramePump::new(
         frame_socket.as_raw_fd(),
+        carrier,
         ready.guest_ipv4,
         ready.guest_mac,
         ready.mtu,
@@ -186,6 +201,7 @@ fn run() -> Result<(), GatewayError> {
                 &network,
                 &stats,
                 &frame_socket,
+                &github_hosts,
                 &mut revision,
             )?
         {
@@ -243,6 +259,7 @@ fn run() -> Result<(), GatewayError> {
                 &network,
                 &stats,
                 &frame_socket,
+                &github_hosts,
                 &mut revision,
             )? {
                 return Ok(());
@@ -258,7 +275,8 @@ fn dispatch_requests(
     secrets: &SecretsHandle,
     network: &SmoltcpNetwork,
     stats: &FrameStats,
-    frame_socket: &UnixDatagram,
+    frame_socket: &OwnedFd,
+    github_hosts: &GithubHosts,
     revision: &mut u64,
 ) -> Result<bool, GatewayError> {
     for request in requests {
@@ -275,7 +293,7 @@ fn dispatch_requests(
                     .map_err(|_| GatewayError::Control)?;
                     continue;
                 }
-                if network::validate_update(&update.operation).is_err() {
+                if network::validate_update(&update.operation, github_hosts).is_err() {
                     control::write_response(
                         control,
                         &Response::Error(ErrorResponse::for_revision(
@@ -408,7 +426,9 @@ fn apply_update(
     }
 }
 
-fn fail_closed<T>(frame_socket: &UnixDatagram, error: GatewayError) -> Result<T, GatewayError> {
+/// Shuts the frame socket down so the peer sees the end of the link. A TAP descriptor is not a
+/// socket, so there the shutdown does nothing and the process exit that follows ends the link.
+fn fail_closed<T>(frame_socket: &OwnedFd, error: GatewayError) -> Result<T, GatewayError> {
     let _ = unsafe { libc::shutdown(frame_socket.as_raw_fd(), libc::SHUT_RDWR) };
     Err(error)
 }
@@ -471,6 +491,8 @@ mod tests {
             },
             secrets: Vec::new(),
             github_profile_json: None,
+            profile: control::Profile::Vm,
+            github_hosts: None,
         };
         let resources = build_network(init).unwrap();
         let runtime = tokio::runtime::Builder::new_current_thread()

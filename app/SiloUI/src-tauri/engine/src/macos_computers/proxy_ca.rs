@@ -1,4 +1,6 @@
-//! Per-computer proxy CA storage. The private key stays in the channel Keychain.
+//! Per-computer proxy CA storage. The private key stays in the channel Keychain on a Mac, and
+//! in the credential file store (`crate::credential_file_store`, the `keyring` default the engine
+//! daemon installs) on a Linux host; this module only talks to `keyring`.
 //!
 //! Certificate generation is injected: the current engine dependency graph has no
 //! supported X.509 CA generator. The caller must supply matching, unencrypted PEM
@@ -29,7 +31,7 @@ pub(super) trait CaStore: Send + Sync {
 }
 
 /// PEM material intentionally has no `Debug`, `Serialize`, or `Clone` implementation.
-pub(super) struct CaMaterial {
+pub(crate) struct CaMaterial {
     certificate_pem: String,
     private_key_pem: String,
 }
@@ -39,7 +41,7 @@ impl CaMaterial {
     ///
     /// This checks PEM framing and size, not that the certificate and key form a pair.
     /// The generator must establish that cryptographic relationship.
-    pub(super) fn from_pem(
+    pub(crate) fn from_pem(
         certificate_pem: String,
         mut private_key_pem: String,
     ) -> Result<Self, String> {
@@ -53,11 +55,11 @@ impl CaMaterial {
         })
     }
 
-    pub(super) fn certificate_pem(&self) -> &str {
+    pub(crate) fn certificate_pem(&self) -> &str {
         &self.certificate_pem
     }
 
-    pub(super) fn private_key_pem(&self) -> &str {
+    pub(crate) fn private_key_pem(&self) -> &str {
         &self.private_key_pem
     }
 
@@ -176,7 +178,7 @@ fn prune_item_locks() {
 /// `generate` runs only for an absent item. It must return a matching CA certificate
 /// and an unencrypted private key as PEM. No PEM is written to application files.
 #[allow(dead_code)] // Provisioning owns the explicit CA creation step.
-pub(super) fn get_or_create(
+pub(crate) fn get_or_create(
     computer_id: &str,
     generate: impl FnOnce() -> Result<CaMaterial, String>,
 ) -> Result<CaMaterial, String> {
@@ -190,14 +192,14 @@ pub(super) fn get_or_create(
 
 /// Read the channel-scoped CA without creating or replacing Keychain state.
 /// Ordinary Start uses this to fail closed when setup did not persist the CA.
-pub(super) fn get_existing(computer_id: &str) -> Result<Option<CaMaterial>, String> {
+pub(crate) fn get_existing(computer_id: &str) -> Result<Option<CaMaterial>, String> {
     get_existing_with(crate::channel::current(), computer_id, live_store())
 }
 
 /// Removes the computer's CA, key included, from the channel Keychain, and releases the
 /// computer's lock entry. Call it when the computer is deleted; it can be repeated until it
 /// succeeds, and an absent CA is not an error.
-pub(super) fn retire(computer_id: &str) -> Result<(), String> {
+pub(crate) fn retire(computer_id: &str) -> Result<(), String> {
     retire_with(crate::channel::current(), computer_id, live_store())
 }
 
@@ -873,5 +875,90 @@ mod tests {
             .unwrap()
             .certificate_pem()
             .contains("Zm9yaw=="));
+    }
+
+    /// On a Linux host the engine daemon makes the file store the `keyring` default, so the
+    /// same code keeps a container computer's CA in private files. This store reaches the file
+    /// store directly, to test it without changing the process-wide default.
+    #[cfg(target_os = "linux")]
+    struct FileStore(std::path::PathBuf);
+
+    #[cfg(target_os = "linux")]
+    impl FileStore {
+        fn entry(&self, service: &str, account: &str) -> keyring::Entry {
+            use keyring::credential::CredentialBuilderApi;
+            let credential =
+                crate::credential_file_store::FileCredentialBuilder::new(self.0.clone())
+                    .build(None, service, account)
+                    .unwrap();
+            keyring::Entry::new_with_credential(credential)
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    impl CaStore for FileStore {
+        fn get(&self, service: &str, account: &str) -> Result<Option<String>, String> {
+            match self.entry(service, account).get_password() {
+                Ok(value) => Ok(Some(value)),
+                Err(keyring::Error::NoEntry) => Ok(None),
+                Err(error) => Err(error.to_string()),
+            }
+        }
+
+        fn set(&self, service: &str, account: &str, value: &str) -> Result<(), String> {
+            self.entry(service, account)
+                .set_password(value)
+                .map_err(|error| error.to_string())
+        }
+
+        fn delete(&self, service: &str, account: &str) -> Result<(), String> {
+            match self.entry(service, account).delete_credential() {
+                Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+                Err(error) => Err(error.to_string()),
+            }
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_ca_lives_in_private_files_of_the_linux_credential_store() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let home = tempfile::tempdir().unwrap();
+        let root = home.path().join("credentials");
+        let store = FileStore(root.clone());
+        let created = get_or_create_with(Channel::Development, "container-1", &store, || {
+            Ok(generated("Y29udGFpbmVy"))
+        })
+        .unwrap();
+        // The second call reads what the first stored; it does not generate again.
+        let again = get_or_create_with(Channel::Development, "container-1", &store, || {
+            Err("must not generate".into())
+        })
+        .unwrap();
+        assert_eq!(again.certificate_pem(), created.certificate_pem());
+        assert_eq!(again.private_key_pem(), created.private_key_pem());
+
+        let service = service_name(Channel::Development);
+        let file = root
+            .join(crate::credential_file_store::file_name(&service).unwrap())
+            .join(crate::credential_file_store::file_name("computer:container-1").unwrap());
+        let mode =
+            |path: &std::path::Path| std::fs::metadata(path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&file), 0o600);
+        assert_eq!(mode(file.parent().unwrap()), 0o700);
+        assert!(
+            get_existing_with(Channel::Development, "container-2", &store)
+                .unwrap()
+                .is_none()
+        );
+
+        retire_with(Channel::Development, "container-1", &store).unwrap();
+        assert!(!file.exists());
+        assert!(
+            get_existing_with(Channel::Development, "container-1", &store)
+                .unwrap()
+                .is_none()
+        );
     }
 }

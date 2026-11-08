@@ -40,6 +40,36 @@ pub struct InitRequest {
     pub secrets: Vec<SecretInput>,
     #[serde(default, deserialize_with = "deserialize_zeroizing_option")]
     pub github_profile_json: Option<Zeroizing<String>>,
+    /// What the gateway serves. Absent means a macOS VM, as before.
+    #[serde(default)]
+    pub profile: Profile,
+    /// The hosts the GitHub credential covers. Absent means `github.com` and
+    /// `api.github.com`; only a container profile may name others.
+    #[serde(default)]
+    pub github_hosts: Option<Vec<String>>,
+}
+
+/// The kind of computer behind the frame descriptor. It decides the carrier of fd 3 and
+/// which parameters the init message may set.
+#[derive(Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum Profile {
+    /// A macOS VM: fd 3 is a connected datagram socket; the published ports are exactly
+    /// SSH (22) and the screen (5900).
+    #[default]
+    Vm,
+    /// A container: fd 3 is a TAP device (`IFF_TAP | IFF_NO_PI`) opened inside the
+    /// container's own user and network namespace; the published ports are the computer's.
+    Container,
+}
+
+impl Profile {
+    pub fn carrier(self) -> crate::frames::FrameCarrier {
+        match self {
+            Self::Vm => crate::frames::FrameCarrier::Datagram,
+            Self::Container => crate::frames::FrameCarrier::Tap,
+        }
+    }
 }
 
 #[derive(Deserialize)]

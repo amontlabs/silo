@@ -52,7 +52,7 @@ mod proxy;
 #[path = "macos_computers/proxy_address.rs"]
 mod proxy_address;
 #[path = "macos_computers/proxy_ca.rs"]
-mod proxy_ca;
+pub(crate) mod proxy_ca;
 #[path = "macos_computers/quiet.rs"]
 mod quiet;
 #[path = "macos_computers/recovery.rs"]

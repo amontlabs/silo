@@ -57,6 +57,9 @@ CLI_CHANNEL_VARIABLE = 'SILO_CHANNEL_IDENTIFIER'
 # Beside silod: bundled_tools::resolve is the executable's directory for a plain engine
 # directory, where the runtime finds `msb` and Git its executables (GIT_EXEC_PATH).
 LINUX_TOOLS = ('msb', 'git', 'git-lfs', 'git-remote-http', 'git-remote-https')
+# The engine archive also carries the network gateway (named for the Mac it began on): it runs a
+# container computer's network on a Linux host, beside silod like the tools.
+LINUX_ENGINE_TOOLS = (*LINUX_TOOLS, 'silo-macos-gateway')
 LINUX_ROOT = 'silo-engine'
 # The CI runner helper (a Go program of its own), built for the platform and shipped beside silod
 # with the licenses of the Go modules it links (docs/SiloUI-CI-RUNNER.md#linux-hosts).
@@ -214,7 +217,7 @@ def linux_runtime_files(target, tauri=TAURI):
         if found != wanted:
             raise RuntimeError(f'The staged {label} is for {found}, not {wanted}; prepare the runtime on this architecture.')
     files = {}
-    for tool in LINUX_TOOLS:
+    for tool in LINUX_ENGINE_TOOLS:
         source = binaries / f'{tool}-{target}'
         if not source.is_file():
             raise RuntimeError(f'{source} is missing. Run `npm run runtime:prepare` first.')
@@ -269,7 +272,7 @@ def package_linux(out_dir, *, platform, commit, silod_binary, cli_binary, runner
     if not licenses:
         raise RuntimeError(f'{runner_licenses} holds no licenses for silo-runner.')
     files.update({f'resources/silo-runner-licenses/{path.name}': (path, 0o644) for path in licenses})
-    for executable in ('silod', 'silo', 'silo-runner', *LINUX_TOOLS, 'resources/git-support/lfs-transfer/git-lfs-transfer'):
+    for executable in ('silod', 'silo', 'silo-runner', *LINUX_ENGINE_TOOLS, 'resources/git-support/lfs-transfer/git-lfs-transfer'):
         found = elf_machine(files[executable][0])
         if found != machine:
             raise RuntimeError(f'{executable} is not a {platform} executable (ELF machine {found}, wanted {machine}).')

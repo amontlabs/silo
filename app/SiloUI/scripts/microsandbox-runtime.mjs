@@ -105,7 +105,7 @@ export async function buildPatchedExecutable({
     `CARGO_TARGET_${targetEnvironment}_RUSTFLAGS`,
     ...Object.keys(process.env).filter(name => name.startsWith("CARGO_PROFILE_RELEASE_")).sort(),
   ].map(name => [name, process.env[name] ?? null]))
-  const gatewayInputs = targetTriple === "aarch64-apple-darwin" && appRoot
+  const gatewayInputs = appRoot
     ? await readMacosGatewayInputs(appRoot)
     : null
   const gatewaySourceDigest = gatewayInputs
@@ -317,8 +317,8 @@ export async function stageRuntime({
       : { executable: buildOutput }
     const executable = Buffer.from(outputs.executable)
     const macosGateway = outputs.macosGateway ? Buffer.from(outputs.macosGateway) : null
-    if (targetTriple === "aarch64-apple-darwin" && buildExecutable === buildPatchedExecutable && !macosGateway) {
-      throw new Error("Patched MicroSandbox preparation did not build the Silo macOS gateway")
+    if (buildExecutable === buildPatchedExecutable && !macosGateway) {
+      throw new Error("Patched MicroSandbox preparation did not build the Silo gateway")
     }
     const library = await fetchVerifiedFile(
       fetchStream,

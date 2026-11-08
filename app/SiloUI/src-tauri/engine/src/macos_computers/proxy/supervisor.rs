@@ -5,18 +5,19 @@ use super::super::proxy_ca::CaMaterial;
 use super::super::store::Record;
 use super::super::MacosContext;
 use super::{mark_unavailable, publish, remove};
+use crate::gateway_control::{
+    self, duplicate_for_child, is_update_ack, pass_descriptors, read_response, validate_ready,
+    write_frame, ChildGuard, Expected, Ready, MAX_MESSAGE_BYTES, PROTOCOL_VERSION, USAGE_LOG_ENV,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::{
     collections::HashMap,
     ffi::OsStr,
-    io::{self, Read, Write},
-    os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd},
-    os::unix::{
-        net::{UnixDatagram, UnixStream},
-        process::CommandExt,
-    },
+    io::Write,
+    os::fd::{AsRawFd, RawFd},
+    os::unix::net::{UnixDatagram, UnixStream},
     path::PathBuf,
     process::{Child, Command, Stdio},
     sync::{
@@ -28,16 +29,10 @@ use std::{
 };
 use zeroize::{Zeroize, Zeroizing};
 
-const PROTOCOL_VERSION: u16 = 1;
-const MAX_MESSAGE_BYTES: usize = 1024 * 1024;
-const FRAME_FD: RawFd = 3;
-const CONTROL_FD: RawFd = 4;
 const START_TIMEOUT: Duration = Duration::from_secs(60);
 const UPDATE_TIMEOUT: Duration = Duration::from_secs(6);
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
 const GATEWAY_BINARY: &str = "silo-macos-gateway";
-/// Names the file the gateway appends credential-use events to.
-const USAGE_LOG_ENV: &str = "SILO_SECRET_USAGE_LOG";
 
 static NEXT_HELPER_GENERATION: AtomicU64 = AtomicU64::new(1);
 static ACTIVE: OnceLock<Mutex<HashMap<String, ActiveGateway>>> = OnceLock::new();
@@ -85,7 +80,7 @@ struct ActiveGateway {
 #[derive(Clone)]
 pub(in crate::macos_computers_engine) struct PreparedGateway {
     helper_generation: u64,
-    ready: ReadyResponse,
+    ready: Ready,
     child: Arc<Mutex<GatewayChild>>,
 }
 
@@ -126,8 +121,8 @@ impl PreparedGateway {
             computer_id,
             vm_generation,
             self.helper_generation,
-            self.ready.ssh_host_port(),
-            self.ready.screen_host_port(),
+            ssh_host_port(&self.ready),
+            screen_host_port(&self.ready),
         )?;
         active.insert(computer_id.to_owned(), current);
         drop(active);
@@ -158,44 +153,20 @@ impl PreparedGateway {
     }
 }
 
-#[derive(Clone, Deserialize)]
-struct ReadyResponse {
-    version: u16,
-    #[serde(rename = "type")]
-    kind: String,
-    slot: u16,
-    guest_ipv4: std::net::Ipv4Addr,
-    gateway_ipv4: std::net::Ipv4Addr,
-    prefix_len: u8,
-    dns_ipv4: std::net::Ipv4Addr,
-    guest_mac: [u8; 6],
-    gateway_mac: [u8; 6],
-    mtu: u16,
-    ca_cert_pem: String,
-    loopback_ports: Vec<LoopbackPort>,
+fn ssh_host_port(ready: &Ready) -> u16 {
+    host_port_of(ready, 22)
 }
 
-impl ReadyResponse {
-    fn ssh_host_port(&self) -> u16 {
-        self.loopback_ports
-            .iter()
-            .find(|port| port.guest_port == 22)
-            .map_or(0, |port| port.host_port)
-    }
-
-    fn screen_host_port(&self) -> u16 {
-        self.loopback_ports
-            .iter()
-            .find(|port| port.guest_port == 5900)
-            .map_or(0, |port| port.host_port)
-    }
+fn screen_host_port(ready: &Ready) -> u16 {
+    host_port_of(ready, 5900)
 }
 
-#[derive(Clone, Deserialize)]
-struct LoopbackPort {
-    host_port: u16,
-    guest_port: u16,
-    protocol: String,
+fn host_port_of(ready: &Ready, guest_port: u16) -> u16 {
+    ready
+        .loopback_ports
+        .iter()
+        .find(|port| port.guest_port == guest_port)
+        .map_or(0, |port| port.host_port)
 }
 
 struct GatewayChild {
@@ -208,25 +179,6 @@ struct GatewayChild {
     github_profile: Option<Zeroizing<String>>,
     github_tokens: Vec<Zeroizing<String>>,
     failed: bool,
-}
-
-struct ChildGuard(Option<Child>);
-
-impl ChildGuard {
-    fn take(&mut self) -> Child {
-        self.0.take().expect("gateway child guard owns its child")
-    }
-}
-
-impl Drop for ChildGuard {
-    fn drop(&mut self) {
-        if let Some(child) = &mut self.0 {
-            if child.try_wait().ok().flatten().is_none() {
-                let _ = child.kill();
-            }
-            let _ = child.wait();
-        }
-    }
 }
 
 impl Drop for GatewayChild {
@@ -379,20 +331,11 @@ pub(in crate::macos_computers_engine) fn prepare(
             computer_dir.join(crate::credentials_usage::USAGE_FILE),
         )
         .env("MSB_LIBKRUNFW_PATH", bundled_runtime_library(app)?);
-    let frame_source = frame_child_fd.as_raw_fd();
-    let control_source = control_child_fd.as_raw_fd();
-    // SAFETY: pre_exec performs only async-signal-safe descriptor operations.
-    unsafe {
-        command.pre_exec(move || {
-            if libc::dup2(frame_source, FRAME_FD) < 0 || libc::dup2(control_source, CONTROL_FD) < 0
-            {
-                return Err(io::Error::last_os_error());
-            }
-            libc::close(frame_source);
-            libc::close(control_source);
-            Ok(())
-        });
-    }
+    pass_descriptors(
+        &mut command,
+        frame_child_fd.as_raw_fd(),
+        control_child_fd.as_raw_fd(),
+    );
     let mut child =
         ChildGuard(Some(command.spawn().map_err(|_| {
             "Silo could not start the computer network gateway.".to_owned()
@@ -478,9 +421,9 @@ pub(in crate::macos_computers_engine) fn prepare(
     if response.get("type").and_then(Value::as_str) != Some("ready") {
         return Err("The computer network gateway rejected its configuration.".into());
     }
-    let ready: ReadyResponse = serde_json::from_value(response)
+    let ready: Ready = serde_json::from_value(response)
         .map_err(|_| "The computer network gateway returned invalid readiness data.".to_owned())?;
-    validate_ready(&ready, address, guest_mac, ca.certificate_pem())?;
+    validate_vm_ready(&ready, address, guest_mac, ca.certificate_pem())?;
 
     let child_state = GatewayChild {
         child: child.take(),
@@ -507,21 +450,8 @@ pub(in crate::macos_computers_engine) fn generate_ca(
     app: &MacosContext,
 ) -> Result<CaMaterial, String> {
     let binary = gateway_binary(app)?;
-    let mut output = Command::new(binary)
-        .arg(OsStr::new("--generate-ca"))
-        .output()
-        .map_err(|_| "Silo could not generate the computer network CA.".to_owned())?;
-    if !output.status.success() || !output.stderr.is_empty() {
-        return Err("Silo could not generate the computer network CA.".into());
-    }
-    let decoded = decode_frame(&output.stdout);
-    output.stdout.zeroize();
-    let response = Zeroizing::new(decoded?);
-    let mut bundle: GeneratedCa = serde_json::from_slice(&response)
-        .map_err(|_| "The computer network CA generator returned invalid data.".to_owned())?;
-    let cert = std::mem::take(&mut bundle.cert_pem);
-    let key = std::mem::take(&mut bundle.key_pem);
-    CaMaterial::from_pem(cert, key)
+    let (cert, key) = gateway_control::generate_ca(&binary)?;
+    CaMaterial::from_pem(cert, key.to_string())
 }
 
 /// Asks the pinned gateway build to sign a certificate for the trust-probe name with this
@@ -609,19 +539,6 @@ fn parse_trust_probe_response(bytes: &[u8]) -> Result<String, String> {
     Ok(pem)
 }
 
-#[derive(Deserialize)]
-#[allow(dead_code)]
-struct GeneratedCa {
-    cert_pem: String,
-    key_pem: String,
-}
-
-impl Drop for GeneratedCa {
-    fn drop(&mut self) {
-        self.key_pem.zeroize();
-    }
-}
-
 fn gateway_binary(app: &MacosContext) -> Result<PathBuf, String> {
     let mut candidates = Vec::new();
     if let Ok(current) = std::env::current_exe() {
@@ -652,16 +569,6 @@ fn bundled_runtime_library(app: &MacosContext) -> Result<PathBuf, String> {
     }
 }
 
-fn duplicate_for_child(fd: RawFd) -> Result<OwnedFd, String> {
-    // F_DUPFD_CLOEXEC avoids inheriting any descriptor except the two dup2 targets below.
-    let duplicated = unsafe { libc::fcntl(fd, libc::F_DUPFD_CLOEXEC, 10) };
-    if duplicated < 0 {
-        return Err("Silo could not prepare the computer gateway descriptors.".into());
-    }
-    // SAFETY: `fcntl` returned a new owned descriptor.
-    Ok(unsafe { OwnedFd::from_raw_fd(duplicated) })
-}
-
 fn parse_mac(value: &str) -> Result<[u8; 6], String> {
     let octets = value
         .split(':')
@@ -673,27 +580,26 @@ fn parse_mac(value: &str) -> Result<[u8; 6], String> {
         .map_err(|_| "The computer's network address is damaged.".to_owned())
 }
 
-fn validate_ready(
-    ready: &ReadyResponse,
+fn validate_vm_ready(
+    ready: &Ready,
     address: ProxyAddress,
     guest_mac: [u8; 6],
     ca_certificate_pem: &str,
 ) -> Result<(), String> {
-    if ready.version != PROTOCOL_VERSION
-        || ready.kind != "ready"
-        || ready.slot != address.slot()
-        || ready.guest_ipv4 != address.guest()
-        || ready.gateway_ipv4 != address.host()
-        || ready.dns_ipv4 != address.host()
-        || ready.prefix_len != 30
-        || ready.guest_mac != guest_mac
-        || ready.gateway_mac == [0; 6]
-        || ready.gateway_mac[0] & 1 != 0
-        || ready.mtu != 1500
-        || ready.ca_cert_pem != ca_certificate_pem
-        || ready.ssh_host_port() == 0
-        || ready.screen_host_port() == 0
-        || ready.ssh_host_port() == ready.screen_host_port()
+    validate_ready(
+        ready,
+        &Expected {
+            slot: address.slot(),
+            guest_ipv4: address.guest(),
+            gateway_ipv4: address.host(),
+            guest_mac,
+            mtu: 1500,
+            ca_certificate_pem,
+        },
+    )?;
+    if ssh_host_port(ready) == 0
+        || screen_host_port(ready) == 0
+        || ssh_host_port(ready) == screen_host_port(ready)
         || ready.loopback_ports.len() != 2
         || ready
             .loopback_ports
@@ -703,45 +609,6 @@ fn validate_ready(
         return Err("The computer network gateway returned inconsistent network identity.".into());
     }
     Ok(())
-}
-
-fn write_frame(stream: &mut UnixStream, body: &[u8]) -> io::Result<()> {
-    if body.is_empty() || body.len() > MAX_MESSAGE_BYTES {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "invalid control frame",
-        ));
-    }
-    stream.write_all(&(body.len() as u32).to_be_bytes())?;
-    stream.write_all(body)
-}
-
-fn read_response(stream: &mut UnixStream) -> io::Result<Value> {
-    let mut prefix = [0u8; 4];
-    stream.read_exact(&mut prefix)?;
-    let size = u32::from_be_bytes(prefix) as usize;
-    if size == 0 || size > MAX_MESSAGE_BYTES {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "invalid control frame",
-        ));
-    }
-    let mut body = Zeroizing::new(vec![0; size]);
-    stream.read_exact(&mut body)?;
-    serde_json::from_slice(&body)
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid control response"))
-}
-
-#[allow(dead_code)]
-fn decode_frame(bytes: &[u8]) -> Result<Vec<u8>, String> {
-    if bytes.len() < 4 {
-        return Err("The computer network CA generator returned invalid data.".into());
-    }
-    let size = u32::from_be_bytes(bytes[..4].try_into().expect("four-byte prefix")) as usize;
-    if size == 0 || size > MAX_MESSAGE_BYTES || bytes.len() != size + 4 {
-        return Err("The computer network CA generator returned invalid data.".into());
-    }
-    Ok(bytes[4..].to_vec())
 }
 
 fn shutdown_child(child: Arc<Mutex<GatewayChild>>) {
@@ -1048,18 +915,7 @@ fn apply_update(
         .and_then(|_| read_response(&mut child.control));
     body.zeroize();
     match result {
-        Ok(response)
-            if response.get("type").and_then(Value::as_str) == Some("ack")
-                && response.get("version").and_then(Value::as_u64)
-                    == Some(u64::from(PROTOCOL_VERSION))
-                && response.get("revision").and_then(Value::as_u64) == Some(child.revision)
-                && response
-                    .get("closed_previous_generation")
-                    .and_then(Value::as_bool)
-                    == Some(true) =>
-        {
-            Ok(())
-        }
+        Ok(response) if is_update_ack(&response, child.revision) => Ok(()),
         _ => {
             invalidate(child, computer, gateway);
             Err("The computer network policy update did not close previous connections.".into())

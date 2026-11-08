@@ -21,12 +21,56 @@ use tempfile::TempDir;
 use zeroize::{Zeroize, Zeroizing};
 
 use crate::control::{
-    CaInput, InitRequest, LoopbackPort, PROTOCOL_VERSION, PortProtocol, ReadyResponse,
+    CaInput, InitRequest, LoopbackPort, PROTOCOL_VERSION, PortProtocol, Profile, ReadyResponse,
 };
 
 const MAX_MTU: u16 = 1500;
 const MIN_MTU: u16 = 576;
 const GITHUB_PLACEHOLDER: &str = "$MSB_SILO_GITHUB";
+/// The hosts the GitHub credential covers unless a container's init names its own.
+const DEFAULT_GITHUB_HOSTS: [&str; 2] = ["github.com", "api.github.com"];
+/// The hosts a GitHub credential may ever cover: the ones the credential selection accepts.
+const KNOWN_GITHUB_HOSTS: [&str; 3] = ["github.com", "api.github.com", "uploads.github.com"];
+/// The most ports one container publishes.
+pub const MAX_LOOPBACK_PORTS: usize = 32;
+
+/// The hosts the GitHub credential covers, fixed at init.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GithubHosts(Vec<String>);
+
+impl GithubHosts {
+    pub fn from_init(init: &InitRequest) -> Result<Self, NetworkSetupError> {
+        match (&init.github_hosts, init.profile) {
+            (None, _) => Ok(Self(DEFAULT_GITHUB_HOSTS.map(str::to_owned).to_vec())),
+            (Some(_), Profile::Vm) => Err(NetworkSetupError::InvalidInput),
+            (Some(hosts), Profile::Container) => {
+                let mut seen = HashSet::new();
+                // Both default hosts stay covered: git and the API cannot be told apart
+                // by a credential that reaches only one of them.
+                if !DEFAULT_GITHUB_HOSTS
+                    .iter()
+                    .all(|host| hosts.iter().any(|value| value == host))
+                    || !hosts.iter().all(|host| {
+                        KNOWN_GITHUB_HOSTS.contains(&host.as_str()) && seen.insert(host)
+                    })
+                {
+                    return Err(NetworkSetupError::InvalidInput);
+                }
+                Ok(Self(hosts.clone()))
+            }
+        }
+    }
+
+    fn iter(&self) -> impl Iterator<Item = &str> {
+        self.0.iter().map(String::as_str)
+    }
+
+    fn matches(&self, requested: &[String]) -> bool {
+        requested.len() == self.0.len()
+            && requested.iter().map(String::as_str).collect::<HashSet<_>>()
+                == self.iter().collect::<HashSet<_>>()
+    }
+}
 
 pub struct NetworkResources {
     pub network: SmoltcpNetwork,
@@ -110,25 +154,43 @@ pub fn validate_init(init: &InitRequest) -> Result<(), NetworkSetupError> {
             return Err(NetworkSetupError::InvalidInput);
         }
     }
-    if init.loopback_ports.len() != 2
-        || !init.loopback_ports.iter().any(|mapping| {
-            mapping.host_port == 0
-                && mapping.guest_port == 22
-                && mapping.protocol == PortProtocol::Tcp
-        })
-        || !init.loopback_ports.iter().any(|mapping| {
-            mapping.host_port == 0
-                && mapping.guest_port == 5900
-                && mapping.protocol == PortProtocol::Tcp
-        })
-    {
-        return Err(NetworkSetupError::InvalidInput);
+    match init.profile {
+        Profile::Vm => {
+            if init.loopback_ports.len() != 2
+                || !init.loopback_ports.iter().any(|mapping| {
+                    mapping.host_port == 0
+                        && mapping.guest_port == 22
+                        && mapping.protocol == PortProtocol::Tcp
+                })
+                || !init.loopback_ports.iter().any(|mapping| {
+                    mapping.host_port == 0
+                        && mapping.guest_port == 5900
+                        && mapping.protocol == PortProtocol::Tcp
+                })
+            {
+                return Err(NetworkSetupError::InvalidInput);
+            }
+        }
+        // The container's own ports: any number up to the cap, each guest port once, and the
+        // gateway picks every host port (the caller learns them from `ready`).
+        Profile::Container => {
+            if init.loopback_ports.len() > MAX_LOOPBACK_PORTS
+                || init
+                    .loopback_ports
+                    .iter()
+                    .any(|mapping| mapping.host_port != 0)
+            {
+                return Err(NetworkSetupError::InvalidInput);
+            }
+        }
     }
+    GithubHosts::from_init(init)?;
     Ok(())
 }
 
 pub fn build_network(mut init: InitRequest) -> Result<NetworkResources, NetworkSetupError> {
     install_crypto_provider();
+    let github_hosts = GithubHosts::from_init(&init)?;
     let ca_files = TempDir::new().map_err(|_| NetworkSetupError::TemporaryFiles)?;
     let ca_cert_path = write_private_file(
         ca_files.path(),
@@ -192,12 +254,13 @@ pub fn build_network(mut init: InitRequest) -> Result<NetworkResources, NetworkS
         builder = builder.secret(|_| entry);
     }
     if let Some(mut github_profile) = init.github_profile_json.take() {
-        let entry = microsandbox_network::config::builder::SecretBuilder::new()
+        let mut entry = microsandbox_network::config::builder::SecretBuilder::new()
             .env("SILO_GITHUB")
             .value(std::mem::take(&mut *github_profile))
-            .placeholder(GITHUB_PLACEHOLDER)
-            .allow("github.com")
-            .allow("api.github.com");
+            .placeholder(GITHUB_PLACEHOLDER);
+        for host in github_hosts.iter() {
+            entry = entry.allow(host);
+        }
         builder = builder.secret(|_| entry);
     }
 
@@ -417,6 +480,7 @@ fn valid_json(value: &str) -> bool {
 
 pub fn validate_update(
     operation: &crate::control::UpdateOperation,
+    github_hosts: &GithubHosts,
 ) -> Result<(), NetworkSetupError> {
     use crate::control::UpdateOperation;
 
@@ -457,13 +521,7 @@ pub fn validate_update(
                 return Err(NetworkSetupError::InvalidInput);
             }
             if name == "SILO_GITHUB" {
-                let requested = allowed_hosts
-                    .iter()
-                    .map(String::as_str)
-                    .collect::<HashSet<_>>();
-                if allowed_hosts.len() != 2
-                    || requested != HashSet::from(["github.com", "api.github.com"])
-                {
+                if !github_hosts.matches(allowed_hosts) {
                     return Err(NetworkSetupError::InvalidInput);
                 }
             } else if !allowed_hosts
@@ -500,7 +558,7 @@ pub enum NetworkSetupError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::control::{CaInput, SecretInput, UpdateOperation};
+    use crate::control::{CaInput, UpdateOperation};
     use microsandbox_network::policy::{Action, DestinationGroup};
     use std::net::Ipv4Addr;
 
@@ -549,7 +607,22 @@ mod tests {
 
     #[test]
     fn empty_dns_and_empty_credential_material_are_valid() {
-        let init = InitRequest {
+        assert!(validate_init(&vm_init()).is_ok());
+    }
+
+    fn container_init() -> InitRequest {
+        let mut init = vm_init();
+        init.profile = Profile::Container;
+        init.loopback_ports = vec![LoopbackPort {
+            host_port: 0,
+            guest_port: 8080,
+            protocol: PortProtocol::Tcp,
+        }];
+        init
+    }
+
+    fn vm_init() -> InitRequest {
+        InitRequest {
             version: PROTOCOL_VERSION,
             slot: 4,
             guest_ipv4: Ipv4Addr::new(172, 16, 0, 18),
@@ -558,18 +631,13 @@ mod tests {
             policy: None,
             dns_nameservers: Vec::new(),
             intercepted_ports: vec![443],
-            loopback_ports: vec![
-                LoopbackPort {
+            loopback_ports: [22, 5900]
+                .map(|guest_port| LoopbackPort {
                     host_port: 0,
-                    guest_port: 22,
+                    guest_port,
                     protocol: PortProtocol::Tcp,
-                },
-                LoopbackPort {
-                    host_port: 0,
-                    guest_port: 5900,
-                    protocol: PortProtocol::Tcp,
-                },
-            ],
+                })
+                .to_vec(),
             ca: CaInput {
                 cert_pem: Zeroizing::new(
                     "-----BEGIN CERTIFICATE-----\nx\n-----END CERTIFICATE-----".into(),
@@ -578,53 +646,173 @@ mod tests {
                     "-----BEGIN PRIVATE KEY-----\nx\n-----END PRIVATE KEY-----".into(),
                 ),
             },
-            secrets: Vec::<SecretInput>::new(),
+            secrets: Vec::new(),
             github_profile_json: None,
-        };
+            profile: Profile::Vm,
+            github_hosts: None,
+        }
+    }
+
+    #[test]
+    fn a_vm_publishes_exactly_ssh_and_the_screen() {
+        let mut init = vm_init();
+        init.loopback_ports.pop();
+        assert!(validate_init(&init).is_err());
+        let mut init = vm_init();
+        init.loopback_ports[1].guest_port = 8080;
+        assert!(validate_init(&init).is_err());
+    }
+
+    #[test]
+    fn a_container_publishes_the_ports_its_computer_names() {
+        assert!(validate_init(&container_init()).is_ok());
+        let mut init = container_init();
+        init.loopback_ports.clear();
         assert!(validate_init(&init).is_ok());
+        let mut init = container_init();
+        init.loopback_ports = [22, 5900, 3000]
+            .map(|guest_port| LoopbackPort {
+                host_port: 0,
+                guest_port,
+                protocol: PortProtocol::Tcp,
+            })
+            .to_vec();
+        assert!(validate_init(&init).is_ok());
+
+        // The gateway picks the host port; a container cannot ask for one.
+        let mut init = container_init();
+        init.loopback_ports[0].host_port = 40000;
+        assert!(validate_init(&init).is_err());
+
+        // A guest port is published once per protocol, and never as zero.
+        let mut init = container_init();
+        init.loopback_ports.push(init.loopback_ports[0].clone());
+        assert!(validate_init(&init).is_err());
+        let mut init = container_init();
+        init.loopback_ports[0].guest_port = 0;
+        assert!(validate_init(&init).is_err());
+        let mut init = container_init();
+        init.loopback_ports = (1..=MAX_LOOPBACK_PORTS as u16 + 1)
+            .map(|guest_port| LoopbackPort {
+                host_port: 0,
+                guest_port,
+                protocol: PortProtocol::Tcp,
+            })
+            .collect();
+        assert!(validate_init(&init).is_err());
+    }
+
+    #[test]
+    fn the_github_hosts_are_a_container_parameter_limited_to_github() {
+        let hosts = |values: &[&str]| Some(values.iter().map(|v| v.to_string()).collect());
+        let mut init = container_init();
+        init.github_hosts = hosts(&["github.com", "api.github.com", "uploads.github.com"]);
+        assert!(validate_init(&init).is_ok());
+        for rejected in [
+            vec!["github.com"],
+            vec!["github.com", "api.github.com", "evil.example"],
+            vec!["github.com", "api.github.com", "github.com"],
+            vec!["*"],
+        ] {
+            let mut init = container_init();
+            init.github_hosts = hosts(&rejected);
+            assert!(validate_init(&init).is_err(), "{rejected:?}");
+        }
+        // A VM keeps the fixed pair.
+        let mut init = vm_init();
+        init.github_hosts = hosts(&["github.com", "api.github.com", "uploads.github.com"]);
+        assert!(validate_init(&init).is_err());
+    }
+
+    #[test]
+    fn github_host_updates_must_name_the_hosts_fixed_at_init() {
+        let update = |hosts: &[&str]| UpdateOperation::SetAllowedHosts {
+            name: "SILO_GITHUB".into(),
+            allowed_hosts: hosts.iter().map(|v| v.to_string()).collect(),
+        };
+        let pair = GithubHosts::from_init(&vm_init()).unwrap();
+        assert!(validate_update(&update(&["api.github.com", "github.com"]), &pair).is_ok());
+        assert!(
+            validate_update(
+                &update(&["github.com", "api.github.com", "uploads.github.com"]),
+                &pair
+            )
+            .is_err()
+        );
+        let mut init = container_init();
+        init.github_hosts = Some(
+            ["github.com", "api.github.com", "uploads.github.com"]
+                .map(str::to_owned)
+                .to_vec(),
+        );
+        let triple = GithubHosts::from_init(&init).unwrap();
+        assert!(
+            validate_update(
+                &update(&["uploads.github.com", "github.com", "api.github.com"]),
+                &triple
+            )
+            .is_ok()
+        );
+        assert!(validate_update(&update(&["github.com", "api.github.com"]), &triple).is_err());
     }
 
     #[test]
     fn policy_updates_reject_reserved_names_and_unscoped_github_hosts() {
+        let hosts = GithubHosts::from_init(&vm_init()).unwrap();
         assert!(
-            validate_update(&UpdateOperation::PutSecret {
-                name: "API_KEY".into(),
-                value: Zeroizing::new("synthetic".into()),
-                placeholder: "$MSB_API_KEY".into(),
-                allowed_hosts: vec!["api.example.test".into()],
-            })
+            validate_update(
+                &UpdateOperation::PutSecret {
+                    name: "API_KEY".into(),
+                    value: Zeroizing::new("synthetic".into()),
+                    placeholder: "$MSB_API_KEY".into(),
+                    allowed_hosts: vec!["api.example.test".into()],
+                },
+                &hosts
+            )
             .is_ok()
         );
         assert!(
-            validate_update(&UpdateOperation::PutSecret {
-                name: "API_KEY".into(),
-                value: Zeroizing::new("synthetic".into()),
-                placeholder: "$MSB_API_KEY".into(),
-                allowed_hosts: vec!["*".into()],
-            })
+            validate_update(
+                &UpdateOperation::PutSecret {
+                    name: "API_KEY".into(),
+                    value: Zeroizing::new("synthetic".into()),
+                    placeholder: "$MSB_API_KEY".into(),
+                    allowed_hosts: vec!["*".into()],
+                },
+                &hosts
+            )
             .is_ok()
         );
         assert!(
-            validate_update(&UpdateOperation::PutSecret {
-                name: "PATH".into(),
-                value: Zeroizing::new("synthetic".into()),
-                placeholder: "$MSB_PATH".into(),
-                allowed_hosts: vec!["api.example.test".into()],
-            })
+            validate_update(
+                &UpdateOperation::PutSecret {
+                    name: "PATH".into(),
+                    value: Zeroizing::new("synthetic".into()),
+                    placeholder: "$MSB_PATH".into(),
+                    allowed_hosts: vec!["api.example.test".into()],
+                },
+                &hosts
+            )
             .is_err()
         );
         assert!(
-            validate_update(&UpdateOperation::SetAllowedHosts {
-                name: "SILO_GITHUB".into(),
-                allowed_hosts: vec!["github.com".into(), "api.github.com".into()],
-            })
+            validate_update(
+                &UpdateOperation::SetAllowedHosts {
+                    name: "SILO_GITHUB".into(),
+                    allowed_hosts: vec!["github.com".into(), "api.github.com".into()],
+                },
+                &hosts
+            )
             .is_ok()
         );
         assert!(
-            validate_update(&UpdateOperation::SetAllowedHosts {
-                name: "SILO_GITHUB".into(),
-                allowed_hosts: vec!["*".into()],
-            })
+            validate_update(
+                &UpdateOperation::SetAllowedHosts {
+                    name: "SILO_GITHUB".into(),
+                    allowed_hosts: vec!["*".into()],
+                },
+                &hosts
+            )
             .is_err()
         );
     }
