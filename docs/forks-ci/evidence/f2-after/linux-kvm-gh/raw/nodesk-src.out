@@ -1,0 +1,12 @@
+Building the recipe demo-nodesk...
+Building the recipe demo-nodesk: 5s
+Building the recipe demo-nodesk: 10s
+Building the recipe demo-nodesk: 15s
+Building the recipe demo-nodesk: 20s
+Building the recipe demo-nodesk: 25s
+Building the recipe demo-nodesk: 30s
+Forking demo-nodesk into e2e-forks-nodesk-src...
+Forked e2e-forks-nodesk-src (stopped): demo-nodesk as of 22:34:50 (manual checkpoint, 7s old)
+Starting e2e-forks-nodesk-src...
+Starting e2e-forks-nodesk-src: 5s
+Started e2e-forks-nodesk-src (running)

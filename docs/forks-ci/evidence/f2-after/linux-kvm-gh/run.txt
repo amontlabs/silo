@@ -1,0 +1,178 @@
+silo: Cannot reach the Silo engine at /home/runner/.silo-dev/engine.sock: The engine connection failed: No such file or directory (os error 2). Open Silo and try again.
+Traceback (most recent call last):
+  File "<string>", line 3, in <module>
+  File "/opt/hostedtoolcache/Python/3.12.16/x64/lib/python3.12/json/__init__.py", line 293, in load
+    return loads(fp.read(),
+           ^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.16/x64/lib/python3.12/json/__init__.py", line 346, in loads
+    return _default_decoder.decode(s)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.16/x64/lib/python3.12/json/decoder.py", line 338, in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/hostedtoolcache/Python/3.12.16/x64/lib/python3.12/json/decoder.py", line 356, in raw_decode
+    raise JSONDecodeError("Expecting value", s, err.value) from None
+json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+== header (2026-11-07T22:25:15Z)
+commit of the scripts: e88eeb5c15002a0e5f38094f2438d9355549ebb0
+machine: Intel(R) Xeon(R) Platinum 8370C CPU @ 2.80GHz, 15.6 GiB RAM (14.5 GiB available), 4 cores, Ubuntu 24.04.5 LTS, kernel 7.0.0-1017-azure, x86_64
+kvm: present; swap 3.0 GiB
+silo CLI: /home/runner/work/_temp/prefix/silo-engine/silo (silo 0.1.0; channel org.silo.dev)
+silo CLI resolves to: /home/runner/work/_temp/prefix/silo-engine/silo
+computers: No computers yet. Create one with `silo create <name>`.;
+sections: cold warm1 warm4 ten plain nodesk; runs 3; ten = 10; wait before a cold run 0s
+clock: wall clock (monotonic) of the silo process; the CLI polls jobs every 300 ms
+[22:25:15] main absent: creating it with silo up --recipe demo
+main is running. ssh main.silo-dev reaches it.
+main: main  running    linux   2 cpu, 4 GiB
+
+== cold
+[22:26:24] cold run 1: waiting 0s
+cold1 rc=0 11.71s
+  cold1: captured 1 new fork point(s) of main (disks only)
+-- RAM of cold fork 1 (20 s after ready)
+method: sum of Pss, /proc/PID/smaps_rollup
+pid 14035: 1036.0 MiB  /home/runner/work/_temp/prefix/silo-engine/msb machine --name e2e-forks-cold1 --sandbox-id 3 --startup-fd 98 -
+pid 14570: 7.6 MiB  /home/runner/work/_temp/prefix/silo-engine/msb wait e2e-forks-cold1 --timeout 600s
+TOTAL 1043.6
+[22:26:58] cold run 2: waiting 0s
+cold2 rc=0 11.95s
+  cold2: captured 1 new fork point(s) of main (disks only)
+[22:27:11] cold run 3: waiting 0s
+cold3 rc=0 11.66s
+  cold3: captured 1 new fork point(s) of main (disks only)
+(a) Linux fork of a running idle main, to running+ready: N=3 median=11.71s min=11.66s max=11.95s runs=[11.71, 11.95, 11.66]
+
+== warm1
+warm1-1 rc=0 11.96s
+  warm1-1: captured 1 new fork point(s) of main (disks only)
+warm1-2 rc=0 11.95s
+  warm1-2: captured 1 new fork point(s) of main (disks only)
+warm1-3 rc=0 11.95s
+  warm1-3: captured 1 new fork point(s) of main (disks only)
+(c) one fork right after silo up, to running+ready: N=3 median=11.95s min=11.95s max=11.96s runs=[11.96, 11.95, 11.95]
+
+== warm4
+warm4-1 rc=0 41.08s
+  warm4-1: captured 1 new fork point(s) of main (disks only)
+-- RAM of e2e-forks-w4x1-1
+method: sum of Pss, /proc/PID/smaps_rollup
+pid 24923: 1020.7 MiB  /home/runner/work/_temp/prefix/silo-engine/msb machine --name e2e-forks-w4x1-1 --sandbox-id 9 --startup-fd 98 
+pid 25824: 5.6 MiB  /home/runner/work/_temp/prefix/silo-engine/msb wait e2e-forks-w4x1-1 --timeout 600s
+TOTAL 1026.3
+-- RAM of e2e-forks-w4x1-2
+method: sum of Pss, /proc/PID/smaps_rollup
+pid 25360: 1021.6 MiB  /home/runner/work/_temp/prefix/silo-engine/msb machine --name e2e-forks-w4x1-2 --sandbox-id 10 --startup-fd 98
+pid 26475: 5.5 MiB  /home/runner/work/_temp/prefix/silo-engine/msb wait e2e-forks-w4x1-2 --timeout 600s
+TOTAL 1027.2
+-- RAM of e2e-forks-w4x1-3
+method: sum of Pss, /proc/PID/smaps_rollup
+pid 25979: 1010.3 MiB  /home/runner/work/_temp/prefix/silo-engine/msb machine --name e2e-forks-w4x1-3 --sandbox-id 11 --startup-fd 98
+pid 27317: 5.5 MiB  /home/runner/work/_temp/prefix/silo-engine/msb wait e2e-forks-w4x1-3 --timeout 600s
+TOTAL 1015.9
+-- RAM of e2e-forks-w4x1-4
+method: sum of Pss, /proc/PID/smaps_rollup
+pid 26691: 1020.9 MiB  /home/runner/work/_temp/prefix/silo-engine/msb machine --name e2e-forks-w4x1-4 --sandbox-id 12 --startup-fd 98
+pid 28099: 5.6 MiB  /home/runner/work/_temp/prefix/silo-engine/msb wait e2e-forks-w4x1-4 --timeout 600s
+TOTAL 1026.5
+warm4-2 rc=0 39.71s
+  warm4-2: captured 1 new fork point(s) of main (disks only)
+-- RAM of e2e-forks-w4x2-1
+method: sum of Pss, /proc/PID/smaps_rollup
+pid 32728: 1017.5 MiB  /home/runner/work/_temp/prefix/silo-engine/msb machine --name e2e-forks-w4x2-1 --sandbox-id 13 --startup-fd 98
+pid 33666: 5.8 MiB  /home/runner/work/_temp/prefix/silo-engine/msb wait e2e-forks-w4x2-1 --timeout 600s
+TOTAL 1023.3
+-- RAM of e2e-forks-w4x2-2
+method: sum of Pss, /proc/PID/smaps_rollup
+pid 33815: 1025.6 MiB  /home/runner/work/_temp/prefix/silo-engine/msb machine --name e2e-forks-w4x2-2 --sandbox-id 15 --startup-fd 98
+pid 35263: 5.6 MiB  /home/runner/work/_temp/prefix/silo-engine/msb wait e2e-forks-w4x2-2 --timeout 600s
+TOTAL 1031.2
+-- RAM of e2e-forks-w4x2-3
+method: sum of Pss, /proc/PID/smaps_rollup
+pid 34645: 1031.9 MiB  /home/runner/work/_temp/prefix/silo-engine/msb machine --name e2e-forks-w4x2-3 --sandbox-id 16 --startup-fd 98
+pid 36029: 5.7 MiB  /home/runner/work/_temp/prefix/silo-engine/msb wait e2e-forks-w4x2-3 --timeout 600s
+TOTAL 1037.6
+-- RAM of e2e-forks-w4x2-4
+method: sum of Pss, /proc/PID/smaps_rollup
+pid 33152: 1018.0 MiB  /home/runner/work/_temp/prefix/silo-engine/msb machine --name e2e-forks-w4x2-4 --sandbox-id 14 --startup-fd 98
+pid 34504: 5.5 MiB  /home/runner/work/_temp/prefix/silo-engine/msb wait e2e-forks-w4x2-4 --timeout 600s
+TOTAL 1023.6
+warm4-3 rc=0 43.15s
+  warm4-3: captured 1 new fork point(s) of main (disks only)
+-- RAM of e2e-forks-w4x3-1
+method: sum of Pss, /proc/PID/smaps_rollup
+pid 42498: 1022.3 MiB  /home/runner/work/_temp/prefix/silo-engine/msb machine --name e2e-forks-w4x3-1 --sandbox-id 20 --startup-fd 98
+pid 43900: 5.8 MiB  /home/runner/work/_temp/prefix/silo-engine/msb wait e2e-forks-w4x3-1 --timeout 600s
+TOTAL 1028.1
+-- RAM of e2e-forks-w4x3-2
+method: sum of Pss, /proc/PID/smaps_rollup
+pid 40545: 1021.1 MiB  /home/runner/work/_temp/prefix/silo-engine/msb machine --name e2e-forks-w4x3-2 --sandbox-id 17 --startup-fd 98
+pid 41224: 5.6 MiB  /home/runner/work/_temp/prefix/silo-engine/msb wait e2e-forks-w4x3-2 --timeout 600s
+TOTAL 1026.7
+-- RAM of e2e-forks-w4x3-3
+method: sum of Pss, /proc/PID/smaps_rollup
+pid 41091: 1001.8 MiB  /home/runner/work/_temp/prefix/silo-engine/msb machine --name e2e-forks-w4x3-3 --sandbox-id 18 --startup-fd 98
+pid 42253: 5.6 MiB  /home/runner/work/_temp/prefix/silo-engine/msb wait e2e-forks-w4x3-3 --timeout 600s
+TOTAL 1007.5
+-- RAM of e2e-forks-w4x3-4
+method: sum of Pss, /proc/PID/smaps_rollup
+pid 41773: 1023.7 MiB  /home/runner/work/_temp/prefix/silo-engine/msb machine --name e2e-forks-w4x3-4 --sandbox-id 19 --startup-fd 98
+pid 43011: 5.7 MiB  /home/runner/work/_temp/prefix/silo-engine/msb wait e2e-forks-w4x3-4 --timeout 600s
+TOTAL 1029.5
+(b) silo fork main -n 4 right after silo up, to 4 running+ready: N=3 median=41.08s min=39.71s max=43.15s runs=[41.08, 39.71, 43.15]
+(d) RAM per fork, 20 s after ready, over the forks of 3 runs of -n 4 (MiB): N=12 median=1026.60MiB min=1007.50MiB max=1037.60MiB runs=[1026.3, 1027.2, 1015.9, 1026.5, 1023.3, 1031.2, 1037.6, 1023.6, 1028.1, 1026.7, 1007.5, 1029.5]
+
+== ten
+(f) 10 forks at once: per-fork RAM median 1026.5 MiB from (d); available 13820 MiB; needed 14879 MiB (per fork x 10 x 1.25 + 2 GiB)
+(f) NOT MEASURED: available memory 13820 MiB is below the 14879 MiB the 10 forks need
+
+== plain
+[22:31:58] plain: making the source e2e-forks-plain-src from the recipe demo-plain
+-- status of e2e-forks-plain-src
+e2e-forks-plain-src (linux): running
+2 cpu, 4 GiB memory, 10 GiB disk
+0 checkpoints
+Running
+quiet: applied; stopped: none; scrubbed: /etc/silo/guest-client.json; secrets: none
+secrets assigned: none
+credentials used: none
+computer use: ready, approval ask, driver 0.38.0
+plain1 rc=0 13.92s
+  plain1: captured 1 new fork point(s) of e2e-forks-plain-src (disks only)
+-- RAM of e2e-forks-plain1 (20 s after ready)
+method: sum of Pss, /proc/PID/smaps_rollup
+pid 50454: 1015.4 MiB  /home/runner/work/_temp/prefix/silo-engine/msb machine --name e2e-forks-plain1 --sandbox-id 23 --startup-fd 98
+pid 50824: 6.7 MiB  /home/runner/work/_temp/prefix/silo-engine/msb wait e2e-forks-plain1 --timeout 600s
+TOTAL 1022.0
+plain2 rc=0 14.29s
+  plain2: captured 1 new fork point(s) of e2e-forks-plain-src (disks only)
+plain3 rc=0 14.36s
+  plain3: captured 1 new fork point(s) of e2e-forks-plain-src (disks only)
+(plain) Linux fork of a running idle demo-plain computer, to running+ready: N=3 median=14.29s min=13.92s max=14.36s runs=[13.92, 14.29, 14.36]
+
+== nodesk
+[22:34:24] nodesk: making the source e2e-forks-nodesk-src from the recipe demo-nodesk
+-- status of e2e-forks-nodesk-src
+e2e-forks-nodesk-src (linux): running
+2 cpu, 4 GiB memory, 10 GiB disk
+0 checkpoints
+e2e-forks-nodesk-src has no desktop; turn it on with `silo desktop on e2e-forks-nodesk-src`.
+Running
+quiet: applied; stopped: none; scrubbed: /etc/silo/guest-client.json; secrets: none
+secrets assigned: none
+credentials used: none
+nodesk1 rc=0 8.49s
+  nodesk1: captured 1 new fork point(s) of e2e-forks-nodesk-src (disks only)
+-- RAM of e2e-forks-nodesk1 (20 s after ready)
+method: sum of Pss, /proc/PID/smaps_rollup
+pid 60513: 379.9 MiB  /home/runner/work/_temp/prefix/silo-engine/msb machine --name e2e-forks-nodesk1 --sandbox-id 28 --startup-fd 9
+pid 61192: 6.6 MiB  /home/runner/work/_temp/prefix/silo-engine/msb wait e2e-forks-nodesk1 --timeout 600s
+TOTAL 386.5
+nodesk2 rc=0 8.62s
+  nodesk2: captured 1 new fork point(s) of e2e-forks-nodesk-src (disks only)
+nodesk3 rc=0 8.82s
+  nodesk3: captured 1 new fork point(s) of e2e-forks-nodesk-src (disks only)
+(nodesk) Linux fork of a running idle demo-nodesk computer, to running+ready: N=3 median=8.62s min=8.49s max=8.82s runs=[8.49, 8.62, 8.82]
+[22:36:19] cleanup
+main (made by this run) dropped
+No computers yet. Create one with `silo create <name>`.

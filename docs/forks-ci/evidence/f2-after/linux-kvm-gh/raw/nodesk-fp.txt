@@ -1,0 +1,4 @@
+method: sum of Pss, /proc/PID/smaps_rollup
+pid 60513: 379.9 MiB  /home/runner/work/_temp/prefix/silo-engine/msb machine --name e2e-forks-nodesk1 --sandbox-id 28 --startup-fd 9
+pid 61192: 6.6 MiB  /home/runner/work/_temp/prefix/silo-engine/msb wait e2e-forks-nodesk1 --timeout 600s
+TOTAL 386.5
