@@ -199,7 +199,7 @@ Branch `claude/containers-ct1`, pull request [#92](https://github.com/amontlabs/
   revisions and the close barrier, shutdown) and the file-store CA test. `cargo test --workspace` on macOS:
   all pass except the 8 `host_push::protocol_tests`, which need the prepared Git runtime (also skipped for F2).
 - **Live check** on the KVM runner, no root step in the path: [evidence/ct1-gateway](evidence/ct1-gateway/README.md).
-  22 of 22 checks, with the script driving the gateway and with the engine starting it. Public HTTPS works,
+  25 of 25 checks (22 before the review fixes), with the script driving the gateway and with the engine starting it. Public HTTPS works,
   private addresses and the host's own address are refused, a fake token is substituted for
   `api.github.com` (401 "Bad credentials"), DNS works and a private answer is blocked.
 - **Found on the way.** TLS is intercepted only toward hosts a secret is allowed for (the existing rule);

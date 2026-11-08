@@ -8,6 +8,14 @@
   "ip": "ip utility, iproute2-6.1.0, libbpf 1.3.0",
   "checks": [
     {
+      "check": "a TUN device handed over as the frame descriptor is refused with invalid_frame_carrier",
+      "passed": true,
+      "detail": {
+        "answer": "invalid_frame_carrier",
+        "exit": 1
+      }
+    },
+    {
       "check": "a published port answers on the host's loopback",
       "passed": true,
       "detail": {
@@ -98,6 +106,22 @@
       }
     },
     {
+      "check": "the gateway's own address is refused",
+      "passed": true,
+      "detail": {
+        "curl": 7,
+        "status": "000"
+      }
+    },
+    {
+      "check": "the gateway's own address over TLS is refused",
+      "passed": true,
+      "detail": {
+        "curl": 7,
+        "status": "000"
+      }
+    },
+    {
       "check": "api.github.com answers a substituted fake token with Bad credentials",
       "passed": true,
       "detail": {
@@ -164,8 +188,8 @@
       "check": "frames crossed the TAP in both directions",
       "passed": true,
       "detail": {
-        "guest_to_engine_frames": 112,
-        "engine_to_guest_frames": 78,
+        "guest_to_engine_frames": 119,
+        "engine_to_guest_frames": 89,
         "guest_mac_spoof": 0,
         "guest_ip_spoof": 0,
         "malformed_frames": 0,
@@ -175,18 +199,27 @@
       }
     },
     {
-      "check": "the credential-use log names the secret, the host and the method, and never the value",
+      "check": "the credential-use log is JSON lines; it names the secret, the host and the method, and never the value",
       "passed": true,
       "detail": {
         "lines": 1,
-        "first_line": "{\"v\":1,\"at\":1794131637680,\"kind\":\"used\",\"secret\":\"CT1_FAKE_TOKEN\",\"host\":\"api.github.com\",\"method\":\"GET\"}"
+        "malformed_lines": 0,
+        "first_event": {
+          "v": 1,
+          "at": 1794133752803,
+          "kind": "used",
+          "secret": "CT1_FAKE_TOKEN",
+          "host": "api.github.com",
+          "method": "GET"
+        }
       }
     },
     {
       "check": "the secret was used for api.github.com only, not for a request to another host",
       "passed": true,
       "detail": {
-        "used_events": 1
+        "used_events": 1,
+        "outside_the_allowed_hosts": []
       }
     },
     {
