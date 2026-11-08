@@ -370,6 +370,12 @@ capability list (refused with the plain message, hidden in the app).
   container, the control socket MicroSandbox serves for a VM (`containers/ports.rs`, at the path `network.rs`
   already uses, `0600` in a `0700` folder) and forwards to the gateway, so `network.rs` and the URL proxy needed no
   change (only `socket_path` became `pub(crate)`).
+- **The guest trusts the gateway's CA.** The first live run showed curl in the container refusing the
+  certificate the gateway presents for `api.github.com` ("self-signed certificate in certificate chain"): a VM gets
+  the CA installed by its runtime, a container did not. The start now writes the image's
+  `/etc/ssl/certs/ca-certificates.crt` plus the computer's CA to `state/ca-bundle.crt` and binds it read-only over
+  that path (the image file is read without following a link, capped at 4 MiB). It is the third host file the
+  container sees. Tools that ship their own bundle (Node, a browser) need their own setting.
 - **CT1 nit.** The CA handover moves the key (`std::mem::take`) instead of copying it with `to_string`, in
   `computer_ca` and in the macOS supervisor's `generate_ca`.
 - **Why SSH is stopped.** The guest image has `openssh-sftp-server` but no `sshd`. `msb ssh serve`, the host

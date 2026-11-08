@@ -750,7 +750,8 @@ with nothing sensitive on it, and the app, the CLI and `silo list` label it as l
   tasks always; CPU only when the user manager delegates `cpu`, otherwise the computer is not
   CPU-limited) on the computer's transient user scope. No host folder, no Docker or Podman socket and not the
   engine socket (boundary 7) are mounted; the engine's files are not in the container's mount
-  namespace. The only host files the container sees are its own `resolv.conf` and `hosts`.
+  namespace. The only host files the container sees are its own `resolv.conf`, `hosts` and system trust
+  bundle (the image's, plus the computer's gateway CA; bound read-only).
 - **Network.** The container's network namespace holds one TAP device and a loopback, and nothing
   else; a gateway process (the same network stack as macOS computers, boundary 2) is the only way
   out, with the Public policy and the gateway as resolver. A command run in the computer enters

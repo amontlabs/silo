@@ -269,6 +269,24 @@ fn private_dir(path: &Path) -> Result<(), String> {
         .map_err(io)
 }
 
+/// The image's system trust bundle followed by the computer's CA.
+fn ca_bundle(rootfs: &Path, ca_cert: &str) -> Result<String, String> {
+    const LIMIT: u64 = 4 * 1024 * 1024;
+    let path = rootfs.join(oci::CA_BUNDLE_PATH.trim_start_matches('/'));
+    let missing = || "The container image has no system trust bundle.".to_owned();
+    let meta = std::fs::symlink_metadata(&path).map_err(|_| missing())?;
+    if !meta.is_file() || meta.len() > LIMIT {
+        return Err(missing());
+    }
+    let mut bundle = std::fs::read_to_string(&path).map_err(|_| missing())?;
+    if !bundle.ends_with('\n') {
+        bundle.push('\n');
+    }
+    bundle.push_str(ca_cert.trim_end());
+    bundle.push('\n');
+    Ok(bundle)
+}
+
 /// The file the gateway appends its credential-use events to: where `computers.credentials`
 /// reads a Linux computer's events, so the credentials-used line needs no container case.
 fn usage_log_file(home: &Path, name: &str) -> Result<PathBuf, String> {
@@ -398,12 +416,22 @@ fn launch(
     let boot = boot_layer(layout, tools)?;
     let uid = unsafe { libc::getuid() };
     let unit = unit_name(paths, name);
+    // The computer's certificate authority joins the guest's trust bundle, as the runtime does
+    // for a virtual machine, so a guest accepts the certificate the gateway presents for a host
+    // a secret is allowed for.
+    let id = record.label("silo.machine-id").unwrap_or(name).to_owned();
+    let (ca_cert, ca_key) = computer_ca(&tools.gateway, &id)?;
+    write_readable(
+        &state.join("ca-bundle.crt"),
+        &ca_bundle(rootfs, &ca_cert)?,
+    )?;
     let spec = oci::build(&oci::Params {
         name,
         rootfs: &dir.merged(),
         cgroup_path: &cgroup_path(uid, &unit),
         resolv_conf: &state.join("resolv.conf"),
         hosts: &state.join("hosts"),
+        ca_bundle: &state.join("ca-bundle.crt"),
         arch: std::env::consts::ARCH,
     })?;
     std::fs::write(
@@ -524,8 +552,6 @@ fn launch(
         .set_read_timeout(Some(Duration::from_secs(60)))
         .map_err(io)?;
     let tap = receive_descriptor(&stream)?;
-    let id = record.label("silo.machine-id").unwrap_or(name).to_owned();
-    let (ca_cert, ca_key) = computer_ca(&tools.gateway, &id)?;
     let gateway_log = std::fs::File::create(state.join("gateway.log")).map_err(io)?;
     let usage_log = usage_log_file(&paths.home, name)?;
     // The secrets this computer is assigned, with the values the engine read for this start. A
@@ -906,6 +932,21 @@ pub fn exec_command(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_gateway_ca_follows_the_images_trust_bundle() {
+        let rootfs = tempfile::tempdir().unwrap();
+        let certs = rootfs.path().join("etc/ssl/certs");
+        std::fs::create_dir_all(&certs).unwrap();
+        std::fs::write(certs.join("ca-certificates.crt"), "PUBLIC-ROOTS").unwrap();
+        let bundle = ca_bundle(rootfs.path(), "GATEWAY-CA\n").unwrap();
+        assert_eq!(bundle, "PUBLIC-ROOTS\nGATEWAY-CA\n");
+        // A link in the image is not followed to a host file.
+        std::fs::remove_file(certs.join("ca-certificates.crt")).unwrap();
+        std::os::unix::fs::symlink("/etc/passwd", certs.join("ca-certificates.crt")).unwrap();
+        assert!(ca_bundle(rootfs.path(), "GATEWAY-CA").is_err());
+        assert!(ca_bundle(tempfile::tempdir().unwrap().path(), "GATEWAY-CA").is_err());
+    }
 
     #[test]
     fn the_cgroup_is_a_leaf_of_the_users_scope() {

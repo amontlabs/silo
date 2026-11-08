@@ -13,6 +13,10 @@ use std::path::Path;
 /// Where the shim binary sits inside the container.
 pub const INIT_PATH: &str = "/silo/init";
 
+/// The system trust bundle (Debian and Ubuntu), which the gateway's CA is added to so the guest
+/// accepts the certificates the gateway issues toward hosts a secret is allowed for.
+pub const CA_BUNDLE_PATH: &str = "/etc/ssl/certs/ca-certificates.crt";
+
 /// What Silo's own root commands (account setup, installs) may use inside the container's user
 /// namespace; user processes and the container's first process have none.
 pub const ROOT_EXEC_CAPABILITIES: [&str; 7] = [
@@ -49,6 +53,8 @@ pub struct Params<'a> {
     pub cgroup_path: &'a str,
     pub resolv_conf: &'a Path,
     pub hosts: &'a Path,
+    /// The system trust bundle with the computer's gateway CA added.
+    pub ca_bundle: &'a Path,
     /// `std::env::consts::ARCH`.
     pub arch: &'a str,
 }
@@ -147,6 +153,8 @@ pub fn build(params: &Params<'_>) -> Result<Spec, String> {
              "options": ["rbind", "ro", "nosuid", "nodev", "noexec"]},
             {"destination": "/etc/hosts", "type": "bind", "source": params.hosts,
              "options": ["rbind", "ro", "nosuid", "nodev", "noexec"]},
+            {"destination": CA_BUNDLE_PATH, "type": "bind", "source": params.ca_bundle,
+             "options": ["rbind", "ro", "nosuid", "nodev", "noexec"]},
         ],
         "linux": {
             "namespaces": namespaces,
@@ -194,6 +202,7 @@ mod tests {
             cgroup_path: "/user.slice/x.scope/ctr",
             resolv_conf: Path::new("/r/state/resolv.conf"),
             hosts: Path::new("/r/state/hosts"),
+            ca_bundle: Path::new("/r/state/ca-bundle.crt"),
             arch: "x86_64",
         })
         .unwrap()
@@ -335,7 +344,7 @@ mod tests {
     }
 
     #[test]
-    fn proc_and_sys_are_masked_or_read_only_and_only_two_files_are_bound_from_the_host() {
+    fn proc_and_sys_are_masked_or_read_only_and_only_three_files_are_bound_from_the_host() {
         let spec = spec();
         let linux = spec.linux().as_ref().unwrap();
         assert!(linux
@@ -359,7 +368,10 @@ mod tests {
             .filter(|m| m.typ().as_deref() == Some("bind"))
             .map(|m| m.destination().to_string_lossy().into_owned())
             .collect();
-        assert_eq!(bound, ["/etc/resolv.conf", "/etc/hosts"]);
+        assert_eq!(
+            bound,
+            ["/etc/resolv.conf", "/etc/hosts", "/etc/ssl/certs/ca-certificates.crt"]
+        );
         let text = serde_json::to_string(&spec).unwrap();
         assert!(
             !text.contains("docker.sock")
