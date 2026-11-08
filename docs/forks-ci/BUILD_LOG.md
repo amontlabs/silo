@@ -618,6 +618,17 @@ checks passed; the failures were four product problems, all fixed afterwards (te
     glob skips dotfiles and directories. Python tests for both.
   - *Tests:* `go vet` (also `GOOS=linux` amd64 and arm64), `gofmt`, `go test -race ./...`; `test_package_engine.py`,
     `test_linux_host_workflow.py` pass. Still no GitHub run and no Linux machine.
+- **CI: `Linux computer on KVM` failed at `silo create` ("Silo could not download the VM image"), not caused by the runner step.**
+  Runs 42465256087 (attempts 1-3) failed at `== Creating e2e-hosts-ci` after about 40 s. The VM image is fetched from
+  `github.com/amontlabs/silo/releases/download/guest-ubuntu-24.04-v5/image-amd64.tar.gz` (`guest-image/image-lock.json`); that
+  asset exists (361 MB, `uploaded`), but at 10:19 UTC every `github.com/.../releases/download/...` URL, including an unrelated
+  repository's, answered HTTP 504 from outside CI while githubstatus.com reported all systems operational. Other branches
+  failed the same step in the same window with no runner step at all (`claude/forks-phase-4-transfer` run 42469940031 at
+  10:14:29 UTC, whose workflow has no `runner-host-e2e.sh`; `claude/containers-ct1` run 42466752224 at 09:36 UTC), while
+  run 42467219772 passed at 09:26: a flaky release-download endpoint, not state the runner step leaves behind. The runner
+  step only restarts the engine through `Wants=` with the same user-manager environment, home and image cache dir as the
+  engine the register step started, and the engine journal shows nothing between the restart and the stop. The create step
+  now retries a download failure (3 attempts, 30 s apart) so a brief GitHub outage does not fail the job.
 - **Open:** (1) the live check above; (2) `silo-runner` is not in the macOS archive; (3) one helper per machine, so two machines
   serving the same recipe need two labels; (4) the default budget ignores memory the host's other services use, so on a
   shared machine set `linuxBudget`.

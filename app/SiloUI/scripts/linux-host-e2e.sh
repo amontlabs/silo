@@ -64,10 +64,24 @@ if [[ -n "$existing" ]]; then
   echo "A computer named $name or $fork already exists; this test never touches it" >&2
   exit 1
 fi
-trap cleanup EXIT
+stderr_file="$(mktemp)"
+trap 'rm -f "$stderr_file"; cleanup' EXIT
 
 step "Creating $name"
-"$silo" create "$name" --linux --cpus 1 --memory 2 --disk 2
+# The VM image comes from a GitHub release, whose download endpoint sometimes answers 504 for a
+# while: a download failure is retried, anything else fails at once.
+for attempt in 1 2 3; do
+  if "$silo" create "$name" --linux --cpus 1 --memory 2 --disk 2 2> "$stderr_file"; then
+    break
+  fi
+  cat "$stderr_file" >&2
+  if ((attempt == 3)) || ! grep -q "could not download the VM image" "$stderr_file"; then
+    exit 1
+  fi
+  echo "The VM image download failed (attempt $attempt of 3); trying again in 30 s" >&2
+  if listed "$name" | grep -qx -- "$name"; then "$silo" drop "$name" || true; fi
+  sleep 30
+done
 
 step "Starting $name"
 "$silo" start "$name"
