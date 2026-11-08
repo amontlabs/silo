@@ -1,6 +1,6 @@
 #!/bin/bash
-# Installs Google Chrome (the guest image has no browser) with apt. Needs the relaxed capabilities: the baseline
-# (none) cannot run dpkg and apt as container root. Its result is the "desktop" container's starting upper layer.
+# Installs Google Chrome (the guest image has no browser) with apt. apt works with no capabilities (aptprobe.txt); this
+# prep step still runs with the relaxed set. Its result is the "desktop" container's starting upper layer.
 now() { date +%s.%N; }
 t=$(now)
 mkdir -p /tmp/c1-logs

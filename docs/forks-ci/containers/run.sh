@@ -4,7 +4,7 @@
 #
 #   bash docs/forks-ci/containers/setup.sh && bash docs/forks-ci/containers/run.sh
 #
-# Environment: SECTIONS (default: facts sec cold ten fork net desktop work), RUNS (3), TEN (10), C1_WORK (/mnt/c1),
+# Environment: SECTIONS (default: facts sec cold ten fork net desktop tendesktop work proxycmp), RUNS (3), TEN (10), C1_WORK (/mnt/c1),
 # C1_OUT (evidence directory, default $C1_WORK/evidence).
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"

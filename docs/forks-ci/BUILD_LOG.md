@@ -133,18 +133,28 @@ Both owner decisions:
 - **Where.** The GitHub ubuntu-24.04 runner (a cloud VM: the microVM runs on nested KVM, the containers run on
   the runner's kernel); the container and microVM measurements ran in the same job on the same CPU (EPYC
   9V74, run 42429983339). The owner's Linux machine was offline. Landlock ABI 8 on the kernel (7.0.0-azure).
-- **Numbers** (N=3, medians): ready shell 0.09 s against 5.31 s for the microVM; fork 0.20 s against 13.10 s
-  (10.28 s without a desktop); ten forks at once 1.10 s (four microVM forks 32.09 s; ten did not fit in the
-  runner's memory); idle memory 4.1 MiB against 840.8 MiB; ten Xfce and Selkies desktops 2015 MiB in total
-  and serving after 28.4 s. The CPU-bound workload steps (unpack, cargo, make) were 11-20 % faster in the
-  container; downloads through the proxy were slower (apt 61.6 s against 15.0 s), and the choice of proxy
-  moved them by 3-5 times (tinyproxy against Squid).
+- **Numbers** (N=3, medians), fair pairs first: one desktop 315 MiB in a container (763 MiB with Chrome)
+  against 840 MiB for a microVM; about 2.3 s of desktop start steps against 5.3 s; ten desktops about 2 GiB
+  against about 10 GiB (estimated as one fork's 1032 MiB x 10, not measured: ten microVMs did not fit the
+  runner). Ten desktops "serving after 28.4 s" includes 15 s of fixed sleeps; the last Selkies answered about
+  12 s after the start (read from the run log). Bare shell, against a microVM that boots a desktop: 0.09 s and
+  4 MiB; fork 0.20 s against 13.10 s; four microVM forks 32.09 s. The workload rows (apt, unpack, cargo,
+  make) are not like for like (the microVM ran in a fork of main from the demo recipe with build tools
+  pre-installed, the container from the bare image) and are not a speed result. Through the proxy, apt's
+  download was slower; tinyproxy against Squid was 3-5 times, but no control ran the download through Squid
+  from the host without a container, Squid's own spread (23-75 s) is unexplained, and the single-file transfer
+  was 39 MB.
 - **Baseline held.** Capabilities, seccomp, Landlock, the network policy and the masked paths were checked from
   inside; the desktop (Xvfb, PulseAudio, Xfce, Selkies, Cua Driver's MCP server) runs; Chrome needs
   `--no-sandbox` because the baseline blocks the user namespace its sandbox uses.
 - **Costs found.** A root step for the veth and nftables; Ubuntu 24.04's
   `apparmor_restrict_unprivileged_userns` has to be 0; cgroup delegation; a fork's manifest diff must compare
   upper trees both ways (a deleted upper-only file leaves no whiteout; whiteouts are 0/0 devices).
-- **Conclusion.** Worth building as an opt-in kind if the owner accepts the shared kernel; the F2 forks do not
-  close the gap in start time or memory. Not measured: bare metal, a screenshot through Cua Driver, a Selkies
-  client session, Silo's secrets proxy in a container, the isolation evals. The decision is the owner's.
+- **Conclusion.** Worth building as a clearly labelled, never-default option for a machine the owner treats
+  as disposable: about 2x faster start and 5x lighter on the fair pairs. Costs: shared host kernel, Chrome
+  only with `--no-sandbox`, a root helper per container for its network, Ubuntu's AppArmor
+  unprivileged-userns guard relaxed host-wide, a two-way diff of upper layers, secrets, tokens and evals
+  untested. Not probed: `clone`/`setns` with `CLONE_NEWUSER` (only `unshare`), non-TCP traffic. Not run:
+  Silo's secrets proxy, the GitHub token boundary, the guest client, the isolation evals, a Cua Driver
+  screenshot, a Selkies client session, bare metal. A PR with the `containers-microvm` label re-runs the long
+  microVM job on every push. The decision is the owner's.

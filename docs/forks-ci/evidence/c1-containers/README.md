@@ -10,34 +10,56 @@ default.
 
 ## Conclusion
 
-**Yes, it is worth building as an opt-in kind, if the owner accepts the trade below. The microVM forks
-are not cheap enough to replace it for the stated purpose.**
+**Worth building, as a clearly labelled option that is never the default, for a machine the owner treats
+as disposable.** On the fair pairs (a container running a desktop against a microVM that boots one) it
+starts about 2x faster and uses about 5x less memory. The decision is the owner's.
 
-- On the same runner, a ready container shell takes 0.09 s, a microVM 5.3 s. A fork takes 0.20 s
-  against 13.1 s (10.3 s without a desktop, the best F2 gives). Ten forks at once take 1.1 s; four
-  microVM forks take 32 s, and ten did not fit in the runner's memory.
-- An idle container uses 4 MiB (1 MiB each when ten run, because the pages of the image are shared); a
-  microVM uses about 840 MiB, and a fork 1032 MiB. A whole desktop (Xvfb, PulseAudio, Xfce, the Selkies
-  streamer) uses 315 MiB in one container and about 200 MiB each when ten run: ten desktops took 2.0 GiB
-  in total and were all serving after 28 s. Ten microVMs at 1032 MiB each come to 10 GiB, which the
-  runner could not hold: the script found 13849 MiB free and needs 14940 MiB for ten, so it did not run them.
-- F2's best case (a fork without a desktop) is still 10.3 s. The microVM boots a kernel and a guest;
-  this phase measured only the total, not how it divides.
-- The work itself runs at least as fast. In the steps of a developer workload that are mostly
-  unpacking or compiling (unpacking packages, a cargo build, a C build) the container was 11-20 % faster
-  on this runner; the runner is a
-  cloud VM, so the microVM runs on nested KVM, and a bare-metal host was not measured.
-- What it costs. A container shares the host's kernel, so a kernel bug is a host-account bug; the
-  baseline reduces that exposure and does not remove it (the owner accepts this for this kind). Silo
-  would take on a second isolation boundary: a seccomp profile, a Landlock shim, a root-owned network
-  helper (a veth pair cannot be made rootless), cgroup delegation, and on Ubuntu 24.04 a relaxed
-  AppArmor user-namespace setting. The secrets proxy (boundary 3), the GitHub token boundary and the
-  guest client were not part of C1 and would each need a container version. Chrome has to run with
-  `--no-sandbox`.
+Fair pairs (same runner, same CPU, N=3 medians):
+
+- **One desktop, memory.** A container running Xvfb, PulseAudio, Xfce and the Selkies streamer uses
+  **315 MiB** (763 MiB with a headed Chrome window). A microVM, which always boots the desktop, uses
+  **840 MiB**.
+- **Desktop start.** The container's desktop start steps add up to about **2.3 s** (Xvfb 0.21 s,
+  PulseAudio 0.21 s, Xfce 0.67 s, Selkies answering 1.16 s, from `raw/desktop.txt`); the microVM's
+  `silo start` plus first `silo exec` takes **5.3 s**.
+- **Ten desktops.** Ten container desktops use **about 2 GiB** in total (2015 MiB measured). Ten microVMs
+  would use **about 10 GiB**: this is **estimated, not measured**, one fork's 1032 MiB times ten. The
+  runner could not hold ten (13849 MiB available, 14940 MiB needed), so the script did not run them.
+- **Ten desktops, time.** The 28.4 s to "the last one serving" includes 15 s of fixed sleeps in
+  [`mode-desktop.sh`](../../containers/boot/mode-desktop.sh) (lines 47-56: 5 s after Selkies serves,
+  10 s before reading memory). The last Selkies answered about **12 s** after the start. That is read
+  from the run log, not measured directly: in each run the first desktop printed `selkies-http` at
+  7.7, 8.3 and 6.8 s after its own start, and the 28.4 s total less the 15 s of sleeps leaves about
+  13 s for the last desktop including its start-up and the check.
+
+Bare shell, not comparable on its own: a container shell is ready after 0.09 s and idles at 4 MiB, a
+fork after 0.20 s; the microVM boots a whole desktop and takes 5.3 s and 840 MiB (a fork 13.1 s and
+1032 MiB; 10.3 s without a desktop, the best F2 gives). Ten container forks at once take 1.1 s; four
+microVM forks take 32 s.
+
+Workload steps (apt, unpack, cargo, make) **are not like for like and are not a speed result**: see
+section 3. The microVM ran in a fork of `main` built from the demo recipe, the container from the bare
+image, so the package sets differ.
+
+What it costs:
+
+- A container shares the host's kernel, so a kernel bug is a host-account bug; the baseline reduces
+  that exposure and does not remove it.
+- Chrome only runs with `--no-sandbox`.
+- A root helper per container for its network (a veth pair cannot be made rootless).
+- Ubuntu's AppArmor guard on unprivileged user namespaces
+  (`kernel.apparmor_restrict_unprivileged_userns`) has to be relaxed, host-wide.
+- A two-way diff of upper layers (a fork's deleted upper-only file leaves no whiteout).
+- Also a second isolation boundary to maintain (seccomp profile, Landlock shim, cgroup delegation).
+- Secrets, tokens and isolation evals are untested (below).
 
 Suggested next step if the owner agrees: a prototype phase (C2) of one container computer on a Linux
 host, driven by `silod`, with the baseline below, its own proxy for secrets, and the isolation evals
-run against it. This is a recommendation; the decision is the owner's.
+run against it.
+
+**What C1 did not probe or run.** Not probed: `clone`/`setns` with `CLONE_NEWUSER` (only `unshare` was
+tried from inside), non-TCP traffic. Not run: Silo's secrets proxy, the GitHub token boundary, the guest
+client, the isolation evals, a Cua Driver screenshot, a Selkies client session, bare metal.
 
 ## Where and how it ran
 
@@ -56,7 +78,8 @@ run against it. This is a recommendation; the decision is the owner's.
   below are the main run's unless the text says otherwise.
 - **Workflow and scripts.** [`containers-c1.yml`](../../../../.github/workflows/containers-c1.yml)
   (triggered only by changes under `docs/forks-ci/containers/**` and by hand; the microVM job also needs
-  the `containers-microvm` label or a manual run) and [`docs/forks-ci/containers/`](../../containers/).
+  the `containers-microvm` label or a manual run. **A pull request carrying the `containers-microvm`
+  label re-runs the long microVM job on every push.**) and [`docs/forks-ci/containers/`](../../containers/).
   Nothing in the normal CI changes: the paths are not shared with other workflows, and
   `app/SiloUI/scripts/ci-native-changes.py` already treats `docs/` as skippable (this pull request's own
   Rust jobs run only because it adds a workflow file).
@@ -132,16 +155,16 @@ Generated by [`mkconfig.py`](../../containers/mkconfig.py); proof from inside th
 
 | | Container | microVM (this runner) |
 |---|---|---|
-| Cold start to a ready shell | **0.09 s** (0.08-0.09); the process is running after 0.04 s | **5.31 s** (5.29-5.32): `silo start` 5.09 s + first `silo exec` 0.23 s |
+| Cold start to a ready shell (bare shell; the microVM boots a desktop) | **0.09 s** (0.08-0.09); the process is running after 0.04 s | **5.31 s** (5.29-5.32): `silo start` 5.09 s + first `silo exec` 0.23 s |
 | Creating a new computer first | not needed (the image is shared) | 13.37 s (13.06-13.39) |
-| Memory, one idle | **4.1 MiB** PSS (4.1-4.2) | **840.8 MiB** (830.9-841.5) |
+| Memory, one idle (bare shell; the microVM includes a desktop) | **4.1 MiB** PSS (4.1-4.2) | **840.8 MiB** (830.9-841.5) |
 | Ten started at once | **0.82 s** (0.77-0.84) to the last ready shell; 10.0 MiB in total (10.0-10.1), 1.0 MiB each (N=30) | not measured (see the forks below) |
 | Fork, one (new computer from a disk-only copy of the source's disk) | **0.20 s** (0.19-0.20): copy 0.07 s of a 101 MiB upper layer + start | **13.10 s** (13.10-13.12) cold, 13.17 s right after `silo up`; **10.28 s** (9.63-11.09) without a desktop |
 | Four forks at once | not run (ten were) | 32.09 s (31.21-32.37) |
 | Ten forks at once | **1.10 s** (1.09-1.10): ten copies in parallel 0.24 s + ten starts; 10.0 MiB in total | **not measured**: 13849 MiB available, the script needs 14940 MiB |
 | Memory per fork | 1.0 MiB each when ten run | 1031.7 MiB (1018.0-1042.5, N=12) |
-| One desktop running | 315.4 MiB (Xvfb, PulseAudio, Xfce, Selkies), 762.7 MiB with a headed Chrome window | included in the 840 MiB above (the guest image always starts it) |
-| Ten desktops at once | **28.38 s** (28.02-28.43) to the last one serving; **2014.7 MiB** in total (2013.3-2024.0), the host used 3.0 GiB | not measured: ten microVMs do not fit the runner |
+| One desktop running | 315.4 MiB (Xvfb, PulseAudio, Xfce, Selkies), 762.7 MiB with a headed Chrome window; about 2.3 s of start steps | included in the 840 MiB and 5.3 s above (the guest image always starts it): the fair pair for this row |
+| Ten desktops at once | **28.38 s** (28.02-28.43) to the last one serving, of which 15 s are fixed sleeps (about 12 s to the last Selkies answer, see the conclusion); **2014.7 MiB** in total (2013.3-2024.0), the host used 3.0 GiB | not measured: ten microVMs do not fit the runner; about 10 GiB estimated as 1032 MiB x 10 |
 
 Notes. The fork copy is `cp -a` on ext4 (no reflink), of a 101 MiB upper layer that was in the page
 cache; a cold-cache copy and a larger upper layer were not measured. PSS of containers is low because the
@@ -182,8 +205,13 @@ fresh microVM fork each run, as root, times measured inside: a full `git clone` 
 `apt-get update`, `apt-get install` of build-essential, nodejs and npm (download and unpack/configure
 timed apart), `npm install` in the clone, rustup minimal, `cargo install --locked hexyl`, a
 `--depth 1` clone of zlib and `./configure && make -j2`. The container has 2 cpus and 4 GiB like the
-microVM. **The container's network goes through the proxy; the microVM's goes through MicroSandbox's
-gateway**, so the phases that download are not like for like.
+microVM. **The two sides are not like for like, and these rows are not a speed result.** The microVM
+ran in a fork of `main` built from the demo recipe
+(`docs/v1/checks/final-proj/.silo/recipes/demo.yaml` pre-installs build-essential, jq, ripgrep, python3,
+cron and git; see [`microvm.sh`](../../containers/microvm.sh) lines 47 and 77), the container from the
+bare image, so the package sets differ (the container's apt install has more to unpack). The container's
+network also goes through the proxy and the microVM's through MicroSandbox's gateway, so the phases
+that download differ too.
 
 | Phase (seconds, median, min-max, N=3) | Container | microVM |
 |---|---|---|
@@ -198,7 +226,7 @@ gateway**, so the phases that download are not like for like.
 | configure and make zlib | **2.56** (2.53-2.66) | 2.88 (2.87-3.55) |
 | Whole run | 128.20 (95.73-130.10), includes starting the container | 80.98 (77.58-86.22) |
 
-- **The steps that are mostly unpacking or compiling are faster in the container**: unpack 20 %, cargo build 14 %, make 11 % (second
+- **Not a speed result.** The steps that are mostly unpacking or compiling were shorter in the container (unpack 20 %, cargo build 14 %, make 11 %), but with different package sets they cannot be quoted as the container being faster (second
   sample, EPYC 9V45: unpack 14.77 s, cargo 12.29 s, make 2.03 s; the microVM there, in the earlier run
   42425963473, took 16.66, 13.75 and 2.13 s, kept in [`second-sample/microvm/`](second-sample/microvm/)).
   The microVM runs on nested KVM here.
@@ -206,9 +234,11 @@ gateway**, so the phases that download are not like for like.
   the proxy adds a hop for each. The first proxy tried, tinyproxy, took **198.87 s** (195.35-206.17) for
   the apt download that Squid did in 69.56 s (64.71-75.64) in the same comparison step (the table's
   61.60 s is the workload runs; in the second sample the pair was 156.95 s against 34.73 s); the
-  microVM's 15 s is without a proxy. Squid's own runs spread from 32 to 65 s. So the difference between
-  the two proxies is large and the container is not what makes the downloads slow. One hop also costs
-  on a single large file: 50 MB took 1.86 s through Squid against 0.92 s direct from the host. What
+  microVM's 15 s is without a proxy. Squid's own runs spread from 23 to 75 s, and that spread is unexplained. **No control ran the apt
+  download through Squid from the host without a container**, so how much of the time is the container
+  and how much is Squid is not separated; the 3-5x effect is between tinyproxy and Squid only. One hop
+  also costs on a single large file: 39 MB (39,223,207 bytes) took 1.86 s through Squid against 0.92 s
+  direct from the host. What
   Silo's real proxy would cost is not measured; the placeholder proxy of boundary 3 is MicroSandbox's,
   and C1 did not run it.
 - The upper layer after the workload was 1273 MiB (the build tools and caches).
