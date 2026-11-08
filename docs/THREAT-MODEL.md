@@ -678,6 +678,43 @@ Not defended on a Linux host:
   single-tenant host.
 - **The Secret Service backend**, which has never been exercised.
 
+### Container computers
+
+A container computer (Linux hosts only, opt-in, never the default) is **weaker than a virtual
+machine**. It shares the host's kernel, so a kernel bug reachable from inside is a bug in the host
+account, and boundary 1 does not hold for it: the hardware boundary is replaced by the baseline
+below, which narrows the kernel surface and does not remove it. It is meant for a dev-only machine
+with nothing sensitive on it, and the app, the CLI and `silo list` label it as less isolated.
+
+- **Who the computer is on the host.** crun runs rootless inside a user namespace made with
+  `newuidmap` and the account's `/etc/subuid` range. Container root is the account itself; every
+  other id is a sub-id that owns no file of the account's. A process that escapes the container
+  therefore lands as the account that owns the engine, and nothing is added to that account.
+- **The baseline.** No capabilities in the container's first process or in a user's commands (Silo's
+  own root commands, such as creating the working account, get seven file and ownership
+  capabilities inside the namespace); `no_new_privs` (so `sudo` and setuid programs do not gain
+  privileges); a seccomp deny-list over allow-all (io_uring, `keyctl`, `bpf`, `perf_event_open`,
+  `userfaultfd`, and `clone`, `unshare` and `setns` with a new user namespace, `clone3` answered
+  with ENOSYS); Landlock applied by Silo's init shim, which is also the container's first process
+  and reaps zombies, and which wraps every command run in the computer; a writable layer over a
+  read-only image; `/proc` and `/sys` masked or read-only; cgroup v2 limits (memory, tasks, CPU)
+  on the computer's transient user scope. No host folder, no Docker or Podman socket and not the
+  engine socket (boundary 7) are mounted; the engine's files are not in the container's mount
+  namespace. The only host files the container sees are its own `resolv.conf` and `hosts`.
+- **Network.** The container's network namespace holds one TAP device and a loopback, and nothing
+  else; a gateway process (the same network stack as macOS computers, boundary 2) is the only way
+  out, with the Public policy and the gateway as resolver. A command run in the computer enters
+  that namespace too. In this phase there are no secrets, GitHub access, published ports or SSH
+  for a container computer; commands that would need them are refused.
+- **Known gaps.** `/sys` is a read-only bind of the host's, so it shows the host's network
+  interface names and hardware details. Chrome needs `--no-sandbox` in a container (the baseline
+  blocks the user namespace its sandbox needs), so a web page that compromises the browser reaches
+  everything in the computer. Ubuntu's `kernel.apparmor_restrict_unprivileged_userns` has to be 0
+  on the host, which relaxes a host-wide guard; Silo checks and names it and never sets it. A
+  container does not survive an engine restart (its gateway is the engine's child): the first look
+  after a restart stops it. The evals of the isolation claims above have not been run against a
+  container computer.
+
 ## CI runner (`silo-runner`)
 
 Scope: the Go helper `silo-runner` ([CI runner](SiloUI-CI-RUNNER.md)) on a Mac or on a

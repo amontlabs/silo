@@ -227,6 +227,54 @@ Branch `claude/containers-ct1`, pull request [#92](https://github.com/amontlabs/
   - **Docs.** The AppArmor sysctl is set by hand in CI; CT2 adds it to `silo host init`.
 - **Not done.** aarch64 live run, UDP published ports, the container runtime (CT2).
 
+### 8 Nov 2026: phase CT2 built (the container runtime core)
+
+Branch `claude/containers-ct2`.
+
+- **The seam.** `run_msb_process`, where the engine spawns the runtime, calls `containers::route` first:
+  a command that names a container computer (or a `create` carrying the label `silo.runtime=container`) is
+  answered by `engine/src/containers/` in MicroSandbox's argument and JSON shapes, and a `list` is completed
+  with the container computers. Locks, the working account, change capture and the API above it are shared.
+  Two more places know the kind: `Target::plan` (streaming guest commands start their own process, so the
+  container's `crun exec` command is built there) and `create_computer_with_progress` (the image comes from
+  the container image cache and the runtime label is added). The computer configuration gained
+  `runtime: container` (absent for a virtual machine); `ComputerKind::Container` and
+  `silo create --container` are the API and CLI side; the app lists the kind with "Less isolated than a VM".
+- **Tools chosen** ([Reuse established tools](../../AGENTS.md)): crun 1.14.1 (Apache-2.0 or LGPL-2.1+,
+  Ubuntu 24.04 apt, used in C1), skopeo 1.13.3 (Apache-2.0, apt) and umoci 0.4.7 (Apache-2.0, apt) to
+  turn the pinned image archive into a root filesystem, the `oci-spec` crate 0.10 (Apache-2.0, already in
+  the dependency tree through MicroSandbox) for the runtime configuration, `systemd-run --user --scope`
+  for cgroup delegation. Silo checks them (`silo host init`) and installs none. Gaps that needed Silo
+  code: a user-namespace holder that maps sub-ids, mounts the overlay and creates the TAP
+  (`silo-ctr`, 600 lines of Rust over `libc`; podman's `unshare`/pasta would bring a container engine and a
+  second network stack), and the Landlock/PID 1 shim (`silo-init`; no maintained single-purpose tool).
+- **umoci runs inside the user namespace, without `--rootless`.** `--rootless` gives every file to the
+  account (uid 1000 of the image became the account's uid, `/etc/shadow` lost its group). Run as root of
+  `silo-ctr userns`, umoci keeps the owners as sub-ids, as in the image. Deleting a computer likewise runs
+  `rm -rf` in that namespace.
+- **Layout** (`containers/layout.rs`): the image once per config digest; a shim layer (`silo/init`,
+  `/workspace`); per computer an upper and work directory, a `layers/` directory for sealed layers (CT4) and
+  a record. The overlay's lower directories are the sealed layers newest first, the shim layer, the image.
+- **Found on the way** (real Linux, Ubuntu 24.04 arm64, systemd user manager):
+  - `crun exec` joins only the namespaces the configuration lists; the container shares the holder's network
+    namespace, so an exec'd command landed in the host's. `silo-ctr enter` runs `crun exec` inside the
+    holder's user and network namespaces; a test proves the exec'd command sees only `lo` and the TAP.
+  - The overlay root takes the mode of the upper directory (a 0700 upper made `/` unreadable to other users).
+  - The working-account setup assumes a workspace disk and a working `sudo`. In a container (`SILO_RUNTIME=container`)
+    `/workspace` is a folder and no sudoers file is written: `no_new_privs` means `sudo` cannot work.
+  - Silo's own root commands get seven capabilities (chown, file owner and mode, kill, setuid, setgid) inside
+    the namespace, because creating the account needs them; other commands have none.
+- **Not in CT2:** secrets, GitHub, published ports, SSH, terminals, desktop, checkpoints, forks, export (all
+  refused with "cannot do '<verb>' yet"); CPU limits when the user manager does not delegate `cpu`;
+  a container surviving an engine restart; a root filesystem size limit (the configured disk is recorded and
+  reported, not enforced); the app learning a remote host's platform (its editor offers the kind only for a
+  device that reports `platform: linux`, which the Connections list does not report yet, so the CLI is the way
+  to create one).
+- **Tests:** engine unit tests for the argument shapes, routing, the OCI baseline, the image cache, user
+  resolution, the record and listing (macOS and Linux); 47 tests of `silo-container-shim`, including the real
+  user namespace, overlay, TAP hand-over, PID 1 reaping and Landlock, run on Ubuntu 24.04; host prerequisite,
+  API, CLI and frontend tests. Live: `linux-host-e2e.sh` with `SILO_E2E_CONTAINER=1` on the KVM runner.
+
 ### R1: CI runner on the Mac (branch `claude/runner-phase-1`)
 
 - **Built:** `silo-action/` and every reference removed; `silo-runner` (Go, `app/SiloUI/runner`, on
