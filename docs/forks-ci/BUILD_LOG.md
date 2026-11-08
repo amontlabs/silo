@@ -4,10 +4,22 @@ Plan: [PLAN.md](PLAN.md).
 
 ## Resume
 
-- **Phase:** design questions out to the advisor and Fable; F1 next on `claude/forks-phase-1`.
-- **Linux KVM host:** the owner's test machine (10.77.77.2) did not answer on 7 Nov (no route to
-  host). Linux measurements run on the GitHub KVM runner (`linux-host.yml`) until it is back; each
-  result names the machine it ran on.
+- **Merged (8 Nov 2026):** F1 (#84), F2 (#88), C1 (#87), R1 (#83), F3 (#86).
+- **Open phases:** F4 (export a computer that lives on another machine), R2 (Linux hosts as runner
+  machines). C1 waits for the owner's decision on building container computers.
+- **Open follow-ups found during the build:**
+  - A Linux fork leaves its fork-point checkpoint on the source (it was a manual checkpoint before F2 too);
+    macOS removes its fork point with the last fork. Fixing it means the macOS release machinery on Linux.
+  - The trimming half of `storage::start_monitor` (`periodic`) is not wired into `silod` since the engine
+    split; F3 wired the sweep only. Empty 4 KB `silo-import-*` group folders can remain.
+  - No macOS fork timing: creating a macOS source on the Dev engine failed ("did not accept SSH logins in
+    time") during F1 and F2.
+  - launchd refuses ad-hoc-signed Dev engine builds ("needs LWCR update"); live checks started `silod --agent`
+    by hand.
+  - `quiet::processes_match_by_exact_name_not_by_prefix_or_pattern` fails on main too (seen 8 Nov).
+- **Linux KVM host:** the owner's test machine (10.77.77.2) did not answer on 7-8 Nov. Linux measurements ran
+  on the GitHub KVM runner; each result names the machine it ran on.
+- **Live-check repository:** https://github.com/0xpolarzero/silo-runner-e2e (private), used by the R1 checks.
 
 ## Start (7 Nov 2026)
 
@@ -121,6 +133,11 @@ Both owner decisions:
   - **Open:** on Linux a `silo fork -n N` shares a manual-kind "silo-fork-<id>" checkpoint that stays on the source. It cannot be removed after the forks exist (they use the snapshot member, so deletion is refused as in use), and a fork-point kind removed with its last fork would need the macOS `release_fork_point` machinery rebuilt on Linux's snapshot lineage; not done here.
   - **Not done:** a macOS fork timing (no macOS computer on Dev), the Linux KVM host.
   - **Reviews:** Fable LGTM, Opus LGTM.
+
+- **Linux KVM, after** ([evidence](evidence/f2-after/linux-kvm-gh/README.md), GitHub runner, a different
+  instance than F1's): fork of a running main 11.71 s (F1 11.03 s), fork right after `silo up` 11.95 s
+  (10.14 s), `-n 4` 41.08 s (36.20 s), RAM per fork 1027 MiB (1027 MiB); one fork with a desktop 14.29 s and
+  1022 MiB, without one 8.62 s and 387 MiB.
 
 ### 8 Nov 2026: phase C1 measured (crun containers against the microVM)
 

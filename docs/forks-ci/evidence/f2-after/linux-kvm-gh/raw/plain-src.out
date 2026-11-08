@@ -1,0 +1,14 @@
+Building the recipe demo-plain...
+Building the recipe demo-plain: 5s
+Building the recipe demo-plain: 10s
+Building the recipe demo-plain: 15s
+Building the recipe demo-plain: 20s
+Building the recipe demo-plain: 25s
+Building the recipe demo-plain: 30s
+Building the recipe demo-plain: 35s
+Building the recipe demo-plain: 41s
+Forking demo-plain into e2e-forks-plain-src...
+Forked e2e-forks-plain-src (stopped): demo-plain as of 22:32:34 (manual checkpoint, 7s old)
+Starting e2e-forks-plain-src...
+Starting e2e-forks-plain-src: 5s
+Started e2e-forks-plain-src (running)
