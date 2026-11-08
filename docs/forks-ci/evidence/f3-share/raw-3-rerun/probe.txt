@@ -1,0 +1,7 @@
+Manual probe after run 3 (same Dev engine, build silo-412e329c, commands as typed; computers e2e-share-base created with
+`silo-dev create e2e-share-base --linux --cpus 2` and started, never forked from, nothing installed):
+  silo-dev export e2e-share-base -o base.silo-backup --yes     -> Exported (6.4 MiB)
+  silo-dev import base.silo-backup --name e2e-share-copy       -> silo: Import failed: Loading computer disks from the export file failed:
+        error: archive contains duplicate entry: layers/layer_87157fb508a8231822a4fcead2aa2985.raw No computer was added. Data unpacked for it may still use disk space.
+  fork e2e-share-src of the base, running: export 11.8 MiB, import: the same error, the same layer name
+  the same fork stopped (export warns it cannot check for logins): import: the same error, the same layer name

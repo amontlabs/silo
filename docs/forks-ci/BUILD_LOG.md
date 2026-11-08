@@ -436,3 +436,11 @@ checks passed; the failures were four product problems, all fixed afterwards (te
    import already removed its whole group (`discard_import_group`). Tests (both failed before the change):
    `deleting_an_imported_computer_removes_its_whole_import_group`,
    `the_sweep_removes_import_groups_no_computer_owns`. The cause is from reading the code, not observed live.
+
+- **Live rerun, 8 Nov 2026 (run 3, evidence in [f3-share](evidence/f3-share/README.md)).** On an integration build
+  (`412e329c`) with `cf97e65a`: S2 no longer names the Silo CA (only the Claude Code login), S3 and S9 (checkpoint
+  export) ran at 59 GiB free without a space refusal, but **S4 fails**: importing any export, even of a fresh
+  never-forked computer, stops with `archive contains duplicate entry: layers/layer_87157fb5….raw` from the runtime's
+  `snapshot load`. S5 to S8 were not reached, so S7 (keep into the receiver's computer) and the import-group
+  clean-up of a dropped imported computer are still unseen. Failed imports left no group; six older
+  `silo-import-*` groups (8.4 GB) were not cleared by the new engine. Open for F3: find why the payload has the layer twice.
