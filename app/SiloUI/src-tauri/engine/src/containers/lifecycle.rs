@@ -138,7 +138,11 @@ fn boot_layer(layout: &Layout, tools: &Tools) -> Result<PathBuf, String> {
     std::fs::create_dir_all(partial.join("workspace")).map_err(io)?;
     let target = partial.join("silo/init");
     std::fs::write(&target, &bytes).map_err(io)?;
+    // Every user of the computer reads these, whatever umask the engine runs with.
     use std::os::unix::fs::PermissionsExt;
+    for directory in [&partial, &partial.join("silo"), &partial.join("workspace")] {
+        std::fs::set_permissions(directory, std::fs::Permissions::from_mode(0o755)).map_err(io)?;
+    }
     std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o755)).map_err(io)?;
     match std::fs::rename(&partial, &boot) {
         Ok(()) => Ok(boot),
