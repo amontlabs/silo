@@ -199,6 +199,8 @@ class LinuxPackageTests(unittest.TestCase):
         self.silod.write_bytes(elf(62, 'silod'))
         self.cli.write_bytes(elf(62, 'silo'))
         self.runner.write_bytes(elf(62, 'silo-runner'))
+        for helper in engine.CONTAINER_HELPERS:
+            (self.silod.parent / helper).write_bytes(elf(62, helper))
         self.stage(X64, 62, 'amd64')
 
     def stage(self, target, machine, guest):
@@ -261,6 +263,7 @@ class LinuxPackageTests(unittest.TestCase):
             'release.json': 0o644, 'LICENSE': 0o644, 'THIRD-PARTY-NOTICES.md': 0o644,
             'api/silo-api.schema.json': 0o644,
             'silod': 0o755, 'silo': 0o755, 'silo-runner': 0o755,
+            'silo-ctr': 0o755, 'silo-init': 0o755,
             'resources/silo-runner-licenses/scaleset-MIT.txt': 0o644,
             'msb': 0o755, 'git': 0o755, 'git-lfs': 0o755, 'git-remote-http': 0o755, 'git-remote-https': 0o755,
             'silo-macos-gateway': 0o755,
@@ -344,6 +347,10 @@ class LinuxPackageTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'silo-runner is not a linux-arm64 executable'):
             self.package(platform='linux-arm64')
         self.runner.write_bytes(elf(183, 'silo-runner'))
+        with self.assertRaisesRegex(RuntimeError, 'silo-ctr is not a linux-arm64 executable'):
+            self.package(platform='linux-arm64')
+        for helper in engine.CONTAINER_HELPERS:
+            (self.silod.parent / helper).write_bytes(elf(183, helper))
         archive, _ = self.package(platform='linux-arm64')
         self.assertEqual(archive.name, f'silo-engine-{VERSION}-linux-arm64.tar.gz')
         self.assertIn('silo-engine/resources/microsandbox/aarch64-unknown-linux-gnu/lib/libkrunfw.so.5.6.1',
@@ -477,7 +484,7 @@ class LinuxPackageTests(unittest.TestCase):
                 self.assertEqual((silod, cli), (Path(f'/t/{X64}/release/silod'), Path(f'/t/{X64}/release/silo')))
                 command, options = calls[0]
                 self.assertEqual(command, ['cargo', '+1.94.0', 'build', '--locked', '--release', '-p', 'silod',
-                                           '-p', 'silo-cli', '--target', X64])
+                                           '-p', 'silo-cli', '-p', 'silo-container-shim', '--target', X64])
                 self.assertEqual(options['env'].get('SILO_CHANNEL_IDENTIFIER'), expected)
 
 

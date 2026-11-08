@@ -60,6 +60,9 @@ LINUX_TOOLS = ('msb', 'git', 'git-lfs', 'git-remote-http', 'git-remote-https')
 # The engine archive also carries the network gateway (named for the Mac it began on): it runs a
 # container computer's network on a Linux host, beside silod like the tools.
 LINUX_ENGINE_TOOLS = (*LINUX_TOOLS, 'silo-macos-gateway')
+# The container computer helpers (silo-container-shim): built with silod, so they sit beside it in
+# the cargo release directory, and ship beside it in the archive.
+CONTAINER_HELPERS = ('silo-ctr', 'silo-init')
 LINUX_ROOT = 'silo-engine'
 # The CI runner helper (a Go program of its own), built for the platform and shipped beside silod
 # with the licenses of the Go modules it links (docs/SiloUI-CI-RUNNER.md#linux-hosts).
@@ -272,7 +275,12 @@ def package_linux(out_dir, *, platform, commit, silod_binary, cli_binary, runner
     if not licenses:
         raise RuntimeError(f'{runner_licenses} holds no licenses for silo-runner.')
     files.update({f'resources/silo-runner-licenses/{path.name}': (path, 0o644) for path in licenses})
-    for executable in ('silod', 'silo', 'silo-runner', *LINUX_ENGINE_TOOLS, 'resources/git-support/lfs-transfer/git-lfs-transfer'):
+    for helper in CONTAINER_HELPERS:
+        source = Path(silod_binary).parent / helper
+        if not source.is_file():
+            raise RuntimeError(f'{source} is missing. Build silo-container-shim for the platform.')
+        files[helper] = (source, 0o755)
+    for executable in ('silod', 'silo', 'silo-runner', *CONTAINER_HELPERS, *LINUX_ENGINE_TOOLS, 'resources/git-support/lfs-transfer/git-lfs-transfer'):
         found = elf_machine(files[executable][0])
         if found != machine:
             raise RuntimeError(f'{executable} is not a {platform} executable (ELF machine {found}, wanted {machine}).')
@@ -302,12 +310,13 @@ def cargo_build(target, toolchain, run=subprocess.run):
 
 
 def cargo_build_linux(target, toolchain, channel, run=subprocess.run):
-    """Builds silod and `silo` for `target`; the CLI's channel is compiled in. Returns both binaries."""
+    """Builds silod, `silo` and the container helpers for `target`; the CLI's channel is compiled in.
+    Returns silod and `silo`; the helpers are beside silod."""
     env = {key: value for key, value in os.environ.items() if key != CLI_CHANNEL_VARIABLE}
     identifier = CHANNELS[channel][1]
     if identifier:
         env[CLI_CHANNEL_VARIABLE] = identifier
-    release = cargo_release_dir(target, toolchain, run, packages=('silod', 'silo-cli'), env=env)
+    release = cargo_release_dir(target, toolchain, run, packages=('silod', 'silo-cli', 'silo-container-shim'), env=env)
     return release / 'silod', release / 'silo'
 
 

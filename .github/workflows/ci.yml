@@ -253,7 +253,7 @@ jobs:
       # silod; silo-host's own tests run with its default (desktop) feature, then without.
       - name: Run daemon, CLI and client tests
         timeout-minutes: 30
-        run: cargo nextest run -p silod -p silo-cli -p silo-client -p silo-api --locked --profile ci
+        run: cargo nextest run -p silod -p silo-cli -p silo-client -p silo-api -p silo-container-shim --locked --profile ci
       - name: Run host helper tests
         timeout-minutes: 15
         run: |
