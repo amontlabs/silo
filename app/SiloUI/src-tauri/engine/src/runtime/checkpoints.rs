@@ -5,9 +5,6 @@ use std::collections::{HashMap, HashSet};
 
 pub const RESTORE_EXPECTED_DURATION: Duration = Duration::from_secs(60 * 60);
 
-#[cfg(test)]
-#[path = "checkpoints/import_shell_sweep_tests.rs"]
-mod import_shell_sweep_tests;
 #[path = "checkpoints/native.rs"]
 mod native;
 #[path = "checkpoints/reclaim.rs"]
@@ -4018,20 +4015,6 @@ fn retry_queued_snapshots(
         .filter(|member| !removed.contains(member.snapshot_id.as_str()))
         .collect();
     save_cleanup(paths, &remaining)?;
-    // A member can be released long after its computer was dropped (an imported copy shares
-    // its snapshot ID with the computer it was exported from, and stays while that one lives),
-    // so the group's empty folder is only removable now.
-    let mut groups: Vec<&str> = plan
-        .remove
-        .iter()
-        .filter(|member| removed.contains(member.snapshot_id.as_str()))
-        .filter_map(|member| member.group.as_deref())
-        .collect();
-    groups.sort_unstable();
-    groups.dedup();
-    for group in groups {
-        remove_empty_group_directory(runner, paths, group);
-    }
     if let Some((_, failure)) = failures.into_iter().next() {
         return Err(failure);
     }
@@ -4081,7 +4064,6 @@ pub(crate) fn remove_deleted_snapshots(
     if let Err(failure) = retry_deleted_snapshots(runner, paths) {
         eprintln!("Kept checkpoint data of deleted computer {computer}: {failure}");
     }
-    remove_empty_group_directory(runner, paths, group);
     Ok(())
 }
 
@@ -4153,103 +4135,6 @@ fn queue_unowned_import_groups(
     Ok(())
 }
 
-/// Most empty import folders one recovery pass removes; the rest wait for the next pass, so the
-/// pass never holds the device-wide gate for long however many leftovers there are.
-const SHELLS_PER_PASS: usize = 32;
-
-/// Removes the empty shells (`.group.lock`, `group.json`) of import groups no checkpoint record
-/// names, which MicroSandbox leaves behind once the last member is removed. A group that still
-/// lists a member, or holds any other file, stays. One `snapshot list` decides every folder, and
-/// a pass stops at `SHELLS_PER_PASS` removals or when the maintenance budget is spent. The pass
-/// holds the gate as hidden housekeeping that only starts while nothing else waits (the gate has
-/// no cheaper "someone is waiting" check to stop on mid-pass), so the cap and budget bound it.
-fn remove_unowned_import_group_shells(runner: &dyn RuntimeRunner, paths: &RuntimePaths) {
-    let Ok(owned) = owned_groups(paths) else {
-        return;
-    };
-    let Ok(entries) = fs::read_dir(paths.home.join("snapshots")) else {
-        return;
-    };
-    let mut candidates: Vec<String> = entries
-        .filter_map(Result::ok)
-        .filter_map(|entry| entry.file_name().to_str().map(str::to_owned))
-        .filter(|group| crate::backup::valid_import_group(group) && !owned.contains(group))
-        .collect();
-    if candidates.is_empty() {
-        return;
-    }
-    candidates.sort_unstable();
-    let Ok(inventory) = native::inventory(runner, paths) else {
-        return;
-    };
-    let deadline = Instant::now() + super::shutdown::maintenance_budget();
-    let mut removed = 0;
-    for group in candidates {
-        if removed >= SHELLS_PER_PASS || Instant::now() >= deadline {
-            return;
-        }
-        if remove_empty_group_directory_in(paths, &group, &inventory) {
-            removed += 1;
-        }
-    }
-}
-
-/// MicroSandbox leaves `snapshots/<group>` with its lock and metadata files after the last
-/// member of a group is removed. Remove that empty shell once nothing lists the group;
-/// anything else in the directory keeps it. A failure is logged only.
-fn remove_empty_group_directory(runner: &dyn RuntimeRunner, paths: &RuntimePaths, group: &str) {
-    if !valid_snapshot_group(group) {
-        return;
-    }
-    let Ok(inventory) = native::inventory(runner, paths) else {
-        return;
-    };
-    remove_empty_group_directory_in(paths, group, &inventory);
-}
-
-/// The removal behind `remove_empty_group_directory`, decided from an inventory the caller
-/// already read. Returns true when the folder was removed.
-fn remove_empty_group_directory_in(
-    paths: &RuntimePaths,
-    group: &str,
-    inventory: &[native::Member],
-) -> bool {
-    if !valid_snapshot_group(group) {
-        return false;
-    }
-    let directory = paths.home.join("snapshots").join(group);
-    let Ok(entries) = fs::read_dir(&directory) else {
-        return false;
-    };
-    let names: Vec<_> = entries
-        .filter_map(Result::ok)
-        .map(|entry| entry.file_name())
-        .collect();
-    if names
-        .iter()
-        .any(|name| name != ".group.lock" && name != "group.json")
-    {
-        return false;
-    }
-    if inventory
-        .iter()
-        .any(|member| member.group.as_deref() == Some(group))
-    {
-        return false;
-    }
-    for name in names {
-        if let Err(failure) = fs::remove_file(directory.join(name)) {
-            eprintln!("An empty checkpoint group was kept: {failure}");
-            return false;
-        }
-    }
-    if let Err(failure) = fs::remove_dir(&directory) {
-        eprintln!("An empty checkpoint group was kept: {failure}");
-        return false;
-    }
-    true
-}
-
 /// Remove the member a failed capture may have published, unless something already
 /// builds on it. Returns true when it is gone. Runs even after a cancel.
 pub fn discard_failed_capture(
@@ -4312,7 +4197,6 @@ pub(crate) fn recover_interrupted(
         unresolved: HashMap::new(),
         cleanup_error: retry_deleted_snapshots(runner, paths).err(),
     };
-    remove_unowned_import_group_shells(runner, paths);
     for configuration in metadata.computers.iter() {
         let result = (|| {
             let mut record = load(paths, configuration.id())?;

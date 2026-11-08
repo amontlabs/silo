@@ -711,8 +711,8 @@ fn maintenance_tick(
 }
 
 /// One recovery pass over checkpoint data, for the engine's timer: finish what an interrupted
-/// capture or a deletion left, and clear import groups no computer owns (their members and
-/// the empty folder MicroSandbox leaves). Skips whenever any operation is active or waiting,
+/// capture or a deletion left, and clear the members of import groups no computer owns
+/// (through MicroSandbox; the empty group folder it leaves stays). Skips whenever any operation is active or waiting,
 /// like the periodic work above. Nothing else calls `recover_interrupted`, so without this pass
 /// the engine never clears leftovers of earlier runs.
 pub fn recover_checkpoint_data(host: &dyn RuntimeHost) {

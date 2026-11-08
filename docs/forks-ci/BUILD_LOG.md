@@ -452,15 +452,14 @@ checks passed; the failures were four product problems, all fixed afterwards (te
   (`8794f629`; test `a_capture_is_saved_without_its_parents_so_no_layer_is_written_twice`, failed before). The old
   missing-ancestor retry and its two tests are gone. (2) *Groups left.* The six groups were empty folders by then (the
   8.4 GB was not reproduced). The sweep never ran: its only caller, `storage::start_monitor`, has had no caller since the
-  engine split; `silod` now runs `recover_checkpoint_data` on a timer (`5aa8a1ae`), the sweep removes the empty folders of
-  unowned import groups (`8794f629`, test `the_sweep_removes_the_empty_shell_of_an_import_group_no_computer_owns`), and a
-  member released later (an imported copy shares its snapshot ID with the computer it came from and stays while that lives)
-  takes its folder with it (`05992ceb`, test `a_member_released_later_takes_its_empty_import_group_folder_with_it`).
+  engine split; `silod` now runs `recover_checkpoint_data` on a timer (`5aa8a1ae`). Dropping a computer now queues every
+  member of its import group (`8794f629`), and a member released later (an imported copy shares its snapshot ID with the
+  computer it came from and stays while that lives) is removed then (`05992ceb`, test
+  `a_member_released_later_is_removed_through_the_runtime`). Silo does **not** remove the empty `silo-import-*` folder
+  (`.group.lock`, `group.json`, about 4 KB each) MicroSandbox leaves; those can remain.
   **Still dead:** the trimming half of `start_monitor` (`periodic`, warm-computer trims) is not wired into `silod`; not
   changed here, it needs its own decision.
-- **Sweep bounded (review P2).** The shell sweep held the device gate while running one `snapshot list` per empty
-  `silo-import-*` folder. A pass now reads the inventory once and decides every folder from it, removes at most 32 folders
-  and stops at the maintenance budget; the rest wait for the next timer pass. The gate has no cheap "others are waiting"
-  check (its own hidden guard counts), so as with `start_monitor` the pass starts only while nothing waits. Tests in
-  `import_shell_sweep_tests.rs`: one runner call for many folders, the cap leaves the rest, a folder with a member or another
-  file stays.
+- **Folder removal dropped (review).** An earlier cut of the sweep unlinked empty `silo-import-*` folders from the
+  filesystem after an unlocked scan, while MicroSandbox publishes under its own group lock, and its time budget excluded
+  the inventory. Removed (`remove_unowned_import_group_shells`, `remove_empty_group_directory` and their tests):
+  MicroSandbox has no command that deletes an empty group, and the folders are about 4 KB each.

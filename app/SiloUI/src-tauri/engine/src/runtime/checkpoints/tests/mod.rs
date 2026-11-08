@@ -3678,148 +3678,18 @@ fn the_sweep_removes_import_groups_no_computer_owns() {
 }
 
 #[test]
-fn the_sweep_removes_the_empty_shell_of_an_import_group_no_computer_owns() {
-    let _test_state = crate::test_support::global_state();
-    let directory = tempfile::tempdir().unwrap();
-    let mut owner = Record::default();
-    owner.snapshot_group = Some(OTHER_IMPORT_GROUP.into());
-    let paths = delete_fixture(&directory, Vec::new(), Some(owner));
-    let snapshots = paths.home.join("snapshots");
-    let shell = |name: &str, files: &[&str]| {
-        let group = snapshots.join(name);
-        fs::create_dir_all(&group).unwrap();
-        for file in files {
-            fs::write(group.join(file), "").unwrap();
-        }
-        group
-    };
-    // Members already removed by an earlier sweep leave only the lock and group.json.
-    let unowned = shell(IMPORT_GROUP, &[".group.lock", "group.json"]);
-    let owned = shell(OTHER_IMPORT_GROUP, &[".group.lock", "group.json"]);
-    let with_other_file = shell(
-        "silo-import-00000000000000000000000000000000",
-        &[".group.lock", "group.json", "extra"],
-    );
-    let not_an_import = shell("elsewhere", &[".group.lock", "group.json"]);
-    let store = Store::new(Vec::new());
-
-    recover_interrupted(&store, &paths).unwrap();
-
-    assert!(!unowned.exists());
-    assert!(owned.exists(), "a record names this group");
-    assert!(
-        with_other_file.exists(),
-        "an unknown file keeps the directory"
-    );
-    assert!(not_an_import.exists(), "only import groups are swept");
-}
-
-#[test]
-fn a_member_released_later_takes_its_empty_import_group_folder_with_it() {
+fn a_member_released_later_is_removed_through_the_runtime() {
     let _test_state = crate::test_support::global_state();
     let directory = tempfile::tempdir().unwrap();
     let paths = delete_fixture(&directory, Vec::new(), None);
-    let group = paths.home.join("snapshots").join(IMPORT_GROUP);
-    fs::create_dir_all(&group).unwrap();
-    for file in [".group.lock", "group.json"] {
-        fs::write(group.join(file), "").unwrap();
-    }
     let store = Store::new(Vec::new()).with(IMPORT_GROUP, "fork-point-7", "snap_p", None);
     // The member was queued when its computer was dropped and kept until now.
     save_cleanup(&paths, &native::inventory(&store, &paths).unwrap()).unwrap();
 
     retry_deleted_snapshots(&store, &paths).unwrap();
 
+    // The empty group folder MicroSandbox leaves (about 4 KB) is not removed by Silo.
     assert!(store.names().is_empty());
-    assert!(!group.exists());
-}
-
-/// `dev` is deleted: its configuration is gone and the group directory holds `files`.
-fn deleted_dev_with_group_files(
-    directory: &tempfile::TempDir,
-    files: &[&str],
-) -> (RuntimePaths, std::path::PathBuf) {
-    let paths = delete_fixture(directory, vec![entry(A, "Base", "manual")], None);
-    write_metadata(
-        &paths.metadata,
-        &ComputerConfigurationRequest {
-            schema_version: 1,
-            computers: Vec::new(),
-        },
-    )
-    .unwrap();
-    let group = paths.home.join("snapshots").join("dev");
-    fs::create_dir_all(&group).unwrap();
-    for name in files {
-        fs::write(group.join(name), "").unwrap();
-    }
-    (paths, group)
-}
-
-#[test]
-fn deleting_a_computer_removes_the_empty_snapshot_group_directory() {
-    let _test_state = crate::test_support::global_state();
-    let directory = tempfile::tempdir().unwrap();
-    let (paths, group) = deleted_dev_with_group_files(&directory, &[".group.lock", "group.json"]);
-    let store = Store::new(Vec::new()).with("dev", A, "snap_a", None);
-
-    remove_deleted_snapshots(&store, &paths, ID, "dev").unwrap();
-
-    assert!(store.names().is_empty());
-    assert!(!group.exists());
-}
-
-#[test]
-fn a_snapshot_group_directory_with_other_content_or_members_is_kept() {
-    let _test_state = crate::test_support::global_state();
-    let directory = tempfile::tempdir().unwrap();
-    let (paths, group) =
-        deleted_dev_with_group_files(&directory, &[".group.lock", "group.json", "extra"]);
-    let store = Store::new(Vec::new()).with("dev", A, "snap_a", None);
-    remove_deleted_snapshots(&store, &paths, ID, "dev").unwrap();
-    assert!(group.exists(), "an unknown file keeps the directory");
-
-    let directory = tempfile::tempdir().unwrap();
-    let (paths, group) = deleted_dev_with_group_files(&directory, &[".group.lock", "group.json"]);
-    // A member another computer still needs stays, and so does its group.
-    let store = Store::new(Vec::new()).with("dev", A, "snap_a", None).with(
-        "dev",
-        "silo-backup-0-1-2",
-        "snap_x",
-        None,
-    );
-    store.members.lock().unwrap().retain(|member| member.1 == A);
-    save(
-        &paths,
-        FORK_ID,
-        &Record {
-            snapshot_group: Some("dev".into()),
-            pending_checkpoint_restore: Some(PendingRestore {
-                checkpoint_id: A.into(),
-                source_computer: "dev".into(),
-                state: "full".into(),
-            }),
-            ..Record::default()
-        },
-    )
-    .unwrap();
-    let mut forked = computer_configuration();
-    forked.id = FORK_ID.into();
-    forked.name = "branch".into();
-    write_metadata(
-        &paths.metadata,
-        &ComputerConfigurationRequest {
-            schema_version: 1,
-            computers: vec![forked],
-        },
-    )
-    .unwrap();
-    remove_deleted_snapshots(&store, &paths, ID, "dev").unwrap();
-    assert_eq!(store.names(), [A]);
-    assert!(
-        group.exists(),
-        "a group with a member the fork needs is kept"
-    );
 }
 
 #[test]
