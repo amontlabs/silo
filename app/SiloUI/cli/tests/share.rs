@@ -441,6 +441,9 @@ fn device_engine(copy_fails: bool, import_outcome: &'static str) -> FakeEngine {
                 json!({"name": "wrong-route", "bytes": 0, "sha256": SHA})
             }))
         }
+        "operations.job.get" if import_outcome == "unreachable" => {
+            Err(("internal", "The other device is not answering.".to_owned()))
+        }
         "operations.job.get" => Ok(finished(json!({
             "kind": "result", "operation": "restore", "outcome": import_outcome,
             "message": "The export file is not valid.", "archive": {}
@@ -594,6 +597,24 @@ async fn an_import_the_other_device_refuses_still_removes_its_copy_of_the_file()
         "Import failed: The export file is not valid."
     );
     assert_eq!(fake.calls("exports.discard")[0]["name"], RECEIVED);
+}
+
+#[tokio::test]
+async fn an_import_still_queued_on_the_other_device_keeps_its_file() {
+    let directory = tempfile::tempdir().unwrap();
+    let file = directory.path().join("friend.silo-backup");
+    std::fs::write(&file, "x").unwrap();
+    // The wait fails while the import has not been reported finished: it may still run.
+    let fake = device_engine(false, "unreachable");
+    let error = run(
+        device_cli(&fake, &["import", file.to_str().unwrap()]),
+        Path::new("/"),
+    )
+    .await
+    .unwrap_err();
+    assert!(error.message.contains("not answering"), "{}", error.message);
+    assert_eq!(fake.calls("exports.import").len(), 1);
+    assert!(fake.calls("exports.discard").is_empty());
 }
 
 #[tokio::test]

@@ -1622,16 +1622,21 @@ fn transfer_file(
     archive_path: &Path,
     cancellation: &backup::Cancellation,
 ) -> Result<Option<crate::transfer_area::FileInfo>, TransferError> {
-    let Ok(host) = controller.runtime_host() else {
-        return Ok(None);
-    };
-    let Ok(area) = crate::transfer_area::Area::of_engine(host.engine_context().as_ref()) else {
+    let Some(area) = transfer_area(controller) else {
         return Ok(None);
     };
     describe_transfer(&area, archive_path, cancellation)
 }
 
-/// The report for `archive_path` when it is an export file of `area`.
+/// The transfer area of this engine, when there is one.
+fn transfer_area(controller: &Controller) -> Option<crate::transfer_area::Area> {
+    let host = controller.runtime_host().ok()?;
+    crate::transfer_area::Area::of_engine(host.engine_context().as_ref()).ok()
+}
+
+/// The report for `archive_path` when it is an export file of `area`. The file is made private
+/// to the account, and it is removed when it cannot be reported (too large, cancelled, unreadable):
+/// no job result names it, so nothing else would remove it before the day's sweep.
 fn describe_transfer(
     area: &crate::transfer_area::Area,
     archive_path: &Path,
@@ -1645,6 +1650,38 @@ fn describe_transfer(
         .and_then(|name| name.to_str())
         .unwrap_or_default()
         .to_owned();
+    let described = describe_export_file(archive_path, &name, cancellation);
+    if described.is_err() {
+        let _ = area.remove(&name);
+    }
+    described.map(Some)
+}
+
+fn describe_export_file(
+    archive_path: &Path,
+    name: &str,
+    cancellation: &backup::Cancellation,
+) -> Result<crate::transfer_area::FileInfo, TransferError> {
+    use std::os::unix::fs::PermissionsExt;
+    // The export tool writes with the account's umask; the area promises 0600.
+    fs::set_permissions(archive_path, fs::Permissions::from_mode(0o600)).map_err(|error| {
+        TransferError::from(format!(
+            "Silo could not make the export private to this account: {error}"
+        ))
+    })?;
+    // The size is known before the hash is, so a file past the cap is not read.
+    let size = fs::metadata(archive_path)
+        .map_err(|error| TransferError::from(format!("Silo could not read the export: {error}")))?
+        .len();
+    if size > crate::transfer_area::MAX_BYTES {
+        return Err(format!(
+            "The export {name} is {}, more than the {} Silo shares between devices, so it was \
+             removed. Run silo export on that device and copy the file yourself.",
+            backup::format_bytes(size),
+            backup::format_bytes(crate::transfer_area::MAX_BYTES),
+        )
+        .into());
+    }
     let (bytes, sha256) = crate::transfer_area::digest(archive_path, &|| cancellation.cancelled())
         .map_err(|error| {
             if cancellation.cancelled() {
@@ -1655,14 +1692,11 @@ fn describe_transfer(
                 ))
             }
         })?;
-    if bytes > crate::transfer_area::MAX_BYTES {
-        return Err("The export is larger than Silo sends between machines.".into());
-    }
-    Ok(Some(crate::transfer_area::FileInfo {
-        name,
+    Ok(crate::transfer_area::FileInfo {
+        name: name.to_owned(),
         bytes,
         sha256,
-    }))
+    })
 }
 
 /// Why an export or import worker ended without a result. The outcome comes
@@ -2160,13 +2194,30 @@ fn backup_at_paths(
             existing_member,
         });
     }
+    let request = backup::BackupRequest {
+        destination: archive_path.to_path_buf(),
+        sources,
+        fork_records,
+        pinned_image: pinned_image(paths),
+    };
+    // A file for another machine is refused before it is written when its estimate is already
+    // past what the transfer area carries; `describe_transfer` checks the real size afterwards.
+    if transfer_area(controller).is_some_and(|area| area.owns_export_path(archive_path)) {
+        let estimate = controller
+            .service
+            .estimate_export_bytes(&request, cancellation)?;
+        if estimate > crate::transfer_area::MAX_BYTES {
+            return Err(format!(
+                "This export would be about {} before compression, more than the {} Silo shares \
+                 between devices. Run silo export on that device and copy the file yourself.",
+                backup::format_bytes(estimate),
+                backup::format_bytes(crate::transfer_area::MAX_BYTES),
+            )
+            .into());
+        }
+    }
     let result = controller.service.create_backup_with_token(
-        backup::BackupRequest {
-            destination: archive_path.to_path_buf(),
-            sources,
-            fork_records,
-            pinned_image: pinned_image(paths),
-        },
+        request,
         cancellation,
         recovery::token(controller)?.as_deref(),
         &|source, member| recovery::export_capture_intent(controller, source, member),
@@ -4164,11 +4215,37 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
-        // A cancelled export is a cancellation, not a failure.
+        // The area promises 0600 whatever the export tool's umask gave.
+        fs::set_permissions(&path, std::os::unix::fs::PermissionsExt::from_mode(0o644)).unwrap();
+        describe_transfer(&area, &path, &backup::Cancellation::default()).unwrap();
+        assert_eq!(
+            std::os::unix::fs::PermissionsExt::mode(&fs::metadata(&path).unwrap().permissions())
+                & 0o777,
+            0o600
+        );
+        // A cancelled export is a cancellation, not a failure, and leaves no file behind.
         let cancellation = backup::Cancellation::default();
         cancellation.cancel();
         let error = describe_transfer(&area, &path, &cancellation).unwrap_err();
         assert!(error.cancelled);
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn an_export_past_the_cap_is_removed_and_the_error_names_it() {
+        let directory = tempfile::tempdir().unwrap();
+        let area = crate::transfer_area::Area::at(directory.path()).unwrap();
+        let (name, path) = area.export_target();
+        // A sparse file one byte over the cap: it is refused by its size, never hashed.
+        fs::File::create(&path)
+            .unwrap()
+            .set_len(crate::transfer_area::MAX_BYTES + 1)
+            .unwrap();
+        let error = describe_transfer(&area, &path, &backup::Cancellation::default()).unwrap_err();
+        assert!(!error.cancelled);
+        assert!(error.message.contains(&name), "{}", error.message);
+        assert!(error.message.contains("16.0 GiB"), "{}", error.message);
+        assert!(!path.exists());
     }
 
     #[test]

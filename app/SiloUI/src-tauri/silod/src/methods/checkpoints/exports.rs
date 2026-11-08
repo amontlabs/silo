@@ -147,6 +147,22 @@ pub(super) async fn create(
             Some(path.to_string_lossy().into_owned()),
         )
     } else {
+        // A name in the area is the machine's to give; a caller's own file there would be
+        // read like an export and removed by the sweep.
+        let area = transfer_area(context)?;
+        for path in [
+            Some(params.destination.as_str()),
+            params.archive_path.as_deref(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            if area.contains(std::path::Path::new(path)) {
+                return Err(DispatchError::internal(
+                    "That folder is Silo's transfer folder. Choose another place for the export.",
+                ));
+            }
+        }
         (params.destination, params.archive_path)
     };
     let operation_id = blocking(move || {

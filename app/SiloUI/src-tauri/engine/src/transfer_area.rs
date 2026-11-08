@@ -10,8 +10,10 @@
 //! - **Import files** (`i-<token>.silo-backup`) are created by a write stream, which mints the
 //!   name, and may only be imported from (by the owner's import job), never read back.
 //!
-//! A write goes to `<name>.part` with a declared size and sha256, after a free-space check, and
-//! is renamed to its name only when both match; any other end deletes the `.part`. Removal is an
+//! A write goes to `<name>.part` with a declared size and sha256, after a free-space check that
+//! counts the bytes other writes of this process have reserved and not yet finished (up to the
+//! stream budget in `remote.rs` may be open at once), and is renamed to its name only when both
+//! match; any other end deletes the `.part` and gives its reservation back. Removal is an
 //! explicit owner call after a successful copy, and a sweep clears what is left.
 //!
 //! The stream is one JSON header line from the owner, then the file's bytes, then (for a write)
@@ -27,6 +29,7 @@ use std::{
     io::{BufRead, Read, Write},
     os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt},
     path::{Path, PathBuf},
+    sync::Mutex,
     time::{Duration, SystemTime},
 };
 
@@ -52,6 +55,23 @@ pub const IDLE_LIMIT: Duration = Duration::from_secs(120);
 const CHUNK: usize = 64 * 1024;
 const HEADER_LIMIT: u64 = 4096;
 const TOKEN_LENGTH: usize = 32;
+
+/// The bytes promised to writes that have not finished, per area folder. Free space is read from
+/// the volume, which the declared size has not yet used, so concurrent writes would each pass
+/// the same check; this is what they subtract.
+static RESERVED: Mutex<Vec<(PathBuf, u64)>> = Mutex::new(Vec::new());
+
+fn release_reserved(dir: &Path, bytes: u64) {
+    let mut reserved = RESERVED
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(index) = reserved.iter().position(|(path, _)| path == dir) {
+        reserved[index].1 = reserved[index].1.saturating_sub(bytes);
+        if reserved[index].1 == 0 {
+            reserved.swap_remove(index);
+        }
+    }
+}
 
 /// Which way a file in the area may be used.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -189,6 +209,21 @@ impl Area {
         (name, path)
     }
 
+    /// Whether `path` is the area or lies inside it, wherever its links lead. A path that does
+    /// not exist yet is judged by its nearest existing parent.
+    pub fn contains(&self, path: &Path) -> bool {
+        let mut existing = path;
+        loop {
+            if let Ok(canonical) = existing.canonicalize() {
+                return canonical.starts_with(&self.dir);
+            }
+            match existing.parent() {
+                Some(parent) => existing = parent,
+                None => return false,
+            }
+        }
+    }
+
     /// Whether `path` is an export file this area would hand out.
     pub fn owns_export_path(&self, path: &Path) -> bool {
         path.parent() == Some(self.dir.as_path())
@@ -225,11 +260,12 @@ impl Area {
             return Err("That file is no longer here. Export it again.".into());
         }
         // One marker per name makes the claim atomic across threads and processes.
+        let marker = self.dir.join(format!("{name}{USED_SUFFIX}"));
         OpenOptions::new()
             .write(true)
             .create_new(true)
             .mode(0o600)
-            .open(self.dir.join(format!("{name}{USED_SUFFIX}")))
+            .open(&marker)
             .map_err(|error| {
                 if error.kind() == std::io::ErrorKind::AlreadyExists {
                     "That file was already sent once. Export it again.".to_owned()
@@ -237,10 +273,14 @@ impl Area {
                     error.to_string()
                 }
             })?;
+        // The marker means "sent once"; a file that could not be opened was not sent.
         let file = OpenOptions::new()
             .read(true)
             .custom_flags(libc::O_NOFOLLOW)
             .open(&path)
+            .inspect_err(|_| {
+                let _ = fs::remove_file(&marker);
+            })
             .map_err(|error| error.to_string())?;
         let bytes = file.metadata().map_err(|error| error.to_string())?.len();
         if bytes > MAX_BYTES {
@@ -250,7 +290,8 @@ impl Area {
     }
 
     /// Reserves a write of `bytes` with this `sha256`: refused when the size is zero or past the
-    /// cap, or the volume cannot hold it with `FREE_SPACE_MARGIN` to spare.
+    /// cap, or the volume cannot hold it with `FREE_SPACE_MARGIN` to spare after the writes
+    /// already reserved. The reservation lasts until the returned `Writer` is renamed or dropped.
     pub fn begin_write(&self, bytes: u64, sha256: &str) -> Result<Writer, String> {
         let available = crate::backup::available_bytes(&self.dir)
             .map_err(|error| format!("Silo could not read the free space here: {error}"))?;
@@ -275,10 +316,24 @@ impl Area {
         if !is_sha256(sha256) {
             return Err("The file's checksum is not valid.".into());
         }
-        if available < bytes.saturating_add(FREE_SPACE_MARGIN) {
-            return Err(
-                "This machine does not have enough free space to receive that file.".into(),
-            );
+        // Check and reserve under one lock, so two writes cannot both pass on the same space.
+        {
+            let mut reserved = RESERVED
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let promised = reserved
+                .iter()
+                .find(|(path, _)| *path == self.dir)
+                .map_or(0, |(_, promised)| *promised);
+            if available.saturating_sub(promised) < bytes.saturating_add(FREE_SPACE_MARGIN) {
+                return Err(
+                    "This machine does not have enough free space to receive that file.".into(),
+                );
+            }
+            match reserved.iter_mut().find(|(path, _)| *path == self.dir) {
+                Some((_, promised)) => *promised += bytes,
+                None => reserved.push((self.dir.clone(), bytes)),
+            }
         }
         let name = new_name(Role::Import);
         let part = self.dir.join(format!("{name}{PART_SUFFIX}"));
@@ -287,6 +342,7 @@ impl Area {
             .create_new(true)
             .mode(0o600)
             .open(&part)
+            .inspect_err(|_| release_reserved(&self.dir, bytes))
             .map_err(|error| error.to_string())?;
         Ok(Writer {
             area: self.clone(),
@@ -412,6 +468,7 @@ impl Drop for Writer {
     fn drop(&mut self) {
         // A rename moved the `.part`; anything else leaves it to delete.
         let _ = fs::remove_file(&self.part);
+        release_reserved(&self.area.dir, self.bytes);
     }
 }
 
@@ -601,9 +658,16 @@ pub fn push(
         if read == 0 {
             return Err("The file changed while it was being sent.".into());
         }
-        input
-            .write_all(&buffer[..read])
-            .map_err(|error| format!("The other machine stopped receiving: {error}"))?;
+        if let Err(error) = input.write_all(&buffer[..read]) {
+            // The owner ends a refused write after sending its reason; show that, not the pipe.
+            return Err(match read_header(output) {
+                Ok(verdict) => verdict["error"].as_str().map_or_else(
+                    || format!("The other machine stopped receiving: {error}"),
+                    str::to_owned,
+                ),
+                Err(_) => format!("The other machine stopped receiving: {error}"),
+            });
+        }
         sent += read as u64;
         progress(sent);
     }
@@ -804,6 +868,51 @@ mod tests {
     }
 
     #[test]
+    fn writes_in_flight_count_against_free_space_until_they_end() {
+        let (_dir, area) = area();
+        let good = sha(b"x");
+        let size = 1_000_000;
+        let available = 2 * size + FREE_SPACE_MARGIN;
+        let first = area.begin_write_with_space(size, &good, available).unwrap();
+        // The second would fit alone but not beside the first.
+        assert!(area
+            .begin_write_with_space(size + 1, &good, available)
+            .unwrap_err()
+            .contains("free space"));
+        let second = area.begin_write_with_space(size, &good, available).unwrap();
+        assert!(area
+            .begin_write_with_space(1, &good, available)
+            .unwrap_err()
+            .contains("free space"));
+        // A dropped write gives its bytes back.
+        drop(first);
+        let third = area.begin_write_with_space(size, &good, available).unwrap();
+        // A finished write does too (its file is then on the volume, so `available` falls).
+        drop((second, third));
+        let data = b"hello".to_vec();
+        area.begin_write_with_space(5, &sha(&data), 5 + FREE_SPACE_MARGIN)
+            .unwrap()
+            .receive(&mut Cursor::new(data), &mut |_| {}, &|| false)
+            .unwrap();
+        assert!(area
+            .begin_write_with_space(size, &good, size + FREE_SPACE_MARGIN)
+            .is_ok());
+    }
+
+    #[test]
+    fn a_failed_open_of_an_export_does_not_leave_the_sent_marker() {
+        let (_dir, area) = area();
+        let (name, path) = area.export_target();
+        fs::write(&path, b"x").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o000)).unwrap();
+        // The owner of the file can still open it as root; the check needs a refused open.
+        if File::open(&path).is_err() {
+            assert!(area.open_for_read(&name).is_err());
+            assert!(!area.dir().join(format!("{name}.used")).exists());
+        }
+    }
+
+    #[test]
     fn an_import_file_is_only_importable_by_its_import_name() {
         let (_dir, area) = area();
         let (export, path) = area.export_target();
@@ -845,6 +954,19 @@ mod tests {
         assert!(!old.exists() && fresh.exists());
         assert_eq!(area.sweep(None), 1);
         assert_eq!(fs::read_dir(area.dir()).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn a_path_in_the_area_is_found_even_when_it_does_not_exist_yet_or_goes_through_a_link() {
+        let (dir, area) = area();
+        assert!(area.contains(area.dir()));
+        assert!(area.contains(&area.dir().join("new.silo-backup")));
+        assert!(area.contains(&area.dir().join("a/b/c.silo-backup")));
+        let link = dir.path().join("link");
+        std::os::unix::fs::symlink(area.dir(), &link).unwrap();
+        assert!(area.contains(&link.join("x.silo-backup")));
+        assert!(!area.contains(&dir.path().join("elsewhere.silo-backup")));
+        assert!(!area.contains(Path::new("/nonexistent/place")));
     }
 
     #[test]
@@ -1000,6 +1122,31 @@ mod tests {
         assert!(error.contains("does not match"));
         assert!(handle.join().unwrap().is_err());
         assert_eq!(fs::read_dir(area.dir()).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn a_push_cut_off_by_the_owner_shows_the_owners_reason() {
+        let (near, far) = UnixStream::pair().unwrap();
+        let owner = std::thread::spawn(move || {
+            let mut far = far;
+            write_line(&mut far, &json!({"name": new_name(Role::Import)})).unwrap();
+            write_line(&mut far, &json!({"error": "This machine is full."})).unwrap();
+            // Closing is what makes the controller's next write fail.
+        });
+        owner.join().unwrap();
+        let mut input = near.try_clone().unwrap();
+        let mut reader = std::io::BufReader::new(near);
+        let data = vec![1u8; 4 * CHUNK];
+        let error = push(
+            &mut input,
+            &mut reader,
+            &mut Cursor::new(data.clone()),
+            data.len() as u64,
+            &mut |_| {},
+            &|| false,
+        )
+        .unwrap_err();
+        assert_eq!(error, "This machine is full.");
     }
 
     #[test]

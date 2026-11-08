@@ -171,12 +171,18 @@ other device does the export or import itself (the logins are asked about on it,
 file travels through the other device's transfer area: it writes the export there under a name it
 picks, this device copies it over the Connections link (a `Copying ...` step with progress, size
 and checksum checked), and the other device removes its copy. An import goes the other way and the
-other device removes the received file whether the import worked or not. A leftover (the
+other device removes the received file once the import has finished, worked or not (if this
+device loses track of an import that may still be running, the file stays for that import and is
+swept later). A leftover (the
 connection dropped, the engine stopped) is swept when that engine starts and after a day. Ctrl-C
 cancels the copy. Both devices need this Silo version; an older one answers "The other machine's
 Silo is too old to share computers over Connections. Update Silo there." The file is limited to
-16 GiB and the other device needs that much free space plus 64 MiB. See
-[Connections](SiloUI-CONNECTIONS.md#sharing-a-computer-between-devices).
+16 GiB and the receiving device needs that much free space plus 64 MiB, after what its other
+copies in progress have already claimed. The limit is 16 GiB because computer exports carry disk
+images, which Files' 4 GiB is too small for, and because 16 GiB at the copy's 64 KiB/s time budget
+is about three days, so the budget stays finite. An export that Silo estimates to be over the limit
+is refused before it starts, and one that turns out larger is removed with a message naming the
+file and its size. See [Connections](SiloUI-CONNECTIONS.md#sharing-a-computer-between-devices).
 
 The MCP server has no export or import tool: both read and write files at paths the caller
 chooses, and the file can hold the computer's logins, so they stay a decision of the person at the

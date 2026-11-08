@@ -362,7 +362,8 @@ one `.silo-backup` file, and `silo import` reads one. What the file holds, and d
 **Sharing a computer that lives on another device.** `silo --device mini export main -o FILE` and
 `silo --device mini import FILE` move the file over Connections. The managed key may only run the
 bridge, so `scp` and `sftp` do not reach the owner; Files' `sftp` only reaches guests. The owner
-therefore keeps a *transfer area*, `<engine directory>/transfer/` (directory 0700, files 0600),
+therefore keeps a *transfer area*, `<engine directory>/transfer/` (directory 0700; every file in it
+0600: received files are created that way and an export is made private when it finishes),
 and serves exactly one file of it per `exports.file` stream.
 
 - **No new data access.** A controller already holds the owner's authority (boundary 7): it can
@@ -375,8 +376,14 @@ and serves exactly one file of it per `exports.file` stream.
   (a marker file is created exclusively); a second open is refused. Links are not followed.
 - **Owner disk is bounded by what is declared.** A write names its size and sha256 first and is
   refused when the size is zero, past the cap (16 GiB; the engine's own export has no smaller
-  limit), or the volume cannot hold it with 64 MiB to spare, counting writes already promised. The
-  bytes go to a `.part` file, exactly the declared size is read, and the file is renamed only when
+  limit), or the volume cannot hold it with 64 MiB to spare after the writes already promised.
+  Writes are not serialized (the engine's stream budget of 192 is the only bound on how many are
+  open); instead each one reserves its declared size in a counter the check subtracts from the
+  free space, under one lock, and gives it back when the file is kept or the write ends. The
+  counter counts a write's full size even after part of it is on disk, so it errs on the side of
+  refusing. An export is refused before it is written when its estimate is past the cap, and one
+  that turns out larger is removed. A caller cannot choose a name in the area: an export aimed at
+  the area's folder by path is refused. The bytes go to a `.part` file, exactly the declared size is read, and the file is renamed only when
   the size and hash match; any other end deletes the `.part`. A stalled write ends after 120 s.
   The copy has the Files time budget (45 s plus the size at 64 KiB/s) and the controller's job can
   be cancelled.
@@ -387,9 +394,12 @@ and serves exactly one file of it per `exports.file` stream.
   truncated or changed file. It does not authenticate the sender: the controller already has the
   owner's authority.
 - **Leftovers are swept.** The controller asks the owner to remove the file after a successful copy
-  (`exports.discard`, for names of the area only). The engine empties the area when it starts and a
+  (`exports.discard`, for names of the area only); for an import it does so once the import is
+  reported finished, and leaves the file when it could only lose track of the job. The engine
+  empties the area when it starts, before the Connections bridge accepts its first stream, and a
   periodic pass removes entries older than a day, so a crash or a lost connection leaves a file for
-  at most a day. While it lasts, the file is readable by the engine's account and root, like the
+  at most a day. On the controller the copy is written beside the chosen path as `<path>.part` and
+  takes the path only when the hash matched, without replacing a file that is there. While it lasts, the file is readable by the engine's account and root, like the
   rest of the engine directory.
 - **One hop, and no old owners.** The controller copies from the owner it names; an owner never
   forwards. An owner that does not advertise `exports.file` in its handshake is refused with a

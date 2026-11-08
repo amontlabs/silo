@@ -488,12 +488,22 @@ fn receive(
     cancel: &Arc<AtomicBool>,
 ) -> Result<TransferFile, String> {
     let expected = plan.expected.clone().ok_or("Missing file details.")?;
+    // The copy goes to `<path>.part` and takes its name only when the hash matched, so a failed
+    // or interrupted copy never leaves a file at the path the user chose. An existing file is
+    // refused now, not after hours of copying.
+    let part = part_path(&plan.path);
+    if std::fs::symlink_metadata(&plan.path).is_ok() {
+        return Err(format!(
+            "Silo could not create {}: a file already exists there.",
+            plan.path.display()
+        ));
+    }
     let mut file = OpenOptions::new()
         .write(true)
         .create_new(true)
         .mode(0o600)
-        .open(&plan.path)
-        .map_err(|error| format!("Silo could not create {}: {error}", plan.path.display()))?;
+        .open(&part)
+        .map_err(|error| format!("Silo could not create {}: {error}", part.display()))?;
     let mut reporter = Reporter::new(engine, job_id, plan, expected.bytes);
     let result = (|| {
         let opened = link().open(
@@ -533,8 +543,15 @@ fn receive(
         copied
     })();
     drop(file);
+    // A hard link fails when something appeared at the path meanwhile, where a rename would
+    // replace it.
+    let result = result.and_then(|()| {
+        std::fs::hard_link(&part, &plan.path)
+            .map_err(|error| format!("Silo could not create {}: {error}", plan.path.display()))
+    });
     match result {
         Ok(()) => {
+            remove_partial(&part);
             reporter.report(expected.bytes, TransferState::Done);
             Ok(TransferFile {
                 name: expected.name,
@@ -543,7 +560,7 @@ fn receive(
             })
         }
         Err(message) => {
-            remove_partial(&plan.path);
+            remove_partial(&part);
             reporter.report(
                 0,
                 if cancel.load(Ordering::Acquire) {
@@ -555,6 +572,12 @@ fn receive(
             Err(message)
         }
     }
+}
+
+fn part_path(path: &Path) -> PathBuf {
+    let mut part = path.as_os_str().to_owned();
+    part.push(".part");
+    PathBuf::from(part)
 }
 
 fn remove_partial(path: &Path) {

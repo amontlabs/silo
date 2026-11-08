@@ -469,6 +469,18 @@ impl Engine {
         }
     }
 
+    /// Whether the job this connection most recently started has finished. False when it is
+    /// still running, queued, or cannot be asked about, e.g. while the other device is out of
+    /// reach: a wait that failed says nothing about the job itself.
+    pub async fn last_job_finished(&self) -> bool {
+        let Some(job_id) = self.last_job() else {
+            return false;
+        };
+        self.job(&job_id, None)
+            .await
+            .is_ok_and(|reply| reply.get("state").and_then(Value::as_str) == Some("finished"))
+    }
+
     /// What to tell someone whose wait ended before the job did.
     pub fn reattach_hint(job_id: &str) -> String {
         format!("The job {job_id} keeps running in the engine. Re-attach with `silo job {job_id}`.")

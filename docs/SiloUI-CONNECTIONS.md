@@ -154,7 +154,11 @@ Stream method, `exports.file`, carried like `guest.ssh`, and the owner's files l
 The stream is a JSON header line from the owner, the bytes, and for a write a JSON verdict line.
 An export name can be read once; an import name cannot be read; a client never sends a path. A
 refusal (unknown name, already sent, not enough room, past the cap) arrives before the first
-byte. `exports.transfer` owns progress (`operations.job.progress`, the Files progress shape), cancel
+byte. Each write reserves its declared size in a counter shared by the engine's writes and every
+check subtracts it from the free space, so concurrent writes cannot overfill the disk together;
+how many may run at once is bounded only by the engine's stream budget (192 streams), not by a
+rule of one transfer at a time. The reservation is released when the file is kept or the write
+ends. `exports.transfer` owns progress (`operations.job.progress`, the Files progress shape), cancel
 and the time budget (45 s plus the size at 64 KiB/s); raw bytes never cross `engine.sock`. The
 controller checks the owner's handshake for `exports.file` before an export or import that uses the
 area, and says plainly that the owner's Silo is too old. Leftovers are removed when the owner's

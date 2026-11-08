@@ -137,6 +137,9 @@ pub(crate) fn serve(
     // The engine watches its computers whether or not a client is connected (95 A-26).
     crate::methods::computers::install_health_watch(context.clone());
     crate::methods::access::install(context.clone())?;
+    // A copy over Connections ended with the engine that served it; empty the area before the
+    // bridge accepts the first stream, so a new copy is never swept.
+    crate::timers::sweep_transfer_area(&context, true);
     crate::methods::access::start_connections(context.clone())?;
 
     let storage = silo_engine::runtime_migration::selected_runtime_storage(&paths.engine.app_data)?;

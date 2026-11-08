@@ -1544,6 +1544,11 @@ mod transfer {
             json!({"name": name, "bytes": data.len(), "sha256": sha(&data)})
         );
         assert_eq!(std::fs::read(&destination).unwrap(), data);
+        assert!(!fixture
+            .directory
+            .path()
+            .join("copy.silo-backup.part")
+            .exists());
         use std::os::unix::fs::PermissionsExt;
         assert_eq!(
             std::fs::metadata(&destination)
@@ -1581,6 +1586,31 @@ mod transfer {
             .message
             .contains("does not match what the other machine exported"));
         assert!(!destination.exists());
+        assert!(!destination.with_extension("silo-backup.part").exists());
+    }
+
+    #[tokio::test]
+    async fn a_copy_never_replaces_a_file_that_is_already_at_the_path() {
+        let fixture = fixture();
+        let owner = Owner::new(&["exports.file"]);
+        let (name, staged) = owner.area.export_target();
+        std::fs::write(&staged, b"new").unwrap();
+        let _installed = Installed::new(owner);
+        let destination = fixture.directory.path().join("copy.silo-backup");
+        std::fs::write(&destination, b"mine").unwrap();
+        let started = call(
+            &fixture,
+            MethodName::ExportsTransfer,
+            receive_params(&destination, &name, b"new", &sha(b"new")),
+        )
+        .await;
+        // Refused when the request is made or when the job runs; either way the file is mine.
+        if let Ok(started) = started {
+            let outcome = finished(&fixture, &job_id(started)).await.outcome.unwrap();
+            assert!(outcome.error.is_some());
+        }
+        assert_eq!(std::fs::read(&destination).unwrap(), b"mine");
+        assert!(!destination.with_extension("silo-backup.part").exists());
     }
 
     #[tokio::test]
@@ -1744,6 +1774,9 @@ mod transfer {
         .unwrap();
         let job = job_id(started);
         tokio::time::sleep(Duration::from_millis(300)).await;
+        // While it copies, the path the user chose does not exist: only the `.part` does.
+        let part = fixture.directory.path().join("copy.silo-backup.part");
+        assert!(!destination.exists() && part.exists());
         silo_engine::context::EngineContext::job_registry(fixture.silod.as_ref())
             .unwrap()
             .cancel(&job)
@@ -1752,7 +1785,7 @@ mod transfer {
         let error = outcome.error.unwrap();
         assert_eq!(error.code, ErrorCode::Cancelled, "{}", error.message);
         assert!(error.message.contains("cancelled"));
-        assert!(!destination.exists());
+        assert!(!destination.exists() && !part.exists());
     }
 
     fn area_of(fixture: &Fixture) -> Area {
@@ -1833,6 +1866,32 @@ mod transfer {
             transfer_area::parse_name(path.file_name().unwrap().to_str().unwrap()),
             Some(transfer_area::Role::Export)
         );
+    }
+
+    #[tokio::test]
+    async fn an_export_cannot_be_aimed_into_the_transfer_area_by_a_caller() {
+        let fixture = fixture();
+        let area = area_of(&fixture);
+        let inside = area.dir().join(format!("x-{}.silo-backup", "c".repeat(32)));
+        for params in [
+            json!({
+                "destination": "/somewhere/else", "computerIds": [fixture.macos_id],
+                "archivePath": inside.to_str().unwrap()
+            }),
+            json!({
+                "destination": area.dir().to_str().unwrap(), "computerIds": [fixture.macos_id]
+            }),
+            json!({
+                "destination": area.dir().to_str().unwrap(), "computerIds": [fixture.macos_id],
+                "archivePath": area.dir().join("mine.silo-backup").to_str().unwrap()
+            }),
+        ] {
+            let error = call(&fixture, MethodName::ExportsCreate, params)
+                .await
+                .unwrap_err();
+            assert!(error.message.contains("transfer"), "{}", error.message);
+        }
+        assert_eq!(std::fs::read_dir(area.dir()).unwrap().count(), 0);
     }
 
     #[tokio::test]

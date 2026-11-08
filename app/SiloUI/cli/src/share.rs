@@ -498,7 +498,12 @@ async fn import_to_device(
             progress,
         )
         .await;
-    discard(engine, &name, progress).await;
+    // The file is the import's input: it goes only once the import is over. A wait that failed
+    // while the import is still running, or queued behind the other device's work, leaves it
+    // for the job (and for the machine's sweep).
+    if imported.is_ok() || engine.last_job_finished().await {
+        discard(engine, &name, progress).await;
+    }
     imported
 }
 

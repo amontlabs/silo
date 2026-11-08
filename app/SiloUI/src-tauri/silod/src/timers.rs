@@ -261,7 +261,6 @@ pub(crate) fn sweep_transfer_area(context: &SilodContext, at_start: bool) -> usi
 
 /// Starts the engine timers. Call once, after the context and the secrets runtime are installed.
 pub fn start(context: Arc<SilodContext>) -> Timers {
-    sweep_transfer_area(&context, true);
     let upkeep = SilodUpkeep::new(context);
     let host = upkeep.host();
     let _ = std::thread::Builder::new()

@@ -1015,11 +1015,12 @@ impl<R: MsbRunner> BackupService<R> {
     /// capture is part of the payload, not counted again. Other computers' snapshots and
     /// caches are not written by this export. Ancestors kept in another computer's
     /// group are not counted; the final destination check uses the actual archive.
-    fn check_export_space(
+    /// The result is before compression, so it is an upper bound of the archive.
+    pub(crate) fn estimate_export_bytes(
         &self,
         request: &BackupRequest,
         cancellation: &Cancellation,
-    ) -> Result<(), BackupError> {
+    ) -> Result<u64, BackupError> {
         let store = self.native_store_root();
         let mut payload_bytes = 0_u64;
         let mut carries_image = false;
@@ -1044,7 +1045,17 @@ impl<R: MsbRunner> BackupService<R> {
                 .saturating_add(estimated_tree_bytes(&store.join("cache"), cancellation)?);
         }
         let estimate = payload_bytes.saturating_add(MAX_MANIFEST_BYTES);
-        let estimate = estimate.saturating_add(estimate / 100); // tar/zstd overhead
+        Ok(estimate.saturating_add(estimate / 100)) // tar/zstd overhead
+    }
+
+    /// Whether the volumes that hold the working copy and the destination can take the
+    /// estimate from `estimate_export_bytes`.
+    fn check_export_space(
+        &self,
+        request: &BackupRequest,
+        cancellation: &Cancellation,
+    ) -> Result<(), BackupError> {
+        let estimate = self.estimate_export_bytes(request, cancellation)?;
         let destination = request.destination.parent().ok_or_else(|| {
             BackupError::InvalidRequest("The export destination has no parent directory.".into())
         })?;
@@ -4162,7 +4173,7 @@ pub(crate) fn available_bytes(path: &Path) -> io::Result<u64> {
 }
 
 /// Binary units, labelled as such.
-fn format_bytes(bytes: u64) -> String {
+pub(crate) fn format_bytes(bytes: u64) -> String {
     const GIB: u64 = 1024 * 1024 * 1024;
     if bytes >= GIB {
         format!("{:.1} GiB", bytes as f64 / GIB as f64)
