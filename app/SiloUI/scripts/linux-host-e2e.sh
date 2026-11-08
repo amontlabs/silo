@@ -20,6 +20,9 @@ silo="$1/silo"
 name="${SILO_E2E_COMPUTER:-e2e-hosts-ci}"
 fork="$name-fork"
 ctr="$name-ctr"
+# A second container that keeps the secret when it is taken away from the first (a secret always
+# has a computer).
+ctr2="$name-ctr2"
 # Seconds to wait for the engine socket to answer.
 ready_timeout="${SILO_E2E_READY_TIMEOUT:-120}"
 # Seconds between attempts to create the computer when the VM image download fails.
@@ -47,7 +50,7 @@ cleanup() {
   local status=$?
   trap - EXIT
   rm -f "${stderr_file:-}"
-  for computer in "$ctr" "$fork" "$name"; do
+  for computer in "$ctr2" "$ctr" "$fork" "$name"; do
     if listed "$computer" 2>/dev/null | grep -qx -- "$computer"; then
       echo "Stopping and dropping $computer after a failed run"
       "$silo" stop "$computer" || true
@@ -241,7 +244,8 @@ container_network_features() {
   # request with no token at all "Requires authentication".
   local fake placeholder='$MSB_E2E_FAKE_TOKEN'
   fake="ghp_$(head -c 48 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 36)"
-  printf '%s' "$fake" | "$silo" secrets set E2E_FAKE_TOKEN --computer "$ctr" --domain api.github.com
+  "$silo" create "$ctr2" --container --cpus 1 --memory 2 --disk 2
+  printf '%s' "$fake" | "$silo" secrets set E2E_FAKE_TOKEN --computer "$ctr" --computer "$ctr2" --domain api.github.com
   # A secret assigned to a running computer takes effect at its next start, as for a VM.
   "$silo" stop "$ctr"
   "$silo" start "$ctr"
@@ -313,11 +317,12 @@ print(port.get("state") or "-", port.get("hostPort") or "-", port.get("url") or 
   expect "uses recorded after the removal" "$after" "$before"
   expect "placeholder after the removal" "$(in_container sh -c 'printf %s "${E2E_FAKE_TOKEN-}"')" ""
   assigned=$("$silo" secrets list)
-  if grep -q "E2E_FAKE_TOKEN.*$ctr" <<<"$assigned"; then
+  if grep -w E2E_FAKE_TOKEN <<<"$assigned" | grep -qw -- "$ctr"; then
     echo "the secret is still assigned: $assigned" >&2
     exit 1
   fi
   echo "secret removal: no longer assigned"
+  "$silo" drop "$ctr2"
 }
 
 step "Waiting for the engine"
@@ -332,12 +337,12 @@ until "$silo" list >/dev/null 2>&1; do
 done
 # The check must fail when the list does: an empty answer would let the test take over a
 # computer it did not make.
-if ! existing=$(listed "$name" "$fork" "$ctr"); then
+if ! existing=$(listed "$name" "$fork" "$ctr" "$ctr2"); then
   echo "Could not list the engine's computers; this test never runs without knowing them" >&2
   exit 1
 fi
 if [[ -n "$existing" ]]; then
-  echo "A computer named $name, $fork or $ctr already exists; this test never touches it" >&2
+  echo "A computer named $name, $fork, $ctr or $ctr2 already exists; this test never touches it" >&2
   exit 1
 fi
 stderr_file="$(mktemp)"
@@ -397,7 +402,7 @@ if [[ -n "$left" ]]; then
 fi
 if [[ "${SILO_E2E_CONTAINER:-0}" == 1 ]]; then
   container_checks
-  left=$(listed "$ctr")
+  left=$(listed "$ctr" "$ctr2")
   if [[ -n "$left" ]]; then
     echo "Still listed after drop: $left" >&2
     exit 1
