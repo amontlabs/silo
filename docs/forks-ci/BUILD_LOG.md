@@ -305,6 +305,17 @@ Branch `claude/containers-ct2`.
     longer repeats it on every command; the threat model states what Landlock covers, that an escape lands as
     the engine's account (engine socket, every other computer), that the writable layer has no size limit
     yet, and that CPU limits need a delegated `cpu` controller.
+  - **Second re-check** (Opus). The desktop actions (`setup-agent-tools` included) and the computer-use
+    approval check the capability before any side effect. Each exec gets its own private directory holding the
+    pid file and the `--process` JSON (it carries environment values), removed when the exec ends: an
+    `ExecGroup` drop for a waited exec, the plan's last holder for a streaming one (`Plan.files`, kept by
+    `Streaming` until the process is gone). Leftovers are removed only when their command no longer leads its
+    process group, so a waited exec running longer than 10 minutes keeps its pid file and its timeout still
+    kills it. Root execs now carry the inheritable set matching ambient (the kernel needs it). The threat model
+    says the ruleset applies on Landlock ABI 1 to 3. `reconcile` documents why a gateway it does not hold means
+    a leftover: `silod` is the only process that starts containers for an account and holds the channel's
+    `engine.lock`. The live check asserts that the root account setup of `silo start` (a waited root exec)
+    worked and that no exec files remain.
 - **Tests:** engine unit tests for the argument shapes, routing, the OCI baseline, the image cache, user
   resolution, the record and listing (macOS and Linux); 47 tests of `silo-container-shim`, including the real
   user namespace, overlay, TAP hand-over, PID 1 reaping and Landlock, run on Ubuntu 24.04; host prerequisite,

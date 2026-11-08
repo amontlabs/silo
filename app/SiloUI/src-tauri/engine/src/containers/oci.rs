@@ -93,6 +93,7 @@ pub fn exec_process(
         process["capabilities"] = json!({
             "effective": capabilities,
             "bounding": capabilities,
+            "inheritable": capabilities,
             "ambient": capabilities,
             "permitted": capabilities,
         });
@@ -261,10 +262,10 @@ mod tests {
             root["capabilities"]["effective"].as_array().unwrap().len(),
             7
         );
-        assert_eq!(
-            root["capabilities"]["ambient"],
-            root["capabilities"]["bounding"]
-        );
+        // The kernel only raises an ambient capability that is also permitted and inheritable.
+        for set in ["ambient", "inheritable", "permitted", "bounding"] {
+            assert_eq!(root["capabilities"][set], root["capabilities"]["effective"], "{set}");
+        }
         // The shape is a valid OCI process.
         let _: oci_spec::runtime::Process = serde_json::from_value(root).unwrap();
         let _: oci_spec::runtime::Process = serde_json::from_value(process).unwrap();

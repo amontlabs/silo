@@ -8,6 +8,7 @@ use std::{
     collections::HashSet,
     process::Child,
     sync::{Mutex, MutexGuard, PoisonError},
+    time::Duration,
 };
 
 /// A spawned child that is always waited for: if the guard is dropped (an early error return) the
@@ -74,27 +75,34 @@ pub fn is_starting(name: &str) -> bool {
 /// The command a `crun exec` started in the container, which `silo-init --own-group` made the
 /// leader of its own process group. `crun exec --pid-file` records its pid; killing the group
 /// ends the command and everything it started, which killing the `crun exec` process does not.
+///
+/// It owns a private directory holding the pid file and the `--process` JSON (which carries the
+/// command's environment values), and removes it when the exec is over.
+#[derive(Debug)]
 pub struct ExecGroup {
-    pid_file: std::path::PathBuf,
+    directory: std::path::PathBuf,
 }
 
+const PID_FILE: &str = "exec.pid";
+const PROCESS_FILE: &str = "process.json";
+
 impl ExecGroup {
-    pub fn new(pid_file: std::path::PathBuf) -> Self {
-        Self { pid_file }
+    pub fn new(directory: std::path::PathBuf) -> Self {
+        Self { directory }
     }
 
-    pub fn pid_file(&self) -> &std::path::Path {
-        &self.pid_file
+    pub fn pid_file(&self) -> std::path::PathBuf {
+        self.directory.join(PID_FILE)
+    }
+
+    pub fn process_file(&self) -> std::path::PathBuf {
+        self.directory.join(PROCESS_FILE)
     }
 
     /// SIGKILLs the command's process group. Only a process that leads its own group is touched,
     /// so a stale or reused pid cannot take anything else with it. Returns whether it signalled.
     pub fn kill(&self) -> bool {
-        let Some(pid) = std::fs::read_to_string(&self.pid_file)
-            .ok()
-            .and_then(|text| text.trim().parse::<i32>().ok())
-            .filter(|pid| *pid > 1)
-        else {
+        let Some(pid) = leader_pid(&self.directory) else {
             return false;
         };
         // SAFETY: getpgid and kill take plain integers.
@@ -109,7 +117,28 @@ impl ExecGroup {
 
 impl Drop for ExecGroup {
     fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.pid_file);
+        let _ = std::fs::remove_dir_all(&self.directory);
+    }
+}
+
+fn leader_pid(directory: &std::path::Path) -> Option<i32> {
+    std::fs::read_to_string(directory.join(PID_FILE))
+        .ok()
+        .and_then(|text| text.trim().parse::<i32>().ok())
+        .filter(|pid| *pid > 1)
+}
+
+/// Whether the exec directory `directory` is a leftover: its command is gone (its pid no longer
+/// leads a process group), or it never recorded a pid and has sat unused for `idle`.
+pub fn exec_leftover(directory: &std::path::Path, idle: Duration) -> bool {
+    match leader_pid(directory) {
+        // SAFETY: getpgid takes a plain integer.
+        Some(pid) => unsafe { libc::getpgid(pid) != pid },
+        None => std::fs::metadata(directory)
+            .and_then(|meta| meta.modified())
+            .ok()
+            .and_then(|modified| modified.elapsed().ok())
+            .is_some_and(|age| age > idle),
     }
 }
 
@@ -173,6 +202,7 @@ mod tests {
         let mut leader = leader.spawn().unwrap();
         let pid_file = directory.path().join("exec.pid");
         std::fs::write(&pid_file, format!("{}\n", leader.id())).unwrap();
+        std::fs::write(directory.path().join("process.json"), "{}").unwrap();
         let deadline = Instant::now() + Duration::from_secs(10);
         while !leaf.exists() && Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(20));
@@ -182,7 +212,8 @@ mod tests {
             .trim()
             .parse()
             .unwrap();
-        let group = ExecGroup::new(pid_file.clone());
+        let group = ExecGroup::new(directory.path().to_owned());
+        assert_eq!(group.pid_file(), pid_file);
         assert!(group.kill());
         leader.wait().unwrap();
         // The background child is a zombie of init at worst; wait until it is gone or defunct.
@@ -196,7 +227,36 @@ mod tests {
         }
         assert!(gone(leaf), "the command's child survived");
         drop(group);
-        assert!(!pid_file.exists());
+        assert!(!directory.path().exists(), "the exec's files stayed behind");
+    }
+
+    #[test]
+    fn an_exec_directory_is_a_leftover_only_when_its_command_is_gone() {
+        use std::os::unix::process::CommandExt;
+        let root = tempfile::tempdir().unwrap();
+        let idle = Duration::from_secs(600);
+        // A command that leads its own group is running, however old its directory is.
+        let mut leader = Command::new("sleep")
+            .arg("300")
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let running = root.path().join("running");
+        std::fs::create_dir(&running).unwrap();
+        std::fs::write(running.join("exec.pid"), format!("{}\n", leader.id())).unwrap();
+        assert!(!exec_leftover(&running, idle));
+        assert!(!exec_leftover(&running, Duration::ZERO));
+        let group = ExecGroup::new(running.clone());
+        assert!(group.kill());
+        leader.wait().unwrap();
+        assert!(exec_leftover(&running, idle), "the command is gone");
+        drop(group);
+        // No pid yet: a fresh directory is an exec being set up; an idle one is abandoned.
+        let fresh = root.path().join("fresh");
+        std::fs::create_dir(&fresh).unwrap();
+        assert!(!exec_leftover(&fresh, idle));
+        std::thread::sleep(Duration::from_millis(20));
+        assert!(exec_leftover(&fresh, Duration::from_millis(1)));
     }
 
     #[test]
@@ -205,7 +265,7 @@ mod tests {
         let pid_file = directory.path().join("exec.pid");
         // This test process leads no group of its own (its group is the test harness's).
         std::fs::write(&pid_file, format!("{}\n", std::process::id())).unwrap();
-        let group = ExecGroup::new(pid_file.clone());
+        let group = ExecGroup::new(directory.path().to_owned());
         // SAFETY: getpgrp has no preconditions.
         if unsafe { libc::getpgrp() } as u32 != std::process::id() {
             assert!(!group.kill());

@@ -226,9 +226,15 @@ impl Target {
                 if crate::containers::route(paths, &["inspect".to_owned(), name.clone()])
                     == crate::containers::Route::Container
                 {
-                    let (program, args) = crate::containers::guest_plan(paths, name, user, argv, env)
-                        .map_err(|message| GuestError::new(ErrorCode::NotRunning, message))?;
-                    return Ok(Plan { program, args, envs: Vec::new() });
+                    let (program, args, files) =
+                        crate::containers::guest_plan(paths, name, user, argv, env)
+                            .map_err(|message| GuestError::new(ErrorCode::NotRunning, message))?;
+                    return Ok(Plan {
+                        program,
+                        args,
+                        envs: Vec::new(),
+                        files: Some(std::sync::Arc::new(files)),
+                    });
                 }
                 let mut args = vec![
                     "exec".to_owned(),
@@ -257,6 +263,7 @@ impl Target {
                 args.push("--".into());
                 args.extend(argv.iter().cloned());
                 Ok(Plan {
+                    files: None,
                     program: paths.executable.clone(),
                     args,
                     envs: vec![
@@ -276,6 +283,7 @@ impl Target {
                 let command = command_line(argv, env, root);
                 let (program, args) = shell.invocation(&command)?;
                 Ok(Plan {
+                    files: None,
                     program: PathBuf::from(program),
                     args,
                     envs: Vec::new(),

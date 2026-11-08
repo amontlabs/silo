@@ -130,6 +130,20 @@ print(rows.get(sys.argv[1], "missing"))' "$ctr")
   sleep 2
   expect "timed-out command leftovers" "$(in_container sh -c 'kill -0 "$(cat /tmp/e2e-leftover)" 2>/dev/null && echo alive || echo gone')" gone
 
+  step "Checking Silo's own root commands in $ctr"
+  # `silo start` ran the account setup as root through a waited exec (a timeout, the seven
+  # capabilities, ambient and inheritable): the account it creates and the record it writes prove
+  # the root exec worked, and a command as that account sees them.
+  expect "root account setup" "$(in_container sh -c 'echo "$(id -un) $(test -s /var/lib/silo/working-account.json && echo recorded)"')" "silo recorded"
+  # No exec leaves its directory (pid file, process JSON with the environment) behind.
+  leftovers=1
+  for _ in $(seq 1 20); do
+    leftovers=$(find "$HOME/.silo-dev" -path "*containers/computers/$ctr/state/exec/*" 2>/dev/null | wc -l)
+    [[ "$leftovers" == 0 ]] && break
+    sleep 0.5
+  done
+  expect "exec files left behind" "$leftovers" 0
+
   step "Checking the network of $ctr"
   # A public host answers, so the refusals below mean something.
   code=000

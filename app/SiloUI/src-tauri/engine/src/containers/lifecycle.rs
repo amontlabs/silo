@@ -144,6 +144,11 @@ fn status_in(proc: &Path, paths: &RuntimePaths, name: &str, record: &ComputerRec
 
 /// Once, when the engine starts: stops the containers an earlier engine process left running.
 /// Their gateways died with that process, so they have no network and nothing to manage them.
+///
+/// A container whose holder is alive and whose gateway this process does not hold counts as a
+/// leftover. That is right only because `silod` is the one process that starts containers for an
+/// account, and it runs once per channel and account (it holds that channel's `engine.lock`
+/// before serving), so no other live engine can own a gateway for this runtime home.
 pub fn reconcile(paths: &RuntimePaths, tools: &Tools) {
     let layout = Layout::new(&paths.home);
     for name in layout.names() {
@@ -658,29 +663,33 @@ pub struct ExecPlan {
     pub group: ExecGroup,
 }
 
-/// Files older than this in a computer's `exec` directory are leftovers.
-const EXEC_FILE_MAX_AGE: Duration = Duration::from_secs(600);
+/// An exec directory with no pid recorded is a leftover after this long.
+const EXEC_IDLE_MAX: Duration = Duration::from_secs(600);
 
-/// A new private file name in the computer's `exec` directory; stale ones are removed first.
-fn exec_file(dir: &ComputerDir, extension: &str) -> Result<PathBuf, String> {
-    let directory = dir.state().join("exec");
-    private_dir(&directory)?;
-    for entry in std::fs::read_dir(&directory)
-        .into_iter()
-        .flatten()
-        .flatten()
-    {
-        let old = entry
-            .metadata()
-            .and_then(|meta| meta.modified())
-            .ok()
-            .and_then(|modified| modified.elapsed().ok())
-            .is_some_and(|age| age > EXEC_FILE_MAX_AGE);
-        if old {
-            let _ = std::fs::remove_file(entry.path());
+/// A new private directory for one exec, inside the computer's `exec` directory. The directories
+/// of execs whose command is gone are removed first; one still running is never touched, however
+/// long it has run.
+fn exec_directory(dir: &ComputerDir) -> Result<PathBuf, String> {
+    let root = dir.state().join("exec");
+    private_dir(&root)?;
+    for entry in std::fs::read_dir(&root).into_iter().flatten().flatten() {
+        let path = entry.path();
+        let leftover = if path.is_dir() {
+            hold::exec_leftover(&path, EXEC_IDLE_MAX)
+        } else {
+            true
+        };
+        if leftover {
+            let _ = if path.is_dir() {
+                std::fs::remove_dir_all(&path)
+            } else {
+                std::fs::remove_file(&path)
+            };
         }
     }
-    Ok(directory.join(format!("{}.{extension}", uuid::Uuid::new_v4().simple())))
+    let directory = root.join(uuid::Uuid::new_v4().simple().to_string());
+    private_dir(&directory)?;
+    Ok(directory)
 }
 
 /// The `crun exec` command for `exec`, run as `uid`/`gid` (and the user's other groups) with the
@@ -755,7 +764,8 @@ pub fn exec_command(
         &argv,
         capabilities,
     );
-    let process_file = exec_file(&dir, "json")?;
+    let group = ExecGroup::new(exec_directory(&dir)?);
+    let process_file = group.process_file();
     {
         use std::os::unix::fs::OpenOptionsExt;
         let mut file = std::fs::OpenOptions::new()
@@ -767,7 +777,6 @@ pub fn exec_command(
         file.write_all(&serde_json::to_vec(&process).map_err(|e| e.to_string())?)
             .map_err(io)?;
     }
-    let group = ExecGroup::new(exec_file(&dir, "pid")?);
     // Inside the holder's namespaces, so the command has the container's network.
     let mut command = Command::new(&tools.ctr);
     command
@@ -1015,6 +1024,18 @@ mod tests {
             args[at("--pid-file") + 1],
             plan.group.pid_file().to_string_lossy()
         );
+        use std::os::unix::fs::PermissionsExt;
+        // Both files live in one directory that is the exec's alone, closed to other users.
+        let exec_directory = plan.group.pid_file().parent().unwrap().to_owned();
+        assert_eq!(
+            args[at("--process") + 1],
+            plan.group.process_file().to_string_lossy()
+        );
+        assert_eq!(plan.group.process_file().parent().unwrap(), exec_directory);
+        assert_eq!(
+            std::fs::metadata(&exec_directory).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
         assert_eq!(args.last().unwrap(), "dev");
         let process: serde_json::Value =
             serde_json::from_slice(&std::fs::read(&args[at("--process") + 1]).unwrap()).unwrap();
@@ -1051,6 +1072,47 @@ mod tests {
             .collect::<Vec<_>>();
         let file = &text[text.iter().position(|a| a == "--process").unwrap() + 1];
         assert!(!std::fs::read_to_string(file).unwrap().contains("timeout"));
+        // The files, environment values included, are removed when the exec is over.
+        let streaming_directory = streaming.group.process_file().parent().unwrap().to_owned();
+        drop(streaming);
+        assert!(!streaming_directory.exists());
+        drop(plan);
+        assert!(!exec_directory.exists());
+    }
+
+    #[test]
+    fn a_long_running_exec_keeps_its_files_and_only_finished_ones_are_removed() {
+        use std::os::unix::process::CommandExt;
+        let home = tempfile::tempdir().unwrap();
+        let paths = test_paths(home.path());
+        let layout = Layout::new(&paths.home);
+        let dir = layout.computer("dev");
+        std::fs::create_dir_all(dir.upper().join("etc")).unwrap();
+        dir.write_record(&record(true)).unwrap();
+        let made = layout.image("sha256:made-from");
+        std::fs::create_dir_all(made.join("rootfs/etc")).unwrap();
+        std::fs::write(made.join("digest"), "sha256:made-from\n").unwrap();
+        std::fs::write(made.join("rootfs/etc/passwd"), "root:x:0:0::/root:/bin/sh\n").unwrap();
+        let tools = fake_tools(home.path());
+        let first = exec_command(&paths, &tools, "dev", &exec_of("root"), true).unwrap();
+        let mut leader = std::process::Command::new("sleep")
+            .arg("300")
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        std::fs::write(first.group.pid_file(), format!("{}\n", leader.id())).unwrap();
+        // Another finished exec left its files behind.
+        let finished = dir.state().join("exec").join("finished");
+        std::fs::create_dir_all(&finished).unwrap();
+        std::fs::write(finished.join("exec.pid"), "999999999\n").unwrap();
+        std::fs::write(finished.join("process.json"), "{}").unwrap();
+        let second = exec_command(&paths, &tools, "dev", &exec_of("root"), true).unwrap();
+        assert!(first.group.process_file().exists(), "a running exec lost its files");
+        assert!(second.group.process_file().exists());
+        assert!(!finished.exists(), "a finished exec's files stayed behind");
+        // So the timeout can still end the command.
+        assert!(first.group.kill());
+        leader.wait().unwrap();
     }
 
     #[test]

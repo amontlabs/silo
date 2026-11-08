@@ -715,9 +715,11 @@ with nothing sensitive on it, and the app, the CLI and `silo list` label it as l
   `/root`, `/workspace`, `/dev`, `/usr`, `/etc`, `/opt`, `/srv`, `/mnt`). It therefore mainly protects
   `/silo/init`, `/boot` and the root directory itself; the system directories stay writable to the
   container's root, which is the point of a computer you install software in. It is a second layer
-  and **advisory where it is absent**: on a kernel without Landlock, or older than ABI 4, the
-  holder logs one warning per start (shown by the engine) and the container runs without it; the
-  namespaces, the missing capabilities, seccomp and the read-only masks still apply.
+  and **advisory where it is absent**: on a kernel without Landlock the holder logs one warning
+  per start (shown by the engine) and the container runs without it. On a kernel with Landlock
+  ABI 1 to 3 (older than ABI 4) the filesystem ruleset still applies and the holder warns that
+  the kernel is older than the baseline expects; the namespaces, the missing capabilities,
+  seccomp and the read-only masks apply in every case.
 - **Account files.** The engine reads the container's `/etc/passwd` and `/etc/group` on the host to
   find a user's ids. Those files live in the writable layer, which the container controls, so they
   are opened without following links, must be regular files and are capped at 1 MiB; overlay

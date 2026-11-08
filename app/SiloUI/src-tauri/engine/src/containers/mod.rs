@@ -423,14 +423,15 @@ fn exec_and_wait(
 }
 
 /// The program and arguments that run `argv` in container computer `name`, for the streaming
-/// guest commands that start the process themselves.
+/// guest commands that start the process themselves. The returned [`hold::ExecGroup`] owns the
+/// files the arguments name; keep it until the process has ended.
 pub fn guest_plan(
     paths: &RuntimePaths,
     name: &str,
     user: &str,
     argv: &[String],
     env: &[(String, String)],
-) -> Result<(PathBuf, Vec<String>), String> {
+) -> Result<(PathBuf, Vec<String>, hold::ExecGroup), String> {
     #[cfg(target_os = "linux")]
     {
         let tools = tools::Tools::locate(paths).map_err(|e| e.to_string())?;
@@ -443,7 +444,7 @@ pub fn guest_plan(
             timeout: None,
             argv: argv.to_vec(),
         };
-        let lifecycle::ExecPlan { command, .. } =
+        let lifecycle::ExecPlan { command, group } =
             lifecycle::exec_command(paths, &tools, name, &exec, false)?;
         Ok((
             PathBuf::from(command.get_program()),
@@ -451,6 +452,7 @@ pub fn guest_plan(
                 .get_args()
                 .map(|arg| arg.to_string_lossy().into_owned())
                 .collect(),
+            group,
         ))
     }
     #[cfg(not(target_os = "linux"))]

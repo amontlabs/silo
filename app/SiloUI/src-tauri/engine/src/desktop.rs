@@ -736,6 +736,13 @@ pub fn local_for_job(
     expected_id: Option<&str>,
     job: Option<&JobLink>,
 ) -> Result<Value, String> {
+    if action.is_some() {
+        crate::containers::capability::require(
+            paths,
+            computer,
+            crate::containers::capability::Capability::Desktop,
+        )?;
+    }
     // A desktop action changes only this computer's guest (and may start the computer); it
     // waits its turn per computer. Reading desktop status observes only, so it takes
     // no gate and stays available during other operations.
@@ -829,6 +836,11 @@ pub fn local_approval(
 ) -> Result<Value, String> {
     let approval =
         crate::computer_use::Approval::parse(mode).ok_or("Unsupported computer-use approval.")?;
+    crate::containers::capability::require(
+        paths,
+        computer,
+        crate::containers::capability::Capability::Desktop,
+    )?;
     runtime::shutdown::ensure_accepting_operations()?;
     let (paths, configuration) = computer_configuration(paths, computer, expected_id)?;
     let status = approval_at(
@@ -988,6 +1000,21 @@ mod tests {
             runtime: None,
             desktop,
         }
+    }
+
+    #[test]
+    fn a_container_computer_gets_no_desktop_action_and_nothing_runs() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = crate::guest::test_support::runtime(directory.path());
+        crate::containers::capability::make_container(&paths.home, "box");
+        let wanted = "cannot give a desktop to a container computer yet";
+        for action in ["start", "setup-computer-use", "setup-agent-tools"] {
+            let error = local(&paths, "box", Some(action), None).unwrap_err();
+            assert!(error.contains(wanted), "{action}: {error}");
+        }
+        let error = local_approval(&paths, "box", "ask", None).unwrap_err();
+        assert!(error.contains(wanted), "{error}");
+        assert!(!directory.path().join("msb.log").exists(), "the runtime ran");
     }
 
     #[test]
