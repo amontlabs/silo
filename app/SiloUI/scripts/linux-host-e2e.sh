@@ -88,7 +88,9 @@ json.dump({
     "capabilities": {k: caps for k in ("effective", "bounding", "inheritable", "ambient", "permitted")},
 }, open(sys.argv[1], "w"))
 PY
-  "$engine_dir/silo-ctr" enter --state "$state" -- crun --root "$state/crun" --cgroup-manager=cgroupfs exec --process "$process" "$ctr" || status=$?
+  # In a scope of the user manager, as the engine is: joining the container's cgroup needs a common
+  # ancestor the account may write, which a shell in a login session does not share.
+  systemd-run --user --scope --quiet -- "$engine_dir/silo-ctr" enter --state "$state" -- crun --root "$state/crun" --cgroup-manager=cgroupfs exec --process "$process" "$ctr" || status=$?
   rm -f "$process"
   return "$status"
 }
