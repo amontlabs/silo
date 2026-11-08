@@ -262,6 +262,13 @@ Branch `claude/containers-ct2`.
   - The overlay root takes the mode of the upper directory (a 0700 upper made `/` unreadable to other users).
   - The working-account setup assumes a workspace disk and a working `sudo`. In a container (`SILO_RUNTIME=container`)
     `/workspace` is a folder and no sudoers file is written: `no_new_privs` means `sudo` cannot work.
+  - The engine runs with umask 077, which crun and every command in the container inherited: mount point
+    directories and the `resolv.conf` and `hosts` files bound into the container came out private, so the
+    working account could not resolve names. `silo-ctr` now sets umask 022 for everything it starts, and the
+    shim layer and bound files are given their modes explicitly. Only the real engine on the KVM runner showed
+    it (the live check prints the container's network state when a public host is unreachable).
+  - A new container computer gets no default desktop from its image (the image includes one; a container has
+    no desktop yet).
   - Silo's own root commands get seven capabilities (chown, file owner and mode, kill, setuid, setgid) inside
     the namespace, because creating the account needs them; other commands have none.
 - **Not in CT2:** secrets, GitHub, published ports, SSH, terminals, desktop, checkpoints, forks, export (all
@@ -273,7 +280,10 @@ Branch `claude/containers-ct2`.
 - **Tests:** engine unit tests for the argument shapes, routing, the OCI baseline, the image cache, user
   resolution, the record and listing (macOS and Linux); 47 tests of `silo-container-shim`, including the real
   user namespace, overlay, TAP hand-over, PID 1 reaping and Landlock, run on Ubuntu 24.04; host prerequisite,
-  API, CLI and frontend tests. Live: `linux-host-e2e.sh` with `SILO_E2E_CONTAINER=1` on the KVM runner.
+  API, CLI and frontend tests. Live: `linux-host-e2e.sh` with `SILO_E2E_CONTAINER=1` on the KVM runner (x86_64,
+  Ubuntu 24.04, kernel 7.0): create, start, `uname -a`, a file written and read, listed as `container`, no
+  capabilities, `no_new_privs`, seccomp, io_uring refused, nested user namespace refused, only `lo` and the TAP,
+  a public host reachable, link-local, private, gateway and loopback addresses refused, stop, drop.
 
 ### R1: CI runner on the Mac (branch `claude/runner-phase-1`)
 
