@@ -1,0 +1,119 @@
+{
+  "baseCapturedAt": "2026-11-08T02:08:00.694372Z",
+  "baselineApplied": false,
+  "baselineAvailable": false,
+  "capturedAt": "2026-11-08T02:08:27.469046Z",
+  "code": [],
+  "credentialsUsed": {
+    "blocked": [],
+    "used": []
+  },
+  "database": [],
+  "format": 1,
+  "home": "/root",
+  "idle_noise": [],
+  "ignored": {
+    "paths": [
+      "/etc/hostname",
+      "/etc/hosts",
+      "/etc/resolv.conf",
+      "/home/silo/.config/pulse/ba185b61e9b54839859d297a0367fe73-default-sink",
+      "/home/silo/.config/pulse/ba185b61e9b54839859d297a0367fe73-default-source",
+      "/home/silo/.dbus/session-bus/ba185b61e9b54839859d297a0367fe73-1"
+    ],
+    "pruned_trees": []
+  },
+  "not_kept": {
+    "credential_details": {
+      "/home/silo/.claude/.credentials.json": [
+        {
+          "after": {
+            "hash": "13a08d54e2e83980e1e4c3e01d7cacbe2915005725c0de5147fdf66b5166ea82",
+            "kind": "file",
+            "size": "28"
+          },
+          "before": null,
+          "change": "added",
+          "path": "/home/silo/.claude/.credentials.json"
+        }
+      ]
+    },
+    "credentials": {
+      "/home/silo/.claude/.credentials.json": [
+        "/home/silo/.claude/.credentials.json"
+      ]
+    },
+    "listening": [],
+    "processes": [],
+    "services": []
+  },
+  "other": [
+    {
+      "after": {
+        "hash": "befcea71d2c552fd60ebfd7772b087de5148061f12f635353241c495576c933f",
+        "kind": "file",
+        "size": "7"
+      },
+      "before": null,
+      "change": "added",
+      "path": "/home/silo/share-conflict.txt"
+    },
+    {
+      "after": {
+        "hash": "b9ef9055297503d2e428ebbbffd236a7986ec15f9e9b7c7e5bd206162766d3f0",
+        "kind": "file",
+        "size": "16"
+      },
+      "before": null,
+      "change": "added",
+      "path": "/home/silo/share-marker.txt"
+    }
+  ],
+  "packages": [],
+  "repo_changes": [],
+  "repo_files": [],
+  "reviewDigest": "edb3348caf3e96c4cfdb3d11ce0eebc50082e80ef00783ff7253d3fd06a26337",
+  "settings": {
+    "cron": [],
+    "files": [
+      {
+        "after": {
+          "hash": "7ef61ddc91284d65b911e9c058edf7c1b056c6dcca376678d94ec50d696ce592",
+          "kind": "file",
+          "size": "185824"
+        },
+        "before": {
+          "hash": "da113eacda8f572e2f7b659c68337b41b4020ffc8d2fd6877578c0223282a7db",
+          "kind": "file",
+          "size": "185189"
+        },
+        "change": "modified",
+        "path": "/etc/ssl/certs/ca-certificates.crt"
+      }
+    ],
+    "launch_agents": [],
+    "services": []
+  },
+  "summary": [
+    {
+      "bucket": "Settings & files",
+      "lines": [
+        "~ /etc/ssl/certs/ca-certificates.crt"
+      ]
+    },
+    {
+      "bucket": "Other changed",
+      "lines": [
+        "+ /home/silo/share-conflict.txt",
+        "+ /home/silo/share-marker.txt"
+      ]
+    },
+    {
+      "bucket": "Not kept",
+      "lines": [
+        "credentials: /home/silo/.claude/.credentials.json"
+      ]
+    }
+  ],
+  "text": "Settings & files\n  ~ /etc/ssl/certs/ca-certificates.crt\nOther changed\n  + /home/silo/share-conflict.txt\n  + /home/silo/share-marker.txt\nNot kept\n  credentials: /home/silo/.claude/.credentials.json\nIgnored: 6 paths (caches, logs, build output)"
+}

@@ -442,5 +442,19 @@ checks passed; the failures were four product problems, all fixed afterwards (te
   export) ran at 59 GiB free without a space refusal, but **S4 fails**: importing any export, even of a fresh
   never-forked computer, stops with `archive contains duplicate entry: layers/layer_87157fb5….raw` from the runtime's
   `snapshot load`. S5 to S8 were not reached, so S7 (keep into the receiver's computer) and the import-group
-  clean-up of a dropped imported computer are still unseen. Failed imports left no group; six older
-  `silo-import-*` groups (8.4 GB) were not cleared by the new engine. Open for F3: find why the payload has the layer twice.
+  clean-up of a dropped imported computer were still unseen. Failed imports left no group; six older
+  `silo-import-*` folders were not cleared by the new engine.
+- **Run 4, 8 Nov 2026 (evidence in [f3-share](evidence/f3-share/README.md), `run-4-rerun.txt`): 22 passed, 0 failed**
+  (S9 `--device` skipped), S7 included; no `silo-import-*` left after dropping everything. Causes and fixes:
+  (1) *Duplicate layer.* `msb snapshot save --with-parents` writes a layer twice when the capture's chain already holds its
+  parent's head (any export after an earlier capture of the computer, such as F2's fork points), and `snapshot load` refuses it.
+  Reproduced with one computer exported four times (the fourth file failed); exports now save the capture alone
+  (`8794f629`; test `a_capture_is_saved_without_its_parents_so_no_layer_is_written_twice`, failed before). The old
+  missing-ancestor retry and its two tests are gone. (2) *Groups left.* The six groups were empty folders by then (the
+  8.4 GB was not reproduced). The sweep never ran: its only caller, `storage::start_monitor`, has had no caller since the
+  engine split; `silod` now runs `recover_checkpoint_data` on a timer (`5aa8a1ae`), the sweep removes the empty folders of
+  unowned import groups (`8794f629`, test `the_sweep_removes_the_empty_shell_of_an_import_group_no_computer_owns`), and a
+  member released later (an imported copy shares its snapshot ID with the computer it came from and stays while that lives)
+  takes its folder with it (`05992ceb`, test `a_member_released_later_takes_its_empty_import_group_folder_with_it`).
+  **Still dead:** the trimming half of `start_monitor` (`periodic`, warm-computer trims) is not wired into `silod`; not
+  changed here, it needs its own decision.

@@ -84,7 +84,7 @@ Build: integration of `claude/forks-phase-3` (with the live-check fixes `cf97e65
 | S5 to S8 (diff of the copy, fold, S7 keep into the receiver's computer, conflict) | **Not reached**: every one needs the imported computer. Their FAIL lines are consequences of S4, not findings; S7 (keep into the receiver's computer) was therefore not seen to pass |
 | no `snapshots/silo-import-*` left after dropping everything | The failed imports added none (the directory list is identical before and after the run), but the **six groups from the earlier runs are still there** (8.4 GB, `du`), and starting the new engine did not clear them |
 
-**Product problem, not fixed here.** The import failure is not specific to the fork: a never-forked, freshly created and
+**Product problem (fixed after run 3, see Run 4).** The import failure is not specific to the fork: a never-forked, freshly created and
 started computer (`silo export e2e-share-base -o base.silo-backup --yes`, 6.4 MiB) fails to import with the same error and the same layer name,
 and so does a stopped fork (`probe.txt`). The message comes from the runtime's `snapshot load` (`backup.rs`,
 `load_import_group`), so the exported payload contains that layer twice; the same shape passed S4 in runs 1 and 2 on the
@@ -98,3 +98,45 @@ space check no longer refuses (S3 and S9 ran at 59 GiB free), and a failed impor
 groups left by an *imported computer that was dropped* could not be tested.
 
 All e2e computers were dropped. The probe archives were in `/tmp/f3-probe` (deleted).
+
+## Run 4 (8 Nov 2026): S1 to S9 pass, no import group left
+
+Build: integration of `claude/forks-phase-3` (with `8794f629`, `5aa8a1ae`, `05992ceb`) and `claude/runner-phase-1` on
+`origin/main` (local branch, never pushed; merge `3a085526`), release-profile Dev bundle, engine started by hand from it
+(`silo-3a085526…`). Base `e2e-share-base`: a new Linux computer (2 cpu), started. Output: [run-4-rerun.txt](run-4-rerun.txt),
+`raw-4-rerun/`. An earlier attempt on the build before the last fix is kept as
+[run-4a-before-shell-fix.txt](run-4a-before-shell-fix.txt) (22 passed, 0 failed too; two empty import folders stayed after the run).
+
+**22 passed, 0 failed**, S9 `--device` skipped (no connected device). S4 imports, S5 `silo diff` of the copy lists the sender's
+marker, S6, S7 (the keep into the receiver's computer, `e2e-share-target`) **passes** (dry run, keep, marker in the target), S8.
+The export of the fork with a marker and a fake login: 5,314,579 bytes (5.1 MiB), 2 s.
+
+### Cause of the run 3 import failure
+
+MicroSandbox's `snapshot save --with-parents` writes a layer twice when the capture's own layer chain already contains its
+parent's head, and `snapshot load` refuses such an archive (`archive contains duplicate entry: layers/layer_<hash>.raw`).
+That is the case for a capture taken after an earlier capture of the same computer: its disk is a qcow2 layer backed by the
+raw layer that is the parent's head. Reproduced on the Dev engine with one fresh computer (`silo export` four times, importing
+each file): the first three imported, the fourth failed with that error; saving the same capture by hand
+(`msb snapshot save <capture> out.msb`) with `--with-parents` gave an archive with `layers/layer_eda7….raw` listed twice
+(`zstd -dc | tar t | sort | uniq -d`), without it an archive that loads. Runs 1 and 2 never exported a computer whose
+lineage already held a capture, so they did not see it; in run 3 the forks of S1 (F2's disk-only fork points) had put captures
+on the base before the export. Fix: an export saves the capture alone (`backup.rs`); the capture holds every layer, and the
+retry path for a missing ancestor already relied on that.
+
+### The old `silo-import-*` groups
+
+By the time they were inspected (after run 3) the six groups held no snapshot (`group.json` with `"head": null`, `.group.lock`),
+4 KB each; the 8.4 GB in the run 3 note was not reproduced. What was left was the empty folder. Two causes:
+
+1. Nothing called the sweep. `recover_interrupted` (which queues the members of import groups no checkpoint record names)
+   is only called by `maintenance_tick`, which only `storage::start_monitor` calls, and no code has called `start_monitor`
+   since `ff4fe89f7` (Silo.app stopped starting an engine). `silod` now has a storage timer (30 s after start, then every ten
+   minutes) that runs the recovery; live, the nine empty folders were gone about 30 s after the new engine started.
+2. Neither the sweep nor a drop removed the folder after the last member went. The sweep now removes the empty
+   folders of unowned import groups, and any removal of queued members removes the group's empty folder. An imported copy of a
+   computer keeps the snapshot ID of the computer it was exported from, so it stays while that computer lives (seen live: an
+   import of the base's own export stayed until the base was dropped); the folder now goes with it at that point.
+
+After dropping every `e2e-share-*` computer including the base: no `silo-import-*` folder in `snapshots/`, no such entry in
+`msb snapshot ls`.

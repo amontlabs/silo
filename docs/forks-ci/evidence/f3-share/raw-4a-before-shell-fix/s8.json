@@ -1,0 +1,33 @@
+{
+  "refusal": {
+    "conflicts": [
+      {
+        "detail": "changed on main since the fork was made, and differently in the fork",
+        "item": "/home/silo/share-conflict.txt",
+        "kind": "file"
+      }
+    ],
+    "hint": "Bring main's change into the fork (or remove the file from the fork's commits) and keep again.",
+    "message": "Keep stopped: /home/silo/share-conflict.txt clash on e84d2ed7-fd19-40a8-9807-5bb80137730d and in e0a5b185-fc2a-45b3-9d56-783e5d3a545a. e84d2ed7-fd19-40a8-9807-5bb80137730d was not changed.",
+    "reason": "divergent"
+  },
+  "report": {
+    "checkpoint": null,
+    "fork": "e0a5b185-fc2a-45b3-9d56-783e5d3a545a",
+    "notes": [],
+    "reviewDigest": "d6d478d9142f52630bf7c17d95c6949873a3b28dd26fd66003eebb945a0ffcde",
+    "steps": [],
+    "summary": [
+      "Settings & files",
+      "  ~ /etc/ssl/certs/ca-certificates.crt",
+      "Other changed",
+      "  + /home/silo/share-conflict.txt",
+      "  + /home/silo/share-marker.txt",
+      "Not kept",
+      "  credentials: /home/silo/.claude/.credentials.json",
+      "Ignored: 6 paths (caches, logs, build output)"
+    ],
+    "target": "e84d2ed7-fd19-40a8-9807-5bb80137730d"
+  },
+  "status": "refused"
+}
