@@ -147,8 +147,20 @@ jobs:
       - name: Run silo-runner as a service next to the engine
         timeout-minutes: 5
         run: bash scripts/runner-host-e2e.sh "$ENGINE" "$UNIT"
-      - name: Drive a Linux computer through the silo command
+      # What a container computer needs from the host (`silo host init` names the same things):
+      # sudo only installs the packages and relaxes Ubuntu's host-wide guard on unprivileged user
+      # namespaces; Silo itself sets nothing. The runner account's sub-ids come from adduser.
+      - name: Prepare the host for container computers
+        run: |
+          set -euo pipefail
+          sudo apt-get install -y --no-install-recommends crun skopeo umoci uidmap
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          grep "^$(id -un):" /etc/subuid /etc/subgid || sudo usermod --add-subuids 100000-165535 --add-subgids 100000-165535 "$(id -un)"
+          ls -l /dev/net/tun
+      - name: Drive a Linux computer and a container computer through the silo command
         timeout-minutes: 40
+        env:
+          SILO_E2E_CONTAINER: '1'
         run: bash scripts/linux-host-e2e.sh "$ENGINE"
       # SIGTERM ends the engine's session; it must exit 0 so systemd does not restart it.
       # A session end that left computers running exits non-zero, and fails here. After an
