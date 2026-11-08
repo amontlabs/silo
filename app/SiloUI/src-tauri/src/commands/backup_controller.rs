@@ -148,6 +148,7 @@ pub(crate) async fn start_export(
             computer_ids,
             checkpoint_id,
             archive_path: None,
+            transfer_area: None,
             device_id: None,
         }))
         .await?;
@@ -169,6 +170,7 @@ pub(crate) async fn start_import(
             archive_path,
             new_name,
             source_name,
+            transfer_name: None,
             device_id: None,
         }))
         .await?;
