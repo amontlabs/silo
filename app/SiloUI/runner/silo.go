@@ -138,8 +138,9 @@ func (c *CLI) Fork(ctx context.Context, name, recipe string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	// `silo fork <name> --recipe <recipe> --json` prints the new computer itself; forks of an
-	// existing computer print {"forks": [...]}. Both carry the engine's id.
+	// `silo fork <name> --recipe <recipe> --json` prints the new computer itself. The {"forks": [...]}
+	// envelope is what the fanout path prints (--count or several names); it is accepted, with one
+	// fork in it, so a change of output shape does not lose a computer. Both carry the engine's id.
 	var made struct {
 		ID    string `json:"id"`
 		Forks []struct {

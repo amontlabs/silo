@@ -34,6 +34,9 @@ pub(super) const STATE: &str = "state.vzvmsave";
 const PARTIAL: &str = ".partial-";
 const FOLDER: &str = "checkpoints";
 /// The name of the checkpoint Restore saves first.
+/// Why a capture of a running computer stopped before it paused the machine.
+pub(super) const FLUSH_FAILED: &str =
+    "Silo could not flush the running computer's disk. Try again, or stop the computer first.";
 pub(super) const RECOVERY_NAME: &str = "Before restore";
 const MAX_NAME_CHARS: usize = 80;
 /// Where a fork finds the credentials of the guest it was copied from, until its own are set.
@@ -443,6 +446,10 @@ fn now() -> String {
 pub(super) trait Machine {
     /// Whether the running machine's memory can be saved, or why not.
     fn memory_support(&self) -> Result<(), String>;
+    /// Has the running guest write its cached file data out to its disk. A fork boots from a
+    /// checkpoint's disk without the memory, so a capture of a running machine does this
+    /// first, whatever the kind of capture.
+    fn flush_disk(&self) -> Result<(), String>;
     /// Pauses the running machine, saves its memory to `state`, runs `copy` while it is
     /// paused and resumes it. The machine is resumed whatever happened.
     fn save_running(
@@ -504,6 +511,13 @@ pub(super) fn create_with_policy<M: Machine>(
         machine.memory_support().map_err(|why| {
             format!("This computer's memory can't be saved ({why}). Stop it to save a checkpoint of its disk.")
         })?;
+    }
+    if subject.running {
+        // The disk is copied while the machine is paused, and a computer forked from this
+        // checkpoint boots from that copy without the saved memory, so what the guest still
+        // holds in memory has to reach the disk first.
+        machine.stage("Writing the disk out");
+        machine.flush_disk()?;
     }
     let id = uuid::Uuid::new_v4().to_string();
     let partial = partial_dir(layout, &id);
@@ -1023,6 +1037,7 @@ mod tests {
         fail_copy_after_save: bool,
         cancel_after_save: bool,
         fail_stop: bool,
+        fail_flush: bool,
     }
 
     impl Fake {
@@ -1035,6 +1050,14 @@ mod tests {
     }
 
     impl Machine for Fake {
+        fn flush_disk(&self) -> Result<(), String> {
+            self.note("flush");
+            if self.fail_flush {
+                Err(FLUSH_FAILED.into())
+            } else {
+                Ok(())
+            }
+        }
         fn memory_support(&self) -> Result<(), String> {
             self.memory_unsupported
                 .map_or(Ok(()), |why| Err(why.to_string()))
@@ -1177,7 +1200,7 @@ mod tests {
             .into_iter()
             .filter(|call| !call.starts_with("stage"))
             .collect();
-        assert_eq!(calls, ["pause", "save", "resume"]);
+        assert_eq!(calls, ["flush", "pause", "save", "resume"]);
         let state = state_file(&layout, &meta.id);
         assert_eq!(
             fs::metadata(&state).unwrap().permissions().mode() & 0o777,
@@ -1304,7 +1327,7 @@ mod tests {
             .into_iter()
             .filter(|call| !call.starts_with("stage"))
             .collect();
-        assert_eq!(calls, ["pause", "save", "resume", "force-stop"]);
+        assert_eq!(calls, ["flush", "pause", "save", "resume", "force-stop"]);
         assert_eq!(fs::read(layout.disk()).unwrap(), b"disk-v1");
         let recovery = list(&layout)
             .into_iter()
@@ -1742,6 +1765,65 @@ mod tests {
             Err(already_replaced("dev"))
         );
         assert!(already_replaced("dev").contains("Start dev to finish it"));
+    }
+
+    /// A fork boots from a checkpoint's disk without its memory, so every kind of capture of a
+    /// running computer has the guest write its disk out first, and none pauses without it.
+    #[test]
+    fn every_capture_of_a_running_computer_flushes_the_guest_before_it_pauses() {
+        for (policy_kind, reason) in [
+            (PolicyKind::Manual, Reason::Manual),
+            (PolicyKind::Automatic, Reason::Manual),
+            (PolicyKind::ForkPoint, Reason::Manual),
+            (PolicyKind::Manual, Reason::BeforeRestore),
+        ] {
+            let (_data, layout) = computer();
+            let machine = Fake::default();
+            create_with_policy(
+                &subject(&layout, &machine, true),
+                "Live",
+                reason,
+                policy_kind,
+            )
+            .unwrap();
+            let calls = machine.calls();
+            let flush = calls.iter().position(|call| call == "flush").unwrap();
+            let pause = calls.iter().position(|call| call == "pause").unwrap();
+            assert!(flush < pause, "{policy_kind:?} {reason:?}: {calls:?}");
+        }
+    }
+
+    #[test]
+    fn a_capture_whose_flush_failed_never_pauses_and_leaves_no_checkpoint() {
+        for policy_kind in [PolicyKind::Manual, PolicyKind::ForkPoint] {
+            let (_data, layout) = computer();
+            let machine = Fake {
+                fail_flush: true,
+                ..Default::default()
+            };
+            let error = create_with_policy(
+                &subject(&layout, &machine, true),
+                "Live",
+                Reason::Manual,
+                policy_kind,
+            )
+            .unwrap_err();
+            assert_eq!(error, FLUSH_FAILED);
+            assert!(!machine.calls().iter().any(|call| call == "pause"));
+            assert!(list(&layout).is_empty());
+            assert!(folder_names(&layout).is_empty());
+        }
+    }
+
+    #[test]
+    fn a_stopped_computer_needs_no_flush() {
+        let (_data, layout) = computer();
+        let machine = Fake {
+            fail_flush: true,
+            ..Default::default()
+        };
+        create(&subject(&layout, &machine, false), "Disk", Reason::Manual).unwrap();
+        assert!(!machine.calls().iter().any(|call| call == "flush"));
     }
 
     #[test]

@@ -1,7 +1,7 @@
 #!/bin/sh
 # Live check for phase R1 (silo-runner). NOT run by CI and not run when it was written.
 #
-# Needs: the Dev engine running, ~/.local/bin/silo-dev, a Go toolchain, the gh CLI signed in, and a
+# Needs: the Dev engine running, ~/.local/bin/silo-dev, a Go toolchain, jq, the gh CLI signed in, and a
 # PRIVATE test repository you can push workflows to. Nothing here reads or prints a credential:
 # GitHub authentication reaches silo-runner through the environment variable named below.
 #
@@ -57,9 +57,16 @@ visibility=$(gh api "repos/$R1_REPO" --jq .visibility)
 [ "$visibility" = private ] || { echo "$R1_REPO is $visibility; this check needs a private repository" >&2; exit 1; }
 
 others_before="$work/others-before.txt"
-# not the header (its column widths follow the longest name) and not the recipe's builder computer,
-# which this script itself makes
-others() { "$silo" list --all 2> /dev/null | grep -v -e '^ci-' -e '^NAME' -e "^silo-build-silo-$R1_OS-" | sort; }
+# Every computer but the helper's own (ci-*) and the recipe's builder, which this script itself
+# makes, as sorted id, name and state fields. The JSON is compared, not the CLI's text table,
+# whose columns are padded to the longest name and so shift for rows that did not change.
+command -v jq > /dev/null || { echo "jq is needed to compare the engine's computers" >&2; exit 1; }
+others() {
+  "$silo" list --all --json 2> /dev/null |
+    jq -r --arg builder "silo-build-silo-$R1_OS-" \
+      '.computers[] | select((.name | startswith("ci-") or startswith($builder)) | not) | [.id, .name, .state] | @tsv' |
+    sort
+}
 others > "$others_before"
 
 echo "== build silo-runner"

@@ -2,4 +2,4 @@
 "silo-ui": patch
 ---
 
-A macOS recipe build now writes the computer's disk out before it saves the build. Before, the last files a setup command wrote, and part of a large extracted archive, could be missing from every computer forked from the recipe. Recipes built before this are rebuilt on the next use.
+A checkpoint of a running macOS computer now has the computer write its disk out before it is copied, whatever kind of checkpoint it is. Before, the last files written, and part of a large extracted archive, could be missing from a computer forked from that checkpoint, and so from every computer forked from a recipe. Recipes built before this are rebuilt on the next use.

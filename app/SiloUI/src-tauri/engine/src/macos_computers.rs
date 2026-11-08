@@ -6187,6 +6187,18 @@ struct LiveMachine<'a> {
 }
 
 impl checkpoints::Machine for LiveMachine<'_> {
+    fn flush_disk(&self) -> Result<(), String> {
+        let (record, _) = computer(self.id)?;
+        let layout = Layout::new(&self.app.paths().app_data, self.id);
+        let flushed = guest_access::run(&layout, &record, "/bin/sync", None, FLUSH_WAIT)
+            .is_ok_and(|output| output.status == 0);
+        if flushed {
+            Ok(())
+        } else {
+            Err(checkpoints::FLUSH_FAILED.into())
+        }
+    }
+
     fn memory_support(&self) -> Result<(), String> {
         engine::memory_support(self.app, self.id)
     }
@@ -6312,15 +6324,6 @@ fn capture_held(
         ),
     );
     let _space = reserve_for_memory(data, &held.record, running && !disk_only)?;
-    if running && disk_only {
-        // The disk is copied while the machine is paused, so what the guest still holds in
-        // memory has to reach it first.
-        let flushed = guest_access::run(&layout, &held.record, "/bin/sync", None, FLUSH_WAIT)
-            .is_ok_and(|output| output.status == 0);
-        if !flushed {
-            return Err("Silo could not flush the running computer's disk. Try again, or stop the computer first.".into());
-        }
-    }
     let machine = LiveMachine {
         app,
         id,

@@ -251,10 +251,15 @@ Both owner decisions:
 - **Live check, 8 Nov 2026 ([r1-runner](evidence/r1-runner/README.md)).** Linux recipe: 19 of 19 pass (run 2, 7 Nov). macOS recipe:
   the 7 Nov run was blocked by `silo-run-jit: No such file`. Cause: the recipe build checkpoints the *running* builder and a fork
   boots from the copied disk without the builder's memory, so on macOS the last writes (`silo-run-jit`, and half of the extracted
-  runner: `bin/` was empty) were not on the disk. Fixed in the engine: a macOS build ends with `/bin/sync` ("Writing the disk"),
-  `BUILD_VERSION` is now `silo-recipe-build-3` (older builds are rebuilt), test
-  `a_macos_build_writes_the_guest_disk_out_last_and_a_linux_build_does_not`. Rerun with `R1_OS=macos` on the integration build
+  runner: `bin/` was empty) were not on the disk. Fixed in the engine (first as a recipe step, see the follow-up below):
+  `BUILD_VERSION` is now `silo-recipe-build-3` (older builds are rebuilt). Rerun with `R1_OS=macos` on the integration build
   `412e329c`: 18 of 19 pass (success job on `ci-silo-macos-r1-c69eb916`, deleted; failing job on `ci-silo-macos-r1-b8d9ee73`, kept
   stopped; no JIT configuration on any command line; restart reconcile; 0 runners at the end). The 19th failed because of the
   script (the recipe's own builder computer and the list header differed in the before/after comparison); the script is fixed
   and was not run again. The check script now takes `R1_OS=linux|macos`.
+- **Review follow-up (8 Nov 2026).** The sync moved from the recipe into the macOS checkpoint capture: `Machine::flush_disk` runs
+  `/bin/sync` (60 s limit, a failure refuses the capture before the pause) for every capture of a running computer, whatever its
+  kind (manual, automatic, fork point, the recovery checkpoint before a Restore), because a fork discards saved memory for all of
+  them. The recipe step is gone, `silo-recipe-build-3` stays. Linux needs nothing: its disk-only captures already require the
+  guest flush and its full captures keep the memory. The check script now compares `silo list --all --json` by sorted
+  (id, name, state), minus `ci-*` and the recipe builder (it needs `jq`); the `silo.go` fork comment names the fanout envelope.
