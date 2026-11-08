@@ -95,6 +95,11 @@ for _ in $(seq 60); do
   sleep 1
 done
 systemctl --user is-active --quiet "$engine_unit" || fail "starting $unit did not start $engine_unit"
+# The unit is Type=simple, so "active" comes before the socket answers.
+for _ in $(seq 60); do
+  "$engine/silo" list > /dev/null 2>&1 && break
+  sleep 1
+done
 "$engine/silo" list > /dev/null || fail "the engine does not answer"
 
 step "unregister"
