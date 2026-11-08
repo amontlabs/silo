@@ -208,6 +208,30 @@ wait_for_usage() {
   echo "$seen"
 }
 
+# What to read when a published port does not become reachable: the engine's own view, the guest's
+# listeners, the loopback port, and the port control socket asked directly.
+port_diagnostics() {
+  echo "== Port diagnostics for $ctr" >&2
+  "$silo" --json ports "$ctr" >&2 || true
+  in_container sh -c 'cat /proc/net/tcp; ps -ef' >&2 || true
+  curl -sv --max-time 5 "http://127.0.0.1:$1/" >&2 || true
+  local socket
+  socket=$(engine_find -path '*/run/sandboxes/*/control.sock' | head -n 1)
+  echo "control socket: ${socket:-none}" >&2
+  if [[ -n "$socket" ]]; then
+    python3 - "$socket" <<'PY' >&2 || true
+import json, socket, sys
+for request in ({"op": "ports_list"}, {"op": "port_probe", "guest_port": 8080}):
+    with socket.socket(socket.AF_UNIX) as s:
+        s.settimeout(10)
+        s.connect(sys.argv[1])
+        s.sendall(json.dumps(request).encode() + b"\n")
+        print(request, "->", s.makefile().readline().strip())
+PY
+  fi
+  engine_find -path "*containers/computers/$ctr/state/gateway.log" -exec sh -c 'echo "-- $1"; tail -n 30 "$1"' _ {} \; >&2
+}
+
 # Secrets, published ports and the URL proxy in the container, through the same commands a virtual
 # machine uses. (SSH, the editor, a terminal and the in-guest client are refused for a container
 # computer for now.)
@@ -263,6 +287,7 @@ print(port.get("state") or "-", port.get("hostPort") or "-", port.get("url") or 
     [[ "$state" == reachable && "$url" != - ]] && break
     sleep 0.5
   done
+  if [[ "$state" != reachable ]]; then port_diagnostics "$host_port"; fi
   expect "published port state" "$state" reachable
   echo "published at $url (host port $host_port)"
   expect "page through the URL proxy" "$(curl -sS --max-time 20 "$url")" ct3-port-ok
