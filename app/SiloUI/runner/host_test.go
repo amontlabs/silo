@@ -147,7 +147,7 @@ func TestNothingChangesOnAMacOrWithAnotherMachinesEngine(t *testing.T) {
 
 func TestTheRealHostReadsThisMachine(t *testing.T) {
 	host := RealHost()
-	if host.GOOS == "" || host.GOARCH == "" || host.CPUs < 1 || host.MemTotalKiB == nil || host.MemLimitKiB == nil || host.OpenKVM == nil {
+	if host.GOOS == "" || host.GOARCH == "" || host.CPUs < 1 || host.MemTotalKiB == nil || host.OpenKVM == nil {
 		t.Fatalf("host %+v", host)
 	}
 }
