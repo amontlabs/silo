@@ -69,7 +69,7 @@ expect() {
 # query to the gateway, and the gateway's and holder's own logs on the host.
 container_diagnostics() {
   echo "== Diagnostics for $ctr" >&2
-  in_container sh -c 'cat /etc/resolv.conf; cat /proc/net/route; cat /proc/net/dev; getent hosts example.com || echo "getent: no answer"' >&2 || true
+  in_container sh -c 'id; ls -ln / /etc/resolv.conf /etc/hosts; grep -E "resolv|hosts" /proc/self/mountinfo; cat /etc/resolv.conf; cat /proc/net/route; cat /proc/net/dev; getent hosts example.com || echo "getent: no answer"' >&2 || true
   in_container python3 -c '
 import socket
 s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -80,6 +80,8 @@ try:
     print("dns answer bytes:", len(s.recvfrom(512)[0]))
 except OSError as error:
     print("dns query failed:", error)' >&2 || true
+  find "$HOME/.silo-dev" -path '*containers/computers/*/state/resolv.conf' -exec stat -c '%a %U %n' {} \; >&2 2>/dev/null || true
+  sudo dmesg 2>/dev/null | grep -iE 'apparmor|landlock|denied' | tail -n 15 >&2 || true
   find "$HOME/.silo-dev" -path '*containers/computers/*/state/*.log' 2>/dev/null | while read -r log; do
     echo "-- $log" >&2
     tail -n 40 "$log" >&2 || true

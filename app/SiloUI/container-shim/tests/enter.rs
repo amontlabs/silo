@@ -71,3 +71,24 @@ fn a_command_entered_into_a_holder_shares_its_network_namespace_and_not_the_host
         ["lo:"].map(|s| s.trim_end_matches(':'))
     );
 }
+
+#[test]
+fn commands_started_by_silo_ctr_get_the_ordinary_umask_whatever_the_callers() {
+    use std::os::unix::process::CommandExt;
+    let probe = ctr().args(["userns", "--", "true"]).output().unwrap();
+    if !probe.status.success() {
+        eprintln!("skipped: user namespaces with sub-ids are unavailable here");
+        return;
+    }
+    let mut umask = ctr();
+    umask.args(["userns", "--", "sh", "-c", "umask"]);
+    // SAFETY: umask is async-signal-safe in the child between fork and exec.
+    unsafe {
+        umask.pre_exec(|| {
+            libc::umask(0o077);
+            Ok(())
+        });
+    }
+    let output = umask.output().unwrap();
+    assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "0022");
+}

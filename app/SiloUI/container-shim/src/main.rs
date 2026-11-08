@@ -19,6 +19,10 @@ mod userns;
 #[cfg(target_os = "linux")]
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    // The engine runs with a private umask; what runs in the container (crun's mount points,
+    // the user's files) must get the ordinary one.
+    // SAFETY: umask has no preconditions.
+    unsafe { libc::umask(0o022) };
     let outcome = match args.first().map(String::as_str) {
         Some("userns") => userns::command(&args[1..]),
         Some("enter") => enter::command(&args[1..]),
