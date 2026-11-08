@@ -306,7 +306,22 @@ fn boot_layer(layout: &Layout, tools: &Tools) -> Result<PathBuf, String> {
 /// Runs in a user namespace laid out like the container's.
 /// An I/O error with what was being done and where.
 fn at(what: &str, path: &Path, error: std::io::Error) -> String {
-    format!("Could not {what} {}: {error}", path.display())
+    use std::os::unix::fs::MetadataExt;
+    let owner = |path: Option<&Path>| {
+        path.and_then(|path| std::fs::symlink_metadata(path).ok())
+            .map_or_else(
+                || "absent".to_owned(),
+                |meta| format!("{}:{} {:o}", meta.uid(), meta.gid(), meta.mode() & 0o7777),
+            )
+    };
+    // SAFETY: geteuid has no preconditions.
+    let me = unsafe { libc::geteuid() };
+    format!(
+        "Could not {what} {}: {error} (it is {}, its folder {}; this process is user {me})",
+        path.display(),
+        owner(Some(path)),
+        owner(path.parent())
+    )
 }
 
 fn own_as_root(tools: &Tools, paths: &[&Path]) -> Result<(), String> {
