@@ -1,0 +1,29 @@
+# A plain CI job on a fresh Silo computer made from the silo-linux recipe. The computer is deleted
+# when the job succeeds. When the job fails it is stopped and kept under the runner's name (the
+# "Runner name" line of the job's "Set up job" step, ci-silo-linux-<id>), so you can look at it:
+#
+#   silo start ci-silo-linux-<id>
+#   silo exec ci-silo-linux-<id> -- ls /opt/actions-runner/_work   # or any command; then: silo drop <name>
+#
+# Add the tools your build needs to your copy of the silo-linux recipe.
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: silo-linux
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Build
+        run: make build
+      - name: Test
+        run: make test

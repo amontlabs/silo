@@ -175,6 +175,20 @@ pub async fn exec_streaming(
     argv: &[String],
     cwd: Option<&str>,
     progress: Progress<'_>,
+    sink: impl FnMut(bool, &[u8]),
+) -> Result<Ran, CliError> {
+    exec_streaming_with_input(engine, computer, argv, cwd, None, progress, sink).await
+}
+
+/// `exec_streaming` with bytes on the command's standard input, which then ends. The bytes
+/// go to the engine in the request body, never in the command line or the environment.
+pub async fn exec_streaming_with_input(
+    engine: &Engine,
+    computer: &Computer,
+    argv: &[String],
+    cwd: Option<&str>,
+    stdin: Option<Vec<u8>>,
+    progress: Progress<'_>,
     mut sink: impl FnMut(bool, &[u8]),
 ) -> Result<Ran, CliError> {
     let started = engine
@@ -185,7 +199,7 @@ pub async fn exec_streaming(
             cwd: cwd.map(str::to_owned),
             env: None,
             as_user: None,
-            stdin: None,
+            stdin,
             stdin_open: false,
             retain_output_bytes: RETAIN_OUTPUT_BYTES,
         }))

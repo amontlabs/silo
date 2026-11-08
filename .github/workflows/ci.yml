@@ -101,8 +101,6 @@ jobs:
         run: python3 scripts/run-script-tests.py
       - name: Run the isolation eval self-tests
         run: python3 -m unittest discover -s ../../docs/evals -p 'test_*.py'
-      - name: Run the Silo GitHub Action tests
-        run: sh ../../silo-action/test/run.sh
       - name: Run the hosted reviewer service tests
         run: |
           python3 -m pip install --quiet -r ../../reviewer-service/requirements-dev.txt
@@ -119,6 +117,28 @@ jobs:
           npm ci
           npm run typecheck
           npm test
+
+  # silo-runner is a Go program of its own (app/SiloUI/runner); it shells out to `silo` and is
+  # tested against fakes, so it needs no engine, Rust or macOS.
+  runner:
+    name: silo-runner (Go)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: app/SiloUI/runner
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: app/SiloUI/runner/go.mod
+          cache-dependency-path: app/SiloUI/runner/go.sum
+      - name: Check formatting
+        run: test -z "$(gofmt -l .)"
+      - run: go vet ./...
+      - run: go test -race -count=1 ./...
 
   docs:
     name: Documentation links
@@ -145,10 +165,10 @@ jobs:
       - name: Check relative links in documentation
         run: >-
           "$LYCHEE" --offline --no-progress
-          '*.md' 'docs/**/*.md' 'app/SiloUI/*.md' 'app/SiloUI/api/**/*.md' 'app/SiloUI/tests/**/*.md'
+          '*.md' 'docs/**/*.md' 'app/SiloUI/runner/**/*.md' 'app/SiloUI/*.md' 'app/SiloUI/api/**/*.md' 'app/SiloUI/tests/**/*.md'
           'app/SiloUI/docs/**/*.html' 'app/SiloUI/src/**/*.md'
           'app/SiloUI/src-tauri/guest/**/*.md' 'app/SiloUI/src-tauri/macos-gateway/*.md' 'app/SiloUI/.changeset/*.md'
-          'artifacts/**/*.md' 'website/*.md' 'demo/*.md' 'silo-action/*.md' 'reviewer-service/*.md'
+          'artifacts/**/*.md' 'website/*.md' 'demo/*.md' 'reviewer-service/*.md'
 
   # The engine and its daemon run on Linux hosts (Linux computers over KVM), so the
   # engine, silod, the CLI and the client crates build and pass their tests there.

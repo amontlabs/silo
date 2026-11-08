@@ -1,0 +1,23 @@
+Building the recipe silo-macos...
+Building the recipe silo-macos: 5s
+Building the recipe silo-macos: 10s
+Building the recipe silo-macos: 15s
+Building the recipe silo-macos: 20s
+Building the recipe silo-macos: 25s
+Building the recipe silo-macos: 30s
+Building the recipe silo-macos: 36s
+Building the recipe silo-macos: 41s
+Building the recipe silo-macos: 46s
+Building the recipe silo-macos: 51s
+Building the recipe silo-macos: 56s
+Building the recipe silo-macos: 61s
+Building the recipe silo-macos: 66s
+Building the recipe silo-macos: 72s
+Building the recipe silo-macos: 77s
+Building the recipe silo-macos: 82s
+Building the recipe silo-macos: 87s
+Building the recipe silo-macos: 92s
+Building the recipe silo-macos: 97s
+Building the recipe silo-macos: 102s
+Built silo-macos (49260e96db5e), checkpoint e0cd0819-a596-4f9b-aa42-80a8a068d49f.
+exit 0

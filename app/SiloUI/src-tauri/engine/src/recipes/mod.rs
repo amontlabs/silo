@@ -18,7 +18,7 @@ use build::{builder_name, is_builder_of};
 pub use cache::Cache;
 
 /// Folded into every hash, so a change to how a build runs retires every cached build.
-const BUILD_VERSION: &str = "silo-recipe-build-2";
+const BUILD_VERSION: &str = "silo-recipe-build-3";
 
 /// A recipe's size when it names none.
 pub fn default_resources(os: RecipeOs) -> (u32, u32, u32) {

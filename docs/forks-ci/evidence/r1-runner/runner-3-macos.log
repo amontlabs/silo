@@ -1,0 +1,32 @@
+time=2026-11-08T02:14:21.387+01:00 level=INFO msg="silo-runner is serving" scaleSets=1
+time=2026-11-08T02:14:21.677+01:00 level=INFO msg="Handling initial session statistics" label=silo-macos-r1 listener.totalAssignedJobs=1
+time=2026-11-08T02:14:21.677+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=0
+time=2026-11-08T02:15:03.467+01:00 level=INFO msg="runner ready" runner=ci-silo-macos-r1-aab9cf2f label=silo-macos-r1
+time=2026-11-08T02:15:09.427+01:00 level=INFO msg="job started" runner=ci-silo-macos-r1-aab9cf2f job=j request=0
+time=2026-11-08T02:15:09.437+01:00 level=INFO msg="job completed" runner=ci-silo-macos-r1-aab9cf2f result=succeeded request=0
+time=2026-11-08T02:15:09.586+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000012
+time=2026-11-08T02:15:09.620+01:00 level=INFO msg="runner command ended" runner=ci-silo-macos-r1-aab9cf2f
+time=2026-11-08T02:15:09.917+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000013
+time=2026-11-08T02:15:19.838+01:00 level=INFO msg="a computer is gone" computer=ci-silo-macos-r1-aab9cf2f
+time=2026-11-08T02:15:55.263+01:00 level=INFO msg="runner ready" runner=ci-silo-macos-r1-c69eb916 label=silo-macos-r1
+time=2026-11-08T02:16:00.108+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000013
+time=2026-11-08T02:16:00.289+01:00 level=INFO msg="job started" runner=ci-silo-macos-r1-c69eb916 job=j request=0
+time=2026-11-08T02:16:00.438+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000014
+time=2026-11-08T02:16:01.898+01:00 level=INFO msg="job completed" runner=ci-silo-macos-r1-c69eb916 result=succeeded request=0
+time=2026-11-08T02:16:02.039+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000015
+time=2026-11-08T02:16:02.087+01:00 level=INFO msg="runner command ended" runner=ci-silo-macos-r1-c69eb916
+time=2026-11-08T02:16:03.985+01:00 level=WARN msg="cannot delete the computer" computer=ci-silo-macos-r1-c69eb916 error="silo drop f7ccce20-c80e-4b1f-89b5-0bd70b3c6f6f: exit status 1: Dropping ci-silo-macos-r1-c69eb916...\nsilo: Stop the computer first."
+time=2026-11-08T02:16:52.231+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000015
+time=2026-11-08T02:16:53.539+01:00 level=INFO msg="a computer is gone" computer=ci-silo-macos-r1-c69eb916
+time=2026-11-08T02:17:01.170+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000016
+time=2026-11-08T02:17:41.822+01:00 level=INFO msg="runner ready" runner=ci-silo-macos-r1-b8d9ee73 label=silo-macos-r1
+time=2026-11-08T02:17:47.864+01:00 level=INFO msg="job started" runner=ci-silo-macos-r1-b8d9ee73 job=j request=0
+time=2026-11-08T02:17:47.877+01:00 level=INFO msg="job completed" runner=ci-silo-macos-r1-b8d9ee73 result=failed request=0
+time=2026-11-08T02:17:48.016+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=100000017
+time=2026-11-08T02:17:48.093+01:00 level=INFO msg="runner command ended" runner=ci-silo-macos-r1-b8d9ee73
+time=2026-11-08T02:17:49.085+01:00 level=INFO msg="kept a computer after a job that did not succeed" computer=ci-silo-macos-r1-b8d9ee73 result=failed
+time=2026-11-08T02:17:58.578+01:00 level=INFO msg="listener stopped" label=silo-macos-r1
+time=2026-11-08T02:17:59.919+01:00 level=INFO msg="silo-runner is serving" scaleSets=1
+time=2026-11-08T02:18:00.199+01:00 level=INFO msg="Handling initial session statistics" label=silo-macos-r1 listener.totalAssignedJobs=0
+time=2026-11-08T02:18:00.200+01:00 level=INFO msg="Getting next message" label=silo-macos-r1 listener.lastMessageID=0
+time=2026-11-08T02:18:16.762+01:00 level=INFO msg="listener stopped" label=silo-macos-r1

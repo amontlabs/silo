@@ -424,6 +424,12 @@ fn a_macos_build_needs_a_free_virtual_machine() {
     assert_eq!(env.calls("create"), 0);
 }
 
+/// The recipe builds made before the checkpoint itself wrote the guest disk out are rebuilt.
+#[test]
+fn the_build_version_retires_builds_made_before_the_disk_flush() {
+    assert_ne!(BUILD_VERSION, "silo-recipe-build-2");
+}
+
 #[test]
 fn remove_drops_the_builder_and_the_entry() {
     let dir = tempfile::tempdir().unwrap();

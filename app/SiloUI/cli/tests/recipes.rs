@@ -526,3 +526,43 @@ fn a_recipe_can_turn_the_desktop_off_and_leaves_it_on_otherwise() {
     );
     assert!(parse_recipe("desktop: maybe\n").is_err());
 }
+
+// MARK: The CI runner recipes
+
+/// The recipes `silo-runner` ships parse as recipes, install the runner at the path the helper
+/// starts it from, pin a version with a SHA-256, and read the JIT configuration from stdin.
+#[test]
+fn the_ci_runner_recipes_parse_and_pin_the_runner() {
+    let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../runner/recipes");
+    for (name, os, path, archive) in [
+        (
+            "silo-linux",
+            "linux",
+            "/opt/actions-runner",
+            "actions-runner-linux-arm64",
+        ),
+        (
+            "silo-macos",
+            "macos",
+            "/Users/Shared/actions-runner",
+            "actions-runner-osx-arm64",
+        ),
+    ] {
+        let text = std::fs::read_to_string(directory.join(format!("{name}.yaml"))).unwrap();
+        let recipe = parse_recipe(&text).unwrap_or_else(|error| panic!("{name}: {error}"));
+        assert_eq!(format!("{:?}", recipe.os).to_lowercase(), os, "{name}");
+        let setup = recipe.setup.join("\n");
+        assert!(setup.contains(path), "{name}");
+        assert!(setup.contains(archive), "{name}");
+        assert!(setup.contains(&format!("{path}/silo-run-jit")) || setup.contains("silo-run-jit"));
+        assert!(
+            setup.contains("IFS= read -r ACTIONS_RUNNER_INPUT_JITCONFIG"),
+            "{name}"
+        );
+        let version = regex::Regex::new(r"(?m)^\s*RUNNER_VERSION=\d+\.\d+\.\d+$").unwrap();
+        let sha = regex::Regex::new(r"(?m)^\s*RUNNER_SHA256=[0-9a-f]{64}$").unwrap();
+        assert_eq!(version.find_iter(&setup).count(), 1, "{name}");
+        assert_eq!(sha.find_iter(&setup).count(), 1, "{name}");
+        assert!(!setup.contains("--jitconfig"), "{name}");
+    }
+}

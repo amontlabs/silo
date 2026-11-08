@@ -1,0 +1,46 @@
+== build silo-runner
+PASS: config is valid and the repository is private
+PASS: recipes install
+== build the recipe (slow the first time)
+Built silo-macos (3dc81febe879), checkpoint cff48519-2c6f-4f80-a18f-a1a0ac42a230.
+== start silo-runner
+PASS: silo-runner is running
+PASS: a second silo-runner on the same state is refused
+== a job that succeeds
+PASS: the job ran on a Silo computer and succeeded
+    the job page names the runner: ci-silo-macos-r1-0f3b3af8
+PASS: the runner is named like a ci-silo-macos-r1 computer
+PASS: the job's log shows the same runner name
+PASS: the successful job's computer was deleted
+PASS: its runner is gone from GitHub
+== a job that fails
+PASS: the failing job failed
+    the job page names the runner: ci-silo-macos-r1-c1f4b46e
+PASS: each job got its own computer (ci-silo-macos-r1-0f3b3af8, then ci-silo-macos-r1-c1f4b46e)
+PASS: the failed job's computer is kept, stopped
+PASS: the failed job's runner is gone from GitHub
+    ci-* computers now:
+    ci-silo-macos-r1-c1f4b46e       stopped    macos   4 cpu, 8 GiB
+== no JIT configuration in any process command line or in the log
+    the sampler saw the runner command 26 times
+PASS: the sampler saw the runner's exec --stdin command
+PASS: no JIT configuration on any silo or runner command line while the jobs ran
+PASS: the log has no encoded JIT config
+== restart reconcile
+PASS: the kept failure survives a restart, still stopped
+PASS: the restart made no other ci-* computer
+PASS: no computer other than ci-* changed on the engine
+== clean up the test repository workflows and computers
+passed: 19, failed: 0; work dir: /tmp/r1-work-4
+
+== direct check of the engine fix (guest sync before every macOS checkpoint capture), 8 Nov 2026
+Engine build silo-f799cb607f8a3ddf16a08e7f6ec743dab2be4fcd (integration of forks-phase-3 and runner-phase-1 on origin/main, release Dev bundle)
+1. silo fork e2e-macos-sync --recipe silo-macos; silo start e2e-macos-sync -> running (macos)
+2. silo exec e2e-macos-sync -- sh -c 'echo sync-check-1794104922-22669 > /Users/Shared/sync-check.txt; head -c 4096 /dev/urandom > /Users/Shared/sync-blob.bin'
+3. silo checkpoint e2e-macos-sync --name sync-check --kind manual  (immediately after the write)
+   -> Checkpoint sync-check (4fef20fe-9fde-496d-8c38-b35535de1067)
+4. silo fork e2e-macos-sync --checkpoint 4fef20fe-9fde-496d-8c38-b35535de1067 --name e2e-macos-sync-fork; silo start e2e-macos-sync-fork
+5. silo exec e2e-macos-sync-fork -- cat /Users/Shared/sync-check.txt; ls -l /Users/Shared/sync-blob.bin
+   -> sync-check-1794104922-22669
+   -> -rw-r--r--  1 silo  wheel  4096 Nov  7 18:28 /Users/Shared/sync-blob.bin
+Expected sync-check-1794104922-22669: PASS (file and 4096-byte blob are in the fork)

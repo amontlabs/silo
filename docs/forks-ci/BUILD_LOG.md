@@ -121,7 +121,6 @@ Both owner decisions:
   - **Open:** on Linux a `silo fork -n N` shares a manual-kind "silo-fork-<id>" checkpoint that stays on the source. It cannot be removed after the forks exist (they use the snapshot member, so deletion is refused as in use), and a fork-point kind removed with its last fork would need the macOS `release_fork_point` machinery rebuilt on Linux's snapshot lineage; not done here.
   - **Not done:** a macOS fork timing (no macOS computer on Dev), the Linux KVM host.
   - **Reviews:** Fable LGTM, Opus LGTM.
-
 ### 8 Nov 2026: phase C1 measured (crun containers against the microVM)
 
 - **Question and scope.** Is an opt-in container computer on Linux hosts (crun, rootless, all capabilities
@@ -158,3 +157,125 @@ Both owner decisions:
   Silo's secrets proxy, the GitHub token boundary, the guest client, the isolation evals, a Cua Driver
   screenshot, a Selkies client session, bare metal. A PR with the `containers-microvm` label re-runs the long
   microVM job on every push. The decision is the owner's.
+### R1: CI runner on the Mac (branch `claude/runner-phase-1`)
+
+- **Built:** `silo-action/` and every reference removed; `silo-runner` (Go, `app/SiloUI/runner`, on
+  `actions/scaleset` v0.5.0); recipes `silo-linux` and `silo-macos` (runner 2.338.2, SHA-256 from the
+  release digests, linux-arm64 and osx-arm64); `silo exec --stream [--stdin]` in the CLI; example
+  workflow; Go CI job; [CI runner](../SiloUI-CI-RUNNER.md); threat-model section; changeset.
+- **Long-lived command with a secret, without argv:** `silo exec` was bounded to 180 s and had no input.
+  The API's `guest.exec.start` already takes `stdin` and has no time limit, so the CLI gained
+  `--stream` (uses `guest.exec.start`, output as it arrives, no step recorded) and `--stdin` (reads the
+  CLI's stdin to its end, at most 1 MiB, into the request). Not an env flag: the engine passes
+  a guest `env` value as `--env K=V` in the host's `msb exec` arguments (Linux computers) or in the ssh
+  command line (macOS computers), where `ps` shows it; stdin is not in either. The recipes' `silo-run-jit` script reads the line into
+  `ACTIONS_RUNNER_INPUT_JITCONFIG` and execs `run.sh`.
+- **Decisions beyond Q6:** a computer is deleted after `succeeded`, `canceled` and `skipped`, kept
+  after anything else; ready means the runner printed "Listening for Jobs"; after `startAttempts`
+  failures the helper backs off up to 16 minutes; the recipe is refreshed when a new runner release is
+  `afterDays` (3) old, with the digest from the release API; capacity counts `silo list --all`, so a
+  macOS recipe build uses a slot.
+- **Lifecycle rewritten to [R1-SIMPLER-DESIGN.md](R1-SIMPLER-DESIGN.md) (7 Nov 2026).** Two review
+  rounds kept finding ownership bugs in the per-runner flags, goroutines and the separate startup
+  reconcile, so the scaler's finish/abandon/settle/retry/retention/adopt/housekeeping paths and
+  `reconcile.go` are gone. One event-loop goroutine (`fleet.go`) is the only writer of the records and
+  the ledger; `plan()` runs after every event and every 30 s tick and starts the next step of each
+  record; the ledger (`state.go`) holds the phases `forking | live | finishing | kept`, written by name
+  before the fork and by id after, and fsynced with its directory. Every engine call after the fork goes
+  by id (`silo drop` does not stop a running computer and the engine refuses to delete one, so
+  `CLI.Drop` stops first); a computer is gone only when a fresh successful `silo list` lacks its id;
+  capacity (`capacity.go`) is a pure function of the latest list plus computers asked for that it does
+  not show running, with the memory read from the recipe file (the scale set's `memoryGiB` key is
+  gone). A job in flight across a restart is adopted as busy and kept with result `unknown`. Non-test Go
+  went from 2588 to 2997 lines: the loop needs its event and task types, the list confirmation and the
+  probe of an adopted runner, which the old code spread over flags.
+- **Review round 3 fixes (7 Nov 2026).** (1) A live record whose runner had a job (its request id is
+  recorded on `JobStarted`, or a job result is stored) is adopted as busy at load and probed; if
+  GitHub no longer has the runner it ends `unknown` and is kept, instead of going through the orphan
+  path and being deleted. Only a live record with no job evidence is finished as an orphan, and that
+  now happens at load, so the `subRestored` sub-state is gone. (2) `JobStillRunning` clears only the
+  helper's own reasons; a stored job result survives, and the probe finishes with it (a success is
+  deleted, a failure stays `failed`) and uses `unknown` only when there is none. (3) The capacity
+  demands are every forking or live record the latest list does not show running. (4) A recipe
+  rebuild reserves its computer (`Fleet.Reserve`, replacing `CheckCapacity`) until it ends; while the list
+  also shows its VM it counts twice, which errs towards fewer computers. (5) The engine refuses to
+  stop a computer that is not running (`This computer isn't running.`, `stop_with_job`), so
+  `CLI.Stop` treats a computer the list shows as stopped as done. (6) A fork that returns an error keeps
+  its `forking` record until a list started after the error binds the exact name (deregister, then
+  delete by id) or shows none (forgotten); the old test of a same-name twin was replaced, because the
+  helper chose the name. A helper killed during a fork whose computer appears after the next start's
+  first list is the remaining case, documented as the owner's to delete. (7) Cosmetic: `retain` has no
+  return value, `type event = any` and the duplicated settler close and idle test are gone. The old
+  watcher of an adopted runner's command is left: it ends with the command and its exit event is
+  ignored by process identity. Tests: 86 (7 new), `go vet`, `gofmt`, `go test -race -count=3 ./...`
+  pass, also with `TZ=UTC`; non-test Go is now 3045 lines.
+- **Review round 4 fixes (7 Nov 2026).** (1) A fork refused because the name is taken
+  (`Computer names must be unique.`, which the CLI prints as text on stderr with no code, so
+  `CLI.Fork` marks it by that sentence) forgets the record and deletes nothing; the old rule would
+  have bound and deleted the computer that had the name. Other fork errors still keep the record for a
+  fresh list. (2) `pendingDemands` does not count a live record with no start in flight, no watched
+  runner command and a computer that a list started after its fork or start (`seenFrom`) shows
+  stopped, so a Mac restart does not hold macOS slots for adopted busy records; a start success moves
+  `seenFrom` on, and a rebuild's `Reserve` list, which cannot be ordered, discounts nothing. (3)
+  `JobStillRunning` sets the helper's own reason to `unknown`, not empty, so a restart before
+  `JobStarted` is persisted adopts the record as busy instead of finishing it as an orphan and deleting
+  a failed job's computer. (4) Docs: pending capacity wording, the restored-record rule, finishing
+  records restarting at deregistration, and a dated note in the design. Each fix has an event-driven
+  regression test; `go vet`, `gofmt` and `go test -race -count=3 ./...` pass, also with `TZ=UTC`.
+- **Tests (no live GitHub, no engine, no computer):** `go vet`, `gofmt`, `go test -race -count=3 ./...`
+  (also with `TZ=UTC`) in `app/SiloUI/runner`: 79 tests pass. The fakes complete at once and the tests
+  drive the loop through events and wait for it to go quiet, so they do not sleep (one uses a 10 ms
+  ready timeout). They cover capacity as a function of the list (macOS two-VM limit counting forks in
+  progress, Linux count and recipe-file RAM), public-repository and public-runner-group refusal,
+  success delete, failure keep, keepFailed count and days, deregister before delete,
+  `JobStillRunningError`, failed deregistration retry, readiness retry and backoff, watchdog restart,
+  the JIT value in the command's standard input and in no argv (a fake `silo` script), `silo drop`
+  stopping first, config validation, the runner version refresh and its rollback, the ledger fsync, and
+  a regression test for each review finding (retention before deregistration, a same-name twin and a
+  failed fork, renamed computers and failed lists, a GitHub outage retried by the tick, a failed ledger
+  write, a result arriving while finishing, recipe memory) and for restarts (idle orphan, job in
+  flight, forking records, kept, interrupted keep). `cargo test -p silo-cli --locked`
+  (synthetic GitHub values, shared target dir; run for the first build, this rewrite changes no Rust):
+  all pass, including 3 new tests (`exec_stream.rs`:
+  the input travels in the request body, not in argv; no step is recorded; `cli.rs` flag parsing;
+  `recipes.rs`: the shipped recipes parse and pin the runner). `cargo fmt --check` clean;
+  `test_ci_native_changes.py` 7 tests pass.
+- **Not run:** the live check, `docs/forks-ci/checks/r1_runner_check.sh` (private test repository,
+  Dev engine, needs scheduling); `actionlint` (not installed; the example parses as YAML); the full
+  Rust workspace and the frontend suites (this phase changes only `cli/` and the Go helper).
+- **Open:** (1) `go.mod` says Go 1.27.3 because `scaleset` v0.5.0 does; the brief said 1.25. (2) The
+  in-guest client cannot run a command in a fork, and `silo-runner` does not install its token, so the
+  example's fork/diff/fold steps need that install done separately. (3) PLAN.md, BUILD_LOG.md and
+  DESIGN-QUESTIONS.md are copied from `claude/forks-phase-3` (they are not on `main`); identical text
+  merges cleanly. (4) `silo-runner` is not built into the app bundle or released.
+- **Live check, 8 Nov 2026 ([r1-runner](evidence/r1-runner/README.md)).** Linux recipe: 19 of 19 pass (run 2, 7 Nov). macOS recipe:
+  the 7 Nov run was blocked by `silo-run-jit: No such file`. Cause: the recipe build checkpoints the *running* builder and a fork
+  boots from the copied disk without the builder's memory, so on macOS the last writes (`silo-run-jit`, and half of the extracted
+  runner: `bin/` was empty) were not on the disk. Fixed in the engine (first as a recipe step, see the follow-up below):
+  `BUILD_VERSION` is now `silo-recipe-build-3` (older builds are rebuilt). Rerun with `R1_OS=macos` on the integration build
+  `412e329c`: 18 of 19 pass (success job on `ci-silo-macos-r1-c69eb916`, deleted; failing job on `ci-silo-macos-r1-b8d9ee73`, kept
+  stopped; no JIT configuration on any command line; restart reconcile; 0 runners at the end). The 19th failed because of the
+  script (the recipe's own builder computer and the list header differed in the before/after comparison); the script is fixed
+  and was not run again. The check script now takes `R1_OS=linux|macos`.
+- **Review follow-up (8 Nov 2026).** The sync moved from the recipe into the macOS checkpoint capture: `Machine::flush_disk` runs
+  `/bin/sync` (60 s limit, a failure refuses the capture before the pause) for every capture of a running computer, whatever its
+  kind (manual, automatic, fork point, the recovery checkpoint before a Restore), because a fork discards saved memory for all of
+  them. The recipe step is gone, `silo-recipe-build-3` stays. Linux needs nothing: its disk-only captures already require the
+  guest flush and its full captures keep the memory. The check script now compares `silo list --all --json` by sorted
+  (id, name, state), minus `ci-*` and the recipe builder (it needs `jq`); the `silo.go` fork comment names the fanout envelope.
+- **macOS sync before every capture (8 Nov, decided after the gpt-6.1-sol review of `0b29af74`):** the guest
+  sync runs before every capture of a running macOS computer, including the before-keep, promote and undo
+  recovery checkpoints. macOS checkpoints hold disks only, so without it a restore (undo) could lose recent
+  writes just as a fork could. Cost: those operations wait for the sync (at most 60 s) and refuse when the
+  guest does not answer it; keep already needs the guest to apply changes. Accepted: correctness of every
+  saved point over the speed of a few. The `quiet::processes_match_by_exact_name_not_by_prefix_or_pattern`
+  failure seen in the engine suite also fails on main (`569f6fea`) at the same assertion and is not caused
+  by this branch.
+- **R1 live check, run 4 (macOS, 8 Nov 2026): 19 of 19 pass**, with the engine sync of `0b29af74` and the JSON before/after
+  comparison. Integration build `silo-f799cb60` (local merge of `forks-phase-3` and `runner-phase-1` on `origin/main`, release
+  Dev bundle, engine started by hand), private repo `0xpolarzero/silo-runner-e2e`, `maxRunners: 1`, no macOS VM running before. The
+  success job ran on `ci-silo-macos-r1-0f3b3af8` (deleted, runner gone), the failing one on `ci-silo-macos-r1-c1f4b46e` (kept,
+  stopped, runner gone); no JIT on any command line (sampler: 26 sightings of `exec --stdin`). Direct check of the fix: a file
+  written in a running macOS computer, a manual checkpoint right after, a fork of that checkpoint: the file (and a 4 KiB blob) is
+  in the fork. Cleaned up: 0 runners, no `ci-*`/`e2e-*` computer, recipe build removed. Evidence:
+  [`evidence/r1-runner/run-4-macos.txt`](evidence/r1-runner/run-4-macos.txt), `runner-4-macos.log`, `config-macos-4.yaml`.

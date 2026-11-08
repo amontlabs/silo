@@ -399,6 +399,14 @@ pub struct ExecCommand {
     /// Seconds before the command is stopped (at most 180).
     #[arg(long, default_value_t = ops::MAX_EXEC_SECS)]
     pub timeout: u64,
+    /// Run with no time limit and print the output as it arrives; the exit code is the
+    /// command's. The command is not recorded as a step, so nothing is checkpointed.
+    #[arg(long, conflicts_with = "timeout")]
+    pub stream: bool,
+    /// With --stream: give the command this process's standard input, read to its end, as
+    /// its own. It travels to the engine in the request, so it appears in no command line.
+    #[arg(long, requires = "stream")]
+    pub stdin: bool,
     #[arg(last = true, required = true, value_name = "COMMAND")]
     pub command: Vec<String>,
 }
@@ -421,6 +429,25 @@ fn read_secret_value() -> Result<String, CliError> {
         .read_to_string(&mut value)
         .map_err(|error| CliError::new(format!("Cannot read the secret from stdin: {error}")))?;
     Ok(trim_newline(value))
+}
+
+/// The most standard input `silo exec --stream --stdin` forwards.
+const MAX_EXEC_INPUT_BYTES: u64 = 1 << 20;
+
+/// This process's standard input to its end, for the command `exec --stream --stdin` runs.
+fn read_exec_input() -> Result<Vec<u8>, CliError> {
+    use std::io::Read;
+    let mut bytes = Vec::new();
+    std::io::stdin()
+        .take(MAX_EXEC_INPUT_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| CliError::new(format!("Cannot read standard input: {error}")))?;
+    if bytes.len() as u64 > MAX_EXEC_INPUT_BYTES {
+        return Err(CliError::new(format!(
+            "Standard input is longer than {MAX_EXEC_INPUT_BYTES} bytes."
+        )));
+    }
+    Ok(bytes)
 }
 
 fn trim_newline(mut value: String) -> String {
@@ -1038,6 +1065,47 @@ async fn dispatch(
                 format!("Dropped {}", v["dropped"].as_str().unwrap_or_default())
             });
         }
+        Command::Exec(exec) if exec.stream => {
+            let stdin = if exec.stdin {
+                Some(read_exec_input()?)
+            } else {
+                None
+            };
+            let computer = engine.computer(&exec.computer).await?;
+            let (sink, _) = output_sink(json, false);
+            let (mut out, mut err) = (fanout::Capture::default(), fanout::Capture::default());
+            let ran = fanout::exec_streaming_with_input(
+                engine,
+                &computer,
+                &exec.command,
+                exec.cwd.as_deref(),
+                stdin,
+                &stderr_progress,
+                |is_err, bytes| {
+                    if is_err {
+                        err.push(bytes);
+                    } else {
+                        out.push(bytes);
+                    }
+                    sink(&computer.name, is_err, bytes);
+                },
+            )
+            .await?;
+            if json {
+                emit(
+                    true,
+                    &serde_json::json!({
+                        "exitCode": ran.exit_code,
+                        "signal": ran.signal,
+                        "stdout": String::from_utf8_lossy(&out.bytes),
+                        "stderr": String::from_utf8_lossy(&err.bytes),
+                        "outputTruncated": out.truncated || err.truncated,
+                    }),
+                    |_| String::new(),
+                );
+            }
+            return Ok(ran.exit_code);
+        }
         Command::Exec(exec) => {
             let args = ExecArgs {
                 computer: exec.computer,
@@ -1396,6 +1464,37 @@ mod tests {
         };
         assert_eq!(exec.command, ["ls", "-la", "--color"]);
         assert!(Cli::try_parse_from(["silo", "exec", "main"]).is_err());
+    }
+
+    #[test]
+    fn exec_stream_and_stdin_are_opt_in_and_only_stdin_needs_the_stream() {
+        let cli = parse(&[
+            "exec", "main", "--stream", "--stdin", "--", "sh", "-c", "cat",
+        ]);
+        let Command::Exec(exec) = cli.command else {
+            panic!("not an exec")
+        };
+        assert!(exec.stream && exec.stdin);
+        assert_eq!(exec.command, ["sh", "-c", "cat"]);
+        let Command::Exec(plain) = parse(&["exec", "main", "--", "ls"]).command else {
+            panic!("not an exec")
+        };
+        assert!(!plain.stream && !plain.stdin);
+        for bad in [
+            vec!["silo", "exec", "main", "--stdin", "--", "ls"],
+            vec![
+                "silo",
+                "exec",
+                "main",
+                "--stream",
+                "--timeout",
+                "5",
+                "--",
+                "ls",
+            ],
+        ] {
+            assert!(Cli::try_parse_from(bad.clone()).is_err(), "{bad:?}");
+        }
     }
 
     #[test]

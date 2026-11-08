@@ -1,0 +1,31 @@
+j	Set up job	﻿2026-11-07T23:37:09.0259590Z Current runner version: '2.338.2'
+j	Set up job	2026-11-07T23:37:09.0262711Z Runner name: 'ci-silo-linux-r1-d15ffebc'
+j	Set up job	2026-11-07T23:37:09.0263199Z Runner group name: 'Default'
+j	Set up job	2026-11-07T23:37:09.0263802Z Machine name: 'ci-silo-linux-r1-d15ffebc'
+j	Set up job	2026-11-07T23:37:09.0265299Z ##[group]GITHUB_TOKEN Permissions
+j	Set up job	2026-11-07T23:37:09.0266531Z Contents: read
+j	Set up job	2026-11-07T23:37:09.0266878Z Metadata: read
+j	Set up job	2026-11-07T23:37:09.0267251Z Packages: read
+j	Set up job	2026-11-07T23:37:09.0267582Z ##[endgroup]
+j	Set up job	2026-11-07T23:37:09.0268570Z Secret source: Actions
+j	Set up job	2026-11-07T23:37:09.0269117Z Cache mode: write
+j	Set up job	2026-11-07T23:37:09.0269494Z Prepare workflow directory
+j	Set up job	2026-11-07T23:37:09.0457790Z Prepare all required actions
+j	Set up job	2026-11-07T23:37:09.0507072Z Complete job name: j
+j	Run echo "hostname=$(hostname) runner=$RUNNER_NAME"	﻿2026-11-07T23:37:09.0907096Z ##[group]Run echo "hostname=$(hostname) runner=$RUNNER_NAME"
+j	Run echo "hostname=$(hostname) runner=$RUNNER_NAME"	2026-11-07T23:37:09.0907668Z ^[[36;1mecho "hostname=$(hostname) runner=$RUNNER_NAME"^[[0m
+j	Run echo "hostname=$(hostname) runner=$RUNNER_NAME"	2026-11-07T23:37:09.0922275Z shell: /usr/bin/bash -e {0}
+j	Run echo "hostname=$(hostname) runner=$RUNNER_NAME"	2026-11-07T23:37:09.0922748Z ##[endgroup]
+j	Run echo "hostname=$(hostname) runner=$RUNNER_NAME"	2026-11-07T23:37:09.0997279Z hostname=ci-silo-linux-r1-d15ffebc runner=ci-silo-linux-r1-d15ffebc
+j	Run uname -a	﻿2026-11-07T23:37:09.1048883Z ##[group]Run uname -a
+j	Run uname -a	2026-11-07T23:37:09.1049197Z ^[[36;1muname -a^[[0m
+j	Run uname -a	2026-11-07T23:37:09.1052613Z shell: /usr/bin/bash -e {0}
+j	Run uname -a	2026-11-07T23:37:09.1052937Z ##[endgroup]
+j	Run uname -a	2026-11-07T23:37:09.1090422Z Linux ci-silo-linux-r1-d15ffebc 6.12.109 #1 SMP Fri Jul 24 13:01:52 WAT 2026 aarch64 aarch64 aarch64 GNU/Linux
+j	Run printf "#include <stdio.h>\\nint main(void){puts(\"built on a Silo computer\");return 0;}\\n" > hello.c	﻿2026-11-07T23:37:09.1113633Z ##[group]Run printf "#include <stdio.h>\\nint main(void){puts(\"built on a Silo computer\");return 0;}\\n" > hello.c
+j	Run printf "#include <stdio.h>\\nint main(void){puts(\"built on a Silo computer\");return 0;}\\n" > hello.c	2026-11-07T23:37:09.1114634Z ^[[36;1mprintf "#include <stdio.h>\\nint main(void){puts(\"built on a Silo computer\");return 0;}\\n" > hello.c^[[0m
+j	Run printf "#include <stdio.h>\\nint main(void){puts(\"built on a Silo computer\");return 0;}\\n" > hello.c	2026-11-07T23:37:09.1115144Z ^[[36;1mcc -o hello hello.c && ./hello^[[0m
+j	Run printf "#include <stdio.h>\\nint main(void){puts(\"built on a Silo computer\");return 0;}\\n" > hello.c	2026-11-07T23:37:09.1119382Z shell: /usr/bin/bash -e {0}
+j	Run printf "#include <stdio.h>\\nint main(void){puts(\"built on a Silo computer\");return 0;}\\n" > hello.c	2026-11-07T23:37:09.1119707Z ##[endgroup]
+j	Run printf "#include <stdio.h>\\nint main(void){puts(\"built on a Silo computer\");return 0;}\\n" > hello.c	2026-11-07T23:37:09.1378966Z built on a Silo computer
+j	Complete job	﻿2026-11-07T23:37:09.1422579Z Cleaning up orphan processes
