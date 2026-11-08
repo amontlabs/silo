@@ -38,6 +38,13 @@ FAKE_SILO = textwrap.dedent('''\
             sys.exit(1)
         print(json.dumps({{'computers': [{{'name': n, 'state': s}} for n, s in computers.items()]}}))
     elif command == 'create':
+        failures = Path(os.environ['FAKE_STATE'] + '.image')
+        left = int(os.environ.get('FAKE_IMAGE_FAILS', '0')) - (int(failures.read_text()) if failures.exists() else 0)
+        if left > 0:
+            failures.write_text(str((int(failures.read_text()) if failures.exists() else 0) + 1))
+            sys.exit('silo: Silo could not download the VM image. Check your network connection, then retry.')
+        if os.environ.get('FAKE_CREATE_FAILS'):
+            sys.exit('silo: no space left')
         computers[rest[0]] = 'stopped'; save()
     elif command == 'start':
         computers[rest[0]] = 'running'; save()
@@ -262,7 +269,7 @@ class LinuxHostEndToEndScriptTests(unittest.TestCase):
 
     def run_script(self, **environment):
         env = {**os.environ, 'FAKE_STATE': str(self.state), 'FAKE_CALLS': str(self.calls),
-               'SILO_E2E_READY_TIMEOUT': '1', **environment}
+               'SILO_E2E_READY_TIMEOUT': '1', 'SILO_E2E_RETRY_WAIT': '0', **environment}
         result = subprocess.run(['bash', str(E2E), str(self.engine)], env=env, capture_output=True, text=True,
                                 timeout=60)
         calls = [line for line in self.calls.read_text().splitlines() if not line.startswith(('list', '--json list'))] \
@@ -298,6 +305,23 @@ class LinuxHostEndToEndScriptTests(unittest.TestCase):
         self.assertIn('did not print a Linux kernel', result.stderr)
         self.assertEqual(calls[-2:], ['stop e2e-hosts-ci', 'drop e2e-hosts-ci'])
         self.assertEqual(self.computers(), {})
+
+    def test_a_failed_image_download_is_retried(self):
+        result, calls = self.run_script(FAKE_IMAGE_FAILS='2')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(calls[:3], ['create e2e-hosts-ci --linux --cpus 1 --memory 2 --disk 2'] * 3)
+        self.assertEqual(self.computers(), {})
+
+    def test_a_persistent_download_failure_fails_after_three_attempts(self):
+        result, calls = self.run_script(FAKE_IMAGE_FAILS='9')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual([c for c in calls if c.startswith('create')], ['create e2e-hosts-ci --linux --cpus 1 --memory 2 --disk 2'] * 3)
+        self.assertIn('could not download the VM image', result.stderr)
+
+    def test_another_create_failure_is_not_retried(self):
+        result, calls = self.run_script(FAKE_CREATE_FAILS='1')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual([c for c in calls if c.startswith('create')], ['create e2e-hosts-ci --linux --cpus 1 --memory 2 --disk 2'])
 
     def test_it_never_touches_a_computer_it_did_not_make(self):
         self.state.write_text(json.dumps({'e2e-hosts-ci': 'running'}))
