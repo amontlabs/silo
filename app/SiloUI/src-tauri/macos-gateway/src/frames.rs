@@ -99,8 +99,57 @@ pub struct PollEvents {
     pub backend: libc::pollfd,
 }
 
+/// What the frame descriptor is. A VM's frames travel over a connected datagram socket
+/// (`recvmsg` and `send`); a container's travel over a TAP device opened inside the
+/// container's own user and network namespace, which is read and written with plain
+/// `readv` and `write`: `recvmsg` and `send` do not work on a TAP descriptor.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FrameCarrier {
+    Datagram,
+    Tap,
+}
+
+impl FrameCarrier {
+    /// One frame from the carrier, without blocking. The flags carry `MSG_TRUNC` when the
+    /// frame did not fit the buffer.
+    fn receive(self, fd: RawFd, buffer: &mut [u8]) -> io::Result<(usize, libc::c_int)> {
+        match self {
+            Self::Datagram => recv_datagram(fd, buffer),
+            Self::Tap => read_tap_frame(fd, buffer),
+        }
+    }
+
+    /// One whole frame to the carrier, without blocking. A frame the carrier cannot take
+    /// right now is dropped and reported as sent: the link is lossy like any other and the
+    /// senders retry.
+    fn send(self, fd: RawFd, frame: &[u8]) -> io::Result<usize> {
+        let sent = match self {
+            Self::Datagram => unsafe {
+                libc::send(fd, frame.as_ptr().cast(), frame.len(), libc::MSG_DONTWAIT)
+            },
+            Self::Tap => unsafe { libc::write(fd, frame.as_ptr().cast(), frame.len()) },
+        };
+        if sent < 0 {
+            let error = io::Error::last_os_error();
+            // A datagram socket whose receiver has not read for a while (the guest is
+            // still booting) answers ENOBUFS instead of EAGAIN. A TAP device whose
+            // interface is not up yet answers EIO.
+            let dropped = match self {
+                Self::Datagram => error.raw_os_error() == Some(libc::ENOBUFS),
+                Self::Tap => matches!(error.raw_os_error(), Some(libc::EIO | libc::ENOBUFS)),
+            };
+            if dropped {
+                return Ok(frame.len());
+            }
+            return Err(error);
+        }
+        Ok(sent as usize)
+    }
+}
+
 pub struct FramePump<'a> {
     frame_fd: RawFd,
+    carrier: FrameCarrier,
     guest_ipv4: Ipv4Addr,
     guest_mac: [u8; 6],
     mtu: u16,
@@ -122,6 +171,7 @@ pub enum FramePumpError {
 impl<'a> FramePump<'a> {
     pub fn new(
         frame_fd: RawFd,
+        carrier: FrameCarrier,
         guest_ipv4: Ipv4Addr,
         guest_mac: [u8; 6],
         mtu: u16,
@@ -130,6 +180,7 @@ impl<'a> FramePump<'a> {
     ) -> Self {
         Self {
             frame_fd,
+            carrier,
             guest_ipv4,
             guest_mac,
             mtu,
@@ -196,7 +247,7 @@ impl<'a> FramePump<'a> {
         let mut frame = [0u8; FRAME_BUFFER_CAP];
         let mut handled = 0;
         while handled < budget {
-            let (n, flags) = match recv_datagram(self.frame_fd, &mut frame) {
+            let (n, flags) = match self.carrier.receive(self.frame_fd, &mut frame) {
                 Ok(result) => result,
                 Err(error) if error.kind() == io::ErrorKind::Interrupted => {
                     self.stats.interrupted_reads.fetch_add(1, Ordering::Relaxed);
@@ -337,28 +388,10 @@ impl<'a> FramePump<'a> {
     }
 
     fn flush_pending(&mut self, budget: usize) -> Result<usize, FramePumpError> {
-        let result = self.pending.flush_with(budget, |frame| {
-            let sent = unsafe {
-                libc::send(
-                    self.frame_fd,
-                    frame.as_ptr().cast(),
-                    frame.len(),
-                    libc::MSG_DONTWAIT,
-                )
-            };
-            if sent < 0 {
-                let error = io::Error::last_os_error();
-                if error.raw_os_error() == Some(libc::ENOBUFS) {
-                    // A datagram socket whose receiver has not read for a while (the guest is
-                    // still booting) answers ENOBUFS instead of EAGAIN. The link is lossy
-                    // like any other: the frame is dropped and the senders retry.
-                    return Ok(frame.len());
-                }
-                Err(error)
-            } else {
-                Ok(sent as usize)
-            }
-        });
+        let (frame_fd, carrier) = (self.frame_fd, self.carrier);
+        let result = self
+            .pending
+            .flush_with(budget, |frame| carrier.send(frame_fd, frame));
         match result {
             Ok(result) => {
                 if result.would_block {
@@ -415,6 +448,93 @@ fn recv_datagram(fd: RawFd, buffer: &mut [u8]) -> io::Result<(usize, libc::c_int
     } else {
         Ok((read as usize, message.msg_flags))
     }
+}
+
+/// Reads one frame from a TAP descriptor. A second, one-byte buffer behind the frame buffer
+/// shows a frame that was longer than the frame buffer: the kernel discards what does not
+/// fit, so the read would otherwise return a silently shortened frame.
+fn read_tap_frame(fd: RawFd, buffer: &mut [u8]) -> io::Result<(usize, libc::c_int)> {
+    let mut spill = [0u8; 1];
+    let iovecs = [
+        libc::iovec {
+            iov_base: buffer.as_mut_ptr().cast(),
+            iov_len: buffer.len(),
+        },
+        libc::iovec {
+            iov_base: spill.as_mut_ptr().cast(),
+            iov_len: spill.len(),
+        },
+    ];
+    let read = unsafe { libc::readv(fd, iovecs.as_ptr(), iovecs.len() as libc::c_int) };
+    if read < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let read = read as usize;
+    if read > buffer.len() {
+        Ok((buffer.len(), libc::MSG_TRUNC))
+    } else {
+        Ok((read, 0))
+    }
+}
+
+/// Checks that `fd` is the kind of descriptor `carrier` names and makes it non-blocking.
+/// A TAP descriptor must be a layer-2 device with no packet-information header and no
+/// virtio-net header, so that every read and write is exactly one Ethernet frame. The
+/// datagram path is not inspected: its reads and writes fail on any other descriptor.
+pub fn prepare_carrier(fd: RawFd, carrier: FrameCarrier) -> io::Result<()> {
+    if carrier == FrameCarrier::Datagram {
+        return Ok(());
+    }
+    check_tap(fd)?;
+    // SAFETY: `fd` is an open descriptor; F_GETFL and F_SETFL read and set its status flags.
+    unsafe {
+        let flags = libc::fcntl(fd, libc::F_GETFL);
+        if flags < 0 || libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) < 0 {
+            return Err(io::Error::last_os_error());
+        }
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn check_tap(fd: RawFd) -> io::Result<()> {
+    // `struct ifreq`: a 16-byte name, then a union of which TUNGETIFF fills the flags.
+    #[repr(C)]
+    struct IfReq {
+        name: [u8; 16],
+        flags: libc::c_short,
+        padding: [u8; 22],
+    }
+    const TUNGETIFF: libc::c_ulong = 0x8004_54d2;
+    const IFF_TUN: libc::c_short = 0x0001;
+    const IFF_TAP: libc::c_short = 0x0002;
+    const IFF_NO_PI: libc::c_short = 0x1000;
+    const IFF_VNET_HDR: libc::c_short = 0x4000;
+    let mut request = IfReq {
+        name: [0; 16],
+        flags: 0,
+        padding: [0; 22],
+    };
+    // SAFETY: `request` is a valid `struct ifreq` for the call to fill.
+    if unsafe { libc::ioctl(fd, TUNGETIFF as _, &mut request) } < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let wanted = request.flags & (IFF_TUN | IFF_TAP | IFF_NO_PI | IFF_VNET_HDR);
+    if wanted != IFF_TAP | IFF_NO_PI {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "the frame descriptor is not a TAP device without packet information",
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(not(target_os = "linux"))]
+fn check_tap(_fd: RawFd) -> io::Result<()> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "TAP frame carriers exist only on Linux",
+    ))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -754,6 +874,119 @@ mod tests {
         assert!(pending.is_empty());
     }
 
+    /// A connected datagram socket pair stands in for the TAP device: like a TAP descriptor, it
+    /// keeps each `write` as one message, delivers one message per `readv`, and discards what
+    /// the buffers do not take.
+    fn datagrams() -> (
+        std::os::unix::net::UnixDatagram,
+        std::os::unix::net::UnixDatagram,
+    ) {
+        std::os::unix::net::UnixDatagram::pair().unwrap()
+    }
+
+    #[test]
+    fn a_tap_carrier_reads_and_writes_whole_frames_with_plain_read_and_write() {
+        use std::os::fd::AsRawFd;
+
+        let (device, peer) = datagrams();
+        let frame = ipv4_frame(GUEST_MAC, GUEST_IP);
+        assert_eq!(
+            FrameCarrier::Tap.send(device.as_raw_fd(), &frame).unwrap(),
+            frame.len()
+        );
+        let mut buffer = [0u8; FRAME_BUFFER_CAP];
+        assert_eq!(peer.recv(&mut buffer).unwrap(), frame.len());
+        assert_eq!(&buffer[..frame.len()], &frame[..]);
+
+        peer.send(&frame).unwrap();
+        let (read, flags) = FrameCarrier::Tap
+            .receive(device.as_raw_fd(), &mut buffer)
+            .unwrap();
+        assert_eq!(&buffer[..read], &frame[..]);
+        assert_eq!(flags & libc::MSG_TRUNC, 0);
+    }
+
+    #[test]
+    fn a_tap_frame_longer_than_the_buffer_is_reported_truncated() {
+        use std::os::fd::AsRawFd;
+
+        let (device, peer) = datagrams();
+        let mut buffer = [0u8; 32];
+        peer.send(&[7u8; 40]).unwrap();
+        let (read, flags) = FrameCarrier::Tap
+            .receive(device.as_raw_fd(), &mut buffer)
+            .unwrap();
+        assert_eq!(read, buffer.len());
+        assert_ne!(flags & libc::MSG_TRUNC, 0);
+
+        // A frame one byte over is truncated, and the next frame is not affected.
+        peer.send(&[8u8; 33]).unwrap();
+        peer.send(&[9u8; 32]).unwrap();
+        let (_, flags) = FrameCarrier::Tap
+            .receive(device.as_raw_fd(), &mut buffer)
+            .unwrap();
+        assert_ne!(flags & libc::MSG_TRUNC, 0);
+        let (read, flags) = FrameCarrier::Tap
+            .receive(device.as_raw_fd(), &mut buffer)
+            .unwrap();
+        assert_eq!((read, flags & libc::MSG_TRUNC), (32, 0));
+    }
+
+    #[test]
+    fn an_empty_tap_reads_as_would_block_once_it_is_prepared_non_blocking() {
+        use std::os::fd::AsRawFd;
+
+        let (device, _peer) = datagrams();
+        device.set_nonblocking(true).unwrap();
+        let mut buffer = [0u8; FRAME_BUFFER_CAP];
+        let error = FrameCarrier::Tap
+            .receive(device.as_raw_fd(), &mut buffer)
+            .unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::WouldBlock);
+    }
+
+    #[test]
+    fn the_datagram_carrier_keeps_the_socket_calls() {
+        use std::os::fd::AsRawFd;
+        use std::os::unix::net::UnixDatagram;
+
+        let (gateway_end, guest_end) = UnixDatagram::pair().unwrap();
+        let frame = ipv4_frame(GUEST_MAC, GUEST_IP);
+        guest_end.send(&frame).unwrap();
+        let mut buffer = [0u8; FRAME_BUFFER_CAP];
+        let (read, _) = FrameCarrier::Datagram
+            .receive(gateway_end.as_raw_fd(), &mut buffer)
+            .unwrap();
+        assert_eq!(&buffer[..read], &frame[..]);
+        assert_eq!(
+            FrameCarrier::Datagram
+                .send(gateway_end.as_raw_fd(), &frame)
+                .unwrap(),
+            frame.len()
+        );
+        let mut echoed = [0u8; FRAME_BUFFER_CAP];
+        assert_eq!(guest_end.recv(&mut echoed).unwrap(), frame.len());
+    }
+
+    #[test]
+    fn only_a_tap_without_packet_information_is_accepted_as_a_tap_carrier() {
+        use std::os::fd::AsRawFd;
+        use std::os::unix::net::UnixDatagram;
+
+        let mut ends = [0; 2];
+        assert_eq!(unsafe { libc::pipe(ends.as_mut_ptr()) }, 0);
+        let (socket, _peer) = UnixDatagram::pair().unwrap();
+        for fd in [ends[0], socket.as_raw_fd()] {
+            assert!(prepare_carrier(fd, FrameCarrier::Tap).is_err());
+        }
+        unsafe {
+            libc::close(ends[0]);
+            libc::close(ends[1]);
+        }
+        // The datagram path inspects nothing.
+        assert!(prepare_carrier(socket.as_raw_fd(), FrameCarrier::Datagram).is_ok());
+    }
+
     #[test]
     fn recvmsg_reports_truncated_datagram_without_slicing_past_buffer() {
         use std::os::fd::AsRawFd;
@@ -782,6 +1015,7 @@ mod tests {
         let stats = FrameStats::default();
         let mut pump = FramePump::new(
             gateway_end.as_raw_fd(),
+            FrameCarrier::Datagram,
             GUEST_IP,
             GUEST_MAC,
             1500,
@@ -833,6 +1067,7 @@ mod tests {
         let stats = FrameStats::default();
         let mut pump = FramePump::new(
             gateway_end.as_raw_fd(),
+            FrameCarrier::Datagram,
             GUEST_IP,
             GUEST_MAC,
             1500,
@@ -899,7 +1134,9 @@ mod tests {
     }
 
     /// While the guest boots nothing reads the frame socket. macOS then answers ENOBUFS, which
-    /// used to stop the gateway ("The computer network gateway is unavailable").
+    /// used to stop the gateway ("The computer network gateway is unavailable"). Linux answers
+    /// EAGAIN instead, which the next test covers.
+    #[cfg(target_os = "macos")]
     #[test]
     fn a_full_guest_queue_drops_frames_instead_of_stopping_the_gateway() {
         use microsandbox_network::netstack::{backend::SmoltcpBackend, shared::SharedState};
@@ -913,6 +1150,7 @@ mod tests {
         let stats = FrameStats::default();
         let mut pump = FramePump::new(
             gateway_end.as_raw_fd(),
+            FrameCarrier::Datagram,
             GUEST_IP,
             GUEST_MAC,
             1500,
@@ -932,6 +1170,49 @@ mod tests {
         pump.pending.push(frame).unwrap();
         pump.flush_pending(1).unwrap();
         assert!(pump.pending.is_empty());
+    }
+
+    /// Linux answers EAGAIN to a non-blocking send into a datagram socket nobody reads: the
+    /// frame stays queued for the next turn, and the gateway keeps running.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_full_guest_queue_keeps_frames_pending_instead_of_stopping_the_gateway() {
+        use microsandbox_network::netstack::{backend::SmoltcpBackend, shared::SharedState};
+        use std::os::fd::AsRawFd;
+        use std::os::unix::net::UnixDatagram;
+        use std::sync::Arc;
+
+        let shared = Arc::new(SharedState::new(1024));
+        let (gateway_end, _guest_end) = UnixDatagram::pair().unwrap();
+        gateway_end.set_nonblocking(true).unwrap();
+        let stats = FrameStats::default();
+        let mut pump = FramePump::new(
+            gateway_end.as_raw_fd(),
+            FrameCarrier::Datagram,
+            GUEST_IP,
+            GUEST_MAC,
+            1500,
+            &stats,
+            Box::new(SmoltcpBackend::new(shared)),
+        );
+        let frame = ipv4_frame(GUEST_MAC, GUEST_IP);
+        let mut filled = false;
+        for _ in 0..100_000 {
+            if gateway_end.send(&frame).is_err() {
+                filled = true;
+                break;
+            }
+        }
+        assert!(filled, "the queue never filled");
+        pump.pending.push(frame).unwrap();
+        assert_eq!(pump.flush_pending(1).unwrap(), 0);
+        assert!(!pump.pending.is_empty());
+        assert_eq!(
+            stats
+                .snapshot_with_backend_tx_ring_drops(0)
+                .engine_send_eagain,
+            1
+        );
     }
 
     fn ipv4_frame(source_mac: [u8; 6], source_ip: Ipv4Addr) -> Vec<u8> {
