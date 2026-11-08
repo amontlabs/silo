@@ -370,7 +370,7 @@ class HostsEndToEndScriptTests(unittest.TestCase):
                                         HOME=str(home), FAKE_LEAVE_FILE='1')
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('kept files after the export', result.stderr)
-        self.assertEqual(self.state_now()['computers'], {})
+        self.assertEqual(self.state_now()['computers'], {}, result.stdout[-1500:] + result.stderr[-1500:])
         self.assertFalse([call for call in calls if ' import ' in call])
 
     @unittest.skipUnless(shutil.which('ssh-keygen'), 'needs ssh-keygen')

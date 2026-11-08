@@ -93,7 +93,7 @@ cleanup() {
       controller drop "$computer" || true
     fi
   done
-  [[ -n "$share_dir" ]] && as "$controller_user" rm -rf "$share_dir"
+  if [[ -n "$share_dir" ]]; then as "$controller_user" rm -rf "$share_dir" || true; fi
   for computer in "$sent" "$fork" "$name"; do
     if [[ "$(listed_on_host "$computer" 2>/dev/null || true)" == "$computer" ]]; then
       echo "Stopping and dropping $computer on the host after a failed run"
