@@ -327,7 +327,7 @@ Branch `claude/containers-ct2`.
 
 ### 8 Nov 2026: phase CT3 built in part (network features for container computers)
 
-Branch `claude/containers-ct3`. Secrets, GitHub access, credential-use events, published ports and the URL proxy
+Branch `claude/containers-ct3`, pull request [#95](https://github.com/amontlabs/silo/pull/95). Secrets, GitHub access, credential-use events, published ports and the URL proxy
 work for container computers through the existing commands, API methods and screens. **SSH access, the editor, a
 terminal and the in-guest client are not built**: each needs a container-specific branch outside
 `engine/src/containers/` and the capability list, which the brief said to stop and report. They stay on the
