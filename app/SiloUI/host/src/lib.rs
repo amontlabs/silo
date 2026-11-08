@@ -2,6 +2,7 @@
 
 pub mod applications;
 pub mod channel;
+pub mod container_prerequisites;
 pub mod installer;
 pub mod notifications;
 pub mod system_integrations;

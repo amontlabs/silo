@@ -745,6 +745,8 @@ release.json                  as above, targets x86_64- or aarch64-unknown-linux
 silod                         not signed
 silo                          the production silo command
 silo-runner                   the CI runner helper (Go, static), version = the engine's
+silo-ctr, silo-init           container computer helpers: the rootless namespace holder, and the
+                              container's first process (silo-container-shim)
 msb, git, git-lfs,            bundled tools, beside silod where the engine looks
 git-remote-http, git-remote-https
 resources/engine-manifest.json                      production, engineBuild = silo-<source commit>

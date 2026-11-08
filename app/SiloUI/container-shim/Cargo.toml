@@ -1,0 +1,22 @@
+[package]
+name = "silo-container-shim"
+version = "0.1.0"
+description = "Native helpers of a container computer on a Linux host: silo-init (the container's PID 1 and Landlock exec wrapper) and silo-ctr (the rootless namespace and container holder)"
+license = "MIT"
+repository = "https://github.com/amontlabs/silo"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "silo-ctr"
+path = "src/main.rs"
+
+[[bin]]
+name = "silo-init"
+path = "src/init.rs"
+
+[dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = "3.27"

@@ -4990,6 +4990,7 @@ dependencies = [
  "sha2 0.10.9",
  "silo-api",
  "silo-client",
+ "silo-host",
  "tempfile",
  "time",
  "tokio",
@@ -5008,6 +5009,14 @@ dependencies = [
  "tempfile",
  "tokio",
  "uuid",
+]
+
+[[package]]
+name = "silo-container-shim"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "tempfile",
 ]
 
 [[package]]
@@ -5032,6 +5041,7 @@ dependencies = [
  "objc2-app-kit",
  "objc2-foundation",
  "objc2-virtualization",
+ "oci-spec",
  "plist",
  "reqwest 0.12.28",
  "rusqlite",

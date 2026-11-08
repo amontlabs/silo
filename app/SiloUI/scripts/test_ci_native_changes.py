@@ -56,6 +56,7 @@ class ClassificationTests(unittest.TestCase):
                       ['app/SiloUI/README.md'], ['.github/workflows/ci.yml'], ['LICENSE'],
                       ['app/SiloUI/src/test/contracts/backup-state.json'],
                       ['app/SiloUI/src/features/application/model/reserved-secret-names.json'],
+                      ['app/SiloUI/src/features/computers/model/container-unavailable.json'],
                       ['app/SiloUI/runner/recipes/silo-linux.yaml'], ['app/SiloUI/runnerx/a.go'],
                       ['app/SiloUI/srcx/a.ts'], ['docsy/file.md'], ['websites/x']):
             with self.subTest(paths=paths):

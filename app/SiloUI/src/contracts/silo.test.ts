@@ -18,6 +18,13 @@ describe("Silo contract fixtures", () => {
     }
   })
 
+  it("accepts a container runtime and rejects any other", () => {
+    const computer = fixtureComputerDefaults[0]
+    expect(setupComputerConfigurationSchema.parse({ ...computer, runtime: "container" }).runtime).toBe("container")
+    expect(setupComputerConfigurationSchema.parse(computer).runtime).toBeUndefined()
+    expect(() => setupComputerConfigurationSchema.parse({ ...computer, runtime: "docker" })).toThrow()
+  })
+
   it("accepts an explicit optional host Git identity without reading local configuration", () => {
     expect(onboardingSourceSchema.parse({
       ...onboardingScenarios.running,

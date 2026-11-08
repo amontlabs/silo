@@ -17,7 +17,8 @@ RUNNER_READ_BY_RUST = 'app/SiloUI/runner/recipes/'
 # Frontend sources. Rust tests read only these two locations inside them.
 FRONTEND_PREFIX = 'app/SiloUI/src/'
 FRONTEND_READ_BY_RUST = ('app/SiloUI/src/test/contracts/',
-                         'app/SiloUI/src/features/application/model/reserved-secret-names.json')
+                         'app/SiloUI/src/features/application/model/reserved-secret-names.json',
+                         'app/SiloUI/src/features/computers/model/container-unavailable.json')
 
 
 def skippable(path):

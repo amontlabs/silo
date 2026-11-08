@@ -15,6 +15,7 @@ fn computer_configuration(built_in: bool) -> ComputerConfiguration {
         max_memory_gib: 1,
         workspace_storage_gib: 1,
         runtime_storage_gib: 1,
+        runtime: None,
         desktop: Some(desktop::DesktopConfiguration {
             start_with_computer: true,
             built_in,

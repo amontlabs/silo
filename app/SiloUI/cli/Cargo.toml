@@ -26,6 +26,7 @@ serde_yaml_ng = "0.10"
 sha2 = "0.10"
 silo-api = { path = "../api" }
 silo-client = { path = "../client" }
+silo-host = { path = "../host", default-features = false }
 time = "0.3"
 tokio = { version = "1", features = ["io-util", "macros", "net", "rt-multi-thread", "signal", "sync", "time", "io-std"] }
 unicode-normalization = "0.1"

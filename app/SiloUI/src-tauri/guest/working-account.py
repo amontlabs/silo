@@ -226,7 +226,12 @@ def set_up(desktop_service):
     missing = [tool for tool in TOOLS if not shutil.which(tool)]
     if missing:
         raise RuntimeError(f'The sandbox is missing {", ".join(missing)}.')
-    if run('findmnt', '-rn', '-T', '/workspace', '-o', 'TARGET,FSTYPE') != '/workspace ext4':
+    # A container computer has no workspace disk of its own: /workspace is a folder of its root.
+    container = os.environ.get('SILO_RUNTIME') == 'container'
+    if container:
+        if not Path('/workspace').is_dir():
+            raise RuntimeError('The silo account needs the workspace folder.')
+    elif run('findmnt', '-rn', '-T', '/workspace', '-o', 'TARGET,FSTYPE') != '/workspace ext4':
         raise RuntimeError('The silo account needs the standard workspace disk.')
     if RECORD.exists():
         if json.loads(RECORD.read_text()) != POLICY:
@@ -272,15 +277,17 @@ def set_up(desktop_service):
     run('chown', '-hR', 'silo:silo', str(HOME))
     # Do not traverse other mounts or follow symlinks into system or host files.
     run('find', '/workspace', '-xdev', '-exec', 'chown', '-h', 'silo:silo', '{}', '+')
-    sudoers = Path('/etc/sudoers.d/silo')
-    write_text_atomic(sudoers, 'silo ALL=(ALL:ALL) NOPASSWD: ALL\n', 0o440)
-    run('visudo', '-cf', str(sudoers))
+    # sudo cannot gain privileges in a container (no-new-privileges), so none is granted there.
+    if not container:
+        sudoers = Path('/etc/sudoers.d/silo')
+        write_text_atomic(sudoers, 'silo ALL=(ALL:ALL) NOPASSWD: ALL\n', 0o440)
+        run('visudo', '-cf', str(sudoers))
     state = Path('/var/lib/silo-desktop')
     if (state / 'installed.json').exists():
         service = Path('/usr/local/bin/silo-desktop')
         write_text_atomic(service, desktop_service, 0o755)
         write_text_atomic(state / 'configuration-managed.json', '{"home":"/home/silo"}\n', 0o600)
-    run('runuser', '-u', 'silo', '--', 'env', 'HOME=/home/silo', 'USER=silo', 'LOGNAME=silo', 'sh', '-ec', 'test -w "$HOME"; test -w /workspace; sudo -n true; test -x /usr/lib/openssh/sftp-server')
+    run('runuser', '-u', 'silo', '--', 'env', 'HOME=/home/silo', 'USER=silo', 'LOGNAME=silo', 'sh', '-ec', 'test -w "$HOME"; test -w /workspace; ' + ('' if container else 'sudo -n true; ') + 'test -x /usr/lib/openssh/sftp-server')
     RECORD.parent.mkdir(parents=True, exist_ok=True)
     write_text_atomic(RECORD, json.dumps(POLICY, separators=(',', ':')) + '\n', 0o644)
 

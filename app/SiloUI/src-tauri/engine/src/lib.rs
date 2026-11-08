@@ -14,6 +14,7 @@ pub mod checkpoints;
 pub(crate) mod child_process;
 pub mod clipboard;
 pub mod computer_gateway;
+pub mod containers;
 pub mod computer_names;
 pub mod computer_tree;
 pub mod computer_use;

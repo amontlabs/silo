@@ -184,6 +184,11 @@ impl Computer {
     }
 }
 
+/// Whether a `computers.list` reply says the engine supports macOS computers.
+pub fn macos_supported(listed: &Value) -> bool {
+    listed.pointer("/macos/supported").and_then(Value::as_bool) == Some(true)
+}
+
 /// Reads the computers out of a `computers.list` reply.
 pub fn computers_from(listed: &Value) -> Vec<Computer> {
     let mut found = Vec::new();
@@ -214,7 +219,13 @@ pub fn computers_from(listed: &Value) -> Vec<Computer> {
         found.push(Computer {
             id: text(configuration, "id").unwrap_or_default(),
             name: text(configuration, "name").unwrap_or_default(),
-            kind: "linux",
+            kind: if computer.get("kind").and_then(Value::as_str) == Some("container")
+                || configuration.get("runtime").and_then(Value::as_str) == Some("container")
+            {
+                "container"
+            } else {
+                "linux"
+            },
             state: text(computer, "state").unwrap_or_else(|| "unknown".into()),
             detail: text(computer, "stateDetail").filter(|detail| !detail.is_empty()),
             cpus: number(configuration, "cpus").unwrap_or(0),
@@ -520,6 +531,18 @@ impl Engine {
             }))
             .await?;
         Ok(computers_from(&listed))
+    }
+
+    /// Whether the engine that runs the commands reports that it runs macOS computers, which
+    /// only a Mac does.
+    pub async fn runs_macos_computers(&self) -> Result<bool, CliError> {
+        let listed = self
+            .call(requests::computers_list(ComputerListParams {
+                device_id: None,
+                refresh_repositories: None,
+            }))
+            .await?;
+        Ok(macos_supported(&listed))
     }
 
     pub async fn computer(&self, name: &str) -> Result<Computer, CliError> {
@@ -862,6 +885,26 @@ mod tests {
         let error = pick_device(&listed, "nas").unwrap_err();
         assert!(error.message.contains("Mac mini"), "{}", error.message);
         assert!(pick_device(&json!([]), "nas").is_err());
+    }
+
+    #[test]
+    fn a_container_row_reads_as_container() {
+        let listed = json!({"linux": {"computers": [
+            {"kind": "container", "state": "running",
+             "configuration": {"id": "c", "name": "box", "runtime": "container"}},
+            {"kind": "linux", "state": "running", "configuration": {"id": "l", "name": "vm"}}
+        ]}});
+        let computers = computers_from(&listed);
+        assert_eq!(computers[0].kind, "container");
+        assert_eq!(computers[0].to_json()["kind"], "container");
+        assert_eq!(computers[1].kind, "linux");
+    }
+
+    #[test]
+    fn only_an_engine_that_supports_macos_computers_is_a_mac() {
+        assert!(macos_supported(&json!({"macos": {"supported": true}})));
+        assert!(!macos_supported(&json!({"macos": {"supported": false}})));
+        assert!(!macos_supported(&json!({"linux": {}})));
     }
 
     #[test]

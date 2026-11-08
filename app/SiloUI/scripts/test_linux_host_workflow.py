@@ -188,7 +188,7 @@ class LinuxHostWorkflowTests(unittest.TestCase):
         steps = WORKFLOW.split('    steps:\n', 1)[1]
         order = ['Probe KVM', 'Prepare the runtime', 'Build and package the Dev engine',
                  'Install the engine from its archive', 'Start the engine as a systemd user service',
-                 'Drive a Linux computer through the silo command', 'Stop the engine and remove the service']
+                 'Drive a Linux computer and a container computer through the silo command', 'Stop the engine and remove the service']
         positions = [steps.index(f'- name: {name}\n') for name in order]
         self.assertEqual(positions, sorted(positions))
         self.assertIn('package-engine.py --platform linux-x64 --channel development', steps)
@@ -213,6 +213,20 @@ class LinuxHostWorkflowTests(unittest.TestCase):
         for needle in ('systemctl --user stop "$UNIT"', 'test "$result" = success', 'test "$status" = 0',
                        'engine.sock', '--service unregister', '= notRegistered'):
             self.assertIn(needle, stop)
+
+    def test_container_computers_are_driven_after_the_host_is_prepared_for_them(self):
+        steps = WORKFLOW.split('    steps:\n', 1)[1]
+        prepare = steps.split('- name: Prepare the host for container computers\n', 1)[1].split('      - ', 1)[0]
+        for needle in ('apt-get install', 'crun skopeo umoci uidmap', 'kernel.apparmor_restrict_unprivileged_userns=0', '/etc/subuid'):
+            self.assertIn(needle, prepare)
+        self.assertLess(steps.index('- name: Prepare the host for container computers'),
+                        steps.index('- name: Drive a Linux computer and a container computer'))
+        drive = steps.split('- name: Drive a Linux computer and a container computer', 1)[1].split('      - ', 1)[0]
+        self.assertIn("SILO_E2E_CONTAINER: '1'", drive)
+        script = E2E.read_text()
+        for needle in ('create "$ctr" --container', 'CapEff:0000000000000000', 'NoNewPrivs:1', 'io_uring', '169.254.169.254',
+                       'container_checks', '"$silo" drop "$ctr"'):
+            self.assertIn(needle, script)
 
     def test_silo_runner_runs_as_a_service_next_to_the_engine_without_contacting_github(self):
         steps = WORKFLOW.split('    steps:\n', 1)[1]

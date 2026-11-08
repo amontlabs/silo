@@ -10,7 +10,7 @@ use silo_api::methods::{
     common::{ComputerTargetParams, DeviceParams},
     computers::{
         ComputerConfiguration, ComputerConfigurationChange, ComputerConfigurationChangeParams,
-        ComputerCreateParams, ComputerDeleteParams, DesktopConfiguration,
+        ComputerCreateParams, ComputerDeleteParams, ComputerRuntimeKind, DesktopConfiguration,
         MacosComputerCreateRequest,
     },
     desktop::{DesktopAction, DesktopActionParams},
@@ -429,6 +429,8 @@ async fn save_secret(
 pub enum Platform {
     Linux,
     Macos,
+    /// A Linux computer run as a container, on Linux hosts only.
+    Container,
 }
 
 #[derive(Clone, Debug)]
@@ -445,8 +447,13 @@ pub async fn create(
     args: &CreateArgs,
     progress: Progress<'_>,
 ) -> Result<Value, CliError> {
+    if args.platform == Platform::Container && engine.runs_macos_computers().await? {
+        return Err(CliError::new(
+            "Container computers run on Linux hosts only. This device is a Mac.",
+        ));
+    }
     let params = match args.platform {
-        Platform::Linux => {
+        Platform::Linux | Platform::Container => {
             let cpus = args.cpus.unwrap_or(2);
             let memory = args.memory_gib.unwrap_or(4);
             let narrow = |value: u64, what: &str| {
@@ -464,6 +471,8 @@ pub async fn create(
                     workspace_storage_gib: narrow(args.disk_gib.unwrap_or(10), "--disk")?,
                     runtime_storage_gib: 10,
                     desktop: None,
+                    runtime: (args.platform == Platform::Container)
+                        .then_some(ComputerRuntimeKind::Container),
                 },
                 request_id: None,
                 device_id: None,

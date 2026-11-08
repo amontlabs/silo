@@ -1,7 +1,7 @@
 import { z } from "zod"
 import type { ApplicationComputer } from "./application-source"
 
-export const deviceSchema = z.object({ id: z.string().min(1), name: z.string().min(1), address: z.string().min(1) })
+export const deviceSchema = z.object({ id: z.string().min(1), name: z.string().min(1), address: z.string().min(1), platform: z.enum(["macos", "linux"]).optional().catch(undefined) })
 export const connectionsStatusSchema = z.object({ enabled: z.boolean(), deviceId: z.string(), name: z.string(), address: z.string(), addresses: z.array(z.object({ address: z.string().min(1), kind: z.enum(["name", "tailscale", "network"]) })).optional(), error: z.string().nullish(), cliLinkError: z.string().nullish() })
 export type Device = z.infer<typeof deviceSchema> & { connected: boolean; busy?: boolean; error?: string; lastSeen?: number }
 export type ConnectionsStatus = z.infer<typeof connectionsStatusSchema>

@@ -228,6 +228,103 @@ Branch `claude/containers-ct1`, pull request [#92](https://github.com/amontlabs/
   - **Docs.** The AppArmor sysctl is set by hand in CI; CT2 adds it to `silo host init`.
 - **Not done.** aarch64 live run, UDP published ports, the container runtime (CT2).
 
+### 8 Nov 2026: phase CT2 built (the container runtime core)
+
+Branch `claude/containers-ct2`.
+
+- **The seam.** `run_msb_process`, where the engine spawns the runtime, calls `containers::route` first:
+  a command that names a container computer (or a `create` carrying the label `silo.runtime=container`) is
+  answered by `engine/src/containers/` in MicroSandbox's argument and JSON shapes, and a `list` is completed
+  with the container computers. Locks, the working account, change capture and the API above it are shared.
+  Two more places know the kind: `Target::plan` (streaming guest commands start their own process, so the
+  container's `crun exec` command is built there) and `create_computer_with_progress` (the image comes from
+  the container image cache and the runtime label is added). The computer configuration gained
+  `runtime: container` (absent for a virtual machine); `ComputerKind::Container` and
+  `silo create --container` are the API and CLI side; the app lists the kind with "Less isolated than a VM".
+- **Tools chosen** ([Reuse established tools](../../AGENTS.md)): crun 1.14.1 (Apache-2.0 or LGPL-2.1+,
+  Ubuntu 24.04 apt, used in C1), skopeo 1.13.3 (Apache-2.0, apt) and umoci 0.4.7 (Apache-2.0, apt) to
+  turn the pinned image archive into a root filesystem, the `oci-spec` crate 0.10 (Apache-2.0, already in
+  the dependency tree through MicroSandbox) for the runtime configuration, `systemd-run --user --scope`
+  for cgroup delegation. Silo checks them (`silo host init`) and installs none. Gaps that needed Silo
+  code: a user-namespace holder that maps sub-ids, mounts the overlay and creates the TAP
+  (`silo-ctr`, 600 lines of Rust over `libc`; podman's `unshare`/pasta would bring a container engine and a
+  second network stack), and the Landlock/PID 1 shim (`silo-init`; no maintained single-purpose tool).
+- **umoci runs inside the user namespace, without `--rootless`.** `--rootless` gives every file to the
+  account (uid 1000 of the image became the account's uid, `/etc/shadow` lost its group). Run as root of
+  `silo-ctr userns`, umoci keeps the owners as sub-ids, as in the image. Deleting a computer likewise runs
+  `rm -rf` in that namespace.
+- **Layout** (`containers/layout.rs`): the image once per config digest; a shim layer (`silo/init`,
+  `/workspace`); per computer an upper and work directory, a `layers/` directory for sealed layers (CT4) and
+  a record. The overlay's lower directories are the sealed layers newest first, the shim layer, the image.
+- **Found on the way** (real Linux, Ubuntu 24.04 arm64, systemd user manager):
+  - `crun exec` joins only the namespaces the configuration lists; the container shares the holder's network
+    namespace, so an exec'd command landed in the host's. `silo-ctr enter` runs `crun exec` inside the
+    holder's user and network namespaces; a test proves the exec'd command sees only `lo` and the TAP.
+  - The overlay root takes the mode of the upper directory (a 0700 upper made `/` unreadable to other users).
+  - The working-account setup assumes a workspace disk and a working `sudo`. In a container (`SILO_RUNTIME=container`)
+    `/workspace` is a folder and no sudoers file is written: `no_new_privs` means `sudo` cannot work.
+  - The engine runs with umask 077, which crun and every command in the container inherited: mount point
+    directories and the `resolv.conf` and `hosts` files bound into the container came out private, so the
+    working account could not resolve names. `silo-ctr` now sets umask 022 for everything it starts, and the
+    shim layer and bound files are given their modes explicitly. Only the real engine on the KVM runner showed
+    it (the live check prints the container's network state when a public host is unreachable).
+  - A new container computer gets no default desktop from its image (the image includes one; a container has
+    no desktop yet).
+  - Silo's own root commands get seven capabilities (chown, file owner and mode, kill, setuid, setgid) inside
+    the namespace, because creating the account needs them; other commands have none.
+- **Not in CT2:** secrets, GitHub, published ports, SSH, terminals, desktop, checkpoints, forks, export (all
+  refused with "Silo cannot <verb> a container computer yet"); CPU limits when the user manager does not
+  delegate `cpu`; a container surviving an engine restart; a root filesystem size limit (the configured disk
+  is recorded and reported, not enforced; planned in [CONTAINERS-PLAN](CONTAINERS-PLAN.md)); the app learning a remote host's platform (its editor offers the kind only for a
+  device that reports `platform: linux`, which the Connections list does not report yet, so the CLI is the way
+  to create one).
+- **Review fixes** (code review by Opus, threat-model review by Fable 5.1; one mechanism each):
+  - **Capabilities by kind** (`containers/capability.rs`). Terminal, editor (setup, key authorization,
+    transport), SSH access, export and desktop reach the runtime by their own paths, not the argument shape
+    `route` answers, so a container was handed to MicroSandbox. Each entry point now names its capability and
+    calls one check by kind before any side effect, with the same "Silo cannot <verb> a container computer yet"
+    message; the app hides the same actions from one list (`container-unavailable.json`, read by the engine
+    test and the frontend). A runtime update may not change a computer's kind, and a container's desktop may
+    not change (the installer would run inside it). A `--secret` on a container `create` is refused, and the
+    engine no longer adds the GitHub secret and `GH_TOKEN` to a container's create (CT3).
+  - **A read never mutates.** `status` only looks: a list refresh during a start used to stop the starting
+    container (its holder exists before its gateway) and wait up to 25 s. A computer is marked starting before
+    its holder is spawned; leftovers of an earlier engine are stopped once, by `reconcile` when the engine
+    starts. The holder is identified by pid and its cgroup scope, not by the name `silo-ctr`.
+  - **The recorded image.** Start and exec use the image digest in the computer's record, unpack it when it
+    is the pinned one, and otherwise refuse with a clear message; a computer's upper layer is never mounted
+    over another image. A partial unpack of another live engine is no longer deleted.
+  - **Nothing is left behind by a timeout.** The command runs as the leader of its own process group
+    (`silo-init --own-group`), `crun exec --pid-file` records it, and a timeout kills that group.
+    Streaming execs go through the guest supervisor, which already ends its group. `crun exec` now gets the
+    user's supplementary groups through `--process`. A `systemd-run` child is reaped on every error return.
+  - **Untrusted account files.** `/etc/passwd` and `/etc/group` of the writable layer are opened component by
+    component without following links, must be regular files, are capped at 1 MiB, and overlay whiteouts hide
+    lower files.
+  - **Hardening wording and details.** `setns` is denied outright; `systemctl` is located like the other
+    tools; the holder logs one Landlock warning per start (unavailable or ABI below 4) and `silo-init` no
+    longer repeats it on every command; the threat model states what Landlock covers, that an escape lands as
+    the engine's account (engine socket, every other computer), that the writable layer has no size limit
+    yet, and that CPU limits need a delegated `cpu` controller.
+  - **Second re-check** (Opus). The desktop actions (`setup-agent-tools` included) and the computer-use
+    approval check the capability before any side effect. Each exec gets its own private directory holding the
+    pid file and the `--process` JSON (it carries environment values), removed when the exec ends: an
+    `ExecGroup` drop for a waited exec, the plan's last holder for a streaming one (`Plan.files`, kept by
+    `Streaming` until the process is gone). Leftovers are removed only when their command no longer leads its
+    process group, so a waited exec running longer than 10 minutes keeps its pid file and its timeout still
+    kills it. Root execs now carry the inheritable set matching ambient (the kernel needs it). The threat model
+    says the ruleset applies on Landlock ABI 1 to 3. `reconcile` documents why a gateway it does not hold means
+    a leftover: `silod` is the only process that starts containers for an account and holds the channel's
+    `engine.lock`. The live check asserts that the root account setup of `silo start` (a waited root exec)
+    worked and that no exec files remain.
+- **Tests:** engine unit tests for the argument shapes, routing, the OCI baseline, the image cache, user
+  resolution, the record and listing (macOS and Linux); 47 tests of `silo-container-shim`, including the real
+  user namespace, overlay, TAP hand-over, PID 1 reaping and Landlock, run on Ubuntu 24.04; host prerequisite,
+  API, CLI and frontend tests. Live: `linux-host-e2e.sh` with `SILO_E2E_CONTAINER=1` on the KVM runner (x86_64,
+  Ubuntu 24.04, kernel 7.0): create, start, `uname -a`, a file written and read, listed as `container`, no
+  capabilities, `no_new_privs`, seccomp, io_uring refused, nested user namespace refused, only `lo` and the TAP,
+  a public host reachable, link-local, private, gateway and loopback addresses refused, stop, drop.
+
 ### R1: CI runner on the Mac (branch `claude/runner-phase-1`)
 
 - **Built:** `silo-action/` and every reference removed; `silo-runner` (Go, `app/SiloUI/runner`, on

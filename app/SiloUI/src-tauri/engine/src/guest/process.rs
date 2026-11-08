@@ -21,6 +21,9 @@ pub(crate) struct Plan {
     pub program: PathBuf,
     pub args: Vec<String>,
     pub envs: Vec<(String, String)>,
+    /// The files the arguments name (a container's per-exec directory), removed once the plan and
+    /// the process it started are gone.
+    pub files: Option<Arc<crate::containers::hold::ExecGroup>>,
 }
 
 impl Plan {
@@ -245,6 +248,8 @@ pub(crate) struct Streaming {
     pub child: Child,
     pub stdin: Option<ChildStdin>,
     pub readers: Vec<JoinHandle<()>>,
+    /// Keeps the plan's files until the process is gone.
+    _files: Option<Arc<crate::containers::hold::ExecGroup>>,
 }
 
 impl Streaming {
@@ -294,6 +299,7 @@ pub(crate) fn spawn_streaming(
         child,
         stdin: input,
         readers,
+        _files: plan.files.clone(),
     })
 }
 
@@ -322,7 +328,32 @@ mod tests {
             program: "/bin/sh".into(),
             args: vec!["-c".into(), script.into()],
             envs: Vec::new(),
+            files: None,
         }
+    }
+
+    #[test]
+    fn a_plans_files_outlive_the_plan_while_its_process_runs() {
+        let root = tempfile::tempdir().unwrap();
+        let files = root.path().join("exec");
+        std::fs::create_dir(&files).unwrap();
+        let mut plan = shell("exit 0");
+        plan.files = Some(Arc::new(crate::containers::hold::ExecGroup::new(
+            files.clone(),
+        )));
+        let streaming = spawn_streaming(&plan, false, Arc::new(|_, _| {})).unwrap();
+        drop(plan);
+        assert!(files.exists(), "the files went before the process ended");
+        drop(streaming);
+        assert!(!files.exists(), "the files stayed behind");
+        // A plan that never ran removes them too.
+        std::fs::create_dir(&files).unwrap();
+        let mut unused = shell("exit 0");
+        unused.files = Some(Arc::new(crate::containers::hold::ExecGroup::new(
+            files.clone(),
+        )));
+        drop(unused);
+        assert!(!files.exists());
     }
 
     /// The pid a script wrote into `file`, once it is complete.

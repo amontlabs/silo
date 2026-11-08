@@ -1,5 +1,6 @@
 import type { ApplicationSource, ApplicationComputer } from "@/features/application/model/application-source"
 import { computerAvailability } from "@/features/application/model/computer-availability"
+import { computerCan } from "@/features/computers/model/computer-capabilities"
 
 /**
  * One computer's "…" menu in the status panel, as data. The desktop app renders it as a
@@ -41,8 +42,8 @@ export function computerMenuItems(computer: ApplicationComputer, source: Applica
         { kind: "action", id: "restart", label: "Restart…", enabled: canRestart, run: () => handlers.confirm("restart") } as const,
       ]),
     { kind: "separator" },
-    { kind: "action", id: "terminal", label: `Open in ${source.preferences.terminal}`, enabled: canOpen, run: handlers.openTerminal },
-    { kind: "action", id: "editor", label: `Open in ${source.preferences.editor}…`, enabled: canOpen, run: handlers.chooseFolder },
+    ...(computerCan(computer.configuration, "terminal") ? [{ kind: "action", id: "terminal", label: `Open in ${source.preferences.terminal}`, enabled: canOpen, run: handlers.openTerminal } as const] : []),
+    ...(computerCan(computer.configuration, "editor") ? [{ kind: "action", id: "editor", label: `Open in ${source.preferences.editor}…`, enabled: canOpen, run: handlers.chooseFolder } as const] : []),
     {
       kind: "submenu",
       id: "sites",

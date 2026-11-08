@@ -220,6 +220,7 @@ pub(crate) fn authorize_guest(
 ) -> Result<Value, String> {
     let (_guard, name) =
         prepare_guest_target(&runtime::OPERATIONS, paths, string(params, "computerId")?)?;
+    crate::containers::capability::require(paths, &name, crate::containers::capability::Capability::Editor)?;
     let user = crate::working_account::inspect_user(paths, &name)?;
     crate::working_account::require_client_protocol(params)?;
     let public = crate::editor::authorize_remote(
@@ -262,6 +263,7 @@ pub(crate) fn spawn_stream(
     // and a long operation never blocks opening a connection.
     let name = computer_name(paths, params)?;
     runtime::shutdown::ensure_accepting_operations()?;
+    crate::containers::capability::require(paths, &name, crate::containers::capability::Capability::SshAccess)?;
     crate::terminal::running_computer(paths, &name)?;
     crate::working_account::require_runtime(paths)?;
     runtime::runtime_command(&paths.executable)
@@ -364,11 +366,36 @@ mod tests {
                     max_memory_gib: 4,
                     workspace_storage_gib: 10,
                     runtime_storage_gib: 10,
+                    runtime: None,
                     desktop: None,
                 }],
             },
         )
         .unwrap();
+    }
+
+    #[test]
+    fn a_container_computer_gets_no_guest_key_authorization_or_ssh_session() {
+        let directory = tempfile::tempdir().unwrap();
+        let paths = crate::guest::test_support::runtime(directory.path());
+        crate::containers::capability::make_container(&paths.home, "dev");
+        let id = crate::guest::test_support::COMPUTER_ID;
+        let params = json!({
+            "computerId": id,
+            "publicKey": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKaDgVuE9Eq4wyQDZgT0kPA3H",
+            "path": "/workspace",
+        });
+        let prepared = authorize_guest(&paths, &params).unwrap_err();
+        assert!(
+            prepared.contains("cannot connect an editor to a container computer yet"),
+            "{prepared}"
+        );
+        let session = spawn_stream(&paths, "guest.ssh", &json!({"computerId": id})).unwrap_err();
+        assert!(
+            session.contains("cannot serve SSH access to a container computer yet"),
+            "{session}"
+        );
+        assert!(!directory.path().join("msb.log").exists(), "the runtime ran");
     }
 
     #[test]

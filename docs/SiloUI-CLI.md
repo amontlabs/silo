@@ -58,7 +58,7 @@ the engine's message.
 | `silo secrets list` | secret names and the computers they are assigned to (never values) |
 | `silo secrets set NAME [--computer C]... [--domain D]...` | add a secret or replace its value; the value is read from stdin, never an argument |
 | `silo secrets assign NAME COMPUTER` / `silo secrets unassign NAME COMPUTER` | change which computers have a secret |
-| `silo create <name> [--linux\|--macos] [--cpus N --memory GiB --disk GiB]` | create a computer |
+| `silo create <name> [--linux\|--macos\|--container] [--cpus N --memory GiB --disk GiB]` | create a computer. `--container` makes a Linux computer that runs as a container. A container computer shares the host's kernel, so it is less isolated than a VM; use it for a dev-only machine with nothing sensitive on it. Linux hosts only. |
 | `silo start <computer>` / `silo stop <computer>` | lifecycle |
 | `silo desktop on\|off <computer>` | turn a running Linux computer's desktop on (and start it) or off (and stop it); forks made later inherit the choice, and `--gui` and the computer-use tools refuse a computer with it off. A macOS computer is its own display and has no such setting |
 | `silo retry-setup <computer>` | finish the setup of a macOS computer that ended `failed` before it was ready |

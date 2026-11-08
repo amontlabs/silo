@@ -801,6 +801,7 @@ mod tests {
             max_memory_gib: 32,
             workspace_storage_gib: 60,
             runtime_storage_gib: 80,
+            runtime: None,
             desktop: None,
         };
         fs::write(

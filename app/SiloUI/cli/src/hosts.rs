@@ -28,6 +28,7 @@ use clap::Subcommand;
 use serde_json::{json, Value};
 use silo_api::methods::{connections, requests, EmptyParams};
 use silo_client::channel::Channel;
+use silo_host::container_prerequisites;
 
 use crate::{engine::Engine, error::CliError};
 
@@ -328,6 +329,8 @@ pub struct HostSetup {
     pub path: Option<OsString>,
     pub socket: PathBuf,
     pub vm: VmProbe,
+    /// What the host says about container computers; `None` where they cannot run (a Mac).
+    pub containers: Option<container_prerequisites::Report>,
     /// Where this machine's SSH server should listen (port 22 on the loopback address).
     pub ssh: SocketAddr,
     /// How long to wait for the engine's socket after starting the service.
@@ -354,6 +357,7 @@ impl HostSetup {
             path: std::env::var_os("PATH"),
             socket,
             vm: VmProbe::detect(platform, Path::new("/dev/kvm")),
+            containers: (platform == Platform::Linux).then(container_prerequisites::check),
             ssh: SocketAddr::from(([127, 0, 0, 1], 22)),
             engine_wait: Duration::from_secs(60),
             opener: PathBuf::from("/usr/bin/open"),
@@ -1096,7 +1100,7 @@ pub async fn init(setup: &HostSetup, authorize: &[String]) -> Result<Value, CliE
                 .to_owned(),
         );
     }
-    Ok(json!({
+    let mut result = json!({
         "platform": platform_name(setup.platform),
         "kinds": setup.platform.kinds(),
         "vm": {"ok": true, "detail": vm},
@@ -1107,7 +1111,52 @@ pub async fn init(setup: &HostSetup, authorize: &[String]) -> Result<Value, CliE
         "controllers": controllers,
         "ssh": ssh,
         "advice": advice,
-    }))
+    });
+    if let Some(report) = &setup.containers {
+        result["containerComputers"] = container_computers_json(report);
+    }
+    Ok(result)
+}
+
+/// The container-computer prerequisites as `silo host init` reports them.
+fn container_computers_json(report: &container_prerequisites::Report) -> Value {
+    json!({
+        "ready": report.ready(),
+        "findings": report.findings.iter().map(|finding| json!({
+            "id": finding.id,
+            "level": finding.level.as_str(),
+            "ok": finding.ok,
+            "what": finding.what,
+            "fix": finding.fix,
+        })).collect::<Vec<_>>(),
+    })
+}
+
+fn render_container_computers(section: &Value, out: &mut Vec<String>) {
+    let findings: Vec<&Value> = section["findings"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .collect();
+    let unmet: Vec<&&Value> = findings.iter().filter(|row| row["ok"] == false).collect();
+    out.push(String::new());
+    if section["ready"] == true {
+        out.push("Container computers: ready".to_owned());
+    } else {
+        out.push("Container computers: not ready (optional; Silo changes nothing here)".to_owned());
+    }
+    for row in unmet {
+        let advice = if row["level"] == "advice" {
+            " (advice)"
+        } else {
+            ""
+        };
+        out.push(format!(
+            "  {}{advice}: {}",
+            row["what"].as_str().unwrap_or_default(),
+            row["fix"].as_str().unwrap_or_default()
+        ));
+    }
 }
 
 fn platform_name(platform: Platform) -> &'static str {
@@ -1415,6 +1464,9 @@ pub fn render_host(value: &Value) -> String {
         if !advice.contains(&text) {
             out.push(format!("Note: {text}"));
         }
+    }
+    if value["containerComputers"].is_object() {
+        render_container_computers(&value["containerComputers"], &mut out);
     }
     out.join("\n")
 }

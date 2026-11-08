@@ -697,6 +697,7 @@ mod tests {
             max_memory_gib: 8,
             workspace_storage_gib: 10,
             runtime_storage_gib: 10,
+            runtime: None,
             desktop: None,
         }
     }
@@ -774,6 +775,7 @@ mod tests {
             max_memory_gib: 2,
             workspace_storage_gib: 10,
             runtime_storage_gib: 10,
+            runtime: None,
             desktop: None,
         };
         let previous = ComputerConfigurationRequest {
@@ -964,6 +966,7 @@ mod tests {
             max_memory_gib: 8,
             workspace_storage_gib: 10,
             runtime_storage_gib: 10,
+            runtime: None,
             desktop: None,
         };
         let request = ComputerConfigurationRequest {
@@ -1048,6 +1051,7 @@ mod tests {
             max_memory_gib: 8,
             workspace_storage_gib: 10,
             runtime_storage_gib: 10,
+            runtime: None,
             desktop: None,
         };
         let request = ComputerConfigurationRequest {
@@ -1085,6 +1089,7 @@ mod tests {
             max_memory_gib: 8,
             workspace_storage_gib: 10,
             runtime_storage_gib: 10,
+            runtime: None,
             desktop: None,
         };
         let request = ComputerConfigurationRequest {
@@ -1146,6 +1151,7 @@ mod tests {
             max_memory_gib: 8,
             workspace_storage_gib: 10,
             runtime_storage_gib: 10,
+            runtime: None,
             desktop: None,
         };
         let (a, b, c) = (entry("a"), entry("b"), entry("c"));

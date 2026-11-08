@@ -48,6 +48,7 @@ export const setupComputerConfigurationSchema = z.object({
   workspaceStorageGiB: z.number().int().min(1).max(4_194_303),
   runtimeStorageGiB: z.number().int().min(1).max(4_194_303),
   desktop: desktopConfigurationSchema.optional(),
+  runtime: z.literal("container").optional(),
 }).strict().refine((computer) => computer.workspaceStorageGiB + computer.runtimeStorageGiB <= 4_194_303, { message: "The two disks together exceed 4,194,303 GiB. Reduce a disk size.", path: ["workspaceStorageGiB"] }).refine((computer) => computer.cpus <= computer.maxCPUs, {
   message: "cpus must not exceed maxCPUs",
 }).refine((computer) => computer.memoryGiB <= computer.maxMemoryGiB, {

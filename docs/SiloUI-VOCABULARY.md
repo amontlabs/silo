@@ -9,6 +9,7 @@ older name on purpose.
 | Term | Meaning | Examples |
 | --- | --- | --- |
 | **computer** | A virtual computer Silo creates and runs for an agent. Its saved settings are its **configuration**. | New computer, Start the computer, `ApplicationComputer`, `ComputerConfiguration`, `computerId` |
+| **container computer** | A Linux computer that runs as a container on a Linux host instead of a VM. It shares the host's kernel, so it is less isolated than a VM. Never the default. | Container, Less isolated than a VM, `runtime: "container"`, `ComputerKind::Container` |
 | **device** | A physical Mac or Linux machine that runs Silo. The local one is **this device**; elsewhere the UI shows the device's name. | This device, Computers on linux-box, `Device`, `deviceId` |
 | **Connections** | The feature that links devices so one Silo manages computers on another. A computer on another device is a **remote computer**. | Connections settings, Connect device, `remote_computer_action` |
 | **workspace** | Only the persistent `/workspace` folder and disk inside each computer. | Workspace files, `workspaceStorageGiB`, `read_workspace_storage` |
