@@ -27,7 +27,7 @@ call (7 Nov); its Mac live checks stay open there.
 | F3 | 1 | Sharing: `silo export` / `silo import`, the guest image by reference, a warning for logins found on the computer, keep an imported computer into main | Merged, PR #86 |
 | F4 | 1 | Sharing a computer that lives on another machine | Planned |
 | R1 | 2 | CI runner on the Mac: delete `silo-action/`, the Go helper on actions/scaleset, a Linux and a macOS runner recipe, a fresh computer per job, delete on success, keep on failure, private repositories only, example workflow | Merged, PR #83 |
-| R2 | 2 | Linux hosts as runner machines | Planned |
+| R2 | 2 | Linux hosts as runner machines: `silo-runner` in the Linux engine archives, a systemd user service, a default Linux budget from the host, a KVM check, both runner architectures in the `silo-linux` recipe | Built; no job has run on a Linux host yet (live check script written, not run) |
 | C1 | 3 | Container computers with crun: measurements only, reported to the owner before any build | Merged, PR #87; [evidence](evidence/c1-containers/README.md); the owner decided to build (8 Nov) |
 | CT1-CT6 | 3 | Container computers with the same capabilities as VM computers: [CONTAINERS-PLAN.md](CONTAINERS-PLAN.md) | Planned |
 

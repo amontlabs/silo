@@ -1,7 +1,7 @@
 # CI runner: Silo as the machine GitHub Actions jobs run on
 
-`silo-runner` (Go, `app/SiloUI/runner`) makes a Mac running Silo the machine that runs the jobs of a
-private GitHub repository or organization. Every job gets a fresh Silo computer forked from a
+`silo-runner` (Go, `app/SiloUI/runner`) makes a Mac running Silo, or a [Linux host](#linux-hosts)
+running `silod`, the machine that runs the jobs of a private GitHub repository or organization. Every job gets a fresh Silo computer forked from a
 recipe; the computer is deleted when the job succeeds and stopped and kept when it fails (the last
 `keepFailed.count` of them, 3 on Linux and 1 on a Mac by default).
 
@@ -21,6 +21,9 @@ runner scale set protocol, job messages, runner registration) and drives Silo on
 Gap: `scaleset` v0.5.0's `go.mod` asks for Go 1.27.3, so `runner/go.mod` pins its own Go version, 1.27.3;
 the repository's other Go code uses 1.25.
 
+The Linux host support adds no dependency: the service is a systemd user unit written by the helper
+itself, the way `silod --service register` writes the engine's.
+
 ## One label per recipe
 
 GitHub gives a job to any idle runner whose labels match, and sends no branch, pull request or SHA
@@ -35,7 +38,8 @@ from the `silo-linux` recipe. Put different toolchains in different recipes and 
 3. **Credentials**, either:
    - a **GitHub App** (preferred) installed on the repository with *Administration: read and write*
      (repository) or *Self-hosted runners: read and write* (organization), plus *Metadata: read*. Note
-     the client id and the installation id, and save the private key as a `0600` file; or
+     the client id and the installation id, and save the private key as a `0600` file (the helper
+     warns at start and in `check` when the group or others can read it, as `ssh` does for a key); or
    - a **personal access token** with the same permissions, exported in an environment variable whose
      name you put in the configuration (`tokenEnv`). The token is never written in the file.
 4. **Configuration** (YAML or JSON, unknown keys are errors): start from
@@ -60,13 +64,13 @@ silo-runner run   -config config.yaml
 | `github.runnerGroup` | runner group of the scale sets | `default` |
 | `github.auth.app` | `clientId`, `installationId`, `privateKeyFile` | |
 | `github.auth.tokenEnv` | environment variable holding a personal access token | |
-| `silo.path` / `projectDir` / `socket` / `device` | the `silo` command, where its recipes are, `--socket`, `--device` | `silo`, `~/.silo-runner/project` |
+| `silo.path` / `projectDir` / `socket` / `device` | the `silo` command (`silo-dev` for a Silo Dev build), where its recipes are, `--socket`, `--device` | `silo`, `~/.silo-runner/project` |
 | `stateDir` | lock file and the record of the computers the helper made (`computers.json`) | `~/.silo-runner/state` |
 | `limits.minFreeDiskGiB` / `diskPath` | no new computer below this much free disk | 20 GiB, home |
 | `limits.readyTimeout` / `startAttempts` | wait for "Listening for Jobs"; computers tried before backing off | 3m, 3 |
 | `limits.idleTimeout` | an idle runner no job needs is removed after this | 10m |
 | `limits.listenerStall` | the watchdog restarts a session with no poll for this long | 5m |
-| `linuxBudget` | `memoryGiB`, `count`: Linux computers on this host; 0 or left out means no bound beyond `maxRunners`. Each computer counts with the `memory:` of its recipe file (the engine's default, 4 GiB on Linux and 8 on macOS, when the file has none) | none |
+| `linuxBudget` | `memoryGiB`, `count`: Linux computers on this host. Each computer counts with the `memory:` of its recipe file (the engine's default, 4 GiB on Linux and 8 on macOS, when the file has none) | on a Mac, none (0 or left out: no bound beyond `maxRunners`). On a [Linux host](#linux-hosts), a field left out comes from the host: three quarters of its memory (the smaller of the machine's and its cgroup's limit), one computer per CPU |
 | `runnerRefresh` | `checkEvery` (24h), `afterDays` (3), `disabled` | |
 | `scaleSets[]` | `label`, `recipe`, `os` (`linux`/`macos`), `maxRunners`, `keepFailed: {count, days}` | `maxRunners` 1, `keepFailed.count` 3 (Linux) or 1 (macOS), `keepFailed.days` 7 |
 
@@ -200,6 +204,153 @@ has the value, and so does the job. Only secrets that **Silo manages** (`silo se
 computer) can be placeholders. Give a job only secrets you would give a build server, and keep the
 repository private.
 
+## Linux hosts
+
+A Linux machine that runs `silod` ([Linux host](SiloUI-ENGINE.md#silod-on-a-linux-host), x86_64 or
+aarch64) can be the runner machine. Its computers are Linux computers over KVM, so only Linux scale
+sets run there (a `macos` scale set is refused). **One helper per machine, one label per machine and
+recipe**: two machines that should both serve `runs-on: silo-linux` need two labels (for example
+`silo-linux-a` and `silo-linux-b`), because GitHub picks any idle runner of a label and each helper
+owns the computers of its own machine. One helper for several machines is later work.
+
+### Install
+
+`silo-runner` is in the Linux engine archive, beside `silod` and `silo`
+(`silo-engine-<version>-linux-x64.tar.gz` or `-linux-arm64.tar.gz`; see
+[Engine releases](SiloUI-RELEASES.md#engine-releases)). Install the engine as the
+[engine guide](SiloUI-ENGINE.md#silod-on-a-linux-host) says (`silo host init`), as a dedicated
+account that is not root and is in the `kvm` group. Then, as the same account:
+
+```sh
+mkdir -p ~/.config/silo-runner && chmod 700 ~/.config/silo-runner
+```
+
+Write `~/.config/silo-runner/config.yaml`, starting from
+[`examples/config-linux.yaml`](../app/SiloUI/runner/examples/config-linux.yaml), and keep the GitHub
+credential in files only this account can read:
+
+```sh
+R=~/.local/opt/silo-engine/silo-runner
+$R install-recipes -config ~/.config/silo-runner/config.yaml     # writes silo-linux into projectDir
+                                                                 # (keeps one already there; -replace: see Upgrading)
+chmod 600 ~/.config/silo-runner/app.private-key.pem              # a GitHub App key, or instead:
+printf 'SILO_RUNNER_TOKEN=%s\n' "$TOKEN" > ~/.config/silo-runner/env && chmod 600 ~/.config/silo-runner/env
+$R check -offline -config ~/.config/silo-runner/config.yaml     # this machine only: /dev/kvm, the budget
+$R check -config ~/.config/silo-runner/config.yaml              # and GitHub: refuses a public repository
+$R service register -config ~/.config/silo-runner/config.yaml
+```
+
+Put the absolute path of `silo` in `silo.path` (`~/.local/bin/silo`, or `silo-dev` for a Silo Dev
+engine). The service does not search `PATH`; see [Service](#service).
+
+The `silo-linux` recipe picks the runner for the computer's architecture while it builds
+(`uname -m`: `arm64` on an aarch64 host or a Mac, `x64` on an x86_64 host) and checks the download
+against that architecture's SHA-256; both are pinned in the recipe
+(`RUNNER_SHA256_ARM64`, `RUNNER_SHA256_X64`), and the version refresh moves both from the same
+release's published digests (a release missing either digest changes nothing). The first job builds
+the recipe, which takes several minutes.
+
+### Service
+
+`silo-runner service register` writes `~/.config/systemd/user/silo-runner.service`
+(`$XDG_CONFIG_HOME` is honored), then runs `systemctl --user daemon-reload`, `enable` and `restart`
+on it. It follows `silod --service register`, and like it never replaces a unit file it did not
+write (its first line marks it) and never asks for privileges. The unit:
+
+- is a **user** unit, so it runs as the account whose user manager runs it: the account of the
+  engine's socket (the engine accepts only clients of its own account). It has no `User=`, and
+  `silo-runner` refuses to run as root, with or without systemd;
+- has `After=` and `Wants=` the engine's unit (`org.silo.preview.engine.service`; pass
+  `-engine-unit org.silo.dev.engine.service` for a Silo Dev engine), so the helper starts after the
+  engine and starting it starts a stopped engine. Stopping or restarting the engine does not stop
+  the helper; it retries until the engine answers;
+- runs `silo-runner run -config <file> -silo <path>` with the canonical paths, where `<path>` is
+  the absolute path `service register` resolved from `silo.path` (a bare name is looked up on the
+  `PATH` of the shell that registers; a relative path, or one that is not an executable file, is
+  refused). The user manager's `PATH` usually lacks `~/.local/bin`, so a bare `silo` would fail every
+  call and the unit would restart every ten seconds. `-silo` replaces `silo.path` for that run;
+  register again after moving silo. The unit also has `Restart=on-failure`,
+  `RestartSec=10` and no start rate limit, `UMask=0077`, `KillMode=mixed` and `TimeoutStopSec=120`:
+  a stop sends SIGTERM to the helper alone, which then deregisters idle runners and waits for the
+  work in flight (the [shutdown](#how-the-helper-keeps-track) rules); whatever is left after the
+  timeout is killed. Computers with a job keep running and are picked up by the next start;
+- reads `~/.config/silo-runner/env` if it exists (`EnvironmentFile=-%E/silo-runner/env`), the place
+  for `SILO_RUNNER_TOKEN=` when `github.auth.tokenEnv` is used. A GitHub App needs no environment.
+  Keep that file and the App key `0600`: the helper does not set their modes, but at start (a
+  warning in the log) and in `check` (a `warning:` line) it names either one when the group or
+  others can read it, with the `chmod` that fixes it.
+
+`silo-runner service unregister` runs `disable --now` and removes the file. As for the engine, turn
+lingering on so the services start at boot and survive the last logout (an administrator runs
+`sudo loginctl enable-linger "$(id -un)"`; `register` prints this when lingering is off).
+
+**Why a unit written by the helper and not a documented unit file.** The unit needs the canonical
+paths of the binary and the configuration, quoted for systemd, the engine's unit name for the
+channel, and a refusal to replace someone else's file; a copied file would be edited wrongly
+(a stale path after an upgrade, `%` and `$` in a path). The code is about 150 lines, mirrors
+`silod --service register`, and has unit tests for the text and the systemctl calls. After an
+upgrade that installs a new engine directory, run the new `silo-runner service register` (it
+rewrites the unit and restarts the helper), as for `silod`.
+
+### Logs
+
+The helper logs to standard error, which the user journal keeps:
+
+```sh
+journalctl --user -u silo-runner.service -f
+journalctl --user -u org.silo.preview.engine.service        # the engine's
+```
+
+`silo-runner run -debug` is not set by the unit; add `-debug` to a copy of `ExecStart` through
+`systemctl --user edit silo-runner.service` when you need it. The journal is readable by the
+host's administrators ([threat model](THREAT-MODEL.md#ci-runner-silo-runner)); the helper logs
+computer names, job and runner ids, GitHub error messages and recipe versions, never the GitHub
+credential or a JIT configuration.
+
+### Capacity and /dev/kvm
+
+At start (and in `check`, with `-offline` for this part alone) the helper on a Linux host:
+
+- requires `/dev/kvm` to open for reading and writing as this account, and otherwise stops with
+  what to do (`/dev/kvm does not exist`, or add the account to the `kvm` group);
+- gives each `linuxBudget` field you left out the host's value: **memory is three quarters of the
+  machine's total memory** (`MemTotal` in `/proc/meminfo`; the rest is the host's own, the page cache
+  and each virtual machine's overhead) and **count is the number of CPUs**. It uses the machine's
+  size and not what is free right now, so a restart with computers running computes the same budget.
+  The count is only the CPU count, and neither cgroup limits nor memory the host's other services
+  use are subtracted: **where the engine or your user slice has a memory limit (`MemoryMax=`), or in a
+  container or virtual machine that has less memory than it reports, or with CPU quotas or other
+  services on the host, set `linuxBudget` yourself.** The log line says which fields came from the host;
+- refuses a budget smaller than one computer of your largest recipe (the recipe's `memory:`, 8 GiB for
+  the shipped `silo-linux`), because no job could ever start. Give the recipe less memory, or the
+  host more;
+- refuses a `macos` scale set.
+
+Why the default is derived and not required: an unbounded Linux host lets a burst of jobs use all of
+its memory, and leaving the number to the owner means the safe setting depends on remembering to
+write it. With `silo.device` set, the helper drives an engine on another machine, and none of these
+host checks apply.
+
+### What this phase did not run
+
+The jobs on a Linux host have not run against GitHub: registering runners needs an admin token and
+the owner's Linux machine was offline. The archive, the unit, `/dev/kvm`, the budget and the journal
+are tested on a KVM runner (`scripts/runner-host-e2e.sh`, in the Linux host workflow, with no
+GitHub). The end-to-end check against a private repository is
+[`forks-ci/checks/r2_linux_runner_check.sh`](forks-ci/checks/r2_linux_runner_check.sh).
+
+### Upgrading
+
+- **An older `silo-linux` recipe.** `install-recipes` keeps a recipe file that is already there, so
+  one installed before the recipe pinned both architectures still pins only the arm64 runner. On an
+  x86_64 host that would build and then fail every job. At start and in `check`, the helper refuses a
+  Linux recipe that pins a single runner architecture other than the host's and says so. Run
+  `silo-runner install-recipes -replace -config <file>`: it moves your copy to `silo-linux.yaml.bak`
+  and writes the shipped one; copy your own tools back from the `.bak` and rebuild
+  (`silo recipe build silo-linux`).
+- **A service registered before `-silo`.** Its unit has no absolute `silo` path. Run
+  `silo-runner service register` again.
+
 ## Runner version
 
 Recipes install GitHub's runner with a pinned version and SHA-256, and the scale sets turn self-update
@@ -220,6 +371,7 @@ logs the date GitHub will stop the runner. If you edit a recipe's download, keep
 
 ## Not in this phase
 
-Linux hosts as the runner machine (R2); outbound rules per label; per-job network logs; one helper for
-several machines. The live check against a private test repository is
-[`forks-ci/checks/r1_runner_check.sh`](forks-ci/checks/r1_runner_check.sh).
+Outbound rules per label; per-job network logs; one helper for several machines; the macOS archive
+does not carry `silo-runner` (a Mac builds it with `go build`). The live check against a private test repository is
+[`forks-ci/checks/r1_runner_check.sh`](forks-ci/checks/r1_runner_check.sh) (Mac, or Linux with `R1_OS=linux`
+against a Dev engine) and, for a Linux host, [`forks-ci/checks/r2_linux_runner_check.sh`](forks-ci/checks/r2_linux_runner_check.sh).

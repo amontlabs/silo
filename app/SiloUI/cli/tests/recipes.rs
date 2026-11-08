@@ -534,18 +534,20 @@ fn a_recipe_can_turn_the_desktop_off_and_leaves_it_on_otherwise() {
 #[test]
 fn the_ci_runner_recipes_parse_and_pin_the_runner() {
     let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../runner/recipes");
-    for (name, os, path, archive) in [
+    for (name, os, path, archive, digests) in [
         (
             "silo-linux",
             "linux",
             "/opt/actions-runner",
-            "actions-runner-linux-arm64",
+            "actions-runner-linux-${arch}",
+            2,
         ),
         (
             "silo-macos",
             "macos",
             "/Users/Shared/actions-runner",
             "actions-runner-osx-arm64",
+            1,
         ),
     ] {
         let text = std::fs::read_to_string(directory.join(format!("{name}.yaml"))).unwrap();
@@ -560,9 +562,9 @@ fn the_ci_runner_recipes_parse_and_pin_the_runner() {
             "{name}"
         );
         let version = regex::Regex::new(r"(?m)^\s*RUNNER_VERSION=\d+\.\d+\.\d+$").unwrap();
-        let sha = regex::Regex::new(r"(?m)^\s*RUNNER_SHA256=[0-9a-f]{64}$").unwrap();
+        let sha = regex::Regex::new(r"(?m)^\s*RUNNER_SHA256(_ARM64|_X64)?=[0-9a-f]{64}$").unwrap();
         assert_eq!(version.find_iter(&setup).count(), 1, "{name}");
-        assert_eq!(sha.find_iter(&setup).count(), 1, "{name}");
+        assert_eq!(sha.find_iter(&setup).count(), digests, "{name}");
         assert!(!setup.contains("--jitconfig"), "{name}");
     }
 }

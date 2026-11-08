@@ -5,8 +5,8 @@ app needs to assemble `Silo Engine.app`. The app re-signs it and sets `SiloEngin
 in the engine Info.plist to its own signer (docs/SiloUI-RELEASES.md#engine-releases).
 
 Linux (`linux-x64`, `linux-arm64`): a complete engine directory for a Linux host, `silod` with the
-`silo` command and the bundled tools beside it and `resources/` holding the manifest and the
-runtime (docs/SiloUI-ENGINE.md#silod-on-a-linux-host). The runtime comes from
+`silo` command, the `silo-runner` CI helper and the bundled tools beside it and `resources/` holding
+the manifest and the runtime (docs/SiloUI-ENGINE.md#silod-on-a-linux-host). The runtime comes from
 `npm run runtime:prepare` on a host of the same architecture."""
 import argparse
 import gzip
@@ -20,6 +20,7 @@ import re
 import subprocess
 import sys
 import tarfile
+import tempfile
 import tomllib
 
 APP = Path(__file__).resolve().parent.parent
@@ -57,6 +58,11 @@ CLI_CHANNEL_VARIABLE = 'SILO_CHANNEL_IDENTIFIER'
 # directory, where the runtime finds `msb` and Git its executables (GIT_EXEC_PATH).
 LINUX_TOOLS = ('msb', 'git', 'git-lfs', 'git-remote-http', 'git-remote-https')
 LINUX_ROOT = 'silo-engine'
+# The CI runner helper (a Go program of its own), built for the platform and shipped beside silod
+# with the licenses of the Go modules it links (docs/SiloUI-CI-RUNNER.md#linux-hosts).
+RUNNER = APP / 'runner'
+RUNNER_LICENSES = RUNNER / 'licenses'
+RUNNER_GOARCH = {'linux-x64': 'amd64', 'linux-arm64': 'arm64'}
 LIBKRUNFW = 'libkrunfw.so.5.6.1'
 # runtime:prepare's outputs under src-tauri/runtime, and where each goes under resources/: the
 # paths the app bundle's Tauri resources use (tauri.conf.json, tauri.linux.conf.json).
@@ -234,10 +240,11 @@ def linux_runtime_files(target, tauri=TAURI):
     return files
 
 
-def package_linux(out_dir, *, platform, commit, silod_binary, cli_binary, toolchain, channel='production',
-                  silod=SILOD, tauri=TAURI):
-    """Writes the Linux engine tarball and its `.sha256`; returns their paths. `silod_binary` and
-    `cli_binary` are silod and `silo` built for the platform (the CLI for the same channel)."""
+def package_linux(out_dir, *, platform, commit, silod_binary, cli_binary, runner_binary, toolchain,
+                  channel='production', silod=SILOD, tauri=TAURI, runner_licenses=RUNNER_LICENSES):
+    """Writes the Linux engine tarball and its `.sha256`; returns their paths. `silod_binary`,
+    `cli_binary` and `runner_binary` are silod, `silo` (for the same channel) and `silo-runner` built
+    for the platform."""
     check_commit(commit)
     target, machine = LINUX_TARGETS[platform]
     manifest_path, _ = CHANNELS[channel]
@@ -250,13 +257,19 @@ def package_linux(out_dir, *, platform, commit, silod_binary, cli_binary, toolch
         'release.json': (json.dumps(release_info(version, commit, toolchain, manifest, target), indent=2).encode() + b'\n', 0o644),
         'silod': (Path(silod_binary), 0o755),
         'silo': (Path(cli_binary), 0o755),
+        'silo-runner': (Path(runner_binary), 0o755),
         'resources/engine-manifest.json': ((json.dumps(manifest, indent=2) + '\n').encode(), 0o644),
         'api/silo-api.schema.json': (SCHEMA, 0o644),
         'THIRD-PARTY-NOTICES.md': (NOTICES, 0o644),
         'LICENSE': (LICENSE, 0o644),
     }
     files.update(linux_runtime_files(target, tauri))
-    for executable in ('silod', 'silo', *LINUX_TOOLS, 'resources/git-support/lfs-transfer/git-lfs-transfer'):
+    licenses = sorted(path for path in Path(runner_licenses).glob('*')
+                      if path.is_file() and not path.name.startswith('.'))
+    if not licenses:
+        raise RuntimeError(f'{runner_licenses} holds no licenses for silo-runner.')
+    files.update({f'resources/silo-runner-licenses/{path.name}': (path, 0o644) for path in licenses})
+    for executable in ('silod', 'silo', 'silo-runner', *LINUX_TOOLS, 'resources/git-support/lfs-transfer/git-lfs-transfer'):
         found = elf_machine(files[executable][0])
         if found != machine:
             raise RuntimeError(f'{executable} is not a {platform} executable (ELF machine {found}, wanted {machine}).')
@@ -295,6 +308,19 @@ def cargo_build_linux(target, toolchain, channel, run=subprocess.run):
     return release / 'silod', release / 'silo'
 
 
+def go_build_runner(platform, version, run=subprocess.run, out_dir=None):
+    """Builds `silo-runner` for the platform (a static binary, so any host can build either
+    architecture) and returns its path, in out_dir (the caller's, which it removes). Needs the Go
+    version in runner/go.mod."""
+    if out_dir is None:
+        raise ValueError('go_build_runner needs a directory for the binary.')
+    out = Path(out_dir) / 'silo-runner'
+    env = {**os.environ, 'GOOS': 'linux', 'GOARCH': RUNNER_GOARCH[platform], 'CGO_ENABLED': '0'}
+    run(['go', 'build', '-trimpath', '-ldflags', f'-s -w -X main.version={version}', '-o', str(out), '.'],
+        cwd=RUNNER, env=env, check=True)
+    return out
+
+
 def toolchain_version(runtime_inputs=RUNTIME_INPUTS):
     return json.loads(runtime_inputs.read_text(encoding='utf-8'))['toolchain']
 
@@ -304,7 +330,8 @@ def source_commit():
     return result.stdout.strip()
 
 
-def main(argv=None, *, build=cargo_build, build_linux=cargo_build_linux, commit_of=source_commit):
+def main(argv=None, *, build=cargo_build, build_linux=cargo_build_linux, build_runner=go_build_runner,
+         commit_of=source_commit):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--out-dir', type=Path, default=Path('engine-release'))
     parser.add_argument('--source-commit', default=None, help='default: git rev-parse HEAD')
@@ -321,9 +348,15 @@ def main(argv=None, *, build=cargo_build, build_linux=cargo_build_linux, commit_
     else:
         target = LINUX_TARGETS[args.platform][0]
         silod_binary, cli_binary = build_linux(target, toolchain, args.channel)
-        archive, checksum = package_linux(args.out_dir, platform=args.platform, commit=args.source_commit or commit_of(),
-                                          silod_binary=silod_binary, cli_binary=cli_binary, toolchain=toolchain,
-                                          channel=args.channel)
+        # The runner is built in a directory of its own that goes away once it is in the archive.
+        with tempfile.TemporaryDirectory(prefix='silo-runner-') as runner_dir:
+            runner_binary = build_runner(args.platform, engine_version(SILOD, CHANNELS[args.channel][0]),
+                                         out_dir=runner_dir)
+            archive, checksum = package_linux(args.out_dir, platform=args.platform,
+                                              commit=args.source_commit or commit_of(),
+                                              silod_binary=silod_binary, cli_binary=cli_binary,
+                                              runner_binary=runner_binary, toolchain=toolchain,
+                                              channel=args.channel)
     print(archive)
     print(checksum)
 

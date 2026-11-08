@@ -157,6 +157,10 @@ behind `cfg(target_os = "linux")`.
   executable's directory, where the runtime finds `msb` and Git. The release archives
   `silo-engine-<version>-linux-x64.tar.gz` and `-linux-arm64.tar.gz` hold exactly this
   directory as `silo-engine/` (see [Engine releases](SiloUI-RELEASES.md#engine-releases)).
+- **CI runner.** The archive also holds `silo-runner`, the helper that makes the host run GitHub
+  Actions jobs in a fresh computer each; it is its own service, registered with
+  `silo-runner service register` and started after the engine's unit
+  ([CI runner, Linux hosts](SiloUI-CI-RUNNER.md#linux-hosts)). The engine ignores it.
 - **Identity.** The channel comes from `resources/engine-manifest.json`, validated as strictly
   as a bundle's (regular file under 64 KiB, known channel, semver version, non-empty build,
   protocol range) except for the bundle identifier, which a Linux engine has none of. There is
@@ -334,3 +338,7 @@ behind `cfg(target_os = "linux")`.
   its own engine, adds it with `silo devices add silo-host@127.0.0.1:22 --host-key <fingerprint>`
   over the runner's SSH server, and creates, starts, stops and drops an `e2e-hosts-*` computer on
   it with `--device` before removing it.
+  Before the computer steps, `scripts/runner-host-e2e.sh` runs the archive's `silo-runner` against
+  the same engine and systemd user manager, without GitHub: `check -offline` on `/dev/kvm`,
+  `service register` (a unit ordered after the engine's and starting it when it is down), the
+  helper's log in the user journal, and `service unregister`.

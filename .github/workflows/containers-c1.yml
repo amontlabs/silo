@@ -126,6 +126,11 @@ jobs:
         with:
           runner: ubuntu-24.04
           target: x86_64-unknown-linux-gnu
+      # silo-runner is a Go program of its own and goes in the archive (runner/go.mod pins Go).
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: app/SiloUI/runner/go.mod
+          cache-dependency-path: app/SiloUI/runner/go.sum
       - name: Build and package the Dev engine
         timeout-minutes: 40
         run: python3 scripts/package-engine.py --platform linux-x64 --channel development --out-dir "$RUNNER_TEMP/engine-release" --source-commit "$GITHUB_SHA"

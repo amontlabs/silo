@@ -16,6 +16,8 @@ name="${SILO_E2E_COMPUTER:-e2e-hosts-ci}"
 fork="$name-fork"
 # Seconds to wait for the engine socket to answer.
 ready_timeout="${SILO_E2E_READY_TIMEOUT:-120}"
+# Seconds between attempts to create the computer when the VM image download fails.
+retry_wait="${SILO_E2E_RETRY_WAIT:-30}"
 
 case "$name" in
   e2e-hosts-*) ;;
@@ -34,6 +36,7 @@ print("\n".join(sorted(name for name in sys.argv[1:] if name in names)))' "$@"
 cleanup() {
   local status=$?
   trap - EXIT
+  rm -f "${stderr_file:-}"
   for computer in "$fork" "$name"; do
     if listed "$computer" 2>/dev/null | grep -qx -- "$computer"; then
       echo "Stopping and dropping $computer after a failed run"
@@ -64,10 +67,24 @@ if [[ -n "$existing" ]]; then
   echo "A computer named $name or $fork already exists; this test never touches it" >&2
   exit 1
 fi
+stderr_file="$(mktemp)"
 trap cleanup EXIT
 
 step "Creating $name"
-"$silo" create "$name" --linux --cpus 1 --memory 2 --disk 2
+# The VM image comes from a GitHub release, whose download endpoint sometimes answers 504 for a
+# while: a download failure is retried, anything else fails at once.
+for attempt in 1 2 3; do
+  if "$silo" create "$name" --linux --cpus 1 --memory 2 --disk 2 2> "$stderr_file"; then
+    break
+  fi
+  cat "$stderr_file" >&2
+  if ((attempt == 3)) || ! grep -q "could not download the VM image" "$stderr_file"; then
+    exit 1
+  fi
+  echo "The VM image download failed (attempt $attempt of 3); trying again in ${retry_wait} s" >&2
+  if listed "$name" | grep -qx -- "$name"; then "$silo" drop "$name" || true; fi
+  sleep "$retry_wait"
+done
 
 step "Starting $name"
 "$silo" start "$name"

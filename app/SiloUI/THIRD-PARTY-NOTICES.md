@@ -50,6 +50,21 @@ list comes from `go list -deps` for the actual guest build target; upstream
 `go.sum` and the Go checksum database verify module source. Corresponding
 source and redistribution review remain part of release preparation.
 
+# silo-runner
+
+The Linux engine archives include `silo-runner`, Silo's own Go program (`app/SiloUI/runner`), built
+with Go 1.27.3 and statically linked. It links these Go modules; their licenses are in
+`resources/silo-runner-licenses/`, with the Go license:
+
+- `github.com/actions/scaleset` v0.5.0 (GitHub's runner scale set client), MIT.
+- `github.com/golang-jwt/jwt/v5` v5.3.1, MIT.
+- `github.com/google/uuid` v1.6.0, BSD-3-Clause.
+- `gopkg.in/yaml.v3` v3.0.1, MIT and Apache-2.0 (its `NOTICE` is included).
+- The Go standard library and runtime, BSD-3-Clause.
+
+`silo-runner` does not bundle GitHub's runner program: the `silo-linux` recipe downloads it into each
+computer, checked against a pinned SHA-256.
+
 # Silo guest image: Selkies desktop streamer and codecs
 
 Silo's published guest images from `ubuntu-24.04-v4` on (GitHub release `guest-ubuntu-24.04-v4` and

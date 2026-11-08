@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"log/slog"
@@ -31,8 +32,10 @@ type Deps struct {
 	Checker  AccessChecker
 	Releases ReleaseSource
 	Disk     func(path string) (int, error)
-	Logger   *slog.Logger
-	Now      func() time.Time
+	// Host describes the machine; the zero value is not a Linux host and checks nothing.
+	Host   Host
+	Logger *slog.Logger
+	Now    func() time.Time
 }
 
 // tickEvery is how often the fleet plans on its own, retrying whatever failed.
@@ -46,6 +49,9 @@ func NewDeps(cfg *Config, logger *slog.Logger) (*Deps, error) {
 	target, err := ParseTarget(cfg.GitHub.ConfigURL)
 	if err != nil {
 		return nil, err
+	}
+	if env := cfg.GitHub.Auth.TokenEnv; env != "" && os.Getenv(env) == "" {
+		return nil, fmt.Errorf("github.auth.tokenEnv names %s, which is empty in this environment (under systemd, put %s=... in the file ~/.config/silo-runner/env, mode 0600)", env, env)
 	}
 	api, err := newScaleClient(cfg)
 	if err != nil {
@@ -63,6 +69,7 @@ func NewDeps(cfg *Config, logger *slog.Logger) (*Deps, error) {
 			Token:   token,
 		},
 		Releases: GitHubReleases{},
+		Host:     RealHost(),
 		Logger:   logger,
 		Now:      time.Now,
 	}, nil
@@ -103,6 +110,16 @@ func Run(ctx context.Context, cfg *Config, deps *Deps) error {
 	logger := deps.Logger
 	if deps.Now == nil {
 		deps.Now = time.Now
+	}
+	report, err := ApplyHost(cfg, deps.Host)
+	if err != nil {
+		return err
+	}
+	if report.LinuxHost {
+		logger.Info(report.Describe())
+	}
+	for _, warning := range SecretFileWarnings(cfg, envFile()) {
+		logger.Warn(warning)
 	}
 	if err := CheckAccess(ctx, cfg, deps); err != nil {
 		return err
@@ -222,9 +239,10 @@ func SignalContext() (context.Context, context.CancelFunc) {
 	return signal.NotifyContext(context.Background(), os.Interrupt, terminateSignal)
 }
 
-// InstallRecipes writes the shipped runner recipes into the project directory without
-// replacing a recipe that is already there.
-func InstallRecipes(projectDir string, out func(format string, args ...any)) error {
+// InstallRecipes writes the shipped runner recipes into the project directory. A recipe that is
+// already there is kept, unless replace is set: then it is moved to <name>.yaml.bak (replacing an
+// older .bak) and the shipped one is written, unless the two are identical.
+func InstallRecipes(projectDir string, replace bool, out func(format string, args ...any)) error {
 	dir := filepath.Join(projectDir, ".silo", "recipes")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
@@ -235,13 +253,23 @@ func InstallRecipes(projectDir string, out func(format string, args ...any)) err
 	}
 	for _, entry := range entries {
 		target := filepath.Join(dir, entry.Name())
-		if _, err := os.Stat(target); err == nil {
-			out("kept the existing %s\n", target)
-			continue
-		}
 		data, err := shippedRecipes.ReadFile("recipes/" + entry.Name())
 		if err != nil {
 			return err
+		}
+		if existing, err := os.ReadFile(target); err == nil {
+			switch {
+			case !replace:
+				out("kept the existing %s\n", target)
+				continue
+			case bytes.Equal(existing, data):
+				out("%s is already the shipped recipe\n", target)
+				continue
+			}
+			if err := os.Rename(target, target+".bak"); err != nil {
+				return err
+			}
+			out("moved the existing %s to %s.bak\n", target, target)
 		}
 		if err := os.WriteFile(target, data, 0o644); err != nil {
 			return err
