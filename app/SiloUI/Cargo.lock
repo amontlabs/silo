@@ -5012,6 +5012,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "silo-container-shim"
+version = "0.1.0"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "silo-engine"
 version = "0.1.0"
 dependencies = [
