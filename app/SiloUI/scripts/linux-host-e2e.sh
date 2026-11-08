@@ -65,6 +65,27 @@ expect() {
   echo "$what: $got"
 }
 
+# What to read when the container cannot reach a public host: its resolver and routes, a direct
+# query to the gateway, and the gateway's and holder's own logs on the host.
+container_diagnostics() {
+  echo "== Diagnostics for $ctr" >&2
+  in_container sh -c 'cat /etc/resolv.conf; cat /proc/net/route; cat /proc/net/dev; getent hosts example.com || echo "getent: no answer"' >&2 || true
+  in_container python3 -c '
+import socket
+s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+s.settimeout(5)
+query = b"\x12\x34\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00\x07example\x03com\x00\x00\x01\x00\x01"
+try:
+    s.sendto(query, ("172.30.0.5", 53))
+    print("dns answer bytes:", len(s.recvfrom(512)[0]))
+except OSError as error:
+    print("dns query failed:", error)' >&2 || true
+  find "$HOME/.silo-dev" -path '*containers/computers/*/state/*.log' 2>/dev/null | while read -r log; do
+    echo "-- $log" >&2
+    tail -n 40 "$log" >&2 || true
+  done
+}
+
 container_checks() {
   step "Creating container computer $ctr"
   "$silo" create "$ctr" --container --cpus 1 --memory 2 --disk 2
@@ -104,6 +125,7 @@ print(rows.get(sys.argv[1], "missing"))' "$ctr")
     [[ "$code" == 200 ]] && break
     sleep 3
   done
+  if [[ "$code" != 200 ]]; then container_diagnostics; fi
   expect "public host" "$code" 200
   for target in 169.254.169.254 10.0.0.1 172.30.0.5 127.0.0.2; do
     result=$(in_container python3 -c '
