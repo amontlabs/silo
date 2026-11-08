@@ -30,6 +30,10 @@ case "$name" in
   *) echo "Test computers are named e2e-hosts-*, not $name" >&2; exit 2 ;;
 esac
 
+# The engine's files: the socket folder and the data folder the runtime home is under.
+engine_roots() { printf '%s\n' "$HOME/.silo-dev" "$HOME/.local/share/org.silo.dev"; }
+engine_find() { local root; while read -r root; do [[ -d "$root" ]] && find "$root" "$@" 2>/dev/null; done < <(engine_roots); true; }
+
 step() { printf '\n== %s\n' "$*"; }
 
 listed() {
@@ -82,9 +86,9 @@ try:
     print("dns answer bytes:", len(s.recvfrom(512)[0]))
 except OSError as error:
     print("dns query failed:", error)' >&2 || true
-  find "$HOME/.silo-dev" -path '*containers/computers/*/state/resolv.conf' -exec stat -c '%a %U %n' {} \; >&2 2>/dev/null || true
+  engine_find -path '*containers/computers/*/state/resolv.conf' -exec stat -c '%a %U %n' {} \; >&2 || true
   sudo dmesg 2>/dev/null | grep -iE 'apparmor|landlock|denied' | tail -n 15 >&2 || true
-  find "$HOME/.silo-dev" -path '*containers/computers/*/state/*.log' 2>/dev/null | while read -r log; do
+  engine_find -path '*containers/computers/*/state/*.log' | while read -r log; do
     echo "-- $log" >&2
     tail -n 40 "$log" >&2 || true
   done
@@ -138,7 +142,7 @@ print(rows.get(sys.argv[1], "missing"))' "$ctr")
   # No exec leaves its directory (pid file, process JSON with the environment) behind.
   leftovers=1
   for _ in $(seq 1 20); do
-    leftovers=$(find "$HOME/.silo-dev" -path "*containers/computers/$ctr/state/exec/*" 2>/dev/null | wc -l)
+    leftovers=$(engine_find -path "*containers/computers/$ctr/state/exec/*" | wc -l)
     [[ "$leftovers" == 0 ]] && break
     sleep 0.5
   done
@@ -176,7 +180,7 @@ except OSError:
 # values; the file `computers.credentials` reads for any Linux computer).
 usage_count() {
   local file
-  file=$(find "$HOME/.silo-dev" -path "*sandboxes/$ctr/logs/secret-usage.jsonl" 2>/dev/null | head -n 1)
+  file=$(engine_find -path "*sandboxes/$ctr/logs/secret-usage.jsonl" | head -n 1)
   if [[ -z "$file" ]]; then echo 0; return; fi
   python3 - "$file" "$1" "$2" <<'PY'
 import json, sys
@@ -236,7 +240,12 @@ container_network_features() {
   echo "allowed host: Bad credentials"
   local used
   used=$(wait_for_usage E2E_FAKE_TOKEN 10 api.github.com 1)
-  if ((used < 1)); then echo "the gateway recorded no use of the secret toward api.github.com" >&2; exit 1; fi
+  if ((used < 1)); then
+    echo "the gateway recorded no use of the secret toward api.github.com" >&2
+    engine_find -name 'secret-usage*' -exec sh -c 'echo "-- $1"; tail -n 5 "$1"' _ {} \; >&2
+    engine_find -path "*containers/computers/$ctr/state/gateway.log" -exec sh -c 'echo "-- $1"; tail -n 20 "$1"' _ {} \; >&2
+    exit 1
+  fi
   echo "uses recorded toward api.github.com: $used"
   in_container curl -sS --max-time 20 -o /dev/null -H 'Authorization: Bearer $MSB_E2E_FAKE_TOKEN' https://example.com/ || true
   sleep 2
