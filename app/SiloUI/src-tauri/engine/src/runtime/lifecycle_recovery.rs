@@ -661,6 +661,7 @@ mod tests {
             max_memory_gib: 1,
             workspace_storage_gib: 1,
             runtime_storage_gib: 1,
+            runtime: None,
             desktop: None,
         };
         write_metadata(

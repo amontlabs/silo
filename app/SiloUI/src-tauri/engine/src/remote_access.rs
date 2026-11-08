@@ -364,6 +364,7 @@ mod tests {
                     max_memory_gib: 4,
                     workspace_storage_gib: 10,
                     runtime_storage_gib: 10,
+                    runtime: None,
                     desktop: None,
                 }],
             },

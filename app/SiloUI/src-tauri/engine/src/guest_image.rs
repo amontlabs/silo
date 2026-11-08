@@ -27,7 +27,7 @@ pub(crate) struct GuestImageManifest {
     pub(crate) version: String,
     architecture: String,
     pub(crate) image_reference: String,
-    image_digest: String,
+    pub(crate) image_digest: String,
     pub(crate) archive_sha256: String,
     pub(crate) archive_bytes: u64,
     pub(crate) unpacked_bytes: u64,
@@ -285,6 +285,23 @@ pub fn is_imported_as(paths: &RuntimePaths, manifest: &GuestImageManifest) -> bo
     // creating `cache` beneath it would make the alias a real directory.
     let directory = paths.home.join("cache");
     directory.is_dir() && GlobalCache::new(&directory).is_ok_and(|cache| cached(&cache, manifest))
+}
+
+/// Unpacks the verified archive of `manifest` (an OCI image layout as a tar file) to `output`
+/// for a runtime that reads the archive itself rather than MicroSandbox's cache.
+pub(crate) fn extract_verified_archive(
+    paths: &RuntimePaths,
+    manifest: &GuestImageManifest,
+    output: &Path,
+) -> Result<(), RuntimeError> {
+    manifest.validate().map_err(RuntimeError::Unavailable)?;
+    let archive_path = manifest.archive_path(&paths.guest_image);
+    let mut downloaded = open_archive(&archive_path).map_err(RuntimeError::Unavailable)?;
+    hash_archive(&mut downloaded, manifest).map_err(RuntimeError::Unavailable)?;
+    let mut file = File::create(output).map_err(|_| {
+        RuntimeError::Unavailable("Silo could not prepare temporary VM image storage.".into())
+    })?;
+    unpack(&archive_path, &mut file, manifest.unpacked_bytes).map_err(RuntimeError::Unavailable)
 }
 
 /// Imports the pinned image from its downloaded archive unless the cache already holds it.

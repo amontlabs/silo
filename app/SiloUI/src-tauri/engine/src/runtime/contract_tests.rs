@@ -79,6 +79,7 @@ fn application_and_remote_snapshot_match_wire_contract() {
         max_memory_gib: 8,
         workspace_storage_gib: 10,
         runtime_storage_gib: 20,
+        runtime: None,
         desktop: None,
     };
     write_metadata(

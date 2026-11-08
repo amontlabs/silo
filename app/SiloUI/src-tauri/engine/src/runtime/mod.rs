@@ -455,9 +455,24 @@ pub struct ComputerConfiguration {
     pub(crate) runtime_storage_gib: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub desktop: Option<crate::desktop::DesktopConfiguration>,
+    /// The runtime the computer runs on; absent for a MicroSandbox virtual machine.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime: Option<ComputerRuntimeKind>,
+}
+
+/// A runtime other than MicroSandbox.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ComputerRuntimeKind {
+    /// A rootless crun container on a Linux host.
+    Container,
 }
 
 impl ComputerConfiguration {
+    pub fn is_container(&self) -> bool {
+        self.runtime == Some(ComputerRuntimeKind::Container)
+    }
+
     pub fn id(&self) -> &str {
         &self.id
     }
@@ -706,7 +721,14 @@ impl ApplicationSource {
         let mut value = serde_json::to_value(self)?;
         if let Some(computers) = value.get_mut("computers").and_then(Value::as_array_mut) {
             for computer in computers {
-                computer["kind"] = Value::String("linux".to_owned());
+                let kind = if computer.pointer("/configuration/runtime").and_then(Value::as_str)
+                    == Some("container")
+                {
+                    "container"
+                } else {
+                    "linux"
+                };
+                computer["kind"] = Value::String(kind.to_owned());
                 canonical_checkpoint_times(computer);
             }
         }
@@ -1527,6 +1549,23 @@ fn run_msb_process(
             crate::desktop_viewer_api::close_computer(computer);
         }
     }
+    match crate::containers::route(paths, args) {
+        crate::containers::Route::Container => return crate::containers::run(paths, args, timeout),
+        crate::containers::Route::MergeList => {
+            let answer = spawn_runtime_command(paths, args, timeout, report)?;
+            return crate::containers::merge_list(paths, args, answer);
+        }
+        crate::containers::Route::Runtime => {}
+    }
+    spawn_runtime_command(paths, args, timeout, report)
+}
+
+fn spawn_runtime_command(
+    paths: &RuntimePaths,
+    args: &[String],
+    timeout: Duration,
+    report: &dyn Fn(Value),
+) -> Result<CommandOutput, RuntimeError> {
     ensure_runtime_files(paths)?;
     if matches!(args.first().map(String::as_str), Some("start" | "restart")) {
         if let Some(computer) = args.get(1).filter(|name| validate_name(name).is_ok()) {
@@ -5901,9 +5940,10 @@ fn application_computer(
             }),
         ),
     };
+    let purpose = if configuration.is_container() { "Local container" } else { "Local MicroSandbox" };
     ApplicationComputer {
         configuration,
-        purpose: "Local MicroSandbox".into(),
+        purpose: purpose.into(),
         state,
         state_detail,
         can_dismiss_error: inspected.status == "Crashed"
@@ -6466,7 +6506,13 @@ fn create_computer_with_progress(
         workspace_storage_gib,
         runtime_storage_gib,
         desktop,
+        runtime,
     } = configuration;
+    if runtime.is_some() && desktop.is_some() {
+        return Err(RuntimeError::Invalid(
+            "A container computer has no desktop yet. Create it without one.".into(),
+        ));
+    }
     configuration_recovery::claim(paths, configuration)?;
     progress("computer-disk-preparation", name, 0);
     let preflight = (|| {
@@ -6505,8 +6551,11 @@ fn create_computer_with_progress(
     })();
     preflight?;
     progress("computer-image-preparation", name, 0);
-    let image = runner.prepare_guest_image(paths)?;
-    let args: Vec<String> = vec![
+    let image = match runtime {
+        Some(ComputerRuntimeKind::Container) => crate::containers::guest_image_reference()?,
+        None => runner.prepare_guest_image(paths)?,
+    };
+    let mut args: Vec<String> = vec![
         "create".into(),
         image,
         "--pull".into(),
@@ -6547,6 +6596,9 @@ fn create_computer_with_progress(
         "--quiet".into(),
         "--progress-json".into(),
     ];
+    if runtime.is_some() {
+        args.extend(["--label".into(), crate::containers::RUNTIME_LABEL.into()]);
+    }
     progress("computer-runtime-preparation", name, 0);
     if let Err(error) = runner.run(paths, &args, MUTATION_TIMEOUT) {
         return Err(with_cleanup_error(
@@ -6633,6 +6685,7 @@ pub fn create_disposable_test_computer(
         max_memory_gib: 1,
         workspace_storage_gib: 1,
         runtime_storage_gib: 2,
+        runtime: None,
         desktop: None,
     };
     let mut request = read_metadata(&paths.metadata)?;
@@ -6657,6 +6710,7 @@ pub fn create_disposable_desktop_computer(
         max_memory_gib: 4,
         workspace_storage_gib: 2,
         runtime_storage_gib: 6,
+        runtime: None,
         desktop: None,
     };
     let mut request = read_metadata(&paths.metadata)?;
@@ -9643,6 +9697,7 @@ esac
             max_memory_gib: 32,
             workspace_storage_gib: 60,
             runtime_storage_gib: 80,
+            runtime: None,
             desktop: None,
         }
     }
@@ -14623,6 +14678,7 @@ mod change_configuration_tests {
             max_memory_gib: 4,
             workspace_storage_gib: 10,
             runtime_storage_gib: 10,
+            runtime: None,
             desktop: None,
         }
     }
@@ -14882,6 +14938,7 @@ mod cross_kind_name_tests {
             max_memory_gib: 8,
             workspace_storage_gib: 10,
             runtime_storage_gib: 10,
+            runtime: None,
             desktop: None,
         }
     }

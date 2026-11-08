@@ -16,6 +16,7 @@ fn built_in_computer() -> ComputerConfiguration {
         max_memory_gib: 1,
         workspace_storage_gib: 1,
         runtime_storage_gib: 1,
+        runtime: None,
         desktop: Some(crate::desktop::DesktopConfiguration {
             start_with_computer: true,
             built_in: true,

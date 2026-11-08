@@ -223,6 +223,13 @@ impl Target {
                 } else {
                     linux_user(paths, name)?
                 };
+                if crate::containers::route(paths, &["inspect".to_owned(), name.clone()])
+                    == crate::containers::Route::Container
+                {
+                    let (program, args) = crate::containers::guest_plan(paths, name, user, argv, env)
+                        .map_err(|message| GuestError::new(ErrorCode::NotRunning, message))?;
+                    return Ok(Plan { program, args, envs: Vec::new() });
+                }
                 let mut args = vec![
                     "exec".to_owned(),
                     name.clone(),

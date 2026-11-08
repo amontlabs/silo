@@ -826,6 +826,7 @@ fn computer_configuration() -> ComputerConfiguration {
         max_memory_gib: 1,
         workspace_storage_gib: 1,
         runtime_storage_gib: 1,
+        runtime: None,
         desktop: None,
     }
 }
@@ -3110,6 +3111,7 @@ fn delete_fixture(
             workspace_storage_gib,
             runtime_storage_gib,
             desktop,
+            runtime: None,
         });
         save(&paths, FORK_ID, record).unwrap();
     }
