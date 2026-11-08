@@ -108,13 +108,15 @@ pub(crate) fn make_container(home: &Path, name: &str) {
         max_memory_mib: 1024,
         root_disk_mib: 1024,
         workspace_mib: 1024,
-        labels: Vec::new(),
+        labels: vec![("silo.managed".into(), "true".into())],
         env: Vec::new(),
         image_digest: "sha256:d".into(),
         image_reference: "r:1".into(),
         layers: Vec::new(),
         created_ms: 1,
         started_once: false,
+        secrets: Vec::new(),
+        github: false,
     })
     .unwrap();
 }

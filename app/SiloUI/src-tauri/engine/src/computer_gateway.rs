@@ -10,8 +10,8 @@
 //! `shutdown`).
 //!
 //! This module starts and drives one gateway for an already-open TAP descriptor. It creates no
-//! namespace and runs no container: the container runtime (a later phase) opens the TAP and
-//! calls [`Gateway::start`]. The macOS supervisor
+//! namespace and runs no container: the container runtime
+//! ([`crate::containers::lifecycle`]) opens the TAP and calls [`Gateway::start`]. The macOS supervisor
 //! (`macos_computers/proxy/supervisor.rs`) speaks the same protocol for VMs; the framing, the
 //! descriptor handoff, the readiness checks and the acknowledgement rule are shared in
 //! [`crate::gateway_control`].
@@ -20,11 +20,13 @@
 //! anything but its own acknowledgement, or hits a broken link stops the gateway, and every
 //! later call answers "unavailable": a refused or half-applied secret change must never look
 //! applied, and a late acknowledgement must never be read as the answer to the next request.
-//! A stopped gateway is not restarted here; restart on failure is planned for CT3.
+//! A stopped gateway is not restarted: the container's registry sees it is gone, the computer
+//! reads as stopped (its network is gone, which fails closed), and a start brings up a new
+//! gateway with the secrets and GitHub access the engine holds.
 //!
 //! Dropping a [`Gateway`], [`Gateway::shutdown`] and a failed update all wait for the process,
 //! and a gateway that hangs takes up to about 10 s to stop (5 s for the shutdown exchange and
-//! 5 s for the process to exit, then it is killed). CT3's caller must therefore not drop a
+//! 5 s for the process to exit, then it is killed). The caller must therefore not drop a
 //! `Gateway` on an async worker thread; stop it on a blocking thread.
 
 use crate::gateway_control::{
@@ -239,9 +241,84 @@ impl Gateway {
         Ok(response.get("counters").cloned().unwrap_or(Value::Null))
     }
 
+    /// The TCP ports published on the host's loopback now: the ones named at start and the ones
+    /// added since, with the host port the gateway bound for each.
+    pub fn ports(&mut self) -> Result<Vec<PublishedPort>, String> {
+        self.port_request(serde_json::json!({"version": PROTOCOL_VERSION, "type": "ports"}))
+    }
+
+    /// Publishes a guest TCP port on the host's loopback (`host_port` 0 lets the gateway pick),
+    /// and returns the ports published after it.
+    pub fn add_port(
+        &mut self,
+        guest_port: u16,
+        host_port: u16,
+    ) -> Result<Vec<PublishedPort>, String> {
+        self.port_request(serde_json::json!({
+            "version": PROTOCOL_VERSION, "type": "port_add",
+            "guest_port": guest_port, "host_port": host_port,
+        }))
+    }
+
+    pub fn remove_port(&mut self, guest_port: u16) -> Result<Vec<PublishedPort>, String> {
+        self.port_request(serde_json::json!({
+            "version": PROTOCOL_VERSION, "type": "port_remove", "guest_port": guest_port,
+        }))
+    }
+
+    /// Whether the gateway can open a connection to the guest port through its listener.
+    pub fn probe_port(&mut self, guest_port: u16) -> Result<bool, String> {
+        self.ensure_running()?;
+        let request = serde_json::json!({
+            "version": PROTOCOL_VERSION, "type": "port_probe", "guest_port": guest_port,
+        });
+        let response = self.exchange(&request)?;
+        match (
+            response.get("type").and_then(Value::as_str),
+            response.get("reachable").and_then(Value::as_bool),
+        ) {
+            (Some("port_probe"), Some(reachable)) if has_version(&response) => Ok(reachable),
+            _ => self.unexpected(&response),
+        }
+    }
+
+    fn port_request(&mut self, request: Value) -> Result<Vec<PublishedPort>, String> {
+        self.ensure_running()?;
+        let response = self.exchange(&request)?;
+        if response.get("type").and_then(Value::as_str) != Some("ports") || !has_version(&response)
+        {
+            return self.unexpected(&response);
+        }
+        serde_json::from_value::<Vec<PublishedPort>>(
+            response.get("ports").cloned().unwrap_or(Value::Null),
+        )
+        .ok()
+        .filter(|ports| ports.iter().all(|port| port.protocol == "tcp"))
+        .map_or_else(|| self.unexpected(&response), Ok)
+    }
+
+    /// A refusal the gateway reports in order (`port_rejected`) leaves the link in step; any
+    /// other answer means it is no longer the answer to this request, so the gateway stops.
+    fn unexpected<T>(&mut self, response: &Value) -> Result<T, String> {
+        if response.get("type").and_then(Value::as_str) == Some("error")
+            && response.get("code").and_then(Value::as_str) == Some("port_rejected")
+            && has_version(response)
+        {
+            return Err("The computer network gateway refused the port.".into());
+        }
+        self.fail();
+        Err(UNAVAILABLE.into())
+    }
+
     /// Asks the gateway to stop, then makes sure it has. A hung gateway takes up to about 10 s;
     /// see the module documentation.
     pub fn shutdown(mut self) {
+        self.stop();
+    }
+
+    /// Stops the gateway like [`Gateway::shutdown`] without consuming it, for a gateway that is
+    /// shared. Every later call answers "unavailable".
+    pub fn close(&mut self) {
         self.stop();
     }
 
@@ -320,6 +397,10 @@ impl Drop for Gateway {
     fn drop(&mut self) {
         self.stop();
     }
+}
+
+fn has_version(response: &Value) -> bool {
+    response.get("version").and_then(Value::as_u64) == Some(u64::from(PROTOCOL_VERSION))
 }
 
 fn zeroize_value(value: &mut Value) {
@@ -442,13 +523,44 @@ pub fn computer_ca(
 ) -> Result<(String, Zeroizing<String>), String> {
     use crate::macos_computers::proxy_ca;
     let material = proxy_ca::get_or_create(computer_id, || {
-        let (cert, key) = generate_ca(binary)?;
-        proxy_ca::CaMaterial::from_pem(cert, key.to_string())
+        let (cert, mut key) = generate_ca(binary)?;
+        // Moved, not copied: the generator's buffer is left empty.
+        proxy_ca::CaMaterial::from_pem(cert, std::mem::take(&mut *key))
     })?;
     Ok((
         material.certificate_pem().to_owned(),
         Zeroizing::new(material.private_key_pem().to_owned()),
     ))
+}
+
+#[cfg(test)]
+impl Gateway {
+    /// A gateway whose process is a long sleep: only the control link is real.
+    pub(crate) fn for_test(control: UnixStream) -> Gateway {
+        const CERT: &str = "-----BEGIN CERTIFICATE-----\nx\n-----END CERTIFICATE-----";
+        let child = Command::new("sleep").arg("30").spawn().unwrap();
+        control.set_read_timeout(Some(UPDATE_TIMEOUT)).unwrap();
+        control.set_write_timeout(Some(UPDATE_TIMEOUT)).unwrap();
+        Gateway {
+            child: Some(child),
+            control,
+            revision: 0,
+            ready: Ready {
+                version: 1,
+                kind: "ready".into(),
+                slot: 7,
+                guest_ipv4: Ipv4Addr::new(172, 30, 0, 6),
+                gateway_ipv4: Ipv4Addr::new(172, 30, 0, 5),
+                prefix_len: 30,
+                dns_ipv4: Ipv4Addr::new(172, 30, 0, 5),
+                guest_mac: [2, 0, 0, 0, 0, 7],
+                gateway_mac: [2, 0, 0, 0, 0, 8],
+                mtu: 1500,
+                ca_cert_pem: CERT.into(),
+                loopback_ports: Vec::new(),
+            },
+        }
+    }
 }
 
 #[cfg(test)]
@@ -608,28 +720,81 @@ mod tests {
 
     /// A gateway whose process is a long sleep: only the control link is real.
     fn with_sleeping_child(control: UnixStream) -> Gateway {
-        let child = Command::new("sleep").arg("30").spawn().unwrap();
-        control.set_read_timeout(Some(UPDATE_TIMEOUT)).unwrap();
-        control.set_write_timeout(Some(UPDATE_TIMEOUT)).unwrap();
-        Gateway {
-            child: Some(child),
-            control,
-            revision: 0,
-            ready: Ready {
-                version: 1,
-                kind: "ready".into(),
-                slot: 7,
-                guest_ipv4: Ipv4Addr::new(172, 30, 0, 6),
-                gateway_ipv4: Ipv4Addr::new(172, 30, 0, 5),
-                prefix_len: 30,
-                dns_ipv4: Ipv4Addr::new(172, 30, 0, 5),
-                guest_mac: [2, 0, 0, 0, 0, 7],
-                gateway_mac: [2, 0, 0, 0, 0, 8],
-                mtu: 1500,
-                ca_cert_pem: CERT.into(),
-                loopback_ports: Vec::new(),
-            },
-        }
+        Gateway::for_test(control)
+    }
+
+    #[test]
+    fn ports_are_published_and_listed_through_the_control_link() {
+        let (control, mut peer) = UnixStream::pair().unwrap();
+        let server = thread::spawn(move || {
+            let mut seen = Vec::new();
+            for reply in [
+                serde_json::json!({"type": "ports", "version": 1, "ports": [
+                    {"host_port": 40001, "guest_port": 3000, "protocol": "tcp"}]}),
+                serde_json::json!({"type": "port_probe", "version": 1, "reachable": true}),
+                serde_json::json!({"type": "ports", "version": 1, "ports": []}),
+                serde_json::json!({"type": "ports", "version": 1, "ports": []}),
+            ] {
+                let request = read_response(&mut peer).unwrap();
+                write_frame(&mut peer, &serde_json::to_vec(&reply).unwrap()).unwrap();
+                seen.push(request);
+            }
+            seen
+        });
+        let mut gateway = with_sleeping_child(control);
+        let added = gateway.add_port(3000, 0).unwrap();
+        assert_eq!(added[0].host_port, 40001);
+        assert!(gateway.probe_port(3000).unwrap());
+        assert!(gateway.remove_port(3000).unwrap().is_empty());
+        assert!(gateway.ports().unwrap().is_empty());
+        let seen = server.join().unwrap();
+        assert_eq!(seen[0]["type"], "port_add");
+        assert_eq!(seen[0]["guest_port"], 3000);
+        assert_eq!(seen[0]["host_port"], 0);
+        assert_eq!(seen[1]["type"], "port_probe");
+        assert_eq!(seen[2]["type"], "port_remove");
+        assert_eq!(seen[3]["type"], "ports");
+        // Port requests are not policy updates: they use no revision.
+        assert_eq!(gateway.revision, 0);
+        assert!(gateway.is_running());
+    }
+
+    #[test]
+    fn a_refused_port_leaves_the_link_in_step_and_any_other_answer_stops_the_gateway() {
+        let (control, mut peer) = UnixStream::pair().unwrap();
+        let server = thread::spawn(move || {
+            for reply in [
+                serde_json::json!({"type": "error", "version": 1, "code": "port_rejected"}),
+                // The answer to a different request, or a port list with a UDP port.
+                serde_json::json!({"type": "ack", "version": 1, "revision": 1, "closed_previous_generation": true}),
+            ] {
+                read_response(&mut peer).unwrap();
+                write_frame(&mut peer, &serde_json::to_vec(&reply).unwrap()).unwrap();
+            }
+        });
+        let mut gateway = with_sleeping_child(control);
+        let refused = gateway.add_port(3000, 80).unwrap_err();
+        assert!(refused.contains("refused the port"), "{refused}");
+        assert!(gateway.is_running());
+        assert!(gateway.ports().is_err());
+        assert!(!gateway.is_running());
+        server.join().unwrap();
+        assert!(gateway.add_port(3000, 0).is_err());
+    }
+
+    #[test]
+    fn a_port_list_that_is_not_tcp_stops_the_gateway() {
+        let (control, mut peer) = UnixStream::pair().unwrap();
+        let server = thread::spawn(move || {
+            read_response(&mut peer).unwrap();
+            let reply = serde_json::json!({"type": "ports", "version": 1, "ports": [
+                {"host_port": 40001, "guest_port": 3000, "protocol": "udp"}]});
+            write_frame(&mut peer, &serde_json::to_vec(&reply).unwrap()).unwrap();
+        });
+        let mut gateway = with_sleeping_child(control);
+        assert!(gateway.ports().is_err());
+        server.join().unwrap();
+        assert!(!gateway.is_running());
     }
 
     #[test]

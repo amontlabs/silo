@@ -1,6 +1,7 @@
 mod control;
 mod frames;
 mod network;
+mod ports;
 
 use std::ffi::OsStr;
 use std::io::{self, Write};
@@ -118,6 +119,7 @@ fn run() -> Result<(), GatewayError> {
     let github_hosts =
         GithubHosts::from_init(&init).map_err(|_| GatewayError::InvalidConfiguration)?;
     let carrier = init.profile.carrier();
+    let container = init.profile == control::Profile::Container;
     // A container's fd 3 must be a TAP device of the right kind; a descriptor of any other
     // kind is refused before any frame is read.
     if frames::prepare_carrier(frame_socket.as_raw_fd(), carrier).is_err() {
@@ -202,6 +204,7 @@ fn run() -> Result<(), GatewayError> {
                 &stats,
                 &frame_socket,
                 &github_hosts,
+                container,
                 &mut revision,
             )?
         {
@@ -260,6 +263,7 @@ fn run() -> Result<(), GatewayError> {
                 &stats,
                 &frame_socket,
                 &github_hosts,
+                container,
                 &mut revision,
             )? {
                 return Ok(());
@@ -277,6 +281,7 @@ fn dispatch_requests(
     stats: &FrameStats,
     frame_socket: &OwnedFd,
     github_hosts: &GithubHosts,
+    container: bool,
     revision: &mut u64,
 ) -> Result<bool, GatewayError> {
     for request in requests {
@@ -347,6 +352,33 @@ fn dispatch_requests(
                         counters: stats
                             .snapshot_with_backend_tx_ring_drops(network.tx_ring_overflows()),
                     },
+                )
+                .map_err(|_| GatewayError::Control)?;
+            }
+            Request::PortProbe { version, .. } if version == control::PROTOCOL_VERSION => {
+                if !(container && ports::probe_in_background(network, &request, control)) {
+                    control::write_response(
+                        control,
+                        &Response::Error(ErrorResponse::for_revision(None, "port_rejected")),
+                    )
+                    .map_err(|_| GatewayError::Control)?;
+                }
+            }
+            Request::Ports { version }
+            | Request::PortAdd { version, .. }
+            | Request::PortRemove { version, .. }
+                if version == control::PROTOCOL_VERSION =>
+            {
+                let response = if container {
+                    ports::handle(network, &request)
+                } else {
+                    None
+                };
+                control::write_response(
+                    control,
+                    &response.unwrap_or_else(|| {
+                        Response::Error(ErrorResponse::for_revision(None, "port_rejected"))
+                    }),
                 )
                 .map_err(|_| GatewayError::Control)?;
             }

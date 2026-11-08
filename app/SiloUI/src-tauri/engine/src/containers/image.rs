@@ -356,6 +356,8 @@ mod tests {
             layers: Vec::new(),
             created_ms: 1,
             started_once: true,
+            secrets: Vec::new(),
+            github: false,
         }
     }
 

@@ -309,7 +309,7 @@ fn control(socket: &Path, request: Value) -> Result<Vec<Published>, String> {
     Ok(ports)
 }
 
-fn socket_path(paths: &RuntimePaths, computer: &str) -> std::path::PathBuf {
+pub(crate) fn socket_path(paths: &RuntimePaths, computer: &str) -> std::path::PathBuf {
     use sha2::{Digest, Sha256};
     let digest = format!("{:x}", Sha256::digest(computer.as_bytes()));
     paths

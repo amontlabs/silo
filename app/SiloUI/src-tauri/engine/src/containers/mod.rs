@@ -19,10 +19,29 @@ pub mod layout;
 #[cfg(target_os = "linux")]
 pub mod lifecycle;
 pub mod oci;
+#[cfg(target_os = "linux")]
+pub mod ports;
+pub mod secrets;
 pub mod tools;
 pub mod users;
 
 pub use args::RUNTIME_LABEL;
+
+/// The secret material one runtime command may use: the values of the general secrets assigned
+/// to the computer (name, value, allowed hosts) and the GitHub access profile. It is read from
+/// the host credential store by the caller, handed to the gateway and never kept or logged.
+pub struct Material<'a> {
+    pub secrets: &'a [(String, String, Vec<String>)],
+    pub github_profile: &'a str,
+}
+
+impl Material<'static> {
+    /// No secrets and GitHub access off.
+    pub const NONE: Material<'static> = Material {
+        secrets: &[],
+        github_profile: crate::runtime::DISABLED_GITHUB_PROFILE,
+    };
+}
 
 use crate::runtime::{CommandOutput, RuntimeError, RuntimePaths};
 use args::{Command, Create};
@@ -103,6 +122,7 @@ pub fn run(
     paths: &RuntimePaths,
     args: &[String],
     timeout: Duration,
+    material: &Material<'_>,
 ) -> Result<CommandOutput, RuntimeError> {
     let command = args::parse(args).map_err(RuntimeError::Invalid)?;
     match command {
@@ -110,7 +130,12 @@ pub fn run(
         Command::Inspect { name } => inspect(paths, &name).map(|value| output(value.to_string())),
         Command::List { .. } => Ok(output(Value::Array(listed(paths, None)).to_string())),
         Command::Unsupported { verb } => Err(not_yet(&verb)),
-        Command::Start { name } => start(paths, &name, timeout).map(|()| output(String::new())),
+        Command::Start { name } => {
+            start(paths, &name, timeout, material).map(|()| output(String::new()))
+        }
+        Command::Modify(modify) => {
+            modify_computer(paths, &modify, material).map(|()| output(String::new()))
+        }
         Command::Stop { name } => stop(paths, &name).map(|()| output(String::new())),
         Command::Remove { name } => remove(paths, &name).map(|()| output(String::new())),
         Command::Exec(exec) => exec_and_wait(paths, &exec, timeout),
@@ -156,6 +181,164 @@ fn create_computer(paths: &RuntimePaths, create: &Create) -> Result<(), RuntimeE
     dir.write_record(&record).map_err(failed)
 }
 
+/// Records a secret change and applies it to the running gateway, if there is one. The gateway
+/// is updated first, so a removal takes effect before it is written down; any failed exchange
+/// has already stopped the gateway (it fails closed), so a change that is not confirmed is
+/// never left looking applied.
+fn modify_computer(
+    paths: &RuntimePaths,
+    modify: &args::Modify,
+    material: &Material<'_>,
+) -> Result<(), RuntimeError> {
+    let dir = Layout::new(&paths.home).computer(&modify.name);
+    let before = record_of(paths, &modify.name)?;
+    // The change is checked before anything is applied; it is written below, to the record as it
+    // is then, not to a copy read before the gateway exchange.
+    secrets::apply_to_record(&mut before.clone(), modify).map_err(RuntimeError::Invalid)?;
+    #[cfg(target_os = "linux")]
+    live_update(paths, &before, modify, material)?;
+    #[cfg(not(target_os = "linux"))]
+    let _ = material;
+    record_change(&dir, modify)
+}
+
+/// Writes a `modify` into the record as it is now, so a change another request made while this
+/// one waited on the gateway is kept.
+fn record_change(dir: &layout::ComputerDir, modify: &args::Modify) -> Result<(), RuntimeError> {
+    let mut refused = None;
+    dir.update_record(|record| {
+        refused = secrets::apply_to_record(record, modify).err();
+    })
+    .map_err(RuntimeError::Unavailable)?;
+    // The check depends on the change alone, so it passed before; were it ever to fail the record
+    // would hold a half-applied change, so it is reported rather than hidden.
+    match refused {
+        Some(detail) => Err(RuntimeError::Invalid(detail)),
+        None => Ok(()),
+    }
+}
+
+/// Why a change to the running gateway did not apply.
+#[cfg(target_os = "linux")]
+enum LiveFailure {
+    /// Refused before the gateway was asked: the gateway is as it was.
+    Refused(RuntimeError),
+    /// An exchange with the gateway failed. The gateway fails closed: it has stopped.
+    Exchange(String),
+}
+
+#[cfg(target_os = "linux")]
+fn live_update(
+    paths: &RuntimePaths,
+    before: &ComputerRecord,
+    modify: &args::Modify,
+    material: &Material<'_>,
+) -> Result<(), RuntimeError> {
+    let name = modify.name.as_str();
+    if lifecycle::status(paths, name, before) != lifecycle::Status::Running {
+        return Ok(());
+    }
+    let Some(running) = lifecycle::running(name) else {
+        return Ok(());
+    };
+    match apply_live(&running, before, modify, material) {
+        Ok(()) => Ok(()),
+        Err(LiveFailure::Refused(error)) => Err(error),
+        Err(LiveFailure::Exchange(detail)) => {
+            let tools = tools::Tools::locate(paths).ok();
+            Err(stopped_after_failed_exchange(
+                paths,
+                tools.as_ref(),
+                before,
+                detail,
+            ))
+        }
+    }
+}
+
+/// A gateway that failed an exchange has stopped and the computer has no network, but its
+/// processes run on: the computer is stopped too, so what the disk and the interface say matches
+/// what is true. The error names both.
+#[cfg(target_os = "linux")]
+fn stopped_after_failed_exchange(
+    paths: &RuntimePaths,
+    tools: Option<&tools::Tools>,
+    record: &ComputerRecord,
+    detail: String,
+) -> RuntimeError {
+    let stopped = tools.map(|tools| lifecycle::stop(paths, tools, &record.name, record));
+    eprintln!("Updating container computer {}: {detail}", record.name);
+    RuntimeError::Unavailable(match stopped {
+        Some(Ok(())) => format!(
+            "Silo could not update the network gateway of container computer {}, so it stopped the computer. Start it again.",
+            record.name
+        ),
+        _ => format!(
+            "Silo could not update the network gateway of container computer {}, and could not stop the computer. Stop it before using it.",
+            record.name
+        ),
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn apply_live(
+    running: &lifecycle::Running,
+    before: &ComputerRecord,
+    modify: &args::Modify,
+    material: &Material<'_>,
+) -> Result<(), LiveFailure> {
+    use crate::computer_gateway::Secret;
+    use zeroize::Zeroizing;
+    let mut active = running.active_secrets();
+    let mut gateway = running.gateway();
+    for spec in modify.put.iter().filter(|_| !modify.next_start) {
+        if spec.name == args::GITHUB_SECRET_NAME {
+            if !before.github {
+                return Err(LiveFailure::Refused(RuntimeError::Invalid(
+                    "This computer was started without GitHub access. Restart it to turn GitHub access on."
+                        .into(),
+                )));
+            }
+            gateway
+                .set_github_profile(Some(material.github_profile))
+                .map_err(LiveFailure::Exchange)?;
+            continue;
+        }
+        let Some((_, value, hosts)) = material
+            .secrets
+            .iter()
+            .find(|(secret, _, _)| secret == &spec.name)
+        else {
+            return Err(LiveFailure::Refused(RuntimeError::Invalid(format!(
+                "The value of secret {} is not available to the engine.",
+                spec.name
+            ))));
+        };
+        gateway
+            .put_secret(&Secret {
+                name: spec.name.clone(),
+                value: Zeroizing::new(value.clone()),
+                allowed_hosts: hosts.clone(),
+            })
+            .map_err(LiveFailure::Exchange)?;
+        if !active.contains(&spec.name) {
+            active.push(spec.name.clone());
+        }
+        running.set_active(active.clone());
+    }
+    for removed in &modify.remove {
+        // The gateway refuses to remove a secret it does not hold, which would stop it.
+        if active.contains(removed) {
+            gateway
+                .remove_secret(removed)
+                .map_err(LiveFailure::Exchange)?;
+            active.retain(|name| name != removed);
+            running.set_active(active.clone());
+        }
+    }
+    Ok(())
+}
+
 fn new_record(create: &Create, image: &image::Unpacked) -> ComputerRecord {
     ComputerRecord {
         schema_version: RECORD_VERSION,
@@ -176,6 +359,8 @@ fn new_record(create: &Create, image: &image::Unpacked) -> ComputerRecord {
             .map(|d| d.as_millis() as u64)
             .unwrap_or(0),
         started_once: false,
+        secrets: Vec::new(),
+        github: create.github,
     }
 }
 
@@ -206,7 +391,12 @@ fn stopped_word(record: &ComputerRecord) -> &'static str {
 
 /// `inspect` in the shape the engine reads: the saved configuration the engine compares with its
 /// own (resources, root disk, workspace disk, labels) and, while running, the same as active.
-pub fn inspect_value(name: &str, record: &ComputerRecord, status: &str) -> Value {
+pub fn inspect_value(
+    name: &str,
+    record: &ComputerRecord,
+    status: &str,
+    active: &[String],
+) -> Value {
     let labels: serde_json::Map<String, Value> = record
         .labels
         .iter()
@@ -226,7 +416,7 @@ pub fn inspect_value(name: &str, record: &ComputerRecord, status: &str) -> Value
             "type": "Owned",
             "storage": {"kind": "disk", "capacity_mib": record.workspace_mib},
         }],
-        "secrets": [],
+        "network": secrets::network_value(record, None),
     });
     let mut value = json!({
         "name": name,
@@ -237,6 +427,7 @@ pub fn inspect_value(name: &str, record: &ComputerRecord, status: &str) -> Value
     });
     if status == "Running" {
         value["active_config"] = value["config"].clone();
+        value["active_config"]["network"] = secrets::network_value(record, Some(active));
         value["runtime_instance_id"] = json!(format!("container-{name}-{}", record.created_ms));
     }
     value
@@ -248,6 +439,7 @@ fn inspect(paths: &RuntimePaths, name: &str) -> Result<Value, RuntimeError> {
         name,
         &record,
         state_word(paths, name, &record),
+        &active_secrets(name),
     ))
 }
 
@@ -289,10 +481,69 @@ pub fn merge_list(
 }
 
 #[cfg(target_os = "linux")]
-fn start(paths: &RuntimePaths, name: &str, timeout: Duration) -> Result<(), RuntimeError> {
+fn active_secrets(name: &str) -> Vec<String> {
+    lifecycle::active_secrets(name)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn active_secrets(_: &str) -> Vec<String> {
+    Vec::new()
+}
+
+#[cfg(target_os = "linux")]
+fn start(
+    paths: &RuntimePaths,
+    name: &str,
+    timeout: Duration,
+    material: &Material<'_>,
+) -> Result<(), RuntimeError> {
     require_host()?;
     let tools = tools::Tools::locate(paths)?;
-    lifecycle::start(paths, &tools, name, timeout)
+    let running_before =
+        lifecycle::status(paths, name, &record_of(paths, name)?) == lifecycle::Status::Running;
+    lifecycle::start(paths, &tools, name, timeout, material)?;
+    if running_before {
+        return Ok(());
+    }
+    // A computer that cannot trust its gateway's certificates would fail every request to a host
+    // a secret is allowed for, so it does not stay up.
+    install_gateway_ca(paths, name).map_err(|error| {
+        eprintln!("Starting container computer {name}: the gateway certificate: {error:?}");
+        let _ = stop(paths, name);
+        RuntimeError::Unavailable(format!(
+            "Silo could not add its network gateway's certificate to the trust store of container computer {name}, so it did not start. The image needs update-ca-certificates."
+        ))
+    })
+}
+
+/// The root command that adds the gateway CA (bound at [`oci::GATEWAY_CA_PATH`]) to the guest's
+/// trust bundle. `--fresh` rebuilds the certificate links, so a CA an earlier start left in the
+/// computer's own files is dropped when it is no longer the one bound.
+#[cfg(target_os = "linux")]
+fn gateway_ca_command(name: &str) -> args::Exec {
+    args::Exec {
+        name: name.to_owned(),
+        user: Some("root".into()),
+        env: Vec::new(),
+        workdir: Some("/".into()),
+        no_start: true,
+        timeout: Some(GATEWAY_CA_TIMEOUT),
+        argv: vec!["update-ca-certificates".into(), "--fresh".into()],
+    }
+}
+
+/// How long `update-ca-certificates` may take, hooks (a Java trust store, say) included.
+#[cfg(target_os = "linux")]
+const GATEWAY_CA_TIMEOUT: Duration = Duration::from_secs(120);
+
+#[cfg(target_os = "linux")]
+fn install_gateway_ca(paths: &RuntimePaths, name: &str) -> Result<(), RuntimeError> {
+    exec_and_wait(
+        paths,
+        &gateway_ca_command(name),
+        GATEWAY_CA_TIMEOUT + Duration::from_secs(10),
+    )
+    .map(|_| ())
 }
 
 #[cfg(target_os = "linux")]
@@ -309,7 +560,7 @@ fn remove(paths: &RuntimePaths, name: &str) -> Result<(), RuntimeError> {
 }
 
 #[cfg(not(target_os = "linux"))]
-fn start(_: &RuntimePaths, _: &str, _: Duration) -> Result<(), RuntimeError> {
+fn start(_: &RuntimePaths, _: &str, _: Duration, _: &Material<'_>) -> Result<(), RuntimeError> {
     require_host()
 }
 
@@ -496,6 +747,7 @@ mod tests {
                 ("silo.machine-id".into(), "id1".into()),
             ],
             env: Vec::new(),
+            github: false,
         };
         let image = image::Unpacked {
             rootfs: PathBuf::new(),
@@ -508,6 +760,147 @@ mod tests {
         let mut record = new_record(&create, &image);
         record.started_once = started;
         dir.write_record(&record).unwrap();
+    }
+
+    fn modification(name: &str, put: &[&str], remove: &[&str]) -> args::Modify {
+        args::Modify {
+            name: name.into(),
+            put: put
+                .iter()
+                .map(|secret| args::SecretSpec {
+                    name: (*secret).into(),
+                    allowed_hosts: vec!["api.example.test".into()],
+                })
+                .collect(),
+            remove: remove.iter().map(|secret| (*secret).to_owned()).collect(),
+            next_start: false,
+        }
+    }
+
+    #[test]
+    fn a_change_is_written_to_the_record_as_it_is_when_the_exchange_is_over() {
+        let home = tempfile::tempdir().unwrap();
+        make(home.path(), "box", true);
+        let dir = Layout::new(home.path()).computer("box");
+        let before = dir.read_record().unwrap();
+        // Another request assigns a secret while this one waits on the gateway.
+        dir.update_record(|record| {
+            record.secrets.push(layout::SecretRecord {
+                name: "OTHER".into(),
+                allowed_hosts: vec!["other.example.test".into()],
+            });
+            record.started_once = true;
+        })
+        .unwrap();
+        record_change(&dir, &modification("box", &["MINE"], &[])).unwrap();
+        let after = dir.read_record().unwrap();
+        let names: Vec<&str> = after.secrets.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(
+            names,
+            ["MINE", "OTHER"],
+            "the concurrent assignment was lost"
+        );
+        assert!(before.secrets.is_empty());
+        // A removal takes only what it names.
+        record_change(&dir, &modification("box", &[], &["MINE"])).unwrap();
+        let names: Vec<String> = dir
+            .read_record()
+            .unwrap()
+            .secrets
+            .into_iter()
+            .map(|s| s.name)
+            .collect();
+        assert_eq!(names, ["OTHER"]);
+    }
+
+    #[cfg(target_os = "linux")]
+    fn unreachable_tools(directory: &std::path::Path) -> tools::Tools {
+        let missing = |name: &str| directory.join(name);
+        tools::Tools {
+            ctr: missing("silo-ctr"),
+            init: missing("silo-init"),
+            gateway: missing("gateway"),
+            crun: missing("crun"),
+            skopeo: missing("skopeo"),
+            umoci: missing("umoci"),
+            systemd_run: missing("systemd-run"),
+            systemctl: missing("systemctl"),
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_failed_gateway_exchange_stops_the_computer_instead_of_leaving_it_looking_stopped() {
+        use std::os::unix::net::UnixStream;
+        let home = tempfile::tempdir().unwrap();
+        let paths = crate::test_support::paths(home.path());
+        make(&paths.home, "exchange-fails", true);
+        let record = record_of(&paths, "exchange-fails").unwrap();
+        // The gateway's control link is gone: its next exchange fails.
+        let (control, peer) = UnixStream::pair().unwrap();
+        drop(peer);
+        let running = lifecycle::register_for_test(
+            "exchange-fails",
+            crate::computer_gateway::Gateway::for_test(control),
+            vec!["TOKEN".into()],
+        );
+        let modify = modification("exchange-fails", &[], &["TOKEN"]);
+        let failure = apply_live(&running, &record, &modify, &Material::NONE)
+            .err()
+            .expect("the exchange should fail");
+        let LiveFailure::Exchange(detail) = failure else {
+            panic!("a refused exchange is not a failed one");
+        };
+        // The computer is still registered as running until the failure is handled.
+        assert!(lifecycle::running("exchange-fails").is_some());
+        let tools = unreachable_tools(home.path());
+        let error = stopped_after_failed_exchange(&paths, Some(&tools), &record, detail);
+        match error {
+            RuntimeError::Unavailable(message) => {
+                assert!(message.contains("stopped the computer"), "{message}");
+                assert!(!message.contains("could not stop"), "{message}");
+            }
+            other => panic!("{other:?}"),
+        }
+        // Stopped: no gateway is registered, so the computer reads as stopped on disk and in the UI.
+        assert!(lifecycle::running("exchange-fails").is_none());
+        assert!(lifecycle::active_secrets("exchange-fails").is_empty());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_change_refused_before_the_exchange_leaves_the_computer_running() {
+        use std::os::unix::net::UnixStream;
+        let home = tempfile::tempdir().unwrap();
+        let paths = crate::test_support::paths(home.path());
+        make(&paths.home, "refused", true);
+        let record = record_of(&paths, "refused").unwrap();
+        let (control, _peer) = UnixStream::pair().unwrap();
+        let running = lifecycle::register_for_test(
+            "refused",
+            crate::computer_gateway::Gateway::for_test(control),
+            Vec::new(),
+        );
+        // The engine holds no value for the secret: nothing is asked of the gateway.
+        let modify = modification("refused", &["MISSING"], &[]);
+        let failure = apply_live(&running, &record, &modify, &Material::NONE)
+            .err()
+            .expect("the change should be refused");
+        assert!(matches!(
+            failure,
+            LiveFailure::Refused(RuntimeError::Invalid(_))
+        ));
+        assert!(lifecycle::running("refused").is_some());
+        running.gateway().close();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn the_gateway_ca_is_added_by_a_root_update_of_the_trust_store() {
+        let exec = gateway_ca_command("dev");
+        assert_eq!(exec.user.as_deref(), Some("root"));
+        assert_eq!(exec.argv, ["update-ca-certificates", "--fresh"]);
+        assert!(exec.timeout.is_some());
     }
 
     #[test]
@@ -560,7 +953,7 @@ mod tests {
             .computer("box")
             .read_record()
             .unwrap();
-        let value = inspect_value("box", &record, "Created");
+        let value = inspect_value("box", &record, "Created", &[]);
         assert_eq!(value["status"], "Created");
         assert_eq!(value["config"]["labels"]["silo.managed"], "true");
         assert_eq!(value["config"]["resources"]["memory_mib"], 2048);
@@ -573,7 +966,7 @@ mod tests {
             1024
         );
         assert!(value.get("active_config").is_none());
-        let running = inspect_value("box", &record, "Running");
+        let running = inspect_value("box", &record, "Running", &[]);
         assert_eq!(running["active_config"], running["config"]);
         assert!(running["runtime_instance_id"]
             .as_str()
@@ -622,10 +1015,89 @@ mod tests {
             &paths,
             &strings(&["snapshot", "create", "--sandbox", "box", "x"]),
             Duration::from_secs(1),
+            &Material::NONE,
         )
         .unwrap_err();
         assert!(
             error.to_string().contains("cannot snapshot a container computer yet"),
+            "{error}"
+        );
+    }
+
+    fn modify_args(parts: &[&str]) -> Vec<String> {
+        let mut args = strings(&["modify", "box"]);
+        args.extend(strings(parts));
+        args.extend(strings(&["--format", "json"]));
+        args
+    }
+
+    fn secrets_of(paths: &RuntimePaths) -> Vec<Value> {
+        let value = inspect(paths, "box").unwrap();
+        value["config"]["network"]["secrets"]["secrets"]
+            .as_array()
+            .unwrap()
+            .clone()
+    }
+
+    #[test]
+    fn secrets_are_assigned_and_removed_by_the_commands_the_shared_code_issues() {
+        let home = tempfile::tempdir().unwrap();
+        let paths = paths(home.path());
+        make(home.path(), "box", false);
+        assert!(secrets_of(&paths).is_empty());
+        let assign = modify_args(&[
+            "--secret",
+            "TOKEN:passthrough=*@api.example.test,*.cdn.example.test",
+        ]);
+        run(&paths, &assign, Duration::from_secs(1), &Material::NONE).unwrap();
+        let secrets = secrets_of(&paths);
+        assert_eq!(secrets.len(), 1);
+        assert_eq!(secrets[0]["env_var"], "TOKEN");
+        assert_eq!(secrets[0]["placeholder"], "$MSB_TOKEN");
+        assert_eq!(secrets[0]["allowed_hosts"][1]["wildcard"], "*.cdn.example.test");
+        // Never a value: the record holds names and hosts only.
+        let record = std::fs::read_to_string(
+            Layout::new(home.path()).computer("box").record_path(),
+        )
+        .unwrap();
+        assert!(!record.contains("value"), "{record}");
+        let remove = modify_args(&["--secret-rm", "TOKEN"]);
+        run(&paths, &remove, Duration::from_secs(1), &Material::NONE).unwrap();
+        assert!(secrets_of(&paths).is_empty());
+    }
+
+    #[test]
+    fn github_access_is_assigned_to_a_stopped_container_and_kept() {
+        let home = tempfile::tempdir().unwrap();
+        let paths = paths(home.path());
+        make(home.path(), "box", false);
+        let assign = modify_args(&[
+            "--secret",
+            "SILO_GITHUB:passthrough=*@github.com,api.github.com,uploads.github.com",
+        ]);
+        run(&paths, &assign, Duration::from_secs(1), &Material::NONE).unwrap();
+        let secrets = secrets_of(&paths);
+        assert_eq!(secrets[0]["env_var"], "SILO_GITHUB");
+        assert_eq!(secrets[0]["placeholder"], "$MSB_SILO_GITHUB");
+        let elsewhere = modify_args(&["--secret", "SILO_GITHUB:passthrough=*@evil.example"]);
+        let error = run(&paths, &elsewhere, Duration::from_secs(1), &Material::NONE).unwrap_err();
+        assert!(error.to_string().contains("GitHub hosts only"), "{error}");
+    }
+
+    #[test]
+    fn a_modify_that_changes_anything_but_secrets_is_refused_in_plain_words() {
+        let home = tempfile::tempdir().unwrap();
+        let paths = paths(home.path());
+        make(home.path(), "box", false);
+        let error = run(
+            &paths,
+            &modify_args(&["--cpus", "2", "--next-start"]),
+            Duration::from_secs(1),
+            &Material::NONE,
+        )
+        .unwrap_err();
+        assert!(
+            error.to_string().contains("cannot modify a container computer yet"),
             "{error}"
         );
     }
@@ -652,6 +1124,7 @@ mod tests {
             workspace_mib: 1,
             labels: vec![],
             env: vec![],
+            github: false,
         };
         // On a host that is not ready the refusal names the missing pieces first; either way no record changes.
         let error = create_computer(&paths, &create).unwrap_err();

@@ -16,10 +16,14 @@ if [[ $# -ne 1 ]]; then
   echo "usage: $0 ENGINE_DIR" >&2
   exit 2
 fi
+engine_dir="$1"
 silo="$1/silo"
 name="${SILO_E2E_COMPUTER:-e2e-hosts-ci}"
 fork="$name-fork"
 ctr="$name-ctr"
+# A second container that keeps the secret when it is taken away from the first (a secret always
+# has a computer).
+ctr2="$name-ctr2"
 # Seconds to wait for the engine socket to answer.
 ready_timeout="${SILO_E2E_READY_TIMEOUT:-120}"
 # Seconds between attempts to create the computer when the VM image download fails.
@@ -29,6 +33,10 @@ case "$name" in
   e2e-hosts-*) ;;
   *) echo "Test computers are named e2e-hosts-*, not $name" >&2; exit 2 ;;
 esac
+
+# The engine's files: the socket folder and the data folder the runtime home is under.
+engine_roots() { printf '%s\n' "$HOME/.silo-dev" "$HOME/.local/share/org.silo.dev"; }
+engine_find() { local root; while read -r root; do [[ -d "$root" ]] && find "$root" "$@" 2>/dev/null; done < <(engine_roots); true; }
 
 step() { printf '\n== %s\n' "$*"; }
 
@@ -43,7 +51,7 @@ cleanup() {
   local status=$?
   trap - EXIT
   rm -f "${stderr_file:-}"
-  for computer in "$ctr" "$fork" "$name"; do
+  for computer in "$ctr2" "$ctr" "$fork" "$name"; do
     if listed "$computer" 2>/dev/null | grep -qx -- "$computer"; then
       echo "Stopping and dropping $computer after a failed run"
       "$silo" stop "$computer" || true
@@ -57,6 +65,35 @@ cleanup() {
 in_container() { "$silo" exec "$ctr" -- "$@"; }
 # The same with a timeout in seconds.
 in_container_for() { local seconds="$1"; shift; "$silo" exec "$ctr" --timeout "$seconds" -- "$@"; }
+
+# Runs a command as root in the container, the way Silo runs its own root commands: through the
+# engine's helper and `crun exec`, with the seven capabilities and the init shim in front. `silo
+# exec` runs as the working account, which cannot become root (no_new_privs), so the commands that
+# need root, such as a package install, use this.
+root_in_container() {
+  local state process status=0
+  state=$(engine_find -path "*containers/computers/$ctr/state" -type d | head -n 1)
+  [[ -n "$state" ]] || { echo "no state folder found for $ctr" >&2; return 1; }
+  process=$(mktemp)
+  python3 - "$process" /silo/init --own-group -- "$@" <<'PY'
+import json, sys
+caps = ["CAP_CHOWN", "CAP_DAC_OVERRIDE", "CAP_FOWNER", "CAP_FSETID", "CAP_KILL", "CAP_SETGID", "CAP_SETUID"]
+json.dump({
+    "terminal": False,
+    "user": {"uid": 0, "gid": 0},
+    "args": sys.argv[2:],
+    "env": ["PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "HOME=/root", "DEBIAN_FRONTEND=noninteractive"],
+    "cwd": "/",
+    "noNewPrivileges": True,
+    "capabilities": {k: caps for k in ("effective", "bounding", "inheritable", "ambient", "permitted")},
+}, open(sys.argv[1], "w"))
+PY
+  # In a scope of the user manager, as the engine is: joining the container's cgroup needs a common
+  # ancestor the account may write, which a shell in a login session does not share.
+  systemd-run --user --scope --quiet -- "$engine_dir/silo-ctr" enter --state "$state" -- crun --root "$state/crun" --cgroup-manager=cgroupfs exec --process "$process" "$ctr" || status=$?
+  rm -f "$process"
+  return "$status"
+}
 
 expect() {
   local what="$1" got="$2" wanted="$3"
@@ -82,9 +119,9 @@ try:
     print("dns answer bytes:", len(s.recvfrom(512)[0]))
 except OSError as error:
     print("dns query failed:", error)' >&2 || true
-  find "$HOME/.silo-dev" -path '*containers/computers/*/state/resolv.conf' -exec stat -c '%a %U %n' {} \; >&2 2>/dev/null || true
+  engine_find -path '*containers/computers/*/state/resolv.conf' -exec stat -c '%a %U %n' {} \; >&2 || true
   sudo dmesg 2>/dev/null | grep -iE 'apparmor|landlock|denied' | tail -n 15 >&2 || true
-  find "$HOME/.silo-dev" -path '*containers/computers/*/state/*.log' 2>/dev/null | while read -r log; do
+  engine_find -path '*containers/computers/*/state/*.log' | while read -r log; do
     echo "-- $log" >&2
     tail -n 40 "$log" >&2 || true
   done
@@ -138,7 +175,7 @@ print(rows.get(sys.argv[1], "missing"))' "$ctr")
   # No exec leaves its directory (pid file, process JSON with the environment) behind.
   leftovers=1
   for _ in $(seq 1 20); do
-    leftovers=$(find "$HOME/.silo-dev" -path "*containers/computers/$ctr/state/exec/*" 2>/dev/null | wc -l)
+    leftovers=$(engine_find -path "*containers/computers/$ctr/state/exec/*" | wc -l)
     [[ "$leftovers" == 0 ]] && break
     sleep 0.5
   done
@@ -165,9 +202,181 @@ except OSError:
     expect "private address $target" "$result" refused
   done
 
+  container_network_features
+
   step "Stopping and dropping $ctr"
   "$silo" stop "$ctr"
   "$silo" drop "$ctr"
+}
+
+# How many times the gateway recorded using secret $1 toward host $2 (names and hosts, never
+# values; the file `computers.credentials` reads for any Linux computer).
+usage_count() {
+  local file
+  file=$(engine_find -path "*sandboxes/$ctr/logs/secret-usage.jsonl" | head -n 1)
+  if [[ -z "$file" ]]; then echo 0; return; fi
+  python3 - "$file" "$1" "$2" <<'PY'
+import json, sys
+count = 0
+for line in open(sys.argv[1]):
+    try:
+        event = json.loads(line)
+    except ValueError:
+        continue
+    if event.get("kind") == "used" and event.get("secret") == sys.argv[2] and event.get("host") == sys.argv[3]:
+        count += 1
+print(count)
+PY
+}
+
+# Waits up to $2 seconds for the number of recorded uses of secret $1 toward host $3 to be $4 or
+# more (the gateway writes its events a moment after the request).
+wait_for_usage() {
+  local secret="$1" seconds="$2" host="$3" wanted="$4" seen=0
+  for _ in $(seq 1 "$((seconds * 2))"); do
+    seen=$(usage_count "$secret" "$host")
+    ((seen >= wanted)) && break
+    sleep 0.5
+  done
+  echo "$seen"
+}
+
+# What to read when a published port does not become reachable: the engine's own view, the guest's
+# listeners, the loopback port, and the port control socket asked directly.
+port_diagnostics() {
+  echo "== Port diagnostics for $ctr" >&2
+  "$silo" --json ports "$ctr" >&2 || true
+  in_container sh -c 'cat /proc/net/tcp; ps -ef' >&2 || true
+  curl -sv --max-time 5 "http://127.0.0.1:$1/" >&2 || true
+  local socket
+  socket=$(engine_find -path '*/run/sandboxes/*/control.sock' | head -n 1)
+  echo "control socket: ${socket:-none}" >&2
+  if [[ -n "$socket" ]]; then
+    python3 - "$socket" <<'PY' >&2 || true
+import json, socket, sys
+for request in ({"op": "ports_list"}, {"op": "port_probe", "guest_port": 8080}):
+    with socket.socket(socket.AF_UNIX) as s:
+        s.settimeout(10)
+        s.connect(sys.argv[1])
+        s.sendall(json.dumps(request).encode() + b"\n")
+        print(request, "->", s.makefile().readline().strip())
+PY
+  fi
+  engine_find -path "*containers/computers/$ctr/state/gateway.log" -exec sh -c 'echo "-- $1"; tail -n 30 "$1"' _ {} \; >&2
+}
+
+# Secrets, published ports and the URL proxy in the container, through the same commands a virtual
+# machine uses. (SSH, the editor, a terminal and the in-guest client are refused for a container
+# computer for now.)
+container_network_features() {
+  step "Giving $ctr a fake secret"
+  # A random token shaped like a GitHub one: GitHub answers "Bad credentials" to it, and a
+  # request with no token at all "Requires authentication".
+  local fake placeholder='$MSB_E2E_FAKE_TOKEN'
+  fake="ghp_$(head -c 48 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 36)"
+  "$silo" create "$ctr2" --container --cpus 1 --memory 2 --disk 2
+  printf '%s' "$fake" | "$silo" secrets set E2E_FAKE_TOKEN --computer "$ctr" --computer "$ctr2" --domain api.github.com
+  # A secret assigned to a running computer takes effect at its next start, as for a VM.
+  "$silo" stop "$ctr"
+  "$silo" start "$ctr"
+
+  step "Checking what the guest sees"
+  expect "guest placeholder" "$(in_container sh -c 'printf %s "$E2E_FAKE_TOKEN"')" "$placeholder"
+  expect "GitHub placeholder" "$(in_container sh -c 'printf %s "$GH_TOKEN"')" '$MSB_SILO_GITHUB'
+  expect "the value inside the guest" "$(in_container sh -c "cat /proc/self/environ /proc/1/environ 2>/dev/null | grep -c '$fake' || true")" 0
+
+  step "Reinstalling ca-certificates in $ctr, as an upgrade of it would"
+  # The guest's trust bundle is its own file: the package replaces it by renaming a new one over
+  # it, which fails with EBUSY when a mount sits on the path. Silo adds only the gateway's CA
+  # certificate, as a local one, and runs update-ca-certificates at each start. The substitution
+  # check below then shows HTTPS through the gateway still verifies after the reinstall, with no
+  # restart in between.
+  local installed=0
+  for _ in 1 2 3; do
+    if root_in_container apt-get update -qq && root_in_container apt-get install -y -qq --reinstall ca-certificates; then
+      installed=1
+      break
+    fi
+    sleep 5
+  done
+  [[ "$installed" == 1 ]] || { echo "reinstalling ca-certificates in $ctr failed" >&2; exit 1; }
+  root_in_container update-ca-certificates --fresh
+  expect "gateway CA in the trust store" "$(in_container sh -c 'test -s /etc/ssl/certs/silo-gateway.pem && echo linked')" linked
+  expect "bundle variable" "$(in_container sh -c 'printf %s "$SSL_CERT_FILE"')" /etc/ssl/certs/ca-certificates.crt
+  expect "node variable" "$(in_container sh -c 'printf %s "$NODE_EXTRA_CA_CERTS"')" /usr/local/share/ca-certificates/silo-gateway.crt
+  # The guest can add a CA of its own beside the gateway's.
+  root_in_container sh -c 'cp /usr/local/share/ca-certificates/silo-gateway.crt /usr/local/share/ca-certificates/e2e-extra.crt && update-ca-certificates' >/dev/null
+  expect "a CA the guest added" "$(in_container sh -c 'test -s /etc/ssl/certs/e2e-extra.pem && echo linked')" linked
+  root_in_container sh -c 'rm -f /usr/local/share/ca-certificates/e2e-extra.crt && update-ca-certificates --fresh' >/dev/null
+
+  step "Checking that the secret is substituted for its host and no other"
+  local reply status
+  for _ in 1 2 3; do
+    reply=$(in_container curl -sS --max-time 20 -H 'Authorization: Bearer $MSB_E2E_FAKE_TOKEN' -w '\n%{http_code}' https://api.github.com/user || true)
+    [[ "${reply##*$'\n'}" == 401 ]] && break
+    sleep 3
+  done
+  status="${reply##*$'\n'}"
+  expect "allowed host status" "$status" 401
+  if [[ "$reply" != *"Bad credentials"* ]]; then echo "allowed host: GitHub did not answer Bad credentials: $reply" >&2; exit 1; fi
+  echo "allowed host: Bad credentials"
+  local used
+  used=$(wait_for_usage E2E_FAKE_TOKEN 10 api.github.com 1)
+  if ((used < 1)); then
+    echo "the gateway recorded no use of the secret toward api.github.com" >&2
+    engine_find -name 'secret-usage*' -exec sh -c 'echo "-- $1"; tail -n 5 "$1"' _ {} \; >&2
+    engine_find -path "*containers/computers/$ctr/state/gateway.log" -exec sh -c 'echo "-- $1"; tail -n 20 "$1"' _ {} \; >&2
+    exit 1
+  fi
+  echo "uses recorded toward api.github.com: $used"
+  in_container curl -sS --max-time 20 -o /dev/null -H 'Authorization: Bearer $MSB_E2E_FAKE_TOKEN' https://example.com/ || true
+  sleep 2
+  expect "uses recorded toward another host" "$(usage_count E2E_FAKE_TOKEN example.com)" 0
+
+  step "Publishing a port of $ctr and opening it through the URL proxy"
+  in_container sh -c 'mkdir -p /tmp/www && echo ct3-port-ok > /tmp/www/index.html && cd /tmp/www && (nohup python3 -m http.server 8080 --bind 0.0.0.0 >/dev/null 2>&1 &)'
+  "$silo" publish "$ctr" 8080 --http
+  local url="" host_port="" state=""
+  for _ in $(seq 1 40); do
+    read -r state host_port url < <("$silo" --json ports "$ctr" | python3 -c '
+import json, sys
+port = next((p for p in json.load(sys.stdin)["ports"] if p["port"] == 8080), {})
+print(port.get("state") or "-", port.get("hostPort") or "-", port.get("url") or "-")')
+    [[ "$state" == reachable && "$url" != - ]] && break
+    sleep 0.5
+  done
+  if [[ "$state" != reachable ]]; then port_diagnostics "$host_port"; fi
+  expect "published port state" "$state" reachable
+  echo "published at $url (host port $host_port)"
+  expect "page through the URL proxy" "$(curl -sS --max-time 20 "$url")" ct3-port-ok
+  expect "page on the loopback port" "$(curl -sS --max-time 20 "http://127.0.0.1:$host_port/")" ct3-port-ok
+  "$silo" unpublish "$ctr" 8080
+  for _ in $(seq 1 20); do
+    curl -sS --max-time 3 -o /dev/null "http://127.0.0.1:$host_port/" 2>/dev/null || break
+    sleep 0.5
+  done
+  if curl -sS --max-time 3 -o /dev/null "http://127.0.0.1:$host_port/" 2>/dev/null; then
+    echo "the unpublished port still answers on the loopback" >&2
+    exit 1
+  fi
+  echo "unpublished port: closed"
+
+  step "Taking the secret away from the running $ctr"
+  "$silo" secrets unassign E2E_FAKE_TOKEN "$ctr"
+  local before after assigned
+  before=$(usage_count E2E_FAKE_TOKEN api.github.com)
+  in_container curl -sS --max-time 20 -o /dev/null -H 'Authorization: Bearer $MSB_E2E_FAKE_TOKEN' https://api.github.com/user || true
+  sleep 3
+  after=$(usage_count E2E_FAKE_TOKEN api.github.com)
+  expect "uses recorded after the removal" "$after" "$before"
+  expect "placeholder after the removal" "$(in_container sh -c 'printf %s "${E2E_FAKE_TOKEN-}"')" ""
+  assigned=$("$silo" secrets list)
+  if grep -w E2E_FAKE_TOKEN <<<"$assigned" | grep -qw -- "$ctr"; then
+    echo "the secret is still assigned: $assigned" >&2
+    exit 1
+  fi
+  echo "secret removal: no longer assigned"
+  "$silo" drop "$ctr2"
 }
 
 step "Waiting for the engine"
@@ -182,12 +391,12 @@ until "$silo" list >/dev/null 2>&1; do
 done
 # The check must fail when the list does: an empty answer would let the test take over a
 # computer it did not make.
-if ! existing=$(listed "$name" "$fork" "$ctr"); then
+if ! existing=$(listed "$name" "$fork" "$ctr" "$ctr2"); then
   echo "Could not list the engine's computers; this test never runs without knowing them" >&2
   exit 1
 fi
 if [[ -n "$existing" ]]; then
-  echo "A computer named $name, $fork or $ctr already exists; this test never touches it" >&2
+  echo "A computer named $name, $fork, $ctr or $ctr2 already exists; this test never touches it" >&2
   exit 1
 fi
 stderr_file="$(mktemp)"
@@ -247,7 +456,7 @@ if [[ -n "$left" ]]; then
 fi
 if [[ "${SILO_E2E_CONTAINER:-0}" == 1 ]]; then
   container_checks
-  left=$(listed "$ctr")
+  left=$(listed "$ctr" "$ctr2")
   if [[ -n "$left" ]]; then
     echo "Still listed after drop: $left" >&2
     exit 1

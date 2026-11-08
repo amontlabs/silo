@@ -450,8 +450,8 @@ pub(in crate::macos_computers_engine) fn generate_ca(
     app: &MacosContext,
 ) -> Result<CaMaterial, String> {
     let binary = gateway_binary(app)?;
-    let (cert, key) = gateway_control::generate_ca(&binary)?;
-    CaMaterial::from_pem(cert, key.to_string())
+    let (cert, mut key) = gateway_control::generate_ca(&binary)?;
+    CaMaterial::from_pem(cert, std::mem::take(&mut *key))
 }
 
 /// Asks the pinned gateway build to sign a certificate for the trust-probe name with this

@@ -11,6 +11,10 @@ guest `:3000` can be open side by side. The code is `url_proxy.rs` in the engine
   host port (see the [network plan](SiloUI-NETWORK-PLAN.md)). The proxy sits in
   front of those forwards and never touches the guest, so it works the same for
   Linux and macOS computers.
+- A container computer publishes its ports the same way: its gateway binds the loopback listener
+  (the gateway picks the host port unless one is asked for) and the engine serves the
+  per-computer port control socket for it, so the proxy and the port settings above it do not know
+  the kind of computer.
 - One listener on 127.0.0.1 serves every name. Its port is 47383, or the number
   in `SILO_URL_PROXY_PORT`; when that is busy at start it takes a free port.
   `network.urls` always reports the port actually bound. No guest port number is

@@ -143,6 +143,20 @@ impl ComputerDir {
         Ok(record)
     }
 
+    /// Reads the record, changes it and saves it, as one step: two changes (a start finishing,
+    /// a secret assigned) never overwrite each other with a stale copy.
+    pub fn update_record(
+        &self,
+        change: impl FnOnce(&mut ComputerRecord),
+    ) -> Result<ComputerRecord, String> {
+        static RECORDS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _guard = RECORDS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut record = self.read_record()?;
+        change(&mut record);
+        self.write_record(&record)?;
+        Ok(record)
+    }
+
     pub fn write_record(&self, record: &ComputerRecord) -> Result<(), String> {
         let text = serde_json::to_vec_pretty(record)
             .map_err(|_| "The container computer's record could not be saved.".to_owned())?;
@@ -175,6 +189,22 @@ pub struct ComputerRecord {
     /// Set after the first stop, so `inspect` can tell `Created` from `Stopped`.
     #[serde(default)]
     pub started_once: bool,
+    /// The general secrets assigned to the computer: names and the hosts they may be sent to.
+    /// Values live in the host credential store and reach the gateway only.
+    #[serde(default)]
+    pub secrets: Vec<SecretRecord>,
+    /// Whether the computer carries the GitHub access secret (`SILO_GITHUB`), as a virtual
+    /// machine does from creation.
+    #[serde(default)]
+    pub github: bool,
+}
+
+/// One assigned secret: its guest-visible name and where the gateway may substitute it.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SecretRecord {
+    pub name: String,
+    pub allowed_hosts: Vec<String>,
 }
 
 impl ComputerRecord {
@@ -207,6 +237,8 @@ mod tests {
             layers: vec!["layers/1".into(), "layers/2".into()],
             created_ms: 5,
             started_once: false,
+            secrets: Vec::new(),
+            github: false,
         }
     }
 
