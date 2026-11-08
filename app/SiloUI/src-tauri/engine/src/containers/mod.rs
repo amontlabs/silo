@@ -50,10 +50,16 @@ pub fn route(paths: &RuntimePaths, args: &[String]) -> Route {
     }
     let layout = Layout::new(&paths.home);
     if args.first().map(String::as_str) == Some("list") {
-        return if layout.names().is_empty() { Route::Runtime } else { Route::MergeList };
+        return if layout.names().is_empty() {
+            Route::Runtime
+        } else {
+            Route::MergeList
+        };
     }
     match args::target_name(args) {
-        Some(name) if crate::runtime::validate_name(name).is_ok() && layout.computer(name).exists() => {
+        Some(name)
+            if crate::runtime::validate_name(name).is_ok() && layout.computer(name).exists() =>
+        {
             Route::Container
         }
         _ => Route::Runtime,
@@ -74,7 +80,10 @@ fn not_yet(verb: &str) -> RuntimeError {
 }
 
 fn output(stdout: String) -> CommandOutput {
-    CommandOutput { stdout, stderr: String::new() }
+    CommandOutput {
+        stdout,
+        stderr: String::new(),
+    }
 }
 
 pub fn run(
@@ -175,7 +184,11 @@ fn state_word(_: &RuntimePaths, _: &str, record: &ComputerRecord) -> &'static st
 }
 
 fn stopped_word(record: &ComputerRecord) -> &'static str {
-    if record.started_once { "Stopped" } else { "Created" }
+    if record.started_once {
+        "Stopped"
+    } else {
+        "Created"
+    }
 }
 
 /// `inspect` in the shape the engine reads: the saved configuration the engine compares with its
@@ -218,7 +231,11 @@ pub fn inspect_value(name: &str, record: &ComputerRecord, status: &str) -> Value
 
 fn inspect(paths: &RuntimePaths, name: &str) -> Result<Value, RuntimeError> {
     let record = record_of(paths, name)?;
-    Ok(inspect_value(name, &record, state_word(paths, name, &record)))
+    Ok(inspect_value(
+        name,
+        &record,
+        state_word(paths, name, &record),
+    ))
 }
 
 fn listed(paths: &RuntimePaths, label: Option<&str>) -> Vec<Value> {
@@ -244,11 +261,18 @@ pub fn merge_list(
     args: &[String],
     answer: CommandOutput,
 ) -> Result<CommandOutput, RuntimeError> {
-    let mut rows: Vec<Value> = serde_json::from_str(&answer.stdout)
-        .map_err(|_| RuntimeError::Malformed("The bundled runtime returned an invalid computer list.".into()))?;
-    let label = args.windows(2).find(|pair| pair[0] == "--label").map(|pair| pair[1].as_str());
+    let mut rows: Vec<Value> = serde_json::from_str(&answer.stdout).map_err(|_| {
+        RuntimeError::Malformed("The bundled runtime returned an invalid computer list.".into())
+    })?;
+    let label = args
+        .windows(2)
+        .find(|pair| pair[0] == "--label")
+        .map(|pair| pair[1].as_str());
     rows.extend(listed(paths, label));
-    Ok(CommandOutput { stdout: Value::Array(rows).to_string(), stderr: answer.stderr })
+    Ok(CommandOutput {
+        stdout: Value::Array(rows).to_string(),
+        stderr: answer.stderr,
+    })
 }
 
 #[cfg(target_os = "linux")]
@@ -289,7 +313,9 @@ fn remove(paths: &RuntimePaths, name: &str) -> Result<(), RuntimeError> {
 
 /// Collects a child's output stream on its own thread, up to 64 MiB.
 #[cfg(target_os = "linux")]
-fn read_to_string<R: std::io::Read + Send + 'static>(stream: Option<R>) -> std::thread::JoinHandle<String> {
+fn read_to_string<R: std::io::Read + Send + 'static>(
+    stream: Option<R>,
+) -> std::thread::JoinHandle<String> {
     use std::io::Read;
     std::thread::spawn(move || {
         let mut bytes = Vec::new();
@@ -301,14 +327,22 @@ fn read_to_string<R: std::io::Read + Send + 'static>(stream: Option<R>) -> std::
 }
 
 #[cfg(target_os = "linux")]
-fn exec_and_wait(paths: &RuntimePaths, exec: &args::Exec, timeout: Duration) -> Result<CommandOutput, RuntimeError> {
+fn exec_and_wait(
+    paths: &RuntimePaths,
+    exec: &args::Exec,
+    timeout: Duration,
+) -> Result<CommandOutput, RuntimeError> {
     use std::process::Stdio;
     let record = record_of(paths, &exec.name)?;
     let tools = tools::Tools::locate(paths)?;
     if lifecycle::status(paths, &tools, &exec.name, &record) != lifecycle::Status::Running {
-        return Err(RuntimeError::Unavailable(format!("Start {} first.", exec.name)));
+        return Err(RuntimeError::Unavailable(format!(
+            "Start {} first.",
+            exec.name
+        )));
     }
-    let mut command = lifecycle::exec_command(paths, &tools, &exec.name, exec, true).map_err(RuntimeError::Invalid)?;
+    let mut command = lifecycle::exec_command(paths, &tools, &exec.name, exec, true)
+        .map_err(RuntimeError::Invalid)?;
     let operation = "Running a command in the computer".to_owned();
     let mut child = command
         .stdin(Stdio::null())
@@ -323,31 +357,48 @@ fn exec_and_wait(paths: &RuntimePaths, exec: &args::Exec, timeout: Duration) -> 
     let status = loop {
         match child.try_wait() {
             Ok(Some(status)) => break status,
-            Ok(None) if std::time::Instant::now() < deadline => std::thread::sleep(Duration::from_millis(20)),
+            Ok(None) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(20))
+            }
             Ok(None) => {
                 let _ = child.kill();
                 let _ = child.wait();
                 return Err(RuntimeError::TimedOut { operation });
             }
             Err(error) => {
-                return Err(RuntimeError::Failed { operation, exit_code: None, detail: error.to_string() })
+                return Err(RuntimeError::Failed {
+                    operation,
+                    exit_code: None,
+                    detail: error.to_string(),
+                })
             }
         }
     };
-    let (stdout, stderr) = (out.join().unwrap_or_default(), err.join().unwrap_or_default());
+    let (stdout, stderr) = (
+        out.join().unwrap_or_default(),
+        err.join().unwrap_or_default(),
+    );
     match status.code() {
         Some(0) => Ok(CommandOutput { stdout, stderr }),
         Some(124) if exec.timeout.is_some() => Err(RuntimeError::TimedOut { operation }),
         code => Err(RuntimeError::Failed {
             operation,
             exit_code: code,
-            detail: if stderr.trim().is_empty() { stdout } else { stderr },
+            detail: if stderr.trim().is_empty() {
+                stdout
+            } else {
+                stderr
+            },
         }),
     }
 }
 
 #[cfg(not(target_os = "linux"))]
-fn exec_and_wait(_: &RuntimePaths, _: &args::Exec, _: Duration) -> Result<CommandOutput, RuntimeError> {
+fn exec_and_wait(
+    _: &RuntimePaths,
+    _: &args::Exec,
+    _: Duration,
+) -> Result<CommandOutput, RuntimeError> {
     require_host().and(Err(not_yet("exec")))
 }
 
@@ -375,7 +426,10 @@ pub fn guest_plan(
         let command = lifecycle::exec_command(paths, &tools, name, &exec, false)?;
         Ok((
             PathBuf::from(command.get_program()),
-            command.get_args().map(|arg| arg.to_string_lossy().into_owned()).collect(),
+            command
+                .get_args()
+                .map(|arg| arg.to_string_lossy().into_owned())
+                .collect(),
         ))
     }
     #[cfg(not(target_os = "linux"))]
@@ -414,10 +468,17 @@ mod tests {
             max_memory_mib: 2048,
             root_disk_mib: 4096,
             workspace_mib: 1024,
-            labels: vec![("silo.managed".into(), "true".into()), ("silo.machine-id".into(), "id1".into())],
+            labels: vec![
+                ("silo.managed".into(), "true".into()),
+                ("silo.machine-id".into(), "id1".into()),
+            ],
             env: Vec::new(),
         };
-        let image = image::Unpacked { rootfs: PathBuf::new(), digest: "sha256:d".into(), reference: "r:1".into() };
+        let image = image::Unpacked {
+            rootfs: PathBuf::new(),
+            digest: "sha256:d".into(),
+            reference: "r:1".into(),
+        };
         let layout = Layout::new(home);
         let dir = layout.computer(name);
         std::fs::create_dir_all(dir.path()).unwrap();
@@ -430,35 +491,71 @@ mod tests {
     fn commands_route_by_the_computer_they_name() {
         let home = tempfile::tempdir().unwrap();
         let paths = paths(home.path());
-        assert_eq!(route(&paths, &strings(&["list", "--format", "json"])), Route::Runtime);
-        make(home.path(), "box", false);
-        assert_eq!(route(&paths, &strings(&["inspect", "box", "--format", "json"])), Route::Container);
-        assert_eq!(route(&paths, &strings(&["inspect", "vm", "--format", "json"])), Route::Runtime);
-        assert_eq!(route(&paths, &strings(&["remove", "--quiet", "box"])), Route::Container);
-        assert_eq!(route(&paths, &strings(&["list", "--format", "json"])), Route::MergeList);
-        assert_eq!(route(&paths, &strings(&["--silo-github-protocol"])), Route::Runtime);
         assert_eq!(
-            route(&paths, &strings(&["create", "img", "--name", "new", "--label", RUNTIME_LABEL])),
+            route(&paths, &strings(&["list", "--format", "json"])),
+            Route::Runtime
+        );
+        make(home.path(), "box", false);
+        assert_eq!(
+            route(&paths, &strings(&["inspect", "box", "--format", "json"])),
             Route::Container
         );
-        assert_eq!(route(&paths, &strings(&["create", "img", "--name", "new"])), Route::Runtime);
+        assert_eq!(
+            route(&paths, &strings(&["inspect", "vm", "--format", "json"])),
+            Route::Runtime
+        );
+        assert_eq!(
+            route(&paths, &strings(&["remove", "--quiet", "box"])),
+            Route::Container
+        );
+        assert_eq!(
+            route(&paths, &strings(&["list", "--format", "json"])),
+            Route::MergeList
+        );
+        assert_eq!(
+            route(&paths, &strings(&["--silo-github-protocol"])),
+            Route::Runtime
+        );
+        assert_eq!(
+            route(
+                &paths,
+                &strings(&["create", "img", "--name", "new", "--label", RUNTIME_LABEL])
+            ),
+            Route::Container
+        );
+        assert_eq!(
+            route(&paths, &strings(&["create", "img", "--name", "new"])),
+            Route::Runtime
+        );
     }
 
     #[test]
     fn inspect_describes_the_saved_configuration_the_engine_compares_with() {
         let home = tempfile::tempdir().unwrap();
         make(home.path(), "box", false);
-        let record = Layout::new(home.path()).computer("box").read_record().unwrap();
+        let record = Layout::new(home.path())
+            .computer("box")
+            .read_record()
+            .unwrap();
         let value = inspect_value("box", &record, "Created");
         assert_eq!(value["status"], "Created");
         assert_eq!(value["config"]["labels"]["silo.managed"], "true");
         assert_eq!(value["config"]["resources"]["memory_mib"], 2048);
-        assert_eq!(value["config"]["image"]["Oci"]["root_disk"]["size_mib"], 4096);
-        assert_eq!(value["config"]["mounts"][0]["storage"]["capacity_mib"], 1024);
+        assert_eq!(
+            value["config"]["image"]["Oci"]["root_disk"]["size_mib"],
+            4096
+        );
+        assert_eq!(
+            value["config"]["mounts"][0]["storage"]["capacity_mib"],
+            1024
+        );
         assert!(value.get("active_config").is_none());
         let running = inspect_value("box", &record, "Running");
         assert_eq!(running["active_config"], running["config"]);
-        assert!(running["runtime_instance_id"].as_str().unwrap().starts_with("container-box-"));
+        assert!(running["runtime_instance_id"]
+            .as_str()
+            .unwrap()
+            .starts_with("container-box-"));
     }
 
     #[test]
@@ -466,14 +563,30 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let paths = paths(home.path());
         make(home.path(), "box", true);
-        let answer = CommandOutput { stdout: r#"[{"name":"vm","status":"Running"}]"#.into(), stderr: String::new() };
-        let merged = merge_list(&paths, &strings(&["list", "--label", "silo.managed=true", "--format", "json"]), answer).unwrap();
+        let answer = CommandOutput {
+            stdout: r#"[{"name":"vm","status":"Running"}]"#.into(),
+            stderr: String::new(),
+        };
+        let merged = merge_list(
+            &paths,
+            &strings(&["list", "--label", "silo.managed=true", "--format", "json"]),
+            answer,
+        )
+        .unwrap();
         let rows: Vec<Value> = serde_json::from_str(&merged.stdout).unwrap();
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[1]["name"], "box");
         assert_eq!(rows[1]["status"], "Stopped");
-        let answer = CommandOutput { stdout: "[]".into(), stderr: String::new() };
-        let none = merge_list(&paths, &strings(&["list", "--label", "silo.other=1"]), answer).unwrap();
+        let answer = CommandOutput {
+            stdout: "[]".into(),
+            stderr: String::new(),
+        };
+        let none = merge_list(
+            &paths,
+            &strings(&["list", "--label", "silo.other=1"]),
+            answer,
+        )
+        .unwrap();
         assert_eq!(none.stdout, "[]");
     }
 
@@ -482,8 +595,16 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let paths = paths(home.path());
         make(home.path(), "box", false);
-        let error = run(&paths, &strings(&["snapshot", "create", "--sandbox", "box", "x"]), Duration::from_secs(1)).unwrap_err();
-        assert!(error.to_string().contains("cannot do 'snapshot' yet"), "{error}");
+        let error = run(
+            &paths,
+            &strings(&["snapshot", "create", "--sandbox", "box", "x"]),
+            Duration::from_secs(1),
+        )
+        .unwrap_err();
+        assert!(
+            error.to_string().contains("cannot do 'snapshot' yet"),
+            "{error}"
+        );
     }
 
     #[test]
@@ -499,12 +620,22 @@ mod tests {
         let paths = paths(home.path());
         make(home.path(), "box", false);
         let create = Create {
-            name: "box".into(), cpus: 1, max_cpus: 1, memory_mib: 1, max_memory_mib: 1,
-            root_disk_mib: 1, workspace_mib: 1, labels: vec![], env: vec![],
+            name: "box".into(),
+            cpus: 1,
+            max_cpus: 1,
+            memory_mib: 1,
+            max_memory_mib: 1,
+            root_disk_mib: 1,
+            workspace_mib: 1,
+            labels: vec![],
+            env: vec![],
         };
         // On a host that is not ready the refusal names the missing pieces first; either way no record changes.
         let error = create_computer(&paths, &create).unwrap_err();
-        assert!(matches!(error, RuntimeError::Invalid(_) | RuntimeError::Unavailable(_)));
+        assert!(matches!(
+            error,
+            RuntimeError::Invalid(_) | RuntimeError::Unavailable(_)
+        ));
         assert!(Layout::new(home.path()).computer("box").exists());
     }
 }

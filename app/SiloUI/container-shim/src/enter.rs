@@ -62,7 +62,8 @@ mod tests {
 
     #[test]
     fn the_state_directory_and_command_are_required() {
-        let (state, program) = parse(&args(&["--state", "/s", "--", "crun", "--root", "x"])).unwrap();
+        let (state, program) =
+            parse(&args(&["--state", "/s", "--", "crun", "--root", "x"])).unwrap();
         assert_eq!((state.as_str(), program.len()), ("/s", 3));
         assert!(parse(&args(&["--", "crun"])).is_err());
         assert!(parse(&args(&["--state", "/s", "--"])).is_err());

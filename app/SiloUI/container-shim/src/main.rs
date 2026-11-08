@@ -27,7 +27,9 @@ fn main() {
             println!("{}", env!("CARGO_PKG_VERSION"));
             Ok(0)
         }
-        _ => Err("usage: silo-ctr userns|run|enter|version (see the module documentation)".to_string()),
+        _ => Err(
+            "usage: silo-ctr userns|run|enter|version (see the module documentation)".to_string(),
+        ),
     };
     match outcome {
         Ok(code) => std::process::exit(code),

@@ -117,7 +117,12 @@ impl ComputerDir {
 
     /// The overlay's lower directories, top first: the sealed layers newest to oldest, then
     /// the shim layer, then the image.
-    pub fn lower_dirs(&self, record: &ComputerRecord, boot: &Path, image_rootfs: &Path) -> Vec<PathBuf> {
+    pub fn lower_dirs(
+        &self,
+        record: &ComputerRecord,
+        boot: &Path,
+        image_rootfs: &Path,
+    ) -> Vec<PathBuf> {
         let mut lower: Vec<PathBuf> = record
             .layers
             .iter()

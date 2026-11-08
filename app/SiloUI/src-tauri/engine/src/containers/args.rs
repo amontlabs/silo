@@ -10,15 +10,27 @@ pub const RUNTIME_LABEL: &str = "silo.runtime=container";
 /// What a container computer is asked to do.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Command {
-    List { label: Option<String> },
-    Inspect { name: String },
+    List {
+        label: Option<String>,
+    },
+    Inspect {
+        name: String,
+    },
     Create(Box<Create>),
-    Start { name: String },
-    Stop { name: String },
-    Remove { name: String },
+    Start {
+        name: String,
+    },
+    Stop {
+        name: String,
+    },
+    Remove {
+        name: String,
+    },
     Exec(Box<Exec>),
     /// A command only MicroSandbox computers answer yet.
-    Unsupported { verb: String },
+    Unsupported {
+        verb: String,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -50,7 +62,9 @@ pub fn target_name(args: &[String]) -> Option<&str> {
     let verb = args.first()?.as_str();
     match verb {
         "inspect" | "start" | "stop" | "restart" | "exec" | "rename" | "modify" | "cp" | "fork" => {
-            args.get(1).map(String::as_str).filter(|name| !name.starts_with('-'))
+            args.get(1)
+                .map(String::as_str)
+                .filter(|name| !name.starts_with('-'))
         }
         "remove" => args
             .iter()
@@ -79,7 +93,10 @@ pub fn creates_container(args: &[String]) -> bool {
 }
 
 pub fn parse(args: &[String]) -> Result<Command, String> {
-    let verb = args.first().ok_or("No runtime command was given.")?.as_str();
+    let verb = args
+        .first()
+        .ok_or("No runtime command was given.")?
+        .as_str();
     match verb {
         "list" => Ok(Command::List {
             label: flag_value(args, "--label").map(str::to_owned),
@@ -185,9 +202,7 @@ fn parse_exec(args: &[String]) -> Result<Exec, String> {
                 match flag {
                     "--user" => exec.user = Some(value.clone()),
                     "--env" => {
-                        let (key, text) = value
-                            .split_once('=')
-                            .ok_or("--env needs KEY=VALUE.")?;
+                        let (key, text) = value.split_once('=').ok_or("--env needs KEY=VALUE.")?;
                         exec.env.push((key.to_owned(), text.to_owned()));
                     }
                     "--workdir" => exec.workdir = Some(value.clone()),
@@ -206,7 +221,11 @@ fn parse_exec(args: &[String]) -> Result<Exec, String> {
             }
             "--no-tty" | "--quiet" | "--stream" | "--no-stdin" => index += 1,
             "--tty" => return Err("A terminal in a container computer comes later.".into()),
-            other => return Err(format!("exec option {other} is not available for container computers.")),
+            other => {
+                return Err(format!(
+                    "exec option {other} is not available for container computers."
+                ))
+            }
         }
     }
     Ok(exec)
@@ -249,9 +268,15 @@ mod tests {
 
     #[test]
     fn the_names_the_engine_uses_route_by_position() {
-        assert_eq!(target_name(&args(&["inspect", "dev", "--format", "json"])), Some("dev"));
+        assert_eq!(
+            target_name(&args(&["inspect", "dev", "--format", "json"])),
+            Some("dev")
+        );
         assert_eq!(target_name(&args(&["stop", "dev", "--quiet"])), Some("dev"));
-        assert_eq!(target_name(&args(&["remove", "--quiet", "dev"])), Some("dev"));
+        assert_eq!(
+            target_name(&args(&["remove", "--quiet", "dev"])),
+            Some("dev")
+        );
         assert_eq!(
             target_name(&args(&["snapshot", "create", "--sandbox", "dev", "older"])),
             Some("dev")
@@ -272,17 +297,45 @@ mod tests {
     fn create_is_recognised_by_its_runtime_label() {
         let create = args(&["create", "image", "--name", "dev", "--label", RUNTIME_LABEL]);
         assert!(creates_container(&create));
-        assert!(!creates_container(&args(&["create", "image", "--name", "dev"])));
-        assert!(!creates_container(&args(&["stop", "--label", RUNTIME_LABEL])));
+        assert!(!creates_container(&args(&[
+            "create", "image", "--name", "dev"
+        ])));
+        assert!(!creates_container(&args(&[
+            "stop",
+            "--label",
+            RUNTIME_LABEL
+        ])));
     }
 
     #[test]
     fn the_create_arguments_the_engine_builds_are_read() {
         let create = args(&[
-            "create", "image", "--pull", "never", "--name", "dev", "--cpus", "2", "--max-cpus", "4",
-            "--memory", "2G", "--max-memory", "4G", "--root-disk", "8G", "--mount-owned",
-            "/workspace:kind=disk,size=3G", "--label", "silo.managed=true", "--label", RUNTIME_LABEL,
-            "--env", "A=b=c", "--no-start", "--quiet",
+            "create",
+            "image",
+            "--pull",
+            "never",
+            "--name",
+            "dev",
+            "--cpus",
+            "2",
+            "--max-cpus",
+            "4",
+            "--memory",
+            "2G",
+            "--max-memory",
+            "4G",
+            "--root-disk",
+            "8G",
+            "--mount-owned",
+            "/workspace:kind=disk,size=3G",
+            "--label",
+            "silo.managed=true",
+            "--label",
+            RUNTIME_LABEL,
+            "--env",
+            "A=b=c",
+            "--no-start",
+            "--quiet",
         ]);
         let Command::Create(create) = parse(&create).unwrap() else {
             panic!("not a create");
@@ -291,15 +344,32 @@ mod tests {
         assert_eq!((create.cpus, create.max_cpus), (2, 4));
         assert_eq!((create.memory_mib, create.max_memory_mib), (2048, 4096));
         assert_eq!((create.root_disk_mib, create.workspace_mib), (8192, 3072));
-        assert!(create.labels.contains(&("silo.managed".into(), "true".into())));
+        assert!(create
+            .labels
+            .contains(&("silo.managed".into(), "true".into())));
         assert_eq!(create.env, vec![("A".into(), "b=c".into())]);
     }
 
     #[test]
     fn the_exec_arguments_the_engine_builds_are_read() {
         let exec = args(&[
-            "exec", "dev", "--no-start", "--no-tty", "--quiet", "--timeout", "30s", "--user", "root",
-            "--env", "USER=root", "--workdir", "/", "--", "sh", "-c", "echo $USER",
+            "exec",
+            "dev",
+            "--no-start",
+            "--no-tty",
+            "--quiet",
+            "--timeout",
+            "30s",
+            "--user",
+            "root",
+            "--env",
+            "USER=root",
+            "--workdir",
+            "/",
+            "--",
+            "sh",
+            "-c",
+            "echo $USER",
         ]);
         let Command::Exec(exec) = parse(&exec).unwrap() else {
             panic!("not an exec");
@@ -333,7 +403,9 @@ mod tests {
     fn commands_only_virtual_machines_answer_are_named() {
         assert_eq!(
             parse(&args(&["snapshot", "create", "--sandbox", "dev", "x"])).unwrap(),
-            Command::Unsupported { verb: "snapshot".into() }
+            Command::Unsupported {
+                verb: "snapshot".into()
+            }
         );
     }
 }

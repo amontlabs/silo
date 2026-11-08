@@ -144,7 +144,8 @@ pub fn build(params: &Params<'_>) -> Result<Spec, String> {
             "readonlyPaths": ["/proc/bus", "/proc/fs", "/proc/irq", "/proc/sys", "/proc/sysrq-trigger"],
         },
     });
-    serde_json::from_value(value).map_err(|error| format!("The container configuration is invalid: {error}"))
+    serde_json::from_value(value)
+        .map_err(|error| format!("The container configuration is invalid: {error}"))
 }
 
 #[cfg(test)]
@@ -171,7 +172,13 @@ mod tests {
         let process = spec.process().as_ref().unwrap();
         assert_eq!(process.no_new_privileges(), Some(true));
         let caps = process.capabilities().as_ref().unwrap();
-        for set in [caps.bounding(), caps.effective(), caps.permitted(), caps.inheritable(), caps.ambient()] {
+        for set in [
+            caps.bounding(),
+            caps.effective(),
+            caps.permitted(),
+            caps.inheritable(),
+            caps.ambient(),
+        ] {
             assert!(set.as_ref().is_none_or(|set| set.is_empty()));
         }
         assert_eq!(process.args().as_ref().unwrap()[0], INIT_PATH);
@@ -208,7 +215,13 @@ mod tests {
     fn the_ids_map_as_two_extents_of_the_holders_namespace() {
         let spec = spec();
         let linux = spec.linux().as_ref().unwrap();
-        let sizes: Vec<_> = linux.uid_mappings().as_ref().unwrap().iter().map(|m| (m.container_id(), m.host_id(), m.size())).collect();
+        let sizes: Vec<_> = linux
+            .uid_mappings()
+            .as_ref()
+            .unwrap()
+            .iter()
+            .map(|m| (m.container_id(), m.host_id(), m.size()))
+            .collect();
         assert_eq!(sizes, [(0, 0, 1), (1, 1, 65535)]);
         assert_eq!(linux.gid_mappings().as_ref().unwrap().len(), 2);
     }
@@ -239,10 +252,21 @@ mod tests {
     fn proc_and_sys_are_masked_or_read_only_and_only_two_files_are_bound_from_the_host() {
         let spec = spec();
         let linux = spec.linux().as_ref().unwrap();
-        assert!(linux.masked_paths().as_ref().unwrap().contains(&"/proc/kcore".to_owned()));
-        assert!(linux.readonly_paths().as_ref().unwrap().contains(&"/proc/sys".to_owned()));
+        assert!(linux
+            .masked_paths()
+            .as_ref()
+            .unwrap()
+            .contains(&"/proc/kcore".to_owned()));
+        assert!(linux
+            .readonly_paths()
+            .as_ref()
+            .unwrap()
+            .contains(&"/proc/sys".to_owned()));
         let mounts = spec.mounts().as_ref().unwrap();
-        let sys = mounts.iter().find(|m| m.destination() == &PathBuf::from("/sys")).unwrap();
+        let sys = mounts
+            .iter()
+            .find(|m| m.destination() == &PathBuf::from("/sys"))
+            .unwrap();
         assert!(sys.options().as_ref().unwrap().contains(&"ro".to_owned()));
         let bound: Vec<_> = mounts
             .iter()
@@ -251,7 +275,11 @@ mod tests {
             .collect();
         assert_eq!(bound, ["/etc/resolv.conf", "/etc/hosts"]);
         let text = serde_json::to_string(&spec).unwrap();
-        assert!(!text.contains("docker.sock") && !text.contains("podman.sock") && !text.contains("silod"));
+        assert!(
+            !text.contains("docker.sock")
+                && !text.contains("podman.sock")
+                && !text.contains("silod")
+        );
     }
 
     #[test]
@@ -266,7 +294,12 @@ mod tests {
         let spec = spec();
         assert_eq!(spec.hostname().as_deref(), Some("dev"));
         assert_eq!(
-            spec.linux().as_ref().unwrap().cgroups_path().as_ref().unwrap(),
+            spec.linux()
+                .as_ref()
+                .unwrap()
+                .cgroups_path()
+                .as_ref()
+                .unwrap(),
             &PathBuf::from("/user.slice/x.scope/ctr")
         );
     }

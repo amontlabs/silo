@@ -59,7 +59,11 @@ pub enum Status {
 /// The scope's unit name: per runtime home, so Silo and Silo Dev never share one.
 pub fn unit_name(paths: &RuntimePaths, name: &str) -> String {
     let digest = Sha256::digest(paths.home.to_string_lossy().as_bytes());
-    let hash: String = digest.iter().take(4).map(|byte| format!("{byte:02x}")).collect();
+    let hash: String = digest
+        .iter()
+        .take(4)
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
     format!("silo-ct-{hash}-{name}")
 }
 
@@ -82,8 +86,12 @@ fn holder_pid(state: &Path) -> Option<u32> {
 
 /// Whether `pid` is a live `silo-ctr` (a recycled pid is not).
 fn is_holder(pid: u32) -> bool {
-    std::fs::read(format!("/proc/{pid}/cmdline"))
-        .is_ok_and(|bytes| bytes.split(|b| *b == 0).next().is_some_and(|argv0| argv0.ends_with(b"silo-ctr")))
+    std::fs::read(format!("/proc/{pid}/cmdline")).is_ok_and(|bytes| {
+        bytes
+            .split(|b| *b == 0)
+            .next()
+            .is_some_and(|argv0| argv0.ends_with(b"silo-ctr"))
+    })
 }
 
 pub fn holder_alive(dir: &ComputerDir) -> bool {
@@ -117,7 +125,11 @@ pub fn status(paths: &RuntimePaths, tools: &Tools, name: &str, record: &Computer
 fn boot_layer(layout: &Layout, tools: &Tools) -> Result<PathBuf, String> {
     let bytes = std::fs::read(&tools.init).map_err(io)?;
     let digest = Sha256::digest(&bytes);
-    let hash: String = digest.iter().take(8).map(|byte| format!("{byte:02x}")).collect();
+    let hash: String = digest
+        .iter()
+        .take(8)
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
     let boot = layout.boot(&hash);
     if boot.join("silo/init").is_file() {
         return Ok(boot);
@@ -139,14 +151,21 @@ fn boot_layer(layout: &Layout, tools: &Tools) -> Result<PathBuf, String> {
 
 fn private_dir(path: &Path) -> Result<(), String> {
     use std::os::unix::fs::DirBuilderExt;
-    std::fs::DirBuilder::new().recursive(true).mode(0o700).create(path).map_err(io)
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(path)
+        .map_err(io)
 }
 
 /// `recvmsg` of one file descriptor sent with `SCM_RIGHTS`.
 fn receive_descriptor(stream: &std::os::unix::net::UnixStream) -> Result<OwnedFd, String> {
     use std::os::fd::AsRawFd;
     let mut data = [0u8; 8];
-    let mut iov = libc::iovec { iov_base: data.as_mut_ptr().cast(), iov_len: data.len() };
+    let mut iov = libc::iovec {
+        iov_base: data.as_mut_ptr().cast(),
+        iov_len: data.len(),
+    };
     let mut control = [0u64; 8];
     // SAFETY: a zeroed msghdr is valid; the pointers refer to buffers that outlive the call.
     let mut message: libc::msghdr = unsafe { std::mem::zeroed() };
@@ -155,14 +174,20 @@ fn receive_descriptor(stream: &std::os::unix::net::UnixStream) -> Result<OwnedFd
     message.msg_control = control.as_mut_ptr().cast();
     message.msg_controllen = std::mem::size_of_val(&control) as _;
     // SAFETY: `message` points at valid buffers for the whole call.
-    let received = unsafe { libc::recvmsg(stream.as_raw_fd(), &mut message, libc::MSG_CMSG_CLOEXEC) };
+    let received =
+        unsafe { libc::recvmsg(stream.as_raw_fd(), &mut message, libc::MSG_CMSG_CLOEXEC) };
     if received <= 0 {
-        return Err("the container holder closed the link before sending its network device".into());
+        return Err(
+            "the container holder closed the link before sending its network device".into(),
+        );
     }
     // SAFETY: the kernel filled `message`'s control buffer; CMSG_* only read within it.
     unsafe {
         let header = libc::CMSG_FIRSTHDR(&message);
-        if header.is_null() || (*header).cmsg_level != libc::SOL_SOCKET || (*header).cmsg_type != libc::SCM_RIGHTS {
+        if header.is_null()
+            || (*header).cmsg_level != libc::SOL_SOCKET
+            || (*header).cmsg_type != libc::SCM_RIGHTS
+        {
             return Err("the container holder sent no network device".into());
         }
         let descriptor = std::ptr::read_unaligned(libc::CMSG_DATA(header).cast::<i32>());
@@ -182,7 +207,9 @@ pub fn start(
 ) -> Result<(), RuntimeError> {
     let unavailable = |detail: String| {
         eprintln!("Starting container computer {name}: {detail}");
-        RuntimeError::Unavailable(format!("Silo could not start container computer {name}. {detail}"))
+        RuntimeError::Unavailable(format!(
+            "Silo could not start container computer {name}. {detail}"
+        ))
     };
     let layout = Layout::new(&paths.home);
     let dir = layout.computer(name);
@@ -192,13 +219,24 @@ pub fn start(
     }
     let image = super::image::ensure(paths, tools)?;
     cleanup_stale(paths, tools, &dir, name);
-    let started = launch(paths, tools, &layout, &dir, name, &record, &image.rootfs, timeout).map_err(|detail| {
+    let started = launch(
+        paths,
+        tools,
+        &layout,
+        &dir,
+        name,
+        &record,
+        &image.rootfs,
+        timeout,
+    )
+    .map_err(|detail| {
         let _ = stop(paths, tools, name, &record);
         unavailable(detail)
     })?;
     let _ = started.pid;
     record.started_once = true;
-    dir.write_record(&record).map_err(RuntimeError::Unavailable)?;
+    dir.write_record(&record)
+        .map_err(RuntimeError::Unavailable)?;
     Ok(())
 }
 
@@ -218,7 +256,8 @@ fn launch(
     std::fs::create_dir_all(dir.upper()).map_err(io)?;
     {
         use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(dir.upper(), std::fs::Permissions::from_mode(0o755)).map_err(io)?;
+        std::fs::set_permissions(dir.upper(), std::fs::Permissions::from_mode(0o755))
+            .map_err(io)?;
     }
     private_dir(&dir.work())?;
     private_dir(&dir.merged())?;
@@ -234,9 +273,21 @@ fn launch(
         hosts: &state.join("hosts"),
         arch: std::env::consts::ARCH,
     })?;
-    std::fs::write(dir.bundle().join("config.json"), serde_json::to_vec_pretty(&spec).map_err(|e| e.to_string())?).map_err(io)?;
-    std::fs::write(state.join("hosts"), format!("127.0.0.1 localhost\n127.0.1.1 {name}\n::1 localhost\n")).map_err(io)?;
-    std::fs::write(state.join("resolv.conf"), format!("nameserver {GATEWAY_IPV4}\n")).map_err(io)?;
+    std::fs::write(
+        dir.bundle().join("config.json"),
+        serde_json::to_vec_pretty(&spec).map_err(|e| e.to_string())?,
+    )
+    .map_err(io)?;
+    std::fs::write(
+        state.join("hosts"),
+        format!("127.0.0.1 localhost\n127.0.1.1 {name}\n::1 localhost\n"),
+    )
+    .map_err(io)?;
+    std::fs::write(
+        state.join("resolv.conf"),
+        format!("nameserver {GATEWAY_IPV4}\n"),
+    )
+    .map_err(io)?;
 
     let socket = state.join("ctl.sock");
     let _ = std::fs::remove_file(&socket);
@@ -297,12 +348,19 @@ fn launch(
             Ok(())
         });
     }
-    let mut child = command.spawn().map_err(|e| format!("systemd-run could not start: {e}"))?;
+    let mut child = command
+        .spawn()
+        .map_err(|e| format!("systemd-run could not start: {e}"))?;
     let deadline = Instant::now() + timeout.min(Duration::from_secs(120));
     let tail = |state: &Path| {
         std::fs::read_to_string(state.join("holder.log"))
             .ok()
-            .and_then(|text| text.lines().rev().find(|l| !l.trim().is_empty()).map(str::to_owned))
+            .and_then(|text| {
+                text.lines()
+                    .rev()
+                    .find(|l| !l.trim().is_empty())
+                    .map(str::to_owned)
+            })
             .unwrap_or_default()
     };
     let stream = loop {
@@ -310,7 +368,10 @@ fn launch(
             Ok((stream, _)) => break stream,
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                 if let Ok(Some(status)) = child.try_wait() {
-                    return Err(format!("The container holder exited ({status}): {}", tail(&state)));
+                    return Err(format!(
+                        "The container holder exited ({status}): {}",
+                        tail(&state)
+                    ));
                 }
                 if Instant::now() >= deadline {
                     let _ = child.kill();
@@ -322,7 +383,9 @@ fn launch(
         }
     };
     stream.set_nonblocking(false).map_err(io)?;
-    stream.set_read_timeout(Some(Duration::from_secs(60))).map_err(io)?;
+    stream
+        .set_read_timeout(Some(Duration::from_secs(60)))
+        .map_err(io)?;
     let tap = receive_descriptor(&stream)?;
     let id = record.label("silo.machine-id").unwrap_or(name).to_owned();
     let (ca_cert, ca_key) = computer_ca(&tools.gateway, &id)?;
@@ -347,8 +410,17 @@ fn launch(
         },
     )?;
     let ready = gateway.ready().clone();
-    std::fs::write(state.join("resolv.conf"), format!("nameserver {}\n", ready.dns_ipv4)).map_err(io)?;
-    let mac = ready.guest_mac.iter().map(|b| format!("{b:02x}")).collect::<Vec<_>>().join(":");
+    std::fs::write(
+        state.join("resolv.conf"),
+        format!("nameserver {}\n", ready.dns_ipv4),
+    )
+    .map_err(io)?;
+    let mac = ready
+        .guest_mac
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect::<Vec<_>>()
+        .join(":");
     let reply = format!(
         "mac={mac}\nmtu={}\naddress={}\nprefix_len={}\ngateway={}\n\n",
         ready.mtu, ready.guest_ipv4, ready.prefix_len, ready.gateway_ipv4
@@ -357,7 +429,10 @@ fn launch(
     let mut line = String::new();
     BufReader::new(&stream).read_line(&mut line).map_err(io)?;
     if line.trim() != "up" {
-        return Err(format!("The container network did not come up: {}", tail(&state)));
+        return Err(format!(
+            "The container network did not come up: {}",
+            tail(&state)
+        ));
     }
     GATEWAYS
         .lock()
@@ -375,11 +450,19 @@ fn launch(
 
 fn crun(tools: &Tools, state: &Path) -> Command {
     let mut command = Command::new(&tools.crun);
-    command.arg("--root").arg(state.join("crun")).arg("--cgroup-manager=cgroupfs");
+    command
+        .arg("--root")
+        .arg(state.join("crun"))
+        .arg("--cgroup-manager=cgroupfs");
     command
 }
 
-fn wait_running(crun_path: &Path, state: &Path, name: &str, deadline: Instant) -> Result<(), String> {
+fn wait_running(
+    crun_path: &Path,
+    state: &Path,
+    name: &str,
+    deadline: Instant,
+) -> Result<(), String> {
     loop {
         let output = Command::new(crun_path)
             .arg("--root")
@@ -393,35 +476,63 @@ fn wait_running(crun_path: &Path, state: &Path, name: &str, deadline: Instant) -
         }
         if Instant::now() >= deadline {
             let log = std::fs::read_to_string(state.join("holder.log")).unwrap_or_default();
-            let last = log.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("");
-            return Err(format!("The container did not reach the running state. {last}"));
+            let last = log
+                .lines()
+                .rev()
+                .find(|l| !l.trim().is_empty())
+                .unwrap_or("");
+            return Err(format!(
+                "The container did not reach the running state. {last}"
+            ));
         }
         std::thread::sleep(Duration::from_millis(50));
     }
 }
 
 fn systemctl(args: &[&str]) {
-    let _ = Command::new("systemctl").arg("--user").args(args).stdout(Stdio::null()).stderr(Stdio::null()).status();
+    let _ = Command::new("systemctl")
+        .arg("--user")
+        .args(args)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
 }
 
 /// What an earlier run left: a scope, crun state, a socket.
 fn cleanup_stale(paths: &RuntimePaths, tools: &Tools, dir: &ComputerDir, name: &str) {
     let state = dir.state();
     if holder_alive(dir) {
-        systemctl(&["kill", "--signal=SIGKILL", &format!("{}.scope", unit_name(paths, name))]);
+        systemctl(&[
+            "kill",
+            "--signal=SIGKILL",
+            &format!("{}.scope", unit_name(paths, name)),
+        ]);
     }
-    let _ = crun(tools, &state).args(["delete", "--force", name]).stdout(Stdio::null()).stderr(Stdio::null()).status();
+    let _ = crun(tools, &state)
+        .args(["delete", "--force", name])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
     for stale in ["ctl.sock", "holder.pid", "outer.pid", "container.pid"] {
         let _ = std::fs::remove_file(state.join(stale));
     }
 }
 
-pub fn stop(paths: &RuntimePaths, tools: &Tools, name: &str, record: &ComputerRecord) -> Result<(), RuntimeError> {
+pub fn stop(
+    paths: &RuntimePaths,
+    tools: &Tools,
+    name: &str,
+    record: &ComputerRecord,
+) -> Result<(), RuntimeError> {
     let layout = Layout::new(&paths.home);
     let dir = layout.computer(name);
     let state = dir.state();
     if holder_alive(&dir) {
-        let _ = crun(tools, &state).args(["kill", name, "TERM"]).stdout(Stdio::null()).stderr(Stdio::null()).status();
+        let _ = crun(tools, &state)
+            .args(["kill", name, "TERM"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
         let deadline = Instant::now() + TERM_WAIT;
         while holder_alive(&dir) && Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(50));
@@ -435,11 +546,16 @@ pub fn stop(paths: &RuntimePaths, tools: &Tools, name: &str, record: &ComputerRe
             }
         }
         if holder_alive(&dir) {
-            return Err(RuntimeError::Unavailable(format!("Container computer {name} did not stop.")));
+            return Err(RuntimeError::Unavailable(format!(
+                "Container computer {name} did not stop."
+            )));
         }
     }
     cleanup_stale(paths, tools, &dir, name);
-    let gateway = GATEWAYS.lock().ok().and_then(|mut map| map.as_mut().and_then(|map| map.remove(name)));
+    let gateway = GATEWAYS
+        .lock()
+        .ok()
+        .and_then(|mut map| map.as_mut().and_then(|map| map.remove(name)));
     if let Some(gateway) = gateway {
         gateway.shutdown();
     }
@@ -455,7 +571,9 @@ pub fn stop(paths: &RuntimePaths, tools: &Tools, name: &str, record: &ComputerRe
 pub fn remove(paths: &RuntimePaths, tools: &Tools, name: &str) -> Result<(), RuntimeError> {
     let dir = Layout::new(&paths.home).computer(name);
     if holder_alive(&dir) {
-        return Err(RuntimeError::Invalid(format!("Stop {name} before dropping it.")));
+        return Err(RuntimeError::Invalid(format!(
+            "Stop {name} before dropping it."
+        )));
     }
     super::image::remove_tree(tools, dir.path()).map_err(|detail| {
         eprintln!("Removing container computer {name}: {detail}");
@@ -474,8 +592,9 @@ pub fn exec_command(
     let layout = Layout::new(&paths.home);
     let dir = layout.computer(name);
     let record = dir.read_record()?;
-    let image = super::image::unpacked(&layout, &super::image::pinned().map_err(|e| e.to_string())?)
-        .ok_or("The container image is not unpacked.")?;
+    let image =
+        super::image::unpacked(&layout, &super::image::pinned().map_err(|e| e.to_string())?)
+            .ok_or("The container image is not unpacked.")?;
     let boot = boot_layer(&layout, tools)?;
     let mut layers = vec![dir.upper()];
     layers.extend(dir.lower_dirs(&record, &boot, &image.rootfs));
@@ -496,15 +615,22 @@ pub fn exec_command(
         .arg(dir.state().join("crun"))
         .arg("--cgroup-manager=cgroupfs");
     command.arg("exec").arg("--no-new-privs");
-    command.arg("--cwd").arg(exec.workdir.as_deref().unwrap_or("/"));
-    command.arg("--user").arg(format!("{}:{}", identity.uid, identity.gid));
+    command
+        .arg("--cwd")
+        .arg(exec.workdir.as_deref().unwrap_or("/"));
+    command
+        .arg("--user")
+        .arg(format!("{}:{}", identity.uid, identity.gid));
     if identity.uid == 0 {
         for capability in oci::ROOT_EXEC_CAPABILITIES {
             command.arg("--cap").arg(capability);
         }
     }
     let mut environment = vec![
-        ("PATH".to_owned(), "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin".to_owned()),
+        (
+            "PATH".to_owned(),
+            "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin".to_owned(),
+        ),
         ("HOME".to_owned(), identity.home.clone()),
         ("TERM".to_owned(), "xterm".to_owned()),
         ("LANG".to_owned(), "C.UTF-8".to_owned()),
@@ -520,7 +646,10 @@ pub fn exec_command(
     command.arg(name).arg(oci::INIT_PATH).arg("--");
     if with_timeout {
         if let Some(limit) = exec.timeout {
-            command.arg("timeout").arg("--kill-after=5s").arg(format!("{}s", limit.as_secs().max(1)));
+            command
+                .arg("timeout")
+                .arg("--kill-after=5s")
+                .arg(format!("{}s", limit.as_secs().max(1)));
         }
     }
     command.args(&exec.argv);

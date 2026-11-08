@@ -73,10 +73,17 @@ pub fn run_checked(program: &Path, args: &[&std::ffi::OsStr]) -> Result<String, 
         Ok(String::from_utf8_lossy(&output.stdout).into_owned())
     } else {
         let text = String::from_utf8_lossy(&output.stderr);
-        let last = text.lines().rev().find(|line| !line.trim().is_empty()).unwrap_or("");
+        let last = text
+            .lines()
+            .rev()
+            .find(|line| !line.trim().is_empty())
+            .unwrap_or("");
         Err(format!(
             "{} failed ({}): {last}",
-            program.file_name().and_then(|n| n.to_str()).unwrap_or("program"),
+            program
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("program"),
             output.status
         ))
     }
@@ -101,7 +108,14 @@ mod tests {
 
     #[test]
     fn a_failing_tool_reports_its_last_error_line() {
-        let error = run_checked(Path::new("/bin/sh"), &["-c".as_ref(), "echo a >&2; echo b >&2; exit 3".as_ref()]).unwrap_err();
-        assert!(error.contains("sh failed") && error.ends_with(": b"), "{error}");
+        let error = run_checked(
+            Path::new("/bin/sh"),
+            &["-c".as_ref(), "echo a >&2; echo b >&2; exit 3".as_ref()],
+        )
+        .unwrap_err();
+        assert!(
+            error.contains("sh failed") && error.ends_with(": b"),
+            "{error}"
+        );
     }
 }

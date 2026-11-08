@@ -30,7 +30,11 @@ pub fn resolve(name: &str, passwd: &str, group: &str) -> Option<Identity> {
         .map(|line| line.split(':').collect::<Vec<_>>())
         .find(|fields| fields.len() >= 6 && (fields[0] == user || fields[2] == user));
     let (uid, mut gid, home) = match entry {
-        Some(fields) => (fields[2].parse().ok()?, fields[3].parse().ok()?, fields[5].to_owned()),
+        Some(fields) => (
+            fields[2].parse().ok()?,
+            fields[3].parse().ok()?,
+            fields[5].to_owned(),
+        ),
         None => {
             let number = user.parse::<u32>().ok()?;
             (number, number, "/".to_owned())
@@ -40,7 +44,9 @@ pub fn resolve(name: &str, passwd: &str, group: &str) -> Option<Identity> {
         gid = group
             .lines()
             .map(|line| line.split(':').collect::<Vec<_>>())
-            .find(|fields| fields.len() >= 3 && (fields[0] == group_name || fields[2] == group_name))
+            .find(|fields| {
+                fields.len() >= 3 && (fields[0] == group_name || fields[2] == group_name)
+            })
             .and_then(|fields| fields[2].parse().ok())
             .or_else(|| group_name.parse().ok())?;
     }
@@ -51,13 +57,17 @@ pub fn resolve(name: &str, passwd: &str, group: &str) -> Option<Identity> {
 mod tests {
     use super::*;
 
-    const PASSWD: &str = "root:x:0:0:root:/root:/bin/bash\nsilo:x:1001:1001::/home/silo:/bin/bash\n";
+    const PASSWD: &str =
+        "root:x:0:0:root:/root:/bin/bash\nsilo:x:1001:1001::/home/silo:/bin/bash\n";
     const GROUP: &str = "root:x:0:\nsilo:x:1001:\nsudo:x:27:silo\nvideo:x:44:silo,other\n";
 
     #[test]
     fn names_resolve_to_ids_and_home() {
         let silo = resolve("silo", PASSWD, GROUP).unwrap();
-        assert_eq!((silo.uid, silo.gid, silo.home.as_str()), (1001, 1001, "/home/silo"));
+        assert_eq!(
+            (silo.uid, silo.gid, silo.home.as_str()),
+            (1001, 1001, "/home/silo")
+        );
         let root = resolve("root", PASSWD, GROUP).unwrap();
         assert_eq!((root.uid, root.gid, root.home.as_str()), (0, 0, "/root"));
     }
@@ -66,7 +76,10 @@ mod tests {
     fn numbers_and_explicit_groups_resolve() {
         assert_eq!(resolve("1001", PASSWD, GROUP).unwrap().home, "/home/silo");
         let unknown = resolve("4242", PASSWD, GROUP).unwrap();
-        assert_eq!((unknown.uid, unknown.gid, unknown.home.as_str()), (4242, 4242, "/"));
+        assert_eq!(
+            (unknown.uid, unknown.gid, unknown.home.as_str()),
+            (4242, 4242, "/")
+        );
         assert_eq!(resolve("silo:video", PASSWD, GROUP).unwrap().gid, 44);
         assert_eq!(resolve("nobody-here", PASSWD, GROUP), None);
     }
@@ -78,9 +91,15 @@ mod tests {
         std::fs::create_dir_all(lower.path().join("etc")).unwrap();
         std::fs::write(lower.path().join("etc/passwd"), "lower").unwrap();
         let layers = [upper.path().to_path_buf(), lower.path().to_path_buf()];
-        assert_eq!(read_from_layers(&layers, "etc/passwd").as_deref(), Some("lower"));
+        assert_eq!(
+            read_from_layers(&layers, "etc/passwd").as_deref(),
+            Some("lower")
+        );
         std::fs::create_dir_all(upper.path().join("etc")).unwrap();
         std::fs::write(upper.path().join("etc/passwd"), "upper").unwrap();
-        assert_eq!(read_from_layers(&layers, "etc/passwd").as_deref(), Some("upper"));
+        assert_eq!(
+            read_from_layers(&layers, "etc/passwd").as_deref(),
+            Some("upper")
+        );
     }
 }

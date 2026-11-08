@@ -7,7 +7,10 @@
 //! container. (`umoci unpack --rootless` would give every file to the account itself.)
 //! Containers mount the result read-only as the bottom overlay layer.
 
-use super::{layout::Layout, tools::{run_checked, Tools}};
+use super::{
+    layout::Layout,
+    tools::{run_checked, Tools},
+};
 use crate::runtime::guest_image::{extract_verified_archive, GuestImageManifest, PinnedImage};
 use crate::runtime::{RuntimeError, RuntimePaths};
 use serde_json::Value;
@@ -45,7 +48,9 @@ pub fn ensure(paths: &RuntimePaths, tools: &Tools) -> Result<Unpacked, RuntimeEr
     let manifest = pinned()?;
     let layout = Layout::new(&paths.home);
     let _guard = UNPACK_LOCK.lock().map_err(|_| {
-        RuntimeError::Unavailable("Image preparation is unavailable. Restart Silo and retry.".into())
+        RuntimeError::Unavailable(
+            "Image preparation is unavailable. Restart Silo and retry.".into(),
+        )
     })?;
     if let Some(done) = unpacked(&layout, &manifest) {
         return Ok(done);
@@ -67,8 +72,7 @@ pub fn ensure(paths: &RuntimePaths, tools: &Tools) -> Result<Unpacked, RuntimeEr
     // A partial unpack holds files of sub-ids: only the namespace can remove them.
     let _ = remove_tree(tools, &work);
     result.map_err(failed)?;
-    unpacked(&layout, &manifest)
-        .ok_or_else(|| failed("the unpacked image is incomplete".into()))
+    unpacked(&layout, &manifest).ok_or_else(|| failed("the unpacked image is incomplete".into()))
 }
 
 fn unpack_into(
@@ -94,7 +98,10 @@ fn unpack_into(
     let _ = std::fs::remove_file(&tar);
     let found = config_digest(&oci)?;
     if found != manifest.image_digest {
-        return Err(format!("the image is {found}, not the pinned {}", manifest.image_digest));
+        return Err(format!(
+            "the image is {found}, not the pinned {}",
+            manifest.image_digest
+        ));
     }
     let bundle = work.join("bundle");
     run_checked(
@@ -112,8 +119,11 @@ fn unpack_into(
     let finished = work.join("done");
     std::fs::create_dir_all(&finished).map_err(|e| e.to_string())?;
     std::fs::rename(bundle.join("rootfs"), finished.join("rootfs")).map_err(|e| e.to_string())?;
-    std::fs::write(finished.join("digest"), format!("{}\n", manifest.image_digest))
-        .map_err(|e| e.to_string())?;
+    std::fs::write(
+        finished.join("digest"),
+        format!("{}\n", manifest.image_digest),
+    )
+    .map_err(|e| e.to_string())?;
     let target = layout.image(&manifest.image_digest);
     // A concurrent engine process may have finished first; keep its result.
     match std::fs::rename(&finished, &target) {
@@ -139,7 +149,14 @@ pub fn remove_tree(tools: &Tools, path: &Path) -> Result<(), String> {
     }
     run_checked(
         &tools.ctr,
-        &["userns".as_ref(), "--".as_ref(), "/bin/rm".as_ref(), "-rf".as_ref(), "--".as_ref(), path.as_ref()],
+        &[
+            "userns".as_ref(),
+            "--".as_ref(),
+            "/bin/rm".as_ref(),
+            "-rf".as_ref(),
+            "--".as_ref(),
+            path.as_ref(),
+        ],
     )
     .map(drop)
 }
@@ -147,11 +164,15 @@ pub fn remove_tree(tools: &Tools, path: &Path) -> Result<(), String> {
 /// The config digest of the single image in an OCI layout directory.
 pub fn config_digest(layout: &Path) -> Result<String, String> {
     let read = |path: PathBuf| -> Result<Value, String> {
-        serde_json::from_slice(&std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?)
-            .map_err(|e| format!("{}: {e}", path.display()))
+        serde_json::from_slice(
+            &std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?,
+        )
+        .map_err(|e| format!("{}: {e}", path.display()))
     };
     let blob = |digest: &str| -> Result<PathBuf, String> {
-        let hex = digest.strip_prefix("sha256:").ok_or("an unsupported digest")?;
+        let hex = digest
+            .strip_prefix("sha256:")
+            .ok_or("an unsupported digest")?;
         if hex.len() != 64 || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
             return Err("an invalid digest".into());
         }
@@ -162,8 +183,15 @@ pub fn config_digest(layout: &Path) -> Result<String, String> {
     if manifests.len() != 1 {
         return Err("the layout does not hold exactly one image".into());
     }
-    let manifest = read(blob(manifests[0]["digest"].as_str().ok_or("no manifest digest")?)?)?;
-    Ok(manifest["config"]["digest"].as_str().ok_or("no config digest")?.to_owned())
+    let manifest = read(blob(
+        manifests[0]["digest"]
+            .as_str()
+            .ok_or("no manifest digest")?,
+    )?)?;
+    Ok(manifest["config"]["digest"]
+        .as_str()
+        .ok_or("no config digest")?
+        .to_owned())
 }
 
 #[cfg(test)]
@@ -180,7 +208,11 @@ mod tests {
             format!(r#"{{"manifests":[{{"digest":"sha256:{manifest}"}}]}}"#),
         )
         .unwrap();
-        std::fs::write(blobs.join(&manifest), format!(r#"{{"config":{{"digest":"{config}"}}}}"#)).unwrap();
+        std::fs::write(
+            blobs.join(&manifest),
+            format!(r#"{{"config":{{"digest":"{config}"}}}}"#),
+        )
+        .unwrap();
         dir
     }
 
@@ -194,10 +226,22 @@ mod tests {
     #[test]
     fn a_layout_with_two_images_or_a_bad_digest_is_refused() {
         let dir = fake_layout("sha256:x");
-        std::fs::write(dir.path().join("index.json"), r#"{"manifests":[{"digest":"sha256:../x"},{"digest":"y"}]}"#).unwrap();
-        assert!(config_digest(dir.path()).unwrap_err().contains("exactly one"));
-        std::fs::write(dir.path().join("index.json"), r#"{"manifests":[{"digest":"sha256:../x"}]}"#).unwrap();
-        assert!(config_digest(dir.path()).unwrap_err().contains("invalid digest"));
+        std::fs::write(
+            dir.path().join("index.json"),
+            r#"{"manifests":[{"digest":"sha256:../x"},{"digest":"y"}]}"#,
+        )
+        .unwrap();
+        assert!(config_digest(dir.path())
+            .unwrap_err()
+            .contains("exactly one"));
+        std::fs::write(
+            dir.path().join("index.json"),
+            r#"{"manifests":[{"digest":"sha256:../x"}]}"#,
+        )
+        .unwrap();
+        assert!(config_digest(dir.path())
+            .unwrap_err()
+            .contains("invalid digest"));
     }
 
     #[test]
