@@ -263,3 +263,11 @@ Both owner decisions:
   them. The recipe step is gone, `silo-recipe-build-3` stays. Linux needs nothing: its disk-only captures already require the
   guest flush and its full captures keep the memory. The check script now compares `silo list --all --json` by sorted
   (id, name, state), minus `ci-*` and the recipe builder (it needs `jq`); the `silo.go` fork comment names the fanout envelope.
+- **macOS sync before every capture (8 Nov, decided after the gpt-6.1-sol review of `0b29af74`):** the guest
+  sync runs before every capture of a running macOS computer, including the before-keep, promote and undo
+  recovery checkpoints. macOS checkpoints hold disks only, so without it a restore (undo) could lose recent
+  writes just as a fork could. Cost: those operations wait for the sync (at most 60 s) and refuse when the
+  guest does not answer it; keep already needs the guest to apply changes. Accepted: correctness of every
+  saved point over the speed of a few. The `quiet::processes_match_by_exact_name_not_by_prefix_or_pattern`
+  failure seen in the engine suite also fails on main (`569f6fea`) at the same assertion and is not caused
+  by this branch.
