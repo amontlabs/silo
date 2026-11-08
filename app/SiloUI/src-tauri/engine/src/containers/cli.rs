@@ -41,27 +41,183 @@ pub fn run_with(paths: &RuntimePaths, arguments: &[String]) -> Result<i32, Strin
     }
 }
 
-/// A terminal in the computer, on the terminal this process is attached to.
+/// A terminal in the computer, on the terminal this process is attached to. `crun` makes the
+/// pseudo-terminal and hands its controlling side to a private socket here; this process puts
+/// its own terminal in raw mode and copies bytes both ways until the command ends, passing the
+/// window size along.
 #[cfg(target_os = "linux")]
 fn terminal(paths: &RuntimePaths, exec: &args::Exec) -> Result<i32, String> {
     use super::{lifecycle, tools::Tools};
+    use std::os::fd::AsRawFd;
+    use std::process::Stdio;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::{Duration, Instant};
+
+    static RESIZED: AtomicBool = AtomicBool::new(true);
+    extern "C" fn on_resize(_: libc::c_int) {
+        RESIZED.store(true, Ordering::Relaxed);
+    }
+
     let tools = Tools::locate(paths).map_err(|error| error.to_string())?;
     if !lifecycle::holder_alive(paths, &exec.name) {
         return Err(format!("Start {} first.", exec.name));
     }
+    let directory = tempfile::Builder::new()
+        .prefix("silo-pty-")
+        .tempdir()
+        .map_err(|error| format!("The terminal could not start: {error}"))?;
+    let socket = directory.path().join("c");
+    let listener = std::os::unix::net::UnixListener::bind(&socket)
+        .map_err(|error| format!("The terminal could not start: {error}"))?;
+    listener
+        .set_nonblocking(true)
+        .map_err(|error| error.to_string())?;
+    let mut with_socket = exec.clone();
+    with_socket.console_socket = Some(socket);
     let lifecycle::ExecPlan {
         mut command,
         group,
-    } = lifecycle::exec_command(paths, &tools, &exec.name, exec, false)?;
-    let status = command
-        .status()
+    } = lifecycle::exec_command(paths, &tools, &exec.name, &with_socket, false)?;
+    let mut child = command
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .spawn()
         .map_err(|error| format!("The terminal could not start: {error}"))?;
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let master = loop {
+        match listener.accept() {
+            Ok((stream, _)) => {
+                stream
+                    .set_nonblocking(false)
+                    .map_err(|error| error.to_string())?;
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(10)))
+                    .map_err(|error| error.to_string())?;
+                break lifecycle::receive_descriptor(&stream)?;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                if let Ok(Some(status)) = child.try_wait() {
+                    return Err(format!("The terminal could not start ({status})."));
+                }
+                if Instant::now() >= deadline {
+                    group.kill();
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err("The terminal did not start in time.".into());
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            Err(error) => return Err(error.to_string()),
+        }
+    };
+    drop(directory);
+    let master = std::fs::File::from(master);
+    let master_fd = master.as_raw_fd();
+    // SAFETY: plain calls on descriptors this process owns; `saved` is only used when it was filled.
+    let interactive = unsafe { libc::isatty(0) == 1 };
+    let mut saved: libc::termios = unsafe { std::mem::zeroed() };
+    let raw_mode = interactive && unsafe { libc::tcgetattr(0, &mut saved) } == 0;
+    if raw_mode {
+        let mut raw = saved;
+        // SAFETY: `raw` is a valid termios.
+        unsafe {
+            libc::cfmakeraw(&mut raw);
+            libc::tcsetattr(0, libc::TCSANOW, &raw);
+            libc::signal(libc::SIGWINCH, on_resize as libc::sighandler_t);
+        }
+    }
+    let mut stdin_open = true;
+    let mut buffer = [0u8; 8192];
+    let status = loop {
+        if RESIZED.swap(false, Ordering::Relaxed) && interactive {
+            // SAFETY: TIOCGWINSZ/TIOCSWINSZ read and write one winsize.
+            unsafe {
+                let mut size: libc::winsize = std::mem::zeroed();
+                if libc::ioctl(0, libc::TIOCGWINSZ, &mut size) == 0 {
+                    libc::ioctl(master_fd, libc::TIOCSWINSZ, &size);
+                }
+            }
+        }
+        let mut fds = [
+            libc::pollfd {
+                fd: if stdin_open { 0 } else { -1 },
+                events: libc::POLLIN,
+                revents: 0,
+            },
+            libc::pollfd {
+                fd: master_fd,
+                events: libc::POLLIN,
+                revents: 0,
+            },
+        ];
+        // SAFETY: `fds` is a valid array of two pollfd.
+        unsafe { libc::poll(fds.as_mut_ptr(), 2, 100) };
+        if fds[0].revents & (libc::POLLIN | libc::POLLHUP) != 0 {
+            // SAFETY: reads into a buffer of the length given.
+            let read = unsafe { libc::read(0, buffer.as_mut_ptr().cast(), buffer.len()) };
+            if read > 0 {
+                write_all(master_fd, &buffer[..read as usize]);
+            } else if read == 0 {
+                stdin_open = false;
+            }
+        }
+        if fds[1].revents & (libc::POLLIN | libc::POLLHUP) != 0 {
+            // SAFETY: reads into a buffer of the length given.
+            let read = unsafe { libc::read(master_fd, buffer.as_mut_ptr().cast(), buffer.len()) };
+            if read > 0 {
+                write_all(1, &buffer[..read as usize]);
+            } else if read <= 0 {
+                // The command closed its terminal: it is over.
+                break child.wait().map_err(|error| error.to_string());
+            }
+        }
+        if let Ok(Some(status)) = child.try_wait() {
+            // Whatever it printed last.
+            loop {
+                let mut pending = libc::pollfd {
+                    fd: master_fd,
+                    events: libc::POLLIN,
+                    revents: 0,
+                };
+                // SAFETY: one valid pollfd and a read into a buffer of the length given.
+                let ready = unsafe { libc::poll(&mut pending, 1, 50) };
+                if ready <= 0 {
+                    break;
+                }
+                let read =
+                    unsafe { libc::read(master_fd, buffer.as_mut_ptr().cast(), buffer.len()) };
+                if read <= 0 {
+                    break;
+                }
+                write_all(1, &buffer[..read as usize]);
+            }
+            break Ok(status);
+        }
+    };
+    if raw_mode {
+        // SAFETY: restores the attributes read above.
+        unsafe { libc::tcsetattr(0, libc::TCSANOW, &saved) };
+    }
     group.kill();
+    let status = status?;
     use std::os::unix::process::ExitStatusExt;
     Ok(status
         .code()
         .or_else(|| status.signal().map(|signal| 128 + signal))
         .unwrap_or(1))
+}
+
+/// Writes all of `bytes` to `fd`, giving up on an error.
+#[cfg(target_os = "linux")]
+fn write_all(fd: i32, mut bytes: &[u8]) {
+    while !bytes.is_empty() {
+        // SAFETY: writes from a slice of the length given.
+        let written = unsafe { libc::write(fd, bytes.as_ptr().cast(), bytes.len()) };
+        if written <= 0 {
+            return;
+        }
+        bytes = &bytes[written as usize..];
+    }
 }
 
 #[cfg(not(target_os = "linux"))]
