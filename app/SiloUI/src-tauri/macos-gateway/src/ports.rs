@@ -9,7 +9,9 @@
 use microsandbox_network::config::{PortProtocol as NetworkPortProtocol, PublishedPort};
 use microsandbox_network::network::SmoltcpNetwork;
 
-use crate::control::{LoopbackPort, PROTOCOL_VERSION, PortProtocol, Request, Response};
+use crate::control::{
+    ErrorResponse, LoopbackPort, PROTOCOL_VERSION, PortProtocol, Request, Response,
+};
 use crate::network::MAX_LOOPBACK_PORTS;
 
 /// The lowest host port a caller may ask for; zero lets the gateway pick.
@@ -76,21 +78,52 @@ pub fn handle(network: &SmoltcpNetwork, request: &Request) -> Option<Response> {
             control.add(*guest_port, *host_port)
         }
         Request::PortRemove { guest_port, .. } => control.remove(*guest_port),
-        Request::PortProbe { guest_port, .. } => {
-            return control
-                .probe(*guest_port)
-                .ok()
-                .map(|reachable| Response::PortProbe {
-                    version: PROTOCOL_VERSION,
-                    reachable,
-                });
-        }
+        // A probe is a TCP handshake with the guest, which needs the frame pump to run: it is
+        // answered by `probe_in_background`, never here on the pump's thread.
         _ => return None,
     };
     Some(Response::Ports {
         version: PROTOCOL_VERSION,
         ports: to_loopback(listed.ok()?)?,
     })
+}
+
+/// Starts a probe of a guest port and answers it on `control` when it ends. The probe waits for
+/// the guest's reply to a connection attempt, and that reply reaches the network stack only
+/// while the thread that called us keeps pumping frames, so the wait happens on its own thread.
+/// The control link carries one request at a time, so nothing else writes to it meanwhile.
+/// `false` when the request is refused (the caller answers `port_rejected`).
+pub fn probe_in_background(
+    network: &SmoltcpNetwork,
+    request: &Request,
+    control: &std::os::unix::net::UnixStream,
+) -> bool {
+    let Request::PortProbe { guest_port, .. } = request else {
+        return false;
+    };
+    if !acceptable(request) {
+        return false;
+    }
+    let Some(handle) = network.port_control_handle() else {
+        return false;
+    };
+    let Ok(mut writer) = control.try_clone() else {
+        return false;
+    };
+    let guest_port = *guest_port;
+    std::thread::Builder::new()
+        .name("port-probe".into())
+        .spawn(move || {
+            let response = match handle.probe(guest_port) {
+                Ok(reachable) => Response::PortProbe {
+                    version: PROTOCOL_VERSION,
+                    reachable,
+                },
+                Err(_) => Response::Error(ErrorResponse::for_revision(None, "port_rejected")),
+            };
+            let _ = crate::control::write_response(&mut writer, &response);
+        })
+        .is_ok()
 }
 
 #[cfg(test)]

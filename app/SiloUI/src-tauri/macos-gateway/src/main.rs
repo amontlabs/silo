@@ -355,10 +355,18 @@ fn dispatch_requests(
                 )
                 .map_err(|_| GatewayError::Control)?;
             }
+            Request::PortProbe { version, .. } if version == control::PROTOCOL_VERSION => {
+                if !(container && ports::probe_in_background(network, &request, control)) {
+                    control::write_response(
+                        control,
+                        &Response::Error(ErrorResponse::for_revision(None, "port_rejected")),
+                    )
+                    .map_err(|_| GatewayError::Control)?;
+                }
+            }
             Request::Ports { version }
             | Request::PortAdd { version, .. }
             | Request::PortRemove { version, .. }
-            | Request::PortProbe { version, .. }
                 if version == control::PROTOCOL_VERSION =>
             {
                 let response = if container {
