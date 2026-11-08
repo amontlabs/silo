@@ -443,8 +443,13 @@ container_access_features() {
 
   step "Opening the terminal command of $ctr"
   # The command the app and `silo` launch in a terminal emulator, run on a pseudo-terminal.
-  local home
-  home=$(container_home)
+  # The runtime home exactly as the engine gave it to the SSH listener it started (the unit name
+  # of a container is derived from that text).
+  local home listener
+  listener=$(pgrep -f -- '--container-runtime ssh serve' | head -n 1)
+  home=$(tr '\0' '\n' < "/proc/$listener/environ" | sed -n 's/^MSB_HOME=//p')
+  [[ -n "$home" ]] || { echo "no SSH listener to read the runtime home from" >&2; exit 1; }
+  echo "runtime home: $home (found: $(container_home))"
   local terminal=(/usr/bin/env "MSB_HOME=$home" "MSB_PATH=$engine_dir/msb" "MSB_LIBKRUNFW_PATH=$engine_dir/msb"
     "$engine_dir/silod" --container-runtime exec "$ctr" --user silo --env USER=silo --env LOGNAME=silo --no-start --workdir /workspace --tty)
   local typed
