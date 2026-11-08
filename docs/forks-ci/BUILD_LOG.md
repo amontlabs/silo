@@ -469,9 +469,19 @@ client through the same commands, API methods and screens as a Linux VM. Fable's
   and the boot layer have a new directory name (`-keepid`), and a computer whose upper directory is owned by the
   engine's own user (an earlier build) is refused at start with "Recreate it". No migration (first container
   release). The share is the computer's runtime folder bound at `/.msb`; Landlock's writable list gained `/.msb`.
-- **Found while reading** (not yet exercised live until the CI run): the engine can end a root-owned command's process
-  group because it owns the container's user namespace (capabilities in descendants); `silo-init --own-group` no
-  longer fails for a session leader (a terminal's command).
+- **Found on the way** (KVM runner, x86_64, Ubuntu 24.04):
+  - The container runtime gives the container's standard output and error files to the user its first process runs
+    as. The holder's log is those files, and root is now a sub-id, so the second start could not open its own log
+    ("Permission denied"). The log is now new each start and `0666` inside the private state folder.
+  - A process started outside the engine's control group (a terminal from a login session, an editor's proxy) cannot
+    join the container's group: `crun exec` failed with no message. Terminals and SSH sessions now run in a
+    `systemd-run --user --scope`, as the engine's own commands do (`lifecycle::in_user_scope`).
+  - `crun exec` with an inherited terminal exited 1 silently; the terminal command now makes the pty itself
+    (`--console-socket`, as the SSH server does) and copies bytes between it and the user's terminal.
+  - The root directory of the unpacked image belongs to root (a sub-id), which the engine may not move between
+    folders: the namespace moves it. A unit name derives from the runtime home text, so a hand-made command line
+    must use the home the engine passes.
+  - `silo-init --own-group` no longer fails for a session leader (a terminal's command).
 - **Threat model**: the container section says the working account is now the engine's user (an escape as the agent
   lands as the engine), why the namespaces still separate them, and describes the SSH server, SFTP, terminals and
   the share. Guides: [managed SSH](../SiloUI-MANAGED-SSH.md#container-computers),
@@ -483,7 +493,12 @@ client through the same commands, API methods and screens as a Linux VM. Fable's
   upper-directory ownership refusal, the boot-layer name, the share modes, the published secrets, `command_for` and
   the proxy/terminal strings for both kinds, the spool's container owner and modes, `silo-ctr userns --keep-id` (maps
   and a real namespace test), and the frontend (a container is offered terminal, editor and SSH, not export or the
-  desktop). Live: `linux-host-e2e.sh` (below).
+  desktop). Live: `linux-host-e2e.sh` with `SILO_E2E_CONTAINER=1` on the KVM runner passes: `silo ssh-setup`,
+  `ssh NAME.silo-dev uname -a` (Linux), the account, an exit status, standard input, `pwd` in the home, an SFTP put and
+  get of 300 kB (identical, owned by `silo`), `ssh -tt ... tty` (`/dev/pts/0`), `stty size`, an interactive shell, the
+  terminal command on a pty (`/dev/pts/0`, `silo`, `/workspace`), the editor proxy in `--stdio` mode under a scripted
+  `ssh` (an unlisted key and another account refused), and the in-guest `silo --in-guest list` as the non-root
+  account after `silo guest-client install --binary`.
 
 ### R1: CI runner on the Mac (branch `claude/runner-phase-1`)
 
