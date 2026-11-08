@@ -180,9 +180,13 @@ Silo is too old to share computers over Connections. Update Silo there." The fil
 16 GiB and the receiving device needs that much free space plus 64 MiB, after what its other
 copies in progress have already claimed. The limit is 16 GiB because computer exports carry disk
 images, which Files' 4 GiB is too small for, and because 16 GiB at the copy's 64 KiB/s time budget
-is about three days, so the budget stays finite. An export that Silo estimates to be over the limit
-is refused before it starts, and one that turns out larger is removed with a message naming the
-file and its size. See [Connections](SiloUI-CONNECTIONS.md#sharing-a-computer-between-devices).
+is about three days, so the budget stays finite. Silo does not guess the size up front: an export
+for another device stops as soon as the computers written so far are over the limit, before the
+file is assembled, and the message names the computer and the limit; a finished file that is still
+larger is removed with a message naming the file and its size. The copy lands in a `.part` file
+next to the path you chose and takes its name without replacing anything (on a drive without
+that, such as exFAT, it falls back to a link or to a check and a rename); a `.part` left by an
+earlier crashed copy is removed and the copy starts again. See [Connections](SiloUI-CONNECTIONS.md#sharing-a-computer-between-devices).
 
 The MCP server has no export or import tool: both read and write files at paths the caller
 chooses, and the file can hold the computer's logins, so they stay a decision of the person at the

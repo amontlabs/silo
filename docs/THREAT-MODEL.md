@@ -381,8 +381,8 @@ and serves exactly one file of it per `exports.file` stream.
   open); instead each one reserves its declared size in a counter the check subtracts from the
   free space, under one lock, and gives it back when the file is kept or the write ends. The
   counter counts a write's full size even after part of it is on disk, so it errs on the side of
-  refusing. An export is refused before it is written when its estimate is past the cap, and one
-  that turns out larger is removed. A caller cannot choose a name in the area: an export aimed at
+  refusing. An export stops once the computers written are past the cap, before the file is assembled,
+  and a finished one that turns out larger is removed. A caller cannot choose a name in the area: an export aimed at
   the area's folder by path is refused. The bytes go to a `.part` file, exactly the declared size is read, and the file is renamed only when
   the size and hash match; any other end deletes the `.part`. A stalled write ends after 120 s.
   The copy has the Files time budget (45 s plus the size at 64 KiB/s) and the controller's job can

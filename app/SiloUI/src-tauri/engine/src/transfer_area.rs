@@ -147,6 +147,52 @@ pub fn digest(path: &Path, cancelled: &dyn Fn() -> bool) -> Result<(u64, String)
     Ok((bytes, hex(&hasher.finalize())))
 }
 
+/// Puts `source` at `destination` without ever replacing a file there, and returns
+/// `AlreadyExists` when something is already there. The kernel's exclusive rename does it in one
+/// step; a volume that lacks it (some SMB shares, FAT) gets a hard link followed by removing
+/// `source`; a volume that has neither (exFAT, vfat) gets an existence check and a plain
+/// rename, whose only gap is something appearing at `destination` in between.
+pub fn publish_without_replacing(source: &Path, destination: &Path) -> std::io::Result<()> {
+    publish_without_replacing_with(
+        source,
+        destination,
+        crate::backup::exclusive_rename,
+        |source, destination| fs::hard_link(source, destination),
+    )
+}
+
+fn publish_without_replacing_with(
+    source: &Path,
+    destination: &Path,
+    exclusive: impl Fn(&Path, &Path) -> std::io::Result<()>,
+    link: impl Fn(&Path, &Path) -> std::io::Result<()>,
+) -> std::io::Result<()> {
+    // ENOTSUP and EOPNOTSUPP are the same value on Linux and differ on macOS.
+    let unsupported = |error: &std::io::Error| {
+        error.raw_os_error().is_some_and(|code| {
+            [libc::EINVAL, libc::ENOTSUP, libc::EOPNOTSUPP, libc::ENOSYS].contains(&code)
+        })
+    };
+    match exclusive(source, destination) {
+        Err(error) if unsupported(&error) => {}
+        result => return result,
+    }
+    match link(source, destination) {
+        Ok(()) => {
+            let _ = fs::remove_file(source);
+            return Ok(());
+        }
+        Err(error)
+            if unsupported(&error)
+                || matches!(error.raw_os_error(), Some(libc::EPERM | libc::EMLINK)) => {}
+        Err(error) => return Err(error),
+    }
+    if fs::symlink_metadata(destination).is_ok() {
+        return Err(std::io::Error::from(std::io::ErrorKind::AlreadyExists));
+    }
+    fs::rename(source, destination)
+}
+
 /// The bytes available to this account at `path` (or its nearest existing parent).
 pub fn free_space(path: &Path) -> Result<u64, String> {
     crate::backup::available_bytes(path)
@@ -700,6 +746,66 @@ mod tests {
 
     fn token() -> String {
         "0123456789abcdef0123456789abcdef".into()
+    }
+
+    #[test]
+    fn publishing_never_replaces_and_falls_back_when_a_volume_lacks_a_primitive() {
+        let dir = tempfile::tempdir().unwrap();
+        let unsupported = |_: &Path, _: &Path| Err(std::io::Error::from_raw_os_error(libc::ENOTSUP));
+        let einval = |_: &Path, _: &Path| Err(std::io::Error::from_raw_os_error(libc::EINVAL));
+        let eperm = |_: &Path, _: &Path| Err(std::io::Error::from_raw_os_error(libc::EPERM));
+        let make = |name: &str| {
+            let path = dir.path().join(name);
+            fs::write(&path, name).unwrap();
+            path
+        };
+        // The real primitives.
+        let (source, destination) = (make("a.part"), dir.path().join("a"));
+        publish_without_replacing(&source, &destination).unwrap();
+        assert!(!source.exists());
+        assert_eq!(fs::read(&destination).unwrap(), b"a.part");
+        let source = make("a2.part");
+        let error = publish_without_replacing(&source, &destination).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::AlreadyExists);
+        assert_eq!(fs::read(&destination).unwrap(), b"a.part");
+
+        // No exclusive rename: a hard link, and the source name goes away.
+        let (source, destination) = (make("b.part"), dir.path().join("b"));
+        publish_without_replacing_with(&source, &destination, einval, |s, d| fs::hard_link(s, d))
+            .unwrap();
+        assert!(!source.exists());
+        assert_eq!(fs::read(&destination).unwrap(), b"b.part");
+        let source = make("b2.part");
+        let error = publish_without_replacing_with(&source, &destination, unsupported, |s, d| {
+            fs::hard_link(s, d)
+        })
+        .unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::AlreadyExists);
+
+        // Neither: an existence check and a plain rename.
+        let (source, destination) = (make("c.part"), dir.path().join("c"));
+        publish_without_replacing_with(&source, &destination, unsupported, eperm).unwrap();
+        assert!(!source.exists());
+        assert_eq!(fs::read(&destination).unwrap(), b"c.part");
+        let source = make("c2.part");
+        let error =
+            publish_without_replacing_with(&source, &destination, unsupported, unsupported)
+                .unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::AlreadyExists);
+        assert_eq!(fs::read(&destination).unwrap(), b"c.part");
+        assert!(source.exists());
+
+        // An error that is not "unsupported" is reported, not worked around.
+        let denied = |_: &Path, _: &Path| Err(std::io::Error::from_raw_os_error(libc::EACCES));
+        let source = make("d.part");
+        let error = publish_without_replacing_with(
+            &source,
+            &dir.path().join("d"),
+            denied,
+            |s, d| fs::hard_link(s, d),
+        )
+        .unwrap_err();
+        assert_eq!(error.raw_os_error(), Some(libc::EACCES));
     }
 
     #[test]

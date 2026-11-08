@@ -348,15 +348,24 @@ no computer, Dev engine or app bundle was touched.
     wait leaves the file (the sweep removes it) and the re-attach hint stays valid.
   - *Over-cap export.* The owner removes the `x-` file when `describe_transfer` fails (too large,
     cancelled, unreadable); the size is read from the file before it is hashed and the error names the
-    file and size. An export whose estimate (`BackupService::estimate_export_bytes`, before compression,
-    the figure the free-space check uses) is past 16 GiB is refused before it starts; Linux exports only,
-    macOS computers have no estimate and rely on the check after the write. The estimate ignores
-    compression, so a computer whose raw size is over 16 GiB is refused even if it would compress below.
+    file and size. The up-front refusal from `estimate_export_bytes` (before compression, whole store
+    and cache when the image travels) is gone: it could refuse an export that would fit. Instead the
+    export stops itself: `BackupRequest::size_cap` (set to the area's 16 GiB for a file in the area)
+    is checked in `create_backup_with_token` after each computer's disks are written, and the error
+    names that computer and the cap. This is not a mid-write abort of the tool that writes a
+    computer's disks (an external command), so one oversized computer is still written to the
+    working copy before it is refused; nothing is assembled, no file is left at the destination, and
+    the working copy is dropped. The after-write check stays. The estimate still feeds the free-space check.
   - *Export files 0600.* `describe_transfer` sets 0600 on the export, so "files 0600" is true for both
     kinds.
-  - *Receive wrote to the final path.* `export_transfer::receive` writes `<path>.part` and links it to the
-    path only when the hash matches (a hard link, so nothing is replaced); an existing file is refused
-    before the copy.
+  - *Receive wrote to the final path.* `export_transfer::receive` writes `<path>.part` and puts it at the
+    path only when the hash matches; an existing file is refused before the copy and nothing is replaced.
+    The first cut used `hard_link`, which exFAT/FAT32/vfat and many SMB shares refuse, so every copy there
+    failed at the end. It now uses `transfer_area::publish_without_replacing`: the kernel's exclusive rename
+    (`renameatx_np` `RENAME_EXCL` / `renameat2` `RENAME_NOREPLACE`), else a hard link and removing the `.part`,
+    else an existence check and a plain rename. The fallbacks are tested with injected errors. A `.part`
+    left by a crash (a regular file of this account) is removed once and the copy starts again; anything
+    else there is named in the error.
   - *Broken pipe.* `push` reads the owner's error line when a write fails and returns the owner's reason.
   - *Client-chosen names.* `exports.create` refuses a destination or archive path inside the area
     (`Area::contains`, links followed); only `transferArea: true` names a file there.

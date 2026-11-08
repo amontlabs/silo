@@ -498,12 +498,7 @@ fn receive(
             plan.path.display()
         ));
     }
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(&part)
-        .map_err(|error| format!("Silo could not create {}: {error}", part.display()))?;
+    let mut file = create_part(&part)?;
     let mut reporter = Reporter::new(engine, job_id, plan, expected.bytes);
     let result = (|| {
         let opened = link().open(
@@ -543,12 +538,8 @@ fn receive(
         copied
     })();
     drop(file);
-    // A hard link fails when something appeared at the path meanwhile, where a rename would
-    // replace it.
-    let result = result.and_then(|()| {
-        std::fs::hard_link(&part, &plan.path)
-            .map_err(|error| format!("Silo could not create {}: {error}", plan.path.display()))
-    });
+    // Publishing never replaces: something that appeared at the path meanwhile is kept.
+    let result = result.and_then(|()| publish(&part, &plan.path));
     match result {
         Ok(()) => {
             remove_partial(&part);
@@ -578,6 +569,56 @@ fn part_path(path: &Path) -> PathBuf {
     let mut part = path.as_os_str().to_owned();
     part.push(".part");
     PathBuf::from(part)
+}
+
+/// Creates `part` for writing. A `.part` left by a copy that crashed is this flow's own file,
+/// so a regular file of this account is removed once and the copy starts again; anything else
+/// there is named in the error rather than reported as a bare "File exists".
+fn create_part(part: &Path) -> Result<File, String> {
+    use std::os::unix::fs::MetadataExt;
+    let create = || {
+        OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(part)
+    };
+    match create() {
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            let stale = std::fs::symlink_metadata(part).is_ok_and(|metadata| {
+                // SAFETY: geteuid has no preconditions.
+                metadata.is_file() && metadata.uid() == unsafe { libc::geteuid() }
+            });
+            let in_the_way = |detail: &str| {
+                format!(
+                    "Silo could not create {}: an earlier copy left {} there and {detail}. Remove it and try again.",
+                    part.display(),
+                    part.display(),
+                )
+            };
+            if !stale {
+                return Err(in_the_way("it is not a file Silo can safely remove"));
+            }
+            std::fs::remove_file(part)
+                .map_err(|error| in_the_way(&format!("removing it failed: {error}")))?;
+            create().map_err(|error| format!("Silo could not create {}: {error}", part.display()))
+        }
+        result => result.map_err(|error| format!("Silo could not create {}: {error}", part.display())),
+    }
+}
+
+/// Moves the finished copy to the path the user chose without replacing anything there.
+fn publish(part: &Path, path: &Path) -> Result<(), String> {
+    transfer_area::publish_without_replacing(part, path).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::AlreadyExists {
+            format!(
+                "Silo could not create {}: a file already exists there.",
+                path.display()
+            )
+        } else {
+            format!("Silo could not create {}: {error}", path.display())
+        }
+    })
 }
 
 fn remove_partial(path: &Path) {
@@ -655,5 +696,43 @@ fn send(
             );
             Err(message)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_stale_part_from_a_crash_is_replaced_and_a_foreign_one_is_named() {
+        let dir = tempfile::tempdir().unwrap();
+        let part = dir.path().join("x.silo-backup.part");
+        std::fs::write(&part, b"left by a crash").unwrap();
+        let mut file = create_part(&part).unwrap();
+        file.write_all(b"new").unwrap();
+        drop(file);
+        assert_eq!(std::fs::read(&part).unwrap(), b"new");
+
+        let other = dir.path().join("y.silo-backup.part");
+        std::fs::create_dir(&other).unwrap();
+        let message = create_part(&other).unwrap_err();
+        assert!(message.contains("y.silo-backup.part") && message.contains("earlier copy"));
+        assert!(!message.contains("File exists"));
+    }
+
+    #[test]
+    fn publishing_keeps_a_file_that_appeared_at_the_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let part = dir.path().join("a.part");
+        let path = dir.path().join("a");
+        std::fs::write(&part, b"copy").unwrap();
+        publish(&part, &path).unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"copy");
+        assert!(!part.exists());
+
+        std::fs::write(&part, b"second").unwrap();
+        let message = publish(&part, &path).unwrap_err();
+        assert!(message.contains("already exists"));
+        assert_eq!(std::fs::read(&path).unwrap(), b"copy");
     }
 }

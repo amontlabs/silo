@@ -2199,23 +2199,12 @@ fn backup_at_paths(
         sources,
         fork_records,
         pinned_image: pinned_image(paths),
+        // A file for another machine stops as soon as the computers written exceed what the
+        // transfer area carries; `describe_transfer` checks the finished file's size.
+        size_cap: transfer_area(controller)
+            .is_some_and(|area| area.owns_export_path(archive_path))
+            .then_some(crate::transfer_area::MAX_BYTES),
     };
-    // A file for another machine is refused before it is written when its estimate is already
-    // past what the transfer area carries; `describe_transfer` checks the real size afterwards.
-    if transfer_area(controller).is_some_and(|area| area.owns_export_path(archive_path)) {
-        let estimate = controller
-            .service
-            .estimate_export_bytes(&request, cancellation)?;
-        if estimate > crate::transfer_area::MAX_BYTES {
-            return Err(format!(
-                "This export would be about {} before compression, more than the {} Silo shares \
-                 between devices. Run silo export on that device and copy the file yourself.",
-                backup::format_bytes(estimate),
-                backup::format_bytes(crate::transfer_area::MAX_BYTES),
-            )
-            .into());
-        }
-    }
     let result = controller.service.create_backup_with_token(
         request,
         cancellation,
