@@ -4589,8 +4589,68 @@
       ],
       "type": "object"
     },
+    "ExportCheckParams": {
+      "properties": {
+        "checkpointId": {
+          "description": "The export packages this checkpoint rather than the live disk.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "computerId": {
+          "type": "string"
+        },
+        "deviceId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "computerId"
+      ],
+      "type": "object"
+    },
+    "ExportCheckResult": {
+      "properties": {
+        "checked": {
+          "description": "`disk` and `fork-time record`: the places that were listed.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "logins": {
+          "description": "Logins found, by tool name and path.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "unchecked": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "logins",
+        "checked"
+      ],
+      "type": "object"
+    },
     "ExportCreateParams": {
       "properties": {
+        "archivePath": {
+          "description": "The exact file to write. When set, `destination` is not matched against the\nremembered export folder and the file must not exist yet.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "checkpointId": {
           "type": [
             "string",
@@ -7032,6 +7092,9 @@
         "engine_update_prepare": {
           "$ref": "#/$defs/EngineUpdatePrepareFinishedResult"
         },
+        "export_check": {
+          "$ref": "#/$defs/ExportCheckResult"
+        },
         "github": {
           "$ref": "#/$defs/GitHubState"
         },
@@ -7093,6 +7156,7 @@
         "desktop",
         "backup",
         "archive_inspection",
+        "export_check",
         "upload",
         "download",
         "github",
@@ -8061,6 +8125,7 @@
         "events.subscribe",
         "events.unsubscribe",
         "exports.acknowledge",
+        "exports.check",
         "exports.create",
         "exports.destination.set",
         "exports.dismiss",
@@ -9460,6 +9525,22 @@
             },
             "params": {
               "$ref": "#/$defs/ExportAcknowledgeParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "exports.check",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/ExportCheckParams"
             }
           },
           "required": [
@@ -12225,6 +12306,22 @@
             },
             "result": {
               "type": "boolean"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "exports.check",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/JobStartResult"
             }
           },
           "required": [
@@ -17142,6 +17239,10 @@
       "resultType": "EngineUpdatePrepareFinishedResult"
     },
     {
+      "method": "exports.check",
+      "resultType": "ExportCheckResult"
+    },
+    {
       "method": "exports.create",
       "resultType": "BackupOperation"
     },
@@ -17682,6 +17783,12 @@
       "name": "exports.acknowledge",
       "paramsType": "exports::ExportAcknowledgeParams",
       "resultType": "bool"
+    },
+    {
+      "kind": "job",
+      "name": "exports.check",
+      "paramsType": "exports::ExportCheckParams",
+      "resultType": "common::JobStartResult"
     },
     {
       "kind": "job",

@@ -1,0 +1,22 @@
+{
+  "report": {
+    "checkpoint": null,
+    "fork": "42cb2b54-e4dc-4aec-b6be-383019e5302a",
+    "notes": [],
+    "reviewDigest": "edb3348caf3e96c4cfdb3d11ce0eebc50082e80ef00783ff7253d3fd06a26337",
+    "steps": [],
+    "summary": [
+      "Settings & files",
+      "  ~ /etc/ssl/certs/ca-certificates.crt",
+      "Other changed",
+      "  + /home/silo/share-conflict.txt",
+      "  + /home/silo/share-marker.txt",
+      "Not kept",
+      "  credentials: /home/silo/.claude/.credentials.json",
+      "Ignored: 6 paths (caches, logs, build output)",
+      "will keep files: 3"
+    ],
+    "target": "8fe8b940-a07b-43c2-a95e-4b92511460ce"
+  },
+  "status": "dry-run"
+}

@@ -710,6 +710,34 @@ fn maintenance_tick(
     periodic(runner, paths, &recovery.unresolved)
 }
 
+/// One recovery pass over checkpoint data, for the engine's timer: finish what an interrupted
+/// capture or a deletion left, and clear the members of import groups no computer owns
+/// (through MicroSandbox; the empty group folder it leaves stays). Skips whenever any operation is active or waiting,
+/// like the periodic work above. Nothing else calls `recover_interrupted`, so without this pass
+/// the engine never clears leftovers of earlier runs.
+pub fn recover_checkpoint_data(host: &dyn RuntimeHost) {
+    let Ok(_guard) = OPERATIONS.try_device_hidden("Clearing leftover checkpoint data") else {
+        return;
+    };
+    if shutdown::ensure_accepting_operations().is_err() {
+        return;
+    }
+    let Ok(paths) = runtime_paths(host) else {
+        return;
+    };
+    match checkpoints::recover_interrupted(&ProcessRunner, &paths) {
+        Ok(recovery) => {
+            if let Some(failure) = recovery.cleanup_error {
+                eprintln!("Deleted checkpoint data was kept: {failure}");
+            }
+            for (id, failure) in &recovery.unresolved {
+                eprintln!("Interrupted checkpoint data for computer {id} was kept: {failure}");
+            }
+        }
+        Err(failure) => eprintln!("Checkpoint recovery could not finish: {failure}"),
+    }
+}
+
 pub fn start_monitor(host: Arc<dyn RuntimeHost>) {
     thread::spawn(move || {
         loop {

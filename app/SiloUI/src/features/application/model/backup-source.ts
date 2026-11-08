@@ -78,7 +78,17 @@ export class ExportIncompleteError extends Error {
   }
 }
 
+/** The logins Silo found on a computer before it is shared. Nothing is removed from the export. */
+export interface ExportLogins {
+  /** Each login by tool name and path, for example "a Claude Code login (/root/.claude/.credentials.json)". */
+  logins: string[]
+  /** Why Silo could not check the whole computer, when it could not (it is stopped, or the export is of a checkpoint). */
+  unchecked?: string
+}
+
 export interface BackupActions {
+  /** Lists the logins on a computer, or on the disk of one of its checkpoints, before an export. */
+  checkLogins: (computerName: string, checkpointId?: string) => Promise<ExportLogins>
   chooseDestination: () => Promise<string | null>
   /**
    * Picks an export file and checks it. Aborting `signal` stops the check (a large file

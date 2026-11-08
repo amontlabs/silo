@@ -3,6 +3,7 @@
 //! output shape: `docs/SiloUI-CHANGES.md`.
 
 pub mod collect;
+pub mod credentials;
 pub mod diff;
 pub mod fork_base;
 pub mod ignore;

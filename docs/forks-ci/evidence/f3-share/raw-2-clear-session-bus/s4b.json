@@ -1,0 +1,34 @@
+{
+  "archive": "/Users/polarzero/.t3/worktrees/microsandbox-workspaces/t3-51f4af68/docs/forks-ci/evidence/f3-share/raw-2-clear-session-bus/e2e-share-src.silo-backup",
+  "boots": null,
+  "checkpointList": [],
+  "checkpoints": 0,
+  "computerUse": {
+    "agents": null,
+    "appliedApproval": "unknown",
+    "approval": "ask",
+    "approvalApply": "pending",
+    "approvalApplyReason": null,
+    "at": null,
+    "driverVersion": null,
+    "reason": "Start the computer to set up computer use.",
+    "schemaVersion": null,
+    "state": "unavailable"
+  },
+  "cpus": 2,
+  "credentialsUsed": {
+    "blocked": [],
+    "used": []
+  },
+  "detail": "Ready to start from checkpoint",
+  "diskGiB": 10,
+  "generation": 0,
+  "github": null,
+  "id": "4743fc57-e88b-4845-9549-155774bc2fd4",
+  "kind": "linux",
+  "memoryGiB": 4,
+  "name": "e2e-share-src-imported",
+  "quiet": null,
+  "secrets": [],
+  "state": "stopped"
+}

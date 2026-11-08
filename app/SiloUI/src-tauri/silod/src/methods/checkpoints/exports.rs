@@ -9,9 +9,9 @@ use silo_api::{
     methods::{
         common::JobStartResult,
         exports::{
-            ExportAcknowledgeParams, ExportCreateParams, ExportDestinationResult,
-            ExportDestinationSetParams, ExportDismissParams, ExportImportParams,
-            ExportInspectParams, ExportStateParams,
+            ExportAcknowledgeParams, ExportCheckParams, ExportCreateParams,
+            ExportDestinationResult, ExportDestinationSetParams, ExportDismissParams,
+            ExportImportParams, ExportInspectParams, ExportStateParams,
         },
     },
 };
@@ -110,6 +110,27 @@ pub(super) async fn inspect(
     output(JobStartResult { job_id })
 }
 
+/// `exports.check`: the logins on a computer, before it is shared. Starts a job; the result
+/// is the list. The computer is resolved here so an unknown id is refused at once.
+pub(super) async fn check(
+    context: &HandlerContext,
+    params: &Value,
+) -> Result<HandlerOutput, DispatchError> {
+    let params: ExportCheckParams = context.decode_params(params)?;
+    require_local_device(context, params.device_id.as_deref())?;
+    let host = context.silod_context().runtime_host();
+    let from_checkpoint = params.checkpoint_id.is_some();
+    let started = tokio::task::spawn_blocking(move || {
+        silo_engine::changes::credentials::start_check(host, params.computer_id, from_checkpoint)
+    })
+    .await
+    .map_err(|_| DispatchError::internal("The check could not start."))?;
+    started
+        .map(|job_id| JobStartResult { job_id })
+        .map_err(super::failure)
+        .and_then(output)
+}
+
 pub(super) async fn create(
     context: &HandlerContext,
     params: &Value,
@@ -123,6 +144,7 @@ pub(super) async fn create(
             params.destination,
             params.computer_ids,
             params.checkpoint_id,
+            params.archive_path,
         )
         .map_err(message_error)
     })

@@ -4,7 +4,7 @@ import { ExportIncompleteError, type BackupArchive, type BackupController, type 
 
 import type { ProductionContext } from "./production-context"
 import { backupFailure, backupResultKey, errorMessage, shareStructure } from "./production-helpers"
-import { archiveInspectionShape } from "./production-schemas"
+import { archiveInspectionShape, exportLoginsShape } from "./production-schemas"
 import type { ProductionSnapshot } from "./production-types"
 
 /** What export and import need from the rest of the source. */
@@ -97,6 +97,10 @@ export function createBackupControls({ native, snapshot, publish, disposed, view
   }
 
   const backupActions: BackupController["actions"] = {
+    async checkLogins(computerName, checkpointId) {
+      const found = exportLoginsShape.parse(await native.invoke("check_export_logins", { computer: computerName, ...(checkpointId && { checkpointId }) }))
+      return { logins: found.logins, ...(found.unchecked && { unchecked: found.unchecked }) }
+    },
     async chooseDestination() {
       const selected = await native.invoke<string | null>("choose_backup_destination")
       if (selected) await refresh()

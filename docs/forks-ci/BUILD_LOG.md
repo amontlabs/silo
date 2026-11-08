@@ -71,7 +71,7 @@ Design questions: [DESIGN-QUESTIONS.md](DESIGN-QUESTIONS.md). Advised by Fable 5
   has one; import stores it as the imported computer's fork-time record, so `silo fold --into main` is
   an ordinary three-way keep. A computer without one (a main) imports as its own computer and cannot be
   kept into another. Both advisors.
-- **Q4, guest image:** exports stop embedding the guest image (no `--with-image`); import already
+- **Q4, guest image** (the import claim below was not accurate; see F3): exports stop embedding the guest image (no `--with-image`); import already
   refuses an archive whose image digest differs from this Silo's pinned image (`backup.rs` import
   checks), so the embedded copy is never used. The receiver needs the same pinned image, prepared as for
   a new computer. Fable; the advisor's "pull any digest from the registry" adds an offline failure mode
@@ -121,6 +121,7 @@ Both owner decisions:
   - **Open:** on Linux a `silo fork -n N` shares a manual-kind "silo-fork-<id>" checkpoint that stays on the source. It cannot be removed after the forks exist (they use the snapshot member, so deletion is refused as in use), and a fork-point kind removed with its last fork would need the macOS `release_fork_point` machinery rebuilt on Linux's snapshot lineage; not done here.
   - **Not done:** a macOS fork timing (no macOS computer on Dev), the Linux KVM host.
   - **Reviews:** Fable LGTM, Opus LGTM.
+
 ### 8 Nov 2026: phase C1 measured (crun containers against the microVM)
 
 - **Question and scope.** Is an opt-in container computer on Linux hosts (crun, rootless, all capabilities
@@ -279,3 +280,186 @@ Both owner decisions:
   written in a running macOS computer, a manual checkpoint right after, a fork of that checkpoint: the file (and a 4 KiB blob) is
   in the fork. Cleaned up: 0 runners, no `ci-*`/`e2e-*` computer, recipe build removed. Evidence:
   [`evidence/r1-runner/run-4-macos.txt`](evidence/r1-runner/run-4-macos.txt), `runner-4-macos.log`, `config-macos-4.yaml`.
+### Phase F3: sharing a computer as a file (branch `claude/forks-phase-3`, 7 Nov 2026)
+
+What changed, with the evidence for each claim. Test counts are from `cargo test --locked` (synthetic
+GitHub configuration, shared target dir) and Vitest, run on 7 Nov 2026 on the Mac; none of it touched a
+computer, the Dev engine or an app bundle.
+
+- **`silo export` / `silo import`** (`cli/src/share.rs`, `cli.rs`, `render.rs`; `--json` like every
+  command; the same job waiting as the other commands, `Engine::run_job`). `exports.create` gained
+  `archivePath` (the exact file; the remembered-folder rule applies only without it) and there is a new
+  job `exports.check`. `--device` is refused for both with "…work on this device for now, so --device
+  cannot be used with them yet." No MCP tools: the MCP server has no owner-only tier, and both commands
+  read and write files at paths the caller picks and the file can hold the computer's logins; reasons
+  are in `docs/SiloUI-CLI.md`. Evidence: `cli/tests/share.rs` 10 tests (question text, no terminal
+  without `--yes`, `--yes`, failed check, checkpoint by name, failed export/import reported, default
+  import name, `--device`), 3 unit tests in `share.rs`.
+- **Guest image by reference.** Verified first, and the claim in Decision Q4 was not accurate:
+  `compare_loaded_descriptor` (`backup.rs`) compares the loaded snapshot's image with *the archive's own*
+  manifest, not with this Silo's pinned image, so import did not refuse an archive naming another image.
+  What replaces it: a Linux computer whose image reference (and recorded digest, when it has one) equals
+  the pinned image that the runtime cache holds is saved without `--with-image` (`--with-parents`
+  unchanged, including the retry without parents) and its manifest row says `imageEmbedded: false` and
+  carries `imageDigest`, **always the sender's pinned digest** (`PinnedImageRef.manifest_digest`), also when
+  the computer recorded none (before, such a row was matched by tag only). Validation requires a digest
+  exactly on the rows that leave the image out. Import of a lean row now prepares the image **before the
+  payload is extracted** (`prepare_restore_in_group` reads the manifest first, so an offline receiver fails
+  before copying gigabytes; the download checks its own space in `download_and_publish`, and the extraction
+  space check that follows sees what is left): the reference must be this Silo's pinned one (else "Update
+  Silo…"), `preparation::ensure_image` prepares it as computer creation does, and the cached manifest digest
+  must equal the row's `imageDigest`. **Format:** only an archive that needs format 5 (a lean row or a
+  fork-time record) is written as format 5; any other is written as format 4 (header and manifest), so older
+  Silo builds still read it and the changeset needs no warning. Format 4 files are still read; format 5
+  fields in a format 4 file are refused. Evidence: `backup.rs` tests for pinned/other/none image with the
+  digest and the format of each, digest required exactly on lean rows, prepare called first with the digest
+  and with nothing staged, the retry without parents, import calling the preparation only for a lean row
+  and stopping when it fails, format 4 written and read, format 5 fields refused in format 4;
+  `backup_controller.rs` test for another pinned image. **Size before/after: not measured** (the unit tests
+  use a fake runtime; the live check prints the size and takes `BEFORE_BYTES`).
+- **Fork-time record travels.** Archive manifest `forkRecords` (computer, size, sha256, capturedAt,
+  records, bytes), the gzipped stored manifest after the payloads; counted in the file length, hashed,
+  verified by every full check, extracted for the selected computer on import and stored by
+  `Store::put_imported_base` with no source and no origin (parsed first; a bad record is refused and
+  stores nothing). Linux and macOS (and mixed) archives carry it. A failed import removes it. A computer
+  without a record imports as its own, and `fold` without `--into` keeps its message. Evidence:
+  `backup.rs` round trip, tampered record fails check and import, record for an unknown computer refused;
+  `changes/store.rs` 2 tests; `backup_controller.rs` stores/forgets the record; `keep/tests.rs` two
+  tests that read the imported record back and keep three-way into the receiver's main (kept; and
+  refused as divergent with main untouched when the receiver changed the same file).
+  **Hardening after review (7 Nov):** `put_imported_base` counts `records` and `bytes` from the parsed
+  manifest and ignores the archive's numbers (the archive section keeps its fields; import no longer reads
+  them), and a `capturedAt` that is not an RFC 3339 time between 2020 and a day from now is replaced by
+  the import time (test with 1970, year 9999, text and empty). The compressed cap is 128 MiB, what a
+  capture reads back from a computer (`Options::max_compressed_bytes`); the 512 MiB decompressed cap stays
+  because a capture accepts the same (`Options::max_manifest_bytes`), so a lower one would refuse records
+  the engine itself made. **Orphan record:** the record is stored before the computer is saved, and
+  `discard_uncommitted_import` (also what relaunch recovery calls for a journaled identity) did not remove
+  it, so an interruption between the two, or a failed save of the settings, left a record under an id no
+  computer has; macOS relaunch recovery had the same gap. Both now call `forget_fork_record`, whose failure
+  keeps the identity journaled for the next launch. Test: a stored record is gone after
+  `discard_uncommitted_import`.
+- **Login warning.** `credential_group` now matches `.claude/.credentials.json`, `.codex/auth.json`,
+  `.gemini/oauth_creds.json` and `.gemini/gemini-credentials.json` (`gh/hosts.yml` was there). Claude Code and
+  Codex paths are from the tools' own docs (code.claude.com/docs/en/authentication: Linux, mode 0600;
+  developers.openai.com/codex/auth). **Gemini CLI, corrected after review:** `oauth_creds.json` is the legacy
+  file; current gemini-cli migrates it into keychain storage and, with no secret service, writes
+  `~/.gemini/gemini-credentials.json` (`fileKeychain.ts` in google-gemini/gemini-cli: `path.join(homedir(),
+  GEMINI_DIR)` + `gemini-credentials.json`, written encrypted with mode 0600). Both are matched; the earlier
+  claim that the path came only from third-party tools was wrong about the source, not about the legacy
+  file. `login_label` names a login ("a Claude Code login (path)") and leaves out what every computer has
+  (`/etc/shadow`, host keys, public keys, the desktop password). `changes::credentials::check` lists the disk
+  with one change manifest capture (the `silo diff` walk, which runs a bounded script in the guest and
+  reads a gzip back; cost = one capture of `/etc /root /home /usr/local /opt /srv`, seconds on a small
+  computer, proportional to the number of files, and the computer must be running) and the stored record.
+  Warn, never filter. **One "could not check" case (review):** a stopped computer (its disk is not listed;
+  a check never starts it), a checkpoint export (only the record is checked) and a failed check are the
+  same case, with the reason in `unchecked`. The CLI asks "Silo could not check <name> for logins
+  (<reason>). Share anyway? [y/N]" (with "other logins" and the found ones in the same question when both
+  apply), refuses without a terminal unless `--yes`, and with `--yes` reports the reason in `--json`
+  (`unchecked`) and in the text output; the app shows the same sentence in its dialog before the folder
+  picker, and a failed check asks too. Before, a stopped computer exported without a question and a failed
+  check under `--yes` was reported as clean. Evidence: engine tests `ignore.rs` 2, `credentials.rs` 3;
+  `cli/tests/share.rs` 12 (stopped computer asked and refused/accepted, failed check with `--yes` reported
+  in JSON and text); frontend `computer-transfer.test.tsx` (failed check, stopped computer with no logins
+  found, logins beside "other logins"), production bridge 2 new tests.
+  **Tauri command:** `check_export_logins` compiled and its forwarding test passed
+  (`cargo check -p silo-ui`, `cargo test -p silo-ui the_logins_check`) with empty placeholder files for the
+  resources `build.rs` requires (`binaries/*`, `runtime/*`, git-ignored, deleted afterwards);
+  `runtime:prepare` itself was not run (it builds MicroSandbox and Git from source with network access), so
+  this proves the Rust compiles and the forwarding, not a packaged app.
+- **Docs/changeset:** `docs/SiloUI-CLI.md` (commands table and a "Sharing a computer as a file"
+  section, with what the person sees when Silo could not check), `docs/THREAT-MODEL.md` (boundary 6, including
+  that an imported computer is untrusted until kept: `silo fold <imported> --into main` writes the sender's
+  shell files, agent settings and crontab into the computer that holds the receiver's secrets, so read
+  `silo diff` first), `app/SiloUI/.changeset/share-a-computer.md`.
+- **Export file name:** `-o FILE` must end in `.silo-backup`; checked up front for Linux and macOS in
+  `explicit_archive` (before, only the Linux write path checked, after the capture).
+- **Live check, not run:** `docs/forks-ci/checks/f3_share_check.sh` (Dev engine, `e2e-share-*`; keeps
+  the import into a second fork `e2e-share-target`, not the Dev main).
+
+**Final review fixes (7 Nov; reviews: Fable LGTM, Opus LGTM after these).** An import now computes the
+guest image to prepare a second time from the extracted archive and refuses ("the file changed while
+Silo was reading it") unless it equals the image that was described and prepared, so a file replaced
+between the two reads cannot load an unprepared image (test swaps the archive inside `prepare_image`).
+A macOS import that left no computer propagates a failed fork-record removal and keeps the restore
+identity for recovery instead of dropping the error (`settle_unsaved_macos_import`, with a test). `silo
+export --yes` says "other logins" when some were listed. A disk listing that fails after the fork-time
+record was read keeps the record's logins and reports the reason, and a Linux computer that cannot be
+reached is no longer reported as stopped (3 tests in `changes/credentials.rs`). Run: engine `backup`,
+`backup_controller` and `changes::credentials` tests (267 passed), `silo-cli --test share` (12 passed),
+render unit test, `cargo fmt --check`; no frontend file changed.
+
+Test results (7 Nov, after the review fixes): silo-engine 3123 passed, 8 failed, 31 ignored (the 8 are the
+same `host_push::protocol_tests::*`, which panic "prepare the bundled Git runtime before testing" in this
+checkout; none touches this change); silod 320 unit plus its integration tests, all passing; silo-cli 148
+unit + 12 `share` tests, all passing; silo-client 16; silo-api 49. Frontend: typecheck clean, lint 0 errors
+(existing warnings), Vitest 287 files / 2863 tests. `demo/` `tsc --noEmit` clean (node_modules deleted
+afterwards). `cargo fmt --all --check` clean. New tests were written with their fixes, not run failing
+first, except where a changed assertion shows the old behaviour (the CLI check-failure test).
+
+**F3 live check (7 Nov, Dev engine, Mac) and the fixes it led to.** Evidence:
+[f3-share](evidence/f3-share/README.md) (`raw-1-default/`, `raw-2-clear-session-bus/`). 18 of 22 and 19 of 21
+checks passed; the failures were four product problems, all fixed afterwards (tests, not a second live run):
+
+1. *Keep of an imported computer into the receiver's computer.* (a) `/home/silo/.dbus/session-bus/<machine-id>-1`
+   is rewritten by every started computer, so any two computers started since their common ancestor
+   conflicted on it ("divergent"). `changes/ignore.rs` now ignores `*/.dbus/session-bus` and
+   `.xsession-errors*` (the X session's error log, the same kind of per-login file); test
+   `per_login_runtime_files_are_not_a_change`. The other per-boot files under the home directory that the
+   evidence shows (`.config/pulse/<machine-id>-*`, `.Xauthority`, `.ICEauthority`) were already ignored.
+   (b) The `changed` refusal in run 2 was not a product fault: `silo fold` without `--reviewed` pins the keep to
+   the digest of the last `silo diff` of the fork (`Engine::recall_review`, `ops::fold`), and that was S5's,
+   before the probe deleted the session-bus files in the copy. The refusal's `report.reviewDigest`
+   (`f70af3…`) equals the dry run's, while S5's `s5.json` has `142494…`: the fork did not change between the dry
+   run and the keep, it changed after the review the keep was pinned to, and the refusal is the designed
+   answer. `f3_share_check.sh` now runs `silo diff` on the copy right before S7 (the `CLEAR_SESSION_BUS` probe
+   is gone). Not yet seen live: that the keep then succeeds; the probe is a rerun of the script on the Dev
+   engine.
+2. *The Silo CA named as a login.* `/etc/pki/ca-trust/source/anchors/microsandbox-ca.pem` is in
+   `SYSTEM_CREDENTIALS`, as is the macOS equivalent, the proxy CA and its trust-probe leaf under
+   `/Library/Application Support/Silo/NetworkBootstrap/` (written by `macos_computers/proxy/bootstrap.rs`; not
+   checked live). A CA anchor a person adds is still named (test).
+3. *Export free-space check.* `check_export_space` counted every snapshot and cache of the engine, once per
+   selected computer, plus the computer's disk twice (in the estimate and as a capture on the store). It now
+   counts, once per computer, its own snapshot group, its disk when a new capture is taken, and the image cache
+   once when a file carries the image, plus the manifest margin and 1 %, for the working copy and the
+   destination (and the 1 GiB reserve per volume). Ancestors kept in another computer's group are not counted
+   (the check on the finished file uses its real size). Test `export_space_counts_the_computers_own_payload_once`
+   (24 MiB of other snapshots and cache do not matter; the computer's own data does).
+4. *`snapshots/silo-import-*` left behind.* An imported computer's group holds the archive's ancestors under
+   the exporting computer's names, and dropping the computer queued only members named like Silo's own
+   captures (`silo_member`), so the others stayed. `remove_deleted_snapshots` now queues every member of an
+   import group (names valid for the journal; the planner still keeps what a record or a live computer's lineage
+   uses). The startup/maintenance sweep (`recover_interrupted`) also queues the members of import groups that
+   no checkpoint record on disk names, which clears the groups earlier drops left. Discarding an unfinished
+   import already removed its whole group (`discard_import_group`). Tests (both failed before the change):
+   `deleting_an_imported_computer_removes_its_whole_import_group`,
+   `the_sweep_removes_import_groups_no_computer_owns`. The cause is from reading the code, not observed live.
+
+- **Live rerun, 8 Nov 2026 (run 3, evidence in [f3-share](evidence/f3-share/README.md)).** On an integration build
+  (`412e329c`) with `cf97e65a`: S2 no longer names the Silo CA (only the Claude Code login), S3 and S9 (checkpoint
+  export) ran at 59 GiB free without a space refusal, but **S4 fails**: importing any export, even of a fresh
+  never-forked computer, stops with `archive contains duplicate entry: layers/layer_87157fb5….raw` from the runtime's
+  `snapshot load`. S5 to S8 were not reached, so S7 (keep into the receiver's computer) and the import-group
+  clean-up of a dropped imported computer were still unseen. Failed imports left no group; six older
+  `silo-import-*` folders were not cleared by the new engine.
+- **Run 4, 8 Nov 2026 (evidence in [f3-share](evidence/f3-share/README.md), `run-4-rerun.txt`): 22 passed, 0 failed**
+  (S9 `--device` skipped), S7 included; no `silo-import-*` left after dropping everything. Causes and fixes:
+  (1) *Duplicate layer.* `msb snapshot save --with-parents` writes a layer twice when the capture's chain already holds its
+  parent's head (any export after an earlier capture of the computer, such as F2's fork points), and `snapshot load` refuses it.
+  Reproduced with one computer exported four times (the fourth file failed); exports now save the capture alone
+  (`8794f629`; test `a_capture_is_saved_without_its_parents_so_no_layer_is_written_twice`, failed before). The old
+  missing-ancestor retry and its two tests are gone. (2) *Groups left.* The six groups were empty folders by then (the
+  8.4 GB was not reproduced). The sweep never ran: its only caller, `storage::start_monitor`, has had no caller since the
+  engine split; `silod` now runs `recover_checkpoint_data` on a timer (`5aa8a1ae`). Dropping a computer now queues every
+  member of its import group (`8794f629`), and a member released later (an imported copy shares its snapshot ID with the
+  computer it came from and stays while that lives) is removed then (`05992ceb`, test
+  `a_member_released_later_is_removed_through_the_runtime`). Silo does **not** remove the empty `silo-import-*` folder
+  (`.group.lock`, `group.json`, about 4 KB each) MicroSandbox leaves; those can remain.
+  **Still dead:** the trimming half of `start_monitor` (`periodic`, warm-computer trims) is not wired into `silod`; not
+  changed here, it needs its own decision.
+- **Folder removal dropped (review).** An earlier cut of the sweep unlinked empty `silo-import-*` folders from the
+  filesystem after an unlocked scan, while MicroSandbox publishes under its own group lock, and its time budget excluded
+  the inventory. Removed (`remove_unowned_import_group_shells`, `remove_empty_group_directory` and their tests):
+  MicroSandbox has no command that deletes an empty group, and the folders are about 4 KB each.

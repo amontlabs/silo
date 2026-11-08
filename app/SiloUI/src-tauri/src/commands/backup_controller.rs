@@ -8,7 +8,7 @@ use crate::engine_client::{
 use serde_json::Value;
 use silo_api::methods::{
     exports::{
-        ExportAcknowledgeParams, ExportCreateParams, ExportDestinationSetParams,
+        ExportAcknowledgeParams, ExportCheckParams, ExportCreateParams, ExportDestinationSetParams,
         ExportDismissParams, ExportImportParams, ExportInspectParams, ExportStateParams,
     },
     operations::CancelJobParams,
@@ -113,6 +113,23 @@ pub(crate) async fn reveal_target(
     listed_archive(&state(engine).await?, archive_path)
 }
 
+/// The logins found on a computer (or its checkpoint) before it is shared.
+pub(crate) async fn check_logins(
+    engine: &EngineClient,
+    computer: String,
+    checkpoint_id: Option<String>,
+) -> Result<Value, EngineError> {
+    let roster = roster(engine, None).await?;
+    let computer_id = roster.id_of(&computer)?;
+    engine
+        .run_job(requests::exports_check(ExportCheckParams {
+            computer_id,
+            checkpoint_id,
+            device_id: None,
+        }))
+        .await
+}
+
 /// Starts an export and returns its operation id.
 pub(crate) async fn start_export(
     engine: &EngineClient,
@@ -130,6 +147,7 @@ pub(crate) async fn start_export(
             destination,
             computer_ids,
             checkpoint_id,
+            archive_path: None,
             device_id: None,
         }))
         .await?;
@@ -311,6 +329,17 @@ pub(crate) async fn reveal_backup_archive(
 }
 
 #[tauri::command]
+pub(crate) async fn check_export_logins(
+    engine: Engine<'_>,
+    window: WebviewWindow,
+    computer: String,
+    checkpoint_id: Option<String>,
+) -> Result<Value, EngineError> {
+    require_main(&window)?;
+    check_logins(&engine, computer, checkpoint_id).await
+}
+
+#[tauri::command]
 pub(crate) async fn start_backup(
     engine: Engine<'_>,
     window: WebviewWindow,
@@ -381,7 +410,7 @@ mod forwarding_tests {
         })
     }
 
-    fn replies(method: MethodName, _params: &Value) -> Result<Value, (&'static str, String)> {
+    fn replies(method: MethodName, params: &Value) -> Result<Value, (&'static str, String)> {
         match method {
             MethodName::EventsSubscribe => Ok(json!({"subscription": "sub"})),
             MethodName::ComputersList => Ok(json!({
@@ -393,7 +422,12 @@ mod forwarding_tests {
             MethodName::ExportsCreate => Ok(json!({"jobId": "exports:op9"})),
             MethodName::ExportsImport => Ok(json!({"jobId": "exports:op10"})),
             MethodName::ExportsInspect => Ok(json!({"jobId": "inspect:r1"})),
+            MethodName::ExportsCheck => Ok(json!({"jobId": "exports:check1"})),
             MethodName::ExportsDismiss | MethodName::ExportsAcknowledge => Ok(json!(true)),
+            MethodName::OperationsJobGet if params["jobId"] == "exports:check1" => Ok(json!({
+                "jobId": "exports:check1", "state": "finished",
+                "outcome": {"result": {"logins": ["a Claude Code login (/root/.claude/.credentials.json)"], "checked": ["disk"]}}
+            })),
             MethodName::OperationsJobGet => Ok(json!({
                 "jobId": "inspect:r1", "state": "finished",
                 "outcome": {"result": {"archive": {"name": "a"}, "valid": true}}
@@ -439,6 +473,27 @@ mod forwarding_tests {
             .unwrap_err();
         assert_eq!(missing.code, "not_found");
         assert_eq!(fake.calls(MethodName::ExportsCreate).len(), 1);
+    }
+
+    #[tokio::test]
+    async fn the_logins_check_names_the_computer_by_id_and_returns_the_engine_list() {
+        let fake = FakeEngine::start(|method, params| replies(method, params));
+        let (engine, _) = connected_client(&fake).await;
+        let found = check_logins(&engine, "dev".into(), Some("c1".into()))
+            .await
+            .unwrap();
+        assert_eq!(
+            found["logins"][0],
+            "a Claude Code login (/root/.claude/.credentials.json)"
+        );
+        assert_eq!(
+            fake.calls(MethodName::ExportsCheck),
+            vec![json!({"computerId": DEV, "checkpointId": "c1"})]
+        );
+        let missing = check_logins(&engine, "ghost".into(), None)
+            .await
+            .unwrap_err();
+        assert_eq!(missing.code, "not_found");
     }
 
     #[tokio::test]

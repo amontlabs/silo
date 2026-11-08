@@ -15,7 +15,7 @@ const archive = { name: "dev.silo-backup", archivePath: "/backups/dev.silo-backu
 function controller(overrides: Partial<BackupController["state"]> = {}, actions: Partial<BackupController["actions"]> = {}): BackupController {
   return {
     state: { snapshotId: "1", availability: "available", archives: [archive], operation: null, ...overrides },
-    actions: { chooseDestination: vi.fn(), chooseArchive: vi.fn(), inspectArchive: vi.fn(), startBackup: vi.fn(), exportAndVerify: vi.fn().mockReturnValue(new Promise(() => {})), startRestore: vi.fn(), cancelOperation: vi.fn(), dismissOperation: vi.fn(), revealArchive: vi.fn().mockResolvedValue(undefined), ...actions },
+    actions: { checkLogins: vi.fn().mockResolvedValue({ logins: [] }), chooseDestination: vi.fn(), chooseArchive: vi.fn(), inspectArchive: vi.fn(), startBackup: vi.fn(), exportAndVerify: vi.fn().mockReturnValue(new Promise(() => {})), startRestore: vi.fn(), cancelOperation: vi.fn(), dismissOperation: vi.fn(), revealArchive: vi.fn().mockResolvedValue(undefined), ...actions },
   }
 }
 
@@ -31,10 +31,77 @@ function Harness({ backup, openComputer = vi.fn() }: { backup: BackupController;
     <button type="button" onClick={() => void transfer.exportComputer("dev")}>Start export</button>
     <button type="button" onClick={() => void transfer.beginImport()}>Start import</button>
     {transfer.importPopover(<button type="button">Add</button>)}
+    {transfer.loginConfirmation}
   </SettingsProvider>
 }
 
 afterEach(() => { toast.dismiss() })
+
+describe("logins found before an export", () => {
+  const claude = "a Claude Code login (/root/.claude/.credentials.json)"
+
+  it("names the logins and waits for an answer before a folder is chosen", async () => {
+    const backup = controller({}, { checkLogins: vi.fn().mockResolvedValue({ logins: [claude] }), chooseDestination: vi.fn().mockResolvedValue("/Volumes/Backups") })
+    render(<Harness backup={backup} />)
+    fireEvent.click(screen.getByRole("button", { name: "Start export" }))
+    expect(await screen.findByText(claude)).toBeInTheDocument()
+    expect(screen.getByText(/Silo keeps these files in the export/)).toBeInTheDocument()
+    expect(backup.actions.checkLogins).toHaveBeenCalledWith("dev", undefined)
+    expect(backup.actions.chooseDestination).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole("button", { name: "Share anyway" }))
+    await act(async () => { await Promise.resolve() })
+    expect(backup.actions.exportAndVerify).toHaveBeenCalledExactlyOnceWith("/Volumes/Backups", ["dev"], undefined)
+  })
+
+  it("exports nothing when the answer is Cancel", async () => {
+    const backup = controller({}, { checkLogins: vi.fn().mockResolvedValue({ logins: [claude] }), chooseDestination: vi.fn().mockResolvedValue("/Volumes/Backups") })
+    render(<Harness backup={backup} />)
+    fireEvent.click(screen.getByRole("button", { name: "Start export" }))
+    fireEvent.click(await screen.findByRole("button", { name: "Cancel" }))
+    await act(async () => { await Promise.resolve() })
+    expect(backup.actions.chooseDestination).not.toHaveBeenCalled()
+    expect(backup.actions.exportAndVerify).not.toHaveBeenCalled()
+    expect(screen.queryByText(claude)).not.toBeInTheDocument()
+  })
+
+  it("asks nothing when no login is found, and checks the checkpoint it exports", async () => {
+    const backup = controller({}, { chooseDestination: vi.fn().mockResolvedValue("/Volumes/Backups") })
+    let transfer: ComputerTransfer | undefined
+    render(<Capture backup={backup} onTransfer={(value) => { transfer = value }} />)
+    void transfer!.exportComputer("dev", { id: "checkpoint-1", name: "Before upgrade" })
+    await act(async () => { await Promise.resolve(); await Promise.resolve() })
+    expect(backup.actions.checkLogins).toHaveBeenCalledWith("dev", "checkpoint-1")
+    expect(backup.actions.exportAndVerify).toHaveBeenCalledWith("/Volumes/Backups", ["dev"], "checkpoint-1")
+  })
+
+  it("asks again when the check itself fails, saying why", async () => {
+    const backup = controller({}, { checkLogins: vi.fn().mockRejectedValue(new Error("The computer is busy.")), chooseDestination: vi.fn().mockResolvedValue("/Volumes/Backups") })
+    render(<Harness backup={backup} />)
+    fireEvent.click(screen.getByRole("button", { name: "Start export" }))
+    expect(await screen.findByText("Silo could not check dev for logins (The computer is busy).")).toBeInTheDocument()
+    expect(backup.actions.exportAndVerify).not.toHaveBeenCalled()
+  })
+
+  it("asks about a stopped computer that holds no logins that were found, and exports only after a yes", async () => {
+    const unchecked = "the computer is stopped, so its files were not listed; start it to check them"
+    const backup = controller({}, { checkLogins: vi.fn().mockResolvedValue({ logins: [], unchecked }), chooseDestination: vi.fn().mockResolvedValue("/Volumes/Backups") })
+    render(<Harness backup={backup} />)
+    fireEvent.click(screen.getByRole("button", { name: "Start export" }))
+    expect(await screen.findByText(`Silo could not check dev for logins (${unchecked}).`)).toBeInTheDocument()
+    expect(backup.actions.chooseDestination).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole("button", { name: "Share anyway" }))
+    await act(async () => { await Promise.resolve() })
+    expect(backup.actions.exportAndVerify).toHaveBeenCalledExactlyOnceWith("/Volumes/Backups", ["dev"], undefined)
+  })
+
+  it("says what could not be checked beside the logins that were found", async () => {
+    const unchecked = "the computer is stopped, so its files were not listed; start it to check them"
+    const backup = controller({}, { checkLogins: vi.fn().mockResolvedValue({ logins: ["a GitHub CLI login (/root/.config/gh/hosts.yml)"], unchecked }) })
+    render(<Harness backup={backup} />)
+    fireEvent.click(screen.getByRole("button", { name: "Start export" }))
+    expect(await screen.findByText(`Silo could not check dev for other logins (${unchecked}).`)).toBeInTheDocument()
+  })
+})
 
 describe("export notifications", () => {
   it("does not start an export if another transfer begins while the folder picker is open", async () => {
@@ -43,6 +110,7 @@ describe("export notifications", () => {
     let transfer!: ComputerTransfer
     const { rerender } = render(<Capture backup={backup} onTransfer={value => { transfer = value }} />)
     const exporting = transfer.exportComputer("dev")
+    await act(async () => { await Promise.resolve() })
     const running: BackupOperation = { kind: "running", operation: "restore", archive, runningNames: [], progress: 30, phases: [] }
     rerender(<Capture backup={{ ...backup, state: { ...backup.state, operation: running } }} onTransfer={value => { transfer = value }} />)
     choose("/backups")

@@ -58,6 +58,11 @@ pub const BUILTIN_IGNORE: &str = "\
 .Xauthority
 */.local/share/recently-used.xbel
 
+# the session bus address file D-Bus writes for each login (named by machine id and display),
+# and the X session's error log
+*/.dbus/session-bus
+.xsession-errors*
+
 # macOS background churn, from the files an idle macOS fork rewrites within minutes of its
 # first start (preference caches, contacts and knowledge databases with their write-ahead
 # files, system management state, Spotlight and Biome event stores)
@@ -308,6 +313,10 @@ const CREDENTIAL_NAMES: &[&str] = &[
 /// Path suffixes of single credential files.
 const CREDENTIAL_SUFFIXES: &[&str] = &[
     "/gh/hosts.yml",
+    "/.claude/.credentials.json",
+    "/.codex/auth.json",
+    "/.gemini/oauth_creds.json",
+    "/.gemini/gemini-credentials.json",
     "/.docker/config.json",
     "/.aws/credentials",
     "/.kube/config",
@@ -373,6 +382,68 @@ pub fn credential_group_owned(path: &str, owned: bool) -> Option<String> {
     None
 }
 
+/// Logins that belong to a person or an account, by the end of the path, with the name an
+/// export warning shows.
+const LOGIN_LABELS: &[(&str, &str)] = &[
+    ("/.claude/.credentials.json", "a Claude Code login"),
+    ("/.codex/auth.json", "a Codex login"),
+    ("/.gemini/oauth_creds.json", "a Gemini CLI login"),
+    ("/.gemini/gemini-credentials.json", "a Gemini CLI login"),
+    ("/gh/hosts.yml", "a GitHub CLI login"),
+    ("/.aws/credentials", "AWS credentials"),
+    ("/.docker/config.json", "Docker registry logins"),
+    ("/.kube/config", "a Kubernetes config"),
+    ("/.netrc", "a .netrc login"),
+    ("/.git-credentials", "stored Git credentials"),
+    ("/.npmrc", "an npm config that may hold a token"),
+    ("/.pypirc", "a PyPI config that may hold a token"),
+];
+
+/// Credential paths every computer has, which say nothing about a person's logins: system
+/// password files, the machine's own host keys and the desktop's connection password.
+const SYSTEM_CREDENTIALS: &[&str] = &[
+    "/etc/shadow",
+    "/etc/gshadow",
+    "/etc/master.passwd",
+    "/etc/sudoers",
+    "/var/lib/silo-desktop/connection.json",
+    "/etc/ssh/ssh_host_",
+    "/etc/ssl/private/",
+    // Silo's own CA, which every computer trusts: the MicroSandbox one on Linux, the proxy
+    // CA and its trust-probe leaf on macOS. Public certificates, not a person's login.
+    "/etc/pki/ca-trust/source/anchors/microsandbox-ca.pem",
+    "/Library/Application Support/Silo/NetworkBootstrap/",
+];
+
+/// Files of `.ssh` folders that hold no private key.
+const PUBLIC_SSH_NAMES: &[&str] = &["authorized_keys", "known_hosts", "config"];
+
+/// What a login found on a computer is called in an export warning: the tool's name for the
+/// files of a known tool, else the path. `None` for a path that is not a credential, and for
+/// the credentials every computer has (system password files, host keys, public keys).
+pub fn login_label(path: &str) -> Option<String> {
+    credential_group(path)?;
+    if SYSTEM_CREDENTIALS
+        .iter()
+        .any(|system| path == *system || path.starts_with(system))
+    {
+        return None;
+    }
+    let base = path.rsplit('/').next().unwrap_or(path);
+    if path.contains("/.ssh/") && (base.ends_with(".pub") || PUBLIC_SSH_NAMES.contains(&base)) {
+        return None;
+    }
+    for (suffix, label) in LOGIN_LABELS {
+        if path.ends_with(suffix) {
+            return Some(format!("{label} ({path})"));
+        }
+    }
+    if path.contains("/.ssh/") {
+        return Some(format!("an SSH private key ({path})"));
+    }
+    Some(path.to_owned())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -418,6 +489,20 @@ mod tests {
         assert!(credential_group("/var/lib/silo-desktop/connection.json").is_some());
         assert!(!list.matches("/home/silo/.config/xfce4/xfconf/xfce-perchannel-xml/displays.xml"));
         assert!(!list.matches("/Users/silo/Library/Application Support/Silo/notes.txt"));
+    }
+
+    #[test]
+    fn per_login_runtime_files_are_not_a_change() {
+        let list = IgnoreList::builtin();
+        for path in [
+            "/home/silo/.dbus/session-bus/11c2687859234b8cb26058b223401bb8-1",
+            "/root/.dbus/session-bus/a58639137b9771e322faf1aa6aeae96f-0",
+            "/home/silo/.xsession-errors",
+            "/home/silo/.xsession-errors.old",
+        ] {
+            assert!(list.matches(path), "{path} should be ignored");
+        }
+        assert!(!list.matches("/home/silo/.dbus/notes.txt"));
     }
 
     #[test]
@@ -503,5 +588,73 @@ mod tests {
         assert_eq!(credential_group("/root/.openclaw/openclaw.json"), None);
         assert_eq!(credential_group("/root/.aws/config"), None);
         assert_eq!(credential_group("/root/app/src/lib.rs"), None);
+    }
+
+    #[test]
+    fn the_login_files_named_in_the_claude_code_and_codex_docs_and_by_gemini_cli_tools_are_credentials(
+    ) {
+        for (path, group) in [
+            (
+                "/root/.claude/.credentials.json",
+                "/root/.claude/.credentials.json",
+            ),
+            ("/home/dev/.codex/auth.json", "/home/dev/.codex/auth.json"),
+            (
+                "/home/dev/.gemini/oauth_creds.json",
+                "/home/dev/.gemini/oauth_creds.json",
+            ),
+            (
+                "/home/dev/.gemini/gemini-credentials.json",
+                "/home/dev/.gemini/gemini-credentials.json",
+            ),
+        ] {
+            assert_eq!(credential_group(path).as_deref(), Some(group), "{path}");
+        }
+        assert_eq!(credential_group("/root/.claude/settings.json"), None);
+        assert_eq!(credential_group("/root/.codex/config.toml"), None);
+        assert_eq!(credential_group("/root/.gemini/settings.json"), None);
+        assert_eq!(
+            login_label("/home/dev/.gemini/gemini-credentials.json").as_deref(),
+            Some("a Gemini CLI login (/home/dev/.gemini/gemini-credentials.json)")
+        );
+    }
+
+    #[test]
+    fn logins_are_named_and_the_credentials_every_computer_has_are_not_listed() {
+        assert_eq!(
+            login_label("/root/.claude/.credentials.json").as_deref(),
+            Some("a Claude Code login (/root/.claude/.credentials.json)")
+        );
+        assert_eq!(
+            login_label("/home/dev/.config/gh/hosts.yml").as_deref(),
+            Some("a GitHub CLI login (/home/dev/.config/gh/hosts.yml)")
+        );
+        assert_eq!(
+            login_label("/home/dev/.ssh/id_ed25519").as_deref(),
+            Some("an SSH private key (/home/dev/.ssh/id_ed25519)")
+        );
+        assert_eq!(
+            login_label("/home/dev/certs/server.pem").as_deref(),
+            Some("/home/dev/certs/server.pem")
+        );
+        // a CA anchor a person added is still named
+        assert_eq!(
+            login_label("/etc/pki/ca-trust/source/anchors/corp.pem").as_deref(),
+            Some("/etc/pki/ca-trust/source/anchors/corp.pem")
+        );
+        for path in [
+            "/etc/shadow",
+            "/etc/ssh/ssh_host_ed25519_key",
+            "/etc/ssl/private/ssl-cert-snakeoil.key",
+            "/var/lib/silo-desktop/connection.json",
+            "/etc/pki/ca-trust/source/anchors/microsandbox-ca.pem",
+            "/Library/Application Support/Silo/NetworkBootstrap/proxy-ca.pem",
+            "/home/dev/.ssh/authorized_keys",
+            "/home/dev/.ssh/known_hosts",
+            "/home/dev/.ssh/id_ed25519.pub",
+            "/home/dev/app/src/main.rs",
+        ] {
+            assert_eq!(login_label(path), None, "{path}");
+        }
     }
 }

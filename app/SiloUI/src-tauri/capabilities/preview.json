@@ -52,6 +52,7 @@
     "allow-inspect-backup-archive",
     "allow-cancel-backup-inspection",
     "allow-reveal-backup-archive",
+    "allow-check-export-logins",
     "allow-start-backup",
     "allow-start-restore",
     "allow-cancel-backup-operation",

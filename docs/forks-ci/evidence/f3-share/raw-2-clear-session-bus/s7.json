@@ -1,0 +1,24 @@
+{
+  "refusal": {
+    "conflicts": [
+      {
+        "detail": "its changes differ from the reviewed diff",
+        "item": "7d953a9f-9a6c-43b2-916d-af9c585851a1",
+        "kind": "fork"
+      }
+    ],
+    "hint": "Review it again with `silo diff --json` and keep with the new digest.",
+    "message": "7d953a9f-9a6c-43b2-916d-af9c585851a1 changed since it was reviewed. d1c8ae4f-c854-4aa9-8ff2-b190a5b1be24 was not changed.",
+    "reason": "changed"
+  },
+  "report": {
+    "checkpoint": null,
+    "fork": "7d953a9f-9a6c-43b2-916d-af9c585851a1",
+    "notes": [],
+    "reviewDigest": "f70af3f25e5a3d9a70e7dbc7953b58bedb272be58b07dcbe69a6ce1f3dea6175",
+    "steps": [],
+    "summary": [],
+    "target": "d1c8ae4f-c854-4aa9-8ff2-b190a5b1be24"
+  },
+  "status": "refused"
+}

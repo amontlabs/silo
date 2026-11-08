@@ -38,6 +38,7 @@ const actions: BackupController['actions'] = {
   cancelOperation: noop,
   dismissOperation: noop,
   revealArchive: async () => undefined,
+  checkLogins: async () => ({ logins: [] }),
 };
 
 function backupAt(frame: number): BackupController {

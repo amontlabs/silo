@@ -182,6 +182,7 @@ fn main() {
             commands::backup_controller::inspect_backup_archive,
             commands::backup_controller::cancel_backup_inspection,
             commands::backup_controller::reveal_backup_archive,
+            commands::backup_controller::check_export_logins,
             commands::backup_controller::start_backup,
             commands::backup_controller::start_restore,
             commands::backup_controller::cancel_backup_operation,

@@ -1,0 +1,45 @@
+== S0 start from nothing
+== S1 a fork with a fake Claude Code login and a marker file
+PASS  S1 both forks run 
+step 1
+== S2 export without --yes and without a terminal: the warning, and no file
+Looking for logins on e2e-share-src...
+silo: This computer contains a Claude Code login (/home/silo/.claude/.credentials.json). Pass --yes to share it anyway; the files stay in the export.
+PASS  S2 refused without a terminal (exit 1)
+PASS  S2 names the Claude Code login 
+PASS  S2 wrote no file 
+== S3 export with --yes: the login is reported and stays in the file
+export took 2 s
+PASS  S3 export succeeded 
+export size: 5314579 bytes
+PASS  S3 --json lists the login 
+== S4 import under a new name
+PASS  S4 import succeeded 
+PASS  S4 the copy is stopped 
+step 1
+PASS  S4 the marker came along 
+step 2
+PASS  S4 the fake login is still in the copy (never filtered) 
+PASS  S4 a second import without --name picks a free name (e2e-share-src-imported)
+== S5 the copy has a fork-time record: diff shows the sender's work
+PASS  S5 silo diff works on the imported computer 
+PASS  S5 the diff lists the marker file 
+== S6 fold --into without a target says it does not know
+PASS  S6 refused 
+PASS  S6 says where it was forked from is unknown 
+== S7 fold into the receiver's main (e2e-share-target): kept three-way
+PASS  S7 the dry run reports a plan 
+PASS  S7 kept 
+step 1
+PASS  S7 the marker is in the target 
+== S8 conflict: the receiver changed the same file differently
+step 2
+PASS  S8 refused as divergent 
+PASS  S8 names the conflicting file 
+step 3
+PASS  S8 the target keeps the receiver's version 
+== S9 a checkpoint export, and --device
+PASS  S9 a checkpoint exports by name 
+SKIP  S9 --device (set DEVICE=<a connected device> to run it)
+== done: 22 passed, 0 failed (evidence in /Users/polarzero/.t3/worktrees/microsandbox-workspaces/t3-51f4af68/docs/forks-ci/evidence/f3-share/raw-4-rerun)
+script exit 0

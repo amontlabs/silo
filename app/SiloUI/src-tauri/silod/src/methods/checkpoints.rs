@@ -103,6 +103,7 @@ async fn dispatch(
         MethodName::ExportsState => exports::state(context, params).await,
         MethodName::ExportsDestinationSet => exports::destination_set(context, params).await,
         MethodName::ExportsInspect => exports::inspect(context, params).await,
+        MethodName::ExportsCheck => exports::check(context, params).await,
         MethodName::ExportsCreate => exports::create(context, params).await,
         MethodName::ExportsImport => exports::import(context, params).await,
         MethodName::ExportsDismiss => exports::dismiss(context, params).await,

@@ -378,9 +378,9 @@ removed ones are not merged. Memory objects in `runtime/checkpoint-store` stay f
 computer's life, bounded by dirtied RAM, and the launch base stays. Space is returned
 for good only when the computer is deleted.
 
-Exports save a capture with `--with-parents`, which fails when a removed ancestor is
-missing. The export then saves the capture alone, which is complete because every
-snapshot holds its own layers.
+Exports save a capture alone, without `--with-parents`: every snapshot holds its own
+layers, and `--with-parents` writes a layer twice when the capture's chain already holds
+its parent's head, which `snapshot load` refuses (found 8 Nov 2026).
 
 ### Checkpoint usage survey scope
 

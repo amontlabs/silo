@@ -92,6 +92,7 @@ function backupFor(frame: number): BackupController {
       cancelOperation: noop,
       dismissOperation: noop,
       revealArchive: async () => undefined,
+      checkLogins: async () => ({ logins: [] }),
     },
   };
 }

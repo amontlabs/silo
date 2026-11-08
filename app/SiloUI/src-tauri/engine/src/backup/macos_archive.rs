@@ -5,8 +5,8 @@
 
 use super::{
     check_cancelled, format_bytes, now_ms, open_regular_file, pending_digest,
-    read_and_verify_package, validate_manifest, write_immutable_package, BackupError, BackupResult,
-    BackupService, Cancellation, MsbRunner, PackageComputer, PackageManifest, RuntimeManifest,
+    read_and_verify_package, validate_manifest, BackupError, BackupResult, BackupService,
+    Cancellation, MsbRunner, PackageComputer, PackageManifest, RuntimeManifest,
     DEFAULT_MAX_ARCHIVE_BYTES, FORMAT_VERSION, FREE_SPACE_RESERVE, MAGIC, MAX_MANIFEST_BYTES,
 };
 use serde::{Deserialize, Serialize};
@@ -269,6 +269,7 @@ impl<R: MsbRunner> BackupService<R> {
         &self,
         destination: &Path,
         sources: Vec<MacosArchiveSource>,
+        fork_records: &[(String, super::ForkRecordFile)],
         cancellation: &Cancellation,
         token: Option<&str>,
     ) -> Result<BackupResult, BackupError> {
@@ -383,6 +384,7 @@ impl<R: MsbRunner> BackupService<R> {
                 guest_architecture: "aarch64".into(),
             },
             computers: Vec::with_capacity(prepared.len()),
+            fork_records: Vec::new(),
         };
         let mut payloads = Vec::with_capacity(prepared.len());
         let mut staged_payload_files = Vec::with_capacity(prepared.len());
@@ -421,6 +423,8 @@ impl<R: MsbRunner> BackupService<R> {
                 payload_size,
                 payload_sha256: pending_digest(),
                 volumes: Vec::new(),
+                image_embedded: true,
+                image_digest: None,
             });
             payloads.push(payload.reopen()?);
             staged_payload_files.push(payload);
@@ -445,10 +449,12 @@ impl<R: MsbRunner> BackupService<R> {
                 "The selected macOS exports exceed the archive size safety limit.".into(),
             ));
         }
-        let size_bytes = write_immutable_package(
+        let records = super::attach_fork_records(&mut manifest, fork_records)?;
+        let size_bytes = super::write_immutable_package_with_records(
             destination,
             &mut manifest,
             payloads,
+            records,
             cancellation,
             token,
             self.free_space,
@@ -1692,6 +1698,7 @@ mod tests {
         let payload = vec![0_u8; payload_size as usize];
         let manifest = PackageManifest {
             schema_version: FORMAT_VERSION,
+            fork_records: Vec::new(),
             created_at_ms: 1,
             runtime: RuntimeManifest {
                 name: RUNTIME_NAME.into(),
@@ -1706,6 +1713,8 @@ mod tests {
                 payload_size,
                 payload_sha256: digest(&payload),
                 volumes: Vec::new(),
+                image_embedded: true,
+                image_digest: None,
             }],
         };
         let manifest_bytes = serde_json::to_vec(&manifest).unwrap();

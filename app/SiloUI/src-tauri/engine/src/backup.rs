@@ -26,7 +26,14 @@ pub(crate) use macos_archive::{
 };
 
 const MAGIC: &[u8; 16] = b"SILO-BACKUP\0\0\0\0\0";
-const FORMAT_VERSION: u32 = 4;
+/// Format 5: a computer's guest image may travel by reference (`imageEmbedded: false` with its
+/// `imageDigest`) and a fork-time record may follow the payloads. An archive that needs neither
+/// is still written as format 4, which older Silo builds read.
+const FORMAT_VERSION: u32 = 5;
+const OLDEST_READABLE_FORMAT_VERSION: u32 = 4;
+/// The largest compressed fork-time record an archive carries or an import accepts: what a
+/// capture reads back from a computer (`collect::Options::max_compressed_bytes`).
+const MAX_FORK_RECORD_BYTES: u64 = 128 * 1024 * 1024;
 const MAX_MANIFEST_BYTES: u64 = 1024 * 1024;
 const MAX_COMMAND_OUTPUT: usize = 32 * 1024;
 const MAX_STRUCTURED_OUTPUT: usize = 1024 * 1024;
@@ -441,10 +448,73 @@ pub(crate) struct BackupSource {
     pub(crate) existing_member: Option<String>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub(crate) struct BackupRequest {
     pub(crate) destination: PathBuf,
     pub(crate) sources: Vec<BackupSource>,
+    /// Fork-time records to carry, by computer name.
+    pub(crate) fork_records: Vec<(String, ForkRecordFile)>,
+    /// The guest image this Silo pins and its runtime cache holds. A computer that uses it
+    /// travels without the image; the importing Silo prepares its own copy.
+    pub(crate) pinned_image: Option<PinnedImageRef>,
+}
+
+/// The pinned guest image as the runtime cache holds it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct PinnedImageRef {
+    pub(crate) reference: String,
+    pub(crate) manifest_digest: String,
+}
+
+/// The guest image an archive row left out, as its reference and the digest of the build the
+/// sender pinned; `None` for a row that carries its image.
+fn guest_image_to_prepare(
+    manifest: &PackageManifest,
+    source: &PackageComputer,
+) -> Result<Option<(String, String)>, BackupError> {
+    if source.image_embedded {
+        return Ok(None);
+    }
+    let runtime_config = if manifest.runtime.name == MIXED_RUNTIME_NAME {
+        mixed_micro_configuration(source)?.1
+    } else {
+        source.runtime_config.clone()
+    };
+    let reference = runtime_config
+        .pointer("/image/Oci/reference")
+        .and_then(Value::as_str)
+        .ok_or_else(|| BackupError::InvalidArchive("it names no guest image to prepare".into()))?;
+    let digest = source.image_digest.as_deref().ok_or_else(|| {
+        BackupError::InvalidArchive(
+            "it does not say which build of the guest image it needs".into(),
+        )
+    })?;
+    if runtime_config
+        .get("manifest_digest")
+        .filter(|recorded| !recorded.is_null())
+        .is_some_and(|recorded| recorded.as_str() != Some(digest))
+    {
+        return Err(BackupError::InvalidArchive(
+            "its guest image digest does not match its settings".into(),
+        ));
+    }
+    Ok(Some((reference.to_owned(), digest.to_owned())))
+}
+
+/// Whether a computer whose runtime configuration is `runtime_config` travels without its image:
+/// it uses the pinned image's reference and, when its configuration records one, its digest.
+fn leaves_image_out(pinned_image: Option<&PinnedImageRef>, runtime_config: &Value) -> bool {
+    let Some(pinned) = pinned_image else {
+        return false;
+    };
+    runtime_config
+        .pointer("/image/Oci/reference")
+        .and_then(Value::as_str)
+        == Some(pinned.reference.as_str())
+        && runtime_config
+            .get("manifest_digest")
+            .filter(|digest| !digest.is_null())
+            .is_none_or(|digest| digest.as_str() == Some(pinned.manifest_digest.as_str()))
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -487,6 +557,52 @@ struct PackageManifest {
     created_at_ms: u64,
     runtime: RuntimeManifest,
     computers: Vec<PackageComputer>,
+    /// Fork-time records that follow the computers' payloads, in this order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    fork_records: Vec<ForkRecordSection>,
+}
+
+/// The fork-time record of one computer: its stored gzipped manifest, after the payloads.
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ForkRecordSection {
+    computer: String,
+    size: u64,
+    sha256: String,
+    captured_at: String,
+    records: u64,
+    bytes: u64,
+}
+
+impl ExtractedForkRecord {
+    #[cfg(test)]
+    pub(crate) fn for_test(path: PathBuf, captured_at: &str) -> Self {
+        Self {
+            path,
+            captured_at: captured_at.into(),
+            _stage: tempfile::tempdir().unwrap(),
+        }
+    }
+}
+
+/// A stored fork-time record to carry in an export.
+#[derive(Clone, Debug)]
+pub(crate) struct ForkRecordFile {
+    pub(crate) path: PathBuf,
+    pub(crate) captured_at: String,
+    pub(crate) records: u64,
+    pub(crate) bytes: u64,
+}
+
+/// A fork-time record read out of an archive and verified, in a private folder that is
+/// removed when this is dropped.
+#[derive(Debug)]
+pub(crate) struct ExtractedForkRecord {
+    pub(crate) path: PathBuf,
+    /// The sender's word; the store checks it. The record counts are not carried over: the
+    /// store counts them from the manifest.
+    pub(crate) captured_at: String,
+    _stage: tempfile::TempDir,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -530,6 +646,22 @@ struct PackageComputer {
     /// Format 3 reserves this list for separate disk payloads. The computer
     /// disk travels inside the MicroSandbox snapshot, so it must stay empty.
     volumes: Vec<Value>,
+    /// Whether the payload carries the guest image. When it does not, the image named in
+    /// `runtimeConfig` is the one this Silo pins, and the importing Silo prepares it.
+    #[serde(default = "image_embedded_by_default", skip_serializing_if = "is_true")]
+    image_embedded: bool,
+    /// The manifest digest of the guest image the sender pinned, written whenever the image is
+    /// left out; the importing Silo prepares an image with exactly this digest or refuses.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    image_digest: Option<String>,
+}
+
+fn image_embedded_by_default() -> bool {
+    true
+}
+
+fn is_true(value: &bool) -> bool {
+    *value
 }
 
 /// See `BackupService::discard_import_on_failure`.
@@ -773,41 +905,25 @@ impl<R: MsbRunner> BackupService<R> {
                     capture_intent(source, None)?;
                 }
                 let payload_path = stage.path().join(format!("{index}.msb"));
-                let save_arguments = |with_parents: bool| -> Vec<String> {
-                    let mut arguments = vec![
-                        "snapshot".into(),
-                        "save".into(),
-                        snapshot.to_string_lossy().into_owned(),
-                        payload_path.to_string_lossy().into_owned(),
-                    ];
-                    if with_parents {
-                        arguments.push("--with-parents".into());
-                    }
-                    arguments.push("--with-image".into());
-                    arguments
-                };
-                match self.require_success_with(
+                // A capture holds every layer it needs, so the archive is written without its
+                // lineage. `--with-parents` writes a layer twice when the capture's chain already
+                // holds its parent's head (a computer exported or forked before), and
+                // `snapshot load` refuses such an archive as having a duplicate entry.
+                let mut save_arguments = vec![
+                    "snapshot".into(),
+                    "save".into(),
+                    snapshot.to_string_lossy().into_owned(),
+                    payload_path.to_string_lossy().into_owned(),
+                ];
+                if !leaves_image_out(request.pinned_image.as_ref(), &runtime_config) {
+                    save_arguments.push("--with-image".into());
+                }
+                self.require_success_with(
                     "Writing computer disks to the export file",
-                    &save_arguments(true),
+                    &save_arguments,
                     data_timeout,
                     cancellation,
-                ) {
-                    // Checkpoint retention removes old ancestors. A snapshot holds its own
-                    // complete layers, so the archive is written without the missing lineage.
-                    Err(BackupError::CommandFailed { detail, .. })
-                        if detail.contains("not in local index") =>
-                    {
-                        self.require_success_with(
-                            "Writing computer disks to the export file",
-                            &save_arguments(false),
-                            data_timeout,
-                            cancellation,
-                        )?;
-                    }
-                    other => {
-                        other?;
-                    }
-                }
+                )?;
                 Ok::<_, BackupError>(payload_path)
             })();
             let payload_path = capture_result?;
@@ -843,6 +959,7 @@ impl<R: MsbRunner> BackupService<R> {
                 .iter()
                 .map(
                     |(source, runtime_config, computer_configuration, _, payload_size)| {
+                        let lean = leaves_image_out(request.pinned_image.as_ref(), runtime_config);
                         PackageComputer {
                             name: source.name.clone(),
                             runtime_config: runtime_config.clone(),
@@ -852,19 +969,28 @@ impl<R: MsbRunner> BackupService<R> {
                             payload_sha256: pending_digest(),
                             // Format 3 keeps this field; MicroSandbox's snapshot carries the disks.
                             volumes: Vec::new(),
+                            image_embedded: !lean,
+                            image_digest: request
+                                .pinned_image
+                                .as_ref()
+                                .filter(|_| lean)
+                                .map(|pinned| pinned.manifest_digest.clone()),
                         }
                     },
                 )
                 .collect(),
+            fork_records: Vec::new(),
         };
+        let records = attach_fork_records(&mut manifest, &request.fork_records)?;
         let archive_payloads = payloads
             .into_iter()
             .map(|(_, _, _, payload, _)| payload)
             .collect::<Vec<_>>();
-        let size_bytes = write_immutable_package(
+        let size_bytes = write_immutable_package_with_records(
             &request.destination,
             &mut manifest,
             archive_payloads,
+            records,
             cancellation,
             token,
             self.free_space,
@@ -881,33 +1007,43 @@ impl<R: MsbRunner> BackupService<R> {
         })
     }
 
-    /// Estimate the self-contained archive before capture/save writes anything.
-    /// Include the native snapshot store (parents may be in another group) and
-    /// image cache, plus source disks for new captures. Counting unrelated native
-    /// data is conservative; the final destination check uses the actual archive.
+    /// Estimate what this export writes before capture/save writes anything: each
+    /// computer's own payload once (its snapshot group, plus its disk when a new capture
+    /// is taken, plus the guest image cache once when any computer carries the image),
+    /// and a margin for the manifest and tar/zstd overhead. The payload is staged in the
+    /// working copy and then written to the destination, so each of those needs it; the
+    /// capture is part of the payload, not counted again. Other computers' snapshots and
+    /// caches are not written by this export. Ancestors kept in another computer's
+    /// group are not counted; the final destination check uses the actual archive.
     fn check_export_space(
         &self,
         request: &BackupRequest,
         cancellation: &Cancellation,
     ) -> Result<(), BackupError> {
         let store = self.native_store_root();
-        let mut capture_bytes = 0_u64;
+        let mut payload_bytes = 0_u64;
+        let mut carries_image = false;
         for source in &request.sources {
             validate_computer_name(&source.name)?;
+            validate_group_name(&source.snapshot_group)?;
+            payload_bytes = payload_bytes.saturating_add(estimated_tree_bytes(
+                &store.join("snapshots").join(&source.snapshot_group),
+                cancellation,
+            )?);
             if source.existing_member.is_none() {
-                capture_bytes = capture_bytes.saturating_add(estimated_tree_bytes(
+                payload_bytes = payload_bytes.saturating_add(estimated_tree_bytes(
                     &store.join("sandboxes").join(&source.name),
                     cancellation,
                 )?);
             }
+            carries_image |=
+                !leaves_image_out(request.pinned_image.as_ref(), &source.runtime_config);
         }
-        let existing = estimated_tree_bytes(&store.join("snapshots"), cancellation)?
-            .saturating_add(estimated_tree_bytes(&store.join("cache"), cancellation)?);
-        // Multiple selected computers can include the same ancestors/image.
-        let estimate = existing
-            .saturating_mul(request.sources.len() as u64)
-            .saturating_add(capture_bytes)
-            .saturating_add(MAX_MANIFEST_BYTES);
+        if carries_image {
+            payload_bytes = payload_bytes
+                .saturating_add(estimated_tree_bytes(&store.join("cache"), cancellation)?);
+        }
+        let estimate = payload_bytes.saturating_add(MAX_MANIFEST_BYTES);
         let estimate = estimate.saturating_add(estimate / 100); // tar/zstd overhead
         let destination = request.destination.parent().ok_or_else(|| {
             BackupError::InvalidRequest("The export destination has no parent directory.".into())
@@ -919,7 +1055,6 @@ impl<R: MsbRunner> BackupService<R> {
                 "Silo's export working copy",
             ),
             (destination, estimate, "the export destination"),
-            (store, capture_bytes, "Silo's checkpoint storage"),
         ];
         for (index, (path, _, label)) in writes.iter().enumerate() {
             let needed = writes
@@ -1007,6 +1142,7 @@ impl<R: MsbRunner> BackupService<R> {
         destination: &Path,
         source_archives: &[PathBuf],
         source_order: &[String],
+        fork_records: &[(String, ForkRecordFile)],
         cancellation: &Cancellation,
         token: Option<&str>,
     ) -> Result<BackupResult, BackupError> {
@@ -1076,6 +1212,7 @@ impl<R: MsbRunner> BackupService<R> {
                 guest_architecture: "aarch64".into(),
             },
             computers: Vec::with_capacity(source_order.len()),
+            fork_records: Vec::new(),
         };
         let mut payloads: Vec<Box<dyn Read>> = Vec::with_capacity(source_order.len());
         for name in source_order {
@@ -1143,13 +1280,17 @@ impl<R: MsbRunner> BackupService<R> {
                 payload_size: computer.payload_size,
                 payload_sha256: pending_digest(),
                 volumes: computer.volumes.clone(),
+                image_embedded: computer.image_embedded,
+                image_digest: computer.image_digest.clone(),
             });
         }
 
+        let records = attach_fork_records(&mut manifest, fork_records)?;
         let size_bytes = write_immutable_package_from_readers(
             destination,
             &mut manifest,
             payloads,
+            records,
             cancellation,
             token,
             self.free_space,
@@ -1268,6 +1409,59 @@ impl<R: MsbRunner> BackupService<R> {
         self.read_inspection(archive, cancellation, PayloadMode::VerifyAll)
     }
 
+    /// The verified fork-time record of the computer an import selects, written to a private
+    /// folder. `None` when the archive carries none for it.
+    pub(crate) fn extract_fork_record(
+        &self,
+        archive: &Path,
+        source_name: Option<&str>,
+        cancellation: &Cancellation,
+    ) -> Result<Option<ExtractedForkRecord>, BackupError> {
+        let package = read_and_verify_payloads(
+            archive,
+            self.max_archive_bytes,
+            cancellation,
+            PayloadMode::Describe,
+        )?;
+        let index = select_restore_source(&package.manifest, source_name)?;
+        let name = &package.manifest.computers[index].name;
+        let mut offset = fork_records_offset(&package.manifest, package.payload_offset)?;
+        let Some(record) = package.manifest.fork_records.iter().find(|record| {
+            let found = record.computer == *name;
+            if !found {
+                offset += record.size;
+            }
+            found
+        }) else {
+            return Ok(None);
+        };
+        let (mut file, _) = open_regular_file(archive).map_err(|error| match error {
+            OpenRegularError::NotRegular => {
+                BackupError::InvalidArchive("the selected item is not a regular file".into())
+            }
+            OpenRegularError::Io(error) => BackupError::Io(error),
+        })?;
+        file.seek(SeekFrom::Start(offset))?;
+        fs::create_dir_all(&self.scratch_root)?;
+        let stage = self.staging_directory("restore-record-")?;
+        let path = extract_verified_payload(
+            &mut file,
+            record.size,
+            &record.sha256,
+            Some(stage.path().join("base.tsv.gz")),
+            &format!("fork-time record for {name}"),
+            cancellation,
+        )?
+        .ok_or_else(|| {
+            BackupError::InvalidArchive("the fork-time record was not written".into())
+        })?;
+        Ok(Some(ExtractedForkRecord {
+            path,
+            captured_at: record.captured_at.clone(),
+            _stage: stage,
+        }))
+    }
+
     /// Read the archive's header and manifest without reading any payload.
     /// The import itself verifies the selected payload while extracting it,
     /// so it needs no second full inspection (E-26).
@@ -1304,7 +1498,13 @@ impl<R: MsbRunner> BackupService<R> {
         request: RestoreRequest,
         cancellation: &Cancellation,
     ) -> Result<PreparedRestore, BackupError> {
-        self.prepare_restore_in_group(request, &new_import_group(), cancellation, &|| Ok(()))
+        self.prepare_restore_in_group(
+            request,
+            &new_import_group(),
+            cancellation,
+            &|| Ok(()),
+            &|_, _| Ok(()),
+        )
     }
 
     /// Like `prepare_restore`, but loads into a group the caller named first,
@@ -1316,6 +1516,7 @@ impl<R: MsbRunner> BackupService<R> {
         import_group: &str,
         cancellation: &Cancellation,
         before_load: &dyn Fn() -> Result<(), BackupError>,
+        prepare_image: &dyn Fn(&str, &str) -> Result<(), BackupError>,
     ) -> Result<PreparedRestore, BackupError> {
         let _guard = self.begin()?;
         if !valid_import_group(import_group) {
@@ -1328,6 +1529,24 @@ impl<R: MsbRunner> BackupService<R> {
         if names.contains(&request.new_name) {
             return Err(BackupError::Conflict(request.new_name));
         }
+        // An archive that does not carry its guest image names the build it needs. Have it
+        // ready before anything is copied, so a device that cannot get it fails at once.
+        let described = read_and_verify_payloads(
+            &request.archive,
+            self.max_archive_bytes,
+            cancellation,
+            PayloadMode::Describe,
+        )?;
+        let described_source =
+            select_restore_source(&described.manifest, request.source_name.as_deref())?;
+        let described_image = guest_image_to_prepare(
+            &described.manifest,
+            &described.manifest.computers[described_source],
+        )?;
+        if let Some((reference, digest)) = &described_image {
+            prepare_image(reference, digest)?;
+        }
+        drop(described);
         fs::create_dir_all(&self.scratch_root)?;
         let stage = self.staging_directory("restore-")?;
         let store = self.native_store_root();
@@ -1350,6 +1569,13 @@ impl<R: MsbRunner> BackupService<R> {
             BackupError::InvalidArchive("checkpoint payload was not extracted".into())
         })?;
         let source = &package.manifest.computers[extracted.index];
+        // The file was opened again for extraction; the image prepared above must be the one
+        // this read needs, or a file replaced in between would load an image nobody prepared.
+        if guest_image_to_prepare(&package.manifest, source)? != described_image {
+            return Err(BackupError::InvalidArchive(
+                "the file changed while Silo was reading it; choose it again".into(),
+            ));
+        }
         let payload_path = &extracted.path;
         let runtime_config = if package.manifest.runtime.name == MIXED_RUNTIME_NAME {
             mixed_micro_configuration(source)?.1
@@ -2099,6 +2325,66 @@ fn read_and_verify_package(
     cancellation: &Cancellation,
     mode: PayloadMode<'_>,
 ) -> Result<VerifiedPackage, BackupError> {
+    let describe = matches!(mode, PayloadMode::Describe);
+    let package = read_and_verify_payloads(path, max_archive_bytes, cancellation, mode)?;
+    if !describe {
+        verify_fork_records(path, &package, cancellation)?;
+    }
+    Ok(package)
+}
+
+/// Where the fork-time records of `manifest` start: right after the payloads.
+fn fork_records_offset(
+    manifest: &PackageManifest,
+    payload_offset: u64,
+) -> Result<u64, BackupError> {
+    manifest
+        .computers
+        .iter()
+        .try_fold(payload_offset, |offset, computer| {
+            offset.checked_add(computer.payload_size)
+        })
+        .ok_or_else(|| BackupError::InvalidArchive("payload sizes overflow".into()))
+}
+
+/// Hashes every fork-time record of an archive whose payloads were already checked.
+fn verify_fork_records(
+    path: &Path,
+    package: &VerifiedPackage,
+    cancellation: &Cancellation,
+) -> Result<(), BackupError> {
+    if package.manifest.fork_records.is_empty() {
+        return Ok(());
+    }
+    let (mut file, _) = open_regular_file(path).map_err(|error| match error {
+        OpenRegularError::NotRegular => {
+            BackupError::InvalidArchive("the selected item is not a regular file".into())
+        }
+        OpenRegularError::Io(error) => BackupError::Io(error),
+    })?;
+    file.seek(SeekFrom::Start(fork_records_offset(
+        &package.manifest,
+        package.payload_offset,
+    )?))?;
+    for record in &package.manifest.fork_records {
+        extract_verified_payload(
+            &mut file,
+            record.size,
+            &record.sha256,
+            None,
+            &format!("fork-time record for {}", record.computer),
+            cancellation,
+        )?;
+    }
+    Ok(())
+}
+
+fn read_and_verify_payloads(
+    path: &Path,
+    max_archive_bytes: u64,
+    cancellation: &Cancellation,
+    mode: PayloadMode<'_>,
+) -> Result<VerifiedPackage, BackupError> {
     check_cancelled(cancellation)?;
     let (mut file, metadata) = open_regular_file(path).map_err(|error| match error {
         OpenRegularError::NotRegular => {
@@ -2145,8 +2431,14 @@ fn read_and_verify_package(
             sum.checked_add(computer.payload_size)
         })
         .ok_or_else(|| BackupError::InvalidArchive("payload sizes overflow".into()))?;
+    let records_total = manifest
+        .fork_records
+        .iter()
+        .try_fold(0_u64, |sum, record| sum.checked_add(record.size))
+        .ok_or_else(|| BackupError::InvalidArchive("fork-time record sizes overflow".into()))?;
     let expected_len = header_len
         .checked_add(payload_total)
+        .and_then(|length| length.checked_add(records_total))
         .ok_or_else(|| BackupError::InvalidArchive("export file size overflows".into()))?;
     if expected_len != metadata.len() {
         return Err(BackupError::InvalidArchive(
@@ -2421,9 +2713,12 @@ fn verify_mixed_payloads(
                     payload_size: computer.payload_size,
                     payload_sha256: computer.payload_sha256.clone(),
                     volumes: computer.volumes.clone(),
+                    image_embedded: computer.image_embedded,
+                    image_digest: computer.image_digest.clone(),
                 };
                 let row_manifest = PackageManifest {
                     schema_version: manifest.schema_version,
+                    fork_records: Vec::new(),
                     created_at_ms: manifest.created_at_ms,
                     runtime: RuntimeManifest {
                         name: macos_archive::RUNTIME_NAME.into(),
@@ -2602,6 +2897,9 @@ fn parse_version(version: &str) -> Option<(u64, u64, u64)> {
 }
 
 fn check_format_version(version: u32) -> Result<(), BackupError> {
+    if (OLDEST_READABLE_FORMAT_VERSION..=FORMAT_VERSION).contains(&version) {
+        return Ok(());
+    }
     match version.cmp(&FORMAT_VERSION) {
         std::cmp::Ordering::Equal => Ok(()),
         std::cmp::Ordering::Less => Err(BackupError::UnsupportedArchive(format!(
@@ -2674,6 +2972,58 @@ fn validate_manifest(manifest: &PackageManifest) -> Result<(), BackupError> {
         }
     }
     check_format_version(manifest.schema_version)?;
+    if manifest.schema_version < 5
+        && (!manifest.fork_records.is_empty()
+            || manifest
+                .computers
+                .iter()
+                .any(|computer| !computer.image_embedded || computer.image_digest.is_some()))
+    {
+        return Err(BackupError::InvalidArchive(
+            "it uses format 5 fields in an earlier format".into(),
+        ));
+    }
+    if manifest.runtime.name != "microsandbox" && manifest.runtime.name != MIXED_RUNTIME_NAME {
+        if manifest
+            .computers
+            .iter()
+            .any(|computer| !computer.image_embedded)
+        {
+            return Err(BackupError::InvalidArchive(
+                "only Linux computers can leave their guest image out".into(),
+            ));
+        }
+    }
+    // A row either carries its image or names the exact build it needs.
+    if manifest.computers.iter().any(|computer| {
+        computer.image_embedded == computer.image_digest.is_some()
+            || computer
+                .image_digest
+                .as_deref()
+                .is_some_and(|digest| !is_sha256(digest))
+    }) {
+        return Err(BackupError::InvalidArchive(
+            "a computer that leaves its guest image out must name its digest, and one that carries it must not"
+                .into(),
+        ));
+    }
+    let mut recorded = HashSet::new();
+    for record in &manifest.fork_records {
+        if !manifest
+            .computers
+            .iter()
+            .any(|computer| computer.name == record.computer)
+            || !recorded.insert(record.computer.as_str())
+            || record.size == 0
+            || record.size > MAX_FORK_RECORD_BYTES
+            || record.captured_at.len() > 64
+            || !is_sha256(&record.sha256)
+        {
+            return Err(BackupError::InvalidArchive(
+                "a fork-time record does not match a computer".into(),
+            ));
+        }
+    }
     if manifest.computers.is_empty() || manifest.computers.len() > 64 {
         return Err(BackupError::InvalidArchive(
             "the computer count is outside supported limits".into(),
@@ -2769,6 +3119,8 @@ fn validate_mixed_computer(computer: &PackageComputer) -> Result<(), BackupError
                 payload_size: computer.payload_size,
                 payload_sha256: computer.payload_sha256.clone(),
                 volumes: computer.volumes.clone(),
+                image_embedded: computer.image_embedded,
+                image_digest: computer.image_digest.clone(),
             };
             validate_linux_computer(&row)?;
             Ok(())
@@ -3032,6 +3384,18 @@ fn validate_computer_name(name: &str) -> Result<(), BackupError> {
     if !valid {
         return Err(BackupError::InvalidRequest(
             "Computer names must start with a letter and contain only lowercase letters, numbers, and hyphens.".into(),
+        ));
+    }
+    Ok(())
+}
+
+/// A snapshot group is one directory name under the native store's `snapshots`.
+fn validate_group_name(group: &str) -> Result<(), BackupError> {
+    let valid =
+        !group.is_empty() && group != "." && group != ".." && !group.contains(['/', '\\', '\0']);
+    if !valid {
+        return Err(BackupError::InvalidRequest(
+            "The computer's checkpoint group is not a valid name.".into(),
         ));
     }
     Ok(())
@@ -3976,10 +4340,33 @@ impl Read for LimitedPayloadReader {
 /// Writes the archive, hashing each payload while it is copied (one read per
 /// payload), then verifies the whole written file once before publishing it.
 /// `payloads[i]` is the open, already-measured payload of `manifest.computers[i]`.
+#[cfg(test)]
 fn write_immutable_package(
     destination: &Path,
     manifest: &mut PackageManifest,
     payloads: Vec<File>,
+    cancellation: &Cancellation,
+    token: Option<&str>,
+    free_space: fn(&Path) -> io::Result<u64>,
+) -> Result<u64, BackupError> {
+    write_immutable_package_with_records(
+        destination,
+        manifest,
+        payloads,
+        Vec::new(),
+        cancellation,
+        token,
+        free_space,
+    )
+}
+
+/// [`write_immutable_package`] for a manifest whose `fork_records` were set by
+/// [`attach_fork_records`], which also returned `records`.
+fn write_immutable_package_with_records(
+    destination: &Path,
+    manifest: &mut PackageManifest,
+    payloads: Vec<File>,
+    records: Vec<Box<dyn Read>>,
     cancellation: &Cancellation,
     token: Option<&str>,
     free_space: fn(&Path) -> io::Result<u64>,
@@ -3991,16 +4378,65 @@ fn write_immutable_package(
             .into_iter()
             .map(|payload| Box::new(payload) as Box<dyn Read>)
             .collect(),
+        records,
         cancellation,
         token,
         free_space,
     )
 }
 
+/// Opens the stored fork-time records of the computers in `manifest` and lists them in its
+/// `fork_records`, and settles the format: 5 when a record or a lean image needs it, else 4.
+/// A computer the manifest does not hold is left out.
+fn attach_fork_records(
+    manifest: &mut PackageManifest,
+    records: &[(String, ForkRecordFile)],
+) -> Result<Vec<Box<dyn Read>>, BackupError> {
+    let mut readers: Vec<Box<dyn Read>> = Vec::new();
+    for computer in &manifest.computers {
+        let Some((_, record)) = records.iter().find(|(name, _)| *name == computer.name) else {
+            continue;
+        };
+        let (file, metadata) = open_regular_file(&record.path).map_err(|error| match error {
+            OpenRegularError::NotRegular => BackupError::InvalidArchive(
+                "the stored fork-time record is not a regular file".into(),
+            ),
+            OpenRegularError::Io(error) => BackupError::Io(error),
+        })?;
+        if metadata.len() == 0 || metadata.len() > MAX_FORK_RECORD_BYTES {
+            return Err(BackupError::InvalidRequest(format!(
+                "The fork-time record of {} is empty or exceeds the export size limit.",
+                computer.name
+            )));
+        }
+        manifest.fork_records.push(ForkRecordSection {
+            computer: computer.name.clone(),
+            size: metadata.len(),
+            sha256: pending_digest(),
+            captured_at: record.captured_at.clone(),
+            records: record.records,
+            bytes: record.bytes,
+        });
+        readers.push(Box::new(file));
+    }
+    // An archive that needs nothing from format 5 is written as format 4, so a Silo that
+    // predates format 5 can still read it.
+    if manifest.fork_records.is_empty()
+        && manifest
+            .computers
+            .iter()
+            .all(|computer| computer.image_embedded)
+    {
+        manifest.schema_version = OLDEST_READABLE_FORMAT_VERSION;
+    }
+    Ok(readers)
+}
+
 fn write_immutable_package_from_readers(
     destination: &Path,
     manifest: &mut PackageManifest,
     payloads: Vec<Box<dyn Read>>,
+    records: Vec<Box<dyn Read>>,
     cancellation: &Cancellation,
     token: Option<&str>,
     free_space: fn(&Path) -> io::Result<u64>,
@@ -4008,7 +4444,7 @@ fn write_immutable_package_from_readers(
     let parent = destination.parent().ok_or_else(|| {
         BackupError::InvalidRequest("The export destination has no parent directory.".into())
     })?;
-    if payloads.len() != manifest.computers.len() {
+    if payloads.len() != manifest.computers.len() || records.len() != manifest.fork_records.len() {
         return Err(BackupError::InvalidRequest(
             "The export payloads do not match its manifest.".into(),
         ));
@@ -4016,6 +4452,9 @@ fn write_immutable_package_from_readers(
     fs::create_dir_all(parent)?;
     for computer in &mut manifest.computers {
         computer.payload_sha256 = pending_digest();
+    }
+    for record in &mut manifest.fork_records {
+        record.sha256 = pending_digest();
     }
     let manifest_bytes = serde_json::to_vec(manifest)?;
     if manifest_bytes.is_empty() || manifest_bytes.len() as u64 > MAX_MANIFEST_BYTES {
@@ -4032,6 +4471,12 @@ fn write_immutable_package_from_readers(
             (MAGIC.len() + 4 + 8 + manifest_bytes.len()) as u64,
             |sum, computer| sum.checked_add(computer.payload_size),
         )
+        .and_then(|size| {
+            manifest
+                .fork_records
+                .iter()
+                .try_fold(size, |sum, record| sum.checked_add(record.size))
+        })
         .ok_or_else(|| {
             BackupError::InvalidRequest("The export size cannot be represented.".into())
         })?;
@@ -4052,7 +4497,7 @@ fn write_immutable_package_from_readers(
         .prefix(&prefix)
         .tempfile_in(parent)?;
     temporary.write_all(MAGIC)?;
-    temporary.write_all(&FORMAT_VERSION.to_be_bytes())?;
+    temporary.write_all(&manifest.schema_version.to_be_bytes())?;
     temporary.write_all(&(manifest_bytes.len() as u64).to_be_bytes())?;
     let manifest_offset = (MAGIC.len() + 4 + 8) as u64;
     temporary.write_all(&manifest_bytes)?;
@@ -4077,6 +4522,27 @@ fn write_immutable_package_from_readers(
             )));
         }
         computer.payload_sha256 = format!("sha256:{:x}", hasher.finalize());
+    }
+    for (record, mut input) in manifest.fork_records.iter_mut().zip(records) {
+        let mut hasher = Sha256::new();
+        let mut copied = 0_u64;
+        loop {
+            check_cancelled(cancellation)?;
+            let count = input.read(&mut buffer)?;
+            if count == 0 {
+                break;
+            }
+            hasher.update(&buffer[..count]);
+            temporary.write_all(&buffer[..count])?;
+            copied += count as u64;
+        }
+        if copied != record.size {
+            return Err(BackupError::InvalidRequest(format!(
+                "The fork-time record of {} changed while it was being exported.",
+                record.computer
+            )));
+        }
+        record.sha256 = format!("sha256:{:x}", hasher.finalize());
     }
     let final_manifest = serde_json::to_vec(manifest)?;
     if final_manifest.len() != manifest_bytes.len() {
@@ -4341,7 +4807,6 @@ mod tests {
         timeouts: Mutex<Vec<(Vec<String>, Duration)>>,
         fail_load: AtomicBool,
         fail_save: AtomicBool,
-        ancestor_missing: AtomicBool,
         fail_import_verify: AtomicBool,
         cancel_during_load: AtomicBool,
         invalid_import_head: AtomicBool,
@@ -4403,19 +4868,8 @@ mod tests {
                     self.removed.lock().unwrap().push((*selector).to_owned());
                     Ok(success())
                 }
-                ["snapshot", "save", _, output, "--with-parents", "--with-image"]
-                | ["snapshot", "save", _, output, "--with-image"] => {
-                    if arguments
-                        .iter()
-                        .any(|argument| argument == "--with-parents")
-                        && self.ancestor_missing.load(Ordering::Acquire)
-                    {
-                        return Ok(CommandOutput {
-                            status: ExitStatus::from_raw(1 << 8),
-                            stderr: "parent snap_gone not in local index; ship it alongside or re-save with --with-parents".into(),
-                            ..success()
-                        });
-                    }
+                ["snapshot", "save", _, output, "--with-image"]
+                | ["snapshot", "save", _, output] => {
                     if self.fail_save.load(Ordering::Acquire) {
                         return Ok(CommandOutput {
                             status: ExitStatus::from_raw(1 << 8),
@@ -4687,6 +5141,7 @@ mod tests {
         let macos_payload = vec![0x5a; macos_archive::stream_size(&macos_config).unwrap() as usize];
         let manifest = PackageManifest {
             schema_version: FORMAT_VERSION,
+            fork_records: Vec::new(),
             created_at_ms: 123,
             runtime: RuntimeManifest {
                 name: MIXED_RUNTIME_NAME.into(),
@@ -4708,6 +5163,8 @@ mod tests {
                     payload_size: linux_payload.len() as u64,
                     payload_sha256: pending_digest(),
                     volumes: Vec::new(),
+                    image_embedded: true,
+                    image_digest: None,
                 },
                 PackageComputer {
                     name: "mac-box".into(),
@@ -4719,6 +5176,8 @@ mod tests {
                     payload_size: macos_payload.len() as u64,
                     payload_sha256: pending_digest(),
                     volumes: Vec::new(),
+                    image_embedded: true,
+                    image_digest: None,
                 },
             ],
         };
@@ -4828,6 +5287,7 @@ mod tests {
                     computer_configuration: computer_configuration("dev"),
                     existing_member: None,
                 }],
+                ..Default::default()
             },
             &Cancellation::default(),
         )
@@ -5163,36 +5623,7 @@ mod tests {
         let calls = service.runner.calls.lock().unwrap();
         assert!(calls
             .iter()
-            .any(|args| args.ends_with(&["--with-parents".into(), "--with-image".into()])));
-    }
-
-    #[test]
-    fn an_export_whose_ancestors_were_removed_saves_the_capture_alone_and_loads() {
-        let temp = tempfile::tempdir().unwrap();
-        let destination = temp.path().join("dev.silo-backup");
-        let runner = FakeRunner::default();
-        runner.ancestor_missing.store(true, Ordering::Release);
-        let service = service(&temp, runner);
-        create_one(&service, destination.clone(), false).unwrap();
-        {
-            let calls = service.runner.calls.lock().unwrap();
-            let saves: Vec<_> = calls
-                .iter()
-                .filter(|args| args.get(1).map(String::as_str) == Some("save"))
-                .collect();
-            assert_eq!(saves.len(), 2);
-            assert!(saves[0].contains(&"--with-parents".to_owned()));
-            assert!(!saves[1].contains(&"--with-parents".to_owned()));
-        }
-        // The fallback archive passes the same verification an import starts with.
-        let package = read_and_verify_package(
-            &destination,
-            DEFAULT_MAX_ARCHIVE_BYTES,
-            &Cancellation::default(),
-            PayloadMode::VerifyAll,
-        )
-        .unwrap();
-        assert_eq!(package.manifest.computers.len(), 1);
+            .any(|args| args.ends_with(&["--with-image".into()])));
     }
 
     #[test]
@@ -5220,6 +5651,7 @@ mod tests {
                         computer_configuration: computer_configuration("dev"),
                         existing_member: Some(member.into()),
                     }],
+                    ..Default::default()
                 },
                 &Cancellation::default(),
             )
@@ -5236,7 +5668,7 @@ mod tests {
             .any(|args| matches!(args.as_slice(), [head, verb, ..] if head == "snapshot" && verb == "verify")));
         assert!(calls
             .iter()
-            .any(|args| args.ends_with(&["--with-parents".into(), "--with-image".into()])));
+            .any(|args| args.ends_with(&["--with-image".into()])));
     }
 
     fn export_checkpoint(
@@ -5263,6 +5695,7 @@ mod tests {
                         computer_configuration: computer_configuration("dev"),
                         existing_member: Some(member.into()),
                     }],
+                    ..Default::default()
                 },
                 &Cancellation::default(),
             )
@@ -5380,6 +5813,7 @@ mod tests {
                         computer_configuration: computer_configuration("dev"),
                         existing_member: None,
                     }],
+                    ..Default::default()
                 },
                 &Cancellation::default(),
                 None,
@@ -5495,6 +5929,7 @@ mod tests {
                         computer_configuration: computer_configuration("dev"),
                         existing_member: None,
                     }],
+                    ..Default::default()
                 },
                 &Cancellation::default(),
             )
@@ -5799,6 +6234,7 @@ mod tests {
                         computer_configuration: computer_configuration("dev"),
                         existing_member: None,
                     }],
+                    ..Default::default()
                 },
                 &cancellation,
             ),
@@ -5885,6 +6321,7 @@ mod tests {
                         computer_configuration: computer_configuration("dev"),
                         existing_member: Some("silo-backup-0-0-1".into()),
                     }],
+                    ..Default::default()
                 },
                 &Cancellation::default(),
             )
@@ -6047,10 +6484,423 @@ mod tests {
                 "{message}"
             );
         }
-        let message = with_format(5);
+        let message = with_format(6);
         assert!(
             message.contains("newer version of Silo") && message.contains("Update Silo"),
             "{message}"
+        );
+    }
+
+    fn export_with(
+        service: &BackupService<FakeRunner>,
+        destination: PathBuf,
+        pinned_image: Option<&str>,
+        fork_records: Vec<(String, ForkRecordFile)>,
+    ) {
+        service
+            .create_backup(
+                BackupRequest {
+                    destination,
+                    sources: vec![BackupSource {
+                        name: "dev".into(),
+                        snapshot_group: "dev".into(),
+                        was_running: false,
+                        runtime_config: managed_config("dev"),
+                        computer_configuration: computer_configuration("dev"),
+                        existing_member: None,
+                    }],
+                    fork_records,
+                    pinned_image: pinned_image.map(|reference| PinnedImageRef {
+                        reference: reference.to_owned(),
+                        manifest_digest: format!("sha256:{}", "c".repeat(64)),
+                    }),
+                },
+                &Cancellation::default(),
+            )
+            .unwrap();
+    }
+
+    fn manifest_of(path: &Path) -> PackageManifest {
+        read_and_verify_package(
+            path,
+            DEFAULT_MAX_ARCHIVE_BYTES,
+            &Cancellation::default(),
+            PayloadMode::Describe,
+        )
+        .unwrap()
+        .manifest
+    }
+
+    fn saves(service: &BackupService<FakeRunner>) -> Vec<Vec<String>> {
+        service
+            .runner
+            .calls
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|args| args.get(..2) == Some(&["snapshot".to_owned(), "save".to_owned()]))
+            .cloned()
+            .collect()
+    }
+
+    #[test]
+    fn a_computer_on_the_pinned_image_is_exported_without_the_image_and_any_other_keeps_it() {
+        let temp = tempfile::tempdir().unwrap();
+        let service = service(&temp, FakeRunner::default());
+        let pinned = temp.path().join("pinned.silo-backup");
+        export_with(&service, pinned.clone(), Some("alpine:3.20"), Vec::new());
+        let other = temp.path().join("other.silo-backup");
+        export_with(
+            &service,
+            other.clone(),
+            Some("ghcr.io/x/silo-guest:other"),
+            Vec::new(),
+        );
+        let none = temp.path().join("none.silo-backup");
+        export_with(&service, none.clone(), None, Vec::new());
+
+        let saves = saves(&service);
+        assert_eq!(saves.len(), 3);
+        assert!(!saves[0].contains(&"--with-image".to_owned()));
+        assert!(saves[1].contains(&"--with-image".to_owned()));
+        assert!(saves[2].contains(&"--with-image".to_owned()));
+        assert!(!manifest_of(&pinned).computers[0].image_embedded);
+        assert!(manifest_of(&other).computers[0].image_embedded);
+        assert!(manifest_of(&none).computers[0].image_embedded);
+        // Only the archive that needs format 5 is written as format 5, and it names the digest
+        // the sender pinned even though the computer recorded none.
+        let lean = manifest_of(&pinned);
+        assert_eq!(lean.schema_version, 5);
+        assert_eq!(
+            lean.computers[0].image_digest.as_deref(),
+            Some(format!("sha256:{}", "c".repeat(64)).as_str())
+        );
+        for older in [manifest_of(&other), manifest_of(&none)] {
+            assert_eq!(older.schema_version, 4);
+            assert_eq!(older.computers[0].image_digest, None);
+        }
+    }
+
+    #[test]
+    fn a_row_must_name_its_image_digest_exactly_when_it_leaves_the_image_out() {
+        let temp = tempfile::tempdir().unwrap();
+        let service = service(&temp, FakeRunner::default());
+        let lean = temp.path().join("lean.silo-backup");
+        export_with(&service, lean.clone(), Some("alpine:3.20"), Vec::new());
+        let mut manifest = manifest_of(&lean);
+        validate_manifest(&manifest).unwrap();
+        manifest.computers[0].image_digest = None;
+        let error = validate_manifest(&manifest).unwrap_err().to_string();
+        assert!(error.contains("must name its digest"), "{error}");
+        manifest.computers[0].image_digest = Some("sha256:short".into());
+        assert!(validate_manifest(&manifest).is_err());
+        manifest.computers[0].image_digest = Some(format!("sha256:{}", "c".repeat(64)));
+        manifest.computers[0].image_embedded = true;
+        let error = validate_manifest(&manifest).unwrap_err().to_string();
+        assert!(error.contains("must name its digest"), "{error}");
+    }
+
+    #[test]
+    fn the_image_is_prepared_with_the_senders_digest_before_the_payload_is_copied() {
+        let temp = tempfile::tempdir().unwrap();
+        let service = service(&temp, FakeRunner::default());
+        let lean = temp.path().join("lean.silo-backup");
+        export_with(&service, lean.clone(), Some("alpine:3.20"), Vec::new());
+        let asked = std::cell::RefCell::new(Vec::new());
+        let refused = service.prepare_restore_in_group(
+            restore_request(lean),
+            &new_import_group(),
+            &Cancellation::default(),
+            &|| panic!("nothing is journaled before the image is ready"),
+            &|reference, digest| {
+                // Nothing of the archive is on disk yet: an offline device fails before the copy.
+                let staged = fs::read_dir(&service.scratch_root)
+                    .map(|entries| entries.count())
+                    .unwrap_or(0);
+                asked
+                    .borrow_mut()
+                    .push((reference.to_owned(), digest.to_owned(), staged));
+                Err(BackupError::InvalidRequest("offline".into()))
+            },
+        );
+        assert!(matches!(refused, Err(BackupError::InvalidRequest(_))));
+        assert_eq!(
+            asked.borrow().as_slice(),
+            [(
+                "alpine:3.20".to_owned(),
+                format!("sha256:{}", "c".repeat(64)),
+                0
+            )]
+        );
+    }
+
+    #[test]
+    fn a_computer_whose_recorded_image_digest_differs_from_the_cached_one_keeps_its_image() {
+        let pinned = PinnedImageRef {
+            reference: "alpine:3.20".into(),
+            manifest_digest: format!("sha256:{}", "a".repeat(64)),
+        };
+        let mut config = managed_config("dev");
+        assert!(leaves_image_out(Some(&pinned), &config));
+        config["manifest_digest"] = Value::Null;
+        assert!(leaves_image_out(Some(&pinned), &config));
+        config["manifest_digest"] = pinned.manifest_digest.clone().into();
+        assert!(leaves_image_out(Some(&pinned), &config));
+        config["manifest_digest"] = format!("sha256:{}", "b".repeat(64)).into();
+        assert!(!leaves_image_out(Some(&pinned), &config));
+        assert!(!leaves_image_out(None, &managed_config("dev")));
+    }
+
+    /// `msb snapshot save --with-parents` writes a layer twice when the capture's own layer chain
+    /// already holds its parent's head (a computer that was exported or forked before: the new
+    /// capture is a qcow2 layer backed by the raw layer that is its parent's head), and
+    /// `snapshot load` then refuses the archive with "archive contains duplicate entry:
+    /// layers/layer_<hash>.raw". Live repro: `silo export` of one computer four times. A capture
+    /// holds every layer it needs, so no export asks for the parents.
+    #[test]
+    fn a_capture_is_saved_without_its_parents_so_no_layer_is_written_twice() {
+        let temp = tempfile::tempdir().unwrap();
+        let service = service(&temp, FakeRunner::default());
+        for (index, image) in [
+            Some("alpine:3.20"),
+            Some("ghcr.io/x/silo-guest:other"),
+            None,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let destination = temp.path().join(format!("{index}.silo-backup"));
+            export_with(&service, destination, image, Vec::new());
+        }
+        let saves = saves(&service);
+        assert_eq!(saves.len(), 3);
+        assert!(saves
+            .iter()
+            .all(|args| !args.contains(&"--with-parents".to_owned())));
+    }
+
+    #[test]
+    fn an_import_prepares_the_image_an_archive_left_out_and_stops_when_that_fails() {
+        let temp = tempfile::tempdir().unwrap();
+        let service = service(&temp, FakeRunner::default());
+        let lean = temp.path().join("lean.silo-backup");
+        export_with(&service, lean.clone(), Some("alpine:3.20"), Vec::new());
+        let full = temp.path().join("full.silo-backup");
+        export_with(&service, full.clone(), None, Vec::new());
+
+        let prepared = std::cell::RefCell::new(Vec::new());
+        let group = new_import_group();
+        service
+            .prepare_restore_in_group(
+                restore_request(full),
+                &group,
+                &Cancellation::default(),
+                &|| Ok(()),
+                &|reference, _| {
+                    prepared.borrow_mut().push(reference.to_owned());
+                    Ok(())
+                },
+            )
+            .unwrap();
+        assert!(prepared.borrow().is_empty());
+        service.discard_import_group(&group).unwrap();
+
+        let group = new_import_group();
+        service
+            .prepare_restore_in_group(
+                restore_request(lean.clone()),
+                &group,
+                &Cancellation::default(),
+                &|| Ok(()),
+                &|reference, _| {
+                    prepared.borrow_mut().push(reference.to_owned());
+                    Ok(())
+                },
+            )
+            .unwrap();
+        assert_eq!(prepared.borrow().as_slice(), ["alpine:3.20"]);
+        service.discard_import_group(&group).unwrap();
+
+        let loads_before = import_group_calls(&service, "load").len();
+        let refused = service.prepare_restore_in_group(
+            restore_request(lean),
+            &new_import_group(),
+            &Cancellation::default(),
+            &|| panic!("nothing is journaled before the image is ready"),
+            &|_, _| {
+                Err(BackupError::InvalidRequest(
+                    "Silo's VM image is not downloaded yet.".into(),
+                ))
+            },
+        );
+        assert!(matches!(refused, Err(BackupError::InvalidRequest(_))));
+        assert_eq!(import_group_calls(&service, "load").len(), loads_before);
+    }
+
+    #[test]
+    fn an_archive_replaced_after_its_image_was_prepared_is_refused_before_anything_loads() {
+        let temp = tempfile::tempdir().unwrap();
+        let service = service(&temp, FakeRunner::default());
+        let lean = temp.path().join("lean.silo-backup");
+        export_with(&service, lean.clone(), Some("alpine:3.20"), Vec::new());
+        let full = temp.path().join("full.silo-backup");
+        export_with(&service, full.clone(), None, Vec::new());
+
+        let refused = service.prepare_restore_in_group(
+            restore_request(lean.clone()),
+            &new_import_group(),
+            &Cancellation::default(),
+            &|| panic!("nothing is journaled for a file that changed"),
+            &|_, _| {
+                fs::copy(&full, &lean).unwrap();
+                Ok(())
+            },
+        );
+        assert!(
+            matches!(&refused, Err(BackupError::InvalidArchive(message)) if message.contains("changed")),
+            "the replaced file must be refused"
+        );
+        assert!(import_group_calls(&service, "load").is_empty());
+    }
+
+    fn gzip_file(directory: &Path, text: &str) -> ForkRecordFile {
+        use std::io::Write as _;
+        let path = directory.join("base.tsv.gz");
+        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        encoder.write_all(text.as_bytes()).unwrap();
+        fs::write(&path, encoder.finish().unwrap()).unwrap();
+        ForkRecordFile {
+            path,
+            captured_at: "2026-11-07T10:00:00Z".into(),
+            records: text.lines().count() as u64,
+            bytes: text.len() as u64,
+        }
+    }
+
+    #[test]
+    fn a_fork_time_record_travels_after_the_payloads_and_comes_back_verified() {
+        let temp = tempfile::tempdir().unwrap();
+        let service = service(&temp, FakeRunner::default());
+        let record = gzip_file(temp.path(), "META\tformat\t2\nF\t/a\t1\t1\tabc\n");
+        let stored = fs::read(&record.path).unwrap();
+        let with = temp.path().join("with.silo-backup");
+        export_with(&service, with.clone(), None, vec![("dev".into(), record)]);
+        let without = temp.path().join("without.silo-backup");
+        export_with(&service, without.clone(), None, Vec::new());
+
+        assert_eq!(manifest_of(&with).fork_records.len(), 1);
+        assert!(manifest_of(&without).fork_records.is_empty());
+        service
+            .inspect_archive(&with, &Cancellation::default())
+            .unwrap();
+        let extracted = service
+            .extract_fork_record(&with, None, &Cancellation::default())
+            .unwrap()
+            .unwrap();
+        assert_eq!(fs::read(&extracted.path).unwrap(), stored);
+        assert_eq!(extracted.captured_at, "2026-11-07T10:00:00Z");
+        let folder = extracted.path.parent().unwrap().to_path_buf();
+        drop(extracted);
+        assert!(!folder.exists());
+        assert!(service
+            .extract_fork_record(&without, None, &Cancellation::default())
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn a_changed_fork_time_record_fails_the_archive_check_and_the_import() {
+        let temp = tempfile::tempdir().unwrap();
+        let service = service(&temp, FakeRunner::default());
+        let record = gzip_file(temp.path(), "META\tformat\t2\n");
+        let destination = temp.path().join("with.silo-backup");
+        export_with(
+            &service,
+            destination.clone(),
+            None,
+            vec![("dev".into(), record)],
+        );
+        let mut bytes = fs::read(&destination).unwrap();
+        let last = bytes.len() - 1;
+        bytes[last] ^= 0xff;
+        fs::write(&destination, bytes).unwrap();
+        let message = service
+            .inspect_archive(&destination, &Cancellation::default())
+            .unwrap_err()
+            .to_string();
+        assert!(
+            message.contains("fork-time record") && message.contains("integrity"),
+            "{message}"
+        );
+        let message = service
+            .extract_fork_record(&destination, None, &Cancellation::default())
+            .unwrap_err()
+            .to_string();
+        assert!(message.contains("integrity"), "{message}");
+    }
+
+    #[test]
+    fn a_fork_time_record_for_a_computer_the_archive_does_not_hold_is_refused() {
+        let temp = tempfile::tempdir().unwrap();
+        let service = service(&temp, FakeRunner::default());
+        let destination = temp.path().join("dev.silo-backup");
+        create_one(&service, destination.clone(), false).unwrap();
+        let mut manifest = manifest_of(&destination);
+        manifest.schema_version = FORMAT_VERSION;
+        manifest.fork_records.push(ForkRecordSection {
+            computer: "ghost".into(),
+            size: 10,
+            sha256: pending_digest(),
+            captured_at: "t".into(),
+            records: 1,
+            bytes: 1,
+        });
+        let error = validate_manifest(&manifest).unwrap_err().to_string();
+        assert!(
+            error.contains("fork-time record does not match a computer"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn an_archive_that_needs_nothing_from_format_5_is_written_and_read_as_format_4() {
+        let temp = tempfile::tempdir().unwrap();
+        let destination = temp.path().join("dev.silo-backup");
+        let service = service(&temp, FakeRunner::default());
+        create_one(&service, destination.clone(), false).unwrap();
+        let bytes = fs::read(&destination).unwrap();
+        assert_eq!(
+            u32::from_be_bytes(bytes[MAGIC.len()..MAGIC.len() + 4].try_into().unwrap()),
+            4
+        );
+        assert_eq!(manifest_of(&destination).schema_version, 4);
+        let inspected = service
+            .inspect_archive(&destination, &Cancellation::default())
+            .unwrap();
+        assert_eq!(inspected.computers, ["dev"]);
+    }
+
+    #[test]
+    fn format_5_fields_are_refused_in_a_format_4_archive() {
+        let temp = tempfile::tempdir().unwrap();
+        let destination = temp.path().join("dev.silo-backup");
+        let service = service(&temp, FakeRunner::default());
+        create_one(&service, destination.clone(), false).unwrap();
+        let verified = read_and_verify_package(
+            &destination,
+            DEFAULT_MAX_ARCHIVE_BYTES,
+            &Cancellation::default(),
+            PayloadMode::Describe,
+        )
+        .unwrap();
+        let mut manifest = verified.manifest;
+        manifest.schema_version = 4;
+        manifest.computers[0].image_embedded = false;
+        manifest.computers[0].image_digest = Some(format!("sha256:{}", "c".repeat(64)));
+        let error = validate_manifest(&manifest).unwrap_err().to_string();
+        assert!(
+            error.contains("format 5 fields in an earlier format"),
+            "{error}"
         );
     }
 
@@ -6322,6 +7172,7 @@ mod tests {
                     claimed.store(true, Ordering::Release);
                     Ok(())
                 },
+                &|_, _| Ok(()),
             );
             assert!(matches!(result, Err(BackupError::ImportGroupConflict(_))));
             assert!(!claimed.load(Ordering::Acquire));
@@ -6379,6 +7230,7 @@ mod tests {
             &group,
             &Cancellation::default(),
             &|| Ok(()),
+            &|_, _| Ok(()),
         );
         assert!(matches!(result, Err(BackupError::CommandFailed { .. })));
         // The root becomes head, the child goes first, then the root: no --force.
@@ -6440,6 +7292,7 @@ mod tests {
                         Ok(())
                     }
                 },
+                &|_, _| Ok(()),
             );
             assert!(recorded.load(Ordering::Acquire));
             if journal_fails {
@@ -6495,6 +7348,7 @@ mod tests {
             &group,
             &Cancellation::default(),
             &|| panic!("an existing group is never journaled as owned"),
+            &|_, _| Ok(()),
         );
         assert!(matches!(result, Err(BackupError::ImportGroupConflict(_))));
         assert!(import_group_calls(&service, "load").is_empty());
@@ -6537,6 +7391,7 @@ mod tests {
                 BackupRequest {
                     destination,
                     sources: vec![source("dev"), source("second")],
+                    ..Default::default()
                 },
                 &Cancellation::default(),
             )
@@ -6742,6 +7597,8 @@ mod tests {
             payload_size: manifest.computers[0].payload_size,
             payload_sha256: manifest.computers[0].payload_sha256.clone(),
             volumes: manifest.computers[0].volumes.clone(),
+            image_embedded: true,
+            image_digest: None,
         };
         second_linux.runtime_config["configuration"]["name"] =
             Value::String(second_linux.name.clone());
@@ -6808,9 +7665,12 @@ mod tests {
             payload_size: size,
             payload_sha256: pending_digest(),
             volumes: Vec::new(),
+            image_embedded: true,
+            image_digest: None,
         };
         let manifest = |size: u64| PackageManifest {
             schema_version: FORMAT_VERSION,
+            fork_records: Vec::new(),
             created_at_ms: 1,
             runtime: RuntimeManifest {
                 name: "microsandbox".into(),
@@ -7417,6 +8277,54 @@ mod tests {
         assert!(matches!(error, BackupError::InsufficientSpace(_)));
         assert!(error.to_string().contains("working copy"), "{error}");
         assert!(service.runner.calls.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn export_space_counts_the_computers_own_payload_once() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut service = service(&temp, FakeRunner::default());
+        // Room for the reserve and a few MiB: far less than the engine's other data.
+        service.free_space = |_| Ok(FREE_SPACE_RESERVE + 6 * 1024 * 1024);
+        let write = |path: PathBuf, mebibytes: usize| {
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, vec![7_u8; mebibytes * 1024 * 1024]).unwrap();
+        };
+        let store = temp.path().join("home");
+        // Other computers' snapshots and the image cache are not written by this export.
+        write(store.join("snapshots/other/snap_1/disk.raw"), 24);
+        write(store.join("cache/layers/base.erofs"), 24);
+        write(store.join("snapshots/dev/snap_2/disk.raw"), 1);
+        let request = |destination: PathBuf| BackupRequest {
+            destination,
+            sources: vec![BackupSource {
+                name: "dev".into(),
+                snapshot_group: "dev".into(),
+                was_running: false,
+                runtime_config: managed_config("dev"),
+                computer_configuration: computer_configuration("dev"),
+                existing_member: Some("silo-backup-0-x".into()),
+            }],
+            fork_records: Vec::new(),
+            pinned_image: Some(PinnedImageRef {
+                reference: "alpine:3.20".into(),
+                manifest_digest: format!("sha256:{}", "a".repeat(64)),
+            }),
+        };
+        let cancellation = Cancellation::default();
+        let destination = temp.path().join("dev.silo-backup");
+        service
+            .check_export_space(&request(destination.clone()), &cancellation)
+            .expect("only the computer's own 1 MiB payload counts");
+
+        // The same computer's own data counts: 4 MiB staged and written needs more than 6 MiB.
+        write(store.join("snapshots/dev/snap_3/disk.raw"), 3);
+        let error = service
+            .check_export_space(&request(destination), &cancellation)
+            .unwrap_err();
+        assert!(
+            matches!(error, BackupError::InsufficientSpace(_)),
+            "{error}"
+        );
     }
 
     #[test]

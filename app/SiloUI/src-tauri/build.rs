@@ -114,6 +114,7 @@ fn main() {
             "choose_backup_archive",
             "inspect_backup_archive",
             "cancel_backup_inspection",
+            "check_export_logins",
             "start_backup",
             "start_restore",
             "cancel_backup_operation",
