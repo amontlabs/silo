@@ -239,6 +239,7 @@ impl Upkeep for SilodUpkeep {
 
     fn recover_storage(&self) {
         silo_engine::runtime::storage::recover_checkpoint_data(&self.host());
+        sweep_transfer_area(&self.context, false);
     }
 
     fn paused(&self) -> bool {
@@ -247,8 +248,20 @@ impl Upkeep for SilodUpkeep {
     }
 }
 
+/// Clears the transfer area (`silo_engine::transfer_area`). At the engine's start it empties it:
+/// a copy over Connections ended with the engine that served it. Later it removes what nobody
+/// removed after a day. Returns how many entries it removed.
+pub(crate) fn sweep_transfer_area(context: &SilodContext, at_start: bool) -> usize {
+    use silo_engine::transfer_area::{Area, STALE_AFTER};
+    match Area::of_engine(context) {
+        Ok(area) => area.sweep((!at_start).then_some(STALE_AFTER)),
+        Err(_) => 0,
+    }
+}
+
 /// Starts the engine timers. Call once, after the context and the secrets runtime are installed.
 pub fn start(context: Arc<SilodContext>) -> Timers {
+    sweep_transfer_area(&context, true);
     let upkeep = SilodUpkeep::new(context);
     let host = upkeep.host();
     let _ = std::thread::Builder::new()

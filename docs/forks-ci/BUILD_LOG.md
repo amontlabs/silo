@@ -5,8 +5,9 @@ Plan: [PLAN.md](PLAN.md).
 ## Resume
 
 - **Merged (8 Nov 2026):** F1 (#84), F2 (#88), C1 (#87), R1 (#83), F3 (#86).
-- **Open phases:** F4 (export a computer that lives on another machine) and R2 (Linux hosts as runner
-  machines), both in progress; container computers (C2 onwards) being designed.
+- **Open phases:** F4 (export a computer that lives on another machine) is built on
+  `claude/forks-phase-4-transfer`, pull request open, its live check is the `linux-host.yml` two-account
+  job; R2 (Linux hosts as runner machines) is in progress; container computers (C2 onwards) are being designed.
 - **Open follow-ups found during the build:**
   - A Linux fork leaves its fork-point checkpoint on the source (it was a manual checkpoint before F2 too);
     macOS removes its fork point with the last fork. Fixing it means the macOS release machinery on Linux.
@@ -303,6 +304,58 @@ Both owner decisions:
   written in a running macOS computer, a manual checkpoint right after, a fork of that checkpoint: the file (and a 4 KiB blob) is
   in the fork. Cleaned up: 0 runners, no `ci-*`/`e2e-*` computer, recipe build removed. Evidence:
   [`evidence/r1-runner/run-4-macos.txt`](evidence/r1-runner/run-4-macos.txt), `runner-4-macos.log`, `config-macos-4.yaml`.
+### Phase F4: sharing a computer that lives on another machine (branch `claude/forks-phase-4-transfer`, 8 Nov 2026)
+
+Decision Q5 built as designed by the owner's brief and Fable: the export runs on the owning machine,
+its file is copied over Connections, the owner's copy is removed. Test counts are from `cargo test
+--locked` with synthetic GitHub configuration and a shared target dir, run on 8 Nov 2026 on the Mac;
+no computer, Dev engine or app bundle was touched.
+
+- **Why a stream.** The managed key is `restrict,command="... --remote-bridge"`, so `scp`/`sftp` cannot
+  reach the owner, and Files' `sftp` only reaches guests through `guest.ssh`. A new Stream method
+  `exports.file` carries one file, like `guest.ssh` (`engine/src/remote.rs` `METHODS`, served by
+  `serve_file_stream`; the handshake's capability list is the old-owner check).
+- **Transfer area** (`engine/src/transfer_area.rs`): `<engine dir>/transfer/`, 0700 and 0600. Names are
+  owner-made `x-<32 hex>.silo-backup` (export, read once through an exclusive `.used` marker, links not
+  followed) and `i-<32 hex>.silo-backup` (import, never readable); `parse_name` is the fixed pattern. A write
+  declares size and sha256, is refused at zero, past the cap or without room (`size + 64 MiB`, counting
+  writes already promised), goes to `.part`, reads exactly the declared bytes and is renamed only when the
+  hash matches; every other end deletes the `.part`. **Cap: 16 GiB.** Not the Files 4 GiB (a computer
+  export can exceed it) and not the engine's export limit, which is 8 TiB; 16 GiB is a deliberate middle
+  that keeps the time budget finite. Remove is `exports.discard`; the sweep empties the area when
+  `silod` starts and removes entries older than a day on the storage timer (`timers::sweep_transfer_area`).
+- **Owner jobs, one variant.** `exports.create` takes `transferArea` (the owner picks the name; the job's
+  `archive.transfer` holds `{name, bytes, sha256}`, hashed after the write: `backup_controller::describe_transfer`),
+  `exports.import` takes `transferName` (resolved to an import name that is in the area, otherwise the
+  ordinary import: the archive checks are the boundary). New API methods: `exports.discard` (owner command)
+  and `exports.transfer` (controller job, `deviceId` required). The check, create and import are asked on
+  the owner through the existing routing; the CLI's `ROUTED_METHODS` lists them.
+- **Controller job** (`silod/src/methods/checkpoints/export_transfer.rs`): `receive` writes a new 0600 file
+  and removes it on any failure; `send` hashes the local file, then sends. Progress is the Files
+  `TransferProgress`; cancel is the job's; the Files budget (45 s plus 64 KiB/s) is enforced by a watchdog
+  that closes the stream. An owner without `exports.file` is refused with "The other machine's Silo is too
+  old to share computers over Connections. Update Silo there." by the job and by the controller's routing of
+  `exports.create`/`exports.import` that use the area.
+- **CLI** (`cli/src/share.rs`): `--device` export checks the output name first, creates the export in the
+  owner's area, copies it with a local `exports.transfer`, then discards the owner's copy whatever the copy
+  did; import sends first, imports from the received name, and discards whatever the import did. A failed
+  discard is a warning.
+- **Docs/changeset:** `docs/THREAT-MODEL.md` (boundary 6, "Sharing a computer that lives on another
+  device"), `docs/SiloUI-CLI.md`, `docs/SiloUI-CONNECTIONS.md`, `app/SiloUI/.changeset/share-across-devices.md`.
+- **Tests.** Engine `transfer_area` 19 (names and roles, single use, links, `.part`, hash and short/long
+  streams, abort, size/cap/free space, remove, sweep, the stream over socket pairs both ways), `remote`
+  170 (the method lists), `backup_controller` 1 (`describe_transfer`). `silod` `methods::` 244 (a controller
+  job against the real owner side over socket pairs: receive, send, bad hash, refused name, cancel of a
+  stalled copy, old owner, request validation; owner `exports.discard`, `exports.create` with the area,
+  `exports.import` from the area; the routing gate; the sweep). `silo-cli` 150 unit + `tests/share.rs`
+  17 (the device flows, the discard on every path, the order of requests and which job is followed on
+  which device). `hosts-e2e.sh` unit tests 18 (the sharing steps and a file left in a transfer area).
+  `silo-api` 49 (schema and requests regenerated).
+- **Live check:** `hosts-e2e.sh` with `SILO_E2E_SHARE=1` on the two-account KVM job
+  (`linux-host.yml`): see the pull request for the run. **Not covered by any test:** a real `ssh` hop with
+  the restricted key (the unit tests replace it with socket pairs), the Mac, and an exported computer
+  larger than the runner disk.
+
 ### Phase F3: sharing a computer as a file (branch `claude/forks-phase-3`, 7 Nov 2026)
 
 What changed, with the evidence for each claim. Test counts are from `cargo test --locked` (synthetic

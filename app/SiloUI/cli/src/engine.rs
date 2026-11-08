@@ -632,6 +632,10 @@ const ROUTED_PREFIXES: &[&str] = &[
 const ROUTED_METHODS: &[&str] = &[
     "desktop.action",
     "desktop.status",
+    "exports.check",
+    "exports.create",
+    "exports.discard",
+    "exports.import",
     "guest.exec",
     "guest.exec.get",
     "guest.exec.input",

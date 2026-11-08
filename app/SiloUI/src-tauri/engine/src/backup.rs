@@ -4141,7 +4141,7 @@ fn same_volume(left: &Path, right: &Path) -> bool {
 
 /// `statvfs` of the nearest existing ancestor: space available to this
 /// account (f_bavail), so a path that is not created yet still resolves.
-fn available_bytes(path: &Path) -> io::Result<u64> {
+pub(crate) fn available_bytes(path: &Path) -> io::Result<u64> {
     use std::os::unix::ffi::OsStrExt;
     let existing = path
         .ancestors()

@@ -84,6 +84,7 @@ pub mod steps;
 pub mod sync;
 pub mod terminal;
 pub mod transfer;
+pub mod transfer_area;
 pub mod updates;
 pub mod url_proxy;
 pub mod viewer_clipboard;

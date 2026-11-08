@@ -367,6 +367,7 @@ fn set_aside(app_data: &Path, detail: &str) -> Result<(PathBuf, Journal), String
             destination: app_data.to_string_lossy().into_owned(),
             computers: Vec::new(),
             checkpoint_name: None,
+            transfer: None,
         },
         request: Request::Backup {
             names: Vec::new(),

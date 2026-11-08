@@ -9,6 +9,7 @@
 pub(crate) mod all_devices;
 mod changes;
 mod device;
+pub(crate) mod export_transfer;
 mod exports;
 mod keep;
 mod migration;
@@ -106,6 +107,8 @@ async fn dispatch(
         MethodName::ExportsCheck => exports::check(context, params).await,
         MethodName::ExportsCreate => exports::create(context, params).await,
         MethodName::ExportsImport => exports::import(context, params).await,
+        MethodName::ExportsDiscard => exports::discard(context, params).await,
+        MethodName::ExportsTransfer => export_transfer::start(context, params).await,
         MethodName::ExportsDismiss => exports::dismiss(context, params).await,
         MethodName::ExportsAcknowledge => exports::acknowledge(context, params).await,
         MethodName::MigrationState => migration::state(context, params).await,

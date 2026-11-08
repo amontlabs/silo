@@ -46,6 +46,10 @@ struct Archive {
     /// The checkpoint an export packages, so titles do not depend on UI memory (E-52).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     checkpoint_name: Option<String>,
+    /// Set on a finished export written into the transfer area: the name, size and sha256
+    /// the other machine fetches it by.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    transfer: Option<crate::transfer_area::FileInfo>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -833,6 +837,7 @@ fn archive_from(path: &Path, inspected: &backup::ArchiveInspection) -> Archive {
             .into_owned(),
         computers: inspected.computers.clone(),
         checkpoint_name: None,
+        transfer: None,
     }
 }
 
@@ -987,6 +992,7 @@ pub fn inspection_worker(
                         .into_owned(),
                     computers: Vec::new(),
                     checkpoint_name: None,
+                    transfer: None,
                 },
                 valid: false,
                 reason: Some(error.to_string()),
@@ -1473,6 +1479,7 @@ fn claim_export_at(
         destination,
         computers: computers.to_vec(),
         checkpoint_name: checkpoint_name.map(Into::into),
+        transfer: None,
     };
     let journal = recovery::Journal::backup(archive.clone(), computers.to_vec(), checkpoint_id);
     let operation_id = journal.identity().to_string();
@@ -1579,6 +1586,13 @@ fn run_backup(
         checkpoint_id.as_deref(),
         &cancellation,
     );
+    let result = result.and_then(|archive| {
+        let transfer = transfer_file(&controller, &archive_path, &cancellation)?;
+        Ok(Archive {
+            transfer,
+            ..archive
+        })
+    });
     let operation = match result {
         Ok(archive) => Operation::Result {
             operation: "backup",
@@ -1599,6 +1613,56 @@ fn run_backup(
     notify_transfer(&controller, &operation, started.elapsed());
     let _ = set_operation(&controller, operation);
     publish_and_finish(&controller, || publish(&controller));
+}
+
+/// The name, size and sha256 of a finished export that sits in the transfer area, so the other
+/// machine can fetch it and check what arrived. `None` for any other export.
+fn transfer_file(
+    controller: &Controller,
+    archive_path: &Path,
+    cancellation: &backup::Cancellation,
+) -> Result<Option<crate::transfer_area::FileInfo>, TransferError> {
+    let Ok(host) = controller.runtime_host() else {
+        return Ok(None);
+    };
+    let Ok(area) = crate::transfer_area::Area::of_engine(host.engine_context().as_ref()) else {
+        return Ok(None);
+    };
+    describe_transfer(&area, archive_path, cancellation)
+}
+
+/// The report for `archive_path` when it is an export file of `area`.
+fn describe_transfer(
+    area: &crate::transfer_area::Area,
+    archive_path: &Path,
+    cancellation: &backup::Cancellation,
+) -> Result<Option<crate::transfer_area::FileInfo>, TransferError> {
+    if !area.owns_export_path(archive_path) {
+        return Ok(None);
+    }
+    let name = archive_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default()
+        .to_owned();
+    let (bytes, sha256) = crate::transfer_area::digest(archive_path, &|| cancellation.cancelled())
+        .map_err(|error| {
+            if cancellation.cancelled() {
+                TransferError::cancelled()
+            } else {
+                TransferError::from(format!(
+                    "Silo could not prepare the export to be sent: {error}"
+                ))
+            }
+        })?;
+    if bytes > crate::transfer_area::MAX_BYTES {
+        return Err("The export is larger than Silo sends between machines.".into());
+    }
+    Ok(Some(crate::transfer_area::FileInfo {
+        name,
+        bytes,
+        sha256,
+    }))
 }
 
 /// Why an export or import worker ended without a result. The outcome comes
@@ -2365,6 +2429,7 @@ pub fn begin_import(
             .into_owned(),
         computers: source_name.iter().cloned().collect(),
         checkpoint_name: None,
+        transfer: None,
     };
     let journal =
         recovery::Journal::restore(archive.clone(), new_name.clone(), source_name.clone());
@@ -3426,6 +3491,7 @@ mod tests {
             destination: directory.path().display().to_string(),
             computers: vec!["source".into()],
             checkpoint_name: None,
+            transfer: None,
         };
         let journal =
             recovery::Journal::restore(archive.clone(), "copy".into(), Some("source".into()));
@@ -3525,6 +3591,7 @@ mod tests {
             destination: directory.path().display().to_string(),
             computers: vec!["source".into()],
             checkpoint_name: None,
+            transfer: None,
         };
         let journal =
             recovery::Journal::restore(archive.clone(), "copy".into(), Some("source".into()));
@@ -3940,6 +4007,7 @@ mod tests {
             destination: "/backups".into(),
             computers: vec!["dev".into()],
             checkpoint_name: None,
+            transfer: None,
         }
     }
 
@@ -3963,6 +4031,7 @@ mod tests {
             destination: destination.display().to_string(),
             computers: vec!["copy".into()],
             checkpoint_name: None,
+            transfer: None,
         };
         recovery::begin(
             &seed,
@@ -4070,6 +4139,36 @@ mod tests {
             .expect("a pending journal must block updates");
         assert!(error.contains("interrupted export or import"), "{error}");
         assert!(!controller.busy.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn a_finished_export_in_the_transfer_area_reports_its_name_size_and_hash() {
+        let directory = tempfile::tempdir().unwrap();
+        let area = crate::transfer_area::Area::at(directory.path()).unwrap();
+        let (name, path) = area.export_target();
+        fs::write(&path, b"archive bytes").unwrap();
+        let info = describe_transfer(&area, &path, &backup::Cancellation::default())
+            .unwrap()
+            .expect("an export file of the area");
+        assert_eq!(info.name, name);
+        assert_eq!(info.bytes, 13);
+        assert_eq!(
+            info.sha256,
+            crate::transfer_area::digest(&path, &|| false).unwrap().1
+        );
+        // Any other export is described by nothing, so its result is unchanged.
+        let elsewhere = directory.path().join("main.silo-backup");
+        fs::write(&elsewhere, b"x").unwrap();
+        assert!(
+            describe_transfer(&area, &elsewhere, &backup::Cancellation::default())
+                .unwrap()
+                .is_none()
+        );
+        // A cancelled export is a cancellation, not a failure.
+        let cancellation = backup::Cancellation::default();
+        cancellation.cancel();
+        let error = describe_transfer(&area, &path, &cancellation).unwrap_err();
+        assert!(error.cancelled);
     }
 
     #[test]

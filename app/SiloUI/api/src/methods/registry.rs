@@ -149,10 +149,12 @@ define_registry! {
     ExportsCheck => ("exports.check", Job, exports::ExportCheckParams, common::JobStartResult);
     ExportsCreate => ("exports.create", Job, exports::ExportCreateParams, common::JobStartResult);
     ExportsDestinationSet => ("exports.destination.set", Command, exports::ExportDestinationSetParams, exports::ExportDestinationResult);
+    ExportsDiscard => ("exports.discard", Command, exports::ExportDiscardParams, bool);
     ExportsDismiss => ("exports.dismiss", Command, exports::ExportDismissParams, bool);
     ExportsImport => ("exports.import", Job, exports::ExportImportParams, common::JobStartResult);
     ExportsInspect => ("exports.inspect", Job, exports::ExportInspectParams, common::JobStartResult);
     ExportsState => ("exports.state", Query, exports::ExportStateParams, exports::BackupState);
+    ExportsTransfer => ("exports.transfer", Job, exports::ExportTransferParams, common::JobStartResult);
     FilesDownload => ("files.download", Job, files::FileDownloadParams, common::JobStartResult);
     FilesList => ("files.list", Query, files::FileListParams, files::FileListResult);
     FilesUpload => ("files.upload", Job, files::FileUploadParams, common::JobStartResult);
@@ -249,7 +251,7 @@ mod tests {
 
     #[test]
     fn registry_covers_every_canonical_method_and_kind() {
-        assert_eq!(METHOD_REGISTRY.len(), 173);
+        assert_eq!(METHOD_REGISTRY.len(), 175);
         assert_eq!(
             METHOD_REGISTRY
                 .iter()
@@ -262,14 +264,14 @@ mod tests {
                 .iter()
                 .filter(|m| m.kind == MethodKind::Command)
                 .count(),
-            72
+            73
         );
         assert_eq!(
             METHOD_REGISTRY
                 .iter()
                 .filter(|m| m.kind == MethodKind::Job)
                 .count(),
-            41
+            42
         );
         assert_eq!(
             METHOD_REGISTRY

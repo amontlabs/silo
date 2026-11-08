@@ -9,8 +9,12 @@
 # ENGINE_DIR is an unpacked engine archive both accounts may run (root-owned, not writable by
 # others). Both accounts linger, so their systemd user managers run; the machine's SSH server
 # listens on SILO_E2E_SSH_PORT (22). SILO_E2E_REMOTE_EXEC=1 also runs `exec` and
-# `fork -- <command>` through --device (phase 5). The computers are named e2e-hosts-* and are
-# stopped and dropped, and the controller removed from the host, even when a step fails.
+# `fork -- <command>` through --device (phase 5). SILO_E2E_SHARE=1 also exports the host's
+# computer to the controller over Connections, imports the file on the controller, imports it
+# back onto the host with --device, and checks that neither engine's transfer area keeps a
+# file (SILO_E2E_STATE_DIR is the channel's folder under the account's home, .silo-dev for
+# the Dev engine). The computers are named e2e-hosts-* and are stopped and dropped, and the
+# controller removed from the host, even when a step fails.
 set -euo pipefail
 
 if [[ $# -ne 3 ]]; then
@@ -22,6 +26,10 @@ host_user="$2"
 controller_user="$3"
 name="${SILO_E2E_COMPUTER:-e2e-hosts-remote}"
 fork="$name-fork"
+# Made by the sharing steps: on the controller, and on the host from a file sent with --device.
+imported="$name-imported"
+sent="$name-sent"
+state_dir="${SILO_E2E_STATE_DIR:-.silo-dev}"
 port="${SILO_E2E_SSH_PORT:-22}"
 host_key_file="${SILO_E2E_HOST_KEY_FILE:-/etc/ssh/ssh_host_ed25519_key.pub}"
 ready_timeout="${SILO_E2E_READY_TIMEOUT:-120}"
@@ -61,11 +69,32 @@ names = {computer["name"] for computer in json.load(sys.stdin)["computers"]}
 print("\n".join(sorted(name for name in sys.argv[1:] if name in names)))' "$@"
 }
 
+# What an account's engine keeps in its transfer area, one name per line.
+transfer_files() {
+  as "$1" bash -c 'ls -A "$HOME/$1/engine/transfer" 2>/dev/null || true' _ "$state_dir"
+}
+
+# The names among the arguments that the controller lists as its own computers.
+listed_on_controller() {
+  controller --json list --all | python3 -c '
+import json, sys
+names = {computer["name"] for computer in json.load(sys.stdin)["computers"]}
+print("\n".join(sorted(name for name in sys.argv[1:] if name in names)))' "$@"
+}
+
 device=""
+share_dir=""
 cleanup() {
   local status=$?
   trap - EXIT
-  for computer in "$fork" "$name"; do
+  for computer in "$imported"; do
+    if [[ "$(listed_on_controller "$computer" 2>/dev/null || true)" == "$computer" ]]; then
+      echo "Dropping $computer on the controller after a failed run"
+      controller drop "$computer" || true
+    fi
+  done
+  [[ -n "$share_dir" ]] && as "$controller_user" rm -rf "$share_dir"
+  for computer in "$sent" "$fork" "$name"; do
     if [[ "$(listed_on_host "$computer" 2>/dev/null || true)" == "$computer" ]]; then
       echo "Stopping and dropping $computer on the host after a failed run"
       host stop "$computer" || true
@@ -140,7 +169,7 @@ host host status
 
 # The check must fail when the list does: an empty answer would let the test take over a
 # computer it did not make.
-if ! existing=$(listed_on_host "$name" "$fork"); then
+if ! existing=$(listed_on_host "$name" "$fork" "$sent"); then
   echo "Could not list the host's computers; this test never runs without knowing them" >&2
   exit 1
 fi
@@ -179,6 +208,40 @@ if [[ "${SILO_E2E_REMOTE_EXEC:-0}" == 1 ]]; then
   output=$(controller --device "$device" fork "$name" --name "$fork" -- uname -a)
   echo "$output"
   [[ "$output" == *Linux* ]] || { echo "the fork's command did not print a Linux kernel" >&2; exit 1; }
+fi
+
+if [[ "${SILO_E2E_SHARE:-0}" == 1 ]]; then
+  step "Exporting $name from the host to the controller"
+  [[ -z "$(transfer_files "$host_user")" ]] || { echo "The host's transfer area is not empty before the test" >&2; exit 1; }
+  if [[ -n "$(listed_on_controller "$imported")" ]]; then
+    echo "A computer named $imported already exists on the controller; this test never touches it" >&2
+    exit 1
+  fi
+  share_dir=$(as "$controller_user" mktemp -d)
+  exported="$share_dir/$name.silo-backup"
+  # The computer is running, so the login check can list its disk; --yes accepts what it finds.
+  controller --device "$device" export "$name" --yes -o "$exported"
+  as "$controller_user" test -s "$exported" || { echo "The exported file is missing or empty" >&2; exit 1; }
+  size=$(as "$controller_user" bash -c 'wc -c < "$1"' _ "$exported")
+  echo "Exported file: $size bytes"
+  [[ -z "$(transfer_files "$host_user")" ]] || { echo "The host kept files after the export: $(transfer_files "$host_user")" >&2; exit 1; }
+  [[ -z "$(transfer_files "$controller_user")" ]] || { echo "The controller's transfer area holds files after the export" >&2; exit 1; }
+
+  step "Importing the file on the controller"
+  controller import "$exported" --name "$imported"
+  [[ "$(listed_on_controller "$imported")" == "$imported" ]] || { echo "$imported is not on the controller" >&2; exit 1; }
+
+  step "Importing the file onto the host from the controller with --device"
+  controller --device "$device" import "$exported" --name "$sent"
+  [[ "$(listed_on_host "$sent")" == "$sent" ]] || { echo "$sent is not on the host" >&2; exit 1; }
+  [[ -z "$(transfer_files "$host_user")" ]] || { echo "The host kept files after the import: $(transfer_files "$host_user")" >&2; exit 1; }
+  [[ -z "$(transfer_files "$controller_user")" ]] || { echo "The controller's transfer area holds files after the import" >&2; exit 1; }
+
+  step "Dropping the imported computers"
+  controller drop "$imported"
+  controller --device "$device" drop "$sent"
+  as "$controller_user" rm -rf "$share_dir"
+  share_dir=""
 fi
 
 step "Stopping and dropping from the controller"

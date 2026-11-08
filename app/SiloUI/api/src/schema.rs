@@ -63,6 +63,7 @@ struct JobTerminalResultsSchema {
     backup: crate::methods::exports::BackupOperation,
     archive_inspection: crate::methods::exports::ArchiveInspectionResult,
     export_check: crate::methods::exports::ExportCheckResult,
+    export_transfer: crate::methods::exports::ExportTransferFinishedResult,
     upload: crate::methods::files::UploadOutcome,
     download: crate::methods::files::DownloadOutcome,
     github: crate::methods::github::GitHubState,
@@ -120,6 +121,7 @@ pub const JOB_FINISHED_RESULT_REGISTRY: &[(&str, &str)] = &[
     ("exports.create", "BackupOperation"),
     ("exports.import", "BackupOperation"),
     ("exports.inspect", "ArchiveInspectionResult"),
+    ("exports.transfer", "TransferFile"),
     ("files.download", "DownloadOutcome"),
     ("files.upload", "UploadOutcome"),
     ("github.connect", "GitHubState"),
@@ -195,8 +197,8 @@ mod tests {
             schema_json().unwrap()
         );
         let schema: serde_json::Value = serde_json::from_str(&schema_json().unwrap()).unwrap();
-        assert_eq!(schema["x-silo-methods"].as_array().unwrap().len(), 173);
-        assert_eq!(schema["x-silo-job-results"].as_array().unwrap().len(), 38);
+        assert_eq!(schema["x-silo-methods"].as_array().unwrap().len(), 175);
+        assert_eq!(schema["x-silo-job-results"].as_array().unwrap().len(), 39);
         assert_eq!(
             schema["$schema"],
             "https://json-schema.org/draft/2020-12/schema"

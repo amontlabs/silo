@@ -359,6 +359,42 @@ one `.silo-backup` file, and `silo import` reads one. What the file holds, and d
   the sender's agent changed runs in your main afterwards. Read `silo diff <imported>` before
   you keep it, and do not keep what you would not run.
 
+**Sharing a computer that lives on another device.** `silo --device mini export main -o FILE` and
+`silo --device mini import FILE` move the file over Connections. The managed key may only run the
+bridge, so `scp` and `sftp` do not reach the owner; Files' `sftp` only reaches guests. The owner
+therefore keeps a *transfer area*, `<engine directory>/transfer/` (directory 0700, files 0600),
+and serves exactly one file of it per `exports.file` stream.
+
+- **No new data access.** A controller already holds the owner's authority (boundary 7): it can
+  export any computer to a folder on the owner, run commands in it and read its files. The area adds
+  no path a controller could not already use; it exists because the key cannot copy a file.
+- **Names are the owner's.** A client never sends a path. The owner picks every name (`x-<token>`
+  for an export it wrote, `i-<token>` for a file it received), the pattern is fixed, and a name
+  carries its role: an export name can only be read, an import name only imported from, so received
+  bytes cannot be read back and an export cannot be overwritten. Each export name is read once
+  (a marker file is created exclusively); a second open is refused. Links are not followed.
+- **Owner disk is bounded by what is declared.** A write names its size and sha256 first and is
+  refused when the size is zero, past the cap (16 GiB; the engine's own export has no smaller
+  limit), or the volume cannot hold it with 64 MiB to spare, counting writes already promised. The
+  bytes go to a `.part` file, exactly the declared size is read, and the file is renamed only when
+  the size and hash match; any other end deletes the `.part`. A stalled write ends after 120 s.
+  The copy has the Files time budget (45 s plus the size at 64 KiB/s) and the controller's job can
+  be cancelled.
+- **Import content is untrusted.** A received file is imported exactly like a local file of unknown
+  origin: the archive validation is the only boundary, and the imported computer is untrusted until
+  it is kept (boundary 6).
+- **Integrity is size and hash over SSH.** SSH protects the bytes in transit; the hash catches a
+  truncated or changed file. It does not authenticate the sender: the controller already has the
+  owner's authority.
+- **Leftovers are swept.** The controller asks the owner to remove the file after a successful copy
+  (`exports.discard`, for names of the area only). The engine empties the area when it starts and a
+  periodic pass removes entries older than a day, so a crash or a lost connection leaves a file for
+  at most a day. While it lasts, the file is readable by the engine's account and root, like the
+  rest of the engine directory.
+- **One hop, and no old owners.** The controller copies from the owner it names; an owner never
+  forwards. An owner that does not advertise `exports.file` in its handshake is refused with a
+  plain message before anything is exported.
+
 ### 7. The engine socket: same user only
 
 `silod` listens on `~/.silo/engine.sock` (`~/.silo-dev` for Silo Dev). The directory must be owned
@@ -400,8 +436,8 @@ the request names this device's id
 `METHODS` and `OWNER_METHODS`
 ([`remote.rs#L328`](../app/SiloUI/src-tauri/engine/src/remote.rs#L328),
 [`#L398`](../app/SiloUI/src-tauri/engine/src/remote.rs#L398)), including delete, checkpoint
-restore, guest exec, file reads and writes, exports, and the `guest.ssh` and macOS display byte
-streams. Turning Connections off refuses every request but leaves installed keys in
+restore, guest exec, file reads and writes, exports, and the `guest.ssh`, `exports.file` and macOS
+display byte streams. Turning Connections off refuses every request but leaves installed keys in
 `authorized_keys`; removing a device revokes its key. `authorized_keys` is the only place a
 controller key is revoked, and keys do not expire. Through the bridge, `connections.keys.revoke`
 is allowed only for the key the forced command names

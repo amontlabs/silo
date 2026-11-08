@@ -163,9 +163,24 @@ margin and the 1 GiB Silo always keeps free. Other computers' checkpoints and ca
 Ancestors that live in another computer's group are not counted either; the check that follows the
 write uses the file's real size.
 
-`--device` is refused for now: export and import work on this device. The MCP server has no export
-or import tool: both read and write files at paths the caller chooses, and the file can hold the
-computer's logins, so they stay a decision of the person at the terminal.
+**A computer on another device.** `silo --device mini export main -o ~/Desktop/main.silo-backup`
+exports a computer of a connected device into a file on this one, and `silo --device mini import
+~/Desktop/main.silo-backup --name friend-main` creates a computer there from a file here. The
+other device does the export or import itself (the logins are asked about on it, as above, and
+`-o` is a path on this device). Because the managed Connections key can only run Silo's bridge, the
+file travels through the other device's transfer area: it writes the export there under a name it
+picks, this device copies it over the Connections link (a `Copying ...` step with progress, size
+and checksum checked), and the other device removes its copy. An import goes the other way and the
+other device removes the received file whether the import worked or not. A leftover (the
+connection dropped, the engine stopped) is swept when that engine starts and after a day. Ctrl-C
+cancels the copy. Both devices need this Silo version; an older one answers "The other machine's
+Silo is too old to share computers over Connections. Update Silo there." The file is limited to
+16 GiB and the other device needs that much free space plus 64 MiB. See
+[Connections](SiloUI-CONNECTIONS.md#sharing-a-computer-between-devices).
+
+The MCP server has no export or import tool: both read and write files at paths the caller
+chooses, and the file can hold the computer's logins, so they stay a decision of the person at the
+terminal.
 
 ## Several forks and commands
 
@@ -313,7 +328,8 @@ Connections (the device's name, its id or an id prefix; `local` is this device).
 that device's engine can answer goes to it, so `silo --device mini fork main`, `exec`,
 `fork main -- <command>` (and `-n`), `fork --gui`, `diff`, `fold`, `requests`, `steps`, `tree`,
 `checkpoints` and `list` work on the Mac mini's computers. The first form is used rather than an
-`@device` prefix on computer names, so names stay plain. `up`, `ports`, `publish`, `unpublish`,
+`@device` prefix on computer names, so names stay plain. `export` and `import` copy a file between the two devices
+([sharing](#sharing-a-computer-as-a-file)). `up`, `ports`, `publish`, `unpublish`,
 `ssh-setup`, `secrets`, folder forks and `fold --pr` use this device's files, SSH configuration
 or secrets and refuse `--device`.
 The routing is described in [Connections](SiloUI-CONNECTIONS.md#driving-another-devices-main-v1-methods).
@@ -502,7 +518,9 @@ silo --json devices add ada@build-box:22 --host-key SHA256:... < /dev/null
 `app/SiloUI/scripts/hosts-e2e.sh` does this with two accounts on one Linux machine (the
 `linux-host.yml` workflow runs it on its KVM runner): it prepares the host, adds it by
 `127.0.0.1`, makes, starts and drops an `e2e-hosts-*` computer there with `--device`, and
-removes the host again, cleaning up after a failure.
+removes the host again, cleaning up after a failure. With `SILO_E2E_SHARE=1` it also exports the
+host's computer to the controller, imports the file on the controller, imports it onto the host
+with `--device`, and checks that neither engine's transfer area keeps a file.
 
 `silo devices list` shows the saved devices with their last health check, and
 `silo devices remove <device>` removes one, as in the app: the engine forgets it only after the
