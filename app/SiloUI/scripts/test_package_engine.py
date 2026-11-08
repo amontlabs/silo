@@ -398,8 +398,12 @@ class LinuxPackageTests(unittest.TestCase):
         self.addCleanup(setattr, engine, 'package_linux', real)
         runners = []
 
-        def build_runner(platform, version):
+        build_dirs = []
+
+        def build_runner(platform, version, out_dir):
             runners.append((platform, version))
+            build_dirs.append(Path(out_dir))
+            self.assertTrue(Path(out_dir).is_dir())
             return self.runner
 
         real_licenses = engine.RUNNER_LICENSES
@@ -411,6 +415,7 @@ class LinuxPackageTests(unittest.TestCase):
         self.assertEqual(built, [(X64, '1.94.0', 'development')])
         self.assertEqual(calls[0]['channel'], 'development')
         self.assertEqual(runners, [('linux-x64', VERSION)])
+        self.assertFalse(build_dirs[0].exists(), 'the runner build directory is removed after packaging')
         self.assertTrue((self.out / LINUX_ARCHIVE).is_file())
         with self.assertRaises(SystemExit):
             engine.main(['--channel', 'development'], build=None, build_linux=None)
@@ -434,6 +439,18 @@ class LinuxPackageTests(unittest.TestCase):
                              ('linux', goarch, '0'))
             self.assertEqual(options['cwd'], engine.RUNNER)
             self.assertTrue(options['check'])
+
+    def test_hidden_files_and_directories_in_the_licenses_folder_are_not_packaged(self):
+        (self.licenses / '.DS_Store').write_text('junk')
+        (self.licenses / '.gitkeep').write_text('')
+        (self.licenses / 'sub').mkdir()
+        archive, _ = self.package()
+        names = {name for name in self.members(archive) if '/resources/silo-runner-licenses/' in name}
+        self.assertEqual({name.rsplit('/', 1)[1] for name in names}, {'scaleset-MIT.txt'})
+
+    def test_the_runner_build_needs_a_directory_it_does_not_leave_behind(self):
+        with self.assertRaises(ValueError):
+            engine.go_build_runner('linux-x64', '0.9.1', lambda *a, **k: None)
 
     def test_the_checked_in_runner_licenses_cover_every_go_module_it_links(self):
         names = {path.name for path in engine.RUNNER_LICENSES.iterdir()}

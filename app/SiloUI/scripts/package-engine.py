@@ -264,7 +264,8 @@ def package_linux(out_dir, *, platform, commit, silod_binary, cli_binary, runner
         'LICENSE': (LICENSE, 0o644),
     }
     files.update(linux_runtime_files(target, tauri))
-    licenses = sorted(Path(runner_licenses).glob('*'))
+    licenses = sorted(path for path in Path(runner_licenses).glob('*')
+                      if path.is_file() and not path.name.startswith('.'))
     if not licenses:
         raise RuntimeError(f'{runner_licenses} holds no licenses for silo-runner.')
     files.update({f'resources/silo-runner-licenses/{path.name}': (path, 0o644) for path in licenses})
@@ -309,8 +310,11 @@ def cargo_build_linux(target, toolchain, channel, run=subprocess.run):
 
 def go_build_runner(platform, version, run=subprocess.run, out_dir=None):
     """Builds `silo-runner` for the platform (a static binary, so any host can build either
-    architecture) and returns its path. Needs the Go version in runner/go.mod."""
-    out = Path(out_dir or tempfile.mkdtemp(prefix='silo-runner-')) / 'silo-runner'
+    architecture) and returns its path, in out_dir (the caller's, which it removes). Needs the Go
+    version in runner/go.mod."""
+    if out_dir is None:
+        raise ValueError('go_build_runner needs a directory for the binary.')
+    out = Path(out_dir) / 'silo-runner'
     env = {**os.environ, 'GOOS': 'linux', 'GOARCH': RUNNER_GOARCH[platform], 'CGO_ENABLED': '0'}
     run(['go', 'build', '-trimpath', '-ldflags', f'-s -w -X main.version={version}', '-o', str(out), '.'],
         cwd=RUNNER, env=env, check=True)
@@ -344,10 +348,15 @@ def main(argv=None, *, build=cargo_build, build_linux=cargo_build_linux, build_r
     else:
         target = LINUX_TARGETS[args.platform][0]
         silod_binary, cli_binary = build_linux(target, toolchain, args.channel)
-        runner_binary = build_runner(args.platform, engine_version(SILOD, CHANNELS[args.channel][0]))
-        archive, checksum = package_linux(args.out_dir, platform=args.platform, commit=args.source_commit or commit_of(),
-                                          silod_binary=silod_binary, cli_binary=cli_binary, runner_binary=runner_binary,
-                                          toolchain=toolchain, channel=args.channel)
+        # The runner is built in a directory of its own that goes away once it is in the archive.
+        with tempfile.TemporaryDirectory(prefix='silo-runner-') as runner_dir:
+            runner_binary = build_runner(args.platform, engine_version(SILOD, CHANNELS[args.channel][0]),
+                                         out_dir=runner_dir)
+            archive, checksum = package_linux(args.out_dir, platform=args.platform,
+                                              commit=args.source_commit or commit_of(),
+                                              silod_binary=silod_binary, cli_binary=cli_binary,
+                                              runner_binary=runner_binary, toolchain=toolchain,
+                                              channel=args.channel)
     print(archive)
     print(checksum)
 

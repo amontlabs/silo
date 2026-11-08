@@ -38,7 +38,8 @@ from the `silo-linux` recipe. Put different toolchains in different recipes and 
 3. **Credentials**, either:
    - a **GitHub App** (preferred) installed on the repository with *Administration: read and write*
      (repository) or *Self-hosted runners: read and write* (organization), plus *Metadata: read*. Note
-     the client id and the installation id, and save the private key as a `0600` file; or
+     the client id and the installation id, and save the private key as a `0600` file (the helper
+     warns at start and in `check` when the group or others can read it, as `ssh` does for a key); or
    - a **personal access token** with the same permissions, exported in an environment variable whose
      name you put in the configuration (`tokenEnv`). The token is never written in the file.
 4. **Configuration** (YAML or JSON, unknown keys are errors): start from
@@ -63,13 +64,13 @@ silo-runner run   -config config.yaml
 | `github.runnerGroup` | runner group of the scale sets | `default` |
 | `github.auth.app` | `clientId`, `installationId`, `privateKeyFile` | |
 | `github.auth.tokenEnv` | environment variable holding a personal access token | |
-| `silo.path` / `projectDir` / `socket` / `device` | the `silo` command, where its recipes are, `--socket`, `--device` | `silo`, `~/.silo-runner/project` |
+| `silo.path` / `projectDir` / `socket` / `device` | the `silo` command (`silo-dev` for a Silo Dev build), where its recipes are, `--socket`, `--device` | `silo`, `~/.silo-runner/project` |
 | `stateDir` | lock file and the record of the computers the helper made (`computers.json`) | `~/.silo-runner/state` |
 | `limits.minFreeDiskGiB` / `diskPath` | no new computer below this much free disk | 20 GiB, home |
 | `limits.readyTimeout` / `startAttempts` | wait for "Listening for Jobs"; computers tried before backing off | 3m, 3 |
 | `limits.idleTimeout` | an idle runner no job needs is removed after this | 10m |
 | `limits.listenerStall` | the watchdog restarts a session with no poll for this long | 5m |
-| `linuxBudget` | `memoryGiB`, `count`: Linux computers on this host. Each computer counts with the `memory:` of its recipe file (the engine's default, 4 GiB on Linux and 8 on macOS, when the file has none) | on a Mac, none (0 or left out: no bound beyond `maxRunners`). On a [Linux host](#linux-hosts), a field left out comes from the host: three quarters of its memory, one computer per CPU |
+| `linuxBudget` | `memoryGiB`, `count`: Linux computers on this host. Each computer counts with the `memory:` of its recipe file (the engine's default, 4 GiB on Linux and 8 on macOS, when the file has none) | on a Mac, none (0 or left out: no bound beyond `maxRunners`). On a [Linux host](#linux-hosts), a field left out comes from the host: three quarters of its memory (the smaller of the machine's and its cgroup's limit), one computer per CPU |
 | `runnerRefresh` | `checkEvery` (24h), `afterDays` (3), `disabled` | |
 | `scaleSets[]` | `label`, `recipe`, `os` (`linux`/`macos`), `maxRunners`, `keepFailed: {count, days}` | `maxRunners` 1, `keepFailed.count` 3 (Linux) or 1 (macOS), `keepFailed.days` 7 |
 
@@ -231,12 +232,16 @@ credential in files only this account can read:
 ```sh
 R=~/.local/opt/silo-engine/silo-runner
 $R install-recipes -config ~/.config/silo-runner/config.yaml     # writes silo-linux into projectDir
+                                                                 # (keeps one already there; -replace: see Upgrading)
 chmod 600 ~/.config/silo-runner/app.private-key.pem              # a GitHub App key, or instead:
 printf 'SILO_RUNNER_TOKEN=%s\n' "$TOKEN" > ~/.config/silo-runner/env && chmod 600 ~/.config/silo-runner/env
 $R check -offline -config ~/.config/silo-runner/config.yaml     # this machine only: /dev/kvm, the budget
 $R check -config ~/.config/silo-runner/config.yaml              # and GitHub: refuses a public repository
 $R service register -config ~/.config/silo-runner/config.yaml
 ```
+
+Put the absolute path of `silo` in `silo.path` (`~/.local/bin/silo`, or `silo-dev` for a Silo Dev
+engine). The service does not search `PATH`; see [Service](#service).
 
 The `silo-linux` recipe picks the runner for the computer's architecture while it builds
 (`uname -m`: `arm64` on an aarch64 host or a Mac, `x64` on an x86_64 host) and checks the download
@@ -259,13 +264,21 @@ write (its first line marks it) and never asks for privileges. The unit:
   `-engine-unit org.silo.dev.engine.service` for a Silo Dev engine), so the helper starts after the
   engine and starting it starts a stopped engine. Stopping or restarting the engine does not stop
   the helper; it retries until the engine answers;
-- runs `silo-runner run -config <file>` with the canonical paths, `Restart=on-failure`,
+- runs `silo-runner run -config <file> -silo <path>` with the canonical paths, where `<path>` is
+  the absolute path `service register` resolved from `silo.path` (a bare name is looked up on the
+  `PATH` of the shell that registers; a relative path, or one that is not an executable file, is
+  refused). The user manager's `PATH` usually lacks `~/.local/bin`, so a bare `silo` would fail every
+  call and the unit would restart every ten seconds. `-silo` replaces `silo.path` for that run;
+  register again after moving silo. The unit also has `Restart=on-failure`,
   `RestartSec=10` and no start rate limit, `UMask=0077`, `KillMode=mixed` and `TimeoutStopSec=120`:
   a stop sends SIGTERM to the helper alone, which then deregisters idle runners and waits for the
   work in flight (the [shutdown](#how-the-helper-keeps-track) rules); whatever is left after the
   timeout is killed. Computers with a job keep running and are picked up by the next start;
 - reads `~/.config/silo-runner/env` if it exists (`EnvironmentFile=-%E/silo-runner/env`), the place
   for `SILO_RUNNER_TOKEN=` when `github.auth.tokenEnv` is used. A GitHub App needs no environment.
+  Keep that file and the App key `0600`: the helper does not set their modes, but at start (a
+  warning in the log) and in `check` (a `warning:` line) it names either one when the group or
+  others can read it, with the `chmod` that fixes it.
 
 `silo-runner service unregister` runs `disable --now` and removes the file. As for the engine, turn
 lingering on so the services start at boot and survive the last logout (an administrator runs
@@ -304,7 +317,11 @@ At start (and in `check`, with `-offline` for this part alone) the helper on a L
   machine's total memory** (`MemTotal` in `/proc/meminfo`; the rest is the host's own, the page cache
   and each virtual machine's overhead) and **count is the number of CPUs**. It uses the machine's
   size and not what is free right now, so a restart with computers running computes the same budget.
-  The log line says which fields came from the host. Set `linuxBudget` to choose your own;
+  When the helper's own cgroup (cgroup v2 `memory.max`, or any parent's, such as `MemoryMax=` on the
+  unit) allows less than `MemTotal`, that smaller number is used and the log line says so. The count
+  is only the CPU count, and memory the host's other services use is not subtracted: **on a shared
+  or limited host (containers, a small virtual machine with other services, CPU quotas) set
+  `linuxBudget` yourself.** The log line says which fields came from the host;
 - refuses a budget smaller than one computer of your largest recipe (the recipe's `memory:`, 8 GiB for
   the shipped `silo-linux`), because no job could ever start. Give the recipe less memory, or the
   host more;
@@ -322,6 +339,18 @@ the owner's Linux machine was offline. The archive, the unit, `/dev/kvm`, the bu
 are tested on a KVM runner (`scripts/runner-host-e2e.sh`, in the Linux host workflow, with no
 GitHub). The end-to-end check against a private repository is
 [`forks-ci/checks/r2_linux_runner_check.sh`](forks-ci/checks/r2_linux_runner_check.sh).
+
+### Upgrading
+
+- **An older `silo-linux` recipe.** `install-recipes` keeps a recipe file that is already there, so
+  one installed before the recipe pinned both architectures still pins only the arm64 runner. On an
+  x86_64 host that would build and then fail every job. At start and in `check`, the helper refuses a
+  Linux recipe that pins a single runner architecture other than the host's and says so. Run
+  `silo-runner install-recipes -replace -config <file>`: it moves your copy to `silo-linux.yaml.bak`
+  and writes the shipped one; copy your own tools back from the `.bak` and rebuild
+  (`silo recipe build silo-linux`).
+- **A service registered before `-silo`.** Its unit has no absolute `silo` path. Run
+  `silo-runner service register` again.
 
 ## Runner version
 

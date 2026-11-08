@@ -16,7 +16,11 @@ github:
     # tokenEnv: SILO_RUNNER_TOKEN
 
 silo:
-  path: silo                            # the archive's silo, on PATH (silo host init links it)
+  # The absolute path of the archive's silo (`silo host init` links it at ~/.local/bin/silo; a Silo
+  # Dev engine's link is silo-dev). `service register` writes this path into the unit, because the
+  # user manager's PATH does not include ~/.local/bin. A bare `silo` works only if it is on PATH
+  # in the shell that registers the service.
+  path: /home/ci/.local/bin/silo
   projectDir: ~/.silo-runner/project    # holds .silo/recipes (silo-runner install-recipes writes them)
 
 limits:

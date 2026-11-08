@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"runtime"
 	"syscall"
 )
@@ -23,10 +24,13 @@ var terminateSignal = syscall.SIGTERM
 const usage = `usage: silo-runner <command> -config FILE
 
   run             serve the scale sets in the configuration until interrupted
+                  (-silo PATH replaces silo.path; the service passes an absolute one)
   check           validate the configuration and refuse a public repository, then exit
                   (-offline: check the configuration and this machine only, never GitHub)
   install-recipes write the silo-linux and silo-macos recipes into the project directory
-  service register   [-engine-unit NAME] install and start the systemd user service (Linux)
+                  (-replace: also replace one already there, keeping it as .bak)
+  service register   [-engine-unit NAME] install and start the systemd user service (Linux); it writes
+                  the absolute path of silo.path into the unit
   service unregister stop and remove the service
   version         print the version
 
@@ -57,6 +61,8 @@ func realMain(args []string) int {
 	flags := flag.NewFlagSet(command, flag.ContinueOnError)
 	path := flags.String("config", "", "configuration file (YAML or JSON)")
 	debug := flags.Bool("debug", false, "log at debug level")
+	siloPath := flags.String("silo", "", "run: the silo command, replacing silo.path (the service passes an absolute path)")
+	replace := flags.Bool("replace", false, "install-recipes: replace a recipe already there (the old one is kept as .bak)")
 	offline := flags.Bool("offline", false, "check: look at the configuration and this machine only")
 	if err := flags.Parse(args); err != nil {
 		return 2
@@ -75,12 +81,19 @@ func realMain(args []string) int {
 		fmt.Fprintln(os.Stderr, "silo-runner:", err)
 		return 1
 	}
+	if *siloPath != "" {
+		cfg.Silo.Path = *siloPath
+	}
 	ctx, stop := SignalContext()
 	defer stop()
 	switch command {
 	case "install-recipes":
-		err = InstallRecipes(cfg.Silo.ProjectDir, func(format string, args ...any) { fmt.Printf(format, args...) })
+		err = InstallRecipes(cfg.Silo.ProjectDir, *replace, func(format string, args ...any) { fmt.Printf(format, args...) })
 	case "check", "run":
+		if command == "check" {
+			// Before anything that can fail, so the warning is there next to the failure.
+			printSecretWarnings(cfg)
+		}
 		if command == "check" && *offline {
 			err = checkOffline(cfg)
 			break
@@ -109,6 +122,13 @@ func realMain(args []string) int {
 		return 1
 	}
 	return 0
+}
+
+// printSecretWarnings says which credential files the group or others can read.
+func printSecretWarnings(cfg *Config) {
+	for _, warning := range SecretFileWarnings(cfg, envFile()) {
+		fmt.Println("warning:", warning)
+	}
 }
 
 // checkOffline validates the configuration and, on a Linux host, the machine: /dev/kvm and the
@@ -150,11 +170,15 @@ func serviceMain(args []string) int {
 			fmt.Fprint(os.Stderr, usage)
 			return 2
 		}
-		// A configuration that does not load would only fail again under systemd.
-		if _, err = LoadConfig(*path); err == nil {
-			var program string
-			if program, err = os.Executable(); err == nil {
-				err = RegisterService(setup, program, *path, *engineUnit)
+		// A configuration that does not load would only fail again under systemd, and so would a
+		// silo the user manager's PATH cannot find: resolve it here, from this shell.
+		var cfg *Config
+		if cfg, err = LoadConfig(*path); err == nil {
+			var program, silo string
+			if silo, err = ResolveSilo(cfg.Silo.Path, exec.LookPath); err == nil {
+				if program, err = os.Executable(); err == nil {
+					err = RegisterService(setup, program, *path, silo, *engineUnit)
+				}
 			}
 		}
 	}

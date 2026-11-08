@@ -72,6 +72,7 @@ wants="$(systemctl --user show "$unit" --property=Wants --value)"
 [[ " $after " == *" $engine_unit "* ]] || fail "the unit is not ordered after $engine_unit: $after"
 [[ " $wants " == *" $engine_unit "* ]] || fail "the unit does not want $engine_unit: $wants"
 systemd-analyze --user verify "$HOME/.config/systemd/user/$unit"
+grep -q "^ExecStart=.* -silo \"$engine/silo\"\$" "$HOME/.config/systemd/user/$unit" || fail "the unit does not pass the absolute silo path"
 
 step "the helper runs as this account and logs to the journal"
 # No token is set, so the helper refuses to start, says why and is restarted: the unit and the

@@ -75,7 +75,8 @@ type RunnerConfig struct {
 	MacosStart []string `yaml:"macosStart"`
 }
 
-// LinuxBudget bounds the Linux computers the helper starts; zero means no bound beyond maxRunners.
+// LinuxBudget bounds the Linux computers the helper starts. A zero field means the host's default
+// on a Linux host (see ApplyHost) and no bound beyond maxRunners anywhere else.
 type LinuxBudget struct {
 	MemoryGiB int `yaml:"memoryGiB"`
 	Count     int `yaml:"count"`

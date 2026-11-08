@@ -719,7 +719,7 @@ func TestInstallRecipesDoesNotReplaceAnExistingRecipe(t *testing.T) {
 	existing := filepath.Join(dir, ".silo", "recipes", "silo-linux.yaml")
 	_ = os.MkdirAll(filepath.Dir(existing), 0o755)
 	_ = os.WriteFile(existing, []byte("mine"), 0o644)
-	if err := InstallRecipes(dir, func(string, ...any) {}); err != nil {
+	if err := InstallRecipes(dir, false, func(string, ...any) {}); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := os.ReadFile(existing); string(got) != "mine" {
@@ -727,6 +727,32 @@ func TestInstallRecipesDoesNotReplaceAnExistingRecipe(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, ".silo", "recipes", "silo-macos.yaml")); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestInstallRecipesReplaceKeepsTheOldRecipeAsBak(t *testing.T) {
+	dir := t.TempDir()
+	existing := filepath.Join(dir, ".silo", "recipes", "silo-linux.yaml")
+	_ = os.MkdirAll(filepath.Dir(existing), 0o755)
+	_ = os.WriteFile(existing, []byte("mine"), 0o644)
+	var said []string
+	say := func(format string, args ...any) { said = append(said, fmt.Sprintf(format, args...)) }
+	if err := InstallRecipes(dir, true, say); err != nil {
+		t.Fatal(err)
+	}
+	shipped, _ := shippedRecipes.ReadFile("recipes/silo-linux.yaml")
+	if got, _ := os.ReadFile(existing); string(got) != string(shipped) {
+		t.Fatal("not replaced")
+	}
+	if got, _ := os.ReadFile(existing + ".bak"); string(got) != "mine" {
+		t.Fatalf("backup %q", got)
+	}
+	// Again: nothing changes and the backup is not overwritten with the shipped file.
+	if err := InstallRecipes(dir, true, say); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(existing + ".bak"); string(got) != "mine" || !strings.Contains(strings.Join(said, ""), "already the shipped recipe") {
+		t.Fatalf("backup %q said %v", got, said)
 	}
 }
 

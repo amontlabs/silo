@@ -534,6 +534,25 @@ checks passed; the failures were four product problems, all fixed afterwards (te
   passes with synthetic GitHub values; `shellcheck` is clean on `runner-host-e2e.sh`. Both Linux binaries were
   cross-built on the Mac and are ELF x86-64 and AArch64. The classifier is unchanged: `runner/` stays skippable except
   `recipes/`.
+- **Review fixes (round 1, same branch).**
+  - *Unit could not find `silo`:* the user manager's `PATH` lacks `~/.local/bin`, so `silo.path: silo` failed every call and the unit
+    restarted every 10 s. `service register` now resolves `silo.path` (`exec.LookPath` from the registering shell; an absolute path
+    must be an executable file; a relative path with a slash, or anything unresolvable, is refused) and writes it into
+    `ExecStart` as `run -config <file> -silo <absolute path>`; `run` takes `-silo`. Example config uses an absolute path and names
+    `silo-dev`. Tests: unit text, `ResolveSilo`, register refusal writes nothing. `runner-host-e2e.sh` also greps the unit.
+  - *Old single-arm64 recipe on an x86_64 host:* `ApplyHost` (start and `check`) parses each installed Linux recipe's pin and
+    refuses a single-architecture pin other than the host's `GOARCH`, naming `silo-runner install-recipes -replace`. New flag
+    `-replace` moves the existing recipe to `<name>.yaml.bak` and writes the shipped one. Upgrade notes in the guide.
+  - *0600 was only documented:* `SecretFileWarnings` warns (log at start; `warning:` lines in `check`, also `-offline`) when the App
+    key or `~/.config/silo-runner/env` is group- or world-readable, as ssh does for a key; it does not refuse. Threat model reworded
+    to "the guide makes them 0600 and the helper warns otherwise".
+  - *Default budget ignored cgroup limits:* the host default memory is capped by the tightest cgroup v2 `memory.max` of the helper's
+    own cgroup and its ancestors (log says so); docs say a shared or limited host should set `linuxBudget`; the stale comment on
+    `LinuxBudget` (zero now means the host default) is fixed.
+  - *Packaging:* `go_build_runner` no longer leaves its `mkdtemp` directory (`main` builds in a `TemporaryDirectory`); the licence
+    glob skips dotfiles and directories. Python tests for both.
+  - *Tests:* `go vet` (also `GOOS=linux` amd64 and arm64), `gofmt`, `go test -race ./...`; `test_package_engine.py`,
+    `test_linux_host_workflow.py` pass. Still no GitHub run and no Linux machine.
 - **Open:** (1) the live check above; (2) `silo-runner` is not in the macOS archive; (3) one helper per machine, so two machines
   serving the same recipe need two labels; (4) the default budget ignores memory the host's other services use, so on a
   shared machine set `linuxBudget`.

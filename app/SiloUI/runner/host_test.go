@@ -147,7 +147,7 @@ func TestNothingChangesOnAMacOrWithAnotherMachinesEngine(t *testing.T) {
 
 func TestTheRealHostReadsThisMachine(t *testing.T) {
 	host := RealHost()
-	if host.GOOS == "" || host.CPUs < 1 || host.MemTotalKiB == nil || host.OpenKVM == nil {
+	if host.GOOS == "" || host.GOARCH == "" || host.CPUs < 1 || host.MemTotalKiB == nil || host.MemLimitKiB == nil || host.OpenKVM == nil {
 		t.Fatalf("host %+v", host)
 	}
 }
@@ -178,5 +178,180 @@ func TestTheLinuxExampleConfigurationIsValidAndTakesItsBudgetFromTheHost(t *test
 	report, err := ApplyHost(cfg, linuxHost(32*1024*1024, 8, nil))
 	if err != nil || !report.MemoryFromHost || !report.CountFromHost {
 		t.Fatalf("report %+v err %v", report, err)
+	}
+}
+
+func installRecipe(t *testing.T, cfg *Config, name, text string) {
+	t.Helper()
+	dir := filepath.Join(cfg.Silo.ProjectDir, ".silo", "recipes")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, name+".yaml"), []byte(text), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAnOlderRecipeThatPinsTheWrongRunnerArchitectureIsRefusedBeforeAnyJob(t *testing.T) {
+	sha := strings.Repeat("a", 64)
+	arm64Only := "os: linux\nmemory: 4\nsetup:\n  - |\n    RUNNER_VERSION=2.330.0\n    RUNNER_SHA256=" + sha + "\n    curl https://x/actions-runner-linux-arm64-${RUNNER_VERSION}.tar.gz\n"
+	x64Host, armHost := linuxHost(32*1024*1024, 4, nil), linuxHost(32*1024*1024, 4, nil)
+	x64Host.GOARCH, armHost.GOARCH = "amd64", "arm64"
+
+	cfg := hostConfig(t, "")
+	installRecipe(t, cfg, "silo-linux", arm64Only)
+	_, err := ApplyHost(cfg, x64Host)
+	if err == nil {
+		t.Fatal("an arm64-only recipe was accepted on an x86_64 host")
+	}
+	for _, want := range []string{"silo-linux", "arm64", "x64", "install-recipes -replace"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("the error lacks %q: %v", want, err)
+		}
+	}
+	// The same recipe suits an aarch64 host, and an x64-only recipe is refused there.
+	if _, err := ApplyHost(cfg, armHost); err != nil {
+		t.Fatal(err)
+	}
+	installRecipe(t, cfg, "silo-linux", strings.ReplaceAll(arm64Only, "linux-arm64", "linux-x64"))
+	if _, err := ApplyHost(cfg, armHost); err == nil {
+		t.Fatal("an x64-only recipe was accepted on an aarch64 host")
+	}
+	// The shipped recipe pins both, and a recipe that is missing or pins nothing is not refused.
+	shipped, _ := shippedRecipes.ReadFile("recipes/silo-linux.yaml")
+	installRecipe(t, cfg, "silo-linux", string(shipped))
+	if _, err := ApplyHost(cfg, x64Host); err != nil {
+		t.Fatal(err)
+	}
+	installRecipe(t, cfg, "silo-linux", "os: linux\nmemory: 4\n")
+	if _, err := ApplyHost(cfg, x64Host); err != nil {
+		t.Fatal(err)
+	}
+	// A Mac or another machine's engine is not this host.
+	installRecipe(t, cfg, "silo-linux", arm64Only)
+	cfg.Silo.Device = "other"
+	if _, err := ApplyHost(cfg, x64Host); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writeCgroup(t *testing.T, root, rel, memoryMax string) {
+	t.Helper()
+	dir := filepath.Join(root, rel)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "memory.max"), []byte(memoryMax+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestTheCgroupMemoryLimitIsTheTightestOfTheServiceAndItsParents(t *testing.T) {
+	root := t.TempDir()
+	proc := filepath.Join(t.TempDir(), "cgroup")
+	if err := os.WriteFile(proc, []byte("0::/user.slice/user-1000.slice/user@1000.service/app.slice/silo-runner.service\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeCgroup(t, root, "", "max")
+	writeCgroup(t, root, "user.slice/user-1000.slice", "17179869184") // 16 GiB
+	writeCgroup(t, root, "user.slice/user-1000.slice/user@1000.service/app.slice/silo-runner.service", "max")
+	if got := CgroupMemoryLimitKiB(proc, root); got != 16*1024*1024 {
+		t.Fatalf("limit %d KiB", got)
+	}
+	writeCgroup(t, root, "user.slice/user-1000.slice/user@1000.service/app.slice/silo-runner.service", "8589934592") // 8 GiB
+	if got := CgroupMemoryLimitKiB(proc, root); got != 8*1024*1024 {
+		t.Fatalf("limit %d KiB", got)
+	}
+	// No limit anywhere, no cgroup v2 line, or nothing readable: no limit.
+	none := t.TempDir()
+	writeCgroup(t, none, "", "max")
+	if got := CgroupMemoryLimitKiB(proc, none); got != 0 {
+		t.Fatalf("limit %d", got)
+	}
+	_ = os.WriteFile(proc, []byte("12:memory:/old\n"), 0o644)
+	if got := CgroupMemoryLimitKiB(proc, root); got != 0 {
+		t.Fatalf("a cgroup v1 host gave %d", got)
+	}
+	if got := CgroupMemoryLimitKiB(filepath.Join(root, "missing"), root); got != 0 {
+		t.Fatalf("limit %d", got)
+	}
+	// A path that climbs out of the tree stays inside it.
+	_ = os.WriteFile(proc, []byte("0::/../../../x\n"), 0o644)
+	writeCgroup(t, root, "", "4294967296")
+	if got := CgroupMemoryLimitKiB(proc, root); got != 4*1024*1024 {
+		t.Fatalf("limit %d KiB", got)
+	}
+}
+
+func TestTheDefaultBudgetIsCappedByTheCgroupMemoryLimit(t *testing.T) {
+	host := linuxHost(64*1024*1024, 8, nil)
+	host.MemLimitKiB = func() int64 { return 16 * 1024 * 1024 }
+	cfg := hostConfig(t, "")
+	report, err := ApplyHost(cfg, host)
+	if err != nil || cfg.LinuxHost.MemoryGiB != 12 || !report.MemoryCgroupLimited {
+		t.Fatalf("budget %+v report %+v err %v", cfg.LinuxHost, report, err)
+	}
+	if line := report.Describe(); !strings.Contains(line, "12 GiB (from this service's cgroup memory limit)") {
+		t.Fatal(line)
+	}
+	// A limit above the machine's memory, or none, changes nothing; a configured value is not capped.
+	host.MemLimitKiB = func() int64 { return 128 * 1024 * 1024 }
+	cfg = hostConfig(t, "")
+	if report, err = ApplyHost(cfg, host); err != nil || cfg.LinuxHost.MemoryGiB != 48 || report.MemoryCgroupLimited {
+		t.Fatalf("budget %+v report %+v err %v", cfg.LinuxHost, report, err)
+	}
+	host.MemLimitKiB = func() int64 { return 4 * 1024 * 1024 }
+	cfg = hostConfig(t, "linuxBudget: {memoryGiB: 30}\n")
+	if _, err = ApplyHost(cfg, host); err != nil || cfg.LinuxHost.MemoryGiB != 30 {
+		t.Fatalf("budget %+v err %v", cfg.LinuxHost, err)
+	}
+	// A cap too small for one computer is refused and says where it came from.
+	host.MemLimitKiB = func() int64 { return 4 * 1024 * 1024 }
+	cfg = hostConfig(t, "")
+	installRecipe(t, cfg, "silo-linux", "os: linux\nmemory: 8\n")
+	if _, err = ApplyHost(cfg, host); err == nil || !strings.Contains(err.Error(), "cgroup") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestACredentialFileOthersCanReadIsWarnedAbout(t *testing.T) {
+	dir := t.TempDir()
+	key, env := filepath.Join(dir, "app.pem"), filepath.Join(dir, "env")
+	cfg := hostConfig(t, "")
+	cfg.GitHub.Auth = AuthConfig{App: &AppAuth{ClientID: "x", InstallationID: 1, PrivateKeyFile: key}}
+	// Missing files are not this check's business.
+	if got := SecretFileWarnings(cfg, env); len(got) != 0 {
+		t.Fatalf("warnings %v", got)
+	}
+	for _, path := range []string{key, env} {
+		if err := os.WriteFile(path, []byte("secret"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := SecretFileWarnings(cfg, env); len(got) != 0 {
+		t.Fatalf("warnings for 0600 files: %v", got)
+	}
+	for mode, path := range map[os.FileMode]string{0o640: key, 0o604: env} {
+		if err := os.Chmod(path, mode); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got := SecretFileWarnings(cfg, env)
+	if len(got) != 2 || !strings.Contains(got[0], key) || !strings.Contains(got[0], "0640") || !strings.Contains(got[0], "chmod 600 "+key) ||
+		!strings.Contains(got[1], env) || !strings.Contains(got[1], "0604") {
+		t.Fatalf("warnings %v", got)
+	}
+	// Owner-only variations (0400, 0700) are fine: ssh only objects to group and other access.
+	_ = os.Chmod(key, 0o400)
+	_ = os.Chmod(env, 0o700)
+	if got := SecretFileWarnings(cfg, env); len(got) != 0 {
+		t.Fatalf("warnings %v", got)
+	}
+}
+
+func TestTheEnvironmentFileIsTheOneTheUnitReads(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", "/xdg")
+	if got := envFile(); got != "/xdg/silo-runner/env" {
+		t.Fatalf("env file %q", got)
 	}
 }

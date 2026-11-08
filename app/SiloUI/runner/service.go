@@ -45,7 +45,11 @@ func (realSystemd) Run(program string, args ...string) (string, error) {
 // unit so the engine comes up first when it is not running, and restarts the helper after a
 // failure. It has no User=: a user unit runs as the account that owns the user manager, which is
 // the account of the engine's socket.
-func ServiceUnit(program, configPath, engineUnit string) (string, error) {
+//
+// siloPath is the absolute path of the silo command (see ResolveSilo). The user manager's PATH
+// lacks ~/.local/bin, where `silo host init` links silo, so a bare "silo" would fail every call and
+// the unit would restart every ten seconds for ever.
+func ServiceUnit(program, configPath, siloPath, engineUnit string) (string, error) {
 	if !unitNamePattern.MatchString(engineUnit) {
 		return "", fmt.Errorf("%q is not a systemd service name such as %s", engineUnit, defaultEngineUnit)
 	}
@@ -56,6 +60,10 @@ func ServiceUnit(program, configPath, engineUnit string) (string, error) {
 	config, err := execArgument(configPath)
 	if err != nil {
 		return "", err
+	}
+	silo, err := execArgument(siloPath)
+	if err != nil {
+		return "", fmt.Errorf("silo.path: %w", err)
 	}
 	return fmt.Sprintf(`%s
 [Unit]
@@ -69,7 +77,7 @@ StartLimitIntervalSec=0
 
 [Service]
 Type=simple
-ExecStart=%[3]s run -config %[4]s
+ExecStart=%[3]s run -config %[4]s -silo %[5]s
 # The GitHub token, when the configuration reads one (github.auth.tokenEnv), goes in this
 # optional file, mode 0600: SILO_RUNNER_TOKEN=...
 EnvironmentFile=-%%E/silo-runner/env
@@ -85,7 +93,7 @@ TimeoutStopSec=120
 
 [Install]
 WantedBy=default.target
-`, serviceMarker, engineUnit, exe, config), nil
+`, serviceMarker, engineUnit, exe, config, silo), nil
 }
 
 // execArgument quotes path as one ExecStart word, escaping what systemd would expand.
@@ -126,19 +134,29 @@ type ServiceSetup struct {
 
 // DefaultServiceSetup is the running account's.
 func DefaultServiceSetup(out io.Writer) (ServiceSetup, error) {
-	config := os.Getenv("XDG_CONFIG_HOME")
-	if !filepath.IsAbs(config) {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return ServiceSetup{}, fmt.Errorf("cannot find the home directory: %w", err)
-		}
-		config = filepath.Join(home, ".config")
+	config, err := userConfigDir()
+	if err != nil {
+		return ServiceSetup{}, err
 	}
 	current, err := user.Current()
 	if err != nil {
 		return ServiceSetup{}, fmt.Errorf("cannot look up the account: %w", err)
 	}
 	return ServiceSetup{UnitDir: filepath.Join(config, "systemd", "user"), Systemd: realSystemd{}, Out: out, Account: current.Username, Euid: os.Geteuid()}, nil
+}
+
+// userConfigDir is $XDG_CONFIG_HOME, or ~/.config when it is not set to an absolute path: the
+// systemd specifier %E of a user unit.
+func userConfigDir() (string, error) {
+	config := os.Getenv("XDG_CONFIG_HOME")
+	if filepath.IsAbs(config) {
+		return config, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("cannot find the home directory: %w", err)
+	}
+	return filepath.Join(home, ".config"), nil
 }
 
 func (s ServiceSetup) unitPath() string { return filepath.Join(s.UnitDir, serviceName) }
@@ -182,9 +200,40 @@ func (s ServiceSetup) readUnit() (string, error) {
 	return string(data), nil
 }
 
+// ResolveSilo returns the absolute path of the silo command that silo.path names. A bare name is
+// looked up on PATH of the shell that registers the service; a path must be absolute and must be
+// an executable file. The service runs with the user manager's PATH, which usually lacks
+// ~/.local/bin, so it is given this path and never searches.
+func ResolveSilo(path string, lookPath func(string) (string, error)) (string, error) {
+	hint := "set silo.path to the absolute path of the silo command (`silo host init` links it at ~/.local/bin/silo, or silo-dev for a Silo Dev engine)"
+	if path == "" {
+		return "", errors.New("silo.path is empty: " + hint)
+	}
+	found := path
+	if strings.Contains(path, "/") {
+		if !filepath.IsAbs(path) {
+			return "", fmt.Errorf("silo.path %q is relative to a directory the service does not start in: %s", path, hint)
+		}
+	} else {
+		looked, err := lookPath(path)
+		if err != nil {
+			return "", fmt.Errorf("cannot find %q on PATH, and the service would not find it either: %s", path, hint)
+		}
+		if found, err = filepath.Abs(looked); err != nil {
+			return "", err
+		}
+	}
+	info, err := os.Stat(found)
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o111 == 0 {
+		return "", fmt.Errorf("%s is not an executable file: %s", found, hint)
+	}
+	return found, nil
+}
+
 // RegisterService writes the unit and starts it. program is the silo-runner to run and
-// configPath the configuration it reads; both are made absolute with links resolved.
-func RegisterService(s ServiceSetup, program, configPath, engineUnit string) error {
+// configPath the configuration it reads; both are made absolute with links resolved. siloPath is
+// the absolute silo command the unit passes to the helper (-silo).
+func RegisterService(s ServiceSetup, program, configPath, siloPath, engineUnit string) error {
 	if s.Euid == 0 {
 		return errors.New("silo-runner does not run as root: register the service as the account that runs silod")
 	}
@@ -196,7 +245,7 @@ func RegisterService(s ServiceSetup, program, configPath, engineUnit string) err
 	if err != nil {
 		return fmt.Errorf("cannot find the configuration: %w", err)
 	}
-	unit, err := ServiceUnit(program, configPath, engineUnit)
+	unit, err := ServiceUnit(program, configPath, siloPath, engineUnit)
 	if err != nil {
 		return err
 	}

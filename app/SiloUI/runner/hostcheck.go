@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -16,10 +17,15 @@ import (
 type Host struct {
 	// GOOS is the operating system the helper runs on.
 	GOOS string
+	// GOARCH is the architecture the helper runs on, as runtime.GOARCH names it.
+	GOARCH string
 	// CPUs is the number of CPUs the helper may use.
 	CPUs int
 	// MemTotalKiB reads MemTotal from /proc/meminfo.
 	MemTotalKiB func() (int64, error)
+	// MemLimitKiB is the memory limit of the helper's own cgroup (cgroup v2 memory.max, the
+	// tightest of it and its ancestors), or 0 when there is none or it cannot be read.
+	MemLimitKiB func() int64
 	// OpenKVM opens /dev/kvm for reading and writing, the way the engine's virtual machines do.
 	OpenKVM func() error
 }
@@ -27,8 +33,12 @@ type Host struct {
 // RealHost is the machine the helper is running on.
 func RealHost() Host {
 	return Host{
-		GOOS: runtime.GOOS,
-		CPUs: runtime.NumCPU(),
+		GOOS:   runtime.GOOS,
+		GOARCH: runtime.GOARCH,
+		CPUs:   runtime.NumCPU(),
+		MemLimitKiB: func() int64 {
+			return CgroupMemoryLimitKiB("/proc/self/cgroup", "/sys/fs/cgroup")
+		},
 		MemTotalKiB: func() (int64, error) {
 			file, err := os.Open("/proc/meminfo")
 			if err != nil {
@@ -71,6 +81,43 @@ func ParseMemTotalKiB(r io.Reader) (int64, error) {
 	return 0, errors.New("/proc/meminfo has no MemTotal line")
 }
 
+// CgroupMemoryLimitKiB reads the cgroup v2 memory.max that applies to this process: the smallest
+// number in memory.max of its cgroup (named by procCgroup, /proc/self/cgroup) and of every
+// ancestor up to root (the mounted cgroup tree). It is 0 when no level sets a limit, the host
+// uses cgroup v1, or the files cannot be read.
+func CgroupMemoryLimitKiB(procCgroup, root string) int64 {
+	raw, err := os.ReadFile(procCgroup)
+	if err != nil {
+		return 0
+	}
+	var rel string
+	found := false
+	for _, line := range strings.Split(string(raw), "\n") {
+		if path, ok := strings.CutPrefix(line, "0::"); ok {
+			rel, found = path, true
+		}
+	}
+	if !found {
+		return 0
+	}
+	root = filepath.Clean(root)
+	var limit int64
+	for dir := filepath.Join(root, filepath.Clean("/"+rel)); ; dir = filepath.Dir(dir) {
+		if data, err := os.ReadFile(filepath.Join(dir, "memory.max")); err == nil {
+			// "max" is no limit and does not parse.
+			if size, err := strconv.ParseInt(strings.TrimSpace(string(data)), 10, 64); err == nil && size > 0 {
+				if kib := size / 1024; limit == 0 || kib < limit {
+					limit = kib
+				}
+			}
+		}
+		if dir == root || dir == filepath.Dir(dir) {
+			break
+		}
+	}
+	return limit
+}
+
 // DefaultLinuxBudget is the budget a Linux host gets when linuxBudget does not set one: three
 // quarters of the host's memory (the rest is the host's own, the page cache and each virtual
 // machine's overhead) and at most one computer per CPU. It comes from the machine's size, not
@@ -95,6 +142,8 @@ type HostReport struct {
 	Budget LinuxBudget
 	// MemoryFromHost and CountFromHost say which fields came from the machine and not the file.
 	MemoryFromHost, CountFromHost bool
+	// MemoryCgroupLimited says the host default memory was capped by the helper's cgroup limit.
+	MemoryCgroupLimited bool
 }
 
 // ApplyHost checks a Linux host and fills in its Linux budget. On a Linux host it refuses a
@@ -111,6 +160,9 @@ func ApplyHost(cfg *Config, host Host) (HostReport, error) {
 		if set.OS == "macos" {
 			return report, fmt.Errorf("scaleSets[%d]: a Linux host cannot run macOS computers; remove %q or run silo-runner on a Mac", i, set.Label)
 		}
+		if err := checkRecipeArchitecture(cfg.Silo.ProjectDir, set, host.GOARCH); err != nil {
+			return report, err
+		}
 		largest = max(largest, RecipeMemoryGiB(cfg.Silo.ProjectDir, set.Recipe, set.OS))
 	}
 	if err := host.OpenKVM(); err != nil {
@@ -122,6 +174,11 @@ func ApplyHost(cfg *Config, host Host) (HostReport, error) {
 		if err != nil {
 			return report, fmt.Errorf("cannot read this host's memory to size linuxBudget (set linuxBudget.memoryGiB and linuxBudget.count yourself): %w", err)
 		}
+		if host.MemLimitKiB != nil {
+			if limit := host.MemLimitKiB(); limit > 0 && limit < total {
+				total, report.MemoryCgroupLimited = limit, true
+			}
+		}
 		defaults := DefaultLinuxBudget(total, host.CPUs)
 		if budget.MemoryGiB == 0 {
 			budget.MemoryGiB, report.MemoryFromHost = defaults.MemoryGiB, true
@@ -132,18 +189,59 @@ func ApplyHost(cfg *Config, host Host) (HostReport, error) {
 	}
 	if budget.MemoryGiB < largest {
 		return report, fmt.Errorf("linuxBudget.memoryGiB is %d GiB%s but a computer of your recipes needs %d GiB, so no job could start; give the recipe less memory or set linuxBudget.memoryGiB to at least %d",
-			budget.MemoryGiB, fromHost(report.MemoryFromHost), largest, largest)
+			budget.MemoryGiB, fromHost(report), largest, largest)
 	}
 	cfg.LinuxHost = budget
 	report.Budget = budget
 	return report, nil
 }
 
-func fromHost(derived bool) string {
-	if derived {
+func fromHost(report HostReport) string {
+	switch {
+	case report.MemoryFromHost && report.MemoryCgroupLimited:
+		return " (three quarters of the memory this service's cgroup may use)"
+	case report.MemoryFromHost:
 		return " (three quarters of this host's memory)"
 	}
 	return ""
+}
+
+// runnerArch is the name GitHub's runner archives and the recipe pins give a Go architecture.
+func runnerArch(goarch string) string {
+	switch goarch {
+	case "amd64":
+		return "x64"
+	case "arm64":
+		return "arm64"
+	}
+	return ""
+}
+
+// checkRecipeArchitecture refuses an installed Linux recipe that pins the GitHub runner for one
+// architecture other than the host's. Recipes installed before the dual pin carry a single arm64
+// digest (install-recipes keeps an existing file), and a job on an x86_64 host would fail after a
+// long recipe build with no named cause. A recipe that is missing, does not pin a runner, or pins
+// both architectures is not this check's business.
+func checkRecipeArchitecture(projectDir string, set ScaleSetSpec, goarch string) error {
+	want := runnerArch(goarch)
+	if want == "" || set.OS == "macos" {
+		return nil
+	}
+	raw, err := os.ReadFile(filepath.Join(projectDir, ".silo", "recipes", set.Recipe+".yaml"))
+	if err != nil {
+		return nil
+	}
+	pin, err := ParsePin(string(raw))
+	if err != nil || pin.OS != "linux" || len(pin.SHA256) != 1 {
+		return nil
+	}
+	for have := range pin.SHA256 {
+		if have != want {
+			return fmt.Errorf("the recipe %q downloads the GitHub runner for %s but this host is %s, so a computer built from it could not run a job: reinstall the shipped recipe with `silo-runner install-recipes -replace -config <file>` (it keeps your copy as %s.yaml.bak; copy your own tools back)",
+				set.Recipe, have, want, set.Recipe)
+		}
+	}
+	return nil
 }
 
 // kvmError explains an unusable /dev/kvm.
@@ -165,6 +263,10 @@ func (r HostReport) Describe() string {
 		}
 		return "from the configuration"
 	}
+	memory := where(r.MemoryFromHost)
+	if r.MemoryCgroupLimited {
+		memory = "from this service's cgroup memory limit"
+	}
 	return fmt.Sprintf("Linux computers: at most %d at once (%s) using at most %d GiB (%s)",
-		r.Budget.Count, where(r.CountFromHost), r.Budget.MemoryGiB, where(r.MemoryFromHost))
+		r.Budget.Count, where(r.CountFromHost), r.Budget.MemoryGiB, memory)
 }

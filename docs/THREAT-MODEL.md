@@ -716,7 +716,9 @@ last bullets cover a runner on a Linux host.
   records only the job id, method, state, progress and the exit result, never the request
   ([`registry.rs#L217`](../app/SiloUI/src-tauri/engine/src/jobs/registry.rs#L217)). In the computer it is
   in the memory and environment of GitHub's runner program, so the job (same account) can read it; it is
-  useless after the one job. Prefer a GitHub App over a token, and keep the key file `0600`.
+  useless after the one job. Prefer a GitHub App over a token, and keep the key file `0600`: the guide
+  says to, and the helper warns (at start and in `check`) when the group or others can read it; it does
+  not set the mode or refuse to run.
 - **Why public repositories are refused.** GitHub's guidance is that self-hosted runners "should
   almost never be used for public repositories" because anyone can open a pull request whose workflow
   runs on the runner. `silo-runner` refuses to start for a public repository, and for an organization
@@ -739,8 +741,9 @@ last bullets cover a runner on a Linux host.
 - **The Linux budget.** On a Mac, `linuxBudget` (memory and count) defaults to unbounded: with it unset,
   only `maxRunners` and the free-disk guard limit how many Linux computers the helper starts, so a burst
   of jobs can use the Mac's memory. macOS is always limited to Apple's two running computers. On a Linux
-  host an unset field defaults to the host's: three quarters of its total memory and one computer per
-  CPU. That bounds a burst of jobs; it is a guard against running the host out of memory, not a
+  host an unset field defaults to the host's: three quarters of its total memory (or of the helper's
+  cgroup memory limit, when that is smaller) and one computer per
+  CPU; a shared or limited host should set `linuxBudget`. That bounds a burst of jobs; it is a guard against running the host out of memory, not a
   security limit, and it does not bound CPU time, disk beyond the free-disk guard, or network use.
 - **The helper only deletes what it made.** It records every computer in `<stateDir>/computers.json`:
   by name before `silo fork` (the engine has not made it yet), and by the engine's computer id once
@@ -765,9 +768,10 @@ last bullets cover a runner on a Linux host.
   stops and keeps the computer with the result `unknown` (unless the job's result reaches it first). That computer holds the job's files and
   secrets like any kept failure and is subject to the same limits.
 - **A runner host's GitHub credential is on that host, readable by the account.** On a Linux host the
-  helper's configuration holds the path of a GitHub App private key (a `0600` file) or a personal access
-  token (`github.auth.tokenEnv`, which under the service is read from `~/.config/silo-runner/env`, also
-  `0600`). Any process of the account can read them, and so can root; a backup of the home directory
+  helper's configuration holds the path of a GitHub App private key or a personal access
+  token (`github.auth.tokenEnv`, which under the service is read from `~/.config/silo-runner/env`). The
+  guide makes both files `0600` and the helper warns when either is readable by its group or others;
+  nothing sets or enforces the mode. Any process of the account can read them, and so can root; a backup of the home directory
   copies them; the token is also in the helper's environment (`/proc/<pid>/environ`, readable by the
   account and root). The account is the one that runs `silod`, so a libkrun or virtio escape from a
   job's computer (boundary 1) lands in the account that holds the credential, the engine's credential
