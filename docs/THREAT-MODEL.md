@@ -742,16 +742,18 @@ with nothing sensitive on it, and the app, the CLI and `silo list` label it as l
   other id are sub-ids that own no file of the account's. A process that escapes the container as
   the working account therefore lands as the account that owns the engine, and says plainly what
   that means: the engine socket, the engine's files and every other computer on the host (virtual
-  machines and containers alike) are within its reach. Nothing is added to that account, and
-  nothing is taken from it either. This is a change from a container whose root was the engine's
+  machines and containers alike) are within its reach. The mapping gives the account no capability
+  it did not have as the engine's user, and removes none of the engine's. This is a change from a container whose root was the engine's
   user: now a process that escapes as the *agent* lands as the engine, which is the process an
   agent runs as; an escape as container root (which Silo's own commands use, with seven file
   capabilities) lands as a sub-id and needs a second step. The mapping is what makes the
   in-guest client work (below) and why SSH sessions and files the agent writes are readable to
   the engine; it is not what keeps the agent from the engine. The namespaces do: the container's
   pid namespace shows no engine, gateway or holder process (nothing to signal or trace, `/proc`
-  masked), its mount namespace holds none of the engine's files or sockets, its network namespace
-  holds only the TAP, its user namespace gives it no capability over anything outside it, and the
+  masked), its mount namespace holds none of the engine's files or sockets except one folder, the
+  computer's own share bound at `/.msb` (its runtime folder, which holds the in-guest client's
+  bridge folder: the account writes there, the engine reads and answers, and every other user of
+  the container may only search the folder), its network namespace holds only the TAP, its user namespace gives it no capability over anything outside it, and the
   baseline below applies to the agent's commands as to any. The engine's user owns the computer's
   upper directory and what the agent writes in it; the upper directory's root, the unpacked image,
   and the init shim's layer belong to the container's root (a sub-id), so the agent cannot replace

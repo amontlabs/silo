@@ -235,8 +235,9 @@ struct Dirs {
 }
 
 impl Spool {
-    pub fn new(dir: PathBuf) -> Self {
-        let keep_id = crate::containers::keep_id_for_bridge(&dir);
+    /// The spool in `dir`. `keep_id` is set by the caller for a container computer, which knows
+    /// the kind of the computer; the spool does not look for it.
+    pub fn new(dir: PathBuf, keep_id: Option<KeepId>) -> Self {
         Self { dir, keep_id }
     }
 
@@ -377,6 +378,13 @@ impl Spool {
     }
 
     /// Writes the answer atomically, readable by the owner only.
+    ///
+    /// In a container computer the file is the engine's own user's, which is the working account:
+    /// the account reads its answers. A request from root or another guest user has no owner here,
+    /// and its answer is the account's too, so a process of the container that is root without
+    /// `CAP_DAC_OVERRIDE` cannot read it (the root commands Silo starts have the capability). A
+    /// file cannot be given to a sub-id without a helper in the holder's namespace, and a looser
+    /// mode would show the answer to every guest user that learns its id.
     pub fn respond(
         &self,
         frame: &GuestResponseFrame,
@@ -514,7 +522,7 @@ mod tests {
     fn spool() -> (tempfile::TempDir, Spool) {
         let dir = tempfile::tempdir().unwrap();
         fs::create_dir(dir.path().join("runtime")).unwrap();
-        let spool = Spool::new(dir.path().join("runtime").join("silo-bridge"));
+        let spool = Spool::new(dir.path().join("runtime").join("silo-bridge"), None);
         spool.ensure().unwrap();
         (dir, spool)
     }
@@ -753,10 +761,11 @@ mod tests {
     fn a_containers_requests_are_owned_through_the_id_mapping_and_its_folders_are_sealed_by_mode() {
         let home = tempfile::tempdir().unwrap();
         crate::containers::capability::make_container(home.path(), "box");
-        let spool = Spool::new(spool_dir(home.path(), "box"));
+        let keep_id = crate::containers::keep_id_for(home.path(), "box");
+        let spool = Spool::new(spool_dir(home.path(), "box"), keep_id);
         assert!(spool.keep_id.is_some());
-        // A virtual machine's (or an unknown) bridge folder is not a container's.
-        assert!(Spool::new(spool_dir(home.path(), "vm")).keep_id.is_none());
+        // A virtual machine (or an unknown computer) has no id mapping to give the spool.
+        assert!(crate::containers::keep_id_for(home.path(), "vm").is_none());
         spool.ensure().unwrap();
         let mode = |path: &Path| fs::metadata(path).unwrap().permissions().mode() & 0o7777;
         let runtime = spool.dir.parent().unwrap();
@@ -777,6 +786,16 @@ mod tests {
         spool.respond(&reply(ID), taken[0].owner).unwrap();
         let answer = spool.dir.join("resp").join(format!("{ID}.json"));
         assert_eq!(mode(&answer) & 0o777, 0o600);
+        // A request from anyone but the account (root, another guest user) has no owner, and its
+        // answer stays the account's `0600` file: the engine cannot hand a file to a sub-id, and
+        // widening the mode would show the answer to every guest user that knows its id. A root
+        // process with `CAP_DAC_OVERRIDE` (the root commands Silo starts have it) still reads it.
+        use std::os::unix::fs::MetadataExt;
+        const OTHER: &str = "fedcba9876543210fedcba9876543210";
+        spool.respond(&reply(OTHER), None).unwrap();
+        let other = fs::metadata(spool.dir.join("resp").join(format!("{OTHER}.json"))).unwrap();
+        assert_eq!(other.permissions().mode() & 0o777, 0o600);
+        assert_eq!(other.uid(), KeepId::current().uid);
     }
 
     #[test]

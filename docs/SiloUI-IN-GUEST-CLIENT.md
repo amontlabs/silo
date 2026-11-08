@@ -194,8 +194,19 @@ machine's share is virtualized:
   so the agent's `0600` request files are owned by the engine on disk and the engine's `0600` answers
   are readable by the agent. The engine computes a request's owner from the file's real owner
   through that mapping (`containers::idmap::KeepId`, used by `guest_client::Spool` when the
-  bridge folder belongs to a container). A request written by any other id (another guest user,
-  root) has no owner, and the engine usually cannot read it at all.
+  bridge folder belongs to a container; the worker names the kind, the spool does not look for
+  it). A request written by any other id (another guest user, root) has no owner, and the engine
+  usually cannot read it at all.
+- **Root is a difference from a virtual machine.** A virtual machine's answer is made readable to
+  the user that asked, root included. A container's answer to a request the engine could read from
+  root has no owner to give it to, so it stays the account's `0600` file, and a process that is
+  root in the container without `CAP_DAC_OVERRIDE` cannot read it. The root commands Silo starts
+  (`silo exec --user root`, account setup) have that capability and read it; a root process
+  without it (a service that dropped it, a shell opened another way) gets "permission denied" on
+  the answer. Giving the file to the container's root needs a helper in the holder's namespace
+  (a file cannot be handed to a sub-id otherwise), and a looser mode would show the answer to
+  every guest user that learns the request id, so neither is done: the client is meant for the
+  working account.
 - **Sealing.** `sandboxes/<name>` is `0700` on the host, the runtime folder `0711`, and
   `silo-bridge`, `req/` and `resp/` get `0755`, `1733` and `0711`, restored on every pass of the
   worker; the other guest users can search the runtime folder but not list it. The agent owns the

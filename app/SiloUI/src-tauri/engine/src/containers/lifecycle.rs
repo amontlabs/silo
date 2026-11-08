@@ -259,9 +259,11 @@ pub fn reconcile(paths: &RuntimePaths, tools: &Tools) {
             let _ = stop(paths, tools, &name, &record);
         }
     }
+    prune_storage(paths, tools);
 }
 
-fn boot_layer(layout: &Layout, tools: &Tools) -> Result<PathBuf, String> {
+/// The name of the boot layer for the init shim `tools` names (and the ownership layout).
+fn boot_hash(tools: &Tools) -> Result<(String, Vec<u8>), String> {
     let bytes = std::fs::read(&tools.init).map_err(|e| at("read the init shim", &tools.init, e))?;
     // The ownership layout is part of what the layer is: another one is another directory.
     let digest = Sha256::new()
@@ -273,6 +275,11 @@ fn boot_layer(layout: &Layout, tools: &Tools) -> Result<PathBuf, String> {
         .take(8)
         .map(|byte| format!("{byte:02x}"))
         .collect();
+    Ok((hash, bytes))
+}
+
+fn boot_layer(layout: &Layout, tools: &Tools) -> Result<PathBuf, String> {
+    let (hash, bytes) = boot_hash(tools)?;
     let boot = layout.boot(&hash);
     if boot.join("silo/init").is_file() {
         return Ok(boot);
@@ -299,6 +306,44 @@ fn boot_layer(layout: &Layout, tools: &Tools) -> Result<PathBuf, String> {
         Ok(()) => Ok(boot),
         Err(_) if boot.join("silo/init").is_file() => Ok(boot),
         Err(error) => Err(at("move the boot layer to", &boot, error)),
+    }
+}
+
+/// Removes what the storage holds that no computer needs: unpacked images no computer's record
+/// names (the pinned image stays: the next computer starts from it), and, when no container is
+/// running, boot layers of other init shims. A record that cannot be read leaves everything in
+/// place. Best effort: what cannot be removed stays for the next sweep.
+pub fn prune_storage(paths: &RuntimePaths, tools: &Tools) {
+    let layout = Layout::new(&paths.home);
+    let Ok(pinned) = super::image::pinned() else {
+        return;
+    };
+    let name_of = |digest: &str| {
+        layout
+            .image(digest)
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default()
+    };
+    let mut images = vec![name_of(&pinned.image_digest)];
+    let mut running = false;
+    for name in layout.names() {
+        let Ok(record) = layout.computer(&name).read_record() else {
+            return;
+        };
+        images.push(name_of(&record.image_digest));
+        running |= holder_alive(paths, &name) || hold::is_starting(&name);
+    }
+    for stale in super::image::unused_dirs(&layout.images(), &images) {
+        let _ = super::image::remove_tree(tools, &stale);
+    }
+    if running {
+        return;
+    }
+    if let Ok((hash, _)) = boot_hash(tools) {
+        for stale in super::image::unused_dirs(&layout.root().join("boot"), &[hash]) {
+            let _ = super::image::remove_tree(tools, &stale);
+        }
     }
 }
 
@@ -344,11 +389,22 @@ fn own_as_root(tools: &Tools, paths: &[&Path]) -> Result<(), String> {
 /// force: the root of the container's file system is root's (a sub-id), and a directory an earlier
 /// build left owned by the engine's own user cannot be used with it.
 pub fn check_upper(dir: &ComputerDir, name: &str) -> Result<bool, String> {
+    let sub_ids = super::idmap::current_sub_ids().ok_or(
+        "Silo could not read this account's sub-uid range in /etc/subuid. Run silo host init to see what container computers need.",
+    )?;
+    check_upper_in(dir, name, &sub_ids)
+}
+
+fn check_upper_in(
+    dir: &ComputerDir,
+    name: &str,
+    sub_ids: &std::ops::Range<u32>,
+) -> Result<bool, String> {
     use std::os::unix::fs::MetadataExt;
     match std::fs::symlink_metadata(dir.upper()) {
         Ok(meta)
             if meta.is_dir()
-                && super::idmap::KeepId::current().upper_owner_is_current(meta.uid()) =>
+                && super::idmap::KeepId::current().upper_owner_is_current(meta.uid(), sub_ids) =>
         {
             Ok(true)
         }
@@ -1569,15 +1625,16 @@ mod tests {
         let dir = layout.computer("dev");
         std::fs::create_dir_all(dir.path()).unwrap();
         // None yet: it is made on the first start.
-        assert_eq!(check_upper(&dir, "dev"), Ok(false));
+        let sub_ids = 500_000..565_535;
+        assert_eq!(check_upper_in(&dir, "dev", &sub_ids), Ok(false));
         // One this process made is owned by the engine's own user, as an earlier build's was.
         std::fs::create_dir_all(dir.upper()).unwrap();
-        let error = check_upper(&dir, "dev").unwrap_err();
+        let error = check_upper_in(&dir, "dev", &sub_ids).unwrap_err();
         assert!(error.contains("Recreate it") && error.contains("dev"), "{error}");
         // A file in its place is no upper directory either.
         std::fs::remove_dir(dir.upper()).unwrap();
         std::fs::write(dir.upper(), "x").unwrap();
-        assert!(check_upper(&dir, "dev").is_err());
+        assert!(check_upper_in(&dir, "dev", &sub_ids).is_err());
     }
 
     #[test]

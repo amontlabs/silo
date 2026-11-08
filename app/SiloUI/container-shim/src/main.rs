@@ -4,11 +4,13 @@
 //!   silo-ctr run --state DIR --lower L1:L2:... --upper U --work W --merged M --bundle B --id ID
 //!                [--sock PATH] [--crun PATH] [--sub-uid N --sub-gid N]
 //!   silo-ctr enter --state DIR -- CMD ARGS...
+//!   silo-ctr connect --state DIR --host HOST --port N
 //!   silo-ctr version
 
 #![cfg_attr(not(target_os = "linux"), allow(dead_code))]
 
 mod common;
+mod connect;
 mod enter;
 mod net;
 mod run;
@@ -25,6 +27,7 @@ fn main() {
     unsafe { libc::umask(0o022) };
     let outcome = match args.first().map(String::as_str) {
         Some("userns") => userns::command(&args[1..]),
+        Some("connect") => connect::command(&args[1..]),
         Some("enter") => enter::command(&args[1..]),
         Some("run") => run::command(&args[1..]),
         Some("version") => {
@@ -32,7 +35,7 @@ fn main() {
             Ok(0)
         }
         _ => Err(
-            "usage: silo-ctr userns|run|enter|version (see the module documentation)".to_string(),
+            "usage: silo-ctr userns|run|enter|connect|version (see the module documentation)".to_string(),
         ),
     };
     match outcome {

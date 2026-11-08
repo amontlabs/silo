@@ -395,6 +395,104 @@ remove_editor_key() {
   fi
 }
 
+# Port forwarding to the container's loopback, a large transfer in both directions at once, a
+# client that dies, and idle sockets, over the SSH server of the container computer.
+container_forwarding_and_transfers() {
+  local host="$1" scratch="$2" forwarders=() pid
+  local ssh_opts=(-o BatchMode=yes -o ConnectTimeout=30 -o ExitOnForwardFailure=yes)
+
+  step "Forwarding ports of $ctr over SSH (-L and -D)"
+  # A server on the container's loopback only: the host has nothing on this port, so an answer
+  # proves the connection was made from inside the container's network namespace.
+  in_container sh -c 'mkdir -p /tmp/fwd && echo fwd-ok > /tmp/fwd/index.html && cd /tmp/fwd && (nohup python3 -m http.server 18080 --bind 127.0.0.1 >/dev/null 2>&1 &)'
+  for _ in $(seq 1 20); do
+    [[ "$(in_container curl -sS --max-time 3 http://127.0.0.1:18080/index.html 2>/dev/null || true)" == fwd-ok ]] && break
+    sleep 1
+  done
+  expect "container server" "$(in_container curl -sS --max-time 5 http://127.0.0.1:18080/index.html)" fwd-ok
+  if curl -sS --max-time 3 -o /dev/null http://127.0.0.1:18080/ 2>/dev/null; then
+    echo "the host serves port 18080 itself; the forwarding check would prove nothing" >&2
+    exit 1
+  fi
+  ssh -N "${ssh_opts[@]}" -L 28080:127.0.0.1:18080 -L 28081:10.255.255.1:80 -L 28082:localhost:18080 "$host" &
+  forwarders+=($!)
+  ssh -N "${ssh_opts[@]}" -D 21080 "$host" &
+  forwarders+=($!)
+  local answer=""
+  for _ in $(seq 1 20); do
+    answer=$(curl -sS --max-time 5 http://127.0.0.1:28080/index.html 2>/dev/null || true)
+    [[ "$answer" == fwd-ok ]] && break
+    sleep 1
+  done
+  expect "ssh -L to a port served inside the container" "$answer" fwd-ok
+  expect "ssh -L to localhost" "$(curl -sS --max-time 5 http://127.0.0.1:28082/index.html)" fwd-ok
+  expect "ssh -D (SOCKS) to the container's loopback" "$(curl -sS --max-time 10 --socks5-hostname 127.0.0.1:21080 http://127.0.0.1:18080/index.html)" fwd-ok
+  # Anything but the container's loopback is refused by the server.
+  if curl -sS --max-time 5 -o /dev/null http://127.0.0.1:28081/ 2>/dev/null; then
+    echo "a forward to 10.255.255.1 was served" >&2
+    exit 1
+  fi
+  if curl -sS --max-time 10 -o /dev/null --socks5-hostname 127.0.0.1:21080 http://example.com/ 2>/dev/null; then
+    echo "a SOCKS forward to a public host was served" >&2
+    exit 1
+  fi
+  echo "forwards to the loopback answer; other destinations are refused"
+  for pid in "${forwarders[@]}"; do kill "$pid" 2>/dev/null || true; done
+  wait 2>/dev/null || true
+
+  step "Sending a large file through ssh cat in both directions at once"
+  local ssh_plain=(-o BatchMode=yes -o ConnectTimeout=30)
+  head -c 60000000 /dev/urandom > "$scratch/big.bin"
+  # Input and output both flow at full speed: a server that stops reading the client while it
+  # waits for the command's input stalls here, and the timeout fails the check.
+  timeout 180 ssh "${ssh_plain[@]}" "$host" cat < "$scratch/big.bin" > "$scratch/big.out"
+  expect "hash of the file through cat" "$(sha256sum < "$scratch/big.out" | cut -d' ' -f1)" "$(sha256sum < "$scratch/big.bin" | cut -d' ' -f1)"
+  timeout 180 ssh "${ssh_plain[@]}" "$host" 'cat > /workspace/e2e-big.bin' < "$scratch/big.bin"
+  expect "hash of the file in the container" "$(in_container sha256sum /workspace/e2e-big.bin | cut -d' ' -f1)" "$(sha256sum < "$scratch/big.bin" | cut -d' ' -f1)"
+  timeout 180 ssh "${ssh_plain[@]}" "$host" 'cat /workspace/e2e-big.bin' > "$scratch/big.down"
+  cmp "$scratch/big.bin" "$scratch/big.down"
+  in_container rm -f /workspace/e2e-big.bin
+  rm -f "$scratch/big.bin" "$scratch/big.out" "$scratch/big.down"
+
+  step "Ending a remote command when its client goes away"
+  in_container rm -f /tmp/e2e-client-pid
+  ssh "${ssh_plain[@]}" "$host" 'echo $$ > /tmp/e2e-client-pid; exec sleep 300' &
+  local client=$!
+  for _ in $(seq 1 20); do
+    [[ -n "$(in_container cat /tmp/e2e-client-pid 2>/dev/null || true)" ]] && break
+    sleep 1
+  done
+  local remote
+  remote=$(in_container cat /tmp/e2e-client-pid)
+  expect "remote command running" "$(in_container sh -c "kill -0 $remote 2>/dev/null && echo alive || echo gone")" alive
+  kill -9 "$client" 2>/dev/null || true
+  wait "$client" 2>/dev/null || true
+  local state=alive
+  for _ in $(seq 1 20); do
+    state=$(in_container sh -c "kill -0 $remote 2>/dev/null && echo alive || echo gone")
+    [[ "$state" == gone ]] && break
+    sleep 1
+  done
+  expect "remote command after its client was killed" "$state" gone
+
+  step "Idle sockets do not lock out a login"
+  local port address
+  address=$(ssh -G "$host" | awk '$1 == "hostname" { print $2 }')
+  port=$(ssh -G "$host" | awk '$1 == "port" { print $2 }')
+  # Twice the limit of logged-in connections, doing nothing.
+  python3 -c '
+import socket, sys, time
+sockets = [socket.create_connection((sys.argv[1], int(sys.argv[2]))) for _ in range(40)]
+open(sys.argv[3], "w").write("held")
+time.sleep(60)' "$address" "$port" "$scratch/idle-held" &
+  local idle=$!
+  for _ in $(seq 1 20); do [[ -f "$scratch/idle-held" ]] && break; sleep 1; done
+  expect "idle sockets held" "$(cat "$scratch/idle-held" 2>/dev/null || true)" held
+  expect "a login while idle sockets are open" "$(ssh "${ssh_plain[@]}" "$host" id -un)" silo
+  kill "$idle" 2>/dev/null || true
+  wait "$idle" 2>/dev/null || true
+}
+
 # SSH, SFTP, a terminal, the editor's proxy and the in-guest client, which a container computer has
 # through the same commands as a virtual machine.
 container_access_features() {
@@ -429,6 +527,8 @@ container_access_features() {
   cmp "$scratch/up.bin" "$scratch/down.bin"
   expect "file written over sftp, read in the guest" "$(in_container sh -c 'wc -c < /workspace/e2e-sftp.bin | tr -d " "')" 300000
   expect "file owner" "$(in_container stat -c %U /workspace/e2e-sftp.bin)" silo
+
+  container_forwarding_and_transfers "$host" "$scratch"
 
   step "Opening a terminal session in $ctr over SSH"
   local tty_name

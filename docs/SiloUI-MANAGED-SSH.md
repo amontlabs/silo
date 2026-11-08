@@ -194,7 +194,19 @@ kinds share it, and that is the better end state. What it does:
 | exec | `/bin/bash -c COMMAND` |
 | `pty-req` | a pseudo-terminal made by `crun`; the window-change request resizes it |
 | `sftp` subsystem | `/usr/lib/openssh/sftp-server`, from the image's `openssh-sftp-server` (it is in the guest image already) |
-| anything else (environment, agent, X11, forwarding, other subsystems) | refused |
+| `direct-tcpip` (`ssh -L`, `ssh -D`, the editor's port forwarding) | a connection from inside the container's network namespace (`silo-ctr connect`) to the container's own loopback: `localhost`, `127.0.0.0/8` or `::1`, ports 1 to 65535. Any other destination is refused (`administratively prohibited`), so a forward never reaches the host's network or the TAP's |
+| `signal` | sent to the command's process group |
+| anything else (environment, agent, X11, remote forwarding (`-R`), other subsystems) | refused |
+
+The SSH login `silo` must be the working account the container's id mapping gives the engine's
+user (id 1001): the server resolves the name in the computer's own account files, and refuses the
+login, with a message that says so, if the id is anything else, root's included.
+
+A connection has 30 seconds to log in whatever the inactivity timeout is, and only logged-in
+connections count against the limit of 32 (at most 64 are still logging in at once), so idle
+sockets cannot lock a person out. What a command has not read of the client's input waits in a
+queue of up to 32 MiB, and a command that falls further behind is ended, so a transfer in both
+directions (`ssh NAME cat < big > copy`) never stalls the connection's other traffic.
 
 Every command runs through the engine's own exec path (`silo-ctr enter`, `crun exec`, the init
 shim), so the hardening baseline, the process-group kill when a channel closes, and the
@@ -205,7 +217,9 @@ same files as for a virtual machine.
 
 The live check (`scripts/linux-host-e2e.sh` with `SILO_E2E_CONTAINER=1`) runs `silo ssh-setup`, then
 `ssh NAME.silo-dev uname -a`, an SFTP put and get, a `ssh -tt ... tty` session, the terminal
-command, the editor proxy in `--stdio` mode under a scripted `ssh`, and the in-guest client.
+command, the editor proxy in `--stdio` mode under a scripted `ssh`, port forwarding (`ssh -L` to a port served
+inside the container, and a refused destination), a large file through `ssh NAME cat` both ways (hashes compared), a
+killed client that takes its remote command with it, idle sockets that do not lock out a login, and the in-guest client.
 
 ## Reconciliation
 

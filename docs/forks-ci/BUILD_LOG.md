@@ -500,6 +500,43 @@ client through the same commands, API methods and screens as a Linux VM. Fable's
   `ssh` (an unlisted key and another account refused), and the in-guest `silo --in-guest list` as the non-root
   account after `silo guest-client install --binary`.
 
+- **Review fixes (9 Nov 2026, PR 97).**
+  - *Port forwarding.* The server answers `direct-tcpip` (`ssh -L`, `ssh -D`, the editor's forwarding), which
+    MicroSandbox's server accepts, and only to the container's own loopback (`localhost`, `127.0.0.0/8`, `::1`, ports
+    1 to 65535); anything else is refused. The connection is made by a new `silo-ctr connect --state DIR --host H --port N`,
+    which joins the holder's user and network namespaces (`enter`'s code, now `join_holder`), connects, writes one zero
+    byte, and relays standard input and output; the server starts it, waits for the byte, then accepts the channel, so a
+    refused connection is an `open failed` for the client and the session loop never waits for it. The managed-SSH table
+    no longer says forwarding is refused (remote `-R` still is).
+  - *No stall under load.* `data()` awaited a bounded queue inside the session loop, which is also what takes the client's
+    window updates: `ssh box cat < big > out` filled the command's stdin, the command's stdout filled the client's window,
+    and the update that would have freed it sat behind the blocked loop. The queue is now unbounded in count and bounded
+    in bytes (32 MiB; a command that falls further behind is ended), and `data()` never waits. A channel close or a
+    dropped connection already killed the command's process group (the channel is dropped); the live check now proves it
+    by killing a client.
+  - *Login deadline.* A connection has 30 s from `accept` (the version exchange included) to log in, whatever the inactivity
+    timeout; at most 64 connections are logging in at once; only a logged-in connection takes one of the 32 slots, so idle
+    sockets can no longer lock SSH out under `--no-inactivity-timeout`. A client over the cap of logged-in connections
+    is disconnected when it proves its key.
+  - *Signals* in an SSH `signal` request go to the exec's process group (`ExecGroup::signal`, the same leader check as the kill).
+  - *Root's in-guest answers* are a documented difference, not changed: the engine cannot give a file to a sub-id without a
+    helper in the holder's namespace, and a looser mode would show the answer to any guest user that learns the id.
+    A root process with `CAP_DAC_OVERRIDE` (Silo's own root commands) reads it; one without gets "permission denied".
+    Stated in the in-guest client guide and pinned by a test.
+  - *Storage.* `prune_storage` (at engine start and before an unpack, so the space check counts only what is needed)
+    removes unpacked images no computer's record names (the pinned image stays) and, with no container running, boot
+    layers of other init shims.
+  - *Terminal start* keeps `crun exec`'s error output and returns at once when it ends before handing over the terminal
+    (it waited 15 s with no reason); the listener logs an `accept` error and tries again after 50 ms, doubling to 2 s.
+  - *Threat model.* SSH refuses a login unless `silo` in the computer's account files has the id 1001 (never 0) that the
+    keep-id mapping gives the engine's user. The container section names the `/.msb` share as the one engine-owned
+    folder in the mount namespace and no longer says nothing is added to the account. An upper directory is current only
+    if a sub-id of the account (from `/etc/subuid`) owns it. `Spool::new` takes the `KeepId` from the worker
+    (`containers::keep_id_for(home, name)`), so the spool does not know about kinds.
+  - *Tests.* Unit tests for each, run in a Linux container here and in CI; `linux-host-e2e.sh` gained forwarding (`-L`,
+    `-D`, refused destinations, a port the host does not serve), a 60 MB file through `ssh cat` both ways with hashes,
+    a killed client, and 40 idle sockets with a login in between.
+
 ### R1: CI runner on the Mac (branch `claude/runner-phase-1`)
 
 - **Built:** `silo-action/` and every reference removed; `silo-runner` (Go, `app/SiloUI/runner`, on

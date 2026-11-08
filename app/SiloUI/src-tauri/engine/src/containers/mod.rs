@@ -30,11 +30,10 @@ pub mod users;
 
 pub use args::RUNTIME_LABEL;
 
-/// For the in-guest client's bridge folder of a container computer, the id mapping its files are
-/// owned by (`dir` is `<runtime home>/sandboxes/<name>/runtime/silo-bridge`); `None` for any other.
-pub fn keep_id_for_bridge(dir: &std::path::Path) -> Option<idmap::KeepId> {
-    let name = dir.parent()?.parent()?.file_name()?.to_str()?;
-    let home = dir.parent()?.parent()?.parent()?.parent()?;
+/// For the in-guest client of the computer `name`, the id mapping its bridge folder's files are
+/// owned by (`guest_client::Spool::new` takes it); `None` when the runtime home holds no container
+/// computer of that name.
+pub fn keep_id_for(home: &std::path::Path, name: &str) -> Option<idmap::KeepId> {
     capability::is_container(home, name).then(idmap::KeepId::current)
 }
 
