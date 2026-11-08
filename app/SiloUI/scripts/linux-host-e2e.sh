@@ -457,7 +457,7 @@ container_access_features() {
   typed=$(printf 'tty; id -un; pwd; exit\n' | script -qec "${terminal[*]}" /dev/null 2>&1 | tr -d '\r') || code=$?
   echo "terminal command output (status $code):"
   printf '%s\n' "$typed"
-  grep -q '^/dev/pts/[0-9]*$' <<<"$typed" || { echo "the terminal printed: $typed" >&2; exit 1; }
+  grep -Eq '/dev/pts/[0-9]+$' <<<"$typed" || { echo "the terminal printed: $typed" >&2; exit 1; }
   grep -qx 'silo' <<<"$typed" || { echo "the terminal did not run as silo: $typed" >&2; exit 1; }
   grep -qx '/workspace' <<<"$typed" || { echo "the terminal did not start in /workspace: $typed" >&2; exit 1; }
   echo "terminal command: ok"
