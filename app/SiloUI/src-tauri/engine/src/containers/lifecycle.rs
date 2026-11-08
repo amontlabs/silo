@@ -590,14 +590,24 @@ fn launch(
         .map(|path| path.to_string_lossy().into_owned())
         .collect::<Vec<_>>()
         .join(":");
-    // The holder appends to one log across starts: only what it writes from here is this start's.
-    let log_from =
-        std::fs::metadata(state.join("holder.log")).map_or(0, |meta| meta.len() as usize);
-    let log = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(state.join("holder.log"))
-        .map_err(|e| at("open", &state.join("holder.log"), e))?;
+    // The holder's output is the container's standard output and error too, and the container
+    // runtime gives those files to the user the container's first process runs as: root, a
+    // sub-id the engine cannot write as. A new file each start, open to its owner and to others
+    // (inside the engine's private state folder), stays usable by the engine and the holder
+    // after that change.
+    let holder_log = state.join("holder.log");
+    let _ = std::fs::remove_file(&holder_log);
+    let log = {
+        use std::os::unix::fs::PermissionsExt;
+        let log = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&holder_log)
+            .map_err(|e| at("open", &holder_log, e))?;
+        log.set_permissions(std::fs::Permissions::from_mode(0o666))
+            .map_err(|e| at("set the mode of", &holder_log, e))?;
+        log
+    };
     let mut command = Command::new(&tools.systemd_run);
     command
         .args(["--user", "--scope", "--quiet", "--collect"])
@@ -767,7 +777,7 @@ fn launch(
     // The holder runs on; dropping the guard hands its exit status to a thread.
     let log = std::fs::read_to_string(state.join("holder.log")).unwrap_or_default();
     Ok(Started {
-        warnings: hold::warnings_since(&log, log_from),
+        warnings: hold::warnings_since(&log, 0),
     })
 }
 
