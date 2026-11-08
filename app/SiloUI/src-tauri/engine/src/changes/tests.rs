@@ -770,18 +770,29 @@ fn counts_saturate() {
 }
 
 #[test]
-fn large_baselines_subtract_quickly() {
-    let n = 30_000;
-    let files = |h: &str| {
-        (0..n)
-            .map(|i| format!("F\t/etc/f{i}\t1\t1\t{h}\n"))
-            .collect::<String>()
+fn large_baselines_subtract_in_linear_time() {
+    // Four times the files must cost about four times as much, not sixteen: comparing the
+    // two sizes on the same run keeps the check independent of how fast the machine is.
+    let time = |n: usize| {
+        let files = |h: &str| {
+            (0..n)
+                .map(|i| format!("F\t/etc/f{i}\t1\t1\t{h}\n"))
+                .collect::<String>()
+        };
+        let (idle, task) = (files("a"), files("b"));
+        let started = std::time::Instant::now();
+        let d = with_baseline("", &idle, &task);
+        let elapsed = started.elapsed();
+        assert_eq!(d.idle_noise.len(), n);
+        elapsed.as_secs_f64()
     };
-    let (idle, task) = (files("a"), files("b"));
-    let started = std::time::Instant::now();
-    let d = with_baseline("", &idle, &task);
-    assert_eq!(d.idle_noise.len(), n);
-    assert!(started.elapsed().as_secs() < 20);
+    let small = time(10_000);
+    let large = time(40_000);
+    let ratio = large / small.max(1e-6);
+    assert!(
+        ratio < 9.0,
+        "4x the files took {ratio:.1}x as long ({small:.3}s -> {large:.3}s); linear is 4x, quadratic 16x"
+    );
 }
 
 #[test]
