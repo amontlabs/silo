@@ -84,6 +84,7 @@ pub fn build(params: &Params<'_>) -> Result<Spec, String> {
                 "HOME=/root",
                 "TERM=xterm",
                 "LANG=C.UTF-8",
+                "SILO_RUNTIME=container",
             ],
             "cwd": "/",
             "capabilities": {

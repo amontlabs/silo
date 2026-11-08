@@ -508,6 +508,7 @@ pub fn exec_command(
         ("HOME".to_owned(), identity.home.clone()),
         ("TERM".to_owned(), "xterm".to_owned()),
         ("LANG".to_owned(), "C.UTF-8".to_owned()),
+        ("SILO_RUNTIME".to_owned(), "container".to_owned()),
     ];
     for (key, value) in &exec.env {
         environment.retain(|(existing, _)| existing != key);
