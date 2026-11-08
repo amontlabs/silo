@@ -33,6 +33,7 @@ import os
 import secrets
 import signal
 import socket
+import ssl
 import struct
 import subprocess
 import sys
@@ -111,6 +112,20 @@ def json_message(body):
         return None
 
 
+def tls_issuer(cafile, host="example.com"):
+    """Connects to `host`:443 and returns the verified certificate's issuer, or the error."""
+    context = ssl.create_default_context(cafile=cafile) if cafile else ssl.create_default_context()
+    try:
+        with socket.create_connection((host, 443), timeout=15) as plain:
+            with context.wrap_socket(plain, server_hostname=host) as tls:
+                issuer = dict(item[0] for item in tls.getpeercert()["issuer"])
+                return {"issuer": issuer.get("organizationName") or issuer.get("commonName")}
+    except ssl.SSLCertVerificationError as error:
+        return {"error": error.verify_message}
+    except OSError as error:
+        return {"error": type(error).__name__}
+
+
 def dns_query(server, name, timeout=10):
     """One UDP A query to `server`; returns (rcode, [IPv4 strings])."""
     identifier = secrets.randbits(16)
@@ -184,7 +199,8 @@ def inside_namespace(arguments):
     with open(ca, "w") as handle:
         handle.write(ready["ca_cert_pem"])
 
-    interfaces = sorted(os.listdir("/sys/class/net"))
+    # /sys still shows the namespace sysfs was mounted in; the kernel interface list is this one's.
+    interfaces = sorted(name for _, name in socket.if_nameindex())
     check(results, "the namespace holds only a loopback and the TAP", interfaces == ["lo", TAP_NAME], interfaces)
 
     server = subprocess.Popen(
@@ -206,8 +222,24 @@ def inside_namespace(arguments):
         # 1. A public HTTPS host answers through the gateway's interception.
         code, status, _ = curl(["--cacert", ca, "-o", "/dev/null", "https://example.com/"])
         check(results, "a public HTTPS host answers through the gateway", code == 0 and status == "200", {"curl": code, "status": status})
-        code, _, _ = curl(["-o", "/dev/null", "https://example.com/"])
-        check(results, "without the gateway CA the connection is not trusted (the gateway signed it)", code == 60, {"curl": code})
+        # TLS is intercepted only toward hosts a secret is allowed for (api.github.com here); any
+        # other host keeps its public certificate. (Python's TLS, so no curl configuration is
+        # involved: curl's --cacert still reads the system store.)
+        other = tls_issuer(None, "example.com")
+        check(
+            results,
+            "a host no secret is allowed for keeps its public certificate",
+            other.get("issuer") not in (None, "microsandbox"),
+            other,
+        )
+        system = tls_issuer(None, "api.github.com")
+        trusted = tls_issuer(ca, "api.github.com")
+        check(
+            results,
+            "toward a secret's host the system trust store refuses the certificate and the gateway CA accepts it",
+            system.get("error") is not None and trusted.get("issuer") == "microsandbox",
+            {"system_trust_store": system, "gateway_ca": trusted},
+        )
         code, status, _ = curl(["-o", "/dev/null", "http://example.com/"])
         check(results, "public plain HTTP answers", code == 0 and status[:1] in ("2", "3"), {"curl": code, "status": status})
 
