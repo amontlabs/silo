@@ -287,6 +287,19 @@ fn remove(paths: &RuntimePaths, name: &str) -> Result<(), RuntimeError> {
     Ok(())
 }
 
+/// Collects a child's output stream on its own thread, up to 64 MiB.
+#[cfg(target_os = "linux")]
+fn read_to_string<R: std::io::Read + Send + 'static>(stream: Option<R>) -> std::thread::JoinHandle<String> {
+    use std::io::Read;
+    std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        if let Some(stream) = stream {
+            let _ = stream.take(64 * 1024 * 1024).read_to_end(&mut bytes);
+        }
+        String::from_utf8_lossy(&bytes).into_owned()
+    })
+}
+
 #[cfg(target_os = "linux")]
 fn exec_and_wait(paths: &RuntimePaths, exec: &args::Exec, timeout: Duration) -> Result<CommandOutput, RuntimeError> {
     use std::process::Stdio;
@@ -305,17 +318,7 @@ fn exec_and_wait(paths: &RuntimePaths, exec: &args::Exec, timeout: Duration) -> 
         .map_err(|error| RuntimeError::Launch(error.to_string()))?;
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
-    let read = |stream: Option<impl std::io::Read + Send + 'static>| {
-        std::thread::spawn(move || {
-            let mut bytes = Vec::new();
-            if let Some(mut stream) = stream {
-                let _ = std::io::Read::take(&mut stream, 64 * 1024 * 1024).read_to_end(&mut bytes);
-            }
-            String::from_utf8_lossy(&bytes).into_owned()
-        })
-    };
-    use std::io::Read;
-    let (out, err) = (read(stdout), read(stderr));
+    let (out, err) = (read_to_string(stdout), read_to_string(stderr));
     let deadline = std::time::Instant::now() + timeout;
     let status = loop {
         match child.try_wait() {

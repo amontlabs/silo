@@ -214,7 +214,12 @@ fn launch(
 ) -> Result<Started, String> {
     let state = dir.state();
     private_dir(&state)?;
-    private_dir(&dir.upper())?;
+    // The overlay's root directory takes the upper directory's mode: it must stay traversable.
+    std::fs::create_dir_all(dir.upper()).map_err(io)?;
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(dir.upper(), std::fs::Permissions::from_mode(0o755)).map_err(io)?;
+    }
     private_dir(&dir.work())?;
     private_dir(&dir.merged())?;
     private_dir(&dir.bundle())?;
@@ -479,7 +484,17 @@ pub fn exec_command(
     let user = exec.user.as_deref().unwrap_or("root");
     let identity = users::resolve(user, &passwd, &group)
         .ok_or_else(|| format!("The user {user} does not exist in {name}."))?;
-    let mut command = crun(tools, &dir.state());
+    // Inside the holder's namespaces, so the command has the container's network.
+    let mut command = Command::new(&tools.ctr);
+    command
+        .arg("enter")
+        .arg("--state")
+        .arg(dir.state())
+        .arg("--")
+        .arg(&tools.crun)
+        .arg("--root")
+        .arg(dir.state().join("crun"))
+        .arg("--cgroup-manager=cgroupfs");
     command.arg("exec").arg("--no-new-privs");
     command.arg("--cwd").arg(exec.workdir.as_deref().unwrap_or("/"));
     command.arg("--user").arg(format!("{}:{}", identity.uid, identity.gid));

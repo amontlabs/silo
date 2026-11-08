@@ -57,10 +57,10 @@ pub fn ensure(paths: &RuntimePaths, tools: &Tools) -> Result<Unpacked, RuntimeEr
                 .into(),
         )
     };
-    crate::runtime::guest_image::check_space(&paths.home, manifest.unpacked_bytes.saturating_mul(3))
-        .map_err(RuntimeError::Unavailable)?;
     let images = layout.images();
     std::fs::create_dir_all(&images).map_err(|error| failed(error.to_string()))?;
+    crate::runtime::guest_image::check_space(&images, manifest.unpacked_bytes.saturating_mul(3))
+        .map_err(RuntimeError::Unavailable)?;
     remove_partial(tools, &images);
     let work = images.join(format!("partial-{}", std::process::id()));
     let result = unpack_into(paths, tools, &manifest, &layout, &work);
