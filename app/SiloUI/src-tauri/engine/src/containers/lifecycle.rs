@@ -532,7 +532,8 @@ fn launch(
     // bundle itself stays the guest's own file: nothing is bound over it, and nothing is read
     // from the image here.
     let id = record.label("silo.machine-id").unwrap_or(name).to_owned();
-    let (ca_cert, ca_key) = computer_ca(&tools.gateway, &id)?;
+    let (ca_cert, ca_key) =
+        computer_ca(&tools.gateway, &id).map_err(|e| format!("computer CA: {e}"))?;
     write_readable(
         &state.join("gateway-ca.crt"),
         &format!("{}\n", ca_cert.trim_end()),
@@ -551,7 +552,7 @@ fn launch(
         dir.bundle().join("config.json"),
         serde_json::to_vec_pretty(&spec).map_err(|e| e.to_string())?,
     )
-    .map_err(io)?;
+    .map_err(|e| at("write", &dir.bundle().join("config.json"), e))?;
     write_readable(
         &state.join("hosts"),
         &format!("127.0.0.1 localhost\n127.0.1.1 {name}\n::1 localhost\n"),
@@ -563,8 +564,10 @@ fn launch(
 
     let socket = state.join("ctl.sock");
     let _ = std::fs::remove_file(&socket);
-    let listener = UnixListener::bind(&socket).map_err(io)?;
-    listener.set_nonblocking(true).map_err(io)?;
+    let listener = UnixListener::bind(&socket).map_err(|e| at("bind", &socket, e))?;
+    listener
+        .set_nonblocking(true)
+        .map_err(|e| at("set up", &socket, e))?;
 
     let lower = dir
         .lower_dirs(record, &boot, rootfs)
@@ -579,7 +582,7 @@ fn launch(
         .create(true)
         .append(true)
         .open(state.join("holder.log"))
-        .map_err(io)?;
+        .map_err(|e| at("open", &state.join("holder.log"), e))?;
     let mut command = Command::new(&tools.systemd_run);
     command
         .args(["--user", "--scope", "--quiet", "--collect"])
@@ -664,9 +667,10 @@ fn launch(
     stream
         .set_read_timeout(Some(Duration::from_secs(60)))
         .map_err(io)?;
-    let tap = receive_descriptor(&stream)?;
-    let gateway_log = std::fs::File::create(state.join("gateway.log")).map_err(io)?;
-    let usage_log = usage_log_file(&paths.home, name)?;
+    let tap = receive_descriptor(&stream).map_err(|e| format!("network device: {e}"))?;
+    let gateway_log = std::fs::File::create(state.join("gateway.log"))
+        .map_err(|e| at("create", &state.join("gateway.log"), e))?;
+    let usage_log = usage_log_file(&paths.home, name).map_err(|e| format!("usage log: {e}"))?;
     // The secrets this computer is assigned, with the values the engine read for this start. A
     // value the engine does not hold is left out: nothing substitutes it.
     let secrets: Vec<Secret> = record
@@ -707,7 +711,8 @@ fn launch(
             usage_log: Some(usage_log),
             log: Some(gateway_log),
         },
-    )?;
+    )
+    .map_err(|e| format!("gateway: {e}"))?;
     let ready = gateway.ready().clone();
     write_readable(
         &state.join("resolv.conf"),
