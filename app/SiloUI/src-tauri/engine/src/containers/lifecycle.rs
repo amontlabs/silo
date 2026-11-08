@@ -262,7 +262,7 @@ pub fn reconcile(paths: &RuntimePaths, tools: &Tools) {
 }
 
 fn boot_layer(layout: &Layout, tools: &Tools) -> Result<PathBuf, String> {
-    let bytes = std::fs::read(&tools.init).map_err(io)?;
+    let bytes = std::fs::read(&tools.init).map_err(|e| at("read the init shim", &tools.init, e))?;
     // The ownership layout is part of what the layer is: another one is another directory.
     let digest = Sha256::new()
         .chain_update(&bytes)
@@ -280,28 +280,35 @@ fn boot_layer(layout: &Layout, tools: &Tools) -> Result<PathBuf, String> {
     let partial = boot.with_extension("partial");
     // An earlier attempt's files may belong to root (a sub-id).
     let _ = super::image::remove_tree(tools, &partial);
-    std::fs::create_dir_all(partial.join("silo")).map_err(io)?;
-    std::fs::create_dir_all(partial.join("workspace")).map_err(io)?;
+    std::fs::create_dir_all(partial.join("silo")).map_err(|e| at("create", &partial, e))?;
+    std::fs::create_dir_all(partial.join("workspace")).map_err(|e| at("create", &partial, e))?;
     let target = partial.join("silo/init");
-    std::fs::write(&target, &bytes).map_err(io)?;
+    std::fs::write(&target, &bytes).map_err(|e| at("write", &target, e))?;
     // Every user of the computer reads these, whatever umask the engine runs with.
     use std::os::unix::fs::PermissionsExt;
     for directory in [&partial, &partial.join("silo"), &partial.join("workspace")] {
-        std::fs::set_permissions(directory, std::fs::Permissions::from_mode(0o755)).map_err(io)?;
+        std::fs::set_permissions(directory, std::fs::Permissions::from_mode(0o755))
+            .map_err(|e| at("set the mode of", directory, e))?;
     }
-    std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o755)).map_err(io)?;
+    std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o755))
+        .map_err(|e| at("set the mode of", &target, e))?;
     // Root's, not the working account's (which is the engine's own user): the account must not be
     // able to replace the init shim or its folder.
     own_as_root(tools, &[&partial.join("silo"), &partial.join("workspace")])?;
     match std::fs::rename(&partial, &boot) {
         Ok(()) => Ok(boot),
         Err(_) if boot.join("silo/init").is_file() => Ok(boot),
-        Err(error) => Err(io(error)),
+        Err(error) => Err(at("move the boot layer to", &boot, error)),
     }
 }
 
 /// Gives `paths` (and what is below them) to the container's root, which is a sub-id on the host.
 /// Runs in a user namespace laid out like the container's.
+/// An I/O error with what was being done and where.
+fn at(what: &str, path: &Path, error: std::io::Error) -> String {
+    format!("Could not {what} {}: {error}", path.display())
+}
+
 fn own_as_root(tools: &Tools, paths: &[&Path]) -> Result<(), String> {
     let agent = super::idmap::AGENT_ID.to_string();
     let mut args: Vec<&std::ffi::OsStr> = vec![
@@ -347,12 +354,12 @@ fn prepare_upper(tools: &Tools, dir: &ComputerDir, name: &str) -> Result<(), Str
             // directory that looks like an earlier build's.
             let staging = dir.path().join("upper.new");
             super::image::remove_tree(tools, &staging)?;
-            std::fs::create_dir(&staging).map_err(io)?;
+            std::fs::create_dir(&staging).map_err(|e| at("create", &staging, e))?;
             // The overlay's root directory takes the upper directory's mode: it must stay traversable.
             std::fs::set_permissions(&staging, std::fs::Permissions::from_mode(0o755))
-                .map_err(io)?;
+                .map_err(|e| at("set the mode of", &staging, e))?;
             own_as_root(tools, &[&staging])?;
-            std::fs::rename(&staging, &upper).map_err(io)
+            std::fs::rename(&staging, &upper).map_err(|e| at("move it to", &upper, e))
         }
     }
 }
@@ -364,11 +371,13 @@ fn prepare_upper(tools: &Tools, dir: &ComputerDir, name: &str) -> Result<(), Str
 fn share_directory(home: &Path, name: &str) -> Result<PathBuf, String> {
     use std::os::unix::fs::PermissionsExt;
     let computer = home.join("sandboxes").join(name);
-    private_dir(&computer)?;
-    std::fs::set_permissions(&computer, std::fs::Permissions::from_mode(0o700)).map_err(io)?;
+    private_dir(&computer).map_err(|e| format!("create {}: {e}", computer.display()))?;
+    std::fs::set_permissions(&computer, std::fs::Permissions::from_mode(0o700))
+        .map_err(|e| at("set the mode of", &computer, e))?;
     let runtime = computer.join("runtime");
-    std::fs::create_dir_all(&runtime).map_err(io)?;
-    std::fs::set_permissions(&runtime, std::fs::Permissions::from_mode(0o711)).map_err(io)?;
+    std::fs::create_dir_all(&runtime).map_err(|e| at("create", &runtime, e))?;
+    std::fs::set_permissions(&runtime, std::fs::Permissions::from_mode(0o711))
+        .map_err(|e| at("set the mode of", &runtime, e))?;
     Ok(runtime)
 }
 
@@ -376,8 +385,9 @@ fn share_directory(home: &Path, name: &str) -> Result<PathBuf, String> {
 /// engine runs with.
 fn write_readable(path: &Path, contents: &str) -> Result<(), String> {
     use std::os::unix::fs::PermissionsExt;
-    std::fs::write(path, contents).map_err(io)?;
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o644)).map_err(io)
+    std::fs::write(path, contents).map_err(|e| at("write", path, e))?;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o644))
+        .map_err(|e| at("set the mode of", path, e))
 }
 
 pub(super) fn private_dir(path: &Path) -> Result<(), String> {
@@ -386,7 +396,7 @@ pub(super) fn private_dir(path: &Path) -> Result<(), String> {
         .recursive(true)
         .mode(0o700)
         .create(path)
-        .map_err(io)
+        .map_err(|e| at("create", path, e))
 }
 
 /// The file the gateway appends its credential-use events to: where `computers.credentials`
