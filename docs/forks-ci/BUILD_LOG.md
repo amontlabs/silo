@@ -5,8 +5,8 @@ Plan: [PLAN.md](PLAN.md).
 ## Resume
 
 - **Merged (8 Nov 2026):** F1 (#84), F2 (#88), C1 (#87), R1 (#83), F3 (#86).
-- **Open phases:** F4 (export a computer that lives on another machine), R2 (Linux hosts as runner
-  machines). C1 waits for the owner's decision on building container computers.
+- **Open phases:** F4 (export a computer that lives on another machine) and R2 (Linux hosts as runner
+  machines), both in progress; container computers (C2 onwards) being designed.
 - **Open follow-ups found during the build:**
   - A Linux fork leaves its fork-point checkpoint on the source (it was a manual checkpoint before F2 too);
     macOS removes its fork point with the last fork. Fixing it means the macOS release machinery on Linux.
@@ -100,6 +100,12 @@ Design questions: [DESIGN-QUESTIONS.md](DESIGN-QUESTIONS.md). Advised by Fable 5
   advisors (the advisor's job-started hook is dropped for the runner name).
 - **Login warning:** add Claude Code (`~/.claude/.credentials.json`) and other agent logins to the
   credential patterns; the export check scans the computer's files and its fork-time record.
+- **Container computers (decided by the owner, 8 Nov, after C1):** build them. An opt-in kind for Linux hosts,
+  never the default, chosen knowingly for a dev-only machine with nothing sensitive on it. It has the same API
+  and capabilities as a VM computer: everything a user can do with a VM computer (create, start, stop, exec,
+  fork, checkpoints, diff and keep, secrets, GitHub access, ports and URLs, desktop and computer use, export and
+  import, Connections) they can do with a container computer, through the same CLI, MCP tools, app screens and
+  behaviour. The threat model states it is weaker than a VM.
 
 ## Status
 
