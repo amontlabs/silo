@@ -329,9 +329,9 @@ Branch `claude/containers-ct2`.
 
 Branch `claude/containers-ct3`, pull request [#95](https://github.com/amontlabs/silo/pull/95). Secrets, GitHub access, credential-use events, published ports and the URL proxy
 work for container computers through the existing commands, API methods and screens. **SSH access, the editor, a
-terminal and the in-guest client are not built**: each needs a container-specific branch outside
-`engine/src/containers/` and the capability list, which the brief said to stop and report. They stay on the
-capability list (refused with the plain message, hidden in the app).
+terminal and the in-guest client are not built and move to phase CT3b**: each needs a container-specific branch
+outside `engine/src/containers/` and the capability list, which the brief said to stop and report. They stay on
+the capability list (refused with the plain message, hidden in the app) until CT3b.
 
 - **The seam moved one step.** CT2 routed a container at `run_msb_process`. Secrets and GitHub access reach the
   runtime through `spawn_runtime` (the shared `modify` calls skip `run_msb_process`), and `start` needs the
@@ -372,10 +372,26 @@ capability list (refused with the plain message, hidden in the app).
   change (only `socket_path` became `pub(crate)`).
 - **The guest trusts the gateway's CA.** The first live run showed curl in the container refusing the
   certificate the gateway presents for `api.github.com` ("self-signed certificate in certificate chain"): a VM gets
-  the CA installed by its runtime, a container did not. The start now writes the image's
-  `/etc/ssl/certs/ca-certificates.crt` plus the computer's CA to `state/ca-bundle.crt` and binds it read-only over
-  that path (the image file is read without following a link, capped at 4 MiB). It is the third host file the
-  container sees. Tools that ship their own bundle (Node, a browser) need their own setting.
+  the CA installed by its runtime, a container did not. The first fix bound a bundle (the image's
+  `/etc/ssl/certs/ca-certificates.crt` plus the CA) read-only over that path. Review found it broke the guest:
+  `update-ca-certificates` renames a new bundle onto that path, which fails on a mount point (`EBUSY`), so an
+  `apt` upgrade of `ca-certificates` or a JDK install failed and a guest could not add a CA of its own. Now only
+  the computer's CA certificate is bound, read-only, at `/usr/local/share/ca-certificates/silo-gateway.crt`, and
+  `start` runs `update-ca-certificates --fresh` as a Silo root exec once the container is up (a failure stops the
+  container and says so). The bundle is the guest's own writable file, and the host reads nothing from the image
+  for this any more, which also removes the host-side bundle read that could follow a link above the file in the image.
+  Every command Silo runs in the computer gets the variables the runtime's guest agent sets in a VM
+  (`microsandbox/crates/agentd/lib/tls.rs`): `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE` and `CURL_CA_BUNDLE` name the
+  system bundle and `NODE_EXTRA_CA_CERTS` names the CA file. The CA is the third host file the container sees.
+  Tools that ship their own bundle need their own setting. The live check now reinstalls `ca-certificates` in the
+  container with `apt-get` and shows the HTTPS substitution through the gateway still verifies.
+- **Review fixes.** A failed gateway exchange on a running container (the gateway stops, failing closed) now stops
+  the container too, so the record, the interface and the processes agree; a `modify` writes its secrets into the
+  record as it is after the exchange, not into a copy read before it (a concurrent assignment is kept); the
+  `Running.active` comment says what the code does; the macOS gateway takes a port back when it cannot report the
+  result of a `port_add`. Threat model: the container's difference from a VM is the escape boundary, not where the
+  values live; the section names the three network differences (no passthrough hosts, a per-computer CA kept in
+  the Linux credential file store, which tools trust it).
 - **The probe runs off the pump's thread.** The first live run published a port but read it as `unknown`:
   `port_probe` waits for the guest's reply to a connection attempt, and that reply reaches the network stack only
   while the gateway's control loop, which is also its frame pump, keeps running. The probe now waits on its own
@@ -412,7 +428,8 @@ capability list (refused with the plain message, hidden in the app).
   from `api.github.com` with a gateway `used` event and no event for `example.com`, publishes a port, opens it
   through the URL proxy and the loopback port, unpublishes it, and removes the secret from the running computer
   (no further `used` event).
-- **Not done.** SSH, editor, terminal, in-guest client (above); GitHub access live; UDP ports; aarch64 live run.
+- **Not done.** SSH, editor, terminal and in-guest client (phase CT3b, above); GitHub access live; UDP ports;
+  aarch64 live run.
 
 ### R1: CI runner on the Mac (branch `claude/runner-phase-1`)
 
