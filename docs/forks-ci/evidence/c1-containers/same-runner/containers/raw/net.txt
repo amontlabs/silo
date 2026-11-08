@@ -1,0 +1,16 @@
+UP 1794099490.353042799
+READY 1794099490.410032475
+NET proxy-https rc=0 http=200 
+NET proxy-http rc=0 http=200 
+NET direct-https rc=6 curl: (6) Could not resolve host: example.com http=000 
+NET direct-ip rc=7 curl: (7) Failed to connect to 1.1.1.1 port 80 after 0 ms: Couldn't connect to server http=000 
+NET direct-dns rc=2  
+NET host-canary-8000 rc=7 curl: (7) Failed to connect to 10.200.1.1 port 8000 after 0 ms: Couldn't connect to server http=000 
+NET host-proxy-port-plain-request-expected-reachable rc=0 http=400 
+NET host-ssh-22 rc=1 bash: connect: Permission denied bash: line 1: /dev/tcp/10.200.1.1/22: Permission denied 
+NET other-container-subnet rc=7 curl: (7) Failed to connect to 10.200.99.2 port 3128 after 0 ms: Couldn't connect to server http=000 
+NET proxy-download-50MB rc=0 bytes=39223207 seconds=1.859609 bytes_per_s=21092179 
+NET proxy-40-small-requests rc=0  
+NET loopback-server rc=0 http=200 
+NET_DONE
+MODE_EXIT 0 1794099498.849782473

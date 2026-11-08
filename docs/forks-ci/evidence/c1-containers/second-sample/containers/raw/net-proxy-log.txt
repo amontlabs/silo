@@ -1,0 +1,15 @@
+-- squid access log, requests from the container (10.200.1.2)
+1794097979.992    138 10.200.1.2 TCP_MISS/200 256221 GET http://archive.ubuntu.com/ubuntu/dists/noble/InRelease - HIER_DIRECT/91.189.92.23 -
+1794097980.131    138 10.200.1.2 TCP_MISS/200 256221 GET http://archive.ubuntu.com/ubuntu/dists/noble/InRelease - HIER_DIRECT/91.189.92.23 -
+1794097980.270    138 10.200.1.2 TCP_MISS/200 256221 GET http://archive.ubuntu.com/ubuntu/dists/noble/InRelease - HIER_DIRECT/91.189.92.23 -
+1794097980.409    138 10.200.1.2 TCP_MISS/200 256221 GET http://archive.ubuntu.com/ubuntu/dists/noble/InRelease - HIER_DIRECT/91.189.92.23 -
+1794097980.548    138 10.200.1.2 TCP_MISS/200 256221 GET http://archive.ubuntu.com/ubuntu/dists/noble/InRelease - HIER_DIRECT/91.189.92.23 -
+1794097980.687    138 10.200.1.2 TCP_MISS/200 256221 GET http://archive.ubuntu.com/ubuntu/dists/noble/InRelease - HIER_DIRECT/91.189.92.23 -
+1794097980.826    138 10.200.1.2 TCP_MISS/200 256221 GET http://archive.ubuntu.com/ubuntu/dists/noble/InRelease - HIER_DIRECT/91.189.92.23 -
+1794097980.965    138 10.200.1.2 TCP_MISS/200 256221 GET http://archive.ubuntu.com/ubuntu/dists/noble/InRelease - HIER_DIRECT/91.189.92.23 -
+1794097981.104    138 10.200.1.2 TCP_MISS/200 256221 GET http://archive.ubuntu.com/ubuntu/dists/noble/InRelease - HIER_DIRECT/91.189.92.23 -
+1794097981.244    139 10.200.1.2 TCP_MISS/200 256221 GET http://archive.ubuntu.com/ubuntu/dists/noble/InRelease - HIER_DIRECT/91.189.92.23 -
+1794097981.383    138 10.200.1.2 TCP_MISS/200 256221 GET http://archive.ubuntu.com/ubuntu/dists/noble/InRelease - HIER_DIRECT/91.189.92.23 -
+1794097981.522    138 10.200.1.2 TCP_MISS/200 256221 GET http://archive.ubuntu.com/ubuntu/dists/noble/InRelease - HIER_DIRECT/91.189.92.23 -
+-- canary log (the host service; nothing from 10.200.1.2 may appear)
+0

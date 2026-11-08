@@ -1,0 +1,12 @@
+PHASE git_clone_express 1.46 0
+PHASE apt_update 1.42 0
+PHASE apt_download 15.00 0
+PHASE apt_unpack_configure 21.54 0
+PHASE npm_install 10.69 0
+PHASE rustup_install 9.77 0
+PHASE cargo_install_hexyl 17.28 0
+PHASE git_clone_zlib 0.93 0
+PHASE make_zlib 2.88 0
+WORKLOAD_DONE
+WORKLOAD_TOTAL 80.98
+WORKLOAD_END

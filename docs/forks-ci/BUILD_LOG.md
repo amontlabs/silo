@@ -121,3 +121,30 @@ Both owner decisions:
   - **Open:** on Linux a `silo fork -n N` shares a manual-kind "silo-fork-<id>" checkpoint that stays on the source. It cannot be removed after the forks exist (they use the snapshot member, so deletion is refused as in use), and a fork-point kind removed with its last fork would need the macOS `release_fork_point` machinery rebuilt on Linux's snapshot lineage; not done here.
   - **Not done:** a macOS fork timing (no macOS computer on Dev), the Linux KVM host.
   - **Reviews:** Fable LGTM, Opus LGTM.
+
+### 8 Nov 2026: phase C1 measured (crun containers against the microVM)
+
+- **Question and scope.** Is an opt-in container computer on Linux hosts (crun, rootless, all capabilities
+  dropped, no-new-privs, a seccomp deny-list, Landlock from a small init shim, its own network namespace with a
+  veth pair and default-deny nftables to a host proxy, an overlay root over the guest image, cgroup v2
+  limits) worth building? Measurements only; nothing is built into Silo. Scripts in
+  `docs/forks-ci/containers/`, workflow `.github/workflows/containers-c1.yml` (only for changes there and by
+  hand), results in [evidence/c1-containers](evidence/c1-containers/README.md).
+- **Where.** The GitHub ubuntu-24.04 runner (a cloud VM: the microVM runs on nested KVM, the containers run on
+  the runner's kernel); the container and microVM measurements ran in the same job on the same CPU (EPYC
+  9V74, run 42429983339). The owner's Linux machine was offline. Landlock ABI 8 on the kernel (7.0.0-azure).
+- **Numbers** (N=3, medians): ready shell 0.09 s against 5.31 s for the microVM; fork 0.20 s against 13.10 s
+  (10.28 s without a desktop); ten forks at once 1.10 s (four microVM forks 32.09 s; ten did not fit in the
+  runner's memory); idle memory 4.1 MiB against 840.8 MiB; ten Xfce and Selkies desktops 2015 MiB in total
+  and serving after 28.4 s. The CPU-bound workload steps (unpack, cargo, make) were 11-20 % faster in the
+  container; downloads through the proxy were slower (apt 61.6 s against 15.0 s), and the choice of proxy
+  moved them by 3-5 times (tinyproxy against Squid).
+- **Baseline held.** Capabilities, seccomp, Landlock, the network policy and the masked paths were checked from
+  inside; the desktop (Xvfb, PulseAudio, Xfce, Selkies, Cua Driver's MCP server) runs; Chrome needs
+  `--no-sandbox` because the baseline blocks the user namespace its sandbox uses.
+- **Costs found.** A root step for the veth and nftables; Ubuntu 24.04's
+  `apparmor_restrict_unprivileged_userns` has to be 0; cgroup delegation; a fork's manifest diff must compare
+  upper trees both ways (a deleted upper-only file leaves no whiteout; whiteouts are 0/0 devices).
+- **Conclusion.** Worth building as an opt-in kind if the owner accepts the shared kernel; the F2 forks do not
+  close the gap in start time or memory. Not measured: bare metal, a screenshot through Cua Driver, a Selkies
+  client session, Silo's secrets proxy in a container, the isolation evals. The decision is the owner's.

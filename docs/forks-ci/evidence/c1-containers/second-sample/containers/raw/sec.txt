@@ -1,0 +1,47 @@
+UP 1794097878.016439942
+READY 1794097878.107632340
+CHECK id uid=0(root) gid=0(root) groups=0(root)
+CHECK status.CapInh 0000000000000000
+CHECK status.CapPrm 0000000000000000
+CHECK status.CapEff 0000000000000000
+CHECK status.CapBnd 0000000000000000
+CHECK status.CapAmb 0000000000000000
+CHECK status.NoNewPrivs 1
+CHECK status.Seccomp 2
+CHECK uid_map  0 0 1; 1 1 65535;
+CHECK syscall.io_uring_setup result=-1 errno=EPERM
+CHECK syscall.io_uring_enter result=-1 errno=EPERM
+CHECK syscall.io_uring_register result=-1 errno=EPERM
+CHECK syscall.keyctl result=-1 errno=EPERM
+CHECK syscall.add_key result=-1 errno=EPERM
+CHECK syscall.request_key result=-1 errno=EPERM
+CHECK syscall.bpf result=-1 errno=EPERM
+CHECK syscall.perf_event_open result=-1 errno=EPERM
+CHECK syscall.userfaultfd result=-1 errno=EPERM
+CHECK syscall.clone3 result=-1 errno=ENOSYS
+CHECK syscall.getpid(control) result=32 errno=-
+CHECK unshare(CLONE_NEWUSER) result=-1 errno=EPERM
+CHECK tcp-connect-127.0.0.1:3128 ECONNREFUSED  (ECONNREFUSED = Landlock allowed the attempt; EACCES = Landlock denied it)
+CHECK tcp-connect-127.0.0.1:9 EACCES  (ECONNREFUSED = Landlock allowed the attempt; EACCES = Landlock denied it)
+CHECK unshare-user unshare: unshare failed: Operation not permitted
+rc=1
+CHECK mount-tmpfs mount: /mnt: permission denied.
+       dmesg(1) may have more information after failed mount system call.
+rc=32
+CHECK write-proc-sys /silo/mode-sec.sh: line 11: /proc/sys/kernel/hostname: Read-only file system
+rc=1
+CHECK read-proc-kcore 0
+CHECK read-proc-keys 0
+CHECK read-proc-sched_debug head: cannot open '/proc/sched_debug' for reading: No such file or directory
+0
+CHECK write-sys touch: cannot touch '/sys/c1': Read-only file system
+rc=1
+CHECK write-boot mkdir: cannot create directory ‘/boot/c1’: Permission denied
+rc=1  (outside Landlock's writable paths)
+CHECK write-media touch: cannot touch '/media/c1': Permission denied
+rc=1  (outside Landlock's writable paths)
+CHECK write-tmp rc=0  (inside)
+CHECK write-usr-local rc=0  (inside)
+CHECK dev-nodes core fd full mqueue null ptmx pts random shm stderr stdin stdout tty urandom zero 
+CHECK mountinfo-root overlay rw,lowerdir=/mnt/c1/boot:/mnt/c1/base/rootfs,upperdir=/mnt/c1/ctr/sec1/upper,workdir=/mnt/c1/ctr/sec1/work,redirect_dir=nofollow,uuid=on,userxattr
+MODE_EXIT 0 1794097878.154357127

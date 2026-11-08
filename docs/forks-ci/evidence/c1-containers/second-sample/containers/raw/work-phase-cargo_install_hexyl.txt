@@ -1,0 +1,3 @@
+cargo_install_hexyl 12.29
+cargo_install_hexyl 12.39
+cargo_install_hexyl 11.97

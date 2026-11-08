@@ -1,0 +1,6 @@
+-- same 50 MB range direct from the host (no container, no proxy)
+bytes=39223207 seconds=1.430056 bytes_per_s=27427741
+-- the same 40 small requests direct from the host, one curl process (keep-alive)
+seconds=6.45
+-- the same 40 small requests direct from the host, a new curl process each (no keep-alive)
+seconds=24.89

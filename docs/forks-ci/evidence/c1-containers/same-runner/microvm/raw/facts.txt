@@ -1,0 +1,5 @@
+date: 2026-11-08T00:37:01Z
+machine: AMD EPYC 9V74 80-Core Processor, 15.6 GiB RAM (14.6 GiB available), 4 cores, Ubuntu 24.04.5 LTS, kernel 7.0.0-1017-azure, x86_64
+kvm: present; swap 3.0 GiB
+silo: /home/runner/work/_temp/prefix/silo-engine/silo (silo 0.1.0)
+scripts commit: 2b6afeb827012428a78ba65ea6756e0c454831de

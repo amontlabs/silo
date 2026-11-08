@@ -1,0 +1,13 @@
+table inet silo_c1 {
+	chain input {
+		type filter hook input priority filter - 10; policy accept;
+		iifname "vh*" tcp dport 3128 accept
+		iifname "vh*" counter packets 0 bytes 0 drop
+	}
+
+	chain forward {
+		type filter hook forward priority filter - 10; policy accept;
+		iifname "vh*" counter packets 0 bytes 0 drop
+		oifname "vh*" counter packets 0 bytes 0 drop
+	}
+}
