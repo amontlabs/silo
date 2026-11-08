@@ -8,7 +8,10 @@ namespace holds only the TAP, so everything it reaches goes through the gateway:
 
   * a public HTTPS host answers through the gateway's TLS interception (the gateway CA is the
     only trust anchor the check gives curl);
-  * private addresses (10.x, the host's own address, 169.254.169.254) are refused;
+  * private addresses (10.x, the host's own address, the gateway's own address, 169.254.169.254)
+    are refused;
+  * a descriptor that is a TUN device (`IFF_TUN`), not a TAP, is refused by the gateway with
+    `invalid_frame_carrier`;
   * a `$MSB_<NAME>` placeholder in a header is replaced for an allowed host, and the secret
     is a fake value, so no real secret is involved;
   * DNS goes to the gateway, and an answer with a private address is blocked;
@@ -44,7 +47,9 @@ import time
 PROTOCOL_VERSION = 1
 SECRET_NAME = "CT1_FAKE_TOKEN"
 TAP_NAME = "tap0"
+TUN_NAME = "tun0"
 TUNSETIFF = 0x400454CA
+IFF_TUN = 0x0001
 IFF_TAP = 0x0002
 IFF_NO_PI = 0x1000
 PUBLISHED_GUEST_PORT = 8080
@@ -178,9 +183,12 @@ def configure_interface(ready):
 def inside_namespace(arguments):
     """Runs as the namespace's root; the host sees an ordinary user."""
     link = socket.socket(fileno=arguments.link_fd)
+    tun_link = socket.socket(fileno=arguments.tun_link_fd)
     tun = os.open("/dev/net/tun", os.O_RDWR | os.O_CLOEXEC)
     fcntl.ioctl(tun, TUNSETIFF, struct.pack("16sH22x", TAP_NAME.encode(), IFF_TAP | IFF_NO_PI))
     link.sendmsg([b"tap\n"], [(socket.SOL_SOCKET, socket.SCM_RIGHTS, array.array("i", [tun]))])
+    # The gateway now holds the only descriptor of the device; this process keeps none.
+    os.close(tun)
     reader = link.makefile("r")
     setup = json.loads(reader.readline())
     ready = setup["ready"]
@@ -202,6 +210,14 @@ def inside_namespace(arguments):
     # /sys still shows the namespace sysfs was mounted in; the kernel interface list is this one's.
     interfaces = sorted(name for _, name in socket.if_nameindex())
     check(results, "the namespace holds only a loopback and the TAP", interfaces == ["lo", TAP_NAME], interfaces)
+
+    # A TUN device (a layer-3 carrier) handed over as the frame descriptor must be refused by the
+    # gateway. It is opened only now so that it is not in the interface list checked above.
+    wrong = os.open("/dev/net/tun", os.O_RDWR | os.O_CLOEXEC)
+    fcntl.ioctl(wrong, TUNSETIFF, struct.pack("16sH22x", TUN_NAME.encode(), IFF_TUN | IFF_NO_PI))
+    tun_link.sendmsg([b"tun\n"], [(socket.SOL_SOCKET, socket.SCM_RIGHTS, array.array("i", [wrong]))])
+    os.close(wrong)
+    receive_exactly(tun_link, 1)  # the host has tried it
 
     server = subprocess.Popen(
         [sys.executable, "-m", "http.server", str(PUBLISHED_GUEST_PORT), "--bind", guest],
@@ -250,6 +266,8 @@ def inside_namespace(arguments):
             ("the link-local metadata address", "http://169.254.169.254/latest/meta-data/"),
             ("the host's own address", f"http://{setup['host_ip']}:{setup['host_listener_port']}/"),
             ("the host's own address over TLS", f"https://{setup['host_ip']}:{setup['host_listener_port']}/"),
+            ("the gateway's own address", f"http://{ready['gateway_ipv4']}:80/"),
+            ("the gateway's own address over TLS", f"https://{ready['gateway_ipv4']}:443/"),
         ):
             code, status, _ = curl(["-k", "--connect-timeout", "5", "-o", "/dev/null", url], timeout=8)
             check(results, f"{label} is refused", code != 0 and status in ("000", ""), {"curl": code, "status": status})
@@ -354,7 +372,44 @@ def alive(pid):
 
 GUEST_MAC = [0x02, 0x53, 0x49, 0x4C, 0x4F, 0x01]
 GUEST_IPV4 = "172.30.0.6"
+GATEWAY_IPV4 = "172.30.0.5"
 ALLOWED_HOSTS = ["api.github.com"]
+
+
+def init_message(cert_pem, key_pem, fake_value):
+    return {
+        "type": "init", "version": PROTOCOL_VERSION, "profile": "container",
+        "slot": 1, "guest_ipv4": GUEST_IPV4, "guest_mac": GUEST_MAC, "mtu": 1500,
+        "dns_nameservers": [], "intercepted_ports": [443],
+        "loopback_ports": [{"host_port": 0, "guest_port": PUBLISHED_GUEST_PORT, "protocol": "tcp"}],
+        "ca": {"cert_pem": cert_pem, "key_pem": key_pem},
+        "secrets": [{
+            "name": SECRET_NAME, "value": fake_value,
+            "placeholder": f"$MSB_{SECRET_NAME}", "allowed_hosts": ALLOWED_HOSTS,
+        }],
+        "github_profile_json": None,
+    }
+
+
+def refused_carrier(gateway, fd, usage_log, fake_value):
+    """Starts the gateway with `fd` as its frame descriptor and returns its answer to a valid
+    `init` (the error code, or the type) and its exit code."""
+    cert_pem, key_pem = generate_ca(gateway)
+    control, control_child = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
+    pid = start_gateway(gateway, fd, control_child.fileno(), usage_log)
+    control_child.close()
+    try:
+        control.settimeout(30)
+        send_message(control, init_message(cert_pem, key_pem, fake_value))
+        answer = receive_message(control)
+        _, status = os.waitpid(pid, 0)
+        pid = None
+        return answer.get("code", answer.get("type")), os.waitstatus_to_exitcode(status)
+    finally:
+        control.close()
+        if pid is not None and alive(pid):
+            os.kill(pid, signal.SIGTERM)
+            os.waitpid(pid, 0)
 
 
 class DirectGateway:
@@ -365,18 +420,7 @@ class DirectGateway:
         self.control, control_child = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
         self.pid = start_gateway(gateway, tap_fd, control_child.fileno(), usage_log)
         control_child.close()
-        send_message(self.control, {
-            "type": "init", "version": PROTOCOL_VERSION, "profile": "container",
-            "slot": 1, "guest_ipv4": GUEST_IPV4, "guest_mac": GUEST_MAC, "mtu": 1500,
-            "dns_nameservers": [], "intercepted_ports": [443],
-            "loopback_ports": [{"host_port": 0, "guest_port": PUBLISHED_GUEST_PORT, "protocol": "tcp"}],
-            "ca": {"cert_pem": cert_pem, "key_pem": key_pem},
-            "secrets": [{
-                "name": SECRET_NAME, "value": fake_value,
-                "placeholder": f"$MSB_{SECRET_NAME}", "allowed_hosts": ALLOWED_HOSTS,
-            }],
-            "github_profile_json": None,
-        })
+        send_message(self.control, init_message(cert_pem, key_pem, fake_value))
         self.ready = receive_message(self.control)
         if self.ready.get("type") != "ready":
             raise RuntimeError(f"the gateway did not become ready: {self.ready.get('code', self.ready.get('type'))}")
@@ -409,7 +453,8 @@ class HarnessGateway:
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, pass_fds=[tap_fd],
         )
         self.process.stdin.write(json.dumps({
-            "slot": 1, "guest_ipv4": GUEST_IPV4, "guest_mac": GUEST_MAC, "mtu": 1500,
+            "slot": 1, "guest_ipv4": GUEST_IPV4, "gateway_ipv4": GATEWAY_IPV4,
+            "guest_mac": GUEST_MAC, "mtu": 1500,
             "published_ports": [PUBLISHED_GUEST_PORT],
             "secrets": [{"name": SECRET_NAME, "value": fake_value, "allowed_hosts": ALLOWED_HOSTS}],
             "usage_log": usage_log,
@@ -437,6 +482,34 @@ class HarnessGateway:
             self.process.wait(timeout=10)
 
 
+def receive_descriptor(link, marker):
+    """Receives one descriptor sent with `marker` as its four-byte message."""
+    data, ancillary, _, _ = link.recvmsg(len(marker), socket.CMSG_LEN(struct.calcsize("i")))
+    if data != marker or not ancillary:
+        raise RuntimeError(f"the namespace did not hand over a descriptor ({marker!r})")
+    received = array.array("i")
+    received.frombytes(ancillary[0][2][: struct.calcsize("i")])
+    return received[0]
+
+
+def parse_usage_log(text):
+    """The usage log is one JSON object per line. Returns (events, number of lines that are not)."""
+    events, malformed = [], 0
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        try:
+            event = json.loads(line)
+        except ValueError:
+            malformed += 1
+            continue
+        if isinstance(event, dict):
+            events.append(event)
+        else:
+            malformed += 1
+    return events, malformed
+
+
 def on_host(arguments):
     gateway = os.path.abspath(arguments.gateway)
     scratch = tempfile.mkdtemp(prefix="ct1-host-")
@@ -461,22 +534,20 @@ def on_host(arguments):
     threading.Thread(target=accept_loop, daemon=True).start()
 
     link_host, link_child = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
+    tun_host, tun_child = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
     namespace = subprocess.Popen(
         [
             "unshare", "--user", "--map-root-user", "--net", "--mount", "--",
-            sys.executable, os.path.abspath(__file__), "--in-namespace", "--link-fd", str(link_child.fileno()),
+            sys.executable, os.path.abspath(__file__), "--in-namespace",
+            "--link-fd", str(link_child.fileno()), "--tun-link-fd", str(tun_child.fileno()),
         ],
-        pass_fds=[link_child.fileno()],
+        pass_fds=[link_child.fileno(), tun_child.fileno()],
     )
     link_child.close()
+    tun_child.close()
     backend = None
     try:
-        data, ancillary, _, _ = link_host.recvmsg(16, socket.CMSG_LEN(struct.calcsize("i")))
-        if data != b"tap\n" or not ancillary:
-            raise RuntimeError("the namespace did not hand over a TAP descriptor")
-        received = array.array("i")
-        received.frombytes(ancillary[0][2][: struct.calcsize("i")])
-        tap_fd = received[0]
+        tap_fd = receive_descriptor(link_host, b"tap\n")
 
         if arguments.harness:
             backend = HarnessGateway(os.path.abspath(arguments.harness), gateway, tap_fd, usage_log, fake_value)
@@ -489,11 +560,23 @@ def on_host(arguments):
             "rebind_names": [name for name in REBIND_NAMES if resolves_privately(name)],
         }
         link_host.sendall((json.dumps(setup) + "\n").encode())
+        results = []
+        wrong_fd = receive_descriptor(tun_host, b"tun\n")
+        try:
+            answer, exit_code = refused_carrier(gateway, wrong_fd, usage_log + ".refused", fake_value)
+        finally:
+            os.close(wrong_fd)
+        tun_host.sendall(b"x")
+        check(
+            results,
+            "a TUN device handed over as the frame descriptor is refused with invalid_frame_carrier",
+            answer == "invalid_frame_carrier" and exit_code != 0,
+            {"answer": answer, "exit": exit_code},
+        )
         reader = link_host.makefile("r")
         if json.loads(reader.readline())["event"] != "listening":
             raise RuntimeError("the namespace did not start its listener")
 
-        results = []
         published = ready["loopback_ports"][0]["host_port"]
         try:
             with socket.create_connection(("127.0.0.1", published), timeout=10) as connection:
@@ -522,17 +605,25 @@ def on_host(arguments):
                 usage = handle.read()
         except OSError:
             usage = ""
+        events, malformed = parse_usage_log(usage)
+        used = [event for event in events if event.get("kind") == "used"]
         check(
             results,
-            "the credential-use log names the secret, the host and the method, and never the value",
-            SECRET_NAME in usage and "api.github.com" in usage and fake_value not in usage,
-            {"lines": len(usage.splitlines()), "first_line": usage.splitlines()[0] if usage else None},
+            "the credential-use log is JSON lines; it names the secret, the host and the method, and never the value",
+            not malformed
+            and any(
+                (event.get("secret"), event.get("host"), event.get("method")) == (SECRET_NAME, "api.github.com", "GET")
+                for event in used
+            )
+            and fake_value not in usage,
+            {"lines": len(events), "malformed_lines": malformed, "first_event": events[0] if events else None},
         )
+        outside = [event for event in used if event.get("host") not in ALLOWED_HOSTS or event.get("secret") != SECRET_NAME]
         check(
             results,
             "the secret was used for api.github.com only, not for a request to another host",
-            "example.com" not in usage and usage.count('"kind":"used"') == usage.count("api.github.com"),
-            {"used_events": usage.count('"kind":"used"')},
+            bool(used) and not outside,
+            {"used_events": len(used), "outside_the_allowed_hosts": outside},
         )
         stopped, exit_code = backend.shutdown()
         backend = None
@@ -566,10 +657,11 @@ def on_host(arguments):
                 namespace.wait(timeout=10)
             except subprocess.TimeoutExpired:
                 namespace.kill()
-        try:
-            os.unlink(usage_log)
-        except OSError:
-            pass
+        for path in (usage_log, usage_log + ".refused"):
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
 
 
 def main():
@@ -579,6 +671,7 @@ def main():
     parser.add_argument("--evidence-dir")
     parser.add_argument("--in-namespace", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--link-fd", type=int, help=argparse.SUPPRESS)
+    parser.add_argument("--tun-link-fd", type=int, help=argparse.SUPPRESS)
     arguments = parser.parse_args()
     if arguments.in_namespace:
         inside_namespace(arguments)

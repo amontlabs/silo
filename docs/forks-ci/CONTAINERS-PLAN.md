@@ -17,7 +17,7 @@ the advisor (gemini-4-argon), 8 Nov 2026. Where they differed, the choice and th
   (Fable; the advisor proposed a sibling owner module, which would duplicate the layers above `msb`.)
 - **Network and secrets: one stack, two carriers.** `silo-macos-gateway` already runs MicroSandbox's network
   stack (the Public policy, header substitution after upstream TLS verification, a per-computer CA, DNS,
-  published ports) as a host process for macOS VMs. It becomes `silo-gateway` and also runs on Linux; for a
+  published ports) as a host process for macOS VMs. It keeps that name and also runs on Linux; for a
   container its frames come from a TAP device created inside the container's own user and network namespace
   (no root step, no veth, no nftables). The namespace holds only the TAP, so the gateway is the only way out.
   Linux VMs keep MicroSandbox's in-process stack: moving them would change boundaries 2 and 3 for every
@@ -52,8 +52,8 @@ when CI is green and the code and Fable reviews (with a threat-model review) pas
 
 | Phase | What | Live check | Status |
 |---|---|---|---|
-| CT1 | `silo-gateway` on Linux: lift the build and `cfg` gates, TAP carrier, CA in the Linux credential file store | A bare user+net namespace with a TAP: curl through the gateway reaches a public host; a private address is refused; a placeholder header is substituted for an allowed host | Built ([#92](https://github.com/amontlabs/silo/pull/92), [evidence](evidence/ct1-gateway/README.md)); the binary keeps the name `silo-macos-gateway` |
-| CT2 | Container runtime core: `engine/src/containers/`, image unpack, overlay chain, crun config (`oci-spec` crate), cgroup delegation, create/start/exec/stop/drop, `kind: container` in API, CLI and app list | `linux-host-e2e.sh` with a container computer | Planned |
+| CT1 | `silo-macos-gateway` on Linux: lift the build and `cfg` gates, TAP carrier, CA in the Linux credential file store | A bare user+net namespace with a TAP: curl through the gateway reaches a public host; a private address is refused; a placeholder header is substituted for an allowed host | Built ([#92](https://github.com/amontlabs/silo/pull/92), [evidence](evidence/ct1-gateway/README.md)); the binary keeps its name; the gateway fails closed, so a failed update stops it (CT3 adds restart) |
+| CT2 | Container runtime core: `engine/src/containers/`, image unpack, overlay chain, crun config (`oci-spec` crate), cgroup delegation, create/start/exec/stop/drop, `kind: container` in API, CLI and app list; `silo host init` checks and names the host prerequisites, including `kernel.apparmor_restrict_unprivileged_userns=0` (CT1's CI sets it by hand) | `linux-host-e2e.sh` with a container computer | Planned |
 | CT3 | Network, secrets, GitHub access, ports and URLs, SSH, the in-guest client, for containers | The CT1 checks from inside a container; a published port answers; `ssh` works | Planned |
 | CT4 | Checkpoints, forks, quiet forks, diff, keep, undo, retention | Checkpoint, fork `-n 4`, exec, diff lists a change, keep, undo | Planned |
 | CT5 | Desktop and computer use; the app's container kind and warning | Desktop on, viewer answers, Cua Driver lists windows, a screenshot artifact | Planned |

@@ -243,8 +243,9 @@ jobs:
   # tests, then a live check with no root step in the path (scripts/gateway-live-check.py). An
   # unprivileged user makes a user and network namespace with `unshare`, creates a TAP in it and hands
   # the descriptor to the gateway, once driven by the script and once started by the engine's own code.
-  # sudo only installs packages and relaxes Ubuntu's host-wide guard on unprivileged user namespaces,
-  # which `silo host init` names as a prerequisite and never sets. The secret is a fake value.
+  # sudo only installs packages and relaxes Ubuntu's host-wide guard on unprivileged user namespaces
+  # (kernel.apparmor_restrict_unprivileged_userns); CT2 adds that prerequisite to `silo host init`.
+  # The secret is a fake value.
   gateway:
     name: Gateway as a container's network
     runs-on: ubuntu-24.04
@@ -283,6 +284,8 @@ jobs:
       - name: Test the gateway crate
         timeout-minutes: 30
         run: node scripts/test-gateway.mjs
+      - name: Test the live check's own helpers
+        run: python3 -m unittest discover -s scripts -p 'test_gateway_live_check.py'
       - name: Build the engine harness
         timeout-minutes: 40
         run: cargo build --locked --manifest-path Cargo.toml -p silo-engine --example gateway_tap_harness

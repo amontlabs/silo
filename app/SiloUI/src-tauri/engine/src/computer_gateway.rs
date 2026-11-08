@@ -12,15 +12,32 @@
 //! This module starts and drives one gateway for an already-open TAP descriptor. It creates no
 //! namespace and runs no container: the container runtime (a later phase) opens the TAP and
 //! calls [`Gateway::start`]. The macOS supervisor
-//! (`macos_computers/proxy/supervisor.rs`) speaks the same protocol for VMs and is unchanged.
+//! (`macos_computers/proxy/supervisor.rs`) speaks the same protocol for VMs; the framing, the
+//! descriptor handoff, the readiness checks and the acknowledgement rule are shared in
+//! [`crate::gateway_control`].
+//!
+//! The gateway fails closed. An update or stats exchange that times out, is answered with
+//! anything but its own acknowledgement, or hits a broken link stops the gateway, and every
+//! later call answers "unavailable": a refused or half-applied secret change must never look
+//! applied, and a late acknowledgement must never be read as the answer to the next request.
+//! A stopped gateway is not restarted here; restart on failure is planned for CT3.
+//!
+//! Dropping a [`Gateway`], [`Gateway::shutdown`] and a failed update all wait for the process,
+//! and a gateway that hangs takes up to about 10 s to stop (5 s for the shutdown exchange and
+//! 5 s for the process to exit, then it is killed). CT3's caller must therefore not drop a
+//! `Gateway` on an async worker thread; stop it on a blocking thread.
 
-use serde::{Deserialize, Serialize};
+use crate::gateway_control::{
+    duplicate_for_child, is_update_ack, pass_descriptors, read_response, validate_ready,
+    write_frame, ChildGuard, Expected, PROTOCOL_VERSION, USAGE_LOG_ENV,
+};
+pub use crate::gateway_control::{generate_ca, PublishedPort, Ready};
+use serde::Serialize;
 use serde_json::Value;
 use std::{
-    io::{self, Read, Write},
     net::Ipv4Addr,
-    os::fd::{AsRawFd, FromRawFd, OwnedFd},
-    os::unix::{net::UnixStream, process::CommandExt},
+    os::fd::{AsRawFd, OwnedFd},
+    os::unix::net::UnixStream,
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     time::{Duration, Instant},
@@ -29,19 +46,17 @@ use zeroize::{Zeroize, Zeroizing};
 
 /// The gateway executable's file name, beside the engine's own executable.
 pub const GATEWAY_BINARY: &str = "silo-macos-gateway";
-const PROTOCOL_VERSION: u16 = 1;
-const MAX_MESSAGE_BYTES: usize = 1024 * 1024;
-const FRAME_FD: i32 = 3;
-const CONTROL_FD: i32 = 4;
 const START_TIMEOUT: Duration = Duration::from_secs(60);
-const UPDATE_TIMEOUT: Duration = Duration::from_secs(6);
+const UPDATE_TIMEOUT: Duration = if cfg!(test) {
+    Duration::from_millis(300)
+} else {
+    Duration::from_secs(6)
+};
 const STOP_TIMEOUT: Duration = if cfg!(test) {
     Duration::from_millis(300)
 } else {
     Duration::from_secs(5)
 };
-/// Names the file the gateway appends credential-use events to.
-const USAGE_LOG_ENV: &str = "SILO_SECRET_USAGE_LOG";
 const NOT_READY: &str = "The computer network gateway did not become ready.";
 const UNAVAILABLE: &str = "The computer network gateway is unavailable.";
 
@@ -56,6 +71,9 @@ pub struct Secret {
 pub struct Params {
     pub slot: u16,
     pub guest_ipv4: Ipv4Addr,
+    /// The gateway's own address on the computer's /30 link (also its DNS server), which the
+    /// gateway must report back.
+    pub gateway_ipv4: Ipv4Addr,
     pub guest_mac: [u8; 6],
     pub mtu: u16,
     /// The computer's own TCP ports to publish on the host's loopback (port zero is asked of
@@ -69,32 +87,6 @@ pub struct Params {
     pub usage_log: Option<PathBuf>,
     /// Where the gateway's own output goes; discarded when absent.
     pub log: Option<std::fs::File>,
-}
-
-/// A port the gateway published on the host's loopback.
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-pub struct PublishedPort {
-    pub host_port: u16,
-    pub guest_port: u16,
-    pub protocol: String,
-}
-
-/// What the gateway reports once it serves: the identity it gave the computer's side.
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct Ready {
-    pub version: u16,
-    #[serde(rename = "type")]
-    pub kind: String,
-    pub slot: u16,
-    pub guest_ipv4: Ipv4Addr,
-    pub gateway_ipv4: Ipv4Addr,
-    pub prefix_len: u8,
-    pub dns_ipv4: Ipv4Addr,
-    pub guest_mac: [u8; 6],
-    pub gateway_mac: [u8; 6],
-    pub mtu: u16,
-    pub ca_cert_pem: String,
-    pub loopback_ports: Vec<PublishedPort>,
 }
 
 #[derive(Serialize)]
@@ -174,20 +166,7 @@ impl Gateway {
         if let Some(usage) = &params.usage_log {
             command.env(USAGE_LOG_ENV, usage);
         }
-        let (frame_source, control_source) = (tap_fd.as_raw_fd(), control_fd.as_raw_fd());
-        // SAFETY: pre_exec performs only async-signal-safe descriptor operations.
-        unsafe {
-            command.pre_exec(move || {
-                if libc::dup2(frame_source, FRAME_FD) < 0
-                    || libc::dup2(control_source, CONTROL_FD) < 0
-                {
-                    return Err(io::Error::last_os_error());
-                }
-                libc::close(frame_source);
-                libc::close(control_source);
-                Ok(())
-            });
-        }
+        pass_descriptors(&mut command, tap_fd.as_raw_fd(), control_fd.as_raw_fd());
         let child = command
             .spawn()
             .map_err(|_| "Silo could not start the computer network gateway.".to_owned())?;
@@ -254,12 +233,14 @@ impl Gateway {
         let request = serde_json::json!({"version": PROTOCOL_VERSION, "type": "stats"});
         let response = self.exchange(&request)?;
         if response.get("type").and_then(Value::as_str) != Some("stats") {
+            self.fail();
             return Err(UNAVAILABLE.into());
         }
         Ok(response.get("counters").cloned().unwrap_or(Value::Null))
     }
 
-    /// Asks the gateway to stop, then makes sure it has.
+    /// Asks the gateway to stop, then makes sure it has. A hung gateway takes up to about 10 s;
+    /// see the module documentation.
     pub fn shutdown(mut self) {
         self.stop();
     }
@@ -283,6 +264,16 @@ impl Gateway {
         let _ = child.wait();
     }
 
+    /// Stops the gateway at once, without asking: its control link can no longer be trusted
+    /// (the answer did not come, or was not the one asked for), so whatever policy it holds is
+    /// unknown. Every later call answers "unavailable".
+    fn fail(&mut self) {
+        if let Some(mut child) = self.child.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+
     fn ensure_running(&mut self) -> Result<(), String> {
         if self.is_running() {
             Ok(())
@@ -303,13 +294,8 @@ impl Gateway {
         let response = self.exchange(&request);
         zeroize_value(&mut request);
         let response = response?;
-        let acknowledged = response.get("type").and_then(Value::as_str) == Some("ack")
-            && response.get("revision").and_then(Value::as_u64) == Some(revision)
-            && response
-                .get("closed_previous_generation")
-                .and_then(Value::as_bool)
-                == Some(true);
-        if !acknowledged {
+        if !is_update_ack(&response, revision) {
+            self.fail();
             return Err("The computer network gateway rejected the policy update.".into());
         }
         self.revision = revision;
@@ -323,7 +309,10 @@ impl Gateway {
         let result =
             write_frame(&mut self.control, &body).and_then(|()| read_response(&mut self.control));
         body.zeroize();
-        result.map_err(|_| UNAVAILABLE.to_owned())
+        result.map_err(|_| {
+            self.fail();
+            UNAVAILABLE.to_owned()
+        })
     }
 }
 
@@ -342,25 +331,6 @@ fn zeroize_value(value: &mut Value) {
     }
 }
 
-struct ChildGuard(Option<Child>);
-
-impl ChildGuard {
-    fn take(&mut self) -> Child {
-        self.0.take().expect("gateway child guard owns its child")
-    }
-}
-
-impl Drop for ChildGuard {
-    fn drop(&mut self) {
-        if let Some(child) = &mut self.0 {
-            if child.try_wait().ok().flatten().is_none() {
-                let _ = child.kill();
-            }
-            let _ = child.wait();
-        }
-    }
-}
-
 /// Sends `init` and returns the validated `ready`.
 fn handshake(
     control: &mut UnixStream,
@@ -371,6 +341,7 @@ fn handshake(
     let Params {
         slot,
         guest_ipv4,
+        gateway_ipv4,
         guest_mac,
         mtu,
         published_ports,
@@ -427,25 +398,22 @@ fn handshake(
         .map_err(|_| "The computer network gateway returned invalid readiness data.".to_owned())?;
     validate_ready(
         &ready,
-        slot,
-        guest_ipv4,
-        guest_mac,
-        mtu,
-        ca_cert_pem,
-        &published_ports,
+        &Expected {
+            slot,
+            guest_ipv4,
+            gateway_ipv4,
+            guest_mac,
+            mtu,
+            ca_certificate_pem: ca_cert_pem,
+        },
     )?;
+    validate_published_ports(&ready, &published_ports)?;
     Ok(ready)
 }
 
-fn validate_ready(
-    ready: &Ready,
-    slot: u16,
-    guest_ipv4: Ipv4Addr,
-    guest_mac: [u8; 6],
-    mtu: u16,
-    ca_cert_pem: &str,
-    published_ports: &[u16],
-) -> Result<(), String> {
+/// The container-specific part of the readiness check: the ports published are exactly the
+/// ones asked for, each bound on the host, over TCP.
+fn validate_published_ports(ready: &Ready, published_ports: &[u16]) -> Result<(), String> {
     let mut requested = published_ports.to_vec();
     requested.sort_unstable();
     let mut reported = ready
@@ -454,17 +422,7 @@ fn validate_ready(
         .map(|port| port.guest_port)
         .collect::<Vec<_>>();
     reported.sort_unstable();
-    if ready.version != PROTOCOL_VERSION
-        || ready.kind != "ready"
-        || ready.slot != slot
-        || ready.guest_ipv4 != guest_ipv4
-        || ready.guest_mac != guest_mac
-        || ready.mtu != mtu
-        || ready.gateway_ipv4 == guest_ipv4
-        || ready.gateway_mac == [0; 6]
-        || ready.gateway_mac[0] & 1 != 0
-        || ready.ca_cert_pem != ca_cert_pem
-        || requested != reported
+    if requested != reported
         || ready
             .loopback_ports
             .iter()
@@ -473,43 +431,6 @@ fn validate_ready(
         return Err("The computer network gateway returned inconsistent network identity.".into());
     }
     Ok(())
-}
-
-/// A CA from the gateway's own generator: the certificate, and the key (zeroized when dropped).
-pub fn generate_ca(binary: &Path) -> Result<(String, Zeroizing<String>), String> {
-    const FAILED: &str = "Silo could not generate the computer network CA.";
-    #[derive(Deserialize)]
-    struct Bundle {
-        cert_pem: String,
-        key_pem: String,
-    }
-    impl Drop for Bundle {
-        fn drop(&mut self) {
-            self.key_pem.zeroize();
-        }
-    }
-    let mut output = Command::new(binary)
-        .arg("--generate-ca")
-        .output()
-        .map_err(|_| FAILED.to_owned())?;
-    if !output.status.success() || !output.stderr.is_empty() {
-        output.stdout.zeroize();
-        return Err(FAILED.into());
-    }
-    let framed = Zeroizing::new(std::mem::take(&mut output.stdout));
-    let size = framed
-        .get(..4)
-        .map(|prefix| u32::from_be_bytes(prefix.try_into().expect("four-byte prefix")) as usize);
-    let body = match size {
-        Some(size) if size != 0 && size <= MAX_MESSAGE_BYTES && framed.len() == size + 4 => {
-            &framed[4..]
-        }
-        _ => return Err(FAILED.into()),
-    };
-    let mut bundle: Bundle = serde_json::from_slice(body).map_err(|_| FAILED.to_owned())?;
-    let cert = std::mem::take(&mut bundle.cert_pem);
-    let key = Zeroizing::new(std::mem::take(&mut bundle.key_pem));
-    Ok((cert, key))
 }
 
 /// The computer's stable CA, created through the gateway's generator on first use and kept in
@@ -530,48 +451,10 @@ pub fn computer_ca(
     ))
 }
 
-fn duplicate_for_child(fd: i32) -> Result<OwnedFd, String> {
-    // F_DUPFD_CLOEXEC avoids inheriting any descriptor except the two dup2 targets.
-    // SAFETY: `fcntl` is called on an open descriptor and returns a new owned one.
-    let duplicated = unsafe { libc::fcntl(fd, libc::F_DUPFD_CLOEXEC, 10) };
-    if duplicated < 0 {
-        return Err("Silo could not prepare the computer gateway descriptors.".into());
-    }
-    // SAFETY: `fcntl` returned a new descriptor that nothing else owns.
-    Ok(unsafe { OwnedFd::from_raw_fd(duplicated) })
-}
-
-fn write_frame(stream: &mut UnixStream, body: &[u8]) -> io::Result<()> {
-    if body.is_empty() || body.len() > MAX_MESSAGE_BYTES {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "invalid control frame",
-        ));
-    }
-    stream.write_all(&(body.len() as u32).to_be_bytes())?;
-    stream.write_all(body)
-}
-
-fn read_response(stream: &mut UnixStream) -> io::Result<Value> {
-    let mut prefix = [0u8; 4];
-    stream.read_exact(&mut prefix)?;
-    let size = u32::from_be_bytes(prefix) as usize;
-    if size == 0 || size > MAX_MESSAGE_BYTES {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "invalid control frame",
-        ));
-    }
-    let mut body = Zeroizing::new(vec![0; size]);
-    stream.read_exact(&mut body)?;
-    serde_json::from_slice(&body)
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid control response"))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::thread;
+    use std::{os::fd::FromRawFd, thread};
 
     const CERT: &str = "-----BEGIN CERTIFICATE-----\nx\n-----END CERTIFICATE-----";
     const KEY: &str = "-----BEGIN PRIVATE KEY-----\nx\n-----END PRIVATE KEY-----";
@@ -580,6 +463,7 @@ mod tests {
         Params {
             slot: 7,
             guest_ipv4: Ipv4Addr::new(172, 30, 0, 6),
+            gateway_ipv4: Ipv4Addr::new(172, 30, 0, 5),
             guest_mac: [2, 0x53, 0x49, 0x4c, 0x4f, 7],
             mtu: 1500,
             published_ports: ports,
@@ -655,7 +539,13 @@ mod tests {
     #[test]
     fn an_inconsistent_ready_is_refused() {
         type Change = fn(&mut Value);
-        let changes: [(&str, Change); 6] = [
+        let changes: [(&str, Change); 8] = [
+            ("a gateway address that was not asked for", |ready| {
+                ready["gateway_ipv4"] = "172.30.0.9".into()
+            }),
+            ("a dns server that is not the gateway", |ready| {
+                ready["dns_ipv4"] = "8.8.8.8".into()
+            }),
             ("another address", |ready| {
                 ready["guest_ipv4"] = "172.30.0.10".into()
             }),
@@ -719,6 +609,8 @@ mod tests {
     /// A gateway whose process is a long sleep: only the control link is real.
     fn with_sleeping_child(control: UnixStream) -> Gateway {
         let child = Command::new("sleep").arg("30").spawn().unwrap();
+        control.set_read_timeout(Some(UPDATE_TIMEOUT)).unwrap();
+        control.set_write_timeout(Some(UPDATE_TIMEOUT)).unwrap();
         Gateway {
             child: Some(child),
             control,
@@ -779,8 +671,92 @@ mod tests {
         assert_eq!(seen[0]["operation"]["placeholder"], "$MSB_TOKEN_A");
         assert_eq!(seen[1]["operation"]["kind"], "remove_secret");
         assert_eq!(seen[2]["operation"]["profile_json"], "{}");
-        // A rejected update does not consume its revision.
+        // A rejected update does not consume its revision, and it stops the gateway: what it
+        // holds is no longer known.
         assert_eq!(gateway.revision, 2);
+        assert!(!gateway.is_running());
+        assert!(gateway.remove_secret("TOKEN_A").is_err());
+        assert!(gateway.stats().is_err());
+    }
+
+    fn ack(revision: u64) -> Value {
+        serde_json::json!({"type": "ack", "version": 1, "revision": revision, "closed_previous_generation": true})
+    }
+
+    #[test]
+    fn a_late_ack_after_a_timed_out_update_is_never_taken_for_the_next_answer() {
+        let (control, mut peer) = UnixStream::pair().unwrap();
+        let server = thread::spawn(move || {
+            let first = read_response(&mut peer).unwrap();
+            assert_eq!(first["revision"], 1);
+            // Nothing is answered within the timeout; the ack arrives afterwards.
+            thread::sleep(UPDATE_TIMEOUT + Duration::from_millis(300));
+            let _ = write_frame(&mut peer, &serde_json::to_vec(&ack(1)).unwrap());
+            // The next request must never reach the gateway, so no second read is answered.
+            peer.set_read_timeout(Some(Duration::from_millis(300)))
+                .unwrap();
+            read_response(&mut peer).is_err()
+        });
+        let mut gateway = with_sleeping_child(control);
+        let pid = gateway.child.as_ref().unwrap().id();
+        let revoke = gateway.remove_secret("TOKEN_A");
+        assert!(revoke.is_err(), "a timed-out update is not applied");
+        assert!(!gateway.is_running(), "the gateway is stopped");
+        // SAFETY: signal 0 only checks that the process exists.
+        assert_ne!(unsafe { libc::kill(pid as i32, 0) }, 0);
+        thread::sleep(Duration::from_millis(400));
+        // The late ack is waiting on the link: a fresh call must still be unavailable.
+        let error = gateway.remove_secret("TOKEN_B").unwrap_err();
+        assert_eq!(error, UNAVAILABLE);
+        assert_eq!(gateway.stats().unwrap_err(), UNAVAILABLE);
+        assert!(
+            server.join().unwrap(),
+            "no request was sent after the failure"
+        );
+    }
+
+    #[test]
+    fn a_refused_update_is_not_taken_for_an_applied_one() {
+        let (control, mut peer) = UnixStream::pair().unwrap();
+        let server = thread::spawn(move || {
+            let request = read_response(&mut peer).unwrap();
+            let reply = serde_json::json!({"type": "error", "version": 1, "revision": request["revision"], "code": "invalid_revision"});
+            write_frame(&mut peer, &serde_json::to_vec(&reply).unwrap()).unwrap();
+        });
+        let mut gateway = with_sleeping_child(control);
+        assert!(gateway.remove_secret("TOKEN_A").is_err());
+        server.join().unwrap();
+        assert!(!gateway.is_running());
+        assert_eq!(gateway.remove_secret("TOKEN_A").unwrap_err(), UNAVAILABLE);
+    }
+
+    #[test]
+    fn an_ack_of_another_protocol_version_is_refused() {
+        let (control, mut peer) = UnixStream::pair().unwrap();
+        let server = thread::spawn(move || {
+            let request = read_response(&mut peer).unwrap();
+            let mut reply = ack(request["revision"].as_u64().unwrap());
+            reply["version"] = 2.into();
+            write_frame(&mut peer, &serde_json::to_vec(&reply).unwrap()).unwrap();
+        });
+        let mut gateway = with_sleeping_child(control);
+        assert!(gateway.remove_secret("TOKEN_A").is_err());
+        server.join().unwrap();
+        assert!(!gateway.is_running());
+    }
+
+    #[test]
+    fn a_failed_stats_exchange_stops_the_gateway() {
+        let (control, mut peer) = UnixStream::pair().unwrap();
+        let server = thread::spawn(move || {
+            read_response(&mut peer).unwrap();
+            write_frame(&mut peer, br#"{"type":"error","version":1}"#).unwrap();
+        });
+        let mut gateway = with_sleeping_child(control);
+        assert!(gateway.stats().is_err());
+        server.join().unwrap();
+        assert!(!gateway.is_running());
+        assert_eq!(gateway.remove_secret("TOKEN_A").unwrap_err(), UNAVAILABLE);
     }
 
     #[test]

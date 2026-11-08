@@ -20,6 +20,7 @@ use zeroize::Zeroizing;
 struct Settings {
     slot: u16,
     guest_ipv4: Ipv4Addr,
+    gateway_ipv4: Ipv4Addr,
     guest_mac: [u8; 6],
     mtu: u16,
     published_ports: Vec<u16>,
@@ -66,6 +67,7 @@ fn main() -> Result<(), String> {
         Params {
             slot: settings.slot,
             guest_ipv4: settings.guest_ipv4,
+            gateway_ipv4: settings.gateway_ipv4,
             guest_mac: settings.guest_mac,
             mtu: settings.mtu,
             published_ports: settings.published_ports,

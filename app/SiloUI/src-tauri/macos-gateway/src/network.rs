@@ -171,9 +171,15 @@ pub fn validate_init(init: &InitRequest) -> Result<(), NetworkSetupError> {
                 return Err(NetworkSetupError::InvalidInput);
             }
         }
-        // The container's own ports: any number up to the cap, each guest port once.
+        // The container's own ports: any number up to the cap, each guest port once, and the
+        // gateway picks every host port (the caller learns them from `ready`).
         Profile::Container => {
-            if init.loopback_ports.len() > MAX_LOOPBACK_PORTS {
+            if init.loopback_ports.len() > MAX_LOOPBACK_PORTS
+                || init
+                    .loopback_ports
+                    .iter()
+                    .any(|mapping| mapping.host_port != 0)
+            {
                 return Err(NetworkSetupError::InvalidInput);
             }
         }
@@ -672,6 +678,11 @@ mod tests {
             })
             .to_vec();
         assert!(validate_init(&init).is_ok());
+
+        // The gateway picks the host port; a container cannot ask for one.
+        let mut init = container_init();
+        init.loopback_ports[0].host_port = 40000;
+        assert!(validate_init(&init).is_err());
 
         // A guest port is published once per protocol, and never as zero.
         let mut init = container_init();

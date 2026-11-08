@@ -176,7 +176,7 @@ Both owner decisions:
   Silo's secrets proxy, the GitHub token boundary, the guest client, the isolation evals, a Cua Driver
   screenshot, a Selkies client session, bare metal. A PR with the `containers-microvm` label re-runs the long
   microVM job on every push. The decision is the owner's.
-### 8 Nov 2026: phase CT1 built (`silo-gateway` on Linux)
+### 8 Nov 2026: phase CT1 built (the gateway on Linux)
 
 Branch `claude/containers-ct1`, pull request [#92](https://github.com/amontlabs/silo/pull/92).
 
@@ -204,6 +204,27 @@ Branch `claude/containers-ct1`, pull request [#92](https://github.com/amontlabs/
   `api.github.com` (401 "Bad credentials"), DNS works and a private answer is blocked.
 - **Found on the way.** TLS is intercepted only toward hosts a secret is allowed for (the existing rule);
   the first version of the check expected interception everywhere and was wrong, not the gateway.
+- **Review fixes** (Opus code review, Fable threat-model review):
+  - **Fail closed.** The container gateway kept running after an update or stats exchange that timed out or
+    was refused, and kept its revision, so a late acknowledgement was taken as the answer to the next
+    update and a refused update (`invalid_revision`) could look applied: a secret revocation could look done
+    while the secret was still substituted. Now any failed update or stats exchange stops the gateway and
+    every later call answers "unavailable". The acknowledgement must also carry the protocol `version`.
+  - **One control module.** `engine/src/gateway_control.rs` holds what the macOS supervisor and
+    `computer_gateway` share: framing, the descriptor handoff, the `ready` identity checks (DNS = gateway,
+    `/30`, gateway inside the guest's link), the CA generator, the acknowledgement rule and the child guard.
+    The macOS supervisor uses it with unchanged behaviour (its tests pass unchanged). `Params` gains
+    `gateway_ipv4`, which `ready` must report.
+  - **Container host ports.** The container profile now requires every `host_port` to be 0 (the gateway
+    picks); a requested port is refused at `init`.
+  - **Live check.** A TUN device (`IFF_TUN`) handed over as the frame descriptor is refused with
+    `invalid_frame_carrier`; the namespace process closes its own copy of the TAP after the handover; the
+    usage log is parsed as JSON lines instead of counting strings; the gateway's own address is probed and
+    refused.
+  - **Caller contract for CT3.** `Gateway::stop()` (drop and `shutdown`) can take up to about 10 s for a
+    hung gateway (5 s for the shutdown exchange, 5 s to exit), so CT3's caller must not drop a `Gateway` on
+    an async worker thread. The gateway is not restarted after a failure; restart is planned for CT3.
+  - **Docs.** The AppArmor sysctl is set by hand in CI; CT2 adds it to `silo host init`.
 - **Not done.** aarch64 live run, UDP published ports, the container runtime (CT2).
 
 ### R1: CI runner on the Mac (branch `claude/runner-phase-1`)
