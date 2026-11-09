@@ -24,8 +24,10 @@ ctr="$name-ctr"
 # A second container that keeps the secret when it is taken away from the first (a secret always
 # has a computer).
 ctr2="$name-ctr2"
-# A container with a small disk, to write past its size.
+# A container whose stated size is small, so it is over it.
 ctr3="$name-ctr3"
+# The file that fills the host's disk in the guard check; the cleanup removes it.
+fill_file=""
 # The engine's systemd unit, which the restart check ends the way a crash does.
 engine_unit="${SILO_E2E_UNIT:-org.silo.dev.engine.service}"
 # Seconds to wait for the engine socket to answer.
@@ -54,6 +56,7 @@ print("\n".join(sorted(name for name in sys.argv[1:] if name in names)))' "$@"
 cleanup() {
   local status=$?
   trap - EXIT
+  [[ -n "$fill_file" ]] && rm -f "$fill_file"
   rm -f "${stderr_file:-}"
   remove_editor_key
   for computer in "$ctr3" "$ctr2" "$ctr" "$ctr-k" "$ctr-f-1" "$ctr-f-2" "$ctr-f-3" "$ctr-f-4" "$fork" "$name"; do
@@ -152,7 +155,7 @@ print(found[0] if found else "missing")' "$2"
 has_file() { "$silo" exec "$1" -- sh -c "test -e '$2' && echo yes || echo no"; }
 
 # Checkpoints, forks, diff, keep, undo and a quiet fork of a running container, then an engine
-# restart (a crash: the unit is killed, systemd starts it again) and a write past the disk size.
+# restart (a crash: the unit is killed, systemd starts it again) and, after them, the host disk guard.
 container_checkpoint_features() {
   step "Checkpointing the running $ctr"
   in_container sh -c 'echo base > /workspace/ct4-base'
@@ -228,12 +231,13 @@ container_checkpoint_features() {
   expect "public host after an engine restart" "$code" 200
 }
 
-# A write past the disk size fails, with the file system read-only, and the computer works again
-# once space is freed and it is started again.
-container_disk_limit() {
-  step "Writing past the disk size of $ctr3"
+# The host's disk guard: a container computer has no size bound, but a host short of disk space
+# refuses to start one and stops the running ones that are over their stated size. The host is
+# filled past the margin with a fallocate'd file on the engine's file system.
+container_disk_guard() {
+  step "Filling the host past the disk margin with $ctr3 over its size"
   "$silo" create "$ctr3" --container --cpus 1 --memory 1 --disk 1
-  # A container's limit is its root disk and workspace together (81 GiB here); the record of this
+  # A container's size is its root disk and workspace together (81 GiB here); the record of this
   # stopped test computer is made small so the runner's disk is enough to pass it.
   record=$(engine_find -path "*containers/computers/$ctr3/computer.json" | head -n 1)
   python3 - "$record" <<'PY'
@@ -243,22 +247,31 @@ record["rootDiskMib"], record["workspaceMib"] = 300, 100
 json.dump(record, open(sys.argv[1], "w"))
 PY
   "$silo" start "$ctr3"
-  failed=no
-  for i in $(seq 1 40); do
-    if ! "$silo" exec "$ctr3" -- dd if=/dev/zero "of=/home/silo/fill.$i" bs=1M count=64 conv=fsync status=none 2>/dev/null; then
-      failed=yes
-      break
-    fi
-    sleep 1
+  # 600 MiB, over the 400 MiB it is stated to have. Nothing stops it while the host has room.
+  "$silo" exec "$ctr3" -- dd if=/dev/zero of=/home/silo/fill bs=1M count=600 conv=fsync status=none
+  local home margin_mib=${SILO_CONTAINER_DISK_MARGIN_MIB:-5120} free
+  home=$(dirname "$(engine_find -path "*containers/computers/$ctr3/computer.json" | head -n 1)")
+  free=$(df --output=avail -B1 "$home" | tail -n 1 | tr -d ' ')
+  # Leave half the margin free.
+  fill_file="$(dirname "$home")/silo-e2e-fill"
+  fallocate -l "$((free - margin_mib * 1024 * 1024 / 2))" "$fill_file"
+  # The guard looks every 30 seconds (every minute while low).
+  stopped=no
+  for i in $(seq 1 30); do
+    state=$("$silo" --json status "$ctr3" | python3 -c 'import json, sys; print(json.load(sys.stdin)["state"])')
+    if [[ "$state" != running ]]; then stopped=yes; break; fi
+    sleep 10
   done
-  if [[ "$failed" != yes ]]; then
-    engine_find -path "*containers/computers/$ctr3/state/disk.log" -exec tail -n 20 {} \; >&2 || true
-    "$silo" exec "$ctr3" -- sh -c 'du -sm /home/silo; grep " / " /proc/self/mountinfo' >&2 || true
-  fi
-  expect "a write past the disk size fails" "$failed" yes
-  message=$("$silo" exec "$ctr3" -- sh -c 'echo x > /home/silo/more 2>&1' 2>&1 || true)
-  echo "after the limit: $message"
-  grep -qi "read-only" <<<"$message" || { echo "the failure is not a read-only file system: $message" >&2; exit 1; }
+  expect "the oversized computer is stopped while the host is low on disk" "$stopped" yes
+  refused=$("$silo" start "$ctr3" 2>&1 || true)
+  echo "start while low: $refused"
+  grep -q "nearly full" <<<"$refused" || { echo "the start was not refused for the disk: $refused" >&2; exit 1; }
+  forked=$("$silo" checkpoint "$ctr" --name ct4-low 2>&1 || true)
+  grep -q "nearly full" <<<"$forked" || { echo "the checkpoint was not refused for the disk: $forked" >&2; exit 1; }
+  expect "the container that stayed within its size keeps running" "$("$silo" --json status "$ctr" | python3 -c 'import json, sys; print(json.load(sys.stdin)["state"])')" running
+  rm -f "$fill_file"
+  "$silo" start "$ctr3"
+  expect "the computer starts again once the file is removed" "$("$silo" --json status "$ctr3" | python3 -c 'import json, sys; print(json.load(sys.stdin)["state"])')" running
   "$silo" stop "$ctr3"
   "$silo" drop "$ctr3"
 }
@@ -341,7 +354,7 @@ except OSError:
   container_network_features
   container_access_features
   container_checkpoint_features
-  container_disk_limit
+  container_disk_guard
 
   step "Stopping and dropping $ctr"
   "$silo" stop "$ctr"

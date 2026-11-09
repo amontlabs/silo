@@ -110,6 +110,7 @@ pub fn fork_record(snapshot: &Snapshot, restore: &Restore) -> ComputerRecord {
 
 /// Makes the stopped computer a `restore` asks for. It starts afterwards, like any restore.
 pub fn make_fork(paths: &RuntimePaths, restore: &Restore) -> Result<(), RuntimeError> {
+    super::host_disk::require_room(&paths.home, "make a fork")?;
     let _store = layers::lock();
     let layout = Layout::new(&paths.home);
     let snapshot = Store::new(&layout)
@@ -134,8 +135,29 @@ pub fn make_fork(paths: &RuntimePaths, restore: &Restore) -> Result<(), RuntimeE
         .map_err(RuntimeError::Unavailable)
 }
 
+/// The longest a running container's processes stay frozen for the copy of its writable layer.
+/// Connections of the computer (and its clients') time out in the pause that follows, so a
+/// longer copy is not worth it: the checkpoint fails and the computer carries on.
+#[cfg(target_os = "linux")]
+pub const FROZEN_LIMIT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// What a checkpoint whose copy took longer than [`FROZEN_LIMIT`] says.
+#[cfg(target_os = "linux")]
+fn too_slow(name: &str) -> String {
+    format!(
+        "The checkpoint of {name} was not made: copying its files took longer than {} seconds, so the computer was resumed. Stop it and make the checkpoint again (a stopped computer's checkpoint takes no time), or free some space in it first.",
+        FROZEN_LIMIT.as_secs()
+    )
+}
+
 /// A checkpoint of a computer: seals a stopped computer's writable layer, or copies a running one's
 /// while its processes are frozen.
+///
+/// The layer store's lock is held only to register the checkpoint, never for the copy: a copy of a
+/// large layer would block every start, restore and fork. The copy is made first, into a layer no
+/// record names yet; collection leaves a layer alone for its grace period, which the copy's
+/// limit stays far inside. The computer's processes are frozen for the copy itself and for no
+/// longer than [`FROZEN_LIMIT`].
 #[cfg(target_os = "linux")]
 pub fn create(paths: &RuntimePaths, request: &SnapshotCreate) -> Result<(), RuntimeError> {
     use super::{hold::StartMark, lifecycle, tools::Tools};
@@ -151,32 +173,55 @@ pub fn create(paths: &RuntimePaths, request: &SnapshotCreate) -> Result<(), Runt
             request.computer
         ))
     })?;
-    let _store = layers::lock();
-    if store.read(&request.group, &request.name).is_ok() {
-        return Err(invalid(format!(
+    super::host_disk::require_room(&paths.home, "make a checkpoint")?;
+    let exists = || {
+        invalid(format!(
             "The checkpoint {}:{} already exists.",
             request.group, request.name
-        )));
+        ))
+    };
+    if store.read(&request.group, &request.name).is_ok() {
+        return Err(exists());
     }
     let record = dir.read_record().map_err(RuntimeError::Unavailable)?;
     let upper = dir.upper_of(&record);
     let unchanged = !upper.exists() || layers::is_empty_dir(&upper);
     let recreate = |name: &str| RuntimeError::Unavailable(super::idmap::recreate_message(name));
-    let chain = if unchanged {
-        record.layers.clone()
-    } else if record.upper.is_empty() {
-        return Err(recreate(&request.computer));
-    } else if lifecycle::holder_alive(paths, &request.computer) {
-        let copy = layers::new_id();
-        let frozen =
-            lifecycle::freeze(paths, &request.computer).map_err(RuntimeError::Unavailable)?;
-        let copied = lifecycle::make_layer(&tools, &layout.layer(&copy))
-            .and_then(|()| lifecycle::copy_layer(&tools, &upper, &layout.layer(&copy)));
-        drop(frozen);
-        copied.map_err(RuntimeError::Unavailable)?;
+    // A running computer's layer is copied before the store is locked.
+    let mut copied = None;
+    if !unchanged {
+        if record.upper.is_empty() {
+            return Err(recreate(&request.computer));
+        }
+        if lifecycle::holder_alive(paths, &request.computer) {
+            let copy = layers::new_id();
+            let target = layout.layer(&copy);
+            lifecycle::make_layer(&tools, &target).map_err(RuntimeError::Unavailable)?;
+            let outcome = {
+                let _frozen = lifecycle::freeze(paths, &request.computer)
+                    .map_err(RuntimeError::Unavailable)?;
+                lifecycle::copy_layer(&tools, &upper, &target, FROZEN_LIMIT)
+            };
+            if let Err(failure) = outcome {
+                let _ = super::image::remove_tree(&tools, &target);
+                return Err(RuntimeError::Unavailable(match failure {
+                    lifecycle::CopyFailure::TooSlow => too_slow(&request.computer),
+                    lifecycle::CopyFailure::Failed(detail) => detail,
+                }));
+            }
+            copied = Some(copy);
+        }
+    }
+    let _store = layers::lock();
+    if store.read(&request.group, &request.name).is_ok() {
+        return Err(exists());
+    }
+    let chain = if let Some(copy) = copied {
         let mut chain = record.layers.clone();
         chain.push(copy);
         chain
+    } else if unchanged {
+        record.layers.clone()
     } else {
         let fresh = layers::new_id();
         lifecycle::make_layer(&tools, &layout.layer(&fresh)).map_err(RuntimeError::Unavailable)?;

@@ -9,6 +9,12 @@
 use crate::common::{io_err, os_err};
 
 /// Joins the user and network namespaces of the holder whose state directory is `state`.
+///
+/// It trusts `outer.pid` in that folder and does not check that the process is the holder: the
+/// engine does (`containers::lifecycle::is_holder`: a `silo-ctr` process in the computer's own
+/// scope) before it runs any command that names the folder, and the folder is the engine
+/// account's own (mode 0700). Run by hand with a folder someone else controls it would join
+/// whatever process that folder names, which the account could already do.
 #[cfg(target_os = "linux")]
 pub fn join_holder(state: &str) -> Result<(), String> {
     use std::os::fd::AsRawFd;

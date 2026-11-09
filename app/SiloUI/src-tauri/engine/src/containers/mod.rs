@@ -24,7 +24,7 @@ pub mod lifecycle;
 pub mod oci;
 #[cfg(target_os = "linux")]
 pub mod ports;
-pub mod quota;
+pub mod host_disk;
 pub mod secrets;
 pub mod snapshots;
 pub mod ssh;
@@ -89,10 +89,14 @@ pub fn quiet_script(script: &str) -> String {
 /// running (their gateways went with it). Reading a computer's state never does this.
 pub fn reconcile_at_start(paths: &RuntimePaths) {
     #[cfg(target_os = "linux")]
-    if !layout::Layout::new(&paths.home).names().is_empty() {
-        if let Ok(tools) = tools::Tools::locate(paths) {
-            lifecycle::reconcile(paths, &tools);
+    {
+        if !layout::Layout::new(&paths.home).names().is_empty() {
+            if let Ok(tools) = tools::Tools::locate(paths) {
+                lifecycle::reconcile(paths, &tools);
+            }
         }
+        // Looks at the host's free space for as long as the engine runs (see `host_disk`).
+        lifecycle::spawn_guard(paths);
     }
     #[cfg(not(target_os = "linux"))]
     let _ = paths;
@@ -457,6 +461,7 @@ fn new_record(create: &Create, image: &image::Unpacked) -> ComputerRecord {
 #[cfg(target_os = "linux")]
 fn state_word(paths: &RuntimePaths, name: &str, record: &ComputerRecord) -> &'static str {
     match lifecycle::status(paths, name, record) {
+        lifecycle::Status::Running if lifecycle::is_paused(paths, name) => "Paused",
         lifecycle::Status::Running => "Running",
         lifecycle::Status::Starting => "Starting",
         lifecycle::Status::Stopped => "Stopped",
@@ -514,7 +519,7 @@ pub fn inspect_value(
         "updated_at": null,
         "runtime_instance_id": null,
     });
-    if status == "Running" {
+    if status == "Running" || status == "Paused" {
         value["active_config"] = value["config"].clone();
         value["active_config"]["network"] = secrets::network_value(record, Some(active));
         value["runtime_instance_id"] = json!(format!("container-{name}-{}", record.created_ms));
@@ -524,12 +529,19 @@ pub fn inspect_value(
 
 fn inspect(paths: &RuntimePaths, name: &str) -> Result<Value, RuntimeError> {
     let record = record_of(paths, name)?;
-    Ok(inspect_value(
+    #[cfg_attr(not(target_os = "linux"), allow(unused_mut))]
+    let mut value = inspect_value(
         name,
         &record,
         state_word(paths, name, &record),
         &active_secrets(name),
-    ))
+    );
+    // Why Silo stopped the computer, when the host disk guard did (see `host_disk`).
+    #[cfg(target_os = "linux")]
+    if let Some(notice) = lifecycle::guard_notice(paths, name) {
+        value["notice"] = json!(notice);
+    }
+    Ok(value)
 }
 
 fn listed(paths: &RuntimePaths, label: Option<&str>) -> Vec<Value> {
@@ -650,12 +662,11 @@ fn stop(paths: &RuntimePaths, name: &str) -> Result<(), RuntimeError> {
 fn freeze(paths: &RuntimePaths, name: &str, freeze: bool) -> Result<(), RuntimeError> {
     require_host()?;
     if freeze {
-        // Held until `resume`: the guard would thaw it.
-        std::mem::forget(lifecycle::freeze(paths, name).map_err(RuntimeError::Unavailable)?);
-        Ok(())
+        lifecycle::pause(paths, name)
     } else {
-        lifecycle::thaw(paths, name).map_err(RuntimeError::Unavailable)
+        lifecycle::resume(paths, name)
     }
+    .map_err(RuntimeError::Unavailable)
 }
 
 #[cfg(target_os = "linux")]

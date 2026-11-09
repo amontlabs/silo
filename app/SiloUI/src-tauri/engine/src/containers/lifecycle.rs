@@ -286,8 +286,11 @@ pub fn adopt(
     let layout = Layout::new(&paths.home);
     let dir = layout.computer(name);
     let state = dir.state();
-    // A capture the earlier engine did not finish may have left the processes frozen.
-    let _ = thaw(paths, name);
+    // A capture the earlier engine did not finish may have left the processes frozen; a computer
+    // its user paused stays paused (the pause is recorded in its state folder).
+    if !is_paused(paths, name) {
+        let _ = thaw(paths, name);
+    }
     let general = crate::secrets::runtime_material(name)?;
     let material = Material {
         secrets: &general,
@@ -334,7 +337,6 @@ pub fn adopt(
         start_gateway(paths, tools, name, record, &state, tap, &ca_cert, &ca_key, &material)?;
     register(paths, name, &state, gateway, active)?;
     let _ = std::fs::remove_file(&socket);
-    watch_disk(paths, tools, name);
     Ok(())
 }
 
@@ -528,23 +530,61 @@ fn cgroup_dir(paths: &RuntimePaths, name: &str) -> PathBuf {
     Path::new("/sys/fs/cgroup").join(cgroup_path(uid, &unit_name(paths, name)).trim_start_matches('/'))
 }
 
-/// A container whose processes are frozen; they are thawed when this is dropped.
+/// The file in a computer's state folder that says its user paused it. A checkpoint freezes the
+/// processes too, for the copy only; the two are told apart by this file, so a checkpoint of a paused
+/// computer leaves it paused, `inspect` says Paused, and an engine that takes the computer back
+/// after a restart does not thaw it. A stop or a start removes it.
+const PAUSED_FILE: &str = "paused";
+
+fn paused_file(paths: &RuntimePaths, name: &str) -> PathBuf {
+    Layout::new(&paths.home).computer(name).state().join(PAUSED_FILE)
+}
+
+/// Whether the computer's user paused it (and it has not been resumed, stopped or started since).
+pub fn is_paused(paths: &RuntimePaths, name: &str) -> bool {
+    paused_file(paths, name).exists()
+}
+
+/// Held while a computer is frozen or thawed, so a user's resume cannot thaw the processes in the
+/// middle of a checkpoint's copy (and a pause cannot be undone by the checkpoint ending).
+static FREEZING: Mutex<()> = Mutex::new(());
+
+fn freezing() -> MutexGuard<'static, ()> {
+    FREEZING.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// A container whose processes are frozen for a copy; they are thawed when this is dropped, unless
+/// their user paused the computer.
 pub struct Frozen {
     file: PathBuf,
+    paused: PathBuf,
+    _freezing: MutexGuard<'static, ()>,
 }
 
 impl Drop for Frozen {
     fn drop(&mut self) {
-        let _ = std::fs::write(&self.file, "0");
+        if !self.paused.exists() {
+            let _ = std::fs::write(&self.file, "0");
+        }
     }
 }
 
 /// Freezes the container's control group and waits until the kernel reports it frozen, so a copy
 /// of its files sees none of them change.
 pub fn freeze(paths: &RuntimePaths, name: &str) -> Result<Frozen, String> {
+    freeze_holding(paths, name, freezing())
+}
+
+fn freeze_holding(
+    paths: &RuntimePaths,
+    name: &str,
+    guard: MutexGuard<'static, ()>,
+) -> Result<Frozen, String> {
     let directory = cgroup_dir(paths, name);
     let frozen = Frozen {
         file: directory.join("cgroup.freeze"),
+        paused: paused_file(paths, name),
+        _freezing: guard,
     };
     std::fs::write(&frozen.file, "1").map_err(|e| at("freeze", &frozen.file, e))?;
     let events = directory.join("cgroup.events");
@@ -560,47 +600,100 @@ pub fn freeze(paths: &RuntimePaths, name: &str) -> Result<Frozen, String> {
     }
 }
 
+/// The user's pause: records it, then freezes the processes (they stay frozen until `resume`).
+pub fn pause(paths: &RuntimePaths, name: &str) -> Result<(), String> {
+    let guard = freezing();
+    let marker = paused_file(paths, name);
+    std::fs::write(&marker, "").map_err(|e| at("record the pause of", &marker, e))?;
+    match freeze_holding(paths, name, guard) {
+        // Dropped with the marker in place: the processes stay frozen.
+        Ok(frozen) => {
+            drop(frozen);
+            Ok(())
+        }
+        Err(detail) => {
+            let _ = std::fs::remove_file(&marker);
+            Err(detail)
+        }
+    }
+}
+
+/// The user's resume.
+pub fn resume(paths: &RuntimePaths, name: &str) -> Result<(), String> {
+    let _freezing = freezing();
+    let _ = std::fs::remove_file(paused_file(paths, name));
+    thaw(paths, name)
+}
+
 /// Thaws the container (a no-op when it is not frozen).
-pub fn thaw(paths: &RuntimePaths, name: &str) -> Result<(), String> {
+fn thaw(paths: &RuntimePaths, name: &str) -> Result<(), String> {
     let file = cgroup_dir(paths, name).join("cgroup.freeze");
     std::fs::write(&file, "0").map_err(|e| at("thaw", &file, e))
 }
 
-/// Whether the container is frozen.
-pub fn is_frozen(paths: &RuntimePaths, name: &str) -> bool {
-    std::fs::read_to_string(cgroup_dir(paths, name).join("cgroup.events"))
-        .is_ok_and(|text| text.lines().any(|l| l == "frozen 1"))
-}
-
 fn in_container_namespace(tools: &Tools, command: &[&std::ffi::OsStr]) -> Result<(), String> {
     let agent = super::idmap::AGENT_ID.to_string();
-    let mut args: Vec<&std::ffi::OsStr> = vec![
-        "userns".as_ref(),
-        "--keep-id".as_ref(),
-        agent.as_ref(),
-        "--".as_ref(),
-    ];
+    run_checked(&tools.ctr, &namespace_args(&agent, command)).map(drop)
+}
+
+/// Why a bounded copy of a layer did not finish.
+#[derive(Debug, PartialEq, Eq)]
+pub enum CopyFailure {
+    /// The copy was still running at the limit and was killed.
+    TooSlow,
+    Failed(String),
+}
+
+/// The arguments that run `command` as the container's owner in its user namespace.
+fn namespace_args<'a>(agent: &'a str, command: &[&'a std::ffi::OsStr]) -> Vec<&'a std::ffi::OsStr> {
+    let mut args: Vec<&std::ffi::OsStr> =
+        vec!["userns".as_ref(), "--keep-id".as_ref(), agent.as_ref(), "--".as_ref()];
     args.extend_from_slice(command);
-    run_checked(&tools.ctr, &args).map(drop)
+    args
 }
 
 /// Copies the files of the layer `from` into the empty layer `to`, owners and attributes kept, as
-/// a reflink where the file system has them.
-pub fn copy_layer(tools: &Tools, from: &Path, to: &Path) -> Result<(), String> {
+/// a reflink where the file system has them. It is killed when it takes longer than `limit`: a
+/// running computer's processes are frozen while it copies.
+pub fn copy_layer(
+    tools: &Tools,
+    from: &Path,
+    to: &Path,
+    limit: Duration,
+) -> Result<(), CopyFailure> {
     let (mut source, mut target) = (from.as_os_str().to_owned(), to.as_os_str().to_owned());
     source.push("/.");
     target.push("/");
-    in_container_namespace(
-        tools,
-        &[
-            "cp".as_ref(),
-            "-a".as_ref(),
-            "--reflink=auto".as_ref(),
-            "--".as_ref(),
-            source.as_ref(),
-            target.as_ref(),
-        ],
+    let agent = super::idmap::AGENT_ID.to_string();
+    let copy: [&std::ffi::OsStr; 6] = [
+        "cp".as_ref(),
+        "-a".as_ref(),
+        "--reflink=auto".as_ref(),
+        "--".as_ref(),
+        source.as_ref(),
+        target.as_ref(),
+    ];
+    match super::tools::run_bounded(&tools.ctr, &namespace_args(&agent, &copy), limit) {
+        Ok(done) if done.success => Ok(()),
+        Ok(done) => Err(CopyFailure::Failed(format!("cp failed: {}", done.last_error))),
+        Err(super::tools::BoundedError::TimedOut) => Err(CopyFailure::TooSlow),
+        Err(super::tools::BoundedError::CouldNotStart(detail)) => Err(CopyFailure::Failed(detail)),
+    }
+}
+
+/// The bytes a writable layer occupies on disk, counted inside the user namespace so directories
+/// the engine's own account cannot read count too. `None` when it could not be measured.
+pub fn layer_bytes(tools: &Tools, layer: &Path) -> Option<u64> {
+    let agent = super::idmap::AGENT_ID.to_string();
+    let du: [&std::ffi::OsStr; 4] = ["du".as_ref(), "-sB1".as_ref(), "--".as_ref(), layer.as_os_str()];
+    let done = super::tools::run_bounded(
+        &tools.ctr,
+        &namespace_args(&agent, &du),
+        Duration::from_secs(300),
     )
+    .ok()?;
+    // `du` exits non-zero when a file vanished under it; the total it printed still counts.
+    done.stdout.split_whitespace().next()?.parse().ok()
 }
 
 /// Folds `layers` (oldest first) into the new layer `out`.
@@ -616,9 +709,11 @@ pub fn merge_layers(tools: &Tools, out: &Path, layers: &[PathBuf]) -> Result<(),
     in_container_namespace(tools, &command)
 }
 
-/// Folds the oldest sealed layers of a stopped computer whose chain is too long into one.
+/// Folds the oldest sealed layers of a stopped computer whose chain is too long into one. Nothing
+/// is locked unless there is something to fold, and the fold is made before the store is locked:
+/// the new layer is safe from collection for the grace period, and the lock is held only to put it
+/// into the record.
 pub fn flatten(paths: &RuntimePaths, tools: &Tools, name: &str) -> Result<(), String> {
-    let _store = super::layers::lock();
     let layout = Layout::new(&paths.home);
     let dir = layout.computer(name);
     let record = dir.read_record()?;
@@ -628,7 +723,11 @@ pub fn flatten(paths: &RuntimePaths, tools: &Tools, name: &str) -> Result<(), St
     }
     let merged = super::layers::new_id();
     let sources: Vec<PathBuf> = record.layers[..count].iter().map(|id| layout.layer(id)).collect();
-    merge_layers(tools, &layout.layer(&merged), &sources)?;
+    if let Err(detail) = merge_layers(tools, &layout.layer(&merged), &sources) {
+        let _ = super::image::remove_tree(tools, &layout.layer(&merged));
+        return Err(detail);
+    }
+    let _store = super::layers::lock();
     dir.update_record(|record| {
         record.layers = super::layers::flattened(&record.layers, count, &merged);
     })
@@ -644,86 +743,92 @@ pub fn collect_layers(paths: &RuntimePaths, tools: &Tools) {
     }
 }
 
-/// Computers whose disk watcher runs.
-static WATCHED: Mutex<Option<std::collections::HashSet<String>>> = Mutex::new(None);
-
-/// Holds the running container to its disk size: measures its writable layer every few seconds
-/// and makes its root read-only past the limit (see [`super::quota`]). One watcher per computer;
-/// it ends with the container.
-pub fn watch_disk(paths: &RuntimePaths, tools: &Tools, name: &str) {
-    if !WATCHED
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .get_or_insert_with(Default::default)
-        .insert(name.to_owned())
-    {
-        return;
+/// One look of the host disk guard (see [`super::host_disk`]): below the margin of free space it
+/// stops the running computers whose layer is over their stated size, largest first, and leaves a
+/// message in each one's state folder. It returns the names it stopped.
+pub fn guard_pass(paths: &RuntimePaths, tools: &Tools) -> Vec<String> {
+    let layout = Layout::new(&paths.home);
+    let Ok(free) = crate::transfer_area::free_space(&paths.home) else {
+        return Vec::new();
+    };
+    let margin = super::host_disk::margin_bytes();
+    if free >= margin {
+        return Vec::new();
     }
-    let (paths, tools, name) = (paths.clone(), tools.clone(), name.to_owned());
-    let _ = std::thread::Builder::new()
-        .name("silo-disk-watch".into())
-        .spawn(move || {
-            let mut read_only = false;
-            while holder_alive(&paths, &name) {
-                let started = Instant::now();
-                let layout = Layout::new(&paths.home);
-                let dir = layout.computer(&name);
-                if let Ok(record) = dir.read_record() {
-                    let used = super::quota::used_bytes(&dir.upper_of(&record));
-                    let limit_mib = super::quota::limit_mib(&record);
-                    let note = |text: String| {
-                        use std::io::Write;
-                        if let Ok(mut file) = std::fs::OpenOptions::new()
-                            .create(true)
-                            .append(true)
-                            .open(dir.state().join("disk.log"))
-                        {
-                            let _ = writeln!(file, "{text}");
-                        }
-                    };
-                    if used >> 20 > limit_mib / 2 {
-                        note(format!("{} of {} MiB used, read-only: {read_only}", used >> 20, limit_mib));
-                    }
-                    let wanted = match super::quota::decide(used, limit_mib, read_only) {
-                        super::quota::Action::Nothing => None,
-                        super::quota::Action::MakeReadOnly => Some("--ro"),
-                        super::quota::Action::MakeWritable => Some("--rw"),
-                    };
-                    if let Some(mode) = wanted {
-                        let state = dir.state();
-                        let outcome = run_checked(
-                            &tools.ctr,
-                            &["remount".as_ref(), "--state".as_ref(), state.as_os_str(), mode.as_ref()],
-                        );
-                        match outcome {
-                            Ok(_) => {
-                                note(format!("remount {mode} done"));
-                                read_only = mode == "--ro";
-                                if read_only {
-                                    eprintln!(
-                                        "Container computer {name}: its disk is full ({} of {} MiB used), so its files are read-only until space is freed.",
-                                        used >> 20,
-                                        limit_mib
-                                    );
-                                }
-                            }
-                            Err(detail) => {
-                                note(format!("remount {mode} failed: {detail}"));
-                                eprintln!("Container computer {name}: the disk limit could not be applied: {detail}");
-                            }
-                        }
-                    }
+    let running: Vec<String> = layout
+        .names()
+        .into_iter()
+        .filter(|name| {
+            layout
+                .computer(name)
+                .read_record()
+                .is_ok_and(|record| status(paths, name, &record) == Status::Running)
+        })
+        .collect();
+    super::host_disk::pass(
+        free,
+        margin,
+        running,
+        |name| {
+            let dir = layout.computer(name);
+            let record = dir.read_record().ok()?;
+            Some(super::host_disk::Sizes {
+                layer: layer_bytes(tools, &dir.upper_of(&record))?,
+                limit: super::host_disk::limit_bytes(&record),
+            })
+        },
+        |name, sizes| {
+            let dir = layout.computer(name);
+            let Ok(record) = dir.read_record() else {
+                return false;
+            };
+            let notice = dir.state().join(super::host_disk::NOTICE);
+            let text = super::host_disk::stop_notice(free, margin, sizes);
+            let _ = write_readable(&notice, &text);
+            eprintln!("Container computer {name}: {text}");
+            match stop(paths, tools, name, &record) {
+                Ok(()) => true,
+                Err(detail) => {
+                    // It is still running, so the message would be false.
+                    let _ = std::fs::remove_file(&notice);
+                    eprintln!("Container computer {name}: it could not be stopped: {detail:?}");
+                    false
                 }
-                // A measurement never takes more than a tenth of the time.
-                let pause = (started.elapsed() * 10).max(Duration::from_secs(1));
-                std::thread::sleep(pause.min(Duration::from_secs(30)));
             }
-            WATCHED
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .get_or_insert_with(Default::default)
-                .remove(&name);
-        });
+        },
+    )
+}
+
+/// The message the host disk guard left when it stopped the computer, if it did and nothing has
+/// started the computer since.
+pub fn guard_notice(paths: &RuntimePaths, name: &str) -> Option<String> {
+    std::fs::read_to_string(Layout::new(&paths.home).computer(name).state().join(super::host_disk::NOTICE))
+        .ok()
+        .map(|text| text.trim().to_owned())
+        .filter(|text| !text.is_empty())
+}
+
+/// Starts the host disk guard once for this engine process. It holds nothing about any computer
+/// between looks: each look reads the records and the free space again.
+pub fn spawn_guard(paths: &RuntimePaths) {
+    static STARTED: std::sync::Once = std::sync::Once::new();
+    let paths = paths.clone();
+    STARTED.call_once(move || {
+        let _ = std::thread::Builder::new()
+            .name("silo-disk-guard".into())
+            .spawn(move || loop {
+                if let Ok(tools) = Tools::locate(&paths) {
+                    guard_pass(&paths, &tools);
+                }
+                let low = crate::transfer_area::free_space(&paths.home)
+                    .is_ok_and(|free| free < super::host_disk::margin_bytes());
+                std::thread::sleep(if low {
+                    super::host_disk::CHECK_EVERY_WHEN_LOW
+                } else {
+                    super::host_disk::CHECK_EVERY
+                });
+            });
+    });
 }
 
 /// Creates what the container binds as its per-computer share (`/.msb`): the computer's runtime
@@ -836,6 +941,10 @@ pub fn start(
     if is_running(Path::new("/proc"), paths, name) {
         return Ok(());
     }
+    // A host short of disk space starts nothing (see `host_disk`).
+    super::host_disk::require_room(&paths.home, "start a container computer")?;
+    // The reason an earlier stop left in the status is over once the computer starts again.
+    let _ = std::fs::remove_file(dir.state().join(super::host_disk::NOTICE));
     // A chain of sealed layers that has grown long is folded before it is mounted.
     flatten(paths, tools, name).map_err(&unavailable)?;
     let record = dir.read_record().map_err(RuntimeError::Unavailable)?;
@@ -865,7 +974,6 @@ pub fn start(
     // Re-read: a secret may have been assigned while the computer was starting.
     dir.update_record(|record| record.started_once = true)
         .map_err(RuntimeError::Unavailable)?;
-    watch_disk(paths, tools, name);
     Ok(())
 }
 
@@ -1215,6 +1323,10 @@ fn systemctl(tools: &Tools, args: &[&str]) {
         .status();
 }
 
+/// The files of a computer's state folder that belong to one run: a stop or a start removes them
+/// (a pause with them).
+const STALE_STATE_FILES: [&str; 5] = ["ctl.sock", "holder.pid", "outer.pid", "container.pid", PAUSED_FILE];
+
 /// What an earlier run left: a scope, crun state, a socket.
 fn cleanup_stale(paths: &RuntimePaths, tools: &Tools, dir: &ComputerDir, name: &str) {
     let state = dir.state();
@@ -1233,7 +1345,7 @@ fn cleanup_stale(paths: &RuntimePaths, tools: &Tools, dir: &ComputerDir, name: &
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status();
-    for stale in ["ctl.sock", "holder.pid", "outer.pid", "container.pid"] {
+    for stale in STALE_STATE_FILES {
         let _ = std::fs::remove_file(state.join(stale));
     }
 }
@@ -1561,6 +1673,36 @@ mod tests {
 
     fn test_paths(home: &Path) -> RuntimePaths {
         crate::test_support::paths(home)
+    }
+
+    #[test]
+    fn a_checkpoints_freeze_thaws_unless_the_user_paused_the_computer() {
+        let home = tempfile::tempdir().unwrap();
+        let paths = test_paths(home.path());
+        let state = Layout::new(&paths.home).computer("dev").state();
+        std::fs::create_dir_all(&state).unwrap();
+        let file = home.path().join("cgroup.freeze");
+        let frozen = |guard| Frozen {
+            file: file.clone(),
+            paused: paused_file(&paths, "dev"),
+            _freezing: guard,
+        };
+        // No pause: the end of the copy thaws.
+        std::fs::write(&file, "1").unwrap();
+        drop(frozen(freezing()));
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "0");
+        // The user paused the computer: the checkpoint leaves it frozen, and inspect says so.
+        assert!(!is_paused(&paths, "dev"));
+        std::fs::write(paused_file(&paths, "dev"), "").unwrap();
+        assert!(is_paused(&paths, "dev"));
+        std::fs::write(&file, "1").unwrap();
+        drop(frozen(freezing()));
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "1");
+    }
+
+    #[test]
+    fn a_stop_or_start_ends_a_pause() {
+        assert!(STALE_STATE_FILES.contains(&PAUSED_FILE));
     }
 
     fn fake_process(proc: &Path, pid: u32, argv0: &str, cgroup: &str) {

@@ -2922,6 +2922,9 @@ fn restore_steps(
         save(paths, computer_id, &record)?;
     }
     let mut journal = record.restore_journal.clone().unwrap();
+    // Only the run that made the capture may stop a container that kept running after it: on a
+    // retry (phase "secured") a container that is running again has writes the capture lacks.
+    let captured_now = journal.phase == "capturing";
     if journal.phase == "capturing" {
         let memory_capture = journal.prior_running && with_memory;
         let _bridge_hold = (memory_capture && inspected.status == "Running")
@@ -3026,8 +3029,8 @@ fn restore_steps(
         save(paths, computer_id, &record)?;
     }
     let mut current = inspect_computer(runner, paths, configuration.name())?;
-    if current.status == "Running" && journal.prior_running && !with_memory {
-        // Its disks were captured while it ran; it stops now, and the Restore replaces it.
+    if current.status == "Running" && journal.prior_running && !with_memory && captured_now {
+        // Its disks were captured while it ran, in this run; it stops now, and the Restore replaces it.
         runner.run(
             paths,
             &["stop".into(), "--force".into(), configuration.name().into()],

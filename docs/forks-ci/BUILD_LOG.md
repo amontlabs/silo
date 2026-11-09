@@ -618,26 +618,54 @@ restart, the disk size) are closed. Design as approved: [CONTAINERS-PLAN](CONTAI
   and sends it over a socket as the holder does at start; a new gateway serves it, the ports are published again and the
   disk watcher resumes. The GitHub profile is not cached by a new engine, so it is applied by the next refresh. A
   container that cannot be taken back is stopped as before.
-- **Disk size.** Neither option works rootless: a project quota is set with the administrator's rights on a file system
-  mounted for it, and a loop file needs `mount`, which a user namespace cannot do for a block file system (only FUSE could,
-  and that needs `fuse2fs`, which Silo does not install). So the engine holds the limit: it measures the writable layer
-  (allocated blocks) every few seconds and, past `root_disk_mib`, remounts the container's root read-only
-  (`silo-ctr remount --ro`, in the container's mount namespace); writes fail with "Read-only file system", and below 95 %
-  (after a stop and a start) it is writable again. This is a bound with an overshoot of one measurement, not a kernel
-  quota. The threat-model sentence about the unlimited layer is replaced.
+- **Disk size (revised after review, 9 Nov 2026).** No rootless mechanism bounds a folder: a project quota is set with
+  the administrator's rights on a file system mounted for it, and a loop file needs `mount`, which a user namespace
+  cannot do for a block file system. The first CT4 build measured the writable layer and remounted the container's root
+  read-only past `root_disk_mib` (`silo-ctr remount`, `quota.rs`, a watcher thread per computer). Review found it does
+  not hold: the remount fails while a process has a file open for writing, nothing brings it back after an engine
+  restart, a checkpoint resets it, and a directory the engine cannot read is not counted. It is removed (the shim's
+  `remount`, `quota.rs`, `watch_disk` and the per-computer watcher state). A container computer now shares the host's disk
+  and its size is **reported, not a bound** (threat model, CLI guide, engine guide, changeset). The host is guarded instead
+  (`containers/host_disk.rs`): below a margin of free space on the engine's file system (`transfer_area::free_space`; 5 GiB,
+  `SILO_CONTAINER_DISK_MARGIN_MIB` in `silod`'s environment, since a Linux host has no settings file; the reason for the value
+  is in the module) a container start, checkpoint and fork are refused with a plain message, and one thread of the engine
+  (every 30 s, every 60 s while low) stops, with the ordinary graceful stop, the running container computers whose writable
+  layer is over their stated size, largest first, leaving the reason in `state/host-disk-notice`, which `inspect` reports as
+  `notice` and a start removes. The layer is measured only while the host is low, by `silo-ctr userns -- du -sB1` (so
+  directories the engine cannot read count), bounded to 5 minutes. A computer within its size is never stopped, and a stop
+  frees nothing; the guard keeps nothing per computer between looks, so a quick stop and start has no watcher state to
+  inherit (Opus 4).
+- **Review fixes (9 Nov 2026).** (Opus 5) A running container's checkpoint no longer holds the layer-store lock for
+  the copy: the copy goes into a new layer id first (safe from collection for the 10-minute grace), the lock is taken to
+  register; the processes are frozen for the copy only and at most 30 s (the copy runs in its own process group and is
+  killed at the bound; the computer is thawed and the checkpoint fails with a plain message, the half copy removed).
+  `flatten` checks `flatten_count` before anything and merges before taking the lock. (Opus 6) A restore retried after an
+  engine crash stops a running container only when this run made the capture (journal phase `capturing`); otherwise it
+  refuses as for VMs ("resumed after its recovery checkpoint"). (Opus 7) A user's pause is a `paused` file in the state
+  folder, separate from the checkpoint's freeze: a checkpoint of a paused container leaves it paused (the freeze guard
+  thaws only when there is no file), `inspect` and `list` say Paused, `resume` removes the file, `adopt` thaws only
+  without it, and a stop or start removes it; a lock keeps a resume from thawing the processes in the middle of a copy.
+  (Opus 8) The quiet step for a container runs after the start (the engine's confirm step), before the fork is reported
+  started, so the VM promise that nothing else starts first does not hold; this is documented in the threat model and
+  the checkpoints guide, and editing the fork's layer before the start was left out. (Fable) Documented: the `/.msb`
+  share is outside any size; dropped layers go at the next collection pass (engine start, a removed checkpoint or
+  computer; older than 10 minutes), not at once; `silo-ctr`'s `join_holder` trusts `outer.pid` and relies on the
+  engine's `is_holder` check.
 - **Quiet forks.** The existing quiet record applies as for a VM, through the engine's confirm step before the fork is
   reported started. A container's script is the VM script with its host name and `/etc/hosts` steps allowed to fail
   (`containers::quiet_script`; the shared script is embedded in the MicroSandbox patch and stays identical).
 - **Tests.** Chain, seal, fork layout, flatten, collection and checkpoint store (`layers.rs`), the snapshot and restore
-  argument shapes and routing, the fork record, the quota arithmetic, `silo-ctr merge`, `tap` and `remount` argument
-  shapes and merge semantics on Linux, the capability in `capture_with_kind` and `restore_steps`, the capability list and
+  argument shapes and routing, the fork record, the host guard (margin, refusal message, selection largest first,
+  nothing measured with room), the bounded runner, a retried restore that must not stop a running container,
+  `silo-ctr merge` and `tap` argument shapes and merge semantics on Linux, the capability in `capture_with_kind` and `restore_steps`, the capability list and
   the app's copy. Live: `linux-host-e2e.sh` with `SILO_E2E_CONTAINER=1` (below).
 - **Live check** (KVM runner): `linux-host-e2e.sh` with `SILO_E2E_CONTAINER=1`, run 42561463802 (x86_64, Ubuntu 24.04). Checkpoint of the running container
   (scope `disk`) 0.6 s. `silo fork -n 4` from that checkpoint, four forks created and started: **6.8 s** (the starts, about 5 s each, run
   in parallel). Each fork saw the checkpoint and none saw the parent's later writes, the parent's cron job or another fork's files. `diff` in
   a fork listed `/home/silo/only-1`; `fold` kept a file into the parent and `undo` removed it again (the parent's earlier state stayed). The
   engine unit was killed with SIGKILL: the container was running again with its file and a working public network about 12 s later. A
-  container whose recorded size was set to 400 MiB failed a write with "Read-only file system" within a few chunks of 64 MiB. The
+  container whose recorded size was set to 400 MiB failed a write with "Read-only file system" within a few chunks of 64 MiB
+  (this step is replaced by the host guard check below; the remount it checked is gone). The
   first runs failed on the test script (the diff scan does not look in `/workspace`; a plain fork starts stopped; a container's `--disk`
   is only its workspace, so its limit is root disk plus workspace, 81 GiB, and the test shrinks the recorded size).
 

@@ -865,18 +865,39 @@ with nothing sensitive on it, and the app, the CLI and `silo list` label it as l
   (no file moves). A running container cannot swap its writable layer, so its checkpoint is a
   copy of it, made by the container's own user namespace while the container's control group is
   frozen (a reflink copy where the file system has them; otherwise the time grows with the size
-  of the layer). A long chain has its oldest layers folded into one when the computer is stopped
+  of the layer). The processes are frozen for the copy itself and no longer than 30 seconds: a
+  copy that takes longer is killed, the computer is resumed and the checkpoint fails with a plain
+  message (a stopped computer's checkpoint takes no time). The copy is made before the layer
+  store's lock is taken, which is held only to register the checkpoint, so a long copy never
+  blocks another computer's start, restore or fork; the new layer is safe from collection for the
+  collection's ten-minute grace period, far longer than the copy may run. The freeze is separate
+  from a user's pause: a checkpoint of a paused computer leaves it paused, `inspect` reports it
+  as Paused, and an engine that takes the computer back after a restart does not thaw it (the
+  pause is a file in the computer's state folder; a stop or a start removes it). A long chain has its oldest layers folded into one when the computer starts
   (`silo-ctr merge`, which keeps whiteouts and opaque directories). The layer files are owned by
   the container's sub-ids, so the engine reads, copies and removes them only through a user
-  namespace laid out like the container's. A fork is quiet like a virtual machine's: the
-  existing quiet step (scheduled jobs parked, identity renewed) runs in the new container before
-  the fork is reported started; a container's host name and `/etc/hosts` are set by the runtime
-  and are left alone.
+  namespace laid out like the container's. Removing a checkpoint, a fork or a computer drops its
+  references; the layers nothing names any more are removed by the next collection pass (at the
+  engine's start, after a checkpoint is removed and after a computer is removed), not at once, and only once they are more
+  than ten minutes old. A fork is quiet like a virtual machine's, but **later than a virtual
+  machine's**: the quiet step (scheduled jobs parked, identity renewed) of a virtual machine runs
+  first in its boot, before anything else starts. A container has no such hook, so the engine runs
+  the step right after the fork has started, before the fork is reported started. For that
+  moment the fork's processes (its image's services, scheduled jobs and anything the parent left
+  to start with the computer) are already running with the parent's identity and its jobs, and
+  the "starts nothing else first" promise of the virtual machine does not hold. Doing it before the
+  start would mean editing the fork's writable layer from the host in the user namespace, which
+  was left out. A container's host name and `/etc/hosts` are set by the runtime and are left alone.
 - **An engine restart.** The holder, the container and its network device (which the namespace
   keeps) outlive the engine, as a virtual machine does. The next engine hands the device to a
   new gateway (`silo-ctr tap`), serves the published ports again and takes the container back; the
   GitHub profile is applied by the engine's next refresh. A container that cannot be taken back
-  is stopped.
+  is stopped. `silo-ctr enter` and `silo-ctr tap` join the namespaces of the process in the computer's
+  `outer.pid`; they do not check that it is the holder. The engine does, before it runs either
+  (`is_holder`: a `silo-ctr` process in the computer's own systemd scope), and the folder is the
+  engine account's own and private, so the check is the engine's and a hand-run `silo-ctr` with a
+  folder someone else controls joins whatever that folder names, which the account could do
+  anyway.
 - **What Landlock covers.** The ruleset grants the container's root read and execute everywhere and
   write access to the directories a system normally writes (`/tmp`, `/var`, `/run`, `/home`,
   `/root`, `/workspace`, `/dev`, `/usr`, `/etc`, `/opt`, `/srv`, `/mnt`, and the share `/.msb`). It therefore mainly protects
@@ -891,14 +912,29 @@ with nothing sensitive on it, and the app, the CLI and `silo list` label it as l
   find a user's ids. Those files live in the writable layer, which the container controls, so they
   are opened without following links, must be regular files and are capped at 1 MiB; overlay
   whiteouts are honoured as inside the container.
-- **The disk limit.** The kernel offers no quota a rootless host can set on a writable layer (a
-  project quota or a loop-mounted file system needs administrator rights, and a user namespace
-  cannot mount a block file system), so the engine holds the computer's size (its root disk and workspace disk together, as one file system holds both) itself: it measures the
-  writable layer every few seconds and, past the limit, remounts the container's root read-only
-  (`silo-ctr remount`); writes fail with "Read-only file system" until the computer is stopped,
-  space is freed and it is started again. The limit is not a hard bound: a program can write
-  for the length of one measurement past it, so the host still needs free space as a
-  margin. Sealed layers belong to checkpoints and forks and are not counted against a computer.
+- **The disk.** A container computer shares the host's disk: its files are a folder on the
+  file system that holds the engine's home, and **its size (root disk and workspace disk
+  together) is reported, not a bound**. The kernel offers no quota a rootless host can set on a
+  folder (a project quota or a loop-mounted file system needs administrator rights, and a user
+  namespace cannot mount a block file system). Making the container's root read-only past a limit
+  was built and removed: it fails while a process has a file open for writing, has no way back
+  after the engine restarts, is undone by a checkpoint and does not see a directory the engine
+  cannot read. So a container that writes without end can fill the host's disk, as any program of
+  the account can. What Silo does instead protects the host: below a margin of free space on the
+  engine's file system (5 GiB by default; `SILO_CONTAINER_DISK_MARGIN_MIB` sets it, in MiB, in the
+  environment of `silod`, because a Linux host has no settings file) the engine refuses to start a
+  container computer, make a checkpoint of one or fork one, with a plain message, and stops (the
+  ordinary graceful stop) the running container computers whose writable layer is larger than
+  their stated size, the largest first, leaving the reason in the computer's status. A computer
+  within its stated size is never stopped, and a stop frees nothing by itself: the files stay
+  until their owner removes some. The guard reads the free space every 30 seconds and holds
+  nothing about a computer between looks. Only while the host is below the margin does it measure
+  layers (every minute), inside the user namespace so unreadable directories count (`du` there);
+  a layer that cannot be measured is left alone. A program can write the whole margin between two
+  looks, and the margin itself is the only protection against that. Sealed layers belong to
+  checkpoints and forks and are not counted against a computer; the per-computer share
+  (`/.msb`, the in-guest client's bridge folder, in the engine's `sandboxes` folder) is outside
+  every size, the computer's and the guard's.
 - **Known gaps.** `/sys` is a fresh sysfs mounted read-only inside the container's own user and
   network namespaces, so it shows the container's own devices (the TAP and loopback) and the
   host's hardware, not the host's network interfaces. Chrome needs `--no-sandbox` in a container (the baseline
