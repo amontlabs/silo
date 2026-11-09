@@ -440,15 +440,26 @@ container_forwarding_and_transfers() {
   for pid in "${forwarders[@]}"; do kill "$pid" 2>/dev/null || true; done
   wait 2>/dev/null || true
 
-  step "Sending a large file through ssh cat in both directions at once"
-  local ssh_plain=(-o BatchMode=yes -o ConnectTimeout=30)
+  step "Sending a large file through ssh cat in both directions at once, five times"
+  local ssh_plain=(-o BatchMode=yes -o ConnectTimeout=30) round big_hash
   head -c 60000000 /dev/urandom > "$scratch/big.bin"
+  big_hash=$(sha256sum < "$scratch/big.bin" | cut -d' ' -f1)
   # Input and output both flow at full speed: a server that stops reading the client while it
-  # waits for the command's input stalls here, and the timeout fails the check.
-  timeout 180 ssh "${ssh_plain[@]}" "$host" cat < "$scratch/big.bin" > "$scratch/big.out"
-  expect "hash of the file through cat" "$(sha256sum < "$scratch/big.out" | cut -d' ' -f1)" "$(sha256sum < "$scratch/big.bin" | cut -d' ' -f1)"
+  # waits for the command's input stalls here, and one that ends a command that falls behind
+  # fails here at random, so every one of the five rounds must give the same hash.
+  for round in 1 2 3 4 5; do
+    timeout 180 ssh "${ssh_plain[@]}" "$host" cat < "$scratch/big.bin" > "$scratch/big.out"
+    expect "hash of the file through cat (round $round of 5)" "$(sha256sum < "$scratch/big.out" | cut -d' ' -f1)" "$big_hash"
+  done
+
+  step "Sending a large file to a command that reads slowly"
+  # The command takes 64 KiB every 10 ms, far slower than the client sends: the server holds the
+  # client back with the SSH window instead of ending the command, so the command sees every byte.
+  local slow_reader='python3 -c '"'"'import sys,time,hashlib;h=hashlib.sha256();[(h.update(c),time.sleep(0.01)) for c in iter(lambda:sys.stdin.buffer.read1(65536),b"")];print(h.hexdigest())'"'"
+  expect "hash of the file read slowly" "$(timeout 300 ssh "${ssh_plain[@]}" "$host" "$slow_reader" < "$scratch/big.bin")" "$big_hash"
+  rm -f "$scratch/big.out"
   timeout 180 ssh "${ssh_plain[@]}" "$host" 'cat > /workspace/e2e-big.bin' < "$scratch/big.bin"
-  expect "hash of the file in the container" "$(in_container sha256sum /workspace/e2e-big.bin | cut -d' ' -f1)" "$(sha256sum < "$scratch/big.bin" | cut -d' ' -f1)"
+  expect "hash of the file in the container" "$(in_container sha256sum /workspace/e2e-big.bin | cut -d' ' -f1)" "$big_hash"
   timeout 180 ssh "${ssh_plain[@]}" "$host" 'cat /workspace/e2e-big.bin' > "$scratch/big.down"
   cmp "$scratch/big.bin" "$scratch/big.down"
   in_container rm -f /workspace/e2e-big.bin

@@ -260,35 +260,36 @@ mod server {
         rows: u16,
     }
 
-    /// Most bytes a client may have sent to a command that has not read them yet. The session loop
-    /// never waits for the command (it must keep answering the client's window updates, or a
-    /// command that writes as much as it reads would stop the transfer in both directions), so
-    /// what the command has not taken waits here, up to this much.
-    const INPUT_QUEUE_LIMIT: usize = 32 * 1024 * 1024;
+    /// How much input a client may send to a command that has not taken it yet: the SSH window
+    /// of a channel. The server grants window back only as the command takes the input, so a
+    /// command that reads slowly slows the client down (as with OpenSSH) and nothing is ended
+    /// or buffered without bound: a connection holds at most `MAX_CHANNELS` windows, 32 MiB.
+    /// The session loop never waits for the command (it must keep answering the client's
+    /// window updates, or a command that writes as much as it reads would stop the transfer in
+    /// both directions), so what the command has not taken waits in a queue of at most this size.
+    pub(super) const INPUT_WINDOW: u32 = 2 * 1024 * 1024;
 
-    /// Most bytes all the channels of one connection may have queued at once: 16 channels at
-    /// 32 MiB would otherwise be 512 MiB held for one key holder.
-    const CONNECTION_QUEUE_LIMIT: usize = 64 * 1024 * 1024;
-
-    /// What is queued for one command, counted against its channel and its connection.
+    /// What is queued for one command.
     struct Queue {
         queued: AtomicUsize,
-        budget: Arc<AtomicUsize>,
     }
 
     impl Queue {
         fn release(&self, bytes: usize) {
             self.queued.fetch_sub(bytes, Ordering::Relaxed);
-            self.budget.fetch_sub(bytes, Ordering::Relaxed);
         }
     }
 
-    impl Drop for Queue {
-        /// What was never written goes back to the connection's budget.
-        fn drop(&mut self) {
-            self.budget
-                .fetch_sub(*self.queued.get_mut(), Ordering::Relaxed);
-        }
+    /// What became of a chunk of the client's input.
+    #[derive(Debug, PartialEq, Eq)]
+    enum Pushed {
+        /// Waits for the command; its window is granted back once the command has taken it.
+        Queued,
+        /// The command no longer reads: the input is dropped, as it always was, and its window
+        /// is granted back at once.
+        Discarded,
+        /// The client sent more than the window it was granted.
+        Overrun,
     }
 
     /// The bytes waiting for a command's input.
@@ -299,50 +300,47 @@ mod server {
     }
 
     impl Input {
-        fn new(budget: Arc<AtomicUsize>) -> (Self, mpsc::UnboundedReceiver<Bytes>) {
+        fn new() -> (Self, mpsc::UnboundedReceiver<Bytes>) {
             let (sender, receiver) = mpsc::unbounded_channel();
             let queue = Arc::new(Queue {
                 queued: AtomicUsize::new(0),
-                budget,
             });
-            (
-                Self {
-                    sender,
-                    queue,
-                },
-                receiver,
-            )
+            (Self { sender, queue }, receiver)
         }
 
-        /// Starts the task that writes the queue to `sink`. The caller keeps the returned guard
-        /// for as long as the channel lives: the task ends with it, even if the command (in a
-        /// process group of its own, out of reach of the kill) never reads again. Ending the
-        /// input (dropping this `Input`) lets the task finish writing what is queued.
+        /// Starts the task that writes the queue to `sink` and calls `grant` with the number of
+        /// bytes of window to give the client back as they are taken. The caller keeps the
+        /// returned guard for as long as the channel lives: the task ends with it, even if the
+        /// command (in a process group of its own, out of reach of the kill) never reads again.
+        /// Ending the input (dropping this `Input`) lets the task finish writing what is queued.
         fn attach(
             &self,
             sink: impl AsyncWrite + Unpin + Send + 'static,
             receiver: mpsc::UnboundedReceiver<Bytes>,
+            grant: impl Fn(u32) + Send + 'static,
         ) -> AbortOnDrop {
-            AbortOnDrop(tokio::spawn(write_input(sink, receiver, self.queue.clone())))
+            AbortOnDrop(tokio::spawn(write_input(
+                sink,
+                receiver,
+                self.queue.clone(),
+                grant,
+            )))
         }
 
-        /// Queues `data` without waiting. `false` when the command is that far behind, or the
-        /// connection's commands together are.
-        fn push(&self, data: &[u8]) -> bool {
+        /// Queues `data` without waiting.
+        fn push(&self, data: &[u8]) -> Pushed {
             let queue = &self.queue;
-            if queue.queued.load(Ordering::Relaxed).saturating_add(data.len()) > INPUT_QUEUE_LIMIT
-                || queue.budget.load(Ordering::Relaxed).saturating_add(data.len())
-                    > CONNECTION_QUEUE_LIMIT
+            if queue.queued.load(Ordering::Relaxed).saturating_add(data.len())
+                > INPUT_WINDOW as usize
             {
-                return false;
+                return Pushed::Overrun;
             }
             queue.queued.fetch_add(data.len(), Ordering::Relaxed);
-            queue.budget.fetch_add(data.len(), Ordering::Relaxed);
             if self.sender.send(Bytes::copy_from_slice(data)).is_err() {
-                // The command no longer reads: its input is discarded, as it always was.
                 queue.release(data.len());
+                return Pushed::Discarded;
             }
-            true
+            Pushed::Queued
         }
     }
 
@@ -402,8 +400,6 @@ mod server {
         /// `None` over standard input and output, where the caller is the one process that
         /// started the server.
         limits: Option<Limits>,
-        /// Bytes queued for the commands of all this connection's channels (`CONNECTION_QUEUE_LIMIT`).
-        budget: Arc<AtomicUsize>,
     }
 
     impl Connection {
@@ -446,7 +442,7 @@ mod server {
                 return session.channel_failure(channel);
             }
             let pty = chan.pty.clone();
-            match start(&self.shared, session.handle(), channel, &request, pty, self.budget.clone()).await {
+            match start(&self.shared, session.handle(), channel, &request, pty).await {
                 Ok(started) => {
                     let chan = self.channels.get_mut(&channel).expect("channel kept");
                     chan.input = started.input;
@@ -653,6 +649,11 @@ mod server {
             }
         }
 
+        /// The window of a command's channel is granted as the command takes its input.
+        fn manual_window(&mut self, channel: ChannelId) -> bool {
+            self.channels.contains_key(&channel)
+        }
+
         async fn data(
             &mut self,
             channel: ChannelId,
@@ -664,16 +665,38 @@ mod server {
             let Some(chan) = self.channels.get_mut(&channel) else {
                 return Ok(());
             };
-            if chan.input.as_ref().is_some_and(|input| !input.push(data)) {
-                // The command has not read what the client sent for a long way: it is ended.
-                chan.end();
-                session.extended_data(
-                    channel,
-                    1,
-                    Bytes::from_static(b"The command did not read its input.\r\n"),
-                )?;
-                session.exit_status_request(channel, 1)?;
-                session.close(channel)?;
+            let pushed = chan.input.as_ref().map(|input| input.push(data));
+            match pushed {
+                Some(Pushed::Queued) => {}
+                // No command (yet, or any more) takes this input.
+                None | Some(Pushed::Discarded) => {
+                    session.window_adjust(channel, data.len() as u32)?;
+                }
+                Some(Pushed::Overrun) => {
+                    // A client past its window is out of protocol (OpenSSH disconnects it).
+                    chan.end();
+                    session.extended_data(
+                        channel,
+                        1,
+                        Bytes::from_static(b"The client sent more than its window.\r\n"),
+                    )?;
+                    session.exit_status_request(channel, 1)?;
+                    session.close(channel)?;
+                }
+            }
+            Ok(())
+        }
+
+        async fn extended_data(
+            &mut self,
+            channel: ChannelId,
+            _code: u32,
+            data: &[u8],
+            session: &mut Session,
+        ) -> Result<(), Self::Error> {
+            // A client has no extended data to give a command; its window is returned.
+            if self.channels.contains_key(&channel) {
+                session.window_adjust(channel, data.len() as u32)?;
             }
             Ok(())
         }
@@ -789,14 +812,13 @@ mod server {
         channel: ChannelId,
         request: &Request,
         pty: Option<Pty>,
-        budget: Arc<AtomicUsize>,
     ) -> Result<Started, String> {
         if !lifecycle::holder_alive(&shared.paths, &shared.name) {
             return Err(format!("Start {} first.", shared.name));
         }
         match pty {
-            Some(pty) => start_terminal(shared, handle, channel, request, pty, budget).await,
-            None => start_pipes(shared, handle, channel, request, budget).await,
+            Some(pty) => start_terminal(shared, handle, channel, request, pty).await,
+            None => start_pipes(shared, handle, channel, request).await,
         }
     }
 
@@ -813,7 +835,6 @@ mod server {
         handle: Handle,
         channel: ChannelId,
         request: &Request,
-        budget: Arc<AtomicUsize>,
     ) -> Result<Started, String> {
         let (work, request) = (shared.clone(), request.clone());
         let lifecycle::ExecPlan { command, group } =
@@ -831,8 +852,11 @@ mod server {
         let stdin = child.stdin.take().ok_or("The session has no input.")?;
         let stdout = child.stdout.take().ok_or("The session has no output.")?;
         let stderr = child.stderr.take().ok_or("The session has no output.")?;
-        let (input, receiver) = Input::new(budget);
-        let writer = input.attach(stdin, receiver);
+        let (input, receiver) = Input::new();
+        let granting = handle.clone();
+        let writer = input.attach(stdin, receiver, move |bytes| {
+            let _ = granting.window_adjust(channel, bytes);
+        });
         let held = group.clone();
         let task = tokio::spawn(async move {
             let out = tokio::spawn(pump(stdout, handle.clone(), channel, None));
@@ -863,7 +887,6 @@ mod server {
         channel: ChannelId,
         request: &Request,
         pty: Pty,
-        budget: Arc<AtomicUsize>,
     ) -> Result<Started, String> {
         // `crun` hands the terminal's controlling side to a socket we own. The path stays short
         // (a socket path holds about 100 bytes) and private.
@@ -907,8 +930,11 @@ mod server {
             master.try_clone().map_err(|error| error.to_string())?,
         );
         let writer = tokio::fs::File::from_std(master);
-        let (input, receiver) = Input::new(budget);
-        let writer = input.attach(writer, receiver);
+        let (input, receiver) = Input::new();
+        let granting = handle.clone();
+        let writer = input.attach(writer, receiver, move |bytes| {
+            let _ = granting.window_adjust(channel, bytes);
+        });
         let held = group.clone();
         let task = tokio::spawn(async move {
             let output = tokio::spawn(pump(reader, handle.clone(), channel, None));
@@ -1143,19 +1169,37 @@ mod server {
         }
     }
 
-    /// Writes what the client sends to the command until the client ends its input.
+    /// Writes what the client sends to the command until the client ends its input, and calls
+    /// `grant` with the window to give the client back as the command takes it (in batches,
+    /// and whenever the queue is empty so a small transfer is never held back).
     async fn write_input(
         mut sink: impl AsyncWrite + Unpin,
         mut receiver: mpsc::UnboundedReceiver<Bytes>,
         queue: Arc<Queue>,
+        grant: impl Fn(u32),
     ) {
+        let mut taken = 0u32;
         while let Some(chunk) = receiver.recv().await {
             let written = sink.write_all(&chunk).await.is_ok() && sink.flush().await.is_ok();
             queue.release(chunk.len());
+            taken += chunk.len() as u32;
             if !written {
+                // The command no longer reads: what is queued is dropped and its window given
+                // back, so the client is not left waiting for it.
+                receiver.close();
+                while let Some(rest) = receiver.recv().await {
+                    queue.release(rest.len());
+                    taken += rest.len() as u32;
+                }
+                grant(taken);
                 return;
             }
+            if taken >= INPUT_WINDOW / 4 || receiver.is_empty() {
+                grant(taken);
+                taken = 0;
+            }
         }
+        grant(taken);
         let _ = sink.shutdown().await;
     }
 
@@ -1165,6 +1209,7 @@ mod server {
             auth_rejection_time_initial: Some(std::time::Duration::ZERO),
             methods: russh::MethodSet::from(&[russh::MethodKind::PublicKey][..]),
             max_auth_attempts: 6,
+            window_size: INPUT_WINDOW,
             keys: vec![host_key],
             inactivity_timeout: (!serve.no_inactivity_timeout).then_some(INACTIVITY),
             ..Default::default()
@@ -1184,7 +1229,6 @@ mod server {
             channels: HashMap::new(),
             forwards: HashMap::new(),
             limits,
-            budget: Arc::new(AtomicUsize::new(0)),
         }
     }
 
@@ -1584,51 +1628,45 @@ mod server {
         }
 
         #[test]
-        fn a_command_that_does_not_read_cannot_hold_up_the_session_or_grow_without_limit() {
-            let (input, _receiver) = Input::new(Arc::new(AtomicUsize::new(0)));
-            let chunk = vec![7u8; 1024 * 1024];
-            // Nothing reads: every push still returns at once, up to the limit.
-            for _ in 0..INPUT_QUEUE_LIMIT / chunk.len() {
-                assert!(input.push(&chunk));
+        fn a_command_that_does_not_read_cannot_hold_up_the_session_or_grow_past_the_window() {
+            let (input, _receiver) = Input::new();
+            let chunk = vec![7u8; 32 * 1024];
+            // Nothing reads: every push still returns at once, up to the window a client was granted.
+            for _ in 0..INPUT_WINDOW as usize / chunk.len() {
+                assert_eq!(input.push(&chunk), Pushed::Queued);
             }
-            assert!(!input.push(&[0]), "the queue grew past its limit");
-            assert_eq!(input.queue.queued.load(Ordering::Relaxed), INPUT_QUEUE_LIMIT);
+            // A client that keeps sending past its window is out of protocol.
+            assert_eq!(input.push(&[0]), Pushed::Overrun);
+            assert_eq!(
+                input.queue.queued.load(Ordering::Relaxed),
+                INPUT_WINDOW as usize
+            );
         }
 
         #[test]
-        fn the_channels_of_one_connection_share_one_budget_that_a_closed_channel_gives_back() {
-            let budget = Arc::new(AtomicUsize::new(0));
-            let chunk = vec![7u8; 1024 * 1024];
-            let (first, _r1) = Input::new(budget.clone());
-            let (second, _r2) = Input::new(budget.clone());
-            let (third, _r3) = Input::new(budget.clone());
-            for _ in 0..INPUT_QUEUE_LIMIT / chunk.len() {
-                assert!(first.push(&chunk));
-            }
-            for _ in 0..(CONNECTION_QUEUE_LIMIT - INPUT_QUEUE_LIMIT) / chunk.len() {
-                assert!(second.push(&chunk));
-            }
-            assert_eq!(budget.load(Ordering::Relaxed), CONNECTION_QUEUE_LIMIT);
-            // Each is under its own limit, the connection is not.
-            assert!(!third.push(&[0]), "the connection's budget was passed");
-            assert!(!second.push(&[0]));
-            // The first channel closes with its queue unread: its bytes are given back.
-            drop(first);
-            assert_eq!(
-                budget.load(Ordering::Relaxed),
-                CONNECTION_QUEUE_LIMIT - INPUT_QUEUE_LIMIT
-            );
-            assert!(third.push(&chunk));
+        fn a_connection_holds_at_most_one_window_per_channel() {
+            // The bound that replaced the per-connection queue limit: a channel queues at most
+            // its window, a connection has at most `MAX_CHANNELS` channels.
+            assert!(MAX_CHANNELS as u64 * u64::from(INPUT_WINDOW) <= 32 * 1024 * 1024);
+        }
+
+        /// The window the writer gave back, in total.
+        fn granted_total() -> (Arc<AtomicUsize>, impl Fn(u32) + Send + 'static) {
+            let total = Arc::new(AtomicUsize::new(0));
+            let counted = total.clone();
+            (total, move |bytes| {
+                counted.fetch_add(bytes as usize, Ordering::Relaxed);
+            })
         }
 
         #[tokio::test(flavor = "multi_thread")]
         async fn a_writer_stuck_on_a_command_that_never_reads_ends_with_the_channel() {
-            let budget = Arc::new(AtomicUsize::new(0));
-            let (input, receiver) = Input::new(budget.clone());
+            let (input, receiver) = Input::new();
             // A pipe nobody reads: the writer blocks on it for good.
             let (_reader, writer) = tokio::io::duplex(16);
-            let guard = input.attach(writer, receiver);
-            assert!(input.push(&[1u8; 4096]));
+            let (granted, grant) = granted_total();
+            let guard = input.attach(writer, receiver, grant);
+            assert_eq!(input.push(&[1u8; 4096]), Pushed::Queued);
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             let sender = input.sender.clone();
             // Ending the input alone leaves the writer to finish what is queued...
@@ -1640,23 +1678,31 @@ mod server {
             tokio::time::timeout(std::time::Duration::from_secs(5), sender.closed())
                 .await
                 .expect("the writer task outlived the channel");
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-            assert_eq!(budget.load(Ordering::Relaxed), 0);
+            // Nothing was taken by the command, so nothing was granted back.
+            assert_eq!(granted.load(Ordering::Relaxed), 0);
         }
 
         #[tokio::test(flavor = "multi_thread")]
-        async fn the_input_queue_empties_into_the_command_while_the_session_keeps_going() {
-            let (input, receiver) = Input::new(Arc::new(AtomicUsize::new(0)));
+        async fn the_window_comes_back_only_as_the_command_takes_the_input() {
+            let (input, receiver) = Input::new();
             // A sink that takes a few kilobytes and then waits for its reader.
             let (mut reader, writer) = tokio::io::duplex(4096);
-            let writer_task = tokio::spawn(write_input(writer, receiver, input.queue.clone()));
-            let chunk = vec![1u8; 64 * 1024];
+            let (granted, grant) = granted_total();
+            let writer_task = tokio::spawn(write_input(writer, receiver, input.queue.clone(), grant));
+            let chunk = vec![1u8; 32 * 1024];
+            let pushes = INPUT_WINDOW as usize / chunk.len();
             let started = std::time::Instant::now();
-            for _ in 0..64 {
-                assert!(input.push(&chunk));
+            for _ in 0..pushes {
+                assert_eq!(input.push(&chunk), Pushed::Queued);
             }
-            // 4 MiB were handed over without anything reading them.
+            // A whole window was handed over without anything reading it...
             assert!(started.elapsed() < std::time::Duration::from_secs(5));
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            // ...and almost none of it was granted back: the client is held at its window.
+            assert!(
+                granted.load(Ordering::Relaxed) <= chunk.len(),
+                "window was granted for input nothing had taken"
+            );
             let queue = input.queue.clone();
             drop(input);
             let mut received = 0usize;
@@ -1667,11 +1713,194 @@ mod server {
                     break;
                 }
                 received += count;
+                assert!(granted.load(Ordering::Relaxed) <= received + 4096 + chunk.len());
             }
             writer_task.await.unwrap();
-            assert_eq!(received, 64 * chunk.len());
+            assert_eq!(received, pushes * chunk.len());
+            assert_eq!(granted.load(Ordering::Relaxed), received);
             assert_eq!(queue.queued.load(Ordering::Relaxed), 0);
-            assert_eq!(queue.budget.load(Ordering::Relaxed), 0);
+        }
+
+        #[tokio::test(flavor = "multi_thread")]
+        async fn a_command_that_stops_reading_gives_the_rest_of_the_window_back() {
+            let (input, receiver) = Input::new();
+            // A command that closed its input (`head -c`): writes fail.
+            let (reader, writer) = tokio::io::duplex(16);
+            drop(reader);
+            let (granted, grant) = granted_total();
+            let writer_task = input.attach(writer, receiver, grant);
+            let mut sent = 0usize;
+            for _ in 0..8 {
+                if input.push(&[3u8; 1000]) != Pushed::Overrun {
+                    sent += 1000;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            // What was queued is dropped and given back; what came later is discarded at once
+            // (the session grants it), so the client never waits on a command that is gone.
+            let discarded = (0..4).filter(|_| input.push(&[3u8; 10]) == Pushed::Discarded).count();
+            assert_eq!(discarded, 4);
+            assert!(granted.load(Ordering::Relaxed) >= 1000);
+            assert!(granted.load(Ordering::Relaxed) <= sent);
+            assert_eq!(input.queue.queued.load(Ordering::Relaxed), 0);
+            drop(writer_task);
+        }
+
+        /// The real handler, except that a command is a sink the test controls.
+        struct Sinked {
+            inner: Connection,
+            sink: Option<tokio::io::DuplexStream>,
+            queue: Arc<std::sync::Mutex<Option<Arc<Queue>>>>,
+        }
+
+        impl Handler for Sinked {
+            type Error = russh::Error;
+
+            async fn auth_publickey_offered(
+                &mut self,
+                user: &str,
+                offer: PublicKeyOffer<'_>,
+            ) -> Result<Auth, Self::Error> {
+                self.inner.auth_publickey_offered(user, offer).await
+            }
+
+            async fn auth_publickey(
+                &mut self,
+                user: &str,
+                key: VerifiedPublicKey<'_>,
+            ) -> Result<Auth, Self::Error> {
+                self.inner.auth_publickey(user, key).await
+            }
+
+            async fn channel_open_session(
+                &mut self,
+                channel: Channel<Msg>,
+                reply: russh::server::ChannelOpenHandle,
+                session: &mut Session,
+            ) -> Result<(), Self::Error> {
+                self.inner.channel_open_session(channel, reply, session).await
+            }
+
+            async fn exec_request(
+                &mut self,
+                channel: ChannelId,
+                _data: &[u8],
+                session: &mut Session,
+            ) -> Result<(), Self::Error> {
+                let sink = self.sink.take().expect("one command");
+                let (input, receiver) = Input::new();
+                *self.queue.lock().unwrap() = Some(input.queue.clone());
+                let handle = session.handle();
+                let writer = input.attach(sink, receiver, move |bytes| {
+                    let _ = handle.window_adjust(channel, bytes);
+                });
+                let chan = self.inner.channels.get_mut(&channel).unwrap();
+                chan.input = Some(input);
+                chan.writer = Some(writer);
+                session.channel_success(channel)
+            }
+
+            fn manual_window(&mut self, channel: ChannelId) -> bool {
+                self.inner.manual_window(channel)
+            }
+
+            async fn data(
+                &mut self,
+                channel: ChannelId,
+                data: &[u8],
+                session: &mut Session,
+            ) -> Result<(), Self::Error> {
+                self.inner.data(channel, data, session).await
+            }
+
+            async fn extended_data(
+                &mut self,
+                channel: ChannelId,
+                code: u32,
+                data: &[u8],
+                session: &mut Session,
+            ) -> Result<(), Self::Error> {
+                self.inner.extended_data(channel, code, data, session).await
+            }
+
+            async fn channel_eof(
+                &mut self,
+                channel: ChannelId,
+                session: &mut Session,
+            ) -> Result<(), Self::Error> {
+                self.inner.channel_eof(channel, session).await
+            }
+        }
+
+        /// A client that sends far more than the window to a command that reads slowly, or not
+        /// at all for a while, is held back by the window: the transfer completes, the queue
+        /// never passes the window, and nothing is ended.
+        #[tokio::test(flavor = "multi_thread")]
+        async fn a_command_that_reads_slowly_holds_the_client_back_and_is_never_ended() {
+            let allowed = key();
+            let fixture = fixture(&authorized_line(&allowed, "me"));
+            let (reader, sink) = tokio::io::duplex(64 * 1024);
+            let queue = Arc::new(std::sync::Mutex::new(None));
+            let (client_end, server_end) = tokio::io::duplex(256 * 1024);
+            let (config, shared, tapped) = (fixture.config.clone(), fixture.shared.clone(), queue.clone());
+            tokio::spawn(async move {
+                let handler = Sinked {
+                    inner: handler(&shared, None),
+                    sink: Some(sink),
+                    queue: tapped,
+                };
+                let session = russh::server::run_stream(config, server_end, handler).await.unwrap();
+                let _ = session.await;
+            });
+            let mut client = client_over(client_end).await;
+            assert!(login(&mut client, &allowed).await);
+            let mut channel = client.channel_open_session().await.unwrap();
+            channel.exec(true, "slow").await.unwrap();
+
+            const TOTAL: usize = 12 * 1024 * 1024;
+            let chunk = vec![5u8; 32 * 1024];
+            let sender = tokio::spawn(async move {
+                for _ in 0..TOTAL / chunk.len() {
+                    channel.data(&chunk[..]).await.expect("the command was ended");
+                }
+                channel.eof().await.unwrap();
+                channel
+            });
+            let queued = || {
+                queue
+                    .lock()
+                    .unwrap()
+                    .as_ref()
+                    .map_or(0, |queue| queue.queued.load(Ordering::Relaxed))
+            };
+            // Nothing reads yet: the client fills its window and then waits, far short of 12 MiB.
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            assert!(!sender.is_finished(), "the client was not held back");
+            assert!(queued() <= INPUT_WINDOW as usize, "the queue passed the window");
+
+            // The command now reads slowly (about 64 KiB every 2 ms).
+            let mut reader = reader;
+            let mut received = 0usize;
+            let mut buffer = vec![0u8; 64 * 1024];
+            let mut most = 0usize;
+            tokio::time::timeout(std::time::Duration::from_secs(120), async {
+                while received < TOTAL {
+                    let count = reader.read(&mut buffer).await.unwrap();
+                    assert!(count > 0, "the input ended early");
+                    received += count;
+                    most = most.max(queued());
+                    tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+                }
+            })
+            .await
+            .expect("the transfer did not complete");
+            assert_eq!(received, TOTAL);
+            assert!(most <= INPUT_WINDOW as usize, "the queue passed the window: {most}");
+            let _channel = tokio::time::timeout(std::time::Duration::from_secs(30), sender)
+                .await
+                .expect("the client never finished sending")
+                .unwrap();
         }
 
         #[tokio::test(flavor = "multi_thread")]

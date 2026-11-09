@@ -196,4 +196,5 @@ licensed under MIT or Apache-2.0, for the loopback WebSocket endpoint of that wi
 
 Silo's engine uses `russh` 0.65.1 (https://github.com/Eugeny/russh), licensed under
 Apache-2.0, with the RustCrypto crates it builds on (MIT or Apache-2.0), for the SSH server of
-container computers on Linux hosts. It is the library MicroSandbox's own SSH server uses.
+container computers on Linux hosts. It is the library MicroSandbox's own SSH server uses. Silo
+vendors it with a small patch (`src-tauri/vendor/russh/SILO-PATCH.md`).

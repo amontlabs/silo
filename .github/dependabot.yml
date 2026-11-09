@@ -65,6 +65,8 @@ updates:
         update-types: [version-update:semver-minor, version-update:semver-major]
       # Pinned to the vendored, Silo-patched copy under src-tauri/vendor.
       - dependency-name: 'tauri-plugin-updater'
+      # Pinned to the vendored, Silo-patched copy under src-tauri/vendor (SSH window control).
+      - dependency-name: 'russh'
       # Must match runtime-inputs.json and the microsandbox patch set.
       - dependency-name: 'microsandbox-*'
       # gtk-rs majors must match the GTK version Tauri and wry build against.

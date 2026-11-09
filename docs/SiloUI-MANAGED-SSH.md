@@ -207,12 +207,17 @@ namespace, so a stale `outer.pid` that another computer's holder has reused is r
 
 A connection has 30 seconds to log in whatever the inactivity timeout is, and only logged-in
 connections count against the limit of 32 (at most 64 are still logging in at once), so idle
-sockets cannot lock a person out. What a command has not read of the client's input waits in a
-queue of up to 32 MiB per channel and 64 MiB across all the channels of one connection (so at
-most 32 connections x 64 MiB are held), and a command that falls further behind either limit is
-ended, so a transfer in both directions (`ssh NAME cat < big > copy`) never stalls the
-connection's other traffic. When a channel closes, its writer task ends and its queue goes back
-to the connection's budget, even for a command in a process group of its own that never reads.
+sockets cannot lock a person out. A command is never ended because it reads slowly. The
+client's input is flow-controlled with the SSH channel window, as OpenSSH does: each channel
+grants the client 2 MiB, and the server gives window back only as the command takes the input,
+so a slow command slows the client down (`rsync`, `git` and a large `scp` just take longer)
+while the server holds at most 2 MiB per channel, 32 MiB across the 16 channels of one
+connection. The session loop never waits for the command, so a transfer in both directions
+(`ssh NAME cat < big > copy`) never stalls the connection's other traffic. A client that sends
+more than its window is out of protocol and its channel is closed. When a channel closes, its
+writer task ends, even for a command in a process group of its own that never reads. russh
+grants the window by itself as data arrives, so Silo carries a small patch to it (see
+`app/SiloUI/src-tauri/vendor/russh/SILO-PATCH.md`).
 
 Every command runs through the engine's own exec path (`silo-ctr enter`, `crun exec`, the init
 shim), so the hardening baseline, the process-group kill when a channel closes, and the

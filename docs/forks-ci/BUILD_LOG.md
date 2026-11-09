@@ -510,14 +510,36 @@ client through the same commands, API methods and screens as a Linux VM. Fable's
     no longer says forwarding is refused (remote `-R` still is).
   - *No stall under load.* `data()` awaited a bounded queue inside the session loop, which is also what takes the client's
     window updates: `ssh box cat < big > out` filled the command's stdin, the command's stdout filled the client's window,
-    and the update that would have freed it sat behind the blocked loop. The queue is now unbounded in count and bounded
-    in bytes (32 MiB; a command that falls further behind is ended), and `data()` never waits. A channel close or a
+    and the update that would have freed it sat behind the blocked loop. `data()` now never waits: the input goes to an
+    unbounded queue that a writer task empties into the command. The first fix bounded that queue in bytes (32 MiB per
+    channel, 64 MiB per connection) and ended a command that fell behind; the KVM check (60 MB both ways) then failed
+    twice and passed twice on identical code. Ending a command for reading slowly is not what `sshd` does and would
+    break `rsync`, `git` and large `scp` at random, so it is replaced by real flow control (below). A channel close or a
     dropped connection already killed the command's process group (the channel is dropped); the live check now proves it
     by killing a client.
   - *Login deadline.* A connection has 30 s from `accept` (the version exchange included) to log in, whatever the inactivity
     timeout; at most 64 connections are logging in at once; only a logged-in connection takes one of the 32 slots, so idle
     sockets can no longer lock SSH out under `--no-inactivity-timeout`. A client over the cap of logged-in connections
     is disconnected when it proves its key.
+  - *Flow control (no command is ended for being slow).* russh 0.65.1 sends `WINDOW_ADJUST` itself, before it calls
+    `Handler::data`, as soon as its view of the client's window is under half the target; the handler cannot delay it
+    (`Handler::adjust_window` only picks the next target, after the packet is queued) and `Session` has no call to send
+    one, so the window bounds what is in flight, not what is queued. Awaiting inside `data()` is no answer (the loop
+    would stop taking the client's window updates, the stall above). So Silo vendors russh 0.65.1 with a patch
+    (`src-tauri/vendor/russh`, `[patch.crates-io]` as for `tauri-plugin-updater`, `SILO-PATCH.md`; not upstreamed):
+    `Handler::manual_window(channel)` (default false) makes russh count received bytes against the channel's window
+    without granting more, and `Session::window_adjust` / `Handle::window_adjust` grant it (the handle's goes through the
+    priority queue, so it is never held behind output waiting for the client's window). The server grants a channel's
+    2 MiB window (`Config::window_size`) back as the writer task empties the queue into the command (in batches of 512 KiB
+    and whenever the queue is empty), and at once for input nothing takes (before the command starts, after EOF, a command
+    that closed its input, whose queued bytes the writer drops and gives back). A channel therefore queues at most 2 MiB
+    and a connection at most 16 x 2 MiB; a client past its window gets its channel closed, as `sshd` disconnects it. The
+    per-channel and per-connection byte limits and the "did not read its input" ending are gone. Tests (Linux container
+    here, CI): the queue never passes the window, the window comes back only as the command takes the input, a command that
+    stops reading gives it all back, and a real client sending 12 MiB to a command that is paused and then reads 64 KiB
+    every 2 ms is held back, never ended, and delivers every byte with the queue within the window.
+    `linux-host-e2e.sh` now runs the 60 MB `ssh cat` both ways five times (all five hashes must match) and sends the file
+    to a command that reads 64 KiB every 10 ms, which must receive it intact.
   - *Signals* in an SSH `signal` request go to the exec's process group (`ExecGroup::signal`, the same leader check as the kill).
   - *Root's in-guest answers* are a documented difference, not changed: the engine cannot give a file to a sub-id without a
     helper in the holder's namespace, and a looser mode would show the answer to any guest user that learns the id.
@@ -534,8 +556,8 @@ client through the same commands, API methods and screens as a Linux VM. Fable's
     if a sub-id of the account (from `/etc/subuid`) owns it. `Spool::new` takes the `KeepId` from the worker
     (`containers::keep_id_for(home, name)`), so the spool does not know about kinds.
   - *Tests.* Unit tests for each, run in a Linux container here and in CI; `linux-host-e2e.sh` gained forwarding (`-L`,
-    `-D`, refused destinations, a port the host does not serve), a 60 MB file through `ssh cat` both ways with hashes,
-    a killed client, and 40 idle sockets with a login in between.
+    `-D`, refused destinations, a port the host does not serve), a 60 MB file through `ssh cat` both ways with hashes
+    (five rounds, and a slow reader; see the flow-control item), a killed client, and 40 idle sockets with a login in between.
 
 ### R1: CI runner on the Mac (branch `claude/runner-phase-1`)
 
