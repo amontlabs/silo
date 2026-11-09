@@ -884,11 +884,13 @@ with nothing sensitive on it, and the app, the CLI and `silo list` label it as l
     files of the layers below show through. Memory is bounded: a folder's owner and attributes are
     applied as it is made, only the chain of open folders waits for its mode and time, and the
     process runs under a 1 GiB address-space limit, so a tar header that claims more ends in a failed
-    allocation. The disk is measured, not estimated: before every chunk of a file and every 256
-    entries `unpack` reads the free bytes and free inodes of the layer's file system and stops under
+    allocation. The disk is measured, not estimated: before every chunk of a file, every 256
+    entries, and whenever the names, link targets and attributes written since the last look add
+    up to 16 MiB, `unpack` reads the free bytes and free inodes of the layer's file system and stops under
     the host disk margin (5 GiB by default; the inode margin is that over 16 KiB per inode), which
     counts block size, inodes, attributes and link targets as the file system does. Between two looks
-    it can write at most one 16 MiB chunk of a file, or 256 entries of metadata. There is no limit on
+    it can write at most one 16 MiB chunk of a file, or 16 MiB of names, link targets and attributes
+    plus the file system's own cost of 256 entries. There is no limit on
     the number of entries: the inode margin is the limit. Sockets are not exported (tar has no
     type for them). The files it makes are what the container's own root could have written:
     setuid bits, file capabilities and device whiteouts are inert inside the container under the
@@ -906,7 +908,7 @@ with nothing sensitive on it, and the app, the CLI and `silo list` label it as l
     whatever its sender's agent left, and keeping it into your main writes the sender's files there
     (read `silo diff` first). A malicious file can fill the free space down to the margin, as a
     container that writes without end can (see The disk below). The unpack stops within one chunk
-    or 256 entries of the margin, not exactly at it, and another process writing at the same time
+    and 256 entries of the margin, not exactly at it, and another process writing at the same time
     can still take the disk below it (the host disk guard handles that, as for any container).
   - *The guest image.* The file does not carry it. An export accepts any image digest unpacked on
     the exporting device, and an import accepts the pinned one or one kept unpacked; otherwise it

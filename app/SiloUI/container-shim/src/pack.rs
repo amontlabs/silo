@@ -636,8 +636,9 @@ mod linux {
     }
 
     /// Reads a tar stream into `root`, which must be an empty folder (the layer itself, once this
-    /// process has made it its root). The disk is looked at before every chunk of a file and every
-    /// [`LOOK_EVERY`] entries; nothing is written below the margin `room` names.
+    /// process has made it its root). The disk is looked at before every chunk of a file, every
+    /// [`LOOK_EVERY`] entries, and whenever names, link targets and attributes add up to a chunk;
+    /// nothing is written below the margin `room` names.
     pub fn unpack_tree(root: &Path, input: impl Read, room: &Room) -> Result<(), String> {
         let mut archive = Archive::new(input);
         let entries = archive
@@ -645,11 +646,10 @@ mod linux {
             .map_err(|e| io_err("read the stream", &e))?;
         let mut open: Vec<Open> = Vec::new();
         let mut count = 0u64;
+        // Names, link targets and attributes written since the disk was last looked at.
+        let mut since_look = 0u64;
         for entry in entries {
             let mut entry = entry.map_err(|e| io_err("read the stream", &e))?;
-            if count.is_multiple_of(LOOK_EVERY) {
-                room.check(root, 0)?;
-            }
             let kind = entry.header().entry_type();
             let path = entry_path(&entry.path_bytes(), kind.is_dir())?;
             if (count == 0) != (path == b".") || (count == 0 && !kind.is_dir()) {
@@ -677,6 +677,14 @@ mod linux {
             };
             if meta.mode > 0o7777 {
                 return Err(impossible());
+            }
+            let link = entry.link_name_bytes().map_or(0, |link| link.len());
+            let attributes: usize = meta.xattrs.iter().map(|(n, v)| n.len() + v.len()).sum();
+            let metadata = (path.len() + link + attributes) as u64;
+            since_look += metadata;
+            if (count - 1).is_multiple_of(LOOK_EVERY) || since_look >= CHUNK {
+                room.check(root, metadata)?;
+                since_look = 0;
             }
             let target = join(root, &path);
             match kind {

@@ -8,7 +8,7 @@ Plan: [PLAN.md](PLAN.md).
 - **Open phases:** F4 (export a computer that lives on another machine) is built on
   `claude/forks-phase-4-transfer`, pull request open, its live check is the `linux-host.yml` two-account
   job; R2 (Linux hosts as runner machines) is in progress; container computers: CT1 to CT5 are merged, CT6 (export, import and
-  Connections) is built in #104 and its live check was green twice in a row.
+  Connections) is built in #104.
 - **Open follow-ups found during the build:**
   - A Linux fork leaves its fork-point checkpoint on the source (it was a manual checkpoint before F2 too);
     macOS removes its fork point with the last fork. Fixing it means the macOS release machinery on Linux.
@@ -873,209 +873,6 @@ same CLI, API and app as a VM. Design: [CONTAINERS-PLAN](CONTAINERS-PLAN.md).
   manifest promises; kind disagreement; format 5 cannot hold a container; the image rules), `route` for an imported checkpoint with no
   container computer, the user-manager environment. Desktop service: the orphaned lock. Frontend: capabilities and the overview page.
   Linux unit tests also ran on the Mac in a container (shim and engine).
-- **Live check** (KVM runner): `linux-host-e2e.sh` with `SILO_E2E_CONTAINER=1`, run 42561463802 (x86_64, Ubuntu 24.04). Checkpoint of the running container
-  (scope `disk`) 0.6 s. `silo fork -n 4` from that checkpoint, four forks created and started: **6.8 s** (the starts, about 5 s each, run
-  in parallel). Each fork saw the checkpoint and none saw the parent's later writes, the parent's cron job or another fork's files. `diff` in
-  a fork listed `/home/silo/only-1`; `fold` kept a file into the parent and `undo` removed it again (the parent's earlier state stayed). The
-  engine unit was killed with SIGKILL: the container was running again with its file and a working public network about 12 s later. A
-  container whose recorded size was set to 400 MiB failed a write with "Read-only file system" within a few chunks of 64 MiB
-  (this step is replaced by the host guard check below; the remount it checked is gone). The
-  first runs failed on the test script (the diff scan does not look in `/workspace`; a plain fork starts stopped; a container's `--disk`
-  is only its workspace, so its limit is root disk plus workspace, 81 GiB, and the test shrinks the recorded size).
-- **Live check after the review fixes** (KVM runner, code head `681bf0c6b`, Linux host run 42566219752, attempts 3 and 4, both
-  green; attempt 1 failed on the VM image download before any container step, and attempt 2 passed the container steps and failed on the same download in the two-device step): the disk-limit step is
-  replaced by the host guard. A container whose recorded size was 400 MiB wrote 600 MiB (nothing stopped it while the host
-  had room); a `fallocate`d file on the engine's file system left 2.5 GiB free (margin 5 GiB). Within the guard's first
-  look (about 37 s) the oversized computer was stopped; `silo start` of it was refused with "This device's disk is nearly
-  full (2.5 GiB free; Silo keeps at least 5.0 GiB free), so Silo did not start a container computer. Free some space on
-  this device, then try again."; a checkpoint of the other container, which was within its size, was refused with the
-  same message and that container kept running; after the file was removed the oversized computer started again.
-
-### 9 Nov 2026: phase CT5 built (the desktop and computer use for container computers)
-
-Branch `claude/containers-ct5`. A container computer has the desktop and computer use through the same API, CLI, MCP and
-app as a Linux VM, and the "not yet" list is down to export (CT6) and memory checkpoints (never). Design as decided:
-[CONTAINERS-PLAN](CONTAINERS-PLAN.md).
-
-- **Capability.** `Capability::Desktop` is on for the container kind (`containers/capability.rs`, `container-unavailable.json`
-  now `["export", "memorySnapshots"]`). Three refusals that existed only for containers are gone: the create-time
-  "no desktop yet", the update-time "a container's desktop may not change", and the new-computer rule that kept a
-  container from taking its image's desktop (`desktop::default_new_computer_desktops`). A new container is built in and
-  starts its desktop like a VM; the app shows "Add Linux desktop" for a container without one.
-- **Start without systemd** (`containers/desktop.rs`, called from `containers::start` after the gateway certificate). A VM's init
-  runs the image's `silo-desktop-boot`. A container's PID 1 is the shim with no capability, and the desktop service
-  switches to the `silo` account with `runuser`, which needs setuid/setgid, so the engine runs the same hook after every start
-  as one root command (the capabilities Silo's root commands already get), on a background thread: it waits up to 150 s for
-  `/var/lib/silo/working-account.json` (a first start creates the account after the container is up), then runs the hook
-  (which does nothing until the desktop's install is recorded as finished); an image with no hook starts nothing. The start does
-  not wait for it and a failure is logged, not returned; a hook that fails leaves the marker that makes the desktop's status say
-  `failed`. The service's own
-  supervisors then keep Xvfb, Xfce and Selkies up, as in a VM. No new container branch outside `engine/src/containers/`:
-  the only edits outside are removals of the three refusals above, a guard in `setup-desktop.sh` and the app.
-- **No VM-only installer path.** The desktop setup in a container reaches `setup-desktop.sh` through the same engine code; with
-  `SILO_RUNTIME=container` (set on every container exec) it exits with a message instead of falling back to `apt-get` when
-  the image's desktop is not complete. The branch that provisions the image's preinstalled desktop touches neither apt nor
-  the network and runs as for a VM.
-- **Chrome with `--no-sandbox`.** `silo-computer-use.py` (pushed and applied after every boot, and when the desktop is turned
-  on) writes, in a container only, launchers for `google-chrome`, `google-chrome-stable`, `chromium` and `chromium-browser`
-  in `/usr/local/bin` and `google-chrome.desktop` and `chromium.desktop` in `/usr/local/share/applications` that run the launcher, which execs the first installed browser
-  (`/opt/google/chrome/google-chrome`, Debian's Chromium paths, whichever name was called) with `--no-sandbox`; a file of that
-  name that the helper did not write is left alone. No seccomp exception for Chrome. The app's computer page shows a note when a container has a
-  desktop; the threat model, the desktop guide and the computer-use guide say it plainly.
-- **Host disk guard (CT4 re-check).** (1) A layer the guard cannot measure (the measurement timed out, or `du` itself failed or
-  printed nothing readable) counts as over its size and goes first; layers are measured by up to four workers at once, each bounded to five
-  minutes, so one slow container does not hold up the others. (2) The threat model now says the guard's stop can land during a
-  checkpoint copy (the frozen scope is killed after the 15 s stop wait; the copy runs outside the container and still
-  saves), can act on a measurement minutes old, that sizes adding up to more than the disk can still fill it, and that a
-  checkpoint freezes for up to 10 s of waiting plus 30 s of copying.
-- **Recipes do not make containers, but a container can be created with its desktop off.** A recipe has no runtime, so a
-  recipe's `desktop: false` never makes a container. `computers.create` takes `configuration.desktop =
-  {startWithComputer: false}` for a container as for a VM (the app's form sends it); `silo create --no-desktop`
-  now sends the same request for both kinds, and the live check creates a container that way.
-- **Found on the way** (the KVM runner; four of these failed the first live runs):
-  - A root command in a container has no `CAP_SYS_PTRACE`, so it cannot read another account's `/proc/<pid>/exe`. The desktop
-    service's identity check of a process it just started (Xvfb) failed, and every container creation failed with "Desktop
-    session failed to start". The service now names such a process by its `comm` (`process_exe`), the same way at launch and later.
-    The guest's error also carries the end of the service log now (a creation sees only the error), and the engine logs the reason
-    a desktop setup failed.
-  - **Landlock keeps one exec from reading another's processes.** Each exec runs in its own Landlock domain, and Landlock refuses
-    `ptrace` access checks (which `/proc/<pid>/environ` uses) between sibling domains, even for the same account. Cua Driver's
-    launcher could not read the desktop session's environment from `xfce4-session` (`X11 setup failed: Authorization required`).
-    In a container the session now writes `DISPLAY`, `DBUS_SESSION_BUS_ADDRESS`, `XDG_RUNTIME_DIR` and `XAUTHORITY` to
-    `/run/silo-desktop/user/session.env` (mode 0600, the working account's) when it starts, and the launcher and
-    `silo-computer-use` read that file when they cannot read the process. (The review fixes below make this the one path for both kinds.)
-  - The first start creates the working account after the container is up, so the boot command waits for it.
-  - The Linux runner has Google Chrome installed on the host; a guest test for the missing-browser message must not rely on the
-    machine having none.
-  - The viewer's streamer listens on the container's loopback, and a published port reaches the guest's own address, so the
-    URL-proxy check hands a published port to it with a small forwarder in the container; the viewer itself reaches the loopback
-    port over the computer's SSH server, as the app does.
-- **Tests.** (The review fixes below add the cases for the hook that waits for the install, the failed status, the fixed
-  environment of engine commands, `/run` as a tmpfs, `--no-desktop`, the session file reader and its removal, the Chromium entry,
-  the streamer password and the unmeasurable layer.) Engine: the capability list and its app copy, the desktop defaults for a container (built in, and
-  autostart-off kept), the update validator, the boot command and script, the host guard (unmeasurable layer, ordering, parallel
-  measurement). Guest: the Chrome launchers (written for a container only, never over a foreign file, run the browser with the
-  flag and its arguments, say so when none is installed). Frontend: the capability model, the overview and detail pages (desktop
-  action offered; the browser warning shown for a container only). Live: `linux-host-e2e.sh` with `SILO_E2E_CONTAINER=1`
-  (a fourth container with the desktop on, below).
-- **Live check** (KVM runner, x86_64, Ubuntu 24.04; Linux host run 42591492385, code head `66888e0c`): a container created with the
-  desktop on started it with the computer (service `running`; Xvfb, Xfce and Selkies up). The viewer port answered 401 over an
-  `ssh -L` to the container's loopback, through the URL proxy and on its loopback port. Cua Driver (the MCP launcher, as an agent
-  starts it) listed the desktop's windows (`Desktop`, `xfce4-panel`) and saved a 1440x900 screenshot (49 KB), uploaded as the
-  `container-desktop-screenshots` artifact. Google Chrome (installed from dl.google.com) failed with its own sandbox (exit
-  non-zero), started through the launcher, loaded https://example.com through the gateway, and opened a window on the desktop (listed
-  by Cua Driver with a second screenshot, 190 KB) whose process has `--no-sandbox`. `silo fork --gui` returned a running fork with
-  computer use ready; `silo desktop off` stopped the desktop, `fork --gui` then said "has no desktop; turn it on with `silo desktop on`",
-  a restart and a plain fork of it started none, and `silo desktop on` brought it back. `desktop: false` at creation was first
-  covered only through `silo desktop off`; the review fixes below add a container created with `--no-desktop`.
-
-#### Review fixes (a code review and a threat-model review of the first build)
-
-- **Desktop off at creation.** The first build said it could not be tested because a recipe cannot make a container; that was
-  wrong, since `computers.create` takes `configuration.desktop = {startWithComputer: false}` for a container (the app's form
-  sends it). `silo create --no-desktop` (both kinds, not with `--macos`) sends the same request, and the live check creates a
-  container that way, starts it and asserts that no desktop, process or service answers.
-- **One session-environment path.** The desktop session of a VM now writes `/run/silo-desktop/user/session.env` too;
-  `xfce_command` has no `SILO_RUNTIME` branch, the `/proc/<pid>/environ` scans and the `runuser ... cat environ` fallback are
-  gone, and the launcher and `silo-computer-use` read the file (root also checks that it is a small regular file of the working
-  account, opened without following a link). The desktop stopping removes it. A VM whose session was started by the earlier
-  service has no file until its desktop restarts.
-- **Disk guard.** Only a measurement that timed out, or a `du` that ran and printed nothing readable, is unmeasurable. The
-  measurement is a small script that prints `du`'s exit status, so a failure of `silo-ctr userns` or `newuidmap` (no status) is
-  logged and says nothing about the layer, like `CouldNotStart`. An unmeasurable layer is stopped as soon as its own measurement
-  ends, not after the whole pass.
-- **Boot race.** The hook `setup-desktop.sh` writes does nothing until `install-stage` says `installed`.
-- **A failed boot is visible.** The engine's boot command runs the hook with a 120 s limit and, when it fails, leaves
-  `/run/silo-desktop/failed`; the desktop status reports `failed` when the session is stopped and that marker exists (the next
-  start, a stop or a new boot removes it).
-- **The computer's environment and engine commands.** `Exec.fixed_environment` makes `exec_command` use only the engine's
-  defaults; the boot command and the gateway certificate update set it. Owner-run `exec` is unchanged.
-- **`process_exe`** falls back to `comm` only when `SILO_RUNTIME=container`; in a VM an unreadable `exe` is not recognised, as before.
-- **Browsers.** `chromium.desktop` is replaced like `google-chrome.desktop`, and both entries run the launcher, which adds the
-  flag once.
-- **`/run`** is a tmpfs in the container spec, as a VM's; the cookie and session file do not travel into a checkpoint or a fork.
-- **Docs and warning.** The threat model, the app's note, and the desktop and computer-use guides say that a compromised browser
-  can act with the computer's GitHub access and secrets and use its in-guest `silo` client, that any Chromium-based program
-  started with `--no-sandbox` is exposed the same way, that a launcher runs the first installed browser whatever name was called
-  and stays after `desktop off`. The line saying the viewer's credentials stay in root's folder was false (Selkies took the
-  password as an argument, readable by every process); Selkies 2.0.0 reads `SELKIES_BASIC_AUTH_PASSWORD`, so the service passes
-  it in the streamer's environment and the threat model says who can read that.
-- **Live check after the review fixes** (KVM runner, x86_64, code head `8f1342d7d`; Linux host run 42613588062, attempts 1 and 2
-  both green; CI run 42613588066 green). The container with the desktop on also shows `/run` as a tmpfs, `session.env` as
-  `600:silo`, no `basic-auth-password` in the streamer's arguments, and no `session.env` after `silo desktop off`; the container
-  created with `--no-desktop` reports `desktop: false`, starts with no Xvfb, Xfce or Selkies, nothing answering on port 6901, and the
-  desktop service `stopped`. Earlier runs on the way failed for the checks' own reasons, not the product's: the helper that runs
-  root commands lacked `SILO_RUNTIME=container` (the process-name fallback is now container-only, so status said `failed`); the
-  process probes matched their own shell; and a screenshot of a busier Chrome page was larger than one command's output limit, so
-  it is copied out in pieces now.
-
-
-### 9 Nov 2026: phase CT6 built (export, import and Connections for container computers)
-
-Branch `claude/containers-ct6` ([#104](https://github.com/amontlabs/silo/pull/104)). A container computer is exported to a
-`.silo-backup` file, imported under a new name on the same device or another, and exported and imported across Connections, with the
-same CLI, API and app as a VM. Design: [CONTAINERS-PLAN](CONTAINERS-PLAN.md).
-
-- **Payload.** A checkpoint of a container is a chain of layers, so the file holds the chain: a header (the checkpoint's name and its
-  record without secrets, GitHub access, environment and layer ids) and one zstd frame per layer (`containers/archive.rs`). Each layer is
-  a standard tar (PAX) stream, written by `silo-ctr pack` and made by `silo-ctr unpack` with the `tar` crate the engine already uses,
-  both run in the container's user namespace (`pack.rs` in the shim). Owners, modes, times, hard and symbolic links, FIFOs, whiteouts
-  (character device 0:0) and extended attributes (`SCHILY.xattr.*`, so `user.overlay.opaque` and file capabilities travel) are tar's
-  own; tar has no socket type, so **sockets are left out** (nothing listens on one after an import, and the desktop service treats an X
-  lock whose socket is missing as stale after a fresh boot); any other device stops the export. Nothing is merged or copied first, so an
-  export needs no disk beyond the file. **What makes the unpack safe is where it runs, not the format:** `pack` and `unpack` change their
-  root to the layer, so a path or a link in the stream can only name the layer's own files (the reason a plain `tar` extracted as the
-  container's root is not used: it can be led through a symbolic link it created earlier). On top of that `unpack` refuses any path with
-  `..`, an empty name or an absolute one, and the overlay's attributes other than `user.overlay.opaque`. A first design had a record
-  format of Silo's own; two reviews found that it only added a format nobody else reads, and tar covers the same fields.
-  **Memory and disk:** a folder's owner and attributes are applied as it is made and only its mode and time wait for the end of the folder
-  (the stream lists a folder before its contents, so what waits is the chain of open folders), and the process runs with an address-space
-  limit (1 GiB, set by `pack` and `unpack` themselves; checked with a 3 GiB extended header, which ends in "out of memory"). The disk is
-  measured, not modelled: `unpack` reads `statvfs` of the new layer before every chunk of a file and every 256 entries and stops under
-  the host-disk margin of free bytes or of free inodes (the margin over 16 KiB per inode, ext4's default ratio), so block size, inodes,
-  attributes and link targets are counted by the file system. There is no entry limit any more; the inode check replaces it, and `du` is
-  no longer used on import.
-- **Format 6.** A file with a container row is written as format 6 (4 and 5 as before), so an older Silo refuses it as newer and never
-  hands it to MicroSandbox. Rows are marked by the `silo.runtime=container` label in the recorded settings, which must agree with
-  `runtime: container` in the computer's settings. The row leaves the image out and names the config digest it needs; an export accepts any digest unpacked on this device
-  (a computer made on an older pinned image still exports), and an import accepts the pinned one or one kept unpacked, and otherwise says
-  "this computer was made on an older guest image that this device does not have" (the guest image is delivered with Silo; there is no
-  registry pull to fall back on). The header is compared with the manifest's settings (cpus, memory, image reference, root disk and workspace, each required)
-  before anything is loaded, which is what the descriptor comparison is for a VM.
-- **One routing seam.** `snapshot save GROUP:NAME FILE` and `snapshot load FILE --group G --runtime container` are answered by
-  `containers::route`/`run` like the other checkpoint commands; `snapshot head` now answers the group's newest checkpoint. The backup
-  service's runner (`SystemMsbRunner`) routes through `containers::route`: a container command runs as `silod --container-runtime ...`
-  (a child, so it can be timed out and cancelled as MicroSandbox's can), and a list is merged with the container rows. `backup.rs`
-  branches only where a payload is made or read (the capture reference, the lean-image row, the extraction, the load and its descriptor
-  check), and a captured checkpoint is named `group:name` when the runtime reports no folder for it. `Capability::Export` is gone; the
-  list has `memorySnapshots` left, and the app shows Export for a container.
-- **Found by the live checks** (each failed a KVM run; none by a unit test):
-  - A container's `inspect` answer lacked the computer's name and `kind: managed` in its root disk, which MicroSandbox's export checks
-    require; its network section is the gateway's, not the profile (the export records the deny-all profile, as for a VM, and an import
-    of a container asks for the gateway's one policy, as a fork does: `containers::imported_network_policy`).
-  - The desktop's stale-display check needs the X lock and its socket together; the first design carried sockets for that, and tar cannot,
-    so the service now treats a lock without its socket as stale after a fresh boot.
-  - The controller of a two-device import has no container computer, so `snapshot list` was MicroSandbox's alone and the import saw no
-    group; the list is merged whenever the container checkpoint folder exists.
-  - **A home folder with a default ACL** (the CI runner's accounts have one) gave the image's unpacked folders an entry that umoci could
-    not restore ("invalid argument"). Silo's folders for container files now have their default ACL removed (`layout::strip_default_acl`).
-  - **An engine started from another account's session** carried that account's `XDG_RUNTIME_DIR`, and `systemd-run --user` could not
-    reach its own manager ("Failed to connect to bus: Permission denied"). Commands for the user manager now get this account's runtime
-    folder when the environment's is not its own.
-  - A container's sockets live under its name: with `e2e-hosts-remote-ctr-imported` and `/home/silo-controller/...` the holder's socket
-    path passed 107 bytes ("path must be shorter than SUN_LEN"). The live check uses short names; the limit is not changed here.
-- **CT5 review notes.** The e2e viewer checks assert 401 without the password and 200 with it (over `ssh -L`, the URL proxy, the loopback
-  port and inside the computer). The disk guard test no longer depends on the clock: the slow measurement ends only after the
-  unmeasured layer was stopped. The desktop service removes `/run/silo-desktop/failed` when the streamer comes up, so a boot hook that
-  gave up waiting does not leave it behind. The comments at `containers/mod.rs` (the boot command is bounded by `BOOT_TIMEOUT`) and
-  `desktop-service.py` (what a previous boot left in `/run` is stale; `/run` is a tmpfs in both kinds) are corrected.
-- **Tests.** Shim: `pack` 13 (round trip of files, links, hard links, modes, times, whiteouts and opaque folders, sockets, the limits, hostile
-  paths, damaged and padded streams). Engine: `containers::archive` 5 (6 on a Mac) (header checks, the match with the settings, the refusal on a device
-  that cannot run containers), `backup::` (a container exports by `group:name` without the image in format 6; a VM still in 4; the settings
-  a real container reports pass the export checks; import through the container runtime and the refusal where none runs, at inspection
-  and at import; data larger than the manifest promises; kind disagreement; format 5 cannot hold a container), `route` for an imported
-  checkpoint with no container computer, the user-manager environment. Frontend: capabilities and the overview page. Linux unit tests
-  also ran on the Mac in a container (shim and engine).
 - **Live check** (KVM runner, x86_64, Ubuntu 24.04, `linux-host.yml`, code head `24555ef63`): run 42654535736, **attempt 1 and attempt 2
   both green** (CI run 42654535640 green). `linux-host-e2e.sh`: a container with a file, a link, a nested file and a Claude Code login is
   exported (`silo export` without `--yes` and a terminal refuses and names the login; with `--yes` it writes 1.6 MiB), imported as a
@@ -1086,11 +883,19 @@ same CLI, API and app as a VM. Design: [CONTAINERS-PLAN](CONTAINERS-PLAN.md).
   area keeps a file), imported on the controller and onto the host with `--device`, and both copies started and read. Failed runs on the
   way, each for a product reason above: 42625816364, 42628340339, 42631011903, 42635178431, 42639046657, 42642591613, 42647204135,
   42651247266. No run needed a rerun for a GitHub 504.
+- **Live check after the review fixes** (tar layers, measured disk, memory limit, image rules): the first run on `67681dc5f`
+  (42673505880) failed at the import: overlayfs had written its own `user.overlay.uuid` on the exported layer, and the new unpack
+  refuses overlay attributes other than the opaque mark. `pack` now leaves overlayfs's own records behind (it writes them again on the
+  next mount; a test covers it). The same push made a VM's export journal carry `"container": false`, which an engine test of the
+  journal's shape caught; the flag is now written only for a container. A re-check found the disk look could let a stream write up
+  to 256 entries of 64 MiB attributes between two looks on XFS or btrfs; the unpack now also looks whenever names, link targets and
+  attributes written since the last look add up to 16 MiB.
 - **Not done.** The viewer and an `ssh` session over Connections for a container are not driven by the two-account run (exec and the
   desktop switch are); they use the same routed methods and `runtime::command_for`. A mid-write abort of `pack` is a kill of the child
   (its layers stay on disk until the grace period collects them). An import whose image this device does not have cannot
   pull it (there is no registry fetch for the guest image). The socket-path length is not raised. A lock without its socket is cleared
   only after a fresh boot (the boot id), so a container re-imported on the same host boot keeps it until the host restarts.
+
 
 ### R1: CI runner on the Mac (branch `claude/runner-phase-1`)
 
