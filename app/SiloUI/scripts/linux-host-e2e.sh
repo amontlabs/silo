@@ -477,7 +477,7 @@ container_without_desktop() {
   sleep 45
   desktop_answers && { echo "a desktop answers in a computer created with it off" >&2; exit 1; }
   for process in Xvfb xfce4-session selkies; do
-    expect "process $process" "$(in_container sh -c "pgrep -f $process >/dev/null && echo up || echo down")" down
+    expect "process $process" "$(in_container sh -c "pgrep -f '[${process:0:1}]${process:1}' >/dev/null && echo up || echo down")" down
   done
   state=$(root_in_container /usr/local/bin/silo-desktop status | python3 -c 'import json, sys; print(json.load(sys.stdin)["state"])')
   expect "desktop service state" "$state" stopped
@@ -503,7 +503,7 @@ container_desktop_features() {
   state=$(root_in_container /usr/local/bin/silo-desktop status | python3 -c 'import json, sys; print(json.load(sys.stdin)["state"])')
   expect "desktop service state" "$state" running
   for process in Xvfb xfce4-session selkies; do
-    expect "process $process" "$(in_container sh -c "pgrep -f $process >/dev/null && echo up || echo down")" up
+    expect "process $process" "$(in_container sh -c "pgrep -f '[${process:0:1}]${process:1}' >/dev/null && echo up || echo down")" up
   done
   # /run is memory, as a virtual machine's is: what the desktop keeps there (the display's
   # authority cookie, the session's environment) is not in the computer's files.
