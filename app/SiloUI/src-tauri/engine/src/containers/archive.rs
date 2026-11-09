@@ -446,6 +446,13 @@ mod linux {
         let header = read_header_from(&mut file)?;
         require_importable_image(&paths.home, &header.template.image_digest)?;
         crate::containers::host_disk::require_room(&paths.home, "import a container computer")?;
+        // The pinned image is unpacked now if no computer has needed it yet: a kept image is one
+        // that is unpacked, so a later Silo that pins another image keeps this one for it.
+        if crate::containers::image::pinned()
+            .is_ok_and(|pinned| pinned.image_digest == header.template.image_digest)
+        {
+            crate::containers::image::ensure(paths, &tools)?;
+        }
         let store = Store::new(&layout);
         if store.group_exists(&request.group) {
             return Err(invalid(format!(
