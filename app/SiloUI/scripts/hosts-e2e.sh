@@ -255,7 +255,7 @@ if [[ "${SILO_E2E_CONTAINER:-0}" == 1 ]]; then
   step "Making a container computer on the host from the controller"
   if ! controller --device "$device" create "$ctr" --container --cpus 1 --memory 2 --disk 2; then
     echo "== The host account after the failed container create" >&2
-    as "$host_user" bash -c 'id; grep "^$(id -un):" /etc/subuid /etc/subgid; findmnt -T "$HOME" -o TARGET,SOURCE,FSTYPE,OPTIONS; ls -ldZ "$HOME" "$HOME/$1"; getfacl -p "$HOME" "$HOME/$1" 2>&1 | head -20; d="$HOME/$1/xattr-probe"; /var/lib/silo-ci/silo-engine/silo-ctr userns --keep-id 1001 -- sh -c "mkdir $d && setfattr -n user.probe -v 1 $d; echo setfattr=\$?; getfattr -d -m - $d; rmdir $d"' _ "$state_dir" >&2 || true
+    as "$host_user" bash -c 'uid=$(id -u); pid=$(pgrep -u "$uid" -x silod | head -n 1); echo "silod pid $pid"; tr "\0" "\n" < "/proc/$pid/environ" | grep -E "^(XDG|DBUS|HOME|USER|PATH)" ; ls -ld "/run/user/$uid" "/run/user/$uid/bus" "/run/user/$uid/systemd/private"; systemctl --user show-environment | grep -E "XDG|DBUS"; env -i $(tr "\0" " " < "/proc/$pid/environ") systemd-run --user --scope --quiet -- true; echo "systemd-run with the engine environment: $?"; systemd-run --user --scope --quiet -- true; echo "systemd-run with this environment: $?"; cat /proc/$pid/status | grep -E "^(Uid|Gid|Groups|NoNewPrivs|Seccomp)"; cat /proc/$pid/attr/current 2>&1' >&2 || true
     exit 1
   fi
   controller --device "$device" start "$ctr"
