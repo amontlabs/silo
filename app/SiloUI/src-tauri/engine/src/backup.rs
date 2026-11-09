@@ -2252,10 +2252,16 @@ fn read_snapshot_descriptor(artifact: &Path) -> Result<Value, BackupError> {
 
 /// Whether a capture's descriptor says it holds the computer's memory: one the runtime took
 /// with `--full`. Either spelling of the scope counts (see `compare_loaded_descriptor`).
+/// Whether a capture may hold memory: anything but a descriptor that names a disk-only capture
+/// (scope `file` or `disk`, state `file`). A missing or unknown scope counts as memory.
 fn descriptor_holds_memory(descriptor: &Value) -> bool {
-    [descriptor.get("scope"), descriptor.pointer("/state/kind")]
-        .into_iter()
-        .any(|value| matches!(value.and_then(Value::as_str), Some("checkpoint" | "full")))
+    !matches!(
+        (
+            descriptor.get("scope").and_then(Value::as_str),
+            descriptor.pointer("/state/kind").and_then(Value::as_str),
+        ),
+        (Some("file" | "disk"), Some("file"))
+    )
 }
 
 /// Why a checkpoint that holds memory is not exported, and what to do instead.
@@ -5120,7 +5126,11 @@ mod tests {
                         .join(group)
                         .join("snap_00000000000000000000000000000000");
                     fs::create_dir_all(&snapshot)?;
-                    fs::write(snapshot.join("snapshot.json"), b"{}")?;
+                    // A capture without `--full` holds the disk only, as the runtime records.
+                    fs::write(
+                        snapshot.join("snapshot.json"),
+                        br#"{"scope":"file","state":{"kind":"file"}}"#,
+                    )?;
                     if self.cancel_after_snapshot.load(Ordering::Acquire) {
                         cancellation.cancel();
                     }
@@ -6361,11 +6371,21 @@ mod tests {
         scope_only["scope"] = "checkpoint".into();
         let mut state_only = memory_checkpoint_descriptor();
         state_only["scope"] = "file".into();
+        // A scope the runtime does not write, or none, counts as memory.
+        let mut unknown_scope = loaded_descriptor_for(&managed_config("dev"));
+        unknown_scope["scope"] = "snapshot".into();
+        let mut no_scope = loaded_descriptor_for(&managed_config("dev"));
+        no_scope.as_object_mut().unwrap().remove("scope");
+        let mut no_state = loaded_descriptor_for(&managed_config("dev"));
+        no_state.as_object_mut().unwrap().remove("state");
         for descriptor in [
             memory_checkpoint_descriptor(),
             index_spelling,
             scope_only,
             state_only,
+            unknown_scope,
+            no_scope,
+            no_state,
         ] {
             assert!(descriptor_holds_memory(&descriptor));
             let temp = tempfile::tempdir().unwrap();
