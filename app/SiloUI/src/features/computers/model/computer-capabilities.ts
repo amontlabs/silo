@@ -2,7 +2,7 @@ import type { SetupComputerConfiguration } from "@/contracts/silo"
 import unavailableOnContainers from "./container-unavailable.json"
 
 /** An action a computer's kind may not have yet. The engine refuses it by the same id (`containers::capability`). */
-export type ComputerCapability = "terminal" | "editor" | "sshAccess" | "export" | "desktop"
+export type ComputerCapability = "terminal" | "editor" | "sshAccess" | "export" | "desktop" | "memorySnapshots"
 
 const missingOnContainers: ReadonlySet<string> = new Set(unavailableOnContainers)
 

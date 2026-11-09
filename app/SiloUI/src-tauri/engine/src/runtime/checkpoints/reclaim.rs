@@ -554,11 +554,16 @@ fn reclaim_inner(
         .iter()
         .filter_map(|(_, member)| member.as_ref().map(|member| member.snapshot_id.as_str()))
         .collect();
-    let merged = merges(runner, paths, computer, &survey, &group, &removed).and_then(|steps| {
-        steps
-            .iter()
-            .try_for_each(|step| run_merge(runner, paths, computer, step))
-    });
+    // A container's layers are collected when no checkpoint names them: there is nothing to merge.
+    let merged = if crate::containers::capability::is_container(&paths.home, computer) {
+        Ok(())
+    } else {
+        merges(runner, paths, computer, &survey, &group, &removed).and_then(|steps| {
+            steps
+                .iter()
+                .try_for_each(|step| run_merge(runner, paths, computer, step))
+        })
+    };
     if let Err(detail) = merged {
         return Err(format!(
             "Older checkpoints were kept; their disk was not freed. {detail}"

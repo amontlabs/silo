@@ -5,6 +5,8 @@
 //!                [--sock PATH] [--crun PATH] [--sub-uid N --sub-gid N]
 //!   silo-ctr enter --state DIR -- CMD ARGS...
 //!   silo-ctr connect --state DIR --host HOST --port N
+//!   silo-ctr tap --state DIR --sock PATH   (hands the running container's network device to the engine)
+//!   silo-ctr merge --out DIR LAYER...   (inside `userns`: folds overlay layers into one)
 //!   silo-ctr version
 
 #![cfg_attr(not(target_os = "linux"), allow(dead_code))]
@@ -12,10 +14,12 @@
 mod common;
 mod connect;
 mod enter;
+mod merge;
 mod net;
 mod run;
 mod sock;
 mod subid;
+mod tap;
 mod userns;
 
 #[cfg(target_os = "linux")]
@@ -30,12 +34,14 @@ fn main() {
         Some("connect") => connect::command(&args[1..]),
         Some("enter") => enter::command(&args[1..]),
         Some("run") => run::command(&args[1..]),
+        Some("merge") => merge::command(&args[1..]),
+        Some("tap") => tap::command(&args[1..]),
         Some("version") => {
             println!("{}", env!("CARGO_PKG_VERSION"));
             Ok(0)
         }
         _ => Err(
-            "usage: silo-ctr userns|run|enter|connect|version (see the module documentation)".to_string(),
+            "usage: silo-ctr userns|run|enter|connect|merge|tap|version (see the module documentation)".to_string(),
         ),
     };
     match outcome {

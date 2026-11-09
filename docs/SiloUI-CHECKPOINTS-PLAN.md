@@ -842,3 +842,23 @@ values remain archive contents, so export warnings about sensitive data apply.
 Deterministic tests exercise disk/full Start with denied and synthetic authorized
 profiles, imported environment persistence and argument boundaries, and invalid
 entries. They do not prove a live GitHub CLI request.
+
+### Container computers
+
+A container computer has the same checkpoints, forks, quiet forks, diff, keep and undo, with
+differences that matter:
+
+- Its checkpoints save the disks only, never memory. A running container is copied while its
+  processes are frozen for the copy itself, at most 30 seconds; a longer copy fails with a plain
+  message and the computer carries on. A checkpoint of a paused container leaves it paused.
+- **The quiet step runs later than a VM's.** A VM's boot hook runs the step first and starts
+  nothing else unless it succeeds. A container has no such hook: the engine runs the step right
+  after the fork has started, before the fork is reported started. For that moment the fork's own
+  services and jobs are already running with the parent's identity. The step was not moved
+  before the start because that means editing the fork's writable layer from the host in the
+  user namespace.
+- Its size is reported, not a bound (it shares the host's disk); a host short of disk space
+  refuses to start, checkpoint or fork it ([the disk](SiloUI-ENGINE.md#container-computers-optional)).
+- Layers that no record and no checkpoint names (after removing a checkpoint, a fork or a
+  computer) are removed at the next collection pass, which runs when the engine starts and after a
+  removal, and only for layers older than ten minutes. The space comes back then, not at once.

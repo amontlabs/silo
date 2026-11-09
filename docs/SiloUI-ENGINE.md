@@ -379,6 +379,21 @@ The checks, by id:
 - Advice only (nothing is refused, a limit stays off): `cpu-limit`, when `cpu` is not delegated,
   so CPU limits are not enforced; `landlock`, when the kernel's `lsm=` list lacks it.
 
+**The disk.** A container computer shares the host's disk: its files are a folder in the engine's
+home, and the size it was created with (`--disk` and the root disk, together) is reported, not a
+bound. A rootless host has no way to cap a folder. Silo protects the host instead. When the file
+system that holds the engine's home has less than 5 GiB free, the engine refuses to start a
+container computer, to make a checkpoint of one or to fork one ("This device's disk is nearly
+full ..."), and it stops, with the ordinary graceful stop, the running container computers whose
+files are larger than their stated size, the largest first, with the reason in the computer's
+status. A computer within its size is never stopped by this, and stopping frees nothing: free
+the space (remove files, drop computers or checkpoints) and start the computer again. The
+margin is `SILO_CONTAINER_DISK_MARGIN_MIB` (in MiB) in the environment of `silod`, for example
+`systemctl --user edit silod` and `Environment=SILO_CONTAINER_DISK_MARGIN_MIB=10240`. The guard
+reads the free space every 30 seconds and measures layers (inside the user namespace, so
+unreadable folders count) only while the host is below the margin. The `/.msb` share of each
+computer is outside every size.
+
 **The AppArmor trade-off.** Ubuntu 24.04 blocks unprivileged user namespaces by default. The fix
 Silo names, `sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0` (kept after a reboot
 by a file in `/etc/sysctl.d`), relaxes that guard for every program on the host. The narrower

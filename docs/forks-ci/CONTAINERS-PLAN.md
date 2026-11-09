@@ -47,11 +47,12 @@ the advisor (gemini-4-argon), 8 Nov 2026. Where they differed, the choice and th
 
 ## Planned work not yet in a phase
 
-- **Writable-layer size limit.** `root_disk_mib` is recorded but not enforced: a container can fill the
-  filesystem holding the engine home (see the threat model). Enforce it with an XFS or ext4 project quota on
-  each computer's directory where the filesystem supports it, and a loop-mounted file of the configured size
-  where it does not; refuse to start with a clear message when neither is available. Lands with CT4, whose
-  checkpoints seal layers and need the same accounting.
+- **Writable-layer size limit.** No rootless bound exists (a project quota and a loop file both need
+  administrator rights; a per-computer read-only remount was built in CT4 and removed after review: it fails with
+  open writers, has no way back after a restart, is reset by a checkpoint and misses unreadable directories). A
+  container's size is reported, not a bound. CT4 protects the host instead: below a margin of free space on the
+  engine's file system (5 GiB, `SILO_CONTAINER_DISK_MARGIN_MIB`) it refuses to start, checkpoint or fork a
+  container computer and stops the running ones over their stated size, largest first (see the threat model).
 
 ## Phases
 
@@ -64,6 +65,6 @@ when CI is green and the code and Fable reviews (with a threat-model review) pas
 | CT2 | Container runtime core: `engine/src/containers/`, image unpack, overlay chain, crun config (`oci-spec` crate), cgroup delegation, create/start/exec/stop/drop, `kind: container` in API, CLI and app list; `silo host init` checks and names the host prerequisites, including `kernel.apparmor_restrict_unprivileged_userns=0` (CT1's CI sets it by hand) | `linux-host-e2e.sh` with a container computer | Built (this branch; [BUILD_LOG](BUILD_LOG.md#8-nov-2026-phase-ct2-built-the-container-runtime-core)) |
 | CT3 | Network, secrets, GitHub access, ports and URLs, for containers | The CT1 checks from inside a container; a published port answers | Built ([#95](https://github.com/amontlabs/silo/pull/95), [BUILD_LOG](BUILD_LOG.md#8-nov-2026-phase-ct3-built-in-part-network-features-for-container-computers)); SSH, the editor, the terminal and the in-guest client moved to CT3b |
 | CT3b | SSH access, the editor handoff, the terminal and the in-guest client for containers: `ssh serve` and `exec --tty` answered by the engine's own russh server through `runtime::command_for`; the engine's user is the working account in the container (keep-id), so the in-guest spool works without stat virtualization | `silo ssh-setup` then `ssh NAME.silo-dev uname -a`; an sftp put and get; `ssh -tt ... tty`; the terminal command on a pty; the editor proxy in `--stdio` mode; the in-guest `silo` answering a read call as the `silo` account | Built (this branch; [BUILD_LOG](BUILD_LOG.md#8-nov-2026-phase-ct3b-built-ssh-the-editor-the-terminal-and-the-in-guest-client-for-container-computers)) |
-| CT4 | Checkpoints, forks, quiet forks, diff, keep, undo, retention | Checkpoint, fork `-n 4`, exec, diff lists a change, keep, undo | Planned |
+| CT4 | Checkpoints, forks, quiet forks, diff, keep, undo, retention; a container survives an engine restart; a host short of disk space is protected | Checkpoint a running container, restore, fork `-n 4`, exec, diff lists a change, keep, undo, quiet fork, engine restart, fill the host past the margin | Built (this branch; [BUILD_LOG](BUILD_LOG.md#9-nov-2026-phase-ct4-built-checkpoints-forks-and-restart-for-container-computers)) |
 | CT5 | Desktop and computer use; the app's container kind and warning | Desktop on, viewer answers, Cua Driver lists windows, a screenshot artifact | Planned |
 | CT6 | Export, import, Connections, threat-model section, vocabulary | Export, import under a new name, exec; the two-account run with a container | Planned |

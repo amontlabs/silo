@@ -826,8 +826,11 @@ fn capture_with_kind(
         inspected = inspect_capture_source(runner, paths, id, configuration.name())?;
     }
     let source_running = inspected.status == "Running";
+    // A computer without memory snapshots (a container) saves its disks, running or not.
+    let with_memory =
+        crate::containers::capability::memory_snapshots(&paths.home, configuration.name());
     let scope = match inspected.status.as_str() {
-        "Running" if depth == CaptureDepth::WithMemory => "full",
+        "Running" if depth == CaptureDepth::WithMemory && with_memory => "full",
         "Running" | "Created" | "Stopped" => "disk",
         _ => {
             return Err(RuntimeError::Invalid(
@@ -2184,8 +2187,13 @@ fn root_exec(name: &str, timeout: &str, command: &[&str]) -> Vec<String> {
     args
 }
 
-fn quiet_exec_args(name: &str, quiet: &QuietRecord) -> Vec<String> {
-    let mut args = root_exec(name, "120s", &["sh", "-c", QUIET_SCRIPT, "silo-quiet"]);
+fn quiet_exec_args(paths: &RuntimePaths, name: &str, quiet: &QuietRecord) -> Vec<String> {
+    let script = if crate::containers::capability::is_container(&paths.home, name) {
+        crate::containers::quiet_script(QUIET_SCRIPT)
+    } else {
+        QUIET_SCRIPT.to_owned()
+    };
+    let mut args = root_exec(name, "120s", &["sh", "-c", &script, "silo-quiet"]);
     args.push(quiet.token.clone());
     args.push(fork_hostname(name));
     args.extend(quiet_entries(quiet));
@@ -2231,7 +2239,7 @@ fn apply_quiet(
         runner
             .run(
                 paths,
-                &quiet_exec_args(name, quiet),
+                &quiet_exec_args(paths, name, quiet),
                 Duration::from_secs(150),
             )
             .and_then(|_| marked(quiet))
@@ -2868,6 +2876,8 @@ fn restore_steps(
         .clone();
     current_network_args(&inspected.config)?;
     let prior_running = inspected.status == "Running";
+    let with_memory =
+        crate::containers::capability::memory_snapshots(&paths.home, configuration.name());
     // A retry of an unfinished Restore also accepts a crashed computer: its disks are intact.
     let retrying = record.restore_journal.is_some();
     if !prior_running
@@ -2891,7 +2901,7 @@ fn restore_steps(
             native_id: None,
             name: "Before restore".into(),
             created_at: activity_timestamp(),
-            scope: if prior_running { "full" } else { "disk" }.into(),
+            scope: if prior_running && with_memory { "full" } else { "disk" }.into(),
             reason: "before-restore".into(),
             kind: "manual".into(),
         };
@@ -2912,10 +2922,14 @@ fn restore_steps(
         save(paths, computer_id, &record)?;
     }
     let mut journal = record.restore_journal.clone().unwrap();
+    // Only the run that made the capture may stop a container that kept running after it: on a
+    // retry (phase "secured") a container that is running again has writes the capture lacks.
+    let captured_now = journal.phase == "capturing";
     if journal.phase == "capturing" {
-        let _bridge_hold = (journal.prior_running && inspected.status == "Running")
+        let memory_capture = journal.prior_running && with_memory;
+        let _bridge_hold = (memory_capture && inspected.status == "Running")
             .then(|| crate::guest_client::hold_bridge(configuration.name()));
-        if journal.prior_running && inspected.status == "Running" {
+        if memory_capture && inspected.status == "Running" {
             release_stale_share_entries(runner, paths, configuration.name());
         }
         if journal.prior_running
@@ -2928,7 +2942,10 @@ fn restore_steps(
             record.restore_journal = Some(journal.clone());
             save(paths, computer_id, &record)?;
         }
-        if journal.prior_running && inspected.status == "Running" {
+        // Only a capture with memory pauses the guest first; a disk capture of a running computer
+        // is consistent by itself and the computer is stopped afterwards.
+        let paused_capture = journal.prior_running && journal.recovery_checkpoint.scope == "full";
+        if paused_capture && inspected.status == "Running" {
             if let Err(failure) = runner.run(
                 paths,
                 &[
@@ -2949,7 +2966,7 @@ fn restore_steps(
                 ));
             }
         }
-        if journal.prior_running
+        if paused_capture
             && inspect_computer(runner, paths, configuration.name())?.status != "Paused"
         {
             return Err(abandon_capture(
@@ -2970,8 +2987,10 @@ fn restore_steps(
             "--group".into(),
             lineage_group.clone(),
         ];
-        if journal.prior_running {
+        if paused_capture {
             args.extend(["--full".into(), "--guest-flush".into(), "required".into()]);
+        } else if journal.prior_running {
+            args.extend(["--guest-flush".into(), "required".into()]);
         }
         args.push("--integrity".into());
         let capture = runner
@@ -3009,7 +3028,16 @@ fn restore_steps(
         });
         save(paths, computer_id, &record)?;
     }
-    let current = inspect_computer(runner, paths, configuration.name())?;
+    let mut current = inspect_computer(runner, paths, configuration.name())?;
+    if current.status == "Running" && journal.prior_running && !with_memory && captured_now {
+        // Its disks were captured while it ran, in this run; it stops now, and the Restore replaces it.
+        runner.run(
+            paths,
+            &["stop".into(), "--force".into(), configuration.name().into()],
+            STOP_TIMEOUT,
+        )?;
+        current = inspect_computer(runner, paths, configuration.name())?;
+    }
     if current.status == "Running" {
         return Err(error(
             "The computer resumed after its recovery checkpoint. Restore was stopped to protect later writes.",

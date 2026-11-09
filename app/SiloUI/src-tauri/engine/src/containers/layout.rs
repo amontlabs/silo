@@ -5,13 +5,16 @@
 //!       boot/<hash>/                         the shim layer: silo/init and an empty workspace
 //!       computers/<name>/
 //!         computer.json                      the record (ComputerRecord)
-//!         layers/<n>/                        sealed layers, oldest first (checkpoints, a later phase)
-//!         upper/ work/                       the current writable layer and its overlay work directory
+//!         work/                              the overlay work directory
+//!       layers/<id>/                         the shared layer store: sealed layers and writable uppers
+//!       snapshots/<group>/<name>.json        checkpoints (a chain of layer ids and a record template)
 //!         bundle/config.json                 the OCI configuration crun runs
 //!         state/                             crun's state, the holder's pid files, logs, sockets
 //!
 //! The overlay's lower directories, top first, are the sealed layers newest to oldest, the shim
-//! layer and the image: [`ComputerDir::lower_dirs`].
+//! layer and the image: [`ComputerDir::lower_dirs`]. The writable layer is one of the store's
+//! directories too (`ComputerRecord::upper`); a computer made before the store has it at
+//! `computers/<name>/upper` and cannot be sealed.
 
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -58,9 +61,24 @@ impl Layout {
         self.root.join("computers")
     }
 
+    /// The shared layer store.
+    pub fn layers(&self) -> PathBuf {
+        self.root.join("layers")
+    }
+
+    pub fn layer(&self, id: &str) -> PathBuf {
+        self.layers().join(id)
+    }
+
+    /// The checkpoints of the computers (and forks) of every group.
+    pub fn snapshots(&self) -> PathBuf {
+        self.root.join("snapshots")
+    }
+
     pub fn computer(&self, name: &str) -> ComputerDir {
         ComputerDir {
             dir: self.computers().join(name),
+            store: self.layers(),
         }
     }
 
@@ -81,6 +99,7 @@ impl Layout {
 #[derive(Clone, Debug)]
 pub struct ComputerDir {
     dir: PathBuf,
+    store: PathBuf,
 }
 
 impl ComputerDir {
@@ -96,8 +115,18 @@ impl ComputerDir {
         self.record_path().is_file()
     }
 
-    pub fn upper(&self) -> PathBuf {
+    /// Where a computer made before the layer store kept its writable layer.
+    pub fn legacy_upper(&self) -> PathBuf {
         self.dir.join("upper")
+    }
+
+    /// The computer's writable layer.
+    pub fn upper_of(&self, record: &ComputerRecord) -> PathBuf {
+        if record.upper.is_empty() {
+            self.legacy_upper()
+        } else {
+            self.store.join(&record.upper)
+        }
     }
 
     pub fn work(&self) -> PathBuf {
@@ -132,7 +161,7 @@ impl ComputerDir {
             .layers
             .iter()
             .rev()
-            .map(|layer| self.dir.join(layer))
+            .map(|layer| self.store.join(layer))
             .collect();
         lower.push(boot.to_path_buf());
         lower.push(image_rootfs.to_path_buf());
@@ -190,8 +219,11 @@ pub struct ComputerRecord {
     /// The config digest of the image the computer was made from.
     pub image_digest: String,
     pub image_reference: String,
-    /// Sealed layer directories relative to the computer's directory, oldest first.
+    /// The ids of the sealed layers in the shared store, oldest first.
     pub layers: Vec<String>,
+    /// The id of the writable layer in the store; empty for a computer made before the store.
+    #[serde(default)]
+    pub upper: String,
     pub created_ms: u64,
     /// Set after the first stop, so `inspect` can tell `Created` from `Stopped`.
     #[serde(default)]
@@ -241,7 +273,8 @@ mod tests {
             env: Vec::new(),
             image_digest: "sha256:abc".into(),
             image_reference: "ghcr.io/x/y:1".into(),
-            layers: vec!["layers/1".into(), "layers/2".into()],
+            layers: vec!["l1".into(), "l2".into()],
+            upper: "l3".into(),
             created_ms: 5,
             started_once: false,
             secrets: Vec::new(),
@@ -257,8 +290,8 @@ mod tests {
         assert_eq!(
             lower,
             [
-                "/h/containers/computers/dev/layers/2",
-                "/h/containers/computers/dev/layers/1",
+                "/h/containers/layers/l2",
+                "/h/containers/layers/l1",
                 "/h/containers/boot/b",
                 "/h/containers/images/abc-keepid",
             ]

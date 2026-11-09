@@ -186,6 +186,7 @@ mod linux {
     /// Creates the TAP device, hands it to the engine over the socket and configures it as told.
     fn network_over(path: &str) -> Result<(), String> {
         let tap = net::create_tap()?;
+        net::keep_tap(&tap)?;
         let stream = sock::connect(path)?;
         sock::send_tap(&stream, tap.as_raw_fd())?;
         drop(tap);

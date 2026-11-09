@@ -243,6 +243,17 @@ mod linux {
         Ok(tun)
     }
 
+    /// Keeps `tap0` after its last descriptor is closed (it goes with the network namespace), so a
+    /// later engine can open it again.
+    pub fn keep_tap(tun: &File) -> Result<(), String> {
+        // SAFETY: TUNSETPERSIST takes an integer argument; the descriptor is open.
+        let rc = unsafe { libc::ioctl(tun.as_raw_fd(), libc::TUNSETPERSIST as _, 1 as libc::c_int) };
+        if rc != 0 {
+            return Err(os_err("TUNSETPERSIST tap0"));
+        }
+        Ok(())
+    }
+
     /// Gives `tap0` its hardware address, MTU and address, brings it up and adds the default route.
     pub fn configure_tap(config: &NetConfig) -> Result<(), String> {
         let socket = inet_socket()?;

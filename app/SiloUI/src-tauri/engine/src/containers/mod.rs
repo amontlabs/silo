@@ -17,13 +17,16 @@ pub mod cli;
 pub mod hold;
 pub mod idmap;
 pub mod image;
+pub mod layers;
 pub mod layout;
 #[cfg(target_os = "linux")]
 pub mod lifecycle;
 pub mod oci;
 #[cfg(target_os = "linux")]
 pub mod ports;
+pub mod host_disk;
 pub mod secrets;
+pub mod snapshots;
 pub mod ssh;
 pub mod tools;
 pub mod users;
@@ -68,14 +71,32 @@ use layout::{ComputerRecord, Layout, RECORD_VERSION};
 use serde_json::{json, Value};
 use std::{path::PathBuf, time::Duration};
 
+/// The quiet step (`runtime/checkpoints/quiet.sh`) for a container. A container's host name is
+/// set when it starts and its `/etc/hosts` is a file bound from outside that its root cannot write,
+/// so those two steps are allowed to fail; everything else (identity, scheduled jobs, services,
+/// scrubs) is the virtual machine's script unchanged.
+pub fn quiet_script(script: &str) -> String {
+    script
+        .replacen("hostname \"$host\" || exit 1", "hostname \"$host\" || true", 1)
+        .replacen(
+            "cat \"$quiet/hosts.new\" > /etc/hosts || exit 1",
+            "cat \"$quiet/hosts.new\" > /etc/hosts || true",
+            1,
+        )
+}
+
 /// Once, when the engine starts: stops the container computers an earlier engine process left
 /// running (their gateways went with it). Reading a computer's state never does this.
 pub fn reconcile_at_start(paths: &RuntimePaths) {
     #[cfg(target_os = "linux")]
-    if !layout::Layout::new(&paths.home).names().is_empty() {
-        if let Ok(tools) = tools::Tools::locate(paths) {
-            lifecycle::reconcile(paths, &tools);
+    {
+        if !layout::Layout::new(&paths.home).names().is_empty() {
+            if let Ok(tools) = tools::Tools::locate(paths) {
+                lifecycle::reconcile(paths, &tools);
+            }
         }
+        // Looks at the host's free space for as long as the engine runs (see `host_disk`).
+        lifecycle::spawn_guard(paths);
     }
     #[cfg(not(target_os = "linux"))]
     let _ = paths;
@@ -107,6 +128,34 @@ pub fn route(paths: &RuntimePaths, args: &[String]) -> Route {
             Route::Runtime
         } else {
             Route::MergeList
+        };
+    }
+    let snapshots = layers::Store::new(&layout);
+    if args.first().map(String::as_str) == Some("snapshot") {
+        match args.get(1).map(String::as_str) {
+            // A capture is routed by the computer it is taken from.
+            Some("create") => {}
+            // Without a group the answer is MicroSandbox's with the container checkpoints added.
+            Some("list") if args::snapshot_group(args).is_none() => {
+                return if layout.names().is_empty() {
+                    Route::Runtime
+                } else {
+                    Route::MergeList
+                };
+            }
+            _ => {
+                return match args::snapshot_group(args) {
+                    Some(group) if snapshots.group_exists(group) => Route::Container,
+                    _ => Route::Runtime,
+                }
+            }
+        }
+    }
+    if args.first().map(String::as_str) == Some("restore") {
+        // The new computer does not exist yet: the checkpoint's group says whose it is.
+        return match args::snapshot_group(args) {
+            Some(group) if snapshots.group_exists(group) => Route::Container,
+            _ => Route::Runtime,
         };
     }
     match args::target_name(args) {
@@ -149,6 +198,26 @@ pub fn run(
         Command::Inspect { name } => inspect(paths, &name).map(|value| output(value.to_string())),
         Command::List { .. } => Ok(output(Value::Array(listed(paths, None)).to_string())),
         Command::Unsupported { verb } => Err(not_yet(&verb)),
+        Command::SnapshotCreate(request) => {
+            snapshots::create(paths, &request).map(|()| output(String::new()))
+        }
+        Command::SnapshotList { group } => snapshots::list(paths, group.as_deref())
+            .map(|rows| output(Value::Array(rows).to_string())),
+        Command::SnapshotVerify { group, name } => {
+            snapshots::verify(paths, &group, &name).map(|()| output(String::new()))
+        }
+        Command::SnapshotRemove { group, name } => {
+            snapshots::remove(paths, &group, &name)?;
+            collect_layers(paths);
+            Ok(output(String::new()))
+        }
+        Command::SnapshotHead => Ok(output(json!({"head": null}).to_string())),
+        Command::Restore(restore) => {
+            snapshots::make_fork(paths, &restore)?;
+            start(paths, &restore.name, timeout, material).map(|()| output(String::new()))
+        }
+        Command::Pause { name } => freeze(paths, &name, true).map(|()| output(String::new())),
+        Command::Resume { name } => freeze(paths, &name, false).map(|()| output(String::new())),
         Command::SshServe(_) => Err(RuntimeError::Invalid(
             "ssh serve is a long-running command, started through the container runtime command."
                 .into(),
@@ -377,6 +446,7 @@ fn new_record(create: &Create, image: &image::Unpacked) -> ComputerRecord {
         image_digest: image.digest.clone(),
         image_reference: image.reference.clone(),
         layers: Vec::new(),
+        upper: layers::new_id(),
         created_ms: std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_millis() as u64)
@@ -391,6 +461,7 @@ fn new_record(create: &Create, image: &image::Unpacked) -> ComputerRecord {
 #[cfg(target_os = "linux")]
 fn state_word(paths: &RuntimePaths, name: &str, record: &ComputerRecord) -> &'static str {
     match lifecycle::status(paths, name, record) {
+        lifecycle::Status::Running if lifecycle::is_paused(paths, name) => "Paused",
         lifecycle::Status::Running => "Running",
         lifecycle::Status::Starting => "Starting",
         lifecycle::Status::Stopped => "Stopped",
@@ -448,7 +519,7 @@ pub fn inspect_value(
         "updated_at": null,
         "runtime_instance_id": null,
     });
-    if status == "Running" {
+    if status == "Running" || status == "Paused" {
         value["active_config"] = value["config"].clone();
         value["active_config"]["network"] = secrets::network_value(record, Some(active));
         value["runtime_instance_id"] = json!(format!("container-{name}-{}", record.created_ms));
@@ -458,12 +529,19 @@ pub fn inspect_value(
 
 fn inspect(paths: &RuntimePaths, name: &str) -> Result<Value, RuntimeError> {
     let record = record_of(paths, name)?;
-    Ok(inspect_value(
+    #[cfg_attr(not(target_os = "linux"), allow(unused_mut))]
+    let mut value = inspect_value(
         name,
         &record,
         state_word(paths, name, &record),
         &active_secrets(name),
-    ))
+    );
+    // Why Silo stopped the computer, when the host disk guard did (see `host_disk`).
+    #[cfg(target_os = "linux")]
+    if let Some(notice) = lifecycle::guard_notice(paths, name) {
+        value["notice"] = json!(notice);
+    }
+    Ok(value)
 }
 
 fn listed(paths: &RuntimePaths, label: Option<&str>) -> Vec<Value> {
@@ -483,12 +561,15 @@ fn listed(paths: &RuntimePaths, label: Option<&str>) -> Vec<Value> {
         .collect()
 }
 
-/// MicroSandbox's `list` answer with the container computers added.
+/// MicroSandbox's `list` answer (of computers or of checkpoints) with the container ones added.
 pub fn merge_list(
     paths: &RuntimePaths,
     args: &[String],
     answer: CommandOutput,
 ) -> Result<CommandOutput, RuntimeError> {
+    if args.first().map(String::as_str) == Some("snapshot") {
+        return snapshots::merge_list(paths, args, answer);
+    }
     let mut rows: Vec<Value> = serde_json::from_str(&answer.stdout).map_err(|_| {
         RuntimeError::Malformed("The bundled runtime returned an invalid computer list.".into())
     })?;
@@ -576,6 +657,32 @@ fn stop(paths: &RuntimePaths, name: &str) -> Result<(), RuntimeError> {
     let tools = tools::Tools::locate(paths)?;
     lifecycle::stop(paths, &tools, name, &record)
 }
+
+#[cfg(target_os = "linux")]
+fn freeze(paths: &RuntimePaths, name: &str, freeze: bool) -> Result<(), RuntimeError> {
+    require_host()?;
+    if freeze {
+        lifecycle::pause(paths, name)
+    } else {
+        lifecycle::resume(paths, name)
+    }
+    .map_err(RuntimeError::Unavailable)
+}
+
+#[cfg(target_os = "linux")]
+fn collect_layers(paths: &RuntimePaths) {
+    if let Ok(tools) = tools::Tools::locate(paths) {
+        lifecycle::collect_layers(paths, &tools);
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn freeze(_: &RuntimePaths, _: &str, _: bool) -> Result<(), RuntimeError> {
+    require_host()
+}
+
+#[cfg(not(target_os = "linux"))]
+fn collect_layers(_: &RuntimePaths) {}
 
 #[cfg(target_os = "linux")]
 fn remove(paths: &RuntimePaths, name: &str) -> Result<(), RuntimeError> {
@@ -1032,19 +1139,68 @@ mod tests {
     }
 
     #[test]
+    fn checkpoint_commands_are_routed_by_the_computer_or_the_group_they_name() {
+        let home = tempfile::tempdir().unwrap();
+        let paths = paths(home.path());
+        make(home.path(), "box", false);
+        let route = |parts: &[&str]| route(&paths, &strings(parts));
+        // A capture goes where its computer lives.
+        assert_eq!(
+            route(&["snapshot", "create", "c1", "--from-sandbox", "box", "--group", "box"]),
+            Route::Container
+        );
+        assert_eq!(
+            route(&["snapshot", "create", "c1", "--from-sandbox", "vm", "--group", "vm"]),
+            Route::Runtime
+        );
+        // Everything else by the group, which only exists once a container checkpoint does.
+        assert_eq!(route(&["snapshot", "verify", "box:c1"]), Route::Runtime);
+        assert_eq!(route(&["restore", "box:c1", "--name", "kid"]), Route::Runtime);
+        let layout = Layout::new(home.path());
+        layers::Store::new(&layout)
+            .write(&layers::Snapshot::new("box", "c1", Vec::new(), {
+                layout.computer("box").read_record().unwrap()
+            }))
+            .unwrap();
+        assert_eq!(route(&["snapshot", "verify", "box:c1"]), Route::Container);
+        assert_eq!(route(&["snapshot", "remove", "--force", "box:c1", "--quiet"]), Route::Container);
+        assert_eq!(route(&["snapshot", "remove", "vm:c2"]), Route::Runtime);
+        assert_eq!(route(&["restore", "box:c1", "--name", "kid"]), Route::Container);
+        assert_eq!(route(&["restore", "vm:c2", "--name", "kid"]), Route::Runtime);
+        assert_eq!(route(&["snapshot", "list", "--group", "box", "--format", "json"]), Route::Container);
+        assert_eq!(route(&["snapshot", "list", "--group", "vm", "--format", "json"]), Route::Runtime);
+        assert_eq!(route(&["snapshot", "list", "--format", "json"]), Route::MergeList);
+        assert_eq!(route(&["stop", "--force", "box"]), Route::Container);
+        assert_eq!(route(&["pause", "box", "--guest-flush", "required"]), Route::Container);
+        assert_eq!(route(&["resume", "box"]), Route::Container);
+    }
+
+    #[test]
+    fn the_container_quiet_step_tolerates_only_the_host_name_and_hosts_file() {
+        let script = include_str!("../runtime/checkpoints/quiet.sh");
+        let adapted = quiet_script(script);
+        assert_eq!(script.matches("|| exit 1").count() - 2, adapted.matches("|| exit 1").count());
+        assert!(adapted.contains("hostname \"$host\" || true"));
+        assert!(adapted.contains("> /etc/hosts || true"));
+        // The machine identity and the scheduled-job steps still stop the script when they fail.
+        assert!(adapted.contains("printf '%s\\n' \"$new\" > /etc/machine-id || exit 1"));
+        assert!(adapted.contains("park \"$f\" || exit 1"));
+    }
+
+    #[test]
     fn commands_only_virtual_machines_answer_are_refused_in_plain_words() {
         let home = tempfile::tempdir().unwrap();
         let paths = paths(home.path());
         make(home.path(), "box", false);
         let error = run(
             &paths,
-            &strings(&["snapshot", "create", "--sandbox", "box", "x"]),
+            &strings(&["rename", "box", "x"]),
             Duration::from_secs(1),
             &Material::NONE,
         )
         .unwrap_err();
         assert!(
-            error.to_string().contains("cannot snapshot a container computer yet"),
+            error.to_string().contains("cannot rename a container computer yet"),
             "{error}"
         );
     }

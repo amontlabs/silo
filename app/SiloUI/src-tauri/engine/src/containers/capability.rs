@@ -17,12 +17,16 @@ pub enum Capability {
     Export,
     /// The graphical desktop and what runs on it.
     Desktop,
+    /// A checkpoint that carries the memory and running processes. A container's checkpoints are
+    /// disks only.
+    MemorySnapshots,
 }
 
 impl Capability {
-    pub const ALL: [Capability; 2] = [
+    pub const ALL: [Capability; 3] = [
         Capability::Export,
         Capability::Desktop,
+        Capability::MemorySnapshots,
     ];
 
     /// The name the app uses for the action.
@@ -30,6 +34,7 @@ impl Capability {
         match self {
             Capability::Export => "export",
             Capability::Desktop => "desktop",
+            Capability::MemorySnapshots => "memorySnapshots",
         }
     }
 
@@ -38,6 +43,7 @@ impl Capability {
         match self {
             Capability::Export => "export or back up",
             Capability::Desktop => "give a desktop to",
+            Capability::MemorySnapshots => "save the memory of",
         }
     }
 
@@ -55,6 +61,11 @@ pub fn refusal(verb: &str) -> String {
 /// Whether the runtime home holds a container computer called `name`.
 pub fn is_container(home: &Path, name: &str) -> bool {
     crate::runtime::validate_name(name).is_ok() && Layout::new(home).computer(name).exists()
+}
+
+/// Whether the computer `name` can save its memory in a checkpoint: every computer but a container.
+pub fn memory_snapshots(home: &Path, name: &str) -> bool {
+    Capability::MemorySnapshots.container_has() || !is_container(home, name)
 }
 
 /// Refuses `capability` for `name` when it is a container computer that lacks it. Call it before
@@ -98,6 +109,7 @@ pub(crate) fn make_container(home: &Path, name: &str) {
         image_digest: "sha256:d".into(),
         image_reference: "r:1".into(),
         layers: Vec::new(),
+        upper: "l0".into(),
         created_ms: 1,
         started_once: false,
         secrets: Vec::new(),
@@ -146,7 +158,7 @@ mod tests {
         for capability in Capability::ALL {
             assert_eq!(ids.contains(&capability.id()), !capability.container_has());
         }
-        assert_eq!(ids, ["export", "desktop"]);
+        assert_eq!(ids, ["export", "desktop", "memorySnapshots"]);
         // The app reads the same list from this file.
         let app: Vec<String> = serde_json::from_str(include_str!(
             "../../../../src/features/computers/model/container-unavailable.json"

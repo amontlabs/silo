@@ -31,10 +31,57 @@ pub enum Command {
     SshServe(Box<SshServe>),
     /// Secrets and GitHub access: the only `modify` a container computer answers.
     Modify(Box<Modify>),
+    /// `snapshot create NAME --from-sandbox COMPUTER --group GROUP`.
+    SnapshotCreate(Box<SnapshotCreate>),
+    /// `snapshot list`, for one group or all.
+    SnapshotList {
+        group: Option<String>,
+    },
+    /// `snapshot verify GROUP:NAME`.
+    SnapshotVerify {
+        group: String,
+        name: String,
+    },
+    /// `snapshot remove GROUP:NAME`.
+    SnapshotRemove {
+        group: String,
+        name: String,
+    },
+    /// `snapshot head GROUP[:NAME]`: a container group has no head.
+    SnapshotHead,
+    /// `restore GROUP:NAME --name NEW`: a new computer from a checkpoint, started.
+    Restore(Box<Restore>),
+    /// Freeze or thaw the container's processes.
+    Pause {
+        name: String,
+    },
+    Resume {
+        name: String,
+    },
     /// A command only MicroSandbox computers answer yet.
     Unsupported {
         verb: String,
     },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SnapshotCreate {
+    pub name: String,
+    pub computer: String,
+    pub group: String,
+}
+
+/// What `restore` asks for: the checkpoint, and what the new computer gets from the caller.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Restore {
+    pub group: String,
+    pub member: String,
+    pub name: String,
+    pub cpus: Option<u64>,
+    pub memory_mib: Option<u64>,
+    pub labels: Vec<(String, String)>,
+    pub env: Vec<(String, String)>,
+    pub secrets: Vec<SecretSpec>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -116,17 +163,17 @@ pub fn target_name(args: &[String]) -> Option<&str> {
             .then(|| args.get(2).map(String::as_str))
             .flatten()
             .filter(|name| !name.starts_with('-')),
-        "inspect" | "start" | "stop" | "restart" | "exec" | "rename" | "modify" | "cp" | "fork" => {
-            args.get(1)
-                .map(String::as_str)
-                .filter(|name| !name.starts_with('-'))
-        }
-        "remove" => args
+        "inspect" | "start" | "restart" | "exec" | "rename" | "modify" | "cp" | "fork" | "pause"
+        | "resume" => args
+            .get(1)
+            .map(String::as_str)
+            .filter(|name| !name.starts_with('-')),
+        "stop" | "remove" => args
             .iter()
             .skip(1)
             .map(String::as_str)
             .find(|arg| !arg.starts_with('-')),
-        "snapshot" => flag_value(args, "--sandbox"),
+        "snapshot" => flag_value(args, "--from-sandbox"),
         "restore" => flag_value(args, "--name"),
         "create" => flag_value(args, "--name"),
         _ => None,
@@ -137,6 +184,27 @@ fn flag_value<'a>(args: &'a [String], flag: &str) -> Option<&'a str> {
     args.windows(2)
         .find(|pair| pair[0] == flag)
         .map(|pair| pair[1].as_str())
+}
+
+/// The checkpoint group a `snapshot` or `restore` command names, when it names one (`snapshot
+/// list` without `--group` names none).
+pub fn snapshot_group(args: &[String]) -> Option<&str> {
+    match args.first().map(String::as_str)? {
+        "snapshot" => match args.get(1).map(String::as_str)? {
+            "create" | "list" => flag_value(args, "--group"),
+            "verify" | "remove" | "head" => args
+                .iter()
+                .skip(2)
+                .find(|arg| !arg.starts_with('-'))
+                .map(|selector| selector.split_once(':').map_or(selector.as_str(), |(group, _)| group)),
+            _ => None,
+        },
+        "restore" => args
+            .get(1)
+            .filter(|selector| !selector.starts_with('-'))
+            .and_then(|selector| selector.split_once(':').map(|(group, _)| group)),
+        _ => None,
+    }
 }
 
 /// Whether a `create` asks for a container computer.
@@ -170,6 +238,18 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
         "create" => parse_create(args).map(|create| Command::Create(Box::new(create))),
         "exec" => parse_exec(args).map(|exec| Command::Exec(Box::new(exec))),
         "ssh" => parse_ssh(args).map(|serve| Command::SshServe(Box::new(serve))),
+        "pause" | "resume" => {
+            let name = target_name(args)
+                .ok_or_else(|| format!("{verb} needs a computer name."))?
+                .to_owned();
+            Ok(if verb == "pause" {
+                Command::Pause { name }
+            } else {
+                Command::Resume { name }
+            })
+        }
+        "snapshot" => parse_snapshot(args),
+        "restore" => parse_restore(args).map(|restore| Command::Restore(Box::new(restore))),
         "modify" => Ok(match parse_modify(args)? {
             Some(modify) => Command::Modify(Box::new(modify)),
             None => Command::Unsupported {
@@ -249,6 +329,126 @@ fn parse_create(args: &[String]) -> Result<Create, String> {
         env: repeated_pairs(args, "--env"),
         github,
     })
+}
+
+fn selector(text: &str) -> Result<(String, String), String> {
+    text.split_once(':')
+        .filter(|(group, name)| !group.is_empty() && !name.is_empty())
+        .map(|(group, name)| (group.to_owned(), name.to_owned()))
+        .ok_or_else(|| "A checkpoint is named GROUP:NAME.".to_owned())
+}
+
+fn parse_snapshot(args: &[String]) -> Result<Command, String> {
+    let sub = args.get(1).map(String::as_str).ok_or("snapshot needs a verb.")?;
+    let positional: Vec<&String> = {
+        let mut found = Vec::new();
+        let mut index = 2;
+        while index < args.len() {
+            match args[index].as_str() {
+                "--from-sandbox" | "--group" | "--guest-flush" | "--format" => index += 2,
+                flag if flag.starts_with('-') => index += 1,
+                _ => {
+                    found.push(&args[index]);
+                    index += 1;
+                }
+            }
+        }
+        found
+    };
+    match sub {
+        "create" => {
+            if args.iter().any(|arg| arg == "--full") {
+                return Err(crate::containers::capability::refusal(
+                    crate::containers::capability::Capability::MemorySnapshots.verb(),
+                ));
+            }
+            Ok(Command::SnapshotCreate(Box::new(SnapshotCreate {
+                name: positional.first().ok_or("snapshot create needs a name.")?.to_string(),
+                computer: flag_value(args, "--from-sandbox")
+                    .ok_or("snapshot create needs --from-sandbox.")?
+                    .to_owned(),
+                group: flag_value(args, "--group")
+                    .ok_or("snapshot create needs --group.")?
+                    .to_owned(),
+            })))
+        }
+        "list" => Ok(Command::SnapshotList {
+            group: flag_value(args, "--group").map(str::to_owned),
+        }),
+        "verify" | "remove" => {
+            let (group, name) = selector(positional.first().ok_or("A checkpoint is named GROUP:NAME.")?)?;
+            Ok(if sub == "verify" {
+                Command::SnapshotVerify { group, name }
+            } else {
+                Command::SnapshotRemove { group, name }
+            })
+        }
+        "head" => Ok(Command::SnapshotHead),
+        other => Ok(Command::Unsupported {
+            verb: format!("snapshot {other}"),
+        }),
+    }
+}
+
+fn parse_restore(args: &[String]) -> Result<Restore, String> {
+    let (group, member) = selector(
+        args.get(1)
+            .filter(|text| !text.starts_with('-'))
+            .ok_or("restore needs GROUP:NAME.")?,
+    )?;
+    let mut restore = Restore {
+        group,
+        member,
+        ..Restore::default()
+    };
+    let mut index = 2;
+    while index < args.len() {
+        let flag = args[index].as_str();
+        let value = |at: usize| args.get(at).ok_or_else(|| format!("{flag} needs a value."));
+        if let Some(pair) = flag.strip_prefix("--env=") {
+            let (key, text) = pair.split_once('=').ok_or("--env needs KEY=VALUE.")?;
+            restore.env.push((key.to_owned(), text.to_owned()));
+            index += 1;
+            continue;
+        }
+        match flag {
+            "--name" => restore.name = value(index + 1)?.clone(),
+            "--cpus" => restore.cpus = value(index + 1)?.parse().ok(),
+            "--memory" => restore.memory_mib = parse_size_mib(value(index + 1)?),
+            "--label" | "--env" => {
+                let (key, text) = value(index + 1)?
+                    .split_once('=')
+                    .ok_or_else(|| format!("{flag} needs KEY=VALUE."))?;
+                let pair = (key.to_owned(), text.to_owned());
+                if flag == "--label" {
+                    restore.labels.push(pair);
+                } else {
+                    restore.env.push(pair);
+                }
+            }
+            "--secret" => restore.secrets.push(
+                parse_secret_spec(value(index + 1)?).ok_or("--secret needs NAME:passthrough=*@HOSTS.")?,
+            ),
+            "--net-default-egress" | "--net-default-ingress" | "--net-rule" => {
+                value(index + 1)?;
+            }
+            "--disk-only" => {
+                index += 1;
+                continue;
+            }
+            "--cow-mem" => {
+                return Err(crate::containers::capability::refusal(
+                    crate::containers::capability::Capability::MemorySnapshots.verb(),
+                ))
+            }
+            _ => return Err(format!("restore does not take {flag} for a container computer.")),
+        }
+        index += 2;
+    }
+    if restore.name.is_empty() {
+        return Err("restore needs --name.".into());
+    }
+    Ok(restore)
 }
 
 fn repeated_values<'a>(args: &'a [String], flag: &str) -> Vec<&'a str> {
@@ -478,12 +678,21 @@ mod tests {
             Some("dev")
         );
         assert_eq!(target_name(&args(&["stop", "dev", "--quiet"])), Some("dev"));
+        assert_eq!(target_name(&args(&["stop", "--force", "dev"])), Some("dev"));
+        assert_eq!(target_name(&args(&["pause", "dev", "--guest-flush", "required"])), Some("dev"));
+        assert_eq!(target_name(&args(&["resume", "dev"])), Some("dev"));
+        assert_eq!(snapshot_group(&args(&["snapshot", "verify", "box:c1"])), Some("box"));
+        assert_eq!(snapshot_group(&args(&["snapshot", "remove", "--quiet", "box:c1"])), Some("box"));
+        assert_eq!(snapshot_group(&args(&["snapshot", "list", "--format", "json"])), None);
+        assert_eq!(snapshot_group(&args(&["snapshot", "list", "--group", "box"])), Some("box"));
+        assert_eq!(snapshot_group(&args(&["restore", "box:c1", "--name", "kid"])), Some("box"));
+        assert_eq!(snapshot_group(&args(&["restore", "--name", "kid"])), None);
         assert_eq!(
             target_name(&args(&["remove", "--quiet", "dev"])),
             Some("dev")
         );
         assert_eq!(
-            target_name(&args(&["snapshot", "create", "--sandbox", "dev", "older"])),
+            target_name(&args(&["snapshot", "create", "older", "--from-sandbox", "dev", "--group", "dev"])),
             Some("dev")
         );
         assert_eq!(target_name(&args(&["list", "--format", "json"])), None);
@@ -493,7 +702,7 @@ mod tests {
     #[test]
     fn a_checkpoint_named_like_a_computer_does_not_route_to_it() {
         assert_eq!(
-            target_name(&args(&["snapshot", "create", "--sandbox", "vm", "dev"])),
+            target_name(&args(&["snapshot", "create", "dev", "--from-sandbox", "vm", "--group", "vm"])),
             Some("vm")
         );
     }
@@ -791,9 +1000,9 @@ mod tests {
     #[test]
     fn commands_only_virtual_machines_answer_are_named() {
         assert_eq!(
-            parse(&args(&["snapshot", "create", "--sandbox", "dev", "x"])).unwrap(),
+            parse(&args(&["rename", "dev", "x"])).unwrap(),
             Command::Unsupported {
-                verb: "snapshot".into()
+                verb: "rename".into()
             }
         );
     }
