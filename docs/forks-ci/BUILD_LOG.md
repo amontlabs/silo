@@ -632,7 +632,14 @@ restart, the disk size) are closed. Design as approved: [CONTAINERS-PLAN](CONTAI
   argument shapes and routing, the fork record, the quota arithmetic, `silo-ctr merge`, `tap` and `remount` argument
   shapes and merge semantics on Linux, the capability in `capture_with_kind` and `restore_steps`, the capability list and
   the app's copy. Live: `linux-host-e2e.sh` with `SILO_E2E_CONTAINER=1` (below).
-- **Live check** (KVM runner): CT4_LIVE_RESULTS
+- **Live check** (KVM runner): `linux-host-e2e.sh` with `SILO_E2E_CONTAINER=1`, run 42561463802 (x86_64, Ubuntu 24.04). Checkpoint of the running container
+  (scope `disk`) 0.6 s. `silo fork -n 4` from that checkpoint, four forks created and started: **6.8 s** (the starts, about 5 s each, run
+  in parallel). Each fork saw the checkpoint and none saw the parent's later writes, the parent's cron job or another fork's files. `diff` in
+  a fork listed `/home/silo/only-1`; `fold` kept a file into the parent and `undo` removed it again (the parent's earlier state stayed). The
+  engine unit was killed with SIGKILL: the container was running again with its file and a working public network about 12 s later. A
+  container whose recorded size was set to 400 MiB failed a write with "Read-only file system" within a few chunks of 64 MiB. The
+  first runs failed on the test script (the diff scan does not look in `/workspace`; a plain fork starts stopped; a container's `--disk`
+  is only its workspace, so its limit is root disk plus workspace, 81 GiB, and the test shrinks the recorded size).
 
 ### R1: CI runner on the Mac (branch `claude/runner-phase-1`)
 
