@@ -776,7 +776,7 @@ pub fn merge_layers(tools: &Tools, out: &Path, layers: &[PathBuf]) -> Result<(),
 
 /// Folds the oldest sealed layers of a stopped computer whose chain is too long into one. Nothing
 /// is locked unless there is something to fold, and the fold is made before the store is locked:
-/// the new layer is safe from collection for the grace period, and the lock is held only to put it
+/// the new layer is reserved, so collection leaves it alone, and the lock is held only to put it
 /// into the record.
 pub fn flatten(paths: &RuntimePaths, tools: &Tools, name: &str) -> Result<(), String> {
     let layout = Layout::new(&paths.home);
@@ -787,6 +787,7 @@ pub fn flatten(paths: &RuntimePaths, tools: &Tools, name: &str) -> Result<(), St
         return Ok(());
     }
     let merged = super::layers::new_id();
+    let _reservation = super::layers::reserve(&merged);
     let sources: Vec<PathBuf> = record.layers[..count].iter().map(|id| layout.layer(id)).collect();
     if let Err(detail) = merge_layers(tools, &layout.layer(&merged), &sources) {
         let _ = super::image::remove_tree(tools, &layout.layer(&merged));

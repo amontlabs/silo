@@ -166,9 +166,9 @@ fn too_slow(name: &str) -> String {
 ///
 /// The layer store's lock is held only to register the checkpoint, never for the copy: a copy of a
 /// large layer would block every start, restore and fork. The copy is made first, into a layer no
-/// record names yet; collection leaves a layer alone for its grace period, which the copy's
-/// limit stays far inside. The computer's processes are frozen for the copy itself and for no
-/// longer than [`FROZEN_LIMIT`].
+/// record names yet, which is reserved so that collection leaves it alone until the checkpoint
+/// names it. The computer's processes are frozen for the copy itself and for no longer than
+/// [`FROZEN_LIMIT`].
 #[cfg(target_os = "linux")]
 pub fn create(paths: &RuntimePaths, request: &SnapshotCreate) -> Result<(), RuntimeError> {
     use super::{hold::StartMark, lifecycle, tools::Tools};
@@ -206,6 +206,7 @@ pub fn create(paths: &RuntimePaths, request: &SnapshotCreate) -> Result<(), Runt
         }
         if lifecycle::holder_alive(paths, &request.computer) {
             let copy = layers::new_id();
+            let reservation = layers::reserve(&copy);
             let target = layout.layer(&copy);
             lifecycle::make_layer(&tools, &target).map_err(RuntimeError::Unavailable)?;
             let outcome = {
@@ -220,16 +221,16 @@ pub fn create(paths: &RuntimePaths, request: &SnapshotCreate) -> Result<(), Runt
                     lifecycle::CopyFailure::Failed(detail) => detail,
                 }));
             }
-            copied = Some(copy);
+            copied = Some((copy, reservation));
         }
     }
     let _store = layers::lock();
     if store.read(&request.group, &request.name).is_ok() {
         return Err(exists());
     }
-    let chain = if let Some(copy) = copied {
+    let chain = if let Some((copy, _)) = &copied {
         let mut chain = record.layers.clone();
-        chain.push(copy);
+        chain.push(copy.clone());
         chain
     } else if unchanged {
         record.layers.clone()
