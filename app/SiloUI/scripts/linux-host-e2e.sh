@@ -87,7 +87,7 @@ in_container_for() { local seconds="$1"; shift; "$silo" exec "$ctr" --timeout "$
 # Runs a command as root in the container, the way Silo runs its own root commands: through the
 # engine's helper and `crun exec`, with the seven capabilities and the init shim in front. `silo
 # exec` runs as the working account, which cannot become root (no_new_privs), so the commands that
-# need root, such as a package install, use this.
+# need root, such as a package install, use this. It sets SILO_RUNTIME as the engine does.
 root_in_container() {
   local state process status=0
   state=$(engine_find -path "*containers/computers/$ctr/state" -type d | head -n 1)
@@ -100,7 +100,7 @@ json.dump({
     "terminal": False,
     "user": {"uid": 0, "gid": 0},
     "args": sys.argv[2:],
-    "env": ["PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "HOME=/root", "DEBIAN_FRONTEND=noninteractive"],
+    "env": ["PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "HOME=/root", "SILO_RUNTIME=container", "DEBIAN_FRONTEND=noninteractive"],
     "cwd": "/",
     "noNewPrivileges": True,
     "capabilities": {k: caps for k in ("effective", "bounding", "inheritable", "ambient", "permitted")},

@@ -692,8 +692,10 @@ app as a Linux VM, and the "not yet" list is down to export (CT6) and memory che
   runs the image's `silo-desktop-boot`. A container's PID 1 is the shim with no capability, and the desktop service
   switches to the `silo` account with `runuser`, which needs setuid/setgid, so the engine runs the same hook after every start
   as one root command (the capabilities Silo's root commands already get), on a background thread: it waits up to 150 s for
-  `/var/lib/silo/working-account.json` (a first start creates the account after the container is up), then runs the hook;
-  an image with no hook starts nothing. The start does not wait for it and a failure is logged, not returned. The service's own
+  `/var/lib/silo/working-account.json` (a first start creates the account after the container is up), then runs the hook
+  (which does nothing until the desktop's install is recorded as finished); an image with no hook starts nothing. The start does
+  not wait for it and a failure is logged, not returned; a hook that fails leaves the marker that makes the desktop's status say
+  `failed`. The service's own
   supervisors then keep Xvfb, Xfce and Selkies up, as in a VM. No new container branch outside `engine/src/containers/`:
   the only edits outside are removals of the three refusals above, a guard in `setup-desktop.sh` and the app.
 - **No VM-only installer path.** The desktop setup in a container reaches `setup-desktop.sh` through the same engine code; with
@@ -702,12 +704,12 @@ app as a Linux VM, and the "not yet" list is down to export (CT6) and memory che
   the network and runs as for a VM.
 - **Chrome with `--no-sandbox`.** `silo-computer-use.py` (pushed and applied after every boot, and when the desktop is turned
   on) writes, in a container only, launchers for `google-chrome`, `google-chrome-stable`, `chromium` and `chromium-browser`
-  in `/usr/local/bin` and a `google-chrome.desktop` in `/usr/local/share/applications` that exec the first installed browser
-  (`/opt/google/chrome/google-chrome`, Debian's Chromium paths) with `--no-sandbox`; a file of that name that the helper did
-  not write is left alone. No seccomp exception for Chrome. The app's computer page shows a note when a container has a
+  in `/usr/local/bin` and `google-chrome.desktop` and `chromium.desktop` in `/usr/local/share/applications` that run the launcher, which execs the first installed browser
+  (`/opt/google/chrome/google-chrome`, Debian's Chromium paths, whichever name was called) with `--no-sandbox`; a file of that
+  name that the helper did not write is left alone. No seccomp exception for Chrome. The app's computer page shows a note when a container has a
   desktop; the threat model, the desktop guide and the computer-use guide say it plainly.
-- **Host disk guard (CT4 re-check).** (1) A layer the guard cannot measure (the `du` timed out, failed or printed nothing
-  readable) counts as over its size and goes first; layers are measured by up to four workers at once, each bounded to five
+- **Host disk guard (CT4 re-check).** (1) A layer the guard cannot measure (the measurement timed out, or `du` itself failed or
+  printed nothing readable) counts as over its size and goes first; layers are measured by up to four workers at once, each bounded to five
   minutes, so one slow container does not hold up the others. (2) The threat model now says the guard's stop can land during a
   checkpoint copy (the frozen scope is killed after the 15 s stop wait; the copy runs outside the container and still
   saves), can act on a measurement minutes old, that sizes adding up to more than the disk can still fill it, and that a
@@ -727,14 +729,16 @@ app as a Linux VM, and the "not yet" list is down to export (CT6) and memory che
     launcher could not read the desktop session's environment from `xfce4-session` (`X11 setup failed: Authorization required`).
     In a container the session now writes `DISPLAY`, `DBUS_SESSION_BUS_ADDRESS`, `XDG_RUNTIME_DIR` and `XAUTHORITY` to
     `/run/silo-desktop/user/session.env` (mode 0600, the working account's) when it starts, and the launcher and
-    `silo-computer-use` read that file when they cannot read the process. A virtual machine starts its session unchanged.
+    `silo-computer-use` read that file when they cannot read the process. (The review fixes below make this the one path for both kinds.)
   - The first start creates the working account after the container is up, so the boot command waits for it.
   - The Linux runner has Google Chrome installed on the host; a guest test for the missing-browser message must not rely on the
     machine having none.
   - The viewer's streamer listens on the container's loopback, and a published port reaches the guest's own address, so the
     URL-proxy check hands a published port to it with a small forwarder in the container; the viewer itself reaches the loopback
     port over the computer's SSH server, as the app does.
-- **Tests.** Engine: the capability list and its app copy, the desktop defaults for a container (built in, and
+- **Tests.** (The review fixes below add the cases for the hook that waits for the install, the failed status, the fixed
+  environment of engine commands, `/run` as a tmpfs, `--no-desktop`, the session file reader and its removal, the Chromium entry,
+  the streamer password and the unmeasurable layer.) Engine: the capability list and its app copy, the desktop defaults for a container (built in, and
   autostart-off kept), the update validator, the boot command and script, the host guard (unmeasurable layer, ordering, parallel
   measurement). Guest: the Chrome launchers (written for a container only, never over a foreign file, run the browser with the
   flag and its arguments, say so when none is installed). Frontend: the capability model, the overview and detail pages (desktop
@@ -750,6 +754,38 @@ app as a Linux VM, and the "not yet" list is down to export (CT6) and memory che
   computer use ready; `silo desktop off` stopped the desktop, `fork --gui` then said "has no desktop; turn it on with `silo desktop on`",
   a restart and a plain fork of it started none, and `silo desktop on` brought it back. `desktop: false` at creation was first
   covered only through `silo desktop off`; the review fixes below add a container created with `--no-desktop`.
+
+#### Review fixes (a code review and a threat-model review of the first build)
+
+- **Desktop off at creation.** The first build said it could not be tested because a recipe cannot make a container; that was
+  wrong, since `computers.create` takes `configuration.desktop = {startWithComputer: false}` for a container (the app's form
+  sends it). `silo create --no-desktop` (both kinds, not with `--macos`) sends the same request, and the live check creates a
+  container that way, starts it and asserts that no desktop, process or service answers.
+- **One session-environment path.** The desktop session of a VM now writes `/run/silo-desktop/user/session.env` too;
+  `xfce_command` has no `SILO_RUNTIME` branch, the `/proc/<pid>/environ` scans and the `runuser ... cat environ` fallback are
+  gone, and the launcher and `silo-computer-use` read the file (root also checks that it is a small regular file of the working
+  account, opened without following a link). The desktop stopping removes it. A VM whose session was started by the earlier
+  service has no file until its desktop restarts.
+- **Disk guard.** Only a measurement that timed out, or a `du` that ran and printed nothing readable, is unmeasurable. The
+  measurement is a small script that prints `du`'s exit status, so a failure of `silo-ctr userns` or `newuidmap` (no status) is
+  logged and says nothing about the layer, like `CouldNotStart`. An unmeasurable layer is stopped as soon as its own measurement
+  ends, not after the whole pass.
+- **Boot race.** The hook `setup-desktop.sh` writes does nothing until `install-stage` says `installed`.
+- **A failed boot is visible.** The engine's boot command runs the hook with a 120 s limit and, when it fails, leaves
+  `/run/silo-desktop/failed`; the desktop status reports `failed` when the session is stopped and that marker exists (the next
+  start, a stop or a new boot removes it).
+- **The computer's environment and engine commands.** `Exec.fixed_environment` makes `exec_command` use only the engine's
+  defaults; the boot command and the gateway certificate update set it. Owner-run `exec` is unchanged.
+- **`process_exe`** falls back to `comm` only when `SILO_RUNTIME=container`; in a VM an unreadable `exe` is not recognised, as before.
+- **Browsers.** `chromium.desktop` is replaced like `google-chrome.desktop`, and both entries run the launcher, which adds the
+  flag once.
+- **`/run`** is a tmpfs in the container spec, as a VM's; the cookie and session file do not travel into a checkpoint or a fork.
+- **Docs and warning.** The threat model, the app's note, and the desktop and computer-use guides say that a compromised browser
+  can act with the computer's GitHub access and secrets and use its in-guest `silo` client, that any Chromium-based program
+  started with `--no-sandbox` is exposed the same way, that a launcher runs the first installed browser whatever name was called
+  and stays after `desktop off`. The line saying the viewer's credentials stay in root's folder was false (Selkies took the
+  password as an argument, readable by every process); Selkies 2.0.0 reads `SELKIES_BASIC_AUTH_PASSWORD`, so the service passes
+  it in the streamer's environment and the threat model says who can read that.
 
 ### R1: CI runner on the Mac (branch `claude/runner-phase-1`)
 
