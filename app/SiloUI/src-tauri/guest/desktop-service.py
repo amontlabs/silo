@@ -776,6 +776,15 @@ def prepare_selkies_runtime(account):
         raise RuntimeError('Could not initialize desktop X authority') from None
 
 
+def log_tail(limit=1500):
+    """The end of the service log, for an error message: the reason is in the log, and a caller
+    that only sees the error (a creation that fails) has no other way to read it."""
+    try:
+        return LOG.read_text(errors='replace')[-limit:].strip().replace('\n', ' | ')
+    except OSError:
+        return ''
+
+
 def start_selkies():
     if supervisor():
         if selkies_session_state(selkies_state(), True) != 'failed':
@@ -793,7 +802,7 @@ def start_selkies():
         if current['sessionState'] == 'running' and current['streamState'] == 'running':
             return
         if current['sessionState'] == 'failed':
-            raise RuntimeError('Desktop session failed to start; inspect /var/log/silo-desktop.log')
+            raise RuntimeError('Desktop session failed to start; inspect /var/log/silo-desktop.log: ' + log_tail())
         if current['streamState'] == 'failed':
             raise RuntimeError('Selkies failed to start; desktop session remains running; inspect /var/log/silo-desktop.log')
         time.sleep(0.1)
