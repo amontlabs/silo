@@ -164,6 +164,18 @@ fn leader_pid(directory: &std::path::Path) -> Option<i32> {
         .filter(|pid| *pid > 1)
 }
 
+/// A new folder for the socket `crun` hands a terminal's controlling side to. Whoever connects to
+/// that socket first gives the session its terminal, so only this account may enter the folder,
+/// whatever umask the process runs with (a terminal or an editor's proxy starts from a login
+/// session, not from the engine).
+pub fn console_directory() -> std::io::Result<tempfile::TempDir> {
+    use std::os::unix::fs::PermissionsExt;
+    tempfile::Builder::new()
+        .prefix("silo-pty-")
+        .permissions(std::fs::Permissions::from_mode(0o700))
+        .tempdir()
+}
+
 /// Whether the exec directory `directory` is a leftover: its command is gone (its pid no longer
 /// leads a process group), or it never recorded a pid and has sat unused for `idle`.
 pub fn exec_leftover(directory: &std::path::Path, idle: Duration) -> bool {
@@ -399,6 +411,14 @@ mod tests {
         in_computer(proc.path(), bystander.id(), UNIT);
         assert!(group.kill());
         bystander.wait().unwrap();
+    }
+
+    #[test]
+    fn the_folder_of_a_terminals_socket_is_the_accounts_alone() {
+        use std::os::unix::fs::PermissionsExt;
+        let directory = console_directory().unwrap();
+        let mode = std::fs::metadata(directory.path()).unwrap().permissions().mode() & 0o7777;
+        assert_eq!(mode, 0o700, "{mode:o}");
     }
 
     #[test]
