@@ -3,8 +3,8 @@ name: Linux host
 # Runs a real Linux computer on a Linux host engine: builds the Silo Dev engine
 # archive (package-engine.py), unpacks it, registers it as a systemd user
 # service and drives a computer through its silo command
-# (scripts/linux-host-e2e.sh): create, start, exec, checkpoint, fork, exec in
-# the fork, drop both. Then two accounts act as two devices (scripts/hosts-e2e.sh):
+# (scripts/linux-host-e2e.sh): create, start, exec, checkpoint, exports that
+# must hold no memory, fork, exec in the fork, drop both. Then two accounts act as two devices (scripts/hosts-e2e.sh):
 # one prepared with `silo host init`, the other adding it by address over the local
 # SSH server and managing a computer on it. GitHub's ubuntu-24.04 runners have
 # /dev/kvm. Build values are synthetic; this workflow gets no secrets and never

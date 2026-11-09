@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # Drives a real Linux computer on a running Linux host engine through its `silo` command:
-# create, start, exec, checkpoint, fork, exec in the fork, then stop and drop both. The
+# create, start, exec, checkpoint, fork, exec in the fork, then stop and drop both. Between the
+# checkpoint and the fork it checks that no export holds memory: the checkpoint, saved while the
+# computer ran, is refused; the running computer's export and the export of a fork of that
+# checkpoint are opened and hold disks only. The
 # computers are named e2e-hosts-* and stopped and dropped even when a step fails.
 #
 # With SILO_E2E_CONTAINER=1 it then drives a container computer the same way (create --container,
@@ -24,6 +27,8 @@ engine_dir="$1"
 silo="$1/silo"
 name="${SILO_E2E_COMPUTER:-e2e-hosts-ci}"
 fork="$name-fork"
+# The fork of a checkpoint that was saved while the computer ran.
+ckpt_fork="$name-ckpt"
 ctr="$name-ctr"
 # A second container that keeps the secret when it is taken away from the first (a secret always
 # has a computer).
@@ -42,6 +47,8 @@ ctr7="$name-ctr7"
 artifacts="${SILO_E2E_ARTIFACTS:-}"
 # The file that fills the host's disk in the guard check; the cleanup removes it.
 fill_file=""
+# Where the VM exports are written; the cleanup removes it.
+export_dir=""
 # The engine's systemd unit, which the restart check ends the way a crash does.
 engine_unit="${SILO_E2E_UNIT:-org.silo.dev.engine.service}"
 # Seconds to wait for the engine socket to answer.
@@ -73,7 +80,8 @@ cleanup() {
   [[ -n "$fill_file" ]] && rm -f "$fill_file"
   rm -f "${stderr_file:-}"
   remove_editor_key
-  for computer in "$ctr7" "$ctr6" "$ctr4-gui" "$ctr4-plain" "$ctr4" "$ctr5" "$ctr3" "$ctr2" "$ctr" "$ctr-k" "$ctr-f-1" "$ctr-f-2" "$ctr-f-3" "$ctr-f-4" "$fork" "$name"; do
+  [[ -n "$export_dir" ]] && rm -rf "$export_dir"
+  for computer in "$ctr7" "$ctr6" "$ctr4-gui" "$ctr4-plain" "$ctr4" "$ctr5" "$ctr3" "$ctr2" "$ctr" "$ctr-k" "$ctr-f-1" "$ctr-f-2" "$ctr-f-3" "$ctr-f-4" "$ckpt_fork" "$fork" "$name"; do
     if listed "$computer" 2>/dev/null | grep -qx -- "$computer"; then
       echo "Stopping and dropping $computer after a failed run"
       "$silo" stop "$computer" || true
@@ -163,6 +171,96 @@ checkpoint_scope() {
 import json, sys
 found = [c.get("scope", "?") for c in json.load(sys.stdin)["checkpoints"] if c["name"] == sys.argv[1]]
 print(found[0] if found else "missing")' "$2"
+}
+
+# Fails unless the export file $1 holds disks only. The file is a header, a manifest and one
+# MicroSandbox snapshot archive (a zstd tar) per computer. MicroSandbox keeps a capture's memory,
+# execution and device state under `checkpoints/` in that archive, and names the capture's scope
+# in `snapshots/<id>/snapshot.json`: neither may say anything but a disk capture.
+export_holds_no_memory() {
+  python3 - "$1" <<'PY'
+import json, subprocess, sys, tarfile, threading
+
+with open(sys.argv[1], "rb") as file:
+    if not file.read(16).startswith(b"SILO-BACKUP"):
+        sys.exit("not a Silo export file")
+    file.read(4)
+    manifest = json.loads(file.read(int.from_bytes(file.read(8), "big")))
+    if not manifest["computers"]:
+        sys.exit("the export holds no computer")
+    for computer in manifest["computers"]:
+        name = computer["name"]
+        zstd = subprocess.Popen(["zstd", "-dc"], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+
+        def feed(left=computer["payloadSize"]):
+            while left:
+                chunk = file.read(min(left, 1 << 20))
+                if not chunk:
+                    break
+                zstd.stdin.write(chunk)
+                left -= len(chunk)
+            zstd.stdin.close()
+
+        feeder = threading.Thread(target=feed, daemon=True)
+        feeder.start()
+        entries = snapshots = 0
+        with tarfile.open(fileobj=zstd.stdout, mode="r|") as archive:
+            for member in archive:
+                path = member.name.removeprefix("./")
+                entries += 1
+                if path.split("/")[0] == "checkpoints":
+                    sys.exit(f"{name}: the export holds {path}")
+                if path.startswith("snapshots/") and path.endswith("/snapshot.json"):
+                    descriptor = json.load(archive.extractfile(member))
+                    scope = descriptor.get("scope")
+                    kind = descriptor.get("state", {}).get("kind")
+                    if scope != "file" or kind != "file":
+                        sys.exit(f"{name}: {path} is a {scope}/{kind} capture, not a disk capture")
+                    snapshots += 1
+        feeder.join()
+        if zstd.wait() != 0:
+            sys.exit(f"{name}: the snapshot archive could not be read")
+        if snapshots == 0:
+            sys.exit(f"{name}: the export names no snapshot")
+        print(f"{name}: {entries} entries, {snapshots} disk capture(s), nothing under checkpoints/")
+PY
+}
+
+# No export of a VM computer holds memory. The computer $name is running and has the checkpoint
+# e2e-hosts-ci, saved while it ran.
+vm_exports_hold_no_memory() {
+  local id output
+  command -v zstd > /dev/null || { echo "zstd is needed to open an export file" >&2; exit 1; }
+  export_dir=$(mktemp -d)
+
+  step "Exporting the checkpoint of $name that was saved while it ran is refused"
+  expect "checkpoint scope" "$(checkpoint_scope "$name" e2e-hosts-ci)" full
+  id=$(checkpoint_id "$name" e2e-hosts-ci)
+  if output=$("$silo" export "$name" --checkpoint "$id" -o "$export_dir/checkpoint.silo-backup" --yes < /dev/null 2>&1); then
+    echo "a checkpoint that holds memory was exported: $output" >&2
+    exit 1
+  fi
+  echo "$output"
+  grep -q "holds the computer's memory" <<<"$output" || { echo "the refusal did not give its reason" >&2; exit 1; }
+  grep -q "Fork the checkpoint and export the fork" <<<"$output" || { echo "the refusal did not say what to do instead" >&2; exit 1; }
+  [[ -z "$(ls -A "$export_dir")" ]] || { echo "a refused export left a file: $(ls -A "$export_dir")" >&2; exit 1; }
+
+  step "Exporting $name while it runs"
+  "$silo" export "$name" -o "$export_dir/running.silo-backup" --yes < /dev/null
+  echo "export file: $(wc -c < "$export_dir/running.silo-backup") bytes"
+  export_holds_no_memory "$export_dir/running.silo-backup"
+
+  step "Forking that checkpoint as $ckpt_fork and exporting the fork"
+  "$silo" fork "$name" --name "$ckpt_fork" --checkpoint "$id"
+  if [[ "$("$silo" --json status "$ckpt_fork" | python3 -c 'import json, sys; print(json.load(sys.stdin)["state"])')" != running ]]; then
+    "$silo" start "$ckpt_fork"
+  fi
+  "$silo" export "$ckpt_fork" -o "$export_dir/fork.silo-backup" --yes < /dev/null
+  export_holds_no_memory "$export_dir/fork.silo-backup"
+  "$silo" stop "$ckpt_fork"
+  "$silo" drop "$ckpt_fork"
+  rm -rf "$export_dir"
+  export_dir=""
 }
 
 # Whether $2 exists in the computer $1 ("yes" or "no").
@@ -1297,6 +1395,8 @@ echo "$output"
 step "Saving a checkpoint of $name"
 "$silo" checkpoint "$name" --name e2e-hosts-ci
 
+vm_exports_hold_no_memory
+
 step "Forking $name as $fork"
 "$silo" fork "$name" --name "$fork"
 state=$("$silo" --json status "$fork" | python3 -c 'import json, sys; print(json.load(sys.stdin)["state"])')
@@ -1317,7 +1417,7 @@ step "Stopping $fork and $name"
 step "Dropping $fork and $name"
 "$silo" drop "$fork"
 "$silo" drop "$name"
-left=$(listed "$name" "$fork")
+left=$(listed "$name" "$fork" "$ckpt_fork")
 if [[ -n "$left" ]]; then
   echo "Still listed after drop: $left" >&2
   exit 1

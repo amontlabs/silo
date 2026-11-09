@@ -58,6 +58,32 @@ FAKE_SILO = textwrap.dedent('''\
         print(os.environ.get('FAKE_UNAME', 'Linux e2e 6.12.0 x86_64 GNU/Linux'))
     elif command == 'checkpoint':
         pass
+    elif command == 'checkpoints':
+        print(json.dumps({{'checkpoints': [{{'id': 'ckpt-1', 'name': 'e2e-hosts-ci',
+                                           'scope': os.environ.get('FAKE_CHECKPOINT_SCOPE', 'full')}}]}}))
+    elif command == 'export':
+        # A checkpoint saved while the computer ran is refused, as the engine refuses it.
+        if '--checkpoint' in rest and not os.environ.get('FAKE_EXPORTS_MEMORY_CHECKPOINT'):
+            sys.exit("silo: This checkpoint was saved while e2e-hosts-ci was running, so it holds the computer's "
+                     "memory, and an export never carries memory. Fork the checkpoint and export the fork, or "
+                     "export e2e-hosts-ci itself.")
+        assert '--yes' in rest and computers[rest[0]] == 'running', rest
+        import io, tarfile
+        scope = os.environ.get('FAKE_EXPORT_SCOPE', 'file')
+        members = {{'snapshots/snap_1/snapshot.json': json.dumps({{'scope': scope, 'state': {{'kind': scope}}}}).encode(),
+                    'layers/layer_1.raw': b'disk'}}
+        if os.environ.get('FAKE_EXPORT_HOLDS_MEMORY'):
+            members['checkpoints/snap_1/checkpoint.json'] = b'{{}}'
+        payload = io.BytesIO()
+        with tarfile.open(fileobj=payload, mode='w') as archive:
+            for path, data in members.items():
+                info = tarfile.TarInfo(path)
+                info.size = len(data)
+                archive.addfile(info, io.BytesIO(data))
+        manifest = json.dumps({{'computers': [{{'name': rest[0], 'payloadSize': len(payload.getvalue())}}]}}).encode()
+        Path(rest[rest.index('-o') + 1]).write_bytes(
+            b'SILO-BACKUP' + bytes(5) + (4).to_bytes(4, 'big') + len(manifest).to_bytes(8, 'big') + manifest
+            + payload.getvalue())
     elif command == 'drop':
         if computers[rest[0]] == 'running':
             sys.exit(f'{{rest[0]}} is still running')
@@ -293,15 +319,27 @@ class LinuxHostEndToEndScriptTests(unittest.TestCase):
         silo.write_text(FAKE_SILO.format(python=sys.executable))
         silo.chmod(0o755)
         self.state, self.calls = self.root / 'state.json', self.root / 'calls.txt'
+        # The fake silo writes the snapshot archive of an export as a plain tar, so the `zstd -dc`
+        # the script opens it with passes the bytes through.
+        self.tools = self.root / 'tools'
+        self.tools.mkdir()
+        (self.tools / 'zstd').write_text('#!/bin/sh\nexec cat\n')
+        (self.tools / 'zstd').chmod(0o755)
+        self.exports = self.root / 'tmp'
+        self.exports.mkdir()
 
     def run_script(self, **environment):
         env = {**os.environ, 'FAKE_STATE': str(self.state), 'FAKE_CALLS': str(self.calls),
+               'PATH': f"{self.tools}{os.pathsep}{os.environ['PATH']}", 'TMPDIR': str(self.exports),
                'SILO_E2E_READY_TIMEOUT': '1', 'SILO_E2E_RETRY_WAIT': '0', **environment}
         result = subprocess.run(['bash', str(E2E), str(self.engine)], env=env, capture_output=True, text=True,
                                 timeout=60)
-        calls = [line for line in self.calls.read_text().splitlines() if not line.startswith(('list', '--json list'))] \
-            if self.calls.exists() else []
+        calls = [re.sub(r'-o \S+/', '-o ', line) for line in self.calls.read_text().splitlines()
+                 if not line.startswith(('list', '--json list'))] if self.calls.exists() else []
         return result, calls
+
+    def exports_left(self):
+        return [path.name for path in self.exports.rglob('*.silo-backup')]
 
     def computers(self):
         return json.loads(self.state.read_text()) if self.state.exists() else {}
@@ -314,6 +352,16 @@ class LinuxHostEndToEndScriptTests(unittest.TestCase):
             'start e2e-hosts-ci',
             'exec e2e-hosts-ci -- uname -a',
             'checkpoint e2e-hosts-ci --name e2e-hosts-ci',
+            '--json checkpoints e2e-hosts-ci',
+            '--json checkpoints e2e-hosts-ci',
+            'export e2e-hosts-ci --checkpoint ckpt-1 -o checkpoint.silo-backup --yes',
+            'export e2e-hosts-ci -o running.silo-backup --yes',
+            'fork e2e-hosts-ci --name e2e-hosts-ci-ckpt --checkpoint ckpt-1',
+            '--json status e2e-hosts-ci-ckpt',
+            'start e2e-hosts-ci-ckpt',
+            'export e2e-hosts-ci-ckpt -o fork.silo-backup --yes',
+            'stop e2e-hosts-ci-ckpt',
+            'drop e2e-hosts-ci-ckpt',
             'fork e2e-hosts-ci --name e2e-hosts-ci-fork',
             '--json status e2e-hosts-ci-fork',
             'start e2e-hosts-ci-fork',
@@ -325,6 +373,38 @@ class LinuxHostEndToEndScriptTests(unittest.TestCase):
         ])
         self.assertEqual(self.computers(), {})
         self.assertIn('== Passed', result.stdout)
+        self.assertIn('e2e-hosts-ci: 2 entries, 1 disk capture(s), nothing under checkpoints/', result.stdout)
+        self.assertIn('e2e-hosts-ci-ckpt: 2 entries, 1 disk capture(s), nothing under checkpoints/', result.stdout)
+        self.assertEqual(self.exports_left(), [])
+
+    def test_an_exported_checkpoint_that_holds_memory_fails_the_run(self):
+        result, calls = self.run_script(FAKE_EXPORTS_MEMORY_CHECKPOINT='1')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('a checkpoint that holds memory was exported', result.stderr)
+        self.assertEqual(calls[-3:], ['export e2e-hosts-ci --checkpoint ckpt-1 -o checkpoint.silo-backup --yes',
+                                      'stop e2e-hosts-ci', 'drop e2e-hosts-ci'])
+        self.assertEqual((self.computers(), self.exports_left()), ({}, []))
+
+    def test_an_export_with_memory_in_it_fails_the_run(self):
+        for environment, message in (
+            ({'FAKE_EXPORT_HOLDS_MEMORY': '1'}, 'e2e-hosts-ci: the export holds checkpoints/snap_1/checkpoint.json'),
+            ({'FAKE_EXPORT_SCOPE': 'checkpoint'},
+             'e2e-hosts-ci: snapshots/snap_1/snapshot.json is a checkpoint/checkpoint capture, not a disk capture'),
+        ):
+            with self.subTest(environment):
+                self.calls.unlink(missing_ok=True)
+                result, calls = self.run_script(**environment)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(message, result.stderr)
+                self.assertEqual(calls[-3:], ['export e2e-hosts-ci -o running.silo-backup --yes',
+                                              'stop e2e-hosts-ci', 'drop e2e-hosts-ci'])
+                self.assertEqual((self.computers(), self.exports_left()), ({}, []))
+
+    def test_a_checkpoint_saved_without_memory_does_not_stand_for_the_check(self):
+        result, calls = self.run_script(FAKE_CHECKPOINT_SCOPE='disk')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("checkpoint scope: got 'disk', wanted 'full'", result.stderr)
+        self.assertEqual((self.computers(), self.exports_left()), ({}, []))
 
     def test_a_failed_step_still_drops_what_it_made(self):
         result, calls = self.run_script(FAKE_UNAME='Darwin')
