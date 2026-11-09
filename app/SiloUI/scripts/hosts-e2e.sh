@@ -14,7 +14,10 @@
 # back onto the host with --device, and checks that neither engine's transfer area keeps a
 # file (SILO_E2E_STATE_DIR is the channel's folder under the account's home, .silo-dev for
 # the Dev engine). The computers are named e2e-hosts-* and are stopped and dropped, and the
-# controller removed from the host, even when a step fails.
+# controller removed from the host, even when a step fails. SILO_E2E_CONTAINER=1 also makes a
+# container computer on the host and drives it from the controller the same way: it is listed,
+# run in, switched off and on again as to its desktop, exported to the controller, imported on both
+# accounts (each account runs containers of its own), and used in the copy it was imported as.
 set -euo pipefail
 
 if [[ $# -ne 3 ]]; then
@@ -29,6 +32,10 @@ fork="$name-fork"
 # Made by the sharing steps: on the controller, and on the host from a file sent with --device.
 imported="$name-imported"
 sent="$name-sent"
+# The container computer of the container steps, and the computers its export becomes.
+ctr="$name-ctr"
+ctr_imported="$name-ctr-imported"
+ctr_sent="$name-ctr-sent"
 state_dir="${SILO_E2E_STATE_DIR:-.silo-dev}"
 port="${SILO_E2E_SSH_PORT:-22}"
 host_key_file="${SILO_E2E_HOST_KEY_FILE:-/etc/ssh/ssh_host_ed25519_key.pub}"
@@ -87,14 +94,14 @@ share_dir=""
 cleanup() {
   local status=$?
   trap - EXIT
-  for computer in "$imported"; do
+  for computer in "$imported" "$ctr_imported"; do
     if [[ "$(listed_on_controller "$computer" 2>/dev/null || true)" == "$computer" ]]; then
       echo "Dropping $computer on the controller after a failed run"
       controller drop "$computer" || true
     fi
   done
   if [[ -n "$share_dir" ]]; then as "$controller_user" rm -rf "$share_dir" || true; fi
-  for computer in "$sent" "$fork" "$name"; do
+  for computer in "$ctr_sent" "$ctr" "$sent" "$fork" "$name"; do
     if [[ "$(listed_on_host "$computer" 2>/dev/null || true)" == "$computer" ]]; then
       echo "Stopping and dropping $computer on the host after a failed run"
       host stop "$computer" || true
@@ -169,7 +176,7 @@ host host status
 
 # The check must fail when the list does: an empty answer would let the test take over a
 # computer it did not make.
-if ! existing=$(listed_on_host "$name" "$fork" "$sent"); then
+if ! existing=$(listed_on_host "$name" "$fork" "$sent" "$ctr" "$ctr_sent"); then
   echo "Could not list the host's computers; this test never runs without knowing them" >&2
   exit 1
 fi
@@ -240,6 +247,78 @@ if [[ "${SILO_E2E_SHARE:-0}" == 1 ]]; then
   step "Dropping the imported computers"
   controller drop "$imported"
   controller --device "$device" drop "$sent"
+  as "$controller_user" rm -rf "$share_dir"
+  share_dir=""
+fi
+
+if [[ "${SILO_E2E_CONTAINER:-0}" == 1 ]]; then
+  step "Making a container computer on the host from the controller"
+  controller --device "$device" create "$ctr" --container --cpus 1 --memory 2 --disk 2
+  controller --device "$device" start "$ctr"
+  kind=$(host --json list --all | python3 -c '
+import json, sys
+rows = {c["name"]: c["kind"] for c in json.load(sys.stdin)["computers"]}
+print(rows.get(sys.argv[1], "missing"))' "$ctr")
+  [[ "$kind" == container ]] || { echo "$ctr is a $kind on the host, not a container" >&2; exit 1; }
+  controller list --all-devices | grep -q -- "$ctr" || { echo "$ctr is not in the controller's list of every device" >&2; exit 1; }
+
+  step "Running commands in $ctr from the controller"
+  output=$(controller --device "$device" exec "$ctr" -- sh -c 'echo over-connections > /workspace/e2e-note && cat /workspace/e2e-note && uname -s')
+  echo "$output"
+  [[ "$output" == $'over-connections\nLinux' ]] || { echo "unexpected output from $ctr: $output" >&2; exit 1; }
+  controller --device "$device" exec "$ctr" -- sh -c 'mkdir -p ~/.claude && echo "{}" > ~/.claude/.credentials.json'
+
+  step "Turning the desktop of $ctr off and on from the controller"
+  controller --device "$device" desktop off "$ctr"
+  controller --device "$device" desktop on "$ctr"
+
+  step "Exporting $ctr from the host to the controller"
+  [[ -z "$(transfer_files "$host_user")" ]] || { echo "The host's transfer area is not empty before the container export" >&2; exit 1; }
+  share_dir=$(as "$controller_user" mktemp -d)
+  exported="$share_dir/$ctr.silo-backup"
+  # The login on the computer is named, and --yes shares it anyway; nothing is left out.
+  if output=$(controller --device "$device" export "$ctr" -o "$exported" 2>&1 < /dev/null); then
+    echo "an export of a computer with a login finished without --yes: $output" >&2
+    exit 1
+  fi
+  grep -q 'Claude Code login' <<<"$output" || { echo "the export did not name the login: $output" >&2; exit 1; }
+  controller --device "$device" export "$ctr" --yes -o "$exported"
+  as "$controller_user" test -s "$exported" || { echo "The exported container file is missing or empty" >&2; exit 1; }
+  [[ -z "$(transfer_files "$host_user")" ]] || { echo "The host kept files after the container export: $(transfer_files "$host_user")" >&2; exit 1; }
+  [[ -z "$(transfer_files "$controller_user")" ]] || { echo "The controller's transfer area holds files after the container export" >&2; exit 1; }
+
+  step "Importing the container file on the controller and onto the host"
+  controller import "$exported" --name "$ctr_imported"
+  controller --device "$device" import "$exported" --name "$ctr_sent"
+  [[ "$(listed_on_controller "$ctr_imported")" == "$ctr_imported" ]] || { echo "$ctr_imported is not on the controller" >&2; exit 1; }
+  [[ "$(listed_on_host "$ctr_sent")" == "$ctr_sent" ]] || { echo "$ctr_sent is not on the host" >&2; exit 1; }
+  [[ -z "$(transfer_files "$host_user")" ]] || { echo "The host kept files after the container import" >&2; exit 1; }
+  [[ -z "$(transfer_files "$controller_user")" ]] || { echo "The controller's transfer area holds files after the container import" >&2; exit 1; }
+
+  step "Using the imported copies"
+  controller start "$ctr_imported"
+  controller --device "$device" start "$ctr_sent"
+  for where in "controller" "controller --device $device"; do
+    case "$where" in
+      controller) copy="$ctr_imported" ;;
+      *) copy="$ctr_sent" ;;
+    esac
+    output=$($where exec "$copy" -- sh -c 'cat /workspace/e2e-note && test -f ~/.claude/.credentials.json && echo login')
+    [[ "$output" == $'over-connections\nlogin' ]] || { echo "unexpected output from $copy: $output" >&2; exit 1; }
+  done
+  kind=$(controller --json list --all | python3 -c '
+import json, sys
+rows = {c["name"]: c["kind"] for c in json.load(sys.stdin)["computers"]}
+print(rows.get(sys.argv[1], "missing"))' "$ctr_imported")
+  [[ "$kind" == container ]] || { echo "$ctr_imported is a $kind on the controller, not a container" >&2; exit 1; }
+
+  step "Dropping the container computers"
+  controller stop "$ctr_imported"
+  controller --device "$device" stop "$ctr_sent"
+  controller drop "$ctr_imported"
+  controller --device "$device" drop "$ctr_sent"
+  controller --device "$device" stop "$ctr"
+  controller --device "$device" drop "$ctr"
   as "$controller_user" rm -rf "$share_dir"
   share_dir=""
 fi

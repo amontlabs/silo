@@ -72,7 +72,7 @@ impl Report {
             .map(|finding| format!("{} — {}", finding.what, finding.fix))
             .collect();
         Some(format!(
-            "This computer cannot run container computers yet: {}",
+            "This device cannot run container computers yet: {}",
             list.join("; ")
         ))
     }
@@ -675,7 +675,7 @@ mod tests {
         let report = linux(&fake);
         assert!(!report.ready());
         let message = report.refusal().unwrap();
-        assert!(message.starts_with("This computer cannot run container computers yet: "));
+        assert!(message.starts_with("This device cannot run container computers yet: "));
         assert!(message
             .contains("crun is installed — install it (Ubuntu 24.04: sudo apt install crun)"));
         assert!(message.contains("umoci is installed — "));
@@ -691,7 +691,7 @@ mod tests {
         assert!(report.findings.iter().all(|f| !f.ok && f.fix == NOT_LINUX));
         assert_eq!(
             report.refusal().unwrap(),
-            "This computer cannot run container computers yet: This host runs Linux — container computers run only on a Linux host"
+            "This device cannot run container computers yet: This host runs Linux — container computers run only on a Linux host"
         );
     }
 }

@@ -108,7 +108,7 @@ export function applicationCommands(source: ApplicationSource, actions: Applicat
     if (actions.forkCheckpoint && onComputerRequest && !changing) {
       commands.push({ id: `${id}:fork`, label: `Fork ${name}…`, icon: GitFork, group: "Actions", keywords: [...computerKeywords, "fork", "copy", "clone"], opensPanel: true, run: () => onComputerRequest(id, "fork") })
     }
-    if (!computer.device && onExportComputer && !changing && computerCan(computer.configuration, "export")) {
+    if (!computer.device && onExportComputer && !changing) {
       commands.push({ id: `${id}:export`, label: `Export ${name}…`, icon: Download, group: "Actions", keywords: [...computerKeywords, "export", "backup", "archive"], run: () => onExportComputer(computer.configuration.name) })
     }
     const offline = Boolean(computer.device && !computer.device.connected)

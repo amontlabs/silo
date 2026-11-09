@@ -1,11 +1,10 @@
-//! What a container computer cannot do yet: one list, one check.
+//! What a container computer cannot do: one list, one check.
 //!
-//! Export reaches the runtime by its own path (not the argument shape
-//! [`super::route`] answers), so a container would otherwise be handed to MicroSandbox, or to an
-//! installer, that does not know it. Every such entry point names its
-//! [`Capability`] and calls [`require`] before it does anything; the app hides the same actions
-//! from [`unavailable`]. A later phase gives the container kind a capability by flipping
-//! [`Capability::container_has`] and adding the code behind it.
+//! The desktop installer reaches the runtime by its own path (not the argument shape
+//! [`super::route`] answers), so a container would otherwise be handed to an installer that does
+//! not know it. Every such entry point names its [`Capability`] and calls [`require`] before it
+//! does anything; the app hides the same actions from [`unavailable`]. A container computer has
+//! everything a virtual machine has but the memory in its checkpoints.
 
 use super::layout::Layout;
 use crate::runtime::RuntimePaths;
@@ -13,8 +12,6 @@ use std::path::Path;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Capability {
-    /// A portable export or backup of the computer.
-    Export,
     /// The graphical desktop and what runs on it.
     Desktop,
     /// A checkpoint that carries the memory and running processes. A container's checkpoints are
@@ -23,8 +20,7 @@ pub enum Capability {
 }
 
 impl Capability {
-    pub const ALL: [Capability; 3] = [
-        Capability::Export,
+    pub const ALL: [Capability; 2] = [
         Capability::Desktop,
         Capability::MemorySnapshots,
     ];
@@ -32,7 +28,6 @@ impl Capability {
     /// The name the app uses for the action.
     pub const fn id(self) -> &'static str {
         match self {
-            Capability::Export => "export",
             Capability::Desktop => "desktop",
             Capability::MemorySnapshots => "memorySnapshots",
         }
@@ -41,14 +36,12 @@ impl Capability {
     /// The verb of the refusal: "Silo cannot <verb> a container computer yet."
     pub const fn verb(self) -> &'static str {
         match self {
-            Capability::Export => "export or back up",
             Capability::Desktop => "give a desktop to",
             Capability::MemorySnapshots => "save the memory of",
         }
     }
 
-    /// Whether the container kind does this yet. Export is phase CT6; the desktop (and computer
-    /// use with it) is CT5. A checkpoint never carries a container's memory.
+    /// Whether the container kind does this. A checkpoint never carries a container's memory.
     pub const fn container_has(self) -> bool {
         matches!(self, Capability::Desktop)
     }
@@ -139,9 +132,10 @@ mod tests {
             );
         }
         assert!(require_in(home.path(), "box", Capability::Desktop).is_ok());
-        assert!(require_in(home.path(), "box", Capability::Export)
-            .unwrap_err()
-            .contains("cannot export or back up a container computer yet"));
+        assert_eq!(
+            require_in(home.path(), "box", Capability::MemorySnapshots).unwrap_err(),
+            "Silo cannot save the memory of a container computer yet. Use a virtual machine computer for this."
+        );
     }
 
     #[test]
@@ -160,8 +154,8 @@ mod tests {
         for capability in Capability::ALL {
             assert_eq!(ids.contains(&capability.id()), !capability.container_has());
         }
-        assert_eq!(ids, ["export", "memorySnapshots"]);
-        // The desktop and computer use are CT5's: a container passes the check.
+        assert_eq!(ids, ["memorySnapshots"]);
+        // The desktop, computer use and export: a container passes the check.
         assert!(Capability::Desktop.container_has());
         // The app reads the same list from this file.
         let app: Vec<String> = serde_json::from_str(include_str!(

@@ -85,7 +85,7 @@ pub struct Snapshot {
 impl Snapshot {
     pub fn new(group: &str, name: &str, layers: Vec<String>, template: ComputerRecord) -> Self {
         Self {
-            snapshot_id: format!("snap_{}", &uuid::Uuid::new_v4().simple().to_string()[..16]),
+            snapshot_id: format!("snap_{}", uuid::Uuid::new_v4().simple()),
             group: group.to_owned(),
             name: name.to_owned(),
             created_ms: now_ms(),

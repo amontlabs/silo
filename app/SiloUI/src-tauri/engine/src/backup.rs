@@ -29,7 +29,10 @@ const MAGIC: &[u8; 16] = b"SILO-BACKUP\0\0\0\0\0";
 /// Format 5: a computer's guest image may travel by reference (`imageEmbedded: false` with its
 /// `imageDigest`) and a fork-time record may follow the payloads. An archive that needs neither
 /// is still written as format 4, which older Silo builds read.
-const FORMAT_VERSION: u32 = 5;
+const FORMAT_VERSION: u32 = 6;
+/// Format 6: a computer may be a container computer, whose payload is its layers (see
+/// `containers::archive`). Only an archive that holds one is written as format 6.
+const CONTAINER_FORMAT_VERSION: u32 = 6;
 const OLDEST_READABLE_FORMAT_VERSION: u32 = 4;
 /// The largest compressed fork-time record an archive carries or an import accepts: what a
 /// capture reads back from a computer (`collect::Options::max_compressed_bytes`).
@@ -113,7 +116,60 @@ impl MsbRunner for SystemMsbRunner {
         timeout: Duration,
         cancellation: &Cancellation,
     ) -> Result<CommandOutput, BackupError> {
-        run_msb_process(command, arguments, timeout, cancellation, TERMINATE_GRACE)
+        let paths = command.runtime_paths();
+        match crate::containers::route(&paths, arguments) {
+            crate::containers::Route::Runtime => {
+                run_msb_process(command, arguments, timeout, cancellation, TERMINATE_GRACE)
+            }
+            crate::containers::Route::Container => {
+                let (program, leading) = crate::containers::runtime_invocation(&paths);
+                run_process(
+                    &program,
+                    &leading,
+                    command,
+                    arguments,
+                    timeout,
+                    cancellation,
+                    TERMINATE_GRACE,
+                )
+            }
+            crate::containers::Route::MergeList => {
+                let mut output =
+                    run_msb_process(command, arguments, timeout, cancellation, TERMINATE_GRACE)?;
+                if output.status.success() {
+                    let merged = crate::containers::merge_list(
+                        &paths,
+                        arguments,
+                        crate::runtime::CommandOutput {
+                            stdout: output.stdout,
+                            stderr: output.stderr,
+                        },
+                    )
+                    .map_err(|error| BackupError::CommandFailed {
+                        operation: "Reading the container computers".into(),
+                        detail: error.to_string(),
+                    })?;
+                    output.stdout = merged.stdout;
+                    output.stderr = merged.stderr;
+                }
+                Ok(output)
+            }
+        }
+    }
+}
+
+impl MsbCommand {
+    /// The runtime paths the container runtime reads (its home), for routing a command.
+    fn runtime_paths(&self) -> crate::runtime::RuntimePaths {
+        crate::runtime::RuntimePaths {
+            guest_image: PathBuf::new(),
+            executable: self.executable.clone(),
+            home: self.home.clone(),
+            storage_home: self.storage_home.clone(),
+            library: self.library.clone(),
+            metadata: PathBuf::new(),
+            volumes: PathBuf::new(),
+        }
     }
 }
 
@@ -144,6 +200,28 @@ fn run_msb_process(
     cancellation: &Cancellation,
     grace: Duration,
 ) -> Result<CommandOutput, BackupError> {
+    run_process(
+        &command.executable,
+        &[],
+        command,
+        arguments,
+        timeout,
+        cancellation,
+        grace,
+    )
+}
+
+/// Runs `program` (the runtime, or the container runtime command with its leading argument) with
+/// `arguments` in the runtime's environment, under the export and import time limits.
+fn run_process(
+    program: &Path,
+    leading: &[String],
+    command: &MsbCommand,
+    arguments: &[String],
+    timeout: Duration,
+    cancellation: &Cancellation,
+    grace: Duration,
+) -> Result<CommandOutput, BackupError> {
     if cancellation.cancelled() {
         return Err(BackupError::Cancelled);
     }
@@ -161,11 +239,12 @@ fn run_msb_process(
     } else {
         None
     };
-    let mut process = crate::runtime::runtime_command(&command.executable);
+    let mut process = crate::runtime::runtime_command(program);
     if let Some(lock) = &worker_lock {
         inherit_worker_lock(&mut process, lock);
     }
     let mut child = process
+        .args(leading)
         .args(arguments)
         .env("MSB_HOME", &command.home)
         .env("MSB_PATH", &command.executable)
@@ -521,6 +600,27 @@ fn leaves_image_out(pinned_image: Option<&PinnedImageRef>, runtime_config: &Valu
             .is_none_or(|digest| digest.as_str() == Some(pinned.manifest_digest.as_str()))
 }
 
+/// A captured checkpoint as the runtime commands name it: the folder MicroSandbox keeps it in,
+/// or `group:name` for a container computer's.
+enum CapturedRef {
+    Path(PathBuf),
+    Container(String),
+}
+
+impl CapturedRef {
+    fn argument(&self) -> String {
+        match self {
+            Self::Path(path) => path.to_string_lossy().into_owned(),
+            Self::Container(selector) => selector.clone(),
+        }
+    }
+}
+
+/// Whether a runtime configuration describes a container computer (the label its creation sets).
+fn is_container_row(runtime_config: &Value) -> bool {
+    crate::containers::is_container_config(runtime_config)
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct BackupResult {
     pub(crate) created_at_ms: u64,
@@ -714,6 +814,9 @@ pub(crate) struct BackupService<R = SystemMsbRunner> {
     max_archive_bytes: u64,
     /// Bytes available to this account on the volume holding a path.
     free_space: fn(&Path) -> io::Result<u64>,
+    /// Whether this device can run a container computer, asked before a container import
+    /// copies anything.
+    container_host: fn() -> Result<(), crate::runtime::RuntimeError>,
 }
 
 impl BackupService<SystemMsbRunner> {
@@ -732,6 +835,7 @@ impl<R: MsbRunner> BackupService<R> {
             command_timeout: DEFAULT_COMMAND_TIMEOUT,
             max_archive_bytes: DEFAULT_MAX_ARCHIVE_BYTES,
             free_space: available_bytes,
+            container_host: crate::containers::archive::require_container_host,
         }
     }
 
@@ -809,15 +913,6 @@ impl<R: MsbRunner> BackupService<R> {
         }
         let _guard = self.begin()?;
         validate_backup_request(&request)?;
-        // The snapshots below go straight to MicroSandbox, which does not know a container.
-        for source in &request.sources {
-            crate::containers::capability::require_in(
-                &self.command.home,
-                &source.name,
-                crate::containers::capability::Capability::Export,
-            )
-            .map_err(BackupError::InvalidRequest)?;
-        }
         fs::create_dir_all(&self.scratch_root)?;
         self.check_export_space(&request, cancellation)?;
         let stage = self.staging_directory("backup-")?;
@@ -829,7 +924,14 @@ impl<R: MsbRunner> BackupService<R> {
             validate_computer_name(&source.name)?;
             let mut runtime_config = source.runtime_config.clone();
             let mut computer_configuration = source.computer_configuration.clone();
-            portable_export_network(&source.name, &mut runtime_config)?;
+            let container = is_container_row(&runtime_config);
+            if container {
+                // A container's network is the gateway's, not MicroSandbox's profile; an import
+                // starts from the deny-all policy whatever the source had.
+                runtime_config["network"] = imported_deny_network_value();
+            } else {
+                portable_export_network(&source.name, &mut runtime_config)?;
+            }
             validate_export_configs(&source.name, &runtime_config, &computer_configuration)?;
             let snapshot_group = source.snapshot_group.clone();
             // Capture, verification and saving read the computer's disks.
@@ -845,20 +947,23 @@ impl<R: MsbRunner> BackupService<R> {
                 // a state export captures the computer's current disk first.
                 let snapshot = if let Some(member) = &source.existing_member {
                     let snapshot =
-                        self.captured_snapshot_path(&snapshot_group, member, cancellation)?;
+                        self.captured_snapshot_ref(&snapshot_group, member, cancellation)?;
                     // Describe the checkpoint as it was captured, not the
-                    // computer as it is now (E-29).
-                    apply_captured_layout(
-                        &source.name,
-                        &read_snapshot_descriptor(&snapshot)?,
-                        &mut runtime_config,
-                        &mut computer_configuration,
-                    )?;
-                    validate_export_configs(
-                        &source.name,
-                        &runtime_config,
-                        &computer_configuration,
-                    )?;
+                    // computer as it is now (E-29). A container's checkpoint has no
+                    // descriptor: its disks cannot be resized, so it is the computer's own.
+                    if let CapturedRef::Path(path) = &snapshot {
+                        apply_captured_layout(
+                            &source.name,
+                            &read_snapshot_descriptor(path)?,
+                            &mut runtime_config,
+                            &mut computer_configuration,
+                        )?;
+                        validate_export_configs(
+                            &source.name,
+                            &runtime_config,
+                            &computer_configuration,
+                        )?;
+                    }
                     snapshot
                 } else {
                     let entries =
@@ -900,15 +1005,12 @@ impl<R: MsbRunner> BackupService<R> {
                     )?;
                     // Capture advances MicroSandbox's source lineage. Its ancestor must
                     // remain in the native snapshot store even if archive writing fails.
-                    self.captured_snapshot_path(&snapshot_group, &snapshot_name, cancellation)?
+                    self.captured_snapshot_ref(&snapshot_group, &snapshot_name, cancellation)?
                 };
+                let snapshot = snapshot.argument();
                 self.require_success_with(
                     "Verifying captured computer disk",
-                    &[
-                        "snapshot".into(),
-                        "verify".into(),
-                        snapshot.to_string_lossy().into_owned(),
-                    ],
+                    &["snapshot".into(), "verify".into(), snapshot.clone()],
                     data_timeout,
                     cancellation,
                 )?;
@@ -925,10 +1027,13 @@ impl<R: MsbRunner> BackupService<R> {
                 let mut save_arguments = vec![
                     "snapshot".into(),
                     "save".into(),
-                    snapshot.to_string_lossy().into_owned(),
+                    snapshot,
                     payload_path.to_string_lossy().into_owned(),
                 ];
-                if !leaves_image_out(request.pinned_image.as_ref(), &runtime_config) {
+                // A container's layers sit on the guest image and the file never carries it.
+                if !container
+                    && !leaves_image_out(request.pinned_image.as_ref(), &runtime_config)
+                {
                     save_arguments.push("--with-image".into());
                 }
                 self.require_success_with(
@@ -940,6 +1045,21 @@ impl<R: MsbRunner> BackupService<R> {
                 Ok::<_, BackupError>(payload_path)
             })();
             let payload_path = capture_result?;
+            // The guest image a row leaves out, and the build the importing Silo must have.
+            let lean = container || leaves_image_out(request.pinned_image.as_ref(), &runtime_config);
+            let image_digest = if container {
+                let header = crate::containers::archive::read_header(&payload_path)
+                    .map_err(|error| BackupError::InvalidRequest(error.to_string()))?;
+                crate::containers::archive::require_pinned_image(&header)
+                    .map_err(|error| BackupError::InvalidRequest(error.to_string()))?;
+                Some(header.template.image_digest)
+            } else {
+                request
+                    .pinned_image
+                    .as_ref()
+                    .filter(|_| lean)
+                    .map(|pinned| pinned.manifest_digest.clone())
+            };
             let (payload, payload_size) = open_payload(&payload_path, self.max_archive_bytes)?;
             total_payload_bytes = total_payload_bytes
                 .checked_add(payload_size)
@@ -965,6 +1085,7 @@ impl<R: MsbRunner> BackupService<R> {
                 computer_configuration,
                 payload,
                 payload_size,
+                image_digest,
             ));
         }
 
@@ -980,8 +1101,7 @@ impl<R: MsbRunner> BackupService<R> {
             computers: payloads
                 .iter()
                 .map(
-                    |(source, runtime_config, computer_configuration, _, payload_size)| {
-                        let lean = leaves_image_out(request.pinned_image.as_ref(), runtime_config);
+                    |(source, runtime_config, computer_configuration, _, payload_size, digest)| {
                         PackageComputer {
                             name: source.name.clone(),
                             runtime_config: runtime_config.clone(),
@@ -991,12 +1111,8 @@ impl<R: MsbRunner> BackupService<R> {
                             payload_sha256: pending_digest(),
                             // Format 3 keeps this field; MicroSandbox's snapshot carries the disks.
                             volumes: Vec::new(),
-                            image_embedded: !lean,
-                            image_digest: request
-                                .pinned_image
-                                .as_ref()
-                                .filter(|_| lean)
-                                .map(|pinned| pinned.manifest_digest.clone()),
+                            image_embedded: digest.is_none(),
+                            image_digest: digest.clone(),
                         }
                     },
                 )
@@ -1006,7 +1122,7 @@ impl<R: MsbRunner> BackupService<R> {
         let records = attach_fork_records(&mut manifest, &request.fork_records)?;
         let archive_payloads = payloads
             .into_iter()
-            .map(|(_, _, _, payload, _)| payload)
+            .map(|(_, _, _, payload, _, _)| payload)
             .collect::<Vec<_>>();
         let size_bytes = write_immutable_package_with_records(
             &request.destination,
@@ -1110,12 +1226,12 @@ impl<R: MsbRunner> BackupService<R> {
         Ok(())
     }
 
-    fn captured_snapshot_path(
+    fn captured_snapshot_ref(
         &self,
         group: &str,
         name: &str,
         cancellation: &Cancellation,
-    ) -> Result<PathBuf, BackupError> {
+    ) -> Result<CapturedRef, BackupError> {
         let entries = self.snapshot_index("Locating captured computer disk", cancellation)?;
         let mut matches = entries.iter().filter(|entry| {
             entry["group"] == group && entry["name"] == name && entry["availability"] == "ready"
@@ -1128,7 +1244,12 @@ impl<R: MsbRunner> BackupService<R> {
                     "The runtime did not publish exactly one ready captured checkpoint.".into(),
                 )
             })?;
-        self.member_artifact(entry, group)
+        // A container's checkpoint has no folder in MicroSandbox's store: the runtime names it
+        // by `group:name`.
+        if entry["artifact_path"].is_null() {
+            return Ok(CapturedRef::Container(format!("{group}:{name}")));
+        }
+        self.member_artifact(entry, group).map(CapturedRef::Path)
     }
 
     /// The canonical artifact directory of an indexed member, confined to
@@ -1513,6 +1634,17 @@ impl<R: MsbRunner> BackupService<R> {
         mode: PayloadMode<'_>,
     ) -> Result<ArchiveInspection, BackupError> {
         let package = read_and_verify_package(archive, self.max_archive_bytes, cancellation, mode)?;
+        // A file with a container computer is no use to a device that cannot run one: say so
+        // when it is chosen, not after it has been read.
+        if package
+            .manifest
+            .computers
+            .iter()
+            .any(|computer| is_container_row(&computer.runtime_config))
+        {
+            (self.container_host)()
+                .map_err(|error| BackupError::InvalidRequest(error.to_string()))?;
+        }
         Ok(ArchiveInspection {
             created_at_ms: package.manifest.created_at_ms,
             size_bytes: package.size_bytes,
@@ -1576,7 +1708,18 @@ impl<R: MsbRunner> BackupService<R> {
             &described.manifest,
             &described.manifest.computers[described_source],
         )?;
-        if let Some((reference, digest)) = &described_image {
+        let described_container =
+            is_container_row(&described.manifest.computers[described_source].runtime_config);
+        if described_container {
+            // A container is not made of the MicroSandbox image the callback prepares: this
+            // device needs to be able to run containers and to pin the same guest image.
+            (self.container_host)()
+                .map_err(|error| BackupError::InvalidRequest(error.to_string()))?;
+            if let Some((_, digest)) = &described_image {
+                crate::containers::archive::require_pinned_digest(digest)
+                    .map_err(|error| BackupError::InvalidRequest(error.to_string()))?;
+            }
+        } else if let Some((reference, digest)) = &described_image {
             prepare_image(reference, digest)?;
         }
         drop(described);
@@ -1615,6 +1758,21 @@ impl<R: MsbRunner> BackupService<R> {
         } else {
             source.runtime_config.clone()
         };
+        let container = is_container_row(&runtime_config);
+        if container {
+            // What `msb restore` rebuilds from the descriptor, a container's start rebuilds from
+            // this header: it must be the computer the manifest was checked for.
+            let header = crate::containers::archive::read_header(payload_path)
+                .map_err(|error| BackupError::InvalidArchive(error.to_string()))?;
+            header
+                .matches(&runtime_config)
+                .map_err(BackupError::InvalidArchive)?;
+            if source.image_digest.as_deref() != Some(header.template.image_digest.as_str()) {
+                return Err(BackupError::InvalidArchive(
+                    "its container data uses another guest image than its settings".into(),
+                ));
+            }
+        }
         // The pre-scan measured exactly what the runtime will unpack; check
         // again now that the private copy is written.
         let needed = extracted
@@ -1686,17 +1844,22 @@ impl<R: MsbRunner> BackupService<R> {
         cancellation: &Cancellation,
     ) -> Result<String, BackupError> {
         let data_timeout = self.data_timeout(unpacked_bytes);
+        let mut load = vec![
+            "snapshot".into(),
+            "load".into(),
+            payload_path.to_string_lossy().into_owned(),
+            "--group".into(),
+            import_group.into(),
+            "--stage-id".into(),
+            import_group["silo-import-".len()..].into(),
+        ];
+        if is_container_row(runtime_config) {
+            load.push(crate::containers::args::LOAD_RUNTIME.0.into());
+            load.push(crate::containers::args::LOAD_RUNTIME.1.into());
+        }
         self.require_success_with(
             "Loading computer disks from the export file",
-            &[
-                "snapshot".into(),
-                "load".into(),
-                payload_path.to_string_lossy().into_owned(),
-                "--group".into(),
-                import_group.into(),
-                "--stage-id".into(),
-                import_group["silo-import-".len()..].into(),
-            ],
+            &load,
             data_timeout,
             cancellation,
         )?;
@@ -1777,13 +1940,17 @@ impl<R: MsbRunner> BackupService<R> {
         )?;
         // `msb restore` rebuilds the computer from this descriptor, not from the
         // export manifest Silo validated, so the two must agree (E-19).
-        let descriptor =
-            read_snapshot_descriptor(&self.member_artifact(head_member, import_group)?)?;
-        compare_loaded_descriptor(&descriptor, head_id, runtime_config).map_err(|detail| {
-            BackupError::InvalidArchive(format!(
-                "the loaded checkpoint does not match the export's settings: {detail}"
-            ))
-        })?;
+        // A container's checkpoint has no descriptor: its header was compared with the settings
+        // before anything was loaded.
+        if !head_member["artifact_path"].is_null() {
+            let descriptor =
+                read_snapshot_descriptor(&self.member_artifact(head_member, import_group)?)?;
+            compare_loaded_descriptor(&descriptor, head_id, runtime_config).map_err(|detail| {
+                BackupError::InvalidArchive(format!(
+                    "the loaded checkpoint does not match the export's settings: {detail}"
+                ))
+            })?;
+        }
         Ok(snapshot_member)
     }
 
@@ -1802,14 +1969,10 @@ impl<R: MsbRunner> BackupService<R> {
         }) {
             return Ok(false);
         }
-        let path = self.captured_snapshot_path(group, member, &cleanup)?;
+        let snapshot = self.captured_snapshot_ref(group, member, &cleanup)?;
         self.require_success_with(
             "Verifying interrupted export capture",
-            &[
-                "snapshot".into(),
-                "verify".into(),
-                path.to_string_lossy().into_owned(),
-            ],
+            &["snapshot".into(), "verify".into(), snapshot.argument()],
             self.command_timeout.min(CLEANUP_COMMAND_TIMEOUT),
             &cleanup,
         )?;
@@ -2590,28 +2753,47 @@ fn read_and_verify_payloads(
                         0
                     })
                     .min(DEFAULT_MAX_ARCHIVE_BYTES);
-                let (path, scan) = extract_scanned_payload(
-                    &mut file,
-                    computer.payload_size,
-                    &computer.payload_sha256,
-                    dir.join(format!("snapshot-{index}.tar.zst")),
-                    &label,
-                    ScanLimits {
-                        max_unpacked_bytes: unpack_budget,
-                        max_entries: MAX_SNAPSHOT_ENTRIES,
-                        max_sparse_bytes: largest_declared_disk(&computer.computer_configuration),
-                    },
-                    cancellation,
-                )
-                .map_err(|error| match error {
-                    BackupError::InsufficientSpace(_) => BackupError::InsufficientSpace(format!(
-                        "Importing {} needs more than the {} of free space available to Silo's runtime storage (keeping {} free).",
-                        computer.name,
-                        format_bytes(unpack_budget),
-                        format_bytes(FREE_SPACE_RESERVE)
-                    )),
-                    error => error,
-                })?;
+                let (path, scan) = if is_container_row(&computer.runtime_config) {
+                    // A container's layers are checked by the unpack that makes them, against
+                    // the free space it finds then; here the file is only hashed and kept.
+                    let path = extract_verified_payload(
+                        &mut file,
+                        computer.payload_size,
+                        &computer.payload_sha256,
+                        Some(dir.join(format!("container-{index}.payload"))),
+                        &label,
+                        cancellation,
+                    )?
+                    .ok_or_else(|| {
+                        BackupError::InvalidArchive("the container data was not written".into())
+                    })?;
+                    (path, PayloadScan::default())
+                } else {
+                    extract_scanned_payload(
+                        &mut file,
+                        computer.payload_size,
+                        &computer.payload_sha256,
+                        dir.join(format!("snapshot-{index}.tar.zst")),
+                        &label,
+                        ScanLimits {
+                            max_unpacked_bytes: unpack_budget,
+                            max_entries: MAX_SNAPSHOT_ENTRIES,
+                            max_sparse_bytes: largest_declared_disk(
+                                &computer.computer_configuration,
+                            ),
+                        },
+                        cancellation,
+                    )
+                    .map_err(|error| match error {
+                        BackupError::InsufficientSpace(_) => BackupError::InsufficientSpace(format!(
+                            "Importing {} needs more than the {} of free space available to Silo's runtime storage (keeping {} free).",
+                            computer.name,
+                            format_bytes(unpack_budget),
+                            format_bytes(FREE_SPACE_RESERVE)
+                        )),
+                        error => error,
+                    })?
+                };
                 extracted = Some(ExtractedPayload { index, path, scan });
             }
             Some(_) => {
@@ -3016,6 +3198,20 @@ fn validate_manifest(manifest: &PackageManifest) -> Result<(), BackupError> {
             "it uses format 5 fields in an earlier format".into(),
         ));
     }
+    if manifest
+        .computers
+        .iter()
+        .any(|computer| is_container_row(&computer.runtime_config))
+        && (manifest.schema_version < CONTAINER_FORMAT_VERSION
+            || manifest.runtime.name != "microsandbox"
+            || manifest.computers.iter().any(|computer| {
+                is_container_row(&computer.runtime_config) && computer.image_embedded
+            }))
+    {
+        return Err(BackupError::InvalidArchive(
+            "a container computer is recorded in a way only format 6 allows".into(),
+        ));
+    }
     if manifest.runtime.name != "microsandbox" && manifest.runtime.name != MIXED_RUNTIME_NAME {
         if manifest
             .computers
@@ -3115,6 +3311,15 @@ fn validate_linux_computer(computer: &PackageComputer) -> Result<(), BackupError
         .map_err(|error| BackupError::InvalidArchive(error.to_string()))?;
     validate_computer_configuration(&computer.name, &computer.computer_configuration)
         .map_err(|error| BackupError::InvalidArchive(error.to_string()))?;
+    // The settings and the data must agree on what kind of computer this is.
+    if is_container_row(&computer.runtime_config)
+        != (computer.computer_configuration.get("runtime").and_then(Value::as_str)
+            == Some("container"))
+    {
+        return Err(BackupError::InvalidArchive(
+            "the kind of computer its settings name is not the kind its data is".into(),
+        ));
+    }
     validate_package_volumes(&computer.volumes)?;
     validate_volume_contract(&computer.runtime_config, &computer.computer_configuration)
 }
@@ -3448,10 +3653,16 @@ fn validate_computer_configuration(name: &str, config: &Value) -> Result<(), Bac
         "workspaceStorageGiB",
         "runtimeStorageGiB",
     ];
-    if object.len() != FIELDS.len() + usize::from(object.contains_key("desktop"))
+    // `runtime` is absent for a MicroSandbox virtual machine and "container" for a container.
+    let optional = ["desktop", "runtime"];
+    if object.len()
+        != FIELDS.len() + optional.iter().filter(|key| object.contains_key(**key)).count()
         || object
             .keys()
-            .any(|key| key != "desktop" && !FIELDS.contains(&key.as_str()))
+            .any(|key| !optional.contains(&key.as_str()) && !FIELDS.contains(&key.as_str()))
+        || object
+            .get("runtime")
+            .is_some_and(|runtime| runtime.as_str() != Some("container"))
         || object.get("desktop").is_some_and(|desktop| {
             serde_json::from_value::<crate::desktop::DesktopConfiguration>(desktop.clone()).is_err()
         })
@@ -4452,16 +4663,24 @@ fn attach_fork_records(
         });
         readers.push(Box::new(file));
     }
-    // An archive that needs nothing from format 5 is written as format 4, so a Silo that
-    // predates format 5 can still read it.
-    if manifest.fork_records.is_empty()
+    // An archive is written in the oldest format that holds what it carries, so a Silo that
+    // predates a format can still read an archive that does not need it.
+    manifest.schema_version = if manifest
+        .computers
+        .iter()
+        .any(|computer| is_container_row(&computer.runtime_config))
+    {
+        CONTAINER_FORMAT_VERSION
+    } else if manifest.fork_records.is_empty()
         && manifest
             .computers
             .iter()
             .all(|computer| computer.image_embedded)
     {
-        manifest.schema_version = OLDEST_READABLE_FORMAT_VERSION;
-    }
+        OLDEST_READABLE_FORMAT_VERSION
+    } else {
+        5
+    };
     Ok(readers)
 }
 
@@ -4844,6 +5063,9 @@ mod tests {
         cancel_during_load: AtomicBool,
         invalid_import_head: AtomicBool,
         cancel_after_snapshot: AtomicBool,
+        /// Answers as the container runtime does: a checkpoint has no folder, and `save` writes
+        /// a container payload.
+        container: AtomicBool,
     }
 
     impl MsbRunner for FakeRunner {
@@ -4910,13 +5132,20 @@ mod tests {
                             ..success()
                         });
                     }
-                    let payload = self
-                        .saved_payload
-                        .lock()
-                        .unwrap()
-                        .clone()
-                        .unwrap_or_else(fake_snapshot_archive);
+                    let payload = if self.container.load(Ordering::Acquire) {
+                        container_payload()
+                    } else {
+                        self.saved_payload
+                            .lock()
+                            .unwrap()
+                            .clone()
+                            .unwrap_or_else(fake_snapshot_archive)
+                    };
                     fs::write(output, payload)?;
+                    Ok(success())
+                }
+                ["snapshot", "load", _, "--group", group, "--stage-id", id, "--runtime", "container"] => {
+                    assert_eq!(*id, &group["silo-import-".len()..]);
                     Ok(success())
                 }
                 ["snapshot", "load", _, "--group", group, "--stage-id", id] => {
@@ -4987,6 +5216,19 @@ mod tests {
                         .iter()
                         .rev()
                         .find(|call| call.get(1).is_some_and(|part| part == "load"))
+                        .filter(|_| self.container.load(Ordering::Acquire))
+                    {
+                        entries.push(serde_json::json!({
+                            "group": load[4],
+                            "name": "silo-backup-0-1-2",
+                            "availability": "ready",
+                            "snapshot_id": "snap_11111111111111111111111111111111",
+                            "artifact_path": null,
+                        }));
+                    } else if let Some(load) = calls
+                        .iter()
+                        .rev()
+                        .find(|call| call.get(1).is_some_and(|part| part == "load"))
                     {
                         let group = &load[4];
                         let artifact = |id: &str, descriptor: &Value| -> io::Result<PathBuf> {
@@ -5006,6 +5248,13 @@ mod tests {
                             "artifact_path": artifact("snap_00000000000000000000000000000000", &serde_json::json!({}))?}));
                         entries.push(serde_json::json!({"group":group,"name":"imported-member","availability":"ready","snapshot_id":"snap_11111111111111111111111111111111","digest":format!("sha256:{}", "b".repeat(64)),"parent_digest":"snap_00000000000000000000000000000000",
                             "artifact_path": artifact("snap_11111111111111111111111111111111", &head)?}));
+                    }
+                    if self.container.load(Ordering::Acquire) {
+                        for entry in &mut entries {
+                            if entry["group"].as_str().is_some_and(|group| !group.starts_with("silo-import-")) {
+                                entry["artifact_path"] = Value::Null;
+                            }
+                        }
                     }
                     let removed = self.removed.lock().unwrap();
                     entries.retain(|entry| {
@@ -5253,21 +5502,237 @@ mod tests {
         )
     }
 
+    /// `inspect`'s settings of a container computer called `dev`.
+    fn container_config() -> Value {
+        let mut inspected =
+            crate::containers::inspect_value("dev", &container_header().template, "Running", &[]);
+        // The runtime reports its settings with the computer's name inside.
+        inspected["config"]["name"] = "dev".into();
+        inspected["config"].clone()
+    }
+
+    fn container_header() -> crate::containers::archive::Header {
+        let mut template = crate::containers::layout::ComputerRecord {
+            schema_version: crate::containers::layout::RECORD_VERSION,
+            name: "dev".into(),
+            cpus: 4,
+            max_cpus: 6,
+            memory_mib: 16384,
+            max_memory_mib: 32768,
+            root_disk_mib: 81920,
+            workspace_mib: 61440,
+            labels: vec![
+                ("silo.managed".into(), "true".into()),
+                ("silo.runtime".into(), "container".into()),
+            ],
+            env: Vec::new(),
+            image_digest: crate::containers::image::pinned().unwrap().image_digest,
+            image_reference: "alpine:3.20".into(),
+            layers: Vec::new(),
+            upper: String::new(),
+            created_ms: 1,
+            started_once: true,
+            secrets: Vec::new(),
+            github: false,
+        };
+        template.started_once = false;
+        crate::containers::archive::Header {
+            name: "silo-backup-0-1-2".into(),
+            template,
+            layers: 1,
+        }
+    }
+
+    /// What `snapshot save` of a container writes: the header and one (here empty) layer.
+    fn container_payload() -> Vec<u8> {
+        container_payload_of(&container_header())
+    }
+
+    fn container_payload_of(header: &crate::containers::archive::Header) -> Vec<u8> {
+        let json = serde_json::to_vec(header).unwrap();
+        let mut file = crate::containers::archive::MAGIC.to_vec();
+        file.extend_from_slice(&(json.len() as u32).to_be_bytes());
+        file.extend_from_slice(&json);
+        file.extend_from_slice(&0u64.to_be_bytes());
+        file
+    }
+
+    fn container_computer_configuration() -> Value {
+        let mut configuration = computer_configuration("dev");
+        configuration["runtime"] = "container".into();
+        configuration
+    }
+
+    fn export_container(service: &BackupService<FakeRunner>, destination: PathBuf) -> Result<BackupResult, BackupError> {
+        service.runner.container.store(true, Ordering::Release);
+        service.create_backup(
+            BackupRequest {
+                destination,
+                sources: vec![BackupSource {
+                    name: "dev".into(),
+                    snapshot_group: "dev".into(),
+                    was_running: true,
+                    runtime_config: container_config(),
+                    computer_configuration: container_computer_configuration(),
+                    existing_member: None,
+                }],
+                ..Default::default()
+            },
+            &Cancellation::default(),
+        )
+    }
+
     #[test]
-    fn exporting_a_container_computer_is_refused_before_anything_is_staged_or_run() {
+    fn a_container_computer_exports_by_name_without_its_image_in_format_6() {
         let temp = tempfile::tempdir().unwrap();
         let service = service(&temp, FakeRunner::default());
-        crate::containers::capability::make_container(&temp.path().join("home"), "dev");
-        let error = create_one(&service, temp.path().join("dev.silo-backup"), true).unwrap_err();
-        assert!(
-            error
-                .to_string()
-                .contains("cannot export or back up a container computer yet"),
-            "{error}"
-        );
-        assert!(!service.scratch_root.exists(), "a staging folder was made");
-        assert!(!temp.path().join("dev.silo-backup").exists());
-        assert!(service.runner.calls.lock().unwrap().is_empty(), "the runtime ran");
+        let destination = temp.path().join("dev.silo-backup");
+        export_container(&service, destination.clone()).unwrap();
+        let calls = service.runner.calls.lock().unwrap().clone();
+        let capture = calls.iter().find(|call| call[1] == "create").unwrap();
+        let member = capture[2].clone();
+        // The checkpoint is named by `group:member`, not by a folder, and the file never carries
+        // the image.
+        let selector = format!("dev:{member}");
+        assert!(calls.iter().any(|call| call[..] == ["snapshot", "verify", selector.as_str()]));
+        let save = calls.iter().find(|call| call[1] == "save").unwrap();
+        assert_eq!(save[2], selector);
+        assert!(!save.contains(&"--with-image".to_owned()), "{save:?}");
+        let manifest = manifest_of(&destination);
+        assert_eq!(manifest.schema_version, 6);
+        let row = &manifest.computers[0];
+        assert!(!row.image_embedded);
+        assert_eq!(row.image_digest.as_deref(), Some(container_header().template.image_digest.as_str()));
+        assert!(is_container_row(&row.runtime_config));
+    }
+
+    #[test]
+    fn a_virtual_machine_export_is_still_written_in_the_older_formats() {
+        let temp = tempfile::tempdir().unwrap();
+        let service = service(&temp, FakeRunner::default());
+        let destination = temp.path().join("dev.silo-backup");
+        create_one(&service, destination.clone(), false).unwrap();
+        assert_eq!(manifest_of(&destination).schema_version, 4);
+    }
+
+    #[test]
+    fn a_container_export_of_another_guest_image_is_refused_before_a_file_is_made() {
+        let temp = tempfile::tempdir().unwrap();
+        let runner = FakeRunner::default();
+        runner.container.store(true, Ordering::Release);
+        let service = service(&temp, runner);
+        let destination = temp.path().join("dev.silo-backup");
+        let pinned = crate::containers::image::pinned().unwrap().image_digest;
+        assert!(crate::containers::archive::require_pinned_digest(&pinned).is_ok());
+        let other = format!("sha256:{}", "0".repeat(64));
+        let error = crate::containers::archive::require_pinned_digest(&other).unwrap_err();
+        assert!(error.to_string().contains("different image"), "{error}");
+        drop(service);
+        assert!(!destination.exists());
+    }
+
+    #[test]
+    fn a_container_archive_is_imported_through_the_container_runtime_and_refused_where_none_runs() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut service = service(&temp, FakeRunner::default());
+        let destination = temp.path().join("dev.silo-backup");
+        export_container(&service, destination.clone()).unwrap();
+        service.container_host = || Err(crate::runtime::RuntimeError::Invalid("no containers here".into()));
+        let error = service
+            .inspect_archive(&destination, &Cancellation::default())
+            .unwrap_err();
+        assert!(error.to_string().contains("no containers here"), "{error}");
+        let before = service.runner.calls.lock().unwrap().len();
+        let error = service
+            .prepare_restore(restore_request(destination.clone()), &Cancellation::default())
+            .err()
+            .unwrap();
+        assert!(error.to_string().contains("no containers here"), "{error}");
+        // Nothing was copied or loaded.
+        let calls = service.runner.calls.lock().unwrap().clone();
+        assert!(calls[before..].iter().all(|call| call[1] != "load"), "{calls:?}");
+        assert!(fs::read_dir(&service.scratch_root).unwrap().all(|entry| {
+            fs::read_dir(entry.unwrap().path()).map(|mut dir| dir.next().is_none()).unwrap_or(true)
+        }));
+
+        service.container_host = || Ok(());
+        let restored = service
+            .prepare_restore(restore_request(destination), &Cancellation::default())
+            .unwrap();
+        assert_eq!(restored.snapshot_member, "silo-backup-0-1-2");
+        assert!(restored.snapshot_group.starts_with("silo-import-"));
+        let load = import_group_calls(&service, "load");
+        assert_eq!(load.len(), 1);
+        assert!(load[0].ends_with(&["--runtime".to_owned(), "container".to_owned()]), "{load:?}");
+    }
+
+    #[test]
+    fn a_container_archive_whose_data_differs_from_its_settings_is_refused() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut service = service(&temp, FakeRunner::default());
+        service.container_host = || Ok(());
+        let destination = temp.path().join("dev.silo-backup");
+        export_container(&service, destination.clone()).unwrap();
+        // The file is rebuilt with data that makes a larger computer than its manifest promises.
+        let mut manifest = manifest_of(&destination);
+        let mut header = container_header();
+        header.template.memory_mib = 32768;
+        let payload = container_payload_of(&header);
+        let rewritten = temp.path().join("rewritten.silo-backup");
+        manifest.computers[0].payload_size = payload.len() as u64;
+        let payload_file = temp.path().join("payload");
+        fs::write(&payload_file, &payload).unwrap();
+        write_immutable_package_with_records(
+            &rewritten,
+            &mut manifest,
+            vec![File::open(&payload_file).unwrap()],
+            Vec::new(),
+            &Cancellation::default(),
+            None,
+            available_bytes,
+        )
+        .unwrap();
+        let error = service
+            .prepare_restore(restore_request(rewritten), &Cancellation::default())
+            .err()
+            .unwrap();
+        assert!(error.to_string().contains("does not match its settings"), "{error}");
+    }
+
+    #[test]
+    fn settings_and_data_must_agree_on_the_kind_of_computer() {
+        let temp = tempfile::tempdir().unwrap();
+        let service = service(&temp, FakeRunner::default());
+        let destination = temp.path().join("dev.silo-backup");
+        export_container(&service, destination.clone()).unwrap();
+        let mut manifest = manifest_of(&destination);
+        assert_eq!(manifest.computers[0].computer_configuration["runtime"], "container");
+        manifest.computers[0].computer_configuration["runtime"] = Value::Null;
+        manifest.computers[0]
+            .computer_configuration
+            .as_object_mut()
+            .unwrap()
+            .remove("runtime");
+        assert!(validate_manifest(&manifest).unwrap_err().to_string().contains("kind of computer"));
+        let mut other = manifest_of(&destination);
+        other.computers[0].computer_configuration["runtime"] = "vm".into();
+        assert!(validate_manifest(&other).is_err());
+    }
+
+    #[test]
+    fn a_format_5_file_cannot_hold_a_container_computer() {
+        let temp = tempfile::tempdir().unwrap();
+        let service = service(&temp, FakeRunner::default());
+        let destination = temp.path().join("dev.silo-backup");
+        export_container(&service, destination.clone()).unwrap();
+        let mut manifest = manifest_of(&destination);
+        manifest.schema_version = 5;
+        let error = validate_manifest(&manifest).unwrap_err();
+        assert!(error.to_string().contains("only format 6 allows"), "{error}");
+        manifest.schema_version = 6;
+        manifest.computers[0].image_embedded = true;
+        manifest.computers[0].image_digest = None;
+        assert!(validate_manifest(&manifest).is_err());
     }
 
     #[test]
@@ -6579,7 +7044,7 @@ mod tests {
                 "{message}"
             );
         }
-        let message = with_format(6);
+        let message = with_format(FORMAT_VERSION + 1);
         assert!(
             message.contains("newer version of Silo") && message.contains("Update Silo"),
             "{message}"

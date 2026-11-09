@@ -11,6 +11,7 @@
 //! Layout and design: [`layout`], [`oci`] (the hardening baseline), [`image`] (the pinned image,
 //! unpacked once per digest) and [`lifecycle`] (the holder, the gateway and `crun`).
 
+pub mod archive;
 pub mod args;
 pub mod capability;
 pub mod cli;
@@ -33,6 +34,18 @@ pub mod tools;
 pub mod users;
 
 pub use args::RUNTIME_LABEL;
+
+/// Whether a computer's runtime configuration (the `inspect` answer an export records) is a
+/// container computer's: it carries the label its creation sets.
+pub fn is_container_config(config: &Value) -> bool {
+    RUNTIME_LABEL.split_once('=').is_some_and(|(key, value)| {
+        config
+            .get("labels")
+            .and_then(|labels| labels.get(key))
+            .and_then(Value::as_str)
+            == Some(value)
+    })
+}
 
 /// For the in-guest client of the computer `name`, the id mapping its bridge folder's files are
 /// owned by (`guest_client::Spool::new` takes it); `None` when the runtime home holds no container
@@ -136,6 +149,14 @@ pub fn route(paths: &RuntimePaths, args: &[String]) -> Route {
         match args.get(1).map(String::as_str) {
             // A capture is routed by the computer it is taken from.
             Some("create") => {}
+            // A file does not say which runtime wrote it: the caller does.
+            Some("load") => {
+                return if args::loads_container(args) {
+                    Route::Container
+                } else {
+                    Route::Runtime
+                }
+            }
             // Without a group the answer is MicroSandbox's with the container checkpoints added.
             Some("list") if args::snapshot_group(args).is_none() => {
                 return if layout.names().is_empty() {
@@ -212,7 +233,15 @@ pub fn run(
             collect_layers(paths);
             Ok(output(String::new()))
         }
-        Command::SnapshotHead => Ok(output(json!({"head": null}).to_string())),
+        Command::SnapshotHead { group } => {
+            snapshots::head(paths, &group).map(|value| output(value.to_string()))
+        }
+        Command::SnapshotSave(save) => {
+            archive::save(paths, &save).map(|()| output(String::new()))
+        }
+        Command::SnapshotLoad(load) => {
+            archive::load(paths, &load).map(|()| output(String::new()))
+        }
         Command::Restore(restore) => {
             snapshots::make_fork(paths, &restore)?;
             start(paths, &restore.name, timeout, material).map(|()| output(String::new()))
@@ -505,7 +534,7 @@ pub fn inspect_value(
             "memory_mib": record.memory_mib,
             "max_memory_mib": record.max_memory_mib,
         },
-        "image": {"Oci": {"reference": record.image_reference, "root_disk": {"size_mib": record.root_disk_mib}}},
+        "image": {"Oci": {"reference": record.image_reference, "root_disk": {"kind": "managed", "size_mib": record.root_disk_mib}}},
         "mounts": [{
             "guest": crate::runtime::WORKSPACE_MOUNT,
             "type": "Owned",
@@ -625,8 +654,8 @@ fn start(
 
 /// Starts the computer's desktop the way a virtual machine's boot does, in the background: the
 /// start does not wait for it, and a desktop that does not start never fails the computer (the
-/// desktop's status says `failed`, see [`desktop::boot_command`]). The command ends by itself when
-/// the computer stops.
+/// desktop's status says `failed`, see [`desktop::boot_command`]). The command is bounded by
+/// [`desktop::BOOT_TIMEOUT`], and it ends sooner if the computer stops.
 #[cfg(target_os = "linux")]
 fn start_desktop(paths: &RuntimePaths, name: &str) {
     let paths = paths.clone();

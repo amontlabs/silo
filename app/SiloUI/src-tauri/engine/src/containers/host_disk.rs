@@ -249,6 +249,7 @@ pub fn pass(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::AtomicBool;
     use std::time::{Duration, Instant};
 
     const GIB: u64 = 1 << 30;
@@ -502,7 +503,8 @@ mod tests {
 
     #[test]
     fn a_layer_that_could_not_be_measured_is_stopped_when_its_own_measurement_ends() {
-        let started = Instant::now();
+        let unknown_stopped = AtomicBool::new(false);
+        let slow_saw_it_stopped = AtomicBool::new(false);
         let stops = Mutex::new(Vec::new());
         let stopped = pass(
             0,
@@ -510,26 +512,31 @@ mod tests {
             vec!["slow".into(), "unknown".into(), "big".into()],
             |name| match name {
                 "slow" => {
-                    std::thread::sleep(Duration::from_millis(500));
+                    // This measurement ends only once the unmeasured layer has been stopped (or,
+                    // were it never stopped before the pass was over, after a long wait).
+                    let deadline = Instant::now() + Duration::from_secs(20);
+                    while !unknown_stopped.load(Ordering::SeqCst) && Instant::now() < deadline {
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+                    slow_saw_it_stopped
+                        .store(unknown_stopped.load(Ordering::SeqCst), Ordering::SeqCst);
                     sizes(20, 8)
                 }
                 "unknown" => unmeasured(8),
                 _ => sizes(30, 8),
             },
             |name, _| {
-                stops
-                    .lock()
-                    .unwrap()
-                    .push((name.to_owned(), started.elapsed()));
+                stops.lock().unwrap().push(name.to_owned());
+                if name == "unknown" {
+                    unknown_stopped.store(true, Ordering::SeqCst);
+                }
                 true
             },
         );
         assert_eq!(stopped, ["unknown", "big", "slow"]);
-        let stops = stops.into_inner().unwrap();
         // Each is stopped once, and the unmeasured one did not wait for the slow measurement.
-        assert_eq!(stops.len(), 3);
-        assert_eq!(stops[0].0, "unknown");
-        assert!(stops[0].1 < Duration::from_millis(250), "{stops:?}");
+        assert_eq!(stops.into_inner().unwrap(), ["unknown", "big", "slow"]);
+        assert!(slow_saw_it_stopped.load(Ordering::SeqCst));
     }
 
     #[test]

@@ -44,6 +44,17 @@ pub fn merge_list(
     })
 }
 
+/// `snapshot head GROUP`: the newest checkpoint of the group, `null` when it has none.
+pub fn head(paths: &RuntimePaths, group: &str) -> Result<Value, RuntimeError> {
+    let snapshots = Store::new(&Layout::new(&paths.home))
+        .list(Some(group))
+        .map_err(RuntimeError::Unavailable)?;
+    Ok(serde_json::json!({
+        "group": group,
+        "head": snapshots.last().map(|snapshot| snapshot.snapshot_id.clone()),
+    }))
+}
+
 pub fn verify(paths: &RuntimePaths, group: &str, name: &str) -> Result<(), RuntimeError> {
     let layout = Layout::new(&paths.home);
     let snapshot = Store::new(&layout).read(group, name).map_err(invalid)?;
@@ -414,10 +425,29 @@ mod tests {
         );
         assert_eq!(
             parse(&strings(&["snapshot", "head", "box", "--format", "json"])).unwrap(),
-            Command::SnapshotHead
+            Command::SnapshotHead { group: "box".into() }
+        );
+        assert_eq!(
+            parse(&strings(&["snapshot", "save", "box:c1", "/out/file"])).unwrap(),
+            Command::SnapshotSave(Box::new(super::super::args::SnapshotSave {
+                group: "box".into(),
+                name: "c1".into(),
+                file: "/out/file".into(),
+            }))
+        );
+        assert_eq!(
+            parse(&strings(&[
+                "snapshot", "load", "/in/file", "--group", "silo-import-ab", "--stage-id", "ab",
+                "--runtime", "container"
+            ]))
+            .unwrap(),
+            Command::SnapshotLoad(Box::new(super::super::args::SnapshotLoad {
+                file: "/in/file".into(),
+                group: "silo-import-ab".into(),
+            }))
         );
         assert!(matches!(
-            parse(&strings(&["snapshot", "save", "x", "y"])).unwrap(),
+            parse(&strings(&["snapshot", "bogus"])).unwrap(),
             Command::Unsupported { .. }
         ));
     }

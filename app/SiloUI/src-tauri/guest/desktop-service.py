@@ -607,6 +607,9 @@ def supervise_selkies_stream(state, account, environment, stopping, restart_requ
             if selkies_http_ready():
                 state['streamState'] = 'running'
                 write_selkies_state(state)
+                # A start that gave up waiting (a container's boot command) leaves this marker
+                # although the desktop came up afterwards.
+                (RUN / 'failed').unlink(missing_ok=True)
                 break
             try:
                 child.wait(timeout=0.2)
@@ -1362,7 +1365,7 @@ def main():
             marker = RUN / 'boot-id'
             if not marker.exists() or marker.read_text() != epoch:
                 (RUN / 'failed').unlink(missing_ok=True)
-                # Nothing of the previous boot runs, but /run is on the computer's disk.
+                # Nothing of the previous boot runs, so what it left in /run is stale.
                 reset_session_runtime()
                 marker.write_text(epoch)
         if action == 'status':

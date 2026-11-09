@@ -246,7 +246,7 @@ export function OverviewPage({ active = true, readOnly = false, notifyOperations
       ...(local && actions.readWorkspaceStorage ? [{ label: "Storage", icon: HardDrive, accessibleLabel: `Storage for ${configuration.name}`, onSelect: () => openComputer(configuration.id, "storage") }] : []),
       // Shown whenever the page shows its SSH tab.
       ...((source.sshAccess || actions.refreshSshAccess) && computerCan(configuration, "sshAccess") ? [{ label: "SSH", icon: KeyRound, accessibleLabel: `SSH for ${configuration.name}`, onSelect: () => openComputer(configuration.id, "access") }] : []),
-      ...(local && exportComputer && computerCan(configuration, "export") ? [{ label: "Export…", icon: Download, accessibleLabel: `Export ${configuration.name}`, disabled: configurationLocked || availability.busy || transferBusy || stale, onSelect: () => exportComputer(configuration.name) }] : []),
+      ...(local && exportComputer ? [{ label: "Export…", icon: Download, accessibleLabel: `Export ${configuration.name}`, disabled: configurationLocked || availability.busy || transferBusy || stale, onSelect: () => exportComputer(configuration.name) }] : []),
     ]
     const popovers: MenuPopovers = { ...forkPopovers(computer) }
     if (restartPrompt) popovers.restart = close => <ConfirmBody tone={restartPrompt.tone} title={restartPrompt.title} description={restartPrompt.description} confirmLabel={restartPrompt.confirmLabel} onClose={close} onConfirm={lifecycleLater(computer, "restart", true)} />
@@ -354,7 +354,7 @@ export function OverviewPage({ active = true, readOnly = false, notifyOperations
       onEditor: () => openFolderPicker(configuration.id),
       desktop: desktopAction(computer),
       lifecycleGuard: guard,
-      onCheckpointExport: exportComputer && computerCan(configuration, "export") ? (checkpoint: ComputerCheckpoint) => exportComputer(configuration.name, { id: checkpoint.id, name: checkpoint.name }) : undefined,
+      onCheckpointExport: exportComputer ? (checkpoint: ComputerCheckpoint) => exportComputer(configuration.name, { id: checkpoint.id, name: checkpoint.name }) : undefined,
       checkpointExportDisabled: transferBusy || backup?.state.availability === "unavailable",
       onCheckpointForkedAction: (name: string) => forkOpenAction(name, computer.device?.id),
       onCheckpointRestoredAction: () => ({ label: "Start", onClick: lifecycleLater(computer, "start", false) }),
