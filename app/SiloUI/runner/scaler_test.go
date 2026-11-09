@@ -295,6 +295,30 @@ func TestARunnerThatStaysSilentUntilTheReadyTimeoutIsReplaced(t *testing.T) {
 	}
 }
 
+// The command of a runner that never listened is still running when the helper gives up on it.
+// It must be drained and waited for like any other, or every failed start leaves a `silo exec`
+// process that is never reaped.
+func TestTheCommandOfARunnerThatNeverListenedIsReaped(t *testing.T) {
+	h := newHarness(t, harnessOptions{readyTimeout: 10 * time.Millisecond})
+	h.silo.output = func(n int) []string {
+		if n == 0 {
+			return []string{"Connected to GitHub", holdOpen}
+		}
+		return []string{"Listening for Jobs"}
+	}
+	h.scale(available(1))
+	if _, ok := h.silo.state("ci-silo-linux-00000001"); ok {
+		t.Fatal("the computer whose runner never listened must be deleted")
+	}
+	h.silo.mu.Lock()
+	silent := h.silo.runs[0]
+	h.silo.mu.Unlock()
+	waitFor(t, "the silent runner's command to be reaped", silent.waited.Load)
+	if got := h.status(); len(got) != 1 || got["ci-silo-linux-00000002"] != "idle" {
+		t.Fatalf("the end of the old command must not touch the new runner: %v", got)
+	}
+}
+
 func TestAfterTheLastAttemptTheFleetBacksOff(t *testing.T) {
 	h := newHarness(t, harnessOptions{})
 	h.silo.output = func(int) []string { return []string{"nothing useful"} }

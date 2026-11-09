@@ -1358,70 +1358,6 @@ checks passed; the failures were four product problems, all fixed afterwards (te
     own cgroup missed a `MemoryMax=` on silod's unit and could shrink the budget wrongly). Docs say that where the engine or the
     user's slice has a memory limit, or in a container or VM with less memory than it reports, `linuxBudget` must be set; the stale
     comment on `LinuxBudget` (zero now means the host default) is fixed.
-  - *Packaging:* `package-engine.py` builds `silo-runner` (`go build`, `CGO_ENABLED=0`, `GOOS=linux`, `GOARCH` of the
-    platform, `-X main.version=<engine version>`) and puts it in both Linux archives as `silo-runner`, with the Go modules'
-    licenses (checked in under `runner/licenses/`) in `resources/silo-runner-licenses/` and a notices section. The ELF
-    machine check covers it. The jobs that package a Linux archive (`linux-host.yml` x2, `containers-c1.yml`,
-    `engine-release.yml`) install Go from `runner/go.mod`; the release verification runs `silo-runner version`. Not in the macOS
-    engine archive (an embedding-app format; a Mac builds the helper with `go build`).
-  - *Service:* `silo-runner service register|unregister` (`service.go`) writes `~/.config/systemd/user/silo-runner.service` with
-    `After=`/`Wants=` the engine's unit (`-engine-unit` for a Dev engine), `Restart=on-failure`, `UMask=0077`,
-    `KillMode=mixed`, an optional `EnvironmentFile=-%E/silo-runner/env` for the token. **Chosen over a documented unit file**
-    because the unit needs canonical, systemd-quoted paths and a refusal to overwrite foreign files, the same reasons
-    `silod --service register` writes its own; about 150 lines, unit-tested. A user unit runs as the account of the user
-    manager, which is the account of the engine's socket; `silo-runner` also refuses euid 0.
-  - *Capacity:* on a Linux host (`GOOS=linux`, no `silo.device`) a `linuxBudget` field left out defaults to three quarters
-    of `MemTotal` and one computer per CPU. **Chosen over requiring it** so the safe setting does not depend on remembering
-    to write it; `MemTotal` and not `MemAvailable` so a restart with computers running computes the same budget. A budget
-    below one computer of the largest recipe, a `macos` scale set, and an unusable `/dev/kvm` (missing, or no permission:
-    what to do is in the message) stop startup. `silo-runner check -offline` does the host part with no GitHub; an empty
-    `tokenEnv` variable is named before any call.
-  - *Recipe:* `silo-linux` pins `RUNNER_SHA256_ARM64` and `RUNNER_SHA256_X64` (the digests of `linux-arm64` and `linux-x64`
-    2.338.2, from the release API) and picks one by `uname -m` while building. `ParsePin`/`WithPin` and the refresh handle
-    both: each digest comes from its own asset of the same release, and a release missing either changes nothing. The
-    Rust recipe test (`cli/tests/recipes.rs`) expects the two digests.
-  - *Docs:* CI runner guide "Linux hosts" (install, config, service, journal, capacity), threat-model bullets (the
-    credential on the host, the journal readers, root, KVM, both pins, the Linux budget), engine and release docs,
-    `examples/config-linux.yaml`, changeset (`silo-ui`: minor).
-- **Live check: what was and was not run.**
-  - *Not run:* `docs/forks-ci/checks/r2_linux_runner_check.sh`, the whole flow (runner for the machine's architecture, a
-    computer per job on KVM, deleted on success, kept on failure, runners removed at GitHub, the service and its journal).
-    It needs an admin token that CI must not hold, and the owner's Linux machine (10.77.77.2) was offline. **No job has
-    run through `silo-runner` on a Linux host, and the x86_64 runner recipe has never been built.**
-  - *Run by CI on KVM (no GitHub), `scripts/runner-host-e2e.sh` in the Linux host workflow:* the archive's `silo-runner` runs
-    on that architecture and reports the engine version; `check -offline` opens the real `/dev/kvm` and sizes the budget
-    from the host; a `macos` scale set is refused; `service register` against the real systemd user manager gives a unit
-    that is enabled, ordered after and wanting the engine's unit, passing `systemd-analyze --user verify`; the helper's
-    log (it stops for lack of a token) is in the user journal under this account's uid; starting the helper starts a stopped
-    engine; `service unregister` removes the unit and leaves the engine running. A fake GitHub was not built: the
-    runner program inside the computer needs the real service to reach "Listening for Jobs", so a stub of the scale set
-    endpoints could not honestly exercise a fork per job or runner deletion, which the Go fakes already cover.
-    (First run happens when the PR's checks run; see the PR.)
-- **Tests:** Go `go vet`, `gofmt`, `go test -race ./...` in `runner/`: 115 tests pass, 24 of them new (`host_test.go`,
-  `service_test.go`, and the architecture cases in `misc_test.go`): the service unit text and its quoting, register and
-  unregister calls, refusal of root and of foreign unit files, the default budget and its sources, KVM errors, the
-  macOS-scale-set refusal, the shipped recipe's two pins, the refresh moving both digests from their own assets, and a
-  recipe whose digests do not match its download. `test_package_engine.py` (the archive holds `silo-runner` and the licenses,
-  the ELF check, the Go build command per platform), `test_linux_host_workflow.py`, `test_engine_release_workflow.py`,
-  `test_workflow_pins.py`, `test_ci_native_changes.py` (no path change needed) pass; `cargo test -p silo-cli --test recipes`
-  passes with synthetic GitHub values; `shellcheck` is clean on `runner-host-e2e.sh`. Both Linux binaries were
-  cross-built on the Mac and are ELF x86-64 and AArch64. The classifier is unchanged: `runner/` stays skippable except
-  `recipes/`.
-- **Review fixes (round 1, same branch).**
-  - *Unit could not find `silo`:* the user manager's `PATH` lacks `~/.local/bin`, so `silo.path: silo` failed every call and the unit
-    restarted every 10 s. `service register` now resolves `silo.path` (`exec.LookPath` from the registering shell; an absolute path
-    must be an executable file; a relative path with a slash, or anything unresolvable, is refused) and writes it into
-    `ExecStart` as `run -config <file> -silo <absolute path>`; `run` takes `-silo`. Example config uses an absolute path and names
-    `silo-dev`. Tests: unit text, `ResolveSilo`, register refusal writes nothing. `runner-host-e2e.sh` also greps the unit.
-  - *Old single-arm64 recipe on an x86_64 host:* `ApplyHost` (start and `check`) parses each installed Linux recipe's pin and
-    refuses a single-architecture pin other than the host's `GOARCH`, naming `silo-runner install-recipes -replace`. New flag
-    `-replace` moves the existing recipe to `<name>.yaml.bak` and writes the shipped one. Upgrade notes in the guide.
-  - *0600 was only documented:* `SecretFileWarnings` warns (log at start; `warning:` lines in `check`, also `-offline`) when the App
-    key or `~/.config/silo-runner/env` is group- or world-readable, as ssh does for a key; it does not refuse. Threat model reworded
-    to "the guide makes them 0600 and the helper warns otherwise".
-  - *Default budget ignored cgroup limits:* the host default memory is capped by the tightest cgroup v2 `memory.max` of the helper's
-    own cgroup and its ancestors (log says so); docs say a shared or limited host should set `linuxBudget`; the stale comment on
-    `LinuxBudget` (zero now means the host default) is fixed.
   - *Packaging:* `go_build_runner` no longer leaves its `mkdtemp` directory (`main` builds in a `TemporaryDirectory`); the licence
     glob skips dotfiles and directories. Python tests for both.
   - *Tests:* `go vet` (also `GOOS=linux` amd64 and arm64), `gofmt`, `go test -race ./...`; `test_package_engine.py`,
@@ -1441,38 +1377,92 @@ checks passed; the failures were four product problems, all fixed afterwards (te
   serving the same recipe need two labels; (4) the default budget ignores memory the host's other services use, so on a
   shared machine set `linuxBudget`.
 
+#### Post-merge review: CI runner (R1 and R2, 9 Nov 2026)
+
+Review of `app/SiloUI/runner`, its CI wiring and its docs as they are on `main` after the container phases.
+
+- **Fixed: the command of a runner that never listened was never reaped** (`fleet.go` `onUpDone`). When the
+  runner did not print "Listening for Jobs" within `readyTimeout`, its `silo exec` command was still running and
+  nothing drained its output or waited for it: the helper interrupted it after deregistration and dropped it, so
+  every such failed start left a zombie process and the goroutine `os/exec` keeps per command, until the helper
+  exited. The command is now watched whenever the start returned one, ready or not. Test:
+  `TestTheCommandOfARunnerThatNeverListenedIsReaped` (failed before).
+- **Fixed: a running container computer did not count against the Linux budget** (`capacity.go`). CT2 made the
+  command line list container computers with the kind `container`; capacity counted only `linux`, so on a Linux
+  host the helper could start virtual machines into memory a container computer already used. Everything that is
+  not a macOS virtual machine now counts as a Linux computer. Test:
+  `TestARunningContainerComputerCountsAgainstTheLinuxBudget` (failed before).
+- **Fixed: docs that said the default budget reads cgroup limits.** The guide's configuration table and the
+  threat model said the default memory was the smaller of the machine's and a cgroup limit; the code reads
+  `MemTotal` only (the cgroup cap was dropped in R2's review). Both now say so. The R2 entry above had its
+  "Built", "Live check", "Tests" and review bullets twice, the second copy with the dropped cgroup behaviour; the
+  copy is removed. The public-repository refusal said "this Mac" on a Linux host; it says "this machine".
+- **Checked, no change:** one event loop writes the records and the ledger; the phases and the by-id rule; the JIT
+  configuration only on standard input (the CLI's `exec --stream --stdin` sends it in the request body and prints
+  a reattach hint on interrupt, so the runner in the computer outlives the command); one label per scale set;
+  `DisableUpdate` set on create and repaired on an existing set; the watchdog (the `scaleset` listener calls
+  `Scale` once per poll, also with a nil message); scale-up from a fresh list with pending demands; restart
+  adoption; delete on success and keep on failure; no checkpoint call anywhere in the helper; the private
+  repository and runner group check failing closed; the docs' statement that GitHub's own secrets and
+  `GITHUB_TOKEN` are not placeholders.
+- **Left for the owner:** (1) the private-repository check runs at start only, so a repository made public while
+  the helper runs is served until the next start; (2) a second Ctrl-C does not end a slow shutdown (the signal
+  stays caught); (3) the Resume section above still lists R2 as in progress; (4) no job has run through
+  `silo-runner` on a Linux host (unchanged from R2).
+
 ## Post-merge review
 
 ### Forks and sharing a computer as a file, VM computers (F2 #88, F3 #86, F4 #93; 9 Nov 2026)
 
 Read on `main` at `69742419`: the fork point and the desktop setting, `backup.rs`, `backup_controller.rs`,
 `changes/credentials.rs`, `transfer_area.rs`, `export_transfer.rs`, the `exports.*` handlers, the bridge's
-`exports.file` stream, `cli/src/share.rs` and the app's export dialog. No code behaviour was changed; nothing was
-run against a computer or an engine.
+`exports.file` stream, `cli/src/share.rs` and the app's export dialog. The review found the problems below; the
+fixes are in the same pull request (#105).
 
-- **Open, needs the owner's decision: an export can hold memory.** The rule is that no memory is carried into a
-  fork or an export. Forks keep it (a fork point is disks only and every fork starts from disks). Exports do not,
-  in three cases: a macOS computer exported while it runs (`macos_computers.rs` `create_archive` calls
-  `save_running` and adds `state.vzvmsave`), a macOS checkpoint that saved memory, and a Linux VM checkpoint
-  taken while the computer ran (`backup_at_paths` drops the checkpoint's scope and `snapshot save` of
-  MicroSandbox 0.7.6 writes a full checkpoint with its memory; read in its `archive.rs` at tag `v0.7.6`, not
-  seen in a file). No import uses the memory (`import_pending_restore_with_environment` records `state: "disk"`;
-  the macOS import's own message is "Import verifies it but starts the new computer from its disk"), so it is
-  only larger files and whatever the programs held in memory, which the login check does not look at. Both
-  behaviours are older than F3; F3 added `silo export --checkpoint` and F4 the same over Connections.
-  What a fix needs decided: on macOS the memory can simply be left out (a running export would take the disk-only
-  capture a fork point takes; not live-checked here, there is no macOS computer on the Dev engine); on Linux
-  MicroSandbox has no way to save a full checkpoint without its memory, so it is either refuse such a checkpoint
-  (most checkpoints are taken while the computer runs) or build a conversion. Until then the docs say what the
-  file holds.
-- **Docs corrected.** `docs/SiloUI-CLI.md` said "No memory is in any file" and `docs/THREAT-MODEL.md` "No memory is
-  ever carried into an export"; both are true of container computers only and now say so. The sharing sections of
-  both name the three cases and how to leave memory out. The threat model also says which folders the login check
-  lists (the `silo diff` walk in `changes/collect.sh`; `/workspace` is not one of them). `backup.rs`: the comment on
-  `FORMAT_VERSION` described format 5 while the constant is the newest readable format (6). The Resume section and
-  `PLAN.md` listed F4 as an open pull request.
-- **Seen, not changed (low; from reading the code):** two copies from another device to the same `-o` path at the same time share one
-  `<path>.part` (`export_transfer::create_part` removes the other's as a leftover), so the first to finish can
-  publish the second's unfinished file; it is complete once the second ends, and the second reports an error. A
-  transfer-area export leaves its "Export complete" result and a system notice on the owning device, naming a file
-  the controller then discards. `Area::open_for_read` keeps its used marker when the file is past the cap.
+- **Fixed: an export could hold memory.** The rule is that no memory is carried into a fork or an export. Forks
+  kept it (a fork point is disks only and every fork starts from disks). Exports did not, in three cases, and no
+  import ever used the memory (`import_pending_restore_with_environment` records `state: "disk"`; a macOS import
+  starts from the disk). All three now carry disks only:
+  - **A macOS computer exported while it runs.** `create_archive` called `save_running` and added
+    `state.vzvmsave`. It now takes the capture a fork point takes: the guest writes its disk out (`flush_disk`),
+    then the machine is paused while the disks are cloned (`pause_for_copy`). No memory is saved and no space is
+    reserved for it. An export whose flush fails stops before the pause, as a fork does.
+  - **A macOS checkpoint that saved memory.** Its disks are cloned and the saved memory stays in the
+    checkpoint's folder. The file names the checkpoint with the kind `disk`.
+  - **A Linux VM checkpoint taken while the computer ran: refused.** MicroSandbox 0.7.6 writes such a checkpoint
+    whole: `snapshot export` adds `checkpoints/<id>/` with the memory, execution and device state (its
+    `archive.rs` at tag `v0.7.6`), and it has no option to leave them out (nor has `v0.7.14`). A fork avoids the
+    memory only by starting a new computer from the checkpoint (`restore --disk-only`); that leaves no disk-only
+    capture to write, so giving an export the same source would mean a hidden temporary computer for every such
+    export. `create_backup_with_token` instead reads the descriptor of every capture before the runtime verifies
+    or writes it and stops at one whose scope or state says `checkpoint` (or `full`): "This checkpoint was saved
+    while <name> was running, so it holds the computer's memory, and an export never carries memory. Fork the
+    checkpoint and export the fork, or export <name> itself." `apply_captured_layout` lost the branch that read
+    such a checkpoint's CPUs and memory.
+
+  The reader is unchanged: a file an older Silo wrote with memory still imports, from its disks.
+- **Tests.** macOS (`macos_computers.rs`, the capture step `capture_archive_sources` with a machine that fails
+  the test if memory is asked for): `an_export_of_a_running_computer_holds_its_disks_and_no_memory`,
+  `an_export_of_a_memory_checkpoint_holds_its_disks_and_no_memory`. The capture step is tested instead of the
+  written file because the writer wants a disk of the computer's full size. Linux (`backup.rs`):
+  `a_checkpoint_that_holds_memory_is_never_written_to_an_export` (refused before `snapshot verify` or
+  `snapshot save`, no file left) and `a_running_computer_is_captured_without_its_memory`. Live, on the KVM
+  runner: `linux-host-e2e.sh` saves a checkpoint while the computer runs, expects its export to be refused with
+  no file, then opens the export of the running computer and the export of a fork of that checkpoint and fails
+  on anything under `checkpoints/` or a descriptor that is not a disk capture.
+- **Not live-checked: macOS.** There is no macOS computer on the Dev engine; the macOS change is covered by the
+  unit tests above only.
+- **Fixed: two copies from another device to the same `-o` path shared one `<path>.part`**, so the first to
+  finish could publish the second's unfinished file (`export_transfer::create_part` removed the other's as a
+  leftover). Each copy now writes `<path>.<random>.part` and nothing that exists is opened or removed; publishing
+  is still the rename that never replaces. A copy that crashes leaves its own `.part`, which nothing removes.
+- **Docs corrected.** `docs/SiloUI-CLI.md` and `docs/THREAT-MODEL.md` say that no export holds memory, for every
+  kind of computer, and what happens to a Linux VM checkpoint that does. The threat model also says which
+  folders the login check lists (the `silo diff` walk in `changes/collect.sh`; `/workspace` is not one of them).
+  `backup.rs`: the comment on `FORMAT_VERSION` described format 5 while the constant is the newest readable
+  format (6). The Resume section and `PLAN.md` listed F4 as an open pull request.
+- **Removed** `app/SiloUI/src-tauri/edit14.py`, an editing script committed by mistake in `0b601f2cd`; nothing
+  used it.
+- **Seen, not changed (low; from reading the code):** a transfer-area export leaves its "Export complete" result
+  and a system notice on the owning device, naming a file the controller then discards. `Area::open_for_read`
+  keeps its used marker when the file is past the cap.

@@ -46,6 +46,27 @@ func TestMacCapacityCountsEveryRunningMacVMAndForksInProgress(t *testing.T) {
 	}
 }
 
+// A container computer runs on the Linux host's memory like a virtual machine does; the command
+// line lists its kind as "container" (cli/src/engine.rs computers_from).
+func TestARunningContainerComputerCountsAgainstTheLinuxBudget(t *testing.T) {
+	listed := []Computer{{Name: "box", Kind: "container", State: "running", MemoryGiB: 8}}
+	if err := (Capacity{Linux: LinuxBudget{MemoryGiB: 12}}).Allows("linux", 8, listed, nil); !errors.Is(err, errNoCapacity) {
+		t.Fatalf("8 GiB in a container plus 8 more exceeds 12 GiB: %v", err)
+	}
+	if err := (Capacity{Linux: LinuxBudget{Count: 1}}).Allows("linux", 1, listed, nil); !errors.Is(err, errNoCapacity) {
+		t.Fatalf("count: %v", err)
+	}
+	listed[0].State = "stopped"
+	if err := (Capacity{Linux: LinuxBudget{MemoryGiB: 12, Count: 1}}).Allows("linux", 8, listed, nil); err != nil {
+		t.Fatal(err)
+	}
+	// It is not a macOS virtual machine.
+	listed[0].State = "running"
+	if err := (Capacity{}).Allows("macos", 8, append(listed, Computer{Name: "m", Kind: "macos", State: "running"}), nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestLinuxCapacityHonoursTheCountAndMemoryBudget(t *testing.T) {
 	listed := []Computer{{Name: "l1", Kind: "linux", State: "running", MemoryGiB: 8}}
 	capacity := Capacity{Linux: LinuxBudget{MemoryGiB: 20, Count: 3}}
