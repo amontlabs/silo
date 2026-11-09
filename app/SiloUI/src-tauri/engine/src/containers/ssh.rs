@@ -230,6 +230,26 @@ mod server {
         connections: Arc<Semaphore>,
         /// Connections that have not logged in yet (`MAX_UNAUTHENTICATED`).
         unauthenticated: Arc<Semaphore>,
+        /// Whether the computer's working account is the one SSH may log in as.
+        account: fn(&Shared) -> Result<(), String>,
+        /// Whether the computer's holder is alive (a recycled `outer.pid` is not it).
+        holder_alive: fn(&Shared) -> bool,
+    }
+
+    fn holder_alive(shared: &Shared) -> bool {
+        lifecycle::holder_alive(&shared.paths, &shared.name)
+    }
+
+    /// The login check: the working account must have the id the container's id mapping gives
+    /// the engine's user. Reads the computer's account files, so it runs off the session loop.
+    fn working_account(shared: &Shared) -> Result<(), String> {
+        let identity = lifecycle::identity(
+            &shared.paths,
+            &shared.tools,
+            &shared.name,
+            crate::working_account::USER,
+        )?;
+        check_working_identity(&identity, &shared.name)
     }
 
     /// The terminal a client asked for.
@@ -246,29 +266,83 @@ mod server {
     /// what the command has not taken waits here, up to this much.
     const INPUT_QUEUE_LIMIT: usize = 32 * 1024 * 1024;
 
+    /// Most bytes all the channels of one connection may have queued at once: 16 channels at
+    /// 32 MiB would otherwise be 512 MiB held for one key holder.
+    const CONNECTION_QUEUE_LIMIT: usize = 64 * 1024 * 1024;
+
+    /// What is queued for one command, counted against its channel and its connection.
+    struct Queue {
+        queued: AtomicUsize,
+        budget: Arc<AtomicUsize>,
+    }
+
+    impl Queue {
+        fn release(&self, bytes: usize) {
+            self.queued.fetch_sub(bytes, Ordering::Relaxed);
+            self.budget.fetch_sub(bytes, Ordering::Relaxed);
+        }
+    }
+
+    impl Drop for Queue {
+        /// What was never written goes back to the connection's budget.
+        fn drop(&mut self) {
+            self.budget
+                .fetch_sub(*self.queued.get_mut(), Ordering::Relaxed);
+        }
+    }
+
     /// The bytes waiting for a command's input.
     #[derive(Clone)]
     struct Input {
         sender: mpsc::UnboundedSender<Bytes>,
-        queued: Arc<AtomicUsize>,
+        queue: Arc<Queue>,
+        /// The task writing to the command: ended with the channel, even if the command (in a
+        /// process group of its own, out of reach of the kill) never reads again.
+        writer: Option<Arc<AbortOnDrop>>,
     }
 
     impl Input {
-        fn new() -> (Self, mpsc::UnboundedReceiver<Bytes>) {
+        fn new(budget: Arc<AtomicUsize>) -> (Self, mpsc::UnboundedReceiver<Bytes>) {
             let (sender, receiver) = mpsc::unbounded_channel();
-            let queued = Arc::new(AtomicUsize::new(0));
-            (Self { sender, queued }, receiver)
+            let queue = Arc::new(Queue {
+                queued: AtomicUsize::new(0),
+                budget,
+            });
+            (
+                Self {
+                    sender,
+                    queue,
+                    writer: None,
+                },
+                receiver,
+            )
         }
 
-        /// Queues `data` without waiting. `false` when the command is that far behind.
+        /// Starts the task that writes the queue to `sink`.
+        fn attach(
+            &mut self,
+            sink: impl AsyncWrite + Unpin + Send + 'static,
+            receiver: mpsc::UnboundedReceiver<Bytes>,
+        ) {
+            let task = tokio::spawn(write_input(sink, receiver, self.queue.clone()));
+            self.writer = Some(Arc::new(AbortOnDrop(task)));
+        }
+
+        /// Queues `data` without waiting. `false` when the command is that far behind, or the
+        /// connection's commands together are.
         fn push(&self, data: &[u8]) -> bool {
-            if self.queued.load(Ordering::Relaxed).saturating_add(data.len()) > INPUT_QUEUE_LIMIT {
+            let queue = &self.queue;
+            if queue.queued.load(Ordering::Relaxed).saturating_add(data.len()) > INPUT_QUEUE_LIMIT
+                || queue.budget.load(Ordering::Relaxed).saturating_add(data.len())
+                    > CONNECTION_QUEUE_LIMIT
+            {
                 return false;
             }
-            self.queued.fetch_add(data.len(), Ordering::Relaxed);
+            queue.queued.fetch_add(data.len(), Ordering::Relaxed);
+            queue.budget.fetch_add(data.len(), Ordering::Relaxed);
             if self.sender.send(Bytes::copy_from_slice(data)).is_err() {
                 // The command no longer reads: its input is discarded, as it always was.
-                self.queued.fetch_sub(data.len(), Ordering::Relaxed);
+                queue.release(data.len());
             }
             true
         }
@@ -328,6 +402,8 @@ mod server {
         /// `None` over standard input and output, where the caller is the one process that
         /// started the server.
         limits: Option<Limits>,
+        /// Bytes queued for the commands of all this connection's channels (`CONNECTION_QUEUE_LIMIT`).
+        budget: Arc<AtomicUsize>,
     }
 
     impl Connection {
@@ -370,7 +446,7 @@ mod server {
                 return session.channel_failure(channel);
             }
             let pty = chan.pty.clone();
-            match start(&self.shared, session.handle(), channel, &request, pty).await {
+            match start(&self.shared, session.handle(), channel, &request, pty, self.budget.clone()).await {
                 Ok(started) => {
                     let chan = self.channels.get_mut(&channel).expect("channel kept");
                     chan.input = started.input;
@@ -415,6 +491,16 @@ mod server {
             key: VerifiedPublicKey<'_>,
         ) -> Result<Auth, Self::Error> {
             if !self.allowed(user, key.public_key) {
+                return Ok(Auth::reject());
+            }
+            // The working account must be the one the id mapping gives the engine's user: the
+            // login is refused otherwise, so no channel (command, terminal or forward) opens.
+            let (shared, check) = (self.shared.clone(), self.shared.account);
+            let account = tokio::task::spawn_blocking(move || check(&shared))
+                .await
+                .unwrap_or_else(|_| Err("the account check failed".to_owned()));
+            if let Err(error) = account {
+                eprintln!("silo: ssh login refused in {}: {error}", self.shared.name);
                 return Ok(Auth::reject());
             }
             // Over the limit of logged-in connections: the connection is closed.
@@ -701,13 +787,14 @@ mod server {
         channel: ChannelId,
         request: &Request,
         pty: Option<Pty>,
+        budget: Arc<AtomicUsize>,
     ) -> Result<Started, String> {
         if !lifecycle::holder_alive(&shared.paths, &shared.name) {
             return Err(format!("Start {} first.", shared.name));
         }
         match pty {
-            Some(pty) => start_terminal(shared, handle, channel, request, pty).await,
-            None => start_pipes(shared, handle, channel, request).await,
+            Some(pty) => start_terminal(shared, handle, channel, request, pty, budget).await,
+            None => start_pipes(shared, handle, channel, request, budget).await,
         }
     }
 
@@ -724,6 +811,7 @@ mod server {
         handle: Handle,
         channel: ChannelId,
         request: &Request,
+        budget: Arc<AtomicUsize>,
     ) -> Result<Started, String> {
         let (work, request) = (shared.clone(), request.clone());
         let lifecycle::ExecPlan { command, group } =
@@ -741,8 +829,8 @@ mod server {
         let stdin = child.stdin.take().ok_or("The session has no input.")?;
         let stdout = child.stdout.take().ok_or("The session has no output.")?;
         let stderr = child.stderr.take().ok_or("The session has no output.")?;
-        let (input, receiver) = Input::new();
-        tokio::spawn(write_input(stdin, receiver, input.queued.clone()));
+        let (mut input, receiver) = Input::new(budget);
+        input.attach(stdin, receiver);
         let held = group.clone();
         let task = tokio::spawn(async move {
             let out = tokio::spawn(pump(stdout, handle.clone(), channel, None));
@@ -772,6 +860,7 @@ mod server {
         channel: ChannelId,
         request: &Request,
         pty: Pty,
+        budget: Arc<AtomicUsize>,
     ) -> Result<Started, String> {
         // `crun` hands the terminal's controlling side to a socket we own. The path stays short
         // (a socket path holds about 100 bytes) and private.
@@ -815,8 +904,8 @@ mod server {
             master.try_clone().map_err(|error| error.to_string())?,
         );
         let writer = tokio::fs::File::from_std(master);
-        let (input, receiver) = Input::new();
-        tokio::spawn(write_input(writer, receiver, input.queued.clone()));
+        let (mut input, receiver) = Input::new(budget);
+        input.attach(writer, receiver);
         let held = group.clone();
         let task = tokio::spawn(async move {
             let output = tokio::spawn(pump(reader, handle.clone(), channel, None));
@@ -967,6 +1056,10 @@ mod server {
         ),
         String,
     > {
+        // A stale `outer.pid` may now name another computer's holder: join nothing then.
+        if !(shared.holder_alive)(shared) {
+            return Err(format!("Start {} first.", shared.name));
+        }
         let state = Layout::new(&shared.paths.home).computer(&shared.name).state();
         let mut child = tokio::process::Command::new(&shared.tools.ctr)
             .arg("connect")
@@ -1050,11 +1143,11 @@ mod server {
     async fn write_input(
         mut sink: impl AsyncWrite + Unpin,
         mut receiver: mpsc::UnboundedReceiver<Bytes>,
-        queued: Arc<AtomicUsize>,
+        queue: Arc<Queue>,
     ) {
         while let Some(chunk) = receiver.recv().await {
             let written = sink.write_all(&chunk).await.is_ok() && sink.flush().await.is_ok();
-            queued.fetch_sub(chunk.len(), Ordering::Relaxed);
+            queue.release(chunk.len());
             if !written {
                 return;
             }
@@ -1087,6 +1180,7 @@ mod server {
             channels: HashMap::new(),
             forwards: HashMap::new(),
             limits,
+            budget: Arc::new(AtomicUsize::new(0)),
         }
     }
 
@@ -1131,6 +1225,8 @@ mod server {
             authorized,
             connections: Arc::new(Semaphore::new(MAX_CONNECTIONS)),
             unauthenticated: Arc::new(Semaphore::new(MAX_UNAUTHENTICATED)),
+            account: working_account,
+            holder_alive,
         });
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
@@ -1351,6 +1447,8 @@ mod server {
                 authorized: file,
                 connections: Arc::new(Semaphore::new(MAX_CONNECTIONS)),
                 unauthenticated: Arc::new(Semaphore::new(MAX_UNAUTHENTICATED)),
+                account: |_| Ok(()),
+                holder_alive: |_| true,
             });
             let config = config(&SshServe::default(), key());
             Fixture {
@@ -1483,22 +1581,67 @@ mod server {
 
         #[test]
         fn a_command_that_does_not_read_cannot_hold_up_the_session_or_grow_without_limit() {
-            let (input, _receiver) = Input::new();
+            let (input, _receiver) = Input::new(Arc::new(AtomicUsize::new(0)));
             let chunk = vec![7u8; 1024 * 1024];
             // Nothing reads: every push still returns at once, up to the limit.
             for _ in 0..INPUT_QUEUE_LIMIT / chunk.len() {
                 assert!(input.push(&chunk));
             }
             assert!(!input.push(&[0]), "the queue grew past its limit");
-            assert_eq!(input.queued.load(Ordering::Relaxed), INPUT_QUEUE_LIMIT);
+            assert_eq!(input.queue.queued.load(Ordering::Relaxed), INPUT_QUEUE_LIMIT);
+        }
+
+        #[test]
+        fn the_channels_of_one_connection_share_one_budget_that_a_closed_channel_gives_back() {
+            let budget = Arc::new(AtomicUsize::new(0));
+            let chunk = vec![7u8; 1024 * 1024];
+            let (first, _r1) = Input::new(budget.clone());
+            let (second, _r2) = Input::new(budget.clone());
+            let (third, _r3) = Input::new(budget.clone());
+            for _ in 0..INPUT_QUEUE_LIMIT / chunk.len() {
+                assert!(first.push(&chunk));
+            }
+            for _ in 0..(CONNECTION_QUEUE_LIMIT - INPUT_QUEUE_LIMIT) / chunk.len() {
+                assert!(second.push(&chunk));
+            }
+            assert_eq!(budget.load(Ordering::Relaxed), CONNECTION_QUEUE_LIMIT);
+            // Each is under its own limit, the connection is not.
+            assert!(!third.push(&[0]), "the connection's budget was passed");
+            assert!(!second.push(&[0]));
+            // The first channel closes with its queue unread: its bytes are given back.
+            drop(first);
+            assert_eq!(
+                budget.load(Ordering::Relaxed),
+                CONNECTION_QUEUE_LIMIT - INPUT_QUEUE_LIMIT
+            );
+            assert!(third.push(&chunk));
+        }
+
+        #[tokio::test(flavor = "multi_thread")]
+        async fn a_writer_stuck_on_a_command_that_never_reads_ends_with_the_channel() {
+            let budget = Arc::new(AtomicUsize::new(0));
+            let (mut input, receiver) = Input::new(budget.clone());
+            // A pipe nobody reads: the writer blocks on it for good.
+            let (_reader, writer) = tokio::io::duplex(16);
+            input.attach(writer, receiver);
+            assert!(input.push(&[1u8; 4096]));
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            let sender = input.sender.clone();
+            // What `Chan::end` does: the input goes, and the writer with it.
+            drop(input);
+            tokio::time::timeout(std::time::Duration::from_secs(5), sender.closed())
+                .await
+                .expect("the writer task outlived the channel");
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            assert_eq!(budget.load(Ordering::Relaxed), 0);
         }
 
         #[tokio::test(flavor = "multi_thread")]
         async fn the_input_queue_empties_into_the_command_while_the_session_keeps_going() {
-            let (input, receiver) = Input::new();
+            let (input, receiver) = Input::new(Arc::new(AtomicUsize::new(0)));
             // A sink that takes a few kilobytes and then waits for its reader.
             let (mut reader, writer) = tokio::io::duplex(4096);
-            let writer_task = tokio::spawn(write_input(writer, receiver, input.queued.clone()));
+            let writer_task = tokio::spawn(write_input(writer, receiver, input.queue.clone()));
             let chunk = vec![1u8; 64 * 1024];
             let started = std::time::Instant::now();
             for _ in 0..64 {
@@ -1506,7 +1649,7 @@ mod server {
             }
             // 4 MiB were handed over without anything reading them.
             assert!(started.elapsed() < std::time::Duration::from_secs(5));
-            let queued = input.queued.clone();
+            let queue = input.queue.clone();
             drop(input);
             let mut received = 0usize;
             let mut buffer = vec![0u8; 8192];
@@ -1519,7 +1662,29 @@ mod server {
             }
             writer_task.await.unwrap();
             assert_eq!(received, 64 * chunk.len());
-            assert_eq!(queued.load(Ordering::Relaxed), 0);
+            assert_eq!(queue.queued.load(Ordering::Relaxed), 0);
+            assert_eq!(queue.budget.load(Ordering::Relaxed), 0);
+        }
+
+        #[tokio::test(flavor = "multi_thread")]
+        async fn a_forward_is_refused_when_the_computers_holder_is_not_alive() {
+            let mut fixture = fixture("");
+            // A stale `outer.pid`, reused by another computer's holder: no namespace is joined.
+            Arc::get_mut(&mut fixture.shared).unwrap().holder_alive = |_| false;
+            let error = open_forward(&fixture.shared, "127.0.0.1", 80)
+                .await
+                .unwrap_err();
+            assert!(error.contains("Start box first."), "{error:?}");
+        }
+
+        #[tokio::test(flavor = "multi_thread")]
+        async fn a_login_is_refused_when_the_working_account_has_the_wrong_id() {
+            let key = key();
+            let mut fixture = fixture(&authorized_line(&key, "me"));
+            assert!(authenticates(&fixture, "silo", &key).await);
+            Arc::get_mut(&mut fixture.shared).unwrap().account =
+                |_| Err("The account silo in box has the id 1000.".into());
+            assert!(!authenticates(&fixture, "silo", &key).await);
         }
 
         #[tokio::test(flavor = "multi_thread")]

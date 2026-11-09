@@ -200,13 +200,19 @@ kinds share it, and that is the better end state. What it does:
 
 The SSH login `silo` must be the working account the container's id mapping gives the engine's
 user (id 1001): the server resolves the name in the computer's own account files, and refuses the
-login, with a message that says so, if the id is anything else, root's included.
+login if the id is anything else, root's included. The check is made at authentication, so a
+refused login opens no command, terminal or port forward; the reason is in the engine's log. A
+forward also checks that the computer's holder is alive before it joins the container's network
+namespace, so a stale `outer.pid` that another computer's holder has reused is refused.
 
 A connection has 30 seconds to log in whatever the inactivity timeout is, and only logged-in
 connections count against the limit of 32 (at most 64 are still logging in at once), so idle
 sockets cannot lock a person out. What a command has not read of the client's input waits in a
-queue of up to 32 MiB, and a command that falls further behind is ended, so a transfer in both
-directions (`ssh NAME cat < big > copy`) never stalls the connection's other traffic.
+queue of up to 32 MiB per channel and 64 MiB across all the channels of one connection (so at
+most 32 connections x 64 MiB are held), and a command that falls further behind either limit is
+ended, so a transfer in both directions (`ssh NAME cat < big > copy`) never stalls the
+connection's other traffic. When a channel closes, its writer task ends and its queue goes back
+to the connection's budget, even for a command in a process group of its own that never reads.
 
 Every command runs through the engine's own exec path (`silo-ctr enter`, `crun exec`, the init
 shim), so the hardening baseline, the process-group kill when a channel closes, and the
