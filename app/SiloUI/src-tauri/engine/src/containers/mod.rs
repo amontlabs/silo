@@ -14,6 +14,7 @@
 pub mod args;
 pub mod capability;
 pub mod cli;
+pub mod desktop;
 pub mod hold;
 pub mod idmap;
 pub mod image;
@@ -617,7 +618,32 @@ fn start(
         RuntimeError::Unavailable(format!(
             "Silo could not add its network gateway's certificate to the trust store of container computer {name}, so it did not start. The image needs update-ca-certificates."
         ))
-    })
+    })?;
+    start_desktop(paths, name);
+    Ok(())
+}
+
+/// Starts the computer's desktop the way a virtual machine's boot does, in the background: the
+/// start does not wait for it, and a desktop that does not start never fails the computer (the
+/// status says so). The command ends by itself when the computer stops.
+#[cfg(target_os = "linux")]
+fn start_desktop(paths: &RuntimePaths, name: &str) {
+    let (paths, name) = (paths.clone(), name.to_owned());
+    let spawned = std::thread::Builder::new()
+        .name(format!("desktop-boot-{name}"))
+        .spawn(move || {
+            let command = desktop::boot_command(&name);
+            if let Err(error) = exec_and_wait(
+                &paths,
+                &command,
+                desktop::BOOT_TIMEOUT + Duration::from_secs(10),
+            ) {
+                eprintln!("Container computer {name}: the desktop boot: {error:?}");
+            }
+        });
+    if let Err(error) = spawned {
+        eprintln!("Container computer {name}: the desktop boot could not start: {error}");
+    }
 }
 
 /// The root command that adds the gateway CA (bound at [`oci::GATEWAY_CA_PATH`]) to the guest's

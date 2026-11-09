@@ -656,6 +656,83 @@ def write_privacy_env():
         log(f'could not switch off Cua Driver telemetry system-wide: {error}')
 
 
+BROWSER_LAUNCHER_DIR = Path('/usr/local/bin')
+APPLICATIONS_DIR = Path('/usr/local/share/applications')
+# The wrapper starts the first of these that exists. The names are what an agent, `xdg-open`
+# or the desktop's launcher runs (`google-chrome-stable` and `google-chrome` are Google
+# Chrome's own, `chromium` and `chromium-browser` the distributions').
+BROWSER_BINARIES = ('/opt/google/chrome/google-chrome', '/usr/lib/chromium/chromium',
+                    '/usr/lib/chromium-browser/chromium-browser')
+BROWSER_NAMES = ('google-chrome', 'google-chrome-stable', 'chromium', 'chromium-browser')
+BROWSER_LAUNCHER_MARK = '# silo-container-browser-launcher'
+BROWSER_LAUNCHER_TEXT = '''#!/bin/sh
+# silo-container-browser-launcher
+# Written by silo-computer-use in a Silo container computer. A browser's own sandbox needs a
+# nested user namespace, which a container computer's seccomp profile denies (the baseline has
+# no exception for the browser), so the browser runs without it: a web page that compromises
+# the browser reaches everything in this computer.
+for browser in %s; do
+    if [ -x "$browser" ]; then
+        exec "$browser" --no-sandbox "$@"
+    fi
+done
+echo "No browser is installed in this computer (looked for: %s)." >&2
+exit 127
+''' % (' '.join(BROWSER_BINARIES), ', '.join(BROWSER_BINARIES))
+BROWSER_DESKTOP_TEXT = '''[Desktop Entry]
+Version=1.0
+Name=Web Browser (without its sandbox)
+Comment=Silo container computer: starts the browser with --no-sandbox
+Exec=%s --no-sandbox %%U
+Terminal=false
+Type=Application
+Categories=Network;WebBrowser;
+MimeType=text/html;text/xml;application/xhtml+xml;x-scheme-handler/http;x-scheme-handler/https;
+StartupNotify=true
+'''
+
+
+def is_container():
+    """Whether this guest is a Silo container computer (the engine sets the variable)."""
+    return os.environ.get('SILO_RUNTIME') == 'container'
+
+
+def write_if_changed(path, text, mode):
+    """Writes `path` atomically unless it already holds exactly `text`; never replaces a file
+    that is not ours (`owned` is checked by the caller)."""
+    if path.is_file() and path.read_text() == text and os.access(path, os.X_OK if mode & 0o100 else os.R_OK):
+        return
+    path.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(prefix='.tmp-', dir=path.parent)
+    with os.fdopen(fd, 'w') as output:
+        output.write(text)
+        os.fchmod(output.fileno(), mode)
+    os.replace(temporary, path)
+
+
+def write_browser_launchers(directory=None, applications=None):
+    """In a container computer, puts a `--no-sandbox` launcher ahead of each browser command
+    on PATH and a desktop entry for the same name ahead of the packaged one, so a browser
+    started by an agent, the desktop or `xdg-open` runs the way the baseline allows. A file of
+    the same name that this helper did not write is left alone. A virtual machine keeps its
+    browser's sandbox."""
+    if not is_container():
+        return
+    directory = directory or BROWSER_LAUNCHER_DIR
+    applications = applications or APPLICATIONS_DIR
+    try:
+        for name in BROWSER_NAMES:
+            target = directory / name
+            if target.exists() and BROWSER_LAUNCHER_MARK not in target.read_text(errors='replace'):
+                continue
+            write_if_changed(target, BROWSER_LAUNCHER_TEXT, 0o755)
+        entry = applications / 'google-chrome.desktop'
+        if not entry.exists() or 'Name=Web Browser (without its sandbox)' in entry.read_text(errors='replace'):
+            write_if_changed(entry, BROWSER_DESKTOP_TEXT % (directory / 'google-chrome-stable'), 0o644)
+    except OSError as error:
+        log(f'could not write the browser launchers: {error}')
+
+
 @contextlib.contextmanager
 def as_user():
     """Runs file edits as the working account, so nothing it owns is written through root."""
@@ -1170,6 +1247,7 @@ def reconcile():
             return {'reconcile': 'busy'}
         write_launcher()
         write_privacy_env()
+        write_browser_launchers()
         agents, pending = reconcile_agents(receipt)
         if (agents, pending) != (receipt.get('agents') or [], receipt.get('pending') or []):
             write_json(RECEIPT, dict(receipt, agents=agents, pending=pending, updatedAt=now()))
@@ -1297,6 +1375,7 @@ def update(pinned, mode, force, boot):
         # registered, and registrations follow a desktop session that was started again.
         write_launcher()
         write_privacy_env()
+        write_browser_launchers()
         agents, pending = reconcile_agents(existing)
         if (agents, pending) != (existing.get('agents') or [], existing.get('pending') or []):
             write_json(RECEIPT, dict(existing, agents=agents, pending=pending, updatedAt=now()))
@@ -1318,6 +1397,7 @@ def update(pinned, mode, force, boot):
             session_error = failure
         write_launcher()
         write_privacy_env()
+        write_browser_launchers()
         registered, pending, failed = configure(sorted(AGENTS), mode)
         if failed and not registered:
             raise Failure('setup-failed', 'could not register the driver with ' + ', '.join(failed))

@@ -159,10 +159,19 @@ jobs:
           grep "^$(id -un):" /etc/subuid /etc/subgid || sudo usermod --add-subuids 100000-165535 --add-subgids 100000-165535 "$(id -un)"
           ls -l /dev/net/tun
       - name: Drive a Linux computer and a container computer through the silo command
-        timeout-minutes: 40
+        timeout-minutes: 60
         env:
           SILO_E2E_CONTAINER: '1'
+          # The desktop checks leave a screenshot of the desktop and of Chrome here.
+          SILO_E2E_ARTIFACTS: ${{ runner.temp }}/desktop-evidence
         run: bash scripts/linux-host-e2e.sh "$ENGINE"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: container-desktop-screenshots
+          path: ${{ runner.temp }}/desktop-evidence/
+          if-no-files-found: ignore
+          retention-days: 14
       # SIGTERM ends the engine's session; it must exit 0 so systemd does not restart it.
       # A session end that left computers running exits non-zero, and fails here. After an
       # earlier failure the step only stops the engine, leaving the unit for the logs below.

@@ -7,6 +7,13 @@ const labels: Record<ComputerOs, string> = { linux: "Linux", macos: "macOS", con
 /** Shown on a container computer, which shares the host's kernel. */
 export const containerWarning = "Less isolated than a VM"
 
+/** Said on a container computer's page when it has a desktop: its browser runs without its own sandbox. */
+export const containerBrowserWarning = "This computer shares the host's kernel, and its browser runs without its sandbox. A web page that compromises the browser reaches everything in this computer."
+
+export function ContainerBrowserNotice({ className }: { className?: string }) {
+  return <p role="note" data-slot="container-browser-notice" className={cn("rounded-lg bg-warning/15 px-3 py-2 text-caption text-warning", className)}>{containerBrowserWarning}</p>
+}
+
 /** Names the operating system a computer runs, in the same pill as the device badge. A container computer says it is less isolated. */
 export function OsBadge({ os, className }: { os: ComputerOs; className?: string }) {
   const container = os === "container"

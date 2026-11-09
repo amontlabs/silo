@@ -305,6 +305,12 @@ if [ -f /var/lib/silo-desktop/installed.json ]; then
         exit 0
     fi
 fi
+# A container computer never installs packages: it runs only what the image carries.
+if [ "${SILO_RUNTIME:-}" = container ] && [ "$image_problem" != ok ]; then
+    [ "$image_problem" != none ] || image_problem='the image has none'
+    printf '%s\n' "This container computer's image has no complete desktop ($image_problem). Create a new computer from the current image." >&2
+    exit 1
+fi
 if [ "$image_problem" = ok ]; then
     printf '%s\n' 'Using the desktop preinstalled in the guest image' >&2
     printf '%s\n' installing > /var/lib/silo-desktop/install-stage

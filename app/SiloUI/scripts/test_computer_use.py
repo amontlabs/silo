@@ -1199,5 +1199,66 @@ class ReceiptPersistence(unittest.TestCase):
         self.assertEqual(list(self.path.parent.iterdir()), [self.path])
 
 
+class BrowserLaunchers(unittest.TestCase):
+    def setUp(self):
+        self.root = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__('shutil').rmtree(self.root, ignore_errors=True))
+        self.bin = self.root / 'bin'
+        self.apps = self.root / 'applications'
+        self.bin.mkdir()
+
+    def write(self, container):
+        env = {'SILO_RUNTIME': 'container'} if container else {}
+        with mock.patch.dict(os.environ, env, clear=False):
+            if not container:
+                os.environ.pop('SILO_RUNTIME', None)
+            cu.write_browser_launchers(self.bin, self.apps)
+
+    def test_a_container_gets_a_no_sandbox_launcher_for_each_browser_name(self):
+        self.write(True)
+        for name in cu.BROWSER_NAMES:
+            launcher = self.bin / name
+            self.assertTrue(os.access(launcher, os.X_OK), name)
+            self.assertIn('--no-sandbox', launcher.read_text())
+        entry = (self.apps / 'google-chrome.desktop').read_text()
+        self.assertIn(f'Exec={self.bin}/google-chrome-stable --no-sandbox %U', entry)
+
+    def test_a_virtual_machine_keeps_the_browsers_sandbox(self):
+        self.write(False)
+        self.assertEqual(list(self.bin.iterdir()), [])
+        self.assertFalse(self.apps.exists())
+
+    def test_a_file_this_helper_did_not_write_is_left_alone(self):
+        (self.bin / 'chromium').write_text('#!/bin/sh\necho mine\n')
+        self.write(True)
+        self.assertEqual((self.bin / 'chromium').read_text(), '#!/bin/sh\necho mine\n')
+        self.assertIn('--no-sandbox', (self.bin / 'google-chrome').read_text())
+
+    def test_the_launcher_runs_the_first_installed_browser_with_the_flag_and_the_arguments(self):
+        browser = self.root / 'chrome'
+        browser.write_text('#!/bin/sh\nprintf "%s " "$@"\n')
+        browser.chmod(0o755)
+        text = cu.BROWSER_LAUNCHER_TEXT.replace('/opt/google/chrome/google-chrome', str(browser))
+        launcher = self.root / 'launcher'
+        launcher.write_text(text)
+        launcher.chmod(0o755)
+        result = subprocess.run([str(launcher), 'about:blank', '--x'], capture_output=True, text=True)
+        self.assertEqual(result.stdout, '--no-sandbox about:blank --x ')
+
+    def test_the_launcher_says_so_when_no_browser_is_installed(self):
+        launcher = self.root / 'launcher'
+        launcher.write_text(cu.BROWSER_LAUNCHER_TEXT)
+        launcher.chmod(0o755)
+        result = subprocess.run([str(launcher)], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 127)
+        self.assertIn('No browser is installed', result.stderr)
+
+    def test_an_update_rewrites_a_stale_launcher_and_keeps_it_executable(self):
+        self.write(True)
+        (self.bin / 'google-chrome').write_text(cu.BROWSER_LAUNCHER_MARK + ' old\n')
+        self.write(True)
+        self.assertEqual((self.bin / 'google-chrome').read_text(), cu.BROWSER_LAUNCHER_TEXT)
+
+
 if __name__ == '__main__':
     unittest.main()

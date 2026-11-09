@@ -25,11 +25,11 @@ function setup(container: boolean) {
 }
 
 it("knows what a container computer cannot do yet, and a VM can do everything", () => {
-  for (const capability of ["export", "desktop"] as const) {
+  for (const capability of ["export", "memorySnapshots"] as const) {
     expect(computerCan({ runtime: "container" }, capability)).toBe(false)
     expect(computerCan({}, capability)).toBe(true)
   }
-  for (const capability of ["terminal", "editor", "sshAccess"] as const) {
+  for (const capability of ["terminal", "editor", "sshAccess", "desktop"] as const) {
     expect(computerCan({ runtime: "container" }, capability)).toBe(true)
     expect(computerCan({}, capability)).toBe(true)
   }
@@ -45,7 +45,7 @@ it("offers a virtual machine its terminal, editor, SSH and export", async () => 
   expect(screen.getByRole("menuitem", { name: "Export dev" })).toBeInTheDocument()
 })
 
-it("offers a container computer its terminal, editor and SSH, and hides export and the desktop", async () => {
+it("offers a container computer its terminal, editor, SSH and desktop, and hides export", async () => {
   const user = userEvent.setup()
   setup(true)
   const row = within(screen.getByText("dev").closest("li")!)
@@ -53,5 +53,5 @@ it("offers a container computer its terminal, editor and SSH, and hides export a
   await user.click(row.getByRole("button", { name: "More actions for dev" }))
   expect(screen.getByRole("menuitem", { name: "SSH for dev" })).toBeInTheDocument()
   expect(screen.queryByRole("menuitem", { name: "Export dev" })).not.toBeInTheDocument()
-  expect(screen.queryByRole("menuitem", { name: "Add Linux desktop" })).not.toBeInTheDocument()
+  expect(screen.getByRole("menuitem", { name: "Add Linux desktop" })).toBeInTheDocument()
 })

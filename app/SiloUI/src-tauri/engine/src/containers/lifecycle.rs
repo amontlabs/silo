@@ -773,7 +773,7 @@ pub fn guard_pass(paths: &RuntimePaths, tools: &Tools) -> Vec<String> {
             let dir = layout.computer(name);
             let record = dir.read_record().ok()?;
             Some(super::host_disk::Sizes {
-                layer: layer_bytes(tools, &dir.upper_of(&record))?,
+                layer: layer_bytes(tools, &dir.upper_of(&record)),
                 limit: super::host_disk::limit_bytes(&record),
             })
         },

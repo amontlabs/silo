@@ -12,7 +12,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import type { SetupComputerConfiguration } from "@/contracts/silo"
-import { OsBadge } from "@/features/computers/components/os-badge"
+import { ContainerBrowserNotice, OsBadge } from "@/features/computers/components/os-badge"
 import { ComputerEditor } from "@/features/computers/components/computer-editor"
 import { useComputerEditing } from "@/features/computers/model/use-computer-editing"
 import { computerBusyReason } from "@/features/computers/model/computer-presentation"
@@ -473,7 +473,7 @@ export function ComputerDetailPage({ computer, source, actions, controls }: {
         </div>
         <ScrollArea className="min-h-0 flex-1">
           <div className="pt-4">
-            <TabsContent value="overview"><OverviewTab computer={computer} source={source} actions={actions} active={activeTab === "overview" && controls.pageActive !== false} onEdit={canEdit ? () => editing.startEdit(configuration) : undefined} onNavigate={controls.onNavigate} computerUse={configuration.desktop ? <ComputerUseSection key={target} computer={target} active={activeTab === "overview" && controls.pageActive !== false} /> : undefined} /></TabsContent>
+            <TabsContent value="overview"><OverviewTab computer={computer} source={source} actions={actions} active={activeTab === "overview" && controls.pageActive !== false} onEdit={canEdit ? () => editing.startEdit(configuration) : undefined} onNavigate={controls.onNavigate} computerUse={configuration.desktop ? <>{configuration.runtime === "container" && <ContainerBrowserNotice className="mb-3" />}<ComputerUseSection key={target} computer={target} active={activeTab === "overview" && controls.pageActive !== false} /></> : undefined} /></TabsContent>
             <TabsContent value="checkpoints">
               <CheckpointPanel computer={computer} target={target} actions={actions} takenNames={computerNamesOnDevice(source.computers, computer.device?.id, macosNames)} disabled={controls.configurationLocked || Boolean(computer.lifecycleAction) || Boolean(computer.device?.busy) || computer.freshness === "stale"} onExport={controls.onCheckpointExport} exportDisabled={controls.checkpointExportDisabled} forkedAction={controls.onCheckpointForkedAction} restoredAction={controls.onCheckpointRestoredAction} />
               <div className="pt-5"><StepsPanel computer={computer} target={target} actions={actions} takenNames={computerNamesOnDevice(source.computers, computer.device?.id, macosNames)} disabled={controls.configurationLocked || Boolean(computer.lifecycleAction) || Boolean(computer.device?.busy) || computer.freshness === "stale"} forkedAction={controls.onCheckpointForkedAction} /></div>

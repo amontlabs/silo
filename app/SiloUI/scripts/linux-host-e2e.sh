@@ -5,7 +5,9 @@
 #
 # With SILO_E2E_CONTAINER=1 it then drives a container computer the same way (create --container,
 # start, exec, a file written and read back, listed as kind container, hardening spot checks,
-# stop, drop). The host must have crun, skopeo, umoci and the other container prerequisites
+# stop, drop), then a second container with the desktop on: the desktop service, the viewer port
+# (over SSH as the app's viewer reaches it, and through the URL proxy), Cua Driver listing windows
+# and saving a screenshot, Chrome with --no-sandbox, `fork --gui`, `silo desktop off`. The host must have crun, skopeo, umoci and the other container prerequisites
 # (`silo host init` names them).
 #
 # Usage: linux-host-e2e.sh ENGINE_DIR
@@ -26,6 +28,11 @@ ctr="$name-ctr"
 ctr2="$name-ctr2"
 # A container whose stated size is small, so it is over it.
 ctr3="$name-ctr3"
+# The container that gets the desktop checks, and the forks made from it.
+ctr4="$name-ctr4"
+# Where the desktop checks leave their evidence (a screenshot of the desktop and of Chrome); the
+# workflow uploads it. A run outside CI keeps it in a temporary folder.
+artifacts="${SILO_E2E_ARTIFACTS:-}"
 # The file that fills the host's disk in the guard check; the cleanup removes it.
 fill_file=""
 # The engine's systemd unit, which the restart check ends the way a crash does.
@@ -59,7 +66,7 @@ cleanup() {
   [[ -n "$fill_file" ]] && rm -f "$fill_file"
   rm -f "${stderr_file:-}"
   remove_editor_key
-  for computer in "$ctr3" "$ctr2" "$ctr" "$ctr-k" "$ctr-f-1" "$ctr-f-2" "$ctr-f-3" "$ctr-f-4" "$fork" "$name"; do
+  for computer in "$ctr4-gui" "$ctr4-plain" "$ctr4" "$ctr3" "$ctr2" "$ctr" "$ctr-k" "$ctr-f-1" "$ctr-f-2" "$ctr-f-3" "$ctr-f-4" "$fork" "$name"; do
     if listed "$computer" 2>/dev/null | grep -qx -- "$computer"; then
       echo "Stopping and dropping $computer after a failed run"
       "$silo" stop "$computer" || true
@@ -355,6 +362,246 @@ except OSError:
   container_access_features
   container_checkpoint_features
   container_disk_guard
+
+  step "Stopping and dropping $ctr"
+  "$silo" stop "$ctr"
+  "$silo" drop "$ctr"
+}
+
+# A probe run in the container as the working account: starts Cua Driver the way an agent does
+# (the MCP launcher), lists its windows and saves a screenshot of the desktop to $1.
+cua_probe_source() {
+  base64 -w0 <<'PY'
+import json, select, subprocess, sys, time
+
+out = sys.argv[1]
+proc = subprocess.Popen(['/usr/local/libexec/silo-cua-driver-mcp'], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE, text=True, bufsize=1)
+
+def send(message):
+    proc.stdin.write(json.dumps(message) + '\n')
+    proc.stdin.flush()
+
+def receive(wanted, timeout):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        ready, _, _ = select.select([proc.stdout], [], [], 0.5)
+        if not ready:
+            if proc.poll() is not None:
+                return None
+            continue
+        line = proc.stdout.readline()
+        if not line:
+            return None
+        try:
+            message = json.loads(line)
+        except ValueError:
+            continue
+        if message.get('id') == wanted:
+            return message
+    return None
+
+def call(identifier, name, arguments):
+    send({'jsonrpc': '2.0', 'id': identifier, 'method': 'tools/call', 'params': {'name': name, 'arguments': arguments}})
+    reply = receive(identifier, 90)
+    result = (reply or {}).get('result', {})
+    text = ' '.join(c.get('text', '') for c in result.get('content', []) if c.get('type') == 'text')
+    return result.get('isError'), text, reply
+
+send({'jsonrpc': '2.0', 'id': 1, 'method': 'initialize', 'params': {'protocolVersion': '2024-11-05', 'capabilities': {}, 'clientInfo': {'name': 'e2e', 'version': '0'}}})
+if not receive(1, 60):
+    print('CUA initialize: no answer', proc.stderr.read(2000) if proc.poll() is not None else '')
+    sys.exit(1)
+send({'jsonrpc': '2.0', 'method': 'notifications/initialized'})
+error, text, reply = call(2, 'list_windows', {})
+print('WINDOWS', error, text[:1500].replace('\n', ' | '))
+error, text, reply = call(3, 'get_desktop_state', {'screenshot_out_file': out})
+print('STATE', error, text[:300].replace('\n', ' | '))
+proc.terminate()
+PY
+}
+
+# Saves a screenshot of the desktop of $ctr to the evidence folder as $2: the probe above writes
+# it in the container, the file is copied out through the working account.
+desktop_screenshot() {
+  local file="$1" shot="/tmp/e2e-$1" out
+  out=$(in_container sh -c "echo $(cua_probe_source) | base64 -d > /tmp/e2e-cua-probe.py && python3 /tmp/e2e-cua-probe.py $shot")
+  echo "$out"
+  grep -q '^WINDOWS' <<<"$out" || { echo "Cua Driver did not answer" >&2; exit 1; }
+  windows=$(grep '^WINDOWS' <<<"$out")
+  in_container base64 -w0 "$shot" | base64 -d > "$artifacts/$file"
+  local size
+  size=$(wc -c < "$artifacts/$file")
+  [[ "$(head -c 4 "$artifacts/$file" | tail -c 3)" == PNG && "$size" -gt 5000 ]] || { echo "$file is not a screenshot ($size bytes)" >&2; exit 1; }
+  echo "screenshot $file: $size bytes"
+}
+
+# Whether the desktop's streamer answers on the container's loopback (the viewer's port 6901 answers
+# 401 without its credentials, 200 with them).
+desktop_answers() {
+  local code
+  code=$(in_container curl -sS -o /dev/null --max-time 5 -w '%{http_code}' http://127.0.0.1:6901/ 2>/dev/null || true)
+  [[ "$code" == 200 || "$code" == 401 ]]
+}
+
+wait_for_desktop() {
+  local _
+  for _ in $(seq 1 90); do
+    desktop_answers && return 0
+    sleep 2
+  done
+  echo "The desktop of $ctr did not answer; its service says:" >&2
+  root_in_container /usr/local/bin/silo-desktop status >&2 || true
+  root_in_container sh -c 'tail -n 60 /var/log/silo-desktop.log' >&2 || true
+  return 1
+}
+
+# The desktop, computer use and Chrome in a container computer, through the same commands a virtual
+# machine's desktop uses. A recipe cannot make a container, so `desktop: false` at creation is
+# checked through the same setting: `silo desktop off`, a restart and a fork.
+container_desktop_features() {
+  # Every helper above reads $ctr: for these checks it is the desktop container.
+  local ctr="$ctr4" host state code url host_port forwarder reply
+  [[ -n "$artifacts" ]] || artifacts=$(mktemp -d)
+  mkdir -p "$artifacts"
+
+  step "Creating and starting $ctr, a container computer with the desktop on"
+  "$silo" create "$ctr" --container --cpus 2 --memory 4 --disk 4
+  "$silo" start "$ctr"
+
+  step "Checking that the desktop of $ctr started with it"
+  wait_for_desktop
+  state=$(root_in_container /usr/local/bin/silo-desktop status | python3 -c 'import json, sys; print(json.load(sys.stdin)["state"])')
+  expect "desktop service state" "$state" running
+  for process in Xvfb xfce4-session selkies; do
+    expect "process $process" "$(in_container sh -c "pgrep -f $process >/dev/null && echo up || echo down")" up
+  done
+
+  step "Reaching the viewer port over SSH, as the app's viewer does"
+  host=$("$silo" --json ssh-setup "$ctr" | python3 -c 'import json, sys; print(json.load(sys.stdin)["host"])')
+  ssh -N -o BatchMode=yes -o ConnectTimeout=30 -o ExitOnForwardFailure=yes -L 29901:127.0.0.1:6901 "$host" &
+  forwarder=$!
+  code=000
+  for _ in $(seq 1 20); do
+    code=$(curl -sS -o /dev/null --max-time 5 -w '%{http_code}' http://127.0.0.1:29901/ 2>/dev/null || true)
+    [[ "$code" == 200 || "$code" == 401 ]] && break
+    sleep 1
+  done
+  kill "$forwarder" 2>/dev/null || true
+  wait "$forwarder" 2>/dev/null || true
+  [[ "$code" == 200 || "$code" == 401 ]] || { echo "the viewer port did not answer over ssh -L (got $code)" >&2; exit 1; }
+  echo "viewer port over ssh -L: $code"
+
+  step "Reaching the viewer port through the URL proxy"
+  # The streamer listens on the container's loopback only, as in a virtual machine; a published
+  # port reaches the guest's own address, so a forwarder in the container hands 6902 on to it.
+  in_container sh -c 'cat > /tmp/e2e-forward.py <<EOF
+import socket, threading
+def pump(a, b):
+    try:
+        while (data := a.recv(65536)):
+            b.sendall(data)
+    except OSError:
+        pass
+    finally:
+        for sock in (a, b):
+            try: sock.shutdown(socket.SHUT_RDWR)
+            except OSError: pass
+server = socket.socket()
+server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+server.bind(("0.0.0.0", 6902))
+server.listen(8)
+while True:
+    client, _ = server.accept()
+    target = socket.create_connection(("127.0.0.1", 6901))
+    threading.Thread(target=pump, args=(client, target), daemon=True).start()
+    threading.Thread(target=pump, args=(target, client), daemon=True).start()
+EOF
+(nohup python3 /tmp/e2e-forward.py >/dev/null 2>&1 &)'
+  "$silo" publish "$ctr" 6902 --http
+  url="" host_port="" state=""
+  for _ in $(seq 1 40); do
+    read -r state host_port url < <("$silo" --json ports "$ctr" | python3 -c '
+import json, sys
+port = next((p for p in json.load(sys.stdin)["ports"] if p["port"] == 6902), {})
+print(port.get("state") or "-", port.get("hostPort") or "-", port.get("url") or "-")')
+    [[ "$state" == reachable && "$url" != - ]] && break
+    sleep 0.5
+  done
+  expect "viewer port state" "$state" reachable
+  code=$(curl -sS -o /dev/null --max-time 20 -w '%{http_code}' "$url" || true)
+  [[ "$code" == 200 || "$code" == 401 ]] || { echo "the viewer port did not answer through the URL proxy (got $code at $url)" >&2; exit 1; }
+  echo "viewer port through $url: $code"
+  code=$(curl -sS -o /dev/null --max-time 20 -w '%{http_code}' "http://127.0.0.1:$host_port/" || true)
+  [[ "$code" == 200 || "$code" == 401 ]] || { echo "the viewer port did not answer on the loopback port $host_port (got $code)" >&2; exit 1; }
+
+  step "Listing windows with Cua Driver and saving a screenshot of $ctr"
+  local windows=""
+  desktop_screenshot desktop-screenshot.png
+  grep -qiE 'panel|desktop' <<<"$windows" || { echo "Cua Driver listed no desktop window: $windows" >&2; exit 1; }
+
+  step "Starting Chrome in $ctr (with --no-sandbox) and loading a page through the gateway"
+  if [[ "$(uname -m)" != x86_64 ]]; then
+    echo "Google Chrome has no Linux arm64 build: skipped on $(uname -m)"
+  else
+    root_in_container apt-get update -qq
+    for attempt in 1 2 3; do
+      root_in_container sh -c 'cd /tmp && curl -fsSL --max-time 300 -o chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb && apt-get -o APT::Sandbox::User=root install -y -qq ./chrome.deb' && break
+      ((attempt == 3)) && { echo "Google Chrome did not install" >&2; exit 1; }
+      sleep 10
+    done
+    # Its own sandbox needs a nested user namespace, which the baseline denies: it must fail
+    # as it is, and run through the launcher Silo's computer-use setup writes.
+    expect "chrome with its sandbox" "$(in_container sh -c '/opt/google/chrome/chrome --headless=new --disable-gpu --user-data-dir=/tmp/e2e-chrome-a --dump-dom about:blank >/dev/null 2>&1; echo $?' | sed 's/^[1-9][0-9]*$/refused/')" refused
+    reply=$(in_container sh -c 'google-chrome-stable --headless=new --disable-gpu --user-data-dir=/tmp/e2e-chrome-b --dump-dom https://example.com 2>/dev/null')
+    grep -q 'Example Domain' <<<"$reply" || { echo "Chrome did not load https://example.com through the gateway: ${reply:0:300}" >&2; exit 1; }
+    echo "Chrome loaded https://example.com through the gateway"
+    in_container sh -c 'DISPLAY=:1 nohup google-chrome-stable --disable-gpu --no-first-run --user-data-dir=/tmp/e2e-chrome-c https://example.com >/tmp/e2e-chrome.log 2>&1 &'
+    for _ in $(seq 1 30); do
+      [[ "$(in_container sh -c 'DISPLAY=:1 xwininfo -root -tree 2>/dev/null | grep -ci "example domain\|chrome"')" -gt 0 ]] && break
+      sleep 2
+    done
+    expect "chrome window on the desktop" "$([[ "$(in_container sh -c 'DISPLAY=:1 xwininfo -root -tree 2>/dev/null | grep -ci "example domain\|chrome"')" -gt 0 ]] && echo yes || echo no)" yes
+    expect "chrome runs with --no-sandbox" "$(in_container sh -c 'pgrep -af /opt/google/chrome/chrome | grep -c -- --no-sandbox | sed "s/^[1-9][0-9]*$/yes/"')" yes
+    windows=""
+    desktop_screenshot desktop-chrome-screenshot.png
+    in_container sh -c 'pkill -u silo -f /opt/google/chrome/chrome || true'
+  fi
+
+  step "Forking $ctr with --gui"
+  reply=$("$silo" --json fork "$ctr" --gui --name "$ctr-gui")
+  echo "$reply" | python3 -c 'import json, sys; v = json.load(sys.stdin); print("fork --gui:", v["name"], v["state"], v.get("computerUse", {}).get("state"))'
+  expect "the fork's desktop" "$("$silo" exec "$ctr-gui" -- sh -c 'curl -sS -o /dev/null --max-time 5 -w "%{http_code}" http://127.0.0.1:6901/ | sed "s/^401$/up/;s/^200$/up/"')" up
+  "$silo" stop "$ctr-gui"
+  "$silo" drop "$ctr-gui"
+
+  step "Turning the desktop of $ctr off"
+  "$silo" desktop off "$ctr"
+  desktop_answers && { echo "the desktop still answers after silo desktop off" >&2; exit 1; }
+  if reply=$("$silo" fork "$ctr" --gui --name "$ctr-gui" 2>&1); then
+    echo "fork --gui worked on a computer with its desktop off" >&2
+    "$silo" drop "$ctr-gui" || true
+    exit 1
+  fi
+  grep -q "$ctr has no desktop; turn it on with" <<<"$reply" || { echo "fork --gui said: $reply" >&2; exit 1; }
+  echo "fork --gui: $reply"
+
+  step "Restarting $ctr and forking it with its desktop off"
+  "$silo" stop "$ctr"
+  "$silo" start "$ctr"
+  sleep 30
+  desktop_answers && { echo "the desktop started with the computer although it is off" >&2; exit 1; }
+  "$silo" fork "$ctr" --name "$ctr-plain"
+  [[ "$("$silo" --json status "$ctr-plain" | python3 -c 'import json, sys; print(json.load(sys.stdin)["state"])')" == running ]] || "$silo" start "$ctr-plain"
+  sleep 30
+  expect "the fork's desktop" "$("$silo" exec "$ctr-plain" -- sh -c 'curl -sS -o /dev/null --max-time 3 http://127.0.0.1:6901/ >/dev/null 2>&1 && echo up || echo down')" down
+  "$silo" stop "$ctr-plain"
+  "$silo" drop "$ctr-plain"
+
+  step "Turning the desktop of $ctr on again"
+  "$silo" desktop on "$ctr"
+  wait_for_desktop
+  echo "the desktop answers again"
 
   step "Stopping and dropping $ctr"
   "$silo" stop "$ctr"
@@ -947,7 +1194,8 @@ if [[ -n "$left" ]]; then
 fi
 if [[ "${SILO_E2E_CONTAINER:-0}" == 1 ]]; then
   container_checks
-  left=$(listed "$ctr" "$ctr2" "$ctr3")
+  container_desktop_features
+  left=$(listed "$ctr" "$ctr2" "$ctr3" "$ctr4")
   if [[ -n "$left" ]]; then
     echo "Still listed after drop: $left" >&2
     exit 1
