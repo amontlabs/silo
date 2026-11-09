@@ -1461,26 +1461,42 @@ class DesktopStartSize(unittest.TestCase):
 
 
 class SessionEnvironmentFile(unittest.TestCase):
-    def test_a_container_session_writes_its_environment_for_other_commands(self):
-        with patch.dict(os.environ, {'SILO_RUNTIME': 'container'}):
-            command = service.xfce_command()
+    def test_the_session_writes_its_environment_for_other_commands(self):
+        command = service.XFCE_COMMAND
         self.assertEqual(command[:4], ['dbus-run-session', '--', 'sh', '-c'])
         self.assertIn('session.env', command[4])
         self.assertTrue(command[4].endswith('exec startxfce4'))
         for key in ('DISPLAY', 'DBUS_SESSION_BUS_ADDRESS', 'XDG_RUNTIME_DIR', 'XAUTHORITY'):
             self.assertIn(key, command[4])
 
-    def test_a_virtual_machine_session_is_started_as_before(self):
-        with patch.dict(os.environ, {}, clear=False):
-            os.environ.pop('SILO_RUNTIME', None)
-            self.assertEqual(service.xfce_command(), ['dbus-run-session', '--', 'startxfce4'])
+    def test_stopping_the_desktop_removes_the_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            session = Path(directory) / 'session.env'
+            session.write_text('DISPLAY=:1\n')
+            for state in ({'bootId': 'other'}, {'bootId': service.current_boot_id()}):
+                session.write_text('DISPLAY=:1\n')
+                with patch.object(service, 'SESSION_ENV_FILE', session), \
+                     patch.object(service, 'write_selkies_state'):
+                    service.stop_selkies_processes(dict(state))
+                self.assertFalse(session.exists(), state)
 
 
 class ProcessExecutable(unittest.TestCase):
-    def test_a_process_whose_exe_root_may_not_read_is_named_by_its_comm(self):
-        with patch.object(service.os, 'readlink', side_effect=PermissionError), \
+    CONTAINER = {'SILO_RUNTIME': 'container'}
+
+    def test_in_a_container_a_process_whose_exe_root_may_not_read_is_named_by_its_comm(self):
+        with patch.dict(os.environ, self.CONTAINER), \
+                patch.object(service.os, 'readlink', side_effect=PermissionError), \
                 patch.object(service.Path, 'read_text', return_value='Xvfb\n'):
             self.assertEqual(service.process_exe(123), 'comm:Xvfb')
+
+    def test_in_a_virtual_machine_an_unreadable_exe_is_not_replaced(self):
+        with patch.dict(os.environ, {}, clear=False), \
+                patch.object(service.os, 'readlink', side_effect=PermissionError):
+            os.environ.pop('SILO_RUNTIME', None)
+            with self.assertRaises(PermissionError):
+                service.process_exe(123)
+            self.assertIsNone(service.managed_process_identity(os.getpid()))
 
     def test_a_readable_exe_is_the_link_target(self):
         with patch.object(service.os, 'readlink', return_value='/usr/bin/Xvfb'):
@@ -1490,7 +1506,8 @@ class ProcessExecutable(unittest.TestCase):
     def test_the_identity_of_a_live_process_is_stable_with_either_form(self):
         first = service.managed_process_identity(os.getpid())
         self.assertEqual(service.managed_process_identity(os.getpid()), first)
-        with patch.object(service.os, 'readlink', side_effect=PermissionError):
+        with patch.dict(os.environ, self.CONTAINER), \
+                patch.object(service.os, 'readlink', side_effect=PermissionError):
             fallback = service.managed_process_identity(os.getpid())
             self.assertTrue(fallback['exe'].startswith('comm:'))
             self.assertEqual(service.managed_process_identity(os.getpid()), fallback)

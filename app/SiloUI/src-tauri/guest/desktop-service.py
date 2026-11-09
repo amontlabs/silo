@@ -145,11 +145,15 @@ def current_boot_id():
 
 def process_exe(pid):
     """The executable of a process. Root reads another account's `/proc/<pid>/exe` only with
-    CAP_SYS_PTRACE, which a container computer's root commands do not have; the process name
-    (always readable) stands in, so the same call names the same process at launch and later."""
+    CAP_SYS_PTRACE, which a container computer's root commands do not have; there the process
+    name (always readable) stands in, so the same call names the same process at launch and
+    later. A virtual machine's root has the capability, and an unreadable `exe` there stays an
+    error (the process is not recognised)."""
     try:
         return os.readlink(f'/proc/{pid}/exe')
     except PermissionError:
+        if os.environ.get('SILO_RUNTIME') != 'container':
+            raise
         return 'comm:' + Path(f'/proc/{pid}/comm').read_text().strip()
 
 
@@ -652,6 +656,8 @@ def supervise_selkies_stream(state, account, environment, stopping, restart_requ
 
 def stop_selkies_processes(state, children_by_pid=None):
     children_by_pid = children_by_pid or {}
+    # The session that wrote its environment file is going away.
+    SESSION_ENV_FILE.unlink(missing_ok=True)
     if state.get('bootId') != current_boot_id():
         state.update(sessionState='stopped', sessionProcesses=[],
                      streamState='stopped', streamProcess=None, streamAttempts=0)
@@ -963,19 +969,15 @@ def start_session_processes(commands, environment, account, state, children, sto
                 sleep_until_service_event(0.5)
 
 
-# In a container computer the commands of one exec cannot read the processes of another (Landlock
-# keeps a process from reading outside its own domain), so a program that needs the session's
-# environment (Cua Driver's launcher) cannot read it from the session process. The session writes
-# it to a file the working account owns when it starts.
+# The session writes its environment to a file the working account owns when it starts. A program
+# that needs the session (Cua Driver's launcher, `silo-computer-use`) reads the file instead of
+# another process's environment, which a container's commands cannot read (Landlock keeps a
+# process from reading outside its own domain) and a virtual machine's would read differently.
+SESSION_ENV_FILE = RUN / 'user/session.env'
 SESSION_ENV_SCRIPT = ('umask 077; env | grep -E "^(DISPLAY|DBUS_SESSION_BUS_ADDRESS|XDG_RUNTIME_DIR|XAUTHORITY)=" '
                       '> "$XDG_RUNTIME_DIR/session.env.new" && mv "$XDG_RUNTIME_DIR/session.env.new" '
                       '"$XDG_RUNTIME_DIR/session.env"; exec startxfce4')
-
-
-def xfce_command():
-    if os.environ.get('SILO_RUNTIME') == 'container':
-        return ['dbus-run-session', '--', 'sh', '-c', SESSION_ENV_SCRIPT]
-    return ['dbus-run-session', '--', 'startxfce4']
+XFCE_COMMAND = ['dbus-run-session', '--', 'sh', '-c', SESSION_ENV_SCRIPT]
 
 
 def supervise_selkies():
@@ -1038,7 +1040,7 @@ def supervise_selkies():
                 ('xvfb', ['Xvfb', ':1', '-screen', '0', XVFB_SCREEN, '+extension', 'RANDR',
                           '-noreset', '-nolisten', 'tcp', '-auth', str(RUN / 'user/Xauthority')]),
                 ('pulse', ['pulseaudio', '--daemonize=no', '--exit-idle-time=-1']),
-                ('xfce', xfce_command()),
+                ('xfce', XFCE_COMMAND),
             ]
             start_session_processes(
                 commands, environment, account, state, session_children, lambda: stopping,

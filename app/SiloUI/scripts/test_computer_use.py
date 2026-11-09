@@ -141,7 +141,7 @@ class Guest(unittest.TestCase):
         self.write_pinned()
         (root / 'desktop-config.json').write_text(json.dumps({'autoStart': True}))
 
-    def fake_session_env(self, proc=None, strict=False):
+    def fake_session_env(self, strict=False):
         if strict and 'DBUS_SESSION_BUS_ADDRESS' not in self.session_environ:
             raise cu.Failure('session-unavailable')
         return dict(self.session_environ)
@@ -1034,27 +1034,27 @@ class Watcher(Guest):
 
 
 class SessionEnvironment(unittest.TestCase):
-    def test_the_environment_is_read_from_the_session_process(self):
+    SESSION = ('DISPLAY=:1\nDBUS_SESSION_BUS_ADDRESS=unix:path=/tmp/dbus-Z\n'
+               'XDG_RUNTIME_DIR=/run/silo-desktop/user\nXAUTHORITY=/run/x\nPATH=/ignored\n')
+
+    def read(self, directory, **options):
+        account = mock.Mock(pw_uid=os.getuid())
+        with mock.patch.object(cu.pwd, 'getpwnam', return_value=account):
+            return cu.session_env(directory=directory, **options)
+
+    def test_the_environment_is_read_from_the_file_the_session_wrote(self):
         with tempfile.TemporaryDirectory() as directory:
-            proc = Path(directory)
-            for pid, comm, environ in ((10, 'bash', 'DISPLAY=:9'),
-                                       (11, 'xfce4-session',
-                                        'DISPLAY=:1\0DBUS_SESSION_BUS_ADDRESS=unix:path=/tmp/dbus-Z\0'
-                                        'XDG_RUNTIME_DIR=/run/silo-desktop/user\0XAUTHORITY=/run/x\0PATH=/bin')):
-                (proc / str(pid)).mkdir()
-                (proc / str(pid) / 'comm').write_text(comm + '\n')
-                (proc / str(pid) / 'environ').write_bytes(environ.encode())
-            with mock.patch.object(cu.pwd, 'getpwnam', side_effect=KeyError):
-                found = cu.session_env(proc)
+            (Path(directory) / 'session.env').write_text(self.SESSION)
+            found = self.read(directory)
         self.assertEqual(found, {'DISPLAY': ':1', 'XDG_RUNTIME_DIR': '/run/silo-desktop/user',
                                  'DBUS_SESSION_BUS_ADDRESS': 'unix:path=/tmp/dbus-Z', 'XAUTHORITY': '/run/x'})
 
-    def test_without_a_session_process_defaults_apply_and_strict_fails(self):
+    def test_without_the_file_defaults_apply_and_strict_fails(self):
         with tempfile.TemporaryDirectory() as directory:
-            self.assertEqual(cu.session_env(Path(directory)),
+            self.assertEqual(self.read(directory),
                              {'DISPLAY': ':1', 'XDG_RUNTIME_DIR': '/run/silo-desktop/user'})
             with self.assertRaises(cu.Failure) as caught:
-                cu.session_env(Path(directory), strict=True)
+                self.read(directory, strict=True)
         self.assertEqual(caught.exception.reason, 'session-unavailable')
 
 
@@ -1067,44 +1067,39 @@ class Launcher(unittest.TestCase):
         spec.loader.exec_module(module)
         return module
 
-    def proc(self, directory, pid, comm, environ, uid=None):
-        path = Path(directory) / str(pid)
-        path.mkdir()
-        (path / 'comm').write_text(comm + '\n')
-        (path / 'environ').write_bytes(environ.encode())
+    SESSION = ('DISPLAY=:1\nDBUS_SESSION_BUS_ADDRESS=unix:path=/tmp/dbus-NEW\n'
+               'XDG_RUNTIME_DIR=/run/silo-desktop/user\nXAUTHORITY=/run/xauth\nPATH=/ignored\n')
 
-    def test_it_reads_the_current_session_of_its_own_user(self):
+    def test_it_reads_the_file_the_session_wrote(self):
         launcher = self.load()
         with tempfile.TemporaryDirectory() as directory:
-            self.proc(directory, 5, 'xfce4-session', 'DISPLAY=:1\0DBUS_SESSION_BUS_ADDRESS=unix:path=/tmp/dbus-NEW\0'
-                      'XDG_RUNTIME_DIR=/run/silo-desktop/user\0XAUTHORITY=/run/xauth\0PATH=/bin')
-            self.proc(directory, 6, 'bash', 'DISPLAY=:9')
-            found = launcher.session_env(directory, uid=os.getuid())
+            session = Path(directory) / 'session.env'
+            session.write_text(self.SESSION)
+            found = launcher.session_env(str(session))
             self.assertEqual(found, {'DISPLAY': ':1', 'DBUS_SESSION_BUS_ADDRESS': 'unix:path=/tmp/dbus-NEW',
                                      'XDG_RUNTIME_DIR': '/run/silo-desktop/user', 'XAUTHORITY': '/run/xauth'})
-            # Another user's session is not used.
-            other = launcher.session_env(directory, uid=os.getuid() + 1)
+            # A file of another account is not used.
+            other = launcher.session_env(str(session), uid=os.getuid() + 1)
             self.assertNotIn('XAUTHORITY', other)
-            self.assertEqual(other['DISPLAY'], ':1')
+            self.assertNotEqual(other['DBUS_SESSION_BUS_ADDRESS'], 'unix:path=/tmp/dbus-NEW')
 
-    def test_when_the_session_cannot_be_read_it_uses_the_file_the_session_wrote(self):
+    def test_it_does_not_follow_a_link_or_read_a_pipe(self):
         launcher = self.load()
         with tempfile.TemporaryDirectory() as directory:
-            self.proc(directory, 5, 'xfce4-session', '')
-            os.chmod(Path(directory) / '5' / 'environ', 0)
-            session = Path(directory) / 'session.env'
-            session.write_text('DISPLAY=:1\nDBUS_SESSION_BUS_ADDRESS=unix:path=/tmp/dbus-FILE\n'
-                               'XAUTHORITY=/run/silo-desktop/user/Xauthority\nPATH=/ignored\n')
-            with mock.patch.object(launcher, 'SESSION_FILE', str(session)):
-                found = launcher.session_env(directory, uid=os.getuid())
-        self.assertEqual(found['DBUS_SESSION_BUS_ADDRESS'], 'unix:path=/tmp/dbus-FILE')
-        self.assertEqual(found['XAUTHORITY'], '/run/silo-desktop/user/Xauthority')
-        self.assertNotIn('PATH', found)
+            target = Path(directory) / 'target'
+            target.write_text(self.SESSION)
+            link = Path(directory) / 'link'
+            link.symlink_to(target)
+            pipe = Path(directory) / 'pipe'
+            os.mkfifo(pipe)
+            for path in (link, pipe):
+                self.assertNotEqual(launcher.session_env(str(path))['DBUS_SESSION_BUS_ADDRESS'],
+                                    'unix:path=/tmp/dbus-NEW')
 
-    def test_without_a_session_it_falls_back_to_the_standard_addresses(self):
+    def test_without_the_file_it_falls_back_to_the_standard_addresses(self):
         launcher = self.load()
         with tempfile.TemporaryDirectory() as directory:
-            found = launcher.session_env(directory, uid=1234)
+            found = launcher.session_env(str(Path(directory) / 'none'), uid=1234)
         self.assertEqual(found['DISPLAY'], ':1')
         self.assertTrue(found['DBUS_SESSION_BUS_ADDRESS'].endswith('/bus'))
 
@@ -1215,18 +1210,21 @@ class ReceiptPersistence(unittest.TestCase):
 
 class SessionFile(unittest.TestCase):
     def test_root_reads_only_a_small_regular_file_of_the_account(self):
+        uid = os.getuid()
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / 'good').write_text('DISPLAY=:1\n')
-            self.assertEqual(cu.read_session_file(root / 'good'), 'DISPLAY=:1\n')
+            self.assertEqual(cu.read_session_file(root / 'good', uid), 'DISPLAY=:1\n')
+            with self.assertRaises(OSError):
+                cu.read_session_file(root / 'good', uid + 1)
             os.symlink(root / 'good', root / 'link')
             with self.assertRaises(OSError):
-                cu.read_session_file(root / 'link')
+                cu.read_session_file(root / 'link', uid)
             os.mkfifo(root / 'pipe')
             with self.assertRaises(OSError):
-                cu.read_session_file(root / 'pipe')
+                cu.read_session_file(root / 'pipe', uid)
             (root / 'big').write_text('A' * 100000)
-            self.assertEqual(len(cu.read_session_file(root / 'big')), 8192)
+            self.assertEqual(len(cu.read_session_file(root / 'big', uid)), 8192)
 
 
 class BrowserLaunchers(unittest.TestCase):

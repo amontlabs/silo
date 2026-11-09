@@ -99,12 +99,13 @@ LAUNCHER_TEXT = r'''#!/usr/bin/python3
 """Starts the Cua Driver MCP server inside the current Silo desktop session.
 
 Agents start MCP servers from SSH shells and terminals that may predate the desktop session,
-and the session's D-Bus address changes with every desktop start. This launcher reads the
-environment of the running session (the `xfce4-session` process of the same user) when the
-server starts, turns off Cua Driver's telemetry and update check, and runs `cua-driver mcp`.
+and the session's D-Bus address changes with every desktop start. The desktop session writes its
+environment to a file when it starts; this launcher reads that file when the server starts, turns
+off Cua Driver's telemetry and update check, and runs `cua-driver mcp`.
 Installed by the guest image and refreshed by silo-computer-use.
 """
 import os
+import stat
 import sys
 
 DRIVER = '/usr/local/bin/cua-driver'
@@ -112,43 +113,24 @@ KEYS = ('DISPLAY', 'DBUS_SESSION_BUS_ADDRESS', 'XDG_RUNTIME_DIR', 'XAUTHORITY')
 SESSION_FILE = '/run/silo-desktop/user/session.env'
 
 
-def session_env(proc='/proc', uid=None):
+def session_env(path=SESSION_FILE, uid=None):
     uid = os.getuid() if uid is None else uid
     found = {}
     try:
-        pids = sorted((n for n in os.listdir(proc) if n.isdigit()), key=int)
-    except OSError:
-        pids = []
-    for pid in pids:
+        # Only a small regular file of this account, opened without following a link.
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_NOCTTY)
         try:
-            base = os.path.join(proc, pid)
-            with open(os.path.join(base, 'comm')) as handle:
-                if handle.read().strip() != 'xfce4-session':
-                    continue
-            if os.stat(base).st_uid != uid:
-                continue
-            with open(os.path.join(base, 'environ'), 'rb') as handle:
-                raw = handle.read()
-        except OSError:
-            continue
-        for item in raw.split(b'\0'):
-            key, _, value = item.decode('utf-8', 'replace').partition('=')
-            if key in KEYS and value:
-                found[key] = value
-        if 'DBUS_SESSION_BUS_ADDRESS' in found:
-            break
-    if 'DBUS_SESSION_BUS_ADDRESS' not in found:
-        # A container computer's commands cannot read each other's processes (Landlock keeps a
-        # process from reading one outside its own domain), so the session wrote its
-        # environment to a file when it started.
-        try:
-            with open(SESSION_FILE) as handle:
-                for line in handle.read().splitlines():
+            info = os.fstat(fd)
+            if stat.S_ISREG(info.st_mode) and info.st_uid == uid:
+                text = os.read(fd, 8192).decode('utf-8', 'replace')
+                for line in text.splitlines():
                     key, _, value = line.partition('=')
                     if key in KEYS and value:
-                        found.setdefault(key, value)
-        except OSError:
-            pass
+                        found[key] = value
+        finally:
+            os.close(fd)
+    except OSError:
+        pass
     runtime = found.get('XDG_RUNTIME_DIR') or (
         '/run/silo-desktop/user' if os.path.isdir('/run/silo-desktop/user') else f'/run/user/{uid}')
     found.setdefault('DISPLAY', ':1')
@@ -185,7 +167,6 @@ AGENT_BIN_GLOBS = [f'{HOME}/.nvm/versions/node/*/bin', f'{HOME}/.volta/bin', f'{
 # The default session environment of the Silo desktop (setup-desktop.sh, desktop-service.py).
 SESSION_DISPLAY = ':1'
 SESSION_RUNTIME_DIR = '/run/silo-desktop/user'
-SESSION_PROCESS = 'xfce4-session'
 PRIVACY_ENV = {'CUA_DRIVER_RS_TELEMETRY_ENABLED': '0', 'CUA_DRIVER_RS_UPDATE_CHECK': 'false'}
 WATCH_LOCK = STATE / 'watch.lock'
 WATCH_INTERVAL = 5
@@ -581,67 +562,39 @@ def ensure_driver(pinned, stage):
 
 # ----------------------------------------------------------------- the desktop session
 
-def read_session_file(path):
-    """The session's environment file, which the working account owns: opened without following
-    a link, never blocking on a pipe, and only if it is a small regular file, so root does not
-    hang or run out of memory on what the account made of it."""
+def read_session_file(path, uid):
+    """The session's environment file. The working account owns it and writes it, so root opens
+    it without following a link, never blocking on a pipe, and uses it only if it is a small
+    regular file of that account: root does not hang, run out of memory or take values from
+    what another owner made of it."""
     fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_NOCTTY)
     try:
-        if not stat.S_ISREG(os.fstat(fd).st_mode):
-            raise OSError('not a regular file')
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != uid:
+            raise OSError('not a regular file of the working account')
         return os.read(fd, 8192).decode('utf-8', 'replace')
     finally:
         os.close(fd)
 
 
-def session_env(proc=Path('/proc'), strict=False):
-    """The environment of the desktop session, read from its `xfce4-session` process: DISPLAY,
-    DBUS_SESSION_BUS_ADDRESS, XDG_RUNTIME_DIR (and XAUTHORITY when the session has one).
+def session_env(strict=False, directory=SESSION_RUNTIME_DIR):
+    """The environment of the desktop session, read from the file the session wrote when it
+    started: DISPLAY, DBUS_SESSION_BUS_ADDRESS, XDG_RUNTIME_DIR (and XAUTHORITY when the session
+    has one).
 
     An MCP server an agent starts from an SSH shell has none of these. The bus address is
-    chosen by `dbus-run-session` and changes with every desktop start. Without a session
-    process the bus address is absent; `strict` then raises `session-unavailable`."""
+    chosen by `dbus-run-session` and changes with every desktop start. Without the file (the
+    desktop is off) the bus address is absent; `strict` then raises `session-unavailable`."""
     found = {}
     try:
-        uid = pwd.getpwnam(USER).pw_uid
-    except KeyError:
-        uid = None
-    try:
-        entries = sorted((p for p in proc.iterdir() if p.name.isdigit()), key=lambda p: int(p.name))
-    except OSError:
-        entries = []
-    for entry in entries:
-        try:
-            if (entry / 'comm').read_text().strip() != SESSION_PROCESS:
-                continue
-            if uid is not None and entry.stat().st_uid != uid:
-                continue
-            try:
-                raw = (entry / 'environ').read_bytes()
-            except PermissionError:
-                # A root without CAP_SYS_PTRACE (a container) reads it as the owner instead.
-                raw = subprocess.run(['runuser', '-u', USER, '--', 'cat', str(entry / 'environ')],
-                                     stdin=subprocess.DEVNULL, capture_output=True, timeout=10).stdout
-        except (OSError, subprocess.SubprocessError):
-            continue
-        for item in raw.split(b'\0'):
-            key, _, value = item.decode('utf-8', 'replace').partition('=')
+        for line in read_session_file(Path(directory) / 'session.env', pwd.getpwnam(USER).pw_uid).splitlines():
+            key, _, value = line.partition('=')
             if key in ('DISPLAY', 'DBUS_SESSION_BUS_ADDRESS', 'XDG_RUNTIME_DIR', 'XAUTHORITY') and value:
                 found[key] = value
-        if 'DBUS_SESSION_BUS_ADDRESS' in found:
-            break
-    if 'DBUS_SESSION_BUS_ADDRESS' not in found:
-        # A container computer's commands cannot read each other's processes (Landlock), so the
-        # session wrote its environment to a file when it started.
-        try:
-            for line in read_session_file(Path(SESSION_RUNTIME_DIR) / 'session.env').splitlines():
-                key, _, value = line.partition('=')
-                if key in ('DISPLAY', 'DBUS_SESSION_BUS_ADDRESS', 'XDG_RUNTIME_DIR', 'XAUTHORITY') and value:
-                    found.setdefault(key, value)
-        except OSError:
-            pass
+    except (OSError, KeyError):
+        pass
     if 'DBUS_SESSION_BUS_ADDRESS' not in found and strict:
-        raise Failure('session-unavailable', 'no desktop session process')
+        raise Failure('session-unavailable', 'no desktop session')
     environment = {'DISPLAY': found.get('DISPLAY', SESSION_DISPLAY),
                    'XDG_RUNTIME_DIR': found.get('XDG_RUNTIME_DIR', SESSION_RUNTIME_DIR)}
     for key in ('DBUS_SESSION_BUS_ADDRESS', 'XAUTHORITY'):
