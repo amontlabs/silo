@@ -392,19 +392,34 @@ mod linux {
             drop(stdout);
             let status = child.wait().map_err(io)?;
             let reason = errors.join().unwrap_or_default();
-            if !status.success() {
-                return Err(unavailable(format!(
-                    "Packing the computer's files failed: {}.",
-                    last_line(&reason)
-                )));
-            }
-            copied.map_err(io)?;
+            packed(copied, status.success(), &reason)?;
             let end = file.stream_position().map_err(io)?;
             file.seek(SeekFrom::Start(length_at)).map_err(io)?;
             file.write_all(&(end - start).to_be_bytes()).map_err(io)?;
             file.seek(SeekFrom::Start(end)).map_err(io)?;
         }
         file.sync_all().map_err(io)
+    }
+
+    /// Whether a layer reached the export file, from how the copy into the file and the helper
+    /// ended. A file that could not be written (a full disk) also ends the helper, with a broken
+    /// pipe, so the write is the reason to give when both failed.
+    fn packed(
+        copied: std::io::Result<()>,
+        helper_succeeded: bool,
+        helper_errors: &str,
+    ) -> Result<(), RuntimeError> {
+        copied.map_err(|error| {
+            unavailable(format!("The export file could not be written: {error}."))
+        })?;
+        if helper_succeeded {
+            Ok(())
+        } else {
+            Err(unavailable(format!(
+                "Packing the computer's files failed: {}.",
+                last_line(helper_errors)
+            )))
+        }
     }
 
     pub fn load(paths: &RuntimePaths, request: &SnapshotLoad) -> Result<(), RuntimeError> {
@@ -540,6 +555,31 @@ mod linux {
             )));
         }
         fed.map_err(|_| corrupt("a layer is damaged"))
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn a_full_disk_is_named_instead_of_the_helpers_broken_pipe() {
+            let full = || std::io::Error::from_raw_os_error(libc::ENOSPC);
+            let error = packed(Err(full()), false, "silo-ctr: write the stream: Broken pipe\n")
+                .unwrap_err()
+                .to_string();
+            assert!(
+                error.starts_with("The export file could not be written:")
+                    && !error.contains("Broken pipe"),
+                "{error}"
+            );
+            // The helper's own failure (a device in the layer) is still the reason when the
+            // file took everything the helper wrote.
+            let error = packed(Ok(()), false, "silo-ctr: /dev/x is a device\n")
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("is a device"), "{error}");
+            assert!(packed(Ok(()), true, "").is_ok());
+        }
     }
 }
 
