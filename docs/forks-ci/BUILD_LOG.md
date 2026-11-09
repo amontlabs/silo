@@ -7,7 +7,8 @@ Plan: [PLAN.md](PLAN.md).
 - **Merged (8 Nov 2026):** F1 (#84), F2 (#88), C1 (#87), R1 (#83), F3 (#86).
 - **Open phases:** F4 (export a computer that lives on another machine) is built on
   `claude/forks-phase-4-transfer`, pull request open, its live check is the `linux-host.yml` two-account
-  job; R2 (Linux hosts as runner machines) is in progress; container computers (C2 onwards) are being designed.
+  job; R2 (Linux hosts as runner machines) is in progress; container computers: CT1 to CT5 are merged, CT6 (export, import and
+  Connections) is built in #104 and its live check was green twice in a row.
 - **Open follow-ups found during the build:**
   - A Linux fork leaves its fork-point checkpoint on the source (it was a manual checkpoint before F2 too);
     macOS removes its fork point with the last fork. Fixing it means the macOS release machinery on Linux.
@@ -795,6 +796,75 @@ app as a Linux VM, and the "not yet" list is down to export (CT6) and memory che
   process probes matched their own shell; and a screenshot of a busier Chrome page was larger than one command's output limit, so
   it is copied out in pieces now.
 
+
+### 9 Nov 2026: phase CT6 built (export, import and Connections for container computers)
+
+Branch `claude/containers-ct6` ([#104](https://github.com/amontlabs/silo/pull/104)). A container computer is exported to a
+`.silo-backup` file, imported under a new name on the same device or another, and exported and imported across Connections, with the
+same CLI, API and app as a VM. Design: [CONTAINERS-PLAN](CONTAINERS-PLAN.md).
+
+- **Payload.** A checkpoint of a container is a chain of layers, so the file holds the chain: a header (the checkpoint's name and its
+  record without secrets, GitHub access, environment and layer ids) and one zstd frame per layer (`containers/archive.rs`). Each layer is
+  written by `silo-ctr pack` and made by `silo-ctr unpack`, both run in the container's user namespace (`pack.rs` in the shim): a small
+  record stream with owners, modes, times, extended attributes (whiteouts and opaque folders as they are), hard links, symbolic links,
+  FIFOs and sockets; any other device stops the export. Nothing is merged or copied first, so an export needs no disk beyond the file.
+  The unpack changes its root to the new empty layer, refuses any path with `..`, an empty name or an absolute one, and stops at a byte
+  limit (the free space less the host-disk margin) and 20 million entries. **Why not GNU tar:** a tar extracted as the container's root can
+  be led through a symbolic link it created earlier; with its root changed to the layer nothing can name a file outside it, and the
+  shim already had the owner, attribute and whiteout code (`merge`). The format is Silo's own and documented in `pack.rs`; the choice
+  and its gap (no tool reads it but Silo) are recorded here as AGENTS.md asks.
+- **Format 6.** A file with a container row is written as format 6 (4 and 5 as before), so an older Silo refuses it as newer and never
+  hands it to MicroSandbox. Rows are marked by the `silo.runtime=container` label in the recorded settings, which must agree with
+  `runtime: container` in the computer's settings. The row leaves the image out and names the config digest it needs; the importing Silo
+  refuses any other than the one it pins. The header is compared with the manifest's settings (cpus, memory, image reference, root disk)
+  before anything is loaded, which is what the descriptor comparison is for a VM.
+- **One routing seam.** `snapshot save GROUP:NAME FILE` and `snapshot load FILE --group G --runtime container` are answered by
+  `containers::route`/`run` like the other checkpoint commands; `snapshot head` now answers the group's newest checkpoint. The backup
+  service's runner (`SystemMsbRunner`) routes through `containers::route`: a container command runs as `silod --container-runtime ...`
+  (a child, so it can be timed out and cancelled as MicroSandbox's can), and a list is merged with the container rows. `backup.rs`
+  branches only where a payload is made or read (the capture reference, the lean-image row, the extraction, the load and its descriptor
+  check), and a captured checkpoint is named `group:name` when the runtime reports no folder for it. `Capability::Export` is gone; the
+  list has `memorySnapshots` left, and the app shows Export for a container.
+- **Found by the live checks** (each failed a KVM run; none by a unit test):
+  - A container's `inspect` answer lacked the computer's name and `kind: managed` in its root disk, which MicroSandbox's export checks
+    require; its network section is the gateway's, not the profile (the export records the deny-all profile, as for a VM, and an import
+    of a container asks for the gateway's one policy, as a fork does: `containers::imported_network_policy`).
+  - Sockets are carried, not skipped: the desktop's stale-display check needs the lock file and the socket together.
+  - The controller of a two-device import has no container computer, so `snapshot list` was MicroSandbox's alone and the import saw no
+    group; the list is merged whenever the container checkpoint folder exists.
+  - **A home folder with a default ACL** (the CI runner's accounts have one) gave the image's unpacked folders an entry that umoci could
+    not restore ("invalid argument"). Silo's folders for container files now have their default ACL removed (`layout::strip_default_acl`).
+  - **An engine started from another account's session** carried that account's `XDG_RUNTIME_DIR`, and `systemd-run --user` could not
+    reach its own manager ("Failed to connect to bus: Permission denied"). Commands for the user manager now get this account's runtime
+    folder when the environment's is not its own.
+  - A container's sockets live under its name: with `e2e-hosts-remote-ctr-imported` and `/home/silo-controller/...` the holder's socket
+    path passed 107 bytes ("path must be shorter than SUN_LEN"). The live check uses short names; the limit is not changed here.
+- **CT5 review notes.** The e2e viewer checks assert 401 without the password and 200 with it (over `ssh -L`, the URL proxy, the loopback
+  port and inside the computer). The disk guard test no longer depends on the clock: the slow measurement ends only after the
+  unmeasured layer was stopped. The desktop service removes `/run/silo-desktop/failed` when the streamer comes up, so a boot hook that
+  gave up waiting does not leave it behind. The comments at `containers/mod.rs` (the boot command is bounded by `BOOT_TIMEOUT`) and
+  `desktop-service.py` (what a previous boot left in `/run` is stale; `/run` is a tmpfs in both kinds) are corrected.
+- **Tests.** Shim: `pack` 13 (round trip of files, links, hard links, modes, times, whiteouts and opaque folders, sockets, the limits, hostile
+  paths, damaged and padded streams). Engine: `containers::archive` 5 (6 on a Mac) (header checks, the match with the settings, the refusal on a device
+  that cannot run containers), `backup::` (a container exports by `group:name` without the image in format 6; a VM still in 4; the settings
+  a real container reports pass the export checks; import through the container runtime and the refusal where none runs, at inspection
+  and at import; data larger than the manifest promises; kind disagreement; format 5 cannot hold a container), `route` for an imported
+  checkpoint with no container computer, the user-manager environment. Frontend: capabilities and the overview page. Linux unit tests
+  also ran on the Mac in a container (shim and engine).
+- **Live check** (KVM runner, x86_64, Ubuntu 24.04, `linux-host.yml`, code head `24555ef63`): run 42654535736, **attempt 1 and attempt 2
+  both green** (CI run 42654535640 green). `linux-host-e2e.sh`: a container with a file, a link, a nested file and a Claude Code login is
+  exported (`silo export` without `--yes` and a terminal refuses and names the login; with `--yes` it writes 1.6 MiB), imported as a
+  second computer (listed as `container`), started, and its file, link, nested file and login read back; changing the copy leaves the
+  source alone; an import under an existing name and a half file are refused and add no computer; after both are dropped no
+  `silo-import-*` checkpoint is left. `hosts-e2e.sh` (two accounts): a container made on the host from the controller is listed, run
+  in, switched off and on as to its desktop, exported to the controller (the login is named; `--yes` writes 1.6 MiB; neither transfer
+  area keeps a file), imported on the controller and onto the host with `--device`, and both copies started and read. Failed runs on the
+  way, each for a product reason above: 42625816364, 42628340339, 42631011903, 42635178431, 42639046657, 42642591613, 42647204135,
+  42651247266. No run needed a rerun for a GitHub 504.
+- **Not done.** The viewer and an `ssh` session over Connections for a container are not driven by the two-account run (exec and the
+  desktop switch are); they use the same routed methods and `runtime::command_for`. A mid-write abort of `pack` is a kill of the child
+  (its layers stay on disk until the grace period collects them). A container whose image is not the pinned one cannot be exported
+  (the file does not carry it). The socket-path length is not raised.
 
 ### R1: CI runner on the Mac (branch `claude/runner-phase-1`)
 
