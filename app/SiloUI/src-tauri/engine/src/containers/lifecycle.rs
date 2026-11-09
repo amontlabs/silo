@@ -1813,6 +1813,7 @@ mod tests {
         let paths = test_paths(home.path());
         let layout = Layout::new(&paths.home);
         let dir = layout.computer("dev");
+        std::fs::create_dir_all(dir.path()).unwrap();
         std::fs::create_dir_all(layout.layer("l0").join("etc")).unwrap();
         dir.write_record(&record(true)).unwrap();
         let made = layout.image("sha256:made-from");
@@ -1847,6 +1848,7 @@ mod tests {
         let paths = test_paths(home.path());
         let layout = Layout::new(&paths.home);
         let dir = layout.computer("dev");
+        std::fs::create_dir_all(dir.path()).unwrap();
         std::fs::create_dir_all(layout.layer("l0").join("etc")).unwrap();
         dir.write_record(&record(true)).unwrap();
         let made = layout.image("sha256:made-from");

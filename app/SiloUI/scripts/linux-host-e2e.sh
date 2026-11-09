@@ -173,7 +173,7 @@ container_checkpoint_features() {
     expect "$fork_i sees the checkpoint" "$("$silo" exec "$fork_i" -- cat /workspace/ct4-base)" base
     expect "$fork_i lacks later writes" "$(has_file "$fork_i" /workspace/ct4-after)" no
     expect "$fork_i has no cron job of the parent" "$(has_file "$fork_i" /etc/cron.d/ct4-cron)" no
-    "$silo" exec "$fork_i" -- sh -c "echo fork-$i > /workspace/only-$i"
+    "$silo" exec "$fork_i" -- sh -c "echo fork-$i > /workspace/only-$i; echo fork-$i > /home/silo/only-$i"
   done
   expect "the parent has its cron job" "$(has_file "$ctr" /etc/cron.d/ct4-cron)" yes
   for i in 1 2 3 4; do
@@ -187,7 +187,7 @@ container_checkpoint_features() {
   step "Diff in a fork"
   diff_text=$("$silo" diff "$ctr-f-1")
   echo "$diff_text"
-  grep -q "only-1" <<<"$diff_text" || { echo "the diff of $ctr-f-1 does not list its change" >&2; exit 1; }
+  grep -q "/home/silo/only-1" <<<"$diff_text" || { echo "the diff of $ctr-f-1 does not list its change" >&2; exit 1; }
   for i in 1 2 3 4; do
     "$silo" stop "$ctr-f-$i"
     "$silo" drop "$ctr-f-$i"
@@ -195,13 +195,13 @@ container_checkpoint_features() {
 
   step "Keeping a fork into $ctr and undoing it"
   "$silo" fork "$ctr" --name "$ctr-k"
-  "$silo" exec "$ctr-k" -- sh -c 'echo kept > /workspace/ct4-kept'
+  "$silo" exec "$ctr-k" -- sh -c 'echo kept > /home/silo/ct4-kept'
   "$silo" fold "$ctr-k"
-  expect "kept file in the parent" "$(has_file "$ctr" /workspace/ct4-kept)" yes
+  expect "kept file in the parent" "$(has_file "$ctr" /home/silo/ct4-kept)" yes
   "$silo" undo "$ctr"
   state=$("$silo" --json status "$ctr" | python3 -c 'import json, sys; print(json.load(sys.stdin)["state"])')
   [[ "$state" == running ]] || "$silo" start "$ctr"
-  expect "kept file after undo" "$(has_file "$ctr" /workspace/ct4-kept)" no
+  expect "kept file after undo" "$(has_file "$ctr" /home/silo/ct4-kept)" no
   expect "earlier state after undo" "$(has_file "$ctr" /workspace/ct4-after)" yes
   "$silo" stop "$ctr-k"
   "$silo" drop "$ctr-k"
