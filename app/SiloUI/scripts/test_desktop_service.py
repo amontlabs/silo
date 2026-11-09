@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import shutil
 import stat
+import subprocess
 import tempfile
 from types import SimpleNamespace
 import unittest
@@ -1534,6 +1535,22 @@ class SessionEnvironmentFile(unittest.TestCase):
         self.assertTrue(command[4].endswith('exec startxfce4'))
         for key in ('DISPLAY', 'DBUS_SESSION_BUS_ADDRESS', 'XDG_RUNTIME_DIR', 'XAUTHORITY'):
             self.assertIn(key, command[4])
+
+    def test_the_session_keeps_the_umask_it_was_started_with(self):
+        # Only the file is private: what runs in the desktop makes files as anywhere else.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'bin').mkdir()
+            stub = root / 'bin/startxfce4'
+            stub.write_text('#!/bin/sh\numask > "$XDG_RUNTIME_DIR/umask"\n')
+            stub.chmod(0o755)
+            environment = dict(PATH=f"{root / 'bin'}:{os.environ['PATH']}", DISPLAY=':1',
+                               XDG_RUNTIME_DIR=str(root), DBUS_SESSION_BUS_ADDRESS='unix:path=/tmp/dbus-T')
+            subprocess.run(['sh', '-c', service.SESSION_ENV_SCRIPT], env=environment, check=True,
+                           preexec_fn=lambda: os.umask(0o022))
+            self.assertEqual((root / 'umask').read_text().strip().lstrip('0'), '22')
+            self.assertEqual(stat.S_IMODE((root / 'session.env').stat().st_mode), 0o600)
+            self.assertIn('DBUS_SESSION_BUS_ADDRESS=unix:path=/tmp/dbus-T', (root / 'session.env').read_text())
 
     def test_stopping_the_desktop_removes_the_file(self):
         with tempfile.TemporaryDirectory() as directory:
