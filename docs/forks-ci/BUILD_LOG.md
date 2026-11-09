@@ -4,10 +4,9 @@ Plan: [PLAN.md](PLAN.md).
 
 ## Resume
 
-- **Merged (8 Nov 2026):** F1 (#84), F2 (#88), C1 (#87), R1 (#83), F3 (#86).
-- **Open phases:** F4 (export a computer that lives on another machine) is built on
-  `claude/forks-phase-4-transfer`, pull request open, its live check is the `linux-host.yml` two-account
-  job; R2 (Linux hosts as runner machines) is in progress; container computers: CT1 to CT5 are merged, CT6 (export, import and
+- **Merged (8 Nov 2026):** F1 (#84), F2 (#88), C1 (#87), R1 (#83), F3 (#86), F4 (#93; its live check is
+  the `linux-host.yml` two-account job).
+- **Open phases:** R2 (Linux hosts as runner machines) is in progress; container computers: CT1 to CT5 are merged, CT6 (export, import and
   Connections) is built in #104.
 - **Open follow-ups found during the build:**
   - A Linux fork leaves its fork-point checkpoint on the source (it was a manual checkpoint before F2 too);
@@ -1441,3 +1440,39 @@ checks passed; the failures were four product problems, all fixed afterwards (te
 - **Open:** (1) the live check above; (2) `silo-runner` is not in the macOS archive; (3) one helper per machine, so two machines
   serving the same recipe need two labels; (4) the default budget ignores memory the host's other services use, so on a
   shared machine set `linuxBudget`.
+
+## Post-merge review
+
+### Forks and sharing a computer as a file, VM computers (F2 #88, F3 #86, F4 #93; 9 Nov 2026)
+
+Read on `main` at `69742419`: the fork point and the desktop setting, `backup.rs`, `backup_controller.rs`,
+`changes/credentials.rs`, `transfer_area.rs`, `export_transfer.rs`, the `exports.*` handlers, the bridge's
+`exports.file` stream, `cli/src/share.rs` and the app's export dialog. No code behaviour was changed; nothing was
+run against a computer or an engine.
+
+- **Open, needs the owner's decision: an export can hold memory.** The rule is that no memory is carried into a
+  fork or an export. Forks keep it (a fork point is disks only and every fork starts from disks). Exports do not,
+  in three cases: a macOS computer exported while it runs (`macos_computers.rs` `create_archive` calls
+  `save_running` and adds `state.vzvmsave`), a macOS checkpoint that saved memory, and a Linux VM checkpoint
+  taken while the computer ran (`backup_at_paths` drops the checkpoint's scope and `snapshot save` of
+  MicroSandbox 0.7.6 writes a full checkpoint with its memory; read in its `archive.rs` at tag `v0.7.6`, not
+  seen in a file). No import uses the memory (`import_pending_restore_with_environment` records `state: "disk"`;
+  the macOS import's own message is "Import verifies it but starts the new computer from its disk"), so it is
+  only larger files and whatever the programs held in memory, which the login check does not look at. Both
+  behaviours are older than F3; F3 added `silo export --checkpoint` and F4 the same over Connections.
+  What a fix needs decided: on macOS the memory can simply be left out (a running export would take the disk-only
+  capture a fork point takes; not live-checked here, there is no macOS computer on the Dev engine); on Linux
+  MicroSandbox has no way to save a full checkpoint without its memory, so it is either refuse such a checkpoint
+  (most checkpoints are taken while the computer runs) or build a conversion. Until then the docs say what the
+  file holds.
+- **Docs corrected.** `docs/SiloUI-CLI.md` said "No memory is in any file" and `docs/THREAT-MODEL.md` "No memory is
+  ever carried into an export"; both are true of container computers only and now say so. The sharing sections of
+  both name the three cases and how to leave memory out. The threat model also says which folders the login check
+  lists (the `silo diff` walk in `changes/collect.sh`; `/workspace` is not one of them). `backup.rs`: the comment on
+  `FORMAT_VERSION` described format 5 while the constant is the newest readable format (6). The Resume section and
+  `PLAN.md` listed F4 as an open pull request.
+- **Seen, not changed (low; from reading the code):** two copies from another device to the same `-o` path at the same time share one
+  `<path>.part` (`export_transfer::create_part` removes the other's as a leftover), so the first to finish can
+  publish the second's unfinished file; it is complete once the second ends, and the second reports an error. A
+  transfer-area export leaves its "Export complete" result and a system notice on the owning device, naming a file
+  the controller then discards. `Area::open_for_read` keeps its used marker when the file is past the cap.

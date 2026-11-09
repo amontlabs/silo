@@ -26,9 +26,11 @@ pub(crate) use macos_archive::{
 };
 
 const MAGIC: &[u8; 16] = b"SILO-BACKUP\0\0\0\0\0";
-/// Format 5: a computer's guest image may travel by reference (`imageEmbedded: false` with its
-/// `imageDigest`) and a fork-time record may follow the payloads. An archive that needs neither
-/// is still written as format 4, which older Silo builds read.
+/// The newest format this Silo reads. An archive is written in the oldest format that holds
+/// what it carries (`attach_fork_records`), so older Silo builds read what they can. Format 5:
+/// a computer's guest image may travel by reference (`imageEmbedded: false` with its
+/// `imageDigest`) and a fork-time record may follow the payloads; an archive that needs neither
+/// is written as format 4.
 const FORMAT_VERSION: u32 = 6;
 /// Format 6: a computer may be a container computer, whose payload is its layers (see
 /// `containers::archive`). Only an archive that holds one is written as format 6.
