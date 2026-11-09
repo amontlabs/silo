@@ -337,7 +337,12 @@ pub(crate) fn configure_with(
         &script,
         Duration::from_secs(1800),
         true,
-    )?;
+    )
+    .map_err(|error| {
+        // The caller's message names the operation only; the engine's log keeps the guest's reason.
+        eprintln!("Desktop setup of {name} failed: {error:?}");
+        error
+    })?;
     Ok(())
 }
 

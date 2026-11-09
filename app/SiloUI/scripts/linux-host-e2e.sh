@@ -285,7 +285,11 @@ PY
 
 container_checks() {
   step "Creating container computer $ctr"
-  "$silo" create "$ctr" --container --cpus 1 --memory 2 --disk 2
+  if ! "$silo" create "$ctr" --container --cpus 1 --memory 2 --disk 2; then
+    echo "== The engine's log after the failed create" >&2
+    journalctl --user --unit "$engine_unit" --no-pager -n 80 >&2 || true
+    exit 1
+  fi
 
   step "Starting $ctr"
   "$silo" start "$ctr"
