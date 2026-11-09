@@ -552,9 +552,15 @@ mod tests {
     #[test]
     fn only_a_measurement_in_which_du_ran_says_anything_about_the_layer() {
         // `du` printed its total.
-        assert_eq!(du_result("4096\t/layer\nsilo-du-exit:0\n"), Some(Some(4096)));
+        assert_eq!(
+            du_result("4096\t/layer\nsilo-du-exit:0\n"),
+            Some(Some(4096))
+        );
         // `du` exits non-zero when a file vanished under it; its total counts.
-        assert_eq!(du_result("8192\t/layer\nsilo-du-exit:1\n"), Some(Some(8192)));
+        assert_eq!(
+            du_result("8192\t/layer\nsilo-du-exit:1\n"),
+            Some(Some(8192))
+        );
         // `du` ran and printed nothing readable: the layer cannot be measured.
         assert_eq!(du_result("silo-du-exit:1\n"), Some(None));
         assert_eq!(du_result("lots\t/layer\nsilo-du-exit:0\n"), Some(None));

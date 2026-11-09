@@ -55,7 +55,9 @@ mod tests {
     fn the_script_waits_for_the_account_and_runs_the_images_boot_hook() {
         let script = &boot_command("box").argv[2];
         let account = script.find("working-account.json").unwrap();
-        let hook = script.find("timeout 120 /usr/local/libexec/silo-desktop-boot").unwrap();
+        let hook = script
+            .find("timeout 120 /usr/local/libexec/silo-desktop-boot")
+            .unwrap();
         assert!(account < hook);
         // No hook, nothing to start: not an error.
         assert!(script.contains("[ -x /usr/local/libexec/silo-desktop-boot ] || exit 0"));
@@ -67,7 +69,9 @@ mod tests {
     fn a_hook_that_fails_leaves_the_marker_the_desktop_reports_and_a_good_one_does_not() {
         let script = &boot_command("box").argv[2];
         let marker = script.find("> /run/silo-desktop/failed").unwrap();
-        let hook = script.find("timeout 120 /usr/local/libexec/silo-desktop-boot").unwrap();
+        let hook = script
+            .find("timeout 120 /usr/local/libexec/silo-desktop-boot")
+            .unwrap();
         let success = script.find("&& exit 0").unwrap();
         // The marker is written only after the hook failed, and the command then fails.
         assert!(hook < success && success < marker);

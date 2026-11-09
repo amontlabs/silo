@@ -712,9 +712,10 @@ app as a Linux VM, and the "not yet" list is down to export (CT6) and memory che
   checkpoint copy (the frozen scope is killed after the 15 s stop wait; the copy runs outside the container and still
   saves), can act on a measurement minutes old, that sizes adding up to more than the disk can still fill it, and that a
   checkpoint freezes for up to 10 s of waiting plus 30 s of copying.
-- **Recipes do not make containers.** A recipe has no runtime, so "a recipe with `desktop: false` creates a container
-  without one" is not possible as written; the live check covers the same setting through `silo desktop off`, a restart and a
-  fork (which inherits it). Whether `silo create --container` should take `--no-desktop` is open.
+- **Recipes do not make containers, but a container can be created with its desktop off.** A recipe has no runtime, so a
+  recipe's `desktop: false` never makes a container. `computers.create` takes `configuration.desktop =
+  {startWithComputer: false}` for a container as for a VM (the app's form sends it); `silo create --no-desktop`
+  now sends the same request for both kinds, and the live check creates a container that way.
 - **Found on the way** (the KVM runner; four of these failed the first live runs):
   - A root command in a container has no `CAP_SYS_PTRACE`, so it cannot read another account's `/proc/<pid>/exe`. The desktop
     service's identity check of a process it just started (Xvfb) failed, and every container creation failed with "Desktop
@@ -747,8 +748,8 @@ app as a Linux VM, and the "not yet" list is down to export (CT6) and memory che
   non-zero), started through the launcher, loaded https://example.com through the gateway, and opened a window on the desktop (listed
   by Cua Driver with a second screenshot, 190 KB) whose process has `--no-sandbox`. `silo fork --gui` returned a running fork with
   computer use ready; `silo desktop off` stopped the desktop, `fork --gui` then said "has no desktop; turn it on with `silo desktop on`",
-  a restart and a plain fork of it started none, and `silo desktop on` brought it back. A recipe cannot make a container, so
-  `desktop: false` at creation is covered by the setting through `desktop off`.
+  a restart and a plain fork of it started none, and `silo desktop on` brought it back. `desktop: false` at creation was first
+  covered only through `silo desktop off`; the review fixes below add a container created with `--no-desktop`.
 
 ### R1: CI runner on the Mac (branch `claude/runner-phase-1`)
 
