@@ -562,12 +562,12 @@ print(port.get("state") or "-", port.get("hostPort") or "-", port.get("url") or 
     reply=$(in_container sh -c 'google-chrome-stable --headless=new --disable-gpu --user-data-dir=/tmp/e2e-chrome-b --dump-dom https://example.com 2>/dev/null')
     grep -q 'Example Domain' <<<"$reply" || { echo "Chrome did not load https://example.com through the gateway: ${reply:0:300}" >&2; exit 1; }
     echo "Chrome loaded https://example.com through the gateway"
-    in_container sh -c 'DISPLAY=:1 nohup google-chrome-stable --disable-gpu --no-first-run --user-data-dir=/tmp/e2e-chrome-c https://example.com >/tmp/e2e-chrome.log 2>&1 &'
+    in_container sh -c 'DISPLAY=:1 XAUTHORITY=/run/silo-desktop/user/Xauthority nohup google-chrome-stable --disable-gpu --no-first-run --user-data-dir=/tmp/e2e-chrome-c https://example.com >/tmp/e2e-chrome.log 2>&1 &'
     for _ in $(seq 1 30); do
-      [[ "$(in_container sh -c 'DISPLAY=:1 xwininfo -root -tree 2>/dev/null | grep -ci "example domain\|chrome"')" -gt 0 ]] && break
+      [[ "$(in_container sh -c 'DISPLAY=:1 XAUTHORITY=/run/silo-desktop/user/Xauthority xwininfo -root -tree 2>/dev/null | grep -ci "example domain\|chrome"')" -gt 0 ]] && break
       sleep 2
     done
-    expect "chrome window on the desktop" "$([[ "$(in_container sh -c 'DISPLAY=:1 xwininfo -root -tree 2>/dev/null | grep -ci "example domain\|chrome"')" -gt 0 ]] && echo yes || echo no)" yes
+    expect "chrome window on the desktop" "$([[ "$(in_container sh -c 'DISPLAY=:1 XAUTHORITY=/run/silo-desktop/user/Xauthority xwininfo -root -tree 2>/dev/null | grep -ci "example domain\|chrome"')" -gt 0 ]] && echo yes || echo no)" yes
     expect "chrome runs with --no-sandbox" "$(in_container sh -c 'pgrep -af /opt/google/chrome/chrome | grep -c -- --no-sandbox | sed "s/^[1-9][0-9]*$/yes/"')" yes
     windows=""
     desktop_screenshot desktop-chrome-screenshot.png
