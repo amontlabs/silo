@@ -296,9 +296,6 @@ mod server {
     struct Input {
         sender: mpsc::UnboundedSender<Bytes>,
         queue: Arc<Queue>,
-        /// The task writing to the command: ended with the channel, even if the command (in a
-        /// process group of its own, out of reach of the kill) never reads again.
-        writer: Option<Arc<AbortOnDrop>>,
     }
 
     impl Input {
@@ -312,20 +309,21 @@ mod server {
                 Self {
                     sender,
                     queue,
-                    writer: None,
                 },
                 receiver,
             )
         }
 
-        /// Starts the task that writes the queue to `sink`.
+        /// Starts the task that writes the queue to `sink`. The caller keeps the returned guard
+        /// for as long as the channel lives: the task ends with it, even if the command (in a
+        /// process group of its own, out of reach of the kill) never reads again. Ending the
+        /// input (dropping this `Input`) lets the task finish writing what is queued.
         fn attach(
-            &mut self,
+            &self,
             sink: impl AsyncWrite + Unpin + Send + 'static,
             receiver: mpsc::UnboundedReceiver<Bytes>,
-        ) {
-            let task = tokio::spawn(write_input(sink, receiver, self.queue.clone()));
-            self.writer = Some(Arc::new(AbortOnDrop(task)));
+        ) -> AbortOnDrop {
+            AbortOnDrop(tokio::spawn(write_input(sink, receiver, self.queue.clone())))
         }
 
         /// Queues `data` without waiting. `false` when the command is that far behind, or the
@@ -362,6 +360,7 @@ mod server {
     struct Chan {
         pty: Option<Pty>,
         input: Option<Input>,
+        writer: Option<AbortOnDrop>,
         master: Option<Arc<std::fs::File>>,
         group: Option<Arc<ExecGroup>>,
         task: Option<JoinHandle<()>>,
@@ -370,6 +369,7 @@ mod server {
     impl Chan {
         fn end(&mut self) {
             self.input = None;
+            self.writer = None;
             if let Some(group) = self.group.take() {
                 group.kill();
             }
@@ -450,6 +450,7 @@ mod server {
                 Ok(started) => {
                     let chan = self.channels.get_mut(&channel).expect("channel kept");
                     chan.input = started.input;
+                    chan.writer = Some(started.writer);
                     chan.master = started.master;
                     chan.group = Some(started.group);
                     chan.task = Some(started.task);
@@ -739,6 +740,7 @@ mod server {
 
     struct Started {
         input: Option<Input>,
+        writer: AbortOnDrop,
         master: Option<Arc<std::fs::File>>,
         group: Arc<ExecGroup>,
         task: JoinHandle<()>,
@@ -829,8 +831,8 @@ mod server {
         let stdin = child.stdin.take().ok_or("The session has no input.")?;
         let stdout = child.stdout.take().ok_or("The session has no output.")?;
         let stderr = child.stderr.take().ok_or("The session has no output.")?;
-        let (mut input, receiver) = Input::new(budget);
-        input.attach(stdin, receiver);
+        let (input, receiver) = Input::new(budget);
+        let writer = input.attach(stdin, receiver);
         let held = group.clone();
         let task = tokio::spawn(async move {
             let out = tokio::spawn(pump(stdout, handle.clone(), channel, None));
@@ -848,6 +850,7 @@ mod server {
         });
         Ok(Started {
             input: Some(input),
+            writer,
             master: None,
             group,
             task,
@@ -904,8 +907,8 @@ mod server {
             master.try_clone().map_err(|error| error.to_string())?,
         );
         let writer = tokio::fs::File::from_std(master);
-        let (mut input, receiver) = Input::new(budget);
-        input.attach(writer, receiver);
+        let (input, receiver) = Input::new(budget);
+        let writer = input.attach(writer, receiver);
         let held = group.clone();
         let task = tokio::spawn(async move {
             let output = tokio::spawn(pump(reader, handle.clone(), channel, None));
@@ -916,6 +919,7 @@ mod server {
         });
         Ok(Started {
             input: Some(input),
+            writer,
             master: Some(sizing),
             group,
             task,
@@ -1620,15 +1624,19 @@ mod server {
         #[tokio::test(flavor = "multi_thread")]
         async fn a_writer_stuck_on_a_command_that_never_reads_ends_with_the_channel() {
             let budget = Arc::new(AtomicUsize::new(0));
-            let (mut input, receiver) = Input::new(budget.clone());
+            let (input, receiver) = Input::new(budget.clone());
             // A pipe nobody reads: the writer blocks on it for good.
             let (_reader, writer) = tokio::io::duplex(16);
-            input.attach(writer, receiver);
+            let guard = input.attach(writer, receiver);
             assert!(input.push(&[1u8; 4096]));
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             let sender = input.sender.clone();
-            // What `Chan::end` does: the input goes, and the writer with it.
+            // Ending the input alone leaves the writer to finish what is queued...
             drop(input);
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            assert!(!sender.is_closed(), "the writer was cut off at the end of input");
+            // ...and what `Chan::end` does ends it.
+            drop(guard);
             tokio::time::timeout(std::time::Duration::from_secs(5), sender.closed())
                 .await
                 .expect("the writer task outlived the channel");
