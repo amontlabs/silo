@@ -436,8 +436,16 @@ desktop_screenshot() {
   echo "$out"
   grep -q '^WINDOWS' <<<"$out" || { echo "Cua Driver did not answer" >&2; exit 1; }
   windows=$(grep '^WINDOWS' <<<"$out")
-  in_container base64 -w0 "$shot" | base64 -d > "$artifacts/$file"
-  local size
+  # A command's output is limited, and a screenshot of a busy page can be larger than the limit
+  # once base64 has made it a third bigger: copy it out in pieces.
+  : > "$artifacts/$file"
+  local piece=0 chunk size
+  while :; do
+    chunk=$(in_container sh -c "dd if=$shot bs=98304 skip=$piece count=1 2>/dev/null | base64 -w0")
+    [[ -n "$chunk" ]] || break
+    printf %s "$chunk" | base64 -d >> "$artifacts/$file"
+    piece=$((piece + 1))
+  done
   size=$(wc -c < "$artifacts/$file")
   [[ "$(head -c 4 "$artifacts/$file" | tail -c 3)" == PNG && "$size" -gt 5000 ]] || { echo "$file is not a screenshot ($size bytes)" >&2; exit 1; }
   echo "screenshot $file: $size bytes"
