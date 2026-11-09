@@ -165,7 +165,8 @@ pub fn route(paths: &RuntimePaths, args: &[String]) -> Route {
             }
             // Without a group the answer is MicroSandbox's with the container checkpoints added.
             Some("list") if args::snapshot_group(args).is_none() => {
-                return if layout.names().is_empty() {
+                // An imported container has checkpoints before it has a record.
+                return if layout.names().is_empty() && !layout.snapshots().is_dir() {
                     Route::Runtime
                 } else {
                     Route::MergeList
@@ -1240,6 +1241,29 @@ mod tests {
         assert_eq!(route(&["stop", "--force", "box"]), Route::Container);
         assert_eq!(route(&["pause", "box", "--guest-flush", "required"]), Route::Container);
         assert_eq!(route(&["resume", "box"]), Route::Container);
+    }
+
+    #[test]
+    fn an_imported_containers_checkpoint_is_listed_on_a_device_with_no_container_computer() {
+        let home = tempfile::tempdir().unwrap();
+        let paths = paths(home.path());
+        let list = strings(&["snapshot", "list", "--format", "json"]);
+        assert_eq!(route(&paths, &list), Route::Runtime);
+        let layout = Layout::new(home.path());
+        let template = {
+            make(home.path(), "box", false);
+            layout.computer("box").read_record().unwrap()
+        };
+        std::fs::remove_dir_all(layout.computer("box").path()).unwrap();
+        assert!(layout.names().is_empty());
+        layers::Store::new(&layout)
+            .write(&layers::Snapshot::new("silo-import-ab", "c1", Vec::new(), template))
+            .unwrap();
+        assert_eq!(route(&paths, &list), Route::MergeList);
+        assert_eq!(
+            route(&paths, &strings(&["restore", "silo-import-ab:c1", "--name", "kid"])),
+            Route::Container
+        );
     }
 
     #[test]
