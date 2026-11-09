@@ -534,6 +534,7 @@ fn parse_exec(args: &[String]) -> Result<Exec, String> {
         timeout: None,
         tty: false,
         console_socket: None,
+        fixed_environment: false,
         argv,
     };
     let mut index = 0;

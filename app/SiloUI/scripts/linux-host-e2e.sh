@@ -7,8 +7,9 @@
 # start, exec, a file written and read back, listed as kind container, hardening spot checks,
 # stop, drop), then a second container with the desktop on: the desktop service, the viewer port
 # (over SSH as the app's viewer reaches it, and through the URL proxy), Cua Driver listing windows
-# and saving a screenshot, Chrome with --no-sandbox, `fork --gui`, `silo desktop off`. The host must have crun, skopeo, umoci and the other container prerequisites
-# (`silo host init` names them).
+# and saving a screenshot, Chrome with --no-sandbox, `fork --gui`, `silo desktop off`; then a
+# container created with `--no-desktop`. The host must have crun, skopeo, umoci and the other
+# container prerequisites (`silo host init` names them).
 #
 # Usage: linux-host-e2e.sh ENGINE_DIR
 # ENGINE_DIR is an unpacked engine archive (silo-engine/), whose engine is already serving.
@@ -30,6 +31,8 @@ ctr2="$name-ctr2"
 ctr3="$name-ctr3"
 # The container that gets the desktop checks, and the forks made from it.
 ctr4="$name-ctr4"
+# A container created with its desktop off.
+ctr5="$name-ctr5"
 # Where the desktop checks leave their evidence (a screenshot of the desktop and of Chrome); the
 # workflow uploads it. A run outside CI keeps it in a temporary folder.
 artifacts="${SILO_E2E_ARTIFACTS:-}"
@@ -66,7 +69,7 @@ cleanup() {
   [[ -n "$fill_file" ]] && rm -f "$fill_file"
   rm -f "${stderr_file:-}"
   remove_editor_key
-  for computer in "$ctr4-gui" "$ctr4-plain" "$ctr4" "$ctr3" "$ctr2" "$ctr" "$ctr-k" "$ctr-f-1" "$ctr-f-2" "$ctr-f-3" "$ctr-f-4" "$fork" "$name"; do
+  for computer in "$ctr4-gui" "$ctr4-plain" "$ctr4" "$ctr5" "$ctr3" "$ctr2" "$ctr" "$ctr-k" "$ctr-f-1" "$ctr-f-2" "$ctr-f-3" "$ctr-f-4" "$fork" "$name"; do
     if listed "$computer" 2>/dev/null | grep -qx -- "$computer"; then
       echo "Stopping and dropping $computer after a failed run"
       "$silo" stop "$computer" || true
@@ -460,9 +463,31 @@ wait_for_desktop() {
   return 1
 }
 
+# A container created with its desktop off. `--no-desktop` sends the request the app's form sends
+# (`computers.create` with `configuration.desktop = {startWithComputer: false}`); a recipe cannot
+# make a container, so this is the creation-time setting for one.
+container_without_desktop() {
+  local ctr="$ctr5" state
+  step "Creating and starting $ctr, a container computer with its desktop off at creation"
+  "$silo" create "$ctr" --container --no-desktop --cpus 1 --memory 2 --disk 4
+  expect "desktop setting" "$("$silo" --json status "$ctr" | python3 -c 'import json, sys; print(json.load(sys.stdin)["desktop"])')" False
+  "$silo" start "$ctr"
+  # The engine's boot command waits for the working account (made by this first start) and runs
+  # the desktop boot hook, which starts nothing for a computer whose desktop is off.
+  sleep 45
+  desktop_answers && { echo "a desktop answers in a computer created with it off" >&2; exit 1; }
+  for process in Xvfb xfce4-session selkies; do
+    expect "process $process" "$(in_container sh -c "pgrep -f $process >/dev/null && echo up || echo down")" down
+  done
+  state=$(root_in_container /usr/local/bin/silo-desktop status | python3 -c 'import json, sys; print(json.load(sys.stdin)["state"])')
+  expect "desktop service state" "$state" stopped
+  step "Stopping and dropping $ctr"
+  "$silo" stop "$ctr"
+  "$silo" drop "$ctr"
+}
+
 # The desktop, computer use and Chrome in a container computer, through the same commands a virtual
-# machine's desktop uses. A recipe cannot make a container, so `desktop: false` at creation is
-# checked through the same setting: `silo desktop off`, a restart and a fork.
+# machine's desktop uses. `silo desktop off`, a restart and a fork check the setting after creation.
 container_desktop_features() {
   # Every helper above reads $ctr: for these checks it is the desktop container.
   local ctr="$ctr4" host state code url host_port forwarder reply
@@ -1199,7 +1224,8 @@ fi
 if [[ "${SILO_E2E_CONTAINER:-0}" == 1 ]]; then
   container_checks
   container_desktop_features
-  left=$(listed "$ctr" "$ctr2" "$ctr3" "$ctr4")
+  container_without_desktop
+  left=$(listed "$ctr" "$ctr2" "$ctr3" "$ctr4" "$ctr5")
   if [[ -n "$left" ]]; then
     echo "Still listed after drop: $left" >&2
     exit 1
