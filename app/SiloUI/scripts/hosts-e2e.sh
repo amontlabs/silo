@@ -33,9 +33,10 @@ fork="$name-fork"
 imported="$name-imported"
 sent="$name-sent"
 # The container computer of the container steps, and the computers its export becomes.
-ctr="$name-ctr"
-ctr_imported="$name-ctr-imported"
-ctr_sent="$name-ctr-sent"
+# (Short names: a container's sockets live under its name and a path is limited to 107 bytes.)
+ctr="$name-c"
+ctr_imported="$name-ci"
+ctr_sent="$name-cs"
 state_dir="${SILO_E2E_STATE_DIR:-.silo-dev}"
 port="${SILO_E2E_SSH_PORT:-22}"
 host_key_file="${SILO_E2E_HOST_KEY_FILE:-/etc/ssh/ssh_host_ed25519_key.pub}"
