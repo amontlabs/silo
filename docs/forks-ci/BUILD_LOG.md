@@ -668,6 +668,14 @@ restart, the disk size) are closed. Design as approved: [CONTAINERS-PLAN](CONTAI
   (this step is replaced by the host guard check below; the remount it checked is gone). The
   first runs failed on the test script (the diff scan does not look in `/workspace`; a plain fork starts stopped; a container's `--disk`
   is only its workspace, so its limit is root disk plus workspace, 81 GiB, and the test shrinks the recorded size).
+- **Live check after the review fixes** (KVM runner, code head `681bf0c6b`, Linux host run 42566219752, attempts 3 and 4, both
+  green; attempt 1 failed on the VM image download before any container step, and attempt 2 passed the container steps and failed on the same download in the two-device step): the disk-limit step is
+  replaced by the host guard. A container whose recorded size was 400 MiB wrote 600 MiB (nothing stopped it while the host
+  had room); a `fallocate`d file on the engine's file system left 2.5 GiB free (margin 5 GiB). Within the guard's first
+  look (about 37 s) the oversized computer was stopped; `silo start` of it was refused with "This device's disk is nearly
+  full (2.5 GiB free; Silo keeps at least 5.0 GiB free), so Silo did not start a container computer. Free some space on
+  this device, then try again."; a checkpoint of the other container, which was within its size, was refused with the
+  same message and that container kept running; after the file was removed the oversized computer started again.
 
 ### R1: CI runner on the Mac (branch `claude/runner-phase-1`)
 
