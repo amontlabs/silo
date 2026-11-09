@@ -47,6 +47,44 @@ as the previous boot's (boots are nearly deterministic) made PulseAudio exit wit
 computer use reported "The Linux desktop was not running". Reproduced on the first
 restart of a built-in computer; intermittent on restart and on import.
 
+## Container computers
+
+A container computer (a Linux host's opt-in kind, see the [threat model](THREAT-MODEL.md#container-computers))
+has the same desktop as a Linux VM: the setting is the same (on by default; `silo create --no-desktop`, or the
+desktop switch of the app's new-computer form, creates it with the desktop off; `silo desktop off|on` and the
+computer's settings change it later; forks inherit it), and so are the viewer, `silo fork --gui`, the
+computer-use tools and their approvals. What differs:
+
+- **Start.** A VM's init runs `/usr/local/libexec/silo-desktop-boot`. A container has no init system and its
+  PID 1 has no capability (the service switches to the `silo` account), so after every start the engine runs
+  the same boot hook once as a root command (`containers/desktop.rs`), in the background: it waits up to 150 s
+  for the working account to exist (a first start creates it after the container is up), then starts the
+  desktop unless its automatic start is off. The hook starts nothing until the desktop's install is recorded
+  as finished (a start can come while the installer still runs). The start never waits for it and never fails
+  because of it; a hook that fails leaves the desktop's status at `failed`, which `silo status` and the app
+  show. Like every command the engine runs itself, the boot command gets Silo's fixed environment only, not
+  the computer's own variables.
+- **Setup.** The image carries the desktop (v4 and later images). `setup-desktop.sh` runs from the same engine
+  code, but in a container (`SILO_RUNTIME=container`) it refuses the apt install path: a computer whose image
+  has no complete desktop says so and must be created again. A container created before this phase has no
+  desktop setting and is the same.
+- **The session's environment.** The desktop session of a VM or a container writes its display, bus and runtime
+  variables to `/run/silo-desktop/user/session.env` (the working account's, mode 0600) when it starts, and the
+  desktop stopping removes it. Cua Driver's launcher and `silo-computer-use` read that file instead of another
+  process's environment, which one command in a container cannot read.
+- **Chrome.** A container's Chrome runs with `--no-sandbox`: the computer-use setup writes launchers in
+  `/usr/local/bin` (`google-chrome`, `google-chrome-stable`, `chromium`, `chromium-browser`) and desktop
+  entries (`google-chrome.desktop`, `chromium.desktop`) that start the first installed of Google Chrome's,
+  Debian's Chromium's and Chromium's other path, whichever name was called, with the flag, because the baseline
+  denies the nested user namespace Chrome's sandbox needs. The launchers stay when the desktop is turned off.
+  They cover those names only: any other Chromium-based program an agent starts with `--no-sandbox`
+  (Playwright, Puppeteer, Electron) has the same exposure. The computer's page in the app says a web page that
+  compromises the browser reaches everything in the computer and can act with its GitHub access and secrets
+  and use its in-guest `silo` client. The image has no browser; install one in the computer.
+- **The viewer** reaches the streamer on the container's loopback through the computer's own SSH server
+  (`direct-tcpip` to the container's loopback only), as for a VM. `/run` is memory, as in a VM, so the
+  display's authority cookie and the session file are not part of a checkpoint or a fork.
+
 ## Selkies settings, screen size and recipes 4 and 5
 
 `launch_selkies_streamer` in `guest/desktop-service.py` starts Selkies 2.0.0 with
@@ -321,8 +359,8 @@ error. They use temporary paths without running a computer.
      Hermes and OpenCode are not registered. The launcher exists because an MCP server started
      from an SSH shell has no desktop environment and the D-Bus address changes with every
      desktop start: it reads `DISPLAY`, `DBUS_SESSION_BUS_ADDRESS` and `XDG_RUNTIME_DIR` from the
-     running `xfce4-session`, sets the telemetry and update-check switches off, and runs
-     `cua-driver mcp`;
+     file the desktop session writes when it starts (`/run/silo-desktop/user/session.env`), sets the
+     telemetry and update-check switches off, and runs `cua-driver mcp`;
   3. removes leftovers of the earlier LCU setup: its registrations, approval entries and hooks
      (only `mcp__lcu*` and commands under `/opt/lcu` or `/usr/local/bin/lcu`; a user's own rule
      that mentions "lcu" stays), its `lcu*` skills, `~/.local/share/lcu`, its Pi package entry,

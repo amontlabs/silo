@@ -99,43 +99,38 @@ LAUNCHER_TEXT = r'''#!/usr/bin/python3
 """Starts the Cua Driver MCP server inside the current Silo desktop session.
 
 Agents start MCP servers from SSH shells and terminals that may predate the desktop session,
-and the session's D-Bus address changes with every desktop start. This launcher reads the
-environment of the running session (the `xfce4-session` process of the same user) when the
-server starts, turns off Cua Driver's telemetry and update check, and runs `cua-driver mcp`.
+and the session's D-Bus address changes with every desktop start. The desktop session writes its
+environment to a file when it starts; this launcher reads that file when the server starts, turns
+off Cua Driver's telemetry and update check, and runs `cua-driver mcp`.
 Installed by the guest image and refreshed by silo-computer-use.
 """
 import os
+import stat
 import sys
 
 DRIVER = '/usr/local/bin/cua-driver'
 KEYS = ('DISPLAY', 'DBUS_SESSION_BUS_ADDRESS', 'XDG_RUNTIME_DIR', 'XAUTHORITY')
+SESSION_FILE = '/run/silo-desktop/user/session.env'
 
 
-def session_env(proc='/proc', uid=None):
+def session_env(path=SESSION_FILE, uid=None):
     uid = os.getuid() if uid is None else uid
     found = {}
     try:
-        pids = sorted((n for n in os.listdir(proc) if n.isdigit()), key=int)
-    except OSError:
-        pids = []
-    for pid in pids:
+        # Only a small regular file of this account, opened without following a link.
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_NOCTTY)
         try:
-            base = os.path.join(proc, pid)
-            with open(os.path.join(base, 'comm')) as handle:
-                if handle.read().strip() != 'xfce4-session':
-                    continue
-            if os.stat(base).st_uid != uid:
-                continue
-            with open(os.path.join(base, 'environ'), 'rb') as handle:
-                raw = handle.read()
-        except OSError:
-            continue
-        for item in raw.split(b'\0'):
-            key, _, value = item.decode('utf-8', 'replace').partition('=')
-            if key in KEYS and value:
-                found[key] = value
-        if 'DBUS_SESSION_BUS_ADDRESS' in found:
-            break
+            info = os.fstat(fd)
+            if stat.S_ISREG(info.st_mode) and info.st_uid == uid:
+                text = os.read(fd, 8192).decode('utf-8', 'replace')
+                for line in text.splitlines():
+                    key, _, value = line.partition('=')
+                    if key in KEYS and value:
+                        found[key] = value
+        finally:
+            os.close(fd)
+    except OSError:
+        pass
     runtime = found.get('XDG_RUNTIME_DIR') or (
         '/run/silo-desktop/user' if os.path.isdir('/run/silo-desktop/user') else f'/run/user/{uid}')
     found.setdefault('DISPLAY', ':1')
@@ -172,7 +167,6 @@ AGENT_BIN_GLOBS = [f'{HOME}/.nvm/versions/node/*/bin', f'{HOME}/.volta/bin', f'{
 # The default session environment of the Silo desktop (setup-desktop.sh, desktop-service.py).
 SESSION_DISPLAY = ':1'
 SESSION_RUNTIME_DIR = '/run/silo-desktop/user'
-SESSION_PROCESS = 'xfce4-session'
 PRIVACY_ENV = {'CUA_DRIVER_RS_TELEMETRY_ENABLED': '0', 'CUA_DRIVER_RS_UPDATE_CHECK': 'false'}
 WATCH_LOCK = STATE / 'watch.lock'
 WATCH_INTERVAL = 5
@@ -568,44 +562,39 @@ def ensure_driver(pinned, stage):
 
 # ----------------------------------------------------------------- the desktop session
 
-def session_env(proc=Path('/proc'), strict=False):
-    """The environment of the desktop session, read from its `xfce4-session` process: DISPLAY,
-    DBUS_SESSION_BUS_ADDRESS, XDG_RUNTIME_DIR (and XAUTHORITY when the session has one).
+def read_session_file(path, uid):
+    """The session's environment file. The working account owns it and writes it, so root opens
+    it without following a link, never blocking on a pipe, and uses it only if it is a small
+    regular file of that account: root does not hang, run out of memory or take values from
+    what another owner made of it."""
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_NOCTTY)
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != uid:
+            raise OSError('not a regular file of the working account')
+        return os.read(fd, 8192).decode('utf-8', 'replace')
+    finally:
+        os.close(fd)
+
+
+def session_env(strict=False, directory=SESSION_RUNTIME_DIR):
+    """The environment of the desktop session, read from the file the session wrote when it
+    started: DISPLAY, DBUS_SESSION_BUS_ADDRESS, XDG_RUNTIME_DIR (and XAUTHORITY when the session
+    has one).
 
     An MCP server an agent starts from an SSH shell has none of these. The bus address is
-    chosen by `dbus-run-session` and changes with every desktop start. Without a session
-    process the bus address is absent; `strict` then raises `session-unavailable`."""
+    chosen by `dbus-run-session` and changes with every desktop start. Without the file (the
+    desktop is off) the bus address is absent; `strict` then raises `session-unavailable`."""
     found = {}
     try:
-        uid = pwd.getpwnam(USER).pw_uid
-    except KeyError:
-        uid = None
-    try:
-        entries = sorted((p for p in proc.iterdir() if p.name.isdigit()), key=lambda p: int(p.name))
-    except OSError:
-        entries = []
-    for entry in entries:
-        try:
-            if (entry / 'comm').read_text().strip() != SESSION_PROCESS:
-                continue
-            if uid is not None and entry.stat().st_uid != uid:
-                continue
-            try:
-                raw = (entry / 'environ').read_bytes()
-            except PermissionError:
-                # A root without CAP_SYS_PTRACE (a container) reads it as the owner instead.
-                raw = subprocess.run(['runuser', '-u', USER, '--', 'cat', str(entry / 'environ')],
-                                     stdin=subprocess.DEVNULL, capture_output=True, timeout=10).stdout
-        except (OSError, subprocess.SubprocessError):
-            continue
-        for item in raw.split(b'\0'):
-            key, _, value = item.decode('utf-8', 'replace').partition('=')
+        for line in read_session_file(Path(directory) / 'session.env', pwd.getpwnam(USER).pw_uid).splitlines():
+            key, _, value = line.partition('=')
             if key in ('DISPLAY', 'DBUS_SESSION_BUS_ADDRESS', 'XDG_RUNTIME_DIR', 'XAUTHORITY') and value:
                 found[key] = value
-        if 'DBUS_SESSION_BUS_ADDRESS' in found:
-            break
+    except (OSError, KeyError):
+        pass
     if 'DBUS_SESSION_BUS_ADDRESS' not in found and strict:
-        raise Failure('session-unavailable', 'no desktop session process')
+        raise Failure('session-unavailable', 'no desktop session')
     environment = {'DISPLAY': found.get('DISPLAY', SESSION_DISPLAY),
                    'XDG_RUNTIME_DIR': found.get('XDG_RUNTIME_DIR', SESSION_RUNTIME_DIR)}
     for key in ('DBUS_SESSION_BUS_ADDRESS', 'XAUTHORITY'):
@@ -654,6 +643,88 @@ def write_privacy_env():
             os.replace(temporary, SYSTEM_ENVIRONMENT)
     except OSError as error:
         log(f'could not switch off Cua Driver telemetry system-wide: {error}')
+
+
+BROWSER_LAUNCHER_DIR = Path('/usr/local/bin')
+APPLICATIONS_DIR = Path('/usr/local/share/applications')
+# The wrapper starts the first of these that exists. The names are what an agent, `xdg-open`
+# or the desktop's launcher runs (`google-chrome-stable` and `google-chrome` are Google
+# Chrome's own, `chromium` and `chromium-browser` the distributions').
+BROWSER_BINARIES = ('/opt/google/chrome/google-chrome', '/usr/lib/chromium/chromium',
+                    '/usr/lib/chromium-browser/chromium-browser')
+BROWSER_NAMES = ('google-chrome', 'google-chrome-stable', 'chromium', 'chromium-browser')
+BROWSER_LAUNCHER_MARK = '# silo-container-browser-launcher'
+BROWSER_LAUNCHER_TEXT = '''#!/bin/sh
+# silo-container-browser-launcher
+# Written by silo-computer-use in a Silo container computer. A browser's own sandbox needs a
+# nested user namespace, which a container computer's seccomp profile denies (the baseline has
+# no exception for the browser), so the browser runs without it: a web page that compromises
+# the browser reaches everything in this computer.
+for browser in %s; do
+    if [ -x "$browser" ]; then
+        exec "$browser" --no-sandbox "$@"
+    fi
+done
+echo "No browser is installed in this computer (looked for: %s)." >&2
+exit 127
+''' % (' '.join(BROWSER_BINARIES), ', '.join(BROWSER_BINARIES))
+# The desktop entries the packages install (Google Chrome's, Debian's Chromium) and the launcher
+# each one runs instead; the launcher adds the flag itself.
+BROWSER_ENTRIES = {'google-chrome.desktop': 'google-chrome-stable', 'chromium.desktop': 'chromium'}
+BROWSER_DESKTOP_NAME = 'Web Browser (without its sandbox)'
+BROWSER_DESKTOP_TEXT = '''[Desktop Entry]
+Version=1.0
+Name=%s
+Comment=Silo container computer: starts the browser without its sandbox
+Exec=%%s %%%%U
+Terminal=false
+Type=Application
+Categories=Network;WebBrowser;
+MimeType=text/html;text/xml;application/xhtml+xml;x-scheme-handler/http;x-scheme-handler/https;
+StartupNotify=true
+''' % BROWSER_DESKTOP_NAME
+
+
+def is_container():
+    """Whether this guest is a Silo container computer (the engine sets the variable)."""
+    return os.environ.get('SILO_RUNTIME') == 'container'
+
+
+def write_if_changed(path, text, mode):
+    """Writes `path` atomically unless it already holds exactly `text`; never replaces a file
+    that is not ours (`owned` is checked by the caller)."""
+    if path.is_file() and path.read_text() == text and os.access(path, os.X_OK if mode & 0o100 else os.R_OK):
+        return
+    path.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(prefix='.tmp-', dir=path.parent)
+    with os.fdopen(fd, 'w') as output:
+        output.write(text)
+        os.fchmod(output.fileno(), mode)
+    os.replace(temporary, path)
+
+
+def write_browser_launchers(directory=None, applications=None):
+    """In a container computer, puts a `--no-sandbox` launcher ahead of each browser command
+    on PATH and a desktop entry for the same name ahead of the packaged one, so a browser
+    started by an agent, the desktop or `xdg-open` runs the way the baseline allows. A file of
+    the same name that this helper did not write is left alone. A virtual machine keeps its
+    browser's sandbox."""
+    if not is_container():
+        return
+    directory = directory or BROWSER_LAUNCHER_DIR
+    applications = applications or APPLICATIONS_DIR
+    try:
+        for name in BROWSER_NAMES:
+            target = directory / name
+            if target.exists() and BROWSER_LAUNCHER_MARK not in target.read_text(errors='replace'):
+                continue
+            write_if_changed(target, BROWSER_LAUNCHER_TEXT, 0o755)
+        for entry_name, launcher in BROWSER_ENTRIES.items():
+            entry = applications / entry_name
+            if not entry.exists() or f'Name={BROWSER_DESKTOP_NAME}' in entry.read_text(errors='replace'):
+                write_if_changed(entry, BROWSER_DESKTOP_TEXT % (directory / launcher), 0o644)
+    except OSError as error:
+        log(f'could not write the browser launchers: {error}')
 
 
 @contextlib.contextmanager
@@ -1170,6 +1241,7 @@ def reconcile():
             return {'reconcile': 'busy'}
         write_launcher()
         write_privacy_env()
+        write_browser_launchers()
         agents, pending = reconcile_agents(receipt)
         if (agents, pending) != (receipt.get('agents') or [], receipt.get('pending') or []):
             write_json(RECEIPT, dict(receipt, agents=agents, pending=pending, updatedAt=now()))
@@ -1297,6 +1369,7 @@ def update(pinned, mode, force, boot):
         # registered, and registrations follow a desktop session that was started again.
         write_launcher()
         write_privacy_env()
+        write_browser_launchers()
         agents, pending = reconcile_agents(existing)
         if (agents, pending) != (existing.get('agents') or [], existing.get('pending') or []):
             write_json(RECEIPT, dict(existing, agents=agents, pending=pending, updatedAt=now()))
@@ -1318,6 +1391,7 @@ def update(pinned, mode, force, boot):
             session_error = failure
         write_launcher()
         write_privacy_env()
+        write_browser_launchers()
         registered, pending, failed = configure(sorted(AGENTS), mode)
         if failed and not registered:
             raise Failure('setup-failed', 'could not register the driver with ' + ', '.join(failed))

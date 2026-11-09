@@ -81,6 +81,22 @@ name what it waits for (`desktop starting, computer use installing`). The result
 usual JSON plus `computerUse` (`state`, `approval`, `appliedApproval`, `driverVersion`,
 `reason`, `session`). `--gui` takes a computer, not a folder.
 
+## Container computers
+
+A container computer on a Linux host has computer use as a VM does: the same Cua Driver, the same launcher
+(`/usr/local/libexec/silo-cua-driver-mcp`), `silo mcp`, approvals and `fork --gui` (see
+[Container computers](SiloUI-DESKTOP.md#container-computers) for how its desktop starts). The setup that runs
+after every boot also writes the container's Chrome launchers, which add `--no-sandbox` (the container's
+seccomp profile denies the nested user namespace Chrome's sandbox needs). An agent that drives Chrome
+drives a browser whose pages are not isolated from the rest of the computer: a page that compromises it
+can act with the computer's GitHub access, use its secrets (the gateway swaps a placeholder for the real
+value on the hosts a secret is allowed for) and use the computer's in-guest `silo` client. The launchers cover
+`google-chrome`, `google-chrome-stable`, `chromium` and `chromium-browser`, each starting the first
+installed of Google Chrome and Chromium whatever name was called, and they stay after `silo desktop off`;
+any other Chromium-based program an agent starts with `--no-sandbox` (Playwright, Puppeteer, Electron) is
+exposed the same way. Approval is the user's guard: `ask` keeps the user in the loop, and `auto` should
+not be used on a container that holds anything that matters.
+
 ## Approval: `ask` and `auto` for agents inside a fork
 
 `ask` and `auto` are the computer-use approval of the agents that run inside a computer (Claude

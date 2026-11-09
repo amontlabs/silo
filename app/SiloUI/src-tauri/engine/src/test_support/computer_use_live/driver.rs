@@ -15,13 +15,13 @@ impl Fixture {
     }
 
     /// Runs `script` as the silo account with the environment of the running desktop session,
-    /// read from the silo-owned `xfce4-session` the way `/usr/local/libexec/silo-cua-driver-mcp`
+    /// read from the file the session wrote the way `/usr/local/libexec/silo-cua-driver-mcp`
     /// reads it, so it behaves as an agent's MCP server does.
     pub(crate) fn exec_in_session(&self, name: &str, script: &str) -> String {
         self.exec_status(
             name,
             &format!(
-                "session=$(python3 - <<'PY'\n{SESSION_ENVIRONMENT}\nPY\n); \
+                "session=$({SESSION_ENVIRONMENT}); \
                  runuser -u silo -- env HOME=/home/silo USER=silo LOGNAME=silo CUA_DRIVER_RS_TELEMETRY_ENABLED=0 CUA_DRIVER_RS_UPDATE_CHECK=false $session {script}"
             ),
         )
@@ -81,21 +81,8 @@ impl Fixture {
     }
 }
 
-/// Prints `KEY=value` for the display variables of the silo-owned `xfce4-session`.
-const SESSION_ENVIRONMENT: &str = r#"import os, pwd
-uid = pwd.getpwnam('silo').pw_uid
-keys = (b'DISPLAY', b'DBUS_SESSION_BUS_ADDRESS', b'XDG_RUNTIME_DIR', b'XAUTHORITY')
-for pid in sorted((n for n in os.listdir('/proc') if n.isdigit()), key=int):
-    try:
-        with open(f'/proc/{pid}/comm') as handle:
-            if handle.read().strip() != 'xfce4-session' or os.stat(f'/proc/{pid}').st_uid != uid:
-                continue
-        with open(f'/proc/{pid}/environ', 'rb') as handle:
-            items = handle.read().split(b'\0')
-    except OSError:
-        continue
-    print(' '.join(i.decode() for i in items if i.partition(b'=')[0] in keys and i.partition(b'=')[2]))
-    break"#;
+/// Prints `KEY=value` for the display variables the desktop session wrote when it started.
+const SESSION_ENVIRONMENT: &str = r#"grep -E '^(DISPLAY|DBUS_SESSION_BUS_ADDRESS|XDG_RUNTIME_DIR|XAUTHORITY)=' /run/silo-desktop/user/session.env | tr '\n' ' '"#;
 
 /// The probes a working desktop session needs from `cua-driver doctor --json`.
 const DOCTOR_PROBES: [&str; 3] = ["display server", "X11 connection", "AT-SPI"];

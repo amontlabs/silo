@@ -8,7 +8,7 @@ describe("computerCan", () => {
     expect(computerCan(container, "editor")).toBe(true)
     expect(computerCan(container, "sshAccess")).toBe(true)
     expect(computerCan(container, "export")).toBe(false)
-    expect(computerCan(container, "desktop")).toBe(false)
+    expect(computerCan(container, "desktop")).toBe(true)
     expect(computerCan(container, "memorySnapshots")).toBe(false)
   })
 

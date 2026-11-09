@@ -677,6 +677,125 @@ restart, the disk size) are closed. Design as approved: [CONTAINERS-PLAN](CONTAI
   this device, then try again."; a checkpoint of the other container, which was within its size, was refused with the
   same message and that container kept running; after the file was removed the oversized computer started again.
 
+### 9 Nov 2026: phase CT5 built (the desktop and computer use for container computers)
+
+Branch `claude/containers-ct5`. A container computer has the desktop and computer use through the same API, CLI, MCP and
+app as a Linux VM, and the "not yet" list is down to export (CT6) and memory checkpoints (never). Design as decided:
+[CONTAINERS-PLAN](CONTAINERS-PLAN.md).
+
+- **Capability.** `Capability::Desktop` is on for the container kind (`containers/capability.rs`, `container-unavailable.json`
+  now `["export", "memorySnapshots"]`). Three refusals that existed only for containers are gone: the create-time
+  "no desktop yet", the update-time "a container's desktop may not change", and the new-computer rule that kept a
+  container from taking its image's desktop (`desktop::default_new_computer_desktops`). A new container is built in and
+  starts its desktop like a VM; the app shows "Add Linux desktop" for a container without one.
+- **Start without systemd** (`containers/desktop.rs`, called from `containers::start` after the gateway certificate). A VM's init
+  runs the image's `silo-desktop-boot`. A container's PID 1 is the shim with no capability, and the desktop service
+  switches to the `silo` account with `runuser`, which needs setuid/setgid, so the engine runs the same hook after every start
+  as one root command (the capabilities Silo's root commands already get), on a background thread: it waits up to 150 s for
+  `/var/lib/silo/working-account.json` (a first start creates the account after the container is up), then runs the hook
+  (which does nothing until the desktop's install is recorded as finished); an image with no hook starts nothing. The start does
+  not wait for it and a failure is logged, not returned; a hook that fails leaves the marker that makes the desktop's status say
+  `failed`. The service's own
+  supervisors then keep Xvfb, Xfce and Selkies up, as in a VM. No new container branch outside `engine/src/containers/`:
+  the only edits outside are removals of the three refusals above, a guard in `setup-desktop.sh` and the app.
+- **No VM-only installer path.** The desktop setup in a container reaches `setup-desktop.sh` through the same engine code; with
+  `SILO_RUNTIME=container` (set on every container exec) it exits with a message instead of falling back to `apt-get` when
+  the image's desktop is not complete. The branch that provisions the image's preinstalled desktop touches neither apt nor
+  the network and runs as for a VM.
+- **Chrome with `--no-sandbox`.** `silo-computer-use.py` (pushed and applied after every boot, and when the desktop is turned
+  on) writes, in a container only, launchers for `google-chrome`, `google-chrome-stable`, `chromium` and `chromium-browser`
+  in `/usr/local/bin` and `google-chrome.desktop` and `chromium.desktop` in `/usr/local/share/applications` that run the launcher, which execs the first installed browser
+  (`/opt/google/chrome/google-chrome`, Debian's Chromium paths, whichever name was called) with `--no-sandbox`; a file of that
+  name that the helper did not write is left alone. No seccomp exception for Chrome. The app's computer page shows a note when a container has a
+  desktop; the threat model, the desktop guide and the computer-use guide say it plainly.
+- **Host disk guard (CT4 re-check).** (1) A layer the guard cannot measure (the measurement timed out, or `du` itself failed or
+  printed nothing readable) counts as over its size and goes first; layers are measured by up to four workers at once, each bounded to five
+  minutes, so one slow container does not hold up the others. (2) The threat model now says the guard's stop can land during a
+  checkpoint copy (the frozen scope is killed after the 15 s stop wait; the copy runs outside the container and still
+  saves), can act on a measurement minutes old, that sizes adding up to more than the disk can still fill it, and that a
+  checkpoint freezes for up to 10 s of waiting plus 30 s of copying.
+- **Recipes do not make containers, but a container can be created with its desktop off.** A recipe has no runtime, so a
+  recipe's `desktop: false` never makes a container. `computers.create` takes `configuration.desktop =
+  {startWithComputer: false}` for a container as for a VM (the app's form sends it); `silo create --no-desktop`
+  now sends the same request for both kinds, and the live check creates a container that way.
+- **Found on the way** (the KVM runner; four of these failed the first live runs):
+  - A root command in a container has no `CAP_SYS_PTRACE`, so it cannot read another account's `/proc/<pid>/exe`. The desktop
+    service's identity check of a process it just started (Xvfb) failed, and every container creation failed with "Desktop
+    session failed to start". The service now names such a process by its `comm` (`process_exe`), the same way at launch and later.
+    The guest's error also carries the end of the service log now (a creation sees only the error), and the engine logs the reason
+    a desktop setup failed.
+  - **Landlock keeps one exec from reading another's processes.** Each exec runs in its own Landlock domain, and Landlock refuses
+    `ptrace` access checks (which `/proc/<pid>/environ` uses) between sibling domains, even for the same account. Cua Driver's
+    launcher could not read the desktop session's environment from `xfce4-session` (`X11 setup failed: Authorization required`).
+    In a container the session now writes `DISPLAY`, `DBUS_SESSION_BUS_ADDRESS`, `XDG_RUNTIME_DIR` and `XAUTHORITY` to
+    `/run/silo-desktop/user/session.env` (mode 0600, the working account's) when it starts, and the launcher and
+    `silo-computer-use` read that file when they cannot read the process. (The review fixes below make this the one path for both kinds.)
+  - The first start creates the working account after the container is up, so the boot command waits for it.
+  - The Linux runner has Google Chrome installed on the host; a guest test for the missing-browser message must not rely on the
+    machine having none.
+  - The viewer's streamer listens on the container's loopback, and a published port reaches the guest's own address, so the
+    URL-proxy check hands a published port to it with a small forwarder in the container; the viewer itself reaches the loopback
+    port over the computer's SSH server, as the app does.
+- **Tests.** (The review fixes below add the cases for the hook that waits for the install, the failed status, the fixed
+  environment of engine commands, `/run` as a tmpfs, `--no-desktop`, the session file reader and its removal, the Chromium entry,
+  the streamer password and the unmeasurable layer.) Engine: the capability list and its app copy, the desktop defaults for a container (built in, and
+  autostart-off kept), the update validator, the boot command and script, the host guard (unmeasurable layer, ordering, parallel
+  measurement). Guest: the Chrome launchers (written for a container only, never over a foreign file, run the browser with the
+  flag and its arguments, say so when none is installed). Frontend: the capability model, the overview and detail pages (desktop
+  action offered; the browser warning shown for a container only). Live: `linux-host-e2e.sh` with `SILO_E2E_CONTAINER=1`
+  (a fourth container with the desktop on, below).
+- **Live check** (KVM runner, x86_64, Ubuntu 24.04; Linux host run 42591492385, code head `66888e0c`): a container created with the
+  desktop on started it with the computer (service `running`; Xvfb, Xfce and Selkies up). The viewer port answered 401 over an
+  `ssh -L` to the container's loopback, through the URL proxy and on its loopback port. Cua Driver (the MCP launcher, as an agent
+  starts it) listed the desktop's windows (`Desktop`, `xfce4-panel`) and saved a 1440x900 screenshot (49 KB), uploaded as the
+  `container-desktop-screenshots` artifact. Google Chrome (installed from dl.google.com) failed with its own sandbox (exit
+  non-zero), started through the launcher, loaded https://example.com through the gateway, and opened a window on the desktop (listed
+  by Cua Driver with a second screenshot, 190 KB) whose process has `--no-sandbox`. `silo fork --gui` returned a running fork with
+  computer use ready; `silo desktop off` stopped the desktop, `fork --gui` then said "has no desktop; turn it on with `silo desktop on`",
+  a restart and a plain fork of it started none, and `silo desktop on` brought it back. `desktop: false` at creation was first
+  covered only through `silo desktop off`; the review fixes below add a container created with `--no-desktop`.
+
+#### Review fixes (a code review and a threat-model review of the first build)
+
+- **Desktop off at creation.** The first build said it could not be tested because a recipe cannot make a container; that was
+  wrong, since `computers.create` takes `configuration.desktop = {startWithComputer: false}` for a container (the app's form
+  sends it). `silo create --no-desktop` (both kinds, not with `--macos`) sends the same request, and the live check creates a
+  container that way, starts it and asserts that no desktop, process or service answers.
+- **One session-environment path.** The desktop session of a VM now writes `/run/silo-desktop/user/session.env` too;
+  `xfce_command` has no `SILO_RUNTIME` branch, the `/proc/<pid>/environ` scans and the `runuser ... cat environ` fallback are
+  gone, and the launcher and `silo-computer-use` read the file (root also checks that it is a small regular file of the working
+  account, opened without following a link). The desktop stopping removes it. A VM whose session was started by the earlier
+  service has no file until its desktop restarts.
+- **Disk guard.** Only a measurement that timed out, or a `du` that ran and printed nothing readable, is unmeasurable. The
+  measurement is a small script that prints `du`'s exit status, so a failure of `silo-ctr userns` or `newuidmap` (no status) is
+  logged and says nothing about the layer, like `CouldNotStart`. An unmeasurable layer is stopped as soon as its own measurement
+  ends, not after the whole pass.
+- **Boot race.** The hook `setup-desktop.sh` writes does nothing until `install-stage` says `installed`.
+- **A failed boot is visible.** The engine's boot command runs the hook with a 120 s limit and, when it fails, leaves
+  `/run/silo-desktop/failed`; the desktop status reports `failed` when the session is stopped and that marker exists (the next
+  start, a stop or a new boot removes it).
+- **The computer's environment and engine commands.** `Exec.fixed_environment` makes `exec_command` use only the engine's
+  defaults; the boot command and the gateway certificate update set it. Owner-run `exec` is unchanged.
+- **`process_exe`** falls back to `comm` only when `SILO_RUNTIME=container`; in a VM an unreadable `exe` is not recognised, as before.
+- **Browsers.** `chromium.desktop` is replaced like `google-chrome.desktop`, and both entries run the launcher, which adds the
+  flag once.
+- **`/run`** is a tmpfs in the container spec, as a VM's; the cookie and session file do not travel into a checkpoint or a fork.
+- **Docs and warning.** The threat model, the app's note, and the desktop and computer-use guides say that a compromised browser
+  can act with the computer's GitHub access and secrets and use its in-guest `silo` client, that any Chromium-based program
+  started with `--no-sandbox` is exposed the same way, that a launcher runs the first installed browser whatever name was called
+  and stays after `desktop off`. The line saying the viewer's credentials stay in root's folder was false (Selkies took the
+  password as an argument, readable by every process); Selkies 2.0.0 reads `SELKIES_BASIC_AUTH_PASSWORD`, so the service passes
+  it in the streamer's environment and the threat model says who can read that.
+- **Live check after the review fixes** (KVM runner, x86_64, code head `8f1342d7d`; Linux host run 42613588062, attempts 1 and 2
+  both green; CI run 42613588066 green). The container with the desktop on also shows `/run` as a tmpfs, `session.env` as
+  `600:silo`, no `basic-auth-password` in the streamer's arguments, and no `session.env` after `silo desktop off`; the container
+  created with `--no-desktop` reports `desktop: false`, starts with no Xvfb, Xfce or Selkies, nothing answering on port 6901, and the
+  desktop service `stopped`. Earlier runs on the way failed for the checks' own reasons, not the product's: the helper that runs
+  root commands lacked `SILO_RUNTIME=container` (the process-name fallback is now container-only, so status said `failed`); the
+  process probes matched their own shell; and a screenshot of a busier Chrome page was larger than one command's output limit, so
+  it is copied out in pieces now.
+
+
 ### R1: CI runner on the Mac (branch `claude/runner-phase-1`)
 
 - **Built:** `silo-action/` and every reference removed; `silo-runner` (Go, `app/SiloUI/runner`, on

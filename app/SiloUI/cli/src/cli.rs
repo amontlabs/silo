@@ -217,6 +217,9 @@ pub struct CreateCommand {
     /// Disk in GiB.
     #[arg(long)]
     pub disk: Option<u64>,
+    /// Create a Linux computer without starting its desktop (`silo desktop on` turns it on later).
+    #[arg(long, conflicts_with = "macos")]
+    pub no_desktop: bool,
 }
 
 #[derive(Args, Debug)]
@@ -832,6 +835,7 @@ async fn dispatch(
                 cpus: create.cpus,
                 memory_gib: create.memory,
                 disk_gib: create.disk,
+                no_desktop: create.no_desktop,
             };
             let value = ops::create(engine, &args, progress).await?;
             emit(json, &value, |v| render::computer_line("Created", v));
@@ -1587,6 +1591,23 @@ mod tests {
             (create.cpus, create.memory, create.disk),
             (Some(6), Some(12), Some(80))
         );
+    }
+
+    #[test]
+    fn a_linux_or_container_computer_can_be_created_without_a_desktop() {
+        assert!(Cli::try_parse_from(["silo", "create", "a", "--macos", "--no-desktop"]).is_err());
+        for flags in [&["--no-desktop"][..], &["--container", "--no-desktop"]] {
+            let mut line = vec!["create", "a"];
+            line.extend_from_slice(flags);
+            let Command::Create(create) = parse(&line).command else {
+                panic!("not a create")
+            };
+            assert!(create.no_desktop);
+        }
+        let Command::Create(create) = parse(&["create", "a"]).command else {
+            panic!("not a create")
+        };
+        assert!(!create.no_desktop);
     }
 
     #[test]

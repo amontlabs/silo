@@ -48,8 +48,6 @@ pub(crate) fn default_new_computer_desktops(
     let built_in_image = image_includes_desktop(image_version);
     for configuration in computers {
         let old = previous.iter().find(|old| old.id() == configuration.id());
-        // A container computer has no desktop yet, whatever its image includes.
-        let built_in_image = built_in_image && !configuration.is_container();
         let desktop = &mut configuration.desktop;
         match old {
             Some(old) => {
@@ -339,7 +337,12 @@ pub(crate) fn configure_with(
         &script,
         Duration::from_secs(1800),
         true,
-    )?;
+    )
+    .map_err(|error| {
+        // The caller's message names the operation only; the engine's log keeps the guest's reason.
+        eprintln!("Desktop setup of {name} failed: {error:?}");
+        error
+    })?;
     Ok(())
 }
 
@@ -1003,28 +1006,43 @@ mod tests {
     }
 
     #[test]
-    fn a_container_computer_gets_no_desktop_action_and_nothing_runs() {
+    fn a_container_computer_passes_the_desktop_check_like_a_virtual_machine() {
         let directory = tempfile::tempdir().unwrap();
         let paths = crate::guest::test_support::runtime(directory.path());
         crate::containers::capability::make_container(&paths.home, "box");
-        let wanted = "cannot give a desktop to a container computer yet";
-        for action in ["start", "setup-computer-use", "setup-agent-tools"] {
-            let error = local(&paths, "box", Some(action), None).unwrap_err();
-            assert!(error.contains(wanted), "{action}: {error}");
+        for name in ["box", "vm"] {
+            crate::containers::capability::require(
+                &paths,
+                name,
+                crate::containers::capability::Capability::Desktop,
+            )
+            .unwrap();
         }
-        let error = local_approval(&paths, "box", "ask", None).unwrap_err();
-        assert!(error.contains(wanted), "{error}");
-        assert!(!directory.path().join("msb.log").exists(), "the runtime ran");
     }
 
     #[test]
-    fn a_new_container_computer_gets_no_desktop_from_its_image() {
+    fn a_new_container_computer_gets_the_desktop_from_its_image_like_a_virtual_machine() {
         let mut container = computer("c", None);
         container.runtime = Some(crate::runtime::ComputerRuntimeKind::Container);
         let mut computers = vec![container, computer("v", None)];
         default_new_computer_desktops(&mut computers, &[], "ubuntu-24.04-v5");
-        assert!(computers[0].desktop.is_none());
-        assert!(computers[1].desktop.is_some());
+        for configuration in &computers {
+            let desktop = configuration.desktop.as_ref().unwrap();
+            assert!(desktop.built_in && desktop.start_with_computer);
+        }
+        // `desktop: false` in a recipe (an autostart-off desktop) is kept for a container too.
+        let mut manual = computer(
+            "m",
+            Some(DesktopConfiguration {
+                start_with_computer: false,
+                built_in: false,
+            }),
+        );
+        manual.runtime = Some(crate::runtime::ComputerRuntimeKind::Container);
+        let mut computers = vec![manual];
+        default_new_computer_desktops(&mut computers, &[], "ubuntu-24.04-v5");
+        let desktop = computers[0].desktop.as_ref().unwrap();
+        assert!(desktop.built_in && !desktop.start_with_computer);
     }
 
     #[test]

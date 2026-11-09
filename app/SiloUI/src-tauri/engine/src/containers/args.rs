@@ -149,6 +149,11 @@ pub struct Exec {
     /// Where `crun` hands the pseudo-terminal's controlling side. Without it a `tty` command uses
     /// the terminal the caller is attached to.
     pub console_socket: Option<std::path::PathBuf>,
+    /// A command the engine runs itself (as root, in the computer): it gets the engine's fixed
+    /// environment only. The computer's own variables (`PATH`, `LD_PRELOAD`, `HOME`...) are the
+    /// owner's to set for the owner's commands; they must not steer a program an account can
+    /// replace when it runs as root.
+    pub fixed_environment: bool,
     pub argv: Vec<String>,
 }
 
@@ -529,6 +534,7 @@ fn parse_exec(args: &[String]) -> Result<Exec, String> {
         timeout: None,
         tty: false,
         console_socket: None,
+        fixed_environment: false,
         argv,
     };
     let mut index = 0;

@@ -5,8 +5,11 @@
 #
 # With SILO_E2E_CONTAINER=1 it then drives a container computer the same way (create --container,
 # start, exec, a file written and read back, listed as kind container, hardening spot checks,
-# stop, drop). The host must have crun, skopeo, umoci and the other container prerequisites
-# (`silo host init` names them).
+# stop, drop), then a second container with the desktop on: the desktop service, the viewer port
+# (over SSH as the app's viewer reaches it, and through the URL proxy), Cua Driver listing windows
+# and saving a screenshot, Chrome with --no-sandbox, `fork --gui`, `silo desktop off`; then a
+# container created with `--no-desktop`. The host must have crun, skopeo, umoci and the other
+# container prerequisites (`silo host init` names them).
 #
 # Usage: linux-host-e2e.sh ENGINE_DIR
 # ENGINE_DIR is an unpacked engine archive (silo-engine/), whose engine is already serving.
@@ -26,6 +29,13 @@ ctr="$name-ctr"
 ctr2="$name-ctr2"
 # A container whose stated size is small, so it is over it.
 ctr3="$name-ctr3"
+# The container that gets the desktop checks, and the forks made from it.
+ctr4="$name-ctr4"
+# A container created with its desktop off.
+ctr5="$name-ctr5"
+# Where the desktop checks leave their evidence (a screenshot of the desktop and of Chrome); the
+# workflow uploads it. A run outside CI keeps it in a temporary folder.
+artifacts="${SILO_E2E_ARTIFACTS:-}"
 # The file that fills the host's disk in the guard check; the cleanup removes it.
 fill_file=""
 # The engine's systemd unit, which the restart check ends the way a crash does.
@@ -59,7 +69,7 @@ cleanup() {
   [[ -n "$fill_file" ]] && rm -f "$fill_file"
   rm -f "${stderr_file:-}"
   remove_editor_key
-  for computer in "$ctr3" "$ctr2" "$ctr" "$ctr-k" "$ctr-f-1" "$ctr-f-2" "$ctr-f-3" "$ctr-f-4" "$fork" "$name"; do
+  for computer in "$ctr4-gui" "$ctr4-plain" "$ctr4" "$ctr5" "$ctr3" "$ctr2" "$ctr" "$ctr-k" "$ctr-f-1" "$ctr-f-2" "$ctr-f-3" "$ctr-f-4" "$fork" "$name"; do
     if listed "$computer" 2>/dev/null | grep -qx -- "$computer"; then
       echo "Stopping and dropping $computer after a failed run"
       "$silo" stop "$computer" || true
@@ -77,7 +87,7 @@ in_container_for() { local seconds="$1"; shift; "$silo" exec "$ctr" --timeout "$
 # Runs a command as root in the container, the way Silo runs its own root commands: through the
 # engine's helper and `crun exec`, with the seven capabilities and the init shim in front. `silo
 # exec` runs as the working account, which cannot become root (no_new_privs), so the commands that
-# need root, such as a package install, use this.
+# need root, such as a package install, use this. It sets SILO_RUNTIME as the engine does.
 root_in_container() {
   local state process status=0
   state=$(engine_find -path "*containers/computers/$ctr/state" -type d | head -n 1)
@@ -90,7 +100,7 @@ json.dump({
     "terminal": False,
     "user": {"uid": 0, "gid": 0},
     "args": sys.argv[2:],
-    "env": ["PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "HOME=/root", "DEBIAN_FRONTEND=noninteractive"],
+    "env": ["PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "HOME=/root", "SILO_RUNTIME=container", "DEBIAN_FRONTEND=noninteractive"],
     "cwd": "/",
     "noNewPrivileges": True,
     "capabilities": {k: caps for k in ("effective", "bounding", "inheritable", "ambient", "permitted")},
@@ -278,7 +288,11 @@ PY
 
 container_checks() {
   step "Creating container computer $ctr"
-  "$silo" create "$ctr" --container --cpus 1 --memory 2 --disk 2
+  if ! "$silo" create "$ctr" --container --cpus 1 --memory 2 --disk 2; then
+    echo "== The engine's log after the failed create" >&2
+    journalctl --user --unit "$engine_unit" --no-pager -n 80 >&2 || true
+    exit 1
+  fi
 
   step "Starting $ctr"
   "$silo" start "$ctr"
@@ -355,6 +369,283 @@ except OSError:
   container_access_features
   container_checkpoint_features
   container_disk_guard
+
+  step "Stopping and dropping $ctr"
+  "$silo" stop "$ctr"
+  "$silo" drop "$ctr"
+}
+
+# A probe run in the container as the working account: starts Cua Driver the way an agent does
+# (the MCP launcher), lists its windows and saves a screenshot of the desktop to $1.
+cua_probe_source() {
+  base64 -w0 <<'PY'
+import json, select, subprocess, sys, time
+
+out = sys.argv[1]
+proc = subprocess.Popen(['/usr/local/libexec/silo-cua-driver-mcp'], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE, text=True, bufsize=1)
+
+def send(message):
+    proc.stdin.write(json.dumps(message) + '\n')
+    proc.stdin.flush()
+
+def receive(wanted, timeout):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        ready, _, _ = select.select([proc.stdout], [], [], 0.5)
+        if not ready:
+            if proc.poll() is not None:
+                return None
+            continue
+        line = proc.stdout.readline()
+        if not line:
+            return None
+        try:
+            message = json.loads(line)
+        except ValueError:
+            continue
+        if message.get('id') == wanted:
+            return message
+    return None
+
+def call(identifier, name, arguments):
+    send({'jsonrpc': '2.0', 'id': identifier, 'method': 'tools/call', 'params': {'name': name, 'arguments': arguments}})
+    reply = receive(identifier, 90)
+    result = (reply or {}).get('result', {})
+    text = ' '.join(c.get('text', '') for c in result.get('content', []) if c.get('type') == 'text')
+    return result.get('isError'), text, reply
+
+send({'jsonrpc': '2.0', 'id': 1, 'method': 'initialize', 'params': {'protocolVersion': '2024-11-05', 'capabilities': {}, 'clientInfo': {'name': 'e2e', 'version': '0'}}})
+if not receive(1, 60):
+    print('CUA initialize: no answer', proc.stderr.read(2000) if proc.poll() is not None else '')
+    sys.exit(1)
+send({'jsonrpc': '2.0', 'method': 'notifications/initialized'})
+error, text, reply = call(2, 'list_windows', {})
+print('WINDOWS', error, text[:1500].replace('\n', ' | '))
+error, text, reply = call(3, 'get_desktop_state', {'screenshot_out_file': out})
+print('STATE', error, text[:300].replace('\n', ' | '))
+proc.terminate()
+PY
+}
+
+# Saves a screenshot of the desktop of $ctr to the evidence folder as $2: the probe above writes
+# it in the container, the file is copied out through the working account.
+desktop_screenshot() {
+  local file="$1" shot="/tmp/e2e-$1" out
+  out=$(in_container sh -c "echo $(cua_probe_source) | base64 -d > /tmp/e2e-cua-probe.py && python3 /tmp/e2e-cua-probe.py $shot")
+  echo "$out"
+  grep -q '^WINDOWS' <<<"$out" || { echo "Cua Driver did not answer" >&2; exit 1; }
+  windows=$(grep '^WINDOWS' <<<"$out")
+  # A command's output is limited, and a screenshot of a busy page can be larger than the limit
+  # once base64 has made it a third bigger: copy it out in pieces.
+  : > "$artifacts/$file"
+  local piece=0 chunk size
+  while :; do
+    chunk=$(in_container sh -c "dd if=$shot bs=98304 skip=$piece count=1 2>/dev/null | base64 -w0")
+    [[ -n "$chunk" ]] || break
+    printf %s "$chunk" | base64 -d >> "$artifacts/$file"
+    piece=$((piece + 1))
+  done
+  size=$(wc -c < "$artifacts/$file")
+  [[ "$(head -c 4 "$artifacts/$file" | tail -c 3)" == PNG && "$size" -gt 5000 ]] || { echo "$file is not a screenshot ($size bytes)" >&2; exit 1; }
+  echo "screenshot $file: $size bytes"
+}
+
+# Whether the desktop's streamer answers on the container's loopback (the viewer's port 6901 answers
+# 401 without its credentials, 200 with them).
+desktop_answers() {
+  local code
+  code=$(in_container curl -sS -o /dev/null --max-time 5 -w '%{http_code}' http://127.0.0.1:6901/ 2>/dev/null || true)
+  [[ "$code" == 200 || "$code" == 401 ]]
+}
+
+wait_for_desktop() {
+  local _
+  for _ in $(seq 1 90); do
+    desktop_answers && return 0
+    sleep 2
+  done
+  echo "The desktop of $ctr did not answer; its service says:" >&2
+  root_in_container /usr/local/bin/silo-desktop status >&2 || true
+  root_in_container sh -c 'tail -n 60 /var/log/silo-desktop.log' >&2 || true
+  return 1
+}
+
+# A container created with its desktop off. `--no-desktop` sends the request the app's form sends
+# (`computers.create` with `configuration.desktop = {startWithComputer: false}`); a recipe cannot
+# make a container, so this is the creation-time setting for one.
+container_without_desktop() {
+  local ctr="$ctr5" state
+  step "Creating and starting $ctr, a container computer with its desktop off at creation"
+  "$silo" create "$ctr" --container --no-desktop --cpus 1 --memory 2 --disk 4
+  expect "desktop setting" "$("$silo" --json status "$ctr" | python3 -c 'import json, sys; print(json.load(sys.stdin)["desktop"])')" False
+  "$silo" start "$ctr"
+  # The engine's boot command waits for the working account (made by this first start) and runs
+  # the desktop boot hook, which starts nothing for a computer whose desktop is off.
+  sleep 45
+  desktop_answers && { echo "a desktop answers in a computer created with it off" >&2; exit 1; }
+  for process in Xvfb xfce4-session selkies; do
+    expect "process $process" "$(in_container sh -c "pgrep -f '[${process:0:1}]${process:1}' >/dev/null && echo up || echo down")" down
+  done
+  state=$(root_in_container /usr/local/bin/silo-desktop status | python3 -c 'import json, sys; print(json.load(sys.stdin)["state"])')
+  expect "desktop service state" "$state" stopped
+  step "Stopping and dropping $ctr"
+  "$silo" stop "$ctr"
+  "$silo" drop "$ctr"
+}
+
+# The desktop, computer use and Chrome in a container computer, through the same commands a virtual
+# machine's desktop uses. `silo desktop off`, a restart and a fork check the setting after creation.
+container_desktop_features() {
+  # Every helper above reads $ctr: for these checks it is the desktop container.
+  local ctr="$ctr4" host state code url host_port forwarder reply
+  [[ -n "$artifacts" ]] || artifacts=$(mktemp -d)
+  mkdir -p "$artifacts"
+
+  step "Creating and starting $ctr, a container computer with the desktop on"
+  "$silo" create "$ctr" --container --cpus 2 --memory 4 --disk 4
+  "$silo" start "$ctr"
+
+  step "Checking that the desktop of $ctr started with it"
+  wait_for_desktop
+  state=$(root_in_container /usr/local/bin/silo-desktop status | python3 -c 'import json, sys; print(json.load(sys.stdin)["state"])')
+  expect "desktop service state" "$state" running
+  for process in Xvfb xfce4-session selkies; do
+    expect "process $process" "$(in_container sh -c "pgrep -f '[${process:0:1}]${process:1}' >/dev/null && echo up || echo down")" up
+  done
+  # /run is memory, as a virtual machine's is: what the desktop keeps there (the display's
+  # authority cookie, the session's environment) is not in the computer's files.
+  expect "/run is a tmpfs" "$(in_container sh -c 'grep -q " /run tmpfs " /proc/mounts && echo yes || echo no')" yes
+  expect "the session's environment file" "$(in_container sh -c 'stat -c %a:%U /run/silo-desktop/user/session.env')" 600:silo
+  # Every process in the computer can read another's arguments, so the viewer's password is not one.
+  expect "the streamer's arguments carry no password" "$(in_container sh -c 'tr "\0" " " < /proc/$(pgrep -f "[s]elkies.*--addr=127" | head -n 1)/cmdline | grep -c basic-auth-password || true')" 0
+
+  step "Reaching the viewer port over SSH, as the app's viewer does"
+  host=$("$silo" --json ssh-setup "$ctr" | python3 -c 'import json, sys; print(json.load(sys.stdin)["host"])')
+  ssh -N -o BatchMode=yes -o ConnectTimeout=30 -o ExitOnForwardFailure=yes -L 29901:127.0.0.1:6901 "$host" &
+  forwarder=$!
+  code=000
+  for _ in $(seq 1 20); do
+    code=$(curl -sS -o /dev/null --max-time 5 -w '%{http_code}' http://127.0.0.1:29901/ 2>/dev/null || true)
+    [[ "$code" == 200 || "$code" == 401 ]] && break
+    sleep 1
+  done
+  kill "$forwarder" 2>/dev/null || true
+  wait "$forwarder" 2>/dev/null || true
+  [[ "$code" == 200 || "$code" == 401 ]] || { echo "the viewer port did not answer over ssh -L (got $code)" >&2; exit 1; }
+  echo "viewer port over ssh -L: $code"
+
+  step "Reaching the viewer port through the URL proxy"
+  # The streamer listens on the container's loopback only, as in a virtual machine; a published
+  # port reaches the guest's own address, so a forwarder in the container hands 6902 on to it.
+  in_container sh -c 'cat > /tmp/e2e-forward.py <<EOF
+import socket, threading
+def pump(a, b):
+    try:
+        while (data := a.recv(65536)):
+            b.sendall(data)
+    except OSError:
+        pass
+    finally:
+        for sock in (a, b):
+            try: sock.shutdown(socket.SHUT_RDWR)
+            except OSError: pass
+server = socket.socket()
+server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+server.bind(("0.0.0.0", 6902))
+server.listen(8)
+while True:
+    client, _ = server.accept()
+    target = socket.create_connection(("127.0.0.1", 6901))
+    threading.Thread(target=pump, args=(client, target), daemon=True).start()
+    threading.Thread(target=pump, args=(target, client), daemon=True).start()
+EOF
+(nohup python3 /tmp/e2e-forward.py >/dev/null 2>&1 &)'
+  "$silo" publish "$ctr" 6902 --http
+  url="" host_port="" state=""
+  for _ in $(seq 1 40); do
+    read -r state host_port url < <("$silo" --json ports "$ctr" | python3 -c '
+import json, sys
+port = next((p for p in json.load(sys.stdin)["ports"] if p["port"] == 6902), {})
+print(port.get("state") or "-", port.get("hostPort") or "-", port.get("url") or "-")')
+    [[ "$state" == reachable && "$url" != - ]] && break
+    sleep 0.5
+  done
+  expect "viewer port state" "$state" reachable
+  code=$(curl -sS -o /dev/null --max-time 20 -w '%{http_code}' "$url" || true)
+  [[ "$code" == 200 || "$code" == 401 ]] || { echo "the viewer port did not answer through the URL proxy (got $code at $url)" >&2; exit 1; }
+  echo "viewer port through $url: $code"
+  code=$(curl -sS -o /dev/null --max-time 20 -w '%{http_code}' "http://127.0.0.1:$host_port/" || true)
+  [[ "$code" == 200 || "$code" == 401 ]] || { echo "the viewer port did not answer on the loopback port $host_port (got $code)" >&2; exit 1; }
+
+  step "Listing windows with Cua Driver and saving a screenshot of $ctr"
+  local windows=""
+  desktop_screenshot desktop-screenshot.png
+  grep -qiE 'panel|desktop' <<<"$windows" || { echo "Cua Driver listed no desktop window: $windows" >&2; exit 1; }
+
+  step "Starting Chrome in $ctr (with --no-sandbox) and loading a page through the gateway"
+  if [[ "$(uname -m)" != x86_64 ]]; then
+    echo "Google Chrome has no Linux arm64 build: skipped on $(uname -m)"
+  else
+    root_in_container apt-get update -qq
+    for attempt in 1 2 3; do
+      root_in_container sh -c 'cd /tmp && curl -fsSL --max-time 300 -o chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb && apt-get -o APT::Sandbox::User=root install -y -qq ./chrome.deb' && break
+      ((attempt == 3)) && { echo "Google Chrome did not install" >&2; exit 1; }
+      sleep 10
+    done
+    # Its own sandbox needs a nested user namespace, which the baseline denies: it must fail
+    # as it is, and run through the launcher Silo's computer-use setup writes.
+    expect "chrome with its sandbox" "$(in_container sh -c '/opt/google/chrome/chrome --headless=new --disable-gpu --user-data-dir=/tmp/e2e-chrome-a --dump-dom about:blank >/dev/null 2>&1; echo $?' | sed 's/^[1-9][0-9]*$/refused/')" refused
+    reply=$(in_container sh -c 'google-chrome-stable --headless=new --disable-gpu --user-data-dir=/tmp/e2e-chrome-b --dump-dom https://example.com 2>/dev/null')
+    grep -q 'Example Domain' <<<"$reply" || { echo "Chrome did not load https://example.com through the gateway: ${reply:0:300}" >&2; exit 1; }
+    echo "Chrome loaded https://example.com through the gateway"
+    in_container sh -c 'DISPLAY=:1 XAUTHORITY=/run/silo-desktop/user/Xauthority nohup google-chrome-stable --disable-gpu --no-first-run --user-data-dir=/tmp/e2e-chrome-c https://example.com >/tmp/e2e-chrome.log 2>&1 &'
+    for _ in $(seq 1 30); do
+      [[ "$(in_container sh -c 'DISPLAY=:1 XAUTHORITY=/run/silo-desktop/user/Xauthority xwininfo -root -tree 2>/dev/null | grep -ci "example domain\|chrome"')" -gt 0 ]] && break
+      sleep 2
+    done
+    expect "chrome window on the desktop" "$([[ "$(in_container sh -c 'DISPLAY=:1 XAUTHORITY=/run/silo-desktop/user/Xauthority xwininfo -root -tree 2>/dev/null | grep -ci "example domain\|chrome"')" -gt 0 ]] && echo yes || echo no)" yes
+    expect "chrome runs with --no-sandbox" "$(in_container sh -c 'pgrep -af "[/]opt/google/chrome/chrome" | grep -c -- --no-sandbox | sed "s/^[1-9][0-9]*$/yes/"')" yes
+    windows=""
+    desktop_screenshot desktop-chrome-screenshot.png
+    in_container sh -c 'pkill -u silo -f "[/]opt/google/chrome/chrome" || true'
+  fi
+
+  step "Forking $ctr with --gui"
+  reply=$("$silo" --json fork "$ctr" --gui --name "$ctr-gui")
+  echo "$reply" | python3 -c 'import json, sys; v = json.load(sys.stdin); print("fork --gui:", v["name"], v["state"], v.get("computerUse", {}).get("state"))'
+  expect "the fork's desktop" "$("$silo" exec "$ctr-gui" -- sh -c 'curl -sS -o /dev/null --max-time 5 -w "%{http_code}" http://127.0.0.1:6901/ | sed "s/^401$/up/;s/^200$/up/"')" up
+  "$silo" stop "$ctr-gui"
+  "$silo" drop "$ctr-gui"
+
+  step "Turning the desktop of $ctr off"
+  "$silo" desktop off "$ctr"
+  desktop_answers && { echo "the desktop still answers after silo desktop off" >&2; exit 1; }
+  expect "the session's environment file after desktop off" "$(in_container sh -c 'test -e /run/silo-desktop/user/session.env && echo there || echo gone')" gone
+  if reply=$("$silo" fork "$ctr" --gui --name "$ctr-gui" 2>&1); then
+    echo "fork --gui worked on a computer with its desktop off" >&2
+    "$silo" drop "$ctr-gui" || true
+    exit 1
+  fi
+  grep -q "$ctr has no desktop; turn it on with" <<<"$reply" || { echo "fork --gui said: $reply" >&2; exit 1; }
+  echo "fork --gui: $reply"
+
+  step "Restarting $ctr and forking it with its desktop off"
+  "$silo" stop "$ctr"
+  "$silo" start "$ctr"
+  sleep 30
+  desktop_answers && { echo "the desktop started with the computer although it is off" >&2; exit 1; }
+  "$silo" fork "$ctr" --name "$ctr-plain"
+  [[ "$("$silo" --json status "$ctr-plain" | python3 -c 'import json, sys; print(json.load(sys.stdin)["state"])')" == running ]] || "$silo" start "$ctr-plain"
+  sleep 30
+  expect "the fork's desktop" "$("$silo" exec "$ctr-plain" -- sh -c 'curl -sS -o /dev/null --max-time 3 http://127.0.0.1:6901/ >/dev/null 2>&1 && echo up || echo down')" down
+  "$silo" stop "$ctr-plain"
+  "$silo" drop "$ctr-plain"
+
+  step "Turning the desktop of $ctr on again"
+  "$silo" desktop on "$ctr"
+  wait_for_desktop
+  echo "the desktop answers again"
 
   step "Stopping and dropping $ctr"
   "$silo" stop "$ctr"
@@ -947,7 +1238,9 @@ if [[ -n "$left" ]]; then
 fi
 if [[ "${SILO_E2E_CONTAINER:-0}" == 1 ]]; then
   container_checks
-  left=$(listed "$ctr" "$ctr2" "$ctr3")
+  container_desktop_features
+  container_without_desktop
+  left=$(listed "$ctr" "$ctr2" "$ctr3" "$ctr4" "$ctr5")
   if [[ -n "$left" ]]; then
     echo "Still listed after drop: $left" >&2
     exit 1

@@ -169,6 +169,11 @@ pub fn build(params: &Params<'_>) -> Result<Spec, String> {
              "options": ["nosuid", "noexec", "nodev", "ro"]},
             {"destination": "/sys/fs/cgroup", "type": "cgroup", "source": "cgroup",
              "options": ["nosuid", "noexec", "nodev", "relatime", "ro"]},
+            // As a virtual machine's /run is: memory, empty at every start, and not part of the
+            // computer's files, so what the desktop keeps there (the display's authority cookie,
+            // the session's environment) is not carried into a checkpoint or a fork.
+            {"destination": "/run", "type": "tmpfs", "source": "tmpfs",
+             "options": ["nosuid", "nodev", "mode=755", "size=268435456"]},
             {"destination": "/etc/resolv.conf", "type": "bind", "source": params.resolv_conf,
              "options": ["rbind", "ro", "nosuid", "nodev", "noexec"]},
             {"destination": "/etc/hosts", "type": "bind", "source": params.hosts,
@@ -433,6 +438,13 @@ mod tests {
             .find(|m| m.destination() == &PathBuf::from("/sys"))
             .unwrap();
         assert!(sys.options().as_ref().unwrap().contains(&"ro".to_owned()));
+        let run = mounts
+            .iter()
+            .find(|m| m.destination() == &PathBuf::from("/run"))
+            .unwrap();
+        assert_eq!(run.typ().as_deref(), Some("tmpfs"));
+        let options = run.options().as_ref().unwrap();
+        assert!(options.contains(&"nosuid".to_owned()) && options.contains(&"nodev".to_owned()));
         let bound: Vec<_> = mounts
             .iter()
             .filter(|m| m.typ().as_deref() == Some("bind"))

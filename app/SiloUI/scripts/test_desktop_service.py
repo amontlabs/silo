@@ -462,6 +462,17 @@ class DesktopLifecycle(unittest.TestCase):
              patch.object(service, 'listening', return_value=True):
             self.assertEqual(service.status()['state'], 'running')
 
+    def test_a_start_that_failed_before_the_service_ran_shows_as_failed_until_the_next_stop(self):
+        with patch.object(service, 'streamer_backend', return_value='selkies'), \
+             patch.object(service, 'selkies_state', return_value=None), \
+             patch.object(service, 'supervisor', return_value=None):
+            self.assertEqual(service.status()['state'], 'stopped')
+            (service.RUN / 'failed').write_text('The desktop did not start at boot\n')
+            self.assertEqual(service.status()['state'], 'failed')
+            with patch.object(service, 'stop_selkies_processes'):
+                service.stop()
+            self.assertEqual(service.status()['state'], 'stopped')
+
     def test_kasm_status_does_not_report_stopped_when_display_artifacts_remain(self):
         lock = self.root / 'X1-lock'
         lock.write_text('321')
@@ -1458,6 +1469,79 @@ class DesktopStartSize(unittest.TestCase):
                 SessionStartRetry.COMMANDS, {}, 'account', {'sessionProcesses': []}, [], lambda: False,
                 after_launch=steps.append)
         self.assertEqual(steps, ['xvfb', 'pulse', 'xfce'])
+
+
+class StreamerCredentials(unittest.TestCase):
+    def test_the_viewer_password_is_in_the_streamers_environment_not_its_arguments(self):
+        password = 'ab' * 32
+        with tempfile.TemporaryDirectory() as directory, \
+             patch.object(service, 'STATE', Path(directory)), \
+             patch.object(service, 'USER', 'silo'), \
+             patch.object(service, 'launch_managed_process', return_value=('child', {})) as launch:
+            service.write(Path(directory) / 'connection.json',
+                          {'username': 'silo', 'port': 6901, 'password': password})
+            environment = {'HOME': '/home/silo'}
+            service.launch_selkies_streamer(SimpleNamespace(), environment)
+        _, argv, passed, _ = launch.call_args.args
+        self.assertFalse(any(password in argument for argument in argv), argv)
+        self.assertFalse(any('basic-auth-password' in argument for argument in argv), argv)
+        self.assertEqual(passed['SELKIES_BASIC_AUTH_PASSWORD'], password)
+        self.assertEqual(passed['HOME'], '/home/silo')
+        # The service's own environment, shared by the other session programs, does not get it.
+        self.assertNotIn('SELKIES_BASIC_AUTH_PASSWORD', environment)
+
+
+class SessionEnvironmentFile(unittest.TestCase):
+    def test_the_session_writes_its_environment_for_other_commands(self):
+        command = service.XFCE_COMMAND
+        self.assertEqual(command[:4], ['dbus-run-session', '--', 'sh', '-c'])
+        self.assertIn('session.env', command[4])
+        self.assertTrue(command[4].endswith('exec startxfce4'))
+        for key in ('DISPLAY', 'DBUS_SESSION_BUS_ADDRESS', 'XDG_RUNTIME_DIR', 'XAUTHORITY'):
+            self.assertIn(key, command[4])
+
+    def test_stopping_the_desktop_removes_the_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            session = Path(directory) / 'session.env'
+            session.write_text('DISPLAY=:1\n')
+            for state in ({'bootId': 'other'}, {'bootId': service.current_boot_id()}):
+                session.write_text('DISPLAY=:1\n')
+                with patch.object(service, 'SESSION_ENV_FILE', session), \
+                     patch.object(service, 'write_selkies_state'):
+                    service.stop_selkies_processes(dict(state))
+                self.assertFalse(session.exists(), state)
+
+
+class ProcessExecutable(unittest.TestCase):
+    CONTAINER = {'SILO_RUNTIME': 'container'}
+
+    def test_in_a_container_a_process_whose_exe_root_may_not_read_is_named_by_its_comm(self):
+        with patch.dict(os.environ, self.CONTAINER), \
+                patch.object(service.os, 'readlink', side_effect=PermissionError), \
+                patch.object(service.Path, 'read_text', return_value='Xvfb\n'):
+            self.assertEqual(service.process_exe(123), 'comm:Xvfb')
+
+    def test_in_a_virtual_machine_an_unreadable_exe_is_not_replaced(self):
+        with patch.dict(os.environ, {}, clear=False), \
+                patch.object(service.os, 'readlink', side_effect=PermissionError):
+            os.environ.pop('SILO_RUNTIME', None)
+            with self.assertRaises(PermissionError):
+                service.process_exe(123)
+            self.assertIsNone(service.managed_process_identity(os.getpid()))
+
+    def test_a_readable_exe_is_the_link_target(self):
+        with patch.object(service.os, 'readlink', return_value='/usr/bin/Xvfb'):
+            self.assertEqual(service.process_exe(123), '/usr/bin/Xvfb')
+
+    @unittest.skipUnless(Path('/proc/self/stat').exists(), 'needs /proc')
+    def test_the_identity_of_a_live_process_is_stable_with_either_form(self):
+        first = service.managed_process_identity(os.getpid())
+        self.assertEqual(service.managed_process_identity(os.getpid()), first)
+        with patch.dict(os.environ, self.CONTAINER), \
+                patch.object(service.os, 'readlink', side_effect=PermissionError):
+            fallback = service.managed_process_identity(os.getpid())
+            self.assertTrue(fallback['exe'].startswith('comm:'))
+            self.assertEqual(service.managed_process_identity(os.getpid()), fallback)
 
 
 if __name__ == '__main__':

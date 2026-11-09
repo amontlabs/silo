@@ -1,6 +1,6 @@
 //! What a container computer cannot do yet: one list, one check.
 //!
-//! Export and the desktop reach the runtime by their own paths (not the argument shape
+//! Export reaches the runtime by its own path (not the argument shape
 //! [`super::route`] answers), so a container would otherwise be handed to MicroSandbox, or to an
 //! installer, that does not know it. Every such entry point names its
 //! [`Capability`] and calls [`require`] before it does anything; the app hides the same actions
@@ -47,9 +47,10 @@ impl Capability {
         }
     }
 
-    /// Whether the container kind does this yet. Nothing is, until the phase that adds it.
+    /// Whether the container kind does this yet. Export is phase CT6; the desktop (and computer
+    /// use with it) is CT5. A checkpoint never carries a container's memory.
     pub const fn container_has(self) -> bool {
-        false
+        matches!(self, Capability::Desktop)
     }
 }
 
@@ -127,7 +128,7 @@ mod tests {
     fn a_container_is_refused_every_capability_it_lacks_in_the_same_words() {
         let home = tempfile::tempdir().unwrap();
         make_container(home.path(), "box");
-        for capability in Capability::ALL {
+        for capability in Capability::ALL.into_iter().filter(|c| !c.container_has()) {
             let error = require_in(home.path(), "box", capability).unwrap_err();
             assert_eq!(
                 error,
@@ -137,6 +138,7 @@ mod tests {
                 )
             );
         }
+        assert!(require_in(home.path(), "box", Capability::Desktop).is_ok());
         assert!(require_in(home.path(), "box", Capability::Export)
             .unwrap_err()
             .contains("cannot export or back up a container computer yet"));
@@ -158,7 +160,9 @@ mod tests {
         for capability in Capability::ALL {
             assert_eq!(ids.contains(&capability.id()), !capability.container_has());
         }
-        assert_eq!(ids, ["export", "desktop", "memorySnapshots"]);
+        assert_eq!(ids, ["export", "memorySnapshots"]);
+        // The desktop and computer use are CT5's: a container passes the check.
+        assert!(Capability::Desktop.container_has());
         // The app reads the same list from this file.
         let app: Vec<String> = serde_json::from_str(include_str!(
             "../../../../src/features/computers/model/container-unavailable.json"

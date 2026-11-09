@@ -141,7 +141,7 @@ class Guest(unittest.TestCase):
         self.write_pinned()
         (root / 'desktop-config.json').write_text(json.dumps({'autoStart': True}))
 
-    def fake_session_env(self, proc=None, strict=False):
+    def fake_session_env(self, strict=False):
         if strict and 'DBUS_SESSION_BUS_ADDRESS' not in self.session_environ:
             raise cu.Failure('session-unavailable')
         return dict(self.session_environ)
@@ -1034,27 +1034,27 @@ class Watcher(Guest):
 
 
 class SessionEnvironment(unittest.TestCase):
-    def test_the_environment_is_read_from_the_session_process(self):
+    SESSION = ('DISPLAY=:1\nDBUS_SESSION_BUS_ADDRESS=unix:path=/tmp/dbus-Z\n'
+               'XDG_RUNTIME_DIR=/run/silo-desktop/user\nXAUTHORITY=/run/x\nPATH=/ignored\n')
+
+    def read(self, directory, **options):
+        account = mock.Mock(pw_uid=os.getuid())
+        with mock.patch.object(cu.pwd, 'getpwnam', return_value=account):
+            return cu.session_env(directory=directory, **options)
+
+    def test_the_environment_is_read_from_the_file_the_session_wrote(self):
         with tempfile.TemporaryDirectory() as directory:
-            proc = Path(directory)
-            for pid, comm, environ in ((10, 'bash', 'DISPLAY=:9'),
-                                       (11, 'xfce4-session',
-                                        'DISPLAY=:1\0DBUS_SESSION_BUS_ADDRESS=unix:path=/tmp/dbus-Z\0'
-                                        'XDG_RUNTIME_DIR=/run/silo-desktop/user\0XAUTHORITY=/run/x\0PATH=/bin')):
-                (proc / str(pid)).mkdir()
-                (proc / str(pid) / 'comm').write_text(comm + '\n')
-                (proc / str(pid) / 'environ').write_bytes(environ.encode())
-            with mock.patch.object(cu.pwd, 'getpwnam', side_effect=KeyError):
-                found = cu.session_env(proc)
+            (Path(directory) / 'session.env').write_text(self.SESSION)
+            found = self.read(directory)
         self.assertEqual(found, {'DISPLAY': ':1', 'XDG_RUNTIME_DIR': '/run/silo-desktop/user',
                                  'DBUS_SESSION_BUS_ADDRESS': 'unix:path=/tmp/dbus-Z', 'XAUTHORITY': '/run/x'})
 
-    def test_without_a_session_process_defaults_apply_and_strict_fails(self):
+    def test_without_the_file_defaults_apply_and_strict_fails(self):
         with tempfile.TemporaryDirectory() as directory:
-            self.assertEqual(cu.session_env(Path(directory)),
+            self.assertEqual(self.read(directory),
                              {'DISPLAY': ':1', 'XDG_RUNTIME_DIR': '/run/silo-desktop/user'})
             with self.assertRaises(cu.Failure) as caught:
-                cu.session_env(Path(directory), strict=True)
+                self.read(directory, strict=True)
         self.assertEqual(caught.exception.reason, 'session-unavailable')
 
 
@@ -1067,30 +1067,39 @@ class Launcher(unittest.TestCase):
         spec.loader.exec_module(module)
         return module
 
-    def proc(self, directory, pid, comm, environ, uid=None):
-        path = Path(directory) / str(pid)
-        path.mkdir()
-        (path / 'comm').write_text(comm + '\n')
-        (path / 'environ').write_bytes(environ.encode())
+    SESSION = ('DISPLAY=:1\nDBUS_SESSION_BUS_ADDRESS=unix:path=/tmp/dbus-NEW\n'
+               'XDG_RUNTIME_DIR=/run/silo-desktop/user\nXAUTHORITY=/run/xauth\nPATH=/ignored\n')
 
-    def test_it_reads_the_current_session_of_its_own_user(self):
+    def test_it_reads_the_file_the_session_wrote(self):
         launcher = self.load()
         with tempfile.TemporaryDirectory() as directory:
-            self.proc(directory, 5, 'xfce4-session', 'DISPLAY=:1\0DBUS_SESSION_BUS_ADDRESS=unix:path=/tmp/dbus-NEW\0'
-                      'XDG_RUNTIME_DIR=/run/silo-desktop/user\0XAUTHORITY=/run/xauth\0PATH=/bin')
-            self.proc(directory, 6, 'bash', 'DISPLAY=:9')
-            found = launcher.session_env(directory, uid=os.getuid())
+            session = Path(directory) / 'session.env'
+            session.write_text(self.SESSION)
+            found = launcher.session_env(str(session))
             self.assertEqual(found, {'DISPLAY': ':1', 'DBUS_SESSION_BUS_ADDRESS': 'unix:path=/tmp/dbus-NEW',
                                      'XDG_RUNTIME_DIR': '/run/silo-desktop/user', 'XAUTHORITY': '/run/xauth'})
-            # Another user's session is not used.
-            other = launcher.session_env(directory, uid=os.getuid() + 1)
+            # A file of another account is not used.
+            other = launcher.session_env(str(session), uid=os.getuid() + 1)
             self.assertNotIn('XAUTHORITY', other)
-            self.assertEqual(other['DISPLAY'], ':1')
+            self.assertNotEqual(other['DBUS_SESSION_BUS_ADDRESS'], 'unix:path=/tmp/dbus-NEW')
 
-    def test_without_a_session_it_falls_back_to_the_standard_addresses(self):
+    def test_it_does_not_follow_a_link_or_read_a_pipe(self):
         launcher = self.load()
         with tempfile.TemporaryDirectory() as directory:
-            found = launcher.session_env(directory, uid=1234)
+            target = Path(directory) / 'target'
+            target.write_text(self.SESSION)
+            link = Path(directory) / 'link'
+            link.symlink_to(target)
+            pipe = Path(directory) / 'pipe'
+            os.mkfifo(pipe)
+            for path in (link, pipe):
+                self.assertNotEqual(launcher.session_env(str(path))['DBUS_SESSION_BUS_ADDRESS'],
+                                    'unix:path=/tmp/dbus-NEW')
+
+    def test_without_the_file_it_falls_back_to_the_standard_addresses(self):
+        launcher = self.load()
+        with tempfile.TemporaryDirectory() as directory:
+            found = launcher.session_env(str(Path(directory) / 'none'), uid=1234)
         self.assertEqual(found['DISPLAY'], ':1')
         self.assertTrue(found['DBUS_SESSION_BUS_ADDRESS'].endswith('/bus'))
 
@@ -1197,6 +1206,101 @@ class ReceiptPersistence(unittest.TestCase):
                 cu.write_receipt(self.pinned, 'ask', 'ready')
         self.assertEqual(json.loads(self.path.read_text())['state'], 'ready')
         self.assertEqual(list(self.path.parent.iterdir()), [self.path])
+
+
+class SessionFile(unittest.TestCase):
+    def test_root_reads_only_a_small_regular_file_of_the_account(self):
+        uid = os.getuid()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'good').write_text('DISPLAY=:1\n')
+            self.assertEqual(cu.read_session_file(root / 'good', uid), 'DISPLAY=:1\n')
+            with self.assertRaises(OSError):
+                cu.read_session_file(root / 'good', uid + 1)
+            os.symlink(root / 'good', root / 'link')
+            with self.assertRaises(OSError):
+                cu.read_session_file(root / 'link', uid)
+            os.mkfifo(root / 'pipe')
+            with self.assertRaises(OSError):
+                cu.read_session_file(root / 'pipe', uid)
+            (root / 'big').write_text('A' * 100000)
+            self.assertEqual(len(cu.read_session_file(root / 'big', uid)), 8192)
+
+
+class BrowserLaunchers(unittest.TestCase):
+    def setUp(self):
+        self.root = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__('shutil').rmtree(self.root, ignore_errors=True))
+        self.bin = self.root / 'bin'
+        self.apps = self.root / 'applications'
+        self.bin.mkdir()
+
+    def write(self, container):
+        env = {'SILO_RUNTIME': 'container'} if container else {}
+        with mock.patch.dict(os.environ, env, clear=False):
+            if not container:
+                os.environ.pop('SILO_RUNTIME', None)
+            cu.write_browser_launchers(self.bin, self.apps)
+
+    def test_a_container_gets_a_no_sandbox_launcher_for_each_browser_name(self):
+        self.write(True)
+        for name in cu.BROWSER_NAMES:
+            launcher = self.bin / name
+            self.assertTrue(os.access(launcher, os.X_OK), name)
+            self.assertIn('--no-sandbox', launcher.read_text())
+        # Each packaged desktop entry is replaced by one that runs the launcher, which adds the
+        # flag once.
+        for entry_name, launcher in (('google-chrome.desktop', 'google-chrome-stable'),
+                                     ('chromium.desktop', 'chromium')):
+            entry = (self.apps / entry_name).read_text()
+            self.assertIn(f'Exec={self.bin}/{launcher} %U\n', entry)
+            self.assertNotIn('--no-sandbox', entry)
+
+    def test_an_entry_this_helper_did_not_write_is_left_alone(self):
+        self.apps.mkdir()
+        (self.apps / 'chromium.desktop').write_text('[Desktop Entry]\nName=Mine\n')
+        self.write(True)
+        self.assertEqual((self.apps / 'chromium.desktop').read_text(), '[Desktop Entry]\nName=Mine\n')
+        self.assertTrue((self.apps / 'google-chrome.desktop').exists())
+
+    def test_a_virtual_machine_keeps_the_browsers_sandbox(self):
+        self.write(False)
+        self.assertEqual(list(self.bin.iterdir()), [])
+        self.assertFalse(self.apps.exists())
+
+    def test_a_file_this_helper_did_not_write_is_left_alone(self):
+        (self.bin / 'chromium').write_text('#!/bin/sh\necho mine\n')
+        self.write(True)
+        self.assertEqual((self.bin / 'chromium').read_text(), '#!/bin/sh\necho mine\n')
+        self.assertIn('--no-sandbox', (self.bin / 'google-chrome').read_text())
+
+    def test_the_launcher_runs_the_first_installed_browser_with_the_flag_and_the_arguments(self):
+        browser = self.root / 'chrome'
+        browser.write_text('#!/bin/sh\nprintf "%s " "$@"\n')
+        browser.chmod(0o755)
+        text = cu.BROWSER_LAUNCHER_TEXT.replace('/opt/google/chrome/google-chrome', str(browser))
+        launcher = self.root / 'launcher'
+        launcher.write_text(text)
+        launcher.chmod(0o755)
+        result = subprocess.run([str(launcher), 'about:blank', '--x'], capture_output=True, text=True)
+        self.assertEqual(result.stdout, '--no-sandbox about:blank --x ')
+
+    def test_the_launcher_says_so_when_no_browser_is_installed(self):
+        text = cu.BROWSER_LAUNCHER_TEXT
+        for path in cu.BROWSER_BINARIES:
+            text = text.replace(path, str(self.root / 'absent' / Path(path).name))
+        launcher = self.root / 'launcher'
+        launcher.write_text(text)
+        launcher.chmod(0o755)
+        result = subprocess.run([str(launcher)], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 127)
+        self.assertIn('No browser is installed', result.stderr)
+
+    def test_an_update_rewrites_a_stale_launcher_and_keeps_it_executable(self):
+        self.write(True)
+        (self.bin / 'google-chrome').write_text(cu.BROWSER_LAUNCHER_MARK + ' old\n')
+        self.write(True)
+        self.assertEqual((self.bin / 'google-chrome').read_text(), cu.BROWSER_LAUNCHER_TEXT)
 
 
 if __name__ == '__main__':

@@ -143,12 +143,26 @@ def current_boot_id():
         return None
 
 
+def process_exe(pid):
+    """The executable of a process. Root reads another account's `/proc/<pid>/exe` only with
+    CAP_SYS_PTRACE, which a container computer's root commands do not have; there the process
+    name (always readable) stands in, so the same call names the same process at launch and
+    later. A virtual machine's root has the capability, and an unreadable `exe` there stays an
+    error (the process is not recognised)."""
+    try:
+        return os.readlink(f'/proc/{pid}/exe')
+    except PermissionError:
+        if os.environ.get('SILO_RUNTIME') != 'container':
+            raise
+        return 'comm:' + Path(f'/proc/{pid}/comm').read_text().strip()
+
+
 def managed_process_identity(pid):
     try:
         fields = Path(f'/proc/{pid}/stat').read_text().rsplit(')', 1)[1].split()
         return dict(startTicks=int(fields[19]), pgid=int(fields[2]),
                     uid=Path(f'/proc/{pid}').stat().st_uid,
-                    exe=os.readlink(f'/proc/{pid}/exe'))
+                    exe=process_exe(pid))
     except (FileNotFoundError, ProcessLookupError, PermissionError, OSError, ValueError, IndexError):
         return None
 
@@ -521,9 +535,10 @@ def launch_selkies_streamer(account, environment):
             connection.get('port') != 6901 or not isinstance(connection.get('password'), str) or
             not re.fullmatch(r'[0-9a-f]{64}', connection['password'])):
         raise RuntimeError('Desktop connection credentials are invalid')
+    # The password goes in the environment (Selkies reads SELKIES_BASIC_AUTH_PASSWORD): an
+    # argument would be in /proc/<pid>/cmdline, which every process in the computer can read.
     argv = [str(SELKIES_EXECUTABLE), '--addr=127.0.0.1', '--port=6901',
-            '--enable-https=false', f'--basic-auth-user={USER}',
-            f"--basic-auth-password={connection['password']}", '--encoder=h264enc',
+            '--enable-https=false', f'--basic-auth-user={USER}', '--encoder=h264enc',
             '--use-cpu=true', '--mode=websockets', '--enable-dual-mode=false|locked',
             '--enable-resize=true', '--use-css-scaling=false|locked',
             '--video-streaming-mode=false', '--framerate=60,8-60',
@@ -531,6 +546,7 @@ def launch_selkies_streamer(account, environment):
             '--clipboard-seamless=false', '--file-transfers=none',
             '--audio-enabled=true', '--audio-bitrate=64000',
             '--microphone-enabled=false|locked', '--ui-sidebar-show-audio-settings=false']
+    environment = dict(environment, SELKIES_BASIC_AUTH_PASSWORD=connection['password'])
     return launch_managed_process('selkies', argv, environment, account)
 
 
@@ -642,6 +658,8 @@ def supervise_selkies_stream(state, account, environment, stopping, restart_requ
 
 def stop_selkies_processes(state, children_by_pid=None):
     children_by_pid = children_by_pid or {}
+    # The session that wrote its environment file is going away.
+    SESSION_ENV_FILE.unlink(missing_ok=True)
     if state.get('bootId') != current_boot_id():
         state.update(sessionState='stopped', sessionProcesses=[],
                      streamState='stopped', streamProcess=None, streamAttempts=0)
@@ -776,6 +794,15 @@ def prepare_selkies_runtime(account):
         raise RuntimeError('Could not initialize desktop X authority') from None
 
 
+def log_tail(limit=1500):
+    """The end of the service log, for an error message: the reason is in the log, and a caller
+    that only sees the error (a creation that fails) has no other way to read it."""
+    try:
+        return LOG.read_text(errors='replace')[-limit:].strip().replace('\n', ' | ')
+    except OSError:
+        return ''
+
+
 def start_selkies():
     if supervisor():
         if selkies_session_state(selkies_state(), True) != 'failed':
@@ -793,7 +820,7 @@ def start_selkies():
         if current['sessionState'] == 'running' and current['streamState'] == 'running':
             return
         if current['sessionState'] == 'failed':
-            raise RuntimeError('Desktop session failed to start; inspect /var/log/silo-desktop.log')
+            raise RuntimeError('Desktop session failed to start; inspect /var/log/silo-desktop.log: ' + log_tail())
         if current['streamState'] == 'failed':
             raise RuntimeError('Selkies failed to start; desktop session remains running; inspect /var/log/silo-desktop.log')
         time.sleep(0.1)
@@ -944,6 +971,17 @@ def start_session_processes(commands, environment, account, state, children, sto
                 sleep_until_service_event(0.5)
 
 
+# The session writes its environment to a file the working account owns when it starts. A program
+# that needs the session (Cua Driver's launcher, `silo-computer-use`) reads the file instead of
+# another process's environment, which a container's commands cannot read (Landlock keeps a
+# process from reading outside its own domain) and a virtual machine's would read differently.
+SESSION_ENV_FILE = RUN / 'user/session.env'
+SESSION_ENV_SCRIPT = ('umask 077; env | grep -E "^(DISPLAY|DBUS_SESSION_BUS_ADDRESS|XDG_RUNTIME_DIR|XAUTHORITY)=" '
+                      '> "$XDG_RUNTIME_DIR/session.env.new" && mv "$XDG_RUNTIME_DIR/session.env.new" '
+                      '"$XDG_RUNTIME_DIR/session.env"; exec startxfce4')
+XFCE_COMMAND = ['dbus-run-session', '--', 'sh', '-c', SESSION_ENV_SCRIPT]
+
+
 def supervise_selkies():
     with (RUN / 'supervisor.lock').open('w') as guard:
         try:
@@ -1004,7 +1042,7 @@ def supervise_selkies():
                 ('xvfb', ['Xvfb', ':1', '-screen', '0', XVFB_SCREEN, '+extension', 'RANDR',
                           '-noreset', '-nolisten', 'tcp', '-auth', str(RUN / 'user/Xauthority')]),
                 ('pulse', ['pulseaudio', '--daemonize=no', '--exit-idle-time=-1']),
-                ('xfce', ['dbus-run-session', '--', 'startxfce4']),
+                ('xfce', XFCE_COMMAND),
             ]
             start_session_processes(
                 commands, environment, account, state, session_children, lambda: stopping,
@@ -1078,6 +1116,10 @@ def status():
         state = ('failed' if 'failed' in (session_state, stream_state) else
                  'running' if session_state == stream_state == 'running' else
                  'starting' if 'starting' in (session_state, stream_state) else 'stopped')
+        if state == 'stopped' and (RUN / 'failed').exists():
+            # A start that failed before the service ran (a container's boot command) leaves the
+            # marker; the next start, a stop or a new boot removes it.
+            state = 'failed'
         backend = 'selkies'
         streamer_version = '2.0.0'
         update_required = False

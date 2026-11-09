@@ -6477,16 +6477,6 @@ fn validate_computer_update(
             "A computer cannot change between a virtual machine and a container. Create a new computer instead.".into(),
         ));
     }
-    if configuration.is_container()
-        && crate::desktop::configuration(previous) != crate::desktop::configuration(configuration)
-    {
-        // The desktop installer would run inside the container.
-        return Err(RuntimeError::Invalid(
-            crate::containers::capability::refusal(
-                crate::containers::capability::Capability::Desktop.verb(),
-            ),
-        ));
-    }
     if previous.name() != configuration.name() {
         return Err(RuntimeError::Invalid(format!("Bundled MicroSandbox cannot rename computer '{}'. Keep its name or create a new computer.", previous.name())));
     }
@@ -6562,11 +6552,6 @@ fn create_computer_with_progress(
         desktop,
         runtime,
     } = configuration;
-    if runtime.is_some() && desktop.is_some() {
-        return Err(RuntimeError::Invalid(
-            "A container computer has no desktop yet. Create it without one.".into(),
-        ));
-    }
     configuration_recovery::claim(paths, configuration)?;
     progress("computer-disk-preparation", name, 0);
     let preflight = (|| {
@@ -10047,24 +10032,18 @@ esac
     }
 
     #[test]
-    fn a_container_computer_keeps_its_kind_and_gets_no_desktop_by_an_update() {
+    fn a_container_computer_keeps_its_kind_and_takes_a_desktop_change_like_a_virtual_machine() {
         let mut container = computer();
         container.runtime = Some(ComputerRuntimeKind::Container);
         // Unchanged is fine.
         validate_computer_update(&container, &container.clone()).unwrap();
-        // A desktop turned on, or changed, would run the desktop installer in the container.
+        // A desktop change is taken as for a virtual machine.
         let mut with_desktop = container.clone();
         with_desktop.desktop = Some(crate::desktop::DesktopConfiguration {
             start_with_computer: true,
             built_in: false,
         });
-        let error = validate_computer_update(&container, &with_desktop).unwrap_err();
-        assert!(
-            error
-                .to_string()
-                .contains("cannot give a desktop to a container computer yet"),
-            "{error}"
-        );
+        validate_computer_update(&container, &with_desktop).unwrap();
         // The kind never changes, in either direction.
         let vm = computer();
         for (from, to) in [(&vm, &container), (&container, &vm)] {

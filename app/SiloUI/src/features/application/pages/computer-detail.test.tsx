@@ -534,3 +534,16 @@ it.each([false, true])("waits for this computer's port discovery when another de
   expect(screen.getByText("No ports")).toBeVisible()
   expect(screen.queryByText("http://127.0.0.1:43000")).not.toBeInTheDocument()
 })
+
+it.each([["container", true], ["Linux VM", false]])("on a %s computer with a desktop, the browser warning is shown: %s", async (_kind, container) => {
+  const source = localVmSource()
+  const computer = localComputer(source)
+  computer.state = "running"
+  computer.freshness = "fresh"
+  computer.configuration.desktop = { startWithComputer: true }
+  if (container) computer.configuration.runtime = "container"
+  await openDetail(source, {}, computer)
+  const text = "A web page that compromises the browser reaches everything in this computer: it can act with this computer's GitHub access and secrets, and use its silo client."
+  if (container) expect(screen.getByText(text, { exact: false })).toBeVisible()
+  else expect(screen.queryByText(text, { exact: false })).not.toBeInTheDocument()
+})

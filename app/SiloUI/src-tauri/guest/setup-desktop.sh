@@ -270,6 +270,8 @@ provision_image_desktop() {
     mkdir -p /usr/local/libexec
     cat > /usr/local/libexec/silo-desktop-boot <<'BOOT'
 #!/bin/sh
+# Nothing to start until the install is recorded as finished: a start can come mid-install.
+[ "$(cat /var/lib/silo-desktop/install-stage 2>/dev/null)" = installed ] || exit 0
 exec /usr/local/bin/silo-desktop boot
 BOOT
     chmod 0755 /usr/local/libexec/silo-desktop-boot
@@ -304,6 +306,12 @@ if [ -f /var/lib/silo-desktop/installed.json ]; then
         python3 "$helper" status
         exit 0
     fi
+fi
+# A container computer never installs packages: it runs only what the image carries.
+if [ "${SILO_RUNTIME:-}" = container ] && [ "$image_problem" != ok ]; then
+    [ "$image_problem" != none ] || image_problem='the image has none'
+    printf '%s\n' "This container computer's image has no complete desktop ($image_problem). Create a new computer from the current image." >&2
+    exit 1
 fi
 if [ "$image_problem" = ok ]; then
     printf '%s\n' 'Using the desktop preinstalled in the guest image' >&2
@@ -346,6 +354,8 @@ install -m 0755 "$helper" /usr/local/bin/silo-desktop
 mkdir -p /usr/local/libexec
 cat > /usr/local/libexec/silo-desktop-boot <<'BOOT'
 #!/bin/sh
+# Nothing to start until the install is recorded as finished: a start can come mid-install.
+[ "$(cat /var/lib/silo-desktop/install-stage 2>/dev/null)" = installed ] || exit 0
 exec /usr/local/bin/silo-desktop boot
 BOOT
 chmod 0755 /usr/local/libexec/silo-desktop-boot

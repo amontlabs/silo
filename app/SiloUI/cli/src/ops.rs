@@ -440,6 +440,17 @@ pub struct CreateArgs {
     pub cpus: Option<u64>,
     pub memory_gib: Option<u64>,
     pub disk_gib: Option<u64>,
+    /// A Linux computer created with its desktop off: the same setting the app's form sends.
+    pub no_desktop: bool,
+}
+
+/// The desktop setting of a new Linux computer. Without `--no-desktop` the request names none and
+/// the engine decides (a desktop the computer starts with, where its image includes one).
+fn desktop_of(args: &CreateArgs) -> Option<DesktopConfiguration> {
+    args.no_desktop.then_some(DesktopConfiguration {
+        start_with_computer: false,
+        built_in: false,
+    })
 }
 
 pub async fn create(
@@ -470,7 +481,7 @@ pub async fn create(
                     max_memory_gib: narrow(memory, "--memory")?,
                     workspace_storage_gib: narrow(args.disk_gib.unwrap_or(10), "--disk")?,
                     runtime_storage_gib: 10,
-                    desktop: None,
+                    desktop: desktop_of(args),
                     runtime: (args.platform == Platform::Container)
                         .then_some(ComputerRuntimeKind::Container),
                 },
@@ -1650,6 +1661,21 @@ pub async fn checkpoints(engine: &Engine, computer: &str) -> Result<Value, CliEr
 mod tests {
     use super::*;
     use crate::config::parse_recipe;
+
+    #[test]
+    fn no_desktop_sends_the_setting_the_apps_form_sends() {
+        let args = |no_desktop| CreateArgs {
+            name: "a".into(),
+            platform: Platform::Container,
+            cpus: None,
+            memory_gib: None,
+            disk_gib: None,
+            no_desktop,
+        };
+        assert_eq!(desktop_of(&args(false)), None);
+        let off = desktop_of(&args(true)).unwrap();
+        assert!(!off.start_with_computer && !off.built_in);
+    }
 
     #[test]
     fn default_fork_names_come_from_the_source() {
