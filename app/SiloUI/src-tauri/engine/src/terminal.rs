@@ -7,19 +7,23 @@ use std::process::Command;
 pub fn command(paths: &RuntimePaths, name: &str) -> Result<String, String> {
     let user = crate::working_account::USER;
     runtime::validate_name(name).map_err(|e| e.to_string())?;
-    crate::containers::capability::require(paths, name, crate::containers::capability::Capability::Terminal)?;
     let home = paths.home.to_str().ok_or("Invalid runtime home path.")?;
     let executable = paths.executable.to_str().ok_or("Invalid runtime path.")?;
     let library = paths
         .library
         .to_str()
         .ok_or("Invalid runtime library path.")?;
-    let args = [
+    // `msb`, or `silod --container-runtime` for a container computer.
+    let (program, leading) = runtime::runtime_invocation(paths, name);
+    let mut args = vec![
         "/usr/bin/env".to_string(),
         format!("MSB_HOME={home}"),
         format!("MSB_PATH={executable}"),
         format!("MSB_LIBKRUNFW_PATH={library}"),
-        executable.into(),
+        program.to_str().ok_or("Invalid runtime path.")?.into(),
+    ];
+    args.extend(leading);
+    args.extend([
         "exec".into(),
         name.into(),
         "--user".into(),
@@ -32,7 +36,7 @@ pub fn command(paths: &RuntimePaths, name: &str) -> Result<String, String> {
         "--workdir".into(),
         "/workspace".into(),
         "--tty".into(),
-    ];
+    ]);
     Ok(args.iter().map(|a| quote(a)).collect::<Vec<_>>().join(" "))
 }
 /// The inspected computer, or "Start <name> first." when it is stopped or has no runtime computer yet.
@@ -152,16 +156,23 @@ mod tests {
     }
 
     #[test]
-    fn a_container_computer_gets_no_terminal_command() {
+    fn a_container_computer_gets_the_container_runtime_command_and_a_virtual_machine_msb() {
         let dir = tempfile::tempdir().unwrap();
         let paths = crate::test_support::paths(dir.path());
         crate::containers::capability::make_container(&paths.home, "box");
-        let error = command(&paths, "box").unwrap_err();
-        assert_eq!(
-            error,
-            "Silo cannot open a terminal in a container computer yet. Use a virtual machine computer for this."
+        let silod = paths.executable.with_file_name("silod");
+        let container = command(&paths, "box").unwrap();
+        assert!(
+            container.contains(&format!(
+                "{} '--container-runtime' 'exec' 'box' '--user' 'silo'",
+                quote(silod.to_str().unwrap())
+            )),
+            "{container}"
         );
-        assert!(command(&paths, "dev").is_ok());
+        assert!(container.ends_with("'--tty'"), "{container}");
+        let machine = command(&paths, "dev").unwrap();
+        assert!(!machine.contains("container-runtime"), "{machine}");
+        assert!(machine.contains(&format!("{} 'exec' 'dev'", quote(paths.executable.to_str().unwrap()))), "{machine}");
     }
 
     #[test]

@@ -51,6 +51,7 @@ cleanup() {
   local status=$?
   trap - EXIT
   rm -f "${stderr_file:-}"
+  remove_editor_key
   for computer in "$ctr2" "$ctr" "$fork" "$name"; do
     if listed "$computer" 2>/dev/null | grep -qx -- "$computer"; then
       echo "Stopping and dropping $computer after a failed run"
@@ -203,6 +204,7 @@ except OSError:
   done
 
   container_network_features
+  container_access_features
 
   step "Stopping and dropping $ctr"
   "$silo" stop "$ctr"
@@ -266,8 +268,7 @@ PY
 }
 
 # Secrets, published ports and the URL proxy in the container, through the same commands a virtual
-# machine uses. (SSH, the editor, a terminal and the in-guest client are refused for a container
-# computer for now.)
+# machine uses.
 container_network_features() {
   step "Giving $ctr a fake secret"
   # A random token shaped like a GitHub one: GitHub answers "Bad credentials" to it, and a
@@ -377,6 +378,346 @@ print(port.get("state") or "-", port.get("hostPort") or "-", port.get("url") or 
   fi
   echo "secret removal: no longer assigned"
   "$silo" drop "$ctr2"
+}
+
+# The runtime home of the container computer: the folder that holds containers/ and sandboxes/.
+container_home() {
+  local computer
+  computer=$(engine_find -path "*containers/computers/$ctr" -type d | head -n 1)
+  [[ -n "$computer" ]] || { echo "no runtime home found for $ctr" >&2; return 1; }
+  dirname "$(dirname "$(dirname "$computer")")"
+}
+
+editor_key_file=""
+remove_editor_key() {
+  if [[ -n "$editor_key_file" && -f "${editor_home:-/nonexistent}/ssh/authorized_keys" ]]; then
+    sed -i '/ silo-e2e-editor$/d' "$editor_home/ssh/authorized_keys" || true
+  fi
+}
+
+# Port forwarding to the container's loopback, a large transfer in both directions at once, a
+# client that dies, and idle sockets, over the SSH server of the container computer.
+container_forwarding_and_transfers() {
+  local host="$1" scratch="$2" forwarders=() pid
+  local ssh_opts=(-o BatchMode=yes -o ConnectTimeout=30 -o ExitOnForwardFailure=yes)
+
+  step "Forwarding ports of $ctr over SSH (-L and -D)"
+  # A server on the container's loopback only: the host has nothing on this port, so an answer
+  # proves the connection was made from inside the container's network namespace.
+  in_container sh -c 'mkdir -p /tmp/fwd && echo fwd-ok > /tmp/fwd/index.html && cd /tmp/fwd && (nohup python3 -m http.server 18080 --bind 127.0.0.1 >/dev/null 2>&1 &)'
+  for _ in $(seq 1 20); do
+    [[ "$(in_container curl -sS --max-time 3 http://127.0.0.1:18080/index.html 2>/dev/null || true)" == fwd-ok ]] && break
+    sleep 1
+  done
+  expect "container server" "$(in_container curl -sS --max-time 5 http://127.0.0.1:18080/index.html)" fwd-ok
+  if curl -sS --max-time 3 -o /dev/null http://127.0.0.1:18080/ 2>/dev/null; then
+    echo "the host serves port 18080 itself; the forwarding check would prove nothing" >&2
+    exit 1
+  fi
+  ssh -N "${ssh_opts[@]}" -L 28080:127.0.0.1:18080 -L 28081:10.255.255.1:80 -L 28082:localhost:18080 "$host" &
+  forwarders+=($!)
+  ssh -N "${ssh_opts[@]}" -D 21080 "$host" &
+  forwarders+=($!)
+  local answer=""
+  for _ in $(seq 1 20); do
+    answer=$(curl -sS --max-time 5 http://127.0.0.1:28080/index.html 2>/dev/null || true)
+    [[ "$answer" == fwd-ok ]] && break
+    sleep 1
+  done
+  expect "ssh -L to a port served inside the container" "$answer" fwd-ok
+  expect "ssh -L to localhost" "$(curl -sS --max-time 5 http://127.0.0.1:28082/index.html)" fwd-ok
+  expect "ssh -D (SOCKS) to the container's loopback" "$(curl -sS --max-time 10 --socks5-hostname 127.0.0.1:21080 http://127.0.0.1:18080/index.html)" fwd-ok
+  # Anything but the container's loopback is refused by the server.
+  if curl -sS --max-time 5 -o /dev/null http://127.0.0.1:28081/ 2>/dev/null; then
+    echo "a forward to 10.255.255.1 was served" >&2
+    exit 1
+  fi
+  if curl -sS --max-time 10 -o /dev/null --socks5-hostname 127.0.0.1:21080 http://example.com/ 2>/dev/null; then
+    echo "a SOCKS forward to a public host was served" >&2
+    exit 1
+  fi
+  echo "forwards to the loopback answer; other destinations are refused"
+  for pid in "${forwarders[@]}"; do kill "$pid" 2>/dev/null || true; done
+  wait 2>/dev/null || true
+
+  step "Sending 60 MB both ways through an ssh -L forward, and a forward whose target does not read"
+  # One server in the container echoes (so the transfer goes both ways at once); another accepts
+  # a connection and never reads it. A forward is flow-controlled like a command: the echo comes
+  # back whole, and the target that does not read holds back its own client and nothing else on
+  # the connection (a shell command on it still answers).
+  local servers
+  servers=$(base64 -w0 <<'PY'
+import socket, threading, time
+
+def listener(port):
+    server = socket.socket()
+    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    server.bind(("127.0.0.1", port))
+    server.listen(8)
+    return server
+
+def echo(connection):
+    while True:
+        data = connection.recv(65536)
+        if not data:
+            break
+        connection.sendall(data)
+    connection.close()
+
+def serve_echo(server):
+    while True:
+        connection, _ = server.accept()
+        threading.Thread(target=echo, args=(connection,), daemon=True).start()
+
+def serve_deaf(server):
+    held = []
+    while True:
+        held.append(server.accept()[0])
+
+threading.Thread(target=serve_echo, args=(listener(18081),), daemon=True).start()
+threading.Thread(target=serve_deaf, args=(listener(18082),), daemon=True).start()
+time.sleep(3600)
+PY
+)
+  in_container sh -c "echo $servers | base64 -d > /tmp/fwd/servers.py && (nohup python3 /tmp/fwd/servers.py >/dev/null 2>&1 &)"
+  for _ in $(seq 1 20); do
+    in_container python3 -c 'import socket;socket.create_connection(("127.0.0.1",18082),2).close();socket.create_connection(("127.0.0.1",18081),2).close()' 2>/dev/null && break
+    sleep 1
+  done
+  local control="$scratch/forward-control"
+  ssh -M -S "$control" -N "${ssh_opts[@]}" -L 28083:127.0.0.1:18081 -L 28084:127.0.0.1:18082 "$host" &
+  forwarders+=($!)
+  for _ in $(seq 1 20); do
+    ssh -S "$control" -O check "$host" 2>/dev/null && break
+    sleep 1
+  done
+  # The deaf target first: a client sends it far more than the window and waits.
+  python3 -I -c '
+import socket, sys, time
+connection = socket.create_connection(("127.0.0.1", 28084), 10)
+chunk = b"x" * 65536
+deadline = time.time() + 120
+while time.time() < deadline:
+    connection.sendall(chunk)
+' &
+  local stuck=$!
+  sleep 3
+  expect "a shell command on the connection while a forward's target does not read" "$(timeout 30 ssh -S "$control" "$host" 'echo still-answering')" still-answering
+  # The echo through the same connection, 60 MB sent and read back at once, hashes compared.
+  local echoed
+  echoed=$(timeout 300 python3 -I -c '
+import hashlib, os, socket, sys, threading
+total = 60_000_000
+connection = socket.create_connection(("127.0.0.1", 28083), 10)
+sent = hashlib.sha256()
+def send():
+    left = total
+    while left:
+        chunk = os.urandom(min(65536, left))
+        sent.update(chunk)
+        connection.sendall(chunk)
+        left -= len(chunk)
+sender = threading.Thread(target=send)
+sender.start()
+received = hashlib.sha256()
+left = total
+while left:
+    data = connection.recv(min(65536, left))
+    if not data:
+        sys.exit("the forward ended with %d bytes missing" % left)
+    received.update(data)
+    left -= len(data)
+sender.join()
+print("same" if sent.hexdigest() == received.hexdigest() else "different")
+')
+  expect "60 MB through an ssh -L forward, both ways at once" "$echoed" same
+  expect "a shell command after the transfer" "$(timeout 30 ssh -S "$control" "$host" 'echo still-answering')" still-answering
+  kill "$stuck" 2>/dev/null || true
+  ssh -S "$control" -O exit "$host" 2>/dev/null || true
+  wait 2>/dev/null || true
+  in_container sh -c "pkill -f 'fwd/servers[.]py'" || true
+
+  step "Sending a large file through ssh cat in both directions at once, five times"
+  local ssh_plain=(-o BatchMode=yes -o ConnectTimeout=30) round big_hash
+  head -c 60000000 /dev/urandom > "$scratch/big.bin"
+  big_hash=$(sha256sum < "$scratch/big.bin" | cut -d' ' -f1)
+  # Input and output both flow at full speed: a server that stops reading the client while it
+  # waits for the command's input stalls here, and one that ends a command that falls behind
+  # fails here at random, so every one of the five rounds must give the same hash.
+  for round in 1 2 3 4 5; do
+    timeout 180 ssh "${ssh_plain[@]}" "$host" cat < "$scratch/big.bin" > "$scratch/big.out"
+    expect "hash of the file through cat (round $round of 5)" "$(sha256sum < "$scratch/big.out" | cut -d' ' -f1)" "$big_hash"
+  done
+
+  step "Sending a large file to a command that reads slowly"
+  # The command takes 64 KiB every 10 ms, far slower than the client sends: the server holds the
+  # client back with the SSH window instead of ending the command, so the command sees every byte.
+  local slow_reader='python3 -c '"'"'import sys,time,hashlib;h=hashlib.sha256();[(h.update(c),time.sleep(0.01)) for c in iter(lambda:sys.stdin.buffer.read1(65536),b"")];print(h.hexdigest())'"'"
+  expect "hash of the file read slowly" "$(timeout 300 ssh "${ssh_plain[@]}" "$host" "$slow_reader" < "$scratch/big.bin")" "$big_hash"
+  rm -f "$scratch/big.out"
+  timeout 180 ssh "${ssh_plain[@]}" "$host" 'cat > /workspace/e2e-big.bin' < "$scratch/big.bin"
+  expect "hash of the file in the container" "$(in_container sha256sum /workspace/e2e-big.bin | cut -d' ' -f1)" "$big_hash"
+  timeout 180 ssh "${ssh_plain[@]}" "$host" 'cat /workspace/e2e-big.bin' > "$scratch/big.down"
+  cmp "$scratch/big.bin" "$scratch/big.down"
+  in_container rm -f /workspace/e2e-big.bin
+  rm -f "$scratch/big.bin" "$scratch/big.out" "$scratch/big.down"
+
+  step "Ending a remote command when its client goes away"
+  in_container rm -f /tmp/e2e-client-pid
+  ssh "${ssh_plain[@]}" "$host" 'echo $$ > /tmp/e2e-client-pid; exec sleep 300' &
+  local client=$!
+  for _ in $(seq 1 20); do
+    [[ -n "$(in_container cat /tmp/e2e-client-pid 2>/dev/null || true)" ]] && break
+    sleep 1
+  done
+  local remote
+  remote=$(in_container cat /tmp/e2e-client-pid)
+  expect "remote command running" "$(in_container sh -c "kill -0 $remote 2>/dev/null && echo alive || echo gone")" alive
+  kill -9 "$client" 2>/dev/null || true
+  wait "$client" 2>/dev/null || true
+  local state=alive
+  for _ in $(seq 1 20); do
+    state=$(in_container sh -c "kill -0 $remote 2>/dev/null && echo alive || echo gone")
+    [[ "$state" == gone ]] && break
+    sleep 1
+  done
+  expect "remote command after its client was killed" "$state" gone
+
+  step "Idle sockets do not lock out a login"
+  local port address
+  address=$(ssh -G "$host" | awk '$1 == "hostname" { print $2 }')
+  port=$(ssh -G "$host" | awk '$1 == "port" { print $2 }')
+  # Twice the limit of logged-in connections, doing nothing.
+  python3 -c '
+import socket, sys, time
+sockets = [socket.create_connection((sys.argv[1], int(sys.argv[2]))) for _ in range(40)]
+open(sys.argv[3], "w").write("held")
+time.sleep(60)' "$address" "$port" "$scratch/idle-held" &
+  local idle=$!
+  for _ in $(seq 1 20); do [[ -f "$scratch/idle-held" ]] && break; sleep 1; done
+  expect "idle sockets held" "$(cat "$scratch/idle-held" 2>/dev/null || true)" held
+  expect "a login while idle sockets are open" "$(ssh "${ssh_plain[@]}" "$host" id -un)" silo
+  kill "$idle" 2>/dev/null || true
+  wait "$idle" 2>/dev/null || true
+}
+
+# SSH, SFTP, a terminal, the editor's proxy and the in-guest client, which a container computer has
+# through the same commands as a virtual machine.
+container_access_features() {
+  local scratch host
+  scratch=$(mktemp -d)
+
+  step "Setting up SSH for $ctr and running commands over it"
+  host=$("$silo" --json ssh-setup "$ctr" | python3 -c 'import json, sys; print(json.load(sys.stdin)["host"])')
+  local ssh_opts=(-o BatchMode=yes -o ConnectTimeout=30)
+  # The listener is started by the engine when access is enabled; give it a moment.
+  local seen=""
+  for _ in $(seq 1 20); do
+    seen=$(ssh "${ssh_opts[@]}" "$host" uname -a 2>/dev/null || true)
+    [[ "$seen" == Linux* ]] && break
+    sleep 1
+  done
+  if [[ "$seen" != Linux* ]]; then
+    ssh -v "${ssh_opts[@]}" "$host" uname -a >&2 || true
+    echo "ssh $host uname -a did not print a Linux kernel" >&2
+    exit 1
+  fi
+  echo "ssh $host uname -a: $seen"
+  expect "ssh account" "$(ssh "${ssh_opts[@]}" "$host" id -un)" silo
+  expect "ssh exit status" "$(ssh "${ssh_opts[@]}" "$host" 'exit 7' >/dev/null 2>&1; echo $?)" 7
+  expect "ssh without a terminal" "$(ssh "${ssh_opts[@]}" "$host" 'tty' 2>/dev/null || true)" "not a tty"
+  expect "ssh standard input" "$(printf 'piped-input' | ssh "${ssh_opts[@]}" "$host" cat)" piped-input
+  expect "ssh working directory" "$(ssh "${ssh_opts[@]}" "$host" pwd)" /home/silo
+
+  step "Copying files to and from $ctr over SFTP"
+  head -c 300000 /dev/urandom > "$scratch/up.bin"
+  printf 'put %s /workspace/e2e-sftp.bin\nget /workspace/e2e-sftp.bin %s\nls -l /workspace\n' "$scratch/up.bin" "$scratch/down.bin" | sftp "${ssh_opts[@]}" -b - "$host"
+  cmp "$scratch/up.bin" "$scratch/down.bin"
+  expect "file written over sftp, read in the guest" "$(in_container sh -c 'wc -c < /workspace/e2e-sftp.bin | tr -d " "')" 300000
+  expect "file owner" "$(in_container stat -c %U /workspace/e2e-sftp.bin)" silo
+
+  container_forwarding_and_transfers "$host" "$scratch"
+
+  step "Opening a terminal session in $ctr over SSH"
+  local tty_name
+  tty_name=$(ssh -tt "${ssh_opts[@]}" "$host" tty | tr -d '\r')
+  if [[ ! "$tty_name" =~ ^/dev/pts/[0-9]+$ ]]; then echo "ssh -tt tty printed '$tty_name'" >&2; exit 1; fi
+  echo "terminal: $tty_name"
+  local sized
+  sized=$(ssh -tt "${ssh_opts[@]}" "$host" 'stty size' | tr -d '\r')
+  [[ "$sized" =~ ^[0-9]+\ [0-9]+$ ]] || { echo "stty size printed '$sized'" >&2; exit 1; }
+  # A shell on a terminal reads the commands it is sent and ends with the connection.
+  expect "interactive shell" "$(printf 'echo shell-$((6*7))\nexit\n' | ssh -tt "${ssh_opts[@]}" "$host" | tr -d '\r' | grep -o 'shell-42' | head -n 1)" shell-42
+
+  step "Opening the terminal command of $ctr"
+  # The command the app and `silo` launch in a terminal emulator, run on a pseudo-terminal.
+  # The runtime home exactly as the engine gave it to the SSH listener it started (the unit name
+  # of a container is derived from that text).
+  local home listener
+  listener=$(pgrep -f -- '--container-runtime ssh serve' | head -n 1)
+  home=$(tr '\0' '\n' < "/proc/$listener/environ" | sed -n 's/^MSB_HOME=//p')
+  [[ -n "$home" ]] || { echo "no SSH listener to read the runtime home from" >&2; exit 1; }
+  echo "runtime home: $home (found: $(container_home))"
+  local terminal=(/usr/bin/env "MSB_HOME=$home" "MSB_PATH=$engine_dir/msb" "MSB_LIBKRUNFW_PATH=$engine_dir/msb"
+    "$engine_dir/silod" --container-runtime exec "$ctr" --user silo --env USER=silo --env LOGNAME=silo --no-start --workdir /workspace --tty)
+  local typed
+  local code=0
+  typed=$(printf 'tty; id -un; pwd; exit\n' | script -qec "${terminal[*]}" /dev/null 2>&1 | tr -d '\r') || code=$?
+  echo "terminal command output (status $code):"
+  printf '%s\n' "$typed"
+  grep -Eq '/dev/pts/[0-9]+$' <<<"$typed" || { echo "the terminal printed: $typed" >&2; exit 1; }
+  grep -qx 'silo' <<<"$typed" || { echo "the terminal did not run as silo: $typed" >&2; exit 1; }
+  grep -qx '/workspace' <<<"$typed" || { echo "the terminal did not start in /workspace: $typed" >&2; exit 1; }
+  echo "terminal command: ok"
+
+  step "Using the editor's proxy (ssh serve --stdio) in $ctr"
+  editor_home="$home"
+  mkdir -p "$home/ssh"
+  ssh-keygen -q -t ed25519 -N '' -f "$scratch/editor_key" -C silo-e2e-editor
+  editor_key_file="$scratch/editor_key"
+  cat "$scratch/editor_key.pub" >> "$home/ssh/authorized_keys"
+  local host_key="$home/sandboxes/$ctr/ssh/host_ed25519"
+  [[ -f "$host_key" ]] || { echo "no host key at $host_key" >&2; exit 1; }
+  printf 'silo-e2e-editor %s\n' "$(ssh-keygen -y -f "$host_key")" > "$scratch/known_hosts"
+  local proxy="/usr/bin/env MSB_HOME=$home MSB_PATH=$engine_dir/msb MSB_LIBKRUNFW_PATH=$engine_dir/msb $engine_dir/silod --container-runtime ssh serve $ctr --stdio --no-start --no-inactivity-timeout"
+  local editor_ssh=(ssh -F /dev/null -o BatchMode=yes -o IdentitiesOnly=yes -o IdentityAgent=none
+    -o "UserKnownHostsFile=$scratch/known_hosts" -o StrictHostKeyChecking=yes -o "ProxyCommand=$proxy")
+  expect "editor proxy" "$("${editor_ssh[@]}" -o "IdentityFile=$scratch/editor_key" -l silo silo-e2e-editor uname -s)" Linux
+  # A key that is not listed is refused, and so is a login for another account.
+  ssh-keygen -q -t ed25519 -N '' -f "$scratch/stranger" -C stranger
+  if "${editor_ssh[@]}" -o "IdentityFile=$scratch/stranger" -l silo silo-e2e-editor true 2>/dev/null; then
+    echo "a key that is not authorized logged in" >&2
+    exit 1
+  fi
+  if "${editor_ssh[@]}" -o "IdentityFile=$scratch/editor_key" -l root silo-e2e-editor true 2>/dev/null; then
+    echo "a login for another account succeeded" >&2
+    exit 1
+  fi
+  echo "editor proxy refuses an unlisted key and another account"
+  remove_editor_key
+  expect "authorized key removed" "$(grep -c silo-e2e-editor "$home/ssh/authorized_keys" || true)" 0
+
+  step "Installing the in-guest client in $ctr"
+  mkdir -p "$scratch/project"
+  (cd "$scratch/project" && "$silo" guest-client install "$ctr" --binary "$silo")
+  expect "client binary" "$(in_container sh -c 'test -x /usr/local/bin/silo && echo installed')" installed
+  expect "client account" "$(in_container id -u)" 1001
+  expect "bridge folder owner" "$(in_container stat -c %U /.msb/silo-bridge)" silo
+  local listed_inside
+  listed_inside=$(in_container silo --in-guest --json list)
+  if ! grep -q "\"$ctr\"" <<<"$listed_inside"; then
+    echo "the in-guest client did not list $ctr: $listed_inside" >&2
+    engine_find -path "*sandboxes/$ctr/runtime" -exec ls -lan {} \; >&2 || true
+    exit 1
+  fi
+  echo "in-guest list: ok"
+  # The client reaches only its own computer and forks; a keep is not offered at all.
+  if in_container silo --in-guest keep "$ctr" >/dev/null 2>&1; then
+    echo "the in-guest client ran a keep" >&2
+    exit 1
+  fi
+  (cd "$scratch/project" && "$silo" guest-client revoke "$ctr") >/dev/null
+  rm -rf "$scratch"
 }
 
 step "Waiting for the engine"

@@ -431,6 +431,153 @@ the capability list (refused with the plain message, hidden in the app) until CT
 - **Not done.** SSH, editor, terminal and in-guest client (phase CT3b, above); GitHub access live; UDP ports;
   aarch64 live run.
 
+### 8 Nov 2026: phase CT3b built (SSH, the editor, the terminal and the in-guest client for container computers)
+
+Branch `claude/containers-ct3b`. A container computer has SSH access, an editor connection, a terminal and the in-guest
+client through the same commands, API methods and screens as a Linux VM. Fable's design, as decided:
+
+- **SSH, editor, terminal: one seam.** The callers already spawn `<runtime executable> ssh serve NAME [--stdio | --host
+  --port --authorized-keys --expected-machine-id ...]` (SSH access, the editor's `ProxyCommand`, Connections' remote
+  guest) or `<runtime executable> exec NAME ... --tty` (terminals). `runtime::command_for(paths, name)` returns the
+  `msb` command for a VM and `silod --container-runtime` for a container (`containers::runtime_invocation`; `silod`
+  sits beside `msb`, where `silo-ctr` already does); the four callers use it and no caller branches on the kind. The
+  capability gates for the terminal, editor and SSH access are gone from the shared list (it keeps export and the
+  desktop). `silod --container-runtime` (`containers/cli.rs`) parses the same arguments (`containers/args.rs` gained
+  `Command::SshServe` and `exec --tty`; a terminal with no command is `bash -l`) and runs either the server or
+  `crun exec` on the caller's terminal.
+- **The server** (`containers/ssh.rs`): russh 0.65.1 (Apache-2.0; the same library MicroSandbox's `msb ssh serve`
+  uses), `default-features = false, features = ["ring"]` so the `rsa` crate (RUSTSEC-2023-0071) is not built; 65 new
+  crates in `Cargo.lock`, none upgrading an existing one. `russh-sftp` is not needed: `sftp` is
+  `/usr/lib/openssh/sftp-server` (already in the guest image, `openssh-sftp-server`; no image change) piped to the
+  channel as the working account. Auth: public keys from the authorized-keys file the caller names (the editor's
+  shared `ssh/authorized_keys` by default), read at each attempt, plain key lines only (a line with options is skipped),
+  login `silo` only; host key `sandboxes/<name>/ssh/host_ed25519`; `--expected-machine-id` against the record's
+  `silo.machine-id`. Sessions are `crun exec` as `silo` through the existing exec path (`silo-ctr enter`, the init shim,
+  the process-group kill when a channel or connection ends); a pty is made by crun and handed to the server over a
+  private `--console-socket`; client environment, agent, X11 and forwarding are refused. The listener prints
+  `SILO_SSH_READY` (and the session lines) as MicroSandbox's does. The server runs apart from the engine, so the
+  engine now publishes a computer's active secret names to `state/secrets.active` and the sessions get the same
+  `NAME=$MSB_NAME` placeholders. A backend trait upstream (so both kinds share one server) is the better end state;
+  not done here.
+- **Keep-id.** The spool depended on virtiofs stat virtualization. In a container the working account (1001) is now
+  the engine's own user and group (`containers/idmap.rs`): crun's maps are container `0..1000` to holder `1..1001`,
+  `1001` to holder `0` (the engine's user), `1002..` to the same holder ids, so root is a sub-id and the agent's
+  `0600` request files are the engine's on disk. `silo-ctr userns --keep-id N` (new) makes the same layout for the
+  image unpack (umoci), and the boot layer and each upper directory are given to root through it (the agent must not
+  own `/` or `/silo`). `Spool` takes the owner from the file's real uid and gid through the mapping when the bridge
+  folder is a container's; it writes no override and keeps `0711` on the runtime folder instead. The unpacked image
+  and the boot layer have a new directory name (`-keepid`), and a computer whose upper directory is owned by the
+  engine's own user (an earlier build) is refused at start with "Recreate it". No migration (first container
+  release). The share is the computer's runtime folder bound at `/.msb`; Landlock's writable list gained `/.msb`.
+- **Found on the way** (KVM runner, x86_64, Ubuntu 24.04):
+  - The container runtime gives the container's standard output and error files to the user its first process runs
+    as. The holder's log is those files, and root is now a sub-id, so the second start could not open its own log
+    ("Permission denied"). The log is now new each start and `0666` inside the private state folder.
+  - A process started outside the engine's control group (a terminal from a login session, an editor's proxy) cannot
+    join the container's group: `crun exec` failed with no message. Terminals and SSH sessions now run in a
+    `systemd-run --user --scope`, as the engine's own commands do (`lifecycle::in_user_scope`).
+  - `crun exec` with an inherited terminal exited 1 silently; the terminal command now makes the pty itself
+    (`--console-socket`, as the SSH server does) and copies bytes between it and the user's terminal.
+  - The root directory of the unpacked image belongs to root (a sub-id), which the engine may not move between
+    folders: the namespace moves it. A unit name derives from the runtime home text, so a hand-made command line
+    must use the home the engine passes.
+  - `silo-init --own-group` no longer fails for a session leader (a terminal's command).
+- **Threat model**: the container section says the working account is now the engine's user (an escape as the agent
+  lands as the engine), why the namespaces still separate them, and describes the SSH server, SFTP, terminals and
+  the share. Guides: [managed SSH](../SiloUI-MANAGED-SSH.md#container-computers),
+  [in-guest client](../SiloUI-IN-GUEST-CLIENT.md#container-computers).
+- **Tests**: argument shapes (`ssh serve` flags and refusals, `exec --tty`), authorized keys and key matching, the
+  machine-identity refusal, term cleaning, the readiness line, an in-process russh client against the server (listed
+  key accepted, another key, another account and a removed key refused, a session on a stopped computer errors, an
+  environment and an unknown subsystem refused), the id extents and owner mapping, the OCI maps and `/.msb` mount, the
+  upper-directory ownership refusal, the boot-layer name, the share modes, the published secrets, `command_for` and
+  the proxy/terminal strings for both kinds, the spool's container owner and modes, `silo-ctr userns --keep-id` (maps
+  and a real namespace test), and the frontend (a container is offered terminal, editor and SSH, not export or the
+  desktop). Live: `linux-host-e2e.sh` with `SILO_E2E_CONTAINER=1` on the KVM runner passes: `silo ssh-setup`,
+  `ssh NAME.silo-dev uname -a` (Linux), the account, an exit status, standard input, `pwd` in the home, an SFTP put and
+  get of 300 kB (identical, owned by `silo`), `ssh -tt ... tty` (`/dev/pts/0`), `stty size`, an interactive shell, the
+  terminal command on a pty (`/dev/pts/0`, `silo`, `/workspace`), the editor proxy in `--stdio` mode under a scripted
+  `ssh` (an unlisted key and another account refused), and the in-guest `silo --in-guest list` as the non-root
+  account after `silo guest-client install --binary`.
+
+- **Review fixes (9 Nov 2026, PR 97).**
+  - *Port forwarding.* The server answers `direct-tcpip` (`ssh -L`, `ssh -D`, the editor's forwarding), which
+    MicroSandbox's server accepts, and only to the container's own loopback (`localhost`, `127.0.0.0/8`, `::1`, ports
+    1 to 65535); anything else is refused. The connection is made by a new `silo-ctr connect --state DIR --host H --port N`,
+    which joins the holder's user and network namespaces (`enter`'s code, now `join_holder`), connects, writes one zero
+    byte, and relays standard input and output; the server starts it, waits for the byte, then accepts the channel, so a
+    refused connection is an `open failed` for the client and the session loop never waits for it. The managed-SSH table
+    no longer says forwarding is refused (remote `-R` still is).
+  - *No stall under load.* `data()` awaited a bounded queue inside the session loop, which is also what takes the client's
+    window updates: `ssh box cat < big > out` filled the command's stdin, the command's stdout filled the client's window,
+    and the update that would have freed it sat behind the blocked loop. `data()` now never waits: the input goes to an
+    unbounded queue that a writer task empties into the command. The first fix bounded that queue in bytes (32 MiB per
+    channel, 64 MiB per connection) and ended a command that fell behind; the KVM check (60 MB both ways) then failed
+    twice and passed twice on identical code. Ending a command for reading slowly is not what `sshd` does and would
+    break `rsync`, `git` and large `scp` at random, so it is replaced by real flow control (below). A channel close or a
+    dropped connection already killed the command's process group (the channel is dropped); the live check now proves it
+    by killing a client.
+  - *Login deadline.* A connection has 30 s from `accept` (the version exchange included) to log in, whatever the inactivity
+    timeout; at most 64 connections are logging in at once; only a logged-in connection takes one of the 32 slots, so idle
+    sockets can no longer lock SSH out under `--no-inactivity-timeout`. A client over the cap of logged-in connections
+    is disconnected when it proves its key.
+  - *Flow control (no command is ended for being slow).* russh 0.65.1 sends `WINDOW_ADJUST` itself, before it calls
+    `Handler::data`, as soon as its view of the client's window is under half the target; the handler cannot delay it
+    (`Handler::adjust_window` only picks the next target, after the packet is queued) and `Session` has no call to send
+    one, so the window bounds what is in flight, not what is queued. Awaiting inside `data()` is no answer (the loop
+    would stop taking the client's window updates, the stall above). So Silo vendors russh 0.65.1 with a patch
+    (`src-tauri/vendor/russh`, `[patch.crates-io]` as for `tauri-plugin-updater`, `SILO-PATCH.md`; not upstreamed):
+    `Handler::manual_window(channel)` (default false) makes russh count received bytes against the channel's window
+    without granting more, and `Session::window_adjust` / `Handle::window_adjust` grant it (the handle's goes through the
+    priority queue, so it is never held behind output waiting for the client's window). The server grants a channel's
+    2 MiB window (`Config::window_size`) back as the writer task empties the queue into the command (in batches of 512 KiB
+    and whenever the queue is empty), and at once for input nothing takes (before the command starts, after EOF, a command
+    that closed its input, whose queued bytes the writer drops and gives back). A channel therefore queues at most 2 MiB
+    and a connection at most 16 x 2 MiB; a client past its window gets its channel closed, as `sshd` disconnects it. The
+    per-channel and per-connection byte limits and the "did not read its input" ending are gone. Tests (Linux container
+    here, CI): the queue never passes the window, the window comes back only as the command takes the input, a command that
+    stops reading gives it all back, and a real client sending 12 MiB to a command that is paused and then reads 64 KiB
+    every 2 ms is held back, never ended, and delivers every byte with the queue within the window.
+    `linux-host-e2e.sh` now runs the 60 MB `ssh cat` both ways five times (all five hashes must match) and sends the file
+    to a command that reads 64 KiB every 10 ms, which must receive it intact.
+  - *Memory bound and forwards (review round 3).* The window counted payload bytes only, but each `CHANNEL_DATA` was its
+    own entry in an unbounded queue, so 2 MiB sent as one-byte packets was about two million entries (over 100 MiB for
+    one channel). The queue is now one buffer per channel (`BytesMut` under a mutex, a `Notify` for the writer, which
+    takes everything with `split()`): payload at most the window, allocation at most twice that, whatever the packet
+    sizes. `direct-tcpip` forwards had russh's automatic window and a bounded queue the session loop awaited, so a
+    target that stopped reading froze the whole connection (the shell too) and a bulk two-way forward could deadlock.
+    A forward is now a command: manual window, input through `data()` into the same queue and a writer task (which the
+    forward's task owns), output through `Handle::data`; the channel's own receiving end is dropped. Tests: one-byte
+    packets to a command that never reads stay in one buffer of at most twice the window; a forward whose target never
+    reads holds back its client while an echo forward and a new channel on the same connection answer; 16 MiB both ways
+    through a forward with hashes (the in-memory transport must hold a window each way: russh writes without reading
+    meanwhile, so two russh ends sending in bulk over a small buffer wait on each other). `linux-host-e2e.sh`: 60 MB
+    both ways through an `ssh -L` forward (hashes), and a shell command on the same connection that still answers while a
+    forward's target does not read. Output is still held only by the client's window: a client that stops reading one
+    channel stops the loop from taking the connection's other output (russh does not read its handle queue while a
+    channel has pending data), which the guide says. The patch draft for russh is
+    [the upstream draft](../v1/upstream/russh-manual-window.md).
+  - *russh is watched by hand.* While russh is vendored (`src-tauri/vendor/russh`), Dependabot and RustSec no longer see
+    it, so its releases and advisories are checked by hand until the patch is upstream (`SILO-PATCH.md` says the same).
+  - *Signals* in an SSH `signal` request go to the exec's process group (`ExecGroup::signal`, the same leader check as the kill).
+  - *Root's in-guest answers* are a documented difference, not changed: the engine cannot give a file to a sub-id without a
+    helper in the holder's namespace, and a looser mode would show the answer to any guest user that learns the id.
+    A root process with `CAP_DAC_OVERRIDE` (Silo's own root commands) reads it; one without gets "permission denied".
+    Stated in the in-guest client guide and pinned by a test.
+  - *Storage.* `prune_storage` (at engine start and before an unpack, so the space check counts only what is needed)
+    removes unpacked images no computer's record names (the pinned image stays) and, with no container running, boot
+    layers of other init shims.
+  - *Terminal start* keeps `crun exec`'s error output and returns at once when it ends before handing over the terminal
+    (it waited 15 s with no reason); the listener logs an `accept` error and tries again after 50 ms, doubling to 2 s.
+  - *Threat model.* SSH refuses a login unless `silo` in the computer's account files has the id 1001 (never 0) that the
+    keep-id mapping gives the engine's user. The container section names the `/.msb` share as the one engine-owned
+    folder in the mount namespace and no longer says nothing is added to the account. An upper directory is current only
+    if a sub-id of the account (from `/etc/subuid`) owns it. `Spool::new` takes the `KeepId` from the worker
+    (`containers::keep_id_for(home, name)`), so the spool does not know about kinds.
+  - *Tests.* Unit tests for each, run in a Linux container here and in CI; `linux-host-e2e.sh` gained forwarding (`-L`,
+    `-D`, refused destinations, a port the host does not serve), a 60 MB file through `ssh cat` both ways with hashes
+    (five rounds, and a slow reader; see the flow-control item), a killed client, and 40 idle sockets with a login in between.
+
 ### R1: CI runner on the Mac (branch `claude/runner-phase-1`)
 
 - **Built:** `silo-action/` and every reference removed; `silo-runner` (Go, `app/SiloUI/runner`, on

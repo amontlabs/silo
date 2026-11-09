@@ -102,6 +102,12 @@ impl ExecGroup {
     /// SIGKILLs the command's process group. Only a process that leads its own group is touched,
     /// so a stale or reused pid cannot take anything else with it. Returns whether it signalled.
     pub fn kill(&self) -> bool {
+        self.signal(libc::SIGKILL)
+    }
+
+    /// Sends `signal` to the command's process group (an SSH client's `signal` request), under the
+    /// same rule as [`ExecGroup::kill`]. Returns whether it signalled.
+    pub fn signal(&self, signal: i32) -> bool {
         let Some(pid) = leader_pid(&self.directory) else {
             return false;
         };
@@ -110,7 +116,7 @@ impl ExecGroup {
             if libc::getpgid(pid) != pid {
                 return false;
             }
-            libc::kill(-pid, libc::SIGKILL) == 0
+            libc::kill(-pid, signal) == 0
         }
     }
 }
@@ -228,6 +234,32 @@ mod tests {
         assert!(gone(leaf), "the command's child survived");
         drop(group);
         assert!(!directory.path().exists(), "the exec's files stayed behind");
+    }
+
+    #[test]
+    fn a_signal_reaches_the_command_and_what_it_started_and_only_when_it_leads_its_group() {
+        use std::os::unix::process::CommandExt;
+        let directory = tempfile::tempdir().unwrap();
+        let mut leader = Command::new("sh");
+        leader
+            .args(["-c", "trap 'exit 42' TERM; sleep 300 & wait"])
+            .process_group(0);
+        let mut leader = leader.spawn().unwrap();
+        std::fs::write(directory.path().join("exec.pid"), format!("{}\n", leader.id())).unwrap();
+        let group = ExecGroup::new(directory.path().to_owned());
+        // Give the shell time to install its trap before the signal arrives.
+        std::thread::sleep(Duration::from_millis(300));
+        assert!(group.signal(libc::SIGTERM));
+        let status = leader.wait().unwrap();
+        assert_eq!(status.code(), Some(42), "the command did not get SIGTERM: {status:?}");
+        // The command is gone: nothing is signalled any more.
+        assert!(!group.signal(libc::SIGTERM));
+        // A process that does not lead its group is never signalled.
+        std::fs::write(directory.path().join("exec.pid"), format!("{}\n", std::process::id())).unwrap();
+        // SAFETY: getpgrp has no preconditions.
+        if unsafe { libc::getpgrp() } as u32 != std::process::id() {
+            assert!(!group.signal(libc::SIGTERM));
+        }
     }
 
     #[test]

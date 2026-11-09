@@ -36,7 +36,7 @@ Alternatives, and why not:
 - **A third-party gateway (an MCP gateway, a credential broker).** None keeps to "this computer
   and its forks" or knows Silo's fork tree; the allow-list below is the product policy.
 
-Gaps accepted: polling adds up to about 300 ms to each call; Linux computers only (macOS computers
+Gaps accepted: polling adds up to about 300 ms to each call; Linux computers only, virtual machines and containers (macOS computers
 have no host folder, so `guestClient.enable` refuses them); and the `/.msb` share has not had a
 security review ([boundary 6](THREAT-MODEL.md#6-the-workspace-disk-and-host-folders)), so the
 engine bounds every read it makes there.
@@ -179,6 +179,44 @@ from removing each other's requests. If the host file system keeps no extended a
 setting is skipped and answers show the runtime's default owner (root's), which is the root-only case.
 Checked in a running Linux guest on MicroSandbox 0.7.6: `/.msb` shows as `drwx--x--x root root`, and the
 `silo` user reads its answers.
+
+## Container computers
+
+A container computer has the in-guest client too, with the same token, allow-list and folder
+parsing. Only the share differs, because a container sees real file owners and modes where a virtual
+machine's share is virtualized:
+
+- **The share.** The computer's runtime folder (`sandboxes/<name>/runtime`) is bound read-write at
+  `/.msb` (no exec, no devices), so the client finds `/.msb/silo-bridge` as in a virtual machine.
+  The Landlock ruleset the init shim applies lets the account write there.
+- **Owners.** No stat override is written or read. The container's id mapping makes the working
+  account (`silo`, 1001) the engine's own user ([threat model](THREAT-MODEL.md#container-computers)),
+  so the agent's `0600` request files are owned by the engine on disk and the engine's `0600` answers
+  are readable by the agent. The engine computes a request's owner from the file's real owner
+  through that mapping (`containers::idmap::KeepId`, used by `guest_client::Spool` when the
+  bridge folder belongs to a container; the worker names the kind, the spool does not look for
+  it). A request written by any other id (another guest user, root) has no owner, and the engine
+  usually cannot read it at all.
+- **Root is a difference from a virtual machine.** A virtual machine's answer is made readable to
+  the user that asked, root included. A container's answer to a request the engine could read from
+  root has no owner to give it to, so it stays the account's `0600` file, and a process that is
+  root in the container without `CAP_DAC_OVERRIDE` cannot read it. The root commands Silo starts
+  (`silo exec --user root`, account setup) have that capability and read it; a root process
+  without it (a service that dropped it, a shell opened another way) gets "permission denied" on
+  the answer. Giving the file to the container's root needs a helper in the holder's namespace
+  (a file cannot be handed to a sub-id otherwise), and a looser mode would show the answer to
+  every guest user that learns the request id, so neither is done: the client is meant for the
+  working account.
+- **Sealing.** `sandboxes/<name>` is `0700` on the host, the runtime folder `0711`, and
+  `silo-bridge`, `req/` and `resp/` get `0755`, `1733` and `0711`, restored on every pass of the
+  worker; the other guest users can search the runtime folder but not list it. The agent owns the
+  folders, which a virtual machine's guest does not, so it can change their modes; the bridge's
+  checks do not depend on them.
+- **A container made by an earlier build** (before the id mapping) is refused at start with a
+  message to recreate it.
+
+The live check installs the in-guest `silo` and runs a read call (`silo --in-guest list`) as the
+`silo` account.
 
 ## Checkpoints of a running computer
 

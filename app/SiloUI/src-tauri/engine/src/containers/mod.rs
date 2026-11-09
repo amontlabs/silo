@@ -13,7 +13,9 @@
 
 pub mod args;
 pub mod capability;
+pub mod cli;
 pub mod hold;
+pub mod idmap;
 pub mod image;
 pub mod layout;
 #[cfg(target_os = "linux")]
@@ -22,10 +24,27 @@ pub mod oci;
 #[cfg(target_os = "linux")]
 pub mod ports;
 pub mod secrets;
+pub mod ssh;
 pub mod tools;
 pub mod users;
 
 pub use args::RUNTIME_LABEL;
+
+/// For the in-guest client of the computer `name`, the id mapping its bridge folder's files are
+/// owned by (`guest_client::Spool::new` takes it); `None` when the runtime home holds no container
+/// computer of that name.
+pub fn keep_id_for(home: &std::path::Path, name: &str) -> Option<idmap::KeepId> {
+    capability::is_container(home, name).then(idmap::KeepId::current)
+}
+
+/// The program and leading argument of the container runtime command (`cli`): `silod`, which
+/// is installed beside the bundled `msb`.
+pub fn runtime_invocation(paths: &RuntimePaths) -> (PathBuf, Vec<String>) {
+    (
+        paths.executable.with_file_name("silod"),
+        vec![cli::FLAG.to_owned()],
+    )
+}
 
 /// The secret material one runtime command may use: the values of the general secrets assigned
 /// to the computer (name, value, allowed hosts) and the GitHub access profile. It is read from
@@ -130,6 +149,10 @@ pub fn run(
         Command::Inspect { name } => inspect(paths, &name).map(|value| output(value.to_string())),
         Command::List { .. } => Ok(output(Value::Array(listed(paths, None)).to_string())),
         Command::Unsupported { verb } => Err(not_yet(&verb)),
+        Command::SshServe(_) => Err(RuntimeError::Invalid(
+            "ssh serve is a long-running command, started through the container runtime command."
+                .into(),
+        )),
         Command::Start { name } => {
             start(paths, &name, timeout, material).map(|()| output(String::new()))
         }
@@ -529,6 +552,7 @@ fn gateway_ca_command(name: &str) -> args::Exec {
         no_start: true,
         timeout: Some(GATEWAY_CA_TIMEOUT),
         argv: vec!["update-ca-certificates".into(), "--fresh".into()],
+        ..args::Exec::default()
     }
 }
 
@@ -694,6 +718,7 @@ pub fn guest_plan(
             no_start: true,
             timeout: None,
             argv: argv.to_vec(),
+            ..args::Exec::default()
         };
         let lifecycle::ExecPlan { command, group } =
             lifecycle::exec_command(paths, &tools, name, &exec, false)?;

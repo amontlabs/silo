@@ -1,6 +1,8 @@
 //! `silo-ctr userns`: a command as root of a new user and mount namespace (and network namespace with
 //! `--net`), the way rootless podman sets up its outer namespace. Container id 0 is the caller, ids
-//! 1..=65535 the caller's sub-id range, mapped by the setuid `newuidmap` and `newgidmap`.
+//! 1..=65535 the caller's sub-id range, mapped by the setuid `newuidmap` and `newgidmap`. With `--keep-id N`
+//! the caller is id N instead (as rootless podman's `--userns=keep-id`), the sub-id range fills the other ids, and
+//! the command runs as id 0, a sub-id: the layout a container computer's files are owned by.
 
 use crate::subid;
 
@@ -9,6 +11,8 @@ pub struct UsernsArgs {
     pub sub_uid: Option<u32>,
     pub sub_gid: Option<u32>,
     pub net: bool,
+    /// The id the caller keeps (the container's working account), instead of becoming root.
+    pub keep_id: Option<u32>,
     pub command: Vec<String>,
 }
 
@@ -25,6 +29,7 @@ pub fn parse_args(args: &[String]) -> Result<UsernsArgs, String> {
         sub_uid: None,
         sub_gid: None,
         net: false,
+        keep_id: None,
         command: Vec::new(),
     };
     let mut index = 0;
@@ -37,6 +42,17 @@ pub fn parse_args(args: &[String]) -> Result<UsernsArgs, String> {
                 break;
             }
             "--net" => parsed.net = true,
+            "--keep-id" => {
+                let id = number_after(arg, args.get(index))?;
+                index += 1;
+                if !(1..subid::RANGE).contains(&id) {
+                    return Err(format!(
+                        "--keep-id: {id} is not between 1 and {}",
+                        subid::RANGE - 1
+                    ));
+                }
+                parsed.keep_id = Some(id);
+            }
             "--sub-uid" | "--sub-gid" => {
                 let number = number_after(arg, args.get(index))?;
                 index += 1;
@@ -56,16 +72,22 @@ pub fn parse_args(args: &[String]) -> Result<UsernsArgs, String> {
 }
 
 /// The `newuidmap`/`newgidmap` arguments after the pid: container 0 is `id`, 1..=65535 start at `sub`.
-pub fn map_args(id: u32, sub: u32) -> Vec<String> {
-    [
-        "0".to_string(),
-        id.to_string(),
-        "1".into(),
-        "1".into(),
-        sub.to_string(),
-        subid::RANGE.to_string(),
-    ]
-    .into()
+/// With `keep` the caller `id` is container `keep` instead; container 0..keep and keep+1..=65535 take the
+/// sub-ids in order, so a container id `c` below `keep` is sub-id `sub + c` and one above it `sub + c - 1`.
+pub fn map_args(id: u32, sub: u32, keep: Option<u32>) -> Vec<String> {
+    let extents: Vec<(u32, u32, u32)> = match keep {
+        None => vec![(0, id, 1), (1, sub, subid::RANGE)],
+        Some(keep) => vec![
+            (0, sub, keep),
+            (keep, id, 1),
+            (keep + 1, sub + keep, subid::RANGE - keep),
+        ],
+    };
+    extents
+        .into_iter()
+        .flat_map(|(inside, outside, count)| [inside, outside, count])
+        .map(|number| number.to_string())
+        .collect()
 }
 
 #[cfg(target_os = "linux")]
@@ -90,10 +112,16 @@ mod linux {
         pub sub_uid: u32,
         pub sub_gid: u32,
         pub net: bool,
+        pub keep_id: Option<u32>,
     }
 
     /// The caller's ranges, or the explicitly given starts.
-    pub fn resolve(sub_uid: Option<u32>, sub_gid: Option<u32>, net: bool) -> Result<Spec, String> {
+    pub fn resolve(
+        sub_uid: Option<u32>,
+        sub_gid: Option<u32>,
+        net: bool,
+        keep_id: Option<u32>,
+    ) -> Result<Spec, String> {
         // SAFETY: getuid and getgid have no preconditions and cannot fail.
         let (uid, gid) = unsafe { (libc::getuid(), libc::getgid()) };
         let user = subid::user_name(uid);
@@ -109,6 +137,7 @@ mod linux {
             sub_uid,
             sub_gid,
             net,
+            keep_id,
         })
     }
 
@@ -147,10 +176,16 @@ mod linux {
         Err(io_err(&format!("exec {}", command[0]), &error))
     }
 
-    fn run_map(program: &str, pid: i32, id: u32, sub: u32) -> Result<(), String> {
+    fn run_map(
+        program: &str,
+        pid: i32,
+        id: u32,
+        sub: u32,
+        keep: Option<u32>,
+    ) -> Result<(), String> {
         let status = Command::new(program)
             .arg(pid.to_string())
-            .args(map_args(id, sub))
+            .args(map_args(id, sub, keep))
             .status()
             .map_err(|error| io_err(program, &error))?;
         if status.success() {
@@ -192,6 +227,15 @@ mod linux {
             _ => return Err("the parent did not finish the id mapping".into()),
         }
         drop((ready, go));
+        if spec.keep_id.is_some() {
+            // The caller is not root here: become root (a sub-id) so the command has the capabilities
+            // the namespace gave it and creates files as root.
+            // SAFETY: plain id changes of this single-threaded child, with CAP_SETUID/SETGID in its namespace.
+            if unsafe { libc::setresgid(0, 0, 0) } != 0 || unsafe { libc::setresuid(0, 0, 0) } != 0
+            {
+                return Err(os_err("become root in the namespace"));
+            }
+        }
         make_private()?;
         body()
     }
@@ -238,8 +282,8 @@ mod linux {
         }
         // SAFETY: getuid and getgid have no preconditions and cannot fail.
         let (uid, gid) = unsafe { (libc::getuid(), libc::getgid()) };
-        let mapped = run_map("newuidmap", pid, uid, spec.sub_uid)
-            .and_then(|()| run_map("newgidmap", pid, gid, spec.sub_gid));
+        let mapped = run_map("newuidmap", pid, uid, spec.sub_uid, spec.keep_id)
+            .and_then(|()| run_map("newgidmap", pid, gid, spec.sub_gid, spec.keep_id));
         if let Err(error) = mapped {
             kill_and_reap(pid);
             return Err(error);
@@ -252,10 +296,10 @@ mod linux {
         Ok(status_code(wait_for(pid)?))
     }
 
-    /// `silo-ctr userns [--sub-uid N] [--sub-gid N] [--net] -- CMD ARGS...`
+    /// `silo-ctr userns [--sub-uid N] [--sub-gid N] [--net] [--keep-id N] -- CMD ARGS...`
     pub fn command(args: &[String]) -> Result<i32, String> {
         let parsed = parse_args(args)?;
-        let spec = resolve(parsed.sub_uid, parsed.sub_gid, parsed.net)?;
+        let spec = resolve(parsed.sub_uid, parsed.sub_gid, parsed.net, parsed.keep_id)?;
         launch(&spec, &mut |_| Ok(()), || exec_command(&parsed.command))
     }
 }
@@ -287,6 +331,7 @@ mod tests {
                 sub_uid: Some(100000),
                 sub_gid: Some(200000),
                 net: true,
+                keep_id: None,
                 command: args(&["id", "--net"]),
             }
         );
@@ -311,8 +356,36 @@ mod tests {
     #[test]
     fn the_map_arguments_put_the_caller_at_zero_and_the_range_at_one() {
         assert_eq!(
-            map_args(1000, 165536),
+            map_args(1000, 165536, None),
             args(&["0", "1000", "1", "1", "165536", "65535"])
         );
+    }
+
+    #[test]
+    fn keeping_an_id_puts_the_caller_there_and_the_sub_ids_around_it() {
+        // Container 0..=1000 are sub-ids 165536.., 1001 is the caller, 1002.. continue the range.
+        assert_eq!(
+            map_args(1000, 165536, Some(1001)),
+            args(&["0", "165536", "1001", "1001", "1000", "1", "1002", "166537", "64534"])
+        );
+        // The sub-id range is used in full, once.
+        let extents = map_args(1000, 165536, Some(1001));
+        let counts: u32 = extents
+            .chunks(3)
+            .map(|e| e[2].parse::<u32>().unwrap())
+            .sum();
+        assert_eq!(counts, subid::RANGE + 1);
+    }
+
+    #[test]
+    fn keep_id_is_parsed_and_must_leave_room_for_root() {
+        let parsed = parse_args(&args(&["--keep-id", "1001", "--", "id"])).unwrap();
+        assert_eq!(parsed.keep_id, Some(1001));
+        for bad in ["0", "65535", "70000", "x"] {
+            assert!(
+                parse_args(&args(&["--keep-id", bad, "--", "id"])).is_err(),
+                "{bad}"
+            );
+        }
     }
 }

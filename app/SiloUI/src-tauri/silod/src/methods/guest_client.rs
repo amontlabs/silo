@@ -92,7 +92,11 @@ async fn enable(params: &Value, context: &HandlerContext) -> Result<HandlerOutpu
             .map_err(DispatchError::internal)?;
     let app_data = context.silod_context().paths().app_data.clone();
     let result = tokio::task::spawn_blocking(move || {
-        Spool::new(spool_dir(&paths.home, &name)).ensure()?;
+        Spool::new(
+            spool_dir(&paths.home, &name),
+            silo_engine::containers::keep_id_for(&paths.home, &name),
+        )
+        .ensure()?;
         let minted = TokenStore::new(&app_data).mint(&params.computer_id, params.policy)?;
         Ok::<_, String>(GuestClientEnableResult {
             computer_id: params.computer_id,

@@ -5,6 +5,7 @@ resolver = "2"
 
 [patch.crates-io]
 tauri-plugin-updater = { path = "src-tauri/vendor/tauri-plugin-updater" }
+russh = { path = "src-tauri/vendor/russh" }
 
 [profile.dev.package.sha2]
 opt-level = 3

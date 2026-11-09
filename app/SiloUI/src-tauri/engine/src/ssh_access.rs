@@ -279,7 +279,6 @@ fn follow_listener(output: impl BufRead, ready: &SyncSender<()>) {
     }
 }
 fn spawn(paths: &RuntimePaths, config: &Configuration) -> Result<Listener, String> {
-    crate::containers::capability::require(paths, &config.computer, crate::containers::capability::Capability::SshAccess)?;
     let root = paths.home.join("ssh/managed-access");
     editor::private_directory(&paths.home.join("ssh"))?;
     editor::private_directory(&root)?;
@@ -303,7 +302,7 @@ fn spawn(paths: &RuntimePaths, config: &Configuration) -> Result<Listener, Strin
         hosts.push(&config.bind_address);
     }
     for host in hosts {
-        let mut child = crate::runtime::runtime_command(&paths.executable)
+        let mut child = crate::runtime::command_for(paths, &config.computer)
             .args([
                 "ssh",
                 "serve",
@@ -907,7 +906,6 @@ fn save_with(
         })
         .ok_or("This computer no longer exists on its device. Refresh SSH access.")?;
     let computer = configuration.name().to_owned();
-    crate::containers::capability::require(paths, &computer, crate::containers::capability::Capability::SshAccess)?;
     let mut configs = read(paths)?;
     let previous = configs.iter().find(|c| c.computer_id == configuration.id());
     let managed = previous
@@ -1117,39 +1115,6 @@ mod tests {
             managed_key: None,
         }
     }
-    #[test]
-    fn ssh_access_for_a_container_computer_is_refused_before_any_setting_or_key_is_saved() {
-        let directory = tempfile::tempdir().unwrap();
-        let paths = crate::guest::test_support::runtime(directory.path());
-        crate::containers::capability::make_container(&paths.home, "dev");
-        for enabled in [true, false] {
-            let error = save_with(
-                &paths,
-                Target::Name("dev"),
-                Settings {
-                    enabled,
-                    port: 2222,
-                    bind_address: "127.0.0.1".into(),
-                    keys: None,
-                },
-            )
-            .err()
-            .unwrap();
-            assert!(
-                error.contains("cannot serve SSH access to a container computer yet"),
-                "{error}"
-            );
-        }
-        let mut saved = config();
-        saved.computer = "dev".into();
-        assert!(spawn(&paths, &saved)
-            .err()
-            .is_some_and(|error| error.contains("cannot serve SSH access to a container")));
-        assert!(!paths.home.join("ssh").exists(), "keys or settings were written");
-        assert!(read(&paths).unwrap().is_empty());
-        assert!(!directory.path().join("msb.log").exists(), "the runtime ran");
-    }
-
     #[test]
     fn a_failed_listener_waits_twice_as_long_each_time_up_to_five_minutes() {
         let c = config();

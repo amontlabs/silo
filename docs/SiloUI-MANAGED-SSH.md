@@ -171,6 +171,74 @@ agent transport's closure. Losing that transport ends the listener and active
 sessions without reconnecting to a replacement computer. `--no-start` refuses a stopped
 computer, and `--no-inactivity-timeout` disables the existing SSH inactivity timer.
 
+## Container computers
+
+A container computer ([threat model](THREAT-MODEL.md#container-computers)) has the same SSH access,
+editor connection and terminal as a virtual machine, through the same commands and the same
+screens. It has no `sshd` either: the callers above start `<runtime executable> ssh serve NAME ...`,
+and for a container the executable is `silod --container-runtime` instead of `msb`
+(`runtime::command_for` picks it, so no caller branches on the kind). The flags are the same
+(`--stdio`, `--no-start`, `--no-inactivity-timeout`, `--exit-on-stdin-close`, `--authorized-keys`,
+`--expected-machine-id`, `--host`, `--port`) and so is the readiness line, `SILO_SSH_READY`.
+
+The server is `engine/src/containers/ssh.rs`, built on the [russh](https://github.com/Eugeny/russh)
+library MicroSandbox's own server uses (Apache-2.0; version 0.65.1 is pinned, with the ring backend
+and no RSA support). It is not MicroSandbox's server because that one is written against its
+sandbox and agent types and cannot take another backend; a backend trait upstream would let both
+kinds share it, and that is the better end state. What it does:
+
+| SSH request | Inside the computer |
+| --- | --- |
+| public-key login | the authorized-keys file the caller names (`MSB_HOME/ssh/authorized_keys` when none), read at each attempt; the login name is `silo` |
+| shell | `/bin/bash -l` as `silo`, in its home |
+| exec | `/bin/bash -c COMMAND` |
+| `pty-req` | a pseudo-terminal made by `crun`; the window-change request resizes it |
+| `sftp` subsystem | `/usr/lib/openssh/sftp-server`, from the image's `openssh-sftp-server` (it is in the guest image already) |
+| `direct-tcpip` (`ssh -L`, `ssh -D`, the editor's port forwarding) | a connection from inside the container's network namespace (`silo-ctr connect`) to the container's own loopback: `localhost`, `127.0.0.0/8` or `::1`, ports 1 to 65535. Any other destination is refused (`administratively prohibited`), so a forward never reaches the host's network or the TAP's |
+| `signal` | sent to the command's process group |
+| anything else (environment, agent, X11, remote forwarding (`-R`), other subsystems) | refused |
+
+The SSH login `silo` must be the working account the container's id mapping gives the engine's
+user (id 1001): the server resolves the name in the computer's own account files, and refuses the
+login if the id is anything else, root's included. The check is made at authentication, so a
+refused login opens no command, terminal or port forward; the reason is in the engine's log. A
+forward also checks that the computer's holder is alive before it joins the container's network
+namespace, so a stale `outer.pid` that another computer's holder has reused is refused.
+
+A connection has 30 seconds to log in whatever the inactivity timeout is, and only logged-in
+connections count against the limit of 32 (at most 64 are still logging in at once), so idle
+sockets cannot lock a person out. A command is never ended because it reads slowly. The
+client's input is flow-controlled with the SSH channel window, as OpenSSH does, for commands, terminals
+and port forwards alike: each channel grants the client 2 MiB, and the server gives window back only as the command
+(or the forward's target) takes the input, so a slow one slows the client down (`rsync`, `git` and a large `scp` just
+take longer). What waits is one buffer per channel that every packet is appended to, so it is 2 MiB of payload however
+small the packets are (a window sent as one-byte packets is not millions of entries) and at most 4 MiB allocated
+(the buffer grows by doubling). A connection has at most 16 channels, forwards included: 32 MiB of payload, at most
+64 MiB allocated; the 32 logged-in connections of a server at most 1 GiB and 2 GiB. The session loop never waits for a
+command or a target, so a transfer in both directions (`ssh NAME cat < big > copy`, or a bulk `ssh -L` forward) never
+stalls the connection's other traffic, and a forward whose target stops reading holds back only its own client.
+Output is the other direction: it is held by the client's window, which russh sends from the session loop, so a client
+that stops reading one channel's output (a local program that stops reading an `ssh -L` socket) also pauses the output
+of the connection's other channels until it reads again, as it does for any russh server. A client that sends
+more than its window is out of protocol and its channel is closed. When a channel closes, its
+writer task ends, even for a command in a process group of its own that never reads. russh
+grants the window by itself as data arrives, so Silo carries a small patch to it (see
+`app/SiloUI/src-tauri/vendor/russh/SILO-PATCH.md`).
+
+Every command runs through the engine's own exec path (`silo-ctr enter`, `crun exec`, the init
+shim), so the hardening baseline, the process-group kill when a channel closes, and the
+placeholder environment of the computer's secrets apply to it. A terminal opened from Silo runs
+`silod --container-runtime exec NAME --tty ...`, which runs the same `crun exec` on the user's own
+terminal. Host-key pinning, the per-computer `known_hosts` and the editor's configuration are the
+same files as for a virtual machine.
+
+The live check (`scripts/linux-host-e2e.sh` with `SILO_E2E_CONTAINER=1`) runs `silo ssh-setup`, then
+`ssh NAME.silo-dev uname -a`, an SFTP put and get, a `ssh -tt ... tty` session, the terminal
+command, the editor proxy in `--stdio` mode under a scripted `ssh`, port forwarding (`ssh -L` to a port served
+inside the container, and a refused destination, 60 MB both ways through a forward with hashes, and a shell command
+on the same connection that still answers while a forward's target does not read), a large file through `ssh NAME cat` both ways (hashes compared), a
+killed client that takes its remote command with it, idle sockets that do not lock out a login, and the in-guest client.
+
 ## Reconciliation
 
 Silo reconciles after normal starts, restarts, temporary `exec` starts/stops,

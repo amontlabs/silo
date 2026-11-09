@@ -27,6 +27,8 @@ pub enum Command {
         name: String,
     },
     Exec(Box<Exec>),
+    /// `ssh serve`: the SSH server of the computer (a long-running command, not a waited one).
+    SshServe(Box<SshServe>),
     /// Secrets and GitHub access: the only `modify` a container computer answers.
     Modify(Box<Modify>),
     /// A command only MicroSandbox computers answer yet.
@@ -70,7 +72,24 @@ pub struct Modify {
     pub next_start: bool,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// `ssh serve NAME` with the flags the engine's callers pass, in MicroSandbox's shape.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SshServe {
+    pub name: String,
+    /// One connection over standard input and output (an editor's `ProxyCommand`).
+    pub stdio: bool,
+    /// Never start the computer; it must already be running.
+    pub no_start: bool,
+    pub no_inactivity_timeout: bool,
+    /// Exit when the owner closes standard input, and print the readiness line after binding.
+    pub exit_on_stdin_close: bool,
+    pub authorized_keys: Option<std::path::PathBuf>,
+    pub expected_machine_id: Option<String>,
+    pub host: Option<String>,
+    pub port: Option<u16>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Exec {
     pub name: String,
     pub user: Option<String>,
@@ -78,13 +97,25 @@ pub struct Exec {
     pub workdir: Option<String>,
     pub no_start: bool,
     pub timeout: Option<Duration>,
+    /// Run in a pseudo-terminal (`--tty`).
+    pub tty: bool,
+    /// Where `crun` hands the pseudo-terminal's controlling side. Without it a `tty` command uses
+    /// the terminal the caller is attached to.
+    pub console_socket: Option<std::path::PathBuf>,
     pub argv: Vec<String>,
 }
+
+/// What a terminal runs when it names no command.
+pub const LOGIN_SHELL: [&str; 2] = ["/bin/bash", "-l"];
 
 /// The computer a command is about, for the routing decision, without parsing the rest.
 pub fn target_name(args: &[String]) -> Option<&str> {
     let verb = args.first()?.as_str();
     match verb {
+        "ssh" => (args.get(1).map(String::as_str) == Some("serve"))
+            .then(|| args.get(2).map(String::as_str))
+            .flatten()
+            .filter(|name| !name.starts_with('-')),
         "inspect" | "start" | "stop" | "restart" | "exec" | "rename" | "modify" | "cp" | "fork" => {
             args.get(1)
                 .map(String::as_str)
@@ -138,6 +169,7 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
         }
         "create" => parse_create(args).map(|create| Command::Create(Box::new(create))),
         "exec" => parse_exec(args).map(|exec| Command::Exec(Box::new(exec))),
+        "ssh" => parse_ssh(args).map(|serve| Command::SshServe(Box::new(serve))),
         "modify" => Ok(match parse_modify(args)? {
             Some(modify) => Command::Modify(Box::new(modify)),
             None => Command::Unsupported {
@@ -276,15 +308,18 @@ fn parse_exec(args: &[String]) -> Result<Exec, String> {
     let name = target_name(args)
         .ok_or("exec needs a computer name.")?
         .to_owned();
-    let separator = args
-        .iter()
-        .position(|arg| arg == "--")
-        .ok_or("exec needs a command after `--`.")?;
-    let options = &args[2..separator];
-    let argv = args[separator + 1..].to_vec();
-    if argv.is_empty() {
+    let separator = args.iter().position(|arg| arg == "--");
+    let options = &args[2..separator.unwrap_or(args.len())];
+    let argv = separator.map_or_else(Vec::new, |at| args[at + 1..].to_vec());
+    // A terminal without a command is the working account's login shell, as the runtime's is.
+    let wants_shell = options.iter().any(|option| option == "--tty") && argv.is_empty();
+    let argv = if wants_shell {
+        LOGIN_SHELL.iter().map(|part| (*part).to_owned()).collect()
+    } else if argv.is_empty() {
         return Err("exec needs a command after `--`.".into());
-    }
+    } else {
+        argv
+    };
     let mut exec = Exec {
         name,
         user: None,
@@ -292,6 +327,8 @@ fn parse_exec(args: &[String]) -> Result<Exec, String> {
         workdir: None,
         no_start: false,
         timeout: None,
+        tty: false,
+        console_socket: None,
         argv,
     };
     let mut index = 0;
@@ -322,7 +359,10 @@ fn parse_exec(args: &[String]) -> Result<Exec, String> {
                 index += 1;
             }
             "--no-tty" | "--quiet" | "--stream" | "--no-stdin" => index += 1,
-            "--tty" => return Err("A terminal in a container computer comes later.".into()),
+            "--tty" => {
+                exec.tty = true;
+                index += 1;
+            }
             other => {
                 return Err(format!(
                     "exec option {other} is not available for container computers."
@@ -331,6 +371,69 @@ fn parse_exec(args: &[String]) -> Result<Exec, String> {
         }
     }
     Ok(exec)
+}
+
+/// `ssh serve NAME [--stdio] [--no-start] [--no-inactivity-timeout] [--exit-on-stdin-close]
+/// [--authorized-keys PATH] [--expected-machine-id ID] [--host HOST] [--port PORT]`.
+fn parse_ssh(args: &[String]) -> Result<SshServe, String> {
+    if args.get(1).map(String::as_str) != Some("serve") {
+        return Err("Only `ssh serve` is available for container computers.".into());
+    }
+    let name = target_name(args)
+        .ok_or("ssh serve needs a computer name.")?
+        .to_owned();
+    let mut serve = SshServe {
+        name,
+        ..SshServe::default()
+    };
+    let mut index = 3;
+    while index < args.len() {
+        let flag = args[index].as_str();
+        let next = args.get(index + 1).cloned();
+        let value = || next.clone().ok_or_else(|| format!("{flag} needs a value."));
+        match flag {
+            "--stdio" => serve.stdio = true,
+            "--no-start" => serve.no_start = true,
+            "--no-inactivity-timeout" => serve.no_inactivity_timeout = true,
+            "--exit-on-stdin-close" => serve.exit_on_stdin_close = true,
+            "--authorized-keys" => {
+                serve.authorized_keys = Some(value()?.into());
+                index += 1;
+            }
+            "--expected-machine-id" => {
+                serve.expected_machine_id = Some(value()?);
+                index += 1;
+            }
+            "--host" => {
+                serve.host = Some(value()?);
+                index += 1;
+            }
+            "--port" => {
+                serve.port = Some(
+                    value()?
+                        .parse()
+                        .map_err(|_| "--port needs a port number.".to_owned())?,
+                );
+                index += 1;
+            }
+            other => {
+                return Err(format!(
+                    "ssh serve option {other} is not available for container computers."
+                ))
+            }
+        }
+        index += 1;
+    }
+    if serve.expected_machine_id.is_some() && !serve.no_start {
+        return Err("--expected-machine-id needs --no-start.".into());
+    }
+    if serve.exit_on_stdin_close && !serve.no_start {
+        return Err("--exit-on-stdin-close needs --no-start.".into());
+    }
+    if serve.exit_on_stdin_close && serve.stdio {
+        return Err("--exit-on-stdin-close cannot be used with --stdio.".into());
+    }
+    Ok(serve)
 }
 
 /// `2G`, `512M`, `2048` (mebibytes) as mebibytes.
@@ -592,10 +695,88 @@ mod tests {
     }
 
     #[test]
-    fn a_terminal_and_unknown_exec_options_are_refused() {
-        assert!(parse(&args(&["exec", "dev", "--tty", "--", "sh"])).is_err());
+    fn unknown_exec_options_and_a_missing_command_are_refused() {
         assert!(parse(&args(&["exec", "dev", "--rlimit", "x", "--", "sh"])).is_err());
         assert!(parse(&args(&["exec", "dev", "--user", "root"])).is_err());
+    }
+
+    #[test]
+    fn a_terminal_runs_the_given_command_or_the_login_shell() {
+        let Command::Exec(shell) = parse(&args(&[
+            "exec", "dev", "--user", "silo", "--env", "USER=silo", "--no-start", "--workdir",
+            "/workspace", "--tty",
+        ]))
+        .unwrap() else {
+            panic!("an exec")
+        };
+        assert!(shell.tty && shell.console_socket.is_none());
+        assert_eq!(shell.argv, ["/bin/bash", "-l"]);
+        assert_eq!(shell.workdir.as_deref(), Some("/workspace"));
+        let Command::Exec(given) = parse(&args(&["exec", "dev", "--tty", "--", "top"])).unwrap()
+        else {
+            panic!("an exec")
+        };
+        assert!(given.tty);
+        assert_eq!(given.argv, ["top"]);
+        let Command::Exec(plain) = parse(&args(&["exec", "dev", "--", "id"])).unwrap() else {
+            panic!("an exec")
+        };
+        assert!(!plain.tty);
+    }
+
+    #[test]
+    fn ssh_serve_takes_the_flags_the_engines_callers_pass() {
+        // The editor's ProxyCommand.
+        let Command::SshServe(editor) = parse(&args(&[
+            "ssh", "serve", "dev", "--stdio", "--no-start", "--no-inactivity-timeout",
+        ]))
+        .unwrap() else {
+            panic!("an ssh serve")
+        };
+        assert_eq!(
+            *editor,
+            SshServe {
+                name: "dev".into(),
+                stdio: true,
+                no_start: true,
+                no_inactivity_timeout: true,
+                ..SshServe::default()
+            }
+        );
+        // SSH access's listener.
+        let Command::SshServe(listener) = parse(&args(&[
+            "ssh", "serve", "dev", "--no-start", "--no-inactivity-timeout", "--exit-on-stdin-close",
+            "--authorized-keys", "/h/keys", "--expected-machine-id", "abc", "--host", "127.0.0.1",
+            "--port", "2222",
+        ]))
+        .unwrap() else {
+            panic!("an ssh serve")
+        };
+        assert_eq!(listener.authorized_keys.as_deref(), Some(std::path::Path::new("/h/keys")));
+        assert_eq!(
+            (listener.expected_machine_id.as_deref(), listener.host.as_deref(), listener.port),
+            (Some("abc"), Some("127.0.0.1"), Some(2222))
+        );
+        assert!(listener.exit_on_stdin_close && !listener.stdio);
+        assert_eq!(target_name(&args(&["ssh", "serve", "dev", "--stdio"])), Some("dev"));
+        assert_eq!(target_name(&args(&["ssh", "authorize", "dev"])), None);
+    }
+
+    #[test]
+    fn ssh_serve_refuses_what_the_runtime_refuses_and_what_it_does_not_know() {
+        for bad in [
+            // These need --no-start, and the owner's pipe cannot be the connection.
+            vec!["ssh", "serve", "dev", "--expected-machine-id", "abc"],
+            vec!["ssh", "serve", "dev", "--exit-on-stdin-close"],
+            vec!["ssh", "serve", "dev", "--no-start", "--exit-on-stdin-close", "--stdio"],
+            vec!["ssh", "serve", "dev", "--port", "http"],
+            vec!["ssh", "serve", "dev", "--port"],
+            vec!["ssh", "serve", "dev", "--bogus"],
+            vec!["ssh", "serve"],
+            vec!["ssh", "authorize", "dev"],
+        ] {
+            assert!(parse(&args(&bad)).is_err(), "{bad:?}");
+        }
     }
 
     #[test]

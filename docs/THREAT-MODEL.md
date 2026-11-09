@@ -484,7 +484,7 @@ binary serves the socket, not who connects to it.
 | macOS screen, another Mac | A noVNC page in a Tauri webview speaks RFB to the guest's Screen Sharing through a loopback WebSocket endpoint (random per-window token, Host and Origin checks, one connection, message size limit) spliced to the owner over the SSH bridge. The webview parses guest-controlled RFB data. | [`macos_display_gateway.rs`](../app/SiloUI/src-tauri/engine/src/macos_display_gateway.rs), [display path](SiloUI-MACOS-COMPUTERS.md#on-another-mac) |
 | Clipboard | Inside the viewer, both directions run only on an explicit user action (shortcut, menu item or button). An engine client can trigger the same transfer for a Linux computer it is viewing (`clipboard.transfer`), and read or write a macOS computer's clipboard (`clipboard.read`, `clipboard.write`). There is no background sync. | [`viewer_clipboard.rs`](../app/SiloUI/src-tauri/engine/src/viewer_clipboard.rs), [`display.rs#L1009`](../app/SiloUI/src-tauri/silod/src/methods/display.rs#L1009), [`macos_computers.rs`, `macos_clipboard_read`](../app/SiloUI/src-tauri/engine/src/macos_computers.rs#L2489) |
 | Host push | Host Git uses a sanitized configuration and fixed executable; the guest supplies objects through standard protocols, not hooks or configuration. | [`host_push.rs`](../app/SiloUI/src-tauri/engine/src/host_push.rs), [`host_push_transport.rs`](../app/SiloUI/src-tauri/engine/src/host_push_transport.rs) |
-| Editor and terminal | The user's editor, and a terminal for a computer on another device, connect over SSH with no agent forwarding (`ForwardAgent no`, `IdentityAgent none`), a per-computer `known_hosts` and `StrictHostKeyChecking yes`; guest paths are URL-encoded and control characters refused. A local terminal for a Linux computer runs `msb exec --tty` through MicroSandbox's guest agent, not SSH; a local terminal for a macOS computer runs `/usr/bin/ssh -t` with the same no-forwarding, pinned-host-key settings ([`ssh_alias.rs#L126`](../app/SiloUI/src-tauri/engine/src/macos_computers/ssh_alias.rs#L126), [`#L258`](../app/SiloUI/src-tauri/engine/src/macos_computers/ssh_alias.rs#L258)). The editor's own remote trust model still applies. | [`editor.rs`](../app/SiloUI/src-tauri/engine/src/editor.rs), [`terminal.rs`](../app/SiloUI/src-tauri/engine/src/terminal.rs) |
+| Editor and terminal | The user's editor, and a terminal for a computer on another device, connect over SSH with no agent forwarding (`ForwardAgent no`, `IdentityAgent none`), a per-computer `known_hosts` and `StrictHostKeyChecking yes`; guest paths are URL-encoded and control characters refused. A local terminal for a Linux computer runs `msb exec --tty` through MicroSandbox's guest agent, not SSH (for a container computer, `silod --container-runtime exec --tty`, which runs `crun exec` on the user's terminal; its SSH is served by the engine's own server, see [Container computers](#container-computers)); a local terminal for a macOS computer runs `/usr/bin/ssh -t` with the same no-forwarding, pinned-host-key settings ([`ssh_alias.rs#L126`](../app/SiloUI/src-tauri/engine/src/macos_computers/ssh_alias.rs#L126), [`#L258`](../app/SiloUI/src-tauri/engine/src/macos_computers/ssh_alias.rs#L258)). The editor's own remote trust model still applies. | [`editor.rs`](../app/SiloUI/src-tauri/engine/src/editor.rs), [`terminal.rs`](../app/SiloUI/src-tauri/engine/src/terminal.rs) |
 | Guest agent | In every Linux computer, MicroSandbox's `agentd` talks to the `msb` process on the Mac over virtio-serial (CBOR) for readiness, exec and heartbeats. Silo parses `msb exec` output (repository discovery, directory listings). Silo configures no virtio-vsock routes. | [`runtime/mod.rs`](../app/SiloUI/src-tauri/engine/src/runtime/mod.rs), [MicroSandbox `protocol/lib.rs`](https://github.com/superradcompany/microsandbox/blob/09df3d4b9d832adaede1fb9a198cfc660bfab8cd/crates/protocol/lib/lib.rs) |
 | Published ports | Guest services appear on Mac loopback; opening one in a browser runs guest content at a per-computer `.localhost` origin; a page there can still send cross-site requests to other loopback services ([`network.rs#L87`](../app/SiloUI/src-tauri/engine/src/network.rs#L87)). | [`network.rs`](../app/SiloUI/src-tauri/engine/src/network.rs) |
 
@@ -537,7 +537,7 @@ secret, GitHub token or other computer's data.
   still has no security review (boundary 6); this adds a parser of guest-written JSON on the Mac.
 - **Other guest users.** `req/` is `1733` and `resp/` `0711`, requests and answers `0600`; the
   engine gives each answer the stat override of the user that wrote the request, so that user
-  (and root) reads it and no other guest user does. The override format is taken from MicroSandbox
+  (and root) reads it and no other guest user does. (In a container the folders carry real owners: see [Container computers](#container-computers).) The override format is taken from MicroSandbox
   0.7.6 source and is not yet checked in a running guest.
 - **Forks and jobs.** A fork is the token's only after its job finished and the fork exists below
   the computer (recorded by id); forks the person made are never reachable, and a failed fork
@@ -736,12 +736,30 @@ below, which narrows the kernel surface and does not remove it. It is meant for 
 with nothing sensitive on it, and the app, the CLI and `silo list` label it as less isolated.
 
 - **Who the computer is on the host.** crun runs rootless inside a user namespace made with
-  `newuidmap` and the account's `/etc/subuid` range. Container root is the account itself; every
-  other id is a sub-id that owns no file of the account's. A process that escapes the container
-  therefore lands as the account that owns the engine, and says plainly what that means: the
-  engine socket, the engine's files and every other computer on the host (virtual machines and
-  containers alike) are within its reach. Nothing is added to that account, and nothing is taken
-  from it either.
+  `newuidmap` and the account's `/etc/subuid` range, laid out like rootless Podman's
+  `--userns=keep-id` ([`idmap.rs`](../app/SiloUI/src-tauri/engine/src/containers/idmap.rs)): the
+  working account (`silo`, id 1001) **is the engine's own user and group**, and root and every
+  other id are sub-ids that own no file of the account's. A process that escapes the container as
+  the working account therefore lands as the account that owns the engine, and says plainly what
+  that means: the engine socket, the engine's files and every other computer on the host (virtual
+  machines and containers alike) are within its reach. The mapping gives the account no capability
+  it did not have as the engine's user, and removes none of the engine's. This is a change from a container whose root was the engine's
+  user: now a process that escapes as the *agent* lands as the engine, which is the process an
+  agent runs as; an escape as container root (which Silo's own commands use, with seven file
+  capabilities) lands as a sub-id and needs a second step. The mapping is what makes the
+  in-guest client work (below) and why SSH sessions and files the agent writes are readable to
+  the engine; it is not what keeps the agent from the engine. The namespaces do: the container's
+  pid namespace shows no engine, gateway or holder process (nothing to signal or trace, `/proc`
+  masked), its mount namespace holds none of the engine's files or sockets except one folder, the
+  computer's own share bound at `/.msb` (its runtime folder, which holds the in-guest client's
+  bridge folder: the account writes there, the engine reads and answers, and every other user of
+  the container may only search the folder), its network namespace holds only the TAP, its user namespace gives it no capability over anything outside it, and the
+  baseline below applies to the agent's commands as to any. The engine's user owns the computer's
+  upper directory and what the agent writes in it; the upper directory's root, the unpacked image,
+  and the init shim's layer belong to the container's root (a sub-id), so the agent cannot replace
+  `/silo/init` or rename system directories out from under Silo's root commands. A container
+  made by an earlier build, whose files were owned the other way, is refused at start with a
+  message to recreate it.
 - **The baseline.** No capabilities in the container's first process or in a user's commands (Silo's
   own root commands, such as creating the working account, get seven file and ownership
   capabilities inside the namespace); `no_new_privs` (so `sudo` and setuid programs do not gain
@@ -796,12 +814,48 @@ with nothing sensitive on it, and the app, the CLI and `silo list` label it as l
   and the URL proxy serves it under `<port>.<computer>.silo.localhost`. The engine passes each
   request to the gateway over a per-computer control socket in a private directory (socket
   `0600`); a host port below 1024 is refused and at most 32 ports are published.
-- **Not yet for a container.** SSH access, the editor, a terminal, the in-guest client, export
-  and the desktop are refused with a plain message (see the capability list in
-  `containers/capability.rs`); the app hides them.
+- **SSH, the editor and terminals (boundaries 7 and 8).** A container has no `sshd`, as a
+  virtual machine has none: MicroSandbox's `msb ssh serve` is a host-side russh server that maps a
+  shell, a command, a terminal and `sftp` onto its guest agent, and a container is answered by the
+  same command line with a server of ours on the same library
+  ([`ssh.rs`](../app/SiloUI/src-tauri/engine/src/containers/ssh.rs), russh 0.65, Apache-2.0, with
+  its ring backend and no RSA keys). The engine's callers start it where they start `msb`
+  (`silod --container-runtime ssh serve ...`): an editor's `ProxyCommand` over standard input and
+  output, and the SSH access listener on the host's loopback (or the one chosen address) as the
+  engine's child. It authenticates public keys only, from the authorized-keys file its caller names
+  (read at every attempt, so removing a key ends access at once; a line with options is not
+  accepted), for the working account only, and presents the computer's pinned host key; it runs
+  at most 32 connections and 16 channels each. A session is `crun exec` as the working account
+  through the engine's own exec path: the baseline above applies to it (no capabilities,
+  `no_new_privs`, seccomp, Landlock), and a closed channel or connection ends the command's whole
+  process group. The `sftp` subsystem runs `/usr/lib/openssh/sftp-server` (the guest image's
+  `openssh-sftp-server`) as the working account, so file access over SFTP is exactly the account's
+  own. A terminal comes from a pseudo-terminal `crun` makes inside the container; the SSH server
+  receives its controlling side over a private socket. Client environment variables are refused,
+  as with an `sshd` that accepts none, and there is no agent, X11, port or socket forwarding. The
+  local terminal runs the same command attached to the user's terminal. The loopback listener is
+  reachable by every user on the host (see the loopback note under Other local users); the
+  authorized key is the whole check, as for a virtual machine's. SSH sessions do not survive the
+  engine stopping the container or the listener, and a container does not survive an engine
+  restart.
+- **The in-guest client (boundary 9) in a container.** The per-computer share is the computer's
+  runtime folder, bound at `/.msb` (read-write, no exec, no devices) and sealed by mode instead of
+  by stat override: its parent `sandboxes/<name>` is `0700`, the runtime folder `0711`, and
+  `silo-bridge`, `req/` and `resp/` keep the modes of a virtual machine's (`0755`, `1733`, `0711`).
+  Because the working account is the engine's own user, the agent's `0600` request files are
+  readable by the engine and the engine's `0600` answers by the agent; a file owned by any other
+  id (another guest user, root) is not the account's, gets no owner, and its answer (if the
+  engine could read the request at all) is the agent's alone. The agent owns the folders it
+  writes in, so it can loosen their modes (a virtual machine's folders are root's to it): the
+  worker restores the runtime folder's mode every pass, `req/` and `resp/` stay below it, and
+  what the agent gains by loosening them is access for other guest users to its own requests,
+  which it can already give them. The token, the allow-list and the folder parsing (links, sizes,
+  counts) are the same code and the same limits.
+- **Not yet for a container.** Export and the desktop are refused with a plain message (see the
+  capability list in `containers/capability.rs`); the app hides them.
 - **What Landlock covers.** The ruleset grants the container's root read and execute everywhere and
   write access to the directories a system normally writes (`/tmp`, `/var`, `/run`, `/home`,
-  `/root`, `/workspace`, `/dev`, `/usr`, `/etc`, `/opt`, `/srv`, `/mnt`). It therefore mainly protects
+  `/root`, `/workspace`, `/dev`, `/usr`, `/etc`, `/opt`, `/srv`, `/mnt`, and the share `/.msb`). It therefore mainly protects
   `/silo/init`, `/boot` and the root directory itself; the system directories stay writable to the
   container's root, which is the point of a computer you install software in. It is a second layer
   and **advisory where it is absent**: on a kernel without Landlock the holder logs one warning

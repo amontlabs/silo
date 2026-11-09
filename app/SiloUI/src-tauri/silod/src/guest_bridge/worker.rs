@@ -164,7 +164,10 @@ fn work(shared: &Shared, computer: &str) {
         else {
             continue;
         };
-        let spool = Spool::new(guest_client::spool_dir(&home, name));
+        let spool = Spool::new(
+            guest_client::spool_dir(&home, name),
+            silo_engine::containers::keep_id_for(&home, name),
+        );
         spool.seal();
         if guest_client::bridge_held(name) {
             // A full capture of the running computer is being made.

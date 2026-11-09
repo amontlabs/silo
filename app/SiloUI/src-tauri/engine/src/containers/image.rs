@@ -112,6 +112,9 @@ pub fn ensure(paths: &RuntimePaths, tools: &Tools) -> Result<Unpacked, RuntimeEr
     };
     let images = layout.images();
     std::fs::create_dir_all(&images).map_err(|error| failed(error.to_string()))?;
+    // Old images no computer needs go first, so the space check counts only what is needed.
+    #[cfg(target_os = "linux")]
+    super::lifecycle::prune_storage(paths, tools);
     crate::runtime::guest_image::check_space(&images, manifest.unpacked_bytes.saturating_mul(3))
         .map_err(RuntimeError::Unavailable)?;
     remove_partial(tools, &images);
@@ -156,6 +159,8 @@ fn unpack_into(
         &tools.ctr,
         &[
             "userns".as_ref(),
+            "--keep-id".as_ref(),
+            super::idmap::AGENT_ID.to_string().as_ref(),
             "--".as_ref(),
             tools.umoci.as_ref(),
             "unpack".as_ref(),
@@ -166,7 +171,21 @@ fn unpack_into(
     )?;
     let finished = work.join("done");
     std::fs::create_dir_all(&finished).map_err(|e| e.to_string())?;
-    std::fs::rename(bundle.join("rootfs"), finished.join("rootfs")).map_err(|e| e.to_string())?;
+    // The root file system's top directory is root's (a sub-id), which the engine may not move
+    // between folders: the namespace moves it.
+    run_checked(
+        &tools.ctr,
+        &[
+            "userns".as_ref(),
+            "--keep-id".as_ref(),
+            super::idmap::AGENT_ID.to_string().as_ref(),
+            "--".as_ref(),
+            "mv".as_ref(),
+            "--".as_ref(),
+            bundle.join("rootfs").as_ref(),
+            finished.join("rootfs").as_ref(),
+        ],
+    )?;
     std::fs::write(
         finished.join("digest"),
         format!("{}\n", manifest.image_digest),
@@ -231,6 +250,22 @@ fn remove_partial(tools: &Tools, images: &Path) {
     }
 }
 
+/// The directories in `root` that are not named in `keep`, except the partial ones (an unpack or a
+/// boot layer in the making belongs to whoever is making it). Files are never listed.
+pub fn unused_dirs(root: &Path, keep: &[String]) -> Vec<PathBuf> {
+    std::fs::read_dir(root)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
+        .filter(|entry| {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            !name.starts_with(PARTIAL) && !name.ends_with(".partial") && !keep.contains(&name)
+        })
+        .map(|entry| entry.path())
+        .collect()
+}
+
 /// Removes a directory tree that may hold files owned by sub-ids.
 pub fn remove_tree(tools: &Tools, path: &Path) -> Result<(), String> {
     if !path.exists() {
@@ -285,6 +320,21 @@ pub fn config_digest(layout: &Path) -> Result<String, String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn only_directories_nobody_needs_are_unused_and_partial_ones_are_left_to_their_maker() {
+        let root = tempfile::tempdir().unwrap();
+        for directory in ["aaa-keepid", "bbb-keepid", "ccc", "partial-123", "d.partial"] {
+            std::fs::create_dir(root.path().join(directory)).unwrap();
+        }
+        std::fs::write(root.path().join("note.txt"), "x").unwrap();
+        let mut unused = unused_dirs(root.path(), &["aaa-keepid".to_owned()]);
+        unused.sort();
+        assert_eq!(
+            unused,
+            [root.path().join("bbb-keepid"), root.path().join("ccc")]
+        );
+        assert!(unused_dirs(&root.path().join("missing"), &[]).is_empty());
+    }
     use super::*;
 
     fn fake_layout(config: &str) -> tempfile::TempDir {

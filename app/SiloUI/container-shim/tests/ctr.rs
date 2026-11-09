@@ -88,6 +88,43 @@ fn userns_makes_the_caller_root_with_both_ranges_mapped() {
 }
 
 #[test]
+fn userns_keep_id_runs_as_root_and_puts_the_caller_at_that_id() {
+    if !namespaces_available() {
+        return;
+    }
+    assert_eq!(
+        text(&userns_output(&["--keep-id", "1001", "--", "id", "-u"])).0,
+        "0\n"
+    );
+    // A file the caller owns shows as owned by the kept id; one root makes is a sub-id on disk.
+    let dir = scratch("keepid");
+    let script = format!(
+        "mkdir -p {d}/own && stat -c %u:%g {d}/own && : > {d}/own/root-file && chown 1001:1001 {d}/own/root-file",
+        d = dir.display()
+    );
+    let created = userns_output(&["--keep-id", "1001", "--", "sh", "-c", &script]);
+    assert_eq!(text(&created).0, "0:0\n", "{:?}", text(&created));
+    // SAFETY: getuid and getgid cannot fail.
+    let (uid, gid) = unsafe { (libc::getuid(), libc::getgid()) };
+    use std::os::unix::fs::MetadataExt;
+    // Container id 1001 is the caller on disk.
+    let meta = std::fs::metadata(dir.join("own/root-file")).unwrap();
+    assert_eq!((meta.uid(), meta.gid()), (uid, gid));
+    // The caller's own file is the kept id inside.
+    let seen = userns_output(&[
+        "--keep-id",
+        "1001",
+        "--",
+        "stat",
+        "-c",
+        "%u:%g",
+        &dir.join("own/root-file").display().to_string(),
+    ]);
+    assert_eq!(text(&seen).0, "1001:1001\n");
+    let _ = userns_output(&["--", "rm", "-rf", &dir.display().to_string()]);
+}
+
+#[test]
 fn userns_can_create_and_chown_files_in_the_sub_id_range() {
     if !namespaces_available() {
         return;

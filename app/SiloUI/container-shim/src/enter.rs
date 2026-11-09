@@ -8,12 +8,12 @@
 
 use crate::common::{io_err, os_err};
 
+/// Joins the user and network namespaces of the holder whose state directory is `state`.
 #[cfg(target_os = "linux")]
-pub fn command(args: &[String]) -> Result<i32, String> {
-    use std::{os::fd::AsRawFd, os::unix::process::CommandExt, process::Command};
+pub fn join_holder(state: &str) -> Result<(), String> {
+    use std::os::fd::AsRawFd;
 
-    let (state, program) = parse(args)?;
-    let pid = std::fs::read_to_string(std::path::Path::new(&state).join("outer.pid"))
+    let pid = std::fs::read_to_string(std::path::Path::new(state).join("outer.pid"))
         .map_err(|error| io_err("read outer.pid", &error))?
         .trim()
         .parse::<u32>()
@@ -27,6 +27,15 @@ pub fn command(args: &[String]) -> Result<i32, String> {
             return Err(os_err(&format!("join the holder's {file} namespace")));
         }
     }
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+pub fn command(args: &[String]) -> Result<i32, String> {
+    use std::{os::unix::process::CommandExt, process::Command};
+
+    let (state, program) = parse(args)?;
+    join_holder(&state)?;
     let error = Command::new(&program[0]).args(&program[1..]).exec();
     Err(io_err(&format!("exec {}", program[0]), &error))
 }

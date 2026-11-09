@@ -13,7 +13,8 @@
 mod common;
 
 const DEFAULT_RO: &str = "/";
-const DEFAULT_RW: &str = "/tmp:/var:/run:/home:/root:/workspace:/dev:/usr:/etc:/opt:/srv:/mnt";
+const DEFAULT_RW: &str =
+    "/tmp:/var:/run:/home:/root:/workspace:/dev:/usr:/etc:/opt:/srv:/mnt:/.msb";
 
 /// The Landlock filesystem rights (`LANDLOCK_ACCESS_FS_*`) up to ABI 3.
 mod fs {
@@ -360,8 +361,11 @@ mod run {
             supervise(&parsed.command)
         } else {
             if parsed.own_group {
-                // SAFETY: setpgid(0, 0) takes plain integers; the process leads no group yet.
-                if unsafe { libc::setpgid(0, 0) } != 0 {
+                // A command on a terminal is a session leader, which already leads its own group
+                // (and cannot setpgid).
+                // SAFETY: getpgrp and getpid have no preconditions; setpgid(0, 0) takes plain integers.
+                let leads = unsafe { libc::getpgrp() == libc::getpid() };
+                if !leads && unsafe { libc::setpgid(0, 0) } != 0 {
                     fail(&os_err("setpgid"));
                 }
             }
@@ -394,9 +398,11 @@ mod tests {
     fn defaults_apply_without_options() {
         let parsed = parse_args(&args(&["--", "/bin/true"])).unwrap();
         assert_eq!(parsed.ro, vec!["/"]);
-        assert_eq!(parsed.rw.len(), 12);
+        assert_eq!(parsed.rw.len(), 13);
         assert_eq!(parsed.rw[0], "/tmp");
         assert_eq!(parsed.rw[11], "/mnt");
+        // The per-computer share the in-guest client writes its requests to.
+        assert_eq!(parsed.rw[12], "/.msb");
         assert_eq!(parsed.command, vec!["/bin/true"]);
         assert!(!parsed.require && !parsed.probe);
     }

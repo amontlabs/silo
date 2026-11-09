@@ -20,7 +20,7 @@ use super::{
     hold::{self, ExecGroup, Reaped, StartMark},
     layout::{ComputerDir, ComputerRecord, Layout},
     oci,
-    tools::Tools,
+    tools::{run_checked, Tools},
     users,
 };
 use crate::computer_gateway::{computer_ca, Gateway, Params, Secret};
@@ -55,6 +55,30 @@ pub struct Running {
     /// a removal) updates both together; a new assignment made while the computer runs is only
     /// recorded (`--next-start`) and joins at the next start, as for a virtual machine.
     active: Mutex<Vec<String>>,
+    /// Where the active names are written for the processes of other commands (the SSH server
+    /// runs apart from the engine and gives its sessions the same placeholders).
+    published: Option<PathBuf>,
+}
+
+/// The file in a computer's state directory that lists its active secrets, one name per line.
+const ACTIVE_SECRETS_FILE: &str = "secrets.active";
+
+fn publish_active(file: &Option<PathBuf>, names: &[String]) {
+    if let Some(file) = file {
+        let _ = std::fs::write(file, names.join("\n"));
+    }
+}
+
+/// The active secrets of a running computer as its engine published them; none when unknown.
+pub fn published_secrets(dir: &ComputerDir) -> Vec<String> {
+    std::fs::read_to_string(dir.state().join(ACTIVE_SECRETS_FILE))
+        .map(|text| {
+            text.lines()
+                .filter(|name| !name.is_empty())
+                .map(str::to_owned)
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 impl Running {
@@ -72,6 +96,7 @@ impl Running {
     }
 
     pub fn set_active(&self, names: Vec<String>) {
+        publish_active(&self.published, &names);
         *self.active.lock().unwrap_or_else(PoisonError::into_inner) = names;
     }
 }
@@ -96,6 +121,7 @@ pub fn register_for_test(name: &str, gateway: Gateway, active: Vec<String>) -> A
     let running = Arc::new(Running {
         gateway: Mutex::new(gateway),
         active: Mutex::new(active),
+        published: None,
     });
     registry()
         .get_or_insert_with(HashMap::new)
@@ -233,54 +259,215 @@ pub fn reconcile(paths: &RuntimePaths, tools: &Tools) {
             let _ = stop(paths, tools, &name, &record);
         }
     }
+    prune_storage(paths, tools);
 }
 
-fn boot_layer(layout: &Layout, tools: &Tools) -> Result<PathBuf, String> {
-    let bytes = std::fs::read(&tools.init).map_err(io)?;
-    let digest = Sha256::digest(&bytes);
+/// The name of the boot layer for the init shim `tools` names (and the ownership layout).
+fn boot_hash(tools: &Tools) -> Result<(String, Vec<u8>), String> {
+    let bytes = std::fs::read(&tools.init).map_err(|e| at("read the init shim", &tools.init, e))?;
+    // The ownership layout is part of what the layer is: another one is another directory.
+    let digest = Sha256::new()
+        .chain_update(&bytes)
+        .chain_update(super::layout::OWNERSHIP.as_bytes())
+        .finalize();
     let hash: String = digest
         .iter()
         .take(8)
         .map(|byte| format!("{byte:02x}"))
         .collect();
+    Ok((hash, bytes))
+}
+
+fn boot_layer(layout: &Layout, tools: &Tools) -> Result<PathBuf, String> {
+    let (hash, bytes) = boot_hash(tools)?;
     let boot = layout.boot(&hash);
     if boot.join("silo/init").is_file() {
         return Ok(boot);
     }
     let partial = boot.with_extension("partial");
-    let _ = std::fs::remove_dir_all(&partial);
-    std::fs::create_dir_all(partial.join("silo")).map_err(io)?;
-    std::fs::create_dir_all(partial.join("workspace")).map_err(io)?;
+    // An earlier attempt's files may belong to root (a sub-id).
+    let _ = super::image::remove_tree(tools, &partial);
+    std::fs::create_dir_all(partial.join("silo")).map_err(|e| at("create", &partial, e))?;
+    std::fs::create_dir_all(partial.join("workspace")).map_err(|e| at("create", &partial, e))?;
     let target = partial.join("silo/init");
-    std::fs::write(&target, &bytes).map_err(io)?;
+    std::fs::write(&target, &bytes).map_err(|e| at("write", &target, e))?;
     // Every user of the computer reads these, whatever umask the engine runs with.
     use std::os::unix::fs::PermissionsExt;
     for directory in [&partial, &partial.join("silo"), &partial.join("workspace")] {
-        std::fs::set_permissions(directory, std::fs::Permissions::from_mode(0o755)).map_err(io)?;
+        std::fs::set_permissions(directory, std::fs::Permissions::from_mode(0o755))
+            .map_err(|e| at("set the mode of", directory, e))?;
     }
-    std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o755)).map_err(io)?;
+    std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o755))
+        .map_err(|e| at("set the mode of", &target, e))?;
+    // Root's, not the working account's (which is the engine's own user): the account must not be
+    // able to replace the init shim or its folder.
+    own_as_root(tools, &[&partial.join("silo"), &partial.join("workspace")])?;
     match std::fs::rename(&partial, &boot) {
         Ok(()) => Ok(boot),
         Err(_) if boot.join("silo/init").is_file() => Ok(boot),
+        Err(error) => Err(at("move the boot layer to", &boot, error)),
+    }
+}
+
+/// Removes what the storage holds that no computer needs: unpacked images no computer's record
+/// names (the pinned image stays: the next computer starts from it), and, when no container is
+/// running, boot layers of other init shims. A record that cannot be read leaves everything in
+/// place. Best effort: what cannot be removed stays for the next sweep.
+pub fn prune_storage(paths: &RuntimePaths, tools: &Tools) {
+    let layout = Layout::new(&paths.home);
+    let Ok(pinned) = super::image::pinned() else {
+        return;
+    };
+    let name_of = |digest: &str| {
+        layout
+            .image(digest)
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default()
+    };
+    let mut images = vec![name_of(&pinned.image_digest)];
+    let mut running = false;
+    for name in layout.names() {
+        let Ok(record) = layout.computer(&name).read_record() else {
+            return;
+        };
+        images.push(name_of(&record.image_digest));
+        running |= holder_alive(paths, &name) || hold::is_starting(&name);
+    }
+    for stale in super::image::unused_dirs(&layout.images(), &images) {
+        let _ = super::image::remove_tree(tools, &stale);
+    }
+    if running {
+        return;
+    }
+    if let Ok((hash, _)) = boot_hash(tools) {
+        for stale in super::image::unused_dirs(&layout.root().join("boot"), &[hash]) {
+            let _ = super::image::remove_tree(tools, &stale);
+        }
+    }
+}
+
+/// Gives `paths` (and what is below them) to the container's root, which is a sub-id on the host.
+/// Runs in a user namespace laid out like the container's.
+/// An I/O error with what was being done and where.
+fn at(what: &str, path: &Path, error: std::io::Error) -> String {
+    use std::os::unix::fs::MetadataExt;
+    let owner = |path: Option<&Path>| {
+        path.and_then(|path| std::fs::symlink_metadata(path).ok())
+            .map_or_else(
+                || "absent".to_owned(),
+                |meta| format!("{}:{} {:o}", meta.uid(), meta.gid(), meta.mode() & 0o7777),
+            )
+    };
+    // SAFETY: geteuid has no preconditions.
+    let me = unsafe { libc::geteuid() };
+    format!(
+        "Could not {what} {}: {error} (it is {}, its folder {}; this process is user {me})",
+        path.display(),
+        owner(Some(path)),
+        owner(path.parent())
+    )
+}
+
+fn own_as_root(tools: &Tools, paths: &[&Path]) -> Result<(), String> {
+    let agent = super::idmap::AGENT_ID.to_string();
+    let mut args: Vec<&std::ffi::OsStr> = vec![
+        "userns".as_ref(),
+        "--keep-id".as_ref(),
+        agent.as_ref(),
+        "--".as_ref(),
+        "chown".as_ref(),
+        "-R".as_ref(),
+        "0:0".as_ref(),
+        "--".as_ref(),
+    ];
+    args.extend(paths.iter().map(|path| path.as_os_str()));
+    run_checked(&tools.ctr, &args).map(drop)
+}
+
+/// Whether the computer's upper directory, when it has one, was made with the id mapping now in
+/// force: the root of the container's file system is root's (a sub-id), and a directory an earlier
+/// build left owned by the engine's own user cannot be used with it.
+pub fn check_upper(dir: &ComputerDir, name: &str) -> Result<bool, String> {
+    let sub_ids = super::idmap::current_sub_ids().ok_or(
+        "Silo could not read this account's sub-uid range in /etc/subuid. Run silo host init to see what container computers need.",
+    )?;
+    check_upper_in(dir, name, &sub_ids)
+}
+
+fn check_upper_in(
+    dir: &ComputerDir,
+    name: &str,
+    sub_ids: &std::ops::Range<u32>,
+) -> Result<bool, String> {
+    use std::os::unix::fs::MetadataExt;
+    match std::fs::symlink_metadata(dir.upper()) {
+        Ok(meta)
+            if meta.is_dir()
+                && super::idmap::KeepId::current().upper_owner_is_current(meta.uid(), sub_ids) =>
+        {
+            Ok(true)
+        }
+        Ok(_) => Err(super::idmap::recreate_message(name)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
         Err(error) => Err(io(error)),
     }
+}
+
+/// Makes the computer's upper directory, or checks the one it has.
+fn prepare_upper(tools: &Tools, dir: &ComputerDir, name: &str) -> Result<(), String> {
+    use std::os::unix::fs::PermissionsExt;
+    let upper = dir.upper();
+    match check_upper(dir, name)? {
+        true => Ok(()),
+        false => {
+            // Made aside and renamed into place, so an interrupted start never leaves an upper
+            // directory that looks like an earlier build's.
+            let staging = dir.path().join("upper.new");
+            super::image::remove_tree(tools, &staging)?;
+            std::fs::create_dir(&staging).map_err(|e| at("create", &staging, e))?;
+            // The overlay's root directory takes the upper directory's mode: it must stay traversable.
+            std::fs::set_permissions(&staging, std::fs::Permissions::from_mode(0o755))
+                .map_err(|e| at("set the mode of", &staging, e))?;
+            own_as_root(tools, &[&staging])?;
+            std::fs::rename(&staging, &upper).map_err(|e| at("move it to", &upper, e))
+        }
+    }
+}
+
+/// Creates what the container binds as its per-computer share (`/.msb`): the computer's runtime
+/// folder, which the in-guest client's bridge folder lives in. Only the account that owns the engine
+/// reaches it from the host, and the container's other users only get to search it, as in a virtual
+/// machine (`guest_client::Spool` seals the folders below it).
+fn share_directory(home: &Path, name: &str) -> Result<PathBuf, String> {
+    use std::os::unix::fs::PermissionsExt;
+    let computer = home.join("sandboxes").join(name);
+    private_dir(&computer).map_err(|e| format!("create {}: {e}", computer.display()))?;
+    std::fs::set_permissions(&computer, std::fs::Permissions::from_mode(0o700))
+        .map_err(|e| at("set the mode of", &computer, e))?;
+    let runtime = computer.join("runtime");
+    std::fs::create_dir_all(&runtime).map_err(|e| at("create", &runtime, e))?;
+    std::fs::set_permissions(&runtime, std::fs::Permissions::from_mode(0o711))
+        .map_err(|e| at("set the mode of", &runtime, e))?;
+    Ok(runtime)
 }
 
 /// Writes a file the container's users read (it is bound into the container), whatever umask the
 /// engine runs with.
 fn write_readable(path: &Path, contents: &str) -> Result<(), String> {
     use std::os::unix::fs::PermissionsExt;
-    std::fs::write(path, contents).map_err(io)?;
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o644)).map_err(io)
+    std::fs::write(path, contents).map_err(|e| at("write", path, e))?;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o644))
+        .map_err(|e| at("set the mode of", path, e))
 }
 
-fn private_dir(path: &Path) -> Result<(), String> {
+pub(super) fn private_dir(path: &Path) -> Result<(), String> {
     use std::os::unix::fs::DirBuilderExt;
     std::fs::DirBuilder::new()
         .recursive(true)
         .mode(0o700)
         .create(path)
-        .map_err(io)
+        .map_err(|e| at("create", path, e))
 }
 
 /// The file the gateway appends its credential-use events to: where `computers.credentials`
@@ -294,7 +481,7 @@ fn usage_log_file(home: &Path, name: &str) -> Result<PathBuf, String> {
 }
 
 /// `recvmsg` of one file descriptor sent with `SCM_RIGHTS`.
-fn receive_descriptor(stream: &std::os::unix::net::UnixStream) -> Result<OwnedFd, String> {
+pub(super) fn receive_descriptor(stream: &std::os::unix::net::UnixStream) -> Result<OwnedFd, String> {
     use std::os::fd::AsRawFd;
     let mut data = [0u8; 8];
     let mut iov = libc::iovec {
@@ -359,6 +546,8 @@ pub fn start(
     if is_running(Path::new("/proc"), paths, name) {
         return Ok(());
     }
+    // Before any image is unpacked for it.
+    check_upper(&dir, name).map_err(RuntimeError::Unavailable)?;
     // The image the computer was made from, not whatever is pinned now.
     let image = super::image::ensure_recorded(paths, tools, name, &record)?;
     cleanup_stale(paths, tools, &dir, name);
@@ -399,13 +588,8 @@ fn launch(
 ) -> Result<Started, String> {
     let state = dir.state();
     private_dir(&state)?;
-    // The overlay's root directory takes the upper directory's mode: it must stay traversable.
-    std::fs::create_dir_all(dir.upper()).map_err(io)?;
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(dir.upper(), std::fs::Permissions::from_mode(0o755))
-            .map_err(io)?;
-    }
+    prepare_upper(tools, dir, name)?;
+    let share = share_directory(&paths.home, name)?;
     private_dir(&dir.work())?;
     private_dir(&dir.merged())?;
     private_dir(&dir.bundle())?;
@@ -419,7 +603,8 @@ fn launch(
     // bundle itself stays the guest's own file: nothing is bound over it, and nothing is read
     // from the image here.
     let id = record.label("silo.machine-id").unwrap_or(name).to_owned();
-    let (ca_cert, ca_key) = computer_ca(&tools.gateway, &id)?;
+    let (ca_cert, ca_key) =
+        computer_ca(&tools.gateway, &id).map_err(|e| format!("computer CA: {e}"))?;
     write_readable(
         &state.join("gateway-ca.crt"),
         &format!("{}\n", ca_cert.trim_end()),
@@ -431,13 +616,14 @@ fn launch(
         resolv_conf: &state.join("resolv.conf"),
         hosts: &state.join("hosts"),
         ca_cert: &state.join("gateway-ca.crt"),
+        share: &share,
         arch: std::env::consts::ARCH,
     })?;
     std::fs::write(
         dir.bundle().join("config.json"),
         serde_json::to_vec_pretty(&spec).map_err(|e| e.to_string())?,
     )
-    .map_err(io)?;
+    .map_err(|e| at("write", &dir.bundle().join("config.json"), e))?;
     write_readable(
         &state.join("hosts"),
         &format!("127.0.0.1 localhost\n127.0.1.1 {name}\n::1 localhost\n"),
@@ -449,8 +635,10 @@ fn launch(
 
     let socket = state.join("ctl.sock");
     let _ = std::fs::remove_file(&socket);
-    let listener = UnixListener::bind(&socket).map_err(io)?;
-    listener.set_nonblocking(true).map_err(io)?;
+    let listener = UnixListener::bind(&socket).map_err(|e| at("bind", &socket, e))?;
+    listener
+        .set_nonblocking(true)
+        .map_err(|e| at("set up", &socket, e))?;
 
     let lower = dir
         .lower_dirs(record, &boot, rootfs)
@@ -458,14 +646,24 @@ fn launch(
         .map(|path| path.to_string_lossy().into_owned())
         .collect::<Vec<_>>()
         .join(":");
-    // The holder appends to one log across starts: only what it writes from here is this start's.
-    let log_from =
-        std::fs::metadata(state.join("holder.log")).map_or(0, |meta| meta.len() as usize);
-    let log = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(state.join("holder.log"))
-        .map_err(io)?;
+    // The holder's output is the container's standard output and error too, and the container
+    // runtime gives those files to the user the container's first process runs as: root, a
+    // sub-id the engine cannot write as. A new file each start, open to its owner and to others
+    // (inside the engine's private state folder), stays usable by the engine and the holder
+    // after that change.
+    let holder_log = state.join("holder.log");
+    let _ = std::fs::remove_file(&holder_log);
+    let log = {
+        use std::os::unix::fs::PermissionsExt;
+        let log = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&holder_log)
+            .map_err(|e| at("open", &holder_log, e))?;
+        log.set_permissions(std::fs::Permissions::from_mode(0o666))
+            .map_err(|e| at("set the mode of", &holder_log, e))?;
+        log
+    };
     let mut command = Command::new(&tools.systemd_run);
     command
         .args(["--user", "--scope", "--quiet", "--collect"])
@@ -550,9 +748,10 @@ fn launch(
     stream
         .set_read_timeout(Some(Duration::from_secs(60)))
         .map_err(io)?;
-    let tap = receive_descriptor(&stream)?;
-    let gateway_log = std::fs::File::create(state.join("gateway.log")).map_err(io)?;
-    let usage_log = usage_log_file(&paths.home, name)?;
+    let tap = receive_descriptor(&stream).map_err(|e| format!("network device: {e}"))?;
+    let gateway_log = std::fs::File::create(state.join("gateway.log"))
+        .map_err(|e| at("create", &state.join("gateway.log"), e))?;
+    let usage_log = usage_log_file(&paths.home, name).map_err(|e| format!("usage log: {e}"))?;
     // The secrets this computer is assigned, with the values the engine read for this start. A
     // value the engine does not hold is left out: nothing substitutes it.
     let secrets: Vec<Secret> = record
@@ -593,7 +792,8 @@ fn launch(
             usage_log: Some(usage_log),
             log: Some(gateway_log),
         },
-    )?;
+    )
+    .map_err(|e| format!("gateway: {e}"))?;
     let ready = gateway.ready().clone();
     write_readable(
         &state.join("resolv.conf"),
@@ -620,8 +820,10 @@ fn launch(
     }
     let running = Arc::new(Running {
         gateway: Mutex::new(gateway),
-        active: Mutex::new(active),
+        active: Mutex::new(active.clone()),
+        published: Some(state.join(ACTIVE_SECRETS_FILE)),
     });
+    publish_active(&running.published, &active);
     registry()
         .get_or_insert_with(HashMap::new)
         .insert(name.to_owned(), running.clone());
@@ -631,7 +833,7 @@ fn launch(
     // The holder runs on; dropping the guard hands its exit status to a thread.
     let log = std::fs::read_to_string(state.join("holder.log")).unwrap_or_default();
     Ok(Started {
-        warnings: hold::warnings_since(&log, log_from),
+        warnings: hold::warnings_since(&log, 0),
     })
 }
 
@@ -773,12 +975,25 @@ pub fn remove(paths: &RuntimePaths, tools: &Tools, name: &str) -> Result<(), Run
         eprintln!("Removing container computer {name}: {detail}");
         RuntimeError::Unavailable(format!("Silo could not remove container computer {name}."))
     })?;
-    // The events the gateway wrote and the computer's certificate authority go with it.
-    let events = paths.home.join("sandboxes").join(name);
-    let _ = std::fs::remove_dir_all(events.join("logs"));
-    let _ = std::fs::remove_dir(&events);
+    // The events the gateway wrote, the share (the in-guest client's bridge folder, which the guest
+    // wrote into), the SSH host key and the computer's certificate authority go with it. The guest's
+    // files are owned by sub-ids, so the namespace removes them.
+    let _ = super::image::remove_tree(tools, &paths.home.join("sandboxes").join(name));
     let _ = crate::macos_computers::proxy_ca::retire(&id);
     Ok(())
+}
+
+/// `command` run in a scope of the user manager (`systemd-run --user --scope`). Joining the
+/// container's control group needs an ancestor this account may write, which a process started
+/// from a login session (a terminal, an editor's proxy) does not share with the container; the
+/// engine's own processes are inside the user manager already.
+pub fn in_user_scope(tools: &Tools, command: &Command) -> Command {
+    let mut scoped = Command::new(&tools.systemd_run);
+    scoped
+        .args(["--user", "--scope", "--quiet", "--"])
+        .arg(command.get_program())
+        .args(command.get_args());
+    scoped
 }
 
 /// A `crun exec` command and the handle that ends what it runs.
@@ -834,6 +1049,29 @@ fn trust_environment() -> [(String, String); 4] {
     ]
 }
 
+/// Who `user` is in the computer: its ids, home and groups, read from the account files of the image
+/// the computer was made from and its own writable layer.
+pub fn identity(
+    paths: &RuntimePaths,
+    tools: &Tools,
+    name: &str,
+    user: &str,
+) -> Result<users::Identity, String> {
+    let layout = Layout::new(&paths.home);
+    let dir = layout.computer(name);
+    let record = dir.read_record()?;
+    let image =
+        super::image::unpacked_digest(&layout, &record.image_digest, &record.image_reference)
+            .ok_or("The container image of this computer is not unpacked. Start it again.")?;
+    let boot = boot_layer(&layout, tools)?;
+    let mut layers = vec![dir.upper()];
+    layers.extend(dir.lower_dirs(&record, &boot, &image.rootfs));
+    let passwd = users::read_from_layers(&layers, "etc/passwd")?.unwrap_or_default();
+    let group = users::read_from_layers(&layers, "etc/group")?.unwrap_or_default();
+    users::resolve(user, &passwd, &group)
+        .ok_or_else(|| format!("The user {user} does not exist in {name}."))
+}
+
 /// The `crun exec` command for `exec`, run as `uid`/`gid` (and the user's other groups) with the
 /// given environment.
 ///
@@ -851,17 +1089,8 @@ pub fn exec_command(
     let layout = Layout::new(&paths.home);
     let dir = layout.computer(name);
     let record = dir.read_record()?;
-    let image =
-        super::image::unpacked_digest(&layout, &record.image_digest, &record.image_reference)
-            .ok_or("The container image of this computer is not unpacked. Start it again.")?;
-    let boot = boot_layer(&layout, tools)?;
-    let mut layers = vec![dir.upper()];
-    layers.extend(dir.lower_dirs(&record, &boot, &image.rootfs));
-    let passwd = users::read_from_layers(&layers, "etc/passwd")?.unwrap_or_default();
-    let group = users::read_from_layers(&layers, "etc/group")?.unwrap_or_default();
     let user = exec.user.as_deref().unwrap_or("root");
-    let identity = users::resolve(user, &passwd, &group)
-        .ok_or_else(|| format!("The user {user} does not exist in {name}."))?;
+    let identity = identity(paths, tools, name, user)?;
 
     let mut environment = vec![
         (
@@ -911,6 +1140,7 @@ pub fn exec_command(
         exec.workdir.as_deref().unwrap_or("/"),
         &environment,
         &argv,
+        exec.tty,
         capabilities,
     );
     let group = ExecGroup::new(exec_directory(&dir)?);
@@ -941,8 +1171,12 @@ pub fn exec_command(
         .arg("--process")
         .arg(&process_file)
         .arg("--pid-file")
-        .arg(group.pid_file())
-        .arg(name);
+        .arg(group.pid_file());
+    if let Some(socket) = &exec.console_socket {
+        // The server holding the terminal's controlling side receives it here (SCM_RIGHTS).
+        command.arg("--console-socket").arg(socket);
+    }
+    command.arg(name);
     Ok(ExecPlan { command, group })
 }
 
@@ -1106,9 +1340,21 @@ mod tests {
     fn fake_tools(directory: &Path) -> Tools {
         let init = directory.join("silo-init");
         std::fs::write(&init, b"init").unwrap();
+        // A stand-in for `silo-ctr userns`: it runs the command after `--`, except the ownership
+        // change that only a user namespace allows.
+        let ctr = directory.join("silo-ctr");
+        std::fs::write(
+            &ctr,
+            "#!/bin/sh\nwhile [ \"$1\" != -- ]; do shift; done; shift\n[ \"$1\" = chown ] && exit 0\nexec \"$@\"\n",
+        )
+        .unwrap();
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&ctr, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
         let other = |name: &str| directory.join(name);
         Tools {
-            ctr: other("silo-ctr"),
+            ctr,
             init,
             gateway: other("gateway"),
             crun: other("crun"),
@@ -1128,6 +1374,7 @@ mod tests {
             no_start: true,
             timeout: Some(Duration::from_secs(7)),
             argv: vec!["id".into()],
+            ..Exec::default()
         }
     }
 
@@ -1311,5 +1558,122 @@ mod tests {
         .err()
         .unwrap();
         assert!(error.contains("not a regular file"), "{error}");
+    }
+
+    fn a_computer_with_an_image(home: &Path) -> (RuntimePaths, Tools) {
+        let paths = test_paths(home);
+        let layout = Layout::new(&paths.home);
+        let dir = layout.computer("dev");
+        std::fs::create_dir_all(dir.path()).unwrap();
+        dir.write_record(&record(true)).unwrap();
+        let made = layout.image("sha256:made-from");
+        std::fs::create_dir_all(made.join("rootfs/etc")).unwrap();
+        std::fs::write(made.join("digest"), "sha256:made-from\n").unwrap();
+        std::fs::write(
+            made.join("rootfs/etc/passwd"),
+            "silo:x:1001:1001::/home/silo:/bin/bash\n",
+        )
+        .unwrap();
+        (paths, fake_tools(home))
+    }
+
+    #[test]
+    fn a_terminal_runs_on_a_pseudo_terminal_and_hands_it_to_the_console_socket() {
+        let home = tempfile::tempdir().unwrap();
+        let (paths, tools) = a_computer_with_an_image(home.path());
+        let mut exec = exec_of("silo");
+        exec.tty = true;
+        exec.console_socket = Some("/tmp/silo-pty-x/c".into());
+        let plan = exec_command(&paths, &tools, "dev", &exec, false).unwrap();
+        let args: Vec<String> = plan
+            .command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        let at = args.iter().position(|arg| arg == "--console-socket").unwrap();
+        assert_eq!(args[at + 1], "/tmp/silo-pty-x/c");
+        // The container name stays last, after every option.
+        assert_eq!(args.last().unwrap(), "dev");
+        let process: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(plan.group.process_file()).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(process["terminal"], true);
+        assert_eq!(process["user"]["uid"], 1001);
+        // Without a terminal, no socket is passed.
+        let plain = exec_command(&paths, &tools, "dev", &exec_of("silo"), false).unwrap();
+        assert!(!plain.command.get_args().any(|arg| arg == "--console-socket"));
+    }
+
+    #[test]
+    fn who_a_user_is_comes_from_the_image_the_computer_was_made_from() {
+        let home = tempfile::tempdir().unwrap();
+        let (paths, tools) = a_computer_with_an_image(home.path());
+        let identity = identity(&paths, &tools, "dev", "silo").unwrap();
+        assert_eq!((identity.uid, identity.gid, identity.home.as_str()), (1001, 1001, "/home/silo"));
+        assert!(identity_error(&paths, &tools, "nobody").contains("does not exist"));
+    }
+
+    fn identity_error(paths: &RuntimePaths, tools: &Tools, user: &str) -> String {
+        identity(paths, tools, "dev", user).unwrap_err()
+    }
+
+    #[test]
+    fn an_upper_directory_from_an_earlier_build_is_refused_with_a_recreate_message() {
+        let home = tempfile::tempdir().unwrap();
+        let layout = Layout::new(home.path());
+        let dir = layout.computer("dev");
+        std::fs::create_dir_all(dir.path()).unwrap();
+        // None yet: it is made on the first start.
+        let sub_ids = 500_000..565_535;
+        assert_eq!(check_upper_in(&dir, "dev", &sub_ids), Ok(false));
+        // One this process made is owned by the engine's own user, as an earlier build's was.
+        std::fs::create_dir_all(dir.upper()).unwrap();
+        let error = check_upper_in(&dir, "dev", &sub_ids).unwrap_err();
+        assert!(error.contains("Recreate it") && error.contains("dev"), "{error}");
+        // A file in its place is no upper directory either.
+        std::fs::remove_dir(dir.upper()).unwrap();
+        std::fs::write(dir.upper(), "x").unwrap();
+        assert!(check_upper_in(&dir, "dev", &sub_ids).is_err());
+    }
+
+    #[test]
+    fn the_boot_layer_is_named_by_the_init_shim_and_the_ownership_layout() {
+        let home = tempfile::tempdir().unwrap();
+        let layout = Layout::new(home.path());
+        let tools = fake_tools(home.path());
+        let boot = boot_layer(&layout, &tools).unwrap();
+        assert!(boot.join("silo/init").is_file() && boot.join("workspace").is_dir());
+        // A layer an earlier build made under the init shim's plain digest is never reused.
+        let plain = hex_prefix(&Sha256::digest(b"init"));
+        assert_ne!(boot.file_name().unwrap().to_str().unwrap(), plain);
+    }
+
+    fn hex_prefix(digest: &[u8]) -> String {
+        digest.iter().take(8).map(|byte| format!("{byte:02x}")).collect()
+    }
+
+    #[test]
+    fn the_share_directory_is_private_to_the_account_and_only_searchable_below() {
+        use std::os::unix::fs::PermissionsExt;
+        let home = tempfile::tempdir().unwrap();
+        let runtime = share_directory(home.path(), "dev").unwrap();
+        assert_eq!(runtime, home.path().join("sandboxes/dev/runtime"));
+        let mode = |path: &Path| std::fs::metadata(path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&home.path().join("sandboxes/dev")), 0o700);
+        assert_eq!(mode(&runtime), 0o711);
+    }
+
+    #[test]
+    fn the_secrets_the_engine_published_are_what_other_processes_read() {
+        let home = tempfile::tempdir().unwrap();
+        let dir = Layout::new(home.path()).computer("dev");
+        std::fs::create_dir_all(dir.state()).unwrap();
+        assert!(published_secrets(&dir).is_empty());
+        let file = Some(dir.state().join(ACTIVE_SECRETS_FILE));
+        publish_active(&file, &["A".into(), "B_TOKEN".into()]);
+        assert_eq!(published_secrets(&dir), ["A", "B_TOKEN"]);
+        publish_active(&file, &[]);
+        assert!(published_secrets(&dir).is_empty());
     }
 }
