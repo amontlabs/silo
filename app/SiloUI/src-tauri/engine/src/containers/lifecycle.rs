@@ -499,6 +499,7 @@ pub fn make_layer(tools: &Tools, path: &Path) -> Result<(), String> {
     use std::os::unix::fs::PermissionsExt;
     let parent = path.parent().ok_or("A layer has no folder.")?;
     std::fs::create_dir_all(parent).map_err(|e| at("create", parent, e))?;
+    super::layout::strip_default_acl(parent);
     let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("layer");
     let staging = parent.join(format!(".new-{name}"));
     super::image::remove_tree(tools, &staging)?;
