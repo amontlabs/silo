@@ -47,6 +47,32 @@ as the previous boot's (boots are nearly deterministic) made PulseAudio exit wit
 computer use reported "The Linux desktop was not running". Reproduced on the first
 restart of a built-in computer; intermittent on restart and on import.
 
+## Container computers
+
+A container computer (a Linux host's opt-in kind, see the [threat model](THREAT-MODEL.md#container-computers))
+has the same desktop as a Linux VM: the setting is the same (on by default; `desktop: false` is for VM
+recipes, which do not make containers, so `silo desktop off` on a running container, or the computer's settings,
+is how to turn it off; forks inherit it), and so are the viewer, `silo fork --gui`, the computer-use tools and
+their approvals. What differs:
+
+- **Start.** A VM's init runs `/usr/local/libexec/silo-desktop-boot`. A container has no init system and its
+  PID 1 has no capability (the service switches to the `silo` account), so after every start the engine runs
+  the same boot hook once as a root command (`containers/desktop.rs`), in the background: it waits up to 150 s
+  for the working account to exist (a first start creates it after the container is up), then starts the
+  desktop unless its automatic start is off. The start never waits for it and never fails because of it;
+  `silo status` and the viewer show the desktop's own state.
+- **Setup.** The image carries the desktop (v4 and later images). `setup-desktop.sh` runs from the same engine
+  code, but in a container (`SILO_RUNTIME=container`) it refuses the apt install path: a computer whose image
+  has no complete desktop says so and must be created again. A container created before this phase has no
+  desktop setting and is the same.
+- **Chrome.** A container's Chrome runs with `--no-sandbox`: the computer-use setup writes launchers in
+  `/usr/local/bin` (`google-chrome`, `google-chrome-stable`, `chromium`, `chromium-browser`) and a desktop entry
+  that add the flag, because the baseline denies the nested user namespace Chrome's sandbox needs. The
+  computer's page in the app says a web page that compromises the browser reaches everything in the
+  computer. The image has no browser; install one in the computer.
+- **The viewer** reaches the streamer on the container's loopback through the computer's own SSH server
+  (`direct-tcpip` to the container's loopback only), as for a VM.
+
 ## Selkies settings, screen size and recipes 4 and 5
 
 `launch_selkies_streamer` in `guest/desktop-service.py` starts Selkies 2.0.0 with

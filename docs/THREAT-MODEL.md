@@ -851,10 +851,31 @@ with nothing sensitive on it, and the app, the CLI and `silo list` label it as l
   what the agent gains by loosening them is access for other guest users to its own requests,
   which it can already give them. The token, the allow-list and the folder parsing (links, sizes,
   counts) are the same code and the same limits.
-- **Not yet for a container.** Export and the desktop are refused with a plain message (see the
-  capability list in `containers/capability.rs`); the app hides them. A container also has no
-  memory checkpoints (the same list: "memory snapshots"): its checkpoints save the disks, whether
-  the computer runs or not.
+- **Not yet for a container.** Export is refused with a plain message (see the capability list in
+  `containers/capability.rs`); the app hides it. A container also has no memory checkpoints (the
+  same list: "memory snapshots"): its checkpoints save the disks, whether the computer runs or not.
+- **The desktop and Chrome.** A container computer has the desktop and computer use of a virtual
+  machine: the image's own desktop service (Xvfb, PulseAudio, Xfce, Selkies) and Cua Driver, started
+  by a root command after the container starts (the image's boot hook; the container has no init
+  system and its PID 1 has no capability), with nothing installed by the desktop setup (it refuses
+  to install packages in a container). The viewer reaches the streamer on the container's loopback
+  through the computer's own SSH server, as for a virtual machine; no port is opened on the host.
+  **Chrome runs without its sandbox.** Chrome's sandbox needs a nested user namespace, which the
+  baseline's seccomp profile denies, and there is **no exception for Chrome**: allowing nested user
+  namespaces for one program cannot be done safely, since they are a frequent kernel-bug entry
+  point and the profile applies to the whole container. So the computer-use setup writes launchers
+  for `google-chrome`, `google-chrome-stable`, `chromium` and `chromium-browser` in `/usr/local/bin`
+  (and a desktop entry for the same name) that add `--no-sandbox`. The consequence, plainly: **a web
+  page that compromises the browser reaches everything in this computer** that the working account
+  can reach (its files, its secrets' placeholders, its network as the gateway allows), because the
+  renderer is no longer isolated from the rest of the browser or the account. It stays inside the
+  container's baseline (no capability, seccomp, Landlock, only the TAP and the gateway), and the
+  app, the CLI and `silo list` label the kind; the computer's page repeats the warning when it has
+  a desktop. A browser other than those four (Playwright's bundled one, say) is not covered by the
+  launchers and fails to start unless its caller passes the flag. A virtual machine keeps Chrome's
+  sandbox. With the desktop off no launcher is written until it is turned on (a program that starts
+  Chrome by hand passes the flag itself). The approvals, the audit of computer-use calls and the
+  one-driver-session rule are those of a virtual machine and run in the same engine code.
 - **Checkpoints and forks.** A computer's file system is an overlay: its writable layer over a
   chain of sealed layers, the shim layer and the image. Every layer is a directory of one shared
   store (`containers/layers/<id>`), a checkpoint is a list of layer ids with a copy of the
@@ -930,15 +951,24 @@ with nothing sensitive on it, and the app, the CLI and `silo list` label it as l
   until their owner removes some. The guard reads the free space every 30 seconds and holds
   nothing about a computer between looks. Only while the host is below the margin does it measure
   layers (every minute), inside the user namespace so unreadable directories count (`du` there);
-  a layer that cannot be measured is left alone. A program can write the whole margin between two
-  looks, and the margin itself is the only protection against that. Sealed layers belong to
+  **a layer that cannot be measured (the `du` timed out or failed) counts as over its size** and is
+  stopped first, so a container cannot avoid the guard by making itself slow to measure. Layers are
+  measured in parallel (at most four at a time, each bounded to five minutes), so one slow
+  container does not hold up the others; with more than four slow ones a look takes several bounds.
+  What the guard does not give: its stop can land during a checkpoint's copy (it then ends the
+  frozen control group after 15 seconds, and the copy, which runs outside the container,
+  still completes and saves); it can act on a measurement taken minutes earlier, since a look
+  measures first and stops afterwards; the sizes of several computers can add up to more than the
+  disk, so each within its size and together enough to fill it; and a checkpoint freezes the
+  processes for up to 10 seconds of waiting plus 30 seconds of copying. A program can write the
+  whole margin between two looks, and the margin itself is the only protection against that. Sealed layers belong to
   checkpoints and forks and are not counted against a computer; the per-computer share
   (`/.msb`, the in-guest client's bridge folder, in the engine's `sandboxes` folder) is outside
   every size, the computer's and the guard's.
 - **Known gaps.** `/sys` is a fresh sysfs mounted read-only inside the container's own user and
   network namespaces, so it shows the container's own devices (the TAP and loopback) and the
-  host's hardware, not the host's network interfaces. Chrome needs `--no-sandbox` in a container (the baseline
-  blocks the user namespace its sandbox needs), so a web page that compromises the browser reaches
+  host's hardware, not the host's network interfaces. Chrome runs with `--no-sandbox` (see The
+  desktop and Chrome above), so a web page that compromises the browser reaches
   everything in the computer. Ubuntu's `kernel.apparmor_restrict_unprivileged_userns` has to be 0
   on the host, which relaxes a host-wide guard; Silo checks and names it and never sets it. A
   container's gateway is the engine's child, so a restart replaces it (see An engine restart

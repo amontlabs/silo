@@ -677,6 +677,51 @@ restart, the disk size) are closed. Design as approved: [CONTAINERS-PLAN](CONTAI
   this device, then try again."; a checkpoint of the other container, which was within its size, was refused with the
   same message and that container kept running; after the file was removed the oversized computer started again.
 
+### 9 Nov 2026: phase CT5 built (the desktop and computer use for container computers)
+
+Branch `claude/containers-ct5`. A container computer has the desktop and computer use through the same API, CLI, MCP and
+app as a Linux VM, and the "not yet" list is down to export (CT6) and memory checkpoints (never). Design as decided:
+[CONTAINERS-PLAN](CONTAINERS-PLAN.md).
+
+- **Capability.** `Capability::Desktop` is on for the container kind (`containers/capability.rs`, `container-unavailable.json`
+  now `["export", "memorySnapshots"]`). Three refusals that existed only for containers are gone: the create-time
+  "no desktop yet", the update-time "a container's desktop may not change", and the new-computer rule that kept a
+  container from taking its image's desktop (`desktop::default_new_computer_desktops`). A new container is built in and
+  starts its desktop like a VM; the app shows "Add Linux desktop" for a container without one.
+- **Start without systemd** (`containers/desktop.rs`, called from `containers::start` after the gateway certificate). A VM's init
+  runs the image's `silo-desktop-boot`. A container's PID 1 is the shim with no capability, and the desktop service
+  switches to the `silo` account with `runuser`, which needs setuid/setgid, so the engine runs the same hook after every start
+  as one root command (the capabilities Silo's root commands already get), on a background thread: it waits up to 150 s for
+  `/var/lib/silo/working-account.json` (a first start creates the account after the container is up), then runs the hook;
+  an image with no hook starts nothing. The start does not wait for it and a failure is logged, not returned. The service's own
+  supervisors then keep Xvfb, Xfce and Selkies up, as in a VM. No new container branch outside `engine/src/containers/`:
+  the only edits outside are removals of the three refusals above, a guard in `setup-desktop.sh` and the app.
+- **No VM-only installer path.** The desktop setup in a container reaches `setup-desktop.sh` through the same engine code; with
+  `SILO_RUNTIME=container` (set on every container exec) it exits with a message instead of falling back to `apt-get` when
+  the image's desktop is not complete. The branch that provisions the image's preinstalled desktop touches neither apt nor
+  the network and runs as for a VM.
+- **Chrome with `--no-sandbox`.** `silo-computer-use.py` (pushed and applied after every boot, and when the desktop is turned
+  on) writes, in a container only, launchers for `google-chrome`, `google-chrome-stable`, `chromium` and `chromium-browser`
+  in `/usr/local/bin` and a `google-chrome.desktop` in `/usr/local/share/applications` that exec the first installed browser
+  (`/opt/google/chrome/google-chrome`, Debian's Chromium paths) with `--no-sandbox`; a file of that name that the helper did
+  not write is left alone. No seccomp exception for Chrome. The app's computer page shows a note when a container has a
+  desktop; the threat model, the desktop guide and the computer-use guide say it plainly.
+- **Host disk guard (CT4 re-check).** (1) A layer the guard cannot measure (the `du` timed out, failed or printed nothing
+  readable) counts as over its size and goes first; layers are measured by up to four workers at once, each bounded to five
+  minutes, so one slow container does not hold up the others. (2) The threat model now says the guard's stop can land during a
+  checkpoint copy (the frozen scope is killed after the 15 s stop wait; the copy runs outside the container and still
+  saves), can act on a measurement minutes old, that sizes adding up to more than the disk can still fill it, and that a
+  checkpoint freezes for up to 10 s of waiting plus 30 s of copying.
+- **Recipes do not make containers.** A recipe has no runtime, so "a recipe with `desktop: false` creates a container
+  without one" is not possible as written; the live check covers the same setting through `silo desktop off`, a restart and a
+  fork (which inherits it). Whether `silo create --container` should take `--no-desktop` is open.
+- **Tests.** Engine: the capability list and its app copy, the desktop defaults for a container (built in, and
+  autostart-off kept), the update validator, the boot command and script, the host guard (unmeasurable layer, ordering, parallel
+  measurement). Guest: the Chrome launchers (written for a container only, never over a foreign file, run the browser with the
+  flag and its arguments, say so when none is installed). Frontend: the capability model, the overview and detail pages (desktop
+  action offered; the browser warning shown for a container only). Live: `linux-host-e2e.sh` with `SILO_E2E_CONTAINER=1`
+  (a fourth container with the desktop on, below).
+
 ### R1: CI runner on the Mac (branch `claude/runner-phase-1`)
 
 - **Built:** `silo-action/` and every reference removed; `silo-runner` (Go, `app/SiloUI/runner`, on
