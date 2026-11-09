@@ -670,6 +670,7 @@ pub fn watch_disk(paths: &RuntimePaths, tools: &Tools, name: &str) {
                 let dir = layout.computer(&name);
                 if let Ok(record) = dir.read_record() {
                     let used = super::quota::used_bytes(&dir.upper_of(&record));
+                    let limit_mib = super::quota::limit_mib(&record);
                     let note = |text: String| {
                         use std::io::Write;
                         if let Ok(mut file) = std::fs::OpenOptions::new()
@@ -680,10 +681,10 @@ pub fn watch_disk(paths: &RuntimePaths, tools: &Tools, name: &str) {
                             let _ = writeln!(file, "{text}");
                         }
                     };
-                    if used >> 20 > record.root_disk_mib / 2 {
-                        note(format!("{} of {} MiB used, read-only: {read_only}", used >> 20, record.root_disk_mib));
+                    if used >> 20 > limit_mib / 2 {
+                        note(format!("{} of {} MiB used, read-only: {read_only}", used >> 20, limit_mib));
                     }
-                    let wanted = match super::quota::decide(used, record.root_disk_mib, read_only) {
+                    let wanted = match super::quota::decide(used, limit_mib, read_only) {
                         super::quota::Action::Nothing => None,
                         super::quota::Action::MakeReadOnly => Some("--ro"),
                         super::quota::Action::MakeWritable => Some("--rw"),
@@ -702,7 +703,7 @@ pub fn watch_disk(paths: &RuntimePaths, tools: &Tools, name: &str) {
                                     eprintln!(
                                         "Container computer {name}: its disk is full ({} of {} MiB used), so its files are read-only until space is freed.",
                                         used >> 20,
-                                        record.root_disk_mib
+                                        limit_mib
                                     );
                                 }
                             }

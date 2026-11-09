@@ -1,4 +1,5 @@
-//! Holding a container computer to its disk size (`root_disk_mib`).
+//! Holding a container computer to its disk size (`root_disk_mib` plus `workspace_mib`: a container
+//! has one file system, where a virtual machine has a root disk and a workspace disk).
 //!
 //! The kernel's tools for a size limit on a directory (a project quota on XFS or ext4, a loop-mounted
 //! file system) need administrator rights to set up, and neither a user namespace nor FUSE-less
@@ -8,13 +9,18 @@
 //! (`silo-ctr remount --ro`); writes then fail with "Read-only file system" until space is freed
 //! (stop the computer, free space, start it again) and the layer is below the limit.
 //!
-//! The limit counts the writable layer (and so `/workspace`, which is a folder in it). Sealed
+//! The limit counts the writable layer (and so `/workspace`, which is a folder in it, whose size is added). Sealed
 //! layers belong to checkpoints and forks and are not counted against a computer.
 
 use std::path::Path;
 
 /// The most entries one measurement visits, so a layer of millions of files cannot stall the watcher.
 const MAX_ENTRIES: usize = 4_000_000;
+
+/// The size a computer's writable layer may reach.
+pub fn limit_mib(record: &super::layout::ComputerRecord) -> u64 {
+    record.root_disk_mib.saturating_add(record.workspace_mib)
+}
 
 /// Bytes the files below `path` occupy on disk (allocated blocks, links not followed).
 pub fn used_bytes(path: &Path) -> u64 {
@@ -75,6 +81,20 @@ mod tests {
         std::os::unix::fs::symlink("/", dir.path().join("link")).unwrap();
         let used = used_bytes(dir.path());
         assert!((100_000..200_000).contains(&used), "{used}");
+    }
+
+    #[test]
+    fn the_limit_adds_the_workspace_to_the_root_disk() {
+        let home = tempfile::tempdir().unwrap();
+        crate::containers::capability::make_container(home.path(), "box");
+        let record = super::super::layout::Layout::new(home.path())
+            .computer("box")
+            .read_record()
+            .unwrap();
+        assert_eq!(
+            limit_mib(&record),
+            record.root_disk_mib + record.workspace_mib
+        );
     }
 
     #[test]

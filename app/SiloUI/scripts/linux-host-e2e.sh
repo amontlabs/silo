@@ -233,6 +233,15 @@ container_checkpoint_features() {
 container_disk_limit() {
   step "Writing past the disk size of $ctr3"
   "$silo" create "$ctr3" --container --cpus 1 --memory 1 --disk 1
+  # A container's limit is its root disk and workspace together (81 GiB here); the record of this
+  # stopped test computer is made small so the runner's disk is enough to pass it.
+  record=$(engine_find -path "*containers/computers/$ctr3/computer.json" | head -n 1)
+  python3 - "$record" <<'PY'
+import json, sys
+record = json.load(open(sys.argv[1]))
+record["rootDiskMib"], record["workspaceMib"] = 300, 100
+json.dump(record, open(sys.argv[1], "w"))
+PY
   "$silo" start "$ctr3"
   failed=no
   for i in $(seq 1 40); do

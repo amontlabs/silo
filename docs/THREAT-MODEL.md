@@ -893,7 +893,7 @@ with nothing sensitive on it, and the app, the CLI and `silo list` label it as l
   whiteouts are honoured as inside the container.
 - **The disk limit.** The kernel offers no quota a rootless host can set on a writable layer (a
   project quota or a loop-mounted file system needs administrator rights, and a user namespace
-  cannot mount a block file system), so the engine holds `root_disk_mib` itself: it measures the
+  cannot mount a block file system), so the engine holds the computer's size (its root disk and workspace disk together, as one file system holds both) itself: it measures the
   writable layer every few seconds and, past the limit, remounts the container's root read-only
   (`silo-ctr remount`); writes fail with "Read-only file system" until the computer is stopped,
   space is freed and it is started again. The limit is not a hard bound: a program can write
