@@ -273,6 +273,22 @@ pub fn referenced(layout: &Layout) -> Result<HashSet<String>, String> {
     Ok(ids)
 }
 
+/// The config digests of the guest images the computers' records and the checkpoints name. A
+/// checkpoint counts because an imported computer has one before it has a record (its first start
+/// makes the record), and its layers hold changes against exactly that image. Fails when any of
+/// them cannot be read, as [`referenced`] does: an unpacked image is only removed when everything
+/// that might need it was read.
+pub fn images_named(layout: &Layout) -> Result<HashSet<String>, String> {
+    let mut digests = HashSet::new();
+    for name in layout.names() {
+        digests.insert(layout.computer(&name).read_record()?.image_digest);
+    }
+    for snapshot in Store::new(layout).list(None)? {
+        digests.insert(snapshot.template.image_digest);
+    }
+    Ok(digests)
+}
+
 /// The store's entries that nothing names, from `(entry name, age)` pairs. Staging directories
 /// (dot-prefixed) go once they are old; a layer goes once it is older than the grace period.
 pub fn unreferenced(present: &[(String, Duration)], referenced: &HashSet<String>) -> Vec<String> {
@@ -466,6 +482,23 @@ mod tests {
         Store::new(&layout).remove("parent", "c1").unwrap();
         let rest = referenced(&layout).unwrap();
         assert!(rest.contains("a") && !rest.contains("b"));
+    }
+
+    #[test]
+    fn an_imported_checkpoint_names_its_image_before_its_computer_has_a_record() {
+        let home = tempfile::tempdir().unwrap();
+        let layout = Layout::new(home.path());
+        let older = format!("sha256:{}", "a".repeat(64));
+        let mut template = record();
+        template.image_digest = older.clone();
+        Store::new(&layout)
+            .write(&Snapshot::new("silo-import-ab", "c1", ids(&["l1"]), template))
+            .unwrap();
+        assert!(layout.names().is_empty());
+        assert_eq!(images_named(&layout).unwrap(), [older].into());
+        // A checkpoint that cannot be read says nothing about what it needs.
+        std::fs::write(layout.snapshots().join("silo-import-ab/c2.json"), "{").unwrap();
+        assert!(images_named(&layout).is_err());
     }
 
     #[test]
