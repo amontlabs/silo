@@ -865,20 +865,35 @@ with nothing sensitive on it, and the app, the CLI and `silo list` label it as l
   namespaces for one program cannot be done safely, since they are a frequent kernel-bug entry
   point and the profile applies to the whole container. So the computer-use setup writes launchers
   for `google-chrome`, `google-chrome-stable`, `chromium` and `chromium-browser` in `/usr/local/bin`
-  (and a desktop entry for the same name) that add `--no-sandbox`. The consequence, plainly: **a web
-  page that compromises the browser reaches everything in this computer** that the working account
-  can reach (its files, its secrets' placeholders, its network as the gateway allows), because the
-  renderer is no longer isolated from the rest of the browser or the account. It stays inside the
-  container's baseline (no capability, seccomp, Landlock, only the TAP and the gateway), and the
-  app, the CLI and `silo list` label the kind; the computer's page repeats the warning when it has
-  a desktop. A browser other than those four (Playwright's bundled one, say) is not covered by the
-  launchers and fails to start unless its caller passes the flag. A virtual machine keeps Chrome's
+  (and the desktop entries `google-chrome.desktop` and `chromium.desktop`) that add `--no-sandbox`. The
+  consequence, plainly: **a web page that compromises the browser reaches everything in this
+  computer** that the working account can reach, because the renderer is no longer isolated from the
+  rest of the browser or the account: its files, its network as the gateway allows, and the authority
+  the computer holds. **It can act with this computer's GitHub access and use its secrets** (the
+  gateway swaps a secret's placeholder for the real value on the hosts that secret is allowed for), and
+  **it can use the computer's in-guest `silo` client**, with what that client may do from this computer. It stays inside the container's baseline (no capability, seccomp, Landlock,
+  only the TAP and the gateway), and the app, the CLI and `silo list` label the kind; the computer's
+  page repeats the warning when it has a desktop. The launchers do not make a single browser safer:
+  each runs the first installed of Google Chrome and the two Chromium paths, whatever name was called,
+  and a launcher stays when the desktop is turned off. They cover those names only: **any
+  Chromium-based program that an agent starts with `--no-sandbox`** (Playwright's and Puppeteer's
+  browsers, an Electron application: their sandbox needs the same user namespace, so their callers
+  pass the flag) **has the same exposure**, and one started without the flag fails to start. A virtual machine keeps Chrome's
   sandbox. With the desktop off no launcher is written until it is turned on (a program that starts
   Chrome by hand passes the flag itself). The approvals, the audit of computer-use calls and the
   one-driver-session rule are those of a virtual machine and run in the same engine code. Each command the engine runs in the
   container is in its own Landlock domain, which cannot read a process of another command (`/proc/<pid>/environ`, `exe`), so
-  the desktop session leaves its display, bus and runtime variables in `/run/silo-desktop/user/session.env`, a file only the
-  working account reads; it holds no secret (the viewer's credentials stay in `/var/lib/silo-desktop`, root's).
+  the desktop session of either kind leaves its display, bus and runtime variables in
+  `/run/silo-desktop/user/session.env`, a file only the working account owns and root reads after checking
+  that: it holds no secret, and the desktop stopping removes it. The viewer's credentials stay in
+  `/var/lib/silo-desktop`, root's, and the streamer gets its password in its environment
+  (`SELKIES_BASIC_AUTH_PASSWORD`), not in its arguments, which every process in the computer can read; its
+  environment is readable by root and the working account's own processes, as in a virtual machine.
+  `/run` is a tmpfs, as in a virtual machine, so the display's authority cookie and the session file are
+  not part of the computer's files and do not travel into a checkpoint or a fork. The commands the engine
+  runs itself as root (the boot command of the desktop, the gateway certificate update) take Silo's fixed
+  environment only, never the computer's own variables (`PATH`, `LD_PRELOAD`, `HOME`), which would
+  otherwise steer a program the account can replace.
 - **Checkpoints and forks.** A computer's file system is an overlay: its writable layer over a
   chain of sealed layers, the shim layer and the image. Every layer is a directory of one shared
   store (`containers/layers/<id>`), a checkpoint is a list of layer ids with a copy of the
@@ -954,8 +969,11 @@ with nothing sensitive on it, and the app, the CLI and `silo list` label it as l
   until their owner removes some. The guard reads the free space every 30 seconds and holds
   nothing about a computer between looks. Only while the host is below the margin does it measure
   layers (every minute), inside the user namespace so unreadable directories count (`du` there);
-  **a layer that cannot be measured (the `du` timed out or failed) counts as over its size** and is
-  stopped first, so a container cannot avoid the guard by making itself slow to measure. Layers are
+  **a layer that cannot be measured (the measurement timed out, or `du` itself failed) counts as over
+  its size** and is stopped first, as soon as its own measurement ends, so a container cannot avoid the
+  guard by making itself slow to measure. A failure of the tools around `du` (the user namespace cannot
+  be set up, say) says nothing about the layer: it is logged and the computer is left alone, so a
+  transient host error does not stop every container. Layers are
   measured in parallel (at most four at a time, each bounded to five minutes), so one slow
   container does not hold up the others; with more than four slow ones a look takes several bounds.
   What the guard does not give: its stop can land during a checkpoint's copy (it then ends the

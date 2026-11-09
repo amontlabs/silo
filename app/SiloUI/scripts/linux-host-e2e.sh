@@ -505,6 +505,12 @@ container_desktop_features() {
   for process in Xvfb xfce4-session selkies; do
     expect "process $process" "$(in_container sh -c "pgrep -f $process >/dev/null && echo up || echo down")" up
   done
+  # /run is memory, as a virtual machine's is: what the desktop keeps there (the display's
+  # authority cookie, the session's environment) is not in the computer's files.
+  expect "/run is a tmpfs" "$(in_container sh -c 'grep -q " /run tmpfs " /proc/mounts && echo yes || echo no')" yes
+  expect "the session's environment file" "$(in_container sh -c 'stat -c %a:%U /run/silo-desktop/user/session.env')" 600:silo
+  # Every process in the computer can read another's arguments, so the viewer's password is not one.
+  expect "the streamer's arguments carry no password" "$(in_container sh -c 'tr "\0" " " < /proc/$(pgrep -f "[s]elkies.*--addr=127" | head -n 1)/cmdline | grep -c basic-auth-password || true')" 0
 
   step "Reaching the viewer port over SSH, as the app's viewer does"
   host=$("$silo" --json ssh-setup "$ctr" | python3 -c 'import json, sys; print(json.load(sys.stdin)["host"])')
@@ -607,6 +613,7 @@ print(port.get("state") or "-", port.get("hostPort") or "-", port.get("url") or 
   step "Turning the desktop of $ctr off"
   "$silo" desktop off "$ctr"
   desktop_answers && { echo "the desktop still answers after silo desktop off" >&2; exit 1; }
+  expect "the session's environment file after desktop off" "$(in_container sh -c 'test -e /run/silo-desktop/user/session.env && echo there || echo gone')" gone
   if reply=$("$silo" fork "$ctr" --gui --name "$ctr-gui" 2>&1); then
     echo "fork --gui worked on a computer with its desktop off" >&2
     "$silo" drop "$ctr-gui" || true

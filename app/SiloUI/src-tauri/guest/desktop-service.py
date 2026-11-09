@@ -535,9 +535,10 @@ def launch_selkies_streamer(account, environment):
             connection.get('port') != 6901 or not isinstance(connection.get('password'), str) or
             not re.fullmatch(r'[0-9a-f]{64}', connection['password'])):
         raise RuntimeError('Desktop connection credentials are invalid')
+    # The password goes in the environment (Selkies reads SELKIES_BASIC_AUTH_PASSWORD): an
+    # argument would be in /proc/<pid>/cmdline, which every process in the computer can read.
     argv = [str(SELKIES_EXECUTABLE), '--addr=127.0.0.1', '--port=6901',
-            '--enable-https=false', f'--basic-auth-user={USER}',
-            f"--basic-auth-password={connection['password']}", '--encoder=h264enc',
+            '--enable-https=false', f'--basic-auth-user={USER}', '--encoder=h264enc',
             '--use-cpu=true', '--mode=websockets', '--enable-dual-mode=false|locked',
             '--enable-resize=true', '--use-css-scaling=false|locked',
             '--video-streaming-mode=false', '--framerate=60,8-60',
@@ -545,6 +546,7 @@ def launch_selkies_streamer(account, environment):
             '--clipboard-seamless=false', '--file-transfers=none',
             '--audio-enabled=true', '--audio-bitrate=64000',
             '--microphone-enabled=false|locked', '--ui-sidebar-show-audio-settings=false']
+    environment = dict(environment, SELKIES_BASIC_AUTH_PASSWORD=connection['password'])
     return launch_managed_process('selkies', argv, environment, account)
 
 

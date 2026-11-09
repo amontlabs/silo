@@ -1471,6 +1471,26 @@ class DesktopStartSize(unittest.TestCase):
         self.assertEqual(steps, ['xvfb', 'pulse', 'xfce'])
 
 
+class StreamerCredentials(unittest.TestCase):
+    def test_the_viewer_password_is_in_the_streamers_environment_not_its_arguments(self):
+        password = 'ab' * 32
+        with tempfile.TemporaryDirectory() as directory, \
+             patch.object(service, 'STATE', Path(directory)), \
+             patch.object(service, 'USER', 'silo'), \
+             patch.object(service, 'launch_managed_process', return_value=('child', {})) as launch:
+            service.write(Path(directory) / 'connection.json',
+                          {'username': 'silo', 'port': 6901, 'password': password})
+            environment = {'HOME': '/home/silo'}
+            service.launch_selkies_streamer(SimpleNamespace(), environment)
+        _, argv, passed, _ = launch.call_args.args
+        self.assertFalse(any(password in argument for argument in argv), argv)
+        self.assertFalse(any('basic-auth-password' in argument for argument in argv), argv)
+        self.assertEqual(passed['SELKIES_BASIC_AUTH_PASSWORD'], password)
+        self.assertEqual(passed['HOME'], '/home/silo')
+        # The service's own environment, shared by the other session programs, does not get it.
+        self.assertNotIn('SELKIES_BASIC_AUTH_PASSWORD', environment)
+
+
 class SessionEnvironmentFile(unittest.TestCase):
     def test_the_session_writes_its_environment_for_other_commands(self):
         command = service.XFCE_COMMAND

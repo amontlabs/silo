@@ -8,7 +8,7 @@ const labels: Record<ComputerOs, string> = { linux: "Linux", macos: "macOS", con
 export const containerWarning = "Less isolated than a VM"
 
 /** Said on a container computer's page when it has a desktop: its browser runs without its own sandbox. */
-export const containerBrowserWarning = "This computer shares the host's kernel, and its browser runs without its sandbox. A web page that compromises the browser reaches everything in this computer."
+export const containerBrowserWarning = "This computer shares the host's kernel, and its browser runs without its sandbox. A web page that compromises the browser reaches everything in this computer: it can act with this computer's GitHub access and secrets, and use its silo client."
 
 export function ContainerBrowserNotice({ className }: { className?: string }) {
   return <p role="note" data-slot="container-browser-notice" className={cn("rounded-lg bg-warning/15 px-3 py-2 text-caption text-warning", className)}>{containerBrowserWarning}</p>

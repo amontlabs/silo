@@ -668,17 +668,21 @@ done
 echo "No browser is installed in this computer (looked for: %s)." >&2
 exit 127
 ''' % (' '.join(BROWSER_BINARIES), ', '.join(BROWSER_BINARIES))
+# The desktop entries the packages install (Google Chrome's, Debian's Chromium) and the launcher
+# each one runs instead; the launcher adds the flag itself.
+BROWSER_ENTRIES = {'google-chrome.desktop': 'google-chrome-stable', 'chromium.desktop': 'chromium'}
+BROWSER_DESKTOP_NAME = 'Web Browser (without its sandbox)'
 BROWSER_DESKTOP_TEXT = '''[Desktop Entry]
 Version=1.0
-Name=Web Browser (without its sandbox)
-Comment=Silo container computer: starts the browser with --no-sandbox
-Exec=%s --no-sandbox %%U
+Name=%s
+Comment=Silo container computer: starts the browser without its sandbox
+Exec=%%s %%%%U
 Terminal=false
 Type=Application
 Categories=Network;WebBrowser;
 MimeType=text/html;text/xml;application/xhtml+xml;x-scheme-handler/http;x-scheme-handler/https;
 StartupNotify=true
-'''
+''' % BROWSER_DESKTOP_NAME
 
 
 def is_container():
@@ -715,9 +719,10 @@ def write_browser_launchers(directory=None, applications=None):
             if target.exists() and BROWSER_LAUNCHER_MARK not in target.read_text(errors='replace'):
                 continue
             write_if_changed(target, BROWSER_LAUNCHER_TEXT, 0o755)
-        entry = applications / 'google-chrome.desktop'
-        if not entry.exists() or 'Name=Web Browser (without its sandbox)' in entry.read_text(errors='replace'):
-            write_if_changed(entry, BROWSER_DESKTOP_TEXT % (directory / 'google-chrome-stable'), 0o644)
+        for entry_name, launcher in BROWSER_ENTRIES.items():
+            entry = applications / entry_name
+            if not entry.exists() or f'Name={BROWSER_DESKTOP_NAME}' in entry.read_text(errors='replace'):
+                write_if_changed(entry, BROWSER_DESKTOP_TEXT % (directory / launcher), 0o644)
     except OSError as error:
         log(f'could not write the browser launchers: {error}')
 

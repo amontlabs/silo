@@ -1248,8 +1248,20 @@ class BrowserLaunchers(unittest.TestCase):
             launcher = self.bin / name
             self.assertTrue(os.access(launcher, os.X_OK), name)
             self.assertIn('--no-sandbox', launcher.read_text())
-        entry = (self.apps / 'google-chrome.desktop').read_text()
-        self.assertIn(f'Exec={self.bin}/google-chrome-stable --no-sandbox %U', entry)
+        # Each packaged desktop entry is replaced by one that runs the launcher, which adds the
+        # flag once.
+        for entry_name, launcher in (('google-chrome.desktop', 'google-chrome-stable'),
+                                     ('chromium.desktop', 'chromium')):
+            entry = (self.apps / entry_name).read_text()
+            self.assertIn(f'Exec={self.bin}/{launcher} %U\n', entry)
+            self.assertNotIn('--no-sandbox', entry)
+
+    def test_an_entry_this_helper_did_not_write_is_left_alone(self):
+        self.apps.mkdir()
+        (self.apps / 'chromium.desktop').write_text('[Desktop Entry]\nName=Mine\n')
+        self.write(True)
+        self.assertEqual((self.apps / 'chromium.desktop').read_text(), '[Desktop Entry]\nName=Mine\n')
+        self.assertTrue((self.apps / 'google-chrome.desktop').exists())
 
     def test_a_virtual_machine_keeps_the_browsers_sandbox(self):
         self.write(False)

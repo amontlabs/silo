@@ -543,7 +543,7 @@ it.each([["container", true], ["Linux VM", false]])("on a %s computer with a des
   computer.configuration.desktop = { startWithComputer: true }
   if (container) computer.configuration.runtime = "container"
   await openDetail(source, {}, computer)
-  const text = "A web page that compromises the browser reaches everything in this computer."
+  const text = "A web page that compromises the browser reaches everything in this computer: it can act with this computer's GitHub access and secrets, and use its silo client."
   if (container) expect(screen.getByText(text, { exact: false })).toBeVisible()
   else expect(screen.queryByText(text, { exact: false })).not.toBeInTheDocument()
 })
