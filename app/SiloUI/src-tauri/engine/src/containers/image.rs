@@ -207,7 +207,7 @@ const PARTIAL: &str = "partial-";
 /// its process id has been reused.
 const PARTIAL_MAX_AGE: std::time::Duration = std::time::Duration::from_secs(24 * 3600);
 
-fn process_alive(pid: u32) -> bool {
+pub(super) fn process_alive(pid: u32) -> bool {
     // SAFETY: signal 0 only checks that the process exists.
     let result = unsafe { libc::kill(pid as i32, 0) };
     result == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)

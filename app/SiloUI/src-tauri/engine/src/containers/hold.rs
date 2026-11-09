@@ -176,12 +176,13 @@ pub fn console_directory() -> std::io::Result<tempfile::TempDir> {
         .tempdir()
 }
 
-/// Whether the exec directory `directory` is a leftover: its command is gone (its pid no longer
-/// leads a process group), or it never recorded a pid and has sat unused for `idle`.
+/// Whether the exec directory `directory` is a leftover: its command is gone (no process has its
+/// pid), or it never recorded a pid and has sat unused for `idle`. A command that is alive is
+/// never one, whether or not it leads its group yet: `crun exec` records the pid before
+/// `silo-init --own-group` has run, and the files of an exec that is starting must stay.
 pub fn exec_leftover(directory: &std::path::Path, idle: Duration) -> bool {
     match leader_pid(directory) {
-        // SAFETY: getpgid takes a plain integer.
-        Some(pid) => unsafe { libc::getpgid(pid) != pid },
+        Some(pid) => !super::image::process_alive(pid as u32),
         None => std::fs::metadata(directory)
             .and_then(|meta| meta.modified())
             .ok()
@@ -352,6 +353,24 @@ mod tests {
         assert!(!exec_leftover(&fresh, idle));
         std::thread::sleep(Duration::from_millis(20));
         assert!(exec_leftover(&fresh, Duration::from_millis(1)));
+    }
+
+    #[test]
+    fn an_exec_whose_command_has_not_taken_its_group_yet_is_not_a_leftover() {
+        // `crun exec` records the pid before `silo-init --own-group` makes the command the leader
+        // of its group: until then it is alive in the group of what started it, as this one is.
+        let mut starting = Command::new("sleep").arg("300").spawn().unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::write(
+            directory.path().join("exec.pid"),
+            format!("{}\n", starting.id()),
+        )
+        .unwrap();
+        let leftover = exec_leftover(directory.path(), Duration::ZERO);
+        starting.kill().unwrap();
+        starting.wait().unwrap();
+        assert!(!leftover, "the files of an exec that is starting would be removed");
+        assert!(exec_leftover(directory.path(), Duration::from_secs(600)), "the command is gone");
     }
 
     #[test]
