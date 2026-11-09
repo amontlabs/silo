@@ -47,8 +47,14 @@ pub enum Command {
         group: String,
         name: String,
     },
-    /// `snapshot head GROUP[:NAME]`: a container group has no head.
-    SnapshotHead,
+    /// `snapshot head GROUP[:NAME]`: the group's newest checkpoint.
+    SnapshotHead {
+        group: String,
+    },
+    /// `snapshot save GROUP:NAME FILE`: the checkpoint's files as one export payload.
+    SnapshotSave(Box<SnapshotSave>),
+    /// `snapshot load FILE --group GROUP --runtime container`: an export payload as a checkpoint.
+    SnapshotLoad(Box<SnapshotLoad>),
     /// `restore GROUP:NAME --name NEW`: a new computer from a checkpoint, started.
     Restore(Box<Restore>),
     /// Freeze or thaw the container's processes.
@@ -69,6 +75,32 @@ pub struct SnapshotCreate {
     pub name: String,
     pub computer: String,
     pub group: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SnapshotSave {
+    pub group: String,
+    pub name: String,
+    pub file: std::path::PathBuf,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SnapshotLoad {
+    pub file: std::path::PathBuf,
+    pub group: String,
+}
+
+/// The flag pair that sends a `snapshot load` to the container runtime: MicroSandbox's own
+/// load takes no such flag, and a file alone does not say which runtime wrote it.
+pub const LOAD_RUNTIME: (&str, &str) = ("--runtime", "container");
+
+/// Whether a `snapshot load` names the container runtime.
+pub fn loads_container(args: &[String]) -> bool {
+    args.first().map(String::as_str) == Some("snapshot")
+        && args.get(1).map(String::as_str) == Some("load")
+        && args
+            .windows(2)
+            .any(|pair| pair[0] == LOAD_RUNTIME.0 && pair[1] == LOAD_RUNTIME.1)
 }
 
 /// What `restore` asks for: the checkpoint, and what the new computer gets from the caller.
@@ -197,7 +229,7 @@ pub fn snapshot_group(args: &[String]) -> Option<&str> {
     match args.first().map(String::as_str)? {
         "snapshot" => match args.get(1).map(String::as_str)? {
             "create" | "list" => flag_value(args, "--group"),
-            "verify" | "remove" | "head" => args
+            "verify" | "remove" | "head" | "save" => args
                 .iter()
                 .skip(2)
                 .find(|arg| !arg.starts_with('-'))
@@ -350,7 +382,8 @@ fn parse_snapshot(args: &[String]) -> Result<Command, String> {
         let mut index = 2;
         while index < args.len() {
             match args[index].as_str() {
-                "--from-sandbox" | "--group" | "--guest-flush" | "--format" => index += 2,
+                "--from-sandbox" | "--group" | "--guest-flush" | "--format" | "--runtime"
+                | "--stage-id" => index += 2,
                 flag if flag.starts_with('-') => index += 1,
                 _ => {
                     found.push(&args[index]);
@@ -388,7 +421,30 @@ fn parse_snapshot(args: &[String]) -> Result<Command, String> {
                 Command::SnapshotRemove { group, name }
             })
         }
-        "head" => Ok(Command::SnapshotHead),
+        "head" => {
+            let (group, _) = positional
+                .first()
+                .map(|text| text.split_once(':').unwrap_or((text.as_str(), "")))
+                .ok_or("snapshot head needs a group.")?;
+            Ok(Command::SnapshotHead {
+                group: group.to_owned(),
+            })
+        }
+        "save" => {
+            let (group, name) =
+                selector(positional.first().ok_or("A checkpoint is named GROUP:NAME.")?)?;
+            Ok(Command::SnapshotSave(Box::new(SnapshotSave {
+                group,
+                name,
+                file: positional.get(1).ok_or("snapshot save needs a file.")?.as_str().into(),
+            })))
+        }
+        "load" => Ok(Command::SnapshotLoad(Box::new(SnapshotLoad {
+            file: positional.first().ok_or("snapshot load needs a file.")?.as_str().into(),
+            group: flag_value(args, "--group")
+                .ok_or("snapshot load needs --group.")?
+                .to_owned(),
+        }))),
         other => Ok(Command::Unsupported {
             verb: format!("snapshot {other}"),
         }),

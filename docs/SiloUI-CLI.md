@@ -58,7 +58,7 @@ the engine's message.
 | `silo secrets list` | secret names and the computers they are assigned to (never values) |
 | `silo secrets set NAME [--computer C]... [--domain D]...` | add a secret or replace its value; the value is read from stdin, never an argument |
 | `silo secrets assign NAME COMPUTER` / `silo secrets unassign NAME COMPUTER` | change which computers have a secret |
-| `silo create <name> [--linux\|--macos\|--container] [--cpus N --memory GiB --disk GiB]` | create a computer. `--container` makes a Linux computer that runs as a container. A container computer shares the host's kernel, so it is less isolated than a VM; use it for a dev-only machine with nothing sensitive on it. Linux hosts only. Its checkpoints save the disks only (never memory), also while it runs, and `silo fork`, `diff`, `fold` and `undo` work as for a VM. Its disk size is reported, not a bound: it shares the host's disk. Below 5 GiB free on the host, Silo refuses to start it, checkpoint it or fork it, and stops running container computers that are over their size, largest first ([the disk](SiloUI-ENGINE.md#container-computers-optional)). |
+| `silo create <name> [--linux\|--macos\|--container] [--cpus N --memory GiB --disk GiB]` | create a computer. `--container` makes a Linux computer that runs as a container. A container computer shares the host's kernel, so it is less isolated than a VM; use it for a dev-only machine with nothing sensitive on it. Linux hosts only. Its checkpoints save the disks only (never memory), also while it runs, and `silo fork`, `diff`, `fold`, `undo`, `export` and `import` work as for a VM. Its disk size is reported, not a bound: it shares the host's disk. Below 5 GiB free on the host, Silo refuses to start it, checkpoint it or fork it, and stops running container computers that are over their size, largest first ([the disk](SiloUI-ENGINE.md#container-computers-optional)). |
 | `silo start <computer>` / `silo stop <computer>` | lifecycle |
 | `silo desktop on\|off <computer>` | turn a running Linux computer's desktop on (and start it) or off (and stop it); forks made later inherit the choice, and `--gui` and the computer-use tools refuse a computer with it off. A macOS computer is its own display and has no such setting |
 | `silo retry-setup <computer>` | finish the setup of a macOS computer that ended `failed` before it was ready |
@@ -99,7 +99,7 @@ A fork publishes the ports its source publishes (a recipe fork, the recipe's `po
 ## Sharing a computer as a file
 
 ```sh
-silo export main -o ~/Desktop/main.silo-backup       # a Linux or macOS computer, running or stopped
+silo export main -o ~/Desktop/main.silo-backup       # a Linux, container or macOS computer, running or stopped
 silo import ~/Desktop/main.silo-backup --name friend-main
 silo start friend-main
 silo fold friend-main --into main                    # bring its work into your own main
@@ -117,6 +117,14 @@ when the computer uses the image this Silo pins: the receiving Silo prepares the
 way it does for a new computer (a download when it is not on the device), and refuses a file that
 names another image than its own. Files made before this change carry their image and import as
 before.
+
+**A container computer** exports and imports the same way, on a Linux device that can run
+containers, and over Connections with `--device`. Its file holds its disks, not the guest image:
+the importing device needs the image the computer was made on (the one its Silo pins, or one it
+kept), and a device without it says the computer was made on an older guest image that it does not
+have. A device that cannot run containers refuses the file with the reason `silo host init`
+gives, before anything is copied. The file is written in format 6, which a Silo that predates
+container exports refuses as newer. No memory is in any file.
 
 **Bringing the work into your main.** If the exported computer was a fork, the file carries its
 fork-time record, so the imported computer keeps the way any fork does: `silo diff` shows what

@@ -8,7 +8,8 @@
 # stop, drop), then a second container with the desktop on: the desktop service, the viewer port
 # (over SSH as the app's viewer reaches it, and through the URL proxy), Cua Driver listing windows
 # and saving a screenshot, Chrome with --no-sandbox, `fork --gui`, `silo desktop off`; then a
-# container created with `--no-desktop`. The host must have crun, skopeo, umoci and the other
+# container created with `--no-desktop`; and a container exported to a file and imported under a
+# new name. The host must have crun, skopeo, umoci and the other
 # container prerequisites (`silo host init` names them).
 #
 # Usage: linux-host-e2e.sh ENGINE_DIR
@@ -33,6 +34,9 @@ ctr3="$name-ctr3"
 ctr4="$name-ctr4"
 # A container created with its desktop off.
 ctr5="$name-ctr5"
+# A container that is exported, and the computer its export is imported as.
+ctr6="$name-ctr6"
+ctr7="$name-ctr7"
 # Where the desktop checks leave their evidence (a screenshot of the desktop and of Chrome); the
 # workflow uploads it. A run outside CI keeps it in a temporary folder.
 artifacts="${SILO_E2E_ARTIFACTS:-}"
@@ -69,7 +73,7 @@ cleanup() {
   [[ -n "$fill_file" ]] && rm -f "$fill_file"
   rm -f "${stderr_file:-}"
   remove_editor_key
-  for computer in "$ctr4-gui" "$ctr4-plain" "$ctr4" "$ctr5" "$ctr3" "$ctr2" "$ctr" "$ctr-k" "$ctr-f-1" "$ctr-f-2" "$ctr-f-3" "$ctr-f-4" "$fork" "$name"; do
+  for computer in "$ctr7" "$ctr6" "$ctr4-gui" "$ctr4-plain" "$ctr4" "$ctr5" "$ctr3" "$ctr2" "$ctr" "$ctr-k" "$ctr-f-1" "$ctr-f-2" "$ctr-f-3" "$ctr-f-4" "$fork" "$name"; do
     if listed "$computer" 2>/dev/null | grep -qx -- "$computer"; then
       echo "Stopping and dropping $computer after a failed run"
       "$silo" stop "$computer" || true
@@ -451,12 +455,27 @@ desktop_screenshot() {
   echo "screenshot $file: $size bytes"
 }
 
-# Whether the desktop's streamer answers on the container's loopback (the viewer's port 6901 answers
-# 401 without its credentials, 200 with them).
+# Whether the desktop's streamer answers on the container's loopback. The viewer's port 6901
+# answers 401 without its password and 200 with it (see expect_viewer).
 desktop_answers() {
   local code
   code=$(in_container curl -sS -o /dev/null --max-time 5 -w '%{http_code}' http://127.0.0.1:6901/ 2>/dev/null || true)
-  [[ "$code" == 200 || "$code" == 401 ]]
+  [[ "$code" == 401 ]]
+}
+
+# The viewer's password, as the desktop service keeps it for root.
+viewer_password=""
+read_viewer_password() {
+  viewer_password=$(root_in_container sh -c 'cat /var/lib/silo-desktop/connection.json' | python3 -c 'import json, sys; print(json.load(sys.stdin)["password"])')
+  [[ -n "$viewer_password" ]] || { echo "the desktop service has no viewer password" >&2; exit 1; }
+}
+
+# expect_viewer LABEL URL: the viewer at URL (reached from this host) refuses a request without its
+# password and serves one with it.
+expect_viewer() {
+  local label="$1" url="$2"
+  expect "$label without the password" "$(curl -sS -o /dev/null --max-time 20 -w '%{http_code}' "$url" || true)" 401
+  expect "$label with the password" "$(curl -sS -o /dev/null --max-time 20 -w '%{http_code}' -u "silo:$viewer_password" "$url" || true)" 200
 }
 
 wait_for_desktop() {
@@ -469,6 +488,75 @@ wait_for_desktop() {
   root_in_container /usr/local/bin/silo-desktop status >&2 || true
   root_in_container sh -c 'tail -n 60 /var/log/silo-desktop.log' >&2 || true
   return 1
+}
+
+# A container computer exported to a file and imported under a new name: its files come back
+# (including a login the export warned about, which it never filters), its settings stay, it runs,
+# and an import on a device that cannot run containers is refused in plain words.
+container_export_import() {
+  local ctr="$ctr6" copy="$ctr7" file output kind
+  file=$(mktemp -d)/container.silo-backup
+  step "Creating and starting $ctr, a container computer with files to export"
+  "$silo" create "$ctr" --container --cpus 1 --memory 2 --disk 2
+  "$silo" start "$ctr"
+  in_container sh -c 'echo exported-ok > /workspace/e2e-export-note && mkdir -p ~/.claude && echo "{}" > ~/.claude/.credentials.json && ln -s e2e-export-note /workspace/e2e-link && mkdir -p /workspace/e2e-dir && echo nested > /workspace/e2e-dir/inner'
+
+  step "Exporting $ctr: the login warning is the same as a virtual machine's and nothing is filtered"
+  if output=$("$silo" export "$ctr" -o "$file" < /dev/null 2>&1); then
+    echo "an export of a computer with a login finished without --yes: $output" >&2
+    exit 1
+  fi
+  grep -q 'Claude Code login' <<<"$output" || { echo "the export did not name the login: $output" >&2; exit 1; }
+  [[ ! -e "$file" ]] || { echo "a refused export left a file" >&2; exit 1; }
+  "$silo" export "$ctr" -o "$file" --yes
+  [[ -s "$file" ]] || { echo "the export file is missing or empty" >&2; exit 1; }
+  echo "export file: $(wc -c < "$file") bytes"
+
+  step "Importing the file as $copy"
+  "$silo" import "$file" --name "$copy"
+  kind=$("$silo" --json list --all | python3 -c '
+import json, sys
+rows = {c["name"]: c["kind"] for c in json.load(sys.stdin)["computers"]}
+print(rows.get(sys.argv[1], "missing"))' "$copy")
+  expect "kind of the import" "$kind" container
+  "$silo" start "$copy"
+  step "Running commands in $copy"
+  expect "file" "$("$silo" exec "$copy" -- cat /workspace/e2e-export-note)" exported-ok
+  expect "link" "$("$silo" exec "$copy" -- readlink /workspace/e2e-link)" e2e-export-note
+  expect "nested file" "$("$silo" exec "$copy" -- cat /workspace/e2e-dir/inner)" nested
+  expect "the login travels" "$("$silo" exec "$copy" -- sh -c 'test -f ~/.claude/.credentials.json && echo there')" there
+  expect "kernel" "$("$silo" exec "$copy" -- uname -s)" Linux
+  "$silo" exec "$copy" -- sh -c 'echo changed > /workspace/e2e-export-note'
+  expect "the source is unchanged" "$("$silo" exec "$ctr" -- cat /workspace/e2e-export-note)" exported-ok
+
+  step "Refusing an import under a name that exists, and a damaged file"
+  if output=$("$silo" import "$file" --name "$copy" 2>&1); then
+    echo "an import under an existing name finished" >&2
+    exit 1
+  fi
+  echo "refused: $output"
+  head -c "$(($(wc -c < "$file") / 2))" "$file" > "$file.cut"
+  if output=$("$silo" import "$file.cut" --name "$ctr-cut" 2>&1); then
+    echo "a truncated file was imported" >&2
+    exit 1
+  fi
+  echo "refused: $output"
+  expect "no computer from the refused imports" "$(listed "$ctr-cut")" ""
+
+  step "Stopping and dropping $ctr and $copy"
+  "$silo" stop "$copy"
+  "$silo" stop "$ctr"
+  "$silo" drop "$copy"
+  "$silo" drop "$ctr"
+  rm -rf "$(dirname "$file")"
+  # What the import kept of the file (its checkpoint) goes with the computer.
+  leftovers=1
+  for _ in $(seq 1 30); do
+    leftovers=$(engine_find -path "*containers/snapshots/silo-import-*" -name '*.json' | wc -l)
+    [[ "$leftovers" == 0 ]] && break
+    sleep 1
+  done
+  expect "import checkpoints left behind" "$leftovers" 0
 }
 
 # A container created with its desktop off. `--no-desktop` sends the request the app's form sends
@@ -508,6 +596,8 @@ container_desktop_features() {
 
   step "Checking that the desktop of $ctr started with it"
   wait_for_desktop
+  read_viewer_password
+  expect "the viewer inside the computer with its password" "$(in_container curl -sS -o /dev/null --max-time 5 -w '%{http_code}' -u "silo:$viewer_password" http://127.0.0.1:6901/)" 200
   state=$(root_in_container /usr/local/bin/silo-desktop status | python3 -c 'import json, sys; print(json.load(sys.stdin)["state"])')
   expect "desktop service state" "$state" running
   for process in Xvfb xfce4-session selkies; do
@@ -527,13 +617,12 @@ container_desktop_features() {
   code=000
   for _ in $(seq 1 20); do
     code=$(curl -sS -o /dev/null --max-time 5 -w '%{http_code}' http://127.0.0.1:29901/ 2>/dev/null || true)
-    [[ "$code" == 200 || "$code" == 401 ]] && break
+    [[ "$code" == 401 ]] && break
     sleep 1
   done
+  expect_viewer "the viewer over ssh -L" http://127.0.0.1:29901/
   kill "$forwarder" 2>/dev/null || true
   wait "$forwarder" 2>/dev/null || true
-  [[ "$code" == 200 || "$code" == 401 ]] || { echo "the viewer port did not answer over ssh -L (got $code)" >&2; exit 1; }
-  echo "viewer port over ssh -L: $code"
 
   step "Reaching the viewer port through the URL proxy"
   # The streamer listens on the container's loopback only, as in a virtual machine; a published
@@ -572,11 +661,8 @@ print(port.get("state") or "-", port.get("hostPort") or "-", port.get("url") or 
     sleep 0.5
   done
   expect "viewer port state" "$state" reachable
-  code=$(curl -sS -o /dev/null --max-time 20 -w '%{http_code}' "$url" || true)
-  [[ "$code" == 200 || "$code" == 401 ]] || { echo "the viewer port did not answer through the URL proxy (got $code at $url)" >&2; exit 1; }
-  echo "viewer port through $url: $code"
-  code=$(curl -sS -o /dev/null --max-time 20 -w '%{http_code}' "http://127.0.0.1:$host_port/" || true)
-  [[ "$code" == 200 || "$code" == 401 ]] || { echo "the viewer port did not answer on the loopback port $host_port (got $code)" >&2; exit 1; }
+  expect_viewer "the viewer through the URL proxy" "$url"
+  expect_viewer "the viewer on the loopback port" "http://127.0.0.1:$host_port/"
 
   step "Listing windows with Cua Driver and saving a screenshot of $ctr"
   local windows=""
@@ -614,7 +700,7 @@ print(port.get("state") or "-", port.get("hostPort") or "-", port.get("url") or 
   step "Forking $ctr with --gui"
   reply=$("$silo" --json fork "$ctr" --gui --name "$ctr-gui")
   echo "$reply" | python3 -c 'import json, sys; v = json.load(sys.stdin); print("fork --gui:", v["name"], v["state"], v.get("computerUse", {}).get("state"))'
-  expect "the fork's desktop" "$("$silo" exec "$ctr-gui" -- sh -c 'curl -sS -o /dev/null --max-time 5 -w "%{http_code}" http://127.0.0.1:6901/ | sed "s/^401$/up/;s/^200$/up/"')" up
+  expect "the fork's desktop" "$("$silo" exec "$ctr-gui" -- sh -c 'curl -sS -o /dev/null --max-time 5 -w "%{http_code}" http://127.0.0.1:6901/ | sed "s/^401$/up/"')" up
   "$silo" stop "$ctr-gui"
   "$silo" drop "$ctr-gui"
 
@@ -1238,9 +1324,10 @@ if [[ -n "$left" ]]; then
 fi
 if [[ "${SILO_E2E_CONTAINER:-0}" == 1 ]]; then
   container_checks
+  container_export_import
   container_desktop_features
   container_without_desktop
-  left=$(listed "$ctr" "$ctr2" "$ctr3" "$ctr4" "$ctr5")
+  left=$(listed "$ctr" "$ctr2" "$ctr3" "$ctr4" "$ctr5" "$ctr6" "$ctr7")
   if [[ -n "$left" ]]; then
     echo "Still listed after drop: $left" >&2
     exit 1

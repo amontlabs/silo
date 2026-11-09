@@ -141,7 +141,9 @@ with one device unreachable, acting on a remote row) and `cli/tests/devices.rs`.
 use the ordinary owner methods (`exports.check`, `exports.create`, `exports.import`) and two
 additions. The restricted Connections key cannot run `scp` or `sftp`, so the bytes go through a
 Stream method, `exports.file`, carried like `guest.ssh`, and the owner's files live in its
-*transfer area*, `<engine directory>/transfer/`.
+*transfer area*, `<engine directory>/transfer/`. A container computer travels the same way: the
+owner runs the export and the import with its own container runtime, and the controller only
+holds the file (it needs container support only to import it itself).
 
 | Step | Where | What |
 | --- | --- | --- |

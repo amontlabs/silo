@@ -9,7 +9,9 @@ older name on purpose.
 | Term | Meaning | Examples |
 | --- | --- | --- |
 | **computer** | A virtual computer Silo creates and runs for an agent. Its saved settings are its **configuration**. | New computer, Start the computer, `ApplicationComputer`, `ComputerConfiguration`, `computerId` |
-| **container computer** | A Linux computer that runs as a container on a Linux host instead of a VM. It shares the host's kernel, so it is less isolated than a VM. Never the default. | Container, Less isolated than a VM, `runtime: "container"`, `ComputerKind::Container` |
+| **container computer** | A Linux computer that runs as a container on a Linux host instead of a VM. It shares the host's kernel, so it is less isolated than a VM. Never the default. It has everything a VM computer has (create, start, exec, files, checkpoints, forks, diff and keep, secrets, GitHub access, ports and URLs, desktop and computer use, export and import, Connections) except the memory in its checkpoints. | Container, Less isolated than a VM, `runtime: "container"`, `ComputerKind::Container` |
+| **layer** | One folder of files that a container computer's disk is made of. A checkpoint seals the writable layer, a fork shares the sealed ones, an export writes them. Internal: the app and the command line say "disks" and "checkpoint". | `containers/layers`, `silo-ctr pack` |
+| **export file** | A `.silo-backup` file that holds a whole computer, a VM or a container, to share or keep. **Import** makes a new, stopped computer from it, on this device or another. A container's file does not carry the guest image, so both devices need the same one. | Export, Import, `silo export`, `silo import`, `.silo-backup` |
 | **device** | A physical Mac or Linux machine that runs Silo. The local one is **this device**; elsewhere the UI shows the device's name. | This device, Computers on linux-box, `Device`, `deviceId` |
 | **Connections** | The feature that links devices so one Silo manages computers on another. A computer on another device is a **remote computer**. | Connections settings, Connect device, `remote_computer_action` |
 | **workspace** | Only the persistent `/workspace` folder and disk inside each computer. | Workspace files, `workspaceStorageGiB`, `read_workspace_storage` |
@@ -41,6 +43,7 @@ installations and other programs read. They do not change.
 | `<folder>.code-workspace` and the fallback `workspace.code-workspace` in the editor folder of the private state folder | VS Code's own workspace file; its settings belong to the file name existing installations already use. |
 | The `/workspace` mount and `owned-volumes/workspace_<hash>` | Guest path and MicroSandbox layout derived from it. |
 | `<name>-<hash>.localhost` published-site origins | Changing an origin discards browser state for published sites. |
+| The `silo.runtime=container` label and `"runtime": "container"` in a computer's saved configuration | Stored in every container computer's record and written into its export file (format 6), where an older Silo reads it as a newer format. |
 
 ## Saved data
 
@@ -53,5 +56,8 @@ Two Silo devices must run the same remote protocol version. The protocol version
 changed with this vocabulary, so an updated device refuses an older one and
 names the device that needs the update.
 
-Exports use format 4. Silo refuses exports in other formats, as it already did
-for earlier format changes.
+Exports are written in the oldest format that holds what they carry: format 4, 5
+when a computer's guest image or a fork's record travels by reference, and format
+6 when a container computer is in the file. Silo reads formats 4 to 6 and refuses
+any other, as it already did for earlier format changes; an older Silo refuses a
+format it does not know as a newer one.

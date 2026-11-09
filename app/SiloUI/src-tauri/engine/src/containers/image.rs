@@ -112,6 +112,8 @@ pub fn ensure(paths: &RuntimePaths, tools: &Tools) -> Result<Unpacked, RuntimeEr
     };
     let images = layout.images();
     std::fs::create_dir_all(&images).map_err(|error| failed(error.to_string()))?;
+    super::layout::strip_default_acl(layout.root());
+    super::layout::strip_default_acl(&images);
     // Old images no computer needs go first, so the space check counts only what is needed.
     #[cfg(target_os = "linux")]
     super::lifecycle::prune_storage(paths, tools);

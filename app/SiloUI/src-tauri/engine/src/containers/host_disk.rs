@@ -45,6 +45,10 @@ const MEASURE_WORKERS: usize = 4;
 /// has looked, and a full root file system breaks the host's services, not only Silo. 5 GiB covers
 /// those on a host of the size Silo is meant for and still leaves a 25 GB disk mostly usable.
 pub const DEFAULT_MARGIN_MIB: u64 = 5 * 1024;
+/// Bytes of room per inode in the margin: ext4's default ratio (`mke2fs.conf`, `inode_ratio`),
+/// so the margin of free inodes is the margin of free bytes at the ratio a file system is
+/// usually made with.
+pub const BYTES_PER_INODE: u64 = 16384;
 /// The engine's setting for the margin, in MiB (the engine has no settings file on a Linux host; a
 /// systemd override of `silod` sets it).
 pub const MARGIN_ENV: &str = "SILO_CONTAINER_DISK_MARGIN_MIB";
@@ -67,6 +71,11 @@ fn margin_from(setting: Option<&str>) -> u64 {
 /// The free space the host keeps, in bytes.
 pub fn margin_bytes() -> u64 {
     margin_from(std::env::var(MARGIN_ENV).ok().as_deref())
+}
+
+/// The margin of free inodes an import keeps (see [`BYTES_PER_INODE`]).
+pub fn margin_inodes() -> u64 {
+    margin_bytes() / BYTES_PER_INODE
 }
 
 /// The size a computer's writable layer may reach before the guard may stop it, in bytes.
@@ -249,6 +258,7 @@ pub fn pass(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::AtomicBool;
     use std::time::{Duration, Instant};
 
     const GIB: u64 = 1 << 30;
@@ -502,7 +512,8 @@ mod tests {
 
     #[test]
     fn a_layer_that_could_not_be_measured_is_stopped_when_its_own_measurement_ends() {
-        let started = Instant::now();
+        let unknown_stopped = AtomicBool::new(false);
+        let slow_saw_it_stopped = AtomicBool::new(false);
         let stops = Mutex::new(Vec::new());
         let stopped = pass(
             0,
@@ -510,26 +521,31 @@ mod tests {
             vec!["slow".into(), "unknown".into(), "big".into()],
             |name| match name {
                 "slow" => {
-                    std::thread::sleep(Duration::from_millis(500));
+                    // This measurement ends only once the unmeasured layer has been stopped (or,
+                    // were it never stopped before the pass was over, after a long wait).
+                    let deadline = Instant::now() + Duration::from_secs(20);
+                    while !unknown_stopped.load(Ordering::SeqCst) && Instant::now() < deadline {
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+                    slow_saw_it_stopped
+                        .store(unknown_stopped.load(Ordering::SeqCst), Ordering::SeqCst);
                     sizes(20, 8)
                 }
                 "unknown" => unmeasured(8),
                 _ => sizes(30, 8),
             },
             |name, _| {
-                stops
-                    .lock()
-                    .unwrap()
-                    .push((name.to_owned(), started.elapsed()));
+                stops.lock().unwrap().push(name.to_owned());
+                if name == "unknown" {
+                    unknown_stopped.store(true, Ordering::SeqCst);
+                }
                 true
             },
         );
         assert_eq!(stopped, ["unknown", "big", "slow"]);
-        let stops = stops.into_inner().unwrap();
         // Each is stopped once, and the unmeasured one did not wait for the slow measurement.
-        assert_eq!(stops.len(), 3);
-        assert_eq!(stops[0].0, "unknown");
-        assert!(stops[0].1 < Duration::from_millis(250), "{stops:?}");
+        assert_eq!(stops.into_inner().unwrap(), ["unknown", "big", "slow"]);
+        assert!(slow_saw_it_stopped.load(Ordering::SeqCst));
     }
 
     #[test]

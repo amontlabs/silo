@@ -851,9 +851,68 @@ with nothing sensitive on it, and the app, the CLI and `silo list` label it as l
   what the agent gains by loosening them is access for other guest users to its own requests,
   which it can already give them. The token, the allow-list and the folder parsing (links, sizes,
   counts) are the same code and the same limits.
-- **Not yet for a container.** Export is refused with a plain message (see the capability list in
-  `containers/capability.rs`); the app hides it. A container also has no memory checkpoints (the
-  same list: "memory snapshots"): its checkpoints save the disks, whether the computer runs or not.
+- **No memory checkpoints.** The capability list in `containers/capability.rs` has one entry left,
+  "memory snapshots": a container's checkpoints, and so its exports, save the disks only, whether the
+  computer runs or not. No memory is ever carried into an export.
+- **Export and import** ([`archive.rs`](../app/SiloUI/src-tauri/engine/src/containers/archive.rs),
+  `silo-ctr pack` and `unpack` in [`pack.rs`](../app/SiloUI/container-shim/src/pack.rs);
+  [Sharing a computer as a file](#6-the-workspace-disk-and-host-folders) applies unchanged: what the
+  file holds, the login warning, nothing filtered, an imported computer untrusted until kept).
+  A container's file is format 6, which a Silo without it refuses as newer, so an older device never
+  tries to load it as a MicroSandbox snapshot. What differs from a virtual machine's:
+  - *What is written.* The export is a checkpoint of the computer's disks (a running one is frozen
+    for the copy, up to 30 s, as for any checkpoint) and each layer of its chain is written as it is,
+    owners included, by `silo-ctr pack` in the container's own user namespace, so the engine's
+    account never reads a layer outside it. A socket file comes back as an empty socket file; a
+    device node other than a whiteout stops the export. The guest image is never in the file: the file names the config digest
+    it needs and the importing Silo refuses any other than the one it pins, which also bounds what
+    the layers can sit on. Secrets, GitHub access, environment, ports and layer ids are dropped
+    from the record in the file, as they are for a VM, and the settings in the manifest carry the
+    same deny-all network section a VM's do. A container's real network is the gateway's one policy
+    (public addresses only, boundary 2), which an imported container has from its first start like
+    any other, with the secrets and GitHub access this device assigns to it then.
+  - *What is read.* The file is an untrusted input. The payload's hash is checked as for a VM; the
+    header is read with unknown fields refused, and its name, resources, labels and image are checked
+    field by field and against the settings the manifest was validated for, so the file cannot make a
+    larger computer than the manifest promised. A header carries no layer ids, secrets or paths.
+    Each layer is a standard tar (PAX) stream that `silo-ctr unpack` reads as the container's root in
+    a user namespace laid out like the container's, with the new empty layer as its root: the safety
+    is the changed root, not the format. A path with `..`, an absolute path, an empty name or a hard
+    link outside the layer is refused, and a symbolic link in the file can only name the layer's own
+    files, so nothing outside the layer can be written. The overlay's own attributes other than
+    `user.overlay.opaque` (`redirect`, `origin`, `metacopy`, ...) are refused, since they decide which
+    files of the layers below show through. Memory is bounded: a folder's owner and attributes are
+    applied as it is made, only the chain of open folders waits for its mode and time, and the
+    process runs under a 1 GiB address-space limit, so a tar header that claims more ends in a failed
+    allocation. The disk is measured, not estimated: before every chunk of a file, every 256
+    entries, and whenever the names, link targets and attributes written since the last look add
+    up to 16 MiB, `unpack` reads the free bytes and free inodes of the layer's file system and stops under
+    the host disk margin (5 GiB by default; the inode margin is that over 16 KiB per inode), which
+    counts block size, inodes, attributes and link targets as the file system does. Between two looks
+    it can write at most one 16 MiB chunk of a file, or 16 MiB of names, link targets and attributes
+    plus the file system's own cost of 256 entries. There is no limit on
+    the number of entries: the inode margin is the limit. Sockets are not exported (tar has no
+    type for them). The files it makes are what the container's own root could have written:
+    setuid bits, file capabilities and device whiteouts are inert inside the container under the
+    baseline (no new privileges, no capability, seccomp). On the host the account's own id is the
+    container's agent user (`--keep-id`), so a file of that user with the setuid bit in an imported
+    layer is a setuid file of the engine account on the host; the layer store (`containers/layers`)
+    and the folder holding it are set to `0700` each time a layer is made, so no other account can
+    reach or run it (a test checks the modes; this was set explicitly rather than found already
+    so, because the folders' modes came from the umask and any default ACL).
+  - *A device that cannot run containers* refuses an inspection or an import of such a file before
+    anything is copied: on a Mac, "Silo cannot import a container computer on this device. Container
+    computers run only on a Linux host."; on Linux the unmet requirements and their fixes, as
+    `silo host init` gives them.
+  - *What it does not cover.* An imported container is as untrusted as an imported VM: it runs
+    whatever its sender's agent left, and keeping it into your main writes the sender's files there
+    (read `silo diff` first). A malicious file can fill the free space down to the margin, as a
+    container that writes without end can (see The disk below). The unpack stops within one chunk
+    and 256 entries of the margin, not exactly at it, and another process writing at the same time
+    can still take the disk below it (the host disk guard handles that, as for any container).
+  - *The guest image.* The file does not carry it. An export accepts any image digest unpacked on
+    the exporting device, and an import accepts the pinned one or one kept unpacked; otherwise it
+    says the computer was made on an older guest image that this device does not have.
 - **The desktop and Chrome.** A container computer has the desktop and computer use of a virtual
   machine: the image's own desktop service (Xvfb, PulseAudio, Xfce, Selkies) and Cua Driver, started
   by a root command after the container starts (the image's boot hook; the container has no init
@@ -986,6 +1045,17 @@ with nothing sensitive on it, and the app, the CLI and `silo list` label it as l
   checkpoints and forks and are not counted against a computer; the per-computer share
   (`/.msb`, the in-guest client's bridge folder, in the engine's `sandboxes` folder) is outside
   every size, the computer's and the guard's.
+- **Over Connections** nothing is container-specific beyond what the earlier items say. A container
+  is listed, run in and has its desktop switched through the same routed methods as a VM, answered
+  by the owner's engine; its terminal and SSH are served by the owner's own `ssh serve` and
+  `exec --tty` command, which `runtime::command_for` picks for a container as for a VM. `silo --device
+  export` and `import` move the same format 6 file through the owner's transfer area (boundary 6,
+  [Sharing a computer that lives on another device](#6-the-workspace-disk-and-host-folders)):
+  the owner runs `pack` and `unpack` as its own account, the controller never reads a layer, and
+  the controller needs no container support of its own to hold the file (it needs it only to import
+  it). An owner that cannot run containers, or whose Silo predates format 6, refuses the file with
+  its own message. A controller already holds the owner's authority (boundary 7), so it can export
+  any container there, files and logins included.
 - **Known gaps.** `/sys` is a fresh sysfs mounted read-only inside the container's own user and
   network namespaces, so it shows the container's own devices (the TAP and loopback) and the
   host's hardware, not the host's network interfaces. Chrome runs with `--no-sandbox` (see The

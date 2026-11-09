@@ -43,6 +43,13 @@ fn entry(name: &str, source: &str, hosts: &[String]) -> Value {
     })
 }
 
+/// The network policy a container computer reports, whatever it was asked for: its gateway has
+/// one policy (public addresses only, enforced there), so this is what a fork or an import is
+/// asked to keep.
+pub fn policy() -> Value {
+    json!({"default_egress": "allow", "default_ingress": "deny", "rules": []})
+}
+
 /// The `network` section of an inspected computer: the policy (the gateway enforces the real one;
 /// this is what a fork is asked to keep), the secrets assigned (`names` limits it to
 /// those the running gateway holds, for `active_config`) and the TLS handling they need.
@@ -65,7 +72,7 @@ pub fn network_value(record: &ComputerRecord, names: Option<&[String]>) -> Value
     }
     json!({
         "tls": {"enabled": true},
-        "policy": {"default_egress": "allow", "default_ingress": "deny", "rules": []},
+        "policy": policy(),
         "secrets": {"secrets": entries},
     })
 }

@@ -80,17 +80,21 @@ pub struct Snapshot {
     pub layers: Vec<String>,
     /// The computer's record when the checkpoint was made; a fork takes its resources and image.
     pub template: ComputerRecord,
+    /// Set while an import is still filling the layers: a half-filled layer is not a checkpoint.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub filling: bool,
 }
 
 impl Snapshot {
     pub fn new(group: &str, name: &str, layers: Vec<String>, template: ComputerRecord) -> Self {
         Self {
-            snapshot_id: format!("snap_{}", &uuid::Uuid::new_v4().simple().to_string()[..16]),
+            snapshot_id: format!("snap_{}", uuid::Uuid::new_v4().simple()),
             group: group.to_owned(),
             name: name.to_owned(),
             created_ms: now_ms(),
             layers,
             template,
+            filling: false,
         }
     }
 
@@ -205,12 +209,13 @@ impl Store {
     }
 }
 
-/// Whether every layer the checkpoint names is in the store.
+/// Whether every layer the checkpoint names is in the store, and none is still being filled.
 pub fn intact(layout: &Layout, snapshot: &Snapshot) -> bool {
-    snapshot
-        .layers
-        .iter()
-        .all(|id| valid_name(id) && layout.layer(id).is_dir())
+    !snapshot.filling
+        && snapshot
+            .layers
+            .iter()
+            .all(|id| valid_name(id) && layout.layer(id).is_dir())
 }
 
 /// The record of a computer after its writable layer `sealed` joined the chain and `fresh` became
@@ -519,5 +524,32 @@ mod tests {
     fn the_lower_option_length_counts_every_path_and_separator() {
         let lower = [PathBuf::from("/a/b"), PathBuf::from("/c")];
         assert_eq!(lower_option_bytes(&lower), 4 + 1 + 2 + 1);
+    }
+
+    #[test]
+    fn a_checkpoint_still_being_filled_is_not_intact_and_can_still_be_removed() {
+        let home = tempfile::tempdir().unwrap();
+        let layout = Layout::new(home.path());
+        std::fs::create_dir_all(layout.layer("a")).unwrap();
+        let mut snapshot = Snapshot::new("silo-import-ab", "c1", vec!["a".into()], record());
+        assert!(intact(&layout, &snapshot));
+        snapshot.filling = true;
+        assert!(!intact(&layout, &snapshot));
+        assert_eq!(
+            snapshot.listed(intact(&layout, &snapshot))["availability"],
+            "incomplete"
+        );
+        // A crash leaves the record as written; recovery lists and removes it like any other.
+        let store = Store::new(&layout);
+        store.write(&snapshot).unwrap();
+        assert!(store.read("silo-import-ab", "c1").unwrap().filling);
+        store.remove("silo-import-ab", "c1").unwrap();
+        assert!(store.list(None).unwrap().is_empty());
+        // Once finished the flag is gone from the saved record.
+        snapshot.filling = false;
+        store.write(&snapshot).unwrap();
+        let text =
+            std::fs::read_to_string(layout.snapshots().join("silo-import-ab/c1.json")).unwrap();
+        assert!(!text.contains("filling"));
     }
 }

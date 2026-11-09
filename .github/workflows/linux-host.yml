@@ -228,6 +228,7 @@ jobs:
         env:
           SILO_E2E_REMOTE_EXEC: '1'
           SILO_E2E_SHARE: '1'
+          SILO_E2E_CONTAINER: '1'
         run: bash scripts/hosts-e2e.sh /var/lib/silo-ci/silo-engine silo-host silo-controller
       - name: Stop both accounts' engines
         if: always() && env.HOSTS_E2E == '1'

@@ -7,7 +7,8 @@ Plan: [PLAN.md](PLAN.md).
 - **Merged (8 Nov 2026):** F1 (#84), F2 (#88), C1 (#87), R1 (#83), F3 (#86).
 - **Open phases:** F4 (export a computer that lives on another machine) is built on
   `claude/forks-phase-4-transfer`, pull request open, its live check is the `linux-host.yml` two-account
-  job; R2 (Linux hosts as runner machines) is in progress; container computers (C2 onwards) are being designed.
+  job; R2 (Linux hosts as runner machines) is in progress; container computers: CT1 to CT5 are merged, CT6 (export, import and
+  Connections) is built in #104.
 - **Open follow-ups found during the build:**
   - A Linux fork leaves its fork-point checkpoint on the source (it was a manual checkpoint before F2 too);
     macOS removes its fork point with the last fork. Fixing it means the macOS release machinery on Linux.
@@ -794,6 +795,106 @@ app as a Linux VM, and the "not yet" list is down to export (CT6) and memory che
   root commands lacked `SILO_RUNTIME=container` (the process-name fallback is now container-only, so status said `failed`); the
   process probes matched their own shell; and a screenshot of a busier Chrome page was larger than one command's output limit, so
   it is copied out in pieces now.
+
+
+### 9 Nov 2026: phase CT6 built (export, import and Connections for container computers)
+
+Branch `claude/containers-ct6` ([#104](https://github.com/amontlabs/silo/pull/104)). A container computer is exported to a
+`.silo-backup` file, imported under a new name on the same device or another, and exported and imported across Connections, with the
+same CLI, API and app as a VM. Design: [CONTAINERS-PLAN](CONTAINERS-PLAN.md).
+
+- **Payload.** A checkpoint of a container is a chain of layers, so the file holds the chain: a header (the checkpoint's name and its
+  record without secrets, GitHub access, environment and layer ids) and one zstd frame per layer (`containers/archive.rs`). Each layer is
+  a standard tar (PAX) stream, written by `silo-ctr pack` and made by `silo-ctr unpack` with the `tar` crate the engine already uses,
+  both run in the container's user namespace (`pack.rs` in the shim). Owners, modes, times, hard and symbolic links, FIFOs, whiteouts
+  (character device 0:0) and extended attributes (`SCHILY.xattr.*`, so `user.overlay.opaque` and file capabilities travel) are tar's
+  own; tar has no socket type, so **sockets are left out** (nothing listens on one after an import, and the desktop service treats an X
+  lock whose socket is missing as stale after a fresh boot); any other device stops the export. Nothing is merged or copied first, so an
+  export needs no disk beyond the file. **What makes the unpack safe is where it runs, not the format:** `pack` and `unpack` change their
+  root to the layer, so a path or a link in the stream can only name the layer's own files (the reason a plain `tar` extracted as the
+  container's root is not used: it can be led through a symbolic link it created earlier). On top of that `unpack` refuses any path with
+  `..`, an empty name or an absolute one, and the overlay's attributes other than `user.overlay.opaque`. A first design had a record
+  format of Silo's own; two reviews found that it only added a format nobody else reads, and tar covers the same fields.
+  **Memory and disk:** a folder's owner and attributes are applied as it is made and only its mode and time wait for the end of the folder
+  (the stream lists a folder before its contents, so what waits is the chain of open folders), and the process runs with an address-space
+  limit (1 GiB, set by `pack` and `unpack` themselves; checked with a 3 GiB extended header, which ends in "out of memory"). The disk is
+  measured, not modelled: `unpack` reads `statvfs` of the new layer before every chunk of a file and every 256 entries and stops under
+  the host-disk margin of free bytes or of free inodes (the margin over 16 KiB per inode, ext4's default ratio), so block size, inodes,
+  attributes and link targets are counted by the file system. There is no entry limit any more; the inode check replaces it, and `du` is
+  no longer used on import.
+- **Format 6.** A file with a container row is written as format 6 (4 and 5 as before), so an older Silo refuses it as newer and never
+  hands it to MicroSandbox. Rows are marked by the `silo.runtime=container` label in the recorded settings, which must agree with
+  `runtime: container` in the computer's settings. The row leaves the image out and names the config digest it needs; an export accepts any digest unpacked on this device
+  (a computer made on an older pinned image still exports), and an import accepts the pinned one or one kept unpacked, and otherwise says
+  "this computer was made on an older guest image that this device does not have" (the guest image is delivered with Silo; there is no
+  registry pull to fall back on). The header is compared with the manifest's settings (cpus, memory, image reference, root disk and workspace, each required)
+  before anything is loaded, which is what the descriptor comparison is for a VM.
+- **One routing seam.** `snapshot save GROUP:NAME FILE` and `snapshot load FILE --group G --runtime container` are answered by
+  `containers::route`/`run` like the other checkpoint commands; `snapshot head` now answers the group's newest checkpoint. The backup
+  service's runner (`SystemMsbRunner`) routes through `containers::route`: a container command runs as `silod --container-runtime ...`
+  (a child, so it can be timed out and cancelled as MicroSandbox's can), and a list is merged with the container rows. `backup.rs`
+  branches only where a payload is made or read (the capture reference, the lean-image row, the extraction, the load and its descriptor
+  check), and a captured checkpoint is named `group:name` when the runtime reports no folder for it. `Capability::Export` is gone; the
+  list has `memorySnapshots` left, and the app shows Export for a container.
+- **Found by the live checks** (each failed a KVM run; none by a unit test):
+  - A container's `inspect` answer lacked the computer's name and `kind: managed` in its root disk, which MicroSandbox's export checks
+    require; its network section is the gateway's, not the profile (the export records the deny-all profile, as for a VM, and an import
+    of a container asks for the gateway's one policy, as a fork does: `containers::imported_network_policy`).
+  - The desktop's stale-display check needs the X lock and its socket together; the first design carried sockets for that, and tar cannot,
+    so the service now treats a lock without its socket as stale after a fresh boot.
+  - The controller of a two-device import has no container computer, so `snapshot list` was MicroSandbox's alone and the import saw no
+    group; the list is merged whenever the container checkpoint folder exists.
+  - **A home folder with a default ACL** (the CI runner's accounts have one) gave the image's unpacked folders an entry that umoci could
+    not restore ("invalid argument"). Silo's folders for container files now have their default ACL removed (`layout::strip_default_acl`).
+  - **An engine started from another account's session** carried that account's `XDG_RUNTIME_DIR`, and `systemd-run --user` could not
+    reach its own manager ("Failed to connect to bus: Permission denied"). Commands for the user manager now get this account's runtime
+    folder when the environment's is not its own.
+  - A container's sockets live under its name: with `e2e-hosts-remote-ctr-imported` and `/home/silo-controller/...` the holder's socket
+    path passed 107 bytes ("path must be shorter than SUN_LEN"). The live check uses short names; the limit is not changed here.
+- **CT5 review notes.** The e2e viewer checks assert 401 without the password and 200 with it (over `ssh -L`, the URL proxy, the loopback
+  port and inside the computer). The disk guard test no longer depends on the clock: the slow measurement ends only after the
+  unmeasured layer was stopped. The desktop service removes `/run/silo-desktop/failed` when the streamer comes up, so a boot hook that
+  gave up waiting does not leave it behind. The comments at `containers/mod.rs` (the boot command is bounded by `BOOT_TIMEOUT`) and
+  `desktop-service.py` (what a previous boot left in `/run` is stale; `/run` is a tmpfs in both kinds) are corrected.
+- **Review fixes** (two reviewers and a code review of #104). An import that is interrupted or fails on any layer removes the layers
+  already made (the guard exists before the first layer), and the checkpoint record says `filling` until the last layer is unpacked, so a
+  half-filled layer is not intact, is listed incomplete and is removed by crash recovery like any import group. A checkpoint is taken as a
+  VM's or a container's by its computer's row (`is_container_row`; the export journal records it too), never by a missing
+  `artifact_path`: for a VM that is an error, so the descriptor comparison cannot be skipped. A host that is not Linux is told
+  "Container computers run only on a Linux host." and nothing else. The layer store and the folder holding it are set to `0700` each time
+  a layer is made (`lifecycle::seal_store`): a layer's file may be setuid to the engine account (its id is kept in the namespace), so no
+  other account may reach it.
+- **Tests.** Shim: `pack` 15 (round trip of files, links, hard links, long names, modes, times, whiteouts, opaque folders and attributes,
+  sockets left out, the overlay's other attributes refused, the disk margins, hostile paths, devices and a second root, damaged and padded
+  streams). Engine: `containers::archive` (header checks, the match with the settings including root disk and workspace and a missing one,
+  the refusal on a device that cannot run containers), `containers::layers` (a filling checkpoint), `containers::lifecycle` (the store
+  modes), `backup::` (a container exports by `group:name` without the image in format 6; a VM still in 4; the settings a real
+  container reports pass the export checks; import through the container runtime and the refusal where none runs; data larger than the
+  manifest promises; kind disagreement; format 5 cannot hold a container; the image rules), `route` for an imported checkpoint with no
+  container computer, the user-manager environment. Desktop service: the orphaned lock. Frontend: capabilities and the overview page.
+  Linux unit tests also ran on the Mac in a container (shim and engine).
+- **Live check** (KVM runner, x86_64, Ubuntu 24.04, `linux-host.yml`, code head `24555ef63`): run 42654535736, **attempt 1 and attempt 2
+  both green** (CI run 42654535640 green). `linux-host-e2e.sh`: a container with a file, a link, a nested file and a Claude Code login is
+  exported (`silo export` without `--yes` and a terminal refuses and names the login; with `--yes` it writes 1.6 MiB), imported as a
+  second computer (listed as `container`), started, and its file, link, nested file and login read back; changing the copy leaves the
+  source alone; an import under an existing name and a half file are refused and add no computer; after both are dropped no
+  `silo-import-*` checkpoint is left. `hosts-e2e.sh` (two accounts): a container made on the host from the controller is listed, run
+  in, switched off and on as to its desktop, exported to the controller (the login is named; `--yes` writes 1.6 MiB; neither transfer
+  area keeps a file), imported on the controller and onto the host with `--device`, and both copies started and read. Failed runs on the
+  way, each for a product reason above: 42625816364, 42628340339, 42631011903, 42635178431, 42639046657, 42642591613, 42647204135,
+  42651247266. No run needed a rerun for a GitHub 504.
+- **Live check after the review fixes** (tar layers, measured disk, memory limit, image rules): the first run on `67681dc5f`
+  (42673505880) failed at the import: overlayfs had written its own `user.overlay.uuid` on the exported layer, and the new unpack
+  refuses overlay attributes other than the opaque mark. `pack` now leaves overlayfs's own records behind (it writes them again on the
+  next mount; a test covers it). The same push made a VM's export journal carry `"container": false`, which an engine test of the
+  journal's shape caught; the flag is now written only for a container. A re-check found the disk look could let a stream write up
+  to 256 entries of 64 MiB attributes between two looks on XFS or btrfs; the unpack now also looks whenever names, link targets and
+  attributes written since the last look add up to 16 MiB.
+- **Not done.** The viewer and an `ssh` session over Connections for a container are not driven by the two-account run (exec and the
+  desktop switch are); they use the same routed methods and `runtime::command_for`. A mid-write abort of `pack` is a kill of the child
+  (its layers stay on disk until the grace period collects them). An import whose image this device does not have cannot
+  pull it (there is no registry fetch for the guest image). The socket-path length is not raised. A lock without its socket is cleared
+  only after a fresh boot (the boot id), so a container re-imported on the same host boot keeps it until the host restarts.
 
 
 ### R1: CI runner on the Mac (branch `claude/runner-phase-1`)

@@ -155,6 +155,26 @@ pub fn unit_name(paths: &RuntimePaths, name: &str) -> String {
     format!("silo-ct-{hash}-{name}")
 }
 
+/// Points a command that talks to the account's systemd user manager (`systemd-run --user`,
+/// `systemctl --user`) at this account's runtime folder. An engine started from another account's
+/// session (a CI runner's, a `sudo` shell's) can carry that account's `XDG_RUNTIME_DIR`, and the
+/// manager's socket is then refused to it ("Failed to connect to bus: Permission denied").
+fn for_user_manager(command: &mut Command) {
+    // SAFETY: getuid has no preconditions.
+    let uid = unsafe { libc::getuid() };
+    for_user_manager_of(command, uid, std::env::var_os("XDG_RUNTIME_DIR").as_deref());
+}
+
+fn for_user_manager_of(command: &mut Command, uid: u32, current: Option<&std::ffi::OsStr>) {
+    use std::os::unix::fs::MetadataExt;
+    let owned = current.is_some_and(|dir| std::fs::metadata(dir).is_ok_and(|meta| meta.uid() == uid));
+    if !owned {
+        command
+            .env("XDG_RUNTIME_DIR", format!("/run/user/{uid}"))
+            .env_remove("DBUS_SESSION_BUS_ADDRESS");
+    }
+}
+
 /// The container's cgroup below the cgroup root: a leaf of its scope.
 pub fn cgroup_path(uid: u32, unit: &str) -> String {
     format!("/user.slice/user-{uid}.slice/user@{uid}.service/app.slice/{unit}.scope/ctr")
@@ -492,6 +512,27 @@ fn check_upper_in(
     }
 }
 
+/// The layer store (`containers/layers`) and the folder holding it are the engine account's
+/// alone: a layer's files carry the owners and modes of a file system somebody else may have made
+/// (an import), and with the account's own id kept in the container's namespace a setuid file
+/// there is setuid to this account on the host, so no other account may reach it. Set each time a
+/// layer is made, whatever the umask or a default ACL gave.
+pub fn seal_store(layers: &Path) -> Result<(), String> {
+    use std::os::unix::fs::PermissionsExt;
+    let holder = layers.parent().filter(|_| {
+        layers.file_name().is_some_and(|name| name == "layers")
+            && layers
+                .parent()
+                .and_then(Path::file_name)
+                .is_some_and(|name| name == "containers")
+    });
+    for dir in std::iter::once(layers).chain(holder) {
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))
+            .map_err(|e| at("set the mode of", dir, e))?;
+    }
+    Ok(())
+}
+
 /// Makes the empty layer `path`: aside, given to the container's root, then renamed into place
 /// (within one folder, so no directory of a sub-id moves), so an interrupted start never leaves a
 /// layer that looks like an earlier build's.
@@ -499,6 +540,8 @@ pub fn make_layer(tools: &Tools, path: &Path) -> Result<(), String> {
     use std::os::unix::fs::PermissionsExt;
     let parent = path.parent().ok_or("A layer has no folder.")?;
     std::fs::create_dir_all(parent).map_err(|e| at("create", parent, e))?;
+    super::layout::strip_default_acl(parent);
+    seal_store(parent)?;
     let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("layer");
     let staging = parent.join(format!(".new-{name}"));
     super::image::remove_tree(tools, &staging)?;
@@ -1092,6 +1135,7 @@ fn launch(
         log
     };
     let mut command = Command::new(&tools.systemd_run);
+    for_user_manager(&mut command);
     command
         .args(["--user", "--scope", "--quiet", "--collect"])
         .arg(format!("--unit={unit}"))
@@ -1337,7 +1381,9 @@ fn wait_running(
 }
 
 fn systemctl(tools: &Tools, args: &[&str]) {
-    let _ = Command::new(&tools.systemctl)
+    let mut command = Command::new(&tools.systemctl);
+    for_user_manager(&mut command);
+    let _ = command
         .arg("--user")
         .args(args)
         .stdout(Stdio::null())
@@ -1452,6 +1498,7 @@ pub fn remove(paths: &RuntimePaths, tools: &Tools, name: &str) -> Result<(), Run
 /// engine's own processes are inside the user manager already.
 pub fn in_user_scope(tools: &Tools, command: &Command) -> Command {
     let mut scoped = Command::new(&tools.systemd_run);
+    for_user_manager(&mut scoped);
     scoped
         .args(["--user", "--scope", "--quiet", "--"])
         .arg(command.get_program())
@@ -1652,6 +1699,66 @@ pub fn exec_command(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_layer_store_and_its_folder_are_the_accounts_alone() {
+        use std::os::unix::fs::PermissionsExt;
+        let home = tempfile::tempdir().unwrap();
+        let store = home.path().join("containers/layers");
+        std::fs::create_dir_all(&store).unwrap();
+        for dir in [&store, store.parent().unwrap()] {
+            std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o777)).unwrap();
+        }
+        seal_store(&store).unwrap();
+        for dir in [&store, store.parent().unwrap()] {
+            let mode = std::fs::metadata(dir).unwrap().permissions().mode() & 0o7777;
+            assert_eq!(mode, 0o700, "{}", dir.display());
+        }
+        // Only the store's own folders: a layer made elsewhere leaves its parents alone.
+        let elsewhere = home.path().join("elsewhere/layers");
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        std::fs::set_permissions(
+            elsewhere.parent().unwrap(),
+            std::fs::Permissions::from_mode(0o755),
+        )
+        .unwrap();
+        seal_store(&elsewhere).unwrap();
+        let mode = std::fs::metadata(elsewhere.parent().unwrap())
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o7777;
+        assert_eq!(mode, 0o755);
+    }
+
+    #[test]
+    fn a_command_for_the_user_manager_gets_this_accounts_runtime_folder_unless_it_already_has_it() {
+        use std::os::unix::fs::MetadataExt;
+        let folder = tempfile::tempdir().unwrap();
+        let uid = std::fs::metadata(folder.path()).unwrap().uid();
+        let env = |command: &Command, key: &str| {
+            command
+                .get_envs()
+                .find(|(name, _)| *name == key)
+                .map(|(_, value)| value.map(|v| v.to_owned()))
+        };
+        // Another account's folder (here: one nobody this account owns) is replaced.
+        let mut other = Command::new("true");
+        for_user_manager_of(&mut other, uid + 1, Some(folder.path().as_os_str()));
+        assert_eq!(
+            env(&other, "XDG_RUNTIME_DIR"),
+            Some(Some(format!("/run/user/{}", uid + 1).into()))
+        );
+        assert_eq!(env(&other, "DBUS_SESSION_BUS_ADDRESS"), Some(None));
+        // A missing one too.
+        let mut missing = Command::new("true");
+        for_user_manager_of(&mut missing, uid, None);
+        assert!(env(&missing, "XDG_RUNTIME_DIR").is_some());
+        // One this account owns is left alone.
+        let mut own = Command::new("true");
+        for_user_manager_of(&mut own, uid, Some(folder.path().as_os_str()));
+        assert_eq!(env(&own, "XDG_RUNTIME_DIR"), None);
+    }
+
     use super::*;
 
     #[test]

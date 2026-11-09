@@ -69,6 +69,9 @@ struct ExportCapture {
     computer_id: String,
     group: String,
     member: String,
+    /// Whether the computer is a container computer (journals written before it was not).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    container: bool,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -488,6 +491,7 @@ pub(super) fn export_capture_intent(
             .into(),
         group: source.snapshot_group.clone(),
         member: member.into(),
+        container: backup::is_container_source(source),
     });
     if let Some(capture) = &capture {
         validate_export_capture(capture).map_err(backup::BackupError::InvalidRequest)?;
@@ -529,7 +533,7 @@ pub(super) fn settle_export_capture(
         (capture.group.clone(), capture.member.clone()),
     ) && !controller
         .service
-        .export_capture_ready(&capture.group, &capture.member)
+        .export_capture_ready(&capture.group, &capture.member, capture.container)
         .map_err(|error| error.to_string())?
     {
         return Err(format!("The incomplete export capture {}:{} could not be removed. Its cleanup progress was kept.", capture.group, capture.member));

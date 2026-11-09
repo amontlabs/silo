@@ -25,6 +25,23 @@ pub const RECORD_VERSION: u8 = 1;
 /// earlier build made with other file owners is never taken for it.
 pub const OWNERSHIP: &str = "-keepid";
 
+/// Removes the default ACL of a folder Silo keeps container files in, so nothing made below it
+/// inherits one. A home folder with a default ACL (a shared server's, a runner's) would otherwise
+/// give every layer an entry naming an account that a container's id mapping does not have, and
+/// unpacking the image or an import then fails to restore it ("invalid argument"). A folder with
+/// none, or a file system without ACLs, is left as it is.
+#[cfg(target_os = "linux")]
+pub fn strip_default_acl(dir: &Path) {
+    use std::os::unix::ffi::OsStrExt;
+    if let Ok(path) = std::ffi::CString::new(dir.as_os_str().as_bytes()) {
+        // SAFETY: both arguments are valid NUL-terminated strings.
+        unsafe { libc::removexattr(path.as_ptr(), c"system.posix_acl_default".as_ptr()) };
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn strip_default_acl(_: &Path) {}
+
 #[derive(Clone, Debug)]
 pub struct Layout {
     root: PathBuf,

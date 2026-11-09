@@ -37,6 +37,25 @@ pub fn run_with(paths: &RuntimePaths, arguments: &[String]) -> Result<i32, Strin
     match args::parse(arguments)? {
         Command::SshServe(serve) => super::ssh::serve(paths, &serve),
         Command::Exec(exec) if exec.tty => terminal(paths, &exec),
+        // The export and import of a container computer run as a child of the engine, like
+        // MicroSandbox's snapshot commands, so that they can be timed out and cancelled.
+        Command::SnapshotCreate(_)
+        | Command::SnapshotList { .. }
+        | Command::SnapshotVerify { .. }
+        | Command::SnapshotRemove { .. }
+        | Command::SnapshotHead { .. }
+        | Command::SnapshotSave(_)
+        | Command::SnapshotLoad(_) => {
+            let output = super::run(
+                paths,
+                arguments,
+                std::time::Duration::from_secs(60 * 60 * 24),
+                &super::Material::NONE,
+            )
+            .map_err(|error| error.to_string())?;
+            print!("{}", output.stdout);
+            Ok(0)
+        }
         _ => Err("This command is not available for container computers.".into()),
     }
 }
@@ -246,7 +265,7 @@ mod tests {
     }
 
     #[test]
-    fn only_the_ssh_server_and_a_terminal_are_answered() {
+    fn only_the_ssh_server_a_terminal_and_the_snapshot_commands_are_answered() {
         for refused in [
             args(&["start", "box"]),
             args(&["exec", "box", "--", "id"]),
