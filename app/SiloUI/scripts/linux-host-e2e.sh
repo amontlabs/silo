@@ -429,6 +429,8 @@ PY
 # it in the container, the file is copied out through the working account.
 desktop_screenshot() {
   local file="$1" shot="/tmp/e2e-$1" out
+  # What the driver's launcher reads to find the session (printed so a failure can be read).
+  in_container sh -c 'id -u; pgrep -a xfce4-session | head -n 2; pid=$(pgrep -o xfce4-session); ls -ld /proc/$pid; tr "\0" "\n" < /proc/$pid/environ | grep -E "^(DISPLAY|XAUTHORITY|DBUS_SESSION_BUS_ADDRESS|XDG_RUNTIME_DIR)=" ; ls -l /run/silo-desktop/user | head -n 12' >&2 || true
   out=$(in_container sh -c "echo $(cua_probe_source) | base64 -d > /tmp/e2e-cua-probe.py && python3 /tmp/e2e-cua-probe.py $shot")
   echo "$out"
   grep -q '^WINDOWS' <<<"$out" || { echo "Cua Driver did not answer" >&2; exit 1; }
