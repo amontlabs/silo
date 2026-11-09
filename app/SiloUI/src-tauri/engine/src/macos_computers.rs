@@ -3091,7 +3091,13 @@ fn capture_archive_sources(
     cancellation: &crate::backup::Cancellation,
     token: Option<&str>,
     machine: ExportMachine<'_>,
-) -> Result<(Vec<crate::backup::MacosArchiveSource>, Vec<tempfile::TempDir>), String> {
+) -> Result<
+    (
+        Vec<crate::backup::MacosArchiveSource>,
+        Vec<tempfile::TempDir>,
+    ),
+    String,
+> {
     ensure_loaded(app)?;
     if names.is_empty() || (checkpoint_id.is_some() && names.len() != 1) {
         return Err(if checkpoint_id.is_some() {

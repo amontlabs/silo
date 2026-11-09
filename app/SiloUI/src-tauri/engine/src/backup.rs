@@ -17,10 +17,10 @@ use std::{
 };
 
 mod macos_archive;
-#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-pub(crate) use macos_archive::MAX_HARDWARE_MODEL_BYTES;
 #[cfg(test)]
 pub(crate) use macos_archive::memory_configuration_digest;
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+pub(crate) use macos_archive::MAX_HARDWARE_MODEL_BYTES;
 pub(crate) use macos_archive::{
     ArchiveRuntimeKind, MacosArchiveComponentInput, MacosArchiveConfig, MacosArchiveConfiguration,
     MacosArchiveMemory, MacosArchiveSource, MacosArchiveSourceKind, MacosCheckpointKind,
