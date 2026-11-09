@@ -240,7 +240,12 @@ container_disk_limit() {
       failed=yes
       break
     fi
+    sleep 1
   done
+  if [[ "$failed" != yes ]]; then
+    journalctl --user -u "$engine_unit" --no-pager -n 40 | grep -iE "disk|remount|$ctr3" >&2 || true
+    "$silo" exec "$ctr3" -- sh -c 'du -sm /home/silo; grep " / " /proc/self/mountinfo' >&2 || true
+  fi
   expect "a write past the disk size fails" "$failed" yes
   message=$("$silo" exec "$ctr3" -- sh -c 'echo x > /home/silo/more 2>&1' 2>&1 || true)
   echo "after the limit: $message"
