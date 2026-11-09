@@ -120,8 +120,9 @@ before.
 
 **A container computer** exports and imports the same way, on a Linux device that can run
 containers, and over Connections with `--device`. Its file holds its disks, not the guest image:
-both devices need the same image, so a device with an older Silo says so and the older one is
-updated first. A device that cannot run containers refuses the file with the reason `silo host init`
+the importing device needs the image the computer was made on (the one its Silo pins, or one it
+kept), and a device without it says the computer was made on an older guest image that it does not
+have. A device that cannot run containers refuses the file with the reason `silo host init`
 gives, before anything is copied. The file is written in format 6, which a Silo that predates
 container exports refuses as newer. No memory is in any file.
 

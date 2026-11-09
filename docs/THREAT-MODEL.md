@@ -875,21 +875,42 @@ with nothing sensitive on it, and the app, the CLI and `silo list` label it as l
     header is read with unknown fields refused, and its name, resources, labels and image are checked
     field by field and against the settings the manifest was validated for, so the file cannot make a
     larger computer than the manifest promised. A header carries no layer ids, secrets or paths.
-    Each layer is made by `silo-ctr unpack` as the container's root in a user namespace laid out like
-    the container's, with the new empty layer as its root: a path with `..`, an absolute path, an
-    empty name or a hard link outside the layer is refused, and a symbolic link in the file can
-    only name the layer's own files, so nothing outside the layer can be written. It stops at a
-    byte limit (the free space less the host disk margin, 5 GiB by default) and at 20 million
-    entries a layer, before writing past either. The files it makes are what the container's
-    own root could have written: setuid bits, file capabilities and device whiteouts are inert under
-    the baseline (no new privileges, no capability, seccomp).
+    Each layer is a standard tar (PAX) stream that `silo-ctr unpack` reads as the container's root in
+    a user namespace laid out like the container's, with the new empty layer as its root: the safety
+    is the changed root, not the format. A path with `..`, an absolute path, an empty name or a hard
+    link outside the layer is refused, and a symbolic link in the file can only name the layer's own
+    files, so nothing outside the layer can be written. The overlay's own attributes other than
+    `user.overlay.opaque` (`redirect`, `origin`, `metacopy`, ...) are refused, since they decide which
+    files of the layers below show through. Memory is bounded: a folder's owner and attributes are
+    applied as it is made, only the chain of open folders waits for its mode and time, and the
+    process runs under a 1 GiB address-space limit, so a tar header that claims more ends in a failed
+    allocation. The disk is measured, not estimated: before every chunk of a file and every 256
+    entries `unpack` reads the free bytes and free inodes of the layer's file system and stops under
+    the host disk margin (5 GiB by default; the inode margin is that over 16 KiB per inode), which
+    counts block size, inodes, attributes and link targets as the file system does. Between two looks
+    it can write at most one 16 MiB chunk of a file, or 256 entries of metadata. There is no limit on
+    the number of entries: the inode margin is the limit. Sockets are not exported (tar has no
+    type for them). The files it makes are what the container's own root could have written:
+    setuid bits, file capabilities and device whiteouts are inert inside the container under the
+    baseline (no new privileges, no capability, seccomp). On the host the account's own id is the
+    container's agent user (`--keep-id`), so a file of that user with the setuid bit in an imported
+    layer is a setuid file of the engine account on the host; the layer store (`containers/layers`)
+    and the folder holding it are set to `0700` each time a layer is made, so no other account can
+    reach or run it (a test checks the modes; this was set explicitly rather than found already
+    so, because the folders' modes came from the umask and any default ACL).
   - *A device that cannot run containers* refuses an inspection or an import of such a file before
-    anything is copied: "Silo cannot import a container computer on this device. This device cannot run
-    container computers yet: ..." with the reason `silo host init` gives.
+    anything is copied: on a Mac, "Silo cannot import a container computer on this device. Container
+    computers run only on a Linux host."; on Linux the unmet requirements and their fixes, as
+    `silo host init` gives them.
   - *What it does not cover.* An imported container is as untrusted as an imported VM: it runs
     whatever its sender's agent left, and keeping it into your main writes the sender's files there
     (read `silo diff` first). A malicious file can fill the free space down to the margin, as a
-    container that writes without end can (see The disk below), and cannot go past it.
+    container that writes without end can (see The disk below). The unpack stops within one chunk
+    or 256 entries of the margin, not exactly at it, and another process writing at the same time
+    can still take the disk below it (the host disk guard handles that, as for any container).
+  - *The guest image.* The file does not carry it. An export accepts any image digest unpacked on
+    the exporting device, and an import accepts the pinned one or one kept unpacked; otherwise it
+    says the computer was made on an older guest image that this device does not have.
 - **The desktop and Chrome.** A container computer has the desktop and computer use of a virtual
   machine: the image's own desktop service (Xvfb, PulseAudio, Xfce, Selkies) and Cua Driver, started
   by a root command after the container starts (the image's boot hook; the container has no init

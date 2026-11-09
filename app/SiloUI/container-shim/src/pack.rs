@@ -1,55 +1,58 @@
-//! `silo-ctr pack LAYER` and `silo-ctr unpack [--max-bytes N] [--max-entries N] LAYER`: one overlay
-//! layer to a byte stream and back, for the export and import of a container computer. Both run
-//! inside the container's user namespace (`silo-ctr userns --keep-id N -- silo-ctr pack ...`),
-//! where the layer's owners are real and a whiteout can be made.
+//! `silo-ctr pack LAYER` and `silo-ctr unpack [--min-free-bytes N] [--min-free-inodes N] LAYER`:
+//! one overlay layer to a tar stream and back, for the export and import of a container computer.
+//! Both run inside the container's user namespace (`silo-ctr userns --keep-id N -- silo-ctr pack
+//! ...`), where the layer's owners are real and a whiteout can be made.
 //!
-//! `pack` writes the layer's tree to standard output and `unpack` reads it from standard input
-//! into the empty layer folder it is given. An import reads a file somebody else made, so
-//! `unpack` first changes its root to the layer: whatever the stream contains, a link in it can
-//! only point at the layer's own files, and nothing outside the layer can be named. It also stops
-//! at a byte or entry limit the caller sets, before it writes past it.
+//! The stream is standard tar (PAX, written and read by the `tar` crate): folders, files, symbolic
+//! and hard links, named pipes, and whiteouts (character device 0:0, which the layers below may
+//! still need hidden). Extended attributes travel as PAX `SCHILY.xattr.*` records, so
+//! `user.overlay.opaque` and file capabilities survive. Tar has no socket type, so sockets are
+//! left out of an export (nothing listens on one after an import anyway); any other device is
+//! refused.
 //!
-//! The stream (all numbers big-endian) is a magic line, then one record per entry, then an end
-//! record. An entry is its kind (a letter), its path relative to the layer (`.` for the layer
-//! itself), mode, owner and group, modification time and extended attributes, then what the kind
-//! carries: a file's size and bytes, a symbolic link's target, a hard link's earlier path.
-//! Whiteouts (character device 0:0) and the `user.overlay.opaque` attribute travel as they are,
-//! because the layers below may still hold the files they hide. A socket travels as the file it
-//! is (nothing listens on it afterwards), so a layer comes back as `cp -a` would copy it; any other
-//! device is refused.
+//! What makes `unpack` safe on a file somebody else made is not the format but where it runs:
+//! `pack` and `unpack` both change their root to the layer first, so a path or link in the stream
+//! can only name the layer's own files. On top of that `unpack` checks every path, refuses the
+//! overlay attributes other than `user.overlay.opaque`, and holds a bounded amount in memory: a
+//! folder's owner and attributes are applied as it is made and only its mode and time wait for
+//! the end of the folder (the stream lists a folder before its contents, so what waits is the
+//! chain of open folders, not every folder). The process runs under an address-space limit, and
+//! it measures the real disk (free bytes and free inodes of the layer's file system) instead of a
+//! model of what the stream will need.
 
-use std::io::{self, Read, Write};
+/// The most an address space may grow to in `pack` and `unpack`. Their buffers are a few MiB, the
+/// open folders at most [`MAX_PATH`] bytes per path component, and one entry's attributes at most
+/// [`MAX_XATTRS`] times [`MAX_XATTR_VALUE`] bytes, so this leaves room for all of those at once;
+/// a stream that makes the tar reader hold more (an extended header of any size) ends in a failed
+/// allocation instead of using the host's memory.
+pub const ADDRESS_SPACE_LIMIT: u64 = 1 << 30;
+pub const MAX_PATH: usize = 4096;
+const MAX_XATTRS: usize = 1024;
+const MAX_XATTR_NAME: usize = 255;
+const MAX_XATTR_VALUE: usize = 65536;
+/// The PAX record prefix GNU tar and libarchive use for extended attributes.
+const XATTR_PREFIX: &str = "SCHILY.xattr.";
+/// The only attribute of the overlay's own namespace a layer may carry.
+const OPAQUE: &[u8] = b"user.overlay.opaque";
+const OVERLAY_NAMESPACE: &[u8] = b"user.overlay.";
+/// The most written between two looks at the disk.
+const CHUNK: u64 = 16 << 20;
+/// The disk is also looked at once per this many entries, files or not.
+const LOOK_EVERY: u64 = 256;
 
-/// The first bytes of a stream.
-pub const MAGIC: &[u8; 16] = b"SILO-CTR-LAYER1\n";
-const DIR: u8 = b'D';
-const FILE: u8 = b'F';
-const SYMLINK: u8 = b'S';
-const HARDLINK: u8 = b'H';
-const WHITEOUT: u8 = b'W';
-const FIFO: u8 = b'P';
-const SOCKET: u8 = b'K';
-const END: u8 = b'E';
-
-const MAX_PATH: u32 = 4096;
-const MAX_XATTRS: u32 = 1024;
-const MAX_XATTR_NAME: u16 = 255;
-const MAX_XATTR_VALUE: u32 = 65536;
-/// What one entry's bookkeeping is counted as against the byte limit, besides its content.
-const ENTRY_COST: u64 = 512;
-
-/// The options of an `unpack` command line: the byte limit, the entry limit and the layer.
+/// The options of an `unpack` command line: how much of the file system must stay free, and the
+/// layer.
 #[derive(Debug, PartialEq)]
 pub struct UnpackArgs {
-    pub max_bytes: u64,
-    pub max_entries: u64,
+    pub min_free_bytes: u64,
+    pub min_free_inodes: u64,
     pub layer: String,
 }
 
 pub fn parse_unpack_args(args: &[String]) -> Result<UnpackArgs, String> {
     let mut parsed = UnpackArgs {
-        max_bytes: u64::MAX,
-        max_entries: u64::MAX,
+        min_free_bytes: 0,
+        min_free_inodes: 0,
         layer: String::new(),
     };
     let mut iter = args.iter();
@@ -61,8 +64,8 @@ pub fn parse_unpack_args(args: &[String]) -> Result<UnpackArgs, String> {
                 .map_err(|_| format!("{flag} needs a number"))
         };
         match arg.as_str() {
-            "--max-bytes" => parsed.max_bytes = number("--max-bytes")?,
-            "--max-entries" => parsed.max_entries = number("--max-entries")?,
+            "--min-free-bytes" => parsed.min_free_bytes = number("--min-free-bytes")?,
+            "--min-free-inodes" => parsed.min_free_inodes = number("--min-free-inodes")?,
             other if other.starts_with("--") => return Err(format!("unknown option {other}")),
             other if parsed.layer.is_empty() => parsed.layer = other.to_owned(),
             _ => return Err("unpack takes one layer".into()),
@@ -87,305 +90,48 @@ pub fn valid_entry_path(path: &[u8]) -> bool {
         return true;
     }
     !path.is_empty()
-        && path.len() <= MAX_PATH as usize
+        && path.len() <= MAX_PATH
         && !path.contains(&0)
         && path
             .split(|byte| *byte == b'/')
             .all(|name| !name.is_empty() && name != b"." && name != b"..")
 }
 
-fn put_u16(out: &mut impl Write, value: u16) -> io::Result<()> {
-    out.write_all(&value.to_be_bytes())
-}
-fn put_u32(out: &mut impl Write, value: u32) -> io::Result<()> {
-    out.write_all(&value.to_be_bytes())
-}
-fn put_u64(out: &mut impl Write, value: u64) -> io::Result<()> {
-    out.write_all(&value.to_be_bytes())
-}
-fn put_bytes(out: &mut impl Write, bytes: &[u8]) -> io::Result<()> {
-    put_u32(
-        out,
-        u32::try_from(bytes.len()).map_err(|_| io::Error::other("a name is too long"))?,
-    )?;
-    out.write_all(bytes)
-}
-
-fn get<const N: usize>(input: &mut impl Read) -> io::Result<[u8; N]> {
-    let mut buffer = [0u8; N];
-    input.read_exact(&mut buffer)?;
-    Ok(buffer)
-}
-fn get_u8(input: &mut impl Read) -> io::Result<u8> {
-    Ok(get::<1>(input)?[0])
-}
-fn get_u16(input: &mut impl Read) -> io::Result<u16> {
-    Ok(u16::from_be_bytes(get(input)?))
-}
-fn get_u32(input: &mut impl Read) -> io::Result<u32> {
-    Ok(u32::from_be_bytes(get(input)?))
-}
-fn get_u64(input: &mut impl Read) -> io::Result<u64> {
-    Ok(u64::from_be_bytes(get(input)?))
-}
-fn get_i64(input: &mut impl Read) -> io::Result<i64> {
-    Ok(i64::from_be_bytes(get(input)?))
-}
-
-fn bad(detail: &str) -> io::Error {
-    io::Error::new(io::ErrorKind::InvalidData, detail.to_owned())
-}
-
-/// A length-prefixed byte string of at most `max` bytes.
-fn get_bytes(input: &mut impl Read, max: u32) -> io::Result<Vec<u8>> {
-    let length = get_u32(input)?;
-    if length > max {
-        return Err(bad("the stream has a name or value that is too long"));
+/// The path of a tar entry in the form [`valid_entry_path`] takes: tar writers add a slash to a
+/// folder's name, and the layer's own folder is `./` (or `.`).
+pub fn entry_path(raw: &[u8], is_dir: bool) -> Result<Vec<u8>, String> {
+    let outside = || "the stream names a path outside the layer".to_string();
+    let path = match (is_dir, raw.strip_suffix(b"/")) {
+        (true, Some(rest)) => rest,
+        (false, Some(_)) => return Err(outside()),
+        (_, None) => raw,
+    };
+    if valid_entry_path(path) {
+        Ok(path.to_vec())
+    } else {
+        Err(outside())
     }
-    let mut bytes = vec![0u8; length as usize];
-    input.read_exact(&mut bytes)?;
-    Ok(bytes)
 }
 
-/// The attributes every entry but a hard link carries.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Attributes {
-    pub mode: u32,
-    pub uid: u32,
-    pub gid: u32,
-    pub mtime_sec: i64,
-    pub mtime_nsec: u32,
-    pub xattrs: Vec<(Vec<u8>, Vec<u8>)>,
-}
-
-fn put_attributes(out: &mut impl Write, attributes: &Attributes) -> io::Result<()> {
-    put_u32(out, attributes.mode)?;
-    put_u32(out, attributes.uid)?;
-    put_u32(out, attributes.gid)?;
-    out.write_all(&attributes.mtime_sec.to_be_bytes())?;
-    put_u32(out, attributes.mtime_nsec)?;
-    put_u32(out, attributes.xattrs.len() as u32)?;
-    for (name, value) in &attributes.xattrs {
-        put_u16(out, name.len() as u16)?;
-        out.write_all(name)?;
-        put_bytes(out, value)?;
+/// Whether an attribute may be set from a stream: the overlay's own attributes decide which files
+/// of the layers below show through, so only the one the layers use is allowed.
+pub fn xattr_allowed(name: &[u8]) -> Result<(), String> {
+    if name.is_empty() || name.len() > MAX_XATTR_NAME || name.contains(&0) {
+        return Err("the stream has an attribute with a bad name".into());
     }
-    Ok(())
-}
-
-fn get_attributes(input: &mut impl Read) -> io::Result<Attributes> {
-    let mode = get_u32(input)?;
-    let uid = get_u32(input)?;
-    let gid = get_u32(input)?;
-    let mtime_sec = get_i64(input)?;
-    let mtime_nsec = get_u32(input)?;
-    if mtime_nsec >= 1_000_000_000 || mode > 0o7777 {
-        return Err(bad(
-            "the stream has an entry with an impossible mode or time",
+    if name.starts_with(OVERLAY_NAMESPACE) && name != OPAQUE {
+        return Err(format!(
+            "the stream has the overlay attribute {}, which a layer may not carry",
+            String::from_utf8_lossy(name)
         ));
     }
-    let count = get_u32(input)?;
-    if count > MAX_XATTRS {
-        return Err(bad("the stream has an entry with too many attributes"));
-    }
-    let mut xattrs = Vec::new();
-    for _ in 0..count {
-        let length = get_u16(input)?;
-        if length == 0 || length > MAX_XATTR_NAME {
-            return Err(bad("the stream has an attribute with a bad name"));
-        }
-        let mut name = vec![0u8; length as usize];
-        input.read_exact(&mut name)?;
-        if name.contains(&0) {
-            return Err(bad("the stream has an attribute with a bad name"));
-        }
-        xattrs.push((name, get_bytes(input, MAX_XATTR_VALUE)?));
-    }
-    Ok(Attributes {
-        mode,
-        uid,
-        gid,
-        mtime_sec,
-        mtime_nsec,
-        xattrs,
-    })
-}
-
-/// One entry of a stream, as `unpack` reads it. A file's bytes follow the record in the stream
-/// and are read by [`copy_content`].
-#[derive(Debug, PartialEq, Eq)]
-pub enum Entry {
-    Dir(Vec<u8>, Attributes),
-    File(Vec<u8>, Attributes, u64),
-    Symlink(Vec<u8>, Attributes, Vec<u8>),
-    Hardlink(Vec<u8>, Vec<u8>),
-    Whiteout(Vec<u8>, Attributes),
-    Fifo(Vec<u8>, Attributes),
-    Socket(Vec<u8>, Attributes),
-    End,
-}
-
-fn put_path(out: &mut impl Write, tag: u8, path: &[u8]) -> io::Result<()> {
-    out.write_all(&[tag])?;
-    put_bytes(out, path)
-}
-
-pub fn write_header(out: &mut impl Write) -> io::Result<()> {
-    out.write_all(MAGIC)
-}
-
-pub fn write_end(out: &mut impl Write) -> io::Result<()> {
-    out.write_all(&[END])
-}
-
-pub fn write_dir(out: &mut impl Write, path: &[u8], attributes: &Attributes) -> io::Result<()> {
-    put_path(out, DIR, path)?;
-    put_attributes(out, attributes)
-}
-
-pub fn write_file_start(
-    out: &mut impl Write,
-    path: &[u8],
-    attributes: &Attributes,
-    size: u64,
-) -> io::Result<()> {
-    put_path(out, FILE, path)?;
-    put_attributes(out, attributes)?;
-    put_u64(out, size)
-}
-
-pub fn write_symlink(
-    out: &mut impl Write,
-    path: &[u8],
-    attributes: &Attributes,
-    target: &[u8],
-) -> io::Result<()> {
-    put_path(out, SYMLINK, path)?;
-    put_attributes(out, attributes)?;
-    put_bytes(out, target)
-}
-
-pub fn write_hardlink(out: &mut impl Write, path: &[u8], target: &[u8]) -> io::Result<()> {
-    put_path(out, HARDLINK, path)?;
-    put_bytes(out, target)
-}
-
-pub fn write_whiteout(
-    out: &mut impl Write,
-    path: &[u8],
-    attributes: &Attributes,
-) -> io::Result<()> {
-    put_path(out, WHITEOUT, path)?;
-    put_attributes(out, attributes)
-}
-
-pub fn write_fifo(out: &mut impl Write, path: &[u8], attributes: &Attributes) -> io::Result<()> {
-    put_path(out, FIFO, path)?;
-    put_attributes(out, attributes)
-}
-
-pub fn write_socket(out: &mut impl Write, path: &[u8], attributes: &Attributes) -> io::Result<()> {
-    put_path(out, SOCKET, path)?;
-    put_attributes(out, attributes)
-}
-
-/// Reads the magic line.
-pub fn read_header(input: &mut impl Read) -> io::Result<()> {
-    if &get::<16>(input)? != MAGIC {
-        return Err(bad("the stream is not a container layer"));
-    }
     Ok(())
 }
 
-/// The next entry. Paths are checked; a file's bytes are left in `input`.
-pub fn read_entry(input: &mut impl Read) -> io::Result<Entry> {
-    let tag = get_u8(input)?;
-    if tag == END {
-        return Ok(Entry::End);
-    }
-    let path = get_bytes(input, MAX_PATH)?;
-    if !valid_entry_path(&path) {
-        return Err(bad("the stream names a path outside the layer"));
-    }
-    if path == b"." && tag != DIR {
-        return Err(bad("the stream's root is not a folder"));
-    }
-    Ok(match tag {
-        DIR => Entry::Dir(path, get_attributes(input)?),
-        FILE => {
-            let attributes = get_attributes(input)?;
-            Entry::File(path, attributes, get_u64(input)?)
-        }
-        SYMLINK => {
-            let attributes = get_attributes(input)?;
-            let target = get_bytes(input, MAX_PATH)?;
-            if target.is_empty() || target.contains(&0) {
-                return Err(bad("the stream has a link with an empty target"));
-            }
-            Entry::Symlink(path, attributes, target)
-        }
-        HARDLINK => {
-            let target = get_bytes(input, MAX_PATH)?;
-            if !valid_entry_path(&target) || target == b"." {
-                return Err(bad(
-                    "the stream has a hard link to a path outside the layer",
-                ));
-            }
-            Entry::Hardlink(path, target)
-        }
-        WHITEOUT => Entry::Whiteout(path, get_attributes(input)?),
-        FIFO => Entry::Fifo(path, get_attributes(input)?),
-        SOCKET => Entry::Socket(path, get_attributes(input)?),
-        _ => return Err(bad("the stream has an entry of an unknown kind")),
-    })
-}
-
-/// Copies exactly `size` bytes, failing when the stream ends first.
-pub fn copy_content(input: &mut impl Read, out: &mut impl Write, size: u64) -> io::Result<()> {
-    let copied = io::copy(&mut input.take(size), out)?;
-    if copied != size {
-        return Err(bad("the stream ends inside a file"));
-    }
-    Ok(())
-}
-
-/// The running count against the limits of an `unpack`.
-#[derive(Debug, Default)]
-pub struct Budget {
-    pub max_bytes: u64,
-    pub max_entries: u64,
-    entries: u64,
-    bytes: u64,
-}
-
-impl Budget {
-    pub fn new(max_bytes: u64, max_entries: u64) -> Self {
-        Self {
-            max_bytes,
-            max_entries,
-            entries: 0,
-            bytes: 0,
-        }
-    }
-
-    /// Counts one entry of `content` bytes; an error once a limit is passed.
-    pub fn charge(&mut self, content: u64) -> Result<(), String> {
-        self.entries += 1;
-        self.bytes = self
-            .bytes
-            .saturating_add(content)
-            .saturating_add(ENTRY_COST);
-        if self.entries > self.max_entries {
-            return Err(format!(
-                "the layer has more than {} entries, more than this device allows",
-                self.max_entries
-            ));
-        }
-        if self.bytes > self.max_bytes {
-            return Err("the layer needs more space than this device has for it".into());
-        }
-        Ok(())
-    }
+/// Whether `folder` (a path, `.` for the layer) holds `path`.
+pub fn holds(folder: &[u8], path: &[u8]) -> bool {
+    folder == b"."
+        || (path.len() > folder.len() && path.starts_with(folder) && path[folder.len()] == b'/')
 }
 
 #[cfg(target_os = "linux")]
@@ -398,15 +144,47 @@ mod linux {
     use std::collections::HashMap;
     use std::ffi::{CString, OsStr};
     use std::fs;
+    use std::io::{self, Read, Write};
     use std::os::unix::ffi::OsStrExt;
     use std::os::unix::fs::{FileTypeExt, MetadataExt};
     use std::path::{Path, PathBuf};
+    use tar::{Archive, Builder, EntryType, Header};
 
     fn c(path: &Path) -> Result<CString, String> {
         CString::new(path.as_os_str().as_bytes()).map_err(|_| "a path contains a NUL byte".into())
     }
 
-    fn xattr_pairs(path: &Path) -> Result<Vec<(Vec<u8>, Vec<u8>)>, String> {
+    fn name_c(name: &[u8]) -> Result<CString, String> {
+        CString::new(name).map_err(|_| "an attribute name contains NUL".into())
+    }
+
+    /// The limit on memory, then the layer as the whole world of this process.
+    fn confine(layer: &str) -> Result<(), String> {
+        let limit = libc::rlimit {
+            rlim_cur: ADDRESS_SPACE_LIMIT,
+            rlim_max: ADDRESS_SPACE_LIMIT,
+        };
+        // SAFETY: `limit` is a valid rlimit; the call changes only this process.
+        if unsafe { libc::setrlimit(libc::RLIMIT_AS, &limit) } != 0 {
+            return Err(os_err("limit the memory"));
+        }
+        let path = c(Path::new(layer))?;
+        let root = CString::new("/").expect("no NUL");
+        // SAFETY: valid path strings; the calls change only this process's root and directory.
+        unsafe {
+            if libc::chroot(path.as_ptr()) != 0 {
+                return Err(os_err(&format!("enter {layer}")));
+            }
+            if libc::chdir(root.as_ptr()) != 0 {
+                return Err(os_err("change to the layer's root"));
+            }
+        }
+        Ok(())
+    }
+
+    type Xattrs = Vec<(Vec<u8>, Vec<u8>)>;
+
+    fn xattr_pairs(path: &Path) -> Result<Xattrs, String> {
         let p = c(path)?;
         // SAFETY: a null buffer of size 0 asks for the length only.
         let length = unsafe { libc::llistxattr(p.as_ptr(), std::ptr::null_mut(), 0) };
@@ -435,8 +213,8 @@ mod linux {
             .split(|byte| *byte == 0)
             .filter(|name| !name.is_empty())
         {
-            let n = CString::new(name).map_err(|_| "an attribute name contains NUL")?;
-            let mut value = vec![0u8; MAX_XATTR_VALUE as usize];
+            let n = name_c(name)?;
+            let mut value = vec![0u8; MAX_XATTR_VALUE];
             // SAFETY: `value` is valid for its length.
             let got = unsafe {
                 libc::lgetxattr(
@@ -455,22 +233,11 @@ mod linux {
         Ok(pairs)
     }
 
-    fn attributes_of(path: &Path, meta: &fs::Metadata) -> Result<Attributes, String> {
-        Ok(Attributes {
-            mode: meta.mode() & 0o7777,
-            uid: meta.uid(),
-            gid: meta.gid(),
-            mtime_sec: meta.mtime(),
-            mtime_nsec: meta.mtime_nsec() as u32,
-            xattrs: xattr_pairs(path)?,
-        })
-    }
-
-    fn relative(root: &Path, path: &Path) -> Vec<u8> {
+    fn relative(root: &Path, path: &Path) -> PathBuf {
         match path.strip_prefix(root) {
-            Ok(rest) if rest.as_os_str().is_empty() => b".".to_vec(),
-            Ok(rest) => rest.as_os_str().as_bytes().to_vec(),
-            Err(_) => b".".to_vec(),
+            Ok(rest) if rest.as_os_str().is_empty() => PathBuf::from("."),
+            Ok(rest) => rest.to_path_buf(),
+            Err(_) => PathBuf::from("."),
         }
     }
 
@@ -480,35 +247,97 @@ mod linux {
 
     pub fn pack_command(arguments: &[String]) -> Result<i32, String> {
         let layer = parse_pack_args(arguments)?;
+        confine(&layer)?;
         let stdout = io::stdout();
-        let mut out = io::BufWriter::with_capacity(1 << 20, stdout.lock());
-        pack_layer(Path::new(&layer), &mut out)?;
-        out.flush().map_err(write_err)?;
+        let out = io::BufWriter::with_capacity(1 << 20, stdout.lock());
+        pack_tree(Path::new("/"), out)?;
         Ok(0)
     }
 
-    /// The whole tree of `root` onto `out`.
-    pub fn pack_layer(root: &Path, out: &mut impl Write) -> Result<(), String> {
+    /// A file's bytes, failing when the file ends before the size its header gave.
+    struct Exact<R> {
+        inner: R,
+        left: u64,
+    }
+
+    impl<R: Read> Read for Exact<R> {
+        fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+            if self.left == 0 {
+                return Ok(0);
+            }
+            let limit = buffer.len().min(self.left as usize);
+            let got = self.inner.read(&mut buffer[..limit])?;
+            if got == 0 {
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "the file changed while it was read",
+                ));
+            }
+            self.left -= got as u64;
+            Ok(got)
+        }
+    }
+
+    fn header_of(meta: &fs::Metadata, kind: EntryType) -> Header {
+        let mut header = Header::new_gnu();
+        header.set_entry_type(kind);
+        header.set_mode(meta.mode() & 0o7777);
+        header.set_uid(u64::from(meta.uid()));
+        header.set_gid(u64::from(meta.gid()));
+        header.set_mtime(meta.mtime().max(0) as u64);
+        header.set_size(0);
+        header
+    }
+
+    /// The whole tree of `root` as tar onto `out`.
+    pub fn pack_tree(root: &Path, out: impl Write) -> Result<(), String> {
         let meta = fs::symlink_metadata(root)
             .map_err(|e| io_err(&format!("look at {}", root.display()), &e))?;
         if !meta.is_dir() {
             return Err(format!("{} is not a folder", root.display()));
         }
-        write_header(out).map_err(write_err)?;
+        let mut builder = Builder::new(out);
         let mut links = HashMap::new();
-        pack_dir(root, root, &meta, &mut links, out)?;
-        write_end(out).map_err(write_err)
+        pack_dir(root, root, &meta, &mut links, &mut builder)?;
+        let mut out = builder.into_inner().map_err(write_err)?;
+        out.flush().map_err(write_err)
     }
 
-    fn pack_dir(
+    /// The PAX record for an entry's attributes, ahead of its header.
+    fn put_xattrs<W: Write>(builder: &mut Builder<W>, path: &Path) -> Result<(), String> {
+        let pairs = xattr_pairs(path)?;
+        if pairs.len() > MAX_XATTRS {
+            return Err(format!("{} has too many attributes", path.display()));
+        }
+        let mut records = Vec::new();
+        for (name, value) in &pairs {
+            let key = std::str::from_utf8(name).map_err(|_| {
+                format!(
+                    "an attribute of {} has a name that is not text",
+                    path.display()
+                )
+            })?;
+            records.push((format!("{XATTR_PREFIX}{key}"), value.as_slice()));
+        }
+        builder
+            .append_pax_extensions(records.iter().map(|(key, value)| (key.as_str(), *value)))
+            .map_err(write_err)
+    }
+
+    type Links = HashMap<(u64, u64), PathBuf>;
+
+    fn pack_dir<W: Write>(
         root: &Path,
         dir: &Path,
         meta: &fs::Metadata,
-        links: &mut HashMap<(u64, u64), Vec<u8>>,
-        out: &mut impl Write,
+        links: &mut Links,
+        builder: &mut Builder<W>,
     ) -> Result<(), String> {
-        let attributes = attributes_of(dir, meta)?;
-        write_dir(out, &relative(root, dir), &attributes).map_err(write_err)?;
+        put_xattrs(builder, dir)?;
+        let mut header = header_of(meta, EntryType::Directory);
+        builder
+            .append_data(&mut header, relative(root, dir), io::empty())
+            .map_err(write_err)?;
         let mut names: Vec<_> = fs::read_dir(dir)
             .map_err(|e| io_err(&format!("read {}", dir.display()), &e))?
             .map(|entry| entry.map(|entry| entry.file_name()))
@@ -522,40 +351,60 @@ mod linux {
             let kind = meta.file_type();
             let rel = relative(root, &path);
             if kind.is_dir() {
-                pack_dir(root, &path, &meta, links, out)?;
+                pack_dir(root, &path, &meta, links, builder)?;
                 continue;
             }
-            if !kind.is_symlink() && meta.nlink() > 1 && !kind.is_dir() {
+            if kind.is_socket() {
+                continue;
+            }
+            if !kind.is_symlink() && meta.nlink() > 1 {
                 let key = (meta.dev(), meta.ino());
                 if let Some(first) = links.get(&key) {
-                    write_hardlink(out, &rel, first).map_err(write_err)?;
+                    let mut header = header_of(&meta, EntryType::Link);
+                    builder
+                        .append_link(&mut header, &rel, first)
+                        .map_err(write_err)?;
                     continue;
                 }
                 links.insert(key, rel.clone());
             }
-            let attributes = attributes_of(&path, &meta)?;
             if kind.is_symlink() {
                 let target = fs::read_link(&path)
                     .map_err(|e| io_err(&format!("read {}", path.display()), &e))?;
-                write_symlink(out, &rel, &attributes, target.as_os_str().as_bytes())
+                put_xattrs(builder, &path)?;
+                let mut header = header_of(&meta, EntryType::Symlink);
+                builder
+                    .append_link(&mut header, &rel, target)
                     .map_err(write_err)?;
             } else if kind.is_file() {
-                write_file_start(out, &rel, &attributes, meta.len()).map_err(write_err)?;
-                let mut file = fs::File::open(&path)
+                put_xattrs(builder, &path)?;
+                let mut header = header_of(&meta, EntryType::Regular);
+                header.set_size(meta.len());
+                let file = fs::File::open(&path)
                     .map_err(|e| io_err(&format!("open {}", path.display()), &e))?;
                 // A file that changes while it is read is a file that is not at rest: the
                 // caller packs checkpoints, which are.
-                let copied = io::copy(&mut (&mut file).take(meta.len()), out)
-                    .map_err(|e| io_err(&format!("read {}", path.display()), &e))?;
-                if copied != meta.len() {
-                    return Err(format!("{} changed while it was read", path.display()));
-                }
+                let data = Exact {
+                    inner: file,
+                    left: meta.len(),
+                };
+                builder
+                    .append_data(&mut header, &rel, data)
+                    .map_err(|e| io_err(&format!("pack {}", path.display()), &e))?;
             } else if kind.is_fifo() {
-                write_fifo(out, &rel, &attributes).map_err(write_err)?;
-            } else if kind.is_socket() {
-                write_socket(out, &rel, &attributes).map_err(write_err)?;
+                put_xattrs(builder, &path)?;
+                let mut header = header_of(&meta, EntryType::Fifo);
+                builder
+                    .append_data(&mut header, &rel, io::empty())
+                    .map_err(write_err)?;
             } else if kind.is_char_device() && meta.rdev() == 0 {
-                write_whiteout(out, &rel, &attributes).map_err(write_err)?;
+                put_xattrs(builder, &path)?;
+                let mut header = header_of(&meta, EntryType::Char);
+                header.set_device_major(0).map_err(write_err)?;
+                header.set_device_minor(0).map_err(write_err)?;
+                builder
+                    .append_data(&mut header, &rel, io::empty())
+                    .map_err(write_err)?;
             } else {
                 return Err(format!(
                     "{} is a device, which a container computer's files cannot hold",
@@ -568,27 +417,46 @@ mod linux {
 
     pub fn unpack_command(arguments: &[String]) -> Result<i32, String> {
         let parsed = parse_unpack_args(arguments)?;
-        let layer = PathBuf::from(OsStr::new(&parsed.layer));
-        // The layer becomes the whole world of this process.
-        let path = c(&layer)?;
-        // SAFETY: valid path strings; the calls change only this process's root and directory.
-        unsafe {
-            if libc::chroot(path.as_ptr()) != 0 {
-                return Err(os_err(&format!("enter {}", layer.display())));
-            }
-            let root = CString::new("/").expect("no NUL");
-            if libc::chdir(root.as_ptr()) != 0 {
-                return Err(os_err("change to the layer's root"));
-            }
-        }
+        confine(&parsed.layer)?;
         let stdin = io::stdin();
-        let mut input = io::BufReader::with_capacity(1 << 20, stdin.lock());
-        unpack_layer(
+        let input = io::BufReader::with_capacity(1 << 20, stdin.lock());
+        unpack_tree(
             Path::new("/"),
-            &mut input,
-            Budget::new(parsed.max_bytes, parsed.max_entries),
+            input,
+            &Room {
+                min_free_bytes: parsed.min_free_bytes,
+                min_free_inodes: parsed.min_free_inodes,
+            },
         )?;
         Ok(0)
+    }
+
+    /// How much of the file system must stay free.
+    pub struct Room {
+        pub min_free_bytes: u64,
+        pub min_free_inodes: u64,
+    }
+
+    impl Room {
+        /// An error when writing `need` more bytes would leave the file system holding `root`
+        /// with less than the margin of free bytes, or when it is already short of free inodes.
+        fn check(&self, root: &Path, need: u64) -> Result<(), String> {
+            let p = c(root)?;
+            // SAFETY: `stat` is written by the call, and `p` is a valid path string.
+            let mut stat: libc::statvfs = unsafe { std::mem::zeroed() };
+            if unsafe { libc::statvfs(p.as_ptr(), &mut stat) } != 0 {
+                return Err(os_err("look at the free space"));
+            }
+            let free = (stat.f_bavail as u64).saturating_mul(stat.f_frsize as u64);
+            if free < self.min_free_bytes.saturating_add(need) {
+                return Err("this device does not have the room for the layer".into());
+            }
+            // A file system that keeps no inode count (btrfs) reports none.
+            if stat.f_files != 0 && (stat.f_favail as u64) < self.min_free_inodes {
+                return Err("this device has run out of files to make for the layer".into());
+            }
+            Ok(())
+        }
     }
 
     fn join(root: &Path, relative: &[u8]) -> PathBuf {
@@ -599,10 +467,10 @@ mod linux {
         }
     }
 
-    fn set_xattrs(path: &Path, xattrs: &[(Vec<u8>, Vec<u8>)]) -> Result<(), String> {
+    fn set_xattrs(path: &Path, xattrs: &Xattrs) -> Result<(), String> {
         let p = c(path)?;
         for (name, value) in xattrs {
-            let n = CString::new(name.clone()).map_err(|_| "an attribute name contains NUL")?;
+            let n = name_c(name)?;
             // SAFETY: both buffers are valid for their lengths.
             let rc = unsafe {
                 libc::lsetxattr(
@@ -620,28 +488,44 @@ mod linux {
         Ok(())
     }
 
-    /// Owner, attributes, mode and time, in the order that keeps each from undoing another.
-    fn apply(path: &Path, attributes: &Attributes, is_link: bool) -> Result<(), String> {
+    /// What an entry says about itself besides its kind.
+    struct Meta {
+        mode: u32,
+        uid: u32,
+        gid: u32,
+        mtime: i64,
+        xattrs: Xattrs,
+    }
+
+    /// Owner, then attributes: a folder gets both as it is made.
+    fn own(path: &Path, meta: &Meta) -> Result<(), String> {
         let p = c(path)?;
         // SAFETY: `p` is a valid path string.
-        if unsafe { libc::lchown(p.as_ptr(), attributes.uid, attributes.gid) } != 0 {
+        if unsafe { libc::lchown(p.as_ptr(), meta.uid, meta.gid) } != 0 {
             return Err(os_err(&format!("change the owner of {}", path.display())));
         }
-        set_xattrs(path, &attributes.xattrs)?;
-        if !is_link {
-            // SAFETY: `p` is a valid path string.
-            if unsafe { libc::chmod(p.as_ptr(), attributes.mode as libc::mode_t) } != 0 {
-                return Err(os_err(&format!("set the mode of {}", path.display())));
-            }
+        set_xattrs(path, &meta.xattrs)
+    }
+
+    fn set_mode(path: &Path, mode: u32) -> Result<(), String> {
+        let p = c(path)?;
+        // SAFETY: `p` is a valid path string.
+        if unsafe { libc::chmod(p.as_ptr(), mode as libc::mode_t) } != 0 {
+            return Err(os_err(&format!("set the mode of {}", path.display())));
         }
+        Ok(())
+    }
+
+    fn set_time(path: &Path, mtime: i64) -> Result<(), String> {
+        let p = c(path)?;
         let times = [
             libc::timespec {
-                tv_sec: attributes.mtime_sec,
+                tv_sec: mtime,
                 tv_nsec: libc::UTIME_OMIT,
             },
             libc::timespec {
-                tv_sec: attributes.mtime_sec,
-                tv_nsec: attributes.mtime_nsec as _,
+                tv_sec: mtime,
+                tv_nsec: 0,
             },
         ];
         // SAFETY: `times` holds two timespecs; the flag keeps a link from being followed.
@@ -659,7 +543,16 @@ mod linux {
         Ok(())
     }
 
-    /// A whiteout (character device 0:0) or a socket file: the nodes `mknod` makes without a device.
+    /// Owner, attributes, mode and time, in the order that keeps each from undoing another.
+    fn apply(path: &Path, meta: &Meta, is_link: bool) -> Result<(), String> {
+        own(path, meta)?;
+        if !is_link {
+            set_mode(path, meta.mode)?;
+        }
+        set_time(path, meta.mtime)
+    }
+
+    /// A whiteout (character device 0:0): the node `mknod` makes without a device.
     fn mknod(path: &Path, mode: u32) -> Result<(), String> {
         let p = c(path)?;
         // SAFETY: `p` is a valid path string.
@@ -673,94 +566,200 @@ mod linux {
         io_err(&format!("{what} {}", path.display()), error)
     }
 
-    /// Reads a stream into `root`, which must be an empty folder (the layer itself, once this
-    /// process has made it its root). Nothing is written past `budget`.
-    pub fn unpack_layer(
-        root: &Path,
+    /// A folder still being filled: its mode and time wait for the end of it.
+    struct Open {
+        path: Vec<u8>,
+        target: PathBuf,
+        mode: u32,
+        mtime: i64,
+    }
+
+    fn close(folder: Open) -> Result<(), String> {
+        set_mode(&folder.target, folder.mode)?;
+        set_time(&folder.target, folder.mtime)
+    }
+
+    /// Copies `size` bytes in chunks, looking at the disk before each.
+    fn copy_content(
         input: &mut impl Read,
-        mut budget: Budget,
+        file: &mut fs::File,
+        size: u64,
+        root: &Path,
+        room: &Room,
     ) -> Result<(), String> {
-        read_header(input).map_err(|e| e.to_string())?;
-        // Folders get their own mode and time last, so that filling them does not change either.
-        let mut folders: Vec<(PathBuf, Attributes)> = Vec::new();
-        let mut seen_root = false;
-        loop {
-            match read_entry(input).map_err(|e| io_err("read the stream", &e))? {
-                Entry::End => break,
-                Entry::Dir(path, attributes) => {
-                    budget.charge(0)?;
-                    let target = join(root, &path);
-                    if path == b"." {
-                        seen_root = true;
-                    } else {
+        let mut left = size;
+        let mut buffer = vec![0u8; 1 << 16];
+        while left > 0 {
+            let chunk = left.min(CHUNK);
+            room.check(root, chunk)?;
+            let mut piece = chunk;
+            while piece > 0 {
+                let want = (piece as usize).min(buffer.len());
+                input
+                    .read_exact(&mut buffer[..want])
+                    .map_err(|e| io_err("read the stream", &e))?;
+                file.write_all(&buffer[..want])
+                    .map_err(|e| io_err("write a file", &e))?;
+                piece -= want as u64;
+            }
+            left -= chunk;
+        }
+        Ok(())
+    }
+
+    /// The attributes of an entry from its PAX records; anything else in them is ignored.
+    fn xattrs_of<R: Read>(entry: &mut tar::Entry<'_, R>) -> Result<Xattrs, String> {
+        let mut xattrs = Vec::new();
+        let records = entry
+            .pax_extensions()
+            .map_err(|e| io_err("read the stream", &e))?;
+        for record in records.into_iter().flatten() {
+            let record = record.map_err(|e| io_err("read the stream", &e))?;
+            let Some(name) = record.key_bytes().strip_prefix(XATTR_PREFIX.as_bytes()) else {
+                continue;
+            };
+            xattr_allowed(name)?;
+            if record.value_bytes().len() > MAX_XATTR_VALUE || xattrs.len() == MAX_XATTRS {
+                return Err("the stream has an entry with too many or too large attributes".into());
+            }
+            xattrs.push((name.to_vec(), record.value_bytes().to_vec()));
+        }
+        Ok(xattrs)
+    }
+
+    fn impossible() -> String {
+        "the stream has an entry with an impossible owner, mode or time".into()
+    }
+
+    /// Reads a tar stream into `root`, which must be an empty folder (the layer itself, once this
+    /// process has made it its root). The disk is looked at before every chunk of a file and every
+    /// [`LOOK_EVERY`] entries; nothing is written below the margin `room` names.
+    pub fn unpack_tree(root: &Path, input: impl Read, room: &Room) -> Result<(), String> {
+        let mut archive = Archive::new(input);
+        let entries = archive
+            .entries()
+            .map_err(|e| io_err("read the stream", &e))?;
+        let mut open: Vec<Open> = Vec::new();
+        let mut count = 0u64;
+        for entry in entries {
+            let mut entry = entry.map_err(|e| io_err("read the stream", &e))?;
+            if count.is_multiple_of(LOOK_EVERY) {
+                room.check(root, 0)?;
+            }
+            let kind = entry.header().entry_type();
+            let path = entry_path(&entry.path_bytes(), kind.is_dir())?;
+            if (count == 0) != (path == b".") || (count == 0 && !kind.is_dir()) {
+                return Err(
+                    "the stream's first entry must be the layer's folder, and only it".into(),
+                );
+            }
+            count += 1;
+            while let Some(top) = open.last() {
+                if holds(&top.path, &path) {
+                    break;
+                }
+                close(open.pop().expect("a last"))?;
+            }
+            let header = entry.header();
+            let meta = Meta {
+                mode: header.mode().map_err(|_| impossible())?,
+                uid: u32::try_from(header.uid().map_err(|_| impossible())?)
+                    .map_err(|_| impossible())?,
+                gid: u32::try_from(header.gid().map_err(|_| impossible())?)
+                    .map_err(|_| impossible())?,
+                mtime: i64::try_from(header.mtime().map_err(|_| impossible())?)
+                    .map_err(|_| impossible())?,
+                xattrs: xattrs_of(&mut entry)?,
+            };
+            if meta.mode > 0o7777 {
+                return Err(impossible());
+            }
+            let target = join(root, &path);
+            match kind {
+                EntryType::Directory => {
+                    if path != b"." {
                         fs::create_dir(&target).map_err(|e| fail(&target, "create", &e))?;
                     }
-                    folders.push((target, attributes));
+                    own(&target, &meta)?;
+                    open.push(Open {
+                        path,
+                        target,
+                        mode: meta.mode,
+                        mtime: meta.mtime,
+                    });
                 }
-                Entry::File(path, attributes, size) => {
-                    budget.charge(size)?;
-                    let target = join(root, &path);
+                EntryType::Regular => {
+                    let size = entry.size();
                     let mut file = fs::OpenOptions::new()
                         .write(true)
                         .create_new(true)
                         .open(&target)
                         .map_err(|e| fail(&target, "create", &e))?;
-                    copy_content(input, &mut file, size).map_err(|e| fail(&target, "write", &e))?;
+                    copy_content(&mut entry, &mut file, size, root, room)?;
                     drop(file);
-                    apply(&target, &attributes, false)?;
+                    apply(&target, &meta, false)?;
                 }
-                Entry::Symlink(path, attributes, link_target) => {
-                    budget.charge(0)?;
-                    let target = join(root, &path);
-                    std::os::unix::fs::symlink(OsStr::from_bytes(&link_target), &target)
+                EntryType::Symlink => {
+                    let link = entry
+                        .link_name_bytes()
+                        .filter(|link| {
+                            !link.is_empty() && link.len() <= MAX_PATH && !link.contains(&0)
+                        })
+                        .ok_or("the stream has a link with a bad target")?;
+                    std::os::unix::fs::symlink(OsStr::from_bytes(&link), &target)
                         .map_err(|e| fail(&target, "create", &e))?;
-                    apply(&target, &attributes, true)?;
+                    apply(&target, &meta, true)?;
                 }
-                Entry::Hardlink(path, earlier) => {
-                    budget.charge(0)?;
-                    let (target, original) = (join(root, &path), join(root, &earlier));
+                EntryType::Link => {
+                    let earlier = entry
+                        .link_name_bytes()
+                        .map(|link| link.to_vec())
+                        .filter(|link| valid_entry_path(link) && link != b".")
+                        .ok_or("the stream has a hard link to a path outside the layer")?;
+                    let original = join(root, &earlier);
                     fs::hard_link(&original, &target).map_err(|e| fail(&target, "link", &e))?;
                 }
-                Entry::Whiteout(path, attributes) => {
-                    budget.charge(0)?;
-                    let target = join(root, &path);
-                    mknod(&target, libc::S_IFCHR as u32)?;
-                    apply(&target, &attributes, false)?;
-                }
-                Entry::Socket(path, attributes) => {
-                    budget.charge(0)?;
-                    let target = join(root, &path);
-                    mknod(&target, libc::S_IFSOCK as u32)?;
-                    apply(&target, &attributes, false)?;
-                }
-                Entry::Fifo(path, attributes) => {
-                    budget.charge(0)?;
-                    let target = join(root, &path);
+                EntryType::Fifo => {
                     let p = c(&target)?;
                     // SAFETY: `p` is a valid path string.
                     if unsafe { libc::mkfifo(p.as_ptr(), 0o600) } != 0 {
                         return Err(os_err(&format!("create {}", target.display())));
                     }
-                    apply(&target, &attributes, false)?;
+                    apply(&target, &meta, false)?;
                 }
+                EntryType::Char => {
+                    let header = entry.header();
+                    if header.device_major().ok().flatten() != Some(0)
+                        || header.device_minor().ok().flatten() != Some(0)
+                    {
+                        return Err("the stream has a device, which a layer may not hold".into());
+                    }
+                    mknod(&target, libc::S_IFCHR)?;
+                    apply(&target, &meta, false)?;
+                }
+                _ => return Err("the stream has an entry of a kind a layer may not hold".into()),
             }
         }
-        if !seen_root {
+        if count == 0 {
             return Err("the stream has no root folder".into());
         }
-        while let Some((path, attributes)) = folders.pop() {
-            apply(&path, &attributes, false)?;
+        while let Some(folder) = open.pop() {
+            close(folder)?;
         }
-        // Whatever follows the end record is not part of a layer.
-        let mut extra = [0u8; 1];
-        if input
-            .read(&mut extra)
-            .map_err(|e| io_err("read the stream", &e))?
-            != 0
-        {
-            return Err("the stream has data after the end of the layer".into());
+        // Whatever follows the end of the archive is not part of a layer, but zeros (padding).
+        let mut rest = archive.into_inner();
+        let mut buffer = [0u8; 4096];
+        loop {
+            let got = rest
+                .read(&mut buffer)
+                .map_err(|e| io_err("read the stream", &e))?;
+            if got == 0 {
+                return Ok(());
+            }
+            if buffer[..got].iter().any(|byte| *byte != 0) {
+                return Err("the stream has data after the end of the layer".into());
+            }
         }
-        Ok(())
     }
 
     #[cfg(test)]
@@ -774,14 +773,17 @@ mod linux {
             fs::write(full, text).unwrap();
         }
 
+        fn anywhere() -> Room {
+            Room {
+                min_free_bytes: 0,
+                min_free_inodes: 0,
+            }
+        }
+
         fn round_trip(source: &Path, target: &Path) -> Result<(), String> {
             let mut stream = Vec::new();
-            pack_layer(source, &mut stream)?;
-            unpack_layer(
-                target,
-                &mut stream.as_slice(),
-                Budget::new(u64::MAX, u64::MAX),
-            )
+            pack_tree(source, &mut stream)?;
+            unpack_tree(target, stream.as_slice(), &anywhere())
         }
 
         #[test]
@@ -798,10 +800,16 @@ mod linux {
             symlink("/absolute/elsewhere", a.path().join("usr/bin/far")).unwrap();
             fs::hard_link(a.path().join("etc/one"), a.path().join("etc/two")).unwrap();
             fs::create_dir(a.path().join("empty")).unwrap();
+            let long = "d".repeat(90);
+            put(a.path(), &format!("{long}/{long}/{long}/file"), "deep");
             round_trip(a.path(), b.path()).unwrap();
             assert_eq!(
                 fs::read_to_string(b.path().join("etc/one")).unwrap(),
                 "hello"
+            );
+            assert_eq!(
+                fs::read_to_string(b.path().join(format!("{long}/{long}/{long}/file"))).unwrap(),
+                "deep"
             );
             assert_eq!(
                 fs::metadata(b.path().join("usr/bin/tool")).unwrap().mode() & 0o7777,
@@ -827,19 +835,32 @@ mod linux {
         }
 
         #[test]
-        fn a_folder_keeps_its_time_after_it_is_filled() {
+        fn a_folder_keeps_its_time_and_mode_after_it_is_filled() {
             let (a, b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
-            put(a.path(), "d/file", "x");
+            put(a.path(), "d/e/file", "x");
+            put(a.path(), "d/other/file", "y");
             let old = std::time::SystemTime::now() - std::time::Duration::from_secs(86400 * 30);
-            fs::File::open(a.path().join("d"))
-                .unwrap()
-                .set_modified(old)
-                .unwrap();
+            for dir in ["d", "d/e"] {
+                fs::File::open(a.path().join(dir))
+                    .unwrap()
+                    .set_modified(old)
+                    .unwrap();
+            }
+            fs::set_permissions(a.path().join("d/e"), fs::Permissions::from_mode(0o555)).unwrap();
             round_trip(a.path(), b.path()).unwrap();
+            for dir in ["d", "d/e"] {
+                assert_eq!(
+                    fs::metadata(a.path().join(dir)).unwrap().mtime(),
+                    fs::metadata(b.path().join(dir)).unwrap().mtime(),
+                    "{dir}"
+                );
+            }
             assert_eq!(
-                fs::metadata(a.path().join("d")).unwrap().mtime(),
-                fs::metadata(b.path().join("d")).unwrap().mtime()
+                fs::metadata(b.path().join("d/e")).unwrap().mode() & 0o7777,
+                0o555
             );
+            fs::set_permissions(a.path().join("d/e"), fs::Permissions::from_mode(0o755)).unwrap();
+            fs::set_permissions(b.path().join("d/e"), fs::Permissions::from_mode(0o755)).unwrap();
         }
 
         #[test]
@@ -847,7 +868,7 @@ mod linux {
             let (a, b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
             put(a.path(), "d/new", "n");
             // Only root (or a user namespace) may make the device or the attribute.
-            if mknod(&a.path().join("gone"), libc::S_IFCHR as u32).is_err() {
+            if mknod(&a.path().join("gone"), libc::S_IFCHR).is_err() {
                 return;
             }
             let d = c(&a.path().join("d")).unwrap();
@@ -866,8 +887,67 @@ mod linux {
                 .contains(&(b"user.overlay.opaque".to_vec(), b"y".to_vec())));
         }
 
+        fn root_header() -> Header {
+            let mut root = Header::new_gnu();
+            root.set_entry_type(EntryType::Directory);
+            root.set_mode(0o755);
+            root.set_size(0);
+            root.set_mtime(1);
+            root.set_uid(unsafe { libc::getuid() }.into());
+            root.set_gid(unsafe { libc::getgid() }.into());
+            root
+        }
+
+        fn stream_with(entries: impl FnOnce(&mut Builder<Vec<u8>>)) -> Vec<u8> {
+            let mut builder = Builder::new(Vec::new());
+            builder
+                .append_data(&mut root_header(), ".", io::empty())
+                .unwrap();
+            entries(&mut builder);
+            builder.into_inner().unwrap()
+        }
+
+        fn mine(kind: EntryType, size: u64) -> Header {
+            let mut header = root_header();
+            header.set_entry_type(kind);
+            header.set_mode(0o644);
+            header.set_size(size);
+            header
+        }
+
         #[test]
-        fn the_limits_stop_the_unpack_before_it_writes_past_them() {
+        fn an_attribute_travels_and_the_overlays_other_attributes_are_refused() {
+            let (a, b, c2) = (
+                tempfile::tempdir().unwrap(),
+                tempfile::tempdir().unwrap(),
+                tempfile::tempdir().unwrap(),
+            );
+            put(a.path(), "f", "x");
+            let f = c(&a.path().join("f")).unwrap();
+            let name = CString::new("user.note").unwrap();
+            // SAFETY: valid strings and a one-byte value.
+            if unsafe { libc::lsetxattr(f.as_ptr(), name.as_ptr(), b"v".as_ptr().cast(), 1, 0) }
+                != 0
+            {
+                return; // the file system keeps no user attributes
+            }
+            round_trip(a.path(), b.path()).unwrap();
+            assert!(xattr_pairs(&b.path().join("f"))
+                .unwrap()
+                .contains(&(b"user.note".to_vec(), b"v".to_vec())));
+            // A stream made by hand with an overlay attribute that redirects to a lower folder.
+            let stream = stream_with(|out| {
+                out.append_pax_extensions([("SCHILY.xattr.user.overlay.redirect", &b"/etc"[..])])
+                    .unwrap();
+                out.append_data(&mut mine(EntryType::Directory, 0), "d", io::empty())
+                    .unwrap();
+            });
+            let error = unpack_tree(c2.path(), stream.as_slice(), &anywhere()).unwrap_err();
+            assert!(error.contains("overlay attribute"), "{error}");
+        }
+
+        #[test]
+        fn the_unpack_stops_when_the_disk_has_less_than_the_margin() {
             let (a, b, c2) = (
                 tempfile::tempdir().unwrap(),
                 tempfile::tempdir().unwrap(),
@@ -875,112 +955,96 @@ mod linux {
             );
             put(a.path(), "big", &"x".repeat(100_000));
             let mut stream = Vec::new();
-            pack_layer(a.path(), &mut stream).unwrap();
-            let error = unpack_layer(b.path(), &mut stream.as_slice(), Budget::new(50_000, 100))
-                .unwrap_err();
-            assert!(error.contains("more space"), "{error}");
-            assert!(!b.path().join("big").exists());
-            put(a.path(), "second", "x");
-            let mut stream = Vec::new();
-            pack_layer(a.path(), &mut stream).unwrap();
-            let error = unpack_layer(c2.path(), &mut stream.as_slice(), Budget::new(u64::MAX, 2))
-                .unwrap_err();
-            assert!(error.contains("more than 2 entries"), "{error}");
-        }
-
-        fn stream_with(entries: impl FnOnce(&mut Vec<u8>)) -> Vec<u8> {
-            let mut stream = Vec::new();
-            write_header(&mut stream).unwrap();
-            let root = Attributes {
-                mode: 0o755,
-                uid: unsafe { libc::getuid() },
-                gid: unsafe { libc::getgid() },
-                mtime_sec: 1,
-                mtime_nsec: 0,
-                xattrs: Vec::new(),
+            pack_tree(a.path(), &mut stream).unwrap();
+            let all = Room {
+                min_free_bytes: u64::MAX / 2,
+                min_free_inodes: 0,
             };
-            write_dir(&mut stream, b".", &root).unwrap();
-            entries(&mut stream);
-            write_end(&mut stream).unwrap();
-            stream
-        }
-
-        fn mine() -> Attributes {
-            Attributes {
-                mode: 0o644,
-                uid: unsafe { libc::getuid() },
-                gid: unsafe { libc::getgid() },
-                mtime_sec: 1,
-                mtime_nsec: 0,
-                xattrs: Vec::new(),
+            let error = unpack_tree(b.path(), stream.as_slice(), &all).unwrap_err();
+            assert!(error.contains("room"), "{error}");
+            assert!(!b.path().join("big").exists());
+            let inodes = Room {
+                min_free_bytes: 0,
+                min_free_inodes: u64::MAX,
+            };
+            // A file system without an inode count (btrfs) cannot refuse on it.
+            if let Err(error) = unpack_tree(c2.path(), stream.as_slice(), &inodes) {
+                assert!(error.contains("files to make"), "{error}");
             }
         }
 
         #[test]
         fn a_stream_that_names_a_path_outside_the_layer_is_refused() {
-            for path in [
-                &b"../escape"[..],
-                b"/etc/passwd",
-                b"a/../../b",
-                b"a//b",
-                b"",
-                b"a/./b",
-            ] {
+            for path in ["../escape", "/etc/passwd", "a/../../b", "a//b", "a/./b"] {
                 let target = tempfile::tempdir().unwrap();
+                // The tar crate refuses to write such a name, so the header is written raw.
                 let stream = stream_with(|out| {
-                    write_file_start(out, path, &mine(), 1).unwrap();
-                    out.push(b'x');
+                    let mut header = mine(EntryType::Regular, 1);
+                    header.as_old_mut().name[..path.len()].copy_from_slice(path.as_bytes());
+                    header.set_cksum();
+                    out.append(&header, &b"x"[..]).unwrap();
                 });
-                let error = unpack_layer(
-                    target.path(),
-                    &mut stream.as_slice(),
-                    Budget::new(u64::MAX, u64::MAX),
-                )
-                .unwrap_err();
+                let error = unpack_tree(target.path(), stream.as_slice(), &anywhere()).unwrap_err();
                 assert!(error.contains("outside the layer"), "{path:?}: {error}");
             }
             let target = tempfile::tempdir().unwrap();
-            let stream = stream_with(|out| write_hardlink(out, b"x", b"../../etc/passwd").unwrap());
-            assert!(unpack_layer(
-                target.path(),
-                &mut stream.as_slice(),
-                Budget::new(u64::MAX, u64::MAX)
-            )
-            .is_err());
+            let stream = stream_with(|out| {
+                let mut header = mine(EntryType::Link, 0);
+                let link = b"../../etc/passwd";
+                header.as_old_mut().name[0] = b'x';
+                header.as_old_mut().linkname[..link.len()].copy_from_slice(link);
+                header.set_cksum();
+                out.append(&header, io::empty()).unwrap();
+            });
+            assert!(unpack_tree(target.path(), stream.as_slice(), &anywhere()).is_err());
+        }
+
+        #[test]
+        fn a_device_or_a_second_root_is_refused() {
+            let target = tempfile::tempdir().unwrap();
+            let stream = stream_with(|out| {
+                let mut header = mine(EntryType::Char, 0);
+                header.set_device_major(1).unwrap();
+                header.set_device_minor(3).unwrap();
+                out.append_data(&mut header, "null", io::empty()).unwrap();
+            });
+            assert!(unpack_tree(target.path(), stream.as_slice(), &anywhere()).is_err());
+            let target = tempfile::tempdir().unwrap();
+            let stream = stream_with(|out| {
+                out.append_data(&mut mine(EntryType::Directory, 0), ".", io::empty())
+                    .unwrap();
+            });
+            assert!(unpack_tree(target.path(), stream.as_slice(), &anywhere()).is_err());
         }
 
         #[test]
         fn a_broken_stream_is_an_error_and_not_a_partial_success() {
             let a = tempfile::tempdir().unwrap();
-            put(a.path(), "f", "some content");
+            put(a.path(), "f", &"some content".repeat(100));
             let mut stream = Vec::new();
-            pack_layer(a.path(), &mut stream).unwrap();
-            for cut in [0, 5, 20, stream.len() - 1] {
+            pack_tree(a.path(), &mut stream).unwrap();
+            // Inside a header and inside a file's bytes.
+            for cut in [100, 600, 700] {
                 let target = tempfile::tempdir().unwrap();
                 assert!(
-                    unpack_layer(
-                        target.path(),
-                        &mut &stream[..cut],
-                        Budget::new(u64::MAX, u64::MAX)
-                    )
-                    .is_err(),
+                    unpack_tree(target.path(), &stream[..cut], &anywhere()).is_err(),
                     "cut at {cut}"
                 );
             }
-            let mut padded = stream.clone();
-            padded.push(0);
             let target = tempfile::tempdir().unwrap();
-            let error = unpack_layer(
-                target.path(),
-                &mut padded.as_slice(),
-                Budget::new(u64::MAX, u64::MAX),
-            )
-            .unwrap_err();
+            assert!(unpack_tree(target.path(), &stream[..0], &anywhere()).is_err());
+            let mut padded = stream.clone();
+            padded.extend_from_slice(&[0; 2048]);
+            let target = tempfile::tempdir().unwrap();
+            unpack_tree(target.path(), padded.as_slice(), &anywhere()).unwrap();
+            padded.push(1);
+            let target = tempfile::tempdir().unwrap();
+            let error = unpack_tree(target.path(), padded.as_slice(), &anywhere()).unwrap_err();
             assert!(error.contains("after the end"), "{error}");
         }
 
         #[test]
-        fn a_socket_comes_back_as_a_socket_and_a_file_that_exists_is_not_replaced() {
+        fn a_socket_is_left_out_and_a_file_that_exists_is_not_replaced() {
             let (a, b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
             put(a.path(), "f", "x");
             let _socket = std::os::unix::net::UnixListener::bind(a.path().join("sock")).unwrap();
@@ -993,10 +1057,8 @@ mod linux {
             );
             let c2 = tempfile::tempdir().unwrap();
             round_trip(a.path(), c2.path()).unwrap();
-            assert!(fs::symlink_metadata(c2.path().join("sock"))
-                .unwrap()
-                .file_type()
-                .is_socket());
+            assert!(c2.path().join("f").exists());
+            assert!(fs::symlink_metadata(c2.path().join("sock")).is_err());
         }
 
         #[test]
@@ -1006,14 +1068,10 @@ mod linux {
             let target = tempfile::tempdir().unwrap();
             fs::create_dir(target.path().join("real")).unwrap();
             let stream = stream_with(|out| {
-                write_symlink(out, b"link", &mine(), b"real").unwrap();
+                out.append_link(&mut mine(EntryType::Symlink, 0), "link", "real")
+                    .unwrap();
             });
-            unpack_layer(
-                target.path(),
-                &mut stream.as_slice(),
-                Budget::new(u64::MAX, u64::MAX),
-            )
-            .unwrap();
+            unpack_tree(target.path(), stream.as_slice(), &anywhere()).unwrap();
             assert_eq!(
                 fs::read_link(target.path().join("link")).unwrap(),
                 Path::new("real")
@@ -1031,27 +1089,31 @@ mod tests {
     }
 
     #[test]
-    fn the_unpack_options_are_the_limits_and_one_layer() {
-        let parsed =
-            parse_unpack_args(&args(&["--max-bytes", "10", "--max-entries", "3", "/l"])).unwrap();
+    fn the_unpack_options_are_the_margins_and_one_layer() {
+        let parsed = parse_unpack_args(&args(&[
+            "--min-free-bytes",
+            "10",
+            "--min-free-inodes",
+            "3",
+            "/l",
+        ]))
+        .unwrap();
         assert_eq!(
             parsed,
             UnpackArgs {
-                max_bytes: 10,
-                max_entries: 3,
+                min_free_bytes: 10,
+                min_free_inodes: 3,
                 layer: "/l".into()
             }
         );
-        assert_eq!(
-            parse_unpack_args(&args(&["/l"])).unwrap().max_bytes,
-            u64::MAX
-        );
+        assert_eq!(parse_unpack_args(&args(&["/l"])).unwrap().min_free_bytes, 0);
         for bad in [
             args(&[]),
-            args(&["--max-bytes", "x", "/l"]),
-            args(&["--max-bytes"]),
+            args(&["--min-free-bytes", "x", "/l"]),
+            args(&["--min-free-bytes"]),
             args(&["/a", "/b"]),
             args(&["--bogus", "/l"]),
+            args(&["--max-bytes", "1", "/l"]),
         ] {
             assert!(parse_unpack_args(&bad).is_err(), "{bad:?}");
         }
@@ -1070,87 +1132,50 @@ mod tests {
         ] {
             assert!(!valid_entry_path(bad.as_bytes()), "{bad:?}");
         }
-        assert!(!valid_entry_path(&vec![b'a'; MAX_PATH as usize + 1]));
+        assert!(!valid_entry_path(&vec![b'a'; MAX_PATH + 1]));
     }
 
     #[test]
-    fn an_entry_round_trips_through_its_record() {
-        let attributes = Attributes {
-            mode: 0o4755,
-            uid: 1000,
-            gid: 1001,
-            mtime_sec: -5,
-            mtime_nsec: 999,
-            xattrs: vec![(b"user.x".to_vec(), b"v".to_vec())],
-        };
-        let mut stream = Vec::new();
-        write_file_start(&mut stream, b"a/b", &attributes, 3).unwrap();
-        stream.extend_from_slice(b"abc");
-        write_symlink(&mut stream, b"l", &attributes, b"a/b").unwrap();
-        write_end(&mut stream).unwrap();
-        let mut input = stream.as_slice();
-        assert_eq!(
-            read_entry(&mut input).unwrap(),
-            Entry::File(b"a/b".to_vec(), attributes.clone(), 3)
-        );
-        let mut content = Vec::new();
-        copy_content(&mut input, &mut content, 3).unwrap();
-        assert_eq!(content, b"abc");
-        assert_eq!(
-            read_entry(&mut input).unwrap(),
-            Entry::Symlink(b"l".to_vec(), attributes, b"a/b".to_vec())
-        );
-        assert_eq!(read_entry(&mut input).unwrap(), Entry::End);
+    fn tar_names_become_layer_paths_only_in_the_forms_tar_writes() {
+        assert_eq!(entry_path(b"./", true).unwrap(), b".");
+        assert_eq!(entry_path(b".", true).unwrap(), b".");
+        assert_eq!(entry_path(b"a/b/", true).unwrap(), b"a/b");
+        assert_eq!(entry_path(b"a/b", false).unwrap(), b"a/b");
+        for (raw, dir) in [
+            (&b"a/"[..], false),
+            (b"/a", true),
+            (b"../a", false),
+            (b"a//", true),
+            (b"./a", false),
+        ] {
+            assert!(entry_path(raw, dir).is_err(), "{raw:?}");
+        }
     }
 
     #[test]
-    fn an_impossible_record_is_refused() {
-        let mut stream = Vec::new();
-        write_dir(
-            &mut stream,
-            b".",
-            &Attributes {
-                mode: 0o755,
-                uid: 0,
-                gid: 0,
-                mtime_sec: 0,
-                mtime_nsec: 2_000_000_000,
-                xattrs: Vec::new(),
-            },
-        )
-        .unwrap();
-        assert!(read_entry(&mut stream.as_slice()).is_err());
-        assert!(read_entry(&mut [b'Z', 0, 0, 0, 1, b'a'].as_slice()).is_err());
-        assert!(read_header(&mut b"not a layer line".as_slice()).is_err());
-        let mut short = Vec::new();
-        write_file_start(
-            &mut short,
-            b"f",
-            &Attributes {
-                mode: 0o644,
-                uid: 0,
-                gid: 0,
-                mtime_sec: 0,
-                mtime_nsec: 0,
-                xattrs: Vec::new(),
-            },
-            10,
-        )
-        .unwrap();
-        short.extend_from_slice(b"abc");
-        let mut input = short.as_slice();
-        assert!(matches!(read_entry(&mut input).unwrap(), Entry::File(..)));
-        assert!(copy_content(&mut input, &mut Vec::new(), 10).is_err());
+    fn only_the_opaque_overlay_attribute_may_be_set() {
+        assert!(xattr_allowed(b"user.overlay.opaque").is_ok());
+        assert!(xattr_allowed(b"user.note").is_ok());
+        assert!(xattr_allowed(b"security.capability").is_ok());
+        for bad in [
+            &b"user.overlay.redirect"[..],
+            b"user.overlay.origin",
+            b"user.overlay.metacopy",
+            b"user.overlay.opaquex",
+            b"",
+            b"a\0b",
+        ] {
+            assert!(xattr_allowed(bad).is_err(), "{bad:?}");
+        }
+        assert!(xattr_allowed(&[b'a'; 256]).is_err());
     }
 
     #[test]
-    fn the_budget_counts_content_and_each_entry() {
-        let mut budget = Budget::new(ENTRY_COST * 2 + 100, 10);
-        budget.charge(50).unwrap();
-        budget.charge(50).unwrap();
-        assert!(budget.charge(1).is_err());
-        let mut few = Budget::new(u64::MAX, 1);
-        few.charge(0).unwrap();
-        assert!(few.charge(0).is_err());
+    fn a_folder_holds_what_is_below_it() {
+        assert!(holds(b".", b"a"));
+        assert!(holds(b"a", b"a/b"));
+        assert!(!holds(b"a", b"a"));
+        assert!(!holds(b"a", b"ab/c"));
+        assert!(!holds(b"a/b", b"a/c"));
     }
 }

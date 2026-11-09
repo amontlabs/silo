@@ -762,6 +762,18 @@ def reset_session_runtime():
         pass
 
 
+def remove_orphaned_display_lock():
+    """After a fresh boot, remove a :1 lock whose socket is missing: nothing of the previous boot
+    runs, and a computer's export carries no sockets, so the lock would never be adopted."""
+    try:
+        if (DISPLAY_SOCKET_DIR / 'X1').exists() or port_listening(5901) or listening():
+            return
+        if stat.S_ISREG(DISPLAY_LOCK.lstat().st_mode):
+            DISPLAY_LOCK.unlink()
+    except OSError:
+        pass
+
+
 def prepare_selkies_runtime(account):
     if not prepare_display_socket_directory():
         raise RuntimeError('The X11 socket directory is active or unsafe; inspect the desktop service log')
@@ -1367,6 +1379,7 @@ def main():
                 (RUN / 'failed').unlink(missing_ok=True)
                 # Nothing of the previous boot runs, so what it left in /run is stale.
                 reset_session_runtime()
+                remove_orphaned_display_lock()
                 marker.write_text(epoch)
         if action == 'status':
             pass

@@ -63,10 +63,10 @@ impl Report {
         if unmet.is_empty() {
             return None;
         }
-        let unmet = match unmet.iter().find(|finding| finding.id == "linux") {
-            Some(linux) => vec![*linux],
-            None => unmet,
-        };
+        // A host that is not Linux will not become one: say that alone, with no "yet".
+        if unmet.iter().any(|finding| finding.id == "linux") {
+            return Some("Container computers run only on a Linux host.".to_owned());
+        }
         let list: Vec<String> = unmet
             .iter()
             .map(|finding| format!("{} — {}", finding.what, finding.fix))
@@ -691,7 +691,7 @@ mod tests {
         assert!(report.findings.iter().all(|f| !f.ok && f.fix == NOT_LINUX));
         assert_eq!(
             report.refusal().unwrap(),
-            "This device cannot run container computers yet: This host runs Linux — container computers run only on a Linux host"
+            "Container computers run only on a Linux host."
         );
     }
 }

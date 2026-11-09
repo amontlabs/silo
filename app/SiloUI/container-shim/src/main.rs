@@ -7,8 +7,8 @@
 //!   silo-ctr connect --state DIR --host HOST --port N
 //!   silo-ctr tap --state DIR --sock PATH   (hands the running container's network device to the engine)
 //!   silo-ctr merge --out DIR LAYER...   (inside `userns`: folds overlay layers into one)
-//!   silo-ctr pack LAYER                 (inside `userns`: the layer's files onto standard output)
-//!   silo-ctr unpack [--max-bytes N] [--max-entries N] LAYER   (inside `userns`: standard input into an empty layer)
+//!   silo-ctr pack LAYER                 (inside `userns`: the layer's files as tar onto standard output)
+//!   silo-ctr unpack [--min-free-bytes N] [--min-free-inodes N] LAYER   (inside `userns`: a tar stream on standard input into an empty layer)
 //!   silo-ctr version
 
 #![cfg_attr(not(target_os = "linux"), allow(dead_code))]

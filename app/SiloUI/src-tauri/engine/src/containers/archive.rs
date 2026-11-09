@@ -3,16 +3,19 @@
 //! already use for a virtual machine's MicroSandbox snapshot.
 //!
 //! A checkpoint is a chain of layers (see [`super::layers`]), so the payload is the chain: a
-//! header, then each layer as its own zstd frame of `silo-ctr pack`'s stream. Nothing is merged or
+//! header, then each layer as its own zstd frame of a standard tar (PAX) stream that
+//! `silo-ctr pack` writes and `silo-ctr unpack` reads (sockets are left out: tar has no type for
+//! one). Nothing is merged or
 //! copied first, so an export needs no disk space beyond the file. The guest image does not travel:
 //! the header names the image the layers sit on, and the importing Silo needs the same one.
 //!
 //!     "SILO-CTR-EXPORT1" | header length (u32) | header (JSON) | per layer: frame length (u64) | zstd frame
 //!
 //! An import reads a file somebody else made. Each layer is unpacked by `silo-ctr unpack` in the
-//! user namespace of a container, with the new layer as its root and a limit on bytes and
-//! entries (see the shim's `pack` module). The header is checked field by field before any
-//! layer is made, and nothing in it can name a secret, a host path or another checkpoint.
+//! user namespace of a container, with the new layer as its root and a limit on memory and
+//! the disk's real free bytes and inodes watched (see the shim's `pack` module). The header is
+//! checked field by field before any layer is made, and nothing in it can name a secret, a host
+//! path or another checkpoint.
 
 use super::args::{SnapshotLoad, SnapshotSave};
 use super::layout::{ComputerRecord, RECORD_VERSION};
@@ -27,8 +30,6 @@ pub const MAGIC: &[u8; 16] = b"SILO-CTR-EXPORT1";
 const MAX_HEADER_BYTES: u32 = 1 << 20;
 /// More layers than a chain can have (see `layers::MAX_CHAIN`), with room for a longer one.
 pub const MAX_LAYERS: u32 = 64;
-/// The most entries one layer may hold on import.
-const MAX_ENTRIES_PER_LAYER: u64 = 20_000_000;
 /// The largest value of a size or count in a header; nothing a person can make is larger.
 const MAX_RESOURCE: u64 = 1 << 40;
 
@@ -136,6 +137,8 @@ impl Header {
     pub fn matches(&self, runtime_config: &Value) -> Result<(), String> {
         let template = &self.template;
         let number = |pointer: &str| runtime_config.pointer(pointer).and_then(Value::as_u64);
+        // The sizes the host disk guard reads come from the header, so each must be there and
+        // equal (a missing one is a manifest that does not describe this computer).
         let same = number("/resources/cpus") == Some(template.cpus)
             && number("/resources/max_cpus") == Some(template.max_cpus)
             && number("/resources/memory_mib") == Some(template.memory_mib)
@@ -144,9 +147,8 @@ impl Header {
                 .pointer("/image/Oci/reference")
                 .and_then(Value::as_str)
                 == Some(template.image_reference.as_str())
-            && runtime_config
-                .pointer("/image/Oci/root_disk/size_mib")
-                .is_none_or(|size| size.as_u64() == Some(template.root_disk_mib));
+            && number("/image/Oci/root_disk/size_mib") == Some(template.root_disk_mib)
+            && number("/mounts/0/storage/capacity_mib") == Some(template.workspace_mib);
         if same {
             Ok(())
         } else {
@@ -201,19 +203,34 @@ pub fn require_container_host() -> Result<(), RuntimeError> {
     })
 }
 
-/// The guest image a header needs must be the one this Silo pins: the layers hold changes against
-/// exactly that image, and the file does not carry it.
-pub fn require_pinned_image(header: &Header) -> Result<(), RuntimeError> {
-    require_pinned_digest(&header.template.image_digest)
+/// Whether this device has the guest image with config digest `digest`: the one this Silo pins
+/// (unpacked when a computer needs it) or one kept unpacked for a computer made on it. The
+/// layers hold changes against exactly that image, and the file does not carry it.
+fn has_image(home: &Path, digest: &str) -> bool {
+    is_sha256(digest)
+        && (super::image::pinned().is_ok_and(|pinned| pinned.image_digest == digest)
+            || super::image::unpacked_digest(&super::layout::Layout::new(home), digest, "")
+                .is_some())
 }
 
-/// [`require_pinned_image`] for the config digest an export names.
-pub fn require_pinned_digest(digest: &str) -> Result<(), RuntimeError> {
-    if digest == super::image::pinned()?.image_digest {
+/// An export names the image its computer was made on, whichever build pinned it then: it only
+/// needs to be one this device has.
+pub fn require_exportable_image(home: &Path, header: &Header) -> Result<(), RuntimeError> {
+    if has_image(home, &header.template.image_digest) {
         return Ok(());
     }
     Err(invalid(
-        "A container computer's export does not carry the guest image, so both devices need the same one. This computer uses a different image than this Silo pins: update Silo on the device with the older version, then export it again.",
+        "This computer was made on a guest image that is no longer on this device, so it cannot be exported.",
+    ))
+}
+
+/// An import needs the image the file's layers sit on.
+pub fn require_importable_image(home: &Path, digest: &str) -> Result<(), RuntimeError> {
+    if has_image(home, digest) {
+        return Ok(());
+    }
+    Err(invalid(
+        "This computer was made on an older guest image that this device does not have.",
     ))
 }
 
@@ -400,7 +417,7 @@ mod linux {
             ))
         })?;
         let header = read_header_from(&mut file)?;
-        require_pinned_image(&header)?;
+        require_importable_image(&paths.home, &header.template.image_digest)?;
         crate::containers::host_disk::require_room(&paths.home, "import a container computer")?;
         let store = Store::new(&layout);
         if store.group_exists(&request.group) {
@@ -409,44 +426,46 @@ mod linux {
                 request.group
             )));
         }
-        // What may be written: the free space less the host guard's margin.
-        let free = crate::transfer_area::free_space(&paths.home).map_err(unavailable)?;
-        let budget = free.saturating_sub(crate::containers::host_disk::margin_bytes());
         let ids: Vec<String> = (0..header.layers).map(|_| layers::new_id()).collect();
+        // Whatever fails from here on removes what was made (layers and record), so the guard
+        // exists before the first layer does.
+        let created = Created {
+            layout: &layout,
+            tools: &tools,
+            group: &request.group,
+            name: &header.name,
+            ids: &ids,
+            keep: std::cell::Cell::new(false),
+        };
         // The record that names the layers is written first, so collection never takes a layer
-        // that is still being filled; a failure removes both.
-        let _created = {
+        // that is still being filled; it says so (`filling`), so a layer half unpacked is not a
+        // checkpoint whatever stops the import.
+        let mut snapshot = {
             let _store = layers::lock();
             for id in &ids {
                 lifecycle::make_layer(&tools, &layout.layer(id)).map_err(unavailable)?;
             }
             let mut template = header.template.clone();
             template.layers = ids.clone();
-            let snapshot = Snapshot::new(&request.group, &header.name, ids.clone(), template);
+            let mut snapshot = Snapshot::new(&request.group, &header.name, ids.clone(), template);
+            snapshot.filling = true;
             store.write(&snapshot).map_err(unavailable)?;
-            Created {
-                layout: &layout,
-                tools: &tools,
-                group: &request.group,
-                name: &header.name,
-                ids: &ids,
-                keep: std::cell::Cell::new(false),
-            }
+            snapshot
         };
-        let mut remaining = budget;
         for id in &ids {
             let mut length = [0u8; 8];
             file.read_exact(&mut length)
                 .map_err(|_| corrupt("a layer is missing"))?;
             let length = u64::from_be_bytes(length);
-            let used = unpack_layer(&tools, &layout.layer(id), &mut file, length, remaining)?;
-            remaining = remaining.saturating_sub(used);
+            unpack_layer(&tools, &layout.layer(id), &mut file, length)?;
         }
         let mut extra = [0u8; 1];
         if file.read(&mut extra).unwrap_or(0) != 0 {
             return Err(corrupt("it has data after its last layer"));
         }
-        _created.keep.set(true);
+        snapshot.filling = false;
+        store.write(&snapshot).map_err(unavailable)?;
+        created.keep.set(true);
         Ok(())
     }
 
@@ -473,24 +492,24 @@ mod linux {
         }
     }
 
-    /// Feeds one frame of the file to `silo-ctr unpack`; returns the bytes the layer took.
+    /// Feeds one frame of the file to `silo-ctr unpack`, which keeps the margin of the host disk
+    /// guard free in bytes and in inodes.
     fn unpack_layer(
         tools: &Tools,
         layer: &Path,
         file: &mut File,
         length: u64,
-        budget: u64,
-    ) -> Result<u64, RuntimeError> {
-        let max_bytes = budget.to_string();
-        let max_entries = MAX_ENTRIES_PER_LAYER.to_string();
+    ) -> Result<(), RuntimeError> {
+        let min_bytes = crate::containers::host_disk::margin_bytes().to_string();
+        let min_inodes = crate::containers::host_disk::margin_inodes().to_string();
         let mut child = helper(
             tools,
             "unpack",
             &[
-                "--max-bytes".as_ref(),
-                max_bytes.as_ref(),
-                "--max-entries".as_ref(),
-                max_entries.as_ref(),
+                "--min-free-bytes".as_ref(),
+                min_bytes.as_ref(),
+                "--min-free-inodes".as_ref(),
+                min_inodes.as_ref(),
                 layer.as_os_str(),
             ],
         )
@@ -520,9 +539,7 @@ mod linux {
                 last_line(&reason)
             )));
         }
-        fed.map_err(|_| corrupt("a layer is damaged"))?;
-        // What the layer holds, as the host guard counts it.
-        Ok(lifecycle::layer_bytes(tools, layer).flatten().unwrap_or(0))
+        fed.map_err(|_| corrupt("a layer is damaged"))
     }
 }
 
@@ -694,8 +711,23 @@ mod tests {
         let mut elsewhere = same.clone();
         elsewhere.template.image_reference = "other:1".into();
         assert!(elsewhere.matches(&config).is_err());
-        let mut disk = same;
+        let mut disk = same.clone();
         disk.template.root_disk_mib += 1;
         assert!(disk.matches(&config).is_err());
+        let mut workspace = same.clone();
+        workspace.template.workspace_mib += 1;
+        assert!(workspace.matches(&config).is_err());
+        // A manifest that leaves a size out does not describe this computer.
+        for pointer in ["/image/Oci/root_disk", "/mounts"] {
+            let mut missing = config.clone();
+            let (parent, key) = pointer.rsplit_once('/').unwrap();
+            let parent = if parent.is_empty() {
+                &mut missing
+            } else {
+                missing.pointer_mut(parent).unwrap()
+            };
+            parent.as_object_mut().unwrap().remove(key);
+            assert!(same.matches(&missing).is_err(), "{pointer}");
+        }
     }
 }

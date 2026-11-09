@@ -1095,6 +1095,41 @@ class StaleSessionRuntime(unittest.TestCase):
         self.assertTrue((service.RUN / 'user' / 'bus').exists())
         self.assertEqual((service.RUN / 'boot-id').read_text(), 'new-boot')
 
+    def test_a_new_boot_removes_a_display_lock_whose_socket_is_missing(self):
+        self.pulse_dir()
+        lock = self.root / 'X1-lock'
+        lock.write_text('4242\n')
+        socket_dir = self.root / 'x11'
+        socket_dir.mkdir()
+        (service.RUN / 'boot-id').write_text('old-boot')
+        boot = self.root / 'boot_id'
+        boot.write_text('new-boot')
+        with patch.object(service, 'BOOT_ID', boot), \
+             patch.object(service, 'DISPLAY_LOCK', lock), \
+             patch.object(service, 'DISPLAY_SOCKET_DIR', socket_dir), \
+             patch.object(service, 'port_listening', return_value=False), \
+             patch.object(service, 'listening', return_value=False):
+            self.command('status')
+        self.assertFalse(lock.exists())
+
+    def test_a_display_lock_with_its_socket_is_left_for_the_stale_pair_check(self):
+        self.pulse_dir()
+        lock = self.root / 'X1-lock'
+        lock.write_text('4242\n')
+        socket_dir = self.root / 'x11'
+        socket_dir.mkdir()
+        (socket_dir / 'X1').write_text('')
+        (service.RUN / 'boot-id').write_text('old-boot')
+        boot = self.root / 'boot_id'
+        boot.write_text('new-boot')
+        with patch.object(service, 'BOOT_ID', boot), \
+             patch.object(service, 'DISPLAY_LOCK', lock), \
+             patch.object(service, 'DISPLAY_SOCKET_DIR', socket_dir), \
+             patch.object(service, 'port_listening', return_value=False), \
+             patch.object(service, 'listening', return_value=False):
+            self.command('status')
+        self.assertTrue(lock.exists())
+
     def test_reset_never_follows_a_symlink_planted_in_the_runtime_directory(self):
         outside = self.root / 'outside'
         outside.mkdir()

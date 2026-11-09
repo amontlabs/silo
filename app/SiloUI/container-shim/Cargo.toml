@@ -17,6 +17,8 @@ path = "src/init.rs"
 
 [dependencies]
 libc = "0.2"
+# The export format of a layer; without its own xattr handling (the shim sets attributes itself).
+tar = { version = "0.4", default-features = false }
 
 [dev-dependencies]
 tempfile = "3.27"

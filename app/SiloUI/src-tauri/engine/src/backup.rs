@@ -621,6 +621,11 @@ fn is_container_row(runtime_config: &Value) -> bool {
     crate::containers::is_container_config(runtime_config)
 }
 
+/// [`is_container_row`] for a source of an export.
+pub(crate) fn is_container_source(source: &BackupSource) -> bool {
+    is_container_row(&source.runtime_config)
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct BackupResult {
     pub(crate) created_at_ms: u64,
@@ -946,8 +951,12 @@ impl<R: MsbRunner> BackupService<R> {
                 // A checkpoint export reuses an already-captured, immutable member;
                 // a state export captures the computer's current disk first.
                 let snapshot = if let Some(member) = &source.existing_member {
-                    let snapshot =
-                        self.captured_snapshot_ref(&snapshot_group, member, cancellation)?;
+                    let snapshot = self.captured_snapshot_ref(
+                        &snapshot_group,
+                        member,
+                        container,
+                        cancellation,
+                    )?;
                     // Describe the checkpoint as it was captured, not the
                     // computer as it is now (E-29). A container's checkpoint has no
                     // descriptor: its disks cannot be resized, so it is the computer's own.
@@ -1005,7 +1014,12 @@ impl<R: MsbRunner> BackupService<R> {
                     )?;
                     // Capture advances MicroSandbox's source lineage. Its ancestor must
                     // remain in the native snapshot store even if archive writing fails.
-                    self.captured_snapshot_ref(&snapshot_group, &snapshot_name, cancellation)?
+                    self.captured_snapshot_ref(
+                        &snapshot_group,
+                        &snapshot_name,
+                        container,
+                        cancellation,
+                    )?
                 };
                 let snapshot = snapshot.argument();
                 self.require_success_with(
@@ -1050,7 +1064,7 @@ impl<R: MsbRunner> BackupService<R> {
             let image_digest = if container {
                 let header = crate::containers::archive::read_header(&payload_path)
                     .map_err(|error| BackupError::InvalidRequest(error.to_string()))?;
-                crate::containers::archive::require_pinned_image(&header)
+                crate::containers::archive::require_exportable_image(&self.command.home, &header)
                     .map_err(|error| BackupError::InvalidRequest(error.to_string()))?;
                 Some(header.template.image_digest)
             } else {
@@ -1230,6 +1244,7 @@ impl<R: MsbRunner> BackupService<R> {
         &self,
         group: &str,
         name: &str,
+        container: bool,
         cancellation: &Cancellation,
     ) -> Result<CapturedRef, BackupError> {
         let entries = self.snapshot_index("Locating captured computer disk", cancellation)?;
@@ -1245,8 +1260,10 @@ impl<R: MsbRunner> BackupService<R> {
                 )
             })?;
         // A container's checkpoint has no folder in MicroSandbox's store: the runtime names it
-        // by `group:name`.
-        if entry["artifact_path"].is_null() {
+        // by `group:name`. Which kind a computer is comes from its own row, never from what the
+        // checkpoint list leaves out: a virtual machine's checkpoint without its folder is an
+        // error.
+        if container {
             return Ok(CapturedRef::Container(format!("{group}:{name}")));
         }
         self.member_artifact(entry, group).map(CapturedRef::Path)
@@ -1712,11 +1729,11 @@ impl<R: MsbRunner> BackupService<R> {
             is_container_row(&described.manifest.computers[described_source].runtime_config);
         if described_container {
             // A container is not made of the MicroSandbox image the callback prepares: this
-            // device needs to be able to run containers and to pin the same guest image.
+            // device needs to be able to run containers and to have the guest image the layers sit on.
             (self.container_host)()
                 .map_err(|error| BackupError::InvalidRequest(error.to_string()))?;
             if let Some((_, digest)) = &described_image {
-                crate::containers::archive::require_pinned_digest(digest)
+                crate::containers::archive::require_importable_image(&self.command.home, digest)
                     .map_err(|error| BackupError::InvalidRequest(error.to_string()))?;
             }
         } else if let Some((reference, digest)) = &described_image {
@@ -1942,7 +1959,7 @@ impl<R: MsbRunner> BackupService<R> {
         // export manifest Silo validated, so the two must agree (E-19).
         // A container's checkpoint has no descriptor: its header was compared with the settings
         // before anything was loaded.
-        if !head_member["artifact_path"].is_null() {
+        if !is_container_row(runtime_config) {
             let descriptor =
                 read_snapshot_descriptor(&self.member_artifact(head_member, import_group)?)?;
             compare_loaded_descriptor(&descriptor, head_id, runtime_config).map_err(|detail| {
@@ -1961,6 +1978,7 @@ impl<R: MsbRunner> BackupService<R> {
         &self,
         group: &str,
         member: &str,
+        container: bool,
     ) -> Result<bool, BackupError> {
         let cleanup = Cancellation::default();
         let entries = self.snapshot_index("Checking interrupted export capture", &cleanup)?;
@@ -1969,7 +1987,7 @@ impl<R: MsbRunner> BackupService<R> {
         }) {
             return Ok(false);
         }
-        let snapshot = self.captured_snapshot_ref(group, member, &cleanup)?;
+        let snapshot = self.captured_snapshot_ref(group, member, container, &cleanup)?;
         self.require_success_with(
             "Verifying interrupted export capture",
             &["snapshot".into(), "verify".into(), snapshot.argument()],
@@ -5614,19 +5632,36 @@ mod tests {
     }
 
     #[test]
-    fn a_container_export_of_another_guest_image_is_refused_before_a_file_is_made() {
+    fn a_guest_image_this_device_has_can_be_exported_and_imported_and_another_cannot() {
         let temp = tempfile::tempdir().unwrap();
-        let runner = FakeRunner::default();
-        runner.container.store(true, Ordering::Release);
-        let service = service(&temp, runner);
-        let destination = temp.path().join("dev.silo-backup");
+        let home = temp.path();
         let pinned = crate::containers::image::pinned().unwrap().image_digest;
-        assert!(crate::containers::archive::require_pinned_digest(&pinned).is_ok());
+        let mut header = container_header();
+        header.template.image_digest = pinned.clone();
+        assert!(crate::containers::archive::require_exportable_image(home, &header).is_ok());
+        assert!(crate::containers::archive::require_importable_image(home, &pinned).is_ok());
+        // An image an older build pinned, still unpacked here, is as good as the pinned one.
+        let older = format!("sha256:{}", "1".repeat(64));
+        let layout = crate::containers::layout::Layout::new(home);
+        fs::create_dir_all(layout.image(&older).join("rootfs")).unwrap();
+        fs::write(layout.image(&older).join("digest"), format!("{older}\n")).unwrap();
+        header.template.image_digest = older.clone();
+        assert!(crate::containers::archive::require_exportable_image(home, &header).is_ok());
+        assert!(crate::containers::archive::require_importable_image(home, &older).is_ok());
         let other = format!("sha256:{}", "0".repeat(64));
-        let error = crate::containers::archive::require_pinned_digest(&other).unwrap_err();
-        assert!(error.to_string().contains("different image"), "{error}");
-        drop(service);
-        assert!(!destination.exists());
+        header.template.image_digest = other.clone();
+        let error = crate::containers::archive::require_exportable_image(home, &header)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("no longer on this device"), "{error}");
+        let error = crate::containers::archive::require_importable_image(home, &other)
+            .unwrap_err()
+            .to_string();
+        assert_eq!(
+            error,
+            "This computer was made on an older guest image that this device does not have."
+        );
+        assert!(crate::containers::archive::require_importable_image(home, "../../x").is_err());
     }
 
     #[test]
