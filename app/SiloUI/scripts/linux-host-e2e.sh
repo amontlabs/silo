@@ -195,6 +195,7 @@ container_checkpoint_features() {
 
   step "Keeping a fork into $ctr and undoing it"
   "$silo" fork "$ctr" --name "$ctr-k"
+  "$silo" start "$ctr-k"
   "$silo" exec "$ctr-k" -- sh -c 'echo kept > /home/silo/ct4-kept'
   "$silo" fold "$ctr-k"
   expect "kept file in the parent" "$(has_file "$ctr" /home/silo/ct4-kept)" yes
