@@ -340,6 +340,7 @@ mod tests {
         let mut plan = shell("exit 0");
         plan.files = Some(Arc::new(crate::containers::hold::ExecGroup::new(
             files.clone(),
+            "silo-ct-test",
         )));
         let streaming = spawn_streaming(&plan, false, Arc::new(|_, _| {})).unwrap();
         drop(plan);
@@ -351,6 +352,7 @@ mod tests {
         let mut unused = shell("exit 0");
         unused.files = Some(Arc::new(crate::containers::hold::ExecGroup::new(
             files.clone(),
+            "silo-ct-test",
         )));
         drop(unused);
         assert!(!files.exists());

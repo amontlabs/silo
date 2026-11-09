@@ -78,17 +78,36 @@ pub fn is_starting(name: &str) -> bool {
 ///
 /// It owns a private directory holding the pid file and the `--process` JSON (which carries the
 /// command's environment values), and removes it when the exec is over.
+///
+/// The pid file outlives the command (until the exec's owner lets go of it), and by then the number
+/// may belong to any other process of the host. So a signal is sent only while the pid is a
+/// process of the computer's own scope (`unit`), read from `/proc/<pid>/cgroup` right before.
 #[derive(Debug)]
 pub struct ExecGroup {
     directory: std::path::PathBuf,
+    /// The scope unit of the computer the command runs in (`lifecycle::unit_name`).
+    unit: String,
+    /// Where the processes are described (`/proc`).
+    proc: std::path::PathBuf,
 }
 
 const PID_FILE: &str = "exec.pid";
 const PROCESS_FILE: &str = "process.json";
 
 impl ExecGroup {
-    pub fn new(directory: std::path::PathBuf) -> Self {
-        Self { directory }
+    pub fn new(directory: std::path::PathBuf, unit: &str) -> Self {
+        Self {
+            directory,
+            unit: unit.to_owned(),
+            proc: "/proc".into(),
+        }
+    }
+
+    /// The same group, reading the processes from `proc` instead of `/proc`.
+    #[cfg(test)]
+    pub fn with_proc(mut self, proc: &std::path::Path) -> Self {
+        self.proc = proc.to_owned();
+        self
     }
 
     pub fn pid_file(&self) -> std::path::PathBuf {
@@ -99,8 +118,9 @@ impl ExecGroup {
         self.directory.join(PROCESS_FILE)
     }
 
-    /// SIGKILLs the command's process group. Only a process that leads its own group is touched,
-    /// so a stale or reused pid cannot take anything else with it. Returns whether it signalled.
+    /// SIGKILLs the command's process group. Only a process of the computer's own scope that
+    /// leads its own group is touched, so a stale or reused pid cannot take a process of the host
+    /// or of another computer with it. Returns whether it signalled.
     pub fn kill(&self) -> bool {
         self.signal(libc::SIGKILL)
     }
@@ -111,6 +131,9 @@ impl ExecGroup {
         let Some(pid) = leader_pid(&self.directory) else {
             return false;
         };
+        if !self.in_computer(pid) {
+            return false;
+        }
         // SAFETY: getpgid and kill take plain integers.
         unsafe {
             if libc::getpgid(pid) != pid {
@@ -118,6 +141,13 @@ impl ExecGroup {
             }
             libc::kill(-pid, signal) == 0
         }
+    }
+
+    /// Whether `pid` is a process of the computer's scope now (`crun exec` puts the command in the
+    /// container's control group, below the scope).
+    fn in_computer(&self, pid: i32) -> bool {
+        std::fs::read_to_string(self.proc.join(pid.to_string()).join("cgroup"))
+            .is_ok_and(|text| in_scope(&text, &self.unit))
     }
 }
 
@@ -179,6 +209,20 @@ mod tests {
         unsafe { libc::kill(pid as i32, 0) == 0 }
     }
 
+    const UNIT: &str = "silo-ct-ab12cd34-dev";
+
+    /// Describes `pid` in the process folder `proc` as a process of the scope `unit`, the way
+    /// `crun exec` leaves a command in the container's control group.
+    fn in_computer(proc: &std::path::Path, pid: u32, unit: &str) {
+        let dir = proc.join(pid.to_string());
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("cgroup"),
+            format!("0::/user.slice/user-1000.slice/user@1000.service/app.slice/{unit}.scope/ctr\n"),
+        )
+        .unwrap();
+    }
+
     #[test]
     fn a_dropped_guard_reaps_its_child_so_no_zombie_is_left() {
         let child = Command::new("sh").args(["-c", "exit 0"]).spawn().unwrap();
@@ -218,7 +262,9 @@ mod tests {
             .trim()
             .parse()
             .unwrap();
-        let group = ExecGroup::new(directory.path().to_owned());
+        let proc = tempfile::tempdir().unwrap();
+        in_computer(proc.path(), leader.id(), UNIT);
+        let group = ExecGroup::new(directory.path().to_owned(), UNIT).with_proc(proc.path());
         assert_eq!(group.pid_file(), pid_file);
         assert!(group.kill());
         leader.wait().unwrap();
@@ -246,7 +292,10 @@ mod tests {
             .process_group(0);
         let mut leader = leader.spawn().unwrap();
         std::fs::write(directory.path().join("exec.pid"), format!("{}\n", leader.id())).unwrap();
-        let group = ExecGroup::new(directory.path().to_owned());
+        let proc = tempfile::tempdir().unwrap();
+        in_computer(proc.path(), leader.id(), UNIT);
+        in_computer(proc.path(), std::process::id(), UNIT);
+        let group = ExecGroup::new(directory.path().to_owned(), UNIT).with_proc(proc.path());
         // Give the shell time to install its trap before the signal arrives.
         std::thread::sleep(Duration::from_millis(300));
         assert!(group.signal(libc::SIGTERM));
@@ -278,7 +327,9 @@ mod tests {
         std::fs::write(running.join("exec.pid"), format!("{}\n", leader.id())).unwrap();
         assert!(!exec_leftover(&running, idle));
         assert!(!exec_leftover(&running, Duration::ZERO));
-        let group = ExecGroup::new(running.clone());
+        let proc = tempfile::tempdir().unwrap();
+        in_computer(proc.path(), leader.id(), UNIT);
+        let group = ExecGroup::new(running.clone(), UNIT).with_proc(proc.path());
         assert!(group.kill());
         leader.wait().unwrap();
         assert!(exec_leftover(&running, idle), "the command is gone");
@@ -297,7 +348,9 @@ mod tests {
         let pid_file = directory.path().join("exec.pid");
         // This test process leads no group of its own (its group is the test harness's).
         std::fs::write(&pid_file, format!("{}\n", std::process::id())).unwrap();
-        let group = ExecGroup::new(directory.path().to_owned());
+        let proc = tempfile::tempdir().unwrap();
+        in_computer(proc.path(), std::process::id(), UNIT);
+        let group = ExecGroup::new(directory.path().to_owned(), UNIT).with_proc(proc.path());
         // SAFETY: getpgrp has no preconditions.
         if unsafe { libc::getpgrp() } as u32 != std::process::id() {
             assert!(!group.kill());
@@ -306,7 +359,46 @@ mod tests {
             std::fs::write(&pid_file, text).unwrap();
             assert!(!group.kill(), "{text:?}");
         }
-        assert!(!ExecGroup::new(directory.path().join("missing")).kill());
+        assert!(!ExecGroup::new(directory.path().join("missing"), UNIT).kill());
+    }
+
+    #[test]
+    fn a_pid_that_now_belongs_to_a_process_outside_the_computer_is_never_signalled() {
+        use std::os::unix::process::CommandExt;
+        // The command ended and its pid file stayed (a channel that closes after its command, a
+        // terminal that ends); the number now names a process of the host that leads a group of
+        // its own, as a shell's job, a daemon or another computer's holder does.
+        let mut bystander = Command::new("sleep")
+            .arg("300")
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::write(
+            directory.path().join("exec.pid"),
+            format!("{}\n", bystander.id()),
+        )
+        .unwrap();
+        let proc = tempfile::tempdir().unwrap();
+        // No entry at all, a process of the host, and a process of another computer.
+        let group = ExecGroup::new(directory.path().to_owned(), UNIT).with_proc(proc.path());
+        assert!(!group.kill());
+        let dir = proc.path().join(bystander.id().to_string());
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("cgroup"), "0::/user.slice/user-1000.slice/session-3.scope\n")
+            .unwrap();
+        assert!(!group.kill());
+        in_computer(proc.path(), bystander.id(), "silo-ct-ab12cd34-other");
+        assert!(!group.kill());
+        assert!(!group.signal(libc::SIGTERM));
+        assert!(
+            matches!(bystander.try_wait(), Ok(None)),
+            "a process outside the computer was signalled"
+        );
+        // The same process inside the computer's scope is the command, and is ended.
+        in_computer(proc.path(), bystander.id(), UNIT);
+        assert!(group.kill());
+        bystander.wait().unwrap();
     }
 
     #[test]
