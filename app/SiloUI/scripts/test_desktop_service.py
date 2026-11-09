@@ -1460,5 +1460,25 @@ class DesktopStartSize(unittest.TestCase):
         self.assertEqual(steps, ['xvfb', 'pulse', 'xfce'])
 
 
+class ProcessExecutable(unittest.TestCase):
+    def test_a_process_whose_exe_root_may_not_read_is_named_by_its_comm(self):
+        with patch.object(service.os, 'readlink', side_effect=PermissionError), \
+                patch.object(service.Path, 'read_text', return_value='Xvfb\n'):
+            self.assertEqual(service.process_exe(123), 'comm:Xvfb')
+
+    def test_a_readable_exe_is_the_link_target(self):
+        with patch.object(service.os, 'readlink', return_value='/usr/bin/Xvfb'):
+            self.assertEqual(service.process_exe(123), '/usr/bin/Xvfb')
+
+    @unittest.skipUnless(Path('/proc/self/stat').exists(), 'needs /proc')
+    def test_the_identity_of_a_live_process_is_stable_with_either_form(self):
+        first = service.managed_process_identity(os.getpid())
+        self.assertEqual(service.managed_process_identity(os.getpid()), first)
+        with patch.object(service.os, 'readlink', side_effect=PermissionError):
+            fallback = service.managed_process_identity(os.getpid())
+            self.assertTrue(fallback['exe'].startswith('comm:'))
+            self.assertEqual(service.managed_process_identity(os.getpid()), fallback)
+
+
 if __name__ == '__main__':
     unittest.main()

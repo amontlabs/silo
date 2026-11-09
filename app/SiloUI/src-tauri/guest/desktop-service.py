@@ -143,12 +143,22 @@ def current_boot_id():
         return None
 
 
+def process_exe(pid):
+    """The executable of a process. Root reads another account's `/proc/<pid>/exe` only with
+    CAP_SYS_PTRACE, which a container computer's root commands do not have; the process name
+    (always readable) stands in, so the same call names the same process at launch and later."""
+    try:
+        return os.readlink(f'/proc/{pid}/exe')
+    except PermissionError:
+        return 'comm:' + Path(f'/proc/{pid}/comm').read_text().strip()
+
+
 def managed_process_identity(pid):
     try:
         fields = Path(f'/proc/{pid}/stat').read_text().rsplit(')', 1)[1].split()
         return dict(startTicks=int(fields[19]), pgid=int(fields[2]),
                     uid=Path(f'/proc/{pid}').stat().st_uid,
-                    exe=os.readlink(f'/proc/{pid}/exe'))
+                    exe=process_exe(pid))
     except (FileNotFoundError, ProcessLookupError, PermissionError, OSError, ValueError, IndexError):
         return None
 
