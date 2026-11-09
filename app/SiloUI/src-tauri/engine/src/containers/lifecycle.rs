@@ -155,6 +155,26 @@ pub fn unit_name(paths: &RuntimePaths, name: &str) -> String {
     format!("silo-ct-{hash}-{name}")
 }
 
+/// Points a command that talks to the account's systemd user manager (`systemd-run --user`,
+/// `systemctl --user`) at this account's runtime folder. An engine started from another account's
+/// session (a CI runner's, a `sudo` shell's) can carry that account's `XDG_RUNTIME_DIR`, and the
+/// manager's socket is then refused to it ("Failed to connect to bus: Permission denied").
+fn for_user_manager(command: &mut Command) {
+    // SAFETY: getuid has no preconditions.
+    let uid = unsafe { libc::getuid() };
+    for_user_manager_of(command, uid, std::env::var_os("XDG_RUNTIME_DIR").as_deref());
+}
+
+fn for_user_manager_of(command: &mut Command, uid: u32, current: Option<&std::ffi::OsStr>) {
+    use std::os::unix::fs::MetadataExt;
+    let owned = current.is_some_and(|dir| std::fs::metadata(dir).is_ok_and(|meta| meta.uid() == uid));
+    if !owned {
+        command
+            .env("XDG_RUNTIME_DIR", format!("/run/user/{uid}"))
+            .env_remove("DBUS_SESSION_BUS_ADDRESS");
+    }
+}
+
 /// The container's cgroup below the cgroup root: a leaf of its scope.
 pub fn cgroup_path(uid: u32, unit: &str) -> String {
     format!("/user.slice/user-{uid}.slice/user@{uid}.service/app.slice/{unit}.scope/ctr")
@@ -1093,6 +1113,7 @@ fn launch(
         log
     };
     let mut command = Command::new(&tools.systemd_run);
+    for_user_manager(&mut command);
     command
         .args(["--user", "--scope", "--quiet", "--collect"])
         .arg(format!("--unit={unit}"))
@@ -1338,7 +1359,9 @@ fn wait_running(
 }
 
 fn systemctl(tools: &Tools, args: &[&str]) {
-    let _ = Command::new(&tools.systemctl)
+    let mut command = Command::new(&tools.systemctl);
+    for_user_manager(&mut command);
+    let _ = command
         .arg("--user")
         .args(args)
         .stdout(Stdio::null())
@@ -1453,6 +1476,7 @@ pub fn remove(paths: &RuntimePaths, tools: &Tools, name: &str) -> Result<(), Run
 /// engine's own processes are inside the user manager already.
 pub fn in_user_scope(tools: &Tools, command: &Command) -> Command {
     let mut scoped = Command::new(&tools.systemd_run);
+    for_user_manager(&mut scoped);
     scoped
         .args(["--user", "--scope", "--quiet", "--"])
         .arg(command.get_program())
@@ -1653,6 +1677,35 @@ pub fn exec_command(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_command_for_the_user_manager_gets_this_accounts_runtime_folder_unless_it_already_has_it() {
+        use std::os::unix::fs::MetadataExt;
+        let folder = tempfile::tempdir().unwrap();
+        let uid = std::fs::metadata(folder.path()).unwrap().uid();
+        let env = |command: &Command, key: &str| {
+            command
+                .get_envs()
+                .find(|(name, _)| *name == key)
+                .map(|(_, value)| value.map(|v| v.to_owned()))
+        };
+        // Another account's folder (here: one nobody this account owns) is replaced.
+        let mut other = Command::new("true");
+        for_user_manager_of(&mut other, uid + 1, Some(folder.path().as_os_str()));
+        assert_eq!(
+            env(&other, "XDG_RUNTIME_DIR"),
+            Some(Some(format!("/run/user/{}", uid + 1).into()))
+        );
+        assert_eq!(env(&other, "DBUS_SESSION_BUS_ADDRESS"), Some(None));
+        // A missing one too.
+        let mut missing = Command::new("true");
+        for_user_manager_of(&mut missing, uid, None);
+        assert!(env(&missing, "XDG_RUNTIME_DIR").is_some());
+        // One this account owns is left alone.
+        let mut own = Command::new("true");
+        for_user_manager_of(&mut own, uid, Some(folder.path().as_os_str()));
+        assert_eq!(env(&own, "XDG_RUNTIME_DIR"), None);
+    }
+
     use super::*;
 
     #[test]
