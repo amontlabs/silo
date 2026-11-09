@@ -192,13 +192,17 @@ pub fn exec_leftover(directory: &std::path::Path, idle: Duration) -> bool {
 }
 
 /// Whether the text of `/proc/<pid>/cgroup` places the process in the scope `unit`.scope (or a
-/// cgroup below it). A recycled process id is not.
+/// cgroup below it). A recycled process id is not. The first scope on the path decides: a
+/// computer may make cgroups below its own scope, and one named after another computer's scope
+/// is still inside its own.
 pub fn in_scope(cgroup: &str, unit: &str) -> bool {
     let scope = format!("{unit}.scope");
     cgroup
         .lines()
         .filter_map(|line| line.splitn(3, ':').nth(2))
-        .any(|path| path.split('/').any(|part| part == scope))
+        .any(|path| {
+            path.split('/').find(|part| part.ends_with(".scope")) == Some(scope.as_str())
+        })
 }
 
 /// The warnings the holder wrote to its log at or after byte `from` (`silo-ctr: warning: ...`).
@@ -473,6 +477,9 @@ mod tests {
             unit
         ));
         assert!(!in_scope("", unit));
+        // A cgroup another computer made below its own scope, named after this one's.
+        let other = "0::/user.slice/user-1000.slice/user@1000.service/app.slice/silo-ct-ab12cd34-other.scope";
+        assert!(!in_scope(&format!("{other}/ctr/{unit}.scope\n"), unit));
     }
 
     #[test]
