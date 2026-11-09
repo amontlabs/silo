@@ -934,7 +934,8 @@ refusal), and of the docs of the whole build against the code. Fixes are in the 
   and the status column of [CONTAINERS-PLAN.md](CONTAINERS-PLAN.md) still listed merged phases as open or as "this
   branch"; the container plan said nothing is copied for a checkpoint, which holds for a stopped computer only.
   The CT6 entry had no live check of the merged head; the run is added from GitHub's record. Relative links and
-  heading anchors of the build's docs were checked with a script (none broken).
+  heading anchors of the build's docs were checked with a script (none broken). The docs index ([README](../README.md)) did not
+  list this build's plan, log or the container plan; it has a row for them now.
 - **Checked, no change:** `unpack` and `pack` (the changed root, path and link checks, attribute rules, the
   memory limit, the disk looks, what follows the end of a stream); the header checks and the comparison with the
   manifest; labels in a header (those the engine reads are set again by the restore, and the quiet-fork labels

@@ -29,6 +29,7 @@ that every platform or live VM workflow has been exercised.
 | In-guest client | [`silo --in-guest`](SiloUI-IN-GUEST-CLIENT.md): a scoped token and bridge folder so an agent inside a computer can fork and ask for review; what it may and may not do |
 | Recipes | [Recipes and `silo up`](SiloUI-RECIPES.md): the recipe format, the build cache, forks and the desktop setting |
 | CI runner | [Silo as the machine GitHub Actions jobs run on](SiloUI-CI-RUNNER.md): `silo-runner`, a fresh computer per job, private repositories only |
+| Forks, sharing, CI runner and container computers | [Build plan](forks-ci/PLAN.md) and [log](forks-ci/BUILD_LOG.md) of the November 2026 build; [container computers plan](forks-ci/CONTAINERS-PLAN.md): an opt-in kind for Linux hosts that is less isolated than a VM, set up as in [the engine on a Linux host](SiloUI-ENGINE.md#container-computers-optional) |
 | Change review | [Reviewing a fork's changes](SiloUI-CHANGES.md): diff buckets and the `silo diff --json` shape |
 | Using the app | [Using the Silo app](SiloUI-APP.md): create a computer, open a project and development server, open the desktop, and connect another device |
 | Engine | [Engine crate extraction](SiloUI-ENGINE.md): workspace location, host context boundary, and macOS VM-window seam for `silod` |
