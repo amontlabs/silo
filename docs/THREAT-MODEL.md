@@ -944,7 +944,10 @@ with nothing sensitive on it, and the app, the CLI and `silo list` label it as l
   container is in its own Landlock domain, which cannot read a process of another command (`/proc/<pid>/environ`, `exe`), so
   the desktop session of either kind leaves its display, bus and runtime variables in
   `/run/silo-desktop/user/session.env`, a file only the working account owns and root reads after checking
-  that: it holds no secret, and the desktop stopping removes it. The viewer's credentials stay in
+  that: it holds no secret, and the desktop stopping removes it. A virtual machine whose desktop service predates
+  the file (Silo 0.13 or earlier; a computer keeps its service until its desktop is updated) has none, and the
+  launcher and `silo-computer-use` then read the working account's `xfce4-session` process, as they did before.
+  The viewer's credentials stay in
   `/var/lib/silo-desktop`, root's, and the streamer gets its password in its environment
   (`SELKIES_BASIC_AUTH_PASSWORD`), not in its arguments, which every process in the computer can read; its
   environment is readable by root and the working account's own processes, as in a virtual machine.
