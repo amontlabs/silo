@@ -628,10 +628,12 @@ fn start(
 /// status says so). The command ends by itself when the computer stops.
 #[cfg(target_os = "linux")]
 fn start_desktop(paths: &RuntimePaths, name: &str) {
-    let (paths, name) = (paths.clone(), name.to_owned());
+    let paths = paths.clone();
+    let owned = name.to_owned();
     let spawned = std::thread::Builder::new()
         .name(format!("desktop-boot-{name}"))
         .spawn(move || {
+            let name = owned;
             let command = desktop::boot_command(&name);
             if let Err(error) = exec_and_wait(
                 &paths,
