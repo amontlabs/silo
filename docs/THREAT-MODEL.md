@@ -875,7 +875,10 @@ with nothing sensitive on it, and the app, the CLI and `silo list` label it as l
   launchers and fails to start unless its caller passes the flag. A virtual machine keeps Chrome's
   sandbox. With the desktop off no launcher is written until it is turned on (a program that starts
   Chrome by hand passes the flag itself). The approvals, the audit of computer-use calls and the
-  one-driver-session rule are those of a virtual machine and run in the same engine code.
+  one-driver-session rule are those of a virtual machine and run in the same engine code. Each command the engine runs in the
+  container is in its own Landlock domain, which cannot read a process of another command (`/proc/<pid>/environ`, `exe`), so
+  the desktop session leaves its display, bus and runtime variables in `/run/silo-desktop/user/session.env`, a file only the
+  working account reads; it holds no secret (the viewer's credentials stay in `/var/lib/silo-desktop`, root's).
 - **Checkpoints and forks.** A computer's file system is an overlay: its writable layer over a
   chain of sealed layers, the shim layer and the image. Every layer is a directory of one shared
   store (`containers/layers/<id>`), a checkpoint is a list of layer ids with a copy of the
