@@ -568,10 +568,10 @@ print(port.get("state") or "-", port.get("hostPort") or "-", port.get("url") or 
       sleep 2
     done
     expect "chrome window on the desktop" "$([[ "$(in_container sh -c 'DISPLAY=:1 XAUTHORITY=/run/silo-desktop/user/Xauthority xwininfo -root -tree 2>/dev/null | grep -ci "example domain\|chrome"')" -gt 0 ]] && echo yes || echo no)" yes
-    expect "chrome runs with --no-sandbox" "$(in_container sh -c 'pgrep -af /opt/google/chrome/chrome | grep -c -- --no-sandbox | sed "s/^[1-9][0-9]*$/yes/"')" yes
+    expect "chrome runs with --no-sandbox" "$(in_container sh -c 'pgrep -af "[/]opt/google/chrome/chrome" | grep -c -- --no-sandbox | sed "s/^[1-9][0-9]*$/yes/"')" yes
     windows=""
     desktop_screenshot desktop-chrome-screenshot.png
-    in_container sh -c 'pkill -u silo -f /opt/google/chrome/chrome || true'
+    in_container sh -c 'pkill -u silo -f "[/]opt/google/chrome/chrome" || true'
   fi
 
   step "Forking $ctr with --gui"
