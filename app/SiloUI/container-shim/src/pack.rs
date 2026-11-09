@@ -14,7 +14,8 @@
 //! itself), mode, owner and group, modification time and extended attributes, then what the kind
 //! carries: a file's size and bytes, a symbolic link's target, a hard link's earlier path.
 //! Whiteouts (character device 0:0) and the `user.overlay.opaque` attribute travel as they are,
-//! because the layers below may still hold the files they hide. Sockets are left out; any other
+//! because the layers below may still hold the files they hide. A socket travels as the file it
+//! is (nothing listens on it afterwards), so a layer comes back as `cp -a` would copy it; any other
 //! device is refused.
 
 use std::io::{self, Read, Write};
@@ -27,6 +28,7 @@ const SYMLINK: u8 = b'S';
 const HARDLINK: u8 = b'H';
 const WHITEOUT: u8 = b'W';
 const FIFO: u8 = b'P';
+const SOCKET: u8 = b'K';
 const END: u8 = b'E';
 
 const MAX_PATH: u32 = 4096;
@@ -219,6 +221,7 @@ pub enum Entry {
     Hardlink(Vec<u8>, Vec<u8>),
     Whiteout(Vec<u8>, Attributes),
     Fifo(Vec<u8>, Attributes),
+    Socket(Vec<u8>, Attributes),
     End,
 }
 
@@ -281,6 +284,11 @@ pub fn write_fifo(out: &mut impl Write, path: &[u8], attributes: &Attributes) ->
     put_attributes(out, attributes)
 }
 
+pub fn write_socket(out: &mut impl Write, path: &[u8], attributes: &Attributes) -> io::Result<()> {
+    put_path(out, SOCKET, path)?;
+    put_attributes(out, attributes)
+}
+
 /// Reads the magic line.
 pub fn read_header(input: &mut impl Read) -> io::Result<()> {
     if &get::<16>(input)? != MAGIC {
@@ -327,6 +335,7 @@ pub fn read_entry(input: &mut impl Read) -> io::Result<Entry> {
         }
         WHITEOUT => Entry::Whiteout(path, get_attributes(input)?),
         FIFO => Entry::Fifo(path, get_attributes(input)?),
+        SOCKET => Entry::Socket(path, get_attributes(input)?),
         _ => return Err(bad("the stream has an entry of an unknown kind")),
     })
 }
@@ -516,9 +525,6 @@ mod linux {
                 pack_dir(root, &path, &meta, links, out)?;
                 continue;
             }
-            if kind.is_socket() {
-                continue;
-            }
             if !kind.is_symlink() && meta.nlink() > 1 && !kind.is_dir() {
                 let key = (meta.dev(), meta.ino());
                 if let Some(first) = links.get(&key) {
@@ -546,6 +552,8 @@ mod linux {
                 }
             } else if kind.is_fifo() {
                 write_fifo(out, &rel, &attributes).map_err(write_err)?;
+            } else if kind.is_socket() {
+                write_socket(out, &rel, &attributes).map_err(write_err)?;
             } else if kind.is_char_device() && meta.rdev() == 0 {
                 write_whiteout(out, &rel, &attributes).map_err(write_err)?;
             } else {
@@ -651,6 +659,7 @@ mod linux {
         Ok(())
     }
 
+    /// A whiteout (character device 0:0) or a socket file: the nodes `mknod` makes without a device.
     fn mknod(path: &Path, mode: u32) -> Result<(), String> {
         let p = c(path)?;
         // SAFETY: `p` is a valid path string.
@@ -716,6 +725,12 @@ mod linux {
                     budget.charge(0)?;
                     let target = join(root, &path);
                     mknod(&target, libc::S_IFCHR as u32)?;
+                    apply(&target, &attributes, false)?;
+                }
+                Entry::Socket(path, attributes) => {
+                    budget.charge(0)?;
+                    let target = join(root, &path);
+                    mknod(&target, libc::S_IFSOCK as u32)?;
                     apply(&target, &attributes, false)?;
                 }
                 Entry::Fifo(path, attributes) => {
@@ -965,7 +980,7 @@ mod linux {
         }
 
         #[test]
-        fn a_socket_is_left_out_and_a_file_that_exists_is_not_replaced() {
+        fn a_socket_comes_back_as_a_socket_and_a_file_that_exists_is_not_replaced() {
             let (a, b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
             put(a.path(), "f", "x");
             let _socket = std::os::unix::net::UnixListener::bind(a.path().join("sock")).unwrap();
@@ -978,7 +993,10 @@ mod linux {
             );
             let c2 = tempfile::tempdir().unwrap();
             round_trip(a.path(), c2.path()).unwrap();
-            assert!(!c2.path().join("sock").exists());
+            assert!(fs::symlink_metadata(c2.path().join("sock"))
+                .unwrap()
+                .file_type()
+                .is_socket());
         }
 
         #[test]

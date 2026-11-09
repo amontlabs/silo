@@ -863,8 +863,8 @@ with nothing sensitive on it, and the app, the CLI and `silo list` label it as l
   - *What is written.* The export is a checkpoint of the computer's disks (a running one is frozen
     for the copy, up to 30 s, as for any checkpoint) and each layer of its chain is written as it is,
     owners included, by `silo-ctr pack` in the container's own user namespace, so the engine's
-    account never reads a layer outside it. Sockets are left out; a device node other than a
-    whiteout stops the export. The guest image is never in the file: the file names the config digest
+    account never reads a layer outside it. A socket file comes back as an empty socket file; a
+    device node other than a whiteout stops the export. The guest image is never in the file: the file names the config digest
     it needs and the importing Silo refuses any other than the one it pins, which also bounds what
     the layers can sit on. Secrets, GitHub access, environment, ports and layer ids are dropped
     from the record in the file, as they are for a VM, and the settings in the manifest carry the
