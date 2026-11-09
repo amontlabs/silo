@@ -33,10 +33,11 @@ func (c Capacity) Allows(os string, memoryGiB int, listed []Computer, pending []
 		if !computer.Occupies() {
 			continue
 		}
-		switch computer.Kind {
-		case "macos":
+		// Whatever is not a macOS virtual machine runs on the Linux budget: a Linux virtual
+		// machine, and a container computer, which uses the host's memory the same way.
+		if computer.Kind == "macos" {
 			macRunning++
-		case "linux":
+		} else {
 			linuxRunning++
 			linuxMem += computer.MemoryGiB
 		}
