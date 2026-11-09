@@ -1087,6 +1087,20 @@ class Launcher(unittest.TestCase):
             self.assertNotIn('XAUTHORITY', other)
             self.assertEqual(other['DISPLAY'], ':1')
 
+    def test_when_the_session_cannot_be_read_it_uses_the_file_the_session_wrote(self):
+        launcher = self.load()
+        with tempfile.TemporaryDirectory() as directory:
+            self.proc(directory, 5, 'xfce4-session', '')
+            os.chmod(Path(directory) / '5' / 'environ', 0)
+            session = Path(directory) / 'session.env'
+            session.write_text('DISPLAY=:1\nDBUS_SESSION_BUS_ADDRESS=unix:path=/tmp/dbus-FILE\n'
+                               'XAUTHORITY=/run/silo-desktop/user/Xauthority\nPATH=/ignored\n')
+            with mock.patch.object(launcher, 'SESSION_FILE', str(session)):
+                found = launcher.session_env(directory, uid=os.getuid())
+        self.assertEqual(found['DBUS_SESSION_BUS_ADDRESS'], 'unix:path=/tmp/dbus-FILE')
+        self.assertEqual(found['XAUTHORITY'], '/run/silo-desktop/user/Xauthority')
+        self.assertNotIn('PATH', found)
+
     def test_without_a_session_it_falls_back_to_the_standard_addresses(self):
         launcher = self.load()
         with tempfile.TemporaryDirectory() as directory:

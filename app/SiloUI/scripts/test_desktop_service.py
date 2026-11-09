@@ -1460,6 +1460,22 @@ class DesktopStartSize(unittest.TestCase):
         self.assertEqual(steps, ['xvfb', 'pulse', 'xfce'])
 
 
+class SessionEnvironmentFile(unittest.TestCase):
+    def test_a_container_session_writes_its_environment_for_other_commands(self):
+        with patch.dict(os.environ, {'SILO_RUNTIME': 'container'}):
+            command = service.xfce_command()
+        self.assertEqual(command[:4], ['dbus-run-session', '--', 'sh', '-c'])
+        self.assertIn('session.env', command[4])
+        self.assertTrue(command[4].endswith('exec startxfce4'))
+        for key in ('DISPLAY', 'DBUS_SESSION_BUS_ADDRESS', 'XDG_RUNTIME_DIR', 'XAUTHORITY'):
+            self.assertIn(key, command[4])
+
+    def test_a_virtual_machine_session_is_started_as_before(self):
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop('SILO_RUNTIME', None)
+            self.assertEqual(service.xfce_command(), ['dbus-run-session', '--', 'startxfce4'])
+
+
 class ProcessExecutable(unittest.TestCase):
     def test_a_process_whose_exe_root_may_not_read_is_named_by_its_comm(self):
         with patch.object(service.os, 'readlink', side_effect=PermissionError), \

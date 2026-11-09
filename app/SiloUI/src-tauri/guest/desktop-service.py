@@ -963,6 +963,21 @@ def start_session_processes(commands, environment, account, state, children, sto
                 sleep_until_service_event(0.5)
 
 
+# In a container computer the commands of one exec cannot read the processes of another (Landlock
+# keeps a process from reading outside its own domain), so a program that needs the session's
+# environment (Cua Driver's launcher) cannot read it from the session process. The session writes
+# it to a file the working account owns when it starts.
+SESSION_ENV_SCRIPT = ('umask 077; env | grep -E "^(DISPLAY|DBUS_SESSION_BUS_ADDRESS|XDG_RUNTIME_DIR|XAUTHORITY)=" '
+                      '> "$XDG_RUNTIME_DIR/session.env.new" && mv "$XDG_RUNTIME_DIR/session.env.new" '
+                      '"$XDG_RUNTIME_DIR/session.env"; exec startxfce4')
+
+
+def xfce_command():
+    if os.environ.get('SILO_RUNTIME') == 'container':
+        return ['dbus-run-session', '--', 'sh', '-c', SESSION_ENV_SCRIPT]
+    return ['dbus-run-session', '--', 'startxfce4']
+
+
 def supervise_selkies():
     with (RUN / 'supervisor.lock').open('w') as guard:
         try:
@@ -1023,7 +1038,7 @@ def supervise_selkies():
                 ('xvfb', ['Xvfb', ':1', '-screen', '0', XVFB_SCREEN, '+extension', 'RANDR',
                           '-noreset', '-nolisten', 'tcp', '-auth', str(RUN / 'user/Xauthority')]),
                 ('pulse', ['pulseaudio', '--daemonize=no', '--exit-idle-time=-1']),
-                ('xfce', ['dbus-run-session', '--', 'startxfce4']),
+                ('xfce', xfce_command()),
             ]
             start_session_processes(
                 commands, environment, account, state, session_children, lambda: stopping,

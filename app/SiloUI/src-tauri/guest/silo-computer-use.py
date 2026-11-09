@@ -109,6 +109,7 @@ import sys
 
 DRIVER = '/usr/local/bin/cua-driver'
 KEYS = ('DISPLAY', 'DBUS_SESSION_BUS_ADDRESS', 'XDG_RUNTIME_DIR', 'XAUTHORITY')
+SESSION_FILE = '/run/silo-desktop/user/session.env'
 
 
 def session_env(proc='/proc', uid=None):
@@ -136,6 +137,18 @@ def session_env(proc='/proc', uid=None):
                 found[key] = value
         if 'DBUS_SESSION_BUS_ADDRESS' in found:
             break
+    if 'DBUS_SESSION_BUS_ADDRESS' not in found:
+        # A container computer's commands cannot read each other's processes (Landlock keeps a
+        # process from reading one outside its own domain), so the session wrote its
+        # environment to a file when it started.
+        try:
+            with open(SESSION_FILE) as handle:
+                for line in handle.read().splitlines():
+                    key, _, value = line.partition('=')
+                    if key in KEYS and value:
+                        found.setdefault(key, value)
+        except OSError:
+            pass
     runtime = found.get('XDG_RUNTIME_DIR') or (
         '/run/silo-desktop/user' if os.path.isdir('/run/silo-desktop/user') else f'/run/user/{uid}')
     found.setdefault('DISPLAY', ':1')
@@ -604,6 +617,16 @@ def session_env(proc=Path('/proc'), strict=False):
                 found[key] = value
         if 'DBUS_SESSION_BUS_ADDRESS' in found:
             break
+    if 'DBUS_SESSION_BUS_ADDRESS' not in found:
+        # A container computer's commands cannot read each other's processes (Landlock), so the
+        # session wrote its environment to a file when it started.
+        try:
+            for line in (Path(SESSION_RUNTIME_DIR) / 'session.env').read_text().splitlines():
+                key, _, value = line.partition('=')
+                if key in ('DISPLAY', 'DBUS_SESSION_BUS_ADDRESS', 'XDG_RUNTIME_DIR', 'XAUTHORITY') and value:
+                    found.setdefault(key, value)
+        except OSError:
+            pass
     if 'DBUS_SESSION_BUS_ADDRESS' not in found and strict:
         raise Failure('session-unavailable', 'no desktop session process')
     environment = {'DISPLAY': found.get('DISPLAY', SESSION_DISPLAY),
