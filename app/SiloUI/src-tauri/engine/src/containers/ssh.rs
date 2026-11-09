@@ -666,11 +666,12 @@ mod server {
             };
             if chan.input.as_ref().is_some_and(|input| !input.push(data)) {
                 // The command has not read what the client sent for a long way: it is ended.
+                let debug = chan.input.as_ref().map(|i| (i.queue.queued.load(Ordering::Relaxed), i.queue.budget.load(Ordering::Relaxed)));
                 chan.end();
                 session.extended_data(
                     channel,
                     1,
-                    Bytes::from_static(b"The command did not read its input.\r\n"),
+                    Bytes::from(format!("The command did not read its input. DEBUG {debug:?}\r\n")),
                 )?;
                 session.exit_status_request(channel, 1)?;
                 session.close(channel)?;
