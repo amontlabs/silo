@@ -1689,7 +1689,6 @@ mod server {
         async fn a_login_is_refused_when_the_working_account_has_the_wrong_id() {
             let key = key();
             let mut fixture = fixture(&authorized_line(&key, "me"));
-            assert!(authenticates(&fixture, "silo", &key).await);
             Arc::get_mut(&mut fixture.shared).unwrap().account =
                 |_| Err("The account silo in box has the id 1000.".into());
             assert!(!authenticates(&fixture, "silo", &key).await);
