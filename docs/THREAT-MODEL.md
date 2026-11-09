@@ -831,13 +831,22 @@ with nothing sensitive on it, and the app, the CLI and `silo list` label it as l
   process group. The `sftp` subsystem runs `/usr/lib/openssh/sftp-server` (the guest image's
   `openssh-sftp-server`) as the working account, so file access over SFTP is exactly the account's
   own. A terminal comes from a pseudo-terminal `crun` makes inside the container; the SSH server
-  receives its controlling side over a private socket. Client environment variables are refused,
-  as with an `sshd` that accepts none, and there is no agent, X11, port or socket forwarding. The
-  local terminal runs the same command attached to the user's terminal. The loopback listener is
-  reachable by every user on the host (see the loopback note under Other local users); the
-  authorized key is the whole check, as for a virtual machine's. SSH sessions do not survive the
-  engine stopping the container or the listener; a container that an engine restart leaves
-  running is taken back by the next engine (see Checkpoints and forks below).
+  (or the local terminal command) receives its controlling side over a socket in a folder only
+  the account can enter (mode `0700`, whatever the umask of the process that serves the session:
+  whoever connects to that socket first gives the session its terminal). Client environment
+  variables are refused, as with an `sshd` that accepts none, and there is no agent, X11, remote
+  (`-R`) or socket forwarding. A local forward (`direct-tcpip`: `ssh -L`, `ssh -D`, the editor's
+  port forwarding, the desktop viewer) is answered only toward the container's own loopback, by a
+  connection made inside the container's network namespace (`silo-ctr connect`); any other
+  destination is refused, so a forward never reaches the host's network. The local terminal runs
+  the same command attached to the user's terminal. To end or signal a command (a closed channel,
+  a timeout, an SSH `signal` request) the engine signals the process group named in the command's
+  pid file, and only while that pid is a process of the computer's own scope: the file outlives
+  the command, and a number the host has since given to another process is never signalled. The
+  loopback listener is reachable by every user on the host (see the loopback note under Other
+  local users); the authorized key is the whole check, as for a virtual machine's. SSH sessions do
+  not survive the engine stopping the container or the listener; a container that an engine
+  restart leaves running is taken back by the next engine (see Checkpoints and forks below).
 - **The in-guest client (boundary 9) in a container.** The per-computer share is the computer's
   runtime folder, bound at `/.msb` (read-write, no exec, no devices) and sealed by mode instead of
   by stat override: its parent `sandboxes/<name>` is `0700`, the runtime folder `0711`, and
