@@ -866,8 +866,11 @@ with nothing sensitive on it, and the app, the CLI and `silo list` label it as l
     account never reads a layer outside it. Sockets are left out; a device node other than a
     whiteout stops the export. The guest image is never in the file: the file names the config digest
     it needs and the importing Silo refuses any other than the one it pins, which also bounds what
-    the layers can sit on. The network policy is reset to deny-all, and secrets, GitHub access,
-    environment, ports and layer ids are dropped from the record in the file, as they are for a VM.
+    the layers can sit on. Secrets, GitHub access, environment, ports and layer ids are dropped
+    from the record in the file, as they are for a VM, and the settings in the manifest carry the
+    same deny-all network section a VM's do. A container's real network is the gateway's one policy
+    (public addresses only, boundary 2), which an imported container has from its first start like
+    any other, with the secrets and GitHub access this device assigns to it then.
   - *What is read.* The file is an untrusted input. The payload's hash is checked as for a VM; the
     header is read with unknown fields refused, and its name, resources, labels and image are checked
     field by field and against the settings the manifest was validated for, so the file cannot make a

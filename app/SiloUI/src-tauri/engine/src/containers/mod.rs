@@ -527,6 +527,7 @@ pub fn inspect_value(
         .map(|(key, value)| (key.clone(), Value::String(value.clone())))
         .collect();
     let config = json!({
+        "name": name,
         "labels": labels,
         "resources": {
             "cpus": record.cpus,
@@ -1146,6 +1147,7 @@ mod tests {
             .unwrap();
         let value = inspect_value("box", &record, "Created", &[]);
         assert_eq!(value["status"], "Created");
+        assert_eq!(value["config"]["name"], "box");
         assert_eq!(value["config"]["labels"]["silo.managed"], "true");
         assert_eq!(value["config"]["resources"]["memory_mib"], 2048);
         assert_eq!(

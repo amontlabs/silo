@@ -549,6 +549,14 @@ print(rows.get(sys.argv[1], "missing"))' "$copy")
   "$silo" drop "$copy"
   "$silo" drop "$ctr"
   rm -rf "$(dirname "$file")"
+  # What the import kept of the file (its checkpoint) goes with the computer.
+  leftovers=1
+  for _ in $(seq 1 30); do
+    leftovers=$(engine_find -path "*containers/snapshots/silo-import-*" -name '*.json' | wc -l)
+    [[ "$leftovers" == 0 ]] && break
+    sleep 1
+  done
+  expect "import checkpoints left behind" "$leftovers" 0
 }
 
 # A container created with its desktop off. `--no-desktop` sends the request the app's form sends

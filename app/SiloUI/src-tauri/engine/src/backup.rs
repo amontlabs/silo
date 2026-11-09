@@ -5504,11 +5504,9 @@ mod tests {
 
     /// `inspect`'s settings of a container computer called `dev`.
     fn container_config() -> Value {
-        let mut inspected =
-            crate::containers::inspect_value("dev", &container_header().template, "Running", &[]);
-        // The runtime reports its settings with the computer's name inside.
-        inspected["config"]["name"] = "dev".into();
-        inspected["config"].clone()
+        crate::containers::inspect_value("dev", &container_header().template, "Running", &[])
+            ["config"]
+            .clone()
     }
 
     fn container_header() -> crate::containers::archive::Header {
