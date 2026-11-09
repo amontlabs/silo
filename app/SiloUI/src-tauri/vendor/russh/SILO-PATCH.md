@@ -26,6 +26,11 @@ command that read slowly, which `sshd` does not do.
   priority queue (`Msg::WindowAdjust`), which is not held back while data waits for the client's
   window.
 
+The upstream unit tests stay in `src/` but are not run: cargo cannot test a non-member crate that
+needs dev-dependencies, and they are dropped from the manifest (`scripts/test_ci_coverage.py` exempts
+russh for that reason). The patch is covered by the SSH server's own tests, which drive a real russh
+client against it (a command that reads slowly is held back by the window and never ended).
+
 Run the SSH server's tests on Linux through the Silo manifest:
 
     cargo test --manifest-path app/SiloUI/Cargo.toml -p silo-engine --lib containers::ssh
