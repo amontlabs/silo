@@ -1246,8 +1246,11 @@ class BrowserLaunchers(unittest.TestCase):
         self.assertEqual(result.stdout, '--no-sandbox about:blank --x ')
 
     def test_the_launcher_says_so_when_no_browser_is_installed(self):
+        text = cu.BROWSER_LAUNCHER_TEXT
+        for path in cu.BROWSER_BINARIES:
+            text = text.replace(path, str(self.root / 'absent' / Path(path).name))
         launcher = self.root / 'launcher'
-        launcher.write_text(cu.BROWSER_LAUNCHER_TEXT)
+        launcher.write_text(text)
         launcher.chmod(0o755)
         result = subprocess.run([str(launcher)], capture_output=True, text=True)
         self.assertEqual(result.returncode, 127)
