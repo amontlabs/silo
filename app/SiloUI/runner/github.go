@@ -19,7 +19,7 @@ import (
 
 // publicRepoAdvice is shown whenever the helper refuses a public repository.
 const publicRepoAdvice = "GitHub's own guidance is that self-hosted runners \"should almost never be used for public repositories\": " +
-	"anyone can open a pull request, and a workflow it runs would execute on this Mac. silo-runner only serves private repositories"
+	"anyone can open a pull request, and a workflow it runs would execute on this machine. silo-runner only serves private repositories"
 
 // AccessChecker verifies that nothing public can reach the runners.
 type AccessChecker interface {

@@ -70,7 +70,7 @@ silo-runner run   -config config.yaml
 | `limits.readyTimeout` / `startAttempts` | wait for "Listening for Jobs"; computers tried before backing off | 3m, 3 |
 | `limits.idleTimeout` | an idle runner no job needs is removed after this | 10m |
 | `limits.listenerStall` | the watchdog restarts a session with no poll for this long | 5m |
-| `linuxBudget` | `memoryGiB`, `count`: Linux computers on this host. Each computer counts with the `memory:` of its recipe file (the engine's default, 4 GiB on Linux and 8 on macOS, when the file has none) | on a Mac, none (0 or left out: no bound beyond `maxRunners`). On a [Linux host](#linux-hosts), a field left out comes from the host: three quarters of its memory (the smaller of the machine's and its cgroup's limit), one computer per CPU |
+| `linuxBudget` | `memoryGiB`, `count`: Linux computers on this host. Each computer counts with the `memory:` of its recipe file (the engine's default, 4 GiB on Linux and 8 on macOS, when the file has none) | on a Mac, none (0 or left out: no bound beyond `maxRunners`). On a [Linux host](#linux-hosts), a field left out comes from the host: three quarters of its memory, one computer per CPU (cgroup limits are not read; see [Capacity](#capacity-and-devkvm)) |
 | `runnerRefresh` | `checkEvery` (24h), `afterDays` (3), `disabled` | |
 | `scaleSets[]` | `label`, `recipe`, `os` (`linux`/`macos`), `maxRunners`, `keepFailed: {count, days}` | `maxRunners` 1, `keepFailed.count` 3 (Linux) or 1 (macOS), `keepFailed.days` 7 |
 
@@ -83,7 +83,8 @@ silo-runner run   -config config.yaml
    not show running yet: every record that is forking, or live and not shown running, plus the recipe
    rebuilds that are running. On a Mac every running,
    starting or stopping macOS VM counts, whatever started it (a recipe build, your own computer,
-   another runner): Apple allows two. Linux uses `linuxBudget` and the memory in each recipe file. The
+   another runner): Apple allows two. Linux uses `linuxBudget` and the memory in each recipe file; a
+   running container computer counts as a Linux computer with its memory. The
    free-disk guard comes next. Nothing is forked when either says no; the next poll or tick asks again.
 3. The helper writes the computer's record (`ci-<label>-<id>`, phase `forking`) and then runs
    `silo fork ci-<label>-<id> --recipe <recipe>`. The name is new every time and is never taken from a

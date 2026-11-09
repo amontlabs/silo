@@ -1359,70 +1359,6 @@ checks passed; the failures were four product problems, all fixed afterwards (te
     own cgroup missed a `MemoryMax=` on silod's unit and could shrink the budget wrongly). Docs say that where the engine or the
     user's slice has a memory limit, or in a container or VM with less memory than it reports, `linuxBudget` must be set; the stale
     comment on `LinuxBudget` (zero now means the host default) is fixed.
-  - *Packaging:* `package-engine.py` builds `silo-runner` (`go build`, `CGO_ENABLED=0`, `GOOS=linux`, `GOARCH` of the
-    platform, `-X main.version=<engine version>`) and puts it in both Linux archives as `silo-runner`, with the Go modules'
-    licenses (checked in under `runner/licenses/`) in `resources/silo-runner-licenses/` and a notices section. The ELF
-    machine check covers it. The jobs that package a Linux archive (`linux-host.yml` x2, `containers-c1.yml`,
-    `engine-release.yml`) install Go from `runner/go.mod`; the release verification runs `silo-runner version`. Not in the macOS
-    engine archive (an embedding-app format; a Mac builds the helper with `go build`).
-  - *Service:* `silo-runner service register|unregister` (`service.go`) writes `~/.config/systemd/user/silo-runner.service` with
-    `After=`/`Wants=` the engine's unit (`-engine-unit` for a Dev engine), `Restart=on-failure`, `UMask=0077`,
-    `KillMode=mixed`, an optional `EnvironmentFile=-%E/silo-runner/env` for the token. **Chosen over a documented unit file**
-    because the unit needs canonical, systemd-quoted paths and a refusal to overwrite foreign files, the same reasons
-    `silod --service register` writes its own; about 150 lines, unit-tested. A user unit runs as the account of the user
-    manager, which is the account of the engine's socket; `silo-runner` also refuses euid 0.
-  - *Capacity:* on a Linux host (`GOOS=linux`, no `silo.device`) a `linuxBudget` field left out defaults to three quarters
-    of `MemTotal` and one computer per CPU. **Chosen over requiring it** so the safe setting does not depend on remembering
-    to write it; `MemTotal` and not `MemAvailable` so a restart with computers running computes the same budget. A budget
-    below one computer of the largest recipe, a `macos` scale set, and an unusable `/dev/kvm` (missing, or no permission:
-    what to do is in the message) stop startup. `silo-runner check -offline` does the host part with no GitHub; an empty
-    `tokenEnv` variable is named before any call.
-  - *Recipe:* `silo-linux` pins `RUNNER_SHA256_ARM64` and `RUNNER_SHA256_X64` (the digests of `linux-arm64` and `linux-x64`
-    2.338.2, from the release API) and picks one by `uname -m` while building. `ParsePin`/`WithPin` and the refresh handle
-    both: each digest comes from its own asset of the same release, and a release missing either changes nothing. The
-    Rust recipe test (`cli/tests/recipes.rs`) expects the two digests.
-  - *Docs:* CI runner guide "Linux hosts" (install, config, service, journal, capacity), threat-model bullets (the
-    credential on the host, the journal readers, root, KVM, both pins, the Linux budget), engine and release docs,
-    `examples/config-linux.yaml`, changeset (`silo-ui`: minor).
-- **Live check: what was and was not run.**
-  - *Not run:* `docs/forks-ci/checks/r2_linux_runner_check.sh`, the whole flow (runner for the machine's architecture, a
-    computer per job on KVM, deleted on success, kept on failure, runners removed at GitHub, the service and its journal).
-    It needs an admin token that CI must not hold, and the owner's Linux machine (10.77.77.2) was offline. **No job has
-    run through `silo-runner` on a Linux host, and the x86_64 runner recipe has never been built.**
-  - *Run by CI on KVM (no GitHub), `scripts/runner-host-e2e.sh` in the Linux host workflow:* the archive's `silo-runner` runs
-    on that architecture and reports the engine version; `check -offline` opens the real `/dev/kvm` and sizes the budget
-    from the host; a `macos` scale set is refused; `service register` against the real systemd user manager gives a unit
-    that is enabled, ordered after and wanting the engine's unit, passing `systemd-analyze --user verify`; the helper's
-    log (it stops for lack of a token) is in the user journal under this account's uid; starting the helper starts a stopped
-    engine; `service unregister` removes the unit and leaves the engine running. A fake GitHub was not built: the
-    runner program inside the computer needs the real service to reach "Listening for Jobs", so a stub of the scale set
-    endpoints could not honestly exercise a fork per job or runner deletion, which the Go fakes already cover.
-    (First run happens when the PR's checks run; see the PR.)
-- **Tests:** Go `go vet`, `gofmt`, `go test -race ./...` in `runner/`: 115 tests pass, 24 of them new (`host_test.go`,
-  `service_test.go`, and the architecture cases in `misc_test.go`): the service unit text and its quoting, register and
-  unregister calls, refusal of root and of foreign unit files, the default budget and its sources, KVM errors, the
-  macOS-scale-set refusal, the shipped recipe's two pins, the refresh moving both digests from their own assets, and a
-  recipe whose digests do not match its download. `test_package_engine.py` (the archive holds `silo-runner` and the licenses,
-  the ELF check, the Go build command per platform), `test_linux_host_workflow.py`, `test_engine_release_workflow.py`,
-  `test_workflow_pins.py`, `test_ci_native_changes.py` (no path change needed) pass; `cargo test -p silo-cli --test recipes`
-  passes with synthetic GitHub values; `shellcheck` is clean on `runner-host-e2e.sh`. Both Linux binaries were
-  cross-built on the Mac and are ELF x86-64 and AArch64. The classifier is unchanged: `runner/` stays skippable except
-  `recipes/`.
-- **Review fixes (round 1, same branch).**
-  - *Unit could not find `silo`:* the user manager's `PATH` lacks `~/.local/bin`, so `silo.path: silo` failed every call and the unit
-    restarted every 10 s. `service register` now resolves `silo.path` (`exec.LookPath` from the registering shell; an absolute path
-    must be an executable file; a relative path with a slash, or anything unresolvable, is refused) and writes it into
-    `ExecStart` as `run -config <file> -silo <absolute path>`; `run` takes `-silo`. Example config uses an absolute path and names
-    `silo-dev`. Tests: unit text, `ResolveSilo`, register refusal writes nothing. `runner-host-e2e.sh` also greps the unit.
-  - *Old single-arm64 recipe on an x86_64 host:* `ApplyHost` (start and `check`) parses each installed Linux recipe's pin and
-    refuses a single-architecture pin other than the host's `GOARCH`, naming `silo-runner install-recipes -replace`. New flag
-    `-replace` moves the existing recipe to `<name>.yaml.bak` and writes the shipped one. Upgrade notes in the guide.
-  - *0600 was only documented:* `SecretFileWarnings` warns (log at start; `warning:` lines in `check`, also `-offline`) when the App
-    key or `~/.config/silo-runner/env` is group- or world-readable, as ssh does for a key; it does not refuse. Threat model reworded
-    to "the guide makes them 0600 and the helper warns otherwise".
-  - *Default budget ignored cgroup limits:* the host default memory is capped by the tightest cgroup v2 `memory.max` of the helper's
-    own cgroup and its ancestors (log says so); docs say a shared or limited host should set `linuxBudget`; the stale comment on
-    `LinuxBudget` (zero now means the host default) is fixed.
   - *Packaging:* `go_build_runner` no longer leaves its `mkdtemp` directory (`main` builds in a `TemporaryDirectory`); the licence
     glob skips dotfiles and directories. Python tests for both.
   - *Tests:* `go vet` (also `GOOS=linux` amd64 and arm64), `gofmt`, `go test -race ./...`; `test_package_engine.py`,
@@ -1441,3 +1377,36 @@ checks passed; the failures were four product problems, all fixed afterwards (te
 - **Open:** (1) the live check above; (2) `silo-runner` is not in the macOS archive; (3) one helper per machine, so two machines
   serving the same recipe need two labels; (4) the default budget ignores memory the host's other services use, so on a
   shared machine set `linuxBudget`.
+
+#### Post-merge review: CI runner (R1 and R2, 9 Nov 2026)
+
+Review of `app/SiloUI/runner`, its CI wiring and its docs as they are on `main` after the container phases.
+
+- **Fixed: the command of a runner that never listened was never reaped** (`fleet.go` `onUpDone`). When the
+  runner did not print "Listening for Jobs" within `readyTimeout`, its `silo exec` command was still running and
+  nothing drained its output or waited for it: the helper interrupted it after deregistration and dropped it, so
+  every such failed start left a zombie process and the goroutine `os/exec` keeps per command, until the helper
+  exited. The command is now watched whenever the start returned one, ready or not. Test:
+  `TestTheCommandOfARunnerThatNeverListenedIsReaped` (failed before).
+- **Fixed: a running container computer did not count against the Linux budget** (`capacity.go`). CT2 made the
+  command line list container computers with the kind `container`; capacity counted only `linux`, so on a Linux
+  host the helper could start virtual machines into memory a container computer already used. Everything that is
+  not a macOS virtual machine now counts as a Linux computer. Test:
+  `TestARunningContainerComputerCountsAgainstTheLinuxBudget` (failed before).
+- **Fixed: docs that said the default budget reads cgroup limits.** The guide's configuration table and the
+  threat model said the default memory was the smaller of the machine's and a cgroup limit; the code reads
+  `MemTotal` only (the cgroup cap was dropped in R2's review). Both now say so. The R2 entry above had its
+  "Built", "Live check", "Tests" and review bullets twice, the second copy with the dropped cgroup behaviour; the
+  copy is removed. The public-repository refusal said "this Mac" on a Linux host; it says "this machine".
+- **Checked, no change:** one event loop writes the records and the ledger; the phases and the by-id rule; the JIT
+  configuration only on standard input (the CLI's `exec --stream --stdin` sends it in the request body and prints
+  a reattach hint on interrupt, so the runner in the computer outlives the command); one label per scale set;
+  `DisableUpdate` set on create and repaired on an existing set; the watchdog (the `scaleset` listener calls
+  `Scale` once per poll, also with a nil message); scale-up from a fresh list with pending demands; restart
+  adoption; delete on success and keep on failure; no checkpoint call anywhere in the helper; the private
+  repository and runner group check failing closed; the docs' statement that GitHub's own secrets and
+  `GITHUB_TOKEN` are not placeholders.
+- **Left for the owner:** (1) the private-repository check runs at start only, so a repository made public while
+  the helper runs is served until the next start; (2) a second Ctrl-C does not end a slow shutdown (the signal
+  stays caught); (3) the Resume section above still lists R2 as in progress; (4) no job has run through
+  `silo-runner` on a Linux host (unchanged from R2).

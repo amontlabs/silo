@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -58,6 +59,8 @@ func (e *events) count(prefix string) int {
 type fakeProcess struct {
 	lines chan string
 	once  sync.Once
+	// waited says Wait returned: the command was reaped.
+	waited atomic.Bool
 }
 
 // holdOpen, as an output line, keeps a runner that is not ready alive.
@@ -81,7 +84,7 @@ func newProcess(lines ...string) *fakeProcess {
 }
 
 func (p *fakeProcess) Lines() <-chan string { return p.lines }
-func (p *fakeProcess) Wait() error          { <-p.lines; return nil }
+func (p *fakeProcess) Wait() error          { <-p.lines; p.waited.Store(true); return nil }
 func (p *fakeProcess) Kill()                { p.once.Do(func() { close(p.lines) }) }
 
 // fakeSilo keeps computers in memory, by id as the engine does.
@@ -91,6 +94,8 @@ type fakeSilo struct {
 	// computers by id.
 	computers map[string]Computer
 	procs     map[string]*fakeProcess
+	// runs are the runner commands in the order they were started.
+	runs []*fakeProcess
 	// output decides what the runner prints for the nth runner started (from 0).
 	output  func(n int) []string
 	started int
@@ -285,6 +290,7 @@ func (f *fakeSilo) StartRunner(_ context.Context, id, input string, argv []strin
 	proc := newProcess(f.output(n)...)
 	f.mu.Lock()
 	f.procs[id] = proc
+	f.runs = append(f.runs, proc)
 	f.mu.Unlock()
 	return proc, nil
 }

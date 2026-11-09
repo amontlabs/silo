@@ -1129,9 +1129,8 @@ last bullets cover a runner on a Linux host.
 - **The Linux budget.** On a Mac, `linuxBudget` (memory and count) defaults to unbounded: with it unset,
   only `maxRunners` and the free-disk guard limit how many Linux computers the helper starts, so a burst
   of jobs can use the Mac's memory. macOS is always limited to Apple's two running computers. On a Linux
-  host an unset field defaults to the host's: three quarters of its total memory (or of the helper's
-  cgroup memory limit, when that is smaller) and one computer per
-  CPU; a shared or limited host should set `linuxBudget`. That bounds a burst of jobs; it is a guard against running the host out of memory, not a
+  host an unset field defaults to the host's: three quarters of its total memory and one computer per
+  CPU. Cgroup limits are not read, so a shared or limited host should set `linuxBudget`. That bounds a burst of jobs; it is a guard against running the host out of memory, not a
   security limit, and it does not bound CPU time, disk beyond the free-disk guard, or network use.
 - **The helper only deletes what it made.** It records every computer in `<stateDir>/computers.json`:
   by name before `silo fork` (the engine has not made it yet), and by the engine's computer id once

@@ -591,7 +591,10 @@ func (f *Fleet) onUpDone(rec *record, ev upDone, now time.Time) {
 	}
 	set := f.sets[rec.Label]
 	if ev.proc != nil {
+		// The command is drained and waited for until it ends, whether or not the runner came up:
+		// one that never listened is still running, and nothing else would reap it.
 		rec.proc = ev.proc
+		f.watch(rec.Name, ev.proc)
 	}
 	if ev.err != nil {
 		f.opts.Logger.Warn("runner did not come up", "computer", rec.Name, "error", ev.err.Error())
@@ -604,7 +607,6 @@ func (f *Fleet) onUpDone(rec *record, ev upDone, now time.Time) {
 	set.succeeded()
 	// The computer runs now: a list that started before the start says nothing about it.
 	rec.seenFrom = f.listStarts + 1
-	f.watch(rec.Name, ev.proc)
 	if rec.Phase == PhaseLive && rec.sub == subStarting {
 		rec.sub, rec.since = subIdle, now
 	}
