@@ -212,6 +212,10 @@ mod linux {
         for name in names
             .split(|byte| *byte == 0)
             .filter(|name| !name.is_empty())
+            // Overlayfs keeps its own records (`user.overlay.uuid`, `origin`, `impure`) on a
+            // layer it has mounted and writes them again on the next mount; only the opaque
+            // mark is the layer's content.
+            .filter(|name| !name.starts_with(OVERLAY_NAMESPACE) || *name == OPAQUE)
         {
             let n = name_c(name)?;
             let mut value = vec![0u8; MAX_XATTR_VALUE];
@@ -879,7 +883,21 @@ mod linux {
             {
                 return;
             }
+            // Overlayfs's own record on a layer it has mounted stays behind.
+            let root = c(a.path()).unwrap();
+            let uuid = CString::new("user.overlay.uuid").unwrap();
+            // SAFETY: valid strings and a one-byte value.
+            assert_eq!(
+                unsafe {
+                    libc::lsetxattr(root.as_ptr(), uuid.as_ptr(), b"u".as_ptr().cast(), 1, 0)
+                },
+                0
+            );
             round_trip(a.path(), b.path()).unwrap();
+            assert!(xattr_pairs(b.path())
+                .unwrap()
+                .iter()
+                .all(|(name, _)| name != b"user.overlay.uuid"));
             let meta = fs::symlink_metadata(b.path().join("gone")).unwrap();
             assert!(meta.file_type().is_char_device() && meta.rdev() == 0);
             assert!(xattr_pairs(&b.path().join("d"))

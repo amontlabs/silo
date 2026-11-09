@@ -70,7 +70,7 @@ struct ExportCapture {
     group: String,
     member: String,
     /// Whether the computer is a container computer (journals written before it was not).
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     container: bool,
 }
 
