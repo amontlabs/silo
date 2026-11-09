@@ -488,9 +488,9 @@ fn receive(
     cancel: &Arc<AtomicBool>,
 ) -> Result<TransferFile, String> {
     let expected = plan.expected.clone().ok_or("Missing file details.")?;
-    // The copy goes to `<path>.part` and takes its name only when the hash matched, so a failed
-    // or interrupted copy never leaves a file at the path the user chose. An existing file is
-    // refused now, not after hours of copying.
+    // The copy goes to a temporary file of its own beside `path` and takes its name only when
+    // the hash matched, so a failed or interrupted copy never leaves a file at the path the user
+    // chose. An existing file is refused now, not after hours of copying.
     let part = part_path(&plan.path);
     if std::fs::symlink_metadata(&plan.path).is_ok() {
         return Err(format!(
@@ -565,46 +565,24 @@ fn receive(
     }
 }
 
+/// The temporary file of one copy to `path`: `<path>.<random>.part`, in the same folder so it
+/// can take the final name with a rename. Every copy gets its own, so two copies to one path
+/// never write to, remove or publish each other's file.
 fn part_path(path: &Path) -> PathBuf {
+    let unique = uuid::Uuid::new_v4().simple().to_string();
     let mut part = path.as_os_str().to_owned();
-    part.push(".part");
+    part.push(format!(".{}.part", &unique[..16]));
     PathBuf::from(part)
 }
 
-/// Creates `part` for writing. A `.part` left by a copy that crashed is this flow's own file,
-/// so a regular file of this account is removed once and the copy starts again; anything else
-/// there is named in the error rather than reported as a bare "File exists".
+/// Creates `part` for writing. Nothing that already exists there is opened or removed.
 fn create_part(part: &Path) -> Result<File, String> {
-    use std::os::unix::fs::MetadataExt;
-    let create = || {
-        OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
-            .open(part)
-    };
-    match create() {
-        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-            let stale = std::fs::symlink_metadata(part).is_ok_and(|metadata| {
-                // SAFETY: geteuid has no preconditions.
-                metadata.is_file() && metadata.uid() == unsafe { libc::geteuid() }
-            });
-            let in_the_way = |detail: &str| {
-                format!(
-                    "Silo could not create {}: an earlier copy left {} there and {detail}. Remove it and try again.",
-                    part.display(),
-                    part.display(),
-                )
-            };
-            if !stale {
-                return Err(in_the_way("it is not a file Silo can safely remove"));
-            }
-            std::fs::remove_file(part)
-                .map_err(|error| in_the_way(&format!("removing it failed: {error}")))?;
-            create().map_err(|error| format!("Silo could not create {}: {error}", part.display()))
-        }
-        result => result.map_err(|error| format!("Silo could not create {}: {error}", part.display())),
-    }
+    OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(part)
+        .map_err(|error| format!("Silo could not create {}: {error}", part.display()))
 }
 
 /// Moves the finished copy to the path the user chose without replacing anything there.
@@ -704,20 +682,44 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_stale_part_from_a_crash_is_replaced_and_a_foreign_one_is_named() {
+    fn each_copy_to_a_path_writes_its_own_temporary_file() {
         let dir = tempfile::tempdir().unwrap();
-        let part = dir.path().join("x.silo-backup.part");
-        std::fs::write(&part, b"left by a crash").unwrap();
-        let mut file = create_part(&part).unwrap();
-        file.write_all(b"new").unwrap();
-        drop(file);
-        assert_eq!(std::fs::read(&part).unwrap(), b"new");
+        let path = dir.path().join("x.silo-backup");
+        let (first, second) = (part_path(&path), part_path(&path));
+        assert_ne!(first, second);
+        for part in [&first, &second] {
+            assert_eq!(part.parent(), path.parent());
+            let name = part.file_name().unwrap().to_str().unwrap();
+            assert!(name.starts_with("x.silo-backup.") && name.ends_with(".part"));
+        }
 
-        let other = dir.path().join("y.silo-backup.part");
-        std::fs::create_dir(&other).unwrap();
-        let message = create_part(&other).unwrap_err();
-        assert!(message.contains("y.silo-backup.part") && message.contains("earlier copy"));
-        assert!(!message.contains("File exists"));
+        // The second copy starts while the first is unfinished, then the first finishes.
+        let mut one = create_part(&first).unwrap();
+        let mut two = create_part(&second).unwrap();
+        one.write_all(b"first, complete").unwrap();
+        two.write_all(b"second, unfin").unwrap();
+        drop(one);
+        publish(&first, &path).unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"first, complete");
+
+        // The second one cannot take the name and removes only its own file.
+        drop(two);
+        assert!(publish(&second, &path)
+            .unwrap_err()
+            .contains("already exists"));
+        remove_partial(&second);
+        assert_eq!(std::fs::read(&path).unwrap(), b"first, complete");
+        assert!(!first.exists() && !second.exists());
+    }
+
+    #[test]
+    fn a_temporary_file_that_exists_is_left_as_it_is() {
+        let dir = tempfile::tempdir().unwrap();
+        let part = dir.path().join("x.silo-backup.0123456789abcdef.part");
+        std::fs::write(&part, b"another copy's").unwrap();
+        let message = create_part(&part).unwrap_err();
+        assert!(message.contains("x.silo-backup.0123456789abcdef.part"));
+        assert_eq!(std::fs::read(&part).unwrap(), b"another copy's");
     }
 
     #[test]

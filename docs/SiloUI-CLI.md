@@ -110,12 +110,14 @@ record. Without `-o` the file is `<computer>-<date>.silo-backup` in the current 
 existing file is never replaced. `--checkpoint` exports a saved point of the computer (its id or
 name) instead of its current state. A running computer is captured in place; it is not stopped.
 
-The file can also hold the computer's **memory**: when a macOS computer is exported while it
-runs, and when the exported checkpoint (`--checkpoint`) was saved while the computer ran, on
-macOS or on a Linux VM. Importing never uses it (an imported computer starts from its disks),
-and the login check below does not look at it. To leave memory out, stop a macOS computer before
-exporting it, and for a Linux VM export its current state or a checkpoint saved while it was
-stopped.
+The file never holds the computer's **memory**, whatever kind of computer it is: an export
+carries disks only. A running computer has its cached file data written out to its disk, then
+its disks are copied (a macOS computer is paused for the copy). A macOS checkpoint that saved
+memory is exported from its disks alone. A Linux VM checkpoint that was saved while the computer
+ran holds its memory and the runtime cannot write it without, so `--checkpoint` refuses it: fork
+that checkpoint (`silo fork <computer> --checkpoint <id>`) and export the fork, or export the
+computer itself. A file written before this rule can hold memory; importing never uses it (an
+imported computer starts from its disks).
 
 The receiver gets a **new computer** with its own id, stopped, on a deny-all network policy, with
 no secrets, ports or published URLs. `silo import` names it after the sender's computer, or with
@@ -131,7 +133,7 @@ the importing device needs the image the computer was made on (the one its Silo 
 kept), and a device without it says the computer was made on an older guest image that it does not
 have. A device that cannot run containers refuses the file with the reason `silo host init`
 gives, before anything is copied. The file is written in format 6, which a Silo that predates
-container exports refuses as newer. A container computer's file never holds memory.
+container exports refuses as newer. No memory is in any file.
 
 **Bringing the work into your main.** If the exported computer was a fork, the file carries its
 fork-time record, so the imported computer keeps the way any fork does: `silo diff` shows what

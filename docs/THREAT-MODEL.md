@@ -355,18 +355,18 @@ one `.silo-backup` file, and `silo import` reads one. What the file holds, and d
   `/opt`, `/srv` and the crontabs on Linux; the home folder, `/usr/local`, `/opt/homebrew/etc` and
   the launch agents and daemons on macOS), so a login anywhere else,
   such as under `/workspace`, is not named either.
-- **Memory is in the file in three cases.** An export of a macOS computer that is running saves
-  its memory beside its disks
-  ([`macos_computers.rs`](../app/SiloUI/src-tauri/engine/src/macos_computers.rs), `create_archive`),
-  an export of a macOS checkpoint that saved memory carries that memory, and so does an export of a
-  Linux VM checkpoint that was taken while the computer ran: MicroSandbox writes such a checkpoint
-  whole, and [`backup.rs`](../app/SiloUI/src-tauri/engine/src/backup.rs) passes it on as it is.
-  No import uses the memory: an imported computer always starts from its disks. Memory can hold
-  what is on no disk (whatever the running programs held at that moment), and the login check
-  does not look at it. There is none in an export of a Linux VM's current state (its disks are
-  captured without memory), of a stopped macOS computer, of a checkpoint taken while the computer
-  was stopped, or of a container computer. The three cases do not meet the rule that no memory
-  leaves in an export; see the [post-merge review](forks-ci/BUILD_LOG.md#post-merge-review).
+- **No memory is in the file**, for any kind of computer: an export carries disks only, as a
+  fork does. A running computer is captured from its disks: the guest writes its cached file data
+  out and the disks are copied, with a macOS computer paused for the copy the way a fork point
+  takes it ([`macos_computers.rs`](../app/SiloUI/src-tauri/engine/src/macos_computers.rs),
+  `create_archive`). A macOS checkpoint that saved memory is exported from its disks; the saved
+  memory stays in the checkpoint's folder. A Linux VM checkpoint taken while the computer ran is
+  refused: MicroSandbox writes such a checkpoint whole, with its memory, and has no way to leave
+  it out, so [`backup.rs`](../app/SiloUI/src-tauri/engine/src/backup.rs) reads the descriptor of
+  every capture before it is written and stops at one that holds memory, saying what to do
+  instead (fork the checkpoint and export the fork, or export the computer itself). A container
+  computer has no memory checkpoints. A file written before this rule can hold memory; an import
+  never uses it, because an imported computer always starts from its disks.
 - **Secrets, published ports, the network policy and host-folder mounts are not carried**; an
   imported computer starts stopped with a deny-all policy.
 - **An export is a plain file.** Keep it where you would keep the secrets in it. Importing one
@@ -869,8 +869,7 @@ with nothing sensitive on it, and the app, the CLI and `silo list` label it as l
   counts) are the same code and the same limits.
 - **No memory checkpoints.** The capability list in `containers/capability.rs` has one entry left,
   "memory snapshots": a container's checkpoints, and so its exports, save the disks only, whether the
-  computer runs or not. No memory is ever carried into a container computer's export (a VM's can
-  hold memory: boundary 6, "Sharing a computer as a file").
+  computer runs or not. No memory is ever carried into an export.
 - **Export and import** ([`archive.rs`](../app/SiloUI/src-tauri/engine/src/containers/archive.rs),
   `silo-ctr pack` and `unpack` in [`pack.rs`](../app/SiloUI/container-shim/src/pack.rs);
   [Sharing a computer as a file](#6-the-workspace-disk-and-host-folders) applies unchanged: what the
