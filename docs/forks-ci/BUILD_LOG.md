@@ -715,12 +715,40 @@ app as a Linux VM, and the "not yet" list is down to export (CT6) and memory che
 - **Recipes do not make containers.** A recipe has no runtime, so "a recipe with `desktop: false` creates a container
   without one" is not possible as written; the live check covers the same setting through `silo desktop off`, a restart and a
   fork (which inherits it). Whether `silo create --container` should take `--no-desktop` is open.
+- **Found on the way** (the KVM runner; four of these failed the first live runs):
+  - A root command in a container has no `CAP_SYS_PTRACE`, so it cannot read another account's `/proc/<pid>/exe`. The desktop
+    service's identity check of a process it just started (Xvfb) failed, and every container creation failed with "Desktop
+    session failed to start". The service now names such a process by its `comm` (`process_exe`), the same way at launch and later.
+    The guest's error also carries the end of the service log now (a creation sees only the error), and the engine logs the reason
+    a desktop setup failed.
+  - **Landlock keeps one exec from reading another's processes.** Each exec runs in its own Landlock domain, and Landlock refuses
+    `ptrace` access checks (which `/proc/<pid>/environ` uses) between sibling domains, even for the same account. Cua Driver's
+    launcher could not read the desktop session's environment from `xfce4-session` (`X11 setup failed: Authorization required`).
+    In a container the session now writes `DISPLAY`, `DBUS_SESSION_BUS_ADDRESS`, `XDG_RUNTIME_DIR` and `XAUTHORITY` to
+    `/run/silo-desktop/user/session.env` (mode 0600, the working account's) when it starts, and the launcher and
+    `silo-computer-use` read that file when they cannot read the process. A virtual machine starts its session unchanged.
+  - The first start creates the working account after the container is up, so the boot command waits for it.
+  - The Linux runner has Google Chrome installed on the host; a guest test for the missing-browser message must not rely on the
+    machine having none.
+  - The viewer's streamer listens on the container's loopback, and a published port reaches the guest's own address, so the
+    URL-proxy check hands a published port to it with a small forwarder in the container; the viewer itself reaches the loopback
+    port over the computer's SSH server, as the app does.
 - **Tests.** Engine: the capability list and its app copy, the desktop defaults for a container (built in, and
   autostart-off kept), the update validator, the boot command and script, the host guard (unmeasurable layer, ordering, parallel
   measurement). Guest: the Chrome launchers (written for a container only, never over a foreign file, run the browser with the
   flag and its arguments, say so when none is installed). Frontend: the capability model, the overview and detail pages (desktop
   action offered; the browser warning shown for a container only). Live: `linux-host-e2e.sh` with `SILO_E2E_CONTAINER=1`
   (a fourth container with the desktop on, below).
+- **Live check** (KVM runner, x86_64, Ubuntu 24.04; Linux host run 42591492385, code head `66888e0c`): a container created with the
+  desktop on started it with the computer (service `running`; Xvfb, Xfce and Selkies up). The viewer port answered 401 over an
+  `ssh -L` to the container's loopback, through the URL proxy and on its loopback port. Cua Driver (the MCP launcher, as an agent
+  starts it) listed the desktop's windows (`Desktop`, `xfce4-panel`) and saved a 1440x900 screenshot (49 KB), uploaded as the
+  `container-desktop-screenshots` artifact. Google Chrome (installed from dl.google.com) failed with its own sandbox (exit
+  non-zero), started through the launcher, loaded https://example.com through the gateway, and opened a window on the desktop (listed
+  by Cua Driver with a second screenshot, 190 KB) whose process has `--no-sandbox`. `silo fork --gui` returned a running fork with
+  computer use ready; `silo desktop off` stopped the desktop, `fork --gui` then said "has no desktop; turn it on with `silo desktop on`",
+  a restart and a plain fork of it started none, and `silo desktop on` brought it back. A recipe cannot make a container, so
+  `desktop: false` at creation is covered by the setting through `desktop off`.
 
 ### R1: CI runner on the Mac (branch `claude/runner-phase-1`)
 
