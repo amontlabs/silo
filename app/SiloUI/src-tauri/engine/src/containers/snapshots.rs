@@ -177,8 +177,9 @@ pub fn create(paths: &RuntimePaths, request: &SnapshotCreate) -> Result<(), Runt
     let layout = Layout::new(&paths.home);
     let dir = layout.computer(&request.computer);
     let store = Store::new(&layout);
-    // No start may begin while the layers are being sealed or copied.
-    let _mark = StartMark::begin(&request.computer).ok_or_else(|| {
+    // No start may begin while the layers are being sealed or copied. The computer is held, not
+    // marked as starting: a running one stays running to a command or a secret change.
+    let _mark = StartMark::hold(&request.computer).ok_or_else(|| {
         RuntimeError::Unavailable(format!(
             "Container computer {} is starting. Try again when it is up.",
             request.computer

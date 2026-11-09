@@ -1946,6 +1946,31 @@ mod tests {
         drop(mark);
     }
 
+    #[test]
+    fn a_running_computer_held_for_a_checkpoint_is_still_running() {
+        let proc = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let paths = test_paths(home.path());
+        let name = "held-box";
+        let state = Layout::new(&paths.home).computer(name).state();
+        std::fs::create_dir_all(&state).unwrap();
+        std::fs::write(state.join("holder.pid"), "10\n").unwrap();
+        std::fs::write(state.join("ctl.sock"), "").unwrap();
+        fake_process(proc.path(), 10, "silo-ctr", &scope_of(&unit_name(&paths, name)));
+        let (control, _peer) = std::os::unix::net::UnixStream::pair().unwrap();
+        let running = register_for_test(name, Gateway::for_test(control), Vec::new());
+        let status = || status_in(proc.path(), &paths, name, &record(true));
+        assert_eq!(status(), Status::Running);
+        // A checkpoint keeps a start from beginning. Commands and secret changes ask for the
+        // status: to them the computer must not look as if it were starting.
+        let hold = StartMark::hold(name).unwrap();
+        assert!(StartMark::begin(name).is_none());
+        assert_eq!(status(), Status::Running);
+        drop(hold);
+        registry().as_mut().and_then(|map| map.remove(name));
+        running.gateway().close();
+    }
+
     fn fake_tools(directory: &Path) -> Tools {
         let init = directory.join("silo-init");
         std::fs::write(&init, b"init").unwrap();
