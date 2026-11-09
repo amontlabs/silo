@@ -670,6 +670,19 @@ pub fn watch_disk(paths: &RuntimePaths, tools: &Tools, name: &str) {
                 let dir = layout.computer(&name);
                 if let Ok(record) = dir.read_record() {
                     let used = super::quota::used_bytes(&dir.upper_of(&record));
+                    let note = |text: String| {
+                        use std::io::Write;
+                        if let Ok(mut file) = std::fs::OpenOptions::new()
+                            .create(true)
+                            .append(true)
+                            .open(dir.state().join("disk.log"))
+                        {
+                            let _ = writeln!(file, "{text}");
+                        }
+                    };
+                    if used >> 20 > record.root_disk_mib / 2 {
+                        note(format!("{} of {} MiB used, read-only: {read_only}", used >> 20, record.root_disk_mib));
+                    }
                     let wanted = match super::quota::decide(used, record.root_disk_mib, read_only) {
                         super::quota::Action::Nothing => None,
                         super::quota::Action::MakeReadOnly => Some("--ro"),
@@ -683,6 +696,7 @@ pub fn watch_disk(paths: &RuntimePaths, tools: &Tools, name: &str) {
                         );
                         match outcome {
                             Ok(_) => {
+                                note(format!("remount {mode} done"));
                                 read_only = mode == "--ro";
                                 if read_only {
                                     eprintln!(
@@ -692,7 +706,10 @@ pub fn watch_disk(paths: &RuntimePaths, tools: &Tools, name: &str) {
                                     );
                                 }
                             }
-                            Err(detail) => eprintln!("Container computer {name}: the disk limit could not be applied: {detail}"),
+                            Err(detail) => {
+                                note(format!("remount {mode} failed: {detail}"));
+                                eprintln!("Container computer {name}: the disk limit could not be applied: {detail}");
+                            }
                         }
                     }
                 }

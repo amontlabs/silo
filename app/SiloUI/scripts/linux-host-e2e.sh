@@ -243,7 +243,7 @@ container_disk_limit() {
     sleep 1
   done
   if [[ "$failed" != yes ]]; then
-    journalctl --user -u "$engine_unit" --no-pager -n 40 | grep -iE "disk|remount|$ctr3" >&2 || true
+    engine_find -path "*containers/computers/$ctr3/state/disk.log" -exec tail -n 20 {} \; >&2 || true
     "$silo" exec "$ctr3" -- sh -c 'du -sm /home/silo; grep " / " /proc/self/mountinfo' >&2 || true
   fi
   expect "a write past the disk size fails" "$failed" yes
