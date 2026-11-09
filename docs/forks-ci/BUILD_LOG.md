@@ -786,6 +786,15 @@ app as a Linux VM, and the "not yet" list is down to export (CT6) and memory che
   and stays after `desktop off`. The line saying the viewer's credentials stay in root's folder was false (Selkies took the
   password as an argument, readable by every process); Selkies 2.0.0 reads `SELKIES_BASIC_AUTH_PASSWORD`, so the service passes
   it in the streamer's environment and the threat model says who can read that.
+- **Live check after the review fixes** (KVM runner, x86_64, code head `8f1342d7d`; Linux host run 42613588062, attempts 1 and 2
+  both green; CI run 42613588066 green). The container with the desktop on also shows `/run` as a tmpfs, `session.env` as
+  `600:silo`, no `basic-auth-password` in the streamer's arguments, and no `session.env` after `silo desktop off`; the container
+  created with `--no-desktop` reports `desktop: false`, starts with no Xvfb, Xfce or Selkies, nothing answering on port 6901, and the
+  desktop service `stopped`. Earlier runs on the way failed for the checks' own reasons, not the product's: the helper that runs
+  root commands lacked `SILO_RUNTIME=container` (the process-name fallback is now container-only, so status said `failed`); the
+  process probes matched their own shell; and a screenshot of a busier Chrome page was larger than one command's output limit, so
+  it is copied out in pieces now.
+
 
 ### R1: CI runner on the Mac (branch `claude/runner-phase-1`)
 
