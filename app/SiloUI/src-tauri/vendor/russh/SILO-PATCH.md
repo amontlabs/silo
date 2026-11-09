@@ -31,6 +31,14 @@ needs dev-dependencies, and they are dropped from the manifest (`scripts/test_ci
 russh for that reason). The patch is covered by the SSH server's own tests, which drive a real russh
 client against it (a command that reads slowly is held back by the window and never ended).
 
+## Watching russh by hand
+
+While russh is vendored, Dependabot and RustSec (`cargo audit`, `cargo deny`) no longer see it: the crate is a path
+dependency, with no registry version to compare. Until the patch is upstream (draft:
+`docs/v1/upstream/russh-manual-window.md`), russh releases and advisories are watched by hand
+(https://github.com/Eugeny/russh/releases and the RustSec database), and a new release is vendored again with this
+patch on top.
+
 Run the SSH server's tests on Linux through the Silo manifest:
 
     cargo test --manifest-path app/SiloUI/Cargo.toml -p silo-engine --lib containers::ssh

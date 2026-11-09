@@ -1489,8 +1489,8 @@ impl Session {
                 map_err!(ensure_end(r))?;
                 let target = self.target_window_size;
 
-                #[allow(clippy::collapsible_if)]
                 let manual = handler.manual_window(channel_num);
+                #[allow(clippy::collapsible_if)]
                 if let Some(ref mut enc) = self.common.encrypted {
                     if manual {
                         enc.consume_window(channel_num, data.len());

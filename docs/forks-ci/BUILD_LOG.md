@@ -540,6 +540,25 @@ client through the same commands, API methods and screens as a Linux VM. Fable's
     every 2 ms is held back, never ended, and delivers every byte with the queue within the window.
     `linux-host-e2e.sh` now runs the 60 MB `ssh cat` both ways five times (all five hashes must match) and sends the file
     to a command that reads 64 KiB every 10 ms, which must receive it intact.
+  - *Memory bound and forwards (review round 3).* The window counted payload bytes only, but each `CHANNEL_DATA` was its
+    own entry in an unbounded queue, so 2 MiB sent as one-byte packets was about two million entries (over 100 MiB for
+    one channel). The queue is now one buffer per channel (`BytesMut` under a mutex, a `Notify` for the writer, which
+    takes everything with `split()`): payload at most the window, allocation at most twice that, whatever the packet
+    sizes. `direct-tcpip` forwards had russh's automatic window and a bounded queue the session loop awaited, so a
+    target that stopped reading froze the whole connection (the shell too) and a bulk two-way forward could deadlock.
+    A forward is now a command: manual window, input through `data()` into the same queue and a writer task (which the
+    forward's task owns), output through `Handle::data`; the channel's own receiving end is dropped. Tests: one-byte
+    packets to a command that never reads stay in one buffer of at most twice the window; a forward whose target never
+    reads holds back its client while an echo forward and a new channel on the same connection answer; 16 MiB both ways
+    through a forward with hashes (the in-memory transport must hold a window each way: russh writes without reading
+    meanwhile, so two russh ends sending in bulk over a small buffer wait on each other). `linux-host-e2e.sh`: 60 MB
+    both ways through an `ssh -L` forward (hashes), and a shell command on the same connection that still answers while a
+    forward's target does not read. Output is still held only by the client's window: a client that stops reading one
+    channel stops the loop from taking the connection's other output (russh does not read its handle queue while a
+    channel has pending data), which the guide says. The patch draft for russh is
+    [the upstream draft](../v1/upstream/russh-manual-window.md).
+  - *russh is watched by hand.* While russh is vendored (`src-tauri/vendor/russh`), Dependabot and RustSec no longer see
+    it, so its releases and advisories are checked by hand until the patch is upstream (`SILO-PATCH.md` says the same).
   - *Signals* in an SSH `signal` request go to the exec's process group (`ExecGroup::signal`, the same leader check as the kill).
   - *Root's in-guest answers* are a documented difference, not changed: the engine cannot give a file to a sub-id without a
     helper in the holder's namespace, and a looser mode would show the answer to any guest user that learns the id.

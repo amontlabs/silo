@@ -207,16 +207,15 @@ mod server {
         tools::Tools,
     };
     use crate::runtime::RuntimePaths;
-    use bytes::Bytes;
+    use bytes::{Bytes, BytesMut};
     use russh::server::Handle;
     use std::collections::HashMap;
     use std::io::Write as _;
     use std::os::fd::{AsRawFd, OwnedFd};
     use std::process::Stdio;
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
     use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-    use tokio::sync::{mpsc, watch, Semaphore};
+    use tokio::sync::{watch, Notify, Semaphore};
     use tokio::task::JoinHandle;
 
     /// What every connection of one server shares.
@@ -260,23 +259,71 @@ mod server {
         rows: u16,
     }
 
-    /// How much input a client may send to a command that has not taken it yet: the SSH window
-    /// of a channel. The server grants window back only as the command takes the input, so a
-    /// command that reads slowly slows the client down (as with OpenSSH) and nothing is ended
-    /// or buffered without bound: a connection holds at most `MAX_CHANNELS` windows, 32 MiB.
-    /// The session loop never waits for the command (it must keep answering the client's
-    /// window updates, or a command that writes as much as it reads would stop the transfer in
-    /// both directions), so what the command has not taken waits in a queue of at most this size.
+    /// How much input a client may send to a command (or a forward's target) that has not taken
+    /// it yet: the SSH window of a channel. The server grants window back only as the command
+    /// takes the input, so a command that reads slowly slows the client down (as with OpenSSH)
+    /// and nothing is ended or buffered without bound: a channel holds at most this much
+    /// payload, in one buffer (at most twice its size allocated, whatever the packet sizes), and
+    /// a connection at most `MAX_CHANNELS` channels. The session loop never waits for the
+    /// command (it must keep answering the client's window updates, or a command that writes as
+    /// much as it reads would stop the transfer in both directions).
     pub(super) const INPUT_WINDOW: u32 = 2 * 1024 * 1024;
 
-    /// What is queued for one command.
+    /// The bytes waiting for one command's (or forward's) input, as one buffer: every packet is
+    /// appended to it, so a client that sends the window in one-byte packets costs the window
+    /// and not an entry per packet.
     struct Queue {
-        queued: AtomicUsize,
+        state: std::sync::Mutex<QueueState>,
+        ready: Notify,
+    }
+
+    #[derive(Default)]
+    struct QueueState {
+        buffer: BytesMut,
+        /// Bytes pushed and not yet written: the buffer and what the writer is writing.
+        queued: usize,
+        /// The client ended its input; the writer finishes what is queued and closes the sink.
+        ended: bool,
+        /// Nothing takes the input any more.
+        closed: bool,
     }
 
     impl Queue {
+        fn lock(&self) -> std::sync::MutexGuard<'_, QueueState> {
+            self.state.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+        }
+
+        fn queued(&self) -> usize {
+            self.lock().queued
+        }
+
+        /// Called by the writer once it has written `bytes`.
         fn release(&self, bytes: usize) {
-            self.queued.fetch_sub(bytes, Ordering::Relaxed);
+            let mut state = self.lock();
+            state.queued = state.queued.saturating_sub(bytes);
+        }
+
+        /// Nothing takes the input any more: what is queued is dropped and its size returned.
+        fn close(&self) -> usize {
+            let mut state = self.lock();
+            state.closed = true;
+            let rest = state.buffer.len();
+            state.buffer = BytesMut::new();
+            state.queued = state.queued.saturating_sub(rest);
+            rest
+        }
+
+        /// Starts the task that writes the queue to `sink` and calls `grant` with the number of
+        /// bytes of window to give the client back as they are taken. The caller keeps the
+        /// returned guard for as long as the channel lives: the task ends with it, even if the
+        /// command (in a process group of its own, out of reach of the kill) never reads again.
+        /// Ending the input (dropping its `Input`) lets the task finish writing what is queued.
+        fn attach(
+            self: &Arc<Self>,
+            sink: impl AsyncWrite + Unpin + Send + 'static,
+            grant: impl Fn(u32) + Send + 'static,
+        ) -> AbortOnDrop {
+            AbortOnDrop(tokio::spawn(write_input(sink, self.clone(), grant)))
         }
     }
 
@@ -292,55 +339,59 @@ mod server {
         Overrun,
     }
 
-    /// The bytes waiting for a command's input.
-    #[derive(Clone)]
+    /// The client's side of a command's input. Dropping it is the end of the input.
     struct Input {
-        sender: mpsc::UnboundedSender<Bytes>,
         queue: Arc<Queue>,
     }
 
     impl Input {
-        fn new() -> (Self, mpsc::UnboundedReceiver<Bytes>) {
-            let (sender, receiver) = mpsc::unbounded_channel();
-            let queue = Arc::new(Queue {
-                queued: AtomicUsize::new(0),
-            });
-            (Self { sender, queue }, receiver)
+        fn new() -> Self {
+            Self {
+                queue: Arc::new(Queue {
+                    state: std::sync::Mutex::new(QueueState::default()),
+                    ready: Notify::new(),
+                }),
+            }
         }
 
-        /// Starts the task that writes the queue to `sink` and calls `grant` with the number of
-        /// bytes of window to give the client back as they are taken. The caller keeps the
-        /// returned guard for as long as the channel lives: the task ends with it, even if the
-        /// command (in a process group of its own, out of reach of the kill) never reads again.
-        /// Ending the input (dropping this `Input`) lets the task finish writing what is queued.
         fn attach(
             &self,
             sink: impl AsyncWrite + Unpin + Send + 'static,
-            receiver: mpsc::UnboundedReceiver<Bytes>,
             grant: impl Fn(u32) + Send + 'static,
         ) -> AbortOnDrop {
-            AbortOnDrop(tokio::spawn(write_input(
-                sink,
-                receiver,
-                self.queue.clone(),
-                grant,
-            )))
+            self.queue.attach(sink, grant)
         }
 
         /// Queues `data` without waiting.
         fn push(&self, data: &[u8]) -> Pushed {
-            let queue = &self.queue;
-            if queue.queued.load(Ordering::Relaxed).saturating_add(data.len())
-                > INPUT_WINDOW as usize
-            {
+            let mut state = self.queue.lock();
+            if state.queued.saturating_add(data.len()) > INPUT_WINDOW as usize {
                 return Pushed::Overrun;
             }
-            queue.queued.fetch_add(data.len(), Ordering::Relaxed);
-            if self.sender.send(Bytes::copy_from_slice(data)).is_err() {
-                queue.release(data.len());
+            if state.closed || state.ended {
                 return Pushed::Discarded;
             }
+            state.queued += data.len();
+            state.buffer.extend_from_slice(data);
+            drop(state);
+            self.queue.ready.notify_one();
             Pushed::Queued
+        }
+    }
+
+    impl Drop for Input {
+        fn drop(&mut self) {
+            self.queue.lock().ended = true;
+            self.queue.ready.notify_one();
+        }
+    }
+
+    /// Marks the queue closed when the writer ends, however it ends (including being aborted).
+    struct Closing(Arc<Queue>);
+
+    impl Drop for Closing {
+        fn drop(&mut self) {
+            self.0.close();
         }
     }
 
@@ -392,11 +443,19 @@ mod server {
         authenticated: watch::Sender<bool>,
     }
 
+    /// A `direct-tcpip` channel: flow-controlled like a command's, so a target that stops
+    /// reading holds back its own client and nothing else.
+    struct Forward {
+        input: Option<Input>,
+        /// Owns the writer too (the task holds it), so both end with the channel.
+        _task: AbortOnDrop,
+    }
+
     struct Connection {
         shared: Arc<Shared>,
         channels: HashMap<ChannelId, Chan>,
         /// Open `direct-tcpip` channels, each served by a task that ends with the channel.
-        forwards: HashMap<ChannelId, AbortOnDrop>,
+        forwards: HashMap<ChannelId, Forward>,
         /// `None` over standard input and output, where the caller is the one process that
         /// started the server.
         limits: Option<Limits>,
@@ -543,16 +602,27 @@ mod server {
                 reply.reject(ChannelOpenFailure::ResourceShortage).await;
                 return Ok(());
             }
+            // The channel's own receiving end is not used (its bounded queue would make the
+            // session loop wait for the target): the data comes through `data()`.
             let id = channel.id();
+            drop(channel);
+            let input = Input::new();
             let task = tokio::spawn(forward(
                 self.shared.clone(),
                 session.handle(),
-                channel,
+                id,
                 host,
                 port,
                 reply,
+                input.queue.clone(),
             ));
-            self.forwards.insert(id, AbortOnDrop(task));
+            self.forwards.insert(
+                id,
+                Forward {
+                    input: Some(input),
+                    _task: AbortOnDrop(task),
+                },
+            );
             Ok(())
         }
 
@@ -649,9 +719,9 @@ mod server {
             }
         }
 
-        /// The window of a command's channel is granted as the command takes its input.
+        /// The window of a command's or a forward's channel is granted as it takes its input.
         fn manual_window(&mut self, channel: ChannelId) -> bool {
-            self.channels.contains_key(&channel)
+            self.channels.contains_key(&channel) || self.forwards.contains_key(&channel)
         }
 
         async fn data(
@@ -662,10 +732,14 @@ mod server {
         ) -> Result<(), Self::Error> {
             // Never waits for the command: this loop also takes the client's window updates,
             // which the command's output needs to get through.
-            let Some(chan) = self.channels.get_mut(&channel) else {
-                return Ok(());
+            let input = match self.channels.get(&channel) {
+                Some(chan) => &chan.input,
+                None => match self.forwards.get(&channel) {
+                    Some(forward) => &forward.input,
+                    None => return Ok(()),
+                },
             };
-            let pushed = chan.input.as_ref().map(|input| input.push(data));
+            let pushed = input.as_ref().map(|input| input.push(data));
             match pushed {
                 Some(Pushed::Queued) => {}
                 // No command (yet, or any more) takes this input.
@@ -674,13 +748,17 @@ mod server {
                 }
                 Some(Pushed::Overrun) => {
                     // A client past its window is out of protocol (OpenSSH disconnects it).
-                    chan.end();
-                    session.extended_data(
-                        channel,
-                        1,
-                        Bytes::from_static(b"The client sent more than its window.\r\n"),
-                    )?;
-                    session.exit_status_request(channel, 1)?;
+                    if let Some(chan) = self.channels.get_mut(&channel) {
+                        chan.end();
+                        session.extended_data(
+                            channel,
+                            1,
+                            Bytes::from_static(b"The client sent more than its window.\r\n"),
+                        )?;
+                        session.exit_status_request(channel, 1)?;
+                    } else {
+                        self.forwards.remove(&channel);
+                    }
                     session.close(channel)?;
                 }
             }
@@ -695,7 +773,7 @@ mod server {
             session: &mut Session,
         ) -> Result<(), Self::Error> {
             // A client has no extended data to give a command; its window is returned.
-            if self.channels.contains_key(&channel) {
+            if self.channels.contains_key(&channel) || self.forwards.contains_key(&channel) {
                 session.window_adjust(channel, data.len() as u32)?;
             }
             Ok(())
@@ -711,6 +789,9 @@ mod server {
                 if chan.master.is_none() {
                     chan.input = None;
                 }
+            } else if let Some(forward) = self.forwards.get_mut(&channel) {
+                // The target gets the end of its input once what is queued is written.
+                forward.input = None;
             }
             Ok(())
         }
@@ -852,9 +933,9 @@ mod server {
         let stdin = child.stdin.take().ok_or("The session has no input.")?;
         let stdout = child.stdout.take().ok_or("The session has no output.")?;
         let stderr = child.stderr.take().ok_or("The session has no output.")?;
-        let (input, receiver) = Input::new();
+        let input = Input::new();
         let granting = handle.clone();
-        let writer = input.attach(stdin, receiver, move |bytes| {
+        let writer = input.attach(stdin, move |bytes| {
             let _ = granting.window_adjust(channel, bytes);
         });
         let held = group.clone();
@@ -930,9 +1011,9 @@ mod server {
             master.try_clone().map_err(|error| error.to_string())?,
         );
         let writer = tokio::fs::File::from_std(master);
-        let (input, receiver) = Input::new();
+        let input = Input::new();
         let granting = handle.clone();
-        let writer = input.attach(writer, receiver, move |bytes| {
+        let writer = input.attach(writer, move |bytes| {
             let _ = granting.window_adjust(channel, bytes);
         });
         let held = group.clone();
@@ -1044,24 +1125,29 @@ mod server {
     }
 
     /// Serves a `direct-tcpip` channel: `silo-ctr connect` joins the container's network namespace
-    /// and connects to its loopback, then its standard input and output are the channel.
+    /// and connects to its loopback, then its standard input and output are the channel. Flow
+    /// control is a command's: the client's data waits in `queue` (at most the window), the
+    /// window comes back as the target takes it, and the target's output goes out through the
+    /// handle, which the client's window holds back without stopping the session loop.
     async fn forward(
         shared: Arc<Shared>,
         handle: Handle,
-        channel: Channel<Msg>,
+        id: ChannelId,
         host: String,
         port: u16,
         reply: ChannelOpenHandle,
+        queue: Arc<Queue>,
     ) {
-        let id = channel.id();
         match open_forward(&shared, &host, port).await {
             Ok((child, stdin, stdout)) => {
+                let granting = handle.clone();
+                let writer = queue.attach(stdin, move |bytes| {
+                    let _ = granting.window_adjust(id, bytes);
+                });
                 reply.accept().await;
-                let mut stream = channel.into_stream();
-                let mut peer = tokio::io::join(stdout, stdin);
-                let _ = tokio::io::copy_bidirectional(&mut stream, &mut peer).await;
-                drop(stream);
+                pump(stdout, handle.clone(), id, None).await;
                 // `child` ends here and takes the connection with it.
+                drop(writer);
                 drop(child);
                 let _ = handle.eof(id).await;
                 let _ = handle.close(id).await;
@@ -1174,32 +1260,45 @@ mod server {
     /// and whenever the queue is empty so a small transfer is never held back).
     async fn write_input(
         mut sink: impl AsyncWrite + Unpin,
-        mut receiver: mpsc::UnboundedReceiver<Bytes>,
         queue: Arc<Queue>,
         grant: impl Fn(u32),
     ) {
-        let mut taken = 0u32;
-        while let Some(chunk) = receiver.recv().await {
+        let _closing = Closing(queue.clone());
+        let mut taken = 0usize;
+        loop {
+            let (chunk, ended) = {
+                let mut state = queue.lock();
+                if state.buffer.is_empty() {
+                    (None, state.ended)
+                } else {
+                    (Some(state.buffer.split().freeze()), false)
+                }
+            };
+            let Some(chunk) = chunk else {
+                if ended {
+                    break;
+                }
+                queue.ready.notified().await;
+                continue;
+            };
             let written = sink.write_all(&chunk).await.is_ok() && sink.flush().await.is_ok();
             queue.release(chunk.len());
-            taken += chunk.len() as u32;
+            taken += chunk.len();
             if !written {
                 // The command no longer reads: what is queued is dropped and its window given
                 // back, so the client is not left waiting for it.
-                receiver.close();
-                while let Some(rest) = receiver.recv().await {
-                    queue.release(rest.len());
-                    taken += rest.len() as u32;
-                }
-                grant(taken);
+                taken += queue.close();
+                grant(taken as u32);
                 return;
             }
-            if taken >= INPUT_WINDOW / 4 || receiver.is_empty() {
-                grant(taken);
+            if taken >= INPUT_WINDOW as usize / 4 || queue.queued() == 0 {
+                grant(taken as u32);
                 taken = 0;
             }
         }
-        grant(taken);
+        if taken > 0 {
+            grant(taken as u32);
+        }
         let _ = sink.shutdown().await;
     }
 
@@ -1444,6 +1543,7 @@ mod server {
     mod tests {
         use super::*;
         use russh::keys::{Algorithm, PrivateKey, PrivateKeyWithHashAlg};
+        use std::sync::atomic::{AtomicUsize, Ordering};
 
         struct Client;
 
@@ -1509,7 +1609,18 @@ mod server {
         async fn connect(
             fixture: &Fixture,
         ) -> russh::client::Handle<Client> {
-            let (client_end, server_end) = tokio::io::duplex(256 * 1024);
+            connect_buffered(fixture, 256 * 1024).await
+        }
+
+        /// `connect` over a transport that holds `buffer` bytes each way. russh's session loop
+        /// writes without reading meanwhile, so two russh ends that both send in bulk over a
+        /// small in-memory buffer wait on each other: the buffer must hold what either end
+        /// has in flight (its peer's window). Real peers read and write at once.
+        async fn connect_buffered(
+            fixture: &Fixture,
+            buffer: usize,
+        ) -> russh::client::Handle<Client> {
+            let (client_end, server_end) = tokio::io::duplex(buffer);
             // The server waits for the client's identification before it answers.
             let (config, shared) = (fixture.config.clone(), fixture.shared.clone());
             tokio::spawn(async move {
@@ -1629,7 +1740,7 @@ mod server {
 
         #[test]
         fn a_command_that_does_not_read_cannot_hold_up_the_session_or_grow_past_the_window() {
-            let (input, _receiver) = Input::new();
+            let input = Input::new();
             let chunk = vec![7u8; 32 * 1024];
             // Nothing reads: every push still returns at once, up to the window a client was granted.
             for _ in 0..INPUT_WINDOW as usize / chunk.len() {
@@ -1637,17 +1748,28 @@ mod server {
             }
             // A client that keeps sending past its window is out of protocol.
             assert_eq!(input.push(&[0]), Pushed::Overrun);
-            assert_eq!(
-                input.queue.queued.load(Ordering::Relaxed),
-                INPUT_WINDOW as usize
-            );
+            assert_eq!(input.queue.queued(), INPUT_WINDOW as usize);
         }
 
+        /// The queue is bounded in memory, not only in payload bytes: a window sent as one-byte
+        /// packets is one buffer of about the window, not an entry per packet.
         #[test]
-        fn a_connection_holds_at_most_one_window_per_channel() {
-            // The bound that replaced the per-connection queue limit: a channel queues at most
-            // its window, a connection has at most `MAX_CHANNELS` channels.
-            assert!(MAX_CHANNELS as u64 * u64::from(INPUT_WINDOW) <= 32 * 1024 * 1024);
+        fn a_window_of_one_byte_packets_is_one_buffer_not_millions_of_entries() {
+            let input = Input::new();
+            for _ in 0..INPUT_WINDOW {
+                assert_eq!(input.push(&[9]), Pushed::Queued);
+            }
+            assert_eq!(input.push(&[9]), Pushed::Overrun);
+            let state = input.queue.lock();
+            assert_eq!(state.queued, INPUT_WINDOW as usize);
+            assert_eq!(state.buffer.len(), INPUT_WINDOW as usize);
+            // One allocation, at most twice the payload (the growth of a vector).
+            assert!(
+                state.buffer.capacity() <= 2 * INPUT_WINDOW as usize,
+                "the buffer holds {} bytes for {} of payload",
+                state.buffer.capacity(),
+                INPUT_WINDOW
+            );
         }
 
         /// The window the writer gave back, in total.
@@ -1659,36 +1781,66 @@ mod server {
             })
         }
 
+        /// Same, with a writer attached to a command that never reads: what the writer has
+        /// taken counts as queued until it is written, and the memory stays the window plus a
+        /// constant however the packets come.
+        #[tokio::test(flavor = "multi_thread")]
+        async fn one_byte_packets_to_a_command_that_never_reads_stay_bounded() {
+            let input = Input::new();
+            let (_reader, sink) = tokio::io::duplex(16);
+            let (granted, grant) = granted_total();
+            let _writer = input.attach(sink, grant);
+            let mut pushed = 0usize;
+            while input.push(&[9]) == Pushed::Queued {
+                pushed += 1;
+                assert!(pushed <= INPUT_WINDOW as usize + 16, "the window was passed");
+                if pushed.is_multiple_of(4096) {
+                    tokio::task::yield_now().await;
+                }
+            }
+            // The window, and the few bytes the command took (the sink holds 16).
+            assert!(pushed >= INPUT_WINDOW as usize, "only {pushed} bytes were queued");
+            let state = input.queue.lock();
+            assert!(state.queued <= INPUT_WINDOW as usize);
+            // What is not yet with the writer is in one buffer, not an entry per packet.
+            assert!(state.buffer.capacity() <= 2 * INPUT_WINDOW as usize + 64 * 1024);
+            assert!(granted.load(Ordering::Relaxed) <= 16);
+        }
+
         #[tokio::test(flavor = "multi_thread")]
         async fn a_writer_stuck_on_a_command_that_never_reads_ends_with_the_channel() {
-            let (input, receiver) = Input::new();
+            let input = Input::new();
             // A pipe nobody reads: the writer blocks on it for good.
             let (_reader, writer) = tokio::io::duplex(16);
             let (granted, grant) = granted_total();
-            let guard = input.attach(writer, receiver, grant);
+            let guard = input.attach(writer, grant);
             assert_eq!(input.push(&[1u8; 4096]), Pushed::Queued);
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-            let sender = input.sender.clone();
+            let queue = input.queue.clone();
             // Ending the input alone leaves the writer to finish what is queued...
             drop(input);
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-            assert!(!sender.is_closed(), "the writer was cut off at the end of input");
+            assert!(!queue.lock().closed, "the writer was cut off at the end of input");
             // ...and what `Chan::end` does ends it.
             drop(guard);
-            tokio::time::timeout(std::time::Duration::from_secs(5), sender.closed())
-                .await
-                .expect("the writer task outlived the channel");
+            tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                while !queue.lock().closed {
+                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .expect("the writer task outlived the channel");
             // Nothing was taken by the command, so nothing was granted back.
             assert_eq!(granted.load(Ordering::Relaxed), 0);
         }
 
         #[tokio::test(flavor = "multi_thread")]
         async fn the_window_comes_back_only_as_the_command_takes_the_input() {
-            let (input, receiver) = Input::new();
+            let input = Input::new();
             // A sink that takes a few kilobytes and then waits for its reader.
             let (mut reader, writer) = tokio::io::duplex(4096);
             let (granted, grant) = granted_total();
-            let writer_task = tokio::spawn(write_input(writer, receiver, input.queue.clone(), grant));
+            let writer_task = tokio::spawn(write_input(writer, input.queue.clone(), grant));
             let chunk = vec![1u8; 32 * 1024];
             let pushes = INPUT_WINDOW as usize / chunk.len();
             let started = std::time::Instant::now();
@@ -1718,17 +1870,17 @@ mod server {
             writer_task.await.unwrap();
             assert_eq!(received, pushes * chunk.len());
             assert_eq!(granted.load(Ordering::Relaxed), received);
-            assert_eq!(queue.queued.load(Ordering::Relaxed), 0);
+            assert_eq!(queue.queued(), 0);
         }
 
         #[tokio::test(flavor = "multi_thread")]
         async fn a_command_that_stops_reading_gives_the_rest_of_the_window_back() {
-            let (input, receiver) = Input::new();
+            let input = Input::new();
             // A command that closed its input (`head -c`): writes fail.
             let (reader, writer) = tokio::io::duplex(16);
             drop(reader);
             let (granted, grant) = granted_total();
-            let writer_task = input.attach(writer, receiver, grant);
+            let writer_task = input.attach(writer, grant);
             let mut sent = 0usize;
             for _ in 0..8 {
                 if input.push(&[3u8; 1000]) != Pushed::Overrun {
@@ -1743,7 +1895,7 @@ mod server {
             assert_eq!(discarded, 4);
             assert!(granted.load(Ordering::Relaxed) >= 1000);
             assert!(granted.load(Ordering::Relaxed) <= sent);
-            assert_eq!(input.queue.queued.load(Ordering::Relaxed), 0);
+            assert_eq!(input.queue.queued(), 0);
             drop(writer_task);
         }
 
@@ -1789,10 +1941,10 @@ mod server {
                 session: &mut Session,
             ) -> Result<(), Self::Error> {
                 let sink = self.sink.take().expect("one command");
-                let (input, receiver) = Input::new();
+                let input = Input::new();
                 *self.queue.lock().unwrap() = Some(input.queue.clone());
                 let handle = session.handle();
-                let writer = input.attach(sink, receiver, move |bytes| {
+                let writer = input.attach(sink, move |bytes| {
                     let _ = handle.window_adjust(channel, bytes);
                 });
                 let chan = self.inner.channels.get_mut(&channel).unwrap();
@@ -1872,7 +2024,7 @@ mod server {
                     .lock()
                     .unwrap()
                     .as_ref()
-                    .map_or(0, |queue| queue.queued.load(Ordering::Relaxed))
+                    .map_or(0, |queue| queue.queued())
             };
             // Nothing reads yet: the client fills its window and then waits, far short of 12 MiB.
             tokio::time::sleep(std::time::Duration::from_millis(500)).await;
@@ -2039,6 +2191,120 @@ mod server {
                     "a forward to {host}:{port} was accepted"
                 );
             }
+        }
+
+        /// A forward is flow-controlled like a command: a target that never reads holds back
+        /// its own client at the window, and the connection's other channels keep working.
+        #[tokio::test(flavor = "multi_thread")]
+        async fn a_forward_whose_target_stops_reading_holds_back_only_its_own_client() {
+            let allowed = key();
+            // Port 9001 is a target that reads nothing; any other port echoes.
+            let fixture = fixture_with_ctr(
+                &authorized_line(&allowed, "me"),
+                "#!/bin/sh\nprintf '\\000'\ncase \"$7\" in 9001) exec sleep 60;; *) exec cat;; esac\n",
+            );
+            let mut client = connect(&fixture).await;
+            assert!(login(&mut client, &allowed).await);
+            let stuck = client
+                .channel_open_direct_tcpip("127.0.0.1", 9001, "127.0.0.1", 40000)
+                .await
+                .unwrap();
+            let (_stuck_read, stuck_write) = stuck.split();
+            let sender = tokio::spawn(async move {
+                let chunk = vec![1u8; 32 * 1024];
+                for _ in 0..(8 * 1024 * 1024) / chunk.len() {
+                    if stuck_write.data(&chunk[..]).await.is_err() {
+                        return false;
+                    }
+                }
+                true
+            });
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            assert!(!sender.is_finished(), "the client was not held back by the target");
+
+            // The same connection still answers: another forward and a new session channel.
+            let mut echo = tokio::time::timeout(
+                std::time::Duration::from_secs(10),
+                client.channel_open_direct_tcpip("127.0.0.1", 8080, "127.0.0.1", 40001),
+            )
+            .await
+            .expect("the connection froze behind the forward that is not read")
+            .unwrap();
+            echo.data(&b"still here"[..]).await.unwrap();
+            let mut echoed = Vec::new();
+            while echoed.len() < b"still here".len() {
+                match tokio::time::timeout(std::time::Duration::from_secs(10), echo.wait())
+                    .await
+                    .expect("the connection froze behind the forward that is not read")
+                {
+                    Some(russh::ChannelMsg::Data { data }) => echoed.extend_from_slice(&data),
+                    Some(_) => {}
+                    None => break,
+                }
+            }
+            assert_eq!(echoed, b"still here");
+            tokio::time::timeout(std::time::Duration::from_secs(10), client.channel_open_session())
+                .await
+                .expect("a new channel could not open")
+                .unwrap();
+            assert!(!sender.is_finished(), "the stuck forward was let through");
+            sender.abort();
+        }
+
+        /// A transfer in both directions at once through a forward completes, whole.
+        #[tokio::test(flavor = "multi_thread")]
+        async fn a_forward_carries_a_bulk_transfer_in_both_directions_at_once() {
+            use sha2::{Digest, Sha256};
+            let allowed = key();
+            let fixture = fixture_with_ctr(
+                &authorized_line(&allowed, "me"),
+                "#!/bin/sh\nprintf '\\000'\nexec cat\n",
+            );
+            let mut client = connect_buffered(&fixture, 8 * 1024 * 1024).await;
+            assert!(login(&mut client, &allowed).await);
+            let channel = client
+                .channel_open_direct_tcpip("127.0.0.1", 8080, "127.0.0.1", 40000)
+                .await
+                .unwrap();
+            let (mut read, write) = channel.split();
+            const TOTAL: usize = 16 * 1024 * 1024;
+            const CHUNK: usize = 32 * 1024;
+            let sender = tokio::spawn(async move {
+                let mut hash = Sha256::new();
+                for index in 0..TOTAL / CHUNK {
+                    let chunk: Vec<u8> = (0..CHUNK).map(|at| (at + index * 7) as u8).collect();
+                    hash.update(&chunk);
+                    write.data(&chunk[..]).await.expect("the forward was closed");
+                }
+                write.eof().await.unwrap();
+                hash.finalize()
+            });
+            let mut hash = Sha256::new();
+            let mut received = 0usize;
+            let finished = tokio::time::timeout(std::time::Duration::from_secs(120), async {
+                while received < TOTAL {
+                    match read.wait().await {
+                        Some(russh::ChannelMsg::Data { data }) => {
+                            hash.update(&data);
+                            received += data.len();
+                        }
+                        Some(_) => {}
+                        None => break,
+                    }
+                }
+            })
+            .await;
+            assert!(
+                finished.is_ok(),
+                "the transfer did not complete: {received} of {TOTAL} bytes came back, the client finished sending: {}",
+                sender.is_finished()
+            );
+            assert_eq!(received, TOTAL);
+            let sent = tokio::time::timeout(std::time::Duration::from_secs(30), sender)
+                .await
+                .expect("the client never finished sending")
+                .unwrap();
+            assert_eq!(hash.finalize(), sent);
         }
 
         #[tokio::test(flavor = "multi_thread")]

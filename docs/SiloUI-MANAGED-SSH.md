@@ -208,12 +208,18 @@ namespace, so a stale `outer.pid` that another computer's holder has reused is r
 A connection has 30 seconds to log in whatever the inactivity timeout is, and only logged-in
 connections count against the limit of 32 (at most 64 are still logging in at once), so idle
 sockets cannot lock a person out. A command is never ended because it reads slowly. The
-client's input is flow-controlled with the SSH channel window, as OpenSSH does: each channel
-grants the client 2 MiB, and the server gives window back only as the command takes the input,
-so a slow command slows the client down (`rsync`, `git` and a large `scp` just take longer)
-while the server holds at most 2 MiB per channel, 32 MiB across the 16 channels of one
-connection. The session loop never waits for the command, so a transfer in both directions
-(`ssh NAME cat < big > copy`) never stalls the connection's other traffic. A client that sends
+client's input is flow-controlled with the SSH channel window, as OpenSSH does, for commands, terminals
+and port forwards alike: each channel grants the client 2 MiB, and the server gives window back only as the command
+(or the forward's target) takes the input, so a slow one slows the client down (`rsync`, `git` and a large `scp` just
+take longer). What waits is one buffer per channel that every packet is appended to, so it is 2 MiB of payload however
+small the packets are (a window sent as one-byte packets is not millions of entries) and at most 4 MiB allocated
+(the buffer grows by doubling). A connection has at most 16 channels, forwards included: 32 MiB of payload, at most
+64 MiB allocated; the 32 logged-in connections of a server at most 1 GiB and 2 GiB. The session loop never waits for a
+command or a target, so a transfer in both directions (`ssh NAME cat < big > copy`, or a bulk `ssh -L` forward) never
+stalls the connection's other traffic, and a forward whose target stops reading holds back only its own client.
+Output is the other direction: it is held by the client's window, which russh sends from the session loop, so a client
+that stops reading one channel's output (a local program that stops reading an `ssh -L` socket) also pauses the output
+of the connection's other channels until it reads again, as it does for any russh server. A client that sends
 more than its window is out of protocol and its channel is closed. When a channel closes, its
 writer task ends, even for a command in a process group of its own that never reads. russh
 grants the window by itself as data arrives, so Silo carries a small patch to it (see
@@ -229,7 +235,8 @@ same files as for a virtual machine.
 The live check (`scripts/linux-host-e2e.sh` with `SILO_E2E_CONTAINER=1`) runs `silo ssh-setup`, then
 `ssh NAME.silo-dev uname -a`, an SFTP put and get, a `ssh -tt ... tty` session, the terminal
 command, the editor proxy in `--stdio` mode under a scripted `ssh`, port forwarding (`ssh -L` to a port served
-inside the container, and a refused destination), a large file through `ssh NAME cat` both ways (hashes compared), a
+inside the container, and a refused destination, 60 MB both ways through a forward with hashes, and a shell command
+on the same connection that still answers while a forward's target does not read), a large file through `ssh NAME cat` both ways (hashes compared), a
 killed client that takes its remote command with it, idle sockets that do not lock out a login, and the in-guest client.
 
 ## Reconciliation

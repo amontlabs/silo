@@ -440,6 +440,103 @@ container_forwarding_and_transfers() {
   for pid in "${forwarders[@]}"; do kill "$pid" 2>/dev/null || true; done
   wait 2>/dev/null || true
 
+  step "Sending 60 MB both ways through an ssh -L forward, and a forward whose target does not read"
+  # One server in the container echoes (so the transfer goes both ways at once); another accepts
+  # a connection and never reads it. A forward is flow-controlled like a command: the echo comes
+  # back whole, and the target that does not read holds back its own client and nothing else on
+  # the connection (a shell command on it still answers).
+  local servers
+  servers=$(base64 -w0 <<'PY'
+import socket, threading, time
+
+def listener(port):
+    server = socket.socket()
+    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    server.bind(("127.0.0.1", port))
+    server.listen(8)
+    return server
+
+def echo(connection):
+    while True:
+        data = connection.recv(65536)
+        if not data:
+            break
+        connection.sendall(data)
+    connection.close()
+
+def serve_echo(server):
+    while True:
+        connection, _ = server.accept()
+        threading.Thread(target=echo, args=(connection,), daemon=True).start()
+
+def serve_deaf(server):
+    held = []
+    while True:
+        held.append(server.accept()[0])
+
+threading.Thread(target=serve_echo, args=(listener(18081),), daemon=True).start()
+threading.Thread(target=serve_deaf, args=(listener(18082),), daemon=True).start()
+time.sleep(3600)
+PY
+)
+  in_container sh -c "echo $servers | base64 -d > /tmp/fwd/servers.py && (nohup python3 /tmp/fwd/servers.py >/dev/null 2>&1 &)"
+  for _ in $(seq 1 20); do
+    in_container python3 -c 'import socket;socket.create_connection(("127.0.0.1",18082),2).close();socket.create_connection(("127.0.0.1",18081),2).close()' 2>/dev/null && break
+    sleep 1
+  done
+  local control="$scratch/forward-control"
+  ssh -M -S "$control" -N "${ssh_opts[@]}" -L 28083:127.0.0.1:18081 -L 28084:127.0.0.1:18082 "$host" &
+  forwarders+=($!)
+  for _ in $(seq 1 20); do
+    ssh -S "$control" -O check "$host" 2>/dev/null && break
+    sleep 1
+  done
+  # The deaf target first: a client sends it far more than the window and waits.
+  python3 -I -c '
+import socket, sys, time
+connection = socket.create_connection(("127.0.0.1", 28084), 10)
+chunk = b"x" * 65536
+deadline = time.time() + 120
+while time.time() < deadline:
+    connection.sendall(chunk)
+' &
+  local stuck=$!
+  sleep 3
+  expect "a shell command on the connection while a forward's target does not read" "$(timeout 30 ssh -S "$control" "$host" 'echo still-answering')" still-answering
+  # The echo through the same connection, 60 MB sent and read back at once, hashes compared.
+  local echoed
+  echoed=$(timeout 300 python3 -I -c '
+import hashlib, os, socket, sys, threading
+total = 60_000_000
+connection = socket.create_connection(("127.0.0.1", 28083), 10)
+sent = hashlib.sha256()
+def send():
+    left = total
+    while left:
+        chunk = os.urandom(min(65536, left))
+        sent.update(chunk)
+        connection.sendall(chunk)
+        left -= len(chunk)
+sender = threading.Thread(target=send)
+sender.start()
+received = hashlib.sha256()
+left = total
+while left:
+    data = connection.recv(min(65536, left))
+    if not data:
+        sys.exit("the forward ended with %d bytes missing" % left)
+    received.update(data)
+    left -= len(data)
+sender.join()
+print("same" if sent.hexdigest() == received.hexdigest() else "different")
+')
+  expect "60 MB through an ssh -L forward, both ways at once" "$echoed" same
+  expect "a shell command after the transfer" "$(timeout 30 ssh -S "$control" "$host" 'echo still-answering')" still-answering
+  kill "$stuck" 2>/dev/null || true
+  ssh -S "$control" -O exit "$host" 2>/dev/null || true
+  wait 2>/dev/null || true
+  in_container sh -c "pkill -f 'fwd/servers[.]py'" || true
+
   step "Sending a large file through ssh cat in both directions at once, five times"
   local ssh_plain=(-o BatchMode=yes -o ConnectTimeout=30) round big_hash
   head -c 60000000 /dev/urandom > "$scratch/big.bin"
