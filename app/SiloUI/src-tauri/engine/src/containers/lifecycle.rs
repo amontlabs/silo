@@ -682,18 +682,22 @@ pub fn copy_layer(
 }
 
 /// The bytes a writable layer occupies on disk, counted inside the user namespace so directories
-/// the engine's own account cannot read count too. `None` when it could not be measured.
-pub fn layer_bytes(tools: &Tools, layer: &Path) -> Option<u64> {
+/// the engine's own account cannot read count too. `Some(None)` when the layer could not be
+/// measured (the measurement ran too long, or printed nothing readable); `None` when the
+/// measuring tool itself could not start, which says nothing about the layer.
+pub fn layer_bytes(tools: &Tools, layer: &Path) -> Option<Option<u64>> {
     let agent = super::idmap::AGENT_ID.to_string();
     let du: [&std::ffi::OsStr; 4] = ["du".as_ref(), "-sB1".as_ref(), "--".as_ref(), layer.as_os_str()];
-    let done = super::tools::run_bounded(
+    match super::tools::run_bounded(
         &tools.ctr,
         &namespace_args(&agent, &du),
         Duration::from_secs(300),
-    )
-    .ok()?;
-    // `du` exits non-zero when a file vanished under it; the total it printed still counts.
-    done.stdout.split_whitespace().next()?.parse().ok()
+    ) {
+        Err(super::tools::BoundedError::CouldNotStart(_)) => None,
+        Err(super::tools::BoundedError::TimedOut) => Some(None),
+        // `du` exits non-zero when a file vanished under it; the total it printed still counts.
+        Ok(done) => Some(done.stdout.split_whitespace().next().and_then(|n| n.parse().ok())),
+    }
 }
 
 /// Folds `layers` (oldest first) into the new layer `out`.
@@ -773,7 +777,7 @@ pub fn guard_pass(paths: &RuntimePaths, tools: &Tools) -> Vec<String> {
             let dir = layout.computer(name);
             let record = dir.read_record().ok()?;
             Some(super::host_disk::Sizes {
-                layer: layer_bytes(tools, &dir.upper_of(&record)),
+                layer: layer_bytes(tools, &dir.upper_of(&record))?,
                 limit: super::host_disk::limit_bytes(&record),
             })
         },
@@ -1551,6 +1555,10 @@ pub fn exec_command(
         .cloned()
         .chain(super::secrets::placeholder_env(&active_secrets(name)));
     for (key, value) in own.chain(exec.env.iter().cloned()) {
+        // The kind is the engine's to say: the guest scripts refuse to install packages by it.
+        if key == "SILO_RUNTIME" {
+            continue;
+        }
         environment.retain(|(existing, _)| existing != &key);
         environment.push((key, value));
     }

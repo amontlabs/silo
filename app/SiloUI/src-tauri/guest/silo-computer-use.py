@@ -581,6 +581,19 @@ def ensure_driver(pinned, stage):
 
 # ----------------------------------------------------------------- the desktop session
 
+def read_session_file(path):
+    """The session's environment file, which the working account owns: opened without following
+    a link, never blocking on a pipe, and only if it is a small regular file, so root does not
+    hang or run out of memory on what the account made of it."""
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_NOCTTY)
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise OSError('not a regular file')
+        return os.read(fd, 8192).decode('utf-8', 'replace')
+    finally:
+        os.close(fd)
+
+
 def session_env(proc=Path('/proc'), strict=False):
     """The environment of the desktop session, read from its `xfce4-session` process: DISPLAY,
     DBUS_SESSION_BUS_ADDRESS, XDG_RUNTIME_DIR (and XAUTHORITY when the session has one).
@@ -621,7 +634,7 @@ def session_env(proc=Path('/proc'), strict=False):
         # A container computer's commands cannot read each other's processes (Landlock), so the
         # session wrote its environment to a file when it started.
         try:
-            for line in (Path(SESSION_RUNTIME_DIR) / 'session.env').read_text().splitlines():
+            for line in read_session_file(Path(SESSION_RUNTIME_DIR) / 'session.env').splitlines():
                 key, _, value = line.partition('=')
                 if key in ('DISPLAY', 'DBUS_SESSION_BUS_ADDRESS', 'XDG_RUNTIME_DIR', 'XAUTHORITY') and value:
                     found.setdefault(key, value)

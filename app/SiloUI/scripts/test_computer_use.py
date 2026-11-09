@@ -1213,6 +1213,22 @@ class ReceiptPersistence(unittest.TestCase):
         self.assertEqual(list(self.path.parent.iterdir()), [self.path])
 
 
+class SessionFile(unittest.TestCase):
+    def test_root_reads_only_a_small_regular_file_of_the_account(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'good').write_text('DISPLAY=:1\n')
+            self.assertEqual(cu.read_session_file(root / 'good'), 'DISPLAY=:1\n')
+            os.symlink(root / 'good', root / 'link')
+            with self.assertRaises(OSError):
+                cu.read_session_file(root / 'link')
+            os.mkfifo(root / 'pipe')
+            with self.assertRaises(OSError):
+                cu.read_session_file(root / 'pipe')
+            (root / 'big').write_text('A' * 100000)
+            self.assertEqual(len(cu.read_session_file(root / 'big')), 8192)
+
+
 class BrowserLaunchers(unittest.TestCase):
     def setUp(self):
         self.root = Path(tempfile.mkdtemp())
