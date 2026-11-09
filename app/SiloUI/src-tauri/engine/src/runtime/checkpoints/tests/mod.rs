@@ -5987,7 +5987,8 @@ fn quiet_arguments_are_positional_and_run_as_root() {
         scrub: vec!["/root/xy*".into()],
         ..quiet_record(TOKEN)
     };
-    let args = quiet_exec_args("My Fork", &quiet);
+    let home = tempfile::tempdir().unwrap();
+    let args = quiet_exec_args(&paths(&home), "My Fork", &quiet);
     assert_eq!(&args[..2], ["exec", "My Fork"]);
     assert!(args.windows(2).any(|pair| pair == ["--user", "root"]));
     assert_eq!(
@@ -6589,4 +6590,122 @@ fn autostart_entries_match_any_word_of_their_exec_line() {
     assert!(check("env A=1 \"/opt/poller\"", "poller"));
     assert!(!check("/usr/bin/pollerx", "poller"));
     assert!(!check("/usr/bin/poller.old", "poller"));
+}
+
+#[test]
+fn a_running_container_is_captured_with_disks_only() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let paths = paths(&directory);
+    write_metadata(
+        &paths.metadata,
+        &ComputerConfigurationRequest {
+            schema_version: 1,
+            computers: vec![computer_configuration()],
+        },
+    )
+    .unwrap();
+    // A bridge folder makes a capture with memory drop the guest's cached entries first.
+    std::fs::create_dir_all(crate::guest_client::spool_dir(&paths.home, "dev")).unwrap();
+    crate::containers::capability::make_container(&paths.home, "dev");
+    let runner = Runner {
+        mount_type: "Owned",
+        calls: Mutex::new(Vec::new()),
+    };
+    capture_with(&runner, &paths, ID, "Before work", "manual").unwrap();
+    let calls = runner.calls.lock().unwrap();
+    let create = calls
+        .iter()
+        .find(|call| call[..2] == ["snapshot", "create"])
+        .unwrap();
+    assert!(!create.iter().any(|arg| arg == "--full"), "{create:?}");
+    assert!(!calls
+        .iter()
+        .any(|call| call.iter().any(|arg| arg.contains("drop_caches"))));
+    assert_eq!(load(&paths, ID).unwrap().checkpoints[0].scope, "disk");
+}
+
+#[test]
+fn restoring_a_running_container_saves_its_disks_and_stops_it_without_pausing() {
+    let _test_state = crate::test_support::global_state();
+    struct ContainerRunner {
+        state: Mutex<&'static str>,
+        calls: Mutex<Vec<Vec<String>>>,
+    }
+    impl RuntimeRunner for ContainerRunner {
+        fn run(
+            &self,
+            _paths: &RuntimePaths,
+            args: &[String],
+            _timeout: Duration,
+        ) -> Result<CommandOutput, RuntimeError> {
+            self.calls.lock().unwrap().push(args.to_vec());
+            let stdout = match args[0].as_str() {
+                "inspect" => serde_json::json!({"name":"dev","status":*self.state.lock().unwrap(),"config":{
+                    "labels":{"silo.managed":"true","silo.machine-id":ID},
+                    "mounts":[{"guest":"/workspace","type":"Owned","storage":{"kind":"disk","capacity_mib":1024}}],
+                    "network":{"policy":{"default_egress":"allow","default_ingress":"deny","rules":[]}}
+                }}).to_string(),
+                "snapshot" if args[1] == "list" => {
+                    let entry = |name: &str| serde_json::json!({"group":"dev","name":name,"scope":"disk","availability":"ready"});
+                    let mut names = vec!["c000000000000000000000000000000".to_owned()];
+                    names.extend(
+                        self.calls.lock().unwrap().iter().filter(|call| call[..2] == ["snapshot", "create"]).map(|call| call[2].clone()),
+                    );
+                    serde_json::to_string(&names.iter().map(|name| entry(name)).collect::<Vec<_>>()).unwrap()
+                }
+                "snapshot" => String::new(),
+                "stop" => {
+                    assert!(args.iter().any(|arg| arg == "--force"));
+                    *self.state.lock().unwrap() = "Stopped";
+                    String::new()
+                }
+                "remove" => String::new(),
+                "list" => "[]".into(),
+                _ => panic!("unexpected runtime command: {args:?}"),
+            };
+            Ok(CommandOutput {
+                stdout,
+                stderr: String::new(),
+            })
+        }
+    }
+    let directory = tempfile::tempdir().unwrap();
+    let paths = paths(&directory);
+    write_metadata(
+        &paths.metadata,
+        &ComputerConfigurationRequest {
+            schema_version: 1,
+            computers: vec![computer_configuration()],
+        },
+    )
+    .unwrap();
+    crate::containers::capability::make_container(&paths.home, "dev");
+    let mut record = Record::default();
+    record.checkpoints.push(Checkpoint {
+        id: "c000000000000000000000000000000".into(),
+        native_id: None,
+        name: "Selected".into(),
+        created_at: 1,
+        scope: "disk".into(),
+        reason: "manual".into(),
+        kind: "manual".into(),
+    });
+    save(&paths, ID, &record).unwrap();
+    let runner = ContainerRunner {
+        state: Mutex::new("Running"),
+        calls: Mutex::new(Vec::new()),
+    };
+    restore_with(&runner, &paths, ID, "c000000000000000000000000000000").unwrap();
+    let calls = runner.calls.lock().unwrap();
+    let position = |command: &str| calls.iter().position(|args| args[0] == command).unwrap();
+    assert!(!calls.iter().any(|args| args[0] == "pause"));
+    let create = calls.iter().find(|call| call[..2] == ["snapshot", "create"]).unwrap();
+    assert!(!create.iter().any(|arg| arg == "--full"), "{create:?}");
+    assert!(position("snapshot") < position("stop"));
+    assert!(position("stop") < position("remove"));
+    let stored = load(&paths, ID).unwrap();
+    assert_eq!(stored.checkpoints[0].reason, "before-restore");
+    assert_eq!(stored.checkpoints[0].scope, "disk");
+    assert_eq!(stored.pending_checkpoint_restore.unwrap().state, "disk");
 }

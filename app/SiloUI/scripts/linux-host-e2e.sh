@@ -24,6 +24,10 @@ ctr="$name-ctr"
 # A second container that keeps the secret when it is taken away from the first (a secret always
 # has a computer).
 ctr2="$name-ctr2"
+# A container with a small disk, to write past its size.
+ctr3="$name-ctr3"
+# The engine's systemd unit, which the restart check ends the way a crash does.
+engine_unit="${SILO_E2E_UNIT:-org.silo.dev.engine.service}"
 # Seconds to wait for the engine socket to answer.
 ready_timeout="${SILO_E2E_READY_TIMEOUT:-120}"
 # Seconds between attempts to create the computer when the VM image download fails.
@@ -52,7 +56,7 @@ cleanup() {
   trap - EXIT
   rm -f "${stderr_file:-}"
   remove_editor_key
-  for computer in "$ctr2" "$ctr" "$fork" "$name"; do
+  for computer in "$ctr3" "$ctr2" "$ctr" "$ctr-k" "$ctr-f-1" "$ctr-f-2" "$ctr-f-3" "$ctr-f-4" "$fork" "$name"; do
     if listed "$computer" 2>/dev/null | grep -qx -- "$computer"; then
       echo "Stopping and dropping $computer after a failed run"
       "$silo" stop "$computer" || true
@@ -126,6 +130,122 @@ except OSError as error:
     echo "-- $log" >&2
     tail -n 40 "$log" >&2 || true
   done
+}
+
+# The id of the checkpoint of $1 called $2.
+checkpoint_id() {
+  "$silo" --json checkpoints "$1" | python3 -c '
+import json, sys
+found = [c["id"] for c in json.load(sys.stdin)["checkpoints"] if c["name"] == sys.argv[1]]
+print(found[0] if found else "")' "$2"
+}
+
+# The scope the checkpoint $2 of $1 was saved with.
+checkpoint_scope() {
+  "$silo" --json checkpoints "$1" | python3 -c '
+import json, sys
+found = [c.get("scope", "?") for c in json.load(sys.stdin)["checkpoints"] if c["name"] == sys.argv[1]]
+print(found[0] if found else "missing")' "$2"
+}
+
+# Whether $2 exists in the computer $1 ("yes" or "no").
+has_file() { "$silo" exec "$1" -- sh -c "test -e '$2' && echo yes || echo no"; }
+
+# Checkpoints, forks, diff, keep, undo and a quiet fork of a running container, then an engine
+# restart (a crash: the unit is killed, systemd starts it again) and a write past the disk size.
+container_checkpoint_features() {
+  step "Checkpointing the running $ctr"
+  in_container sh -c 'echo base > /workspace/ct4-base'
+  root_in_container sh -c 'echo "* * * * * root touch /tmp/ct4-cron-ran" > /etc/cron.d/ct4-cron'
+  "$silo" checkpoint "$ctr" --name ct4-base
+  base=$(checkpoint_id "$ctr" ct4-base)
+  [[ -n "$base" ]] || { echo "no checkpoint ct4-base listed" >&2; exit 1; }
+  expect "checkpoint scope" "$(checkpoint_scope "$ctr" ct4-base)" disk
+  in_container sh -c 'echo later > /workspace/ct4-after'
+
+  step "Forking $ctr four times from the checkpoint"
+  started=$(date +%s.%N)
+  "$silo" fork "$ctr" --name "$ctr-f" -n 4 --checkpoint "$base"
+  finished=$(date +%s.%N)
+  python3 -c 'import sys; print("fork -n 4 from a checkpoint of a running container: %.1f s" % (float(sys.argv[2]) - float(sys.argv[1])))' "$started" "$finished"
+  for i in 1 2 3 4; do
+    fork_i="$ctr-f-$i"
+    expect "$fork_i sees the checkpoint" "$("$silo" exec "$fork_i" -- cat /workspace/ct4-base)" base
+    expect "$fork_i lacks later writes" "$(has_file "$fork_i" /workspace/ct4-after)" no
+    expect "$fork_i has no cron job of the parent" "$(has_file "$fork_i" /etc/cron.d/ct4-cron)" no
+    "$silo" exec "$fork_i" -- sh -c "echo fork-$i > /workspace/only-$i"
+  done
+  expect "the parent has its cron job" "$(has_file "$ctr" /etc/cron.d/ct4-cron)" yes
+  for i in 1 2 3 4; do
+    for j in 1 2 3 4; do
+      [[ "$i" == "$j" ]] && continue
+      expect "fork $i does not see fork $j" "$(has_file "$ctr-f-$i" "/workspace/only-$j")" no
+    done
+  done
+  expect "the parent does not see a fork's file" "$(has_file "$ctr" /workspace/only-1)" no
+
+  step "Diff in a fork"
+  diff_text=$("$silo" diff "$ctr-f-1")
+  echo "$diff_text"
+  grep -q "only-1" <<<"$diff_text" || { echo "the diff of $ctr-f-1 does not list its change" >&2; exit 1; }
+  for i in 1 2 3 4; do
+    "$silo" stop "$ctr-f-$i"
+    "$silo" drop "$ctr-f-$i"
+  done
+
+  step "Keeping a fork into $ctr and undoing it"
+  "$silo" fork "$ctr" --name "$ctr-k"
+  "$silo" exec "$ctr-k" -- sh -c 'echo kept > /workspace/ct4-kept'
+  "$silo" fold "$ctr-k"
+  expect "kept file in the parent" "$(has_file "$ctr" /workspace/ct4-kept)" yes
+  "$silo" undo "$ctr"
+  state=$("$silo" --json status "$ctr" | python3 -c 'import json, sys; print(json.load(sys.stdin)["state"])')
+  [[ "$state" == running ]] || "$silo" start "$ctr"
+  expect "kept file after undo" "$(has_file "$ctr" /workspace/ct4-kept)" no
+  expect "earlier state after undo" "$(has_file "$ctr" /workspace/ct4-after)" yes
+  "$silo" stop "$ctr-k"
+  "$silo" drop "$ctr-k"
+
+  step "Restarting the engine under the running $ctr"
+  systemctl --user kill --kill-whom=main --signal=SIGKILL "$engine_unit"
+  came_back=no
+  for _ in $(seq 1 60); do
+    sleep 3
+    if [[ "$("$silo" --json status "$ctr" 2>/dev/null | python3 -c 'import json, sys; print(json.load(sys.stdin)["state"])' 2>/dev/null)" == running ]]; then
+      came_back=yes
+      break
+    fi
+  done
+  expect "container after an engine restart" "$came_back" yes
+  expect "file after an engine restart" "$(in_container cat /workspace/ct4-base)" base
+  code=000
+  for _ in 1 2 3 4 5; do
+    code=$(in_container curl -sS -o /dev/null --max-time 20 -w '%{http_code}' https://example.com || true)
+    [[ "$code" == 200 ]] && break
+    sleep 3
+  done
+  expect "public host after an engine restart" "$code" 200
+}
+
+# A write past the disk size fails, with the file system read-only, and the computer works again
+# once space is freed and it is started again.
+container_disk_limit() {
+  step "Writing past the disk size of $ctr3"
+  "$silo" create "$ctr3" --container --cpus 1 --memory 1 --disk 1
+  "$silo" start "$ctr3"
+  failed=no
+  for i in $(seq 1 40); do
+    if ! "$silo" exec "$ctr3" -- dd if=/dev/zero "of=/home/silo/fill.$i" bs=1M count=64 conv=fsync status=none 2>/dev/null; then
+      failed=yes
+      break
+    fi
+  done
+  expect "a write past the disk size fails" "$failed" yes
+  message=$("$silo" exec "$ctr3" -- sh -c 'echo x > /home/silo/more 2>&1' 2>&1 || true)
+  echo "after the limit: $message"
+  grep -qi "read-only" <<<"$message" || { echo "the failure is not a read-only file system: $message" >&2; exit 1; }
+  "$silo" stop "$ctr3"
+  "$silo" drop "$ctr3"
 }
 
 container_checks() {
@@ -205,6 +325,8 @@ except OSError:
 
   container_network_features
   container_access_features
+  container_checkpoint_features
+  container_disk_limit
 
   step "Stopping and dropping $ctr"
   "$silo" stop "$ctr"
@@ -737,7 +859,7 @@ if ! existing=$(listed "$name" "$fork" "$ctr" "$ctr2"); then
   exit 1
 fi
 if [[ -n "$existing" ]]; then
-  echo "A computer named $name, $fork, $ctr or $ctr2 already exists; this test never touches it" >&2
+  echo "A computer named $name, $fork, $ctr, $ctr2 or $ctr3 already exists; this test never touches it" >&2
   exit 1
 fi
 stderr_file="$(mktemp)"
@@ -797,7 +919,7 @@ if [[ -n "$left" ]]; then
 fi
 if [[ "${SILO_E2E_CONTAINER:-0}" == 1 ]]; then
   container_checks
-  left=$(listed "$ctr" "$ctr2")
+  left=$(listed "$ctr" "$ctr2" "$ctr3")
   if [[ -n "$left" ]]; then
     echo "Still listed after drop: $left" >&2
     exit 1

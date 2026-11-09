@@ -836,8 +836,8 @@ with nothing sensitive on it, and the app, the CLI and `silo list` label it as l
   local terminal runs the same command attached to the user's terminal. The loopback listener is
   reachable by every user on the host (see the loopback note under Other local users); the
   authorized key is the whole check, as for a virtual machine's. SSH sessions do not survive the
-  engine stopping the container or the listener, and a container does not survive an engine
-  restart.
+  engine stopping the container or the listener; a container that an engine restart leaves
+  running is taken back by the next engine (see Checkpoints and forks below).
 - **The in-guest client (boundary 9) in a container.** The per-computer share is the computer's
   runtime folder, bound at `/.msb` (read-write, no exec, no devices) and sealed by mode instead of
   by stat override: its parent `sandboxes/<name>` is `0700`, the runtime folder `0711`, and
@@ -852,7 +852,31 @@ with nothing sensitive on it, and the app, the CLI and `silo list` label it as l
   which it can already give them. The token, the allow-list and the folder parsing (links, sizes,
   counts) are the same code and the same limits.
 - **Not yet for a container.** Export and the desktop are refused with a plain message (see the
-  capability list in `containers/capability.rs`); the app hides them.
+  capability list in `containers/capability.rs`); the app hides them. A container also has no
+  memory checkpoints (the same list: "memory snapshots"): its checkpoints save the disks, whether
+  the computer runs or not.
+- **Checkpoints and forks.** A computer's file system is an overlay: its writable layer over a
+  chain of sealed layers, the shim layer and the image. Every layer is a directory of one shared
+  store (`containers/layers/<id>`), a checkpoint is a list of layer ids with a copy of the
+  computer's record, and a fork is a new record over the checkpoint's list with a writable layer
+  of its own. Nothing a fork writes reaches the parent or another fork. The fork keeps its own
+  reference to the layers, so deleting the parent or the checkpoint keeps them; a layer no record
+  and no checkpoint names is removed. A stopped computer's checkpoint seals its writable layer
+  (no file moves). A running container cannot swap its writable layer, so its checkpoint is a
+  copy of it, made by the container's own user namespace while the container's control group is
+  frozen (a reflink copy where the file system has them; otherwise the time grows with the size
+  of the layer). A long chain has its oldest layers folded into one when the computer is stopped
+  (`silo-ctr merge`, which keeps whiteouts and opaque directories). The layer files are owned by
+  the container's sub-ids, so the engine reads, copies and removes them only through a user
+  namespace laid out like the container's. A fork is quiet like a virtual machine's: the
+  existing quiet step (scheduled jobs parked, identity renewed) runs in the new container before
+  the fork is reported started; a container's host name and `/etc/hosts` are set by the runtime
+  and are left alone.
+- **An engine restart.** The holder, the container and its network device (which the namespace
+  keeps) outlive the engine, as a virtual machine does. The next engine hands the device to a
+  new gateway (`silo-ctr tap`), serves the published ports again and takes the container back; the
+  GitHub profile is applied by the engine's next refresh. A container that cannot be taken back
+  is stopped.
 - **What Landlock covers.** The ruleset grants the container's root read and execute everywhere and
   write access to the directories a system normally writes (`/tmp`, `/var`, `/run`, `/home`,
   `/root`, `/workspace`, `/dev`, `/usr`, `/etc`, `/opt`, `/srv`, `/mnt`, and the share `/.msb`). It therefore mainly protects
@@ -867,18 +891,22 @@ with nothing sensitive on it, and the app, the CLI and `silo list` label it as l
   find a user's ids. Those files live in the writable layer, which the container controls, so they
   are opened without following links, must be regular files and are capped at 1 MiB; overlay
   whiteouts are honoured as inside the container.
-- **No disk limit yet.** The writable layer has no size limit. `root_disk_mib` is recorded and
-  reported but not enforced, so a container can fill the filesystem that holds the engine's home
-  and take the engine and every other computer on the host down with it. A project quota or a
-  loop file per computer is planned ([CONTAINERS-PLAN](forks-ci/CONTAINERS-PLAN.md)).
+- **The disk limit.** The kernel offers no quota a rootless host can set on a writable layer (a
+  project quota or a loop-mounted file system needs administrator rights, and a user namespace
+  cannot mount a block file system), so the engine holds `root_disk_mib` itself: it measures the
+  writable layer every few seconds and, past the limit, remounts the container's root read-only
+  (`silo-ctr remount`); writes fail with "Read-only file system" until the computer is stopped,
+  space is freed and it is started again. The limit is not a hard bound: a program can write
+  for the length of one measurement past it, so the host still needs free space as a
+  margin. Sealed layers belong to checkpoints and forks and are not counted against a computer.
 - **Known gaps.** `/sys` is a fresh sysfs mounted read-only inside the container's own user and
   network namespaces, so it shows the container's own devices (the TAP and loopback) and the
   host's hardware, not the host's network interfaces. Chrome needs `--no-sandbox` in a container (the baseline
   blocks the user namespace its sandbox needs), so a web page that compromises the browser reaches
   everything in the computer. Ubuntu's `kernel.apparmor_restrict_unprivileged_userns` has to be 0
   on the host, which relaxes a host-wide guard; Silo checks and names it and never sets it. A
-  container does not survive an engine restart (its gateway is the engine's child): the engine
-  stops it when it starts, and reading a computer's state never changes it. The evals of the isolation claims above have not been run against a
+  container's gateway is the engine's child, so a restart replaces it (see An engine restart
+  above); reading a computer's state never changes the computer. The evals of the isolation claims above have not been run against a
   container computer.
 
 ## CI runner (`silo-runner`)

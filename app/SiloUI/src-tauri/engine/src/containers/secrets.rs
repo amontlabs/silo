@@ -43,7 +43,8 @@ fn entry(name: &str, source: &str, hosts: &[String]) -> Value {
     })
 }
 
-/// The `network` section of an inspected computer: the secrets assigned (`names` limits it to
+/// The `network` section of an inspected computer: the policy (the gateway enforces the real one;
+/// this is what a fork is asked to keep), the secrets assigned (`names` limits it to
 /// those the running gateway holds, for `active_config`) and the TLS handling they need.
 pub fn network_value(record: &ComputerRecord, names: Option<&[String]>) -> Value {
     let mut entries: Vec<Value> = record
@@ -62,7 +63,11 @@ pub fn network_value(record: &ComputerRecord, names: Option<&[String]>) -> Value
         let hosts: Vec<String> = GITHUB_HOSTS.map(str::to_owned).to_vec();
         entries.push(entry(GITHUB_SECRET_NAME, GITHUB_SECRET_NAME, &hosts));
     }
-    json!({"tls": {"enabled": true}, "secrets": {"secrets": entries}})
+    json!({
+        "tls": {"enabled": true},
+        "policy": {"default_egress": "allow", "default_ingress": "deny", "rules": []},
+        "secrets": {"secrets": entries},
+    })
 }
 
 /// The guest environment that carries the placeholders: `NAME=$MSB_NAME` for each secret the
@@ -220,6 +225,8 @@ mod tests {
         .unwrap();
         let network = network_value(&record, None);
         assert_eq!(network["tls"]["enabled"], true);
+        assert_eq!(network["policy"]["default_egress"], "allow");
+        assert_eq!(network["policy"]["rules"], json!([]));
         let entries = network["secrets"]["secrets"].as_array().unwrap();
         assert_eq!(entries.len(), 2);
         let token = &entries[0];

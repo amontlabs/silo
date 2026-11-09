@@ -24,6 +24,7 @@ use super::{
     users,
 };
 use crate::computer_gateway::{computer_ca, Gateway, Params, Secret};
+use crate::gateway_control::Ready;
 use crate::runtime::{RuntimeError, RuntimePaths};
 use sha2::{Digest, Sha256};
 use std::{
@@ -255,11 +256,86 @@ pub fn reconcile(paths: &RuntimePaths, tools: &Tools) {
             let Ok(record) = layout.computer(&name).read_record() else {
                 continue;
             };
-            eprintln!("Container computer {name}: stopping a leftover of an earlier Silo engine.");
-            let _ = stop(paths, tools, &name, &record);
+            // A virtual machine outlives the engine and is taken back by the next one; so is a
+            // container, whose network device the namespace keeps. One that cannot be taken back
+            // (its device is gone, a secret cannot be read) is stopped, as before.
+            match adopt(paths, tools, &name, &record) {
+                Ok(()) => eprintln!("Container computer {name}: taken back after an engine restart."),
+                Err(detail) => {
+                    eprintln!(
+                        "Container computer {name}: stopping a leftover of an earlier Silo engine ({detail})."
+                    );
+                    let _ = stop(paths, tools, &name, &record);
+                }
+            }
         }
     }
     prune_storage(paths, tools);
+    collect_layers(paths, tools);
+}
+
+/// Takes back a running container whose gateway went with an earlier engine: the namespace kept
+/// its network device, so `silo-ctr tap` hands it over again and a new gateway serves it. The
+/// GitHub profile is not cached by a new engine; the engine's refresh applies it.
+pub fn adopt(
+    paths: &RuntimePaths,
+    tools: &Tools,
+    name: &str,
+    record: &ComputerRecord,
+) -> Result<(), String> {
+    let layout = Layout::new(&paths.home);
+    let dir = layout.computer(name);
+    let state = dir.state();
+    // A capture the earlier engine did not finish may have left the processes frozen.
+    let _ = thaw(paths, name);
+    let general = crate::secrets::runtime_material(name)?;
+    let material = Material {
+        secrets: &general,
+        github_profile: crate::runtime::DISABLED_GITHUB_PROFILE,
+    };
+    let socket = state.join("adopt.sock");
+    let _ = std::fs::remove_file(&socket);
+    let listener = UnixListener::bind(&socket).map_err(|e| at("bind", &socket, e))?;
+    listener.set_nonblocking(true).map_err(|e| at("set up", &socket, e))?;
+    let mut command = Command::new(&tools.ctr);
+    command
+        .arg("tap")
+        .arg("--state")
+        .arg(&state)
+        .arg("--sock")
+        .arg(&socket)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let mut child = Reaped::new(command.spawn().map_err(|e| format!("silo-ctr could not start: {e}"))?);
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let stream = loop {
+        match listener.accept() {
+            Ok((stream, _)) => break stream,
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                if matches!(child.child().try_wait(), Ok(Some(status)) if !status.success()) {
+                    return Err("the network device could not be opened again".into());
+                }
+                if Instant::now() >= deadline {
+                    let _ = child.child().kill();
+                    return Err("the network device was not handed over in time".into());
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            Err(error) => return Err(io(error)),
+        }
+    };
+    stream.set_nonblocking(false).map_err(io)?;
+    stream.set_read_timeout(Some(Duration::from_secs(30))).map_err(io)?;
+    let tap = receive_descriptor(&stream).map_err(|e| format!("network device: {e}"))?;
+    let id = record.label("silo.machine-id").unwrap_or(name).to_owned();
+    let (ca_cert, ca_key) = computer_ca(&tools.gateway, &id).map_err(|e| format!("computer CA: {e}"))?;
+    let (gateway, _, active) =
+        start_gateway(paths, tools, name, record, &state, tap, &ca_cert, &ca_key, &material)?;
+    register(paths, name, &state, gateway, active)?;
+    let _ = std::fs::remove_file(&socket);
+    watch_disk(paths, tools, name);
+    Ok(())
 }
 
 /// The name of the boot layer for the init shim `tools` names (and the ownership layout).
@@ -388,20 +464,20 @@ fn own_as_root(tools: &Tools, paths: &[&Path]) -> Result<(), String> {
 /// Whether the computer's upper directory, when it has one, was made with the id mapping now in
 /// force: the root of the container's file system is root's (a sub-id), and a directory an earlier
 /// build left owned by the engine's own user cannot be used with it.
-pub fn check_upper(dir: &ComputerDir, name: &str) -> Result<bool, String> {
+pub fn check_upper(dir: &ComputerDir, record: &ComputerRecord, name: &str) -> Result<bool, String> {
     let sub_ids = super::idmap::current_sub_ids().ok_or(
         "Silo could not read this account's sub-uid range in /etc/subuid. Run silo host init to see what container computers need.",
     )?;
-    check_upper_in(dir, name, &sub_ids)
+    check_upper_in(&dir.upper_of(record), name, &sub_ids)
 }
 
 fn check_upper_in(
-    dir: &ComputerDir,
+    upper: &Path,
     name: &str,
     sub_ids: &std::ops::Range<u32>,
 ) -> Result<bool, String> {
     use std::os::unix::fs::MetadataExt;
-    match std::fs::symlink_metadata(dir.upper()) {
+    match std::fs::symlink_metadata(upper) {
         Ok(meta)
             if meta.is_dir()
                 && super::idmap::KeepId::current().upper_owner_is_current(meta.uid(), sub_ids) =>
@@ -414,25 +490,222 @@ fn check_upper_in(
     }
 }
 
-/// Makes the computer's upper directory, or checks the one it has.
-fn prepare_upper(tools: &Tools, dir: &ComputerDir, name: &str) -> Result<(), String> {
+/// Makes the empty layer `path`: aside, given to the container's root, then renamed into place
+/// (within one folder, so no directory of a sub-id moves), so an interrupted start never leaves a
+/// layer that looks like an earlier build's.
+pub fn make_layer(tools: &Tools, path: &Path) -> Result<(), String> {
     use std::os::unix::fs::PermissionsExt;
-    let upper = dir.upper();
-    match check_upper(dir, name)? {
+    let parent = path.parent().ok_or("A layer has no folder.")?;
+    std::fs::create_dir_all(parent).map_err(|e| at("create", parent, e))?;
+    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("layer");
+    let staging = parent.join(format!(".new-{name}"));
+    super::image::remove_tree(tools, &staging)?;
+    std::fs::create_dir(&staging).map_err(|e| at("create", &staging, e))?;
+    // The overlay's root directory takes the upper directory's mode: it must stay traversable.
+    std::fs::set_permissions(&staging, std::fs::Permissions::from_mode(0o755))
+        .map_err(|e| at("set the mode of", &staging, e))?;
+    own_as_root(tools, &[&staging])?;
+    std::fs::rename(&staging, path).map_err(|e| at("move it to", path, e))
+}
+
+/// Makes the computer's upper directory, or checks the one it has.
+fn prepare_upper(
+    tools: &Tools,
+    dir: &ComputerDir,
+    record: &ComputerRecord,
+    name: &str,
+) -> Result<(), String> {
+    match check_upper(dir, record, name)? {
         true => Ok(()),
-        false => {
-            // Made aside and renamed into place, so an interrupted start never leaves an upper
-            // directory that looks like an earlier build's.
-            let staging = dir.path().join("upper.new");
-            super::image::remove_tree(tools, &staging)?;
-            std::fs::create_dir(&staging).map_err(|e| at("create", &staging, e))?;
-            // The overlay's root directory takes the upper directory's mode: it must stay traversable.
-            std::fs::set_permissions(&staging, std::fs::Permissions::from_mode(0o755))
-                .map_err(|e| at("set the mode of", &staging, e))?;
-            own_as_root(tools, &[&staging])?;
-            std::fs::rename(&staging, &upper).map_err(|e| at("move it to", &upper, e))
-        }
+        false => make_layer(tools, &dir.upper_of(record)),
     }
+}
+
+/// The container's control group, below the cgroup mount.
+fn cgroup_dir(paths: &RuntimePaths, name: &str) -> PathBuf {
+    // SAFETY: getuid has no preconditions.
+    let uid = unsafe { libc::getuid() };
+    Path::new("/sys/fs/cgroup").join(cgroup_path(uid, &unit_name(paths, name)).trim_start_matches('/'))
+}
+
+/// A container whose processes are frozen; they are thawed when this is dropped.
+pub struct Frozen {
+    file: PathBuf,
+}
+
+impl Drop for Frozen {
+    fn drop(&mut self) {
+        let _ = std::fs::write(&self.file, "0");
+    }
+}
+
+/// Freezes the container's control group and waits until the kernel reports it frozen, so a copy
+/// of its files sees none of them change.
+pub fn freeze(paths: &RuntimePaths, name: &str) -> Result<Frozen, String> {
+    let directory = cgroup_dir(paths, name);
+    let frozen = Frozen {
+        file: directory.join("cgroup.freeze"),
+    };
+    std::fs::write(&frozen.file, "1").map_err(|e| at("freeze", &frozen.file, e))?;
+    let events = directory.join("cgroup.events");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        if std::fs::read_to_string(&events).is_ok_and(|text| text.lines().any(|l| l == "frozen 1")) {
+            return Ok(frozen);
+        }
+        if Instant::now() >= deadline {
+            return Err(format!("Container computer {name} did not freeze in time."));
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
+/// Thaws the container (a no-op when it is not frozen).
+pub fn thaw(paths: &RuntimePaths, name: &str) -> Result<(), String> {
+    let file = cgroup_dir(paths, name).join("cgroup.freeze");
+    std::fs::write(&file, "0").map_err(|e| at("thaw", &file, e))
+}
+
+/// Whether the container is frozen.
+pub fn is_frozen(paths: &RuntimePaths, name: &str) -> bool {
+    std::fs::read_to_string(cgroup_dir(paths, name).join("cgroup.events"))
+        .is_ok_and(|text| text.lines().any(|l| l == "frozen 1"))
+}
+
+fn in_container_namespace(tools: &Tools, command: &[&std::ffi::OsStr]) -> Result<(), String> {
+    let agent = super::idmap::AGENT_ID.to_string();
+    let mut args: Vec<&std::ffi::OsStr> = vec![
+        "userns".as_ref(),
+        "--keep-id".as_ref(),
+        agent.as_ref(),
+        "--".as_ref(),
+    ];
+    args.extend_from_slice(command);
+    run_checked(&tools.ctr, &args).map(drop)
+}
+
+/// Copies the files of the layer `from` into the empty layer `to`, owners and attributes kept, as
+/// a reflink where the file system has them.
+pub fn copy_layer(tools: &Tools, from: &Path, to: &Path) -> Result<(), String> {
+    let (mut source, mut target) = (from.as_os_str().to_owned(), to.as_os_str().to_owned());
+    source.push("/.");
+    target.push("/");
+    in_container_namespace(
+        tools,
+        &[
+            "cp".as_ref(),
+            "-a".as_ref(),
+            "--reflink=auto".as_ref(),
+            "--".as_ref(),
+            source.as_ref(),
+            target.as_ref(),
+        ],
+    )
+}
+
+/// Folds `layers` (oldest first) into the new layer `out`.
+pub fn merge_layers(tools: &Tools, out: &Path, layers: &[PathBuf]) -> Result<(), String> {
+    make_layer(tools, out)?;
+    let mut command: Vec<&std::ffi::OsStr> = vec![
+        tools.ctr.as_os_str(),
+        "merge".as_ref(),
+        "--out".as_ref(),
+        out.as_os_str(),
+    ];
+    command.extend(layers.iter().map(|layer| layer.as_os_str()));
+    in_container_namespace(tools, &command)
+}
+
+/// Folds the oldest sealed layers of a stopped computer whose chain is too long into one.
+pub fn flatten(paths: &RuntimePaths, tools: &Tools, name: &str) -> Result<(), String> {
+    let _store = super::layers::lock();
+    let layout = Layout::new(&paths.home);
+    let dir = layout.computer(name);
+    let record = dir.read_record()?;
+    let count = super::layers::flatten_count(&record.layers);
+    if count == 0 {
+        return Ok(());
+    }
+    let merged = super::layers::new_id();
+    let sources: Vec<PathBuf> = record.layers[..count].iter().map(|id| layout.layer(id)).collect();
+    merge_layers(tools, &layout.layer(&merged), &sources)?;
+    dir.update_record(|record| {
+        record.layers = super::layers::flattened(&record.layers, count, &merged);
+    })
+    .map(drop)
+}
+
+/// Removes the layers nothing names (see [`super::layers`]). Best effort: a layer that cannot go
+/// stays for the next pass.
+pub fn collect_layers(paths: &RuntimePaths, tools: &Tools) {
+    let _store = super::layers::lock();
+    for layer in super::layers::collectible(&Layout::new(&paths.home)) {
+        let _ = super::image::remove_tree(tools, &layer);
+    }
+}
+
+/// Computers whose disk watcher runs.
+static WATCHED: Mutex<Option<std::collections::HashSet<String>>> = Mutex::new(None);
+
+/// Holds the running container to its disk size: measures its writable layer every few seconds
+/// and makes its root read-only past the limit (see [`super::quota`]). One watcher per computer;
+/// it ends with the container.
+pub fn watch_disk(paths: &RuntimePaths, tools: &Tools, name: &str) {
+    if !WATCHED
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .get_or_insert_with(Default::default)
+        .insert(name.to_owned())
+    {
+        return;
+    }
+    let (paths, tools, name) = (paths.clone(), tools.clone(), name.to_owned());
+    let _ = std::thread::Builder::new()
+        .name("silo-disk-watch".into())
+        .spawn(move || {
+            let mut read_only = false;
+            while holder_alive(&paths, &name) {
+                let started = Instant::now();
+                let layout = Layout::new(&paths.home);
+                let dir = layout.computer(&name);
+                if let Ok(record) = dir.read_record() {
+                    let used = super::quota::used_bytes(&dir.upper_of(&record));
+                    let wanted = match super::quota::decide(used, record.root_disk_mib, read_only) {
+                        super::quota::Action::Nothing => None,
+                        super::quota::Action::MakeReadOnly => Some("--ro"),
+                        super::quota::Action::MakeWritable => Some("--rw"),
+                    };
+                    if let Some(mode) = wanted {
+                        let state = dir.state();
+                        let outcome = run_checked(
+                            &tools.ctr,
+                            &["remount".as_ref(), "--state".as_ref(), state.as_os_str(), mode.as_ref()],
+                        );
+                        match outcome {
+                            Ok(_) => {
+                                read_only = mode == "--ro";
+                                if read_only {
+                                    eprintln!(
+                                        "Container computer {name}: its disk is full ({} of {} MiB used), so its files are read-only until space is freed.",
+                                        used >> 20,
+                                        record.root_disk_mib
+                                    );
+                                }
+                            }
+                            Err(detail) => eprintln!("Container computer {name}: the disk limit could not be applied: {detail}"),
+                        }
+                    }
+                }
+                // A measurement never takes more than a tenth of the time.
+                let pause = (started.elapsed() * 10).max(Duration::from_secs(1));
+                std::thread::sleep(pause.min(Duration::from_secs(30)));
+            }
+            WATCHED
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .get_or_insert_with(Default::default)
+                .remove(&name);
+        });
 }
 
 /// Creates what the container binds as its per-computer share (`/.msb`): the computer's runtime
@@ -542,12 +815,14 @@ pub fn start(
     })?;
     let layout = Layout::new(&paths.home);
     let dir = layout.computer(name);
-    let record = dir.read_record().map_err(RuntimeError::Unavailable)?;
     if is_running(Path::new("/proc"), paths, name) {
         return Ok(());
     }
+    // A chain of sealed layers that has grown long is folded before it is mounted.
+    flatten(paths, tools, name).map_err(&unavailable)?;
+    let record = dir.read_record().map_err(RuntimeError::Unavailable)?;
     // Before any image is unpacked for it.
-    check_upper(&dir, name).map_err(RuntimeError::Unavailable)?;
+    check_upper(&dir, &record, name).map_err(RuntimeError::Unavailable)?;
     // The image the computer was made from, not whatever is pinned now.
     let image = super::image::ensure_recorded(paths, tools, name, &record)?;
     cleanup_stale(paths, tools, &dir, name);
@@ -572,6 +847,7 @@ pub fn start(
     // Re-read: a secret may have been assigned while the computer was starting.
     dir.update_record(|record| record.started_once = true)
         .map_err(RuntimeError::Unavailable)?;
+    watch_disk(paths, tools, name);
     Ok(())
 }
 
@@ -588,7 +864,7 @@ fn launch(
 ) -> Result<Started, String> {
     let state = dir.state();
     private_dir(&state)?;
-    prepare_upper(tools, dir, name)?;
+    prepare_upper(tools, dir, record, name)?;
     let share = share_directory(&paths.home, name)?;
     private_dir(&dir.work())?;
     private_dir(&dir.merged())?;
@@ -640,8 +916,11 @@ fn launch(
         .set_nonblocking(true)
         .map_err(|e| at("set up", &socket, e))?;
 
-    let lower = dir
-        .lower_dirs(record, &boot, rootfs)
+    let lower_dirs = dir.lower_dirs(record, &boot, rootfs);
+    if super::layers::lower_option_bytes(&lower_dirs) > super::layers::MAX_LOWER_BYTES {
+        return Err("This computer's layers do not fit one mount. Delete some checkpoints and start it again.".into());
+    }
+    let lower = lower_dirs
         .iter()
         .map(|path| path.to_string_lossy().into_owned())
         .collect::<Vec<_>>()
@@ -684,7 +963,7 @@ fn launch(
         .arg("--lower")
         .arg(&lower)
         .arg("--upper")
-        .arg(dir.upper())
+        .arg(dir.upper_of(record))
         .arg("--work")
         .arg(dir.work())
         .arg("--merged")
@@ -749,6 +1028,51 @@ fn launch(
         .set_read_timeout(Some(Duration::from_secs(60)))
         .map_err(io)?;
     let tap = receive_descriptor(&stream).map_err(|e| format!("network device: {e}"))?;
+    let (gateway, ready, active) =
+        start_gateway(paths, tools, name, record, &state, tap, &ca_cert, &ca_key, material)?;
+    let mac = ready
+        .guest_mac
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect::<Vec<_>>()
+        .join(":");
+    let reply = format!(
+        "mac={mac}\nmtu={}\naddress={}\nprefix_len={}\ngateway={}\n\n",
+        ready.mtu, ready.guest_ipv4, ready.prefix_len, ready.gateway_ipv4
+    );
+    (&stream).write_all(reply.as_bytes()).map_err(io)?;
+    let mut line = String::new();
+    BufReader::new(&stream).read_line(&mut line).map_err(io)?;
+    if line.trim() != "up" {
+        return Err(format!(
+            "The container network did not come up: {}",
+            tail(&state)
+        ));
+    }
+    let running = register(paths, name, &state, gateway, active)?;
+    wait_running(&tools.crun, &state, name, deadline)?;
+    holder_pid(&state).ok_or("The container holder left no pid file.")?;
+    // The holder runs on; dropping the guard hands its exit status to a thread.
+    let log = std::fs::read_to_string(state.join("holder.log")).unwrap_or_default();
+    Ok(Started {
+        warnings: hold::warnings_since(&log, 0),
+    })
+}
+
+/// Starts the gateway on the container's network device with the secrets this computer is assigned
+/// (the values the caller read for this start), and writes the resolver file the container reads.
+#[allow(clippy::too_many_arguments)]
+fn start_gateway(
+    paths: &RuntimePaths,
+    tools: &Tools,
+    name: &str,
+    record: &ComputerRecord,
+    state: &Path,
+    tap: OwnedFd,
+    ca_cert: &str,
+    ca_key: &str,
+    material: &Material<'_>,
+) -> Result<(Gateway, Ready, Vec<String>), String> {
     let gateway_log = std::fs::File::create(state.join("gateway.log"))
         .map_err(|e| at("create", &state.join("gateway.log"), e))?;
     let usage_log = usage_log_file(&paths.home, name).map_err(|e| format!("usage log: {e}"))?;
@@ -773,8 +1097,8 @@ fn launch(
     let gateway = Gateway::start(
         &tools.gateway,
         tap,
-        &ca_cert,
-        &ca_key,
+        ca_cert,
+        ca_key,
         Params {
             slot: 1,
             guest_ipv4: GUEST_IPV4,
@@ -799,25 +1123,17 @@ fn launch(
         &state.join("resolv.conf"),
         &format!("nameserver {}\n", ready.dns_ipv4),
     )?;
-    let mac = ready
-        .guest_mac
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect::<Vec<_>>()
-        .join(":");
-    let reply = format!(
-        "mac={mac}\nmtu={}\naddress={}\nprefix_len={}\ngateway={}\n\n",
-        ready.mtu, ready.guest_ipv4, ready.prefix_len, ready.gateway_ipv4
-    );
-    (&stream).write_all(reply.as_bytes()).map_err(io)?;
-    let mut line = String::new();
-    BufReader::new(&stream).read_line(&mut line).map_err(io)?;
-    if line.trim() != "up" {
-        return Err(format!(
-            "The container network did not come up: {}",
-            tail(&state)
-        ));
-    }
+    Ok((gateway, ready, active))
+}
+
+/// Records the running gateway and serves the computer's published ports.
+fn register(
+    paths: &RuntimePaths,
+    name: &str,
+    state: &Path,
+    gateway: Gateway,
+    active: Vec<String>,
+) -> Result<Arc<Running>, String> {
     let running = Arc::new(Running {
         gateway: Mutex::new(gateway),
         active: Mutex::new(active.clone()),
@@ -828,13 +1144,7 @@ fn launch(
         .get_or_insert_with(HashMap::new)
         .insert(name.to_owned(), running.clone());
     super::ports::serve(paths, name, &running)?;
-    wait_running(&tools.crun, &state, name, deadline)?;
-    holder_pid(&state).ok_or("The container holder left no pid file.")?;
-    // The holder runs on; dropping the guard hands its exit status to a thread.
-    let log = std::fs::read_to_string(state.join("holder.log")).unwrap_or_default();
-    Ok(Started {
-        warnings: hold::warnings_since(&log, 0),
-    })
+    Ok(running)
 }
 
 fn crun(tools: &Tools, state: &Path) -> Command {
@@ -980,6 +1290,7 @@ pub fn remove(paths: &RuntimePaths, tools: &Tools, name: &str) -> Result<(), Run
     // files are owned by sub-ids, so the namespace removes them.
     let _ = super::image::remove_tree(tools, &paths.home.join("sandboxes").join(name));
     let _ = crate::macos_computers::proxy_ca::retire(&id);
+    collect_layers(paths, tools);
     Ok(())
 }
 
@@ -1064,7 +1375,7 @@ pub fn identity(
         super::image::unpacked_digest(&layout, &record.image_digest, &record.image_reference)
             .ok_or("The container image of this computer is not unpacked. Start it again.")?;
     let boot = boot_layer(&layout, tools)?;
-    let mut layers = vec![dir.upper()];
+    let mut layers = vec![dir.upper_of(&record)];
     layers.extend(dir.lower_dirs(&record, &boot, &image.rootfs));
     let passwd = users::read_from_layers(&layers, "etc/passwd")?.unwrap_or_default();
     let group = users::read_from_layers(&layers, "etc/group")?.unwrap_or_default();
@@ -1294,6 +1605,7 @@ mod tests {
             image_digest: "sha256:made-from".into(),
             image_reference: "ref:1".into(),
             layers: Vec::new(),
+            upper: "l0".into(),
             created_ms: 1,
             started_once: started,
             secrets: Vec::new(),
@@ -1501,7 +1813,7 @@ mod tests {
         let paths = test_paths(home.path());
         let layout = Layout::new(&paths.home);
         let dir = layout.computer("dev");
-        std::fs::create_dir_all(dir.upper().join("etc")).unwrap();
+        std::fs::create_dir_all(layout.layer("l0").join("etc")).unwrap();
         dir.write_record(&record(true)).unwrap();
         let made = layout.image("sha256:made-from");
         std::fs::create_dir_all(made.join("rootfs/etc")).unwrap();
@@ -1535,7 +1847,7 @@ mod tests {
         let paths = test_paths(home.path());
         let layout = Layout::new(&paths.home);
         let dir = layout.computer("dev");
-        std::fs::create_dir_all(dir.upper().join("etc")).unwrap();
+        std::fs::create_dir_all(layout.layer("l0").join("etc")).unwrap();
         dir.write_record(&record(true)).unwrap();
         let made = layout.image("sha256:made-from");
         std::fs::create_dir_all(made.join("rootfs/etc")).unwrap();
@@ -1547,7 +1859,7 @@ mod tests {
         .unwrap();
         let host_file = home.path().join("host-passwd");
         std::fs::write(&host_file, "root:x:0:0::/host:/bin/sh\n").unwrap();
-        std::os::unix::fs::symlink(&host_file, dir.upper().join("etc/passwd")).unwrap();
+        std::os::unix::fs::symlink(&host_file, layout.layer("l0").join("etc/passwd")).unwrap();
         let error = exec_command(
             &paths,
             &fake_tools(home.path()),
@@ -1626,15 +1938,16 @@ mod tests {
         std::fs::create_dir_all(dir.path()).unwrap();
         // None yet: it is made on the first start.
         let sub_ids = 500_000..565_535;
-        assert_eq!(check_upper_in(&dir, "dev", &sub_ids), Ok(false));
+        let upper = dir.legacy_upper();
+        assert_eq!(check_upper_in(&upper, "dev", &sub_ids), Ok(false));
         // One this process made is owned by the engine's own user, as an earlier build's was.
-        std::fs::create_dir_all(dir.upper()).unwrap();
-        let error = check_upper_in(&dir, "dev", &sub_ids).unwrap_err();
+        std::fs::create_dir_all(&upper).unwrap();
+        let error = check_upper_in(&upper, "dev", &sub_ids).unwrap_err();
         assert!(error.contains("Recreate it") && error.contains("dev"), "{error}");
         // A file in its place is no upper directory either.
-        std::fs::remove_dir(dir.upper()).unwrap();
-        std::fs::write(dir.upper(), "x").unwrap();
-        assert!(check_upper_in(&dir, "dev", &sub_ids).is_err());
+        std::fs::remove_dir(&upper).unwrap();
+        std::fs::write(&upper, "x").unwrap();
+        assert!(check_upper_in(&upper, "dev", &sub_ids).is_err());
     }
 
     #[test]

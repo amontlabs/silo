@@ -404,6 +404,7 @@ mod tests {
             image_digest: digest.into(),
             image_reference: "ref:1".into(),
             layers: Vec::new(),
+            upper: "l0".into(),
             created_ms: 1,
             started_once: true,
             secrets: Vec::new(),

@@ -578,6 +578,62 @@ client through the same commands, API methods and screens as a Linux VM. Fable's
     `-D`, refused destinations, a port the host does not serve), a 60 MB file through `ssh cat` both ways with hashes
     (five rounds, and a slow reader; see the flow-control item), a killed client, and 40 idle sockets with a login in between.
 
+### 9 Nov 2026: phase CT4 built (checkpoints, forks and restart for container computers)
+
+Branch `claude/containers-ct4`. A container computer has checkpoints, forks (`-n N`, `--from-step`), quiet forks, diff,
+keep, undo, steps and retention through the same API, CLI, MCP and app as a Linux VM; the CT2 gaps (an engine
+restart, the disk size) are closed. Design as approved: [CONTAINERS-PLAN](CONTAINERS-PLAN.md).
+
+- **The seam answers MicroSandbox's operations in its shapes** (`containers/snapshots.rs`, `containers/args.rs`):
+  `snapshot create/list/verify/remove/head`, `restore G:N --name X`, `pause`, `resume` and `stop --force`. Capture is
+  routed by `--from-sandbox` (`args::target_name` read `--sandbox`: fixed), the rest by the checkpoint group
+  (`restore_steps` removes the computer record first, so the computer cannot name it), and `snapshot list` without a
+  group is MicroSandbox's answer with the container checkpoints added. The engine's checkpoint records, retention
+  (`reclaim` skips the layer merge for a container: layers are collected when nothing names them), delete, fork and
+  quiet-fork code run unchanged. `inspect` reports a network policy (the engine records and compares it for a fork).
+- **A "memory snapshots" capability** (`Capability::MemorySnapshots`, false for a container, in the list the app reads).
+  `capture_with_kind` and `restore_steps` ask it: a running container is captured with scope disk (no `--full`, no
+  pause, no cache drop) and a Restore of a running one captures its disks, stops it (`stop --force`) and replaces it.
+  `--full` and `--cow-mem` are refused by the seam as a backstop.
+- **Layers** (`containers/layers.rs`): one store, `containers/layers/<id>`; a computer's record names its sealed layers
+  (oldest first) and its writable layer by id. A stopped computer's checkpoint seals the writable layer (adds the id to the
+  chain, opens a new empty one: no directory owned by a sub-id moves, since layers are made in the store and
+  never renamed across folders). A fork is a new record over the checkpoint's chain with a writable layer of its own and
+  its own references. Layers nothing names (no record, no checkpoint) are removed by a scan (grace of 10 minutes; a
+  record that cannot be read stops the scan). A chain over 16 sealed layers has its oldest 8 folded into one when the
+  computer starts (`silo-ctr merge`: whiteouts and opaque directories survive). The overlay options are one page of
+  mount data (about 100 bytes a layer), so the cap keeps the kernel's `lowerdir` limits (500 layers, and `lowerdir+=` on
+  6.8 and later, which the runner's kernel has) out of play; a start refuses a chain whose option string passes 3400 bytes.
+- **Deviation from the design: a running container's checkpoint is a copy.** An overlay mount cannot change its upper
+  directory, and the container's file descriptors and working directories keep pointing at the old one, so there is no way to
+  seal a live upper and "open a new empty upper" under a running container without restarting its processes. A checkpoint
+  of a running container is therefore a copy of the writable layer (`cp -a --reflink=auto` in the container's user
+  namespace, so owners and attributes are kept), made while the container's cgroup is frozen (`cgroup.freeze`, waited
+  until `cgroup.events` says frozen 1), then thawed. The computer keeps its layer. The cost is proportional to the size of
+  the writable layer on a file system without reflinks (the fork point of a fresh dev computer is small), and nothing for a
+  stopped one.
+- **Engine restart.** A VM computer outlives the engine (a crash or `kill`) and the next engine takes it back. A container's
+  gateway was the engine's child, so it was stopped by `reconcile`. Now the holder makes its TAP persistent (kept by the
+  network namespace) and the next engine runs `silo-ctr tap`, which joins the holder's namespaces, opens the device again
+  and sends it over a socket as the holder does at start; a new gateway serves it, the ports are published again and the
+  disk watcher resumes. The GitHub profile is not cached by a new engine, so it is applied by the next refresh. A
+  container that cannot be taken back is stopped as before.
+- **Disk size.** Neither option works rootless: a project quota is set with the administrator's rights on a file system
+  mounted for it, and a loop file needs `mount`, which a user namespace cannot do for a block file system (only FUSE could,
+  and that needs `fuse2fs`, which Silo does not install). So the engine holds the limit: it measures the writable layer
+  (allocated blocks) every few seconds and, past `root_disk_mib`, remounts the container's root read-only
+  (`silo-ctr remount --ro`, in the container's mount namespace); writes fail with "Read-only file system", and below 95 %
+  (after a stop and a start) it is writable again. This is a bound with an overshoot of one measurement, not a kernel
+  quota. The threat-model sentence about the unlimited layer is replaced.
+- **Quiet forks.** The existing quiet record applies as for a VM, through the engine's confirm step before the fork is
+  reported started. A container's script is the VM script with its host name and `/etc/hosts` steps allowed to fail
+  (`containers::quiet_script`; the shared script is embedded in the MicroSandbox patch and stays identical).
+- **Tests.** Chain, seal, fork layout, flatten, collection and checkpoint store (`layers.rs`), the snapshot and restore
+  argument shapes and routing, the fork record, the quota arithmetic, `silo-ctr merge`, `tap` and `remount` argument
+  shapes and merge semantics on Linux, the capability in `capture_with_kind` and `restore_steps`, the capability list and
+  the app's copy. Live: `linux-host-e2e.sh` with `SILO_E2E_CONTAINER=1` (below).
+- **Live check** (KVM runner): CT4_LIVE_RESULTS
+
 ### R1: CI runner on the Mac (branch `claude/runner-phase-1`)
 
 - **Built:** `silo-action/` and every reference removed; `silo-runner` (Go, `app/SiloUI/runner`, on
