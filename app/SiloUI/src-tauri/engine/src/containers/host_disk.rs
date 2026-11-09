@@ -23,10 +23,13 @@
 //!
 //! A computer that stays within its stated size is never stopped by this guard, however little the
 //! host has left: it did not use more than it was given, and stopping it frees nothing. A layer the
-//! guard cannot measure (the `du` timed out, failed or printed nothing usable) counts as over its
-//! size, and as larger than any measured one: a computer must not be able to avoid the guard by
-//! making itself slow to measure. The layers are measured a few at a time, so one slow computer
-//! does not hold up the rest.
+//! guard cannot measure (the measurement timed out, or `du` itself failed or printed nothing
+//! usable) counts as over its size, and as larger than any measured one: a computer must not be
+//! able to avoid the guard by making itself slow to measure. It is stopped as soon as its own
+//! measurement ends, not after the others. A tool around `du` that fails (the user namespace
+//! cannot be set up, say) says nothing about the layer: that is logged and the computer is left
+//! alone, so a transient host error does not stop every container. The layers are measured a few
+//! at a time, so one slow computer does not hold up the rest.
 
 use crate::runtime::RuntimeError;
 use std::path::Path;
@@ -72,6 +75,27 @@ pub fn limit_bytes(record: &super::layout::ComputerRecord) -> u64 {
         .root_disk_mib
         .saturating_add(record.workspace_mib)
         .saturating_mul(1 << 20)
+}
+
+/// The script the guard runs in the user namespace to measure a layer (its path is `$1`). It ends
+/// by printing `du`'s exit status, so a measurement in which `du` ran can be told from one in
+/// which the tools around it failed before it did.
+pub const DU_SCRIPT: &str = r#"du -sB1 -- "$1"; echo "silo-du-exit:$?""#;
+
+/// What [`DU_SCRIPT`] printed: `None` when `du` never ran (the tools around it failed, which says
+/// nothing about the layer), `Some(None)` when it ran and printed no size, and `Some(Some(bytes))`
+/// when it printed one (`du` exits non-zero when a file vanished under it; the total still counts).
+pub fn du_result(stdout: &str) -> Option<Option<u64>> {
+    if !stdout.lines().any(|line| line.starts_with("silo-du-exit:")) {
+        return None;
+    }
+    Some(
+        stdout
+            .lines()
+            .next()
+            .and_then(|line| line.split_whitespace().next())
+            .and_then(|total| total.parse().ok()),
+    )
 }
 
 fn size(bytes: u64) -> String {
@@ -182,29 +206,49 @@ fn measure_all<T: Send>(
 }
 
 /// One look at the host. With `free` at or above `margin` it does nothing and measures nothing.
-/// Below it, it measures each of `running` (a few at a time), and stops the ones [`select`] names,
-/// largest first, through `stop`. Returns the names it stopped.
+/// Below it, it measures each of `running` (a few at a time) and stops, through `stop`, the ones
+/// [`select`] names, largest first; a layer that could not be measured is stopped as soon as its
+/// own measurement ends. Returns the names it stopped.
 pub fn pass(
     free: u64,
     margin: u64,
     running: Vec<String>,
     measure: impl Fn(&str) -> Option<Sizes> + Sync,
-    mut stop: impl FnMut(&str, &Sizes) -> bool,
+    stop: impl Fn(&str, &Sizes) -> bool + Sync,
 ) -> Vec<String> {
     if free >= margin {
         return Vec::new();
     }
-    select(measure_all(running, &measure))
+    let tried: Mutex<Vec<(String, bool)>> = Mutex::new(Vec::new());
+    let measured = measure_all(running, &|name: &str| {
+        let sizes = measure(name);
+        if let Some(unmeasured) = sizes.as_ref().filter(|sizes| sizes.layer.is_none()) {
+            let stopped = stop(name, unmeasured);
+            tried
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push((name.to_owned(), stopped));
+        }
+        sizes
+    });
+    let tried = tried.into_inner().unwrap_or_else(|e| e.into_inner());
+    let rest: Vec<String> = select(measured)
         .into_iter()
+        .filter(|(name, _)| !tried.iter().any(|(done, _)| done == name))
         .filter(|(name, sizes)| stop(name, sizes))
         .map(|(name, _)| name)
+        .collect();
+    tried
+        .into_iter()
+        .filter(|(_, stopped)| *stopped)
+        .map(|(name, _)| name)
+        .chain(rest)
         .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::cell::RefCell;
     use std::time::{Duration, Instant};
 
     const GIB: u64 = 1 << 30;
@@ -303,7 +347,7 @@ mod tests {
 
     #[test]
     fn below_the_margin_the_oversized_are_stopped_largest_first_and_the_rest_left() {
-        let order = RefCell::new(Vec::new());
+        let order = Mutex::new(Vec::new());
         let stopped = pass(
             GIB,
             5 * GIB,
@@ -315,14 +359,15 @@ mod tests {
             },
             |name, sizes| {
                 order
-                    .borrow_mut()
+                    .lock()
+                    .unwrap()
                     .push((name.to_owned(), sizes.layer.unwrap() / GIB));
                 true
             },
         );
         assert_eq!(stopped, ["bigger", "big"]);
         assert_eq!(
-            *order.borrow(),
+            *order.lock().unwrap(),
             [("bigger".to_owned(), 20), ("big".to_owned(), 10)]
         );
     }
@@ -382,7 +427,7 @@ mod tests {
 
     #[test]
     fn below_the_margin_an_unmeasurable_computer_is_stopped_first_and_says_so() {
-        let notices = RefCell::new(Vec::new());
+        let notices = Mutex::new(Vec::new());
         let stopped = pass(
             GIB,
             5 * GIB,
@@ -394,13 +439,14 @@ mod tests {
             },
             |name, sizes| {
                 notices
-                    .borrow_mut()
+                    .lock()
+                    .unwrap()
                     .push((name.to_owned(), stop_notice(GIB, 5 * GIB, sizes)));
                 true
             },
         );
         assert_eq!(stopped, ["slow", "big"]);
-        let notices = notices.borrow();
+        let notices = notices.into_inner().unwrap();
         assert!(
             notices[0].1.contains("could not measure"),
             "{}",
@@ -452,5 +498,68 @@ mod tests {
         let results = measure_all(names.clone(), &|name: &str| name.to_owned());
         let got: Vec<String> = results.into_iter().map(|(_, value)| value).collect();
         assert_eq!(got, names);
+    }
+
+    #[test]
+    fn a_layer_that_could_not_be_measured_is_stopped_when_its_own_measurement_ends() {
+        let started = Instant::now();
+        let stops = Mutex::new(Vec::new());
+        let stopped = pass(
+            0,
+            GIB,
+            vec!["slow".into(), "unknown".into(), "big".into()],
+            |name| match name {
+                "slow" => {
+                    std::thread::sleep(Duration::from_millis(500));
+                    sizes(20, 8)
+                }
+                "unknown" => unmeasured(8),
+                _ => sizes(30, 8),
+            },
+            |name, _| {
+                stops
+                    .lock()
+                    .unwrap()
+                    .push((name.to_owned(), started.elapsed()));
+                true
+            },
+        );
+        assert_eq!(stopped, ["unknown", "big", "slow"]);
+        let stops = stops.into_inner().unwrap();
+        // Each is stopped once, and the unmeasured one did not wait for the slow measurement.
+        assert_eq!(stops.len(), 3);
+        assert_eq!(stops[0].0, "unknown");
+        assert!(stops[0].1 < Duration::from_millis(250), "{stops:?}");
+    }
+
+    #[test]
+    fn an_unmeasured_layer_that_would_not_stop_is_not_tried_twice() {
+        let tries = AtomicUsize::new(0);
+        let stopped = pass(
+            0,
+            GIB,
+            vec!["unknown".into()],
+            |_| unmeasured(8),
+            |_, _| {
+                tries.fetch_add(1, Ordering::SeqCst);
+                false
+            },
+        );
+        assert!(stopped.is_empty());
+        assert_eq!(tries.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn only_a_measurement_in_which_du_ran_says_anything_about_the_layer() {
+        // `du` printed its total.
+        assert_eq!(du_result("4096\t/layer\nsilo-du-exit:0\n"), Some(Some(4096)));
+        // `du` exits non-zero when a file vanished under it; its total counts.
+        assert_eq!(du_result("8192\t/layer\nsilo-du-exit:1\n"), Some(Some(8192)));
+        // `du` ran and printed nothing readable: the layer cannot be measured.
+        assert_eq!(du_result("silo-du-exit:1\n"), Some(None));
+        assert_eq!(du_result("lots\t/layer\nsilo-du-exit:0\n"), Some(None));
+        // The user namespace could not be set up (nothing ran inside it): says nothing.
+        assert_eq!(du_result(""), None);
+        assert_eq!(du_result("4096\t/layer\n"), None);
     }
 }

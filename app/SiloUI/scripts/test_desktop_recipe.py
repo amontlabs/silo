@@ -395,6 +395,25 @@ class PreinstalledImageDesktop(DesktopRecipe):
         self.assertTrue(os.access(self.root / 'usr/local/libexec/silo-desktop-boot', os.X_OK))
         self.assert_session_identity()
 
+    def test_the_boot_hook_starts_nothing_until_the_install_is_recorded_as_finished(self):
+        self.run_recipe()
+        started = self.root / 'started'
+        stub = self.root / 'usr/local/bin/silo-desktop'
+        stub.write_text(f'#!/bin/sh\ntouch {started}\n')
+        stub.chmod(0o755)
+        hook = self.root / 'usr/local/libexec/silo-desktop-boot'
+        stage = self.state / 'install-stage'
+        for value in ('installing', ''):
+            stage.write_text(value + '\n')
+            subprocess.run(['/bin/sh', str(hook)], check=True)
+            self.assertFalse(started.exists(), value)
+        stage.unlink()
+        subprocess.run(['/bin/sh', str(hook)], check=True)
+        self.assertFalse(started.exists())
+        stage.write_text('installed\n')
+        subprocess.run(['/bin/sh', str(hook)], check=True)
+        self.assertTrue(started.exists())
+
     def test_v4_amd64_receipt_uses_the_build_architecture(self):
         digest = 'bbaa4d71012b9374a753b7dfddc1da07e31f34b04277fe4fb3d045f18fd88391'
         self.run_recipe(env={'DPKG_ARCH': 'amd64', 'EXPECTED_STREAMER_SHA': digest})

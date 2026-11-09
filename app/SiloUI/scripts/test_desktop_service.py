@@ -462,6 +462,17 @@ class DesktopLifecycle(unittest.TestCase):
              patch.object(service, 'listening', return_value=True):
             self.assertEqual(service.status()['state'], 'running')
 
+    def test_a_start_that_failed_before_the_service_ran_shows_as_failed_until_the_next_stop(self):
+        with patch.object(service, 'streamer_backend', return_value='selkies'), \
+             patch.object(service, 'selkies_state', return_value=None), \
+             patch.object(service, 'supervisor', return_value=None):
+            self.assertEqual(service.status()['state'], 'stopped')
+            (service.RUN / 'failed').write_text('The desktop did not start at boot\n')
+            self.assertEqual(service.status()['state'], 'failed')
+            with patch.object(service, 'stop_selkies_processes'):
+                service.stop()
+            self.assertEqual(service.status()['state'], 'stopped')
+
     def test_kasm_status_does_not_report_stopped_when_display_artifacts_remain(self):
         lock = self.root / 'X1-lock'
         lock.write_text('321')

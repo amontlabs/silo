@@ -683,20 +683,38 @@ pub fn copy_layer(
 
 /// The bytes a writable layer occupies on disk, counted inside the user namespace so directories
 /// the engine's own account cannot read count too. `Some(None)` when the layer could not be
-/// measured (the measurement ran too long, or printed nothing readable); `None` when the
-/// measuring tool itself could not start, which says nothing about the layer.
+/// measured (the measurement ran too long, or `du` ran and printed nothing readable); `None` when
+/// the tools around `du` failed (`silo-ctr`, the id mapping), which says nothing about the layer.
 pub fn layer_bytes(tools: &Tools, layer: &Path) -> Option<Option<u64>> {
     let agent = super::idmap::AGENT_ID.to_string();
-    let du: [&std::ffi::OsStr; 4] = ["du".as_ref(), "-sB1".as_ref(), "--".as_ref(), layer.as_os_str()];
+    let measure: [&std::ffi::OsStr; 5] = [
+        "sh".as_ref(),
+        "-c".as_ref(),
+        super::host_disk::DU_SCRIPT.as_ref(),
+        "sh".as_ref(),
+        layer.as_os_str(),
+    ];
     match super::tools::run_bounded(
         &tools.ctr,
-        &namespace_args(&agent, &du),
+        &namespace_args(&agent, &measure),
         Duration::from_secs(300),
     ) {
-        Err(super::tools::BoundedError::CouldNotStart(_)) => None,
+        Err(super::tools::BoundedError::CouldNotStart(detail)) => {
+            eprintln!("Container disk guard: measuring {}: {detail}", layer.display());
+            None
+        }
         Err(super::tools::BoundedError::TimedOut) => Some(None),
-        // `du` exits non-zero when a file vanished under it; the total it printed still counts.
-        Ok(done) => Some(done.stdout.split_whitespace().next().and_then(|n| n.parse().ok())),
+        Ok(done) => {
+            let result = super::host_disk::du_result(&done.stdout);
+            if result.is_none() {
+                eprintln!(
+                    "Container disk guard: measuring {} did not run `du`: {}",
+                    layer.display(),
+                    done.last_error
+                );
+            }
+            result
+        }
     }
 }
 
@@ -1548,13 +1566,16 @@ pub fn exec_command(
         ("SILO_RUNTIME".to_owned(), "container".to_owned()),
     ];
     environment.extend(trust_environment());
-    // The computer's own environment, then the placeholders of the secrets its gateway holds.
+    // The computer's own environment, then the placeholders of the secrets its gateway holds; the
+    // engine's own commands take neither.
     let own = record
         .env
         .iter()
         .cloned()
-        .chain(super::secrets::placeholder_env(&active_secrets(name)));
-    for (key, value) in own.chain(exec.env.iter().cloned()) {
+        .chain(super::secrets::placeholder_env(&active_secrets(name)))
+        .chain(exec.env.iter().cloned())
+        .filter(|_| !exec.fixed_environment);
+    for (key, value) in own {
         // The kind is the engine's to say: the guest scripts refuse to install packages by it.
         if key == "SILO_RUNTIME" {
             continue;
@@ -1972,6 +1993,63 @@ mod tests {
         assert!(!streaming_directory.exists());
         drop(plan);
         assert!(!exec_directory.exists());
+    }
+
+    /// The environment of the process a root `exec` of `dev` gets, as `NAME=value` lines.
+    fn process_environment(exec: &Exec) -> Vec<String> {
+        let home = tempfile::tempdir().unwrap();
+        let paths = test_paths(home.path());
+        let layout = Layout::new(&paths.home);
+        let dir = layout.computer("dev");
+        std::fs::create_dir_all(dir.path()).unwrap();
+        let mut stored = record(true);
+        stored.env = ["PATH=/work/bin", "LD_PRELOAD=/work/evil.so", "HOME=/work", "OWN=1"]
+            .iter()
+            .map(|pair| {
+                let (key, value) = pair.split_once('=').unwrap();
+                (key.to_owned(), value.to_owned())
+            })
+            .collect();
+        dir.write_record(&stored).unwrap();
+        let made = layout.image("sha256:made-from");
+        std::fs::create_dir_all(made.join("rootfs/etc")).unwrap();
+        std::fs::write(made.join("digest"), "sha256:made-from\n").unwrap();
+        std::fs::write(made.join("rootfs/etc/passwd"), "root:x:0:0::/root:/bin/sh\n").unwrap();
+        let plan = exec_command(&paths, &fake_tools(home.path()), "dev", exec, true).unwrap();
+        let process: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(plan.group.process_file()).unwrap()).unwrap();
+        process["env"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|entry| entry.as_str().unwrap().to_owned())
+            .collect()
+    }
+
+    #[test]
+    fn a_command_the_engine_runs_takes_none_of_the_computers_own_environment() {
+        let mut engine = exec_of("root");
+        engine.fixed_environment = true;
+        let env = process_environment(&engine);
+        // A program an account can replace runs as root with the engine's defaults only.
+        for set in ["PATH=/work/bin", "LD_PRELOAD=/work/evil.so", "HOME=/work", "OWN=1", "A=b"] {
+            assert!(!env.iter().any(|entry| entry == set), "{set} reached {env:?}");
+        }
+        assert!(env.iter().any(|entry| entry
+            == "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"));
+        assert!(env.iter().any(|entry| entry == "HOME=/root"));
+        assert!(env.iter().any(|entry| entry == "SILO_RUNTIME=container"));
+        // The owner's own command keeps the computer's variables and its own.
+        let env = process_environment(&exec_of("root"));
+        for set in ["PATH=/work/bin", "LD_PRELOAD=/work/evil.so", "HOME=/work", "OWN=1", "A=b"] {
+            assert!(env.iter().any(|entry| entry == set), "{set} missing from {env:?}");
+        }
+    }
+
+    #[test]
+    fn the_engines_own_root_commands_are_fixed_environment_commands() {
+        assert!(super::super::desktop::boot_command("dev").fixed_environment);
+        assert!(super::super::gateway_ca_command("dev").fixed_environment);
     }
 
     #[test]

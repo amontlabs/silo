@@ -1114,6 +1114,10 @@ def status():
         state = ('failed' if 'failed' in (session_state, stream_state) else
                  'running' if session_state == stream_state == 'running' else
                  'starting' if 'starting' in (session_state, stream_state) else 'stopped')
+        if state == 'stopped' and (RUN / 'failed').exists():
+            # A start that failed before the service ran (a container's boot command) leaves the
+            # marker; the next start, a stop or a new boot removes it.
+            state = 'failed'
         backend = 'selkies'
         streamer_version = '2.0.0'
         update_required = False

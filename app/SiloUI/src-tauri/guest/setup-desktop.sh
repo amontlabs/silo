@@ -270,6 +270,8 @@ provision_image_desktop() {
     mkdir -p /usr/local/libexec
     cat > /usr/local/libexec/silo-desktop-boot <<'BOOT'
 #!/bin/sh
+# Nothing to start until the install is recorded as finished: a start can come mid-install.
+[ "$(cat /var/lib/silo-desktop/install-stage 2>/dev/null)" = installed ] || exit 0
 exec /usr/local/bin/silo-desktop boot
 BOOT
     chmod 0755 /usr/local/libexec/silo-desktop-boot
@@ -352,6 +354,8 @@ install -m 0755 "$helper" /usr/local/bin/silo-desktop
 mkdir -p /usr/local/libexec
 cat > /usr/local/libexec/silo-desktop-boot <<'BOOT'
 #!/bin/sh
+# Nothing to start until the install is recorded as finished: a start can come mid-install.
+[ "$(cat /var/lib/silo-desktop/install-stage 2>/dev/null)" = installed ] || exit 0
 exec /usr/local/bin/silo-desktop boot
 BOOT
 chmod 0755 /usr/local/libexec/silo-desktop-boot

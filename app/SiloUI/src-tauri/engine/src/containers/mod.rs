@@ -625,7 +625,8 @@ fn start(
 
 /// Starts the computer's desktop the way a virtual machine's boot does, in the background: the
 /// start does not wait for it, and a desktop that does not start never fails the computer (the
-/// status says so). The command ends by itself when the computer stops.
+/// desktop's status says `failed`, see [`desktop::boot_command`]). The command ends by itself when
+/// the computer stops.
 #[cfg(target_os = "linux")]
 fn start_desktop(paths: &RuntimePaths, name: &str) {
     let paths = paths.clone();
@@ -657,6 +658,7 @@ fn gateway_ca_command(name: &str) -> args::Exec {
         name: name.to_owned(),
         user: Some("root".into()),
         env: Vec::new(),
+        fixed_environment: true,
         workdir: Some("/".into()),
         no_start: true,
         timeout: Some(GATEWAY_CA_TIMEOUT),
