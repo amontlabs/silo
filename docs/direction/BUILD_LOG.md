@@ -26,7 +26,7 @@ Plan: [PLAN.md](PLAN.md). Agent rules: [AGENT-BRIEF.md](AGENT-BRIEF.md).
 | T1 | merged 2026-11-10 (`e000d684c`) | `t1-policy-audit` | silod 341, api 52, policy and audit 42 tests passed in the item. Only one review round ran (fallback model); the second hit a quota. Orchestrator read rules.rs, policy/mod.rs and the gate: no hole found; checkpoint ids are looked up inside the named computer's record. A Codex review is running |
 | T1 review | done 2026-11-10 (Opus) | | one high finding and seven smaller, listed under Found. All eight fixed and merged 2026-11-10 (`fix/policy-audit-review-findings`): the made record moves inside the promote's own Lineage step and is saved in the promote journal, so undo and recovery reverse or repeat it; silod 346 and the engine's policy, audit and promote tests (116) passed in the item. Orchestrator read `policy/handoff.rs`. Not exercised against a real engine. A Codex pass is still owed |
 | T2 | running since 2026-11-10 | | task id ends `b36c91cf-09c3-4e62-9c5d-cbb05e3d8482` (Opus) |
-| T3 | running since 2026-11-10 | | task id ends `90e092a2-578c-42d5-8ade-b7fadfe8c9c0` (Sonnet) |
+| T3 | merged 2026-11-10 | `feat/device-resource-limits` | merged by hand; 588 focused tests passed after the merge. Reviewed once by the fallback model. Open: a burst of starts can each pass before any computer has booted (needs a reservation of admitted starts' memory); a request larger than the headroom is still admitted; disk is measured at app data, not a separately chosen storage location |
 | T4 | merged 2026-11-10 | `feat/keep-conflict-choices` | engine tests 273, api 53, silod checkpoints 56 passed in the item; two review rounds; the `silo-ui` crate was not built there |
 | T9 | merged 2026-11-10 | `feat/macos-computer-app-parity` | frontend only, no Rust change; 2914 frontend tests passed in the item; reviewed by the fallback model (gemini flash) only, one round; not run in the real app |
 | T11 | running since 2026-11-10 | | task id ends `8a11b496-7815-4ef3-830d-fe8aa13cc55a` (Sonnet) |
@@ -94,7 +94,7 @@ These were not asked of the owner. Each is open to change.
   files (keeps both sides of additive hunks); set the pinned counts by hand (methods, per-kind,
   job results); `git checkout --ours` the two generated files and run both generators; add the
   new methods to `engine/src/policy/rules.rs`; run `docs/direction/tools/integrate.sh` or the
-  focused suites; commit. Method count after T12: 178 (56 queries), 40 job results.
+  focused suites; commit. Method count after T3: 179 (57 queries), 40 job results, 27 error codes.
 - **Integration run after T1, T4, T7, T9** (2026-11-10): api, silod, cli and the engine's policy,
   audit, guest_client, changes and macOS suites, 1101 tests, no failures; fmt clean.
 
