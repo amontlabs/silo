@@ -38,7 +38,7 @@ export const githubStateShape = z.object({
 
 export const directoryPageShape = z.object({
   snapshotId: z.string().min(1),
-  entries: z.array(z.object({ name: z.string().min(1), path: z.string().startsWith("/workspace/"), kind: z.enum(["folder", "file", "symlink"]) }).strict()).max(200),
+  entries: z.array(z.object({ name: z.string().min(1), path: z.string().refine(path => path.startsWith("/workspace/") || path.startsWith("/Users/silo/workspace/")), kind: z.enum(["folder", "file", "symlink"]) }).strict()).max(200),
   nextOffset: z.number().int().nonnegative().nullable(),
 }).strict()
 

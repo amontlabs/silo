@@ -763,6 +763,17 @@ describe("production application bridge", () => {
     store.dispose()
   })
 
+  it("reports a terminal that fails to open on a computer this list does not hold, such as a macOS computer", async () => {
+    toasts.showOperationFailure.mockClear()
+    const mock = native({}, { computer_action: () => { throw new Error("The computer is not reachable over SSH.") } })
+    const store = createProductionSource(mock.bridge)
+    await store.initialize()
+    store.applicationActions.openTerminal("daily")
+    await vi.waitFor(() => expect(toasts.showOperationFailure).toHaveBeenCalledWith("open-terminal:daily", "Could not open terminal for daily", { description: "The computer is not reachable over SSH." }))
+    expect(mock.invoke).toHaveBeenCalledWith("computer_action", { action: "open-terminal", name: "daily" })
+    store.dispose()
+  })
+
   it("publishes saved computer configuration before requesting live state", async () => {
     const configurations = source.computers.map(({ configuration }) => structuredClone(configuration))
     const invoke = nativeBridgeMock({ read_computer_configuration: () => ({ schemaVersion: 1, computers: configurations }) })
