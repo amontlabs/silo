@@ -54,6 +54,11 @@ pub struct InitRequest {
     pub mtu: u16,
     #[serde(default)]
     pub policy: Option<NetworkPolicy>,
+    /// Strict hostname-policy enforcement. Absent means on, the network default. A computer
+    /// with a list of allowed hosts turns it off, or a TLS connection the gateway does not
+    /// intercept is refused when only a hostname rule admits it.
+    #[serde(default)]
+    pub strict: Option<bool>,
     pub dns_nameservers: Vec<String>,
     #[serde(default = "default_intercepted_ports")]
     pub intercepted_ports: Vec<u16>,
@@ -437,6 +442,52 @@ mod tests {
             Err(ControlError::InvalidLength)
         ));
         assert!(decoder.buffer.is_empty());
+    }
+
+    #[test]
+    fn init_takes_a_hostname_policy_and_strict() {
+        let request: Request = serde_json::from_value(serde_json::json!({
+            "version": 1,
+            "type": "init",
+            "slot": 4,
+            "guest_ipv4": "172.16.0.18",
+            "guest_mac": [2, 0, 0, 0, 0, 4],
+            "policy": {
+                "default_egress": "deny",
+                "default_ingress": "allow",
+                "rules": [
+                    {"action": "allow", "destination": {"group": "host"}, "direction": "egress",
+                     "ports": [{"start": 53, "end": 53}], "protocols": ["udp", "tcp"]},
+                    {"action": "allow", "destination": {"domain": "example.com"}, "direction": "egress",
+                     "ports": [{"start": 443, "end": 443}], "protocols": ["tcp"]},
+                    {"action": "allow", "destination": {"domain_suffix": "python.org"}, "direction": "egress",
+                     "ports": [{"start": 443, "end": 443}], "protocols": ["tcp"]},
+                    {"action": "allow", "destination": {"group": "host"}, "direction": "egress",
+                     "ports": [{"start": 47311, "end": 47311}], "protocols": ["tcp"]}
+                ]
+            },
+            "strict": false,
+            "dns_nameservers": [],
+            "loopback_ports": [],
+            "ca": {"cert_pem": "cert", "key_pem": "private"}
+        }))
+        .unwrap();
+        let Request::Init(init) = request else {
+            panic!("init variant was not decoded")
+        };
+        assert_eq!(init.strict, Some(false));
+        assert_eq!(init.policy.unwrap().rules.len(), 4);
+        let absent: Request = serde_json::from_value(serde_json::json!({
+            "version": 1, "type": "init", "slot": 4, "guest_ipv4": "172.16.0.18",
+            "guest_mac": [2, 0, 0, 0, 0, 4], "dns_nameservers": [], "loopback_ports": [],
+            "ca": {"cert_pem": "cert", "key_pem": "private"}
+        }))
+        .unwrap();
+        let Request::Init(absent) = absent else {
+            panic!("init variant was not decoded")
+        };
+        assert_eq!(absent.strict, None);
+        assert!(absent.policy.is_none());
     }
 
     #[test]

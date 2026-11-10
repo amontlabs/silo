@@ -196,6 +196,9 @@ pub enum ComputerCreateParams {
         /// report, and a computer can claim it.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         agents: Vec<super::agents::AgentId>,
+        /// The new computer's network policy. Absent, it is open.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        network_policy: Option<super::network::NetworkPolicy>,
     },
     Macos {
         request: MacosComputerCreateRequest,
@@ -207,6 +210,9 @@ pub enum ComputerCreateParams {
         /// and a computer can claim it.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         agents: Vec<super::agents::AgentId>,
+        /// The new computer's network policy. Absent, it is open.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        network_policy: Option<super::network::NetworkPolicy>,
     },
 }
 

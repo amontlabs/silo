@@ -300,6 +300,7 @@ async fn make_one(
         secrets: Vec::new(),
         quiet: None,
         recipe_hash,
+        network_policy: None,
     };
     ops::apply_fork_extras(&mut params, extras)?;
     engine

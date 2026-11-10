@@ -503,6 +503,7 @@ mod tests {
             guest_mac: [2, 0, 0, 0, 0, 1],
             mtu: 1500,
             policy: None,
+            strict: None,
             dns_nameservers: Vec::new(),
             intercepted_ports: vec![443],
             loopback_ports: vec![

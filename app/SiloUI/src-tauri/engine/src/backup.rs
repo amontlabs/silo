@@ -4014,6 +4014,11 @@ fn portable_export_network(name: &str, runtime_config: &mut Value) -> Result<(),
     for field in ["policy", "secrets", "ports"] {
         candidate[field] = expected[field].clone();
     }
+    // A boolean `strict` goes with the policy: an allowlist computer runs with it off, and the
+    // import starts closed with the profile's value.
+    if candidate.get("strict").is_some_and(Value::is_boolean) {
+        candidate["strict"] = expected["strict"].clone();
+    }
     if let (Some(candidate), Some(expected)) = (candidate.as_object(), expected.as_object()) {
         let differing = expected
             .keys()
@@ -6996,19 +7001,15 @@ mod tests {
                 serde_json::json!({"domain": "example.com"}),
                 serde_json::json!({"domain_suffix": "example.com"}),
             ] {
-                // With `strict` off the runtime treats a hostname allow rule differently,
-                // so that combination is a real setting, and the export names it.
-                let error = export_with_rule(origin, false.into(), hostname.clone())
-                    .err()
-                    .unwrap()
-                    .to_string();
-                assert!(error.contains("custom network strict settings"), "{error}");
-                // With it on (the profile's value) the rule is only a custom policy,
-                // which an export resets like any other.
-                let manifest = export_with_rule(origin, true.into(), hostname).unwrap();
-                assert!(imported_deny_network(
-                    &manifest.computers[0].runtime_config["network"]
-                ));
+                // An allowlist computer runs with `strict` off; the export resets it with the
+                // policy, and with it on (the profile's value) only the policy is reset.
+                for strict in [false, true] {
+                    let manifest = export_with_rule(origin, strict.into(), hostname.clone())
+                        .unwrap_or_else(|error| panic!("{origin} {strict}: {error}"));
+                    let network = &manifest.computers[0].runtime_config["network"];
+                    assert!(imported_deny_network(network));
+                    assert_eq!(network["strict"], true);
+                }
             }
             // Without a hostname rule the value changes nothing.
             let manifest = export_with_rule(

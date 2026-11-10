@@ -13,6 +13,8 @@ pub mod resources;
 mod rules;
 pub mod store;
 #[cfg(test)]
+mod network_tests;
+#[cfg(test)]
 mod tests;
 
 use std::collections::{BTreeSet, HashSet};
@@ -24,6 +26,7 @@ use silo_api::{
 };
 
 pub use access::{Access, GitHubAccess};
+use crate::network_policy::{NetworkPolicy, NetworkPolicyMode};
 pub use resources::Resources;
 pub use rules::{rule, Rule};
 
@@ -101,6 +104,13 @@ pub trait World {
     fn resources(&self, computer: &str) -> Option<Resources>;
     /// The port and bind address saved for a computer's SSH access, when it has any.
     fn ssh_settings(&self, computer: &str) -> Option<(u16, String)>;
+    /// The network policy a computer runs with; `None` when it cannot be read, so a check
+    /// against it asks.
+    fn network_policy(&self, computer: &str) -> Option<NetworkPolicy> {
+        crate::network_policy::store::get(computer)
+            .ok()
+            .map(|stored| crate::network_policy::effective(stored, None))
+    }
 }
 
 /// How a result is cut before it goes back to a computer.
@@ -512,6 +522,15 @@ impl<'a> Judge<'a> {
                 wider.push(format!("the secret {name}"));
             }
         }
+        let asked_network = Self::asked_network_policy(params, "networkPolicy")?;
+        match self.new_computer_network(asked_network, self.world.network_policy(source), new_name)
+        {
+            Ok(policy) => rewritten["networkPolicy"] = json!(policy),
+            Err(summary) if wider.is_empty() => {
+                return Ok(ask_to_create(ApprovalKind::Network, summary, rewritten, creates))
+            }
+            Err(_) => wider.push("a network policy wider than its own".into()),
+        }
         if !wider.is_empty() {
             return Ok(ask_to_create(
                 ApprovalKind::Access,
@@ -568,17 +587,34 @@ impl<'a> Judge<'a> {
                     id: Some(id),
                     source: None,
                 };
+                let asked_network = Self::asked_network_policy(params, "networkPolicy")?;
+                let network = self.new_computer_network(asked_network, None, name);
+                if let Ok(policy) = &network {
+                    rewritten["networkPolicy"] = json!(policy);
+                }
                 let asked = Resources::of_linux(configuration)
                     .ok_or("A Linux computer's CPUs, memory and storage are numbers.")?;
                 let more = self.more_than_it_has(&asked);
                 let container =
                     configuration.get("runtime").and_then(Value::as_str) == Some("container");
+                if let (false, None, Err(summary)) = (container, &more, &network) {
+                    return Ok(ask_to_create(
+                        ApprovalKind::Network,
+                        summary.clone(),
+                        rewritten,
+                        creates,
+                    ));
+                }
                 if container || more.is_some() {
                     let mut summary = format!("Make {name}");
                     if container {
                         summary.push_str(", a container computer (it shares this device's kernel, so it is less isolated than a virtual machine)");
                     }
                     summary.push_str(&self.sizes_sentence(&asked, more.as_deref()));
+                    if let Err(network) = &network {
+                        summary.push(' ');
+                        summary.push_str(network);
+                    }
                     let kind = if container {
                         ApprovalKind::Container
                     } else {
@@ -597,10 +633,18 @@ impl<'a> Judge<'a> {
                 let name = self.checked_name(text(request, "name"))?;
                 let asked = Resources::of_macos(request)
                     .ok_or("A macOS computer's CPUs, memory and disk are numbers.")?;
+                let asked_network = Self::asked_network_policy(params, "networkPolicy")?;
+                let network = self.new_computer_network(asked_network, None, name);
                 if let Some(more) = self.more_than_it_has(&asked) {
+                    let mut summary =
+                        format!("Make {name}{}", self.sizes_sentence(&asked, Some(&more)));
+                    if let Err(network) = &network {
+                        summary.push(' ');
+                        summary.push_str(network);
+                    }
                     return Ok(ask_to_create(
                         ApprovalKind::Resources,
-                        format!("Make {name}{}", self.sizes_sentence(&asked, Some(&more))),
+                        summary,
                         rewritten,
                         Creation {
                             name: name.to_owned(),
@@ -608,6 +652,21 @@ impl<'a> Judge<'a> {
                             source: None,
                         },
                     ));
+                }
+                match network {
+                    Ok(policy) => rewritten["networkPolicy"] = json!(policy),
+                    Err(summary) => {
+                        return Ok(ask_to_create(
+                            ApprovalKind::Network,
+                            summary,
+                            rewritten,
+                            Creation {
+                                name: name.to_owned(),
+                                id: None,
+                                source: None,
+                            },
+                        ))
+                    }
                 }
                 Ok(Decision::Allow(Allowed {
                     params: Some(rewritten),
@@ -779,6 +838,7 @@ impl<'a> Judge<'a> {
                 ))
             }
             MethodName::GitHubConfigurationSave => self.github_configuration(kind, params),
+            MethodName::NetworkPolicySet => self.network_policy_set(kind, params),
             MethodName::SecretsSave => {
                 let request = params.get("request").ok_or("The secret is missing.")?;
                 if request.get("operation").and_then(Value::as_str) != Some("add") {
@@ -840,6 +900,77 @@ impl<'a> Judge<'a> {
                 other.name()
             )),
         }
+    }
+
+    /// A network policy in `params[key]`, checked and in its stored form; `None` when absent.
+    fn asked_network_policy(params: &Value, key: &str) -> Result<Option<NetworkPolicy>, String> {
+        match params.get(key) {
+            None | Some(Value::Null) => Ok(None),
+            Some(value) => {
+                let policy: NetworkPolicy = serde_json::from_value(value.clone())
+                    .map_err(|_| format!("{key} is not a network policy."))?;
+                crate::network_policy::validate(&policy).map(Some)
+            }
+        }
+    }
+
+    /// The network policy a computer the caller makes gets: the one asked for, else
+    /// `inherited` when it is no wider than the caller's own, else the caller's own. `Err` holds
+    /// the summary of what is wider than the caller's own policy, for a request.
+    fn new_computer_network(
+        &self,
+        asked: Option<NetworkPolicy>,
+        inherited: Option<NetworkPolicy>,
+        new_name: &str,
+    ) -> Result<NetworkPolicy, String> {
+        let Some(own) = self.world.network_policy(self.caller) else {
+            return Err(format!(
+                "Give {new_name} a network policy; the network policy of {} could not be read to compare.",
+                self.name(self.caller)
+            ));
+        };
+        let chosen = match asked {
+            Some(asked) => asked,
+            None => match inherited {
+                Some(inherited) if crate::network_policy::no_wider(&inherited, &own) => inherited,
+                _ => own.clone(),
+            },
+        };
+        if crate::network_policy::no_wider(&chosen, &own) {
+            Ok(chosen)
+        } else {
+            Err(crate::network_policy::widening_summary(new_name, &own, &chosen))
+        }
+    }
+
+    /// Narrowing a network policy is free; anything wider than the target's current policy, or
+    /// for a computer it made wider than the caller's own, asks.
+    fn network_policy_set(&self, kind: ApprovalKind, params: &Value) -> Result<Decision, String> {
+        let target = self.tree_target(params, "computerId")?;
+        let asked = Self::asked_network_policy(params, "policy")?
+            .ok_or("The call must give a policy (policy).")?;
+        let rewritten = json!({ "computerId": target, "policy": asked });
+        let current = self.world.network_policy(&target);
+        let own = self.world.network_policy(self.caller);
+        let within_current = current
+            .as_ref()
+            .is_some_and(|current| crate::network_policy::no_wider(&asked, current));
+        let within_own = target == self.caller
+            || own
+                .as_ref()
+                .is_some_and(|own| crate::network_policy::no_wider(&asked, own));
+        if within_current && within_own {
+            return Ok(allow_with(rewritten));
+        }
+        let closed = NetworkPolicy {
+            mode: NetworkPolicyMode::Closed,
+            ..NetworkPolicy::default()
+        };
+        let base = if within_current { own } else { current }.unwrap_or(closed);
+        Ok(ask(
+            kind,
+            crate::network_policy::widening_summary(&self.name(&target), &base, &asked),
+        ))
     }
 
     /// A GitHub configuration replaces every computer's policy, so it may change only the

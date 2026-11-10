@@ -489,6 +489,7 @@ pub async fn create(
                 request_id: None,
                 device_id: None,
                 agents: Vec::new(),
+                network_policy: None,
             }
         }
         Platform::Macos => ComputerCreateParams::Macos {
@@ -500,6 +501,7 @@ pub async fn create(
             },
             device_id: None,
             agents: Vec::new(),
+            network_policy: None,
         },
     };
     engine
@@ -866,6 +868,7 @@ async fn fork_now(
         secrets: Vec::new(),
         quiet: None,
         recipe_hash,
+        network_policy: None,
     };
     apply_fork_extras(
         &mut params,
@@ -1194,6 +1197,7 @@ async fn measure_on_throwaway(
         secrets: Vec::new(),
         quiet: None,
         recipe_hash: copy.recipe_hash.map(str::to_owned),
+        network_policy: None,
     };
     apply_fork_extras(&mut params, &extras)?;
     engine
@@ -1816,6 +1820,7 @@ mod tests {
             secrets: Vec::new(),
             quiet: None,
             recipe_hash: None,
+            network_policy: None,
         };
         apply_fork_extras(&mut params, &ForkExtras::default()).unwrap();
         assert!(params.secrets.is_empty());
@@ -1963,6 +1968,7 @@ pub async fn up(
                 secrets: Vec::new(),
                 quiet: None,
                 recipe_hash: None,
+                network_policy: None,
             };
             engine
                 .run_job(

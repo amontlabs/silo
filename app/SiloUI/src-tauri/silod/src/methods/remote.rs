@@ -1034,6 +1034,9 @@ mod tests {
         "display.show",
         "display.close",
         "clipboard.transfer",
+        // A computer's network policy is set on the device that runs it.
+        "network.policy.get",
+        "network.policy.set",
     ];
 
     #[test]
