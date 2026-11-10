@@ -915,8 +915,10 @@ with nothing sensitive on it, and the app, the CLI and `silo list` label it as l
   - *The guest image.* The file does not carry it. An export accepts any image digest unpacked on
     the exporting device, and an import accepts the pinned one or one kept unpacked; otherwise it
     says the computer was made on an older guest image that this device does not have. An image
-    is kept unpacked while a computer's record or a checkpoint names it, so the image an imported
+    is kept unpacked while a computer's record or a checkpoint names it, so an image an imported
     computer needs is kept before its first start too, when only its imported checkpoint names it.
+    The pinned image is not unpacked by an import (that needs the image download): until its first
+    start, a computer imported on it needs a Silo that still pins that image.
 - **The desktop and Chrome.** A container computer has the desktop and computer use of a virtual
   machine: the image's own desktop service (Xvfb, PulseAudio, Xfce, Selkies) and Cua Driver, started
   by a root command after the container starts (the image's boot hook; the container has no init
