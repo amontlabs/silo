@@ -37,6 +37,10 @@ type Scaler struct {
 	// private-repository check, run again before each job). An error leaves the message unacked,
 	// so GitHub offers the job again and the check runs again.
 	check func(context.Context) error
+	// refused is set by a failed check and cleared by the next one that passes. Until then no
+	// runner is asked for: a new session's first poll carries GitHub's statistics but no job, so
+	// the check would not run on it.
+	refused atomic.Bool
 }
 
 // SetAcquirer sets the message session that jobs are acquired from; a new session replaces it.
@@ -62,6 +66,7 @@ func (s *Scaler) Scale(ctx context.Context, msg *scaleset.RunnerScaleSetMessage)
 				if err := s.check(ctx); err != nil {
 					checkErr = fmt.Errorf("the job is not taken: %w", err)
 				}
+				s.refused.Store(checkErr != nil)
 			}
 			if checkErr == nil {
 				ids := make([]int64, 0, len(msg.JobAvailableMessages))
@@ -80,7 +85,7 @@ func (s *Scaler) Scale(ctx context.Context, msg *scaleset.RunnerScaleSetMessage)
 			}
 		}
 		event.started, event.completed = msg.JobStartedMessages, msg.JobCompletedMessages
-		if checkErr != nil {
+		if s.refused.Load() {
 			// No runner is asked for while the repository is not served; the jobs in flight
 			// keep theirs.
 			none := 0

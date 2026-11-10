@@ -1635,7 +1635,8 @@ Follows the container sharing review above and R2's left-for-owner list; branch 
   1). Every poll that brings jobs runs the private-repository check again before a job is acquired; a public
   repository, or one the check cannot read, is not served (the poll fails and no new jobs are acquired, but
   started and completed job events from the poll are still delivered so finished jobs' computers are cleaned
-  up, and the poll asks for no runner, so no idle computer is made for a job it did not take). Tests: `TestAJobIsNotTakenWhenTheRepositoryIsNoLongerPrivate`,
+  up; no runner is asked for until a check passes again, including on a new session's first poll, which carries
+  GitHub's statistics but no job to check). Tests: `TestAJobIsNotTakenWhenTheRepositoryIsNoLongerPrivate`,
   `TestEventsDeliveredWhenPerJobPrivacyCheckFails`.
 - **Fixed: a second Ctrl-C ends a runner shutdown** (R2's item 2). After the first interrupt the shutdown waits
   for the work in flight (deregistrations, stops, drops); another interrupt ends the whole shutdown sequence at

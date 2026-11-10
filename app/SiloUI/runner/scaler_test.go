@@ -786,4 +786,20 @@ func TestEventsDeliveredWhenPerJobPrivacyCheckFails(t *testing.T) {
 	if names := h.silo.names(); len(names) != 0 {
 		t.Fatalf("a computer was made while the repository was public: %v", names)
 	}
+	// Nor after a reconnect, whose first poll carries GitHub's statistics but no job to check.
+	if err := h.scaler.Scale(context.Background(), &scaleset.RunnerScaleSetMessage{
+		Statistics: &scaleset.RunnerScaleSetStatistic{TotalAssignedJobs: 1},
+	}); err != nil {
+		t.Fatalf("a poll without jobs failed: %v", err)
+	}
+	h.fleet.Settle()
+	if names := h.silo.names(); len(names) != 0 {
+		t.Fatalf("a computer was made after a reconnect while the repository was public: %v", names)
+	}
+	// Once the repository is private again, the next offer is taken.
+	checker.set(nil)
+	h.scale(available(3))
+	if len(h.silo.names()) != 1 {
+		t.Fatalf("no computer for a job once the repository was private again: %v", h.status())
+	}
 }
