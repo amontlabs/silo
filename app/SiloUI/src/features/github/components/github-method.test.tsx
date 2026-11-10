@@ -77,3 +77,11 @@ it("asks for a token when token access names none", () => {
   expect(screen.getByRole("combobox", { name: "GitHub token for dev" })).toHaveValue("")
   expect(screen.getByRole("option", { name: "Choose a token…" })).toBeDisabled()
 })
+
+it("says when the token a computer chose no longer exists", () => {
+  const props = propsWith()
+  const { rerender } = render(<GitHubAccessEditor {...props} computers={[{ name: "dev", tokenMissing: true }]} tokenSecrets={[work]} computerRepositoryAccess={tokenAccess("token-gone")} />)
+  expect(screen.getByRole("alert")).toHaveTextContent("The token this computer used was removed, so it has no GitHub access. Choose another token.")
+  rerender(<GitHubAccessEditor {...props} computers={[{ name: "dev" }]} tokenSecrets={[work]} computerRepositoryAccess={tokenAccess("token-work")} />)
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+})

@@ -15,6 +15,8 @@ struct LegacyToken {
 static TOKEN_OPERATION: Mutex<()> = Mutex::new(());
 /// What the last check learned about each token secret, by secret id.
 static STATUS: Mutex<BTreeMap<String, Status>> = Mutex::new(BTreeMap::new());
+/// Set once a client has used `github.personalToken.save` or `.remove` in this session.
+static LEGACY_CLIENT: AtomicBool = AtomicBool::new(false);
 static CHECK_AT: AtomicU64 = AtomicU64::new(0);
 static APPLIED: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
 
@@ -89,6 +91,25 @@ pub(super) fn status() -> Value {
     }
     status
 }
+/// The policies as the app reads them: a computer whose chosen token secret no longer exists
+/// is marked `tokenMissing`. It keeps failing closed; the mark only says why.
+pub(super) fn with_missing_marks(computers: &[Value]) -> Vec<Value> {
+    let Ok(entries) = crate::secrets::github_token_entries() else {
+        return computers.to_vec();
+    };
+    computers
+        .iter()
+        .map(|policy| {
+            let mut policy = policy.clone();
+            if let Some(id) = chosen(&policy) {
+                if !entries.iter().any(|entry| entry.id == id) {
+                    policy["tokenMissing"] = json!(true);
+                }
+            }
+            policy
+        })
+        .collect()
+}
 pub(super) fn connected(id: &str) -> bool {
     statuses().get(id).is_some_and(|status| status.connected)
 }
@@ -127,26 +148,52 @@ pub(crate) fn validate_token(token: &str) -> Result<String, String> {
     crate::github_http::reset_bearer_retries(token);
     validated_with(token, user_lookup)
 }
-fn validated_with(
-    token: &str,
-    lookup: impl FnOnce(&str) -> Result<Value, String>,
-) -> Result<String, String> {
+/// What GitHub said about a token.
+#[derive(Debug, PartialEq, Eq)]
+enum Validation {
+    /// GitHub accepted the token; this is its account.
+    Accepted(String),
+    /// GitHub answered that the token is not valid.
+    Rejected(String),
+    /// GitHub could not be asked, or its answer says nothing about the token: a timeout, a
+    /// server error, a rate limit, no network.
+    Unknown,
+}
+const NOT_ACCEPTED: &str =
+    "GitHub did not accept this token. Check that it is valid and has not expired.";
+const NOT_REACHED: &str = "Silo could not reach GitHub to check this token. Try again.";
+fn validation(token: &str, lookup: impl FnOnce(&str) -> Result<Value, String>) -> Validation {
     if token.is_empty()
         || token.len() > 4096
         || !token
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b == b'_')
     {
-        return Err("Enter a valid GitHub personal access token.".into());
+        return Validation::Rejected("Enter a valid GitHub personal access token.".into());
     }
-    let user = lookup(token).map_err(|_| {
-        "Could not validate the GitHub token. Check its validity and your connection.".to_string()
-    })?;
-    user["login"]
-        .as_str()
-        .filter(|s| !s.is_empty() && s.len() <= 100)
-        .map(str::to_owned)
-        .ok_or("GitHub did not identify this token's account.".into())
+    match lookup(token) {
+        Err(error) if crate::github_http::credentials_rejected(&error) => {
+            Validation::Rejected(NOT_ACCEPTED.into())
+        }
+        Err(_) => Validation::Unknown,
+        Ok(user) => user["login"]
+            .as_str()
+            .filter(|s| !s.is_empty() && s.len() <= 100)
+            .map_or(Validation::Unknown, |login| {
+                Validation::Accepted(login.to_owned())
+            }),
+    }
+}
+/// The account of a token GitHub accepts; an error for the person otherwise.
+fn validated_with(
+    token: &str,
+    lookup: impl FnOnce(&str) -> Result<Value, String>,
+) -> Result<String, String> {
+    match validation(token, lookup) {
+        Validation::Accepted(account) => Ok(account),
+        Validation::Rejected(message) => Err(message),
+        Validation::Unknown => Err(NOT_REACHED.into()),
+    }
 }
 /// The value of one connected token secret. A disconnected one is never handed out.
 pub(super) fn value_for(id: &str) -> Result<String, String> {
@@ -362,14 +409,19 @@ pub(super) fn next_check() -> Duration {
 #[derive(PartialEq, Eq, Debug)]
 struct Verdict {
     id: String,
-    status: Status,
+    /// The stored value this verdict is about; a replaced token no longer matches it.
+    value_id: String,
+    /// Whether the secret was being removed when the verdict was made.
+    removing: bool,
+    /// `None` when GitHub could not be asked: the previous status stands.
+    status: Option<Status>,
     account: Option<String>,
 }
 /// Validates every token secret. `values` is read only when some token is live, and
 /// `lookup` answers GitHub's `/user`. A failure of one token never changes another's verdict.
 fn evaluate(
     entries: &[crate::secrets::TokenEntry],
-    values: impl FnOnce() -> Result<BTreeMap<String, String>, String>,
+    values: impl FnOnce() -> Result<BTreeMap<String, crate::secrets::TokenValue>, String>,
     lookup: impl Fn(&str) -> Result<Value, String>,
 ) -> Vec<Verdict> {
     let live = entries.iter().any(|entry| !entry.removing);
@@ -377,49 +429,80 @@ fn evaluate(
     entries
         .iter()
         .map(|entry| {
+            let mut value_id = entry.value_id.clone();
             let (status, account) = if entry.removing {
                 (
-                    Status::disconnected("Removal is pending. Retry removing this token."),
+                    Some(Status::disconnected(
+                        "Removal is pending. Retry removing this token.",
+                    )),
                     None,
                 )
             } else {
                 match values.as_ref() {
                     Some(Ok(values)) => match values.get(&entry.id) {
-                        Some(token) => match validated_with(token, &lookup) {
-                            Ok(account) => (Status::connected(), Some(account)),
-                            Err(message) => (Status::disconnected(message), None),
-                        },
+                        Some(token) => {
+                            value_id = token.value_id.clone();
+                            match validation(&token.value, &lookup) {
+                                Validation::Accepted(account) => {
+                                    (Some(Status::connected()), Some(account))
+                                }
+                                Validation::Rejected(message) => {
+                                    (Some(Status::disconnected(message)), None)
+                                }
+                                Validation::Unknown => (None, None),
+                            }
+                        }
                         None => (
-                            Status::disconnected("The token's value is missing. Replace it."),
+                            Some(Status::disconnected(
+                                "The token's value is missing. Replace it.",
+                            )),
                             None,
                         ),
                     },
-                    Some(Err(message)) => (Status::disconnected(message.clone()), None),
-                    None => (Status::disconnected("The token could not be read."), None),
+                    Some(Err(message)) => (Some(Status::disconnected(message.clone())), None),
+                    None => (
+                        Some(Status::disconnected("The token could not be read.")),
+                        None,
+                    ),
                 }
             };
             Verdict {
                 id: entry.id.clone(),
+                value_id,
+                removing: entry.removing,
                 status,
                 account,
             }
         })
         .collect()
 }
-/// Records verdicts and returns the ids whose status changed (a vanished secret counts).
-fn publish_verdicts(verdicts: &[Verdict]) -> Vec<String> {
+/// Whether a verdict still describes the secret as it is now: the same stored value and
+/// the same removal state.
+fn describes(verdict: &Verdict, current: &[crate::secrets::TokenEntry]) -> bool {
+    current.iter().any(|entry| {
+        entry.id == verdict.id
+            && entry.value_id == verdict.value_id
+            && entry.removing == verdict.removing
+    })
+}
+/// Records verdicts and returns the ids whose status changed. A secret in `live` that the
+/// verdicts do not cover keeps its status; one no longer in `live` is forgotten.
+fn publish_verdicts(verdicts: &[Verdict], live: &[&str]) -> Vec<String> {
     let mut statuses = statuses();
     let mut changed: Vec<String> = statuses
         .keys()
-        .filter(|id| !verdicts.iter().any(|v| &v.id == *id))
+        .filter(|id| !live.contains(&id.as_str()))
         .cloned()
         .collect();
     for id in &changed {
         statuses.remove(id);
     }
     for verdict in verdicts {
-        if statuses.get(&verdict.id) != Some(&verdict.status) {
-            statuses.insert(verdict.id.clone(), verdict.status.clone());
+        let Some(status) = &verdict.status else {
+            continue;
+        };
+        if statuses.get(&verdict.id) != Some(status) {
+            statuses.insert(verdict.id.clone(), status.clone());
             changed.push(verdict.id.clone());
         }
     }
@@ -427,9 +510,6 @@ fn publish_verdicts(verdicts: &[Verdict]) -> Vec<String> {
 }
 /// Called by the existing serialized worker. Snapshot reads never touch secure storage.
 pub(super) fn check() {
-    let Some(_operation) = try_serialize(&TOKEN_OPERATION) else {
-        return;
-    };
     if now() < CHECK_AT.load(Ordering::SeqCst) {
         return;
     }
@@ -438,21 +518,40 @@ pub(super) fn check() {
         CHECK_AT.store(now() + 30, Ordering::SeqCst);
         return;
     };
+    // GitHub is asked without holding TOKEN_OPERATION, so a save never waits for the lookups.
     let verdicts = evaluate(&entries, crate::secrets::github_token_values, user_lookup);
     if verdicts
         .iter()
-        .any(|v| !v.status.connected && !entries.iter().any(|e| e.id == v.id && e.removing))
+        .any(|v| v.status.as_ref().is_none_or(|s| !s.connected) && !v.removing)
     {
         CHECK_AT.store(now() + 30, Ordering::SeqCst);
     }
-    let mut account_changed = false;
-    for verdict in &verdicts {
-        if let Some(account) = &verdict.account {
-            account_changed |=
-                crate::secrets::set_github_token_account(&verdict.id, account).unwrap_or(false);
+    let (account_changed, changed_ids) = {
+        let _operation = serialize(&TOKEN_OPERATION);
+        // A save, replacement or removal may have happened during the lookups; only
+        // verdicts about the secret as it is now are recorded.
+        let Ok(current) = crate::secrets::github_token_entries() else {
+            CHECK_AT.store(now() + 30, Ordering::SeqCst);
+            return;
+        };
+        let verdicts: Vec<Verdict> = verdicts
+            .into_iter()
+            .filter(|verdict| describes(verdict, &current))
+            .collect();
+        let mut account_changed = false;
+        for verdict in &verdicts {
+            if let Some(account) = &verdict.account {
+                account_changed |= crate::secrets::set_github_token_account(
+                    &verdict.id,
+                    &verdict.value_id,
+                    account,
+                )
+                .unwrap_or(false);
+            }
         }
-    }
-    let changed_ids = publish_verdicts(&verdicts);
+        let live: Vec<&str> = current.iter().map(|entry| entry.id.as_str()).collect();
+        (account_changed, publish_verdicts(&verdicts, &live))
+    };
     if account_changed || !changed_ids.is_empty() {
         crate::secrets::publish_changed();
     }
@@ -472,35 +571,46 @@ pub(super) fn check() {
     }
 }
 
+/// Sets what is known about a token secret, or forgets it for `None`. Serialized with the
+/// check, so a verdict being recorded never overwrites a newer state.
+fn set_status(id: &str, status: Option<Status>) {
+    let _operation = serialize(&TOKEN_OPERATION);
+    match status {
+        Some(status) => statuses().insert(id.to_owned(), status),
+        None => statuses().remove(id),
+    };
+}
+
 /// A token secret was saved with a new value that GitHub accepted: its computers pick it up.
 pub(crate) fn secret_saved(id: &str) -> Result<(), String> {
-    statuses().insert(id.to_owned(), Status::connected());
+    set_status(id, Some(Status::connected()));
     CHECK_AT.store(now() + 300, Ordering::SeqCst);
     changed(Some(&[id]))
 }
 /// The user asked to try a token again.
 pub(crate) fn secret_retry(id: &str) -> Result<(), String> {
     CHECK_AT.store(0, Ordering::SeqCst);
-    statuses().remove(id);
+    set_status(id, None);
     changed(Some(&[id]))
 }
 /// A token secret is being removed: detach every computer using it before its value goes.
 pub(crate) fn secret_removing(id: &str) -> Result<(), String> {
-    statuses().insert(
-        id.to_owned(),
-        Status::disconnected("Removing this token."),
-    );
+    set_status(id, Some(Status::disconnected("Removing this token.")));
     changed(Some(&[id]))
 }
 /// A token secret and its value are gone.
 pub(crate) fn secret_removed(id: &str) {
-    statuses().remove(id);
+    set_status(id, None);
     let _ = changed(Some(&[id]));
 }
 
 /// A save from a client that knows only "token mode" names no token: it means the secret
-/// earlier versions managed, when there is one.
+/// earlier versions managed, when there is one. This applies only after such a client has
+/// used the single-token methods; any other save that selects token mode must name a token.
 pub(super) fn with_legacy_choice(mut configuration: Value) -> Value {
+    if !LEGACY_CLIENT.load(Ordering::SeqCst) {
+        return configuration;
+    }
     let Some(policies) = configuration["computers"].as_array_mut() else {
         return configuration;
     };
@@ -524,6 +634,7 @@ pub(super) fn with_legacy_choice(mut configuration: Value) -> Value {
 /// Earlier versions' `github.personalToken.save`: saves the token as the secret named
 /// `github-token`. Computers using it keep using it.
 pub fn save_github_personal_token(token: String) -> Result<Value, String> {
+    LEGACY_CLIENT.store(true, Ordering::SeqCst);
     let existing = crate::secrets::github_token_named(LEGACY_NAME)?;
     crate::secrets::save_secret(
         crate::secrets::github_token_request(existing, LEGACY_NAME, Some(token)),
@@ -534,6 +645,7 @@ pub fn save_github_personal_token(token: String) -> Result<Value, String> {
 
 /// Earlier versions' `github.personalToken.remove`: removes the secret named `github-token`.
 pub fn remove_github_personal_token() -> Result<Value, String> {
+    LEGACY_CLIENT.store(true, Ordering::SeqCst);
     if let Some(id) = crate::secrets::github_token_named(LEGACY_NAME)? {
         crate::secrets::remove_secret(id, || Ok(()))?;
     }
@@ -595,6 +707,13 @@ fn legacy_entry() -> Result<keyring::Entry, String> {
         "personal-token",
     )
     .map_err(|_| "The system credential store is unavailable.".into())
+}
+/// A failed move is logged once and listed in the Secrets activity; the next start tries again.
+pub(super) fn migration_failed(message: &str) {
+    eprintln!("Could not move the saved GitHub token into Secrets: {message}");
+    crate::secrets::record_failure(&format!(
+        "Could not move the saved GitHub token into Secrets: {message} Silo tries again at the next start."
+    ));
 }
 /// Run once at engine start, before the worker: a token saved by an earlier version
 /// becomes the secret `github-token` (or `github-token-2`, and so on, when that name is
@@ -671,6 +790,7 @@ mod tests {
             crate::secrets::use_test_store(None);
             crate::secrets::use_test_vault(None);
             use_test_lookup(None);
+            LEGACY_CLIENT.store(false, Ordering::SeqCst);
             statuses().clear();
         }
     }
@@ -712,7 +832,9 @@ mod tests {
         let bad = token_policy("dev", Some("bad"));
         let none = token_policy("dev", None);
         // Switching to tokens, or to another token, needs a connected token.
-        assert!(validate_method_change(None, &none, true, &connected).is_err());
+        // A save that selects token access without naming a token says what is missing.
+        let missing = validate_method_change(None, &none, true, &connected).unwrap_err();
+        assert!(missing.contains("Choose a connected GitHub token"), "{missing}");
         assert!(validate_method_change(None, &bad, true, &connected).is_err());
         assert!(validate_method_change(Some(&oauth), &bad, true, &connected).is_err());
         assert!(validate_method_change(Some(&oauth), &good, false, &connected).is_ok());
@@ -846,42 +968,161 @@ mod tests {
                 name: (*id).into(),
                 account: None,
                 removing: *removing,
+                value_id: format!("value-{id}"),
             })
             .collect()
+    }
+    fn token_values(
+        pairs: &[(&str, &str)],
+    ) -> Result<BTreeMap<String, crate::secrets::TokenValue>, String> {
+        Ok(pairs
+            .iter()
+            .map(|(id, value)| {
+                (
+                    (*id).to_string(),
+                    crate::secrets::TokenValue {
+                        value_id: format!("value-{id}"),
+                        value: (*value).to_string(),
+                    },
+                )
+            })
+            .collect())
+    }
+    fn rejected() -> Result<Value, String> {
+        Err(format!(
+            "{} Reconnect GitHub.",
+            crate::github_http::CREDENTIALS_REJECTED
+        ))
     }
     #[test]
     fn validation_disconnects_only_the_rejected_token() {
         let _fixture = Fixture::new();
-        let values = || {
-            Ok(BTreeMap::from([
-                ("a".to_string(), "synthetic_good".to_string()),
-                ("b".to_string(), "synthetic_bad".to_string()),
-            ]))
-        };
+        let values = || token_values(&[("a", "synthetic_good"), ("b", "synthetic_bad")]);
         let lookup = |token: &str| match token {
             "synthetic_good" => Ok(json!({"login":"alice"})),
-            _ => Err("401 synthetic_bad rejected".to_string()),
+            _ => rejected(),
         };
+        let both = ["a", "b"];
         let verdicts = evaluate(&entries(&[("a", false), ("b", false)]), values, lookup);
-        assert!(verdicts[0].status.connected);
+        assert!(verdicts[0].status.as_ref().unwrap().connected);
         assert_eq!(verdicts[0].account.as_deref(), Some("alice"));
-        assert!(!verdicts[1].status.connected);
-        let message = verdicts[1].status.message.clone().unwrap();
+        assert!(!verdicts[1].status.as_ref().unwrap().connected);
+        let message = verdicts[1].status.as_ref().unwrap().message.clone().unwrap();
         assert!(!message.contains("synthetic_bad"));
-        assert_eq!(publish_verdicts(&verdicts), ["a", "b"]);
+        assert_eq!(publish_verdicts(&verdicts, &both), ["a", "b"]);
         assert!(connected("a") && !connected("b"));
         // A later check where only b changes leaves a alone.
         let verdicts = evaluate(&entries(&[("a", false), ("b", false)]), values, |_| {
             Ok(json!({"login":"alice"}))
         });
-        assert_eq!(publish_verdicts(&verdicts), ["b"]);
+        assert_eq!(publish_verdicts(&verdicts, &both), ["b"]);
         assert!(connected("a") && connected("b"));
         // A secret that vanished is forgotten.
         let verdicts = evaluate(&entries(&[("a", false)]), values, |_| {
             Ok(json!({"login":"alice"}))
         });
-        assert_eq!(publish_verdicts(&verdicts), ["b"]);
+        assert_eq!(publish_verdicts(&verdicts, &["a"]), ["b"]);
         assert!(!connected("b"));
+    }
+    #[test]
+    fn a_computer_whose_token_was_removed_is_marked_and_stays_without_a_token() {
+        let _fixture = Fixture::new();
+        let kept = crate::secrets::import_github_token("synthetic_token_a", "alice", "work").unwrap();
+        connect(&[&kept]);
+        let marked = with_missing_marks(&[
+            token_policy("kept", Some(&kept)),
+            token_policy("lost", Some("removed-id")),
+            token_policy("none", None),
+            json!({"computer":"signed-in","authenticationMethod":"oauth"}),
+        ]);
+        assert!(marked[0].get("tokenMissing").is_none());
+        assert_eq!(marked[1]["tokenMissing"], true);
+        assert!(marked[2].get("tokenMissing").is_none());
+        assert!(marked[3].get("tokenMissing").is_none());
+        // The policy keeps naming the removed token and gets no value for it.
+        assert_eq!(marked[1]["tokenSecretId"], "removed-id");
+        assert!(value_of(&marked[1]).is_err());
+    }
+    #[test]
+    fn a_failed_lookup_keeps_the_previous_status() {
+        let _fixture = Fixture::new();
+        let values = || token_values(&[("a", "synthetic_a"), ("b", "synthetic_b")]);
+        connect(&["a"]);
+        statuses().insert("b".into(), Status::disconnected("GitHub did not accept this token."));
+        for failure in [
+            "Cannot reach GitHub.",
+            "GitHub is limiting requests.",
+            "GitHub access could not be updated.",
+            "GitHub access update is waiting. Retrying in 2 seconds.",
+        ] {
+            let verdicts = evaluate(&entries(&[("a", false), ("b", false)]), values, |_| {
+                Err(failure.to_string())
+            });
+            assert!(verdicts.iter().all(|v| v.status.is_none()), "{failure}");
+            assert!(publish_verdicts(&verdicts, &["a", "b"]).is_empty());
+            assert!(connected("a") && !connected("b"));
+        }
+        // An answer without an account says nothing about the token either.
+        let verdicts = evaluate(&entries(&[("a", false)]), values, |_| Ok(json!({})));
+        assert!(verdicts[0].status.is_none());
+    }
+    #[test]
+    fn only_a_rejection_disconnects_and_only_a_rejection_is_final() {
+        assert_eq!(
+            validation("synthetic_token", |_| rejected()),
+            Validation::Rejected(NOT_ACCEPTED.into())
+        );
+        assert_eq!(
+            validation("synthetic_token", |_| Err("Cannot reach GitHub.".into())),
+            Validation::Unknown
+        );
+        assert_eq!(
+            validation("synthetic_token", |_| Ok(json!({"login":"alice"}))),
+            Validation::Accepted("alice".into())
+        );
+        assert_eq!(
+            validated_with("synthetic_token", |_| Err("Cannot reach GitHub.".into())),
+            Err("Silo could not reach GitHub to check this token. Try again.".into())
+        );
+    }
+    #[test]
+    fn a_verdict_about_an_older_value_or_a_gone_secret_is_dropped() {
+        let current = entries(&[("a", false), ("b", true)]);
+        let verdict = |id: &str, value_id: &str, removing: bool| Verdict {
+            id: id.into(),
+            value_id: value_id.into(),
+            removing,
+            status: Some(Status::connected()),
+            account: Some("alice".into()),
+        };
+        assert!(describes(&verdict("a", "value-a", false), &current));
+        // The value was replaced during the lookup.
+        assert!(!describes(&verdict("a", "older", false), &current));
+        // The secret is gone, or started to be removed, or finished being removed meanwhile.
+        assert!(!describes(&verdict("gone", "value-gone", false), &current));
+        assert!(!describes(&verdict("b", "value-b", false), &current));
+        assert!(describes(&verdict("b", "value-b", true), &current));
+        assert!(!describes(&verdict("a", "value-a", true), &current));
+    }
+    #[test]
+    fn a_publish_never_forgets_a_secret_that_is_still_there() {
+        let _fixture = Fixture::new();
+        connect(&["a"]);
+        // No verdict was kept for "a" (its value changed during the lookup), but it exists.
+        assert!(publish_verdicts(&[], &["a"]).is_empty());
+        assert!(connected("a"));
+    }
+    #[test]
+    fn a_check_with_an_unreachable_github_changes_nothing() {
+        let _fixture = Fixture::new();
+        let id = crate::secrets::import_github_token("synthetic_token_a", "alice", "work").unwrap();
+        connect(&[&id]);
+        use_test_lookup(Some(Box::new(|_| Err("Cannot reach GitHub.".into()))));
+        CHECK_AT.store(0, Ordering::SeqCst);
+        check();
+        assert!(connected(&id));
+        // The next check comes soon, not in five minutes.
+        assert!(next_check() <= Duration::from_secs(30));
     }
     #[test]
     fn a_token_being_removed_is_disconnected_and_never_read() {
@@ -891,7 +1132,7 @@ mod tests {
             || panic!("a removed token's value was read"),
             |_| panic!("a removed token was sent to GitHub"),
         );
-        assert!(!verdicts[0].status.connected);
+        assert!(!verdicts[0].status.as_ref().unwrap().connected);
         assert_eq!(connection("a", true)["state"], "disconnected");
     }
     #[test]
@@ -902,21 +1143,28 @@ mod tests {
             || Err("Cannot access secrets in the system credential store.".into()),
             |_| panic!("nothing to send"),
         );
-        assert!(verdicts.iter().all(|v| !v.status.connected));
+        assert!(verdicts
+            .iter()
+            .all(|v| !v.status.as_ref().unwrap().connected));
     }
     #[test]
-    fn saving_a_token_asks_github_and_stores_nothing_when_it_refuses() {
+    fn saving_a_token_asks_github_and_stores_nothing_when_it_refuses_or_cannot_say() {
         let _fixture = Fixture::new();
-        use_test_lookup(Some(Box::new(|_| Err("401".into()))));
-        let request = crate::secrets::github_token_request(
-            None,
-            "work",
-            Some(" synthetic_token_a ".into()),
-        );
-        let error = crate::secrets::save_secret(request, || Ok(())).unwrap_err();
-        assert!(error.contains("Could not validate"));
-        assert!(!error.contains("synthetic_token_a"));
-        assert!(crate::secrets::github_token_entries().unwrap().is_empty());
+        for (answer, expected) in [
+            (rejected(), "did not accept"),
+            (Err("Cannot reach GitHub.".into()), "could not reach GitHub"),
+        ] {
+            use_test_lookup(Some(Box::new(move |_| answer.clone())));
+            let request = crate::secrets::github_token_request(
+                None,
+                "work",
+                Some(" synthetic_token_a ".into()),
+            );
+            let error = crate::secrets::save_secret(request, || Ok(())).unwrap_err();
+            assert!(error.contains(expected), "{error}");
+            assert!(!error.contains("synthetic_token_a"));
+            assert!(crate::secrets::github_token_entries().unwrap().is_empty());
+        }
     }
     #[test]
     fn a_token_secret_takes_a_label_and_no_computers_or_hosts() {
@@ -1133,6 +1381,10 @@ mod tests {
         let _fixture = Fixture::new();
         let id = crate::secrets::import_github_token("synthetic_legacy", "alice", LEGACY_NAME)
             .unwrap();
+        // Until a client has used the single-token methods, nothing is chosen for a save.
+        let unmarked = with_legacy_choice(json!({"computers":[token_policy("one", None)]}));
+        assert!(unmarked["computers"][0]["tokenSecretId"].is_null());
+        LEGACY_CLIENT.store(true, Ordering::SeqCst);
         let saved = with_legacy_choice(json!({"computers":[
             token_policy("one", None),
             token_policy("two", Some("other")),

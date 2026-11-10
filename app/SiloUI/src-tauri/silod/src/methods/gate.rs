@@ -599,6 +599,9 @@ impl policy::World for EngineWorld {
     fn github_policies(&self) -> Option<Vec<Value>> {
         self.github.clone()
     }
+    fn github_token_name(&self, id: &str) -> Option<String> {
+        silo_engine::secrets::github_token_name(id)
+    }
     fn new_id(&self) -> String {
         uuid::Uuid::new_v4().to_string()
     }

@@ -258,6 +258,8 @@ export interface ApplicationGitHubComputerPolicy {
   authenticationMethod?: "oauth" | "token"
   /** With token access, the `github-token` secret this computer uses. */
   tokenSecretId?: string
+  /** Set by the engine when the chosen token secret no longer exists. */
+  tokenMissing?: boolean
   repositoryMode?: "selected" | "all"
   allRepositoriesAllowChanges?: boolean
   computer: string

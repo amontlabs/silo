@@ -29,6 +29,8 @@ export function SecretEditor({ secret, source, onSave, onCancel, saving = false,
     domains: secret?.allowedDomains.join(", ") ?? "", allowAnyDomain: secret?.allowedDomains.includes("*") ?? false,
   }))
   const [errors, setErrors] = useState<SecretValidationErrors>({})
+  // A GitHub token leaves the form once it is submitted; after a failed save it is asked for again.
+  const [valueSubmitted, setValueSubmitted] = useState(false)
   const formRef = useRef<HTMLFormElement>(null)
   const id = useId()
   const computers = source.computers.filter(w => !w.device)
@@ -49,6 +51,7 @@ export function SecretEditor({ secret, source, onSave, onCancel, saving = false,
   function update(changes: Partial<SecretDraft>) {
     setDraft((current) => ({ ...current, ...changes }))
     setErrors({})
+    if (changes.value) setValueSubmitted(false)
   }
 
   function fieldError(field: keyof SecretDraft) {
@@ -58,6 +61,10 @@ export function SecretEditor({ secret, source, onSave, onCancel, saving = false,
   return <form ref={formRef} aria-label={title} className="grid min-w-0 gap-3 p-3" noValidate onSubmit={(event) => {
     event.preventDefault()
     if (saving || settingsChanged) return
+    if (token && valueSubmitted && draft.value === "") {
+      setErrors({ value: "Enter the token again to retry." })
+      return
+    }
     const result = secretConfiguration(draft, source.secrets, computers.map(({ configuration }) => configuration.name), secret)
     if (result.errors) {
       setErrors(result.errors)
@@ -67,8 +74,15 @@ export function SecretEditor({ secret, source, onSave, onCancel, saving = false,
     const unchanged = secret && request.value === undefined
       && (token || (request.computers.length === secret.computers.length && request.computers.every((name) => secret.computers.includes(name))
       && request.allowedDomains.length === secret.allowedDomains.length && request.allowedDomains.every((domain) => secret.allowedDomains.includes(domain))))
-    if (unchanged) onCancel()
-    else onSave(request)
+    if (unchanged) {
+      onCancel()
+      return
+    }
+    if (token && request.value !== undefined) {
+      setDraft((current) => ({ ...current, value: "" }))
+      setValueSubmitted(true)
+    }
+    onSave(request)
   }} onKeyDown={(event) => {
     if (!saving && event.key === "Escape" && !event.defaultPrevented && !event.nativeEvent.isComposing) {
       event.preventDefault()

@@ -1301,7 +1301,7 @@ fn public_snapshot(
         d.operations = d.computers.iter().map(|w|json!({"computer":w["computer"],"status":"failed","message":"GitHub access must be verified for this app session.","canRetry":true})).collect();
     }
 
-    json!({"policyRevision":d.revision,"personalToken":personal_token::status(),"state":if CONNECTING.load(Ordering::SeqCst){"connecting"}else if connected{"connected"}else{"disconnected"},"account":d.account,"accessEnabled":d.access_enabled,"deviceIdentity":identity,"repositoryCatalog":d.repositories.iter().filter_map(|r|r["name"].as_str()).collect::<Vec<_>>(),"repositoryCatalogStatus":match &d.catalog_error { Some(message)=>json!({"status":"unavailable","message":message,"canRetry":true}),None=>json!({"status":"available"})},"computers":d.computers,"computerOperations":d.operations})
+    json!({"policyRevision":d.revision,"personalToken":personal_token::status(),"state":if CONNECTING.load(Ordering::SeqCst){"connecting"}else if connected{"connected"}else{"disconnected"},"account":d.account,"accessEnabled":d.access_enabled,"deviceIdentity":identity,"repositoryCatalog":d.repositories.iter().filter_map(|r|r["name"].as_str()).collect::<Vec<_>>(),"repositoryCatalogStatus":match &d.catalog_error { Some(message)=>json!({"status":"unavailable","message":message,"canRetry":true}),None=>json!({"status":"available"})},"computers":personal_token::with_missing_marks(&d.computers),"computerOperations":d.operations})
 }
 type TokenLedger = std::collections::HashMap<String, Vec<String>>;
 fn ledger_entry() -> Result<keyring::Entry, String> {
@@ -1355,8 +1355,37 @@ fn profile(grants: &[RuntimeGrant]) -> Value {
 /// The current GitHub authority and its domain revision for one macOS computer.
 /// The revision prevents an older background attach from restoring stale grants.
 pub(crate) fn macos_proxy_policy(computer: &str) -> Result<(u64, Option<Value>), String> {
-    let _state = serialize(&STATE);
-    let document = load()?;
+    // The credential store can wait on a permission prompt, so the chosen token is read
+    // before STATE is taken for the answer, and the answer is given only if the policy
+    // has not changed since.
+    for _ in 0..3 {
+        let (revision, token) = {
+            let _state = serialize(&STATE);
+            let document = load()?;
+            let policy = document
+                .computers
+                .iter()
+                .find(|policy| policy["computer"].as_str() == Some(computer))
+                .filter(|policy| document.access_enabled && personal_token::selected(policy));
+            (document.revision, policy.cloned())
+        };
+        let token = token.map(|policy| personal_token::value_of(&policy));
+        let _state = serialize(&STATE);
+        let document = load()?;
+        if document.revision != revision {
+            continue;
+        }
+        return macos_proxy_policy_from(&document, computer, token);
+    }
+    Err("GitHub access changed. Applying your latest choices.".into())
+}
+/// The answer of `macos_proxy_policy` for one revision of the policies; `token` is the value
+/// of the token the computer chose, read for that revision.
+fn macos_proxy_policy_from(
+    document: &Document,
+    computer: &str,
+    token: Option<Result<String, String>>,
+) -> Result<(u64, Option<Value>), String> {
     let revision = document.revision;
     if !document.access_enabled {
         return Ok((revision, None));
@@ -1369,7 +1398,7 @@ pub(crate) fn macos_proxy_policy(computer: &str) -> Result<(u64, Option<Value>),
         return Ok((revision, None));
     };
     if personal_token::selected(policy) {
-        let token = personal_token::value_of(policy)?;
+        let token = token.ok_or("GitHub access changed. Applying your latest choices.")??;
         return Ok((revision, Some(personal_token::token_profile(&token))));
     }
     let key = active_key(computer)?;
@@ -3023,8 +3052,10 @@ fn personal_push_credential(policy: &Value, repository: &str) -> Result<HostPush
 /// Re-establish host-only grants after relaunch and renew them before expiry.
 pub fn install() -> Result<(), String> {
     // A token saved by an earlier version becomes a secret before the worker looks for tokens;
-    // a failure is retried at the next start.
-    let _ = personal_token::migrate_legacy();
+    // a failure is shown on the GitHub page and retried at the next start.
+    if let Err(message) = personal_token::migrate_legacy() {
+        personal_token::migration_failed(&message);
+    }
     // Start the first device identity read now so the first GitHub view already has it.
     device_identity();
     if let Ok(document) = load() {
@@ -5657,6 +5688,30 @@ mod tests {
         };
         let state = public_snapshot(document, Ok(None), None);
         crate::runtime::contract_tests::assert_fixture("github-authentication.json", vec![state]);
+    }
+
+    #[test]
+    fn macos_proxy_policy_uses_the_token_read_for_the_same_revision() {
+        let policy = json!({"computer":"dev","authenticationMethod":"token","tokenSecretId":"id"});
+        let document = Document {
+            revision: 4,
+            access_enabled: true,
+            computers: vec![policy],
+            ..Default::default()
+        };
+        let (revision, profile) =
+            macos_proxy_policy_from(&document, "dev", Some(Ok("synthetic_token".into()))).unwrap();
+        assert_eq!(revision, 4);
+        assert_eq!(profile, Some(personal_token::token_profile("synthetic_token")));
+        // A token that could not be read fails closed.
+        assert!(macos_proxy_policy_from(&document, "dev", Some(Err("no".into()))).is_err());
+        // No token was read for this policy: it changed since, so nothing is answered.
+        assert!(macos_proxy_policy_from(&document, "dev", None).is_err());
+        let off = Document {
+            access_enabled: false,
+            ..document
+        };
+        assert_eq!(macos_proxy_policy_from(&off, "dev", None).unwrap(), (4, None));
     }
 
     #[test]

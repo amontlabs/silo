@@ -24,11 +24,24 @@ one by name.
   back. The page says the computer can do everything the token allows.
 - Replacing or removing a token is independent of OAuth login. Removing a token detaches it
   locally; it does not revoke the user's token on GitHub or remove the OAuth connection.
-- The worker validates every saved token at startup and every five minutes, with a 30-second
-  retry after a network or validation failure. A token GitHub rejects is marked
-  disconnected and the computers using it are detached; the Secrets page offers replacement
-  without a manual test button. Other tokens are not affected. Individual GitHub API
-  permission errors remain GitHub's responsibility.
+- The worker validates every saved token at startup and every five minutes. A check has
+  three outcomes: GitHub accepts the token; GitHub rejects it (a 401, or a 403 whose body
+  says the credentials are bad, never a rate limit); or GitHub cannot say (a timeout, a
+  server error, a rate limit, no network). Only a rejection marks the token disconnected and
+  detaches the computers using it; the Secrets page offers replacement without a manual test
+  button. When GitHub cannot say, the token keeps its previous status and is checked again
+  after 30 seconds. A token Silo has not been able to check since it started shows as waiting
+  and its computers stay detached until GitHub answers. Saving a token that GitHub cannot be
+  asked about fails with "Silo could not reach GitHub to check this token. Try again." and
+  saves nothing. A check records its result only if the token it checked is still the saved
+  one: a token replaced or removed while GitHub was being asked keeps what the save recorded.
+  Other tokens are not affected. Individual GitHub API permission errors remain GitHub's
+  responsibility.
+- A computer whose chosen token secret was removed keeps naming it and has no GitHub access
+  (it never falls back). The GitHub state marks that computer's policy `tokenMissing`, and
+  the GitHub page says the token was removed and asks for another.
+- A computer's agent that asks for token access must name the token secret by id. The owner's
+  approval says which token it is and that a personal token gives its full permissions.
 
 ## Earlier versions
 
@@ -41,9 +54,18 @@ anywhere is finished at the next start. A removal that was pending at that time 
 the token is deleted rather than moved.
 
 `github.personalToken.save` and `github.personalToken.remove` are superseded but still work as
-a thin layer over the secret named `github-token`, and a configuration save that selects
-token mode without naming a token chooses that secret when it exists. `personalToken` in the
+a thin layer over the secret named `github-token`. After a client has used either in the
+current session, a configuration save from that client that selects token mode without naming
+a token chooses that secret when it exists. Any other save that selects token mode without
+naming a token fails with "Choose a connected GitHub token before selecting it." `personalToken` in the
 GitHub state describes the same secret.
+
+### Going back to an older Silo
+
+Going back to an older Silo after a token secret exists is not supported. The older version
+cannot read the secrets file once it holds a `github-token` secret, and the old single token
+entry in the credential store is deleted when the token moves, so the older version would have
+neither.
 
 ## Credential boundaries
 

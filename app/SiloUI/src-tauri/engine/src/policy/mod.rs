@@ -91,6 +91,10 @@ pub trait World {
     /// Each computer's GitHub policy as `github.state` lists it, keyed by `computerId`; `None`
     /// when it could not be read.
     fn github_policies(&self) -> Option<Vec<Value>>;
+    /// The name of the GitHub token secret `id`; `None` when there is no such token.
+    fn github_token_name(&self, _id: &str) -> Option<String> {
+        None
+    }
     /// A fresh computer id.
     fn new_id(&self) -> String;
     /// The sizes of a computer; `None` when they cannot be read.
@@ -777,6 +781,14 @@ impl<'a> Judge<'a> {
                     .flatten()
                     .filter_map(Value::as_str)
                     .collect();
+                if request.get("kind").and_then(Value::as_str) == Some("github-token") {
+                    return Ok(ask(
+                        kind,
+                        format!(
+                            "Add the GitHub token {name}. A token gives its full permissions to any computer that uses it."
+                        ),
+                    ));
+                }
                 let sent = if any {
                     "to any destination".to_owned()
                 } else {
@@ -839,10 +851,38 @@ impl<'a> Judge<'a> {
             return Err("Nothing in that GitHub configuration changes.".into());
         }
         let names: Vec<String> = changed.iter().map(|id| self.name(id)).collect();
-        Ok(ask(
-            kind,
-            format!("Change the GitHub access of {}.", names.join(", ")),
-        ))
+        let mut summary = format!("Change the GitHub access of {}.", names.join(", "));
+        let uses_token = |policy: &Value| {
+            policy.get("authenticationMethod").and_then(Value::as_str) == Some("token")
+        };
+        let token_of = |policy: &Value| {
+            policy
+                .get("tokenSecretId")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        };
+        for id in &changed {
+            let Some(policy) = after.get(*id).filter(|policy| uses_token(policy)) else {
+                continue;
+            };
+            let token = token_of(policy).ok_or(
+                "Say which GitHub token the computer should use; a computer's agent has to name the token secret.",
+            )?;
+            if before.get(*id).filter(|policy| uses_token(policy)).and_then(token_of)
+                == Some(token.clone())
+            {
+                continue;
+            }
+            let token_name = self
+                .world
+                .github_token_name(&token)
+                .ok_or("That GitHub token does not exist.")?;
+            summary.push_str(&format!(
+                " {} would use the GitHub token {token_name}. A personal token gives its full permissions to that computer.",
+                self.name(id)
+            ));
+        }
+        Ok(ask(kind, summary))
     }
 }
 

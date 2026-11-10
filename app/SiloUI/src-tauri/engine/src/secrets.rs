@@ -359,6 +359,8 @@ pub(crate) struct TokenEntry {
     pub name: String,
     pub account: Option<String>,
     pub removing: bool,
+    /// Names the stored value; a replaced token gets a new one.
+    pub value_id: String,
 }
 
 pub(crate) fn github_token_entries() -> Result<Vec<TokenEntry>, String> {
@@ -371,8 +373,18 @@ pub(crate) fn github_token_entries() -> Result<Vec<TokenEntry>, String> {
             name: s.name,
             account: s.account,
             removing: s.removing,
+            value_id: s.value_id,
         })
         .collect())
+}
+
+/// The name of the live `github-token` secret `id`.
+pub fn github_token_name(id: &str) -> Option<String> {
+    github_token_entries()
+        .ok()?
+        .into_iter()
+        .find(|entry| entry.id == id && !entry.removing)
+        .map(|entry| entry.name)
 }
 
 /// The id of the live `github-token` secret called `name`.
@@ -396,8 +408,14 @@ pub(crate) fn github_token_value(id: &str) -> Result<String, String> {
         .ok_or_else(|| STORE_ERROR.to_owned())
 }
 
+/// A token's stored value and the `value_id` that names it.
+pub(crate) struct TokenValue {
+    pub value_id: String,
+    pub value: String,
+}
+
 /// The values of every live `github-token` secret, by id, from one credential-store read.
-pub(crate) fn github_token_values() -> Result<BTreeMap<String, String>, String> {
+pub(crate) fn github_token_values() -> Result<BTreeMap<String, TokenValue>, String> {
     let secrets: Vec<_> = load()?
         .secrets
         .into_iter()
@@ -409,7 +427,17 @@ pub(crate) fn github_token_values() -> Result<BTreeMap<String, String>, String> 
     let values = read_vault()?;
     Ok(secrets
         .into_iter()
-        .filter_map(|s| values.get(&s.value_id).map(|v| (s.id, v.clone())))
+        .filter_map(|s| {
+            values.get(&s.value_id).map(|value| {
+                (
+                    s.id,
+                    TokenValue {
+                        value_id: s.value_id,
+                        value: value.clone(),
+                    },
+                )
+            })
+        })
         .collect())
 }
 
@@ -438,26 +466,35 @@ pub(crate) fn peek_github_token_values() -> BTreeMap<String, String> {
         .collect()
 }
 
-/// Records the account GitHub reported for a token.
-pub(crate) fn set_github_token_account(id: &str, account: &str) -> Result<bool, String> {
-    let current = load()?;
-    if current
+/// Whether `secret` is the live token secret holding the value named `value_id`.
+fn holds_value(secret: &Secret, id: &str, value_id: &str) -> bool {
+    secret.id == id
+        && secret.kind == SecretKind::GithubToken
+        && !secret.removing
+        && secret.value_id == value_id
+}
+
+/// Records the account GitHub reported for the value named `value_id` of a token. A secret
+/// whose value was replaced, or that is gone or being removed, keeps what it has.
+pub(crate) fn set_github_token_account(
+    id: &str,
+    value_id: &str,
+    account: &str,
+) -> Result<bool, String> {
+    let _guard = lock_unit(&DOCUMENT);
+    let mut document = load()?;
+    let Some(secret) = document
         .secrets
-        .iter()
-        .any(|s| s.id == id && s.account.as_deref() == Some(account))
-    {
+        .iter_mut()
+        .find(|s| holds_value(s, id, value_id))
+    else {
+        return Ok(false);
+    };
+    if secret.account.as_deref() == Some(account) {
         return Ok(false);
     }
-    update(|d| {
-        if let Some(secret) = d
-            .secrets
-            .iter_mut()
-            .find(|s| s.id == id && s.kind == SecretKind::GithubToken)
-        {
-            secret.account = Some(account.to_owned());
-        }
-        Ok(())
-    })?;
+    secret.account = Some(account.to_owned());
+    save(&document)?;
     Ok(true)
 }
 
@@ -649,6 +686,13 @@ fn event(document: &mut Document, title: &str, failed: bool) {
     if document.activities.len() > 100 {
         document.activities.remove(0);
     }
+}
+/// Puts a failure in the activity list on the Secrets page.
+pub(crate) fn record_failure(title: &str) {
+    let _ = update(|document| {
+        event(document, title, true);
+        Ok(())
+    });
 }
 fn revision(document: &Document, computer: &str) -> String {
     let desired: Vec<_> = document
@@ -1493,6 +1537,33 @@ mod tests {
             )
         );
         assert!(unassigned_names(&document, "dev", &["work".to_string()]).contains(&"work".to_string()));
+        use_test_store(None);
+        use_test_vault(None);
+    }
+    #[test]
+    fn an_account_is_recorded_only_for_the_value_that_was_checked() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        use_test_store(Some(directory.path().join("secrets.json")));
+        use_test_vault(Some(BTreeMap::new()));
+        let id = import_github_token("synthetic_token", "alice", "work").unwrap();
+        let value_id = github_token_entries().unwrap()[0].value_id.clone();
+        let account = || github_token_entries().unwrap()[0].account.clone();
+        // A verdict about an older value, or another secret, changes nothing.
+        assert!(!set_github_token_account(&id, "older-value", "mallory").unwrap());
+        assert!(!set_github_token_account("other", &value_id, "mallory").unwrap());
+        assert_eq!(account().as_deref(), Some("alice"));
+        // The checked value's account is recorded once.
+        assert!(set_github_token_account(&id, &value_id, "bob").unwrap());
+        assert!(!set_github_token_account(&id, &value_id, "bob").unwrap());
+        assert_eq!(account().as_deref(), Some("bob"));
+        // A token being removed keeps its account too.
+        update(|d| {
+            d.secrets[0].removing = true;
+            Ok(())
+        })
+        .unwrap();
+        assert!(!set_github_token_account(&id, &value_id, "carol").unwrap());
         use_test_store(None);
         use_test_vault(None);
     }
