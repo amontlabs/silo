@@ -78,6 +78,12 @@ impl Record {
         &self.approval.computer_id
     }
 
+    /// A pending approval older than [`PENDING_FOR_MS`], whether or not a sweep marked it yet.
+    fn past_due(&self, now: u64) -> bool {
+        self.state() == ApprovalState::Pending
+            && now.saturating_sub(self.created_ms) >= PENDING_FOR_MS
+    }
+
     /// The approval as callers see it: a secret's value never leaves the store.
     pub fn view(&self) -> Approval {
         let mut approval = self.approval.clone();
@@ -303,8 +309,10 @@ impl Store {
     /// The pending approval of `computer` for the same call, if there is one.
     pub fn find_pending(&self, computer: &str, request_key: &str) -> Option<Record> {
         let _held = lock();
+        let now = now_ms();
         self.all().into_iter().find(|record| {
             record.state() == ApprovalState::Pending
+                && !record.past_due(now)
                 && record.computer() == computer
                 && record.request_key == request_key
         })
@@ -371,6 +379,9 @@ impl Store {
     ) -> Result<Record, String> {
         let _held = lock();
         let mut record = self.existing(id)?;
+        if record.past_due(now_ms()) {
+            record.approval.state = ApprovalState::Expired;
+        }
         if record.state() != ApprovalState::Pending {
             return Err(not_pending(&record));
         }

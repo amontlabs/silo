@@ -80,7 +80,7 @@ fn a_computer_holds_at_most_twenty_pending_approvals() {
 #[test]
 fn pending_approvals_expire_after_seven_days_and_ended_ones_go_after_thirty() {
     let (_dir, store) = store();
-    let start = 1_000_000_000_000;
+    let start = now_ms();
     let (old, _) = store.ask_at(asked("c1", 1), start).unwrap();
     let (denied, _) = store.ask_at(asked("c1", 2), start).unwrap();
     store.deny(denied.id(), "app", None).unwrap();
@@ -95,6 +95,15 @@ fn pending_approvals_expire_after_seven_days_and_ended_ones_go_after_thirty() {
         .as_deref()
         .unwrap()
         .contains("seven days"));
+    // Past its time, it is not found again nor answered, even before a sweep marks it.
+    let (late, _) = store
+        .ask_at(asked("c9", 1), now_ms() - PENDING_FOR_MS)
+        .unwrap();
+    assert!(store.find_pending("c9", &late.request_key).is_none());
+    assert!(store
+        .allow(late.id(), "app", None)
+        .unwrap_err()
+        .contains("expired"));
     // Expired, it can no longer be answered.
     assert!(store
         .allow(old.id(), "app", None)
@@ -105,8 +114,8 @@ fn pending_approvals_expire_after_seven_days_and_ended_ones_go_after_thirty() {
     assert!(store.get(old.id()).unwrap().is_some());
     store.sweep(ended + KEPT_FOR_MS);
     assert!(store.get(old.id()).unwrap().is_none());
-    // The denied one ended at the real time, after these sweeps, so it stays.
-    assert!(store.get(denied.id()).unwrap().is_some());
+    // The denied one ended before the expired one, so it is gone too.
+    assert!(store.get(denied.id()).unwrap().is_none());
 }
 
 #[test]

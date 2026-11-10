@@ -227,7 +227,10 @@ fn merge_moved_on(context: &HandlerContext, record: &Record) -> bool {
         .get(request_id)
         .ok()
         .flatten()
-        .is_none_or(|request| Some(&request.review_digest) != record.approval.review_digest.as_ref())
+        .is_none_or(|request| {
+            request.status != FoldRequestStatus::Open
+                || Some(&request.review_digest) != record.approval.review_digest.as_ref()
+        })
 }
 
 /// Stores the approval for a held call, or finds the one the same computer already asked for
@@ -237,6 +240,9 @@ pub(crate) async fn request(
     asked: Asked<'_>,
 ) -> Result<DispatchError, DispatchError> {
     let store = store(context);
+    for expired in store.sweep(approvals::now_ms()) {
+        announce(context, &expired);
+    }
     let key = approvals::request_key(asked.method.name(), asked.asked);
     if let Some(same) = store.find_pending(asked.computer, &key) {
         if !merge_moved_on(context, &same) {
@@ -251,9 +257,6 @@ pub(crate) async fn request(
         ) {
             announce(context, &cancelled);
         }
-    }
-    for expired in store.sweep(approvals::now_ms()) {
-        announce(context, &expired);
     }
     let linked = review_request(context, &asked).await?;
     if let Some((request_id, digest)) = &linked {
