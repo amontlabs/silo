@@ -43,9 +43,15 @@ fn entry(name: &str, source: &str, hosts: &[String]) -> Value {
     })
 }
 
-/// The deny-all policy: what a blocked computer reports and what its gateway is started with.
+/// The deny-all policy: what a blocked computer reports.
 pub fn blocked_policy() -> Value {
     json!({"default_egress": "deny", "default_ingress": "deny", "rules": []})
+}
+
+/// What a blocked computer's gateway is started with: no way out, and the gateway's own ingress
+/// (allowed), so the ports the computer publishes on the host's loopback still answer.
+pub fn blocked_gateway_policy() -> Value {
+    json!({"default_egress": "deny", "default_ingress": "allow", "rules": []})
 }
 
 /// The network policy a container computer reports, which a fork or a restore is asked to keep.

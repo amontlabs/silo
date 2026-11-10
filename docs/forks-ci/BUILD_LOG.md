@@ -1622,7 +1622,10 @@ Follows the container sharing review above and R2's left-for-owner list; branch 
   access among them: the engine's own GitHub updates and restores send secrets too. The command line guide's sharing section and the threat model's container sections say so. Tests:
   `an_imported_container_starts_from_the_deny_all_policy_like_a_virtual_machine`,
   `a_blocked_computer_stays_blocked_whatever_secrets_it_is_given`,
-  `a_header_that_could_smuggle_something_is_refused`.
+  `a_header_that_could_smuggle_something_is_refused`; `linux-host-e2e.sh` checks on the KVM runner that the
+  import reaches no public host and that a port it publishes answers. The gateway of a blocked computer gets
+  deny egress with its own ingress: with deny-all ingress as well, the live check showed the published port
+  stuck at `waiting` (run 42801487005).
 - **Fixed: SELinux labels left out of export and import.** `silo-ctr pack` writes every attribute a file has
   except overlayfs's own records and the SELinux label: the label names types of the exporting host's own
   policy, which `unpack` cannot set inside a user namespace on a host without SELinux, and the importing host

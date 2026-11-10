@@ -898,8 +898,9 @@ with nothing sensitive on it, and the app, the CLI and `silo list` label it as l
     the layers can sit on. Secrets, GitHub access, environment and layer ids are dropped
     from the record in the file, as they are for a VM, and the settings in the manifest carry the
     same deny-all network section a VM's do. An imported container starts with its network blocked
-    (deny-all) and keeps it, as an imported VM does: the gateway starts it with no addresses at
-    all, and no secret assignment (GitHub access among them) changes that.
+    (deny-all) and keeps it, as an imported VM does: the gateway starts it with no way out to
+    any address, and no secret assignment (GitHub access among them) changes that. Ports the user
+    publishes still answer on the host's loopback (the gateway's ingress is left as it is).
   - *What is read.* The file is an untrusted input. The payload's hash is checked as for a VM; the
     header is read with unknown fields refused, and its name, resources, labels and image are checked
     field by field and against the settings the manifest was validated for, so the file cannot make a

@@ -1319,7 +1319,9 @@ fn start_gateway(
             github_hosts: record
                 .github
                 .then(|| super::secrets::GITHUB_HOSTS.map(str::to_owned).to_vec()),
-            policy: record.network_blocked.then(super::secrets::blocked_policy),
+            policy: record
+                .network_blocked
+                .then(super::secrets::blocked_gateway_policy),
             usage_log: Some(usage_log),
             log: Some(gateway_log),
         },
