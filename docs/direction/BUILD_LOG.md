@@ -34,7 +34,7 @@ Plan: [PLAN.md](PLAN.md). Agent rules: [AGENT-BRIEF.md](AGENT-BRIEF.md).
 | S2 | merged 2026-11-10 | `docs/s2-linux-computer-rebuild` | [evidence](evidence/S2.md). Verdict: buildable now for Linux with host-side disk moves; macOS later. T15 waits for T6 (recipes in the engine) |
 | T7 | merged 2026-11-10 | `fix/macos-nat-boundary` | 530 macOS engine tests passed; unit tests only, no macOS computer run; one review round on the fallback model. Live steps are in the item's report, copied below |
 | T11 review | done 2026-11-10 (Sonnet) | | no token value leaks found. Ten findings; the important ones: a network failure detached computers (also true before T11), a stale check could overwrite a newer token's state, and an agent's request for token access was summarised without saying a full-permission token is given, with a missing id bound to the owner's `github-token` after approval. All ten fixed and merged 2026-11-10 (`fix/github-token-review`); api 63, silod 353, engine github/secrets/policy 297 and 902 frontend tests passed in the item. For the owner: the old single-token fallback applies only in a session where a client used the old methods; a token with no answer since start shows waiting and its computers stay detached until GitHub answers |
-| T8 | merged 2026-11-11 | `t3/d4017e2b` | 1046 focused tests passed after the merge. Live check with the rebuilt runtime in a private home: each mode behaves as designed, also after changing a stopped computer's mode, after a fork and after a restore in place ([evidence](evidence/T8.txt)). Opus review running: id ends `7789a8bd-4e5e-4669-a1b9-585faf767a61`. Not verified: a Linux host's runtime (built by CI), a live macOS or container gateway. The channel hook is `network_policy::extra_rules(computer_id)` returning `ExtraRule::GatewayPort(port)` entries |
+| T8 | merged 2026-11-11 | `t3/d4017e2b` | 1046 focused tests passed after the merge. Live check with the rebuilt runtime in a private home: each mode behaves as designed, also after changing a stopped computer's mode, after a fork and after a restore in place ([evidence](evidence/T8.txt)). Opus review done 2026-11-11, findings under Found; the fix task starts once the T2-fix merge has landed (same file). Not verified: a Linux host's runtime (built by CI), a live macOS or container gateway. The channel hook is `network_policy::extra_rules(computer_id)` returning `ExtraRule::GatewayPort(port)` entries |
 | T5a | running since 2026-11-11 | | id ends `483ed458-d28e-46af-950d-c3a473cf2223` (Opus). Starts from `direction` plus T8's branch; uses the Dev engine for its live check. T5b (the engine provides the `silo` binary, guest components, MCP registration, approval waiting and new MCP tools) follows it |
 | T13a | running since 2026-11-11 | | id ends `72236a72-7e02-4671-a224-a9209b1ec45d` (Sonnet): onboarding agent step, Agents section, Open with agent. T13b (network policy control in the app) waits for T8 |
 | T10 | merged 2026-11-11 | `t3/60767d54` | 2989 frontend tests and the shell's command tests passed in the item; no review (quota); never run in the real app. The click-through list is under Found |
@@ -78,6 +78,25 @@ These were not asked of the owner. Each is open to change.
     requests, which narrows it).
 
 ## Found during the build
+
+- **T8 review (Opus), to fix:** (1) high: the policy judge reads a computer with no stored
+  policy as open (`policy/mod.rs` `World::network_policy` calls `effective(stored, None)`), while
+  an import runs closed only through its runtime rules, so an agent in an imported computer can
+  set itself open, or fork itself open, without asking; fix: the judge uses the same answer as
+  `service::resolve`, or an import saves an explicit closed entry. (2) an unreadable policy file
+  makes `plan_for` fall back to open (`network_policy/mod.rs:737`): refuse instead. (3) a macOS
+  computer's policy is saved after its create job is queued (`silod/src/methods/computers.rs`
+  1270-1277): save first. (4) a secret's allowed domains widen an allowlist silently, including
+  public-suffix wildcards: say it in the secret's summary, refuse such wildcards. (5)
+  `restore_attempt_ran` and `lifecycle_recovery::recover_with` start without applying a policy
+  change. (6) an agent's narrowing is saved as an absolute value and can race the owner: compare
+  and set. (7) presets can widen with a Silo update: store expanded hosts or version them. (8)
+  the threat model understates DNS (a query reaches any authoritative server: a usable tunnel)
+  and strict off (traffic with no TLS name to an address tied to an allowed name is admitted).
+  (9) a `closed_network` scrub fork now allows incoming connections. (10) a container record
+  without its id label gets the gateway's default open policy: fail closed. Found sound: argument
+  building and validation, the no-wider comparison, strict off not weakening secrets, export and
+  import, the runtime patch and its pins, `extra_rules`.
 
 - **The runtime changed with T8** (a 25th patch, `restore --net-strict`). Any worktree that runs
   real computers must rebuild it with `npm --prefix app/SiloUI run runtime:prepare`; the
