@@ -238,3 +238,72 @@ fn an_unreadable_policy_asks() {
     };
     asked(set(&world, "main", &mode(NetworkPolicyMode::Closed)));
 }
+
+#[test]
+fn a_network_request_runs_the_checked_policy_and_names_the_computer_plainly() {
+    struct Named(World);
+    impl super::World for Named {
+        fn made(&self, creator: &str) -> HashSet<String> {
+            self.0.made(creator)
+        }
+        fn parent(&self, computer: &str) -> Option<String> {
+            self.0.parent(computer)
+        }
+        fn name(&self, computer: &str) -> Option<String> {
+            Some(match computer {
+                "fork-1" => "evil\u{202e}\"name".to_owned(),
+                other => other.to_owned(),
+            })
+        }
+        fn owns_job(&self, _: &str, _: &str) -> bool {
+            false
+        }
+        fn request_fork(&self, _: &str) -> Option<String> {
+            None
+        }
+        fn request_target(&self, _: &str) -> Option<String> {
+            None
+        }
+        fn access(&self, _: &str) -> Access {
+            Access::default()
+        }
+        fn github_policies(&self) -> Option<Vec<Value>> {
+            Some(Vec::new())
+        }
+        fn new_id(&self) -> String {
+            self.0.new_id()
+        }
+        fn resources(&self, computer: &str) -> Option<Resources> {
+            self.0.resources(computer)
+        }
+        fn ssh_settings(&self, _: &str) -> Option<(u16, String)> {
+            None
+        }
+        fn network_policy(&self, computer: &str) -> Option<NetworkPolicy> {
+            self.0.network_policy(computer)
+        }
+    }
+    let world = Named(World::with(
+        allowlist(&["a.example.com"]),
+        mode(NetworkPolicyMode::Closed),
+    ));
+    let asked_policy = allowlist(&["b.example.com", "a.example.com", "a.example.com"]);
+    let decision = decide(
+        &main(),
+        MethodName::NetworkPolicySet,
+        &json!({"computerId": "fork-1", "policy": asked_policy}),
+        &world,
+    );
+    let Decision::Ask {
+        kind: ApprovalKind::Network,
+        summary,
+        params: Some(params),
+        ..
+    } = decision
+    else {
+        panic!("expected a network request that carries its parameters, got {decision:?}");
+    };
+    assert!(summary.contains("“evil"), "{summary}");
+    assert!(!summary.contains('\u{202e}'), "{summary}");
+    assert_eq!(params["policy"]["hosts"], json!(["a.example.com", "b.example.com"]));
+}

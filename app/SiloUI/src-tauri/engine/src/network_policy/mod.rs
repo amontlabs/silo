@@ -25,11 +25,14 @@ use serde_json::{json, Value};
 pub use silo_api::methods::network::{
     NetworkPolicy, NetworkPolicyHost, NetworkPolicyMode, NetworkPreset,
 };
+use silo_api::plain_text_within;
 
 /// At most this many hosts on a computer's own list.
 pub const MAX_HOSTS: usize = 256;
 /// At most this many presets on a computer's policy.
 pub const MAX_PRESETS: usize = 32;
+/// The longest host a summary shows whole.
+const HOST_SHOWN_MAX_CHARS: usize = 80;
 /// The TCP port an owner's host entry allows.
 pub const HTTPS_PORT: u16 = 443;
 /// Top-level names that never leave the device or that the runtime answers itself
@@ -306,15 +309,20 @@ fn mode_words(mode: NetworkPolicyMode) -> &'static str {
     }
 }
 
+/// A host as a summary shows it: plain and bounded.
+fn shown_host(host: &str) -> String {
+    plain_text_within(host, HOST_SHOWN_MAX_CHARS)
+}
+
 fn host_words(allowed: &[Allowed]) -> String {
     const SHOWN: usize = 20;
     let mut names: Vec<String> = allowed
         .iter()
         .map(|entry| {
             if entry.port == HTTPS_PORT {
-                entry.host.clone()
+                shown_host(&entry.host)
             } else {
-                format!("{} (port {})", entry.host, entry.port)
+                format!("{} (port {})", shown_host(&entry.host), entry.port)
             }
         })
         .collect();

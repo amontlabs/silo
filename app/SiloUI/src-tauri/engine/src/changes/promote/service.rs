@@ -16,6 +16,17 @@ pub fn journal_for(context: &dyn EngineContext) -> Journal {
     Journal::new(context.paths().app_data.join("changes").join("promote"))
 }
 
+/// Which promote or keep an undo of `computer` would take back now: it changes when another
+/// merge or promote into the computer finishes.
+pub fn undo_pin(context: &dyn EngineContext, computer: &str) -> String {
+    let promoted = super::latest_at(&journal_for(context), computer);
+    let journal = keep_service::journal_for(context);
+    let kept = journal
+        .latest_undoable(computer)
+        .map(|checkpoint| (checkpoint.id, journal.latest_undoable_at(computer)));
+    format!("promote:{promoted:?};keep:{kept:?}")
+}
+
 /// `changes.promote`.
 pub fn start_promote(
     host: Arc<dyn RuntimeHost>,

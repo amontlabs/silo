@@ -12,6 +12,7 @@ pub mod handoff;
 pub mod resources;
 mod rules;
 pub mod store;
+mod summary;
 #[cfg(test)]
 mod network_tests;
 #[cfg(test)]
@@ -22,6 +23,7 @@ use std::collections::{BTreeSet, HashSet};
 use serde_json::{json, Value};
 use silo_api::{
     methods::{audit::AuditCallerKind, guest_client::GUEST_TOKEN_PATH, MethodName},
+    plain_text,
     transport::ApprovalKind,
 };
 
@@ -29,6 +31,7 @@ pub use access::{Access, GitHubAccess};
 use crate::network_policy::{NetworkPolicy, NetworkPolicyMode};
 pub use resources::Resources;
 pub use rules::{rule, Rule};
+use summary::{github_access, github_identity, github_writes, listed, quoted};
 
 /// Who made a request. Only the transport sets it.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -110,6 +113,10 @@ pub trait World {
         crate::network_policy::store::get(computer)
             .ok()
             .map(|stored| crate::network_policy::effective(stored, None))
+    }
+    /// The public keys saved for a computer's SSH access.
+    fn ssh_keys(&self, _computer: &str) -> Vec<String> {
+        Vec::new()
     }
 }
 
@@ -199,6 +206,16 @@ fn ask(kind: ApprovalKind, summary: impl Into<String>) -> Decision {
     }
 }
 
+/// An ask for a call that runs with other parameters than the caller sent.
+fn ask_with(kind: ApprovalKind, summary: impl Into<String>, params: Value) -> Decision {
+    Decision::Ask {
+        kind,
+        summary: summary.into(),
+        params: Some(params),
+        creates: None,
+    }
+}
+
 /// An ask for a call that makes a computer: what runs on allow and the computer it makes.
 fn ask_to_create(
     kind: ApprovalKind,
@@ -227,6 +244,9 @@ pub fn decide(caller: &Caller, method: MethodName, params: &Value, world: &dyn W
         Caller::Computer { id } => Judge::new(id, world).decide(method, params),
     }
 }
+
+/// The longest name a computer made by an agent may have.
+const NAME_MAX_CHARS: usize = 64;
 
 fn text<'a>(params: &'a Value, key: &str) -> Option<&'a str> {
     params
@@ -286,6 +306,11 @@ impl<'a> Judge<'a> {
 
     fn name(&self, id: &str) -> String {
         self.world.name(id).unwrap_or_else(|| id.to_owned())
+    }
+
+    /// A computer's name as a summary shows it: quoted, plain and bounded.
+    fn shown(&self, id: &str) -> String {
+        quoted(&self.name(id))
     }
 
     /// The computer in `key`, which must be the caller or one it made.
@@ -411,8 +436,7 @@ impl<'a> Judge<'a> {
                 if let Some(target) = text(params, "targetId") {
                     if !self.in_tree(target) {
                         return Err(
-                            "A review request can target only this computer or one it made."
-                                .into(),
+                            "A review request can target only this computer or one it made.".into(),
                         );
                     }
                 }
@@ -434,17 +458,32 @@ impl<'a> Judge<'a> {
         match method {
             MethodName::CheckpointsFork => self.fork(params),
             MethodName::ComputersCreate => self.new_computer(params),
-            other => Err(format!("{} is not a call that makes a computer.", other.name())),
+            other => Err(format!(
+                "{} is not a call that makes a computer.",
+                other.name()
+            )),
         }
     }
 
-    fn checked_name<'p>(&self, name: Option<&'p str>) -> Result<&'p str, String> {
+    /// A new computer's name: a Linux computer's is held to the runtime's rule; every name is
+    /// plain text and not one Silo reserves.
+    fn checked_name<'p>(&self, name: Option<&'p str>, linux: bool) -> Result<&'p str, String> {
         let name = name.unwrap_or_default();
         if name.trim().is_empty() {
             return Err("A new computer needs a name.".into());
         }
         if crate::computer_tree::hidden(name) {
             return Err("That name is reserved for Silo's own computers.".into());
+        }
+        if linux {
+            crate::runtime::validate_name(name).map_err(|error| error.to_string())?;
+        } else if name != name.trim()
+            || plain_text(name) != name
+            || name.chars().count() > NAME_MAX_CHARS
+        {
+            return Err(format!(
+                "A computer's name is at most {NAME_MAX_CHARS} characters, with no control characters and no space around it."
+            ));
         }
         Ok(name)
     }
@@ -453,7 +492,7 @@ impl<'a> Judge<'a> {
         let source = text(params, "computerId")
             .filter(|id| self.in_tree(id))
             .ok_or("A computer's agent can fork its own computer or a computer it made.")?;
-        let new_name = self.checked_name(text(params, "newName"))?;
+        let new_name = self.checked_name(text(params, "newName"), false)?;
         let named: Vec<String> = match params.get("secrets") {
             None | Some(Value::Null) => Vec::new(),
             Some(Value::Array(names)) => names
@@ -499,6 +538,7 @@ impl<'a> Judge<'a> {
             source: Some(source.to_owned()),
         };
         let mut wider: Vec<String> = Vec::new();
+        let mut secrets_wider: Vec<String> = Vec::new();
         // An earlier state of the caller can hold what the owner has since taken away.
         if source == self.caller && checkpoint.is_some() {
             wider.push("an earlier checkpoint of this computer".into());
@@ -516,11 +556,16 @@ impl<'a> Judge<'a> {
                     _ => false,
                 };
                 if !covered {
-                    wider.push(format!("the GitHub access of {}", self.name(source)));
+                    wider.push(format!("the GitHub access of {}", self.shown(source)));
                 }
             } else if !own.secrets.contains(name) {
-                wider.push(format!("the secret {name}"));
+                secrets_wider.push(name.clone());
             }
+        }
+        match secrets_wider.as_slice() {
+            [] => {}
+            [one] => wider.push(format!("the secret {}", quoted(one))),
+            many => wider.push(format!("the secrets {}", listed(many))),
         }
         let asked_network = Self::asked_network_policy(params, "networkPolicy")?;
         match self.new_computer_network(
@@ -546,10 +591,11 @@ impl<'a> Judge<'a> {
             return Ok(ask_to_create(
                 ApprovalKind::Access,
                 format!(
-                    "Fork {} as {new_name} with {}, which {} does not have.",
-                    self.name(source),
+                    "More access than {} has: fork {} as {} with {}.",
+                    self.shown(self.caller),
+                    self.shown(source),
+                    quoted(new_name),
                     wider.join(" and "),
-                    self.name(self.caller),
                 ),
                 rewritten,
                 creates,
@@ -570,7 +616,7 @@ impl<'a> Judge<'a> {
                     .get("configuration")
                     .filter(|value| value.is_object())
                     .ok_or("A Linux computer needs its configuration.")?;
-                let name = self.checked_name(text(configuration, "name"))?;
+                let name = self.checked_name(text(configuration, "name"), true)?;
                 // The engine names the new computer, so the call cannot reuse an existing id.
                 let id = self.world.new_id();
                 rewritten["configuration"]["id"] = json!(id);
@@ -587,7 +633,11 @@ impl<'a> Judge<'a> {
                         match desktop.get("startWithComputer") {
                             None | Some(Value::Null) => {}
                             Some(Value::Bool(start)) => kept["startWithComputer"] = json!(start),
-                            Some(_) => return Err("The desktop's startWithComputer is true or false.".into()),
+                            Some(_) => {
+                                return Err(
+                                    "The desktop's startWithComputer is true or false.".into()
+                                )
+                            }
                         }
                         rewritten["configuration"]["desktop"] = kept;
                     }
@@ -617,10 +667,14 @@ impl<'a> Judge<'a> {
                     ));
                 }
                 if container || more.is_some() {
-                    let mut summary = format!("Make {name}");
-                    if container {
-                        summary.push_str(", a container computer (it shares this device's kernel, so it is less isolated than a virtual machine)");
-                    }
+                    let mut summary = if container {
+                        format!(
+                            "Less isolated: make {}, a container computer that shares this device's kernel",
+                            quoted(name)
+                        )
+                    } else {
+                        format!("More resources: make {}", quoted(name))
+                    };
                     summary.push_str(&self.sizes_sentence(&asked, more.as_deref()));
                     if let Err(network) = &network {
                         summary.push(' ');
@@ -641,14 +695,17 @@ impl<'a> Judge<'a> {
             }
             Some("macos") => {
                 let request = params.get("request").ok_or("The request is missing.")?;
-                let name = self.checked_name(text(request, "name"))?;
+                let name = self.checked_name(text(request, "name"), false)?;
                 let asked = Resources::of_macos(request)
                     .ok_or("A macOS computer's CPUs, memory and disk are numbers.")?;
                 let asked_network = Self::asked_network_policy(params, "networkPolicy")?;
                 let network = self.new_computer_network(asked_network, None, name);
                 if let Some(more) = self.more_than_it_has(&asked) {
-                    let mut summary =
-                        format!("Make {name}{}", self.sizes_sentence(&asked, Some(&more)));
+                    let mut summary = format!(
+                        "More resources: make {}{}",
+                        quoted(name),
+                        self.sizes_sentence(&asked, Some(&more))
+                    );
                     if let Err(network) = &network {
                         summary.push(' ');
                         summary.push_str(network);
@@ -712,11 +769,11 @@ impl<'a> Judge<'a> {
             None => format!(" with {sizes}."),
             Some([]) => format!(
                 " with {sizes}; the sizes of {} could not be read to compare them.",
-                self.name(self.caller)
+                self.shown(self.caller)
             ),
             Some(more) => format!(
                 " with {sizes}, which is more than {} has: {}.",
-                self.name(self.caller),
+                self.shown(self.caller),
                 more.join(", ")
             ),
         }
@@ -744,12 +801,17 @@ impl<'a> Judge<'a> {
                 if target != self.caller {
                     return Err("A merge can go only into this computer or one it made.".into());
                 }
+                let details = MergeDetails::of(params)?;
                 Ok(ask(
                     kind,
-                    format!(
-                        "Merge the changes of {} into {}.",
-                        self.name(&fork),
-                        self.name(&target)
+                    self.merge_summary(
+                        format!(
+                            "Merge the changes of {} into {}.",
+                            self.shown(&fork),
+                            self.shown(&target)
+                        ),
+                        &target,
+                        &details,
                     ),
                 ))
             }
@@ -758,15 +820,26 @@ impl<'a> Judge<'a> {
                 if !self.made.contains(&fork) {
                     return Err("That review request is not about a computer this one made.".into());
                 }
-                let target = self.world.request_target(text(params, "requestId").unwrap_or_default());
-                if target.is_some_and(|target| self.made.contains(&target)) {
+                let target = self
+                    .world
+                    .request_target(text(params, "requestId").unwrap_or_default());
+                if target
+                    .as_ref()
+                    .is_some_and(|target| self.made.contains(target))
+                {
                     return Ok(allow_with(params.clone()));
                 }
+                let details = MergeDetails::of(params)?;
+                let target = target.unwrap_or_else(|| self.caller.to_owned());
                 Ok(ask(
                     kind,
-                    format!(
-                        "Merge the changes of {} that its review request lists.",
-                        self.name(&fork)
+                    self.merge_summary(
+                        format!(
+                            "Merge the changes of {} that its review request lists.",
+                            self.shown(&fork)
+                        ),
+                        &target,
+                        &details,
                     ),
                 ))
             }
@@ -777,7 +850,10 @@ impl<'a> Judge<'a> {
                 }
                 Ok(ask(
                     kind,
-                    format!("Undo the last merge into {}.", self.name(&target)),
+                    format!(
+                        "Undo the last merge or replacement of {}, putting it back as it was before.",
+                        self.shown(&target)
+                    ),
                 ))
             }
             MethodName::ChangesPromote => {
@@ -793,119 +869,19 @@ impl<'a> Judge<'a> {
                 Ok(ask(
                     kind,
                     format!(
-                        "Replace {} with its fork {}. This restarts {}, and what it did since the fork is set aside.",
-                        self.name(&target),
-                        self.name(&fork),
-                        self.name(&target)
+                        "Replace {} with its fork {}: this restarts {}, and what it did since the fork is set aside.",
+                        self.shown(&target),
+                        self.shown(&fork),
+                        self.shown(&target)
                     ),
                 ))
             }
-            MethodName::NetworkPublish => {
-                let target = self.tree_target(params, "computerId")?;
-                let port = params.get("port").and_then(Value::as_u64).unwrap_or(0);
-                Ok(ask(
-                    kind,
-                    format!(
-                        "Publish port {port} of {} on this device.",
-                        self.name(&target)
-                    ),
-                ))
-            }
-            MethodName::SshAccessSave => {
-                let target = self.tree_target(params, "computerId")?;
-                // Turning SSH access off only narrows it. Only the computer and the switch are the
-                // caller's; the port and address stay what is saved, so nothing the caller sends
-                // is waiting for the next time the owner turns access on.
-                if params.get("enabled") == Some(&Value::Bool(false)) {
-                    let (port, address) = self
-                        .world
-                        .ssh_settings(&target)
-                        .unwrap_or((2222, "127.0.0.1".into()));
-                    return Ok(allow_with(json!({
-                        "computerId": target,
-                        "enabled": false,
-                        "port": port,
-                        "bindAddress": address,
-                    })));
-                }
-                let port = params.get("port").and_then(Value::as_u64).unwrap_or(0);
-                Ok(ask(
-                    kind,
-                    format!(
-                        "Turn on SSH access to {} from outside, on port {port}.",
-                        self.name(&target)
-                    ),
-                ))
-            }
-            MethodName::PushStart => {
-                let target = self.tree_target(params, "computerId")?;
-                let path = text(params, "repositoryPath").unwrap_or("a repository");
-                Ok(ask(
-                    kind,
-                    format!(
-                        "Push {path} from {} to GitHub through this device.",
-                        self.name(&target)
-                    ),
-                ))
-            }
+            MethodName::NetworkPublish => self.publish_port(kind, params),
+            MethodName::SshAccessSave => self.ssh_access(kind, params),
+            MethodName::PushStart => self.push(kind, params),
             MethodName::GitHubConfigurationSave => self.github_configuration(kind, params),
             MethodName::NetworkPolicySet => self.network_policy_set(kind, params),
-            MethodName::SecretsSave => {
-                let request = params.get("request").ok_or("The secret is missing.")?;
-                if request.get("operation").and_then(Value::as_str) != Some("add") {
-                    return Err(
-                        "Only the person who runs Silo changes a saved secret; a computer's agent can ask to add one."
-                            .into(),
-                    );
-                }
-                let name = text(request, "name").ok_or("A secret needs a name.")?;
-                let computers: Vec<&str> = request
-                    .get("computerIds")
-                    .and_then(Value::as_array)
-                    .into_iter()
-                    .flatten()
-                    .filter_map(Value::as_str)
-                    .collect();
-                if computers.iter().any(|id| !self.in_tree(id)) {
-                    return Err(
-                        "A secret can be asked for only for this computer or computers it made."
-                            .into(),
-                    );
-                }
-                let names: Vec<String> = computers.iter().map(|id| self.name(id)).collect();
-                let any = request.get("allowAnyDestination") == Some(&Value::Bool(true));
-                let domains: Vec<&str> = request
-                    .get("allowedDomains")
-                    .and_then(Value::as_array)
-                    .into_iter()
-                    .flatten()
-                    .filter_map(Value::as_str)
-                    .collect();
-                if request.get("kind").and_then(Value::as_str) == Some("github-token") {
-                    return Ok(ask(
-                        kind,
-                        format!(
-                            "Add the GitHub token {name}. A token gives its full permissions to any computer that uses it."
-                        ),
-                    ));
-                }
-                let sent = if any {
-                    "to any destination".to_owned()
-                } else {
-                    format!("only to {}", domains.join(", "))
-                };
-                Ok(ask(
-                    kind,
-                    format!(
-                        "Add the secret {name} for {}, sent {sent}.",
-                        if names.is_empty() {
-                            "no computer".to_owned()
-                        } else {
-                            names.join(", ")
-                        }
-                    ),
-                ))
-            }
+            MethodName::SecretsSave => self.add_secret(kind, params),
             other => Err(format!(
                 "{} has no rule for a computer's agent yet.",
                 other.name()
@@ -936,8 +912,9 @@ impl<'a> Judge<'a> {
     ) -> Result<NetworkPolicy, String> {
         let Some(own) = self.world.network_policy(self.caller) else {
             return Err(format!(
-                "Give {new_name} a network policy; the network policy of {} could not be read to compare.",
-                self.name(self.caller)
+                "Give {} a network policy; the network policy of {} could not be read to compare.",
+                quoted(new_name),
+                self.shown(self.caller)
             ));
         };
         let chosen = match asked {
@@ -950,7 +927,7 @@ impl<'a> Judge<'a> {
         if crate::network_policy::no_wider(&chosen, &own) {
             Ok(chosen)
         } else {
-            Err(crate::network_policy::widening_summary(new_name, &own, &chosen))
+            Err(crate::network_policy::widening_summary(&quoted(new_name), &own, &chosen))
         }
     }
 
@@ -978,9 +955,317 @@ impl<'a> Judge<'a> {
             ..NetworkPolicy::default()
         };
         let base = if within_current { own } else { current }.unwrap_or(closed);
+        Ok(ask_with(
+            kind,
+            crate::network_policy::widening_summary(&self.shown(&target), &base, &asked),
+            rewritten,
+        ))
+    }
+
+    fn merge_summary(&self, base: String, target: &str, details: &MergeDetails) -> String {
+        let mut lead = Vec::new();
+        if !details.commands.is_empty() {
+            lead.push(format!("Runs commands in {}", self.shown(target)));
+        }
+        if details.data_ok {
+            lead.push("accepts database changes".to_owned());
+        }
+        let mut summary = if lead.is_empty() {
+            String::new()
+        } else {
+            let mut lead = lead.join(" and ");
+            lead[..1].make_ascii_uppercase();
+            format!("{lead}. ")
+        };
+        summary.push_str(&base);
+        if !details.commands.is_empty() {
+            summary.push_str(&format!(
+                " In {} it {}.",
+                self.shown(target),
+                details.commands.join("; ")
+            ));
+        }
+        if details.data_ok {
+            summary.push_str(
+                " Database changes are carried even where no migration step covers them.",
+            );
+        }
+        if !details.choices.is_empty() {
+            summary.push_str(&format!(" Choices: {}.", listed(&details.choices)));
+        }
+        if !details.skipped.is_empty() {
+            summary.push_str(&format!(" Not brought over: {}.", listed(&details.skipped)));
+        }
+        summary
+    }
+
+    /// `network.publish`. The device port is the engine's to choose for a computer's agent, so
+    /// a port it asks for is not passed on; the scheme is.
+    fn publish_port(&self, kind: ApprovalKind, params: &Value) -> Result<Decision, String> {
+        let target = self.tree_target(params, "computerId")?;
+        let port = params
+            .get("port")
+            .and_then(Value::as_u64)
+            .filter(|port| (1..=65535).contains(port))
+            .ok_or("Enter a port from 1 to 65535.")?;
+        let mut rewritten = json!({ "computerId": target, "port": port });
+        let how = match params.get("scheme") {
+            None | Some(Value::Null) => "as a plain port",
+            Some(Value::String(scheme)) if scheme == "http" => "as a website over http",
+            Some(Value::String(scheme)) if scheme == "https" => "as a website over https",
+            Some(_) => return Err("The scheme is http or https.".into()),
+        };
+        if let Some(scheme) = params.get("scheme").filter(|scheme| !scheme.is_null()) {
+            rewritten["scheme"] = scheme.clone();
+        }
+        Ok(ask_with(
+            kind,
+            format!(
+                "Opens a port on this device: publish port {port} of {} {how}, on a device port Silo chooses.",
+                self.shown(&target)
+            ),
+            rewritten,
+        ))
+    }
+
+    /// `sshAccess.save`. Turning access off only narrows it; turning it on keeps the saved
+    /// address and keys unless the call changes them, and then says so.
+    fn ssh_access(&self, kind: ApprovalKind, params: &Value) -> Result<Decision, String> {
+        let target = self.tree_target(params, "computerId")?;
+        let (saved_port, saved_address) = self
+            .world
+            .ssh_settings(&target)
+            .unwrap_or((2222, "127.0.0.1".into()));
+        // Only the computer and the switch are the caller's when access goes off; the port and
+        // address stay what is saved, so nothing the caller sends is waiting for the next time
+        // the owner turns access on.
+        if params.get("enabled") == Some(&Value::Bool(false)) {
+            return Ok(allow_with(json!({
+                "computerId": target,
+                "enabled": false,
+                "port": saved_port,
+                "bindAddress": saved_address,
+            })));
+        }
+        let port = params
+            .get("port")
+            .and_then(Value::as_u64)
+            .filter(|port| (1..=65535).contains(port))
+            .ok_or("Enter a port from 1 to 65535.")?;
+        let address = match params.get("bindAddress") {
+            None | Some(Value::Null) => saved_address.clone(),
+            Some(Value::String(address)) => address.clone(),
+            Some(_) => return Err("The bind address is an IPv4 address.".into()),
+        };
+        let ip: std::net::Ipv4Addr = address
+            .parse()
+            .map_err(|_| "Choose an IPv4 address assigned to the device.")?;
+        if ip.is_unspecified()
+            || ip.is_multicast()
+            || ip.is_broadcast()
+            || (ip.is_loopback() && ip != std::net::Ipv4Addr::LOCALHOST)
+        {
+            return Err("Choose 127.0.0.1 or a specific network interface address.".into());
+        }
+        let saved_keys: BTreeSet<String> = self
+            .world
+            .ssh_keys(&target)
+            .iter()
+            .filter_map(|key| crate::ssh_access::normalize_key(key).ok())
+            .collect();
+        let mut rewritten = json!({
+            "computerId": target,
+            "enabled": true,
+            "port": port,
+            "bindAddress": address,
+        });
+        let mut added: Vec<String> = Vec::new();
+        match params.get("keys") {
+            None | Some(Value::Null) => {}
+            Some(Value::Array(keys)) => {
+                if keys.len() > 128 {
+                    return Err("Use at most 128 authorized keys.".into());
+                }
+                let mut normalized = Vec::new();
+                for key in keys {
+                    let key = key.as_str().ok_or("Each key is a public key string.")?;
+                    let key = crate::ssh_access::normalize_key(key)?;
+                    if !normalized.contains(&key) {
+                        if !saved_keys.contains(&key) {
+                            added.push(
+                                crate::ssh_access::key_fingerprint(&key)
+                                    .ok_or("A key could not be read.")?,
+                            );
+                        }
+                        normalized.push(key);
+                    }
+                }
+                rewritten["keys"] = json!(normalized);
+            }
+            Some(_) => return Err("The keys are a list of public keys.".into()),
+        }
+        let reach = if address == "127.0.0.1" {
+            "reachable only from this device".to_owned()
+        } else {
+            format!("reachable from the network at {address}")
+        };
+        let mut summary = String::new();
+        if !added.is_empty() {
+            summary.push_str(&format!(
+                "Authorises {} key chosen by the agent, {}. ",
+                if added.len() == 1 { "a" } else { "keys" },
+                listed(&added)
+            ));
+        }
+        summary.push_str(&format!(
+            "Opens SSH into {} on port {port}, {reach}.",
+            self.shown(&target)
+        ));
+        if added.is_empty() && !saved_keys.is_empty() && rewritten.get("keys").is_none() {
+            summary.push_str(" The keys already saved for it stay authorised.");
+        }
+        Ok(ask_with(kind, summary, rewritten))
+    }
+
+    /// `push.start`: exactly one commit to one branch of one repository.
+    fn push(&self, kind: ApprovalKind, params: &Value) -> Result<Decision, String> {
+        let computer = self.tree_target(params, "computerId")?;
+        let path = text(params, "repositoryPath").ok_or("Name the repository folder to push.")?;
+        if !crate::host_push_transport::valid_repository_path(path) {
+            return Err("The repository must be a folder below /workspace.".into());
+        }
+        let operation = text(params, "operationId").ok_or("The push needs an operationId.")?;
+        let target: crate::host_push::PushTarget = serde_json::from_value(
+            params
+                .get("target")
+                .cloned()
+                .ok_or("Name the repository, branch and commit to push (target).")?,
+        )
+        .map_err(|_| "The target is a repository, a branch and a commit.")?;
+        target.validate()?;
+        let rewritten = json!({
+            "computerId": computer,
+            "repositoryPath": path,
+            "operationId": operation,
+            "target": {
+                "repository": target.repository,
+                "branch": target.branch,
+                "commit": target.commit,
+            },
+        });
+        Ok(ask_with(
+            kind,
+            format!(
+                "Publishes to GitHub: pushes commit {} of {} in {} to the branch {} of {}, through this device.",
+                &target.commit[..12],
+                quoted(path),
+                self.shown(&computer),
+                quoted(&target.branch),
+                quoted(&target.repository)
+            ),
+            rewritten,
+        ))
+    }
+
+    /// `secrets.save` adding a secret.
+    fn add_secret(&self, kind: ApprovalKind, params: &Value) -> Result<Decision, String> {
+        let request = params.get("request").ok_or("The secret is missing.")?;
+        if request.get("operation").and_then(Value::as_str) != Some("add") {
+            return Err(
+                "Only the person who runs Silo changes a saved secret; a computer's agent can ask to add one."
+                    .into(),
+            );
+        }
+        let name = text(request, "name").ok_or("A secret needs a name.")?;
+        let token = request.get("kind").and_then(Value::as_str) == Some("github-token");
+        let valid = if token {
+            crate::secrets::valid_token_name(name)
+        } else {
+            crate::secrets::valid_name(name)
+        };
+        if !valid {
+            return Err(if token {
+                "Choose a name of letters, digits, hyphens and underscores for this token."
+            } else {
+                "Choose a valid, unreserved secret name."
+            }
+            .into());
+        }
+        if request
+            .get("value")
+            .and_then(Value::as_str)
+            .is_none_or(|value| value.is_empty() || value.len() > 64 * 1024 || value.contains('\0'))
+        {
+            return Err(
+                "Secret values must contain between 1 and 65536 bytes without null characters."
+                    .into(),
+            );
+        }
+        let strings = |key: &str| -> Result<Vec<String>, String> {
+            match request.get(key) {
+                None | Some(Value::Null) => Ok(Vec::new()),
+                Some(Value::Array(items)) => items
+                    .iter()
+                    .map(|item| item.as_str().map(str::to_owned))
+                    .collect::<Option<_>>()
+                    .ok_or_else(|| format!("{key} is a list of strings.")),
+                Some(_) => Err(format!("{key} is a list of strings.")),
+            }
+        };
+        let computers = strings("computerIds")?;
+        let domains = strings("allowedDomains")?;
+        if token {
+            if !computers.is_empty() || !domains.is_empty() {
+                return Err(
+                    "A GitHub token is given to computers in GitHub access, with no hosts of its own."
+                        .into(),
+                );
+            }
+            return Ok(ask(
+                kind,
+                format!(
+                    "Full GitHub permissions: add the GitHub token {}. A token gives its full permissions to any computer that uses it.",
+                    quoted(name)
+                ),
+            ));
+        }
+        if computers.iter().any(|id| !self.in_tree(id)) {
+            return Err(
+                "A secret can be asked for only for this computer or computers it made.".into(),
+            );
+        }
+        if computers.is_empty()
+            || computers.len() > 100
+            || computers.iter().collect::<BTreeSet<_>>().len() != computers.len()
+            || domains.is_empty()
+            || domains.len() > 100
+            || !domains
+                .iter()
+                .all(|domain| crate::secrets::valid_domain(domain))
+        {
+            return Err("Select computers and valid allowed domains.".into());
+        }
+        let wildcard = domains.iter().any(|domain| domain == "*");
+        let any = request.get("allowAnyDestination") == Some(&Value::Bool(true));
+        if wildcard && !any {
+            return Err(
+                "Confirm that this secret may go to any HTTPS destination (allowAnyDestination) before saving a wildcard secret."
+                    .into(),
+            );
+        }
+        let names: Vec<String> = computers.iter().map(|id| self.name(id)).collect();
+        let sent = if any || wildcard {
+            "Sent to any destination".to_owned()
+        } else {
+            format!("Sent only to {}", listed(&domains))
+        };
         Ok(ask(
             kind,
-            crate::network_policy::widening_summary(&self.name(&target), &base, &asked),
+            format!(
+                "{sent}: add the secret {} for {}.",
+                quoted(name),
+                listed(&names)
+            ),
         ))
     }
 
@@ -1021,8 +1306,6 @@ impl<'a> Judge<'a> {
         if changed.is_empty() {
             return Err("Nothing in that GitHub configuration changes.".into());
         }
-        let names: Vec<String> = changed.iter().map(|id| self.name(id)).collect();
-        let mut summary = format!("Change the GitHub access of {}.", names.join(", "));
         let uses_token = |policy: &Value| {
             policy.get("authenticationMethod").and_then(Value::as_str) == Some("token")
         };
@@ -1032,28 +1315,120 @@ impl<'a> Judge<'a> {
                 .and_then(Value::as_str)
                 .map(str::to_owned)
         };
+        let mut sentences = Vec::new();
+        let mut writes = false;
+        let mut tokens = false;
         for id in &changed {
-            let Some(policy) = after.get(*id).filter(|policy| uses_token(policy)) else {
-                continue;
-            };
-            let token = token_of(policy).ok_or(
-                "Say which GitHub token the computer should use; a computer's agent has to name the token secret.",
-            )?;
-            if before.get(*id).filter(|policy| uses_token(policy)).and_then(token_of)
-                == Some(token.clone())
-            {
-                continue;
+            let (was, now) = (before.get(*id), after.get(*id));
+            let mut change = format!(
+                "{} goes from {} to {}",
+                self.shown(id),
+                github_access(was),
+                github_access(now)
+            );
+            writes |= github_writes(now) && !github_writes(was);
+            let identity =
+                |policy: Option<&Value>| policy.and_then(|policy| policy.get("identity")).cloned();
+            if identity(was) != identity(now) {
+                change.push_str(&format!("; {}", github_identity(now)));
             }
-            let token_name = self
-                .world
-                .github_token_name(&token)
-                .ok_or("That GitHub token does not exist.")?;
-            summary.push_str(&format!(
-                " {} would use the GitHub token {token_name}. A personal token gives its full permissions to that computer.",
-                self.name(id)
-            ));
+            if let Some(policy) = now.filter(|policy| uses_token(policy)) {
+                let token = token_of(policy).ok_or(
+                    "Say which GitHub token the computer should use; a computer's agent has to name the token secret.",
+                )?;
+                if was.filter(|policy| uses_token(policy)).and_then(token_of) != Some(token.clone())
+                {
+                    let token_name = self
+                        .world
+                        .github_token_name(&token)
+                        .ok_or("That GitHub token does not exist.")?;
+                    tokens = true;
+                    change.push_str(&format!(
+                        "; it would use the GitHub token {}, which gives its full permissions",
+                        quoted(&token_name)
+                    ));
+                }
+            } else if now.is_some() && was.is_some_and(|policy| uses_token(policy)) {
+                change.push_str("; it would use the GitHub sign-in instead of a token");
+            }
+            sentences.push(change);
         }
-        Ok(ask(kind, summary))
+        let lead = if tokens {
+            "Full GitHub token permissions"
+        } else if writes {
+            "GitHub write access"
+        } else {
+            "GitHub access"
+        };
+        Ok(ask(kind, format!("{lead}: {}.", sentences.join(". "))))
+    }
+}
+
+/// What a merge asks to do besides bringing the changes over.
+struct MergeDetails {
+    /// What the hooks do in the target.
+    commands: Vec<String>,
+    data_ok: bool,
+    choices: Vec<String>,
+    skipped: Vec<String>,
+}
+
+impl MergeDetails {
+    fn of(params: &Value) -> Result<Self, String> {
+        let strings = |value: Option<&Value>, what: &str| -> Result<Vec<String>, String> {
+            match value {
+                None | Some(Value::Null) => Ok(Vec::new()),
+                Some(Value::Array(items)) => items
+                    .iter()
+                    .map(|item| item.as_str().map(str::to_owned))
+                    .collect::<Option<_>>()
+                    .ok_or_else(|| format!("{what} is a list of strings.")),
+                Some(_) => Err(format!("{what} is a list of strings.")),
+            }
+        };
+        let mut commands = Vec::new();
+        match params.get("keep") {
+            None | Some(Value::Null) => {}
+            Some(hooks @ Value::Object(_)) => {
+                let restart = strings(hooks.get("restart"), "keep.restart")?;
+                let migrate = strings(hooks.get("migrate"), "keep.migrate")?;
+                let after = strings(hooks.get("after"), "keep.after")?;
+                if !restart.is_empty() {
+                    commands.push(format!("restarts {}", listed(&restart)));
+                }
+                if !migrate.is_empty() {
+                    commands.push(format!("runs {} to migrate", listed(&migrate)));
+                }
+                if !after.is_empty() {
+                    commands.push(format!("runs {} last", listed(&after)));
+                }
+            }
+            Some(_) => return Err("keep is an object of hooks.".into()),
+        }
+        let data_ok = match params.get("dataOk") {
+            None | Some(Value::Null) => false,
+            Some(Value::Bool(ok)) => *ok,
+            Some(_) => return Err("dataOk is true or false.".into()),
+        };
+        let choices = match params.get("choices") {
+            None | Some(Value::Null) => Vec::new(),
+            Some(Value::Object(answers)) => answers
+                .iter()
+                .map(|(item, answer)| {
+                    answer
+                        .as_str()
+                        .map(|answer| format!("{item} = {answer}"))
+                        .ok_or("Each choice is an answer string.".to_owned())
+                })
+                .collect::<Result<_, _>>()?,
+            Some(_) => return Err("choices is an object of answers.".into()),
+        };
+        Ok(Self {
+            commands,
+            data_ok,
+            choices,
+            skipped: strings(params.get("skip"), "skip")?,
+        })
     }
 }
 
