@@ -81,6 +81,11 @@ pub trait RuntimeHost: Send + Sync {
     fn macos_computer_names(&self) -> Vec<String> {
         Vec::new()
     }
+    /// What an export needs to make the hidden copy it leaves logins out of; a host that
+    /// cannot make one leaves the logins in the file.
+    fn export_scrub(&self) -> Option<Arc<dyn crate::export_scrub::ScrubEnv>> {
+        None
+    }
     fn macos_log_target(&self, _computer_id: &str) -> Option<(String, PathBuf)> {
         None
     }

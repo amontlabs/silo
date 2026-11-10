@@ -534,6 +534,13 @@
         "destination": {
           "type": "string"
         },
+        "leftOut": {
+          "description": "The login files the export removed from the computer it wrote, by the name the scan\ngives them. Traces of them may remain in the file's disk layers.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "name": {
           "type": "string"
         },
@@ -5237,6 +5244,13 @@
             "string",
             "null"
           ]
+        },
+        "includeLogins": {
+          "description": "The export keeps the logins in the file, so none will be left out.",
+          "type": [
+            "boolean",
+            "null"
+          ]
         }
       },
       "required": [
@@ -5252,6 +5266,10 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "leavesOut": {
+          "description": "The export removes these logins from the computer it writes: it is made from a copy\nthey are removed from. Traces of them may remain in the file's disk layers.",
+          "type": "boolean"
         },
         "logins": {
           "description": "Logins found, by tool name and path.",
@@ -5300,6 +5318,13 @@
         "deviceId": {
           "type": [
             "string",
+            "null"
+          ]
+        },
+        "includeLogins": {
+          "description": "Keep the logins found on the computer in the file. By default an export of a Linux\ncomputer is made from a copy with the known login files removed; `archive.leftOut`\nof the result names them. Traces of them may remain in the file's disk layers.",
+          "type": [
+            "boolean",
             "null"
           ]
         },

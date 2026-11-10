@@ -125,7 +125,7 @@ export function useBackupFixture({ source, previewMode = "success", onRestoreCom
     actions: {
       async checkLogins() {
         return previewMode === "logins-found"
-          ? { logins: ["a Claude Code login (/root/.claude/.credentials.json)", "a GitHub CLI login (/root/.config/gh/hosts.yml)"] }
+          ? { logins: ["a Claude Code login (/root/.claude/.credentials.json)", "a GitHub CLI login (/root/.config/gh/hosts.yml)"], leavesOut: true }
           : { logins: [] }
       },
       async chooseDestination() { return source.backup.destination },

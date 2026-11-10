@@ -291,6 +291,16 @@ pub fn exported(value: &Value) -> String {
         text(value, "archive"),
         text(value, "size")
     );
+    if let Some(left_out) = value["leftOut"]
+        .as_array()
+        .filter(|left_out| !left_out.is_empty())
+    {
+        let names: Vec<&str> = left_out.iter().filter_map(Value::as_str).collect();
+        line.push_str(&format!(
+            "\nRemoved from the exported computer: {}. Traces of them may remain in the file's disk layers, so keep the file private.",
+            names.join(", ")
+        ));
+    }
     if let Some(logins) = value["logins"]
         .as_array()
         .filter(|logins| !logins.is_empty())

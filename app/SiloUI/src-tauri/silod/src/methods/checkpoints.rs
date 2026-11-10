@@ -16,6 +16,7 @@ mod migration;
 pub(crate) mod preparation;
 mod recipes;
 mod requests;
+pub(crate) mod scrub_env;
 mod steps;
 
 use std::sync::Arc;
@@ -268,6 +269,7 @@ async fn fork(context: &HandlerContext, params: &Value) -> Result<HandlerOutput,
                         .map(|q| q.stop.clone())
                         .unwrap_or_default(),
                     scrub: params.quiet.map(|q| q.scrub).unwrap_or_default(),
+                    closed_network: false,
                 },
                 params.recipe_hash.as_deref(),
             )

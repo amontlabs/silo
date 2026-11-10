@@ -1397,6 +1397,7 @@ mod tests {
             secrets: vec!["github".into()],
             stop: vec!["poller".into()],
             scrub: vec!["/Users/silo/.env".into()],
+            closed_network: false,
         };
         let record = QuietRecord::new(&options);
         assert!(record.scheduled_jobs_disabled && record.new_identity && !record.applied);

@@ -19,6 +19,7 @@ pub mod computer_gateway;
 pub mod containers;
 pub mod computer_names;
 pub mod computer_tree;
+pub mod export_scrub;
 pub mod computer_use;
 pub mod context;
 pub mod creation_inputs;

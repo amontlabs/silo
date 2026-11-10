@@ -121,7 +121,12 @@ pub(super) async fn check(
     let host = context.silod_context().runtime_host();
     let from_checkpoint = params.checkpoint_id.is_some();
     let started = tokio::task::spawn_blocking(move || {
-        silo_engine::changes::credentials::start_check(host, params.computer_id, from_checkpoint)
+        silo_engine::changes::credentials::start_check(
+            host,
+            params.computer_id,
+            from_checkpoint,
+            params.include_logins == Some(true),
+        )
     })
     .await
     .map_err(|_| DispatchError::internal("The check could not start."))?;
@@ -172,6 +177,7 @@ pub(super) async fn create(
             params.computer_ids,
             params.checkpoint_id,
             archive_path,
+            params.include_logins == Some(true),
         )
         .map_err(message_error)
     })

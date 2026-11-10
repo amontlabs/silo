@@ -1,5 +1,8 @@
 #[path = "backup_controller/recovery.rs"]
 mod recovery;
+mod scrub;
+
+pub use scrub::leaves_logins_out;
 
 use crate::runtime::RuntimeHost;
 use crate::{backup, runtime};
@@ -50,6 +53,9 @@ struct Archive {
     /// the other machine fetches it by.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     transfer: Option<crate::transfer_area::FileInfo>,
+    /// The login files an export without logins left out of the file.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    left_out: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -576,6 +582,7 @@ pub fn begin_export_for_ids(
     computer_ids: Vec<String>,
     checkpoint_id: Option<String>,
     archive_path: Option<String>,
+    include_logins: bool,
 ) -> Result<String, String> {
     let macos = controller.runtime_host()?.macos_context();
     // macOS computers are not in the Linux inventory; the Apple Virtualization registry
@@ -611,7 +618,14 @@ pub fn begin_export_for_ids(
             })
         })
         .collect::<Result<Vec<_>, _>>()?;
-    begin_export(controller, destination, names, checkpoint_id, archive_path)
+    begin_export_with(
+        controller,
+        destination,
+        names,
+        checkpoint_id,
+        archive_path,
+        include_logins,
+    )
 }
 
 /// Publishes the current backup operation through the durable job contract.
@@ -838,6 +852,7 @@ fn archive_from(path: &Path, inspected: &backup::ArchiveInspection) -> Archive {
         computers: inspected.computers.clone(),
         checkpoint_name: None,
         transfer: None,
+        left_out: Vec::new(),
     }
 }
 
@@ -993,6 +1008,7 @@ pub fn inspection_worker(
                     computers: Vec::new(),
                     checkpoint_name: None,
                     transfer: None,
+                    left_out: Vec::new(),
                 },
                 valid: false,
                 reason: Some(error.to_string()),
@@ -1291,12 +1307,33 @@ fn explicit_archive(archive_path: &str) -> Result<(PathBuf, PathBuf), String> {
     Ok((folder, file))
 }
 
+/// An export that keeps every login in the file.
 pub fn begin_export(
     controller: Arc<Controller>,
     destination: String,
     computers: Vec<String>,
     checkpoint_id: Option<String>,
     archive_path: Option<String>,
+) -> Result<String, String> {
+    begin_export_with(
+        controller,
+        destination,
+        computers,
+        checkpoint_id,
+        archive_path,
+        true,
+    )
+}
+
+/// Starts an export. Unless `include_logins` is set, a Linux computer's current state is
+/// exported from a hidden copy with its known login files removed ([`crate::export_scrub`]).
+pub fn begin_export_with(
+    controller: Arc<Controller>,
+    destination: String,
+    computers: Vec<String>,
+    checkpoint_id: Option<String>,
+    archive_path: Option<String>,
+    include_logins: bool,
 ) -> Result<String, String> {
     let (canonical, explicit) = match archive_path.as_deref() {
         Some(path) => {
@@ -1407,6 +1444,7 @@ pub fn begin_export(
             archive_path,
             computers,
             checkpoint_id,
+            include_logins,
             cancellation,
             pending_archive,
         )
@@ -1480,6 +1518,7 @@ fn claim_export_at(
         computers: computers.to_vec(),
         checkpoint_name: checkpoint_name.map(Into::into),
         transfer: None,
+        left_out: Vec::new(),
     };
     let journal = recovery::Journal::backup(archive.clone(), computers.to_vec(), checkpoint_id);
     let operation_id = journal.identity().to_string();
@@ -1575,17 +1614,23 @@ fn run_backup(
     archive_path: PathBuf,
     computers: Vec<String>,
     checkpoint_id: Option<String>,
+    include_logins: bool,
     cancellation: backup::Cancellation,
     pending_archive: Archive,
 ) {
     let started = std::time::Instant::now();
-    let result = backup_work(
+    let result = export_and_drop_copies(
         &controller,
         &archive_path,
         &computers,
         checkpoint_id.as_deref(),
+        include_logins,
         &cancellation,
     );
+    let (result, cleanup_note) = match result {
+        Ok((archive, note)) => (Ok(archive), note),
+        Err(error) => (Err(error), None),
+    };
     let result = result.and_then(|archive| {
         let transfer = transfer_file(&controller, &archive_path, &cancellation)?;
         Ok(Archive {
@@ -1605,7 +1650,7 @@ fn run_backup(
             outcome: "success",
             title: "Export complete".into(),
             message: "Computer exported.".into(),
-            detail: None,
+            detail: cleanup_note,
         },
         Err(error) => failed_transfer("backup", pending_archive, None, error),
     };
@@ -1613,6 +1658,64 @@ fn run_backup(
     notify_transfer(&controller, &operation, started.elapsed());
     let _ = set_operation(&controller, operation);
     publish_and_finish(&controller, || publish(&controller));
+}
+
+/// Exports the computers, from hidden copies without their logins when that applies, and drops
+/// the copies whether or not the export worked. A copy that could not be dropped comes back as
+/// a note beside a successful export, and is added to the message of a failed one.
+fn export_and_drop_copies(
+    controller: &Controller,
+    archive_path: &Path,
+    names: &[String],
+    checkpoint_id: Option<&str>,
+    include_logins: bool,
+    cancellation: &backup::Cancellation,
+) -> Result<(Archive, Option<String>), TransferError> {
+    let host = controller.runtime_host()?;
+    // A checkpoint is another disk than the computer's, and the person may ask to keep the logins.
+    let env = host
+        .export_scrub()
+        .filter(|_| !include_logins && checkpoint_id.is_none());
+    let targets = if env.is_some() {
+        scrub::targets(host, names)
+    } else {
+        Vec::new()
+    };
+    let Some(env) = env.filter(|_| !targets.is_empty()) else {
+        return backup_work(controller, archive_path, names, names, &[], checkpoint_id, cancellation)
+            .map(|archive| (archive, None));
+    };
+    let copies = scrub::make_copies(controller, env, &targets, cancellation)?;
+    let result = backup_work(
+        controller,
+        archive_path,
+        &copies.export_names(names),
+        names,
+        &copies.presented(),
+        checkpoint_id,
+        cancellation,
+    );
+    let dropped = copies.drop_all();
+    match (result, dropped) {
+        (Ok(archive), dropped) => Ok((
+            Archive {
+                left_out: copies.left_out(),
+                ..archive
+            },
+            dropped.err(),
+        )),
+        (Err(mut error), Err(note)) => {
+            // A cancel that left a copy behind is reported as the failure it became.
+            error.message = if error.cancelled {
+                format!("The export was cancelled. {note}")
+            } else {
+                format!("{} {note}", error.message)
+            };
+            error.cancelled = false;
+            Err(error)
+        }
+        (Err(error), Ok(())) => Err(error),
+    }
 }
 
 /// The name, size and sha256 of a finished export that sits in the transfer area, so the other
@@ -2002,10 +2105,14 @@ fn prepare_archive_image(
     Ok(())
 }
 
+/// `names` are what is captured; `original_names` are the computers the export is of, which
+/// differ where a hidden copy stands in (`presented`).
 fn backup_work(
     controller: &Controller,
     archive_path: &Path,
     names: &[String],
+    original_names: &[String],
+    presented: &[backup::Presented],
     checkpoint_id: Option<&str>,
     cancellation: &backup::Cancellation,
 ) -> Result<Archive, TransferError> {
@@ -2023,11 +2130,13 @@ fn backup_work(
         publish(controller);
     }
     let paths = runtime::runtime_paths(controller.runtime_host()?)?;
-    backup_at_paths(
+    backup_at_paths_presenting(
         &paths,
         controller,
         archive_path,
         names,
+        original_names,
+        presented,
         checkpoint_id,
         cancellation,
     )
@@ -2042,7 +2151,32 @@ fn backup_at_paths(
     checkpoint_id: Option<&str>,
     cancellation: &backup::Cancellation,
 ) -> Result<Archive, TransferError> {
-    let fork_records = stored_fork_records(controller, names)?;
+    backup_at_paths_presenting(
+        paths,
+        controller,
+        archive_path,
+        names,
+        names,
+        &[],
+        checkpoint_id,
+        cancellation,
+    )
+}
+
+/// [`backup_at_paths`] where the computers in `names` may be hidden copies standing in for
+/// the ones in `original_names`: the fork-time records are the originals', and the rows of the
+/// file carry the originals' names.
+fn backup_at_paths_presenting(
+    paths: &runtime::RuntimePaths,
+    controller: &Controller,
+    archive_path: &Path,
+    names: &[String],
+    original_names: &[String],
+    presented: &[backup::Presented],
+    checkpoint_id: Option<&str>,
+    cancellation: &backup::Cancellation,
+) -> Result<Archive, TransferError> {
+    let fork_records = stored_fork_records(controller, original_names)?;
     if let Some(context) = controller.runtime_host()?.macos_context() {
         let macos_count = names
             .iter()
@@ -2081,11 +2215,22 @@ fn backup_at_paths(
                     .filter(|name| !crate::macos_computers::owns_name(&context, name))
                     .cloned()
                     .collect::<Vec<_>>();
-                backup_at_paths(
+                let linux_originals = linux_names
+                    .iter()
+                    .map(|name| {
+                        presented
+                            .iter()
+                            .find(|entry| entry.copy == *name)
+                            .map_or_else(|| name.clone(), |entry| entry.name.clone())
+                    })
+                    .collect::<Vec<_>>();
+                backup_at_paths_presenting(
                     paths,
                     controller,
                     &linux_archive,
                     &linux_names,
+                    &linux_originals,
+                    presented,
                     None,
                     cancellation,
                 )?;
@@ -2102,7 +2247,7 @@ fn backup_at_paths(
                 let result = controller.service.create_mixed_archive_from_archives(
                     archive_path,
                     &[linux_archive, macos_archive],
-                    names,
+                    original_names,
                     &fork_records,
                     cancellation,
                     recovery::token(controller)?.as_deref(),
@@ -2198,6 +2343,7 @@ fn backup_at_paths(
         destination: archive_path.to_path_buf(),
         sources,
         fork_records,
+        presented: presented.to_vec(),
         pinned_image: pinned_image(paths),
         // A file for another machine stops as soon as the computers written exceed what the
         // transfer area carries; `describe_transfer` checks the finished file's size.
@@ -2470,6 +2616,7 @@ pub fn begin_import(
         computers: source_name.iter().cloned().collect(),
         checkpoint_name: None,
         transfer: None,
+        left_out: Vec::new(),
     };
     let journal =
         recovery::Journal::restore(archive.clone(), new_name.clone(), source_name.clone());
@@ -3478,6 +3625,7 @@ mod tests {
                 first_archive_path,
                 vec!["first".into()],
                 None,
+                true,
                 first.cancellation,
                 first_archive,
             );
@@ -3532,6 +3680,7 @@ mod tests {
             computers: vec!["source".into()],
             checkpoint_name: None,
             transfer: None,
+            left_out: Vec::new(),
         };
         let journal =
             recovery::Journal::restore(archive.clone(), "copy".into(), Some("source".into()));
@@ -3632,6 +3781,7 @@ mod tests {
             computers: vec!["source".into()],
             checkpoint_name: None,
             transfer: None,
+            left_out: Vec::new(),
         };
         let journal =
             recovery::Journal::restore(archive.clone(), "copy".into(), Some("source".into()));
@@ -4048,6 +4198,7 @@ mod tests {
             computers: vec!["dev".into()],
             checkpoint_name: None,
             transfer: None,
+            left_out: Vec::new(),
         }
     }
 
@@ -4072,6 +4223,7 @@ mod tests {
             computers: vec!["copy".into()],
             checkpoint_name: None,
             transfer: None,
+            left_out: Vec::new(),
         };
         recovery::begin(
             &seed,

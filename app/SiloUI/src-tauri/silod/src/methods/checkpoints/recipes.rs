@@ -64,7 +64,7 @@ impl DispatchEnv {
     }
 
     /// Starts a job method and waits for it.
-    fn job(&self, method: MethodName, params: Value) -> Result<Value, String> {
+    pub(super) fn job(&self, method: MethodName, params: Value) -> Result<Value, String> {
         let started = self.call(method, params)?;
         let id = started
             .get("jobId")

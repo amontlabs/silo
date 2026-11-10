@@ -143,7 +143,11 @@ forced through it, so the host itself holds nothing worth taking.
 - **Agent logins** (a Claude or Codex sign-in) are files inside the computer today and are copied
   into forks and exports. The aim is that a login does not travel by accident; the design is
   not decided yet. Until then: a fork keeps its parent's login, because the same agent already
-  controls both, and an export leaves known login files out unless you ask for them.
+  controls both, and an export of a Linux computer removes known login files from the exported
+  computer unless you ask for them. Traces may remain in the file: a copy is a fork, and the disk
+  layers it shares with the computer are written into the file whole (checked on 2026-11-10, see
+  [the evidence](direction/evidence/T14.txt)). Exports of a checkpoint, of a macOS computer and of a
+  container computer keep the logins in the file and warn first.
 
 ## Trust on your own device
 

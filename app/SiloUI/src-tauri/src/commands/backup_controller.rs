@@ -118,6 +118,7 @@ pub(crate) async fn check_logins(
     engine: &EngineClient,
     computer: String,
     checkpoint_id: Option<String>,
+    include_logins: Option<bool>,
 ) -> Result<Value, EngineError> {
     let roster = roster(engine, None).await?;
     let computer_id = roster.id_of(&computer)?;
@@ -125,6 +126,7 @@ pub(crate) async fn check_logins(
         .run_job(requests::exports_check(ExportCheckParams {
             computer_id,
             checkpoint_id,
+            include_logins: include_logins.filter(|include| *include),
             device_id: None,
         }))
         .await
@@ -136,6 +138,7 @@ pub(crate) async fn start_export(
     destination: String,
     computers: Vec<String>,
     checkpoint_id: Option<String>,
+    include_logins: Option<bool>,
 ) -> Result<String, EngineError> {
     let roster = roster(engine, None).await?;
     let computer_ids = computers
@@ -149,6 +152,7 @@ pub(crate) async fn start_export(
             checkpoint_id,
             archive_path: None,
             transfer_area: None,
+            include_logins: include_logins.filter(|include| *include),
             device_id: None,
         }))
         .await?;
@@ -336,9 +340,10 @@ pub(crate) async fn check_export_logins(
     window: WebviewWindow,
     computer: String,
     checkpoint_id: Option<String>,
+    include_logins: Option<bool>,
 ) -> Result<Value, EngineError> {
     require_main(&window)?;
-    check_logins(&engine, computer, checkpoint_id).await
+    check_logins(&engine, computer, checkpoint_id, include_logins).await
 }
 
 #[tauri::command]
@@ -348,9 +353,17 @@ pub(crate) async fn start_backup(
     destination: String,
     computers: Vec<String>,
     checkpoint_id: Option<String>,
+    include_logins: Option<bool>,
 ) -> Result<String, EngineError> {
     require_main(&window)?;
-    start_export(&engine, destination, computers, checkpoint_id).await
+    start_export(
+        &engine,
+        destination,
+        computers,
+        checkpoint_id,
+        include_logins,
+    )
+    .await
 }
 
 #[tauri::command]
@@ -462,6 +475,7 @@ mod forwarding_tests {
             "/exports".into(),
             vec!["dev".into()],
             Some("c1".into()),
+            None,
         )
         .await
         .unwrap();
@@ -470,7 +484,7 @@ mod forwarding_tests {
             fake.calls(MethodName::ExportsCreate),
             vec![json!({"destination": "/exports", "computerIds": [DEV], "checkpointId": "c1"})]
         );
-        let missing = start_export(&engine, "/exports".into(), vec!["ghost".into()], None)
+        let missing = start_export(&engine, "/exports".into(), vec!["ghost".into()], None, None)
             .await
             .unwrap_err();
         assert_eq!(missing.code, "not_found");
@@ -478,10 +492,48 @@ mod forwarding_tests {
     }
 
     #[tokio::test]
+    async fn asking_to_include_logins_reaches_the_engine_and_leaving_it_out_sends_nothing() {
+        let fake = FakeEngine::start(|method, params| replies(method, params));
+        let (engine, _) = connected_client(&fake).await;
+        start_export(
+            &engine,
+            "/exports".into(),
+            vec!["dev".into()],
+            None,
+            Some(true),
+        )
+        .await
+        .unwrap();
+        start_export(
+            &engine,
+            "/exports".into(),
+            vec!["dev".into()],
+            None,
+            Some(false),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            fake.calls(MethodName::ExportsCreate),
+            vec![
+                json!({"destination": "/exports", "computerIds": [DEV], "includeLogins": true}),
+                json!({"destination": "/exports", "computerIds": [DEV]}),
+            ]
+        );
+        check_logins(&engine, "dev".into(), None, Some(true))
+            .await
+            .unwrap();
+        assert_eq!(
+            fake.calls(MethodName::ExportsCheck),
+            vec![json!({"computerId": DEV, "includeLogins": true})]
+        );
+    }
+
+    #[tokio::test]
     async fn the_logins_check_names_the_computer_by_id_and_returns_the_engine_list() {
         let fake = FakeEngine::start(|method, params| replies(method, params));
         let (engine, _) = connected_client(&fake).await;
-        let found = check_logins(&engine, "dev".into(), Some("c1".into()))
+        let found = check_logins(&engine, "dev".into(), Some("c1".into()), None)
             .await
             .unwrap();
         assert_eq!(
@@ -492,7 +544,7 @@ mod forwarding_tests {
             fake.calls(MethodName::ExportsCheck),
             vec![json!({"computerId": DEV, "checkpointId": "c1"})]
         );
-        let missing = check_logins(&engine, "ghost".into(), None)
+        let missing = check_logins(&engine, "ghost".into(), None, None)
             .await
             .unwrap_err();
         assert_eq!(missing.code, "not_found");

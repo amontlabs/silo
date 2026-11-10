@@ -1,0 +1,111 @@
+[22:28:29] == header
+branch feat/exclude-logins-export commit 71752384e; silo: silo 0.1.0; host 26.5 arm64; date 2026-11-10T21:28:29Z
+markers: M1=8f92907d8f78... (640 hex) M2=e6a93999f918... (640 hex)
+computers before: workspace-1 e2e-relay silo-eval-a silo-eval-b 
+zstd: *** Zstandard CLI (64-bit) v1.5.7, by Yann Collet ***
+[22:28:29] == S1 a computer with fake logins at every known login path
+[22:28:40] PASS  create+start e2e-t14-src  -- 
+step 2
+[22:28:41] PASS  every login path holds M1  -- 19 files
+guest: df: Filesystem     Type     Size  Used Avail Use% Mounted on
+guest: df: overlay        overlay  9.8G   31M  9.8G   1% /
+guest: df: /dev/vdc       ext4     7.9G   12K  7.8G   1% /workspace
+guest: /workspace ext4 /dev/vdc
+guest: / overlay overlay
+guest: step 3
+[22:28:42] == S2 the default export (no --yes, no terminal: it must ask nothing)
+export took 14 s; progress:
+  Looking for logins on e2e-t14-src...
+  Exporting e2e-t14-src...
+  Exporting e2e-t14-src: 5s
+  Exporting e2e-t14-src: 10s
+[22:28:56] PASS  S2 default export succeeded  -- 
+json: logins in the file = [] | unchecked = None
+json: left out =
+  /home/silo/project/server.pem
+  AWS credentials (/root/.aws/credentials)
+  Claude Code sign-in data (/home/silo/.claude.json)
+  Claude Code sign-in data (/root/.claude.json)
+  Docker registry logins (/root/.docker/config.json)
+  a .netrc login (/root/.netrc)
+  a Claude Code login (/home/silo/.claude/.credentials.json)
+  a Claude Code login (/root/.claude/.credentials.json)
+  a Codex login (/home/silo/.codex/auth.json)
+  a Codex login (/root/.codex/auth.json)
+  a Gemini CLI login (/root/.gemini/gemini-credentials.json)
+  a Gemini CLI login (/root/.gemini/oauth_creds.json)
+  a GitHub CLI login (/root/.config/gh/hosts.yml)
+  a Kubernetes config (/root/.kube/config)
+  a PyPI config that may hold a token (/root/.pypirc)
+  an SSH private key (/home/silo/.ssh/id_rsa)
+  an SSH private key (/root/.ssh/id_ed25519)
+  an npm config that may hold a token (/root/.npmrc)
+  stored Git credentials (/root/.git-credentials)
+export size: 3273849 bytes
+[22:28:56] PASS  S2 the result names the files it left out  -- 19 files
+[22:28:56] scanning the default export (every byte of every decompressed payload)
+  8f92907d8f78... FOUND in layers/layer_540a6f5e4acf95498605b6f30c583174.raw, layers/layer_3dddd4694e5f60b2ba7261bcf95e62da.qcow2
+  e6a93999f918... FOUND in layers/layer_540a6f5e4acf95498605b6f30c583174.raw, snapshots/snap_e0e936e366885f5e81ba312e6446b6e1/layers/layer_aa184893163491109f4cdccee0530798.raw
+  decompressed bytes scanned: 71452160
+[22:28:56] FAIL  S2 CANARY: M1 (the logins) is not in the default export  -- 
+[22:28:56] FAIL  S2 CANARY: M2 (the deleted file) is not in the default export  -- 
+[22:28:56] == S3 the export with --include-logins (positive control)
+[22:29:00] PASS  S3 include export succeeded  -- 
+  8f92907d8f78... FOUND in layers/layer_356793e1753cc7e7221fb8e625bcb6a2.raw
+  e6a93999f918... FOUND in layers/layer_356793e1753cc7e7221fb8e625bcb6a2.raw, snapshots/snap_479f4f6f16f1838dceb6af7608f71f34/layers/layer_bccee0116a528d351bc1dabd4155073b.raw
+  decompressed bytes scanned: 54347264
+[22:29:00] PASS  S3 M1 is in the export that includes logins  -- 
+note: M2 in the include export: FOUND (a deleted file's bytes stay in an export that is not trimmed)
+[22:29:00] == S4 the default export imports, starts, and its login files are gone
+[22:29:03] PASS  S4 import succeeded  -- Importing e2e-t14-imp...
+[22:29:07] PASS  S4 the imported computer starts  -- 
+step 1
+[22:29:07] PASS  S4 none of the login files is in the imported computer  -- present: 0
+step 2
+[22:29:08] PASS  S4 the imported computer has the other files  -- 
+step 3
+[22:29:08] PASS  S4 the imported computer holds neither marker  -- 
+[22:29:09] PASS  S4 the file carries the sender's name, not a hidden copy's  -- 
+[22:29:09] == S5 the source is untouched and no hidden copy is left
+step 4
+[22:29:09] PASS  S5 the source still has every login file  -- 
+source checkpoints before: 1 line(s); after: 1 line(s)
+[22:29:09] PASS  S5 the source gained no checkpoint but the fork's Fork point  -- 
+[22:29:09] PASS  S5 no silo-export- computer is left in the runtime  -- 
+[22:29:10] PASS  S5 the hidden copy never showed in silo list  -- 
+[22:29:10] == S6 a checkpoint export keeps today's warning
+Looking for logins on e2e-t14-src...
+silo: Silo could not check e2e-t14-src for logins (the files of a checkpoint cannot be listed, only its fork-time record). Pass --yes to share it anyway; the files stay in the export.
+[22:29:12] PASS  S6 a checkpoint export is refused without --yes (its logins cannot be left out)  -- (exit 1)
+
+RESULT: 17 passed, 2 failed
+CANARY: the markers are still in the default export (layers named above). Silo removes the login files from the exported computer
+        (S4 passes) but does not claim the bytes are out of the file: the app and the CLI say traces may remain.
+[22:29:12] cleanup (drops only the e2e-t14-* computers this run made, and its files)
+[22:29:26] silo list after cleanup:
+NAME         STATE      KIND       SIZE
+workspace-1  stopped    linux      8 cpu, 32 GiB
+e2e-relay    stopped    linux      8 cpu, 32 GiB
+silo-eval-a  stopped    linux      2 cpu, 2 GiB
+silo-eval-b  stopped    linux      2 cpu, 2 GiB
+[22:29:26] hidden copies left in the runtime: 0
+script-exit 2
+
+== Notes from the probes made while building this check (2026-11-10, Dev engine, e2e-t14-* computers, dropped)
+Not produced by the script above; typed from the probe output.
+- Guest disks of a new Linux computer: `/` is an overlay (lower: /.msb/rootfs/lower, upper: /.msb/rootfs/upperfs/upper);
+  `/workspace` is ext4 on /dev/vdc. The overlay's writable layer is the ext4 disk /dev/vdb (named by "device_id" in
+  /.msb/root-disk.json), mounted by the guest init outside the namespace commands run in. `fstrim /` therefore fails
+  ("the discard operation is not supported"); mounting /dev/vdb a second time and trimming that mount works
+  ("9.7 GiB (10447319040 bytes) trimmed"), and `fstrim /workspace` works. All three virtio disks report discard support.
+- Layers of a fork (sandboxes/<fork>/): upper.ext4 (10 GiB raw, a hard link shared with the source), upper-sealed-001.qcow2
+  (the source's writes up to the fork point) and upper-restore-<id>.qcow2 (the fork's own head). The marker written to a
+  login file in the source was found, byte for byte, in upper.ext4 and in upper-sealed-001.qcow2 (shared, read-only), and
+  again in the head after the file was removed and the disks trimmed (the head grew from 5.5 MB to 18 MB; msb does not
+  free qcow2 clusters on discard).
+- `msb snapshot export` has --with-parents, --since and --last-layers but no way to flatten a chain, so the layers a fork
+  shares with its source are written whole: the default export in the run above carries the marker in
+  layers/*.raw (the root disk base), layers/*.qcow2 (the head) and snapshots/*/layers/*.raw (the workspace disk base).
+- A default export of a stopped computer (e2e-t14-stopped, a fake ~/.codex/auth.json): "Removed from the exported
+  computer: a Codex login (/root/.codex/auth.json)"; the imported computer started and had no /root/.codex; no silo-export-
+  computer was left (silo list --all).

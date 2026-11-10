@@ -356,22 +356,48 @@ one `.silo-backup` file, and `silo import` reads one. What the file holds, and d
   they were at the fork, which paths and digests, not contents. Import stores it as the new
   computer's record, with no source and no origin, so the receiver names the target
   (`silo fold <imported> --into main`).
-- **Files are never filtered.** Everything on the computer's disks is in the file: anything the
-  agent could read could already leave through the computer's network, and the export is no
-  stricter. A login on the disk is a secret in the file. Before an export Silo lists the logins it
-  recognises, on the disk and in the fork-time record (Claude Code, Codex, Gemini CLI, GitHub CLI,
-  cloud and registry credentials, SSH private keys; not what every computer has: system password
-  files, its SSH host keys, the desktop's connection password and Silo's own certificate authority),
-  and asks; the CLI refuses without a terminal
-  unless `--yes` is passed, and the app asks in a dialog. When Silo could not check (a stopped
-  computer, whose disk is not listed, an export of a checkpoint, or a check that failed) it asks
-  too: "Silo could not check <name> for logins (<reason>). Share anyway?", in the CLI and in the
-  app, and `--json` reports the reason as `unchecked`. The list is a warning, not a guarantee: a
-  secret in a file Silo does not recognise (an `.env`, a token in a shell history) is not named.
-  The disk is listed with the walk `silo diff` does (`/etc`, `/root`, `/home`, `/usr/local`,
-  `/opt`, `/srv` and the crontabs on Linux; the home folder, `/usr/local`, `/opt/homebrew/etc` and
-  the launch agents and daemons on macOS), so a login anywhere else,
-  such as under `/workspace`, is not named either.
+- **A Linux computer's known login files are removed from the exported computer, and traces
+  may remain in the file.** An export of the current state of a Linux virtual machine is made from a
+  hidden, short-lived copy of it (`silo-export-<8 hex>`, never listed): forked with no secrets, no
+  GitHub access and a deny-all network, started, stripped of the files Silo recognises as logins (Claude
+  Code `~/.claude/.credentials.json` and `~/.claude.json`, Codex, Gemini CLI, GitHub CLI, cloud and registry
+  credentials, SSH private keys and key files in `/etc`, `/root`, `/home`, `/usr/local`, `/opt`, `/srv`),
+  stopped, captured under the computer's name and dropped
+  ([`export_scrub.rs`](../app/SiloUI/src-tauri/engine/src/export_scrub.rs)). The list is the one the scan and
+  the diff's "Not kept" use. The result names the files removed; `--include-logins` (or the dialog's Include
+  logins) keeps them. What the removal does and does not give:
+  - **The files are not in the imported computer.** The check in
+    [`t14_export_scrub_check.sh`](direction/checks/t14_export_scrub_check.sh) imports a default export,
+    starts it, and finds none of the login files and neither marker among its files
+    ([`T14.txt`](direction/evidence/T14.txt)).
+  - **Their bytes are still in the file.** The copy is a fork, and a fork's disks are layers over the
+    computer's own. The layers it shares with the computer (everything up to the fork's checkpoint) are
+    read-only and are written into the file whole, deleted files' blocks included. Discarding the copy's free
+    blocks (`fstrim`) reaches only its own top layer, and the same check finds a long random marker, written to
+    every known login path and then deleted, in the layers of the default export. Anyone with the file and the
+    tools to read a disk layer can recover them. Neither the app nor the CLI says the file is free of them;
+    they say traces may remain. Removing them for real needs the layers flattened, which the runtime's
+    snapshot export does not offer.
+  - **It is a list, not a guarantee.** A secret in a file Silo does not recognise (an `.env`, a token in
+    a shell history, a key under `/workspace`) stays in the file; the listing walks the folders `silo diff`
+    walks. A key-material file (`*.pem`, `*.key`, ...) anywhere in those folders is removed too, which can
+    include a certificate an installed program needs; the removed list names every path.
+  - **The computer's own fork-time record travels** (paths and digests, not contents).
+  - **It does not apply to a checkpoint, a macOS computer or a container computer.** A checkpoint is
+    another disk than the live one; a macOS computer's login files and Keychain would need an offline edit
+    of a copied disk, and a fork's rekey already clears the login keychain, but nothing here has verified
+    that the removed bytes leave the disk image; a container has nothing to discard. These exports keep the
+    logins in the file and ask first, as before: Silo lists the logins it recognises, on the disk and in the
+    fork-time record, and asks; the CLI refuses without a terminal unless `--yes` is passed, and the app asks
+    in a dialog. When Silo could not check (a stopped computer, whose disk is not listed, an export of a
+    checkpoint, or a check that failed) it asks too: "Silo could not check <name> for logins (<reason>).
+    Share anyway?", and `--json` reports the reason as `unchecked`. The list is a warning, not a guarantee.
+    The disk is listed with the walk `silo diff` does (`/etc`, `/root`, `/home`, `/usr/local`, `/opt`, `/srv` and
+    the crontabs on Linux; the home folder, `/usr/local`, `/opt/homebrew/etc` and the launch agents and
+    daemons on macOS), so a login anywhere else, such as under `/workspace`, is not named either.
+  - **The copy has the computer's own CPUs and memory** while it exists, and holds a second copy of its
+    writable disks until it is dropped. A copy that the engine could not drop (it stopped mid-export) stays
+    hidden and is dropped by the next export.
 - **No memory is in the file**, for any kind of computer: an export carries disks only, as a
   fork does. A running computer is captured from its disks: the guest writes its cached file data
   out and the disks are copied, with a macOS computer paused for the copy the way a fork point

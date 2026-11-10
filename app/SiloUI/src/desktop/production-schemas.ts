@@ -216,7 +216,7 @@ const remoteApplicationSourceShape = applicationSourceShape.extend({
 
 const backupArchiveShape = z.object({
   name: z.string().min(1), archivePath: z.string().min(1), completedLabel: z.string(), size: z.string(), destination: z.string(), computers: z.array(z.string()),
-  checkpointName: z.string().optional(),
+  checkpointName: z.string().optional(), leftOut: z.array(z.string()).optional(),
 }).strict()
 const backupPhaseShape = z.object({ title: z.string(), detail: z.string(), tone: z.enum(["waiting", "running", "succeeded", "failed"]) }).strict()
 const backupOperationShape = z.discriminatedUnion("kind", [
@@ -233,7 +233,7 @@ const backupStateShape = z.object({
 }).strict()
 export const archiveInspectionShape = z.object({ archive: backupArchiveShape, valid: z.boolean(), reason: z.string().optional(), warnings: z.array(z.string()).optional() }).strict()
 
-export const exportLoginsShape = z.object({ logins: z.array(z.string()), checked: z.array(z.string()).optional(), unchecked: z.string().optional() }).strict()
+export const exportLoginsShape = z.object({ logins: z.array(z.string()), checked: z.array(z.string()).optional(), unchecked: z.string().optional(), leavesOut: z.boolean().optional() }).strict()
 
 const networkStateShape = z.object({ computers: z.array(z.object({
   computer: z.string(), error: z.string().nullable(), host: z.string().regex(/^[a-z0-9-]{1,63}\.localhost$/).nullable().optional(), ports: z.array(z.object({
