@@ -338,7 +338,9 @@ pub fn prepare(
                 if is_migration(&name) {
                     migrations_changed = true;
                 }
-                if sensitive_path(&name) {
+                if sensitive_path(&name)
+                    || sensitive_path(&format!("{}/{name}", repo.repo.trim_end_matches('/')))
+                {
                     let path = format!("{}/{name}", repo.repo.trim_end_matches('/'));
                     plan.conflicts.push(
                         Conflict::new(
@@ -352,6 +354,12 @@ pub fn prepare(
             }
         }
         if repo.commits.is_none() && !repo.new {
+            items.push(ReportItem::new(
+                &repo.id,
+                &repo.repo,
+                outcome::ALREADY_THERE,
+                "the fork has no new commits here; its uncommitted files are listed on their own",
+            ));
             continue;
         }
         if plan.conflicts.iter().any(|c| c.kind == "credentials") {
@@ -444,6 +452,14 @@ pub fn prepare(
                     repo.repo
                 ));
             }
+            for op in &repo.dirty {
+                items.push(ReportItem::new(
+                    &op.id,
+                    &op.path,
+                    outcome::LEFT_AS_MAIN,
+                    "not carried: the repository's commits are left on a branch",
+                ));
+            }
             dirty_checked.push((index, keep_ops));
             continue;
         }
@@ -477,7 +493,7 @@ pub fn prepare(
                 }
                 _ => {}
             }
-            if sensitive_path(&op.rel) {
+            if sensitive_path(&op.rel) || sensitive_path(&op.path) {
                 plan.conflicts.push(
                     Conflict::new("credentials", op.path.clone(), "it is uncommitted in the fork; credentials and ignored paths are not kept into main")
                         .answerable(&format!("credentials:{}", op.path), &[], "added", ""),
@@ -835,6 +851,7 @@ pub fn prepare(
         ));
     }
     items.sort_by(|a, b| a.id.cmp(&b.id));
+    items.dedup_by(|later, first| later.id == first.id);
     report.items = items;
     report.summary.extend(
         plan.summary()

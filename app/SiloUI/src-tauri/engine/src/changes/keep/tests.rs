@@ -60,6 +60,8 @@ struct World {
     /// Computers that are stopped; every other computer runs.
     stopped: Mutex<Vec<String>>,
     fail_start: Mutex<bool>,
+    /// Reading a file from any computer fails.
+    fail_read: Mutex<bool>,
 }
 
 impl World {
@@ -89,6 +91,7 @@ impl World {
             dirs: Mutex::default(),
             stopped: Mutex::default(),
             fail_start: Mutex::default(),
+            fail_read: Mutex::default(),
         })
     }
 
@@ -339,6 +342,9 @@ impl KeepEnv for Fake {
     }
 
     fn read(&self, computer: &str, path: &str) -> Result<Vec<u8>, String> {
+        if *self.0.fail_read.lock().unwrap() {
+            return Err(format!("{path} could not be read"));
+        }
         self.0
             .log
             .lock()
@@ -3186,4 +3192,64 @@ fn the_branch_scripts_leave_a_real_repositorys_checkout_and_branches_alone() {
     let (code, _) = run_script(&scripts::git_branch(&main_path, tmp_ref, "silo/other"), bin.path(), &main);
     assert_ne!(code, 0);
     assert_eq!(git(&main, &["rev-parse", "silo/other"]), head);
+}
+
+#[test]
+fn ignored_files_of_a_repository_left_as_main_or_on_a_branch_are_not_written() {
+    let base = "GIT\t/root/app\taaa\tmain\t0\t0\n";
+    let fork = "GIT\t/root/app\tbbb\tmain\t0\t0\nGIG\t/root/app\t/root/app/build.out\t5\t9\tfff\n";
+    let ignored = "file:/root/app/build.out";
+    for answer in [Answer::Branch, Answer::Main] {
+        let world = simple_world();
+        world.put("fork", "/root/app/build.out", "built");
+        *world.git_state.lock().unwrap() = "merge".into();
+        let (_dir, journal) = journal();
+        let report = kept(
+            run(&world, &store(base, fork, base), &journal, &choosing(&[(APP, answer)])).unwrap(),
+        );
+        world.with("main", |c| assert!(!c.files.contains_key("/root/app/build.out")));
+        assert_eq!(item(&report, ignored).outcome, "left-as-main");
+    }
+    // Without an answer for the repository the file comes along.
+    let world = simple_world();
+    world.put("fork", "/root/app/build.out", "built");
+    *world.git_state.lock().unwrap() = "merge".into();
+    let (_dir, journal) = journal();
+    run(&world, &store(base, fork, base), &journal, &request(Hooks::default())).unwrap();
+    world.with("main", |c| assert!(c.files.contains_key("/root/app/build.out")));
+}
+
+#[test]
+fn a_launch_agent_left_as_main_is_neither_written_nor_loaded() {
+    let plist = "/Users/a/Library/LaunchAgents/dev.new.plist";
+    let fork = format!("F\t{plist}\t1\t1\tbb\nLAGENT\tuser\tdev.new\tbb\t{plist}\n");
+    let world = World::new(Os::Macos, &["fork", "main"]);
+    world.put("fork", plist, "<plist/>");
+    let (_dir, journal) = journal();
+    kept(
+        run(
+            &world,
+            &store("", &fork, ""),
+            &journal,
+            &choosing(&[("launch-agent:user:dev.new", Answer::Main)]),
+        )
+        .unwrap(),
+    );
+    world.with("main", |c| assert!(!c.files.contains_key(plist)));
+    assert_eq!(world.logged("agent_load"), 0);
+}
+
+#[test]
+fn a_failure_while_reading_the_fork_does_not_put_main_back() {
+    let world = simple_world();
+    *world.fail_read.lock().unwrap() = true;
+    let (_dir, journal) = journal();
+    let st = store(SIMPLE_BASE, SIMPLE_FORK, SIMPLE_BASE);
+    let error = run(&world, &st, &journal, &request(Hooks::default())).unwrap_err();
+    assert!(error.contains("could not be read"), "{error}");
+    assert!(!error.contains("put back"), "{error}");
+    assert_eq!(world.logged("restore"), 0);
+    assert_eq!(journal.pending("main").unwrap(), None);
+    assert_eq!(journal.latest_undoable("main"), None);
+    world.with("main", |c| assert_eq!(c.files["/root/.bashrc"].0, b"old"));
 }

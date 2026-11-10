@@ -619,16 +619,38 @@ pub fn build(
                 delete: code.contains('D'),
             });
         }
-        if repo.commits.is_none() && !new && dirty.is_empty() {
-            continue;
-        }
         let id = items::repo(&repo.repo);
-        if plan.left_by_choice(request, &id, &repo.repo) {
-            continue;
-        }
-        let branch = (request.choices.said(&id) == Said::Answered(Answer::Branch)
+        let left = plan.left_by_choice(request, &id, &repo.repo);
+        let branch = (!left
+            && request.choices.said(&id) == Said::Answered(Answer::Branch)
             && repo.commits.is_some())
         .then(|| items::branch_name(&request.fork));
+        if left || branch.is_some() {
+            // The repository's working tree stays as main has it, ignored files included.
+            let ignored: BTreeSet<String> = repo
+                .gitignored
+                .iter()
+                .map(|c| items::file(&c.path))
+                .collect();
+            let (dropped, kept): (Vec<FileCand>, Vec<FileCand>) = std::mem::take(&mut plan.file_cands)
+                .into_iter()
+                .partition(|c| ignored.contains(&c.id));
+            plan.file_cands = kept;
+            for cand in dropped {
+                plan.items.push(ReportItem::new(
+                    &cand.id,
+                    &cand.path,
+                    outcome::LEFT_AS_MAIN,
+                    format!(
+                        "not carried: {} stays as main has it",
+                        repo.repo
+                    ),
+                ));
+            }
+        }
+        if left || (repo.commits.is_none() && !new && dirty.is_empty()) {
+            continue;
+        }
         plan.repos.push(RepoOp {
             id,
             repo: repo.repo.clone(),
@@ -672,10 +694,11 @@ pub fn build(
             continue;
         };
         let id = items::launch_agent(&change.scope, &change.label);
+        let path = normalize(os, &entry.path);
         if plan.left_by_choice(request, &id, &change.label) {
+            plan.file_cands.retain(|c| c.path != path);
             continue;
         }
-        let path = normalize(os, &entry.path);
         let base_ident = match base.lagent.get(&key) {
             Some(a) => Base::File(a.digest.clone()),
             None => Base::Missing,

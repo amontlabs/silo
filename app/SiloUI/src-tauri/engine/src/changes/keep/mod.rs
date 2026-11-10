@@ -379,7 +379,13 @@ pub fn keep(
             Ok(prepare::Prepared::Ready(ready)) => {
                 apply::apply(env, &ready, request, &target).map(|applied| Ok((ready, applied)))
             }
-            Err(error) => Err(error),
+            // Looking at main and the fork changed nothing on main, so there is nothing to
+            // put back.
+            Err(error) => {
+                tracker.cleanup(env);
+                consume(journal);
+                return Err(error);
+            }
         };
         tracker.cleanup(env);
         result
