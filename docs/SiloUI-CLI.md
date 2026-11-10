@@ -110,6 +110,15 @@ record. Without `-o` the file is `<computer>-<date>.silo-backup` in the current 
 existing file is never replaced. `--checkpoint` exports a saved point of the computer (its id or
 name) instead of its current state. A running computer is captured in place; it is not stopped.
 
+The file never holds the computer's **memory**, whatever kind of computer it is: an export
+carries disks only. A running computer has its cached file data written out to its disk, then
+its disks are copied (a macOS computer is paused for the copy). A macOS checkpoint that saved
+memory is exported from its disks alone. A Linux VM checkpoint that was saved while the computer
+ran holds its memory and the runtime cannot write it without, so `--checkpoint` refuses it: fork
+that checkpoint (`silo fork <computer> --checkpoint <id>`) and export the fork, or export the
+computer itself. A file written before this rule can hold memory; importing never uses it (an
+imported computer starts from its disks).
+
 The receiver gets a **new computer** with its own id, stopped, on a deny-all network policy, with
 no secrets, ports or published URLs. `silo import` names it after the sender's computer, or with
 `-imported` added when that name is taken; `--name` chooses. The guest image is not in the file

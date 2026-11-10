@@ -329,7 +329,10 @@ behind `cfg(target_os = "linux")`.
   runner, installs it, registers it as a user service of the lingering runner account, and
   drives a Linux computer over KVM through the `silo` command
   (`app/SiloUI/scripts/linux-host-e2e.sh`): create, start, exec, checkpoint, fork, exec in the
-  fork, stop and drop both. It then stops the service, expects exit code 0 (a session end that
+  fork, stop and drop both. After the checkpoint, which is saved while the computer runs, it
+  checks that no export holds memory: exporting that checkpoint must be refused, and the export
+  of the running computer and of a fork of the checkpoint are opened and must hold disk captures
+  only. It then stops the service, expects exit code 0 (a session end that
   left a computer running fails it), and unregisters it. After a failed step it still stops
   the engine, and keeps the unit for the logs it uploads. Then two new accounts on the same
   runner act as two devices (`app/SiloUI/scripts/hosts-e2e.sh`): `silo-host` runs

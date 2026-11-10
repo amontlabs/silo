@@ -17,18 +17,22 @@ use std::{
 };
 
 mod macos_archive;
+#[cfg(test)]
+pub(crate) use macos_archive::memory_configuration_digest;
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 pub(crate) use macos_archive::MAX_HARDWARE_MODEL_BYTES;
 pub(crate) use macos_archive::{
-    memory_configuration_digest, ArchiveRuntimeKind, MacosArchiveComponentInput,
-    MacosArchiveConfig, MacosArchiveConfiguration, MacosArchiveMemory, MacosArchiveSource,
-    MacosArchiveSourceKind, MacosCheckpointKind, MacosComponentRole,
+    ArchiveRuntimeKind, MacosArchiveComponentInput, MacosArchiveConfig, MacosArchiveConfiguration,
+    MacosArchiveMemory, MacosArchiveSource, MacosArchiveSourceKind, MacosCheckpointKind,
+    MacosComponentRole,
 };
 
 const MAGIC: &[u8; 16] = b"SILO-BACKUP\0\0\0\0\0";
-/// Format 5: a computer's guest image may travel by reference (`imageEmbedded: false` with its
-/// `imageDigest`) and a fork-time record may follow the payloads. An archive that needs neither
-/// is still written as format 4, which older Silo builds read.
+/// The newest format this Silo reads. An archive is written in the oldest format that holds
+/// what it carries (`attach_fork_records`), so older Silo builds read what they can. Format 5:
+/// a computer's guest image may travel by reference (`imageEmbedded: false` with its
+/// `imageDigest`) and a fork-time record may follow the payloads; an archive that needs neither
+/// is written as format 4.
 const FORMAT_VERSION: u32 = 6;
 /// Format 6: a computer may be a container computer, whose payload is its layers (see
 /// `containers::archive`). Only an archive that holds one is written as format 6.
@@ -951,29 +955,7 @@ impl<R: MsbRunner> BackupService<R> {
                 // A checkpoint export reuses an already-captured, immutable member;
                 // a state export captures the computer's current disk first.
                 let snapshot = if let Some(member) = &source.existing_member {
-                    let snapshot = self.captured_snapshot_ref(
-                        &snapshot_group,
-                        member,
-                        container,
-                        cancellation,
-                    )?;
-                    // Describe the checkpoint as it was captured, not the
-                    // computer as it is now (E-29). A container's checkpoint has no
-                    // descriptor: its disks cannot be resized, so it is the computer's own.
-                    if let CapturedRef::Path(path) = &snapshot {
-                        apply_captured_layout(
-                            &source.name,
-                            &read_snapshot_descriptor(path)?,
-                            &mut runtime_config,
-                            &mut computer_configuration,
-                        )?;
-                        validate_export_configs(
-                            &source.name,
-                            &runtime_config,
-                            &computer_configuration,
-                        )?;
-                    }
-                    snapshot
+                    self.captured_snapshot_ref(&snapshot_group, member, container, cancellation)?
                 } else {
                     let entries =
                         self.snapshot_index("Checking export capture limit", cancellation)?;
@@ -1021,6 +1003,40 @@ impl<R: MsbRunner> BackupService<R> {
                         cancellation,
                     )?
                 };
+                // A container's checkpoint has no descriptor: it never holds memory, and its
+                // disks cannot be resized, so its layout is the computer's own.
+                if let CapturedRef::Path(path) = &snapshot {
+                    let descriptor = read_snapshot_descriptor(path)?;
+                    // An export carries disks only, and the runtime writes a capture that
+                    // holds memory with that memory, so such a capture is never written.
+                    if descriptor_holds_memory(&descriptor) {
+                        return Err(BackupError::InvalidRequest(
+                            if source.existing_member.is_some() {
+                                memory_checkpoint_refusal(&source.name)
+                            } else {
+                                format!(
+                                    "The capture of {} holds its memory, which an export never carries. No file was written.",
+                                    source.name
+                                )
+                            },
+                        ));
+                    }
+                    // Describe the checkpoint as it was captured, not the
+                    // computer as it is now (E-29).
+                    if source.existing_member.is_some() {
+                        apply_captured_layout(
+                            &source.name,
+                            &descriptor,
+                            &mut runtime_config,
+                            &mut computer_configuration,
+                        )?;
+                        validate_export_configs(
+                            &source.name,
+                            &runtime_config,
+                            &computer_configuration,
+                        )?;
+                    }
+                }
                 let snapshot = snapshot.argument();
                 self.require_success_with(
                     "Verifying captured computer disk",
@@ -2234,6 +2250,27 @@ fn read_snapshot_descriptor(artifact: &Path) -> Result<Value, BackupError> {
     serde_json::from_slice(&bytes).map_err(|_| invalid())
 }
 
+/// Whether a capture's descriptor says it holds the computer's memory: one the runtime took
+/// with `--full`. Either spelling of the scope counts (see `compare_loaded_descriptor`).
+/// Whether a capture may hold memory: anything but a descriptor that names a disk-only capture
+/// (scope `file` or `disk`, state `file`). A missing or unknown scope counts as memory.
+fn descriptor_holds_memory(descriptor: &Value) -> bool {
+    !matches!(
+        (
+            descriptor.get("scope").and_then(Value::as_str),
+            descriptor.pointer("/state/kind").and_then(Value::as_str),
+        ),
+        (Some("file" | "disk"), Some("file"))
+    )
+}
+
+/// Why a checkpoint that holds memory is not exported, and what to do instead.
+fn memory_checkpoint_refusal(computer: &str) -> String {
+    format!(
+        "This checkpoint was saved while {computer} was running, so it holds the computer's memory, and an export never carries memory. Fork the checkpoint and export the fork, or export {computer} itself."
+    )
+}
+
 fn descriptor_scope_supported(scope: Option<&str>, state_kind: Option<&str>) -> bool {
     matches!(
         (scope, state_kind),
@@ -3404,12 +3441,11 @@ fn validate_export_configs(
     validate_volume_sources(name, runtime_config, computer_configuration)
 }
 
-/// A checkpoint export packs the disk (and, for a full checkpoint, the computer
-/// geometry) as captured, while the computer may have been changed since.
-/// Take everything the checkpoint's descriptor records from it: the owned
-/// workspace capacity and, for a full checkpoint, CPUs and memory (with the
-/// default /tmp size that follows memory). The root disk size cannot change
-/// after creation, so it is kept.
+/// A checkpoint export packs the disk as captured, while the computer may have been
+/// changed since. Take what a disk checkpoint's descriptor records from it: the owned
+/// workspace capacity. CPUs and memory are not in it (only a checkpoint that holds memory
+/// records them, and that one is never exported), and the root disk size cannot change
+/// after creation, so those are kept.
 fn apply_captured_layout(
     name: &str,
     descriptor: &Value,
@@ -3448,35 +3484,6 @@ fn apply_captured_layout(
     }
     computer_configuration["workspaceStorageGiB"] = (capacity_mib / 1024).into();
 
-    if descriptor.pointer("/state/kind").and_then(Value::as_str) == Some("checkpoint") {
-        let captured = |field: &str| {
-            descriptor
-                .pointer(&format!("/state/requirements_summary/{field}"))
-                .and_then(Value::as_u64)
-                .ok_or_else(|| unsupported("its CPU and memory layout is not recorded"))
-        };
-        let (cpus, max_cpus) = (captured("vcpus")?, captured("max_vcpus")?);
-        let (memory_mib, max_memory_mib) = (captured("memory_mib")?, captured("max_memory_mib")?);
-        if memory_mib % 1024 != 0 || max_memory_mib % 1024 != 0 {
-            return Err(unsupported("its memory size is not a whole number of GiB"));
-        }
-        runtime_config["resources"]["cpus"] = cpus.into();
-        runtime_config["resources"]["max_cpus"] = max_cpus.into();
-        runtime_config["resources"]["memory_mib"] = memory_mib.into();
-        runtime_config["resources"]["max_memory_mib"] = max_memory_mib.into();
-        computer_configuration["cpus"] = cpus.into();
-        computer_configuration["maxCPUs"] = max_cpus.into();
-        computer_configuration["memoryGiB"] = (memory_mib / 1024).into();
-        computer_configuration["maxMemoryGiB"] = (max_memory_mib / 1024).into();
-        // Silo sizes the default /tmp from memory; keep that relation.
-        if let Some(tmpfs) = runtime_config
-            .get_mut("mounts")
-            .and_then(Value::as_array_mut)
-            .and_then(|mounts| mounts.iter_mut().find(|mount| mount["type"] == "Tmpfs"))
-        {
-            tmpfs["size_mib"] = (memory_mib / 4).clamp(1, 512).into();
-        }
-    }
     Ok(())
 }
 
@@ -5119,7 +5126,11 @@ mod tests {
                         .join(group)
                         .join("snap_00000000000000000000000000000000");
                     fs::create_dir_all(&snapshot)?;
-                    fs::write(snapshot.join("snapshot.json"), b"{}")?;
+                    // A capture without `--full` holds the disk only, as the runtime records.
+                    fs::write(
+                        snapshot.join("snapshot.json"),
+                        br#"{"scope":"file","state":{"kind":"file"}}"#,
+                    )?;
                     if self.cancel_after_snapshot.load(Ordering::Acquire) {
                         cancellation.cancel();
                     }
@@ -6307,17 +6318,8 @@ mod tests {
 
     #[test]
     fn checkpoint_export_describes_the_checkpoint_as_captured() {
-        // Captured with 2 of 6 CPUs, 1 of 32 GiB memory and a 30 GiB
-        // computer; the computer now has 4 CPUs, 16 GiB and 60 GiB.
+        // Captured with a 30 GiB workspace; the computer now has 60 GiB.
         let mut descriptor = loaded_descriptor_for(&managed_config("dev"));
-        descriptor["scope"] = "checkpoint".into();
-        descriptor["state"] = serde_json::json!({
-            "kind": "checkpoint",
-            "checkpoint_id": "ckpt",
-            "checkpoint_root": format!("sha256:{}", "d".repeat(64)),
-            "restore_intents": ["clone", "resume"],
-            "requirements_summary": {"vcpus": 2, "max_vcpus": 6, "memory_mib": 1024, "max_memory_mib": 32768}
-        });
         descriptor["extensions"][OWNED_VOLUMES_EXTENSION][0]["mount"]["storage"]["capacity_mib"] =
             30720.into();
         let runner = FakeRunner::default();
@@ -6325,22 +6327,9 @@ mod tests {
         let (_temp, manifest) = export_checkpoint(runner);
         let manifest = manifest.unwrap();
         let computer = &manifest.computers[0];
-        assert_eq!(computer.computer_configuration["cpus"], 2);
-        assert_eq!(computer.computer_configuration["maxCPUs"], 6);
-        assert_eq!(computer.computer_configuration["memoryGiB"], 1);
         assert_eq!(computer.computer_configuration["workspaceStorageGiB"], 30);
         assert_eq!(computer.computer_configuration["runtimeStorageGiB"], 80);
-        assert_eq!(computer.runtime_config["resources"]["memory_mib"], 1024);
-        let tmpfs = computer.runtime_config["mounts"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|mount| mount["type"] == "Tmpfs")
-            .unwrap();
-        assert_eq!(tmpfs["size_mib"], 256);
         // The archive now passes the import-side comparison with that snapshot.
-        descriptor["extensions"][OWNED_VOLUMES_EXTENSION][0]["mount"]["storage"]["capacity_mib"] =
-            30720.into();
         assert!(compare_loaded_descriptor(
             &descriptor,
             "snap_11111111111111111111111111111111",
@@ -6357,6 +6346,110 @@ mod tests {
         assert!(
             matches!(manifest, Err(BackupError::UnsupportedStorage(message)) if message.contains("workspace disk"))
         );
+    }
+
+    /// The descriptor of a checkpoint the runtime took with `--full`, while the computer ran.
+    fn memory_checkpoint_descriptor() -> Value {
+        let mut descriptor = loaded_descriptor_for(&managed_config("dev"));
+        descriptor["scope"] = "checkpoint".into();
+        descriptor["state"] = serde_json::json!({
+            "kind": "checkpoint",
+            "checkpoint_id": "ckpt",
+            "checkpoint_root": format!("sha256:{}", "d".repeat(64)),
+            "restore_intents": ["clone", "resume"],
+            "requirements_summary": {"vcpus": 2, "max_vcpus": 6, "memory_mib": 1024, "max_memory_mib": 32768}
+        });
+        descriptor
+    }
+
+    #[test]
+    fn a_checkpoint_that_holds_memory_is_never_written_to_an_export() {
+        // Under either name the runtime gives the scope, and wherever the descriptor says it.
+        let mut index_spelling = memory_checkpoint_descriptor();
+        index_spelling["scope"] = "full".into();
+        let mut scope_only = loaded_descriptor_for(&managed_config("dev"));
+        scope_only["scope"] = "checkpoint".into();
+        let mut state_only = memory_checkpoint_descriptor();
+        state_only["scope"] = "file".into();
+        // A scope the runtime does not write, or none, counts as memory.
+        let mut unknown_scope = loaded_descriptor_for(&managed_config("dev"));
+        unknown_scope["scope"] = "snapshot".into();
+        let mut no_scope = loaded_descriptor_for(&managed_config("dev"));
+        no_scope.as_object_mut().unwrap().remove("scope");
+        let mut no_state = loaded_descriptor_for(&managed_config("dev"));
+        no_state.as_object_mut().unwrap().remove("state");
+        for descriptor in [
+            memory_checkpoint_descriptor(),
+            index_spelling,
+            scope_only,
+            state_only,
+            unknown_scope,
+            no_scope,
+            no_state,
+        ] {
+            assert!(descriptor_holds_memory(&descriptor));
+            let temp = tempfile::tempdir().unwrap();
+            let destination = temp.path().join("checkpoint.silo-backup");
+            let member = "c0123456789abcdef0123456789abcde";
+            let runner = FakeRunner::default();
+            runner
+                .existing_members
+                .lock()
+                .unwrap()
+                .push(("dev".into(), member.into()));
+            *runner.member_descriptor.lock().unwrap() = Some(descriptor);
+            let service = service(&temp, runner);
+            let error = service
+                .create_backup(
+                    BackupRequest {
+                        destination: destination.clone(),
+                        sources: vec![BackupSource {
+                            name: "dev".into(),
+                            snapshot_group: "dev".into(),
+                            was_running: false,
+                            runtime_config: managed_config("dev"),
+                            computer_configuration: computer_configuration("dev"),
+                            existing_member: Some(member.into()),
+                        }],
+                        ..Default::default()
+                    },
+                    &Cancellation::default(),
+                )
+                .unwrap_err();
+            assert!(matches!(error, BackupError::InvalidRequest(_)), "{error}");
+            assert_eq!(error.to_string(), memory_checkpoint_refusal("dev"));
+            // The runtime was never asked to write the checkpoint, and nothing is left behind.
+            let calls = service.runner.calls.lock().unwrap();
+            assert!(calls
+                .iter()
+                .all(|args| !matches!(args.get(1).map(String::as_str), Some("save" | "verify"))));
+            assert_eq!(
+                fs::read_dir(temp.path())
+                    .unwrap()
+                    .filter_map(Result::ok)
+                    .filter(|entry| entry.file_name().to_string_lossy().contains("silo-backup"))
+                    .count(),
+                0
+            );
+        }
+        assert!(!descriptor_holds_memory(&loaded_descriptor_for(
+            &managed_config("dev")
+        )));
+    }
+
+    #[test]
+    fn a_running_computer_is_captured_without_its_memory() {
+        let temp = tempfile::tempdir().unwrap();
+        let service = service(&temp, FakeRunner::default());
+        create_one(&service, temp.path().join("dev.silo-backup"), true).unwrap();
+        let calls = service.runner.calls.lock().unwrap();
+        let captures = calls
+            .iter()
+            .filter(|args| args.get(1).is_some_and(|arg| arg == "create"))
+            .collect::<Vec<_>>();
+        assert_eq!(captures.len(), 1);
+        // Only `--full` makes the runtime save memory.
+        assert!(!captures[0].iter().any(|arg| arg == "--full"));
     }
 
     #[test]

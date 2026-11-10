@@ -351,6 +351,22 @@ one `.silo-backup` file, and `silo import` reads one. What the file holds, and d
   too: "Silo could not check <name> for logins (<reason>). Share anyway?", in the CLI and in the
   app, and `--json` reports the reason as `unchecked`. The list is a warning, not a guarantee: a
   secret in a file Silo does not recognise (an `.env`, a token in a shell history) is not named.
+  The disk is listed with the walk `silo diff` does (`/etc`, `/root`, `/home`, `/usr/local`,
+  `/opt`, `/srv` and the crontabs on Linux; the home folder, `/usr/local`, `/opt/homebrew/etc` and
+  the launch agents and daemons on macOS), so a login anywhere else,
+  such as under `/workspace`, is not named either.
+- **No memory is in the file**, for any kind of computer: an export carries disks only, as a
+  fork does. A running computer is captured from its disks: the guest writes its cached file data
+  out and the disks are copied, with a macOS computer paused for the copy the way a fork point
+  takes it ([`macos_computers.rs`](../app/SiloUI/src-tauri/engine/src/macos_computers.rs),
+  `create_archive`). A macOS checkpoint that saved memory is exported from its disks; the saved
+  memory stays in the checkpoint's folder. A Linux VM checkpoint taken while the computer ran is
+  refused: MicroSandbox writes such a checkpoint whole, with its memory, and has no way to leave
+  it out, so [`backup.rs`](../app/SiloUI/src-tauri/engine/src/backup.rs) reads the descriptor of
+  every capture before it is written and stops at one that holds memory, saying what to do
+  instead (fork the checkpoint and export the fork, or export the computer itself). A container
+  computer has no memory checkpoints. A file written before this rule can hold memory; an import
+  never uses it, because an imported computer always starts from its disks.
 - **Secrets, published ports, the network policy and host-folder mounts are not carried**; an
   imported computer starts stopped with a deny-all policy.
 - **An export is a plain file.** Keep it where you would keep the secrets in it. Importing one

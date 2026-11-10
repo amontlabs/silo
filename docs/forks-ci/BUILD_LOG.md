@@ -4,10 +4,9 @@ Plan: [PLAN.md](PLAN.md).
 
 ## Resume
 
-- **Merged (8 Nov 2026):** F1 (#84), F2 (#88), C1 (#87), R1 (#83), F3 (#86).
-- **Open phases:** F4 (export a computer that lives on another machine) is built on
-  `claude/forks-phase-4-transfer`, pull request open, its live check is the `linux-host.yml` two-account
-  job; R2 (Linux hosts as runner machines) is in progress; container computers: CT1 to CT5 are merged, CT6 (export, import and
+- **Merged (8 Nov 2026):** F1 (#84), F2 (#88), C1 (#87), R1 (#83), F3 (#86), F4 (#93; its live check is
+  the `linux-host.yml` two-account job).
+- **Open phases:** R2 (Linux hosts as runner machines) is in progress; container computers: CT1 to CT5 are merged, CT6 (export, import and
   Connections) is built in #104.
 - **Open follow-ups found during the build:**
   - A Linux fork leaves its fork-point checkpoint on the source (it was a manual checkpoint before F2 too);
@@ -1484,3 +1483,61 @@ Review of `app/SiloUI/runner`, its CI wiring and its docs as they are on `main` 
   the helper runs is served until the next start; (2) a second Ctrl-C does not end a slow shutdown (the signal
   stays caught); (3) the Resume section above still lists R2 as in progress; (4) no job has run through
   `silo-runner` on a Linux host (unchanged from R2).
+
+## Post-merge review
+
+### Forks and sharing a computer as a file, VM computers (F2 #88, F3 #86, F4 #93; 9 Nov 2026)
+
+Read on `main` at `69742419`: the fork point and the desktop setting, `backup.rs`, `backup_controller.rs`,
+`changes/credentials.rs`, `transfer_area.rs`, `export_transfer.rs`, the `exports.*` handlers, the bridge's
+`exports.file` stream, `cli/src/share.rs` and the app's export dialog. The review found the problems below; the
+fixes are in the same pull request (#105).
+
+- **Fixed: an export could hold memory.** The rule is that no memory is carried into a fork or an export. Forks
+  kept it (a fork point is disks only and every fork starts from disks). Exports did not, in three cases, and no
+  import ever used the memory (`import_pending_restore_with_environment` records `state: "disk"`; a macOS import
+  starts from the disk). All three now carry disks only:
+  - **A macOS computer exported while it runs.** `create_archive` called `save_running` and added
+    `state.vzvmsave`. It now takes the capture a fork point takes: the guest writes its disk out (`flush_disk`),
+    then the machine is paused while the disks are cloned (`pause_for_copy`). No memory is saved and no space is
+    reserved for it. An export whose flush fails stops before the pause, as a fork does.
+  - **A macOS checkpoint that saved memory.** Its disks are cloned and the saved memory stays in the
+    checkpoint's folder. The file names the checkpoint with the kind `disk`.
+  - **A Linux VM checkpoint taken while the computer ran: refused.** MicroSandbox 0.7.6 writes such a checkpoint
+    whole: `snapshot export` adds `checkpoints/<id>/` with the memory, execution and device state (its
+    `archive.rs` at tag `v0.7.6`), and it has no option to leave them out (nor has `v0.7.14`). A fork avoids the
+    memory only by starting a new computer from the checkpoint (`restore --disk-only`); that leaves no disk-only
+    capture to write, so giving an export the same source would mean a hidden temporary computer for every such
+    export. `create_backup_with_token` instead reads the descriptor of every capture before the runtime verifies
+    or writes it and goes on only when it names a disk-only capture (scope `file` or `disk`, state `file`).
+    Anything else, a missing or unknown scope included, counts as memory and stops the export: "This checkpoint
+    was saved while <name> was running, so it holds the computer's memory, and an export never carries memory.
+    Fork the checkpoint and export the fork, or export <name> itself." `apply_captured_layout` lost the branch
+    that read such a checkpoint's CPUs and memory.
+
+  The reader is unchanged: a file an older Silo wrote with memory still imports, from its disks.
+- **Tests.** macOS (`macos_computers.rs`, the capture step `capture_archive_sources` with a machine that fails
+  the test if memory is asked for): `an_export_of_a_running_computer_holds_its_disks_and_no_memory`,
+  `an_export_of_a_memory_checkpoint_holds_its_disks_and_no_memory`. The capture step is tested instead of the
+  written file because the writer wants a disk of the computer's full size. Linux (`backup.rs`):
+  `a_checkpoint_that_holds_memory_is_never_written_to_an_export` (refused before `snapshot verify` or
+  `snapshot save`, no file left) and `a_running_computer_is_captured_without_its_memory`. Live, on the KVM
+  runner: `linux-host-e2e.sh` saves a checkpoint while the computer runs, expects its export to be refused with
+  no file, then opens the export of the running computer and the export of a fork of that checkpoint and fails
+  on anything under `checkpoints/` or a descriptor that is not a disk capture.
+- **Not live-checked: macOS.** There is no macOS computer on the Dev engine; the macOS change is covered by the
+  unit tests above only.
+- **Fixed: two copies from another device to the same `-o` path shared one `<path>.part`**, so the first to
+  finish could publish the second's unfinished file (`export_transfer::create_part` removed the other's as a
+  leftover). Each copy now writes `<path>.<random>.part` and nothing that exists is opened or removed; publishing
+  is still the rename that never replaces. A copy that crashes leaves its own `.part`, which nothing removes.
+- **Docs corrected.** `docs/SiloUI-CLI.md` and `docs/THREAT-MODEL.md` say that no export holds memory, for every
+  kind of computer, and what happens to a Linux VM checkpoint that does. The threat model also says which
+  folders the login check lists (the `silo diff` walk in `changes/collect.sh`; `/workspace` is not one of them).
+  `backup.rs`: the comment on `FORMAT_VERSION` described format 5 while the constant is the newest readable
+  format (6). The Resume section and `PLAN.md` listed F4 as an open pull request.
+- **Removed** `app/SiloUI/src-tauri/edit14.py`, an editing script committed by mistake in `0b601f2cd`; nothing
+  used it.
+- **Seen, not changed (low; from reading the code):** a transfer-area export leaves its "Export complete" result
+  and a system notice on the owning device, naming a file the controller then discards. `Area::open_for_read`
+  keeps its used marker when the file is past the cap.

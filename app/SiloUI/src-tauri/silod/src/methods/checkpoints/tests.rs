@@ -1544,11 +1544,7 @@ mod transfer {
             json!({"name": name, "bytes": data.len(), "sha256": sha(&data)})
         );
         assert_eq!(std::fs::read(&destination).unwrap(), data);
-        assert!(!fixture
-            .directory
-            .path()
-            .join("copy.silo-backup.part")
-            .exists());
+        assert!(parts_of(&destination).is_empty());
         use std::os::unix::fs::PermissionsExt;
         assert_eq!(
             std::fs::metadata(&destination)
@@ -1586,7 +1582,7 @@ mod transfer {
             .message
             .contains("does not match what the other machine exported"));
         assert!(!destination.exists());
-        assert!(!destination.with_extension("silo-backup.part").exists());
+        assert!(parts_of(&destination).is_empty());
     }
 
     #[tokio::test]
@@ -1610,7 +1606,7 @@ mod transfer {
             assert!(outcome.error.is_some());
         }
         assert_eq!(std::fs::read(&destination).unwrap(), b"mine");
-        assert!(!destination.with_extension("silo-backup.part").exists());
+        assert!(parts_of(&destination).is_empty());
     }
 
     #[tokio::test]
@@ -1774,9 +1770,10 @@ mod transfer {
         .unwrap();
         let job = job_id(started);
         tokio::time::sleep(Duration::from_millis(300)).await;
-        // While it copies, the path the user chose does not exist: only the `.part` does.
-        let part = fixture.directory.path().join("copy.silo-backup.part");
-        assert!(!destination.exists() && part.exists());
+        // While it copies, the path the user chose does not exist: only the copy's own
+        // temporary file does.
+        assert!(!destination.exists());
+        assert_eq!(parts_of(&destination).len(), 1);
         silo_engine::context::EngineContext::job_registry(fixture.silod.as_ref())
             .unwrap()
             .cancel(&job)
@@ -1785,7 +1782,21 @@ mod transfer {
         let error = outcome.error.unwrap();
         assert_eq!(error.code, ErrorCode::Cancelled, "{}", error.message);
         assert!(error.message.contains("cancelled"));
-        assert!(!destination.exists() && !part.exists());
+        assert!(!destination.exists() && parts_of(&destination).is_empty());
+    }
+
+    /// The temporary files of the copies to `destination`: `<destination>.<random>.part`.
+    fn parts_of(destination: &std::path::Path) -> Vec<std::path::PathBuf> {
+        let prefix = format!("{}.", destination.file_name().unwrap().to_str().unwrap());
+        std::fs::read_dir(destination.parent().unwrap())
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.starts_with(&prefix) && name.ends_with(".part"))
+            })
+            .collect()
     }
 
     fn area_of(fixture: &Fixture) -> Area {
