@@ -8,7 +8,17 @@ use serde::{Deserialize, Serialize};
 
 /// An agent Silo can install in a computer.
 #[derive(
-    Clone, Copy, Debug, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, schemars::JsonSchema,
+    Clone,
+    Copy,
+    Debug,
+    Deserialize,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    Serialize,
+    schemars::JsonSchema,
 )]
 #[serde(rename_all = "kebab-case")]
 pub enum AgentId {
@@ -114,7 +124,10 @@ mod tests {
 
     #[test]
     fn agents_use_kebab_case_names() {
-        assert_eq!(serde_json::to_value(AgentId::ClaudeCode).unwrap(), "claude-code");
+        assert_eq!(
+            serde_json::to_value(AgentId::ClaudeCode).unwrap(),
+            "claude-code"
+        );
         assert_eq!(serde_json::to_value(AgentId::Codex).unwrap(), "codex");
         for agent in AgentId::ALL {
             assert_eq!(serde_json::to_value(agent).unwrap(), agent.as_str());
@@ -147,7 +160,10 @@ mod tests {
         let local: AgentsInstallParams =
             serde_json::from_value(serde_json::json!({"computerId": "c", "agent": "claude-code"}))
                 .unwrap();
-        assert!(serde_json::to_value(local).unwrap().get("deviceId").is_none());
+        assert!(serde_json::to_value(local)
+            .unwrap()
+            .get("deviceId")
+            .is_none());
     }
 
     #[test]

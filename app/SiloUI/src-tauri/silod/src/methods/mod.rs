@@ -263,6 +263,7 @@ fn changes_computer(method: MethodName) -> bool {
             | MethodName::TerminalCommand
             | MethodName::EditorCommand
             | MethodName::DesktopAction
+            | MethodName::AgentsInstall
             | MethodName::DisplayViewerOpen
             | MethodName::DisplayShow
             | MethodName::MacosDisplayConnect
@@ -356,6 +357,8 @@ mod tests {
         assert!(changes_computer(MethodName::GuestExec));
         assert!(changes_computer(MethodName::GuestFilesWrite));
         assert!(changes_computer(MethodName::ComputersStart));
+        assert!(changes_computer(MethodName::AgentsInstall));
+        assert!(!changes_computer(MethodName::AgentsList));
         assert!(!changes_computer(MethodName::NetworkPublish));
         assert!(!changes_computer(MethodName::NetworkUnpublish));
         assert!(!changes_computer(MethodName::GuestFilesRead));
@@ -383,6 +386,8 @@ mod tests {
             "exports.state",
             "migration.state",
             "display.show",
+            "agents.list",
+            "agents.install",
             "settings.read",
             "engine.shutdown",
         ] {

@@ -399,6 +399,8 @@ const METHODS: &[(&str, Access)] = &[
 pub const OWNER_METHODS: &[(&str, bool)] = &[
     // (method, changes state)
     ("activity.setup.read", false),
+    ("agents.install", true),
+    ("agents.list", false),
     ("changes.baseline", true),
     ("changes.capture", true),
     ("changes.diff", true),

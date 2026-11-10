@@ -274,7 +274,11 @@ fn installer_script(action: &str) -> String {
 
 fn action_script(action: &str) -> String {
     if action == "setup-agent-tools" {
-        crate::agent_tools::setup_script()
+        format!(
+            "{}\n{}\n",
+            crate::agent_tools::setup_script(),
+            crate::computer_use::register_installed_agents_command()
+        )
     } else if action == "update-streamer" {
         installer_script(action)
     } else {

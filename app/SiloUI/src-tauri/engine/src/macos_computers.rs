@@ -12,6 +12,8 @@
 //! computer's disk and memory and forks new computers from them.
 #[path = "macos_computers/checkpoints.rs"]
 mod checkpoints;
+#[path = "macos_computers/agent_install.rs"]
+mod agent_install;
 #[path = "macos_computers/developer_tools.rs"]
 mod developer_tools;
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
@@ -2193,6 +2195,65 @@ pub async fn macos_agent_tools_state(
         ))
     })
     .await
+}
+
+/// The agents of a macOS computer: Claude Code comes with its template, Codex is read from the
+/// computer while it runs and `unknown` while it does not.
+pub async fn macos_agents(
+    app: MacosContext,
+    id: String,
+) -> Result<Vec<silo_api::methods::agents::AgentInfo>, String> {
+    blocking(move || {
+        ensure_loaded(&app)?;
+        let (_, state) = computer(&id)?;
+        let running = state == State::Running && !guest_computer_use::update_running(&id);
+        agent_install::list(&app, &id, running)
+    })
+    .await
+}
+
+/// Installs an agent in the running macOS computer `id` as the job `job`, and answers with the
+/// computer's agents. `step` is told where the install is.
+pub fn macos_install_agent(
+    app: &MacosContext,
+    id: &str,
+    agent: silo_api::methods::agents::AgentId,
+    job: &crate::desktop::JobLink,
+    step: &dyn Fn(silo_api::methods::agents::AgentInstallStep, Option<String>),
+) -> Result<Vec<silo_api::methods::agents::AgentInfo>, String> {
+    runtime::shutdown::ensure_accepting_operations()?;
+    ensure_loaded(app)?;
+    let (record, _) = computer(id)?;
+    let guard = runtime::OPERATIONS
+        .kind(runtime::operation_gate::OperationKind::Other)
+        .acquire_for_job(
+            runtime::operation_gate::Scope::Computer { id: id.to_owned() },
+            Some(record.name.clone()),
+            &format!("Installing {} in {}", agent.display_name(), record.name),
+            None,
+            job.job_id.clone(),
+            Some(job.cancellation.clone()),
+        )
+        .map_err(|error| error.to_string())?;
+    job.registry
+        .mark_running(&job.job_id)
+        .map_err(|error| error.to_string())?;
+    job.registry
+        .associate_gate(guard.request_id(), job.job_id.clone());
+    guard.allow_cancel();
+    guard.expect_within(Duration::from_secs(40 * 60));
+    let (_, state) = computer(id)?;
+    if state != State::Running {
+        return Err(format!(
+            "Start the computer before installing {} in it.",
+            agent.display_name()
+        ));
+    }
+    let token = guard.cancel_token();
+    agent_install::install(app, id, agent, step, &|| {
+        token.load(std::sync::atomic::Ordering::SeqCst)
+    })?;
+    agent_install::list(app, id, true)
 }
 
 /// Stores desired computer-use approval and schedules the existing guest updater when running.

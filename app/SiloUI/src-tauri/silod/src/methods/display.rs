@@ -10,11 +10,15 @@ use std::{
 use serde::Serialize;
 use serde_json::{json, Value};
 use silo_api::{
-    jobs::{ErrorCode, JobFinished},
+    jobs::{ErrorCode, JobFinished, JobProgress},
     methods::{
         clipboard::{
             ClipboardAction, ClipboardTransferContent, ClipboardTransferResult,
             ClipboardTransferStatus,
+        },
+        agents::{
+            AgentId, AgentInfo, AgentInstallProgress, AgentInstallStep, AgentsInstallParams,
+            AgentsListParams, AgentsListResult,
         },
         computer_use::{ApprovalMode, ComputerUseState},
         desktop::{DesktopAction, DesktopStatus},
@@ -39,7 +43,7 @@ use super::{ownership::owns_prefix, HandlerContext};
 pub(super) fn owns(method: MethodName) -> bool {
     owns_prefix(
         method,
-        &["display.", "desktop.", "computerUse.", "clipboard."],
+        &["display.", "desktop.", "computerUse.", "clipboard.", "agents."],
     )
 }
 
@@ -61,6 +65,8 @@ async fn dispatch(
     context: &HandlerContext,
 ) -> Result<HandlerOutput, DispatchError> {
     match method {
+        MethodName::AgentsList => agents_list(context, params).await,
+        MethodName::AgentsInstall => agents_install(context, params).await,
         MethodName::DesktopStatus => desktop_status(context, params).await,
         MethodName::DesktopConnect => desktop_connect(context, params).await,
         MethodName::DesktopAction => desktop_action(context, params).await,
@@ -359,6 +365,107 @@ async fn desktop_status(
         serde_json::from_value::<DesktopStatus>(status)
             .map_err(|error| DispatchError::internal(error.to_string()))?,
     )
+}
+
+/// `agents.list`: the agents of a computer on this device. Another device's computer reaches
+/// its owner before this runs.
+async fn agents_list(
+    context: &HandlerContext,
+    value: &Value,
+) -> Result<HandlerOutput, DispatchError> {
+    let params: AgentsListParams = decode(context, value)?;
+    let agents = if is_macos_computer(context, &params.computer_id).await? {
+        silo_engine::macos_computers_engine::macos_agents(
+            macos_context(context),
+            params.computer_id,
+        )
+        .await
+        .map_err(map_error)?
+    } else {
+        let paths = local_runtime_paths(context).await?;
+        tokio::task::spawn_blocking(move || {
+            let name = runtime::remote_ops::local_computer_name_in(&paths, &params.computer_id)?;
+            silo_engine::desktop::agents_local(&paths, &name, Some(&params.computer_id))
+        })
+        .await
+        .map_err(|error| DispatchError::internal(error.to_string()))?
+        .map_err(map_error)?
+    };
+    output(AgentsListResult { agents })
+}
+
+/// Tells subscribers where an agent install is.
+fn publish_agent_step(
+    engine: &Arc<dyn EngineContext>,
+    job: &silo_engine::desktop::JobLink,
+    computer_id: &str,
+    agent: AgentId,
+    step: AgentInstallStep,
+    detail: Option<String>,
+) {
+    let _ = silo_engine::jobs::publish_progress(
+        engine.as_ref(),
+        JobProgress::Agent {
+            job_id: job.job_id.clone(),
+            kind: None,
+            computer_id: Some(computer_id.to_owned()),
+            data: AgentInstallProgress {
+                computer_id: computer_id.to_owned(),
+                agent,
+                step,
+                detail,
+            },
+        },
+        Audience::All,
+    );
+}
+
+/// `agents.install`: a job that installs an agent in a running computer on this device,
+/// registers computer use with it, and finishes with the computer's agents.
+async fn agents_install(
+    context: &HandlerContext,
+    value: &Value,
+) -> Result<HandlerOutput, DispatchError> {
+    let params: AgentsInstallParams = decode(context, value)?;
+    let ctx = context.silod_context();
+    let engine: Arc<dyn EngineContext> = Arc::new(ctx.clone());
+    let (computer_id, agent) = (params.computer_id, params.agent);
+    if is_macos_computer(context, &computer_id).await? {
+        let app = macos_context(context);
+        return start_job(context, "agents.install", move |link| {
+            let step = |step, detail| publish_agent_step(&engine, link, &computer_id, agent, step, detail);
+            step(AgentInstallStep::Waiting, None);
+            let agents = silo_engine::macos_computers_engine::macos_install_agent(
+                &app,
+                &computer_id,
+                agent,
+                link,
+                &step,
+            )?;
+            step(AgentInstallStep::Done, None);
+            serde_json::to_value(AgentsListResult { agents }).map_err(|error| error.to_string())
+        })
+        .await;
+    }
+    let host = runtime_host(context);
+    start_job(context, "agents.install", move |link| {
+        let paths = runtime::runtime_paths(&host).map_err(|error| error.to_string())?;
+        let name = runtime::remote_ops::local_computer_name_in(&paths, &computer_id)?;
+        let step = |step, detail| publish_agent_step(&engine, link, &computer_id, agent, step, detail);
+        step(AgentInstallStep::Waiting, None);
+        let agents: Vec<AgentInfo> = silo_engine::desktop::install_agent_for_job(
+            &paths,
+            &name,
+            agent,
+            Some(&computer_id),
+            link,
+            &step,
+        )?;
+        runtime::publish_computers_changed(&host, &paths);
+        step(AgentInstallStep::Done, None);
+        serde_json::to_value(AgentsListResult { agents }).map_err(|error| error.to_string())
+    })
+    .await
 }
 
 /// `desktop.connect` returns the guest's desktop credentials, which a client never holds
@@ -2123,6 +2230,60 @@ mod tests {
             fixture.finished_error(started).await,
             Some(ErrorCode::NotFound)
         );
+    }
+
+    #[tokio::test]
+    async fn agents_list_answers_for_a_macos_computer_and_refuses_an_unknown_one() {
+        let fixture = fixture();
+        let macos = fixture.macos(TestComputerState::Stopped, Approval::Ask);
+        let listed = fixture
+            .call("a", MethodName::AgentsList, json!({"computerId": macos}))
+            .await
+            .unwrap();
+        let listed: AgentsListResult = serde_json::from_value(listed).unwrap();
+        let ids: Vec<_> = listed.agents.iter().map(|agent| agent.id).collect();
+        assert_eq!(ids, [AgentId::ClaudeCode, AgentId::Codex]);
+        let codex = &listed.agents[1];
+        assert_eq!(codex.name, "Codex");
+        // A stopped computer cannot be asked, so Codex is not known.
+        assert_eq!(codex.state, silo_api::methods::agents::AgentState::Unknown);
+        assert_eq!(codex.expected_version, "0.167.0");
+        let unknown = fixture
+            .call(
+                "a",
+                MethodName::AgentsList,
+                json!({"computerId": unknown()}),
+            )
+            .await;
+        assert_eq!(code(unknown).await, ErrorCode::NotFound);
+    }
+
+    #[tokio::test]
+    async fn agents_install_is_a_job_that_needs_a_running_computer() {
+        let fixture = fixture();
+        for computer in [
+            fixture.macos(TestComputerState::Stopped, Approval::Ask),
+            unknown(),
+        ] {
+            let started = fixture
+                .call(
+                    "a",
+                    MethodName::AgentsInstall,
+                    json!({"computerId": computer, "agent": "codex"}),
+                )
+                .await
+                .unwrap();
+            assert!(started["jobId"].as_str().unwrap().starts_with("job:"));
+            assert!(fixture.finished_error(started).await.is_some());
+        }
+        let unnamed = fixture
+            .call(
+                "a",
+                MethodName::AgentsInstall,
+                json!({"computerId": unknown(), "agent": "pi"}),
+            )
+            .await;
+        assert!(unnamed.is_err());
     }
 
     #[tokio::test]
