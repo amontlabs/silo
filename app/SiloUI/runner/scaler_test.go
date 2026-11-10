@@ -764,6 +764,8 @@ func TestEventsDeliveredWhenPerJobPrivacyCheckFails(t *testing.T) {
 	msg := &scaleset.RunnerScaleSetMessage{
 		JobAvailableMessages: []*scaleset.JobAvailable{{RunnerRequestID: 2}},
 		JobCompletedMessages: []*scaleset.JobCompleted{{RunnerRequestID: 1, RunnerName: name, Result: "succeeded"}},
+		// GitHub still counts the offered job as assigned.
+		Statistics: &scaleset.RunnerScaleSetStatistic{TotalAssignedJobs: 1},
 	}
 	err := h.scaler.Scale(context.Background(), msg)
 	if !errors.Is(err, public) {
@@ -779,5 +781,9 @@ func TestEventsDeliveredWhenPerJobPrivacyCheckFails(t *testing.T) {
 	h.fleet.Settle()
 	if _, ok := h.silo.state(name); ok {
 		t.Fatalf("a succeeded computer was not deleted: %v", h.status())
+	}
+	// And no computer is made for the job that was not taken.
+	if names := h.silo.names(); len(names) != 0 {
+		t.Fatalf("a computer was made while the repository was public: %v", names)
 	}
 }

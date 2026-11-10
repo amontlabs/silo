@@ -80,7 +80,12 @@ func (s *Scaler) Scale(ctx context.Context, msg *scaleset.RunnerScaleSetMessage)
 			}
 		}
 		event.started, event.completed = msg.JobStartedMessages, msg.JobCompletedMessages
-		if checkErr == nil && msg.Statistics != nil {
+		if checkErr != nil {
+			// No runner is asked for while the repository is not served; the jobs in flight
+			// keep theirs.
+			none := 0
+			event.assigned = &none
+		} else if msg.Statistics != nil {
 			assigned := msg.Statistics.TotalAssignedJobs
 			event.assigned = &assigned
 		}

@@ -122,7 +122,8 @@ pub fn fork_record(snapshot: &Snapshot, restore: &Restore) -> ComputerRecord {
         })
         .collect();
     record.secrets.sort_by(|a, b| a.name.cmp(&b.name));
-    record.network_blocked = restore.network_blocked;
+    // Nothing unblocks a computer: a fork of a blocked one stays blocked whatever it is asked.
+    record.network_blocked |= restore.network_blocked;
     if let Some(cpus) = restore.cpus {
         record.cpus = cpus;
         record.max_cpus = record.max_cpus.max(cpus);
@@ -537,10 +538,14 @@ mod tests {
             &snapshot,
             &Restore {
                 network_blocked: true,
-                ..restore
+                ..restore.clone()
             },
         );
         assert!(record.network_blocked);
+        // Nor does a restore that leaves the flag out unblock one.
+        let mut blocked = snapshot.clone();
+        blocked.template.network_blocked = true;
+        assert!(fork_record(&blocked, &restore).network_blocked);
     }
 
     #[test]

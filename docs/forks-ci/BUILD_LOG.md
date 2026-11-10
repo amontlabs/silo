@@ -1611,26 +1611,28 @@ fixes are in the same pull request (#105).
 - **Seen, not changed (low; from reading the code):** a transfer-area export leaves its "Export complete" result
   and a system notice on the owning device, naming a file the controller then discards. `Area::open_for_read`
   keeps its used marker when the file is past the cap.
+
 ### Container imports, the runner's checks and the leftovers (10 Nov 2026)
 Follows the container sharing review above and R2's left-for-owner list; branch `fix/forks-ci-post-merge-review`.
-- **Fixed: imported containers stay on a deny-all network like imported VMs** until a secret is assigned, not
-  with the gateway's own policy from its first start. The import records the deny-all policy, the first start
+
+- **Fixed: imported containers stay on a deny-all network like imported VMs**, not with the gateway's own
+  policy from their first start. The import records the deny-all policy, the first start
   hands it to the gateway, a fork keeps it, and an export drops it from the portable template (the header
-  refuses it, like the other settings the importing Silo decides). Assigning a secret to the computer (`silo
-  secret put`, GitHub access among them) unblocks the network at its next start, together with the secret. The
-  command line guide's sharing section and the threat model's container sections say so. Tests:
+  refuses it, like the other settings the importing Silo decides). No secret assignment changes it, GitHub
+  access among them: the engine's own GitHub updates and restores send secrets too. The command line guide's sharing section and the threat model's container sections say so. Tests:
   `an_imported_container_starts_from_the_deny_all_policy_like_a_virtual_machine`,
-  `a_secret_unblocks_a_blocked_computer_and_a_refusal_does_not`,
+  `a_blocked_computer_stays_blocked_whatever_secrets_it_is_given`,
   `a_header_that_could_smuggle_something_is_refused`.
 - **Fixed: SELinux labels left out of export and import.** `silo-ctr pack` writes every attribute a file has
   except overlayfs's own records and the SELinux label: the label names types of the exporting host's own
   policy, which `unpack` cannot set inside a user namespace on a host without SELinux, and the importing host
-  labels the files it makes itself. Test: `an_export_leaves_out_the_hosts_selinux_label_and_overlayfs_records`.
+  labels the files it makes itself; `unpack` skips a label an older file carries. Tests:
+  `an_export_leaves_out_the_hosts_selinux_label_and_overlayfs_records`, `a_streams_selinux_label_is_not_set`.
 - **Fixed: the runner re-checks privacy per job (still delivering job events when the check fails)** (R2's item
   1). Every poll that brings jobs runs the private-repository check again before a job is acquired; a public
   repository, or one the check cannot read, is not served (the poll fails and no new jobs are acquired, but
   started and completed job events from the poll are still delivered so finished jobs' computers are cleaned
-  up). Tests: `TestAJobIsNotTakenWhenTheRepositoryIsNoLongerPrivate`,
+  up, and the poll asks for no runner, so no idle computer is made for a job it did not take). Tests: `TestAJobIsNotTakenWhenTheRepositoryIsNoLongerPrivate`,
   `TestEventsDeliveredWhenPerJobPrivacyCheckFails`.
 - **Fixed: a second Ctrl-C ends a runner shutdown** (R2's item 2). After the first interrupt the shutdown waits
   for the work in flight (deregistrations, stops, drops); another interrupt ends the whole shutdown sequence at
@@ -1641,7 +1643,7 @@ Follows the container sharing review above and R2's left-for-owner list; branch 
 - **Fixed: a paused container stops cleanly.** A paused computer's processes are frozen and cannot run to
   answer TERM, so its stop waited out the grace period and ended in SIGKILL. Stop ends the pause first — under
   the same lock a checkpoint's copy holds — and then signals. Tests:
-  `a_stop_ends_a_pause_before_it_signals_the_processes`,
+  `ending_a_pause_removes_its_marker_even_when_the_thaw_fails`,
   `a_stop_waits_for_a_checkpoint_before_it_ends_a_pause`.
 - **Fixed: a second checkpoint of a container computer says one is in progress**, not that the computer is
   starting. Test:

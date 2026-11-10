@@ -1860,14 +1860,13 @@ mod tests {
     }
 
     #[test]
-    fn a_stop_ends_a_pause_before_it_signals_the_processes() {
+    fn ending_a_pause_removes_its_marker_even_when_the_thaw_fails() {
         let home = tempfile::tempdir().unwrap();
         let paths = test_paths(home.path());
         let dir = Layout::new(&paths.home).computer("dev");
         std::fs::create_dir_all(dir.state()).unwrap();
         std::fs::write(paused_file(&paths, "dev"), "").unwrap();
-        // What stop does first, under the freeze lock. The thaw itself may fail where there is no
-        // cgroup (here); the pause must end regardless, so TERM is answered like any stop's.
+        // The thaw fails where there is no cgroup (here); the pause ends regardless.
         end_pause(&paths, "dev");
         assert!(!is_paused(&paths, "dev"));
     }
