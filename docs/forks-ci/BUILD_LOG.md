@@ -1435,10 +1435,11 @@ fixes are in the same pull request (#105).
     memory only by starting a new computer from the checkpoint (`restore --disk-only`); that leaves no disk-only
     capture to write, so giving an export the same source would mean a hidden temporary computer for every such
     export. `create_backup_with_token` instead reads the descriptor of every capture before the runtime verifies
-    or writes it and stops at one whose scope or state says `checkpoint` (or `full`): "This checkpoint was saved
-    while <name> was running, so it holds the computer's memory, and an export never carries memory. Fork the
-    checkpoint and export the fork, or export <name> itself." `apply_captured_layout` lost the branch that read
-    such a checkpoint's CPUs and memory.
+    or writes it and goes on only when it names a disk-only capture (scope `file` or `disk`, state `file`).
+    Anything else, a missing or unknown scope included, counts as memory and stops the export: "This checkpoint
+    was saved while <name> was running, so it holds the computer's memory, and an export never carries memory.
+    Fork the checkpoint and export the fork, or export <name> itself." `apply_captured_layout` lost the branch
+    that read such a checkpoint's CPUs and memory.
 
   The reader is unchanged: a file an older Silo wrote with memory still imports, from its disks.
 - **Tests.** macOS (`macos_computers.rs`, the capture step `capture_archive_sources` with a machine that fails
