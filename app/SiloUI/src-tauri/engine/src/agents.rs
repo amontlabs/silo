@@ -31,13 +31,61 @@ pub fn unknown() -> Vec<AgentInfo> {
         .collect()
 }
 
-/// The state of an agent whose installed version is `installed`.
+/// A version as dotted numbers, or `None` for anything else.
+fn dotted_numbers(version: &str) -> Option<Vec<u64>> {
+    version
+        .split('.')
+        .map(|part| {
+            (!part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()))
+                .then(|| part.parse().ok())
+                .flatten()
+        })
+        .collect()
+}
+
+/// Whether `installed` is the pinned version or a newer one. Versions compare as dotted
+/// numbers (a missing part is zero); a version that is not dotted numbers counts only when it
+/// is equal.
+pub(crate) fn at_least_pinned(installed: &str, pinned: &str) -> bool {
+    let (Some(mut installed_parts), Some(mut pinned_parts)) =
+        (dotted_numbers(installed), dotted_numbers(pinned))
+    else {
+        return installed == pinned;
+    };
+    let length = installed_parts.len().max(pinned_parts.len());
+    installed_parts.resize(length, 0);
+    pinned_parts.resize(length, 0);
+    installed_parts >= pinned_parts
+}
+
+/// The state of an agent whose installed version is `installed`: ready when it is the pinned
+/// version or a newer one.
 fn state_of_version(agent: AgentId, installed: Option<&str>) -> AgentState {
     match installed {
         None => AgentState::Missing,
-        Some(version) if version == agent_tools::expected_agent_version(agent) => AgentState::Ready,
+        Some(version) if at_least_pinned(version, &agent_tools::expected_agent_version(agent)) => {
+            AgentState::Ready
+        }
         Some(_) => AgentState::Outdated,
     }
+}
+
+/// The longest reason shown for a failed install, in characters.
+const REASON_CHARS: usize = 200;
+
+/// A line a computer printed, made safe to show: control characters removed and cut to
+/// [`REASON_CHARS`] characters.
+pub(crate) fn safe_reason(text: &str) -> String {
+    let cleaned: String = text
+        .chars()
+        .filter(|character| !character.is_control())
+        .collect();
+    let cleaned = cleaned.trim();
+    if cleaned.chars().count() <= REASON_CHARS {
+        return cleaned.to_owned();
+    }
+    let cut: String = cleaned.chars().take(REASON_CHARS).collect();
+    format!("{}…", cut.trim_end())
 }
 
 fn text(value: &Value, key: &str) -> Option<String> {
@@ -47,13 +95,24 @@ fn text(value: &Value, key: &str) -> Option<String> {
         .map(str::to_owned)
 }
 
+/// The longest status line read from a computer, in bytes.
+const STATUS_LINE_BYTES: usize = 4096;
+
 /// The agents of a running Linux computer from the line `agent_tools::status_command` printed.
-/// An empty or unreadable line means nothing is installed. Claude Code follows the agent
-/// tools projection (it needs the Node.js runtime, and an older setup recipe is outdated).
+/// A line that is empty, too long or not a JSON object means the computer did not answer, so
+/// every agent is `unknown`; an answer without a version means that agent is missing. Claude
+/// Code follows the agent tools projection (it needs the Node.js runtime, and an older setup
+/// recipe is outdated).
 pub fn from_linux_status(line: Option<&str>) -> Vec<AgentInfo> {
     let raw: Value = line
-        .and_then(|line| serde_json::from_str(line.trim()).ok())
+        .map(str::trim)
+        .filter(|line| line.len() <= STATUS_LINE_BYTES)
+        .and_then(|line| serde_json::from_str(line).ok())
+        .filter(Value::is_object)
         .unwrap_or(Value::Null);
+    if raw.is_null() {
+        return unknown();
+    }
     let tools = agent_tools::linux_state(line);
     let claude_state = match tools["state"].as_str() {
         Some("ready") => AgentState::Ready,
@@ -90,7 +149,10 @@ pub fn from_macos(
     let receipt_version = |receipt: Option<&Value>| receipt.and_then(|r| text(r, "version"));
     let claude_installed = receipt_version(claude_receipt);
     let claude_expected = agent_tools::expected_agent_version(AgentId::ClaudeCode);
-    let claude = if claude_installed.as_deref() == Some(claude_expected.as_str()) {
+    let claude = if claude_installed
+        .as_deref()
+        .is_some_and(|version| at_least_pinned(version, &claude_expected))
+    {
         info(AgentId::ClaudeCode, AgentState::Ready, claude_installed)
     } else if !developer_tools_installed {
         info(AgentId::ClaudeCode, AgentState::Missing, None)
@@ -202,14 +264,31 @@ pub fn take_requested(computer_id: &str) -> Vec<AgentId> {
         .unwrap_or_default()
 }
 
+/// The line the install script of several agents prints for an agent that failed.
+const FAILED_PREFIX: &str = "silo-agent-failed:";
+
+/// The agents named by [`FAILED_PREFIX`] lines in what an install script printed.
+pub(crate) fn failed_in(output: &str) -> Vec<AgentId> {
+    AgentId::ALL
+        .into_iter()
+        .filter(|agent| {
+            output
+                .lines()
+                .any(|line| line.strip_prefix(FAILED_PREFIX) == Some(agent.as_str()))
+        })
+        .collect()
+}
+
 /// The guest script that installs `agents` in a Linux computer and then registers computer use
-/// with them. An install that fails does not stop the others.
+/// with them. An install that fails does not stop the others; it prints a [`FAILED_PREFIX`]
+/// line naming the agent.
 pub(crate) fn linux_install_all_script(agents: &[AgentId]) -> String {
     let mut script = String::from("status=0\n");
     for agent in agents {
         script.push_str(&format!(
-            "({}) || status=1\n",
-            agent_tools::setup_script_for(*agent)
+            "({}) || {{ echo {FAILED_PREFIX}{}; status=1; }}\n",
+            agent_tools::setup_script_for(*agent),
+            agent.as_str()
         ));
     }
     script.push_str(&crate::computer_use::register_installed_agents_command());
@@ -240,14 +319,92 @@ mod tests {
     }
 
     #[test]
-    fn nothing_printed_by_a_running_linux_computer_means_both_agents_are_missing() {
-        for line in [None, Some(""), Some("not json"), Some("{}")] {
+    fn an_answer_with_no_versions_means_both_agents_are_missing() {
+        for line in [Some("{}"), Some(r#"{"nodeVersion":null,"claudeVersion":null,"codexVersion":null,"recipeVersion":null}"#)] {
             let agents = from_linux_status(line);
             assert!(agents
                 .iter()
                 .all(|agent| agent.state == AgentState::Missing));
             assert!(agents.iter().all(|agent| agent.version.is_none()));
         }
+    }
+
+    #[test]
+    fn a_running_linux_computer_that_gave_no_readable_answer_is_unknown_not_missing() {
+        let too_long = format!(r#"{{"codexVersion":"0.167.0","pad":"{}"}}"#, "x".repeat(5000));
+        for line in [
+            None,
+            Some(""),
+            Some("  "),
+            Some("not json"),
+            Some("[1]"),
+            Some("\"text\""),
+            Some(too_long.as_str()),
+        ] {
+            let agents = from_linux_status(line);
+            assert_eq!(agents.len(), 2);
+            assert!(
+                agents.iter().all(|agent| agent.state == AgentState::Unknown),
+                "{line:?}"
+            );
+            assert!(agents.iter().all(|agent| agent.version.is_none()));
+        }
+    }
+
+    #[test]
+    fn a_newer_installed_version_is_ready_and_versions_compare_as_dotted_numbers() {
+        assert!(at_least_pinned("0.167.0", "0.167.0"));
+        assert!(at_least_pinned("0.168.0", "0.167.0"));
+        assert!(at_least_pinned("0.10.0", "0.9.0"));
+        assert!(at_least_pinned("1.0", "0.167.0"));
+        assert!(at_least_pinned("0.167", "0.167.0"));
+        assert!(!at_least_pinned("0.166.9", "0.167.0"));
+        assert!(!at_least_pinned("0.9.0", "0.10.0"));
+        // Anything that is not dotted numbers counts only when equal.
+        assert!(!at_least_pinned("0.168.0-beta", "0.167.0"));
+        assert!(!at_least_pinned("1..2", "0.167.0"));
+        assert!(!at_least_pinned("", "0.167.0"));
+        assert!(at_least_pinned("nightly", "nightly"));
+        let codex = agent_tools::expected_agent_version(AgentId::Codex);
+        assert_eq!(
+            state_of_version(AgentId::Codex, Some("99.0.0")),
+            AgentState::Ready
+        );
+        assert_eq!(
+            state_of_version(AgentId::Codex, Some("0.1.0")),
+            AgentState::Outdated
+        );
+        assert_eq!(
+            state_of_version(AgentId::Codex, Some(&codex)),
+            AgentState::Ready
+        );
+        let newer = json!({"version": "99.0.0"});
+        let agents = from_macos(true, false, Some(&newer), Some(Some(&newer)));
+        assert_eq!(by_id(&agents, AgentId::ClaudeCode).state, AgentState::Ready);
+        assert_eq!(by_id(&agents, AgentId::Codex).state, AgentState::Ready);
+    }
+
+    #[test]
+    fn a_reason_from_a_computer_has_no_control_characters_and_is_cut_short() {
+        assert_eq!(safe_reason("  plain words \n"), "plain words");
+        assert_eq!(safe_reason("a\u{1b}[31mb\u{7}\r\nc"), "a[31mbc");
+        let long = safe_reason(&"é".repeat(70_000));
+        assert_eq!(long.chars().count(), REASON_CHARS + 1);
+        assert!(long.ends_with('…'));
+        assert_eq!(safe_reason(&"y".repeat(REASON_CHARS)).chars().count(), REASON_CHARS);
+    }
+
+    #[test]
+    fn an_install_script_names_each_failed_agent_and_only_those() {
+        let script = linux_install_all_script(&[AgentId::Codex, AgentId::ClaudeCode]);
+        assert!(script.contains("echo silo-agent-failed:codex"));
+        assert!(script.contains("echo silo-agent-failed:claude-code"));
+        assert_eq!(failed_in("ok\nsilo-agent-failed:codex\n"), [AgentId::Codex]);
+        assert_eq!(
+            failed_in("silo-agent-failed:claude-code\nsilo-agent-failed:codex"),
+            [AgentId::ClaudeCode, AgentId::Codex]
+        );
+        assert!(failed_in("xsilo-agent-failed:codex\nsilo-agent-failed:other").is_empty());
     }
 
     #[test]
@@ -358,7 +515,7 @@ mod tests {
         drop(begin_install(computer, AgentId::ClaudeCode).unwrap());
         drop(begin_install("agents-test-other", AgentId::Codex).unwrap());
 
-        let mut agents = from_linux_status(None);
+        let mut agents = from_linux_status(Some("{}"));
         mark_installing(computer, &mut agents);
         assert_eq!(by_id(&agents, AgentId::Codex).state, AgentState::Installing);
         assert_eq!(
@@ -366,7 +523,7 @@ mod tests {
             AgentState::Missing
         );
         drop(guard);
-        let mut agents = from_linux_status(None);
+        let mut agents = from_linux_status(Some("{}"));
         mark_installing(computer, &mut agents);
         assert_eq!(by_id(&agents, AgentId::Codex).state, AgentState::Missing);
         drop(begin_install(computer, AgentId::Codex).unwrap());
@@ -397,6 +554,6 @@ mod tests {
         let register = script.find("silo-computer-use reconcile").unwrap();
         assert!(codex < claude && claude < register);
         assert!(script.trim_end().ends_with("exit $status"));
-        assert_eq!(script.matches("|| status=1").count(), 2);
+        assert_eq!(script.matches("status=1; }").count(), 2);
     }
 }
