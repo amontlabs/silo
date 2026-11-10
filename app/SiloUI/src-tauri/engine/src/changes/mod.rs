@@ -7,6 +7,7 @@ pub mod credentials;
 pub mod diff;
 pub mod fork_base;
 pub mod ignore;
+pub mod items;
 pub mod keep;
 pub mod manifest;
 pub mod promote;

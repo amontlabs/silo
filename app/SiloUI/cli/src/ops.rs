@@ -1592,6 +1592,8 @@ pub async fn fold(
                 dry_run: dry_run.then_some(true),
                 data_ok: data_ok.then_some(true),
                 review_digest: reviewed,
+                choices: None,
+                skip: None,
             }),
             progress,
         )

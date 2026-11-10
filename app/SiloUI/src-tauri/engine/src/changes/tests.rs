@@ -256,6 +256,7 @@ fn json_shape_is_stable() {
     assert_eq!(
         v["settings"]["files"][0],
         serde_json::json!({
+            "id": "file:/etc/a.conf",
             "path": "/etc/a.conf",
             "change": "added",
             "before": null,
@@ -1003,4 +1004,80 @@ fn the_review_digest_ignores_timestamps_and_idle_noise() {
         review_digest(&with_baseline(a, idle, &n1)),
         review_digest(&with_baseline(a, idle, &n2))
     );
+}
+
+// ---------------------------------------------------------------- item ids
+
+const ID_BASE: &str = "F\t/etc/a.conf\t1\t1\tx\nGIT\t/root/app\taaa\tmain\t0\t0\nPKG\tdpkg\told\t1\nPKGM\tdpkg\told\nCRON\troot\t01\nCRONF\troot\t/var/spool/cron/crontabs/root\nDB\tpostgres\tapp\tschema\ts1\n";
+const ID_FORK: &str = "F\t/etc/a.conf\t2\t2\ty\nF\t/opt/new\t1\t1\tz\nGIT\t/root/app\tbbb\tmain\t0\t0\nGITF\t/root/app\t_M\ta.txt\nPKG\tdpkg\tjq\t1.7\nPKGM\tdpkg\tjq\nCRON\troot\t02\nCRONF\troot\t/var/spool/cron/crontabs/root\nDB\tpostgres\tapp\tschema\ts2\nLAGENT\tuser\tdev.x\td1\t/Users/a/Library/LaunchAgents/dev.x.plist\n";
+
+#[test]
+fn every_entry_a_keep_acts_on_has_the_id_it_is_answered_by() {
+    let d = run(ID_BASE, ID_FORK);
+    let ids: Vec<String> = d.items().into_keys().collect();
+    assert_eq!(
+        ids,
+        [
+            "cron:root",
+            "database:postgres:app",
+            "file:/etc/a.conf",
+            "file:/opt/new",
+            "file:/root/app/a.txt",
+            "launch-agent:user:dev.x",
+            "package:dpkg:jq",
+            "package:dpkg:old",
+            "repo:/root/app",
+        ]
+    );
+    assert_eq!(d.settings.files[0].id, "file:/etc/a.conf");
+    assert_eq!(d.other[0].id, "file:/opt/new");
+    assert_eq!(d.code[0].id, "repo:/root/app");
+    assert_eq!(d.code[0].dirty_ids["a.txt"], "file:/root/app/a.txt");
+    assert_eq!(d.packages[0].ids, ["package:dpkg:jq", "package:dpkg:old"]);
+    assert_eq!(d.settings.cron[0].id, "cron:root");
+    assert_eq!(d.settings.launch_agents[0].id, "launch-agent:user:dev.x");
+    assert_eq!(d.database[0].id, "database:postgres:app");
+    // The ids are in the JSON, and a diff without them still reads.
+    let json = serde_json::to_value(&d).unwrap();
+    assert_eq!(json["code"][0]["id"], "repo:/root/app");
+    let back: Diff = serde_json::from_value(json).unwrap();
+    assert_eq!(back, d);
+    let bare: Diff =
+        serde_json::from_value(serde_json::to_value(d.without_ids()).unwrap()).unwrap();
+    assert!(bare.code[0].id.is_empty() && bare.items().len() == d.items().len());
+}
+
+#[test]
+fn ids_do_not_depend_on_the_order_of_the_manifest() {
+    let reversed: String = ID_FORK.lines().rev().map(|l| format!("{l}\n")).collect();
+    let (a, b) = (run(ID_BASE, ID_FORK), run(ID_BASE, &reversed));
+    assert_eq!(a.items(), b.items());
+}
+
+#[test]
+fn ids_do_not_change_the_review_digest() {
+    use crate::changes::keep::review_digest;
+    fn strip(value: &mut serde_json::Value) {
+        match value {
+            serde_json::Value::Object(map) => {
+                for key in ["id", "ids", "dirty_ids"] {
+                    map.remove(key);
+                }
+                map.values_mut().for_each(strip);
+            }
+            serde_json::Value::Array(items) => items.iter_mut().for_each(strip),
+            _ => {}
+        }
+    }
+    let d = run(ID_BASE, ID_FORK);
+    let mut view = serde_json::json!({
+        "code": d.code, "packages": d.packages, "settings": d.settings,
+        "database": d.database, "other": d.other,
+    });
+    strip(&mut view);
+    let expected = <sha2::Sha256 as sha2::Digest>::digest(serde_json::to_vec(&view).unwrap())
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect::<String>();
+    assert_eq!(review_digest(&d), expected);
 }

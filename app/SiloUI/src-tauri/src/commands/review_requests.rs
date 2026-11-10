@@ -54,6 +54,8 @@ pub(crate) async fn keep(
             request_id: id.to_owned(),
             data_ok: data_ok.then_some(true),
             keep: None,
+            choices: None,
+            skip: None,
         }))
         .await
 }

@@ -96,12 +96,31 @@ pub fn apply(
     // Git.
     for repo in &plan.repos {
         if let Some(bundle) = ready.bundles.iter().find(|b| b.repo == repo.repo) {
-            match bundle.state.as_str() {
-                "uptodate" => done.notes.push(format!(
+            match (&bundle.branch, bundle.state.as_str()) {
+                (_, "uptodate") => done.notes.push(format!(
                     "{}: main already has the fork's commits",
                     repo.repo
                 )),
-                "new" => {
+                (Some(branch), _) if branch.exists => done.notes.push(format!(
+                    "{}: branch {} already holds the fork's commits",
+                    repo.repo, branch.name
+                )),
+                (Some(branch), _) => {
+                    let head = env
+                        .run(
+                            target,
+                            RunAs::Account,
+                            &scripts::git_branch(&repo.repo, &bundle.tmp_ref, &branch.name),
+                        )?
+                        .success(&format!("Creating branch {} in {}", branch.name, repo.repo))?;
+                    done.steps.push(format!(
+                        "git {}: the fork's commits are on branch {} at {}; nothing was merged or checked out",
+                        repo.repo,
+                        branch.name,
+                        head.trim()
+                    ));
+                }
+                (None, "new") => {
                     env.run(
                         target,
                         RunAs::Account,
@@ -110,7 +129,7 @@ pub fn apply(
                     .success(&format!("Cloning {}", repo.repo))?;
                     done.steps.push(format!("git {}: cloned", repo.repo));
                 }
-                _ => {
+                (None, _) => {
                     let head = env
                         .run(
                             target,

@@ -17,7 +17,7 @@ use super::{
     env::{CheckpointRef, ExecOut, GuestCmd, KeepEnv, Live, ManifestStore, Os, RunAs},
     journal::{Entry, Journal, State},
     plan::{self, Base, Decision},
-    prepare, scripts, Hooks, Outcome, Request, Resumed, UndoOutcome,
+    prepare, scripts, Answer, Hooks, Outcome, Request, Resumed, UndoOutcome,
 };
 use crate::changes::{diff::diff, ignore::IgnoreList, manifest::Manifest};
 
@@ -33,6 +33,8 @@ struct Comp {
     pids: BTreeMap<String, u32>,
     merged: Vec<String>,
     hooks: Vec<String>,
+    /// Branch names made in a repository.
+    branches: Vec<String>,
 }
 
 struct World {
@@ -58,6 +60,8 @@ struct World {
     /// Computers that are stopped; every other computer runs.
     stopped: Mutex<Vec<String>>,
     fail_start: Mutex<bool>,
+    /// Reading a file from any computer fails.
+    fail_read: Mutex<bool>,
 }
 
 impl World {
@@ -87,6 +91,7 @@ impl World {
             dirs: Mutex::default(),
             stopped: Mutex::default(),
             fail_start: Mutex::default(),
+            fail_read: Mutex::default(),
         })
     }
 
@@ -259,6 +264,20 @@ impl KeepEnv for Fake {
                 w.with(computer, |c| c.merged.push(cmd.get("repo").to_owned()));
                 "abc1234\n".into()
             }
+            "git_branch_plan" => {
+                let wanted = cmd.get("name").to_owned();
+                let mut name = wanted.clone();
+                let mut n = 1;
+                while w.with(computer, |c| c.branches.contains(&name)) {
+                    n += 1;
+                    name = format!("{wanted}-{n}");
+                }
+                format!("{name}\nnew\n")
+            }
+            "git_branch" => {
+                w.with(computer, |c| c.branches.push(cmd.get("name").to_owned()));
+                "abc1234\n".into()
+            }
             "git_file_state" => w
                 .file_states
                 .lock()
@@ -323,6 +342,9 @@ impl KeepEnv for Fake {
     }
 
     fn read(&self, computer: &str, path: &str) -> Result<Vec<u8>, String> {
+        if *self.0.fail_read.lock().unwrap() {
+            return Err(format!("{path} could not be read"));
+        }
         self.0
             .log
             .lock()
@@ -538,7 +560,14 @@ fn refused(outcome: Outcome) -> super::Refusal {
 fn the_recorded_cli_tools_task_plans_its_packages_files_and_commits() {
     let (base, fork) = (fixture("l3.parent"), fixture("l3.fork"));
     let changes = diff(&base, &fork, None, &IgnoreList::builtin());
-    let plan = plan::build(&changes, &base, &fork, &base, Os::Linux);
+    let plan = plan::build(
+        &changes,
+        &base,
+        &fork,
+        &base,
+        Os::Linux,
+        &Request::default(),
+    );
     assert!(plan.conflicts.is_empty(), "{:?}", plan.conflicts);
     let mut names: Vec<_> = plan
         .packages
@@ -670,7 +699,14 @@ fn package_names_and_versions_are_checked_before_a_manager_sees_them() {
     let base = m("");
     let fork = m("PKG\tdpkg\t-evil\t1.0\nPKGM\tdpkg\t-evil\n");
     let changes = diff(&base, &fork, None, &IgnoreList::builtin());
-    let plan = plan::build(&changes, &base, &fork, &base, Os::Linux);
+    let plan = plan::build(
+        &changes,
+        &base,
+        &fork,
+        &base,
+        Os::Linux,
+        &Request::default(),
+    );
     assert!(plan.packages.is_empty());
     assert_eq!(plan.conflicts[0].kind, "package");
 }
@@ -681,7 +717,14 @@ fn a_package_main_changed_since_the_fork_is_a_conflict_and_a_removal_is_three_wa
     let fork = m("PKG\tdpkg\tjq\t1.7\nPKGM\tdpkg\tjq\n");
     let main = m("PKG\tdpkg\tjq\t1.5\nPKG\tdpkg\told\t1\nPKGM\tdpkg\tjq\nPKGM\tdpkg\told\n");
     let changes = diff(&base, &fork, None, &IgnoreList::builtin());
-    let plan = plan::build(&changes, &base, &fork, &main, Os::Linux);
+    let plan = plan::build(
+        &changes,
+        &base,
+        &fork,
+        &main,
+        Os::Linux,
+        &Request::default(),
+    );
     assert_eq!(plan.conflicts.len(), 1);
     assert_eq!(plan.conflicts[0].item, "dpkg jq");
     assert_eq!(
@@ -692,7 +735,14 @@ fn a_package_main_changed_since_the_fork_is_a_conflict_and_a_removal_is_three_wa
         ["old"]
     );
     let main_edited = m("PKG\tdpkg\tjq\t1.6\nPKG\tdpkg\told\t2\nPKGM\tdpkg\tjq\nPKGM\tdpkg\told\n");
-    let plan = plan::build(&changes, &base, &fork, &main_edited, Os::Linux);
+    let plan = plan::build(
+        &changes,
+        &base,
+        &fork,
+        &main_edited,
+        Os::Linux,
+        &Request::default(),
+    );
     assert!(plan.removals.is_empty());
     assert!(plan.conflicts.iter().any(|c| c.item == "dpkg old"));
 }
@@ -853,7 +903,7 @@ fn a_divergent_keep_stops_before_anything_changes() {
     )
     .unwrap();
     let refusal = refused(outcome);
-    assert_eq!(refusal.reason, "divergent");
+    assert_eq!(refusal.reason, "choices-needed");
     assert_eq!(refusal.conflicts[0].item, "/root/.bashrc");
     for tag in [
         "pkg_install",
@@ -920,7 +970,7 @@ fn a_file_the_receiver_changed_on_main_conflicts_with_the_imported_computers_cha
     let (_dir, journal) = journal();
     let st = store_from_imported_record(SIMPLE_BASE, SIMPLE_FORK, "F\t/root/.bashrc\t21\t9\tdd\n");
     let refusal = refused(run(&world, &st, &journal, &request(Hooks::default())).unwrap());
-    assert_eq!(refusal.reason, "divergent");
+    assert_eq!(refusal.reason, "choices-needed");
     assert_eq!(refusal.conflicts[0].item, "/root/.bashrc");
     assert_eq!(world.logged("checkpoint"), 0);
     world.with("main", |c| {
@@ -942,7 +992,7 @@ fn a_file_the_collector_could_not_hash_is_a_conflict_when_main_differs() {
         )
         .unwrap(),
     );
-    assert_eq!(refusal.reason, "divergent");
+    assert_eq!(refusal.reason, "choices-needed");
 }
 
 #[test]
@@ -1034,7 +1084,7 @@ fn a_git_that_cannot_test_the_merge_refuses_instead_of_going_ahead() {
     };
     let refusal =
         refused(run(&world, &store(BASE, FORK, BASE), &journal, &request(hooks)).unwrap());
-    assert_eq!(refusal.reason, "git");
+    assert_eq!(refusal.reason, "choices-needed");
     assert!(refusal.conflicts[0].detail.contains("merge-tree"));
 }
 
@@ -1378,8 +1428,9 @@ fn brew_installs_only_when_it_would_install_the_forks_version() {
         refusal.conflicts[0].detail,
         "brew now offers 1.8; the fork has 1.7"
     );
-    assert!(refusal.message.contains("package version: brew jq"));
-    assert!(!refusal.message.contains("clash"));
+    assert_eq!(refusal.reason, "choices-needed");
+    assert_eq!(refusal.conflicts[0].id, "package:brew:jq");
+    assert_eq!(refusal.conflicts[0].allowed, [Answer::Main]);
     *world.brew.lock().unwrap() = String::new();
     let refusal = refused(
         run(
@@ -2368,4 +2419,878 @@ fn file_write_creates_missing_parents_and_applies_the_mode() {
     assert_eq!(std::fs::read(&path).unwrap(), b"{}");
     let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
     assert_eq!(mode, 0o600);
+}
+
+// ------------------------------------------------------------------ choices
+
+fn choosing(answers: &[(&str, Answer)]) -> Request {
+    Request {
+        choices: super::Choices {
+            answers: answers
+                .iter()
+                .map(|(id, answer)| ((*id).to_owned(), *answer))
+                .collect(),
+            ..Default::default()
+        },
+        ..request(Hooks::default())
+    }
+}
+
+fn skipping(ids: &[&str]) -> Request {
+    Request {
+        choices: super::Choices {
+            skip: ids.iter().map(|id| (*id).to_owned()).collect(),
+            ..Default::default()
+        },
+        ..request(Hooks::default())
+    }
+}
+
+fn kept(outcome: Outcome) -> super::Report {
+    match outcome {
+        Outcome::Kept(report) => report,
+        other => panic!("expected a kept result, got {other:?}"),
+    }
+}
+
+fn item<'a>(report: &'a super::Report, id: &str) -> &'a super::ReportItem {
+    report
+        .items
+        .iter()
+        .find(|i| i.id == id)
+        .unwrap_or_else(|| panic!("no item {id} in {:?}", report.items))
+}
+
+const BASHRC: &str = "file:/root/.bashrc";
+const APP: &str = "repo:/root/app";
+const REPO_BASE: &str = "F\t/root/.bashrc\t10\t1\tc:old\nGIT\t/root/app\taaa\tmain\t0\t0\n";
+const REPO_FORK: &str = "F\t/root/.bashrc\t12\t2\tbb\nGIT\t/root/app\tbbb\tmain\t0\t0\n";
+
+/// A world where main edited .bashrc and both sides changed /root/app.
+fn clashing_world() -> Arc<World> {
+    let world = simple_world();
+    world.put("main", "/root/.bashrc", "main edited");
+    *world.git_state.lock().unwrap() =
+        "conflict\nCONFLICT (content): Merge conflict in a.js\n".into();
+    *world.changed_files.lock().unwrap() = vec!["a.js".into()];
+    world
+}
+
+#[test]
+fn a_file_both_sides_changed_is_a_question_with_its_id_and_the_allowed_answers() {
+    let world = simple_world();
+    world.put("main", "/root/.bashrc", "main edited");
+    let (_dir, journal) = journal();
+    let outcome = run(
+        &world,
+        &store(SIMPLE_BASE, SIMPLE_FORK, SIMPLE_BASE),
+        &journal,
+        &request(Hooks::default()),
+    )
+    .unwrap();
+    let Outcome::Refused { report, refusal } = outcome else {
+        panic!("{outcome:?}")
+    };
+    assert_eq!(refusal.reason, "choices-needed");
+    let conflict = &refusal.conflicts[0];
+    assert_eq!(conflict.id, BASHRC);
+    assert_eq!(conflict.allowed, [Answer::Fork, Answer::Main]);
+    assert_eq!(
+        (conflict.fork_change.as_str(), conflict.main_change.as_str()),
+        ("changed", "changed")
+    );
+    assert!(
+        refusal.message.contains("needs an answer"),
+        "{}",
+        refusal.message
+    );
+    assert!(report.items.is_empty());
+    assert_eq!(world.logged("checkpoint"), 0);
+    // The question serializes with the fields the wire type reads.
+    let json = Outcome::Refused { report, refusal }.to_json();
+    let wire: silo_api::methods::keep::ChangesKeepResult = serde_json::from_value(json).unwrap();
+    let wire = wire.refusal.unwrap().conflicts.remove(0);
+    assert_eq!(wire.id, BASHRC);
+    assert_eq!(
+        wire.allowed,
+        [
+            silo_api::methods::keep::KeepAnswer::Fork,
+            silo_api::methods::keep::KeepAnswer::Main
+        ]
+    );
+}
+
+#[test]
+fn a_file_conflict_is_settled_by_the_fork_or_by_main() {
+    let st = || store(SIMPLE_BASE, SIMPLE_FORK, SIMPLE_BASE);
+    let world = simple_world();
+    world.put("main", "/root/.bashrc", "main edited");
+    let (_dir, journal) = journal();
+    let report = kept(
+        run(
+            &world,
+            &st(),
+            &journal,
+            &choosing(&[(BASHRC, Answer::Fork)]),
+        )
+        .unwrap(),
+    );
+    world.with("main", |c| {
+        assert_eq!(c.files["/root/.bashrc"].0, b"export X=1\n")
+    });
+    assert_eq!(item(&report, BASHRC).outcome, "brought-over");
+
+    let world = simple_world();
+    world.put("main", "/root/.bashrc", "main edited");
+    let (_dir, journal) = self::journal();
+    let report = kept(
+        run(
+            &world,
+            &st(),
+            &journal,
+            &choosing(&[(BASHRC, Answer::Main)]),
+        )
+        .unwrap(),
+    );
+    world.with("main", |c| {
+        assert_eq!(c.files["/root/.bashrc"].0, b"main edited")
+    });
+    assert_eq!(world.logged("file_write"), 0);
+    assert_eq!(item(&report, BASHRC).outcome, "left-as-main");
+}
+
+#[test]
+fn a_package_conflict_is_settled_by_the_fork_or_by_main() {
+    let base = "PKG\tdpkg\tjq\t1.6\nPKGM\tdpkg\tjq\n";
+    let fork = "PKG\tdpkg\tjq\t1.7\nPKGM\tdpkg\tjq\n";
+    let main = "PKG\tdpkg\tjq\t1.5\nPKGM\tdpkg\tjq\n";
+    let id = "package:dpkg:jq";
+    let world = World::new(Os::Linux, &["fork", "main"]);
+    let (_dir, journal) = journal();
+    let refusal = refused(
+        run(
+            &world,
+            &store(base, fork, main),
+            &journal,
+            &request(Hooks::default()),
+        )
+        .unwrap(),
+    );
+    assert_eq!(refusal.conflicts[0].id, id);
+    assert_eq!(refusal.conflicts[0].allowed, [Answer::Fork, Answer::Main]);
+    assert_eq!(refusal.conflicts[0].fork_change, "now 1.7");
+    assert_eq!(refusal.conflicts[0].main_change, "now 1.5");
+
+    let report = kept(
+        run(
+            &world,
+            &store(base, fork, main),
+            &journal,
+            &choosing(&[(id, Answer::Fork)]),
+        )
+        .unwrap(),
+    );
+    world.with("main", |c| {
+        assert_eq!(c.pkgs.get("dpkg jq").map(String::as_str), Some("1.7"))
+    });
+    assert_eq!(item(&report, id).outcome, "brought-over");
+
+    let world = World::new(Os::Linux, &["fork", "main"]);
+    let (_dir, journal) = self::journal();
+    let report = kept(
+        run(
+            &world,
+            &store(base, fork, main),
+            &journal,
+            &choosing(&[(id, Answer::Main)]),
+        )
+        .unwrap(),
+    );
+    assert_eq!(world.logged("pkg_install"), 0);
+    assert_eq!(item(&report, id).outcome, "left-as-main");
+}
+
+#[test]
+fn a_package_removal_both_sides_touched_is_settled_the_same_way() {
+    let base = "PKG\tdpkg\told\t1\nPKGM\tdpkg\told\n";
+    let main = "PKG\tdpkg\told\t2\nPKGM\tdpkg\told\n";
+    let id = "package:dpkg:old";
+    let world = World::new(Os::Linux, &["fork", "main"]);
+    world.with("main", |c| c.pkgs.insert("dpkg old".into(), "2".into()));
+    let (_dir, journal) = journal();
+    let refusal = refused(
+        run(
+            &world,
+            &store(base, "", main),
+            &journal,
+            &request(Hooks::default()),
+        )
+        .unwrap(),
+    );
+    assert_eq!(refusal.conflicts[0].allowed, [Answer::Fork, Answer::Main]);
+    assert_eq!(refusal.conflicts[0].fork_change, "removed");
+    kept(
+        run(
+            &world,
+            &store(base, "", main),
+            &journal,
+            &choosing(&[(id, Answer::Fork)]),
+        )
+        .unwrap(),
+    );
+    assert_eq!(world.logged("pkg_remove"), 1);
+    world.with("main", |c| assert!(!c.pkgs.contains_key("dpkg old")));
+}
+
+#[test]
+fn a_crontab_conflict_is_settled_by_the_fork_or_by_main() {
+    let base = format!("{CRON_BASE}CRONT\troot\t0 1 * * * b\\n\n");
+    let id = "cron:root";
+    let make = || {
+        let world = World::new(Os::Linux, &["fork", "main"]);
+        world.with("fork", |c| {
+            c.crontab.insert("root".into(), "5 1 * * * b\n".into())
+        });
+        world.with("main", |c| {
+            c.crontab.insert("root".into(), "9 9 * * * b\n".into())
+        });
+        world
+    };
+    let (_dir, journal) = journal();
+    let world = make();
+    let refusal = refused(
+        run(
+            &world,
+            &store(&base, CRON_FORK, CRON_MAIN),
+            &journal,
+            &request(Hooks::default()),
+        )
+        .unwrap(),
+    );
+    assert_eq!(refusal.conflicts[0].id, id);
+    assert_eq!(refusal.conflicts[0].allowed, [Answer::Fork, Answer::Main]);
+
+    kept(
+        run(
+            &world,
+            &store(&base, CRON_FORK, CRON_MAIN),
+            &journal,
+            &choosing(&[(id, Answer::Fork)]),
+        )
+        .unwrap(),
+    );
+    world.with("main", |c| assert_eq!(c.crontab["root"], "5 1 * * * b\n"));
+
+    let world = make();
+    let report = kept(
+        run(
+            &world,
+            &store(&base, CRON_FORK, CRON_MAIN),
+            &journal,
+            &choosing(&[(id, Answer::Main)]),
+        )
+        .unwrap(),
+    );
+    world.with("main", |c| assert_eq!(c.crontab["root"], "9 9 * * * b\n"));
+    assert_eq!(world.logged("crontab_write"), 0);
+    assert_eq!(item(&report, id).outcome, "left-as-main");
+}
+
+#[test]
+fn an_unreadable_file_and_a_blocked_destination_can_only_be_left_as_main() {
+    let world = simple_world();
+    world.put("main", "/root/.bashrc", "<unreadable>");
+    let (_dir, journal) = journal();
+    let st = store(SIMPLE_BASE, SIMPLE_FORK, SIMPLE_BASE);
+    let refusal = refused(run(&world, &st, &journal, &request(Hooks::default())).unwrap());
+    assert_eq!(refusal.conflicts[0].allowed, [Answer::Main]);
+    // `fork` does not settle it.
+    let refusal =
+        refused(run(&world, &st, &journal, &choosing(&[(BASHRC, Answer::Fork)])).unwrap());
+    assert_eq!(refusal.conflicts[0].allowed, [Answer::Main]);
+    kept(run(&world, &st, &journal, &choosing(&[(BASHRC, Answer::Main)])).unwrap());
+
+    let world = simple_world();
+    world.bad_dest.lock().unwrap().push("/root/.bashrc".into());
+    let refusal = refused(run(&world, &st, &journal, &request(Hooks::default())).unwrap());
+    assert_eq!(refusal.conflicts[0].kind, "destination");
+    assert_eq!(refusal.conflicts[0].id, BASHRC);
+    assert_eq!(refusal.conflicts[0].allowed, [Answer::Main]);
+    kept(run(&world, &st, &journal, &choosing(&[(BASHRC, Answer::Main)])).unwrap());
+    assert_eq!(world.logged("file_write"), 0);
+}
+
+#[test]
+fn a_repository_both_sides_changed_offers_branch_or_main_never_fork() {
+    let world = clashing_world();
+    let (_dir, journal) = journal();
+    let st = store(REPO_BASE, REPO_FORK, REPO_BASE);
+    let refusal =
+        refused(run(&world, &st, &journal, &choosing(&[(BASHRC, Answer::Fork)])).unwrap());
+    assert_eq!(refusal.reason, "choices-needed");
+    assert_eq!(refusal.conflicts.len(), 1);
+    let conflict = &refusal.conflicts[0];
+    assert_eq!((conflict.kind.as_str(), conflict.id.as_str()), ("git", APP));
+    assert_eq!(conflict.allowed, [Answer::Branch, Answer::Main]);
+    assert!(conflict.detail.contains("a.js"));
+    assert_eq!(conflict.fork_change, "new commits, now at bbb");
+
+    // Forcing the fork over main's repository is an error naming the repository.
+    let error = run(&world, &st, &journal, &choosing(&[(APP, Answer::Fork)])).unwrap_err();
+    assert!(error.contains(APP) && error.contains("branch"), "{error}");
+    assert_eq!(world.logged("checkpoint"), 0);
+    assert_eq!(world.logged("git_merge"), 0);
+
+    // An unsupported git offers the same two answers.
+    *world.git_state.lock().unwrap() = "unsupported".into();
+    let refusal = refused(run(&world, &st, &journal, &request(Hooks::default())).unwrap());
+    let git = refusal.conflicts.iter().find(|c| c.kind == "git").unwrap();
+    assert_eq!(git.allowed, [Answer::Branch, Answer::Main]);
+}
+
+#[test]
+fn main_for_a_conflicting_repository_leaves_it_alone_without_fetching_anything() {
+    let world = clashing_world();
+    let (_dir, journal) = journal();
+    let st = store(REPO_BASE, REPO_FORK, REPO_BASE);
+    let report = kept(
+        run(
+            &world,
+            &st,
+            &journal,
+            &choosing(&[(APP, Answer::Main), (BASHRC, Answer::Main)]),
+        )
+        .unwrap(),
+    );
+    assert_eq!(item(&report, APP).outcome, "left-as-main");
+    assert_eq!(world.logged("git_precheck"), 0);
+    assert_eq!(world.logged("git_merge"), 0);
+    assert_eq!(world.logged("git_branch"), 0);
+}
+
+#[test]
+fn a_repository_conflict_answered_branch_leaves_the_commits_on_a_branch_and_merges_nothing() {
+    let world = clashing_world();
+    let (_dir, journal) = journal();
+    let st = store(REPO_BASE, REPO_FORK, REPO_BASE);
+    let report = kept(
+        run(
+            &world,
+            &st,
+            &journal,
+            &choosing(&[(APP, Answer::Branch), (BASHRC, Answer::Main)]),
+        )
+        .unwrap(),
+    );
+    assert_eq!(world.logged("git_merge"), 0);
+    assert_eq!(world.logged("git_branch"), 1);
+    world.with("main", |c| {
+        assert_eq!(c.branches, ["silo/fork"]);
+        assert!(c.merged.is_empty());
+        // The working tree and every file are as main had them; the bundle is gone.
+        assert_eq!(c.files["/root/.bashrc"].0, b"main edited");
+        assert!(c.files.keys().all(|p| !p.contains("silo-keep")));
+    });
+    let repo = item(&report, APP);
+    assert_eq!(repo.outcome, "branch");
+    assert!(repo.detail.contains("silo/fork"), "{}", repo.detail);
+    assert!(report
+        .steps
+        .iter()
+        .any(|s| s.contains("on branch silo/fork") && s.contains("nothing was merged")));
+    // Both the look ahead and the keep dropped their temporary refs.
+    assert_eq!(world.logged("git_drop_ref"), 2);
+
+    // A second keep never moves the branch that exists: it takes the next free name.
+    kept(
+        run(
+            &world,
+            &st,
+            &journal,
+            &choosing(&[(APP, Answer::Branch), (BASHRC, Answer::Main)]),
+        )
+        .unwrap(),
+    );
+    world.with("main", |c| {
+        assert_eq!(c.branches, ["silo/fork", "silo/fork-2"])
+    });
+}
+
+#[test]
+fn branch_also_works_for_a_repository_that_would_merge_cleanly_and_drops_its_uncommitted_files() {
+    let world = simple_world();
+    *world.git_state.lock().unwrap() = "merge".into();
+    let (_dir, journal) = journal();
+    let fork = format!("{REPO_FORK}GITF\t/root/app\t_M\ta.txt\n");
+    world.put("fork", "/root/app/a.txt", "fork edit");
+    let st = store(REPO_BASE, &fork, REPO_BASE);
+    let report = kept(run(&world, &st, &journal, &choosing(&[(APP, Answer::Branch)])).unwrap());
+    assert_eq!(item(&report, APP).outcome, "branch");
+    assert_eq!(world.logged("git_merge"), 0);
+    world.with("main", |c| {
+        assert_eq!(c.branches, ["silo/fork"]);
+        assert!(!c.files.contains_key("/root/app/a.txt"));
+    });
+    assert!(report
+        .notes
+        .iter()
+        .any(|n| n.contains("Uncommitted changes")));
+}
+
+#[test]
+fn commits_with_credentials_are_refused_even_when_the_answer_is_branch() {
+    let world = clashing_world();
+    *world.changed_files.lock().unwrap() = vec![".env".into()];
+    let (_dir, journal) = journal();
+    let st = store(REPO_BASE, REPO_FORK, REPO_BASE);
+    let refusal = refused(
+        run(
+            &world,
+            &st,
+            &journal,
+            &choosing(&[(APP, Answer::Branch), (BASHRC, Answer::Main)]),
+        )
+        .unwrap(),
+    );
+    assert_eq!(refusal.reason, "credentials");
+    assert!(refusal.conflicts[0].allowed.is_empty());
+    assert_eq!(world.logged("git_branch"), 0);
+    // A credential cannot be named in a choice: it is not an item of the diff.
+    let error = run(
+        &world,
+        &st,
+        &journal,
+        &choosing(&[("credentials:/root/app/.env", Answer::Fork)]),
+    )
+    .unwrap_err();
+    assert!(error.contains("credentials:/root/app/.env"), "{error}");
+}
+
+#[test]
+fn skip_leaves_an_item_that_does_not_conflict_and_says_so() {
+    let world = simple_world();
+    let (_dir, journal) = journal();
+    let st = store(SIMPLE_BASE, SIMPLE_FORK, SIMPLE_BASE);
+    let report = kept(run(&world, &st, &journal, &skipping(&[BASHRC])).unwrap());
+    world.with("main", |c| assert_eq!(c.files["/root/.bashrc"].0, b"old"));
+    assert_eq!(item(&report, BASHRC).outcome, "skipped");
+    // Not skipped: the same keep brings it over.
+    let world = simple_world();
+    let report = kept(run(&world, &st, &journal, &request(Hooks::default())).unwrap());
+    assert_eq!(item(&report, BASHRC).outcome, "brought-over");
+}
+
+#[test]
+fn a_choice_for_an_unknown_item_or_an_answer_it_does_not_allow_is_an_error_naming_the_item() {
+    let world = clashing_world();
+    let (_dir, journal) = journal();
+    let base = format!("{REPO_BASE}DB\tpostgres\tapp\tschema\ts1\n");
+    let fork = format!("{REPO_FORK}DB\tpostgres\tapp\tschema\ts2\n");
+    let st = store(&base, &fork, &base);
+    let fails = |request: Request, id: &str| {
+        let error = run(&world, &st, &journal, &request).unwrap_err();
+        assert!(error.contains(id), "{error}");
+        error
+    };
+    fails(
+        choosing(&[("file:/nowhere", Answer::Fork)]),
+        "file:/nowhere",
+    );
+    fails(skipping(&["package:dpkg:ghost"]), "package:dpkg:ghost");
+    fails(choosing(&[(BASHRC, Answer::Branch)]), BASHRC);
+    fails(
+        choosing(&[("database:postgres:app", Answer::Main)]),
+        "database:postgres:app",
+    );
+    fails(
+        skipping(&["database:postgres:app"]),
+        "database:postgres:app",
+    );
+    let mut both = skipping(&[BASHRC]);
+    both.choices.answers.insert(BASHRC.into(), Answer::Fork);
+    fails(both, BASHRC);
+    // Nothing was fetched, checkpointed or changed by any of them.
+    assert_eq!(world.logged("checkpoint"), 0);
+    assert_eq!(world.logged("git_precheck"), 0);
+}
+
+#[test]
+fn branch_is_only_offered_for_a_repository_with_commits_in_the_fork() {
+    let world = simple_world();
+    let (_dir, journal) = journal();
+    let fork =
+        format!("{SIMPLE_FORK}GIT\t/root/app\taaa\tmain\t0\t0\nGITF\t/root/app\t_M\ta.txt\n");
+    let base = format!("{SIMPLE_BASE}GIT\t/root/app\taaa\tmain\t0\t0\n");
+    let error = run(
+        &world,
+        &store(&base, &fork, &base),
+        &journal,
+        &choosing(&[(APP, Answer::Branch)]),
+    )
+    .unwrap_err();
+    assert!(
+        error.contains(APP) && error.contains("no commits"),
+        "{error}"
+    );
+}
+
+#[test]
+fn a_dry_run_with_choices_reports_what_the_real_run_does() {
+    let world = clashing_world();
+    let (_dir, journal) = journal();
+    let st = || store(REPO_BASE, REPO_FORK, REPO_BASE);
+    let answers = [(APP, Answer::Branch), (BASHRC, Answer::Fork)];
+    let mut dry = choosing(&answers);
+    dry.dry_run = true;
+    let Outcome::DryRun(planned) = run(&world, &st(), &journal, &dry).unwrap() else {
+        panic!()
+    };
+    assert_eq!(world.logged("checkpoint"), 0);
+    world.with("main", |c| {
+        assert_eq!(c.files["/root/.bashrc"].0, b"main edited");
+        assert!(c.branches.is_empty());
+    });
+
+    // The real run, pinned to the digest the dry run reported.
+    let mut real = choosing(&answers);
+    real.reviewed = planned.review_digest.clone();
+    let done = kept(run(&world, &st(), &journal, &real).unwrap());
+    assert_eq!(done.items, planned.items);
+    assert_eq!(done.summary, planned.summary);
+    assert_eq!(done.fast_forward, planned.fast_forward);
+    assert_eq!(done.items.len(), 2);
+    world.with("main", |c| {
+        assert_eq!(c.files["/root/.bashrc"].0, b"export X=1\n");
+        assert_eq!(c.branches, ["silo/fork"]);
+    });
+
+    // Missing choices answer the same way in a dry run and a real run.
+    let world = clashing_world();
+    let (_dir, journal) = self::journal();
+    let mut dry = request(Hooks::default());
+    dry.dry_run = true;
+    let a = refused(run(&world, &st(), &journal, &dry).unwrap());
+    let b = refused(run(&world, &st(), &journal, &request(Hooks::default())).unwrap());
+    assert_eq!(a, b);
+    assert_eq!(a.conflicts.len(), 2);
+}
+
+#[test]
+fn a_bad_choice_is_checked_after_the_digest_and_a_stale_digest_still_refuses() {
+    let world = simple_world();
+    let (_dir, journal) = journal();
+    let st = store(SIMPLE_BASE, SIMPLE_FORK, SIMPLE_BASE);
+    let mut stale = choosing(&[(BASHRC, Answer::Fork)]);
+    stale.reviewed = Some("not-the-digest".into());
+    assert_eq!(
+        refused(run(&world, &st, &journal, &stale).unwrap()).reason,
+        "changed"
+    );
+}
+
+#[test]
+fn undo_after_choices_puts_main_back_and_the_branch_goes_with_it() {
+    let world = clashing_world();
+    let (_dir, journal) = journal();
+    let mut st = store(REPO_BASE, REPO_FORK, REPO_BASE);
+    kept(
+        run(
+            &world,
+            &st,
+            &journal,
+            &choosing(&[(APP, Answer::Branch), (BASHRC, Answer::Fork)]),
+        )
+        .unwrap(),
+    );
+    world.with("main", |c| {
+        assert_eq!(c.files["/root/.bashrc"].0, b"export X=1\n");
+        assert_eq!(c.branches, ["silo/fork"]);
+    });
+    st.manifests.insert("main".into(), mt(REPO_BASE));
+    let undone = super::undo(&Fake(world.clone()), &st, &journal, "main", WAIT).unwrap();
+    assert!(matches!(undone, UndoOutcome::Undone { .. }), "{undone:?}");
+    world.with("main", |c| {
+        assert_eq!(c.files["/root/.bashrc"].0, b"main edited");
+        assert!(
+            c.branches.is_empty(),
+            "the branch was part of what the undo took back"
+        );
+    });
+}
+
+#[test]
+fn the_report_says_whether_main_was_unchanged_since_the_fork() {
+    let (_dir, journal) = journal();
+    let world = simple_world();
+    let plain = request(Hooks::default());
+    let report = kept(
+        run(
+            &world,
+            &store(SIMPLE_BASE, SIMPLE_FORK, SIMPLE_BASE),
+            &journal,
+            &plain,
+        )
+        .unwrap(),
+    );
+    assert_eq!(report.fast_forward, Some(true));
+
+    // Main changed a file the fork did not touch: not a fast-forward, and nothing conflicts.
+    let world = simple_world();
+    let moved = "F\t/root/.bashrc\t10\t1\tc:old\nF\t/root/other\t1\t9\tdd\n";
+    let report = kept(
+        run(
+            &world,
+            &store(SIMPLE_BASE, SIMPLE_FORK, moved),
+            &journal,
+            &plain,
+        )
+        .unwrap(),
+    );
+    assert_eq!(report.fast_forward, Some(false));
+    assert_eq!(item(&report, BASHRC).outcome, "brought-over");
+
+    // The flag is on a question's report too, and on a dry run's.
+    let world = simple_world();
+    world.put("main", "/root/.bashrc", "main edited");
+    let main = "F\t/root/.bashrc\t21\t9\tdd\n";
+    let outcome = run(
+        &world,
+        &store(SIMPLE_BASE, SIMPLE_FORK, main),
+        &journal,
+        &plain,
+    )
+    .unwrap();
+    let Outcome::Refused { report, .. } = outcome else {
+        panic!()
+    };
+    assert_eq!(report.fast_forward, Some(false));
+    let mut dry = plain.clone();
+    dry.dry_run = true;
+    let world = simple_world();
+    let Outcome::DryRun(report) = run(
+        &world,
+        &store(SIMPLE_BASE, SIMPLE_FORK, SIMPLE_BASE),
+        &journal,
+        &dry,
+    )
+    .unwrap() else {
+        panic!()
+    };
+    assert_eq!(report.fast_forward, Some(true));
+}
+
+#[test]
+fn a_database_item_is_reported_as_never_combined() {
+    let world = simple_world();
+    *world.changed_files.lock().unwrap() = vec!["migrations/002.sql".into()];
+    let (_dir, journal) = journal();
+    let st = || store(BASE, FORK, BASE);
+    let id = "database:postgres:app";
+    let migrate = Hooks {
+        migrate: vec!["npm run migrate".into()],
+        ..Hooks::default()
+    };
+    let report = kept(run(&world, &st(), &journal, &request(migrate)).unwrap());
+    let db = item(&report, id);
+    assert_eq!(db.outcome, "not-combined");
+    assert!(
+        db.detail
+            .contains("migrate step runs on main's own database"),
+        "{}",
+        db.detail
+    );
+
+    let world = simple_world();
+    let data_ok = Request {
+        data_ok: true,
+        ..request(Hooks::default())
+    };
+    let report = kept(run(&world, &st(), &journal, &data_ok).unwrap());
+    assert!(item(&report, id).detail.contains("left as it is"));
+    assert!(
+        report.items.windows(2).all(|w| w[0].id < w[1].id),
+        "items are in id order"
+    );
+}
+
+#[test]
+fn a_request_with_choices_reaches_the_keep_like_any_other() {
+    // `changes.requests.keep` builds its Request with the same choices; both entry points
+    // read them through `Request::choices`.
+    let request = choosing(&[(APP, Answer::Branch)]);
+    assert_eq!(
+        request.choices.said(APP),
+        super::super::items::Said::Answered(Answer::Branch)
+    );
+    assert!(skipping(&[BASHRC]).choices.said(BASHRC) == super::super::items::Said::Skipped);
+}
+
+#[test]
+fn the_branch_scripts_leave_a_real_repositorys_checkout_and_branches_alone() {
+    let root = tempfile::tempdir().unwrap();
+    let git = |dir: &std::path::Path, args: &[&str]| {
+        let out = std::process::Command::new("git")
+            .args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"])
+            .args(args)
+            .current_dir(dir)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        String::from_utf8_lossy(&out.stdout).trim().to_owned()
+    };
+    let (main, fork) = (root.path().join("main"), root.path().join("fork"));
+    std::fs::create_dir(&main).unwrap();
+    git(&main, &["init", "-q", "-b", "trunk"]);
+    std::fs::write(main.join("a.txt"), "one\n").unwrap();
+    git(&main, &["add", "."]);
+    git(&main, &["commit", "-q", "-m", "one"]);
+    git(root.path(), &["clone", "-q", "main", "fork"]);
+    std::fs::write(fork.join("a.txt"), "fork\n").unwrap();
+    git(&fork, &["commit", "-q", "-am", "fork edit"]);
+    std::fs::write(main.join("a.txt"), "main\n").unwrap();
+    git(&main, &["commit", "-q", "-am", "main edit"]);
+    std::fs::write(main.join("scratch.txt"), "untracked\n").unwrap();
+    let (head, fork_head) = (git(&main, &["rev-parse", "HEAD"]), git(&fork, &["rev-parse", "HEAD"]));
+
+    let bin = tempfile::tempdir().unwrap();
+    let bundle = root.path().join("fork.bundle").to_string_lossy().into_owned();
+    let (main_path, fork_path) = (main.to_string_lossy().into_owned(), fork.to_string_lossy().into_owned());
+    let tmp_ref = "refs/silo-tmp/t-0";
+    let ran = |cmd: GuestCmd, dir: &std::path::Path| {
+        let (code, err) = run_script(&cmd, bin.path(), dir);
+        assert_eq!(code, 0, "{err}");
+    };
+    ran(scripts::git_bundle(&fork_path, &bundle), &fork);
+    let output = |cmd: GuestCmd| {
+        let mut command = std::process::Command::new("bash");
+        command.args(["-c", &cmd.script]).current_dir(&main);
+        for (name, value) in &cmd.args {
+            command.env(format!("A_{name}"), value);
+        }
+        let out = command.output().unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    };
+    let state = output(scripts::git_precheck(&main_path, &bundle, tmp_ref));
+    assert!(state.starts_with("conflict"), "{state}");
+
+    assert_eq!(output(scripts::git_branch_plan(&main_path, tmp_ref, "silo/fork")), "silo/fork\nnew\n");
+    output(scripts::git_branch(&main_path, tmp_ref, "silo/fork"));
+    assert_eq!(git(&main, &["rev-parse", "silo/fork"]), fork_head);
+    // Nothing is checked out or merged: main's branch, head, files and untracked file are as they were.
+    assert_eq!(git(&main, &["rev-parse", "HEAD"]), head);
+    assert_eq!(git(&main, &["symbolic-ref", "--short", "HEAD"]), "trunk");
+    assert_eq!(std::fs::read_to_string(main.join("a.txt")).unwrap(), "main\n");
+    assert_eq!(std::fs::read_to_string(main.join("scratch.txt")).unwrap(), "untracked\n");
+    assert_eq!(git(&main, &["status", "--porcelain"]), "?? scratch.txt");
+
+    // The same commits again find the branch; other commits under the name get the next free one.
+    assert_eq!(output(scripts::git_branch_plan(&main_path, tmp_ref, "silo/fork")), "silo/fork\nsame\n");
+    git(&main, &["branch", "silo/other", "trunk"]);
+    assert_eq!(output(scripts::git_branch_plan(&main_path, tmp_ref, "silo/other")), "silo/other-2\nnew\n");
+    // Creating over an existing branch fails instead of moving it.
+    let (code, _) = run_script(&scripts::git_branch(&main_path, tmp_ref, "silo/other"), bin.path(), &main);
+    assert_ne!(code, 0);
+    assert_eq!(git(&main, &["rev-parse", "silo/other"]), head);
+}
+
+#[test]
+fn ignored_files_of_a_repository_left_as_main_or_on_a_branch_are_not_written() {
+    let base = "GIT\t/root/app\taaa\tmain\t0\t0\n";
+    let fork = "GIT\t/root/app\tbbb\tmain\t0\t0\nGIG\t/root/app\t/root/app/build.out\t5\t9\tfff\n";
+    let ignored = "file:/root/app/build.out";
+    for answer in [Answer::Branch, Answer::Main] {
+        let world = simple_world();
+        world.put("fork", "/root/app/build.out", "built");
+        *world.git_state.lock().unwrap() = "merge".into();
+        let (_dir, journal) = journal();
+        let report = kept(
+            run(&world, &store(base, fork, base), &journal, &choosing(&[(APP, answer)])).unwrap(),
+        );
+        world.with("main", |c| assert!(!c.files.contains_key("/root/app/build.out")));
+        assert_eq!(item(&report, ignored).outcome, "left-as-main");
+    }
+    // Without an answer for the repository the file comes along.
+    let world = simple_world();
+    world.put("fork", "/root/app/build.out", "built");
+    *world.git_state.lock().unwrap() = "merge".into();
+    let (_dir, journal) = journal();
+    run(&world, &store(base, fork, base), &journal, &request(Hooks::default())).unwrap();
+    world.with("main", |c| assert!(c.files.contains_key("/root/app/build.out")));
+}
+
+#[test]
+fn a_launch_agent_left_as_main_is_neither_written_nor_loaded() {
+    let plist = "/Users/a/Library/LaunchAgents/dev.new.plist";
+    let fork = format!("F\t{plist}\t1\t1\tbb\nLAGENT\tuser\tdev.new\tbb\t{plist}\n");
+    let world = World::new(Os::Macos, &["fork", "main"]);
+    world.put("fork", plist, "<plist/>");
+    let (_dir, journal) = journal();
+    kept(
+        run(
+            &world,
+            &store("", &fork, ""),
+            &journal,
+            &choosing(&[("launch-agent:user:dev.new", Answer::Main)]),
+        )
+        .unwrap(),
+    );
+    world.with("main", |c| assert!(!c.files.contains_key(plist)));
+    assert_eq!(world.logged("agent_load"), 0);
+}
+
+#[test]
+fn a_failure_while_reading_the_fork_does_not_put_main_back() {
+    let world = simple_world();
+    *world.fail_read.lock().unwrap() = true;
+    let (_dir, journal) = journal();
+    let st = store(SIMPLE_BASE, SIMPLE_FORK, SIMPLE_BASE);
+    let error = run(&world, &st, &journal, &request(Hooks::default())).unwrap_err();
+    assert!(error.contains("could not be read"), "{error}");
+    assert!(!error.contains("put back"), "{error}");
+    assert_eq!(world.logged("restore"), 0);
+    assert_eq!(journal.pending("main").unwrap(), None);
+    assert_eq!(journal.latest_undoable("main"), None);
+    world.with("main", |c| assert_eq!(c.files["/root/.bashrc"].0, b"old"));
+}
+
+#[test]
+fn a_repository_left_on_a_branch_keeps_its_uncommitted_files_but_not_files_outside_it() {
+    let base = "F\t/etc/app.conf\t1\t1\tc:old\nGIT\t/root\taaa\tmain\t0\t0\n";
+    let fork = "F\t/etc/app.conf\t2\t2\tbb\nGIT\t/root\tbbb\tmain\t0\t0\nGITF\t/root\t_M\tnotes.txt\n";
+    let world = World::new(Os::Linux, &["fork", "main"]);
+    world.put("fork", "/etc/app.conf", "fork conf");
+    world.put("fork", "/root/notes.txt", "fork notes");
+    world.put("main", "/etc/app.conf", "old");
+    *world.git_state.lock().unwrap() = "merge".into();
+    let (_dir, journal) = journal();
+    let report = kept(
+        run(
+            &world,
+            &store(base, fork, base),
+            &journal,
+            &choosing(&[("repo:/root", Answer::Branch)]),
+        )
+        .unwrap(),
+    );
+    world.with("main", |c| {
+        assert_eq!(c.files["/etc/app.conf"].0, b"fork conf");
+        assert!(!c.files.contains_key("/root/notes.txt"));
+    });
+    assert_eq!(item(&report, "file:/etc/app.conf").outcome, "brought-over");
+    assert_eq!(item(&report, "file:/root/notes.txt").outcome, "left-as-main");
+}
+
+#[test]
+fn credentials_are_found_by_a_repositorys_full_path_too() {
+    let world = simple_world();
+    *world.changed_files.lock().unwrap() = vec!["shadow".into()];
+    let base = "GIT\t/etc\taaa\tmain\t0\t0\n";
+    let fork = "GIT\t/etc\tbbb\tmain\t0\t0\n";
+    let (_dir, journal) = journal();
+    let refusal = refused(
+        run(&world, &store(base, fork, base), &journal, &request(Hooks::default())).unwrap(),
+    );
+    assert_eq!(refusal.reason, "credentials");
+    assert_eq!(refusal.conflicts[0].item, "/etc/shadow");
 }

@@ -2,9 +2,11 @@
 //!
 //! A keep pins to the diff the user reviewed (a digest), takes a `before-keep` checkpoint of
 //! main, holds main's operation lane, and only then compares the fork with main and the
-//! fork-time base (three-way). Everything it will write is read from the fork first; a keep
-//! that would clash, bring credentials, or carry a database change nothing migrates stops
-//! before main is touched and returns a structured refusal. A journal written before the
+//! fork-time base (three-way). Everything it will write is read from the fork first. An item
+//! both sides changed is a question: the request's `choices` answer it (the fork's version,
+//! main's, or for a repository a branch), and a conflict without an answer stops the keep
+//! before main is touched with the list of questions. A keep that would bring credentials or
+//! carry a database change nothing migrates stops the same way. A journal written before the
 //! first change lets a restart put main back from the checkpoint.
 
 pub mod apply;
@@ -27,9 +29,10 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+pub use crate::changes::items::{Answer, Choices};
 pub use env::{CheckpointRef, ExecOut, GuestCmd, KeepEnv, ManifestStore, Os, RunAs};
 pub use journal::Journal;
-pub use plan::{Conflict, Plan};
+pub use plan::{Conflict, Plan, ReportItem};
 pub use prepare::review_digest;
 
 /// The recipe's `keep:` section.
@@ -54,6 +57,8 @@ pub struct Request {
     pub data_ok: bool,
     /// The review digest the user saw (`silo diff --json`); the keep refuses if the fork moved.
     pub reviewed: Option<String>,
+    /// How the caller settles items both sides changed, and which items to leave out.
+    pub choices: Choices,
 }
 
 /// How long a keep or undo waits for another one on the same target.
@@ -61,7 +66,7 @@ pub const LANE_WAIT: Duration = Duration::from_secs(120);
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Refusal {
-    /// `divergent`, `database`, `git`, `credentials` or `changed`.
+    /// `choices-needed`, `database`, `credentials`, `changed` or `main-changed`.
     pub reason: String,
     pub message: String,
     pub conflicts: Vec<Conflict>,
@@ -79,6 +84,11 @@ pub struct Report {
     pub checkpoint: Option<String>,
     /// The digest of the fork's changes this keep acted on.
     pub review_digest: Option<String>,
+    /// What was done with each item, by id; empty when the keep was refused.
+    pub items: Vec<ReportItem>,
+    /// Whether main was unchanged since the fork was made, so nothing could conflict. Unknown
+    /// (`None`) when the keep stopped before main was looked at.
+    pub fast_forward: Option<bool>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -216,7 +226,13 @@ fn main_changed(request: &Request, target: &str, digest: &str, lines: Vec<String
 /// What differs between two manifests of the same computer, as report lines; `None` when
 /// nothing the keep will write or check moved: its files, packages, crontabs, agents and the
 /// repos it merges. Processes, ports and background churn elsewhere do not count.
-fn main_moved(view: &prepare::ForkView, os: Os, before: &str, now: &str) -> Option<Vec<String>> {
+fn main_moved(
+    view: &prepare::ForkView,
+    os: Os,
+    request: &Request,
+    before: &str,
+    now: &str,
+) -> Option<Vec<String>> {
     use crate::changes::manifest::Manifest;
     if before == now {
         return None;
@@ -227,7 +243,7 @@ fn main_moved(view: &prepare::ForkView, os: Os, before: &str, now: &str) -> Opti
         ]);
     };
     let items = |main: &Manifest| {
-        let plan = plan::build(&view.diff, &view.base, &view.fork, main, os);
+        let plan = plan::build(&view.diff, &view.base, &view.fork, main, os, request);
         prepare::read_signature(&plan, main)
     };
     let (first, second) = (items(&before), items(&now));
@@ -279,6 +295,10 @@ pub fn keep(
     {
         return Ok(refused_early(request, &target, &view.digest));
     }
+    // The digest matched (or none was sent), so the diff in hand is the reviewed one. The
+    // choices are checked against it and are not part of the digest: it pins what the fork
+    // changed, and a choice answers how that meets main, which moves on its own.
+    crate::changes::items::validate(&request.choices, &view.diff)?;
     let mut tracker = prepare::Tracker {
         fork: request.fork.clone(),
         target: target.clone(),
@@ -339,7 +359,7 @@ pub fn keep(
         // the checkpoint saved now that nothing else can change it.
         let moved = store
             .capture(&target)
-            .map(|now| main_moved(&view, os, &main_before, &now));
+            .map(|now| main_moved(&view, os, request, &main_before, &now));
         match moved {
             Ok(None) => {}
             Ok(Some(lines)) => {
@@ -359,7 +379,13 @@ pub fn keep(
             Ok(prepare::Prepared::Ready(ready)) => {
                 apply::apply(env, &ready, request, &target).map(|applied| Ok((ready, applied)))
             }
-            Err(error) => Err(error),
+            // Looking at main and the fork changed nothing on main, so there is nothing to
+            // put back.
+            Err(error) => {
+                tracker.cleanup(env);
+                consume(journal);
+                return Err(error);
+            }
         };
         tracker.cleanup(env);
         result
