@@ -671,6 +671,65 @@ mod tests {
     }
 
     #[test]
+    fn creating_a_computer_may_name_agents_and_old_requests_still_parse() {
+        use crate::methods::{agents::AgentId, computers::ComputerCreateParams};
+
+        let old = serde_json::json!({
+            "kind": "macos",
+            "request": {"name": "mac", "cpus": 4, "memoryGiB": 8, "diskGiB": 64}
+        });
+        let parsed: ComputerCreateParams = serde_json::from_value(old.clone()).unwrap();
+        match &parsed {
+            ComputerCreateParams::Macos { agents, .. } => assert!(agents.is_empty()),
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(serde_json::to_value(parsed).unwrap(), old);
+
+        let named = serde_json::json!({
+            "kind": "macos",
+            "request": {"name": "mac", "cpus": 4, "memoryGiB": 8, "diskGiB": 64},
+            "agents": ["claude-code", "codex"]
+        });
+        match serde_json::from_value(named.clone()).unwrap() {
+            ComputerCreateParams::Macos { agents, .. } => {
+                assert_eq!(agents, [AgentId::ClaudeCode, AgentId::Codex])
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(serde_json::from_value::<ComputerCreateParams>(serde_json::json!({
+            "kind": "macos",
+            "request": {"name": "mac", "cpus": 4, "memoryGiB": 8, "diskGiB": 64},
+            "agents": ["pi"]
+        }))
+        .is_err());
+    }
+
+    #[test]
+    fn agent_methods_are_a_query_and_a_job_and_progress_carries_the_step() {
+        use crate::{
+            jobs::JobProgress,
+            methods::{method_registry, MethodKind},
+        };
+
+        let kind = |name: &str| {
+            method_registry()
+                .iter()
+                .find(|entry| entry.name == name)
+                .unwrap()
+                .kind
+        };
+        assert_eq!(kind("agents.list"), MethodKind::Query);
+        assert_eq!(kind("agents.install"), MethodKind::Job);
+        let progress = serde_json::json!({
+            "source": "agent", "jobId": "job:7", "computerId": "c",
+            "data": {"computerId": "c", "agent": "codex", "step": "downloading",
+                     "detail": "Downloading Codex (42%)"}
+        });
+        let parsed: JobProgress = serde_json::from_value(progress.clone()).unwrap();
+        assert_eq!(serde_json::to_value(parsed).unwrap(), progress);
+    }
+
+    #[test]
     fn expected_sha256_distinguishes_omitted_null_and_string() {
         use crate::methods::guest::GuestFilesWriteParams;
 

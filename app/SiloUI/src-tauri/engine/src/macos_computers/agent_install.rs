@@ -297,7 +297,17 @@ mod tests {
         for agent in AgentId::ALL {
             let plan = plan(agent).unwrap();
             let script = script(agent, &plan);
-            assert!(!script.contains('@'), "{agent:?}: {script}");
+            for marker in [
+                "@AGENT@",
+                "@VERSION@",
+                "@FILE@",
+                "@BYTES@",
+                "@SHA256@",
+                "@MEMBER@",
+                "@LOCK_SHA256@",
+            ] {
+                assert!(!script.contains(marker), "{agent:?}: {marker}");
+            }
             assert!(script.contains(&format!("AGENT='{}'", agent.as_str())));
             assert!(script.contains(&format!("VERSION='{}'", plan.version)));
             assert!(script.contains(&format!("SHA256='{}'", plan.asset.sha256)));

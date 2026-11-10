@@ -2470,6 +2470,13 @@
       "oneOf": [
         {
           "properties": {
+            "agents": {
+              "description": "Agents to install once the computer is first ready. Empty installs none.",
+              "items": {
+                "$ref": "#/$defs/AgentId"
+              },
+              "type": "array"
+            },
             "configuration": {
               "$ref": "#/$defs/ComputerConfiguration"
             },
@@ -2498,6 +2505,13 @@
         },
         {
           "properties": {
+            "agents": {
+              "description": "Agents to install once setup has completed. Empty installs none.",
+              "items": {
+                "$ref": "#/$defs/AgentId"
+              },
+              "type": "array"
+            },
             "deviceId": {
               "type": [
                 "string",
