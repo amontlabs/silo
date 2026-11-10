@@ -10,7 +10,13 @@ use super::{guest_access, layout_and_record, MacosContext};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use silo_api::methods::agents::{AgentId, AgentInfo, AgentInstallStep};
-use std::{fs, path::Path, time::Duration};
+use std::{
+    collections::HashMap,
+    fs,
+    path::Path,
+    sync::{Mutex, MutexGuard},
+    time::{Duration, Instant},
+};
 
 const SCRIPT: &str = include_str!("../../../guest/macos/silo-agent-tools.zsh");
 const LOCK: &str = include_str!("../../../guest/agent-tools-lock.json");
@@ -20,6 +26,17 @@ const INSTALL_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 const COPY_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 const RECEIPT_READ: Duration = Duration::from_secs(8);
 const RECEIPT_MAX_BYTES: usize = 8 * 1024;
+/// How long a read answers further lists without another login to the computer.
+const RECEIPT_CACHE: Duration = Duration::from_secs(3);
+
+type Receipts = (Option<Value>, Option<Value>);
+static RECEIPTS: Mutex<Option<HashMap<String, (Instant, Receipts)>>> = Mutex::new(None);
+
+fn receipts() -> MutexGuard<'static, Option<HashMap<String, (Instant, Receipts)>>> {
+    RECEIPTS
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
 
 /// What one install puts in the computer: the version, the staged file's lock entry and the
 /// name of the one file the Codex archive holds (empty for Claude Code's installer).
@@ -140,7 +157,18 @@ pub(super) fn list(
 ) -> Result<Vec<AgentInfo>, String> {
     let (layout, record) = layout_and_record(app, id)?;
     let (claude, codex) = if running {
-        read_receipts(&layout, &record)
+        let cached = receipts()
+            .as_ref()
+            .and_then(|map| map.get(id))
+            .filter(|(at, _)| at.elapsed() < RECEIPT_CACHE)
+            .map(|(_, read)| read.clone());
+        cached.unwrap_or_else(|| {
+            let read = read_receipts(&layout, &record);
+            receipts()
+                .get_or_insert_with(HashMap::new)
+                .insert(id.to_owned(), (Instant::now(), read.clone()));
+            read
+        })
     } else {
         (None, None)
     };
@@ -245,6 +273,9 @@ pub(super) fn install(
             .or_else(|| output.stderr.lines().rev().find(|line| !line.trim().is_empty()))
             .unwrap_or("the installer returned an error");
         return Err(format!("{name} could not be installed: {reason}"));
+    }
+    if let Some(map) = receipts().as_mut() {
+        map.remove(id);
     }
     step(
         AgentInstallStep::Registering,
