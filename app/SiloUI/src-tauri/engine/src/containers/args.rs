@@ -114,6 +114,9 @@ pub struct Restore {
     pub labels: Vec<(String, String)>,
     pub env: Vec<(String, String)>,
     pub secrets: Vec<SecretSpec>,
+    /// Whether the caller asked for no network (`--net-default-egress deny`), as it does for a
+    /// computer made from an import.
+    pub network_blocked: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -490,7 +493,16 @@ fn parse_restore(args: &[String]) -> Result<Restore, String> {
             "--secret" => restore.secrets.push(
                 parse_secret_spec(value(index + 1)?).ok_or("--secret needs NAME:passthrough=*@HOSTS.")?,
             ),
-            "--net-default-egress" | "--net-default-ingress" | "--net-rule" => {
+            // A container's network is its gateway's policy or none: the default for outgoing
+            // connections says which, and there are no rules to keep.
+            "--net-default-egress" => {
+                restore.network_blocked = match value(index + 1)?.as_str() {
+                    "deny" => true,
+                    "allow" => false,
+                    _ => return Err("--net-default-egress needs allow or deny.".into()),
+                }
+            }
+            "--net-default-ingress" => {
                 value(index + 1)?;
             }
             "--disk-only" => {

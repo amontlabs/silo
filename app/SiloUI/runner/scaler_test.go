@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -677,5 +678,128 @@ func TestAnAdoptedBusyRecordWhoseComputerIsStoppedDoesNotHoldAMacSlot(t *testing
 	}
 	if n := h.log.count("fork "); n != 1 {
 		t.Fatalf("the stopped computer must not hold a slot: forks = %d (%v)", n, h.log.all())
+	}
+}
+
+// MARK: the private-repository check before each job
+
+func TestAJobIsNotTakenWhenTheRepositoryIsNoLongerPrivate(t *testing.T) {
+	h := newHarness(t, harnessOptions{})
+	public := errors.New("o/r is a public repository")
+	h.scaler.check = func(context.Context) error { return public }
+	acquirer := &fakeAcquirer{}
+	h.scaler.SetAcquirer(acquirer)
+	// Scale fails without acquiring, so the listener does not ack the message and GitHub
+	// delivers it again; the check runs again before every attempt.
+	if err := h.scaler.Scale(context.Background(), available(1)); !errors.Is(err, public) {
+		t.Fatalf("err = %v", err)
+	}
+	if len(acquirer.calls) != 0 {
+		t.Fatalf("the job was acquired: %v", acquirer.calls)
+	}
+	h.fleet.Settle()
+	if len(h.status()) != 0 {
+		t.Fatalf("a computer was started anyway: %v", h.status())
+	}
+	// A poll that brings no job does not run the check, so the listener keeps its session.
+	if err := h.scaler.Scale(context.Background(), &scaleset.RunnerScaleSetMessage{Statistics: &scaleset.RunnerScaleSetStatistic{}}); err != nil {
+		t.Fatalf("a statistics poll failed: %v", err)
+	}
+	// A check that cannot say (an outage, a rate limit) refuses the job the same way.
+	h.scaler.check = func(context.Context) error { return errors.New("GitHub is down") }
+	if err := h.scaler.Scale(context.Background(), available(2)); err == nil {
+		t.Fatal("an unreadable check let the job through")
+	}
+	// A passing check lets the job through and a computer is forked for it.
+	h.scaler.check = func(context.Context) error { return nil }
+	h.scale(available(3))
+	if len(acquirer.calls) != 1 || len(acquirer.calls[0]) != 1 || acquirer.calls[0][0] != 3 {
+		t.Fatalf("the private repository's job was not acquired: %v", acquirer.calls)
+	}
+	if _, ok := h.silo.state("ci-silo-linux-00000001"); !ok {
+		t.Fatalf("no computer for the job: %v", h.status())
+	}
+}
+
+type dynamicChecker struct {
+	mu  sync.Mutex
+	err error
+}
+
+func (d *dynamicChecker) CheckPrivate(context.Context, Target, string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.err
+}
+
+func (d *dynamicChecker) set(err error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.err = err
+}
+
+func TestEventsDeliveredWhenPerJobPrivacyCheckFails(t *testing.T) {
+	cfg := testConfig(t)
+	checker := &dynamicChecker{}
+	deps := &Deps{Checker: checker, Logger: quiet()}
+	h := newHarness(t, harnessOptions{
+		checkJobAccess: func(ctx context.Context) error { return CheckAccess(ctx, cfg, deps) },
+	})
+	acquirer := &fakeAcquirer{}
+	h.scaler.SetAcquirer(acquirer)
+
+	// A first job is taken while the repository is private.
+	name := "ci-silo-linux-00000001"
+	h.scale(available(1))
+	if _, ok := h.silo.state(name); !ok {
+		t.Fatalf("no computer started for the first job: %v", h.status())
+	}
+	h.scale(started(1, name))
+
+	// The repository becomes public. A poll arrives bringing a new job offer together with
+	// the completed event of the first job.
+	public := errors.New("o/r is a public repository")
+	checker.set(public)
+
+	msg := &scaleset.RunnerScaleSetMessage{
+		JobAvailableMessages: []*scaleset.JobAvailable{{RunnerRequestID: 2}},
+		JobCompletedMessages: []*scaleset.JobCompleted{{RunnerRequestID: 1, RunnerName: name, Result: "succeeded"}},
+		// GitHub still counts the offered job as assigned.
+		Statistics: &scaleset.RunnerScaleSetStatistic{TotalAssignedJobs: 1},
+	}
+	err := h.scaler.Scale(context.Background(), msg)
+	if !errors.Is(err, public) {
+		t.Fatalf("Scale did not fail with the privacy check error: %v", err)
+	}
+
+	// The new job was not acquired (fail closed).
+	if len(acquirer.calls) != 1 || len(acquirer.calls[0]) != 1 || acquirer.calls[0][0] != 1 {
+		t.Fatalf("unexpected acquired jobs: %v", acquirer.calls)
+	}
+
+	// But the completed event was still delivered, so the finished job's computer was cleaned up.
+	h.fleet.Settle()
+	if _, ok := h.silo.state(name); ok {
+		t.Fatalf("a succeeded computer was not deleted: %v", h.status())
+	}
+	// And no computer is made for the job that was not taken.
+	if names := h.silo.names(); len(names) != 0 {
+		t.Fatalf("a computer was made while the repository was public: %v", names)
+	}
+	// Nor after a reconnect, whose first poll carries GitHub's statistics but no job to check.
+	if err := h.scaler.Scale(context.Background(), &scaleset.RunnerScaleSetMessage{
+		Statistics: &scaleset.RunnerScaleSetStatistic{TotalAssignedJobs: 1},
+	}); err != nil {
+		t.Fatalf("a poll without jobs failed: %v", err)
+	}
+	h.fleet.Settle()
+	if names := h.silo.names(); len(names) != 0 {
+		t.Fatalf("a computer was made after a reconnect while the repository was public: %v", names)
+	}
+	// Once the repository is private again, the next offer is taken.
+	checker.set(nil)
+	h.scale(available(3))
+	if len(h.silo.names()) != 1 {
+		t.Fatalf("no computer for a job once the repository was private again: %v", h.status())
 	}
 }

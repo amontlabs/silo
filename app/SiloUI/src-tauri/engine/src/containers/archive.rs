@@ -52,6 +52,7 @@ pub fn portable_template(record: &ComputerRecord, name: &str) -> ComputerRecord 
     template.env = Vec::new();
     template.secrets = Vec::new();
     template.github = false;
+    template.network_blocked = false;
     template.started_once = false;
     template
 }
@@ -125,6 +126,7 @@ impl Header {
             || !template.secrets.is_empty()
             || template.github
             || template.started_once
+            || template.network_blocked
         {
             return bad("it carries something an export does not");
         }
@@ -679,10 +681,16 @@ mod tests {
         }];
         record.github = true;
         record.started_once = true;
+        record.network_blocked = true;
         let portable = portable_template(&record, "other");
         assert_eq!(portable.name, "other");
         assert!(portable.layers.is_empty() && portable.upper.is_empty() && portable.env.is_empty());
-        assert!(portable.secrets.is_empty() && !portable.github && !portable.started_once);
+        assert!(
+            portable.secrets.is_empty()
+                && !portable.github
+                && !portable.started_once
+                && !portable.network_blocked
+        );
         assert_eq!(portable.cpus, record.cpus);
         assert_eq!(portable.image_digest, record.image_digest);
     }
@@ -711,6 +719,9 @@ mod tests {
         let mut one = header();
         one.template.github = true;
         cases.push(("github", one));
+        let mut one = header();
+        one.template.network_blocked = true;
+        cases.push(("network", one));
         let mut one = header();
         one.template.image_digest = "latest".into();
         cases.push(("image", one));

@@ -35,12 +35,6 @@ pub mod users;
 
 pub use args::RUNTIME_LABEL;
 
-/// The network policy an imported computer starts from when its configuration is a container's:
-/// the one policy its gateway has. `None` for any other configuration.
-pub fn imported_network_policy(config: &Value) -> Option<Value> {
-    is_container_config(config).then(secrets::policy)
-}
-
 /// Whether a computer's runtime configuration (the `inspect` answer an export records) is a
 /// container computer's: it carries the label its creation sets.
 pub fn is_container_config(config: &Value) -> bool {
@@ -491,6 +485,7 @@ fn new_record(create: &Create, image: &image::Unpacked) -> ComputerRecord {
         started_once: false,
         secrets: Vec::new(),
         github: create.github,
+        network_blocked: false,
     }
 }
 

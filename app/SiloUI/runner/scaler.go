@@ -33,6 +33,14 @@ type Scaler struct {
 	label    string
 	acquirer atomic.Pointer[Acquirer]
 	beat     atomic.Int64
+	// check refuses a poll that brings jobs when the repository may not be served any more (the
+	// private-repository check, run again before each job). An error leaves the message unacked,
+	// so GitHub offers the job again and the check runs again.
+	check func(context.Context) error
+	// refused is set by a failed check and cleared by the next one that passes. Until then no
+	// runner is asked for: a new session's first poll carries GitHub's statistics but no job, so
+	// the check would not run on it.
+	refused atomic.Bool
 }
 
 // SetAcquirer sets the message session that jobs are acquired from; a new session replaces it.
@@ -48,29 +56,49 @@ func (s *Scaler) LastScale() time.Time { return time.Unix(0, s.beat.Load()) }
 func (s *Scaler) Scale(ctx context.Context, msg *scaleset.RunnerScaleSetMessage) error {
 	s.beat.Store(time.Now().UnixNano())
 	event := messageEvent{label: s.label, reply: make(chan struct{})}
+	var checkErr error
 	if msg != nil {
 		if len(msg.JobAvailableMessages) > 0 {
-			ids := make([]int64, 0, len(msg.JobAvailableMessages))
-			for _, job := range msg.JobAvailableMessages {
-				ids = append(ids, job.RunnerRequestID)
+			// Taking a job runs code on this machine, so the repository is checked again first, as
+			// at registration. A public repository, or one the check cannot read, is not served:
+			// no job is acquired, but started and completed events from the poll are still delivered.
+			if s.check != nil {
+				if err := s.check(ctx); err != nil {
+					checkErr = fmt.Errorf("the job is not taken: %w", err)
+				}
+				s.refused.Store(checkErr != nil)
 			}
-			acquirer := s.acquirer.Load()
-			if acquirer == nil {
-				return errors.New("no message session to acquire jobs from")
+			if checkErr == nil {
+				ids := make([]int64, 0, len(msg.JobAvailableMessages))
+				for _, job := range msg.JobAvailableMessages {
+					ids = append(ids, job.RunnerRequestID)
+				}
+				acquirer := s.acquirer.Load()
+				if acquirer == nil {
+					return errors.New("no message session to acquire jobs from")
+				}
+				acquired, err := (*acquirer).AcquireJobs(ctx, ids)
+				if err != nil {
+					return fmt.Errorf("cannot acquire jobs: %w", err)
+				}
+				event.acquired = acquired
 			}
-			acquired, err := (*acquirer).AcquireJobs(ctx, ids)
-			if err != nil {
-				return fmt.Errorf("cannot acquire jobs: %w", err)
-			}
-			event.acquired = acquired
 		}
 		event.started, event.completed = msg.JobStartedMessages, msg.JobCompletedMessages
-		if msg.Statistics != nil {
+		if s.refused.Load() {
+			// No runner is asked for while the repository is not served; the jobs in flight
+			// keep theirs.
+			none := 0
+			event.assigned = &none
+		} else if msg.Statistics != nil {
 			assigned := msg.Statistics.TotalAssignedJobs
 			event.assigned = &assigned
 		}
 	}
-	return s.fleet.deliver(event)
+	if err := s.fleet.deliver(event); err != nil {
+		return err
+	}
+	return checkErr
 }
 
 // ComputerName is the name of a computer and of its runner: ci-<label>-<short id>.

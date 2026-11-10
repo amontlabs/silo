@@ -590,7 +590,8 @@ wait_for_desktop() {
 
 # A container computer exported to a file and imported under a new name: its files come back
 # (including a login the export warned about, which it never filters), its settings stay, it runs,
-# and an import on a device that cannot run containers is refused in plain words.
+# its network is blocked while its published ports answer, and an import on a device that cannot
+# run containers is refused in plain words.
 container_export_import() {
   local ctr="$ctr6" copy="$ctr7" file output kind
   file=$(mktemp -d)/container.silo-backup
@@ -625,6 +626,23 @@ print(rows.get(sys.argv[1], "missing"))' "$copy")
   expect "the login travels" "$("$silo" exec "$copy" -- sh -c 'test -f ~/.claude/.credentials.json && echo there')" there
   expect "kernel" "$("$silo" exec "$copy" -- uname -s)" Linux
   "$silo" exec "$copy" -- sh -c 'echo changed > /workspace/e2e-export-note'
+
+  step "The import's network is blocked; a port it publishes answers"
+  local code state
+  code=$("$silo" exec "$copy" -- curl -sS -o /dev/null --max-time 10 -w '%{http_code}' https://example.com 2>/dev/null || true)
+  expect "a public host from the import" "${code:-000}" 000
+  "$silo" exec "$copy" -- sh -c '(nohup python3 -m http.server 6903 --bind 0.0.0.0 >/dev/null 2>&1 &)'
+  "$silo" publish "$copy" 6903
+  state=""
+  for _ in $(seq 1 40); do
+    state=$("$silo" --json ports "$copy" | python3 -c '
+import json, sys
+port = next((p for p in json.load(sys.stdin)["ports"] if p["port"] == 6903), {})
+print(port.get("state") or "-")')
+    [[ "$state" == reachable ]] && break
+    sleep 0.5
+  done
+  expect "a port the import publishes" "$state" reachable
   expect "the source is unchanged" "$("$silo" exec "$ctr" -- cat /workspace/e2e-export-note)" exported-ok
 
   step "Refusing an import under a name that exists, and a damaged file"

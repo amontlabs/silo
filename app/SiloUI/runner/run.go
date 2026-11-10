@@ -164,6 +164,7 @@ func Run(ctx context.Context, cfg *Config, deps *Deps) error {
 		Sets: sets, ProjectDir: cfg.Silo.ProjectDir, Linux: cfg.LinuxHost,
 		ReadyTimeout: cfg.Limits.ReadyTimeout.Std(), StartAttempts: cfg.Limits.StartAttempts, IdleTimeout: cfg.Limits.IdleTimeout.Std(),
 		TickEvery: tickEvery, Logger: logger, Now: deps.Now,
+		CheckJobAccess: func(ctx context.Context) error { return CheckAccess(ctx, cfg, deps) },
 	}, deps.API, deps.Silo, disk, ledger, gates)
 	fleet.Start()
 	var wg sync.WaitGroup
@@ -200,9 +201,38 @@ func Run(ctx context.Context, cfg *Config, deps *Deps) error {
 	}
 	logger.Info("silo-runner is serving", "scaleSets", len(cfg.ScaleSets))
 	<-ctx.Done()
-	wg.Wait()
-	fleet.Shutdown()
+	// The listeners and the refresher end with ctx; the shutdown then waits for the work in
+	// flight (deregistrations, stops, drops). A second interrupt ends the wait at once: every
+	// step records what it did, so the next start picks the computers up.
+	again := make(chan os.Signal, 1)
+	signal.Notify(again, os.Interrupt, terminateSignal)
+	defer signal.Stop(again)
+	shutdown(logger, again, wg.Wait, fleet.Shutdown)
 	return nil
+}
+
+// shutdown waits for listeners to stop and the fleet to shut down. A second interrupt ends
+// the wait at once without waiting for the work in flight.
+func shutdown(logger *slog.Logger, signals <-chan os.Signal, waitListeners func(), shutdownFleet func()) {
+	await(logger, signals, func() {
+		waitListeners()
+		shutdownFleet()
+	})
+}
+
+// await runs wait and returns when it has come back. An interrupt on signals ends the wait early,
+// leaving the step in flight behind: the process is about to exit and nothing waits for it.
+func await(logger *slog.Logger, signals <-chan os.Signal, wait func()) {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		wait()
+	}()
+	select {
+	case <-done:
+	case <-signals:
+		logger.Warn("another interrupt arrived; ending without waiting for the work in flight")
+	}
 }
 
 // ensureScaleSet finds or creates the scale set for a label, with updates disabled in the runner.

@@ -1579,17 +1579,12 @@ pub fn import_pending_restore_with_environment(
         state: "disk".into(),
     });
     // Imported policy and credentials are archive input and carry no authority.
-    // Start will resolve current host-side assignments against this deny policy (for a
-    // container computer, against the one policy its gateway has).
-    record.desired_network_policy = Some(
-        crate::containers::imported_network_policy(runtime_config).unwrap_or_else(|| {
-            serde_json::json!({
-                "default_egress": "deny",
-                "default_ingress": "deny",
-                "rules": []
-            })
-        }),
-    );
+    // Start will resolve current host-side assignments against this deny policy.
+    record.desired_network_policy = Some(serde_json::json!({
+        "default_egress": "deny",
+        "default_ingress": "deny",
+        "rules": []
+    }));
     save(paths, computer_id, &record)
 }
 

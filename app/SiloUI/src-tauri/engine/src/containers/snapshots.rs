@@ -75,6 +75,20 @@ pub fn remove(paths: &RuntimePaths, group: &str, name: &str) -> Result<(), Runti
         .map_err(invalid)
 }
 
+/// Why a checkpoint could not take the computer: a start holds it, or another checkpoint does.
+/// The mark does not say which, so the holder's own kind does: only a start is marked as starting.
+fn held_message(name: &str) -> RuntimeError {
+    if super::hold::is_starting(name) {
+        RuntimeError::Unavailable(format!(
+            "Container computer {name} is starting. Try again when it is up."
+        ))
+    } else {
+        RuntimeError::Unavailable(format!(
+            "A checkpoint of container computer {name} is already in progress. Try again when it is done."
+        ))
+    }
+}
+
 /// Labels of a fork: what the restore says, over what the checkpoint's computer had.
 fn merged_labels(
     template: &[(String, String)],
@@ -108,6 +122,8 @@ pub fn fork_record(snapshot: &Snapshot, restore: &Restore) -> ComputerRecord {
         })
         .collect();
     record.secrets.sort_by(|a, b| a.name.cmp(&b.name));
+    // Nothing unblocks a computer: a fork of a blocked one stays blocked whatever it is asked.
+    record.network_blocked |= restore.network_blocked;
     if let Some(cpus) = restore.cpus {
         record.cpus = cpus;
         record.max_cpus = record.max_cpus.max(cpus);
@@ -179,12 +195,7 @@ pub fn create(paths: &RuntimePaths, request: &SnapshotCreate) -> Result<(), Runt
     let store = Store::new(&layout);
     // No start may begin while the layers are being sealed or copied. The computer is held, not
     // marked as starting: a running one stays running to a command or a secret change.
-    let _mark = StartMark::hold(&request.computer).ok_or_else(|| {
-        RuntimeError::Unavailable(format!(
-            "Container computer {} is starting. Try again when it is up.",
-            request.computer
-        ))
-    })?;
+    let _mark = StartMark::hold(&request.computer).ok_or_else(|| held_message(&request.computer))?;
     super::host_disk::require_room(&paths.home, "make a checkpoint")?;
     let exists = || {
         invalid(format!(
@@ -308,8 +319,6 @@ mod tests {
             "allow",
             "--net-default-ingress",
             "deny",
-            "--net-rule",
-            "allow@dns",
             "--disk-only",
         ]);
         let Ok(Command::Restore(restore)) = parse(&args) else {
@@ -337,6 +346,35 @@ mod tests {
             }
         );
         assert_eq!(restore.labels.len(), 2);
+        // The deny-all policy an import starts from asks for no network.
+        let blocked = parse(&strings(&[
+            "restore",
+            "box:c1",
+            "--name",
+            "child",
+            "--net-default-egress",
+            "deny",
+            "--net-default-ingress",
+            "deny",
+        ]))
+        .unwrap();
+        let Command::Restore(blocked) = blocked else {
+            panic!("not a restore")
+        };
+        assert!(blocked.network_blocked);
+        // Neither policy has rules: the runtime refuses them instead of dropping one.
+        let refused = parse(&strings(&[
+            "restore",
+            "box:c1",
+            "--name",
+            "child",
+            "--net-default-egress",
+            "allow",
+            "--net-rule",
+            "allow@dns",
+        ]))
+        .unwrap_err();
+        assert!(refused.contains("--net-rule"), "{refused}");
     }
 
     #[test]
@@ -482,6 +520,7 @@ mod tests {
                     allowed_hosts: vec!["example.com".into()],
                 },
             ],
+            network_blocked: false,
         };
         let record = fork_record(&snapshot, &restore);
         assert_eq!(record.name, "child");
@@ -493,6 +532,20 @@ mod tests {
         assert!(record.github);
         assert_eq!(record.secrets.len(), 1);
         assert_eq!((record.cpus, record.memory_mib), (2, 2048));
+        assert!(!record.network_blocked);
+        // A fork of a blocked computer stays blocked, like its network policy.
+        let record = fork_record(
+            &snapshot,
+            &Restore {
+                network_blocked: true,
+                ..restore.clone()
+            },
+        );
+        assert!(record.network_blocked);
+        // Nor does a restore that leaves the flag out unblock one.
+        let mut blocked = snapshot.clone();
+        blocked.template.network_blocked = true;
+        assert!(fork_record(&blocked, &restore).network_blocked);
     }
 
     #[test]
@@ -550,5 +603,24 @@ mod tests {
         remove(&paths, "box", "c1").unwrap();
         assert!(list(&paths, None).unwrap().is_empty());
         assert!(remove(&paths, "box", "c1").is_err());
+    }
+
+    #[test]
+    fn a_second_checkpoint_says_one_is_in_progress_not_that_the_computer_is_starting() {
+        // A start holds the computer: "is starting" is still the right answer.
+        let starting = crate::containers::hold::StartMark::begin("held-by-a-start").unwrap();
+        assert!(held_message("held-by-a-start")
+            .to_string()
+            .contains("is starting"));
+        drop(starting);
+        // Another checkpoint holds it: the message says the checkpoint, not a start.
+        let checkpoint = crate::containers::hold::StartMark::hold("held-by-a-checkpoint").unwrap();
+        let message = held_message("held-by-a-checkpoint").to_string();
+        assert!(message.contains("already in progress"), "{message}");
+        assert!(!message.contains("starting"), "{message}");
+        drop(checkpoint);
+        // Nobody holds it: a checkpoint may begin, and the message still names the checkpoint
+        // (it is only asked when the mark could not be taken).
+        assert!(crate::containers::hold::StartMark::hold("held-by-nobody").is_some());
     }
 }

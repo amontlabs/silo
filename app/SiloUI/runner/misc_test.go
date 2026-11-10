@@ -885,3 +885,80 @@ esac
 		t.Fatalf("err = %v", err)
 	}
 }
+
+// MARK: shutdown
+
+func TestASecondInterruptEndsASlowShutdownAtOnce(t *testing.T) {
+	signals := make(chan os.Signal, 1)
+	// The work in flight is slow: it does not come back on its own.
+	slow := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		await(quiet(), signals, func() { <-slow })
+		close(done)
+	}()
+	select {
+	case <-done:
+		t.Fatal("the shutdown ended although nothing came back")
+	case <-time.After(50 * time.Millisecond):
+	}
+	signals <- os.Interrupt
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("a second interrupt did not end the wait")
+	}
+	// The abandoned step still runs to its end in the background; nothing waits on it.
+	close(slow)
+	// A step that finishes on its own needs no interrupt.
+	await(quiet(), signals, func() {})
+}
+
+func TestShutdownSequenceEndsAtOnceOnSecondInterrupt(t *testing.T) {
+	signals := make(chan os.Signal, 1)
+	slowWait := make(chan struct{})
+	slowShutdown := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		shutdown(quiet(), signals, func() { <-slowWait }, func() { <-slowShutdown })
+		close(done)
+	}()
+	select {
+	case <-done:
+		t.Fatal("the shutdown ended although nothing came back")
+	case <-time.After(50 * time.Millisecond):
+	}
+	signals <- os.Interrupt
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("a second interrupt during listener wait did not end the whole shutdown")
+	}
+	close(slowWait)
+	close(slowShutdown)
+
+	// An interrupt during fleet shutdown also ends the wait at once.
+	// New channels: the first shutdown's steps may still be running and reading the old ones.
+	fleetSignals := make(chan os.Signal, 1)
+	slowFleet := make(chan struct{})
+	fleetDone := make(chan struct{})
+	go func() {
+		shutdown(quiet(), fleetSignals, func() {}, func() { <-slowFleet })
+		close(fleetDone)
+	}()
+	select {
+	case <-fleetDone:
+		t.Fatal("the shutdown ended although nothing came back")
+	case <-time.After(50 * time.Millisecond):
+	}
+	fleetSignals <- os.Interrupt
+	select {
+	case <-fleetDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("a second interrupt during fleet shutdown did not end the wait")
+	}
+	close(slowFleet)
+
+	// A shutdown that finishes on its own needs no interrupt.
+	shutdown(quiet(), fleetSignals, func() {}, func() {})
+}

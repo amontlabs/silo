@@ -85,6 +85,9 @@ pub struct Params {
     pub github_profile_json: Option<Zeroizing<String>>,
     /// The hosts the GitHub credential covers; `None` is `github.com` and `api.github.com`.
     pub github_hosts: Option<Vec<String>>,
+    /// The network policy, in the shape MicroSandbox saves one; `None` is the gateway's own
+    /// (public addresses only).
+    pub policy: Option<Value>,
     /// Where the gateway appends credential-use events (names, hosts, methods; never values).
     pub usage_log: Option<PathBuf>,
     /// Where the gateway's own output goes; discarded when absent.
@@ -109,6 +112,8 @@ struct InitRequest<'a> {
     github_profile_json: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     github_hosts: Option<&'a [String]>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    policy: Option<&'a Value>,
 }
 
 #[derive(Serialize)]
@@ -429,6 +434,7 @@ fn handshake(
         secrets,
         github_profile_json,
         github_hosts,
+        policy,
         ..
     } = params;
     let request = InitRequest {
@@ -464,6 +470,7 @@ fn handshake(
             .collect(),
         github_profile_json: github_profile_json.as_deref().map(String::as_str),
         github_hosts: github_hosts.as_deref(),
+        policy: policy.as_ref(),
     };
     let mut body = Zeroizing::new(
         serde_json::to_vec(&request)
@@ -586,6 +593,7 @@ mod tests {
             }],
             github_profile_json: None,
             github_hosts: None,
+            policy: None,
             usage_log: None,
             log: None,
         }

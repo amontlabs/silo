@@ -6760,3 +6760,45 @@ fn a_retried_restore_does_not_stop_a_container_that_is_running_again() {
     );
     assert!(!runner.calls.lock().unwrap().iter().any(|args| args[0] == "stop"));
 }
+
+#[test]
+fn an_imported_container_starts_from_the_deny_all_policy_like_a_virtual_machine() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let paths = paths(&directory);
+    let (key, value) = crate::containers::RUNTIME_LABEL.split_once('=').unwrap();
+    for config in [
+        serde_json::json!({}),
+        serde_json::json!({"labels": {key: value}}),
+    ] {
+        import_pending_restore_with_environment(
+            &paths,
+            ID,
+            "silo-import-6b79cf8f70b34f2d93d13eeb3798a8b9",
+            "silo-backup-0-330418-1790360984903",
+            &config,
+        )
+        .unwrap();
+        assert_eq!(
+            load(&paths, ID).unwrap().desired_network_policy,
+            Some(serde_json::json!({
+                "default_egress": "deny",
+                "default_ingress": "deny",
+                "rules": []
+            })),
+            "{config}"
+        );
+        // The first start asks the runtime for that policy, whichever runtime answers.
+        let runner = RestoreProbe(Mutex::new(Vec::new()));
+        assert!(start_pending(&runner, &paths, &computer_configuration()).is_err());
+        let calls = runner.0.lock().unwrap();
+        let restore = calls.iter().find(|args| args[0] == "restore").unwrap();
+        for flag in ["--net-default-egress", "--net-default-ingress"] {
+            assert!(
+                restore.windows(2).any(|pair| pair == [flag, "deny"]),
+                "{restore:?}"
+            );
+        }
+        assert!(!restore.iter().any(|arg| arg == "--net-rule"), "{restore:?}");
+    }
+}

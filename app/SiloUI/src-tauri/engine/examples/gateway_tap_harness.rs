@@ -82,6 +82,7 @@ fn main() -> Result<(), String> {
                 .collect(),
             github_profile_json: None,
             github_hosts: None,
+            policy: None,
             usage_log: settings.usage_log,
             log: None,
         },
