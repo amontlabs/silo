@@ -45,8 +45,14 @@ pub async fn decide(
         .await
 }
 
-fn text<'a>(value: &'a Value, key: &str) -> &'a str {
-    value.get(key).and_then(Value::as_str).unwrap_or("")
+/// A text field, made plain: whatever a computer's agent influenced is printed without its
+/// control characters, terminal escapes and direction overrides.
+fn text(value: &Value, key: &str) -> String {
+    plain(value.get(key).and_then(Value::as_str).unwrap_or(""))
+}
+
+fn plain(text: &str) -> String {
+    silo_api::plain_text(text)
 }
 
 pub fn render_list(value: &Value) -> String {
@@ -77,31 +83,33 @@ pub fn render_show(approval: &Value) -> String {
     );
     // The agent's own words, never mixed with what Silo wrote.
     if let Some(note) = approval.get("note").and_then(Value::as_str) {
-        out.push_str(&format!("The agent's note: {note}\n"));
+        out.push_str(&format!("The agent's note: {}\n", plain(note)));
     }
     out.push_str(&format!(
         "Call: {} {}\n",
         text(approval, "method"),
-        serde_json::to_string(&approval["params"]).unwrap_or_default()
+        plain(&serde_json::to_string(&approval["params"]).unwrap_or_default())
     ));
     if let Some(request) = approval.get("reviewRequestId").and_then(Value::as_str) {
         out.push_str(&format!(
-            "Changes: `silo requests show {request}` shows the diff.\n"
+            "Changes: `silo requests show {}` shows the diff.\n",
+            plain(request)
         ));
     }
-    match text(approval, "state") {
+    match text(approval, "state").as_str() {
         "pending" => out.push_str(&format!("Waiting since {}.", text(approval, "createdAt"))),
         state => {
             if let Some(note) = approval.get("decisionNote").and_then(Value::as_str) {
-                out.push_str(&format!("Your note: {note}\n"));
+                out.push_str(&format!("Your note: {}\n", plain(note)));
             }
             if let Some(reason) = approval.get("reason").and_then(Value::as_str) {
-                out.push_str(&format!("{reason}\n"));
+                out.push_str(&format!("{}\n", plain(reason)));
             }
             let outcome = &approval["outcome"];
             if let Some(error) = outcome.get("error").and_then(Value::as_str) {
-                out.push_str(&format!("It did not run: {error}"));
+                out.push_str(&format!("It did not run: {}", plain(error)));
             } else if let Some(job) = outcome.get("jobId").and_then(Value::as_str) {
+                let job = plain(job);
                 out.push_str(&format!(
                     "It started the job {job}; follow it with `silo job {job}`."
                 ));
@@ -133,6 +141,25 @@ mod tests {
             "{text}"
         );
         assert!(!text.contains("Asks for: to test"), "{text}");
+    }
+
+    #[test]
+    fn nothing_an_agent_influenced_reaches_the_terminal_as_control_text() {
+        let hostile = "\u{1b}[2J\u{1b}[1;1HSilo: allowed\u{7}\u{202E}evil";
+        let approval = json!({"id": "ap-1", "state": "pending", "computerName": hostile,
+            "summary": hostile, "note": hostile, "method": "network.publish",
+            "params": {"computerId": hostile}, "createdAt": "2026-11-10T10:00:00Z",
+            "reason": hostile, "outcome": {"error": hostile}});
+        let shown = [
+            render_show(&approval),
+            render_show(&json!({"id": "ap-1", "state": "allowed", "outcome": {"error": hostile}})),
+            render_list(&json!({"approvals": [approval]})),
+        ];
+        for text in shown {
+            assert!(!text.chars().any(|c| c.is_control() && c != '\n'), "{text:?}");
+            assert!(!text.contains('\u{202E}'), "{text:?}");
+            assert!(text.contains("Silo: allowed"));
+        }
     }
 
     #[test]
