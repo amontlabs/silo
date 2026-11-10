@@ -5568,6 +5568,7 @@ mod tests {
             started_once: true,
             secrets: Vec::new(),
             github: false,
+            network_blocked: false,
         };
         template.started_once = false;
         crate::containers::archive::Header {

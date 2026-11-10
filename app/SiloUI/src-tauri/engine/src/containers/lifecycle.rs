@@ -1309,6 +1309,7 @@ fn start_gateway(
             github_hosts: record
                 .github
                 .then(|| super::secrets::GITHUB_HOSTS.map(str::to_owned).to_vec()),
+            policy: record.network_blocked.then(super::secrets::blocked_policy),
             usage_log: Some(usage_log),
             log: Some(gateway_log),
         },
@@ -1910,6 +1911,7 @@ mod tests {
             started_once: started,
             secrets: Vec::new(),
             github: false,
+            network_blocked: false,
         }
     }
 

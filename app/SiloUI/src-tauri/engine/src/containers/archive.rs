@@ -52,6 +52,7 @@ pub fn portable_template(record: &ComputerRecord, name: &str) -> ComputerRecord 
     template.env = Vec::new();
     template.secrets = Vec::new();
     template.github = false;
+    template.network_blocked = false;
     template.started_once = false;
     template
 }

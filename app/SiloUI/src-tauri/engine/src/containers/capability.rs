@@ -108,6 +108,7 @@ pub(crate) fn make_container(home: &Path, name: &str) {
         started_once: false,
         secrets: Vec::new(),
         github: false,
+        network_blocked: false,
     })
     .unwrap();
 }

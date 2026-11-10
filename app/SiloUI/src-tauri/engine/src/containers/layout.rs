@@ -253,6 +253,11 @@ pub struct ComputerRecord {
     /// machine does from creation.
     #[serde(default)]
     pub github: bool,
+    /// Whether the computer's network is blocked (deny-all): a computer made from an import starts
+    /// that way, as a virtual machine does, and its forks keep it. Otherwise the gateway applies
+    /// its own policy (public addresses only).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub network_blocked: bool,
 }
 
 /// One assigned secret: its guest-visible name and where the gateway may substitute it.
@@ -296,6 +301,7 @@ mod tests {
             started_once: false,
             secrets: Vec::new(),
             github: false,
+            network_blocked: false,
         }
     }
 

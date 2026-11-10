@@ -411,6 +411,7 @@ mod tests {
             started_once: true,
             secrets: Vec::new(),
             github: false,
+            network_blocked: false,
         }
     }
 

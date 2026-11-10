@@ -6,7 +6,8 @@
 //! The stream is standard tar (PAX, written and read by the `tar` crate): folders, files, symbolic
 //! and hard links, named pipes, and whiteouts (character device 0:0, which the layers below may
 //! still need hidden). Extended attributes travel as PAX `SCHILY.xattr.*` records, so
-//! `user.overlay.opaque` and file capabilities survive. Tar has no socket type, so sockets are
+//! `user.overlay.opaque` and file capabilities survive; a file's SELinux label is the host's own and
+//! is left out ([`xattr_packed`]). Tar has no socket type, so sockets are
 //! left out of an export (nothing listens on one after an import anyway); any other device is
 //! refused.
 //!
@@ -35,6 +36,8 @@ const XATTR_PREFIX: &str = "SCHILY.xattr.";
 /// The only attribute of the overlay's own namespace a layer may carry.
 const OPAQUE: &[u8] = b"user.overlay.opaque";
 const OVERLAY_NAMESPACE: &[u8] = b"user.overlay.";
+/// A file's SELinux label, which belongs to the host that set it.
+const SELINUX: &[u8] = b"security.selinux";
 /// The most written between two looks at the disk.
 const CHUNK: u64 = 16 << 20;
 /// The disk is also looked at once per this many entries, files or not.
@@ -128,6 +131,14 @@ pub fn xattr_allowed(name: &[u8]) -> Result<(), String> {
     Ok(())
 }
 
+/// Whether `pack` writes an attribute of a layer's file. Overlayfs keeps its own records
+/// (`user.overlay.uuid`, `origin`, `impure`) on a layer it has mounted and writes them again on
+/// the next mount; only the opaque mark is the layer's content. A file's SELinux label names
+/// types of the host's own policy, and the importing host labels the files it makes.
+pub fn xattr_packed(name: &[u8]) -> bool {
+    name != SELINUX && (!name.starts_with(OVERLAY_NAMESPACE) || name == OPAQUE)
+}
+
 /// Whether `folder` (a path, `.` for the layer) holds `path`.
 pub fn holds(folder: &[u8], path: &[u8]) -> bool {
     folder == b"."
@@ -211,11 +222,7 @@ mod linux {
         let mut pairs = Vec::new();
         for name in names
             .split(|byte| *byte == 0)
-            .filter(|name| !name.is_empty())
-            // Overlayfs keeps its own records (`user.overlay.uuid`, `origin`, `impure`) on a
-            // layer it has mounted and writes them again on the next mount; only the opaque
-            // mark is the layer's content.
-            .filter(|name| !name.starts_with(OVERLAY_NAMESPACE) || *name == OPAQUE)
+            .filter(|name| !name.is_empty() && xattr_packed(name))
         {
             let n = name_c(name)?;
             let mut value = vec![0u8; MAX_XATTR_VALUE];
@@ -1175,6 +1182,27 @@ mod tests {
             (b"./a", false),
         ] {
             assert!(entry_path(raw, dir).is_err(), "{raw:?}");
+        }
+    }
+
+    #[test]
+    fn an_export_leaves_out_the_hosts_selinux_label_and_overlayfs_records() {
+        for name in [
+            &b"security.selinux"[..],
+            b"user.overlay.uuid",
+            b"user.overlay.origin",
+            b"user.overlay.impure",
+        ] {
+            assert!(!xattr_packed(name), "{}", String::from_utf8_lossy(name));
+        }
+        // What a layer's files are: the opaque mark, capabilities, a user's own attributes.
+        for name in [
+            &b"user.overlay.opaque"[..],
+            b"security.capability",
+            b"security.selinuxx",
+            b"user.note",
+        ] {
+            assert!(xattr_packed(name), "{}", String::from_utf8_lossy(name));
         }
     }
 

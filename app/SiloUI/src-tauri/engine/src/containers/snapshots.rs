@@ -108,6 +108,7 @@ pub fn fork_record(snapshot: &Snapshot, restore: &Restore) -> ComputerRecord {
         })
         .collect();
     record.secrets.sort_by(|a, b| a.name.cmp(&b.name));
+    record.network_blocked = restore.network_blocked;
     if let Some(cpus) = restore.cpus {
         record.cpus = cpus;
         record.max_cpus = record.max_cpus.max(cpus);

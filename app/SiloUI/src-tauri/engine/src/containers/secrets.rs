@@ -43,16 +43,25 @@ fn entry(name: &str, source: &str, hosts: &[String]) -> Value {
     })
 }
 
-/// The network policy a container computer reports, whatever it was asked for: its gateway has
-/// one policy (public addresses only, enforced there), so this is what a fork or an import is
-/// asked to keep.
-pub fn policy() -> Value {
-    json!({"default_egress": "allow", "default_ingress": "deny", "rules": []})
+/// The deny-all policy: what a blocked computer reports and what its gateway is started with.
+pub fn blocked_policy() -> Value {
+    json!({"default_egress": "deny", "default_ingress": "deny", "rules": []})
 }
 
-/// The `network` section of an inspected computer: the policy (the gateway enforces the real one;
-/// this is what a fork is asked to keep), the secrets assigned (`names` limits it to
-/// those the running gateway holds, for `active_config`) and the TLS handling they need.
+/// The network policy a container computer reports, which a fork or a restore is asked to keep.
+/// A container has one of two networks: its gateway's own policy (public addresses only,
+/// enforced there), reported as egress allowed, or none at all ([`blocked_policy`]).
+pub fn policy(record: &ComputerRecord) -> Value {
+    if record.network_blocked {
+        blocked_policy()
+    } else {
+        json!({"default_egress": "allow", "default_ingress": "deny", "rules": []})
+    }
+}
+
+/// The `network` section of an inspected computer: the policy (see [`policy`]), the secrets
+/// assigned (`names` limits it to those the running gateway holds, for `active_config`) and the
+/// TLS handling they need.
 pub fn network_value(record: &ComputerRecord, names: Option<&[String]>) -> Value {
     let mut entries: Vec<Value> = record
         .secrets
@@ -72,7 +81,7 @@ pub fn network_value(record: &ComputerRecord, names: Option<&[String]>) -> Value
     }
     json!({
         "tls": {"enabled": true},
-        "policy": policy(),
+        "policy": policy(record),
         "secrets": {"secrets": entries},
     })
 }
@@ -252,6 +261,12 @@ mod tests {
         );
         assert_eq!(entries[1]["env_var"], "SILO_GITHUB");
         assert_eq!(entries[1]["placeholder"], "$MSB_SILO_GITHUB");
+        // A blocked computer says so, in the shape an import asks for.
+        record.network_blocked = true;
+        assert_eq!(
+            network_value(&record, None)["policy"],
+            json!({"default_egress": "deny", "default_ingress": "deny", "rules": []})
+        );
         // Only what the running gateway holds is active.
         let active = network_value(&record, Some(&["OTHER".to_owned()]));
         assert_eq!(active["secrets"]["secrets"].as_array().unwrap().len(), 1);
