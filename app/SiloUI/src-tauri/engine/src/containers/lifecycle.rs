@@ -1661,7 +1661,7 @@ pub fn exec_command(
         exec.tty,
         capabilities,
     );
-    let group = ExecGroup::new(exec_directory(&dir)?);
+    let group = ExecGroup::new(exec_directory(&dir)?, &unit_name(paths, name));
     let process_file = group.process_file();
     {
         use std::os::unix::fs::OpenOptionsExt;
@@ -2216,8 +2216,17 @@ mod tests {
         assert!(first.group.process_file().exists(), "a running exec lost its files");
         assert!(second.group.process_file().exists());
         assert!(!finished.exists(), "a finished exec's files stayed behind");
-        // So the timeout can still end the command.
-        assert!(first.group.kill());
+        // So the timeout can still end the command: a process of the computer's scope, as
+        // `crun exec` leaves it.
+        let proc = tempfile::tempdir().unwrap();
+        let described = proc.path().join(leader.id().to_string());
+        std::fs::create_dir_all(&described).unwrap();
+        std::fs::write(
+            described.join("cgroup"),
+            format!("0::/user.slice/x/{}.scope/ctr\n", unit_name(&paths, "dev")),
+        )
+        .unwrap();
+        assert!(first.group.with_proc(proc.path()).kill());
         leader.wait().unwrap();
     }
 

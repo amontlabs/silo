@@ -971,9 +971,7 @@ mod server {
     ) -> Result<Started, String> {
         // `crun` hands the terminal's controlling side to a socket we own. The path stays short
         // (a socket path holds about 100 bytes) and private.
-        let directory = tempfile::Builder::new()
-            .prefix("silo-pty-")
-            .tempdir()
+        let directory = crate::containers::hold::console_directory()
             .map_err(|error| format!("The terminal could not start: {error}"))?;
         let socket = directory.path().join("c");
         let listener = std::os::unix::net::UnixListener::bind(&socket)

@@ -579,6 +579,40 @@ client through the same commands, API methods and screens as a Linux VM. Fable's
     `-D`, refused destinations, a port the host does not serve), a 60 MB file through `ssh cat` both ways with hashes
     (five rounds, and a slow reader; see the flow-control item), a killed client, and 40 idle sockets with a login in between.
 
+#### Post-merge review: container basics (CT1 to CT3b, 10 Nov 2026)
+
+Review of the gateway on Linux, the runtime core, secrets, ports and SSH for container computers as they are on
+`main` after CT6 (`engine/src/containers/`, `container-shim`, `computer_gateway.rs`, `gateway_control.rs`, the
+vendored russh patch, checked against the published 0.65.1 source).
+
+- **Fixed: ending a command could signal a process that was not the computer's** (`hold.rs` `ExecGroup`). The
+  pid file of an exec outlives its command: an SSH channel is closed after its command ended, a terminal ends,
+  and a client may send a `signal` request on a channel whose command is over. The only check was that the pid
+  leads a process group, so once the host had given the number to another group leader (a shell's job, a daemon,
+  another computer's command) that group was killed or signalled. The signal is now sent only while the pid is a
+  process of the computer's own scope (`/proc/<pid>/cgroup`, the check the holder already has). Test:
+  `a_pid_that_now_belongs_to_a_process_outside_the_computer_is_never_signalled`.
+- **Fixed: an exec that was starting could lose its pid file** (`hold.rs` `exec_leftover`). Each new exec removes
+  the directories of execs whose command is gone, and "gone" meant "the pid does not lead a process group".
+  crun 1.14.1 writes the pid file as the command goes on to `execv` (`container.c`, `wait_for_process` after the
+  child's go-ahead byte), which is before `silo-init --own-group` has run, so an exec starting at the same time
+  could take a live command for a leftover and remove its files; no timeout, closed channel or signal could end
+  that command afterwards. A directory with a pid is now a leftover only when no process has that pid. Test:
+  `an_exec_whose_command_has_not_taken_its_group_yet_is_not_a_leftover` (failed before).
+- **Fixed: the folder of a terminal's socket followed the umask** (`ssh.rs`, `cli.rs`). crun hands a terminal's
+  controlling side to a socket the SSH server or the terminal command listens on, and whoever connects first
+  gives the session its terminal. The folder was made `0755` under the usual umask, and the socket open to a
+  group or to everyone under a looser one (an editor's proxy and a terminal start from a login session, not from
+  the engine). It is now `0700` explicitly (`hold::console_directory`). Test:
+  `the_folder_of_a_terminals_socket_is_the_accounts_alone` (failed before).
+- **Fixed: the threat model said a container's SSH has no port forwarding.** The server answers local forwards
+  toward the container's own loopback since CT3b's review; the section now says what is forwarded and refused,
+  and describes the two fixes above.
+- **Not changed.** A client that disconnects in the moment between crun starting a command and that command
+  leading its group leaves the command running (the kill finds no group yet); it is the client's own command and
+  the moment is the one above. `silo-ctr enter` trusts `outer.pid` and the callers check the holder first, as
+  documented.
+
 ### 9 Nov 2026: phase CT4 built (checkpoints, forks and restart for container computers)
 
 Branch `claude/containers-ct4`. A container computer has checkpoints, forks (`-n N`, `--from-step`), quiet forks, diff,

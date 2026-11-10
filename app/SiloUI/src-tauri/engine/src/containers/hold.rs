@@ -95,17 +95,36 @@ pub fn is_starting(name: &str) -> bool {
 ///
 /// It owns a private directory holding the pid file and the `--process` JSON (which carries the
 /// command's environment values), and removes it when the exec is over.
+///
+/// The pid file outlives the command (until the exec's owner lets go of it), and by then the number
+/// may belong to any other process of the host. So a signal is sent only while the pid is a
+/// process of the computer's own scope (`unit`), read from `/proc/<pid>/cgroup` right before.
 #[derive(Debug)]
 pub struct ExecGroup {
     directory: std::path::PathBuf,
+    /// The scope unit of the computer the command runs in (`lifecycle::unit_name`).
+    unit: String,
+    /// Where the processes are described (`/proc`).
+    proc: std::path::PathBuf,
 }
 
 const PID_FILE: &str = "exec.pid";
 const PROCESS_FILE: &str = "process.json";
 
 impl ExecGroup {
-    pub fn new(directory: std::path::PathBuf) -> Self {
-        Self { directory }
+    pub fn new(directory: std::path::PathBuf, unit: &str) -> Self {
+        Self {
+            directory,
+            unit: unit.to_owned(),
+            proc: "/proc".into(),
+        }
+    }
+
+    /// The same group, reading the processes from `proc` instead of `/proc`.
+    #[cfg(test)]
+    pub fn with_proc(mut self, proc: &std::path::Path) -> Self {
+        self.proc = proc.to_owned();
+        self
     }
 
     pub fn pid_file(&self) -> std::path::PathBuf {
@@ -116,8 +135,9 @@ impl ExecGroup {
         self.directory.join(PROCESS_FILE)
     }
 
-    /// SIGKILLs the command's process group. Only a process that leads its own group is touched,
-    /// so a stale or reused pid cannot take anything else with it. Returns whether it signalled.
+    /// SIGKILLs the command's process group. Only a process of the computer's own scope that
+    /// leads its own group is touched, so a stale or reused pid cannot take a process of the host
+    /// or of another computer with it. Returns whether it signalled.
     pub fn kill(&self) -> bool {
         self.signal(libc::SIGKILL)
     }
@@ -128,6 +148,9 @@ impl ExecGroup {
         let Some(pid) = leader_pid(&self.directory) else {
             return false;
         };
+        if !self.in_computer(pid) {
+            return false;
+        }
         // SAFETY: getpgid and kill take plain integers.
         unsafe {
             if libc::getpgid(pid) != pid {
@@ -135,6 +158,13 @@ impl ExecGroup {
             }
             libc::kill(-pid, signal) == 0
         }
+    }
+
+    /// Whether `pid` is a process of the computer's scope now (`crun exec` puts the command in the
+    /// container's control group, below the scope).
+    fn in_computer(&self, pid: i32) -> bool {
+        std::fs::read_to_string(self.proc.join(pid.to_string()).join("cgroup"))
+            .is_ok_and(|text| in_scope(&text, &self.unit))
     }
 }
 
@@ -151,12 +181,25 @@ fn leader_pid(directory: &std::path::Path) -> Option<i32> {
         .filter(|pid| *pid > 1)
 }
 
-/// Whether the exec directory `directory` is a leftover: its command is gone (its pid no longer
-/// leads a process group), or it never recorded a pid and has sat unused for `idle`.
+/// A new folder for the socket `crun` hands a terminal's controlling side to. Whoever connects to
+/// that socket first gives the session its terminal, so only this account may enter the folder,
+/// whatever umask the process runs with (a terminal or an editor's proxy starts from a login
+/// session, not from the engine).
+pub fn console_directory() -> std::io::Result<tempfile::TempDir> {
+    use std::os::unix::fs::PermissionsExt;
+    tempfile::Builder::new()
+        .prefix("silo-pty-")
+        .permissions(std::fs::Permissions::from_mode(0o700))
+        .tempdir()
+}
+
+/// Whether the exec directory `directory` is a leftover: its command is gone (no process has its
+/// pid), or it never recorded a pid and has sat unused for `idle`. A command that is alive is
+/// never one, whether or not it leads its group yet: `crun exec` records the pid before
+/// `silo-init --own-group` has run, and the files of an exec that is starting must stay.
 pub fn exec_leftover(directory: &std::path::Path, idle: Duration) -> bool {
     match leader_pid(directory) {
-        // SAFETY: getpgid takes a plain integer.
-        Some(pid) => unsafe { libc::getpgid(pid) != pid },
+        Some(pid) => !super::image::process_alive(pid as u32),
         None => std::fs::metadata(directory)
             .and_then(|meta| meta.modified())
             .ok()
@@ -166,13 +209,17 @@ pub fn exec_leftover(directory: &std::path::Path, idle: Duration) -> bool {
 }
 
 /// Whether the text of `/proc/<pid>/cgroup` places the process in the scope `unit`.scope (or a
-/// cgroup below it). A recycled process id is not.
+/// cgroup below it). A recycled process id is not. The first scope on the path decides: a
+/// computer may make cgroups below its own scope, and one named after another computer's scope
+/// is still inside its own.
 pub fn in_scope(cgroup: &str, unit: &str) -> bool {
     let scope = format!("{unit}.scope");
     cgroup
         .lines()
         .filter_map(|line| line.splitn(3, ':').nth(2))
-        .any(|path| path.split('/').any(|part| part == scope))
+        .any(|path| {
+            path.split('/').find(|part| part.ends_with(".scope")) == Some(scope.as_str())
+        })
 }
 
 /// The warnings the holder wrote to its log at or after byte `from` (`silo-ctr: warning: ...`).
@@ -194,6 +241,20 @@ mod tests {
     fn alive(pid: u32) -> bool {
         // SAFETY: signal 0 only checks that the process exists.
         unsafe { libc::kill(pid as i32, 0) == 0 }
+    }
+
+    const UNIT: &str = "silo-ct-ab12cd34-dev";
+
+    /// Describes `pid` in the process folder `proc` as a process of the scope `unit`, the way
+    /// `crun exec` leaves a command in the container's control group.
+    fn in_computer(proc: &std::path::Path, pid: u32, unit: &str) {
+        let dir = proc.join(pid.to_string());
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("cgroup"),
+            format!("0::/user.slice/user-1000.slice/user@1000.service/app.slice/{unit}.scope/ctr\n"),
+        )
+        .unwrap();
     }
 
     #[test]
@@ -235,7 +296,9 @@ mod tests {
             .trim()
             .parse()
             .unwrap();
-        let group = ExecGroup::new(directory.path().to_owned());
+        let proc = tempfile::tempdir().unwrap();
+        in_computer(proc.path(), leader.id(), UNIT);
+        let group = ExecGroup::new(directory.path().to_owned(), UNIT).with_proc(proc.path());
         assert_eq!(group.pid_file(), pid_file);
         assert!(group.kill());
         leader.wait().unwrap();
@@ -263,7 +326,10 @@ mod tests {
             .process_group(0);
         let mut leader = leader.spawn().unwrap();
         std::fs::write(directory.path().join("exec.pid"), format!("{}\n", leader.id())).unwrap();
-        let group = ExecGroup::new(directory.path().to_owned());
+        let proc = tempfile::tempdir().unwrap();
+        in_computer(proc.path(), leader.id(), UNIT);
+        in_computer(proc.path(), std::process::id(), UNIT);
+        let group = ExecGroup::new(directory.path().to_owned(), UNIT).with_proc(proc.path());
         // Give the shell time to install its trap before the signal arrives.
         std::thread::sleep(Duration::from_millis(300));
         assert!(group.signal(libc::SIGTERM));
@@ -295,7 +361,9 @@ mod tests {
         std::fs::write(running.join("exec.pid"), format!("{}\n", leader.id())).unwrap();
         assert!(!exec_leftover(&running, idle));
         assert!(!exec_leftover(&running, Duration::ZERO));
-        let group = ExecGroup::new(running.clone());
+        let proc = tempfile::tempdir().unwrap();
+        in_computer(proc.path(), leader.id(), UNIT);
+        let group = ExecGroup::new(running.clone(), UNIT).with_proc(proc.path());
         assert!(group.kill());
         leader.wait().unwrap();
         assert!(exec_leftover(&running, idle), "the command is gone");
@@ -309,12 +377,32 @@ mod tests {
     }
 
     #[test]
+    fn an_exec_whose_command_has_not_taken_its_group_yet_is_not_a_leftover() {
+        // `crun exec` records the pid before `silo-init --own-group` makes the command the leader
+        // of its group: until then it is alive in the group of what started it, as this one is.
+        let mut starting = Command::new("sleep").arg("300").spawn().unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::write(
+            directory.path().join("exec.pid"),
+            format!("{}\n", starting.id()),
+        )
+        .unwrap();
+        let leftover = exec_leftover(directory.path(), Duration::ZERO);
+        starting.kill().unwrap();
+        starting.wait().unwrap();
+        assert!(!leftover, "the files of an exec that is starting would be removed");
+        assert!(exec_leftover(directory.path(), Duration::from_secs(600)), "the command is gone");
+    }
+
+    #[test]
     fn the_exec_group_never_signals_a_process_that_does_not_lead_its_own_group() {
         let directory = tempfile::tempdir().unwrap();
         let pid_file = directory.path().join("exec.pid");
         // This test process leads no group of its own (its group is the test harness's).
         std::fs::write(&pid_file, format!("{}\n", std::process::id())).unwrap();
-        let group = ExecGroup::new(directory.path().to_owned());
+        let proc = tempfile::tempdir().unwrap();
+        in_computer(proc.path(), std::process::id(), UNIT);
+        let group = ExecGroup::new(directory.path().to_owned(), UNIT).with_proc(proc.path());
         // SAFETY: getpgrp has no preconditions.
         if unsafe { libc::getpgrp() } as u32 != std::process::id() {
             assert!(!group.kill());
@@ -323,7 +411,54 @@ mod tests {
             std::fs::write(&pid_file, text).unwrap();
             assert!(!group.kill(), "{text:?}");
         }
-        assert!(!ExecGroup::new(directory.path().join("missing")).kill());
+        assert!(!ExecGroup::new(directory.path().join("missing"), UNIT).kill());
+    }
+
+    #[test]
+    fn a_pid_that_now_belongs_to_a_process_outside_the_computer_is_never_signalled() {
+        use std::os::unix::process::CommandExt;
+        // The command ended and its pid file stayed (a channel that closes after its command, a
+        // terminal that ends); the number now names a process of the host that leads a group of
+        // its own, as a shell's job, a daemon or another computer's holder does.
+        let mut bystander = Command::new("sleep")
+            .arg("300")
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::write(
+            directory.path().join("exec.pid"),
+            format!("{}\n", bystander.id()),
+        )
+        .unwrap();
+        let proc = tempfile::tempdir().unwrap();
+        // No entry at all, a process of the host, and a process of another computer.
+        let group = ExecGroup::new(directory.path().to_owned(), UNIT).with_proc(proc.path());
+        assert!(!group.kill());
+        let dir = proc.path().join(bystander.id().to_string());
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("cgroup"), "0::/user.slice/user-1000.slice/session-3.scope\n")
+            .unwrap();
+        assert!(!group.kill());
+        in_computer(proc.path(), bystander.id(), "silo-ct-ab12cd34-other");
+        assert!(!group.kill());
+        assert!(!group.signal(libc::SIGTERM));
+        assert!(
+            matches!(bystander.try_wait(), Ok(None)),
+            "a process outside the computer was signalled"
+        );
+        // The same process inside the computer's scope is the command, and is ended.
+        in_computer(proc.path(), bystander.id(), UNIT);
+        assert!(group.kill());
+        bystander.wait().unwrap();
+    }
+
+    #[test]
+    fn the_folder_of_a_terminals_socket_is_the_accounts_alone() {
+        use std::os::unix::fs::PermissionsExt;
+        let directory = console_directory().unwrap();
+        let mode = std::fs::metadata(directory.path()).unwrap().permissions().mode() & 0o7777;
+        assert_eq!(mode, 0o700, "{mode:o}");
     }
 
     #[test]
@@ -372,6 +507,9 @@ mod tests {
             unit
         ));
         assert!(!in_scope("", unit));
+        // A cgroup another computer made below its own scope, named after this one's.
+        let other = "0::/user.slice/user-1000.slice/user@1000.service/app.slice/silo-ct-ab12cd34-other.scope";
+        assert!(!in_scope(&format!("{other}/ctr/{unit}.scope\n"), unit));
     }
 
     #[test]
