@@ -25,7 +25,7 @@ Plan: [PLAN.md](PLAN.md). Agent rules: [AGENT-BRIEF.md](AGENT-BRIEF.md).
 | S1 | merged 2026-11-10 | `docs/s1-gateway-channel-spike` | [evidence](evidence/S1.md). Channel: yes, no patch. Allowlist: needs strict off, a `restore --net-strict` patch, and gateway init fields |
 | T1 | merged 2026-11-10 (`e000d684c`) | `t1-policy-audit` | silod 341, api 52, policy and audit 42 tests passed in the item. Only one review round ran (fallback model); the second hit a quota. Orchestrator read rules.rs, policy/mod.rs and the gate: no hole found; checkpoint ids are looked up inside the named computer's record. A Codex review is running |
 | T1 review | done 2026-11-10 (Opus) | | one high finding and seven smaller, listed under Found. All eight fixed and merged 2026-11-10 (`fix/policy-audit-review-findings`): the made record moves inside the promote's own Lineage step and is saved in the promote journal, so undo and recovery reverse or repeat it; silod 346 and the engine's policy, audit and promote tests (116) passed in the item. Orchestrator read `policy/handoff.rs`. Not exercised against a real engine. A Codex pass is still owed |
-| T2 | running since 2026-11-10 | | task id ends `b36c91cf-09c3-4e62-9c5d-cbb05e3d8482` (Opus) |
+| T2 | merged 2026-11-11 (`583c19b97`) | `feat/silo-approvals-store` | merged by hand against the T1 fixes and T3 (gate, policy, counts); 1472 focused tests passed after the merge. Reviewed twice in the item on the fallback model. Opus review running: id ends `83e6e8b5-4ca6-47f2-986c-aa72a1d8263c` |
 | T3 | merged 2026-11-10 | `feat/device-resource-limits` | merged by hand; 588 focused tests passed after the merge. Reviewed once by the fallback model. Open: a burst of starts can each pass before any computer has booted (needs a reservation of admitted starts' memory); a request larger than the headroom is still admitted; disk is measured at app data, not a separately chosen storage location |
 | T4 | merged 2026-11-10 | `feat/keep-conflict-choices` | engine tests 273, api 53, silod checkpoints 56 passed in the item; two review rounds; the `silo-ui` crate was not built there |
 | T9 | merged 2026-11-10 | `feat/macos-computer-app-parity` | frontend only, no Rust change; 2914 frontend tests passed in the item; reviewed by the fallback model (gemini flash) only, one round; not run in the real app |
@@ -34,10 +34,12 @@ Plan: [PLAN.md](PLAN.md). Agent rules: [AGENT-BRIEF.md](AGENT-BRIEF.md).
 | S2 | merged 2026-11-10 | `docs/s2-linux-computer-rebuild` | [evidence](evidence/S2.md). Verdict: buildable now for Linux with host-side disk moves; macOS later. T15 waits for T6 (recipes in the engine) |
 | T7 | merged 2026-11-10 | `fix/macos-nat-boundary` | 530 macOS engine tests passed; unit tests only, no macOS computer run; one review round on the fallback model. Live steps are in the item's report, copied below |
 | T11 review | done 2026-11-10 (Sonnet) | | no token value leaks found. Ten findings; the important ones: a network failure detached computers (also true before T11), a stale check could overwrite a newer token's state, and an agent's request for token access was summarised without saying a full-permission token is given, with a missing id bound to the owner's `github-token` after approval. All ten fixed and merged 2026-11-10 (`fix/github-token-review`); api 63, silod 353, engine github/secrets/policy 297 and 902 frontend tests passed in the item. For the owner: the old single-token fallback applies only in a session where a client used the old methods; a token with no answer since start shows waiting and its computers stay detached until GitHub answers |
-| T8 | running since 2026-11-10 | | task id ends `79d02ce1-40dd-4324-bd62-4aa92e074893` (Opus); includes a runtime patch (`restore --net-strict`) and a live check in a private runtime home; no review in the item (quota), orchestrator arranges it |
+| T8 | stopped 2026-11-11 by a Claude API rate limit; continued | `feat/computer-network-policy` (work saved as `2c6442f98`) | continuation on Sonnet: id ends `779e2245-5c05-4c47-a529-662635d5db03`. Left to do then: patch wiring, runtime rebuild, live check, documents |
+| T5a | running since 2026-11-11 | | id ends `483ed458-d28e-46af-950d-c3a473cf2223` (Opus). Starts from `direction` plus T8's branch; uses the Dev engine for its live check. T5b (the engine provides the `silo` binary, guest components, MCP registration, approval waiting and new MCP tools) follows it |
+| T10 | running since 2026-11-11 | | id ends `867f5ada-08b8-4573-aecc-b795909f4116` (Sonnet): approvals and audit in the app, Merge wording, conflict chooser |
 | T14 | merged 2026-11-10 | `feat/exclude-logins-export` | 998 focused tests passed after the merge. **The canary failed**: the imported computer has no login files, but both markers are still in the export file, in the base disk layers (a fork's disks are layers over the source's and `msb` cannot flatten them; trimming reaches only the top layer). Shipped as best effort with the wording "removed, traces may remain". [evidence](evidence/T14.txt). Linux virtual machines only; checkpoint, macOS and container exports keep the old warning. The Dev engine is stopped and free |
 
-Task ids are `node:delegated-task:command%3Amcp%3Ad723019c-0dae-419c-8e5d-2e7d794e60f4%3Adelegate-task%3A<ending>`.
+Task ids are `node:delegated-task:command%3Amcp%3A<session>%3Adelegate-task%3A<ending>`; the session part was `d723019c-0dae-419c-8e5d-2e7d794e60f4` on 2026-11-10 and is `d8f73f30-2d3c-4819-8290-51937a1beb8b` from 2026-11-11.
 Next waves are in the plan's work items table; start an item only when the items before it in
 its dependency chain are merged (T2 and T3 need T1; T5 needs T1, T2 and S1; T6 needs T4 and T2;
 T10 needs T2 and T9; T8 needs S1 and T5; T13 needs T8, T10 and T12).
@@ -75,6 +77,21 @@ These were not asked of the owner. Each is open to change.
     requests, which narrows it).
 
 ## Found during the build
+
+- **Do not run `cargo fmt` on the engine or silod crates as a whole.** They are not rustfmt-clean
+  (the project's check covers only the root package), so it rewrites dozens of unrelated files.
+  It happened once during the T2 merge and was undone.
+- **Claude API rate limit** stopped T8 on 2026-11-11. Keep at most two Opus tasks and four Claude
+  tasks running at once.
+- **Disk:** merged worktrees keep ignored build output; `git clean -fdXq` in each after its merge
+  (done 2026-11-11, 20 GB back). `org.silo.dev` app data is 40 GB (macOS restore images and
+  templates), which is the Dev engine's own data.
+- **T2, for T10 and the owner:** the frontend's list of notice categories lacks `approvals`, so the
+  in-app toast is skipped (T10 adds it). Summaries include computer names that agents choose. A
+  cargo run again printed the private GitHub build file into an agent's log (deleted, nothing
+  committed). The Tauri change that clears one notice by key was not compile-checked in the item.
+- **T3 follow-up owed:** reserve the memory of admitted starts so a burst cannot pass the floor
+  together; refuse a request larger than the headroom.
 
 - **T14, for the owner:** keep removal on by default despite the caveat, or go back to ask-first?
   A real fix needs layer flattening in the runtime. The removal uses the whole known-credential
