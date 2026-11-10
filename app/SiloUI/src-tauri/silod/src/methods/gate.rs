@@ -213,7 +213,9 @@ pub(crate) mod test_nodes {
     static NODES: Mutex<Vec<Node>> = Mutex::new(Vec::new());
 
     fn nodes() -> std::sync::MutexGuard<'static, Vec<Node>> {
-        NODES.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+        NODES
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     pub(crate) fn add(id: &str, name: &str, parent: Option<&str>) {
@@ -299,7 +301,8 @@ pub(crate) async fn admit(
     let (decision, visible, name) = match &caller {
         Caller::Computer { id } => {
             let world = EngineWorld::load(context, method).await;
-            let mut visible: BTreeSet<String> = policy::World::made(&world, id).into_iter().collect();
+            let mut visible: BTreeSet<String> =
+                policy::World::made(&world, id).into_iter().collect();
             visible.insert(id.clone());
             (
                 policy::decide(&caller, method, params, &world),
@@ -307,7 +310,11 @@ pub(crate) async fn admit(
                 policy::World::name(&world, id),
             )
         }
-        _ => (policy::decide(&caller, method, params, &NoWorld), None, None),
+        _ => (
+            policy::decide(&caller, method, params, &NoWorld),
+            None,
+            None,
+        ),
     };
     let seen = visible.clone();
     let refuse = |error: DispatchError, outcome: AuditOutcome| {
@@ -351,7 +358,12 @@ pub(crate) async fn admit(
                 }
             }
             let job = (method == MethodName::OperationsJobAcknowledge)
-                .then(|| params.get("jobId").and_then(Value::as_str).map(str::to_owned))
+                .then(|| {
+                    params
+                        .get("jobId")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned)
+                })
                 .flatten();
             Ok(Admitted {
                 params: allowed.params,
@@ -543,7 +555,9 @@ impl EngineWorld {
             }
             parents.insert(
                 id.to_owned(),
-                node.get("parent").and_then(Value::as_str).map(str::to_owned),
+                node.get("parent")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
             );
         }
         #[cfg(test)]

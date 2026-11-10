@@ -426,8 +426,7 @@ impl<'a> Judge<'a> {
                 if let Some(target) = text(params, "targetId") {
                     if !self.in_tree(target) {
                         return Err(
-                            "A review request can target only this computer or one it made."
-                                .into(),
+                            "A review request can target only this computer or one it made.".into(),
                         );
                     }
                 }
@@ -449,7 +448,10 @@ impl<'a> Judge<'a> {
         match method {
             MethodName::CheckpointsFork => self.fork(params),
             MethodName::ComputersCreate => self.new_computer(params),
-            other => Err(format!("{} is not a call that makes a computer.", other.name())),
+            other => Err(format!(
+                "{} is not a call that makes a computer.",
+                other.name()
+            )),
         }
     }
 
@@ -601,7 +603,11 @@ impl<'a> Judge<'a> {
                         match desktop.get("startWithComputer") {
                             None | Some(Value::Null) => {}
                             Some(Value::Bool(start)) => kept["startWithComputer"] = json!(start),
-                            Some(_) => return Err("The desktop's startWithComputer is true or false.".into()),
+                            Some(_) => {
+                                return Err(
+                                    "The desktop's startWithComputer is true or false.".into()
+                                )
+                            }
                         }
                         rewritten["configuration"]["desktop"] = kept;
                     }
@@ -745,8 +751,13 @@ impl<'a> Judge<'a> {
                 if !self.made.contains(&fork) {
                     return Err("That review request is not about a computer this one made.".into());
                 }
-                let target = self.world.request_target(text(params, "requestId").unwrap_or_default());
-                if target.as_ref().is_some_and(|target| self.made.contains(target)) {
+                let target = self
+                    .world
+                    .request_target(text(params, "requestId").unwrap_or_default());
+                if target
+                    .as_ref()
+                    .is_some_and(|target| self.made.contains(target))
+                {
                     return Ok(allow_with(params.clone()));
                 }
                 let details = MergeDetails::of(params)?;
@@ -832,7 +843,9 @@ impl<'a> Judge<'a> {
             ));
         }
         if details.data_ok {
-            summary.push_str(" Database changes are carried even where no migration step covers them.");
+            summary.push_str(
+                " Database changes are carried even where no migration step covers them.",
+            );
         }
         if !details.choices.is_empty() {
             summary.push_str(&format!(" Choices: {}.", listed(&details.choices)));
@@ -1083,7 +1096,9 @@ impl<'a> Judge<'a> {
             || computers.iter().collect::<BTreeSet<_>>().len() != computers.len()
             || domains.is_empty()
             || domains.len() > 100
-            || !domains.iter().all(|domain| crate::secrets::valid_domain(domain))
+            || !domains
+                .iter()
+                .all(|domain| crate::secrets::valid_domain(domain))
         {
             return Err("Select computers and valid allowed domains.".into());
         }
@@ -1169,7 +1184,8 @@ impl<'a> Judge<'a> {
                 github_access(now)
             );
             writes |= github_writes(now) && !github_writes(was);
-            let identity = |policy: Option<&Value>| policy.and_then(|policy| policy.get("identity")).cloned();
+            let identity =
+                |policy: Option<&Value>| policy.and_then(|policy| policy.get("identity")).cloned();
             if identity(was) != identity(now) {
                 change.push_str(&format!("; {}", github_identity(now)));
             }
@@ -1177,7 +1193,8 @@ impl<'a> Judge<'a> {
                 let token = token_of(policy).ok_or(
                     "Say which GitHub token the computer should use; a computer's agent has to name the token secret.",
                 )?;
-                if was.filter(|policy| uses_token(policy)).and_then(token_of) != Some(token.clone()) {
+                if was.filter(|policy| uses_token(policy)).and_then(token_of) != Some(token.clone())
+                {
                     let token_name = self
                         .world
                         .github_token_name(&token)

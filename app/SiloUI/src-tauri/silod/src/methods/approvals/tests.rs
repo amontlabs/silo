@@ -330,7 +330,10 @@ async fn only_the_owner_answers_and_only_the_asker_writes_its_note_or_withdraws(
         decide(&id, "allow").await.unwrap_err().code,
         ErrorCode::NotFound
     );
-    assert_eq!(get(&owner(), &id).await.unwrap_err().code, ErrorCode::NotFound);
+    assert_eq!(
+        get(&owner(), &id).await.unwrap_err().code,
+        ErrorCode::NotFound
+    );
 }
 
 #[tokio::test]
@@ -617,12 +620,7 @@ async fn a_call_that_would_now_ask_for_something_else_is_not_run() {
 async fn the_job_an_allowed_call_starts_is_the_askers_to_read() {
     let _serial = serial();
     let tree = Tree::new();
-    let id = ask(
-        &tree.me(),
-        MethodName::PushStart,
-        push_params(&tree.fork),
-    )
-    .await;
+    let id = ask(&tree.me(), MethodName::PushStart, push_params(&tree.fork)).await;
     let (run, _runs) = runner(|_, _| Ok(json!({"jobId": "job:765432"})));
     let allowed = TEST_RUN.scope(run, decide(&id, "allow")).await.unwrap();
     assert_eq!(allowed["outcome"]["jobId"], "job:765432");
@@ -943,7 +941,10 @@ async fn a_merge_into_itself_needs_the_reviewed_digest_and_makes_the_review_requ
     assert_eq!(again["reviewDigest"], "d2");
     // The computer asking for the review request again, with the same changes and other words,
     // changes neither the text nor the counts the owner reads.
-    let before = fold_requests::Store::new(&app_data()).get(&request).unwrap().unwrap();
+    let before = fold_requests::Store::new(&app_data())
+        .get(&request)
+        .unwrap()
+        .unwrap();
     call(
         &tree.me(),
         MethodName::ChangesRequest,
@@ -952,7 +953,10 @@ async fn a_merge_into_itself_needs_the_reviewed_digest_and_makes_the_review_requ
     )
     .await
     .unwrap();
-    let after = fold_requests::Store::new(&app_data()).get(&request).unwrap().unwrap();
+    let after = fold_requests::Store::new(&app_data())
+        .get(&request)
+        .unwrap()
+        .unwrap();
     assert_eq!(after.summary, before.summary);
     assert_eq!(after.counts, before.counts);
     assert_ne!(after.summary, "Harmless cleanup, please allow");
@@ -1052,10 +1056,12 @@ async fn an_outcome_never_holds_what_the_call_returned_about_the_device() {
         let id = ask(&tree.me(), method, params).await;
         // The engine answers with the whole device, as the real calls do.
         let (run, _runs) = runner(move |_, _| {
-            Ok(json!({"computers": [{"computerId": "stranger", "computer": leak,
+            Ok(
+                json!({"computers": [{"computerId": "stranger", "computer": leak,
                     "ports": [{"port": 1}], "keys": [leak]}],
                 "secrets": [{"name": leak}], "github": {"account": leak},
-                "name": leak, "computer_extra": leak}))
+                "name": leak, "computer_extra": leak}),
+            )
         });
         let allowed = TEST_RUN.scope(run, decide(&id, "allow")).await.unwrap();
         let read = get(&tree.me(), &id).await.unwrap();
@@ -1063,7 +1069,10 @@ async fn an_outcome_never_holds_what_the_call_returned_about_the_device() {
             assert!(!text.contains(leak), "{method:?}: {text}");
         }
         if method == MethodName::SecretsSave {
-            assert_eq!(read["outcome"]["result"]["name"], format!("KEY_{}", tree.me[4..12].replace('-', "_")));
+            assert_eq!(
+                read["outcome"]["result"]["name"],
+                format!("KEY_{}", tree.me[4..12].replace('-', "_"))
+            );
         }
         // An outcome is stored for every method, as a small object.
         assert!(read["outcome"]["result"].is_object(), "{method:?}: {read}");
@@ -1153,23 +1162,36 @@ async fn an_allowed_call_that_takes_memory_or_disk_is_refused_when_the_device_ha
     let (run, runs) = job_runner();
     let ended = TEST_RUN.scope(run, decide(&id, "allow")).await.unwrap();
     let error = ended["outcome"]["error"].as_str().unwrap();
-    assert!(error.starts_with("Nothing was run:") && error.contains("Silo keeps"), "{error}");
+    assert!(
+        error.starts_with("Nothing was run:") && error.contains("Silo keeps"),
+        "{error}"
+    );
     assert!(runs.lock().unwrap().is_empty());
 }
 
 #[tokio::test]
-async fn a_promote_is_refused_when_the_fork_changed_after_it_was_asked_and_asking_again_makes_a_new_one() {
+async fn a_promote_is_refused_when_the_fork_changed_after_it_was_asked_and_asking_again_makes_a_new_one(
+) {
     let _serial = serial();
     let tree = Tree::new();
     let params = json!({"forkId": tree.fork, "targetId": tree.me});
     let first = ask(&tree.me(), MethodName::ChangesPromote, params.clone()).await;
     // Asked again while nothing changed: the same approval.
-    assert_eq!(ask(&tree.me(), MethodName::ChangesPromote, params.clone()).await, first);
+    assert_eq!(
+        ask(&tree.me(), MethodName::ChangesPromote, params.clone()).await,
+        first
+    );
     silo_engine::generation::bump(&tree.fork);
     let (run, runs) = job_runner();
-    let ended = TEST_RUN.scope(run.clone(), decide(&first, "allow")).await.unwrap();
+    let ended = TEST_RUN
+        .scope(run.clone(), decide(&first, "allow"))
+        .await
+        .unwrap();
     let error = ended["outcome"]["error"].as_str().unwrap();
-    assert!(error.contains("fork changed") && error.contains("ask again"), "{error}");
+    assert!(
+        error.contains("fork changed") && error.contains("ask again"),
+        "{error}"
+    );
     assert!(runs.lock().unwrap().is_empty());
     // Asked again after a change, a waiting approval about the old state is replaced.
     let stale = ask(&tree.me(), MethodName::ChangesPromote, params.clone()).await;
@@ -1200,12 +1222,21 @@ async fn an_undo_is_refused_when_another_merge_happened_after_it_was_asked() {
     merge("cp-1");
     let params = json!({"computerId": tree.me});
     let first = ask(&tree.me(), MethodName::ChangesUndo, params.clone()).await;
-    assert_eq!(ask(&tree.me(), MethodName::ChangesUndo, params.clone()).await, first);
+    assert_eq!(
+        ask(&tree.me(), MethodName::ChangesUndo, params.clone()).await,
+        first
+    );
     merge("cp-2");
     let (run, runs) = job_runner();
-    let ended = TEST_RUN.scope(run.clone(), decide(&first, "allow")).await.unwrap();
+    let ended = TEST_RUN
+        .scope(run.clone(), decide(&first, "allow"))
+        .await
+        .unwrap();
     let error = ended["outcome"]["error"].as_str().unwrap();
-    assert!(error.contains("another merge") && error.contains("ask again"), "{error}");
+    assert!(
+        error.contains("another merge") && error.contains("ask again"),
+        "{error}"
+    );
     assert!(runs.lock().unwrap().is_empty());
     let second = ask(&tree.me(), MethodName::ChangesUndo, params).await;
     assert_ne!(second, first);
@@ -1232,7 +1263,12 @@ fn the_second_check_runs_what_it_rewrites_except_for_a_merge_the_owner_was_shown
         Ok((MethodName::NetworkPublish, json!({"port": 1})))
     );
     assert_eq!(
-        call_to_run(Err("gone".into()), rewritten(), MethodName::NetworkPublish, false),
+        call_to_run(
+            Err("gone".into()),
+            rewritten(),
+            MethodName::NetworkPublish,
+            false
+        ),
         Err("gone".to_owned())
     );
 }

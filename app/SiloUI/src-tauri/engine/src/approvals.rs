@@ -284,10 +284,14 @@ impl Store {
     /// the new one.
     fn write_file(&self, path: &Path, bytes: &[u8]) -> std::io::Result<()> {
         let dir = path.parent().unwrap_or(&self.root);
-        fs::DirBuilder::new().recursive(true).mode(0o700).create(dir)?;
+        fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(dir)?;
         let temporary = dir.join(format!(
             "{}.{}.tmp",
-            path.file_name().map_or_else(String::new, |name| name.to_string_lossy().into_owned()),
+            path.file_name()
+                .map_or_else(String::new, |name| name.to_string_lossy().into_owned()),
             uuid::Uuid::new_v4().simple()
         ));
         let written = (|| {
@@ -438,8 +442,7 @@ impl Store {
                 .records
                 .values()
                 .filter(|record| {
-                    record.state() == ApprovalState::Pending
-                        && record.computer() == new.computer_id
+                    record.state() == ApprovalState::Pending && record.computer() == new.computer_id
                 })
                 .collect();
             if let Some(same) = pending.iter().find(|record| record.request_key == key) {

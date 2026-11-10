@@ -156,7 +156,10 @@ mod tests {
             render_list(&json!({"approvals": [approval]})),
         ];
         for text in shown {
-            assert!(!text.chars().any(|c| c.is_control() && c != '\n'), "{text:?}");
+            assert!(
+                !text.chars().any(|c| c.is_control() && c != '\n'),
+                "{text:?}"
+            );
             assert!(!text.contains('\u{202E}'), "{text:?}");
             assert!(text.contains("Silo: allowed"));
         }

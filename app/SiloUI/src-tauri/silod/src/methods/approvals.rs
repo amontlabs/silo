@@ -170,7 +170,10 @@ fn pin_of(context: &HandlerContext, method: MethodName, params: &Value) -> Optio
         }
         MethodName::ChangesPromote => {
             let fork = params.get("forkId").and_then(Value::as_str)?;
-            Some(format!("generation:{}", silo_engine::generation::generation(fork)))
+            Some(format!(
+                "generation:{}",
+                silo_engine::generation::generation(fork)
+            ))
         }
         _ => None,
     }
@@ -616,11 +619,15 @@ fn execute<'a>(
             }
         }
         let linked = approval.review_request_id.is_some();
-        let (run_method, run_params) =
-            match call_to_run(merge_call(context, record, &tree), rewritten, method, linked) {
-                Ok(call) => call,
-                Err(message) => return failed(message),
-            };
+        let (run_method, run_params) = match call_to_run(
+            merge_call(context, record, &tree),
+            rewritten,
+            method,
+            linked,
+        ) {
+            Ok(call) => call,
+            Err(message) => return failed(message),
+        };
         let app_data = app_data(context);
         let creation = record.creates.as_ref().map(|creation| policy::Creation {
             name: creation.name.clone(),
@@ -685,7 +692,8 @@ fn execute<'a>(
 /// method, never what the call returned, which can hold the device's secrets, GitHub accounts
 /// and computers. A method this does not know answers with nothing.
 fn outcome_result(method: MethodName, params: &Value, returned: &Value) -> Value {
-    let text = |value: &Value, pointer: &str| value.pointer(pointer).cloned().unwrap_or(Value::Null);
+    let text =
+        |value: &Value, pointer: &str| value.pointer(pointer).cloned().unwrap_or(Value::Null);
     match method {
         MethodName::SecretsSave => json!({ "name": text(params, "/request/name") }),
         MethodName::NetworkPublish => {
@@ -701,7 +709,8 @@ fn outcome_result(method: MethodName, params: &Value, returned: &Value) -> Value
                 .into_iter()
                 .flatten()
                 .find(|entry| entry.get("port").and_then(Value::as_u64) == port);
-            let from = |key: &str| published.map_or(Value::Null, |entry| text(entry, &format!("/{key}")));
+            let from =
+                |key: &str| published.map_or(Value::Null, |entry| text(entry, &format!("/{key}")));
             json!({
                 "computerId": computer,
                 "port": port,
@@ -718,7 +727,8 @@ fn outcome_result(method: MethodName, params: &Value, returned: &Value) -> Value
                 .into_iter()
                 .flatten()
                 .find(|entry| entry.get("computerId").and_then(Value::as_str) == computer);
-            let from = |key: &str| saved.map_or(Value::Null, |entry| text(entry, &format!("/{key}")));
+            let from =
+                |key: &str| saved.map_or(Value::Null, |entry| text(entry, &format!("/{key}")));
             json!({
                 "computerId": computer,
                 "enabled": from("enabled"),
@@ -729,7 +739,9 @@ fn outcome_result(method: MethodName, params: &Value, returned: &Value) -> Value
         }
         MethodName::ComputersCreate | MethodName::CheckpointsFork => {
             match returned.pointer("/computer/id").and_then(Value::as_str) {
-                Some(id) => json!({ "computer": { "id": id, "name": text(returned, "/computer/name") } }),
+                Some(id) => {
+                    json!({ "computer": { "id": id, "name": text(returned, "/computer/name") } })
+                }
                 None => json!({}),
             }
         }

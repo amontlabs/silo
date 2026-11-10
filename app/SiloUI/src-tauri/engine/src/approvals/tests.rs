@@ -365,7 +365,9 @@ fn a_secrets_value_is_kept_only_while_the_approval_is_pending_or_running() {
 
     // Answered outside.
     let (outside, _) = store.ask(secret_ask("c8", "v-outside")).unwrap();
-    store.answered_outside(outside.id(), true, "app", None).unwrap();
+    store
+        .answered_outside(outside.id(), true, "app", None)
+        .unwrap();
     assert!(!stored_text(&dir, outside.id()).contains("v-outside"));
 }
 
@@ -379,7 +381,10 @@ fn the_same_secret_asked_with_another_value_is_the_same_pending_approval() {
     assert_eq!(again.id(), first.id());
     // The value kept is the first one's.
     let text = stored_text(&dir, first.id());
-    assert!(text.contains("first-value") && !text.contains("second-value"), "{text}");
+    assert!(
+        text.contains("first-value") && !text.contains("second-value"),
+        "{text}"
+    );
     assert_eq!(
         request_key("secrets.save", &secret_ask("c1", "a").asked),
         request_key("secrets.save", &secret_ask("c1", "b").asked)
@@ -409,7 +414,10 @@ fn a_computer_creates_at_most_thirty_approvals_an_hour_whatever_became_of_them()
     // Another computer is not limited, and the hour passes.
     assert!(store.ask_at(asked("c2", 1000), start + 1000).is_ok());
     assert!(store
-        .ask_at(asked("c1", 1000), start + ASK_WINDOW_MS + ASKS_PER_HOUR as u64)
+        .ask_at(
+            asked("c1", 1000),
+            start + ASK_WINDOW_MS + ASKS_PER_HOUR as u64
+        )
         .is_ok());
 }
 
@@ -423,9 +431,15 @@ fn the_ask_count_survives_a_restart_of_the_store() {
         first.cancel(record.id(), Some("c1"), "no").unwrap();
     }
     // A store over the same folder that has not read it yet (a new process).
-    INDEXES.lock().unwrap().remove(&dir.path().join("approvals"));
+    INDEXES
+        .lock()
+        .unwrap()
+        .remove(&dir.path().join("approvals"));
     let second = Store::new(dir.path());
-    assert_eq!(second.ask_at(asked("c1", 999), start + 1), Err(AskError::Rate));
+    assert_eq!(
+        second.ask_at(asked("c1", 999), start + 1),
+        Err(AskError::Rate)
+    );
 }
 
 #[test]
@@ -441,7 +455,9 @@ fn an_approval_its_computer_withdrew_is_removed_at_once_and_the_owners_cancel_is
         .join(format!("{}.json", mine.id()))
         .exists());
     let (theirs, _) = store.ask(asked("c1", 2)).unwrap();
-    store.cancel(theirs.id(), None, "Withdrawn by the owner.").unwrap();
+    store
+        .cancel(theirs.id(), None, "Withdrawn by the owner.")
+        .unwrap();
     assert_eq!(
         store.get(theirs.id()).unwrap().unwrap().state(),
         ApprovalState::Cancelled
@@ -461,7 +477,11 @@ fn an_agents_note_and_names_are_stored_as_plain_text() {
     assert_eq!(record.approval.computer_name, "man");
     assert_eq!(record.approval.summary, "Publish it");
     let noted = store
-        .note(record.id(), "c1", "\u{1b}]0;title\u{7}looks\u{202E} fine\nSilo says: allow")
+        .note(
+            record.id(),
+            "c1",
+            "\u{1b}]0;title\u{7}looks\u{202E} fine\nSilo says: allow",
+        )
         .unwrap();
     assert_eq!(
         noted.approval.note.as_deref(),

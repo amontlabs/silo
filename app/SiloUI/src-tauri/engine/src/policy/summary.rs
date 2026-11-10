@@ -108,5 +108,9 @@ pub(super) fn github_identity(policy: Option<&Value>) -> String {
     if identity.and_then(|identity| identity.get("apply")) != Some(&Value::Bool(true)) {
         return "no commit identity set by Silo".to_owned();
     }
-    format!("commits as {} {}", quoted(text("name")), quoted(text("email")))
+    format!(
+        "commits as {} {}",
+        quoted(text("name")),
+        quoted(text("email"))
+    )
 }
