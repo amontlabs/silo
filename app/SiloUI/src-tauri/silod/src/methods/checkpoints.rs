@@ -16,6 +16,8 @@ mod migration;
 pub(crate) mod preparation;
 mod recipes;
 mod requests;
+#[cfg(test)]
+pub(crate) use requests::tests_rows;
 mod steps;
 
 use std::sync::Arc;

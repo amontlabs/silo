@@ -438,6 +438,20 @@ engine's `changes.requests.keep` refuses them with "Keep folder forks with `silo
 `stale: null`; `silo requests show` reads the folder itself and fills the text, digest and `stale`.
 `throwAway` and `open` work for them like for any fork.
 
+Merges a computer's agent asks for. A `changes.keep` from a computer into itself, or its
+`changes.requests.keep`, is held for the owner as an approval of kind `merge`
+([SiloUI-POLICY.md](SiloUI-POLICY.md#asking-you)). A `changes.keep` must carry the `reviewDigest`
+of a `changes.diff` the agent ran (without it the call is refused and the agent is told to run
+the diff first; a dry run is refused too). Asking makes or reuses the open review request for that
+fork and target, with that digest and the engine's summary, and links the two: the request's
+`approvalId` and the approval's `reviewRequestId` and `reviewDigest`. Asking again with other
+changes updates the same request and withdraws the earlier approval. Allowing the approval runs
+`changes.requests.keep` for the request with the stored `choices`, `skip`, `keep` and `dataOk`,
+only when the request is still open and still has the approval's digest. Keeping the request
+directly (`changes.requests.keep` from the app or the command line) allows the approval with the
+keep's job; throwing it away denies it; a request closed any other way (its fork or target was
+deleted, or the agent threw it away) withdraws it the next time approvals are read.
+
 ## Steps and the fork tree
 
 A step is one command run on a computer through Silo: `silo exec`, the MCP `exec` tool, or the

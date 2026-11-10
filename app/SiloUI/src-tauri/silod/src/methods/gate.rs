@@ -184,20 +184,54 @@ pub(crate) fn settle_creation(
     }
 }
 
-/// Asks the policy again about a call `computer` made, as at the time it asked. `None` when
-/// that computer no longer exists.
+/// A computer's name, when it exists.
+pub(crate) async fn computer_name(context: &HandlerContext, id: &str) -> Option<String> {
+    let world = EngineWorld::load(context, MethodName::ComputersAccess).await;
+    policy::World::name(&world, id)
+}
+
+/// Computers a test adds to the device the policy sees, where no runtime lists any.
+#[cfg(test)]
+pub(crate) mod test_nodes {
+    use std::sync::Mutex;
+
+    type Node = (String, String, Option<String>);
+    static NODES: Mutex<Vec<Node>> = Mutex::new(Vec::new());
+
+    fn nodes() -> std::sync::MutexGuard<'static, Vec<Node>> {
+        NODES.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    pub(crate) fn add(id: &str, name: &str, parent: Option<&str>) {
+        nodes().push((id.into(), name.into(), parent.map(str::to_owned)));
+    }
+
+    pub(crate) fn remove(id: &str) {
+        nodes().retain(|(node, _, _)| node != id);
+    }
+
+    pub(crate) fn all() -> Vec<Node> {
+        nodes().clone()
+    }
+}
+
+/// Asks the policy again about a call `computer` made, as at the time it asked, and returns
+/// its answer with the computers `computer` may reach (itself and the ones it made). `None`
+/// when that computer no longer exists.
 pub(crate) async fn judge(
     context: &HandlerContext,
     computer: &str,
     method: MethodName,
     params: &Value,
-) -> Option<Decision> {
+) -> Option<(Decision, BTreeSet<String>)> {
     let world = EngineWorld::load(context, method).await;
     policy::World::name(&world, computer)?;
     let caller = Caller::Computer {
         id: computer.to_owned(),
     };
-    Some(policy::decide(&caller, method, params, &world))
+    let mut tree: BTreeSet<String> = policy::World::made(&world, computer).into_iter().collect();
+    tree.insert(computer.to_owned());
+    Some((policy::decide(&caller, method, params, &world), tree))
 }
 
 /// Asks the policy about one call. A refused or held call is recorded and answered here.
@@ -278,6 +312,7 @@ pub(crate) async fn admit(
             };
             let asked = super::approvals::Asked {
                 computer: id,
+                tree: visible.as_deref().cloned().unwrap_or_default(),
                 computer_name: name.unwrap_or_else(|| id.clone()),
                 method,
                 asked: params,
@@ -425,6 +460,11 @@ impl EngineWorld {
                 id.to_owned(),
                 node.get("parent").and_then(Value::as_str).map(str::to_owned),
             );
+        }
+        #[cfg(test)]
+        for (id, name, parent) in test_nodes::all() {
+            names.insert(id.clone(), name);
+            parents.insert(id, parent);
         }
         let github = if method == MethodName::GitHubConfigurationSave {
             super::route(&internal, MethodName::GitHubState, &json!({}))

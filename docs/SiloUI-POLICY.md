@@ -45,8 +45,11 @@ to answer in one piece cannot be cut, so it is withheld.
 | `engine.handshake`, `engine.state`, `engine.disconnect`, `events.unsubscribe` | Free | |
 | `device.facts` | Free | The device's CPUs, memory and whether Remote Login is on; nothing about other computers. |
 | `audit.list` | Free | Only rows about the computer and the computers it made: calls that name one of them, and calls one of them made. |
+| `approvals.list`, `approvals.get`, `approvals.cancel`, `approvals.note` | Free | The handler shows only the approvals of the computer and the computers it made; only the computer that asked withdraws or writes a note. |
+| `approvals.decide` | Never | Answering is yours. |
 | `operations.job.get`, `.acknowledge`, `operations.cancel`, `guest.exec.get`, `guest.exec.input` | Its own jobs | |
 | `operations.list`, `events.subscribe`, `notifications.list` | Never | They cover every computer and are not cut per caller yet. |
+| `computers.access` | Its tree | Names and hosts only, never a value. |
 | `computers.list`, `computers.tree` | Its tree | The answer holds only its tree; a parent outside it is not named. Only the lists are asked for. |
 | `computers.credentials`, `steps.list`, `checkpoints.create`, `checkpoints.usage`, `changes.diff`, `logs.query`, `files.list`, `guest.account`, `guest.files.list`, `.read`, `.watch`, `desktop.status`, `computerUse.state`, `clipboard.read`, `network.urls`, `push.repositories`, `push.status` | Its tree | Reading or checkpointing itself gives it nothing new. |
 | `network.unpublish` | Its tree | Narrowing. |
@@ -79,10 +82,68 @@ to answer in one piece cannot be cut, so it is withheld.
 
 ## Asking you
 
-A call that needs your approval answers at once with the error `approval_required`; its details
+A call that needs your approval answers at once with the error `approval_required`. Its details
 carry the kind (`merge`, `replace_main`, `github`, `secret`, `network`, `port`, `ssh`, `access`,
-`container`) and a summary the engine wrote from the call's parameters, never from the agent's
-words. Approvals are not stored yet, so for now such a call simply does not happen.
+`container`), a summary the engine wrote from the call's parameters, never from the agent's
+words, and the id of the approval that now waits for you. The call itself has not happened.
+
+### The approval
+
+One file per approval under `<app data>/approvals/`, readable by you only, written whole. It holds
+which computer asked, the method and the exact parameters that will run, the summary, the
+agent's note if it added one, the state, the times, and once allowed what the call returned (its
+result, the job it started, or the error it ended with). Nothing a computer does changes the
+method, the parameters or the summary after the approval is made. For a fork or a new computer
+the parameters are the ones the engine checked and rewrote (the agent's token file scrubbed, the
+new computer's id chosen by the engine); a secret's value is kept for the call but never shown.
+
+- **Asking twice** for the same call (same computer, method and parameters) while the first is
+  waiting gives back the same approval.
+- **At most 20** approvals wait for one computer at a time; the 21st call is refused with a plain
+  message.
+- **Expiry:** a waiting approval nobody answers expires after 7 days; answered, withdrawn and
+  expired ones are removed 30 days after they ended.
+- **Deleting a computer** withdraws the approvals it was waiting for.
+- **The agent's note** (`approvals.note`, at most 500 characters, only the computer that asked)
+  explains why. It is shown as the agent's words, apart from the summary, and never in the
+  notification.
+
+### Answering
+
+| Method | Who | What |
+| --- | --- | --- |
+| `approvals.list`, `approvals.get` | you; a computer | You see all. A computer sees the approvals it asked for and those of computers it made, with their state, your note and the outcome, which is how its agent learns the answer. Filters: `state`, `computerId`. |
+| `approvals.decide` | you only | `allow` or `deny`, with an optional note the agent reads. Answering an approval that is not waiting is an error. |
+| `approvals.cancel` | the computer that asked; you | Withdraws a waiting approval. |
+| `approvals.note` | the computer that asked | Attaches or replaces its note while it waits. |
+| `computers.access` | you; a computer for itself or one it made | What that computer holds: its secrets' names and hosts, its GitHub access (repositories, read or write), its published ports and its SSH access. Never a value, nothing about other computers. |
+
+**On allow** the engine records the answer first, then checks the call again as if the computer
+had just made it: the computer still exists, the computers it names are still its own or ones it
+made, and the parameters still pass every check except the asking itself. Only then does it run
+the stored call with your authority, write the audit row with the approval's id, and store the
+outcome on the approval. If the check fails, nothing runs and the approval ends as allowed with an
+error that says why. A job the call starts can be read by the computer that asked, as one it
+started itself; a computer the call makes is recorded as made by the computer that asked, as when
+it makes one without asking.
+
+**Once only.** An approval leaves waiting once: two answers at the same time give one run and an
+error for the other. If Silo stops after recording an allow and before storing what the call
+returned, the next start ends that approval with an error saying it was interrupted; the call is
+never run again on its own.
+
+**Merges** show you the diff through a review request: see the merge part of "Review requests" in
+[SiloUI-CHANGES.md](SiloUI-CHANGES.md). Replacing main (`changes.promote`) and undoing a merge
+(`changes.undo`) are plain approvals.
+
+### Telling the app
+
+Every change of an approval publishes `approvals.changed` (`id`, `state`). A waiting approval keeps
+one notice of category `approvals` (key `approval:<id>`), titled with the computer's name and the
+summary; it is cleared when the approval is answered, withdrawn or expires
+(`notifications.cleared` with that `key`). The settings switch `notifyApprovals` (on by default)
+turns the system notifications off. Approvals are answered on the device whose computer asked, so
+`approvals.changed` is not relayed to other devices.
 
 ## The audit log
 

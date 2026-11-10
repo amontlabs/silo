@@ -783,7 +783,7 @@ async fn reach(context: &HandlerContext, request: FoldRequest, fork: Row) -> Res
 
 /// The computers the handlers see in a test, where no Linux runtime can list them.
 #[cfg(test)]
-pub(super) mod tests_rows {
+pub(crate) mod tests_rows {
     use super::Row;
     use std::sync::Mutex;
 
@@ -804,11 +804,16 @@ pub(super) mod tests_rows {
     }
 
     /// The computers, a complete list, and no fork-time records.
-    pub fn set(rows: Vec<Row>) {
+    pub(in crate::methods::checkpoints) fn set(rows: Vec<Row>) {
         let mut state = state();
         state.rows = Some(rows);
         state.complete = true;
         state.sources.clear();
+    }
+
+    /// No computers, a complete list, and no fork-time records.
+    pub fn set_empty() {
+        set(Vec::new());
     }
 
     /// The fork-time source of each `(fork, target)` pair.
@@ -823,7 +828,7 @@ pub(super) mod tests_rows {
         state().complete = complete;
     }
 
-    pub fn get() -> Option<(Vec<Row>, bool)> {
+    pub(in crate::methods::checkpoints) fn get() -> Option<(Vec<Row>, bool)> {
         let state = state();
         state.rows.clone().map(|rows| (rows, state.complete))
     }

@@ -283,6 +283,137 @@
       ],
       "type": "object"
     },
+    "Approval": {
+      "description": "A call held for the owner's answer. Its method, parameters and summary never change\nafter it is made.",
+      "properties": {
+        "computerId": {
+          "description": "The computer whose agent asked.",
+          "type": "string"
+        },
+        "computerName": {
+          "description": "That computer's name when it asked.",
+          "type": "string"
+        },
+        "createdAt": {
+          "description": "RFC 3339.",
+          "type": "string"
+        },
+        "decidedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "decidedBy": {
+          "description": "The program the owner answered with (diagnostic only).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "decisionNote": {
+          "description": "The owner's note with the answer; the agent reads it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "expiresAt": {
+          "description": "When a pending approval expires (RFC 3339).",
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/ApprovalKind"
+        },
+        "method": {
+          "description": "The method that runs on allow.",
+          "type": "string"
+        },
+        "note": {
+          "description": "The agent's own words on why it asks. Never part of the summary.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "outcome": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ApprovalOutcome"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "params": {
+          "description": "The parameters that run on allow, as the engine checked them. A secret's value is\nnever shown."
+        },
+        "reason": {
+          "description": "Why an approval was cancelled or expired, in plain words.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reviewDigest": {
+          "description": "The digest of the changes the merge is pinned to.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reviewRequestId": {
+          "description": "The review request a merge shows its diff with (`changes.requests.show`).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state": {
+          "$ref": "#/$defs/ApprovalState"
+        },
+        "summary": {
+          "description": "What is asked, written by the engine from the parameters.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "computerId",
+        "computerName",
+        "method",
+        "params",
+        "summary",
+        "state",
+        "createdAt",
+        "expiresAt"
+      ],
+      "type": "object"
+    },
+    "ApprovalDecision": {
+      "description": "The answer to an approval.",
+      "enum": [
+        "allow",
+        "deny"
+      ],
+      "type": "string"
+    },
+    "ApprovalIdParams": {
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
     "ApprovalKind": {
       "description": "What a call that widens a computer's access asks the owner for.",
       "oneOf": [
@@ -340,6 +471,27 @@
       ],
       "type": "string"
     },
+    "ApprovalOutcome": {
+      "description": "What the allowed call returned: its result, the job it started, or the error it ended\nwith.",
+      "properties": {
+        "error": {
+          "description": "Why the call did not run, or how it failed, in plain words.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "jobId": {
+          "description": "The job the call started; the computer that asked may read it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "result": true
+      },
+      "type": "object"
+    },
     "ApprovalRequiredDetails": {
       "description": "The details of an `approval_required` error.",
       "properties": {
@@ -361,6 +513,129 @@
       "required": [
         "kind",
         "summary"
+      ],
+      "type": "object"
+    },
+    "ApprovalState": {
+      "description": "Where an approval stands.",
+      "oneOf": [
+        {
+          "enum": [
+            "denied"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "pending",
+          "description": "Waiting for an answer.",
+          "type": "string"
+        },
+        {
+          "const": "allowed",
+          "description": "Allowed; the engine ran the call, or is running it while `outcome` is absent.",
+          "type": "string"
+        },
+        {
+          "const": "cancelled",
+          "description": "Withdrawn by the computer that asked, or ended because that computer was deleted or\nthe review request it wraps was closed.",
+          "type": "string"
+        },
+        {
+          "const": "expired",
+          "description": "Nobody answered within seven days.",
+          "type": "string"
+        }
+      ]
+    },
+    "ApprovalsChangedPayload": {
+      "description": "The payload of `approvals.changed`.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/ApprovalState"
+        }
+      },
+      "required": [
+        "id",
+        "state"
+      ],
+      "type": "object"
+    },
+    "ApprovalsDecideParams": {
+      "properties": {
+        "decision": {
+          "$ref": "#/$defs/ApprovalDecision"
+        },
+        "id": {
+          "type": "string"
+        },
+        "note": {
+          "description": "Shown to the agent with the answer.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "decision"
+      ],
+      "type": "object"
+    },
+    "ApprovalsListParams": {
+      "properties": {
+        "computerId": {
+          "description": "Only approvals this computer asked for.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ApprovalState"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Only approvals in this state."
+        }
+      },
+      "type": "object"
+    },
+    "ApprovalsListResult": {
+      "properties": {
+        "approvals": {
+          "description": "Newest first.",
+          "items": {
+            "$ref": "#/$defs/Approval"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "approvals"
+      ],
+      "type": "object"
+    },
+    "ApprovalsNoteParams": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "note": {
+          "description": "At most 500 characters; an empty note removes it.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "note"
       ],
       "type": "object"
     },
@@ -2157,6 +2432,145 @@
       ],
       "type": "object"
     },
+    "ComputerAccess": {
+      "description": "What one computer holds.",
+      "properties": {
+        "computerId": {
+          "type": "string"
+        },
+        "github": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ComputerAccessGitHub"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "ports": {
+          "description": "Its ports published on this device.",
+          "items": {
+            "$ref": "#/$defs/PublishedPort"
+          },
+          "type": "array"
+        },
+        "secrets": {
+          "items": {
+            "$ref": "#/$defs/ComputerAccessSecret"
+          },
+          "type": "array"
+        },
+        "ssh": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ComputerAccessSsh"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "computerId",
+        "name",
+        "secrets",
+        "ports"
+      ],
+      "type": "object"
+    },
+    "ComputerAccessGitHub": {
+      "properties": {
+        "allRepositories": {
+          "description": "Every repository the account reaches.",
+          "type": "boolean"
+        },
+        "allRepositoriesWrite": {
+          "description": "With `allRepositories`: whether it may push to them.",
+          "type": "boolean"
+        },
+        "method": {
+          "description": "`oauth` (the signed-in account) or `token` (a personal token).",
+          "type": "string"
+        },
+        "repositories": {
+          "items": {
+            "$ref": "#/$defs/ComputerAccessRepository"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "method",
+        "allRepositories",
+        "allRepositoriesWrite",
+        "repositories"
+      ],
+      "type": "object"
+    },
+    "ComputerAccessRepository": {
+      "properties": {
+        "repository": {
+          "description": "`owner/name`.",
+          "type": "string"
+        },
+        "write": {
+          "description": "Whether the computer may push to it.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "repository",
+        "write"
+      ],
+      "type": "object"
+    },
+    "ComputerAccessSecret": {
+      "description": "A secret a computer holds: its name and where it may be sent. Never its value.",
+      "properties": {
+        "hosts": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "hosts"
+      ],
+      "type": "object"
+    },
+    "ComputerAccessSsh": {
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "port": {
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "state": {
+          "description": "`disabled`, `waiting`, `listening` or `error`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "enabled",
+        "port",
+        "state"
+      ],
+      "type": "object"
+    },
     "ComputerAttention": {
       "description": "Mirrors `app/SiloUI/src-tauri/engine/src/runtime.rs::ComputerAttention`\n(lines 638-650).",
       "properties": {
@@ -2948,6 +3362,17 @@
             "string",
             "null"
           ]
+        }
+      },
+      "required": [
+        "computerId"
+      ],
+      "type": "object"
+    },
+    "ComputersAccessParams": {
+      "properties": {
+        "computerId": {
+          "type": "string"
         }
       },
       "required": [
@@ -4843,6 +5268,36 @@
             "payload"
           ],
           "type": "object"
+        },
+        {
+          "properties": {
+            "deviceId": {
+              "type": "string"
+            },
+            "event": {
+              "const": "approvals.changed",
+              "type": "string"
+            },
+            "payload": {
+              "$ref": "#/$defs/ApprovalsChangedPayload"
+            },
+            "seq": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "subscription": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "event",
+            "subscription",
+            "deviceId",
+            "seq",
+            "payload"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -5386,6 +5841,13 @@
     "FoldRequest": {
       "description": "A recorded request to review a fork. The engine keeps it until it is answered.",
       "properties": {
+        "approvalId": {
+          "description": "The approval that asks the owner to merge this request, when a computer's agent\nasked for the merge.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "closedReason": {
           "anyOf": [
             {
@@ -8554,6 +9016,11 @@
     "MethodName": {
       "enum": [
         "activity.setup.read",
+        "approvals.cancel",
+        "approvals.decide",
+        "approvals.get",
+        "approvals.list",
+        "approvals.note",
         "audit.list",
         "changes.keep",
         "changes.promote",
@@ -8583,6 +9050,7 @@
         "computers.configuration.change",
         "computers.configuration.read",
         "computers.configuration.retry",
+        "computers.access",
         "computers.create",
         "computers.credentials",
         "computers.delete",
@@ -8742,6 +9210,86 @@
             },
             "params": {
               "$ref": "#/$defs/DeviceParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "approvals.cancel",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/ApprovalIdParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "approvals.decide",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/ApprovalsDecideParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "approvals.get",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/ApprovalIdParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "approvals.list",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/ApprovalsListParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "approvals.note",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/ApprovalsNoteParams"
             }
           },
           "required": [
@@ -9206,6 +9754,22 @@
             },
             "params": {
               "$ref": "#/$defs/ComputerConfigurationRetryParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "computers.access",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/ComputersAccessParams"
             }
           },
           "required": [
@@ -11576,6 +12140,86 @@
         {
           "properties": {
             "method": {
+              "const": "approvals.cancel",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/Approval"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "approvals.decide",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/Approval"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "approvals.get",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/Approval"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "approvals.list",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/ApprovalsListResult"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "approvals.note",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/Approval"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
               "const": "audit.list",
               "type": "string"
             },
@@ -12029,6 +12673,22 @@
             },
             "result": {
               "$ref": "#/$defs/JobStartResult"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "computers.access",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/ComputerAccess"
             }
           },
           "required": [
@@ -14940,12 +15600,21 @@
       "type": "object"
     },
     "NoticeCategory": {
-      "enum": [
-        "failures",
-        "changes",
-        "completions"
-      ],
-      "type": "string"
+      "oneOf": [
+        {
+          "enum": [
+            "failures",
+            "changes",
+            "completions"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "approvals",
+          "description": "A computer's agent asks for something only the owner can allow.",
+          "type": "string"
+        }
+      ]
     },
     "NoticeComputer": {
       "properties": {
@@ -14966,6 +15635,13 @@
       "properties": {
         "computerId": {
           "type": "string"
+        },
+        "key": {
+          "description": "Only the notice with this key is gone; without it, every notice of the computer.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
@@ -16467,6 +17143,9 @@
         "notificationsEnabled": {
           "type": "boolean"
         },
+        "notifyApprovals": {
+          "type": "boolean"
+        },
         "notifyChanges": {
           "type": "boolean"
         },
@@ -17934,6 +18613,36 @@
       "resultType": "Vec<computers::ComputerConfigurationProgress>"
     },
     {
+      "kind": "command",
+      "name": "approvals.cancel",
+      "paramsType": "approvals::ApprovalsCancelParams",
+      "resultType": "approvals::Approval"
+    },
+    {
+      "kind": "command",
+      "name": "approvals.decide",
+      "paramsType": "approvals::ApprovalsDecideParams",
+      "resultType": "approvals::Approval"
+    },
+    {
+      "kind": "query",
+      "name": "approvals.get",
+      "paramsType": "approvals::ApprovalsGetParams",
+      "resultType": "approvals::Approval"
+    },
+    {
+      "kind": "query",
+      "name": "approvals.list",
+      "paramsType": "approvals::ApprovalsListParams",
+      "resultType": "approvals::ApprovalsListResult"
+    },
+    {
+      "kind": "command",
+      "name": "approvals.note",
+      "paramsType": "approvals::ApprovalsNoteParams",
+      "resultType": "approvals::Approval"
+    },
+    {
       "kind": "query",
       "name": "audit.list",
       "paramsType": "audit::AuditListParams",
@@ -18106,6 +18815,12 @@
       "name": "computers.configuration.retry",
       "paramsType": "computers::ComputerConfigurationRetryParams",
       "resultType": "common::JobStartResult"
+    },
+    {
+      "kind": "query",
+      "name": "computers.access",
+      "paramsType": "approvals::ComputersAccessParams",
+      "resultType": "approvals::ComputerAccess"
     },
     {
       "kind": "job",

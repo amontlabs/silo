@@ -219,15 +219,18 @@ impl Store {
     /// Writes the approval whole: a reader sees the old file or the new one.
     fn write(&self, record: &Record) -> Result<(), String> {
         let path = self.file(record.id())?;
-        let io = |error: std::io::Error| format!("Cannot save the approval {}: {error}", record.id());
+        let io =
+            |error: std::io::Error| format!("Cannot save the approval {}: {error}", record.id());
         fs::DirBuilder::new()
             .recursive(true)
             .mode(0o700)
             .create(&self.root)
             .map_err(io)?;
-        let temporary = self
-            .root
-            .join(format!("{}.{}.tmp", record.id(), uuid::Uuid::new_v4().simple()));
+        let temporary = self.root.join(format!(
+            "{}.{}.tmp",
+            record.id(),
+            uuid::Uuid::new_v4().simple()
+        ));
         let bytes = serde_json::to_vec_pretty(record).map_err(|error| error.to_string())?;
         let written = (|| {
             let mut file = fs::OpenOptions::new()
@@ -440,7 +443,9 @@ impl Store {
         let _held = lock();
         let mut record = self.existing(id)?;
         if record.state() != ApprovalState::Allowed || record.approval.outcome.is_some() {
-            return Err(format!("The approval {id} has no call waiting for its outcome."));
+            return Err(format!(
+                "The approval {id} has no call waiting for its outcome."
+            ));
         }
         record.approval.outcome = Some(outcome);
         record.ended_ms = Some(now_ms());

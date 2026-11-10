@@ -52,9 +52,7 @@ pub fn rule(method: MethodName) -> Rule {
         M::OperationsList => OwnerOnly,
 
         // Computers.
-        M::ComputersList | M::ComputersTree | M::ComputersCredentials | M::ComputersAccess => {
-            Tree
-        }
+        M::ComputersList | M::ComputersTree | M::ComputersCredentials | M::ComputersAccess => Tree,
         M::ComputersCreate => Create,
         M::ComputersStart
         | M::ComputersStop

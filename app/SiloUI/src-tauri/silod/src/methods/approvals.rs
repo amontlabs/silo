@@ -78,21 +78,6 @@ fn output(value: impl serde::Serialize) -> Result<HandlerOutput, DispatchError> 
         .map_err(|error| DispatchError::internal(error.to_string()))
 }
 
-fn local_only(context: &HandlerContext, device_id: Option<&str>) -> Result<(), DispatchError> {
-    match device_id {
-        Some(device)
-            if device != "local"
-                && device != context.silod_context().local_device().device_id =>
-        {
-            Err(DispatchError::new(
-                ErrorCode::UnsupportedRemoteOperation,
-                "Approvals are answered on the device whose computer asked.",
-            ))
-        }
-        _ => Ok(()),
-    }
-}
-
 /// The engine itself, reading the device as the owner.
 fn internal(context: &HandlerContext) -> HandlerContext {
     HandlerContext::for_owner_bridge(context.engine.clone(), RequestContext::owner("approvals"))
@@ -137,6 +122,8 @@ fn visible_record(context: &HandlerContext, id: &str) -> Result<Record, Dispatch
 /// A call the policy holds for the owner.
 pub(crate) struct Asked<'a> {
     pub computer: &'a str,
+    /// The computer and the computers it made.
+    pub tree: BTreeSet<String>,
     pub computer_name: String,
     pub method: MethodName,
     /// The parameters as the computer sent them.
@@ -220,6 +207,11 @@ async fn review_request(
                 .open_request(&id)
                 .map_err(refused)?;
             fold_requests::check_keepable(&request).map_err(refused)?;
+            if !asked.tree.contains(&request.target) {
+                return Err(refused(
+                    "A merge can go only into this computer or one it made.",
+                ));
+            }
             Ok(Some((request.id, request.review_digest)))
         }
         _ => Ok(None),
@@ -329,7 +321,6 @@ fn settle_links(context: &HandlerContext, records: &mut [Record]) {
 
 async fn list(context: &HandlerContext, params: &Value) -> Result<HandlerOutput, DispatchError> {
     let params: ApprovalsListParams = context.decode_params(params)?;
-    local_only(context, params.device_id.as_deref())?;
     let (mut records, expired) = store(context).list();
     for record in &expired {
         announce(context, record);
@@ -353,7 +344,6 @@ async fn list(context: &HandlerContext, params: &Value) -> Result<HandlerOutput,
 
 async fn get(context: &HandlerContext, params: &Value) -> Result<HandlerOutput, DispatchError> {
     let params: ApprovalIdParams = context.decode_params(params)?;
-    local_only(context, params.device_id.as_deref())?;
     for record in store(context).sweep(approvals::now_ms()) {
         announce(context, &record);
     }
@@ -380,11 +370,12 @@ fn bounded_note(note: Option<String>, max: usize) -> Result<Option<String>, Disp
 
 /// The error for an approval that cannot change now.
 fn unchangeable(message: String) -> DispatchError {
-    let code = if message.starts_with("There is no approval") || message.contains("not an approval id") {
-        ErrorCode::NotFound
-    } else {
-        ErrorCode::Changed
-    };
+    let code =
+        if message.starts_with("There is no approval") || message.contains("not an approval id") {
+            ErrorCode::NotFound
+        } else {
+            ErrorCode::Changed
+        };
     DispatchError::new(code, message)
 }
 
@@ -396,7 +387,6 @@ async fn decide(context: &HandlerContext, params: &Value) -> Result<HandlerOutpu
     };
     let by = client.clone();
     let params: ApprovalsDecideParams = context.decode_params(params)?;
-    local_only(context, params.device_id.as_deref())?;
     let note = bounded_note(params.note, DECISION_NOTE_MAX_CHARS)?;
     let store = store(context);
     let found = visible_record(context, &params.id)?;
@@ -433,7 +423,11 @@ fn failed(message: impl Into<String>) -> ApprovalOutcome {
 
 /// The `changes.requests.keep` an allowed merge runs, after checking that its review request
 /// still shows the changes the owner was asked about.
-fn merge_call(context: &HandlerContext, record: &Record) -> Result<(MethodName, Value), String> {
+fn merge_call(
+    context: &HandlerContext,
+    record: &Record,
+    tree: &BTreeSet<String>,
+) -> Result<(MethodName, Value), String> {
     let approval = &record.approval;
     let Some(request_id) = &approval.review_request_id else {
         return Ok((
@@ -444,8 +438,16 @@ fn merge_call(context: &HandlerContext, record: &Record) -> Result<(MethodName, 
     let request = fold_requests::Store::new(&app_data(context))
         .get(request_id)?
         .ok_or("Its review request no longer exists, so nothing was merged.")?;
+    if !tree.contains(&request.target) || !tree.contains(&request.fork_id) {
+        return Err(
+            "The merge no longer goes between computers the one that asked made, so nothing was merged."
+                .into(),
+        );
+    }
     if !matches!(request.status, FoldRequestStatus::Open) {
-        return Err("Its review request was already answered or closed, so nothing was merged.".into());
+        return Err(
+            "Its review request was already answered or closed, so nothing was merged.".into(),
+        );
     }
     if Some(&request.review_digest) != approval.review_digest.as_ref() {
         return Err(
@@ -474,24 +476,24 @@ fn execute<'a>(
         let Some(method) = MethodName::from_name(&approval.method) else {
             return failed("The stored call is not one this engine knows, so nothing was run.");
         };
-        match gate::judge(context, asker, method, &approval.params).await {
+        let tree = match gate::judge(context, asker, method, &approval.params).await {
             None => {
                 return failed(format!(
                     "{} no longer exists, so nothing was run.",
                     approval.computer_name
                 ))
             }
-            Some(Decision::Refuse { reason }) => {
+            Some((Decision::Refuse { reason }, _)) => {
                 return failed(format!("Nothing was run: {reason}"));
             }
-            Some(Decision::Ask { kind, .. }) if kind != approval.kind => {
+            Some((Decision::Ask { kind, .. }, _)) if kind != approval.kind => {
                 return failed(
                     "Nothing was run: the call would now ask for something other than what you allowed.",
                 );
             }
-            Some(_) => {}
-        }
-        let (run_method, run_params) = match merge_call(context, record) {
+            Some((_, tree)) => tree,
+        };
+        let (run_method, run_params) = match merge_call(context, record, &tree) {
             Ok(call) => call,
             Err(message) => return failed(message),
         };
@@ -506,7 +508,7 @@ fn execute<'a>(
                 return failed(format!("Nothing was run: {message}"));
             }
         }
-        let result = super::run(context, run_method, &run_params).await;
+        let result = run_call(context, run_method, &run_params).await;
         let job = result
             .as_ref()
             .ok()
@@ -548,9 +550,34 @@ fn execute<'a>(
     })
 }
 
+#[cfg(test)]
+pub(crate) type TestRun =
+    std::sync::Arc<dyn Fn(MethodName, &Value) -> Result<Value, DispatchError> + Send + Sync>;
+
+#[cfg(test)]
+tokio::task_local! {
+    /// Stands in for the engine running an allowed call, in a test.
+    pub(crate) static TEST_RUN: TestRun;
+}
+
+/// Runs an allowed call as the owner.
+async fn run_call(
+    context: &HandlerContext,
+    method: MethodName,
+    params: &Value,
+) -> Result<HandlerOutput, DispatchError> {
+    #[cfg(test)]
+    if let Ok(run) = TEST_RUN.try_with(Clone::clone) {
+        return run(method, params).map(|value| HandlerOutput {
+            value,
+            event_barrier: None,
+        });
+    }
+    super::run(context, method, params).await
+}
+
 async fn cancel(context: &HandlerContext, params: &Value) -> Result<HandlerOutput, DispatchError> {
     let params: ApprovalIdParams = context.decode_params(params)?;
-    local_only(context, params.device_id.as_deref())?;
     let found = visible_record(context, &params.id)?;
     let (by, reason) = match context.caller() {
         Caller::Owner { .. } => (None, "Withdrawn by the person who runs Silo."),
@@ -571,7 +598,6 @@ async fn note(context: &HandlerContext, params: &Value) -> Result<HandlerOutput,
         ));
     };
     let params: ApprovalsNoteParams = context.decode_params(params)?;
-    local_only(context, params.device_id.as_deref())?;
     let found = visible_record(context, &params.id)?;
     let noted = store(context)
         .note(found.id(), caller, &params.note)
@@ -584,33 +610,18 @@ async fn note(context: &HandlerContext, params: &Value) -> Result<HandlerOutput,
 
 async fn access(context: &HandlerContext, params: &Value) -> Result<HandlerOutput, DispatchError> {
     let params: ComputersAccessParams = context.decode_params(params)?;
-    local_only(context, params.device_id.as_deref())?;
     let id = params.computer_id;
     if seen(context).is_some_and(|seen| !seen.contains(&id)) {
         return Err(refused("That computer is not this one or one it made."));
     }
     let reader = internal(context);
-    let tree = super::route(&reader, MethodName::ComputersTree, &json!({}))
-        .await
-        .map(|output| output.value)
-        .unwrap_or(Value::Null);
-    let name = tree
-        .get("nodes")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .find(|node| node.get("id").and_then(Value::as_str) == Some(id.as_str()))
-        .and_then(|node| node.get("name").and_then(Value::as_str))
-        .map(str::to_owned)
-        .ok_or_else(|| {
-            DispatchError::new(ErrorCode::NotFound, format!("There is no computer {id}."))
-        })?;
+    let name = gate::computer_name(context, &id).await.ok_or_else(|| {
+        DispatchError::new(ErrorCode::NotFound, format!("There is no computer {id}."))
+    })?;
     let held_name = name.clone();
-    let (secrets, github) = tokio::task::spawn_blocking(move || {
-        policy::access::held(&held_name)
-    })
-    .await
-    .map_err(|_| DispatchError::internal("The computer's access could not be read."))?;
+    let (secrets, github) = tokio::task::spawn_blocking(move || policy::access::held(&held_name))
+        .await
+        .map_err(|_| DispatchError::internal("The computer's access could not be read."))?;
     let ports = super::route(&reader, MethodName::NetworkState, &json!({}))
         .await
         .ok()
@@ -655,11 +666,7 @@ async fn access(context: &HandlerContext, params: &Value) -> Result<HandlerOutpu
 
 /// A review request kept or thrown away directly closes the approval that wraps it: kept is
 /// allowed with the keep's job, thrown away by the owner is denied, by a computer cancelled.
-pub(crate) fn request_answered(
-    context: &HandlerContext,
-    request_id: &str,
-    kept_job: Option<&str>,
-) {
+pub(crate) fn request_answered(context: &HandlerContext, request_id: &str, kept_job: Option<&str>) {
     let store = store(context);
     let by = match context.caller() {
         Caller::Owner { client } => Some(client.clone()),

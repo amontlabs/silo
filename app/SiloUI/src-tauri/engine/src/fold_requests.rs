@@ -590,7 +590,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store = Store::new(dir.path());
         let made = store.create(new("f1", "s")).unwrap();
-        let linked = store.link_approval(&made.id, "ap-0123456789abcdef").unwrap();
+        let linked = store
+            .link_approval(&made.id, "ap-0123456789abcdef")
+            .unwrap();
         assert_eq!(linked.approval_id.as_deref(), Some("ap-0123456789abcdef"));
         let again = store
             .create(NewRequest {
@@ -601,7 +603,9 @@ mod tests {
         assert_eq!(again.id, made.id);
         assert_eq!(again.approval_id.as_deref(), Some("ap-0123456789abcdef"));
         store.mark_thrown_away(&made.id).unwrap();
-        assert!(store.link_approval(&made.id, "ap-1111111111111111").is_err());
+        assert!(store
+            .link_approval(&made.id, "ap-1111111111111111")
+            .is_err());
     }
 
     #[test]

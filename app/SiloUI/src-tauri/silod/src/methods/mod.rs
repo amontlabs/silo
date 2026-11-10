@@ -395,8 +395,8 @@ mod tests {
     use silo_api::methods::{method_registry, MethodName};
 
     use super::{
-        access, approvals, audit, changed_computer, changes_computer, checkpoints, computers, display, guest,
-        guest_client, serves, services,
+        access, approvals, audit, changed_computer, changes_computer, checkpoints, computers,
+        display, guest, guest_client, serves, services,
     };
 
     #[test]

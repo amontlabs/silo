@@ -1,7 +1,8 @@
 //! Approvals: a call a computer's agent made that widens what it has waits here until the
 //! person who runs Silo allows or denies it. On allow the engine runs the stored call itself.
 //! `computers.access` is what a computer holds, so an agent knows what it can hand on and what
-//! it must ask for.
+//! it must ask for. Approvals are answered on the device whose computer asked, so these
+//! methods take no device.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -97,8 +98,6 @@ wire_struct! {
 
 wire_struct! {
     ApprovalsListParams {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        device_id: Option<String>,
         /// Only approvals in this state.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         state: Option<ApprovalState>,
@@ -118,8 +117,6 @@ wire_struct! {
 wire_struct! {
     ApprovalIdParams {
         id: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        device_id: Option<String>,
     }
 }
 
@@ -133,8 +130,6 @@ wire_struct! {
         /// Shown to the agent with the answer.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         note: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        device_id: Option<String>,
     }
 }
 
@@ -143,8 +138,6 @@ wire_struct! {
         id: String,
         /// At most 500 characters; an empty note removes it.
         note: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        device_id: Option<String>,
     }
 }
 
@@ -159,7 +152,11 @@ wire_struct! {
     }
 }
 
-pub type ComputersAccessParams = super::common::ComputerTargetParams;
+wire_struct! {
+    ComputersAccessParams {
+        computer_id: String,
+    }
+}
 
 wire_struct! {
     /// A secret a computer holds: its name and where it may be sent. Never its value.

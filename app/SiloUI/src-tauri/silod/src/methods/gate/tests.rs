@@ -113,11 +113,12 @@ async fn a_widening_call_asks_with_an_engine_written_summary() {
     assert_eq!(details.kind, ApprovalKind::Secret);
     assert!(details.summary.contains("deploy.example.com"));
     assert!(!details.summary.contains("very-secret"));
-    assert!(details.approval_id.is_none());
+    let approval = details.approval_id.unwrap();
     let rows = rows_about(&[&id]);
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].outcome, AuditOutcome::Asked);
     assert_eq!(rows[0].error_code.as_deref(), Some("approval_required"));
+    assert_eq!(rows[0].approval_id.as_deref(), Some(approval.as_str()));
 }
 
 #[tokio::test]

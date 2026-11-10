@@ -199,7 +199,11 @@ impl DeliveredIndex {
         if self.keys.get(computer_id).is_some_and(BTreeSet::is_empty) {
             self.keys.remove(computer_id);
         }
-        self.withdraw_keys(if found { vec![key.to_owned()] } else { Vec::new() })
+        self.withdraw_keys(if found {
+            vec![key.to_owned()]
+        } else {
+            Vec::new()
+        })
     }
 
     fn withdraw_keys(&mut self, keys: Vec<String>) -> PendingWithdrawal {
@@ -442,7 +446,8 @@ mod tests {
             ));
         }
         let preferences = settings(
-            json!({"notifyFailures": false, "notifyChanges": false, "notifyCompletions": false}),
+            json!({"notifyFailures": false, "notifyChanges": false, "notifyCompletions": false,
+                "notifyApprovals": false}),
         );
         for category in ALL {
             assert!(!enabled(&preferences, category));
@@ -970,6 +975,24 @@ mod tests {
         );
         assert!(index.take("1").is_empty());
         assert_eq!(index.take("2"), vec!["computer:2:lifecycle"]);
+    }
+
+    #[test]
+    fn an_engine_approval_notice_parses_and_has_its_own_switch() {
+        let notice: Notice = serde_json::from_value(json!({"category": "approvals",
+            "key": "approval:ap-0123456789abcdef", "title": "main asks: Publish port 8080",
+            "body": "Allow or deny it in Silo.", "computer": {"id": "1", "name": "main"}}))
+        .unwrap();
+        assert_eq!(notice.category, Category::Approvals);
+        assert!(enabled(&settings(json!({})), Category::Approvals));
+        assert!(!enabled(
+            &settings(json!({"notifyApprovals": false})),
+            Category::Approvals
+        ));
+        assert!(enabled(
+            &settings(json!({"notifyApprovals": false})),
+            Category::Failures
+        ));
     }
 
     #[test]

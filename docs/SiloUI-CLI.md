@@ -298,6 +298,21 @@ printed. CI or cron call `silo fork main -- <cmd>` then `silo fold --request`.
 Each takes `--json`. The MCP tools are `requests_list`, `request_show`, `request_keep`,
 `request_throw_away` and `request_open`, on the same engine methods.
 
+## Approvals
+
+What a computer's agent asked you to allow (a merge into its own computer, a port, a secret,
+GitHub access and the rest, see [SiloUI-POLICY.md](SiloUI-POLICY.md#asking-you)):
+
+- `silo approvals` lists the requests waiting for your answer.
+- `silo approvals show <id>` prints what is asked, in Silo's words, the agent's note apart, the
+  call that would run, and once answered what became of it.
+- `silo approvals allow <id>` checks the request again and runs its call; the output says what
+  it returned, the job it started, or why it did not run.
+- `silo approvals deny <id> [--note TEXT]` denies it; the agent reads the note.
+
+Each takes `--json`. A merge's diff is its review request: `silo requests show <id>` with the id
+`show` names.
+
 `silo status` prints, for a fork, a line such as
 `quiet: applied; stopped: poller; scrubbed: /root/.env; secrets: none` (on macOS it adds the
 count of parked jobs and the jobs left scheduled), then `secrets assigned:` and a `github:`

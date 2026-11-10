@@ -132,8 +132,10 @@ mod tests {
                 .collect::<Vec<_>>(),
             [("owner/app", true), ("owner/docs", false)]
         );
-        let all = github_access(&json!({"repositoryMode": "all", "authenticationMethod": "token",
-            "allRepositoriesAllowChanges": true}))
+        let all = github_access(
+            &json!({"repositoryMode": "all", "authenticationMethod": "token",
+            "allRepositoriesAllowChanges": true}),
+        )
         .unwrap();
         assert!(all.all_repositories && all.all_repositories_write);
         assert_eq!(all.method, "token");
