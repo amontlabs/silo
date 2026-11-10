@@ -814,12 +814,14 @@ impl<'a> Judge<'a> {
             lead.push(format!("Runs commands in {}", self.shown(target)));
         }
         if details.data_ok {
-            lead.push("Accepts database changes".to_owned());
+            lead.push("accepts database changes".to_owned());
         }
         let mut summary = if lead.is_empty() {
             String::new()
         } else {
-            format!("{}. ", lead.join(" and "))
+            let mut lead = lead.join(" and ");
+            lead[..1].make_ascii_uppercase();
+            format!("{lead}. ")
         };
         summary.push_str(&base);
         if !details.commands.is_empty() {

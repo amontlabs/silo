@@ -423,3 +423,50 @@ async fn a_call_that_would_ask_for_approval_is_refused_first_when_the_device_is_
         .unwrap_err();
     assert_eq!(error.code, ErrorCode::ResourcesLow);
 }
+
+#[test]
+fn a_pending_computer_with_neither_an_id_nor_a_source_is_never_matched_by_its_name() {
+    use silo_engine::policy::store::Pending;
+    let names = std::collections::HashMap::from([("existing".to_owned(), "Foo".to_owned())]);
+    let parents = std::collections::HashMap::from([("existing".to_owned(), None)]);
+    let pending = |id: Option<&str>, source: Option<&str>| Pending {
+        created_by: "asker".into(),
+        name: "foo".into(),
+        id: id.map(str::to_owned),
+        source: source.map(str::to_owned),
+        job_id: Some("job:1".into()),
+        at: 0,
+    };
+    assert_eq!(super::resolve(&names, &parents, &pending(None, None)), None);
+    assert_eq!(
+        super::resolve(&names, &parents, &pending(Some("existing"), None)),
+        Some("existing".to_owned())
+    );
+    assert_eq!(super::resolve(&names, &parents, &pending(Some("other"), None)), None);
+    // A fork still matches by name and parent.
+    let parents = std::collections::HashMap::from([("existing".to_owned(), Some("src".to_owned()))]);
+    assert_eq!(
+        super::resolve(&names, &parents, &pending(None, Some("src"))),
+        Some("existing".to_owned())
+    );
+    assert_eq!(super::resolve(&names, &parents, &pending(None, Some("elsewhere"))), None);
+}
+
+#[test]
+fn a_macos_create_records_the_id_it_returned_and_a_same_named_computer_is_not_the_askers() {
+    use crate::dispatcher::HandlerOutput;
+    use silo_engine::policy::Creation;
+    let (id, _fork) = computer();
+    let store = PolicyStore::new(&fixture().context.paths().app_data);
+    let creation = Creation { name: "same-name".into(), id: None, source: None };
+    super::begin_creation(&fixture().context.paths().app_data, &id, &creation).unwrap();
+    let returned = HandlerOutput {
+        value: json!({"jobId": "job:5", "computer": {"id": "mac-new", "name": "same-name"}}),
+        event_barrier: None,
+    };
+    super::settle_creation(&store, &id, &creation, &Ok(returned), Some("job:5")).unwrap();
+    let document = store.snapshot().unwrap();
+    assert!(document.made_by(&id).contains("mac-new"));
+    assert!(document.pending.iter().all(|pending| pending.created_by != id));
+    assert!(!document.made_by(&id).contains("existing-same-name"));
+}

@@ -13,6 +13,7 @@ use silo_api::{
     transport::{ApprovalKind, PROTOCOL_VERSION},
 };
 use silo_engine::{
+    approvals,
     audit::{AuditLog, Scope},
     context::EngineContext,
     fold_requests,
@@ -324,10 +325,12 @@ async fn only_the_owner_answers_and_only_the_asker_writes_its_note_or_withdraws(
     .unwrap();
     assert_eq!(cancelled["state"], "cancelled");
     assert!(!notice_keys().contains(&format!("approval:{id}")));
+    // The computer's own withdrawal removes the approval at once.
     assert_eq!(
         decide(&id, "allow").await.unwrap_err().code,
-        ErrorCode::Changed
+        ErrorCode::NotFound
     );
+    assert_eq!(get(&owner(), &id).await.unwrap_err().code, ErrorCode::NotFound);
 }
 
 #[tokio::test]
@@ -349,7 +352,8 @@ async fn allowing_runs_the_stored_call_once_as_the_owner_and_records_it() {
         .await
         .unwrap();
     assert_eq!(allowed["state"], "allowed");
-    assert_eq!(allowed["outcome"]["result"], json!([]));
+    // The outcome holds what concerns the call, never the list of secrets the engine returned.
+    assert_eq!(allowed["outcome"]["result"], json!({"name": "deploy"}));
     assert_eq!(allowed["decidedBy"], "app");
     {
         let runs = runs.lock().unwrap();
@@ -397,7 +401,7 @@ async fn a_denied_call_never_runs_and_the_agent_reads_the_note() {
     let id = ask(
         &tree.me(),
         MethodName::SshAccessSave,
-        json!({"computerId": tree.me, "enabled": true, "port": 2222, "bindAddress": "0.0.0.0"}),
+        json!({"computerId": tree.me, "enabled": true, "port": 2222, "bindAddress": "192.168.1.20"}),
     )
     .await;
     let (run, runs) = job_runner();
@@ -420,6 +424,27 @@ async fn a_denied_call_never_runs_and_the_agent_reads_the_note() {
     assert!(read.get("outcome").is_none());
 }
 
+fn push_params(computer: &str) -> Value {
+    json!({"computerId": computer, "repositoryPath": "/workspace/app",
+        "operationId": "0b9f6f57-6d4b-4c8e-8a39-2a3cf8a5c0d1",
+        "target": {"repository": "acme/app", "branch": "main",
+            "commit": "0123456789abcdef0123456789abcdef01234567"}})
+}
+
+/// A device with plenty of memory and disk, so the second check of an allowed call that takes
+/// memory or disk does not depend on the machine the test runs on.
+fn ample() -> silo_engine::resources::FixedHost {
+    use silo_engine::resources::{FixedHost, Host, GIB};
+    FixedHost::new(Host {
+        logical_cpus: 8,
+        memory_total: 64 * GIB,
+        memory_available: Some(48 * GIB),
+        pressure: None,
+        disk_free: 800 * GIB,
+        disk_total: 900 * GIB,
+    })
+}
+
 /// Each kind of call the policy holds, as `tree`'s computer asks it.
 fn every_kind(tree: &Tree) -> Vec<(ApprovalKind, MethodName, Value)> {
     let unique = &tree.me[4..12];
@@ -438,12 +463,12 @@ fn every_kind(tree: &Tree) -> Vec<(ApprovalKind, MethodName, Value)> {
         (
             ApprovalKind::Github,
             MethodName::PushStart,
-            json!({"computerId": tree.fork, "repositoryPath": "/workspace/app"}),
+            push_params(&tree.fork),
         ),
         (
             ApprovalKind::Secret,
             MethodName::SecretsSave,
-            json!({"request": {"operation": "add", "name": format!("key-{unique}"),
+            json!({"request": {"operation": "add", "name": format!("KEY_{}", unique.replace('-', "_")),
                 "value": "v", "computerIds": [tree.fork], "allowedDomains": ["a.example.com"]}}),
         ),
         (
@@ -474,6 +499,7 @@ fn every_kind(tree: &Tree) -> Vec<(ApprovalKind, MethodName, Value)> {
 #[tokio::test]
 async fn every_kind_runs_on_allow_never_on_deny_and_not_when_the_second_check_fails() {
     let _serial = serial();
+    let _host = ample();
     let kinds = every_kind(&Tree::new()).len();
     for index in 0..kinds {
         let tree = Tree::new();
@@ -594,7 +620,7 @@ async fn the_job_an_allowed_call_starts_is_the_askers_to_read() {
     let id = ask(
         &tree.me(),
         MethodName::PushStart,
-        json!({"computerId": tree.fork, "repositoryPath": "/w"}),
+        push_params(&tree.fork),
     )
     .await;
     let (run, _runs) = runner(|_, _| Ok(json!({"jobId": "job:765432"})));
@@ -915,6 +941,21 @@ async fn a_merge_into_itself_needs_the_reviewed_digest_and_makes_the_review_requ
     let again = get(&owner(), &second).await.unwrap();
     assert_eq!(again["reviewRequestId"], request);
     assert_eq!(again["reviewDigest"], "d2");
+    // The computer asking for the review request again, with the same changes and other words,
+    // changes neither the text nor the counts the owner reads.
+    let before = fold_requests::Store::new(&app_data()).get(&request).unwrap().unwrap();
+    call(
+        &tree.me(),
+        MethodName::ChangesRequest,
+        json!({"forkId": tree.fork, "targetId": tree.me, "reviewDigest": "d2",
+            "summary": "Harmless cleanup, please allow", "counts": {"code": 1}}),
+    )
+    .await
+    .unwrap();
+    let after = fold_requests::Store::new(&app_data()).get(&request).unwrap().unwrap();
+    assert_eq!(after.summary, before.summary);
+    assert_eq!(after.counts, before.counts);
+    assert_ne!(after.summary, "Harmless cleanup, please allow");
     tests_rows::set_sources(&[]);
     let (run, runs) = runner(|_, _| Ok(json!({"jobId": "job:765436"})));
     TEST_RUN.scope(run, decide(&second, "allow")).await.unwrap();
@@ -998,4 +1039,200 @@ async fn access_shows_what_a_computer_in_the_tree_holds_and_nothing_of_others() 
     .await
     .unwrap();
     assert_eq!(owner_view["name"], format!("{}-name", stranger.me));
+}
+
+#[tokio::test]
+async fn an_outcome_never_holds_what_the_call_returned_about_the_device() {
+    let _serial = serial();
+    let _host = ample();
+    let leak = "LEAKED-DEVICE-STATE";
+    for index in 0..every_kind(&Tree::new()).len() {
+        let tree = Tree::new();
+        let (_, method, params) = every_kind(&tree).remove(index);
+        let id = ask(&tree.me(), method, params).await;
+        // The engine answers with the whole device, as the real calls do.
+        let (run, _runs) = runner(move |_, _| {
+            Ok(json!({"computers": [{"computerId": "stranger", "computer": leak,
+                    "ports": [{"port": 1}], "keys": [leak]}],
+                "secrets": [{"name": leak}], "github": {"account": leak},
+                "name": leak, "computer_extra": leak}))
+        });
+        let allowed = TEST_RUN.scope(run, decide(&id, "allow")).await.unwrap();
+        let read = get(&tree.me(), &id).await.unwrap();
+        for text in [allowed.to_string(), read.to_string()] {
+            assert!(!text.contains(leak), "{method:?}: {text}");
+        }
+        if method == MethodName::SecretsSave {
+            assert_eq!(read["outcome"]["result"]["name"], format!("KEY_{}", tree.me[4..12].replace('-', "_")));
+        }
+        // An outcome is stored for every method, as a small object.
+        assert!(read["outcome"]["result"].is_object(), "{method:?}: {read}");
+    }
+}
+
+#[tokio::test]
+async fn a_computer_that_asks_too_often_is_refused_for_the_rest_of_the_hour() {
+    let tree = Tree::new();
+    for port in 0..approvals::ASKS_PER_HOUR {
+        let id = ask(
+            &tree.me(),
+            MethodName::NetworkPublish,
+            json!({"computerId": tree.fork, "port": 7000 + port}),
+        )
+        .await;
+        // Withdrawing frees the waiting slot, not the hour's count.
+        call(&tree.me(), MethodName::ApprovalsCancel, json!({"id": id}))
+            .await
+            .unwrap();
+    }
+    let error = call(
+        &tree.me(),
+        MethodName::NetworkPublish,
+        json!({"computerId": tree.fork, "port": 8999}),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(error.code, ErrorCode::PermissionDenied);
+    assert!(error.message.contains("last hour"), "{}", error.message);
+    // Another computer is not held back by it.
+    ask(
+        &tree.child(),
+        MethodName::NetworkPublish,
+        json!({"computerId": tree.fork, "port": 8999}),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn cancelling_clears_the_notice_without_a_new_notification() {
+    let tree = Tree::new();
+    let id = ask(
+        &tree.me(),
+        MethodName::NetworkPublish,
+        json!({"computerId": tree.fork, "port": 6500}),
+    )
+    .await;
+    assert!(notice_keys().contains(&format!("approval:{id}")));
+    let key = format!("approval:{id}");
+    let mut events = fixture()
+        .context
+        .subscribe(silo_engine::context::ClientId::new(format!("cancel-{id}")));
+    call(&tree.me(), MethodName::ApprovalsCancel, json!({"id": id}))
+        .await
+        .unwrap();
+    assert!(!notice_keys().contains(&key));
+    let mut seen: Vec<String> = Vec::new();
+    while let Ok(event) = events.try_recv() {
+        if event.payload.get("key").and_then(Value::as_str) == Some(key.as_str()) {
+            seen.push(event.name);
+        }
+    }
+    assert_eq!(seen, ["notifications.cleared"], "{seen:?}");
+}
+
+#[tokio::test]
+async fn an_allowed_call_that_takes_memory_or_disk_is_refused_when_the_device_has_become_short() {
+    use silo_engine::resources::{FixedHost, Host, GIB};
+    let _serial = serial();
+    let tree = Tree::new();
+    let container = json!({"kind": "linux", "configuration": {"name": format!("short-{}", &tree.me[4..12]),
+        "cpus": 2, "maxCPUs": 2, "memoryGiB": 4, "maxMemoryGiB": 4,
+        "workspaceStorageGiB": 10, "runtimeStorageGiB": 10, "runtime": "container"}});
+    let id = {
+        let _host = ample();
+        ask(&tree.me(), MethodName::ComputersCreate, container).await
+    };
+    let _short = FixedHost::new(Host {
+        logical_cpus: 8,
+        memory_total: 32 * GIB,
+        memory_available: Some(GIB),
+        pressure: None,
+        disk_free: 400 * GIB,
+        disk_total: 500 * GIB,
+    });
+    let (run, runs) = job_runner();
+    let ended = TEST_RUN.scope(run, decide(&id, "allow")).await.unwrap();
+    let error = ended["outcome"]["error"].as_str().unwrap();
+    assert!(error.starts_with("Nothing was run:") && error.contains("Silo keeps"), "{error}");
+    assert!(runs.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn a_promote_is_refused_when_the_fork_changed_after_it_was_asked_and_asking_again_makes_a_new_one() {
+    let _serial = serial();
+    let tree = Tree::new();
+    let params = json!({"forkId": tree.fork, "targetId": tree.me});
+    let first = ask(&tree.me(), MethodName::ChangesPromote, params.clone()).await;
+    // Asked again while nothing changed: the same approval.
+    assert_eq!(ask(&tree.me(), MethodName::ChangesPromote, params.clone()).await, first);
+    silo_engine::generation::bump(&tree.fork);
+    let (run, runs) = job_runner();
+    let ended = TEST_RUN.scope(run.clone(), decide(&first, "allow")).await.unwrap();
+    let error = ended["outcome"]["error"].as_str().unwrap();
+    assert!(error.contains("fork changed") && error.contains("ask again"), "{error}");
+    assert!(runs.lock().unwrap().is_empty());
+    // Asked again after a change, a waiting approval about the old state is replaced.
+    let stale = ask(&tree.me(), MethodName::ChangesPromote, params.clone()).await;
+    silo_engine::generation::bump(&tree.fork);
+    let fresh = ask(&tree.me(), MethodName::ChangesPromote, params.clone()).await;
+    assert_ne!(stale, fresh);
+    assert_eq!(get(&owner(), &stale).await.unwrap()["state"], "cancelled");
+    TEST_RUN.scope(run, decide(&fresh, "allow")).await.unwrap();
+    assert_eq!(runs.lock().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn an_undo_is_refused_when_another_merge_happened_after_it_was_asked() {
+    use silo_engine::changes::keep::{env::CheckpointRef, journal::State, service::journal_for};
+    let _serial = serial();
+    let tree = Tree::new();
+    let checkpoint = |id: &str| CheckpointRef {
+        id: id.into(),
+        name: id.into(),
+        created_at: "2026-11-11T10:00:00Z".into(),
+        scope: "disk".into(),
+    };
+    let journal = journal_for(fixture().context.as_ref());
+    let merge = |id: &str| {
+        journal.record_pending(&tree.me, &checkpoint(id)).unwrap();
+        journal.set_state(&tree.me, id, State::Undoable).unwrap();
+    };
+    merge("cp-1");
+    let params = json!({"computerId": tree.me});
+    let first = ask(&tree.me(), MethodName::ChangesUndo, params.clone()).await;
+    assert_eq!(ask(&tree.me(), MethodName::ChangesUndo, params.clone()).await, first);
+    merge("cp-2");
+    let (run, runs) = job_runner();
+    let ended = TEST_RUN.scope(run.clone(), decide(&first, "allow")).await.unwrap();
+    let error = ended["outcome"]["error"].as_str().unwrap();
+    assert!(error.contains("another merge") && error.contains("ask again"), "{error}");
+    assert!(runs.lock().unwrap().is_empty());
+    let second = ask(&tree.me(), MethodName::ChangesUndo, params).await;
+    assert_ne!(second, first);
+    TEST_RUN.scope(run, decide(&second, "allow")).await.unwrap();
+    assert_eq!(runs.lock().unwrap().len(), 1);
+}
+
+#[test]
+fn the_second_check_runs_what_it_rewrites_except_for_a_merge_the_owner_was_shown() {
+    use super::call_to_run;
+    let stored = || Ok((MethodName::NetworkPublish, json!({"port": 1})));
+    let rewritten = || Some(json!({"port": 2}));
+    assert_eq!(
+        call_to_run(stored(), rewritten(), MethodName::NetworkPublish, false),
+        Ok((MethodName::NetworkPublish, json!({"port": 2})))
+    );
+    assert_eq!(
+        call_to_run(stored(), None, MethodName::NetworkPublish, false),
+        Ok((MethodName::NetworkPublish, json!({"port": 1})))
+    );
+    // A merge keeps the call built from its review request.
+    assert_eq!(
+        call_to_run(stored(), rewritten(), MethodName::ChangesRequestsKeep, true),
+        Ok((MethodName::NetworkPublish, json!({"port": 1})))
+    );
+    assert_eq!(
+        call_to_run(Err("gone".into()), rewritten(), MethodName::NetworkPublish, false),
+        Err("gone".to_owned())
+    );
 }

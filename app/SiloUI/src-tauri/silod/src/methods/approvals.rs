@@ -151,6 +151,43 @@ fn approval_required(record: &Record) -> DispatchError {
     }
 }
 
+/// A computer's name as a message of Silo's quotes it.
+fn shown_name(name: &str) -> String {
+    format!("“{}”", silo_api::plain_text_within(name, 100))
+}
+
+/// What a call acts on as it is now, so an allowed call is refused when it moved after the
+/// ask: the last merge or replacement an undo would take back, or the state of the fork a
+/// promote would put in place.
+fn pin_of(context: &HandlerContext, method: MethodName, params: &Value) -> Option<String> {
+    match method {
+        MethodName::ChangesUndo => {
+            let computer = params.get("computerId").and_then(Value::as_str)?;
+            Some(silo_engine::changes::promote::service::undo_pin(
+                context.engine_context(),
+                computer,
+            ))
+        }
+        MethodName::ChangesPromote => {
+            let fork = params.get("forkId").and_then(Value::as_str)?;
+            Some(format!("generation:{}", silo_engine::generation::generation(fork)))
+        }
+        _ => None,
+    }
+}
+
+/// Why an allowed call that acts on `method`'s pinned state does not run.
+fn pin_moved_message(method: MethodName) -> &'static str {
+    match method {
+        MethodName::ChangesUndo => {
+            "Nothing was undone: another merge or replacement happened after you were asked. The computer can ask again."
+        }
+        _ => {
+            "Nothing was replaced: the fork changed after you were asked. The computer can ask again."
+        }
+    }
+}
+
 fn refused(message: impl Into<String>) -> DispatchError {
     DispatchError::new(ErrorCode::PermissionDenied, message)
 }
@@ -244,16 +281,17 @@ pub(crate) async fn request(
         announce(context, &expired);
     }
     let key = approvals::request_key(asked.method.name(), asked.asked);
+    let pin = pin_of(context, asked.method, &asked.params);
     if let Some(same) = store.find_pending(asked.computer, &key) {
-        if !merge_moved_on(context, &same) {
+        if !merge_moved_on(context, &same) && same.pin == pin {
             return Ok(approval_required(&same));
         }
-        // The review request was asked for again with other changes since: the earlier ask
-        // can no longer be kept as asked.
+        // The review request was asked for again with other changes, or what the call acts
+        // on moved, since: the earlier ask can no longer be allowed as asked.
         if let Ok(cancelled) = store.cancel(
             same.id(),
             None,
-            "The merge was asked for again with other changes.",
+            "What the call acts on changed after it was asked; the computer asked again.",
         ) {
             announce(context, &cancelled);
         }
@@ -288,6 +326,7 @@ pub(crate) async fn request(
             id: creation.id.clone(),
             source: creation.source.clone(),
         }),
+        pin,
         review_request_id: linked.as_ref().map(|(id, _)| id.clone()),
         review_digest: linked.as_ref().map(|(_, digest)| digest.clone()),
     });
@@ -296,17 +335,26 @@ pub(crate) async fn request(
         Err(AskError::Limit) => {
             return Err(refused(format!(
                 "{} already has {} requests waiting for an answer. Wait for an answer, or withdraw one with approvals.cancel, before asking again.",
-                asked.computer_name,
+                shown_name(&asked.computer_name),
                 approvals::PENDING_LIMIT
+            )))
+        }
+        Err(AskError::Rate) => {
+            return Err(refused(format!(
+                "{} has already made {} requests in the last hour, which is the most it can. Wait before asking again.",
+                shown_name(&asked.computer_name),
+                approvals::ASKS_PER_HOUR
             )))
         }
         Err(AskError::Store(message)) => return Err(DispatchError::internal(message)),
     };
     if created {
         if let Some((request_id, _)) = &linked {
-            if let Err(message) =
-                fold_requests::Store::new(&app_data(context)).link_approval(request_id, record.id())
-            {
+            if let Err(message) = fold_requests::Store::new(&app_data(context)).link_approval(
+                request_id,
+                record.id(),
+                &record.approval.summary,
+            ) {
                 eprintln!("silod: approval {}: {message}", record.id());
             }
             // A merge asked again with other changes replaces the earlier ask.
@@ -509,6 +557,20 @@ fn merge_call(
     Ok((MethodName::ChangesRequestsKeep, keep))
 }
 
+/// The call that runs: a merge runs the review request it was shown; any other call runs as
+/// the second check now rewrites it, when it does.
+fn call_to_run(
+    stored: Result<(MethodName, Value), String>,
+    rewritten: Option<Value>,
+    method: MethodName,
+    linked: bool,
+) -> Result<(MethodName, Value), String> {
+    match (stored?, rewritten) {
+        (_, Some(rewritten)) if !linked => Ok((method, rewritten)),
+        (call, _) => Ok(call),
+    }
+}
+
 /// Checks an allowed call again and runs it as the owner. Never runs a call the check
 /// refuses; the outcome says why in plain words.
 fn execute<'a>(
@@ -521,7 +583,7 @@ fn execute<'a>(
         let Some(method) = MethodName::from_name(&approval.method) else {
             return failed("The stored call is not one this engine knows, so nothing was run.");
         };
-        let tree = match gate::judge(context, asker, method, &approval.params).await {
+        let (tree, rewritten) = match gate::judge(context, asker, method, &approval.params).await {
             None => {
                 return failed(format!(
                     "{} no longer exists, so nothing was run.",
@@ -539,12 +601,26 @@ fn execute<'a>(
                     "Nothing was run: the call would now ask for something other than what you allowed. The computer can ask again.",
                 );
             }
-            Some((_, tree)) => tree,
+            Some((Decision::Ask { .. }, tree)) => (tree, None),
+            // The computer may do it now without asking; it runs as the policy now rewrites it.
+            Some((Decision::Allow(allowed), tree)) => (tree, allowed.params),
         };
-        let (run_method, run_params) = match merge_call(context, record, &tree) {
-            Ok(call) => call,
-            Err(message) => return failed(message),
-        };
+        if gate::takes_headroom(method) {
+            if let Some(message) = gate::short_of_resources(context) {
+                return failed(format!("Nothing was run: {message}"));
+            }
+        }
+        if let Some(pinned) = &record.pin {
+            if pin_of(context, method, &approval.params).as_ref() != Some(pinned) {
+                return failed(pin_moved_message(method));
+            }
+        }
+        let linked = approval.review_request_id.is_some();
+        let (run_method, run_params) =
+            match call_to_run(merge_call(context, record, &tree), rewritten, method, linked) {
+                Ok(call) => call,
+                Err(message) => return failed(message),
+            };
         let app_data = app_data(context);
         let creation = record.creates.as_ref().map(|creation| policy::Creation {
             name: creation.name.clone(),
@@ -596,13 +672,69 @@ fn execute<'a>(
                 error: None,
             },
             Ok(output) => ApprovalOutcome {
-                result: Some(output.value),
+                result: Some(outcome_result(run_method, &run_params, &output.value)),
                 job_id: None,
                 error: None,
             },
             Err(error) => failed(error.message),
         }
     })
+}
+
+/// What an allowed call tells the computer that asked: a small answer written here for each
+/// method, never what the call returned, which can hold the device's secrets, GitHub accounts
+/// and computers. A method this does not know answers with nothing.
+fn outcome_result(method: MethodName, params: &Value, returned: &Value) -> Value {
+    let text = |value: &Value, pointer: &str| value.pointer(pointer).cloned().unwrap_or(Value::Null);
+    match method {
+        MethodName::SecretsSave => json!({ "name": text(params, "/request/name") }),
+        MethodName::NetworkPublish => {
+            let computer = params.get("computerId").and_then(Value::as_str);
+            let port = params.get("port").and_then(Value::as_u64);
+            let published = returned
+                .get("computers")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .find(|entry| entry.get("computerId").and_then(Value::as_str) == computer)
+                .and_then(|entry| entry.get("ports").and_then(Value::as_array))
+                .into_iter()
+                .flatten()
+                .find(|entry| entry.get("port").and_then(Value::as_u64) == port);
+            let from = |key: &str| published.map_or(Value::Null, |entry| text(entry, &format!("/{key}")));
+            json!({
+                "computerId": computer,
+                "port": port,
+                "hostPort": from("hostPort"),
+                "scheme": from("scheme"),
+                "state": from("state"),
+            })
+        }
+        MethodName::SshAccessSave => {
+            let computer = params.get("computerId").and_then(Value::as_str);
+            let saved = returned
+                .get("computers")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .find(|entry| entry.get("computerId").and_then(Value::as_str) == computer);
+            let from = |key: &str| saved.map_or(Value::Null, |entry| text(entry, &format!("/{key}")));
+            json!({
+                "computerId": computer,
+                "enabled": from("enabled"),
+                "port": from("port"),
+                "bindAddress": from("bindAddress"),
+                "state": from("state"),
+            })
+        }
+        MethodName::ComputersCreate | MethodName::CheckpointsFork => {
+            match returned.pointer("/computer/id").and_then(Value::as_str) {
+                Some(id) => json!({ "computer": { "id": id, "name": text(returned, "/computer/name") } }),
+                None => json!({}),
+            }
+        }
+        _ => json!({}),
+    }
 }
 
 #[cfg(test)]
