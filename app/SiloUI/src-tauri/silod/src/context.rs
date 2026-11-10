@@ -360,6 +360,7 @@ impl SilodContext {
             .map_err(|error| error.to_string())?;
         let payload = serde_json::to_value(NotificationsClearedPayload {
             computer_id: computer_id.to_owned(),
+            key: None,
         })
         .map_err(|error| error.to_string())?;
         self.publish_unlocked(Event::new("notifications.cleared", payload), audience);
@@ -403,6 +404,14 @@ impl silo_engine::runtime::RuntimeHost for SilodRuntimeHost {
 
     fn macos_context(&self) -> Option<silo_engine::macos_computers_engine::MacosContext> {
         Some(self.context.macos_context())
+    }
+
+    fn export_scrub(&self) -> Option<Arc<dyn silo_engine::export_scrub::ScrubEnv>> {
+        let handle = tokio::runtime::Handle::try_current().ok()?;
+        Some(crate::methods::checkpoints::scrub_env::env(
+            self.context.clone(),
+            handle,
+        ))
     }
 
     fn runtime_storage(&self) -> Result<PathBuf, String> {
@@ -498,6 +507,23 @@ impl EngineContext for SilodContext {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         self.clear_notices_unlocked(computer_id, audience)
+    }
+
+    fn clear_notice(&self, key: &str, computer_id: &str, audience: Audience) -> Result<(), String> {
+        let _projection = self
+            .notice_projection
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.job_registry()?
+            .clear_notice(key)
+            .map_err(|error| error.to_string())?;
+        let payload = serde_json::to_value(NotificationsClearedPayload {
+            computer_id: computer_id.to_owned(),
+            key: Some(key.to_owned()),
+        })
+        .map_err(|error| error.to_string())?;
+        self.publish_unlocked(Event::new("notifications.cleared", payload), audience);
+        Ok(())
     }
 
     fn job_queue_changed(&self) {

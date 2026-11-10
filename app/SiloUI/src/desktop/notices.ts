@@ -8,7 +8,7 @@ import { z } from "zod"
  * a system notification and as an in-app toast.
  */
 export const noticeSchema = z.object({
-  category: z.enum(["failures", "changes", "completions"]),
+  category: z.enum(["failures", "changes", "completions", "approvals"]),
   key: z.string().min(1),
   title: z.string(),
   body: z.string(),

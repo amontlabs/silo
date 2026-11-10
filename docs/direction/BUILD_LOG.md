@@ -7,9 +7,11 @@ Plan: [PLAN.md](PLAN.md). Agent rules: [AGENT-BRIEF.md](AGENT-BRIEF.md).
 - **Started:** 2026-11-10, from main at the commit that adds this file.
 - **How work lands:** each item is a delegated agent in its own worktree and branch. It runs its
   own review loop with the `reviewer` model, then reports. The orchestrator reads the report,
-  reviews boundary changes itself, merges the branch into main in the main checkout, regenerates
-  the API files if two items touched them, and deletes the item's target folder
-  (`~/code/projects/silo-wt-targets/<item>`). No pull requests; main is pushed now and then.
+  reviews boundary changes itself, merges the branch into the local branch `direction` (checked
+  out at `~/code/projects/silo-direction`), regenerates the API files if two items touched them,
+  and deletes the item's target folder (`~/code/projects/silo-wt-targets/<item>`). `main` on
+  GitHub accepts only pull requests with seven required checks (found 2026-11-10), so the build
+  stays on `direction` and goes up as pull requests at the end.
 - **Live checks** use the Dev engine, one item at a time. On 2026-11-10 a Dev app and engine from a
   deleted build (`silo-dev-target`) were still running; an item that needs the Dev engine
   replaces them with its own build.
@@ -20,10 +22,28 @@ Plan: [PLAN.md](PLAN.md). Agent rules: [AGENT-BRIEF.md](AGENT-BRIEF.md).
 
 | Item | State | Branch | Notes |
 | --- | --- | --- | --- |
-| S1 | started | | |
-| T1 | started | | |
-| T4 | started | | |
-| T9 | started | | |
+| S1 | merged 2026-11-10 | `docs/s1-gateway-channel-spike` | [evidence](evidence/S1.md). Channel: yes, no patch. Allowlist: needs strict off, a `restore --net-strict` patch, and gateway init fields |
+| T1 | merged 2026-11-10 (`e000d684c`) | `t1-policy-audit` | silod 341, api 52, policy and audit 42 tests passed in the item. Only one review round ran (fallback model); the second hit a quota. Orchestrator read rules.rs, policy/mod.rs and the gate: no hole found; checkpoint ids are looked up inside the named computer's record. A Codex review is running |
+| T1 review | done 2026-11-10 (Opus) | | one high finding and seven smaller, listed under Found. All eight fixed and merged 2026-11-10 (`fix/policy-audit-review-findings`): the made record moves inside the promote's own Lineage step and is saved in the promote journal, so undo and recovery reverse or repeat it; silod 346 and the engine's policy, audit and promote tests (116) passed in the item. Orchestrator read `policy/handoff.rs`. Not exercised against a real engine. A Codex pass is still owed |
+| T2 | merged 2026-11-11 (`583c19b97`) | `feat/silo-approvals-store` | merged by hand against the T1 fixes and T3 (gate, policy, counts); 1472 focused tests passed after the merge. Reviewed twice in the item on the fallback model. Opus review done 2026-11-11: no way found to run an unapproved call, run one twice, or reach decide. Twelve findings around it: an allowed `secrets.save` returned the whole secret list to the asker; summaries left out fields the handler honours (GitHub repositories and write access, SSH bind address and keys, the device port, the push branch, merge hooks); secret values stayed in the approval file 30 days; no limit on how often a computer asks; agent text unvalidated and unsanitised in summaries, notices and the CLI. Fix task: id ends `187c6729-ff64-44be-a659-183df4ce8af4` |
+| T3 | merged 2026-11-10 | `feat/device-resource-limits` | merged by hand; 588 focused tests passed after the merge. Reviewed once by the fallback model. Open: a burst of starts can each pass before any computer has booted (needs a reservation of admitted starts' memory); a request larger than the headroom is still admitted; disk is measured at app data, not a separately chosen storage location |
+| T4 | merged 2026-11-10 | `feat/keep-conflict-choices` | engine tests 273, api 53, silod checkpoints 56 passed in the item; two review rounds; the `silo-ui` crate was not built there |
+| T9 | merged 2026-11-10 | `feat/macos-computer-app-parity` | frontend only, no Rust change; 2914 frontend tests passed in the item; reviewed by the fallback model (gemini flash) only, one round; not run in the real app |
+| T11 | merged 2026-11-10 | `feat/github-token-secrets` | 794 focused tests passed after the merge; frontend suite passed in the item. Reviewed once by the fallback model; a fresh-context review is running. Not run against a real computer, Keychain or GitHub. Open: the old single-token methods only find a secret named exactly `github-token`; an older Silo cannot read a `secrets.json` that holds a token secret; a fork still refuses to copy token access |
+| T12 | merged 2026-11-10 | `feat/computer-agent-install` | merged by hand (registry conflicts with T1); `agents.list` is Tree and `agents.install` is Made in the policy; 637 focused tests passed after the merge. Sonnet review done: one host-harm finding (unbounded guest stderr held in host memory and copied into the job error on macOS), plus false `missing` for an unreachable computer, an uncancellable Linux install, a racy create-time install, and weaker checks than intended. All nine findings fixed and merged 2026-11-10 (`t3/6c7ce149`): guest output capped, an unreachable computer reports `unknown`, a Linux install is stoppable (process group, checked on the Linux test machine), create-with-agents takes the install guard and reports steps. Left: a failed create-time install shows a generic message. macOS create with agents is refused; Linux create installs best effort; no real computer run |
+| S2 | merged 2026-11-10 | `docs/s2-linux-computer-rebuild` | [evidence](evidence/S2.md). Verdict: buildable now for Linux with host-side disk moves; macOS later. T15 waits for T6 (recipes in the engine) |
+| T7 | merged 2026-11-10 | `fix/macos-nat-boundary` | 530 macOS engine tests passed; unit tests only, no macOS computer run; one review round on the fallback model. Live steps are in the item's report, copied below |
+| T11 review | done 2026-11-10 (Sonnet) | | no token value leaks found. Ten findings; the important ones: a network failure detached computers (also true before T11), a stale check could overwrite a newer token's state, and an agent's request for token access was summarised without saying a full-permission token is given, with a missing id bound to the owner's `github-token` after approval. All ten fixed and merged 2026-11-10 (`fix/github-token-review`); api 63, silod 353, engine github/secrets/policy 297 and 902 frontend tests passed in the item. For the owner: the old single-token fallback applies only in a session where a client used the old methods; a token with no answer since start shows waiting and its computers stay detached until GitHub answers |
+| T8 | stopped 2026-11-11 by a Claude API rate limit; continued | `feat/computer-network-policy` (work saved as `2c6442f98`) | continuation on Sonnet: id ends `779e2245-5c05-4c47-a529-662635d5db03`. Left to do then: patch wiring, runtime rebuild, live check, documents |
+| T5a | running since 2026-11-11 | | id ends `483ed458-d28e-46af-950d-c3a473cf2223` (Opus). Starts from `direction` plus T8's branch; uses the Dev engine for its live check. T5b (the engine provides the `silo` binary, guest components, MCP registration, approval waiting and new MCP tools) follows it |
+| T13a | running since 2026-11-11 | | id ends `72236a72-7e02-4671-a224-a9209b1ec45d` (Sonnet): onboarding agent step, Agents section, Open with agent. T13b (network policy control in the app) waits for T8 |
+| T10 | merged 2026-11-11 | `t3/60767d54` | 2989 frontend tests and the shell's command tests passed in the item; no review (quota); never run in the real app. The click-through list is under Found |
+| T14 | merged 2026-11-10 | `feat/exclude-logins-export` | 998 focused tests passed after the merge. **The canary failed**: the imported computer has no login files, but both markers are still in the export file, in the base disk layers (a fork's disks are layers over the source's and `msb` cannot flatten them; trimming reaches only the top layer). Shipped as best effort with the wording "removed, traces may remain". [evidence](evidence/T14.txt). Linux virtual machines only; checkpoint, macOS and container exports keep the old warning. The Dev engine is stopped and free |
+
+Task ids are `node:delegated-task:command%3Amcp%3A<session>%3Adelegate-task%3A<ending>`; the session part was `d723019c-0dae-419c-8e5d-2e7d794e60f4` on 2026-11-10 and is `d8f73f30-2d3c-4819-8290-51937a1beb8b` from 2026-11-11.
+Next waves are in the plan's work items table; start an item only when the items before it in
+its dependency chain are merged (T2 and T3 need T1; T5 needs T1, T2 and S1; T6 needs T4 and T2;
+T10 needs T2 and T9; T8 needs S1 and T5; T13 needs T8, T10 and T12).
 
 ## Decisions taken while planning
 
@@ -58,3 +78,132 @@ These were not asked of the owner. Each is open to change.
     requests, which narrows it).
 
 ## Found during the build
+
+- **T10 click-through for the live run:** the sidebar shows Pending with a count; an agent asks
+  (a port, a merge): toast with Review, system notification with Silo in the background, menu bar
+  row, clicking the notification opens the request; Allow, and Deny with a note; a merge with
+  conflicts, choose and merge again; Settings, Notifications, "Requests from agents"; Activity,
+  "Who did what": filters, Load more, Open request.
+- **T10, to fix:** Deny on a merge approval leaves the fork's review request open, so it comes
+  back as its own row. The engine can only close a request by keeping it or deleting the fork;
+  it needs a "declined" close that keeps the fork. `docs/silo-help.html` says nothing about
+  Pending or Merge.
+
+- **Do not run `cargo fmt` on the engine or silod crates as a whole.** They are not rustfmt-clean
+  (the project's check covers only the root package), so it rewrites dozens of unrelated files.
+  It happened once during the T2 merge and was undone.
+- **Claude API rate limit** stopped T8 on 2026-11-11. Keep at most two Opus tasks and four Claude
+  tasks running at once.
+- **Disk:** merged worktrees keep ignored build output; `git clean -fdXq` in each after its merge
+  (done 2026-11-11, 20 GB back). `org.silo.dev` app data is 40 GB (macOS restore images and
+  templates), which is the Dev engine's own data.
+- **T2, for T10 and the owner:** the frontend's list of notice categories lacks `approvals`, so the
+  in-app toast is skipped (T10 adds it). Summaries include computer names that agents choose. A
+  cargo run again printed the private GitHub build file into an agent's log (deleted, nothing
+  committed). The Tauri change that clears one notice by key was not compile-checked in the item.
+- **T3 follow-up owed:** reserve the memory of admitted starts so a burst cannot pass the floor
+  together; refuse a request larger than the headroom.
+
+- **T14, for the owner:** keep removal on by default despite the caveat, or go back to ask-first?
+  A real fix needs layer flattening in the runtime. The removal uses the whole known-credential
+  list, so it also takes key files (`*.pem`, `*.key`) found in the scanned folders; the dialog
+  lists them first. A copy left by an engine crash mid-export stays hidden until the next
+  scrubbed export drops it. Cancelling and a crash mid-export were not tried live; the dialog was
+  not run on screen. The stale Silo Dev app and engine were stopped through `engine.shutdown`.
+
+- **T1 boundary review (Opus), all being fixed in the T1 fix task:** (1) high: `forget_makers`
+  was never called, so after the owner approves "replace main with fork F" the old main still
+  controlled the new one; fix: on promote the fork takes the target's place, the target's other
+  computers are re-pointed to the fork, the old main keeps nothing; undo reverses it.
+  (2) `guest.prepare` appended a key to a device-wide `authorized_keys`: now owner only.
+  (3) `checkpoints.create` on itself could evict the owner's automatic and step checkpoints:
+  manual kind forced, `keepNewest` dropped. (4) `computers.create` passed sizes through: larger
+  than the caller's own now asks (new approval kind, resources). (5) the audit log could be
+  flooded to evict rows: repeated rows collapse, per-computer caps, target id recorded only when
+  it is the caller's. (6) `sshAccess.save` off passed keys and port through. (7) merge-request
+  keep and promote between two computers the caller made no longer ask. The review confirmed
+  every dispatch path reaches the gate, the caller cannot be chosen by the client, ids other than
+  `computerId` are scoped by their handlers, and the Device caller is unchanged.
+
+- **Merging two items that both add methods** conflicts in `api/src/methods/mod.rs`,
+  `registry.rs`, `schema.rs`, `requests.rs`, the schema file and `engine/src/lib.rs`. Recipe:
+  `git merge --no-ff --no-commit <branch>`; run `docs/direction/tools/union.py` on the hand-written
+  files (keeps both sides of additive hunks); set the pinned counts by hand (methods, per-kind,
+  job results); `git checkout --ours` the two generated files and run both generators; add the
+  new methods to `engine/src/policy/rules.rs`; run `docs/direction/tools/integrate.sh` or the
+  focused suites; commit. Method count after T3: 179 (57 queries), 40 job results, 27 error codes.
+- **Integration run after T1, T4, T7, T9** (2026-11-10): api, silod, cli and the engine's policy,
+  audit, guest_client, changes and macOS suites, 1101 tests, no failures; fmt clean.
+
+- **Integration checks** run with
+  `CARGO_TARGET_DIR=~/code/projects/silo-wt-targets/integration`; the script regenerates the API
+  files and runs the focused suites; its log is `~/code/projects/silo-wt-targets/integration.log`.
+  The integration worktree has APFS clones of the ignored `src-tauri/binaries` folder and the
+  private GitHub build file.
+- **Reviewer quota:** on 2026-11-10 the `reviewer` model stopped with "Individual quota reached,
+  resets in 4h", and Codex itself is out of usage until 2026-11-11 15:12. Until then reviews run
+  as delegated read-only tasks on Claude models with a fresh context (Opus for boundary items,
+  Sonnet otherwise). A Codex pass over the boundary (T1, T2, T5) is owed once Codex is back.
+- **T1, for the owner:** a token's `fork_secrets` no longer limits forks (a fork may get any
+  secret its maker has). `device.facts` and `engine.state` are open to a computer; notifications,
+  `events.subscribe` and `operations.list` are closed because they are not cut per computer, so a
+  client inside a computer polls. A computer cannot read its own secrets' names or GitHub access
+  yet (`computers.access` is in T2). A job result too large to send in one piece is withheld from
+  a computer. Some gated methods do not take `computerId` in the form the gate reads and are
+  therefore refused for a computer (safe): check `clipboard.read`, `computerUse.setup`,
+  `computers.dismissError`, `computers.forceStop`, `desktop.status`, `macos.setup.retry`,
+  `network.urls` in the live run.
+
+- **S2 design for T15 (Linux rebuild on the newest image):** (1) take the lane, journal, stop;
+  (2) disk checkpoint with integrity, the undo; (3) create `<name>-rebuild-<hex>` on the newest
+  image with the old arguments, boot, account setup, stop; (4) move the workspace disk (APFS
+  clone of the whole disk folder and its layer list, or the supported `adopt-disk` when the disk
+  is one raw file; sizes must match); (5) boot both, carry `/home/silo` by tar inside the guest
+  plus `msb cp` (1.15 GB in 9 s; a tar pipe between two execs took 1 min 41 s), copy the host
+  `ssh/` folder; (6) replay the recipe; (7) stop both, rename old to `<name>-undo` and new to
+  `<name>`, relabel `silo.machine-id`. Unsolved: homes over about 1.8 GiB on a 4 GiB root disk,
+  things installed by hand outside home and the recipe, Linux hosts without reflink, and old
+  checkpoints still restoring the old image. Replacing the root disk in place works only by
+  editing the runtime's private database: not to be built.
+
+- **T7:** bootstrap files on a used disk are replaced, never created (the host cannot make
+  root-owned files the guest accepts), so a fork or import whose disk lacks any of the three is
+  refused. The proxy CA is installed in the first boot, not written offline. A computer converted
+  by the launch migration from before the gateway still boots on NAT once (its record is not
+  flagged); closing that needs the migration to stage offline. The Claude Code installer still
+  downloads inside the guest. Full engine suite in the item: 3378 passed, 8 failed, all in
+  `host_push::protocol_tests` (git and LFS), not run on the base commit, so not known to be new.
+- **T7 live check, still to run:** (1) fork a complete macOS computer whose tools are stale: no
+  NAT boot in the setup log, key login behind the gateway, fork ends complete; (2) import an
+  export: same, including the 775 MB tools copy over the gateway's SSH port and the Claude Code
+  install; (3) fork or import a disk with one bootstrap file removed: refusal, disk unchanged;
+  (4) the SIP step: Recovery works with no network card; (5) first install and template copy
+  still use NAT.
+
+- **Worktrees** are under `~/.t3/worktrees/microsandbox-workspaces/`; branch names are chosen by
+  the agents (see the Branch column).
+- **Reviewer availability:** T9's review ran on the last fallback (gemini flash); T4's first
+  round also ran on a fallback. Boundary items get the orchestrator's own review on top.
+- **T9, left for the owner:** navigation badges (error count, spinner) still follow Linux
+  computers only, because the preview fixtures include a failed macOS computer; macOS computers
+  on another device stay rows without a page; disk size is not editable (the engine allows CPU
+  and memory only). `computers.restart`, `storage.*` and SSH access reject macOS computers in the
+  engine, so the page does not offer them. The export-before-delete fix has no test.
+
+- **T4:** the `silo-ui` build script printed the contents of `github-build.local.json` into the
+  agent's command output during a cargo build. Nothing was committed. The owner may want to
+  rotate what that file holds, and the build script should stop printing it.
+- **T4, existing behaviour left alone:** on macOS, files under `/etc` are normalised to
+  `/private/etc` before the "main moved while starting" check, which may then miss them; a
+  gitignored `.env` is carried over by a merge without a credential check (the wall covers Git
+  history only); temp-file and temporary-ref cleanup errors in keep are ignored silently.
+- **T4, for T6:** CLI and MCP text still says `divergent`; the new refusal reason is
+  `choices-needed`, ids look like `file:<path>`, `package:<mgr>:<name>`, `repo:<path>`.
+
+- **S1:** `msb modify` cannot change network rules; the supported way on an existing computer is
+  the engine's restore in place (about 1.2 s idle). `--vsock` works and is a second fallback for
+  the channel. The guest `silo` builds with `scripts/build-guest-silo.sh` in 36 s (12.7 MB,
+  static); plain cargo fails because `ring` needs a C compiler. `current_network_args` rejects
+  hostname rules, `restore` has no `--net-strict`, and `portable_export_network` refuses a
+  computer whose strict is off. A memory-restored test computer reported a pinned `interface`
+  that made export refuse; not checked whether the engine clears it.

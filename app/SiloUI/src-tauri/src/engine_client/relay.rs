@@ -59,6 +59,7 @@ pub(crate) fn legacy_events(frame: &Value) -> Vec<(&'static str, Value)> {
         "updates.changed" => vec![("silo://update-state", payload)],
         "preparation.changed" => vec![("silo://preparation-status", payload)],
         "notifications.notice" => vec![("silo://notice", payload)],
+        "approvals.changed" => vec![("silo://approvals-changed", payload)],
         "operations.job.progress" => progress_events(&payload),
         _ => Vec::new(),
     }
@@ -133,6 +134,20 @@ mod tests {
                 json!({"key": "k"})
             ))),
             vec!["silo://notice"]
+        );
+    }
+
+    #[test]
+    fn an_approval_change_reaches_the_window_with_its_id_and_state() {
+        assert_eq!(
+            legacy_events(&frame(
+                "approvals.changed",
+                json!({"id": "ap-1", "state": "allowed"})
+            )),
+            vec![(
+                "silo://approvals-changed",
+                json!({"id": "ap-1", "state": "allowed"})
+            )]
         );
     }
 

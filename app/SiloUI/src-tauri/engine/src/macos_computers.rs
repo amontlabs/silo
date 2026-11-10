@@ -12,6 +12,8 @@
 //! computer's disk and memory and forks new computers from them.
 #[path = "macos_computers/checkpoints.rs"]
 mod checkpoints;
+#[path = "macos_computers/agent_install.rs"]
+mod agent_install;
 #[path = "macos_computers/developer_tools.rs"]
 mod developer_tools;
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
@@ -1358,6 +1360,7 @@ fn macos_job_finished(
                 code,
                 message,
                 diagnostics: None,
+                details: None,
             }),
             outcome_chunked: false,
         },
@@ -1457,6 +1460,7 @@ fn publish_checkpoint_completion<T: serde::Serialize>(
                     code: silo_api::jobs::ErrorCode::Internal,
                     message: format!("Could not encode the macOS checkpoint result: {error}"),
                     diagnostics: None,
+                    details: None,
                 }),
                 outcome_chunked: false,
             },
@@ -1473,6 +1477,7 @@ fn publish_checkpoint_completion<T: serde::Serialize>(
                 },
                 message: message.clone(),
                 diagnostics: None,
+                details: None,
             }),
             outcome_chunked: false,
         },
@@ -2193,6 +2198,65 @@ pub async fn macos_agent_tools_state(
         ))
     })
     .await
+}
+
+/// The agents of a macOS computer: Claude Code comes with its template, Codex is read from the
+/// computer while it runs and `unknown` while it does not.
+pub async fn macos_agents(
+    app: MacosContext,
+    id: String,
+) -> Result<Vec<silo_api::methods::agents::AgentInfo>, String> {
+    blocking(move || {
+        ensure_loaded(&app)?;
+        let (_, state) = computer(&id)?;
+        let running = state == State::Running && !guest_computer_use::update_running(&id);
+        agent_install::list(&app, &id, running)
+    })
+    .await
+}
+
+/// Installs an agent in the running macOS computer `id` as the job `job`, and answers with the
+/// computer's agents. `step` is told where the install is.
+pub fn macos_install_agent(
+    app: &MacosContext,
+    id: &str,
+    agent: silo_api::methods::agents::AgentId,
+    job: &crate::desktop::JobLink,
+    step: &dyn Fn(silo_api::methods::agents::AgentInstallStep, Option<String>),
+) -> Result<Vec<silo_api::methods::agents::AgentInfo>, String> {
+    runtime::shutdown::ensure_accepting_operations()?;
+    ensure_loaded(app)?;
+    let (record, _) = computer(id)?;
+    let guard = runtime::OPERATIONS
+        .kind(runtime::operation_gate::OperationKind::Other)
+        .acquire_for_job(
+            runtime::operation_gate::Scope::Computer { id: id.to_owned() },
+            Some(record.name.clone()),
+            &format!("Installing {} in {}", agent.display_name(), record.name),
+            None,
+            job.job_id.clone(),
+            Some(job.cancellation.clone()),
+        )
+        .map_err(|error| error.to_string())?;
+    job.registry
+        .mark_running(&job.job_id)
+        .map_err(|error| error.to_string())?;
+    job.registry
+        .associate_gate(guard.request_id(), job.job_id.clone());
+    guard.allow_cancel();
+    guard.expect_within(Duration::from_secs(40 * 60));
+    let (_, state) = computer(id)?;
+    if state != State::Running {
+        return Err(format!(
+            "Start the computer before installing {} in it.",
+            agent.display_name()
+        ));
+    }
+    let token = guard.cancel_token();
+    agent_install::install(app, id, agent, step, &|| {
+        token.load(std::sync::atomic::Ordering::SeqCst)
+    })?;
+    agent_install::list(app, id, true)
 }
 
 /// Stores desired computer-use approval and schedules the existing guest updater when running.
@@ -3631,6 +3695,8 @@ pub(crate) fn import_archive<R: crate::backup::MsbRunner>(
     record.pending_restore = None;
     record.inherited_access = false;
     record.imported = true;
+    // The disk comes from an archive, which an agent may have written.
+    record.agent_may_have_used = true;
     engine::validate_archive_configuration(app, &record, &stage_layout)?;
     store::save(&stage_layout, &record)?;
     std::fs::set_permissions(&stage, std::fs::Permissions::from_mode(0o700))
@@ -5221,9 +5287,11 @@ fn mark_proxy_bootstrap(
         return Ok(());
     }
     record.setup.proxy_bootstrap = true;
+    record.note_agent_use();
     store::save(layout, &record)?;
     update(app, &record.id, |entry| {
         entry.record.setup.proxy_bootstrap = true;
+        entry.record.note_agent_use();
     });
     emit(app);
     Ok(())
@@ -5923,6 +5991,7 @@ fn delete(app: &MacosContext, id: &str) -> Result<(), String> {
             Ok(()) => {
                 registry().entries.retain(|entry| entry.record.id != id);
                 crate::changes::store::forget(app.engine.as_ref(), &[id.to_owned()]);
+                crate::policy::store::computer_removed(id);
                 if let Err(message) = ports::computer_removed(app, id) {
                     eprintln!("A deleted macOS computer's published ports could not be removed: {message}");
                 }
@@ -6814,6 +6883,8 @@ fn fork_setup(record: &mut Record, checkpoint: &checkpoints::Meta) {
         needs_personalizing: true,
         proxy_bootstrap: false,
     };
+    // The disk is the checkpoint's, which an agent may have written.
+    record.agent_may_have_used = true;
 }
 
 fn fork_workflow(
@@ -11389,6 +11460,8 @@ mod tests {
             proxy_bootstrap: true,
         };
         record.developer_tools_version = Some(developer_tools::version());
+        // A complete setup is saved and loaded with the flag.
+        record.agent_may_have_used = true;
         let old = record.clone();
         let layout = Layout::new(data.path(), &id);
         store::save(&layout, &old).unwrap();

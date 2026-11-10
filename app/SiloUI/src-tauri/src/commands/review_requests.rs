@@ -1,8 +1,11 @@
 //! Tauri adapters for review requests: `changes.requests.*`, `steps.list` and `computers.tree`.
 //! Job methods wait for their outcome and return its result.
+use std::collections::BTreeMap;
+
 use crate::engine_client::{params::device, Engine, EngineClient, EngineError};
 use serde_json::Value;
 use silo_api::methods::{
+    keep::KeepAnswer,
     requests,
     review_requests::{
         ChangesRequestsKeepParams, ChangesRequestsListParams, RequestFilter, RequestIdParams,
@@ -47,6 +50,7 @@ pub(crate) async fn keep(
     device_id: Option<&str>,
     id: &str,
     data_ok: bool,
+    choices: Option<BTreeMap<String, KeepAnswer>>,
 ) -> Result<Value, EngineError> {
     engine
         .run_job(requests::changes_requests_keep(ChangesRequestsKeepParams {
@@ -54,6 +58,8 @@ pub(crate) async fn keep(
             request_id: id.to_owned(),
             data_ok: data_ok.then_some(true),
             keep: None,
+            choices: choices.filter(|choices| !choices.is_empty()),
+            skip: None,
         }))
         .await
 }
@@ -132,9 +138,10 @@ pub(crate) async fn keep_review_request(
     request_id: String,
     device_id: Option<String>,
     data_ok: Option<bool>,
+    choices: Option<BTreeMap<String, KeepAnswer>>,
 ) -> Result<Value, String> {
     let data_ok = data_ok.unwrap_or(false);
-    keep(&engine, device_id.as_deref(), &request_id, data_ok)
+    keep(&engine, device_id.as_deref(), &request_id, data_ok, choices)
         .await
         .map_err(String::from)
 }
@@ -233,7 +240,10 @@ mod forwarding_tests {
         let fake = FakeEngine::start(|method, params| replies(method, params));
         let (engine, _) = connected_client(&fake).await;
         assert_eq!(show(&engine, None, "r1").await.unwrap()["ok"], 1);
-        keep(&engine, None, "r1", true).await.unwrap();
+        let choices = BTreeMap::from([("repo:/root/app".to_owned(), KeepAnswer::Branch)]);
+        keep(&engine, None, "r1", true, Some(choices))
+            .await
+            .unwrap();
         throw_away(&engine, None, "r1").await.unwrap();
         open(&engine, None, "r1").await.unwrap();
         assert_eq!(
@@ -242,7 +252,9 @@ mod forwarding_tests {
         );
         assert_eq!(
             fake.calls(MethodName::ChangesRequestsKeep),
-            vec![json!({"requestId": "r1", "dataOk": true})]
+            vec![
+                json!({"requestId": "r1", "dataOk": true, "choices": {"repo:/root/app": "branch"}})
+            ]
         );
         assert_eq!(fake.calls(MethodName::ChangesRequestsThrowAway).len(), 1);
         assert_eq!(fake.calls(MethodName::ChangesRequestsOpen).len(), 1);
@@ -257,7 +269,7 @@ mod forwarding_tests {
             other => replies(other, params),
         });
         let (engine, _) = connected_client(&fake).await;
-        let error = keep(&engine, None, "r1", false).await.unwrap_err();
+        let error = keep(&engine, None, "r1", false, None).await.unwrap_err();
         assert_eq!(error.code, "busy");
     }
 
@@ -286,6 +298,15 @@ mod forwarding_tests {
             read::<rr::ChangesRequestsKeepResult>(&fixtures, "refusedKeep")
                 .refusal
                 .is_some()
+        );
+        let needed = read::<rr::ChangesRequestsKeepResult>(&fixtures, "choicesNeeded");
+        assert_eq!(needed.refusal.unwrap().conflicts.len(), 2);
+        assert_eq!(needed.request.approval_id.as_deref(), Some("ap-merge"));
+        assert_eq!(
+            read::<rr::ChangesRequestsKeepResult>(&fixtures, "fastForwardKeep")
+                .report
+                .fast_forward,
+            Some(true)
         );
         assert_eq!(
             read::<rr::ChangesRequestsThrowAwayResult>(&fixtures, "throwAway").dropped,

@@ -45,12 +45,60 @@ describe("logins found before an export", () => {
     render(<Harness backup={backup} />)
     fireEvent.click(screen.getByRole("button", { name: "Start export" }))
     expect(await screen.findByText(claude)).toBeInTheDocument()
-    expect(screen.getByText(/Silo keeps these files in the export/)).toBeInTheDocument()
+    expect(screen.getByText(/Silo cannot leave these files out of this export/)).toBeInTheDocument()
+    expect(screen.queryByText(/Silo keeps these files in the export/)).not.toBeInTheDocument()
     expect(backup.actions.checkLogins).toHaveBeenCalledWith("dev", undefined)
     expect(backup.actions.chooseDestination).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole("button", { name: "Share anyway" }))
     await act(async () => { await Promise.resolve() })
     expect(backup.actions.exportAndVerify).toHaveBeenCalledExactlyOnceWith("/Volumes/Backups", ["dev"], undefined)
+  })
+
+  describe("when the export removes them", () => {
+    const found = { logins: [claude], leavesOut: true }
+    const withLogins = () => controller({}, { checkLogins: vi.fn().mockResolvedValue(found), chooseDestination: vi.fn().mockResolvedValue("/Volumes/Backups") })
+
+    it("says they are removed, with the caveat, and exports without them on the default choice", async () => {
+      const backup = withLogins()
+      render(<Harness backup={backup} />)
+      fireEvent.click(screen.getByRole("button", { name: "Start export" }))
+      expect(await screen.findByText(claude)).toBeInTheDocument()
+      expect(screen.getByText(/Silo removes these files from the export, but traces may remain in the file/)).toBeInTheDocument()
+      expect(screen.queryByText(/Silo keeps these files/)).not.toBeInTheDocument()
+      expect(backup.actions.chooseDestination).not.toHaveBeenCalled()
+      fireEvent.click(screen.getByRole("button", { name: "Remove logins and export" }))
+      await act(async () => { await Promise.resolve() })
+      expect(backup.actions.exportAndVerify).toHaveBeenCalledExactlyOnceWith("/Volumes/Backups", ["dev"], undefined)
+    })
+
+    it("includes them only when the person chooses to", async () => {
+      const backup = withLogins()
+      render(<Harness backup={backup} />)
+      fireEvent.click(screen.getByRole("button", { name: "Start export" }))
+      fireEvent.click(await screen.findByRole("button", { name: "Include logins" }))
+      await act(async () => { await Promise.resolve() })
+      expect(backup.actions.exportAndVerify).toHaveBeenCalledExactlyOnceWith("/Volumes/Backups", ["dev"], undefined, true)
+    })
+
+    it("exports nothing on Cancel", async () => {
+      const backup = withLogins()
+      render(<Harness backup={backup} />)
+      fireEvent.click(screen.getByRole("button", { name: "Start export" }))
+      fireEvent.click(await screen.findByRole("button", { name: "Cancel" }))
+      await act(async () => { await Promise.resolve() })
+      expect(backup.actions.chooseDestination).not.toHaveBeenCalled()
+      expect(backup.actions.exportAndVerify).not.toHaveBeenCalled()
+    })
+
+    it("asks nothing when none are found, even if the computer could not be listed", async () => {
+      const unchecked = "the computer is stopped, so its files were not listed; start it to check them"
+      const backup = controller({}, { checkLogins: vi.fn().mockResolvedValue({ logins: [], unchecked, leavesOut: true }), chooseDestination: vi.fn().mockResolvedValue("/Volumes/Backups") })
+      let transfer: ComputerTransfer | undefined
+      render(<Capture backup={backup} onTransfer={(value) => { transfer = value }} />)
+      void transfer!.exportComputer("dev")
+      await act(async () => { await Promise.resolve(); await Promise.resolve() })
+      expect(backup.actions.exportAndVerify).toHaveBeenCalledExactlyOnceWith("/Volumes/Backups", ["dev"], undefined)
+    })
   })
 
   it("exports nothing when the answer is Cancel", async () => {
@@ -195,6 +243,14 @@ describe("export notifications", () => {
     fireEvent.click(await screen.findByRole("button", { name: /Show in (Finder|folder)/ }))
     expect(backup.actions.revealArchive).toHaveBeenCalledWith(archive)
     expect(backup.actions.dismissOperation).toHaveBeenCalledOnce()
+  })
+
+  it("tells how many login files an export removed", async () => {
+    const left = { ...archive, leftOut: ["a Claude Code login (/root/.claude/.credentials.json)", "Claude Code sign-in data (/root/.claude.json)"] }
+    const success: BackupOperation = { kind: "result", operation: "backup", archive: left, runningNames: [], outcome: "success", title: "Export ready", message: "done" }
+    const { rerender } = render(<Harness backup={controller()} />)
+    rerender(<Harness backup={controller({ operation: success })} />)
+    expect(await screen.findByText("dev.silo-backup · 2 GiB · 2 login files removed")).toBeInTheDocument()
   })
 
   it("dismissing a result toast clears the backend operation", async () => {

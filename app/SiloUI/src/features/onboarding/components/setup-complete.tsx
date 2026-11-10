@@ -1,5 +1,5 @@
 import { useLayoutEffect } from "react"
-import { Bell, Boxes, Check, CircleAlert, CircleCheck, GitFork, HeartPulse, Power } from "lucide-react"
+import { Bell, Boxes, Check, CircleAlert, CircleCheck, GitFork, HeartPulse, Power, ShieldQuestion } from "lucide-react"
 
 import { FilterCombobox } from "@/components/filter-combobox"
 import { SectionHeading } from "@/components/page"
@@ -14,6 +14,7 @@ const notificationCategories = [
   { id: "notifyFailures", label: "Failures", icon: CircleAlert },
   { id: "notifyChanges", label: "Unexpected computer changes", icon: HeartPulse },
   { id: "notifyCompletions", label: "Long tasks finished", icon: CircleCheck },
+  { id: "notifyApprovals", label: "Requests from agents", icon: ShieldQuestion },
 ] as const
 
 export function SetupComplete({ configurations, githubSummary }: {

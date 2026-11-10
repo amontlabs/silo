@@ -195,6 +195,28 @@ describe("logins found before an export", () => {
     production.dispose()
   })
 
+  it("says whether the export leaves them out, and passes along the choice to include them", async () => {
+    const native = bridge(async () => "op-1")
+    const reply = { logins: ["a Claude Code login (/root/.claude/.credentials.json)"], checked: ["disk"], leavesOut: true }
+    const invoke = native.invoke.getMockImplementation()!
+    native.invoke.mockImplementation(async (command, args) => command === "check_export_logins" ? reply : invoke(command, args))
+    const production = createProductionSource(native.bridge)
+    await production.initialize()
+    await expect(production.backupActions.checkLogins("dev")).resolves.toEqual({ logins: reply.logins, leavesOut: true })
+    await production.backupActions.checkLogins("dev", undefined, true)
+    expect(native.invoke).toHaveBeenLastCalledWith("check_export_logins", { computer: "dev", includeLogins: true })
+    production.dispose()
+  })
+
+  it("starts an export that includes the logins only when asked to", async () => {
+    const native = bridge(async () => "op-1")
+    const production = createProductionSource(native.bridge)
+    await production.initialize()
+    void production.backupActions.exportAndVerify("/Volumes/Backups", ["dev"], undefined, true).catch(() => undefined)
+    await vi.waitFor(() => expect(native.invoke).toHaveBeenCalledWith("start_backup", { destination: "/Volumes/Backups", computers: ["dev"], includeLogins: true }))
+    production.dispose()
+  })
+
   it("refuses an answer in an unknown shape", async () => {
     const native = bridge(async () => "op-1")
     const invoke = native.invoke.getMockImplementation()!

@@ -50,6 +50,7 @@ impl DispatchEnv {
                 client_id: "recipes".to_owned(),
                 protocol: 1,
                 client: None,
+                caller: silo_engine::policy::Caller::owner("recipes"),
             },
         )
     }
@@ -63,7 +64,7 @@ impl DispatchEnv {
     }
 
     /// Starts a job method and waits for it.
-    fn job(&self, method: MethodName, params: Value) -> Result<Value, String> {
+    pub(super) fn job(&self, method: MethodName, params: Value) -> Result<Value, String> {
         let started = self.call(method, params)?;
         let id = started
             .get("jobId")
@@ -321,6 +322,7 @@ pub(super) async fn build(
     recipes::validate(&params.spec).map_err(|message| DispatchError {
         code: silo_api::jobs::ErrorCode::Internal,
         message,
+        details: None,
     })?;
     let started = context.start_job("recipes.build")?;
     let job_id = started.job_id.clone();

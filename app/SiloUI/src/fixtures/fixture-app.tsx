@@ -37,6 +37,7 @@ import { createFixturePreparationBackend, preparationFixtureFromSearch } from ".
 import { createPreparationStore, PreparationProvider } from "@/desktop/preparation"
 import { computerUseFixtureFromSearch, createFixtureComputerUseBackend, withComputerUseFixture } from "./computer-use"
 import { createFixtureUnseenResult, unseenResultFixtureModeFromSearch } from "./transfer-result-notice"
+import { approvalFixtureModeFromSearch } from "./approvals"
 
 export function FixtureApp({ nativeOnboardingComplete = false, nativeDependencies = null, nativeOperations = false, settingsStore }: { nativeOnboardingComplete?: boolean; nativeDependencies?: DependencyRuntime | null; nativeOperations?: boolean; settingsStore?: SettingsStore }) {
   const source = applicationSourceForScenario(scenarioFromSearch(window.location.search))
@@ -61,6 +62,7 @@ function FixtureAppContent({ nativeOnboardingComplete, nativeDependencies, nativ
   const [activityStep, setActivityStep] = useState(0)
   const [dependencyFixtureRecovered, setDependencyFixtureRecovered] = useState(false)
   const operationQueue = operationQueueFromSearch(window.location.search)
+  const approvalMode = approvalFixtureModeFromSearch(window.location.search) ?? "waiting"
   // One backup per preview, so the migration screen and Settings, General agree about it.
   // The migration view always has one; elsewhere it appears only when asked for.
   const backupFixtureMode = preUpgradeBackupFixtureModeFromSearch(window.location.search) ?? (surface === "migration" ? "present" : undefined)
@@ -108,6 +110,7 @@ function FixtureAppContent({ nativeOnboardingComplete, nativeDependencies, nativ
             preUpgradeBackup={preUpgradeBackup}
             editorInclude={editorInclude}
             unseenResult={unseenResult}
+          approvals={approvalMode}
           />
         </RuntimeMigrationBoundary>
       ) : surface === "app" ? (
@@ -120,6 +123,7 @@ function FixtureAppContent({ nativeOnboardingComplete, nativeDependencies, nativ
           preUpgradeBackup={preUpgradeBackup}
           editorInclude={editorInclude}
           unseenResult={unseenResult}
+          approvals={approvalMode}
         />
       ) : surface === "status-bar" ? (
         <StatusBarPreview

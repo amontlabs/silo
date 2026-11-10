@@ -2,6 +2,8 @@ import { ComputerStateLabel } from "@/features/application/components/applicatio
 import { ComputerWaitingStatus } from "@/features/application/components/operation-queue-panel"
 import type { ApplicationActions, ApplicationSource, ApplicationComputer } from "@/features/application/model/application-source"
 import { emptyOperationQueue, waitingOperationForVm } from "@/features/application/model/operation-queue"
+import { statusTones } from "@/components/status-tone"
+import { macosStateLabel } from "@/features/macos-computers/model/macos-computers"
 
 type LifecycleAction = NonNullable<ApplicationComputer["lifecycleAction"]>
 
@@ -35,7 +37,7 @@ export function ComputerStatus({ computer, source, readOnly, onCancel }: { compu
   if (computer.device?.busy) return <span role="status">Updating…</span>
   if (computer.device && !computer.device.connected) return <span>Offline · last known status</span>
   return <span className="inline-flex items-baseline gap-1.5 align-baseline">
-    <ComputerStateLabel state={computer.state} />
+    {computer.macos && computer.state === "starting" ? <span className={`font-medium ${statusTones.warning.text}`} data-computer-state="starting">{macosStateLabel(computer.macos)}</span> : <ComputerStateLabel state={computer.state} />}
     {queueVmId !== null && waitingForVm && <><StatusSeparator /><ComputerWaitingStatus queue={source.operationQueue} computerId={queueVmId} onCancel={cancel} /></>}
   </span>
 }

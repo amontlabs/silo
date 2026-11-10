@@ -69,8 +69,9 @@ describe("Rust-emitted native wire contracts", () => {
     expect(state.github).toEqual({ ...github, account: undefined, computers: github.computers.map(policy => ({
       ...policy, authenticationMethod: policy.authenticationMethod ?? undefined,
     })) })
-    expect(state.github.computers?.map(policy => policy.authenticationMethod)).toEqual([undefined, "oauth", "token"])
-    expect(state.github.computers?.map(policy => policy.computer)).toEqual(["dev-0", "dev-1", "dev-2"])
+    expect(state.github.computers?.map(policy => policy.authenticationMethod)).toEqual([undefined, "oauth", "token", "token"])
+    expect(state.github.computers?.map(policy => policy.tokenSecretId)).toEqual([undefined, undefined, undefined, "00000000-0000-4000-8000-0000000000aa"])
+    expect(state.github.computers?.map(policy => policy.computer)).toEqual(["dev-0", "dev-1", "dev-2", "dev-3"])
     expect(state.computers).toHaveLength(1)
   })
 

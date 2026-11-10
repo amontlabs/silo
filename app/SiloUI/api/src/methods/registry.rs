@@ -65,6 +65,14 @@ pub struct MethodDescriptor {
 
 define_registry! {
     ActivitySetupRead => ("activity.setup.read", Query, common::DeviceParams, Vec<computers::ComputerConfigurationProgress>);
+    ApprovalsCancel => ("approvals.cancel", Command, approvals::ApprovalsCancelParams, approvals::Approval);
+    ApprovalsDecide => ("approvals.decide", Command, approvals::ApprovalsDecideParams, approvals::Approval);
+    ApprovalsGet => ("approvals.get", Query, approvals::ApprovalsGetParams, approvals::Approval);
+    ApprovalsList => ("approvals.list", Query, approvals::ApprovalsListParams, approvals::ApprovalsListResult);
+    ApprovalsNote => ("approvals.note", Command, approvals::ApprovalsNoteParams, approvals::Approval);
+    AuditList => ("audit.list", Query, audit::AuditListParams, audit::AuditListResult);
+    AgentsInstall => ("agents.install", Job, agents::AgentsInstallParams, common::JobStartResult);
+    AgentsList => ("agents.list", Query, agents::AgentsListParams, agents::AgentsListResult);
     ChangesKeep => ("changes.keep", Job, keep::ChangesKeepParams, common::JobStartResult);
     ChangesPromote => ("changes.promote", Job, keep::ChangesPromoteParams, common::JobStartResult);
     ChangesRequest => ("changes.request", Command, keep::ChangesRequestParams, keep::ChangesRequestResult);
@@ -93,6 +101,7 @@ define_registry! {
     ComputersConfigurationChange => ("computers.configuration.change", Job, computers::ComputerConfigurationChangeParams, common::JobStartResult);
     ComputersConfigurationRead => ("computers.configuration.read", Query, computers::ComputerConfigurationReadParams, computers::ComputerConfigurationRequest);
     ComputersConfigurationRetry => ("computers.configuration.retry", Job, computers::ComputerConfigurationRetryParams, common::JobStartResult);
+    ComputersAccess => ("computers.access", Query, approvals::ComputersAccessParams, approvals::ComputerAccess);
     ComputersCreate => ("computers.create", Job, computers::ComputerCreateParams, computers::ComputerCreateResult);
     ComputersCredentials => ("computers.credentials", Query, credentials_used::ComputerCredentialsParams, credentials_used::CredentialsUsage);
     ComputersDelete => ("computers.delete", Job, computers::ComputerDeleteParams, common::JobStartResult);
@@ -124,6 +133,7 @@ define_registry! {
     DesktopStatus => ("desktop.status", Query, desktop::DesktopStatusParams, desktop::DesktopStatus);
     DeviceDependencies => ("device.dependencies", Query, device::DependencyReportParams, device::DependencyReport);
     DeviceFacts => ("device.facts", Query, device::DeviceFactsParams, device::DeviceFacts);
+    DeviceResources => ("device.resources", Query, device::DeviceResourcesParams, device::DeviceResources);
     DisplayClose => ("display.close", Command, display::DisplayCloseParams, ());
     DisplayNativeAttach => ("display.native.attach", Stream, display::NativeDisplayAttachParams, display::NativeDisplayMessage);
     DisplayShow => ("display.show", Command, display::DisplayShowParams, ());
@@ -251,27 +261,27 @@ mod tests {
 
     #[test]
     fn registry_covers_every_canonical_method_and_kind() {
-        assert_eq!(METHOD_REGISTRY.len(), 175);
+        assert_eq!(METHOD_REGISTRY.len(), 185);
         assert_eq!(
             METHOD_REGISTRY
                 .iter()
                 .filter(|m| m.kind == MethodKind::Query)
                 .count(),
-            54
+            60
         );
         assert_eq!(
             METHOD_REGISTRY
                 .iter()
                 .filter(|m| m.kind == MethodKind::Command)
                 .count(),
-            73
+            76
         );
         assert_eq!(
             METHOD_REGISTRY
                 .iter()
                 .filter(|m| m.kind == MethodKind::Job)
                 .count(),
-            42
+            43
         );
         assert_eq!(
             METHOD_REGISTRY

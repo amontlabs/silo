@@ -37,6 +37,8 @@ export function configurationStepText(event: SiloProgressEvent | undefined): str
     case "computer-image-wait": return "Waiting for the computer image"
     case "computer-use-setup":
     case "computer-use-pending": return "Setting up the desktop and computer use"
+    case "agent-installation":
+    case "agent-installation-failed": return "Installing agents"
     case "computer-runtime-preparation":
     case "image-resolving":
     case "image-resolved":
@@ -75,7 +77,9 @@ function creationStage(step: string | undefined, fraction: number | undefined, d
     case "runtime-waiting": return 2
     case "desktop-installation": return 3
     case "computer-use-setup":
-    case "computer-use-pending": return 4
+    case "computer-use-pending":
+    case "agent-installation":
+    case "agent-installation-failed": return 4
     case "computer-settings":
     case "computer-verification":
     case "setup-completed": return finishing

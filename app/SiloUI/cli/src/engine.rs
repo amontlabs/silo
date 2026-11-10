@@ -511,13 +511,14 @@ impl Engine {
         Ok(self.client.request(request.name(), params).await?)
     }
 
-    /// The computers a person works with: the throwaway computers that measure baselines are
-    /// left out.
+    /// The computers a person works with: the throwaway computers that measure baselines, build
+    /// recipes and carry exports are left out.
     pub async fn computers(&self) -> Result<Vec<Computer>, CliError> {
         let mut computers = self.all_computers().await?;
         computers.retain(|computer| {
             !computer.name.starts_with(crate::ops::BASELINE_PREFIX)
                 && !computer.name.starts_with(crate::ops::BUILDER_PREFIX)
+                && !computer.name.starts_with(crate::ops::EXPORT_COPY_PREFIX)
         });
         Ok(computers)
     }

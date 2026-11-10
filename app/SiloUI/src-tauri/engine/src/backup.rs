@@ -544,6 +544,51 @@ pub(crate) struct BackupRequest {
     /// written exceed it, before the archive is assembled, so nothing is left at the
     /// destination.
     pub(crate) size_cap: Option<u64>,
+    /// Computers written under the name and id of another one: the hidden copy an export
+    /// without logins is captured from stands in for the computer it was made from.
+    pub(crate) presented: Vec<Presented>,
+}
+
+/// A computer exported as another: `copy` is captured, and its row says it is `name` with `id`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Presented {
+    pub(crate) copy: String,
+    pub(crate) name: String,
+    pub(crate) id: String,
+}
+
+/// The name a computer's row carries.
+fn presented_name(presented: &[Presented], copy: &str) -> String {
+    presented
+        .iter()
+        .find(|entry| entry.copy == copy)
+        .map_or(copy, |entry| entry.name.as_str())
+        .to_owned()
+}
+
+/// `runtime_config` and `computer_configuration` of `copy` as the computer it stands in for
+/// would have written them; unchanged for a computer that stands in for none.
+fn present(
+    presented: &[Presented],
+    copy: &str,
+    mut runtime_config: Value,
+    mut computer_configuration: Value,
+) -> (Value, Value) {
+    let Some(entry) = presented.iter().find(|entry| entry.copy == copy) else {
+        return (runtime_config, computer_configuration);
+    };
+    runtime_config["name"] = entry.name.clone().into();
+    if let Some(labels) = runtime_config
+        .get_mut("labels")
+        .and_then(Value::as_object_mut)
+    {
+        if labels.contains_key("silo.machine-id") {
+            labels.insert("silo.machine-id".into(), entry.id.clone().into());
+        }
+    }
+    computer_configuration["name"] = entry.name.clone().into();
+    computer_configuration["id"] = entry.id.clone().into();
+    (runtime_config, computer_configuration)
 }
 
 /// The pinned guest image as the runtime cache holds it.
@@ -1109,6 +1154,12 @@ impl<R: MsbRunner> BackupService<R> {
                     format_bytes(cap),
                 )));
             }
+            let (runtime_config, computer_configuration) = present(
+                &request.presented,
+                &source.name,
+                runtime_config,
+                computer_configuration,
+            );
             payloads.push((
                 source,
                 runtime_config,
@@ -1133,7 +1184,7 @@ impl<R: MsbRunner> BackupService<R> {
                 .map(
                     |(source, runtime_config, computer_configuration, _, payload_size, digest)| {
                         PackageComputer {
-                            name: source.name.clone(),
+                            name: presented_name(&request.presented, &source.name),
                             runtime_config: runtime_config.clone(),
                             computer_configuration: computer_configuration.clone(),
                             payload_size: *payload_size,
@@ -1169,8 +1220,8 @@ impl<R: MsbRunner> BackupService<R> {
             size_bytes,
             computers: request
                 .sources
-                .into_iter()
-                .map(|source| source.name)
+                .iter()
+                .map(|source| presented_name(&request.presented, &source.name))
                 .collect(),
         })
     }
@@ -4418,6 +4469,12 @@ fn same_volume(left: &Path, right: &Path) -> bool {
 /// `statvfs` of the nearest existing ancestor: space available to this
 /// account (f_bavail), so a path that is not created yet still resolves.
 pub(crate) fn available_bytes(path: &Path) -> io::Result<u64> {
+    volume_bytes(path).map(|(available, _)| available)
+}
+
+/// Space available to this account and the volume's total size, for the nearest existing
+/// ancestor of `path`.
+pub(crate) fn volume_bytes(path: &Path) -> io::Result<(u64, u64)> {
     use std::os::unix::ffi::OsStrExt;
     let existing = path
         .ancestors()
@@ -4432,8 +4489,19 @@ pub(crate) fn available_bytes(path: &Path) -> io::Result<u64> {
         return Err(io::Error::last_os_error());
     }
     #[allow(clippy::unnecessary_cast)] // The field widths differ between platforms.
-    (statistics.f_bavail as u64)
-        .checked_mul(statistics.f_frsize as u64)
+    let (available, total, unit) = (
+        statistics.f_bavail as u64,
+        statistics.f_blocks as u64,
+        // Some filesystems report no fragment size; POSIX then means the block size.
+        if statistics.f_frsize == 0 {
+            statistics.f_bsize as u64
+        } else {
+            statistics.f_frsize as u64
+        },
+    );
+    available
+        .checked_mul(unit)
+        .zip(total.checked_mul(unit))
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid volume capacity"))
 }
 
@@ -5639,6 +5707,71 @@ mod tests {
         assert!(!row.image_embedded);
         assert_eq!(row.image_digest.as_deref(), Some(container_header().template.image_digest.as_str()));
         assert!(is_container_row(&row.runtime_config));
+    }
+
+    #[test]
+    fn a_hidden_copy_is_captured_and_written_as_the_computer_it_stands_in_for() {
+        let temp = tempfile::tempdir().unwrap();
+        let service = service(&temp, FakeRunner::default());
+        let destination = temp.path().join("main.silo-backup");
+        let mut runtime_config = managed_config("silo-export-0123abcd");
+        runtime_config["labels"]["silo.machine-id"] = "copy-id".into();
+        let mut configuration = computer_configuration("silo-export-0123abcd");
+        configuration["id"] = "9c8f6d1e-0000-4000-8000-000000000001".into();
+        let result = service
+            .create_backup(
+                BackupRequest {
+                    destination: destination.clone(),
+                    sources: vec![BackupSource {
+                        name: "silo-export-0123abcd".into(),
+                        snapshot_group: "dev".into(),
+                        was_running: false,
+                        runtime_config,
+                        computer_configuration: configuration,
+                        existing_member: None,
+                    }],
+                    presented: vec![Presented {
+                        copy: "silo-export-0123abcd".into(),
+                        name: "main".into(),
+                        id: "2f6b739d-ff7a-4be8-aa5e-f6694e4ab0d8".into(),
+                    }],
+                    ..Default::default()
+                },
+                &Cancellation::default(),
+            )
+            .unwrap();
+        assert_eq!(result.computers, ["main"]);
+        // The runtime captured the copy, by its own name.
+        let calls = service.runner.calls.lock().unwrap().clone();
+        let capture = calls.iter().find(|call| call[1] == "create").unwrap();
+        assert!(capture.contains(&"silo-export-0123abcd".to_owned()), "{capture:?}");
+        let manifest = manifest_of(&destination);
+        let row = &manifest.computers[0];
+        assert_eq!(row.name, "main");
+        assert_eq!(row.runtime_config["name"], "main");
+        assert_eq!(row.runtime_config["labels"]["silo.machine-id"], "2f6b739d-ff7a-4be8-aa5e-f6694e4ab0d8");
+        assert_eq!(row.computer_configuration["name"], "main");
+        assert_eq!(row.computer_configuration["id"], "2f6b739d-ff7a-4be8-aa5e-f6694e4ab0d8");
+        validate_manifest(&manifest).unwrap();
+    }
+
+    #[test]
+    fn only_the_copy_a_row_names_is_presented_as_another_computer() {
+        let presented = vec![Presented {
+            copy: "silo-export-0123abcd".into(),
+            name: "main".into(),
+            id: "id-main".into(),
+        }];
+        assert_eq!(presented_name(&presented, "silo-export-0123abcd"), "main");
+        assert_eq!(presented_name(&presented, "other"), "other");
+        let (runtime, configuration) = present(
+            &presented,
+            "other",
+            managed_config("other"),
+            computer_configuration("other"),
+        );
+        assert_eq!(runtime["name"], "other");
+        assert_eq!(configuration["name"], "other");
     }
 
     #[test]
@@ -7235,6 +7368,7 @@ mod tests {
                         manifest_digest: format!("sha256:{}", "c".repeat(64)),
                     }),
                     size_cap: None,
+                    presented: Vec::new(),
                 },
                 &Cancellation::default(),
             )
@@ -9031,6 +9165,7 @@ mod tests {
                 manifest_digest: format!("sha256:{}", "a".repeat(64)),
             }),
             size_cap: None,
+            presented: Vec::new(),
         };
         let cancellation = Cancellation::default();
         let destination = temp.path().join("dev.silo-backup");

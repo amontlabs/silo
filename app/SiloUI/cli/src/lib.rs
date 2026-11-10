@@ -2,6 +2,7 @@
 //! requests in `silo-api`.
 
 pub mod access;
+pub mod approvals;
 pub mod autokeep;
 pub mod cli;
 pub mod clock;

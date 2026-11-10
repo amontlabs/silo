@@ -2,6 +2,8 @@ import { useLifecycleToasts } from "./model/use-lifecycle-toasts"
 import { useRepositoryPushToasts } from "./components/use-repository-push-toasts"
 import { computerTarget } from "./model/connections"
 import { useBackendNotices } from "@/features/application/model/use-backend-notices"
+import { usePending } from "@/features/application/model/use-pending-changes"
+import { dismissOperationToast } from "@/lib/operation-toast"
 import { useUpdates } from "@/features/updates/update-store"
 import { updateCommands } from "@/features/updates/update-commands"
 import { useAppMenu } from "@/desktop/app-menu"
@@ -37,7 +39,7 @@ import { applicationPreferenceChanges, type ApplicationPreferenceSelection } fro
 import { useStableCallback } from "@/lib/use-stable-callback"
 import { SettingsProvider, useSettings } from "@/features/preferences/settings-store"
 import { useMacosComputers } from "@/features/macos-computers/model/macos-computers"
-import { selectableMacosIds } from "@/features/application/model/macos-log-computers"
+import { selectableMacosIds, useMacosApplication } from "@/features/application/model/macos-application-computers"
 import { PageContainer } from "@/components/page"
 
 function computerAttentionCounts(source: Pick<ApplicationSource, "computers" | "computerConfigurationOperation">): { errors: number; warnings: number } {
@@ -134,8 +136,8 @@ export function ApplicationApp(props: ApplicationAppProps) {
   return <SettingsProvider initialSettings={initialSettings}><ApplicationContent {...props} /></SettingsProvider>
 }
 
-function ApplicationContent({ source, actions, backup, initialRoute, routeRequest, connectQuitConfirmation, onOpenRequest }: ApplicationAppProps) {
-  useBackendNotices()
+function ApplicationContent({ source: nativeSource, actions: nativeActions, backup, initialRoute, routeRequest, connectQuitConfirmation, onOpenRequest }: ApplicationAppProps) {
+  const { source, actions } = useMacosApplication(nativeSource, nativeActions)
   useEffect(() => preloadWhenIdle(secondaryPages), [])
   const updates = useUpdates()
   const installingUpdate = updates?.snapshot?.phase === "installing"
@@ -191,6 +193,20 @@ function ApplicationContent({ source, actions, backup, initialRoute, routeReques
   // Reported by the page once it is mounted; backend activity is derived from the source.
   const [githubBusy, setGitHubBusy] = useState(false)
   const visibleTab = activeTab
+  const pending = usePending(actions, visibleTab === "changes")
+  const [openApproval, setOpenApproval] = useState<{ id: string; token: number }>()
+  useBackendNotices((notice) => {
+    navigation.selectTab("changes")
+    if (notice.key.startsWith("approval:")) setOpenApproval({ id: notice.key.slice("approval:".length), token: nextRequestToken() })
+  })
+  // An approval answered elsewhere, or gone, no longer needs its toast.
+  const waitingIds = pending.waiting.flatMap(row => row.kind === "approval" ? [row.approval.id] : []).join("\n")
+  const toasted = useRef(new Set<string>())
+  useEffect(() => {
+    const current = new Set(waitingIds ? waitingIds.split("\n") : [])
+    for (const id of toasted.current) if (!current.has(id)) dismissOperationToast(`approval:${id}`)
+    toasted.current = current
+  }, [waitingIds])
   const visibleComputerSection = computerSection
   const preferences = useMemo(() => ({ ...source.preferences, ...settings }), [source.preferences, settings])
   const applicationSource = useMemo<ApplicationSource>(() => ({
@@ -295,7 +311,8 @@ function ApplicationContent({ source, actions, backup, initialRoute, routeReques
   const { forgetComputers } = navigation
   useEffect(() => {
     const known = new Set<string>()
-    for (const computer of source.computers) known.add(computer.configuration.id)
+    // A macOS computer of another device has no page to keep.
+    for (const computer of source.computers) if (!(computer.macos && computer.device)) known.add(computer.configuration.id)
     for (const configuration of computerConfigurationOperation?.candidate.computers ?? []) known.add(configuration.id)
     forgetComputers((computer) => known.has(computer))
   }, [source.computers, computerConfigurationOperation, forgetComputers])
@@ -312,6 +329,7 @@ function ApplicationContent({ source, actions, backup, initialRoute, routeReques
     if (route.computerSection || route.computer) navigation.selectComputerSection(route.computerSection ?? "overview")
     else if (route.settingsSection) navigation.selectSettingsSection(route.settingsSection)
     else if (route.tab) navigation.selectTab(route.tab)
+    if (route.tab === "changes" && route.approval) setOpenApproval({ id: route.approval, token: nextRequestToken() })
   })
 
   const navigateRequested = useEffectEvent(navigateCommand)
@@ -343,8 +361,10 @@ function ApplicationContent({ source, actions, backup, initialRoute, routeReques
   const openImport = useStableCallback(() => { navigation.selectComputerSection("overview"); navigation.closeComputer(); void transfer.beginImport() })
   const exportComputerByName = useStableCallback((name: string) => { void transfer.exportComputer(name) })
   const openGeneralSettings = useStableCallback(() => navigation.selectSettingsSection("general"))
-  const computerAttention = useMemo(() => computerAttentionCounts(applicationSource), [applicationSource])
-  const navigationLoading = useMemo(() => navigationLoadingState(applicationSource, githubBusy, backupBusy), [applicationSource, githubBusy, backupBusy])
+  // The navigation badges follow the Linux computers; a macOS computer shows its own state on its row and page.
+  const navigationSource = useMemo(() => ({ ...applicationSource, computers: nativeSource.computers }), [applicationSource, nativeSource.computers])
+  const computerAttention = useMemo(() => computerAttentionCounts(navigationSource), [navigationSource])
+  const navigationLoading = useMemo(() => navigationLoadingState(navigationSource, githubBusy, backupBusy), [navigationSource, githubBusy, backupBusy])
   const commands = useMemo(() => [...applicationCommands(applicationSource, actions, navigateCommand, {
     onImportComputer: canImport ? openImport : undefined,
     onNewComputer: canCreateComputer ? requestNewComputer : undefined,
@@ -399,6 +419,7 @@ function ApplicationContent({ source, actions, backup, initialRoute, routeReques
       systemIssueStatus={activeRuntimeRepair?.status ?? null}
       computerAttention={computerAttention}
       navigationLoading={navigationLoading}
+      pendingCount={pending.count}
       onTabChange={navigation.selectTab}
       onComputerSectionChange={navigation.selectComputerSection}
       onSettingsSectionChange={navigation.selectSettingsSection}
@@ -452,12 +473,13 @@ function ApplicationContent({ source, actions, backup, initialRoute, routeReques
             operationQueue={source.operationQueue}
             onDismissRepositoryPush={dismissRepositoryPush}
             onCreateComputer={canCreateComputer && !installingUpdate ? requestNewComputer : undefined}
+            onOpenApproval={(id) => { navigation.selectTab("changes"); setOpenApproval({ id, token: nextRequestToken() }) }}
           />
         )}
       </section>
       <section id="application-panel-changes" role="region" aria-labelledby="application-nav-changes" hidden={visibleTab !== "changes"}>
         <PanelContent active={visibleTab === "changes"}>
-          <PendingChangesPage listReviewRequests={actions.listReviewRequests} reviewActions={actions.reviewRequestActions} active={visibleTab === "changes"} onOpenRequest={(requestId, deviceId) => onOpenRequest?.(requestId, deviceId)} />
+          <PendingChangesPage pending={pending} actions={actions} reviewActions={actions.reviewRequestActions} openApproval={openApproval} onOpenRequest={(requestId, deviceId) => onOpenRequest?.(requestId, deviceId)} />
         </PanelContent>
       </section>
       <section id="application-panel-github" role="region" aria-labelledby="application-nav-github" hidden={visibleTab !== "github"} className="h-full min-h-0 overflow-hidden">
@@ -478,7 +500,7 @@ function ApplicationContent({ source, actions, backup, initialRoute, routeReques
       <section id="application-panel-settings" role="region" aria-labelledby="application-nav-settings" hidden={visibleTab !== "settings"}>
         <div hidden={settingsSection !== "general"}>
           <PanelContent active={visibleTab === "settings" && settingsSection === "general"}>
-            <GeneralPageView source={source} applicationPreferences={applicationPreferences} onApplicationPreferencesChange={changeApplicationPreferences} reduceMotion={reduceMotion} onReduceMotionChange={changeReduceMotion} />
+            <GeneralPageView source={nativeSource} applicationPreferences={applicationPreferences} onApplicationPreferencesChange={changeApplicationPreferences} reduceMotion={reduceMotion} onReduceMotionChange={changeReduceMotion} />
           </PanelContent>
         </div>
         <PageContainer hidden={settingsSection !== "connections"}>

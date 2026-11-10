@@ -16,6 +16,9 @@ mod migration;
 pub(crate) mod preparation;
 mod recipes;
 mod requests;
+pub(crate) mod scrub_env;
+#[cfg(test)]
+pub(crate) use requests::tests_rows;
 mod steps;
 
 use std::sync::Arc;
@@ -126,6 +129,7 @@ async fn dispatch(
         MethodName::PreparationRetry => preparation::retry(context, params).await,
         MethodName::DeviceDependencies => device::dependencies(context, params).await,
         MethodName::DeviceFacts => device::facts(context, params).await,
+        MethodName::DeviceResources => device::resources(context, params).await,
         _ => Err(DispatchError::unsupported(method_name(method))),
     }
 }
@@ -145,6 +149,7 @@ pub(super) fn failure(failure: Failure) -> DispatchError {
     DispatchError {
         code: failure.code,
         message: failure.message,
+        details: None,
     }
 }
 
@@ -163,6 +168,7 @@ pub(super) fn require_local_device(
         return Err(DispatchError {
             code: ErrorCode::UnsupportedRemoteOperation,
             message: "This engine does not route requests to remote devices.".to_owned(),
+            details: None,
         });
     }
     Ok(())
@@ -265,6 +271,7 @@ async fn fork(context: &HandlerContext, params: &Value) -> Result<HandlerOutput,
                         .map(|q| q.stop.clone())
                         .unwrap_or_default(),
                     scrub: params.quiet.map(|q| q.scrub).unwrap_or_default(),
+                    closed_network: false,
                 },
                 params.recipe_hash.as_deref(),
             )

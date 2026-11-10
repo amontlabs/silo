@@ -476,6 +476,9 @@ export const isMacosSettingUp = (computer: MacosComputer) => computer.state === 
 /** An installed computer that stopped before its setup finished can run the remaining steps again. */
 export const canRetryMacosSetup = (computer: MacosComputer) => computer.installed && !computer.setupComplete && (computer.state === "stopped" || computer.state === "failed")
 
+/** A computer that is being created or set up, or whose setup stopped, has no settings to show yet. */
+export const macosNeedsSetup = (computer: MacosComputer) => isMacosCreating(computer) || isMacosSettingUp(computer) || canRetryMacosSetup(computer) || Boolean(computer.needsPersonalizing)
+
 export function macosStateLabel(computer: MacosComputer): string {
   const percent = computer.progress == null ? "" : ` ${Math.round(computer.progress * 100)}%`
   switch (computer.state) {

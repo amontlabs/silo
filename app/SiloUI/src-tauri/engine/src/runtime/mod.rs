@@ -81,6 +81,11 @@ pub trait RuntimeHost: Send + Sync {
     fn macos_computer_names(&self) -> Vec<String> {
         Vec::new()
     }
+    /// What an export needs to make the hidden copy it leaves logins out of; a host that
+    /// cannot make one leaves the logins in the file.
+    fn export_scrub(&self) -> Option<Arc<dyn crate::export_scrub::ScrubEnv>> {
+        None
+    }
     fn macos_log_target(&self, _computer_id: &str) -> Option<(String, PathBuf)> {
         None
     }
@@ -1523,7 +1528,7 @@ thread_local! {
 }
 
 /// Run `work` with this thread's operation cancellation ignored by runtime commands.
-fn without_cancellation<T>(work: impl FnOnce() -> T) -> T {
+pub(crate) fn without_cancellation<T>(work: impl FnOnce() -> T) -> T {
     let previous = CANCELLATION_MASKED.with(|masked| masked.replace(true));
     let result = work();
     CANCELLATION_MASKED.with(|masked| masked.set(previous));
@@ -4151,6 +4156,10 @@ fn computer_progress(
         ("desktop-installation", _) => "Installing the Linux desktop.".into(),
         ("computer-use-setup", _) => "Setting up the desktop and computer use.".into(),
         ("computer-use-pending", _) => "Computer use will finish setting up at first start.".into(),
+        ("agent-installation", _) => format!("Installing agents in {computer}…"),
+        ("agent-installation-failed", _) => format!(
+            "Some agents could not be installed in {computer}. Install them from the computer's page."
+        ),
         ("computer-image-wait", _) => "Waiting for the VM image…".into(),
         ("computer-configuration", _) => format!("{computer} configured."),
         ("computer-verification", 0) => format!("Verifying {computer}…"),
@@ -4193,7 +4202,7 @@ fn computer_progress(
         message,
         safe_for_display: true,
         timestamp: activity_timestamp(),
-        level: "info".into(),
+        level: if step == "agent-installation-failed" { "warning" } else { "info" }.into(),
         elapsed_seconds: 0,
         downloaded_bytes: None,
         total_bytes: None,
@@ -4660,7 +4669,7 @@ fn read_activity(
     }
     for event in &mut events {
         event.message = match event.step.as_str() {
-            "desktop-installation" | "computer-use-setup" | "computer-use-pending" | "computer-configuration" | "computer-verification" | "computer-removal" | "computer-disk-preparation" | "computer-image-preparation" | "computer-image-import" | "computer-runtime-preparation" | "computer-settings" | "setup-started" | "setup-completed" | "setup-interrupted" => computer_progress(&event.request_id, &event.step, &event.computer, event.fraction.unwrap_or(0)).message,
+            "desktop-installation" | "computer-use-setup" | "computer-use-pending" | "agent-installation" | "agent-installation-failed" | "computer-configuration" | "computer-verification" | "computer-removal" | "computer-disk-preparation" | "computer-image-preparation" | "computer-image-import" | "computer-runtime-preparation" | "computer-settings" | "setup-started" | "setup-completed" | "setup-interrupted" => computer_progress(&event.request_id, &event.step, &event.computer, event.fraction.unwrap_or(0)).message,
             "image-resolving" => format!("{}: Resolving the VM image…", event.computer),
             "image-resolved" => format!("{}: VM image resolved; preparing the download…", event.computer),
             "image-download" => format!("{}: Downloading the VM image…", event.computer),
@@ -6390,6 +6399,7 @@ fn apply_whole_configuration_with_progress(
                 configuration.name(),
             )?;
             checkpoints::forget_removed(paths, configuration.id())?;
+            crate::policy::store::computer_removed(configuration.id());
             progress("computer-removal", configuration.name(), 1);
         }
         for configuration in &request.computers {
@@ -6695,6 +6705,7 @@ fn create_computer_with_progress(
             progress("computer-use-pending", name, 0);
         }
     }
+    crate::desktop::install_requested_after_create(runner, paths, id, name, progress);
     Ok(())
 }
 
@@ -8596,6 +8607,19 @@ esac
         let _test_state = crate::test_support::global_state();
         let event = computer_progress("attempt", "computer-image-preparation", "dev", 0);
         assert_eq!(event.message, "Preparing the VM image…");
+    }
+
+    #[test]
+    fn agent_installation_during_creation_is_reported_and_its_failure_is_a_warning() {
+        let _test_state = crate::test_support::global_state();
+        let event = computer_progress("attempt", "agent-installation", "dev", 0);
+        assert_eq!(event.message, "Installing agents in dev…");
+        assert_eq!(event.level, "info");
+        let event = computer_progress("attempt", "agent-installation-failed", "dev", 0);
+        assert_eq!(event.level, "warning");
+        assert!(event
+            .message
+            .contains("Install them from the computer's page."));
     }
 
     #[test]

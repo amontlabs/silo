@@ -11,6 +11,8 @@ export interface ComputerMenuProps {
 
 export interface StatusBarRoute {
   tab?: ApplicationTab
+  /** With the Pending tab: the approval to open. */
+  approval?: string
   computerSection?: ComputerSection
   computer?: string
   computerTab?: ComputerDetailTab
@@ -19,7 +21,7 @@ export interface StatusBarRoute {
 /** What Quit does to running computers once the user chose (95 A-2). */
 export type QuitChoice = "keep" | "stop"
 
-export interface StatusBarActions extends Pick<ApplicationActions, "startComputer" | "stopComputer" | "restartComputer" | "openTerminal" | "pushRepository" | "listComputerDirectory"> {
+export interface StatusBarActions extends Pick<ApplicationActions, "startComputer" | "stopComputer" | "restartComputer" | "openTerminal" | "pushRepository" | "listComputerDirectory" | "listApprovals" | "listReviewRequests" | "watchApprovals"> {
   openSilo: (route?: StatusBarRoute) => void
   /** Quit Silo. With running computers the user has already chosen: keep them running, or stop them first. */
   quit: (choice?: QuitChoice) => void

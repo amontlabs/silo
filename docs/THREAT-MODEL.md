@@ -119,13 +119,24 @@ Limits of this boundary:
 
 - **No hostname or destination allowlist.** Any public host, any port, TCP and UDP (except UDP to port 443). This is what
   "no egress filter yet" means.
-- **macOS computers before setup completes use Apple NAT.** Until a macOS computer's setup,
-  personalization and network bootstrap are complete, and when it boots into Recovery, it runs on
-  `VZNATNetworkDeviceAttachment` with no Silo policy
-  ([`boots_behind_gateway`, `engine.rs#L959`](../app/SiloUI/src-tauri/engine/src/macos_computers/engine.rs#L959);
-  [`engine.rs#L577`](../app/SiloUI/src-tauri/engine/src/macos_computers/engine.rs#L577)). In that
-  state it can reach the Mac and the LAN. Silo's own provisioning is the expected workload then,
-  but a user can start a computer whose setup failed.
+- **macOS computers: only a disk no agent can have written runs on Apple NAT.** A first
+  install and the setup of a copy of a template run on `VZNATNetworkDeviceAttachment` with no
+  Silo policy until their setup completes
+  ([`network_plan`, `store.rs`](../app/SiloUI/src-tauri/engine/src/macos_computers/store.rs);
+  [`engine::start`](../app/SiloUI/src-tauri/engine/src/macos_computers/engine.rs)). In that
+  state the guest can reach the Mac and the LAN. The disk then holds only Apple's image and
+  Silo's scripts, so that is the expected workload. A computer's record carries
+  `agentMayHaveUsed`, set when its setup first completes and never cleared, and set at birth
+  for every fork and import. A flagged computer never gets Apple's NAT: a boot that finishes
+  its setup goes behind the gateway after Silo has replaced the network bootstrap program, its
+  launch daemon and its configuration on the stopped disk, and is refused, with a message that
+  says what to do, when the disk has no such files, a link stands where one should be, the
+  build has no signed program, or the saved network identity does not match. Recovery gets no
+  network card. The choice is made where the machine is built, so nothing the guest does
+  changes it. One case remains: a computer made before the gateway existed is converted once,
+  at launch, over Apple's NAT, because its setup never completed and so its record is not
+  flagged. The details are in
+  [`SiloUI-MACOS-COMPUTERS.md`](SiloUI-MACOS-COMPUTERS.md#network).
 - The classification is by IP, with no notion of "the LAN" beyond the private ranges. A LAN host
   reachable by a global IPv6 address (SLAAC) or a non-RFC 1918 IPv4 address is "public" and
   reachable, as is a service on the Mac's own public address, if it has one. The IPv6 case applies
@@ -267,12 +278,18 @@ reads the token from an inherited pipe, never from arguments, environment or fil
 
 Limits:
 
-- **Personal access token mode has no repository scoping.** The proxy sends the personal token for
-  every request to the GitHub hosts (`profile.version == 2`,
+- **A personal access token is not scoped by Silo.** A personal token is a secret of kind
+  `github-token`; you can keep several and choose one per computer. For a computer that uses one,
+  the proxy sends that token for every request to the GitHub hosts (`profile.version == 2`,
   [patch line 394](../app/SiloUI/patches/microsandbox-silo-network-0.7.6.patch#L394)), so the agent
-  has the token's full permissions. The README says so. Host push in this mode also uses the full
-  personal token, which is not narrowed or revoked
-  ([`github.rs#L2369`](../app/SiloUI/src-tauri/engine/src/github.rs#L2369)).
+  has whatever permissions the token has: the scope is the one you gave it on GitHub, and Silo adds
+  no repository limit. The README says so. A computer only ever receives the token it was given,
+  never another one in the list, and a token secret is never delivered as an environment
+  placeholder. Host push for such a computer also uses the full token it chose, which is not
+  narrowed or revoked (`personal_push_credential` in
+  [`github.rs`](../app/SiloUI/src-tauri/engine/src/github.rs)). A token GitHub rejects
+  disconnects, and the computers using it lose GitHub access instead of falling back to another
+  credential.
 - **Read is still read.** With a read grant the agent can read every granted repository, including
   private ones, and send their contents anywhere (boundary 2 does not stop it).
 - A write grant includes `workflows: write`: the agent can change GitHub Actions workflows in those
@@ -339,22 +356,48 @@ one `.silo-backup` file, and `silo import` reads one. What the file holds, and d
   they were at the fork, which paths and digests, not contents. Import stores it as the new
   computer's record, with no source and no origin, so the receiver names the target
   (`silo fold <imported> --into main`).
-- **Files are never filtered.** Everything on the computer's disks is in the file: anything the
-  agent could read could already leave through the computer's network, and the export is no
-  stricter. A login on the disk is a secret in the file. Before an export Silo lists the logins it
-  recognises, on the disk and in the fork-time record (Claude Code, Codex, Gemini CLI, GitHub CLI,
-  cloud and registry credentials, SSH private keys; not what every computer has: system password
-  files, its SSH host keys, the desktop's connection password and Silo's own certificate authority),
-  and asks; the CLI refuses without a terminal
-  unless `--yes` is passed, and the app asks in a dialog. When Silo could not check (a stopped
-  computer, whose disk is not listed, an export of a checkpoint, or a check that failed) it asks
-  too: "Silo could not check <name> for logins (<reason>). Share anyway?", in the CLI and in the
-  app, and `--json` reports the reason as `unchecked`. The list is a warning, not a guarantee: a
-  secret in a file Silo does not recognise (an `.env`, a token in a shell history) is not named.
-  The disk is listed with the walk `silo diff` does (`/etc`, `/root`, `/home`, `/usr/local`,
-  `/opt`, `/srv` and the crontabs on Linux; the home folder, `/usr/local`, `/opt/homebrew/etc` and
-  the launch agents and daemons on macOS), so a login anywhere else,
-  such as under `/workspace`, is not named either.
+- **A Linux computer's known login files are removed from the exported computer, and traces
+  may remain in the file.** An export of the current state of a Linux virtual machine is made from a
+  hidden, short-lived copy of it (`silo-export-<8 hex>`, never listed): forked with no secrets, no
+  GitHub access and a deny-all network, started, stripped of the files Silo recognises as logins (Claude
+  Code `~/.claude/.credentials.json` and `~/.claude.json`, Codex, Gemini CLI, GitHub CLI, cloud and registry
+  credentials, SSH private keys and key files in `/etc`, `/root`, `/home`, `/usr/local`, `/opt`, `/srv`),
+  stopped, captured under the computer's name and dropped
+  ([`export_scrub.rs`](../app/SiloUI/src-tauri/engine/src/export_scrub.rs)). The list is the one the scan and
+  the diff's "Not kept" use. The result names the files removed; `--include-logins` (or the dialog's Include
+  logins) keeps them. What the removal does and does not give:
+  - **The files are not in the imported computer.** The check in
+    [`t14_export_scrub_check.sh`](direction/checks/t14_export_scrub_check.sh) imports a default export,
+    starts it, and finds none of the login files and neither marker among its files
+    ([`T14.txt`](direction/evidence/T14.txt)).
+  - **Their bytes are still in the file.** The copy is a fork, and a fork's disks are layers over the
+    computer's own. The layers it shares with the computer (everything up to the fork's checkpoint) are
+    read-only and are written into the file whole, deleted files' blocks included. Discarding the copy's free
+    blocks (`fstrim`) reaches only its own top layer, and the same check finds a long random marker, written to
+    every known login path and then deleted, in the layers of the default export. Anyone with the file and the
+    tools to read a disk layer can recover them. Neither the app nor the CLI says the file is free of them;
+    they say traces may remain. Removing them for real needs the layers flattened, which the runtime's
+    snapshot export does not offer.
+  - **It is a list, not a guarantee.** A secret in a file Silo does not recognise (an `.env`, a token in
+    a shell history, a key under `/workspace`) stays in the file; the listing walks the folders `silo diff`
+    walks. A key-material file (`*.pem`, `*.key`, ...) anywhere in those folders is removed too, which can
+    include a certificate an installed program needs; the removed list names every path.
+  - **The computer's own fork-time record travels** (paths and digests, not contents).
+  - **It does not apply to a checkpoint, a macOS computer or a container computer.** A checkpoint is
+    another disk than the live one; a macOS computer's login files and Keychain would need an offline edit
+    of a copied disk, and a fork's rekey already clears the login keychain, but nothing here has verified
+    that the removed bytes leave the disk image; a container has nothing to discard. These exports keep the
+    logins in the file and ask first, as before: Silo lists the logins it recognises, on the disk and in the
+    fork-time record, and asks; the CLI refuses without a terminal unless `--yes` is passed, and the app asks
+    in a dialog. When Silo could not check (a stopped computer, whose disk is not listed, an export of a
+    checkpoint, or a check that failed) it asks too: "Silo could not check <name> for logins (<reason>).
+    Share anyway?", and `--json` reports the reason as `unchecked`. The list is a warning, not a guarantee.
+    The disk is listed with the walk `silo diff` does (`/etc`, `/root`, `/home`, `/usr/local`, `/opt`, `/srv` and
+    the crontabs on Linux; the home folder, `/usr/local`, `/opt/homebrew/etc` and the launch agents and
+    daemons on macOS), so a login anywhere else, such as under `/workspace`, is not named either.
+  - **The copy has the computer's own CPUs and memory** while it exists, and holds a second copy of its
+    writable disks until it is dropped. A copy that the engine could not drop (it stopped mid-export) stays
+    hidden and is dropped by the next export.
 - **No memory is in the file**, for any kind of computer: an export carries disks only, as a
   fork does. A running computer is captured from its disks: the guest writes its cached file data
   out and the disks are copied, with a macOS computer paused for the copy the way a fork point
@@ -513,7 +556,8 @@ methods through the `/.msb/silo-bridge` folder. The engine serves it from
 [`guest_client/scope.rs`](../app/SiloUI/src-tauri/engine/src/guest_client/scope.rs).
 
 What the token can do: fork its own computer (secrets only those the settings list for that agent,
-none by default; at most 32 forks per token and 3 running or starting), start, stop and diff the
+none by default; the number of forks is not capped, but a fork, start or checkpoint is refused when
+the device is short of memory or disk, see [the policy](SiloUI-POLICY.md#limits)), start, stop and diff the
 forks it made, ask for review of those forks, read the review requests and steps of itself and those
 forks, and follow the jobs it started. Forks the person made, or another token made, are not
 reachable, and list results hold only the computer and its own forks.
@@ -527,9 +571,9 @@ capture or baseline either. `fold` and `auto_keep` are not part of its policy: n
 inside.
 
 What a compromised guest gains: the agent already controls the computer, so the token adds the
-ability to make up to 32 forks of it, 3 running at once (a disk and CPU cost; the engine adds no
-total RAM limit, each running fork uses the memory it was created with, and `fork_ram_budget`
-applies only to forks the host CLI makes) and to put review requests in front of
+ability to make forks of it and run them (a disk, CPU and memory cost; there is no count cap, but
+the engine refuses a start, fork or checkpoint while available memory or free disk is below the
+safety floor, and `fork_ram_budget` applies only to forks the host CLI makes) and to put review requests in front of
 the person, whose summary text the agent wrote. A fork, request or summary can be flooded or
 misleading; a keep still shows the engine's own diff, pinned to its digest. It gains no host file,
 secret, GitHub token or other computer's data.
@@ -557,8 +601,8 @@ secret, GitHub token or other computer's data.
   0.7.6 source and is not yet checked in a running guest.
 - **Forks and jobs.** A fork is the token's only after its job finished and the fork exists below
   the computer (recorded by id); forks the person made are never reachable, and a failed fork
-  never claims a computer. A token holds at most 32 forks, 3 running or starting, and 16
-  unacknowledged jobs.
+  never claims a computer. A token holds at most 16 unacknowledged jobs; the number of forks
+  and running forks is not capped (the safety floor on memory and disk applies).
 - **Logging.** The engine writes one line per call to its log: the computer, the method (only a
   name from the allow-list; anything else is logged as "not offered"), and whether it was refused.
   Parameters and tokens are not logged, and a call with a bad token is logged without its method.
@@ -1247,10 +1291,11 @@ These follow from the design today, not from bugs:
   ([`network.rs#L209`](../app/SiloUI/src-tauri/macos-gateway/src/network.rs#L209)). Host-side readers are bounded:
   guest writes to `/.msb` at 16 MiB, relayed command output at 1 MiB
   ([`runtime/mod.rs#L125`](../app/SiloUI/src-tauri/engine/src/runtime/mod.rs#L125)).
-- **Personal access token mode.** The agent's GitHub requests carry the whole token, unscoped
-  (boundary 5).
-- **macOS computers before setup completes.** They run on Apple NAT and can reach the Mac and the
-  LAN (boundary 2).
+- **Personal access tokens.** A computer that uses one sends the whole token, unscoped, with its
+  GitHub requests (boundary 5).
+- **macOS computers during a first install.** Until their setup completes, a first install
+  and the setup of a copy of a template run on Apple NAT and can reach the Mac and the LAN
+  (boundary 2). A computer an agent may have used never does.
 - **Untrusted imported archives.** A macOS import mounts the guest's disk on the Mac; import only
   archives you trust (boundary 6).
 

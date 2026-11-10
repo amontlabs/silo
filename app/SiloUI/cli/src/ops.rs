@@ -18,7 +18,7 @@ use silo_api::methods::{
     keep::{ChangesKeepParams, ChangesPromoteParams, ChangesUndoParams, KeepHooks},
     recipes::{RecipeBuildParams, RecipeRemoveParams},
     requests,
-    secrets::{SecretSaveAction, SecretSaveRequest, SecretsSaveParams},
+    secrets::{SecretKind, SecretSaveAction, SecretSaveRequest, SecretsSaveParams},
 };
 
 use crate::{
@@ -414,6 +414,7 @@ async fn save_secret(
                 },
                 id: existing.and_then(|secret| secret["id"].as_str().map(str::to_owned)),
                 name: name.to_owned(),
+                kind: SecretKind::Generic,
                 value,
                 computer_ids,
                 allowed_domains,
@@ -487,6 +488,7 @@ pub async fn create(
                 },
                 request_id: None,
                 device_id: None,
+                agents: Vec::new(),
             }
         }
         Platform::Macos => ComputerCreateParams::Macos {
@@ -497,6 +499,7 @@ pub async fn create(
                 disk_gib: args.disk_gib.unwrap_or(64),
             },
             device_id: None,
+            agents: Vec::new(),
         },
     };
     engine
@@ -962,6 +965,8 @@ pub const BASELINE_PREFIX: &str = "silo-baseline-";
 const RECIPE_KEY_PREFIX: &str = "recipe:";
 /// Name prefix of the hidden computers that recipes are built in.
 pub const BUILDER_PREFIX: &str = "silo-build-";
+/// Name prefix of the hidden copies an export without logins is made from.
+pub const EXPORT_COPY_PREFIX: &str = "silo-export-";
 /// The longest a throwaway fork is left idle, however long the real fork has run.
 pub const BASELINE_CAP_SECONDS: u64 = 600;
 
@@ -1592,6 +1597,8 @@ pub async fn fold(
                 dry_run: dry_run.then_some(true),
                 data_ok: data_ok.then_some(true),
                 review_digest: reviewed,
+                choices: None,
+                skip: None,
             }),
             progress,
         )

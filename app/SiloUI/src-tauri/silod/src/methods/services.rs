@@ -200,6 +200,7 @@ fn lifecycle_error(error: LifecycleError) -> DispatchError {
         LifecycleError::Busy(message) => DispatchError {
             code: ErrorCode::Busy,
             message,
+            details: None,
         },
         LifecycleError::Refused(message) => DispatchError::internal(message),
     }
@@ -214,7 +215,7 @@ fn update_error(message: String) -> DispatchError {
     } else {
         ErrorCode::Internal
     };
-    DispatchError { code, message }
+    DispatchError { code, message, details: None }
 }
 
 fn job_output(job_id: JobId) -> Result<HandlerOutput, DispatchError> {
@@ -498,6 +499,7 @@ async fn engine_update_abort(
         .map_err(|message| DispatchError {
             code: ErrorCode::Internal,
             message,
+            details: None,
         })?;
     Ok(output(Value::Null))
 }
@@ -541,6 +543,7 @@ async fn engine_credentials_repair(
                 ErrorCode::Internal
             },
             message,
+            details: None,
         })?;
     Ok(output(encode(&result)?))
 }

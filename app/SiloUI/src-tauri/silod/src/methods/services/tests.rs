@@ -93,6 +93,7 @@ fn fixture_at(home: &std::path::Path) -> Fixture {
             client_id: "services-client".to_owned(),
             protocol: 7,
             client: None,
+            caller: silo_engine::policy::Caller::owner("test"),
         },
     );
     Fixture {

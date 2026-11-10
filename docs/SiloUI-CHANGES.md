@@ -133,6 +133,12 @@ may be added.
   `database[].not_compared` is set (with the reason) when one side's server could not be read.
 - `settings.cron[]` may carry `lines_added` and `lines_removed` when both crontab texts are
   known. A crontab the quiet step parked is compared with its parked original.
+- Every entry a keep can bring over or conflict on carries an `id` (see
+  [Item ids](#item-ids)): `settings.files[]`, `other[]`, `code[].gitignored[]`, `code[]`
+  (the repository), `settings.cron[]`, `settings.launch_agents[]` and `database[]`. Each
+  package a keep acts on is listed in `packages[].ids`, and each uncommitted file of a
+  repository in `code[].dirty_ids` (repo-relative path to id). The ids are left out of the
+  review digest, so adding them did not change any digest.
 
 ## Manifest additions the diff reads
 
@@ -153,6 +159,21 @@ task) are kept in `changes/fixtures/`, reduced to the records that differ betwee
 and `changes/tests.rs` asserts the exact text for each. Line counts against the first
 prototype: 3, 4, 7, 15, 9, 8 and 11 on Linux (the PDF skill moved from 10 to 11 because its
 credentials file now has its own Not kept line), 14, 12 and 12 on macOS, 3 for the live task.
+
+## Item ids
+
+An item is one file, one package of a manager, one repository, one crontab, one launch agent or
+one database. Its id is built only from what names it, so it is the same in the diff, in a
+conflict and in a choice, and does not depend on the order of anything:
+
+| Item | Id |
+| --- | --- |
+| a file (also an uncommitted file in a repository) | `file:<absolute path>` |
+| a package | `package:<manager>:<name>` |
+| a repository | `repo:<absolute path>` |
+| a crontab | `cron:<user>` |
+| a launch agent or daemon | `launch-agent:<scope>:<label>` |
+| a database | `database:<engine>:<name>` |
 
 ## Keeping a fork: `silo fold` and `silo undo`
 
@@ -188,13 +209,14 @@ an unreadable file or a changed mode is never taken as unchanged.
    conflict (uncommitted files are compared with the blob at the fork point, so a commit on
    main counts). Git history is searched for credentials, `.env` files and ignored paths; any
    found refuses the keep (`credentials`) with the list. The fork's commits are fetched into a
-   temporary ref and tested with `git merge-tree`; a conflict, or a git that cannot test,
-   refuses. Destinations are checked: a link or non-folder in the path, or a folder where a
-   file goes, refuses. Package names are validated; brew installs only when it would install
-   the fork's version. A database change is carried only with a `keep: migrate:` step and
-   changed migration files (folders named `migrations`, `migrate` or `alembic`), or `--data-ok`;
-   otherwise the refusal points to "Make this main". A refusal is a result
-   (`status: "refused"`, exit code 2) and the target is untouched.
+   temporary ref and tested with `git merge-tree`; a conflict, or a git that cannot test, is a
+   conflict of that repository. Destinations are checked: a link or non-folder in the path, or
+   a folder where a file goes, is a conflict. Package names are validated; brew installs only
+   when it would install the fork's version. A database change is carried only with a
+   `keep: migrate:` step and changed migration files (folders named `migrations`, `migrate` or
+   `alembic`), or `--data-ok`; otherwise the refusal points to "Make this main". A refusal is a
+   result (`status: "refused"`, exit code 2) and the target is untouched. A conflict is not a
+   dead end: see [Conflicts are questions](#conflicts-are-questions).
 4. **Apply, in order.** Package installs and removals (each manager as the user it belongs to),
    git merge, uncommitted files and deletes (renames delete the old path), files (written next
    to the target and renamed; links recreated, never read through), crontabs merged by line
@@ -214,6 +236,66 @@ computer that was stopped stays stopped. The result says which (`main`, `resumed
 carries a note when main was put back but could not be started. A restore has no disk-only
 fallback for a checkpoint with memory. Temporary bundles and git refs are
 removed on every path.
+
+### Conflicts are questions
+
+An item both sides changed is a conflict. The keep no longer stops on it for good: the caller
+answers each one and the keep goes on. The call takes `choices` (item id to answer) and `skip`
+(item ids):
+
+| Answer | Allowed for | What it does |
+| --- | --- | --- |
+| `fork` | files, packages, crontabs, launch agents | The fork's version is written over main's (a package is installed at the fork's version or removed; a crontab is replaced by the fork's whole crontab). |
+| `main` | everything that can conflict | The item stays as main has it. |
+| `branch` | repositories | The fork's commits are brought into main's repository as a branch named `silo/<fork name>`. Nothing is merged, checked out or reset, and the working tree is untouched, so Git can resolve it later. |
+
+- A repository both sides changed offers only `branch` and `main`: Silo does not force-reset
+  someone's repository. `fork` is accepted for a repository that merges cleanly (it is then the
+  ordinary merge) and is an error, naming the repository, for one that does not. An existing
+  branch is never moved: if `silo/<fork name>` exists at other commits, the next free name
+  (`silo/<fork name>-2`, ...) is used, and if it already holds the fork's commits nothing is
+  made. Uncommitted files of a repository whose commits go to a branch are not carried; the
+  report says so.
+- `skip` lists items not to bring over even though they do not conflict. It is the same as the
+  answer `main`; the only difference is the word in the report (`skipped` instead of
+  `left-as-main`). An id in both `skip` and `choices` must be answered `main`.
+- A choice for an id that is not in the reviewed diff, or an answer the item does not allow
+  (`branch` for anything but a repository with commits, any answer for a database), is an
+  error that names the item, before anything is fetched or changed.
+- **Without an answer** the keep is refused with `reason: "choices-needed"` (still
+  `status: "refused"`, exit code 2) and `conflicts` lists every unanswered conflict: its `id`,
+  the `item` and `detail`, `forkChange` and `mainChange` (what changed on each side, in a few
+  words) and `allowed`. Answer them and keep again. A destination that cannot be written, an
+  unreadable file and a package version brew cannot install allow only `main`. The old reasons
+  `divergent` and `git` are gone.
+- **Credentials stay a wall.** They are never brought over and take no answer. A commit or an
+  uncommitted file with credentials, a `.env` or an ignored path refuses the keep
+  (`credentials`), whatever the answers, including `branch`. Their conflicts list no allowed
+  answers and cannot be named in `choices`.
+- **Databases are never combined.** A database takes no answer. As before, a database change
+  needs a `keep: migrate:` step with changed migration files, or `data_ok`, and the report
+  says what happened to each one (`not-combined`): that main's database was left as it is, and
+  whether the recipe's migrate step runs on it.
+
+**Choices and the review digest.** The digest pins what the fork changed, and choices are
+checked against that same diff but are not part of the digest. They answer how those changes
+meet main, which moves on its own, and a digest that covered them would have to change every time
+the answers did. A keep reaches the check only after its digest matched (or none was sent), so
+the diff in hand is the reviewed one; a dry run checks the fork as it is now. Both then run the
+same planning with the same choices, so `--dry-run` with choices reports what the real run does:
+the same `items` and `summary`. A review request (`changes.requests.keep`) passes `choices` and
+`skip` through the same way.
+
+**The report** gains `items`, one per item, in id order, each with its `id`, `kind`, `label`,
+`outcome` and `detail`. The outcome is `brought-over`, `left-as-main` (answered `main`),
+`branch` (a repository's commits left as a branch), `skipped` (in `skip`), `already-there`
+(main already holds it) or `not-combined` (a database). It also gains `fastForward`: `true`
+when main was unchanged since the fork was made, from the fork-time record compared with
+main's capture the same way the fork is (databases do not count, since they are never
+combined). Then nothing could conflict. It changes nothing: everything applies either way.
+
+**Undo** is unchanged. It restores the before-keep checkpoint, which holds the whole disk, so
+a branch the keep made goes with everything else the keep wrote.
 
 ## Making a fork main: `silo fold <fork> --promote`
 
@@ -355,6 +437,20 @@ engine's `changes.requests.keep` refuses them with "Keep folder forks with `silo
 `changes.requests.show` returns `diff: null`, the request's own summary as `text` and
 `stale: null`; `silo requests show` reads the folder itself and fills the text, digest and `stale`.
 `throwAway` and `open` work for them like for any fork.
+
+Merges a computer's agent asks for. A `changes.keep` from a computer into itself, or its
+`changes.requests.keep`, is held for the owner as an approval of kind `merge`
+([SiloUI-POLICY.md](SiloUI-POLICY.md#asking-you)). A `changes.keep` must carry the `reviewDigest`
+of a `changes.diff` the agent ran (without it the call is refused and the agent is told to run
+the diff first; a dry run is refused too). Asking makes or reuses the open review request for that
+fork and target, with that digest and the engine's summary, and links the two: the request's
+`approvalId` and the approval's `reviewRequestId` and `reviewDigest`. Asking again with other
+changes updates the same request and withdraws the earlier approval. Allowing the approval runs
+`changes.requests.keep` for the request with the stored `choices`, `skip`, `keep` and `dataOk`,
+only when the request is still open and still has the approval's digest. Keeping the request
+directly (`changes.requests.keep` from the app or the command line) allows the approval with the
+keep's job; throwing it away denies it; a request closed any other way (its fork or target was
+deleted, or the agent threw it away) withdraws it the next time approvals are read.
 
 ## Steps and the fork tree
 

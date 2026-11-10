@@ -1030,6 +1030,7 @@ pub(crate) mod tests {
                 client_id: "remote-watch-client".to_owned(),
                 protocol: 7,
                 client: None,
+                caller: silo_engine::policy::Caller::owner("test"),
             },
         );
         let watch = crate::methods::dispatch(
@@ -1090,6 +1091,7 @@ pub(crate) mod tests {
                 client_id: "remote-watch-refused".to_owned(),
                 protocol: 7,
                 client: None,
+                caller: silo_engine::policy::Caller::owner("test"),
             },
         );
         let error = crate::methods::dispatch(

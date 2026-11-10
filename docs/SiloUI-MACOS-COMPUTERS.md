@@ -265,21 +265,24 @@ Fork setup steps, measured on the Dev engine (n=1, 164.8 s to ready):
 | Installing developer tools again | 46.3 | Only if the checkpoint lacks them or has another version (the checkpoint's `developerTools` state is carried over) |
 | Workspace folders, network and trust, final shutdown | 8.8 | The same, in that boot, then one shutdown |
 
-When the checkpoint's disk has nothing left to install (developer tools current, computer
-use up to date), the fork's setup does not start the guest at all. It rekeys the stopped
-disk and writes the fork's own gateway address and CA fingerprint into the guest's network
-configuration (in place, so the file keeps its owner); the record is marked `firstBoot`.
-The fork's first Start is its only boot, and it comes up behind its gateway. Before the
-computer is handed over, that Start logs in with the new password, installs the fork's key,
-name and host keys, the network files and the trust of the fork's proxy CA, and gives the
-account its SecureToken back (`fork_first_boot.rs`). A fork waiting for that Start can't be
-checkpointed. If the checkpoint needs developer tools or a computer-use update, the setup
-still uses one boot of its own, over the temporary NAT, and the Start is a second boot.
-A source disk without the network configuration file to take over also gets the boot of its
-own. The first Start saves its result on the computer's current record (`firstBoot`,
-`inheritedAccess` and its account-token note only), since other operations can change the
-record during a boot that takes minutes, and Stop interrupts its waits for the guest.
-The source's copied password and key are deleted as soon as the offline setup ends.
+A fork's setup never starts its guest on Apple's network (see [Network](#network)). It
+rekeys the stopped disk and brings the guest's network bootstrap up to date in the same
+mount: the program, its launch daemon and the configuration with the fork's own gateway
+address and CA fingerprint, each replaced in place so the file keeps its owner; the record is
+marked `firstBoot`. When the checkpoint's disk has nothing left to install (developer tools
+current, computer use up to date), that is all: the fork's first Start is its only boot, and
+it comes up behind its gateway. Before the computer is handed over, that Start logs in with
+the new password, installs the fork's key, name and host keys, the network files and the
+trust of the fork's proxy CA, and gives the account its SecureToken back
+(`fork_first_boot.rs`). A fork waiting for that Start can't be checkpointed. If the
+checkpoint needs developer tools or a computer-use update, the setup makes that same first
+boot itself, behind the gateway, and goes on in the running guest; the Start is then a second
+boot. A source disk that lacks the program, its launch daemon or the configuration is refused
+before the fork's disk is changed (see [Network](#network)). The first Start saves its result
+on the computer's current record (`firstBoot`, `inheritedAccess` and its account-token note
+only), since other operations can change the record during a boot that takes minutes, and Stop
+interrupts its waits for the guest. The source's copied password and key are deleted as soon as
+the offline setup ends.
 Retry setup leaves a fork that is waiting for its first Start to that Start: its key
 does not exist before it.
 
@@ -368,8 +371,8 @@ answer a shutdown), waits for it, then stops the computer as usual. Operations a
 refused after Quit has started. The Start of a computer that is changing state or
 is being personalized is refused as before.
 
-**Where they are.** macOS computers have no detail page, so the row has a
-Checkpoints button that opens the list under it; it is the Linux
+**Where they are.** A macOS computer's page has a Checkpoints tab, and its row
+keeps a Checkpoints button that opens the same list under it; it is the Linux
 `CheckpointPanel` fed through a thin adapter (`macos-checkpoint-panel.tsx`), not a
 second list. Setup logs record each operation (Logs page, per computer).
 
@@ -532,6 +535,73 @@ Per-computer secrets live in `macos-computers/<id>/guest-access/` (mode 0700):
 the account password and the SSH key. Anyone who can read that directory can
 also read the computer's disk, so the Keychain would add no protection.
 
+## Network
+
+A macOS computer reaches the network only through its own gateway process, which applies
+Silo's network rules (the [threat model](THREAT-MODEL.md#2-network-egress-public-addresses-only) describes the
+rules). Three boots do not, and they are limited to disks no agent can have written.
+
+**The `agentMayHaveUsed` flag.** A computer's record has it set the first time its setup
+completes, and never clears it. A fork and an import are born with it set, since their disk
+came from a computer or an archive an agent may have used. A record saved before the field
+existed gets it from its completed setup when it is loaded, and a record that is saved
+without it, while its setup is complete or while the saved record has it, is written with it.
+
+**What a boot gets** (`store::network_plan`, applied by `engine::start` and checked again where
+the machine is built):
+
+| Computer | Network |
+| --- | --- |
+| Setup complete | Its gateway |
+| Flagged, setup not complete, network bootstrap on its disk (`proxyBootstrap`) | Its gateway |
+| Flagged, setup not complete, no network bootstrap recorded | Refused |
+| Not flagged: a first install, or a copy of a template that is still being set up | Apple's NAT |
+| Recovery (turning off System Integrity Protection) | No network card |
+
+Nothing else builds a machine with Apple's network: `Boot::BootstrapNat`, the legacy
+migration's `Boot::ProxyBootstrapNat`, and the installer machine of a new disk. The first two
+check the computer's record, the one in hand and the one saved, and refuse when either says
+an agent may have used the disk or when the saved record cannot be read. Recovery has no network
+card: it needs none, and a guest in Recovery cannot reach the Mac or the local network.
+
+**Bringing a used disk behind its gateway.** A fork or an import is prepared while it is
+stopped (`provision.rs`, `offline_setup.rs`). Silo allocates its gateway address and proxy CA,
+saves its bootstrap identity, then mounts the Data volume and replaces three files in place
+with the current ones: the program `/Library/PrivilegedHelperTools/silo-network-bootstrap`, its
+launch daemon `/Library/LaunchDaemons/com.silo.network-bootstrap.plist` and its configuration
+`/Library/Application Support/Silo/NetworkBootstrap/config.json`. They are replaced and not
+created, because the host cannot make a file the guest sees as owned by root, which launchd and
+the program require. The proxy CA is not written to the disk: the file already there names the
+CA the first boot must remove from the keychain (`remove-inherited-proxy-ca.sh`), and the new CA
+and its trust are installed in the first boot over the login that boot allows. Setup then
+makes that boot itself when guest steps remain, or leaves it to the first Start, and the rest of
+the setup runs over the gateway's loopback SSH port.
+
+Steps that download in the host (the command-line tools, Git LFS, `gh`, Node.js and the Claude
+Code installer file) copy the files to the guest over SSH, and work behind the gateway. The
+one download the guest makes is the binary the Claude Code installer fetches from Anthropic's
+release host over HTTPS; the gateway's default rules allow any public host and the guest
+resolves names through it, so it works without a rule.
+
+**When a used disk is refused.** The boot or the setup stops with a message, and nothing on the
+disk has been changed, when:
+
+- the disk lacks any of the three files above (it was made before the network gateway existed, or
+  not by Silo: an old checkpoint, or an archive exported from a computer that was never set up
+  with the gateway), or one of them is a link or is not a regular file;
+- the build has no signed `silo-network-bootstrap` program;
+- the computer's saved bootstrap identity differs from its Keychain CA or its gateway address;
+- the computer is flagged but has no network bootstrap recorded (`proxyBootstrap` is false and
+  it is not waiting to be personalized): setup cannot repair it.
+
+The message says what the person can do: delete the computer and make it again from a computer
+or checkpoint that this version of Silo has set up, or import an export of one.
+
+**What is not covered.** The launch migration of a computer made before the gateway existed
+still converts it once over Apple's NAT, because such a record is not flagged: its setup was
+never complete. A first install and the setup of a copy of a template still boot on Apple's
+NAT until their setup completes, and the template's contents and fingerprint did not change.
+
 ## On another Mac
 
 A macOS computer can run on another Mac that is connected through
@@ -570,8 +640,8 @@ Silo process exactly as for a local computer; the controller only calls the brid
 **Display path.** The owner serves three things for a viewer. `macos.display.connect`
 returns the guest account's name and password, once the computer is running and its
 setup has finished, and checks that Screen Sharing answers. `macos.display.stream`
-connects to port 5900 of the guest's NAT address (reachable only from the owner) and
-copies bytes both ways; it is a stream method, like `guest.ssh`. `macos.display.resize`
+connects to port 5900 of the guest through the computer's gateway, on a loopback port that
+only the owner can reach, and copies bytes both ways; it is a stream method, like `guest.ssh`. `macos.display.resize`
 reconfigures the first `VZMacGraphicsDisplay` (`reconfigureWithSizeInPixels:`, public
 API) to the viewer window's pixel size, clamped to 640x400 .. 7680x4320 with even
 sides. The controller opens the viewer window (`desktop-shell-macos-<hash>`) and
@@ -627,7 +697,7 @@ A crash of Silo therefore turns its macOS computers off abruptly.
 | Agent computer use | Installed during setup (step 4). Not done yet: re-applying when the `computerUseAutoApproval` setting changes (a rerun of `apply --approval` does it), status in the UI, and cancelling a download or copy in progress (only the steps between them notice a cancellation). macOS shows one "App Background Activity" banner for the reconcile LaunchAgent. Computers set up with the ChatGPT app and LCU switch to Cua Driver through the in-place update at their next start |
 | Setup on other macOS versions | Verified with macOS 26.6.2 guests on a macOS 26.5 Mac. The offline account edit, the Recovery screens and the TCC schema are undocumented and may change with a release; macOS 14 and 15 guests are not qualified yet |
 | Shared copies of one installation | [Templates](#templates): later computers are APFS clones of the first one's result and share its blocks until they change them. Not done: a template per macOS build kept side by side, and shrinking a template's disk |
-| Terminal, editor, Files, network ports, GitHub, secrets, working account | Done in the engine, for local and remote computers: the `silo` working account with passwordless sudo, SSH through a per-computer alias for the terminal, editor (`/Users/silo/workspace`) and Files, published guest ports, and GitHub tokens and secrets applied through the per-computer network gateway. Not done: the UI. A macOS computer has no detail page, so no terminal, editor or Files entry, and the Network, Secrets and GitHub pages list only Linux computers |
+| Terminal, editor, Files, network ports, GitHub, secrets, working account | Done, for local computers: the `silo` working account with passwordless sudo, SSH through a per-computer alias for the terminal, editor (`/Users/silo/workspace`) and Files, published guest ports, and GitHub tokens and secrets applied through the per-computer network gateway. The app lists a macOS computer beside the Linux ones: it opens the same page (terminal, editor, Show screen, Start, Stop and Force stop, Edit CPU & memory while stopped, Delete; Overview with resources, computer use, repositories, secrets and ports; Checkpoints; setup progress in place of the tabs while it is created or set up) and appears on the Files, Logs, Network, Secrets and GitHub pages. It has no Restart, no SSH access for other devices and no Storage tab, because the engine serves those for Linux computers only. A computer on another device keeps its row, Show screen, Edit CPU & memory and its Logs |
 | Export, import and backup | Done for local computers: export of a computer from its row menu or of one checkpoint from its checkpoint list, import as a new computer (with new guest keys), and cleanup after an interrupted export. Not done: export of a remote computer, and importing a checkpoint into an existing computer |
 | Clipboard | Explicit text and image transfer (step 5); no continuous sync |
 | Shared folders | None. The framework offers a VirtioFS share |

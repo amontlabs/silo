@@ -217,7 +217,9 @@ export function ProductionOnboarding({ application, dependencies, source, onOpen
     operationError={setup.error}
     repositoryOptions={application?.github.repositoryCatalog}
     repositoryPolicies={application?.github.computers}
-    tokenConnected={application?.github.personalToken?.state === "connected"}
+    tokenSecrets={application?.secrets
+      .filter((secret) => secret.kind === "github-token" && !secret.removing)
+      .map((secret) => ({ id: secret.id, name: secret.name, account: secret.account, connected: secret.connection?.state === "connected" }))}
     onRetryDependencies={dependencies.retry}
     actions={{
       submitStep: (step, request, options) => {

@@ -342,7 +342,12 @@ impl silo_engine::remote_access::LocalAccess for SilodLocalAccess {
         silo_engine::desktop::dispatch(&paths, method, params)
     }
 
-    fn access_dispatch(&self, method: &str, params: &Value) -> Result<Value, BridgeError> {
+    fn access_dispatch(
+        &self,
+        method: &str,
+        params: &Value,
+        key: Option<&str>,
+    ) -> Result<Value, BridgeError> {
         match method {
             "github.connect" => start_owner_connect(&self.0.context),
             "guest.exec.start" => {
@@ -378,7 +383,7 @@ impl silo_engine::remote_access::LocalAccess for SilodLocalAccess {
                 owner_job_operation(self.0.context.as_ref(), method, params)
             }
             name if silo_engine::remote::is_owner_method(name) => {
-                super::remote::serve_owner(&self.0.context, name, params)
+                super::remote::serve_owner(&self.0.context, name, params, key)
             }
             _ => run_local(self.0.context.as_ref(), method, params).map_err(BridgeError::from),
         }
@@ -490,6 +495,7 @@ pub async fn handle(
         MethodName::GitHubConnectCallback => Err(DispatchError {
             code: ErrorCode::UnsupportedRemoteOperation,
             message: "github.connect.callback is served between engines over Connections, not on the local socket.".to_owned(),
+            details: None,
         }),
         MethodName::PushRepositories => push_repositories(params, context).await,
         MethodName::PushStart => push_start(params, context).await,
@@ -537,7 +543,7 @@ fn failure(message: impl Into<String>) -> DispatchError {
     } else {
         ErrorCode::Internal
     };
-    DispatchError { code, message }
+    DispatchError { code, message, details: None }
 }
 
 fn serialization(error: impl std::fmt::Display) -> DispatchError {
@@ -724,6 +730,7 @@ fn api_configuration_to_engine(
         row["computer"] = json!(computer_name(paths, id)?);
         if let Some(object) = row.as_object_mut() {
             object.remove("computerId");
+            object.remove("tokenMissing");
         }
     }
     Ok(value)
@@ -1097,6 +1104,7 @@ impl ConnectAdmission {
                 code: ErrorCode::Busy,
                 message: "A GitHub sign-in is already in progress. Finish or cancel it first."
                     .to_owned(),
+                details: None,
             });
         }
         *slot = ConnectSlot::Admitting;
@@ -2593,6 +2601,7 @@ pub(crate) mod tests {
                 client_id: "access-test-client".to_owned(),
                 protocol: 7,
                 client: None,
+                caller: silo_engine::policy::Caller::owner("test"),
             },
         )
     }
@@ -3306,6 +3315,21 @@ pub(crate) mod tests {
         let engine = api_configuration_to_engine(typed, &local_paths().unwrap()).unwrap();
         assert_eq!(engine["computers"][0]["computer"], "dev");
         assert!(engine["computers"][0].get("computerId").is_none());
+
+        let chosen = json!({
+            "computerId": COMPUTER,
+            "identity": {"name": "", "email": "", "apply": false},
+            "repositoryMode": "selected",
+            "repositories": [],
+            "allRepositoriesAllowChanges": false,
+            "authenticationMethod": "token",
+            "tokenSecretId": "secret-1",
+        });
+        let typed: github::GitHubConfiguration =
+            serde_json::from_value(json!({"computers": [chosen], "baseRevision": null})).unwrap();
+        let engine = api_configuration_to_engine(typed, &local_paths().unwrap()).unwrap();
+        assert_eq!(engine["computers"][0]["tokenSecretId"], "secret-1");
+        assert_eq!(engine["computers"][0]["authenticationMethod"], "token");
     }
 
     #[tokio::test]
@@ -3360,6 +3384,34 @@ pub(crate) mod tests {
         let error = expect_error(MethodName::SecretsSave, specific).await;
         assert!(error.message.contains(NOT_CONNECTED), "{}", error.message);
         expect_invalid_params(MethodName::SecretsSave, json!({})).await;
+    }
+
+    #[tokio::test]
+    async fn a_github_token_secret_takes_no_computers_or_hosts() {
+        let request = |computers: Value, domains: Value| {
+            json!({"request": {
+                "operation": "add",
+                "name": "work",
+                "kind": "github-token",
+                "value": "synthetic_value",
+                "computerIds": computers,
+                "allowedDomains": domains,
+            }})
+        };
+        for params in [
+            request(json!([COMPUTER]), json!([])),
+            request(json!([]), json!(["api.example.com"])),
+        ] {
+            let error = expect_error(MethodName::SecretsSave, params).await;
+            assert!(
+                error.message.contains("GitHub access"),
+                "{}",
+                error.message
+            );
+        }
+        let mut unknown_kind = request(json!([]), json!([]));
+        unknown_kind["request"]["kind"] = json!("ssh-key");
+        expect_invalid_params(MethodName::SecretsSave, unknown_kind).await;
     }
 
     #[tokio::test]
@@ -3944,13 +3996,13 @@ pub(crate) mod tests {
         let adapter = SilodLocalAccess(runtime_host().unwrap().clone());
         let unknown = json!({"jobId": "job:424243"});
         let error = adapter
-            .access_dispatch("operations.cancel", &unknown)
+            .access_dispatch("operations.cancel", &unknown, None)
             .unwrap_err();
         assert_eq!(error.code, Code::NotFound);
         // A sign-in already running on the owner is refused as busy, not as `internal`.
         let admission = ConnectAdmission::admit().unwrap();
         let error = adapter
-            .access_dispatch("github.connect", &json!({}))
+            .access_dispatch("github.connect", &json!({}), None)
             .unwrap_err();
         assert_eq!(error.code, Code::Busy, "{}", error.message);
         drop(admission);
@@ -4010,6 +4062,7 @@ pub(crate) mod tests {
                 client_id: "subscriber".to_owned(),
                 protocol: 7,
                 client: None,
+                caller: silo_engine::policy::Caller::owner("test"),
             };
             registry.dispatch(MethodName::EventsSubscribe, params, engine.clone(), request)
         };

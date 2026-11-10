@@ -5,7 +5,7 @@ import { interruptionPrompt, lifecycleGuard, type LifecyclePrompt } from "@/feat
 import { computerTarget } from "@/features/application/model/connections"
 import { DeviceBadge } from "@/features/computers/components/device-badge"
 import { useEffect, useRef, useState, type ComponentType, type ReactNode } from "react"
-import { CircleAlert, Code, GitBranch, Monitor, Play, Power, RotateCw, Square, Terminal, TriangleAlert } from "lucide-react"
+import { CircleAlert, Code, GitBranch, GitPullRequestArrow, Monitor, Play, Power, RotateCw, Square, Terminal, TriangleAlert } from "lucide-react"
 
 import { ListCard, ListRow, ListRowDetails, ListRowIcon } from "@/components/list-row"
 import { SiloMark } from "@/components/silo-mark"
@@ -15,6 +15,7 @@ import { ComputerStateLabel } from "@/features/application/components/applicatio
 import { RepositoryPushButton, RepositoryPushFeedback } from "@/features/application/components/repository-push-feedback"
 import type { ApplicationSource, ApplicationComputer } from "@/features/application/model/application-source"
 import { commitLabel } from "@/features/application/model/repository-push"
+import { usePending, type PendingRow } from "@/features/application/model/use-pending-changes"
 import { ComputerAction, ComputerListItem, ComputerListRow } from "@/features/computers/components/computer-list"
 import { SecretChangesLabel } from "@/features/computers/components/secret-changes-label"
 import { computerIconState, computerRowTone } from "@/features/computers/model/computer-presentation"
@@ -42,6 +43,23 @@ function OperationIssue({ title, detail, actionLabel, actionText = "Details", to
           <Button variant="outline" size="xs" aria-label={actionLabel} onClick={onReview}>{actionText}</Button>
           {retry}
         </div>}
+      />
+    </ListCard>
+  )
+}
+
+/** One row for everything waiting for the person; it opens the Pending page, at the request when there is only one. */
+function WaitingForYou({ rows, onOpen }: { rows: PendingRow[]; onOpen: (approvalId?: string) => void }) {
+  const newest = rows[0]
+  const only = rows.length === 1 && newest?.kind === "approval" ? newest.approval.id : undefined
+  const detail = newest?.kind === "approval" ? `${newest.approval.computerName}: ${newest.approval.summary}` : newest ? `Changes in ${newest.entry.forkName ?? newest.entry.request.forkId} to review` : undefined
+  return (
+    <ListCard className="mb-2" role="status" aria-label="Waiting for you">
+      <ListRow
+        icon={<ListRowIcon className="bg-primary/10 text-primary"><GitPullRequestArrow className="size-3.5" aria-hidden="true" /></ListRowIcon>}
+        title={`${rows.length} waiting for you`}
+        detail={detail}
+        actions={<Button variant="outline" size="xs" aria-label="Review what is waiting for you" onClick={() => onOpen(only)}>Review</Button>}
       />
     </ListCard>
   )
@@ -110,6 +128,7 @@ export function StatusBarContent({ source, actions, focusContent, computerMenu: 
   const [confirmation, setConfirmation] = useState<{ computer: string; action: "stop" | "restart" } | null>(null)
   const [startPrompt, setStartPrompt] = useState<{ target: string; prompt: LifecyclePrompt } | null>(null)
   const [lifecycleIssue, setLifecycleIssue] = useState<{ title: string; message: string } | null>(null)
+  const waiting = usePending(actions, false)
   const guarded = lifecycleGuard(source, actions, {
     notify: (title, message) => setLifecycleIssue({ title, message }),
     prompt: (prompt, _confirm, computer) => {
@@ -152,6 +171,7 @@ export function StatusBarContent({ source, actions, focusContent, computerMenu: 
   return (
     <div key="computers" className={cn("status-page status-panel-page flex shrink-0 flex-col overflow-hidden", hasNavigated && "status-page-back")}>
       <div className="shrink-0 px-2 pt-2">
+        {waiting.count > 0 && <WaitingForYou rows={waiting.waiting} onOpen={(approval) => actions.openSilo(approval ? { tab: "changes", approval } : { tab: "changes" })} />}
         {lifecycleIssue && <OperationIssue
           title={lifecycleIssue.title}
           detail={lifecycleIssue.message}

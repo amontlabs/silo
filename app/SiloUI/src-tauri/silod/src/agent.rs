@@ -150,6 +150,8 @@ pub(crate) fn serve(
         &runtime_home,
     )?;
     silo_engine::backup_controller::reconcile_jobs_before_serving(context.as_ref())?;
+    // An approval allowed just before the engine stopped is ended, never run again on its own.
+    crate::methods::approvals::recover(&context);
 
     let runtime = Builder::new_multi_thread()
         .enable_all()

@@ -1301,7 +1301,7 @@ fn public_snapshot(
         d.operations = d.computers.iter().map(|w|json!({"computer":w["computer"],"status":"failed","message":"GitHub access must be verified for this app session.","canRetry":true})).collect();
     }
 
-    json!({"policyRevision":d.revision,"personalToken":personal_token::status(),"state":if CONNECTING.load(Ordering::SeqCst){"connecting"}else if connected{"connected"}else{"disconnected"},"account":d.account,"accessEnabled":d.access_enabled,"deviceIdentity":identity,"repositoryCatalog":d.repositories.iter().filter_map(|r|r["name"].as_str()).collect::<Vec<_>>(),"repositoryCatalogStatus":match &d.catalog_error { Some(message)=>json!({"status":"unavailable","message":message,"canRetry":true}),None=>json!({"status":"available"})},"computers":d.computers,"computerOperations":d.operations})
+    json!({"policyRevision":d.revision,"personalToken":personal_token::status(),"state":if CONNECTING.load(Ordering::SeqCst){"connecting"}else if connected{"connected"}else{"disconnected"},"account":d.account,"accessEnabled":d.access_enabled,"deviceIdentity":identity,"repositoryCatalog":d.repositories.iter().filter_map(|r|r["name"].as_str()).collect::<Vec<_>>(),"repositoryCatalogStatus":match &d.catalog_error { Some(message)=>json!({"status":"unavailable","message":message,"canRetry":true}),None=>json!({"status":"available"})},"computers":personal_token::with_missing_marks(&d.computers),"computerOperations":d.operations})
 }
 type TokenLedger = std::collections::HashMap<String, Vec<String>>;
 fn ledger_entry() -> Result<keyring::Entry, String> {
@@ -1355,8 +1355,37 @@ fn profile(grants: &[RuntimeGrant]) -> Value {
 /// The current GitHub authority and its domain revision for one macOS computer.
 /// The revision prevents an older background attach from restoring stale grants.
 pub(crate) fn macos_proxy_policy(computer: &str) -> Result<(u64, Option<Value>), String> {
-    let _state = serialize(&STATE);
-    let document = load()?;
+    // The credential store can wait on a permission prompt, so the chosen token is read
+    // before STATE is taken for the answer, and the answer is given only if the policy
+    // has not changed since.
+    for _ in 0..3 {
+        let (revision, token) = {
+            let _state = serialize(&STATE);
+            let document = load()?;
+            let policy = document
+                .computers
+                .iter()
+                .find(|policy| policy["computer"].as_str() == Some(computer))
+                .filter(|policy| document.access_enabled && personal_token::selected(policy));
+            (document.revision, policy.cloned())
+        };
+        let token = token.map(|policy| personal_token::value_of(&policy));
+        let _state = serialize(&STATE);
+        let document = load()?;
+        if document.revision != revision {
+            continue;
+        }
+        return macos_proxy_policy_from(&document, computer, token);
+    }
+    Err("GitHub access changed. Applying your latest choices.".into())
+}
+/// The answer of `macos_proxy_policy` for one revision of the policies; `token` is the value
+/// of the token the computer chose, read for that revision.
+fn macos_proxy_policy_from(
+    document: &Document,
+    computer: &str,
+    token: Option<Result<String, String>>,
+) -> Result<(u64, Option<Value>), String> {
     let revision = document.revision;
     if !document.access_enabled {
         return Ok((revision, None));
@@ -1369,11 +1398,8 @@ pub(crate) fn macos_proxy_policy(computer: &str) -> Result<(u64, Option<Value>),
         return Ok((revision, None));
     };
     if personal_token::selected(policy) {
-        let token = personal_token::value()?;
-        return Ok((
-            revision,
-            Some(json!({"version":2,"owners":[],"personalToken":token})),
-        ));
+        let token = token.ok_or("GitHub access changed. Applying your latest choices.")??;
+        return Ok((revision, Some(personal_token::token_profile(&token))));
     }
     let key = active_key(computer)?;
     let grants = active()
@@ -1672,7 +1698,7 @@ fn apply(
             let result = if let Some(error) = narrowing_error.for_computer(name) {
                 Err(error.clone())
             } else if personal_token::selected(w) {
-                personal_token::apply(name, d.revision)
+                personal_token::apply(name, personal_token::chosen(w), d.revision)
             } else {
                 runtime_grants_for(&d, w, &previous).and_then(|grants| {
                     outside_state(
@@ -1781,6 +1807,7 @@ fn validate(computers: &[Value]) -> Result<(), String> {
                 "repositoryMode",
                 "allRepositoriesAllowChanges",
                 "authenticationMethod",
+                "tokenSecretId",
             ]
             .contains(&k.as_str())
         }) {
@@ -1826,6 +1853,11 @@ fn validate(computers: &[Value]) -> Result<(), String> {
         ) || (!w["authenticationMethod"].is_null() && !w["authenticationMethod"].is_string())
         {
             return Err("Choose GitHub OAuth or a personal token.".into());
+        }
+        match &w["tokenSecretId"] {
+            Value::Null => {}
+            Value::String(id) if w["authenticationMethod"] == "token" && !id.is_empty() && id.len() <= 64 => {}
+            _ => return Err("Choose a GitHub token only with token access.".into()),
         }
         let mut repository_names = std::collections::HashSet::new();
         for r in w["repositories"]
@@ -2419,12 +2451,7 @@ pub(crate) fn host_push_credential(
     issue_host_push(
         || {
             if personal_token::selected(policy) {
-                return Ok(HostPushCredential {
-                    token: personal_token::value()?,
-                    repository: repository.into(),
-                    expires_at: None,
-                    retire: None,
-                });
+                return personal_push_credential(policy, repository);
             }
             let c = host_push_account_credential()?;
             let catalog = catalog(&c)?;
@@ -3011,8 +3038,24 @@ fn sweep_retirement(
     failure.map_or(Ok(()), Err)
 }
 
+/// The push credential of a computer that uses a personal token: the token it chose,
+/// never another one and never a sign-in token.
+fn personal_push_credential(policy: &Value, repository: &str) -> Result<HostPushCredential, String> {
+    Ok(HostPushCredential {
+        token: personal_token::value_of(policy)?,
+        repository: repository.into(),
+        expires_at: None,
+        retire: None,
+    })
+}
+
 /// Re-establish host-only grants after relaunch and renew them before expiry.
 pub fn install() -> Result<(), String> {
+    // A token saved by an earlier version becomes a secret before the worker looks for tokens;
+    // a failure is shown on the GitHub page and retried at the next start.
+    if let Err(message) = personal_token::migrate_legacy() {
+        personal_token::migration_failed(&message);
+    }
     // Start the first device identity read now so the first GitHub view already has it.
     device_identity();
     if let Ok(document) = load() {
@@ -3369,19 +3412,26 @@ fn validate_method_change(
     previous: Option<&Value>,
     policy: &Value,
     oauth_connected: bool,
-    token_connected: bool,
+    token_connected: &dyn Fn(&str) -> bool,
 ) -> Result<(), String> {
-    let previous = previous
+    let previous_method = previous
         .and_then(|w| w["authenticationMethod"].as_str())
         .unwrap_or("oauth");
     let method = policy["authenticationMethod"].as_str().unwrap_or("oauth");
-    if method != previous {
-        if method == "token" && !token_connected {
-            return Err("Connect a personal token before selecting it.".into());
+    if method == "token" {
+        // A token that is already chosen stays through unrelated edits, even when it
+        // is disconnected; choosing a different one, or switching to tokens, needs a
+        // connected token.
+        let chosen = personal_token::chosen(policy);
+        let before = previous.and_then(personal_token::chosen);
+        if method != previous_method || chosen != before {
+            match chosen {
+                Some(id) if token_connected(id) => {}
+                _ => return Err("Choose a connected GitHub token before selecting it.".into()),
+            }
         }
-        if method == "oauth" && !oauth_connected {
-            return Err("Connect GitHub OAuth before selecting it.".into());
-        }
+    } else if method != previous_method && method == "oauth" && !oauth_connected {
+        return Err("Connect GitHub OAuth before selecting it.".into());
     }
     Ok(())
 }
@@ -3394,9 +3444,9 @@ fn access_choice(policy: &Value) -> Value {
         .unwrap_or_default();
     repos.sort_by(|a, b| a["repository"].as_str().cmp(&b["repository"].as_str()));
     if all {
-        json!({"method":policy["authenticationMethod"].as_str().unwrap_or("oauth"),"all":true,"changes":policy["allRepositoriesAllowChanges"]})
+        json!({"method":policy["authenticationMethod"].as_str().unwrap_or("oauth"),"token":policy["tokenSecretId"],"all":true,"changes":policy["allRepositoriesAllowChanges"]})
     } else {
-        json!({"method":policy["authenticationMethod"].as_str().unwrap_or("oauth"),"all":false,"repositories":repos})
+        json!({"method":policy["authenticationMethod"].as_str().unwrap_or("oauth"),"token":policy["tokenSecretId"],"all":false,"repositories":repos})
     }
 }
 fn mark_pending_for(d: &mut Document, names: &[String]) {
@@ -3425,7 +3475,7 @@ fn apply_patches(
     patches: &[Value],
     base: Option<u64>,
     oauth_connected: bool,
-    token_connected: bool,
+    token_connected: &dyn Fn(&str) -> bool,
 ) -> Result<Option<Vec<String>>, String> {
     let mut changed_policies = Vec::new();
     let mut access_changed = d.access_pending.clone();
@@ -3499,6 +3549,7 @@ pub fn save_configuration<G>(
     ticket: PendingIntent,
     update_guard: impl FnOnce() -> Result<G, String>,
 ) -> Result<Value, String> {
+    let configuration = personal_token::with_legacy_choice(configuration);
     validate_configuration(&configuration)?;
     let ws = configuration["computers"]
         .as_array()
@@ -3518,7 +3569,7 @@ pub fn save_configuration<G>(
         ws,
         base,
         oauth_connected,
-        personal_token::connected(),
+        &personal_token::connected,
     )?
     else {
         return snapshot();
@@ -3943,7 +3994,7 @@ mod tests {
             };
             let before = serde_json::to_value(&d).unwrap();
             assert!(
-                apply_patches(&mut d, &[saved_policy("dev", true)], None, true, false).is_err()
+                apply_patches(&mut d, &[saved_policy("dev", true)], None, true, &|_| false).is_err()
             );
             assert_eq!(serde_json::to_value(&d).unwrap(), before);
         }
@@ -3959,7 +4010,7 @@ mod tests {
             ..Default::default()
         };
         assert!(
-            apply_patches(&mut d, &[saved_policy("dev", true)], None, true, false)
+            apply_patches(&mut d, &[saved_policy("dev", true)], None, true, &|_| false)
                 .unwrap()
                 .is_some()
         );
@@ -3968,7 +4019,7 @@ mod tests {
         save_at(&path, &d).unwrap();
         assert_eq!(load_at(&path).unwrap().revision, 9_007_199_254_740_991);
         assert_eq!(
-            apply_patches(&mut d, &[saved_policy("dev", true)], None, true, false).unwrap(),
+            apply_patches(&mut d, &[saved_policy("dev", true)], None, true, &|_| false).unwrap(),
             None
         );
     }
@@ -3984,7 +4035,7 @@ mod tests {
         // A fork copied its source's assignment after the page last read the settings.
         d.computers.push(saved_policy("fork", true));
         stamp(&mut d, "fork", None);
-        let changed = apply_patches(&mut d, &[saved_policy("dev", true)], Some(4), true, false)
+        let changed = apply_patches(&mut d, &[saved_policy("dev", true)], Some(4), true, &|_| false)
             .unwrap()
             .unwrap();
         assert_eq!(changed, vec!["dev".to_string()]);
@@ -4007,7 +4058,7 @@ mod tests {
         );
         // Saving what is already stored changes nothing.
         assert_eq!(
-            apply_patches(&mut d, &[saved_policy("dev", true)], Some(4), true, false).unwrap(),
+            apply_patches(&mut d, &[saved_policy("dev", true)], Some(4), true, &|_| false).unwrap(),
             None
         );
         assert_eq!(d.revision, 6);
@@ -4023,41 +4074,41 @@ mod tests {
         stamp(&mut d, "fork", None);
         // The page still showed the fork without its copied assignment.
         assert!(
-            apply_patches(&mut d, &[saved_policy("fork", false)], Some(4), true, false).is_err()
+            apply_patches(&mut d, &[saved_policy("fork", false)], Some(4), true, &|_| false).is_err()
         );
         assert_eq!(d.computers, vec![saved_policy("fork", true)]);
         assert_eq!(d.revision, 5);
         // After seeing it, the same edit applies.
         assert!(
-            apply_patches(&mut d, &[saved_policy("fork", false)], Some(5), true, false)
+            apply_patches(&mut d, &[saved_policy("fork", false)], Some(5), true, &|_| false)
                 .unwrap()
                 .is_some()
         );
         // Rapid edits sent from one view before its first result arrived apply in order.
         let mut edit = saved_policy("fork", false);
         edit["identity"] = json!({"name":"Name","email":"name@example.test","apply":true});
-        assert!(apply_patches(&mut d, &[edit.clone()], Some(5), true, false)
+        assert!(apply_patches(&mut d, &[edit.clone()], Some(5), true, &|_| false)
             .unwrap()
             .is_some());
         assert_eq!(d.computers, vec![edit.clone()]);
         // A save from a newer view wins over a later-arriving one from an older view.
         assert!(
-            apply_patches(&mut d, &[saved_policy("fork", true)], Some(7), true, false)
+            apply_patches(&mut d, &[saved_policy("fork", true)], Some(7), true, &|_| false)
                 .unwrap()
                 .is_some()
         );
-        assert!(apply_patches(&mut d, &[edit], Some(5), true, false).is_err());
+        assert!(apply_patches(&mut d, &[edit], Some(5), true, &|_| false).is_err());
         // A deleted computer's stale choices are not brought back for a new one with its name.
         forget_computer(&mut d, "fork");
         d.revision += 1;
         stamp(&mut d, "fork", None);
         assert!(
-            apply_patches(&mut d, &[saved_policy("fork", true)], Some(8), true, false).is_err()
+            apply_patches(&mut d, &[saved_policy("fork", true)], Some(8), true, &|_| false).is_err()
         );
         assert!(d.computers.is_empty());
         // A caller without a base revision is not checked.
         assert!(
-            apply_patches(&mut d, &[saved_policy("fork", true)], None, true, false)
+            apply_patches(&mut d, &[saved_policy("fork", true)], None, true, &|_| false)
                 .unwrap()
                 .is_some()
         );
@@ -5606,20 +5657,29 @@ mod tests {
     #[test]
     fn nullable_github_authentication_matches_wire_contract() {
         let _test_state = crate::test_support::global_state();
-        let computers = [Value::Null, json!("oauth"), json!("token")]
-            .into_iter()
-            .enumerate()
-            .map(|(index, method)| {
-                json!({
-                    "computer": format!("dev-{index}"),
-                    "authenticationMethod": method,
-                    "repositoryMode": "selected",
-                    "allRepositoriesAllowChanges": false,
-                    "repositories": [],
-                    "identity": {"name": "", "email": "", "apply": false}
-                })
-            })
-            .collect::<Vec<_>>();
+        let computers = [
+            (Value::Null, Value::Null),
+            (json!("oauth"), Value::Null),
+            (json!("token"), Value::Null),
+            (json!("token"), json!("00000000-0000-4000-8000-0000000000aa")),
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(index, (method, token))| {
+            let mut policy = json!({
+                "computer": format!("dev-{index}"),
+                "authenticationMethod": method,
+                "repositoryMode": "selected",
+                "allRepositoriesAllowChanges": false,
+                "repositories": [],
+                "identity": {"name": "", "email": "", "apply": false}
+            });
+            if !token.is_null() {
+                policy["tokenSecretId"] = token;
+            }
+            policy
+        })
+        .collect::<Vec<_>>();
         validate(&computers).unwrap();
         let document = Document {
             session: session().into(),
@@ -5628,6 +5688,30 @@ mod tests {
         };
         let state = public_snapshot(document, Ok(None), None);
         crate::runtime::contract_tests::assert_fixture("github-authentication.json", vec![state]);
+    }
+
+    #[test]
+    fn macos_proxy_policy_uses_the_token_read_for_the_same_revision() {
+        let policy = json!({"computer":"dev","authenticationMethod":"token","tokenSecretId":"id"});
+        let document = Document {
+            revision: 4,
+            access_enabled: true,
+            computers: vec![policy],
+            ..Default::default()
+        };
+        let (revision, profile) =
+            macos_proxy_policy_from(&document, "dev", Some(Ok("synthetic_token".into()))).unwrap();
+        assert_eq!(revision, 4);
+        assert_eq!(profile, Some(personal_token::token_profile("synthetic_token")));
+        // A token that could not be read fails closed.
+        assert!(macos_proxy_policy_from(&document, "dev", Some(Err("no".into()))).is_err());
+        // No token was read for this policy: it changed since, so nothing is answered.
+        assert!(macos_proxy_policy_from(&document, "dev", None).is_err());
+        let off = Document {
+            access_enabled: false,
+            ..document
+        };
+        assert_eq!(macos_proxy_policy_from(&off, "dev", None).unwrap(), (4, None));
     }
 
     #[test]

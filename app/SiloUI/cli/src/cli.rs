@@ -9,7 +9,7 @@ use clap::{Args, Parser, Subcommand};
 use serde_json::Value;
 
 use crate::{
-    access,
+    access, approvals,
     config::{Project, Recipe, Settings},
     engine::{build_channel, default_socket, Engine},
     error::CliError,
@@ -113,6 +113,8 @@ pub enum Command {
     Fold(FoldCommand),
     /// List review requests, or show, keep, throw away or open one.
     Requests(RequestsCommand),
+    /// List what computers' agents asked you to allow, or show, allow or deny one.
+    Approvals(ApprovalsCommand),
     /// Put a computer back to before its latest keep, or a folder back to before its latest fold.
     Undo {
         /// A computer, a fork made from a folder, or the folder's path.
@@ -167,7 +169,7 @@ pub enum Command {
     /// Add, list or remove the devices whose computers this one manages (Connections).
     #[command(subcommand)]
     Devices(crate::hosts::DevicesCommand),
-    /// Save a whole computer as a file to share. Logins found on it are named first.
+    /// Save a whole computer as a file to share. A Linux computer's known login files are removed from it unless you ask to include them.
     Export(ExportCommand),
     /// Add the computer in an export file as a new, stopped computer.
     Import(ImportCommand),
@@ -241,6 +243,11 @@ pub struct ExportCommand {
     /// Share without asking when logins are found or Silo could not check for them.
     #[arg(long)]
     pub yes: bool,
+    /// Keep the logins found on the computer in the file. Without it, an export of a Linux
+    /// computer removes its known login files from the exported computer (traces may remain in
+    /// the file's disk layers).
+    #[arg(long)]
+    pub include_logins: bool,
 }
 
 #[derive(Args, Debug)]
@@ -371,6 +378,26 @@ pub struct RequestsCommand {
     /// `throw-away` and `open` find the device a request is on by themselves.
     #[arg(long)]
     pub all_devices: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct ApprovalsCommand {
+    #[command(subcommand)]
+    pub action: Option<ApprovalsAction>,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ApprovalsAction {
+    /// What the request asks, the agent's note, and what became of it.
+    Show { id: String },
+    /// Allow the request: Silo checks it again and runs its call.
+    Allow { id: String },
+    /// Deny the request; the agent reads your note.
+    Deny {
+        id: String,
+        #[arg(long, value_name = "TEXT")]
+        note: Option<String>,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -1055,6 +1082,31 @@ async fn dispatch(
                 emit(json, &value, render::request_open);
             }
         },
+        Command::Approvals(approvals) => {
+            use silo_api::methods::approvals::ApprovalDecision;
+            match approvals.action {
+                None => emit(
+                    json,
+                    &approvals::list(engine).await?,
+                    approvals::render_list,
+                ),
+                Some(ApprovalsAction::Show { id }) => emit(
+                    json,
+                    &approvals::show(engine, &id).await?,
+                    approvals::render_show,
+                ),
+                Some(ApprovalsAction::Allow { id }) => emit(
+                    json,
+                    &approvals::decide(engine, &id, ApprovalDecision::Allow, None).await?,
+                    approvals::render_show,
+                ),
+                Some(ApprovalsAction::Deny { id, note }) => emit(
+                    json,
+                    &approvals::decide(engine, &id, ApprovalDecision::Deny, note).await?,
+                    approvals::render_show,
+                ),
+            }
+        }
         Command::Undo { computer } => {
             let mut value = flows::undo(engine, &computer, working_directory, progress).await?;
             if let Ok(home) = access::home_dir() {
@@ -1205,6 +1257,7 @@ async fn dispatch(
                 output: export.output,
                 checkpoint: export.checkpoint,
                 yes: export.yes,
+                include_logins: export.include_logins,
             };
             let value = crate::share::export(
                 engine,

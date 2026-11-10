@@ -169,6 +169,8 @@ pub async fn keep(
                 request_id: id.to_owned(),
                 data_ok: data_ok.then_some(true),
                 keep: hooks,
+                choices: None,
+                skip: None,
             }),
             progress,
         )

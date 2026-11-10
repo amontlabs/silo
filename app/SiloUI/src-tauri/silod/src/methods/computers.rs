@@ -58,10 +58,12 @@ use crate::{
 use super::{ownership::owns_prefix, HandlerContext};
 
 pub(super) fn owns(method: MethodName) -> bool {
-    owns_prefix(
-        method,
-        &["computers.", "activity.", "logs.", "storage.", "macos."],
-    )
+    // `computers.access` reads what a computer holds, beside approvals.
+    method != MethodName::ComputersAccess
+        && owns_prefix(
+            method,
+            &["computers.", "activity.", "logs.", "storage.", "macos."],
+        )
 }
 
 // MARK: Hosts
@@ -317,6 +319,7 @@ fn invalid(message: impl ToString) -> DispatchError {
     DispatchError {
         code: error_code(&message),
         message,
+        details: None,
     }
 }
 
@@ -324,6 +327,7 @@ fn not_found(message: &str) -> DispatchError {
     DispatchError {
         code: ErrorCode::NotFound,
         message: message.to_owned(),
+        details: None,
     }
 }
 
@@ -331,6 +335,7 @@ fn unsupported(message: &str) -> DispatchError {
     DispatchError {
         code: ErrorCode::UnsupportedRemoteOperation,
         message: message.to_owned(),
+        details: None,
     }
 }
 
@@ -447,6 +452,7 @@ fn accept_setup_job(
                 "This setup request ID is already in use."
             }
             .to_owned(),
+            details: None,
         });
     }
     Ok(JobStartResult {
@@ -1198,11 +1204,15 @@ async fn begin_create(
             configuration,
             request_id,
             device_id,
+            agents,
         } => {
             require_local_device(context, device_id.as_deref())?;
-            let configuration = serde_json::from_value(encode(configuration)?).map_err(invalid)?;
+            let configuration: silo_engine::runtime::ComputerConfiguration =
+                serde_json::from_value(encode(configuration)?).map_err(invalid)?;
             let request_id = new_request_id(request_id)?;
             let job = accept_linux_setup_job(context, "computers.create", &request_id)?;
+            // Only an accepted creation remembers its agents; the job has not started yet.
+            silo_engine::agents::request_for_creation(configuration.id(), &agents);
             let change = silo_engine::runtime::ComputerConfigurationChange::Upsert {
                 configuration,
                 expected: None,
@@ -1213,8 +1223,17 @@ async fn begin_create(
                 computer: None,
             })?))
         }
-        ComputerCreateParams::Macos { request, device_id } => {
+        ComputerCreateParams::Macos {
+            request,
+            device_id,
+            agents,
+        } => {
             require_local_device(context, device_id.as_deref())?;
+            if !agents.is_empty() {
+                return Err(invalid(
+                    "Silo cannot install an agent while it creates a macOS computer yet. Create the computer, start it, then install the agent from its page.",
+                ));
+            }
             let request: silo_engine::macos_computers::CreateRequest =
                 serde_json::from_value(encode(request)?).map_err(invalid)?;
             // A refused request is an error and leaves no job: the job is allocated after
@@ -1549,6 +1568,7 @@ pub(crate) fn register_display(
             return Err(DispatchError {
                 code: ErrorCode::Cancelled,
                 message: "The client disconnected before its screen opened.".to_owned(),
+                details: None,
             });
         }
         gateways.insert(key, gateway)
@@ -1610,6 +1630,7 @@ async fn macos_display_session(
             return Err(DispatchError {
                 code: ErrorCode::Busy,
                 message: "Close an unused screen first.".to_owned(),
+                details: None,
             });
         }
     }
@@ -1869,6 +1890,7 @@ pub(crate) mod tests {
                 client_id,
                 protocol: silo_api::transport::PROTOCOL_VERSION,
                 client: None,
+                caller: silo_engine::policy::Caller::owner("test"),
             },
         );
         Fixture {
@@ -2799,6 +2821,35 @@ pub(crate) mod tests {
             .is_err());
         let registry = f.context.job_registry().unwrap();
         assert!(registry.list_unacknowledged().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn the_agents_of_a_creation_are_remembered_only_once_its_job_is_accepted() {
+        let f = fixture();
+        let other = "00000000-0000-4000-8000-0000000000d1";
+        let create = |id: &str, request_id: &str| {
+            let mut configuration = linux_configuration();
+            configuration["id"] = json!(id);
+            json!({
+                "kind": "linux",
+                "configuration": configuration,
+                "requestId": request_id,
+                "agents": ["codex"]
+            })
+        };
+        f.call(MethodName::ComputersCreate, create(LINUX, "agents-1"))
+            .await
+            .unwrap();
+        assert_eq!(
+            silo_engine::agents::take_requested(LINUX),
+            vec![silo_api::methods::agents::AgentId::Codex]
+        );
+        // The request id is taken, so the job is refused and nothing is remembered.
+        assert!(f
+            .call(MethodName::ComputersCreate, create(other, "agents-1"))
+            .await
+            .is_err());
+        assert!(silo_engine::agents::take_requested(other).is_empty());
     }
 
     #[tokio::test]

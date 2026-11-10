@@ -53,7 +53,7 @@ the engine's message.
 
 | Command | What it does |
 | --- | --- |
-| `silo list [--all]` | computers and their state; `--all` also shows the hidden throwaways (`silo-baseline-*`, `silo-build-*`) |
+| `silo list [--all]` | computers and their state; `--all` also shows the hidden throwaways (`silo-baseline-*`, `silo-build-*`, `silo-export-*`) |
 | `silo status <computer>` | one computer: size, checkpoints, whether its desktop is on, a fork's quiet state, assigned secrets and GitHub access |
 | `silo secrets list` | secret names and the computers they are assigned to (never values) |
 | `silo secrets set NAME [--computer C]... [--domain D]...` | add a secret or replace its value; the value is read from stdin, never an argument |
@@ -91,7 +91,7 @@ A fork publishes the ports its source publishes (a recipe fork, the recipe's `po
 | `silo --in-guest <list\|tree\|status\|fork\|diff\|fold --request\|requests\|steps>` | run inside a computer with its token: fork itself, diff and request review of its forks; never keeps, promotes, undoes or drops |
 | `silo host init [--authorize KEY\|FILE]...` / `silo host status` / `silo host revoke FINGERPRINT\|KEY\|FILE` | prepare this machine to host computers for other devices, show how it is set up, or stop accepting a controller's key ([details](#hosting-computers-for-other-devices)) |
 | `silo devices add <address> [--host-key FINGERPRINT\|KEY\|FILE] [--replace]` / `list` / `remove <device>` / `key` | connect, list or remove the devices this one manages, or print this device's Silo key ([details](#hosting-computers-for-other-devices)) |
-| `silo export <computer> [-o FILE] [--checkpoint ID\|NAME] [--yes]` | save a whole computer as a `.silo-backup` file to share; logins found on it are named first ([details](#sharing-a-computer-as-a-file)) |
+| `silo export <computer> [-o FILE] [--checkpoint ID\|NAME] [--include-logins] [--yes]` | save a whole computer as a `.silo-backup` file to share; a Linux computer's known login files are removed from it unless `--include-logins` (traces may remain) ([details](#sharing-a-computer-as-a-file)) |
 | `silo import FILE [--name NAME]` | add the computer in an export file as a new, stopped computer |
 | `silo job <id>` | wait for a job that is already running |
 | `silo mcp` | serve the MCP tools on stdio |
@@ -106,7 +106,8 @@ silo fold friend-main --into main                    # bring its work into your 
 ```
 
 `silo export` writes the whole computer: its disks, settings and (for a fork) the fork-time
-record. Without `-o` the file is `<computer>-<date>.silo-backup` in the current folder, and an
+record. A Linux computer's known login files are removed from it unless you pass
+`--include-logins`, with a caveat ([Logins](#sharing-a-computer-as-a-file) below). Without `-o` the file is `<computer>-<date>.silo-backup` in the current folder, and an
 existing file is never replaced. `--checkpoint` exports a saved point of the computer (its id or
 name) instead of its current state. A running computer is captured in place; it is not stopped.
 
@@ -145,35 +146,69 @@ kept). The record does not say which computer it was forked from on your side, s
 without `--into` answers that Silo does not know where it was forked from. A computer that was
 not a fork (a `main`) imports as its own computer and has nothing to keep.
 
-**Logins.** Before it writes anything, `silo export` lists the logins on the computer: the
-agent and tool logins Silo knows (a Claude Code login, `~/.claude/.credentials.json`; a Codex
-login, `~/.codex/auth.json`; a Gemini CLI login, `~/.gemini/gemini-credentials.json` or the older `~/.gemini/oauth_creds.json`; a GitHub CLI login,
-`gh/hosts.yml`), cloud and registry credentials, SSH private keys and key files, found on the
-computer's disk and in its fork-time record. What every computer has is not named: the system
-password files, the machine's own SSH host keys, the desktop's connection password and Silo's own
-certificate authority. When it finds any login it asks:
+**Logins.** An export of a Linux virtual machine's current state removes the computer's known login
+files from the computer the file holds, **but traces may remain in the file**: read the caveat below
+before you rely on it. The known logins are the agent and tool sign-ins (a Claude Code login,
+`~/.claude/.credentials.json`, and `~/.claude.json`, which holds the account Claude Code is signed in
+as and the headers of the MCP servers added for the user; a Codex login, `~/.codex/auth.json`; a Gemini
+CLI login, `~/.gemini/gemini-credentials.json` or the older `~/.gemini/oauth_creds.json`; a GitHub CLI
+login, `gh/hosts.yml`), cloud and registry credentials, SSH private keys and other key files, found in
+`/etc`, `/root`, `/home`, `/usr/local`, `/opt` and `/srv` (the folders `silo diff` walks). What every
+computer has is not touched: the system password files, the machine's own SSH host keys, the desktop's
+connection password and Silo's own certificate authority. The same list names the logins here, in
+the dialog, and under "Not kept" in `silo diff` and `silo fold`.
+
+Silo does this from a short-lived hidden copy of the computer (`silo-export-<8 hex>`, left out of
+`silo list`): the copy is forked from the computer's current state with no secrets, no GitHub access and a
+closed network, started, stripped of the files the scan names, stopped and exported under the
+computer's own name, then dropped, whether the export worked or not. Progress says each step in plain
+words ("Making a temporary copy of the computer", "Removing the logins from the copy", ...). The fork
+takes one disk-only checkpoint of the computer, which stays as any fork's does. A copy that cannot be
+dropped (the engine stopped mid-export) stays hidden and is dropped by the next export. A computer that
+is stopped is exported the same way; the copy is what boots. The result and `--json` name what was removed:
+
+```text
+Exported main to /home/me/main-2026-11-10.silo-backup (3.1 GiB)
+Removed from the exported computer: a Claude Code login (/root/.claude/.credentials.json), Claude Code sign-in data (/root/.claude.json). Traces of them may remain in the file's disk layers, so keep the file private.
+```
+
+`--json` prints `{computer, archive, size, checkpoint, logins, unchecked, leftOut}`: `leftOut` lists the
+files removed; `logins` is only what the file still holds on purpose.
+
+**What this does not do.** It keeps the files out of the computer someone imports; it does not keep their
+bytes out of the file. The copy is a fork, and a fork's disks are layers over the computer's own: the
+layers it shares with the computer (everything up to the fork's checkpoint) are read-only and are written
+into the file whole, with the deleted files' blocks in them. Discarding the freed blocks in the copy (`fstrim`
+works on both of its disks once the root disk is mounted a second time, because `/` is an overlay) changes
+only its own top layer. The canary check ([`t14_export_scrub_check.sh`](direction/checks/t14_export_scrub_check.sh),
+[`T14.txt`](direction/evidence/T14.txt)) writes a long random marker to every known login path and finds it in
+the layers of the default export. Treat the file as private whether or not the logins were removed.
+A file in a place Silo does not recognise (an `.env`, a token in a shell history, a key under `/workspace`) is not
+removed either.
+
+`--include-logins` keeps the files in the computer the file holds. Then, as before, `silo export` lists the logins
+on the computer before it writes anything and asks:
 
 ```text
 This computer contains a Claude Code login (/root/.claude/.credentials.json). Share anyway? [y/N]
 ```
 
-It asks the same question when it **could not check**: the computer is stopped (a check never
-starts it, so its disk is not listed; only its fork-time record is), the export is of a
-checkpoint (the live disk is not the checkpoint's, so only the record is checked), or the check
-failed. Then the question names the reason:
+Three kinds of export cannot remove the logins and always ask this way (and the app asks in a dialog): an export
+of a **checkpoint** (its disk is not the live one, and there is no copy to strip), of a **macOS computer** and of
+a **container computer**. The question also covers the case where Silo **could not check**: the computer is stopped
+(a check never starts it, so its disk is not listed; only its fork-time record is), the export is of a checkpoint, or
+the check failed. Then the question names the reason:
 
 ```text
 Silo could not check main for logins (the computer is stopped, so its files were not listed; start it to check them). Share anyway? [y/N]
 ```
 
 If logins were found and part of the computer could not be checked, both are in one question
-("... Silo could not check main for other logins (...)"). The app asks the same in a dialog
-before the folder picker. Without a terminal `silo export` refuses unless `--yes` is passed.
-Nothing is filtered or removed: a yes puts the files in the export, and anyone with the file can
-use them. The disk is listed with one change capture (the same walk `silo diff` does, over
-`/etc`, `/root`, `/home`, `/usr/local`, `/opt` and `/srv`; a macOS computer's home folder).
-`--json` prints `{computer, archive, size, checkpoint, logins, unchecked}`; `unchecked` is the
-reason when Silo could not check (also with `--yes`) and `null` when it did.
+("... Silo could not check main for other logins (...)"). Without a terminal such an export refuses unless
+`--yes` is passed; a yes puts the files in the export, and anyone with the file can use them. The disk is listed
+with one change capture (the same walk `silo diff` does, over `/etc`, `/root`, `/home`, `/usr/local`, `/opt` and
+`/srv`; a macOS computer's home folder). `unchecked` is the reason when Silo could not check and `null` when it did;
+it is `null` when the export removes the logins.
 
 **Free space.** Before it captures anything, `silo export` checks that the volume of Silo's working
 copy and the volume of the destination can hold what this export writes: the computer's own
@@ -185,7 +220,7 @@ write uses the file's real size.
 **A computer on another device.** `silo --device mini export main -o ~/Desktop/main.silo-backup`
 exports a computer of a connected device into a file on this one, and `silo --device mini import
 ~/Desktop/main.silo-backup --name friend-main` creates a computer there from a file here. The
-other device does the export or import itself (the logins are asked about on it, as above, and
+other device does the export or import itself (the logins are removed or asked about on it, as above, and
 `-o` is a path on this device). Because the managed Connections key can only run Silo's bridge, the
 file travels through the other device's transfer area: it writes the export there under a name it
 picks, this device copies it over the Connections link (a `Copying ...` step with progress, size
@@ -297,6 +332,21 @@ printed. CI or cron call `silo fork main -- <cmd>` then `silo fold --request`.
 
 Each takes `--json`. The MCP tools are `requests_list`, `request_show`, `request_keep`,
 `request_throw_away` and `request_open`, on the same engine methods.
+
+## Approvals
+
+What a computer's agent asked you to allow (a merge into its own computer, a port, a secret,
+GitHub access and the rest, see [SiloUI-POLICY.md](SiloUI-POLICY.md#asking-you)):
+
+- `silo approvals` lists the requests waiting for your answer.
+- `silo approvals show <id>` prints what is asked, in Silo's words, the agent's note apart, the
+  call that would run, and once answered what became of it.
+- `silo approvals allow <id>` checks the request again and runs its call; the output says what
+  it returned, the job it started, or why it did not run.
+- `silo approvals deny <id> [--note TEXT]` denies it; the agent reads the note.
+
+Each takes `--json`. A merge's diff is its review request: `silo requests show <id>` with the id
+`show` names.
 
 `silo status` prints, for a fork, a line such as
 `quiet: applied; stopped: poller; scrubbed: /root/.env; secrets: none` (on macOS it adds the
