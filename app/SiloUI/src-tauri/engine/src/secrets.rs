@@ -439,14 +439,14 @@ pub(crate) fn peek_github_token_values() -> BTreeMap<String, String> {
 }
 
 /// Records the account GitHub reported for a token.
-pub(crate) fn set_github_token_account(id: &str, account: &str) -> Result<(), String> {
+pub(crate) fn set_github_token_account(id: &str, account: &str) -> Result<bool, String> {
     let current = load()?;
     if current
         .secrets
         .iter()
         .any(|s| s.id == id && s.account.as_deref() == Some(account))
     {
-        return Ok(());
+        return Ok(false);
     }
     update(|d| {
         if let Some(secret) = d
@@ -457,7 +457,8 @@ pub(crate) fn set_github_token_account(id: &str, account: &str) -> Result<(), St
             secret.account = Some(account.to_owned());
         }
         Ok(())
-    })
+    })?;
+    Ok(true)
 }
 
 /// The request that saves the secret named `name` as a GitHub token.
@@ -1056,7 +1057,10 @@ fn remove_from_store(id: &str, operation: &mut OperationGuard) -> Result<(), Str
         Ok(())
     })?;
     if secret.kind == SecretKind::GithubToken {
+        // Computers already lost the token; this only clears what remains of it.
+        *operation = None;
         crate::github::personal_token::secret_removed(id);
+        *operation = Some(lock_unit(&OPERATION));
     }
     Ok(())
 }
@@ -1236,13 +1240,19 @@ pub fn save_secret<G>(
         // Computers using the token pick up a replaced value; a computer can take
         // minutes to apply it, so the secrets lock is not held meanwhile.
         drop(operation.take());
-        if replaced {
-            crate::github::personal_token::secret_saved(&id)?;
-        }
+        // The new value is already stored; a computer that could not switch to it is
+        // reported after the rest of the save is recorded.
+        let applied = if replaced {
+            crate::github::personal_token::secret_saved(&id)
+        } else {
+            Ok(())
+        };
         update(|d| {
-            event(d, "Secret settings saved", false);
+            event(d, "Secret settings saved", applied.is_err());
             Ok(())
         })?;
+        let _ = prune_values();
+        applied?;
     } else {
         reconcile(&id, &mut operation)?;
     }

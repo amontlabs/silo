@@ -445,16 +445,20 @@ pub(super) fn check() {
     {
         CHECK_AT.store(now() + 30, Ordering::SeqCst);
     }
+    let mut account_changed = false;
     for verdict in &verdicts {
         if let Some(account) = &verdict.account {
-            let _ = crate::secrets::set_github_token_account(&verdict.id, account);
+            account_changed |=
+                crate::secrets::set_github_token_account(&verdict.id, account).unwrap_or(false);
         }
     }
     let changed_ids = publish_verdicts(&verdicts);
+    if account_changed || !changed_ids.is_empty() {
+        crate::secrets::publish_changed();
+    }
     if changed_ids.is_empty() {
         return;
     }
-    crate::secrets::publish_changed();
     let ids: Vec<&str> = changed_ids.iter().map(String::as_str).collect();
     if let Err(message) = changed(Some(&ids)) {
         // Keep the failed detachment visible and retry it through the normal worker.
