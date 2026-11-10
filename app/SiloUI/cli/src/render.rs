@@ -297,7 +297,7 @@ pub fn exported(value: &Value) -> String {
     {
         let names: Vec<&str> = left_out.iter().filter_map(Value::as_str).collect();
         line.push_str(&format!(
-            "\nLeft out of the file: {}. Pass --include-logins to keep them.",
+            "\nRemoved from the exported computer: {}. Traces of them may remain in the file's disk layers, so keep the file private.",
             names.join(", ")
         ));
     }

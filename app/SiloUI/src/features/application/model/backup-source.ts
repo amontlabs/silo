@@ -7,7 +7,7 @@ export interface BackupArchive {
   computers: string[]
   /** The checkpoint an export packages; absent for an export of the current state. */
   checkpointName?: string
-  /** The login files an export left out of the file, each by tool name and path. */
+  /** The login files an export removed from the exported computer, each by tool name and path. Traces may remain in the file. */
   leftOut?: string[]
 }
 
@@ -86,7 +86,7 @@ export interface ExportLogins {
   logins: string[]
   /** Why Silo could not check the whole computer, when it could not (it is stopped, or the export is of a checkpoint). */
   unchecked?: string
-  /** The export will leave these logins out, unless the person asks to include them. False when it cannot (a checkpoint, a macOS computer). */
+  /** The export removes these logins from the exported computer, unless the person asks to include them. False when it cannot (a checkpoint, a macOS or container computer). */
   leavesOut?: boolean
 }
 

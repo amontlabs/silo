@@ -207,9 +207,14 @@ No fixed caps on how many computers an agent makes. Instead:
 - A personal GitHub token is a secret of kind `github-token`. Several can exist. A computer
   uses signed-in access or one token secret. The engine still hands the proxy the same token
   profile, so the runtime patch does not change. The saved single token is migrated.
-- Exports: a temporary fork is scrubbed of known login files, trimmed, exported and dropped.
+- Exports: a temporary fork is scrubbed of known login files, exported and dropped.
   Shipped only if a canary check shows the login's bytes are not in the file; otherwise today's
-  warning stays. `~/.claude.json` joins the known login paths.
+  warning stays. `~/.claude.json` joins the known login paths. **Built as best effort (T14):** the
+  canary finds the bytes in the file, because a fork's disks are layers over the computer's and the
+  shared read-only layers are written whole (trimming the copy does not reach them; the root is an
+  overlay whose ext4 disk has to be mounted a second time to be trimmed). So the files are removed from
+  the exported computer and the wording says traces may remain. Checkpoint, macOS and container exports
+  keep today's warning. Evidence: `docs/direction/evidence/T14.txt`.
 
 ### 13. Onboarding
 

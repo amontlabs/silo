@@ -127,7 +127,11 @@ async fn an_export_that_leaves_the_logins_out_asks_nothing_and_reports_what_it_l
     assert!(fake.calls("exports.check")[0].get("includeLogins").is_none());
     assert!(fake.calls("exports.create")[0].get("includeLogins").is_none());
     let line = silo_cli::render::exported(&value);
-    assert!(line.contains(&format!("Left out of the file: {CLAUDE}")), "{line}");
+    assert!(
+        line.contains(&format!("Removed from the exported computer: {CLAUDE}")),
+        "{line}"
+    );
+    assert!(line.contains("Traces of them may remain"), "{line}");
 }
 
 #[tokio::test]

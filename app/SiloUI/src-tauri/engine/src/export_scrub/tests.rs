@@ -7,7 +7,6 @@ use super::*;
 struct Fake {
     calls: Mutex<Vec<String>>,
     computers: Mutex<Vec<(String, String)>>,
-    source_checkpoints: Mutex<Vec<String>>,
     /// A call whose text starts with one of these fails.
     fail: Mutex<Vec<String>>,
     /// The fork leaves a half-made computer when it fails.
@@ -27,7 +26,6 @@ impl Fake {
         fake.computers
             .lock().unwrap()
             .push(("src".into(), "main".into()));
-        *fake.source_checkpoints.lock().unwrap() = vec!["old".into()];
         fake
     }
 
@@ -64,14 +62,8 @@ impl ScrubEnv for Fake {
         Ok(self.computers.lock().unwrap().clone())
     }
 
-    fn checkpoint_ids(&self, _: &str) -> Result<Vec<String>, String> {
-        Ok(self.source_checkpoints.lock().unwrap().clone())
-    }
-
     fn fork(&self, source: &str, name: &str) -> Result<String, String> {
         let result = self.step(format!("fork {source} {name}"));
-        // The fork takes a checkpoint of the source whether or not it finishes.
-        self.source_checkpoints.lock().unwrap().push("fork-point".into());
         if result.is_ok() || self.half_made {
             self.computers
                 .lock().unwrap()
@@ -90,7 +82,7 @@ impl ScrubEnv for Fake {
         } else if script == SURVIVORS_SCRIPT {
             "survivors"
         } else {
-            "trim"
+            panic!("an unexpected command: {script}")
         };
         self.step(format!("run {id} {kind}"))?;
         let mut out = ExecOut::default();
@@ -120,16 +112,6 @@ impl ScrubEnv for Fake {
         if result.is_ok() {
             self.computers.lock().unwrap().retain(|(known, _)| known != id);
             self.deleted.lock().unwrap().insert(id.to_owned());
-        }
-        result
-    }
-
-    fn delete_checkpoint(&self, computer: &str, checkpoint: &str) -> Result<(), String> {
-        let result = self.step(format!("delete-checkpoint {computer} {checkpoint}"));
-        if result.is_ok() {
-            self.source_checkpoints
-                .lock().unwrap()
-                .retain(|id| id != checkpoint);
         }
         result
     }
@@ -165,7 +147,7 @@ fn a_copy_is_named_so_that_only_silo_can_make_one() {
 }
 
 #[test]
-fn a_copy_without_logins_is_made_started_stripped_trimmed_and_stopped() {
+fn a_copy_without_logins_is_made_started_stripped_and_stopped() {
     let env = Fake::new(&LOGINS);
     let lines = Mutex::new(Vec::new());
     let prepared = prepare(&env, "src", &progress_into(&lines), &|| false).unwrap();
@@ -179,7 +161,14 @@ fn a_copy_without_logins_is_made_started_stripped_trimmed_and_stopped() {
         ]
     );
     let calls = env.calls();
-    let order = ["fork src", "start copy", "logins copy", "run copy remove", "run copy survivors", "run copy trim", "stop copy"];
+    let order = [
+        "fork src",
+        "start copy",
+        "logins copy",
+        "run copy remove",
+        "run copy survivors",
+        "stop copy",
+    ];
     let mut at = 0;
     for expected in order {
         at += calls[at..]
@@ -189,22 +178,21 @@ fn a_copy_without_logins_is_made_started_stripped_trimmed_and_stopped() {
     }
     // Nothing is dropped yet: the export reads the copy next.
     assert!(!env.called("delete"));
-    assert_eq!(lines.lock().unwrap().len(), 6);
+    assert_eq!(lines.lock().unwrap().len(), 5);
     assert!(lines.lock().unwrap()[0].starts_with("Making a temporary copy"));
 }
 
 #[test]
-fn a_computer_with_no_logins_skips_the_removal_but_is_still_trimmed() {
+fn a_computer_with_no_logins_skips_the_removal() {
     let env = Fake::new(&[]);
     let prepared = prepare(&env, "src", &|_| {}, &|| false).unwrap();
     assert!(prepared.left_out.is_empty());
     assert!(!env.called("run copy remove"));
-    assert!(env.called("run copy trim"));
 }
 
 #[test]
 fn the_copy_is_dropped_whatever_step_fails() {
-    for failing in ["start", "logins", "run copy remove", "run copy survivors", "run copy trim", "stop"] {
+    for failing in ["start", "logins", "run copy remove", "run copy survivors", "stop"] {
         let env = Fake::new(&LOGINS).failing(failing);
         let error = prepare(&env, "src", &|_| {}, &|| false).unwrap_err();
         let Failure::Failed(message) = error else {
@@ -212,11 +200,6 @@ fn the_copy_is_dropped_whatever_step_fails() {
         };
         assert!(message.contains("failed") || message.contains("Silo could not"), "{message}");
         assert!(env.deleted.lock().unwrap().contains("copy"), "{failing}: the copy stays");
-        assert_eq!(
-            *env.source_checkpoints.lock().unwrap(),
-            ["old"],
-            "{failing}: the source keeps the fork's checkpoint"
-        );
         assert!(
             env.computers.lock().unwrap().iter().all(|(_, name)| !is_copy(name)),
             "{failing}"
@@ -232,7 +215,6 @@ fn a_fork_that_fails_leaves_no_copy_and_no_checkpoint() {
         let error = prepare(&env, "src", &|_| {}, &|| false).unwrap_err();
         assert!(matches!(error, Failure::Failed(_)));
         assert_eq!(env.called("delete copy"), half_made);
-        assert_eq!(*env.source_checkpoints.lock().unwrap(), ["old"]);
     }
 }
 
@@ -244,7 +226,7 @@ fn files_that_survive_the_removal_fail_the_export_and_are_named() {
         panic!("expected a failure")
     };
     assert!(message.contains("/root/.claude/.credentials.json"), "{message}");
-    assert!(!env.called("run copy trim"));
+    assert!(!env.called("stop copy"));
     assert!(env.deleted.lock().unwrap().contains("copy"));
 }
 
@@ -279,7 +261,6 @@ fn a_cancel_stops_the_work_and_drops_the_copy() {
         Failure::Cancelled
     );
     assert!(env.deleted.lock().unwrap().contains("copy"));
-    assert_eq!(*env.source_checkpoints.lock().unwrap(), ["old"]);
 }
 
 #[test]
@@ -298,30 +279,15 @@ fn copies_an_earlier_run_left_behind_are_dropped_first() {
 }
 
 #[test]
-fn dropping_a_prepared_copy_removes_it_and_the_forks_checkpoint() {
-    let env = Fake::new(&LOGINS);
-    let prepared = prepare(&env, "src", &|_| {}, &|| false).unwrap();
-    assert_eq!(*env.source_checkpoints.lock().unwrap(), ["old", "fork-point"]);
-    drop_copy(&env, &prepared).unwrap();
-    assert!(env.deleted.lock().unwrap().contains("copy"));
-    assert_eq!(*env.source_checkpoints.lock().unwrap(), ["old"]);
-}
-
-#[test]
-fn dropping_still_removes_the_checkpoint_when_the_copy_will_not_go() {
+fn dropping_a_prepared_copy_removes_it_and_a_copy_that_will_not_go_is_reported() {
     let env = Fake::new(&LOGINS);
     let prepared = prepare(&env, "src", &|_| {}, &|| false).unwrap();
     env.fail.lock().unwrap().push("delete copy".into());
     let error = drop_copy(&env, &prepared).unwrap_err();
-    assert!(error.contains("temporary copy"), "{error}");
-    assert_eq!(*env.source_checkpoints.lock().unwrap(), ["old"]);
-}
-
-#[test]
-fn the_trim_step_covers_the_root_disk_and_the_workspace_disk_and_fails_when_one_cannot() {
-    assert!(TRIM_SCRIPT.contains("/ /workspace"));
-    assert!(TRIM_SCRIPT.contains("fstrim -v"));
-    assert!(TRIM_SCRIPT.contains("status=1"));
+    assert!(error.contains("could not drop the temporary copy"), "{error}");
+    env.fail.lock().unwrap().clear();
+    drop_copy(&env, &prepared).unwrap();
+    assert!(env.deleted.lock().unwrap().contains("copy"));
 }
 
 #[test]

@@ -356,7 +356,14 @@ pub(crate) async fn start_backup(
     include_logins: Option<bool>,
 ) -> Result<String, EngineError> {
     require_main(&window)?;
-    start_export(&engine, destination, computers, checkpoint_id, include_logins).await
+    start_export(
+        &engine,
+        destination,
+        computers,
+        checkpoint_id,
+        include_logins,
+    )
+    .await
 }
 
 #[tauri::command]
@@ -488,12 +495,24 @@ mod forwarding_tests {
     async fn asking_to_include_logins_reaches_the_engine_and_leaving_it_out_sends_nothing() {
         let fake = FakeEngine::start(|method, params| replies(method, params));
         let (engine, _) = connected_client(&fake).await;
-        start_export(&engine, "/exports".into(), vec!["dev".into()], None, Some(true))
-            .await
-            .unwrap();
-        start_export(&engine, "/exports".into(), vec!["dev".into()], None, Some(false))
-            .await
-            .unwrap();
+        start_export(
+            &engine,
+            "/exports".into(),
+            vec!["dev".into()],
+            None,
+            Some(true),
+        )
+        .await
+        .unwrap();
+        start_export(
+            &engine,
+            "/exports".into(),
+            vec!["dev".into()],
+            None,
+            Some(false),
+        )
+        .await
+        .unwrap();
         assert_eq!(
             fake.calls(MethodName::ExportsCreate),
             vec![

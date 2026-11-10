@@ -52,7 +52,7 @@ wire_struct! {
         transfer_area: Option<bool>,
         /// Keep the logins found on the computer in the file. By default an export of a Linux
         /// computer is made from a copy with the known login files removed; `archive.leftOut`
-        /// of the result names them.
+        /// of the result names them. Traces of them may remain in the file's disk layers.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         include_logins: Option<bool>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -82,7 +82,8 @@ wire_struct! {
         checked: Vec<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         unchecked: Option<String>,
-        /// The export will not carry these logins: it is made from a copy they are removed from.
+        /// The export removes these logins from the computer it writes: it is made from a copy
+        /// they are removed from. Traces of them may remain in the file's disk layers.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         leaves_out: bool,
     }
@@ -196,7 +197,8 @@ wire_struct! {
         /// Set when the export was written into the transfer area.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         transfer: Option<TransferFile>,
-        /// The login files the export leaves out, by the name the scan gives them.
+        /// The login files the export removed from the computer it wrote, by the name the scan
+        /// gives them. Traces of them may remain in the file's disk layers.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         left_out: Vec<String>,
     }

@@ -167,7 +167,7 @@ pub enum Command {
     /// Add, list or remove the devices whose computers this one manages (Connections).
     #[command(subcommand)]
     Devices(crate::hosts::DevicesCommand),
-    /// Save a whole computer as a file to share. Logins found on it are named first.
+    /// Save a whole computer as a file to share. A Linux computer's known login files are removed from it unless you ask to include them.
     Export(ExportCommand),
     /// Add the computer in an export file as a new, stopped computer.
     Import(ImportCommand),
@@ -242,7 +242,8 @@ pub struct ExportCommand {
     #[arg(long)]
     pub yes: bool,
     /// Keep the logins found on the computer in the file. Without it, an export of a Linux
-    /// computer leaves its known login files out.
+    /// computer removes its known login files from the exported computer (traces may remain in
+    /// the file's disk layers).
     #[arg(long)]
     pub include_logins: bool,
 }

@@ -1,6 +1,7 @@
 //! The logins found on a computer before it is shared: its disk, listed through the change
 //! manifest capture, and its fork-time record. This only names them; an export of a Linux
-//! computer leaves them out through [`crate::export_scrub`], which removes the files this lists.
+//! virtual machine removes them from the exported computer through [`crate::export_scrub`],
+//! which removes the files this lists.
 
 use std::sync::Arc;
 
@@ -31,9 +32,9 @@ pub struct Found {
     /// Why Silo could not check the whole computer, when it could not (a stopped computer, a checkpoint).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub unchecked: Option<String>,
-    /// The export will not carry these logins: it is made from a copy they are removed from.
-    /// False when they stay in the file (a checkpoint, a computer that is not a Linux one) or
-    /// when the person asked to include them.
+    /// The export removes these logins from the computer it writes: it is made from a copy they
+    /// are removed from. False when they stay in the file (a checkpoint, a computer that is not a
+    /// Linux virtual machine) or when the person asked to include them.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub leaves_out: bool,
 }

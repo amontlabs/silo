@@ -5883,6 +5883,48 @@ fn a_fork_copies_only_the_named_secrets_and_github_on_request() {
 }
 
 #[test]
+fn a_fork_starts_on_a_closed_network_only_when_asked_to() {
+    let _test_state = crate::test_support::global_state();
+    let deny_all = serde_json::json!({
+        "default_egress": "deny",
+        "default_ingress": "deny",
+        "rules": []
+    });
+    let directory = tempfile::tempdir().unwrap();
+    let (paths, mut fork) = fork_fixture(&directory);
+    let parent_policy = fork.desired_policy.clone();
+    assert_ne!(parent_policy, deny_all);
+    fork_commit(
+        &journal_runner("Running", ""),
+        &paths,
+        &FakeAssignments::new(&[]),
+        &fork,
+        "branch",
+    )
+    .unwrap();
+    let (_, record) = fork_child(&paths);
+    assert_eq!(record.desired_network_policy, Some(parent_policy));
+
+    let directory = tempfile::tempdir().unwrap();
+    let (paths, closed) = fork_fixture(&directory);
+    fork = closed;
+    fork.options = ForkOptions {
+        closed_network: true,
+        ..ForkOptions::default()
+    };
+    fork_commit(
+        &journal_runner("Running", ""),
+        &paths,
+        &FakeAssignments::new(&[]),
+        &fork,
+        "branch",
+    )
+    .unwrap();
+    let (_, record) = fork_child(&paths);
+    assert_eq!(record.desired_network_policy, Some(deny_all));
+}
+
+#[test]
 fn a_fork_records_what_it_was_quieted_with() {
     let _test_state = crate::test_support::global_state();
     let directory = tempfile::tempdir().unwrap();

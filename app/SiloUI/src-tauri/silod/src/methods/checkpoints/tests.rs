@@ -1142,6 +1142,86 @@ async fn exports_create_resolves_a_macos_computer_and_hands_it_to_the_archive_wr
 }
 
 #[tokio::test]
+async fn the_logins_check_says_whether_the_export_leaves_them_out() {
+    let fixture = fixture();
+    let check = |include: Option<bool>| {
+        let mut params = json!({"computerId": LINUX_ID});
+        if let Some(include) = include {
+            params["includeLogins"] = json!(include);
+        }
+        params
+    };
+    let left_out = job_id(
+        call(&fixture, MethodName::ExportsCheck, check(None))
+            .await
+            .unwrap(),
+    );
+    let found = finished(&fixture, &left_out).await.outcome.unwrap();
+    assert_eq!(found.result.unwrap()["leavesOut"], json!(true));
+    let included = job_id(
+        call(&fixture, MethodName::ExportsCheck, check(Some(true)))
+            .await
+            .unwrap(),
+    );
+    let found = finished(&fixture, &included).await.outcome.unwrap();
+    assert!(found.result.unwrap().get("leavesOut").is_none());
+    // A macOS computer's logins stay in its file, whatever the choice.
+    let macos = job_id(
+        call(
+            &fixture,
+            MethodName::ExportsCheck,
+            json!({"computerId": fixture.macos_id}),
+        )
+        .await
+        .unwrap(),
+    );
+    let found = finished(&fixture, &macos).await.outcome.unwrap();
+    assert!(found
+        .result
+        .map_or(true, |result| result.get("leavesOut").is_none()));
+    let refused = call(
+        &fixture,
+        MethodName::ExportsCheck,
+        json!({"computerId": LINUX_ID, "includeLogins": "yes"}),
+    )
+    .await
+    .unwrap_err();
+    assert!(refused.message.contains("Invalid params"), "{}", refused.message);
+}
+
+#[tokio::test]
+async fn exports_create_takes_the_choice_to_include_logins_as_a_boolean() {
+    let fixture = fixture();
+    let folder = fixture.directory.path().join("exports");
+    std::fs::create_dir_all(&folder).unwrap();
+    call(
+        &fixture,
+        MethodName::ExportsDestinationSet,
+        json!({"path": folder}),
+    )
+    .await
+    .unwrap();
+    let refused = call(
+        &fixture,
+        MethodName::ExportsCreate,
+        json!({"destination": folder, "computerIds": [fixture.macos_id], "includeLogins": "yes"}),
+    )
+    .await
+    .unwrap_err();
+    assert!(refused.message.contains("Invalid params"), "{}", refused.message);
+    let started = call(
+        &fixture,
+        MethodName::ExportsCreate,
+        json!({"destination": folder, "computerIds": [fixture.macos_id], "includeLogins": true}),
+    )
+    .await
+    .unwrap();
+    let id = job_id(started);
+    assert!(id.as_str().starts_with("exports:"));
+    let _ = finished(&fixture, &id).await;
+}
+
+#[tokio::test]
 async fn exports_import_validates_its_inputs_before_it_starts_a_job() {
     let fixture = fixture();
     let relative = call(

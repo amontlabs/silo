@@ -240,9 +240,6 @@ mod tests {
         fn computers(&self) -> Result<Vec<(String, String)>, String> {
             Ok(Vec::new())
         }
-        fn checkpoint_ids(&self, _: &str) -> Result<Vec<String>, String> {
-            Ok(Vec::new())
-        }
         fn fork(&self, source: &str, name: &str) -> Result<String, String> {
             if self.fail_fork_of == Some(source) {
                 return Err("no room".into());
@@ -264,9 +261,6 @@ mod tests {
         }
         fn delete(&self, id: &str) -> Result<(), String> {
             self.deleted.lock().unwrap().push(id.to_owned());
-            Ok(())
-        }
-        fn delete_checkpoint(&self, _: &str, _: &str) -> Result<(), String> {
             Ok(())
         }
     }

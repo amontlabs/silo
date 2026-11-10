@@ -71,21 +71,6 @@ impl ScrubEnv for Scrub {
         BuildEnv::computers(&self.env)
     }
 
-    fn checkpoint_ids(&self, computer_id: &str) -> Result<Vec<String>, String> {
-        let row = self
-            .env
-            .rows()?
-            .into_iter()
-            .find(|row| row["id"].as_str() == Some(computer_id))
-            .ok_or("The computer is not listed.")?;
-        Ok(row["checkpoints"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter_map(|checkpoint| checkpoint["id"].as_str().map(str::to_owned))
-            .collect())
-    }
-
     fn fork(&self, source_id: &str, name: &str) -> Result<String, String> {
         let _entered = self.env.handle.enter();
         let job = service_for(self.env.silod.as_ref())
@@ -148,14 +133,5 @@ impl ScrubEnv for Scrub {
 
     fn delete(&self, computer_id: &str) -> Result<(), String> {
         BuildEnv::delete(&self.env, computer_id)
-    }
-
-    fn delete_checkpoint(&self, computer_id: &str, checkpoint_id: &str) -> Result<(), String> {
-        self.env
-            .job(
-                MethodName::CheckpointsDelete,
-                json!({"computerId": computer_id, "checkpointId": checkpoint_id}),
-            )
-            .map(|_| ())
     }
 }

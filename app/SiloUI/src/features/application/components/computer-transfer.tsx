@@ -14,8 +14,8 @@ const TRANSFER_TOAST_ID = "backup-operation"
 
 const revealLabel = () => (isMac() ? "Show in Finder" : "Show in folder")
 
-/** What the success toast adds when the export left login files out. */
-const leftOutNote = (leftOut?: string[]) => leftOut?.length ? ` · ${leftOut.length} login ${leftOut.length === 1 ? "file" : "files"} left out` : ""
+/** What the success toast adds when the export removed login files. */
+const leftOutNote = (leftOut?: string[]) => leftOut?.length ? ` · ${leftOut.length} login ${leftOut.length === 1 ? "file" : "files"} removed` : ""
 
 const stepState: Record<BackupPhase["tone"], OperationStep["state"]> = { succeeded: "done", running: "current", waiting: "pending", failed: "failed" }
 
@@ -69,7 +69,7 @@ export function useComputerTransfer(backup: BackupController, options: { source:
       showOperationFailure(TRANSFER_TOAST_ID, "Export is unavailable", { description: controller.state.availabilityMessage ?? "Export is not available in this Silo build. No computer data was changed.", native: false })
       return null
     }
-    // Logins are named before anything is chosen or written. Where the export leaves them out, the person can choose to
+    // Logins are named before anything is chosen or written. Where the export removes them, the person can choose to
     // include them. Where it cannot, a check that found some, or could not run (a stopped computer, a checkpoint, a
     // failure), asks whether to share anyway.
     let logins: string[] = []

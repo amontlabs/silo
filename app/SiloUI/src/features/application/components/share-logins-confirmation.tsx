@@ -10,15 +10,16 @@ export interface ShareLoginsRequest {
   logins: string[]
   /** Why Silo could not check the computer (stopped, a checkpoint, a failed check). */
   unchecked?: string
-  /** The export leaves the logins out unless the person asks to include them. False when it cannot: they stay in the file. */
+  /** The export removes the logins from the exported computer unless the person asks to include them. False when it cannot: they stay in the file. */
   leavesOut: boolean
   answer: (choice: ShareLoginsChoice) => void
 }
 
 /**
  * Names the logins on a computer before it is exported. Where Silo can strip them (a Linux computer's current state)
- * the export leaves them out and the person can choose to include them; where it cannot, they stay in the file and the
- * person is asked whether to share anyway.
+ * the export removes them from the exported computer, with the caveat that traces may remain in the file's disk layers,
+ * and the person can choose to include them; where it cannot, they stay in the file and the person is asked whether to
+ * share anyway.
  */
 export function ShareLoginsConfirmation({ request }: { request: ShareLoginsRequest | null }) {
   return <AlertDialog.Root open={request !== null} onOpenChange={(open) => { if (!open) request?.answer("cancel") }}>
@@ -34,7 +35,7 @@ export function ShareLoginsConfirmation({ request }: { request: ShareLoginsReque
                 {request.logins.map((login) => <li key={login}>{login}</li>)}
               </ul>
               {request.leavesOut
-                ? <p>Silo leaves these files out of the export. Include them only if the file will stay private: anyone who gets it can use them.</p>
+                ? <p>Silo removes these files from the export, but traces may remain in the file. Keep the file private either way, and include the logins only if you mean to share them.</p>
                 : <p>Anyone who gets the export file can use them. Silo cannot leave these files out of this export.</p>}
             </>}
             {request && !request.leavesOut && request.unchecked && <p>Silo could not check {request.computerName} for {request.logins.length > 0 ? "other " : ""}logins ({request.unchecked.trim().replace(/\.$/, "")}).</p>}
@@ -45,7 +46,7 @@ export function ShareLoginsConfirmation({ request }: { request: ShareLoginsReque
           {request?.leavesOut
             ? <>
               <AlertDialog.Action asChild><Button type="button" variant="ghost" size="sm" onClick={() => request.answer("include")}>Include logins</Button></AlertDialog.Action>
-              <AlertDialog.Action asChild><Button type="button" variant="outline" size="sm" onClick={() => request.answer("leave-out")}>Export without logins</Button></AlertDialog.Action>
+              <AlertDialog.Action asChild><Button type="button" variant="outline" size="sm" onClick={() => request.answer("leave-out")}>Remove logins and export</Button></AlertDialog.Action>
             </>
             : <AlertDialog.Action asChild><Button type="button" variant="outline" size="sm" onClick={() => request?.answer("include")}>Share anyway</Button></AlertDialog.Action>}
         </div>

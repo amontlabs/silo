@@ -1,11 +1,17 @@
-//! Exporting a Linux computer without its logins.
+//! Exporting a Linux computer without its login files, as far as the file system goes.
 //!
 //! The export is not made from the computer itself. A hidden, short-lived copy of it is forked
-//! with no secrets, no GitHub access and a closed network, started, stripped of the login files
-//! the scan names (`changes::ignore::login_label` is the one list), told to hand the freed
-//! blocks back to the disk so the deleted bytes do not stay in the disk image, and stopped. The
-//! export captures that copy under the original's name, and the copy is dropped whether the
-//! export worked or not.
+//! with no secrets, no GitHub access and a closed network, started, and stripped of the login files
+//! the scan names (`changes::ignore::login_label` is the one list). The export captures that copy
+//! under the original's name, and the copy is dropped whether the export worked or not.
+//!
+//! This keeps the files out of the imported computer; it does not keep their bytes out of the file.
+//! A copy is a fork, and a fork's disks are layers over the computer's own: the layers the fork
+//! shares with the computer (and the checkpoint it took) are read-only and are written into the
+//! export whole, with the bytes of the deleted files in them. The canary check in
+//! `docs/direction/checks/t14_export_scrub_check.sh` finds a marker written to a login path in the
+//! exported layers after the file is deleted and the free blocks are discarded, so nothing here may
+//! be described as keeping the bytes out.
 //!
 //! The computer-level steps (fork, start, run a command, stop, delete) are supplied by
 //! [`ScrubEnv`]; `silod` implements it with the engine's own methods.
@@ -28,15 +34,6 @@ pub fn is_copy(name: &str) -> bool {
         .is_some_and(|suffix| suffix.len() == 8 && suffix.chars().all(|c| c.is_ascii_hexdigit()))
 }
 
-/// Run as root in the copy after the login files are gone: writes the file systems back, then
-/// asks each of them to discard its free blocks, so the disk image no longer holds the deleted
-/// bytes. `/` is the root disk and `/workspace` the data disk; a file system that cannot
-/// discard fails the step, since the bytes would stay.
-pub const TRIM_SCRIPT: &str = "set -u; sync; status=0; \
-for mount in / /workspace; do \
-  fstrim -v \"$mount\" || { echo \"fstrim $mount failed\" >&2; status=1; }; \
-done; sync; exit $status";
-
 /// Lists, from the paths on stdin (NUL separated), the ones that still exist.
 const SURVIVORS_SCRIPT: &str = "xargs -0 sh -c 'for p; do if [ -e \"$p\" ] || [ -L \"$p\" ]; then printf \"%s\\n\" \"$p\"; fi; done' sh";
 
@@ -47,8 +44,6 @@ const REMOVE_SCRIPT: &str = "xargs -0 rm -f --";
 pub trait ScrubEnv: Send + Sync {
     /// Every computer, as (id, name).
     fn computers(&self) -> Result<Vec<(String, String)>, String>;
-    /// The ids of a computer's checkpoints.
-    fn checkpoint_ids(&self, computer_id: &str) -> Result<Vec<String>, String>;
     /// Forks `source_id` as `name` with no secrets, no GitHub access and a closed network.
     /// Returns the copy's id.
     fn fork(&self, source_id: &str, name: &str) -> Result<String, String>;
@@ -60,7 +55,6 @@ pub trait ScrubEnv: Send + Sync {
     fn stop(&self, computer_id: &str) -> Result<(), String>;
     /// Stops the computer if it runs, then deletes it.
     fn delete(&self, computer_id: &str) -> Result<(), String>;
-    fn delete_checkpoint(&self, computer_id: &str, checkpoint_id: &str) -> Result<(), String>;
 }
 
 /// A copy that is ready to be exported.
@@ -72,8 +66,6 @@ pub struct Prepared {
     pub source_id: String,
     /// What the copy no longer holds, by the name an export warning shows.
     pub left_out: Vec<String>,
-    /// The source's checkpoints before the fork took its own.
-    checkpoints_before: Vec<String>,
 }
 
 /// Why no copy was prepared.
@@ -118,24 +110,18 @@ pub fn prepare(
     if cancelled() {
         return Err(Failure::Cancelled);
     }
-    let checkpoints_before = env
-        .checkpoint_ids(source_id)
-        .map_err(|error| Failure::failed(format!("Silo could not read the checkpoints: {error}")))?;
     let name = copy_name();
     progress("Making a temporary copy of the computer");
     let copy_id = match env.fork(source_id, &name) {
         Ok(id) => id,
         Err(error) => {
-            // The fork may have left a half-made copy, or a checkpoint of the source.
+            // The fork may have left a half-made copy.
             let found = env
                 .computers()
                 .unwrap_or_default()
                 .into_iter()
                 .find(|(_, existing)| *existing == name);
-            let cleanup = found
-                .map(|(id, _)| env.delete(&id))
-                .unwrap_or(Ok(()))
-                .and(drop_new_checkpoints(env, source_id, &checkpoints_before));
+            let cleanup = found.map(|(id, _)| env.delete(&id)).unwrap_or(Ok(()));
             return Err(Failure::failed(format!(
                 "Silo could not make the temporary copy: {error}."
             ))
@@ -147,7 +133,6 @@ pub fn prepare(
         copy_name: name,
         source_id: source_id.to_owned(),
         left_out: Vec::new(),
-        checkpoints_before,
     };
     match strip(env, &mut prepared, progress, cancelled) {
         Ok(()) => Ok(prepared),
@@ -187,9 +172,6 @@ fn strip(
         .collect::<Vec<_>>();
     prepared.left_out.sort();
     prepared.left_out.dedup();
-    proceed()?;
-    progress("Freeing the space the removed files used");
-    step("Silo could not free the removed files' space", trim(env, &id))?;
     proceed()?;
     progress("Stopping the copy");
     step("Silo could not stop the temporary copy", env.stop(&id))
@@ -235,14 +217,6 @@ fn remove(env: &dyn ScrubEnv, id: &str, paths: &[String]) -> Result<(), String> 
     Ok(())
 }
 
-fn trim(env: &dyn ScrubEnv, id: &str) -> Result<(), String> {
-    let out = env.run(id, TRIM_SCRIPT, &[])?;
-    if out.code != 0 {
-        return Err(format!("{}", tail(&out)));
-    }
-    Ok(())
-}
-
 /// The last words a command said, on stderr first.
 fn tail(out: &ExecOut) -> String {
     let text = if out.stderr.is_empty() {
@@ -256,43 +230,15 @@ fn tail(out: &ExecOut) -> String {
     text.chars().skip(skip).collect()
 }
 
-/// The checkpoints the source gained while the copy was forked from it.
-fn drop_new_checkpoints(env: &dyn ScrubEnv, source_id: &str, before: &[String]) -> Result<(), String> {
-    let now = env.checkpoint_ids(source_id)?;
-    let mut failed = Vec::new();
-    for checkpoint in now.iter().filter(|id| !before.contains(id)) {
-        if let Err(error) = env.delete_checkpoint(source_id, checkpoint) {
-            failed.push(error);
-        }
-    }
-    if failed.is_empty() {
-        Ok(())
-    } else {
-        Err(failed.join(" "))
-    }
-}
-
-/// Drops the copy, and the checkpoint the fork took of the source. Every step runs even when an
-/// earlier one failed; the first failures are reported together.
+/// Drops the copy. The disk-only checkpoint the fork took of the source stays, as it does for any
+/// fork: the next checkpoint and export of the source build on it.
 pub fn drop_copy(env: &dyn ScrubEnv, prepared: &Prepared) -> Result<(), String> {
-    let mut failed = Vec::new();
-    if let Err(error) = env.delete(&prepared.copy_id) {
-        failed.push(format!(
+    env.delete(&prepared.copy_id).map_err(|error| {
+        format!(
             "Silo could not drop the temporary copy {} ({error}).",
             prepared.copy_name
-        ));
-    }
-    if let Err(error) = drop_new_checkpoints(env, &prepared.source_id, &prepared.checkpoints_before)
-    {
-        failed.push(format!(
-            "Silo could not remove the checkpoint it took for the export ({error})."
-        ));
-    }
-    if failed.is_empty() {
-        Ok(())
-    } else {
-        Err(failed.join(" "))
-    }
+        )
+    })
 }
 
 #[cfg(test)]
