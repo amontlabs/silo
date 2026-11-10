@@ -57,8 +57,8 @@ pub(super) fn finish(
     }
     let output = guest.run_script(identity_script)?;
     if output.status != 0 || !output.stdout.contains("MARKER_OWNER=0:0") {
-        guest.log_command("fork account script", &output);
-        return Err("Silo could not finish setting up the fork's account.".into());
+        guest.log_command("account script", &output);
+        return Err("Silo could not finish setting up the computer's account.".into());
     }
     // The script replaced the host keys, and every new connection presents them.
     guest.reset_host_keys()?;
@@ -388,7 +388,7 @@ mod tests {
         assert!(result.is_err());
         assert_eq!(
             guest.logged.borrow().as_slice(),
-            ["fork account script: 1 oops"]
+            ["account script: 1 oops"]
         );
         let guest = Fake {
             fail_quiet: true,

@@ -633,12 +633,14 @@ pub(super) fn read_record(layout: &Layout) -> Result<Record, String> {
     Ok(record)
 }
 
-/// Whether a saved record says an agent may have used the disk.
+/// Whether a saved record says an agent may have used the disk, by its flag or by a completed
+/// setup in a version that predates the flag.
 fn saved_agent_use(bytes: &[u8]) -> bool {
-    serde_json::from_slice::<serde_json::Value>(bytes)
-        .ok()
-        .and_then(|value| value.get("agentMayHaveUsed")?.as_bool())
-        .unwrap_or(false)
+    serde_json::from_slice::<Record>(bytes).is_ok_and(|saved| saved.may_hold_agent_work())
+        || serde_json::from_slice::<serde_json::Value>(bytes)
+            .ok()
+            .and_then(|value| value.get("agentMayHaveUsed")?.as_bool())
+            .unwrap_or(false)
 }
 
 pub(super) fn save_with_sync(

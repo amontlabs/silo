@@ -994,23 +994,23 @@ pub(super) fn defer(work: impl FnOnce() + Send + 'static) {
 
 // MARK: Running
 
-/// Whether the saved record or the one in hand says an agent may have written the disk. A copy
-/// read before the flag was set still cannot choose Apple's network.
-fn used_on_disk_or_in_hand(record: &Record, layout: &Layout) -> Record {
+/// The record in hand with the use flag the saved one has, so a copy read before the flag was
+/// set cannot choose Apple's network. A saved record that cannot be read does not count as clean.
+fn used_on_disk_or_in_hand(record: &Record, layout: &Layout) -> Result<Record, String> {
+    let saved = store::read_record(layout).map_err(|_| UNREADABLE_RECORD.to_string())?;
     let mut checked = record.clone();
-    if store::read_record(layout).is_ok_and(|saved| saved.may_hold_agent_work()) {
+    if saved.may_hold_agent_work() {
         checked.agent_may_have_used = true;
     }
-    checked
+    Ok(checked)
 }
+
+const UNREADABLE_RECORD: &str = "Silo could not read this computer's record, so it cannot tell whether it is safe to start on the Mac's own network.";
 
 /// Refuses to build a machine on Apple's own network for a disk an agent may have written.
 /// A record that cannot be read does not count as clean.
 fn ensure_apple_network_allowed(record: &Record, layout: &Layout) -> Result<(), String> {
-    let saved = store::read_record(layout).map_err(|_| {
-        "Silo could not read this computer's record, so it cannot tell whether it is safe to start on the Mac's own network."
-            .to_string()
-    })?;
+    let saved = store::read_record(layout).map_err(|_| UNREADABLE_RECORD.to_string())?;
     if record.may_hold_agent_work() || saved.may_hold_agent_work() {
         return Err(store::NETWORK_NOT_PREPARED.into());
     }
@@ -1023,7 +1023,7 @@ pub(super) fn start(
     layout: &Layout,
     cancelled: &dyn Fn() -> bool,
 ) -> Result<(), String> {
-    if store::network_plan(&used_on_disk_or_in_hand(record, layout))?
+    if store::network_plan(&used_on_disk_or_in_hand(record, layout)?)?
         == store::NetworkPlan::AppleNat
     {
         start_machine(app, record, layout, &Boot::BootstrapNat)?;
@@ -2518,12 +2518,13 @@ mod tests {
             Err(store::NETWORK_NOT_PREPARED.to_string())
         );
         assert_eq!(
-            store::network_plan(&used_on_disk_or_in_hand(&record, &layout)),
+            store::network_plan(&used_on_disk_or_in_hand(&record, &layout).unwrap()),
             Err(store::NETWORK_NOT_PREPARED.to_string())
         );
         // A record that cannot be read does not count as clean.
         std::fs::write(layout.record(), b"not json").unwrap();
         assert!(ensure_apple_network_allowed(&record, &layout).is_err());
+        assert!(used_on_disk_or_in_hand(&record, &layout).is_err());
     }
 
     #[test]
