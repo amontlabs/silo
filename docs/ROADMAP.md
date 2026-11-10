@@ -220,8 +220,12 @@ These gaps are in the threat model and stay there. Each would need its own desig
   separate user is a large change to how the runtime is packaged.
 - **Repository scoping in personal-token mode.** A personal token carries all its permissions by
   design; GitHub App mode is the scoped path.
-- **Network policy for macOS computers before setup completes.** They use Apple's NAT until setup
-  finishes and can reach the Mac and the LAN in that window.
+- **Network policy for macOS computers during a first install.** A first install and the
+  setup of a copy of a template use Apple's NAT until setup finishes and can reach the Mac and
+  the LAN in that window; the disk then holds only Apple's image and Silo's scripts. A computer
+  an agent may have used (every fork and import, and any computer whose setup has completed)
+  never boots on Apple's NAT, and Recovery has no network card. Closing the window for a first
+  install needs the bootstrap files inside the template, which rebuilds every user's template.
 - **Bandwidth and connection limits** per computer.
 
 ## Ideas to revisit
