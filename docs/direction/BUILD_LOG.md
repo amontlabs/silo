@@ -30,7 +30,7 @@ Plan: [PLAN.md](PLAN.md). Agent rules: [AGENT-BRIEF.md](AGENT-BRIEF.md).
 | T4 | merged 2026-11-10 | `feat/keep-conflict-choices` | engine tests 273, api 53, silod checkpoints 56 passed in the item; two review rounds; the `silo-ui` crate was not built there |
 | T9 | merged 2026-11-10 | `feat/macos-computer-app-parity` | frontend only, no Rust change; 2914 frontend tests passed in the item; reviewed by the fallback model (gemini flash) only, one round; not run in the real app |
 | T11 | running since 2026-11-10 | | task id ends `8a11b496-7815-4ef3-830d-fe8aa13cc55a` (Sonnet) |
-| T12 | done, not merged yet | `feat/computer-agent-install` (`20f90cf27`) | no review ran in the item (quota). Review on Sonnet: task id ends `23526503-d93b-4f5f-b0cf-8d7d857a58ec`. At merge, classify `agents.list` (Tree) and `agents.install` (Made) in policy/rules.rs. macOS create with agents is refused; Linux create installs best effort |
+| T12 | merged 2026-11-10 | `feat/computer-agent-install` | merged by hand (registry conflicts with T1); `agents.list` is Tree and `agents.install` is Made in the policy; 637 focused tests passed after the merge. Review on Sonnet still running: task id ends `23526503-d93b-4f5f-b0cf-8d7d857a58ec`; fix its findings on `direction`. macOS create with agents is refused; Linux create installs best effort; no real computer run |
 | S2 | merged 2026-11-10 | `docs/s2-linux-computer-rebuild` | [evidence](evidence/S2.md). Verdict: buildable now for Linux with host-side disk moves; macOS later. T15 waits for T6 (recipes in the engine) |
 | T7 | merged 2026-11-10 | `fix/macos-nat-boundary` | 530 macOS engine tests passed; unit tests only, no macOS computer run; one review round on the fallback model. Live steps are in the item's report, copied below |
 | T14 | running since 2026-11-10 | | task id ends `daee93c4-fbae-4cc0-8abb-9e9e902d2ca4` (Sonnet); holds the Dev engine for its live canary check |
@@ -73,6 +73,16 @@ These were not asked of the owner. Each is open to change.
     requests, which narrows it).
 
 ## Found during the build
+
+- **Merging two items that both add methods** conflicts in `api/src/methods/mod.rs`,
+  `registry.rs`, `schema.rs`, `requests.rs`, the schema file and `engine/src/lib.rs`. Recipe:
+  `git merge --no-ff --no-commit <branch>`; run `docs/direction/tools/union.py` on the hand-written
+  files (keeps both sides of additive hunks); set the pinned counts by hand (methods, per-kind,
+  job results); `git checkout --ours` the two generated files and run both generators; add the
+  new methods to `engine/src/policy/rules.rs`; run `docs/direction/tools/integrate.sh` or the
+  focused suites; commit. Method count after T12: 178 (56 queries), 40 job results.
+- **Integration run after T1, T4, T7, T9** (2026-11-10): api, silod, cli and the engine's policy,
+  audit, guest_client, changes and macOS suites, 1101 tests, no failures; fmt clean.
 
 - **Integration checks** run with
   `CARGO_TARGET_DIR=~/code/projects/silo-wt-targets/integration`; the script regenerates the API
