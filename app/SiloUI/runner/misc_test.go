@@ -885,3 +885,31 @@ esac
 		t.Fatalf("err = %v", err)
 	}
 }
+
+// MARK: shutdown
+
+func TestASecondInterruptEndsASlowShutdownAtOnce(t *testing.T) {
+	signals := make(chan os.Signal, 1)
+	// The work in flight is slow: it does not come back on its own.
+	slow := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		await(quiet(), signals, func() { <-slow })
+		close(done)
+	}()
+	select {
+	case <-done:
+		t.Fatal("the shutdown ended although nothing came back")
+	case <-time.After(50 * time.Millisecond):
+	}
+	signals <- os.Interrupt
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("a second interrupt did not end the wait")
+	}
+	// The abandoned step still runs to its end in the background; nothing waits on it.
+	close(slow)
+	// A step that finishes on its own needs no interrupt.
+	await(quiet(), signals, func() {})
+}

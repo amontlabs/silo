@@ -671,6 +671,16 @@ pub fn resume(paths: &RuntimePaths, name: &str) -> Result<(), String> {
     thaw(paths, name)
 }
 
+/// Ends a pause the way [`resume`] does, for [`stop`]: under the freeze lock, the marker goes and
+/// the processes thaw. A frozen process cannot run to answer a signal, so a stop that signalled
+/// first would wait out TERM and end in SIGKILL. The thaw may fail (a cgroup already gone); the
+/// stop proceeds anyway, as does the marker's removal in the stale-state cleanup.
+fn end_pause(paths: &RuntimePaths, name: &str) {
+    let _freezing = freezing();
+    let _ = std::fs::remove_file(paused_file(paths, name));
+    let _ = thaw(paths, name);
+}
+
 /// Thaws the container (a no-op when it is not frozen).
 fn thaw(paths: &RuntimePaths, name: &str) -> Result<(), String> {
     let file = cgroup_dir(paths, name).join("cgroup.freeze");
@@ -1432,6 +1442,9 @@ pub fn stop(
     let layout = Layout::new(&paths.home);
     let dir = layout.computer(name);
     let state = dir.state();
+    // A paused computer's processes are frozen; end the pause first, so TERM is answered like
+    // any other stop's instead of ending in SIGKILL after the wait.
+    end_pause(paths, name);
     if holder_alive(paths, name) {
         let _ = crun(tools, &state)
             .args(["kill", name, "TERM"])
@@ -1844,6 +1857,43 @@ mod tests {
     #[test]
     fn a_stop_or_start_ends_a_pause() {
         assert!(STALE_STATE_FILES.contains(&PAUSED_FILE));
+    }
+
+    #[test]
+    fn a_stop_ends_a_pause_before_it_signals_the_processes() {
+        let home = tempfile::tempdir().unwrap();
+        let paths = test_paths(home.path());
+        let dir = Layout::new(&paths.home).computer("dev");
+        std::fs::create_dir_all(dir.state()).unwrap();
+        std::fs::write(paused_file(&paths, "dev"), "").unwrap();
+        // What stop does first, under the freeze lock. The thaw itself may fail where there is no
+        // cgroup (here); the pause must end regardless, so TERM is answered like any stop's.
+        end_pause(&paths, "dev");
+        assert!(!is_paused(&paths, "dev"));
+    }
+
+    #[test]
+    fn a_stop_waits_for_a_checkpoint_before_it_ends_a_pause() {
+        let home = tempfile::tempdir().unwrap();
+        let paths = test_paths(home.path());
+        std::fs::create_dir_all(Layout::new(&paths.home).computer("dev").state()).unwrap();
+        std::fs::write(paused_file(&paths, "dev"), "").unwrap();
+        // A checkpoint holds the freeze lock across its copy; the pause of the user must not be
+        // undone in the middle of one.
+        let guard = freezing();
+        let (done, taken) = std::sync::mpsc::channel();
+        let paused = paths.clone();
+        std::thread::spawn(move || {
+            end_pause(&paused, "dev");
+            done.send(()).unwrap();
+        });
+        assert!(
+            taken.recv_timeout(Duration::from_millis(100)).is_err(),
+            "the pause ended while a checkpoint held the freeze lock"
+        );
+        drop(guard);
+        taken.recv_timeout(Duration::from_secs(10)).unwrap();
+        assert!(!is_paused(&paths, "dev"));
     }
 
     fn fake_process(proc: &Path, pid: u32, argv0: &str, cgroup: &str) {

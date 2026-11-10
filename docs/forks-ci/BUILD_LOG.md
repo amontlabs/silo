@@ -143,6 +143,312 @@ Both owner decisions:
   - **Not done:** a macOS fork timing (no macOS computer on Dev), the Linux KVM host.
   - **Reviews:** Fable LGTM, Opus LGTM.
 
+### R1: CI runner on the Mac (branch `claude/runner-phase-1`)
+
+- **Built:** `silo-action/` and every reference removed; `silo-runner` (Go, `app/SiloUI/runner`, on
+  `actions/scaleset` v0.5.0); recipes `silo-linux` and `silo-macos` (runner 2.338.2, SHA-256 from the
+  release digests, linux-arm64 and osx-arm64); `silo exec --stream [--stdin]` in the CLI; example
+  workflow; Go CI job; [CI runner](../SiloUI-CI-RUNNER.md); threat-model section; changeset.
+- **Long-lived command with a secret, without argv:** `silo exec` was bounded to 180 s and had no input.
+  The API's `guest.exec.start` already takes `stdin` and has no time limit, so the CLI gained
+  `--stream` (uses `guest.exec.start`, output as it arrives, no step recorded) and `--stdin` (reads the
+  CLI's stdin to its end, at most 1 MiB, into the request). Not an env flag: the engine passes
+  a guest `env` value as `--env K=V` in the host's `msb exec` arguments (Linux computers) or in the ssh
+  command line (macOS computers), where `ps` shows it; stdin is not in either. The recipes' `silo-run-jit` script reads the line into
+  `ACTIONS_RUNNER_INPUT_JITCONFIG` and execs `run.sh`.
+- **Decisions beyond Q6:** a computer is deleted after `succeeded`, `canceled` and `skipped`, kept
+  after anything else; ready means the runner printed "Listening for Jobs"; after `startAttempts`
+  failures the helper backs off up to 16 minutes; the recipe is refreshed when a new runner release is
+  `afterDays` (3) old, with the digest from the release API; capacity counts `silo list --all`, so a
+  macOS recipe build uses a slot.
+- **Lifecycle rewritten to [R1-SIMPLER-DESIGN.md](R1-SIMPLER-DESIGN.md) (7 Nov 2026).** Two review
+  rounds kept finding ownership bugs in the per-runner flags, goroutines and the separate startup
+  reconcile, so the scaler's finish/abandon/settle/retry/retention/adopt/housekeeping paths and
+  `reconcile.go` are gone. One event-loop goroutine (`fleet.go`) is the only writer of the records and
+  the ledger; `plan()` runs after every event and every 30 s tick and starts the next step of each
+  record; the ledger (`state.go`) holds the phases `forking | live | finishing | kept`, written by name
+  before the fork and by id after, and fsynced with its directory. Every engine call after the fork goes
+  by id (`silo drop` does not stop a running computer and the engine refuses to delete one, so
+  `CLI.Drop` stops first); a computer is gone only when a fresh successful `silo list` lacks its id;
+  capacity (`capacity.go`) is a pure function of the latest list plus computers asked for that it does
+  not show running, with the memory read from the recipe file (the scale set's `memoryGiB` key is
+  gone). A job in flight across a restart is adopted as busy and kept with result `unknown`. Non-test Go
+  went from 2588 to 2997 lines: the loop needs its event and task types, the list confirmation and the
+  probe of an adopted runner, which the old code spread over flags.
+- **Review round 3 fixes (7 Nov 2026).** (1) A live record whose runner had a job (its request id is
+  recorded on `JobStarted`, or a job result is stored) is adopted as busy at load and probed; if
+  GitHub no longer has the runner it ends `unknown` and is kept, instead of going through the orphan
+  path and being deleted. Only a live record with no job evidence is finished as an orphan, and that
+  now happens at load, so the `subRestored` sub-state is gone. (2) `JobStillRunning` clears only the
+  helper's own reasons; a stored job result survives, and the probe finishes with it (a success is
+  deleted, a failure stays `failed`) and uses `unknown` only when there is none. (3) The capacity
+  demands are every forking or live record the latest list does not show running. (4) A recipe
+  rebuild reserves its computer (`Fleet.Reserve`, replacing `CheckCapacity`) until it ends; while the list
+  also shows its VM it counts twice, which errs towards fewer computers. (5) The engine refuses to
+  stop a computer that is not running (`This computer isn't running.`, `stop_with_job`), so
+  `CLI.Stop` treats a computer the list shows as stopped as done. (6) A fork that returns an error keeps
+  its `forking` record until a list started after the error binds the exact name (deregister, then
+  delete by id) or shows none (forgotten); the old test of a same-name twin was replaced, because the
+  helper chose the name. A helper killed during a fork whose computer appears after the next start's
+  first list is the remaining case, documented as the owner's to delete. (7) Cosmetic: `retain` has no
+  return value, `type event = any` and the duplicated settler close and idle test are gone. The old
+  watcher of an adopted runner's command is left: it ends with the command and its exit event is
+  ignored by process identity. Tests: 86 (7 new), `go vet`, `gofmt`, `go test -race -count=3 ./...`
+  pass, also with `TZ=UTC`; non-test Go is now 3045 lines.
+- **Review round 4 fixes (7 Nov 2026).** (1) A fork refused because the name is taken
+  (`Computer names must be unique.`, which the CLI prints as text on stderr with no code, so
+  `CLI.Fork` marks it by that sentence) forgets the record and deletes nothing; the old rule would
+  have bound and deleted the computer that had the name. Other fork errors still keep the record for a
+  fresh list. (2) `pendingDemands` does not count a live record with no start in flight, no watched
+  runner command and a computer that a list started after its fork or start (`seenFrom`) shows
+  stopped, so a Mac restart does not hold macOS slots for adopted busy records; a start success moves
+  `seenFrom` on, and a rebuild's `Reserve` list, which cannot be ordered, discounts nothing. (3)
+  `JobStillRunning` sets the helper's own reason to `unknown`, not empty, so a restart before
+  `JobStarted` is persisted adopts the record as busy instead of finishing it as an orphan and deleting
+  a failed job's computer. (4) Docs: pending capacity wording, the restored-record rule, finishing
+  records restarting at deregistration, and a dated note in the design. Each fix has an event-driven
+  regression test; `go vet`, `gofmt` and `go test -race -count=3 ./...` pass, also with `TZ=UTC`.
+- **Tests (no live GitHub, no engine, no computer):** `go vet`, `gofmt`, `go test -race -count=3 ./...`
+  (also with `TZ=UTC`) in `app/SiloUI/runner`: 79 tests pass. The fakes complete at once and the tests
+  drive the loop through events and wait for it to go quiet, so they do not sleep (one uses a 10 ms
+  ready timeout). They cover capacity as a function of the list (macOS two-VM limit counting forks in
+  progress, Linux count and recipe-file RAM), public-repository and public-runner-group refusal,
+  success delete, failure keep, keepFailed count and days, deregister before delete,
+  `JobStillRunningError`, failed deregistration retry, readiness retry and backoff, watchdog restart,
+  the JIT value in the command's standard input and in no argv (a fake `silo` script), `silo drop`
+  stopping first, config validation, the runner version refresh and its rollback, the ledger fsync, and
+  a regression test for each review finding (retention before deregistration, a same-name twin and a
+  failed fork, renamed computers and failed lists, a GitHub outage retried by the tick, a failed ledger
+  write, a result arriving while finishing, recipe memory) and for restarts (idle orphan, job in
+  flight, forking records, kept, interrupted keep). `cargo test -p silo-cli --locked`
+  (synthetic GitHub values, shared target dir; run for the first build, this rewrite changes no Rust):
+  all pass, including 3 new tests (`exec_stream.rs`:
+  the input travels in the request body, not in argv; no step is recorded; `cli.rs` flag parsing;
+  `recipes.rs`: the shipped recipes parse and pin the runner). `cargo fmt --check` clean;
+  `test_ci_native_changes.py` 7 tests pass.
+- **Not run:** the live check, `docs/forks-ci/checks/r1_runner_check.sh` (private test repository,
+  Dev engine, needs scheduling); `actionlint` (not installed; the example parses as YAML); the full
+  Rust workspace and the frontend suites (this phase changes only `cli/` and the Go helper).
+- **Open:** (1) `go.mod` says Go 1.27.3 because `scaleset` v0.5.0 does; the brief said 1.25. (2) The
+  in-guest client cannot run a command in a fork, and `silo-runner` does not install its token, so the
+  example's fork/diff/fold steps need that install done separately. (3) PLAN.md, BUILD_LOG.md and
+  DESIGN-QUESTIONS.md are copied from `claude/forks-phase-3` (they are not on `main`); identical text
+  merges cleanly. (4) `silo-runner` is not built into the app bundle or released.
+- **Live check, 8 Nov 2026 ([r1-runner](evidence/r1-runner/README.md)).** Linux recipe: 19 of 19 pass (run 2, 7 Nov). macOS recipe:
+  the 7 Nov run was blocked by `silo-run-jit: No such file`. Cause: the recipe build checkpoints the *running* builder and a fork
+  boots from the copied disk without the builder's memory, so on macOS the last writes (`silo-run-jit`, and half of the extracted
+  runner: `bin/` was empty) were not on the disk. Fixed in the engine (first as a recipe step, see the follow-up below):
+  `BUILD_VERSION` is now `silo-recipe-build-3` (older builds are rebuilt). Rerun with `R1_OS=macos` on the integration build
+  `412e329c`: 18 of 19 pass (success job on `ci-silo-macos-r1-c69eb916`, deleted; failing job on `ci-silo-macos-r1-b8d9ee73`, kept
+  stopped; no JIT configuration on any command line; restart reconcile; 0 runners at the end). The 19th failed because of the
+  script (the recipe's own builder computer and the list header differed in the before/after comparison); the script is fixed
+  and was not run again. The check script now takes `R1_OS=linux|macos`.
+- **Review follow-up (8 Nov 2026).** The sync moved from the recipe into the macOS checkpoint capture: `Machine::flush_disk` runs
+  `/bin/sync` (60 s limit, a failure refuses the capture before the pause) for every capture of a running computer, whatever its
+  kind (manual, automatic, fork point, the recovery checkpoint before a Restore), because a fork discards saved memory for all of
+  them. The recipe step is gone, `silo-recipe-build-3` stays. Linux needs nothing: its disk-only captures already require the
+  guest flush and its full captures keep the memory. The check script now compares `silo list --all --json` by sorted
+  (id, name, state), minus `ci-*` and the recipe builder (it needs `jq`); the `silo.go` fork comment names the fanout envelope.
+- **macOS sync before every capture (8 Nov, decided after the gpt-6.1-sol review of `0b29af74`):** the guest
+  sync runs before every capture of a running macOS computer, including the before-keep, promote and undo
+  recovery checkpoints. macOS checkpoints hold disks only, so without it a restore (undo) could lose recent
+  writes just as a fork could. Cost: those operations wait for the sync (at most 60 s) and refuse when the
+  guest does not answer it; keep already needs the guest to apply changes. Accepted: correctness of every
+  saved point over the speed of a few. The `quiet::processes_match_by_exact_name_not_by_prefix_or_pattern`
+  failure seen in the engine suite also fails on main (`569f6fea`) at the same assertion and is not caused
+  by this branch.
+- **R1 live check, run 4 (macOS, 8 Nov 2026): 19 of 19 pass**, with the engine sync of `0b29af74` and the JSON before/after
+  comparison. Integration build `silo-f799cb60` (local merge of `forks-phase-3` and `runner-phase-1` on `origin/main`, release
+  Dev bundle, engine started by hand), private repo `0xpolarzero/silo-runner-e2e`, `maxRunners: 1`, no macOS VM running before. The
+  success job ran on `ci-silo-macos-r1-0f3b3af8` (deleted, runner gone), the failing one on `ci-silo-macos-r1-c1f4b46e` (kept,
+  stopped, runner gone); no JIT on any command line (sampler: 26 sightings of `exec --stdin`). Direct check of the fix: a file
+  written in a running macOS computer, a manual checkpoint right after, a fork of that checkpoint: the file (and a 4 KiB blob) is
+  in the fork. Cleaned up: 0 runners, no `ci-*`/`e2e-*` computer, recipe build removed. Evidence:
+  [`evidence/r1-runner/run-4-macos.txt`](evidence/r1-runner/run-4-macos.txt), `runner-4-macos.log`, `config-macos-4.yaml`.
+### Phase F3: sharing a computer as a file (branch `claude/forks-phase-3`, 7 Nov 2026)
+
+What changed, with the evidence for each claim. Test counts are from `cargo test --locked` (synthetic
+GitHub configuration, shared target dir) and Vitest, run on 7 Nov 2026 on the Mac; none of it touched a
+computer, the Dev engine or an app bundle.
+
+- **`silo export` / `silo import`** (`cli/src/share.rs`, `cli.rs`, `render.rs`; `--json` like every
+  command; the same job waiting as the other commands, `Engine::run_job`). `exports.create` gained
+  `archivePath` (the exact file; the remembered-folder rule applies only without it) and there is a new
+  job `exports.check`. `--device` is refused for both with "…work on this device for now, so --device
+  cannot be used with them yet." No MCP tools: the MCP server has no owner-only tier, and both commands
+  read and write files at paths the caller picks and the file can hold the computer's logins; reasons
+  are in `docs/SiloUI-CLI.md`. Evidence: `cli/tests/share.rs` 10 tests (question text, no terminal
+  without `--yes`, `--yes`, failed check, checkpoint by name, failed export/import reported, default
+  import name, `--device`), 3 unit tests in `share.rs`.
+- **Guest image by reference.** Verified first, and the claim in Decision Q4 was not accurate:
+  `compare_loaded_descriptor` (`backup.rs`) compares the loaded snapshot's image with *the archive's own*
+  manifest, not with this Silo's pinned image, so import did not refuse an archive naming another image.
+  What replaces it: a Linux computer whose image reference (and recorded digest, when it has one) equals
+  the pinned image that the runtime cache holds is saved without `--with-image` (`--with-parents`
+  unchanged, including the retry without parents) and its manifest row says `imageEmbedded: false` and
+  carries `imageDigest`, **always the sender's pinned digest** (`PinnedImageRef.manifest_digest`), also when
+  the computer recorded none (before, such a row was matched by tag only). Validation requires a digest
+  exactly on the rows that leave the image out. Import of a lean row now prepares the image **before the
+  payload is extracted** (`prepare_restore_in_group` reads the manifest first, so an offline receiver fails
+  before copying gigabytes; the download checks its own space in `download_and_publish`, and the extraction
+  space check that follows sees what is left): the reference must be this Silo's pinned one (else "Update
+  Silo…"), `preparation::ensure_image` prepares it as computer creation does, and the cached manifest digest
+  must equal the row's `imageDigest`. **Format:** only an archive that needs format 5 (a lean row or a
+  fork-time record) is written as format 5; any other is written as format 4 (header and manifest), so older
+  Silo builds still read it and the changeset needs no warning. Format 4 files are still read; format 5
+  fields in a format 4 file are refused. Evidence: `backup.rs` tests for pinned/other/none image with the
+  digest and the format of each, digest required exactly on lean rows, prepare called first with the digest
+  and with nothing staged, the retry without parents, import calling the preparation only for a lean row
+  and stopping when it fails, format 4 written and read, format 5 fields refused in format 4;
+  `backup_controller.rs` test for another pinned image. **Size before/after: not measured** (the unit tests
+  use a fake runtime; the live check prints the size and takes `BEFORE_BYTES`).
+- **Fork-time record travels.** Archive manifest `forkRecords` (computer, size, sha256, capturedAt,
+  records, bytes), the gzipped stored manifest after the payloads; counted in the file length, hashed,
+  verified by every full check, extracted for the selected computer on import and stored by
+  `Store::put_imported_base` with no source and no origin (parsed first; a bad record is refused and
+  stores nothing). Linux and macOS (and mixed) archives carry it. A failed import removes it. A computer
+  without a record imports as its own, and `fold` without `--into` keeps its message. Evidence:
+  `backup.rs` round trip, tampered record fails check and import, record for an unknown computer refused;
+  `changes/store.rs` 2 tests; `backup_controller.rs` stores/forgets the record; `keep/tests.rs` two
+  tests that read the imported record back and keep three-way into the receiver's main (kept; and
+  refused as divergent with main untouched when the receiver changed the same file).
+  **Hardening after review (7 Nov):** `put_imported_base` counts `records` and `bytes` from the parsed
+  manifest and ignores the archive's numbers (the archive section keeps its fields; import no longer reads
+  them), and a `capturedAt` that is not an RFC 3339 time between 2020 and a day from now is replaced by
+  the import time (test with 1970, year 9999, text and empty). The compressed cap is 128 MiB, what a
+  capture reads back from a computer (`Options::max_compressed_bytes`); the 512 MiB decompressed cap stays
+  because a capture accepts the same (`Options::max_manifest_bytes`), so a lower one would refuse records
+  the engine itself made. **Orphan record:** the record is stored before the computer is saved, and
+  `discard_uncommitted_import` (also what relaunch recovery calls for a journaled identity) did not remove
+  it, so an interruption between the two, or a failed save of the settings, left a record under an id no
+  computer has; macOS relaunch recovery had the same gap. Both now call `forget_fork_record`, whose failure
+  keeps the identity journaled for the next launch. Test: a stored record is gone after
+  `discard_uncommitted_import`.
+- **Login warning.** `credential_group` now matches `.claude/.credentials.json`, `.codex/auth.json`,
+  `.gemini/oauth_creds.json` and `.gemini/gemini-credentials.json` (`gh/hosts.yml` was there). Claude Code and
+  Codex paths are from the tools' own docs (code.claude.com/docs/en/authentication: Linux, mode 0600;
+  developers.openai.com/codex/auth). **Gemini CLI, corrected after review:** `oauth_creds.json` is the legacy
+  file; current gemini-cli migrates it into keychain storage and, with no secret service, writes
+  `~/.gemini/gemini-credentials.json` (`fileKeychain.ts` in google-gemini/gemini-cli: `path.join(homedir(),
+  GEMINI_DIR)` + `gemini-credentials.json`, written encrypted with mode 0600). Both are matched; the earlier
+  claim that the path came only from third-party tools was wrong about the source, not about the legacy
+  file. `login_label` names a login ("a Claude Code login (path)") and leaves out what every computer has
+  (`/etc/shadow`, host keys, public keys, the desktop password). `changes::credentials::check` lists the disk
+  with one change manifest capture (the `silo diff` walk, which runs a bounded script in the guest and
+  reads a gzip back; cost = one capture of `/etc /root /home /usr/local /opt /srv`, seconds on a small
+  computer, proportional to the number of files, and the computer must be running) and the stored record.
+  Warn, never filter. **One "could not check" case (review):** a stopped computer (its disk is not listed;
+  a check never starts it), a checkpoint export (only the record is checked) and a failed check are the
+  same case, with the reason in `unchecked`. The CLI asks "Silo could not check <name> for logins
+  (<reason>). Share anyway? [y/N]" (with "other logins" and the found ones in the same question when both
+  apply), refuses without a terminal unless `--yes`, and with `--yes` reports the reason in `--json`
+  (`unchecked`) and in the text output; the app shows the same sentence in its dialog before the folder
+  picker, and a failed check asks too. Before, a stopped computer exported without a question and a failed
+  check under `--yes` was reported as clean. Evidence: engine tests `ignore.rs` 2, `credentials.rs` 3;
+  `cli/tests/share.rs` 12 (stopped computer asked and refused/accepted, failed check with `--yes` reported
+  in JSON and text); frontend `computer-transfer.test.tsx` (failed check, stopped computer with no logins
+  found, logins beside "other logins"), production bridge 2 new tests.
+  **Tauri command:** `check_export_logins` compiled and its forwarding test passed
+  (`cargo check -p silo-ui`, `cargo test -p silo-ui the_logins_check`) with empty placeholder files for the
+  resources `build.rs` requires (`binaries/*`, `runtime/*`, git-ignored, deleted afterwards);
+  `runtime:prepare` itself was not run (it builds MicroSandbox and Git from source with network access), so
+  this proves the Rust compiles and the forwarding, not a packaged app.
+- **Docs/changeset:** `docs/SiloUI-CLI.md` (commands table and a "Sharing a computer as a file"
+  section, with what the person sees when Silo could not check), `docs/THREAT-MODEL.md` (boundary 6, including
+  that an imported computer is untrusted until kept: `silo fold <imported> --into main` writes the sender's
+  shell files, agent settings and crontab into the computer that holds the receiver's secrets, so read
+  `silo diff` first), `app/SiloUI/.changeset/share-a-computer.md`.
+- **Export file name:** `-o FILE` must end in `.silo-backup`; checked up front for Linux and macOS in
+  `explicit_archive` (before, only the Linux write path checked, after the capture).
+- **Live check, not run:** `docs/forks-ci/checks/f3_share_check.sh` (Dev engine, `e2e-share-*`; keeps
+  the import into a second fork `e2e-share-target`, not the Dev main).
+
+**Final review fixes (7 Nov; reviews: Fable LGTM, Opus LGTM after these).** An import now computes the
+guest image to prepare a second time from the extracted archive and refuses ("the file changed while
+Silo was reading it") unless it equals the image that was described and prepared, so a file replaced
+between the two reads cannot load an unprepared image (test swaps the archive inside `prepare_image`).
+A macOS import that left no computer propagates a failed fork-record removal and keeps the restore
+identity for recovery instead of dropping the error (`settle_unsaved_macos_import`, with a test). `silo
+export --yes` says "other logins" when some were listed. A disk listing that fails after the fork-time
+record was read keeps the record's logins and reports the reason, and a Linux computer that cannot be
+reached is no longer reported as stopped (3 tests in `changes/credentials.rs`). Run: engine `backup`,
+`backup_controller` and `changes::credentials` tests (267 passed), `silo-cli --test share` (12 passed),
+render unit test, `cargo fmt --check`; no frontend file changed.
+
+Test results (7 Nov, after the review fixes): silo-engine 3123 passed, 8 failed, 31 ignored (the 8 are the
+same `host_push::protocol_tests::*`, which panic "prepare the bundled Git runtime before testing" in this
+checkout; none touches this change); silod 320 unit plus its integration tests, all passing; silo-cli 148
+unit + 12 `share` tests, all passing; silo-client 16; silo-api 49. Frontend: typecheck clean, lint 0 errors
+(existing warnings), Vitest 287 files / 2863 tests. `demo/` `tsc --noEmit` clean (node_modules deleted
+afterwards). `cargo fmt --all --check` clean. New tests were written with their fixes, not run failing
+first, except where a changed assertion shows the old behaviour (the CLI check-failure test).
+
+**F3 live check (7 Nov, Dev engine, Mac) and the fixes it led to.** Evidence:
+[f3-share](evidence/f3-share/README.md) (`raw-1-default/`, `raw-2-clear-session-bus/`). 18 of 22 and 19 of 21
+checks passed; the failures were four product problems, all fixed afterwards (tests, not a second live run):
+
+1. *Keep of an imported computer into the receiver's computer.* (a) `/home/silo/.dbus/session-bus/<machine-id>-1`
+   is rewritten by every started computer, so any two computers started since their common ancestor
+   conflicted on it ("divergent"). `changes/ignore.rs` now ignores `*/.dbus/session-bus` and
+   `.xsession-errors*` (the X session's error log, the same kind of per-login file); test
+   `per_login_runtime_files_are_not_a_change`. The other per-boot files under the home directory that the
+   evidence shows (`.config/pulse/<machine-id>-*`, `.Xauthority`, `.ICEauthority`) were already ignored.
+   (b) The `changed` refusal in run 2 was not a product fault: `silo fold` without `--reviewed` pins the keep to
+   the digest of the last `silo diff` of the fork (`Engine::recall_review`, `ops::fold`), and that was S5's,
+   before the probe deleted the session-bus files in the copy. The refusal's `report.reviewDigest`
+   (`f70af3…`) equals the dry run's, while S5's `s5.json` has `142494…`: the fork did not change between the dry
+   run and the keep, it changed after the review the keep was pinned to, and the refusal is the designed
+   answer. `f3_share_check.sh` now runs `silo diff` on the copy right before S7 (the `CLEAR_SESSION_BUS` probe
+   is gone). Not yet seen live: that the keep then succeeds; the probe is a rerun of the script on the Dev
+   engine.
+2. *The Silo CA named as a login.* `/etc/pki/ca-trust/source/anchors/microsandbox-ca.pem` is in
+   `SYSTEM_CREDENTIALS`, as is the macOS equivalent, the proxy CA and its trust-probe leaf under
+   `/Library/Application Support/Silo/NetworkBootstrap/` (written by `macos_computers/proxy/bootstrap.rs`; not
+   checked live). A CA anchor a person adds is still named (test).
+3. *Export free-space check.* `check_export_space` counted every snapshot and cache of the engine, once per
+   selected computer, plus the computer's disk twice (in the estimate and as a capture on the store). It now
+   counts, once per computer, its own snapshot group, its disk when a new capture is taken, and the image cache
+   once when a file carries the image, plus the manifest margin and 1 %, for the working copy and the
+   destination (and the 1 GiB reserve per volume). Ancestors kept in another computer's group are not counted
+   (the check on the finished file uses its real size). Test `export_space_counts_the_computers_own_payload_once`
+   (24 MiB of other snapshots and cache do not matter; the computer's own data does).
+4. *`snapshots/silo-import-*` left behind.* An imported computer's group holds the archive's ancestors under
+   the exporting computer's names, and dropping the computer queued only members named like Silo's own
+   captures (`silo_member`), so the others stayed. `remove_deleted_snapshots` now queues every member of an
+   import group (names valid for the journal; the planner still keeps what a record or a live computer's lineage
+   uses). The startup/maintenance sweep (`recover_interrupted`) also queues the members of import groups that
+   no checkpoint record on disk names, which clears the groups earlier drops left. Discarding an unfinished
+   import already removed its whole group (`discard_import_group`). Tests (both failed before the change):
+   `deleting_an_imported_computer_removes_its_whole_import_group`,
+   `the_sweep_removes_import_groups_no_computer_owns`. The cause is from reading the code, not observed live.
+
+- **Live rerun, 8 Nov 2026 (run 3, evidence in [f3-share](evidence/f3-share/README.md)).** On an integration build
+  (`412e329c`) with `cf97e65a`: S2 no longer names the Silo CA (only the Claude Code login), S3 and S9 (checkpoint
+  export) ran at 59 GiB free without a space refusal, but **S4 fails**: importing any export, even of a fresh
+  never-forked computer, stops with `archive contains duplicate entry: layers/layer_87157fb5….raw` from the runtime's
+  `snapshot load`. S5 to S8 were not reached, so S7 (keep into the receiver's computer) and the import-group
+  clean-up of a dropped imported computer were still unseen. Failed imports left no group; six older
+  `silo-import-*` folders were not cleared by the new engine.
+- **Run 4, 8 Nov 2026 (evidence in [f3-share](evidence/f3-share/README.md), `run-4-rerun.txt`): 22 passed, 0 failed**
+  (S9 `--device` skipped), S7 included; no `silo-import-*` left after dropping everything. Causes and fixes:
+  (1) *Duplicate layer.* `msb snapshot save --with-parents` writes a layer twice when the capture's chain already holds its
+  parent's head (any export after an earlier capture of the computer, such as F2's fork points), and `snapshot load` refuses it.
+  Reproduced with one computer exported four times (the fourth file failed); exports now save the capture alone
+  (`8794f629`; test `a_capture_is_saved_without_its_parents_so_no_layer_is_written_twice`, failed before). The old
+  missing-ancestor retry and its two tests are gone. (2) *Groups left.* The six groups were empty folders by then (the
+  8.4 GB was not reproduced). The sweep never ran: its only caller, `storage::start_monitor`, has had no caller since the
+  engine split; `silod` now runs `recover_checkpoint_data` on a timer (`5aa8a1ae`). Dropping a computer now queues every
+  member of its import group (`8794f629`), and a member released later (an imported copy shares its snapshot ID with the
+  computer it came from and stays while that lives) is removed then (`05992ceb`, test
+  `a_member_released_later_is_removed_through_the_runtime`). Silo does **not** remove the empty `silo-import-*` folder
+  (`.group.lock`, `group.json`, about 4 KB each) MicroSandbox leaves; those can remain.
+  **Still dead:** the trimming half of `start_monitor` (`periodic`, warm-computer trims) is not wired into `silod`; not
+  changed here, it needs its own decision.
+- **Folder removal dropped (review).** An earlier cut of the sweep unlinked empty `silo-import-*` folders from the
+  filesystem after an unlocked scan, while MicroSandbox publishes under its own group lock, and its time budget excluded
+  the inventory. Removed (`remove_unowned_import_group_shells`, `remove_empty_group_directory` and their tests):
+  MicroSandbox has no command that deletes an empty group, and the folders are about 4 KB each.
+
 ### 8 Nov 2026: phase C1 measured (crun containers against the microVM)
 
 - **Question and scope.** Is an opt-in container computer on Linux hosts (crun, rootless, all capabilities
@@ -614,6 +920,215 @@ vendored russh patch, checked against the published 0.65.1 source).
   the moment is the one above. `silo-ctr enter` trusts `outer.pid` and the callers check the holder first, as
   documented.
 
+### Phase F4: sharing a computer that lives on another machine (branch `claude/forks-phase-4-transfer`, 8 Nov 2026)
+
+Decision Q5 built as designed by the owner's brief and Fable: the export runs on the owning machine,
+its file is copied over Connections, the owner's copy is removed. Test counts are from `cargo test
+--locked` with synthetic GitHub configuration and a shared target dir, run on 8 Nov 2026 on the Mac;
+no computer, Dev engine or app bundle was touched.
+
+- **Why a stream.** The managed key is `restrict,command="... --remote-bridge"`, so `scp`/`sftp` cannot
+  reach the owner, and Files' `sftp` only reaches guests through `guest.ssh`. A new Stream method
+  `exports.file` carries one file, like `guest.ssh` (`engine/src/remote.rs` `METHODS`, served by
+  `serve_file_stream`; the handshake's capability list is the old-owner check).
+- **Transfer area** (`engine/src/transfer_area.rs`): `<engine dir>/transfer/`, 0700 and 0600. Names are
+  owner-made `x-<32 hex>.silo-backup` (export, read once through an exclusive `.used` marker, links not
+  followed) and `i-<32 hex>.silo-backup` (import, never readable); `parse_name` is the fixed pattern. A write
+  declares size and sha256, is refused at zero, past the cap or without room (`size + 64 MiB` beyond the
+  bytes other writes of the process have reserved; see "Review fixes"), goes to `.part`, reads exactly the declared bytes and is renamed only when the
+  hash matches; every other end deletes the `.part`. **Cap: 16 GiB.** Not the Files 4 GiB (a computer
+  export can exceed it) and not the engine's export limit, which is 8 TiB; 16 GiB is a deliberate middle
+  that keeps the time budget finite. Remove is `exports.discard`; the sweep empties the area when
+  `silod` starts and removes entries older than a day on the storage timer (`timers::sweep_transfer_area`).
+- **Owner jobs, one variant.** `exports.create` takes `transferArea` (the owner picks the name; the job's
+  `archive.transfer` holds `{name, bytes, sha256}`, hashed after the write: `backup_controller::describe_transfer`),
+  `exports.import` takes `transferName` (resolved to an import name that is in the area, otherwise the
+  ordinary import: the archive checks are the boundary). New API methods: `exports.discard` (owner command)
+  and `exports.transfer` (controller job, `deviceId` required). The check, create and import are asked on
+  the owner through the existing routing; the CLI's `ROUTED_METHODS` lists them.
+- **Controller job** (`silod/src/methods/checkpoints/export_transfer.rs`): `receive` writes a new 0600 `<path>.part`,
+  links it to the path when the hash matches and removes it on any failure; `send` hashes the local file, then sends. Progress is the Files
+  `TransferProgress`; cancel is the job's; the Files budget (45 s plus 64 KiB/s) is enforced by a watchdog
+  that closes the stream. An owner without `exports.file` is refused with "The other machine's Silo is too
+  old to share computers over Connections. Update Silo there." by the job and by the controller's routing of
+  `exports.create`/`exports.import` that use the area.
+- **Review fixes (8 Nov 2026).** Findings of the review of the first version, each with a test:
+  - *Disk overfill.* `begin_write` only read `statvfs`, so concurrent writes each passed. A
+    process-wide reserved-bytes counter per area folder is checked and raised under one lock and
+    released by the `Writer` on rename or drop. Writes are not serialized: the stream budget of 192
+    (`remote.rs` `STREAM_LIMIT`) bounds how many are open, the reservation bounds the disk. A write's full
+    size stays reserved while its `.part` grows, which errs on the side of refusing. Docs said "counting
+    writes already promised" and "one transfer at a time"; they now say what the code does.
+  - *Import file lost on a failed poll.* `import_to_device` discarded the `i-` file on any error. It now
+    discards when the import succeeded or `Engine::last_job_finished` says the job is finished; a failed
+    wait leaves the file (the sweep removes it) and the re-attach hint stays valid.
+  - *Over-cap export.* The owner removes the `x-` file when `describe_transfer` fails (too large,
+    cancelled, unreadable); the size is read from the file before it is hashed and the error names the
+    file and size. The up-front refusal from `estimate_export_bytes` (before compression, whole store
+    and cache when the image travels) is gone: it could refuse an export that would fit. Instead the
+    export stops itself: `BackupRequest::size_cap` (set to the area's 16 GiB for a file in the area)
+    is checked in `create_backup_with_token` after each computer's disks are written, and the error
+    names that computer and the cap. This is not a mid-write abort of the tool that writes a
+    computer's disks (an external command), so one oversized computer is still written to the
+    working copy before it is refused; nothing is assembled, no file is left at the destination, and
+    the working copy is dropped. The after-write check stays. The estimate still feeds the free-space check.
+  - *Export files 0600.* `describe_transfer` sets 0600 on the export, so "files 0600" is true for both
+    kinds.
+  - *Receive wrote to the final path.* `export_transfer::receive` writes `<path>.part` and puts it at the
+    path only when the hash matches; an existing file is refused before the copy and nothing is replaced.
+    The first cut used `hard_link`, which exFAT/FAT32/vfat and many SMB shares refuse, so every copy there
+    failed at the end. It now uses `transfer_area::publish_without_replacing`: the kernel's exclusive rename
+    (`renameatx_np` `RENAME_EXCL` / `renameat2` `RENAME_NOREPLACE`), else a hard link and removing the `.part`,
+    else an existence check and a plain rename. The fallbacks are tested with injected errors. A `.part`
+    left by a crash (a regular file of this account) is removed once and the copy starts again; anything
+    else there is named in the error.
+  - *Broken pipe.* `push` reads the owner's error line when a write fails and returns the owner's reason.
+  - *Client-chosen names.* `exports.create` refuses a destination or archive path inside the area
+    (`Area::contains`, links followed); only `transferArea: true` names a file there.
+  - *Marker on a failed open.* `open_for_read` removes the `.used` marker when the `O_NOFOLLOW` open fails.
+  - *Sweep order.* `silod` empties the area before `start_connections`, not after the bridge is up.
+  - *Why 16 GiB* is in `docs/SiloUI-CLI.md`.
+- **CLI** (`cli/src/share.rs`): `--device` export checks the output name first, creates the export in the
+  owner's area, copies it with a local `exports.transfer`, then discards the owner's copy whatever the copy
+  did; import sends first, imports from the received name, and discards once the import is finished. A failed
+  discard is a warning.
+- **Docs/changeset:** `docs/THREAT-MODEL.md` (boundary 6, "Sharing a computer that lives on another
+  device"), `docs/SiloUI-CLI.md`, `docs/SiloUI-CONNECTIONS.md`, `app/SiloUI/.changeset/share-across-devices.md`.
+- **Tests.** Engine `transfer_area` 19 (names and roles, single use, links, `.part`, hash and short/long
+  streams, abort, size/cap/free space, remove, sweep, the stream over socket pairs both ways), `remote`
+  170 (the method lists), `backup_controller` 1 (`describe_transfer`). `silod` `methods::` 244 (a controller
+  job against the real owner side over socket pairs: receive, send, bad hash, refused name, cancel of a
+  stalled copy, old owner, request validation; owner `exports.discard`, `exports.create` with the area,
+  `exports.import` from the area; the routing gate; the sweep). `silo-cli` 150 unit + `tests/share.rs`
+  17 (the device flows, the discard on every path, the order of requests and which job is followed on
+  which device). `hosts-e2e.sh` unit tests 18 (the sharing steps and a file left in a transfer area).
+  `silo-api` 49 (schema and requests regenerated).
+- **Live check:** `hosts-e2e.sh` with `SILO_E2E_SHARE=1` on the two-account KVM job
+  (`linux-host.yml`): see the pull request for the run. **Not covered by any test:** a real `ssh` hop with
+  the restricted key (the unit tests replace it with socket pairs), the Mac, and an exported computer
+  larger than the runner disk.
+
+### R2: Linux hosts as runner machines (branch `claude/runner-phase-2`, 8 Nov 2026)
+
+- **Built.**
+  - *Packaging:* `package-engine.py` builds `silo-runner` (`go build`, `CGO_ENABLED=0`, `GOOS=linux`, `GOARCH` of the
+    platform, `-X main.version=<engine version>`) and puts it in both Linux archives as `silo-runner`, with the Go modules'
+    licenses (checked in under `runner/licenses/`) in `resources/silo-runner-licenses/` and a notices section. The ELF
+    machine check covers it. The jobs that package a Linux archive (`linux-host.yml` x2, `containers-c1.yml`,
+    `engine-release.yml`) install Go from `runner/go.mod`; the release verification runs `silo-runner version`. Not in the macOS
+    engine archive (an embedding-app format; a Mac builds the helper with `go build`).
+  - *Service:* `silo-runner service register|unregister` (`service.go`) writes `~/.config/systemd/user/silo-runner.service` with
+    `After=`/`Wants=` the engine's unit (`-engine-unit` for a Dev engine), `Restart=on-failure`, `UMask=0077`,
+    `KillMode=mixed`, an optional `EnvironmentFile=-%E/silo-runner/env` for the token. **Chosen over a documented unit file**
+    because the unit needs canonical, systemd-quoted paths and a refusal to overwrite foreign files, the same reasons
+    `silod --service register` writes its own; about 150 lines, unit-tested. A user unit runs as the account of the user
+    manager, which is the account of the engine's socket; `silo-runner` also refuses euid 0.
+  - *Capacity:* on a Linux host (`GOOS=linux`, no `silo.device`) a `linuxBudget` field left out defaults to three quarters
+    of `MemTotal` and one computer per CPU. **Chosen over requiring it** so the safe setting does not depend on remembering
+    to write it; `MemTotal` and not `MemAvailable` so a restart with computers running computes the same budget. A budget
+    below one computer of the largest recipe, a `macos` scale set, and an unusable `/dev/kvm` (missing, or no permission:
+    what to do is in the message) stop startup. `silo-runner check -offline` does the host part with no GitHub; an empty
+    `tokenEnv` variable is named before any call.
+  - *Recipe:* `silo-linux` pins `RUNNER_SHA256_ARM64` and `RUNNER_SHA256_X64` (the digests of `linux-arm64` and `linux-x64`
+    2.338.2, from the release API) and picks one by `uname -m` while building. `ParsePin`/`WithPin` and the refresh handle
+    both: each digest comes from its own asset of the same release, and a release missing either changes nothing. The
+    Rust recipe test (`cli/tests/recipes.rs`) expects the two digests.
+  - *Docs:* CI runner guide "Linux hosts" (install, config, service, journal, capacity), threat-model bullets (the
+    credential on the host, the journal readers, root, KVM, both pins, the Linux budget), engine and release docs,
+    `examples/config-linux.yaml`, changeset (`silo-ui`: minor).
+- **Live check: what was and was not run.**
+  - *Not run:* `docs/forks-ci/checks/r2_linux_runner_check.sh`, the whole flow (runner for the machine's architecture, a
+    computer per job on KVM, deleted on success, kept on failure, runners removed at GitHub, the service and its journal).
+    It needs an admin token that CI must not hold, and the owner's Linux machine (10.77.77.2) was offline. **No job has
+    run through `silo-runner` on a Linux host, and the x86_64 runner recipe has never been built.**
+  - *Run by CI on KVM (no GitHub), `scripts/runner-host-e2e.sh` in the Linux host workflow:* the archive's `silo-runner` runs
+    on that architecture and reports the engine version; `check -offline` opens the real `/dev/kvm` and sizes the budget
+    from the host; a `macos` scale set is refused; `service register` against the real systemd user manager gives a unit
+    that is enabled, ordered after and wanting the engine's unit, passing `systemd-analyze --user verify`; the helper's
+    log (it stops for lack of a token) is in the user journal under this account's uid; starting the helper starts a stopped
+    engine; `service unregister` removes the unit and leaves the engine running. A fake GitHub was not built: the
+    runner program inside the computer needs the real service to reach "Listening for Jobs", so a stub of the scale set
+    endpoints could not honestly exercise a fork per job or runner deletion, which the Go fakes already cover.
+    (First run happens when the PR's checks run; see the PR.)
+- **Tests:** Go `go vet`, `gofmt`, `go test -race ./...` in `runner/`: 115 tests pass, 24 of them new (`host_test.go`,
+  `service_test.go`, and the architecture cases in `misc_test.go`): the service unit text and its quoting, register and
+  unregister calls, refusal of root and of foreign unit files, the default budget and its sources, KVM errors, the
+  macOS-scale-set refusal, the shipped recipe's two pins, the refresh moving both digests from their own assets, and a
+  recipe whose digests do not match its download. `test_package_engine.py` (the archive holds `silo-runner` and the licenses,
+  the ELF check, the Go build command per platform), `test_linux_host_workflow.py`, `test_engine_release_workflow.py`,
+  `test_workflow_pins.py`, `test_ci_native_changes.py` (no path change needed) pass; `cargo test -p silo-cli --test recipes`
+  passes with synthetic GitHub values; `shellcheck` is clean on `runner-host-e2e.sh`. Both Linux binaries were
+  cross-built on the Mac and are ELF x86-64 and AArch64. The classifier is unchanged: `runner/` stays skippable except
+  `recipes/`.
+- **Review fixes (round 1, same branch).**
+  - *Unit could not find `silo`:* the user manager's `PATH` lacks `~/.local/bin`, so `silo.path: silo` failed every call and the unit
+    restarted every 10 s. `service register` now resolves `silo.path` (`exec.LookPath` from the registering shell; an absolute path
+    must be an executable file; a relative path with a slash, or anything unresolvable, is refused) and writes it into
+    `ExecStart` as `run -config <file> -silo <absolute path>`; `run` takes `-silo`. Example config uses an absolute path and names
+    `silo-dev`. Tests: unit text, `ResolveSilo`, register refusal writes nothing. `runner-host-e2e.sh` also greps the unit.
+  - *Old single-arm64 recipe on an x86_64 host:* `ApplyHost` (start and `check`) parses each installed Linux recipe's pin and
+    refuses a single-architecture pin other than the host's `GOARCH`, naming `silo-runner install-recipes -replace`. New flag
+    `-replace` moves the existing recipe to `<name>.yaml.bak` and writes the shipped one. Upgrade notes in the guide.
+  - *0600 was only documented:* `SecretFileWarnings` warns (log at start; `warning:` lines in `check`, also `-offline`) when the App
+    key or `~/.config/silo-runner/env` is group- or world-readable, as ssh does for a key; it does not refuse. Threat model reworded
+    to "the guide makes them 0600 and the helper warns otherwise".
+  - *Default budget ignored cgroup limits:* the default comes from `MemTotal` and the CPU count only (a cap read from the helper's
+    own cgroup missed a `MemoryMax=` on silod's unit and could shrink the budget wrongly). Docs say that where the engine or the
+    user's slice has a memory limit, or in a container or VM with less memory than it reports, `linuxBudget` must be set; the stale
+    comment on `LinuxBudget` (zero now means the host default) is fixed.
+  - *Packaging:* `go_build_runner` no longer leaves its `mkdtemp` directory (`main` builds in a `TemporaryDirectory`); the licence
+    glob skips dotfiles and directories. Python tests for both.
+  - *Tests:* `go vet` (also `GOOS=linux` amd64 and arm64), `gofmt`, `go test -race ./...`; `test_package_engine.py`,
+    `test_linux_host_workflow.py` pass. Still no GitHub run and no Linux machine.
+- **CI: `Linux computer on KVM` failed at `silo create` ("Silo could not download the VM image"), not caused by the runner step.**
+  Runs 42465256087 (attempts 1-3) failed at `== Creating e2e-hosts-ci` after about 40 s. The VM image is fetched from
+  `github.com/amontlabs/silo/releases/download/guest-ubuntu-24.04-v5/image-amd64.tar.gz` (`guest-image/image-lock.json`); that
+  asset exists (361 MB, `uploaded`), but at 10:19 UTC every `github.com/.../releases/download/...` URL, including an unrelated
+  repository's, answered HTTP 504 from outside CI while githubstatus.com reported all systems operational. Other branches
+  failed the same step in the same window with no runner step at all (`claude/forks-phase-4-transfer` run 42469940031 at
+  10:14:29 UTC, whose workflow has no `runner-host-e2e.sh`; `claude/containers-ct1` run 42466752224 at 09:36 UTC), while
+  run 42467219772 passed at 09:26: a flaky release-download endpoint, not state the runner step leaves behind. The runner
+  step only restarts the engine through `Wants=` with the same user-manager environment, home and image cache dir as the
+  engine the register step started, and the engine journal shows nothing between the restart and the stop. The create step
+  now retries a download failure (3 attempts, 30 s apart) so a brief GitHub outage does not fail the job.
+- **Open:** (1) the live check above; (2) `silo-runner` is not in the macOS archive; (3) one helper per machine, so two machines
+  serving the same recipe need two labels; (4) the default budget ignores memory the host's other services use, so on a
+  shared machine set `linuxBudget`.
+
+#### Post-merge review: CI runner (R1 and R2, 9 Nov 2026)
+
+Review of `app/SiloUI/runner`, its CI wiring and its docs as they are on `main` after the container phases.
+
+- **Fixed: the command of a runner that never listened was never reaped** (`fleet.go` `onUpDone`). When the
+  runner did not print "Listening for Jobs" within `readyTimeout`, its `silo exec` command was still running and
+  nothing drained its output or waited for it: the helper interrupted it after deregistration and dropped it, so
+  every such failed start left a zombie process and the goroutine `os/exec` keeps per command, until the helper
+  exited. The command is now watched whenever the start returned one, ready or not. Test:
+  `TestTheCommandOfARunnerThatNeverListenedIsReaped` (failed before).
+- **Fixed: a running container computer did not count against the Linux budget** (`capacity.go`). CT2 made the
+  command line list container computers with the kind `container`; capacity counted only `linux`, so on a Linux
+  host the helper could start virtual machines into memory a container computer already used. Everything that is
+  not a macOS virtual machine now counts as a Linux computer. Test:
+  `TestARunningContainerComputerCountsAgainstTheLinuxBudget` (failed before).
+- **Fixed: docs that said the default budget reads cgroup limits.** The guide's configuration table and the
+  threat model said the default memory was the smaller of the machine's and a cgroup limit; the code reads
+  `MemTotal` only (the cgroup cap was dropped in R2's review). Both now say so. The R2 entry above had its
+  "Built", "Live check", "Tests" and review bullets twice, the second copy with the dropped cgroup behaviour; the
+  copy is removed. The public-repository refusal said "this Mac" on a Linux host; it says "this machine".
+- **Checked, no change:** one event loop writes the records and the ledger; the phases and the by-id rule; the JIT
+  configuration only on standard input (the CLI's `exec --stream --stdin` sends it in the request body and prints
+  a reattach hint on interrupt, so the runner in the computer outlives the command); one label per scale set;
+  `DisableUpdate` set on create and repaired on an existing set; the watchdog (the `scaleset` listener calls
+  `Scale` once per poll, also with a nil message); scale-up from a fresh list with pending demands; restart
+  adoption; delete on success and keep on failure; no checkpoint call anywhere in the helper; the private
+  repository and runner group check failing closed; the docs' statement that GitHub's own secrets and
+  `GITHUB_TOKEN` are not placeholders.
+- **Left for the owner:** (1) the private-repository check runs at start only, so a repository made public while
+  the helper runs is served until the next start; (2) a second Ctrl-C does not end a slow shutdown (the signal
+  stays caught); (3) the Resume section above still listed R2 as in progress (corrected on 10 Nov by the
+  container sharing and docs review); (4) no job has run through
+  `silo-runner` on a Linux host (unchanged from R2).
+
 ### 9 Nov 2026: phase CT4 built (checkpoints, forks and restart for container computers)
 
 Branch `claude/containers-ct4`. A container computer has checkpoints, forks (`-n N`, `--from-step`), quiet forks, diff,
@@ -1039,521 +1554,6 @@ refusal), and of the docs of the whole build against the code. Fixes are in the 
      because other open pull requests add to them.
 
 
-### R1: CI runner on the Mac (branch `claude/runner-phase-1`)
-
-- **Built:** `silo-action/` and every reference removed; `silo-runner` (Go, `app/SiloUI/runner`, on
-  `actions/scaleset` v0.5.0); recipes `silo-linux` and `silo-macos` (runner 2.338.2, SHA-256 from the
-  release digests, linux-arm64 and osx-arm64); `silo exec --stream [--stdin]` in the CLI; example
-  workflow; Go CI job; [CI runner](../SiloUI-CI-RUNNER.md); threat-model section; changeset.
-- **Long-lived command with a secret, without argv:** `silo exec` was bounded to 180 s and had no input.
-  The API's `guest.exec.start` already takes `stdin` and has no time limit, so the CLI gained
-  `--stream` (uses `guest.exec.start`, output as it arrives, no step recorded) and `--stdin` (reads the
-  CLI's stdin to its end, at most 1 MiB, into the request). Not an env flag: the engine passes
-  a guest `env` value as `--env K=V` in the host's `msb exec` arguments (Linux computers) or in the ssh
-  command line (macOS computers), where `ps` shows it; stdin is not in either. The recipes' `silo-run-jit` script reads the line into
-  `ACTIONS_RUNNER_INPUT_JITCONFIG` and execs `run.sh`.
-- **Decisions beyond Q6:** a computer is deleted after `succeeded`, `canceled` and `skipped`, kept
-  after anything else; ready means the runner printed "Listening for Jobs"; after `startAttempts`
-  failures the helper backs off up to 16 minutes; the recipe is refreshed when a new runner release is
-  `afterDays` (3) old, with the digest from the release API; capacity counts `silo list --all`, so a
-  macOS recipe build uses a slot.
-- **Lifecycle rewritten to [R1-SIMPLER-DESIGN.md](R1-SIMPLER-DESIGN.md) (7 Nov 2026).** Two review
-  rounds kept finding ownership bugs in the per-runner flags, goroutines and the separate startup
-  reconcile, so the scaler's finish/abandon/settle/retry/retention/adopt/housekeeping paths and
-  `reconcile.go` are gone. One event-loop goroutine (`fleet.go`) is the only writer of the records and
-  the ledger; `plan()` runs after every event and every 30 s tick and starts the next step of each
-  record; the ledger (`state.go`) holds the phases `forking | live | finishing | kept`, written by name
-  before the fork and by id after, and fsynced with its directory. Every engine call after the fork goes
-  by id (`silo drop` does not stop a running computer and the engine refuses to delete one, so
-  `CLI.Drop` stops first); a computer is gone only when a fresh successful `silo list` lacks its id;
-  capacity (`capacity.go`) is a pure function of the latest list plus computers asked for that it does
-  not show running, with the memory read from the recipe file (the scale set's `memoryGiB` key is
-  gone). A job in flight across a restart is adopted as busy and kept with result `unknown`. Non-test Go
-  went from 2588 to 2997 lines: the loop needs its event and task types, the list confirmation and the
-  probe of an adopted runner, which the old code spread over flags.
-- **Review round 3 fixes (7 Nov 2026).** (1) A live record whose runner had a job (its request id is
-  recorded on `JobStarted`, or a job result is stored) is adopted as busy at load and probed; if
-  GitHub no longer has the runner it ends `unknown` and is kept, instead of going through the orphan
-  path and being deleted. Only a live record with no job evidence is finished as an orphan, and that
-  now happens at load, so the `subRestored` sub-state is gone. (2) `JobStillRunning` clears only the
-  helper's own reasons; a stored job result survives, and the probe finishes with it (a success is
-  deleted, a failure stays `failed`) and uses `unknown` only when there is none. (3) The capacity
-  demands are every forking or live record the latest list does not show running. (4) A recipe
-  rebuild reserves its computer (`Fleet.Reserve`, replacing `CheckCapacity`) until it ends; while the list
-  also shows its VM it counts twice, which errs towards fewer computers. (5) The engine refuses to
-  stop a computer that is not running (`This computer isn't running.`, `stop_with_job`), so
-  `CLI.Stop` treats a computer the list shows as stopped as done. (6) A fork that returns an error keeps
-  its `forking` record until a list started after the error binds the exact name (deregister, then
-  delete by id) or shows none (forgotten); the old test of a same-name twin was replaced, because the
-  helper chose the name. A helper killed during a fork whose computer appears after the next start's
-  first list is the remaining case, documented as the owner's to delete. (7) Cosmetic: `retain` has no
-  return value, `type event = any` and the duplicated settler close and idle test are gone. The old
-  watcher of an adopted runner's command is left: it ends with the command and its exit event is
-  ignored by process identity. Tests: 86 (7 new), `go vet`, `gofmt`, `go test -race -count=3 ./...`
-  pass, also with `TZ=UTC`; non-test Go is now 3045 lines.
-- **Review round 4 fixes (7 Nov 2026).** (1) A fork refused because the name is taken
-  (`Computer names must be unique.`, which the CLI prints as text on stderr with no code, so
-  `CLI.Fork` marks it by that sentence) forgets the record and deletes nothing; the old rule would
-  have bound and deleted the computer that had the name. Other fork errors still keep the record for a
-  fresh list. (2) `pendingDemands` does not count a live record with no start in flight, no watched
-  runner command and a computer that a list started after its fork or start (`seenFrom`) shows
-  stopped, so a Mac restart does not hold macOS slots for adopted busy records; a start success moves
-  `seenFrom` on, and a rebuild's `Reserve` list, which cannot be ordered, discounts nothing. (3)
-  `JobStillRunning` sets the helper's own reason to `unknown`, not empty, so a restart before
-  `JobStarted` is persisted adopts the record as busy instead of finishing it as an orphan and deleting
-  a failed job's computer. (4) Docs: pending capacity wording, the restored-record rule, finishing
-  records restarting at deregistration, and a dated note in the design. Each fix has an event-driven
-  regression test; `go vet`, `gofmt` and `go test -race -count=3 ./...` pass, also with `TZ=UTC`.
-- **Tests (no live GitHub, no engine, no computer):** `go vet`, `gofmt`, `go test -race -count=3 ./...`
-  (also with `TZ=UTC`) in `app/SiloUI/runner`: 79 tests pass. The fakes complete at once and the tests
-  drive the loop through events and wait for it to go quiet, so they do not sleep (one uses a 10 ms
-  ready timeout). They cover capacity as a function of the list (macOS two-VM limit counting forks in
-  progress, Linux count and recipe-file RAM), public-repository and public-runner-group refusal,
-  success delete, failure keep, keepFailed count and days, deregister before delete,
-  `JobStillRunningError`, failed deregistration retry, readiness retry and backoff, watchdog restart,
-  the JIT value in the command's standard input and in no argv (a fake `silo` script), `silo drop`
-  stopping first, config validation, the runner version refresh and its rollback, the ledger fsync, and
-  a regression test for each review finding (retention before deregistration, a same-name twin and a
-  failed fork, renamed computers and failed lists, a GitHub outage retried by the tick, a failed ledger
-  write, a result arriving while finishing, recipe memory) and for restarts (idle orphan, job in
-  flight, forking records, kept, interrupted keep). `cargo test -p silo-cli --locked`
-  (synthetic GitHub values, shared target dir; run for the first build, this rewrite changes no Rust):
-  all pass, including 3 new tests (`exec_stream.rs`:
-  the input travels in the request body, not in argv; no step is recorded; `cli.rs` flag parsing;
-  `recipes.rs`: the shipped recipes parse and pin the runner). `cargo fmt --check` clean;
-  `test_ci_native_changes.py` 7 tests pass.
-- **Not run:** the live check, `docs/forks-ci/checks/r1_runner_check.sh` (private test repository,
-  Dev engine, needs scheduling); `actionlint` (not installed; the example parses as YAML); the full
-  Rust workspace and the frontend suites (this phase changes only `cli/` and the Go helper).
-- **Open:** (1) `go.mod` says Go 1.27.3 because `scaleset` v0.5.0 does; the brief said 1.25. (2) The
-  in-guest client cannot run a command in a fork, and `silo-runner` does not install its token, so the
-  example's fork/diff/fold steps need that install done separately. (3) PLAN.md, BUILD_LOG.md and
-  DESIGN-QUESTIONS.md are copied from `claude/forks-phase-3` (they are not on `main`); identical text
-  merges cleanly. (4) `silo-runner` is not built into the app bundle or released.
-- **Live check, 8 Nov 2026 ([r1-runner](evidence/r1-runner/README.md)).** Linux recipe: 19 of 19 pass (run 2, 7 Nov). macOS recipe:
-  the 7 Nov run was blocked by `silo-run-jit: No such file`. Cause: the recipe build checkpoints the *running* builder and a fork
-  boots from the copied disk without the builder's memory, so on macOS the last writes (`silo-run-jit`, and half of the extracted
-  runner: `bin/` was empty) were not on the disk. Fixed in the engine (first as a recipe step, see the follow-up below):
-  `BUILD_VERSION` is now `silo-recipe-build-3` (older builds are rebuilt). Rerun with `R1_OS=macos` on the integration build
-  `412e329c`: 18 of 19 pass (success job on `ci-silo-macos-r1-c69eb916`, deleted; failing job on `ci-silo-macos-r1-b8d9ee73`, kept
-  stopped; no JIT configuration on any command line; restart reconcile; 0 runners at the end). The 19th failed because of the
-  script (the recipe's own builder computer and the list header differed in the before/after comparison); the script is fixed
-  and was not run again. The check script now takes `R1_OS=linux|macos`.
-- **Review follow-up (8 Nov 2026).** The sync moved from the recipe into the macOS checkpoint capture: `Machine::flush_disk` runs
-  `/bin/sync` (60 s limit, a failure refuses the capture before the pause) for every capture of a running computer, whatever its
-  kind (manual, automatic, fork point, the recovery checkpoint before a Restore), because a fork discards saved memory for all of
-  them. The recipe step is gone, `silo-recipe-build-3` stays. Linux needs nothing: its disk-only captures already require the
-  guest flush and its full captures keep the memory. The check script now compares `silo list --all --json` by sorted
-  (id, name, state), minus `ci-*` and the recipe builder (it needs `jq`); the `silo.go` fork comment names the fanout envelope.
-- **macOS sync before every capture (8 Nov, decided after the gpt-6.1-sol review of `0b29af74`):** the guest
-  sync runs before every capture of a running macOS computer, including the before-keep, promote and undo
-  recovery checkpoints. macOS checkpoints hold disks only, so without it a restore (undo) could lose recent
-  writes just as a fork could. Cost: those operations wait for the sync (at most 60 s) and refuse when the
-  guest does not answer it; keep already needs the guest to apply changes. Accepted: correctness of every
-  saved point over the speed of a few. The `quiet::processes_match_by_exact_name_not_by_prefix_or_pattern`
-  failure seen in the engine suite also fails on main (`569f6fea`) at the same assertion and is not caused
-  by this branch.
-- **R1 live check, run 4 (macOS, 8 Nov 2026): 19 of 19 pass**, with the engine sync of `0b29af74` and the JSON before/after
-  comparison. Integration build `silo-f799cb60` (local merge of `forks-phase-3` and `runner-phase-1` on `origin/main`, release
-  Dev bundle, engine started by hand), private repo `0xpolarzero/silo-runner-e2e`, `maxRunners: 1`, no macOS VM running before. The
-  success job ran on `ci-silo-macos-r1-0f3b3af8` (deleted, runner gone), the failing one on `ci-silo-macos-r1-c1f4b46e` (kept,
-  stopped, runner gone); no JIT on any command line (sampler: 26 sightings of `exec --stdin`). Direct check of the fix: a file
-  written in a running macOS computer, a manual checkpoint right after, a fork of that checkpoint: the file (and a 4 KiB blob) is
-  in the fork. Cleaned up: 0 runners, no `ci-*`/`e2e-*` computer, recipe build removed. Evidence:
-  [`evidence/r1-runner/run-4-macos.txt`](evidence/r1-runner/run-4-macos.txt), `runner-4-macos.log`, `config-macos-4.yaml`.
-### Phase F4: sharing a computer that lives on another machine (branch `claude/forks-phase-4-transfer`, 8 Nov 2026)
-
-Decision Q5 built as designed by the owner's brief and Fable: the export runs on the owning machine,
-its file is copied over Connections, the owner's copy is removed. Test counts are from `cargo test
---locked` with synthetic GitHub configuration and a shared target dir, run on 8 Nov 2026 on the Mac;
-no computer, Dev engine or app bundle was touched.
-
-- **Why a stream.** The managed key is `restrict,command="... --remote-bridge"`, so `scp`/`sftp` cannot
-  reach the owner, and Files' `sftp` only reaches guests through `guest.ssh`. A new Stream method
-  `exports.file` carries one file, like `guest.ssh` (`engine/src/remote.rs` `METHODS`, served by
-  `serve_file_stream`; the handshake's capability list is the old-owner check).
-- **Transfer area** (`engine/src/transfer_area.rs`): `<engine dir>/transfer/`, 0700 and 0600. Names are
-  owner-made `x-<32 hex>.silo-backup` (export, read once through an exclusive `.used` marker, links not
-  followed) and `i-<32 hex>.silo-backup` (import, never readable); `parse_name` is the fixed pattern. A write
-  declares size and sha256, is refused at zero, past the cap or without room (`size + 64 MiB` beyond the
-  bytes other writes of the process have reserved; see "Review fixes"), goes to `.part`, reads exactly the declared bytes and is renamed only when the
-  hash matches; every other end deletes the `.part`. **Cap: 16 GiB.** Not the Files 4 GiB (a computer
-  export can exceed it) and not the engine's export limit, which is 8 TiB; 16 GiB is a deliberate middle
-  that keeps the time budget finite. Remove is `exports.discard`; the sweep empties the area when
-  `silod` starts and removes entries older than a day on the storage timer (`timers::sweep_transfer_area`).
-- **Owner jobs, one variant.** `exports.create` takes `transferArea` (the owner picks the name; the job's
-  `archive.transfer` holds `{name, bytes, sha256}`, hashed after the write: `backup_controller::describe_transfer`),
-  `exports.import` takes `transferName` (resolved to an import name that is in the area, otherwise the
-  ordinary import: the archive checks are the boundary). New API methods: `exports.discard` (owner command)
-  and `exports.transfer` (controller job, `deviceId` required). The check, create and import are asked on
-  the owner through the existing routing; the CLI's `ROUTED_METHODS` lists them.
-- **Controller job** (`silod/src/methods/checkpoints/export_transfer.rs`): `receive` writes a new 0600 `<path>.part`,
-  links it to the path when the hash matches and removes it on any failure; `send` hashes the local file, then sends. Progress is the Files
-  `TransferProgress`; cancel is the job's; the Files budget (45 s plus 64 KiB/s) is enforced by a watchdog
-  that closes the stream. An owner without `exports.file` is refused with "The other machine's Silo is too
-  old to share computers over Connections. Update Silo there." by the job and by the controller's routing of
-  `exports.create`/`exports.import` that use the area.
-- **Review fixes (8 Nov 2026).** Findings of the review of the first version, each with a test:
-  - *Disk overfill.* `begin_write` only read `statvfs`, so concurrent writes each passed. A
-    process-wide reserved-bytes counter per area folder is checked and raised under one lock and
-    released by the `Writer` on rename or drop. Writes are not serialized: the stream budget of 192
-    (`remote.rs` `STREAM_LIMIT`) bounds how many are open, the reservation bounds the disk. A write's full
-    size stays reserved while its `.part` grows, which errs on the side of refusing. Docs said "counting
-    writes already promised" and "one transfer at a time"; they now say what the code does.
-  - *Import file lost on a failed poll.* `import_to_device` discarded the `i-` file on any error. It now
-    discards when the import succeeded or `Engine::last_job_finished` says the job is finished; a failed
-    wait leaves the file (the sweep removes it) and the re-attach hint stays valid.
-  - *Over-cap export.* The owner removes the `x-` file when `describe_transfer` fails (too large,
-    cancelled, unreadable); the size is read from the file before it is hashed and the error names the
-    file and size. The up-front refusal from `estimate_export_bytes` (before compression, whole store
-    and cache when the image travels) is gone: it could refuse an export that would fit. Instead the
-    export stops itself: `BackupRequest::size_cap` (set to the area's 16 GiB for a file in the area)
-    is checked in `create_backup_with_token` after each computer's disks are written, and the error
-    names that computer and the cap. This is not a mid-write abort of the tool that writes a
-    computer's disks (an external command), so one oversized computer is still written to the
-    working copy before it is refused; nothing is assembled, no file is left at the destination, and
-    the working copy is dropped. The after-write check stays. The estimate still feeds the free-space check.
-  - *Export files 0600.* `describe_transfer` sets 0600 on the export, so "files 0600" is true for both
-    kinds.
-  - *Receive wrote to the final path.* `export_transfer::receive` writes `<path>.part` and puts it at the
-    path only when the hash matches; an existing file is refused before the copy and nothing is replaced.
-    The first cut used `hard_link`, which exFAT/FAT32/vfat and many SMB shares refuse, so every copy there
-    failed at the end. It now uses `transfer_area::publish_without_replacing`: the kernel's exclusive rename
-    (`renameatx_np` `RENAME_EXCL` / `renameat2` `RENAME_NOREPLACE`), else a hard link and removing the `.part`,
-    else an existence check and a plain rename. The fallbacks are tested with injected errors. A `.part`
-    left by a crash (a regular file of this account) is removed once and the copy starts again; anything
-    else there is named in the error.
-  - *Broken pipe.* `push` reads the owner's error line when a write fails and returns the owner's reason.
-  - *Client-chosen names.* `exports.create` refuses a destination or archive path inside the area
-    (`Area::contains`, links followed); only `transferArea: true` names a file there.
-  - *Marker on a failed open.* `open_for_read` removes the `.used` marker when the `O_NOFOLLOW` open fails.
-  - *Sweep order.* `silod` empties the area before `start_connections`, not after the bridge is up.
-  - *Why 16 GiB* is in `docs/SiloUI-CLI.md`.
-- **CLI** (`cli/src/share.rs`): `--device` export checks the output name first, creates the export in the
-  owner's area, copies it with a local `exports.transfer`, then discards the owner's copy whatever the copy
-  did; import sends first, imports from the received name, and discards once the import is finished. A failed
-  discard is a warning.
-- **Docs/changeset:** `docs/THREAT-MODEL.md` (boundary 6, "Sharing a computer that lives on another
-  device"), `docs/SiloUI-CLI.md`, `docs/SiloUI-CONNECTIONS.md`, `app/SiloUI/.changeset/share-across-devices.md`.
-- **Tests.** Engine `transfer_area` 19 (names and roles, single use, links, `.part`, hash and short/long
-  streams, abort, size/cap/free space, remove, sweep, the stream over socket pairs both ways), `remote`
-  170 (the method lists), `backup_controller` 1 (`describe_transfer`). `silod` `methods::` 244 (a controller
-  job against the real owner side over socket pairs: receive, send, bad hash, refused name, cancel of a
-  stalled copy, old owner, request validation; owner `exports.discard`, `exports.create` with the area,
-  `exports.import` from the area; the routing gate; the sweep). `silo-cli` 150 unit + `tests/share.rs`
-  17 (the device flows, the discard on every path, the order of requests and which job is followed on
-  which device). `hosts-e2e.sh` unit tests 18 (the sharing steps and a file left in a transfer area).
-  `silo-api` 49 (schema and requests regenerated).
-- **Live check:** `hosts-e2e.sh` with `SILO_E2E_SHARE=1` on the two-account KVM job
-  (`linux-host.yml`): see the pull request for the run. **Not covered by any test:** a real `ssh` hop with
-  the restricted key (the unit tests replace it with socket pairs), the Mac, and an exported computer
-  larger than the runner disk.
-
-### Phase F3: sharing a computer as a file (branch `claude/forks-phase-3`, 7 Nov 2026)
-
-What changed, with the evidence for each claim. Test counts are from `cargo test --locked` (synthetic
-GitHub configuration, shared target dir) and Vitest, run on 7 Nov 2026 on the Mac; none of it touched a
-computer, the Dev engine or an app bundle.
-
-- **`silo export` / `silo import`** (`cli/src/share.rs`, `cli.rs`, `render.rs`; `--json` like every
-  command; the same job waiting as the other commands, `Engine::run_job`). `exports.create` gained
-  `archivePath` (the exact file; the remembered-folder rule applies only without it) and there is a new
-  job `exports.check`. `--device` is refused for both with "…work on this device for now, so --device
-  cannot be used with them yet." No MCP tools: the MCP server has no owner-only tier, and both commands
-  read and write files at paths the caller picks and the file can hold the computer's logins; reasons
-  are in `docs/SiloUI-CLI.md`. Evidence: `cli/tests/share.rs` 10 tests (question text, no terminal
-  without `--yes`, `--yes`, failed check, checkpoint by name, failed export/import reported, default
-  import name, `--device`), 3 unit tests in `share.rs`.
-- **Guest image by reference.** Verified first, and the claim in Decision Q4 was not accurate:
-  `compare_loaded_descriptor` (`backup.rs`) compares the loaded snapshot's image with *the archive's own*
-  manifest, not with this Silo's pinned image, so import did not refuse an archive naming another image.
-  What replaces it: a Linux computer whose image reference (and recorded digest, when it has one) equals
-  the pinned image that the runtime cache holds is saved without `--with-image` (`--with-parents`
-  unchanged, including the retry without parents) and its manifest row says `imageEmbedded: false` and
-  carries `imageDigest`, **always the sender's pinned digest** (`PinnedImageRef.manifest_digest`), also when
-  the computer recorded none (before, such a row was matched by tag only). Validation requires a digest
-  exactly on the rows that leave the image out. Import of a lean row now prepares the image **before the
-  payload is extracted** (`prepare_restore_in_group` reads the manifest first, so an offline receiver fails
-  before copying gigabytes; the download checks its own space in `download_and_publish`, and the extraction
-  space check that follows sees what is left): the reference must be this Silo's pinned one (else "Update
-  Silo…"), `preparation::ensure_image` prepares it as computer creation does, and the cached manifest digest
-  must equal the row's `imageDigest`. **Format:** only an archive that needs format 5 (a lean row or a
-  fork-time record) is written as format 5; any other is written as format 4 (header and manifest), so older
-  Silo builds still read it and the changeset needs no warning. Format 4 files are still read; format 5
-  fields in a format 4 file are refused. Evidence: `backup.rs` tests for pinned/other/none image with the
-  digest and the format of each, digest required exactly on lean rows, prepare called first with the digest
-  and with nothing staged, the retry without parents, import calling the preparation only for a lean row
-  and stopping when it fails, format 4 written and read, format 5 fields refused in format 4;
-  `backup_controller.rs` test for another pinned image. **Size before/after: not measured** (the unit tests
-  use a fake runtime; the live check prints the size and takes `BEFORE_BYTES`).
-- **Fork-time record travels.** Archive manifest `forkRecords` (computer, size, sha256, capturedAt,
-  records, bytes), the gzipped stored manifest after the payloads; counted in the file length, hashed,
-  verified by every full check, extracted for the selected computer on import and stored by
-  `Store::put_imported_base` with no source and no origin (parsed first; a bad record is refused and
-  stores nothing). Linux and macOS (and mixed) archives carry it. A failed import removes it. A computer
-  without a record imports as its own, and `fold` without `--into` keeps its message. Evidence:
-  `backup.rs` round trip, tampered record fails check and import, record for an unknown computer refused;
-  `changes/store.rs` 2 tests; `backup_controller.rs` stores/forgets the record; `keep/tests.rs` two
-  tests that read the imported record back and keep three-way into the receiver's main (kept; and
-  refused as divergent with main untouched when the receiver changed the same file).
-  **Hardening after review (7 Nov):** `put_imported_base` counts `records` and `bytes` from the parsed
-  manifest and ignores the archive's numbers (the archive section keeps its fields; import no longer reads
-  them), and a `capturedAt` that is not an RFC 3339 time between 2020 and a day from now is replaced by
-  the import time (test with 1970, year 9999, text and empty). The compressed cap is 128 MiB, what a
-  capture reads back from a computer (`Options::max_compressed_bytes`); the 512 MiB decompressed cap stays
-  because a capture accepts the same (`Options::max_manifest_bytes`), so a lower one would refuse records
-  the engine itself made. **Orphan record:** the record is stored before the computer is saved, and
-  `discard_uncommitted_import` (also what relaunch recovery calls for a journaled identity) did not remove
-  it, so an interruption between the two, or a failed save of the settings, left a record under an id no
-  computer has; macOS relaunch recovery had the same gap. Both now call `forget_fork_record`, whose failure
-  keeps the identity journaled for the next launch. Test: a stored record is gone after
-  `discard_uncommitted_import`.
-- **Login warning.** `credential_group` now matches `.claude/.credentials.json`, `.codex/auth.json`,
-  `.gemini/oauth_creds.json` and `.gemini/gemini-credentials.json` (`gh/hosts.yml` was there). Claude Code and
-  Codex paths are from the tools' own docs (code.claude.com/docs/en/authentication: Linux, mode 0600;
-  developers.openai.com/codex/auth). **Gemini CLI, corrected after review:** `oauth_creds.json` is the legacy
-  file; current gemini-cli migrates it into keychain storage and, with no secret service, writes
-  `~/.gemini/gemini-credentials.json` (`fileKeychain.ts` in google-gemini/gemini-cli: `path.join(homedir(),
-  GEMINI_DIR)` + `gemini-credentials.json`, written encrypted with mode 0600). Both are matched; the earlier
-  claim that the path came only from third-party tools was wrong about the source, not about the legacy
-  file. `login_label` names a login ("a Claude Code login (path)") and leaves out what every computer has
-  (`/etc/shadow`, host keys, public keys, the desktop password). `changes::credentials::check` lists the disk
-  with one change manifest capture (the `silo diff` walk, which runs a bounded script in the guest and
-  reads a gzip back; cost = one capture of `/etc /root /home /usr/local /opt /srv`, seconds on a small
-  computer, proportional to the number of files, and the computer must be running) and the stored record.
-  Warn, never filter. **One "could not check" case (review):** a stopped computer (its disk is not listed;
-  a check never starts it), a checkpoint export (only the record is checked) and a failed check are the
-  same case, with the reason in `unchecked`. The CLI asks "Silo could not check <name> for logins
-  (<reason>). Share anyway? [y/N]" (with "other logins" and the found ones in the same question when both
-  apply), refuses without a terminal unless `--yes`, and with `--yes` reports the reason in `--json`
-  (`unchecked`) and in the text output; the app shows the same sentence in its dialog before the folder
-  picker, and a failed check asks too. Before, a stopped computer exported without a question and a failed
-  check under `--yes` was reported as clean. Evidence: engine tests `ignore.rs` 2, `credentials.rs` 3;
-  `cli/tests/share.rs` 12 (stopped computer asked and refused/accepted, failed check with `--yes` reported
-  in JSON and text); frontend `computer-transfer.test.tsx` (failed check, stopped computer with no logins
-  found, logins beside "other logins"), production bridge 2 new tests.
-  **Tauri command:** `check_export_logins` compiled and its forwarding test passed
-  (`cargo check -p silo-ui`, `cargo test -p silo-ui the_logins_check`) with empty placeholder files for the
-  resources `build.rs` requires (`binaries/*`, `runtime/*`, git-ignored, deleted afterwards);
-  `runtime:prepare` itself was not run (it builds MicroSandbox and Git from source with network access), so
-  this proves the Rust compiles and the forwarding, not a packaged app.
-- **Docs/changeset:** `docs/SiloUI-CLI.md` (commands table and a "Sharing a computer as a file"
-  section, with what the person sees when Silo could not check), `docs/THREAT-MODEL.md` (boundary 6, including
-  that an imported computer is untrusted until kept: `silo fold <imported> --into main` writes the sender's
-  shell files, agent settings and crontab into the computer that holds the receiver's secrets, so read
-  `silo diff` first), `app/SiloUI/.changeset/share-a-computer.md`.
-- **Export file name:** `-o FILE` must end in `.silo-backup`; checked up front for Linux and macOS in
-  `explicit_archive` (before, only the Linux write path checked, after the capture).
-- **Live check, not run:** `docs/forks-ci/checks/f3_share_check.sh` (Dev engine, `e2e-share-*`; keeps
-  the import into a second fork `e2e-share-target`, not the Dev main).
-
-**Final review fixes (7 Nov; reviews: Fable LGTM, Opus LGTM after these).** An import now computes the
-guest image to prepare a second time from the extracted archive and refuses ("the file changed while
-Silo was reading it") unless it equals the image that was described and prepared, so a file replaced
-between the two reads cannot load an unprepared image (test swaps the archive inside `prepare_image`).
-A macOS import that left no computer propagates a failed fork-record removal and keeps the restore
-identity for recovery instead of dropping the error (`settle_unsaved_macos_import`, with a test). `silo
-export --yes` says "other logins" when some were listed. A disk listing that fails after the fork-time
-record was read keeps the record's logins and reports the reason, and a Linux computer that cannot be
-reached is no longer reported as stopped (3 tests in `changes/credentials.rs`). Run: engine `backup`,
-`backup_controller` and `changes::credentials` tests (267 passed), `silo-cli --test share` (12 passed),
-render unit test, `cargo fmt --check`; no frontend file changed.
-
-Test results (7 Nov, after the review fixes): silo-engine 3123 passed, 8 failed, 31 ignored (the 8 are the
-same `host_push::protocol_tests::*`, which panic "prepare the bundled Git runtime before testing" in this
-checkout; none touches this change); silod 320 unit plus its integration tests, all passing; silo-cli 148
-unit + 12 `share` tests, all passing; silo-client 16; silo-api 49. Frontend: typecheck clean, lint 0 errors
-(existing warnings), Vitest 287 files / 2863 tests. `demo/` `tsc --noEmit` clean (node_modules deleted
-afterwards). `cargo fmt --all --check` clean. New tests were written with their fixes, not run failing
-first, except where a changed assertion shows the old behaviour (the CLI check-failure test).
-
-**F3 live check (7 Nov, Dev engine, Mac) and the fixes it led to.** Evidence:
-[f3-share](evidence/f3-share/README.md) (`raw-1-default/`, `raw-2-clear-session-bus/`). 18 of 22 and 19 of 21
-checks passed; the failures were four product problems, all fixed afterwards (tests, not a second live run):
-
-1. *Keep of an imported computer into the receiver's computer.* (a) `/home/silo/.dbus/session-bus/<machine-id>-1`
-   is rewritten by every started computer, so any two computers started since their common ancestor
-   conflicted on it ("divergent"). `changes/ignore.rs` now ignores `*/.dbus/session-bus` and
-   `.xsession-errors*` (the X session's error log, the same kind of per-login file); test
-   `per_login_runtime_files_are_not_a_change`. The other per-boot files under the home directory that the
-   evidence shows (`.config/pulse/<machine-id>-*`, `.Xauthority`, `.ICEauthority`) were already ignored.
-   (b) The `changed` refusal in run 2 was not a product fault: `silo fold` without `--reviewed` pins the keep to
-   the digest of the last `silo diff` of the fork (`Engine::recall_review`, `ops::fold`), and that was S5's,
-   before the probe deleted the session-bus files in the copy. The refusal's `report.reviewDigest`
-   (`f70af3…`) equals the dry run's, while S5's `s5.json` has `142494…`: the fork did not change between the dry
-   run and the keep, it changed after the review the keep was pinned to, and the refusal is the designed
-   answer. `f3_share_check.sh` now runs `silo diff` on the copy right before S7 (the `CLEAR_SESSION_BUS` probe
-   is gone). Not yet seen live: that the keep then succeeds; the probe is a rerun of the script on the Dev
-   engine.
-2. *The Silo CA named as a login.* `/etc/pki/ca-trust/source/anchors/microsandbox-ca.pem` is in
-   `SYSTEM_CREDENTIALS`, as is the macOS equivalent, the proxy CA and its trust-probe leaf under
-   `/Library/Application Support/Silo/NetworkBootstrap/` (written by `macos_computers/proxy/bootstrap.rs`; not
-   checked live). A CA anchor a person adds is still named (test).
-3. *Export free-space check.* `check_export_space` counted every snapshot and cache of the engine, once per
-   selected computer, plus the computer's disk twice (in the estimate and as a capture on the store). It now
-   counts, once per computer, its own snapshot group, its disk when a new capture is taken, and the image cache
-   once when a file carries the image, plus the manifest margin and 1 %, for the working copy and the
-   destination (and the 1 GiB reserve per volume). Ancestors kept in another computer's group are not counted
-   (the check on the finished file uses its real size). Test `export_space_counts_the_computers_own_payload_once`
-   (24 MiB of other snapshots and cache do not matter; the computer's own data does).
-4. *`snapshots/silo-import-*` left behind.* An imported computer's group holds the archive's ancestors under
-   the exporting computer's names, and dropping the computer queued only members named like Silo's own
-   captures (`silo_member`), so the others stayed. `remove_deleted_snapshots` now queues every member of an
-   import group (names valid for the journal; the planner still keeps what a record or a live computer's lineage
-   uses). The startup/maintenance sweep (`recover_interrupted`) also queues the members of import groups that
-   no checkpoint record on disk names, which clears the groups earlier drops left. Discarding an unfinished
-   import already removed its whole group (`discard_import_group`). Tests (both failed before the change):
-   `deleting_an_imported_computer_removes_its_whole_import_group`,
-   `the_sweep_removes_import_groups_no_computer_owns`. The cause is from reading the code, not observed live.
-
-- **Live rerun, 8 Nov 2026 (run 3, evidence in [f3-share](evidence/f3-share/README.md)).** On an integration build
-  (`412e329c`) with `cf97e65a`: S2 no longer names the Silo CA (only the Claude Code login), S3 and S9 (checkpoint
-  export) ran at 59 GiB free without a space refusal, but **S4 fails**: importing any export, even of a fresh
-  never-forked computer, stops with `archive contains duplicate entry: layers/layer_87157fb5….raw` from the runtime's
-  `snapshot load`. S5 to S8 were not reached, so S7 (keep into the receiver's computer) and the import-group
-  clean-up of a dropped imported computer were still unseen. Failed imports left no group; six older
-  `silo-import-*` folders were not cleared by the new engine.
-- **Run 4, 8 Nov 2026 (evidence in [f3-share](evidence/f3-share/README.md), `run-4-rerun.txt`): 22 passed, 0 failed**
-  (S9 `--device` skipped), S7 included; no `silo-import-*` left after dropping everything. Causes and fixes:
-  (1) *Duplicate layer.* `msb snapshot save --with-parents` writes a layer twice when the capture's chain already holds its
-  parent's head (any export after an earlier capture of the computer, such as F2's fork points), and `snapshot load` refuses it.
-  Reproduced with one computer exported four times (the fourth file failed); exports now save the capture alone
-  (`8794f629`; test `a_capture_is_saved_without_its_parents_so_no_layer_is_written_twice`, failed before). The old
-  missing-ancestor retry and its two tests are gone. (2) *Groups left.* The six groups were empty folders by then (the
-  8.4 GB was not reproduced). The sweep never ran: its only caller, `storage::start_monitor`, has had no caller since the
-  engine split; `silod` now runs `recover_checkpoint_data` on a timer (`5aa8a1ae`). Dropping a computer now queues every
-  member of its import group (`8794f629`), and a member released later (an imported copy shares its snapshot ID with the
-  computer it came from and stays while that lives) is removed then (`05992ceb`, test
-  `a_member_released_later_is_removed_through_the_runtime`). Silo does **not** remove the empty `silo-import-*` folder
-  (`.group.lock`, `group.json`, about 4 KB each) MicroSandbox leaves; those can remain.
-  **Still dead:** the trimming half of `start_monitor` (`periodic`, warm-computer trims) is not wired into `silod`; not
-  changed here, it needs its own decision.
-- **Folder removal dropped (review).** An earlier cut of the sweep unlinked empty `silo-import-*` folders from the
-  filesystem after an unlocked scan, while MicroSandbox publishes under its own group lock, and its time budget excluded
-  the inventory. Removed (`remove_unowned_import_group_shells`, `remove_empty_group_directory` and their tests):
-  MicroSandbox has no command that deletes an empty group, and the folders are about 4 KB each.
-
-### R2: Linux hosts as runner machines (branch `claude/runner-phase-2`, 8 Nov 2026)
-
-- **Built.**
-  - *Packaging:* `package-engine.py` builds `silo-runner` (`go build`, `CGO_ENABLED=0`, `GOOS=linux`, `GOARCH` of the
-    platform, `-X main.version=<engine version>`) and puts it in both Linux archives as `silo-runner`, with the Go modules'
-    licenses (checked in under `runner/licenses/`) in `resources/silo-runner-licenses/` and a notices section. The ELF
-    machine check covers it. The jobs that package a Linux archive (`linux-host.yml` x2, `containers-c1.yml`,
-    `engine-release.yml`) install Go from `runner/go.mod`; the release verification runs `silo-runner version`. Not in the macOS
-    engine archive (an embedding-app format; a Mac builds the helper with `go build`).
-  - *Service:* `silo-runner service register|unregister` (`service.go`) writes `~/.config/systemd/user/silo-runner.service` with
-    `After=`/`Wants=` the engine's unit (`-engine-unit` for a Dev engine), `Restart=on-failure`, `UMask=0077`,
-    `KillMode=mixed`, an optional `EnvironmentFile=-%E/silo-runner/env` for the token. **Chosen over a documented unit file**
-    because the unit needs canonical, systemd-quoted paths and a refusal to overwrite foreign files, the same reasons
-    `silod --service register` writes its own; about 150 lines, unit-tested. A user unit runs as the account of the user
-    manager, which is the account of the engine's socket; `silo-runner` also refuses euid 0.
-  - *Capacity:* on a Linux host (`GOOS=linux`, no `silo.device`) a `linuxBudget` field left out defaults to three quarters
-    of `MemTotal` and one computer per CPU. **Chosen over requiring it** so the safe setting does not depend on remembering
-    to write it; `MemTotal` and not `MemAvailable` so a restart with computers running computes the same budget. A budget
-    below one computer of the largest recipe, a `macos` scale set, and an unusable `/dev/kvm` (missing, or no permission:
-    what to do is in the message) stop startup. `silo-runner check -offline` does the host part with no GitHub; an empty
-    `tokenEnv` variable is named before any call.
-  - *Recipe:* `silo-linux` pins `RUNNER_SHA256_ARM64` and `RUNNER_SHA256_X64` (the digests of `linux-arm64` and `linux-x64`
-    2.338.2, from the release API) and picks one by `uname -m` while building. `ParsePin`/`WithPin` and the refresh handle
-    both: each digest comes from its own asset of the same release, and a release missing either changes nothing. The
-    Rust recipe test (`cli/tests/recipes.rs`) expects the two digests.
-  - *Docs:* CI runner guide "Linux hosts" (install, config, service, journal, capacity), threat-model bullets (the
-    credential on the host, the journal readers, root, KVM, both pins, the Linux budget), engine and release docs,
-    `examples/config-linux.yaml`, changeset (`silo-ui`: minor).
-- **Live check: what was and was not run.**
-  - *Not run:* `docs/forks-ci/checks/r2_linux_runner_check.sh`, the whole flow (runner for the machine's architecture, a
-    computer per job on KVM, deleted on success, kept on failure, runners removed at GitHub, the service and its journal).
-    It needs an admin token that CI must not hold, and the owner's Linux machine (10.77.77.2) was offline. **No job has
-    run through `silo-runner` on a Linux host, and the x86_64 runner recipe has never been built.**
-  - *Run by CI on KVM (no GitHub), `scripts/runner-host-e2e.sh` in the Linux host workflow:* the archive's `silo-runner` runs
-    on that architecture and reports the engine version; `check -offline` opens the real `/dev/kvm` and sizes the budget
-    from the host; a `macos` scale set is refused; `service register` against the real systemd user manager gives a unit
-    that is enabled, ordered after and wanting the engine's unit, passing `systemd-analyze --user verify`; the helper's
-    log (it stops for lack of a token) is in the user journal under this account's uid; starting the helper starts a stopped
-    engine; `service unregister` removes the unit and leaves the engine running. A fake GitHub was not built: the
-    runner program inside the computer needs the real service to reach "Listening for Jobs", so a stub of the scale set
-    endpoints could not honestly exercise a fork per job or runner deletion, which the Go fakes already cover.
-    (First run happens when the PR's checks run; see the PR.)
-- **Tests:** Go `go vet`, `gofmt`, `go test -race ./...` in `runner/`: 115 tests pass, 24 of them new (`host_test.go`,
-  `service_test.go`, and the architecture cases in `misc_test.go`): the service unit text and its quoting, register and
-  unregister calls, refusal of root and of foreign unit files, the default budget and its sources, KVM errors, the
-  macOS-scale-set refusal, the shipped recipe's two pins, the refresh moving both digests from their own assets, and a
-  recipe whose digests do not match its download. `test_package_engine.py` (the archive holds `silo-runner` and the licenses,
-  the ELF check, the Go build command per platform), `test_linux_host_workflow.py`, `test_engine_release_workflow.py`,
-  `test_workflow_pins.py`, `test_ci_native_changes.py` (no path change needed) pass; `cargo test -p silo-cli --test recipes`
-  passes with synthetic GitHub values; `shellcheck` is clean on `runner-host-e2e.sh`. Both Linux binaries were
-  cross-built on the Mac and are ELF x86-64 and AArch64. The classifier is unchanged: `runner/` stays skippable except
-  `recipes/`.
-- **Review fixes (round 1, same branch).**
-  - *Unit could not find `silo`:* the user manager's `PATH` lacks `~/.local/bin`, so `silo.path: silo` failed every call and the unit
-    restarted every 10 s. `service register` now resolves `silo.path` (`exec.LookPath` from the registering shell; an absolute path
-    must be an executable file; a relative path with a slash, or anything unresolvable, is refused) and writes it into
-    `ExecStart` as `run -config <file> -silo <absolute path>`; `run` takes `-silo`. Example config uses an absolute path and names
-    `silo-dev`. Tests: unit text, `ResolveSilo`, register refusal writes nothing. `runner-host-e2e.sh` also greps the unit.
-  - *Old single-arm64 recipe on an x86_64 host:* `ApplyHost` (start and `check`) parses each installed Linux recipe's pin and
-    refuses a single-architecture pin other than the host's `GOARCH`, naming `silo-runner install-recipes -replace`. New flag
-    `-replace` moves the existing recipe to `<name>.yaml.bak` and writes the shipped one. Upgrade notes in the guide.
-  - *0600 was only documented:* `SecretFileWarnings` warns (log at start; `warning:` lines in `check`, also `-offline`) when the App
-    key or `~/.config/silo-runner/env` is group- or world-readable, as ssh does for a key; it does not refuse. Threat model reworded
-    to "the guide makes them 0600 and the helper warns otherwise".
-  - *Default budget ignored cgroup limits:* the default comes from `MemTotal` and the CPU count only (a cap read from the helper's
-    own cgroup missed a `MemoryMax=` on silod's unit and could shrink the budget wrongly). Docs say that where the engine or the
-    user's slice has a memory limit, or in a container or VM with less memory than it reports, `linuxBudget` must be set; the stale
-    comment on `LinuxBudget` (zero now means the host default) is fixed.
-  - *Packaging:* `go_build_runner` no longer leaves its `mkdtemp` directory (`main` builds in a `TemporaryDirectory`); the licence
-    glob skips dotfiles and directories. Python tests for both.
-  - *Tests:* `go vet` (also `GOOS=linux` amd64 and arm64), `gofmt`, `go test -race ./...`; `test_package_engine.py`,
-    `test_linux_host_workflow.py` pass. Still no GitHub run and no Linux machine.
-- **CI: `Linux computer on KVM` failed at `silo create` ("Silo could not download the VM image"), not caused by the runner step.**
-  Runs 42465256087 (attempts 1-3) failed at `== Creating e2e-hosts-ci` after about 40 s. The VM image is fetched from
-  `github.com/amontlabs/silo/releases/download/guest-ubuntu-24.04-v5/image-amd64.tar.gz` (`guest-image/image-lock.json`); that
-  asset exists (361 MB, `uploaded`), but at 10:19 UTC every `github.com/.../releases/download/...` URL, including an unrelated
-  repository's, answered HTTP 504 from outside CI while githubstatus.com reported all systems operational. Other branches
-  failed the same step in the same window with no runner step at all (`claude/forks-phase-4-transfer` run 42469940031 at
-  10:14:29 UTC, whose workflow has no `runner-host-e2e.sh`; `claude/containers-ct1` run 42466752224 at 09:36 UTC), while
-  run 42467219772 passed at 09:26: a flaky release-download endpoint, not state the runner step leaves behind. The runner
-  step only restarts the engine through `Wants=` with the same user-manager environment, home and image cache dir as the
-  engine the register step started, and the engine journal shows nothing between the restart and the stop. The create step
-  now retries a download failure (3 attempts, 30 s apart) so a brief GitHub outage does not fail the job.
-- **Open:** (1) the live check above; (2) `silo-runner` is not in the macOS archive; (3) one helper per machine, so two machines
-  serving the same recipe need two labels; (4) the default budget ignores memory the host's other services use, so on a
-  shared machine set `linuxBudget`.
-
-#### Post-merge review: CI runner (R1 and R2, 9 Nov 2026)
-
-Review of `app/SiloUI/runner`, its CI wiring and its docs as they are on `main` after the container phases.
-
-- **Fixed: the command of a runner that never listened was never reaped** (`fleet.go` `onUpDone`). When the
-  runner did not print "Listening for Jobs" within `readyTimeout`, its `silo exec` command was still running and
-  nothing drained its output or waited for it: the helper interrupted it after deregistration and dropped it, so
-  every such failed start left a zombie process and the goroutine `os/exec` keeps per command, until the helper
-  exited. The command is now watched whenever the start returned one, ready or not. Test:
-  `TestTheCommandOfARunnerThatNeverListenedIsReaped` (failed before).
-- **Fixed: a running container computer did not count against the Linux budget** (`capacity.go`). CT2 made the
-  command line list container computers with the kind `container`; capacity counted only `linux`, so on a Linux
-  host the helper could start virtual machines into memory a container computer already used. Everything that is
-  not a macOS virtual machine now counts as a Linux computer. Test:
-  `TestARunningContainerComputerCountsAgainstTheLinuxBudget` (failed before).
-- **Fixed: docs that said the default budget reads cgroup limits.** The guide's configuration table and the
-  threat model said the default memory was the smaller of the machine's and a cgroup limit; the code reads
-  `MemTotal` only (the cgroup cap was dropped in R2's review). Both now say so. The R2 entry above had its
-  "Built", "Live check", "Tests" and review bullets twice, the second copy with the dropped cgroup behaviour; the
-  copy is removed. The public-repository refusal said "this Mac" on a Linux host; it says "this machine".
-- **Checked, no change:** one event loop writes the records and the ledger; the phases and the by-id rule; the JIT
-  configuration only on standard input (the CLI's `exec --stream --stdin` sends it in the request body and prints
-  a reattach hint on interrupt, so the runner in the computer outlives the command); one label per scale set;
-  `DisableUpdate` set on create and repaired on an existing set; the watchdog (the `scaleset` listener calls
-  `Scale` once per poll, also with a nil message); scale-up from a fresh list with pending demands; restart
-  adoption; delete on success and keep on failure; no checkpoint call anywhere in the helper; the private
-  repository and runner group check failing closed; the docs' statement that GitHub's own secrets and
-  `GITHUB_TOKEN` are not placeholders.
-- **Left for the owner:** (1) the private-repository check runs at start only, so a repository made public while
-  the helper runs is served until the next start; (2) a second Ctrl-C does not end a slow shutdown (the signal
-  stays caught); (3) the Resume section above still listed R2 as in progress (corrected on 10 Nov by the
-  container sharing and docs review); (4) no job has run through
-  `silo-runner` on a Linux host (unchanged from R2).
-
 ## Post-merge review
 
 ### Forks and sharing a computer as a file, VM computers (F2 #88, F3 #86, F4 #93; 9 Nov 2026)
@@ -1611,3 +1611,39 @@ fixes are in the same pull request (#105).
 - **Seen, not changed (low; from reading the code):** a transfer-area export leaves its "Export complete" result
   and a system notice on the owning device, naming a file the controller then discards. `Area::open_for_read`
   keeps its used marker when the file is past the cap.
+
+### Container imports, the runner's checks and the leftovers (10 Nov 2026)
+
+Follows the container sharing review above and R2's left-for-owner list; branch `fix/forks-ci-post-merge-review`.
+
+- **Fixed: an imported container computer starts with its network blocked**, as an imported virtual machine
+  does, not with the gateway's own policy from its first start. The import records the deny-all policy, the
+  first start hands it to the gateway, a fork keeps it, and an export drops it from the portable template (the
+  header refuses it, like the other settings the importing Silo decides). Assigning a secret to the computer
+  (`silo secret put`, GitHub access among them) unblocks the network at its next start, together with the
+  secret. The command line guide's sharing section and the threat model's container sections say so. Tests:
+  `an_imported_container_starts_from_the_deny_all_policy_like_a_virtual_machine`,
+  `a_secret_unblocks_a_blocked_computer_and_a_refusal_does_not`,
+  `a_header_that_could_smuggle_something_is_refused`.
+- **Fixed: container exports leave out `security.selinux`.** `silo-ctr pack` writes every attribute a file has
+  except overlayfs's own records and the SELinux label: the label names types of the exporting host's own
+  policy, which `unpack` cannot set inside a user namespace on a host without SELinux, and the importing host
+  labels the files it makes itself. Test: `an_export_leaves_out_the_hosts_selinux_label_and_overlayfs_records`.
+- **Fixed: the runner re-checks the repository before each job** (R2's item 1). Every poll that brings jobs
+  runs the private-repository check again before a job is acquired; a public repository, or one the check
+  cannot read, is not served: the poll fails, the message is not acked, GitHub offers the job again and the
+  check runs again. Test: `TestAJobIsNotTakenWhenTheRepositoryIsNoLongerPrivate`.
+- **Fixed: a second Ctrl-C ends a slow shutdown** (R2's item 2). After the first interrupt the shutdown waits
+  for the work in flight (deregistrations, stops, drops); another interrupt ends the wait at once and leaves
+  the step in flight behind — each step records what it did, so the next start picks the computers up. Test:
+  `TestASecondInterruptEndsASlowShutdownAtOnce`.
+- **Fixed: stopping a paused container computer works cleanly.** A paused computer's processes are frozen and
+  cannot run to answer TERM, so its stop waited out the grace period and ended in SIGKILL. Stop ends the pause
+  first — under the same lock a checkpoint's copy holds — and then signals. Tests:
+  `a_stop_ends_a_pause_before_it_signals_the_processes`,
+  `a_stop_waits_for_a_checkpoint_before_it_ends_a_pause`.
+- **Fixed: a second checkpoint of a container computer says a checkpoint is already in progress**, not that
+  the computer is starting. Test:
+  `a_second_checkpoint_says_one_is_in_progress_not_that_the_computer_is_starting`.
+- **The Status sections are in date order** (R1 and F3 between F2 and C1, F4 and R2 between CT3b and CT4); no
+  wording in them changed.

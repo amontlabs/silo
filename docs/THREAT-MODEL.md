@@ -793,7 +793,9 @@ with nothing sensitive on it, and the app, the CLI and `silo list` label it as l
   guest's package manager can update it and a guest can add a CA of its own.
 - **Network.** The container's network namespace holds one TAP device and a loopback, and nothing
   else; a gateway process (the same network stack as macOS computers, boundary 2) is the only way
-  out, with the Public policy and the gateway as resolver. A command run in the computer enters
+  out, with the Public policy and the gateway as resolver. A computer made from an import starts
+  with the deny-all policy instead, until a secret is assigned to it (the export section below).
+  A command run in the computer enters
   that namespace too.
 - **Secrets and GitHub access (boundary 3).** The same mechanism and rules as for a virtual
   machine: the guest's environment holds `$MSB_<name>`, and the gateway substitutes the value only
@@ -895,9 +897,9 @@ with nothing sensitive on it, and the app, the CLI and `silo list` label it as l
     unpacked (see *The guest image* below), which also bounds what
     the layers can sit on. Secrets, GitHub access, environment and layer ids are dropped
     from the record in the file, as they are for a VM, and the settings in the manifest carry the
-    same deny-all network section a VM's do. A container's real network is the gateway's one policy
-    (public addresses only, boundary 2), which an imported container has from its first start like
-    any other, with the secrets and GitHub access this device assigns to it then.
+    same deny-all network section a VM's do. An imported container starts with its network blocked
+    (deny-all), as an imported VM does: the gateway starts it with no addresses at all, and
+    assigning a secret to it unblocks the network at its next start.
   - *What is read.* The file is an untrusted input. The payload's hash is checked as for a VM; the
     header is read with unknown fields refused, and its name, resources, labels and image are checked
     field by field and against the settings the manifest was validated for, so the file cannot make a

@@ -679,3 +679,43 @@ func TestAnAdoptedBusyRecordWhoseComputerIsStoppedDoesNotHoldAMacSlot(t *testing
 		t.Fatalf("the stopped computer must not hold a slot: forks = %d (%v)", n, h.log.all())
 	}
 }
+
+// MARK: the private-repository check before each job
+
+func TestAJobIsNotTakenWhenTheRepositoryIsNoLongerPrivate(t *testing.T) {
+	h := newHarness(t, harnessOptions{})
+	public := errors.New("o/r is a public repository")
+	h.scaler.check = func(context.Context) error { return public }
+	acquirer := &fakeAcquirer{}
+	h.scaler.SetAcquirer(acquirer)
+	// Scale fails without acquiring, so the listener does not ack the message and GitHub
+	// delivers it again; the check runs again before every attempt.
+	if err := h.scaler.Scale(context.Background(), available(1)); !errors.Is(err, public) {
+		t.Fatalf("err = %v", err)
+	}
+	if len(acquirer.calls) != 0 {
+		t.Fatalf("the job was acquired: %v", acquirer.calls)
+	}
+	h.fleet.Settle()
+	if len(h.status()) != 0 {
+		t.Fatalf("a computer was started anyway: %v", h.status())
+	}
+	// A poll that brings no job does not run the check, so the listener keeps its session.
+	if err := h.scaler.Scale(context.Background(), &scaleset.RunnerScaleSetMessage{Statistics: &scaleset.RunnerScaleSetStatistic{}}); err != nil {
+		t.Fatalf("a statistics poll failed: %v", err)
+	}
+	// A check that cannot say (an outage, a rate limit) refuses the job the same way.
+	h.scaler.check = func(context.Context) error { return errors.New("GitHub is down") }
+	if err := h.scaler.Scale(context.Background(), available(2)); err == nil {
+		t.Fatal("an unreadable check let the job through")
+	}
+	// A passing check lets the job through and a computer is forked for it.
+	h.scaler.check = func(context.Context) error { return nil }
+	h.scale(available(3))
+	if len(acquirer.calls) != 1 || len(acquirer.calls[0]) != 1 || acquirer.calls[0][0] != 3 {
+		t.Fatalf("the private repository's job was not acquired: %v", acquirer.calls)
+	}
+	if _, ok := h.silo.state("ci-silo-linux-00000001"); !ok {
+		t.Fatalf("no computer for the job: %v", h.status())
+	}
+}

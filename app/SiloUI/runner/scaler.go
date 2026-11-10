@@ -33,6 +33,10 @@ type Scaler struct {
 	label    string
 	acquirer atomic.Pointer[Acquirer]
 	beat     atomic.Int64
+	// check refuses a poll that brings jobs when the repository may not be served any more (the
+	// private-repository check, run again before each job). An error leaves the message unacked,
+	// so GitHub offers the job again and the check runs again.
+	check func(context.Context) error
 }
 
 // SetAcquirer sets the message session that jobs are acquired from; a new session replaces it.
@@ -50,6 +54,14 @@ func (s *Scaler) Scale(ctx context.Context, msg *scaleset.RunnerScaleSetMessage)
 	event := messageEvent{label: s.label, reply: make(chan struct{})}
 	if msg != nil {
 		if len(msg.JobAvailableMessages) > 0 {
+			// Taking a job runs code on this machine, so the repository is checked again first, as
+			// at registration. A public repository, or one the check cannot read, is not served:
+			// the poll fails, the message is not acked and no job is acquired.
+			if s.check != nil {
+				if err := s.check(ctx); err != nil {
+					return fmt.Errorf("the job is not taken: %w", err)
+				}
+			}
 			ids := make([]int64, 0, len(msg.JobAvailableMessages))
 			for _, job := range msg.JobAvailableMessages {
 				ids = append(ids, job.RunnerRequestID)

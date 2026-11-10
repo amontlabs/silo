@@ -593,6 +593,7 @@ mod tests {
             }],
             github_profile_json: None,
             github_hosts: None,
+            policy: None,
             usage_log: None,
             log: None,
         }

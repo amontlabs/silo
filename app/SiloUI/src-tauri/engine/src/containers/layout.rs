@@ -254,8 +254,8 @@ pub struct ComputerRecord {
     #[serde(default)]
     pub github: bool,
     /// Whether the computer's network is blocked (deny-all): a computer made from an import starts
-    /// that way, as a virtual machine does, and its forks keep it. Otherwise the gateway applies
-    /// its own policy (public addresses only).
+    /// that way, as a virtual machine does, and its forks keep it. Assigning a secret unblocks it,
+    /// at the next start. Otherwise the gateway applies its own policy (public addresses only).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub network_blocked: bool,
 }

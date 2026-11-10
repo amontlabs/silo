@@ -106,6 +106,9 @@ type FleetOptions struct {
 	// TickEvery is how often the loop plans on its own. Zero means never (tests send ticks).
 	TickEvery time.Duration
 	Logger    *slog.Logger
+	// CheckJobAccess runs the private-repository check again before a job is taken; nil checks
+	// nothing (tests).
+	CheckJobAccess func(context.Context) error
 	// Now and NewID are replaced in tests.
 	Now   func() time.Time
 	NewID func() string
@@ -184,7 +187,7 @@ func NewFleet(opts FleetOptions, gh Actions, silo Silo, disk DiskGuard, ledger *
 	f.upCtx, f.upCancel = context.WithCancel(f.ctx)
 	for _, set := range opts.Sets {
 		state := &setState{spec: set.Spec, id: set.ScaleSetID, start: set.Start, outstanding: map[int64]struct{}{}, finished: map[int64]struct{}{}}
-		state.scaler = &Scaler{fleet: f, label: set.Spec.Label}
+		state.scaler = &Scaler{fleet: f, label: set.Spec.Label, check: opts.CheckJobAccess}
 		state.scaler.beat.Store(opts.Now().UnixNano())
 		f.sets[set.Spec.Label] = state
 		if f.gates[set.Spec.Recipe] == nil {
