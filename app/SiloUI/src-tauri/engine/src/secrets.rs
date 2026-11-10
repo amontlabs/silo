@@ -832,7 +832,7 @@ pub(crate) fn reserved_secret_name(name: &str) -> bool {
             .any(|prefix| upper.starts_with(prefix.as_str()))
 }
 
-fn valid_name(name: &str) -> bool {
+pub(crate) fn valid_name(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 128
         && name
@@ -841,7 +841,7 @@ fn valid_name(name: &str) -> bool {
             .all(|(i, c)| c == b'_' || c.is_ascii_alphabetic() || (i > 0 && c.is_ascii_digit()))
         && !reserved_secret_name(name)
 }
-fn valid_domain(domain: &str) -> bool {
+pub(crate) fn valid_domain(domain: &str) -> bool {
     if domain == "*" {
         return true;
     }
@@ -859,7 +859,7 @@ fn valid_domain(domain: &str) -> bool {
         })
 }
 /// A token secret's name is a label, not an environment variable, so hyphens are allowed.
-fn valid_token_name(name: &str) -> bool {
+pub(crate) fn valid_token_name(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 64
         && name.bytes().enumerate().all(|(i, c)| {
