@@ -416,7 +416,8 @@ type harnessOptions struct {
 	// attempts is startAttempts; 3 when zero.
 	attempts int
 	// readyTimeout is how long a runner may take to listen; 200ms when zero.
-	readyTimeout time.Duration
+	readyTimeout   time.Duration
+	checkJobAccess func(context.Context) error
 }
 
 func newHarness(t *testing.T, o harnessOptions) *harness {
@@ -470,7 +471,8 @@ func (h *harness) start() {
 		ProjectDir:   h.projectDir,
 		Linux:        h.opts.linux,
 		ReadyTimeout: h.opts.readyTimeout, StartAttempts: h.opts.attempts, IdleTimeout: time.Minute,
-		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		CheckJobAccess: h.opts.checkJobAccess,
+		Logger:         slog.New(slog.NewTextHandler(io.Discard, nil)),
 		Now: func() time.Time {
 			h.nowMu.Lock()
 			defer h.nowMu.Unlock()

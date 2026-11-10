@@ -52,37 +52,43 @@ func (s *Scaler) LastScale() time.Time { return time.Unix(0, s.beat.Load()) }
 func (s *Scaler) Scale(ctx context.Context, msg *scaleset.RunnerScaleSetMessage) error {
 	s.beat.Store(time.Now().UnixNano())
 	event := messageEvent{label: s.label, reply: make(chan struct{})}
+	var checkErr error
 	if msg != nil {
 		if len(msg.JobAvailableMessages) > 0 {
 			// Taking a job runs code on this machine, so the repository is checked again first, as
 			// at registration. A public repository, or one the check cannot read, is not served:
-			// the poll fails, the message is not acked and no job is acquired.
+			// no job is acquired, but started and completed events from the poll are still delivered.
 			if s.check != nil {
 				if err := s.check(ctx); err != nil {
-					return fmt.Errorf("the job is not taken: %w", err)
+					checkErr = fmt.Errorf("the job is not taken: %w", err)
 				}
 			}
-			ids := make([]int64, 0, len(msg.JobAvailableMessages))
-			for _, job := range msg.JobAvailableMessages {
-				ids = append(ids, job.RunnerRequestID)
+			if checkErr == nil {
+				ids := make([]int64, 0, len(msg.JobAvailableMessages))
+				for _, job := range msg.JobAvailableMessages {
+					ids = append(ids, job.RunnerRequestID)
+				}
+				acquirer := s.acquirer.Load()
+				if acquirer == nil {
+					return errors.New("no message session to acquire jobs from")
+				}
+				acquired, err := (*acquirer).AcquireJobs(ctx, ids)
+				if err != nil {
+					return fmt.Errorf("cannot acquire jobs: %w", err)
+				}
+				event.acquired = acquired
 			}
-			acquirer := s.acquirer.Load()
-			if acquirer == nil {
-				return errors.New("no message session to acquire jobs from")
-			}
-			acquired, err := (*acquirer).AcquireJobs(ctx, ids)
-			if err != nil {
-				return fmt.Errorf("cannot acquire jobs: %w", err)
-			}
-			event.acquired = acquired
 		}
 		event.started, event.completed = msg.JobStartedMessages, msg.JobCompletedMessages
-		if msg.Statistics != nil {
+		if checkErr == nil && msg.Statistics != nil {
 			assigned := msg.Statistics.TotalAssignedJobs
 			event.assigned = &assigned
 		}
 	}
-	return s.fleet.deliver(event)
+	if err := s.fleet.deliver(event); err != nil {
+		return err
+	}
+	return checkErr
 }
 
 // ComputerName is the name of a computer and of its runner: ci-<label>-<short id>.

@@ -913,3 +913,51 @@ func TestASecondInterruptEndsASlowShutdownAtOnce(t *testing.T) {
 	// A step that finishes on its own needs no interrupt.
 	await(quiet(), signals, func() {})
 }
+
+func TestShutdownSequenceEndsAtOnceOnSecondInterrupt(t *testing.T) {
+	signals := make(chan os.Signal, 1)
+	slowWait := make(chan struct{})
+	slowShutdown := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		shutdown(quiet(), signals, func() { <-slowWait }, func() { <-slowShutdown })
+		close(done)
+	}()
+	select {
+	case <-done:
+		t.Fatal("the shutdown ended although nothing came back")
+	case <-time.After(50 * time.Millisecond):
+	}
+	signals <- os.Interrupt
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("a second interrupt during listener wait did not end the whole shutdown")
+	}
+	close(slowWait)
+	close(slowShutdown)
+
+	// An interrupt during fleet shutdown also ends the wait at once.
+	signals = make(chan os.Signal, 1)
+	slowShutdown = make(chan struct{})
+	done = make(chan struct{})
+	go func() {
+		shutdown(quiet(), signals, func() {}, func() { <-slowShutdown })
+		close(done)
+	}()
+	select {
+	case <-done:
+		t.Fatal("the shutdown ended although nothing came back")
+	case <-time.After(50 * time.Millisecond):
+	}
+	signals <- os.Interrupt
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("a second interrupt during fleet shutdown did not end the wait")
+	}
+	close(slowShutdown)
+
+	// A shutdown that finishes on its own needs no interrupt.
+	shutdown(quiet(), signals, func() {}, func() {})
+}
