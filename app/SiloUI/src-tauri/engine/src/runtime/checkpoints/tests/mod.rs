@@ -13,6 +13,7 @@ fn a_migrated_checkpoint_record_loads() {
 }
 
 mod failed_capture_tests;
+mod network_live;
 
 const ID: &str = "00000000-0000-4000-8000-000000000001";
 

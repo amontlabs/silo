@@ -359,9 +359,24 @@ pub struct Grants {
     pub secrets: Vec<(String, Vec<String>)>,
 }
 
+#[cfg(test)]
+thread_local! {
+    static TEST_GRANTS: std::cell::RefCell<Option<Grants>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Tests on this thread see `grants` for every computer instead of the GitHub and secret stores.
+#[cfg(test)]
+pub(crate) fn use_test_grants(grants: Option<Grants>) {
+    TEST_GRANTS.with(|test| *test.borrow_mut() = grants);
+}
+
 impl Grants {
     /// The grants of the computer named `name`, read from the GitHub and secret stores.
     pub fn of_computer(name: &str) -> Self {
+        #[cfg(test)]
+        if let Some(grants) = TEST_GRANTS.with(|test| test.borrow().clone()) {
+            return grants;
+        }
         let access = crate::policy::access::of_computer(name);
         Self {
             github: access.github.is_some(),

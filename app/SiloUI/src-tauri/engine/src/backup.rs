@@ -9312,4 +9312,51 @@ mod tests {
         assert!(validate_computer_name("/absolute").is_err());
         assert!(validate_computer_name("valid-name").is_ok());
     }
+
+    /// The export code paths on the runtime's own configuration of computers on each network
+    /// policy, written by the live check in `runtime::checkpoints::tests::network_live`
+    /// (`SILO_T8_CONFIGS` names their folder).
+    #[test]
+    #[ignore = "reads the configurations a live network policy check wrote"]
+    fn live_export_accepts_each_network_policy() {
+        let folder = std::env::var("SILO_T8_CONFIGS").expect("SILO_T8_CONFIGS");
+        let mut names: Vec<_> = std::fs::read_dir(&folder)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| path.extension().is_some_and(|extension| extension == "json"))
+            .collect();
+        names.sort();
+        assert!(!names.is_empty());
+        for path in names {
+            let label = path.file_stem().unwrap().to_string_lossy().into_owned();
+            let mut config: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+            let strict = config["network"]["strict"].clone();
+            let rules = config["network"]["policy"]["rules"].as_array().map_or(0, Vec::len);
+            let before = validate_snapshottable_config(&label, &config);
+            let exported = portable_export_network(&label, &mut config);
+            let after = validate_snapshottable_config(&label, &config);
+            let show = |result: &Result<(), BackupError>| match result {
+                Ok(()) => "accepted".to_owned(),
+                Err(error) => format!("refused: {error}"),
+            };
+            eprintln!(
+                "EXPORT {label}: runtime strict={strict}, {rules} rules; as it runs: {}; export reset: {}; after the reset: {}; strict now {}",
+                show(&before),
+                show(&exported),
+                show(&after),
+                config["network"]["strict"],
+            );
+            if label.contains("restored") || label.contains("fork") {
+                // A computer restored from a memory checkpoint reports a pinned network interface,
+                // which the export check refuses whatever its rules are.
+                if let Err(error) = &exported {
+                    assert!(error.to_string().contains("interface"), "{label}: {error}");
+                }
+                continue;
+            }
+            exported.unwrap_or_else(|error| panic!("{label}: {error}"));
+            after.unwrap_or_else(|error| panic!("{label}: {error}"));
+            assert_eq!(config["network"]["strict"], true, "{label}");
+        }
+    }
 }

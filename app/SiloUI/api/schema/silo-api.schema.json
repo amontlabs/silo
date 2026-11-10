@@ -2630,6 +2630,17 @@
         "name": {
           "type": "string"
         },
+        "networkPolicy": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NetworkPolicy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Which hosts it may reach."
+        },
         "ports": {
           "description": "Its ports published on this device.",
           "items": {

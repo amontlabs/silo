@@ -208,6 +208,9 @@ wire_struct! {
         ports: Vec<PublishedPort>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         ssh: Option<ComputerAccessSsh>,
+        /// Which hosts it may reach.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        network_policy: Option<super::network::NetworkPolicy>,
     }
 }
 

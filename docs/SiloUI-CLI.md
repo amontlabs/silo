@@ -58,6 +58,7 @@ the engine's message.
 | `silo secrets list` | secret names and the computers they are assigned to (never values) |
 | `silo secrets set NAME [--computer C]... [--domain D]...` | add a secret or replace its value; the value is read from stdin, never an argument |
 | `silo secrets assign NAME COMPUTER` / `silo secrets unassign NAME COMPUTER` | change which computers have a secret |
+| `silo network policy <computer> [--mode open\|allowlist\|closed] [--allow HOST]... [--remove HOST]... [--preset NAME]...` | show or change what a computer may reach; see [Network policy](#network-policy) |
 | `silo create <name> [--linux\|--macos\|--container] [--cpus N --memory GiB --disk GiB]` | create a computer. `--container` makes a Linux computer that runs as a container. A container computer shares the host's kernel, so it is less isolated than a VM; use it for a dev-only machine with nothing sensitive on it. Linux hosts only. Its checkpoints save the disks only (never memory), also while it runs, and `silo fork`, `diff`, `fold`, `undo`, `export` and `import` work as for a VM. Its disk size is reported, not a bound: it shares the host's disk. Below 5 GiB free on the host, Silo refuses to start it, checkpoint it or fork it, and stops running container computers that are over their size, largest first ([the disk](SiloUI-ENGINE.md#container-computers-optional)). |
 | `silo start <computer>` / `silo stop <computer>` | lifecycle |
 | `silo desktop on\|off <computer>` | turn a running Linux computer's desktop on (and start it) or off (and stop it); forks made later inherit the choice, and `--gui` and the computer-use tools refuse a computer with it off. A macOS computer is its own display and has no such setting |
@@ -361,6 +362,24 @@ A new secret needs at least one `--computer` and one `--domain`; for an existing
 default to what it has. A secret cannot be left with no computer, and a secret for any
 destination (`*`) is created in the app. `set` reads all of stdin and drops one final newline:
 `printf %s "$VALUE" | silo secrets set NAME --computer main --domain api.example.com`.
+
+## Network policy
+
+`silo network policy <computer>` prints a computer's network policy: its mode, the hosts you
+allowed, its presets, and every host an allowlist lets through with where it comes from (your list,
+a preset, GitHub access or an assigned secret). `--json` prints the same as data.
+
+- `--mode open` is the default: any public address. `--mode allowlist` reaches only the listed
+  hosts, on port 443. `--mode closed` reaches nothing, not even name lookups.
+- `--allow example.com` or `--allow '*.example.com'` adds a host (repeat for several);
+  `--remove HOST` takes a host or a preset off; `--preset npm` adds a named list kept by Silo
+  (npm, pypi, crates, ubuntu, homebrew, github, anthropic, openai).
+- The change is saved at once and applied the next time the computer starts; the output says when.
+  A running computer keeps its rules until it restarts. A Linux virtual machine is restored in
+  place from a checkpoint taken just before that start, named "Before network policy change".
+
+An allowlist does not stop a computer from sending data to a host on its list. See the
+[threat model](THREAT-MODEL.md#network-policy-per-computer).
 
 ## Hosted reviewer
 

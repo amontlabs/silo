@@ -18,7 +18,7 @@ issue, web page or dependency and now follows the attacker's instructions with r
 Silo tries to keep that agent from reaching the Mac, the Mac's network, other computers, raw
 credentials and repositories the user did not grant. It does **not** try to keep the agent from
 sending the data it can already see to the internet: outbound traffic to public addresses is
-allowed, and there is no per-host egress filter yet.
+allowed by default, and the per-computer network policy (an allowlist or closed) narrows that but does not stop sending data to a host it allows.
 
 | The agent in a computer can | The agent in a computer cannot (if the boundary holds) |
 | --- | --- |
@@ -108,6 +108,57 @@ configuration, which exports compare against, is
 So the guest cannot open a connection to a service listening on the Mac's loopback or LAN address,
 to a router admin page, to a Tailscale peer, or to another computer's guest address.
 
+#### Network policy per computer
+
+Each computer has a mode, set by you (`silo network policy`, `network.policy.set`) and stored with
+the computer ([`network_policy/`](../app/SiloUI/src-tauri/engine/src/network_policy/mod.rs)):
+
+| Mode | Rules the runtime gets | What the guest can reach |
+| --- | --- | --- |
+| `open` (the default; every computer saved before the policy existed) | name lookups, Silo's own rules, every public address | what this boundary describes above |
+| `allowlist` | name lookups, one rule per allowed host on TCP port 443 (the registry presets also name port 80 for Ubuntu's archives), Silo's own rules, and **no** public-address rule | only the listed hosts, plus GitHub's hosts while the computer has GitHub access and the hosts of each secret assigned to it |
+| `closed` | Silo's own rules only | nothing outbound, and no name lookups. A container's blocked state is the same mode. |
+
+Host patterns are lowercase DNS names of at least two labels, or `*.` and such a name (which also
+covers the name itself); addresses, ports, bare top-level names and names that stay on the device
+are refused. Presets (npm, PyPI, crates.io, Ubuntu, Homebrew, GitHub, Anthropic, OpenAI) expand to
+host lists from one data file in the engine. The policy follows the computer: a checkpoint restore
+and a fork keep it, an export drops it, an import starts closed, and a computer from before the
+policy loads as open. A computer's agent may read its own policy and those of computers it made,
+may narrow either freely, and asks you to widen one (see [the policy page](SiloUI-POLICY.md)); a
+computer it makes gets its own policy or a narrower one.
+
+What the allowlist stops: a connection to a public address that is not on the list, by name or by
+address (the runtime checks the name the guest asks for, so pointing an allowed name's address at
+another name fails), a query sent straight to another resolver such as 1.1.1.1 or 8.8.8.8 (the
+rule that lets the guest use any public resolver is absent), and UDP and other ports to listed
+hosts.
+
+What it does **not** stop, and why you should still treat the computer as hostile:
+
+- **Sending data to an allowed host.** A gist, an issue, a package upload or an API call to a host
+  on the list carries whatever the agent can read. The list limits where data can go, not what is
+  sent. A GitHub grant adds GitHub's hosts, which include places the agent can publish to.
+- **Names resolve for hosts that are not on the list.** The gateway's resolver answers any name,
+  so a name outside the list still resolves and the query name itself is a narrow channel to the
+  Mac's resolver. A closed computer has no lookups at all.
+- **With `strict` off, a host that shares an address with an allowed host may be reachable.**
+  Hostname rules for hosts that no secret covers work only while the runtime's strict mode is off
+  (under strict, a TLS connection the runtime does not intercept is refused when only a hostname
+  rule admitted it, so allowed hosts would fail). An allowlist computer therefore runs with strict
+  off. The connection is still checked against the name in the TLS request, but a service that
+  answers on an allowed host's address for another name, or a name that resolves to the same
+  address, is not distinguished by address alone. Open and closed computers run with strict on.
+- **The macOS gateway and containers** apply the same rules through their gateway's start-up
+  request and take them when the gateway starts, so a running computer keeps its rules until it
+  restarts; the answer to a change says when it applies. A Linux virtual machine changes by being
+  restored in place from a checkpoint taken just before its next start.
+
+The runtime cannot change a created computer's rules, so a change is applied by Silo restoring the
+stopped computer in place with the new rules (`restore --net-strict`, the
+`microsandbox-restore-net-strict` patch). A Linux host builds its runtime in CI; the allowlist has
+not been run on one.
+
 macOS computers that have finished setup run behind a per-computer gateway child,
 `silo-macos-gateway` ([source](../app/SiloUI/src-tauri/macos-gateway/README.md)), which uses
 the same MicroSandbox network stack. The VM's only network device is a file-handle attachment to
@@ -117,8 +168,9 @@ and the child applies the `Public` profile when no other policy is given
 
 Limits of this boundary:
 
-- **No hostname or destination allowlist.** Any public host, any port, TCP and UDP (except UDP to port 443). This is what
-  "no egress filter yet" means.
+- **In the default mode, open, there is no hostname or destination filter.** Any public host, any
+  port, TCP and UDP (except UDP to port 443). The other two modes are described under
+  [Network policy per computer](#network-policy-per-computer).
 - **macOS computers: only a disk no agent can have written runs on Apple NAT.** A first
   install and the setup of a copy of a template run on `VZNATNetworkDeviceAttachment` with no
   Silo policy until their setup completes
@@ -411,7 +463,7 @@ one `.silo-backup` file, and `silo import` reads one. What the file holds, and d
   computer has no memory checkpoints. A file written before this rule can hold memory; an import
   never uses it, because an imported computer always starts from its disks.
 - **Secrets, published ports, the network policy and host-folder mounts are not carried**; an
-  imported computer starts stopped with a deny-all policy.
+  imported computer starts stopped with a closed network policy.
 - **An export is a plain file.** Keep it where you would keep the secrets in it. Importing one
   from someone else adds a computer whose disk you did not make; it starts stopped and is as
   untrusted as any new agent computer.
@@ -1310,16 +1362,17 @@ its own Keychain prompts. Silo does not
   defence-in-depth layer today.
 - **Reflected-secret exfiltration.** If an allowed host returns the request's headers (debug echo
   endpoints, some error pages), the guest sees the real value. Restrict secrets to hosts you trust.
-- **Egress filtering.** The policy is default-deny with one allow rule for every public address.
-  There is no per-computer hostname or destination allowlist, no mode that blocks public
-  addresses, and no DNS query log yet; DNS queries go to the Mac's resolvers unfiltered. See
-  [planned changes](#planned-changes-that-will-change-this-document).
+- **Egress filtering.** A new computer's policy is open: default-deny with one allow rule for
+  every public address. The allowlist and closed modes narrow it per computer (see
+  [Network policy per computer](#network-policy-per-computer)) but do not stop sending data to an
+  allowed host, name lookups still reach the Mac's resolvers unfiltered, and there is no DNS
+  query log yet. See [planned changes](#planned-changes-that-will-change-this-document).
 - **Hostile apps that embed the engine.** An app that talks to `silod` is trusted with the same
   authority as Silo.app.
 
 ## Planned changes that will change this document
 
-- Per-computer egress policy (block public addresses by default, or an allowlist, with a DNS log).
+- A DNS query log and a filter for lookups of names outside an allowlist.
 - Per-client socket authentication (macOS code signature, Linux `SO_PEERCRED`) and an audit log of
   client, method and computer.
 - On a Linux host: signed engine archives (roadmap milestone 11), and the isolation evals run on a
