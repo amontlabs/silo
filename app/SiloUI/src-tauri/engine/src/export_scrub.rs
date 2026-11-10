@@ -89,8 +89,8 @@ impl Failure {
 }
 
 /// Drops the copies a failed run left behind. A copy exists only while an export runs, and
-/// exports run one at a time, so every copy found at the start of one is stale.
-fn drop_stale(env: &dyn ScrubEnv) {
+/// exports run one at a time, so every copy found before an export makes its own is stale.
+pub fn drop_stale(env: &dyn ScrubEnv) {
     for (id, name) in env.computers().unwrap_or_default() {
         if is_copy(&name) {
             let _ = env.delete(&id);
@@ -98,7 +98,8 @@ fn drop_stale(env: &dyn ScrubEnv) {
     }
 }
 
-/// Makes the copy of `source_id` and strips it. `progress` gets a plain sentence for each step.
+/// Makes the copy of `source_id` and strips it. The caller drops stale copies first
+/// ([`drop_stale`]), once per export, so a second computer's copy never drops the first's. `progress` gets a plain sentence for each step.
 /// On any failure the copy is dropped before this returns.
 pub fn prepare(
     env: &dyn ScrubEnv,
@@ -106,7 +107,6 @@ pub fn prepare(
     progress: &dyn Fn(&str),
     cancelled: &dyn Fn() -> bool,
 ) -> Result<Prepared, Failure> {
-    drop_stale(env);
     if cancelled() {
         return Err(Failure::Cancelled);
     }

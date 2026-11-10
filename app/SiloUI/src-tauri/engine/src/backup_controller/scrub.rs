@@ -145,6 +145,7 @@ pub(super) fn make_copies(
     };
     show_progress(controller, "Starting");
     publish(controller);
+    export_scrub::drop_stale(env.as_ref());
     for (name, id) in targets {
         let prefix = if targets.len() > 1 {
             format!("{name}: ")
@@ -158,7 +159,11 @@ pub(super) fn make_copies(
                 let cleanup = copies.drop_all();
                 end_progress(controller);
                 return Err(match failure {
-                    Failure::Cancelled => TransferError::cancelled(),
+                    // A cancel that left a copy behind says so instead of passing for clean.
+                    Failure::Cancelled => match cleanup {
+                        Err(note) => TransferError::from(format!("The export was cancelled. {note}")),
+                        Ok(()) => TransferError::cancelled(),
+                    },
                     Failure::Failed(message) => {
                         let message = match cleanup {
                             Ok(()) => message,

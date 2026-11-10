@@ -26,7 +26,7 @@ export function ShareLoginsConfirmation({ request }: { request: ShareLoginsReque
     <AlertDialog.Portal>
       <AlertDialog.Overlay className="fixed inset-0 z-50 bg-black/20" />
       <AlertDialog.Content className="fixed left-1/2 top-1/2 z-50 grid w-[28rem] max-w-[calc(100vw-2rem)] -translate-x-1/2 -translate-y-1/2 gap-3 rounded-lg border bg-popover p-4 text-ui shadow-lg">
-        <AlertDialog.Title className="text-ui font-medium">{request?.leavesOut ? `Export ${request.computerName}?` : `Share ${request?.computerName}?`}</AlertDialog.Title>
+        <AlertDialog.Title className="text-ui font-medium">{request ? (request.leavesOut ? `Export ${request.computerName}?` : `Share ${request.computerName}?`) : ""}</AlertDialog.Title>
         <AlertDialog.Description asChild>
           <div className="grid gap-2 text-muted-foreground">
             {request && request.logins.length > 0 && <>

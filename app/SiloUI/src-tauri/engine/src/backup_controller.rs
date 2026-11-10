@@ -1705,7 +1705,13 @@ fn export_and_drop_copies(
             dropped.err(),
         )),
         (Err(mut error), Err(note)) => {
-            error.message = format!("{} {note}", error.message);
+            // A cancel that left a copy behind is reported as the failure it became.
+            error.message = if error.cancelled {
+                format!("The export was cancelled. {note}")
+            } else {
+                format!("{} {note}", error.message)
+            };
+            error.cancelled = false;
             Err(error)
         }
         (Err(error), Ok(())) => Err(error),
@@ -2241,7 +2247,7 @@ fn backup_at_paths_presenting(
                 let result = controller.service.create_mixed_archive_from_archives(
                     archive_path,
                     &[linux_archive, macos_archive],
-                    names,
+                    original_names,
                     &fork_records,
                     cancellation,
                     recovery::token(controller)?.as_deref(),

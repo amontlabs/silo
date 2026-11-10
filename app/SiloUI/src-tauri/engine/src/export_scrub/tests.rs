@@ -264,6 +264,15 @@ fn a_cancel_stops_the_work_and_drops_the_copy() {
 }
 
 #[test]
+fn a_second_computers_copy_leaves_the_first_ones_alone() {
+    let env = Fake::new(&LOGINS);
+    let first = prepare(&env, "src", &|_| {}, &|| false).unwrap();
+    let second = prepare(&env, "src", &|_| {}, &|| false).unwrap();
+    assert_eq!(first.copy_id, second.copy_id);
+    assert!(!env.deleted.lock().unwrap().contains("copy"));
+}
+
+#[test]
 fn copies_an_earlier_run_left_behind_are_dropped_first() {
     let env = Fake::new(&LOGINS);
     env.computers
@@ -272,6 +281,7 @@ fn copies_an_earlier_run_left_behind_are_dropped_first() {
     env.computers
         .lock().unwrap()
         .push(("other".into(), "silo-build-dev-0123abcd".into()));
+    drop_stale(&env);
     prepare(&env, "src", &|_| {}, &|| false).unwrap();
     assert!(env.deleted.lock().unwrap().contains("stale"));
     assert!(!env.deleted.lock().unwrap().contains("other"));
