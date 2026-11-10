@@ -18,7 +18,7 @@ use silo_api::methods::{
     keep::{ChangesKeepParams, ChangesPromoteParams, ChangesUndoParams, KeepHooks},
     recipes::{RecipeBuildParams, RecipeRemoveParams},
     requests,
-    secrets::{SecretSaveAction, SecretSaveRequest, SecretsSaveParams},
+    secrets::{SecretKind, SecretSaveAction, SecretSaveRequest, SecretsSaveParams},
 };
 
 use crate::{
@@ -414,6 +414,7 @@ async fn save_secret(
                 },
                 id: existing.and_then(|secret| secret["id"].as_str().map(str::to_owned)),
                 name: name.to_owned(),
+                kind: SecretKind::Generic,
                 value,
                 computer_ids,
                 allowed_domains,

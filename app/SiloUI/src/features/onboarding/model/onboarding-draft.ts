@@ -36,7 +36,7 @@ export const onboardingDraftSchema = z.object({
     repository: z.string(),
     allowPushes: z.boolean(),
   }).strict())),
-  computerRepositoryAccess: z.record(z.string(), z.object({ authenticationMethod: z.enum(["oauth", "token"]).optional(), repositoryMode: z.enum(["selected", "all"]), allRepositoriesAllowChanges: z.boolean() }).strict()).optional(),
+  computerRepositoryAccess: z.record(z.string(), z.object({ authenticationMethod: z.enum(["oauth", "token"]).optional(), tokenSecretId: z.string().min(1).max(64).optional(), repositoryMode: z.enum(["selected", "all"]), allRepositoriesAllowChanges: z.boolean() }).strict()).optional(),
   computerIdentities: z.record(z.string(), z.object({
     name: z.string(), email: z.string(), apply: z.boolean(),
   }).strict()),

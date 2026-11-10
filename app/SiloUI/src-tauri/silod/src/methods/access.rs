@@ -3314,6 +3314,21 @@ pub(crate) mod tests {
         let engine = api_configuration_to_engine(typed, &local_paths().unwrap()).unwrap();
         assert_eq!(engine["computers"][0]["computer"], "dev");
         assert!(engine["computers"][0].get("computerId").is_none());
+
+        let chosen = json!({
+            "computerId": COMPUTER,
+            "identity": {"name": "", "email": "", "apply": false},
+            "repositoryMode": "selected",
+            "repositories": [],
+            "allRepositoriesAllowChanges": false,
+            "authenticationMethod": "token",
+            "tokenSecretId": "secret-1",
+        });
+        let typed: github::GitHubConfiguration =
+            serde_json::from_value(json!({"computers": [chosen], "baseRevision": null})).unwrap();
+        let engine = api_configuration_to_engine(typed, &local_paths().unwrap()).unwrap();
+        assert_eq!(engine["computers"][0]["tokenSecretId"], "secret-1");
+        assert_eq!(engine["computers"][0]["authenticationMethod"], "token");
     }
 
     #[tokio::test]
@@ -3368,6 +3383,34 @@ pub(crate) mod tests {
         let error = expect_error(MethodName::SecretsSave, specific).await;
         assert!(error.message.contains(NOT_CONNECTED), "{}", error.message);
         expect_invalid_params(MethodName::SecretsSave, json!({})).await;
+    }
+
+    #[tokio::test]
+    async fn a_github_token_secret_takes_no_computers_or_hosts() {
+        let request = |computers: Value, domains: Value| {
+            json!({"request": {
+                "operation": "add",
+                "name": "work",
+                "kind": "github-token",
+                "value": "synthetic_value",
+                "computerIds": computers,
+                "allowedDomains": domains,
+            }})
+        };
+        for params in [
+            request(json!([COMPUTER]), json!([])),
+            request(json!([]), json!(["api.example.com"])),
+        ] {
+            let error = expect_error(MethodName::SecretsSave, params).await;
+            assert!(
+                error.message.contains("GitHub access"),
+                "{}",
+                error.message
+            );
+        }
+        let mut unknown_kind = request(json!([]), json!([]));
+        unknown_kind["request"]["kind"] = json!("ssh-key");
+        expect_invalid_params(MethodName::SecretsSave, unknown_kind).await;
     }
 
     #[tokio::test]

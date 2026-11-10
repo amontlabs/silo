@@ -23,9 +23,14 @@ export function SecretsPage({ source, onSaveSecret, onRemoveSecret, onRetrySecre
       <PageHeader
         title="Secrets"
         subtitle={<><span>{secrets.length} configured</span> · This device</>}
-        actions={<Button type="button" variant="outline" size="xs" aria-label="Add secret" disabled={manager.saving || manager.busy !== null} onClick={(event) => manager.openEditor(event.currentTarget)}>
-          <Plus aria-hidden="true" data-icon="inline-start" /> Add
-        </Button>}
+        actions={<div className="flex items-center gap-1">
+          <Button type="button" variant="outline" size="xs" aria-label="Add GitHub token" disabled={manager.saving || manager.busy !== null} onClick={(event) => manager.openEditor(event.currentTarget, { kind: "github-token" })}>
+            <Plus aria-hidden="true" data-icon="inline-start" /> GitHub token
+          </Button>
+          <Button type="button" variant="outline" size="xs" aria-label="Add secret" disabled={manager.saving || manager.busy !== null} onClick={(event) => manager.openEditor(event.currentTarget)}>
+            <Plus aria-hidden="true" data-icon="inline-start" /> Add
+          </Button>
+        </div>}
       />
       {manager.editor && !manager.editor.secret && <ListCard><AddSecretEditor manager={manager} /></ListCard>}
       {secrets.length > 0 ? (

@@ -6051,6 +6051,7 @@
       "type": "object"
     },
     "GitHubPersonalTokenSaveParams": {
+      "description": "Superseded: a personal token is a secret of kind `github-token`. This still saves\nthe secret named `github-token`.",
       "properties": {
         "deviceId": {
           "type": [
@@ -6097,6 +6098,13 @@
         },
         "repositoryMode": {
           "$ref": "#/$defs/GitHubRepositoryMode"
+        },
+        "tokenSecretId": {
+          "description": "With token access, the `github-token` secret the computer uses.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
@@ -6219,7 +6227,8 @@
           ]
         },
         "personalToken": {
-          "$ref": "#/$defs/GitHubPersonalToken"
+          "$ref": "#/$defs/GitHubPersonalToken",
+          "description": "Superseded by `github-token` secrets; the state of the one named `github-token`."
         },
         "policyRevision": {
           "format": "uint64",
@@ -16698,6 +16707,13 @@
     },
     "Secret": {
       "properties": {
+        "account": {
+          "description": "The GitHub account a `github-token` secret belongs to, once GitHub confirmed it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "allowedDomains": {
           "items": {
             "type": "string"
@@ -16705,10 +16721,22 @@
           "type": "array"
         },
         "computerIds": {
+          "description": "For a `github-token` secret, the computers whose GitHub access uses it.",
           "items": {
             "type": "string"
           },
           "type": "array"
+        },
+        "connection": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SecretConnection"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Whether GitHub accepts a `github-token` secret."
         },
         "error": {
           "type": [
@@ -16718,6 +16746,11 @@
         },
         "id": {
           "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/SecretKind",
+          "default": "generic",
+          "description": "`generic` secrets reach a computer as a placeholder for the hosts they allow;\n`github-token` secrets reach it only as its GitHub access. Absent on older engines."
         },
         "name": {
           "type": "string"
@@ -16746,6 +16779,30 @@
       ],
       "type": "object"
     },
+    "SecretConnection": {
+      "properties": {
+        "message": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state": {
+          "$ref": "#/$defs/SecretConnectionState"
+        }
+      },
+      "required": [
+        "state"
+      ],
+      "type": "object"
+    },
+    "SecretConnectionState": {
+      "enum": [
+        "connected",
+        "disconnected"
+      ],
+      "type": "string"
+    },
     "SecretIdParams": {
       "properties": {
         "deviceId": {
@@ -16762,6 +16819,13 @@
         "id"
       ],
       "type": "object"
+    },
+    "SecretKind": {
+      "enum": [
+        "generic",
+        "github-token"
+      ],
+      "type": "string"
     },
     "SecretSaveAction": {
       "enum": [
@@ -16795,6 +16859,11 @@
             "string",
             "null"
           ]
+        },
+        "kind": {
+          "$ref": "#/$defs/SecretKind",
+          "default": "generic",
+          "description": "A `github-token` secret takes no computers and no hosts here."
         },
         "name": {
           "type": "string"

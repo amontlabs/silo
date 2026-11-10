@@ -472,12 +472,16 @@ fn valid_draft(value: &Value) -> bool {
                     only_fields(
                         policy,
                         &["repositoryMode", "allRepositoriesAllowChanges"],
-                        &["authenticationMethod"],
+                        &["authenticationMethod", "tokenSecretId"],
                     ) && matches!(policy["repositoryMode"].as_str(), Some("selected" | "all"))
                         && policy["allRepositoriesAllowChanges"].is_boolean()
                         && policy
                             .get("authenticationMethod")
                             .is_none_or(|method| matches!(method.as_str(), Some("oauth" | "token")))
+                        && policy.get("tokenSecretId").is_none_or(|id| {
+                            policy["authenticationMethod"] == "token"
+                                && id.as_str().is_some_and(|id| !id.is_empty() && id.len() <= 64)
+                        })
                 })
             })
         })
@@ -1597,6 +1601,23 @@ mod tests {
         }
         draft["computerRepositoryAccess"]["dev"]["authenticationMethod"] = json!("token");
         draft["computerRepositoryAccess"]["dev"]["token"] = json!("secret");
+        assert!(!valid_draft(&draft));
+    }
+
+    #[test]
+    fn a_draft_may_name_the_token_secret_a_computer_uses() {
+        let mut draft = unfinished_draft();
+        draft["computerRepositoryAccess"] = json!({"dev":{
+            "repositoryMode":"selected","allRepositoriesAllowChanges":false,
+            "authenticationMethod":"token","tokenSecretId":"secret-1"
+        }});
+        assert!(valid_draft(&draft));
+        for invalid in [json!(""), json!(null), json!(3), json!("x".repeat(65))] {
+            draft["computerRepositoryAccess"]["dev"]["tokenSecretId"] = invalid;
+            assert!(!valid_draft(&draft));
+        }
+        draft["computerRepositoryAccess"]["dev"]["tokenSecretId"] = json!("secret-1");
+        draft["computerRepositoryAccess"]["dev"]["authenticationMethod"] = json!("oauth");
         assert!(!valid_draft(&draft));
     }
 

@@ -28,13 +28,23 @@ const dropped = { confirmedDeletions: requestA.computers.slice(1).map(({ id }) =
 const dependencies = { checks: [], retry: vi.fn() }
 
 describe("production onboarding submission errors", () => {
-  it("passes connected token availability to onboarding independently of OAuth", () => {
+  it("passes the GitHub token secrets to onboarding independently of OAuth", () => {
     const source = { applicationActions: {} } as unknown as ProductionSource
-    const connected = { ...application, github: { ...application.github, personalToken: { state: "connected" as const, saved: true } } }
-    const view = render(<ProductionOnboarding application={connected} dependencies={dependencies} source={source} />)
-    expect(captured.props!.tokenConnected).toBe(true)
-    view.rerender(<ProductionOnboarding application={application} dependencies={dependencies} source={source} />)
-    expect(captured.props!.tokenConnected).toBe(false)
+    const secret = (id: string, name: string, connected: boolean, removing = false) => ({
+      id, name, kind: "github-token" as const, computers: [], allowedDomains: [], state: "active" as const, account: "alice", removing,
+      connection: { state: connected ? "connected" as const : "disconnected" as const },
+    })
+    const withTokens = { ...application, secrets: [
+      secret("t1", "work", true), secret("t2", "home", false), secret("t3", "gone", true, true),
+      { id: "g1", name: "API_KEY", computers: ["dev"], allowedDomains: ["example.com"], state: "active" as const },
+    ] }
+    const view = render(<ProductionOnboarding application={withTokens} dependencies={dependencies} source={source} />)
+    expect(captured.props!.tokenSecrets).toEqual([
+      { id: "t1", name: "work", account: "alice", connected: true },
+      { id: "t2", name: "home", account: "alice", connected: false },
+    ])
+    view.rerender(<ProductionOnboarding application={{ ...application, secrets: [] }} dependencies={dependencies} source={source} />)
+    expect(captured.props!.tokenSecrets).toEqual([])
   })
 
   it("passes an intentionally empty restored draft to identity verification", () => {

@@ -14,7 +14,7 @@ it('keeps an explicit OAuth choice through repository-mode edits and recovery', 
   const actions = { connectGitHub: vi.fn(), saveComputerConfiguration: vi.fn(), retryComputerSetup: vi.fn(), finishSetup: vi.fn(), submitStep: vi.fn() }
   const firstStore = createMemorySettingsStore()
   const wrap = (store: ReturnType<typeof createMemorySettingsStore>) => <SettingsProvider store={store}>
-    <OnboardingApp source={source} actions={actions} repositoryPolicies={policies} tokenConnected githubConnectionState='connected' completed={false} />
+    <OnboardingApp source={source} actions={actions} repositoryPolicies={policies} tokenSecrets={[{ id: 'token-1', name: 'work', connected: true }]} githubConnectionState='connected' completed={false} />
   </SettingsProvider>
   const user = userEvent.setup()
   const first = render(wrap(firstStore))

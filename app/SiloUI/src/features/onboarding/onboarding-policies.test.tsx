@@ -29,7 +29,7 @@ function setup(initialSource = source, initialPolicies?: ApplicationGitHubComput
   const actions = { connectGitHub: vi.fn(), saveComputerConfiguration: vi.fn(), retryComputerSetup: vi.fn(), finishSetup: vi.fn(), submitStep: vi.fn() }
   const wrap = (currentSource: OnboardingSource, repositoryPolicies?: ApplicationGitHubComputerPolicy[]) => (
     <SettingsProvider store={store}><OnboardingApp source={currentSource} actions={actions} repositoryPolicies={repositoryPolicies}
-      tokenConnected={tokenConnected} repositoryOptions={["acme/silo", "acme/tools"]} githubConnectionState="connected" completed={false} /></SettingsProvider>
+      tokenSecrets={tokenConnected ? [{ id: "token-1", name: "work", connected: true }] : []} repositoryOptions={["acme/silo", "acme/tools"]} githubConnectionState="connected" completed={false} /></SettingsProvider>
   )
   return { ...render(wrap(initialSource, initialPolicies)), wrap, store, actions, user: userEvent.setup() }
 }

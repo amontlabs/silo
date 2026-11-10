@@ -20,6 +20,7 @@ import { onboardingSteps, projectOnboarding, type OnboardingStep, type ComputerV
 import { configurationRequest } from "@/features/onboarding/model/computer-configuration"
 import { DependenciesStep } from "@/features/onboarding/steps/dependencies-step"
 import { GitHubStep } from "@/features/onboarding/steps/github-step"
+import type { GitHubTokenOption } from "@/features/github/components/github-access-editor"
 import { ReviewStep } from "@/features/onboarding/steps/review-step"
 import { ComputersStep } from "@/features/onboarding/steps/computers-step"
 import type { OnboardingDraft } from "@/features/onboarding/model/onboarding-draft"
@@ -36,7 +37,7 @@ export interface OnboardingAppProps {
   presentationOnlyCompleted?: boolean
   repositoryOptions?: readonly string[]
   repositoryPolicies?: readonly ApplicationGitHubComputerPolicy[]
-  tokenConnected?: boolean
+  tokenSecrets?: readonly GitHubTokenOption[]
   onOpenApp?: () => void
   onRetryDependencies?: () => void
   onConnectDevice?: () => void
@@ -158,7 +159,7 @@ export function OnboardingApp({
   presentationOnlyCompleted = false,
   repositoryOptions,
   repositoryPolicies,
-  tokenConnected = false,
+  tokenSecrets = [],
   onOpenApp,
   onRetryDependencies,
   onConnectDevice,
@@ -169,7 +170,7 @@ export function OnboardingApp({
       currentStep: "dependencies" as const,
       computers: source.computerConfigurations.map((configuration) => ({ ...configuration })),
       unfinishedComputerEditor: null,
-      computerRepositoryAccess: Object.fromEntries((repositoryPolicies ?? []).map((policy) => [policy.computer, { repositoryMode: policy.repositoryMode ?? "selected", allRepositoriesAllowChanges: policy.allRepositoriesAllowChanges ?? false, ...(policy.authenticationMethod ? { authenticationMethod: policy.authenticationMethod } : {}) }])),
+      computerRepositoryAccess: Object.fromEntries((repositoryPolicies ?? []).map((policy) => [policy.computer, { repositoryMode: policy.repositoryMode ?? "selected", allRepositoriesAllowChanges: policy.allRepositoriesAllowChanges ?? false, ...(policy.authenticationMethod ? { authenticationMethod: policy.authenticationMethod } : {}), ...(policy.tokenSecretId ? { tokenSecretId: policy.tokenSecretId } : {}) }])),
       computerSelections: repositoryPolicies ? Object.fromEntries(repositoryPolicies.map((policy) => [policy.computer, [...policy.repositories]])) : initialComputerSelections(source),
       computerIdentities: repositoryPolicies ? { ...initialComputerIdentities(source), ...Object.fromEntries(repositoryPolicies.map((policy) => [policy.computer, { ...policy.identity }])) } : initialComputerIdentities(source),
     }
@@ -256,6 +257,7 @@ export function OnboardingApp({
       if (!editedAuthenticationMethods.current.has(name) && policy.authenticationMethod) {
         next.computerRepositoryAccess[name] = {
           ...next.computerRepositoryAccess[name], authenticationMethod: policy.authenticationMethod,
+          ...(policy.tokenSecretId ? { tokenSecretId: policy.tokenSecretId } : {}),
         }
         changed = true
       }
@@ -365,6 +367,7 @@ export function OnboardingApp({
           repositoryMode: policy?.repositoryMode ?? "selected" as const,
           allRepositoriesAllowChanges: policy?.allRepositoriesAllowChanges ?? false,
           ...(policy?.authenticationMethod ? { authenticationMethod: policy.authenticationMethod } : {}),
+          ...(policy?.tokenSecretId ? { tokenSecretId: policy.tokenSecretId } : {}),
         }]
       })),
     })
@@ -524,7 +527,7 @@ export function OnboardingApp({
           activityEvents={source.activityEvents ?? source.progressEvents}
           computers={computerComputerViews}
           connectionState={githubConnectionState}
-          tokenConnected={tokenConnected}
+          tokenSecrets={tokenSecrets}
           notice={operationError ? <p role="alert" className="text-xs text-destructive">{operationError}</p> : undefined}
           repositoryOptions={availableRepositories}
           computerSelections={Object.fromEntries(computerNames.map((name) => [name, computerValue(computerSelections, name) ?? []]))}
