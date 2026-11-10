@@ -24,7 +24,7 @@ Plan: [PLAN.md](PLAN.md). Agent rules: [AGENT-BRIEF.md](AGENT-BRIEF.md).
 | --- | --- | --- | --- |
 | S1 | merged 2026-11-10 | `docs/s1-gateway-channel-spike` | [evidence](evidence/S1.md). Channel: yes, no patch. Allowlist: needs strict off, a `restore --net-strict` patch, and gateway init fields |
 | T1 | merged 2026-11-10 (`e000d684c`) | `t1-policy-audit` | silod 341, api 52, policy and audit 42 tests passed in the item. Only one review round ran (fallback model); the second hit a quota. Orchestrator read rules.rs, policy/mod.rs and the gate: no hole found; checkpoint ids are looked up inside the named computer's record. A Codex review is running |
-| T1 review | done 2026-11-10 (Opus) | | one high finding and seven smaller, listed under Found. Fix task running: id ends `fa664794-1fe4-4421-89f0-dbf6b4f2fb16` (Sonnet). T5 must not start before it is merged |
+| T1 review | done 2026-11-10 (Opus) | | one high finding and seven smaller, listed under Found. All eight fixed and merged 2026-11-10 (`fix/policy-audit-review-findings`): the made record moves inside the promote's own Lineage step and is saved in the promote journal, so undo and recovery reverse or repeat it; silod 346 and the engine's policy, audit and promote tests (116) passed in the item. Orchestrator read `policy/handoff.rs`. Not exercised against a real engine. A Codex pass is still owed |
 | T2 | running since 2026-11-10 | | task id ends `b36c91cf-09c3-4e62-9c5d-cbb05e3d8482` (Opus) |
 | T3 | running since 2026-11-10 | | task id ends `90e092a2-578c-42d5-8ade-b7fadfe8c9c0` (Sonnet) |
 | T4 | merged 2026-11-10 | `feat/keep-conflict-choices` | engine tests 273, api 53, silod checkpoints 56 passed in the item; two review rounds; the `silo-ui` crate was not built there |
