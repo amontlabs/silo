@@ -627,10 +627,31 @@ pub fn build(
         .then(|| items::branch_name(&request.fork));
         if left || branch.is_some() {
             // The repository's working tree stays as main has it, ignored files included.
+            // Only what belongs to the repository goes: ignored files and uncommitted files,
+            // not a settings or other file that happens to lie under it, and not a file the
+            // caller answered `fork` on its own.
+            let prefix = repo.repo.trim_end_matches('/');
+            let elsewhere: BTreeSet<String> = diff
+                .settings
+                .files
+                .iter()
+                .chain(&diff.other)
+                .map(|c| items::file(&c.path))
+                .collect();
             let ignored: BTreeSet<String> = repo
                 .gitignored
                 .iter()
                 .map(|c| items::file(&c.path))
+                .chain(
+                    repo.dirty_new
+                        .keys()
+                        .chain(repo.renamed_from.values())
+                        .map(|rel| items::file(&format!("{prefix}/{rel}"))),
+                )
+                .filter(|id| {
+                    !elsewhere.contains(id)
+                        && request.choices.said(id) != Said::Answered(Answer::Fork)
+                })
                 .collect();
             let (dropped, kept): (Vec<FileCand>, Vec<FileCand>) = std::mem::take(&mut plan.file_cands)
                 .into_iter()

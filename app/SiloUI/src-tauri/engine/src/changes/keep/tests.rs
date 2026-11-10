@@ -3253,3 +3253,44 @@ fn a_failure_while_reading_the_fork_does_not_put_main_back() {
     assert_eq!(journal.latest_undoable("main"), None);
     world.with("main", |c| assert_eq!(c.files["/root/.bashrc"].0, b"old"));
 }
+
+#[test]
+fn a_repository_left_on_a_branch_keeps_its_uncommitted_files_but_not_files_outside_it() {
+    let base = "F\t/etc/app.conf\t1\t1\tc:old\nGIT\t/root\taaa\tmain\t0\t0\n";
+    let fork = "F\t/etc/app.conf\t2\t2\tbb\nGIT\t/root\tbbb\tmain\t0\t0\nGITF\t/root\t_M\tnotes.txt\n";
+    let world = World::new(Os::Linux, &["fork", "main"]);
+    world.put("fork", "/etc/app.conf", "fork conf");
+    world.put("fork", "/root/notes.txt", "fork notes");
+    world.put("main", "/etc/app.conf", "old");
+    *world.git_state.lock().unwrap() = "merge".into();
+    let (_dir, journal) = journal();
+    let report = kept(
+        run(
+            &world,
+            &store(base, fork, base),
+            &journal,
+            &choosing(&[("repo:/root", Answer::Branch)]),
+        )
+        .unwrap(),
+    );
+    world.with("main", |c| {
+        assert_eq!(c.files["/etc/app.conf"].0, b"fork conf");
+        assert!(!c.files.contains_key("/root/notes.txt"));
+    });
+    assert_eq!(item(&report, "file:/etc/app.conf").outcome, "brought-over");
+    assert_eq!(item(&report, "file:/root/notes.txt").outcome, "left-as-main");
+}
+
+#[test]
+fn credentials_are_found_by_a_repositorys_full_path_too() {
+    let world = simple_world();
+    *world.changed_files.lock().unwrap() = vec!["shadow".into()];
+    let base = "GIT\t/etc\taaa\tmain\t0\t0\n";
+    let fork = "GIT\t/etc\tbbb\tmain\t0\t0\n";
+    let (_dir, journal) = journal();
+    let refusal = refused(
+        run(&world, &store(base, fork, base), &journal, &request(Hooks::default())).unwrap(),
+    );
+    assert_eq!(refusal.reason, "credentials");
+    assert_eq!(refusal.conflicts[0].item, "/etc/shadow");
+}

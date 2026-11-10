@@ -175,6 +175,13 @@ pub fn sensitive_path(path: &str) -> bool {
             && !matches!(base, ".env.example" | ".env.sample" | ".env.template"))
 }
 
+/// Whether a path inside a repository is a credential or an env file, judged by its path in
+/// the repository and by its full path (a repository can sit where the credentials are).
+fn sensitive_in(repo: &str, rel: &str) -> bool {
+    let full = format!("{}/{rel}", repo.trim_end_matches('/'));
+    sensitive_path(rel) || credential_group(&full).is_some()
+}
+
 fn refuse(
     report: Report,
     reason: &str,
@@ -338,9 +345,7 @@ pub fn prepare(
                 if is_migration(&name) {
                     migrations_changed = true;
                 }
-                if sensitive_path(&name)
-                    || sensitive_path(&format!("{}/{name}", repo.repo.trim_end_matches('/')))
-                {
+                if sensitive_in(&repo.repo, &name) {
                     let path = format!("{}/{name}", repo.repo.trim_end_matches('/'));
                     plan.conflicts.push(
                         Conflict::new(
@@ -493,7 +498,7 @@ pub fn prepare(
                 }
                 _ => {}
             }
-            if sensitive_path(&op.rel) || sensitive_path(&op.path) {
+            if sensitive_in(&repo.repo, &op.rel) {
                 plan.conflicts.push(
                     Conflict::new("credentials", op.path.clone(), "it is uncommitted in the fork; credentials and ignored paths are not kept into main")
                         .answerable(&format!("credentials:{}", op.path), &[], "added", ""),
