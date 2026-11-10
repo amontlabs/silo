@@ -26,6 +26,7 @@ Plan: [PLAN.md](PLAN.md). Agent rules: [AGENT-BRIEF.md](AGENT-BRIEF.md).
 | T1 | running since 2026-11-10 | | task id ends `21b89a79-7c1e-432c-8118-44fc0eddcff6` (Opus) |
 | T4 | running since 2026-11-10 | | task id ends `a5a79a51-152a-44dd-b757-b4b2547b6e88` (Sonnet) |
 | T9 | running since 2026-11-10 | | task id ends `5af06c4c-ae51-47ff-a807-035a14df103b` (Sonnet) |
+| T7 | running since 2026-11-10 | | task id ends `b9b0ef15-b4e5-4f7f-8b3d-4c63559442bd` (Sonnet); no live macOS check in the item |
 
 Task ids are `node:delegated-task:command%3Amcp%3Ad723019c-0dae-419c-8e5d-2e7d794e60f4%3Adelegate-task%3A<ending>`.
 Next waves are in the plan's work items table; start an item only when the items before it in
