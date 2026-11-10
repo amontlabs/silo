@@ -44,6 +44,10 @@ pub struct GitHubPolicy {
     /// With token access, the `github-token` secret the computer uses.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub token_secret_id: Option<String>,
+    /// Set by the engine when the token secret this computer chose no longer exists. The
+    /// computer has no GitHub access until another token is chosen.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub token_missing: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, schemars::JsonSchema)]
@@ -221,5 +225,21 @@ mod tests {
         let json = serde_json::to_value(&token).unwrap();
         assert_eq!(json["tokenSecretId"], "s1");
         assert_eq!(serde_json::from_value::<GitHubPolicy>(json).unwrap(), token);
+    }
+    #[test]
+    fn a_policy_says_when_its_token_secret_is_gone() {
+        let mut json = serde_json::json!({
+            "computerId": "c1", "identity": {"name": "", "email": "", "apply": false},
+            "repositoryMode": "selected", "repositories": [],
+            "allRepositoriesAllowChanges": false, "authenticationMethod": "token",
+            "tokenSecretId": "gone"
+        });
+        let present: GitHubPolicy = serde_json::from_value(json.clone()).unwrap();
+        assert!(!present.token_missing);
+        assert!(serde_json::to_value(&present).unwrap().get("tokenMissing").is_none());
+        json["tokenMissing"] = serde_json::json!(true);
+        let missing: GitHubPolicy = serde_json::from_value(json).unwrap();
+        assert!(missing.token_missing);
+        assert_eq!(serde_json::to_value(&missing).unwrap()["tokenMissing"], true);
     }
 }

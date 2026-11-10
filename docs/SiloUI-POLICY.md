@@ -67,8 +67,8 @@ to answer in one piece cannot be cut, so it is withheld.
 | `network.publish` | Asks you | A port on your device. |
 | `sshAccess.save` | Asks you | Turning SSH access off is free, and only the computer and the off switch are taken from the call: the port and address stay what is saved, so nothing it sends waits for you to turn access on. |
 | `push.start` | Asks you | A push to GitHub through your device. |
-| `github.configuration.save` | Asks you | Only when the computers whose GitHub access changes are in its tree; a configuration that drops or changes another computer's access, or changes nothing, is refused. |
-| `secrets.save` | Asks you | Adding a secret for computers in its tree. Changing a saved secret is yours only. The secret's value is never in the request's summary. |
+| `github.configuration.save` | Asks you | Only when the computers whose GitHub access changes are in its tree; a configuration that drops or changes another computer's access, or changes nothing, is refused. Token access must name the token secret by id (an agent is never bound to a token by default) and the summary you approve names that token and says a personal token gives its full permissions. |
+| `secrets.save` | Asks you | Adding a secret for computers in its tree. Changing a saved secret is yours only. The secret's value is never in the request's summary. A GitHub token has its own summary: it names the token and says it gives its full permissions to any computer that uses it. |
 | `changes.capture`, `changes.baseline` | Never | Baselines are cached under keys other computers share. |
 | `changes.requests.markKept`, `changes.requests.open` | Never | |
 | `computers.configuration.*`, `computers.identities.*`, `computers.launch`, `computers.shell`, `activity.setup.read`, `macos.template.delete` | Never | They read or change every computer at once. |

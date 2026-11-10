@@ -730,6 +730,7 @@ fn api_configuration_to_engine(
         row["computer"] = json!(computer_name(paths, id)?);
         if let Some(object) = row.as_object_mut() {
             object.remove("computerId");
+            object.remove("tokenMissing");
         }
     }
     Ok(value)

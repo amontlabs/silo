@@ -47,6 +47,8 @@ export interface GitHubIdentity {
 
 export interface GitHubComputer {
   name: string
+  /** The token this computer chose no longer exists, so it has no GitHub access. */
+  tokenMissing?: boolean
 }
 
 interface RepositoryComboboxProps {
@@ -454,6 +456,9 @@ export function GitHubAccessEditor({
                                 )}
                               </select>
                             </label>
+                          )}
+                          {access.authenticationMethod === "token" && computer.tokenMissing && (
+                            <p role="alert" className="text-destructive">The token this computer used was removed, so it has no GitHub access. Choose another token.</p>
                           )}
                         </div>
                         {connectionState === "connected" && access.authenticationMethod !== "token" && (

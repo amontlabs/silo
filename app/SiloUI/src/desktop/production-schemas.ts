@@ -28,6 +28,7 @@ export const githubStateShape = z.object({
     computer: z.string(), identity: z.object({ name: z.string(), email: z.string(), apply: z.boolean() }),
     authenticationMethod: z.enum(["oauth", "token"]).nullish().transform(value => value ?? undefined),
     tokenSecretId: z.string().nullish().transform(value => value ?? undefined),
+    tokenMissing: z.boolean().optional(),
     repositoryMode: z.enum(["selected", "all"]).default("selected"), allRepositoriesAllowChanges: z.boolean().default(false),
     repositories: z.array(z.object({ repository: z.string(), allowPushes: z.boolean() })),
   })).optional(),

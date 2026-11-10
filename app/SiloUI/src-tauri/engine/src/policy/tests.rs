@@ -114,6 +114,9 @@ impl super::World for World {
     fn github_policies(&self) -> Option<Vec<Value>> {
         self.github.clone()
     }
+    fn github_token_name(&self, id: &str) -> Option<String> {
+        (id == "tok-work").then(|| "work".to_owned())
+    }
     fn new_id(&self) -> String {
         "fresh-id".into()
     }
@@ -616,6 +619,62 @@ fn a_github_configuration_may_change_only_the_callers_tree() {
         save(json!([{"computerId": "main", "repositoryMode": "selected"},
             {"computerId": "stranger", "repositoryMode": "selected"}]))
     )));
+}
+
+fn summary_of(decision: Decision) -> String {
+    match decision {
+        Decision::Ask { summary, .. } => summary,
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn a_github_token_choice_says_what_it_gives_and_names_the_token() {
+    let save = |policy: Value| {
+        json!({"configuration": {"computers": [policy,
+            {"computerId": "stranger", "repositoryMode": "all"}]}})
+    };
+    let token = |secret: Option<&str>| {
+        let mut policy = json!({"computerId": "main", "repositoryMode": "selected",
+            "authenticationMethod": "token"});
+        if let Some(secret) = secret {
+            policy["tokenSecretId"] = json!(secret);
+        }
+        policy
+    };
+    let summary = summary_of(check("github.configuration.save", save(token(Some("tok-work")))));
+    assert!(summary.contains("work"), "{summary}");
+    assert!(summary.contains("full permissions"), "{summary}");
+    assert!(!summary.contains("tok-work"), "{summary}");
+    // No token named, or one that does not exist, is refused rather than defaulted.
+    assert!(refused(&check("github.configuration.save", save(token(None)))));
+    assert!(refused(&check("github.configuration.save", save(token(Some("tok-other"))))));
+    // A change that keeps the same token adds no token sentence.
+    let mut world = World::default();
+    world.github = Some(vec![
+        token(Some("tok-work")),
+        json!({"computerId": "stranger", "repositoryMode": "all"}),
+    ]);
+    let mut renamed = token(Some("tok-work"));
+    renamed["repositoryMode"] = json!("all");
+    let kept = decide(
+        &Caller::Computer { id: "main".into() },
+        method("github.configuration.save"),
+        &save(renamed),
+        &world,
+    );
+    assert!(!summary_of(kept).contains("full permissions"));
+}
+
+#[test]
+fn an_agent_asking_for_a_github_token_secret_is_told_what_it_gives() {
+    let request = json!({"request": {"operation": "add", "kind": "github-token", "name": "work",
+        "value": "synthetic-value", "computerIds": [], "allowedDomains": []}});
+    let summary = summary_of(check("secrets.save", request));
+    assert!(summary.contains("GitHub token work"), "{summary}");
+    assert!(summary.contains("full permissions"), "{summary}");
+    assert!(!summary.contains("only to"), "{summary}");
+    assert!(!summary.contains("synthetic-value"), "{summary}");
 }
 
 #[test]

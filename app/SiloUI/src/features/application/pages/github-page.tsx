@@ -395,7 +395,7 @@ export function GitHubPage({
       </div>
       <GitHubAccessEditor
         compactConnection
-        computers={source.computers.filter(w => !w.device).map(({ configuration }) => ({ name: configuration.name }))}
+        computers={source.computers.filter(w => !w.device).map(({ configuration }) => ({ name: configuration.name, tokenMissing: source.github.computers?.find(policy => policy.computer === configuration.name)?.tokenMissing }))}
         connectionState={connectionState}
         tokenSecrets={tokenSecrets}
         repositoryOptions={source.github.repositoryCatalog ?? []}
