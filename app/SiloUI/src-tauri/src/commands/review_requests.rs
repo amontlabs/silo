@@ -241,7 +241,9 @@ mod forwarding_tests {
         let (engine, _) = connected_client(&fake).await;
         assert_eq!(show(&engine, None, "r1").await.unwrap()["ok"], 1);
         let choices = BTreeMap::from([("repo:/root/app".to_owned(), KeepAnswer::Branch)]);
-        keep(&engine, None, "r1", true, Some(choices)).await.unwrap();
+        keep(&engine, None, "r1", true, Some(choices))
+            .await
+            .unwrap();
         throw_away(&engine, None, "r1").await.unwrap();
         open(&engine, None, "r1").await.unwrap();
         assert_eq!(
@@ -250,7 +252,9 @@ mod forwarding_tests {
         );
         assert_eq!(
             fake.calls(MethodName::ChangesRequestsKeep),
-            vec![json!({"requestId": "r1", "dataOk": true, "choices": {"repo:/root/app": "branch"}})]
+            vec![
+                json!({"requestId": "r1", "dataOk": true, "choices": {"repo:/root/app": "branch"}})
+            ]
         );
         assert_eq!(fake.calls(MethodName::ChangesRequestsThrowAway).len(), 1);
         assert_eq!(fake.calls(MethodName::ChangesRequestsOpen).len(), 1);

@@ -4,16 +4,7 @@ import { SectionHeading } from "@/components/page"
 import { Button } from "@/components/ui/button"
 import type { MergeChoice } from "@/desktop/production-source"
 import type { KeepConflict } from "@/desktop/production-schemas"
-
-/** What each answer does, in a few words. A repository's `branch` names the branch the fork's commits arrive on. */
-export function choiceLabel(choice: string, forkName: string): string {
-  switch (choice) {
-    case "fork": return "Use the fork's version"
-    case "main": return "Keep main's version"
-    case "branch": return `Leave the fork's commits as a branch (silo/${forkName}); nothing is merged`
-    default: return choice
-  }
-}
+import { choiceLabel } from "@/features/application/model/merge-copy"
 
 const isChoice = (value: string): value is MergeChoice => value === "fork" || value === "main" || value === "branch"
 const answerable = (conflict: KeepConflict) => Boolean(conflict.id) && conflict.allowed.some(isChoice)

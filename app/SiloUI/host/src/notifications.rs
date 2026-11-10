@@ -642,7 +642,12 @@ mod tests {
     }
     #[test]
     fn an_approval_notice_opens_its_request_on_the_pending_page() {
-        let mut notice = failure("approval:ap-1", "main asks: Publish port 8080", "", computer());
+        let mut notice = failure(
+            "approval:ap-1",
+            "main asks: Publish port 8080",
+            "",
+            computer(),
+        );
         notice.category = Category::Approvals;
         assert_eq!(
             notice.route(),

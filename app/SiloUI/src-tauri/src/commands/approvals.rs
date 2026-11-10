@@ -137,9 +137,15 @@ pub(crate) async fn list_audit(
     before_id: Option<u64>,
     limit: Option<u32>,
 ) -> Result<Value, String> {
-    audit(&engine, computer_id.as_deref(), caller_kind, before_id, limit)
-        .await
-        .map_err(String::from)
+    audit(
+        &engine,
+        computer_id.as_deref(),
+        caller_kind,
+        before_id,
+        limit,
+    )
+    .await
+    .map_err(String::from)
 }
 
 #[tauri::command]
@@ -177,9 +183,15 @@ mod forwarding_tests {
         list(&engine, Some(ApprovalState::Pending), Some("c1"))
             .await
             .unwrap();
-        audit(&engine, Some("c1"), Some(AuditCallerKind::Computer), Some(40), Some(25))
-            .await
-            .unwrap();
+        audit(
+            &engine,
+            Some("c1"),
+            Some(AuditCallerKind::Computer),
+            Some(40),
+            Some(25),
+        )
+        .await
+        .unwrap();
         resources(&engine, Some("d2")).await.unwrap();
         get(&engine, "ap-1").await.unwrap();
         assert_eq!(
@@ -188,7 +200,9 @@ mod forwarding_tests {
         );
         assert_eq!(
             fake.calls(MethodName::AuditList),
-            vec![json!({"computerId": "c1", "callerKind": "computer", "beforeId": 40, "limit": 25})]
+            vec![
+                json!({"computerId": "c1", "callerKind": "computer", "beforeId": 40, "limit": 25})
+            ]
         );
         assert_eq!(
             fake.calls(MethodName::DeviceResources),

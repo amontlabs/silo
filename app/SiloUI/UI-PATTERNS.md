@@ -108,6 +108,7 @@ surface and its fixtures; there is no on-page selector, so edit the URL.
 | `resource-notice` | `create-storage`, `start-memory` | `src/fixtures/application-resources.ts` |
 | `operations` | `running`, `stuck` | `src/fixtures/operation-queue.ts` |
 | `computer-use` | Built-in computer use: `unavailable`, `installing`, `ready`, `failed`, `auto`, `unknown-approval`, `approval-pending`, `approval-failed`, `approval-partial`, `pre-v4` (the approval ones show the chosen mode, "Applying…" or the failed/partial result with the warning that some agents may still act without asking; the switch applies like the native one, pending then applied). Enables the Computer use section (sandbox page, `dev`) and the `view=desktop` header. There is no consent notice anywhere | `src/fixtures/computer-use.ts` |
+| `approvals` | `none`, `waiting`: what the agents inside computers ask for. `waiting` (the default in the browser preview) lists several kinds of requests waiting, some answered and failed, a merge with conflicts, a fast-forward merge, and audit rows under Activity, Who did what | `src/fixtures/approvals.ts` |
 | `appearance` | `light`, `dark`; otherwise the fixture's theme preference | `src/fixtures/preview.tsx` |
 
 The app view also lists the macOS fixture computers (`src/fixtures/macos-computers.ts`) beside the Linux

@@ -115,6 +115,7 @@ function NavigationButton({
   const countID = `application-nav-${id}-count`
   const countLabel = `${count} waiting for you`
   return (
+    <>
     <NavigationTooltip label={label} collapsed={collapsed} shortcut={shortcutFor(id === "computers" ? "go-computers" : id === "settings" ? "settings" : `go-${id}`)}>
     <button
       id={`application-nav-${id}`}
@@ -152,11 +153,12 @@ function NavigationButton({
       {count > 0 && (collapsed
         ? <span data-navigation-count aria-hidden="true" className="absolute top-1 right-1 size-1.5 rounded-full bg-primary" />
         : <span data-navigation-count aria-hidden="true" className="grid h-4 min-w-4 shrink-0 place-items-center rounded-full bg-primary px-1 text-caption leading-none font-medium text-primary-foreground tabular-nums">{count}</span>)}
-      {count > 0 && <span id={countID} className="sr-only">{countLabel}</span>}
       {!collapsed && <NavigationLoadingIndicator loading={loading} collapsed={false} />}
       {!collapsed && <SidebarShortcut action={id === "computers" ? "go-computers" : id === "settings" ? "settings" : `go-${id}`} />}
     </button>
     </NavigationTooltip>
+    {count > 0 && <span id={countID} className="sr-only">{countLabel}</span>}
+    </>
   )
 }
 

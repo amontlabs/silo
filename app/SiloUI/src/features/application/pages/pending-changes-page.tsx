@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { Boxes, GitMerge, GitPullRequestArrow, Globe, HardDrive, KeyRound, Network, Replace, ShieldQuestion, Terminal, TriangleAlert, type LucideIcon } from "lucide-react"
+import { Boxes, GitMerge, GitPullRequestArrow, Globe, HardDrive, KeyRound, Network, Replace, ShieldQuestion, Terminal, TriangleAlert } from "lucide-react"
 
 import { EmptyState } from "@/components/empty-state"
 import { ListCard, ListRow, ListRowIcon, ListRowSkeleton } from "@/components/list-row"
@@ -16,21 +16,32 @@ import { cn } from "@/lib/utils"
 
 const badgeClass = "inline-flex shrink-0 items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 text-caption font-medium text-muted-foreground"
 
-const kindIcons: Record<string, LucideIcon> = {
-  merge: GitMerge, replace_main: Replace, github: GitPullRequestArrow, secret: KeyRound, network: Network,
-  port: Globe, ssh: Terminal, access: ShieldQuestion, container: Boxes, resources: HardDrive,
+const iconClass = "size-3.5"
+
+/** The icon of what an approval is about. */
+function KindIcon({ kind }: { kind: string }) {
+  switch (kind) {
+    case "merge": return <GitMerge aria-hidden="true" className={iconClass} />
+    case "replace_main": return <Replace aria-hidden="true" className={iconClass} />
+    case "github": return <GitPullRequestArrow aria-hidden="true" className={iconClass} />
+    case "secret": return <KeyRound aria-hidden="true" className={iconClass} />
+    case "network": return <Network aria-hidden="true" className={iconClass} />
+    case "port": return <Globe aria-hidden="true" className={iconClass} />
+    case "ssh": return <Terminal aria-hidden="true" className={iconClass} />
+    case "container": return <Boxes aria-hidden="true" className={iconClass} />
+    case "resources": return <HardDrive aria-hidden="true" className={iconClass} />
+    default: return <ShieldQuestion aria-hidden="true" className={iconClass} />
+  }
 }
-const kindIcon = (kind: string): LucideIcon => kindIcons[kind] ?? ShieldQuestion
 
 function Ago({ at }: { at: string }) {
   return <time dateTime={at} title={formatAbsoluteTime(at)}>{formatRelativeTime(at)}</time>
 }
 
 function ApprovalRow({ approval, request, onOpen }: { approval: Approval; request?: RequestEntry; onOpen: () => void }) {
-  const Icon = kindIcon(approval.kind)
   return (
     <ListRow
-      icon={<ListRowIcon><Icon aria-hidden="true" className="size-3.5" /></ListRowIcon>}
+      icon={<ListRowIcon><KindIcon kind={approval.kind} /></ListRowIcon>}
       onOpen={onOpen}
       title={<>
         <button type="button" className="truncate text-left outline-none focus-visible:underline" onClick={onOpen}>{approval.computerName || "A computer"}</button>
@@ -65,10 +76,9 @@ function RequestRow({ entry, onOpen }: { entry: RequestEntry; onOpen: () => void
 function AnsweredRow({ approval, readJob, onOpen }: { approval: Approval; readJob: ApprovalActions["readApprovalJob"]; onOpen: () => void }) {
   const job = useApprovalJob(readJob, approval)
   const outcome = approvalOutcomeText(approval, job)
-  const Icon = kindIcon(approval.kind)
   return (
     <ListRow
-      icon={<ListRowIcon><Icon aria-hidden="true" className="size-3.5" /></ListRowIcon>}
+      icon={<ListRowIcon><KindIcon kind={approval.kind} /></ListRowIcon>}
       onOpen={onOpen}
       title={<button type="button" className="truncate text-left outline-none focus-visible:underline" onClick={onOpen}>{approval.computerName || "A computer"}</button>}
       detail={<>{approval.summary || approvalKindLabel(approval.kind)} · <Ago at={approval.decidedAt ?? approval.createdAt} /></>}
