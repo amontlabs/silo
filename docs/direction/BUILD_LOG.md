@@ -28,7 +28,7 @@ Plan: [PLAN.md](PLAN.md). Agent rules: [AGENT-BRIEF.md](AGENT-BRIEF.md).
 | T9 | merged 2026-11-10 | `feat/macos-computer-app-parity` | frontend only, no Rust change; 2914 frontend tests passed in the item; reviewed by the fallback model (gemini flash) only, one round; not run in the real app |
 | T11 | running since 2026-11-10 | | task id ends `8a11b496-7815-4ef3-830d-fe8aa13cc55a` (Sonnet) |
 | T12 | running since 2026-11-10 | | task id ends `67f835b1-ca2e-4f89-9c93-4ad720bb45be` (Sonnet) |
-| S2 | running since 2026-11-10 | | task id ends `c8ba35ed-17ae-4a93-b259-def2953e1398` (Sonnet), upgrade path spike |
+| S2 | merged 2026-11-10 | `docs/s2-linux-computer-rebuild` | [evidence](evidence/S2.md). Verdict: buildable now for Linux with host-side disk moves; macOS later. T15 waits for T6 (recipes in the engine) |
 | T7 | merged 2026-11-10 | `fix/macos-nat-boundary` | 530 macOS engine tests passed; unit tests only, no macOS computer run; one review round on the fallback model. Live steps are in the item's report, copied below |
 | T14 | running since 2026-11-10 | | task id ends `daee93c4-fbae-4cc0-8abb-9e9e902d2ca4` (Sonnet); holds the Dev engine for its live canary check |
 
@@ -70,6 +70,18 @@ These were not asked of the owner. Each is open to change.
     requests, which narrows it).
 
 ## Found during the build
+
+- **S2 design for T15 (Linux rebuild on the newest image):** (1) take the lane, journal, stop;
+  (2) disk checkpoint with integrity, the undo; (3) create `<name>-rebuild-<hex>` on the newest
+  image with the old arguments, boot, account setup, stop; (4) move the workspace disk (APFS
+  clone of the whole disk folder and its layer list, or the supported `adopt-disk` when the disk
+  is one raw file; sizes must match); (5) boot both, carry `/home/silo` by tar inside the guest
+  plus `msb cp` (1.15 GB in 9 s; a tar pipe between two execs took 1 min 41 s), copy the host
+  `ssh/` folder; (6) replay the recipe; (7) stop both, rename old to `<name>-undo` and new to
+  `<name>`, relabel `silo.machine-id`. Unsolved: homes over about 1.8 GiB on a 4 GiB root disk,
+  things installed by hand outside home and the recipe, Linux hosts without reflink, and old
+  checkpoints still restoring the old image. Replacing the root disk in place works only by
+  editing the runtime's private database: not to be built.
 
 - **T7:** bootstrap files on a used disk are replaced, never created (the host cannot make
   root-owned files the guest accepts), so a fork or import whose disk lacks any of the three is
