@@ -7,7 +7,7 @@ the program that sent it:
 | --- | --- | --- |
 | **Owner** | the engine's own socket on this device (the app, the `silo` command line) | everything |
 | **Device** | Connections, from another device of yours | the methods the Connections bridge serves (`remote::OWNER_METHODS`), as before |
-| **Computer** | the agent inside a computer (today the in-guest client's bridge folder) | what this page lists |
+| **Computer** | the agent inside a computer, over that computer's own channel: a loopback port whose handshake carries the computer's token ([Silo's tools in a computer](SiloUI-IN-GUEST-CLIENT.md)) | what this page lists |
 
 The rule for a computer: **it can do anything that gives it no more than it already has; anything
 that widens what it has asks you; it never touches a computer outside its own tree.**
@@ -61,7 +61,7 @@ to answer in one piece cannot be cut, so it is withheld.
 | `checkpoints.restore`, `.delete`, `.abandonRestore`, `steps.record` | What it made | Its own checkpoints and steps are your history of it. |
 | `desktop.action`, `computerUse.setup`, `clipboard.write` | What it made | |
 | `changes.request`, `changes.requests.throwAway` | What it made | A review request can target only its tree. |
-| `checkpoints.fork` | Makes a computer | Source: itself or one it made. The fork may have any secret the caller has (see [Secrets in a fork](#secrets-in-a-fork)), and a read-only copy of GitHub access the caller's own access covers; anything more asks you. Forking an earlier checkpoint of itself asks you, since it can hold what you have since taken away. The token file of the in-guest client is always scrubbed; a recipe hash is never passed on (it names a baseline other forks share). |
+| `checkpoints.fork` | Makes a computer | Source: itself or one it made. The fork may have any secret the caller has (see [Secrets in a fork](#secrets-in-a-fork)), and a read-only copy of GitHub access the caller's own access covers; anything more asks you. Forking an earlier checkpoint of itself asks you, since it can hold what you have since taken away. The endpoint file with the caller's token (`/etc/silo/endpoint.json`) is always scrubbed; a recipe hash is never passed on (it names a baseline other forks share). |
 | `computers.create` | Makes a computer | The engine chooses a Linux computer's id. A container computer asks you: it shares the device's kernel. A computer with more CPUs, maximum CPUs, memory, maximum memory or storage than the caller has (a macOS one: CPUs, memory or disk) asks you, with the sizes in the request. Of a Linux computer's `desktop` settings only whether the desktop starts with the computer is passed on (Silo decides the rest). Names Silo reserves (`silo-build-`, `silo-baseline-`) are refused. |
 | `changes.keep` | Asks you | Free when both the fork and the computer it merges into are ones it made; asks when it merges into itself; refused anywhere else. |
 | `changes.requests.keep` | Asks you | Only for a request about a computer it made; free when the request merges into a computer it made too, asks when it merges into itself. |
@@ -80,7 +80,7 @@ to answer in one piece cannot be cut, so it is withheld.
 | `network.state`, `sshAccess.state`, `sshAccess.connection` | Never | They list every computer. |
 | `secrets.list`, `secrets.remove`, `secrets.retry` | Never | A computer never reads a secret's value, and the list shows every computer's secrets. |
 | `github.*` other than the configuration save | Never | Your GitHub account and sign-in. |
-| `guestClient.*` | Never | Tokens are yours to give. |
+| `guestClient.*` | Never | Turning Silo's tools on or off in a computer is yours. |
 | `settings.*`, `connections.*`, `exports.*`, `storage.*`, `updates.*`, `migration.*`, `preparation.*`, `recipes.*`, `engine.shutdown`, `engine.update.*`, `engine.credentials.*`, `device.dependencies` | Never | Engine settings, Connections, exports and imports, updates. |
 
 ## Asking you
@@ -97,7 +97,7 @@ which computer asked, the method and the exact parameters that will run, the sum
 agent's note if it added one, the state, the times, and once allowed what the call returned (its
 result, the job it started, or the error it ended with). Nothing a computer does changes the
 method, the parameters or the summary after the approval is made. For a fork or a new computer
-the parameters are the ones the engine checked and rewrote (the agent's token file scrubbed, the
+the parameters are the ones the engine checked and rewrote (the agent's endpoint file scrubbed, the
 new computer's id chosen by the engine); a secret's value is kept for the call but never shown.
 
 - **Asking twice** for the same call (same computer, method and parameters) while the first is
@@ -165,8 +165,9 @@ computer it named, the outcome (`ok`, `error`, `refused`, `asked`), the error co
 Parameters and results are never stored. A row from a computer names a computer only when it is
 that computer or one it made, so a probe at someone else's computer shows no target. A call that
 repeats the same caller's newest row (same method, outcome, error and computer) adds to that
-row's `count` and moves its `lastAt`, so a loop of refused calls fills one row. A call the
-in-guest bridge refuses before the policy sees it (an unknown method, a cap) is recorded too.
+row's `count` and moves its `lastAt`, so a loop of refused calls fills one row. A connection
+on a computer's channel without that computer's token is recorded as a refused
+`engine.handshake` by that computer, and a job over the cap below is recorded as refused.
 Rows older than 90 days are trimmed; the owner's and devices' rows keep the newest 200,000 and
 each computer's own calls the newest 20,000, so a computer cannot push out any other row.
 `audit.list` reads it, newest first; what it returns to a computer leaves out the program name
@@ -215,8 +216,8 @@ Linux. Your own calls are never held back by the floors. The floors are the sett
   computer the old main made, with its pending computers and jobs, becomes the fork's, so the old
   main keeps nothing it could reach. An undo puts the record back exactly, and a promote or undo
   finished at engine start moves it the same way.
-- The in-guest bridge caps how many of a computer's jobs are unacknowledged (16), which bounds
-  the engine's own bookkeeping.
+- The engine caps how many of a computer's jobs are unacknowledged (16), which bounds its own
+  bookkeeping; a computer's channel also holds at most 8 connections and 16 running requests.
 - The network policy is the same for every computer today, so a fork's inherited policy hands
   nothing over. When computers get policies of their own, a fork of a computer with a wider
   policy than its maker's must ask.

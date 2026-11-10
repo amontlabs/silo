@@ -90,7 +90,7 @@ after every boot also writes the container's Chrome launchers, which add `--no-s
 seccomp profile denies the nested user namespace Chrome's sandbox needs). An agent that drives Chrome
 drives a browser whose pages are not isolated from the rest of the computer: a page that compromises it
 can act with the computer's GitHub access, use its secrets (the gateway swaps a placeholder for the real
-value on the hosts a secret is allowed for) and use the computer's in-guest `silo` client. The launchers cover
+value on the hosts a secret is allowed for) and use Silo's tools in the computer (its `silo`). The launchers cover
 `google-chrome`, `google-chrome-stable`, `chromium` and `chromium-browser`, each starting the first
 installed of Google Chrome and Chromium whatever name was called, and they stay after `silo desktop off`;
 any other Chromium-based program an agent starts with `--no-sandbox` (Playwright, Puppeteer, Electron) is
