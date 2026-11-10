@@ -34,7 +34,7 @@ Plan: [PLAN.md](PLAN.md). Agent rules: [AGENT-BRIEF.md](AGENT-BRIEF.md).
 | S2 | merged 2026-11-10 | `docs/s2-linux-computer-rebuild` | [evidence](evidence/S2.md). Verdict: buildable now for Linux with host-side disk moves; macOS later. T15 waits for T6 (recipes in the engine) |
 | T7 | merged 2026-11-10 | `fix/macos-nat-boundary` | 530 macOS engine tests passed; unit tests only, no macOS computer run; one review round on the fallback model. Live steps are in the item's report, copied below |
 | T11 review | done 2026-11-10 (Sonnet) | | no token value leaks found. Ten findings; the important ones: a network failure detached computers (also true before T11), a stale check could overwrite a newer token's state, and an agent's request for token access was summarised without saying a full-permission token is given, with a missing id bound to the owner's `github-token` after approval. All ten fixed and merged 2026-11-10 (`fix/github-token-review`); api 63, silod 353, engine github/secrets/policy 297 and 902 frontend tests passed in the item. For the owner: the old single-token fallback applies only in a session where a client used the old methods; a token with no answer since start shows waiting and its computers stay detached until GitHub answers |
-| T8 | stopped 2026-11-11 by a Claude API rate limit; continued | `feat/computer-network-policy` (work saved as `2c6442f98`) | continuation on Sonnet: id ends `779e2245-5c05-4c47-a529-662635d5db03`. Left to do then: patch wiring, runtime rebuild, live check, documents |
+| T8 | merged 2026-11-11 | `t3/d4017e2b` | 1046 focused tests passed after the merge. Live check with the rebuilt runtime in a private home: each mode behaves as designed, also after changing a stopped computer's mode, after a fork and after a restore in place ([evidence](evidence/T8.txt)). No review yet. Not verified: a Linux host's runtime (built by CI), a live macOS or container gateway. The channel hook is `network_policy::extra_rules(computer_id)` returning `ExtraRule::GatewayPort(port)` entries |
 | T5a | running since 2026-11-11 | | id ends `483ed458-d28e-46af-950d-c3a473cf2223` (Opus). Starts from `direction` plus T8's branch; uses the Dev engine for its live check. T5b (the engine provides the `silo` binary, guest components, MCP registration, approval waiting and new MCP tools) follows it |
 | T13a | running since 2026-11-11 | | id ends `72236a72-7e02-4671-a224-a9209b1ec45d` (Sonnet): onboarding agent step, Agents section, Open with agent. T13b (network policy control in the app) waits for T8 |
 | T10 | merged 2026-11-11 | `t3/60767d54` | 2989 frontend tests and the shell's command tests passed in the item; no review (quota); never run in the real app. The click-through list is under Found |
@@ -78,6 +78,12 @@ These were not asked of the owner. Each is open to change.
     requests, which narrows it).
 
 ## Found during the build
+
+- **The runtime changed with T8** (a 25th patch, `restore --net-strict`). Any worktree that runs
+  real computers must rebuild it with `npm --prefix app/SiloUI run runtime:prepare`; the
+  integration worktree's cloned `binaries` folder is the old runtime until then.
+- **T8, known:** an allowlist computer restored or forked from a memory checkpoint is refused by
+  export because of its pinned network interface (it was refused before T8 too).
 
 - **T10 click-through for the live run:** the sidebar shows Pending with a count; an agent asks
   (a port, a merge): toast with Review, system notification with Silo in the background, menu bar
