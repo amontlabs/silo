@@ -938,26 +938,27 @@ func TestShutdownSequenceEndsAtOnceOnSecondInterrupt(t *testing.T) {
 	close(slowShutdown)
 
 	// An interrupt during fleet shutdown also ends the wait at once.
-	signals = make(chan os.Signal, 1)
-	slowShutdown = make(chan struct{})
-	done = make(chan struct{})
+	// New channels: the first shutdown's steps may still be running and reading the old ones.
+	fleetSignals := make(chan os.Signal, 1)
+	slowFleet := make(chan struct{})
+	fleetDone := make(chan struct{})
 	go func() {
-		shutdown(quiet(), signals, func() {}, func() { <-slowShutdown })
-		close(done)
+		shutdown(quiet(), fleetSignals, func() {}, func() { <-slowFleet })
+		close(fleetDone)
 	}()
 	select {
-	case <-done:
+	case <-fleetDone:
 		t.Fatal("the shutdown ended although nothing came back")
 	case <-time.After(50 * time.Millisecond):
 	}
-	signals <- os.Interrupt
+	fleetSignals <- os.Interrupt
 	select {
-	case <-done:
+	case <-fleetDone:
 	case <-time.After(2 * time.Second):
 		t.Fatal("a second interrupt during fleet shutdown did not end the wait")
 	}
-	close(slowShutdown)
+	close(slowFleet)
 
 	// A shutdown that finishes on its own needs no interrupt.
-	shutdown(quiet(), signals, func() {}, func() {})
+	shutdown(quiet(), fleetSignals, func() {}, func() {})
 }
