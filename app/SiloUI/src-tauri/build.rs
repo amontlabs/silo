@@ -136,6 +136,7 @@ fn main() {
             "read_checkpoint_usage",
             "list_agents",
             "install_agent",
+            "ensure_ssh_name",
             "list_approvals",
             "get_approval",
             "decide_approval",

@@ -1,3 +1,4 @@
+import type { AgentInfo } from "@/features/agents/model/agents"
 import type { ApplicationActions, ApplicationSource, ApplicationTab, ApplicationComputer, ComputerDetailTab, ComputerSection } from "@/features/application/model/application-source"
 
 /** A renderer of one computer's "…" menu (see `computer-menu-items.ts`). */
@@ -7,6 +8,8 @@ export interface ComputerMenuProps {
   actions: StatusBarActions
   onFolders: () => void
   onConfirm: (action: "stop" | "restart") => void
+  /** The agents this computer is known to have, for the agent entries of the menu. */
+  agents?: readonly AgentInfo[]
 }
 
 export interface StatusBarRoute {
@@ -21,7 +24,7 @@ export interface StatusBarRoute {
 /** What Quit does to running computers once the user chose (95 A-2). */
 export type QuitChoice = "keep" | "stop"
 
-export interface StatusBarActions extends Pick<ApplicationActions, "startComputer" | "stopComputer" | "restartComputer" | "openTerminal" | "pushRepository" | "listComputerDirectory" | "listApprovals" | "listReviewRequests" | "watchApprovals"> {
+export interface StatusBarActions extends Pick<ApplicationActions, "startComputer" | "stopComputer" | "restartComputer" | "openTerminal" | "openAgent" | "listAgents" | "pushRepository" | "listComputerDirectory" | "listApprovals" | "listReviewRequests" | "watchApprovals"> {
   openSilo: (route?: StatusBarRoute) => void
   /** Quit Silo. With running computers the user has already chosen: keep them running, or stop them first. */
   quit: (choice?: QuitChoice) => void

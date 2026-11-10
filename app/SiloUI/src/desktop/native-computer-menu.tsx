@@ -7,6 +7,7 @@ import { showActionFailure, showQuickConfirmation } from "@/lib/operation-toast"
 import { computerTarget } from "@/features/application/model/connections"
 import type { ComputerMenuProps } from "@/features/status-bar/status-bar-types"
 import { computerMenuItems, type ComputerMenuItem } from "@/features/status-bar/computer-menu-items"
+import { openableAgents } from "@/features/agents/model/agents"
 
 type NativeItems = NonNullable<MenuOptions["items"]>
 
@@ -30,7 +31,7 @@ function nativeItems(items: ComputerMenuItem[], current: () => boolean): NativeI
 
 // HTML portals cannot draw outside the status webview. Let the OS own the
 // popup and its submenus, including screen-edge placement and keyboard tracking.
-export function NativeComputerMenu({ computer, source, actions, onFolders, onConfirm }: ComputerMenuProps) {
+export function NativeComputerMenu({ computer, source, actions, onFolders, onConfirm, agents }: ComputerMenuProps) {
   const opening = useRef(false)
   const sequence = useRef(0)
   const activeMenu = useRef<Menu | null>(null)
@@ -55,6 +56,8 @@ export function NativeComputerMenu({ computer, source, actions, onFolders, onCon
       start: () => actions.startComputer(target),
       confirm: onConfirm,
       openTerminal: () => actions.openTerminal(target),
+      agents: openableAgents(agents),
+      openAgent: actions.openAgent && ((agent) => actions.openAgent?.(target, agent)),
       chooseFolder: onFolders,
       openSite: (port) => actions.openSite(target, port),
     }), current)

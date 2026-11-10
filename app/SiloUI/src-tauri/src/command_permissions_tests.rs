@@ -135,6 +135,7 @@ fn migration_and_checkpoint_commands_are_allowlisted_for_the_main_window() {
         "remote_checkpoint_action",
         "list_agents",
         "install_agent",
+        "ensure_ssh_name",
         "list_approvals",
         "get_approval",
         "decide_approval",
@@ -313,4 +314,6 @@ fn agents_are_listed_by_the_status_panel_and_installed_from_the_main_window_only
     assert!(granted("preview", "allow-install-agent"));
     assert!(granted("status", "allow-list-agents"));
     assert!(!granted("status", "allow-install-agent"));
+    assert!(granted("preview", "allow-ensure-ssh-name"));
+    assert!(!granted("status", "allow-ensure-ssh-name"));
 }

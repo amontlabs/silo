@@ -441,3 +441,30 @@ export const approvalJobSchema = z.object({
   error: optionalText, status: optionalText, message: optionalText,
 })
 export type ApprovalJob = z.infer<typeof approvalJobSchema>
+
+// Agents (`agents.list`, `agents.install`) and the SSH name of a computer (`guest.sshAlias.ensure`).
+export const agentIds = ["claude-code", "codex"] as const
+export type AgentId = (typeof agentIds)[number]
+const agentStates = ["ready", "missing", "outdated", "installing", "unknown"] as const
+export type AgentState = (typeof agentStates)[number]
+
+/** An agent this Silo does not know is dropped, so a newer engine never shows a row nothing can act on. */
+const knownAgent = z.object({
+  id: z.enum(agentIds), name: z.string().catch(""),
+  state: tolerantEnum(agentStates, "unknown"), version: optionalText, expectedVersion: z.string().catch(""),
+})
+export type AgentInfo = z.infer<typeof knownAgent>
+
+export const agentsListSchema = z.object({ agents: tolerantArray(knownAgent) })
+
+export const agentInstallStepSchema = tolerantEnum(["waiting", "downloading", "installing", "registering", "done"], "installing")
+export type AgentInstallStep = z.infer<typeof agentInstallStepSchema>
+export const agentInstallProgressSchema = z.object({
+  computerId: z.string(), agent: z.enum(agentIds), step: agentInstallStepSchema, detail: optionalText,
+})
+export type AgentInstallProgress = z.infer<typeof agentInstallProgressSchema>
+
+export const sshNameSchema = z.object({
+  alias: z.string().min(1), includeInstalled: z.boolean().catch(true), includeLine: z.string().catch(""),
+})
+export type SshName = z.infer<typeof sshNameSchema>

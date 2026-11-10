@@ -26,6 +26,7 @@ import type { ProductionContext } from "./production-context"
 import { createBackupControls } from "./production-backup"
 import { createDeviceServices } from "./production-services"
 import { createSetupQueue } from "./production-setup-queue"
+import * as agents from "./production-agents"
 import type { EventHandler, ListedDevice, ProductionBridge, ProductionSnapshot } from "./production-types"
 import { PUSH_STATUS_ATTEMPTS, PUSH_STATUS_INTERVAL_MS, PUSH_STATUS_MAX_INTERVAL_MS, REFRESH_GATE_TIMEOUT_MS, REMOTE_READ_WAIT_MS, RETURN_REFRESH_MIN_AGE_MS, canonicalKey, derivePorts, errorMessage, isUpdateInProgress, lastCancelledLifecycle, pushKey, reportedCancellation, shareStructure, unavailableBackup } from "./production-helpers"
 
@@ -1228,6 +1229,9 @@ export function createProductionSource(native: ProductionBridge = bridge) {
     decideApproval: answer => decideApproval(answer, native),
     watchApprovals: onChange => watchApprovals(onChange, native),
     readApprovalJob: jobId => readApprovalJob(jobId, native),
+    listAgents: computer => agents.listAgents(native, computer),
+    installAgent: (computer, agent, onProgress) => agents.installAgent(native, computer, view.source?.computers.find(item => computerTarget(item) === computer)?.configuration.id ?? computer, agent, onProgress),
+    ensureSshName: computer => agents.ensureSshName(native, computer),
     listAudit: options => listAudit(options, native),
     readDeviceResources: deviceId => readDeviceResources(deviceId, native),
     sshConnection: (computer, download, network) => {
@@ -1364,6 +1368,7 @@ export function createProductionSource(native: ProductionBridge = bridge) {
       catch (cause) { reportActionFailure(`open-desktop:${computer}`, "Could not open the Linux desktop", errorMessage(cause)) }
     },
     openTerminal: (name) => computerAction("open-terminal", name),
+    openAgent: (name, agent) => computerAction("open-agent", name, { agent }),
     openEditor: (name, path) => computerAction("open-editor", name, path ? { path } : undefined),
     connectGitHub: () => { void githubMutation("connect_github").catch(() => {}) },
     cancelGitHubConnection: () => { void githubMutation("cancel_github_connection").catch(() => {}) },
@@ -1396,6 +1401,8 @@ export function createProductionSource(native: ProductionBridge = bridge) {
     stopComputer: applicationActions.stopComputer,
     restartComputer: applicationActions.restartComputer,
     openTerminal: applicationActions.openTerminal,
+    openAgent: applicationActions.openAgent,
+    listAgents: applicationActions.listAgents,
     pushRepository: applicationActions.pushRepository,
     openSilo: (route?: StatusBarRoute) => { void native.invoke("open_main", { route: route ?? null }).catch((cause) => console.error("Silo main window:", errorMessage(cause))) },
     quit: (choice) => { void native.invoke("quit_app", { choice: choice ?? null }).catch((cause: unknown) => reportActionFailure("quit", "Could not quit Silo", errorMessage(cause))) },

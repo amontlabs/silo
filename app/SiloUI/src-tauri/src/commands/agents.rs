@@ -5,6 +5,7 @@ use crate::engine_client::{targets, Engine, EngineClient, EngineError};
 use serde_json::Value;
 use silo_api::methods::{
     agents::{AgentId, AgentsInstallParams},
+    guest::GuestSshAliasEnsureParams,
     requests,
 };
 
@@ -30,6 +31,23 @@ pub(crate) async fn install(
         .await
 }
 
+/// The SSH host name desktop apps on this device use to reach `computer`. It writes the
+/// computer's alias and adds it to the SSH configuration, as opening an editor does, and
+/// needs the computer to be running.
+pub(crate) async fn ssh_name(engine: &EngineClient, computer: &str) -> Result<Value, EngineError> {
+    let target = targets::resolve(engine, computer).await?;
+    engine
+        .call(requests::guest_ssh_alias_ensure(
+            GuestSshAliasEnsureParams {
+                computer_id: target.computer_id,
+                device_id: target.device_id,
+                install_include: None,
+                path: None,
+            },
+        ))
+        .await
+}
+
 #[tauri::command]
 pub(crate) async fn list_agents(engine: Engine<'_>, computer: String) -> Result<Value, String> {
     list(&engine, &computer).await.map_err(String::from)
@@ -44,6 +62,11 @@ pub(crate) async fn install_agent(
     install(&engine, &computer, agent)
         .await
         .map_err(String::from)
+}
+
+#[tauri::command]
+pub(crate) async fn ensure_ssh_name(engine: Engine<'_>, computer: String) -> Result<Value, String> {
+    ssh_name(&engine, &computer).await.map_err(String::from)
 }
 
 #[cfg(test)]
@@ -63,10 +86,32 @@ mod tests {
             ]}})),
             MethodName::AgentsList => Ok(json!({"agents": []})),
             MethodName::AgentsInstall => Ok(json!({"jobId": "job:1"})),
+            MethodName::GuestSshAliasEnsure => Ok(json!({"alias": "silo-x", "user": "silo"})),
             MethodName::OperationsJobGet => Ok(json!({"jobId": "job:1", "state": "finished",
                 "outcome": {"result": {"agents": []}}})),
             _ => Ok(Value::Null),
         }
+    }
+
+    #[test]
+    fn the_contract_fixtures_are_what_the_typed_results_read() {
+        use silo_api::methods::{agents as ag, guest::GuestSshAliasEnsureResult};
+        let fixtures: Value =
+            serde_json::from_str(include_str!("../../../src/test/contracts/agents.json")).unwrap();
+        fn read<T: serde::de::DeserializeOwned>(fixtures: &Value, key: &str) -> T {
+            serde_json::from_value(fixtures[key].clone()).unwrap()
+        }
+        let listed: ag::AgentsListResult = read(&fixtures, "list");
+        assert_eq!(listed.agents[1].state, ag::AgentState::Missing);
+        let installed: ag::AgentsInstallFinishedResult = read(&fixtures, "installed");
+        assert!(installed
+            .agents
+            .iter()
+            .all(|agent| agent.state == ag::AgentState::Ready));
+        let progress: ag::AgentInstallProgress = read(&fixtures, "progress");
+        assert_eq!(progress.step, ag::AgentInstallStep::Downloading);
+        let named: GuestSshAliasEnsureResult = read(&fixtures, "sshName");
+        assert!(named.include_installed && named.alias.starts_with("silo-"));
     }
 
     #[tokio::test]
@@ -100,6 +145,22 @@ mod tests {
         assert_eq!(
             fake.calls(MethodName::AgentsInstall),
             vec![json!({"computerId": "c9", "deviceId": "office", "agent": "claude-code"})]
+        );
+    }
+
+    #[tokio::test]
+    async fn the_ssh_name_is_the_engines_alias_for_the_computer() {
+        let fake = FakeEngine::start(|method, params| replies(method, params));
+        let (engine, _) = connected_client(&fake).await;
+        let named = ssh_name(&engine, "dev").await.unwrap();
+        assert_eq!(named["alias"], "silo-x");
+        ssh_name(&engine, "silo-remote:office:c9").await.unwrap();
+        assert_eq!(
+            fake.calls(MethodName::GuestSshAliasEnsure),
+            vec![
+                json!({"computerId": DEV}),
+                json!({"computerId": "c9", "deviceId": "office"})
+            ]
         );
     }
 

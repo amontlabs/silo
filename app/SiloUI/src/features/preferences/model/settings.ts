@@ -26,6 +26,8 @@ export const settingSchemas = {
   notifyCompletions: z.boolean(),
   /** Whether a computer's agent asking for your answer sends a system notification. */
   notifyApprovals: z.boolean(),
+  /** The agent the person uses, which later computers suggest; null until chosen, "none" for one they set up themselves. */
+  agent: z.enum(["claude-code", "codex", "none"]).nullable(),
   onboardingComplete: z.boolean(),
   alphaNoticeDismissed: z.boolean(),
   /** The SSH `Include` line whose notice was dismissed; a different needed line shows it again. */
@@ -59,6 +61,7 @@ export const defaultSettings: Settings = {
   notifyChanges: true,
   notifyCompletions: true,
   notifyApprovals: true,
+  agent: null,
   onboardingComplete: false,
   alphaNoticeDismissed: false,
   editorIncludeNoticeDismissed: null,

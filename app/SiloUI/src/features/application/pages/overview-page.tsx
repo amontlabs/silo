@@ -17,7 +17,7 @@ import { computerTarget } from "../model/connections"
 import { ConnectDeviceForm } from "../components/connections-settings"
 import { ComputerDetailPage, type ComputerDetailControls, type ComputerDetailEditing } from "./computer-detail-page"
 import type { ApplicationInitialRoute } from "@/features/application/model/use-application-navigation"
-import { Code, Download, GitFork, HardDrive, History, KeyRound, Monitor, RotateCw, Terminal } from "lucide-react"
+import { Bot, Code, Download, GitFork, HardDrive, History, KeyRound, Monitor, RotateCw, Terminal } from "lucide-react"
 import { useEffect, useEffectEvent, useMemo, useRef, useState, type ReactNode } from "react"
 import { dismissOperationToast, dismissComputerToasts, dismissComputerToastsById, showActionFailure } from "@/lib/operation-toast"
 
@@ -50,6 +50,8 @@ import { ComputerAction } from "@/features/computers/components/computer-list"
 import { SecretChangesLabel } from "@/features/computers/components/secret-changes-label"
 import { computerIconState, computerRowTone } from "@/features/computers/model/computer-presentation"
 import { computerCan } from "@/features/computers/model/computer-capabilities"
+import { openableAgents, openAgentLabel } from "@/features/agents/model/agents"
+import { useRunningComputerAgents } from "@/features/agents/model/use-computer-agents"
 import { deviceCapacityFrom } from "@/features/computers/model/computer-limits"
 
 export type { ComputerPageRequest }
@@ -106,6 +108,7 @@ export function OverviewPage({ active = true, readOnly = false, notifyOperations
   const source = useMemo(() => fullSource.computers.some(({ os }) => os === "macos") ? { ...fullSource, computers: fullSource.computers.filter(({ os }) => os !== "macos") } : fullSource, [fullSource])
   useLifecycleToasts(source, actions, { enabled: notifyOperations, readOnly })
   useSshAccessRefresh(readOnly ? undefined : actions.refreshSshAccess, active)
+  const { agentsOf } = useRunningComputerAgents(fullSource, readOnly ? undefined : actions.listAgents)
   const [connecting, setConnecting] = useState(false)
   // Computer detail selection: controlled by the app's navigation when the callbacks are
   // supplied, otherwise kept locally so the page still opens details on its own.
@@ -240,8 +243,17 @@ export function OverviewPage({ active = true, readOnly = false, notifyOperations
     const availability = computerAvailability(computer, source)
     const stale = computer.freshness === "stale"
     const local = !computer.device
+    // One entry per installed agent: it opens the person's terminal with the agent started.
+    const agentItems: MenuAction[] = actions.openAgent && computerCan({ runtime: configuration.runtime, os: computer.os, remote: !local }, "terminal")
+      ? openableAgents(agentsOf(computerTarget(computer))).map(({ id, name }) => ({
+        label: `Open ${name}`, icon: Bot, accessibleLabel: openAgentLabel(id, configuration.name),
+        disabled: readOnly || !availability.canOpen, tooltip: readOnly || availability.canOpen ? undefined : availability.reasons.open,
+        onSelect: () => actions.openAgent?.(computerTarget(computer), id),
+      }))
+      : []
     if (computer.macos) {
       const items: MenuAction[] = [
+        ...agentItems,
         { label: "Checkpoints", icon: History, accessibleLabel: `Checkpoints for ${configuration.name}`, onSelect: () => openComputer(configuration.id, "checkpoints") },
         ...(local && exportComputer && canCheckpointMacos(computer.macos) ? [{ label: "Export…", icon: Download, accessibleLabel: `Export ${configuration.name}`, disabled: readOnly || availability.busy || transferBusy, onSelect: () => exportComputer(configuration.name) }] : []),
       ]
@@ -250,6 +262,7 @@ export function OverviewPage({ active = true, readOnly = false, notifyOperations
     const restartCheck = guard.check(computer, "restart")
     const restartPrompt = restartCheck.kind === "confirm" && availability.canRestart && !readOnly ? restartCheck.prompt : undefined
     const items: MenuAction[] = [
+      ...agentItems,
       restartPrompt
         ? { label: "Restart…", icon: RotateCw, accessibleLabel: `Restart ${configuration.name}`, popover: "restart" }
         : { label: "Restart", icon: RotateCw, accessibleLabel: `Restart ${configuration.name}`, disabled: readOnly || !availability.canRestart, tooltip: readOnly || availability.canRestart ? undefined : availability.reasons.restart, onSelect: () => guard.request(computer, "restart") },

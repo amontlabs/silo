@@ -73,6 +73,7 @@
     "allow-read-checkpoint-usage",
     "allow-list-agents",
     "allow-install-agent",
+    "allow-ensure-ssh-name",
     "allow-list-approvals",
     "allow-get-approval",
     "allow-decide-approval",

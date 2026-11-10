@@ -205,6 +205,7 @@ fn main() {
             commands::runtime_checkpoints::read_checkpoint_usage,
             commands::agents::list_agents,
             commands::agents::install_agent,
+            commands::agents::ensure_ssh_name,
             commands::approvals::list_approvals,
             commands::approvals::get_approval,
             commands::approvals::decide_approval,
