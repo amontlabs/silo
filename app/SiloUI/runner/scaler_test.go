@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -717,5 +718,66 @@ func TestAJobIsNotTakenWhenTheRepositoryIsNoLongerPrivate(t *testing.T) {
 	}
 	if _, ok := h.silo.state("ci-silo-linux-00000001"); !ok {
 		t.Fatalf("no computer for the job: %v", h.status())
+	}
+}
+
+type dynamicChecker struct {
+	mu  sync.Mutex
+	err error
+}
+
+func (d *dynamicChecker) CheckPrivate(context.Context, Target, string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.err
+}
+
+func (d *dynamicChecker) set(err error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.err = err
+}
+
+func TestEventsDeliveredWhenPerJobPrivacyCheckFails(t *testing.T) {
+	cfg := testConfig(t)
+	checker := &dynamicChecker{}
+	deps := &Deps{Checker: checker, Logger: quiet()}
+	h := newHarness(t, harnessOptions{
+		checkJobAccess: func(ctx context.Context) error { return CheckAccess(ctx, cfg, deps) },
+	})
+	acquirer := &fakeAcquirer{}
+	h.scaler.SetAcquirer(acquirer)
+
+	// A first job is taken while the repository is private.
+	name := "ci-silo-linux-00000001"
+	h.scale(available(1))
+	if _, ok := h.silo.state(name); !ok {
+		t.Fatalf("no computer started for the first job: %v", h.status())
+	}
+	h.scale(started(1, name))
+
+	// The repository becomes public. A poll arrives bringing a new job offer together with
+	// the completed event of the first job.
+	public := errors.New("o/r is a public repository")
+	checker.set(public)
+
+	msg := &scaleset.RunnerScaleSetMessage{
+		JobAvailableMessages: []*scaleset.JobAvailable{{RunnerRequestID: 2}},
+		JobCompletedMessages: []*scaleset.JobCompleted{{RunnerRequestID: 1, RunnerName: name, Result: "succeeded"}},
+	}
+	err := h.scaler.Scale(context.Background(), msg)
+	if !errors.Is(err, public) {
+		t.Fatalf("Scale did not fail with the privacy check error: %v", err)
+	}
+
+	// The new job was not acquired (fail closed).
+	if len(acquirer.calls) != 1 || len(acquirer.calls[0]) != 1 || acquirer.calls[0][0] != 1 {
+		t.Fatalf("unexpected acquired jobs: %v", acquirer.calls)
+	}
+
+	// But the completed event was still delivered, so the finished job's computer was cleaned up.
+	h.fleet.Settle()
+	if _, ok := h.silo.state(name); ok {
+		t.Fatalf("a succeeded computer was not deleted: %v", h.status())
 	}
 }

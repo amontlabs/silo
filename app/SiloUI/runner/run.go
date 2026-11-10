@@ -207,9 +207,17 @@ func Run(ctx context.Context, cfg *Config, deps *Deps) error {
 	again := make(chan os.Signal, 1)
 	signal.Notify(again, os.Interrupt, terminateSignal)
 	defer signal.Stop(again)
-	await(logger, again, wg.Wait)
-	await(logger, again, fleet.Shutdown)
+	shutdown(logger, again, wg.Wait, fleet.Shutdown)
 	return nil
+}
+
+// shutdown waits for listeners to stop and the fleet to shut down. A second interrupt ends
+// the wait at once without waiting for the work in flight.
+func shutdown(logger *slog.Logger, signals <-chan os.Signal, waitListeners func(), shutdownFleet func()) {
+	await(logger, signals, func() {
+		waitListeners()
+		shutdownFleet()
+	})
 }
 
 // await runs wait and returns when it has come back. An interrupt on signals ends the wait early,
