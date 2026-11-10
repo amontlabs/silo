@@ -24,13 +24,13 @@ Plan: [PLAN.md](PLAN.md). Agent rules: [AGENT-BRIEF.md](AGENT-BRIEF.md).
 | --- | --- | --- | --- |
 | S1 | merged 2026-11-10 | `docs/s1-gateway-channel-spike` | [evidence](evidence/S1.md). Channel: yes, no patch. Allowlist: needs strict off, a `restore --net-strict` patch, and gateway init fields |
 | T1 | merged 2026-11-10 (`e000d684c`) | `t1-policy-audit` | silod 341, api 52, policy and audit 42 tests passed in the item. Only one review round ran (fallback model); the second hit a quota. Orchestrator read rules.rs, policy/mod.rs and the gate: no hole found; checkpoint ids are looked up inside the named computer's record. A Codex review is running |
-| T1 review | running since 2026-11-10 | | task id ends `00c2c502-46c1-461c-9dd6-3195b97b41f0` (Codex gpt-6.1-sol high, read-only) |
+| T1 review | running since 2026-11-10 | | Codex failed on its usage limit (back 2026-11-11 15:12). Restarted on Opus: task id ends `891f27a0-21f9-4a87-a67d-aeacf00337fd` |
 | T2 | running since 2026-11-10 | | task id ends `b36c91cf-09c3-4e62-9c5d-cbb05e3d8482` (Opus) |
 | T3 | running since 2026-11-10 | | task id ends `90e092a2-578c-42d5-8ade-b7fadfe8c9c0` (Sonnet) |
 | T4 | merged 2026-11-10 | `feat/keep-conflict-choices` | engine tests 273, api 53, silod checkpoints 56 passed in the item; two review rounds; the `silo-ui` crate was not built there |
 | T9 | merged 2026-11-10 | `feat/macos-computer-app-parity` | frontend only, no Rust change; 2914 frontend tests passed in the item; reviewed by the fallback model (gemini flash) only, one round; not run in the real app |
 | T11 | running since 2026-11-10 | | task id ends `8a11b496-7815-4ef3-830d-fe8aa13cc55a` (Sonnet) |
-| T12 | running since 2026-11-10 | | task id ends `67f835b1-ca2e-4f89-9c93-4ad720bb45be` (Sonnet) |
+| T12 | done, not merged yet | `feat/computer-agent-install` (`20f90cf27`) | no review ran in the item (quota). Review on Sonnet: task id ends `23526503-d93b-4f5f-b0cf-8d7d857a58ec`. At merge, classify `agents.list` (Tree) and `agents.install` (Made) in policy/rules.rs. macOS create with agents is refused; Linux create installs best effort |
 | S2 | merged 2026-11-10 | `docs/s2-linux-computer-rebuild` | [evidence](evidence/S2.md). Verdict: buildable now for Linux with host-side disk moves; macOS later. T15 waits for T6 (recipes in the engine) |
 | T7 | merged 2026-11-10 | `fix/macos-nat-boundary` | 530 macOS engine tests passed; unit tests only, no macOS computer run; one review round on the fallback model. Live steps are in the item's report, copied below |
 | T14 | running since 2026-11-10 | | task id ends `daee93c4-fbae-4cc0-8abb-9e9e902d2ca4` (Sonnet); holds the Dev engine for its live canary check |
@@ -80,8 +80,9 @@ These were not asked of the owner. Each is open to change.
   The integration worktree has APFS clones of the ignored `src-tauri/binaries` folder and the
   private GitHub build file.
 - **Reviewer quota:** on 2026-11-10 the `reviewer` model stopped with "Individual quota reached,
-  resets in 4h". Reviews of boundary items go to Codex directly through a delegated task
-  (provider `codex`, `gpt-6.1-sol`, reasoning high) until it is back.
+  resets in 4h", and Codex itself is out of usage until 2026-11-11 15:12. Until then reviews run
+  as delegated read-only tasks on Claude models with a fresh context (Opus for boundary items,
+  Sonnet otherwise). A Codex pass over the boundary (T1, T2, T5) is owed once Codex is back.
 - **T1, for the owner:** a token's `fork_secrets` no longer limits forks (a fork may get any
   secret its maker has). `device.facts` and `engine.state` are open to a computer; notifications,
   `events.subscribe` and `operations.list` are closed because they are not cut per computer, so a
