@@ -3043,8 +3043,9 @@ pub(crate) fn checkpoint_name(
 }
 
 /// Capture one or more Apple Virtualization computers and write their format-4
-/// component archive. Running sources are paused only while immutable copies are
-/// made; the computer operation slot is released before compression starts.
+/// component archive. The archive holds disks only (see `capture_archive_sources`). Running
+/// sources are paused only while immutable copies are made; the computer operation slot is
+/// released before compression starts.
 pub(crate) fn create_archive<R: crate::backup::MsbRunner>(
     app: &MacosContext,
     service: &crate::backup::BackupService<R>,
@@ -3056,6 +3057,47 @@ pub(crate) fn create_archive<R: crate::backup::MsbRunner>(
     token: Option<&str>,
 ) -> Result<crate::backup::BackupResult, String> {
     require_supported()?;
+    let (sources, captures) = capture_archive_sources(
+        app,
+        names,
+        checkpoint_id,
+        cancellation,
+        token,
+        &|app, id, cancel| Box::new(LiveMachine { app, id, cancel }),
+    )?;
+    let result = service
+        .create_macos_archive(destination, sources, fork_records, cancellation, token)
+        .map_err(|error| error.to_string());
+    drop(captures);
+    result
+}
+
+/// The machine of the running computer an export captures.
+type ExportMachine<'f> = &'f dyn for<'a> Fn(
+    &'a MacosContext,
+    &'a str,
+    &'a AtomicU8,
+) -> Box<dyn checkpoints::Machine + 'a>;
+
+/// Copies what an export writes of each computer into a capture folder of its own, once the
+/// Mac is known to support macOS computers, and describes it for the archive. That is disks
+/// only: a running source gets the capture a fork point takes (its disk written out, then
+/// copied while it is paused, with no memory saved), and a checkpoint that saved memory gives
+/// its disks alone. `machine` supplies the running computers' machines.
+fn capture_archive_sources(
+    app: &MacosContext,
+    names: &[String],
+    checkpoint_id: Option<&str>,
+    cancellation: &crate::backup::Cancellation,
+    token: Option<&str>,
+    machine: ExportMachine<'_>,
+) -> Result<
+    (
+        Vec<crate::backup::MacosArchiveSource>,
+        Vec<tempfile::TempDir>,
+    ),
+    String,
+> {
     ensure_loaded(app)?;
     if names.is_empty() || (checkpoint_id.is_some() && names.len() != 1) {
         return Err(if checkpoint_id.is_some() {
@@ -3085,14 +3127,12 @@ pub(crate) fn create_archive<R: crate::backup::MsbRunner>(
         let capture = export_capture_dir(&data, token)
             .map_err(|error| store::io_error("prepare the macOS export", &error))?;
         let mut source_kind = crate::backup::MacosArchiveSourceKind::WholeComputer;
-        let mut saved_memory = false;
         let mut source_cpus = held.record.cpus;
         let mut source_memory_gib = held.record.memory_gib;
         let mut source_disk_gib = held.record.disk_gib;
         let mut source_setup_fingerprint = held.record.setup_version.clone();
         let mut source_computer_use_fingerprint = held.record.computer_use_version.clone();
         let mut source_guest = held.record.restore_image.clone();
-        let mut source_host_build = checkpoints::host_build();
 
         if let Some(checkpoint_id) = checkpoint_id {
             let meta = checkpoints::find(&layout, checkpoint_id)?;
@@ -3107,7 +3147,6 @@ pub(crate) fn create_archive<R: crate::backup::MsbRunner>(
             })?;
             source_setup_fingerprint = meta.setup_fingerprint.clone();
             source_computer_use_fingerprint = meta.computer_use_version.clone();
-            source_host_build = meta.host_build.clone();
             source_guest = meta.macos_version.as_deref().and_then(parse_macos_version);
             if source_guest.is_none() {
                 return Err(
@@ -3115,14 +3154,12 @@ pub(crate) fn create_archive<R: crate::backup::MsbRunner>(
                         .into(),
                 );
             }
-            saved_memory = meta.kind == checkpoints::Kind::Memory;
+            // The checkpoint's disks only: memory it saved stays in its folder, and the file
+            // names the checkpoint by what it carries of it.
             source_kind = crate::backup::MacosArchiveSourceKind::Checkpoint {
                 id: meta.id.clone(),
                 name: meta.name,
-                kind: match meta.kind {
-                    checkpoints::Kind::Disk => crate::backup::MacosCheckpointKind::Disk,
-                    checkpoints::Kind::Memory => crate::backup::MacosCheckpointKind::Memory,
-                },
+                kind: crate::backup::MacosCheckpointKind::Disk,
             };
             clone_archive_component(
                 &checkpoints::dir(&layout, checkpoint_id).join("disk.img"),
@@ -3140,25 +3177,8 @@ pub(crate) fn create_archive<R: crate::backup::MsbRunner>(
                 &layout.machine_identifier(),
                 &capture.path().join("machine-identifier.bin"),
             )?;
-            if saved_memory {
-                let expected = meta.size_bytes.ok_or_else(|| {
-                    "This memory checkpoint has no saved size and cannot be exported.".to_string()
-                })?;
-                let state = checkpoints::state_file(&layout, checkpoint_id);
-                if std::fs::metadata(&state)
-                    .map(|metadata| metadata.len())
-                    .ok()
-                    != Some(expected)
-                {
-                    return Err(
-                        "This checkpoint's saved memory is incomplete and cannot be exported."
-                            .into(),
-                    );
-                }
-                clone_archive_component(&state, &capture.path().join("state.vzvmsave"))?;
-            }
         } else {
-            let copy = || -> Result<(), String> {
+            let mut copy = || -> Result<(), String> {
                 if cancellation.cancelled() {
                     return Err("The operation was cancelled.".into());
                 }
@@ -3177,19 +3197,13 @@ pub(crate) fn create_archive<R: crate::backup::MsbRunner>(
                 )
             };
             if held.state == State::Running {
-                engine::memory_support(app, &record.id)?;
-                let _space = reserve_for_memory(&data, &held.record, true)?;
-                let machine = LiveMachine {
-                    app,
-                    id: &record.id,
-                    cancel: &held.cancel,
-                };
-                checkpoints::Machine::save_running(
-                    &machine,
-                    &capture.path().join("state.vzvmsave"),
-                    &mut || copy(),
-                )?;
-                saved_memory = true;
+                // What a fork point does: no memory is saved, so what the guest still holds
+                // in memory has to reach the disk before the paused copy.
+                let machine = machine(app, &record.id, &held.cancel);
+                machine.stage("Writing the disk out");
+                machine.flush_disk()?;
+                machine.stage("Pausing the computer and copying its disk");
+                machine.pause_for_copy(&mut copy)?;
             } else {
                 copy()?;
             }
@@ -3207,30 +3221,6 @@ pub(crate) fn create_archive<R: crate::backup::MsbRunner>(
             "This computer has no Computer Use fingerprint. Use Retry setup before exporting it.".to_string()
         })?;
         let hardware_model_digest = digest_file(&capture.path().join("hardware-model.bin"))?;
-        let memory = if saved_memory {
-            if source_host_build.is_empty() {
-                return Err(
-                    "This memory checkpoint has no host build and cannot be exported.".into(),
-                );
-            }
-            let state = capture.path().join("state.vzvmsave");
-            let size = std::fs::metadata(&state)
-                .map_err(|error| store::io_error("inspect saved memory", &error))?
-                .len();
-            crate::backup::MacosArchiveMemory::Saved {
-                host_build: source_host_build.clone(),
-                configuration_digest: crate::backup::memory_configuration_digest(
-                    source_cpus,
-                    source_memory_gib,
-                    source_disk_gib,
-                    &hardware_model_digest,
-                )?,
-                size,
-                sha256: digest_file(&state)?,
-            }
-        } else {
-            crate::backup::MacosArchiveMemory::None
-        };
         let config = crate::backup::MacosArchiveConfig {
             payload_version: 1,
             architecture: "aarch64".into(),
@@ -3246,9 +3236,9 @@ pub(crate) fn create_archive<R: crate::backup::MsbRunner>(
             setup_fingerprint,
             computer_use_fingerprint,
             source: source_kind,
-            memory,
+            memory: crate::backup::MacosArchiveMemory::None,
         };
-        let mut components = vec![
+        let components = [
             (crate::backup::MacosComponentRole::Disk, "disk.img"),
             (
                 crate::backup::MacosComponentRole::Auxiliary,
@@ -3263,9 +3253,6 @@ pub(crate) fn create_archive<R: crate::backup::MsbRunner>(
                 "machine-identifier.bin",
             ),
         ];
-        if saved_memory {
-            components.push((crate::backup::MacosComponentRole::Memory, "state.vzvmsave"));
-        }
         sources.push(crate::backup::MacosArchiveSource {
             name: name.clone(),
             runtime_config: config,
@@ -3282,11 +3269,7 @@ pub(crate) fn create_archive<R: crate::backup::MsbRunner>(
         captures.push(capture);
         drop(held);
     }
-    let result = service
-        .create_macos_archive(destination, sources, fork_records, cancellation, token)
-        .map_err(|error| error.to_string());
-    drop(captures);
-    result
+    Ok((sources, captures))
 }
 
 /// Capture folders carry the saved operation's id, so a relaunch can find and remove what an
@@ -3314,9 +3297,9 @@ fn export_capture_prefix(token: &str) -> Result<String, String> {
     Ok(format!("{EXPORT_CAPTURE_PREFIX}{token}-"))
 }
 
-/// Removes the capture folders an export with this saved operation id left behind: disk
-/// clones and saved memory it copied before the process ended. Other operations' folders
-/// stay.
+/// Removes the capture folders an export with this saved operation id left behind: the disk
+/// clones it made before the process ended (and the saved memory an older Silo copied there).
+/// Other operations' folders stay.
 pub(crate) fn remove_export_captures(data: &std::path::Path, token: &str) -> Result<(), String> {
     let prefix = export_capture_prefix(token)?;
     let entries = match std::fs::read_dir(store::root(data)) {
@@ -9199,6 +9182,273 @@ mod tests {
             checkpoints::list(&Layout::new(directory.path(), &source_id))
                 .iter()
                 .all(|meta| meta.policy_kind != checkpoints::PolicyKind::ForkPoint)
+        );
+    }
+
+    /// A set-up computer with a checkpoint that saved memory, as an export finds them.
+    fn export_fixture(directory: &std::path::Path) -> (MacosContext, String, String) {
+        reopen_after_quit();
+        reopen_after_update();
+        let context = Arc::new(JobTestContext::new(directory.to_path_buf()));
+        let app = macos_context(context);
+        {
+            let mut computers = registry();
+            computers.entries.clear();
+            computers.loaded = false;
+            computers.template = None;
+            computers.min_disk_gib = store::MIN_DISK_GIB;
+        }
+        let (mut source, checkpoint_id) = checkpoint_fixture(directory, true);
+        let layout = Layout::new(directory, &source.id);
+        source.restore_image = Some(store::RestoreImageInfo {
+            version: "15.5".into(),
+            build: "24F74".into(),
+        });
+        source.setup_version = Some("0123456789abcdef".into());
+        source.computer_use_version = Some("fedcba9876543210".into());
+        store::save(&layout, &source).unwrap();
+        std::fs::write(layout.machine_identifier(), b"source machine").unwrap();
+
+        let mut meta = checkpoints::find(&layout, &checkpoint_id).unwrap();
+        meta.kind = checkpoints::Kind::Memory;
+        meta.macos_version = source.os_version();
+        meta.host_build = "24F74".into();
+        meta.size_bytes = Some(b"saved memory".len() as u64);
+        meta.setup_fingerprint = source.setup_version.clone();
+        meta.computer_use_version = source.computer_use_version.clone();
+        std::fs::write(
+            checkpoints::dir(&layout, &checkpoint_id).join("checkpoint.json"),
+            serde_json::to_vec(&meta).unwrap(),
+        )
+        .unwrap();
+        std::fs::write(
+            checkpoints::state_file(&layout, &checkpoint_id),
+            b"saved memory",
+        )
+        .unwrap();
+        ensure_loaded(&app).unwrap();
+        (app, source.id, checkpoint_id)
+    }
+
+    /// The files of a capture folder, and that the archive is given exactly those.
+    fn captured_files(source: &crate::backup::MacosArchiveSource) -> Vec<String> {
+        let folder = source.components[0].path.parent().unwrap();
+        let mut files = std::fs::read_dir(folder)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+            .collect::<Vec<_>>();
+        files.sort();
+        let mut given = source
+            .components
+            .iter()
+            .map(|component| {
+                assert_eq!(component.path.parent().unwrap(), folder);
+                component
+                    .path
+                    .file_name()
+                    .unwrap()
+                    .to_str()
+                    .unwrap()
+                    .to_owned()
+            })
+            .collect::<Vec<_>>();
+        given.sort();
+        assert_eq!(files, given);
+        files
+    }
+
+    fn assert_disks_only(source: &crate::backup::MacosArchiveSource) {
+        assert_eq!(
+            source.runtime_config.memory,
+            crate::backup::MacosArchiveMemory::None
+        );
+        assert_eq!(
+            source
+                .components
+                .iter()
+                .map(|component| component.role)
+                .collect::<Vec<_>>(),
+            [
+                crate::backup::MacosComponentRole::Disk,
+                crate::backup::MacosComponentRole::Auxiliary,
+                crate::backup::MacosComponentRole::HardwareModel,
+                crate::backup::MacosComponentRole::MachineIdentifier,
+            ]
+        );
+        assert_eq!(
+            captured_files(source),
+            [
+                "auxiliary-storage.img",
+                "disk.img",
+                "hardware-model.bin",
+                "machine-identifier.bin",
+            ]
+        );
+    }
+
+    /// The capture folders of the exports under way.
+    fn export_captures(data: &std::path::Path) -> Vec<std::path::PathBuf> {
+        std::fs::read_dir(store::root(data))
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.starts_with(EXPORT_CAPTURE_PREFIX))
+            })
+            .collect()
+    }
+
+    /// Stands in for the running machine of an exported computer. An export that asks for
+    /// the machine's memory fails the test.
+    struct ExportedMachine {
+        data: std::path::PathBuf,
+        calls: Arc<Mutex<Vec<&'static str>>>,
+        fail_flush: bool,
+    }
+
+    impl checkpoints::Machine for ExportedMachine {
+        fn memory_support(&self) -> Result<(), String> {
+            panic!("an export asked whether memory can be saved")
+        }
+        fn flush_disk(&self) -> Result<(), String> {
+            self.calls.lock().unwrap().push("flush");
+            if self.fail_flush {
+                Err(checkpoints::FLUSH_FAILED.into())
+            } else {
+                Ok(())
+            }
+        }
+        fn save_running(
+            &self,
+            _state: &std::path::Path,
+            _copy: &mut dyn FnMut() -> Result<(), String>,
+        ) -> Result<(), String> {
+            panic!("an export saved the machine's memory")
+        }
+        fn force_stop(&self) -> Result<(), String> {
+            panic!("an export stopped the computer")
+        }
+        fn pause_for_copy(
+            &self,
+            copy: &mut dyn FnMut() -> Result<(), String>,
+        ) -> Result<(), String> {
+            self.calls.lock().unwrap().push("pause");
+            let copied = copy();
+            // The disks are copied while the machine is paused, and nothing else is.
+            let captures = export_captures(&self.data);
+            assert_eq!(captures.len(), 1);
+            assert!(captures[0].join("disk.img").exists());
+            assert!(!captures[0].join(checkpoints::STATE).exists());
+            self.calls.lock().unwrap().push("resume");
+            copied
+        }
+        fn stage(&self, _stage: &str) {}
+        fn log(&self, _line: &str) {}
+        fn cancelled(&self) -> bool {
+            false
+        }
+    }
+
+    #[test]
+    #[cfg_attr(
+        not(all(target_os = "macos", target_arch = "aarch64")),
+        ignore = "macOS computers are loaded only on an Apple silicon host"
+    )]
+    fn an_export_of_a_running_computer_holds_its_disks_and_no_memory() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let (app, source_id, _) = export_fixture(directory.path());
+        registry().entry(&source_id).unwrap().state = State::Running;
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let capture = |fail_flush: bool| {
+            capture_archive_sources(
+                &app,
+                &["source-mac".into()],
+                None,
+                &Default::default(),
+                None,
+                &|_, _, _| {
+                    Box::new(ExportedMachine {
+                        data: directory.path().to_path_buf(),
+                        calls: calls.clone(),
+                        fail_flush,
+                    })
+                },
+            )
+        };
+
+        let (sources, captures) = capture(false).unwrap();
+        assert_eq!(*calls.lock().unwrap(), ["flush", "pause", "resume"]);
+        assert_eq!(sources.len(), 1);
+        assert_disks_only(&sources[0]);
+        assert_eq!(
+            sources[0].runtime_config.source,
+            crate::backup::MacosArchiveSourceKind::WholeComputer
+        );
+        assert_eq!(
+            std::fs::read(&sources[0].components[0].path).unwrap(),
+            b"source disk"
+        );
+        assert_eq!(registry().entry(&source_id).unwrap().state, State::Running);
+        drop(captures);
+        assert!(export_captures(directory.path()).is_empty());
+
+        // A disk that could not be written out is not copied: the machine is never paused.
+        calls.lock().unwrap().clear();
+        assert_eq!(capture(true).unwrap_err(), checkpoints::FLUSH_FAILED);
+        assert_eq!(*calls.lock().unwrap(), ["flush"]);
+        assert!(export_captures(directory.path()).is_empty());
+    }
+
+    #[test]
+    #[cfg_attr(
+        not(all(target_os = "macos", target_arch = "aarch64")),
+        ignore = "macOS computers are loaded only on an Apple silicon host"
+    )]
+    fn an_export_of_a_memory_checkpoint_holds_its_disks_and_no_memory() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let (app, source_id, checkpoint_id) = export_fixture(directory.path());
+        let layout = Layout::new(directory.path(), &source_id);
+        assert_eq!(
+            checkpoints::find(&layout, &checkpoint_id).unwrap().kind,
+            checkpoints::Kind::Memory
+        );
+
+        // Whether the computer is stopped or running, its machine is left alone.
+        for state in [State::Stopped, State::Running] {
+            registry().entry(&source_id).unwrap().state = state;
+            let (sources, captures) = capture_archive_sources(
+                &app,
+                &["source-mac".into()],
+                Some(&checkpoint_id),
+                &Default::default(),
+                None,
+                &|_, _, _| panic!("a checkpoint export reached the machine"),
+            )
+            .unwrap();
+            assert_eq!(sources.len(), 1);
+            assert_disks_only(&sources[0]);
+            assert_eq!(
+                sources[0].runtime_config.source,
+                crate::backup::MacosArchiveSourceKind::Checkpoint {
+                    id: checkpoint_id.clone(),
+                    name: "Before fork".into(),
+                    kind: crate::backup::MacosCheckpointKind::Disk,
+                }
+            );
+            assert_eq!(
+                std::fs::read(&sources[0].components[0].path).unwrap(),
+                b"checkpoint disk"
+            );
+            drop(captures);
+            assert!(export_captures(directory.path()).is_empty());
+        }
+        // The checkpoint keeps its saved memory; only the export leaves it out.
+        assert_eq!(
+            std::fs::read(checkpoints::state_file(&layout, &checkpoint_id)).unwrap(),
+            b"saved memory"
         );
     }
 

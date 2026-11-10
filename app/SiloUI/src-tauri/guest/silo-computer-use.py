@@ -101,7 +101,8 @@ LAUNCHER_TEXT = r'''#!/usr/bin/python3
 Agents start MCP servers from SSH shells and terminals that may predate the desktop session,
 and the session's D-Bus address changes with every desktop start. The desktop session writes its
 environment to a file when it starts; this launcher reads that file when the server starts, turns
-off Cua Driver's telemetry and update check, and runs `cua-driver mcp`.
+off Cua Driver's telemetry and update check, and runs `cua-driver mcp`. A desktop service
+installed by an earlier Silo writes no file; its session is read from its `xfce4-session` process.
 Installed by the guest image and refreshed by silo-computer-use.
 """
 import os
@@ -113,7 +114,35 @@ KEYS = ('DISPLAY', 'DBUS_SESSION_BUS_ADDRESS', 'XDG_RUNTIME_DIR', 'XAUTHORITY')
 SESSION_FILE = '/run/silo-desktop/user/session.env'
 
 
-def session_env(path=SESSION_FILE, uid=None):
+def process_env(proc, uid):
+    """The environment of this account's `xfce4-session` process, or nothing."""
+    try:
+        pids = sorted((n for n in os.listdir(proc) if n.isdigit()), key=int)
+    except OSError:
+        pids = []
+    for pid in pids:
+        try:
+            base = os.path.join(proc, pid)
+            with open(os.path.join(base, 'comm')) as handle:
+                if handle.read().strip() != 'xfce4-session':
+                    continue
+            if os.stat(base).st_uid != uid:
+                continue
+            with open(os.path.join(base, 'environ'), 'rb') as handle:
+                raw = handle.read()
+        except OSError:
+            continue
+        found = {}
+        for item in raw.split(b'\0'):
+            key, _, value = item.decode('utf-8', 'replace').partition('=')
+            if key in KEYS and value:
+                found[key] = value
+        if 'DBUS_SESSION_BUS_ADDRESS' in found:
+            return found
+    return {}
+
+
+def session_env(path=SESSION_FILE, uid=None, proc='/proc'):
     uid = os.getuid() if uid is None else uid
     found = {}
     try:
@@ -131,6 +160,8 @@ def session_env(path=SESSION_FILE, uid=None):
             os.close(fd)
     except OSError:
         pass
+    if 'DBUS_SESSION_BUS_ADDRESS' not in found:
+        found = process_env(proc, uid) or found
     runtime = found.get('XDG_RUNTIME_DIR') or (
         '/run/silo-desktop/user' if os.path.isdir('/run/silo-desktop/user') else f'/run/user/{uid}')
     found.setdefault('DISPLAY', ':1')
@@ -577,22 +608,59 @@ def read_session_file(path, uid):
         os.close(fd)
 
 
-def session_env(strict=False, directory=SESSION_RUNTIME_DIR):
+SESSION_KEYS = ('DISPLAY', 'DBUS_SESSION_BUS_ADDRESS', 'XDG_RUNTIME_DIR', 'XAUTHORITY')
+SESSION_PROCESS = 'xfce4-session'
+
+
+def session_process_env(proc, uid):
+    """The session's environment, read from the working account's `xfce4-session` process. A
+    desktop service installed by an earlier Silo writes no session file, and a computer keeps
+    the service it was made with until its desktop is updated."""
+    try:
+        entries = sorted((p for p in proc.iterdir() if p.name.isdigit()), key=lambda p: int(p.name))
+    except OSError:
+        entries = []
+    for entry in entries:
+        try:
+            if (entry / 'comm').read_text().strip() != SESSION_PROCESS or entry.stat().st_uid != uid:
+                continue
+            raw = (entry / 'environ').read_bytes()
+        except OSError:
+            continue
+        found = {}
+        for item in raw.split(b'\0'):
+            key, _, value = item.decode('utf-8', 'replace').partition('=')
+            if key in SESSION_KEYS and value:
+                found[key] = value
+        if 'DBUS_SESSION_BUS_ADDRESS' in found:
+            return found
+    return {}
+
+
+def session_env(strict=False, directory=SESSION_RUNTIME_DIR, proc=Path('/proc')):
     """The environment of the desktop session, read from the file the session wrote when it
     started: DISPLAY, DBUS_SESSION_BUS_ADDRESS, XDG_RUNTIME_DIR (and XAUTHORITY when the session
-    has one).
+    has one). Without the file, a session an earlier desktop service started is read from its
+    process (`session_process_env`).
 
     An MCP server an agent starts from an SSH shell has none of these. The bus address is
-    chosen by `dbus-run-session` and changes with every desktop start. Without the file (the
+    chosen by `dbus-run-session` and changes with every desktop start. Without a session (the
     desktop is off) the bus address is absent; `strict` then raises `session-unavailable`."""
     found = {}
     try:
-        for line in read_session_file(Path(directory) / 'session.env', pwd.getpwnam(USER).pw_uid).splitlines():
-            key, _, value = line.partition('=')
-            if key in ('DISPLAY', 'DBUS_SESSION_BUS_ADDRESS', 'XDG_RUNTIME_DIR', 'XAUTHORITY') and value:
-                found[key] = value
-    except (OSError, KeyError):
+        uid = pwd.getpwnam(USER).pw_uid
+    except KeyError:
+        uid = None
+    try:
+        if uid is not None:
+            for line in read_session_file(Path(directory) / 'session.env', uid).splitlines():
+                key, _, value = line.partition('=')
+                if key in SESSION_KEYS and value:
+                    found[key] = value
+    except OSError:
         pass
+    if 'DBUS_SESSION_BUS_ADDRESS' not in found and uid is not None:
+        found = session_process_env(proc, uid) or found
     if 'DBUS_SESSION_BUS_ADDRESS' not in found and strict:
         raise Failure('session-unavailable', 'no desktop session')
     environment = {'DISPLAY': found.get('DISPLAY', SESSION_DISPLAY),

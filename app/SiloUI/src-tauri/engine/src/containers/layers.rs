@@ -11,7 +11,9 @@
 //!   frozen (a reflink copy where the file system has them). The computer keeps its layer.
 //! - **Fork.** A new computer whose chain is the checkpoint's, with a writable layer of its own and
 //!   its own record of those ids, so deleting the parent (or the checkpoint) keeps them.
-//! - **Collection.** A layer no computer record and no checkpoint names is removed.
+//! - **Collection.** A layer no computer record and no checkpoint names is removed, unless it is
+//!   being made ([`reserve`]). Nothing is removed when a record, a checkpoint or one of their
+//!   folders could not be read.
 //! - **Flatten.** A chain longer than [`MAX_CHAIN`] has its oldest layers folded into one layer
 //!   (`silo-ctr merge`) when the computer is not running.
 //!
@@ -23,6 +25,7 @@ use super::layout::{ComputerRecord, Layout};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashSet;
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{Duration, SystemTime};
@@ -45,6 +48,37 @@ pub fn lock() -> std::sync::MutexGuard<'static, ()> {
     STORE
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// The layers being filled before a record or a checkpoint names them.
+static RESERVED: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+fn reserved() -> std::sync::MutexGuard<'static, Vec<String>> {
+    RESERVED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// A layer that collection leaves alone until this is dropped.
+pub struct Reserved(String);
+
+impl Drop for Reserved {
+    fn drop(&mut self) {
+        let mut ids = reserved();
+        if let Some(index) = ids.iter().position(|id| *id == self.0) {
+            ids.swap_remove(index);
+        }
+    }
+}
+
+/// Keeps the layer `id` from collection while it is filled outside the store's lock (the copy of
+/// a running computer's layer, a fold). Its age does not protect it: a copy takes the times of
+/// its source, so a layer written a moment ago can look older than the grace period. Reserve
+/// before the layer is made and drop the reservation after the record or checkpoint that names
+/// it is saved.
+pub fn reserve(id: &str) -> Reserved {
+    reserved().push(id.to_owned());
+    Reserved(id.to_owned())
 }
 
 pub fn new_id() -> String {
@@ -172,32 +206,22 @@ impl Store {
         }
     }
 
-    /// Every checkpoint (of `group` only, when given). An unreadable file fails the listing: a
-    /// partial answer could be taken for absence.
+    /// Every checkpoint (of `group` only, when given). An unreadable file or folder fails the
+    /// listing: a partial answer could be taken for absence.
     pub fn list(&self, group: Option<&str>) -> Result<Vec<Snapshot>, String> {
+        let unreadable = |_| "A checkpoint could not be read.".to_owned();
         let mut found = Vec::new();
         let groups: Vec<PathBuf> = match group {
             Some(group) if valid_name(group) => vec![self.root.join(group)],
             Some(_) => return Ok(found),
-            None => std::fs::read_dir(&self.root)
-                .into_iter()
-                .flatten()
-                .flatten()
-                .map(|entry| entry.path())
-                .filter(|path| path.is_dir())
-                .collect(),
+            None => entries(&self.root).map_err(unreadable)?,
         };
         for folder in groups {
-            let Ok(entries) = std::fs::read_dir(&folder) else {
-                continue;
-            };
-            for entry in entries.flatten() {
-                let path = entry.path();
+            for path in entries(&folder).map_err(unreadable)? {
                 if path.extension().and_then(|e| e.to_str()) != Some("json") {
                     continue;
                 }
-                let text = std::fs::read_to_string(&path)
-                    .map_err(|_| "A checkpoint could not be read.".to_owned())?;
+                let text = std::fs::read_to_string(&path).map_err(unreadable)?;
                 found.push(
                     serde_json::from_str(&text)
                         .map_err(|_| "A checkpoint is damaged.".to_owned())?,
@@ -206,6 +230,18 @@ impl Store {
         }
         found.sort_by(|a: &Snapshot, b| (a.created_ms, &a.name).cmp(&(b.created_ms, &b.name)));
         Ok(found)
+    }
+}
+
+/// What the folder `dir` holds; nothing when there is no such folder (or it is a file). Any other
+/// failure is an error: a folder that could not be read is not an empty one.
+fn entries(dir: &Path) -> std::io::Result<Vec<PathBuf>> {
+    match std::fs::read_dir(dir) {
+        Ok(entries) => entries.map(|entry| entry.map(|entry| entry.path())).collect(),
+        Err(error) if matches!(error.kind(), ErrorKind::NotFound | ErrorKind::NotADirectory) => {
+            Ok(Vec::new())
+        }
+        Err(error) => Err(error),
     }
 }
 
@@ -256,12 +292,27 @@ pub fn flattened(chain: &[String], count: usize, merged: &str) -> Vec<String> {
     next
 }
 
-/// The ids the computers' records and the checkpoints name. Fails when any of them cannot be read:
-/// a layer is only collected when everything that might name it was read.
+/// The ids the computers' records and the checkpoints name. Fails when any of them, or a folder
+/// that holds them, cannot be read: a layer is only collected when everything that might name it
+/// was read.
 pub fn referenced(layout: &Layout) -> Result<HashSet<String>, String> {
+    let unreadable = |_| "The container computers could not be read.".to_owned();
     let mut ids = HashSet::new();
-    for name in layout.names() {
-        let record = layout.computer(&name).read_record()?;
+    for folder in entries(&layout.computers()).map_err(unreadable)? {
+        // A folder without a record is a computer being made or removed.
+        match std::fs::symlink_metadata(folder.join("computer.json")) {
+            Ok(_) => {}
+            Err(error)
+                if matches!(error.kind(), ErrorKind::NotFound | ErrorKind::NotADirectory) =>
+            {
+                continue
+            }
+            Err(error) => return Err(unreadable(error)),
+        }
+        let name = folder.file_name().and_then(|name| name.to_str());
+        let record = layout
+            .computer(name.ok_or("A container computer's name could not be read.")?)
+            .read_record()?;
         ids.extend(record.layers);
         if !record.upper.is_empty() {
             ids.insert(record.upper);
@@ -320,14 +371,18 @@ pub fn present(layout: &Layout) -> Vec<(String, Duration)> {
         .collect()
 }
 
-/// The layer directories to remove now: everything in the store that nothing names and that is
-/// old enough. Empty when a record or checkpoint could not be read.
+/// The layer directories to remove now: everything in the store that nothing names, that is old
+/// enough and that is not being made. Empty when a record or checkpoint could not be read.
 pub fn collectible(layout: &Layout) -> Vec<PathBuf> {
     let Ok(named) = referenced(layout) else {
         return Vec::new();
     };
-    unreferenced(&present(layout), &named)
+    let present = present(layout);
+    // Read after the store was listed: a layer is reserved before it is made.
+    let making = reserved().clone();
+    unreferenced(&present, &named)
         .into_iter()
+        .filter(|name| !making.contains(name))
         .map(|name| layout.layers().join(name))
         .collect()
 }
@@ -532,6 +587,84 @@ mod tests {
         // A record that cannot be read could name anything: nothing is collected.
         std::fs::write(dir.record_path(), "{").unwrap();
         assert!(collectible(&layout).is_empty());
+    }
+
+    fn old_layer(layout: &Layout, name: &str) {
+        std::fs::create_dir_all(layout.layer(name)).unwrap();
+        std::fs::File::open(layout.layer(name))
+            .unwrap()
+            .set_modified(SystemTime::now() - GRACE - Duration::from_secs(3600))
+            .unwrap();
+    }
+
+    #[test]
+    fn a_layer_being_made_is_not_collected_however_old_its_files_look() {
+        // A copy takes its source's modification time (`cp -a`, `silo-ctr merge`), and it is in
+        // the store before a record or a checkpoint names it.
+        let home = tempfile::tempdir().unwrap();
+        let layout = Layout::new(home.path());
+        let reservation = reserve("copy");
+        old_layer(&layout, "copy");
+        old_layer(&layout, "orphan");
+        assert_eq!(collectible(&layout), [layout.layer("orphan")]);
+        // Nothing named it in the end (the copy failed): it goes like any other.
+        drop(reservation);
+        assert_eq!(collectible(&layout).len(), 2);
+    }
+
+    /// Makes `folder` unreadable for the length of `check`. False when this account reads it
+    /// anyway (root), so there is nothing to check.
+    fn while_unreadable(folder: &Path, check: impl FnOnce()) -> bool {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = |mode| std::fs::set_permissions(folder, std::fs::Permissions::from_mode(mode));
+        mode(0o000).unwrap();
+        let unreadable = std::fs::read_dir(folder).is_err();
+        if unreadable {
+            check();
+        }
+        mode(0o700).unwrap();
+        unreadable
+    }
+
+    #[test]
+    fn a_folder_of_records_or_checkpoints_that_cannot_be_read_stops_the_scan() {
+        let home = tempfile::tempdir().unwrap();
+        let layout = Layout::new(home.path());
+        let dir = layout.computer("box");
+        std::fs::create_dir_all(dir.path()).unwrap();
+        let mut box_record = record();
+        box_record.layers = Vec::new();
+        box_record.upper = "live".into();
+        dir.write_record(&box_record).unwrap();
+        let store = Store::new(&layout);
+        store
+            .write(&Snapshot::new("box", "c1", ids(&["held"]), box_record))
+            .unwrap();
+        for name in ["live", "held", "orphan"] {
+            old_layer(&layout, name);
+        }
+        assert_eq!(collectible(&layout), [layout.layer("orphan")]);
+        // What cannot be listed could name anything: it is not taken for empty.
+        for folder in [
+            layout.computers(),
+            layout.snapshots(),
+            layout.snapshots().join("box"),
+        ] {
+            while_unreadable(&folder, || {
+                assert!(referenced(&layout).is_err(), "{}", folder.display());
+                assert!(collectible(&layout).is_empty(), "{}", folder.display());
+            });
+        }
+        while_unreadable(&layout.snapshots().join("box"), || {
+            assert!(store.list(Some("box")).is_err());
+            assert!(store.list(None).is_err());
+        });
+        // A folder with no record (a computer being made or removed) and a stray file name nothing.
+        std::fs::create_dir_all(layout.computers().join("half")).unwrap();
+        std::fs::write(layout.computers().join("stray"), "").unwrap();
+        std::fs::write(layout.snapshots().join("stray"), "").unwrap();
+        assert_eq!(collectible(&layout), [layout.layer("orphan")]);
+        assert_eq!(store.list(None).unwrap().len(), 1);
     }
 
     #[test]

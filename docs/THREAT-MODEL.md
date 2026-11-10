@@ -351,6 +351,22 @@ one `.silo-backup` file, and `silo import` reads one. What the file holds, and d
   too: "Silo could not check <name> for logins (<reason>). Share anyway?", in the CLI and in the
   app, and `--json` reports the reason as `unchecked`. The list is a warning, not a guarantee: a
   secret in a file Silo does not recognise (an `.env`, a token in a shell history) is not named.
+  The disk is listed with the walk `silo diff` does (`/etc`, `/root`, `/home`, `/usr/local`,
+  `/opt`, `/srv` and the crontabs on Linux; the home folder, `/usr/local`, `/opt/homebrew/etc` and
+  the launch agents and daemons on macOS), so a login anywhere else,
+  such as under `/workspace`, is not named either.
+- **No memory is in the file**, for any kind of computer: an export carries disks only, as a
+  fork does. A running computer is captured from its disks: the guest writes its cached file data
+  out and the disks are copied, with a macOS computer paused for the copy the way a fork point
+  takes it ([`macos_computers.rs`](../app/SiloUI/src-tauri/engine/src/macos_computers.rs),
+  `create_archive`). A macOS checkpoint that saved memory is exported from its disks; the saved
+  memory stays in the checkpoint's folder. A Linux VM checkpoint taken while the computer ran is
+  refused: MicroSandbox writes such a checkpoint whole, with its memory, and has no way to leave
+  it out, so [`backup.rs`](../app/SiloUI/src-tauri/engine/src/backup.rs) reads the descriptor of
+  every capture before it is written and stops at one that holds memory, saying what to do
+  instead (fork the checkpoint and export the fork, or export the computer itself). A container
+  computer has no memory checkpoints. A file written before this rule can hold memory; an import
+  never uses it, because an imported computer always starts from its disks.
 - **Secrets, published ports, the network policy and host-folder mounts are not carried**; an
   imported computer starts stopped with a deny-all policy.
 - **An export is a plain file.** Keep it where you would keep the secrets in it. Importing one
@@ -831,13 +847,22 @@ with nothing sensitive on it, and the app, the CLI and `silo list` label it as l
   process group. The `sftp` subsystem runs `/usr/lib/openssh/sftp-server` (the guest image's
   `openssh-sftp-server`) as the working account, so file access over SFTP is exactly the account's
   own. A terminal comes from a pseudo-terminal `crun` makes inside the container; the SSH server
-  receives its controlling side over a private socket. Client environment variables are refused,
-  as with an `sshd` that accepts none, and there is no agent, X11, port or socket forwarding. The
-  local terminal runs the same command attached to the user's terminal. The loopback listener is
-  reachable by every user on the host (see the loopback note under Other local users); the
-  authorized key is the whole check, as for a virtual machine's. SSH sessions do not survive the
-  engine stopping the container or the listener; a container that an engine restart leaves
-  running is taken back by the next engine (see Checkpoints and forks below).
+  (or the local terminal command) receives its controlling side over a socket in a folder only
+  the account can enter (mode `0700`, whatever the umask of the process that serves the session:
+  whoever connects to that socket first gives the session its terminal). Client environment
+  variables are refused, as with an `sshd` that accepts none, and there is no agent, X11, remote
+  (`-R`) or socket forwarding. A local forward (`direct-tcpip`: `ssh -L`, `ssh -D`, the editor's
+  port forwarding, the desktop viewer) is answered only toward the container's own loopback, by a
+  connection made inside the container's network namespace (`silo-ctr connect`); any other
+  destination is refused, so a forward never reaches the host's network. The local terminal runs
+  the same command attached to the user's terminal. To end or signal a command (a closed channel,
+  a timeout, an SSH `signal` request) the engine signals the process group named in the command's
+  pid file, and only while that pid is a process of the computer's own scope: the file outlives
+  the command, and a number the host has since given to another process is never signalled. The
+  loopback listener is reachable by every user on the host (see the loopback note under Other
+  local users); the authorized key is the whole check, as for a virtual machine's. SSH sessions do
+  not survive the engine stopping the container or the listener; a container that an engine
+  restart leaves running is taken back by the next engine (see Checkpoints and forks below).
 - **The in-guest client (boundary 9) in a container.** The per-computer share is the computer's
   runtime folder, bound at `/.msb` (read-write, no exec, no devices) and sealed by mode instead of
   by stat override: its parent `sandboxes/<name>` is `0700`, the runtime folder `0711`, and
@@ -950,7 +975,10 @@ with nothing sensitive on it, and the app, the CLI and `silo list` label it as l
   container is in its own Landlock domain, which cannot read a process of another command (`/proc/<pid>/environ`, `exe`), so
   the desktop session of either kind leaves its display, bus and runtime variables in
   `/run/silo-desktop/user/session.env`, a file only the working account owns and root reads after checking
-  that: it holds no secret, and the desktop stopping removes it. The viewer's credentials stay in
+  that: it holds no secret, and the desktop stopping removes it. A virtual machine whose desktop service predates
+  the file (Silo 0.13 or earlier; a computer keeps its service until its desktop is updated) has none, and the
+  launcher and `silo-computer-use` then read the working account's `xfce4-session` process, as they did before.
+  The viewer's credentials stay in
   `/var/lib/silo-desktop`, root's, and the streamer gets its password in its environment
   (`SELKIES_BASIC_AUTH_PASSWORD`), not in its arguments, which every process in the computer can read; its
   environment is readable by root and the working account's own processes, as in a virtual machine.
@@ -965,7 +993,8 @@ with nothing sensitive on it, and the app, the CLI and `silo list` label it as l
   computer's record, and a fork is a new record over the checkpoint's list with a writable layer
   of its own. Nothing a fork writes reaches the parent or another fork. The fork keeps its own
   reference to the layers, so deleting the parent or the checkpoint keeps them; a layer no record
-  and no checkpoint names is removed. A stopped computer's checkpoint seals its writable layer
+  and no checkpoint names is removed, and nothing is removed when a record, a checkpoint or a
+  folder that holds them cannot be read. A stopped computer's checkpoint seals its writable layer
   (no file moves). A running container cannot swap its writable layer, so its checkpoint is a
   copy of it, made by the container's own user namespace while the container's control group is
   frozen (a reflink copy where the file system has them; otherwise the time grows with the size
@@ -973,12 +1002,13 @@ with nothing sensitive on it, and the app, the CLI and `silo list` label it as l
   copy that takes longer is killed, the computer is resumed and the checkpoint fails with a plain
   message (a stopped computer's checkpoint takes no time). The copy is made before the layer
   store's lock is taken, which is held only to register the checkpoint, so a long copy never
-  blocks another computer's start, restore or fork; the new layer is safe from collection for the
-  collection's ten-minute grace period, far longer than the copy may run. The freeze is separate
+  blocks another computer's start, restore or fork; the new layer is marked as being made, so
+  collection leaves it alone until the checkpoint names it (its age would not protect it: a copy
+  keeps its source's modification time). The freeze is separate
   from a user's pause: a checkpoint of a paused computer leaves it paused, `inspect` reports it
   as Paused, and an engine that takes the computer back after a restart does not thaw it (the
   pause is a file in the computer's state folder; a stop or a start removes it). A long chain has its oldest layers folded into one when the computer starts
-  (`silo-ctr merge`, which keeps whiteouts and opaque directories). The layer files are owned by
+  (`silo-ctr merge`, which keeps whiteouts and opaque directories); the folded layer is marked as being made in the same way. The layer files are owned by
   the container's sub-ids, so the engine reads, copies and removes them only through a user
   namespace laid out like the container's. Removing a checkpoint, a fork or a computer drops its
   references; the layers nothing names any more are removed by the next collection pass (at the

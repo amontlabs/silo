@@ -71,7 +71,10 @@ computer-use tools and their approvals. What differs:
 - **The session's environment.** The desktop session of a VM or a container writes its display, bus and runtime
   variables to `/run/silo-desktop/user/session.env` (the working account's, mode 0600) when it starts, and the
   desktop stopping removes it. Cua Driver's launcher and `silo-computer-use` read that file instead of another
-  process's environment, which one command in a container cannot read.
+  process's environment, which one command in a container cannot read. A virtual machine keeps the desktop
+  service it was made with until its desktop is updated, and a service from Silo 0.13 or earlier writes no
+  file; without the file both read the session's `xfce4-session` process, as they did then. The session
+  keeps the umask it was started with: only the file is private.
 - **Chrome.** A container's Chrome runs with `--no-sandbox`: the computer-use setup writes launchers in
   `/usr/local/bin` (`google-chrome`, `google-chrome-stable`, `chromium`, `chromium-browser`) and desktop
   entries (`google-chrome.desktop`, `chromium.desktop`) that start the first installed of Google Chrome's,
@@ -359,7 +362,8 @@ error. They use temporary paths without running a computer.
      Hermes and OpenCode are not registered. The launcher exists because an MCP server started
      from an SSH shell has no desktop environment and the D-Bus address changes with every
      desktop start: it reads `DISPLAY`, `DBUS_SESSION_BUS_ADDRESS` and `XDG_RUNTIME_DIR` from the
-     file the desktop session writes when it starts (`/run/silo-desktop/user/session.env`), sets the
+     file the desktop session writes when it starts (`/run/silo-desktop/user/session.env`; from the
+     session's `xfce4-session` process when an earlier desktop service wrote no file), sets the
      telemetry and update-check switches off, and runs `cua-driver mcp`;
   3. removes leftovers of the earlier LCU setup: its registrations, approval entries and hooks
      (only `mcp__lcu*` and commands under `/opt/lcu` or `/usr/local/bin/lcu`; a user's own rule

@@ -991,9 +991,11 @@ def start_session_processes(commands, environment, account, state, children, sto
 # another process's environment, which a container's commands cannot read (Landlock keeps a
 # process from reading outside its own domain) and a virtual machine's would read differently.
 SESSION_ENV_FILE = RUN / 'user/session.env'
-SESSION_ENV_SCRIPT = ('umask 077; env | grep -E "^(DISPLAY|DBUS_SESSION_BUS_ADDRESS|XDG_RUNTIME_DIR|XAUTHORITY)=" '
+# The file is made in a subshell: its private mode must not become the umask of the session, which
+# everything started in the desktop inherits.
+SESSION_ENV_SCRIPT = ('(umask 077; env | grep -E "^(DISPLAY|DBUS_SESSION_BUS_ADDRESS|XDG_RUNTIME_DIR|XAUTHORITY)=" '
                       '> "$XDG_RUNTIME_DIR/session.env.new" && mv "$XDG_RUNTIME_DIR/session.env.new" '
-                      '"$XDG_RUNTIME_DIR/session.env"; exec startxfce4')
+                      '"$XDG_RUNTIME_DIR/session.env"); exec startxfce4')
 XFCE_COMMAND = ['dbus-run-session', '--', 'sh', '-c', SESSION_ENV_SCRIPT]
 
 

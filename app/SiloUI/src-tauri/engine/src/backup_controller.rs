@@ -6784,9 +6784,9 @@ mod tests {
         );
     }
 
-    /// Exports a real full checkpoint, imports it as a new computer, cold-boots the
-    /// imported disk, and asserts the checkpoint-time marker survived. Uses only a
-    /// disposable /tmp home; never touches the user's Silo data or running computers.
+    /// Takes a real full checkpoint of a running computer and asserts its export is refused,
+    /// since it holds memory and an export never does. Uses only a disposable /tmp home; never
+    /// touches the user's Silo data or running computers.
     #[test]
     #[ignore = "requires the packaged runtime and hardware virtualization"]
     fn real_checkpoint_export_imports_and_cold_boots_checkpoint_time_disk() {
@@ -6929,7 +6929,7 @@ mod tests {
         };
         let controller = make_controller(&paths);
         let archive = directory.path().join("checkpoint.silo-backup");
-        controller
+        let error = controller
             .service
             .create_backup(
                 backup::BackupRequest {
@@ -6946,78 +6946,18 @@ mod tests {
                 },
                 &backup::Cancellation::default(),
             )
-            .unwrap();
-
-        // Import into a fresh cold home. This installs a stopped, pending-restore
-        // computer and never touches the source home.
-        fs::create_dir_all(&cold.home).unwrap();
-        fs::create_dir_all(&cold.volumes).unwrap();
-        let cold_controller = make_controller(&cold);
-        restore_at_paths(
-            &cold,
-            &cold_controller,
-            &archive,
-            source_name,
-            restored_name,
-            &backup::Cancellation::default(),
-            &|_| {},
-        )
-        .unwrap();
-
-        assert!(runtime::is_pending_restore(&cold, restored_name));
-        // Use the app's explicit Start path; it consumes the pending import only
-        // after the runtime verifies the new computer's identity and policy.
-        runtime::start_disposable_test_import(&cold, restored_name).unwrap();
-        assert!(!runtime::is_pending_restore(&cold, restored_name));
-        let restored_boot_id = run(
-            &cold,
-            &[
-                "exec",
-                restored_name,
-                "--",
-                "cat",
-                "/proc/sys/kernel/random/boot_id",
-            ],
-        )
-        .stdout
-        .trim()
-        .to_owned();
-        assert_ne!(restored_boot_id, source_boot_id);
-        run(
-            &cold,
-            &["exec", restored_name, "--", "sh", "-c", &format!(
-                "test ! -e /dev/shm/silo-ckpt-proof && ! grep -azq 987654 /proc/{captured_pid}/cmdline 2>/dev/null"
-            )],
-        );
-        let proof = run(
-            &cold,
-            &[
-                "exec",
-                restored_name,
-                "--",
-                "sh",
-                "-c",
-                "cat /root/silo-ckpt-proof; printf ':'; cat /workspace/silo-ckpt-proof",
-            ],
-        );
-        let _ = runtime::run_msb(
-            &cold,
-            &["stop".into(), restored_name.into()],
-            Duration::from_secs(60),
-        );
-        assert!(
-            proof
-                .stdout
-                .contains("checkpoint-root:checkpoint-workspace"),
-            "expected checkpoint-time content, got: {}",
-            proof.stdout
-        );
-        eprintln!("Verified checkpoint export/import preserves checkpoint-time disk content.");
+            .unwrap_err();
+        // The checkpoint was saved while the computer ran, so it holds memory, and an export
+        // never carries memory: nothing is written.
+        assert!(matches!(error, backup::BackupError::InvalidRequest(_)), "{error}");
+        assert!(!archive.exists());
+        let _ = (&cold, restored_name, captured_pid, source_boot_id);
+        eprintln!("Verified a checkpoint that holds memory is refused for export.");
     }
 
     /// Imports a checkpoint export written by another Silo/runtime version
-    /// (`SILO_TEST_ARCHIVE`, for example one produced by Silo with MicroSandbox 0.7.4 from
-    /// `real_checkpoint_export_imports_and_cold_boots_checkpoint_time_disk`) into a cold
+    /// (`SILO_TEST_ARCHIVE`, for example a checkpoint export written by Silo with MicroSandbox
+    /// 0.7.4, before exports refused checkpoints that hold memory) into a cold
     /// disposable home and cold-boots it. Uses the computer name of that test.
     #[test]
     #[ignore = "requires the packaged runtime, hardware virtualization and SILO_TEST_ARCHIVE"]

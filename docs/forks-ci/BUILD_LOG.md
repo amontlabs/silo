@@ -580,6 +580,40 @@ client through the same commands, API methods and screens as a Linux VM. Fable's
     `-D`, refused destinations, a port the host does not serve), a 60 MB file through `ssh cat` both ways with hashes
     (five rounds, and a slow reader; see the flow-control item), a killed client, and 40 idle sockets with a login in between.
 
+#### Post-merge review: container basics (CT1 to CT3b, 10 Nov 2026)
+
+Review of the gateway on Linux, the runtime core, secrets, ports and SSH for container computers as they are on
+`main` after CT6 (`engine/src/containers/`, `container-shim`, `computer_gateway.rs`, `gateway_control.rs`, the
+vendored russh patch, checked against the published 0.65.1 source).
+
+- **Fixed: ending a command could signal a process that was not the computer's** (`hold.rs` `ExecGroup`). The
+  pid file of an exec outlives its command: an SSH channel is closed after its command ended, a terminal ends,
+  and a client may send a `signal` request on a channel whose command is over. The only check was that the pid
+  leads a process group, so once the host had given the number to another group leader (a shell's job, a daemon,
+  another computer's command) that group was killed or signalled. The signal is now sent only while the pid is a
+  process of the computer's own scope (`/proc/<pid>/cgroup`, the check the holder already has). Test:
+  `a_pid_that_now_belongs_to_a_process_outside_the_computer_is_never_signalled`.
+- **Fixed: an exec that was starting could lose its pid file** (`hold.rs` `exec_leftover`). Each new exec removes
+  the directories of execs whose command is gone, and "gone" meant "the pid does not lead a process group".
+  crun 1.14.1 writes the pid file as the command goes on to `execv` (`container.c`, `wait_for_process` after the
+  child's go-ahead byte), which is before `silo-init --own-group` has run, so an exec starting at the same time
+  could take a live command for a leftover and remove its files; no timeout, closed channel or signal could end
+  that command afterwards. A directory with a pid is now a leftover only when no process has that pid. Test:
+  `an_exec_whose_command_has_not_taken_its_group_yet_is_not_a_leftover` (failed before).
+- **Fixed: the folder of a terminal's socket followed the umask** (`ssh.rs`, `cli.rs`). crun hands a terminal's
+  controlling side to a socket the SSH server or the terminal command listens on, and whoever connects first
+  gives the session its terminal. The folder was made `0755` under the usual umask, and the socket open to a
+  group or to everyone under a looser one (an editor's proxy and a terminal start from a login session, not from
+  the engine). It is now `0700` explicitly (`hold::console_directory`). Test:
+  `the_folder_of_a_terminals_socket_is_the_accounts_alone` (failed before).
+- **Fixed: the threat model said a container's SSH has no port forwarding.** The server answers local forwards
+  toward the container's own loopback since CT3b's review; the section now says what is forwarded and refused,
+  and describes the two fixes above.
+- **Not changed.** A client that disconnects in the moment between crun starting a command and that command
+  leading its group leaves the command running (the kill finds no group yet); it is the client's own command and
+  the moment is the one above. `silo-ctr enter` trusts `outer.pid` and the callers check the holder first, as
+  documented.
+
 ### 9 Nov 2026: phase CT4 built (checkpoints, forks and restart for container computers)
 
 Branch `claude/containers-ct4`. A container computer has checkpoints, forks (`-n N`, `--from-step`), quiet forks, diff,
@@ -797,6 +831,46 @@ app as a Linux VM, and the "not yet" list is down to export (CT6) and memory che
   process probes matched their own shell; and a screenshot of a busier Chrome page was larger than one command's output limit, so
   it is copied out in pieces now.
 
+
+#### Post-merge review: container checkpoints, disk and desktop (CT4 and CT5, 10 Nov 2026)
+
+Review of `engine/src/containers/` (checkpoints, layers, the host disk guard, restart, the desktop's start) and the
+guest desktop scripts as they are on `main`. The guest scripts are shared with virtual machines, and two of the
+fixes are for those.
+
+- **Fixed: computer use stopped working on virtual machines made before the session file.** The launcher and
+  `silo-computer-use` are pushed to every computer after each boot, but a computer keeps the desktop service it was
+  made with, and the service of Silo 0.13 or earlier writes no `session.env`. CT5's review made the file the only
+  source, so on those machines `doctor` raised `session-unavailable` after every boot and the launcher fell back to
+  a bus address that does not exist. Without the file both read the working account's `xfce4-session` process
+  again, as they did before the file. Tests: `SessionEnvironment` and `Launcher` in `test_computer_use.py`.
+- **Fixed: everything started in the desktop had umask 077.** The command that writes the session file set the
+  umask and then ran `startxfce4` in the same shell, in a virtual machine and in a container. The file is written
+  in a subshell. Test: `test_the_session_keeps_the_umask_it_was_started_with` (failed before).
+- **Fixed: collection could remove a layer that was being made.** The copy of a running computer's layer and the
+  fold of a long chain are made outside the store's lock, in a layer nothing names yet, protected only by the
+  10-minute grace, which read the folder's modification time. `cp -a` and `silo-ctr merge` give the new folder its
+  source's time (the fold after each layer it folds), so the layer looked old while it was still being filled. A
+  collection in that window (another checkpoint or computer removed) deleted files under the fold, which then
+  replaced the computer's oldest layers with what was left, or removed the copy a checkpoint was about to name. Such
+  a layer is now reserved until its record or checkpoint is saved (`layers::reserve`). Test:
+  `a_layer_being_made_is_not_collected_however_old_its_files_look`.
+- **Fixed: a folder that could not be read counted as empty.** `layers::referenced` listed the computers and
+  checkpoints with errors dropped, so a `computers` or `snapshots` folder that could not be opened (no descriptor
+  left, an I/O error) named nothing and every layer older than the grace was collected. The scan and `Store::list`
+  now fail on anything but a missing folder, and a failed scan collects nothing. Test:
+  `a_folder_of_records_or_checkpoints_that_cannot_be_read_stops_the_scan` (failed before).
+- **Fixed: a running computer looked as if it were starting while its checkpoint was made.** The checkpoint took
+  the start mark for the whole freeze and copy (up to 40 s), and the status reads that mark first. A command run in
+  that time was refused with "Start NAME first.", and a secret added or removed was written to the record without
+  reaching the running gateway, which kept the old set until the next start. A checkpoint now holds the computer
+  against a start without marking it as starting (`StartMark::hold`). Tests:
+  `a_held_computer_cannot_be_started_and_is_not_starting`, `a_running_computer_held_for_a_checkpoint_is_still_running`.
+- **Not changed, for the owner:** stopping a computer its user paused waits the 15 s for a `TERM` its frozen
+  processes cannot take, then kills them; thawing first is the fix, and it has to say what happens to a checkpoint
+  copy in flight. Smaller: a fold that fails keeps the computer from starting; the "layers do not fit one mount"
+  message says to delete checkpoints, which does not shorten a computer's own chain; one lock serialises the freeze
+  of every computer, so a long copy delays another computer's pause, resume or checkpoint.
 
 ### 9 Nov 2026: phase CT6 built (export, import and Connections for container computers)
 
@@ -1477,3 +1551,61 @@ Review of `app/SiloUI/runner`, its CI wiring and its docs as they are on `main` 
   stays caught); (3) the Resume section above still listed R2 as in progress (corrected on 10 Nov by the
   container sharing and docs review); (4) no job has run through
   `silo-runner` on a Linux host (unchanged from R2).
+
+## Post-merge review
+
+### Forks and sharing a computer as a file, VM computers (F2 #88, F3 #86, F4 #93; 9 Nov 2026)
+
+Read on `main` at `69742419`: the fork point and the desktop setting, `backup.rs`, `backup_controller.rs`,
+`changes/credentials.rs`, `transfer_area.rs`, `export_transfer.rs`, the `exports.*` handlers, the bridge's
+`exports.file` stream, `cli/src/share.rs` and the app's export dialog. The review found the problems below; the
+fixes are in the same pull request (#105).
+
+- **Fixed: an export could hold memory.** The rule is that no memory is carried into a fork or an export. Forks
+  kept it (a fork point is disks only and every fork starts from disks). Exports did not, in three cases, and no
+  import ever used the memory (`import_pending_restore_with_environment` records `state: "disk"`; a macOS import
+  starts from the disk). All three now carry disks only:
+  - **A macOS computer exported while it runs.** `create_archive` called `save_running` and added
+    `state.vzvmsave`. It now takes the capture a fork point takes: the guest writes its disk out (`flush_disk`),
+    then the machine is paused while the disks are cloned (`pause_for_copy`). No memory is saved and no space is
+    reserved for it. An export whose flush fails stops before the pause, as a fork does.
+  - **A macOS checkpoint that saved memory.** Its disks are cloned and the saved memory stays in the
+    checkpoint's folder. The file names the checkpoint with the kind `disk`.
+  - **A Linux VM checkpoint taken while the computer ran: refused.** MicroSandbox 0.7.6 writes such a checkpoint
+    whole: `snapshot export` adds `checkpoints/<id>/` with the memory, execution and device state (its
+    `archive.rs` at tag `v0.7.6`), and it has no option to leave them out (nor has `v0.7.14`). A fork avoids the
+    memory only by starting a new computer from the checkpoint (`restore --disk-only`); that leaves no disk-only
+    capture to write, so giving an export the same source would mean a hidden temporary computer for every such
+    export. `create_backup_with_token` instead reads the descriptor of every capture before the runtime verifies
+    or writes it and goes on only when it names a disk-only capture (scope `file` or `disk`, state `file`).
+    Anything else, a missing or unknown scope included, counts as memory and stops the export: "This checkpoint
+    was saved while <name> was running, so it holds the computer's memory, and an export never carries memory.
+    Fork the checkpoint and export the fork, or export <name> itself." `apply_captured_layout` lost the branch
+    that read such a checkpoint's CPUs and memory.
+
+  The reader is unchanged: a file an older Silo wrote with memory still imports, from its disks.
+- **Tests.** macOS (`macos_computers.rs`, the capture step `capture_archive_sources` with a machine that fails
+  the test if memory is asked for): `an_export_of_a_running_computer_holds_its_disks_and_no_memory`,
+  `an_export_of_a_memory_checkpoint_holds_its_disks_and_no_memory`. The capture step is tested instead of the
+  written file because the writer wants a disk of the computer's full size. Linux (`backup.rs`):
+  `a_checkpoint_that_holds_memory_is_never_written_to_an_export` (refused before `snapshot verify` or
+  `snapshot save`, no file left) and `a_running_computer_is_captured_without_its_memory`. Live, on the KVM
+  runner: `linux-host-e2e.sh` saves a checkpoint while the computer runs, expects its export to be refused with
+  no file, then opens the export of the running computer and the export of a fork of that checkpoint and fails
+  on anything under `checkpoints/` or a descriptor that is not a disk capture.
+- **Not live-checked: macOS.** There is no macOS computer on the Dev engine; the macOS change is covered by the
+  unit tests above only.
+- **Fixed: two copies from another device to the same `-o` path shared one `<path>.part`**, so the first to
+  finish could publish the second's unfinished file (`export_transfer::create_part` removed the other's as a
+  leftover). Each copy now writes `<path>.<random>.part` and nothing that exists is opened or removed; publishing
+  is still the rename that never replaces. A copy that crashes leaves its own `.part`, which nothing removes.
+- **Docs corrected.** `docs/SiloUI-CLI.md` and `docs/THREAT-MODEL.md` say that no export holds memory, for every
+  kind of computer, and what happens to a Linux VM checkpoint that does. The threat model also says which
+  folders the login check lists (the `silo diff` walk in `changes/collect.sh`; `/workspace` is not one of them).
+  `backup.rs`: the comment on `FORMAT_VERSION` described format 5 while the constant is the newest readable
+  format (6). The Resume section and `PLAN.md` listed F4 as an open pull request.
+- **Removed** `app/SiloUI/src-tauri/edit14.py`, an editing script committed by mistake in `0b601f2cd`; nothing
+  used it.
+- **Seen, not changed (low; from reading the code):** a transfer-area export leaves its "Export complete" result
+  and a system notice on the owning device, naming a file the controller then discards. `Area::open_for_read`
+  keeps its used marker when the file is past the cap.

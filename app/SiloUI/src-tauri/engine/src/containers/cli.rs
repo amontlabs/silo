@@ -81,9 +81,7 @@ fn terminal(paths: &RuntimePaths, exec: &args::Exec) -> Result<i32, String> {
     if !lifecycle::holder_alive(paths, &exec.name) {
         return Err(format!("Start {} first.", exec.name));
     }
-    let directory = tempfile::Builder::new()
-        .prefix("silo-pty-")
-        .tempdir()
+    let directory = super::hold::console_directory()
         .map_err(|error| format!("The terminal could not start: {error}"))?;
     let socket = directory.path().join("c");
     let listener = std::os::unix::net::UnixListener::bind(&socket)
