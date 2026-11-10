@@ -297,6 +297,7 @@ mod tests {
                 },
                 fork_was_running: false,
                 target_was_running: false,
+                makers: Default::default(),
             },
             state: State::Promoted,
             at: 1,

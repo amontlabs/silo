@@ -240,7 +240,7 @@ pub(crate) fn finish(
             });
         }
         if let Some(job) = &job {
-            noted.push(store.note_job(id, job));
+            noted.push(store.note_job_about(id, job, admitted.target.as_deref()));
         }
         if let (Ok(_), Some(done)) = (&result, &admitted.job) {
             noted.push(store.drop_job(id, done));

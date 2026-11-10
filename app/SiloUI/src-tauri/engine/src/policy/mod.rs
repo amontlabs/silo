@@ -8,6 +8,7 @@
 //! the rules in plain words.
 
 pub mod access;
+pub mod handoff;
 mod rules;
 pub mod store;
 #[cfg(test)]

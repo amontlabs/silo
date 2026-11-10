@@ -49,6 +49,9 @@ pub struct OwnedJob {
     pub caller: String,
     pub id: String,
     pub at: u64,
+    /// The computer the call named, when it named one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub computer: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
@@ -376,24 +379,24 @@ impl PolicyStore {
         })
     }
 
-    /// Ends `ids`' standing as computers another computer made, keeping what they made. A
-    /// promote or undo puts one of them in main's place, which its maker must not reach.
-    pub fn forget_makers(&self, ids: &[&str]) -> Result<(), String> {
-        self.update(|document| {
-            document
-                .created
-                .retain(|record| !ids.contains(&record.id.as_str()));
-            Ok(())
-        })
+    pub fn note_job(&self, caller: &str, job_id: &str) -> Result<(), String> {
+        self.note_job_about(caller, job_id, None)
     }
 
-    pub fn note_job(&self, caller: &str, job_id: &str) -> Result<(), String> {
+    /// Notes a job `caller` started, and the computer its call named.
+    pub fn note_job_about(
+        &self,
+        caller: &str,
+        job_id: &str,
+        computer: Option<&str>,
+    ) -> Result<(), String> {
         self.update(|document| {
             if !document.owns_job(caller, job_id) {
                 document.jobs.push(OwnedJob {
                     caller: caller.to_owned(),
                     id: job_id.to_owned(),
                     at: now_secs(),
+                    computer: computer.map(str::to_owned),
                 });
             }
             Ok(())
@@ -432,6 +435,7 @@ impl PolicyStore {
                         caller: creator.to_owned(),
                         id: job.clone(),
                         at: *at,
+                        computer: None,
                     });
                 }
             }

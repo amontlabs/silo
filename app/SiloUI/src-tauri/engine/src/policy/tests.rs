@@ -748,8 +748,6 @@ mod store {
         assert!(document.jobs_of("a").is_empty());
         store.drop_job("main", "job:1").unwrap();
         assert!(store.snapshot().unwrap().jobs.is_empty());
-        store.forget_makers(&["b"]).unwrap();
-        assert!(store.snapshot().unwrap().made_by("main").is_empty());
         store.remove_computers(&["main"]).unwrap();
     }
 }
