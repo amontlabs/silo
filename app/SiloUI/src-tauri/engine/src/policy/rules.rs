@@ -41,6 +41,10 @@ pub fn rule(method: MethodName) -> Rule {
         | M::EngineCredentialsStatus
         | M::DeviceDependencies => OwnerOnly,
         M::AuditList => Open,
+        // Approvals: a computer reads and withdraws its own, and those of computers it made
+        // (the handler cuts them); only the owner answers.
+        M::ApprovalsList | M::ApprovalsGet | M::ApprovalsCancel | M::ApprovalsNote => Open,
+        M::ApprovalsDecide => OwnerOnly,
 
         // Jobs.
         M::OperationsJobGet | M::OperationsJobAcknowledge | M::OperationsCancel => OwnJob,
@@ -48,7 +52,7 @@ pub fn rule(method: MethodName) -> Rule {
         M::OperationsList => OwnerOnly,
 
         // Computers.
-        M::ComputersList | M::ComputersTree | M::ComputersCredentials => Tree,
+        M::ComputersList | M::ComputersTree | M::ComputersCredentials | M::ComputersAccess => Tree,
         M::ComputersCreate => Create,
         M::ComputersStart
         | M::ComputersStop

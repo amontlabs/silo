@@ -149,10 +149,14 @@ impl Allowed {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Decision {
     Allow(Allowed),
-    /// The call widens what the caller has; the owner decides.
+    /// The call widens what the caller has; the owner decides. On allow the engine runs
+    /// `params` when the policy rewrote them, else the caller's, and records `creates` as the
+    /// caller's.
     Ask {
         kind: ApprovalKind,
         summary: String,
+        params: Option<Value>,
+        creates: Option<Creation>,
     },
     Refuse {
         reason: String,
@@ -180,6 +184,23 @@ fn ask(kind: ApprovalKind, summary: impl Into<String>) -> Decision {
     Decision::Ask {
         kind,
         summary: summary.into(),
+        params: None,
+        creates: None,
+    }
+}
+
+/// An ask for a call that makes a computer: what runs on allow and the computer it makes.
+fn ask_to_create(
+    kind: ApprovalKind,
+    summary: impl Into<String>,
+    params: Value,
+    creates: Creation,
+) -> Decision {
+    Decision::Ask {
+        kind,
+        summary: summary.into(),
+        params: Some(params),
+        creates: Some(creates),
     }
 }
 
@@ -492,7 +513,7 @@ impl<'a> Judge<'a> {
             }
         }
         if !wider.is_empty() {
-            return Ok(ask(
+            return Ok(ask_to_create(
                 ApprovalKind::Access,
                 format!(
                     "Fork {} as {new_name} with {}, which {} does not have.",
@@ -500,6 +521,8 @@ impl<'a> Judge<'a> {
                     wider.join(" and "),
                     self.name(self.caller),
                 ),
+                rewritten,
+                creates,
             ));
         }
         Ok(Decision::Allow(Allowed {
@@ -561,7 +584,7 @@ impl<'a> Judge<'a> {
                     } else {
                         ApprovalKind::Resources
                     };
-                    return Ok(ask(kind, summary));
+                    return Ok(ask_to_create(kind, summary, rewritten, creates));
                 }
                 Ok(Decision::Allow(Allowed {
                     params: Some(rewritten),
@@ -575,9 +598,15 @@ impl<'a> Judge<'a> {
                 let asked = Resources::of_macos(request)
                     .ok_or("A macOS computer's CPUs, memory and disk are numbers.")?;
                 if let Some(more) = self.more_than_it_has(&asked) {
-                    return Ok(ask(
+                    return Ok(ask_to_create(
                         ApprovalKind::Resources,
                         format!("Make {name}{}", self.sizes_sentence(&asked, Some(&more))),
+                        rewritten,
+                        Creation {
+                            name: name.to_owned(),
+                            id: None,
+                            source: None,
+                        },
                     ));
                 }
                 Ok(Decision::Allow(Allowed {

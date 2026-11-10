@@ -5,6 +5,7 @@
 
 use crate::transport;
 use super::agents;
+use super::approvals;
 use super::audit;
 use super::changes;
 use super::checkpoints;
@@ -47,6 +48,31 @@ use super::MethodParams;
 /// `activity.setup.read`
 pub fn activity_setup_read(params: common::DeviceParams) -> Request<kind::Query> {
     Request::new(MethodParams::ActivitySetupRead(params))
+}
+
+/// `approvals.cancel`
+pub fn approvals_cancel(params: approvals::ApprovalsCancelParams) -> Request<kind::Command> {
+    Request::new(MethodParams::ApprovalsCancel(params))
+}
+
+/// `approvals.decide`
+pub fn approvals_decide(params: approvals::ApprovalsDecideParams) -> Request<kind::Command> {
+    Request::new(MethodParams::ApprovalsDecide(params))
+}
+
+/// `approvals.get`
+pub fn approvals_get(params: approvals::ApprovalsGetParams) -> Request<kind::Query> {
+    Request::new(MethodParams::ApprovalsGet(params))
+}
+
+/// `approvals.list`
+pub fn approvals_list(params: approvals::ApprovalsListParams) -> Request<kind::Query> {
+    Request::new(MethodParams::ApprovalsList(params))
+}
+
+/// `approvals.note`
+pub fn approvals_note(params: approvals::ApprovalsNoteParams) -> Request<kind::Command> {
+    Request::new(MethodParams::ApprovalsNote(params))
 }
 
 /// `audit.list`
@@ -216,6 +242,11 @@ pub fn computers_configuration_retry(
     params: computers::ComputerConfigurationRetryParams,
 ) -> Request<kind::Job> {
     Request::new(MethodParams::ComputersConfigurationRetry(params))
+}
+
+/// `computers.access`
+pub fn computers_access(params: approvals::ComputersAccessParams) -> Request<kind::Query> {
+    Request::new(MethodParams::ComputersAccess(params))
 }
 
 /// `computers.create`

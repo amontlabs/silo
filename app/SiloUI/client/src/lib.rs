@@ -26,6 +26,7 @@ pub const APP_EVENTS: &[&str] = &[
     "notifications.*",
     "connections.*",
     "display.*",
+    "approvals.*",
 ];
 
 pub use codec::{read_frame, write_frame, MAX_FRAME_BYTES};

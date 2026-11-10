@@ -120,6 +120,9 @@ impl Store {
                 under_way.id
             ));
         }
+        let approval_id = existing
+            .as_ref()
+            .and_then(|request| request.approval_id.clone());
         let request = FoldRequest {
             id: existing.as_ref().map_or_else(
                 || format!("fr-{}", &uuid::Uuid::new_v4().simple().to_string()[..8]),
@@ -136,9 +139,17 @@ impl Store {
             resolved_at: None,
             keeping_since_ms: None,
             closed_reason: None,
+            approval_id,
         };
         self.put(&request)?;
         Ok(request)
+    }
+
+    /// Records the approval that asks the owner to merge the request, which must be open.
+    pub fn link_approval(&self, id: &str, approval_id: &str) -> Result<FoldRequest, String> {
+        self.modify(id, false, |request| {
+            request.approval_id = Some(approval_id.to_owned());
+        })
     }
 
     /// The requests that match `filter`, oldest first.
@@ -572,6 +583,29 @@ mod tests {
         assert_eq!(ids(RequestFilter::Kept), vec![one.id.clone()]);
         assert_eq!(ids(RequestFilter::ThrownAway), vec![two.id.clone()]);
         assert_eq!(ids(RequestFilter::All).len(), 3);
+    }
+
+    #[test]
+    fn an_approval_link_survives_asking_again_and_needs_an_open_request() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(dir.path());
+        let made = store.create(new("f1", "s")).unwrap();
+        let linked = store
+            .link_approval(&made.id, "ap-0123456789abcdef")
+            .unwrap();
+        assert_eq!(linked.approval_id.as_deref(), Some("ap-0123456789abcdef"));
+        let again = store
+            .create(NewRequest {
+                review_digest: "d2".into(),
+                ..new("f1", "s2")
+            })
+            .unwrap();
+        assert_eq!(again.id, made.id);
+        assert_eq!(again.approval_id.as_deref(), Some("ap-0123456789abcdef"));
+        store.mark_thrown_away(&made.id).unwrap();
+        assert!(store
+            .link_approval(&made.id, "ap-1111111111111111")
+            .is_err());
     }
 
     #[test]

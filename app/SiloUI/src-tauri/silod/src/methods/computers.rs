@@ -58,10 +58,12 @@ use crate::{
 use super::{ownership::owns_prefix, HandlerContext};
 
 pub(super) fn owns(method: MethodName) -> bool {
-    owns_prefix(
-        method,
-        &["computers.", "activity.", "logs.", "storage.", "macos."],
-    )
+    // `computers.access` reads what a computer holds, beside approvals.
+    method != MethodName::ComputersAccess
+        && owns_prefix(
+            method,
+            &["computers.", "activity.", "logs.", "storage.", "macos."],
+        )
 }
 
 // MARK: Hosts

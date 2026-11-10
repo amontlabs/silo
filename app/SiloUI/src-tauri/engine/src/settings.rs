@@ -279,6 +279,7 @@ fn valid_setting(key: &str, value: &Value) -> Option<bool> {
         | "notifyFailures"
         | "notifyChanges"
         | "notifyCompletions"
+        | "notifyApprovals"
         | "terminalUseSystemDefault"
         | "editorUseSystemDefault"
         | "browserUseSystemDefault" => value.is_boolean(),

@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     jobs::{JobFinished as FinishedJob, JobProgress as ProgressJob},
     methods::{
+        approvals::ApprovalsChangedPayload,
         computers::{ApplicationSource, MacosComputersState},
         connections::DeviceHealthResult,
         display::ViewerPageEvent,
@@ -228,6 +229,14 @@ pub enum EventEnvelope {
         seq: u64,
         payload: GuestFilesChangedPayload,
     },
+    #[serde(rename = "approvals.changed")]
+    ApprovalsChanged {
+        subscription: String,
+        #[serde(rename = "deviceId")]
+        device_id: String,
+        seq: u64,
+        payload: ApprovalsChangedPayload,
+    },
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, schemars::JsonSchema)]
@@ -297,6 +306,7 @@ pub const EVENT_NAMES: &[&str] = &[
     "guest.exec.output",
     "guest.exec.exited",
     "guest.files.changed",
+    "approvals.changed",
 ];
 
 pub const EVENT_COUNT: usize = EVENT_NAMES.len();

@@ -1738,6 +1738,7 @@ fn fold_request(
         resolved_at: None,
         keeping_since_ms: None,
         closed_reason: None,
+        approval_id: None,
     }
 }
 

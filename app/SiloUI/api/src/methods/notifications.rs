@@ -12,6 +12,8 @@ pub enum NoticeCategory {
     Failures,
     Changes,
     Completions,
+    /// A computer's agent asks for something only the owner can allow.
+    Approvals,
 }
 
 wire_struct! {
@@ -34,5 +36,8 @@ wire_struct! {
 wire_struct! {
     NotificationsClearedPayload {
         computer_id: String,
+        /// Only the notice with this key is gone; without it, every notice of the computer.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        key: Option<String>,
     }
 }

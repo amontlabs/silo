@@ -65,6 +65,11 @@ pub struct MethodDescriptor {
 
 define_registry! {
     ActivitySetupRead => ("activity.setup.read", Query, common::DeviceParams, Vec<computers::ComputerConfigurationProgress>);
+    ApprovalsCancel => ("approvals.cancel", Command, approvals::ApprovalsCancelParams, approvals::Approval);
+    ApprovalsDecide => ("approvals.decide", Command, approvals::ApprovalsDecideParams, approvals::Approval);
+    ApprovalsGet => ("approvals.get", Query, approvals::ApprovalsGetParams, approvals::Approval);
+    ApprovalsList => ("approvals.list", Query, approvals::ApprovalsListParams, approvals::ApprovalsListResult);
+    ApprovalsNote => ("approvals.note", Command, approvals::ApprovalsNoteParams, approvals::Approval);
     AuditList => ("audit.list", Query, audit::AuditListParams, audit::AuditListResult);
     AgentsInstall => ("agents.install", Job, agents::AgentsInstallParams, common::JobStartResult);
     AgentsList => ("agents.list", Query, agents::AgentsListParams, agents::AgentsListResult);
@@ -96,6 +101,7 @@ define_registry! {
     ComputersConfigurationChange => ("computers.configuration.change", Job, computers::ComputerConfigurationChangeParams, common::JobStartResult);
     ComputersConfigurationRead => ("computers.configuration.read", Query, computers::ComputerConfigurationReadParams, computers::ComputerConfigurationRequest);
     ComputersConfigurationRetry => ("computers.configuration.retry", Job, computers::ComputerConfigurationRetryParams, common::JobStartResult);
+    ComputersAccess => ("computers.access", Query, approvals::ComputersAccessParams, approvals::ComputerAccess);
     ComputersCreate => ("computers.create", Job, computers::ComputerCreateParams, computers::ComputerCreateResult);
     ComputersCredentials => ("computers.credentials", Query, credentials_used::ComputerCredentialsParams, credentials_used::CredentialsUsage);
     ComputersDelete => ("computers.delete", Job, computers::ComputerDeleteParams, common::JobStartResult);
@@ -255,20 +261,20 @@ mod tests {
 
     #[test]
     fn registry_covers_every_canonical_method_and_kind() {
-        assert_eq!(METHOD_REGISTRY.len(), 179);
+        assert_eq!(METHOD_REGISTRY.len(), 185);
         assert_eq!(
             METHOD_REGISTRY
                 .iter()
                 .filter(|m| m.kind == MethodKind::Query)
                 .count(),
-            57
+            60
         );
         assert_eq!(
             METHOD_REGISTRY
                 .iter()
                 .filter(|m| m.kind == MethodKind::Command)
                 .count(),
-            73
+            76
         );
         assert_eq!(
             METHOD_REGISTRY

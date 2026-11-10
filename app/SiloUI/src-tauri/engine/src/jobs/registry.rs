@@ -833,6 +833,12 @@ impl JobRegistry {
         Ok(())
     }
 
+    pub fn clear_notice(&self, key: &str) -> Result<(), RegistryError> {
+        let connection = self.lock_connection()?;
+        connection.execute("DELETE FROM notices WHERE key = ?1", [key])?;
+        Ok(())
+    }
+
     fn recover_interrupted_jobs(&self) -> Result<(), RegistryError> {
         let interrupted = JobOutcome {
             result: None,

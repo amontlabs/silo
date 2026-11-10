@@ -511,12 +511,14 @@ pub(super) async fn keep(
     let checkpoints = checkpoint_service(context);
     let manifests = store::production(host.clone());
     let id = request.id;
+    let request_id = id.clone();
     let job_id = tokio::task::spawn_blocking(move || {
         keep_service::start_request_keep(host, checkpoints, manifests, keep_request, id, hold)
     })
     .await
     .map_err(|_| DispatchError::internal("The keep could not start."))?
     .map_err(failure)?;
+    crate::methods::approvals::request_answered(context, &request_id, Some(job_id.as_str()));
     started(job_id)
 }
 
@@ -643,6 +645,9 @@ pub(super) async fn throw_away(
         let outcome = blocking(move || store.mark_thrown_away(&request.id).map_err(message_error))
             .await
             .map_err(|error| error.message)
+            .inspect(|request| {
+                crate::methods::approvals::request_answered(context, &request.id, None)
+            })
             .and_then(|request| {
                 encode(ChangesRequestsThrowAwayResult {
                     request,
@@ -670,6 +675,9 @@ pub(super) async fn throw_away(
             Ok(()) => store_for(&owned)
                 .mark_thrown_away(&request.id)
                 .map_err(|error| format!("{} was dropped, but {error}", fork.name))
+                .inspect(|request| {
+                    crate::methods::approvals::request_answered(&owned, &request.id, None)
+                })
                 .and_then(|request| {
                     encode(ChangesRequestsThrowAwayResult {
                         request,
@@ -775,7 +783,7 @@ async fn reach(context: &HandlerContext, request: FoldRequest, fork: Row) -> Res
 
 /// The computers the handlers see in a test, where no Linux runtime can list them.
 #[cfg(test)]
-pub(super) mod tests_rows {
+pub(crate) mod tests_rows {
     use super::Row;
     use std::sync::Mutex;
 
@@ -796,11 +804,16 @@ pub(super) mod tests_rows {
     }
 
     /// The computers, a complete list, and no fork-time records.
-    pub fn set(rows: Vec<Row>) {
+    pub(in crate::methods::checkpoints) fn set(rows: Vec<Row>) {
         let mut state = state();
         state.rows = Some(rows);
         state.complete = true;
         state.sources.clear();
+    }
+
+    /// No computers, a complete list, and no fork-time records.
+    pub fn set_empty() {
+        set(Vec::new());
     }
 
     /// The fork-time source of each `(fork, target)` pair.
@@ -815,7 +828,7 @@ pub(super) mod tests_rows {
         state().complete = complete;
     }
 
-    pub fn get() -> Option<(Vec<Row>, bool)> {
+    pub(in crate::methods::checkpoints) fn get() -> Option<(Vec<Row>, bool)> {
         let state = state();
         state.rows.clone().map(|rows| (rows, state.complete))
     }

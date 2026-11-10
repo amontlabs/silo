@@ -17,6 +17,8 @@ pub(crate) mod preparation;
 mod recipes;
 mod requests;
 pub(crate) mod scrub_env;
+#[cfg(test)]
+pub(crate) use requests::tests_rows;
 mod steps;
 
 use std::sync::Arc;

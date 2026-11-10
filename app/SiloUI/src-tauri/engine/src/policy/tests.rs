@@ -453,6 +453,57 @@ fn handing_over_access_the_caller_does_not_have_asks() {
 }
 
 #[test]
+fn an_ask_that_makes_a_computer_carries_the_call_to_run_and_the_computer() {
+    match check(
+        "checkpoints.fork",
+        json!({"computerId": "main", "newName": "x", "secrets": ["prod-db"], "extra": 1}),
+    ) {
+        Decision::Ask {
+            params: Some(params),
+            creates: Some(creates),
+            ..
+        } => {
+            // The rewrite the engine runs on allow: the token file is scrubbed, nothing else
+            // the caller sent is passed on.
+            assert_eq!(params["computerId"], "main");
+            assert!(params.get("extra").is_none());
+            assert!(params["quiet"]["scrub"]
+                .as_array()
+                .unwrap()
+                .contains(&json!(GUEST_TOKEN_PATH)));
+            assert_eq!(creates.name, "x");
+            assert_eq!(creates.source.as_deref(), Some("main"));
+        }
+        other => panic!("{other:?}"),
+    }
+    let mut container = json!({"kind": "linux", "configuration": {
+        "name": "box", "id": "mine", "cpus": 2, "maxCPUs": 2, "memoryGiB": 4,
+        "maxMemoryGiB": 4, "workspaceStorageGiB": 10, "runtimeStorageGiB": 10}});
+    container["configuration"]["runtime"] = json!("container");
+    match check("computers.create", container) {
+        Decision::Ask {
+            params: Some(params),
+            creates: Some(creates),
+            ..
+        } => {
+            let id = params["configuration"]["id"].as_str().unwrap();
+            assert_ne!(id, "mine");
+            assert_eq!(creates.id.as_deref(), Some(id));
+        }
+        other => panic!("{other:?}"),
+    }
+    // Other asks run the caller's own parameters.
+    match check("changes.promote", json!({"forkId": "fork-1"})) {
+        Decision::Ask {
+            params: None,
+            creates: None,
+            ..
+        } => {}
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
 fn github_access_covers_a_read_only_copy_only_within_itself() {
     let selected = |repositories: &[&str]| GitHubAccess {
         method: "oauth".into(),
@@ -587,7 +638,7 @@ fn widening_calls_ask_and_narrowing_ones_are_free() {
             "computerIds": computers, "allowedDomains": ["api.example.com"]}})
     };
     match check("secrets.save", secret("add", json!(["fork-1"]))) {
-        Decision::Ask { kind, summary } => {
+        Decision::Ask { kind, summary, .. } => {
             assert_eq!(kind, ApprovalKind::Secret);
             assert!(summary.contains("api.example.com"), "{summary}");
             assert!(!summary.contains("s3cr3t-value"), "{summary}");
@@ -899,7 +950,7 @@ fn a_new_computer_larger_than_its_maker_asks_with_the_sizes() {
         ("runtimeStorageGiB", 11),
     ] {
         match check("computers.create", linux_create(json!({ field: value }))) {
-            Decision::Ask { kind, summary } => {
+            Decision::Ask { kind, summary, .. } => {
                 assert_eq!(kind, ApprovalKind::Resources, "{field}");
                 assert!(summary.contains(&value.to_string()), "{field}: {summary}");
                 assert!(summary.contains("box"), "{summary}");
@@ -911,7 +962,7 @@ fn a_new_computer_larger_than_its_maker_asks_with_the_sizes() {
     let mut container = linux_create(json!({"cpus": 8}));
     container["configuration"]["runtime"] = json!("container");
     match check("computers.create", container) {
-        Decision::Ask { kind, summary } => {
+        Decision::Ask { kind, summary, .. } => {
             assert_eq!(kind, ApprovalKind::Container);
             assert!(summary.contains("8 CPUs") && summary.contains("more than"), "{summary}");
         }
