@@ -1065,7 +1065,9 @@ fn a_full_capture_runs_nothing_in_the_guest_before_the_snapshot() {
 
 #[test]
 fn every_fork_scrubs_the_guest_client_token_once() {
-    use silo_api::methods::guest_client::{GUEST_ENDPOINT_PATH as token, LEGACY_GUEST_TOKEN_PATH as legacy};
+    use silo_api::methods::guest_client::{
+        GUEST_ENDPOINT_PATH as token, LEGACY_GUEST_TOKEN_PATH as legacy,
+    };
     let mut options = ForkOptions::default();
     options.scrub_guest_client_token();
     options.scrub_guest_client_token();

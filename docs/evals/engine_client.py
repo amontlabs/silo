@@ -19,7 +19,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-PROTOCOL_VERSION = 7
+PROTOCOL_VERSION = 8
 MAX_FRAME_BYTES = 4 * 1024 * 1024
 CHANNEL_DIRECTORIES = {"production": ".silo", "development": ".silo-dev"}
 

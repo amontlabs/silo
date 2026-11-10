@@ -1028,7 +1028,7 @@ pub(crate) mod tests {
             fixture().context.clone(),
             crate::dispatcher::RequestContext {
                 client_id: "remote-watch-client".to_owned(),
-                protocol: 7,
+                protocol: 8,
                 client: None,
                 caller: silo_engine::policy::Caller::owner("test"),
             },
@@ -1089,7 +1089,7 @@ pub(crate) mod tests {
             fixture().context.clone(),
             crate::dispatcher::RequestContext {
                 client_id: "remote-watch-refused".to_owned(),
-                protocol: 7,
+                protocol: 8,
                 client: None,
                 caller: silo_engine::policy::Caller::owner("test"),
             },

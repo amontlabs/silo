@@ -156,7 +156,7 @@ async fn access_methods_work_over_the_engine_socket() {
         .ok(
             "engine.handshake",
             json!({
-                "protocol": {"min": 7, "max": 7},
+                "protocol": {"min": 8, "max": 8},
                 "client": {"name": "access-test", "version": "1.0"},
             }),
         )

@@ -1046,7 +1046,7 @@ mod tests {
         let dispatcher = dispatcher();
         let mut session = SessionState::default();
         let reply = dispatcher
-            .execute(dispatcher.prepare(handshake("one", 5, 7), &mut session))
+            .execute(dispatcher.prepare(handshake("one", 5, 8), &mut session))
             .await;
         assert!(matches!(
             reply.response,
@@ -1101,7 +1101,7 @@ mod tests {
         let dispatcher = dispatcher();
         let mut session = SessionState::default();
         let _ = dispatcher
-            .execute(dispatcher.prepare(handshake("one", 7, 7), &mut session))
+            .execute(dispatcher.prepare(handshake("one", 8, 8), &mut session))
             .await;
         let request = serde_json::json!({ "id": "two", "method": "engine.state", "params": {} });
         let _ = dispatcher
@@ -1111,6 +1111,34 @@ mod tests {
             dispatcher.prepare(request, &mut session),
             PreparedRequest::Close(Some(ResponseEnvelope::Error { .. }), _)
         ));
+    }
+
+    #[tokio::test]
+    async fn a_computer_session_calls_as_that_computer_whatever_the_client_says() {
+        let dispatcher = dispatcher();
+        for (mut session, expected) in [
+            (
+                SessionState::for_computer("c1".into()),
+                Caller::Computer { id: "c1".into() },
+            ),
+            (SessionState::default(), Caller::owner("c1")),
+        ] {
+            let mut first = handshake("one", 8, 8);
+            first["params"]["client"] = serde_json::json!({ "name": "c1", "version": "0" });
+            let _ = dispatcher
+                .execute(dispatcher.prepare(first, &mut session))
+                .await;
+            let request = serde_json::json!({
+                "id": "two", "method": "engine.state", "params": { "computerId": "c2" }
+            });
+            let PreparedRequest::Invoke {
+                request_context, ..
+            } = dispatcher.prepare(request, &mut session)
+            else {
+                panic!("a request after the handshake is invoked");
+            };
+            assert_eq!(request_context.caller, expected);
+        }
     }
 
     #[test]

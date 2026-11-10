@@ -285,10 +285,7 @@ impl silo_engine::guest_client::Channels for Channels {
             }
         };
         let (closer, closed) = signal::channel(false);
-        if let Some((_, previous)) = self
-            .served()
-            .insert(computer_id.to_owned(), (port, closer))
-        {
+        if let Some((_, previous)) = self.served().insert(computer_id.to_owned(), (port, closer)) {
             let _ = previous.send(true);
         }
         let served = Served {

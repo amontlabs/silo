@@ -322,7 +322,10 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(params.token.as_deref(), Some("silo_gc_x"));
-        let without = HandshakeParams { token: None, ..params };
+        let without = HandshakeParams {
+            token: None,
+            ..params
+        };
         assert!(!serde_json::to_string(&without).unwrap().contains("token"));
     }
 

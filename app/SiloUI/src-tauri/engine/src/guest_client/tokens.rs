@@ -355,7 +355,9 @@ mod tests {
         assert!(store.verify(&minted.token, "main").is_some());
         assert!(store.verify(&minted.token, "fork-1").is_none());
         assert!(store.verify("silo_gc_nope", "main").is_none());
-        assert!(store.verify(&minted.token[PREFIX.len()..], "main").is_none());
+        assert!(store
+            .verify(&minted.token[PREFIX.len()..], "main")
+            .is_none());
         let mode = fs::metadata(store.file()).unwrap();
         assert_eq!(
             std::os::unix::fs::PermissionsExt::mode(&mode.permissions()) & 0o777,
@@ -369,7 +371,9 @@ mod tests {
         let store = TokenStore::new(dir.path());
         store.enable("main", 40001).unwrap();
         // The hash of an empty record never matches any token.
-        assert!(store.verify(&format!("{PREFIX}{}", "0".repeat(64)), "main").is_none());
+        assert!(store
+            .verify(&format!("{PREFIX}{}", "0".repeat(64)), "main")
+            .is_none());
         assert!(store.status("main").unwrap().unwrap().hash.is_empty());
     }
 

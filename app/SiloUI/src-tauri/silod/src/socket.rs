@@ -1853,7 +1853,7 @@ pub(crate) mod tests {
             &serde_json::json!({
                 "id": "handshake",
                 "method": "engine.handshake",
-                "params": { "protocol": { "min": 7, "max": 7 } }
+                "params": { "protocol": { "min": 8, "max": 8 } }
             }),
         )
         .await
@@ -1882,7 +1882,7 @@ pub(crate) mod tests {
             &serde_json::json!({
                 "id": "handshake",
                 "method": "engine.handshake",
-                "params": { "protocol": { "min": 7, "max": 7 } }
+                "params": { "protocol": { "min": 8, "max": 8 } }
             }),
         )
         .await

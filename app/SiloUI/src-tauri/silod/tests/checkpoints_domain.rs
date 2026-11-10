@@ -111,7 +111,7 @@ async fn the_domain_answers_over_the_socket_with_canonical_results_jobs_and_erro
         &mut client,
         "h",
         "engine.handshake",
-        json!({"protocol": {"min": 7, "max": 7}, "client": {"name": "integration-test", "version": "1.0"}}),
+        json!({"protocol": {"min": 8, "max": 8}, "client": {"name": "integration-test", "version": "1.0"}}),
     )
     .await;
     assert_eq!(success(handshake)["deviceId"], "fixture-device");

@@ -14,6 +14,7 @@ use serde_json::Value;
 use crate::{
     access,
     config::Project,
+    endpoint::Transport,
     engine::{build_channel, Engine},
     error::CliError,
     fanout::{self, ManyArgs},
@@ -22,9 +23,12 @@ use crate::{
     review, steps,
 };
 
+/// The tools a server inside a computer does not offer.
+pub const DEVICE_ONLY_TOOLS: &[&str] = &["review", "ssh_name", "request_open"];
+
 #[derive(Clone)]
 pub struct SiloMcp {
-    socket: PathBuf,
+    transport: Arc<Transport>,
     working_directory: PathBuf,
     engine: Arc<tokio::sync::Mutex<Option<Engine>>>,
     /// The client's name from `initialize`, lowercase: which `agents:` entry applies.
@@ -432,8 +436,52 @@ fn show(result: Result<Value, CliError>) -> Result<String, String> {
 #[tool_router]
 impl SiloMcp {
     pub fn new(socket: PathBuf, working_directory: PathBuf) -> Self {
+        Self::for_transport(Transport::Socket(socket), working_directory)
+    }
+
+    /// The server for `transport`. Inside a computer (its channel), the tools that only make
+    /// sense on the device are not offered: the hosted reviewer, SSH names and opening a
+    /// review request's fork from the device.
+    pub fn for_transport(transport: Transport, working_directory: PathBuf) -> Self {
+        let in_computer = matches!(transport, Transport::Channel(_));
+        let mut server = Self::with_transport(transport, working_directory);
+        if in_computer {
+            for name in DEVICE_ONLY_TOOLS {
+                server.tool_router.remove_route(name);
+            }
+        }
+        server
+    }
+
+    fn in_computer(&self) -> bool {
+        matches!(*self.transport, Transport::Channel(_))
+    }
+
+    /// Refuses what needs the device this server is not on: another device, or a folder.
+    fn on_the_device_only(
+        &self,
+        device: Option<&str>,
+        source: Option<&str>,
+    ) -> Result<(), CliError> {
+        if !self.in_computer() {
+            return Ok(());
+        }
+        if device.is_some_and(|device| device != "local") {
+            return Err(CliError::new(
+                "Connected devices are reached from the device, not from inside a computer.",
+            ));
+        }
+        if source.is_some_and(folder::is_folder) {
+            return Err(CliError::new(
+                "Forking a folder is done on the device, not from inside a computer.",
+            ));
+        }
+        Ok(())
+    }
+
+    fn with_transport(transport: Transport, working_directory: PathBuf) -> Self {
         Self {
-            socket,
+            transport: Arc::new(transport),
             working_directory,
             engine: Arc::new(tokio::sync::Mutex::new(None)),
             agent: Arc::new(std::sync::Mutex::new(None)),
@@ -463,6 +511,7 @@ impl SiloMcp {
     /// The one connection this server keeps, opened again when it has ended.
     /// The engine acting on `device` (a name or id), or on this device when none is given.
     async fn engine_on(&self, device: Option<&str>) -> Result<Engine, CliError> {
+        self.on_the_device_only(device, None)?;
         let engine = self.engine().await?;
         match device {
             None | Some("local") => Ok(engine),
@@ -509,7 +558,7 @@ impl SiloMcp {
         if let Some(engine) = held.as_ref().filter(|engine| !engine.is_closed()) {
             return Ok(engine.clone());
         }
-        let engine = Engine::connect(&self.socket).await?;
+        let engine = Engine::connect_to(&self.transport).await?;
         *held = Some(engine.clone());
         Ok(engine)
     }
@@ -599,6 +648,7 @@ impl SiloMcp {
                     .as_deref()
                     .map(|path| self.working_directory.join(path));
                 let source = params.source.unwrap_or_else(|| ops::MAIN.to_owned());
+                self.on_the_device_only(None, Some(&source))?;
                 if params.device.is_some() && folder::is_folder(&source) {
                     return Err(CliError::new(
                         "A folder is on this device, so `device` cannot be used with it.",
@@ -1472,11 +1522,11 @@ impl ServerHandler for SiloMcp {
 
 /// Serves the tools on stdin and stdout until the client closes them.
 pub async fn serve(
-    socket: PathBuf,
+    transport: Transport,
     working_directory: PathBuf,
     agent: Option<String>,
 ) -> Result<(), CliError> {
-    let server = SiloMcp::new(socket, working_directory).with_agent(agent);
+    let server = SiloMcp::for_transport(transport, working_directory).with_agent(agent);
     let service = server
         .clone()
         .serve(rmcp::transport::stdio())
@@ -1486,4 +1536,46 @@ pub async fn serve(
     server.close_sessions(|_| true).await;
     stopped.map_err(|error| CliError::new(format!("The MCP server stopped: {error}")))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod in_computer_tests {
+    use super::*;
+    use crate::endpoint::Endpoint;
+
+    fn channel() -> Transport {
+        Transport::Channel(Endpoint {
+            host: "127.0.0.1".into(),
+            port: 9,
+            token: "silo_gc_x".into(),
+            computer_id: "c1".into(),
+        })
+    }
+
+    #[test]
+    fn inside_a_computer_the_device_only_tools_are_not_listed() {
+        let on_device = SiloMcp::new("/nowhere.sock".into(), std::env::temp_dir());
+        let inside = SiloMcp::for_transport(channel(), std::env::temp_dir());
+        for name in DEVICE_ONLY_TOOLS {
+            assert!(on_device.tool_router.has_route(name), "{name}");
+            assert!(!inside.tool_router.has_route(name), "{name}");
+        }
+        for name in ["list", "fork", "diff", "exec", "drop"] {
+            assert!(inside.tool_router.has_route(name), "{name}");
+        }
+    }
+
+    #[test]
+    fn inside_a_computer_another_device_and_a_folder_are_refused() {
+        let inside = SiloMcp::for_transport(channel(), std::env::temp_dir());
+        assert!(inside.on_the_device_only(Some("laptop"), None).is_err());
+        assert!(inside.on_the_device_only(Some("local"), None).is_ok());
+        let path = "./repo".to_owned();
+        let refused = inside.on_the_device_only(None, Some(&path)).unwrap_err();
+        assert!(refused.message.contains("device"), "{}", refused.message);
+        let on_device = SiloMcp::new("/nowhere.sock".into(), std::env::temp_dir());
+        assert!(on_device
+            .on_the_device_only(Some("laptop"), Some(&path))
+            .is_ok());
+    }
 }

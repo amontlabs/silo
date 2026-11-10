@@ -1736,7 +1736,7 @@ mod tests {
                 self.engine.clone(),
                 RequestContext {
                     client_id: client.into(),
-                    protocol: 7,
+                    protocol: 8,
                     client: None,
                     caller: silo_engine::policy::Caller::owner("test"),
                 },

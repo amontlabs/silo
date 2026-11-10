@@ -174,9 +174,7 @@ impl Watcher {
 
     /// Each computer's id and whether it is running, as the engine lists them.
     fn states(&self) -> Option<HashMap<String, bool>> {
-        let tree = self
-            .owner_call(MethodName::ComputersTree, json!({}))
-            .ok()?;
+        let tree = self.owner_call(MethodName::ComputersTree, json!({})).ok()?;
         let nodes = tree.get("nodes")?.as_array()?;
         Some(
             nodes
@@ -193,8 +191,9 @@ impl Watcher {
 
     fn check(&self, computer_id: &str) -> Result<bool, String> {
         let runtime = silo_engine::runtime::runtime_paths(self.context.runtime_host().as_ref());
-        let target = silo_engine::guest::resolve(runtime, &self.context.paths().app_data, computer_id)
-            .map_err(|error| error.message)?;
+        let target =
+            silo_engine::guest::resolve(runtime, &self.context.paths().app_data, computer_id)
+                .map_err(|error| error.message)?;
         endpoint::ensure(&target, &self.store)
     }
 
@@ -261,10 +260,8 @@ impl Watcher {
                 .into_iter()
                 .filter(|job| now.saturating_sub(job.at) > JOB_AGE)
             {
-                let state = self.owner_call(
-                    MethodName::OperationsJobGet,
-                    json!({ "jobId": job.id }),
-                );
+                let state =
+                    self.owner_call(MethodName::OperationsJobGet, json!({ "jobId": job.id }));
                 if matches!(&state, Ok(reply) if reply["state"] != "finished") {
                     continue;
                 }

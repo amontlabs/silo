@@ -2653,7 +2653,7 @@ pub(crate) mod tests {
             fixture().context.clone(),
             RequestContext {
                 client_id: "access-test-client".to_owned(),
-                protocol: 7,
+                protocol: 8,
                 client: None,
                 caller: silo_engine::policy::Caller::owner("test"),
             },
@@ -4114,7 +4114,7 @@ pub(crate) mod tests {
         let subscribe = |params: Value| {
             let request = RequestContext {
                 client_id: "subscriber".to_owned(),
-                protocol: 7,
+                protocol: 8,
                 client: None,
                 caller: silo_engine::policy::Caller::owner("test"),
             };

@@ -1205,7 +1205,7 @@ exit 2
                 engine.clone(),
                 RequestContext {
                     client_id: "client-a".into(),
-                    protocol: 7,
+                    protocol: 8,
                     client: None,
                     caller: silo_engine::policy::Caller::owner("test"),
                 },

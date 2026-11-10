@@ -91,7 +91,7 @@ fn fixture_at(home: &std::path::Path) -> Fixture {
         silod.clone(),
         RequestContext {
             client_id: "services-client".to_owned(),
-            protocol: 7,
+            protocol: 8,
             client: None,
             caller: silo_engine::policy::Caller::owner("test"),
         },

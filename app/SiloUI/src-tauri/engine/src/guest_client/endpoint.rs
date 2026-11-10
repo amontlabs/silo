@@ -63,7 +63,11 @@ pub fn matches(text: &[u8], record: &Record) -> bool {
         && same(&hash_of(&file.token), &record.hash)
 }
 
-fn run_as_root(target: &Target, argv: &[&str], stdin: Option<Vec<u8>>) -> Result<guest::ExecOutput, String> {
+fn run_as_root(
+    target: &Target,
+    argv: &[&str],
+    stdin: Option<Vec<u8>>,
+) -> Result<guest::ExecOutput, String> {
     guest::run_bounded(
         target,
         &ExecRequest {
@@ -94,7 +98,13 @@ pub fn write(target: &Target, store: &TokenStore) -> Result<(), String> {
     let text = file_text(&minted.record, &minted.token)?;
     let output = run_as_root(
         target,
-        &["sh", "-c", WRITE_SCRIPT, "silo-endpoint", GUEST_ENDPOINT_PATH],
+        &[
+            "sh",
+            "-c",
+            WRITE_SCRIPT,
+            "silo-endpoint",
+            GUEST_ENDPOINT_PATH,
+        ],
         Some(text.into_bytes()),
     )?;
     if output.exit_code != Some(0) {
@@ -155,9 +165,27 @@ mod tests {
         let current = store.mint("main").unwrap();
         let text = file_text(&current.record, &current.token).unwrap();
         assert!(matches(text.as_bytes(), &current.record));
-        assert!(!matches(text.as_bytes(), &Record { port: Some(40002), ..current.record.clone() }));
-        assert!(!matches(text.as_bytes(), &Record { computer_id: "fork".into(), ..current.record.clone() }));
-        assert!(!matches(text.as_bytes(), &Record { hash: String::new(), ..current.record.clone() }));
+        assert!(!matches(
+            text.as_bytes(),
+            &Record {
+                port: Some(40002),
+                ..current.record.clone()
+            }
+        ));
+        assert!(!matches(
+            text.as_bytes(),
+            &Record {
+                computer_id: "fork".into(),
+                ..current.record.clone()
+            }
+        ));
+        assert!(!matches(
+            text.as_bytes(),
+            &Record {
+                hash: String::new(),
+                ..current.record.clone()
+            }
+        ));
         assert!(!matches(b"not json", &current.record));
         assert!(!matches(b"", &current.record));
     }

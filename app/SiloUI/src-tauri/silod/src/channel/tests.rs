@@ -51,7 +51,9 @@ impl MethodRegistry for EchoCaller {
         _request: RequestContext,
     ) -> StreamFuture<'a> {
         Box::pin(async move {
-            Err(DispatchError::unsupported(crate::dispatcher::method_name(method)))
+            Err(DispatchError::unsupported(crate::dispatcher::method_name(
+                method,
+            )))
         })
     }
 }
@@ -129,7 +131,10 @@ async fn a_valid_token_is_served_and_every_request_is_its_computers() {
     let (mut stream, answer) = first_answer(port, &handshake(Some(TOKEN_A), json!({}))).await;
     let answer = answer.expect("a valid handshake is answered");
     assert_eq!(answer["result"]["protocol"], 8);
-    assert_eq!(caller_of(&mut stream, "1").await, r#"Computer { id: "computer-a" }"#);
+    assert_eq!(
+        caller_of(&mut stream, "1").await,
+        r#"Computer { id: "computer-a" }"#
+    );
 }
 
 #[tokio::test]
@@ -145,10 +150,19 @@ async fn nothing_but_the_token_and_the_port_chooses_the_computer() {
     });
     let (mut stream, answer) = first_answer(port_a, &handshake(Some(TOKEN_A), claims)).await;
     assert!(answer.is_some());
-    assert_eq!(caller_of(&mut stream, "1").await, r#"Computer { id: "computer-a" }"#);
+    assert_eq!(
+        caller_of(&mut stream, "1").await,
+        r#"Computer { id: "computer-a" }"#
+    );
     // A's token on B's port, and B's on A's, are refused.
-    assert!(first_answer(port_b, &handshake(Some(TOKEN_A), json!({}))).await.1.is_none());
-    assert!(first_answer(port_a, &handshake(Some(TOKEN_B), json!({}))).await.1.is_none());
+    assert!(first_answer(port_b, &handshake(Some(TOKEN_A), json!({})))
+        .await
+        .1
+        .is_none());
+    assert!(first_answer(port_a, &handshake(Some(TOKEN_B), json!({})))
+        .await
+        .1
+        .is_none());
 }
 
 #[tokio::test]
@@ -197,7 +211,10 @@ fn the_handshake_check_needs_the_method_and_this_computers_token() {
         check(&handshake(Some(TOKEN_A), json!({})), B),
         Err(Refusal::BadHandshake)
     );
-    assert_eq!(check(&handshake(None, json!({})), A), Err(Refusal::BadHandshake));
+    assert_eq!(
+        check(&handshake(None, json!({})), A),
+        Err(Refusal::BadHandshake)
+    );
     let mut renamed = handshake(Some(TOKEN_A), json!({}));
     renamed["method"] = json!("engine.state");
     assert_eq!(check(&renamed, A), Err(Refusal::BadHandshake));
@@ -218,14 +235,20 @@ async fn a_computer_holds_a_bounded_number_of_connections() {
     }
     let begun = Instant::now();
     let mut extra = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
-    let closed = tokio::time::timeout(Duration::from_secs(5), read_json_frame::<_, Value>(&mut extra))
-        .await
-        .unwrap();
+    let closed = tokio::time::timeout(
+        Duration::from_secs(5),
+        read_json_frame::<_, Value>(&mut extra),
+    )
+    .await
+    .unwrap();
     assert!(!matches!(closed, Ok(Some(_))));
     assert!(begun.elapsed() < REFUSAL_DELAY, "closed at once, not held");
     // Another computer's places are its own.
     let port_b = serve(&channels, B);
-    assert!(first_answer(port_b, &handshake(Some(TOKEN_B), json!({}))).await.1.is_some());
+    assert!(first_answer(port_b, &handshake(Some(TOKEN_B), json!({})))
+        .await
+        .1
+        .is_some());
     drop(held);
 }
 
@@ -238,9 +261,12 @@ async fn turning_the_tools_off_ends_open_sessions_and_the_port() {
     assert!(channels.serving(A));
     channels.close(A);
     assert!(!channels.serving(A));
-    let ended = tokio::time::timeout(Duration::from_secs(5), read_json_frame::<_, Value>(&mut stream))
-        .await
-        .expect("the session ends");
+    let ended = tokio::time::timeout(
+        Duration::from_secs(5),
+        read_json_frame::<_, Value>(&mut stream),
+    )
+    .await
+    .expect("the session ends");
     assert!(!matches!(ended, Ok(Some(_))));
     let mut refused = false;
     for _ in 0..50 {
@@ -295,7 +321,10 @@ fn at_start_a_free_port_is_kept_and_a_taken_one_moves_with_no_valid_token() {
     assert_ne!(moved, taken_port);
     assert_eq!(store.port_of(B), Some(moved));
     assert!(store.verify(&token_a, A).is_some());
-    assert!(store.verify(&token_b, B).is_none(), "the token may have gone to the other program");
+    assert!(
+        store.verify(&token_b, B).is_none(),
+        "the token may have gone to the other program"
+    );
     drop(taken);
 }
 
@@ -314,7 +343,11 @@ fn records_of_the_earlier_client_are_adopted_and_turned_off() {
     .unwrap();
     store.enable("computer-c", 40123).unwrap();
     adopt_earlier_records(&store, &policy);
-    assert!(store.all().unwrap().iter().all(|record| record.computer_id != A));
+    assert!(store
+        .all()
+        .unwrap()
+        .iter()
+        .all(|record| record.computer_id != A));
     assert_eq!(store.port_of("computer-c"), Some(40123));
     let document = policy.snapshot().unwrap();
     assert!(document.made_by(A).contains(B));
@@ -329,11 +362,17 @@ fn the_endpoint_file_is_looked_at_on_each_start_after_changes_and_now_and_then()
     assert!(!due(&fresh, false, 0, now), "never while stopped");
     let checked = Seen::for_test(true, 3, now, None);
     assert!(!due(&checked, true, 3, now + Duration::from_secs(1)));
-    assert!(!due(&checked, true, 4, now + Duration::from_secs(1)), "a change waits a little");
+    assert!(
+        !due(&checked, true, 4, now + Duration::from_secs(1)),
+        "a change waits a little"
+    );
     assert!(due(&checked, true, 4, now + Duration::from_secs(31)));
     assert!(due(&checked, true, 3, now + Duration::from_secs(601)));
     let restarted = Seen::for_test(false, 3, now, None);
-    assert!(due(&restarted, true, 3, now + Duration::from_secs(1)), "a start");
+    assert!(
+        due(&restarted, true, 3, now + Duration::from_secs(1)),
+        "a start"
+    );
     let failed = Seen::for_test(true, 3, now, Some(now + Duration::from_secs(5)));
     assert!(!due(&failed, true, 3, now + Duration::from_secs(1)));
     assert!(due(&failed, true, 3, now + Duration::from_secs(6)));

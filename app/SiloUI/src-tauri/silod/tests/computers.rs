@@ -60,7 +60,7 @@ impl Session {
             .request(
                 "engine.handshake",
                 json!({
-                    "protocol": {"min": 7, "max": 7},
+                    "protocol": {"min": 8, "max": 8},
                     "client": {"name": "computers-socket-test", "version": "1"}
                 }),
             )
