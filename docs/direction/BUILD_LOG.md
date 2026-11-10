@@ -35,7 +35,7 @@ Plan: [PLAN.md](PLAN.md). Agent rules: [AGENT-BRIEF.md](AGENT-BRIEF.md).
 | T7 | merged 2026-11-10 | `fix/macos-nat-boundary` | 530 macOS engine tests passed; unit tests only, no macOS computer run; one review round on the fallback model. Live steps are in the item's report, copied below |
 | T11 review | done 2026-11-10 (Sonnet) | | no token value leaks found. Ten findings; the important ones: a network failure detached computers (also true before T11), a stale check could overwrite a newer token's state, and an agent's request for token access was summarised without saying a full-permission token is given, with a missing id bound to the owner's `github-token` after approval. All ten fixed and merged 2026-11-10 (`fix/github-token-review`); api 63, silod 353, engine github/secrets/policy 297 and 902 frontend tests passed in the item. For the owner: the old single-token fallback applies only in a session where a client used the old methods; a token with no answer since start shows waiting and its computers stay detached until GitHub answers |
 | T8 | running since 2026-11-10 | | task id ends `79d02ce1-40dd-4324-bd62-4aa92e074893` (Opus); includes a runtime patch (`restore --net-strict`) and a live check in a private runtime home; no review in the item (quota), orchestrator arranges it |
-| T14 | running since 2026-11-10 | | task id ends `daee93c4-fbae-4cc0-8abb-9e9e902d2ca4` (Sonnet); holds the Dev engine for its live canary check |
+| T14 | merged 2026-11-10 | `feat/exclude-logins-export` | 998 focused tests passed after the merge. **The canary failed**: the imported computer has no login files, but both markers are still in the export file, in the base disk layers (a fork's disks are layers over the source's and `msb` cannot flatten them; trimming reaches only the top layer). Shipped as best effort with the wording "removed, traces may remain". [evidence](evidence/T14.txt). Linux virtual machines only; checkpoint, macOS and container exports keep the old warning. The Dev engine is stopped and free |
 
 Task ids are `node:delegated-task:command%3Amcp%3Ad723019c-0dae-419c-8e5d-2e7d794e60f4%3Adelegate-task%3A<ending>`.
 Next waves are in the plan's work items table; start an item only when the items before it in
@@ -75,6 +75,13 @@ These were not asked of the owner. Each is open to change.
     requests, which narrows it).
 
 ## Found during the build
+
+- **T14, for the owner:** keep removal on by default despite the caveat, or go back to ask-first?
+  A real fix needs layer flattening in the runtime. The removal uses the whole known-credential
+  list, so it also takes key files (`*.pem`, `*.key`) found in the scanned folders; the dialog
+  lists them first. A copy left by an engine crash mid-export stays hidden until the next
+  scrubbed export drops it. Cancelling and a crash mid-export were not tried live; the dialog was
+  not run on screen. The stale Silo Dev app and engine were stopped through `engine.shutdown`.
 
 - **T1 boundary review (Opus), all being fixed in the T1 fix task:** (1) high: `forget_makers`
   was never called, so after the owner approves "replace main with fork F" the old main still
