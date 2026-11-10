@@ -24,6 +24,8 @@ export const settingSchemas = {
   notifyFailures: z.boolean(),
   notifyChanges: z.boolean(),
   notifyCompletions: z.boolean(),
+  /** Whether a computer's agent asking for your answer sends a system notification. */
+  notifyApprovals: z.boolean(),
   onboardingComplete: z.boolean(),
   alphaNoticeDismissed: z.boolean(),
   /** The SSH `Include` line whose notice was dismissed; a different needed line shows it again. */
@@ -56,6 +58,7 @@ export const defaultSettings: Settings = {
   notifyFailures: true,
   notifyChanges: true,
   notifyCompletions: true,
+  notifyApprovals: true,
   onboardingComplete: false,
   alphaNoticeDismissed: false,
   editorIncludeNoticeDismissed: null,

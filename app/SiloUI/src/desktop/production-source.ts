@@ -6,8 +6,8 @@ import { listen } from "@tauri-apps/api/event"
 import { useMemo, useSyncExternalStore } from "react"
 import { z } from "zod"
 import { showOperationFailure } from "@/lib/operation-toast"
-import { computerTreeSchema, directoryPageShape, githubStateShape, keepRequestResultSchema, openRequestResultSchema, parseApplicationSource, parseBackupState, parseRemoteApplicationSource, requestDetailSchema, requestListSchema, secretShape, stepListSchema, throwAwayResultSchema } from "./production-schemas"
-import type { ComputerStep, ComputerTreeNode, KeepRequestResult, OpenRequestResult, RequestDetail, RequestList, ThrowAwayResult } from "./production-schemas"
+import { approvalJobSchema, approvalListSchema, approvalShape, auditListSchema, computerTreeSchema, deviceResourcesSchema, directoryPageShape, githubStateShape, keepRequestResultSchema, openRequestResultSchema, parseApplicationSource, parseBackupState, parseRemoteApplicationSource, requestDetailSchema, requestListSchema, secretShape, stepListSchema, throwAwayResultSchema } from "./production-schemas"
+import type { Approval, ApprovalJob, ApprovalList, ApprovalState, AuditCallerKind, AuditPage, ComputerStep, ComputerTreeNode, DeviceResources, KeepRequestResult, OpenRequestResult, RequestDetail, RequestList, ThrowAwayResult } from "./production-schemas"
 export { parseApplicationSource, parseBackupState, parseNetworkState, parseRemoteApplicationSource, parseSshAccessState } from "./production-schemas"
 
 import { siloProgressEventSchema, setupComputerConfigurationSchema, type SetupComputerConfiguration, type SiloProgressEvent, type SetupComputerConfigurationRequest, type SetupQueueItemID } from "@/contracts/silo"
@@ -55,8 +55,11 @@ export async function showReviewRequest(target: ReviewRequestTarget, native: Pro
   return requestDetailSchema.parse(await native.invoke("show_review_request", target))
 }
 
-/** Keeps the fork's changes into its target; a stale request is refused. `dataOk` carries database changes. */
-export async function keepReviewRequest(target: ReviewRequestTarget & { dataOk?: boolean }, native: ProductionBridge = bridge): Promise<KeepRequestResult> {
+/** How a conflict is settled: the fork's version, main's, or (a repository) the fork's commits left as a branch. */
+export type MergeChoice = "fork" | "main" | "branch"
+
+/** Merges the fork's changes into its target; a stale request is refused. `dataOk` carries database changes; `choices` answers each conflict by its id. */
+export async function keepReviewRequest(target: ReviewRequestTarget & { dataOk?: boolean, choices?: Record<string, MergeChoice> }, native: ProductionBridge = bridge): Promise<KeepRequestResult> {
   return keepRequestResultSchema.parse(await native.invoke("keep_review_request", target))
 }
 
@@ -68,6 +71,44 @@ export async function throwAwayReviewRequest(target: ReviewRequestTarget, native
 /** Starts the fork when needed and returns where to reach it. */
 export async function openReviewRequest(target: ReviewRequestTarget, native: ProductionBridge = bridge): Promise<OpenRequestResult> {
   return openRequestResultSchema.parse(await native.invoke("open_review_request", target))
+}
+
+/** What the agents inside computers ask for; `state` keeps only the approvals in that state. */
+export async function listApprovals(options: { state?: ApprovalState } = {}, native: ProductionBridge = bridge): Promise<ApprovalList> {
+  return approvalListSchema.parse(await native.invoke("list_approvals", options))
+}
+
+/** Answers a waiting approval. Allowing it makes the engine run the stored call. */
+export async function decideApproval(answer: { id: string, decision: "allow" | "deny", note?: string }, native: ProductionBridge = bridge): Promise<Approval> {
+  return approvalShape.parse(await native.invoke("decide_approval", answer))
+}
+
+/** How the job an allowed approval started is going. */
+export async function readApprovalJob(jobId: string, native: ProductionBridge = bridge): Promise<ApprovalJob> {
+  return approvalJobSchema.parse(await native.invoke("read_approval_job", { jobId }))
+}
+
+/** Who did what, newest first. Pass the previous page's `nextBeforeId` as `beforeId` for the next page. */
+export async function listAudit(options: { computerId?: string, callerKind?: AuditCallerKind, beforeId?: number, limit?: number } = {}, native: ProductionBridge = bridge): Promise<AuditPage> {
+  return auditListSchema.parse(await native.invoke("list_audit", options))
+}
+
+/** What this device (or another) has left in memory and disk. */
+export async function readDeviceResources(deviceId?: string, native: ProductionBridge = bridge): Promise<DeviceResources> {
+  return deviceResourcesSchema.parse(await native.invoke("read_device_resources", { deviceId }))
+}
+
+export const APPROVALS_CHANGED_EVENT = "silo://approvals-changed"
+
+/** Calls `onChange` whenever an approval changes; returns the function that stops listening. */
+export function watchApprovals(onChange: () => void, native: ProductionBridge = bridge): () => void {
+  let stopped = false
+  let stop: (() => void) | undefined
+  native.listen(APPROVALS_CHANGED_EVENT, () => onChange()).then(
+    unlisten => { if (stopped) unlisten(); else stop = unlisten },
+    (cause: unknown) => console.error("Silo approvals:", errorMessage(cause)),
+  )
+  return () => { stopped = true; stop?.() }
 }
 
 /** The recorded steps of a computer, oldest first. */
@@ -1183,6 +1224,12 @@ export function createProductionSource(native: ProductionBridge = bridge) {
     reclaimWorkspaceStorage: async computerId => workspaceStorageStateSchema.parse(await native.invoke("reclaim_workspace_storage", { computerId })),
     refreshSshAccess: services.refreshSshAccess,
     listReviewRequests: options => listReviewRequests(options, native),
+    listApprovals: options => listApprovals(options, native),
+    decideApproval: answer => decideApproval(answer, native),
+    watchApprovals: onChange => watchApprovals(onChange, native),
+    readApprovalJob: jobId => readApprovalJob(jobId, native),
+    listAudit: options => listAudit(options, native),
+    readDeviceResources: deviceId => readDeviceResources(deviceId, native),
     sshConnection: (computer, download, network) => {
       const remote = parseRemoteComputerTarget(computer)
       return native.invoke<string | null>("ssh_connection", remote ? { ...remote, download, ...(network === undefined ? {} : { network }) } : { computer, download, ...(network === undefined ? {} : { network }) })
@@ -1342,6 +1389,9 @@ export function createProductionSource(native: ProductionBridge = bridge) {
 
   const statusActions: StatusBarActions = {
     listComputerDirectory: applicationActions.listComputerDirectory,
+    listApprovals: applicationActions.listApprovals,
+    listReviewRequests: applicationActions.listReviewRequests,
+    watchApprovals: applicationActions.watchApprovals,
     startComputer: applicationActions.startComputer,
     stopComputer: applicationActions.stopComputer,
     restartComputer: applicationActions.restartComputer,

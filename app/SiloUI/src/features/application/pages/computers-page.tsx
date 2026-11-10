@@ -6,7 +6,7 @@ import { FolderActions } from "@/features/application/components/folder-actions"
 import { ComputerFileTree } from "@/features/application/components/computer-file-tree"
 import { useFileTransferControls } from "@/features/application/components/use-file-transfers"
 import type { createDirectoryStore } from "@/features/application/model/directory-store"
-import { memo, useEffect, useId, useMemo, useState } from "react"
+import { memo, useEffect, useId, useMemo, useState, type ReactNode } from "react"
 import { computerCan, kindOf } from "@/features/computers/model/computer-capabilities"
 import { useMacosComputers } from "@/features/macos-computers/model/macos-computers"
 import { Activity, Archive, Box, Boxes, Check, CircleAlert, Cloud, File, GitBranch, KeyRound, Plus, RefreshCw, TriangleAlert, Wrench } from "lucide-react"
@@ -35,6 +35,8 @@ import { showActionFailure } from "@/lib/operation-toast"
 import { cn } from "@/lib/utils"
 import { useStableCallback } from "@/lib/use-stable-callback"
 import { lazyPage } from "@/features/application/components/lazy-page"
+import { AuditLog } from "@/features/application/components/audit-log"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { LazyBoundary } from "@/features/application/components/panel-content"
 
 const logsPage = lazyPage(() => import("./logs-page"), "Logs")
@@ -326,6 +328,31 @@ function ActivityLog({ computers, sourceActivities, filtered, onShowLogs }: { co
   )
 }
 
+/** The Activity section: what happened to the computers, and, where the engine keeps it, who did what. */
+function ActivityView({ events, auditRead, computers, active, onOpenApproval }: {
+  events: ReactNode
+  auditRead: ApplicationActions["listAudit"]
+  computers: readonly ApplicationComputer[]
+  active: boolean
+  onOpenApproval?: (approvalId: string) => void
+}) {
+  const [view, setView] = useState<"events" | "audit">("events")
+  if (!auditRead) return events
+  return (
+    <div className="flex h-full min-h-0 flex-col gap-3">
+      <Tabs value={view} onValueChange={value => setView(value as "events" | "audit")} className="shrink-0">
+        <TabsList variant="line" className="-ml-1.5 w-fit">
+          <TabsTrigger value="events" className="text-xs">Events</TabsTrigger>
+          <TabsTrigger value="audit" className="text-xs">Who did what</TabsTrigger>
+        </TabsList>
+      </Tabs>
+      <div className="min-h-0 flex-1">
+        {view === "events" ? events : <AuditLog read={auditRead} computers={computers} active={active} onOpenApproval={onOpenApproval} />}
+      </div>
+    </div>
+  )
+}
+
 export function ComputersPage({
   source,
   network, networkError, networkActions, onSectionChange,
@@ -346,6 +373,7 @@ export function ComputersPage({
   onDismissRepositoryPush,
   onCreateComputer,
   operationQueue,
+  onOpenApproval,
   notifyOperations = true,
 }: {
   /** The application source, for the same availability rules as the other surfaces. */
@@ -371,6 +399,8 @@ export function ComputersPage({
   onDismissRepositoryPush: (computer: string, repositoryPath: string) => void
   /** Opens the new-computer editor; omitted while a computer cannot be created. */
   onCreateComputer?: () => void
+  /** Opens an approval on the Pending page, from a row of Who did what. */
+  onOpenApproval?: (approvalId: string) => void
   /** Standalone pages own notifications; ApplicationApp owns them across navigation. */
   notifyOperations?: boolean
   /** Lets a running push be cancelled from its notification. */
@@ -449,7 +479,10 @@ export function ComputersPage({
       {section === "files" && <Files source={source} onRefreshRepositories={networkActions.refreshRepositories} editor={editor} onOpenEditor={onOpenEditor} directoryStore={directoryStore} active={active} computers={visibleComputers} repositoryPushOperations={repositoryPushOperations} onPushRepository={onPushRepository} onDismissRepositoryPush={onDismissRepositoryPush} />}
       {section === "logs" && <LazyBoundary><Logs key={logTargetsKey} computers={visibleComputers} query={logQuery} onQueryChange={onLogQueryChange} actions={networkActions} active={active} window={logWindow} onWindowChange={setLogWindow} /></LazyBoundary>}
       {section === "network" && <LazyBoundary><NetworkPage computers={visibleComputers} browser={browser} network={network} error={networkError} actions={networkActions} active={active} /></LazyBoundary>}
-      {section === "activity" && <ActivityLog computers={visibleComputers} sourceActivities={activities} filtered={selection.size > 0} onShowLogs={showActivityLogs} />}
+      {section === "activity" && <ActivityView
+        events={<ActivityLog computers={visibleComputers} sourceActivities={activities} filtered={selection.size > 0} onShowLogs={showActivityLogs} />}
+        auditRead={networkActions.listAudit} computers={listed} active={active} onOpenApproval={onOpenApproval}
+      />}
     </PageContainer>
   )
 }

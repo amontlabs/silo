@@ -2,6 +2,8 @@ import { useLifecycleToasts } from "./model/use-lifecycle-toasts"
 import { useRepositoryPushToasts } from "./components/use-repository-push-toasts"
 import { computerTarget } from "./model/connections"
 import { useBackendNotices } from "@/features/application/model/use-backend-notices"
+import { usePending } from "@/features/application/model/use-pending-changes"
+import { dismissOperationToast } from "@/lib/operation-toast"
 import { useUpdates } from "@/features/updates/update-store"
 import { updateCommands } from "@/features/updates/update-commands"
 import { useAppMenu } from "@/desktop/app-menu"
@@ -136,7 +138,6 @@ export function ApplicationApp(props: ApplicationAppProps) {
 
 function ApplicationContent({ source: nativeSource, actions: nativeActions, backup, initialRoute, routeRequest, connectQuitConfirmation, onOpenRequest }: ApplicationAppProps) {
   const { source, actions } = useMacosApplication(nativeSource, nativeActions)
-  useBackendNotices()
   useEffect(() => preloadWhenIdle(secondaryPages), [])
   const updates = useUpdates()
   const installingUpdate = updates?.snapshot?.phase === "installing"
@@ -192,6 +193,20 @@ function ApplicationContent({ source: nativeSource, actions: nativeActions, back
   // Reported by the page once it is mounted; backend activity is derived from the source.
   const [githubBusy, setGitHubBusy] = useState(false)
   const visibleTab = activeTab
+  const pending = usePending(actions, visibleTab === "changes")
+  const [openApproval, setOpenApproval] = useState<{ id: string; token: number }>()
+  useBackendNotices((notice) => {
+    navigation.selectTab("changes")
+    if (notice.key.startsWith("approval:")) setOpenApproval({ id: notice.key.slice("approval:".length), token: nextRequestToken() })
+  })
+  // An approval answered elsewhere, or gone, no longer needs its toast.
+  const waitingIds = pending.waiting.flatMap(row => row.kind === "approval" ? [row.approval.id] : []).join("\n")
+  const toasted = useRef(new Set<string>())
+  useEffect(() => {
+    const current = new Set(waitingIds ? waitingIds.split("\n") : [])
+    for (const id of toasted.current) if (!current.has(id)) dismissOperationToast(`approval:${id}`)
+    toasted.current = current
+  }, [waitingIds])
   const visibleComputerSection = computerSection
   const preferences = useMemo(() => ({ ...source.preferences, ...settings }), [source.preferences, settings])
   const applicationSource = useMemo<ApplicationSource>(() => ({
@@ -314,6 +329,7 @@ function ApplicationContent({ source: nativeSource, actions: nativeActions, back
     if (route.computerSection || route.computer) navigation.selectComputerSection(route.computerSection ?? "overview")
     else if (route.settingsSection) navigation.selectSettingsSection(route.settingsSection)
     else if (route.tab) navigation.selectTab(route.tab)
+    if (route.tab === "changes" && route.approval) setOpenApproval({ id: route.approval, token: nextRequestToken() })
   })
 
   const navigateRequested = useEffectEvent(navigateCommand)
@@ -403,6 +419,7 @@ function ApplicationContent({ source: nativeSource, actions: nativeActions, back
       systemIssueStatus={activeRuntimeRepair?.status ?? null}
       computerAttention={computerAttention}
       navigationLoading={navigationLoading}
+      pendingCount={pending.count}
       onTabChange={navigation.selectTab}
       onComputerSectionChange={navigation.selectComputerSection}
       onSettingsSectionChange={navigation.selectSettingsSection}
@@ -456,12 +473,13 @@ function ApplicationContent({ source: nativeSource, actions: nativeActions, back
             operationQueue={source.operationQueue}
             onDismissRepositoryPush={dismissRepositoryPush}
             onCreateComputer={canCreateComputer && !installingUpdate ? requestNewComputer : undefined}
+            onOpenApproval={(id) => { navigation.selectTab("changes"); setOpenApproval({ id, token: nextRequestToken() }) }}
           />
         )}
       </section>
       <section id="application-panel-changes" role="region" aria-labelledby="application-nav-changes" hidden={visibleTab !== "changes"}>
         <PanelContent active={visibleTab === "changes"}>
-          <PendingChangesPage listReviewRequests={actions.listReviewRequests} reviewActions={actions.reviewRequestActions} active={visibleTab === "changes"} onOpenRequest={(requestId, deviceId) => onOpenRequest?.(requestId, deviceId)} />
+          <PendingChangesPage pending={pending} actions={actions} reviewActions={actions.reviewRequestActions} openApproval={openApproval} onOpenRequest={(requestId, deviceId) => onOpenRequest?.(requestId, deviceId)} />
         </PanelContent>
       </section>
       <section id="application-panel-github" role="region" aria-labelledby="application-nav-github" hidden={visibleTab !== "github"} className="h-full min-h-0 overflow-hidden">

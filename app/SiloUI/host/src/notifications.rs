@@ -84,6 +84,12 @@ impl Notice {
     /// Where a click on the system notification opens the app. Same shape as
     /// `desktop/use-main-route.ts`.
     pub fn route(&self) -> Value {
+        if self.category == Category::Approvals {
+            return match self.key.strip_prefix("approval:") {
+                Some(id) => serde_json::json!({"tab": "changes", "approval": id}),
+                None => serde_json::json!({"tab": "changes"}),
+            };
+        }
         match &self.computer {
             Some(computer) => serde_json::json!({"tab": "computers", "computer": computer.id}),
             None => serde_json::json!({"tab": "computers"}),
@@ -633,6 +639,17 @@ mod tests {
         notice.computer = None;
         assert_eq!(notice.route(), json!({"tab": "computers"}));
         assert_eq!(notice.thread(), "failures");
+    }
+    #[test]
+    fn an_approval_notice_opens_its_request_on_the_pending_page() {
+        let mut notice = failure("approval:ap-1", "main asks: Publish port 8080", "", computer());
+        notice.category = Category::Approvals;
+        assert_eq!(
+            notice.route(),
+            json!({"tab": "changes", "approval": "ap-1"})
+        );
+        notice.key = "other".into();
+        assert_eq!(notice.route(), json!({"tab": "changes"}));
     }
     #[test]
     fn clearing_remote_notices_preserves_other_devices_with_the_same_computer_id() {

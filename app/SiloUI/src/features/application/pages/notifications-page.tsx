@@ -1,4 +1,4 @@
-import { Bell, CircleAlert, CircleCheck, HeartPulse } from "lucide-react"
+import { Bell, CircleAlert, CircleCheck, HeartPulse, ShieldQuestion } from "lucide-react"
 
 import { ListCard, ListRow, ListRowIcon } from "@/components/list-row"
 import { PageContainer, PageHeader, SectionHeading } from "@/components/page"
@@ -11,6 +11,7 @@ const categories = [
   { id: "notifyFailures", label: "Failures", detail: "Actions and background work that fail, such as start, push, computer export, or computer import.", icon: CircleAlert },
   { id: "notifyChanges", label: "Unexpected computer changes", detail: "A computer stops, fails, or recovers without you asking.", icon: HeartPulse },
   { id: "notifyCompletions", label: "Long tasks finished", detail: "Work that took more than a few seconds finishes while Silo is in the background.", icon: CircleCheck },
+  { id: "notifyApprovals", label: "Requests from agents", detail: "An agent in a computer asks for something only you can allow, such as a merge or a published port.", icon: ShieldQuestion },
 ] as const
 
 export function NotificationsPage() {

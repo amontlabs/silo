@@ -7,8 +7,7 @@ import { withMacosFixtureContents } from "./macos-computers"
 import { fixtureDirectoryLoader } from "./directory-loader"
 import { fixtureComputerSteps, fixtureComputerTree } from "./computer-steps"
 import { fixtureFileTransfers } from "./file-transfers"
-import { fixtureListReviewRequests } from "./pending-changes"
-import { createReviewRequestFixtureActions } from "./review-requests"
+import { createApprovalFixture, type ApprovalFixtureMode } from "./approvals"
 import { useApplicationFixture } from "@/fixtures/application-state"
 import { ApplicationApp } from "@/features/application/application-app"
 import type { ApplicationActions, ApplicationSource, SshAccessRequest, SshAccessComputer } from "@/features/application/model/application-source"
@@ -41,7 +40,7 @@ const inactiveApplicationActions: ApplicationActions = {
   disconnectGitHub: () => undefined,
 }
 
-export function ApplicationPreview({ source, actions, backupPreviewMode, initialRoute, nativeOperations = false, preUpgradeBackup, editorInclude, unseenResult }: {
+export function ApplicationPreview({ source, actions, backupPreviewMode, initialRoute, nativeOperations = false, preUpgradeBackup, editorInclude, unseenResult, approvals }: {
   source: ApplicationSource
   actions?: Partial<ApplicationActions>
   backupPreviewMode?: BackupFixtureMode
@@ -53,19 +52,22 @@ export function ApplicationPreview({ source, actions, backupPreviewMode, initial
   editorInclude?: EditorIncludeBackend
   /** An export or import result that was not shown yet; the application starts with it, as after an upgrade. */
   unseenResult?: FixtureUnseenResult
+  /** What the agents inside computers have asked for. Without it the preview lists no approvals and no review requests. */
+  approvals?: ApprovalFixtureMode
 }) {
   const { store } = useSettings(source.preferences)
   const [systemIntegrations] = useState(() => createFixtureSystemIntegrationStore(store))
   const application = nativeOperations
     ? <UnavailableApplicationPreview source={source} actions={actions} initialRoute={initialRoute} />
-    : <FixtureApplicationPreview source={source} actions={actions} backupPreviewMode={backupPreviewMode} initialRoute={initialRoute} unseenResult={unseenResult} />
+    : <FixtureApplicationPreview source={source} actions={actions} backupPreviewMode={backupPreviewMode} initialRoute={initialRoute} unseenResult={unseenResult} approvals={approvals} />
   const withBackup = preUpgradeBackup ? <PreUpgradeBackupProvider backend={preUpgradeBackup}>{application}</PreUpgradeBackupProvider> : application
   const withInclude = editorInclude ? <EditorIncludeProvider backend={editorInclude}>{withBackup}</EditorIncludeProvider> : withBackup
   return <SettingsProvider store={store}><SystemIntegrationProvider store={systemIntegrations}>{withInclude}</SystemIntegrationProvider></SettingsProvider>
 }
 
-function FixtureApplicationPreview({ source, actions, backupPreviewMode, initialRoute, unseenResult }: Parameters<typeof ApplicationPreview>[0]) {
+function FixtureApplicationPreview({ source, actions, backupPreviewMode, initialRoute, unseenResult, approvals }: Parameters<typeof ApplicationPreview>[0]) {
   const fixture = useApplicationFixture(source)
+  const [approvalFixture] = useState(() => approvals && createApprovalFixture({ mode: approvals, computers: source.computers.map(({ configuration }) => ({ id: configuration.id, name: configuration.name })) }))
   const [sshSettings, setSshSettings] = useState(() => new Map<string, SshAccessRequest>())
   const sshAccess = { computers: fixture.source.computers.map((w, index): SshAccessComputer => {
     const target = computerTarget(w)
@@ -108,8 +110,7 @@ function FixtureApplicationPreview({ source, actions, backupPreviewMode, initial
       listComputerSteps: async () => fixtureComputerSteps,
       readComputerTree: async () => fixtureComputerTree,
       listComputerDirectory,
-      listReviewRequests: fixtureListReviewRequests,
-      reviewRequestActions: createReviewRequestFixtureActions(),
+      ...approvalFixture?.actions,
       fileTransfers,
       queryLogs,
       ...actions,
