@@ -13,6 +13,8 @@ pub mod resources;
 mod rules;
 pub mod store;
 #[cfg(test)]
+mod network_tests;
+#[cfg(test)]
 mod tests;
 
 use std::collections::{BTreeSet, HashSet};

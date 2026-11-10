@@ -1,0 +1,123 @@
+diff --git a/crates/cli/bin/main.rs b/crates/cli/bin/main.rs
+--- a/crates/cli/bin/main.rs
++++ b/crates/cli/bin/main.rs
+@@ -265,7 +265,8 @@ fn silo_protocol_probe(arguments: &[std::ffi::OsString]) -> Option<&'static str>
+             || flag == "--silo-github-protocol"
+             || flag == "--silo-working-account-protocol"
+             || flag == "--silo-secret-values-protocol"
+-            || flag == "--silo-runtime-instance-protocol" => Some("1"),
++            || flag == "--silo-runtime-instance-protocol"
++            || flag == "--silo-restore-strict-protocol" => Some("1"),
+         _ => None,
+     }
+ }
+@@ -803,6 +804,7 @@ mod command_tests {
+             "--silo-working-account-protocol",
+             "--silo-secret-values-protocol",
+             "--silo-runtime-instance-protocol",
++            "--silo-restore-strict-protocol",
+         ] {
+             assert_eq!(silo_protocol_probe(&[flag.into()]), Some("1"));
+         }
+diff --git a/crates/cli/lib/commands/restore.rs b/crates/cli/lib/commands/restore.rs
+--- a/crates/cli/lib/commands/restore.rs
++++ b/crates/cli/lib/commands/restore.rs
+@@ -127,6 +127,11 @@ pub struct RestoreControlArgs {
+     #[cfg(feature = "net")]
+     #[arg(long, value_name = "TOKENS")]
+     pub net_rule: Vec<String>,
++    /// Strict hostname-policy enforcement for the destination, as create's --net-strict.
++    /// Omitted, the destination gets the runtime default (on).
++    #[cfg(feature = "net")]
++    #[arg(long = "net-strict", num_args = 0..=1, require_equals = true, default_missing_value = "true")]
++    pub net_strict: Option<bool>,
+     /// Deprecated alias for --max-tcp-connections.
+     #[cfg(feature = "net")]
+     #[arg(long, conflicts_with = "max_tcp_connections")]
+@@ -175,6 +180,9 @@ impl RestoreControlArgs {
+             if let Some(policy) = self.network_policy()? {
+                 builder = builder.network_policy(policy);
+             }
++            if let Some(enabled) = self.net_strict {
++                builder = builder.network_strict(enabled);
++            }
+             if let Some(limit) = self.max_tcp_connections.or(self.max_connections) {
+                 builder = builder.max_tcp_connections(limit);
+             }
+@@ -458,6 +466,32 @@ mod tests {
+         }
+     }
+ 
++    #[cfg(feature = "net")]
++    #[test]
++    fn restore_parses_net_strict_like_create() {
++        for (flags, expected) in [
++            (vec![], None),
++            (vec!["--net-strict"], Some(true)),
++            (vec!["--net-strict=true"], Some(true)),
++            (vec!["--net-strict=false"], Some(false)),
++        ] {
++            let mut arguments = vec!["restore", "ready", "--name", "child"];
++            arguments.extend(flags);
++            let cli = TestCli::try_parse_from(arguments).unwrap();
++            assert_eq!(cli.args.controls.net_strict, expected);
++            assert!(
++                cli.args
++                    .controls
++                    .apply(Sandbox::restore("ready"))
++                    .is_ok()
++            );
++        }
++        assert!(
++            TestCli::try_parse_from(["restore", "ready", "--name", "child", "--net-strict=maybe"])
++                .is_err()
++        );
++    }
++
+     #[cfg(feature = "net")]
+     #[test]
+     fn restore_parses_independent_tcp_udp_limits_and_rejects_duplicate_tcp_aliases() {
+diff --git a/sdk/rust/lib/sandbox/restore_builder.rs b/sdk/rust/lib/sandbox/restore_builder.rs
+--- a/sdk/rust/lib/sandbox/restore_builder.rs
++++ b/sdk/rust/lib/sandbox/restore_builder.rs
+@@ -155,6 +155,14 @@ impl RestoreBuilder {
+         self
+     }
+ 
++    /// Set the destination host's strict hostname-policy enforcement. Without this the
++    /// destination gets the network default (on), whatever the source used.
++    #[cfg(feature = "net")]
++    pub fn network_strict(mut self, enabled: bool) -> Self {
++        self.inner = self.inner.network(|network| network.strict(enabled));
++        self
++    }
++
+     /// Set the destination host's concurrent TCP connection limit; zero explicitly means unlimited.
+     /// The limit is applied before disk boot or full-restore network activation.
+     #[cfg(feature = "net")]
+@@ -516,6 +524,25 @@ mod tests {
+         assert!(!config(&disabled).spec.network.enabled);
+     }
+ 
++    #[cfg(feature = "net")]
++    #[test]
++    fn destination_strict_defaults_on_and_can_be_turned_off() {
++        let defaults = Sandbox::restore("saved").name("child");
++        assert!(config(&defaults).local_network_config().unwrap().strict);
++        let relaxed = Sandbox::restore("saved")
++            .name("child")
++            .network_policy(NetworkPolicy::none())
++            .network_strict(false);
++        let network = config(&relaxed).local_network_config().unwrap();
++        assert!(!network.strict);
++        assert_eq!(
++            serde_json::to_value(network.policy).unwrap(),
++            serde_json::to_value(NetworkPolicy::none()).unwrap()
++        );
++        let strict = Sandbox::restore("saved").name("child").network_strict(true);
++        assert!(config(&strict).local_network_config().unwrap().strict);
++    }
++
+     #[cfg(feature = "net")]
+     #[test]
+     #[allow(deprecated)]

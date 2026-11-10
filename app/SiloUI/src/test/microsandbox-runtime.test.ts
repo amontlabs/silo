@@ -194,6 +194,8 @@ describe("bundled MicroSandbox release staging", () => {
     let outdatedCachedInstance = false
     let outdatedCachedStaging = false
     let outdatedCachedNoStdin = false
+    let outdatedCachedRestoreStrict = false
+    let outdatedCachedRestoreHelp = false
     const sourceArtifact = { url: "https://example.test/source.tar.gz", sha256: sha256(source) }
     const selected = {
       ...runtimeTargets[targetTriple],
@@ -241,14 +243,17 @@ describe("bundled MicroSandbox release staging", () => {
         if (outdatedCachedAccount && !command.includes("cargo-target") && args[0] === "--silo-working-account-protocol") return "0"
         if (outdatedCachedStdin && !command.includes("cargo-target") && args[0] === "--silo-secret-values-protocol") return "0"
         if (outdatedCachedInstance && !command.includes("cargo-target") && args[0] === "--silo-runtime-instance-protocol") return "0"
-        if (["--silo-storage-protocol", "--silo-desktop-protocol", "--silo-github-token-protocol", "--silo-github-protocol", "--silo-working-account-protocol", "--silo-secret-values-protocol", "--silo-runtime-instance-protocol"].includes(args[0])) return "1"
+        if (outdatedCachedRestoreStrict && !command.includes("cargo-target") && args[0] === "--silo-restore-strict-protocol") return "0"
+        if (["--silo-storage-protocol", "--silo-desktop-protocol", "--silo-github-token-protocol", "--silo-github-protocol", "--silo-working-account-protocol", "--silo-secret-values-protocol", "--silo-runtime-instance-protocol", "--silo-restore-strict-protocol"].includes(args[0])) return "1"
         if (args[0] === "--version") return `msb ${MICRO_SANDBOX_VERSION}`
         if (outdatedCachedStaging && !command.includes("cargo-target") && args[0] === "snapshot" && args[1] === "load") return "--group"
         if (args.includes("--help")) {
           const oldFlags = "--mount-owned --no-start --progress-json"
           const currentFlags = `${oldFlags} --no-stdin`
           if (args[0] === "snapshot") return "--from-sandbox --group --dest-dir --full --guest-flush --integrity --stage-id"
-          if (args[0] === "restore") return "--cow-mem --name"
+          if (args[0] === "restore") {
+            return outdatedCachedRestoreHelp && !command.includes("cargo-target") ? "--cow-mem --name" : "--cow-mem --name --net-strict"
+          }
           if (outdatedCachedNoStdin && !command.includes("cargo-target") && args[0] === "exec") return oldFlags
           return outdatedCachedSsh && !command.includes("cargo-target") && args[0] === "ssh"
             ? oldFlags
@@ -344,6 +349,25 @@ describe("bundled MicroSandbox release staging", () => {
         vi.stubEnv("CARGO_PROFILE_RELEASE_DEBUG", "2")
         await stage()
         expect(compilations).toBe(15)
+
+        // A cached runtime whose restore cannot take --net-strict is rebuilt, by its probe or
+        // by its help.
+        outdatedCachedRestoreStrict = true
+        await stage()
+        expect(compilations).toBe(16)
+        outdatedCachedRestoreStrict = false
+        outdatedCachedRestoreHelp = true
+        await stage()
+        expect(compilations).toBe(17)
+        outdatedCachedRestoreHelp = false
+        await stage()
+        expect(compilations).toBe(17)
+
+        // A change to the gateway's published-port code rebuilds it.
+        const ports = join(appRoot, "src-tauri/macos-gateway/src/ports.rs")
+        await writeFile(ports, `${await readFile(ports, "utf8")}\n// changed\n`)
+        await stage()
+        expect(compilations).toBe(18)
       })
     } finally {
       vi.unstubAllEnvs()

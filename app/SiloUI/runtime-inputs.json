@@ -155,6 +155,10 @@
     {
       "path": "patches/microsandbox-secret-usage-events-0.7.6.patch",
       "sha256": "246ca45a30f5580e3bdacace3fa9e896b712afaff1f22e03dc651c25a505c4ac"
+    },
+    {
+      "path": "patches/microsandbox-restore-net-strict-0.7.6.patch",
+      "sha256": "d2031af0659e0a7c295aa769ac080f1e9ad5ecbb57990902e3bac3425a6113ba"
     }
   ]
 }
