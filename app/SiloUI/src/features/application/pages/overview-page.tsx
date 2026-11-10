@@ -155,7 +155,8 @@ export function OverviewPage({ active = true, readOnly = false, notifyOperations
   // Controlled navigation replaces its history entries in place (the app forgets missing
   // computers), so only the standalone page closes its own selection here: pushing a new
   // entry would leave Back pointing at the missing computer.
-  const allComputers = new Map(fullSource.computers.map((computer) => [computer.configuration.id, computer]))
+  // A macOS computer of another device keeps its row and has no page.
+  const allComputers = new Map(fullSource.computers.filter((computer) => !(computer.macos && computer.device)).map((computer) => [computer.configuration.id, computer]))
   const detailComputer = selectedId ? allComputers.get(selectedId) : undefined
   const detailMissing = Boolean(selectedId) && !detailComputer
   const returnToList = useEffectEvent(() => { if (!controlledNav) closeComputer() })

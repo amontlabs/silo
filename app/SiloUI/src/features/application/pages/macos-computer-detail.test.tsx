@@ -4,6 +4,9 @@ import { expect, it, vi } from "vitest"
 
 import { applicationSourceForScenario } from "@/fixtures/application-scenarios"
 import { createFixtureMacosComputersBackend, createFixtureMacosComputersStore, macosComputerFixtures } from "@/fixtures/macos-computers"
+import { createComputerUseBridge } from "@/desktop/computer-use-bridge"
+import { ComputerUseProvider } from "@/desktop/computer-use-provider"
+import { createFixtureComputerUseBackend } from "@/fixtures/computer-use"
 import { MacosComputersContext, createMacosComputersStore, type MacosComputersStore } from "@/features/macos-computers/model/macos-computers"
 import { useMacosApplication } from "../model/macos-application-computers"
 import type { ApplicationActions, ApplicationSource } from "../model/application-source"
@@ -119,4 +122,14 @@ it("offers a computer whose setup stopped a retry and a way to delete it, withou
   expect(screen.getByRole("button", { name: "Retry setup of xcode-build" })).toBeEnabled()
   await user.click(screen.getByRole("button", { name: "More actions for xcode-build" }))
   expect(screen.getByRole("menuitem", { name: "Delete xcode-build" })).toBeVisible()
+})
+
+it("shows the computer use of a set-up macOS computer on its Overview tab", async () => {
+  const store = createFixtureMacosComputersStore()
+  const source = sourceWithoutLinuxNoise()
+  const user = userEvent.setup()
+  const bridge = createComputerUseBridge(createFixtureComputerUseBackend("ready"))
+  render(<ComputerUseProvider bridge={bridge}><MacosComputersContext.Provider value={store}><Page source={source} actions={{ openTerminal: vi.fn() } as unknown as ApplicationActions} /></MacosComputersContext.Provider></ComputerUseProvider>)
+  await user.click(await screen.findByRole("button", { name: "Open daily" }))
+  expect(await screen.findByRole("region", { name: "Computer use" })).toBeVisible()
 })

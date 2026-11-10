@@ -82,8 +82,10 @@ export function applicationCommands(source: ApplicationSource, actions: Applicat
     const name = computer.device ? `${computer.configuration.name} on ${computer.device.name}` : computer.configuration.name
     const computerKeywords = computer.device ? [computer.configuration.name, computer.device.name] : [name]
     const availability = computerAvailability(computer, source)
-    commands.push({ id: `${id}:page`, label: `Open ${name}`, icon: Boxes, group: "Computers", keywords: [...computerKeywords, "computer", "details"], run: () => navigate({ computer: id }) })
-    commands.push({ id: `${id}:checkpoints`, label: `Open ${name} checkpoints`, icon: History, group: "Computers", keywords: [...computerKeywords, "checkpoints", "restore", "snapshot"], run: () => navigate({ computer: id, computerTab: "checkpoints" }) })
+    // A macOS computer of another device has its row and no page of its own.
+    const hasPage = !(computer.macos && computer.device)
+    if (hasPage) commands.push({ id: `${id}:page`, label: `Open ${name}`, icon: Boxes, group: "Computers", keywords: [...computerKeywords, "computer", "details"], run: () => navigate({ computer: id }) })
+    if (hasPage) commands.push({ id: `${id}:checkpoints`, label: `Open ${name} checkpoints`, icon: History, group: "Computers", keywords: [...computerKeywords, "checkpoints", "restore", "snapshot"], run: () => navigate({ computer: id, computerTab: "checkpoints" }) })
     for (const { section, label, icon, keywords, needs } of computerSections) {
       if (needs && !computerCan(kindOf(computer), needs)) continue
       commands.push({
@@ -113,7 +115,7 @@ export function applicationCommands(source: ApplicationSource, actions: Applicat
       commands.push({ id: `${id}:export`, label: `Export ${name}…`, icon: Download, group: "Actions", keywords: [...computerKeywords, "export", "backup", "archive"], run: () => onExportComputer(computer.configuration.name) })
     }
     const offline = Boolean(computer.device && !computer.device.connected)
-    if (onComputerRequest && source.computerConfigurationOperation === null && !availability.busy && !offline && computer.state !== "running") {
+    if (hasPage && onComputerRequest && source.computerConfigurationOperation === null && !availability.busy && !offline && computer.state !== "running") {
       commands.push({ id: `${id}:delete`, label: `Delete ${name}…`, icon: Trash2, group: "Actions", keywords: [...computerKeywords, "delete", "remove"], opensPanel: true, run: () => onComputerRequest(id, "delete") })
     }
     const lifecycle: { action: LifecycleAction; label: string; icon: LucideIcon; available: boolean }[] = [
