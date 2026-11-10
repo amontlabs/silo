@@ -9,6 +9,7 @@ use std::{
 
 use serde_json::{json, Value};
 use silo_api::{
+    jobs::ErrorCode,
     methods::{
         guest_client::{GuestErrorBody, GuestRequestFrame, GuestResponseFrame},
         method_registry, MethodKind, MethodName,
@@ -161,8 +162,14 @@ pub async fn handle_frame(
     let method = MethodName::from_name(&frame.method)
         .map(MethodName::name)
         .unwrap_or("(a method that is not offered)");
+    if MethodName::from_name(&frame.method).is_none() {
+        env.runner
+            .refused(computer, method, ErrorCode::UnsupportedRemoteOperation);
+    }
     if let Err(message) = within_caps(env, computer, &frame.method) {
         eprintln!("silod: guest client of {computer}: refused {method}");
+        env.runner
+            .refused(computer, method, ErrorCode::PermissionDenied);
         return Some(failure(&id, "permission_denied", message, None));
     }
     let target = frame

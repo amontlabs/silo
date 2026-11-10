@@ -65,7 +65,18 @@ wire_struct! {
         job_id: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         approval_id: Option<String>,
+        /// How many times the same call was made in a row by the same caller. `at` is the
+        /// first, `lastAt` the latest.
+        #[serde(default = "one")]
+        count: u64,
+        /// RFC 3339 time of the latest of the `count` calls.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        last_at: Option<String>,
     }
+}
+
+fn one() -> u64 {
+    1
 }
 
 wire_struct! {

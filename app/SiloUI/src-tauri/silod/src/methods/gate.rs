@@ -68,7 +68,7 @@ fn app_data(context: &HandlerContext) -> PathBuf {
     context.silod_context().paths().app_data.clone()
 }
 
-fn error_code(code: ErrorCode) -> String {
+pub(crate) fn error_code(code: ErrorCode) -> String {
     serde_json::to_value(code)
         .ok()
         .and_then(|value| value.as_str().map(str::to_owned))
@@ -78,6 +78,8 @@ fn error_code(code: ErrorCode) -> String {
 struct Record<'a> {
     method: MethodName,
     target: Option<String>,
+    /// The computers a computer's agent may reach: a row names a target only inside this set.
+    visible: Option<Arc<BTreeSet<String>>>,
     outcome: AuditOutcome,
     error: Option<&'a DispatchError>,
     job_id: Option<String>,
@@ -101,7 +103,15 @@ fn audit(context: &HandlerContext, record: Record<'_>) {
         caller_id: caller.id().map(str::to_owned),
         client,
         method: record.method.name().to_owned(),
-        computer_id: record.target,
+        // A computer's call names no computer outside the ones it made, so the log tells
+        // nothing a refused probe guessed.
+        computer_id: match (&caller, &record.visible) {
+            (Caller::Computer { .. }, Some(visible)) => {
+                record.target.filter(|target| visible.contains(target))
+            }
+            (Caller::Computer { .. }, None) => None,
+            _ => record.target,
+        },
         outcome: record.outcome,
         error_code: record.error.map(|error| error_code(error.code)),
         job_id: record.job_id,
@@ -152,12 +162,14 @@ pub(crate) async fn admit(
         }
         _ => (policy::decide(&caller, method, params, &NoWorld), None),
     };
+    let seen = visible.clone();
     let refuse = |error: DispatchError, outcome: AuditOutcome| {
         audit(
             context,
             Record {
                 method,
                 target: target.clone(),
+                visible: seen.clone(),
                 outcome,
                 error: Some(&error),
                 job_id: None,
@@ -266,6 +278,7 @@ pub(crate) fn finish(
             Record {
                 method,
                 target: admitted.target.clone(),
+                visible: admitted.visible.clone(),
                 outcome,
                 error,
                 job_id: job,

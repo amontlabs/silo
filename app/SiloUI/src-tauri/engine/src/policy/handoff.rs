@@ -238,7 +238,7 @@ mod tests {
         fn request_target(&self, _request_id: &str) -> Option<String> {
             None
         }
-        fn resources(&self, computer: &str) -> Option<Resources> {
+        fn resources(&self, _computer: &str) -> Option<Resources> {
             None
         }
         fn ssh_settings(&self, _computer: &str) -> Option<(u16, String)> {
