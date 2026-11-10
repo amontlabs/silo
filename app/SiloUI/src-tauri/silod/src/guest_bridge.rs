@@ -1,7 +1,8 @@
 //! Serves the in-guest client: reads the request files computers write into their bridge
-//! folders, checks each against the computer's token and scope, runs the allowed ones as the
-//! engine's own methods and writes the answer back (`docs/SiloUI-IN-GUEST-CLIENT.md`). Each
-//! computer with a token has a worker of its own, so one slow call holds up no other computer.
+//! folders, checks each against the computer's token, runs it as that computer's call
+//! (`Caller::Computer`, which the policy judges in `methods::dispatch`) and writes the answer
+//! back (`docs/SiloUI-IN-GUEST-CLIENT.md`). Each computer with a token has a worker of its own,
+//! so one slow call holds up no other computer.
 
 mod frames;
 mod worker;
@@ -10,6 +11,7 @@ use std::{collections::HashMap, collections::HashSet, future::Future, pin::Pin, 
 
 use serde_json::{json, Value};
 use silo_api::{methods::MethodName, transport::PROTOCOL_VERSION};
+use silo_engine::policy::Caller;
 
 use crate::{
     context::SilodContext,
@@ -20,10 +22,12 @@ use crate::{
 pub use frames::{handle_frame, reap, Frames, Reserved};
 pub use worker::start;
 
-/// Runs one method as the engine, for a request that passed its scope check.
+/// Runs one method as the agent inside `computer`, or as the engine itself when `computer` is
+/// `None`.
 pub trait Runner: Send + Sync {
     fn run<'a>(
         &'a self,
+        computer: Option<&'a str>,
         method: &'a str,
         params: Value,
     ) -> Pin<Box<dyn Future<Output = Result<Value, DispatchError>> + Send + 'a>>;
@@ -93,30 +97,37 @@ impl Snapshot {
     }
 }
 
-/// Runs methods through the engine's own handlers as the client `guest-client`.
+/// Runs methods through the engine's own handlers, as the client `guest-client`.
 pub struct EngineRunner {
-    context: HandlerContext,
+    engine: Arc<SilodContext>,
 }
 
 impl EngineRunner {
     pub fn new(engine: Arc<SilodContext>) -> Self {
-        Self {
-            // No socket client asked, so what would answer only the asker (a list's event
-            // barrier) is announced to every subscriber, as for another device's request.
-            context: HandlerContext::for_owner_bridge(
-                engine,
-                RequestContext {
-                    client_id: "guest-client".to_owned(),
-                    protocol: PROTOCOL_VERSION,
-                    client: None,
-                },
-            ),
-        }
+        Self { engine }
+    }
+
+    fn context(&self, computer: Option<&str>) -> HandlerContext {
+        let caller = match computer {
+            Some(id) => Caller::Computer { id: id.to_owned() },
+            None => Caller::owner("guest-client"),
+        };
+        // No socket client asked, so what would answer only the asker (a list's event
+        // barrier) is announced to every subscriber, as for another device's request.
+        HandlerContext::for_owner_bridge(
+            self.engine.clone(),
+            RequestContext {
+                client_id: "guest-client".to_owned(),
+                protocol: PROTOCOL_VERSION,
+                client: None,
+                caller,
+            },
+        )
     }
 
     pub async fn snapshot(&self) -> Result<Snapshot, DispatchError> {
-        let list = self.run("computers.list", json!({})).await?;
-        let tree = self.run("computers.tree", json!({})).await?;
+        let list = self.run(None, "computers.list", json!({})).await?;
+        let tree = self.run(None, "computers.tree", json!({})).await?;
         Ok(Snapshot::from_values(&list, &tree))
     }
 }
@@ -124,19 +135,14 @@ impl EngineRunner {
 impl Runner for EngineRunner {
     fn run<'a>(
         &'a self,
+        computer: Option<&'a str>,
         method: &'a str,
         params: Value,
     ) -> Pin<Box<dyn Future<Output = Result<Value, DispatchError>> + Send + 'a>> {
         Box::pin(async move {
-            let method = silo_api::methods::method_registry()
-                .iter()
-                .find(|descriptor| descriptor.name == method)
-                .map(|descriptor| descriptor.method)
-                .ok_or_else(|| DispatchError::unsupported(method))?;
-            if method == MethodName::GuestClientEnable {
-                return Err(DispatchError::unsupported("guestClient.enable"));
-            }
-            methods::dispatch(&self.context, method, &params)
+            let method =
+                MethodName::from_name(method).ok_or_else(|| DispatchError::unsupported(method))?;
+            methods::dispatch(&self.context(computer), method, &params)
                 .await
                 .map(|output| output.value)
         })

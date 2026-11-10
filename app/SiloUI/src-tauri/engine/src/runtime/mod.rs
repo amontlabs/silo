@@ -6390,6 +6390,7 @@ fn apply_whole_configuration_with_progress(
                 configuration.name(),
             )?;
             checkpoints::forget_removed(paths, configuration.id())?;
+            crate::policy::store::computer_removed(configuration.id());
             progress("computer-removal", configuration.name(), 1);
         }
         for configuration in &request.computers {

@@ -273,6 +273,7 @@ pub fn finish_with_error(
                 code,
                 message: message.into(),
                 diagnostics: None,
+                details: None,
             }),
             outcome_chunked: false,
         },

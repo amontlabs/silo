@@ -159,6 +159,7 @@ pub(crate) fn require_file_sharing(device: &str) -> Result<(), DispatchError> {
         Err(DispatchError {
             code: ErrorCode::UnsupportedRemoteOperation,
             message: TOO_OLD.to_owned(),
+            details: None,
         })
     }
 }

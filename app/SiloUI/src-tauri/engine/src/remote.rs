@@ -3463,7 +3463,9 @@ fn dispatch(
     request: Value,
     connection: operations::Probe,
 ) -> Result<Value, BridgeError> {
-    handle(
+    // The bridge replaced whatever the controller sent here with the key it connected with.
+    let key = request[AUTHENTICATED_KEY].as_str().map(str::to_owned);
+    let result = handle(
         &directory()?,
         &request,
         connection,
@@ -3477,9 +3479,57 @@ fn dispatch(
                 local_access,
                 method,
                 params,
+                key.as_deref(),
             )
         },
-    )
+    );
+    audit_device_change(&request, key, &result);
+    result
+}
+/// Records a change another device made through one of the bridge's own methods. The canonical
+/// methods it serves run through the engine's handlers, which record their own calls.
+fn audit_device_change(request: &Value, key: Option<String>, result: &Result<Value, BridgeError>) {
+    let Some(method) = request["method"].as_str() else {
+        return;
+    };
+    if is_owner_method(method) || access(method) != Some(Access::Change) {
+        return;
+    }
+    let Some(context) = crate::context::current() else {
+        return;
+    };
+    if !context.paths().app_data.is_absolute() {
+        return;
+    }
+    let (outcome, error_code) = match result {
+        Ok(_) => (silo_api::methods::audit::AuditOutcome::Ok, None),
+        Err(error) => (
+            silo_api::methods::audit::AuditOutcome::Error,
+            Some(
+                error
+                    .api_code
+                    .clone()
+                    .unwrap_or_else(|| "internal".to_owned()),
+            ),
+        ),
+    };
+    crate::audit::AuditLog::shared(&context.paths().app_data).record(crate::audit::Row {
+        at_ms: crate::audit::now_ms(),
+        caller_kind: silo_api::methods::audit::AuditCallerKind::Device,
+        caller_id: key,
+        client: None,
+        method: method.to_owned(),
+        computer_id: crate::policy::target_computer(&request["params"]),
+        outcome,
+        error_code,
+        job_id: result
+            .as_ref()
+            .ok()
+            .and_then(|value| value.get("jobId"))
+            .and_then(Value::as_str)
+            .map(str::to_owned),
+        approval_id: None,
+    });
 }
 /// Runs one authorized, classified request against this device.
 fn execute(
@@ -3490,6 +3540,7 @@ fn execute(
     local_access: &dyn crate::remote_access::LocalAccess,
     method: &str,
     params: &Value,
+    key: Option<&str>,
 ) -> Result<Value, BridgeError> {
     if method == "handshake" {
         // Earlier versions installed Silo's key without restrictions; tighten it over this session.
@@ -3503,7 +3554,14 @@ fn execute(
         // (`macos.`) would otherwise claim them.
         _ if is_owner_method(method) => {
             let paths = paths().map_err(BridgeError::from)?;
-            crate::remote_access::dispatch_typed(&paths, method, params, checkpoints, local_access)
+            crate::remote_access::dispatch_typed(
+                &paths,
+                method,
+                params,
+                checkpoints,
+                local_access,
+                key,
+            )
         }
         _ if method.starts_with("runtime.") => {
             crate::runtime::remote_ops::dispatch(runtime_host, method, params.clone())
@@ -3513,7 +3571,14 @@ fn execute(
         }
         _ => {
             let paths = paths().map_err(BridgeError::from)?;
-            crate::remote_access::dispatch_typed(&paths, method, params, checkpoints, local_access)
+            crate::remote_access::dispatch_typed(
+                &paths,
+                method,
+                params,
+                checkpoints,
+                local_access,
+                key,
+            )
         }
     }
 }
@@ -7298,6 +7363,7 @@ mod dispatch_tests {
             &local_access,
             "macos.display.resize",
             &Value::Null,
+            None,
         )
         .unwrap_err();
         assert_eq!(

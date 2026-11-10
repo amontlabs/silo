@@ -840,6 +840,7 @@ impl JobRegistry {
                 code: ErrorCode::Internal,
                 message: INTERRUPTED_MESSAGE.to_owned(),
                 diagnostics: None,
+                details: None,
             }),
         };
         let not_started = JobOutcome {
@@ -848,6 +849,7 @@ impl JobRegistry {
                 code: ErrorCode::Cancelled,
                 message: NOT_STARTED_MESSAGE.to_owned(),
                 diagnostics: None,
+                details: None,
             }),
         };
         let interrupted_json =

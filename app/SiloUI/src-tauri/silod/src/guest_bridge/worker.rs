@@ -3,7 +3,6 @@
 
 use std::{
     collections::HashMap,
-    path::PathBuf,
     sync::{Arc, Mutex},
     thread::JoinHandle,
     time::{Duration, Instant, SystemTime},
@@ -12,6 +11,7 @@ use std::{
 use silo_engine::{
     context::EngineContext,
     guest_client::{self, Spool, TokenStore},
+    policy::store::PolicyStore,
 };
 
 use super::{
@@ -31,19 +31,41 @@ struct Shared {
     context: Arc<SilodContext>,
     handle: tokio::runtime::Handle,
     store: TokenStore,
+    policy: PolicyStore,
     runner: EngineRunner,
-    app_data: PathBuf,
     reserved: Reserved,
     looked: Mutex<(Snapshot, Option<Instant>)>,
 }
 
 impl Shared {
-    fn requests(&self, id: &str) -> Option<String> {
-        silo_engine::fold_requests::Store::new(&self.app_data)
-            .get(id)
-            .ok()
-            .flatten()
-            .map(|request| request.fork_id)
+    /// Moves what this computer's token recorded before the policy kept its own record (the
+    /// forks it made and the jobs it started) into the policy's record.
+    fn adopt_token_records(&self, computer: &str) {
+        let Ok(Some(record)) = self.store.status(computer) else {
+            return;
+        };
+        if record.fork_ids.is_empty() && record.jobs.is_empty() && record.pending.is_empty() {
+            return;
+        }
+        let jobs: Vec<(String, u64)> = record
+            .jobs
+            .iter()
+            .map(|job| (job.id.clone(), job.at))
+            .collect();
+        let adopted = self
+            .policy
+            .import_legacy(computer, &record.fork_ids, &jobs)
+            .and_then(|()| {
+                self.store.update(computer, |record| {
+                    record.fork_ids.clear();
+                    record.pending.clear();
+                    record.jobs.clear();
+                    Ok(())
+                })
+            });
+        if let Err(error) = adopted {
+            eprintln!("silod: guest client of {computer}: {error}");
+        }
     }
 
     fn cached(&self) -> Snapshot {
@@ -96,10 +118,10 @@ pub fn start(context: Arc<SilodContext>) {
     let app_data = context.paths().app_data.clone();
     let shared = Arc::new(Shared {
         store: TokenStore::new(&app_data),
+        policy: PolicyStore::new(&app_data),
         runner: EngineRunner::new(context.clone()),
         context,
         handle,
-        app_data,
         reserved: Reserved::default(),
         looked: Mutex::new((Snapshot::default(), None)),
     });
@@ -137,6 +159,7 @@ fn supervise(shared: &Arc<Shared>) {
 
 /// Serves one computer until its token is gone.
 fn work(shared: &Shared, computer: &str) {
+    shared.adopt_token_records(computer);
     let mut housekept = Instant::now();
     let mut looked_up: Option<Instant> = None;
     loop {
@@ -175,12 +198,11 @@ fn work(shared: &Shared, computer: &str) {
         }
         if spool.has_work() {
             let snapshot = shared.fresh(FRESH);
-            let requests = |id: &str| shared.requests(id);
             let env = Frames {
                 runner: &shared.runner,
                 store: &shared.store,
+                policy: &shared.policy,
                 snapshot: &snapshot,
-                requests: &requests,
                 reserved: &shared.reserved,
             };
             for taken in spool.take() {
@@ -204,7 +226,7 @@ fn work(shared: &Shared, computer: &str) {
             spool.sweep(SystemTime::now());
             shared
                 .handle
-                .block_on(reap(&shared.runner, &shared.store, computer));
+                .block_on(reap(&shared.runner, &shared.policy, computer));
             housekept = Instant::now();
         }
     }

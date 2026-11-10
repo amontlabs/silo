@@ -1,5 +1,5 @@
-//! One request frame: token, scope, the bookkeeping of forks, starts and jobs, the engine call,
-//! and the answer.
+//! One request frame: the token, the bridge's caps on forks, running forks and jobs, the call
+//! (judged by the policy as the computer's own), and the answer.
 
 use std::{
     collections::{HashMap, HashSet},
@@ -8,16 +8,22 @@ use std::{
 };
 
 use serde_json::{json, Value};
-use silo_api::methods::guest_client::{GuestErrorBody, GuestRequestFrame, GuestResponseFrame};
-use silo_engine::guest_client::{self, now_secs, Filter, Record, TokenStore, Topology};
+use silo_api::{
+    methods::{
+        guest_client::{GuestErrorBody, GuestRequestFrame, GuestResponseFrame},
+        method_registry, MethodKind, MethodName,
+    },
+    transport::ApprovalRequiredDetails,
+};
+use silo_engine::{
+    guest_client::{now_secs, TokenStore, MAX_FORKS, MAX_JOBS, MAX_RUNNING},
+    policy::store::PolicyStore,
+};
 
 use super::{Runner, Snapshot};
 
 /// A start that has not shown as running yet still holds its place under the running cap.
 const START_HOLD: Duration = Duration::from_secs(300);
-/// A fork with no job after this long, or an unconfirmed one after [`UNCONFIRMED`], is dropped.
-const NO_JOB: u64 = 120;
-const UNCONFIRMED: u64 = 1800;
 /// A job nobody acknowledged is acknowledged for its client after this long.
 const JOB_AGE: u64 = 1800;
 
@@ -60,69 +66,17 @@ impl Reserved {
 pub struct Frames<'a> {
     pub runner: &'a dyn Runner,
     pub store: &'a TokenStore,
+    pub policy: &'a PolicyStore,
     pub snapshot: &'a Snapshot,
-    pub requests: &'a dyn Fn(&str) -> Option<String>,
     pub reserved: &'a Reserved,
 }
 
-struct World<'a> {
-    env: &'a Frames<'a>,
-    record: &'a Record,
-}
-
-impl Topology for World<'_> {
-    fn created(&self, computer: &str) -> HashSet<String> {
-        let below = self.env.snapshot.descendants_of(computer);
-        self.record
-            .fork_ids
-            .iter()
-            .filter(|id| below.contains(*id))
-            .cloned()
-            .collect()
-    }
-    fn running(&self, computer: &str) -> usize {
-        let mut running: HashSet<String> = self.env.reserved.ids(computer);
-        for id in self.created(computer) {
-            if self
-                .env
-                .snapshot
-                .states
-                .get(&id)
-                .is_some_and(|state| state == "running")
-            {
-                running.insert(id);
-            }
-        }
-        // A fork still being made will be started next.
-        running.len() + self.record.pending.len()
-    }
-    fn forks_asked(&self, _computer: &str) -> usize {
-        self.record.fork_ids.len() + self.record.pending.len()
-    }
-    fn name_taken(&self, name: &str) -> bool {
-        self.env
-            .snapshot
-            .names
-            .values()
-            .any(|taken| taken.eq_ignore_ascii_case(name))
-            || self
-                .record
-                .pending
-                .iter()
-                .any(|pending| pending.name.eq_ignore_ascii_case(name))
-    }
-    fn jobs_outstanding(&self, _computer: &str) -> usize {
-        self.record.jobs.len()
-    }
-    fn request_fork(&self, request_id: &str) -> Option<String> {
-        (self.env.requests)(request_id)
-    }
-    fn owns_job(&self, _caller: &str, job_id: &str) -> bool {
-        self.record.owns_job(job_id)
-    }
-}
-
-fn failure(id: &str, code: &str, message: impl Into<String>) -> GuestResponseFrame {
+fn failure(
+    id: &str,
+    code: &str,
+    message: impl Into<String>,
+    details: Option<ApprovalRequiredDetails>,
+) -> GuestResponseFrame {
     GuestResponseFrame {
         v: 1,
         id: id.to_owned(),
@@ -131,81 +85,64 @@ fn failure(id: &str, code: &str, message: impl Into<String>) -> GuestResponseFra
         error: Some(GuestErrorBody {
             code: code.to_owned(),
             message: message.into(),
+            details,
         }),
     }
 }
 
-/// Confirms the forks this token asked for from their finished jobs, drops the ones that failed
-/// or never started, and forgets forks that no longer exist. Returns the record as it is now.
-async fn settle(env: &Frames<'_>, computer: &str, record: Record) -> Record {
-    let below = env.snapshot.descendants_of(computer);
-    let mut adopt: Vec<(String, String)> = Vec::new();
-    let mut drop_names: Vec<String> = Vec::new();
-    let now = now_secs();
-    for pending in &record.pending {
-        let age = now.saturating_sub(pending.at);
-        let Some(job) = &pending.job_id else {
-            if age > NO_JOB {
-                drop_names.push(pending.name.clone());
-            }
-            continue;
-        };
-        match env
-            .runner
-            .run("operations.job.get", json!({ "jobId": job }))
-            .await
+fn starts_job(method: &str) -> bool {
+    method_registry()
+        .iter()
+        .any(|descriptor| descriptor.name == method && descriptor.kind == MethodKind::Job)
+}
+
+/// The bridge's own limits: the computers one computer has made, how many of them run, and
+/// the jobs it has not acknowledged.
+fn within_caps(env: &Frames<'_>, computer: &str, method: &str) -> Result<(), String> {
+    let document = env.policy.snapshot()?;
+    let made: HashSet<String> = document
+        .made_directly(computer)
+        .into_iter()
+        .filter(|id| env.snapshot.names.contains_key(id))
+        .collect();
+    let pending = document.pending_of(computer);
+    let mut running = env.reserved.ids(computer);
+    for id in &made {
+        if env
+            .snapshot
+            .states
+            .get(id)
+            .is_some_and(|state| state == "running")
         {
-            Ok(reply) if reply["state"] == "finished" => {
-                if reply["outcome"]["error"].is_null() {
-                    let made = env.snapshot.names.iter().find(|(id, name)| {
-                        **name == pending.name
-                            && below.contains(*id)
-                            && !record.fork_ids.contains(*id)
-                    });
-                    match made {
-                        Some((id, _)) => adopt.push((pending.name.clone(), id.clone())),
-                        None if age > UNCONFIRMED => drop_names.push(pending.name.clone()),
-                        None => {}
-                    }
-                } else {
-                    drop_names.push(pending.name.clone());
-                }
-            }
-            Ok(_) => {}
-            Err(_) if age > UNCONFIRMED => drop_names.push(pending.name.clone()),
-            Err(_) => {}
+            running.insert(id.clone());
         }
     }
-    let healthy = !env.snapshot.names.is_empty();
-    let gone = healthy
-        && record
-            .fork_ids
-            .iter()
-            .any(|id| !env.snapshot.names.contains_key(id));
-    if adopt.is_empty() && drop_names.is_empty() && !gone {
-        return record;
-    }
-    let changed = env.store.update(computer, |record| {
-        for (name, id) in &adopt {
-            record.pending.retain(|pending| pending.name != *name);
-            if !record.fork_ids.contains(id) {
-                record.fork_ids.push(id.clone());
-            }
+    // A computer still being made will be started next.
+    let running = running.len() + pending;
+    if matches!(method, "checkpoints.fork" | "computers.create") {
+        if made.len() + pending >= MAX_FORKS {
+            return Err(format!(
+                "This computer has made {MAX_FORKS} computers already; delete one first."
+            ));
         }
-        record
-            .pending
-            .retain(|pending| !drop_names.contains(&pending.name));
-        if healthy {
-            record
-                .fork_ids
-                .retain(|id| env.snapshot.names.contains_key(id));
+        if running >= MAX_RUNNING {
+            return Err(format!(
+                "{MAX_RUNNING} of the computers this one made are running; stop one first."
+            ));
         }
-        Ok(())
-    });
-    if let Err(error) = changed {
-        eprintln!("silod: guest client of {computer}: {error}");
     }
-    env.store.status(computer).ok().flatten().unwrap_or(record)
+    if method == "computers.start" && running >= MAX_RUNNING {
+        return Err(format!(
+            "{MAX_RUNNING} of the computers this one made are running; stop one first."
+        ));
+    }
+    // A job nobody follows still takes a place in the engine's job admission.
+    if starts_job(method) && document.jobs_of(computer).len() >= MAX_JOBS {
+        return Err(format!(
+            "{MAX_JOBS} jobs of this computer's client are not finished and acknowledged yet."
+        ));
+    }
+    Ok(())
 }
 
 /// Answers one request from `computer`'s bridge folder. A frame with no valid token gets no
@@ -216,166 +153,91 @@ pub async fn handle_frame(
     frame: GuestRequestFrame,
 ) -> Option<GuestResponseFrame> {
     let id = frame.id.clone();
-    let Some(record) = env.store.verify(&frame.token, computer) else {
+    if env.store.verify(&frame.token, computer).is_none() {
         eprintln!("silod: guest client of {computer}: dropped a call (token not valid)");
         return None;
-    };
-    let record = settle(env, computer, record).await;
-    // Only a method of the allow-list is ever written to the log; the guest chose the rest.
-    let method = guest_client::ALLOWED
-        .iter()
-        .find(|allowed| **allowed == frame.method)
-        .copied()
-        .unwrap_or("(a method that is not offered)");
-    let world = World {
-        env,
-        record: &record,
-    };
-    let authorized = match guest_client::authorize(
-        computer,
-        &record.policy,
-        &frame.method,
-        &frame.params,
-        &world,
-    ) {
-        Ok(authorized) => authorized,
-        Err(refusal) => {
-            eprintln!("silod: guest client of {computer}: refused {method}");
-            return Some(failure(&id, "permission_denied", refusal.0));
-        }
-    };
-    let text = |key: &str| authorized.params[key].as_str().map(str::to_owned);
-    let fork_name = (method == "checkpoints.fork")
-        .then(|| text("newName"))
-        .flatten();
-    if let Some(name) = &fork_name {
-        match env.store.update(computer, |record| record.begin_fork(name)) {
-            Ok(Some(())) => {}
-            Ok(None) => {
-                return Some(failure(
-                    &id,
-                    "permission_denied",
-                    "This computer has no token.",
-                ))
-            }
-            Err(message) => return Some(failure(&id, "permission_denied", message)),
-        }
     }
-    let started = (method == "computers.start")
-        .then(|| text("computerId"))
-        .flatten();
+    // Only a method of the registry is ever written to the log; the guest chose the rest.
+    let method = MethodName::from_name(&frame.method)
+        .map(MethodName::name)
+        .unwrap_or("(a method that is not offered)");
+    if let Err(message) = within_caps(env, computer, &frame.method) {
+        eprintln!("silod: guest client of {computer}: refused {method}");
+        return Some(failure(&id, "permission_denied", message, None));
+    }
+    let target = frame
+        .params
+        .get("computerId")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    let started = (method == "computers.start").then_some(target.clone()).flatten();
     if let Some(fork) = &started {
         env.reserved.add(computer, fork);
     }
     if method == "computers.stop" {
-        if let Some(fork) = text("computerId") {
-            env.reserved.remove(computer, &fork);
+        if let Some(fork) = &target {
+            env.reserved.remove(computer, fork);
         }
     }
     eprintln!("silod: guest client of {computer}: {method}");
     match env
         .runner
-        .run(&frame.method, authorized.params.clone())
+        .run(Some(computer), &frame.method, frame.params)
         .await
     {
-        Ok(mut result) => {
-            let job = result
-                .get("jobId")
-                .and_then(Value::as_str)
-                .map(str::to_owned);
-            let acknowledged = (method == "operations.job.acknowledge")
-                .then(|| text("jobId"))
-                .flatten();
-            let noted = env.store.update(computer, |record| {
-                if let (true, Some(job)) = (authorized.starts_job, &job) {
-                    record.note_job(job);
-                    if let Some(name) = &fork_name {
-                        if let Some(pending) = record
-                            .pending
-                            .iter_mut()
-                            .find(|pending| pending.name == *name)
-                        {
-                            pending.job_id = Some(job.clone());
-                        }
-                    }
-                }
-                if let Some(done) = &acknowledged {
-                    record.drop_job(done);
-                }
-                Ok(())
-            });
-            if let Err(error) = noted {
-                eprintln!("silod: guest client of {computer}: {error}");
-            }
-            if authorized.filter != Filter::None {
-                let world = World {
-                    env,
-                    record: &record,
-                };
-                guest_client::filter_result(authorized.filter, &mut result, computer, &world);
-            }
-            Some(GuestResponseFrame {
-                v: 1,
-                id,
-                ok: true,
-                result: Some(result),
-                error: None,
-            })
-        }
+        Ok(result) => Some(GuestResponseFrame {
+            v: 1,
+            id,
+            ok: true,
+            result: Some(result),
+            error: None,
+        }),
         Err(error) => {
-            if let Some(name) = &fork_name {
-                let _ = env.store.update(computer, |record| {
-                    record.pending.retain(|pending| pending.name != *name);
-                    Ok(())
-                });
-            }
             if let Some(fork) = &started {
                 env.reserved.remove(computer, fork);
             }
-            Some(failure(
-                &id,
-                &serde_json::to_value(error.code)
-                    .ok()
-                    .and_then(|code| code.as_str().map(str::to_owned))
-                    .unwrap_or_else(|| "internal".into()),
-                error.message,
-            ))
+            let code = serde_json::to_value(error.code)
+                .ok()
+                .and_then(|code| code.as_str().map(str::to_owned))
+                .unwrap_or_else(|| "internal".into());
+            Some(failure(&id, &code, error.message, error.details))
         }
     }
 }
 
 /// Acknowledges, for a client that never did, the jobs it started long ago and that are over,
 /// so no job of a guest stays in the engine's queue.
-pub async fn reap(runner: &dyn Runner, store: &TokenStore, computer: &str) {
-    let Some(record) = store.status(computer).ok().flatten() else {
+pub async fn reap(runner: &dyn Runner, policy: &PolicyStore, computer: &str) {
+    let Ok(document) = policy.snapshot() else {
         return;
     };
     let now = now_secs();
     let mut done: Vec<String> = Vec::new();
-    for job in record
-        .jobs
-        .iter()
+    for job in document
+        .jobs_of(computer)
+        .into_iter()
         .filter(|job| now.saturating_sub(job.at) > JOB_AGE)
     {
         match runner
-            .run("operations.job.get", json!({ "jobId": job.id }))
+            .run(None, "operations.job.get", json!({ "jobId": job.id }))
             .await
         {
             Ok(reply) if reply["state"] != "finished" => {}
             Ok(_) | Err(_) => {
                 let _ = runner
-                    .run("operations.job.acknowledge", json!({ "jobId": job.id }))
+                    .run(
+                        None,
+                        "operations.job.acknowledge",
+                        json!({ "jobId": job.id }),
+                    )
                     .await;
                 done.push(job.id.clone());
             }
         }
     }
-    if !done.is_empty() {
-        let _ = store.update(computer, |record| {
-            for job in &done {
-                record.drop_job(job);
-            }
-            Ok(())
-        });
+    for job in done {
+        if let Err(error) = policy.drop_job(computer, &job) {
+            eprintln!("silod: guest client of {computer}: {error}");
+        }
     }
 }

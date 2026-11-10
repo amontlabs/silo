@@ -41,6 +41,8 @@ pub enum ErrorCode {
     DesktopUpdateRequired,
     // The system credential store refused the engine without asking (Keychain access list).
     CredentialAccessDenied,
+    // The call needs the owner's approval; the error's details say what it asks for.
+    ApprovalRequired,
 }
 
 /// A string JobId with one of the six canonical id-space prefixes.

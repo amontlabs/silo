@@ -283,12 +283,86 @@
       ],
       "type": "object"
     },
+    "ApprovalKind": {
+      "description": "What a call that widens a computer's access asks the owner for.",
+      "oneOf": [
+        {
+          "const": "merge",
+          "description": "Bring a computer's changes into one the caller did not make.",
+          "type": "string"
+        },
+        {
+          "const": "replace_main",
+          "description": "Replace main with a fork.",
+          "type": "string"
+        },
+        {
+          "const": "github",
+          "description": "GitHub access: a repository, or write access.",
+          "type": "string"
+        },
+        {
+          "const": "secret",
+          "description": "A secret, or a secret's assignment to a computer.",
+          "type": "string"
+        },
+        {
+          "const": "network",
+          "description": "A wider network policy.",
+          "type": "string"
+        },
+        {
+          "const": "port",
+          "description": "A port published on the device.",
+          "type": "string"
+        },
+        {
+          "const": "ssh",
+          "description": "SSH access to a computer from outside.",
+          "type": "string"
+        },
+        {
+          "const": "access",
+          "description": "Access the caller does not have itself, handed to a computer it makes or forks.",
+          "type": "string"
+        },
+        {
+          "const": "container",
+          "description": "A container computer, which shares the device's kernel.",
+          "type": "string"
+        }
+      ]
+    },
     "ApprovalMode": {
       "enum": [
         "ask",
         "auto"
       ],
       "type": "string"
+    },
+    "ApprovalRequiredDetails": {
+      "description": "The details of an `approval_required` error.",
+      "properties": {
+        "approvalId": {
+          "description": "The request the owner answers, once approvals are recorded.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "$ref": "#/$defs/ApprovalKind"
+        },
+        "summary": {
+          "description": "What is asked, written by the engine from the call's parameters.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "summary"
+      ],
+      "type": "object"
     },
     "Archive": {
       "properties": {
@@ -366,6 +440,169 @@
       "enum": [
         "warning",
         "error"
+      ],
+      "type": "string"
+    },
+    "AuditCallerKind": {
+      "description": "Who made a recorded call.",
+      "oneOf": [
+        {
+          "const": "owner",
+          "description": "A program on this device, through the engine's own socket (the app, the command line).",
+          "type": "string"
+        },
+        {
+          "const": "device",
+          "description": "Another device, through Connections.",
+          "type": "string"
+        },
+        {
+          "const": "computer",
+          "description": "The agent inside a computer.",
+          "type": "string"
+        }
+      ]
+    },
+    "AuditEntry": {
+      "properties": {
+        "approvalId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "at": {
+          "description": "RFC 3339 time the call was answered.",
+          "type": "string"
+        },
+        "callerId": {
+          "description": "The computer's id for a computer, the key fingerprint for a device when it is known.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "callerKind": {
+          "$ref": "#/$defs/AuditCallerKind"
+        },
+        "client": {
+          "description": "The name the calling program gave; diagnostic only, never an identity.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "computerId": {
+          "description": "The computer the call named, when it named one.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "errorCode": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "jobId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "method": {
+          "type": "string"
+        },
+        "outcome": {
+          "$ref": "#/$defs/AuditOutcome"
+        }
+      },
+      "required": [
+        "id",
+        "at",
+        "callerKind",
+        "method",
+        "outcome"
+      ],
+      "type": "object"
+    },
+    "AuditListParams": {
+      "properties": {
+        "beforeId": {
+          "description": "Only rows older than this row id (the `nextBeforeId` of the previous page).",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "callerKind": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AuditCallerKind"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Only rows of calls this kind of caller made."
+        },
+        "computerId": {
+          "description": "Only rows about this computer.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "limit": {
+          "description": "At most this many rows, newest first; 100 when left out, never more than 500.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "AuditListResult": {
+      "properties": {
+        "entries": {
+          "items": {
+            "$ref": "#/$defs/AuditEntry"
+          },
+          "type": "array"
+        },
+        "nextBeforeId": {
+          "description": "Pass as `beforeId` to read the next, older page; absent on the last page.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "entries"
+      ],
+      "type": "object"
+    },
+    "AuditOutcome": {
+      "description": "How a recorded call ended.",
+      "enum": [
+        "ok",
+        "error",
+        "refused",
+        "asked"
       ],
       "type": "string"
     },
@@ -3785,7 +4022,8 @@
         "setup_incomplete",
         "screen_sharing_unavailable",
         "desktop_update_required",
-        "credential_access_denied"
+        "credential_access_denied",
+        "approval_required"
       ],
       "type": "string"
     },
@@ -3809,6 +4047,17 @@
       "properties": {
         "code": {
           "$ref": "#/$defs/ErrorCode"
+        },
+        "details": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ApprovalRequiredDetails"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "For `approval_required`: what the call asks the owner for."
         },
         "diagnostics": {
           "anyOf": [
@@ -8305,6 +8554,7 @@
     "MethodName": {
       "enum": [
         "activity.setup.read",
+        "audit.list",
         "changes.keep",
         "changes.promote",
         "changes.request",
@@ -8492,6 +8742,22 @@
             },
             "params": {
               "$ref": "#/$defs/DeviceParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "audit.list",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/AuditListParams"
             }
           },
           "required": [
@@ -11299,6 +11565,22 @@
                 "$ref": "#/$defs/ComputerConfigurationProgress"
               },
               "type": "array"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "audit.list",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/AuditListResult"
             }
           },
           "required": [
@@ -17650,6 +17932,12 @@
       "name": "activity.setup.read",
       "paramsType": "common::DeviceParams",
       "resultType": "Vec<computers::ComputerConfigurationProgress>"
+    },
+    {
+      "kind": "query",
+      "name": "audit.list",
+      "paramsType": "audit::AuditListParams",
+      "resultType": "audit::AuditListResult"
     },
     {
       "kind": "job",

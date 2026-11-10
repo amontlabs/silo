@@ -140,7 +140,7 @@ fn map_error(message: impl Into<String>) -> DispatchError {
     } else {
         ErrorCode::Internal
     };
-    DispatchError { code, message }
+    DispatchError { code, message, details: None }
 }
 
 fn decode<T: serde::de::DeserializeOwned>(
@@ -262,6 +262,7 @@ fn macos_unsupported(method: &str) -> DispatchError {
         message: format!(
             "{method} is not available for macOS computers: they have no Linux desktop service."
         ),
+        details: None,
     }
 }
 
@@ -373,6 +374,7 @@ async fn desktop_connect(
         code: silo_api::jobs::ErrorCode::PermissionDenied,
         message: "desktop.connect is for peer engines. Open the computer with display.viewer.open."
             .to_owned(),
+        details: None,
     })
 }
 
@@ -616,6 +618,7 @@ async fn computer_use_setup(
             code: ErrorCode::UnsupportedRemoteOperation,
             message: "A macOS computer sets up computer use itself; change its approval to apply a new mode."
                 .into(),
+            details: None,
         });
     }
     if let Some(device) = remote_device(context, params.device_id.as_deref()) {
@@ -692,6 +695,7 @@ async fn display_viewer_open(
             message:
                 "A macOS computer has no viewer connection: open its screen with display.show."
                     .into(),
+            details: None,
         });
     }
     let engine_context: Arc<dyn EngineContext> = Arc::new(context.silod_context().clone());
@@ -1219,6 +1223,7 @@ fn spawn_job(
                             code: map_error(&message).code,
                             message,
                             diagnostics: None,
+                            details: None,
                         }),
                         outcome_chunked: false,
                     },
@@ -1626,6 +1631,7 @@ mod tests {
                     client_id: client.into(),
                     protocol: 7,
                     client: None,
+                    caller: silo_engine::policy::Caller::owner("test"),
                 },
             )
         }

@@ -3,9 +3,11 @@
 mod ownership;
 
 pub mod access;
+pub mod audit;
 pub mod checkpoints;
 pub mod computers;
 pub mod display;
+pub(crate) mod gate;
 pub mod guest;
 pub mod guest_client;
 pub mod guest_remote;
@@ -18,7 +20,7 @@ pub mod services;
 #[cfg(test)]
 pub(crate) static MACOS_REGISTRY_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-use std::sync::Arc;
+use std::{collections::BTreeSet, sync::Arc};
 
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -44,6 +46,8 @@ pub struct HandlerContext {
     client_id: ClientId,
     /// Set when the request is another device's, run here by `remote::serve_owner`.
     owner_bridge: bool,
+    /// For a computer's call: that computer and the computers it made.
+    visible: Option<Arc<BTreeSet<String>>>,
 }
 
 impl HandlerContext {
@@ -54,7 +58,29 @@ impl HandlerContext {
             client,
             client_id,
             owner_bridge: false,
+            visible: None,
         }
+    }
+
+    /// The same request, limited to `visible` computers for a handler that cuts its own answer.
+    fn with_visible(&self, visible: Option<Arc<BTreeSet<String>>>) -> Self {
+        Self {
+            engine: self.engine.clone(),
+            client: self.client.clone(),
+            client_id: self.client_id.clone(),
+            owner_bridge: self.owner_bridge,
+            visible,
+        }
+    }
+
+    /// Who is calling.
+    pub(crate) fn caller(&self) -> &silo_engine::policy::Caller {
+        &self.client.caller
+    }
+
+    /// For a computer's call: that computer and the computers it made.
+    pub(crate) fn visible(&self) -> Option<&BTreeSet<String>> {
+        self.visible.as_deref()
     }
 
     /// A request another device's engine sent over Connections, served as a local one. Its
@@ -150,6 +176,7 @@ impl HandlerContext {
             return DispatchError {
                 code,
                 message: error.message,
+                details: None,
             };
         }
         let code = match error.code {
@@ -165,6 +192,7 @@ impl HandlerContext {
         DispatchError {
             code,
             message: error.message,
+            details: None,
         }
     }
 
@@ -186,7 +214,7 @@ impl HandlerContext {
                 }
             }
         };
-        DispatchError { code, message }
+        DispatchError { code, message, details: None }
     }
 }
 
@@ -230,6 +258,7 @@ pub fn serves(method: MethodName) -> bool {
         || checkpoints::owns(method)
         || guest::owns(method)
         || guest_client::owns(method)
+        || audit::owns(method)
         || access::owns(method)
         || display::owns(method)
         || services::owns(method)
@@ -287,8 +316,20 @@ fn changed_computer(method: MethodName, params: &Value) -> Option<String> {
         .map(str::to_owned)
 }
 
-/// Runs the request, moving the generation of the computer it can change.
+/// Runs the request once the policy admits it (`gate`), moving the generation of the computer
+/// it can change.
 pub(crate) async fn dispatch(
+    context: &HandlerContext,
+    method: MethodName,
+    params: &Value,
+) -> Result<HandlerOutput, DispatchError> {
+    let admitted = gate::admit(context, method, params).await?;
+    let scoped = context.with_visible(admitted.visible());
+    let result = run(&scoped, method, admitted.params(params)).await;
+    gate::finish(context, method, &admitted, result)
+}
+
+async fn run(
     context: &HandlerContext,
     method: MethodName,
     params: &Value,
@@ -329,6 +370,9 @@ async fn route(
     if let Some(result) = guest_client::handle(method, params, context).await {
         return result;
     }
+    if let Some(result) = audit::handle(method, params, context).await {
+        return result;
+    }
     if let Some(result) = access::handle(method, params, context).await {
         return result;
     }
@@ -346,7 +390,7 @@ mod tests {
     use silo_api::methods::{method_registry, MethodName};
 
     use super::{
-        access, changed_computer, changes_computer, checkpoints, computers, display, guest,
+        access, audit, changed_computer, changes_computer, checkpoints, computers, display, guest,
         guest_client, serves, services,
     };
 
@@ -429,6 +473,7 @@ mod tests {
             checkpoints::owns,
             guest::owns,
             guest_client::owns,
+            audit::owns,
             access::owns,
             display::owns,
             services::owns,

@@ -26,6 +26,45 @@ pub struct ErrorObject {
     pub message: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub diagnostics: Option<IncompatibleVersionDiagnostics>,
+    /// For `approval_required`: what the call asks the owner for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub details: Option<ApprovalRequiredDetails>,
+}
+
+/// What a call that widens a computer's access asks the owner for.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Hash, Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ApprovalKind {
+    /// Bring a computer's changes into one the caller did not make.
+    Merge,
+    /// Replace main with a fork.
+    ReplaceMain,
+    /// GitHub access: a repository, or write access.
+    Github,
+    /// A secret, or a secret's assignment to a computer.
+    Secret,
+    /// A wider network policy.
+    Network,
+    /// A port published on the device.
+    Port,
+    /// SSH access to a computer from outside.
+    Ssh,
+    /// Access the caller does not have itself, handed to a computer it makes or forks.
+    Access,
+    /// A container computer, which shares the device's kernel.
+    Container,
+}
+
+/// The details of an `approval_required` error.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ApprovalRequiredDetails {
+    pub kind: ApprovalKind,
+    /// What is asked, written by the engine from the call's parameters.
+    pub summary: String,
+    /// The request the owner answers, once approvals are recorded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub approval_id: Option<String>,
 }
 
 /// A response echoes its request id and contains exactly one success or error.

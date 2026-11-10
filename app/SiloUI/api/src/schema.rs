@@ -197,7 +197,7 @@ mod tests {
             schema_json().unwrap()
         );
         let schema: serde_json::Value = serde_json::from_str(&schema_json().unwrap()).unwrap();
-        assert_eq!(schema["x-silo-methods"].as_array().unwrap().len(), 175);
+        assert_eq!(schema["x-silo-methods"].as_array().unwrap().len(), 176);
         assert_eq!(schema["x-silo-job-results"].as_array().unwrap().len(), 39);
         assert_eq!(
             schema["$schema"],
@@ -321,6 +321,7 @@ mod tests {
                 engine_app_version: "0.1.0".to_owned(),
                 client_app_version: Some("9.8.7".to_owned()),
             }),
+            details: None,
         };
         let value = serde_json::to_value(&error).unwrap();
 
@@ -370,8 +371,9 @@ mod tests {
             (ScreenSharingUnavailable, "screen_sharing_unavailable"),
             (DesktopUpdateRequired, "desktop_update_required"),
             (CredentialAccessDenied, "credential_access_denied"),
+            (ApprovalRequired, "approval_required"),
         ];
-        assert_eq!(codes.len(), 25);
+        assert_eq!(codes.len(), 26);
         for (code, expected) in codes {
             let json = serde_json::to_string(&code).unwrap();
             assert_eq!(json, format!("\"{expected}\""));

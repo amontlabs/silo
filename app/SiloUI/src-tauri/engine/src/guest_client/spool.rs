@@ -403,6 +403,7 @@ impl Spool {
                 error: Some(GuestErrorBody {
                     code: "too_large".into(),
                     message: "The answer is larger than the bridge allows.".into(),
+                    details: None,
                 }),
             })
             .map_err(|error| error.to_string())?;

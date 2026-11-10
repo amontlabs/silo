@@ -317,6 +317,7 @@ fn invalid(message: impl ToString) -> DispatchError {
     DispatchError {
         code: error_code(&message),
         message,
+        details: None,
     }
 }
 
@@ -324,6 +325,7 @@ fn not_found(message: &str) -> DispatchError {
     DispatchError {
         code: ErrorCode::NotFound,
         message: message.to_owned(),
+        details: None,
     }
 }
 
@@ -331,6 +333,7 @@ fn unsupported(message: &str) -> DispatchError {
     DispatchError {
         code: ErrorCode::UnsupportedRemoteOperation,
         message: message.to_owned(),
+        details: None,
     }
 }
 
@@ -447,6 +450,7 @@ fn accept_setup_job(
                 "This setup request ID is already in use."
             }
             .to_owned(),
+            details: None,
         });
     }
     Ok(JobStartResult {
@@ -1549,6 +1553,7 @@ pub(crate) fn register_display(
             return Err(DispatchError {
                 code: ErrorCode::Cancelled,
                 message: "The client disconnected before its screen opened.".to_owned(),
+                details: None,
             });
         }
         gateways.insert(key, gateway)
@@ -1610,6 +1615,7 @@ async fn macos_display_session(
             return Err(DispatchError {
                 code: ErrorCode::Busy,
                 message: "Close an unused screen first.".to_owned(),
+                details: None,
             });
         }
     }
@@ -1869,6 +1875,7 @@ pub(crate) mod tests {
                 client_id,
                 protocol: silo_api::transport::PROTOCOL_VERSION,
                 client: None,
+                caller: silo_engine::policy::Caller::owner("test"),
             },
         );
         Fixture {

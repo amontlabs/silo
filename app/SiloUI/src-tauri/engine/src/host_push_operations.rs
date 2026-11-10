@@ -560,6 +560,7 @@ pub fn reconcile_jobs_before_serving(
                         message: "The push outcome is unknown because the saved push journal could not be read."
                             .to_owned(),
                         diagnostics: None,
+                        details: None,
                     }),
                     outcome_chunked: false,
                 };
@@ -1069,6 +1070,7 @@ mod tests {
             code: silo_api::jobs::ErrorCode::Internal,
             message: "The engine could not record the push result.".into(),
             diagnostics: None,
+            details: None,
         };
         {
             let registry = silo_engine::jobs::JobRegistry::open(&registry_path).unwrap();

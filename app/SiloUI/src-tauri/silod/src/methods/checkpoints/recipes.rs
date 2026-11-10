@@ -50,6 +50,7 @@ impl DispatchEnv {
                 client_id: "recipes".to_owned(),
                 protocol: 1,
                 client: None,
+                caller: silo_engine::policy::Caller::owner("recipes"),
             },
         )
     }
@@ -321,6 +322,7 @@ pub(super) async fn build(
     recipes::validate(&params.spec).map_err(|message| DispatchError {
         code: silo_api::jobs::ErrorCode::Internal,
         message,
+        details: None,
     })?;
     let started = context.start_job("recipes.build")?;
     let job_id = started.job_id.clone();

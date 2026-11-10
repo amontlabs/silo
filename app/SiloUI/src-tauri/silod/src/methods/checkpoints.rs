@@ -145,6 +145,7 @@ pub(super) fn failure(failure: Failure) -> DispatchError {
     DispatchError {
         code: failure.code,
         message: failure.message,
+        details: None,
     }
 }
 
@@ -163,6 +164,7 @@ pub(super) fn require_local_device(
         return Err(DispatchError {
             code: ErrorCode::UnsupportedRemoteOperation,
             message: "This engine does not route requests to remote devices.".to_owned(),
+            details: None,
         });
     }
     Ok(())
