@@ -84,13 +84,18 @@ struct Record<'a> {
 }
 
 fn audit(context: &HandlerContext, record: Record<'_>) {
+    let app_data = app_data(context);
+    // An engine always has an absolute data folder; a test context without one keeps no log.
+    if !app_data.is_absolute() {
+        return;
+    }
     let request = context.client_identity();
     let caller = &request.caller;
     let client = match caller {
         Caller::Owner { client } => Some(client.clone()),
         _ => request.client.as_ref().map(|client| client.name.clone()),
     };
-    AuditLog::shared(&app_data(context)).record(Row {
+    AuditLog::shared(&app_data).record(Row {
         at_ms: silo_engine::audit::now_ms(),
         caller_kind: caller.kind(),
         caller_id: caller.id().map(str::to_owned),
@@ -163,22 +168,18 @@ pub(crate) async fn admit(
     match decision {
         Decision::Allow(allowed) => {
             if let (Some(creation), Caller::Computer { id }) = (&allowed.creates, &caller) {
-                let store = PolicyStore::new(&app_data(context));
-                let begun = match &creation.id {
-                    // The engine chose the id, so it names this computer and no other.
-                    Some(made) => store.confirm(id, &creation.name, made),
-                    None => store.begin(
-                        id,
-                        Pending {
-                            created_by: id.clone(),
-                            name: creation.name.clone(),
-                            id: None,
-                            source: creation.source.clone(),
-                            job_id: None,
-                            at: 0,
-                        },
-                    ),
-                };
+                // The computer is the caller's once its job has finished well (`settle`).
+                let begun = PolicyStore::new(&app_data(context)).begin(
+                    id,
+                    Pending {
+                        created_by: id.clone(),
+                        name: creation.name.clone(),
+                        id: creation.id.clone(),
+                        source: creation.source.clone(),
+                        job_id: None,
+                        at: 0,
+                    },
+                );
                 if let Err(message) = begun {
                     return refuse(
                         DispatchError::new(ErrorCode::PermissionDenied, message),
@@ -193,7 +194,7 @@ pub(crate) async fn admit(
                 params: allowed.params,
                 filter: allowed.filter,
                 visible: visible.or(allowed.visible.map(Arc::new)),
-                creates: allowed.creates.filter(|creation| creation.id.is_none()),
+                creates: allowed.creates,
                 target,
                 kind: kind_of(method),
                 job,
@@ -249,6 +250,7 @@ pub(crate) fn finish(
         }
         if let (Ok(output), Some(visible)) = (&mut result, &admitted.visible) {
             policy::filter_result(admitted.filter, &mut output.value, visible);
+            policy::cut_for_computer(&mut output.value, visible);
         }
     }
     if matches!(

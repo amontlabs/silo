@@ -587,6 +587,47 @@ fn a_github_configuration_may_change_only_the_callers_tree() {
 }
 
 #[test]
+fn an_unchanged_github_configuration_is_refused_so_its_answer_never_reaches_a_computer() {
+    let unchanged = json!({"configuration": {"computers": [
+        {"computerId": "main", "repositoryMode": "selected"},
+        {"computerId": "stranger", "repositoryMode": "all"}]}});
+    assert!(refused(&check("github.configuration.save", unchanged)));
+}
+
+#[test]
+fn every_answer_to_a_computer_is_cut_wherever_device_wide_state_sits() {
+    let visible = BTreeSet::from(["main".to_owned(), "fork-1".to_owned()]);
+    // The device's state, as a fork job's outcome or `computers.dismissError` answers it.
+    let mut job = json!({"state": "finished", "outcome": {"result": {
+        "computers": [{"configuration": {"id": "fork-1"}}, {"configuration": {"id": "stranger"}}],
+        "secrets": [{"name": "prod"}], "github": {"account": "me"},
+        "activities": [{"computer": "stranger"}], "repositoryPushOperations": [{}],
+        "computerConfigurationOperation": {"x": 1}, "runtimeRepair": null}}});
+    cut_for_computer(&mut job, &visible);
+    let state = &job["outcome"]["result"];
+    assert_eq!(state["computers"].as_array().unwrap().len(), 1);
+    assert_eq!(state["secrets"], json!([]));
+    assert_eq!(state["github"], Value::Null);
+    assert_eq!(state["activities"], json!([]));
+    assert_eq!(state["repositoryPushOperations"], json!([]));
+    assert_eq!(state["computerConfigurationOperation"], Value::Null);
+    // Network and SSH access state list every computer by `computerId`.
+    let mut network = json!({"computers": [
+        {"computer": "main", "computerId": "main", "ports": []},
+        {"computer": "other", "computerId": "stranger", "ports": [{"port": 22}]},
+        {"computer": "unnamed", "ports": []}]});
+    cut_for_computer(&mut network, &visible);
+    assert_eq!(network["computers"].as_array().unwrap().len(), 1);
+    // macOS computers are listed by `id`.
+    let mut list = json!({"macos": {"computers": [{"id": "stranger"}, {"id": "main"}]}});
+    cut_for_computer(&mut list, &visible);
+    assert_eq!(list["macos"]["computers"], json!([{"id": "main"}]));
+    let mut chunked = json!({"state": "finished", "outcomeChunk": {"data": "{\"computers\":[]}"}});
+    cut_for_computer(&mut chunked, &visible);
+    assert_eq!(chunked["outcomeChunk"], Value::Null);
+}
+
+#[test]
 fn the_audit_list_is_cut_to_the_callers_computers() {
     let Decision::Allow(granted) = check("audit.list", json!({})) else {
         panic!("not allowed")

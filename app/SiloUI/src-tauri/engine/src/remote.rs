@@ -3498,6 +3498,9 @@ fn audit_device_change(request: &Value, key: Option<String>, result: &Result<Val
     let Some(context) = crate::context::current() else {
         return;
     };
+    if !context.paths().app_data.is_absolute() {
+        return;
+    }
     let (outcome, error_code) = match result {
         Ok(_) => (silo_api::methods::audit::AuditOutcome::Ok, None),
         Err(error) => (

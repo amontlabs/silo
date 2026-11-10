@@ -33,6 +33,10 @@ compile until it is classified there.
 | Never | refused with `permission_denied` |
 
 Every call is refused when it names another device (`deviceId`, `allDevices`, `deviceIds`).
+Every answer to a computer is cut before it goes back, wherever the device's state sits in it (a
+job's outcome holds the state after a fork, for one): lists of computers keep only its tree, and
+the device's secrets, GitHub account, activities and pushes are left out. A job outcome too large
+to answer in one piece cannot be cut, so it is withheld.
 
 ## Method by method
 
@@ -61,7 +65,7 @@ Every call is refused when it names another device (`deviceId`, `allDevices`, `d
 | `network.publish` | Asks you | A port on your device. |
 | `sshAccess.save` | Asks you | Turning SSH access off is free. |
 | `push.start` | Asks you | A push to GitHub through your device. |
-| `github.configuration.save` | Asks you | Only when the computers whose GitHub access changes are in its tree; a configuration that drops or changes another computer's access is refused. |
+| `github.configuration.save` | Asks you | Only when the computers whose GitHub access changes are in its tree; a configuration that drops or changes another computer's access, or changes nothing, is refused. |
 | `secrets.save` | Asks you | Adding a secret for computers in its tree. Changing a saved secret is yours only. The secret's value is never in the request's summary. |
 | `changes.capture`, `changes.baseline` | Never | Baselines are cached under keys other computers share. |
 | `changes.requests.markKept`, `changes.requests.open` | Never | |

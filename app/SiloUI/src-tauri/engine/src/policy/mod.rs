@@ -730,7 +730,7 @@ impl<'a> Judge<'a> {
             );
         }
         if changed.is_empty() {
-            return Ok(allow_with(params.clone()));
+            return Err("Nothing in that GitHub configuration changes.".into());
         }
         let names: Vec<String> = changed.iter().map(|id| self.name(id)).collect();
         Ok(ask(
@@ -796,6 +796,50 @@ pub fn filter_result(filter: Filter, result: &mut Value, visible: &BTreeSet<Stri
                 });
             }
         }
+    }
+}
+
+/// Cuts any answer to a computer down to what it may see, wherever it sits in the answer (a
+/// job's outcome holds the device's state after a fork, for one). A list of computers keeps only
+/// the visible ones; the device's own state loses its secrets, GitHub, activities and pushes; a
+/// job outcome too large to answer at once, which cannot be cut, is withheld.
+pub fn cut_for_computer(result: &mut Value, visible: &BTreeSet<String>) {
+    match result {
+        Value::Array(items) => {
+            for item in items {
+                cut_for_computer(item, visible);
+            }
+        }
+        Value::Object(object) => {
+            if object.contains_key("outcomeChunk") {
+                object.insert("outcomeChunk".into(), Value::Null);
+            }
+            if let Some(Value::Array(computers)) = object.get_mut("computers") {
+                computers.retain(|computer| {
+                    ["/configuration/id", "/computerId", "/id"]
+                        .iter()
+                        .find_map(|pointer| computer.pointer(pointer).and_then(Value::as_str))
+                        .is_some_and(|id| visible.contains(id))
+                });
+                for (key, emptied) in [
+                    ("secrets", json!([])),
+                    ("github", Value::Null),
+                    ("activities", json!([])),
+                    ("repositoryPushOperations", json!([])),
+                    ("computerConfigurationOperation", Value::Null),
+                    ("repositoryCatalog", json!([])),
+                    ("account", Value::Null),
+                ] {
+                    if object.contains_key(key) {
+                        object.insert(key.into(), emptied);
+                    }
+                }
+            }
+            for value in object.values_mut() {
+                cut_for_computer(value, visible);
+            }
+        }
+        _ => {}
     }
 }
 

@@ -107,10 +107,10 @@ computer shows running, is stopped, or five minutes pass; one being made counts)
 jobs it has not acknowledged. A job over half an hour old that the client never acknowledged is
 acknowledged for it once it has finished.
 
-A computer made from inside is the maker's once the engine knows its id: at once for a new
-computer (the engine chooses a Linux computer's id; a macOS computer's comes back with the call),
-and for a fork once its job finished without error and a computer of that name exists with the
-source as its parent. A fork that failed, or never got a job within two minutes, is dropped. The
+A computer made from inside is the maker's once it exists: a new Linux computer (whose id the
+engine chooses) once its job finished without error, a new macOS computer as soon as the call
+answers with it, and a fork once its job finished without error and a computer of that name exists
+with the source as its parent. A fork that failed, or never got a job within two minutes, is dropped. The
 record is the engine's (`<app data>/policy/computers.json`), kept across restarts and new tokens;
 a token minted by an earlier version hands the forks and jobs it recorded to it the first time the
 bridge serves the computer.
