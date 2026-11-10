@@ -506,6 +506,7 @@ pub(super) async fn keep(
         dry_run: false,
         data_ok: params.data_ok.unwrap_or(false),
         reviewed: Some(request.review_digest.clone()),
+        choices: super::keep::choices_of(params.choices, params.skip),
     };
     let checkpoints = checkpoint_service(context);
     let manifests = store::production(host.clone());

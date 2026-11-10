@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::keep::{FoldRequest, KeepHooks, KeepRefusal, KeepReport};
+use super::keep::{FoldRequest, KeepAnswer, KeepHooks, KeepRefusal, KeepReport};
 
 /// Which requests `changes.requests.list` returns.
 #[derive(
@@ -154,6 +154,12 @@ wire_struct! {
         /// The recipe's `keep:` steps to run around the keep.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         keep: Option<KeepHooks>,
+        /// The answer for each item both sides changed, by item id; see `changes.keep`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        choices: Option<BTreeMap<String, KeepAnswer>>,
+        /// Item ids not to bring over even though they do not conflict; see `changes.keep`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        skip: Option<Vec<String>>,
     }
 }
 

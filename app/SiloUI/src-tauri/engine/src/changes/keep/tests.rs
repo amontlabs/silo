@@ -17,7 +17,7 @@ use super::{
     env::{CheckpointRef, ExecOut, GuestCmd, KeepEnv, Live, ManifestStore, Os, RunAs},
     journal::{Entry, Journal, State},
     plan::{self, Base, Decision},
-    prepare, scripts, Hooks, Outcome, Request, Resumed, UndoOutcome,
+    prepare, scripts, Answer, Hooks, Outcome, Request, Resumed, UndoOutcome,
 };
 use crate::changes::{diff::diff, ignore::IgnoreList, manifest::Manifest};
 
@@ -538,7 +538,7 @@ fn refused(outcome: Outcome) -> super::Refusal {
 fn the_recorded_cli_tools_task_plans_its_packages_files_and_commits() {
     let (base, fork) = (fixture("l3.parent"), fixture("l3.fork"));
     let changes = diff(&base, &fork, None, &IgnoreList::builtin());
-    let plan = plan::build(&changes, &base, &fork, &base, Os::Linux);
+    let plan = plan::build(&changes, &base, &fork, &base, Os::Linux, &Request::default());
     assert!(plan.conflicts.is_empty(), "{:?}", plan.conflicts);
     let mut names: Vec<_> = plan
         .packages
@@ -670,7 +670,7 @@ fn package_names_and_versions_are_checked_before_a_manager_sees_them() {
     let base = m("");
     let fork = m("PKG\tdpkg\t-evil\t1.0\nPKGM\tdpkg\t-evil\n");
     let changes = diff(&base, &fork, None, &IgnoreList::builtin());
-    let plan = plan::build(&changes, &base, &fork, &base, Os::Linux);
+    let plan = plan::build(&changes, &base, &fork, &base, Os::Linux, &Request::default());
     assert!(plan.packages.is_empty());
     assert_eq!(plan.conflicts[0].kind, "package");
 }
@@ -681,7 +681,7 @@ fn a_package_main_changed_since_the_fork_is_a_conflict_and_a_removal_is_three_wa
     let fork = m("PKG\tdpkg\tjq\t1.7\nPKGM\tdpkg\tjq\n");
     let main = m("PKG\tdpkg\tjq\t1.5\nPKG\tdpkg\told\t1\nPKGM\tdpkg\tjq\nPKGM\tdpkg\told\n");
     let changes = diff(&base, &fork, None, &IgnoreList::builtin());
-    let plan = plan::build(&changes, &base, &fork, &main, Os::Linux);
+    let plan = plan::build(&changes, &base, &fork, &main, Os::Linux, &Request::default());
     assert_eq!(plan.conflicts.len(), 1);
     assert_eq!(plan.conflicts[0].item, "dpkg jq");
     assert_eq!(
@@ -692,7 +692,7 @@ fn a_package_main_changed_since_the_fork_is_a_conflict_and_a_removal_is_three_wa
         ["old"]
     );
     let main_edited = m("PKG\tdpkg\tjq\t1.6\nPKG\tdpkg\told\t2\nPKGM\tdpkg\tjq\nPKGM\tdpkg\told\n");
-    let plan = plan::build(&changes, &base, &fork, &main_edited, Os::Linux);
+    let plan = plan::build(&changes, &base, &fork, &main_edited, Os::Linux, &Request::default());
     assert!(plan.removals.is_empty());
     assert!(plan.conflicts.iter().any(|c| c.item == "dpkg old"));
 }
@@ -853,7 +853,7 @@ fn a_divergent_keep_stops_before_anything_changes() {
     )
     .unwrap();
     let refusal = refused(outcome);
-    assert_eq!(refusal.reason, "divergent");
+    assert_eq!(refusal.reason, "choices-needed");
     assert_eq!(refusal.conflicts[0].item, "/root/.bashrc");
     for tag in [
         "pkg_install",
@@ -920,7 +920,7 @@ fn a_file_the_receiver_changed_on_main_conflicts_with_the_imported_computers_cha
     let (_dir, journal) = journal();
     let st = store_from_imported_record(SIMPLE_BASE, SIMPLE_FORK, "F\t/root/.bashrc\t21\t9\tdd\n");
     let refusal = refused(run(&world, &st, &journal, &request(Hooks::default())).unwrap());
-    assert_eq!(refusal.reason, "divergent");
+    assert_eq!(refusal.reason, "choices-needed");
     assert_eq!(refusal.conflicts[0].item, "/root/.bashrc");
     assert_eq!(world.logged("checkpoint"), 0);
     world.with("main", |c| {
@@ -942,7 +942,7 @@ fn a_file_the_collector_could_not_hash_is_a_conflict_when_main_differs() {
         )
         .unwrap(),
     );
-    assert_eq!(refusal.reason, "divergent");
+    assert_eq!(refusal.reason, "choices-needed");
 }
 
 #[test]
@@ -1034,7 +1034,7 @@ fn a_git_that_cannot_test_the_merge_refuses_instead_of_going_ahead() {
     };
     let refusal =
         refused(run(&world, &store(BASE, FORK, BASE), &journal, &request(hooks)).unwrap());
-    assert_eq!(refusal.reason, "git");
+    assert_eq!(refusal.reason, "choices-needed");
     assert!(refusal.conflicts[0].detail.contains("merge-tree"));
 }
 
@@ -1378,8 +1378,9 @@ fn brew_installs_only_when_it_would_install_the_forks_version() {
         refusal.conflicts[0].detail,
         "brew now offers 1.8; the fork has 1.7"
     );
-    assert!(refusal.message.contains("package version: brew jq"));
-    assert!(!refusal.message.contains("clash"));
+    assert_eq!(refusal.reason, "choices-needed");
+    assert_eq!(refusal.conflicts[0].id, "package:brew:jq");
+    assert_eq!(refusal.conflicts[0].allowed, [Answer::Main]);
     *world.brew.lock().unwrap() = String::new();
     let refusal = refused(
         run(

@@ -256,6 +256,7 @@ fn json_shape_is_stable() {
     assert_eq!(
         v["settings"]["files"][0],
         serde_json::json!({
+            "id": "file:/etc/a.conf",
             "path": "/etc/a.conf",
             "change": "added",
             "before": null,
