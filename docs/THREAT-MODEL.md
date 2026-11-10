@@ -876,8 +876,8 @@ with nothing sensitive on it, and the app, the CLI and `silo list` label it as l
   what the agent gains by loosening them is access for other guest users to its own requests,
   which it can already give them. The token, the allow-list and the folder parsing (links, sizes,
   counts) are the same code and the same limits.
-- **No memory checkpoints.** The capability list in `containers/capability.rs` has one entry left,
-  "memory snapshots": a container's checkpoints, and so its exports, save the disks only, whether the
+- **No memory checkpoints.** The capability list in `containers/capability.rs` names one thing a
+  container computer lacks, "memory snapshots": a container's checkpoints, and so its exports, save the disks only, whether the
   computer runs or not. No memory is ever carried into an export.
 - **Export and import** ([`archive.rs`](../app/SiloUI/src-tauri/engine/src/containers/archive.rs),
   `silo-ctr pack` and `unpack` in [`pack.rs`](../app/SiloUI/container-shim/src/pack.rs);
@@ -888,10 +888,12 @@ with nothing sensitive on it, and the app, the CLI and `silo list` label it as l
   - *What is written.* The export is a checkpoint of the computer's disks (a running one is frozen
     for the copy, up to 30 s, as for any checkpoint) and each layer of its chain is written as it is,
     owners included, by `silo-ctr pack` in the container's own user namespace, so the engine's
-    account never reads a layer outside it. A socket file comes back as an empty socket file; a
+    account never reads a layer outside it. A socket file is left out of the file (tar has no type
+    for one); a
     device node other than a whiteout stops the export. The guest image is never in the file: the file names the config digest
-    it needs and the importing Silo refuses any other than the one it pins, which also bounds what
-    the layers can sit on. Secrets, GitHub access, environment, ports and layer ids are dropped
+    it needs and the importing Silo refuses any other than the one it pins or one it has kept
+    unpacked (see *The guest image* below), which also bounds what
+    the layers can sit on. Secrets, GitHub access, environment and layer ids are dropped
     from the record in the file, as they are for a VM, and the settings in the manifest carry the
     same deny-all network section a VM's do. A container's real network is the gateway's one policy
     (public addresses only, boundary 2), which an imported container has from its first start like
@@ -937,7 +939,11 @@ with nothing sensitive on it, and the app, the CLI and `silo list` label it as l
     can still take the disk below it (the host disk guard handles that, as for any container).
   - *The guest image.* The file does not carry it. An export accepts any image digest unpacked on
     the exporting device, and an import accepts the pinned one or one kept unpacked; otherwise it
-    says the computer was made on an older guest image that this device does not have.
+    says the computer was made on an older guest image that this device does not have. An image
+    is kept unpacked while a computer's record or a checkpoint names it, so an image an imported
+    computer needs is kept before its first start too, when only its imported checkpoint names it.
+    The pinned image is not unpacked by an import (that needs the image download): until its first
+    start, a computer imported on it needs a Silo that still pins that image.
 - **The desktop and Chrome.** A container computer has the desktop and computer use of a virtual
   machine: the image's own desktop service (Xvfb, PulseAudio, Xfce, Selkies) and Cua Driver, started
   by a root command after the container starts (the image's boot hook; the container has no init

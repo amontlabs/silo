@@ -12,8 +12,8 @@ call (7 Nov); its Mac live checks stay open there.
 ## Model
 
 - **Machine:** anything with Silo installed. A Mac offers Linux and macOS VMs (Apple allows 2
-  macOS VMs at once per Mac); a Linux server offers Linux VMs, and later containers (part 3).
-- **Computer:** a VM, its own world, where the agent is admin.
+  macOS VMs at once per Mac); a Linux server offers Linux VMs and, when chosen, container computers (part 3).
+- **Computer:** a VM (or, on a Linux server that opts in, a container), its own world, where the agent is admin.
 - **Checkpoint:** a saved point of a computer you can go back to.
 - **Fork:** a new computer started from a computer or a checkpoint. It starts fresh (cold boot from
   the checkpoint's disks), quiet, with no secrets unless named.
@@ -27,9 +27,9 @@ call (7 Nov); its Mac live checks stay open there.
 | F3 | 1 | Sharing: `silo export` / `silo import`, the guest image by reference, a warning for logins found on the computer, keep an imported computer into main | Merged, PR #86 |
 | F4 | 1 | Sharing a computer that lives on another machine: `silo --device X export` / `import` through a transfer area on the owner and an `exports.file` stream | Merged, PR #93; live check on the KVM job |
 | R1 | 2 | CI runner on the Mac: delete `silo-action/`, the Go helper on actions/scaleset, a Linux and a macOS runner recipe, a fresh computer per job, delete on success, keep on failure, private repositories only, example workflow | Merged, PR #83 |
-| R2 | 2 | Linux hosts as runner machines: `silo-runner` in the Linux engine archives, a systemd user service, a default Linux budget from the host, a KVM check, both runner architectures in the `silo-linux` recipe | Built; no job has run on a Linux host yet (live check script written, not run) |
+| R2 | 2 | Linux hosts as runner machines: `silo-runner` in the Linux engine archives, a systemd user service, a default Linux budget from the host, a KVM check, both runner architectures in the `silo-linux` recipe | Merged, PR #90; no job has run on a Linux host yet (live check script written, not run) |
 | C1 | 3 | Container computers with crun: measurements only, reported to the owner before any build | Merged, PR #87; [evidence](evidence/c1-containers/README.md); the owner decided to build (8 Nov) |
-| CT1-CT6 | 3 | Container computers with the same capabilities as VM computers: [CONTAINERS-PLAN.md](CONTAINERS-PLAN.md) | CT1 to CT5 merged; CT6 built ([#104](https://github.com/amontlabs/silo/pull/104)) |
+| CT1-CT6 | 3 | Container computers with the same capabilities as VM computers: [CONTAINERS-PLAN.md](CONTAINERS-PLAN.md) | Merged, PRs #92, #94, #95, #97, #102, #103 and #104 |
 
 Later, not in this plan: outbound rules per runner label and per-job network logs (after roadmap
 milestone 2); one runner helper for several machines.

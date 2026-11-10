@@ -408,12 +408,16 @@ fn boot_layer(layout: &Layout, tools: &Tools) -> Result<PathBuf, String> {
 }
 
 /// Removes what the storage holds that no computer needs: unpacked images no computer's record
-/// names (the pinned image stays: the next computer starts from it), and, when no container is
-/// running, boot layers of other init shims. A record that cannot be read leaves everything in
-/// place. Best effort: what cannot be removed stays for the next sweep.
+/// and no checkpoint names (the pinned image stays: the next computer starts from it), and, when
+/// no container is running, boot layers of other init shims. A record or checkpoint that cannot
+/// be read leaves everything in place. Best effort: what cannot be removed stays for the next
+/// sweep.
 pub fn prune_storage(paths: &RuntimePaths, tools: &Tools) {
     let layout = Layout::new(&paths.home);
     let Ok(pinned) = super::image::pinned() else {
+        return;
+    };
+    let Ok(named) = super::layers::images_named(&layout) else {
         return;
     };
     let name_of = |digest: &str| {
@@ -423,15 +427,14 @@ pub fn prune_storage(paths: &RuntimePaths, tools: &Tools) {
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_default()
     };
-    let mut images = vec![name_of(&pinned.image_digest)];
-    let mut running = false;
-    for name in layout.names() {
-        let Ok(record) = layout.computer(&name).read_record() else {
-            return;
-        };
-        images.push(name_of(&record.image_digest));
-        running |= holder_alive(paths, &name) || hold::is_starting(&name);
-    }
+    let images: Vec<String> = std::iter::once(pinned.image_digest.as_str())
+        .chain(named.iter().map(String::as_str))
+        .map(name_of)
+        .collect();
+    let running = layout
+        .names()
+        .iter()
+        .any(|name| holder_alive(paths, name) || hold::is_starting(name));
     for stale in super::image::unused_dirs(&layout.images(), &images) {
         let _ = super::image::remove_tree(tools, &stale);
     }

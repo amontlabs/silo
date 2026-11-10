@@ -133,7 +133,9 @@ the importing device needs the image the computer was made on (the one its Silo 
 kept), and a device without it says the computer was made on an older guest image that it does not
 have. A device that cannot run containers refuses the file with the reason `silo host init`
 gives, before anything is copied. The file is written in format 6, which a Silo that predates
-container exports refuses as newer. No memory is in any file.
+container exports refuses as newer. No memory is in any file. An imported container computer is
+not on a deny-all network policy: it has the one network every container computer has (public
+addresses only), from its first start. Socket files are not in the file.
 
 **Bringing the work into your main.** If the exported computer was a fork, the file carries its
 fork-time record, so the imported computer keeps the way any fork does: `silo diff` shows what

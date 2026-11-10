@@ -6,8 +6,9 @@ Plan: [PLAN.md](PLAN.md).
 
 - **Merged (8 Nov 2026):** F1 (#84), F2 (#88), C1 (#87), R1 (#83), F3 (#86), F4 (#93; its live check is
   the `linux-host.yml` two-account job).
-- **Open phases:** R2 (Linux hosts as runner machines) is in progress; container computers: CT1 to CT5 are merged, CT6 (export, import and
-  Connections) is built in #104.
+- **Merged (8 and 9 Nov 2026):** R2 (#90; no job has run through `silo-runner` on a Linux host yet) and the
+  container computers, CT1 to CT6 (#92, #94, #95, #97, #102, #103, #104).
+- **Open phases:** none. The post-merge reviews are the sections of that name below.
 - **Open follow-ups found during the build:**
   - A Linux fork leaves its fork-point checkpoint on the source (it was a manual checkpoint before F2 too);
     macOS removes its fork point with the last fork. Fixing it means the macOS release machinery on Linux.
@@ -18,8 +19,9 @@ Plan: [PLAN.md](PLAN.md).
   - launchd refuses ad-hoc-signed Dev engine builds ("needs LWCR update"); live checks started `silod --agent`
     by hand.
   - `quiet::processes_match_by_exact_name_not_by_prefix_or_pattern` fails on main too (seen 8 Nov).
-- **Linux KVM host:** the owner's test machine (10.77.77.2) did not answer on 7-8 Nov. Linux measurements ran
-  on the GitHub KVM runner; each result names the machine it ran on.
+- **Linux KVM host:** the owner's test machine (10.77.77.2) did not answer on 7-8 Nov (it answered `ssh` on
+  10 Nov; nothing was run on it). Linux measurements ran on the GitHub KVM runner; each result names the
+  machine it ran on.
 - **Live-check repository:** https://github.com/0xpolarzero/silo-runner-e2e (private), used by the R1 checks.
 
 ## Start (7 Nov 2026)
@@ -963,11 +965,78 @@ same CLI, API and app as a VM. Design: [CONTAINERS-PLAN](CONTAINERS-PLAN.md).
   journal's shape caught; the flag is now written only for a container. A re-check found the disk look could let a stream write up
   to 256 entries of 64 MiB attributes between two looks on XFS or btrfs; the unpack now also looks whenever names, link targets and
   attributes written since the last look add up to 16 MiB.
+- **Live check of the merged head** (`c84c5c114`, the last commit of #104): `linux-host.yml` run 42677509409,
+  attempt 1 and attempt 2 both green; CI run 42677509116 green. (The squash commit's message names run
+  42677509416, which does not exist; 42677509409 is the run.)
 - **Not done.** The viewer and an `ssh` session over Connections for a container are not driven by the two-account run (exec and the
   desktop switch are); they use the same routed methods and `runtime::command_for`. A mid-write abort of `pack` is a kill of the child
   (its layers stay on disk until the grace period collects them). An import whose image this device does not have cannot
   pull it (there is no registry fetch for the guest image). The socket-path length is not raised. A lock without its socket is cleared
   only after a fresh boot (the boot id), so a container re-imported on the same host boot keeps it until the host restarts.
+
+#### Post-merge review: container sharing and docs (CT6, 10 Nov 2026)
+
+Review of the container export and import as they are on `main` after #104 and #106 (`pack.rs` in the shim,
+`containers/archive.rs`, the container parts of `backup.rs` and of the backup controller, the prerequisites
+refusal), and of the docs of the whole build against the code. Fixes are in the same pull request.
+
+- **Fixed: an imported computer could lose the guest image it needs.** An import is accepted on the pinned image
+  or on an older one kept unpacked, and the imported computer has a checkpoint before it has a record (its first
+  start makes the record). `prune_storage` kept only the images a record names, so once the last computer with a
+  record on the older image was deleted, the next engine start (or the next unpack of the pinned image) removed
+  it and the imported computer could never start ("made from an image that this Silo no longer carries"). Pruning
+  now also keeps every image a checkpoint names (`layers::images_named`) and removes nothing when a checkpoint
+  cannot be read. Test: `an_imported_checkpoint_names_its_image_before_its_computer_has_a_record`. The pinned
+  image on a device where no container computer has needed it yet is accepted for the import without being
+  unpacked, so a Silo update that pins another image before the computer's first start leaves it without one.
+  Unpacking it at import was tried and reverted: it needs the image download, which an account that only imports
+  (the two-account live check's controller) does not have, so the import failed (run 42725019568). The threat
+  model says so instead. Images and layers are found by one scan of the records (`layers::records`), so a
+  computers folder that cannot be read keeps the images as it keeps the layers (the pruning took such a folder
+  for empty; the unreadable-folder test of #108 now checks images too and failed before).
+- **Fixed: a container import's unpack always had one hour.** A VM's import scans its payload and sizes the load's
+  timeout from it; a container's layers are not scanned, so its `snapshot load` got the base hour whatever the
+  computer's size, where its export's `snapshot save` gets the hour plus the declared storage at 16 MiB/s. The
+  load now gets the same as the save. Test: `a_container_import_gets_time_for_the_storage_its_computer_declares`
+  (failed before: 3600 s against 12560 s).
+- **Fixed: a full disk during an export was reported as the helper's broken pipe.** When the export file could not
+  be written, `silo-ctr pack` ended with a broken pipe and its status was read first ("Packing the computer's
+  files failed: ... Broken pipe"). The write failure is now the reason given. Test:
+  `a_full_disk_is_named_instead_of_the_helpers_broken_pipe`.
+- **Fixed: a refused `snapshot save` removed the file it refused to replace.** The payload file is made with
+  `create_new`, and any failure removed whatever was at that path, also when the failure was that the file
+  existed. Not reachable from an export (its payload path is in a new private folder), only from the runtime
+  command itself. A failed save now removes only a file it made. Test:
+  `a_failed_export_removes_the_file_it_made_and_no_other`.
+- **Docs corrected.** The threat model said a socket file "comes back as an empty socket file" (sockets are left
+  out) and that an import refuses any image but the pinned one (it also accepts one kept unpacked); the command
+  line guide said every imported computer is on a deny-all network policy, which is not so for a container (it has
+  the one policy its gateway has, public addresses only, from its first start). The Resume above, [PLAN.md](PLAN.md)
+  and the status column of [CONTAINERS-PLAN.md](CONTAINERS-PLAN.md) still listed merged phases as open or as "this
+  branch"; the container plan said nothing is copied for a checkpoint, which holds for a stopped computer only.
+  The CT6 entry had no live check of the merged head; the run is added from GitHub's record. Relative links and
+  heading anchors of the build's docs were checked with a script (none broken). The docs index ([README](../README.md)) did not
+  list this build's plan, log or the container plan; it has a row for them now.
+- **Checked, no change:** `unpack` and `pack` (the changed root, path and link checks, attribute rules, the
+  memory limit, the disk looks, what follows the end of a stream); the header checks and the comparison with the
+  manifest; labels in a header (those the engine reads are set again by the restore, and the quiet-fork labels
+  only act inside the computer); format 6 rules and the kind agreement; the import guard and the removal of a
+  half-made import group; the journal flag for a container capture; routing of the snapshot commands and the
+  merged list. The export and the engine do not share the in-process store lock (the export's commands run in a
+  `silod --container-runtime` child), which is safe because exports and imports hold the engine's operation gate
+  and collection leaves a layer younger than ten minutes alone.
+- **Left for the owner:**
+  1. An imported container computer has the public-addresses network from its first start; an imported VM starts
+     on deny-all. It is documented, and it follows from the gateway having one policy, but it is a difference in
+     behaviour between the kinds on an untrusted input.
+  2. `pack` writes every attribute a file has except overlayfs's own records, so on a host with SELinux it would
+     write `security.selinux`, which `unpack` cannot set inside a user namespace on a host without SELinux
+     (checked on the Mac in a Linux container: `setfattr -n security.selinux` in `unshare -U -r` is refused with
+     "Operation not permitted" where a `user.` attribute is set). No container computer was run on an SELinux host,
+     so whether such hosts are in scope, and whether the label should be left out as overlayfs's records are, is
+     open.
+  3. The sections after the CT6 entry are not in date order (R1, F4, F3, R2); they were left where they are
+     because other open pull requests add to them.
 
 
 ### R1: CI runner on the Mac (branch `claude/runner-phase-1`)
@@ -1481,7 +1550,8 @@ Review of `app/SiloUI/runner`, its CI wiring and its docs as they are on `main` 
   `GITHUB_TOKEN` are not placeholders.
 - **Left for the owner:** (1) the private-repository check runs at start only, so a repository made public while
   the helper runs is served until the next start; (2) a second Ctrl-C does not end a slow shutdown (the signal
-  stays caught); (3) the Resume section above still lists R2 as in progress; (4) no job has run through
+  stays caught); (3) the Resume section above still listed R2 as in progress (corrected on 10 Nov by the
+  container sharing and docs review); (4) no job has run through
   `silo-runner` on a Linux host (unchanged from R2).
 
 ## Post-merge review

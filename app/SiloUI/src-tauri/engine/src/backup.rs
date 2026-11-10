@@ -1840,11 +1840,18 @@ impl<R: MsbRunner> BackupService<R> {
         // From here on the runtime may hold native data for this group. Every
         // failure, including Cancel and a timed-out or killed load, removes the
         // group and the runtime's leftover import staging before returning.
+        // A container's layers are not scanned before they are unpacked, so its load gets the
+        // time its export got: for the storage the computer declares.
+        let load_bytes = if container {
+            declared_storage_bytes(&source.computer_configuration)
+        } else {
+            extracted.scan.unpacked_bytes
+        };
         match self.load_import_group(
             payload_path,
             import_group,
             &runtime_config,
-            extracted.scan.unpacked_bytes,
+            load_bytes,
             cancellation,
         ) {
             Ok(snapshot_member) => Ok(PreparedRestore {
@@ -5708,6 +5715,32 @@ mod tests {
         let load = import_group_calls(&service, "load");
         assert_eq!(load.len(), 1);
         assert!(load[0].ends_with(&["--runtime".to_owned(), "container".to_owned()]), "{load:?}");
+    }
+
+    #[test]
+    fn a_container_import_gets_time_for_the_storage_its_computer_declares() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut service = service(&temp, FakeRunner::default());
+        let destination = temp.path().join("dev.silo-backup");
+        export_container(&service, destination.clone()).unwrap();
+        service.container_host = || Ok(());
+        service
+            .prepare_restore(restore_request(destination), &Cancellation::default())
+            .unwrap();
+        let timeouts = service.runner.timeouts.lock().unwrap();
+        let timeout = |verb: &str| {
+            timeouts
+                .iter()
+                .filter(|(args, _)| args[0] == "snapshot" && args[1] == verb)
+                .map(|(_, timeout)| *timeout)
+                .collect::<Vec<_>>()
+        };
+        // Its layers are not scanned before they are unpacked, so the load gets what the save
+        // got: the hour plus the declared storage at the slow-disk rate.
+        let declared = declared_storage_bytes(&container_computer_configuration());
+        assert!(declared > 0);
+        assert_eq!(timeout("save"), [service.data_timeout(declared)]);
+        assert_eq!(timeout("load"), timeout("save"));
     }
 
     #[test]

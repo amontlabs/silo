@@ -336,13 +336,11 @@ mod linux {
         header
             .validate()
             .map_err(|detail| invalid(format!("This container cannot be exported: {detail}.")))?;
-        let result = write_payload(&tools, &layout, &snapshot, &header, &request.file);
-        if result.is_err() {
-            let _ = std::fs::remove_file(&request.file);
-        }
-        result
+        write_payload(&tools, &layout, &snapshot, &header, &request.file)
     }
 
+    /// Writes the payload to the new file `out`. A file that is already there is refused and
+    /// left as it is; a file this call made is removed when the payload could not be finished.
     fn write_payload(
         tools: &Tools,
         layout: &Layout,
@@ -351,12 +349,26 @@ mod linux {
         out: &Path,
     ) -> Result<(), RuntimeError> {
         use std::os::unix::fs::OpenOptionsExt;
-        let mut file = std::fs::OpenOptions::new()
+        let file = std::fs::OpenOptions::new()
             .write(true)
             .create_new(true)
             .mode(0o600)
             .open(out)
             .map_err(|error| unavailable(format!("The export file could not be made: {error}.")))?;
+        let result = write_layers(tools, layout, snapshot, header, file);
+        if result.is_err() {
+            let _ = std::fs::remove_file(out);
+        }
+        result
+    }
+
+    fn write_layers(
+        tools: &Tools,
+        layout: &Layout,
+        snapshot: &Snapshot,
+        header: &Header,
+        mut file: File,
+    ) -> Result<(), RuntimeError> {
         let io = |error: std::io::Error| {
             unavailable(format!("The export file could not be written: {error}."))
         };
@@ -392,19 +404,34 @@ mod linux {
             drop(stdout);
             let status = child.wait().map_err(io)?;
             let reason = errors.join().unwrap_or_default();
-            if !status.success() {
-                return Err(unavailable(format!(
-                    "Packing the computer's files failed: {}.",
-                    last_line(&reason)
-                )));
-            }
-            copied.map_err(io)?;
+            packed(copied, status.success(), &reason)?;
             let end = file.stream_position().map_err(io)?;
             file.seek(SeekFrom::Start(length_at)).map_err(io)?;
             file.write_all(&(end - start).to_be_bytes()).map_err(io)?;
             file.seek(SeekFrom::Start(end)).map_err(io)?;
         }
         file.sync_all().map_err(io)
+    }
+
+    /// Whether a layer reached the export file, from how the copy into the file and the helper
+    /// ended. A file that could not be written (a full disk) also ends the helper, with a broken
+    /// pipe, so the write is the reason to give when both failed.
+    fn packed(
+        copied: std::io::Result<()>,
+        helper_succeeded: bool,
+        helper_errors: &str,
+    ) -> Result<(), RuntimeError> {
+        copied.map_err(|error| {
+            unavailable(format!("The export file could not be written: {error}."))
+        })?;
+        if helper_succeeded {
+            Ok(())
+        } else {
+            Err(unavailable(format!(
+                "Packing the computer's files failed: {}.",
+                last_line(helper_errors)
+            )))
+        }
     }
 
     pub fn load(paths: &RuntimePaths, request: &SnapshotLoad) -> Result<(), RuntimeError> {
@@ -540,6 +567,65 @@ mod linux {
             )));
         }
         fed.map_err(|_| corrupt("a layer is damaged"))
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn a_failed_export_removes_the_file_it_made_and_no_other() {
+            let home = tempfile::tempdir().unwrap();
+            let layout = Layout::new(home.path());
+            crate::containers::capability::make_container(home.path(), "box");
+            let record = layout.computer("box").read_record().unwrap();
+            let snapshot = Snapshot::new("box", "c1", vec!["l1".into()], record.clone());
+            let header = Header {
+                name: "c1".into(),
+                template: portable_template(&record, "box"),
+                layers: 1,
+            };
+            // No helper to run: the export fails after the file was made.
+            let missing = home.path().join("no-such-helper");
+            let tools = Tools {
+                ctr: missing.clone(),
+                init: missing.clone(),
+                gateway: missing.clone(),
+                crun: missing.clone(),
+                skopeo: missing.clone(),
+                umoci: missing.clone(),
+                systemd_run: missing.clone(),
+                systemctl: missing,
+            };
+            let out = home.path().join("payload");
+            assert!(write_payload(&tools, &layout, &snapshot, &header, &out).is_err());
+            assert!(!out.exists());
+            // A file that was already there is somebody else's: refused, and still there.
+            std::fs::write(&out, "kept").unwrap();
+            let error = write_payload(&tools, &layout, &snapshot, &header, &out).unwrap_err();
+            assert!(error.to_string().contains("could not be made"), "{error}");
+            assert_eq!(std::fs::read_to_string(&out).unwrap(), "kept");
+        }
+
+        #[test]
+        fn a_full_disk_is_named_instead_of_the_helpers_broken_pipe() {
+            let full = || std::io::Error::from_raw_os_error(libc::ENOSPC);
+            let error = packed(Err(full()), false, "silo-ctr: write the stream: Broken pipe\n")
+                .unwrap_err()
+                .to_string();
+            assert!(
+                error.starts_with("The export file could not be written:")
+                    && !error.contains("Broken pipe"),
+                "{error}"
+            );
+            // The helper's own failure (a device in the layer) is still the reason when the
+            // file took everything the helper wrote.
+            let error = packed(Ok(()), false, "silo-ctr: /dev/x is a device\n")
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("is a device"), "{error}");
+            assert!(packed(Ok(()), true, "").is_ok());
+        }
     }
 }
 
