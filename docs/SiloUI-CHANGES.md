@@ -445,7 +445,10 @@ of a `changes.diff` the agent ran (without it the call is refused and the agent 
 the diff first; a dry run is refused too). Asking makes or reuses the open review request for that
 fork and target, with that digest and the engine's summary, and links the two: the request's
 `approvalId` and the approval's `reviewRequestId` and `reviewDigest`. Asking again with other
-changes updates the same request and withdraws the earlier approval. Allowing the approval runs
+changes updates the same request's digest and withdraws the earlier approval. Once a request is
+linked to an approval, only the engine writes its text: its summary is the approval's, its counts
+are empty, and a later `changes.request` for the same fork (by the agent, with the same digest or
+another) changes neither. Allowing the approval runs
 `changes.requests.keep` for the request with the stored `choices`, `skip`, `keep` and `dataOk`,
 only when the request is still open and still has the approval's digest. Keeping the request
 directly (`changes.requests.keep` from the app or the command line) allows the approval with the

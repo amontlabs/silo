@@ -213,7 +213,9 @@ pub(crate) mod test_nodes {
     static NODES: Mutex<Vec<Node>> = Mutex::new(Vec::new());
 
     fn nodes() -> std::sync::MutexGuard<'static, Vec<Node>> {
-        NODES.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+        NODES
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     pub(crate) fn add(id: &str, name: &str, parent: Option<&str>) {
@@ -244,7 +246,7 @@ pub(crate) fn host_and_floors(
 }
 
 /// A call that starts, creates or checkpoints a computer, which takes memory or disk.
-fn takes_headroom(method: MethodName) -> bool {
+pub(crate) fn takes_headroom(method: MethodName) -> bool {
     matches!(
         method,
         MethodName::ComputersStart
@@ -259,7 +261,7 @@ fn takes_headroom(method: MethodName) -> bool {
 
 /// Why an agent's call that takes memory or disk must fail now: the device has less free than
 /// the floor, or the device cannot be measured so nobody can tell.
-fn short_of_resources(context: &HandlerContext) -> Option<String> {
+pub(crate) fn short_of_resources(context: &HandlerContext) -> Option<String> {
     match host_and_floors(context) {
         Ok((host, floors)) => resources::refusal(&host, &floors),
         Err(_) => Some(
@@ -299,7 +301,8 @@ pub(crate) async fn admit(
     let (decision, visible, name) = match &caller {
         Caller::Computer { id } => {
             let world = EngineWorld::load(context, method).await;
-            let mut visible: BTreeSet<String> = policy::World::made(&world, id).into_iter().collect();
+            let mut visible: BTreeSet<String> =
+                policy::World::made(&world, id).into_iter().collect();
             visible.insert(id.clone());
             (
                 policy::decide(&caller, method, params, &world),
@@ -307,7 +310,11 @@ pub(crate) async fn admit(
                 policy::World::name(&world, id),
             )
         }
-        _ => (policy::decide(&caller, method, params, &NoWorld), None, None),
+        _ => (
+            policy::decide(&caller, method, params, &NoWorld),
+            None,
+            None,
+        ),
     };
     let seen = visible.clone();
     let refuse = |error: DispatchError, outcome: AuditOutcome| {
@@ -351,7 +358,12 @@ pub(crate) async fn admit(
                 }
             }
             let job = (method == MethodName::OperationsJobAcknowledge)
-                .then(|| params.get("jobId").and_then(Value::as_str).map(str::to_owned))
+                .then(|| {
+                    params
+                        .get("jobId")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned)
+                })
                 .flatten();
             Ok(Admitted {
                 params: allowed.params,
@@ -513,6 +525,8 @@ struct EngineWorld {
     resources: HashMap<String, Resources>,
     /// The saved SSH port and bind address of each computer, read only for `sshAccess.save`.
     ssh: HashMap<String, (u16, String)>,
+    /// The saved SSH public keys of each computer, read with the above.
+    ssh_keys: HashMap<String, Vec<String>>,
 }
 
 impl EngineWorld {
@@ -541,7 +555,9 @@ impl EngineWorld {
             }
             parents.insert(
                 id.to_owned(),
-                node.get("parent").and_then(Value::as_str).map(str::to_owned),
+                node.get("parent")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
             );
         }
         #[cfg(test)]
@@ -585,6 +601,7 @@ impl EngineWorld {
             }
         }
         let mut ssh = HashMap::new();
+        let mut ssh_keys = HashMap::new();
         if method == MethodName::SshAccessSave {
             let state = super::route(&internal, MethodName::SshAccessState, &json!({}))
                 .await
@@ -606,6 +623,15 @@ impl EngineWorld {
                 );
                 if let (Some(port), Some(address), Some(id)) = saved {
                     ssh.insert(id.to_owned(), (port, address.to_owned()));
+                    let keys = computer
+                        .get("keys")
+                        .and_then(Value::as_array)
+                        .into_iter()
+                        .flatten()
+                        .filter_map(Value::as_str)
+                        .map(str::to_owned)
+                        .collect();
+                    ssh_keys.insert(id.to_owned(), keys);
                 }
             }
         }
@@ -636,6 +662,7 @@ impl EngineWorld {
             github,
             resources,
             ssh,
+            ssh_keys,
         }
     }
 }
@@ -662,7 +689,9 @@ fn job_state(engine: &dyn EngineContext, job: &str) -> JobState {
 }
 
 /// The id of a computer that was pending: the one the engine chose, or the computer of that
-/// name whose parent is the fork's source.
+/// name whose parent is the fork's source. A name alone proves nothing, since another
+/// computer may already have it, so a pending computer with neither is never matched; the
+/// call that made it answers with its id.
 fn resolve(
     names: &HashMap<String, String>,
     parents: &HashMap<String, Option<String>>,
@@ -671,14 +700,12 @@ fn resolve(
     if let Some(id) = &pending.id {
         return names.contains_key(id).then(|| id.clone());
     }
+    let source = pending.source.as_ref()?;
     names
         .iter()
         .filter(|(_, name)| name.eq_ignore_ascii_case(&pending.name))
         .map(|(id, _)| id)
-        .find(|id| match &pending.source {
-            Some(source) => parents.get(*id).cloned().flatten().as_deref() == Some(source),
-            None => true,
-        })
+        .find(|id| parents.get(*id).cloned().flatten().as_ref() == Some(source))
         .cloned()
 }
 
@@ -714,6 +741,9 @@ impl policy::World for EngineWorld {
     }
     fn ssh_settings(&self, computer: &str) -> Option<(u16, String)> {
         self.ssh.get(computer).cloned()
+    }
+    fn ssh_keys(&self, computer: &str) -> Vec<String> {
+        self.ssh_keys.get(computer).cloned().unwrap_or_default()
     }
     fn access(&self, computer: &str) -> Access {
         self.names

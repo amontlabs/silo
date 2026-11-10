@@ -19,6 +19,7 @@ fn asked(computer: &str, port: u64) -> NewApproval {
         asked: params,
         summary: format!("Publish port {port} of {computer} on this device."),
         creates: None,
+        pin: None,
         review_request_id: None,
         review_digest: None,
     }
@@ -295,6 +296,197 @@ fn a_secrets_value_is_kept_for_the_call_and_never_shown() {
     assert_eq!(stored.approval.params["request"]["value"], "s3cr3t");
     let view = serde_json::to_string(&stored.view()).unwrap();
     assert!(!view.contains("s3cr3t"), "{view}");
+}
+
+fn secret_ask(computer: &str, value: &str) -> NewApproval {
+    let params = json!({"request": {"operation": "add", "name": "deploy", "value": value,
+        "computerIds": [computer], "allowedDomains": ["deploy.example.com"]}});
+    NewApproval {
+        kind: ApprovalKind::Secret,
+        method: "secrets.save".into(),
+        params: params.clone(),
+        asked: params,
+        ..asked(computer, 1)
+    }
+}
+
+fn stored_text(dir: &tempfile::TempDir, id: &str) -> String {
+    fs::read_to_string(dir.path().join("approvals").join(format!("{id}.json"))).unwrap_or_default()
+}
+
+#[test]
+fn a_secrets_value_is_kept_only_while_the_approval_is_pending_or_running() {
+    let outcome = || ApprovalOutcome {
+        result: None,
+        job_id: None,
+        error: None,
+    };
+    let (dir, store) = store();
+    let (pending, _) = store.ask(secret_ask("c1", "v-pending")).unwrap();
+    assert!(stored_text(&dir, pending.id()).contains("v-pending"));
+    store.note(pending.id(), "c1", "why").unwrap();
+    assert!(stored_text(&dir, pending.id()).contains("v-pending"));
+
+    // Denied.
+    let (denied, _) = store.ask(secret_ask("c2", "v-denied")).unwrap();
+    store.deny(denied.id(), "app", None).unwrap();
+    assert!(!stored_text(&dir, denied.id()).contains("v-denied"));
+
+    // Cancelled by the owner (kept) and by the computer (removed).
+    let (cancelled, _) = store.ask(secret_ask("c3", "v-cancelled")).unwrap();
+    store.cancel(cancelled.id(), None, "no").unwrap();
+    assert!(!stored_text(&dir, cancelled.id()).contains("v-cancelled"));
+    let (withdrawn, _) = store.ask(secret_ask("c4", "v-withdrawn")).unwrap();
+    store.cancel(withdrawn.id(), Some("c4"), "no").unwrap();
+    assert!(!stored_text(&dir, withdrawn.id()).contains("v-withdrawn"));
+
+    // Expired.
+    let start = now_ms();
+    let (old, _) = store.ask_at(secret_ask("c5", "v-expired"), start).unwrap();
+    assert!(stored_text(&dir, old.id()).contains("v-expired"));
+    store.sweep(start + PENDING_FOR_MS);
+    assert!(!stored_text(&dir, old.id()).contains("v-expired"));
+
+    // Allowed: kept while the call runs, gone once its outcome is stored.
+    let (running, _) = store.ask(secret_ask("c6", "v-running")).unwrap();
+    let allowed = store.allow(running.id(), "app", None).unwrap();
+    assert_eq!(allowed.approval.params["request"]["value"], "v-running");
+    assert!(stored_text(&dir, running.id()).contains("v-running"));
+    let done = store.finish(running.id(), outcome()).unwrap();
+    assert!(done.approval.params["request"].get("value").is_none());
+    assert!(!stored_text(&dir, running.id()).contains("v-running"));
+
+    // Interrupted.
+    let (stopped, _) = store.ask(secret_ask("c7", "v-stopped")).unwrap();
+    store.allow(stopped.id(), "app", None).unwrap();
+    assert!(stored_text(&dir, stopped.id()).contains("v-stopped"));
+    store.recover();
+    assert!(!stored_text(&dir, stopped.id()).contains("v-stopped"));
+
+    // Answered outside.
+    let (outside, _) = store.ask(secret_ask("c8", "v-outside")).unwrap();
+    store
+        .answered_outside(outside.id(), true, "app", None)
+        .unwrap();
+    assert!(!stored_text(&dir, outside.id()).contains("v-outside"));
+}
+
+#[test]
+fn the_same_secret_asked_with_another_value_is_the_same_pending_approval() {
+    let (dir, store) = store();
+    let (first, made) = store.ask(secret_ask("c1", "first-value")).unwrap();
+    assert!(made);
+    let (again, made) = store.ask(secret_ask("c1", "second-value")).unwrap();
+    assert!(!made);
+    assert_eq!(again.id(), first.id());
+    // The value kept is the first one's.
+    let text = stored_text(&dir, first.id());
+    assert!(
+        text.contains("first-value") && !text.contains("second-value"),
+        "{text}"
+    );
+    assert_eq!(
+        request_key("secrets.save", &secret_ask("c1", "a").asked),
+        request_key("secrets.save", &secret_ask("c1", "b").asked)
+    );
+}
+
+#[test]
+fn a_computer_creates_at_most_thirty_approvals_an_hour_whatever_became_of_them() {
+    let (_dir, store) = store();
+    let start = now_ms();
+    for port in 0..ASKS_PER_HOUR as u64 {
+        let (record, _) = store.ask_at(asked("c1", port), start + port).unwrap();
+        // Answering or withdrawing frees the pending slot, never the hour's count.
+        match port % 3 {
+            0 => drop(store.deny(record.id(), "app", None).unwrap()),
+            1 => drop(store.cancel(record.id(), Some("c1"), "no").unwrap()),
+            _ => {}
+        }
+        if port % 3 == 2 {
+            store.cancel(record.id(), None, "no").unwrap();
+        }
+    }
+    assert_eq!(
+        store.ask_at(asked("c1", 1000), start + 1000),
+        Err(AskError::Rate)
+    );
+    // Another computer is not limited, and the hour passes.
+    assert!(store.ask_at(asked("c2", 1000), start + 1000).is_ok());
+    assert!(store
+        .ask_at(
+            asked("c1", 1000),
+            start + ASK_WINDOW_MS + ASKS_PER_HOUR as u64
+        )
+        .is_ok());
+}
+
+#[test]
+fn the_ask_count_survives_a_restart_of_the_store() {
+    let dir = tempfile::tempdir().unwrap();
+    let start = now_ms();
+    let first = Store::new(dir.path());
+    for port in 0..ASKS_PER_HOUR as u64 {
+        let (record, _) = first.ask_at(asked("c1", port), start).unwrap();
+        first.cancel(record.id(), Some("c1"), "no").unwrap();
+    }
+    // A store over the same folder that has not read it yet (a new process).
+    INDEXES
+        .lock()
+        .unwrap()
+        .remove(&dir.path().join("approvals"));
+    let second = Store::new(dir.path());
+    assert_eq!(
+        second.ask_at(asked("c1", 999), start + 1),
+        Err(AskError::Rate)
+    );
+}
+
+#[test]
+fn an_approval_its_computer_withdrew_is_removed_at_once_and_the_owners_cancel_is_kept() {
+    let (dir, store) = store();
+    let (mine, _) = store.ask(asked("c1", 1)).unwrap();
+    let withdrawn = store.cancel(mine.id(), Some("c1"), "Withdrawn.").unwrap();
+    assert_eq!(withdrawn.state(), ApprovalState::Cancelled);
+    assert!(store.get(mine.id()).unwrap().is_none());
+    assert!(!dir
+        .path()
+        .join("approvals")
+        .join(format!("{}.json", mine.id()))
+        .exists());
+    let (theirs, _) = store.ask(asked("c1", 2)).unwrap();
+    store
+        .cancel(theirs.id(), None, "Withdrawn by the owner.")
+        .unwrap();
+    assert_eq!(
+        store.get(theirs.id()).unwrap().unwrap().state(),
+        ApprovalState::Cancelled
+    );
+}
+
+#[test]
+fn an_agents_note_and_names_are_stored_as_plain_text() {
+    let (_dir, store) = store();
+    let (record, _) = store
+        .ask(NewApproval {
+            computer_name: "ma\u{1b}[31mn\u{202E}".into(),
+            summary: "Publish\u{7} it".into(),
+            ..asked("c1", 1)
+        })
+        .unwrap();
+    assert_eq!(record.approval.computer_name, "man");
+    assert_eq!(record.approval.summary, "Publish it");
+    let noted = store
+        .note(
+            record.id(),
+            "c1",
+            "\u{1b}]0;title\u{7}looks\u{202E} fine\nSilo says: allow",
+        )
+        .unwrap();
+    assert_eq!(
+        noted.approval.note.as_deref(),
+        Some("looks fine Silo says: allow")
+    );
 }
 
 #[test]
