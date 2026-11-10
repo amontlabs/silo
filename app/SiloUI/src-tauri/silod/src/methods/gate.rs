@@ -120,6 +120,7 @@ pub(crate) fn record_approved(
     context: &HandlerContext,
     method: MethodName,
     params: &Value,
+    asker: &str,
     result: &Result<HandlerOutput, DispatchError>,
     approval_id: &str,
 ) {
@@ -137,7 +138,8 @@ pub(crate) fn record_approved(
         context,
         Record {
             method,
-            target: policy::target_computer(params),
+            // A call that names no computer is recorded against the computer that asked.
+            target: policy::target_computer(params).or_else(|| Some(asker.to_owned())),
             outcome,
             error,
             job_id,

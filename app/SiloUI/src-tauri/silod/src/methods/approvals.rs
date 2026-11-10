@@ -218,6 +218,18 @@ async fn review_request(
     }
 }
 
+/// Whether a merge approval's review request now holds other changes than the approval.
+fn merge_moved_on(context: &HandlerContext, record: &Record) -> bool {
+    let Some(request_id) = &record.approval.review_request_id else {
+        return false;
+    };
+    fold_requests::Store::new(&app_data(context))
+        .get(request_id)
+        .ok()
+        .flatten()
+        .is_none_or(|request| Some(&request.review_digest) != record.approval.review_digest.as_ref())
+}
+
 /// Stores the approval for a held call, or finds the one the same computer already asked for
 /// the same call. `Ok` is the `approval_required` answer; `Err` refuses the call.
 pub(crate) async fn request(
@@ -227,9 +239,39 @@ pub(crate) async fn request(
     let store = store(context);
     let key = approvals::request_key(asked.method.name(), asked.asked);
     if let Some(same) = store.find_pending(asked.computer, &key) {
-        return Ok(approval_required(&same));
+        if !merge_moved_on(context, &same) {
+            return Ok(approval_required(&same));
+        }
+        // The review request was asked for again with other changes since: the earlier ask
+        // can no longer be kept as asked.
+        if let Ok(cancelled) = store.cancel(
+            same.id(),
+            None,
+            "The merge was asked for again with other changes.",
+        ) {
+            announce(context, &cancelled);
+        }
+    }
+    for expired in store.sweep(approvals::now_ms()) {
+        announce(context, &expired);
     }
     let linked = review_request(context, &asked).await?;
+    if let Some((request_id, digest)) = &linked {
+        // The review request now shows these changes, so an earlier ask about other changes
+        // can no longer be kept as asked; it is withdrawn before the new one counts.
+        for older in store.pending_for_request(request_id) {
+            if older.approval.review_digest.as_ref() == Some(digest) {
+                continue;
+            }
+            if let Ok(cancelled) = store.cancel(
+                older.id(),
+                None,
+                "The merge was asked for again with other changes.",
+            ) {
+                announce(context, &cancelled);
+            }
+        }
+    }
     let made = store.ask(NewApproval {
         kind: asked.kind,
         computer_id: asked.computer.to_owned(),
@@ -486,9 +528,12 @@ fn execute<'a>(
             Some((Decision::Refuse { reason }, _)) => {
                 return failed(format!("Nothing was run: {reason}"));
             }
-            Some((Decision::Ask { kind, .. }, _)) if kind != approval.kind => {
+            // Asked again now, the call must ask for exactly what you were shown.
+            Some((Decision::Ask { kind, summary, .. }, _))
+                if kind != approval.kind || summary != approval.summary =>
+            {
                 return failed(
-                    "Nothing was run: the call would now ask for something other than what you allowed.",
+                    "Nothing was run: the call would now ask for something other than what you allowed. The computer can ask again.",
                 );
             }
             Some((_, tree)) => tree,
@@ -533,7 +578,14 @@ fn execute<'a>(
         for error in noted.into_iter().filter_map(Result::err) {
             eprintln!("silod: approval {}: {error}", record.id());
         }
-        gate::record_approved(context, run_method, &run_params, &result, record.id());
+        gate::record_approved(
+            context,
+            run_method,
+            &run_params,
+            asker,
+            &result,
+            record.id(),
+        );
         match result {
             Ok(_) if job.is_some() => ApprovalOutcome {
                 result: None,
@@ -670,7 +722,8 @@ pub(crate) fn request_answered(context: &HandlerContext, request_id: &str, kept_
     let store = store(context);
     let by = match context.caller() {
         Caller::Owner { client } => Some(client.clone()),
-        _ => None,
+        Caller::Device { .. } => Some("another device".to_owned()),
+        Caller::Computer { .. } => None,
     };
     for record in store.pending_for_request(request_id) {
         let changed = match (kept_job, &by) {

@@ -565,6 +565,29 @@ async fn the_second_check_refuses_a_target_no_longer_in_the_askers_tree() {
 }
 
 #[tokio::test]
+async fn a_call_that_would_now_ask_for_something_else_is_not_run() {
+    let _serial = serial();
+    let tree = Tree::new();
+    let id = ask(
+        &tree.me(),
+        MethodName::NetworkPublish,
+        json!({"computerId": tree.fork, "port": 4100}),
+    )
+    .await;
+    // The fork was renamed: the summary the engine would write now differs from the one shown.
+    test_nodes::remove(&tree.fork);
+    test_nodes::add(&tree.fork, "renamed", Some(&tree.me));
+    let (run, runs) = job_runner();
+    let ended = TEST_RUN.scope(run, decide(&id, "allow")).await.unwrap();
+    let error = ended["outcome"]["error"].as_str().unwrap();
+    assert!(
+        error.contains("something other than what you allowed"),
+        "{error}"
+    );
+    assert!(runs.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
 async fn the_job_an_allowed_call_starts_is_the_askers_to_read() {
     let _serial = serial();
     let tree = Tree::new();
@@ -762,6 +785,37 @@ async fn a_merge_whose_changes_were_asked_for_again_is_not_kept() {
     let error = ended["outcome"]["error"].as_str().unwrap();
     assert!(error.contains("asked for again"), "{error}");
     assert!(runs.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn a_merge_asked_again_with_other_changes_replaces_the_earlier_ask_even_at_the_limit() {
+    let tree = Tree::new();
+    let request = review_request(&tree, "d1");
+    let first = ask(
+        &tree.me(),
+        MethodName::ChangesRequestsKeep,
+        json!({"requestId": request}),
+    )
+    .await;
+    for port in 0..19 {
+        ask(
+            &tree.me(),
+            MethodName::NetworkPublish,
+            json!({"computerId": tree.fork, "port": 8200 + port}),
+        )
+        .await;
+    }
+    // The agent asked for the review again with other changes, then for the merge again.
+    review_request(&tree, "d2");
+    let second = ask(
+        &tree.me(),
+        MethodName::ChangesRequestsKeep,
+        json!({"requestId": request}),
+    )
+    .await;
+    assert_ne!(second, first);
+    assert_eq!(get(&owner(), &first).await.unwrap()["state"], "cancelled");
+    assert_eq!(get(&owner(), &second).await.unwrap()["reviewDigest"], "d2");
 }
 
 #[tokio::test]
