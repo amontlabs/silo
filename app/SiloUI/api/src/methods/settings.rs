@@ -219,6 +219,25 @@ pub struct SettingsValues {
     )]
     #[schemars(with = "Option<u64>")]
     pub disk_floor_gib: Option<Option<u64>>,
+    /// The agent the person uses; computers made later suggest it. `null` until chosen.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_present_nullable"
+    )]
+    #[schemars(with = "Option<AgentPreference>")]
+    pub agent: Option<Option<AgentPreference>>,
+}
+
+/// Which agent the person uses, or that they set one up themselves.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize, schemars::JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum AgentPreference {
+    ClaudeCode,
+    Codex,
+    /// Silo installs no agent; the person sets it up themselves.
+    #[serde(rename = "none")]
+    Own,
 }
 
 fn deserialize_present<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>

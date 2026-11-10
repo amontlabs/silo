@@ -134,6 +134,8 @@ fn main() {
             "delete_checkpoint",
             "abandon_restore",
             "read_checkpoint_usage",
+            "list_agents",
+            "install_agent",
             "list_approvals",
             "get_approval",
             "decide_approval",

@@ -296,10 +296,52 @@ pub(crate) fn linux_install_all_script(agents: &[AgentId]) -> String {
     script
 }
 
+/// The workspace folder an agent starts in, on a Linux computer.
+const LINUX_WORKSPACE: &str = "/workspace";
+/// The workspace folder an agent starts in, on a macOS computer.
+const MACOS_WORKSPACE: &str = "/Users/silo/workspace";
+
+/// The shell command line that starts `agent` in the computer's workspace folder, for a
+/// terminal on a Linux (`macos` false) or macOS computer. Both systems link the program at
+/// `/usr/local/bin`. It is fixed text chosen from the agent: no part of it comes from a caller.
+/// When the program is not there it says so and leaves the person in a login shell, so the
+/// terminal does not close on a message nobody read.
+pub fn launch_script(agent: AgentId, macos: bool) -> String {
+    let (workspace, shell) = if macos {
+        (MACOS_WORKSPACE, "/bin/zsh")
+    } else {
+        (LINUX_WORKSPACE, "/bin/bash")
+    };
+    let program = match agent {
+        AgentId::ClaudeCode => "/usr/local/bin/claude",
+        AgentId::Codex => "/usr/local/bin/codex",
+    };
+    format!(
+        "cd {workspace} 2>/dev/null; if [ -x {program} ]; then exec {program}; fi; \
+         echo '{} is not installed in this computer. Install it from the computer page in Silo.'; \
+         exec {shell} -l",
+        agent.display_name()
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn each_agent_launches_by_its_fixed_program_in_its_systems_workspace() {
+        let claude = launch_script(AgentId::ClaudeCode, false);
+        assert!(claude.starts_with("cd /workspace 2>/dev/null; "));
+        assert!(claude.contains("exec /usr/local/bin/claude; fi;"));
+        assert!(claude.ends_with("exec /bin/bash -l"));
+        let codex = launch_script(AgentId::Codex, true);
+        assert!(codex.starts_with("cd /Users/silo/workspace 2>/dev/null; "));
+        assert!(codex.contains("[ -x /usr/local/bin/codex ]"));
+        assert!(codex.contains("Codex is not installed in this computer."));
+        assert!(codex.ends_with("exec /bin/zsh -l"));
+        assert!(!codex.contains("claude"));
+    }
 
     fn by_id(agents: &[AgentInfo], id: AgentId) -> &AgentInfo {
         agents.iter().find(|agent| agent.id == id).unwrap()

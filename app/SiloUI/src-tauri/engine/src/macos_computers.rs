@@ -3825,8 +3825,9 @@ pub fn remove_ssh_alias(app: &MacosContext, computer_id: &str) -> Result<(), Str
 pub fn terminal_command(
     app: &MacosContext,
     computer_id: &str,
+    agent: Option<silo_api::methods::agents::AgentId>,
 ) -> Result<silo_api::methods::terminal::CommandResult, String> {
-    ssh_alias::terminal_command(app, computer_id)
+    ssh_alias::terminal_command(app, computer_id, agent)
 }
 
 pub fn editor_command(

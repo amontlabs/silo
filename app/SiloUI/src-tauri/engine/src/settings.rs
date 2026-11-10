@@ -284,6 +284,10 @@ fn valid_setting(key: &str, value: &Value) -> Option<bool> {
         | "editorUseSystemDefault"
         | "browserUseSystemDefault" => value.is_boolean(),
         "terminal" | "editor" | "browser" => bounded_string(value, 256, false),
+        // The agent the person uses: `null` until chosen, `none` for one they set up themselves.
+        "agent" => {
+            value.is_null() || matches!(value.as_str(), Some("claude-code" | "codex" | "none"))
+        }
         // The SSH `Include` line whose notice the user dismissed; null until then.
         "editorIncludeNoticeDismissed" => value.is_null() || bounded_string(value, 8192, false),
         "terminalPath" | "editorPath" | "browserPath" => {
@@ -1107,6 +1111,33 @@ mod tests {
         assert!(store.update(patch(json!({"memoryFloorGib": 0}))).is_err());
         assert!(store.update(patch(json!({"diskFloorGib": 1}))).is_err());
         assert_eq!(store.snapshot().settings["memoryFloorGib"], 6);
+    }
+
+    #[test]
+    fn the_agent_setting_takes_a_known_agent_none_or_null_and_nothing_else() {
+        let mut store = SettingsStore::load(None);
+        assert!(!store.snapshot().settings.contains_key("agent"));
+        let patch = |value: Value| value.as_object().unwrap().clone();
+        for value in [
+            json!("claude-code"),
+            json!("codex"),
+            json!("none"),
+            json!(null),
+        ] {
+            let saved = store
+                .update(patch(json!({"agent": value.clone()})))
+                .unwrap();
+            assert_eq!(saved.settings["agent"], value);
+        }
+        for value in [json!("claude"), json!(""), json!(3), json!("rm -rf /")] {
+            assert!(
+                store
+                    .update(patch(json!({"agent": value.clone()})))
+                    .is_err(),
+                "{value}"
+            );
+        }
+        assert_eq!(store.snapshot().settings["agent"], json!(null));
     }
 
     #[test]

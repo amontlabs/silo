@@ -8,6 +8,7 @@ use super::{
     GuestError,
 };
 use serde_json::{json, Value};
+use silo_api::methods::agents::AgentId;
 use std::{path::Path, time::Duration};
 
 /// The answer when a macOS computer reaches a Linux-only path: macOS terminals, editors and
@@ -20,7 +21,12 @@ fn macos_adapter(what: &str) -> GuestError {
 
 /// The argv a Mac terminal runs to open a shell in the computer: the bundled runtime's
 /// interactive exec as the working account, in `/workspace`. It never starts the computer.
-pub fn terminal_command(target: &Target) -> Result<Vec<String>, GuestError> {
+/// With an `agent` the terminal runs that agent's fixed command in the workspace instead of
+/// the shell.
+pub fn terminal_command(
+    target: &Target,
+    agent: Option<AgentId>,
+) -> Result<Vec<String>, GuestError> {
     let Target::Linux { paths, name, .. } = target else {
         return Err(macos_adapter("Terminal commands"));
     };
@@ -56,6 +62,14 @@ pub fn terminal_command(target: &Target) -> Result<Vec<String>, GuestError> {
         "/workspace".into(),
         "--tty".into(),
     ]);
+    if let Some(agent) = agent {
+        argv.extend([
+            "--".into(),
+            "/bin/bash".into(),
+            "-lc".into(),
+            crate::agents::launch_script(agent, false),
+        ]);
+    }
     Ok(argv)
 }
 
@@ -225,7 +239,7 @@ mod tests {
     fn the_terminal_command_is_the_runtimes_interactive_exec_as_the_working_account() {
         let directory = tempfile::tempdir().unwrap();
         let target = test_support::target(directory.path());
-        let argv = terminal_command(&target).unwrap();
+        let argv = terminal_command(&target, None).unwrap();
         let paths = test_support::runtime(directory.path());
         assert_eq!(argv[0], "/usr/bin/env");
         assert_eq!(argv[1], format!("MSB_HOME={}", paths.home.display()));
@@ -238,13 +252,33 @@ mod tests {
     }
 
     #[test]
+    fn a_terminal_with_an_agent_runs_that_agents_fixed_command_in_the_workspace() {
+        let directory = tempfile::tempdir().unwrap();
+        let target = test_support::target(directory.path());
+        let plain = terminal_command(&target, None).unwrap();
+        for (agent, program) in [
+            (AgentId::ClaudeCode, "/usr/local/bin/claude"),
+            (AgentId::Codex, "/usr/local/bin/codex"),
+        ] {
+            let argv = terminal_command(&target, Some(agent)).unwrap();
+            let start = plain.len();
+            assert_eq!(argv[..start], plain[..]);
+            assert_eq!(argv[start..start + 3], ["--", "/bin/bash", "-lc"]);
+            assert_eq!(argv.len(), start + 4);
+            let script = &argv[start + 3];
+            assert_eq!(script, &crate::agents::launch_script(agent, false));
+            assert!(script.contains(&format!("exec {program}; fi;")), "{script}");
+        }
+    }
+
+    #[test]
     fn macos_computers_are_built_by_the_macos_adapters_not_the_linux_paths() {
         let directory = tempfile::tempdir().unwrap();
         let target = test_support::macos_target(directory.path());
         let home = directory.path().join("user");
         let settings = serde_json::Map::new();
         let errors = [
-            terminal_command(&target).unwrap_err(),
+            terminal_command(&target, None).unwrap_err(),
             editor_command(&target, &home, None, &settings).unwrap_err(),
             ensure_alias(
                 &target,
@@ -378,7 +412,7 @@ mod tests {
         );
         let target =
             crate::guest::resolve(Ok(paths), directory.path(), test_support::COMPUTER_ID).unwrap();
-        let error = terminal_command(&target).unwrap_err();
+        let error = terminal_command(&target, None).unwrap_err();
         assert_eq!(error.code, ErrorCode::NotRunning);
         assert_eq!(error.message, "Start dev first.");
     }

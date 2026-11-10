@@ -1027,8 +1027,8 @@ async fn terminal_command(
     let argv = blocking(move || {
         let target = resolve(&engine, &params.computer_id)?;
         match target {
-            Target::Macos(_) => guest::macos::terminal_command(&macos, &target),
-            Target::Linux { .. } => guest::terminal_command(&target),
+            Target::Macos(_) => guest::macos::terminal_command(&macos, &target, params.agent),
+            Target::Linux { .. } => guest::terminal_command(&target, params.agent),
         }
     })
     .await?;

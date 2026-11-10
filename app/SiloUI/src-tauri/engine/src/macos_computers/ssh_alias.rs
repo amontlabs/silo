@@ -2,7 +2,9 @@
 //! known-hosts file remain owned by `guest_access`; this module writes client config.
 use super::{files, guest_access, MacosContext};
 use crate::{applications::launch, editor};
-use silo_api::methods::{guest::GuestSshAliasEnsureResult, terminal::CommandResult};
+use silo_api::methods::{
+    agents::AgentId, guest::GuestSshAliasEnsureResult, terminal::CommandResult,
+};
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -365,21 +367,30 @@ pub(super) fn remove(app: &MacosContext, computer_id: &str) -> Result<(), String
 pub(super) fn terminal_command(
     app: &MacosContext,
     computer_id: &str,
+    agent: Option<AgentId>,
 ) -> Result<CommandResult, String> {
     let connection = ensure(app, computer_id, None, Some(true))?;
     Ok(CommandResult {
-        argv: terminal_argv(Path::new(&connection.config_path), &connection.alias)?,
+        argv: terminal_argv(Path::new(&connection.config_path), &connection.alias, agent)?,
     })
 }
 
-fn terminal_argv(config: &Path, alias: &str) -> Result<Vec<String>, String> {
-    Ok(vec![
+fn terminal_argv(
+    config: &Path,
+    alias: &str,
+    agent: Option<AgentId>,
+) -> Result<Vec<String>, String> {
+    let mut argv = vec![
         SSH.into(),
         "-F".into(),
         config.to_str().ok_or(FAILED)?.into(),
         "-t".into(),
         alias.into(),
-    ])
+    ];
+    if let Some(agent) = agent {
+        argv.push(crate::agents::launch_script(agent, true));
+    }
+    Ok(argv)
 }
 
 pub(super) fn editor_command(
@@ -485,6 +496,7 @@ mod tests {
         let argv = terminal_argv(
             Path::new("/tmp/Silo Dev/ssh/macos.conf"),
             &alias("e38c0e77-28bc-44a0-9b3d-3b4f68f0d85f"),
+            None,
         )
         .unwrap();
         assert_eq!(
@@ -497,5 +509,20 @@ mod tests {
                 "silo-e38c0e77-28bc-44a0-9b3d-3b4f68f0d85f",
             ]
         );
+    }
+
+    #[test]
+    fn a_terminal_with_an_agent_adds_one_argument_with_the_fixed_command() {
+        for agent in [AgentId::ClaudeCode, AgentId::Codex] {
+            let argv = terminal_argv(
+                Path::new("/tmp/Silo Dev/ssh/macos.conf"),
+                &alias("e38c0e77-28bc-44a0-9b3d-3b4f68f0d85f"),
+                Some(agent),
+            )
+            .unwrap();
+            assert_eq!(argv.len(), 6);
+            assert_eq!(argv[5], crate::agents::launch_script(agent, true));
+            assert!(argv[5].starts_with("cd /Users/silo/workspace "));
+        }
     }
 }
