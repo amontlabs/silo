@@ -363,6 +363,62 @@ pub fn forked(value: &Value) -> String {
     )
 }
 
+/// `silo network policy`.
+pub fn network_policy(value: &Value) -> String {
+    let mode = text(&value["policy"], "mode");
+    let timing = match text(value, "timing") {
+        "applied" => "in force",
+        "nextStart" => "applies when it starts",
+        "nextRestart" => "applies when it restarts; it keeps its current rules until then",
+        other => other,
+    };
+    let described = match mode {
+        "open" => "open: any public address".to_owned(),
+        "closed" => "closed: no outbound traffic".to_owned(),
+        _ => "a list of allowed hosts".to_owned(),
+    };
+    let mut lines = vec![format!("{}: {described} ({timing})", text(value, "computer"))];
+    let hosts = value["allowedHosts"].as_array().cloned().unwrap_or_default();
+    if mode == "allowlist" {
+        if hosts.is_empty() {
+            lines.push("No hosts are allowed; names still resolve.".into());
+        }
+        for host in &hosts {
+            let ports: Vec<String> = host["ports"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_u64)
+                .map(|port| port.to_string())
+                .collect();
+            let from = match text(host, "from") {
+                "list" => "on the list".to_owned(),
+                "github" => "GitHub access".to_owned(),
+                other => other.replacen(':', " ", 1),
+            };
+            lines.push(format!(
+                "  {}  port {}  ({from})",
+                text(host, "host"),
+                ports.join(", ")
+            ));
+        }
+    } else {
+        let listed = value["policy"]["hosts"].as_array().map_or(0, Vec::len)
+            + value["policy"]["presets"].as_array().map_or(0, Vec::len);
+        if listed > 0 {
+            lines.push("Its hosts and presets are kept and apply in allowlist mode.".into());
+        }
+    }
+    let presets: Vec<&str> = value["presets"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|preset| preset["name"].as_str())
+        .collect();
+    lines.push(format!("Presets: {}", presets.join(", ")));
+    lines.join("\n")
+}
+
 pub fn ports(value: &Value) -> String {
     let rows = value["ports"].as_array().cloned().unwrap_or_default();
     if rows.is_empty() {

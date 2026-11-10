@@ -16,7 +16,7 @@ use silo_api::{
             ComputerAccess, ComputerAccessSsh, ComputersAccessParams,
         },
         keep::{ChangesKeepParams, FoldRequestStatus},
-        network::NetworkState,
+        network::{NetworkPolicyState, NetworkState},
         ssh_access::SshAccessState,
         MethodName,
     },
@@ -707,6 +707,15 @@ async fn access(context: &HandlerContext, params: &Value) -> Result<HandlerOutpu
                 .and_then(|state| state.as_str().map(str::to_owned))
                 .unwrap_or_default(),
         });
+    let network_policy = super::route(
+        &reader,
+        MethodName::NetworkPolicyGet,
+        &json!({ "computerId": id }),
+    )
+    .await
+    .ok()
+    .and_then(|output| serde_json::from_value::<NetworkPolicyState>(output.value).ok())
+    .map(|state| state.policy);
     output(ComputerAccess {
         computer_id: id,
         name,
@@ -714,6 +723,7 @@ async fn access(context: &HandlerContext, params: &Value) -> Result<HandlerOutpu
         github,
         ports,
         ssh,
+        network_policy,
     })
 }
 

@@ -4014,6 +4014,11 @@ fn portable_export_network(name: &str, runtime_config: &mut Value) -> Result<(),
     for field in ["policy", "secrets", "ports"] {
         candidate[field] = expected[field].clone();
     }
+    // A boolean `strict` goes with the policy: an allowlist computer runs with it off, and the
+    // import starts closed with the profile's value.
+    if candidate.get("strict").is_some_and(Value::is_boolean) {
+        candidate["strict"] = expected["strict"].clone();
+    }
     if let (Some(candidate), Some(expected)) = (candidate.as_object(), expected.as_object()) {
         let differing = expected
             .keys()
@@ -6996,19 +7001,15 @@ mod tests {
                 serde_json::json!({"domain": "example.com"}),
                 serde_json::json!({"domain_suffix": "example.com"}),
             ] {
-                // With `strict` off the runtime treats a hostname allow rule differently,
-                // so that combination is a real setting, and the export names it.
-                let error = export_with_rule(origin, false.into(), hostname.clone())
-                    .err()
-                    .unwrap()
-                    .to_string();
-                assert!(error.contains("custom network strict settings"), "{error}");
-                // With it on (the profile's value) the rule is only a custom policy,
-                // which an export resets like any other.
-                let manifest = export_with_rule(origin, true.into(), hostname).unwrap();
-                assert!(imported_deny_network(
-                    &manifest.computers[0].runtime_config["network"]
-                ));
+                // An allowlist computer runs with `strict` off; the export resets it with the
+                // policy, and with it on (the profile's value) only the policy is reset.
+                for strict in [false, true] {
+                    let manifest = export_with_rule(origin, strict.into(), hostname.clone())
+                        .unwrap_or_else(|error| panic!("{origin} {strict}: {error}"));
+                    let network = &manifest.computers[0].runtime_config["network"];
+                    assert!(imported_deny_network(network));
+                    assert_eq!(network["strict"], true);
+                }
             }
             // Without a hostname rule the value changes nothing.
             let manifest = export_with_rule(
@@ -9310,5 +9311,57 @@ mod tests {
         assert!(validate_computer_name("../victim").is_err());
         assert!(validate_computer_name("/absolute").is_err());
         assert!(validate_computer_name("valid-name").is_ok());
+    }
+
+    /// The export code paths on the runtime's own configuration of computers on each network
+    /// policy, written by the live check in `runtime::checkpoints::tests::network_live`
+    /// (`SILO_T8_CONFIGS` names their folder).
+    #[test]
+    #[ignore = "reads the configurations a live network policy check wrote"]
+    fn live_export_accepts_each_network_policy() {
+        let folder = std::env::var("SILO_T8_CONFIGS").expect("SILO_T8_CONFIGS");
+        let mut names: Vec<_> = std::fs::read_dir(&folder)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| path.extension().is_some_and(|extension| extension == "json"))
+            .collect();
+        names.sort();
+        assert!(!names.is_empty());
+        for path in names {
+            let label = path.file_stem().unwrap().to_string_lossy().into_owned();
+            let mut config: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+            // Fields the runtime reports for a live computer that a snapshot's configuration lacks.
+            for key in ["external_mount_policy", "snapshot_parent"] {
+                config.as_object_mut().unwrap().remove(key);
+            }
+            let strict = config["network"]["strict"].clone();
+            let rules = config["network"]["policy"]["rules"].as_array().map_or(0, Vec::len);
+            let name = config["name"].as_str().unwrap().to_owned();
+            let before = validate_snapshottable_config(&name, &config);
+            let exported = portable_export_network(&name, &mut config);
+            let after = validate_snapshottable_config(&name, &config);
+            let show = |result: &Result<(), BackupError>| match result {
+                Ok(()) => "accepted".to_owned(),
+                Err(error) => format!("refused: {error}"),
+            };
+            eprintln!(
+                "\nEXPORT {label}: runtime strict={strict}, {rules} rules; as it runs: {}; export reset: {}; after the reset: {}; strict now {}",
+                show(&before),
+                show(&exported),
+                show(&after),
+                config["network"]["strict"],
+            );
+            if label.contains("restored") || label.contains("fork") {
+                // A computer restored from a memory checkpoint reports a pinned network interface,
+                // which the export check refuses whatever its rules are.
+                if let Err(error) = &exported {
+                    assert!(error.to_string().contains("interface"), "{label}: {error}");
+                }
+                continue;
+            }
+            exported.unwrap_or_else(|error| panic!("{label}: {error}"));
+            after.unwrap_or_else(|error| panic!("{label}: {error}"));
+            assert_eq!(config["network"]["strict"], true, "{label}");
+        }
     }
 }

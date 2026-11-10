@@ -13,6 +13,7 @@ fn a_migrated_checkpoint_record_loads() {
 }
 
 mod failed_capture_tests;
+mod network_live;
 
 const ID: &str = "00000000-0000-4000-8000-000000000001";
 
@@ -5934,6 +5935,7 @@ fn a_fork_records_what_it_was_quieted_with() {
         stop: vec!["poller".into()],
         scrub: vec!["/root/.bot.env".into()],
         closed_network: false,
+        network_policy: None,
     };
     fork_commit(
         &journal_runner("Running", ""),
@@ -5957,6 +5959,7 @@ fn fork_options_refuse_odd_names_and_paths() {
         stop: stop.iter().map(|s| s.to_string()).collect(),
         scrub: scrub.iter().map(|s| s.to_string()).collect(),
         closed_network: false,
+        network_policy: None,
     };
     assert!(options(
         &["poller", "my-app.service", "a@b"],

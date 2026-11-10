@@ -72,6 +72,8 @@ const SILO_PROTOCOL_PROBES = [
   // `msb inspect --format json` reports `runtime_instance_id` for a running sandbox.
   // Computer-use setup and storage reclaim refuse to act without it.
   "--silo-runtime-instance-protocol",
+  // `msb restore --net-strict=false` restores a computer with a list of allowed hosts.
+  "--silo-restore-strict-protocol",
 ]
 
 function hasSiloProtocolProbes(executable) {
@@ -138,7 +140,7 @@ export async function buildPatchedExecutable({
       const createHelp = runBuildTool(cachedExecutable, ["create", "--help"])
       const execHelp = runBuildTool(cachedExecutable, ["exec", "--help"])
       const sshHelp = runBuildTool(cachedExecutable, ["ssh", "serve", "--help"])
-      if (runBuildTool(cachedExecutable, ["snapshot", "load", "--help"]).includes("--stage-id") && sshHelp.includes("--no-start") && sshHelp.includes("--authorized-keys") && sshHelp.includes("--exit-on-stdin-close") && sshHelp.includes("--expected-machine-id") && execHelp.includes("--no-start") && execHelp.includes("--no-stdin") && hasSiloProtocolProbes(cachedExecutable) && version === `msb ${MICRO_SANDBOX_VERSION}` && createHelp.includes("--mount-owned") && createHelp.includes("--no-start") && createHelp.includes("--progress-json") && ["--from-sandbox", "--group", "--dest-dir", "--full", "--guest-flush", "--integrity"].every(flag => runBuildTool(cachedExecutable, ["snapshot", "create", "--help"]).includes(flag)) && ["--cow-mem", "--name"].every(flag => runBuildTool(cachedExecutable, ["restore", "--help"]).includes(flag))) {
+      if (runBuildTool(cachedExecutable, ["snapshot", "load", "--help"]).includes("--stage-id") && sshHelp.includes("--no-start") && sshHelp.includes("--authorized-keys") && sshHelp.includes("--exit-on-stdin-close") && sshHelp.includes("--expected-machine-id") && execHelp.includes("--no-start") && execHelp.includes("--no-stdin") && hasSiloProtocolProbes(cachedExecutable) && version === `msb ${MICRO_SANDBOX_VERSION}` && createHelp.includes("--mount-owned") && createHelp.includes("--no-start") && createHelp.includes("--progress-json") && ["--from-sandbox", "--group", "--dest-dir", "--full", "--guest-flush", "--integrity"].every(flag => runBuildTool(cachedExecutable, ["snapshot", "create", "--help"]).includes(flag)) && ["--cow-mem", "--name", "--net-strict"].every(flag => runBuildTool(cachedExecutable, ["restore", "--help"]).includes(flag))) {
         const executable = await readFile(cachedExecutable)
         return gatewayInputs
           ? { executable, macosGateway: await readFile(cachedGateway) }
@@ -240,6 +242,7 @@ async function readMacosGatewayInputs(appRoot) {
     "src/frames.rs",
     "src/main.rs",
     "src/network.rs",
+    "src/ports.rs",
   ]
   return Promise.all(names.map(async name => [name, await readFile(join(directory, name))]))
 }
@@ -352,7 +355,7 @@ export async function stageRuntime({
       const snapshotHelp = runBuildTool(executableTemporary, ["snapshot", "create", "--help"])
       const loadHelp = runBuildTool(executableTemporary, ["snapshot", "load", "--help"])
       const restoreHelp = runBuildTool(executableTemporary, ["restore", "--help"])
-      if (!loadHelp.includes("--stage-id") || !["--from-sandbox", "--group", "--dest-dir", "--full", "--guest-flush", "--integrity"].every(flag => snapshotHelp.includes(flag)) || !restoreHelp.includes("--cow-mem") || !restoreHelp.includes("--name") || !sshHelp.includes("--no-start") || !sshHelp.includes("--authorized-keys") || !sshHelp.includes("--exit-on-stdin-close") || !sshHelp.includes("--expected-machine-id") || !execHelp.includes("--no-start") || !execHelp.includes("--no-stdin") || version !== `msb ${MICRO_SANDBOX_VERSION}` || !createHelp.includes("--mount-owned") || !createHelp.includes("--no-start") || !createHelp.includes("--progress-json")) {
+      if (!loadHelp.includes("--stage-id") || !["--from-sandbox", "--group", "--dest-dir", "--full", "--guest-flush", "--integrity"].every(flag => snapshotHelp.includes(flag)) || !restoreHelp.includes("--cow-mem") || !restoreHelp.includes("--name") || !restoreHelp.includes("--net-strict") || !sshHelp.includes("--no-start") || !sshHelp.includes("--authorized-keys") || !sshHelp.includes("--exit-on-stdin-close") || !sshHelp.includes("--expected-machine-id") || !execHelp.includes("--no-start") || !execHelp.includes("--no-stdin") || version !== `msb ${MICRO_SANDBOX_VERSION}` || !createHelp.includes("--mount-owned") || !createHelp.includes("--no-start") || !createHelp.includes("--progress-json")) {
         throw new Error("Patched MicroSandbox executable failed its version, stopped-create, or managed SSH capability check")
       }
       await rm(isolatedHome, { recursive: true, force: true })

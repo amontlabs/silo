@@ -50,28 +50,38 @@ Done when:
 
 ## 2. Egress policy per computer
 
-**Gap today.** A computer can open any connection to any public address, TCP or UDP, and DNS
-queries go out unfiltered through the host's resolvers. The `open-egress` eval posts a file from
+**Status.** Built: a computer has a network policy of three modes, stored with it, set through
+`network.policy.set` and `silo network policy`, and applied to Linux virtual machines, macOS
+computers and containers. The app's control for it, the `open-egress` eval in allowlist mode and
+the DNS query log are still open.
+
+**Gap before.** A computer could open any connection to any public address, TCP or UDP, and DNS
+queries went out unfiltered through the host's resolvers. The `open-egress` eval posts a file from
 `/workspace` to an arbitrary public host and succeeds.
 
-**Plan.** MicroSandbox, the runtime under Linux computers and the macOS gateway, already supports
-hostname rules and strict enforcement; Silo passes none today. This milestone exposes a policy per
-computer in the API and the app:
+**What exists.**
 
-- Three modes: *public* (today's behaviour, the default for existing computers), *allowlist*
-  (named hosts and ports only) and *deny* (no outbound traffic beyond DNS to the gateway).
-- The hosts a computer needs are added for it and shown: GitHub hosts when GitHub is granted,
-  each assigned secret's allowed hosts, package registries the user picks.
-- A DNS query log per computer, readable through the API and shown in Activity.
-- The same policy for macOS computers through `silo-macos-gateway`.
-- Saved with exports and checkpoints, applied on import and restore.
+- Three modes: *open* (today's behaviour, the default for existing computers), *allowlist* (named
+  hosts, from the owner's list and from presets, on TCP 443) and *closed* (nothing out).
+- The hosts a computer needs are added for it and shown: GitHub's hosts when GitHub is granted and
+  each assigned secret's allowed hosts.
+- The same policy for macOS computers and containers through `silo-macos-gateway`'s start-up
+  request, which carries the rules and a strict flag.
+- Saved with the computer; a checkpoint restore keeps it, a fork inherits it, an export drops it
+  and an import starts closed.
+- A computer's agent may narrow its own policy and those of the computers it made without asking,
+  and asks you to widen one.
+- A small runtime patch lets `msb restore` take `--net-strict`, so a restored or forked allowlist
+  computer keeps its hostname rules working.
 
-Done when the policy is in the API and protocol, tested in Rust, the `open-egress` eval passes on a
-computer in allowlist mode, and the threat model's network section describes it.
+**Still to do.** The app's control for the policy; a DNS query log per computer, readable through
+the API and shown in Activity, with a filter for names that are not on the list; the `open-egress`
+eval passing on a computer in allowlist mode.
 
 **Still open after it.** An allowlist does not stop sending data to an allowed host (a gist, an
-issue, a package upload). DNS queries to allowed names remain a narrow channel. Both stay in the
-threat model.
+issue, a package upload). DNS queries to names that are not on the list still resolve, and a host
+that shares an address with an allowed host may be reachable while strict is off. All of this is in
+the threat model.
 
 ## 3. Reflected-secret redaction
 

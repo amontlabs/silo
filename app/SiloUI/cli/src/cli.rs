@@ -155,6 +155,9 @@ pub enum Command {
     },
     /// Stop publishing a port of a computer.
     Unpublish { computer: String, port: u16 },
+    /// Show or change what a computer may reach on the network.
+    #[command(subcommand)]
+    Network(NetworkCommand),
     /// Make `ssh <computer>.silo` reach a computer (`silo up` does it for main).
     SshSetup { computer: String },
     /// Manage the Silo secrets and which computers have them.
@@ -177,6 +180,35 @@ pub enum Command {
     Job { id: String },
     /// Serve the MCP tools on stdio.
     Mcp,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum NetworkCommand {
+    /// Show a computer's network policy, or change it. A change applies when the computer next
+    /// starts; a running computer keeps its rules until it restarts.
+    Policy {
+        computer: String,
+        /// open (any public address), allowlist (only the hosts listed) or closed (nothing out).
+        #[arg(long, value_enum)]
+        mode: Option<PolicyMode>,
+        /// A host the computer may reach on port 443: `example.com` or `*.example.com`
+        /// (repeatable).
+        #[arg(long = "allow", value_name = "HOST")]
+        allow: Vec<String>,
+        /// A host or preset to take off the list (repeatable).
+        #[arg(long = "remove", value_name = "HOST")]
+        remove: Vec<String>,
+        /// A named list of hosts kept by Silo, such as npm, pypi or github (repeatable).
+        #[arg(long = "preset", value_name = "NAME")]
+        presets: Vec<String>,
+    },
+}
+
+#[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PolicyMode {
+    Open,
+    Allowlist,
+    Closed,
 }
 
 #[derive(Subcommand, Debug)]
@@ -777,6 +809,7 @@ fn refuse_on_device(command: &Command, engine: &Engine) -> Result<(), CliError> 
         Command::Publish { .. } => "publish",
         Command::Unpublish { .. } => "unpublish",
         Command::SshSetup { .. } => "ssh-setup",
+        Command::Network(_) => "network policy",
         Command::Secrets(_) => "secrets",
         Command::Fork(fork) if fork.recipe.is_none() && folder::is_folder(&fork.source) => {
             "fork of a folder"
@@ -1246,6 +1279,30 @@ async fn dispatch(
             &access::unpublish(engine, &computer, port).await?,
             render::ports,
         ),
+        Command::Network(NetworkCommand::Policy {
+            computer,
+            mode,
+            allow,
+            remove,
+            presets,
+        }) => {
+            use silo_api::methods::network::NetworkPolicyMode;
+            let change = access::PolicyChange {
+                mode: mode.map(|mode| match mode {
+                    PolicyMode::Open => NetworkPolicyMode::Open,
+                    PolicyMode::Allowlist => NetworkPolicyMode::Allowlist,
+                    PolicyMode::Closed => NetworkPolicyMode::Closed,
+                }),
+                allow,
+                remove,
+                presets,
+            };
+            emit(
+                json,
+                &access::network_policy(engine, &computer, &change).await?,
+                render::network_policy,
+            );
+        }
         Command::SshSetup { computer } => {
             let home = access::home_dir()?;
             let value = access::ssh_setup(engine, &computer, &home, build_channel()).await?;
