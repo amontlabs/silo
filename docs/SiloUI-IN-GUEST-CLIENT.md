@@ -101,10 +101,10 @@ computer may do freely, what asks the owner (the call is answered `approval_requ
 is never allowed (`permission_denied`). Every refused or held call, and every call that can change
 something, is written to the audit log with the computer's id.
 
-The bridge adds its own limits before the call: a computer holds at most 32 computers it made
-(made and being made), at most 3 of them running or starting (a start holds its place until the
-computer shows running, is stopped, or five minutes pass; one being made counts), and at most 16
-jobs it has not acknowledged. A job over half an hour old that the client never acknowledged is
+The bridge adds its own limit before the call: at most 16 jobs a computer has not acknowledged.
+There is no cap on how many computers it makes or runs; the engine refuses a start, a fork or a
+checkpoint only while the device is short of memory or disk (`device.resources` shows how much is
+left, and the policy page has the floors). A job over half an hour old that the client never acknowledged is
 acknowledged for it once it has finished.
 
 A computer made from inside is the maker's once it exists: a new Linux computer (whose id the

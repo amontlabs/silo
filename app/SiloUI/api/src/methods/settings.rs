@@ -194,6 +194,24 @@ pub struct SettingsValues {
     )]
     #[schemars(with = "u64")]
     pub before_keep_checkpoint_retention_count: Option<u64>,
+    /// Memory, in GiB, an agent inside a computer cannot start or create a computer below;
+    /// `null` returns to the default (the larger of 4 GiB and 10 % of the device's memory).
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_present_nullable"
+    )]
+    #[schemars(with = "Option<u64>")]
+    pub memory_floor_gib: Option<Option<u64>>,
+    /// Free disk, in GiB, an agent inside a computer cannot start or create a computer below;
+    /// `null` returns to the default (the larger of 10 GiB and 5 % of the disk).
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_present_nullable"
+    )]
+    #[schemars(with = "Option<u64>")]
+    pub disk_floor_gib: Option<Option<u64>>,
 }
 
 fn deserialize_present<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>

@@ -212,7 +212,7 @@ fn owner_only_methods_are_refused_whatever_the_parameters() {
 
 #[test]
 fn open_methods_are_allowed_and_job_methods_need_the_callers_job() {
-    for name in ["engine.handshake", "engine.state", "device.facts", "engine.disconnect"] {
+    for name in ["engine.handshake", "engine.state", "device.facts", "device.resources", "engine.disconnect"] {
         assert!(allowed(&check(name, json!({}))), "{name}");
     }
     for name in [

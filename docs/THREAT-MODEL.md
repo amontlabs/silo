@@ -524,7 +524,8 @@ methods through the `/.msb/silo-bridge` folder. The engine serves it from
 [`guest_client/scope.rs`](../app/SiloUI/src-tauri/engine/src/guest_client/scope.rs).
 
 What the token can do: fork its own computer (secrets only those the settings list for that agent,
-none by default; at most 32 forks per token and 3 running or starting), start, stop and diff the
+none by default; the number of forks is not capped, but a fork, start or checkpoint is refused when
+the device is short of memory or disk, see [the policy](SiloUI-POLICY.md#limits)), start, stop and diff the
 forks it made, ask for review of those forks, read the review requests and steps of itself and those
 forks, and follow the jobs it started. Forks the person made, or another token made, are not
 reachable, and list results hold only the computer and its own forks.
@@ -538,9 +539,9 @@ capture or baseline either. `fold` and `auto_keep` are not part of its policy: n
 inside.
 
 What a compromised guest gains: the agent already controls the computer, so the token adds the
-ability to make up to 32 forks of it, 3 running at once (a disk and CPU cost; the engine adds no
-total RAM limit, each running fork uses the memory it was created with, and `fork_ram_budget`
-applies only to forks the host CLI makes) and to put review requests in front of
+ability to make forks of it and run them (a disk, CPU and memory cost; there is no count cap, but
+the engine refuses a start, fork or checkpoint while available memory or free disk is below the
+safety floor, and `fork_ram_budget` applies only to forks the host CLI makes) and to put review requests in front of
 the person, whose summary text the agent wrote. A fork, request or summary can be flooded or
 misleading; a keep still shows the engine's own diff, pinned to its digest. It gains no host file,
 secret, GitHub token or other computer's data.
@@ -568,8 +569,8 @@ secret, GitHub token or other computer's data.
   0.7.6 source and is not yet checked in a running guest.
 - **Forks and jobs.** A fork is the token's only after its job finished and the fork exists below
   the computer (recorded by id); forks the person made are never reachable, and a failed fork
-  never claims a computer. A token holds at most 32 forks, 3 running or starting, and 16
-  unacknowledged jobs.
+  never claims a computer. A token holds at most 16 unacknowledged jobs; the number of forks
+  and running forks is not capped (the safety floor on memory and disk applies).
 - **Logging.** The engine writes one line per call to its log: the computer, the method (only a
   name from the allow-list; anything else is logged as "not offered"), and whether it was refused.
   Parameters and tokens are not logged, and a call with a bad token is logged without its method.

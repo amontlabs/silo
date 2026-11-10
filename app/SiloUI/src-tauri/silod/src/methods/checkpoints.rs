@@ -126,6 +126,7 @@ async fn dispatch(
         MethodName::PreparationRetry => preparation::retry(context, params).await,
         MethodName::DeviceDependencies => device::dependencies(context, params).await,
         MethodName::DeviceFacts => device::facts(context, params).await,
+        MethodName::DeviceResources => device::resources(context, params).await,
         _ => Err(DispatchError::unsupported(method_name(method))),
     }
 }

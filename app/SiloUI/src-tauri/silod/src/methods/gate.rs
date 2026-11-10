@@ -24,6 +24,7 @@ use silo_engine::{
         store::{Document, JobState, Pending, PolicyStore},
         Access, Caller, Creation, Decision, Filter,
     },
+    resources,
 };
 
 use super::HandlerContext;
@@ -132,6 +133,39 @@ fn request_approval(
     }
 }
 
+/// The device now and the floors that apply to an agent inside a computer.
+pub(crate) fn host_and_floors(
+    context: &HandlerContext,
+) -> Result<(resources::Host, resources::Floors), DispatchError> {
+    let host = resources::measure(&app_data(context)).ok_or_else(|| {
+        DispatchError::internal("This device's memory and disk could not be measured.")
+    })?;
+    let (memory, disk) = silo_engine::settings::resource_floors_for(context.engine_context())
+        .map_err(DispatchError::internal)?;
+    let floors = resources::Floors::resolve(&host, memory, disk);
+    Ok((host, floors))
+}
+
+/// A call that starts, creates or checkpoints a computer, which takes memory or disk.
+fn takes_headroom(method: MethodName) -> bool {
+    matches!(
+        method,
+        MethodName::ComputersStart
+            | MethodName::ComputersRestart
+            | MethodName::ComputersCreate
+            | MethodName::CheckpointsFork
+            | MethodName::CheckpointsCreate
+            | MethodName::CheckpointsRestore
+    )
+}
+
+/// Why an agent's call that takes memory or disk must fail now: the device has less free than
+/// the floor. A device that cannot be measured does not refuse.
+fn short_of_resources(context: &HandlerContext) -> Option<String> {
+    let (host, floors) = host_and_floors(context).ok()?;
+    resources::refusal(&host, &floors)
+}
+
 /// Asks the policy about one call. A refused or held call is recorded and answered here.
 pub(crate) async fn admit(
     context: &HandlerContext,
@@ -167,6 +201,14 @@ pub(crate) async fn admit(
     };
     match decision {
         Decision::Allow(allowed) => {
+            if matches!(caller, Caller::Computer { .. }) && takes_headroom(method) {
+                if let Some(message) = short_of_resources(context) {
+                    return refuse(
+                        DispatchError::new(ErrorCode::ResourcesLow, message),
+                        AuditOutcome::Refused,
+                    );
+                }
+            }
             if let (Some(creation), Caller::Computer { id }) = (&allowed.creates, &caller) {
                 // The computer is the caller's once its job has finished well (`settle`).
                 let begun = PolicyStore::new(&app_data(context)).begin(

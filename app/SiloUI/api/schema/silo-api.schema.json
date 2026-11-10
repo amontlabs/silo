@@ -2763,6 +2763,39 @@
       },
       "type": "object"
     },
+    "ComputerResources": {
+      "properties": {
+        "cpus": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "id": {
+          "type": "string"
+        },
+        "memoryGib": {
+          "description": "The memory the computer is configured with, in GiB.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        },
+        "running": {
+          "description": "Whether the computer is running or starting.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "running",
+        "cpus",
+        "memoryGib"
+      ],
+      "type": "object"
+    },
     "ComputerRuntimeKind": {
       "description": "The runtime of a Linux computer when it is not the default one.",
       "enum": [
@@ -3866,6 +3899,109 @@
       },
       "type": "object"
     },
+    "DeviceResources": {
+      "description": "`device.resources`: what this device has left, so an agent can judge whether another computer fits.",
+      "properties": {
+        "computers": {
+          "description": "The computers the caller may see: all of them for the owner, the caller and the computers it made otherwise.",
+          "items": {
+            "$ref": "#/$defs/ComputerResources"
+          },
+          "type": "array"
+        },
+        "diskFloorBytes": {
+          "description": "An agent inside a computer cannot start or create a computer below this much free disk.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "diskFreeBytes": {
+          "description": "Free space on the disk that holds computers.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "diskTotalBytes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "logicalCpus": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "memoryAvailableBytes": {
+          "description": "Memory that can be given to a computer now; absent when the system cannot tell.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "memoryFloorBytes": {
+          "description": "An agent inside a computer cannot start or create a computer below this much free memory.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "memoryPressure": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MemoryPressure"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Absent where the system gives no level."
+        },
+        "memoryTotalBytes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "message": {
+          "description": "One plain sentence about the state.",
+          "type": "string"
+        },
+        "runningComputers": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "runningCpus": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "runningMemoryGib": {
+          "description": "The memory the running computers were configured with, in GiB.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "state": {
+          "$ref": "#/$defs/ResourceState"
+        }
+      },
+      "required": [
+        "logicalCpus",
+        "memoryTotalBytes",
+        "diskFreeBytes",
+        "diskTotalBytes",
+        "runningComputers",
+        "runningMemoryGib",
+        "runningCpus",
+        "memoryFloorBytes",
+        "diskFloorBytes",
+        "state",
+        "message",
+        "computers"
+      ],
+      "type": "object"
+    },
     "DisplayAxis": {
       "maximum": 32767,
       "minimum": 0,
@@ -4023,7 +4159,8 @@
         "screen_sharing_unavailable",
         "desktop_update_required",
         "credential_access_denied",
-        "approval_required"
+        "approval_required",
+        "resources_low"
       ],
       "type": "string"
     },
@@ -8536,6 +8673,15 @@
       ],
       "type": "object"
     },
+    "MemoryPressure": {
+      "description": "The system's own reading of memory pressure.",
+      "enum": [
+        "normal",
+        "warning",
+        "critical"
+      ],
+      "type": "string"
+    },
     "MethodContractSchema": {
       "properties": {
         "params": {
@@ -8614,6 +8760,7 @@
         "desktop.status",
         "device.dependencies",
         "device.facts",
+        "device.resources",
         "display.close",
         "display.native.attach",
         "display.show",
@@ -9698,6 +9845,22 @@
           "properties": {
             "method": {
               "const": "device.facts",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/DeviceParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "device.resources",
               "type": "string"
             },
             "params": {
@@ -12528,6 +12691,22 @@
             },
             "result": {
               "$ref": "#/$defs/DeviceFacts"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "device.resources",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/DeviceResources"
             }
           },
           "required": [
@@ -16142,6 +16321,26 @@
       ],
       "type": "object"
     },
+    "ResourceState": {
+      "description": "How short of memory or disk the device is, judged against the floors Silo keeps free.",
+      "oneOf": [
+        {
+          "const": "ok",
+          "description": "Enough is free.",
+          "type": "string"
+        },
+        {
+          "const": "low",
+          "description": "Less than twice the floor is free: starting another computer works but may slow the device.",
+          "type": "string"
+        },
+        {
+          "const": "critical",
+          "description": "Less than the floor is free: an agent inside a computer cannot start or create another.",
+          "type": "string"
+        }
+      ]
+    },
     "ResponseEnvelope": {
       "anyOf": [
         {
@@ -16443,6 +16642,15 @@
         "computerUseAutoApproval": {
           "type": "boolean"
         },
+        "diskFloorGib": {
+          "description": "Free disk, in GiB, an agent inside a computer cannot start or create a computer below;\n`null` returns to the default (the larger of 10 GiB and 5 % of the disk).",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "editor": {
           "type": "string"
         },
@@ -16463,6 +16671,15 @@
         },
         "launchAtLogin": {
           "type": "boolean"
+        },
+        "memoryFloorGib": {
+          "description": "Memory, in GiB, an agent inside a computer cannot start or create a computer below;\n`null` returns to the default (the larger of 4 GiB and 10 % of the device's memory).",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "notificationsEnabled": {
           "type": "boolean"
@@ -18292,6 +18509,12 @@
       "name": "device.facts",
       "paramsType": "device::DeviceFactsParams",
       "resultType": "device::DeviceFacts"
+    },
+    {
+      "kind": "query",
+      "name": "device.resources",
+      "paramsType": "device::DeviceResourcesParams",
+      "resultType": "device::DeviceResources"
     },
     {
       "kind": "command",

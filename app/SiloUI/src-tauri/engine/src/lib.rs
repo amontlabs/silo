@@ -34,6 +34,7 @@ pub mod desktop_viewer;
 pub mod desktop_viewer_api;
 pub mod desktop_viewer_media;
 pub mod device_facts;
+pub mod resources;
 pub mod device_identity;
 pub(crate) mod download;
 pub mod editor;

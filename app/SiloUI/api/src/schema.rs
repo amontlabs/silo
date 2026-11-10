@@ -197,7 +197,7 @@ mod tests {
             schema_json().unwrap()
         );
         let schema: serde_json::Value = serde_json::from_str(&schema_json().unwrap()).unwrap();
-        assert_eq!(schema["x-silo-methods"].as_array().unwrap().len(), 176);
+        assert_eq!(schema["x-silo-methods"].as_array().unwrap().len(), 177);
         assert_eq!(schema["x-silo-job-results"].as_array().unwrap().len(), 39);
         assert_eq!(
             schema["$schema"],
@@ -372,8 +372,9 @@ mod tests {
             (DesktopUpdateRequired, "desktop_update_required"),
             (CredentialAccessDenied, "credential_access_denied"),
             (ApprovalRequired, "approval_required"),
+            (ResourcesLow, "resources_low"),
         ];
-        assert_eq!(codes.len(), 26);
+        assert_eq!(codes.len(), 27);
         for (code, expected) in codes {
             let json = serde_json::to_string(&code).unwrap();
             assert_eq!(json, format!("\"{expected}\""));

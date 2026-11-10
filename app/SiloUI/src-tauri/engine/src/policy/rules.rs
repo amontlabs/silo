@@ -31,7 +31,7 @@ pub fn rule(method: MethodName) -> Rule {
     match method {
         // The engine itself.
         M::EngineHandshake | M::EngineState | M::EngineDisconnect | M::EventsUnsubscribe => Open,
-        M::DeviceFacts => Open,
+        M::DeviceFacts | M::DeviceResources => Open,
         // Events and notices cover every computer and are not cut per caller.
         M::EventsSubscribe | M::NotificationsList => OwnerOnly,
         M::EngineShutdown

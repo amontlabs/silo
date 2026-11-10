@@ -125,7 +125,7 @@ No fixed caps on how many computers an agent makes. Instead:
   the same facts when available memory or free disk is below the floor (defaults: memory
   `max(4 GiB, 10 %)`, disk `max(10 GiB, 5 %)`, changeable in settings). Above the floor but
   below twice the floor, the call works and its result carries a warning.
-- The CLI's `fork_ram_budget` and the in-guest caps (32 forks, 3 running) go away.
+- The in-guest caps (32 forks, 3 running) go away. The CLI's `fork_ram_budget` goes with `silo.yaml` (item T6).
 
 ### 7. Merge
 

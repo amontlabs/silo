@@ -43,6 +43,8 @@ pub enum ErrorCode {
     CredentialAccessDenied,
     // The call needs the owner's approval; the error's details say what it asks for.
     ApprovalRequired,
+    // The device is too short of memory or disk for an agent to start or create another computer.
+    ResourcesLow,
 }
 
 /// A string JobId with one of the six canonical id-space prefixes.

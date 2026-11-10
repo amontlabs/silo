@@ -299,11 +299,21 @@ fn valid_setting(key: &str, value: &Value) -> Option<bool> {
         "computerOrder" => value.as_array().is_some_and(|keys| {
             keys.len() <= 1024 && keys.iter().all(|key| bounded_string(key, 512, false))
         }),
+        // Null returns to the default floor.
+        "memoryFloorGib" => floor_gib(value, crate::resources::MIN_MEMORY_FLOOR_GIB),
+        "diskFloorGib" => floor_gib(value, crate::resources::MIN_DISK_FLOOR_GIB),
         "automaticCheckpointRetentionCount" | "beforeKeepCheckpointRetentionCount" => value
             .as_u64()
             .is_some_and(|count| count <= u64::from(u32::MAX)),
         _ => return None,
     })
+}
+
+fn floor_gib(value: &Value, minimum: u64) -> bool {
+    value.is_null()
+        || value
+            .as_u64()
+            .is_some_and(|gib| (minimum..=crate::resources::MAX_FLOOR_GIB).contains(&gib))
 }
 
 fn only_fields(object: &Map<String, Value>, required: &[&str], optional: &[&str]) -> bool {
@@ -810,6 +820,16 @@ pub fn before_keep_checkpoint_retention_count_for(
         .ok_or_else(|| "The before-keep checkpoint retention setting is invalid.".to_owned())
 }
 
+/// The floors the owner set for agents inside computers, in GiB: memory, then disk. `None`
+/// means the default.
+pub fn resource_floors_for(
+    context: &dyn silo_engine::EngineContext,
+) -> Result<(Option<u64>, Option<u64>), String> {
+    let settings = settings_of(context)?;
+    let floor = |key: &str| settings.get(key).and_then(Value::as_u64);
+    Ok((floor("memoryFloorGib"), floor("diskFloorGib")))
+}
+
 pub fn read(main: bool) -> Result<Snapshot, String> {
     let state = runtime_state()?;
     let mut snapshot = state
@@ -1041,6 +1061,47 @@ mod tests {
             assert!(!accepted(value.clone()), "{value}");
         }
         assert_eq!(DEFAULT_AUTOMATIC_CHECKPOINT_RETENTION_COUNT, 3);
+    }
+
+    #[test]
+    fn the_resource_floors_have_a_minimum_and_null_returns_to_the_default() {
+        let memory = |value: Value| valid_setting("memoryFloorGib", &value) == Some(true);
+        let disk = |value: Value| valid_setting("diskFloorGib", &value) == Some(true);
+        for value in [
+            json!(1),
+            json!(8),
+            json!(crate::resources::MAX_FLOOR_GIB),
+            json!(null),
+        ] {
+            assert!(memory(value.clone()), "{value}");
+        }
+        for value in [
+            json!(0),
+            json!(-1),
+            json!(1.5),
+            json!("4"),
+            json!(crate::resources::MAX_FLOOR_GIB + 1),
+        ] {
+            assert!(!memory(value.clone()), "{value}");
+            assert!(!disk(value.clone()), "{value}");
+        }
+        assert!(!disk(json!(1)));
+        assert!(disk(json!(2)) && disk(json!(null)));
+    }
+
+    #[test]
+    fn the_resource_floors_are_saved_with_the_other_settings_and_absent_by_default() {
+        let mut store = SettingsStore::load(None);
+        assert!(!store.snapshot().settings.contains_key("memoryFloorGib"));
+        let patch = |value: Value| value.as_object().unwrap().clone();
+        let saved = store
+            .update(patch(json!({"memoryFloorGib": 6, "diskFloorGib": 40})))
+            .unwrap();
+        assert_eq!(saved.settings["memoryFloorGib"], 6);
+        assert_eq!(saved.settings["diskFloorGib"], 40);
+        assert!(store.update(patch(json!({"memoryFloorGib": 0}))).is_err());
+        assert!(store.update(patch(json!({"diskFloorGib": 1}))).is_err());
+        assert_eq!(store.snapshot().settings["memoryFloorGib"], 6);
     }
 
     #[test]
