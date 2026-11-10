@@ -7,9 +7,11 @@ Plan: [PLAN.md](PLAN.md). Agent rules: [AGENT-BRIEF.md](AGENT-BRIEF.md).
 - **Started:** 2026-11-10, from main at the commit that adds this file.
 - **How work lands:** each item is a delegated agent in its own worktree and branch. It runs its
   own review loop with the `reviewer` model, then reports. The orchestrator reads the report,
-  reviews boundary changes itself, merges the branch into main in the main checkout, regenerates
-  the API files if two items touched them, and deletes the item's target folder
-  (`~/code/projects/silo-wt-targets/<item>`). No pull requests; main is pushed now and then.
+  reviews boundary changes itself, merges the branch into the local branch `direction` (checked
+  out at `~/code/projects/silo-direction`), regenerates the API files if two items touched them,
+  and deletes the item's target folder (`~/code/projects/silo-wt-targets/<item>`). `main` on
+  GitHub accepts only pull requests with seven required checks (found 2026-11-10), so the build
+  stays on `direction` and goes up as pull requests at the end.
 - **Live checks** use the Dev engine, one item at a time. On 2026-11-10 a Dev app and engine from a
   deleted build (`silo-dev-target`) were still running; an item that needs the Dev engine
   replaces them with its own build.

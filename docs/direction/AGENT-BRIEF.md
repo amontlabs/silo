@@ -6,9 +6,11 @@ write code. The repository's own rules are in [AGENTS.md](../../AGENTS.md); they
 
 ## Your checkout
 
-- You work in your own git worktree. Commit there, on your branch, as you go. Do not push, do
-  not open a pull request, and do not touch the main checkout at
-  `/Users/polarzero/code/projects/microsandbox-workspaces`.
+- You work in your own git worktree. The build is integrated on the local branch `direction`
+  (checked out at `~/code/projects/silo-direction`). Before anything else run
+  `git merge --ff-only direction` so you start from the latest merged work. Commit on your own
+  branch as you go. Do not push, do not open a pull request, and do not edit the main checkout
+  at `/Users/polarzero/code/projects/microsandbox-workspaces` or the integration checkout.
 - Native builds need the private GitHub build file. Copy it once, without printing it:
   `cp /Users/polarzero/code/projects/microsandbox-workspaces/app/SiloUI/github-build.local.json app/SiloUI/`.
   It is ignored by Git; never commit or print it.
@@ -54,7 +56,7 @@ write code. The repository's own rules are in [AGENTS.md](../../AGENTS.md); they
 When your checks pass, get a review before you report:
 
 1. Start a review with the Agent tool, `model: "reviewer"`, `run_in_background: false`. Give it
-   your worktree path, the command `git diff main...HEAD`, what the change is meant to do, and
+   your worktree path, the command `git diff direction...HEAD`, what the change is meant to do, and
    ask for correctness and security findings only, most severe first, at most ten, each with
    file and line and a concrete failure.
 2. Fix what is real. Say why for anything you reject.
