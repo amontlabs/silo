@@ -101,8 +101,6 @@
     "allow-remove-secret",
     "allow-retry-secret",
     "allow-read-github-state",
-    "allow-save-github-personal-token",
-    "allow-remove-github-personal-token",
     "allow-connect-github",
     "allow-cancel-github-connection",
     "allow-reopen-github-authorization",

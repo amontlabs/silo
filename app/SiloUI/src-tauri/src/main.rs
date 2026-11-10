@@ -119,8 +119,6 @@ fn main() {
             commands::secrets::remove_secret,
             commands::secrets::retry_secret,
             commands::github::read_github_state,
-            commands::github::save_github_personal_token,
-            commands::github::remove_github_personal_token,
             commands::github::connect_github,
             commands::github::cancel_github_connection,
             commands::github::reopen_github_authorization,

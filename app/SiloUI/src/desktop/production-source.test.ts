@@ -557,17 +557,18 @@ describe("production application bridge", () => {
     store.dispose()
   })
 
-  it("keeps personal-token connection independent from OAuth and never publishes its value", async () => {
+  it("saves a GitHub token as a secret, shows its account, and never publishes its value", async () => {
     const mock = native()
-    const base = await mock.invoke("read_application_state") as { github: Record<string, unknown> }
-    const github = { ...base.github, state: "connected", personalToken: { state: "connected", saved: true, account: "token-user" } }
-    const invoke = vi.fn(async (command: string, args?: Record<string, unknown>) => command === "save_github_personal_token" ? github : mock.invoke(command, args))
+    const saved = [{ id: "token-1", name: "work", kind: "github-token", computers: ["dev"], allowedDomains: [], state: "active", account: "token-user", connection: { state: "connected" } },
+      { id: "token-2", name: "home", kind: "github-token", computers: [], allowedDomains: [], state: "active", account: null, connection: { state: "disconnected", message: "Could not validate the GitHub token. Check its validity and your connection." } }]
+    const invoke = vi.fn(async (command: string, args?: Record<string, unknown>) => command === "save_secret" ? saved : mock.invoke(command, args))
     const store = createProductionSource({ ...mock.bridge, invoke } as ProductionBridge)
     await store.initialize()
-    await store.applicationActions.saveGitHubPersonalToken!("github_pat_synthetic")
-    expect(invoke).toHaveBeenCalledWith("save_github_personal_token", { token: "github_pat_synthetic" })
-    expect(store.getSnapshot().source?.github.state).toBe("connected")
-    expect(store.getSnapshot().source?.github.personalToken?.account).toBe("token-user")
+    await store.applicationActions.saveSecret({ operation: "add", kind: "github-token", name: "work", value: "github_pat_synthetic", computers: [], allowedDomains: [] })
+    expect(invoke).toHaveBeenCalledWith("save_secret", { request: { operation: "add", kind: "github-token", name: "work", value: "github_pat_synthetic", computers: [], allowedDomains: [] } })
+    const secrets = store.getSnapshot().source?.secrets
+    expect(secrets?.[0]).toMatchObject({ kind: "github-token", account: "token-user", connection: { state: "connected" }, computers: ["dev"] })
+    expect(secrets?.[1]).toMatchObject({ kind: "github-token", account: undefined, connection: { state: "disconnected" } })
     expect(JSON.stringify(store.getSnapshot())).not.toContain("github_pat_synthetic")
     store.dispose()
   })

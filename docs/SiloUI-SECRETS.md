@@ -74,6 +74,29 @@ and requires an independent future to run before releasing the read. This uses
 [Tauri's async command execution](https://v2.tauri.app/develop/calling-rust/#async-commands)
 and the supported [blocking-work boundary](https://docs.rs/tokio/latest/tokio/task/fn.spawn_blocking.html).
 
+## GitHub tokens
+
+A personal GitHub token is a secret of kind `github-token`. It has a name (a label, so hyphens are
+allowed), a value in the same credential-store vault as other secrets, and the GitHub account
+Silo learned when it checked the token against GitHub's read-only `/user` endpoint. You can keep
+several. Add one from the Secrets page with Add GitHub token; it takes a name and the token only.
+
+- **It is not an environment secret.** It has no allowed hosts of its own (they are GitHub's) and
+  is never delivered to a computer as a `$MSB_NAME` placeholder. Assigning it to a computer
+  (`silo secrets assign`) does not apply: a computer uses a token because its GitHub access names it
+  (`tokenSecretId` in the computer's GitHub settings, see
+  [GitHub personal tokens](SiloUI-GITHUB-PERSONAL-TOKENS.md)). The `computers` of a token secret
+  in `secrets.list` lists the computers whose GitHub access uses it.
+- **Checking.** Saving a token checks it with GitHub first and stores nothing if GitHub refuses
+  it. The GitHub worker checks every token at startup and every five minutes (30 seconds after a
+  failure). A token GitHub rejects shows as disconnected, with the account it last belonged to,
+  and the computers using it lose GitHub access without falling back to anything else.
+- **Remove.** Removing the secret first detaches every computer using it, then deletes the value.
+  A failed deletion stays retryable and keeps the computers detached.
+- **Saved data.** `secrets.json` gains `kind` and `account` for these secrets only; secrets
+  saved by earlier versions load as ordinary secrets. An earlier Silo cannot read a
+  `secrets.json` that holds a token secret.
+
 ## Linux hosts
 
 A Linux server has no desktop session, so there is no Secret Service (or unlocked login keyring)

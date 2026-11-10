@@ -1034,7 +1034,7 @@ export function createProductionSource(native: ProductionBridge = bridge) {
       }
       const message = `GitHub operation failed: ${errorMessage(cause)}`
       if (sequence === githubMutationSequence && snapshot.source) publish({ ...snapshot, error: message, source: { ...snapshot.source, github: { ...snapshot.source.github,
-        ...(!(["save_github_configuration", "save_github_personal_token", "remove_github_personal_token"].includes(command)) && { repositoryCatalogStatus: { status: "unavailable" as const, message, canRetry: command === "refresh_github_repositories" } }),
+        ...(command !== "save_github_configuration" && { repositoryCatalogStatus: { status: "unavailable" as const, message, canRetry: command === "refresh_github_repositories" } }),
       } } })
       throw cause
     } finally {
@@ -1318,8 +1318,6 @@ export function createProductionSource(native: ProductionBridge = bridge) {
     },
     openTerminal: (name) => computerAction("open-terminal", name),
     openEditor: (name, path) => computerAction("open-editor", name, path ? { path } : undefined),
-    saveGitHubPersonalToken: async token => { await githubMutation("save_github_personal_token", { token }) },
-    removeGitHubPersonalToken: async () => { await githubMutation("remove_github_personal_token") },
     connectGitHub: () => { void githubMutation("connect_github").catch(() => {}) },
     cancelGitHubConnection: () => { void githubMutation("cancel_github_connection").catch(() => {}) },
     reopenGitHubAuthorization: () => {

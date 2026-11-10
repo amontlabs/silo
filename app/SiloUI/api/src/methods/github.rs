@@ -8,6 +8,8 @@ pub type GitHubStateParams = DeviceParams;
 pub type GitHubConnectParams = DeviceParams;
 pub type GitHubConnectReopenParams = DeviceParams;
 pub type GitHubDisconnectParams = DeviceParams;
+/// Superseded: a personal token is a secret of kind `github-token`. This still removes the
+/// secret named `github-token`.
 pub type GitHubPersonalTokenRemoveParams = DeviceParams;
 pub type GitHubRepositoriesRefreshParams = DeviceParams;
 
@@ -39,6 +41,9 @@ pub struct GitHubPolicy {
     pub repositories: Vec<GitHubRepositoryPolicy>,
     pub all_repositories_allow_changes: bool,
     pub authentication_method: GitHubAuthenticationMethod,
+    /// With token access, the `github-token` secret the computer uses.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token_secret_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, schemars::JsonSchema)]
@@ -88,6 +93,8 @@ wire_struct! {
 wire_struct! { GitHubConnectCallbackParams { job_id: crate::jobs::JobId, #[serde(default, skip_serializing_if = "Option::is_none")] device_id: Option<String> } }
 
 wire_struct! {
+    /// Superseded: a personal token is a secret of kind `github-token`. This still saves
+    /// the secret named `github-token`.
     GitHubPersonalTokenSaveParams {
         token: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -114,6 +121,7 @@ pub type GitHubNoParams = EmptyParams;
 #[serde(rename_all = "camelCase")]
 pub struct GitHubState {
     pub policy_revision: u64,
+    /// Superseded by `github-token` secrets; the state of the one named `github-token`.
     pub personal_token: GitHubPersonalToken,
     pub state: GitHubConnectionState,
     pub account: Option<String>,
@@ -189,4 +197,29 @@ pub enum GitHubComputerOperationStatus {
     Applying,
     Succeeded,
     Failed,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_policy_names_its_token_secret_only_when_it_has_one() {
+        let sign_in: GitHubPolicy = serde_json::from_value(serde_json::json!({
+            "computerId": "c1", "identity": {"name": "", "email": "", "apply": false},
+            "repositoryMode": "selected", "repositories": [],
+            "allRepositoriesAllowChanges": false, "authenticationMethod": "oauth"
+        }))
+        .unwrap();
+        assert_eq!(sign_in.token_secret_id, None);
+        assert!(serde_json::to_value(&sign_in).unwrap().get("tokenSecretId").is_none());
+        let token = GitHubPolicy {
+            authentication_method: GitHubAuthenticationMethod::Token,
+            token_secret_id: Some("s1".into()),
+            ..sign_in
+        };
+        let json = serde_json::to_value(&token).unwrap();
+        assert_eq!(json["tokenSecretId"], "s1");
+        assert_eq!(serde_json::from_value::<GitHubPolicy>(json).unwrap(), token);
+    }
 }

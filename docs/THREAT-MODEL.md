@@ -267,12 +267,18 @@ reads the token from an inherited pipe, never from arguments, environment or fil
 
 Limits:
 
-- **Personal access token mode has no repository scoping.** The proxy sends the personal token for
-  every request to the GitHub hosts (`profile.version == 2`,
+- **A personal access token is not scoped by Silo.** A personal token is a secret of kind
+  `github-token`; you can keep several and choose one per computer. For a computer that uses one,
+  the proxy sends that token for every request to the GitHub hosts (`profile.version == 2`,
   [patch line 394](../app/SiloUI/patches/microsandbox-silo-network-0.7.6.patch#L394)), so the agent
-  has the token's full permissions. The README says so. Host push in this mode also uses the full
-  personal token, which is not narrowed or revoked
-  ([`github.rs#L2369`](../app/SiloUI/src-tauri/engine/src/github.rs#L2369)).
+  has whatever permissions the token has: the scope is the one you gave it on GitHub, and Silo adds
+  no repository limit. The README says so. A computer only ever receives the token it was given,
+  never another one in the list, and a token secret is never delivered as an environment
+  placeholder. Host push for such a computer also uses the full token it chose, which is not
+  narrowed or revoked (`personal_push_credential` in
+  [`github.rs`](../app/SiloUI/src-tauri/engine/src/github.rs)). A token GitHub rejects
+  disconnects, and the computers using it lose GitHub access instead of falling back to another
+  credential.
 - **Read is still read.** With a read grant the agent can read every granted repository, including
   private ones, and send their contents anywhere (boundary 2 does not stop it).
 - A write grant includes `workflows: write`: the agent can change GitHub Actions workflows in those
@@ -1247,8 +1253,8 @@ These follow from the design today, not from bugs:
   ([`network.rs#L209`](../app/SiloUI/src-tauri/macos-gateway/src/network.rs#L209)). Host-side readers are bounded:
   guest writes to `/.msb` at 16 MiB, relayed command output at 1 MiB
   ([`runtime/mod.rs#L125`](../app/SiloUI/src-tauri/engine/src/runtime/mod.rs#L125)).
-- **Personal access token mode.** The agent's GitHub requests carry the whole token, unscoped
-  (boundary 5).
+- **Personal access tokens.** A computer that uses one sends the whole token, unscoped, with its
+  GitHub requests (boundary 5).
 - **macOS computers before setup completes.** They run on Apple NAT and can reach the Mac and the
   LAN (boundary 2).
 - **Untrusted imported archives.** A macOS import mounts the guest's disk on the Mac; import only

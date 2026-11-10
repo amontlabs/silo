@@ -23,8 +23,9 @@ it.each(["connected", "disconnected"] as const)("keeps token policy through the 
   const user = userEvent.setup()
   const live = applicationSourceForScenario("running", oauthState)
   live.computers = [live.computers[0]]
-  const policy = { ...live.github.computers![0], authenticationMethod: "token" as const, repositoryMode: "selected" as const, allRepositoriesAllowChanges: false }
-  live.github = { ...live.github, personalToken: { state: "connected", saved: true }, computers: [policy], policyRevision: 10 }
+  const policy = { ...live.github.computers![0], authenticationMethod: "token" as const, tokenSecretId: "token-1", repositoryMode: "selected" as const, allRepositoriesAllowChanges: false }
+  live.secrets = [{ id: "token-1", name: "work", kind: "github-token", computers: [], allowedDomains: [], state: "active", account: "alice", connection: { state: "connected" } }]
+  live.github = { ...live.github, computers: [policy], policyRevision: 10 }
   const invoke = nativeBridgeMock({
     read_application_state: () => structuredClone(live),
     read_backup_state: () => ({ snapshotId: "test", availability: "available", archives: [], operation: null }),

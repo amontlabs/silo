@@ -6,10 +6,10 @@ import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
-import type { ApplicationSecret, ApplicationSource, SecretConfigurationRequest } from "../model/application-source"
+import type { ApplicationSecret, ApplicationSource, SecretConfigurationRequest, SecretKind } from "../model/application-source"
 import { secretConfiguration, type SecretDraft, type SecretValidationErrors } from "../model/secret-configuration"
 
-export function SecretEditor({ secret, source, onSave, onCancel, saving = false, saveError, initialComputers }: {
+export function SecretEditor({ secret, source, onSave, onCancel, saving = false, saveError, initialComputers, kind: initialKind }: {
   secret?: ApplicationSecret
   source: ApplicationSource
   onSave: (request: SecretConfigurationRequest) => void
@@ -18,18 +18,22 @@ export function SecretEditor({ secret, source, onSave, onCancel, saving = false,
   saveError?: string
   /** Preselected computers when adding a new secret (e.g. scoped to one computer on its page). */
   initialComputers?: string[]
+  /** What kind of secret to add; an existing secret keeps its own. */
+  kind?: SecretKind
 }) {
+  const kind = secret?.kind ?? initialKind ?? "generic"
+  const token = kind === "github-token"
   const [baseline, setBaseline] = useState(secret)
   const [draft, setDraft] = useState<SecretDraft>(() => ({
-    name: secret?.name ?? "", value: "", computers: secret?.computers ?? initialComputers ?? [],
+    kind, name: secret?.name ?? "", value: "", computers: secret?.computers ?? initialComputers ?? [],
     domains: secret?.allowedDomains.join(", ") ?? "", allowAnyDomain: secret?.allowedDomains.includes("*") ?? false,
   }))
   const [errors, setErrors] = useState<SecretValidationErrors>({})
   const formRef = useRef<HTMLFormElement>(null)
   const id = useId()
   const computers = source.computers.filter(w => !w.device)
-  const title = secret ? `Edit ${secret.name}` : "Add secret"
-  const settingsChanged = Boolean(secret && baseline && (
+  const title = secret ? `Edit ${secret.name}` : token ? "Add GitHub token" : "Add secret"
+  const settingsChanged = Boolean(secret && baseline && !token && (
     secret.computers.length !== baseline.computers.length || !secret.computers.every(name => baseline.computers.includes(name))
     || secret.allowedDomains.length !== baseline.allowedDomains.length || !secret.allowedDomains.every(domain => baseline.allowedDomains.includes(domain))
   ))
@@ -61,8 +65,8 @@ export function SecretEditor({ secret, source, onSave, onCancel, saving = false,
     }
     const request = result.request
     const unchanged = secret && request.value === undefined
-      && request.computers.length === secret.computers.length && request.computers.every((name) => secret.computers.includes(name))
-      && request.allowedDomains.length === secret.allowedDomains.length && request.allowedDomains.every((domain) => secret.allowedDomains.includes(domain))
+      && (token || (request.computers.length === secret.computers.length && request.computers.every((name) => secret.computers.includes(name))
+      && request.allowedDomains.length === secret.allowedDomains.length && request.allowedDomains.every((domain) => secret.allowedDomains.includes(domain))))
     if (unchanged) onCancel()
     else onSave(request)
   }} onKeyDown={(event) => {
@@ -85,16 +89,19 @@ export function SecretEditor({ secret, source, onSave, onCancel, saving = false,
     <div className="grid min-w-0 gap-3 sm:grid-cols-2">
       <div className="grid content-start gap-1">
         <label htmlFor={`${id}-name`} className="text-caption font-medium text-muted-foreground">Name</label>
-        <Input technical id={`${id}-name`} value={draft.name} disabled={Boolean(secret)} autoComplete="off" spellCheck={false} autoCapitalize="off" className="font-mono" placeholder="SERVICE_TOKEN" aria-invalid={Boolean(errors.name)} aria-describedby={errors.name ? `${id}-name-error` : undefined} onChange={(event) => update({ name: event.target.value })} />
+        <Input technical id={`${id}-name`} value={draft.name} disabled={Boolean(secret)} autoComplete="off" spellCheck={false} autoCapitalize="off" className="font-mono" placeholder={token ? "work" : "SERVICE_TOKEN"} aria-invalid={Boolean(errors.name)} aria-describedby={errors.name ? `${id}-name-error` : undefined} onChange={(event) => update({ name: event.target.value })} />
         {fieldError("name")}
       </div>
       <div className="grid content-start gap-1">
-        <label htmlFor={`${id}-value`} className="text-caption font-medium text-muted-foreground">{secret ? "Replacement value" : "Value"}</label>
+        <label htmlFor={`${id}-value`} className="text-caption font-medium text-muted-foreground">{token ? (secret ? "Replacement token" : "Token") : secret ? "Replacement value" : "Value"}</label>
         <Input technical id={`${id}-value`} type="password" value={draft.value} autoComplete="new-password" spellCheck={false} autoCapitalize="off" aria-invalid={Boolean(errors.value)} aria-describedby={errors.value ? `${id}-value-error` : secret ? `${id}-value-hint` : undefined} onChange={(event) => update({ value: event.target.value })} />
-        {secret && <p id={`${id}-value-hint`} className="text-caption text-muted-foreground">Leave blank to keep the current value.</p>}
+        {secret && <p id={`${id}-value-hint`} className="text-caption text-muted-foreground">{token ? "Leave blank to keep the current token." : "Leave blank to keep the current value."}</p>}
         {fieldError("value")}
       </div>
     </div>
+    {token ? <p className="rounded-md bg-warning/10 p-2.5 text-caption text-warning">
+      Silo checks the token with GitHub and shows the account it belongs to. Choose which computers use it on the GitHub page. A computer using it can do everything the token allows, with no repository limits from Silo. Silo sends it only to GitHub and never shows it inside the computer.
+    </p> : <>
     <fieldset className="grid min-w-0 gap-2">
       <legend className="mb-2 text-caption font-medium text-muted-foreground">Computers</legend>
       <FilterCombobox
@@ -123,6 +130,7 @@ export function SecretEditor({ secret, source, onSave, onCancel, saving = false,
       <label className="flex items-center gap-2"><Checkbox checked={draft.allowAnyDomain} aria-invalid={Boolean(errors.allowAnyDomain)} aria-describedby={errors.allowAnyDomain ? `${id}-allowAnyDomain-error` : undefined} onCheckedChange={(checked) => update({ allowAnyDomain: checked === true })} />Allow any HTTPS destination</label>
       {fieldError("allowAnyDomain")}
     </div>}
+    </>}
     </fieldset>
     {saveError && <p role="alert" className="text-caption text-destructive">{saveError}</p>}
     <div className="flex justify-end gap-2">

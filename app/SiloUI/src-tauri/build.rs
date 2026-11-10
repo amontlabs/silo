@@ -165,8 +165,6 @@ fn main() {
             "remove_secret",
             "retry_secret",
             "read_github_state",
-            "save_github_personal_token",
-            "remove_github_personal_token",
             "connect_github",
             "cancel_github_connection",
             "reopen_github_authorization",

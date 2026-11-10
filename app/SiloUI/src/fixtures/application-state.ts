@@ -112,9 +112,11 @@ export function useApplicationFixture(source: ApplicationSource) {
     const secret: ApplicationSecret = {
       id: request.operation === "edit" ? request.id : crypto.randomUUID(),
       name: request.name,
+      ...(request.kind === "github-token"
+        ? { kind: "github-token" as const, account: "preview-user", connection: { state: "connected" as const }, state: "active" as const }
+        : { state: "restart-required" as const }),
       computers: request.computers,
       allowedDomains: request.allowedDomains,
-      state: "restart-required",
     }
     setSecrets((current) => request.operation === "edit"
       ? current.map((existing) => existing.id === request.id ? secret : existing)

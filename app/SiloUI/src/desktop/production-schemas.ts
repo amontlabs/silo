@@ -12,6 +12,7 @@ const sshAccessShape = z.object({ computers: z.array(z.object({
 })) })
 
 export const githubStateShape = z.object({
+  // Superseded by token secrets; still sent for the secret named `github-token`.
   personalToken: z.object({ state: z.enum(["connected", "disconnected"]), saved: z.boolean(), account: z.string().optional(), message: z.string().optional() }).optional(),
   policyRevision: z.number().int().nonnegative().optional(),
   state: z.enum(["disconnected", "connecting", "connected"]),
@@ -26,6 +27,7 @@ export const githubStateShape = z.object({
   computers: z.array(z.object({
     computer: z.string(), identity: z.object({ name: z.string(), email: z.string(), apply: z.boolean() }),
     authenticationMethod: z.enum(["oauth", "token"]).nullish().transform(value => value ?? undefined),
+    tokenSecretId: z.string().nullish().transform(value => value ?? undefined),
     repositoryMode: z.enum(["selected", "all"]).default("selected"), allRepositoriesAllowChanges: z.boolean().default(false),
     repositories: z.array(z.object({ repository: z.string(), allowPushes: z.boolean() })),
   })).optional(),
@@ -43,7 +45,10 @@ export const directoryPageShape = z.object({
 }).strict()
 
 export const secretShape = z.object({
-  id: z.string(), name: z.string(), computers: z.array(z.string()), allowedDomains: z.array(z.string()),
+  id: z.string(), name: z.string(), kind: z.enum(["generic", "github-token"]).optional(),
+  computers: z.array(z.string()), allowedDomains: z.array(z.string()),
+  account: z.string().nullish().transform((value) => value ?? undefined),
+  connection: z.object({ state: z.enum(["connected", "disconnected"]), message: z.string().nullish().transform((value) => value ?? undefined) }).nullish().transform((value) => value ?? undefined),
   state: z.enum(["active", "applying", "restart-required"]), pendingComputers: z.array(z.string()).optional(),
   error: z.string().nullish().transform((value) => value ?? undefined), removing: z.boolean().optional(),
 })

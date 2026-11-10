@@ -210,11 +210,22 @@ export interface ApplicationComputer {
   quiet?: QuietState | null
 }
 
+/** A secret reaches a computer as a placeholder for its allowed hosts (`generic`), or only as
+ * the computer's GitHub access (`github-token`). */
+export type SecretKind = "generic" | "github-token"
+
 export interface ApplicationSecret {
   id: string
   name: string
+  /** Absent means `generic`. */
+  kind?: SecretKind
+  /** For a GitHub token, the computers whose GitHub access uses it. */
   computers: string[]
   allowedDomains: string[]
+  /** The GitHub account a token belongs to, once GitHub confirmed it. */
+  account?: string
+  /** Whether GitHub accepts a token; a disconnected token gives its computers no access. */
+  connection?: { state: "connected" | "disconnected"; message?: string }
   state: "active" | "applying" | "restart-required"
   pendingComputers?: string[]
   error?: string
@@ -224,6 +235,7 @@ export interface ApplicationSecret {
 // Values travel only with a save request, never in the published secret metadata.
 export type SecretConfigurationRequest = {
   name: string
+  kind?: SecretKind
   computers: string[]
   allowedDomains: string[]
 } & ({ operation: "add"; value: string } | { operation: "edit"; id: string; value?: string })
@@ -244,6 +256,8 @@ export interface ApplicationGitHubRepositoryPolicy {
 
 export interface ApplicationGitHubComputerPolicy {
   authenticationMethod?: "oauth" | "token"
+  /** With token access, the `github-token` secret this computer uses. */
+  tokenSecretId?: string
   repositoryMode?: "selected" | "all"
   allRepositoriesAllowChanges?: boolean
   computer: string
@@ -294,7 +308,6 @@ export interface ApplicationSource {
   computerConfigurationOperation: ComputerConfigurationOperation | null
   repositoryPushOperations: RepositoryPushOperation[]
   github: {
-    personalToken?: { state: "connected" | "disconnected"; saved: boolean; account?: string; message?: string }
     policyRevision?: number
     state: "disconnected" | "connecting" | "connected"
     account?: string
@@ -391,8 +404,6 @@ export interface ApplicationActions {
   cancelGitHubConnection?: () => void
   reopenGitHubAuthorization?: () => void
   manageGitHubRepositories?: () => void
-  saveGitHubPersonalToken?: (token: string) => Promise<void>
-  removeGitHubPersonalToken?: () => Promise<void>
   connectGitHub?: () => void
   disconnectGitHub?: () => void
   setGitHubAccessEnabled?: (enabled: boolean) => void
