@@ -3,6 +3,7 @@ import { expect, it, vi } from "vitest"
 import { applicationSourceForScenario } from "@/fixtures/application-scenarios"
 import type { MacosComputersStore } from "@/features/macos-computers/model/macos-computers"
 import type { ApplicationActions } from "./application-source"
+import { computerAvailability } from "./computer-availability"
 
 import type { MacosComputer } from "@/features/macos-computers/model/macos-computers"
 import { logIdentity } from "./logs"
@@ -104,4 +105,20 @@ it("sends Start, Stop and Show screen of a macOS computer to the macOS store, an
   expect(actions.startComputer).toHaveBeenCalledWith("dev")
   expect(actions.openDesktop).toHaveBeenCalledWith("dev")
   expect(wired.openTerminal).toBe(actions.openTerminal)
+})
+
+it("addresses a computer of another device by its target everywhere, including inside its macOS record", () => {
+  const listed = macosApplicationComputer(computer, device)
+  expect(listed.configuration.id).toBe("silo-remote:studio:mac-1")
+  expect(listed.macos?.id).toBe("silo-remote:studio:mac-1")
+  expect(listed.device?.computerId).toBe("mac-1")
+})
+
+it("does not hold a macOS computer while Linux computer changes are applied", () => {
+  const source = structuredClone(applicationSourceForScenario("running"))
+  source.computerConfigurationOperation = { id: "op", status: "applying", candidate: { schemaVersion: 1, computers: [] }, progressEvents: [], result: null, error: null }
+  const mac = macosApplicationComputer({ ...computer, state: "stopped" })
+  expect(computerAvailability(mac, source)).toMatchObject({ canStart: true })
+  expect(computerAvailability(source.computers[0], source).canStart).toBe(false)
+  expect(computerAvailability(macosApplicationComputer(computer), source).reasons.restart).toMatch(/can’t be restarted/)
 })

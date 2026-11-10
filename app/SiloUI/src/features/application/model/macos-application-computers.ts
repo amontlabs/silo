@@ -39,7 +39,8 @@ export function macosApplicationComputer(computer: MacosComputer, device?: Devic
   const listed: ApplicationComputer = {
     ...(device && { device: { ...device, computerId: computer.id } }),
     os: "macos",
-    macos: computer,
+    // A computer of another device is addressed by its target, like the store does.
+    macos: device ? { ...computer, id: remoteComputerTarget(device.id, computer.id) } : computer,
     configuration: {
       id: device ? remoteComputerTarget(device.id, computer.id) : computer.id,
       name: computer.name,

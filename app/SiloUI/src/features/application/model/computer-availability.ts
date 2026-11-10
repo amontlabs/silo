@@ -18,7 +18,8 @@ const lifecycleProgress = { start: "starting", stop: "stopping", restart: "resta
 function blockedReason(computer: ApplicationComputer, source: ApplicationSource): string | undefined {
   const { device, configuration } = computer
   if (!device && source.runtimeRepair) return "Resolve the system issue first."
-  if (!device && source.computerConfigurationOperation) {
+  // A macOS computer is not part of the Linux configuration being applied.
+  if (!device && !computer.macos && source.computerConfigurationOperation) {
     return source.computerConfigurationOperation.status === "failed" ? "Dismiss the computer changes error first." : "Wait for computer changes to finish."
   }
   if (computer.lifecycleAction) return `${configuration.name} is ${lifecycleProgress[computer.lifecycleAction]}.`
@@ -52,6 +53,6 @@ export function computerAvailability(computer: ApplicationComputer, source: Appl
   if (!canOpen) reasons.open = blocked ?? error ?? `Start ${configuration.name} to open it.`
   if (!canStart) reasons.start = blocked ?? `${configuration.name} is already running.`
   if (!canStop) reasons.stop = blocked ?? `${configuration.name} isn’t running.`
-  if (!canRestart) reasons.restart = blocked ?? `${configuration.name} isn’t running.`
+  if (!canRestart) reasons.restart = blocked ?? (computer.macos ? "A macOS computer can’t be restarted. Stop it, then start it." : `${configuration.name} isn’t running.`)
   return { busy, canOpen, canStart, canStop, canRestart, reasons }
 }

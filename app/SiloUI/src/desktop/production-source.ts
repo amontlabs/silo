@@ -717,7 +717,7 @@ export function createProductionSource(native: ProductionBridge = bridge) {
 
   function setComputerFailure(action: string, computerId: string, cause: unknown) {
     const computer = view.source?.computers.find(computer => computer.configuration.id === computerId)
-    if (!computer) { reportActionFailure(`${action}:${computerId}`, `Could not ${action.replace(/-/g, " ")}`, errorMessage(cause)); return }
+    if (!computer) { reportActionFailure(`${action}:${computerId}`, `Could not ${action.replace(/-/g, " ")} for ${computerId}`, errorMessage(cause)); return }
     const message = errorMessage(cause)
     // A user-requested cancellation is not a failure: record it as a neutral,
     // retryable state so the row shows "<Action> cancelled", not a red error.

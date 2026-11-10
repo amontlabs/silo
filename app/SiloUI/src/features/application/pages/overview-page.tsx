@@ -163,8 +163,8 @@ export function OverviewPage({ active = true, readOnly = false, notifyOperations
   // oxlint-disable-next-line react/set-state-in-effect
   useEffect(() => { if (detailMissing) returnToList() }, [detailMissing])
 
-  const latestDeleteState = useRef({ source, readOnly })
-  useEffect(() => { latestDeleteState.current = { source, readOnly } }, [source, readOnly])
+  const latestDeleteState = useRef({ source: fullSource, readOnly })
+  useEffect(() => { latestDeleteState.current = { source: fullSource, readOnly } }, [fullSource, readOnly])
 
   // Every lifecycle request from this page (row, computer page, menus, toasts) goes through the
   // shared guard: unavailable Computer operations are reported and memory pressure asks first.
@@ -279,7 +279,7 @@ export function OverviewPage({ active = true, readOnly = false, notifyOperations
   // otherwise point at something that no longer exists.
   const knownComputers = useRef(new Map<string, { id: string; name: string; deviceId: string; target: string }>())
   useEffect(() => {
-    const current = new Map(source.computers.map(computer => [`${computer.device?.id ?? ""}:${computer.configuration.id}`, { id: computer.configuration.id, name: computer.configuration.name, deviceId: computer.device?.id ?? "", target: computerTarget(computer) }]))
+    const current = new Map(fullSource.computers.map(computer => [`${computer.device?.id ?? ""}:${computer.configuration.id}`, { id: computer.configuration.id, name: computer.configuration.name, deviceId: computer.device?.id ?? "", target: computerTarget(computer) }]))
     for (const [key, known] of knownComputers.current) {
       if (current.has(key)) continue
       dismissComputerToastsById(known.id)
@@ -290,7 +290,7 @@ export function OverviewPage({ active = true, readOnly = false, notifyOperations
       dismissComputerToasts(known.name)
     }
     knownComputers.current = current
-  }, [source.computers])
+  }, [fullSource.computers])
 
   /** Open the fork `name`, created on the same device as its source computer. */
   function forkOpenAction(name: string, deviceId = "") {

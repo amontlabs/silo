@@ -296,7 +296,8 @@ function ApplicationContent({ source: nativeSource, actions: nativeActions, back
   const { forgetComputers } = navigation
   useEffect(() => {
     const known = new Set<string>()
-    for (const computer of source.computers) known.add(computer.configuration.id)
+    // A macOS computer of another device has no page to keep.
+    for (const computer of source.computers) if (!(computer.macos && computer.device)) known.add(computer.configuration.id)
     for (const configuration of computerConfigurationOperation?.candidate.computers ?? []) known.add(configuration.id)
     forgetComputers((computer) => known.has(computer))
   }, [source.computers, computerConfigurationOperation, forgetComputers])

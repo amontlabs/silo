@@ -769,7 +769,7 @@ describe("production application bridge", () => {
     const store = createProductionSource(mock.bridge)
     await store.initialize()
     store.applicationActions.openTerminal("daily")
-    await vi.waitFor(() => expect(toasts.showOperationFailure).toHaveBeenCalledWith("open-terminal:daily", "Could not open terminal", { description: "The computer is not reachable over SSH." }))
+    await vi.waitFor(() => expect(toasts.showOperationFailure).toHaveBeenCalledWith("open-terminal:daily", "Could not open terminal for daily", { description: "The computer is not reachable over SSH." }))
     expect(mock.invoke).toHaveBeenCalledWith("computer_action", { action: "open-terminal", name: "daily" })
     store.dispose()
   })

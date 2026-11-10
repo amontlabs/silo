@@ -10,12 +10,12 @@ async function labels(remote = false) {
   const store = createFixtureMacosComputersStore()
   await store.refresh()
   const source = structuredClone(applicationSourceForScenario("complete"))
-  source.devices = []
-  const merged = withMacosComputers(source, store.getSnapshot())
-  if (remote) {
-    const hosted = merged.computers.find(computer => computer.macos?.id === "mac-running")!
-    hosted.device = { id: "studio", computerId: "mac-running", name: "Studio", address: "studio.local", connected: true }
-  }
+  const local = store.getSnapshot().state!
+  // The same computer, hosted by another device instead of this one.
+  const hosted = { ...local, computers: local.computers.filter(computer => computer.id === "mac-running") }
+  source.devices = remote ? [{ id: "studio", name: "Studio", address: "studio.local", connected: true }] : []
+  const snapshot = remote ? { ...store.getSnapshot(), state: { ...local, computers: [] }, remote: { studio: { state: hosted, error: null, updating: false } } } : store.getSnapshot()
+  const merged = withMacosComputers(source, snapshot)
   const actions = { forkCheckpoint: vi.fn() } as unknown as ApplicationActions
   return applicationCommands(merged, actions, vi.fn(), { onComputerRequest: vi.fn(), onExportComputer: vi.fn() }).map(command => command.label)
 }
