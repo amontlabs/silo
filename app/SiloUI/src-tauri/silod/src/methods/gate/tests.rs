@@ -222,6 +222,7 @@ fn headroom_calls(id: &str, fork: &str) -> Vec<(MethodName, Value)> {
     vec![
         (MethodName::ComputersStart, json!({"computerId": fork})),
         (MethodName::ComputersRestart, json!({"computerId": fork})),
+        (MethodName::MacosSetupRetry, json!({"computerId": fork})),
         (
             MethodName::ComputersCreate,
             json!({"kind": "linux", "configuration": {"id": "x", "name": "gate-created",
@@ -344,4 +345,25 @@ async fn device_resources_tells_every_caller_the_numbers_and_the_state() {
         );
         assert!(read["computers"].is_array());
     }
+}
+
+#[tokio::test]
+async fn a_call_that_would_ask_for_approval_is_refused_first_when_the_device_is_short() {
+    let (id, _fork) = computer();
+    let caller = Caller::Computer { id };
+    let container = json!({"kind": "linux", "configuration": {"id": "x", "name": "gate-container",
+        "cpus": 2, "maxCPUs": 2, "memoryGiB": 4, "maxMemoryGiB": 4,
+        "workspaceStorageGiB": 10, "runtimeStorageGiB": 10, "runtime": "container"}});
+    let error = {
+        let _ample = device(32 * GIB, 400 * GIB);
+        call(&caller, MethodName::ComputersCreate, container.clone())
+            .await
+            .unwrap_err()
+    };
+    assert_eq!(error.code, ErrorCode::ApprovalRequired);
+    let _short = device(GIB, 400 * GIB);
+    let error = call(&caller, MethodName::ComputersCreate, container)
+        .await
+        .unwrap_err();
+    assert_eq!(error.code, ErrorCode::ResourcesLow);
 }

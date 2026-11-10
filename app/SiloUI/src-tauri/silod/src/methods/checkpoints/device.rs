@@ -114,8 +114,10 @@ pub(super) async fn resources(
         disk_free_bytes: host.disk_free,
         disk_total_bytes: host.disk_total,
         running_computers: running.clone().count() as u64,
-        running_memory_gib: running.clone().map(|computer| computer.memory_gib).sum(),
-        running_cpus: running.map(|computer| computer.cpus).sum(),
+        running_memory_gib: running.clone().fold(0_u64, |sum, computer| {
+            sum.saturating_add(computer.memory_gib)
+        }),
+        running_cpus: running.fold(0_u64, |sum, computer| sum.saturating_add(computer.cpus)),
         memory_floor_bytes: floors.memory,
         disk_floor_bytes: floors.disk,
         state: assessment.state,

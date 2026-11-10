@@ -54,11 +54,11 @@ impl Floors {
         Self {
             memory: memory_gib.map_or_else(
                 || MEMORY_FLOOR_MINIMUM.max(host.memory_total / 100 * MEMORY_FLOOR_PERCENT),
-                |gib| gib.saturating_mul(GIB),
+                |gib| gib.max(MIN_MEMORY_FLOOR_GIB).saturating_mul(GIB),
             ),
             disk: disk_gib.map_or_else(
                 || DISK_FLOOR_MINIMUM.max(host.disk_total / 100 * DISK_FLOOR_PERCENT),
-                |gib| gib.saturating_mul(GIB),
+                |gib| gib.max(MIN_DISK_FLOOR_GIB).saturating_mul(GIB),
             ),
         }
     }
@@ -381,6 +381,9 @@ mod tests {
         assert_eq!(floors.disk, 100 * GIB);
         let set = Floors::resolve(&large, Some(2), Some(30));
         assert_eq!((set.memory, set.disk), (2 * GIB, 30 * GIB));
+        // A value below the smallest allowed (from a hand-edited file) is raised to it.
+        let zero = Floors::resolve(&large, Some(0), Some(0));
+        assert_eq!((zero.memory, zero.disk), (GIB, 2 * GIB));
     }
 
     #[test]

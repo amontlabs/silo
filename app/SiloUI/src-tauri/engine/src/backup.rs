@@ -4441,7 +4441,12 @@ pub(crate) fn volume_bytes(path: &Path) -> io::Result<(u64, u64)> {
     let (available, total, unit) = (
         statistics.f_bavail as u64,
         statistics.f_blocks as u64,
-        statistics.f_frsize as u64,
+        // Some filesystems report no fragment size; POSIX then means the block size.
+        if statistics.f_frsize == 0 {
+            statistics.f_bsize as u64
+        } else {
+            statistics.f_frsize as u64
+        },
     );
     available
         .checked_mul(unit)
