@@ -23,7 +23,10 @@ Plan: [PLAN.md](PLAN.md). Agent rules: [AGENT-BRIEF.md](AGENT-BRIEF.md).
 | Item | State | Branch | Notes |
 | --- | --- | --- | --- |
 | S1 | merged 2026-11-10 | `docs/s1-gateway-channel-spike` | [evidence](evidence/S1.md). Channel: yes, no patch. Allowlist: needs strict off, a `restore --net-strict` patch, and gateway init fields |
-| T1 | running since 2026-11-10 | | task id ends `21b89a79-7c1e-432c-8118-44fc0eddcff6` (Opus) |
+| T1 | merged 2026-11-10 (`e000d684c`) | `t1-policy-audit` | silod 341, api 52, policy and audit 42 tests passed in the item. Only one review round ran (fallback model); the second hit a quota. Orchestrator read rules.rs, policy/mod.rs and the gate: no hole found; checkpoint ids are looked up inside the named computer's record. A Codex review is running |
+| T1 review | running since 2026-11-10 | | task id ends `00c2c502-46c1-461c-9dd6-3195b97b41f0` (Codex gpt-6.1-sol high, read-only) |
+| T2 | running since 2026-11-10 | | task id ends `b36c91cf-09c3-4e62-9c5d-cbb05e3d8482` (Opus) |
+| T3 | running since 2026-11-10 | | task id ends `90e092a2-578c-42d5-8ade-b7fadfe8c9c0` (Sonnet) |
 | T4 | merged 2026-11-10 | `feat/keep-conflict-choices` | engine tests 273, api 53, silod checkpoints 56 passed in the item; two review rounds; the `silo-ui` crate was not built there |
 | T9 | merged 2026-11-10 | `feat/macos-computer-app-parity` | frontend only, no Rust change; 2914 frontend tests passed in the item; reviewed by the fallback model (gemini flash) only, one round; not run in the real app |
 | T11 | running since 2026-11-10 | | task id ends `8a11b496-7815-4ef3-830d-fe8aa13cc55a` (Sonnet) |
@@ -70,6 +73,24 @@ These were not asked of the owner. Each is open to change.
     requests, which narrows it).
 
 ## Found during the build
+
+- **Integration checks** run with
+  `CARGO_TARGET_DIR=~/code/projects/silo-wt-targets/integration`; the script regenerates the API
+  files and runs the focused suites; its log is `~/code/projects/silo-wt-targets/integration.log`.
+  The integration worktree has APFS clones of the ignored `src-tauri/binaries` folder and the
+  private GitHub build file.
+- **Reviewer quota:** on 2026-11-10 the `reviewer` model stopped with "Individual quota reached,
+  resets in 4h". Reviews of boundary items go to Codex directly through a delegated task
+  (provider `codex`, `gpt-6.1-sol`, reasoning high) until it is back.
+- **T1, for the owner:** a token's `fork_secrets` no longer limits forks (a fork may get any
+  secret its maker has). `device.facts` and `engine.state` are open to a computer; notifications,
+  `events.subscribe` and `operations.list` are closed because they are not cut per computer, so a
+  client inside a computer polls. A computer cannot read its own secrets' names or GitHub access
+  yet (`computers.access` is in T2). A job result too large to send in one piece is withheld from
+  a computer. Some gated methods do not take `computerId` in the form the gate reads and are
+  therefore refused for a computer (safe): check `clipboard.read`, `computerUse.setup`,
+  `computers.dismissError`, `computers.forceStop`, `desktop.status`, `macos.setup.retry`,
+  `network.urls` in the live run.
 
 - **S2 design for T15 (Linux rebuild on the newest image):** (1) take the lane, journal, stop;
   (2) disk checkpoint with integrity, the undo; (3) create `<name>-rebuild-<hex>` on the newest
