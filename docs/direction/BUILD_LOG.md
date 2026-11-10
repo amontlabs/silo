@@ -24,7 +24,7 @@ Plan: [PLAN.md](PLAN.md). Agent rules: [AGENT-BRIEF.md](AGENT-BRIEF.md).
 | --- | --- | --- | --- |
 | S1 | merged 2026-11-10 | `docs/s1-gateway-channel-spike` | [evidence](evidence/S1.md). Channel: yes, no patch. Allowlist: needs strict off, a `restore --net-strict` patch, and gateway init fields |
 | T1 | merged 2026-11-10 (`e000d684c`) | `t1-policy-audit` | silod 341, api 52, policy and audit 42 tests passed in the item. Only one review round ran (fallback model); the second hit a quota. Orchestrator read rules.rs, policy/mod.rs and the gate: no hole found; checkpoint ids are looked up inside the named computer's record. A Codex review is running |
-| T1 review | running since 2026-11-10 | | Codex failed on its usage limit (back 2026-11-11 15:12). Restarted on Opus: task id ends `891f27a0-21f9-4a87-a67d-aeacf00337fd` |
+| T1 review | done 2026-11-10 (Opus) | | one high finding and seven smaller, listed under Found. Fix task running: id ends `fa664794-1fe4-4421-89f0-dbf6b4f2fb16` (Sonnet). T5 must not start before it is merged |
 | T2 | running since 2026-11-10 | | task id ends `b36c91cf-09c3-4e62-9c5d-cbb05e3d8482` (Opus) |
 | T3 | running since 2026-11-10 | | task id ends `90e092a2-578c-42d5-8ade-b7fadfe8c9c0` (Sonnet) |
 | T4 | merged 2026-11-10 | `feat/keep-conflict-choices` | engine tests 273, api 53, silod checkpoints 56 passed in the item; two review rounds; the `silo-ui` crate was not built there |
@@ -73,6 +73,20 @@ These were not asked of the owner. Each is open to change.
     requests, which narrows it).
 
 ## Found during the build
+
+- **T1 boundary review (Opus), all being fixed in the T1 fix task:** (1) high: `forget_makers`
+  was never called, so after the owner approves "replace main with fork F" the old main still
+  controlled the new one; fix: on promote the fork takes the target's place, the target's other
+  computers are re-pointed to the fork, the old main keeps nothing; undo reverses it.
+  (2) `guest.prepare` appended a key to a device-wide `authorized_keys`: now owner only.
+  (3) `checkpoints.create` on itself could evict the owner's automatic and step checkpoints:
+  manual kind forced, `keepNewest` dropped. (4) `computers.create` passed sizes through: larger
+  than the caller's own now asks (new approval kind, resources). (5) the audit log could be
+  flooded to evict rows: repeated rows collapse, per-computer caps, target id recorded only when
+  it is the caller's. (6) `sshAccess.save` off passed keys and port through. (7) merge-request
+  keep and promote between two computers the caller made no longer ask. The review confirmed
+  every dispatch path reaches the gate, the caller cannot be chosen by the client, ids other than
+  `computerId` are scoped by their handlers, and the Device caller is unchanged.
 
 - **Merging two items that both add methods** conflicts in `api/src/methods/mod.rs`,
   `registry.rs`, `schema.rs`, `requests.rs`, the schema file and `engine/src/lib.rs`. Recipe:
