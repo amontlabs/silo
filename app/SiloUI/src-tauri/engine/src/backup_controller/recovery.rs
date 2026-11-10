@@ -371,6 +371,7 @@ fn set_aside(app_data: &Path, detail: &str) -> Result<(PathBuf, Journal), String
             computers: Vec::new(),
             checkpoint_name: None,
             transfer: None,
+            left_out: Vec::new(),
         },
         request: Request::Backup {
             names: Vec::new(),

@@ -405,6 +405,14 @@ impl silo_engine::runtime::RuntimeHost for SilodRuntimeHost {
         Some(self.context.macos_context())
     }
 
+    fn export_scrub(&self) -> Option<Arc<dyn silo_engine::export_scrub::ScrubEnv>> {
+        let handle = tokio::runtime::Handle::try_current().ok()?;
+        Some(crate::methods::checkpoints::scrub_env::env(
+            self.context.clone(),
+            handle,
+        ))
+    }
+
     fn runtime_storage(&self) -> Result<PathBuf, String> {
         self.migration.runtime_storage()
     }

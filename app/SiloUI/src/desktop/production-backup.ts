@@ -97,9 +97,9 @@ export function createBackupControls({ native, snapshot, publish, disposed, view
   }
 
   const backupActions: BackupController["actions"] = {
-    async checkLogins(computerName, checkpointId) {
-      const found = exportLoginsShape.parse(await native.invoke("check_export_logins", { computer: computerName, ...(checkpointId && { checkpointId }) }))
-      return { logins: found.logins, ...(found.unchecked && { unchecked: found.unchecked }) }
+    async checkLogins(computerName, checkpointId, includeLogins) {
+      const found = exportLoginsShape.parse(await native.invoke("check_export_logins", { computer: computerName, ...(checkpointId && { checkpointId }), ...(includeLogins && { includeLogins }) }))
+      return { logins: found.logins, ...(found.unchecked && { unchecked: found.unchecked }), ...(found.leavesOut && { leavesOut: found.leavesOut }) }
     },
     async chooseDestination() {
       const selected = await native.invoke<string | null>("choose_backup_destination")
@@ -113,17 +113,17 @@ export function createBackupControls({ native, snapshot, publish, disposed, view
       return inspectBackupArchive(archivePath, signal)
     },
     inspectArchive: (archive, signal) => inspectBackupArchive(archive.archivePath, signal),
-    startBackup(destination, computers, checkpointId) {
+    startBackup(destination, computers, checkpointId, includeLogins) {
       if (pendingBackupOperation || view().backup.operation?.kind === "running") return
-      backupActions.exportAndVerify(destination, computers, checkpointId).catch(() => undefined)
+      backupActions.exportAndVerify(destination, computers, checkpointId, includeLogins).catch(() => undefined)
     },
-    async exportAndVerify(destination, computers, checkpointId) {
+    async exportAndVerify(destination, computers, checkpointId, includeLogins) {
       if (pendingBackupOperation || view().backup.operation?.kind === "running") throw new ExportIncompleteError("busy", "Another export or import is running.")
       pendingBackupOperation = true
       const archive: BackupArchive = { name: "Export file", archivePath: "", completedLabel: "Not completed", size: "Unknown", destination, computers }
       showPendingBackup("backup", archive)
       let operationId: string
-      try { operationId = z.string().min(1).parse(await native.invoke("start_backup", { destination, computers, ...(checkpointId && { checkpointId }) })) }
+      try { operationId = z.string().min(1).parse(await native.invoke("start_backup", { destination, computers, ...(checkpointId && { checkpointId }), ...(includeLogins && { includeLogins }) })) }
       catch (cause) {
         localBackupOperation = backupFailure("backup", archive, errorMessage(cause))
         publish({ ...snapshot(), backup: { ...snapshot().backup, operation: localBackupOperation } })

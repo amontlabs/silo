@@ -50,6 +50,11 @@ wire_struct! {
         /// are then ignored; the finished job's `archive.transfer` names the file.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         transfer_area: Option<bool>,
+        /// Keep the logins found on the computer in the file. By default an export of a Linux
+        /// computer is made from a copy with the known login files removed; `archive.leftOut`
+        /// of the result names them.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        include_logins: Option<bool>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         device_id: Option<String>,
     }
@@ -61,6 +66,9 @@ wire_struct! {
         /// The export packages this checkpoint rather than the live disk.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         checkpoint_id: Option<String>,
+        /// The export keeps the logins in the file, so none will be left out.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        include_logins: Option<bool>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         device_id: Option<String>,
     }
@@ -74,6 +82,9 @@ wire_struct! {
         checked: Vec<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         unchecked: Option<String>,
+        /// The export will not carry these logins: it is made from a copy they are removed from.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        leaves_out: bool,
     }
 }
 
@@ -185,6 +196,9 @@ wire_struct! {
         /// Set when the export was written into the transfer area.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         transfer: Option<TransferFile>,
+        /// The login files the export leaves out, by the name the scan gives them.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        left_out: Vec<String>,
     }
 }
 

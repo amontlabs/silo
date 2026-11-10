@@ -241,6 +241,10 @@ pub struct ExportCommand {
     /// Share without asking when logins are found or Silo could not check for them.
     #[arg(long)]
     pub yes: bool,
+    /// Keep the logins found on the computer in the file. Without it, an export of a Linux
+    /// computer leaves its known login files out.
+    #[arg(long)]
+    pub include_logins: bool,
 }
 
 #[derive(Args, Debug)]
@@ -1205,6 +1209,7 @@ async fn dispatch(
                 output: export.output,
                 checkpoint: export.checkpoint,
                 yes: export.yes,
+                include_logins: export.include_logins,
             };
             let value = crate::share::export(
                 engine,

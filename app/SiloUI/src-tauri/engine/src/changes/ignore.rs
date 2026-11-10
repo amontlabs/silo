@@ -314,6 +314,9 @@ const CREDENTIAL_NAMES: &[&str] = &[
 const CREDENTIAL_SUFFIXES: &[&str] = &[
     "/gh/hosts.yml",
     "/.claude/.credentials.json",
+    // Claude Code's user file: the account it is signed in as, sign-in state, and the
+    // headers and variables of the MCP servers added for the user.
+    "/.claude.json",
     "/.codex/auth.json",
     "/.gemini/oauth_creds.json",
     "/.gemini/gemini-credentials.json",
@@ -386,6 +389,7 @@ pub fn credential_group_owned(path: &str, owned: bool) -> Option<String> {
 /// export warning shows.
 const LOGIN_LABELS: &[(&str, &str)] = &[
     ("/.claude/.credentials.json", "a Claude Code login"),
+    ("/.claude.json", "Claude Code sign-in data"),
     ("/.codex/auth.json", "a Codex login"),
     ("/.gemini/oauth_creds.json", "a Gemini CLI login"),
     ("/.gemini/gemini-credentials.json", "a Gemini CLI login"),
@@ -617,6 +621,21 @@ mod tests {
             login_label("/home/dev/.gemini/gemini-credentials.json").as_deref(),
             Some("a Gemini CLI login (/home/dev/.gemini/gemini-credentials.json)")
         );
+    }
+
+    #[test]
+    fn claude_codes_user_file_is_a_login_but_its_backups_are_not() {
+        for path in ["/root/.claude.json", "/home/dev/.claude.json"] {
+            assert_eq!(credential_group(path).as_deref(), Some(path), "{path}");
+            assert_eq!(
+                login_label(path),
+                Some(format!("Claude Code sign-in data ({path})")),
+                "{path}"
+            );
+        }
+        for path in ["/root/.claude/settings.json", "/home/dev/.claude.json.backup"] {
+            assert_eq!(login_label(path), None, "{path}");
+        }
     }
 
     #[test]

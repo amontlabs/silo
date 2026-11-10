@@ -962,6 +962,8 @@ pub const BASELINE_PREFIX: &str = "silo-baseline-";
 const RECIPE_KEY_PREFIX: &str = "recipe:";
 /// Name prefix of the hidden computers that recipes are built in.
 pub const BUILDER_PREFIX: &str = "silo-build-";
+/// Name prefix of the hidden copies an export without logins is made from.
+pub const EXPORT_COPY_PREFIX: &str = "silo-export-";
 /// The longest a throwaway fork is left idle, however long the real fork has run.
 pub const BASELINE_CAP_SECONDS: u64 = 600;
 

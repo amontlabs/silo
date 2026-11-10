@@ -5891,6 +5891,7 @@ fn a_fork_records_what_it_was_quieted_with() {
         secrets: vec!["github".into(), "TOKEN".into()],
         stop: vec!["poller".into()],
         scrub: vec!["/root/.bot.env".into()],
+        closed_network: false,
     };
     fork_commit(
         &journal_runner("Running", ""),
@@ -5913,6 +5914,7 @@ fn fork_options_refuse_odd_names_and_paths() {
         secrets: Vec::new(),
         stop: stop.iter().map(|s| s.to_string()).collect(),
         scrub: scrub.iter().map(|s| s.to_string()).collect(),
+        closed_network: false,
     };
     assert!(options(
         &["poller", "my-app.service", "a@b"],

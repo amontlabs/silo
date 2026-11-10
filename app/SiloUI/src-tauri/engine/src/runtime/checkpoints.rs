@@ -148,10 +148,21 @@ pub struct ForkOptions {
     pub secrets: Vec<String>,
     pub stop: Vec<String>,
     pub scrub: Vec<String>,
+    /// The fork starts on a deny-all network policy instead of its parent's.
+    pub closed_network: bool,
 }
 
 /// The name of the assignment that stands for GitHub access.
 const GITHUB_SECRET_NAME: &str = "github";
+
+/// A policy that allows no traffic in either direction.
+fn closed_network_policy() -> Value {
+    serde_json::json!({
+        "default_egress": "deny",
+        "default_ingress": "deny",
+        "rules": []
+    })
+}
 
 impl ForkOptions {
     fn copies_github(&self) -> bool {
@@ -2466,7 +2477,11 @@ fn fork_commit_with_metadata_writer(
         // is restored disk-only, so the fork never resumes the source's memory.
         state: "disk".into(),
     });
-    child_record.desired_network_policy = Some(fork.desired_policy.clone());
+    child_record.desired_network_policy = Some(if fork.options.closed_network {
+        closed_network_policy()
+    } else {
+        fork.desired_policy.clone()
+    });
     child_record.quiet = Some(QuietRecord {
         scheduled_jobs_disabled: true,
         new_identity: true,
