@@ -3,6 +3,7 @@
 mod ownership;
 
 pub mod access;
+pub mod approvals;
 pub mod audit;
 pub mod checkpoints;
 pub mod computers;
@@ -259,6 +260,7 @@ pub fn serves(method: MethodName) -> bool {
         || guest::owns(method)
         || guest_client::owns(method)
         || audit::owns(method)
+        || approvals::owns(method)
         || access::owns(method)
         || display::owns(method)
         || services::owns(method)
@@ -373,6 +375,9 @@ async fn route(
     if let Some(result) = audit::handle(method, params, context).await {
         return result;
     }
+    if let Some(answer) = approvals::handle(method, params, context) {
+        return answer.await;
+    }
     if let Some(result) = access::handle(method, params, context).await {
         return result;
     }
@@ -390,7 +395,7 @@ mod tests {
     use silo_api::methods::{method_registry, MethodName};
 
     use super::{
-        access, audit, changed_computer, changes_computer, checkpoints, computers, display, guest,
+        access, approvals, audit, changed_computer, changes_computer, checkpoints, computers, display, guest,
         guest_client, serves, services,
     };
 
@@ -474,6 +479,7 @@ mod tests {
             guest::owns,
             guest_client::owns,
             audit::owns,
+            approvals::owns,
             access::owns,
             display::owns,
             services::owns,

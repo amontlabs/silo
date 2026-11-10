@@ -52,11 +52,14 @@ const CLIENT_SCOPED: &[&str] = &[
     "guest.files.changed",
 ];
 
+/// Events about what only this device answers: approvals are decided where they were asked.
+const DEVICE_LOCAL: &[&str] = &["approvals.changed"];
+
 /// The events a controller subscribes to on an owner.
 pub fn relayed_event_names() -> Vec<String> {
     EVENT_NAMES
         .iter()
-        .filter(|name| !CLIENT_SCOPED.contains(name))
+        .filter(|name| !CLIENT_SCOPED.contains(name) && !DEVICE_LOCAL.contains(name))
         .map(|name| (*name).to_owned())
         .collect()
 }

@@ -14,7 +14,6 @@ use serde_json::{json, Value};
 use silo_api::{
     jobs::{ErrorCode, JobId, JobState as ApiJobState},
     methods::{audit::AuditOutcome, method_registry, MethodKind, MethodName},
-    transport::{ApprovalKind, ApprovalRequiredDetails},
 };
 use silo_engine::{
     audit::{AuditLog, Row},
@@ -81,6 +80,8 @@ struct Record<'a> {
     outcome: AuditOutcome,
     error: Option<&'a DispatchError>,
     job_id: Option<String>,
+    /// The approval the call ran under.
+    approval_id: Option<String>,
 }
 
 fn audit(context: &HandlerContext, record: Record<'_>) {
@@ -105,31 +106,98 @@ fn audit(context: &HandlerContext, record: Record<'_>) {
         outcome: record.outcome,
         error_code: record.error.map(|error| error_code(error.code)),
         job_id: record.job_id,
-        approval_id: record
-            .error
-            .and_then(|error| error.details.as_ref())
-            .and_then(|details| details.approval_id.clone()),
+        approval_id: record.approval_id.or_else(|| {
+            record
+                .error
+                .and_then(|error| error.details.as_ref())
+                .and_then(|details| details.approval_id.clone())
+        }),
     });
 }
 
-/// Turns a call the owner must approve into the answer its caller gets. No approval is stored
-/// yet, so the answer carries no approval id.
-fn request_approval(
-    _context: &HandlerContext,
-    _method: MethodName,
-    _params: &Value,
-    kind: ApprovalKind,
-    summary: String,
-) -> DispatchError {
-    DispatchError {
-        code: ErrorCode::ApprovalRequired,
-        message: format!("This needs the approval of the person who runs Silo: {summary}"),
-        details: Some(ApprovalRequiredDetails {
-            kind,
-            summary,
-            approval_id: None,
-        }),
+/// Records a call the owner allowed, run by the engine under the approval `approval_id`.
+pub(crate) fn record_approved(
+    context: &HandlerContext,
+    method: MethodName,
+    params: &Value,
+    result: &Result<HandlerOutput, DispatchError>,
+    approval_id: &str,
+) {
+    let (outcome, error) = match result {
+        Ok(_) => (AuditOutcome::Ok, None),
+        Err(error) => (AuditOutcome::Error, Some(error)),
+    };
+    let job_id = result
+        .as_ref()
+        .ok()
+        .and_then(|output| output.value.get("jobId"))
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    audit(
+        context,
+        Record {
+            method,
+            target: policy::target_computer(params),
+            outcome,
+            error,
+            job_id,
+            approval_id: Some(approval_id.to_owned()),
+        },
+    );
+}
+
+/// Notes a computer `creator` asked for, recorded as its own once its job has finished well.
+pub(crate) fn begin_creation(
+    app_data: &std::path::Path,
+    creator: &str,
+    creation: &Creation,
+) -> Result<(), String> {
+    PolicyStore::new(app_data).begin(
+        creator,
+        Pending {
+            created_by: creator.to_owned(),
+            name: creation.name.clone(),
+            id: creation.id.clone(),
+            source: creation.source.clone(),
+            job_id: None,
+            at: 0,
+        },
+    )
+}
+
+/// Records what became of a computer `creator` asked for, from the call's answer.
+pub(crate) fn settle_creation(
+    store: &PolicyStore,
+    creator: &str,
+    creation: &Creation,
+    result: &Result<HandlerOutput, DispatchError>,
+    job: Option<&str>,
+) -> Result<(), String> {
+    match (result, job) {
+        (Ok(output), _) if output.value.pointer("/computer/id").is_some() => {
+            let made = output.value.pointer("/computer/id").and_then(Value::as_str);
+            store.confirm(creator, &creation.name, made.unwrap_or_default())
+        }
+        (Ok(_), Some(job)) => store.attach_job(creator, &creation.name, job),
+        (Ok(_), None) => Ok(()),
+        (Err(_), _) => store.withdraw(creator, &creation.name),
     }
+}
+
+/// Asks the policy again about a call `computer` made, as at the time it asked. `None` when
+/// that computer no longer exists.
+pub(crate) async fn judge(
+    context: &HandlerContext,
+    computer: &str,
+    method: MethodName,
+    params: &Value,
+) -> Option<Decision> {
+    let world = EngineWorld::load(context, method).await;
+    policy::World::name(&world, computer)?;
+    let caller = Caller::Computer {
+        id: computer.to_owned(),
+    };
+    Some(policy::decide(&caller, method, params, &world))
 }
 
 /// Asks the policy about one call. A refused or held call is recorded and answered here.
@@ -140,7 +208,7 @@ pub(crate) async fn admit(
 ) -> Result<Admitted, DispatchError> {
     let caller = context.client_identity().caller.clone();
     let target = policy::target_computer(params);
-    let (decision, visible) = match &caller {
+    let (decision, visible, name) = match &caller {
         Caller::Computer { id } => {
             let world = EngineWorld::load(context, method).await;
             let mut visible: BTreeSet<String> = policy::World::made(&world, id).into_iter().collect();
@@ -148,9 +216,10 @@ pub(crate) async fn admit(
             (
                 policy::decide(&caller, method, params, &world),
                 Some(Arc::new(visible)),
+                policy::World::name(&world, id),
             )
         }
-        _ => (policy::decide(&caller, method, params, &NoWorld), None),
+        _ => (policy::decide(&caller, method, params, &NoWorld), None, None),
     };
     let refuse = |error: DispatchError, outcome: AuditOutcome| {
         audit(
@@ -161,6 +230,7 @@ pub(crate) async fn admit(
                 outcome,
                 error: Some(&error),
                 job_id: None,
+                approval_id: None,
             },
         );
         Err(error)
@@ -169,17 +239,7 @@ pub(crate) async fn admit(
         Decision::Allow(allowed) => {
             if let (Some(creation), Caller::Computer { id }) = (&allowed.creates, &caller) {
                 // The computer is the caller's once its job has finished well (`settle`).
-                let begun = PolicyStore::new(&app_data(context)).begin(
-                    id,
-                    Pending {
-                        created_by: id.clone(),
-                        name: creation.name.clone(),
-                        id: creation.id.clone(),
-                        source: creation.source.clone(),
-                        job_id: None,
-                        at: 0,
-                    },
-                );
+                let begun = begin_creation(&app_data(context), id, creation);
                 if let Err(message) = begun {
                     return refuse(
                         DispatchError::new(ErrorCode::PermissionDenied, message),
@@ -204,10 +264,33 @@ pub(crate) async fn admit(
             DispatchError::new(ErrorCode::PermissionDenied, reason),
             AuditOutcome::Refused,
         ),
-        Decision::Ask { kind, summary } => refuse(
-            request_approval(context, method, params, kind, summary),
-            AuditOutcome::Asked,
-        ),
+        Decision::Ask {
+            kind,
+            summary,
+            params: rewritten,
+            creates,
+        } => {
+            let Caller::Computer { id } = &caller else {
+                return refuse(
+                    DispatchError::new(ErrorCode::PermissionDenied, summary),
+                    AuditOutcome::Refused,
+                );
+            };
+            let asked = super::approvals::Asked {
+                computer: id,
+                computer_name: name.unwrap_or_else(|| id.clone()),
+                method,
+                asked: params,
+                params: rewritten.unwrap_or_else(|| params.clone()),
+                kind,
+                summary,
+                creates,
+            };
+            match super::approvals::request(context, asked).await {
+                Ok(error) => refuse(error, AuditOutcome::Asked),
+                Err(error) => refuse(error, AuditOutcome::Refused),
+            }
+        }
     }
 }
 
@@ -229,15 +312,13 @@ pub(crate) fn finish(
         let store = PolicyStore::new(&app_data(context));
         let mut noted = Vec::new();
         if let Some(creation) = &admitted.creates {
-            noted.push(match (&result, &job) {
-                (Ok(output), _) if output.value.pointer("/computer/id").is_some() => {
-                    let made = output.value.pointer("/computer/id").and_then(Value::as_str);
-                    store.confirm(id, &creation.name, made.unwrap_or_default())
-                }
-                (Ok(_), Some(job)) => store.attach_job(id, &creation.name, job),
-                (Ok(_), None) => Ok(()),
-                (Err(_), _) => store.withdraw(id, &creation.name),
-            });
+            noted.push(settle_creation(
+                &store,
+                id,
+                creation,
+                &result,
+                job.as_deref(),
+            ));
         }
         if let Some(job) = &job {
             noted.push(store.note_job(id, job));
@@ -269,6 +350,7 @@ pub(crate) fn finish(
                 outcome,
                 error,
                 job_id: job,
+                approval_id: None,
             },
         );
     }

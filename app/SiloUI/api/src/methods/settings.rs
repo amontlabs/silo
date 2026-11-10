@@ -101,6 +101,13 @@ pub struct SettingsValues {
         skip_serializing_if = "Option::is_none",
         deserialize_with = "deserialize_present"
     )]
+    #[schemars(with = "bool")]
+    pub notify_approvals: Option<bool>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_present"
+    )]
     #[schemars(with = "String")]
     pub terminal: Option<String>,
     #[serde(

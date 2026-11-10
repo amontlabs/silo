@@ -197,7 +197,7 @@ mod tests {
             schema_json().unwrap()
         );
         let schema: serde_json::Value = serde_json::from_str(&schema_json().unwrap()).unwrap();
-        assert_eq!(schema["x-silo-methods"].as_array().unwrap().len(), 176);
+        assert_eq!(schema["x-silo-methods"].as_array().unwrap().len(), 182);
         assert_eq!(schema["x-silo-job-results"].as_array().unwrap().len(), 39);
         assert_eq!(
             schema["$schema"],

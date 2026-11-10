@@ -361,6 +361,16 @@ pub(crate) fn assigned_names(computer: &str) -> Result<Vec<String>, String> {
         .collect())
 }
 
+/// The secrets assigned to `computer`, each with the hosts it may be sent to. Never a value.
+pub(crate) fn assigned_with_hosts(computer: &str) -> Result<Vec<(String, Vec<String>)>, String> {
+    Ok(load()?
+        .secrets
+        .iter()
+        .filter(|s| !s.removing && s.computers.iter().any(|w| w == computer))
+        .map(|s| (s.name.clone(), s.allowed_domains.clone()))
+        .collect())
+}
+
 /// Assigns the named secrets to `computer` (references only). Missing names are skipped.
 pub(crate) fn reassign(computer: &str, names: &[String]) -> Result<(), String> {
     if names.is_empty() {

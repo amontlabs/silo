@@ -39,6 +39,8 @@ pub enum Category {
     Changes,
     /// Work that ran for at least `LONG_OPERATION` finished successfully.
     Completions,
+    /// A computer's agent asks for something only the person who runs Silo can allow.
+    Approvals,
 }
 
 /// A successful operation this long or longer is worth a completion notice. Matches the
@@ -73,6 +75,7 @@ impl Category {
             Self::Failures => "failures",
             Self::Changes => "changes",
             Self::Completions => "completions",
+            Self::Approvals => "approvals",
         }
     }
 }
@@ -116,6 +119,7 @@ pub fn enabled(settings: &Map<String, Value>, category: Category) -> bool {
             ),
             Category::Changes => flag(settings, "notifyChanges", &["notifyHealth"]),
             Category::Completions => flag(settings, "notifyCompletions", &[]),
+            Category::Approvals => flag(settings, "notifyApprovals", &[]),
         }
 }
 
@@ -182,8 +186,24 @@ impl DeliveredIndex {
     }
 
     fn withdraw(&mut self, computer_id: &str) -> PendingWithdrawal {
-        let notices = self
-            .take(computer_id)
+        let keys = self.take(computer_id);
+        self.withdraw_keys(keys)
+    }
+
+    /// Withdraws one notice; the computer's other notices stay.
+    fn withdraw_key(&mut self, computer_id: &str, key: &str) -> PendingWithdrawal {
+        let found = self
+            .keys
+            .get_mut(computer_id)
+            .is_some_and(|keys| keys.remove(key));
+        if self.keys.get(computer_id).is_some_and(BTreeSet::is_empty) {
+            self.keys.remove(computer_id);
+        }
+        self.withdraw_keys(if found { vec![key.to_owned()] } else { Vec::new() })
+    }
+
+    fn withdraw_keys(&mut self, keys: Vec<String>) -> PendingWithdrawal {
+        let notices = keys
             .into_iter()
             .map(|key| {
                 let gate = self.gate(&key);
@@ -250,6 +270,14 @@ pub fn withdraw_computer(computer_id: &str) -> PendingWithdrawal {
         .lock()
         .unwrap_or_else(|error| error.into_inner())
         .withdraw(computer_id)
+}
+
+/// Withdraws the notice `key` of the computer, leaving its other notices.
+pub fn withdraw_notice(computer_id: &str, key: &str) -> PendingWithdrawal {
+    DELIVERED
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .withdraw_key(computer_id, key)
 }
 
 pub struct PendingWithdrawal {
@@ -398,7 +426,12 @@ mod tests {
     fn settings(value: Value) -> Map<String, Value> {
         value.as_object().unwrap().clone()
     }
-    const ALL: [Category; 3] = [Category::Failures, Category::Changes, Category::Completions];
+    const ALL: [Category; 4] = [
+        Category::Failures,
+        Category::Changes,
+        Category::Completions,
+        Category::Approvals,
+    ];
     #[test]
     fn master_and_each_category_preference_gate_delivery() {
         for category in ALL {
@@ -937,5 +970,24 @@ mod tests {
         );
         assert!(index.take("1").is_empty());
         assert_eq!(index.take("2"), vec!["computer:2:lifecycle"]);
+    }
+
+    #[test]
+    fn withdrawing_one_notice_keeps_the_computers_others() {
+        let mut index = DeliveredIndex::default();
+        let notice = |key: &str, category: Category| Notice {
+            category,
+            computer: computer(),
+            ..failure(key, "t", "b", None)
+        };
+        index.record(&notice("computer:1:lifecycle", Category::Failures));
+        index.record(&notice("approval:ap-1", Category::Approvals));
+        let mut cleared = Vec::new();
+        index
+            .withdraw_key("1", "approval:ap-1")
+            .clear(|keys| cleared.extend(keys.iter().cloned()));
+        assert_eq!(cleared, ["approval:ap-1"]);
+        assert!(index.withdraw_key("1", "approval:ap-1").notices.is_empty());
+        assert_eq!(index.take("1"), ["computer:1:lifecycle"]);
     }
 }

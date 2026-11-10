@@ -64,6 +64,22 @@ pub trait EngineContext: Send + Sync + 'static {
             .map_err(|error| error.to_string())?;
         let payload = serde_json::to_value(NotificationsClearedPayload {
             computer_id: computer_id.to_owned(),
+            key: None,
+        })
+        .map_err(|error| error.to_string())?;
+        self.publish(Event::new("notifications.cleared", payload), audience);
+        Ok(())
+    }
+
+    /// Removes the retained notice with `key`, which names `computer_id`, and publishes the
+    /// clear event for that key only.
+    fn clear_notice(&self, key: &str, computer_id: &str, audience: Audience) -> Result<(), String> {
+        self.job_registry()?
+            .clear_notice(key)
+            .map_err(|error| error.to_string())?;
+        let payload = serde_json::to_value(NotificationsClearedPayload {
+            computer_id: computer_id.to_owned(),
+            key: Some(key.to_owned()),
         })
         .map_err(|error| error.to_string())?;
         self.publish(Event::new("notifications.cleared", payload), audience);

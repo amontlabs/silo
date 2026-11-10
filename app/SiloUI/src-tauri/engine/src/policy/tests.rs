@@ -552,7 +552,7 @@ fn widening_calls_ask_and_narrowing_ones_are_free() {
             "computerIds": computers, "allowedDomains": ["api.example.com"]}})
     };
     match check("secrets.save", secret("add", json!(["fork-1"]))) {
-        Decision::Ask { kind, summary } => {
+        Decision::Ask { kind, summary, .. } => {
             assert_eq!(kind, ApprovalKind::Secret);
             assert!(summary.contains("api.example.com"), "{summary}");
             assert!(!summary.contains("s3cr3t-value"), "{summary}");

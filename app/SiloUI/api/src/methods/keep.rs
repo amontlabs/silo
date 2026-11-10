@@ -323,6 +323,10 @@ wire_struct! {
         /// target computer was deleted.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         closed_reason: Option<FoldRequestClosedReason>,
+        /// The approval that asks the owner to merge this request, when a computer's agent
+        /// asked for the merge.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        approval_id: Option<String>,
     }
 }
 

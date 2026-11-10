@@ -449,4 +449,5 @@ pub fn computer_removed(id: &str) {
     if let Err(error) = PolicyStore::new(&context.paths().app_data).remove_computers(&[id]) {
         eprintln!("silo-engine: {error}");
     }
+    crate::approvals::computer_removed(id);
 }
