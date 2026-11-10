@@ -15,7 +15,7 @@ use silo_engine::{
 };
 
 use super::{
-    frames::{handle_frame, reap, Frames, Reserved},
+    frames::{handle_frame, reap, Frames},
     EngineRunner, Snapshot,
 };
 use crate::{context::SilodContext, methods};
@@ -33,7 +33,6 @@ struct Shared {
     store: TokenStore,
     policy: PolicyStore,
     runner: EngineRunner,
-    reserved: Reserved,
     looked: Mutex<(Snapshot, Option<Instant>)>,
 }
 
@@ -122,7 +121,6 @@ pub fn start(context: Arc<SilodContext>) {
         runner: EngineRunner::new(context.clone()),
         context,
         handle,
-        reserved: Reserved::default(),
         looked: Mutex::new((Snapshot::default(), None)),
     });
     let spawned = std::thread::Builder::new()
@@ -203,7 +201,6 @@ fn work(shared: &Shared, computer: &str) {
                 store: &shared.store,
                 policy: &shared.policy,
                 snapshot: &snapshot,
-                reserved: &shared.reserved,
             };
             for taken in spool.take() {
                 let reply = match taken.frame {

@@ -391,6 +391,11 @@ pub fn device_facts(params: device::DeviceFactsParams) -> Request<kind::Query> {
     Request::new(MethodParams::DeviceFacts(params))
 }
 
+/// `device.resources`
+pub fn device_resources(params: device::DeviceResourcesParams) -> Request<kind::Query> {
+    Request::new(MethodParams::DeviceResources(params))
+}
+
 /// `display.close`
 pub fn display_close(params: display::DisplayCloseParams) -> Request<kind::Command> {
     Request::new(MethodParams::DisplayClose(params))

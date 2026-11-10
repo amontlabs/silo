@@ -27,7 +27,7 @@ use crate::{
     methods::{self, HandlerContext},
 };
 
-pub use frames::{handle_frame, reap, Frames, Reserved};
+pub use frames::{handle_frame, reap, Frames};
 pub use worker::start;
 
 /// Runs one method as the agent inside `computer`, or as the engine itself when `computer` is

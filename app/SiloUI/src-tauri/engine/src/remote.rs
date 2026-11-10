@@ -440,6 +440,7 @@ pub const OWNER_METHODS: &[(&str, bool)] = &[
     ("computers.tree", false),
     ("device.dependencies", false),
     ("device.facts", false),
+    ("device.resources", false),
     ("exports.acknowledge", true),
     ("exports.check", true),
     ("exports.create", true),

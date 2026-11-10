@@ -1,13 +1,7 @@
-//! One request frame: the token, the bridge's caps on forks, running forks and jobs, the call
-//! (judged by the policy as the computer's own), and the answer.
+//! One request frame: the token, the bridge's cap on unacknowledged jobs, the call (judged by
+//! the policy as the computer's own), and the answer.
 
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Mutex,
-    time::{Duration, Instant},
-};
-
-use serde_json::{json, Value};
+use serde_json::json;
 use silo_api::{
     jobs::ErrorCode,
     methods::{
@@ -17,51 +11,14 @@ use silo_api::{
     transport::ApprovalRequiredDetails,
 };
 use silo_engine::{
-    guest_client::{now_secs, TokenStore, MAX_FORKS, MAX_JOBS, MAX_RUNNING},
+    guest_client::{now_secs, TokenStore, MAX_JOBS},
     policy::store::PolicyStore,
 };
 
 use super::{Runner, Snapshot};
 
-/// A start that has not shown as running yet still holds its place under the running cap.
-const START_HOLD: Duration = Duration::from_secs(300);
 /// A job nobody acknowledged is acknowledged for its client after this long.
 const JOB_AGE: u64 = 1800;
-
-/// Starts issued for each computer's forks and not yet seen running.
-#[derive(Default)]
-pub struct Reserved(Mutex<HashMap<String, HashMap<String, Instant>>>);
-
-impl Reserved {
-    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<String, HashMap<String, Instant>>> {
-        self.0
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-    }
-
-    fn add(&self, computer: &str, fork: &str) {
-        self.lock()
-            .entry(computer.to_owned())
-            .or_default()
-            .insert(fork.to_owned(), Instant::now());
-    }
-
-    fn remove(&self, computer: &str, fork: &str) {
-        if let Some(held) = self.lock().get_mut(computer) {
-            held.remove(fork);
-        }
-    }
-
-    fn ids(&self, computer: &str) -> HashSet<String> {
-        self.lock()
-            .get(computer)
-            .into_iter()
-            .flatten()
-            .filter(|(_, at)| at.elapsed() < START_HOLD)
-            .map(|(id, _)| id.clone())
-            .collect()
-    }
-}
 
 /// What a frame is judged against.
 pub struct Frames<'a> {
@@ -69,7 +26,6 @@ pub struct Frames<'a> {
     pub store: &'a TokenStore,
     pub policy: &'a PolicyStore,
     pub snapshot: &'a Snapshot,
-    pub reserved: &'a Reserved,
 }
 
 fn failure(
@@ -97,47 +53,10 @@ fn starts_job(method: &str) -> bool {
         .any(|descriptor| descriptor.name == method && descriptor.kind == MethodKind::Job)
 }
 
-/// The bridge's own limits: the computers one computer has made, how many of them run, and
-/// the jobs it has not acknowledged.
-fn within_caps(env: &Frames<'_>, computer: &str, method: &str) -> Result<(), String> {
+/// The bridge's own limit: the jobs a computer has not acknowledged. A job nobody follows
+/// still takes a place in the engine's job admission.
+fn within_job_cap(env: &Frames<'_>, computer: &str, method: &str) -> Result<(), String> {
     let document = env.policy.snapshot()?;
-    let made: HashSet<String> = document
-        .made_directly(computer)
-        .into_iter()
-        .filter(|id| env.snapshot.names.contains_key(id))
-        .collect();
-    let pending = document.pending_of(computer);
-    let mut running = env.reserved.ids(computer);
-    for id in &made {
-        if env
-            .snapshot
-            .states
-            .get(id)
-            .is_some_and(|state| state == "running")
-        {
-            running.insert(id.clone());
-        }
-    }
-    // A computer still being made will be started next.
-    let running = running.len() + pending;
-    if matches!(method, "checkpoints.fork" | "computers.create") {
-        if made.len() + pending >= MAX_FORKS {
-            return Err(format!(
-                "This computer has made {MAX_FORKS} computers already; delete one first."
-            ));
-        }
-        if running >= MAX_RUNNING {
-            return Err(format!(
-                "{MAX_RUNNING} of the computers this one made are running; stop one first."
-            ));
-        }
-    }
-    if method == "computers.start" && running >= MAX_RUNNING {
-        return Err(format!(
-            "{MAX_RUNNING} of the computers this one made are running; stop one first."
-        ));
-    }
-    // A job nobody follows still takes a place in the engine's job admission.
     if starts_job(method) && document.jobs_of(computer).len() >= MAX_JOBS {
         return Err(format!(
             "{MAX_JOBS} jobs of this computer's client are not finished and acknowledged yet."
@@ -166,25 +85,11 @@ pub async fn handle_frame(
         env.runner
             .refused(computer, method, ErrorCode::UnsupportedRemoteOperation);
     }
-    if let Err(message) = within_caps(env, computer, &frame.method) {
+    if let Err(message) = within_job_cap(env, computer, &frame.method) {
         eprintln!("silod: guest client of {computer}: refused {method}");
         env.runner
             .refused(computer, method, ErrorCode::PermissionDenied);
         return Some(failure(&id, "permission_denied", message, None));
-    }
-    let target = frame
-        .params
-        .get("computerId")
-        .and_then(Value::as_str)
-        .map(str::to_owned);
-    let started = (method == "computers.start").then_some(target.clone()).flatten();
-    if let Some(fork) = &started {
-        env.reserved.add(computer, fork);
-    }
-    if method == "computers.stop" {
-        if let Some(fork) = &target {
-            env.reserved.remove(computer, fork);
-        }
     }
     eprintln!("silod: guest client of {computer}: {method}");
     match env
@@ -200,9 +105,6 @@ pub async fn handle_frame(
             error: None,
         }),
         Err(error) => {
-            if let Some(fork) = &started {
-                env.reserved.remove(computer, fork);
-            }
             let code = serde_json::to_value(error.code)
                 .ok()
                 .and_then(|code| code.as_str().map(str::to_owned))

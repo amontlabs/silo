@@ -127,6 +127,7 @@ define_registry! {
     DesktopStatus => ("desktop.status", Query, desktop::DesktopStatusParams, desktop::DesktopStatus);
     DeviceDependencies => ("device.dependencies", Query, device::DependencyReportParams, device::DependencyReport);
     DeviceFacts => ("device.facts", Query, device::DeviceFactsParams, device::DeviceFacts);
+    DeviceResources => ("device.resources", Query, device::DeviceResourcesParams, device::DeviceResources);
     DisplayClose => ("display.close", Command, display::DisplayCloseParams, ());
     DisplayNativeAttach => ("display.native.attach", Stream, display::NativeDisplayAttachParams, display::NativeDisplayMessage);
     DisplayShow => ("display.show", Command, display::DisplayShowParams, ());
@@ -254,13 +255,13 @@ mod tests {
 
     #[test]
     fn registry_covers_every_canonical_method_and_kind() {
-        assert_eq!(METHOD_REGISTRY.len(), 178);
+        assert_eq!(METHOD_REGISTRY.len(), 179);
         assert_eq!(
             METHOD_REGISTRY
                 .iter()
                 .filter(|m| m.kind == MethodKind::Query)
                 .count(),
-            56
+            57
         );
         assert_eq!(
             METHOD_REGISTRY

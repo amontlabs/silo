@@ -44,6 +44,7 @@ to answer in one piece cannot be cut, so it is withheld.
 | --- | --- | --- |
 | `engine.handshake`, `engine.state`, `engine.disconnect`, `events.unsubscribe` | Free | |
 | `device.facts` | Free | The device's CPUs, memory and whether Remote Login is on; nothing about other computers. |
+| `device.resources` | Free | What the device has left; see [Limits](#limits). Names only the computer and the computers it made. |
 | `audit.list` | Free | Only rows about the computer and the computers it made: calls that name one of them, and calls one of them made. |
 | `operations.job.get`, `.acknowledge`, `operations.cancel`, `guest.exec.get`, `guest.exec.input` | Its own jobs | |
 | `operations.list`, `events.subscribe`, `notifications.list` | Never | They cover every computer and are not cut per caller yet. |
@@ -113,6 +114,37 @@ and any device key.
 A change another device makes through one of the Connections bridge's own methods (`runtime.*`,
 `macos.*` and the other names in `remote::METHODS`) is recorded there too, with the device's key.
 
+## Limits
+
+There is no fixed number of computers an agent may make or run. It reads what the device has left
+with `device.resources` and judges for itself. The answer holds:
+
+- the device's logical CPUs, its memory in total and how much is available now, and the system's
+  memory pressure where the system gives one;
+- the free and total space of the disk that holds computers;
+- how many computers are running, and the memory and CPUs they were set up with;
+- the two floors below, as numbers, and a `state` with one sentence an agent can act on:
+  `ok`, `low` or `critical`. A computer sees by name only itself and the computers it made; the
+  totals count every computer on the device.
+
+Silo prevents one thing: an agent freezing the device or filling its disk. While available memory
+is below the **memory floor**, or free disk is below the **disk floor**, a computer's agent cannot
+start, restart or create a computer, take or restore a checkpoint, or fork. The call fails before it
+does anything, with the code `resources_low` and the facts ("This device has 3.1 GiB of memory
+available; Silo keeps 6.4 GiB free. Stop a computer first, or ask the person who runs Silo."), and
+is recorded in the audit log as refused.
+
+| | Default | Smallest you can set |
+| --- | --- | --- |
+| Memory floor | the larger of 4 GiB and 10 % of the device's memory | 1 GiB |
+| Disk floor | the larger of 10 GiB and 5 % of the disk | 2 GiB |
+
+Between the floor and twice the floor the state is `low`: the call works, and the answer to
+`device.resources` says starting another computer may slow the device or fill the disk. Available
+memory counts free, inactive, purgeable and speculative pages on a Mac and `MemAvailable` on
+Linux. Your own calls are never held back by the floors. The floors are the settings
+`memoryFloorGib` and `diskFloorGib`; `null` returns to the default.
+
 ## Other limits
 
 - When a computer is deleted, what it made becomes its maker's, so an agent keeps reaching the
@@ -122,8 +154,8 @@ A change another device makes through one of the Connections bridge's own method
   computer the old main made, with its pending computers and jobs, becomes the fork's, so the old
   main keeps nothing it could reach. An undo puts the record back exactly, and a promote or undo
   finished at engine start moves it the same way.
-- The in-guest bridge also caps how many computers one computer holds (32), runs (3) and how many
-  of its jobs are unacknowledged (16).
+- The in-guest bridge caps how many of a computer's jobs are unacknowledged (16), which bounds
+  the engine's own bookkeeping.
 - The network policy is the same for every computer today, so a fork's inherited policy hands
   nothing over. When computers get policies of their own, a fork of a computer with a wider
   policy than its maker's must ask.

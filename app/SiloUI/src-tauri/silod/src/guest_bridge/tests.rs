@@ -7,8 +7,8 @@ use silo_api::{
     transport::{ApprovalKind, ApprovalRequiredDetails},
 };
 use silo_engine::{
-    guest_client::{now_secs, TokenStore, MAX_FORKS, MAX_JOBS},
-    policy::store::{Pending, PolicyStore},
+    guest_client::{now_secs, TokenStore, MAX_JOBS},
+    policy::store::PolicyStore,
 };
 
 use super::*;
@@ -37,10 +37,11 @@ impl Runner for Fake {
         params: Value,
     ) -> Pin<Box<dyn Future<Output = Result<Value, DispatchError>> + Send + 'a>> {
         Box::pin(async move {
-            self.calls
-                .lock()
-                .unwrap()
-                .push((computer.map(str::to_owned), method.to_owned(), params));
+            self.calls.lock().unwrap().push((
+                computer.map(str::to_owned),
+                method.to_owned(),
+                params,
+            ));
             match method {
                 "changes.keep" => Err(DispatchError {
                     code: ErrorCode::ApprovalRequired,
@@ -98,7 +99,6 @@ struct Setup {
     policy: PolicyStore,
     token: String,
     fake: Fake,
-    reserved: Reserved,
 }
 
 fn setup() -> Setup {
@@ -119,7 +119,6 @@ fn setup() -> Setup {
         policy: PolicyStore::new(dir.path()),
         _dir: dir,
         fake: Fake::default(),
-        reserved: Reserved::default(),
     }
 }
 
@@ -135,7 +134,6 @@ impl Setup {
             store: &self.store,
             policy: &self.policy,
             snapshot,
-            reserved: &self.reserved,
         };
         handle_frame(&env, computer, frame).await
     }
@@ -175,7 +173,11 @@ async fn a_call_runs_as_the_computer_whose_folder_it_came_from() {
     let setup = setup();
     let snapshot = snapshot_with(&[]);
     let params = json!({"computerId": "main", "newName": "x", "recipeHash": "h"});
-    assert!(setup.ok(&snapshot, "checkpoints.fork", params.clone()).await);
+    assert!(
+        setup
+            .ok(&snapshot, "checkpoints.fork", params.clone())
+            .await
+    );
     let calls = setup.fake.calls.lock().unwrap();
     // The bridge passes the call on as it came; the policy judges and rewrites it there.
     assert_eq!(
@@ -227,16 +229,17 @@ async fn a_bad_or_foreign_token_gets_no_answer_and_a_revoked_one_stops() {
 }
 
 #[tokio::test]
-async fn starts_in_flight_count_toward_the_running_cap_until_stopped() {
+async fn no_count_of_made_or_running_computers_holds_a_start_or_a_fork_back() {
     let setup = setup();
-    let forks = [("f1", "n1"), ("f2", "n2"), ("f3", "n3"), ("f4", "n4")];
-    let extra: Vec<(&str, &str, &str)> = forks
+    let ids: Vec<String> = (0..40).map(|number| format!("f{number}")).collect();
+    let extra: Vec<(&str, &str, &str)> = ids
         .iter()
-        .map(|(id, name)| (*id, *name, "stopped"))
+        .map(|id| (id.as_str(), id.as_str(), "running"))
         .collect();
     let snapshot = snapshot_with(&extra);
-    setup.made(&["f1", "f2", "f3", "f4"]);
-    for id in ["f1", "f2", "f3"] {
+    let refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+    setup.made(&refs);
+    for id in &ids {
         assert!(
             setup
                 .ok(&snapshot, "computers.start", json!({"computerId": id}))
@@ -244,57 +247,15 @@ async fn starts_in_flight_count_toward_the_running_cap_until_stopped() {
             "{id}"
         );
     }
-    // None shows running yet, but three starts are under way.
-    assert!(
-        !setup
-            .ok(&snapshot, "computers.start", json!({"computerId": "f4"}))
-            .await
-    );
-    assert!(!setup.ok(&snapshot, "checkpoints.fork", json!({"computerId": "main", "newName": "x"})).await);
     assert!(
         setup
-            .ok(&snapshot, "computers.stop", json!({"computerId": "f1"}))
+            .ok(
+                &snapshot,
+                "checkpoints.fork",
+                json!({"computerId": "main", "newName": "x"})
+            )
             .await
     );
-    assert!(
-        setup
-            .ok(&snapshot, "computers.start", json!({"computerId": "f4"}))
-            .await
-    );
-}
-
-#[tokio::test]
-async fn the_computers_one_computer_holds_are_capped() {
-    let setup = setup();
-    let ids: Vec<String> = (0..MAX_FORKS).map(|number| format!("f{number}")).collect();
-    let extra: Vec<(&str, &str, &str)> = ids
-        .iter()
-        .map(|id| (id.as_str(), id.as_str(), "stopped"))
-        .collect();
-    let snapshot = snapshot_with(&extra);
-    let refs: Vec<&str> = ids.iter().map(String::as_str).collect();
-    setup.made(&refs[..MAX_FORKS - 1]);
-    setup
-        .policy
-        .begin(
-            "main",
-            Pending {
-                created_by: String::new(),
-                name: "coming".into(),
-                id: None,
-                source: Some("main".into()),
-                job_id: None,
-                at: 0,
-            },
-        )
-        .unwrap();
-    let reply = setup
-        .ask(&snapshot, "main", "checkpoints.fork", json!({"computerId": "main", "newName": "x"}))
-        .await
-        .unwrap();
-    assert_eq!(reply.error.unwrap().code, "permission_denied");
-    // Computers the person made do not count.
-    assert!(setup.fake.calls.lock().unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -308,7 +269,11 @@ async fn jobs_are_capped_and_old_ones_are_reaped() {
     setup.policy.import_legacy("main", &[], &jobs).unwrap();
     assert!(
         !setup
-            .ok(&snapshot, "checkpoints.fork", json!({"computerId": "main", "newName": "x"}))
+            .ok(
+                &snapshot,
+                "checkpoints.fork",
+                json!({"computerId": "main", "newName": "x"})
+            )
             .await
     );
     // A call that starts no job is not held back.

@@ -186,6 +186,7 @@ governance, and anything tied to funding.
 - Limits. Decided: no fixed cap on how many computers an agent makes. The agent can read the
   device's memory, disk and running computers and judge for itself; a call gets a warning when
   the device is getting short, and fails when going on would freeze the device or fill the
-  disk. Open: whether the app should also show and enforce this, and the default thresholds.
+  disk. The default thresholds are in [the policy](SiloUI-POLICY.md#limits). Open: whether the app
+  should also show this.
 - Whether the address inside a computer can be served without a new runtime patch.
 - What the first-run flow looks like for each agent program, and which ones are supported first.

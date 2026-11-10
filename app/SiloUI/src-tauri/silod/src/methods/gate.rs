@@ -24,6 +24,7 @@ use silo_engine::{
         store::{Document, JobState, Pending, PolicyStore},
         Access, Caller, Creation, Decision, Filter, Resources,
     },
+    resources,
 };
 
 use super::HandlerContext;
@@ -142,6 +143,46 @@ fn request_approval(
     }
 }
 
+/// The device now and the floors that apply to an agent inside a computer.
+pub(crate) fn host_and_floors(
+    context: &HandlerContext,
+) -> Result<(resources::Host, resources::Floors), DispatchError> {
+    let host = resources::measure(&app_data(context)).ok_or_else(|| {
+        DispatchError::internal("This device's memory and disk could not be measured.")
+    })?;
+    // Settings that cannot be read leave the default floors, never none.
+    let (memory, disk) = silo_engine::settings::resource_floors_for(context.engine_context())
+        .unwrap_or((None, None));
+    let floors = resources::Floors::resolve(&host, memory, disk);
+    Ok((host, floors))
+}
+
+/// A call that starts, creates or checkpoints a computer, which takes memory or disk.
+fn takes_headroom(method: MethodName) -> bool {
+    matches!(
+        method,
+        MethodName::ComputersStart
+            | MethodName::ComputersRestart
+            | MethodName::ComputersCreate
+            | MethodName::CheckpointsFork
+            | MethodName::CheckpointsCreate
+            | MethodName::CheckpointsRestore
+            | MethodName::MacosSetupRetry
+    )
+}
+
+/// Why an agent's call that takes memory or disk must fail now: the device has less free than
+/// the floor, or the device cannot be measured so nobody can tell.
+fn short_of_resources(context: &HandlerContext) -> Option<String> {
+    match host_and_floors(context) {
+        Ok((host, floors)) => resources::refusal(&host, &floors),
+        Err(_) => Some(
+            "Silo cannot measure this device's memory and disk, so it cannot tell whether another computer fits. Ask the person who runs Silo."
+                .to_owned(),
+        ),
+    }
+}
+
 /// Asks the policy about one call. A refused or held call is recorded and answered here.
 pub(crate) async fn admit(
     context: &HandlerContext,
@@ -177,6 +218,19 @@ pub(crate) async fn admit(
         );
         Err(error)
     };
+    // A call that would be held for approval is refused too: allowing it later would start a
+    // computer on a device that has nothing left for it.
+    if matches!(caller, Caller::Computer { .. })
+        && takes_headroom(method)
+        && matches!(decision, Decision::Allow(_) | Decision::Ask { .. })
+    {
+        if let Some(message) = short_of_resources(context) {
+            return refuse(
+                DispatchError::new(ErrorCode::ResourcesLow, message),
+                AuditOutcome::Refused,
+            );
+        }
+    }
     match decision {
         Decision::Allow(allowed) => {
             if let (Some(creation), Caller::Computer { id }) = (&allowed.creates, &caller) {

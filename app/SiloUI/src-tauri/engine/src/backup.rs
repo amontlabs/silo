@@ -4418,6 +4418,12 @@ fn same_volume(left: &Path, right: &Path) -> bool {
 /// `statvfs` of the nearest existing ancestor: space available to this
 /// account (f_bavail), so a path that is not created yet still resolves.
 pub(crate) fn available_bytes(path: &Path) -> io::Result<u64> {
+    volume_bytes(path).map(|(available, _)| available)
+}
+
+/// Space available to this account and the volume's total size, for the nearest existing
+/// ancestor of `path`.
+pub(crate) fn volume_bytes(path: &Path) -> io::Result<(u64, u64)> {
     use std::os::unix::ffi::OsStrExt;
     let existing = path
         .ancestors()
@@ -4432,8 +4438,19 @@ pub(crate) fn available_bytes(path: &Path) -> io::Result<u64> {
         return Err(io::Error::last_os_error());
     }
     #[allow(clippy::unnecessary_cast)] // The field widths differ between platforms.
-    (statistics.f_bavail as u64)
-        .checked_mul(statistics.f_frsize as u64)
+    let (available, total, unit) = (
+        statistics.f_bavail as u64,
+        statistics.f_blocks as u64,
+        // Some filesystems report no fragment size; POSIX then means the block size.
+        if statistics.f_frsize == 0 {
+            statistics.f_bsize as u64
+        } else {
+            statistics.f_frsize as u64
+        },
+    );
+    available
+        .checked_mul(unit)
+        .zip(total.checked_mul(unit))
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid volume capacity"))
 }
 

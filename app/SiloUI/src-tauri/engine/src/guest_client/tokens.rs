@@ -51,14 +51,8 @@ pub struct OwnedJob {
     pub at: u64,
 }
 
-/// The most computers one computer's agent holds at once through the bridge (made and pending).
-pub const MAX_FORKS: usize = 32;
 /// The most jobs one token may have started and not acknowledged.
 pub const MAX_JOBS: usize = 16;
-/// The most of its forks one token may have running at once. Each counts as the memory it was
-/// created with; the engine does not limit their total.
-pub const MAX_RUNNING: usize = 3;
-
 pub fn now_secs() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
