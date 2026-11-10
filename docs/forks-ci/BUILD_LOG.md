@@ -991,7 +991,9 @@ refusal), and of the docs of the whole build against the code. Fixes are in the 
   unpacked, so a Silo update that pins another image before the computer's first start leaves it without one.
   Unpacking it at import was tried and reverted: it needs the image download, which an account that only imports
   (the two-account live check's controller) does not have, so the import failed (run 42725019568). The threat
-  model says so instead.
+  model says so instead. Images and layers are found by one scan of the records (`layers::records`), so a
+  computers folder that cannot be read keeps the images as it keeps the layers (the pruning took such a folder
+  for empty; the unreadable-folder test of #108 now checks images too and failed before).
 - **Fixed: a container import's unpack always had one hour.** A VM's import scans its payload and sizes the load's
   timeout from it; a container's layers are not scanned, so its `snapshot load` got the base hour whatever the
   computer's size, where its export's `snapshot save` gets the hour plus the declared storage at 16 MiB/s. The
