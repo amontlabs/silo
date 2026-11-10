@@ -28,14 +28,14 @@ app. The engine decides what each call is allowed, from where the call comes fro
 > A computer can do anything that gives it no more than it already has. Anything that widens what
 > it has asks you.
 
-| Free, within quotas | Asks you | Never |
+| Free, within limits | Asks you | Never |
 | --- | --- | --- |
 | Fork itself, make disposable computers | Merge into main, or replace main | Read a secret's value |
 | Hand a fork any access it has itself | A new repository, or write access | Touch a computer outside its own tree |
 | Run commands in its forks, read their diffs, logs and screens | A new secret | Change engine settings or Connections |
 | Checkpoint, restore, stop and drop its forks | A wider network policy | |
 | | A port published on your device, SSH from outside | |
-| | More CPU, memory or disk than its quota | |
+| | More computers, memory or disk than its limits | |
 
 This replaces the in-guest client's fixed list of thirteen methods, and the full authority that
 `silo mcp` has on the host today.
@@ -122,7 +122,9 @@ A container computer shares the host's kernel. It is faster and less isolated th
 machine, and it runs on Linux hosts. It stays a choice you can make, for a machine used only for
 development that holds nothing sensitive. It is never the default and is labelled for what it
 is. One thing to state where it is offered: the host also holds Silo's own secrets and GitHub
-tokens for its computers.
+tokens for its computers, so an escape reaches them. An idea for later: the part that holds
+secrets and swaps them into requests runs on another device, and the container host's traffic is
+forced through it, so the host itself holds nothing worth taking.
 
 ## Access
 
@@ -136,8 +138,9 @@ tokens for its computers.
 - **Network.** You set a policy per computer, with presets. The agent can ask for an addition
   through the same approvals. No pop-up per connection.
 - **Agent logins** (a Claude or Codex sign-in) are files inside the computer today and are copied
-  into forks and exports. They need a design of their own, so forking and sharing handle them
-  on purpose. Not decided yet.
+  into forks and exports. The aim is that a login does not travel by accident; the design is
+  not decided yet. Until then: a fork keeps its parent's login, because the same agent already
+  controls both, and an export leaves known login files out unless you ask for them.
 
 ## Trust on your own device
 
@@ -177,6 +180,10 @@ governance, and anything tied to funding.
 ## Still open
 
 - How agent logins are stored, forked and shared.
-- Quotas for what an agent may create without asking: how many computers, how much memory and disk.
+- The limits on what an agent may create without asking. Every running computer takes memory,
+  CPU and disk from your device, so an agent that makes forks freely could freeze it or fill the
+  disk. Proposed: limits taken from the device (a share of its memory, a number of computers
+  running at once, a floor of free disk), which you can change in settings; going past one asks
+  you, like any other request.
 - Whether the address inside a computer can be served without a new runtime patch.
 - What the first-run flow looks like for each agent program, and which ones are supported first.
