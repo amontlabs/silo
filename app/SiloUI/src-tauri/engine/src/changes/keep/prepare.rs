@@ -263,14 +263,13 @@ pub fn prepare(
                 } else {
                     &[Answer::Fork, Answer::Main]
                 };
-                plan.conflicts.push(
-                    Conflict::new("file", cand.path.clone(), why).answerable(
+                plan.conflicts
+                    .push(Conflict::new("file", cand.path.clone(), why).answerable(
                         &cand.id,
                         allowed,
                         plan::file_change(&cand.base, f),
                         plan::file_change(&cand.base, m),
-                    ),
-                );
+                    ));
             }
             Decision::Write => {
                 let action = match f {
@@ -403,7 +402,10 @@ pub fn prepare(
                 let mut lines = out.lines();
                 let name = lines.next().unwrap_or("").trim().to_owned();
                 if name.is_empty() {
-                    return Err(format!("Silo could not choose a branch name in {}.", repo.repo));
+                    return Err(format!(
+                        "Silo could not choose a branch name in {}.",
+                        repo.repo
+                    ));
                 }
                 branch = Some(BranchPlan {
                     name,
@@ -411,7 +413,8 @@ pub fn prepare(
                 });
             } else if state == "conflict" {
                 let lines: Vec<&str> = lines.map(str::trim).collect();
-                plan.conflicts.push(git_conflict(&repo, &main, &lines.join(" | ")));
+                plan.conflicts
+                    .push(git_conflict(&repo, &main, &lines.join(" | ")));
             } else if state == "unsupported" {
                 plan.conflicts.push(git_conflict(
                     &repo,
@@ -520,8 +523,12 @@ pub fn prepare(
                     Some(Live::Missing) | None => continue,
                     Some(Live::Unreadable) => {
                         plan.conflicts.push(
-                            Conflict::new("file", op.path.clone(), "it cannot be read")
-                                .answerable(&op.id, &[Answer::Main], "cannot be read", ""),
+                            Conflict::new("file", op.path.clone(), "it cannot be read").answerable(
+                                &op.id,
+                                &[Answer::Main],
+                                "cannot be read",
+                                "",
+                            ),
                         );
                         continue;
                     }
@@ -538,14 +545,15 @@ pub fn prepare(
                     outcome::ALREADY_THERE,
                     "main already holds what the fork holds",
                 )),
-                Decision::Conflict(why) => plan.conflicts.push(
-                    Conflict::new("file", op.path.clone(), why).answerable(
-                        &op.id,
-                        &[Answer::Fork, Answer::Main],
-                        plan::dirty_change(&blob, &fork_m),
-                        plan::dirty_change(&blob, &main_m),
-                    ),
-                ),
+                Decision::Conflict(why) => {
+                    plan.conflicts
+                        .push(Conflict::new("file", op.path.clone(), why).answerable(
+                            &op.id,
+                            &[Answer::Fork, Answer::Main],
+                            plan::dirty_change(&blob, &fork_m),
+                            plan::dirty_change(&blob, &main_m),
+                        ))
+                }
                 Decision::Write => {
                     items.push(ReportItem::new(
                         &op.id,
@@ -852,7 +860,13 @@ pub fn prepare(
 /// fork was made, compared with the fork-time record the same way the fork is. Databases do
 /// not count, since a keep never combines them. When this is true nothing can conflict.
 fn main_unchanged_since_fork(view: &ForkView, main: &Manifest) -> bool {
-    !diff(&view.base, main, view.noise.as_ref(), &IgnoreList::builtin()).has_reviewable_changes()
+    !diff(
+        &view.base,
+        main,
+        view.noise.as_ref(),
+        &IgnoreList::builtin(),
+    )
+    .has_reviewable_changes()
 }
 
 fn short(head: &str) -> &str {

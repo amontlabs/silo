@@ -171,3 +171,28 @@ pub(super) async fn request(
     .map_err(DispatchError::internal)?;
     output(ChangesRequestResult { request })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn answers_and_skips_reach_the_engine_as_the_caller_wrote_them() {
+        let choices = choices_of(
+            Some(
+                [
+                    ("repo:/root/app".to_owned(), KeepAnswer::Branch),
+                    ("file:/etc/x".to_owned(), KeepAnswer::Fork),
+                    ("package:dpkg:jq".to_owned(), KeepAnswer::Main),
+                ]
+                .into(),
+            ),
+            Some(vec!["cron:root".to_owned()]),
+        );
+        assert_eq!(choices.answers["repo:/root/app"], Answer::Branch);
+        assert_eq!(choices.answers["file:/etc/x"], Answer::Fork);
+        assert_eq!(choices.answers["package:dpkg:jq"], Answer::Main);
+        assert!(choices.skip.contains("cron:root"));
+        assert!(choices_of(None, None).is_empty());
+    }
+}

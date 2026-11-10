@@ -96,7 +96,9 @@ impl ReportItem {
     pub fn new(id: &str, label: &str, outcome: &str, detail: impl Into<String>) -> Self {
         Self {
             id: id.to_owned(),
-            kind: items::kind_of(id).map_or("item", items::Kind::label).to_owned(),
+            kind: items::kind_of(id)
+                .map_or("item", items::Kind::label)
+                .to_owned(),
             label: label.to_owned(),
             outcome: outcome.to_owned(),
             detail: detail.into(),
@@ -518,7 +520,12 @@ pub fn build(
                         label,
                         "the name has characters a package manager is not given",
                     )
-                    .answerable(&id, &[Answer::Main], "removed", version_change(before, now)),
+                    .answerable(
+                        &id,
+                        &[Answer::Main],
+                        "removed",
+                        version_change(before, now),
+                    ),
                 );
                 continue;
             }
@@ -539,8 +546,12 @@ pub fn build(
                 );
                 continue;
             }
-            plan.items
-                .push(ReportItem::new(&id, &label, outcome::BROUGHT_OVER, "removes it"));
+            plan.items.push(ReportItem::new(
+                &id,
+                &label,
+                outcome::BROUGHT_OVER,
+                "removes it",
+            ));
             plan.removals.push(PkgOp {
                 manager: manager.to_owned(),
                 name,
@@ -686,7 +697,8 @@ pub fn build(
 
     for db in &diff.database {
         plan.databases.push(format!("{} {}", db.engine, db.name));
-        plan.database_ids.push(items::database(&db.engine, &db.name));
+        plan.database_ids
+            .push(items::database(&db.engine, &db.name));
     }
     plan
 }

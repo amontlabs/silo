@@ -131,7 +131,9 @@ impl Choices {
         if self.skip.contains(id) {
             Said::Skipped
         } else {
-            self.answers.get(id).map_or(Said::Nothing, |a| Said::Answered(*a))
+            self.answers
+                .get(id)
+                .map_or(Said::Nothing, |a| Said::Answered(*a))
         }
     }
 }
@@ -272,7 +274,11 @@ impl Diff {
             );
         }
         for change in &self.database {
-            add(database(&change.engine, &change.name), Kind::Database, false);
+            add(
+                database(&change.engine, &change.name),
+                Kind::Database,
+                false,
+            );
         }
         items
     }

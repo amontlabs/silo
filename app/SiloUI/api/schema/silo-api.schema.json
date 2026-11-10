@@ -783,6 +783,16 @@
     },
     "ChangesKeepParams": {
       "properties": {
+        "choices": {
+          "additionalProperties": {
+            "$ref": "#/$defs/KeepAnswer"
+          },
+          "description": "The answer for each item both sides changed, by item id (the `id` of a conflict, or\nof an entry in `changes.diff`). A repository takes `branch` or `main`; every other\nitem takes `fork` or `main`. An id that is not in the reviewed diff, or an answer the\nitem does not allow, fails the keep and names the item. Databases take no answer.\nChoices are checked against the reviewed diff and are not part of the review digest.",
+          "type": [
+            "object",
+            "null"
+          ]
+        },
         "dataOk": {
           "description": "Carry database changes even though no migration step covers them.",
           "type": [
@@ -825,6 +835,16 @@
             "null"
           ]
         },
+        "skip": {
+          "description": "Item ids not to bring over even though they do not conflict. The same as answering\n`main`; the report calls them `skipped`.",
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
         "targetId": {
           "description": "The computer to keep into; defaults to the one the fork was made from.",
           "type": [
@@ -839,7 +859,7 @@
       "type": "object"
     },
     "ChangesKeepResult": {
-      "description": "The final result of `changes.keep`. `status` is `kept`, `dry-run` or `refused`; a\nrefused keep did not change the target.",
+      "description": "The final result of `changes.keep`. `status` is `kept`, `dry-run` or `refused`; a\nrefused keep did not change the target. A keep that needs answers is `refused` with the\nreason `choices-needed`.",
       "properties": {
         "refusal": {
           "anyOf": [
@@ -989,6 +1009,16 @@
     },
     "ChangesRequestsKeepParams": {
       "properties": {
+        "choices": {
+          "additionalProperties": {
+            "$ref": "#/$defs/KeepAnswer"
+          },
+          "description": "The answer for each item both sides changed, by item id; see `changes.keep`.",
+          "type": [
+            "object",
+            "null"
+          ]
+        },
         "dataOk": {
           "description": "Carry database changes even though no migration step covers them.",
           "type": [
@@ -1016,6 +1046,16 @@
         },
         "requestId": {
           "type": "string"
+        },
+        "skip": {
+          "description": "Item ids not to bring over even though they do not conflict; see `changes.keep`.",
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
         }
       },
       "required": [
@@ -7298,16 +7338,59 @@
       ],
       "type": "object"
     },
+    "KeepAnswer": {
+      "description": "How an item both sides changed is settled.",
+      "oneOf": [
+        {
+          "const": "fork",
+          "description": "The fork's version is written over main's.",
+          "type": "string"
+        },
+        {
+          "const": "main",
+          "description": "The item stays as main has it.",
+          "type": "string"
+        },
+        {
+          "const": "branch",
+          "description": "A repository only: the fork's commits arrive as a branch named `silo/<fork name>` and\nnothing is merged or checked out.",
+          "type": "string"
+        }
+      ]
+    },
     "KeepConflict": {
       "properties": {
+        "allowed": {
+          "default": [],
+          "description": "The answers that settle it; empty when none does.",
+          "items": {
+            "$ref": "#/$defs/KeepAnswer"
+          },
+          "type": "array"
+        },
         "detail": {
+          "type": "string"
+        },
+        "forkChange": {
+          "default": "",
+          "description": "What changed in the fork, in a few words.",
+          "type": "string"
+        },
+        "id": {
+          "default": "",
+          "description": "The id of the item, the key of its answer in `choices`; empty when no answer\nsettles the conflict (credentials).",
           "type": "string"
         },
         "item": {
           "type": "string"
         },
         "kind": {
-          "description": "`file`, `package`, `crontab`, `launch agent` or `git`.",
+          "description": "`file`, `package`, `crontab`, `git`, `credentials` or `destination`.",
+          "type": "string"
+        },
+        "mainChange": {
+          "default": "",
+          "description": "What changed on main, in a few words.",
           "type": "string"
         }
       },
@@ -7348,6 +7431,38 @@
       },
       "type": "object"
     },
+    "KeepItem": {
+      "description": "What happened to one item.",
+      "properties": {
+        "detail": {
+          "description": "The same in words.",
+          "type": "string"
+        },
+        "id": {
+          "description": "The item id.",
+          "type": "string"
+        },
+        "kind": {
+          "description": "`file`, `package`, `repository`, `crontab`, `launch agent` or `database`.",
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "outcome": {
+          "description": "`brought-over`, `left-as-main` (answered `main`), `branch` (a repository's commits\nleft as a branch), `skipped` (listed in `skip`), `already-there` (main already holds\nit) or `not-combined` (a database).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "label",
+        "outcome",
+        "detail"
+      ],
+      "type": "object"
+    },
     "KeepRefusal": {
       "properties": {
         "conflicts": {
@@ -7363,7 +7478,7 @@
           "type": "string"
         },
         "reason": {
-          "description": "`divergent`, `database` or `git`.",
+          "description": "`choices-needed` (both sides changed items that have no answer yet: `conflicts` lists\nthem with the answers each allows), `database`, `credentials`, `changed` or\n`main-changed`. Older engines also said `divergent` and `git`.",
           "type": "string"
         }
       },
@@ -7384,8 +7499,24 @@
             "null"
           ]
         },
+        "fastForward": {
+          "default": null,
+          "description": "Whether main was unchanged since the fork was made, so nothing could conflict.\nAbsent when the keep stopped before main was looked at.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "fork": {
           "type": "string"
+        },
+        "items": {
+          "default": [],
+          "description": "What was done with each item, by id. Empty when the keep was refused.",
+          "items": {
+            "$ref": "#/$defs/KeepItem"
+          },
+          "type": "array"
         },
         "notes": {
           "items": {

@@ -403,7 +403,10 @@ mod tests {
         });
         let result: ChangesKeepResult = serde_json::from_value(value).unwrap();
         let refusal = result.refusal.unwrap();
-        assert_eq!(refusal.conflicts[0].allowed, [KeepAnswer::Branch, KeepAnswer::Main]);
+        assert_eq!(
+            refusal.conflicts[0].allowed,
+            [KeepAnswer::Branch, KeepAnswer::Main]
+        );
         assert_eq!(result.report.fast_forward, Some(false));
         let old: KeepConflict =
             serde_json::from_str(r#"{"kind":"file","item":"/a","detail":"d"}"#).unwrap();

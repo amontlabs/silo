@@ -274,7 +274,7 @@ pub fn git_branch_plan(repo: &str, tmp_ref: &str, name: &str) -> GuestCmd {
 pub fn git_branch(repo: &str, tmp_ref: &str, name: &str) -> GuestCmd {
     git_cmd(
         "git_branch",
-        "set -e\ncd \"$A_repo\"\ngit update-ref \"refs/heads/$A_name\" \"$A_ref^{commit}\" 0000000000000000000000000000000000000000\ngit rev-parse --short \"refs/heads/$A_name\"",
+        "set -e\ncd \"$A_repo\"\ngit update-ref \"refs/heads/$A_name\" \"$A_ref^{commit}\" \"\"\ngit rev-parse --short \"refs/heads/$A_name\"",
     )
     .arg("repo", repo)
     .arg("ref", tmp_ref)

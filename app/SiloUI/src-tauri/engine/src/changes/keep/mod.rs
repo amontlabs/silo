@@ -29,9 +29,9 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+pub use crate::changes::items::{Answer, Choices};
 pub use env::{CheckpointRef, ExecOut, GuestCmd, KeepEnv, ManifestStore, Os, RunAs};
 pub use journal::Journal;
-pub use crate::changes::items::{Answer, Choices};
 pub use plan::{Conflict, Plan, ReportItem};
 pub use prepare::review_digest;
 
