@@ -8,7 +8,9 @@ write code. The repository's own rules are in [AGENTS.md](../../AGENTS.md); they
 
 - You work in your own git worktree. The build is integrated on the local branch `direction`
   (checked out at `~/code/projects/silo-direction`). Before anything else run
-  `git merge --ff-only direction` so you start from the latest merged work. Commit on your own
+  `git merge --ff-only direction` so you start from the latest merged work. If that fails because
+  your new branch was cut from `main` (which has moved on its own) and holds no work of yours,
+  run `git reset --hard direction` instead. Commit on your own
   branch as you go. Do not push, do not open a pull request, and do not edit the main checkout
   at `/Users/polarzero/code/projects/microsandbox-workspaces` or the integration checkout.
 - Native builds need the private GitHub build file. Copy it once, without printing it:

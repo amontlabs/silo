@@ -79,6 +79,12 @@ These were not asked of the owner. Each is open to change.
 
 ## Found during the build
 
+- **`main` moved under the build** (2026-11-11 00:32): the main checkout's `main` was rebased onto
+  GitHub's `main` after pull request #111 (a README tagline change), so the three direction
+  documents committed there have new ids and `direction` no longer fast-forwards from a fresh
+  worktree. New agents reset their empty branch to `direction` (the brief says so). The final
+  pull request merges `main` into `direction` first.
+
 - **T8 review (Opus), to fix:** (1) high: the policy judge reads a computer with no stored
   policy as open (`policy/mod.rs` `World::network_policy` calls `effective(stored, None)`), while
   an import runs closed only through its runtime rules, so an agent in an imported computer can
