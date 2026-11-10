@@ -2708,7 +2708,7 @@
         {
           "properties": {
             "agents": {
-              "description": "Agents to install once the computer is first ready. Empty installs none.",
+              "description": "Agents to install during the new computer's first boot, after its setup. A failed\ninstall does not fail the creation: the creation job reports it and the agent\nlists as `missing`. Empty installs none. A macOS computer does not accept agents\nat creation yet (see the `macos` kind); `agents.install` installs one in a running\ncomputer of either kind. An agent that lists as `ready` is the computer's own\nreport, and a computer can claim it.",
               "items": {
                 "$ref": "#/$defs/AgentId"
               },
@@ -2743,7 +2743,7 @@
         {
           "properties": {
             "agents": {
-              "description": "Agents to install once setup has completed. Empty installs none.",
+              "description": "Not accepted yet: a macOS computer refuses a non-empty list, because its setup ends\nwith the computer stopped. Create the computer, start it, then install an agent\nwith `agents.install`. An agent that lists as `ready` is the computer's own report,\nand a computer can claim it.",
               "items": {
                 "$ref": "#/$defs/AgentId"
               },

@@ -21,11 +21,12 @@ use std::{
 const SCRIPT: &str = include_str!("../../../guest/macos/silo-agent-tools.zsh");
 const LOCK: &str = include_str!("../../../guest/agent-tools-lock.json");
 const STAGE: &str = "/private/tmp/silo-agent-tools";
-const SCRIPT_NAME: &str = "silo-agent-tools.zsh";
 const INSTALL_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 const COPY_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 const RECEIPT_READ: Duration = Duration::from_secs(8);
 const RECEIPT_MAX_BYTES: usize = 8 * 1024;
+/// The most an install script may print before Silo stops it.
+const INSTALL_MAX_STDOUT: usize = 64 * 1024;
 /// How long a read answers further lists without another login to the computer.
 const RECEIPT_CACHE: Duration = Duration::from_secs(3);
 
@@ -118,25 +119,9 @@ const REGISTER_COMMAND: &str = "REGISTER=\"$HOME/Library/Application Support/Sil
 /// Prints the receipt of each agent on its own line: Claude Code, then Codex.
 const READ_RECEIPTS: &str = "for a in claude-code codex; do /bin/cat \"/Library/Application Support/Silo/agents/$a.json\" 2>/dev/null | /usr/bin/tr -d '\\n'; echo; done";
 
-/// The two receipts a running computer holds; a missing or unreadable one is `None`.
-pub(super) fn read_receipts(
-    layout: &super::store::Layout,
-    record: &super::store::Record,
-) -> (Option<Value>, Option<Value>) {
-    let output = guest_access::run_capped(
-        layout,
-        record,
-        READ_RECEIPTS,
-        None,
-        RECEIPT_READ,
-        Some(RECEIPT_MAX_BYTES),
-    )
-    .ok()
-    .filter(|output| output.status == 0);
-    let Some(output) = output else {
-        return (None, None);
-    };
-    let mut lines = output.stdout.lines();
+/// The two receipts in what `READ_RECEIPTS` printed; a missing or unreadable one is `None`.
+fn parse_receipts(stdout: &str) -> Receipts {
+    let mut lines = stdout.lines();
     let mut next = || {
         lines
             .next()
@@ -148,35 +133,57 @@ pub(super) fn read_receipts(
     (claude, codex)
 }
 
+/// The two receipts a running computer holds, or `Err` when the computer could not be asked.
+pub(super) fn read_receipts(
+    layout: &super::store::Layout,
+    record: &super::store::Record,
+) -> Result<Receipts, ()> {
+    let output = guest_access::run_capped(
+        layout,
+        record,
+        READ_RECEIPTS,
+        None,
+        RECEIPT_READ,
+        Some(RECEIPT_MAX_BYTES),
+    )
+    .map_err(|_| ())?;
+    if output.status != 0 {
+        return Err(());
+    }
+    Ok(parse_receipts(&output.stdout))
+}
+
 /// The agents of the computer: Claude Code from its template and receipt, Codex from its
-/// receipt when the computer runs and `unknown` while it does not.
+/// receipt when the computer runs and answers, and `unknown` while it is stopped or does not.
 pub(super) fn list(
     app: &MacosContext,
     id: &str,
     running: bool,
 ) -> Result<Vec<AgentInfo>, String> {
     let (layout, record) = layout_and_record(app, id)?;
-    let (claude, codex) = if running {
+    let read: Option<Receipts> = if running {
         let cached = receipts()
             .as_ref()
             .and_then(|map| map.get(id))
             .filter(|(at, _)| at.elapsed() < RECEIPT_CACHE)
             .map(|(_, read)| read.clone());
-        cached.unwrap_or_else(|| {
-            let read = read_receipts(&layout, &record);
+        cached.or_else(|| {
+            let read = read_receipts(&layout, &record).ok()?;
             receipts()
                 .get_or_insert_with(HashMap::new)
                 .insert(id.to_owned(), (Instant::now(), read.clone()));
-            read
+            Some(read)
         })
     } else {
-        (None, None)
+        None
     };
+    let answered = read.is_some();
+    let (claude, codex) = read.unwrap_or((None, None));
     let mut agents = crate::agents::from_macos(
         record.setup.developer_tools && record.developer_tools_version.is_some(),
         !record.developer_tools_stale(),
         claude.as_ref(),
-        running.then_some(codex.as_ref()),
+        answered.then_some(codex.as_ref()),
     );
     crate::agents::mark_installing(id, &mut agents);
     Ok(agents)
@@ -194,6 +201,19 @@ fn prune_cache(cache: &Path, keep: &str) {
             let _ = fs::remove_file(entry.path());
         }
     }
+}
+
+/// What to show for a failed install: the last `error: ` line the script printed, else its last
+/// line, cleaned and cut short.
+fn install_failure_reason(stderr: &str) -> String {
+    let line = stderr
+        .lines()
+        .rev()
+        .find_map(|line| line.trim().strip_prefix("error: "))
+        .or_else(|| stderr.lines().rev().find(|line| !line.trim().is_empty()))
+        .map(crate::agents::safe_reason)
+        .filter(|reason| !reason.is_empty());
+    line.unwrap_or_else(|| "the installer returned an error".to_owned())
 }
 
 /// Installs `agent` in the running computer `id`: download and check on this device, copy,
@@ -224,11 +244,6 @@ pub(super) fn install(
         return Err(guest_access::CANCELLED.into());
     }
     let (layout, record) = layout_and_record(app, id)?;
-    let local = tempfile::tempdir()
-        .map_err(|error| super::store::io_error("prepare an agent install", &error))?;
-    let script_path = local.path().join(SCRIPT_NAME);
-    fs::write(&script_path, script(agent, &plan))
-        .map_err(|error| super::store::io_error("prepare an agent install", &error))?;
     step(
         AgentInstallStep::Installing,
         Some(format!("Copying {name} to the computer")),
@@ -243,36 +258,35 @@ pub(super) fn install(
     if ready.status != 0 {
         return Err("Silo could not prepare a folder in the computer.".into());
     }
-    for (file, remote) in [
-        (&script_path, format!("{STAGE}/{SCRIPT_NAME}")),
-        (&archive, format!("{STAGE}/{}", plan.asset.file)),
-    ] {
-        if cancelled() {
-            return Err(guest_access::CANCELLED.into());
-        }
-        guest_access::copy_cancellable(&layout, &record, file, &remote, COPY_TIMEOUT, &cancelled)?;
+    if cancelled() {
+        return Err(guest_access::CANCELLED.into());
     }
+    guest_access::copy_cancellable(
+        &layout,
+        &record,
+        &archive,
+        &format!("{STAGE}/{}", plan.asset.file),
+        COPY_TIMEOUT,
+        &cancelled,
+    )?;
     step(
         AgentInstallStep::Installing,
         Some(format!("Installing {name}")),
     );
-    let output = guest_access::run_cancellable_with_input(
+    let output = guest_access::run_cancellable_with_input_capped(
         &layout,
         &record,
         "/bin/zsh -s",
         script(agent, &plan).as_bytes(),
         INSTALL_TIMEOUT,
         &cancelled,
+        Some(INSTALL_MAX_STDOUT),
     )?;
     if output.status != 0 {
-        let reason = output
-            .stderr
-            .lines()
-            .rev()
-            .find_map(|line| line.trim().strip_prefix("error: "))
-            .or_else(|| output.stderr.lines().rev().find(|line| !line.trim().is_empty()))
-            .unwrap_or("the installer returned an error");
-        return Err(format!("{name} could not be installed: {reason}"));
+        return Err(format!(
+            "{name} could not be installed: {}",
+            install_failure_reason(&output.stderr)
+        ));
     }
     if let Some(map) = receipts().as_mut() {
         map.remove(id);
@@ -361,6 +375,86 @@ mod tests {
         let codex_part = &SCRIPT[SCRIPT.find("install_codex()").unwrap()
             ..SCRIPT.find("install_claude_code()").unwrap()];
         assert!(!codex_part.contains("curl"));
+    }
+
+    #[test]
+    fn the_script_checks_a_root_owned_copy_and_cleans_up_on_every_exit() {
+        let checked = SCRIPT.find("shasum -a 256 \"$SAFE/$FILE\"").unwrap();
+        let copied = SCRIPT
+            .find("install -o root -g wheel -m 0644 \"$STAGE/$FILE\" \"$SAFE/$FILE\"")
+            .unwrap();
+        assert!(copied < checked);
+        // Nothing after the copy reads the account's staged file again.
+        assert!(!SCRIPT[checked..].contains("$STAGE/$FILE"));
+        assert!(SCRIPT.contains("trap cleanup EXIT"));
+        assert!(SCRIPT.contains("rm -rf \"$STAGE\""));
+        assert!(SCRIPT.contains("rm -rf \"$SAFE\""));
+        assert!(!SCRIPT.contains("*\"$VERSION\"*"));
+        assert!(!SCRIPT.contains("== \"$VERSION\"*"));
+    }
+
+    fn zsh_output(program: &str) -> Option<String> {
+        if !Path::new("/bin/zsh").exists() {
+            return None;
+        }
+        let from = SCRIPT.find("# The version in a program").unwrap();
+        let to = SCRIPT.find("[[ $(/usr/bin/uname").unwrap();
+        let output = std::process::Command::new("/bin/zsh")
+            .arg("-c")
+            .arg(format!(
+                "setopt extendedglob\n{}\n{program}",
+                &SCRIPT[from..to]
+            ))
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        Some(String::from_utf8_lossy(&output.stdout).into_owned())
+    }
+
+    #[test]
+    fn the_script_compares_versions_as_dotted_numbers_and_takes_the_version_word_exactly() {
+        let Some(tokens) = zsh_output(
+            "for out in 'codex-cli 0.167.0' '2.1.287 (Claude Code)' '0.167.0-beta' 'v1.2.3' ''; do print -r -- \"[$(version_token \"$out\")]\"; done",
+        ) else {
+            return;
+        };
+        assert_eq!(tokens, "[0.167.0]\n[2.1.287]\n[]\n[]\n[]\n");
+        let order = zsh_output(
+            "for pair in '0.167.0 0.167.0' '0.168.0 0.167.0' '0.166.9 0.167.0' '0.10.0 0.9.0' '1.0 0.167.0' '0.167 0.167.0' '08.0.0 8.0.0'; do set -- ${=pair}; not_older $1 $2 && print newer-or-same || print older; done",
+        )
+        .unwrap();
+        assert_eq!(
+            order,
+            "newer-or-same\nnewer-or-same\nolder\nnewer-or-same\nnewer-or-same\nnewer-or-same\nnewer-or-same\n"
+        );
+    }
+
+    #[test]
+    fn the_receipts_are_read_per_line_and_a_missing_one_is_none() {
+        let (claude, codex) =
+            parse_receipts("{\"version\":\"2.1.287\"}\n\n");
+        assert_eq!(claude.unwrap()["version"], "2.1.287");
+        assert!(codex.is_none());
+        let (claude, codex) = parse_receipts("not json\n[1]\n");
+        assert!(claude.is_none() && codex.is_none());
+    }
+
+    #[test]
+    fn a_failure_reason_has_no_control_characters_and_at_most_about_200_characters() {
+        let long = "x".repeat(60_000);
+        let stderr = format!("first\nerror: bad \u{1b}[31mred\u{7} {long}\nlast words\n");
+        let reason = install_failure_reason(&stderr);
+        assert!(reason.chars().count() <= 201, "{}", reason.len());
+        assert!(reason.starts_with("bad [31mred "));
+        assert!(!reason.chars().any(char::is_control));
+        assert_eq!(
+            install_failure_reason("one\nlast \u{1b}[0m line\n\n"),
+            "last [0m line"
+        );
+        assert_eq!(
+            install_failure_reason("\n\u{7}\n"),
+            "the installer returned an error"
+        );
     }
 
     #[test]

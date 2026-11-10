@@ -550,6 +550,20 @@ pub(crate) fn run_cancellable_with_input(
     timeout: Duration,
     cancel: &dyn Fn() -> bool,
 ) -> Result<CommandOutput, String> {
+    run_cancellable_with_input_capped(layout, record, command, stdin, timeout, cancel, None)
+}
+
+/// Like `run_cancellable_with_input`, failing with `OUTPUT_TOO_LARGE` once the command has
+/// printed more than `max_stdout` bytes.
+pub(crate) fn run_cancellable_with_input_capped(
+    layout: &Layout,
+    record: &Record,
+    command: &str,
+    stdin: &[u8],
+    timeout: Duration,
+    cancel: &dyn Fn() -> bool,
+    max_stdout: Option<usize>,
+) -> Result<CommandOutput, String> {
     let account = account(layout)?;
     let address = endpoint(record, 22)?;
     exec_until(
@@ -558,7 +572,7 @@ pub(crate) fn run_cancellable_with_input(
         Some(stdin),
         timeout,
         &environment(layout, Auth::Key)?,
-        None,
+        max_stdout,
         Some(cancel),
     )
 }
@@ -686,7 +700,7 @@ fn exec_until(
     });
     let exceeded = Arc::new(AtomicBool::new(false));
     let stdout = drain(child.stdout.take(), max_stdout, exceeded.clone());
-    let stderr = drain(child.stderr.take(), None, Arc::new(AtomicBool::new(false)));
+    let stderr = drain_tail(child.stderr.take(), STDERR_TAIL_BYTES);
     let deadline = Instant::now() + timeout;
     let status = loop {
         if exceeded.load(Ordering::SeqCst) {
@@ -744,6 +758,38 @@ fn drain<R: Read + Send + 'static>(
             }
         }
         String::from_utf8_lossy(&text).into_owned()
+    })
+}
+
+/// The most stderr a command's output keeps: its last bytes.
+const STDERR_TAIL_BYTES: usize = 64 * 1024;
+
+/// Reads `stream` to its end, so the command never blocks on a full pipe, and returns only its
+/// last `keep` bytes.
+fn drain_tail<R: Read + Send + 'static>(
+    stream: Option<R>,
+    keep: usize,
+) -> thread::JoinHandle<String> {
+    thread::spawn(move || {
+        let mut tail: Vec<u8> = Vec::new();
+        if let Some(mut stream) = stream {
+            let mut chunk = [0u8; 8192];
+            loop {
+                match stream.read(&mut chunk) {
+                    Ok(0) | Err(_) => break,
+                    Ok(read) => {
+                        tail.extend_from_slice(&chunk[..read]);
+                        if tail.len() > keep * 2 {
+                            tail.drain(..tail.len() - keep);
+                        }
+                    }
+                }
+            }
+        }
+        if tail.len() > keep {
+            tail.drain(..tail.len() - keep);
+        }
+        String::from_utf8_lossy(&tail).into_owned()
     })
 }
 
@@ -1000,6 +1046,25 @@ mod tests {
         .unwrap_err();
         assert_eq!(error, CANCELLED);
         assert!(started.elapsed() < Duration::from_secs(5));
+    }
+
+    #[test]
+    fn stderr_keeps_only_its_last_bytes_and_the_command_still_finishes() {
+        let output = exec(
+            "/bin/sh",
+            &[
+                "-c".to_string(),
+                "/usr/bin/yes aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa | /usr/bin/head -c 3000000 >&2; printf 'the-last-line' >&2; exit 4".to_string(),
+            ],
+            None,
+            Duration::from_secs(20),
+            &[],
+            None,
+        )
+        .unwrap();
+        assert_eq!(output.status, 4);
+        assert!(output.stderr.len() <= STDERR_TAIL_BYTES, "{}", output.stderr.len());
+        assert!(output.stderr.ends_with("the-last-line"));
     }
 
     #[test]

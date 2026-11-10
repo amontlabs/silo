@@ -14,6 +14,7 @@ from pathlib import Path
 import platform
 import pwd
 import re
+import resource
 import shutil
 import subprocess
 import sys
@@ -33,6 +34,8 @@ CODEX_ASSETS = {
     'linux-amd64': 'x86_64-unknown-linux-musl',
     'macos-arm64': 'aarch64-apple-darwin',
 }
+NODE_MAX_BYTES = 256 * 1024 * 1024
+INSTALLER_MAX_BYTES = 8 * 1024 * 1024
 ARCHITECTURES = {'aarch64': 'arm64', 'arm64': 'arm64', 'x86_64': 'amd64', 'amd64': 'amd64'}
 
 
@@ -70,8 +73,27 @@ def run(command, timeout=60, **options):
 
 
 def first_version(output):
-    match = re.search(r'\d+\.\d+\.\d+', output or '')
-    return match.group(0) if match else None
+    """The first whole word of the output that is a x.y.z version, with a leading v allowed."""
+    for word in (output or '').split():
+        match = re.fullmatch(r'v?([0-9]+\.[0-9]+\.[0-9]+)', word)
+        if match:
+            return match.group(1)
+    return None
+
+
+def version_parts(version):
+    parts = (version or '').split('.')
+    return [int(part) for part in parts] if all(re.fullmatch('[0-9]+', part) for part in parts) else None
+
+
+def not_older(installed, pinned):
+    """Whether the installed version is the pinned one or a newer one. Dotted numbers compare
+    numerically; anything else counts only when it is equal."""
+    have, want = version_parts(installed), version_parts(pinned)
+    if have is None or want is None:
+        return installed == pinned
+    size = max(len(have), len(want))
+    return have + [0] * (size - len(have)) >= want + [0] * (size - len(want))
 
 
 def account_home():
@@ -128,18 +150,29 @@ def sha256_file(path):
     return digest.hexdigest()
 
 
-def download(url, sha256, destination):
-    """Downloads over HTTPS and keeps the file only when it matches the pinned SHA-256."""
+def limit_file_size(limit):
+    """For a child process: a file it writes cannot grow past the limit."""
+    def apply():
+        resource.setrlimit(resource.RLIMIT_FSIZE, (limit, limit))
+    return apply
+
+
+def download(url, sha256, destination, max_bytes, size=None):
+    """Downloads over HTTPS (redirects too), refuses more than `max_bytes`, and keeps the file
+    only when it has the pinned size, if there is one, and the pinned SHA-256."""
     partial = Path(str(destination) + '.partial')
+    name = url.rsplit('/', 1)[-1]
     result = run(['curl', '--silent', '--show-error', '--fail', '--location', '--retry', '2',
-                  '--connect-timeout', '30', '--max-time', '900', '--proto', '=https', '--tlsv1.2',
-                  url, '-o', str(partial)], timeout=1000)
+                  '--connect-timeout', '30', '--max-time', '900', '--proto', '=https', '--proto-redir', '=https',
+                  '--tlsv1.2', '--max-filesize', str(max_bytes), url, '-o', str(partial)],
+                 timeout=1000, preexec_fn=limit_file_size(max_bytes + 1))
     if result.returncode != 0:
         partial.unlink(missing_ok=True)
-        raise RuntimeError(f'Could not download {url.rsplit("/", 1)[-1]}: {result.stderr.strip()}')
-    if sha256_file(partial) != sha256:
+        raise RuntimeError(f'Could not download {name}: {result.stderr.strip()}')
+    if partial.stat().st_size > max_bytes or (size is not None and partial.stat().st_size != size) \
+            or sha256_file(partial) != sha256:
         partial.unlink(missing_ok=True)
-        raise RuntimeError(f'{url.rsplit("/", 1)[-1]} does not match the version Silo expects')
+        raise RuntimeError(f'{name} does not match the version Silo expects')
     partial.replace(destination)
 
 
@@ -165,7 +198,7 @@ def install_node(lock, work):
         raise RuntimeError(f'Unsupported architecture {platform.machine()}')
     asset = lock['node']['assets'][arch]
     archive_path = Path(work) / asset['url'].rsplit('/', 1)[-1]
-    download(asset['url'], asset['sha256'], archive_path)
+    download(asset['url'], asset['sha256'], archive_path, NODE_MAX_BYTES)
     NODE_ROOT.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(prefix='.node-', dir=NODE_ROOT))
     try:
@@ -191,11 +224,12 @@ def install_node(lock, work):
 
 def install_claude(lock, work):
     version = lock['claudeCode']['version']
-    if claude_version() == version:
+    installed = claude_version()
+    if installed is not None and not_older(installed, version):
         return
     installer = lock['claudeCode']['installer']
     script = Path(work) / 'claude-install.sh'
-    download(installer['url'], installer['sha256'], script)
+    download(installer['url'], installer['sha256'], script, INSTALLER_MAX_BYTES)
     script.chmod(0o755)
     # The working account runs the script, and the work directory is a private temporary one.
     Path(work).chmod(0o755)
@@ -221,15 +255,19 @@ def install_claude(lock, work):
 
 
 def install_codex(lock, work):
+    """Installs the pinned Codex, or keeps a newer one. Returns the version that is installed."""
     version = lock['codex']['version']
-    if codex_version() == version and (CODEX_ROOT / version / 'codex').exists():
-        return
+    installed = codex_version()
+    if installed is not None and installed != version and not_older(installed, version):
+        return installed
+    if installed == version and (CODEX_ROOT / version / 'codex').exists():
+        return version
     arch = ARCHITECTURES.get(platform.machine())
     if arch is None:
         raise RuntimeError(f'Unsupported architecture {platform.machine()}')
     asset = lock['codex']['assets'][f'linux-{arch}']
     archive_path = Path(work) / asset['url'].rsplit('/', 1)[-1]
-    download(asset['url'], asset['sha256'], archive_path)
+    download(asset['url'], asset['sha256'], archive_path, asset['bytes'], asset['bytes'])
     CODEX_ROOT.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(prefix='.codex-', dir=CODEX_ROOT))
     try:
@@ -260,9 +298,10 @@ def install_codex(lock, work):
     for other in CODEX_ROOT.iterdir():
         if other.name != version:
             shutil.rmtree(other, ignore_errors=True)
+    return version
 
 
-def write_receipt(lock, agent):
+def write_receipt(lock, agent, codex_installed=None):
     """Records what was installed. One file holds every agent; setting up one keeps the others."""
     STATE.mkdir(parents=True, exist_ok=True)
     try:
@@ -273,7 +312,7 @@ def write_receipt(lock, agent):
         receipt = {}
     receipt['schemaVersion'] = 1
     if agent == 'codex':
-        receipt['codexVersion'] = lock['codex']['version']
+        receipt['codexVersion'] = codex_installed or lock['codex']['version']
     else:
         receipt.update(recipeVersion=lock['recipeVersion'], nodeVersion=lock['node']['version'],
                        claudeVersion=lock['claudeCode']['version'])
@@ -292,12 +331,13 @@ def setup(lock, agent='claude-code'):
     STATE.mkdir(parents=True, exist_ok=True)
     # Codex's archive is over 100 MB, so its work folder is on the disk, not in /tmp.
     with tempfile.TemporaryDirectory(prefix='silo-agent-tools-', dir=STATE if agent == 'codex' else None) as work:
+        installed = None
         if agent == 'codex':
-            install_codex(lock, work)
+            installed = install_codex(lock, work)
         else:
             install_node(lock, work)
             install_claude(lock, work)
-    write_receipt(lock, agent)
+    write_receipt(lock, agent, installed)
 
 
 def main(argv):

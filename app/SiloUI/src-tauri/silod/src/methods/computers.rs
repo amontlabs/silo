@@ -1208,8 +1208,9 @@ async fn begin_create(
             let configuration: silo_engine::runtime::ComputerConfiguration =
                 serde_json::from_value(encode(configuration)?).map_err(invalid)?;
             let request_id = new_request_id(request_id)?;
-            silo_engine::agents::request_for_creation(configuration.id(), &agents);
             let job = accept_linux_setup_job(context, "computers.create", &request_id)?;
+            // Only an accepted creation remembers its agents; the job has not started yet.
+            silo_engine::agents::request_for_creation(configuration.id(), &agents);
             let change = silo_engine::runtime::ComputerConfigurationChange::Upsert {
                 configuration,
                 expected: None,
@@ -2818,6 +2819,35 @@ pub(crate) mod tests {
             .is_err());
         let registry = f.context.job_registry().unwrap();
         assert!(registry.list_unacknowledged().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn the_agents_of_a_creation_are_remembered_only_once_its_job_is_accepted() {
+        let f = fixture();
+        let other = "00000000-0000-4000-8000-0000000000d1";
+        let create = |id: &str, request_id: &str| {
+            let mut configuration = linux_configuration();
+            configuration["id"] = json!(id);
+            json!({
+                "kind": "linux",
+                "configuration": configuration,
+                "requestId": request_id,
+                "agents": ["codex"]
+            })
+        };
+        f.call(MethodName::ComputersCreate, create(LINUX, "agents-1"))
+            .await
+            .unwrap();
+        assert_eq!(
+            silo_engine::agents::take_requested(LINUX),
+            vec![silo_api::methods::agents::AgentId::Codex]
+        );
+        // The request id is taken, so the job is refused and nothing is remembered.
+        assert!(f
+            .call(MethodName::ComputersCreate, create(other, "agents-1"))
+            .await
+            .is_err());
+        assert!(silo_engine::agents::take_requested(other).is_empty());
     }
 
     #[tokio::test]

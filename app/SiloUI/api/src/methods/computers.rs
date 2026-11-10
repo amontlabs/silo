@@ -188,7 +188,12 @@ pub enum ComputerCreateParams {
         request_id: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         device_id: Option<String>,
-        /// Agents to install once the computer is first ready. Empty installs none.
+        /// Agents to install during the new computer's first boot, after its setup. A failed
+        /// install does not fail the creation: the creation job reports it and the agent
+        /// lists as `missing`. Empty installs none. A macOS computer does not accept agents
+        /// at creation yet (see the `macos` kind); `agents.install` installs one in a running
+        /// computer of either kind. An agent that lists as `ready` is the computer's own
+        /// report, and a computer can claim it.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         agents: Vec<super::agents::AgentId>,
     },
@@ -196,7 +201,10 @@ pub enum ComputerCreateParams {
         request: MacosComputerCreateRequest,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         device_id: Option<String>,
-        /// Agents to install once setup has completed. Empty installs none.
+        /// Not accepted yet: a macOS computer refuses a non-empty list, because its setup ends
+        /// with the computer stopped. Create the computer, start it, then install an agent
+        /// with `agents.install`. An agent that lists as `ready` is the computer's own report,
+        /// and a computer can claim it.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         agents: Vec<super::agents::AgentId>,
     },
