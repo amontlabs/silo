@@ -36,7 +36,7 @@ Plan: [PLAN.md](PLAN.md). Agent rules: [AGENT-BRIEF.md](AGENT-BRIEF.md).
 | T11 review | done 2026-11-10 (Sonnet) | | no token value leaks found. Ten findings; the important ones: a network failure detached computers (also true before T11), a stale check could overwrite a newer token's state, and an agent's request for token access was summarised without saying a full-permission token is given, with a missing id bound to the owner's `github-token` after approval. All ten fixed and merged 2026-11-10 (`fix/github-token-review`); api 63, silod 353, engine github/secrets/policy 297 and 902 frontend tests passed in the item. For the owner: the old single-token fallback applies only in a session where a client used the old methods; a token with no answer since start shows waiting and its computers stay detached until GitHub answers |
 | T8 | stopped 2026-11-11 by a Claude API rate limit; continued | `feat/computer-network-policy` (work saved as `2c6442f98`) | continuation on Sonnet: id ends `779e2245-5c05-4c47-a529-662635d5db03`. Left to do then: patch wiring, runtime rebuild, live check, documents |
 | T5a | running since 2026-11-11 | | id ends `483ed458-d28e-46af-950d-c3a473cf2223` (Opus). Starts from `direction` plus T8's branch; uses the Dev engine for its live check. T5b (the engine provides the `silo` binary, guest components, MCP registration, approval waiting and new MCP tools) follows it |
-| T10 | running since 2026-11-11 | | id ends `867f5ada-08b8-4573-aecc-b795909f4116` (Sonnet): approvals and audit in the app, Merge wording, conflict chooser |
+| T10 | merged 2026-11-11 | `t3/60767d54` | 2989 frontend tests and the shell's command tests passed in the item; no review (quota); never run in the real app. The click-through list is under Found |
 | T14 | merged 2026-11-10 | `feat/exclude-logins-export` | 998 focused tests passed after the merge. **The canary failed**: the imported computer has no login files, but both markers are still in the export file, in the base disk layers (a fork's disks are layers over the source's and `msb` cannot flatten them; trimming reaches only the top layer). Shipped as best effort with the wording "removed, traces may remain". [evidence](evidence/T14.txt). Linux virtual machines only; checkpoint, macOS and container exports keep the old warning. The Dev engine is stopped and free |
 
 Task ids are `node:delegated-task:command%3Amcp%3A<session>%3Adelegate-task%3A<ending>`; the session part was `d723019c-0dae-419c-8e5d-2e7d794e60f4` on 2026-11-10 and is `d8f73f30-2d3c-4819-8290-51937a1beb8b` from 2026-11-11.
@@ -77,6 +77,16 @@ These were not asked of the owner. Each is open to change.
     requests, which narrows it).
 
 ## Found during the build
+
+- **T10 click-through for the live run:** the sidebar shows Pending with a count; an agent asks
+  (a port, a merge): toast with Review, system notification with Silo in the background, menu bar
+  row, clicking the notification opens the request; Allow, and Deny with a note; a merge with
+  conflicts, choose and merge again; Settings, Notifications, "Requests from agents"; Activity,
+  "Who did what": filters, Load more, Open request.
+- **T10, to fix:** Deny on a merge approval leaves the fork's review request open, so it comes
+  back as its own row. The engine can only close a request by keeping it or deleting the fork;
+  it needs a "declined" close that keeps the fork. `docs/silo-help.html` says nothing about
+  Pending or Merge.
 
 - **Do not run `cargo fmt` on the engine or silod crates as a whole.** They are not rustfmt-clean
   (the project's check covers only the root package), so it rewrites dozens of unrelated files.
