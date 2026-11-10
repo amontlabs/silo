@@ -292,12 +292,11 @@ pub fn flattened(chain: &[String], count: usize, merged: &str) -> Vec<String> {
     next
 }
 
-/// The ids the computers' records and the checkpoints name. Fails when any of them, or a folder
-/// that holds them, cannot be read: a layer is only collected when everything that might name it
-/// was read.
-pub fn referenced(layout: &Layout) -> Result<HashSet<String>, String> {
+/// Every computer's record. Fails when a record, or the folder that holds the computers, cannot
+/// be read: what could not be read might name anything.
+fn records(layout: &Layout) -> Result<Vec<ComputerRecord>, String> {
     let unreadable = |_| "The container computers could not be read.".to_owned();
-    let mut ids = HashSet::new();
+    let mut records = Vec::new();
     for folder in entries(&layout.computers()).map_err(unreadable)? {
         // A folder without a record is a computer being made or removed.
         match std::fs::symlink_metadata(folder.join("computer.json")) {
@@ -310,9 +309,21 @@ pub fn referenced(layout: &Layout) -> Result<HashSet<String>, String> {
             Err(error) => return Err(unreadable(error)),
         }
         let name = folder.file_name().and_then(|name| name.to_str());
-        let record = layout
-            .computer(name.ok_or("A container computer's name could not be read.")?)
-            .read_record()?;
+        records.push(
+            layout
+                .computer(name.ok_or("A container computer's name could not be read.")?)
+                .read_record()?,
+        );
+    }
+    Ok(records)
+}
+
+/// The ids the computers' records and the checkpoints name. Fails when any of them, or a folder
+/// that holds them, cannot be read: a layer is only collected when everything that might name it
+/// was read.
+pub fn referenced(layout: &Layout) -> Result<HashSet<String>, String> {
+    let mut ids = HashSet::new();
+    for record in records(layout)? {
         ids.extend(record.layers);
         if !record.upper.is_empty() {
             ids.insert(record.upper);
@@ -326,14 +337,14 @@ pub fn referenced(layout: &Layout) -> Result<HashSet<String>, String> {
 
 /// The config digests of the guest images the computers' records and the checkpoints name. A
 /// checkpoint counts because an imported computer has one before it has a record (its first start
-/// makes the record), and its layers hold changes against exactly that image. Fails when any of
-/// them cannot be read, as [`referenced`] does: an unpacked image is only removed when everything
-/// that might need it was read.
+/// makes the record), and its layers hold changes against exactly that image. Fails when
+/// [`referenced`] does: an unpacked image is only removed when everything that might need it was
+/// read.
 pub fn images_named(layout: &Layout) -> Result<HashSet<String>, String> {
-    let mut digests = HashSet::new();
-    for name in layout.names() {
-        digests.insert(layout.computer(&name).read_record()?.image_digest);
-    }
+    let mut digests: HashSet<String> = records(layout)?
+        .into_iter()
+        .map(|record| record.image_digest)
+        .collect();
     for snapshot in Store::new(layout).list(None)? {
         digests.insert(snapshot.template.image_digest);
     }
@@ -652,6 +663,7 @@ mod tests {
         ] {
             while_unreadable(&folder, || {
                 assert!(referenced(&layout).is_err(), "{}", folder.display());
+                assert!(images_named(&layout).is_err(), "{}", folder.display());
                 assert!(collectible(&layout).is_empty(), "{}", folder.display());
             });
         }
