@@ -37,7 +37,7 @@ import { applicationPreferenceChanges, type ApplicationPreferenceSelection } fro
 import { useStableCallback } from "@/lib/use-stable-callback"
 import { SettingsProvider, useSettings } from "@/features/preferences/settings-store"
 import { useMacosComputers } from "@/features/macos-computers/model/macos-computers"
-import { selectableMacosIds } from "@/features/application/model/macos-log-computers"
+import { selectableMacosIds, useMacosApplication } from "@/features/application/model/macos-application-computers"
 import { PageContainer } from "@/components/page"
 
 function computerAttentionCounts(source: Pick<ApplicationSource, "computers" | "computerConfigurationOperation">): { errors: number; warnings: number } {
@@ -134,7 +134,8 @@ export function ApplicationApp(props: ApplicationAppProps) {
   return <SettingsProvider initialSettings={initialSettings}><ApplicationContent {...props} /></SettingsProvider>
 }
 
-function ApplicationContent({ source, actions, backup, initialRoute, routeRequest, connectQuitConfirmation, onOpenRequest }: ApplicationAppProps) {
+function ApplicationContent({ source: nativeSource, actions: nativeActions, backup, initialRoute, routeRequest, connectQuitConfirmation, onOpenRequest }: ApplicationAppProps) {
+  const { source, actions } = useMacosApplication(nativeSource, nativeActions)
   useBackendNotices()
   useEffect(() => preloadWhenIdle(secondaryPages), [])
   const updates = useUpdates()
@@ -343,8 +344,10 @@ function ApplicationContent({ source, actions, backup, initialRoute, routeReques
   const openImport = useStableCallback(() => { navigation.selectComputerSection("overview"); navigation.closeComputer(); void transfer.beginImport() })
   const exportComputerByName = useStableCallback((name: string) => { void transfer.exportComputer(name) })
   const openGeneralSettings = useStableCallback(() => navigation.selectSettingsSection("general"))
-  const computerAttention = useMemo(() => computerAttentionCounts(applicationSource), [applicationSource])
-  const navigationLoading = useMemo(() => navigationLoadingState(applicationSource, githubBusy, backupBusy), [applicationSource, githubBusy, backupBusy])
+  // The navigation badges follow the Linux computers; a macOS computer shows its own state on its row and page.
+  const navigationSource = useMemo(() => ({ ...applicationSource, computers: nativeSource.computers }), [applicationSource, nativeSource.computers])
+  const computerAttention = useMemo(() => computerAttentionCounts(navigationSource), [navigationSource])
+  const navigationLoading = useMemo(() => navigationLoadingState(navigationSource, githubBusy, backupBusy), [navigationSource, githubBusy, backupBusy])
   const commands = useMemo(() => [...applicationCommands(applicationSource, actions, navigateCommand, {
     onImportComputer: canImport ? openImport : undefined,
     onNewComputer: canCreateComputer ? requestNewComputer : undefined,
@@ -478,7 +481,7 @@ function ApplicationContent({ source, actions, backup, initialRoute, routeReques
       <section id="application-panel-settings" role="region" aria-labelledby="application-nav-settings" hidden={visibleTab !== "settings"}>
         <div hidden={settingsSection !== "general"}>
           <PanelContent active={visibleTab === "settings" && settingsSection === "general"}>
-            <GeneralPageView source={source} applicationPreferences={applicationPreferences} onApplicationPreferencesChange={changeApplicationPreferences} reduceMotion={reduceMotion} onReduceMotionChange={changeReduceMotion} />
+            <GeneralPageView source={nativeSource} applicationPreferences={applicationPreferences} onApplicationPreferencesChange={changeApplicationPreferences} reduceMotion={reduceMotion} onReduceMotionChange={changeReduceMotion} />
           </PanelContent>
         </div>
         <PageContainer hidden={settingsSection !== "connections"}>

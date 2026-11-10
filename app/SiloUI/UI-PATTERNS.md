@@ -110,6 +110,11 @@ surface and its fixtures; there is no on-page selector, so edit the URL.
 | `computer-use` | Built-in computer use: `unavailable`, `installing`, `ready`, `failed`, `auto`, `unknown-approval`, `approval-pending`, `approval-failed`, `approval-partial`, `pre-v4` (the approval ones show the chosen mode, "Applying…" or the failed/partial result with the warning that some agents may still act without asking; the switch applies like the native one, pending then applied). Enables the Computer use section (sandbox page, `dev`) and the `view=desktop` header. There is no consent notice anywhere | `src/fixtures/computer-use.ts` |
 | `appearance` | `light`, `dark`; otherwise the fixture's theme preference | `src/fixtures/preview.tsx` |
 
+The app view also lists the macOS fixture computers (`src/fixtures/macos-computers.ts`) beside the Linux
+ones, whatever the scenario: `daily` is running, `agent-box` is being set up, `xcode-build` is stopped with
+checkpoints. Each opens the same computer page as a Linux computer and appears on the Files, Logs, Network,
+Secrets and GitHub pages.
+
 For example, `/preview.html?view=status-bar&status-bar=long-list` or
 `/preview.html?view=app&scenario=complete&system-issue=needed`. Opening Silo
 from finished onboarding or choosing **Open Silo** in the status bar switches

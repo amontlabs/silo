@@ -7,7 +7,7 @@ import { ComputerFileTree } from "@/features/application/components/computer-fil
 import { useFileTransferControls } from "@/features/application/components/use-file-transfers"
 import type { createDirectoryStore } from "@/features/application/model/directory-store"
 import { memo, useEffect, useId, useMemo, useState } from "react"
-import { macosLogComputer } from "@/features/application/model/macos-log-computers"
+import { computerCan, kindOf } from "@/features/computers/model/computer-capabilities"
 import { useMacosComputers } from "@/features/macos-computers/model/macos-computers"
 import { Activity, Archive, Box, Boxes, Check, CircleAlert, Cloud, File, GitBranch, KeyRound, Plus, RefreshCw, TriangleAlert, Wrench } from "lucide-react"
 
@@ -388,35 +388,26 @@ export function ComputersPage({
       return configuration ? { id: configuration.id, name: configuration.name } : undefined
     },
   })
-  // The Logs section also lists this device's macOS computers: their setup logs are retained
-  // under their ids. Every other section works with the computers of the application source.
-  const macos = useMacosComputers()
-  const macosComputers = macos?.snapshot.state?.supported ? macos.snapshot.state.computers : undefined
-  const remoteMacos = macos?.snapshot.remote
-  const macosStore = macos?.store
+  // The devices whose macOS computers the Logs page lists are read while it is shown.
+  const macosStore = useMacosComputers()?.store
   const logsOwner = useId()
   const logDevices = JSON.stringify(section === "logs" ? (source.devices ?? []).map(device => [device.id, device.connected]) : [])
   useEffect(() => {
     macosStore?.setRemoteDevices(logsOwner, (JSON.parse(logDevices) as [string, boolean][]).map(([id, connected]) => ({ id, connected })))
   }, [macosStore, logsOwner, logDevices])
   useEffect(() => () => macosStore?.setRemoteDevices(logsOwner, []), [macosStore, logsOwner])
+  // Every computer has logs; Files and Network list the ones whose system serves them.
   const listed = useMemo(() => {
-    if (section !== "logs") return computers
-    // Other devices' macOS computers follow the local ones, for the devices of the source that host them.
-    const remote = (source.devices ?? []).flatMap(device => {
-      const hosted = remoteMacos?.[device.id]?.state
-      return hosted?.supported ? hosted.computers.map(computer => macosLogComputer(computer, device)) : []
-    })
-    const extra = [...(macosComputers ?? []).map(computer => macosLogComputer(computer)), ...remote]
-    return extra.length ? [...computers, ...extra] : computers
-  }, [section, computers, macosComputers, remoteMacos, source.devices])
-  // A macOS computer selected on the Logs page is not one of the computers of the other
-  // sections: it stays selected for the way back but filters nothing there.
+    const needs = section === "files" ? "files" : section === "network" ? "ports" : undefined
+    return needs ? computers.filter(computer => computerCan(kindOf(computer), needs)) : computers
+  }, [section, computers])
+  // A computer selected on the Logs page that another section does not list stays selected for
+  // the way back but filters nothing there.
   const selection = useMemo(() => {
     if (section === "logs") return selectedComputerIds
-    const known = new Set(computers.map(({ configuration }) => configuration.id))
+    const known = new Set(listed.map(({ configuration }) => configuration.id))
     return new Set([...selectedComputerIds].filter((id) => known.has(id)))
-  }, [section, computers, selectedComputerIds])
+  }, [section, listed, selectedComputerIds])
   const changeFilter = (next: Set<string>) => {
     if (section === "logs") return onComputerFilterChange(next)
     const hidden = [...selectedComputerIds].filter((id) => !selection.has(id))

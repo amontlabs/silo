@@ -1,4 +1,5 @@
 import { computerTarget } from "@/features/application/model/connections"
+import { workspaceRoot } from "@/features/computers/model/computer-capabilities"
 import { visibleText } from "@/lib/visible-text"
 import { FileActions, FolderActions } from "./folder-actions"
 import type { FileTransferControls } from "./use-file-transfers"
@@ -86,6 +87,7 @@ export function ComputerFileTree({ computer, store, active, editor, onOpenEditor
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set())
   const available = computer.state === "running" && computer.freshness === "fresh"
   const target = computerTarget(computer)
+  const root = workspaceRoot(computer)
   const toggle = (path: string, expand: boolean) => setExpanded((current) => {
     const next = new Set(current)
     if (expand) next.add(path)
@@ -136,10 +138,10 @@ export function ComputerFileTree({ computer, store, active, editor, onOpenEditor
       <ChevronRight className="tree-caret size-3.5 shrink-0 text-muted-foreground transition-transform motion-reduce:transition-none" aria-hidden="true" />
       <Folder className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" /><span className="truncate" title={computer.configuration.name}>{computer.configuration.name}</span>
     </CollapsibleTrigger>
-      {onOpenEditor && <FolderActions editor={editor} path="/workspace" onOpen={() => onOpenEditor(target, "/workspace")} onUpload={transfers && (() => transfers.upload(target, "/workspace", computer.configuration.name))} uploadDisabled={!available || transfers?.busy} disabled={!available} />}
+      {onOpenEditor && <FolderActions editor={editor} path={root} onOpen={() => onOpenEditor(target, root)} onUpload={transfers && (() => transfers.upload(target, root, computer.configuration.name))} uploadDisabled={!available || transfers?.busy} disabled={!available} />}
     </div>
     <CollapsibleContent className="ml-4">
-      {open && (available ? active && <Directory editor={editor} computer={target} computerLabel={computer.configuration.name} path="/workspace" label={`Files in ${computer.configuration.name}`} store={store} expanded={expanded} toggle={toggle} register={register} onOpenEditor={onOpenEditor} transfers={transfers} />
+      {open && (available ? active && <Directory editor={editor} computer={target} computerLabel={computer.configuration.name} path={root} label={`Files in ${computer.configuration.name}`} store={store} expanded={expanded} toggle={toggle} register={register} onOpenEditor={onOpenEditor} transfers={transfers} />
         : <p className="border-l border-border py-1 pl-5 text-xs text-muted-foreground">{computer.freshness !== "fresh" ? "Reconnect to browse files." : computer.state === "stopped" ? "Start this computer to browse its files." : "Files will be available when this computer is running."}</p>)}
     </CollapsibleContent>
   </Collapsible></li>

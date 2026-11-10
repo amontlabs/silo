@@ -2,7 +2,7 @@ import type { LifecycleStep } from "./lifecycle-progress"
 import type { OperationQueue } from "./operation-queue"
 import type { WorkspaceStorageState } from "./workspace-storage"
 import type { ComputerStep, ComputerTreeNode } from "@/desktop/production-schemas"
-import type { QuietState } from "../../macos-computers/model/macos-computers"
+import type { MacosComputer, QuietState } from "../../macos-computers/model/macos-computers"
 import type { CheckpointUsage, PendingCheckpointRestore, UnfinishedRestore, ComputerCheckpoint, ComputerCheckpointOperation } from "./checkpoint-source"
 import type { LogLoader, LogQuery } from "./logs"
 import type { Device, ConnectionsStatus, ComputerDevice } from "./connections"
@@ -25,6 +25,8 @@ export type ComputerDetailSection = Exclude<ComputerSection, "overview">
 /** Tabs on a single computer's detail page, reached from the Computers overview. */
 export type ComputerDetailTab = "overview" | "checkpoints" | "storage" | "access"
 export type ComputerState = "running" | "starting" | "stopped" | "failed"
+/** The system a computer runs. */
+export type ComputerOs = "linux" | "macos"
 
 export type RuntimeRepairPresentation = {
   status: "needed" | "unavailable"
@@ -164,6 +166,10 @@ export interface ApplicationActivity {
 
 export interface ApplicationComputer {
   device?: ComputerDevice
+  /** The system the computer runs; absent means Linux. */
+  os?: ComputerOs
+  /** A macOS computer's own record (setup state, progress, checkpoints); absent on Linux. */
+  macos?: MacosComputer
   configuration: SetupComputerConfiguration
   purpose: string
   state: ComputerState

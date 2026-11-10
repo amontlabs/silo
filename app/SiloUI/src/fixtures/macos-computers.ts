@@ -1,3 +1,4 @@
+import type { ApplicationComputer } from "@/features/application/model/application-source"
 import { createMacosComputersStore, type MacosComputer, type MacosComputersBackend, type MacosComputersState, type MacosRemoteBackend } from "@/features/macos-computers/model/macos-computers"
 
 export const macosComputerFixtures: readonly MacosComputer[] = [
@@ -104,3 +105,15 @@ export function createFixtureMacosRemoteBackend(devices: Record<string, MacosCom
 }
 
 export const createFixtureMacosComputersStore =() => createMacosComputersStore(createFixtureMacosComputersBackend())
+
+/** A small workspace and a setup log for a macOS computer as the application lists it, for the preview's file and log readers. */
+export function withMacosFixtureContents(computer: ApplicationComputer): ApplicationComputer {
+  return {
+    ...computer,
+    files: [
+      { name: "projects", kind: "folder", children: [{ name: "app", kind: "folder", children: [{ name: "README.md", kind: "file" }] }] },
+      { name: "notes.txt", kind: "file" },
+    ],
+    logs: [{ occurredAt: "2026-10-09T10:00:00Z", line: "Setup finished." }],
+  }
+}

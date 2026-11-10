@@ -717,7 +717,7 @@ export function createProductionSource(native: ProductionBridge = bridge) {
 
   function setComputerFailure(action: string, computerId: string, cause: unknown) {
     const computer = view.source?.computers.find(computer => computer.configuration.id === computerId)
-    if (!computer) return
+    if (!computer) { reportActionFailure(`${action}:${computerId}`, `Could not ${action.replace(/-/g, " ")}`, errorMessage(cause)); return }
     const message = errorMessage(cause)
     // A user-requested cancellation is not a failure: record it as a neutral,
     // retryable state so the row shows "<Action> cancelled", not a red error.
@@ -741,7 +741,9 @@ export function createProductionSource(native: ProductionBridge = bridge) {
       return
     }
     const computerId = view.source?.computers.find(computer => computerTarget(computer) === name)?.configuration.id ?? name
-    const stillExists = () => view.source?.computers.some(computer => computer.configuration.id === computerId)
+    // A computer this list does not hold is a macOS computer: its terminal and editor still open here.
+    const listed = view.source?.computers.some(computer => computer.configuration.id === computerId)
+    const stillExists = () => !listed || view.source?.computers.some(computer => computer.configuration.id === computerId)
     const key = `${action}:${computerId}`
     if (pendingComputerActions.has(key) || pendingLifecycle.has(computerId)) return
     pendingComputerActions.add(key)

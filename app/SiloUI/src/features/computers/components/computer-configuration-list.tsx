@@ -80,6 +80,8 @@ interface ComputerConfigurationListProps {
   onNewComputerRequestHandled?: (id: number) => void
   /** Opens the computer's detail page when its row body is activated. */
   onOpenComputer?: (configuration: SetupComputerConfiguration) => void
+  /** Opens the page of a macOS computer of this device, by its id. */
+  onOpenMacosComputer?: (id: string) => void
   /** Runs Duplicate against a configuration on behalf of its detail page (which opens the list editor). */
   configurationActionRequest?: { token: number; computerId: string; action: "duplicate" }
   onConfigurationActionHandled?: (token: number) => void
@@ -103,7 +105,7 @@ interface ComputerConfigurationListProps {
   includeMacosComputers?: boolean
 }
 
-export function ComputerConfigurationList({ devices, getDeviceId, onCommitComputer, onDeleteComputer, onConnectDevice, onImportComputer, onExportMacosComputer, importPopover, configurations, onConfigurationsChange, getRowPresentation, sortPriority, orderRank, onReorder, interactionDisabled: interactionDisabledProp = false, newComputerRequest, onNewComputerRequestHandled, onOpenComputer, configurationActionRequest, onConfigurationActionHandled, summary, footer, initialEditorDraft = null, onEditorDraftChange, validateOperation, isComputerCreated, isComputerDraft, isComputerRunning, getDeviceCapacity, getConfigurationBusyReason, editorDraftKey, includeMacosComputers = false }: ComputerConfigurationListProps) {
+export function ComputerConfigurationList({ devices, getDeviceId, onCommitComputer, onDeleteComputer, onConnectDevice, onImportComputer, onExportMacosComputer, importPopover, configurations, onConfigurationsChange, getRowPresentation, sortPriority, orderRank, onReorder, interactionDisabled: interactionDisabledProp = false, newComputerRequest, onNewComputerRequestHandled, onOpenComputer, onOpenMacosComputer, configurationActionRequest, onConfigurationActionHandled, summary, footer, initialEditorDraft = null, onEditorDraftChange, validateOperation, isComputerCreated, isComputerDraft, isComputerRunning, getDeviceCapacity, getConfigurationBusyReason, editorDraftKey, includeMacosComputers = false }: ComputerConfigurationListProps) {
   const {
     deviceId, setDeviceId,
     committing,
@@ -555,7 +557,7 @@ export function ComputerConfigurationList({ devices, getDeviceId, onCommitComput
                 </ComputerListItem>
               )
             })}
-            {macosComputers.map(computer => <MacosComputerRow key={computer.id} computer={computer} store={macos!.store} takenNames={[...localLinuxNames, ...macosComputers.map(({ name }) => name)]} onExport={onExportMacosComputer} />)}
+            {macosComputers.map(computer => <MacosComputerRow key={computer.id} computer={computer} store={macos!.store} takenNames={[...localLinuxNames, ...macosComputers.map(({ name }) => name)]} onExport={onExportMacosComputer} onOpen={onOpenMacosComputer && (() => onOpenMacosComputer(computer.id))} />)}
             {remoteMacosRows.map(({ computer, device }) => <MacosComputerRow key={computer.id} computer={computer} store={macos!.store} device={device} />)}
         </ComputerList>
         {footer && <div className="mt-3 shrink-0">{footer}</div>}

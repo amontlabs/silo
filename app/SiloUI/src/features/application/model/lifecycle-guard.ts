@@ -3,6 +3,7 @@ import { showActionFailure, showOperationFailure } from "@/lib/operation-toast"
 import type { ApplicationActions, ApplicationSource, ApplicationComputer } from "./application-source"
 import { computerTarget } from "./connections"
 import { computerAvailability } from "./computer-availability"
+import { workspaceRoot } from "@/features/computers/model/computer-capabilities"
 
 export type LifecycleAction = "start" | "stop" | "restart"
 
@@ -50,9 +51,10 @@ export function lifecycleCheck(source: ApplicationSource, computer: ApplicationC
 /** The tray's inline Stop/Restart confirmation, in words every surface shares. */
 export function interruptionPrompt(computer: ApplicationComputer, action: "stop" | "restart"): LifecyclePrompt {
   const label = action === "stop" ? "Stop" : "Restart"
+  const workspace = workspaceRoot(computer)
   const description = action === "stop"
-    ? "Running processes will be interrupted. Files in /workspace are kept."
-    : "Running processes will be interrupted, then the computer starts again. Files in /workspace are kept."
+    ? `Running processes will be interrupted. Files in ${workspace} are kept.`
+    : `Running processes will be interrupted, then the computer starts again. Files in ${workspace} are kept.`
   return { title: `${label} ${computerName(computer)}?`, description, confirmLabel: label, tone: "destructive" }
 }
 

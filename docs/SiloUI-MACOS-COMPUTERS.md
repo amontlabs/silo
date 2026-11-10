@@ -368,8 +368,8 @@ answer a shutdown), waits for it, then stops the computer as usual. Operations a
 refused after Quit has started. The Start of a computer that is changing state or
 is being personalized is refused as before.
 
-**Where they are.** macOS computers have no detail page, so the row has a
-Checkpoints button that opens the list under it; it is the Linux
+**Where they are.** A macOS computer's page has a Checkpoints tab, and its row
+keeps a Checkpoints button that opens the same list under it; it is the Linux
 `CheckpointPanel` fed through a thin adapter (`macos-checkpoint-panel.tsx`), not a
 second list. Setup logs record each operation (Logs page, per computer).
 
@@ -627,7 +627,7 @@ A crash of Silo therefore turns its macOS computers off abruptly.
 | Agent computer use | Installed during setup (step 4). Not done yet: re-applying when the `computerUseAutoApproval` setting changes (a rerun of `apply --approval` does it), status in the UI, and cancelling a download or copy in progress (only the steps between them notice a cancellation). macOS shows one "App Background Activity" banner for the reconcile LaunchAgent. Computers set up with the ChatGPT app and LCU switch to Cua Driver through the in-place update at their next start |
 | Setup on other macOS versions | Verified with macOS 26.6.2 guests on a macOS 26.5 Mac. The offline account edit, the Recovery screens and the TCC schema are undocumented and may change with a release; macOS 14 and 15 guests are not qualified yet |
 | Shared copies of one installation | [Templates](#templates): later computers are APFS clones of the first one's result and share its blocks until they change them. Not done: a template per macOS build kept side by side, and shrinking a template's disk |
-| Terminal, editor, Files, network ports, GitHub, secrets, working account | Done in the engine, for local and remote computers: the `silo` working account with passwordless sudo, SSH through a per-computer alias for the terminal, editor (`/Users/silo/workspace`) and Files, published guest ports, and GitHub tokens and secrets applied through the per-computer network gateway. Not done: the UI. A macOS computer has no detail page, so no terminal, editor or Files entry, and the Network, Secrets and GitHub pages list only Linux computers |
+| Terminal, editor, Files, network ports, GitHub, secrets, working account | Done, for local computers: the `silo` working account with passwordless sudo, SSH through a per-computer alias for the terminal, editor (`/Users/silo/workspace`) and Files, published guest ports, and GitHub tokens and secrets applied through the per-computer network gateway. The app lists a macOS computer beside the Linux ones: it opens the same page (terminal, editor, Show screen, Start, Stop and Force stop, Edit CPU & memory while stopped, Delete; Overview with resources, computer use, repositories, secrets and ports; Checkpoints; setup progress in place of the tabs while it is created or set up) and appears on the Files, Logs, Network, Secrets and GitHub pages. It has no Restart, no SSH access for other devices and no Storage tab, because the engine serves those for Linux computers only. A computer on another device keeps its row, Show screen, Edit CPU & memory and its Logs |
 | Export, import and backup | Done for local computers: export of a computer from its row menu or of one checkpoint from its checkpoint list, import as a new computer (with new guest keys), and cleanup after an interrupted export. Not done: export of a remote computer, and importing a checkpoint into an existing computer |
 | Clipboard | Explicit text and image transfer (step 5); no continuous sync |
 | Shared folders | None. The framework offers a VirtioFS share |

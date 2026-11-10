@@ -43,9 +43,11 @@ export function computerAvailability(computer: ApplicationComputer, source: Appl
   const blocked = blockedReason(computer, source)
   const error = computer.attention?.level === "error" ? computer.attention.message : undefined
   const canOpen = !blocked && !error && state === "running"
-  const canStart = !blocked && (state === "stopped" || state === "failed")
+  // A macOS computer starts once it is installed and personalised, and has no restart.
+  const macos = computer.macos
+  const canStart = !blocked && (state === "stopped" || state === "failed") && (!macos || (macos.installed && !macos.needsPersonalizing))
   const canStop = !blocked && state === "running"
-  const canRestart = !blocked && (state === "running" || state === "failed")
+  const canRestart = !blocked && !macos && (state === "running" || state === "failed")
   const reasons: ComputerAvailability["reasons"] = {}
   if (!canOpen) reasons.open = blocked ?? error ?? `Start ${configuration.name} to open it.`
   if (!canStart) reasons.start = blocked ?? `${configuration.name} is already running.`
