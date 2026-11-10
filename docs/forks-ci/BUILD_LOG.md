@@ -912,7 +912,10 @@ refusal), and of the docs of the whole build against the code. Fixes are in the 
   record on the older image was deleted, the next engine start (or the next unpack of the pinned image) removed
   it and the imported computer could never start ("made from an image that this Silo no longer carries"). Pruning
   now also keeps every image a checkpoint names (`layers::images_named`) and removes nothing when a checkpoint
-  cannot be read. Test: `an_imported_checkpoint_names_its_image_before_its_computer_has_a_record`.
+  cannot be read. Test: `an_imported_checkpoint_names_its_image_before_its_computer_has_a_record`. The same
+  holds for the pinned image on a device where no container computer has needed it yet: it was accepted for the
+  import without being unpacked, so a later Silo that pins another image had nothing kept. An import on the pinned
+  image now unpacks it first (`archive::load`; no unit test, the load needs a container host).
 - **Fixed: a container import's unpack always had one hour.** A VM's import scans its payload and sizes the load's
   timeout from it; a container's layers are not scanned, so its `snapshot load` got the base hour whatever the
   computer's size, where its export's `snapshot save` gets the hour plus the declared storage at 16 MiB/s. The
