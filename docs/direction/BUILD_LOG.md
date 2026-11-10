@@ -29,7 +29,8 @@ Plan: [PLAN.md](PLAN.md). Agent rules: [AGENT-BRIEF.md](AGENT-BRIEF.md).
 | T11 | running since 2026-11-10 | | task id ends `8a11b496-7815-4ef3-830d-fe8aa13cc55a` (Sonnet) |
 | T12 | running since 2026-11-10 | | task id ends `67f835b1-ca2e-4f89-9c93-4ad720bb45be` (Sonnet) |
 | S2 | running since 2026-11-10 | | task id ends `c8ba35ed-17ae-4a93-b259-def2953e1398` (Sonnet), upgrade path spike |
-| T7 | running since 2026-11-10 | | task id ends `b9b0ef15-b4e5-4f7f-8b3d-4c63559442bd` (Sonnet); no live macOS check in the item |
+| T7 | merged 2026-11-10 | `fix/macos-nat-boundary` | 530 macOS engine tests passed; unit tests only, no macOS computer run; one review round on the fallback model. Live steps are in the item's report, copied below |
+| T14 | running since 2026-11-10 | | task id ends `daee93c4-fbae-4cc0-8abb-9e9e902d2ca4` (Sonnet); holds the Dev engine for its live canary check |
 
 Task ids are `node:delegated-task:command%3Amcp%3Ad723019c-0dae-419c-8e5d-2e7d794e60f4%3Adelegate-task%3A<ending>`.
 Next waves are in the plan's work items table; start an item only when the items before it in
@@ -69,6 +70,20 @@ These were not asked of the owner. Each is open to change.
     requests, which narrows it).
 
 ## Found during the build
+
+- **T7:** bootstrap files on a used disk are replaced, never created (the host cannot make
+  root-owned files the guest accepts), so a fork or import whose disk lacks any of the three is
+  refused. The proxy CA is installed in the first boot, not written offline. A computer converted
+  by the launch migration from before the gateway still boots on NAT once (its record is not
+  flagged); closing that needs the migration to stage offline. The Claude Code installer still
+  downloads inside the guest. Full engine suite in the item: 3378 passed, 8 failed, all in
+  `host_push::protocol_tests` (git and LFS), not run on the base commit, so not known to be new.
+- **T7 live check, still to run:** (1) fork a complete macOS computer whose tools are stale: no
+  NAT boot in the setup log, key login behind the gateway, fork ends complete; (2) import an
+  export: same, including the 775 MB tools copy over the gateway's SSH port and the Claude Code
+  install; (3) fork or import a disk with one bootstrap file removed: refusal, disk unchanged;
+  (4) the SIP step: Recovery works with no network card; (5) first install and template copy
+  still use NAT.
 
 - **Worktrees** are under `~/.t3/worktrees/microsandbox-workspaces/`; branch names are chosen by
   the agents (see the Branch column).
