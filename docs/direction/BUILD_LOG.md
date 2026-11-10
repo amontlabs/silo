@@ -22,7 +22,7 @@ Plan: [PLAN.md](PLAN.md). Agent rules: [AGENT-BRIEF.md](AGENT-BRIEF.md).
 
 | Item | State | Branch | Notes |
 | --- | --- | --- | --- |
-| S1 | running since 2026-11-10 | | task id ends `f0bbe729-e613-4141-8f68-11c7985e03a3` (Sonnet) |
+| S1 | merged 2026-11-10 | `docs/s1-gateway-channel-spike` | [evidence](evidence/S1.md). Channel: yes, no patch. Allowlist: needs strict off, a `restore --net-strict` patch, and gateway init fields |
 | T1 | running since 2026-11-10 | | task id ends `21b89a79-7c1e-432c-8118-44fc0eddcff6` (Opus) |
 | T4 | running since 2026-11-10 | | task id ends `a5a79a51-152a-44dd-b757-b4b2547b6e88` (Sonnet) |
 | T9 | running since 2026-11-10 | | task id ends `5af06c4c-ae51-47ff-a807-035a14df103b` (Sonnet) |
@@ -65,3 +65,11 @@ These were not asked of the owner. Each is open to change.
     requests, which narrows it).
 
 ## Found during the build
+
+- **S1:** `msb modify` cannot change network rules; the supported way on an existing computer is
+  the engine's restore in place (about 1.2 s idle). `--vsock` works and is a second fallback for
+  the channel. The guest `silo` builds with `scripts/build-guest-silo.sh` in 36 s (12.7 MB,
+  static); plain cargo fails because `ring` needs a C compiler. `current_network_args` rejects
+  hostname rules, `restore` has no `--net-strict`, and `portable_export_network` refuses a
+  computer whose strict is off. A memory-restored test computer reported a pinned `interface`
+  that made export refuse; not checked whether the engine clears it.
