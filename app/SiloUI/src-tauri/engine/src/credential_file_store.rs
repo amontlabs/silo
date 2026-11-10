@@ -950,7 +950,6 @@ mod tests {
         for storage in crate::runtime_migration::STORAGE_FOLDERS {
             let storage = app_data.join(storage);
             let runtime = storage.join("microsandbox");
-            sources.push(crate::guest_client::spool::spool_dir(&runtime, "computer"));
             sources.push(runtime.join("sandboxes/computer"));
             sources.push(storage.join("volumes"));
             sources.push(storage.clone());

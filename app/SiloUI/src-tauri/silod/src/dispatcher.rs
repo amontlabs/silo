@@ -109,9 +109,20 @@ pub struct SessionState {
     protocol: Option<u32>,
     client: Option<ClientMetadata>,
     seen_ids: HashSet<String>,
+    /// The computer whose channel this session arrived on; `None` on `engine.sock`.
+    computer: Option<String>,
 }
 
 impl SessionState {
+    /// A session on `computer_id`'s channel: every request it makes is that computer's. Only
+    /// the channel's listener makes one, after the handshake's token was checked.
+    pub(crate) fn for_computer(computer_id: String) -> Self {
+        Self {
+            computer: Some(computer_id),
+            ..Self::default()
+        }
+    }
+
     pub fn client_id(&self) -> Option<&str> {
         self.client_id.as_deref()
     }
@@ -506,13 +517,17 @@ impl Dispatcher {
             .client_id
             .clone()
             .expect("negotiated session has client id");
-        // The engine's own socket is the owner's. The client's name is diagnostic only.
-        let caller = Caller::owner(
-            session
-                .client
-                .as_ref()
-                .map_or(client_id.as_str(), |client| client.name.as_str()),
-        );
+        // The engine's own socket is the owner's; a computer's channel is that computer's. The
+        // client's name is diagnostic only.
+        let caller = match &session.computer {
+            Some(id) => Caller::Computer { id: id.clone() },
+            None => Caller::owner(
+                session
+                    .client
+                    .as_ref()
+                    .map_or(client_id.as_str(), |client| client.name.as_str()),
+            ),
+        };
         let request_context = RequestContext {
             client_id,
             protocol: session.protocol.expect("negotiated session has protocol"),

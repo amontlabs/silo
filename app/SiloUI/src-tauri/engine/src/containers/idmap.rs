@@ -11,9 +11,8 @@
 //! | A | 0 | the engine's own user and group |
 //! | A+1 ..= 65535 | A+1 ..= 65535 | sub-ids |
 //!
-//! `A` is the working account, 1001. A file the account writes is the engine's on disk, so the
-//! engine reads the account's `0600` request files and the account reads the engine's `0600`
-//! answers (the in-guest client's spool). Everything else, root included, is a sub-id.
+//! `A` is the working account, 1001. A file the account writes is the engine's on disk.
+//! Everything else, root included, is a sub-id.
 //!
 //! The same layout is what the image, the boot layer and the upper directory are owned by:
 //! `silo-ctr userns --keep-id A` makes the namespace those are unpacked in.

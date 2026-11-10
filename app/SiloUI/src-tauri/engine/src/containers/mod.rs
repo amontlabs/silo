@@ -47,13 +47,6 @@ pub fn is_container_config(config: &Value) -> bool {
     })
 }
 
-/// For the in-guest client of the computer `name`, the id mapping its bridge folder's files are
-/// owned by (`guest_client::Spool::new` takes it); `None` when the runtime home holds no container
-/// computer of that name.
-pub fn keep_id_for(home: &std::path::Path, name: &str) -> Option<idmap::KeepId> {
-    capability::is_container(home, name).then(idmap::KeepId::current)
-}
-
 /// The program and leading argument of the container runtime command (`cli`): `silod`, which
 /// is installed beside the bundled `msb`.
 pub fn runtime_invocation(paths: &RuntimePaths) -> (PathBuf, Vec<String>) {

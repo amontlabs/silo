@@ -911,9 +911,8 @@ pub fn spawn_guard(paths: &RuntimePaths) {
 }
 
 /// Creates what the container binds as its per-computer share (`/.msb`): the computer's runtime
-/// folder, which the in-guest client's bridge folder lives in. Only the account that owns the engine
-/// reaches it from the host, and the container's other users only get to search it, as in a virtual
-/// machine (`guest_client::Spool` seals the folders below it).
+/// folder. Only the account that owns the engine reaches it from the host, and the container's
+/// other users only get to search it, as in a virtual machine.
 fn share_directory(home: &Path, name: &str) -> Result<PathBuf, String> {
     use std::os::unix::fs::PermissionsExt;
     let computer = home.join("sandboxes").join(name);

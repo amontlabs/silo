@@ -228,6 +228,11 @@ impl silo_engine::secrets::RuntimeAccess for SecretsRuntimeAccess {
     }
 }
 
+/// Whether `computer_id` is a macOS computer on this device.
+pub(crate) fn is_macos_computer(computer_id: &str) -> bool {
+    macos_proxy::owning_context(computer_id).is_some()
+}
+
 /// The macOS secrets and GitHub host proxy. Each function resolves the computer by name in
 /// the macOS store and calls the engine's `proxy_*` entry point. No computer is a macOS
 /// proxy computer until the access runtime is installed.

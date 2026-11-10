@@ -96,9 +96,11 @@ pub struct IncompatibleVersionDiagnostics {
 }
 
 /// The engine protocol. 6 was the first canonical multiplexed protocol; 7 removes the
-/// ChatGPT app and LCU methods and fields. Legacy bridge protocol v5 is retired and is not
-/// accepted by `engine.sock`.
-pub const PROTOCOL_VERSION: u32 = 7;
+/// ChatGPT app and LCU methods and fields; 8 adds the handshake's `token` (the channel inside a
+/// computer) and retypes `guestClient.enable`, `.revoke` and `.status` as Silo's tools in a
+/// computer (a port and a token the engine writes into the computer, no token in any answer).
+/// Legacy bridge protocol v5 is retired and is not accepted by `engine.sock`.
+pub const PROTOCOL_VERSION: u32 = 8;
 
 /// Client information is diagnostic metadata, not an authorization identity.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize, schemars::JsonSchema)]
@@ -108,7 +110,8 @@ pub struct ClientMetadata {
 }
 
 /// `engine.handshake` parameters. `sshKey` is used by the Connections bridge
-/// to install the restricted key; local engine clients omit it.
+/// to install the restricted key; local engine clients omit it. `token` is the computer's
+/// token on the channel inside a computer, and is required there; `engine.sock` ignores it.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct HandshakeParams {
@@ -117,6 +120,8 @@ pub struct HandshakeParams {
     pub protocol: ProtocolRange,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub client: Option<ClientMetadata>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token: Option<String>,
 }
 
 /// Result of protocol negotiation. `clientId` is supplied on `engine.sock`

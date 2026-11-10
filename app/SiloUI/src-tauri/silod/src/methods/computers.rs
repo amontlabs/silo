@@ -1194,6 +1194,16 @@ async fn begin_configuration_retry(
     job_output(job)
 }
 
+/// Turns Silo's tools on for a computer being created. A failure leaves the computer without
+/// them; the owner can turn them on later.
+fn tools_for_new_computer(context: &HandlerContext, computer_id: &str) {
+    let store =
+        silo_engine::guest_client::TokenStore::new(&context.silod_context().paths().app_data);
+    if let Err(error) = silo_engine::guest_client::turn_on_in(&store, computer_id) {
+        eprintln!("silod: Silo's tools for {computer_id}: {error}");
+    }
+}
+
 async fn begin_create(
     context: &HandlerContext,
     params: ComputerCreateParams,
@@ -1222,6 +1232,8 @@ async fn begin_create(
                     .map_err(DispatchError::internal)?;
             }
             let job = accept_linux_setup_job(context, "computers.create", &request_id)?;
+            // A new computer has Silo's tools, so its creation passes the channel's rule too.
+            tools_for_new_computer(context, configuration.id());
             // Only an accepted creation remembers its agents; the job has not started yet.
             silo_engine::agents::request_for_creation(configuration.id(), &agents);
             let change = silo_engine::runtime::ComputerConfigurationChange::Upsert {
@@ -1269,6 +1281,9 @@ async fn begin_create(
             .await
             .map_err(invalid)?;
             let value = with_kind(json!({"computers": [encode(row)?]}), "macos");
+            if let Some(id) = value["computers"][0]["id"].as_str() {
+                tools_for_new_computer(context, id);
+            }
             if let (Some(policy), Some(id)) =
                 (&network_policy, value["computers"][0]["id"].as_str())
             {
