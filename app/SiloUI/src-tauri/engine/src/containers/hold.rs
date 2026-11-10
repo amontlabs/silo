@@ -5,7 +5,7 @@
 #![cfg_attr(not(target_os = "linux"), allow(dead_code))]
 
 use std::{
-    collections::HashSet,
+    collections::HashMap,
     process::Child,
     sync::{Mutex, MutexGuard, PoisonError},
     time::Duration,
@@ -39,11 +39,12 @@ impl Drop for Reaped {
     }
 }
 
-/// The computers this engine process is starting (or reconciling) right now, by name. A computer
-/// in it is neither running nor a leftover: its holder may exist before its gateway does.
-static STARTING: Mutex<Option<HashSet<String>>> = Mutex::new(None);
+/// The computers this engine process has taken, by name, and whether it is starting them (or
+/// reconciling them). A computer being started is neither running nor a leftover: its holder may
+/// exist before its gateway does.
+static STARTING: Mutex<Option<HashMap<String, bool>>> = Mutex::new(None);
 
-fn starting() -> MutexGuard<'static, Option<HashSet<String>>> {
+fn starting() -> MutexGuard<'static, Option<HashMap<String, bool>>> {
     STARTING.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
@@ -51,25 +52,41 @@ fn starting() -> MutexGuard<'static, Option<HashSet<String>>> {
 pub struct StartMark(String);
 
 impl StartMark {
-    /// `None` when the computer is already being started.
+    /// `None` when the computer is already taken (it is being started, or held).
     pub fn begin(name: &str) -> Option<Self> {
-        starting()
-            .get_or_insert_with(HashSet::new)
-            .insert(name.to_owned())
-            .then(|| Self(name.to_owned()))
+        Self::take(name, true)
+    }
+
+    /// Keeps a start from beginning until dropped, without saying the computer is starting: a
+    /// checkpoint holds a computer this way, and a running one stays running to everything that
+    /// asks (a command, a secret change). `None` when the computer is already taken.
+    pub fn hold(name: &str) -> Option<Self> {
+        Self::take(name, false)
+    }
+
+    fn take(name: &str, starting_it: bool) -> Option<Self> {
+        let mut taken = starting();
+        let taken = taken.get_or_insert_with(HashMap::new);
+        if taken.contains_key(name) {
+            return None;
+        }
+        taken.insert(name.to_owned(), starting_it);
+        Some(Self(name.to_owned()))
     }
 }
 
 impl Drop for StartMark {
     fn drop(&mut self) {
-        if let Some(set) = starting().as_mut() {
-            set.remove(&self.0);
+        if let Some(taken) = starting().as_mut() {
+            taken.remove(&self.0);
         }
     }
 }
 
 pub fn is_starting(name: &str) -> bool {
-    starting().as_ref().is_some_and(|set| set.contains(name))
+    starting()
+        .as_ref()
+        .is_some_and(|taken| taken.get(name) == Some(&true))
 }
 
 /// The command a `crun exec` started in the container, which `silo-init --own-group` made the
@@ -324,6 +341,19 @@ mod tests {
         drop(mark);
         assert!(!is_starting("hold-test-a"));
         assert!(StartMark::begin("hold-test-a").is_some());
+    }
+
+    #[test]
+    fn a_held_computer_cannot_be_started_and_is_not_starting() {
+        let hold = StartMark::hold("hold-test-c").unwrap();
+        assert!(!is_starting("hold-test-c"));
+        assert!(StartMark::begin("hold-test-c").is_none());
+        assert!(StartMark::hold("hold-test-c").is_none());
+        drop(hold);
+        // A start in flight keeps a checkpoint from holding the computer.
+        let mark = StartMark::begin("hold-test-c").unwrap();
+        assert!(StartMark::hold("hold-test-c").is_none());
+        drop(mark);
     }
 
     #[test]

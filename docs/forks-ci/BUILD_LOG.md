@@ -797,6 +797,46 @@ app as a Linux VM, and the "not yet" list is down to export (CT6) and memory che
   it is copied out in pieces now.
 
 
+#### Post-merge review: container checkpoints, disk and desktop (CT4 and CT5, 10 Nov 2026)
+
+Review of `engine/src/containers/` (checkpoints, layers, the host disk guard, restart, the desktop's start) and the
+guest desktop scripts as they are on `main`. The guest scripts are shared with virtual machines, and two of the
+fixes are for those.
+
+- **Fixed: computer use stopped working on virtual machines made before the session file.** The launcher and
+  `silo-computer-use` are pushed to every computer after each boot, but a computer keeps the desktop service it was
+  made with, and the service of Silo 0.13 or earlier writes no `session.env`. CT5's review made the file the only
+  source, so on those machines `doctor` raised `session-unavailable` after every boot and the launcher fell back to
+  a bus address that does not exist. Without the file both read the working account's `xfce4-session` process
+  again, as they did before the file. Tests: `SessionEnvironment` and `Launcher` in `test_computer_use.py`.
+- **Fixed: everything started in the desktop had umask 077.** The command that writes the session file set the
+  umask and then ran `startxfce4` in the same shell, in a virtual machine and in a container. The file is written
+  in a subshell. Test: `test_the_session_keeps_the_umask_it_was_started_with` (failed before).
+- **Fixed: collection could remove a layer that was being made.** The copy of a running computer's layer and the
+  fold of a long chain are made outside the store's lock, in a layer nothing names yet, protected only by the
+  10-minute grace, which read the folder's modification time. `cp -a` and `silo-ctr merge` give the new folder its
+  source's time (the fold after each layer it folds), so the layer looked old while it was still being filled. A
+  collection in that window (another checkpoint or computer removed) deleted files under the fold, which then
+  replaced the computer's oldest layers with what was left, or removed the copy a checkpoint was about to name. Such
+  a layer is now reserved until its record or checkpoint is saved (`layers::reserve`). Test:
+  `a_layer_being_made_is_not_collected_however_old_its_files_look`.
+- **Fixed: a folder that could not be read counted as empty.** `layers::referenced` listed the computers and
+  checkpoints with errors dropped, so a `computers` or `snapshots` folder that could not be opened (no descriptor
+  left, an I/O error) named nothing and every layer older than the grace was collected. The scan and `Store::list`
+  now fail on anything but a missing folder, and a failed scan collects nothing. Test:
+  `a_folder_of_records_or_checkpoints_that_cannot_be_read_stops_the_scan` (failed before).
+- **Fixed: a running computer looked as if it were starting while its checkpoint was made.** The checkpoint took
+  the start mark for the whole freeze and copy (up to 40 s), and the status reads that mark first. A command run in
+  that time was refused with "Start NAME first.", and a secret added or removed was written to the record without
+  reaching the running gateway, which kept the old set until the next start. A checkpoint now holds the computer
+  against a start without marking it as starting (`StartMark::hold`). Tests:
+  `a_held_computer_cannot_be_started_and_is_not_starting`, `a_running_computer_held_for_a_checkpoint_is_still_running`.
+- **Not changed, for the owner:** stopping a computer its user paused waits the 15 s for a `TERM` its frozen
+  processes cannot take, then kills them; thawing first is the fix, and it has to say what happens to a checkpoint
+  copy in flight. Smaller: a fold that fails keeps the computer from starting; the "layers do not fit one mount"
+  message says to delete checkpoints, which does not shorten a computer's own chain; one lock serialises the freeze
+  of every computer, so a long copy delays another computer's pause, resume or checkpoint.
+
 ### 9 Nov 2026: phase CT6 built (export, import and Connections for container computers)
 
 Branch `claude/containers-ct6` ([#104](https://github.com/amontlabs/silo/pull/104)). A container computer is exported to a

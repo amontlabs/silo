@@ -776,7 +776,7 @@ pub fn merge_layers(tools: &Tools, out: &Path, layers: &[PathBuf]) -> Result<(),
 
 /// Folds the oldest sealed layers of a stopped computer whose chain is too long into one. Nothing
 /// is locked unless there is something to fold, and the fold is made before the store is locked:
-/// the new layer is safe from collection for the grace period, and the lock is held only to put it
+/// the new layer is reserved, so collection leaves it alone, and the lock is held only to put it
 /// into the record.
 pub fn flatten(paths: &RuntimePaths, tools: &Tools, name: &str) -> Result<(), String> {
     let layout = Layout::new(&paths.home);
@@ -787,6 +787,7 @@ pub fn flatten(paths: &RuntimePaths, tools: &Tools, name: &str) -> Result<(), St
         return Ok(());
     }
     let merged = super::layers::new_id();
+    let _reservation = super::layers::reserve(&merged);
     let sources: Vec<PathBuf> = record.layers[..count].iter().map(|id| layout.layer(id)).collect();
     if let Err(detail) = merge_layers(tools, &layout.layer(&merged), &sources) {
         let _ = super::image::remove_tree(tools, &layout.layer(&merged));
@@ -1943,6 +1944,31 @@ mod tests {
             Status::Starting
         );
         drop(mark);
+    }
+
+    #[test]
+    fn a_running_computer_held_for_a_checkpoint_is_still_running() {
+        let proc = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let paths = test_paths(home.path());
+        let name = "held-box";
+        let state = Layout::new(&paths.home).computer(name).state();
+        std::fs::create_dir_all(&state).unwrap();
+        std::fs::write(state.join("holder.pid"), "10\n").unwrap();
+        std::fs::write(state.join("ctl.sock"), "").unwrap();
+        fake_process(proc.path(), 10, "silo-ctr", &scope_of(&unit_name(&paths, name)));
+        let (control, _peer) = std::os::unix::net::UnixStream::pair().unwrap();
+        let running = register_for_test(name, Gateway::for_test(control), Vec::new());
+        let status = || status_in(proc.path(), &paths, name, &record(true));
+        assert_eq!(status(), Status::Running);
+        // A checkpoint keeps a start from beginning. Commands and secret changes ask for the
+        // status: to them the computer must not look as if it were starting.
+        let hold = StartMark::hold(name).unwrap();
+        assert!(StartMark::begin(name).is_none());
+        assert_eq!(status(), Status::Running);
+        drop(hold);
+        registry().as_mut().and_then(|map| map.remove(name));
+        running.gateway().close();
     }
 
     fn fake_tools(directory: &Path) -> Tools {

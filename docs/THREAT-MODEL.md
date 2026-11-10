@@ -944,7 +944,10 @@ with nothing sensitive on it, and the app, the CLI and `silo list` label it as l
   container is in its own Landlock domain, which cannot read a process of another command (`/proc/<pid>/environ`, `exe`), so
   the desktop session of either kind leaves its display, bus and runtime variables in
   `/run/silo-desktop/user/session.env`, a file only the working account owns and root reads after checking
-  that: it holds no secret, and the desktop stopping removes it. The viewer's credentials stay in
+  that: it holds no secret, and the desktop stopping removes it. A virtual machine whose desktop service predates
+  the file (Silo 0.13 or earlier; a computer keeps its service until its desktop is updated) has none, and the
+  launcher and `silo-computer-use` then read the working account's `xfce4-session` process, as they did before.
+  The viewer's credentials stay in
   `/var/lib/silo-desktop`, root's, and the streamer gets its password in its environment
   (`SELKIES_BASIC_AUTH_PASSWORD`), not in its arguments, which every process in the computer can read; its
   environment is readable by root and the working account's own processes, as in a virtual machine.
@@ -959,7 +962,8 @@ with nothing sensitive on it, and the app, the CLI and `silo list` label it as l
   computer's record, and a fork is a new record over the checkpoint's list with a writable layer
   of its own. Nothing a fork writes reaches the parent or another fork. The fork keeps its own
   reference to the layers, so deleting the parent or the checkpoint keeps them; a layer no record
-  and no checkpoint names is removed. A stopped computer's checkpoint seals its writable layer
+  and no checkpoint names is removed, and nothing is removed when a record, a checkpoint or a
+  folder that holds them cannot be read. A stopped computer's checkpoint seals its writable layer
   (no file moves). A running container cannot swap its writable layer, so its checkpoint is a
   copy of it, made by the container's own user namespace while the container's control group is
   frozen (a reflink copy where the file system has them; otherwise the time grows with the size
@@ -967,12 +971,13 @@ with nothing sensitive on it, and the app, the CLI and `silo list` label it as l
   copy that takes longer is killed, the computer is resumed and the checkpoint fails with a plain
   message (a stopped computer's checkpoint takes no time). The copy is made before the layer
   store's lock is taken, which is held only to register the checkpoint, so a long copy never
-  blocks another computer's start, restore or fork; the new layer is safe from collection for the
-  collection's ten-minute grace period, far longer than the copy may run. The freeze is separate
+  blocks another computer's start, restore or fork; the new layer is marked as being made, so
+  collection leaves it alone until the checkpoint names it (its age would not protect it: a copy
+  keeps its source's modification time). The freeze is separate
   from a user's pause: a checkpoint of a paused computer leaves it paused, `inspect` reports it
   as Paused, and an engine that takes the computer back after a restart does not thaw it (the
   pause is a file in the computer's state folder; a stop or a start removes it). A long chain has its oldest layers folded into one when the computer starts
-  (`silo-ctr merge`, which keeps whiteouts and opaque directories). The layer files are owned by
+  (`silo-ctr merge`, which keeps whiteouts and opaque directories); the folded layer is marked as being made in the same way. The layer files are owned by
   the container's sub-ids, so the engine reads, copies and removes them only through a user
   namespace laid out like the container's. Removing a checkpoint, a fork or a computer drops its
   references; the layers nothing names any more are removed by the next collection pass (at the
