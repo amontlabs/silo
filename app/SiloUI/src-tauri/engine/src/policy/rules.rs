@@ -126,6 +126,9 @@ pub fn rule(method: MethodName) -> Rule {
         // Network and SSH access.
         M::NetworkUrls | M::NetworkUnpublish => Tree,
         M::NetworkPublish => Ask(ApprovalKind::Port),
+        M::NetworkPolicyGet => Tree,
+        // Narrowing is free; a wider policy asks (see `Judge::network_policy`).
+        M::NetworkPolicySet => Ask(ApprovalKind::Network),
         M::NetworkOpen | M::NetworkState => OwnerOnly,
         M::SshAccessSave => Ask(ApprovalKind::Ssh),
         M::SshAccessState | M::SshAccessConnection => OwnerOnly,

@@ -148,6 +148,8 @@ pub struct ForkOptions {
     pub secrets: Vec<String>,
     pub stop: Vec<String>,
     pub scrub: Vec<String>,
+    /// The fork's network policy; `None` keeps the source's.
+    pub network_policy: Option<crate::network_policy::NetworkPolicy>,
 }
 
 /// The name of the assignment that stands for GitHub access.
@@ -610,13 +612,28 @@ fn current_network_args(config: &Value) -> Result<Vec<String>, RuntimeError> {
             .as_str()
             .filter(|value| matches!(*value, "ingress" | "egress"))
             .ok_or_else(|| error("A current network rule is unsupported."))?;
-        let group = rule
+        // A group (`host`, `public`, ...), or a host name rule: `domain` is one name and
+        // `domain_suffix` is a name and every name under it (written `*.<name>`).
+        let name_rule = |key: &str| {
+            rule.pointer(&format!("/destination/{key}"))
+                .and_then(Value::as_str)
+                .filter(|name| crate::network_policy::validate_host(name).is_ok())
+        };
+        let group = if let Some(group) = rule
             .pointer("/destination/group")
             .and_then(Value::as_str)
             .filter(|value| {
                 !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_lowercase())
-            })
-            .ok_or_else(|| error("A current network destination is unsupported."))?;
+            }) {
+            group.to_owned()
+        } else if let Some(domain) = name_rule("domain") {
+            domain.to_owned()
+        } else if let Some(suffix) = name_rule("domain_suffix") {
+            format!("*.{suffix}")
+        } else {
+            return Err(error("A current network destination is unsupported."));
+        };
+        let group = group.as_str();
         let protocols = rule["protocols"]
             .as_array()
             .ok_or_else(|| error("A current network protocol is unsupported."))?;
@@ -1585,6 +1602,8 @@ pub fn import_pending_restore_with_environment(
         "default_ingress": "deny",
         "rules": []
     }));
+    // An import starts closed from that policy, whatever policy a computer of this id had here.
+    crate::network_policy::store::remove(computer_id).map_err(RuntimeError::Unavailable)?;
     save(paths, computer_id, &record)
 }
 
@@ -1610,6 +1629,7 @@ fn running_child_matches(
     attempt_id: &str,
     material: &secrets_runtime::Material,
     policy: &Value,
+    strict: bool,
 ) -> bool {
     inspected.status == "Running"
         && inspected
@@ -1627,7 +1647,15 @@ fn running_child_matches(
             .pointer("/labels/silo.restore-attempt")
             .and_then(Value::as_str)
             == Some(attempt_id)
-        && inspected.config.pointer("/network/policy") == Some(policy)
+        && inspected
+            .config
+            .pointer("/network/policy")
+            .is_some_and(|observed| crate::network_policy::same_policy(observed, policy))
+        && inspected
+            .config
+            .pointer("/network/strict")
+            .map_or(Some(true), Value::as_bool)
+            == Some(strict)
         && secrets_runtime::verify_config(&inspected.config, material)
         && inspected
             .config
@@ -1641,6 +1669,149 @@ fn running_child_matches(
                         && secret["source"]["var"] == "SILO_GITHUB"
                 })
             })
+}
+
+/// The runtime's `restore` must take `--net-strict` (Silo's `restore-net-strict` patch) before an
+/// allowlist computer is restored, or it would come back strict and its allowed hosts would fail.
+fn ensure_restore_strict(runner: &dyn RuntimeRunner, paths: &RuntimePaths) -> Result<(), RuntimeError> {
+    let probe = runner.run(
+        paths,
+        &["--silo-restore-strict-protocol".into()],
+        READ_TIMEOUT,
+    );
+    match probe {
+        Ok(output) if output.stdout.trim() == "1" => Ok(()),
+        _ => Err(RuntimeError::Unavailable(
+            "The bundled runtime cannot restore a computer with a list of allowed hosts. Update or repair Silo, then start the computer again.".into(),
+        )),
+    }
+}
+
+/// The rules a virtual machine's stored network policy asks for, with the computer as the
+/// runtime reports it, when the runtime holds other rules. `None` for a computer with no stored
+/// policy, a container, one with a restore in progress and one that already holds them.
+fn changed_network_plan(
+    runner: &dyn RuntimeRunner,
+    paths: &RuntimePaths,
+    configuration: &ComputerConfiguration,
+) -> Result<Option<(crate::network_policy::Plan, InspectedSandbox)>, RuntimeError> {
+    if configuration.runtime.is_some() {
+        return Ok(None);
+    }
+    let Some(stored) =
+        crate::network_policy::store::get(configuration.id()).map_err(RuntimeError::Unavailable)?
+    else {
+        return Ok(None);
+    };
+    let record = load(paths, configuration.id())?;
+    if record.pending_checkpoint_restore.is_some() || record.restore_journal.is_some() {
+        return Ok(None);
+    }
+    let inspected = inspect_computer(runner, paths, configuration.name())?;
+    ensure_managed(&inspected)?;
+    if inspected
+        .config
+        .pointer("/labels/silo.machine-id")
+        .and_then(Value::as_str)
+        != Some(configuration.id())
+    {
+        return Ok(None);
+    }
+    let plan = crate::network_policy::plan(
+        &stored,
+        &crate::network_policy::Grants::of_computer(configuration.name()),
+        &crate::network_policy::extra_rules(configuration.id()),
+    );
+    let network = inspected.config.get("network").cloned().unwrap_or(Value::Null);
+    if plan.matches(&network) {
+        return Ok(None);
+    }
+    Ok(Some((plan, inspected)))
+}
+
+/// Whether a virtual machine's runtime holds other rules than its stored network policy asks
+/// for, so its next start applies them.
+pub(crate) fn network_policy_changed(
+    runner: &dyn RuntimeRunner,
+    paths: &RuntimePaths,
+    configuration: &ComputerConfiguration,
+) -> Result<bool, RuntimeError> {
+    Ok(changed_network_plan(runner, paths, configuration)?.is_some())
+}
+
+/// Applies a changed network policy to a stopped virtual machine before it starts. The runtime
+/// cannot change a computer's rules, so the engine restores it in place: a disk checkpoint
+/// ("Before network policy change"), then the computer is replaced from that checkpoint with
+/// the new rules, as a Restore does. Returns whether it did this and started the computer.
+/// A computer with no stored policy, a container, a running computer and one whose runtime
+/// already holds the rules are left alone.
+pub(super) fn apply_network_policy_change(
+    runner: &dyn RuntimeRunner,
+    paths: &RuntimePaths,
+    configuration: &ComputerConfiguration,
+) -> Result<bool, RuntimeError> {
+    let Some((plan, inspected)) = changed_network_plan(runner, paths, configuration)? else {
+        return Ok(false);
+    };
+    if !matches!(inspected.status.as_str(), "Stopped" | "Created") {
+        return Ok(false);
+    }
+    if !plan.strict {
+        ensure_restore_strict(runner, paths)?;
+    }
+    let lineage_group = ensure_snapshot_group(paths, configuration.id(), configuration.name())?;
+    let checkpoint = capture_with_kind(
+        runner,
+        paths,
+        configuration.id(),
+        "Before network policy change",
+        "before-restore",
+        "manual",
+        CaptureDepth::DisksOnly,
+    )?;
+    let mut record = load(paths, configuration.id())?;
+    record.snapshot_group = Some(lineage_group.clone());
+    record.desired_network_policy = Some(plan.policy_value());
+    record.legacy_mounts = crate::legacy_mounts::recorded(&inspected.config);
+    // Until the original is removed and the pending restore saved, an interruption leaves an
+    // unfinished Restore to this checkpoint, which Start and Abandon already resolve.
+    record.restore_journal = Some(RestoreJournal {
+        target_checkpoint_id: checkpoint.id.clone(),
+        recovery_checkpoint: checkpoint.clone(),
+        prior_running: false,
+        phase: "secured".into(),
+    });
+    record.checkpoint_operation = Some(Operation {
+        kind: "restore".into(),
+        status: "running".into(),
+        stage: "Applying the network policy".into(),
+        error: None,
+    });
+    save(paths, configuration.id(), &record)?;
+    crate::ssh_access::close_computer(configuration.name());
+    crate::desktop_viewer::close_computer(configuration.name());
+    runner.run(
+        paths,
+        &[
+            "remove".into(),
+            "--quiet".into(),
+            configuration.name().into(),
+        ],
+        STOP_TIMEOUT,
+    )?;
+    record.pending_checkpoint_restore = Some(PendingRestore {
+        checkpoint_id: checkpoint.native_id().to_owned(),
+        source_computer: lineage_group,
+        state: checkpoint.scope.clone(),
+    });
+    record.restore_journal = None;
+    record.restore_attempted = false;
+    record.restore_attempt_ran = false;
+    record.restore_attempt_id = None;
+    record.checkpoint_operation = None;
+    save(paths, configuration.id(), &record)?;
+    start_pending(runner, paths, configuration)?;
+    Ok(true)
 }
 
 pub(super) fn start_pending(
@@ -1708,10 +1879,26 @@ pub(super) fn start_pending(
             "Silo cannot match the pending checkpoint to this computer's history. The checkpoint was preserved. Relaunch Silo and retry Start.",
         ));
     }
-    let policy = record.desired_network_policy.clone().ok_or_else(|| {
+    let recorded = record.desired_network_policy.clone().ok_or_else(|| {
         error("The fork's desired network policy is missing. The checkpoint was preserved.")
     })?;
-    let network_args = current_network_args(&serde_json::json!({"network":{"policy":policy}}))?;
+    // The rules come from the computer's stored network policy, so a restore, a fork or an
+    // import starts with that policy and its strict setting.
+    let plan = crate::network_policy::plan_for(
+        configuration.id(),
+        configuration.name(),
+        Some(&recorded),
+    );
+    let policy = plan.policy_value();
+    let mut network_args = current_network_args(&serde_json::json!({"network":{"policy":policy}}))?;
+    if !plan.strict {
+        ensure_restore_strict(runner, paths)?;
+        network_args.push(plan.strict_arg());
+    }
+    if record.desired_network_policy.as_ref() != Some(&policy) {
+        record.desired_network_policy = Some(policy.clone());
+        save(paths, configuration.id(), &record)?;
+    }
     let material = crate::secrets::runtime_material(configuration.name())
         .map_err(RuntimeError::Unavailable)?;
     secrets_runtime::validate_material(&material).map_err(RuntimeError::Invalid)?;
@@ -1753,6 +1940,7 @@ pub(super) fn start_pending(
             attempt_id,
             &material,
             &policy,
+            plan.strict,
         ) {
             record.pending_checkpoint_restore = None;
             record.checkpoint_operation = None;
@@ -1920,7 +2108,7 @@ pub(super) fn start_pending(
         .is_ok_and(|computer| matches!(computer.status.as_str(), "Running" | "Paused" | "Crashed"));
     let result = restored
         .and_then(|_| inspect_computer(runner, paths, configuration.name()))
-        .and_then(|observed| if running_child_matches(&observed, configuration.id(), &attempt_id, &material, &policy) {
+        .and_then(|observed| if running_child_matches(&observed, configuration.id(), &attempt_id, &material, &policy, plan.strict) {
             Ok(observed)
         } else { Err(error("The restored computer did not reach a verified running state. Its checkpoint was preserved.")) })
         ;
@@ -2487,6 +2675,12 @@ fn fork_commit_with_metadata_writer(
     let mut copied_secrets = false;
     let result = (|| {
         crate::computer_use::inherit_settings(paths, source.id(), &child_id)?;
+        crate::network_policy::store::inherit(
+            source.id(),
+            &child_id,
+            fork.options.network_policy.as_ref(),
+        )
+        .map_err(RuntimeError::Unavailable)?;
         // Nothing is copied unless the fork names it; GitHub access is always read-only.
         if fork.options.copies_github() {
             assignments
@@ -2536,6 +2730,7 @@ fn fork_commit_with_metadata_writer(
     if copied_github {
         failed.extend(assignments.forget_github(new_name).err());
     }
+    failed.extend(crate::network_policy::store::remove(&child_id).err());
     failed.extend(
         forget_removed(paths, &child_id)
             .err()

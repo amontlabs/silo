@@ -68,6 +68,7 @@ pub mod macos_display_gateway;
 #[path = "macos_remote.rs"]
 pub mod macos_remote_engine;
 pub mod network;
+pub mod network_policy;
 pub mod notices;
 pub mod owned_tunnel;
 pub mod policy;

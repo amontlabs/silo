@@ -54,6 +54,28 @@ pub fn blocked_gateway_policy() -> Value {
     json!({"default_egress": "deny", "default_ingress": "allow", "rules": []})
 }
 
+/// What a container's gateway is started with: the policy (`None` is the gateway's own, public
+/// addresses only) and the strict setting (`None` is on). A blocked computer is closed whatever
+/// policy is stored; otherwise the stored network policy applies, and open with nothing extra
+/// keeps the gateway's own.
+pub fn gateway_network(name: &str, record: &ComputerRecord) -> (Option<Value>, Option<bool>) {
+    if record.network_blocked {
+        return (Some(blocked_gateway_policy()), None);
+    }
+    let Some(id) = record.label("silo.machine-id") else {
+        return (None, None);
+    };
+    gateway_network_for(&crate::network_policy::plan_for(id, name, None))
+}
+
+fn gateway_network_for(plan: &crate::network_policy::Plan) -> (Option<Value>, Option<bool>) {
+    use crate::network_policy::Rule;
+    if plan.rules == [Rule::Dns, Rule::Public] && plan.strict {
+        return (None, None);
+    }
+    (Some(plan.policy_value()), Some(plan.strict))
+}
+
 /// The network policy a container computer reports, which a fork or a restore is asked to keep.
 /// A container has one of two networks: its gateway's own policy (public addresses only,
 /// enforced there), reported as egress allowed, or none at all ([`blocked_policy`]).
@@ -228,6 +250,44 @@ mod tests {
         )
         .unwrap();
         assert!(record.github && record.secrets.is_empty());
+    }
+
+    #[test]
+    fn the_gateway_gets_the_stored_policy_and_a_blocked_computer_stays_closed() {
+        use crate::network_policy::{plan, Grants, NetworkPolicy, NetworkPolicyMode};
+        let open = plan(&NetworkPolicy::default(), &Grants::default(), &[]);
+        assert_eq!(gateway_network_for(&open), (None, None));
+        let list = plan(
+            &NetworkPolicy {
+                mode: NetworkPolicyMode::Allowlist,
+                hosts: vec!["example.com".into()],
+                presets: Vec::new(),
+            },
+            &Grants::default(),
+            &[],
+        );
+        let (policy, strict) = gateway_network_for(&list);
+        assert_eq!(strict, Some(false));
+        assert_eq!(policy.unwrap()["rules"][1]["destination"], json!({"domain": "example.com"}));
+        let closed = plan(
+            &NetworkPolicy {
+                mode: NetworkPolicyMode::Closed,
+                ..NetworkPolicy::default()
+            },
+            &Grants::default(),
+            &[],
+        );
+        assert_eq!(
+            gateway_network_for(&closed),
+            (Some(blocked_gateway_policy()), Some(true))
+        );
+        let mut blocked = record();
+        blocked.network_blocked = true;
+        blocked.labels.push(("silo.machine-id".into(), "c1".into()));
+        assert_eq!(
+            gateway_network("dev", &blocked),
+            (Some(blocked_gateway_policy()), None)
+        );
     }
 
     #[test]

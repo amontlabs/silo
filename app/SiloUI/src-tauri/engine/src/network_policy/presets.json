@@ -1,0 +1,57 @@
+{
+  "version": 1,
+  "presets": [
+    {
+      "name": "npm",
+      "title": "npm registry",
+      "hosts": ["registry.npmjs.org", "registry.yarnpkg.com"]
+    },
+    {
+      "name": "pypi",
+      "title": "Python Package Index",
+      "hosts": ["pypi.org", "files.pythonhosted.org"]
+    },
+    {
+      "name": "crates",
+      "title": "crates.io",
+      "hosts": ["crates.io", "index.crates.io", "static.crates.io"]
+    },
+    {
+      "name": "ubuntu",
+      "title": "Ubuntu archives",
+      "hosts": [
+        { "host": "*.archive.ubuntu.com", "ports": [80, 443] },
+        { "host": "security.ubuntu.com", "ports": [80, 443] },
+        { "host": "ports.ubuntu.com", "ports": [80, 443] }
+      ]
+    },
+    {
+      "name": "homebrew",
+      "title": "Homebrew",
+      "hosts": ["formulae.brew.sh", "ghcr.io", "pkg-containers.githubusercontent.com"]
+    },
+    {
+      "name": "github",
+      "title": "GitHub",
+      "hosts": [
+        "github.com",
+        "api.github.com",
+        "uploads.github.com",
+        "codeload.github.com",
+        "raw.githubusercontent.com",
+        "objects.githubusercontent.com",
+        "release-assets.githubusercontent.com"
+      ]
+    },
+    {
+      "name": "anthropic",
+      "title": "Anthropic API and sign-in",
+      "hosts": ["api.anthropic.com", "console.anthropic.com", "claude.ai"]
+    },
+    {
+      "name": "openai",
+      "title": "OpenAI API and sign-in",
+      "hosts": ["api.openai.com", "auth.openai.com", "chatgpt.com"]
+    }
+  ]
+}

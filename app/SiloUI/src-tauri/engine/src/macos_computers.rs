@@ -5992,6 +5992,7 @@ fn delete(app: &MacosContext, id: &str) -> Result<(), String> {
                 registry().entries.retain(|entry| entry.record.id != id);
                 crate::changes::store::forget(app.engine.as_ref(), &[id.to_owned()]);
                 crate::policy::store::computer_removed(id);
+                crate::network_policy::computer_removed(id);
                 if let Err(message) = ports::computer_removed(app, id) {
                     eprintln!("A deleted macOS computer's published ports could not be removed: {message}");
                 }
@@ -6741,6 +6742,8 @@ fn fork_checkpoint_with_workflow(
         record.computer_use_desired_approval = held.record.computer_use_desired_approval;
         // A crash before the files are copied leaves a failed computer that can be deleted.
         store::save(&Layout::new(&data, &record.id), &record)?;
+        // The fork keeps its source's network policy unless the call gave it another.
+        crate::network_policy::store::inherit(id, &record.id, options.network_policy.as_ref())?;
         let entry = Entry::new(record.clone(), State::Copying, None);
         let cancel = entry.cancel.clone();
         registry.entries.push(entry);
