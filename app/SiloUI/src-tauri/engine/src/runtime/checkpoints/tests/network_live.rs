@@ -13,7 +13,6 @@ const PROBE: &str = r#"
 code() { curl -s -o /dev/null -m 12 -k -w '%{http_code}' "$1" 2>/dev/null || true; }
 echo "allowed host, HTTPS (example.com): $(code https://example.com)"
 echo "other host, HTTPS (example.org): $(code https://example.org)"
-echo "direct public IP, HTTPS (1.1.1.1): $(code https://1.1.1.1)"
 echo "secret-covered host, HTTPS (api.github.com): $(code https://api.github.com/zen)"
 echo "name example.org through the gateway: $(getent hosts example.org | head -1 | cut -d' ' -f1)"
 python3 - <<'PY'
@@ -29,6 +28,13 @@ def ask(server, name):
         return "rcode=%d answers=%d" % (data[3] & 15, struct.unpack('>H', data[6:8])[0])
     except Exception as e:
         return "no answer (%s)" % type(e).__name__
+def connect(address, port):
+    try:
+        socket.create_connection((address, port), timeout=6).close()
+        return "connected"
+    except Exception as e:
+        return "failed (%s)" % type(e).__name__
+print("direct public IP, TCP connect (1.1.1.1:443):", connect("1.1.1.1", 443))
 print("another resolver (1.1.1.1) for example.org:", ask("1.1.1.1", "example.org"))
 PY
 "#;
@@ -56,19 +62,19 @@ fn field(report: &str, label: &str) -> String {
 
 fn probe(fixture: &Fixture, name: &str, label: &str) -> Reach {
     let report = fixture.exec(name, "root", PROBE).unwrap();
-    eprintln!("PROBE {label} ({name}):\n{report}");
+    eprintln!("\nPROBE {label} ({name}):\n{report}");
     Reach {
         example_com: field(&report, "allowed host, HTTPS (example.com)"),
         example_org: field(&report, "other host, HTTPS (example.org)"),
-        public_ip: field(&report, "direct public IP, HTTPS (1.1.1.1)"),
+        public_ip: field(&report, "direct public IP, TCP connect (1.1.1.1:443)"),
         github: field(&report, "secret-covered host, HTTPS (api.github.com)"),
         gateway_name: field(&report, "name example.org through the gateway"),
         resolver: field(&report, "another resolver (1.1.1.1) for example.org"),
     }
 }
 
-fn reached(code: &str) -> bool {
-    code != "000" && !code.is_empty()
+fn reached(result: &str) -> bool {
+    result != "000" && !result.is_empty() && !result.starts_with("failed")
 }
 
 fn answered(resolver: &str) -> bool {
@@ -230,5 +236,5 @@ fn live_network_policy_modes_restore_and_fork() {
     keep_config(&fixture, source, "allowlist-restored");
     fixture.stop(source);
     use_test_grants(None);
-    eprintln!("Verified the network policy modes, the change on start, a fork and a restore.");
+    eprintln!("\nVerified the network policy modes, the change on start, a fork and a restore.");
 }

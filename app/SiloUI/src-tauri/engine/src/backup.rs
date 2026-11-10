@@ -9330,17 +9330,22 @@ mod tests {
         for path in names {
             let label = path.file_stem().unwrap().to_string_lossy().into_owned();
             let mut config: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+            // Fields the runtime reports for a live computer that a snapshot's configuration lacks.
+            for key in ["external_mount_policy", "snapshot_parent"] {
+                config.as_object_mut().unwrap().remove(key);
+            }
             let strict = config["network"]["strict"].clone();
             let rules = config["network"]["policy"]["rules"].as_array().map_or(0, Vec::len);
-            let before = validate_snapshottable_config(&label, &config);
-            let exported = portable_export_network(&label, &mut config);
-            let after = validate_snapshottable_config(&label, &config);
+            let name = config["name"].as_str().unwrap().to_owned();
+            let before = validate_snapshottable_config(&name, &config);
+            let exported = portable_export_network(&name, &mut config);
+            let after = validate_snapshottable_config(&name, &config);
             let show = |result: &Result<(), BackupError>| match result {
                 Ok(()) => "accepted".to_owned(),
                 Err(error) => format!("refused: {error}"),
             };
             eprintln!(
-                "EXPORT {label}: runtime strict={strict}, {rules} rules; as it runs: {}; export reset: {}; after the reset: {}; strict now {}",
+                "\nEXPORT {label}: runtime strict={strict}, {rules} rules; as it runs: {}; export reset: {}; after the reset: {}; strict now {}",
                 show(&before),
                 show(&exported),
                 show(&after),
