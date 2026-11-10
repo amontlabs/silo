@@ -25,7 +25,8 @@ Plan: [PLAN.md](PLAN.md). Agent rules: [AGENT-BRIEF.md](AGENT-BRIEF.md).
 | S1 | merged 2026-11-10 | `docs/s1-gateway-channel-spike` | [evidence](evidence/S1.md). Channel: yes, no patch. Allowlist: needs strict off, a `restore --net-strict` patch, and gateway init fields |
 | T1 | running since 2026-11-10 | | task id ends `21b89a79-7c1e-432c-8118-44fc0eddcff6` (Opus) |
 | T4 | merged 2026-11-10 | `feat/keep-conflict-choices` | engine tests 273, api 53, silod checkpoints 56 passed in the item; two review rounds; the `silo-ui` crate was not built there |
-| T9 | running since 2026-11-10 | | task id ends `5af06c4c-ae51-47ff-a807-035a14df103b` (Sonnet) |
+| T9 | merged 2026-11-10 | `feat/macos-computer-app-parity` | frontend only, no Rust change; 2914 frontend tests passed in the item; reviewed by the fallback model (gemini flash) only, one round; not run in the real app |
+| T11 | running since 2026-11-10 | | task id ends `8a11b496-7815-4ef3-830d-fe8aa13cc55a` (Sonnet) |
 | T12 | running since 2026-11-10 | | task id ends `67f835b1-ca2e-4f89-9c93-4ad720bb45be` (Sonnet) |
 | S2 | running since 2026-11-10 | | task id ends `c8ba35ed-17ae-4a93-b259-def2953e1398` (Sonnet), upgrade path spike |
 | T7 | running since 2026-11-10 | | task id ends `b9b0ef15-b4e5-4f7f-8b3d-4c63559442bd` (Sonnet); no live macOS check in the item |
@@ -68,6 +69,16 @@ These were not asked of the owner. Each is open to change.
     requests, which narrows it).
 
 ## Found during the build
+
+- **Worktrees** are under `~/.t3/worktrees/microsandbox-workspaces/`; branch names are chosen by
+  the agents (see the Branch column).
+- **Reviewer availability:** T9's review ran on the last fallback (gemini flash); T4's first
+  round also ran on a fallback. Boundary items get the orchestrator's own review on top.
+- **T9, left for the owner:** navigation badges (error count, spinner) still follow Linux
+  computers only, because the preview fixtures include a failed macOS computer; macOS computers
+  on another device stay rows without a page; disk size is not editable (the engine allows CPU
+  and memory only). `computers.restart`, `storage.*` and SSH access reject macOS computers in the
+  engine, so the page does not offer them. The export-before-delete fix has no test.
 
 - **T4:** the `silo-ui` build script printed the contents of `github-build.local.json` into the
   agent's command output during a cargo build. Nothing was committed. The owner may want to
