@@ -188,11 +188,17 @@ pub enum ComputerCreateParams {
         request_id: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         device_id: Option<String>,
+        /// Agents to install once the computer is first ready. Empty installs none.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        agents: Vec<super::agents::AgentId>,
     },
     Macos {
         request: MacosComputerCreateRequest,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         device_id: Option<String>,
+        /// Agents to install once setup has completed. Empty installs none.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        agents: Vec<super::agents::AgentId>,
     },
 }
 

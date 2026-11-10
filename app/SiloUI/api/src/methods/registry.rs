@@ -65,6 +65,8 @@ pub struct MethodDescriptor {
 
 define_registry! {
     ActivitySetupRead => ("activity.setup.read", Query, common::DeviceParams, Vec<computers::ComputerConfigurationProgress>);
+    AgentsInstall => ("agents.install", Job, agents::AgentsInstallParams, common::JobStartResult);
+    AgentsList => ("agents.list", Query, agents::AgentsListParams, agents::AgentsListResult);
     ChangesKeep => ("changes.keep", Job, keep::ChangesKeepParams, common::JobStartResult);
     ChangesPromote => ("changes.promote", Job, keep::ChangesPromoteParams, common::JobStartResult);
     ChangesRequest => ("changes.request", Command, keep::ChangesRequestParams, keep::ChangesRequestResult);
@@ -251,13 +253,13 @@ mod tests {
 
     #[test]
     fn registry_covers_every_canonical_method_and_kind() {
-        assert_eq!(METHOD_REGISTRY.len(), 175);
+        assert_eq!(METHOD_REGISTRY.len(), 177);
         assert_eq!(
             METHOD_REGISTRY
                 .iter()
                 .filter(|m| m.kind == MethodKind::Query)
                 .count(),
-            54
+            55
         );
         assert_eq!(
             METHOD_REGISTRY
@@ -271,7 +273,7 @@ mod tests {
                 .iter()
                 .filter(|m| m.kind == MethodKind::Job)
                 .count(),
-            42
+            43
         );
         assert_eq!(
             METHOD_REGISTRY

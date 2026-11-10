@@ -60,6 +60,7 @@ struct JobTerminalResultsSchema {
     requests_show: crate::methods::review_requests::ChangesRequestsShowResult,
     requests_throw_away: crate::methods::review_requests::ChangesRequestsThrowAwayResult,
     desktop: crate::methods::desktop::DesktopStatus,
+    agents: crate::methods::agents::AgentsListResult,
     backup: crate::methods::exports::BackupOperation,
     archive_inspection: crate::methods::exports::ArchiveInspectionResult,
     export_check: crate::methods::exports::ExportCheckResult,
@@ -77,6 +78,7 @@ struct JobTerminalResultsSchema {
 /// Method-specific final job result schemas. Conditional rows describe the
 /// platform-specific terminal outcomes called out in the domain specifications.
 pub const JOB_FINISHED_RESULT_REGISTRY: &[(&str, &str)] = &[
+    ("agents.install", "AgentsListResult"),
     ("changes.keep", "ChangesKeepResult"),
     ("changes.promote", "ChangesPromoteResult"),
     ("changes.requests.keep", "ChangesRequestsKeepResult"),
@@ -197,8 +199,8 @@ mod tests {
             schema_json().unwrap()
         );
         let schema: serde_json::Value = serde_json::from_str(&schema_json().unwrap()).unwrap();
-        assert_eq!(schema["x-silo-methods"].as_array().unwrap().len(), 175);
-        assert_eq!(schema["x-silo-job-results"].as_array().unwrap().len(), 39);
+        assert_eq!(schema["x-silo-methods"].as_array().unwrap().len(), 177);
+        assert_eq!(schema["x-silo-job-results"].as_array().unwrap().len(), 40);
         assert_eq!(
             schema["$schema"],
             "https://json-schema.org/draft/2020-12/schema"

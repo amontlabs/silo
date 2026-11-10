@@ -288,7 +288,8 @@ fn progress_job_id(progress: &JobProgress) -> JobId {
         | JobProgress::Backup { job_id, .. }
         | JobProgress::Push { job_id, .. }
         | JobProgress::Macos { job_id, .. }
-        | JobProgress::Update { job_id, .. } => job_id.clone(),
+        | JobProgress::Update { job_id, .. }
+        | JobProgress::Agent { job_id, .. } => job_id.clone(),
     }
 }
 

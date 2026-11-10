@@ -6695,6 +6695,7 @@ fn create_computer_with_progress(
             progress("computer-use-pending", name, 0);
         }
     }
+    crate::desktop::install_requested_after_create(runner, paths, id, name);
     Ok(())
 }
 
