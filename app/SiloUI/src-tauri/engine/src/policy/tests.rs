@@ -11,6 +11,7 @@ struct World {
     created: HashMap<&'static str, &'static str>,
     access: HashMap<&'static str, Access>,
     github: Option<Vec<Value>>,
+    sizes: HashMap<&'static str, Resources>,
 }
 
 impl Default for World {
@@ -46,6 +47,12 @@ impl Default for World {
         Self {
             created: HashMap::from([("fork-1", "main"), ("fork-2", "main"), ("grand", "fork-1")]),
             access,
+            sizes: HashMap::from([(
+                "main",
+                Resources::of_linux(&json!({"cpus": 2, "maxCPUs": 4, "memoryGiB": 4,
+                    "maxMemoryGiB": 8, "workspaceStorageGiB": 20, "runtimeStorageGiB": 10}))
+                .unwrap(),
+            )]),
             github: Some(vec![
                 json!({"computerId": "main", "repositoryMode": "selected"}),
                 json!({"computerId": "stranger", "repositoryMode": "all"}),
@@ -83,9 +90,23 @@ impl super::World for World {
     fn request_fork(&self, request_id: &str) -> Option<String> {
         match request_id {
             "fr-mine" => Some("fork-1".into()),
+            "fr-nested" => Some("grand".into()),
             "fr-hand" => Some("by-hand".into()),
             _ => None,
         }
+    }
+    fn request_target(&self, request_id: &str) -> Option<String> {
+        match request_id {
+            "fr-mine" => Some("main".into()),
+            "fr-nested" => Some("fork-1".into()),
+            _ => None,
+        }
+    }
+    fn resources(&self, computer: &str) -> Option<Resources> {
+        self.sizes.get(computer).copied()
+    }
+    fn ssh_settings(&self, _computer: &str) -> Option<(u16, String)> {
+        Some((2200, "127.0.0.1".into()))
     }
     fn access(&self, computer: &str) -> Access {
         self.access.get(computer).cloned().unwrap_or_default()
@@ -480,8 +501,8 @@ fn reserved_names_are_refused_and_a_new_linux_computer_gets_the_engines_id() {
     let macos = json!({"kind": "macos", "request": {"name": "silo-build-m", "cpus": 4,
         "memoryGiB": 8, "diskGiB": 64}});
     assert!(refused(&check("computers.create", macos)));
-    let macos = json!({"kind": "macos", "request": {"name": "mac", "cpus": 4,
-        "memoryGiB": 8, "diskGiB": 64}});
+    let macos = json!({"kind": "macos", "request": {"name": "mac", "cpus": 2,
+        "memoryGiB": 4, "diskGiB": 30}});
     assert!(allowed(&check("computers.create", macos)));
 }
 
@@ -497,14 +518,25 @@ fn merging_into_what_it_made_is_free_and_into_itself_asks() {
         json!({"forkId": "fork-1", "targetId": "stranger"})
     )));
     assert!(refused(&as_computer("fork-1", "changes.keep", json!({"forkId": "fork-1"}))));
+    // Replacing itself asks; replacing a computer it made is as free as merging into one.
     assert_eq!(
-        asked(&check("changes.promote", json!({"forkId": "grand"}))),
+        asked(&check("changes.promote", json!({"forkId": "fork-1"}))),
         Some(ApprovalKind::ReplaceMain)
     );
+    assert!(allowed(&check("changes.promote", json!({"forkId": "grand"}))));
+    assert!(allowed(&check(
+        "changes.promote",
+        json!({"forkId": "grand", "targetId": "fork-1"})
+    )));
+    assert!(refused(&check(
+        "changes.promote",
+        json!({"forkId": "grand", "targetId": "stranger"})
+    )));
     assert_eq!(
         asked(&check("changes.requests.keep", json!({"requestId": "fr-mine"}))),
         Some(ApprovalKind::Merge)
     );
+    assert!(allowed(&check("changes.requests.keep", json!({"requestId": "fr-nested"}))));
     assert!(allowed(&check("changes.undo", json!({"computerId": "fork-1"}))));
     assert_eq!(
         asked(&check("changes.undo", json!({"computerId": "main"}))),
@@ -750,4 +782,107 @@ mod store {
         assert!(store.snapshot().unwrap().jobs.is_empty());
         store.remove_computers(&["main"]).unwrap();
     }
+}
+
+#[test]
+fn turning_ssh_access_off_passes_only_the_computer_the_switch_and_what_is_saved() {
+    let hostile = json!({"computerId": "fork-1", "enabled": false, "port": 22,
+        "bindAddress": "0.0.0.0", "keys": ["ssh-ed25519 AAAA attacker"], "deviceId": "local"});
+    assert_eq!(
+        params_of(check("sshAccess.save", hostile)),
+        json!({"computerId": "fork-1", "enabled": false, "port": 2200, "bindAddress": "127.0.0.1"})
+    );
+    assert!(refused(&check(
+        "sshAccess.save",
+        json!({"computerId": "stranger", "enabled": false, "port": 22, "bindAddress": "x"})
+    )));
+}
+
+#[test]
+fn preparing_a_computer_for_ssh_is_the_owners() {
+    assert!(refused(&check("guest.prepare", json!({"computerId": "fork-1"}))));
+    assert!(refused(&check("guest.prepare", json!({"computerId": "main"}))));
+}
+
+#[test]
+fn a_checkpoint_of_its_own_computer_is_manual_and_never_trims_anything() {
+    let own = params_of(check(
+        "checkpoints.create",
+        json!({"computerId": "main", "name": "x", "kind": "step", "keepNewest": 1}),
+    ));
+    assert_eq!(own, json!({"computerId": "main", "name": "x", "kind": "manual"}));
+    let plain = params_of(check("checkpoints.create", json!({"computerId": "main", "name": "x"})));
+    assert_eq!(plain["kind"], "manual");
+    // A computer it made is the caller's to manage: the parameters pass through.
+    let made = json!({"computerId": "fork-1", "name": "x", "kind": "step", "keepNewest": 3});
+    assert_eq!(params_of(check("checkpoints.create", made.clone())), made);
+}
+
+fn linux_create(sizes: Value) -> Value {
+    let mut configuration = json!({"id": "x", "name": "box", "cpus": 2, "maxCPUs": 4,
+        "memoryGiB": 4, "maxMemoryGiB": 8, "workspaceStorageGiB": 20, "runtimeStorageGiB": 10});
+    for (key, value) in sizes.as_object().into_iter().flatten() {
+        configuration[key] = value.clone();
+    }
+    json!({"kind": "linux", "configuration": configuration})
+}
+
+#[test]
+fn a_new_computer_larger_than_its_maker_asks_with_the_sizes() {
+    assert!(allowed(&check("computers.create", linux_create(json!({})))));
+    assert!(allowed(&check("computers.create", linux_create(json!({"cpus": 1, "memoryGiB": 1})))));
+    for (field, value) in [
+        ("cpus", 3),
+        ("maxCPUs", 5),
+        ("memoryGiB", 5),
+        ("maxMemoryGiB", 9),
+        ("workspaceStorageGiB", 21),
+        ("runtimeStorageGiB", 11),
+    ] {
+        match check("computers.create", linux_create(json!({ field: value }))) {
+            Decision::Ask { kind, summary } => {
+                assert_eq!(kind, ApprovalKind::Resources, "{field}");
+                assert!(summary.contains(&value.to_string()), "{field}: {summary}");
+                assert!(summary.contains("box"), "{summary}");
+            }
+            other => panic!("{field}: {other:?}"),
+        }
+    }
+    // A container that is also larger says so, and is asked as a container.
+    let mut container = linux_create(json!({"cpus": 8}));
+    container["configuration"]["runtime"] = json!("container");
+    match check("computers.create", container) {
+        Decision::Ask { kind, summary } => {
+            assert_eq!(kind, ApprovalKind::Container);
+            assert!(summary.contains("8 CPUs") && summary.contains("more than"), "{summary}");
+        }
+        other => panic!("{other:?}"),
+    }
+    // A computer whose own sizes are unknown asks for anything.
+    assert_eq!(
+        asked(&as_computer("fork-2", "computers.create", linux_create(json!({})))),
+        Some(ApprovalKind::Resources)
+    );
+    let macos = |cpus: u64, disk: u64| {
+        json!({"kind": "macos", "request": {"name": "mac", "cpus": cpus,
+            "memoryGiB": 4, "diskGiB": disk}})
+    };
+    assert!(allowed(&check("computers.create", macos(2, 30))));
+    assert_eq!(asked(&check("computers.create", macos(3, 30))), Some(ApprovalKind::Resources));
+    assert_eq!(asked(&check("computers.create", macos(2, 31))), Some(ApprovalKind::Resources));
+}
+
+#[test]
+fn only_the_desktop_choice_that_is_safe_reaches_a_new_computer() {
+    let mut create = linux_create(json!({}));
+    create["configuration"]["desktop"] = json!({"startWithComputer": false, "builtIn": true});
+    let granted = params_of(check("computers.create", create.clone()));
+    assert_eq!(granted["configuration"]["desktop"], json!({"startWithComputer": false}));
+    create["configuration"]["desktop"] = json!({"startWithComputer": "yes"});
+    assert!(refused(&check("computers.create", create.clone())));
+    create["configuration"]["desktop"] = json!("on");
+    assert!(refused(&check("computers.create", create.clone())));
+    create["configuration"]["desktop"] = Value::Null;
+    let granted = params_of(check("computers.create", create));
+    assert!(granted["configuration"].get("desktop").is_none());
 }

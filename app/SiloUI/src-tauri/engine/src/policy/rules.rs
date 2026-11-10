@@ -86,7 +86,7 @@ pub fn rule(method: MethodName) -> Rule {
 
         // Inside a computer: commands, files, the desktop and computer use.
         M::GuestExec | M::GuestExecStart | M::GuestFilesWrite | M::GuestFilesRemove => Made,
-        M::GuestPrepare | M::GuestSsh => Made,
+        M::GuestSsh => Made,
         M::GuestAccount | M::GuestFilesList | M::GuestFilesRead | M::GuestFilesWatch => Tree,
         M::FilesList | M::LogsQuery => Tree,
         M::DesktopAction | M::ComputerUseSetup | M::ClipboardWrite => Made,
@@ -116,6 +116,8 @@ pub fn rule(method: MethodName) -> Rule {
         | M::TerminalCommand
         | M::GuestSshAliasEnsure
         | M::GuestSshAliasRemove => OwnerOnly,
+        // Prepares the device-wide authorized_keys file every computer shares.
+        M::GuestPrepare => OwnerOnly,
         M::GuestClientEnable | M::GuestClientRevoke | M::GuestClientStatus => OwnerOnly,
         // The agents a computer has: reading is like its other status, installing runs in it.
         M::AgentsList => Tree,

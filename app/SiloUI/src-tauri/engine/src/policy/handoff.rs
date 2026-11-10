@@ -198,7 +198,7 @@ mod tests {
     use silo_api::methods::MethodName;
 
     use super::*;
-    use crate::policy::{decide, Access, Caller, Decision, World};
+    use crate::policy::{decide, Access, Caller, Decision, Resources, World};
 
     fn made(id: &str, by: &str) -> Created {
         Created {
@@ -233,6 +233,15 @@ mod tests {
             self.0.owns_job(caller, job_id)
         }
         fn request_fork(&self, _request_id: &str) -> Option<String> {
+            None
+        }
+        fn request_target(&self, _request_id: &str) -> Option<String> {
+            None
+        }
+        fn resources(&self, computer: &str) -> Option<Resources> {
+            None
+        }
+        fn ssh_settings(&self, _computer: &str) -> Option<(u16, String)> {
             None
         }
         fn access(&self, _computer: &str) -> Access {
