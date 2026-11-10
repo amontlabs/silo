@@ -1,4 +1,4 @@
-//! The first start of a fork that was personalized while stopped.
+//! The first start of a fork, or of an import, that was personalized while stopped.
 //!
 //! Its disk already has the new password and automatic login, no login keychain, no SSH
 //! keys of the source, and the network configuration of its own gateway address. Its
@@ -120,7 +120,7 @@ pub(super) fn complete(
 ) -> Result<store::Record, String> {
     let account = guest_access::account(layout)?;
     let public_key = guest_access::public_key(&account)?;
-    let identity_script = offline_setup::fork_finalization_script(&public_key, &record.name);
+    let identity_script = identity_script(record, &public_key);
     let log = SetupLog::open(app, &record.id);
     if let Some(log) = &log {
         log.hide(&account.password);
@@ -206,6 +206,15 @@ impl Guest for Live<'_> {
         if let Some(log) = &self.log {
             log.command(what, output.status, &output.stdout, &output.stderr);
         }
+    }
+}
+
+/// The account script of this boot: an imported disk also has its login keychains cleared.
+fn identity_script(record: &store::Record, public_key: &str) -> String {
+    if record.imported {
+        offline_setup::import_finalization_script(public_key, &record.name)
+    } else {
+        offline_setup::fork_finalization_script(public_key, &record.name)
     }
 }
 
@@ -309,6 +318,18 @@ mod tests {
         record.first_boot = true;
         record.inherited_access = true;
         record
+    }
+
+    #[test]
+    fn an_imported_disk_gets_the_import_account_script_and_a_fork_the_fork_script() {
+        let fork = record();
+        let forked = identity_script(&fork, "ssh-ed25519 AAAA key");
+        assert!(!forked.contains("Library/Keychains"));
+        let mut imported = record();
+        imported.imported = true;
+        let script = identity_script(&imported, "ssh-ed25519 AAAA key");
+        assert!(script.contains("Library/Keychains"));
+        assert!(script.contains("ssh-keygen -A"));
     }
 
     #[test]
