@@ -22,7 +22,7 @@ export interface ApplicationNavigationLoading {
 }
 
 const primaryItems = [
-  { id: "changes", label: "Pending changes", icon: GitPullRequestArrow },
+  { id: "changes", label: "Pending", icon: GitPullRequestArrow },
   { id: "github", label: "GitHub", icon: GitFork },
   { id: "secrets", label: "Secrets", icon: KeyRound },
 ] as const
@@ -92,6 +92,7 @@ function NavigationButton({
   loading = false,
   reserveDisclosure = false,
   attention,
+  count = 0,
   describedBy,
   collapsed,
   onClick,
@@ -105,11 +106,16 @@ function NavigationButton({
   reserveDisclosure?: boolean
   /** Attention mirrored from a collapsed menu's sections. */
   attention?: SidebarAttention | null
+  /** How many things wait for the person on this page; zero shows nothing. */
+  count?: number
   describedBy?: string
   collapsed: boolean
   onClick: () => void
 }) {
+  const countID = `application-nav-${id}-count`
+  const countLabel = `${count} waiting for you`
   return (
+    <>
     <NavigationTooltip label={label} collapsed={collapsed} shortcut={shortcutFor(id === "computers" ? "go-computers" : id === "settings" ? "settings" : `go-${id}`)}>
     <button
       id={`application-nav-${id}`}
@@ -120,7 +126,7 @@ function NavigationButton({
       aria-controls={`application-panel-${id}`}
       aria-keyshortcuts={shortcutFor(id === "computers" ? "go-computers" : id === "settings" ? "settings" : `go-${id}`)?.aria}
       aria-busy={loading || undefined}
-      aria-describedby={describedBy}
+      aria-describedby={[describedBy, count > 0 ? countID : undefined].filter(Boolean).join(" ") || undefined}
       onClick={onClick}
       className={cn(
         sidebarItemClass,
@@ -144,10 +150,15 @@ function NavigationButton({
       </span>
       <span className="sidebar-label flex-1 text-left">{label}</span>
       {hasAttention(attention) && <AttentionMark attention={attention} collapsed={collapsed} />}
+      {count > 0 && (collapsed
+        ? <span data-navigation-count aria-hidden="true" className="absolute top-1 right-1 size-1.5 rounded-full bg-primary" />
+        : <span data-navigation-count aria-hidden="true" className="grid h-4 min-w-4 shrink-0 place-items-center rounded-full bg-primary px-1 text-caption leading-none font-medium text-primary-foreground tabular-nums">{count}</span>)}
       {!collapsed && <NavigationLoadingIndicator loading={loading} collapsed={false} />}
       {!collapsed && <SidebarShortcut action={id === "computers" ? "go-computers" : id === "settings" ? "settings" : `go-${id}`} />}
     </button>
     </NavigationTooltip>
+    {count > 0 && <span id={countID} className="sr-only">{countLabel}</span>}
+    </>
   )
 }
 
@@ -300,6 +311,7 @@ export function ApplicationShell({
   systemIssueStatus,
   computerAttention,
   navigationLoading,
+  pendingCount = 0,
   navigationDisabled = false,
   defaultSettingsMenuOpen = activeTab === "settings",
   toggleSidebarRequest,
@@ -323,6 +335,8 @@ export function ApplicationShell({
   systemIssueStatus: ActiveRuntimeRepairPresentation["status"] | null
   computerAttention: SidebarAttention
   navigationLoading?: ApplicationNavigationLoading
+  /** How many things wait for the person, shown on the Pending entry. */
+  pendingCount?: number
   navigationDisabled?: boolean
   defaultSettingsMenuOpen?: boolean
   toggleSidebarRequest?: number
@@ -426,7 +440,7 @@ export function ApplicationShell({
                 />
               </DisclosureNavigationItem>
               {primaryItems.map(({ id, label, icon }) => (
-                <NavigationButton key={id} id={id} label={label} icon={icon} active={activeTab === id} collapsed={collapsed} loading={navigationLoading?.tabs?.[id]} onClick={() => selectTab(id)} />
+                <NavigationButton key={id} id={id} label={label} icon={icon} active={activeTab === id} collapsed={collapsed} loading={navigationLoading?.tabs?.[id]} count={id === "changes" ? pendingCount : 0} onClick={() => selectTab(id)} />
               ))}
             </div>
             <div className="mt-auto grid w-full grid-cols-1 gap-1">

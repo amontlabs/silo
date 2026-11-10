@@ -91,5 +91,23 @@
   "credentials": {
     "used": [{ "secret": "GITHUB_TOKEN", "host": "api.github.com", "method": "GET", "count": 4, "lastAt": 1793000000000 }],
     "blocked": []
+  },
+  "choicesNeeded": {
+    "status": "refused",
+    "report": { "fork": "login-fix", "target": "main", "summary": [], "steps": [], "notes": [], "checkpoint": null, "fastForward": false },
+    "refusal": {
+      "reason": "choices-needed", "message": "Both sides changed 2 items. Choose which side to keep for each one.",
+      "hint": "Choose an answer for each item and merge again.",
+      "conflicts": [
+        { "kind": "file", "item": "/etc/app.conf", "detail": "Both changed this file.", "id": "file:/etc/app.conf", "allowed": ["fork", "main"], "forkChange": "changed the port", "mainChange": "changed the log level" },
+        { "kind": "git", "item": "/root/app", "detail": "The commits cannot be merged cleanly.", "id": "repo:/root/app", "allowed": ["branch", "main"], "forkChange": "3 new commits", "mainChange": "2 new commits" }
+      ]
+    },
+    "request": { "id": "req-1", "forkId": "fork-1", "target": "main-1", "createdAt": "2026-11-05T10:00:00Z", "reviewDigest": "d1", "summary": "", "status": "open", "approvalId": "ap-merge" }
+  },
+  "fastForwardKeep": {
+    "status": "kept",
+    "report": { "fork": "login-fix", "target": "main", "summary": ["1 code change"], "steps": [], "notes": [], "checkpoint": "cp-before-keep", "reviewDigest": "d1", "fastForward": true },
+    "request": { "id": "req-1", "forkId": "fork-1", "target": "main-1", "createdAt": "2026-11-05T10:00:00Z", "reviewDigest": "d1", "summary": "", "status": "kept", "keepId": "cp-before-keep" }
   }
 }

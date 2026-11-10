@@ -53,7 +53,7 @@ export function applicationCommands(source: ApplicationSource, actions: Applicat
   const destinations: { label: string; icon: LucideIcon; route: ApplicationInitialRoute; keywords?: string[] }[] = [
     { label: "All computers", icon: Boxes, route: { computerSection: "overview" }, keywords: ["overview", "computers", "configurations"] },
     ...computerSections.map(({ section, label, icon, keywords }) => ({ label, icon, route: { computerSection: section }, keywords: [...keywords] })),
-    { label: "Pending changes", icon: GitPullRequestArrow, route: { tab: "changes" }, keywords: ["review", "requests", "forks", "keep"] },
+    { label: "Pending", icon: GitPullRequestArrow, route: { tab: "changes" }, keywords: ["approvals", "requests", "review", "forks", "merge"] },
     { label: "GitHub", icon: GitFork, route: { tab: "github" }, keywords: ["git", "account", "access"] },
     { label: "Secrets", icon: KeyRound, route: { tab: "secrets" }, keywords: ["tokens", "credentials"] },
     { label: "Settings", icon: Settings2, route: { settingsSection: "general" }, keywords: ["general", "preferences", "applications", "computer use", "agents", "approval"] },

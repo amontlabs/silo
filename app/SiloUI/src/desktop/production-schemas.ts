@@ -279,6 +279,8 @@ export const foldRequestShape = z.object({
   resolvedAt: z.string().nullish().transform(value => value ?? undefined),
   keepingSinceMs: z.number().nonnegative().nullish().transform(value => value ?? undefined),
   closedReason: z.string().nullish().transform(value => (requestClosedReasons as readonly string[]).includes(value ?? "") ? (value as (typeof requestClosedReasons)[number]) : undefined),
+  /** The approval that asks the owner to merge this request, when a computer's agent asked. */
+  approvalId: z.string().nullish().transform(value => value ?? undefined),
 })
 export type FoldRequest = z.infer<typeof foldRequestShape>
 
@@ -312,14 +314,24 @@ export const requestDetailSchema = z.object({
 })
 export type RequestDetail = z.infer<typeof requestDetailSchema>
 
+/** One item both sides changed. `allowed` is empty when no answer settles it (credentials). */
+export const keepConflictShape = z.object({
+  kind: z.string().catch(""), item: z.string().catch(""), detail: z.string().catch(""),
+  id: z.string().catch(""), allowed: z.array(z.string()).catch([]),
+  forkChange: z.string().catch(""), mainChange: z.string().catch(""),
+})
+export type KeepConflict = z.infer<typeof keepConflictShape>
+
 export const keepRefusalShape = z.object({
-  reason: z.string(), message: z.string(), hint: z.string().catch(""), conflicts: z.array(z.unknown()).catch([]),
+  reason: z.string(), message: z.string(), hint: z.string().catch(""), conflicts: tolerantArray(keepConflictShape).catch([]),
 })
 export const keepRequestResultSchema = z.object({
   status: z.string(),
   report: z.object({
     fork: z.string(), target: z.string(), summary: z.array(z.string()).catch([]), steps: z.array(z.string()).catch([]),
     notes: z.array(z.string()).catch([]), checkpoint: optionalText, reviewDigest: optionalText,
+    /** True when main had not changed since the fork, so nothing could conflict. */
+    fastForward: z.boolean().nullish().transform(value => value ?? undefined),
   }),
   refusal: keepRefusalShape.nullish().transform(value => value ?? undefined),
   request: foldRequestShape,
@@ -367,3 +379,65 @@ export const treeNodeShape = z.object({
 })
 export type ComputerTreeNode = z.infer<typeof treeNodeShape>
 export const computerTreeSchema = z.object({ nodes: tolerantArray(treeNodeShape) })
+
+// Approvals (`approvals.*`), the audit log (`audit.list`) and `device.resources`.
+// Unknown kinds, states and callers from a newer engine read as the safest known value.
+const approvalStates = ["pending", "allowed", "denied", "cancelled", "expired"] as const
+
+export const approvalOutcomeShape = z.object({
+  result: z.unknown().optional(), jobId: optionalText, error: optionalText,
+})
+export type ApprovalOutcome = z.infer<typeof approvalOutcomeShape>
+
+export const approvalShape = z.object({
+  id: z.string().min(1), kind: z.string().catch("other"), computerId: z.string().catch(""), computerName: z.string().catch(""),
+  method: z.string().catch(""), params: z.unknown().optional(), summary: z.string().catch(""),
+  /** The agent's own words; never the engine's. */
+  note: optionalText,
+  state: tolerantEnum(approvalStates, "cancelled"),
+  createdAt: z.string(), expiresAt: optionalText, decidedAt: optionalText, decidedBy: optionalText,
+  decisionNote: optionalText, reason: optionalText,
+  outcome: approvalOutcomeShape.nullish().transform(value => value ?? undefined),
+  reviewRequestId: optionalText, reviewDigest: optionalText,
+})
+export type Approval = z.infer<typeof approvalShape>
+export type ApprovalState = Approval["state"]
+
+export const approvalListSchema = z.object({ approvals: tolerantArray(approvalShape) })
+export type ApprovalList = z.infer<typeof approvalListSchema>
+
+const callerKinds = ["owner", "device", "computer"] as const
+const auditOutcomes = ["ok", "error", "refused", "asked"] as const
+export type AuditCallerKind = (typeof callerKinds)[number]
+
+export const auditEntryShape = z.object({
+  id: z.number().int().nonnegative(), at: z.string(),
+  callerKind: tolerantEnum(callerKinds, "computer"), callerId: optionalText, client: optionalText,
+  method: z.string(), computerId: optionalText,
+  outcome: tolerantEnum(auditOutcomes, "error"), errorCode: optionalText, jobId: optionalText, approvalId: optionalText,
+  count: z.number().int().positive().catch(1), lastAt: optionalText,
+})
+export type AuditEntry = z.infer<typeof auditEntryShape>
+
+export const auditListSchema = z.object({
+  entries: tolerantArray(auditEntryShape),
+  nextBeforeId: z.number().int().nonnegative().nullish().transform(value => value ?? undefined),
+})
+export type AuditPage = z.infer<typeof auditListSchema>
+
+export const deviceResourcesSchema = z.object({
+  logicalCpus: z.number().catch(0), memoryTotalBytes: z.number().catch(0),
+  memoryAvailableBytes: z.number().nullish().transform(value => value ?? undefined),
+  diskFreeBytes: z.number().catch(0), diskTotalBytes: z.number().catch(0),
+  runningComputers: z.number().catch(0), runningMemoryGib: z.number().catch(0),
+  state: tolerantEnum(["ok", "low", "critical"], "ok"), message: z.string().catch(""),
+  computers: tolerantArray(z.object({ id: z.string(), name: z.string(), running: z.boolean(), cpus: z.number(), memoryGib: z.number() })).catch([]),
+})
+export type DeviceResources = z.infer<typeof deviceResourcesSchema>
+
+/** How a job an allowed approval started is going. */
+export const approvalJobSchema = z.object({
+  state: tolerantEnum(["waiting", "running", "finished"], "running"),
+  error: optionalText, status: optionalText, message: optionalText,
+})
+export type ApprovalJob = z.infer<typeof approvalJobSchema>

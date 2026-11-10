@@ -15,7 +15,7 @@ import type {
   SiloProgressEvent,
   SiloProtocolError,
 } from "@/contracts/silo"
-import type { RequestList } from "@/desktop/production-schemas"
+import type { Approval, ApprovalJob, ApprovalList, ApprovalState, AuditCallerKind, AuditPage, DeviceResources, RequestList } from "@/desktop/production-schemas"
 import type { ApplicationPreferenceSelection } from "@/features/preferences/model/application-preferences"
 
 export type ApplicationTab = "computers" | "changes" | "github" | "secrets" | "system" | "settings"
@@ -348,6 +348,18 @@ export interface ApplicationActions {
   reviewRequestActions?: import("@/features/application/components/review-request").ReviewRequestActions
   /** The review requests of this device and, with `allDevices`, every connected device. */
   listReviewRequests?: (options?: { status?: "open" | "kept" | "thrown-away" | "all"; allDevices?: boolean }) => Promise<RequestList>
+  /** What the agents inside computers ask the person who runs Silo for. */
+  listApprovals?: (options?: { state?: ApprovalState }) => Promise<ApprovalList>
+  /** Allow or deny a waiting approval; the note is shown to the agent with the answer. */
+  decideApproval?: (answer: { id: string; decision: "allow" | "deny"; note?: string }) => Promise<Approval>
+  /** How the job an allowed approval started is going. */
+  readApprovalJob?: (jobId: string) => Promise<ApprovalJob>
+  /** Calls the handler whenever an approval changes. Returns the function that stops it. */
+  watchApprovals?: (onChange: () => void) => () => void
+  /** Who did what, newest first; `beforeId` continues from the previous page. */
+  listAudit?: (options?: { computerId?: string; callerKind?: AuditCallerKind; beforeId?: number; limit?: number }) => Promise<AuditPage>
+  /** What the device has left in memory and disk. */
+  readDeviceResources?: (deviceId?: string) => Promise<DeviceResources>
   createCheckpoint?: (computer: string, name: string) => Promise<void>
   forkCheckpoint?: (computer: string, checkpointId: string | null, newName: string) => Promise<void>
   restoreCheckpoint?: (computer: string, checkpointId: string) => Promise<void>
