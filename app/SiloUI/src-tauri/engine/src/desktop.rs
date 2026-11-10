@@ -274,7 +274,11 @@ fn installer_script(action: &str) -> String {
 
 fn action_script(action: &str) -> String {
     if action == "setup-agent-tools" {
-        crate::agent_tools::setup_script()
+        format!(
+            "{}\n{}\n",
+            crate::agent_tools::setup_script(),
+            crate::computer_use::register_installed_agents_command()
+        )
     } else if action == "update-streamer" {
         installer_script(action)
     } else {
@@ -597,6 +601,140 @@ fn safe_version(value: Option<&str>) -> Option<&str> {
     })
 }
 
+/// The agents of a Linux computer: read from the guest while it runs, `unknown` otherwise.
+pub fn agents_local(
+    paths: &RuntimePaths,
+    computer: &str,
+    expected_id: Option<&str>,
+) -> Result<Vec<silo_api::methods::agents::AgentInfo>, String> {
+    agents_with(&runtime::ProcessRunner, paths, computer, expected_id)
+}
+
+fn agents_with(
+    runner: &dyn RuntimeRunner,
+    paths: &RuntimePaths,
+    computer: &str,
+    expected_id: Option<&str>,
+) -> Result<Vec<silo_api::methods::agents::AgentInfo>, String> {
+    runtime::validate_name(computer).map_err(|e| e.to_string())?;
+    let configuration = computer_at(runner, paths, computer, expected_id)?;
+    let mut agents = match runtime::observe_computer(runner, paths, computer)
+        .map_err(|e| e.to_string())?
+    {
+        runtime::ComputerRuntime::Present(inspected) if inspected.status == "Running" => {
+            ensure_computer_identity(&configuration, &inspected)?;
+            let output = guest(
+                runner,
+                paths,
+                computer,
+                &crate::agent_tools::status_command(),
+                Duration::from_secs(15),
+                false,
+            )
+            .map_err(|e| e.to_string())?;
+            crate::agents::from_linux_status(output.trim().lines().next())
+        }
+        _ => crate::agents::unknown(),
+    };
+    crate::agents::mark_installing(configuration.id(), &mut agents);
+    Ok(agents)
+}
+
+/// Installs `agent` in the running Linux computer `computer` as a durable job, registers
+/// computer use with it, and answers with the computer's agents. `step` is told where the
+/// install is.
+pub fn install_agent_for_job(
+    paths: &RuntimePaths,
+    computer: &str,
+    agent: silo_api::methods::agents::AgentId,
+    expected_id: Option<&str>,
+    job: &JobLink,
+    step: &dyn Fn(silo_api::methods::agents::AgentInstallStep, Option<String>),
+) -> Result<Vec<silo_api::methods::agents::AgentInfo>, String> {
+    use silo_api::methods::agents::AgentInstallStep;
+    let (_guard, configuration) = prepare_local_for_job(
+        &runtime::OPERATIONS,
+        &runtime::ProcessRunner,
+        paths,
+        computer,
+        Some("setup-agent-tools"),
+        expected_id,
+        Some(job),
+    )?;
+    runtime::shutdown::ensure_accepting_operations()?;
+    match runtime::observe_computer(&runtime::ProcessRunner, paths, computer)
+        .map_err(|e| e.to_string())?
+    {
+        runtime::ComputerRuntime::Absent => return Err(crate::terminal::start_first(computer)),
+        runtime::ComputerRuntime::Present(inspected) => {
+            ensure_computer_identity(&configuration, &inspected)?;
+            if inspected.status != "Running" {
+                return Err(format!(
+                    "Start the computer before installing {} in it.",
+                    agent.display_name()
+                ));
+            }
+        }
+    }
+    let installing = crate::agents::begin_install(configuration.id(), agent)?;
+    step(
+        AgentInstallStep::Installing,
+        Some(format!("Installing {}", agent.display_name())),
+    );
+    guest(
+        &runtime::ProcessRunner,
+        paths,
+        computer,
+        &crate::agent_tools::setup_script_for(agent),
+        action_timeout("setup-agent-tools"),
+        false,
+    )
+    .map_err(|e| e.to_string())?;
+    step(
+        AgentInstallStep::Registering,
+        Some("Adding computer use to the agent".into()),
+    );
+    // Computer use registers itself with an agent at the next boot anyway.
+    let _ = guest(
+        &runtime::ProcessRunner,
+        paths,
+        computer,
+        &crate::computer_use::register_installed_agents_command(),
+        Duration::from_secs(120),
+        false,
+    );
+    drop(installing);
+    publish_application_state_changed();
+    agents_with(&runtime::ProcessRunner, paths, computer, expected_id)
+}
+
+/// Installs the agents a create request asked for in the computer that has just been created.
+/// It is part of the creation's one boot: a failure is reported and leaves the agents
+/// `missing` for `agents.install`, and never fails the creation.
+pub(crate) fn install_requested_after_create(
+    runner: &dyn RuntimeRunner,
+    paths: &RuntimePaths,
+    id: &str,
+    name: &str,
+) {
+    let agents = crate::agents::take_requested(id);
+    if agents.is_empty() {
+        return;
+    }
+    let result = guest_within(
+        runner,
+        paths,
+        name,
+        &crate::agents::linux_install_all_script(&agents),
+        Duration::from_secs(1800 * agents.len() as u64),
+        Duration::from_secs(60),
+        true,
+    );
+    if let Err(error) = result {
+        eprintln!("Agents were not installed while creating {name}: {error}");
+    }
+}
+
 pub fn dispatch(paths: &RuntimePaths, method: &str, params: &Value) -> Result<Value, String> {
     let computer_id = params["computerId"]
         .as_str()
@@ -673,7 +811,11 @@ fn prepare_local_for_job<'a>(
     let guard = match action {
         Some(action) => {
             let computer_id = computer_id.as_deref().ok_or("Missing computer identity.")?;
-            let label = format!("Updating {computer} desktop");
+            let label = if action == "setup-agent-tools" {
+                format!("Installing an agent in {computer}")
+            } else {
+                format!("Updating {computer} desktop")
+            };
             let guard = match job {
                 Some(job) => {
                     let guard = gate
@@ -1555,7 +1697,11 @@ mod tests {
     #[test]
     fn agent_tools_setup_is_a_long_running_action_that_does_not_start_the_computer() {
         let setup = action_script("setup-agent-tools");
-        assert!(setup.contains("agent-tools.py\" \"$silo_tools/agent-tools-lock.json\" setup"));
+        // The old action installs Claude Code, then registers computer use with it.
+        assert!(setup
+            .contains("agent-tools.py\" \"$silo_tools/agent-tools-lock.json\" setup claude-code"));
+        assert!(!setup.contains("setup codex"));
+        assert!(setup.contains("silo-computer-use reconcile"));
         assert_eq!(
             action_timeout("setup-agent-tools"),
             Duration::from_secs(1800)
@@ -2243,6 +2389,107 @@ mod tests {
         assert_eq!(computer_use["agents"], json!(["codex"]));
         assert_eq!(computer_use["approval"], "ask");
         runner.assert_finished();
+    }
+
+    fn agent_exec(script: &str, allow_boot: bool, timeout: &str, output: &str) -> ExpectedCommand {
+        let mut args = vec!["exec", "dev"];
+        if !allow_boot {
+            args.push("--no-start");
+        }
+        args.extend([
+            "--no-tty",
+            "--quiet",
+            "--timeout",
+            timeout,
+            "--user",
+            "root",
+            "--workdir",
+            "/",
+            "--",
+            "sh",
+            "-c",
+            script,
+        ]);
+        ExpectedCommand::ok(args, output)
+    }
+
+    fn registered_computer(dir: &std::path::Path) -> ComputerConfiguration {
+        let configuration = built_in_computer();
+        runtime::write_metadata(
+            &paths(dir).metadata,
+            &runtime::ComputerConfigurationRequest {
+                schema_version: 1,
+                computers: vec![configuration.clone()],
+            },
+        )
+        .unwrap();
+        configuration
+    }
+
+    #[test]
+    fn a_stopped_computer_has_unknown_agents_and_a_running_one_is_asked() {
+        use silo_api::methods::agents::{AgentId, AgentState};
+        let _test_state = crate::test_support::global_state();
+        let dir = tempfile::tempdir().unwrap();
+        let configuration = registered_computer(dir.path());
+        let labels = json!({"silo.managed":"true","silo.machine-id":configuration.id()});
+        let runner = ScriptedRunner::new([
+            inspect("Stopped", labels.clone()),
+            inspect("Stopped", labels.clone()),
+        ]);
+        let agents =
+            agents_with(&runner, &paths(dir.path()), "dev", Some(configuration.id())).unwrap();
+        assert!(agents.iter().all(|agent| agent.state == AgentState::Unknown));
+        runner.assert_finished();
+
+        let status = crate::agent_tools::status_command();
+        let line = r#"{"nodeVersion":"24.21.0","claudeVersion":"2.1.287","codexVersion":"0.167.0","recipeVersion":1}"#;
+        let runner = ScriptedRunner::new([
+            inspect("Running", labels.clone()),
+            inspect("Running", labels),
+            agent_exec(&status, false, "15s", &format!("{line}\n")),
+        ]);
+        let agents =
+            agents_with(&runner, &paths(dir.path()), "dev", Some(configuration.id())).unwrap();
+        assert_eq!(agents[0].id, AgentId::ClaudeCode);
+        assert!(agents.iter().all(|agent| agent.state == AgentState::Ready));
+        runner.assert_finished();
+    }
+
+    #[test]
+    fn a_running_install_is_listed_as_installing() {
+        use silo_api::methods::agents::{AgentId, AgentState};
+        let _test_state = crate::test_support::global_state();
+        let dir = tempfile::tempdir().unwrap();
+        let configuration = registered_computer(dir.path());
+        let labels = json!({"silo.managed":"true","silo.machine-id":configuration.id()});
+        let _installing = crate::agents::begin_install(configuration.id(), AgentId::Codex).unwrap();
+        let runner = ScriptedRunner::new([
+            inspect("Stopped", labels.clone()),
+            inspect("Stopped", labels),
+        ]);
+        let agents =
+            agents_with(&runner, &paths(dir.path()), "dev", Some(configuration.id())).unwrap();
+        assert_eq!(agents[1].state, AgentState::Installing);
+        assert_eq!(agents[0].state, AgentState::Unknown);
+    }
+
+    #[test]
+    fn agents_requested_at_creation_are_installed_in_the_creation_boot_and_nothing_else_runs_without() {
+        use silo_api::methods::agents::AgentId;
+        let _test_state = crate::test_support::global_state();
+        let dir = tempfile::tempdir().unwrap();
+        let id = "00000000-0000-4000-8000-0000000000aa";
+        let nothing = ScriptedRunner::new([]);
+        install_requested_after_create(&nothing, &paths(dir.path()), id, "dev");
+        nothing.assert_finished();
+
+        crate::agents::request_for_creation(id, &[AgentId::Codex]);
+        let script = crate::agents::linux_install_all_script(&[AgentId::Codex]);
+        let runner = ScriptedRunner::new([agent_exec(&script, true, "1800s", "")]);
+        install_requested_after_create(&runner, &paths(dir.path()), id, "dev");
+        runner.assert_finished();
+        assert!(crate::agents::take_requested(id).is_empty());
     }
 
     #[test]

@@ -6,8 +6,9 @@ use schemars::{JsonSchema, Schema, SchemaGenerator};
 use serde::{Deserialize, Serialize};
 
 use crate::methods::{
-    computers::ComputerConfigurationProgress, exports::BackupOperation, files::TransferProgress,
-    operations::OperationKind, push::PushOperation, updates::UpdateProgressData,
+    agents::AgentInstallProgress, computers::ComputerConfigurationProgress,
+    exports::BackupOperation, files::TransferProgress, operations::OperationKind,
+    push::PushOperation, updates::UpdateProgressData,
 };
 
 /// Stable snake_case wire error code. Existing values are sourced from
@@ -218,6 +219,14 @@ pub enum JobProgress {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         computer_id: Option<String>,
         data: UpdateProgressData,
+    },
+    Agent {
+        job_id: JobId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        kind: Option<OperationKind>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        computer_id: Option<String>,
+        data: AgentInstallProgress,
     },
 }
 

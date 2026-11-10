@@ -17,6 +17,113 @@
       ],
       "type": "object"
     },
+    "AgentId": {
+      "description": "An agent Silo can install in a computer.",
+      "enum": [
+        "claude-code",
+        "codex"
+      ],
+      "type": "string"
+    },
+    "AgentInfo": {
+      "properties": {
+        "expectedVersion": {
+          "description": "The version an install puts in the computer.",
+          "type": "string"
+        },
+        "id": {
+          "$ref": "#/$defs/AgentId"
+        },
+        "name": {
+          "description": "The name to show, for example `Claude Code`.",
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/AgentState"
+        },
+        "version": {
+          "description": "The installed version; null when not installed or not known.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "state",
+        "expectedVersion"
+      ],
+      "type": "object"
+    },
+    "AgentInstallProgress": {
+      "description": "The `data` of an `agent` job progress event.",
+      "properties": {
+        "agent": {
+          "$ref": "#/$defs/AgentId"
+        },
+        "computerId": {
+          "type": "string"
+        },
+        "detail": {
+          "description": "A short sentence for the step, such as `Downloading Codex (42%)`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "step": {
+          "$ref": "#/$defs/AgentInstallStep"
+        }
+      },
+      "required": [
+        "computerId",
+        "agent",
+        "step"
+      ],
+      "type": "object"
+    },
+    "AgentInstallStep": {
+      "description": "Where an agent install is. The first step of a macOS install downloads the pinned files on\nthis device; the last registers computer use with the agent.",
+      "enum": [
+        "waiting",
+        "downloading",
+        "installing",
+        "registering",
+        "done"
+      ],
+      "type": "string"
+    },
+    "AgentState": {
+      "oneOf": [
+        {
+          "const": "ready",
+          "description": "Installed at the version this Silo ships.",
+          "type": "string"
+        },
+        {
+          "const": "missing",
+          "description": "Not installed.",
+          "type": "string"
+        },
+        {
+          "const": "outdated",
+          "description": "Installed, but not at the version this Silo ships.",
+          "type": "string"
+        },
+        {
+          "const": "installing",
+          "description": "An install is running in the computer.",
+          "type": "string"
+        },
+        {
+          "const": "unknown",
+          "description": "Not known: the computer is stopped or cannot be reached.",
+          "type": "string"
+        }
+      ]
+    },
     "AgentToolsState": {
       "oneOf": [
         {
@@ -88,6 +195,41 @@
         "expectedNodeVersion",
         "expectedClaudeVersion",
         "expectedRecipeVersion"
+      ],
+      "type": "object"
+    },
+    "AgentsInstallParams": {
+      "properties": {
+        "agent": {
+          "$ref": "#/$defs/AgentId"
+        },
+        "computerId": {
+          "type": "string"
+        },
+        "deviceId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "computerId",
+        "agent"
+      ],
+      "type": "object"
+    },
+    "AgentsListResult": {
+      "properties": {
+        "agents": {
+          "items": {
+            "$ref": "#/$defs/AgentInfo"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "agents"
       ],
       "type": "object"
     },
@@ -2565,6 +2707,13 @@
       "oneOf": [
         {
           "properties": {
+            "agents": {
+              "description": "Agents to install once the computer is first ready. Empty installs none.",
+              "items": {
+                "$ref": "#/$defs/AgentId"
+              },
+              "type": "array"
+            },
             "configuration": {
               "$ref": "#/$defs/ComputerConfiguration"
             },
@@ -2593,6 +2742,13 @@
         },
         {
           "properties": {
+            "agents": {
+              "description": "Agents to install once setup has completed. Empty installs none.",
+              "items": {
+                "$ref": "#/$defs/AgentId"
+              },
+              "type": "array"
+            },
             "deviceId": {
               "type": [
                 "string",
@@ -7461,6 +7617,42 @@
             "data"
           ],
           "type": "object"
+        },
+        {
+          "properties": {
+            "computerId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "data": {
+              "$ref": "#/$defs/AgentInstallProgress"
+            },
+            "jobId": {
+              "$ref": "#/$defs/JobId"
+            },
+            "kind": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/OperationKind2"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "source": {
+              "const": "agent",
+              "type": "string"
+            }
+          },
+          "required": [
+            "source",
+            "jobId",
+            "data"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -7486,6 +7678,9 @@
     "JobTerminalResultsSchema": {
       "description": "Terminal job values remain untagged on the wire. This catalogue roots every\nmethod-specific result schema and maps the defined job completion shapes.",
       "properties": {
+        "agents": {
+          "$ref": "#/$defs/AgentsListResult"
+        },
         "application_source": {
           "$ref": "#/$defs/ApplicationSource"
         },
@@ -7572,6 +7767,7 @@
         "requests_show",
         "requests_throw_away",
         "desktop",
+        "agents",
         "backup",
         "archive_inspection",
         "export_check",
@@ -8555,6 +8751,8 @@
       "enum": [
         "activity.setup.read",
         "audit.list",
+        "agents.install",
+        "agents.list",
         "changes.keep",
         "changes.promote",
         "changes.request",
@@ -8758,6 +8956,38 @@
             },
             "params": {
               "$ref": "#/$defs/AuditListParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "agents.install",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/AgentsInstallParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "agents.list",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/ComputerTargetParams"
             }
           },
           "required": [
@@ -11581,6 +11811,38 @@
             },
             "result": {
               "$ref": "#/$defs/AuditListResult"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "agents.install",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/JobStartResult"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "agents.list",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/AgentsListResult"
             }
           },
           "required": [
@@ -17770,6 +18032,10 @@
   "type": "object",
   "x-silo-job-results": [
     {
+      "method": "agents.install",
+      "resultType": "AgentsListResult"
+    },
+    {
       "method": "changes.keep",
       "resultType": "ChangesKeepResult"
     },
@@ -17938,6 +18204,18 @@
       "name": "audit.list",
       "paramsType": "audit::AuditListParams",
       "resultType": "audit::AuditListResult"
+    },
+    {
+      "kind": "job",
+      "name": "agents.install",
+      "paramsType": "agents::AgentsInstallParams",
+      "resultType": "common::JobStartResult"
+    },
+    {
+      "kind": "query",
+      "name": "agents.list",
+      "paramsType": "agents::AgentsListParams",
+      "resultType": "agents::AgentsListResult"
     },
     {
       "kind": "job",

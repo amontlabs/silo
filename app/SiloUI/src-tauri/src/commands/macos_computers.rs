@@ -98,6 +98,7 @@ pub(crate) async fn create(
         .call(requests::computers_create(ComputerCreateParams::Macos {
             request,
             device_id: None,
+            agents: Vec::new(),
         }))
         .await?;
     acknowledge_in_background(engine, &started);

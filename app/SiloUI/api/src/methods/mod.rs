@@ -12,6 +12,7 @@ macro_rules! wire_struct {
 }
 
 pub mod audit;
+pub mod agents;
 pub mod changes;
 pub mod checkpoints;
 pub mod clipboard;

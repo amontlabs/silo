@@ -487,6 +487,7 @@ pub async fn create(
                 },
                 request_id: None,
                 device_id: None,
+                agents: Vec::new(),
             }
         }
         Platform::Macos => ComputerCreateParams::Macos {
@@ -497,6 +498,7 @@ pub async fn create(
                 disk_gib: args.disk_gib.unwrap_or(64),
             },
             device_id: None,
+            agents: Vec::new(),
         },
     };
     engine

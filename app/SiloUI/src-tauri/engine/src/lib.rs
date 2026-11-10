@@ -6,6 +6,7 @@ extern crate self as silo_engine;
 
 pub mod agent_tools;
 pub mod audit;
+pub mod agents;
 pub mod backup;
 pub mod backup_controller;
 pub mod bridge_error;

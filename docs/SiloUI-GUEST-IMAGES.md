@@ -313,6 +313,44 @@ v5 changes the v4 recipe in these ways:
    `npm --prefix app/SiloUI run test:release`.
 5. Run the live tests in [Rust test support](SiloUI-RUST-TEST-SUPPORT.md) against the new image.
 
+## Agents in a computer
+
+A computer can have two agents: Claude Code and Codex. Both systems answer the same two
+methods, and Silo installs an agent but never signs in to it.
+
+- `agents.list { computerId }` returns each agent with its `state` (`ready`, `missing`,
+  `outdated`, `installing`, or `unknown` while the computer is stopped), its installed
+  `version` and the version an install gives.
+- `agents.install { computerId, agent }` is a job that installs one agent in a running computer,
+  reports its step (`downloading`, `installing`, `registering`) as `agent` progress, and finishes
+  with the same list. It then runs the computer-use registration step, so the agent has the
+  computer-use server at once and not only after the next boot. The old `setup-agent-tools`
+  desktop action is the same install for Claude Code.
+- `computers.create` accepts `agents`. A Linux computer installs them during its first boot
+  after setup; if one fails the computer is still created and the agent shows as `missing`. A
+  macOS computer refuses a non-empty list for now, because its setup ends with the computer
+  stopped and its template must stay as it is.
+
+Both agents are pinned in `app/SiloUI/src-tauri/guest/agent-tools-lock.json`: Claude Code
+by the version and SHA-256 of Anthropic's installer, Codex by the version of OpenAI's release
+and the size and SHA-256 of its archive for Linux arm64 and x64 (musl) and macOS arm64, with
+the release address. Checking the pin means downloading the archive and comparing the SHA-256
+with the one GitHub shows for the release asset.
+
+- **Linux** (`guest/agent-tools.py`, run as root through `agents.install`): the guest downloads
+  over HTTPS, refuses a file that does not match its SHA-256, unpacks the one expected file of the
+  Codex archive into `/opt/silo/codex/<version>/`, links it at `/usr/local/bin/codex`, and runs
+  `codex --version` as the `silo` account. Claude Code is installed with its documented
+  installer as that account, with its updater off. The receipt is `/var/lib/silo/agent-tools.json`
+  (`codexVersion` joins the existing fields).
+- **macOS** (`guest/macos/silo-agent-tools.zsh`): this device downloads and checks the file,
+  copies it over SSH, and the computer downloads nothing for Codex. The script checks the size
+  and SHA-256 again, installs under `/usr/local/libexec/silo-tools/codex/<version>/`, links
+  `/usr/local/bin/codex`, runs `codex --version`, and writes a receipt for the agent at
+  `/Library/Application Support/Silo/agents/<agent>.json`. Claude Code is part of the template,
+  so `agents.list` reports it ready there; installing it again repairs or updates it. The
+  template's developer tools script and lock are not changed by any of this.
+
 ## Runtime behavior
 
 The app downloads and verifies the pinned archive (below), then imports it into its private

@@ -1202,10 +1202,13 @@ async fn begin_create(
             configuration,
             request_id,
             device_id,
+            agents,
         } => {
             require_local_device(context, device_id.as_deref())?;
-            let configuration = serde_json::from_value(encode(configuration)?).map_err(invalid)?;
+            let configuration: silo_engine::runtime::ComputerConfiguration =
+                serde_json::from_value(encode(configuration)?).map_err(invalid)?;
             let request_id = new_request_id(request_id)?;
+            silo_engine::agents::request_for_creation(configuration.id(), &agents);
             let job = accept_linux_setup_job(context, "computers.create", &request_id)?;
             let change = silo_engine::runtime::ComputerConfigurationChange::Upsert {
                 configuration,
@@ -1217,8 +1220,17 @@ async fn begin_create(
                 computer: None,
             })?))
         }
-        ComputerCreateParams::Macos { request, device_id } => {
+        ComputerCreateParams::Macos {
+            request,
+            device_id,
+            agents,
+        } => {
             require_local_device(context, device_id.as_deref())?;
+            if !agents.is_empty() {
+                return Err(invalid(
+                    "Silo cannot install an agent while it creates a macOS computer yet. Create the computer, start it, then install the agent from its page.",
+                ));
+            }
             let request: silo_engine::macos_computers::CreateRequest =
                 serde_json::from_value(encode(request)?).map_err(invalid)?;
             // A refused request is an error and leaves no job: the job is allocated after

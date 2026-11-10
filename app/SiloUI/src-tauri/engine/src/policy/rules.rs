@@ -117,6 +117,9 @@ pub fn rule(method: MethodName) -> Rule {
         | M::GuestSshAliasEnsure
         | M::GuestSshAliasRemove => OwnerOnly,
         M::GuestClientEnable | M::GuestClientRevoke | M::GuestClientStatus => OwnerOnly,
+        // The agents a computer has: reading is like its other status, installing runs in it.
+        M::AgentsList => Tree,
+        M::AgentsInstall => Made,
 
         // Network and SSH access.
         M::NetworkUrls | M::NetworkUnpublish => Tree,

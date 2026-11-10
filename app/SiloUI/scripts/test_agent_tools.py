@@ -123,10 +123,106 @@ class AgentToolsTests(unittest.TestCase):
         self.assertEqual(installer[-1], '2.1.287')
         self.assertIn('DISABLE_AUTOUPDATER=1', installer)
 
+    def test_the_lock_pins_codex_from_the_official_release_for_each_platform(self):
+        lock = tools.read_lock(LOCK)
+        version = lock['codex']['version']
+        self.assertEqual(set(lock['codex']['assets']), {'linux-arm64', 'linux-amd64', 'macos-arm64'})
+        for asset in lock['codex']['assets'].values():
+            self.assertTrue(asset['url'].startswith(f'https://github.com/openai/codex/releases/download/rust-v{version}/'))
+            self.assertRegex(asset['sha256'], '^[0-9a-f]{64}$')
+
+    def test_a_codex_asset_from_another_place_or_without_a_hash_is_refused(self):
+        for change in (lambda asset: asset.update(url='https://example.com/codex.tar.gz'),
+                       lambda asset: asset.update(sha256='abc'),
+                       lambda asset: asset.update(member='codex')):
+            lock = json.loads(LOCK.read_text())
+            change(lock['codex']['assets']['linux-arm64'])
+            with tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / 'lock.json'
+                path.write_text(json.dumps(lock))
+                with self.assertRaisesRegex(RuntimeError, 'Invalid bundled agent tools lock'):
+                    tools.read_lock(path)
+
+    def codex_archive(self, directory, member):
+        buffer = io.BytesIO()
+        with tarfile.open(fileobj=buffer, mode='w:gz') as archive:
+            info = tarfile.TarInfo(member)
+            info.size = 4
+            info.mode = 0o755
+            archive.addfile(info, io.BytesIO(b'ELF!'))
+        return buffer.getvalue()
+
+    def install_codex_from(self, data, lock, directory, versions):
+        bin_dir = Path(directory) / 'bin'
+        bin_dir.mkdir()
+
+        def fake_download(url, sha, destination):
+            Path(destination).write_bytes(data)
+
+        with (mock.patch.object(tools, 'CODEX_ROOT', Path(directory) / 'codex'),
+              mock.patch.object(tools, 'BIN', bin_dir),
+              mock.patch.object(tools.platform, 'machine', return_value='aarch64'),
+              mock.patch.object(tools, 'codex_version', lambda: next(versions)),
+              mock.patch.object(tools, 'download', fake_download)):
+            tools.install_codex(lock, directory)
+        return bin_dir
+
+    def test_codex_is_unpacked_to_a_versioned_folder_and_linked(self):
+        lock = tools.read_lock(LOCK)
+        member = lock['codex']['assets']['linux-arm64']['member']
+        with tempfile.TemporaryDirectory() as directory:
+            bin_dir = self.install_codex_from(self.codex_archive(directory, member), lock, directory,
+                                              iter([None, lock['codex']['version']]))
+            binary = Path(directory) / 'codex' / lock['codex']['version'] / 'codex'
+            self.assertEqual(binary.read_bytes(), b'ELF!')
+            self.assertTrue(binary.stat().st_mode & 0o111)
+            self.assertEqual((bin_dir / 'codex').resolve(), binary.resolve())
+
+    def test_a_codex_archive_with_another_file_is_refused_and_leaves_nothing(self):
+        lock = tools.read_lock(LOCK)
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(RuntimeError, 'expected file'):
+                self.install_codex_from(self.codex_archive(directory, '../escape'), lock, directory, iter([None]))
+            self.assertEqual(list((Path(directory) / 'codex').iterdir()), [])
+
+    def test_codex_that_reports_another_version_fails_the_install(self):
+        lock = tools.read_lock(LOCK)
+        member = lock['codex']['assets']['linux-arm64']['member']
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(RuntimeError, 'pinned version'):
+                self.install_codex_from(self.codex_archive(directory, member), lock, directory, iter([None, '0.0.1']))
+
+    def test_setting_up_codex_installs_only_codex_and_keeps_the_other_receipt_fields(self):
+        lock = tools.read_lock(LOCK)
+        calls = []
+        with tempfile.TemporaryDirectory() as directory:
+            receipt = Path(directory) / 'agent-tools.json'
+            receipt.write_text(json.dumps({'schemaVersion': 1, 'recipeVersion': 1, 'claudeVersion': '2.1.287'}))
+            with (mock.patch.object(tools.os, 'geteuid', return_value=0),
+                  mock.patch.object(tools.pwd, 'getpwnam', return_value=mock.Mock()),
+                  mock.patch.object(tools, 'RECEIPT', receipt), mock.patch.object(tools, 'STATE', Path(directory)),
+                  mock.patch.object(tools, 'install_node', lambda *_: calls.append('node')),
+                  mock.patch.object(tools, 'install_claude', lambda *_: calls.append('claude')),
+                  mock.patch.object(tools, 'install_codex', lambda *_: calls.append('codex'))):
+                tools.setup(lock, 'codex')
+            saved = json.loads(receipt.read_text())
+        self.assertEqual(calls, ['codex'])
+        self.assertEqual(saved['codexVersion'], lock['codex']['version'])
+        self.assertEqual(saved['claudeVersion'], '2.1.287')
+
+    def test_the_command_line_takes_an_agent_and_refuses_an_unknown_one(self):
+        with mock.patch.object(tools, 'setup') as setup, mock.patch.object(tools, 'status', return_value={}):
+            self.assertEqual(tools.main(['x', str(LOCK), 'setup']), 0)
+            self.assertEqual(setup.call_args.args[1], 'claude-code')
+            self.assertEqual(tools.main(['x', str(LOCK), 'setup', 'codex']), 0)
+            self.assertEqual(setup.call_args.args[1], 'codex')
+            self.assertEqual(tools.main(['x', str(LOCK), 'setup', 'other']), 2)
+
     def test_status_reports_nothing_without_the_tools(self):
         with mock.patch.object(tools, 'run', side_effect=FileNotFoundError), \
                 mock.patch.object(tools, 'RECEIPT', Path('/nonexistent/agent-tools.json')):
-            self.assertEqual(tools.status(), {'nodeVersion': None, 'claudeVersion': None, 'recipeVersion': None})
+            self.assertEqual(tools.status(), {'nodeVersion': None, 'claudeVersion': None, 'codexVersion': None,
+                                              'recipeVersion': None})
 
 
 if __name__ == '__main__':

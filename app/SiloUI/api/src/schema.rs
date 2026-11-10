@@ -60,6 +60,7 @@ struct JobTerminalResultsSchema {
     requests_show: crate::methods::review_requests::ChangesRequestsShowResult,
     requests_throw_away: crate::methods::review_requests::ChangesRequestsThrowAwayResult,
     desktop: crate::methods::desktop::DesktopStatus,
+    agents: crate::methods::agents::AgentsListResult,
     backup: crate::methods::exports::BackupOperation,
     archive_inspection: crate::methods::exports::ArchiveInspectionResult,
     export_check: crate::methods::exports::ExportCheckResult,
@@ -77,6 +78,7 @@ struct JobTerminalResultsSchema {
 /// Method-specific final job result schemas. Conditional rows describe the
 /// platform-specific terminal outcomes called out in the domain specifications.
 pub const JOB_FINISHED_RESULT_REGISTRY: &[(&str, &str)] = &[
+    ("agents.install", "AgentsListResult"),
     ("changes.keep", "ChangesKeepResult"),
     ("changes.promote", "ChangesPromoteResult"),
     ("changes.requests.keep", "ChangesRequestsKeepResult"),
@@ -197,8 +199,8 @@ mod tests {
             schema_json().unwrap()
         );
         let schema: serde_json::Value = serde_json::from_str(&schema_json().unwrap()).unwrap();
-        assert_eq!(schema["x-silo-methods"].as_array().unwrap().len(), 176);
-        assert_eq!(schema["x-silo-job-results"].as_array().unwrap().len(), 39);
+        assert_eq!(schema["x-silo-methods"].as_array().unwrap().len(), 178);
+        assert_eq!(schema["x-silo-job-results"].as_array().unwrap().len(), 40);
         assert_eq!(
             schema["$schema"],
             "https://json-schema.org/draft/2020-12/schema"
@@ -668,6 +670,65 @@ mod tests {
             AgentToolsState::Missing
         );
         assert_eq!(serde_json::to_value(status).unwrap(), payload);
+    }
+
+    #[test]
+    fn creating_a_computer_may_name_agents_and_old_requests_still_parse() {
+        use crate::methods::{agents::AgentId, computers::ComputerCreateParams};
+
+        let old = serde_json::json!({
+            "kind": "macos",
+            "request": {"name": "mac", "cpus": 4, "memoryGiB": 8, "diskGiB": 64}
+        });
+        let parsed: ComputerCreateParams = serde_json::from_value(old.clone()).unwrap();
+        match &parsed {
+            ComputerCreateParams::Macos { agents, .. } => assert!(agents.is_empty()),
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(serde_json::to_value(parsed).unwrap(), old);
+
+        let named = serde_json::json!({
+            "kind": "macos",
+            "request": {"name": "mac", "cpus": 4, "memoryGiB": 8, "diskGiB": 64},
+            "agents": ["claude-code", "codex"]
+        });
+        match serde_json::from_value(named.clone()).unwrap() {
+            ComputerCreateParams::Macos { agents, .. } => {
+                assert_eq!(agents, [AgentId::ClaudeCode, AgentId::Codex])
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(serde_json::from_value::<ComputerCreateParams>(serde_json::json!({
+            "kind": "macos",
+            "request": {"name": "mac", "cpus": 4, "memoryGiB": 8, "diskGiB": 64},
+            "agents": ["pi"]
+        }))
+        .is_err());
+    }
+
+    #[test]
+    fn agent_methods_are_a_query_and_a_job_and_progress_carries_the_step() {
+        use crate::{
+            jobs::JobProgress,
+            methods::{method_registry, MethodKind},
+        };
+
+        let kind = |name: &str| {
+            method_registry()
+                .iter()
+                .find(|entry| entry.name == name)
+                .unwrap()
+                .kind
+        };
+        assert_eq!(kind("agents.list"), MethodKind::Query);
+        assert_eq!(kind("agents.install"), MethodKind::Job);
+        let progress = serde_json::json!({
+            "source": "agent", "jobId": "job:7", "computerId": "c",
+            "data": {"computerId": "c", "agent": "codex", "step": "downloading",
+                     "detail": "Downloading Codex (42%)"}
+        });
+        let parsed: JobProgress = serde_json::from_value(progress.clone()).unwrap();
+        assert_eq!(serde_json::to_value(parsed).unwrap(), progress);
     }
 
     #[test]
