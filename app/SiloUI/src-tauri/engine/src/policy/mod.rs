@@ -8,6 +8,8 @@
 //! the rules in plain words.
 
 pub mod access;
+pub mod handoff;
+pub mod resources;
 mod rules;
 pub mod store;
 #[cfg(test)]
@@ -22,6 +24,7 @@ use silo_api::{
 };
 
 pub use access::{Access, GitHubAccess};
+pub use resources::Resources;
 pub use rules::{rule, Rule};
 
 /// Who made a request. Only the transport sets it.
@@ -81,6 +84,8 @@ pub trait World {
     fn owns_job(&self, caller: &str, job_id: &str) -> bool;
     /// The fork a review request is about.
     fn request_fork(&self, request_id: &str) -> Option<String>;
+    /// The computer a review request would merge its fork into.
+    fn request_target(&self, request_id: &str) -> Option<String>;
     /// The secrets and GitHub access a computer holds.
     fn access(&self, computer: &str) -> Access;
     /// Each computer's GitHub policy as `github.state` lists it, keyed by `computerId`; `None`
@@ -88,6 +93,10 @@ pub trait World {
     fn github_policies(&self) -> Option<Vec<Value>>;
     /// A fresh computer id.
     fn new_id(&self) -> String;
+    /// The sizes of a computer; `None` when they cannot be read.
+    fn resources(&self, computer: &str) -> Option<Resources>;
+    /// The port and bind address saved for a computer's SSH access, when it has any.
+    fn ssh_settings(&self, computer: &str) -> Option<(u16, String)>;
 }
 
 /// How a result is cut before it goes back to a computer.
@@ -340,6 +349,19 @@ impl<'a> Judge<'a> {
                 }
                 Ok(allow_with(params))
             }
+            // Retention would let the caller evict the owner's automatic and step checkpoints of
+            // its own computer, so there it makes a manual checkpoint that is never trimmed.
+            MethodName::CheckpointsCreate => {
+                let target = self.tree_target(&params, "computerId")?;
+                let mut params = params;
+                if target == self.caller {
+                    params["kind"] = json!("manual");
+                    if let Some(object) = params.as_object_mut() {
+                        object.remove("keepNewest");
+                    }
+                }
+                Ok(allow_with(params))
+            }
             _ => {
                 self.tree_target(&params, "computerId")?;
                 Ok(allow_with(params))
@@ -495,18 +517,47 @@ impl<'a> Judge<'a> {
                 // The engine names the new computer, so the call cannot reuse an existing id.
                 let id = self.world.new_id();
                 rewritten["configuration"]["id"] = json!(id);
+                // Whether the desktop starts is the only desktop choice a caller makes; Silo
+                // decides whether the desktop is built in.
+                match configuration.get("desktop") {
+                    None | Some(Value::Null) => {
+                        rewritten["configuration"]
+                            .as_object_mut()
+                            .map(|object| object.remove("desktop"));
+                    }
+                    Some(Value::Object(desktop)) => {
+                        let mut kept = json!({});
+                        match desktop.get("startWithComputer") {
+                            None | Some(Value::Null) => {}
+                            Some(Value::Bool(start)) => kept["startWithComputer"] = json!(start),
+                            Some(_) => return Err("The desktop's startWithComputer is true or false.".into()),
+                        }
+                        rewritten["configuration"]["desktop"] = kept;
+                    }
+                    Some(_) => return Err("The desktop configuration is an object.".into()),
+                }
                 let creates = Creation {
                     name: name.to_owned(),
                     id: Some(id),
                     source: None,
                 };
-                if configuration.get("runtime").and_then(Value::as_str) == Some("container") {
-                    return Ok(ask(
-                        ApprovalKind::Container,
-                        format!(
-                            "Make {name}, a container computer: it shares this device's kernel, so it is less isolated than a virtual machine."
-                        ),
-                    ));
+                let asked = Resources::of_linux(configuration)
+                    .ok_or("A Linux computer's CPUs, memory and storage are numbers.")?;
+                let more = self.more_than_it_has(&asked);
+                let container =
+                    configuration.get("runtime").and_then(Value::as_str) == Some("container");
+                if container || more.is_some() {
+                    let mut summary = format!("Make {name}");
+                    if container {
+                        summary.push_str(", a container computer (it shares this device's kernel, so it is less isolated than a virtual machine)");
+                    }
+                    summary.push_str(&self.sizes_sentence(&asked, more.as_deref()));
+                    let kind = if container {
+                        ApprovalKind::Container
+                    } else {
+                        ApprovalKind::Resources
+                    };
+                    return Ok(ask(kind, summary));
                 }
                 Ok(Decision::Allow(Allowed {
                     params: Some(rewritten),
@@ -515,8 +566,16 @@ impl<'a> Judge<'a> {
                 }))
             }
             Some("macos") => {
-                let name =
-                    self.checked_name(params.get("request").and_then(|r| text(r, "name")))?;
+                let request = params.get("request").ok_or("The request is missing.")?;
+                let name = self.checked_name(text(request, "name"))?;
+                let asked = Resources::of_macos(request)
+                    .ok_or("A macOS computer's CPUs, memory and disk are numbers.")?;
+                if let Some(more) = self.more_than_it_has(&asked) {
+                    return Ok(ask(
+                        ApprovalKind::Resources,
+                        format!("Make {name}{}", self.sizes_sentence(&asked, Some(&more))),
+                    ));
+                }
                 Ok(Decision::Allow(Allowed {
                     params: Some(rewritten),
                     creates: Some(Creation {
@@ -528,6 +587,35 @@ impl<'a> Judge<'a> {
                 }))
             }
             _ => Err("A new computer is Linux or macOS (kind).".into()),
+        }
+    }
+
+    /// What a new computer of these sizes has more of than the caller: `Some` (and empty) when
+    /// the caller's own sizes cannot be read, so it asks.
+    fn more_than_it_has(&self, asked: &Resources) -> Option<Vec<String>> {
+        match self.world.resources(self.caller) {
+            Some(own) => {
+                let more = asked.exceeding(&own);
+                (!more.is_empty()).then_some(more)
+            }
+            None => Some(Vec::new()),
+        }
+    }
+
+    /// ", with <sizes>, which is more than <caller> has: <what>." for the summary of a request.
+    fn sizes_sentence(&self, asked: &Resources, more: Option<&[String]>) -> String {
+        let sizes = asked.describe();
+        match more {
+            None => format!(" with {sizes}."),
+            Some([]) => format!(
+                " with {sizes}; the sizes of {} could not be read to compare them.",
+                self.name(self.caller)
+            ),
+            Some(more) => format!(
+                " with {sizes}, which is more than {} has: {}.",
+                self.name(self.caller),
+                more.join(", ")
+            ),
         }
     }
 
@@ -567,6 +655,10 @@ impl<'a> Judge<'a> {
                 if !self.made.contains(&fork) {
                     return Err("That review request is not about a computer this one made.".into());
                 }
+                let target = self.world.request_target(text(params, "requestId").unwrap_or_default());
+                if target.is_some_and(|target| self.made.contains(&target)) {
+                    return Ok(allow_with(params.clone()));
+                }
                 Ok(ask(
                     kind,
                     format!(
@@ -592,6 +684,9 @@ impl<'a> Judge<'a> {
                     .or_else(|| self.world.parent(&fork))
                     .filter(|target| self.in_tree(target))
                     .ok_or("A fork can replace only this computer or one it made.")?;
+                if self.made.contains(&target) {
+                    return Ok(allow_with(params.clone()));
+                }
                 Ok(ask(
                     kind,
                     format!(
@@ -615,9 +710,20 @@ impl<'a> Judge<'a> {
             }
             MethodName::SshAccessSave => {
                 let target = self.tree_target(params, "computerId")?;
-                // Turning SSH access off only narrows it.
+                // Turning SSH access off only narrows it. Only the computer and the switch are the
+                // caller's; the port and address stay what is saved, so nothing the caller sends
+                // is waiting for the next time the owner turns access on.
                 if params.get("enabled") == Some(&Value::Bool(false)) {
-                    return Ok(allow_with(params.clone()));
+                    let (port, address) = self
+                        .world
+                        .ssh_settings(&target)
+                        .unwrap_or((2222, "127.0.0.1".into()));
+                    return Ok(allow_with(json!({
+                        "computerId": target,
+                        "enabled": false,
+                        "port": port,
+                        "bindAddress": address,
+                    })));
                 }
                 let port = params.get("port").and_then(Value::as_u64).unwrap_or(0);
                 Ok(ask(

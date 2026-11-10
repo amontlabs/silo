@@ -22,7 +22,7 @@ use silo_engine::{
     policy::{
         self,
         store::{Document, JobState, Pending, PolicyStore},
-        Access, Caller, Creation, Decision, Filter,
+        Access, Caller, Creation, Decision, Filter, Resources,
     },
 };
 
@@ -68,7 +68,7 @@ fn app_data(context: &HandlerContext) -> PathBuf {
     context.silod_context().paths().app_data.clone()
 }
 
-fn error_code(code: ErrorCode) -> String {
+pub(crate) fn error_code(code: ErrorCode) -> String {
     serde_json::to_value(code)
         .ok()
         .and_then(|value| value.as_str().map(str::to_owned))
@@ -78,6 +78,8 @@ fn error_code(code: ErrorCode) -> String {
 struct Record<'a> {
     method: MethodName,
     target: Option<String>,
+    /// The computers a computer's agent may reach: a row names a target only inside this set.
+    visible: Option<Arc<BTreeSet<String>>>,
     outcome: AuditOutcome,
     error: Option<&'a DispatchError>,
     job_id: Option<String>,
@@ -101,7 +103,15 @@ fn audit(context: &HandlerContext, record: Record<'_>) {
         caller_id: caller.id().map(str::to_owned),
         client,
         method: record.method.name().to_owned(),
-        computer_id: record.target,
+        // A computer's call names no computer outside the ones it made, so the log tells
+        // nothing a refused probe guessed.
+        computer_id: match (&caller, &record.visible) {
+            (Caller::Computer { .. }, Some(visible)) => {
+                record.target.filter(|target| visible.contains(target))
+            }
+            (Caller::Computer { .. }, None) => None,
+            _ => record.target,
+        },
         outcome: record.outcome,
         error_code: record.error.map(|error| error_code(error.code)),
         job_id: record.job_id,
@@ -152,12 +162,14 @@ pub(crate) async fn admit(
         }
         _ => (policy::decide(&caller, method, params, &NoWorld), None),
     };
+    let seen = visible.clone();
     let refuse = |error: DispatchError, outcome: AuditOutcome| {
         audit(
             context,
             Record {
                 method,
                 target: target.clone(),
+                visible: seen.clone(),
                 outcome,
                 error: Some(&error),
                 job_id: None,
@@ -240,7 +252,7 @@ pub(crate) fn finish(
             });
         }
         if let Some(job) = &job {
-            noted.push(store.note_job(id, job));
+            noted.push(store.note_job_about(id, job, admitted.target.as_deref()));
         }
         if let (Ok(_), Some(done)) = (&result, &admitted.job) {
             noted.push(store.drop_job(id, done));
@@ -266,6 +278,7 @@ pub(crate) fn finish(
             Record {
                 method,
                 target: admitted.target.clone(),
+                visible: admitted.visible.clone(),
                 outcome,
                 error,
                 job_id: job,
@@ -294,6 +307,15 @@ impl policy::World for NoWorld {
     fn request_fork(&self, _request_id: &str) -> Option<String> {
         None
     }
+    fn request_target(&self, _request_id: &str) -> Option<String> {
+        None
+    }
+    fn resources(&self, _computer: &str) -> Option<Resources> {
+        None
+    }
+    fn ssh_settings(&self, _computer: &str) -> Option<(u16, String)> {
+        None
+    }
     fn access(&self, _computer: &str) -> Access {
         Access::default()
     }
@@ -313,6 +335,10 @@ struct EngineWorld {
     document: Document,
     app_data: PathBuf,
     github: Option<Vec<Value>>,
+    /// Every computer's sizes, read only for a call that makes a computer.
+    resources: HashMap<String, Resources>,
+    /// The saved SSH port and bind address of each computer, read only for `sshAccess.save`.
+    ssh: HashMap<String, (u16, String)>,
 }
 
 impl EngineWorld {
@@ -353,6 +379,57 @@ impl EngineWorld {
         } else {
             None
         };
+        let mut resources = HashMap::new();
+        if method == MethodName::ComputersCreate {
+            let list = super::route(&internal, MethodName::ComputersList, &json!({}))
+                .await
+                .map(|output| output.value)
+                .unwrap_or(Value::Null);
+            let computers = |kind: &str| {
+                list.pointer(&format!("/{kind}/computers"))
+                    .and_then(Value::as_array)
+                    .cloned()
+                    .unwrap_or_default()
+            };
+            for computer in computers("linux") {
+                let configuration = &computer["configuration"];
+                let id = configuration.get("id").and_then(Value::as_str);
+                if let (Some(id), Some(sizes)) = (id, Resources::of_linux(configuration)) {
+                    resources.insert(id.to_owned(), sizes);
+                }
+            }
+            for computer in computers("macos") {
+                let id = computer.get("id").and_then(Value::as_str);
+                if let (Some(id), Some(sizes)) = (id, Resources::of_macos(&computer)) {
+                    resources.insert(id.to_owned(), sizes);
+                }
+            }
+        }
+        let mut ssh = HashMap::new();
+        if method == MethodName::SshAccessSave {
+            let state = super::route(&internal, MethodName::SshAccessState, &json!({}))
+                .await
+                .map(|output| output.value)
+                .unwrap_or(Value::Null);
+            for computer in state
+                .get("computers")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+            {
+                let saved = (
+                    computer
+                        .get("port")
+                        .and_then(Value::as_u64)
+                        .and_then(|port| u16::try_from(port).ok()),
+                    computer.get("bindAddress").and_then(Value::as_str),
+                    computer.get("computerId").and_then(Value::as_str),
+                );
+                if let (Some(port), Some(address), Some(id)) = saved {
+                    ssh.insert(id.to_owned(), (port, address.to_owned()));
+                }
+            }
+        }
         let app_data = app_data(context);
         let engine = context.engine.clone();
         let settled = {
@@ -378,6 +455,8 @@ impl EngineWorld {
             document,
             app_data,
             github,
+            resources,
+            ssh,
         }
     }
 }
@@ -443,6 +522,19 @@ impl policy::World for EngineWorld {
             .ok()
             .flatten()
             .map(|request| request.fork_id)
+    }
+    fn request_target(&self, request_id: &str) -> Option<String> {
+        silo_engine::fold_requests::Store::new(&self.app_data)
+            .get(request_id)
+            .ok()
+            .flatten()
+            .map(|request| request.target)
+    }
+    fn resources(&self, computer: &str) -> Option<Resources> {
+        self.resources.get(computer).copied()
+    }
+    fn ssh_settings(&self, computer: &str) -> Option<(u16, String)> {
+        self.ssh.get(computer).cloned()
     }
     fn access(&self, computer: &str) -> Access {
         self.names

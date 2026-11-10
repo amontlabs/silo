@@ -18,9 +18,18 @@ use crate::dispatcher::DispatchError;
 #[derive(Default)]
 struct Fake {
     calls: Mutex<Vec<(Option<String>, String, Value)>>,
+    /// The calls the bridge refused before the policy, as (computer, method, code).
+    refusals: Mutex<Vec<(String, String, ErrorCode)>>,
 }
 
 impl Runner for Fake {
+    fn refused(&self, computer: &str, method: &str, code: ErrorCode) {
+        self.refusals
+            .lock()
+            .unwrap()
+            .push((computer.to_owned(), method.to_owned(), code));
+    }
+
     fn run<'a>(
         &'a self,
         computer: Option<&'a str>,
@@ -318,5 +327,23 @@ async fn jobs_are_capped_and_old_ones_are_reaped() {
             .filter(|call| call.1 == "operations.job.acknowledge")
             .count(),
         MAX_JOBS
+    );
+}
+
+#[tokio::test]
+async fn a_call_for_a_method_that_is_not_offered_is_recorded_as_refused() {
+    let setup = setup();
+    let snapshot = snapshot_with(&[]);
+    setup
+        .ask(&snapshot, "main", "made.up.method", json!({"computerId": "stranger"}))
+        .await;
+    setup.ask(&snapshot, "main", "computers.list", json!({})).await;
+    assert_eq!(
+        *setup.fake.refusals.lock().unwrap(),
+        [(
+            "main".to_owned(),
+            "(a method that is not offered)".to_owned(),
+            ErrorCode::UnsupportedRemoteOperation
+        )]
     );
 }

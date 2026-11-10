@@ -10,8 +10,16 @@ mod worker;
 use std::{collections::HashMap, collections::HashSet, future::Future, pin::Pin, sync::Arc};
 
 use serde_json::{json, Value};
-use silo_api::{methods::MethodName, transport::PROTOCOL_VERSION};
-use silo_engine::policy::Caller;
+use silo_api::{
+    jobs::ErrorCode,
+    methods::{audit::AuditCallerKind, audit::AuditOutcome, MethodName},
+    transport::PROTOCOL_VERSION,
+};
+use silo_engine::{
+    audit::{AuditLog, Row},
+    context::EngineContext,
+    policy::Caller,
+};
 
 use crate::{
     context::SilodContext,
@@ -31,6 +39,9 @@ pub trait Runner: Send + Sync {
         method: &'a str,
         params: Value,
     ) -> Pin<Box<dyn Future<Output = Result<Value, DispatchError>> + Send + 'a>>;
+
+    /// Records in the audit log a call the bridge refused before it reached the policy.
+    fn refused(&self, _computer: &str, _method: &str, _code: ErrorCode) {}
 }
 
 /// Which computers exist, what they are called and which were made from which.
@@ -133,6 +144,26 @@ impl EngineRunner {
 }
 
 impl Runner for EngineRunner {
+    fn refused(&self, computer: &str, method: &str, code: ErrorCode) {
+        let app_data = self.engine.paths().app_data.clone();
+        // An engine always has an absolute data folder; a test context without one keeps no log.
+        if !app_data.is_absolute() {
+            return;
+        }
+        AuditLog::shared(&app_data).record(Row {
+            at_ms: silo_engine::audit::now_ms(),
+            caller_kind: AuditCallerKind::Computer,
+            caller_id: Some(computer.to_owned()),
+            client: None,
+            method: method.to_owned(),
+            computer_id: None,
+            outcome: AuditOutcome::Refused,
+            error_code: Some(methods::gate::error_code(code)),
+            job_id: None,
+            approval_id: None,
+        });
+    }
+
     fn run<'a>(
         &'a self,
         computer: Option<&'a str>,

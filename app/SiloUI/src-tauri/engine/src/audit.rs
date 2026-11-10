@@ -5,8 +5,11 @@
 //! left alone.
 //!
 //! Rows are written by a background thread, so recording never waits on the disk and a write
-//! error never fails a call: the first one is reported once and the row is dropped. Rows older
-//! than 90 days, and the oldest beyond 200,000, are trimmed.
+//! error never fails a call: the first one is reported once and the row is dropped. A call that
+//! repeats the caller's newest row (same method, outcome, error and computer) adds to that
+//! row's count instead of making a new one. Rows older than 90 days are trimmed; beyond that
+//! the owner's and devices' rows keep the newest 200,000, and each computer's own calls the
+//! newest 20,000, so a computer can never push out anyone else's rows.
 
 use std::{
     collections::HashMap,
@@ -27,7 +30,7 @@ use silo_api::methods::audit::{
 };
 
 pub const FILE_NAME: &str = "audit.sqlite3";
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
 const QUEUE: usize = 4096;
 const DEFAULT_LIMIT: u32 = 100;
 const MAX_LIMIT: u32 = 500;
@@ -38,7 +41,10 @@ const TRIM_EVERY: u64 = 500;
 #[derive(Clone, Copy, Debug)]
 pub struct Retention {
     pub max_age: Duration,
+    /// Rows kept for the owner and for devices.
     pub max_rows: u64,
+    /// Rows kept for each computer's own calls.
+    pub max_computer_rows: u64,
 }
 
 impl Default for Retention {
@@ -46,6 +52,7 @@ impl Default for Retention {
         Self {
             max_age: Duration::from_secs(90 * 24 * 60 * 60),
             max_rows: 200_000,
+            max_computer_rows: 20_000,
         }
     }
 }
@@ -180,22 +187,26 @@ fn open_connection(path: &Path) -> Result<Connection, String> {
                  outcome TEXT NOT NULL,
                  error_code TEXT,
                  job_id TEXT,
-                 approval_id TEXT
+                 approval_id TEXT,
+                 count INTEGER NOT NULL DEFAULT 1,
+                 last_at INTEGER
              );
              CREATE INDEX IF NOT EXISTS calls_computer ON calls (computer_id, id);
              CREATE INDEX IF NOT EXISTS calls_caller ON calls (caller_id, id);
              CREATE INDEX IF NOT EXISTS calls_at ON calls (at_ms);",
         )
         .map_err(|error| error.to_string())?;
-    let version: Option<i64> = connection
-        .query_row(
-            "SELECT value FROM meta WHERE key = 'schema_version'",
-            [],
-            |row| row.get(0),
-        )
-        .optional()
-        .map_err(|error| error.to_string())?;
-    match version {
+    let read_version = || -> Result<Option<i64>, String> {
+        connection
+            .query_row(
+                "SELECT value FROM meta WHERE key = 'schema_version'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|error| error.to_string())
+    };
+    match read_version()? {
         None => {
             connection
                 .execute(
@@ -205,6 +216,23 @@ fn open_connection(path: &Path) -> Result<Connection, String> {
                 .map_err(|error| error.to_string())?;
         }
         Some(SCHEMA_VERSION) => {}
+        // Version 1 had no count of repeated calls.
+        Some(1) => {
+            let upgraded = connection.execute_batch(
+                "BEGIN IMMEDIATE;
+                 ALTER TABLE calls ADD COLUMN count INTEGER NOT NULL DEFAULT 1;
+                 ALTER TABLE calls ADD COLUMN last_at INTEGER;
+                 UPDATE meta SET value = 2 WHERE key = 'schema_version';
+                 COMMIT;",
+            );
+            if let Err(error) = upgraded {
+                let _ = connection.execute_batch("ROLLBACK");
+                // The reader and the writer may both open the old file; one of them upgraded it.
+                if read_version()? != Some(SCHEMA_VERSION) {
+                    return Err(error.to_string());
+                }
+            }
+        }
         Some(other) => {
             return Err(format!(
                 "{} has schema version {other}, which this engine does not know.",
@@ -215,12 +243,52 @@ fn open_connection(path: &Path) -> Result<Connection, String> {
     Ok(connection)
 }
 
+/// Counts the call in the caller's newest row when it repeats it, else adds a row.
 fn insert(connection: &Connection, row: &Row) -> Result<(), String> {
+    let caller = rusqlite::params![kind_text(row.caller_kind), row.caller_id];
+    let newest: Option<(i64, String, String, Option<String>, Option<String>, Option<String>, Option<String>)> =
+        connection
+            .query_row(
+                "SELECT id, method, outcome, error_code, computer_id, client, approval_id
+                 FROM calls WHERE caller_kind = ?1 AND caller_id IS ?2
+                 ORDER BY id DESC LIMIT 1",
+                caller,
+                |found| {
+                    Ok((
+                        found.get(0)?,
+                        found.get(1)?,
+                        found.get(2)?,
+                        found.get(3)?,
+                        found.get(4)?,
+                        found.get(5)?,
+                        found.get(6)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(|error| error.to_string())?;
+    if let Some((id, method, outcome, error_code, computer_id, client, approval_id)) = newest {
+        let repeats = method == row.method
+            && outcome == outcome_text(row.outcome)
+            && error_code == row.error_code
+            && computer_id == row.computer_id
+            && client == row.client
+            && approval_id == row.approval_id;
+        if repeats {
+            return connection
+                .execute(
+                    "UPDATE calls SET count = count + 1, last_at = ?2 WHERE id = ?1",
+                    rusqlite::params![id, row.at_ms],
+                )
+                .map(|_| ())
+                .map_err(|error| error.to_string());
+        }
+    }
     connection
         .execute(
             "INSERT INTO calls (at_ms, caller_kind, caller_id, client, method, computer_id,
-                 outcome, error_code, job_id, approval_id)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                 outcome, error_code, job_id, approval_id, count, last_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 1, ?1)",
             rusqlite::params![
                 row.at_ms,
                 kind_text(row.caller_kind),
@@ -239,20 +307,45 @@ fn insert(connection: &Connection, row: &Row) -> Result<(), String> {
 }
 
 fn trim(connection: &Connection, retention: Retention) -> Result<(), String> {
+    let failed = |error: rusqlite::Error| error.to_string();
     let age = i64::try_from(retention.max_age.as_millis()).unwrap_or(i64::MAX);
     connection
         .execute(
             "DELETE FROM calls WHERE at_ms < ?1",
             [now_ms().saturating_sub(age)],
         )
-        .map_err(|error| error.to_string())?;
+        .map_err(failed)?;
+    // The owner's and devices' rows are counted apart from every computer's.
     connection
         .execute(
-            "DELETE FROM calls WHERE id <= (SELECT MAX(id) FROM calls) - ?1",
+            "DELETE FROM calls WHERE caller_kind <> 'computer' AND id <= COALESCE(
+                 (SELECT id FROM calls WHERE caller_kind <> 'computer'
+                  ORDER BY id DESC LIMIT 1 OFFSET ?1), 0)",
             [i64::try_from(retention.max_rows).unwrap_or(i64::MAX)],
         )
-        .map(|_| ())
-        .map_err(|error| error.to_string())
+        .map_err(failed)?;
+    let cap = i64::try_from(retention.max_computer_rows).unwrap_or(i64::MAX);
+    let mut over = connection
+        .prepare(
+            "SELECT caller_id FROM calls WHERE caller_kind = 'computer'
+             GROUP BY caller_id HAVING COUNT(*) > ?1",
+        )
+        .map_err(failed)?;
+    let computers: Vec<Option<String>> = over
+        .query_map([cap], |found| found.get(0))
+        .and_then(Iterator::collect)
+        .map_err(failed)?;
+    for computer in computers {
+        connection
+            .execute(
+                "DELETE FROM calls WHERE caller_kind = 'computer' AND caller_id IS ?1 AND id <= COALESCE(
+                     (SELECT id FROM calls WHERE caller_kind = 'computer' AND caller_id IS ?1
+                      ORDER BY id DESC LIMIT 1 OFFSET ?2), 0)",
+                rusqlite::params![computer, cap],
+            )
+            .map_err(failed)?;
+    }
+    Ok(())
 }
 
 fn write_loop(path: PathBuf, retention: Retention, warned: Arc<AtomicBool>, queue: Receiver<Message>) {
@@ -366,7 +459,11 @@ impl AuditLog {
             conditions.push("id < ?".into());
             values.push(SqlValue::Integer(i64::try_from(before).unwrap_or(i64::MAX)));
         }
-        if let Scope::Computers(visible) = scope {
+        let visible_only = match scope {
+            Scope::Computers(visible) => Some(visible),
+            Scope::All => None,
+        };
+        if let Some(visible) = visible_only {
             if visible.is_empty() {
                 return Ok(AuditListResult {
                     entries: Vec::new(),
@@ -389,7 +486,7 @@ impl AuditLog {
         values.push(SqlValue::Integer(i64::from(limit) + 1));
         let sql = format!(
             "SELECT id, at_ms, caller_kind, caller_id, client, method, computer_id, outcome,
-                    error_code, job_id, approval_id
+                    error_code, job_id, approval_id, count, last_at
              FROM calls {filter} ORDER BY id DESC LIMIT ?"
         );
         let mut reader = self
@@ -421,10 +518,23 @@ impl AuditLog {
                     error_code: row.get(8)?,
                     job_id: row.get(9)?,
                     approval_id: row.get(10)?,
+                    count: u64::try_from(row.get::<_, i64>(11)?).unwrap_or(1).max(1),
+                    last_at: row.get::<_, Option<i64>>(12)?.map(rfc3339),
                 })
             })
             .and_then(Iterator::collect)
             .map_err(|error| error.to_string())?;
+        // What a computer reads says nothing about who else called: no program names, no
+        // device keys, and no other computer's id.
+        if let Some(visible) = visible_only {
+            for entry in &mut entries {
+                entry.client = None;
+                let known = entry.caller_id.as_ref().is_some_and(|id| visible.contains(id));
+                if entry.caller_kind != AuditCallerKind::Computer || !known {
+                    entry.caller_id = None;
+                }
+            }
+        }
         let more = entries.len() > limit as usize;
         entries.truncate(limit as usize);
         let next_before_id = more.then(|| entries.last().map(|entry| entry.id)).flatten();
@@ -553,6 +663,7 @@ mod tests {
             Retention {
                 max_age: Duration::from_secs(3600),
                 max_rows: 3,
+                max_computer_rows: 3,
             },
         );
         let mut old = row("old", AuditCallerKind::Owner, None, None);
@@ -567,6 +678,166 @@ mod tests {
             .unwrap();
         assert_eq!(rows.entries.len(), 3);
         assert!(rows.entries.iter().all(|entry| entry.method != "old"));
+    }
+
+    fn kinds() -> AuditListParams {
+        AuditListParams { limit: Some(500), ..all() }
+    }
+
+    fn trimmed_log(owner: u64, computer: u64) -> (tempfile::TempDir, AuditLog) {
+        let directory = tempfile::tempdir().unwrap();
+        let log = AuditLog::open(
+            directory.path().join(FILE_NAME),
+            Retention {
+                max_age: Duration::from_secs(3600),
+                max_rows: owner,
+                max_computer_rows: computer,
+            },
+        );
+        (directory, log)
+    }
+
+    #[test]
+    fn a_computer_can_never_push_out_the_owners_rows() {
+        let (_directory, log) = trimmed_log(4, 4);
+        for number in 0..3 {
+            log.record(row(&format!("owner{number}"), AuditCallerKind::Owner, None, None));
+        }
+        log.record(row("device", AuditCallerKind::Device, Some("key"), None));
+        // The trim runs when the count of rows written reaches a multiple of TRIM_EVERY.
+        for number in 0..TRIM_EVERY * 2 - 14 {
+            log.record(row(&format!("noise{number}"), AuditCallerKind::Computer, Some("a"), None));
+        }
+        for number in 0..10 {
+            log.record(row(&format!("other{number}"), AuditCallerKind::Computer, Some("b"), None));
+        }
+        let rows = log.list(&kinds(), Scope::All).unwrap();
+        let methods = |kind: AuditCallerKind, caller: Option<&str>| {
+            rows.entries
+                .iter()
+                .filter(|entry| entry.caller_kind == kind && entry.caller_id.as_deref() == caller)
+                .map(|entry| entry.method.clone())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(methods(AuditCallerKind::Owner, None).len(), 3);
+        assert_eq!(methods(AuditCallerKind::Device, Some("key")).len(), 1);
+        assert_eq!(methods(AuditCallerKind::Computer, Some("a")).len(), 4);
+        assert_eq!(methods(AuditCallerKind::Computer, Some("b")).len(), 4);
+        assert_eq!(
+            methods(AuditCallerKind::Computer, Some("b"))[0],
+            "other9",
+            "each computer keeps its newest"
+        );
+    }
+
+    #[test]
+    fn owner_and_device_rows_are_trimmed_among_themselves() {
+        let (_directory, log) = trimmed_log(3, 100);
+        for number in 0..TRIM_EVERY {
+            log.record(row(&format!("m{number}"), AuditCallerKind::Owner, None, None));
+        }
+        log.record(row("computer", AuditCallerKind::Computer, Some("a"), None));
+        let rows = log.list(&kinds(), Scope::All).unwrap();
+        assert_eq!(rows.entries.len(), 4);
+        assert_eq!(rows.entries[1].method, format!("m{}", TRIM_EVERY - 1));
+    }
+
+    #[test]
+    fn a_call_that_repeats_the_callers_newest_row_is_counted_in_it() {
+        let (_directory, log) = trimmed_log(100, 100);
+        let mut first = row("exec", AuditCallerKind::Computer, Some("a"), Some("a"));
+        let begun = now_ms() - 60_000;
+        first.at_ms = begun;
+        let mut again = first.clone();
+        again.at_ms = begun + 4_000;
+        log.record(first);
+        log.record(again.clone());
+        log.record(again.clone());
+        // Another caller's row between does not break a caller's run; its own different row does.
+        log.record(row("exec", AuditCallerKind::Computer, Some("b"), Some("b")));
+        log.record(again.clone());
+        let mut refused = again.clone();
+        refused.outcome = AuditOutcome::Refused;
+        refused.error_code = Some("permission_denied".into());
+        log.record(refused.clone());
+        log.record(refused);
+        let mut elsewhere = again.clone();
+        elsewhere.computer_id = Some("c".into());
+        log.record(elsewhere);
+        let rows = log.list(&kinds(), Scope::All).unwrap();
+        let shown: Vec<(String, u64)> = rows
+            .entries
+            .iter()
+            .map(|entry| {
+                (
+                    format!("{}:{:?}:{:?}", entry.method, entry.outcome, entry.computer_id),
+                    entry.count,
+                )
+            })
+            .collect();
+        assert_eq!(
+            shown,
+            [
+                ("exec:Ok:Some(\"c\")".to_owned(), 1),
+                ("exec:Refused:Some(\"a\")".to_owned(), 2),
+                ("exec:Ok:Some(\"b\")".to_owned(), 1),
+                ("exec:Ok:Some(\"a\")".to_owned(), 4),
+            ]
+        );
+        let counted = rows.entries.last().unwrap();
+        assert_eq!(counted.at, rfc3339(begun));
+        assert_eq!(counted.last_at.as_deref(), Some(rfc3339(begun + 4_000).as_str()));
+    }
+
+    #[test]
+    fn a_version_one_file_gains_the_count_columns() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join(FILE_NAME);
+        {
+            let connection = Connection::open(&path).unwrap();
+            connection
+                .execute_batch(
+                    &"CREATE TABLE meta (key TEXT PRIMARY KEY, value INTEGER NOT NULL);
+                     INSERT INTO meta VALUES ('schema_version', 1);
+                     CREATE TABLE calls (
+                         id INTEGER PRIMARY KEY AUTOINCREMENT, at_ms INTEGER NOT NULL,
+                         caller_kind TEXT NOT NULL, caller_id TEXT, client TEXT,
+                         method TEXT NOT NULL, computer_id TEXT, outcome TEXT NOT NULL,
+                         error_code TEXT, job_id TEXT, approval_id TEXT);
+                     INSERT INTO calls (at_ms, caller_kind, method, outcome)
+                         VALUES ({}, 'owner', 'old', 'ok');"
+                        .replace("{}", &(now_ms() - 1000).to_string()),
+                )
+                .unwrap();
+        }
+        let log = AuditLog::open(path, Retention::default());
+        log.record(row("new", AuditCallerKind::Owner, None, None));
+        let rows = log.list(&all(), Scope::All).unwrap();
+        assert_eq!(
+            rows.entries.iter().map(|e| (e.method.as_str(), e.count)).collect::<Vec<_>>(),
+            [("new", 1), ("old", 1)]
+        );
+    }
+
+    #[test]
+    fn what_a_computer_reads_names_no_program_and_no_device_key() {
+        let (_directory, log) = trimmed_log(100, 100);
+        log.record(row("a", AuditCallerKind::Device, Some("SHA256:key"), Some("main")));
+        log.record(row("b", AuditCallerKind::Owner, None, Some("main")));
+        log.record(row("c", AuditCallerKind::Computer, Some("main"), Some("main")));
+        let visible: BTreeSet<String> = ["main".to_owned()].into();
+        let seen = log.list(&all(), Scope::Computers(&visible)).unwrap();
+        assert_eq!(seen.entries.len(), 3);
+        for entry in &seen.entries {
+            assert_eq!(entry.client, None, "{}", entry.method);
+            assert_eq!(
+                entry.caller_id.as_deref(),
+                (entry.caller_kind == AuditCallerKind::Computer).then_some("main")
+            );
+        }
+        let owner = log.list(&all(), Scope::All).unwrap();
+        assert!(owner.entries.iter().all(|entry| entry.client.is_some()));
+        assert!(owner.entries.iter().any(|entry| entry.caller_id.as_deref() == Some("SHA256:key")));
     }
 
     #[test]

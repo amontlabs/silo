@@ -24,6 +24,7 @@ use serde::Serialize;
 use serde_json::{json, Value};
 
 use super::keep::{lane, CheckpointRef, ManifestStore, Os};
+use crate::policy::handoff::Handoff;
 use journal::now_millis;
 pub use journal::{Journal, Record, State, Step, Swap};
 
@@ -116,6 +117,11 @@ pub trait PromoteEnv: Send + Sync {
     }
     /// Everything the stores keep under the computer's name, as one document.
     fn export_bindings(&self, id: &str, name: &str) -> Result<Value, String>;
+    /// Who made which of the two computers, read before the swap and given back to `apply` and
+    /// `revert` in the swap.
+    fn export_makers(&self, _fork_id: &str, _target_id: &str) -> Result<Handoff, String> {
+        Ok(Handoff::default())
+    }
     /// Does one step. Repeating it changes nothing.
     fn apply(&self, step: Step, swap: &Swap) -> Result<(), String>;
     /// Undoes one step, whether or not it was applied. Repeating it changes nothing.
@@ -374,6 +380,7 @@ pub fn promote(
         checkpoint,
         fork_was_running: fork.running,
         target_was_running: main.running,
+        makers: env.export_makers(&fork.id, &main.id)?,
     };
     let mut record = Record {
         swap,

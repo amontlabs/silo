@@ -53,6 +53,8 @@ pub enum ApprovalKind {
     Access,
     /// A container computer, which shares the device's kernel.
     Container,
+    /// A new computer with more CPUs, memory or storage than the computer making it has.
+    Resources,
 }
 
 /// The details of an `approval_required` error.

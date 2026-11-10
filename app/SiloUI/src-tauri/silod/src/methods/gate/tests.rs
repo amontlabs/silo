@@ -93,7 +93,50 @@ async fn a_computers_call_outside_its_rules_is_refused_before_any_handler_and_re
         && row.caller_kind == AuditCallerKind::Computer
         && row.caller_id.as_deref() == Some(id.as_str())
         && row.error_code.as_deref() == Some("permission_denied")));
-    assert_eq!(rows[1].computer_id.as_deref(), Some("someone-else"));
+    assert_eq!(
+        rows[1].computer_id, None,
+        "a computer outside its tree is not named in the log"
+    );
+}
+
+#[tokio::test]
+async fn a_computers_row_names_only_computers_it_may_reach_and_repeats_are_counted() {
+    let (id, fork) = computer();
+    let caller = Caller::Computer { id: id.clone() };
+    for _ in 0..3 {
+        let _ = call(
+            &caller,
+            MethodName::GuestExec,
+            json!({"computerId": "guess-a-victim", "argv": ["true"], "timeoutMs": 1000}),
+        )
+        .await;
+    }
+    let _ = call(
+        &caller,
+        MethodName::GuestExec,
+        json!({"computerId": fork, "argv": ["true"], "timeoutMs": 1000}),
+    )
+    .await;
+    let rows = AuditLog::shared(&fixture().context.paths().app_data)
+        .list(
+            &AuditListParams {
+                computer_id: None,
+                caller_kind: Some(AuditCallerKind::Computer),
+                before_id: None,
+                limit: Some(500),
+            },
+            Scope::All,
+        )
+        .unwrap()
+        .entries;
+    let mine: Vec<&AuditEntry> = rows
+        .iter()
+        .filter(|row| row.caller_id.as_deref() == Some(id.as_str()))
+        .collect();
+    assert_eq!(mine.len(), 2, "{mine:?}");
+    assert_eq!(mine[1].computer_id, None);
+    assert_eq!(mine[1].count, 3, "the same refused probe is one counted row");
+    assert_eq!(mine[0].computer_id.as_deref(), Some(fork.as_str()));
 }
 
 #[tokio::test]
@@ -146,6 +189,7 @@ async fn a_computer_reads_the_audit_rows_about_itself_and_what_it_made_only() {
     .await
     .unwrap();
     let entries: Vec<AuditEntry> = serde_json::from_value(page["entries"].clone()).unwrap();
+    assert!(entries.iter().all(|row| row.client.is_none()));
     assert!(entries.iter().any(|row| row.caller_id.as_deref() == Some(id.as_str())));
     assert!(entries
         .iter()
@@ -178,7 +222,18 @@ async fn an_owners_command_is_recorded_and_a_query_is_not() {
     )
     .await
     .unwrap();
-    let rows = rows_about(&[&target]);
+    let rows = AuditLog::shared(&fixture().context.paths().app_data)
+        .list(
+            &AuditListParams {
+                computer_id: Some(target.clone()),
+                caller_kind: None,
+                before_id: None,
+                limit: Some(500),
+            },
+            Scope::All,
+        )
+        .unwrap()
+        .entries;
     assert_eq!(rows.len(), 1, "{rows:?}");
     assert_eq!(rows[0].method, "operations.cancel");
     assert_eq!(rows[0].caller_kind, AuditCallerKind::Owner);

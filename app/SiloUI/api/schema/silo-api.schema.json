@@ -472,6 +472,11 @@
           "const": "container",
           "description": "A container computer, which shares the device's kernel.",
           "type": "string"
+        },
+        {
+          "const": "resources",
+          "description": "A new computer with more CPUs, memory or storage than the computer making it has.",
+          "type": "string"
         }
       ]
     },
@@ -641,6 +646,13 @@
             "null"
           ]
         },
+        "count": {
+          "default": 1,
+          "description": "How many times the same call was made in a row by the same caller. `at` is the\nfirst, `lastAt` the latest.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
         "errorCode": {
           "type": [
             "string",
@@ -653,6 +665,13 @@
           "type": "integer"
         },
         "jobId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "lastAt": {
+          "description": "RFC 3339 time of the latest of the `count` calls.",
           "type": [
             "string",
             "null"

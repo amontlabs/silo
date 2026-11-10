@@ -28,7 +28,7 @@ compile until it is classified there.
 | Its own jobs | allowed for a job the computer started |
 | Its tree | the target is the computer itself or one it made; lists show only those |
 | What it made | the target is a computer it made, never itself |
-| Makes a computer | forks itself or one it made, or makes a new one; asks if what the new computer gets is more than the caller has |
+| Makes a computer | forks itself or one it made, or makes a new one; asks if what the new computer gets (access, CPUs, memory, storage) is more than the caller has |
 | Asks you | becomes a request you allow or deny; the call answers `approval_required` with what is asked |
 | Never | refused with `permission_denied` |
 
@@ -48,22 +48,23 @@ to answer in one piece cannot be cut, so it is withheld.
 | `operations.job.get`, `.acknowledge`, `operations.cancel`, `guest.exec.get`, `guest.exec.input` | Its own jobs | |
 | `operations.list`, `events.subscribe`, `notifications.list` | Never | They cover every computer and are not cut per caller yet. |
 | `computers.list`, `computers.tree` | Its tree | The answer holds only its tree; a parent outside it is not named. Only the lists are asked for. |
-| `computers.credentials`, `steps.list`, `checkpoints.create`, `checkpoints.usage`, `changes.diff`, `logs.query`, `files.list`, `guest.account`, `guest.files.list`, `.read`, `.watch`, `desktop.status`, `computerUse.state`, `clipboard.read`, `network.urls`, `push.repositories`, `push.status` | Its tree | Reading or checkpointing itself gives it nothing new. |
+| `computers.credentials`, `steps.list`, `checkpoints.usage`, `changes.diff`, `logs.query`, `files.list`, `guest.account`, `guest.files.list`, `.read`, `.watch`, `desktop.status`, `computerUse.state`, `clipboard.read`, `network.urls`, `push.repositories`, `push.status` | Its tree | Reading or checkpointing itself gives it nothing new. |
+| `checkpoints.create` | Its tree | On the caller's own computer the checkpoint is always a manual one and `keepNewest` is dropped, so retention never removes your automatic and step checkpoints; on a computer it made the parameters pass through (retention there only trims what its agent made). |
 | `network.unpublish` | Its tree | Narrowing. |
 | `changes.requests.list`, `changes.requests.show` | Its tree | Requests about forks in its tree. |
 | `computers.start`, `.stop`, `.restart`, `.forceStop`, `.delete`, `.dismissError`, `macos.setup.retry` | What it made | A computer cannot stop or delete itself. |
-| `guest.exec`, `guest.exec.start`, `guest.files.write`, `.remove`, `guest.prepare`, `guest.ssh` | What it made | It already runs anything it likes in itself. |
+| `guest.exec`, `guest.exec.start`, `guest.files.write`, `.remove`, `guest.ssh` | What it made | It already runs anything it likes in itself. |
 | `checkpoints.restore`, `.delete`, `.abandonRestore`, `steps.record` | What it made | Its own checkpoints and steps are your history of it. |
 | `desktop.action`, `computerUse.setup`, `clipboard.write` | What it made | |
 | `changes.request`, `changes.requests.throwAway` | What it made | A review request can target only its tree. |
-| `checkpoints.fork` | Makes a computer | Source: itself or one it made. The fork may have any secret the caller has, and a read-only copy of GitHub access the caller's own access covers; anything more asks you. Forking an earlier checkpoint of itself asks you, since it can hold what you have since taken away. The token file of the in-guest client is always scrubbed; a recipe hash is never passed on (it names a baseline other forks share). |
-| `computers.create` | Makes a computer | The engine chooses a Linux computer's id. A container computer asks you: it shares the device's kernel. Names Silo reserves (`silo-build-`, `silo-baseline-`) are refused. |
+| `checkpoints.fork` | Makes a computer | Source: itself or one it made. The fork may have any secret the caller has (see [Secrets in a fork](#secrets-in-a-fork)), and a read-only copy of GitHub access the caller's own access covers; anything more asks you. Forking an earlier checkpoint of itself asks you, since it can hold what you have since taken away. The token file of the in-guest client is always scrubbed; a recipe hash is never passed on (it names a baseline other forks share). |
+| `computers.create` | Makes a computer | The engine chooses a Linux computer's id. A container computer asks you: it shares the device's kernel. A computer with more CPUs, maximum CPUs, memory, maximum memory or storage than the caller has (a macOS one: CPUs, memory or disk) asks you, with the sizes in the request. Of a Linux computer's `desktop` settings only whether the desktop starts with the computer is passed on (Silo decides the rest). Names Silo reserves (`silo-build-`, `silo-baseline-`) are refused. |
 | `changes.keep` | Asks you | Free when both the fork and the computer it merges into are ones it made; asks when it merges into itself; refused anywhere else. |
-| `changes.requests.keep` | Asks you | Only for a request about a computer it made. |
+| `changes.requests.keep` | Asks you | Only for a request about a computer it made; free when the request merges into a computer it made too, asks when it merges into itself. |
 | `changes.undo` | Asks you | Free on a computer it made; asks on itself. |
-| `changes.promote` (replace main) | Asks you | Always; the request says it restarts the computer it replaces. |
+| `changes.promote` (replace main) | Asks you | Free when both the fork and the computer it replaces are ones it made; asks when it replaces itself (the request says it restarts that computer). |
 | `network.publish` | Asks you | A port on your device. |
-| `sshAccess.save` | Asks you | Turning SSH access off is free. |
+| `sshAccess.save` | Asks you | Turning SSH access off is free, and only the computer and the off switch are taken from the call: the port and address stay what is saved, so nothing it sends waits for you to turn access on. |
 | `push.start` | Asks you | A push to GitHub through your device. |
 | `github.configuration.save` | Asks you | Only when the computers whose GitHub access changes are in its tree; a configuration that drops or changes another computer's access, or changes nothing, is refused. |
 | `secrets.save` | Asks you | Adding a secret for computers in its tree. Changing a saved secret is yours only. The secret's value is never in the request's summary. |
@@ -71,6 +72,7 @@ to answer in one piece cannot be cut, so it is withheld.
 | `changes.requests.markKept`, `changes.requests.open` | Never | |
 | `computers.configuration.*`, `computers.identities.*`, `computers.launch`, `computers.shell`, `activity.setup.read`, `macos.template.delete` | Never | They read or change every computer at once. |
 | `files.upload`, `files.download`, `logs.export`, `clipboard.transfer`, `computerUse.approval`, `display.*`, `desktop.connect`, `macos.display.*`, `editor.*`, `terminal.command`, `guest.sshAlias.*`, `network.open` | Never | They reach your device's own files, clipboard, screen, windows or settings. |
+| `guest.prepare` | Never | It adds a key to the one `authorized_keys` file every computer on the device shares. |
 | `network.state`, `sshAccess.state`, `sshAccess.connection` | Never | They list every computer. |
 | `secrets.list`, `secrets.remove`, `secrets.retry` | Never | A computer never reads a secret's value, and the list shows every computer's secrets. |
 | `github.*` other than the configuration save | Never | Your GitHub account and sign-in. |
@@ -81,8 +83,16 @@ to answer in one piece cannot be cut, so it is withheld.
 
 A call that needs your approval answers at once with the error `approval_required`; its details
 carry the kind (`merge`, `replace_main`, `github`, `secret`, `network`, `port`, `ssh`, `access`,
-`container`) and a summary the engine wrote from the call's parameters, never from the agent's
+`container`, `resources`) and a summary the engine wrote from the call's parameters, never from the agent's
 words. Approvals are not stored yet, so for now such a call simply does not happen.
+
+## Secrets in a fork
+
+A fork may carry any secret its maker holds, whatever that maker's agent was set up to share.
+The old per-agent `fork_secrets` list no longer limits it, and the engine does not read it: it was
+a setting of the friendly `silo` client, which an agent that wants more simply does not use. The
+direction's rule is the limit instead: a computer hands on only what it has, and anything more
+asks you.
 
 ## The audit log
 
@@ -90,8 +100,15 @@ words. Approvals are not stored yet, so for now such a call simply does not happ
 job or a stream) and for every refused or held call: when, who (owner, device with its key
 fingerprint when known, or computer with its id), the name the program gave, the method, the
 computer it named, the outcome (`ok`, `error`, `refused`, `asked`), the error code and the job id.
-Parameters and results are never stored. Rows older than 90 days, and the oldest beyond 200,000,
-are trimmed. `audit.list` reads it, newest first.
+Parameters and results are never stored. A row from a computer names a computer only when it is
+that computer or one it made, so a probe at someone else's computer shows no target. A call that
+repeats the same caller's newest row (same method, outcome, error and computer) adds to that
+row's `count` and moves its `lastAt`, so a loop of refused calls fills one row. A call the
+in-guest bridge refuses before the policy sees it (an unknown method, a cap) is recorded too.
+Rows older than 90 days are trimmed; the owner's and devices' rows keep the newest 200,000 and
+each computer's own calls the newest 20,000, so a computer cannot push out any other row.
+`audit.list` reads it, newest first; what it returns to a computer leaves out the program name
+and any device key.
 
 A change another device makes through one of the Connections bridge's own methods (`runtime.*`,
 `macos.*` and the other names in `remote::METHODS`) is recorded there too, with the device's key.
@@ -100,8 +117,11 @@ A change another device makes through one of the Connections bridge's own method
 
 - When a computer is deleted, what it made becomes its maker's, so an agent keeps reaching the
   computers it could reach before.
-- A replace main (promote) ends the promoted fork's standing as a computer its maker made: it now
-  holds main's place.
+- A replace main (promote) moves the record of who made which with the swap: the promoted fork is
+  made by no one (or takes the old main's place under the computer that made it), and every other
+  computer the old main made, with its pending computers and jobs, becomes the fork's, so the old
+  main keeps nothing it could reach. An undo puts the record back exactly, and a promote or undo
+  finished at engine start moves it the same way.
 - The in-guest bridge also caps how many computers one computer holds (32), runs (3) and how many
   of its jobs are unacknowledged (16).
 - The network policy is the same for every computer today, so a fork's inherited policy hands

@@ -117,12 +117,6 @@ pub(super) async fn promote(
     let mut swapped = vec![params.fork_id.as_str()];
     swapped.extend(target.as_deref());
     crate::methods::guest_client::revoke_for(context, &swapped)?;
-    // The fork takes main's place, which the computer that made it must not reach.
-    if !params.dry_run.unwrap_or(false) {
-        silo_engine::policy::store::PolicyStore::new(&context.silod_context().paths().app_data)
-            .forget_makers(&swapped)
-            .map_err(DispatchError::internal)?;
-    }
     let host = context.silod_context().runtime_host();
     let request = promote::Request {
         fork: params.fork_id,
