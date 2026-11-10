@@ -794,7 +794,7 @@ with nothing sensitive on it, and the app, the CLI and `silo list` label it as l
 - **Network.** The container's network namespace holds one TAP device and a loopback, and nothing
   else; a gateway process (the same network stack as macOS computers, boundary 2) is the only way
   out, with the Public policy and the gateway as resolver. A computer made from an import starts
-  with the deny-all policy instead, until a secret is assigned to it (the export section below).
+  with the deny-all policy instead and keeps it (the export section below).
   A command run in the computer enters
   that namespace too.
 - **Secrets and GitHub access (boundary 3).** The same mechanism and rules as for a virtual
@@ -898,8 +898,8 @@ with nothing sensitive on it, and the app, the CLI and `silo list` label it as l
     the layers can sit on. Secrets, GitHub access, environment and layer ids are dropped
     from the record in the file, as they are for a VM, and the settings in the manifest carry the
     same deny-all network section a VM's do. An imported container starts with its network blocked
-    (deny-all), as an imported VM does: the gateway starts it with no addresses at all, and
-    assigning a secret to it unblocks the network at its next start.
+    (deny-all) and keeps it, as an imported VM does: the gateway starts it with no addresses at
+    all, and no secret assignment (GitHub access among them) changes that.
   - *What is read.* The file is an untrusted input. The payload's hash is checked as for a VM; the
     header is read with unknown fields refused, and its name, resources, labels and image are checked
     field by field and against the settings the manifest was validated for, so the file cannot make a

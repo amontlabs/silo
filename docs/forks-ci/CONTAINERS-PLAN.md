@@ -27,7 +27,8 @@ the advisor (gemini-4-argon), 8 Nov 2026. Where they differed, the choice and th
   of sealed layers: a checkpoint seals the current upper into the chain and starts an empty one; a fork is an
   empty upper over the parent's chain up to that checkpoint. Nothing is copied for a stopped computer, so
   its checkpoints and forks take no time on any filesystem; a running computer keeps its upper, so its
-  checkpoint is a copy of it, made while its processes are frozen (CT4). The chain has a length cap; a maintenance step flattens the oldest layers.
+  checkpoint is a copy of it, made while its processes are frozen (CT4). One lock covers every freeze and thaw
+  on the device, so a pause, a resume or a stop of one container computer waits for a checkpoint copy of another in progress. The chain has a length cap; a maintenance step flattens the oldest layers.
   Diff and keep run the existing change capture through guest exec, as for VMs; they do not read layers.
   (Fable; the advisor's copy of the upper layer per checkpoint costs time proportional to the computer's
   changes on filesystems without reflink.)

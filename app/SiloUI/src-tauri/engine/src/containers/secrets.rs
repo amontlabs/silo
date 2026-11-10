@@ -136,12 +136,6 @@ pub fn apply_to_record(record: &mut ComputerRecord, modify: &Modify) -> Result<(
         record.secrets.retain(|known| &known.name != name);
     }
     record.secrets.sort_by(|a, b| a.name.cmp(&b.name));
-    // Giving a computer a secret is the act that gives it network authority, so it unblocks
-    // the network an import starts from, as it does for a virtual machine. It applies at the
-    // next start, with the secret.
-    if !modify.put.is_empty() {
-        record.network_blocked = false;
-    }
     Ok(())
 }
 
@@ -231,38 +225,21 @@ mod tests {
     }
 
     #[test]
-    fn a_secret_unblocks_a_blocked_computer_and_a_refusal_does_not() {
+    fn a_blocked_computer_stays_blocked_whatever_secrets_it_is_given() {
+        // What the engine sends: a GitHub profile applied or detached (`modify --secret
+        // SILO_GITHUB:...`), a secret of the user's, and their removal.
         let mut blocked = record();
         blocked.network_blocked = true;
-        let error = apply_to_record(
-            &mut blocked,
-            &modify(
-                vec![put("SILO_GITHUB", &["github.com", "evil.example"])],
-                &[],
-            ),
-        )
-        .unwrap_err();
-        assert!(error.contains("GitHub hosts only"), "{error}");
-        assert!(blocked.network_blocked);
-        apply_to_record(
-            &mut blocked,
-            &modify(vec![put("SILO_GITHUB", &GITHUB_HOSTS)], &[]),
-        )
-        .unwrap();
-        assert!(!blocked.network_blocked);
-        // The gateway then runs its own policy, as for any computer.
-        assert_eq!(
-            network_value(&blocked, None)["policy"]["default_egress"],
-            "allow"
-        );
-        // Taking the secret back does not block the computer again.
-        apply_to_record(&mut blocked, &modify(Vec::new(), &["SILO_GITHUB"])).unwrap();
-        assert!(!blocked.network_blocked);
-        // An empty modify (a deferred none) leaves the block as it is.
-        let mut untouched = record();
-        untouched.network_blocked = true;
-        apply_to_record(&mut untouched, &modify(Vec::new(), &[])).unwrap();
-        assert!(untouched.network_blocked);
+        for change in [
+            modify(vec![put("SILO_GITHUB", &GITHUB_HOSTS)], &[]),
+            modify(vec![put("TOKEN", &["api.example.test"])], &[]),
+            modify(Vec::new(), &["SILO_GITHUB", "TOKEN"]),
+            modify(Vec::new(), &[]),
+        ] {
+            apply_to_record(&mut blocked, &change).unwrap();
+            assert!(blocked.network_blocked);
+            assert_eq!(network_value(&blocked, None)["policy"], blocked_policy());
+        }
     }
 
     #[test]

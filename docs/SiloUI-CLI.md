@@ -134,9 +134,8 @@ kept), and a device without it says the computer was made on an older guest imag
 have. A device that cannot run containers refuses the file with the reason `silo host init`
 gives, before anything is copied. The file is written in format 6, which a Silo that predates
 container exports refuses as newer. No memory is in any file. An imported container computer
-starts on a deny-all network policy, as an imported virtual machine does, and its forks keep it.
-Assigning a secret to it (`silo secret put`, GitHub access among them) unblocks the network at
-its next start. Socket files are not in the file.
+starts on a deny-all network policy and stays on it, as an imported virtual machine does, and its
+forks keep it; assigning a secret does not change it. Socket files are not in the file.
 
 **Bringing the work into your main.** If the exported computer was a fork, the file carries its
 fork-time record, so the imported computer keeps the way any fork does: `silo diff` shows what

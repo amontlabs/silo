@@ -131,7 +131,8 @@ pub fn xattr_allowed(name: &[u8]) -> Result<(), String> {
     Ok(())
 }
 
-/// Whether `pack` writes an attribute of a layer's file. Overlayfs keeps its own records
+/// Whether an attribute of a layer's file travels: `pack` writes only these and `unpack` sets
+/// only these. Overlayfs keeps its own records
 /// (`user.overlay.uuid`, `origin`, `impure`) on a layer it has mounted and writes them again on
 /// the next mount; only the opaque mark is the layer's content. A file's SELinux label names
 /// types of the host's own policy, and the importing host labels the files it makes.
@@ -630,6 +631,9 @@ mod linux {
                 continue;
             };
             xattr_allowed(name)?;
+            if !xattr_packed(name) {
+                continue;
+            }
             if record.value_bytes().len() > MAX_XATTR_VALUE || xattrs.len() == MAX_XATTRS {
                 return Err("the stream has an entry with too many or too large attributes".into());
             }
@@ -1092,6 +1096,36 @@ mod linux {
             round_trip(a.path(), c2.path()).unwrap();
             assert!(c2.path().join("f").exists());
             assert!(fs::symlink_metadata(c2.path().join("sock")).is_err());
+        }
+
+        #[test]
+        fn a_streams_selinux_label_is_not_set() {
+            // A file written before labels were left out of exports carries the sender's.
+            let target = tempfile::tempdir().unwrap();
+            let stream = stream_with(|out| {
+                out.append_pax_extensions([(
+                    "SCHILY.xattr.security.selinux",
+                    &b"system_u:object_r:etc_t:s0"[..],
+                )])
+                .unwrap();
+                out.append_data(&mut mine(EntryType::Regular, 1), "f", &b"x"[..])
+                    .unwrap();
+            });
+            unpack_tree(target.path(), stream.as_slice(), &anywhere()).unwrap();
+            let f = c(&target.path().join("f")).unwrap();
+            let name = CString::new("security.selinux").unwrap();
+            let mut value = [0u8; 64];
+            // SAFETY: valid strings and a buffer of the length given.
+            let read = unsafe {
+                libc::lgetxattr(
+                    f.as_ptr(),
+                    name.as_ptr(),
+                    value.as_mut_ptr().cast(),
+                    value.len(),
+                )
+            };
+            // Absent, or the label this host gave the new file, never the stream's.
+            assert!(read < 0 || !value.starts_with(b"system_u:object_r:etc_t"));
         }
 
         #[test]

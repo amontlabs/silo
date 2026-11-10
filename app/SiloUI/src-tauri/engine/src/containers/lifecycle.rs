@@ -1883,13 +1883,14 @@ mod tests {
         let guard = freezing();
         let (done, taken) = std::sync::mpsc::channel();
         let paused = paths.clone();
+        let tools = fake_tools(home.path());
         std::thread::spawn(move || {
-            end_pause(&paused, "dev");
+            stop(&paused, &tools, "dev", &record(true)).unwrap();
             done.send(()).unwrap();
         });
         assert!(
             taken.recv_timeout(Duration::from_millis(100)).is_err(),
-            "the pause ended while a checkpoint held the freeze lock"
+            "the stop went on while a checkpoint held the freeze lock"
         );
         drop(guard);
         taken.recv_timeout(Duration::from_secs(10)).unwrap();
