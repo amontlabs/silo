@@ -24,8 +24,10 @@ Plan: [PLAN.md](PLAN.md). Agent rules: [AGENT-BRIEF.md](AGENT-BRIEF.md).
 | --- | --- | --- | --- |
 | S1 | merged 2026-11-10 | `docs/s1-gateway-channel-spike` | [evidence](evidence/S1.md). Channel: yes, no patch. Allowlist: needs strict off, a `restore --net-strict` patch, and gateway init fields |
 | T1 | running since 2026-11-10 | | task id ends `21b89a79-7c1e-432c-8118-44fc0eddcff6` (Opus) |
-| T4 | running since 2026-11-10 | | task id ends `a5a79a51-152a-44dd-b757-b4b2547b6e88` (Sonnet) |
+| T4 | merged 2026-11-10 | `feat/keep-conflict-choices` | engine tests 273, api 53, silod checkpoints 56 passed in the item; two review rounds; the `silo-ui` crate was not built there |
 | T9 | running since 2026-11-10 | | task id ends `5af06c4c-ae51-47ff-a807-035a14df103b` (Sonnet) |
+| T12 | running since 2026-11-10 | | task id ends `67f835b1-ca2e-4f89-9c93-4ad720bb45be` (Sonnet) |
+| S2 | running since 2026-11-10 | | task id ends `c8ba35ed-17ae-4a93-b259-def2953e1398` (Sonnet), upgrade path spike |
 | T7 | running since 2026-11-10 | | task id ends `b9b0ef15-b4e5-4f7f-8b3d-4c63559442bd` (Sonnet); no live macOS check in the item |
 
 Task ids are `node:delegated-task:command%3Amcp%3Ad723019c-0dae-419c-8e5d-2e7d794e60f4%3Adelegate-task%3A<ending>`.
@@ -66,6 +68,16 @@ These were not asked of the owner. Each is open to change.
     requests, which narrows it).
 
 ## Found during the build
+
+- **T4:** the `silo-ui` build script printed the contents of `github-build.local.json` into the
+  agent's command output during a cargo build. Nothing was committed. The owner may want to
+  rotate what that file holds, and the build script should stop printing it.
+- **T4, existing behaviour left alone:** on macOS, files under `/etc` are normalised to
+  `/private/etc` before the "main moved while starting" check, which may then miss them; a
+  gitignored `.env` is carried over by a merge without a credential check (the wall covers Git
+  history only); temp-file and temporary-ref cleanup errors in keep are ignored silently.
+- **T4, for T6:** CLI and MCP text still says `divergent`; the new refusal reason is
+  `choices-needed`, ids look like `file:<path>`, `package:<mgr>:<name>`, `repo:<path>`.
 
 - **S1:** `msb modify` cannot change network rules; the supported way on an existing computer is
   the engine's restore in place (about 1.2 s idle). `--vsock` works and is a second fallback for
