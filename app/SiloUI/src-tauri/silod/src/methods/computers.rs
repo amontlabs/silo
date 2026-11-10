@@ -1203,11 +1203,22 @@ async fn begin_create(
             request_id,
             device_id,
             agents,
+            network_policy,
         } => {
             require_local_device(context, device_id.as_deref())?;
             let configuration: silo_engine::runtime::ComputerConfiguration =
                 serde_json::from_value(encode(configuration)?).map_err(invalid)?;
+            let network_policy = network_policy
+                .as_ref()
+                .map(silo_engine::network_policy::validate)
+                .transpose()
+                .map_err(invalid)?;
             let request_id = new_request_id(request_id)?;
+            // Saved before the computer is created, so its creation passes the policy's rules.
+            if let Some(policy) = &network_policy {
+                silo_engine::network_policy::store::set(configuration.id(), policy)
+                    .map_err(DispatchError::internal)?;
+            }
             let job = accept_linux_setup_job(context, "computers.create", &request_id)?;
             // Only an accepted creation remembers its agents; the job has not started yet.
             silo_engine::agents::request_for_creation(configuration.id(), &agents);
@@ -1225,8 +1236,14 @@ async fn begin_create(
             request,
             device_id,
             agents,
+            network_policy,
         } => {
             require_local_device(context, device_id.as_deref())?;
+            let network_policy = network_policy
+                .as_ref()
+                .map(silo_engine::network_policy::validate)
+                .transpose()
+                .map_err(invalid)?;
             if !agents.is_empty() {
                 return Err(invalid(
                     "Silo cannot install an agent while it creates a macOS computer yet. Create the computer, start it, then install the agent from its page.",
@@ -1250,6 +1267,12 @@ async fn begin_create(
             .await
             .map_err(invalid)?;
             let value = with_kind(json!({"computers": [encode(row)?]}), "macos");
+            if let (Some(policy), Some(id)) =
+                (&network_policy, value["computers"][0]["id"].as_str())
+            {
+                silo_engine::network_policy::store::set(id, policy)
+                    .map_err(DispatchError::internal)?;
+            }
             let computer = serde_json::from_value(value["computers"][0].clone())
                 .map_err(|error| DispatchError::internal(error.to_string()))?;
             Ok(plain(encode(ComputerCreateResult {

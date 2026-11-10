@@ -506,6 +506,8 @@ pub async fn handle(
         MethodName::NetworkUnpublish => network_change(params, context, false).await,
         MethodName::NetworkOpen => network_open(params, context).await,
         MethodName::NetworkUrls => network_urls(params, context).await,
+        MethodName::NetworkPolicyGet => network_policy(params, context, false).await,
+        MethodName::NetworkPolicySet => network_policy(params, context, true).await,
         MethodName::SshAccessState => ssh_access_state(params, context).await,
         MethodName::SshAccessSave => ssh_access_save(params, context).await,
         MethodName::SshAccessConnection => ssh_access_connection(params, context).await,
@@ -1962,6 +1964,53 @@ pub(crate) fn refresh_url_routes(has_websites: bool) {
     if has_websites || routed {
         let _ = local_network_state();
     }
+}
+
+/// `network.policy.get` and `.set`, for a computer on this device.
+async fn network_policy(
+    params: &Value,
+    context: &HandlerContext,
+    setting: bool,
+) -> Result<HandlerOutput, DispatchError> {
+    let (computer_id, device_id, policy) = if setting {
+        let typed = context.decode_params::<network::NetworkPolicySetParams>(params)?;
+        (typed.computer_id, typed.device_id, Some(typed.policy))
+    } else {
+        let typed = context.decode_params::<network::NetworkTargetParams>(params)?;
+        (typed.computer_id, typed.device_id, None)
+    };
+    if remote_target(context, device_id.as_deref()).is_some() {
+        return Err(DispatchError {
+            code: ErrorCode::UnsupportedRemoteOperation,
+            message: "The network policy of a computer on another device is set on that device."
+                .to_owned(),
+            details: None,
+        });
+    }
+    let state = blocking(move || {
+        use silo_engine::network_policy::service::{self, Target};
+        let paths = local_paths()?;
+        let target = match macos_proxy::owning_context(&computer_id) {
+            Some(_) => {
+                let (name, stopped, _) = silo_engine::macos_computers::promote_view(&computer_id)
+                    .ok_or_else(|| "That computer was not found.".to_owned())?;
+                Target::Macos {
+                    name,
+                    running: !stopped,
+                }
+            }
+            None => {
+                computer_name(&paths, &computer_id)?;
+                Target::Linux(&paths)
+            }
+        };
+        match &policy {
+            Some(policy) => service::set(&computer_id, policy, target),
+            None => service::get(&computer_id, target),
+        }
+    })
+    .await?;
+    to_output(state)
 }
 
 async fn network_urls(

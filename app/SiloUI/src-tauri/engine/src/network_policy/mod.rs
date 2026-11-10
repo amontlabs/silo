@@ -12,6 +12,7 @@
 //! admitted it. An allowlist computer therefore runs with strict off; the cost is in the threat
 //! model (a host sharing an address with an allowed host may be reachable).
 
+pub mod service;
 pub mod store;
 #[cfg(test)]
 mod tests;

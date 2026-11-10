@@ -13,7 +13,10 @@ use serde_json::{json, Value};
 use silo_api::methods::{
     common::{ComputerTargetParams, DeviceParams},
     guest::GuestSshAliasEnsureParams,
-    network::{NetworkPublishParams, NetworkScheme, NetworkUnpublishParams},
+    network::{
+        NetworkPolicy, NetworkPolicyMode, NetworkPolicySetParams, NetworkPublishParams,
+        NetworkScheme, NetworkUnpublishParams,
+    },
     requests,
     ssh_access::{SshAccessConnectionParams, SshAccessSaveParams},
 };
@@ -23,6 +26,83 @@ use crate::{
     engine::{Computer, Engine},
     error::CliError,
 };
+
+// MARK: Network policy
+
+/// What `silo network policy` changes; empty shows the policy.
+#[derive(Debug, Default)]
+pub struct PolicyChange {
+    pub mode: Option<NetworkPolicyMode>,
+    pub allow: Vec<String>,
+    pub remove: Vec<String>,
+    pub presets: Vec<String>,
+}
+
+impl PolicyChange {
+    fn is_empty(&self) -> bool {
+        self.mode.is_none()
+            && self.allow.is_empty()
+            && self.remove.is_empty()
+            && self.presets.is_empty()
+    }
+
+    /// `policy` with this change: hosts and presets added, then removed (a name with no dot is
+    /// a preset), then the mode.
+    fn apply(&self, mut policy: NetworkPolicy) -> NetworkPolicy {
+        for host in &self.allow {
+            let host = host.trim().to_ascii_lowercase();
+            if !policy.hosts.contains(&host) {
+                policy.hosts.push(host);
+            }
+        }
+        for preset in &self.presets {
+            if !policy.presets.contains(preset) {
+                policy.presets.push(preset.clone());
+            }
+        }
+        for removed in &self.remove {
+            let removed = removed.trim().to_ascii_lowercase();
+            policy.hosts.retain(|host| *host != removed);
+            policy.presets.retain(|preset| *preset != removed);
+        }
+        if let Some(mode) = self.mode {
+            policy.mode = mode;
+        }
+        policy
+    }
+}
+
+/// `silo network policy <computer>`: shows a computer's network policy, or changes it.
+pub async fn network_policy(
+    engine: &Engine,
+    name: &str,
+    change: &PolicyChange,
+) -> Result<Value, CliError> {
+    let computer = engine.computer(name).await?;
+    let current = engine
+        .call(requests::network_policy_get(ComputerTargetParams {
+            computer_id: computer.id.clone(),
+            device_id: None,
+        }))
+        .await?;
+    let state = if change.is_empty() {
+        current
+    } else {
+        engine
+            .call(requests::network_policy_set(NetworkPolicySetParams {
+                computer_id: computer.id.clone(),
+                device_id: None,
+                policy: change.apply(
+                    serde_json::from_value(current["policy"].clone())
+                        .map_err(|_| CliError::new("The engine returned an unreadable network policy."))?,
+                ),
+            }))
+            .await?
+    };
+    let mut value = state;
+    value["computer"] = json!(computer.name);
+    Ok(value)
+}
 
 // MARK: Ports
 
@@ -679,5 +759,30 @@ mod tests {
             fs::read_to_string(&b).unwrap(),
             "Host silo-b main.silo\n  User silo\n"
         );
+    }
+}
+
+#[cfg(test)]
+mod policy_tests {
+    use super::*;
+
+    #[test]
+    fn a_change_adds_removes_and_sets_the_mode() {
+        let current = NetworkPolicy {
+            mode: NetworkPolicyMode::Open,
+            hosts: vec!["a.example.com".into()],
+            presets: vec!["npm".into()],
+        };
+        let change = PolicyChange {
+            mode: Some(NetworkPolicyMode::Allowlist),
+            allow: vec!["B.Example.com".into(), "a.example.com".into()],
+            remove: vec!["a.example.com".into(), "npm".into()],
+            presets: vec!["pypi".into()],
+        };
+        let changed = change.apply(current);
+        assert_eq!(changed.mode, NetworkPolicyMode::Allowlist);
+        assert_eq!(changed.hosts, ["b.example.com"]);
+        assert_eq!(changed.presets, ["pypi"]);
+        assert!(PolicyChange::default().is_empty());
     }
 }

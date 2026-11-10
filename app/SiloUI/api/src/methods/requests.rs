@@ -833,6 +833,16 @@ pub fn network_urls(params: network::NetworkTargetParams) -> Request<kind::Query
     Request::new(MethodParams::NetworkUrls(params))
 }
 
+/// `network.policy.get`
+pub fn network_policy_get(params: network::NetworkTargetParams) -> Request<kind::Query> {
+    Request::new(MethodParams::NetworkPolicyGet(params))
+}
+
+/// `network.policy.set`
+pub fn network_policy_set(params: network::NetworkPolicySetParams) -> Request<kind::Command> {
+    Request::new(MethodParams::NetworkPolicySet(params))
+}
+
 /// `notifications.list`
 pub fn notifications_list(params: notifications::NotificationsListParams) -> Request<kind::Query> {
     Request::new(MethodParams::NotificationsList(params))

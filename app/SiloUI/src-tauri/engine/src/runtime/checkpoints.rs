@@ -1739,6 +1739,42 @@ pub(crate) fn network_policy_changed(
     Ok(changed_network_plan(runner, paths, configuration)?.is_some())
 }
 
+/// What `network.policy.get` needs to know about a Linux computer.
+pub struct NetworkPolicyView {
+    pub name: String,
+    pub container: bool,
+    pub running: bool,
+    /// A restore, fork or import is waiting for the computer's next start.
+    pub pending: bool,
+    /// `config.network` as the runtime reports it, when the computer exists in the runtime.
+    pub network: Option<Value>,
+    /// The policy the engine last asked the runtime for.
+    pub recorded: Option<Value>,
+}
+
+/// Reads a Linux computer's network as the runtime holds it.
+pub fn network_policy_view(paths: &RuntimePaths, computer_id: &str) -> Result<NetworkPolicyView, String> {
+    let configuration =
+        computer_configuration(paths, computer_id).map_err(|error| error.to_string())?;
+    let record = load(paths, computer_id).map_err(|error| error.to_string())?;
+    let pending = record.pending_checkpoint_restore.is_some() || record.restore_journal.is_some();
+    let inspected = if pending {
+        None
+    } else {
+        Some(inspect_computer(&ProcessRunner, paths, configuration.name()).map_err(|error| error.to_string())?)
+    };
+    Ok(NetworkPolicyView {
+        name: configuration.name().to_owned(),
+        container: configuration.runtime.is_some(),
+        running: inspected
+            .as_ref()
+            .is_some_and(|inspected| matches!(inspected.status.as_str(), "Running" | "Paused")),
+        pending,
+        network: inspected.and_then(|inspected| inspected.config.get("network").cloned()),
+        recorded: record.desired_network_policy,
+    })
+}
+
 /// Applies a changed network policy to a stopped virtual machine before it starts. The runtime
 /// cannot change a computer's rules, so the engine restores it in place: a disk checkpoint
 /// ("Before network policy change"), then the computer is replaced from that checkpoint with

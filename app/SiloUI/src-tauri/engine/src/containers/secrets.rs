@@ -60,12 +60,17 @@ pub fn blocked_gateway_policy() -> Value {
 /// keeps the gateway's own.
 pub fn gateway_network(name: &str, record: &ComputerRecord) -> (Option<Value>, Option<bool>) {
     if record.network_blocked {
+        if let Some(id) = record.label("silo.machine-id") {
+            crate::network_policy::service::gateway_started(id, &blocked_gateway_policy(), true);
+        }
         return (Some(blocked_gateway_policy()), None);
     }
     let Some(id) = record.label("silo.machine-id") else {
         return (None, None);
     };
-    gateway_network_for(&crate::network_policy::plan_for(id, name, None))
+    let plan = crate::network_policy::plan_for(id, name, None);
+    crate::network_policy::service::gateway_started(id, &plan.policy_value(), plan.strict);
+    gateway_network_for(&plan)
 }
 
 fn gateway_network_for(plan: &crate::network_policy::Plan) -> (Option<Value>, Option<bool>) {

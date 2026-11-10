@@ -1913,6 +1913,17 @@
             "null"
           ]
         },
+        "networkPolicy": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NetworkPolicy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The fork's network policy. Absent, the fork keeps its source's."
+        },
         "newName": {
           "type": "string"
         },
@@ -2746,6 +2757,17 @@
               "const": "linux",
               "type": "string"
             },
+            "networkPolicy": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/NetworkPolicy"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The new computer's network policy. Absent, it is open."
+            },
             "requestId": {
               "type": [
                 "string",
@@ -2777,6 +2799,17 @@
             "kind": {
               "const": "macos",
               "type": "string"
+            },
+            "networkPolicy": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/NetworkPolicy"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The new computer's network policy. Absent, it is open."
             },
             "request": {
               "$ref": "#/$defs/MacosComputerCreateRequest"
@@ -9068,6 +9101,8 @@
         "network.state",
         "network.unpublish",
         "network.urls",
+        "network.policy.get",
+        "network.policy.set",
         "notifications.list",
         "operations.cancel",
         "operations.job.acknowledge",
@@ -11419,6 +11454,38 @@
             },
             "params": {
               "$ref": "#/$defs/ComputerTargetParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "network.policy.get",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/ComputerTargetParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "network.policy.set",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/$defs/NetworkPolicySetParams"
             }
           },
           "required": [
@@ -14319,6 +14386,38 @@
         {
           "properties": {
             "method": {
+              "const": "network.policy.get",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/NetworkPolicyState"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "network.policy.set",
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/$defs/NetworkPolicyState"
+            }
+          },
+          "required": [
+            "method",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
               "const": "notifications.list",
               "type": "string"
             },
@@ -15244,6 +15343,181 @@
       },
       "required": [
         "url"
+      ],
+      "type": "object"
+    },
+    "NetworkPolicy": {
+      "description": "A computer's network policy, as the owner sets it.",
+      "properties": {
+        "hosts": {
+          "default": [],
+          "description": "Host patterns: `example.com` or `*.example.com` (which also covers\n`example.com`). Lowercase names only; no ports, no addresses. Used in allowlist mode.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "mode": {
+          "$ref": "#/$defs/NetworkPolicyMode"
+        },
+        "presets": {
+          "default": [],
+          "description": "Named host lists kept by the engine (`network.policy.get` lists them). Used in\nallowlist mode.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "mode"
+      ],
+      "type": "object"
+    },
+    "NetworkPolicyHost": {
+      "description": "One host a computer in allowlist mode may reach, and why.",
+      "properties": {
+        "from": {
+          "description": "`list`, `preset:<name>`, `github` or `secret:<name>`.",
+          "type": "string"
+        },
+        "host": {
+          "description": "A host pattern, as in `NetworkPolicy::hosts`.",
+          "type": "string"
+        },
+        "ports": {
+          "description": "The TCP ports allowed to it.",
+          "items": {
+            "format": "uint16",
+            "maximum": 65535,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "host",
+        "ports",
+        "from"
+      ],
+      "type": "object"
+    },
+    "NetworkPolicyMode": {
+      "description": "How much of the network a computer may reach.",
+      "oneOf": [
+        {
+          "const": "open",
+          "description": "Any public address, as every computer had before policies existed.",
+          "type": "string"
+        },
+        {
+          "const": "allowlist",
+          "description": "Only the hosts on its list, the hosts of its presets and the hosts its grants need.",
+          "type": "string"
+        },
+        {
+          "const": "closed",
+          "description": "No outbound traffic, not even name lookups.",
+          "type": "string"
+        }
+      ]
+    },
+    "NetworkPolicySetParams": {
+      "properties": {
+        "computerId": {
+          "type": "string"
+        },
+        "deviceId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "policy": {
+          "$ref": "#/$defs/NetworkPolicy"
+        }
+      },
+      "required": [
+        "computerId",
+        "policy"
+      ],
+      "type": "object"
+    },
+    "NetworkPolicyState": {
+      "properties": {
+        "allowedHosts": {
+          "description": "Every host the computer may reach in allowlist mode, including those added for its\nGitHub access and its secrets. Empty in the other modes.",
+          "items": {
+            "$ref": "#/$defs/NetworkPolicyHost"
+          },
+          "type": "array"
+        },
+        "computerId": {
+          "type": "string"
+        },
+        "policy": {
+          "$ref": "#/$defs/NetworkPolicy"
+        },
+        "presets": {
+          "items": {
+            "$ref": "#/$defs/NetworkPreset"
+          },
+          "type": "array"
+        },
+        "timing": {
+          "$ref": "#/$defs/NetworkPolicyTiming"
+        }
+      },
+      "required": [
+        "computerId",
+        "policy",
+        "allowedHosts",
+        "timing",
+        "presets"
+      ],
+      "type": "object"
+    },
+    "NetworkPolicyTiming": {
+      "description": "When a saved policy is in force.",
+      "oneOf": [
+        {
+          "const": "applied",
+          "description": "The computer runs with it now.",
+          "type": "string"
+        },
+        {
+          "const": "nextStart",
+          "description": "The computer is stopped; it starts with this policy.",
+          "type": "string"
+        },
+        {
+          "const": "nextRestart",
+          "description": "The computer is running with its previous rules and keeps them until it restarts.",
+          "type": "string"
+        }
+      ]
+    },
+    "NetworkPreset": {
+      "description": "A named host list the engine keeps.",
+      "properties": {
+        "hosts": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "name": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "title",
+        "hosts"
       ],
       "type": "object"
     },
@@ -19367,6 +19641,18 @@
       "name": "network.urls",
       "paramsType": "network::NetworkTargetParams",
       "resultType": "network::NetworkUrlsResult"
+    },
+    {
+      "kind": "query",
+      "name": "network.policy.get",
+      "paramsType": "network::NetworkTargetParams",
+      "resultType": "network::NetworkPolicyState"
+    },
+    {
+      "kind": "command",
+      "name": "network.policy.set",
+      "paramsType": "network::NetworkPolicySetParams",
+      "resultType": "network::NetworkPolicyState"
     },
     {
       "kind": "query",
