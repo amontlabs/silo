@@ -6269,6 +6269,28 @@ fn computer_action_with(
     if matches!(action, "start" | "stop" | "restart") {
         crash_acknowledgement::clear(paths, name)?;
     }
+    if matches!(action, "start" | "restart") {
+        if let Some(configuration) = read_metadata(&paths.metadata)?
+            .computers
+            .into_iter()
+            .find(|configuration| configuration.name() == name)
+        {
+            // A changed network policy takes effect when the computer next starts; a running
+            // computer keeps its rules until then.
+            let restarting = action == "restart"
+                && checkpoints::network_policy_changed(runner, paths, &configuration)?;
+            if restarting {
+                lifecycle_recovery::perform(runner, paths, device, "stop", name)?;
+            }
+            if checkpoints::apply_network_policy_change(runner, paths, &configuration)? {
+                crate::github::computer_restored(name);
+                return Ok(());
+            }
+            if restarting {
+                return lifecycle_recovery::perform(runner, paths, device, "start", name);
+            }
+        }
+    }
     lifecycle_recovery::perform(runner, paths, device, action, name)
 }
 
@@ -6400,6 +6422,7 @@ fn apply_whole_configuration_with_progress(
             )?;
             checkpoints::forget_removed(paths, configuration.id())?;
             crate::policy::store::computer_removed(configuration.id());
+            crate::network_policy::computer_removed(configuration.id());
             progress("computer-removal", configuration.name(), 1);
         }
         for configuration in &request.computers {
@@ -6636,12 +6659,15 @@ fn create_computer_with_progress(
         "--secret".into(),
         secrets_runtime::SILO_GITHUB_SECRET_SPEC.into(),
     ]);
-    args.extend([
-        // Explicit, so a computer does not depend on the runtime's default (off in
-        // 0.7.2, on since 0.7.4). It matches `guest/github-network-default.json`,
-        // which exports compare against; no hostname rule makes it observable.
-        "--net-strict=true".into(),
-    ]);
+    // The computer's stored network policy (open unless one was saved for it), with strict
+    // given explicitly so a computer does not depend on the runtime's default (off in 0.7.2, on
+    // since 0.7.4). An open computer gets exactly `guest/github-network-default.json`, which
+    // exports compare against. A container's gateway takes its policy when it starts.
+    if runtime.is_some() {
+        args.push("--net-strict=true".into());
+    } else {
+        args.extend(crate::network_policy::plan_for(id, name, None).create_args());
+    }
     args.extend(["--env".into(), "GH_TOKEN=$MSB_SILO_GITHUB".into()]);
     args.extend([
         "--label".into(),

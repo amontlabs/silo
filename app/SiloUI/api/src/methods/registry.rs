@@ -215,6 +215,8 @@ define_registry! {
     NetworkState => ("network.state", Query, network::NetworkStateParams, network::NetworkState);
     NetworkUnpublish => ("network.unpublish", Command, network::NetworkUnpublishParams, network::NetworkState);
     NetworkUrls => ("network.urls", Query, network::NetworkTargetParams, network::NetworkUrlsResult);
+    NetworkPolicyGet => ("network.policy.get", Query, network::NetworkTargetParams, network::NetworkPolicyState);
+    NetworkPolicySet => ("network.policy.set", Command, network::NetworkPolicySetParams, network::NetworkPolicyState);
     NotificationsList => ("notifications.list", Query, notifications::NotificationsListParams, notifications::NotificationsListResult);
     OperationsCancel => ("operations.cancel", Command, operations::CancelJobParams, ());
     OperationsJobAcknowledge => ("operations.job.acknowledge", Command, operations::AcknowledgeJobParams, ());
@@ -261,20 +263,20 @@ mod tests {
 
     #[test]
     fn registry_covers_every_canonical_method_and_kind() {
-        assert_eq!(METHOD_REGISTRY.len(), 185);
+        assert_eq!(METHOD_REGISTRY.len(), 187);
         assert_eq!(
             METHOD_REGISTRY
                 .iter()
                 .filter(|m| m.kind == MethodKind::Query)
                 .count(),
-            60
+            61
         );
         assert_eq!(
             METHOD_REGISTRY
                 .iter()
                 .filter(|m| m.kind == MethodKind::Command)
                 .count(),
-            76
+            77
         );
         assert_eq!(
             METHOD_REGISTRY

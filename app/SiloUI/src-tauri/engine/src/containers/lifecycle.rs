@@ -1300,6 +1300,7 @@ fn start_gateway(
         })
         .collect();
     let active: Vec<String> = secrets.iter().map(|secret| secret.name.clone()).collect();
+    let (gateway_policy, gateway_strict) = super::secrets::gateway_network(name, record);
     let gateway = Gateway::start(
         &tools.gateway,
         tap,
@@ -1319,9 +1320,8 @@ fn start_gateway(
             github_hosts: record
                 .github
                 .then(|| super::secrets::GITHUB_HOSTS.map(str::to_owned).to_vec()),
-            policy: record
-                .network_blocked
-                .then(super::secrets::blocked_gateway_policy),
+            policy: gateway_policy.clone(),
+            strict: gateway_strict,
             usage_log: Some(usage_log),
             log: Some(gateway_log),
         },

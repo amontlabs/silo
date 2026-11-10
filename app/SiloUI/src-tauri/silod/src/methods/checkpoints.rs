@@ -256,6 +256,12 @@ async fn restore(context: &HandlerContext, params: &Value) -> Result<HandlerOutp
 async fn fork(context: &HandlerContext, params: &Value) -> Result<HandlerOutput, DispatchError> {
     let params: CheckpointForkParams = context.decode_params(params)?;
     require_local_device(context, params.device_id.as_deref())?;
+    let network_policy = params
+        .network_policy
+        .as_ref()
+        .map(silo_engine::network_policy::validate)
+        .transpose()
+        .map_err(DispatchError::internal)?;
     let service = service(context);
     job_started(
         blocking_failure(move || {
@@ -272,6 +278,7 @@ async fn fork(context: &HandlerContext, params: &Value) -> Result<HandlerOutput,
                         .unwrap_or_default(),
                     scrub: params.quiet.map(|q| q.scrub).unwrap_or_default(),
                     closed_network: false,
+                    network_policy,
                 },
                 params.recipe_hash.as_deref(),
             )

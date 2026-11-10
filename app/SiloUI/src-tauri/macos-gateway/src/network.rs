@@ -221,6 +221,7 @@ pub fn build_network(mut init: InitRequest) -> Result<NetworkResources, NetworkS
             ..Default::default()
         })
         .policy(policy)
+        .strict(init.strict.unwrap_or(true))
         .tls(|tls| {
             tls.enabled(true)
                 .intercepted_ports(init.intercepted_ports.clone())
@@ -629,6 +630,7 @@ mod tests {
             guest_mac: [2, 0, 0, 0, 0, 4],
             mtu: 1500,
             policy: None,
+            strict: None,
             dns_nameservers: Vec::new(),
             intercepted_ports: vec![443],
             loopback_ports: [22, 5900]
