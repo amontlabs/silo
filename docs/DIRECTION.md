@@ -35,7 +35,7 @@ app. The engine decides what each call is allowed, from where the call comes fro
 | Run commands in its forks, read their diffs, logs and screens | A new secret | Change engine settings or Connections |
 | Checkpoint, restore, stop and drop its forks | A wider network policy | |
 | | A port published on your device, SSH from outside | |
-| | More computers, memory or disk than its limits | |
+| | Replace main | |
 
 This replaces the in-guest client's fixed list of thirteen methods, and the full authority that
 `silo mcp` has on the host today.
@@ -79,13 +79,16 @@ The framing stays: a computer has history, branches and a diff that covers more 
 
 **Merge** is one word for the user, and it has two cases, as in Git:
 
-- **Main has not changed since the fork.** A fast-forward: the fork becomes main. Always safe.
+- **Main has not changed since the fork.** A fast-forward: nothing can conflict, so every change
+  is applied. Main keeps running; the computers are not swapped, because your agent lives in
+  main.
 - **Main has changed.** Silo lists the fork's changes item by item. Items only the fork touched
   are brought in. An item both sides changed is a conflict, and you choose a side. Code merges
-  through Git itself. A database is never combined: you take one side whole.
+  through Git itself: on a conflict the fork's commits arrive as a branch. A database is never
+  combined: main's stays unless the recipe has a migration step.
 
 **Replace main** is the separate, explicit action for taking a fork wholesale and discarding what
-main did since.
+main did since. It restarts main, so it ends whatever runs there.
 
 What goes: the words fold, keep and promote, and keeping without asking when tests pass (the
 tests run inside the fork, so the fork can fake them). This section is a framing; the current
@@ -180,10 +183,9 @@ governance, and anything tied to funding.
 ## Still open
 
 - How agent logins are stored, forked and shared.
-- The limits on what an agent may create without asking. Every running computer takes memory,
-  CPU and disk from your device, so an agent that makes forks freely could freeze it or fill the
-  disk. Proposed: limits taken from the device (a share of its memory, a number of computers
-  running at once, a floor of free disk), which you can change in settings; going past one asks
-  you, like any other request.
+- Limits. Decided: no fixed cap on how many computers an agent makes. The agent can read the
+  device's memory, disk and running computers and judge for itself; a call gets a warning when
+  the device is getting short, and fails when going on would freeze the device or fill the
+  disk. Open: whether the app should also show and enforce this, and the default thresholds.
 - Whether the address inside a computer can be served without a new runtime patch.
 - What the first-run flow looks like for each agent program, and which ones are supported first.
