@@ -3631,6 +3631,8 @@ pub(crate) fn import_archive<R: crate::backup::MsbRunner>(
     record.pending_restore = None;
     record.inherited_access = false;
     record.imported = true;
+    // The disk comes from an archive, which an agent may have written.
+    record.agent_may_have_used = true;
     engine::validate_archive_configuration(app, &record, &stage_layout)?;
     store::save(&stage_layout, &record)?;
     std::fs::set_permissions(&stage, std::fs::Permissions::from_mode(0o700))
@@ -5221,9 +5223,11 @@ fn mark_proxy_bootstrap(
         return Ok(());
     }
     record.setup.proxy_bootstrap = true;
+    record.note_agent_use();
     store::save(layout, &record)?;
     update(app, &record.id, |entry| {
         entry.record.setup.proxy_bootstrap = true;
+        entry.record.note_agent_use();
     });
     emit(app);
     Ok(())
@@ -6814,6 +6818,8 @@ fn fork_setup(record: &mut Record, checkpoint: &checkpoints::Meta) {
         needs_personalizing: true,
         proxy_bootstrap: false,
     };
+    // The disk is the checkpoint's, which an agent may have written.
+    record.agent_may_have_used = true;
 }
 
 fn fork_workflow(
@@ -11389,6 +11395,8 @@ mod tests {
             proxy_bootstrap: true,
         };
         record.developer_tools_version = Some(developer_tools::version());
+        // A complete setup is saved and loaded with the flag.
+        record.agent_may_have_used = true;
         let old = record.clone();
         let layout = Layout::new(data.path(), &id);
         store::save(&layout, &old).unwrap();

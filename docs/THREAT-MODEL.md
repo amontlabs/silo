@@ -119,13 +119,24 @@ Limits of this boundary:
 
 - **No hostname or destination allowlist.** Any public host, any port, TCP and UDP (except UDP to port 443). This is what
   "no egress filter yet" means.
-- **macOS computers before setup completes use Apple NAT.** Until a macOS computer's setup,
-  personalization and network bootstrap are complete, and when it boots into Recovery, it runs on
-  `VZNATNetworkDeviceAttachment` with no Silo policy
-  ([`boots_behind_gateway`, `engine.rs#L959`](../app/SiloUI/src-tauri/engine/src/macos_computers/engine.rs#L959);
-  [`engine.rs#L577`](../app/SiloUI/src-tauri/engine/src/macos_computers/engine.rs#L577)). In that
-  state it can reach the Mac and the LAN. Silo's own provisioning is the expected workload then,
-  but a user can start a computer whose setup failed.
+- **macOS computers: only a disk no agent can have written runs on Apple NAT.** A first
+  install and the setup of a copy of a template run on `VZNATNetworkDeviceAttachment` with no
+  Silo policy until their setup completes
+  ([`network_plan`, `store.rs`](../app/SiloUI/src-tauri/engine/src/macos_computers/store.rs);
+  [`engine::start`](../app/SiloUI/src-tauri/engine/src/macos_computers/engine.rs)). In that
+  state the guest can reach the Mac and the LAN. The disk then holds only Apple's image and
+  Silo's scripts, so that is the expected workload. A computer's record carries
+  `agentMayHaveUsed`, set when its setup first completes and never cleared, and set at birth
+  for every fork and import. A flagged computer never gets Apple's NAT: a boot that finishes
+  its setup goes behind the gateway after Silo has replaced the network bootstrap program, its
+  launch daemon and its configuration on the stopped disk, and is refused, with a message that
+  says what to do, when the disk has no such files, a link stands where one should be, the
+  build has no signed program, or the saved network identity does not match. Recovery gets no
+  network card. The choice is made where the machine is built, so nothing the guest does
+  changes it. One case remains: a computer made before the gateway existed is converted once,
+  at launch, over Apple's NAT, because its setup never completed and so its record is not
+  flagged. The details are in
+  [`SiloUI-MACOS-COMPUTERS.md`](SiloUI-MACOS-COMPUTERS.md#network).
 - The classification is by IP, with no notion of "the LAN" beyond the private ranges. A LAN host
   reachable by a global IPv6 address (SLAAC) or a non-RFC 1918 IPv4 address is "public" and
   reachable, as is a service on the Mac's own public address, if it has one. The IPv6 case applies
@@ -1249,8 +1260,9 @@ These follow from the design today, not from bugs:
   ([`runtime/mod.rs#L125`](../app/SiloUI/src-tauri/engine/src/runtime/mod.rs#L125)).
 - **Personal access token mode.** The agent's GitHub requests carry the whole token, unscoped
   (boundary 5).
-- **macOS computers before setup completes.** They run on Apple NAT and can reach the Mac and the
-  LAN (boundary 2).
+- **macOS computers during a first install.** Until their setup completes, a first install
+  and the setup of a copy of a template run on Apple NAT and can reach the Mac and the LAN
+  (boundary 2). A computer an agent may have used never does.
 - **Untrusted imported archives.** A macOS import mounts the guest's disk on the Mac; import only
   archives you trust (boundary 6).
 
