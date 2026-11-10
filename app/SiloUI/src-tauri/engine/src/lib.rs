@@ -5,6 +5,7 @@
 extern crate self as silo_engine;
 
 pub mod agent_tools;
+pub mod audit;
 pub mod backup;
 pub mod backup_controller;
 pub mod bridge_error;
@@ -67,6 +68,7 @@ pub mod macos_remote_engine;
 pub mod network;
 pub mod notices;
 pub mod owned_tunnel;
+pub mod policy;
 pub mod pre_upgrade_backup;
 pub mod preparation;
 pub mod recipes;

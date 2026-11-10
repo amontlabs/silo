@@ -342,7 +342,12 @@ impl silo_engine::remote_access::LocalAccess for SilodLocalAccess {
         silo_engine::desktop::dispatch(&paths, method, params)
     }
 
-    fn access_dispatch(&self, method: &str, params: &Value) -> Result<Value, BridgeError> {
+    fn access_dispatch(
+        &self,
+        method: &str,
+        params: &Value,
+        key: Option<&str>,
+    ) -> Result<Value, BridgeError> {
         match method {
             "github.connect" => start_owner_connect(&self.0.context),
             "guest.exec.start" => {
@@ -378,7 +383,7 @@ impl silo_engine::remote_access::LocalAccess for SilodLocalAccess {
                 owner_job_operation(self.0.context.as_ref(), method, params)
             }
             name if silo_engine::remote::is_owner_method(name) => {
-                super::remote::serve_owner(&self.0.context, name, params)
+                super::remote::serve_owner(&self.0.context, name, params, key)
             }
             _ => run_local(self.0.context.as_ref(), method, params).map_err(BridgeError::from),
         }
@@ -490,6 +495,7 @@ pub async fn handle(
         MethodName::GitHubConnectCallback => Err(DispatchError {
             code: ErrorCode::UnsupportedRemoteOperation,
             message: "github.connect.callback is served between engines over Connections, not on the local socket.".to_owned(),
+            details: None,
         }),
         MethodName::PushRepositories => push_repositories(params, context).await,
         MethodName::PushStart => push_start(params, context).await,
@@ -537,7 +543,7 @@ fn failure(message: impl Into<String>) -> DispatchError {
     } else {
         ErrorCode::Internal
     };
-    DispatchError { code, message }
+    DispatchError { code, message, details: None }
 }
 
 fn serialization(error: impl std::fmt::Display) -> DispatchError {
@@ -1097,6 +1103,7 @@ impl ConnectAdmission {
                 code: ErrorCode::Busy,
                 message: "A GitHub sign-in is already in progress. Finish or cancel it first."
                     .to_owned(),
+                details: None,
             });
         }
         *slot = ConnectSlot::Admitting;
@@ -2593,6 +2600,7 @@ pub(crate) mod tests {
                 client_id: "access-test-client".to_owned(),
                 protocol: 7,
                 client: None,
+                caller: silo_engine::policy::Caller::owner("test"),
             },
         )
     }
@@ -3944,13 +3952,13 @@ pub(crate) mod tests {
         let adapter = SilodLocalAccess(runtime_host().unwrap().clone());
         let unknown = json!({"jobId": "job:424243"});
         let error = adapter
-            .access_dispatch("operations.cancel", &unknown)
+            .access_dispatch("operations.cancel", &unknown, None)
             .unwrap_err();
         assert_eq!(error.code, Code::NotFound);
         // A sign-in already running on the owner is refused as busy, not as `internal`.
         let admission = ConnectAdmission::admit().unwrap();
         let error = adapter
-            .access_dispatch("github.connect", &json!({}))
+            .access_dispatch("github.connect", &json!({}), None)
             .unwrap_err();
         assert_eq!(error.code, Code::Busy, "{}", error.message);
         drop(admission);
@@ -4010,6 +4018,7 @@ pub(crate) mod tests {
                 client_id: "subscriber".to_owned(),
                 protocol: 7,
                 client: None,
+                caller: silo_engine::policy::Caller::owner("test"),
             };
             registry.dispatch(MethodName::EventsSubscribe, params, engine.clone(), request)
         };

@@ -133,6 +133,7 @@ fn fixture_with(converted_backup: bool) -> Fixture {
             client_id: "test-client".into(),
             protocol: 7,
             client: None,
+            caller: silo_engine::policy::Caller::owner("test"),
         },
     );
     Fixture {

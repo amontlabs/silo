@@ -46,7 +46,8 @@ engine bounds every read it makes there.
 | Piece | Where |
 | --- | --- |
 | Typed methods `guestClient.enable`, `.revoke`, `.status`, and the frame types | `app/SiloUI/api/src/methods/guest_client.rs` |
-| Tokens, scope checks, bridge folder | `app/SiloUI/src-tauri/engine/src/guest_client/` |
+| Tokens and the bridge folder | `app/SiloUI/src-tauri/engine/src/guest_client/` |
+| What each call may do, and who made which computer | `app/SiloUI/src-tauri/engine/src/policy/` |
 | The loop that serves the folders, and the three methods | `app/SiloUI/src-tauri/silod/src/guest_bridge.rs`, `methods/guest_client.rs` |
 | `silo --in-guest ...` and `silo guest-client ...` | `app/SiloUI/cli/src/guest_client.rs`, `guest_install.rs` |
 
@@ -93,38 +94,35 @@ Everything else the CLI offers answers "not available from inside a computer" be
 
 ## What the engine allows
 
-`silo_engine::guest_client::ALLOWED` is the list; any other method is refused with
-`permission_denied`, including every keep, promote, undo, drop, secret, GitHub, exec and file
-method. Per call:
+Each call from the folder runs as the computer's own call (`Caller::Computer`) through the
+engine's one choke point, `methods::dispatch`, where the policy decides it as it would for any
+other way a computer reaches Silo. [The policy](SiloUI-POLICY.md) lists what an agent inside a
+computer may do freely, what asks the owner (the call is answered `approval_required`), and what
+is never allowed (`permission_denied`). Every refused or held call, and every call that can change
+something, is written to the audit log with the computer's id.
 
-| Method | Allowed when |
-| --- | --- |
-| `computers.list`, `computers.tree`, `changes.requests.list` | always; the parameters are dropped, and the result holds only this computer and the forks its token asked for (`computers.list` returns just `linux.computers` and `macos.computers`) |
-| `checkpoints.fork` | `computerId` is the caller; the token holds fewer than 32 forks (made and being made) and fewer than 3 are running or starting (a fork being made counts); `newName` is not a computer's name, not being made, and not one Silo reserves (`silo-build-`, `silo-baseline-`). Only `computerId`, `newName` and `secrets` are passed on: `secrets` may name only what the agent's `fork_secrets` lists; the current state is forked (no checkpoint, no recipe hash); `quiet` is fixed to scrubbing the token file. |
-| `computers.start` | the computer is a fork this token made, and fewer than 3 are running or starting (the start is held against the cap at once, until the fork shows running, is stopped, or five minutes pass) |
-| `computers.stop`, `computers.credentials`, `changes.diff` | the computer is a fork this token made (never the caller, never a fork the person or another token made) |
-| `steps.list` | the caller or a fork this token made |
-| `changes.request` | `forkId` is a fork this token made and `targetId` is absent or the caller |
-| `changes.requests.show` | the request is about a fork this token made |
-| `operations.job.get`, `operations.job.acknowledge` | the job was started by this token, which stays on record with the token (so it survives an engine restart) |
-
-A fork is the token's only once its job finished without error and a computer of that name exists
-below the caller; the token records the fork by id then. A fork that failed, never got a job (after
-two minutes), or whose computer is gone is dropped from the record. A token holds at most 16 jobs it
-has not acknowledged; a job over half an hour old that the client never acknowledged is
+The bridge adds its own limits before the call: a computer holds at most 32 computers it made
+(made and being made), at most 3 of them running or starting (a start holds its place until the
+computer shows running, is stopped, or five minutes pass; one being made counts), and at most 16
+jobs it has not acknowledged. A job over half an hour old that the client never acknowledged is
 acknowledged for it once it has finished.
 
-Not offered: `checkpoints.create`, `changes.capture` and `changes.baseline` (the guest CLI does not
-use them). A `deviceId` other than the local device is refused. Nothing is kept from inside whatever
-the project's `fold` and `auto_keep` say, so they are not part of the token's policy; a request from
-inside waits for `silo requests keep` or the app. The caps limit how many forks a token makes and
-runs; each running fork uses the memory it was created with and the engine adds no total RAM limit.
+A computer made from inside is the maker's once the engine knows its id: at once for a new
+computer (the engine chooses a Linux computer's id; a macOS computer's comes back with the call),
+and for a fork once its job finished without error and a computer of that name exists with the
+source as its parent. A fork that failed, or never got a job within two minutes, is dropped. The
+record is the engine's (`<app data>/policy/computers.json`), kept across restarts and new tokens;
+a token minted by an earlier version hands the forks and jobs it recorded to it the first time the
+bridge serves the computer.
+
+The token's `fork_secrets` no longer limits a fork: the policy lets a fork have any secret its
+maker has, and asks the owner for anything more.
 
 ## Token lifecycle
 
 - **Mint**: `guestClient.enable` for a Linux computer; 32 bytes from the operating system's random
-  source (`getentropy`), shown as 64 hex digits after `silo_gc_`. It replaces any earlier token
-  and clears the list of forks the old one asked for.
+  source (`getentropy`), shown as 64 hex digits after `silo_gc_`. It replaces any earlier token;
+  the computers the computer made stay its own.
 - **Hash only**: the engine stores `sha256(token)`; `guestClient.status` never returns the token.
   It does show the `fork_secrets` the token was minted with, and `silo guest-client status`
   warns when the settings now say something else.

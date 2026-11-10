@@ -86,5 +86,8 @@ wire_struct! {
     GuestErrorBody {
         code: String,
         message: String,
+        /// For `approval_required`: what the call asks the owner for.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        details: Option<crate::transport::ApprovalRequiredDetails>,
     }
 }

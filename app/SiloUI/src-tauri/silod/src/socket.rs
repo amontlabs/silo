@@ -1010,6 +1010,7 @@ fn encode_response(response: &ResponseEnvelope<Value>) -> Result<Vec<u8>, String
             code: ErrorCode::OutputTooLarge,
             message: "The response exceeds the 4 MiB engine frame limit.".to_owned(),
             diagnostics: None,
+            details: None,
         },
     };
     let bytes = serde_json::to_vec(&fallback).map_err(|error| {

@@ -119,6 +119,7 @@ pub(super) fn guest_error(error: GuestError) -> DispatchError {
     DispatchError {
         code: error.code,
         message: error.message,
+        details: None,
     }
 }
 
@@ -136,6 +137,7 @@ fn local_device(context: &HandlerContext, device_id: Option<&str>) -> Result<(),
         return Err(DispatchError {
             code: ErrorCode::UnsupportedRemoteOperation,
             message: "This engine does not route requests to remote devices.".to_owned(),
+            details: None,
         });
     }
     Ok(())
@@ -839,6 +841,7 @@ pub(super) async fn run_transfer(
         return Err(DispatchError {
             code: ErrorCode::Busy,
             message: "This transfer ID is already in use.".to_owned(),
+            details: None,
         });
     }
     let mut task = tokio::task::spawn_blocking(work);
@@ -868,6 +871,7 @@ pub(super) async fn run_transfer(
             return Err(DispatchError {
                 code: ErrorCode::TimedOut,
                 message: "The transfer did not start in time.".to_owned(),
+                details: None,
             });
         }
     }
@@ -1203,6 +1207,7 @@ exit 2
                     client_id: "client-a".into(),
                     protocol: 7,
                     client: None,
+                    caller: silo_engine::policy::Caller::owner("test"),
                 },
             );
             Self {
@@ -1845,7 +1850,7 @@ exit 2
     fn engine_as_owner(device: &str, owner: &Fixture) -> crate::methods::access::tests::StubOwner {
         let engine = owner.engine.clone();
         crate::methods::access::tests::stub_owner(device, move |method, params| {
-            crate::methods::remote::serve_owner(&engine, method, params)
+            crate::methods::remote::serve_owner(&engine, method, params, None)
         })
     }
 

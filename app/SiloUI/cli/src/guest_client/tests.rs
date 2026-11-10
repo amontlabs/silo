@@ -68,6 +68,7 @@ impl Endpoint {
                             error: Some(silo_api::methods::guest_client::GuestErrorBody {
                                 code: "permission_denied".into(),
                                 message,
+                                details: None,
                             }),
                         },
                     };

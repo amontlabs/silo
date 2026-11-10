@@ -4,6 +4,7 @@
 //! Regenerate with `cargo run -p silo-api --example generate_requests`.
 
 use crate::transport;
+use super::audit;
 use super::changes;
 use super::checkpoints;
 use super::clipboard;
@@ -45,6 +46,11 @@ use super::MethodParams;
 /// `activity.setup.read`
 pub fn activity_setup_read(params: common::DeviceParams) -> Request<kind::Query> {
     Request::new(MethodParams::ActivitySetupRead(params))
+}
+
+/// `audit.list`
+pub fn audit_list(params: audit::AuditListParams) -> Request<kind::Query> {
+    Request::new(MethodParams::AuditList(params))
 }
 
 /// `changes.keep`

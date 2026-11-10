@@ -1,46 +1,56 @@
-use std::{
-    future::Future,
-    pin::Pin,
-    sync::atomic::{AtomicBool, Ordering},
-    sync::Mutex,
-};
+use std::{future::Future, pin::Pin, sync::Mutex};
 
 use serde_json::{json, Value};
-use silo_api::methods::guest_client::{GuestClientPolicy, GuestRequestFrame, GuestResponseFrame};
-use silo_engine::guest_client::{now_secs, OwnedJob, TokenStore, MAX_JOBS};
+use silo_api::{
+    jobs::ErrorCode,
+    methods::guest_client::{GuestClientPolicy, GuestRequestFrame, GuestResponseFrame},
+    transport::{ApprovalKind, ApprovalRequiredDetails},
+};
+use silo_engine::{
+    guest_client::{now_secs, TokenStore, MAX_FORKS, MAX_JOBS},
+    policy::store::{Pending, PolicyStore},
+};
 
 use super::*;
 use crate::dispatcher::DispatchError;
 
+/// The engine's answers, with the caller each call was made as.
 #[derive(Default)]
 struct Fake {
-    calls: Mutex<Vec<(String, Value)>>,
-    job_fails: AtomicBool,
+    calls: Mutex<Vec<(Option<String>, String, Value)>>,
 }
 
 impl Runner for Fake {
     fn run<'a>(
         &'a self,
+        computer: Option<&'a str>,
         method: &'a str,
         params: Value,
     ) -> Pin<Box<dyn Future<Output = Result<Value, DispatchError>> + Send + 'a>> {
         Box::pin(async move {
-            self.calls.lock().unwrap().push((method.to_owned(), params));
-            Ok(match method {
-                "checkpoints.fork" => json!({"jobId": "job:fork"}),
-                "computers.start" | "changes.diff" => json!({"jobId": "job:other"}),
-                "operations.job.get" if self.job_fails.load(Ordering::Relaxed) => {
-                    json!({"state": "finished", "outcome": {"error": {"message": "no"}}})
-                }
-                "operations.job.get" => json!({"state": "finished", "outcome": {"result": {}}}),
-                "computers.list" => json!({
-                    "linux": {"computers": [
-                        {"configuration": {"id": "main"}},
-                        {"configuration": {"id": "stranger"}}]},
-                    "macos": {"computers": []}
+            self.calls
+                .lock()
+                .unwrap()
+                .push((computer.map(str::to_owned), method.to_owned(), params));
+            match method {
+                "changes.keep" => Err(DispatchError {
+                    code: ErrorCode::ApprovalRequired,
+                    message: "Needs approval.".into(),
+                    details: Some(ApprovalRequiredDetails {
+                        kind: ApprovalKind::Merge,
+                        summary: "Merge f1 into main.".into(),
+                        approval_id: None,
+                    }),
                 }),
-                _ => json!({}),
-            })
+                "settings.read" => Err(DispatchError::new(
+                    ErrorCode::PermissionDenied,
+                    "Not for a computer.",
+                )),
+                "checkpoints.fork" => Ok(json!({"jobId": "job:fork"})),
+                "computers.start" => Ok(json!({"jobId": "job:other"})),
+                "operations.job.get" => Ok(json!({"state": "finished", "outcome": {"result": {}}})),
+                _ => Ok(json!({})),
+            }
         })
     }
 }
@@ -76,19 +86,20 @@ fn frame(token: &str, method: &str, params: Value) -> GuestRequestFrame {
 struct Setup {
     _dir: tempfile::TempDir,
     store: TokenStore,
+    policy: PolicyStore,
     token: String,
     fake: Fake,
     reserved: Reserved,
 }
 
-fn setup(fork_secrets: &[&str]) -> Setup {
+fn setup() -> Setup {
     let dir = tempfile::tempdir().unwrap();
     let store = TokenStore::new(dir.path());
     let minted = store
         .mint(
             "main",
             GuestClientPolicy {
-                fork_secrets: fork_secrets.iter().map(|name| (*name).to_owned()).collect(),
+                fork_secrets: Vec::new(),
                 agent: None,
             },
         )
@@ -96,6 +107,7 @@ fn setup(fork_secrets: &[&str]) -> Setup {
     Setup {
         token: minted.token,
         store,
+        policy: PolicyStore::new(dir.path()),
         _dir: dir,
         fake: Fake::default(),
         reserved: Reserved::default(),
@@ -103,6 +115,22 @@ fn setup(fork_secrets: &[&str]) -> Setup {
 }
 
 impl Setup {
+    async fn ask_with(
+        &self,
+        snapshot: &Snapshot,
+        computer: &str,
+        frame: GuestRequestFrame,
+    ) -> Option<GuestResponseFrame> {
+        let env = Frames {
+            runner: &self.fake,
+            store: &self.store,
+            policy: &self.policy,
+            snapshot,
+            reserved: &self.reserved,
+        };
+        handle_frame(&env, computer, frame).await
+    }
+
     async fn ask(
         &self,
         snapshot: &Snapshot,
@@ -110,15 +138,8 @@ impl Setup {
         method: &str,
         params: Value,
     ) -> Option<GuestResponseFrame> {
-        let requests = |_: &str| Some("fork-1".to_owned());
-        let env = Frames {
-            runner: &self.fake,
-            store: &self.store,
-            snapshot,
-            requests: &requests,
-            reserved: &self.reserved,
-        };
-        handle_frame(&env, computer, frame(&self.token, method, params)).await
+        self.ask_with(snapshot, computer, frame(&self.token, method, params))
+            .await
     }
 
     async fn ok(&self, snapshot: &Snapshot, method: &str, params: Value) -> bool {
@@ -127,13 +148,10 @@ impl Setup {
             .is_some_and(|reply| reply.ok)
     }
 
-    fn fork_ids(&self) -> Vec<String> {
-        self.store.status("main").unwrap().unwrap().fork_ids
+    fn made(&self, ids: &[&str]) {
+        let forks: Vec<String> = ids.iter().map(|id| (*id).to_owned()).collect();
+        self.policy.import_legacy("main", &forks, &[]).unwrap();
     }
-}
-
-fn fork(name: &str) -> Value {
-    json!({"computerId": "main", "newName": name})
 }
 
 #[test]
@@ -144,106 +162,44 @@ fn descendants_follow_forks_of_forks_and_never_include_the_root() {
 }
 
 #[tokio::test]
-async fn a_fork_is_the_tokens_only_once_its_job_finished_and_the_fork_exists() {
-    let setup = setup(&[]);
-    let before = snapshot_with(&[]);
-    assert!(setup.ok(&before, "checkpoints.fork", fork("made")).await);
-    let call = setup.fake.calls.lock().unwrap()[0].clone();
-    assert_eq!(
-        call.1["quiet"]["scrub"],
-        json!(["/etc/silo/guest-client.json"])
-    );
-    let record = setup.store.status("main").unwrap().unwrap();
-    assert_eq!(record.pending.len(), 1);
-    assert_eq!(record.pending[0].job_id.as_deref(), Some("job:fork"));
-    assert!(record.fork_ids.is_empty() && record.owns_job("job:fork"));
-    let after = snapshot_with(&[("new-id", "made", "stopped")]);
-    assert!(setup.ok(&after, "computers.list", json!({})).await);
-    assert_eq!(setup.fork_ids(), ["new-id"]);
-    assert!(setup
-        .store
-        .status("main")
-        .unwrap()
-        .unwrap()
-        .pending
-        .is_empty());
-    assert!(
-        setup
-            .ok(&after, "computers.start", json!({"computerId": "new-id"}))
-            .await
-    );
-    // The forks the person made are not the agent's.
-    for person_made in ["fork-1", "grand"] {
-        let params = json!({"computerId": person_made});
-        assert!(
-            !setup.ok(&after, "computers.start", params.clone()).await,
-            "{person_made}"
-        );
-        assert!(
-            !setup.ok(&after, "changes.diff", params).await,
-            "{person_made}"
-        );
-    }
-}
-
-#[tokio::test]
-async fn a_failed_fork_is_dropped_and_never_claims_a_computer_of_that_name() {
-    let setup = setup(&[]);
-    assert!(
-        setup
-            .ok(&snapshot_with(&[]), "checkpoints.fork", fork("made"))
-            .await
-    );
-    setup.fake.job_fails.store(true, Ordering::Relaxed);
-    // The name now belongs to a computer the person made.
-    let after = snapshot_with(&[("theirs", "made", "stopped")]);
-    assert!(setup.ok(&after, "computers.list", json!({})).await);
-    let record = setup.store.status("main").unwrap().unwrap();
-    assert!(record.pending.is_empty() && record.fork_ids.is_empty());
-    let params = json!({"computerId": "theirs"});
-    assert!(!setup.ok(&after, "computers.start", params).await);
-    // A name that exists, or is reserved for Silo, is refused up front.
-    assert!(!setup.ok(&after, "checkpoints.fork", fork("main-a1")).await);
-    assert!(
-        !setup
-            .ok(&after, "checkpoints.fork", fork("silo-build-1"))
-            .await
-    );
-    assert_eq!(
-        setup
-            .fake
-            .calls
-            .lock()
-            .unwrap()
-            .iter()
-            .filter(|c| c.0 == "checkpoints.fork")
-            .count(),
-        1
-    );
-}
-
-#[tokio::test]
-async fn keep_promote_undo_and_drop_never_reach_the_engine() {
-    let setup = setup(&[]);
+async fn a_call_runs_as_the_computer_whose_folder_it_came_from() {
+    let setup = setup();
     let snapshot = snapshot_with(&[]);
-    for method in [
-        "changes.keep",
-        "changes.promote",
-        "changes.undo",
-        "computers.delete",
-        "changes.requests.keep",
-        "secrets.save",
-    ] {
-        let params = json!({"computerId": "fork-1", "forkId": "fork-1"});
-        let reply = setup.ask(&snapshot, "main", method, params).await.unwrap();
-        assert_eq!(reply.error.unwrap().code, "permission_denied", "{method}");
-    }
-    assert!(setup.fake.calls.lock().unwrap().is_empty());
+    let params = json!({"computerId": "main", "newName": "x", "recipeHash": "h"});
+    assert!(setup.ok(&snapshot, "checkpoints.fork", params.clone()).await);
+    let calls = setup.fake.calls.lock().unwrap();
+    // The bridge passes the call on as it came; the policy judges and rewrites it there.
+    assert_eq!(
+        calls[0],
+        (Some("main".into()), "checkpoints.fork".into(), params)
+    );
+}
+
+#[tokio::test]
+async fn a_refusal_or_a_held_call_comes_back_with_its_code_and_details() {
+    let setup = setup();
+    let snapshot = snapshot_with(&[]);
+    let refused = setup
+        .ask(&snapshot, "main", "settings.read", json!({}))
+        .await
+        .unwrap();
+    let error = refused.error.unwrap();
+    assert_eq!(error.code, "permission_denied");
+    assert!(error.details.is_none());
+    let held = setup
+        .ask(&snapshot, "main", "changes.keep", json!({"forkId": "f1"}))
+        .await
+        .unwrap();
+    let error = held.error.unwrap();
+    assert_eq!(error.code, "approval_required");
+    let details = error.details.unwrap();
+    assert_eq!(details.kind, ApprovalKind::Merge);
+    assert_eq!(details.summary, "Merge f1 into main.");
 }
 
 #[tokio::test]
 async fn a_bad_or_foreign_token_gets_no_answer_and_a_revoked_one_stops() {
-    let setup = setup(&[]);
+    let setup = setup();
     let snapshot = snapshot_with(&[]);
     // The token file copied into a fork: the fork's folder is served as the fork.
     assert!(setup
@@ -251,66 +207,26 @@ async fn a_bad_or_foreign_token_gets_no_answer_and_a_revoked_one_stops() {
         .await
         .is_none());
     let forged = frame("silo_gc_forged", "computers.list", json!({}));
-    let requests = |_: &str| None;
-    let env = Frames {
-        runner: &setup.fake,
-        store: &setup.store,
-        snapshot: &snapshot,
-        requests: &requests,
-        reserved: &setup.reserved,
-    };
-    assert!(handle_frame(&env, "main", forged).await.is_none());
-    let listed = setup
-        .ask(&snapshot, "main", "computers.list", json!({}))
-        .await
-        .unwrap();
-    assert_eq!(
-        listed.result.unwrap()["linux"]["computers"]
-            .as_array()
-            .unwrap()
-            .len(),
-        1
-    );
+    assert!(setup.ask_with(&snapshot, "main", forged).await.is_none());
+    assert!(setup.ok(&snapshot, "computers.list", json!({})).await);
     setup.store.revoke(&["main"]).unwrap();
     assert!(setup
         .ask(&snapshot, "main", "computers.list", json!({}))
         .await
         .is_none());
-}
-
-#[tokio::test]
-async fn secrets_are_refused_unless_the_settings_name_them() {
-    let params = json!({"computerId": "main", "newName": "x", "secrets": ["github"]});
-    let denied = setup(&[]);
-    assert!(
-        !denied
-            .ok(&snapshot_with(&[]), "checkpoints.fork", params.clone())
-            .await
-    );
-    let allowed = setup(&["github"]);
-    assert!(
-        allowed
-            .ok(&snapshot_with(&[]), "checkpoints.fork", params)
-            .await
-    );
+    assert_eq!(setup.fake.calls.lock().unwrap().len(), 1);
 }
 
 #[tokio::test]
 async fn starts_in_flight_count_toward_the_running_cap_until_stopped() {
-    let setup = setup(&[]);
+    let setup = setup();
     let forks = [("f1", "n1"), ("f2", "n2"), ("f3", "n3"), ("f4", "n4")];
     let extra: Vec<(&str, &str, &str)> = forks
         .iter()
         .map(|(id, name)| (*id, *name, "stopped"))
         .collect();
     let snapshot = snapshot_with(&extra);
-    setup
-        .store
-        .update("main", |record| {
-            record.fork_ids = forks.iter().map(|(id, _)| (*id).to_owned()).collect();
-            Ok(())
-        })
-        .unwrap();
+    setup.made(&["f1", "f2", "f3", "f4"]);
     for id in ["f1", "f2", "f3"] {
         assert!(
             setup
@@ -325,6 +241,7 @@ async fn starts_in_flight_count_toward_the_running_cap_until_stopped() {
             .ok(&snapshot, "computers.start", json!({"computerId": "f4"}))
             .await
     );
+    assert!(!setup.ok(&snapshot, "checkpoints.fork", json!({"computerId": "main", "newName": "x"})).await);
     assert!(
         setup
             .ok(&snapshot, "computers.stop", json!({"computerId": "f1"}))
@@ -338,39 +255,68 @@ async fn starts_in_flight_count_toward_the_running_cap_until_stopped() {
 }
 
 #[tokio::test]
-async fn jobs_are_capped_survive_in_the_token_and_old_ones_are_reaped() {
-    let setup = setup(&[]);
+async fn the_computers_one_computer_holds_are_capped() {
+    let setup = setup();
+    let ids: Vec<String> = (0..MAX_FORKS).map(|number| format!("f{number}")).collect();
+    let extra: Vec<(&str, &str, &str)> = ids
+        .iter()
+        .map(|id| (id.as_str(), id.as_str(), "stopped"))
+        .collect();
+    let snapshot = snapshot_with(&extra);
+    let refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+    setup.made(&refs[..MAX_FORKS - 1]);
+    setup
+        .policy
+        .begin(
+            "main",
+            Pending {
+                created_by: String::new(),
+                name: "coming".into(),
+                id: None,
+                source: Some("main".into()),
+                job_id: None,
+                at: 0,
+            },
+        )
+        .unwrap();
+    let reply = setup
+        .ask(&snapshot, "main", "checkpoints.fork", json!({"computerId": "main", "newName": "x"}))
+        .await
+        .unwrap();
+    assert_eq!(reply.error.unwrap().code, "permission_denied");
+    // Computers the person made do not count.
+    assert!(setup.fake.calls.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn jobs_are_capped_and_old_ones_are_reaped() {
+    let setup = setup();
     let snapshot = snapshot_with(&[]);
     let now = now_secs();
-    setup
-        .store
-        .update("main", |record| {
-            for number in 0..MAX_JOBS {
-                record.jobs.push(OwnedJob {
-                    id: format!("job:{number}"),
-                    at: now - 4000,
-                });
-            }
-            Ok(())
-        })
-        .unwrap();
-    assert!(!setup.ok(&snapshot, "checkpoints.fork", fork("x")).await);
-    // A job this token owns can be followed and acknowledged, which frees its place.
+    let jobs: Vec<(String, u64)> = (0..MAX_JOBS)
+        .map(|number| (format!("job:{number}"), now - 4000))
+        .collect();
+    setup.policy.import_legacy("main", &[], &jobs).unwrap();
     assert!(
-        setup
-            .ok(&snapshot, "operations.job.get", json!({"jobId": "job:0"}))
+        !setup
+            .ok(&snapshot, "checkpoints.fork", json!({"computerId": "main", "newName": "x"}))
             .await
     );
-    assert!(
-        setup
-            .ok(
-                &snapshot,
-                "operations.job.acknowledge",
-                json!({"jobId": "job:0"})
-            )
-            .await
+    // A call that starts no job is not held back.
+    assert!(setup.ok(&snapshot, "computers.list", json!({})).await);
+    reap(&setup.fake, &setup.policy, "main").await;
+    assert!(setup.policy.snapshot().unwrap().jobs_of("main").is_empty());
+    let calls = setup.fake.calls.lock().unwrap();
+    // The bridge's own housekeeping runs as the engine, not as the computer.
+    assert!(calls
+        .iter()
+        .filter(|call| call.1 == "operations.job.acknowledge")
+        .all(|call| call.0.is_none()));
+    assert_eq!(
+        calls
+            .iter()
+            .filter(|call| call.1 == "operations.job.acknowledge")
+            .count(),
+        MAX_JOBS
     );
-    assert!(setup.store.status("main").unwrap().unwrap().jobs.len() < MAX_JOBS);
-    reap(&setup.fake, &setup.store, "main").await;
-    assert!(setup.store.status("main").unwrap().unwrap().jobs.is_empty());
 }

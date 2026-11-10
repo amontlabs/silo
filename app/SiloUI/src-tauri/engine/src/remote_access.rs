@@ -36,8 +36,14 @@ pub trait LocalAccess: Send + Sync {
 
     /// Access-domain methods remain owner-side because credentials and secret values
     /// belong to the selected owner. The silod adapter translates canonical IDs at the
-    /// runtime boundary and publishes the corresponding canonical state events.
-    fn access_dispatch(&self, _method: &str, _params: &Value) -> Result<Value, BridgeError> {
+    /// runtime boundary and publishes the corresponding canonical state events. `key` is the
+    /// fingerprint of the SSH key the other device connected with, when the bridge could tell.
+    fn access_dispatch(
+        &self,
+        _method: &str,
+        _params: &Value,
+        _key: Option<&str>,
+    ) -> Result<Value, BridgeError> {
         Err(BridgeError::unsupported())
     }
 
@@ -113,7 +119,7 @@ pub(crate) fn dispatch(
     checkpoints: &CheckpointHandler,
     local: &dyn LocalAccess,
 ) -> Result<Value, String> {
-    dispatch_typed(paths, method, params, checkpoints, local).map_err(|error| error.message)
+    dispatch_typed(paths, method, params, checkpoints, local, None).map_err(|error| error.message)
 }
 
 /// Runs one owner-side request and keeps the canonical code of an access-domain failure.
@@ -123,9 +129,10 @@ pub(crate) fn dispatch_typed(
     params: &Value,
     checkpoints: &CheckpointHandler,
     local: &dyn LocalAccess,
+    key: Option<&str>,
 ) -> Result<Value, BridgeError> {
     if ACCESS_METHODS.contains(&method) || crate::remote::is_owner_method(method) {
-        return local.access_dispatch(method, params);
+        return local.access_dispatch(method, params, key);
     }
     dispatch_untyped(paths, method, params, checkpoints, local).map_err(BridgeError::from)
 }
@@ -546,7 +553,12 @@ mod typed_access_tests {
         fn desktop_dispatch(&self, _: &str, _: &Value) -> Result<Value, String> {
             unreachable!()
         }
-        fn access_dispatch(&self, method: &str, _: &Value) -> Result<Value, BridgeError> {
+        fn access_dispatch(
+            &self,
+            method: &str,
+            _: &Value,
+            _: Option<&str>,
+        ) -> Result<Value, BridgeError> {
             Err(match method {
                 "operations.cancel" => BridgeError::new(ErrorCode::NotFound, "not_found"),
                 "operations.job.acknowledge" => BridgeError::new(ErrorCode::Busy, "busy"),
@@ -567,7 +579,8 @@ mod typed_access_tests {
         ] {
             assert!(ACCESS_METHODS.contains(&method));
             let error =
-                dispatch_typed(&paths, method, &json!({}), checkpoints, &TypedAccess).unwrap_err();
+                dispatch_typed(&paths, method, &json!({}), checkpoints, &TypedAccess, None)
+                    .unwrap_err();
             assert_eq!(error.code, code, "{method}");
         }
     }

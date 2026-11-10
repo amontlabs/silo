@@ -1358,6 +1358,7 @@ fn macos_job_finished(
                 code,
                 message,
                 diagnostics: None,
+                details: None,
             }),
             outcome_chunked: false,
         },
@@ -1457,6 +1458,7 @@ fn publish_checkpoint_completion<T: serde::Serialize>(
                     code: silo_api::jobs::ErrorCode::Internal,
                     message: format!("Could not encode the macOS checkpoint result: {error}"),
                     diagnostics: None,
+                    details: None,
                 }),
                 outcome_chunked: false,
             },
@@ -1473,6 +1475,7 @@ fn publish_checkpoint_completion<T: serde::Serialize>(
                 },
                 message: message.clone(),
                 diagnostics: None,
+                details: None,
             }),
             outcome_chunked: false,
         },
@@ -5923,6 +5926,7 @@ fn delete(app: &MacosContext, id: &str) -> Result<(), String> {
             Ok(()) => {
                 registry().entries.retain(|entry| entry.record.id != id);
                 crate::changes::store::forget(app.engine.as_ref(), &[id.to_owned()]);
+                crate::policy::store::computer_removed(id);
                 if let Err(message) = ports::computer_removed(app, id) {
                     eprintln!("A deleted macOS computer's published ports could not be removed: {message}");
                 }

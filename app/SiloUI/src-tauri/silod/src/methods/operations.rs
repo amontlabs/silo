@@ -104,6 +104,7 @@ async fn get(params: &Value, context: &HandlerContext) -> Result<HandlerOutput, 
             .ok_or_else(|| DispatchError {
                 code: ErrorCode::NotFound,
                 message: "The job was not found.".to_owned(),
+                details: None,
             })?;
     Ok(output(value(found)?))
 }
