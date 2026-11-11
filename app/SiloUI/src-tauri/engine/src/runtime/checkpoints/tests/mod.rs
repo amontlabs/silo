@@ -348,6 +348,11 @@ fn checkpoint_start_selects_native_scope_and_desired_restore_mode_separately() {
             restore.iter().any(|arg| arg == "--cpus"),
             desired_mode == "disk"
         );
+        assert_eq!(
+            restore.iter().any(|arg| arg == "--allow-missing-resources"),
+            desired_mode == "disk",
+            "native={native_scope}, desired={desired_mode}: {restore:?}"
+        );
     }
 }
 
