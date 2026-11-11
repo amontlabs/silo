@@ -59,7 +59,7 @@ pub(super) fn owns(method: MethodName) -> bool {
             "steps.",
             "device.",
         ],
-    )
+    ) || method == MethodName::ComputersRecipe
 }
 
 pub async fn handle(
@@ -85,6 +85,9 @@ async fn dispatch(
         MethodName::StepsList => steps::list(context, params).await,
         MethodName::StepsRecord => steps::record(context, params).await,
         MethodName::RecipesRemove => recipes::remove(context, params).await,
+        MethodName::RecipesSave => recipes::save(context, params).await,
+        MethodName::RecipesGet => recipes::get(context, params).await,
+        MethodName::ComputersRecipe => recipes::of_computer(context, params).await,
         MethodName::ChangesCapture => changes::capture(context, params).await,
         MethodName::ChangesDiff => changes::diff(context, params).await,
         MethodName::ChangesBaseline => changes::baseline(context, params).await,

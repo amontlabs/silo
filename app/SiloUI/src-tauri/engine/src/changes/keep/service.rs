@@ -76,6 +76,26 @@ where
     Ok(job_id)
 }
 
+/// Appends the packages and settings files a keep brought to the recipe of the computer it
+/// merged into, and says so in the report. A failure is a note: the merge is done.
+fn note_recipe(context: &dyn EngineContext, report: &mut super::Report) {
+    let library = crate::recipes::Library::new(&context.paths().app_data);
+    let target = report.target.clone();
+    match crate::recipes::record_merge(&library, &target, &report.additions) {
+        Ok(Some((name, added))) => {
+            report.recipe = Some(super::RecipeUpdate {
+                name,
+                packages: added.packages,
+                files: added.files,
+            });
+        }
+        Ok(None) => {}
+        Err(error) => report.notes.push(format!(
+            "The recipe of {target} could not be updated: {error}"
+        )),
+    }
+}
+
 /// `changes.keep`.
 pub fn start_keep(
     host: Arc<dyn RuntimeHost>,
@@ -94,7 +114,9 @@ pub fn start_keep(
             &request,
             LANE_WAIT,
         )?;
-        if let super::Outcome::Kept(report) = &outcome {
+        let mut outcome = outcome;
+        if let super::Outcome::Kept(report) = &mut outcome {
+            note_recipe(context.as_ref(), report);
             // The changes the open requests for this fork asked to review are in.
             Store::new(&context.paths().app_data).mark_kept_for(
                 &report.fork,
@@ -253,6 +275,10 @@ pub fn start_request_keep(
                 return Err(error);
             }
         };
+        let mut outcome = outcome;
+        if let super::Outcome::Kept(report) = &mut outcome {
+            note_recipe(context.as_ref(), report);
+        }
         let after = match &outcome {
             super::Outcome::Kept(report) => requests
                 .mark_kept(&request_id, report.checkpoint.clone())

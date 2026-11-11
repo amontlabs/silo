@@ -95,7 +95,10 @@ impl super::World for World {
         }
     }
     fn name(&self, computer: &str) -> Option<String> {
-        Some(format!("{computer}-name"))
+        match computer {
+            "recipe-build" => Some("silo-build-linux-dev-0123abcd".to_owned()),
+            _ => Some(format!("{computer}-name")),
+        }
     }
     fn owns_job(&self, caller: &str, job_id: &str) -> bool {
         caller == "main" && job_id == "job:mine"
@@ -244,6 +247,8 @@ fn owner_only_methods_are_refused_whatever_the_parameters() {
         "changes.capture",
         "changes.requests.markKept",
         "recipes.build",
+        "recipes.save",
+        "recipes.remove",
     ] {
         let decision = check(name, json!({"computerId": "fork-1", "forkId": "fork-1"}));
         match decision {
@@ -385,6 +390,39 @@ fn lists_ask_for_only_the_lists_and_are_cut_to_the_callers_computers() {
     filter_result(Filter::Tree, &mut tree, &visible);
     assert_eq!(tree["nodes"][0]["parent"], "main");
     assert_eq!(tree["nodes"][1]["parent"], Value::Null);
+}
+
+#[test]
+fn recipes_can_be_read_by_a_computer_and_a_recipe_build_can_be_forked() {
+    assert!(allowed(&check("recipes.list", json!({}))));
+    assert!(allowed(&check("recipes.get", json!({"name": "linux-dev"}))));
+    assert!(allowed(&check("computers.recipe", json!({"computerId": "main"}))));
+    assert!(refused(&check("computers.recipe", json!({"computerId": "stranger"}))));
+    // The hidden computer a recipe was built in is a source any computer may fork.
+    let Decision::Allow(granted) = check(
+        "checkpoints.fork",
+        json!({"computerId": "recipe-build", "newName": "from-recipe"}),
+    ) else {
+        panic!("not allowed")
+    };
+    assert_eq!(
+        granted.creates,
+        Some(Creation {
+            name: "from-recipe".into(),
+            id: None,
+            source: Some("recipe-build".into())
+        })
+    );
+    // It is no way to hand over secrets the caller does not have.
+    assert!(!allowed(&check(
+        "checkpoints.fork",
+        json!({"computerId": "recipe-build", "newName": "x", "secrets": ["prod-db"]})
+    )));
+    // Another computer's own fork is still out of reach.
+    assert!(refused(&check(
+        "checkpoints.fork",
+        json!({"computerId": "stranger", "newName": "x"})
+    )));
 }
 
 #[test]

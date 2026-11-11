@@ -392,13 +392,13 @@ pub fn check_keepable(request: &FoldRequest) -> Result<(), String> {
     }
     if let Some(path) = folder_path(&request.target) {
         return Err(format!(
-            "{} was made from the folder {path}. Keep folder forks with `silo fold`, which brings the commits back into the folder.",
+            "{} was made from the folder {path}. Merge folder forks with `silo merge`, which brings the commits back into the folder.",
             request.fork_id
         ));
     }
     if request.review_digest.is_empty() {
         return Err(format!(
-            "The request {} has no review digest to pin the keep to. Ask for the review again with `silo fold --request`.",
+            "The request {} has no review digest to pin the keep to. Ask for the review again with `silo merge --request`.",
             request.id
         ));
     }
@@ -679,7 +679,7 @@ mod tests {
             ..request.clone()
         };
         let message = check_keepable(&folder).unwrap_err();
-        assert!(message.contains("silo fold") && message.contains("/work/app"));
+        assert!(message.contains("silo merge") && message.contains("/work/app"));
         let undigested = FoldRequest {
             review_digest: String::new(),
             ..request.clone()

@@ -115,6 +115,7 @@ define_registry! {
     ComputersShell => ("computers.shell", Query, computers::ComputerShellParams, computers::ApplicationSource);
     ComputersStart => ("computers.start", Job, common::ComputerTargetParams, common::JobStartResult);
     ComputersStop => ("computers.stop", Job, common::ComputerTargetParams, common::JobStartResult);
+    ComputersRecipe => ("computers.recipe", Query, common::ComputerTargetParams, recipes::ComputerRecipeResult);
     ComputersTree => ("computers.tree", Query, steps::ComputersTreeParams, steps::ComputersTreeResult);
     ConnectionsDevicesConnect => ("connections.devices.connect", Command, connections::ConnectDeviceParams, connections::Device);
     ConnectionsDevicesHealth => ("connections.devices.health", Query, connections::DeviceHealthParams, connections::DeviceHealthResult);
@@ -229,8 +230,10 @@ define_registry! {
     PushStart => ("push.start", Job, push::PushStartParams, common::JobStartResult);
     PushStatus => ("push.status", Query, push::PushStatusParams, Option<push::PushOperation>);
     RecipesBuild => ("recipes.build", Job, recipes::RecipeBuildParams, common::JobStartResult);
+    RecipesGet => ("recipes.get", Query, recipes::RecipeGetParams, recipes::RecipeDocument);
     RecipesList => ("recipes.list", Query, common::DeviceParams, recipes::RecipesListResult);
     RecipesRemove => ("recipes.remove", Command, recipes::RecipeRemoveParams, ());
+    RecipesSave => ("recipes.save", Command, recipes::RecipeSaveParams, recipes::RecipeDocument);
     SecretsList => ("secrets.list", Query, common::DeviceParams, Vec<secrets::Secret>);
     SecretsRemove => ("secrets.remove", Command, secrets::SecretsRemoveParams, Vec<secrets::Secret>);
     SecretsRetry => ("secrets.retry", Command, secrets::SecretsRetryParams, Vec<secrets::Secret>);
@@ -263,20 +266,20 @@ mod tests {
 
     #[test]
     fn registry_covers_every_canonical_method_and_kind() {
-        assert_eq!(METHOD_REGISTRY.len(), 187);
+        assert_eq!(METHOD_REGISTRY.len(), 190);
         assert_eq!(
             METHOD_REGISTRY
                 .iter()
                 .filter(|m| m.kind == MethodKind::Query)
                 .count(),
-            61
+            63
         );
         assert_eq!(
             METHOD_REGISTRY
                 .iter()
                 .filter(|m| m.kind == MethodKind::Command)
                 .count(),
-            77
+            78
         );
         assert_eq!(
             METHOD_REGISTRY

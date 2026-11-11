@@ -1,6 +1,6 @@
 # Silo's tools in a computer
 
-An agent that lives inside a computer (Claude Code, Codex, OpenClaw, Hermes) uses Silo from
+An agent that lives inside a computer (Claude Code, Codex) uses Silo from
 there with the same `silo` command and the same `silo mcp` server as on the device. Every call it
 makes is that computer's call: the engine knows which computer is calling from the channel the
 call arrives on, and [the policy](SiloUI-POLICY.md) decides what it may do, what asks the owner,
@@ -88,7 +88,7 @@ silo tools disable <computer>
 
 - for a **running** computer, writes the endpoint file now. If the computer's network does not
   carry the rule yet, the answer says it can reach the tools after a restart (`network:
-  nextRestart`); `silo restart <computer>` does it.
+  nextRestart`); stopping and starting the computer does it.
 - for a **stopped** virtual machine, nothing more: its next start sees that its runtime lacks the
   rule and restores it in place with the rule (as a network policy change does), then the file is
   written once it runs.
@@ -196,14 +196,49 @@ the reason, which `silo` shows as it is). Every refused or held call, and every 
 change something, is written to the audit log with the computer as caller. `silo list` inside a
 computer shows that computer and the computers it made.
 
-Inside a computer, `silo mcp` does not list the tools that only make sense on the device: the
-hosted reviewer (`review`), SSH names (`ssh_name`) and reaching a review request's fork
-(`request_open`); a `device` argument and a folder as a fork's source are refused there.
+## What `silo` does inside a computer
+
+It is the same command line as on the device, and the engine decides each call. What the agent
+sees:
+
+| Command | Inside a computer |
+| --- | --- |
+| `silo list`, `status`, `tree`, `diff`, `steps`, `checkpoints`, `checkpoint`, `ports`, `access`, `resources`, `agents list`, `recipe list`, `recipe show`, `approvals status` | Free, for the computer itself and the computers it made. `silo access` shows names and hosts, never a secret's value; `silo resources` shows what the device has left |
+| `silo fork`, `silo create`, `silo fork <name> --recipe <recipe>` | Free when the new computer gets no more than the caller has; a wider one asks the owner. A fork starts unless `--no-start`. A computer made from a recipe is a fork of the recipe's hidden build, which any computer may fork. `--step-checkpoints` and `--keep-steps N` are options of `silo exec` and `silo fork` |
+| `silo exec`, `start`, `stop`, `restore`, `drop`, `agents install` | On a computer it made, not on itself |
+| `silo merge <fork>`, `silo undo` | Free when the computers involved are ones it made; asks the owner when the target is the computer itself |
+| `silo replace-main <fork>` | Asks the owner when it replaces its own computer, and says that it restarts it |
+| `silo publish`, `silo secrets set`, `silo network policy` to a wider policy, SSH access, a new GitHub repository | Ask the owner |
+| `silo recipe add`, `recipe remove`, `recipe build` | The owner's; refused |
+| `silo ssh-setup`, a fork of a folder, `merge --pr`, `undo` of a folder, `export`, `import`, `review` | Not offered: they work on the device's files, SSH setup or accounts |
+
+A call that asks the owner does not fail. The command prints what was asked, in the engine's
+words, with the request id, and waits for the answer: 2 minutes unless `--wait <duration>`
+(`90s`, `2m`, `1h`) says otherwise, or `--no-wait`. `--reason <text>` adds the agent's own note to
+the request right after it is made, shown to the owner as the agent's. Then the command ends as
+the owner decided:
+
+| Exit code | Meaning |
+| --- | --- |
+| 0 | Allowed, and the command ran (a job is followed as usual) |
+| 4 | The owner denied it; their note is printed |
+| 5 | Still waiting (the wait ran out or `--no-wait`); nothing has run |
+| 6 | The request ended without an answer: withdrawn or expired |
+
+`silo approvals status <id>` and `silo approvals wait <id>` follow a request later, with the same
+exit codes, and `silo approvals note <id> <text>` adds a note. The MCP tools that can ask take
+`wait_secs` (default 30, at most 100) and `reason`; a wait that runs out returns
+`{"status":"waiting-for-owner","approvalId":...}`, and the `approvals` tool lists, shows, waits for
+or adds a note to a request.
+
+Inside a computer, `silo mcp` does not list the tools that only make sense on the device: `up`,
+`ssh_name` (SSH names) and `request_open` (reaching a review request's fork). A `device` argument
+and a folder as a fork's source are refused there.
 
 ## Lifecycle
 
-- **Promote and undo** turn the tools off in both computers involved (`changes.promote`: the
-  fork and its target; `changes.undo`: both computers of the promote it takes back). A failure
+- **Replace main and undo** turn the tools off in both computers involved (`changes.promote`: the
+  fork and its target; `changes.undo`: both computers of the replace it takes back). A failure
   stops the operation before anything changes. Turn them on again for the computer that should
   have them.
 - **Delete** forgets the computer's port and token hash and lets every port kept for it go. A

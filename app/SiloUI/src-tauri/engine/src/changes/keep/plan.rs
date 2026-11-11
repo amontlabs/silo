@@ -196,6 +196,8 @@ pub struct Plan {
     /// Items the caller's choices left alone, and items main already holds.
     pub items: Vec<ReportItem>,
     pub notes: Vec<String>,
+    /// The paths of the settings files the fork added or changed, as the diff names them.
+    pub settings_files: BTreeSet<String>,
 }
 
 impl Plan {
@@ -573,6 +575,13 @@ pub fn build(
         .collect();
     let mut candidates: BTreeSet<String> = BTreeSet::new();
     candidates.extend(diff.settings.files.iter().map(|c| c.path.clone()));
+    plan.settings_files.extend(
+        diff.settings
+            .files
+            .iter()
+            .filter(|c| c.change != crate::changes::diff::Change::Deleted)
+            .map(|c| normalize(os, &c.path)),
+    );
     candidates.extend(diff.other.iter().map(|c| c.path.clone()));
     for repo in &diff.code {
         candidates.extend(repo.gitignored.iter().map(|c| c.path.clone()));

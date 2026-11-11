@@ -8,8 +8,11 @@ use serde_json::{json, Value};
 use silo_api::{
     jobs::JobState,
     methods::{
+        common::ComputerTargetParams,
         recipes::{
-            RecipeBuildParams, RecipeBuildResult, RecipeOs, RecipeRemoveParams, RecipesListResult,
+            ComputerRecipeResult, RecipeBuildParams, RecipeBuildResult, RecipeDefinition,
+            RecipeDocument, RecipeGetParams, RecipeOs, RecipeRecord, RecipeRemoveParams,
+            RecipeSaveParams, RecipeSummary, RecipesListResult,
         },
         MethodName,
     },
@@ -17,7 +20,7 @@ use silo_api::{
 use silo_engine::{
     context::{Audience, EngineContext},
     guest::{self, ExecRequest, GuestUser},
-    recipes::{self, BuildEnv, Cache, Created, ExecOut, RunAs},
+    recipes::{self, BuildEnv, Cache, Created, ExecOut, Library, RunAs},
 };
 
 use crate::{
@@ -313,17 +316,80 @@ fn cache(context: &HandlerContext) -> Cache {
     Cache::new(&context.engine_context().paths().app_data)
 }
 
+fn invalid(message: impl Into<String>) -> DispatchError {
+    DispatchError {
+        code: silo_api::jobs::ErrorCode::Internal,
+        message: message.into(),
+        details: None,
+    }
+}
+
+fn image_of(app_data: &std::path::Path, os: RecipeOs) -> String {
+    match os {
+        RecipeOs::Linux => {
+            silo_engine::runtime::guest_image::pinned_version().unwrap_or_else(|| "unknown".into())
+        }
+        RecipeOs::Macos => silo_engine::macos_computers::recipe_image_version(app_data),
+    }
+}
+
+fn library(context: &HandlerContext) -> Library {
+    Library::new(&context.engine_context().paths().app_data)
+}
+
+fn document(
+    app_data: &std::path::Path,
+    name: &str,
+    recipe: RecipeDefinition,
+    built_in: bool,
+) -> RecipeDocument {
+    let hash = recipes::hash(&recipe.spec, &image_of(app_data, recipe.spec.os));
+    let built = Cache::new(app_data)
+        .get(name)
+        .ok()
+        .flatten()
+        .filter(|entry| entry.hash == hash);
+    RecipeDocument {
+        name: name.to_owned(),
+        built_in,
+        hash,
+        warnings: recipes::quiet_warnings(&recipe),
+        recipe,
+        built,
+    }
+}
+
 pub(super) async fn build(
     context: &HandlerContext,
     params: &Value,
 ) -> Result<HandlerOutput, DispatchError> {
     let params: RecipeBuildParams = context.decode_params(params)?;
     require_local_device(context, params.device_id.as_deref())?;
-    recipes::validate(&params.spec).map_err(|message| DispatchError {
-        code: silo_api::jobs::ErrorCode::Internal,
-        message,
-        details: None,
-    })?;
+    // The stored recipe, else the shipped one; a spec in the call builds that spec with the
+    // rules of the recipe of the same name.
+    let found = library(context).get(&params.name).map_err(invalid)?;
+    let definition = match (params.spec.clone(), found) {
+        (Some(spec), Some((mut stored, _))) => {
+            stored.spec = spec;
+            stored
+        }
+        (Some(spec), None) => RecipeDefinition {
+            spec,
+            quiet: Vec::new(),
+            scrub: Vec::new(),
+            keep: None,
+            test: None,
+            files: Vec::new(),
+        },
+        (None, Some((stored, _))) => stored,
+        (None, None) => {
+            return Err(invalid(format!(
+                "There is no recipe named {}. Save one with recipes.save.",
+                params.name
+            )))
+        }
+    };
+    recipes::validate_definition(&params.name, &definition).map_err(invalid)?;
     let started = context.start_job("recipes.build")?;
     let job_id = started.job_id.clone();
     let silod = Arc::new(context.silod_context().clone());
@@ -338,9 +404,22 @@ pub(super) async fn build(
             &env,
             &cache,
             &params.name,
-            &params.spec,
+            &definition.spec,
             params.force.unwrap_or(false),
-        );
+        )
+        .and_then(|done| {
+            // The builder carries the recipe as it is now; forks of it inherit the record.
+            recipes::records::set(
+                &done.entry.computer_id,
+                &RecipeRecord {
+                    name: params.name.clone(),
+                    hash: done.entry.hash.clone(),
+                    built_at: done.entry.built_at.clone(),
+                    recipe: definition.clone(),
+                },
+            )?;
+            Ok(done)
+        });
         let finished = match outcome {
             Ok(done) => {
                 let result = RecipeBuildResult {
@@ -369,19 +448,90 @@ pub(super) async fn build(
     output(started)
 }
 
+pub(super) async fn save(
+    context: &HandlerContext,
+    params: &Value,
+) -> Result<HandlerOutput, DispatchError> {
+    let params: RecipeSaveParams = context.decode_params(params)?;
+    require_local_device(context, params.device_id.as_deref())?;
+    let app_data = context.engine_context().paths().app_data.clone();
+    tokio::task::spawn_blocking(move || {
+        Library::new(&app_data).save(&params.name, &params.recipe)?;
+        Ok::<_, String>(document(&app_data, &params.name, params.recipe, false))
+    })
+    .await
+    .map_err(|_| DispatchError::internal("The engine task stopped unexpectedly."))?
+    .map_err(invalid)
+    .and_then(output)
+}
+
+pub(super) async fn get(
+    context: &HandlerContext,
+    params: &Value,
+) -> Result<HandlerOutput, DispatchError> {
+    let params: RecipeGetParams = context.decode_params(params)?;
+    require_local_device(context, params.device_id.as_deref())?;
+    let app_data = context.engine_context().paths().app_data.clone();
+    tokio::task::spawn_blocking(move || {
+        let (recipe, built_in) = Library::new(&app_data)
+            .get(&params.name)?
+            .ok_or_else(|| format!("There is no recipe named {}.", params.name))?;
+        Ok::<_, String>(document(&app_data, &params.name, recipe, built_in))
+    })
+    .await
+    .map_err(|_| DispatchError::internal("The engine task stopped unexpectedly."))?
+    .map_err(invalid)
+    .and_then(output)
+}
+
+pub(super) async fn of_computer(
+    context: &HandlerContext,
+    params: &Value,
+) -> Result<HandlerOutput, DispatchError> {
+    let params: ComputerTargetParams = context.decode_params(params)?;
+    require_local_device(context, params.device_id.as_deref())?;
+    let recipe = tokio::task::spawn_blocking(move || recipes::records::get(&params.computer_id))
+        .await
+        .map_err(|_| DispatchError::internal("The engine task stopped unexpectedly."))?
+        .map_err(invalid)?;
+    output(ComputerRecipeResult { recipe })
+}
+
 pub(super) async fn list(
     context: &HandlerContext,
     params: &serde_json::Value,
 ) -> Result<HandlerOutput, DispatchError> {
     let params: silo_api::methods::common::DeviceParams = context.decode_params(params)?;
     require_local_device(context, params.device_id.as_deref())?;
-    let cache = cache(context);
-    let recipes = tokio::task::spawn_blocking(move || cache.list())
-        .await
-        .map_err(|_| DispatchError::internal("The engine task stopped unexpectedly."))?;
-    output(RecipesListResult { recipes })
+    let app_data = context.engine_context().paths().app_data.clone();
+    let listed = tokio::task::spawn_blocking(move || {
+        let cache = Cache::new(&app_data);
+        let recipes = cache.list();
+        let saved = Library::new(&app_data)
+            .list()
+            .into_iter()
+            .map(|(name, recipe, built_in)| {
+                let hash = recipes::hash(&recipe.spec, &image_of(&app_data, recipe.spec.os));
+                RecipeSummary {
+                    built: recipes
+                        .iter()
+                        .any(|entry| entry.name == name && entry.hash == hash),
+                    name,
+                    built_in,
+                    os: recipe.spec.os,
+                    hash,
+                }
+            })
+            .collect();
+        RecipesListResult { recipes, saved }
+    })
+    .await
+    .map_err(|_| DispatchError::internal("The engine task stopped unexpectedly."))?;
+    output(listed)
 }
 
+/// Forgets the stored recipe and drops its build. A recipe that ships with Silo and was never
+/// saved over has no stored copy to forget, so only its build goes.
 pub(super) async fn remove(
     context: &HandlerContext,
     params: &Value,
@@ -391,11 +541,28 @@ pub(super) async fn remove(
     let silod = Arc::new(context.silod_context().clone());
     let handle = tokio::runtime::Handle::current();
     tokio::task::spawn_blocking(move || {
-        let env = DispatchEnv {
-            silod: silod.clone(),
-            handle,
-        };
-        recipes::remove(&env, &Cache::new(&silod.paths().app_data), &params.name)
+        let app_data = silod.paths().app_data.clone();
+        let forgot = Library::new(&app_data).remove(&params.name)?;
+        let cache = Cache::new(&app_data);
+        let built = cache.get(&params.name)?.is_some();
+        if !forgot && !built {
+            return Err(if recipes::built_in(&params.name).is_some() {
+                format!(
+                    "{} ships with Silo and has no build to remove.",
+                    params.name
+                )
+            } else {
+                format!("There is no recipe named {}.", params.name)
+            });
+        }
+        if built {
+            let env = DispatchEnv {
+                silod: silod.clone(),
+                handle,
+            };
+            recipes::remove(&env, &cache, &params.name)?;
+        }
+        Ok(())
     })
     .await
     .map_err(|_| DispatchError::internal("The engine task stopped unexpectedly."))?

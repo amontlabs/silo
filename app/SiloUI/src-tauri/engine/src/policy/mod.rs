@@ -492,9 +492,18 @@ impl<'a> Judge<'a> {
         Ok(name)
     }
 
+    /// Whether `id` is the hidden computer a recipe was built in. It holds nothing but what the
+    /// recipe installs, and its name is one no agent can give a computer, so any computer may
+    /// fork it to make a computer from that recipe.
+    fn is_recipe_build(&self, id: &str) -> bool {
+        self.world
+            .name(id)
+            .is_some_and(|name| name.starts_with(crate::recipes::BUILDER_PREFIX))
+    }
+
     fn fork(&self, params: &Value) -> Result<Decision, String> {
         let source = text(params, "computerId")
-            .filter(|id| self.in_tree(id))
+            .filter(|id| self.in_tree(id) || self.is_recipe_build(id))
             .ok_or("A computer's agent can fork its own computer or a computer it made.")?;
         let new_name = self.checked_name(text(params, "newName"), false)?;
         let named: Vec<String> = match params.get("secrets") {

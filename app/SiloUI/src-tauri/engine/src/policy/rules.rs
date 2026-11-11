@@ -52,7 +52,11 @@ pub fn rule(method: MethodName) -> Rule {
         M::OperationsList => OwnerOnly,
 
         // Computers.
-        M::ComputersList | M::ComputersTree | M::ComputersCredentials | M::ComputersAccess => Tree,
+        M::ComputersList
+        | M::ComputersTree
+        | M::ComputersCredentials
+        | M::ComputersAccess
+        | M::ComputersRecipe => Tree,
         M::ComputersCreate => Create,
         M::ComputersStart
         | M::ComputersStop
@@ -192,6 +196,8 @@ pub fn rule(method: MethodName) -> Rule {
         | M::MigrationPreUpgradeBackupMeasure
         | M::MigrationState => OwnerOnly,
         M::PreparationRetry | M::PreparationStatus => OwnerOnly,
-        M::RecipesBuild | M::RecipesList | M::RecipesRemove => OwnerOnly,
+        // Recipes: a computer may read them; saving, removing and building them is the owner's.
+        M::RecipesGet | M::RecipesList => Open,
+        M::RecipesBuild | M::RecipesRemove | M::RecipesSave => OwnerOnly,
     }
 }

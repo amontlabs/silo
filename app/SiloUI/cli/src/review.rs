@@ -1,10 +1,10 @@
-//! Review requests as the commands and the MCP tools use them: list, show, keep, throw away
-//! and open the requests `silo fold --request` records. The engine does the work; a fork made
+//! Review requests as the commands and the MCP tools use them: list, show, merge, decline
+//! and open the requests `silo merge --request` records. The engine does the work; a fork made
 //! from a host folder is read here, because only the CLI reads the folder's git history.
 
 use serde_json::{json, Value};
 use silo_api::methods::{
-    keep::KeepHooks,
+    keep::KeepAnswer,
     requests,
     review_requests::{
         ChangesRequestsKeepParams, ChangesRequestsListParams, RequestFilter, RequestIdParams,
@@ -152,25 +152,26 @@ pub async fn show(engine: &Engine, id: &str, progress: Progress<'_>) -> Result<V
     Ok(value)
 }
 
-/// Keeps the request's fork into its target, pinned to the request's digest. A refused keep is
-/// a result (`status: "refused"`), and the request stays open.
-pub async fn keep(
+/// Merges the request's fork into its target, pinned to the request's digest. A refused merge
+/// is a result (`status: "refused"`), and the request stays open.
+pub async fn merge(
     engine: &Engine,
     id: &str,
-    hooks: Option<KeepHooks>,
     data_ok: bool,
+    choices: std::collections::BTreeMap<String, KeepAnswer>,
+    skip: Vec<String>,
     progress: Progress<'_>,
 ) -> Result<Value, CliError> {
     engine
         .run_job(
-            &format!("Keeping {id}"),
+            &format!("Merging {id}"),
             requests::changes_requests_keep(ChangesRequestsKeepParams {
                 device_id: None,
                 request_id: id.to_owned(),
                 data_ok: data_ok.then_some(true),
-                keep: hooks,
-                choices: None,
-                skip: None,
+                keep: None,
+                choices: (!choices.is_empty()).then_some(choices),
+                skip: (!skip.is_empty()).then_some(skip),
             }),
             progress,
         )
@@ -178,14 +179,10 @@ pub async fn keep(
 }
 
 /// Drops the request's fork. Neither main nor the request's target is ever dropped.
-pub async fn throw_away(
-    engine: &Engine,
-    id: &str,
-    progress: Progress<'_>,
-) -> Result<Value, CliError> {
+pub async fn decline(engine: &Engine, id: &str, progress: Progress<'_>) -> Result<Value, CliError> {
     engine
         .run_job(
-            &format!("Throwing away {id}"),
+            &format!("Declining {id}"),
             requests::changes_requests_throw_away(id_params(id)),
             progress,
         )

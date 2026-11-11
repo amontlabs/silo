@@ -1,9 +1,11 @@
-//! Recipes: `recipes.build`, `recipes.list` and `recipes.remove`.
+//! Recipes: `recipes.save`, `recipes.get`, `recipes.list`, `recipes.remove` and
+//! `recipes.build`, and `computers.recipe`, which shows the recipe a computer was built from.
 //!
-//! A recipe is a clean machine spec. The engine builds one into a hidden computer, saves a
-//! checkpoint of it, and forks from that checkpoint, so every build input is in
-//! [`RecipeSpec`]. What happens in a fork (`quiet:`, `scrub:`, `keep:`) is not part of the
-//! spec and never changes the build.
+//! A recipe is the text description of a computer. The engine stores named recipes, builds
+//! one into a hidden computer, saves a checkpoint of it, and forks from that checkpoint, so
+//! every build input is in [`RecipeSpec`]. What happens in a fork (`quiet`, `scrub`) and when
+//! changes are merged into a computer (`keep`) is not part of the spec and never changes the
+//! build, but it belongs to the same [`RecipeDefinition`].
 
 use serde::{Deserialize, Serialize};
 
@@ -81,13 +83,110 @@ wire_struct! {
 }
 
 wire_struct! {
+    /// A stored recipe: what builds the computer, and the rules that go with it.
+    RecipeDefinition {
+        spec: RecipeSpec,
+        /// Process names and units stopped in a fork of a computer built from this recipe.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        quiet: Vec<String>,
+        /// Absolute paths removed from such a fork.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        scrub: Vec<String>,
+        /// Run when changes are merged into a computer built from this recipe.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        keep: Option<super::keep::KeepHooks>,
+        /// The command that tests the project; a note for people and agents, never run by Silo.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        test: Option<String>,
+        /// Settings files merged into the computer from forks. Merging appends to it.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        files: Vec<String>,
+    }
+}
+
+wire_struct! {
+    RecipeSaveParams {
+        /// The device that owns this; absent or `local` is this device.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        device_id: Option<String>,
+        /// Lowercase letters, digits, `-` and `_`. Saving over a name replaces that recipe;
+        /// computers already built from it keep the text they were built from.
+        name: String,
+        recipe: RecipeDefinition,
+    }
+}
+
+wire_struct! {
+    RecipeGetParams {
+        /// The device that owns this; absent or `local` is this device.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        device_id: Option<String>,
+        name: String,
+    }
+}
+
+wire_struct! {
+    /// A stored recipe with what the engine knows about it.
+    RecipeDocument {
+        name: String,
+        /// Shipped with Silo (`linux-dev`) and not saved by anyone. Saving a recipe with this
+        /// name replaces it until that recipe is removed.
+        built_in: bool,
+        /// Content hash of the normalized spec on the current image.
+        hash: String,
+        recipe: RecipeDefinition,
+        /// The build forks start from, when one exists for this exact spec.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        built: Option<RecipeEntry>,
+        /// Things worth knowing about the recipe, such as a quiet service whose process name
+        /// cannot be derived.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        warnings: Vec<String>,
+    }
+}
+
+wire_struct! {
+    /// One line of the recipe list.
+    RecipeSummary {
+        name: String,
+        built_in: bool,
+        os: RecipeOs,
+        hash: String,
+        /// A build of this exact spec exists.
+        built: bool,
+    }
+}
+
+wire_struct! {
+    /// The recipe a computer was built from, as it was when it was built. Forks have their
+    /// source's record.
+    RecipeRecord {
+        name: String,
+        /// Content hash of the normalized spec the computer was built from.
+        hash: String,
+        built_at: String,
+        recipe: RecipeDefinition,
+    }
+}
+
+wire_struct! {
+    ComputerRecipeResult {
+        /// Absent for a computer that was not built from a recipe.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        recipe: Option<RecipeRecord>,
+    }
+}
+
+wire_struct! {
     RecipeBuildParams {
         /// The device that owns this; absent or `local` is this device.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         device_id: Option<String>,
-        /// The recipe's name (`linux-dev`, or a file under `.silo/recipes/`).
+        /// The recipe's name: a stored recipe (`linux-dev` is always there).
         name: String,
-        spec: RecipeSpec,
+        /// Build this spec instead of the stored recipe's.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        spec: Option<RecipeSpec>,
         /// Build again even when the cache holds this spec.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         force: Option<bool>,
@@ -123,7 +222,11 @@ wire_struct! {
 
 wire_struct! {
     RecipesListResult {
+        /// The builds forks start from.
         recipes: Vec<RecipeEntry>,
+        /// Every stored recipe, built or not.
+        #[serde(default)]
+        saved: Vec<RecipeSummary>,
     }
 }
 
