@@ -147,6 +147,10 @@
     {
       "path": "patches/microsandbox-rename-stopped-0.7.14.patch",
       "sha256": "1ac764ad3a7930bddc4a087a14d9ce4eb615b2f09bdc0930e08e49eb83e167bd"
+    },
+    {
+      "path": "patches/microsandbox-fork-layer-names-0.7.14.patch",
+      "sha256": "ea43f5a6084e66be16b93683f773804e7208822c854086853167d9e2e9fae1e8"
     }
   ]
 }
