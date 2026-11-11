@@ -9,7 +9,12 @@ Plan: [PLAN.md](PLAN.md). Agent rules: [AGENT-BRIEF.md](AGENT-BRIEF.md).
   own review loop with the `reviewer` model, then reports. The orchestrator reads the report,
   reviews boundary changes itself, merges the branch into main in the main checkout, regenerates
   the API files if two items touched them, and deletes the item's target folder
-  (`~/code/projects/silo-wt-targets/<item>`). No pull requests; main is pushed now and then.
+  (`<worktree>/app/SiloUI/target`, or `~/code/projects/silo-wt-targets/<item>` for items started
+  before 2026-11-11). No pull requests; main is pushed now and then.
+- **Build folders:** a local `post-checkout` hook in `.git/hooks` clones the main checkout's
+  `app/SiloUI/target` into each new worktree (APFS clone, no space until files change). After
+  merging, run `cargo build --manifest-path app/SiloUI/Cargo.toml --workspace --locked` in the main
+  checkout so new worktrees start from current dependency builds.
 - **Live checks** use the Dev engine, one item at a time. On 2026-11-10 a Dev app and engine from a
   deleted build (`silo-dev-target`) were still running; an item that needs the Dev engine
   replaces them with its own build.

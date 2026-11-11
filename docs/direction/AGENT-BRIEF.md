@@ -12,9 +12,10 @@ write code. The repository's own rules are in [AGENTS.md](../../AGENTS.md); they
 - Native builds need the private GitHub build file. Copy it once, without printing it:
   `cp /Users/polarzero/code/projects/microsandbox-workspaces/app/SiloUI/github-build.local.json app/SiloUI/`.
   It is ignored by Git; never commit or print it.
-- Build into your own target folder so builds do not collide:
-  `export CARGO_TARGET_DIR=$HOME/code/projects/silo-wt-targets/<your item id>` for every cargo
-  command. Do not delete it when you finish; the orchestrator does that after the merge.
+- Build in your worktree's own `app/SiloUI/target`. Do not set `CARGO_TARGET_DIR`. A git hook
+  fills that folder at worktree creation with a copy-on-write clone of the main checkout's build,
+  so dependencies are already built and the folder only takes space for what you change. Do not
+  delete it when you finish; the orchestrator does that after the merge.
   Frontend needs `npm --prefix app/SiloUI ci` once in your worktree.
 - Disk is tight. Send build and test output to a log file and read the summary lines. Do not
   build release profiles unless your item needs one.
