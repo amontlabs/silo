@@ -23,3 +23,14 @@ was chosen and why; any can be changed. Older items are also in the build log un
 5. **Starts admitted but not yet booted reserve their memory**, and a request larger than the
    free headroom is refused rather than admitted (being built, R2). Why: a burst of starts could
    each pass the floor before any computer took memory.
+
+## Silo's tools inside a computer (T5b review)
+
+6. **Silo marks its own MCP entry and never touches a user's entry named `silo`.** If the user
+   registered their own `silo` server, Silo leaves it and shows a conflict instead (being built,
+   R3). Why: overwriting a user's config silently is worse than a visible conflict.
+7. **A computer that keeps failing its tools check is retried less, then not until its next
+   start**, and one check has an overall time limit (R3). Why: a broken or hostile computer must
+   not slow down tools for every other computer.
+8. **"Tools OK" for a computer is the computer's own claim.** An agent with root inside can fake
+   it; that is accepted, since the agent already controls that computer. Documented.
