@@ -39,7 +39,8 @@ pub struct ConnectOptions {
     pub client: ClientMetadata,
     pub protocol: ProtocolRange,
     pub handshake_timeout: Duration,
-    /// The computer's token, sent in the handshake on the channel inside a computer.
+    /// The computer's token on the channel inside a computer. It never leaves the client: the
+    /// handshake carries only a proof made with it for the engine's challenge and the port.
     pub token: Option<String>,
 }
 
@@ -215,26 +216,45 @@ impl Client {
         establish(Stream::Unix(stream), options).await
     }
 
-    /// Connects to a computer's channel at `host:port` and negotiates the protocol with the
-    /// token `options` carries.
+    /// Connects to a computer's channel at `host:port` and negotiates the protocol, answering
+    /// the engine's challenge with a proof made from the token `options` carries and `port`.
     pub async fn connect_channel(
         host: &str,
         port: u16,
         options: ConnectOptions,
     ) -> Result<(Self, EventFeed), ClientError> {
-        if options.token.is_none() {
+        let Some(token) = options.token.as_deref() else {
             return Err(ClientError::Protocol(
                 "a computer's channel needs its token".to_owned(),
             ));
-        }
-        let stream = time::timeout(
+        };
+        let key = silo_api::transport::channel_key(token);
+        let mut stream = time::timeout(
             options.handshake_timeout,
             tokio::net::TcpStream::connect((host, port)),
         )
         .await
         .map_err(|_| ClientError::TimedOut)??;
         let _ = stream.set_nodelay(true);
-        establish(Stream::Tcp(stream), options).await
+        let challenge = time::timeout(options.handshake_timeout, read_frame::<_, Value>(&mut stream))
+            .await
+            .map_err(|_| ClientError::TimedOut)??
+            .ok_or(ClientError::Disconnected)?;
+        let challenge: silo_api::transport::ChannelChallenge = serde_json::from_value(challenge)
+            .map_err(|error| {
+                ClientError::Protocol(format!("malformed channel challenge: {error}"))
+            })?;
+        let nonce = silo_api::transport::from_hex::<{ silo_api::transport::CHANNEL_NONCE_BYTES }>(
+            &challenge.nonce,
+        )
+        .ok_or_else(|| ClientError::Protocol("malformed channel challenge".to_owned()))?;
+        let proof = silo_api::transport::channel_proof(&key, &nonce, port);
+        establish_with(
+            Stream::Tcp(stream),
+            options,
+            Some(silo_api::transport::to_hex(&proof)),
+        )
+        .await
     }
 }
 
@@ -356,6 +376,17 @@ pub async fn establish<S>(
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
+    establish_with(stream, options, None).await
+}
+
+async fn establish_with<S>(
+    stream: S,
+    options: ConnectOptions,
+    proof: Option<String>,
+) -> Result<(Client<WriteHalf<S>>, EventFeed), ClientError>
+where
+    S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+{
     let (mut reader, mut writer) = tokio::io::split(stream);
     let request = RequestEnvelope {
         id: HANDSHAKE_ID.to_owned(),
@@ -364,7 +395,7 @@ where
             ssh_key: None,
             protocol: options.protocol,
             client: Some(options.client.clone()),
-            token: options.token.clone(),
+            proof,
         },
         operation_id: None,
         start_within_ms: None,
@@ -490,6 +521,7 @@ mod tests {
             let request: Value = read_frame(&mut server).await.unwrap().unwrap();
             assert_eq!(request["method"], "engine.handshake");
             assert!(request["params"].get("token").is_none());
+            assert!(request["params"].get("proof").is_none());
             assert_eq!(
                 request["params"]["protocol"]["min"],
                 silo_api::transport::PROTOCOL_VERSION
@@ -721,30 +753,86 @@ mod tests {
         ));
     }
 
-    #[tokio::test]
-    async fn a_channel_connection_sends_the_token_over_tcp_and_needs_one() {
+    /// A channel that challenges with `nonce` and returns every byte the client sent.
+    async fn challenging_channel(
+        nonce: [u8; 32],
+    ) -> (u16, tokio::task::JoinHandle<(Value, Vec<u8>)>) {
+        use tokio::io::AsyncReadExt as _;
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
         let seen = tokio::spawn(async move {
             let (mut stream, _) = listener.accept().await.unwrap();
+            write_frame(
+                &mut stream,
+                &json!({ "nonce": silo_api::transport::to_hex(&nonce) }),
+            )
+            .await
+            .unwrap();
             let request: Value = read_frame(&mut stream).await.unwrap().unwrap();
             write_frame(&mut stream, &handshake_reply(8)).await.unwrap();
-            tokio::time::sleep(Duration::from_millis(100)).await;
-            request
+            let mut rest = Vec::new();
+            let _ = tokio::time::timeout(
+                Duration::from_millis(200),
+                stream.read_to_end(&mut rest),
+            )
+            .await;
+            let mut sent = serde_json::to_vec(&request).unwrap();
+            sent.extend(rest);
+            (request, sent)
         });
+        (port, seen)
+    }
+
+    #[tokio::test]
+    async fn a_channel_connection_answers_the_challenge_and_never_sends_the_token() {
+        const TOKEN: &str = "silo_gc_abc";
+        let nonce = [9_u8; 32];
+        let (port, seen) = challenging_channel(nonce).await;
         let mut with_token = options();
-        with_token.token = Some("silo_gc_abc".into());
-        assert!(!format!("{with_token:?}").contains("silo_gc_abc"));
+        with_token.token = Some(TOKEN.into());
+        assert!(!format!("{with_token:?}").contains(TOKEN));
         let (client, _events) = Client::connect_channel("127.0.0.1", port, with_token)
             .await
             .unwrap();
         assert_eq!(client.handshake().client_id.as_deref(), Some("c1"));
-        let request = seen.await.unwrap();
-        assert_eq!(request["params"]["token"], "silo_gc_abc");
+        client.close().await;
+        let (request, sent) = seen.await.unwrap();
+        let key = silo_api::transport::channel_key(TOKEN);
+        let proof = silo_api::transport::from_hex::<32>(request["params"]["proof"].as_str().unwrap())
+            .unwrap();
+        assert!(silo_api::transport::channel_proof_matches(&key, &nonce, port, &proof));
+        assert!(!silo_api::transport::channel_proof_matches(&key, &nonce, port ^ 1, &proof));
+        let sent = String::from_utf8_lossy(&sent);
+        assert!(request["params"].get("token").is_none());
+        assert!(!sent.contains(TOKEN) && !sent.contains("abc"));
+        assert!(!sent.contains(&silo_api::transport::to_hex(&key)));
         assert!(matches!(
             Client::connect_channel("127.0.0.1", port, options()).await,
             Err(ClientError::Protocol(_))
         ));
+    }
+
+    #[tokio::test]
+    async fn a_channel_that_does_not_challenge_gets_nothing() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            // Answers as an engine would, without a challenge first.
+            write_frame(&mut stream, &handshake_reply(8)).await.unwrap();
+            let mut rest = Vec::new();
+            use tokio::io::AsyncReadExt as _;
+            let _ = tokio::time::timeout(Duration::from_millis(300), stream.read_to_end(&mut rest))
+                .await;
+            rest
+        });
+        let mut with_token = options();
+        with_token.token = Some("silo_gc_abc".into());
+        assert!(matches!(
+            Client::connect_channel("127.0.0.1", port, with_token).await,
+            Err(ClientError::Protocol(_))
+        ));
+        assert!(server.await.unwrap().is_empty(), "nothing was sent");
     }
 
     #[tokio::test]

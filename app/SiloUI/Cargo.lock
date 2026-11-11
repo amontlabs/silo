@@ -5792,9 +5792,11 @@ dependencies = [
 name = "silo-api"
 version = "0.1.0"
 dependencies = [
+ "hmac 0.12.1",
  "schemars 1.2.3",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
 ]
 
 [[package]]

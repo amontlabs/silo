@@ -7818,7 +7818,7 @@
       "type": "string"
     },
     "HandshakeParams": {
-      "description": "`engine.handshake` parameters. `sshKey` is used by the Connections bridge\nto install the restricted key; local engine clients omit it. `token` is the computer's\ntoken on the channel inside a computer, and is required there; `engine.sock` ignores it.",
+      "description": "`engine.handshake` parameters. `sshKey` is used by the Connections bridge\nto install the restricted key; local engine clients omit it. `proof` answers the channel's\n[`ChannelChallenge`] on the channel inside a computer, and is required there (lowercase hex of\n[`channel_proof`]); `engine.sock` ignores it.",
       "properties": {
         "client": {
           "anyOf": [
@@ -7830,16 +7830,16 @@
             }
           ]
         },
-        "protocol": {
-          "$ref": "#/$defs/ProtocolRange"
-        },
-        "sshKey": {
+        "proof": {
           "type": [
             "string",
             "null"
           ]
         },
-        "token": {
+        "protocol": {
+          "$ref": "#/$defs/ProtocolRange"
+        },
+        "sshKey": {
           "type": [
             "string",
             "null"
