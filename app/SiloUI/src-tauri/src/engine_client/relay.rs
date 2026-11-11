@@ -4,8 +4,6 @@
 //! listeners, so each canonical event also produces the hint or payload those listeners
 //! read: most only trigger a re-read through the forwarding commands. `display.viewer.page`
 //! is not relayed: it is a script for one viewer's guest page (see `TauriSink`).
-//! `engine.shutdown.changed` is not relayed either: the quit overlay appears only for a Quit
-//! the person chose in this app (see `quit.rs`), never because the engine is going away.
 
 use serde_json::{json, Value};
 
@@ -44,6 +42,13 @@ pub(crate) fn legacy_events(frame: &Value) -> Vec<(&'static str, Value)> {
             vec![("silo://pre-upgrade-backup-changed", Value::Null)]
         }
         "editor.includeNotice.changed" => vec![("silo://editor-include-changed", Value::Null)],
+        "engine.shutdown.changed" => vec![(
+            "silo://shutdown-state-changed",
+            payload
+                .get("shuttingDown")
+                .cloned()
+                .unwrap_or(Value::Bool(false)),
+        )],
         "settings.changed" => {
             let mut snapshot = payload;
             if let Some(object) = snapshot.as_object_mut() {
@@ -113,12 +118,13 @@ mod tests {
             ))),
             vec!["silo://operation-queue-changed"]
         );
-        // The quit overlay follows the app's own Quit, not the engine going away.
-        assert!(legacy_events(&frame(
-            "engine.shutdown.changed",
-            json!({"shuttingDown": true})
-        ))
-        .is_empty());
+        assert_eq!(
+            legacy_events(&frame(
+                "engine.shutdown.changed",
+                json!({"shuttingDown": true})
+            )),
+            vec![("silo://shutdown-state-changed", json!(true))]
+        );
         assert_eq!(
             legacy_events(&frame("updates.changed", json!({"state": "idle"}))),
             vec![("silo://update-state", json!({"state": "idle"}))]
