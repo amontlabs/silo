@@ -304,3 +304,6 @@ These were not asked of the owner. Each is open to change.
   `cargo test` because the `agy` login timed out, so T15 came back uncompiled. Check every Gemini
   branch by building it before trusting its report; finishing work goes to Sonnet when it is
   more than a small fix.
+- **Gemini tasks end early (2026-11-11):** R1 (first try), T15 and R2 each ended their turn while
+  a build or test was still running, reporting "waiting for it to finish". R2 left uncommitted
+  work; Sonnet finishes it in the same worktree. Same plan for R1, R3, R4 and T7 as they return.
