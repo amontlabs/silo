@@ -35,6 +35,7 @@ function allowedOutcome(approval: Approval, job: ApprovalJob | undefined): Appro
   if (!outcome) return { tone: "running", text: "Running…" }
   if (outcome.error) return { tone: "failed", text: `Could not run: ${outcome.error}` }
   if (outcome.jobId) {
+    if (job?.state === "gone") return { tone: "neutral", text: "Finished. Silo no longer keeps its result." }
     if (!job || job.state !== "finished") return { tone: "running", text: "Running…" }
     if (job.error) return { tone: "failed", text: `Failed: ${job.error}` }
     if (job.status === "refused") return { tone: "failed", text: job.message ? `Not done: ${job.message}` : "Not done: the engine refused it." }

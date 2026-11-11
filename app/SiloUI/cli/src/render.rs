@@ -667,6 +667,29 @@ pub fn tree(value: &Value) -> String {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn a_merge_result_names_its_computers() {
+        let mut value =
+            json!({"status": "kept", "report": {"fork": "id-f", "target": "id-t", "steps": []}});
+        name_merge_computers(
+            &mut value,
+            &[
+                ("id-f".into(), "feature".into()),
+                ("id-t".into(), "main".into()),
+            ],
+        );
+        assert!(
+            merge(&value).starts_with("Merged feature into main."),
+            "{}",
+            merge(&value)
+        );
+        assert!(merge(&value).contains("Undo with `silo undo main`."));
+        let mut unknown =
+            json!({"status": "kept", "report": {"fork": "id-f", "target": "id-x", "steps": []}});
+        name_merge_computers(&mut unknown, &[("id-f".into(), "feature".into())]);
+        assert!(merge(&unknown).starts_with("Merged feature into id-x."));
+    }
+
+    #[test]
     fn a_network_policy_shows_its_notices_and_preset_updates() {
         let text = network_policy(&json!({
             "computer": "main",
@@ -1173,6 +1196,24 @@ fn conflict_lines(refusal: &Value) -> String {
         }
     }
     out
+}
+
+/// Replaces the computer ids in a merge report with the names in `names` (id, name pairs); an
+/// id with no known name stays as it is.
+pub fn name_merge_computers(value: &mut Value, names: &[(String, String)]) {
+    let Some(report) = value.get_mut("report").and_then(Value::as_object_mut) else {
+        return;
+    };
+    for key in ["fork", "target"] {
+        let named = report
+            .get(key)
+            .and_then(Value::as_str)
+            .and_then(|id| names.iter().find(|(known, _)| known == id))
+            .map(|(_, name)| name.clone());
+        if let Some(name) = named {
+            report.insert(key.to_owned(), Value::String(name));
+        }
+    }
 }
 
 /// `silo merge`: what was merged, what a dry run would merge, or why nothing was changed.

@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest"
 
 import { approvalListSchema, type ApprovalJob } from "@/desktop/production-schemas"
 
+import { approvalOutcomeText } from "./approval-copy"
 import { FINISHED_JOBS_KEPT, useApprovalJob } from "./use-approval-job"
 
 const allowed = (id: string, jobId: string) => approvalListSchema.parse({ approvals: [{
@@ -35,5 +36,13 @@ describe("useApprovalJob", () => {
     const oldest = renderHook(() => useApprovalJob(read, allowed("y", "old-job-0")))
     expect(oldest.result.current).toBeUndefined()
     await waitFor(() => expect(read).toHaveBeenCalledTimes(FINISHED_JOBS_KEPT + 2))
+  })
+
+  it("stops reading a job the engine no longer holds", async () => {
+    const read = vi.fn().mockResolvedValue({ state: "gone" } as unknown as ApprovalJob)
+    const { result } = renderHook(() => useApprovalJob(read, allowed("g1", "gone-job")))
+    await waitFor(() => expect(result.current?.state).toBe("gone"))
+    expect(approvalOutcomeText(allowed("g1", "gone-job"), result.current)).toEqual({ tone: "neutral", text: "Finished. Silo no longer keeps its result." })
+    expect(read).toHaveBeenCalledTimes(1)
   })
 })
