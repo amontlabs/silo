@@ -61,3 +61,15 @@ The integration step stacks the chains and regenerates `app/SiloUI/patches/*-0.7
   #1713 runs only open/mkdir/symlink as the session user, while rename/remove/chmod/readdir still
   run as root. New probe flag `--silo-restore-strict-protocol`. `should_bypass` means a host with
   no matching secret gets a closed connection, not the #1825 JSON deny page (same as 0.7.6).
+- 2026-11-11: gateway/toolchain/engine slice done on `feat/msb-0715-gateway`. Gateway builds and
+  its 36 tests pass against the integration tree (`msb_krun =0.1.45`; `start_and_wait_for_ports`
+  without a timeout; the error code is now `port_bind_failed`; the `msb_smoltcp` fork arrives
+  through the network crate, so the gateway needs no direct pin; `http_deny_body` was never used
+  and JSON denials are now set explicitly). Gateway `Cargo.lock` regenerated. Rust 1.95.0 is the
+  lowest stable that builds v0.7.15 and the gateway; `runtime-inputs.json` `toolchain` and
+  `rust-toolchain.toml` (a test keeps them equal) moved to it. Engine compiles against v0.7.15
+  (`f9ae8e23`) with no API drift. #1825: nothing in Silo expected dropped connections. #2030: Silo
+  never publishes ports through `msb start/fork/restore` (live `port_add` only, already mapped to
+  "port in use"). #1735: disk restores now add `--allow-missing-resources` unless legacy `-v`
+  mounts are passed; the container shim accepts the flag. #1688/#2030 stdin: Silo never uses
+  `msb run`; every exec through `run_msb` keeps `--no-stdin`.
