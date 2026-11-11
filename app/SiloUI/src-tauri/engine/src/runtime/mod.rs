@@ -5363,23 +5363,27 @@ fn read_rows(runner: &dyn RuntimeRunner, paths: &RuntimePaths) -> Result<Vec<Row
         .map(ComputerConfiguration::name)
         .collect();
     // A computer an interrupted configuration was still creating is Silo's own: recovery
-    // finishes or removes it, and meanwhile it does not fail the reading of every other computer.
-    let being_created: HashSet<String> = configuration_recovery::pending_request(paths)
-        .ok()
-        .flatten()
-        .map(|request| {
-            request
-                .computers
-                .iter()
-                .map(|computer| computer.name().to_owned())
-                .collect()
-        })
-        .unwrap_or_default();
-    if listed_names
+    // finishes or removes it, and meanwhile it does not fail the reading of every other
+    // computer. The pending record is only read when the runtime lists a computer Silo does not
+    // have.
+    let unknown: Vec<&str> = listed_names
         .iter()
-        .any(|name| !configured.contains(name) && !being_created.contains(*name))
-    {
-        return Err(RuntimeError::Malformed(INVENTORY_MISMATCH.into()));
+        .copied()
+        .filter(|name| !configured.contains(name))
+        .collect();
+    if !unknown.is_empty() {
+        let pending = configuration_recovery::load(paths)?;
+        for name in unknown {
+            let creating = match &pending {
+                Some(journal) => {
+                    configuration_recovery::is_being_created(runner, paths, journal, name)?
+                }
+                None => false,
+            };
+            if !creating {
+                return Err(RuntimeError::Malformed(INVENTORY_MISMATCH.into()));
+            }
+        }
     }
     // Whether each computer is read from Silo's pending-restore record rather than the runtime.
     // An unreadable record (damaged, or written by a newer Silo) degrades only its own
@@ -12649,30 +12653,93 @@ exit 9
         assert!(encoded.get("backup").is_none());
     }
 
+    /// `dev` is saved and `made` is the computer an interrupted configuration was creating.
+    fn being_created_fixture(
+        directory: &tempfile::TempDir,
+    ) -> (RuntimePaths, ComputerConfiguration) {
+        let paths = paths(directory);
+        write_metadata(&paths.metadata, &request(vec![computer()])).unwrap();
+        let mut created = second_computer();
+        created.name = "made".into();
+        configuration_recovery::begin(&paths, &request(vec![computer(), created.clone()]))
+            .unwrap();
+        (paths, created)
+    }
+
+    fn listed_with_made(paths: &RuntimePaths, made_owner: &str) -> StubRunner {
+        let mut made = inspect(paths, "Running");
+        made["name"] = json!("made");
+        made["config"]["labels"]["silo.machine-id"] = json!(made_owner);
+        StubRunner::successful_json(vec![
+            json!([
+                {"name":"dev","status":"Running","image":"ubuntu"},
+                {"name":"made","status":"Running","image":"ubuntu"}
+            ]),
+            made,
+            inspect(paths, "Running"),
+        ])
+    }
+
     #[test]
     fn a_computer_still_being_created_does_not_fail_the_reading_of_the_others() {
         let _test_state = crate::test_support::global_state();
         let directory = tempfile::tempdir().unwrap();
-        let paths = paths(&directory);
-        write_metadata(&paths.metadata, &request(vec![computer()])).unwrap();
-        let mut created = second_computer();
-        created.name = "made".into();
-        configuration_recovery::begin(&paths, &request(vec![computer(), created])).unwrap();
-        let listing = || {
-            StubRunner::successful_json(vec![
-                json!([
-                    {"name":"dev","status":"Running","image":"ubuntu"},
-                    {"name":"made","status":"Running","image":"ubuntu"}
-                ]),
-                inspect(&paths, "Running"),
-            ])
-        };
-        let state = read_application_state_with(&listing(), &paths).unwrap();
+        let (paths, created) = being_created_fixture(&directory);
+        let state = read_application_state_with(&listed_with_made(&paths, created.id()), &paths)
+            .unwrap();
         assert_eq!(state.computers.len(), 1);
         // A managed computer no journal names is still refused.
         configuration_recovery::finish(&paths).unwrap();
-        let error = read_application_state_with(&listing(), &paths).unwrap_err();
+        let error = read_application_state_with(&listed_with_made(&paths, created.id()), &paths)
+            .unwrap_err();
         assert!(error.to_string().contains("does not match"), "{error}");
+    }
+
+    #[test]
+    fn a_runtime_computer_of_the_pending_name_owned_by_another_is_refused() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let (paths, _) = being_created_fixture(&directory);
+        let error = read_application_state_with(
+            &listed_with_made(&paths, "00000000-0000-4000-8000-0000000000aa"),
+            &paths,
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("does not match"), "{error}");
+    }
+
+    #[test]
+    fn a_computer_the_pending_configuration_removes_is_not_one_being_created() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let paths = paths(&directory);
+        let mut stale = second_computer();
+        stale.name = "made".into();
+        write_metadata(&paths.metadata, &request(vec![computer(), stale.clone()])).unwrap();
+        configuration_recovery::begin(&paths, &request(vec![computer(), stale.clone()])).unwrap();
+        // The journal's previous list names `made`, which the metadata no longer has.
+        write_metadata(&paths.metadata, &request(vec![computer()])).unwrap();
+        let error = read_application_state_with(&listed_with_made(&paths, stale.id()), &paths)
+            .unwrap_err();
+        assert!(error.to_string().contains("does not match"), "{error}");
+    }
+
+    #[test]
+    fn a_damaged_pending_configuration_is_reported_instead_of_hidden() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let (paths, created) = being_created_fixture(&directory);
+        std::fs::write(
+            paths.metadata.with_file_name("configuration-operation.json"),
+            b"{ not json",
+        )
+        .unwrap();
+        let error = read_application_state_with(&listed_with_made(&paths, created.id()), &paths)
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("Could not recover computer configuration"),
+            "{error}"
+        );
     }
 
     #[test]

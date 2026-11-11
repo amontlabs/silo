@@ -4285,6 +4285,57 @@ pub(crate) mod tests {
         config_without_device(device);
     }
 
+    #[tokio::test]
+    async fn a_removal_stuck_for_one_device_leaves_status_health_and_connect_for_another() {
+        let _key = key_lock().await;
+        let stuck = "77777777-7777-4777-8777-777777777778";
+        let other = "77777777-7777-4777-8777-777777777779";
+        save_device(stuck, "not an address").await;
+        save_device(other, "ssh://user@127.0.0.1:9").await;
+        edit_connections_config(|config| {
+            config["controllerKeys"] =
+                json!({stuck: ["ssh-ed25519 AAAAstuck Silo remote management"]});
+        });
+        // The owner cannot be reached, so this removal stays pending.
+        expect_error(
+            MethodName::ConnectionsDevicesRemove,
+            json!({"deviceId": stuck}),
+        )
+        .await;
+        let within = |future| async {
+            tokio::time::timeout(Duration::from_secs(60), future)
+                .await
+                .expect("the request stalled behind the stuck removal")
+        };
+        let status = within(call(MethodName::ConnectionsStatus, json!({})))
+            .await
+            .unwrap();
+        assert!(status["enabled"].is_boolean());
+        let health = within(call(MethodName::ConnectionsDevicesHealth, json!({})))
+            .await
+            .unwrap();
+        let health: connections::DeviceHealthResult = serde_json::from_value(health).unwrap();
+        assert!(health.devices.iter().any(|row| row.device_id == other));
+        // Connecting another device may fail for its own reasons, but not for this removal.
+        let connected = within(call(
+            MethodName::ConnectionsDevicesConnect,
+            json!({"address": "ssh://user@127.0.0.1:9"}),
+        ))
+        .await;
+        if let Err(error) = connected {
+            assert!(
+                !error.message.contains("being removed"),
+                "{}",
+                error.message
+            );
+        }
+        let config: Value =
+            serde_json::from_slice(&std::fs::read(connections_config_path()).unwrap()).unwrap();
+        assert_eq!(config["removals"][0]["deviceId"], stuck);
+        config_without_device(stuck);
+        config_without_device(other);
+    }
+
     fn config_without_device(device: &str) {
         edit_connections_config(|config| {
             config["devices"]

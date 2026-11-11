@@ -2763,6 +2763,8 @@ struct Store {
     computers: Vec<(&'static str, Option<&'static str>)>,
     fail_create_after_publish: bool,
     fail_remove: bool,
+    /// The runtime's `snapshot verify` rejects every member.
+    fail_verify: bool,
     /// Layers (head included) the fake runtime reports per disk for `modify --compact`.
     layers: usize,
     /// Layers of the `/workspace` disk when its chain differs from the root's.
@@ -2795,6 +2797,7 @@ impl Store {
             computers,
             fail_create_after_publish: false,
             fail_remove: false,
+            fail_verify: false,
             layers: 0,
             workspace_layers: None,
             fail_compact: false,
@@ -2812,6 +2815,10 @@ impl Store {
     }
     fn with_layers(mut self, layers: usize) -> Self {
         self.layers = layers;
+        self
+    }
+    fn failing_verification(mut self) -> Self {
+        self.fail_verify = true;
         self
     }
     fn failing_compaction(mut self) -> Self {
@@ -3010,6 +3017,9 @@ impl RuntimeRunner for Store {
                     }
                     members.remove(index);
                     ok(String::new())
+                }
+                ("snapshot", Some("verify")) if self.fail_verify => {
+                    Err(RuntimeError::Unavailable("snapshot verification failed".into()))
                 }
                 ("snapshot", Some("create")) => {
                     let group = args[args.iter().position(|arg| arg == "--group").unwrap() + 1].clone();
@@ -3761,7 +3771,8 @@ fn only_a_ready_capture_the_computer_builds_on_is_adopted() {
     let store = Store::new(vec![("dev", None)]).with("dev", B, "snap_b", None);
     cursor(&paths, "dev", "snap_b");
     let mut adopted = load(&paths, ID).unwrap();
-    assert!(adopt_finished_capture(&store, &paths, &mut adopted, "dev", "dev"));
+    assert!(adopt_finished_capture(&store, &paths, &mut adopted, "dev", "dev").unwrap());
+    assert!(store.calls.lock().unwrap().iter().any(|call| call[..2] == ["snapshot", "verify"]));
     assert!(adopted.inflight_checkpoint.is_none());
     assert_eq!(adopted.checkpoints[0].id, B);
     // A capture nothing builds on is not adopted (it is discarded instead).
@@ -3773,8 +3784,31 @@ fn only_a_ready_capture_the_computer_builds_on_is_adopted() {
         ..entry(B, "Interrupted", "manual")
     });
     let store = Store::new(vec![("dev", None)]).with("dev", B, "snap_b", None);
-    assert!(!adopt_finished_capture(&store, &paths, &mut record, "dev", "dev"));
+    assert!(!adopt_finished_capture(&store, &paths, &mut record, "dev", "dev").unwrap());
     assert!(record.inflight_checkpoint.is_some());
+}
+
+#[test]
+fn a_finished_capture_that_fails_the_runtimes_check_is_not_adopted() {
+    let _test_state = crate::test_support::global_state();
+    let directory = tempfile::tempdir().unwrap();
+    let paths = delete_fixture(&directory, vec![entry(A, "Kept", "manual")], None);
+    let mut record = load(&paths, ID).unwrap();
+    record.inflight_checkpoint = Some(entry(B, "Interrupted", "manual"));
+    save(&paths, ID, &record).unwrap();
+    let store = Store::new(vec![("dev", None)])
+        .with("dev", A, "snap_a", None)
+        .with("dev", B, "snap_b", Some("snap_a"))
+        .failing_verification();
+    cursor(&paths, "dev", "snap_b");
+    let error = recover_interrupted(&store, &paths).unwrap().unresolved;
+    assert_eq!(error.len(), 1, "{error:?}");
+    assert!(error.values().next().unwrap().to_string().contains("did not pass"));
+    assert_eq!(store.names(), [A, B]);
+    let preserved = load(&paths, ID).unwrap();
+    assert!(preserved.inflight_checkpoint.is_some());
+    let ids: Vec<_> = preserved.checkpoints.iter().map(|c| c.id.as_str()).collect();
+    assert_eq!(ids, [A]);
 }
 
 #[test]
