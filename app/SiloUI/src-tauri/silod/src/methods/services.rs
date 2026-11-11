@@ -717,27 +717,11 @@ pub fn start(context: Arc<SilodContext>) -> Arc<UpdateRecoveryOutcome> {
     {
         eprintln!("silod: could not migrate the settings at launch: {error}");
     }
-    let outcome = Arc::new(UpdateRecoveryOutcome::default());
     let state = update_state(context.as_ref());
     state.set_platform(Arc::new(ServicesPlatform::new(context.clone())));
     // Visible in `engine.state` from the first request, before the recovery thread runs.
     state.mark_recovery_pending(context.as_ref());
-    let recovery_context = context.clone();
-    let recovery_state = state.clone();
-    let settle = outcome.clone();
-    let spawned = std::thread::Builder::new()
-        .name("silod-update-recovery".into())
-        .spawn(move || {
-            // A panic still settles the outcome, as "resumed": no launch pass runs over a
-            // recovery that did not finish.
-            let guard = SettleOnDrop(settle, true);
-            let resumed = recover_saved_computers(&recovery_context, &recovery_state);
-            guard.finish(resumed);
-        });
-    if let Err(error) = spawned {
-        eprintln!("silod: could not start update recovery: {error}");
-        outcome.settle(true);
-    }
+    let outcome = spawn_recovery(&context, &state);
     let spawned = std::thread::Builder::new()
         .name("silod-update-schedule".into())
         .spawn(move || loop {
@@ -754,6 +738,31 @@ pub fn start(context: Arc<SilodContext>) -> Arc<UpdateRecoveryOutcome> {
         });
     if let Err(error) = spawned {
         eprintln!("silod: could not start the update schedule: {error}");
+    }
+    outcome
+}
+
+/// Resumes the saved set on its own thread once the move of computers to protected storage has
+/// ended: while it runs the runtime is closed to everything, and a recovery that ran then would
+/// fail for every computer and not try again in this launch.
+fn spawn_recovery(context: &Arc<SilodContext>, state: &Arc<UpdateState>) -> Arc<UpdateRecoveryOutcome> {
+    let outcome = Arc::new(UpdateRecoveryOutcome::default());
+    let recovery_context = context.clone();
+    let recovery_state = state.clone();
+    let settle = outcome.clone();
+    let spawned = std::thread::Builder::new()
+        .name("silod-update-recovery".into())
+        .spawn(move || {
+            // A panic still settles the outcome, as "resumed": no launch pass runs over a
+            // recovery that did not finish.
+            let guard = SettleOnDrop(settle, true);
+            recovery_context.migration_controller().wait_for_protected_storage();
+            let resumed = recover_saved_computers(&recovery_context, &recovery_state);
+            guard.finish(resumed);
+        });
+    if let Err(error) = spawned {
+        eprintln!("silod: could not start update recovery: {error}");
+        outcome.settle(true);
     }
     outcome
 }

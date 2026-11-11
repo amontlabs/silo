@@ -231,6 +231,18 @@ impl Controller {
         pending
     }
 
+    /// Blocks while [`Self::hold_for_protected_storage`] holds the computers back. Work that
+    /// needs the runtime, update recovery for one, waits here until the move has ended.
+    pub fn wait_for_protected_storage(&self) {
+        protected_storage::wait_until_released(&self.app_data);
+    }
+
+    /// Holds the computers as [`Self::hold_for_protected_storage`] does, whatever the storage.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn hold_protected_storage_for_test(&self) {
+        protected_storage::hold(&self.app_data, "Checking computer storage");
+    }
+
     /// Opens the computers again if [`Self::hold_for_protected_storage`] held them.
     pub fn release_protected_storage(&self) {
         protected_storage::release(&self.app_data);

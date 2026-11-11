@@ -13,7 +13,7 @@ use std::{
     fs,
     io::Write,
     path::{Path, PathBuf},
-    sync::{Mutex, MutexGuard, PoisonError},
+    sync::{Condvar, Mutex, MutexGuard, PoisonError},
     time::Duration,
 };
 
@@ -487,6 +487,8 @@ struct Gate {
 }
 
 static GATE: Mutex<Option<Gate>> = Mutex::new(None);
+/// Signalled whenever the step stops holding a storage folder's computers back.
+static RELEASED: Condvar = Condvar::new();
 
 fn gate() -> MutexGuard<'static, Option<Gate>> {
     GATE.lock().unwrap_or_else(PoisonError::into_inner)
@@ -507,6 +509,18 @@ pub(super) fn hold(app_data: &Path, stage: &str) {
 
 pub(super) fn release(app_data: &Path) {
     with_gate(|gate| gate.running.remove(app_data));
+    RELEASED.notify_all();
+}
+
+/// Blocks while the step holds the computers of `app_data` back.
+pub(super) fn wait_until_released(app_data: &Path) {
+    let mut guard = gate();
+    while guard
+        .as_ref()
+        .is_some_and(|gate| gate.running.contains_key(app_data))
+    {
+        guard = RELEASED.wait(guard).unwrap_or_else(PoisonError::into_inner);
+    }
 }
 
 pub(super) fn set_attention(storage: &Path, attention: BTreeMap<String, String>) {
