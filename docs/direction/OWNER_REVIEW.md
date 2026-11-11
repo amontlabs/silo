@@ -90,8 +90,9 @@ was chosen and why; any can be changed. Older items are also in the build log un
     fork carried the recipe's full text, so the earlier "only its own recipe" rule could be
     sidestepped. Whatever a setup command writes to disk is in every computer built from that
     recipe anyway, so the docs now say: never put tokens in setup lines; use secrets.
-    Hidden in a computer's view (R5): `setup`, each service's `run`, and the `migrate` and
-    `after` steps of `keep`, marked `"commandsHidden": true`. Left visible: `test`, which exists
-    for agents to read (so never put a secret in it), service names and `restart`. Still open: a
-    merge's result lists the hook commands it ran, and a failing one's output, so a hook line can
-    reach the agent that merged; it is in the threat model's known gaps.
+25. **A recipe's `test` command and service names stay visible to computers**; only setup, service
+    `run`, and the keep `migrate`/`after` commands are hidden, and a merge's report names a
+    recipe hook step without its command text (R5). The docs say never to put a secret in any
+    recipe line.
+    A merge you approved also shows step numbers instead of commands in its report, since the
+    asking computer reads the same report; the commands stay readable in the recipe.
