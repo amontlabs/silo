@@ -9,6 +9,7 @@ import { fixtureComputerSteps, fixtureComputerTree } from "./computer-steps"
 import { fixtureFileTransfers } from "./file-transfers"
 import { createApprovalFixture, type ApprovalFixtureMode } from "./approvals"
 import { createAgentFixture, type AgentFixtureMode } from "./agents"
+import { createNetworkFixture, networkFixtureModeFromSearch } from "./network-policy"
 import { useApplicationFixture } from "@/fixtures/application-state"
 import { ApplicationApp } from "@/features/application/application-app"
 import type { ApplicationActions, ApplicationSource, SshAccessRequest, SshAccessComputer } from "@/features/application/model/application-source"
@@ -71,6 +72,8 @@ export function ApplicationPreview({ source, actions, backupPreviewMode, initial
 function FixtureApplicationPreview({ source, actions, backupPreviewMode, initialRoute, unseenResult, approvals, agents }: Parameters<typeof ApplicationPreview>[0]) {
   const fixture = useApplicationFixture(source)
   const [agentFixture] = useState(() => createAgentFixture({ mode: agents }))
+  const [networkFixture] = useState(() => createNetworkFixture({ mode: networkFixtureModeFromSearch(window.location.search) }))
+  useEffect(() => networkFixture.setComputers(fixture.source.computers), [networkFixture, fixture.source.computers])
   useEffect(() => agentFixture.setComputers(fixture.source.computers), [agentFixture, fixture.source.computers])
   const [approvalFixture] = useState(() => approvals && createApprovalFixture({ mode: approvals, computers: source.computers.map(({ configuration }) => ({ id: configuration.id, name: configuration.name })) }))
   const [sshSettings, setSshSettings] = useState(() => new Map<string, SshAccessRequest>())
@@ -116,6 +119,10 @@ function FixtureApplicationPreview({ source, actions, backupPreviewMode, initial
       readComputerTree: async () => fixtureComputerTree,
       listComputerDirectory,
       ...approvalFixture?.actions,
+      readNetworkPolicy: networkFixture.readNetworkPolicy,
+      saveNetworkPolicy: networkFixture.saveNetworkPolicy,
+      readComputerTools: networkFixture.readComputerTools,
+      setComputerTools: networkFixture.setComputerTools,
       ...(agents && { listAgents: agentFixture.listAgents, installAgent: agentFixture.installAgent, ensureSshName: agentFixture.ensureSshName, openAgent: () => undefined }),
       fileTransfers,
       queryLogs,
