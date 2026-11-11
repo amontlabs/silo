@@ -474,6 +474,18 @@ pub(crate) use protected_storage::BACKUP as PROTECTED_STORAGE_BACKUP;
 /// Why this computer cannot be used until a later launch finishes moving its storage.
 pub use protected_storage::attention_message as protected_storage_attention;
 
+#[cfg(test)]
+pub(crate) fn clone_protected_storage_backup_for_test(app_data: &Path, storage: &Path) {
+    protected_storage::clone_backup(app_data, storage).unwrap();
+}
+
+#[cfg(test)]
+pub(crate) fn set_protected_storage_attention_for_test(name: &str, message: Option<&str>) {
+    let mut attention = protected_storage::attention_of(&protected_storage::Report::default());
+    attention.extend(message.map(|message| (name.to_owned(), message.to_owned())));
+    protected_storage::set_attention(attention);
+}
+
 /// The inventory in `folder`, the previous generation's, in whichever vocabulary it was
 /// saved. An empty one when `folder` has none.
 fn previous_computers(folder: &Path) -> Result<runtime::ComputerConfigurationRequest, String> {

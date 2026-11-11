@@ -13328,6 +13328,36 @@ exit 9
     }
 
     #[test]
+    fn a_computer_whose_storage_was_not_moved_cannot_start_and_says_why() {
+        let _test_state = crate::test_support::global_state();
+        let directory = tempfile::tempdir().unwrap();
+        let paths = paths(&directory);
+        write_metadata(&paths.metadata, &request(vec![computer()])).unwrap();
+        let reason = "Its files were kept untouched. Report this problem before using the computer.";
+        crate::runtime_migration::set_protected_storage_attention_for_test("dev", Some(reason));
+        let runner = StubRunner::successful_json(vec![]);
+
+        for action in ["start", "restart"] {
+            let error = computer_action_with(&runner, &paths, &generous_device(), action, "dev")
+                .unwrap_err();
+            assert_eq!(error.to_string(), reason);
+        }
+        assert!(runner.calls.lock().unwrap().is_empty(), "msb is never asked");
+
+        let mut computers = vec![unread_computer(computer())];
+        flag_unmoved_storage(&mut computers);
+        assert!(computers[0].needs_storage_upgrade);
+        let attention = computers[0].attention.as_ref().unwrap();
+        assert!(matches!(attention.level, AttentionLevel::Error));
+        assert_eq!(attention.message, format!("Needs attention: {reason}"));
+
+        crate::runtime_migration::set_protected_storage_attention_for_test("dev", None);
+        let mut computers = vec![unread_computer(computer())];
+        flag_unmoved_storage(&mut computers);
+        assert!(!computers[0].needs_storage_upgrade && computers[0].attention.is_none());
+    }
+
+    #[test]
     fn lifecycle_refuses_a_runtime_row_without_silo_ownership() {
         let _test_state = crate::test_support::global_state();
         let directory = tempfile::tempdir().unwrap();

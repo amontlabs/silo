@@ -1369,4 +1369,74 @@ mod tests {
         assert!(!delete_if_due(dir.path(), Some(home.path()), at("2026-10-01T12:00:00Z")).unwrap());
         assert!(!present(&alias));
     }
+
+    fn protected_clone(app_data: &Path) -> PathBuf {
+        let clone = app_data.join(runtime_migration::PROTECTED_STORAGE_BACKUP);
+        fs::create_dir_all(clone.join("microsandbox")).unwrap();
+        fs::write(clone.join("microsandbox/db"), vec![3; 8192]).unwrap();
+        clone
+    }
+
+    #[test]
+    fn the_protected_storage_clone_is_measured_and_deleted_with_the_previous_generation() {
+        let dir = complete();
+        let alone = measure(dir.path()).unwrap().unwrap();
+        let clone = protected_clone(dir.path());
+        assert!(measure(dir.path()).unwrap().unwrap() > alone);
+        assert_eq!(reveal_path(dir.path()).unwrap(), dir.path().join("runtime"));
+        assert!(delete_backup(dir.path(), None).unwrap());
+        assert!(!dir.path().join("runtime").exists());
+        assert!(!clone.exists());
+        assert!(dir.path().join("runtime-checkpoints-converted").is_dir());
+    }
+
+    #[test]
+    fn the_clone_alone_is_a_backup_once_the_previous_generation_is_gone() {
+        let dir = complete();
+        assert!(delete_backup(dir.path(), None).unwrap());
+        let clone = protected_clone(dir.path());
+        assert_eq!(reveal_path(dir.path()).unwrap(), clone);
+        let first = status(dir.path(), at("2026-11-01T10:00:00Z")).unwrap().unwrap();
+        assert_eq!(first.delete_at.as_deref(), Some("2026-11-15T10:00:00Z"));
+        assert!(!delete_if_due(dir.path(), None, at("2026-11-14T10:00:00Z")).unwrap());
+        assert!(clone.is_dir());
+        assert!(delete_if_due(dir.path(), None, at("2026-11-15T10:00:00Z")).unwrap());
+        assert!(!clone.exists());
+        assert_eq!(status(dir.path(), at("2026-11-15T11:00:00Z")).unwrap(), None);
+    }
+
+    #[test]
+    fn a_new_clone_gets_its_own_fourteen_days() {
+        let dir = complete();
+        save(dir.path(), at("2026-10-01T10:00:00Z"), true).unwrap();
+        runtime_migration::clone_protected_storage_backup_for_test(
+            dir.path(),
+            &dir.path().join("runtime-checkpoints-converted"),
+        );
+        let first = status(dir.path(), at("2026-10-14T10:00:00Z")).unwrap().unwrap();
+        assert_eq!(first.delete_at.as_deref(), Some("2026-10-28T10:00:00Z"));
+        assert!(first.notice_pending);
+    }
+
+    #[test]
+    fn the_clone_never_stands_in_for_the_folder_silo_reads_and_a_link_is_left_alone() {
+        // The clean generation keeps the only copy in `runtime`: only the clone is a backup.
+        let dir = migrated(Some(CLEAN), Some("complete"));
+        let clone = protected_clone(dir.path());
+        assert!(delete_backup(dir.path(), None).unwrap());
+        assert!(!clone.exists());
+        assert!(dir.path().join("runtime").is_dir());
+        // A link in the clone's place is not inspected, followed or removed.
+        let outside = tempfile::tempdir().unwrap();
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(
+                outside.path(),
+                dir.path().join(runtime_migration::PROTECTED_STORAGE_BACKUP),
+            )
+            .unwrap();
+            assert!(matches!(inspect(dir.path()), Backup::NotABackup));
+            assert!(outside.path().is_dir());
+        }
+    }
 }

@@ -50,7 +50,7 @@ pub(super) struct Computer {
     pub outcome: Outcome,
 }
 
-#[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct Report {
     version: u32,
