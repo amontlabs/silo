@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 import { execFileSync } from 'node:child_process'
+import { MICROSANDBOX_BUILD_TOOLCHAIN as TOOLCHAIN } from './microsandbox-runtime.mjs'
 import { ZIG_VERSION, archiverWrapper, compilerWrapper, guestSiloRequired, guestSiloTarget, stageGuestSilo } from './guest-silo-runtime.mjs'
 
 const digest = bytes => createHash('sha256').update(bytes).digest('hex')
@@ -26,7 +27,7 @@ function runner({ zig = ZIG_VERSION, rustc = true, targets = ['aarch64-unknown-l
     }
     if (program === 'rustc') {
       if (!rustc) throw new Error('toolchain is not installed')
-      return { stdout: 'rustc 1.94.0\n' }
+      return { stdout: `rustc ${TOOLCHAIN}\n` }
     }
     if (program === 'rustup' && args[0] === 'target' && args[1] === 'list') return { stdout: `${targets.join('\n')}\n` }
     if (program === 'rustup') { targets.push(args.at(-1)); return { stdout: '' } }
@@ -72,7 +73,7 @@ test('the program is built with zig and staged with its checksum in the manifest
       [1, true, 'arm64', 'aarch64-unknown-linux-musl', ZIG_VERSION])
     assert.equal((await stat(staged.binaryPath)).mode & 0o111, 0o111)
     const cargo = calls.find(([program]) => program === 'cargo')
-    assert.deepEqual(cargo[1], ['+1.94.0', 'build', '--release', '-p', 'silo-cli', '--target', 'aarch64-unknown-linux-musl', '--locked'])
+    assert.deepEqual(cargo[1], [`+${TOOLCHAIN}`, 'build', '--release', '-p', 'silo-cli', '--target', 'aarch64-unknown-linux-musl', '--locked'])
     assert.equal(cargo[2].env.RUSTC_WRAPPER, '')
     assert.equal(cargo[2].env.CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_RUSTFLAGS, '-C link-self-contained=no')
     assert.match(cargo[2].env.CC_aarch64_unknown_linux_musl, /cc$/)
@@ -107,7 +108,7 @@ test('a development build without the Rust musl target says how to add it', asyn
   try {
     const staged = await stageGuestSilo({ appRoot: root, targetTriple: 'aarch64-apple-darwin', required: false, environment: {}, log: quiet, run: runner({ targets: [] }) })
     assert.equal(staged.available, false)
-    assert.match(staged.reason, /rustup target add --toolchain 1\.94\.0 aarch64-unknown-linux-musl/)
+    assert.match(staged.reason, new RegExp(`rustup target add --toolchain ${TOOLCHAIN.replaceAll('.', '\\.')} aarch64-unknown-linux-musl`))
   } finally {
     await rm(root, { recursive: true, force: true })
   }
@@ -139,7 +140,7 @@ test('a build that ships adds the Rust target itself', async () => {
     const staged = await stageGuestSilo({ appRoot: root, targetTriple: 'aarch64-apple-darwin', required: true, log: quiet,
       environment: { CARGO_TARGET_DIR: targetDirectory }, run: runner({ targets: [], calls }) })
     assert.equal(staged.available, true)
-    assert.ok(calls.some(([program, args]) => program === 'rustup' && args.join(' ') === 'target add --toolchain 1.94.0 aarch64-unknown-linux-musl'))
+    assert.ok(calls.some(([program, args]) => program === 'rustup' && args.join(' ') === `target add --toolchain ${TOOLCHAIN} aarch64-unknown-linux-musl`))
   } finally {
     await rm(root, { recursive: true, force: true })
     await rm(targetDirectory, { recursive: true, force: true })

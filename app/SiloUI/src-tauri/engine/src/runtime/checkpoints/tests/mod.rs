@@ -6610,7 +6610,7 @@ fn run_sh(program: &str) -> std::process::Output {
 fn the_boot_patch_carries_the_script_the_engine_runs() {
     let patch = std::fs::read_to_string(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../patches/microsandbox-create-stopped-0.7.6.patch"),
+            .join("../../patches/microsandbox-create-stopped-0.7.14.patch"),
     )
     .unwrap();
     let lines: Vec<&str> = patch.lines().collect();

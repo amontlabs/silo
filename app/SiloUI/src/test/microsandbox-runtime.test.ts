@@ -11,6 +11,7 @@ import {
   runtimeTargets,
   MICROSANDBOX_PATCHES,
   MICRO_SANDBOX_VERSION,
+  MICROSANDBOX_BUILD_TOOLCHAIN,
   resolveRuntimeTarget,
   selectRuntime,
   sha256,
@@ -154,12 +155,12 @@ describe("bundled MicroSandbox release staging", () => {
     expect((await stat(staged.executablePath)).mode & 0o777).toBe(0o755)
     const manifest = JSON.parse(await readFile(staged.manifestPath, "utf8"))
     expect(manifest).toMatchObject({
-      microsandboxVersion: "0.7.6",
+      microsandboxVersion: MICRO_SANDBOX_VERSION,
       targetTriple,
       executable: {
         bundledName: "msb",
         sha256: sha256(executable),
-        sourceCommit: "09df3d4b9d832adaede1fb9a198cfc660bfab8cd",
+        sourceCommit: JSON.parse(readFileSync("runtime-inputs.json", "utf8")).sourceCommit,
         patchSha256s: MICROSANDBOX_PATCHES.map((_, index) => sha256(patches[index])),
         officialReleaseAsset: "msb-darwin-aarch64",
       },
@@ -219,7 +220,7 @@ describe("bundled MicroSandbox release staging", () => {
     // Exercise the real download verifier, build-cache lookup, compiler orchestration,
     // and staged bytes. Only external tools are replaced with deterministic fixtures.
     const compiler = ((command: string, args: string[], options: ExecFileSyncOptions) => {
-      if (command === "rustc") return "rustc 1.94.0 (fixture)"
+      if (command === "rustc") return `rustc ${MICROSANDBOX_BUILD_TOOLCHAIN} (fixture)`
       if (command === "/usr/bin/tar") {
         mkdirSync(join(args[args.indexOf("-C") + 1], "source"), { recursive: true })
         return ""
