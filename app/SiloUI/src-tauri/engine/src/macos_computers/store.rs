@@ -630,7 +630,20 @@ pub(super) fn read_record(layout: &Layout) -> Result<Record, String> {
     let bytes = fs::read(layout.record()).map_err(|error| io_error("read the computer", &error))?;
     let mut record: Record = serde_json::from_slice(&bytes).map_err(|error| error.to_string())?;
     record.note_agent_use();
+    record.disk_gib = disk_file_gib(&layout.disk(), record.disk_gib);
     Ok(record)
+}
+
+/// The size of a backing disk file in whole gibibytes, or `recorded` when the file is missing,
+/// is not a whole number of gibibytes, or is not larger than `recorded`. A file is only ever
+/// larger than its record when an earlier version recorded the guest's usable size after a
+/// failed expansion; the file is what the virtual machine and an export really have.
+pub(super) fn disk_file_gib(disk: &Path, recorded: u64) -> u64 {
+    const GIB: u64 = 1024 * 1024 * 1024;
+    match fs::metadata(disk).map(|meta| meta.len()) {
+        Ok(len) if len % GIB == 0 && len / GIB > recorded => len / GIB,
+        _ => recorded,
+    }
 }
 
 /// Whether a saved record says an agent may have used the disk, by its flag or by a completed
@@ -726,6 +739,7 @@ pub(super) fn load_all(app_data: &Path) -> Vec<Record> {
             let bytes = fs::read(entry.path().join("computer.json")).ok()?;
             let mut record: Record = serde_json::from_slice(&bytes).ok()?;
             record.note_agent_use();
+            record.disk_gib = disk_file_gib(&entry.path().join("disk.img"), record.disk_gib);
             let directory = entry.file_name();
             (record.schema_version == SCHEMA_VERSION && directory.to_str() == Some(&record.id))
                 .then_some(record)
@@ -1313,6 +1327,49 @@ mod tests {
         let layout = Layout::new(app_data.path(), "not-its-id");
         save(&layout, &misplaced).unwrap();
         assert_eq!(load_all(app_data.path()), vec![good]);
+    }
+
+    fn write_disk(layout: &Layout, gib: u64) {
+        fs::create_dir_all(&layout.dir).unwrap();
+        let file = fs::File::create(layout.disk()).unwrap();
+        file.set_len(gib * 1024 * 1024 * 1024).unwrap();
+    }
+
+    #[test]
+    fn a_disk_file_larger_than_its_record_is_what_the_computer_has() {
+        let dir = tempfile::tempdir().unwrap();
+        let layout = Layout::new(dir.path(), "one");
+        // No file, a file of the recorded size and a smaller one change nothing.
+        assert_eq!(disk_file_gib(&layout.disk(), 40), 40);
+        write_disk(&layout, 40);
+        assert_eq!(disk_file_gib(&layout.disk(), 40), 40);
+        assert_eq!(disk_file_gib(&layout.disk(), 64), 64);
+        write_disk(&layout, 64);
+        assert_eq!(disk_file_gib(&layout.disk(), 40), 64);
+        // A file that is not a whole number of gibibytes is not trusted.
+        let file = fs::OpenOptions::new().write(true).open(layout.disk()).unwrap();
+        file.set_len(64 * 1024 * 1024 * 1024 + 4096).unwrap();
+        assert_eq!(disk_file_gib(&layout.disk(), 40), 40);
+    }
+
+    #[test]
+    fn a_record_that_says_less_than_its_disk_file_loads_with_the_files_size() {
+        let app_data = tempfile::tempdir().unwrap();
+        let mut stale = record(&request());
+        stale.disk_gib = 40;
+        stale.disk_note = Some("kept".into());
+        let layout = Layout::new(app_data.path(), &stale.id);
+        write_disk(&layout, 64);
+        save(&layout, &stale).unwrap();
+        let loaded = load_all(app_data.path());
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].disk_gib, 64);
+        assert_eq!(loaded[0].disk_note.as_deref(), Some("kept"));
+        assert_eq!(read_record(&layout).unwrap().disk_gib, 64);
+        // The file on disk is only rewritten by the engine's own saves.
+        assert!(fs::read_to_string(layout.record())
+            .unwrap()
+            .contains("\"diskGiB\": 40"));
     }
 
     #[test]
