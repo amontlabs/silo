@@ -4,14 +4,17 @@
 
 use std::collections::BTreeMap;
 
+use serde::{Deserialize, Serialize};
 use silo_api::methods::recipes::{RecipeDefinition, RecipeOs};
 
 use super::{plain_word, validate};
 
 /// Packages by recipe manager key, and settings file paths.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Additions {
+    #[serde(default)]
     pub packages: BTreeMap<String, Vec<String>>,
+    #[serde(default)]
     pub files: Vec<String>,
 }
 
@@ -123,17 +126,30 @@ pub fn append(recipe: &RecipeDefinition, adds: &Additions) -> (RecipeDefinition,
     (out, fresh)
 }
 
+/// What one merge appended: to the computer's record, and to the saved recipe of the same
+/// name when the merge was allowed to change it. Each holds only entries that were not there
+/// before, so an undo can take back exactly them.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Recorded {
+    /// The recipe's name.
+    pub name: String,
+    #[serde(default)]
+    pub record: Additions,
+    #[serde(default)]
+    pub saved: Additions,
+}
+
 /// After a merge into `target`: appends what it brought to the recipe the computer was built
 /// from. The computer's record always gets it. When `save_recipe` is true, the stored recipe
 /// of the same name gets it when the owner saved one; a recipe that ships with Silo is never
-/// edited. Returns the recipe's name and what was new; `None` when the computer has no recipe
-/// or nothing was new.
+/// edited. Returns what was new to each; `None` when the computer has no recipe or nothing
+/// was new.
 pub fn record_merge(
     library: &super::Library,
     target: &str,
     adds: &Additions,
     save_recipe: bool,
-) -> Result<Option<(String, Additions)>, String> {
+) -> Result<Option<Recorded>, String> {
     if adds.is_empty() {
         return Ok(None);
     }
@@ -145,12 +161,59 @@ pub fn record_merge(
         return Ok(None);
     }
     super::records::amend(target, |stored| stored.recipe = updated)?;
+    let mut saved_fresh = Additions::default();
     if save_recipe {
         let _held = super::library::lock();
         if let Some(saved) = library.saved(&record.name)? {
-            let (appended, _) = append(&saved, adds);
-            library.save_locked(&record.name, &appended)?;
+            let (appended, added) = append(&saved, adds);
+            if !added.is_empty() {
+                library.save_locked(&record.name, &appended)?;
+                saved_fresh = added;
+            }
         }
     }
-    Ok(Some((record.name, fresh)))
+    Ok(Some(Recorded {
+        name: record.name,
+        record: fresh,
+        saved: saved_fresh,
+    }))
+}
+
+/// Takes `adds` out of `recipe`; whether anything was there to take.
+fn remove_from(recipe: &mut RecipeDefinition, adds: &Additions) -> bool {
+    let mut changed = false;
+    for (key, names) in &adds.packages {
+        if let Some(list) = packages_of(recipe, key) {
+            let before = list.len();
+            list.retain(|known| !names.contains(known));
+            changed |= list.len() != before;
+        }
+    }
+    let before = recipe.files.len();
+    recipe.files.retain(|known| !adds.files.contains(known));
+    changed | (recipe.files.len() != before)
+}
+
+/// Takes back what [`record_merge`] appended for the merge into `target`: exactly those
+/// entries, and only while they are still listed. The computer's record is touched only while
+/// it is still the recipe's; the saved recipe only when the merge changed it.
+pub fn unrecord_merge(
+    library: &super::Library,
+    target: &str,
+    recorded: &Recorded,
+) -> Result<(), String> {
+    super::records::amend(target, |stored| {
+        if stored.name == recorded.name {
+            remove_from(&mut stored.recipe, &recorded.record);
+        }
+    })?;
+    if !recorded.saved.is_empty() {
+        let _held = super::library::lock();
+        if let Some(mut saved) = library.saved(&recorded.name)? {
+            if remove_from(&mut saved, &recorded.saved) {
+                library.save_locked(&recorded.name, &saved)?;
+            }
+        }
+    }
+    Ok(())
 }

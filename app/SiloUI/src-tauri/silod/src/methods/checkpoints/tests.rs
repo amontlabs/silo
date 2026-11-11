@@ -1591,6 +1591,127 @@ async fn a_computers_recipe_is_read_from_its_record_and_is_absent_when_it_has_no
     assert!(none.get("recipe").is_none() || none["recipe"].is_null());
 }
 
+/// The call as the agent inside computer `id` makes it.
+async fn call_as_computer(
+    fixture: &Fixture,
+    id: &str,
+    method: MethodName,
+    params: Value,
+) -> Result<Value, DispatchError> {
+    let context = HandlerContext::new(
+        fixture.silod.clone(),
+        RequestContext {
+            client_id: "computer-client".into(),
+            protocol: 8,
+            client: None,
+            caller: silo_engine::policy::Caller::Computer { id: id.to_owned() },
+        },
+    );
+    handle(method, &params, &context)
+        .await
+        .expect("the domain owns the method")
+        .map(|output| output.value)
+}
+
+/// Writes the record of the recipe `name` for computer `id`, as the engine keeps them.
+fn build_from(fixture: &Fixture, id: &str, name: &str, recipe: &Value) {
+    let path = fixture.directory.path().join("data").join("recipe-records.json");
+    std::fs::write(
+        path,
+        json!({"version": 1, "computers": {id: {
+            "name": name, "hash": "h", "builtAt": "2026-11-11T00:00:00Z", "recipe": recipe
+        }}})
+        .to_string(),
+    )
+    .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_computer_reads_only_the_recipe_it_was_built_from() {
+    let fixture = fixture();
+    let secret = json!({"spec": {"os": "linux", "setup": ["export TOKEN=hunter2"]}});
+    let mine = json!({"spec": {"os": "linux", "packages": {"apt": ["nginx"]}}});
+    for (name, recipe) in [("secret", &secret), ("mine", &mine)] {
+        call(
+            &fixture,
+            MethodName::RecipesSave,
+            json!({"name": name, "recipe": recipe}),
+        )
+        .await
+        .unwrap();
+    }
+    build_from(&fixture, LINUX_ID, "mine", &mine);
+
+    let own = call_as_computer(
+        &fixture,
+        LINUX_ID,
+        MethodName::RecipesGet,
+        json!({"name": "mine"}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(own["recipe"], mine);
+    for other in ["secret", "linux-dev"] {
+        let refused = call_as_computer(
+            &fixture,
+            LINUX_ID,
+            MethodName::RecipesGet,
+            json!({"name": other}),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(refused.code, ErrorCode::PermissionDenied, "{other}");
+        assert!(!refused.message.contains("hunter2"), "{}", refused.message);
+    }
+    // A computer built from no recipe reads none.
+    let stranger = call_as_computer(
+        &fixture,
+        "nobody",
+        MethodName::RecipesGet,
+        json!({"name": "mine"}),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(stranger.code, ErrorCode::PermissionDenied);
+    // The owner reads every recipe.
+    let all = call(&fixture, MethodName::RecipesGet, json!({"name": "secret"}))
+        .await
+        .unwrap();
+    assert_eq!(all["recipe"]["spec"]["setup"], secret["spec"]["setup"]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_computer_lists_recipe_names_without_their_contents() {
+    let fixture = fixture();
+    call(
+        &fixture,
+        MethodName::RecipesSave,
+        json!({"name": "secret", "recipe": {"spec": {"os": "linux", "setup": ["export TOKEN=hunter2"]}}}),
+    )
+    .await
+    .unwrap();
+    let listed = call_as_computer(&fixture, LINUX_ID, MethodName::RecipesList, json!({}))
+        .await
+        .unwrap();
+    let rows = listed["saved"].as_array().unwrap();
+    let names: Vec<&str> = rows
+        .iter()
+        .map(|row| row["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["linux-dev", "macos-xcode", "secret"]);
+    assert!(!listed.to_string().contains("hunter2"));
+    for row in rows {
+        let mut keys: Vec<&str> = row
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        keys.sort_unstable();
+        assert_eq!(keys, ["built", "builtIn", "hash", "name", "os"], "{row}");
+    }
+}
+
 // MARK: exports.transfer, exports.discard and the transfer area
 
 mod transfer {

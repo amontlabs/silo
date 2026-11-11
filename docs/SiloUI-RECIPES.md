@@ -43,8 +43,10 @@ files: [/etc/app.conf] # settings files kept into the computer; a merge appends 
 
 `silo recipe list` shows the stored recipes and which are built. `silo recipe show <name>` prints
 one with its hash and any warnings. `silo recipe remove <name>` forgets it and drops its build
-(removing a saved recipe that replaced a shipped one brings the shipped one back). Storing, removing and building belong to the owner; a
-computer's agent can list and show recipes but not change them.
+(removing a saved recipe that replaced a shipped one brings the shipped one back). Storing, removing and building belong to the owner. A
+computer's agent can list the recipes (names, system and whether each is built) and show the one
+its computer was built from, because setup lines may hold secrets; asking to show another is
+refused. It cannot change any.
 
 Package names are single words (a version suffix such as `name@1.2` or `name==1.0` is fine);
 they are passed to the package manager as arguments, never as shell text. `setup` commands are
@@ -94,7 +96,9 @@ that computer's recipe: packages under their manager (`apt`, `brew`, `pip`, `pip
 `cargo`; a package the recipe's system cannot install is left out) and files under `files:`. It
 changes the computer's record, and the stored recipe of the same name when the owner saved one;
 a recipe that ships with Silo is never edited. The merge result lists what was added, so that
-rebuilding from the recipe makes the machine the merged computer now is.
+rebuilding from the recipe makes the machine the merged computer now is. Undoing the merge takes
+those entries back out of the record and out of the stored recipe; entries that were already
+there before the merge stay.
 
 ## Build and cache
 

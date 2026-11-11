@@ -10,6 +10,8 @@ pub enum Program {
     Available { sha256: String },
     /// This build cannot provide it; the reason is shown as it is.
     Unavailable { reason: String },
+    /// A program the owner named for development was put in the computer and stays there.
+    OverrideActive,
 }
 
 /// What Silo wants in a computer.
@@ -21,6 +23,8 @@ pub struct Wanted {
     /// The registration with the agents was owed a removal (the tools were turned off while the
     /// computer was not running).
     pub removal_owed: bool,
+    /// The SHA-256 of the registration helper Silo keeps in the computer.
+    pub helper_sha256: String,
 }
 
 /// What a read of the computer found.
@@ -28,6 +32,8 @@ pub struct Wanted {
 pub struct Observed {
     /// The SHA-256 of `/usr/local/bin/silo` when it is a regular file.
     pub program_sha256: Option<String>,
+    /// The SHA-256 of the registration helper when it is a regular file.
+    pub helper_sha256: Option<String>,
     /// The computer's receipt, already read as untrusted text (`Receipt::parse`).
     pub receipt: Receipt,
 }
@@ -81,6 +87,10 @@ pub fn plan(wanted: &Wanted, observed: &Observed) -> Plan {
         };
     }
     let program = match &wanted.program {
+        Program::OverrideActive if observed.program_sha256.is_some() => ProgramStep::Current,
+        Program::OverrideActive => ProgramStep::Unavailable {
+            reason: "The program named for development is no longer in the computer.".into(),
+        },
         Program::Available { sha256 } if observed.program_sha256.as_deref() == Some(sha256) => {
             ProgramStep::Current
         }
@@ -92,8 +102,17 @@ pub fn plan(wanted: &Wanted, observed: &Observed) -> Plan {
             reason: reason.clone(),
         },
     };
+    // A registration that worked with this helper, with nothing left waiting, needs no new look.
+    let registered = program == ProgramStep::Current
+        && observed.helper_sha256.as_deref() == Some(wanted.helper_sha256.as_str())
+        && observed.receipt.entry(super::MCP.id).is_some_and(|entry| {
+            entry.version == super::MCP.version
+                && entry.state == State::Ok
+                && entry.detail.is_none()
+        });
     let registration = match program {
         ProgramStep::Unavailable { .. } => RegistrationStep::WaitForProgram,
+        _ if registered => RegistrationStep::Nothing,
         _ => RegistrationStep::Apply,
     };
     Plan {
@@ -104,7 +123,7 @@ pub fn plan(wanted: &Wanted, observed: &Observed) -> Plan {
 
 #[cfg(test)]
 mod tests {
-    use super::super::receipt::Entry;
+    use super::super::{receipt::Entry, MCP};
     use super::*;
 
     fn wanted(tools: bool) -> Wanted {
@@ -114,12 +133,14 @@ mod tests {
                 sha256: "a".repeat(64),
             },
             removal_owed: false,
+            helper_sha256: "h".repeat(64),
         }
     }
 
     fn observed(sha: Option<&str>) -> Observed {
         Observed {
             program_sha256: sha.map(str::to_owned),
+            helper_sha256: Some("h".repeat(64)),
             receipt: Receipt::empty("c"),
         }
     }
@@ -134,6 +155,66 @@ mod tests {
             assert_eq!(p.program, ProgramStep::Install, "{found:?}");
             assert_eq!(p.registration, RegistrationStep::Apply);
         }
+    }
+
+    #[test]
+    fn a_registration_that_worked_is_not_made_again_until_something_changes() {
+        let sha = "a".repeat(64);
+        let mut view = observed(Some(&sha));
+        view.receipt
+            .components
+            .insert("silo-mcp".into(), Entry::new(MCP.version, State::Ok, 1));
+        assert_eq!(
+            plan(&wanted(true), &view).registration,
+            RegistrationStep::Nothing
+        );
+        // Another helper, an older version, an agent still waiting, a failure, a new program or
+        // a missing helper each ask for the registration again.
+        let mut other_helper = view.clone();
+        other_helper.helper_sha256 = Some("i".repeat(64));
+        let mut missing_helper = view.clone();
+        missing_helper.helper_sha256 = None;
+        let mut old = view.clone();
+        old.receipt
+            .components
+            .insert("silo-mcp".into(), Entry::new(MCP.version - 1, State::Ok, 1));
+        let mut pending = view.clone();
+        pending.receipt.components.insert(
+            "silo-mcp".into(),
+            Entry::new(MCP.version, State::Ok, 1).with_detail("Codex not installed yet"),
+        );
+        let mut failed = view.clone();
+        failed
+            .receipt
+            .components
+            .insert("silo-mcp".into(), Entry::new(MCP.version, State::Failed, 1));
+        let replaced = observed(Some(&"b".repeat(64)));
+        for (name, case) in [
+            ("other helper", other_helper),
+            ("missing helper", missing_helper),
+            ("old version", old),
+            ("pending agent", pending),
+            ("failure", failed),
+            ("new program", replaced),
+        ] {
+            assert_eq!(
+                plan(&wanted(true), &case).registration,
+                RegistrationStep::Apply,
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_program_named_for_development_stays_while_it_is_in_the_computer() {
+        let mut want = wanted(true);
+        want.program = Program::OverrideActive;
+        let stays = plan(&want, &observed(Some(&"x".repeat(64))));
+        assert_eq!(stays.program, ProgramStep::Current);
+        assert_eq!(stays.registration, RegistrationStep::Apply);
+        let gone = plan(&want, &observed(None));
+        assert!(matches!(gone.program, ProgramStep::Unavailable { .. }));
+        assert_eq!(gone.registration, RegistrationStep::WaitForProgram);
     }
 
     #[test]

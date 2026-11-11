@@ -100,8 +100,10 @@ The program and the registration arrive without anyone passing a file
 development: the CLI names a Linux `silo` on the device (`guestClient.enable` takes `binaryPath`,
 and only the owner at this device may name one), the engine reads it, and it goes into the running
 computer through the same path as the shipped program, checked inside by root against the SHA-256 of
-the bytes that were sent. The computer's next start puts the shipped program back. A macOS computer
-refuses `--binary`; it uses the device's own `silo`.
+the bytes that were sent. The program stays in place, whatever the periodic looks find, until the
+computer next starts or `guestClient.enable` is called again; the engine keeps that note in memory
+for each computer, so an engine restart ends it too. The next start puts the shipped program back.
+A macOS computer refuses `--binary`; it uses the device's own `silo`.
 
 `disable` (`guestClient.revoke`) forgets the token hash and closes every open connection of the
 computer at once. The rule stays in the computer's network until its next start without it, so
@@ -136,8 +138,16 @@ Nothing is passed by hand. The engine keeps two pieces current in every computer
 2. **The registration** of `silo mcp` as an MCP server named `silo` in Claude Code and Codex, the way
    computer use registers Cua Driver (same helper, same editors; the command is
    `/usr/local/bin/silo mcp`, which reads `/etc/silo/endpoint.json` when an agent starts it). It is
-   applied again at each reconcile, and right after `agents.install` finishes (beside computer use's
-   registration). An agent that is not installed yet is registered when it is.
+   applied at a reconcile unless the last one worked with the same helper and nothing was waiting,
+   and right after `agents.install` finishes (beside computer use's registration). An agent that is
+   not installed yet is registered when it is.
+   - Silo's entry is marked: Claude Code's `mcpServers.silo` has `env: {"SILO_MANAGED": "1"}` and
+     Codex's `[mcp_servers.silo.env]` has `SILO_MANAGED = "1"`. Only a marked entry is replaced or
+     removed, and so is the unmarked entry an earlier Silo wrote (the same command,
+     `/usr/local/bin/silo`, and arguments, `mcp`), which gets marked. A `silo` entry the user wrote
+     is left as it is and the status says that the agent already has a tool of its own called
+     `silo`. Claude Code's state file is read again right before it is replaced, so a change Claude
+     Code made while Silo edited is kept.
 
 **When.** The engine's watcher reconciles a computer with the tools on whenever it sees it running
 after it was not (every start, the engine's own start, a new computer's first start, a fork's first
@@ -145,9 +155,25 @@ start), and every ten minutes while it runs; `guestClient.enable` does it at onc
 computer. Each reconcile follows the endpoint file's check. The computer's receipt
 (`/var/lib/silo/components.json`) and its status list each piece's result; a failed step is shown
 there (`silo tools status`) and does not stop the computer. A program that was deleted, replaced by
-an agent or old is replaced at the next start; a registration an agent edited out is made again.
+an agent or old is replaced at the next start; a registration an agent edited out is made again
+when the program or the helper changes, or at the next start.
 
-**Forks.** A fork has its own port, token and endpoint file. Its first start also reconciles it:
+A look that finds nothing to do changes nothing in the computer: the receipt is not written again
+when only the times in it would change. A whole reconcile has 90 seconds, because it holds the
+computer's lock and one of the watcher's four places; a step left undone is shown as waiting, with
+a plain explanation. After five looks in a row that failed or ran out of time, the watcher stops
+looking at that computer on its own until the computer starts or the tools are turned on again.
+
+**The computer's own word.** The hash of the program and the receipt come from the computer, and
+an agent with root there can write anything. They decide what Silo does next (send the program
+again, register again) and are never taken as proof that the program or the registration is in
+place. The in-guest SHA-256 check only catches damage in transfer. With the tools off, the
+explanations in the computer's receipt are not shown as status, since only a step Silo ran
+itself is Silo's word.
+
+**Forks.** A fork has its own port, token and endpoint file. A fork of a computer whose tools are
+off owes a removal at once, because the registration came with the disk. Its first start also
+reconciles it:
 the receipt it copied from its parent names another computer, so it is ignored, the program is
 checked, and the registration is applied. A registration only names `silo mcp`, and `silo` reads the
 fork's own endpoint file, so the fork's agents talk to the fork's channel; the parent's port is not

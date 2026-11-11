@@ -20,7 +20,7 @@ pub use build::{build, remove, BuildEnv, BuildOutcome, Created, ExecOut, RunAs, 
 pub(crate) use scripts::Step as BuildStep;
 #[cfg(test)]
 use build::{builder_name, is_builder_of};
-pub use additions::{append, manager_key, record_merge, Additions};
+pub use additions::{append, manager_key, record_merge, unrecord_merge, Additions, Recorded};
 pub use cache::Cache;
 pub use quiet::{quiet_names, quiet_warnings};
 pub use library::{

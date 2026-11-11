@@ -314,7 +314,10 @@ impl Checker {
         let target = silo_engine::guest::resolve(runtime, app_data, computer_id)
             .map_err(|error| error.message)?;
         let written = endpoint::ensure(&target, &self.store())?;
-        guest_components::reconcile(&target, app_data, &places.sources(), None)?;
+        // A computer whose looks kept failing is left alone until it starts again.
+        if !guest_components::standing::given_up(computer_id) {
+            guest_components::reconcile(&target, app_data, &places.sources(), None)?;
+        }
         Ok(written)
     }
 
@@ -584,6 +587,10 @@ impl Watcher {
                 continue;
             };
             seen.missing_since = None;
+            // A computer the watcher saw stopped that now runs has started.
+            if running && !seen.running && seen.listed {
+                guest_components::standing::start_over(&id);
+            }
             seen.listed = true;
             let generation = silo_engine::generation::generation(&id);
             // A running computer without a token (the engine started, or an export ended it)

@@ -6,7 +6,7 @@ use std::{sync::Arc, time::Duration};
 
 use serde_json::{json, Value};
 use silo_api::{
-    jobs::JobState,
+    jobs::{ErrorCode, JobState},
     methods::{
         common::ComputerTargetParams,
         recipes::{
@@ -20,6 +20,7 @@ use silo_api::{
 use silo_engine::{
     context::{Audience, EngineContext},
     guest::{self, ExecRequest, GuestUser},
+    policy::Caller,
     recipes::{self, BuildEnv, Cache, Created, ExecOut, Library, RunAs},
 };
 
@@ -465,6 +466,32 @@ pub(super) async fn save(
     .and_then(output)
 }
 
+/// What a computer's agent may read of a saved recipe: only the one its computer was built
+/// from. A recipe's setup lines may hold secrets the owner pasted.
+async fn computer_may_read(
+    context: &HandlerContext,
+    app_data: &std::path::Path,
+    name: &str,
+) -> Result<(), DispatchError> {
+    let Caller::Computer { id } = context.caller() else {
+        return Ok(());
+    };
+    let (app_data, id) = (app_data.to_owned(), id.clone());
+    let own = tokio::task::spawn_blocking(move || recipes::records::get_at(&app_data, &id))
+        .await
+        .map_err(|_| DispatchError::internal("The engine task stopped unexpectedly."))?
+        .map_err(invalid)?;
+    if own.is_some_and(|record| record.name == name) {
+        return Ok(());
+    }
+    Err(DispatchError::new(
+        ErrorCode::PermissionDenied,
+        format!(
+            "A computer can read only the recipe it was built from. `recipe list` shows the names of the others; {name} is not this computer's recipe."
+        ),
+    ))
+}
+
 pub(super) async fn get(
     context: &HandlerContext,
     params: &Value,
@@ -472,6 +499,7 @@ pub(super) async fn get(
     let params: RecipeGetParams = context.decode_params(params)?;
     require_local_device(context, params.device_id.as_deref())?;
     let app_data = context.engine_context().paths().app_data.clone();
+    computer_may_read(context, &app_data, &params.name).await?;
     tokio::task::spawn_blocking(move || {
         let (recipe, built_in) = Library::new(&app_data)
             .get(&params.name)?
