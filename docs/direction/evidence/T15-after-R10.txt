@@ -1,0 +1,254 @@
+[20:15:27] == header
+commit 51399c07a on fix/r10-crash-recovery; silo 0.1.0; host 26.5 arm64; 2026-11-11T19:15:27Z
+[20:15:29] PASS  the Dev engine starts from the bundle  -- pid 52608, log /Users/polarzero/.t3/worktrees/microsandbox-workspaces/t3-d78541ff/app/SiloUI/src-tauri/target/verification/silod-dev-t15.log
+[20:15:36] == S0 every call goes to the Dev socket of our engine; its folders are read from it
+[20:15:36] PASS  the socket is ~/.silo-dev/engine.sock  -- /Users/polarzero/.silo-dev/engine.sock
+[20:15:36] PASS  the socket is held by the engine this script started  -- engine pid 52608, socket holders: 52608 
+[20:15:36] PASS  the engine's data folder is read from the engine  -- /Users/polarzero/.silo-dev/engine
+[20:15:36] PASS  the runtime home has the sandboxes folder  -- /Users/polarzero/.silo-dev/c19a79dc92d3
+computers before: workspace-1 e2e-relay silo-eval-a silo-eval-b 
+guest images on this device: ubuntu-24.04-v5 
+[20:15:36] == S1 a Linux computer with a network allowlist, a secret and Silo's tools; data in /workspace, /home/silo and outside them
+[20:15:45] PASS  create e2e-t15-a  -- 
+[20:15:46] PASS  set an allowlist on e2e-t15-a  -- allowlist ['example.com']
+[20:15:46] SKIPPED  assign a secret to e2e-t15-a  -- silo: Allow Silo's engine to use its saved sign-in in the macOS Keychain. (credential_access_denied)
+[20:15:51] PASS  start e2e-t15-a  -- 
+[20:15:52] PASS  turn on Silo's tools in e2e-t15-a  -- 
+[20:15:53] PASS  silo inside e2e-t15-a reaches Silo  -- 
+[20:15:54] PASS  write the marker data  -- 
+[20:15:55] PASS  the image reference of e2e-t15-a is readable  -- ghcr.io/amontlabs/silo-guest:ubuntu-24.04-v5-arm64
+[20:15:55] PASS  the root disk of e2e-t15-a is identified  -- 521186400-1794424537
+[20:15:55] PASS  the tools file of e2e-t15-a is readable  -- digest 834b96bc
+[20:15:56] PASS  before: the allowed host is reachable from e2e-t15-a  -- 
+[20:15:56] PASS  before: another host is blocked from e2e-t15-a  -- 
+[20:15:56] == S2 a computer already on the newest image is refused without --force
+[20:15:57] PASS  plain rebuild of a computer on the newest image is refused  -- Rebuilding e2e-t15-a...
+silo: e2e-t15-a is already on the newest image. Ask for a forced rebuild (silo rebuild --force) to rebuild it anyway. Nothing was changed.
+[20:15:57] PASS  the refusal says why  -- 
+[20:15:57] PASS  e2e-t15-a still runs and is unchanged  -- 
+[20:15:58] PASS  no undo computer was made by the refusal  -- 
+[20:15:58] == S3 rebuild with --force; the build sandbox stays out of the list
+[20:16:21] PASS  silo rebuild --force e2e-t15-a  -- Rebuilding e2e-t15-a...
+Rebuilding e2e-t15-a: 5s
+Rebuilding e2e-t15-a: 10s
+Rebuilding e2e-t15-a: 15s
+Rebuilding e2e-t15-a: 20s
+[20:16:21] PASS  the build sandbox never showed in silo list  -- 
+image before: ghcr.io/amontlabs/silo-guest:ubuntu-24.04-v5-arm64
+image after:  ghcr.io/amontlabs/silo-guest:ubuntu-24.04-v5-arm64
+newest:       ghcr.io/amontlabs/silo-guest:ubuntu-24.04-v5-arm64
+root disk before: 521186400-1794424537
+root disk after:  521188028-1794424559
+[20:16:21] PASS  the rebuilt computer is on the newest image  -- 
+[20:16:21] NOTE only one guest image exists on this device, so the image reference cannot change; the root disk identity below is what shows the computer was rebuilt
+[20:16:21] PASS  the rebuilt computer has a new root disk (not the old file)  -- 
+[20:16:21] PASS  the rebuilt computer keeps its id  -- 17e418d0-32bf-4a9f-b62e-ddc457c54558
+[20:16:22] PASS  the rebuilt computer is running again  -- 
+[20:16:22] PASS  no build sandbox is left in the runtime  -- e2e-t15-a e2e-t15-a-undo silo-build-openclaw-e58d4252 silo-build-demo-7cb168dc silo-eval-b silo-eval-a e2e-relay workspace-1 
+[20:16:22] == S4 workspace and home are intact; what lived outside them is gone; policy, secret and tools carry over
+[20:16:23] PASS  workspace and home files are intact  -- 
+[20:16:24] PASS  the file outside the home folder is not carried  -- cat: /opt/e2e/outside.txt: No such file or directory
+[20:16:24] PASS  the network policy of e2e-t15-a is the same  -- allowlist ['example.com']
+[20:16:25] PASS  after: the allowed host is reachable from e2e-t15-a  -- 
+[20:16:25] PASS  after: another host is still blocked from e2e-t15-a  -- 
+[20:16:25] SKIPPED  the secret is still assigned to e2e-t15-a  -- no secret could be assigned (Keychain approval)
+[20:16:37] PASS  silo inside the rebuilt e2e-t15-a reaches Silo  -- 
+[20:16:38] PASS  the tools token of e2e-t15-a is a new one  -- digest d73afefc (was 834b96bc)
+[20:16:38] == S5 the undo computer exists, is stopped, keeps the old data and policy, and has no secret or tools
+[20:16:39] PASS  e2e-t15-a-undo exists and is stopped  -- state: stopped
+[20:16:39] PASS  e2e-t15-a-undo has the old root disk  -- 521186400-1794424537
+[20:16:39] PASS  e2e-t15-a-undo has the old image  -- ghcr.io/amontlabs/silo-guest:ubuntu-24.04-v5-arm64
+[20:16:40] PASS  e2e-t15-a-undo has another id than e2e-t15-a  -- a68d9c0a-b4a1-484e-93c3-ab9bd3c80d0e
+[20:16:41] PASS  e2e-t15-a-undo has the network policy e2e-t15-a had  -- allowlist ['example.com']
+[20:16:41] SKIPPED  no secret is assigned to e2e-t15-a-undo  -- no secret could be assigned (Keychain approval)
+[20:16:47] PASS  e2e-t15-a-undo keeps the old workspace and home data  -- 
+[20:16:47] PASS  e2e-t15-a-undo keeps the file outside the home folder  -- old-root-only
+[20:16:48] PASS  silo inside e2e-t15-a-undo cannot reach Silo (its old token no longer works)  -- 
+[20:16:49] == S6 a second rebuild is refused because the undo computer exists
+[20:16:50] PASS  second rebuild is refused  -- Rebuilding e2e-t15-a...
+silo: Computer 'e2e-t15-a-undo' already exists. Drop or rename it before rebuilding 'e2e-t15-a'. Nothing was changed.
+[20:16:50] PASS  the refusal says the undo computer exists  -- 
+[20:16:50] == S7 a stopped computer is rebuilt and stays stopped
+[20:16:59] PASS  create e2e-t15-b  -- 
+[20:17:07] PASS  e2e-t15-b is stopped before the rebuild  -- 
+[20:17:26] PASS  silo rebuild --force e2e-t15-b (stopped)  -- Rebuilding e2e-t15-b...
+Rebuilding e2e-t15-b: 5s
+Rebuilding e2e-t15-b: 10s
+Rebuilding e2e-t15-b: 15s
+Rebuilt e2e-t15-b on ghcr.io/amontlabs/silo-guest:ubuntu-24.04-v5-arm64. The previous computer is e2e-t15-b-undo (stopped).
+[20:17:28] PASS  e2e-t15-b is still stopped  -- state: stopped
+[20:17:29] PASS  e2e-t15-b-undo is stopped  -- state: stopped
+[20:17:35] PASS  e2e-t15-b keeps its workspace and home data  -- 
+[20:17:35] == S8 the engine is killed at each step of a rebuild
+[20:17:35] -- crash point 1: kill at 'created' + 0s
+[20:17:44] PASS  create e2e-t15-k1  -- 
+journal step when the engine was killed: created
+[20:18:03] PASS  crash 1: the rebuild reached 'created'  -- saw created
+[20:18:08] PASS  crash 1: the Dev engine restarts  -- pid 57606
+[20:18:14] PASS  crash 1: the interrupted rebuild is settled (its journal is gone)  -- 
+[20:18:14] PASS  crash 1: e2e-t15-k1 still exists under its own name  -- 
+[20:18:16] PASS  crash 1: e2e-t15-k1 keeps its id  -- d3e990c0-cb71-4922-926b-24edba44a886
+outcome: rolled_back
+[20:18:16] PASS  crash 1: a step before the swap is rolled back  -- rolled_back
+[20:18:16] PASS  crash 1: no build sandbox is left  -- e2e-t15-k1 e2e-t15-b e2e-t15-b-undo e2e-t15-a-undo e2e-t15-a silo-build-openclaw-e58d4252 silo-build-demo-7cb168dc silo-eval-b silo-eval-a e2e-relay workspace-1 
+[20:18:16] PASS  crash 1: no staged home folder is left  -- 
+[20:18:20] PASS  crash 1: e2e-t15-k1 keeps its workspace and home data  -- 
+[20:18:21] PASS  crash 1: no tar file of the home folder is left in e2e-t15-k1  -- 
+[20:18:24] -- crash point 2: kill at 'home_carried' + 0s
+[20:18:33] PASS  create e2e-t15-k2  -- 
+journal step when the engine was killed: home_carried
+[20:19:15] PASS  crash 2: the rebuild reached 'home_carried'  -- saw home_carried
+[20:19:20] PASS  crash 2: the Dev engine restarts  -- pid 60664
+[20:19:24] PASS  crash 2: the interrupted rebuild is settled (its journal is gone)  -- 
+[20:19:25] PASS  crash 2: e2e-t15-k2 still exists under its own name  -- 
+[20:19:27] PASS  crash 2: e2e-t15-k2 keeps its id  -- cab3c3c8-7ebf-4fb0-86c0-78af01c71b78
+outcome: rolled_back
+[20:19:27] PASS  crash 2: a step before the swap is rolled back  -- rolled_back
+[20:19:27] PASS  crash 2: no build sandbox is left  -- e2e-t15-k2 e2e-t15-k1 e2e-t15-b e2e-t15-b-undo e2e-t15-a-undo e2e-t15-a silo-build-openclaw-e58d4252 silo-build-demo-7cb168dc silo-eval-b silo-eval-a e2e-relay workspace-1 
+[20:19:27] PASS  crash 2: no staged home folder is left  -- 
+[20:19:32] PASS  crash 2: e2e-t15-k2 keeps its workspace and home data  -- 
+[20:19:33] PASS  crash 2: no tar file of the home folder is left in e2e-t15-k2  -- 
+[20:19:35] -- crash point 3: kill at 'home_carried' + 0.25s
+[20:19:44] PASS  create e2e-t15-k3  -- 
+journal step when the engine was killed: home_carried
+[20:20:12] PASS  crash 3: the rebuild reached 'home_carried'  -- saw home_carried
+[20:20:17] PASS  crash 3: the Dev engine restarts  -- pid 62453
+[20:20:21] PASS  crash 3: the interrupted rebuild is settled (its journal is gone)  -- 
+[20:20:22] PASS  crash 3: e2e-t15-k3 still exists under its own name  -- 
+[20:20:24] PASS  crash 3: e2e-t15-k3 keeps its id  -- 5f7e6a7f-955b-485d-8c75-662efe02c73d
+outcome: rolled_back
+[20:20:24] PASS  crash 3: a step before the swap is rolled back  -- rolled_back
+[20:20:24] PASS  crash 3: no build sandbox is left  -- e2e-t15-k3 e2e-t15-k2 e2e-t15-k1 e2e-t15-b e2e-t15-b-undo e2e-t15-a-undo e2e-t15-a silo-build-openclaw-e58d4252 silo-build-demo-7cb168dc silo-eval-b silo-eval-a e2e-relay workspace-1 
+[20:20:24] PASS  crash 3: no staged home folder is left  -- 
+[20:20:29] PASS  crash 3: e2e-t15-k3 keeps its workspace and home data  -- 
+[20:20:30] PASS  crash 3: no tar file of the home folder is left in e2e-t15-k3  -- 
+[20:20:32] -- crash point 4: kill at 'recipe_replayed' + 0s
+[20:20:42] PASS  create e2e-t15-k4  -- 
+journal step when the engine was killed: recipe_replayed
+[20:21:10] PASS  crash 4: the rebuild reached 'recipe_replayed'  -- saw recipe_replayed
+[20:21:15] PASS  crash 4: the Dev engine restarts  -- pid 64341
+[20:21:19] PASS  crash 4: the interrupted rebuild is settled (its journal is gone)  -- 
+[20:21:20] PASS  crash 4: e2e-t15-k4 still exists under its own name  -- 
+[20:21:21] PASS  crash 4: e2e-t15-k4 keeps its id  -- c52a1e5d-39a4-4467-ae27-2d3456d74a22
+outcome: rolled_back
+[20:21:22] PASS  crash 4: no build sandbox is left  -- e2e-t15-k4 e2e-t15-k3 e2e-t15-k2 e2e-t15-k1 e2e-t15-b e2e-t15-b-undo e2e-t15-a-undo e2e-t15-a silo-build-openclaw-e58d4252 silo-build-demo-7cb168dc silo-eval-b silo-eval-a e2e-relay workspace-1 
+[20:21:22] PASS  crash 4: no staged home folder is left  -- 
+[20:21:27] PASS  crash 4: e2e-t15-k4 keeps its workspace and home data  -- 
+[20:21:28] PASS  crash 4: no tar file of the home folder is left in e2e-t15-k4  -- 
+[20:21:31] -- crash point 5: kill at 'swapping' + 0s
+[20:21:40] PASS  create e2e-t15-k5  -- 
+journal step when the engine was killed: swapping
+[20:22:08] PASS  crash 5: the rebuild reached 'swapping'  -- saw swapping
+[20:22:13] PASS  crash 5: the Dev engine restarts  -- pid 66244
+[20:22:17] PASS  crash 5: the interrupted rebuild is settled (its journal is gone)  -- 
+[20:22:18] PASS  crash 5: e2e-t15-k5 still exists under its own name  -- 
+[20:22:20] PASS  crash 5: e2e-t15-k5 keeps its id  -- 86678a9b-3898-4835-a6fa-82bb613921cb
+outcome: finished
+[20:22:20] PASS  crash 5: a swap is finished or rolled back, never half done  -- finished
+[20:22:20] PASS  crash 5: no build sandbox is left  -- e2e-t15-k5 e2e-t15-k5-undo e2e-t15-k4 e2e-t15-k3 e2e-t15-k2 e2e-t15-k1 e2e-t15-b e2e-t15-b-undo e2e-t15-a-undo e2e-t15-a silo-build-openclaw-e58d4252 silo-build-demo-7cb168dc silo-eval-b silo-eval-a e2e-relay workspace-1 
+[20:22:20] PASS  crash 5: no staged home folder is left  -- 
+[20:22:26] PASS  crash 5: e2e-t15-k5 keeps its workspace and home data  -- 
+[20:22:27] PASS  crash 5: no tar file of the home folder is left in e2e-t15-k5  -- 
+[20:22:28] PASS  crash 5: e2e-t15-k5-undo is stopped  -- state: stopped
+[20:22:29] PASS  crash 5: the rebuilt e2e-t15-k5 has a new root disk  -- cat: /opt/e2e/outside.txt: No such file or directory
+[20:22:32] -- crash point 6: kill at 'swapping' + 0.4s
+[20:22:41] PASS  create e2e-t15-k6  -- 
+journal step when the engine was killed: swapping
+[20:23:09] PASS  crash 6: the rebuild reached 'swapping'  -- saw swapping
+[20:23:15] PASS  crash 6: the Dev engine restarts  -- pid 68318
+[20:23:17] PASS  crash 6: the interrupted rebuild is settled (its journal is gone)  -- 
+[20:23:17] PASS  crash 6: e2e-t15-k6 still exists under its own name  -- 
+[20:23:19] PASS  crash 6: e2e-t15-k6 keeps its id  -- 8f4c55c7-a9b5-4962-bad7-348ae3aa6780
+outcome: finished
+[20:23:20] PASS  crash 6: a swap is finished or rolled back, never half done  -- finished
+[20:23:20] PASS  crash 6: no build sandbox is left  -- e2e-t15-k6 e2e-t15-k6-undo e2e-t15-k5 e2e-t15-k5-undo e2e-t15-k4 e2e-t15-k3 e2e-t15-k2 e2e-t15-k1 e2e-t15-b e2e-t15-b-undo e2e-t15-a-undo e2e-t15-a silo-build-openclaw-e58d4252 silo-build-demo-7cb168dc silo-eval-b silo-eval-a e2e-relay workspace-1 
+[20:23:20] PASS  crash 6: no staged home folder is left  -- 
+[20:23:26] PASS  crash 6: e2e-t15-k6 keeps its workspace and home data  -- 
+[20:23:27] PASS  crash 6: no tar file of the home folder is left in e2e-t15-k6  -- 
+[20:23:28] PASS  crash 6: e2e-t15-k6-undo is stopped  -- state: stopped
+[20:23:29] PASS  crash 6: the rebuilt e2e-t15-k6 has a new root disk  -- cat: /opt/e2e/outside.txt: No such file or directory
+[20:23:32] -- crash point 7: kill at 'swapping' + 1.0s
+[20:23:41] PASS  create e2e-t15-k7  -- 
+journal step when the engine was killed: swapping
+[20:24:11] PASS  crash 7: the rebuild reached 'swapping'  -- saw swapping
+[20:24:16] PASS  crash 7: the Dev engine restarts  -- pid 70761
+[20:24:20] PASS  crash 7: the interrupted rebuild is settled (its journal is gone)  -- 
+[20:24:21] PASS  crash 7: e2e-t15-k7 still exists under its own name  -- 
+[20:24:23] PASS  crash 7: e2e-t15-k7 keeps its id  -- 3f4fde49-e812-4b69-bf33-b728fda8e975
+outcome: finished
+[20:24:24] PASS  crash 7: a swap is finished or rolled back, never half done  -- finished
+[20:24:24] PASS  crash 7: no build sandbox is left  -- e2e-t15-k7 e2e-t15-k7-undo e2e-t15-k6 e2e-t15-k6-undo e2e-t15-k5 e2e-t15-k5-undo e2e-t15-k4 e2e-t15-k3 e2e-t15-k2 e2e-t15-k1 e2e-t15-b e2e-t15-b-undo e2e-t15-a-undo e2e-t15-a silo-build-openclaw-e58d4252 silo-build-demo-7cb168dc silo-eval-b silo-eval-a e2e-relay workspace-1 
+[20:24:24] PASS  crash 7: no staged home folder is left  -- 
+[20:24:30] PASS  crash 7: e2e-t15-k7 keeps its workspace and home data  -- 
+[20:24:31] PASS  crash 7: no tar file of the home folder is left in e2e-t15-k7  -- 
+[20:24:33] PASS  crash 7: e2e-t15-k7-undo is stopped  -- state: stopped
+[20:24:34] PASS  crash 7: the rebuilt e2e-t15-k7 has a new root disk  -- cat: /opt/e2e/outside.txt: No such file or directory
+[20:24:37] -- crash point 8: kill at 'swapping' + 2.0s
+[20:24:46] PASS  create e2e-t15-k8  -- 
+journal step when the engine was killed: swapping
+[20:25:17] PASS  crash 8: the rebuild reached 'swapping'  -- saw swapping
+[20:25:22] PASS  crash 8: the Dev engine restarts  -- pid 73270
+[20:25:24] PASS  crash 8: the interrupted rebuild is settled (its journal is gone)  -- 
+[20:25:25] PASS  crash 8: e2e-t15-k8 still exists under its own name  -- 
+[20:25:27] PASS  crash 8: e2e-t15-k8 keeps its id  -- f949125e-4292-4d06-9526-69bc0639f18e
+outcome: finished
+[20:25:28] PASS  crash 8: a swap is finished or rolled back, never half done  -- finished
+[20:25:28] PASS  crash 8: no build sandbox is left  -- e2e-t15-k8-undo e2e-t15-k7 e2e-t15-k7-undo e2e-t15-k6 e2e-t15-k6-undo e2e-t15-k5 e2e-t15-k5-undo e2e-t15-k4 e2e-t15-k3 e2e-t15-k2 e2e-t15-k1 e2e-t15-b e2e-t15-b-undo e2e-t15-a-undo e2e-t15-a silo-build-openclaw-e58d4252 silo-build-demo-7cb168dc silo-eval-b silo-eval-a e2e-relay workspace-1 
+[20:25:28] PASS  crash 8: no staged home folder is left  -- 
+[20:25:37] PASS  crash 8: e2e-t15-k8 keeps its workspace and home data  -- 
+[20:25:38] PASS  crash 8: no tar file of the home folder is left in e2e-t15-k8  -- 
+[20:25:40] PASS  crash 8: e2e-t15-k8-undo is stopped  -- state: stopped
+[20:25:40] PASS  crash 8: the rebuilt e2e-t15-k8 has a new root disk  -- cat: /opt/e2e/outside.txt: No such file or directory
+[20:25:44] -- crash point 9: kill at 'swapped' + 0s
+[20:25:54] PASS  create e2e-t15-k9  -- 
+journal step when the engine was killed: swapped
+[20:26:25] PASS  crash 9: the rebuild reached 'swapped'  -- saw swapped
+[20:26:30] PASS  crash 9: the Dev engine restarts  -- pid 75914
+[20:26:34] PASS  crash 9: the interrupted rebuild is settled (its journal is gone)  -- 
+[20:26:36] PASS  crash 9: e2e-t15-k9 still exists under its own name  -- 
+[20:26:38] PASS  crash 9: e2e-t15-k9 keeps its id  -- af4fc262-e80f-459e-8dc9-4c6dd9a91341
+outcome: finished
+[20:26:39] PASS  crash 9: a swapped rebuild is finished  -- finished
+[20:26:39] PASS  crash 9: no build sandbox is left  -- e2e-t15-k9 e2e-t15-k9-undo e2e-t15-k8 e2e-t15-k8-undo e2e-t15-k7 e2e-t15-k7-undo e2e-t15-k6 e2e-t15-k6-undo e2e-t15-k5 e2e-t15-k5-undo e2e-t15-k4 e2e-t15-k3 e2e-t15-k2 e2e-t15-k1 e2e-t15-b e2e-t15-b-undo e2e-t15-a-undo e2e-t15-a silo-build-openclaw-e58d4252 silo-build-demo-7cb168dc silo-eval-b silo-eval-a e2e-relay workspace-1 
+[20:26:39] PASS  crash 9: no staged home folder is left  -- 
+[20:26:46] PASS  crash 9: e2e-t15-k9 keeps its workspace and home data  -- 
+[20:26:47] PASS  crash 9: no tar file of the home folder is left in e2e-t15-k9  -- 
+[20:26:49] PASS  crash 9: e2e-t15-k9-undo is stopped  -- state: stopped
+[20:26:50] PASS  crash 9: the rebuilt e2e-t15-k9 has a new root disk  -- cat: /opt/e2e/outside.txt: No such file or directory
+[20:26:53] == S9 Quit during a rebuild
+[20:27:03] PASS  create e2e-t15-q  -- 
+journal step when Quit is asked: created
+[20:27:27] PASS  the rebuild is under way when Quit is asked  -- created
+Quit took 7s: finished (the engine exited and closed the connection)
+[20:27:34] PASS  Quit finished while the rebuild was under way  -- 7s: finished (the engine exited and closed the connection)
+[20:27:34] PASS  Quit did not wait for the whole rebuild  -- 7s
+[20:27:35] PASS  the engine process exited by itself after Quit  -- pid 
+rebuild said: Rebuilding e2e-t15-q...
+Rebuilding e2e-t15-q: 5s
+Rebuilding e2e-t15-q: 10s
+Rebuilding e2e-t15-q: 15s
+silo: The rebuild was stopped because Silo is quitting. Rolling back also failed (Silo is quitting and stopping its local computers. Wait for shutdown to finish.); restarting Silo retries it.
+[20:27:39] PASS  the Dev engine restarts after Quit  -- pid 78414
+[20:27:43] PASS  the rebuild interrupted by Quit is settled  -- 
+[20:27:44] PASS  e2e-t15-q still exists under its own name  -- 
+[20:27:45] PASS  e2e-t15-q keeps its id  -- 
+[20:27:45] PASS  no build sandbox is left after Quit  -- e2e-t15-q e2e-t15-k9 e2e-t15-k9-undo e2e-t15-k8 e2e-t15-k8-undo e2e-t15-k7 e2e-t15-k7-undo e2e-t15-k6 e2e-t15-k6-undo e2e-t15-k5 e2e-t15-k5-undo e2e-t15-k4 e2e-t15-k3 e2e-t15-k2 e2e-t15-k1 e2e-t15-b e2e-t15-b-undo e2e-t15-a-undo e2e-t15-a silo-build-openclaw-e58d4252 silo-build-demo-7cb168dc silo-eval-b silo-eval-a e2e-relay workspace-1 
+[20:27:52] PASS  e2e-t15-q keeps its workspace and home data  -- 
+[20:27:53] PASS  no tar file of the home folder is left in e2e-t15-q  -- 
+[20:27:53] == S10 nothing of a rebuild remains on the device
+[20:27:53] PASS  no silo-rebuild-* sandbox is left  -- e2e-t15-q e2e-t15-k9 e2e-t15-k9-undo e2e-t15-k8 e2e-t15-k8-undo e2e-t15-k7 e2e-t15-k7-undo e2e-t15-k6 e2e-t15-k6-undo e2e-t15-k5 e2e-t15-k5-undo e2e-t15-k4 e2e-t15-k3 e2e-t15-k2 e2e-t15-k1 e2e-t15-b e2e-t15-b-undo e2e-t15-a-undo e2e-t15-a silo-build-openclaw-e58d4252 silo-build-demo-7cb168dc silo-eval-b silo-eval-a e2e-relay workspace-1 
+[20:27:53] PASS  no staged home folder is left  -- 
+[20:27:53] PASS  no rebuild journal is left  -- 
+[20:27:53] == finished
+PASS: 173  FAIL: 0  SKIPPED: 3
+[20:27:53] cleanup (drops only the e2e-t15-* computers this run made, then stops the Dev engine it started)
+[20:30:21] silo list after cleanup:
+NAME         STATE      KIND       SIZE
+workspace-1  stopped    linux      8 cpu, 32 GiB
+e2e-relay    stopped    linux      8 cpu, 32 GiB
+silo-eval-a  stopped    linux      2 cpu, 2 GiB
+silo-eval-b  stopped    linux      2 cpu, 2 GiB
+[20:30:21] sandboxes after cleanup: silo-build-openclaw-e58d4252 silo-build-demo-7cb168dc silo-eval-b silo-eval-a e2e-relay workspace-1 
+[20:30:21] the secret E2E_T15_SECRET stays in the Dev engine's secret store with no computer assigned (the CLI cannot delete one)
+[20:30:22] Dev engine stopped
+script exit 0

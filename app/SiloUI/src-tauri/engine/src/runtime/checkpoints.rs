@@ -898,7 +898,13 @@ fn capture_with_kind(
             paths,
             id,
             (snapshot_group.clone(), interrupted.native_id().to_owned()),
-        ) {
+        ) && !adopt_finished_capture(
+            runner,
+            paths,
+            &mut record,
+            &snapshot_group,
+            configuration.name(),
+        )? {
             return Err(error("An interrupted checkpoint could not be removed. Retry after its dependencies are released."));
         }
         record.inflight_checkpoint = None;
@@ -4442,6 +4448,49 @@ fn queue_unowned_import_groups(
     Ok(())
 }
 
+/// Keeps the capture an interrupted engine left in flight as a checkpoint when the runtime
+/// finished it, the computer already builds on it (its next capture would follow it, so it
+/// cannot be discarded) and the runtime's snapshot verification passes. Returns whether it
+/// did; a capture that builds on nothing or is not ready is left to the caller, while one
+/// the computer builds on that fails verification is an error.
+fn adopt_finished_capture(
+    runner: &dyn RuntimeRunner,
+    paths: &RuntimePaths,
+    record: &mut Record,
+    group: &str,
+    computer_name: &str,
+) -> Result<bool, RuntimeError> {
+    let Some(finished) = record.inflight_checkpoint.clone() else {
+        return Ok(false);
+    };
+    let key = (group.to_owned(), finished.native_id().to_owned());
+    if snapshot_ready(runner, paths, group, &key.1, &finished.scope).is_err() {
+        return Ok(false);
+    }
+    let Ok(survey) = survey(runner, paths) else {
+        return Ok(false);
+    };
+    let Some(member) = survey
+        .inventory
+        .iter()
+        .find(|member| member.key().as_ref() == Some(&key))
+    else {
+        return Ok(false);
+    };
+    if survey.positions.get(&member.snapshot_id).map(String::as_str) != Some(computer_name) {
+        return Ok(false);
+    }
+    if verify_snapshot(runner, paths, group, &finished).is_err() {
+        return Err(error(
+            "An interrupted checkpoint did not pass the runtime's check, and the computer builds on it. It was preserved.",
+        ));
+    }
+    record.checkpoints.insert(0, finished);
+    record.inflight_checkpoint = None;
+    record.checkpoint_operation = None;
+    Ok(true)
+}
+
 /// Remove the member a failed capture may have published, unless something already
 /// builds on it. Returns true when it is gone. Runs even after a cancel.
 pub fn discard_failed_capture(
@@ -4523,8 +4572,12 @@ pub(crate) fn recover_interrupted(
                 runner,
                 paths,
                 configuration.id(),
-                (group, inflight.native_id().to_owned()),
+                (group.clone(), inflight.native_id().to_owned()),
             ) {
+                if adopt_finished_capture(runner, paths, &mut record, &group, configuration.name())?
+                {
+                    return save(paths, configuration.id(), &record);
+                }
                 return Err(error("Interrupted checkpoint data is still in use or could not be removed. It was preserved."));
             }
             record.inflight_checkpoint = None;
