@@ -30,7 +30,8 @@ use silo_api::{
             ApplicationSource, ComputerConfigurationChange as ApiChange,
             ComputerConfigurationChangeParams, ComputerConfigurationRetryParams,
             ComputerCreateParams, ComputerCreateResult, ComputerDeleteParams,
-            ComputerIdentitiesParams, ComputerIdentity, ComputerListParams, ComputerShellParams,
+            ComputerIdentitiesParams, ComputerIdentity, ComputerListParams, ComputerRebuildParams,
+            ComputerShellParams,
             ComputersListResult, LaunchStatus,
         },
         credentials_used::ComputerCredentialsParams,
@@ -966,7 +967,7 @@ pub fn install_credential_source(context: Arc<SilodContext>) {
 
 async fn begin_rebuild(
     context: &HandlerContext,
-    params: ComputerTargetParams,
+    params: ComputerRebuildParams,
 ) -> Result<HandlerOutput, DispatchError> {
     require_local_device(context, params.device_id.as_deref())?;
     let host = SilodRuntimeHost::new(context);
@@ -979,7 +980,12 @@ async fn begin_rebuild(
     let runtime_host = silod.runtime_host();
     let service = super::checkpoints::service_for(&silod);
     let started = tokio::task::spawn_blocking(move || {
-        silo_engine::rebuild::service::start_rebuild(runtime_host, service, params.computer_id)
+        silo_engine::rebuild::service::start_rebuild(
+            runtime_host,
+            service,
+            params.computer_id,
+            params.force.unwrap_or(false),
+        )
     })
     .await
     .map_err(|_| DispatchError::internal("The rebuild could not start."))?;

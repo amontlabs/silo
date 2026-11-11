@@ -1333,6 +1333,7 @@ async fn rebuild_sends_computers_rebuild_and_prints_result() {
     assert_eq!(run(cli, std::env::temp_dir().as_path()).await.unwrap(), 0);
     let sent = &engine.calls("computers.rebuild")[0];
     assert_eq!(sent["computerId"], "id-main");
+    assert!(sent.get("force").is_none(), "{sent}");
     let text = silo_cli::render::rebuild(&json!({
         "name": "main",
         "undoName": "main-undo",
@@ -1340,6 +1341,29 @@ async fn rebuild_sends_computers_rebuild_and_prints_result() {
     }));
     assert!(text.contains("Rebuilt main on ubuntu-24.04-v5"), "{text}");
     assert!(text.contains("main-undo (stopped)"), "{text}");
+}
+
+#[tokio::test]
+async fn rebuild_force_is_sent_when_asked_for() {
+    let engine = keep_engine(json!({
+        "computerId": "id-main",
+        "name": "main",
+        "undoName": "main-undo",
+        "image": "ubuntu-24.04-v5",
+    }));
+    let socket = engine.socket.to_str().unwrap();
+    let cli = <Cli as clap::Parser>::try_parse_from([
+        "silo",
+        "--socket",
+        socket,
+        "--allow-other-channel",
+        "rebuild",
+        "main",
+        "--force",
+    ])
+    .unwrap();
+    assert_eq!(run(cli, std::env::temp_dir().as_path()).await.unwrap(), 0);
+    assert_eq!(engine.calls("computers.rebuild")[0]["force"], true);
 }
 
 #[tokio::test]

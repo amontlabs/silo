@@ -1,17 +1,23 @@
 //! Rebuild a Linux computer on the newest guest image, keeping its workspace, its home folder
 //! and its SSH identity.
 //!
-//! The computer is stopped and checkpointed, a second sandbox is built beside it on the newest
-//! image with the same size, the workspace disk is cloned into it, `/home/silo` is carried
-//! over as a tar file, the recipe the computer was built from is replayed on the new root
-//! disk, and then the two sandboxes swap: the rebuilt one takes the computer's name and id, the
-//! old one becomes `<name>-undo` (stopped, on its own id). Every step is journaled. An
-//! interrupted rebuild is rolled back at the next engine start unless the swap was done, in
-//! which case it is finished (see [`recover_one`]).
+//! The computer is stopped and checkpointed, a second (hidden) sandbox is built beside it on the
+//! newest image with the same size, `/home/silo` is carried over as a tar file while both run,
+//! then both are stopped for good, the workspace disk is cloned into the new one (so nothing
+//! the old computer does can be missed, and it never runs again), the recipe the computer was
+//! built from is replayed on the new root disk, and then the two sandboxes swap: the rebuilt
+//! one takes the computer's name and id, the old one becomes `<name>-undo` (stopped, on its own
+//! id). Every step is journaled. The computer's operation gate and its lane are held from the
+//! first step to the last, so nothing can start, stop, drop or checkpoint either sandbox
+//! meanwhile.
+//!
+//! An interrupted rebuild is rolled back at the next engine start while the swap has not
+//! begun, and finished once it has (see [`recover_one`]).
 //!
 //! Whatever is not copied stays behind in `<name>-undo`: things installed by hand outside the
-//! home folder and the recipe, and the memory of earlier checkpoints, which still restore the
-//! old image.
+//! home folder and the recipe. The `Before rebuild` checkpoint of the old computer is kept (a
+//! rolled-back rebuild keeps it too): it is the way back to the old image on the same computer,
+//! and the checkpoint retention removes it in time.
 
 pub mod engine_env;
 pub mod journal;
@@ -42,6 +48,10 @@ const STOP_WAIT: Duration = Duration::from_millis(50);
 /// The longest a computer name may be.
 const NAME_LIMIT: usize = 32;
 
+/// The sandbox built beside a computer is called `silo-rebuild-<key>`; like Silo's other
+/// working computers it stays out of lists and trees (see `computer_tree::hidden`).
+pub const BUILD_PREFIX: &str = "silo-rebuild-";
+
 /// How much of the new root disk the home folder may fill: the tar file is on that disk too,
 /// next to the unpacked folder.
 const HOME_SHARE_PERCENT: u64 = 45;
@@ -59,12 +69,19 @@ pub struct Info {
     pub busy: Option<String>,
     /// The size of its root disk, in GiB.
     pub root_disk_gib: u32,
+    /// The image reference it was built on, when the runtime reports one.
+    pub image: Option<String>,
 }
 
 /// The engine side of a rebuild. Tests supply a fake; the engine supplies
 /// [`engine_env::EngineRebuildEnv`]. Computers are named by id; the real environment looks the
 /// sandbox up.
 pub trait RebuildEnv: Send + Sync {
+    /// Takes the computer's operation gate, which the caller keeps until it drops the guard.
+    /// Every other method of the environment runs under it and takes no gate itself.
+    fn hold(&self, _id: &str) -> Result<Box<dyn std::any::Any>, String> {
+        Ok(Box::new(()))
+    }
     fn info(&self, id: &str) -> Result<Info, String>;
     /// Why this computer cannot be rebuilt on this device, when it cannot (no copy-on-write
     /// cloning on the host, a disk kept under the computer's name, a resized workspace).
@@ -101,12 +118,12 @@ pub trait RebuildEnv: Send + Sync {
     /// Builds the new sandbox on `plan.image` with the old computer's size and settings and
     /// leaves it stopped.
     fn create(&self, plan: &Plan) -> Result<(), String>;
+    /// Copies `/home/silo` of the running old computer into the running new one.
+    fn carry_home(&self, plan: &Plan) -> Result<(), String>;
     /// Gives the new sandbox a clone of the old one's workspace disk. Both are stopped.
     fn move_workspace(&self, plan: &Plan) -> Result<(), String>;
     /// Copies the old sandbox's host-side SSH folder (its host key) to the new one.
     fn copy_ssh(&self, plan: &Plan) -> Result<(), String>;
-    /// Copies `/home/silo` of the running old computer into the running new one.
-    fn carry_home(&self, plan: &Plan) -> Result<(), String>;
     /// Runs the recipe's install, setup and service steps in the running new computer.
     fn replay_recipe(&self, id: &str, spec: &RecipeSpec) -> Result<(), String>;
     /// Moves the identities (see [`swap`]). Both sandboxes are stopped. Repeating it changes
@@ -134,9 +151,9 @@ pub fn undo_name(name: &str) -> String {
     fitted(name, "-undo")
 }
 
-/// `<name>-rb-<key>`: the sandbox built beside the computer.
-fn build_name(name: &str, key: &str) -> String {
-    fitted(name, &format!("-rb-{key}"))
+/// `silo-rebuild-<key>`: the sandbox built beside the computer.
+fn build_name(key: &str) -> String {
+    format!("{BUILD_PREFIX}{key}")
 }
 
 fn stop_and_wait(env: &dyn RebuildEnv, id: &str) -> Result<(), String> {
@@ -163,19 +180,45 @@ fn refuse(message: String) -> String {
     format!("{message} Nothing was changed.")
 }
 
+/// The name of the host file the home folder of the rebuild staged as `stage` waits in.
+pub(crate) fn stage_file_name(stage: &str) -> String {
+    format!("home-{stage}.tar")
+}
+
+/// Removes the staged home folders in `stage_dir` that no rebuild in the journal waits for: what
+/// a rebuild left behind when the engine stopped in the middle of carrying the home folder.
+pub fn sweep_stage(journal: &Journal, stage_dir: &std::path::Path) {
+    let wanted: std::collections::HashSet<String> = journal
+        .all()
+        .iter()
+        .map(|record| stage_file_name(&record.plan.stage))
+        .collect();
+    let Ok(read) = std::fs::read_dir(stage_dir) else {
+        return;
+    };
+    for entry in read.flatten() {
+        if !wanted.contains(entry.file_name().to_string_lossy().as_ref()) {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+}
+
 /// The home folder's size limit on a root disk of `root_disk_gib`.
 pub fn home_limit(root_disk_gib: u32) -> u64 {
     u64::from(root_disk_gib) * 1024 * 1024 * 1024 * HOME_SHARE_PERCENT / 100
 }
 
-/// Rebuilds the Linux computer `computer_id` on the newest guest image.
+/// Rebuilds the Linux computer `computer_id` on the newest guest image. A computer already on
+/// it is refused unless `force` is set.
 pub fn rebuild(
     env: &dyn RebuildEnv,
     journal: &Journal,
     computer_id: &str,
+    force: bool,
     wait: Duration,
 ) -> Result<ComputerRebuildResult, String> {
     let _lane = lane::acquire(computer_id, wait)?;
+    let _gate = env.hold(computer_id)?;
     // A rebuild this one finds half done is settled first.
     if let Some(record) = journal.get(computer_id) {
         env.note("A rebuild was interrupted; settling it first");
@@ -216,6 +259,12 @@ pub fn rebuild(
     }
     let recipe = env.recipe(computer_id)?;
     let image = env.newest_image()?;
+    if !force && info.image.as_deref() == Some(image.as_str()) {
+        return Err(refuse(format!(
+            "{} is already on the newest image. Ask for a forced rebuild (silo rebuild --force) to rebuild it anyway.",
+            info.name
+        )));
+    }
     let limit = home_limit(info.root_disk_gib);
     let home = env.home_bytes(computer_id)?;
     if home > limit {
@@ -233,7 +282,7 @@ pub fn rebuild(
         old_id: info.id.clone(),
         old_name: info.name.clone(),
         new_id: env.fresh_id(),
-        new_name: build_name(&info.name, &key),
+        new_name: build_name(&key),
         undo_id: env.fresh_id(),
         undo_name: undo_name.clone(),
         image: image.clone(),
@@ -300,10 +349,21 @@ fn advance(
     if record.step < Step::Created {
         env.note("Building the new computer");
         env.create(&plan)?;
-        // The first start sets up the working account before the workspace arrives.
+        // The first start sets up the working account before the home folder arrives.
         env.start(&plan.new_id)?;
         stop_and_wait(env, &plan.new_id)?;
         save(env, journal, record, Step::Created)?;
+    }
+    if record.step < Step::HomeCarried {
+        env.note("Carrying the home folder");
+        env.start(&plan.old_id)?;
+        env.start(&plan.new_id)?;
+        env.carry_home(&plan)?;
+        // The old computer never runs again after this: the workspace disk is cloned from it
+        // stopped, so every write to the workspace is in the clone.
+        stop_and_wait(env, &plan.old_id)?;
+        stop_and_wait(env, &plan.new_id)?;
+        save(env, journal, record, Step::HomeCarried)?;
     }
     if record.step < Step::WorkspaceMoved {
         env.note("Copying the workspace disk");
@@ -311,17 +371,12 @@ fn advance(
         env.copy_ssh(&plan)?;
         save(env, journal, record, Step::WorkspaceMoved)?;
     }
-    if record.step < Step::HomeCarried {
-        env.note("Carrying the home folder");
-        env.start(&plan.old_id)?;
-        env.start(&plan.new_id)?;
-        env.carry_home(&plan)?;
-        save(env, journal, record, Step::HomeCarried)?;
-    }
     if record.step < Step::RecipeReplayed {
         if let Some(spec) = recipe.filter(|spec| spec.os == RecipeOs::Linux) {
             env.note("Installing the recipe on the new image");
+            env.start(&plan.new_id)?;
             env.replay_recipe(&plan.new_id, spec)?;
+            stop_and_wait(env, &plan.new_id)?;
         }
         save(env, journal, record, Step::RecipeReplayed)?;
     }
@@ -359,8 +414,9 @@ fn finish(env: &dyn RebuildEnv, journal: &Journal, record: &Record) {
     journal.remove(&record.plan.old_id);
 }
 
-/// Puts everything back before the swap: the identities if the swap had begun, then the build
-/// sandbox and its staged files go, and the computer runs again if it did.
+/// Puts everything back: the identities if the swap had begun, then the build sandbox and its
+/// staged files go, and the computer runs again only if it did when the rebuild began (it is
+/// left stopped otherwise).
 fn roll_back(env: &dyn RebuildEnv, journal: &Journal, record: &Record) -> Result<(), String> {
     let plan = &record.plan;
     for id in [&plan.new_id, &plan.old_id] {
@@ -382,10 +438,14 @@ fn roll_back(env: &dyn RebuildEnv, journal: &Journal, record: &Record) -> Result
     Ok(())
 }
 
-/// Finishes or rolls back a rebuild the engine stopped in the middle of: finished when the
-/// swap was done, rolled back otherwise.
+/// Finishes or rolls back a rebuild the engine stopped in the middle of. Once the swap has
+/// begun it is finished (the swap repeats harmlessly from wherever it stopped, and both
+/// sandboxes are fully prepared by then); before that the build is thrown away.
 fn recover_record(env: &dyn RebuildEnv, journal: &Journal, record: &Record) -> Result<(), String> {
-    if record.step >= Step::Swapped {
+    if record.step >= Step::Swapping {
+        if record.step < Step::Swapped {
+            env.swap_apply(&record.plan)?;
+        }
         finish(env, journal, record);
         Ok(())
     } else {
@@ -402,9 +462,9 @@ pub fn interrupted_ids(journal: &Journal) -> Vec<String> {
         .collect()
 }
 
-/// Settles the interrupted rebuild of `computer_id` with its lane held from the start. `held`
-/// runs once the lane is held, so the caller can let startup go on knowing no other rebuild
-/// of the computer can begin meanwhile. It is tried up to `attempts` times, `pause` apart (the
+/// Settles the interrupted rebuild of `computer_id` with its lane and operation gate held from
+/// the start. `held` runs once they are, so the caller can let startup go on knowing nothing
+/// can start, stop or change the computer meanwhile. It is tried up to `attempts` times, `pause` apart (the
 /// runtime may not be ready yet at engine start).
 pub fn recover_one(
     env: &dyn RebuildEnv,
@@ -415,6 +475,7 @@ pub fn recover_one(
     pause: Duration,
 ) -> Result<(), String> {
     let _lane = lane::acquire(computer_id, Duration::from_secs(30))?;
+    let _gate = env.hold(computer_id)?;
     held();
     let mut last = Ok(());
     for attempt in 0..attempts.max(1) {

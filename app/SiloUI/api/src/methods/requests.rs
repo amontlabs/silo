@@ -308,7 +308,7 @@ pub fn computers_restart(params: common::ComputerTargetParams) -> Request<kind::
 }
 
 /// `computers.rebuild`
-pub fn computers_rebuild(params: common::ComputerTargetParams) -> Request<kind::Job> {
+pub fn computers_rebuild(params: computers::ComputerRebuildParams) -> Request<kind::Job> {
     Request::new(MethodParams::ComputersRebuild(params))
 }
 

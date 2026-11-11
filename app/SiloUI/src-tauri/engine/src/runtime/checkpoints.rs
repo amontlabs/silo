@@ -1149,8 +1149,26 @@ pub fn create_for_job(
     admitted()?;
     guard.allow_cancel();
     guard.expect_within(std::time::Duration::from_secs(15 * 60));
-    shutdown::ensure_accepting_operations()?;
+    let checkpoint = create_while_held(paths, computer_id, name, kind, retention)?;
+    drop(guard);
+    Ok(checkpoint)
+}
+
+/// [`create_for_job`] for a caller that already holds the computer's operation gate.
+pub fn create_while_held(
+    paths: &RuntimePaths,
+    computer_id: &str,
+    name: &str,
+    kind: silo_api::methods::checkpoints::CheckpointKind,
+    retention: &dyn Fn() -> Result<u32, String>,
+) -> Result<silo_api::methods::checkpoints::Checkpoint, String> {
     use silo_api::methods::checkpoints::CheckpointKind;
+
+    debug_assert!(
+        super::operation_gate::held(),
+        "a checkpoint is captured under the computer's operation gate"
+    );
+    shutdown::ensure_accepting_operations()?;
     if kind == CheckpointKind::Automatic && retention()? == 0 {
         return Err(crate::checkpoints::AUTOMATIC_OFF.into());
     }
@@ -1165,7 +1183,6 @@ pub fn create_for_job(
         depth,
     )
     .map_err(|error| error.to_string())?;
-    drop(guard);
     Ok(api_checkpoint(checkpoint))
 }
 

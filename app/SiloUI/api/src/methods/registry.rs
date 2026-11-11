@@ -112,7 +112,7 @@ define_registry! {
     ComputersLaunch => ("computers.launch", Query, computers::ComputerLaunchParams, computers::LaunchStatus);
     ComputersList => ("computers.list", Query, computers::ComputerListParams, computers::ComputersListResult);
     ComputersRestart => ("computers.restart", Job, common::ComputerTargetParams, common::JobStartResult);
-    ComputersRebuild => ("computers.rebuild", Job, common::ComputerTargetParams, common::JobStartResult);
+    ComputersRebuild => ("computers.rebuild", Job, computers::ComputerRebuildParams, common::JobStartResult);
     ComputersShell => ("computers.shell", Query, computers::ComputerShellParams, computers::ApplicationSource);
     ComputersStart => ("computers.start", Job, common::ComputerTargetParams, common::JobStartResult);
     ComputersStop => ("computers.stop", Job, common::ComputerTargetParams, common::JobStartResult);

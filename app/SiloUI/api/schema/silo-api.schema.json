@@ -3420,6 +3420,30 @@
       },
       "type": "object"
     },
+    "ComputerRebuildParams": {
+      "description": "`computers.rebuild`: the computer to rebuild, and whether to rebuild it although it is\nalready on the newest image.",
+      "properties": {
+        "computerId": {
+          "type": "string"
+        },
+        "deviceId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "force": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "computerId"
+      ],
+      "type": "object"
+    },
     "ComputerRebuildResult": {
       "description": "The final result of `computers.rebuild`.",
       "properties": {
@@ -10561,7 +10585,7 @@
               "type": "string"
             },
             "params": {
-              "$ref": "#/$defs/ComputerTargetParams"
+              "$ref": "#/$defs/ComputerRebuildParams"
             }
           },
           "required": [
@@ -20329,7 +20353,7 @@
     {
       "kind": "job",
       "name": "computers.rebuild",
-      "paramsType": "common::ComputerTargetParams",
+      "paramsType": "computers::ComputerRebuildParams",
       "resultType": "common::JobStartResult"
     },
     {

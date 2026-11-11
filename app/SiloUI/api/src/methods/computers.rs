@@ -30,7 +30,18 @@ pub type ComputerLaunchResult = LaunchStatus;
 pub type ComputerDismissErrorParams = ComputerTargetParams;
 pub type ComputerForceStopParams = ComputerTargetParams;
 pub type ComputerLifecycleParams = ComputerTargetParams;
-pub type ComputerRebuildParams = ComputerTargetParams;
+
+wire_struct! {
+    /// `computers.rebuild`: the computer to rebuild, and whether to rebuild it although it is
+    /// already on the newest image.
+    ComputerRebuildParams {
+        computer_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        device_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        force: Option<bool>,
+    }
+}
 
 wire_struct! {
     /// The final result of `computers.rebuild`.

@@ -5233,6 +5233,38 @@ pub fn change_computer_configuration_with_host_and_job(
     result
 }
 
+/// [`change_computer_configuration_with_host`] for a caller that holds a computer's operation
+/// gate for its whole job (no device-wide operation runs meanwhile, so the saved computers
+/// are the caller's to change). The gate does not nest, so the change does not take it again.
+pub fn change_computer_configuration_while_held(
+    host: &dyn RuntimeHost,
+    change: ComputerConfigurationChange,
+) -> Result<ApplicationSource, String> {
+    debug_assert!(
+        operation_gate::held(),
+        "this change relies on the caller's operation gate"
+    );
+    host.ensure_runtime_ready()?;
+    let request_id = normalize_request_id(None)?;
+    let paths = runtime_paths(host)?;
+    shutdown::ensure_accepting_operations()?;
+    let mut request = read_metadata(&paths.metadata).map_err(|e| e.to_string())?;
+    let before = request.computers.clone();
+    change.apply(&mut request.computers)?;
+    let _reservation =
+        crate::computer_names::reserve(&new_names(&before, &request.computers), &|| {
+            host.macos_computer_names()
+        })?;
+    let deleted = change.deleted_ids();
+    let result =
+        apply_configuration_with_progress(host, &paths, request, &request_id, None);
+    if result.is_ok() {
+        host.clear_computer_notices(&deleted);
+        crate::changes::store::forget(host.engine_context().as_ref(), &deleted);
+    }
+    result
+}
+
 /// Read every computer with no operation-overlap policy: each computer's reading is taken as
 /// settled. A computer whose own inspection fails is returned stale (its last known state with
 /// the reason) instead of failing every computer. Health checks and tests use this.

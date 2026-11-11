@@ -10,8 +10,8 @@ use silo_api::methods::{
     common::{ComputerTargetParams, DeviceParams},
     computers::{
         ComputerConfiguration, ComputerConfigurationChange, ComputerConfigurationChangeParams,
-        ComputerCreateParams, ComputerDeleteParams, ComputerRuntimeKind, DesktopConfiguration,
-        MacosComputerCreateRequest,
+        ComputerCreateParams, ComputerDeleteParams, ComputerRebuildParams, ComputerRuntimeKind,
+        DesktopConfiguration, MacosComputerCreateRequest,
     },
     desktop::{DesktopAction, DesktopActionParams},
     guest::GuestExecParams,
@@ -854,6 +854,8 @@ const RECIPE_KEY_PREFIX: &str = "recipe:";
 pub const BUILDER_PREFIX: &str = "silo-build-";
 /// Name prefix of the hidden copies an export without logins is made from.
 pub const EXPORT_COPY_PREFIX: &str = "silo-export-";
+/// Name prefix of the hidden computer a rebuild builds beside the one it rebuilds.
+pub const REBUILD_BUILD_PREFIX: &str = "silo-rebuild-";
 /// The longest a throwaway fork is left idle, however long the real fork has run.
 pub const BASELINE_CAP_SECONDS: u64 = 600;
 
@@ -1537,19 +1539,22 @@ pub async fn replace_main(
         .await
 }
 
-/// Rebuilds a Linux computer on the newest guest image, keeping its workspace and home.
+/// Rebuilds a Linux computer on the newest guest image, keeping its workspace and home. A
+/// computer already on the newest image is refused unless `force` is set.
 pub async fn rebuild(
     engine: &Engine,
     computer: &str,
+    force: bool,
     progress: Progress<'_>,
 ) -> Result<Value, CliError> {
     let computer = engine.computer(computer).await?;
     engine
         .run_job(
             &format!("Rebuilding {}", computer.name),
-            requests::computers_rebuild(ComputerTargetParams {
+            requests::computers_rebuild(ComputerRebuildParams {
                 device_id: None,
                 computer_id: computer.id,
+                force: force.then_some(true),
             }),
             progress,
         )

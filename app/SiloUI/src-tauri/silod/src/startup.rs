@@ -296,14 +296,17 @@ fn start_promote_recovery(
 }
 
 /// Settles a rebuild the engine stopped in the middle of: finished when its swap was done,
-/// rolled back otherwise. The computer's lane is held from engine start until it is settled,
-/// and the recovery is retried while the runtime is not ready.
+/// rolled back before that. The computer's lane and operation gate are held from engine start
+/// until it is settled, and the recovery is retried while the runtime is not ready.
 fn start_rebuild_recovery(
     context: Arc<SilodContext>,
     host: Arc<dyn RuntimeHost>,
     held: &std::sync::mpsc::Sender<()>,
 ) -> usize {
     let journal = silo_engine::rebuild::service::journal_for(host.engine_context().as_ref());
+    // Home folders staged for a rebuild that no longer exists were left by a stop in the middle
+    // of carrying one.
+    silo_engine::rebuild::service::sweep_stage(host.engine_context().as_ref());
     let mut started = 0;
     for id in silo_engine::rebuild::interrupted_ids(&journal) {
         let (context, host, journal, held) =

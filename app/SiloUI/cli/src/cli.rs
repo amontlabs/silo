@@ -517,6 +517,9 @@ pub struct ReplaceMainCommand {
 pub struct RebuildCommand {
     /// The computer to rebuild on the newest image.
     pub computer: String,
+    /// Rebuild it even when it is already on the newest image.
+    #[arg(long)]
+    pub force: bool,
 }
 
 #[derive(Args, Debug)]
@@ -1127,7 +1130,7 @@ async fn dispatch(
             .await;
         }
         Command::Rebuild(rebuild) => {
-            return rebuild_command(engine, &rebuild.computer, json).await;
+            return rebuild_command(engine, &rebuild.computer, rebuild.force, json).await;
         }
         Command::Fold(merge) => {
             eprintln!("`silo fold` is now `silo merge`; `silo replace-main` replaces main.");
@@ -1708,8 +1711,13 @@ async fn replace_main(
 }
 
 /// `silo rebuild`.
-async fn rebuild_command(engine: &Engine, computer: &str, json: bool) -> Result<i32, CliError> {
-    let value = ops::rebuild(engine, computer, &stderr_progress).await?;
+async fn rebuild_command(
+    engine: &Engine,
+    computer: &str,
+    force: bool,
+    json: bool,
+) -> Result<i32, CliError> {
+    let value = ops::rebuild(engine, computer, force, &stderr_progress).await?;
     emit(json, &value, render::rebuild);
     Ok(0)
 }

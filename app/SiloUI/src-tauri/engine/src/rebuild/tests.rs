@@ -2,13 +2,20 @@
 //! and the undo computer, and the recipe replay. The fake environment keeps a table of
 //! sandboxes the way `msb inspect` and `msb rename` see them.
 
-use std::{collections::HashMap, fs, sync::Mutex, time::Duration};
+use std::{
+    any::Any,
+    collections::HashMap,
+    fs,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
 use silo_api::methods::recipes::{RecipeOs, RecipePackages, RecipeService, RecipeSpec};
 
 use super::{
     engine_env::{
-        can_clone, clone_workspace, copy_folder, parse_du, replay_steps, PACK_HOME, UNPACK_HOME,
+        can_clone, clone_workspace, copy_folder, parse_du, parse_pack_report, replay_steps,
+        PACK_HOME, UNPACK_HOME,
     },
     journal::{Journal, Plan, Record, Step},
     rebuild, recover_one, swap, undo_name, Info, RebuildEnv,
@@ -139,7 +146,7 @@ fn plan() -> Plan {
         old_id: "id-old".into(),
         old_name: "dev".into(),
         new_id: "id-new".into(),
-        new_name: "dev-rb-aaaa1111".into(),
+        new_name: "silo-rebuild-aaaa1111".into(),
         undo_id: "id-undo".into(),
         undo_name: "dev-undo".into(),
         image: "image-v5".into(),
@@ -150,12 +157,12 @@ fn plan() -> Plan {
 fn before() -> Table {
     Table::with(&[
         ("dev", "id-old", "old"),
-        ("dev-rb-aaaa1111", "id-new", "new"),
+        ("silo-rebuild-aaaa1111", "id-new", "new"),
     ])
 }
 
 fn after_tags(table: &Table) -> Vec<Option<&'static str>> {
-    table.tags(&["dev", "dev-undo", "dev-rb-aaaa1111"])
+    table.tags(&["dev", "dev-undo", "silo-rebuild-aaaa1111"])
 }
 
 #[test]
@@ -190,7 +197,7 @@ fn a_swap_stopped_after_any_change_is_finished_or_reverted() {
         swap::revert(&table, &plan()).unwrap();
         assert_eq!(after_tags(&table), [Some("old"), None, Some("new")]);
         assert_eq!(table.named("dev").unwrap().label, "id-old");
-        assert_eq!(table.named("dev-rb-aaaa1111").unwrap().label, "id-new");
+        assert_eq!(table.named("silo-rebuild-aaaa1111").unwrap().label, "id-new");
     }
 }
 
@@ -201,7 +208,7 @@ fn a_swap_reverted_from_the_end_returns_every_name_and_id() {
     swap::revert(&table, &plan()).unwrap();
     assert_eq!(after_tags(&table), [Some("old"), None, Some("new")]);
     assert_eq!(table.named("dev").unwrap().label, "id-old");
-    assert_eq!(table.named("dev-rb-aaaa1111").unwrap().label, "id-new");
+    assert_eq!(table.named("silo-rebuild-aaaa1111").unwrap().label, "id-new");
     // Reverting again changes nothing.
     let done = table.log.lock().unwrap().len();
     swap::revert(&table, &plan()).unwrap();
@@ -214,7 +221,7 @@ fn sandboxes_that_are_not_the_expected_ones_are_left_alone() {
     let table = Table::with(&[
         ("dev", "id-old", "old"),
         ("dev-undo", "id-other", "other"),
-        ("dev-rb-aaaa1111", "id-new", "new"),
+        ("silo-rebuild-aaaa1111", "id-new", "new"),
     ]);
     let error = swap::apply(&table, &plan()).unwrap_err();
     assert!(
@@ -250,7 +257,7 @@ fn the_saved_computers_get_an_undo_entry_and_lose_the_build_entry() {
     let mut computers = vec![
         configuration("a", "alpha"),
         configuration("id-old", "dev"),
-        configuration("id-new", "dev-rb-aaaa1111"),
+        configuration("id-new", "silo-rebuild-aaaa1111"),
         configuration("z", "zulu"),
     ];
     swap::swap_inventory(&mut computers, &plan());
@@ -279,7 +286,7 @@ fn the_saved_computers_get_an_undo_entry_and_lose_the_build_entry() {
         [
             ("a", "alpha"),
             ("id-old", "dev"),
-            ("id-new", "dev-rb-aaaa1111"),
+            ("id-new", "silo-rebuild-aaaa1111"),
             ("z", "zulu")
         ]
     );
@@ -295,11 +302,12 @@ fn undo_and_build_names_fit_a_computer_name() {
     assert_eq!(long.len(), 32);
     let undo = undo_name(long);
     assert!(undo.len() <= 32 && undo.ends_with("-undo"), "{undo}");
-    let build = super::build_name(long, "0123abcd");
-    assert!(
-        build.len() <= 32 && build.ends_with("-rb-0123abcd"),
-        "{build}"
-    );
+    // The build sandbox has a fixed-length name that Silo keeps out of lists.
+    let build = super::build_name("0123abcd");
+    assert_eq!(build, "silo-rebuild-0123abcd");
+    assert!(build.len() <= 32);
+    assert!(crate::computer_tree::hidden(&build));
+    assert!(!crate::computer_tree::hidden("dev-undo"));
     // A name cut at a dash does not leave a double dash.
     let cut = format!("{}-b", "a".repeat(26));
     assert_eq!(undo_name(&cut), format!("{}-undo", "a".repeat(26)));
@@ -316,7 +324,11 @@ struct Machine {
 struct Fake {
     machines: Mutex<HashMap<String, Machine>>,
     table: Table,
-    calls: Mutex<Vec<String>>,
+    calls: Arc<Mutex<Vec<String>>>,
+    /// The image the computer runs on.
+    image: Option<String>,
+    /// Makes the operation gate unavailable.
+    hold_fails: bool,
     /// Fails the next call to this method, once.
     fail_on: Mutex<Option<String>>,
     /// Makes every removal of the build fail.
@@ -345,7 +357,9 @@ impl Fake {
         Fake {
             machines: Mutex::new(machines),
             table: Table::with(&[("dev", old_id, "old")]),
-            calls: Mutex::default(),
+            calls: Arc::default(),
+            image: Some("image-v4".into()),
+            hold_fails: false,
             fail_on: Mutex::default(),
             broken_remove: Mutex::default(),
             os: Os::Linux,
@@ -401,7 +415,9 @@ impl Fake {
                 !matches!(
                     call.split(' ').next(),
                     Some(
-                        "info"
+                        "hold"
+                            | "release"
+                            | "info"
                             | "refusal"
                             | "name_in_use"
                             | "recipe"
@@ -414,7 +430,30 @@ impl Fake {
     }
 }
 
+/// The operation gate the fake hands out: it logs when it is let go.
+struct Gate {
+    calls: Arc<Mutex<Vec<String>>>,
+    id: String,
+}
+
+impl Drop for Gate {
+    fn drop(&mut self) {
+        self.calls.lock().unwrap().push(format!("release {}", self.id));
+    }
+}
+
 impl RebuildEnv for Fake {
+    fn hold(&self, id: &str) -> Result<Box<dyn Any>, String> {
+        self.calls.lock().unwrap().push(format!("hold {id}"));
+        if self.hold_fails {
+            return Err("Another computer operation is still running.".into());
+        }
+        Ok(Box::new(Gate {
+            calls: self.calls.clone(),
+            id: id.into(),
+        }))
+    }
+
     fn info(&self, id: &str) -> Result<Info, String> {
         let machines = self.machines.lock().unwrap();
         let machine = machines.get(id).ok_or("gone")?;
@@ -426,6 +465,7 @@ impl RebuildEnv for Fake {
             running: machine.running,
             busy: self.busy.clone(),
             root_disk_gib: 4,
+            image: self.image.clone(),
         })
     }
 
@@ -551,8 +591,10 @@ impl RebuildEnv for Fake {
         swap::apply(&self.table, plan)?;
         // The rebuilt sandbox now answers to the computer's id.
         let mut machines = self.machines.lock().unwrap();
+        let Some(new) = machines.remove(&plan.new_id) else {
+            return Ok(());
+        };
         let old = machines.remove(&plan.old_id).ok_or("gone")?;
-        let new = machines.remove(&plan.new_id).ok_or("gone")?;
         machines.insert(
             plan.old_id.clone(),
             Machine {
@@ -642,19 +684,19 @@ fn every_refusal_comes_before_any_change() {
         let mut fake = Fake::new(id, true);
         setup(&mut fake);
         let (_dir, journal) = journal();
-        let error = rebuild(&fake, &journal, id, WAIT).unwrap_err();
+        let error = rebuild(&fake, &journal, id, false, WAIT).unwrap_err();
         assert!(error.contains(expect), "{id}: {error}");
         assert!(error.ends_with("Nothing was changed."), "{id}: {error}");
         assert_eq!(fake.changes(), Vec::<String>::new(), "{id}");
         assert!(journal.all().is_empty(), "{id}");
         assert!(fake.running(id), "{id} still runs");
         // The lane was let go: the same attempt reaches the same refusal, not a busy lane.
-        assert_eq!(rebuild(&fake, &journal, id, WAIT).unwrap_err(), error);
+        assert_eq!(rebuild(&fake, &journal, id, false, WAIT).unwrap_err(), error);
     }
     let fake = Fake::new("c-gone", true);
     fake.machines.lock().unwrap().clear();
     let (_dir, journal) = journal();
-    let error = rebuild(&fake, &journal, "c-gone", WAIT).unwrap_err();
+    let error = rebuild(&fake, &journal, "c-gone", false, WAIT).unwrap_err();
     assert!(error.contains("no longer exists"), "{error}");
     assert_eq!(fake.changes(), Vec::<String>::new());
 }
@@ -664,9 +706,56 @@ fn the_refusal_for_a_taken_undo_name_names_it() {
     let mut fake = Fake::new("c-taken", true);
     fake.taken = vec!["dev-undo".into()];
     let (_dir, journal) = journal();
-    let error = rebuild(&fake, &journal, "c-taken", WAIT).unwrap_err();
+    let error = rebuild(&fake, &journal, "c-taken", false, WAIT).unwrap_err();
     assert!(error.contains("Computer 'dev-undo' already exists"), "{error}");
     assert!(error.contains("rebuilding 'dev'"), "{error}");
+}
+
+#[test]
+fn a_computer_already_on_the_newest_image_is_refused_unless_forced() {
+    let mut fake = Fake::new("c-new", true);
+    fake.image = Some("image-v5".into());
+    let (_dir, journal) = journal();
+    let error = rebuild(&fake, &journal, "c-new", false, WAIT).unwrap_err();
+    assert!(error.contains("already on the newest image"), "{error}");
+    assert!(error.contains("--force"), "{error}");
+    assert!(error.ends_with("Nothing was changed."), "{error}");
+    assert_eq!(fake.changes(), Vec::<String>::new());
+    assert!(journal.all().is_empty());
+    assert!(fake.running("c-new"));
+
+    rebuild(&fake, &journal, "c-new", true, WAIT).unwrap();
+    assert!(fake.called("swap_apply"));
+
+    // An image the runtime does not report does not stop a rebuild.
+    let mut fake = Fake::new("c-unknown", false);
+    fake.image = None;
+    rebuild(&fake, &journal, "c-unknown", false, WAIT).unwrap();
+    assert!(fake.called("swap_apply"));
+}
+
+#[test]
+fn nothing_is_changed_when_the_computers_gate_is_not_available() {
+    let mut fake = Fake::new("c-gate", true);
+    fake.hold_fails = true;
+    let (_dir, journal) = journal();
+    let error = rebuild(&fake, &journal, "c-gate", false, WAIT).unwrap_err();
+    assert!(error.contains("still running"), "{error}");
+    assert_eq!(fake.changes(), Vec::<String>::new());
+    assert!(journal.all().is_empty());
+}
+
+#[test]
+fn a_rebuild_is_rolled_back_with_the_gate_still_held() {
+    let fake = Fake::new("c-held", true);
+    fake.fail_once_in("move_workspace");
+    let (_dir, journal) = journal();
+    rebuild(&fake, &journal, "c-held", false, WAIT).unwrap_err();
+    let calls = fake.calls();
+    let released = calls.iter().position(|c| c.starts_with("release")).unwrap();
+    let removed = calls.iter().position(|c| c == "remove_build").unwrap();
+    assert!(removed < released, "{calls:?}");
+    assert_eq!(released, calls.len() - 1);
 }
 
 #[test]
@@ -674,7 +763,7 @@ fn a_rebuild_runs_the_steps_in_order_and_swaps_the_names() {
     let mut fake = Fake::new("c-ok", true);
     fake.recipe = Some(spec());
     let (_dir, journal) = journal();
-    let result = rebuild(&fake, &journal, "c-ok", WAIT).unwrap();
+    let result = rebuild(&fake, &journal, "c-ok", false, WAIT).unwrap();
     assert_eq!(result.computer_id, "c-ok");
     assert_eq!(result.name, "dev");
     assert_eq!(result.undo_name, "dev-undo");
@@ -684,21 +773,36 @@ fn a_rebuild_runs_the_steps_in_order_and_swaps_the_names() {
         [
             "stop c-ok",
             "checkpoint c-ok Before rebuild on the newest image",
-            "create id-n1 dev-rb-aaaa1111",
+            "create id-n1 silo-rebuild-aaaa1111",
             "start id-n1",
             "stop id-n1",
-            "move_workspace id-n1",
-            "copy_ssh id-n1",
             "start c-ok",
             "start id-n1",
             "carry_home c-ok id-n1",
-            "replay_recipe id-n1",
             "stop c-ok",
+            "stop id-n1",
+            "move_workspace id-n1",
+            "copy_ssh id-n1",
+            "start id-n1",
+            "replay_recipe id-n1",
             "stop id-n1",
             "swap_apply",
             "settle_swapped",
             "start c-ok",
         ]
+    );
+    // The gate is taken before the first change and kept to the very end.
+    let calls = fake.calls();
+    assert_eq!(calls.first().map(String::as_str), Some("hold c-ok"));
+    assert_eq!(calls.last().map(String::as_str), Some("release c-ok"));
+    assert_eq!(calls.iter().filter(|c| c.starts_with("hold")).count(), 1);
+    // After the workspace disk is cloned, the old computer never runs until the rebuilt one
+    // has taken its id.
+    let cloned = calls.iter().position(|c| c.starts_with("move_workspace")).unwrap();
+    let swapped = calls.iter().position(|c| c == "swap_apply").unwrap();
+    assert!(
+        !calls[cloned..swapped].iter().any(|c| c == "start c-ok"),
+        "{calls:?}"
     );
     assert!(journal.all().is_empty());
     // The rebuilt sandbox is `dev` under the computer's id and runs again; the old one is the
@@ -714,13 +818,10 @@ fn a_rebuild_runs_the_steps_in_order_and_swaps_the_names() {
 fn a_stopped_computer_stays_stopped_and_one_without_a_recipe_replays_nothing() {
     let fake = Fake::new("c-stopped", false);
     let (_dir, journal) = journal();
-    rebuild(&fake, &journal, "c-stopped", WAIT).unwrap();
+    rebuild(&fake, &journal, "c-stopped", false, WAIT).unwrap();
     assert!(!fake.called("replay_recipe"));
     assert!(!fake.running("c-stopped"));
-    assert_eq!(
-        fake.calls().last().map(String::as_str),
-        Some("settle_swapped")
-    );
+    assert_eq!(fake.changes().last().map(String::as_str), Some("settle_swapped"));
 }
 
 #[test]
@@ -728,13 +829,17 @@ fn the_recipe_is_replayed_in_the_new_computer_with_the_recorded_spec() {
     let mut fake = Fake::new("c-recipe", false);
     fake.recipe = Some(spec());
     let (_dir, journal) = journal();
-    rebuild(&fake, &journal, "c-recipe", WAIT).unwrap();
+    rebuild(&fake, &journal, "c-recipe", false, WAIT).unwrap();
     let replayed = fake.replayed.lock().unwrap().clone();
     assert_eq!(replayed, [("id-n1".to_owned(), spec())]);
-    // After the home folder arrived, before the swap.
+    // After the home folder and the workspace arrived, before the swap.
     let calls = fake.calls();
     let at = |name: &str| calls.iter().position(|c| c.starts_with(name)).unwrap();
-    assert!(at("carry_home") < at("replay_recipe") && at("replay_recipe") < at("swap_apply"));
+    assert!(
+        at("carry_home") < at("move_workspace")
+            && at("move_workspace") < at("replay_recipe")
+            && at("replay_recipe") < at("swap_apply")
+    );
 }
 
 #[test]
@@ -745,7 +850,7 @@ fn a_macos_recipe_is_not_replayed() {
         ..spec()
     });
     let (_dir, journal) = journal();
-    rebuild(&fake, &journal, "c-macrecipe", WAIT).unwrap();
+    rebuild(&fake, &journal, "c-macrecipe", false, WAIT).unwrap();
     assert!(!fake.called("replay_recipe"));
 }
 
@@ -770,7 +875,7 @@ fn a_failure_at_any_step_rolls_back_to_the_computer_as_it_was() {
         fake.recipe = Some(spec());
         fake.fail_once_in(method);
         let (_dir, journal) = journal();
-        let error = rebuild(&fake, &journal, &id, WAIT).unwrap_err();
+        let error = rebuild(&fake, &journal, &id, false, WAIT).unwrap_err();
         assert!(error.contains("injected failure"), "{method}: {error}");
         assert!(
             error.contains("rolled back; dev is as it was"),
@@ -784,7 +889,7 @@ fn a_failure_at_any_step_rolls_back_to_the_computer_as_it_was() {
         assert_eq!(fake.table.named("dev").unwrap().label, id, "{method}");
         assert!(fake.running(&id), "{method}");
         assert_eq!(fake.table.named("dev-undo"), None, "{method}");
-        assert_eq!(fake.table.named("dev-rb-aaaa1111"), None, "{method}");
+        assert_eq!(fake.table.named("silo-rebuild-aaaa1111"), None, "{method}");
         assert!(!fake.machines.lock().unwrap().contains_key("id-n1"), "{method}");
     }
 }
@@ -794,7 +899,7 @@ fn a_computer_that_was_stopped_is_not_started_by_a_rollback() {
     let fake = Fake::new("c-cold", false);
     fake.fail_once_in("carry_home");
     let (_dir, journal) = journal();
-    rebuild(&fake, &journal, "c-cold", WAIT).unwrap_err();
+    rebuild(&fake, &journal, "c-cold", false, WAIT).unwrap_err();
     // Started once to carry the home folder, stopped again by the rollback, not brought back.
     assert!(!fake.running("c-cold"));
     assert!(fake.called("remove_build"));
@@ -887,7 +992,7 @@ fn the_journal_follows_the_steps() {
         journal: &journal,
         seen: Mutex::default(),
     };
-    rebuild(&watching, &journal, "c-journal", WAIT).unwrap();
+    rebuild(&watching, &journal, "c-journal", false, WAIT).unwrap();
     assert_eq!(*watching.seen.lock().unwrap(), [Step::Swapping, Step::Swapped]);
 }
 
@@ -898,12 +1003,12 @@ fn a_rollback_that_fails_keeps_the_journal_and_the_next_start_finishes_it() {
     fake.fail_once_in("carry_home");
     *fake.broken_remove.lock().unwrap() = true;
     let (_dir, journal) = journal();
-    let error = rebuild(&fake, &journal, "c-stuck", WAIT).unwrap_err();
+    let error = rebuild(&fake, &journal, "c-stuck", false, WAIT).unwrap_err();
     assert!(error.contains("Rolling back also failed"), "{error}");
     assert!(error.contains("restarting Silo retries it"), "{error}");
     let left = journal.get("c-stuck").unwrap();
-    assert_eq!(left.step, Step::WorkspaceMoved);
-    assert!(fake.table.named("dev-rb-aaaa1111").is_some());
+    assert_eq!(left.step, Step::Created);
+    assert!(fake.table.named("silo-rebuild-aaaa1111").is_some());
 
     // The next start: the removal works now.
     *fake.broken_remove.lock().unwrap() = false;
@@ -912,7 +1017,7 @@ fn a_rollback_that_fails_keeps_the_journal_and_the_next_start_finishes_it() {
         .unwrap();
     assert_eq!(*held.lock().unwrap(), 1);
     assert!(journal.all().is_empty());
-    assert_eq!(fake.table.named("dev-rb-aaaa1111"), None);
+    assert_eq!(fake.table.named("silo-rebuild-aaaa1111"), None);
     assert_eq!(fake.table.named("dev").unwrap().label, "c-stuck");
     assert!(fake.running("c-stuck"));
 }
@@ -924,8 +1029,8 @@ const STEPS: [Step; 9] = [
     Step::Stopped,
     Step::Checkpointed,
     Step::Created,
-    Step::WorkspaceMoved,
     Step::HomeCarried,
+    Step::WorkspaceMoved,
     Step::RecipeReplayed,
     Step::Swapping,
     Step::Swapped,
@@ -985,7 +1090,10 @@ fn an_interrupted_rebuild_is_rolled_back_or_finished_by_the_step_it_reached() {
             // exactly when it was.
             assert_eq!(fake.table.named("dev").unwrap().label, id, "{label}");
             assert_eq!(fake.running(&id), was_running, "{label}");
-            if step >= Step::Swapped {
+            // The gate was taken before startup was told the computer is held.
+            assert_eq!(fake.calls().first(), Some(&format!("hold {id}")), "{label}");
+            if step >= Step::Swapping {
+                // Once the swap has begun it is finished, never undone.
                 assert!(fake.called("settle_swapped"), "{label}");
                 assert!(!fake.called("remove_build"), "{label}");
                 assert!(!fake.called("swap_revert"), "{label}");
@@ -993,11 +1101,71 @@ fn an_interrupted_rebuild_is_rolled_back_or_finished_by_the_step_it_reached() {
             } else {
                 assert!(fake.called("remove_build"), "{label}");
                 assert!(!fake.called("settle_swapped"), "{label}");
-                assert_eq!(fake.called("swap_revert"), step == Step::Swapping, "{label}");
+                assert!(!fake.called("swap_revert"), "{label}");
                 assert_eq!(after_tags(&fake.table), [Some("old"), None, None], "{label}");
             }
         }
     }
+}
+
+#[test]
+fn a_swap_that_stopped_after_any_rename_is_finished_by_the_next_start() {
+    for done in 0..4 {
+        for was_running in [true, false] {
+            let id = format!("c-partial-{done}-{was_running}");
+            let fake = Fake::new(&id, false);
+            let plan = Plan {
+                old_id: id.clone(),
+                new_id: "id-new".into(),
+                ..plan()
+            };
+            fake.create(&plan).unwrap();
+            // The engine stopped after `done` renames or relabels of the swap.
+            *fake.table.fail_after.lock().unwrap() = Some(done);
+            swap::apply(&fake.table, &plan).unwrap_err();
+            *fake.table.fail_after.lock().unwrap() = None;
+            fake.calls.lock().unwrap().clear();
+            let (_dir, journal) = journal();
+            journal
+                .save(&Record {
+                    plan,
+                    step: Step::Swapping,
+                    checkpoint: None,
+                    was_running,
+                    at: 1,
+                })
+                .unwrap();
+            recover_one(&fake, &journal, &id, &|| {}, 1, Duration::ZERO).unwrap();
+            let label = format!("{done} moves, running={was_running}");
+            assert_eq!(after_tags(&fake.table), [Some("new"), Some("old"), None], "{label}");
+            assert_eq!(fake.table.named("dev").unwrap().label, id, "{label}");
+            assert_eq!(fake.table.named("dev-undo").unwrap().label, "id-undo", "{label}");
+            assert!(fake.called("settle_swapped"), "{label}");
+            assert!(!fake.called("swap_revert") && !fake.called("remove_build"), "{label}");
+            assert_eq!(fake.running(&id), was_running, "{label}");
+            assert!(journal.all().is_empty(), "{label}");
+        }
+    }
+}
+
+#[test]
+fn recovery_does_not_let_startup_go_without_the_computers_gate() {
+    let (mut fake, _dir, journal) = interrupted("c-nogate", Step::Created, false);
+    fake.hold_fails = true;
+    let held = Mutex::new(0);
+    let error = recover_one(
+        &fake,
+        &journal,
+        "c-nogate",
+        &|| *held.lock().unwrap() += 1,
+        1,
+        Duration::ZERO,
+    )
+    .unwrap_err();
+    assert!(error.contains("still running"), "{error}");
+    assert_eq!(*held.lock().unwrap(), 0);
+    assert_eq!(fake.changes(), Vec::<String>::new());
+    assert_eq!(journal.all().len(), 1);
 }
 
 #[test]
@@ -1023,7 +1191,7 @@ fn a_rebuild_settles_an_interrupted_one_of_the_same_computer_first() {
     let (mut fake, _dir, journal) = interrupted("c-again", Step::Created, true);
     fake.ids = Mutex::new(vec!["id-n2".into(), "id-n1".into()]);
     fake.recipe = None;
-    let result = rebuild(&fake, &journal, "c-again", WAIT).unwrap();
+    let result = rebuild(&fake, &journal, "c-again", false, WAIT).unwrap();
     assert_eq!(result.undo_name, "dev-undo");
     let calls = fake.calls();
     let first_removal = calls.iter().position(|c| c == "remove_build").unwrap();
@@ -1079,7 +1247,77 @@ fn the_home_folder_travels_as_a_tar_file_that_keeps_owners_links_and_sparse_file
     for flag in ["--xattrs", "--acls", "--numeric-owner", "--same-owner"] {
         assert!(UNPACK_HOME.contains(flag), "{flag}");
     }
-    assert!(PACK_HOME.contains("/tmp/home.tar") && UNPACK_HOME.contains("/tmp/home.tar"));
+    // The file's name comes from the caller, never a fixed name in /tmp.
+    assert!(!PACK_HOME.contains("/tmp/") && !UNPACK_HOME.contains("/tmp/"));
+}
+
+#[test]
+fn a_partial_or_damaged_home_folder_is_not_carried() {
+    // Only an exit of 0 or 1 from tar counts, the file must exist and list cleanly, it is
+    // created exclusively and readable by root only.
+    for needle in [
+        "[ \"$rc\" -le 1 ] || exit \"$rc\"",
+        "[ -s \"$file\" ]",
+        "tar -tf \"$file\"",
+        "set -C",
+        "umask 077",
+    ] {
+        assert!(PACK_HOME.contains(needle), "{needle}");
+    }
+    assert!(!PACK_HOME.contains("; true"));
+    // The unpacking compares the working account's numeric owner and the file's checksum with
+    // what the packing reported, before anything is written.
+    let unpack_check = UNPACK_HOME.find("sha256sum").unwrap();
+    let extraction = UNPACK_HOME.find("tar -C /home -xpf").unwrap();
+    assert!(unpack_check < extraction);
+    assert!(UNPACK_HOME.contains("id -u silo") && UNPACK_HOME.contains("id -g silo"));
+
+    let sum = "a".repeat(64);
+    assert_eq!(
+        parse_pack_report(format!("1000 1000 {sum}\n").as_bytes()),
+        Ok(super::engine_env::PackReport {
+            uid: "1000".into(),
+            gid: "1000".into(),
+            sum: sum.clone()
+        })
+    );
+    for bad in [
+        String::new(),
+        "1000 1000\n".into(),
+        format!("x 1000 {sum}"),
+        format!("1000 1000 {}", "z".repeat(64)),
+        format!("1000 1000 {}", "a".repeat(10)),
+    ] {
+        assert!(parse_pack_report(bad.as_bytes()).is_err(), "{bad}");
+    }
+}
+
+#[test]
+fn staged_home_folders_nobody_waits_for_are_swept() {
+    let dir = tempfile::tempdir().unwrap();
+    let stage = dir.path().join("stage");
+    write(&stage.join("home-aaaa1111.tar"), "kept");
+    write(&stage.join("home-dead0000.tar"), "stray");
+    write(&stage.join("other"), "stray");
+    let journal = Journal::new(dir.path().join("rebuild"));
+    journal
+        .save(&Record {
+            plan: plan(),
+            step: Step::Created,
+            checkpoint: None,
+            was_running: false,
+            at: 1,
+        })
+        .unwrap();
+    super::sweep_stage(&journal, &stage);
+    let left: Vec<String> = fs::read_dir(&stage)
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(left, ["home-aaaa1111.tar"]);
+    // A folder that does not exist is not an error.
+    super::sweep_stage(&journal, &dir.path().join("none"));
 }
 
 fn out(code: i32, stdout: &str, stderr: &str) -> ExecOut {
@@ -1230,6 +1468,28 @@ fn a_single_raw_workspace_disk_keeps_the_new_sandboxes_journal() {
         "data"
     );
     assert_eq!(fs::read(&journal).unwrap(), before);
+}
+
+#[test]
+fn the_owner_marker_of_a_workspace_disk_stays_the_new_sandboxs_own() {
+    let dir = tempfile::tempdir().unwrap();
+    if !can_clone(dir.path()) {
+        return;
+    }
+    sandbox(dir.path(), "old", "vol-old", &[("disk.raw", "data"), (".disk-owner", "old")], &["disk.raw"]);
+    sandbox(dir.path(), "new", "vol-new", &[("disk.raw", "empty"), (".disk-owner", "new")], &["disk.raw"]);
+    clone_workspace(&dir.path().join("old"), &dir.path().join("new")).unwrap();
+    let disk = dir.path().join("new/owned-volumes/workspace_abc");
+    assert_eq!(fs::read_to_string(disk.join("disk.raw")).unwrap(), "data");
+    assert_eq!(fs::read_to_string(disk.join(".disk-owner")).unwrap(), "new");
+
+    // A new sandbox whose disk has no marker does not get the old one's.
+    sandbox(dir.path(), "plain", "vol-plain", &[("disk.raw", "empty")], &["disk.raw"]);
+    clone_workspace(&dir.path().join("old"), &dir.path().join("plain")).unwrap();
+    assert!(!dir
+        .path()
+        .join("plain/owned-volumes/workspace_abc/.disk-owner")
+        .exists());
 }
 
 #[test]

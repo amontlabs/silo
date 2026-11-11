@@ -35,12 +35,13 @@ pub struct Sources<'a> {
     pub open_request: &'a dyn Fn(&str) -> Option<String>,
 }
 
-/// Names of the throwaway computers Silo makes for its own measurements, recipe builds and
-/// exports without logins.
+/// Names of the throwaway computers Silo makes for its own measurements, recipe builds,
+/// exports without logins and rebuilds on the newest image.
 pub fn hidden(name: &str) -> bool {
     name.starts_with("silo-baseline-")
         || name.starts_with("silo-build-")
         || name.starts_with(crate::export_scrub::COPY_PREFIX)
+        || name.starts_with(crate::rebuild::BUILD_PREFIX)
 }
 
 fn from_of(
