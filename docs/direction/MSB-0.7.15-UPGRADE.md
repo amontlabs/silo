@@ -107,3 +107,9 @@ The integration step stacks the chains and regenerates `app/SiloUI/patches/*-0.7
   over the new default `http` deny settings and the repair step must stop running VMs before
   diagnosing (`fix/msb-0714-live`); a full checkpoint plus a fork of the same 0.7.6 computer is
   `recovery_required` (`silo/0714-fix-forkckpt`).
+- 2026-11-11: fixes in: export accepts the runtime's default http settings and the repair step
+  stops running VMs first (`b295361dd`); raw-IP finding is upstream #1825's JSON denial (no data
+  leaves; kept, OWNER_REVIEW 27); the fork + full checkpoint refusal is an upstream bug in stock
+  v0.7.14 (`root_name` rejects a fork's `layer_<id>.qcow2`), fixed by the new patch
+  `fork-layer-names` (23 patches). Upstream issue draft:
+  `~/code/projects/msb-upstream/fork-checkpoint-repair-issue.md` (not filed). Live re-run started.
