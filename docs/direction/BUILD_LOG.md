@@ -39,7 +39,7 @@ Plan: [PLAN.md](PLAN.md). Agent rules: [AGENT-BRIEF.md](AGENT-BRIEF.md).
 | T5a review | done 2026-11-11 (Opus) | | no critical finding: identity, the gate and the network rule hold. Eight issues from loopback being shared ground: the token is not tied to its port and two enables can race; a token learned while the engine is down still works after restart; a turned-off or moved port stays reachable from the computer; unauthenticated connections can lock a computer's tools out; sessions survive a new token; a macOS fork and exports carry a live token; one stalled computer delays every endpoint check. Fix task (Opus), which also makes the handshake a challenge and response so the token never crosses: all eight fixed and merged 2026-11-11 (`fix/channel-handshake-security`); the focused suites passed after the merge. **Live part not run** (T5b held the Dev engine). To run when no Dev `silod --agent` is running: `T=$HOME/code/projects/silo-wt-targets/T5afix bash docs/direction/checks/t5_channel_check.sh 2>&1 \| tee -a docs/direction/evidence/T5a.txt` (new steps S4b, S4c, S8b, S10b, S11b; the bundle and guest binary are kept in that target folder; rebuild from `direction` if it has moved on). Open: a port another program already holds at engine start is reachable from the computer until it restarts; the wiring that ends a token after an export has no test |
 | T5b | done 2026-11-11, being merged | `feat/guest-silo-components` (`2540e2e67`) | live check 38 of 38 on its branch. No review. The first merge attempt was lost to a rate limit; restarted on `merge/t5b-into-direction-2`: id ends `49a74f5b-16c1-4e77-a04c-1ac2864ea218` (Sonnet). It also fixes the Codex install's folder mode, and runs BOTH live scripts on the merged code (the owed live part of the T5a fixes). It holds the Dev engine |
 | T6 | continued 2026-11-11 after a rate limit | `feat/direction-build-cli` (work saved as `578761ee6`) | continuation: id ends `769dfdfc-64ec-4bec-951c-391304ebb6c4` (Sonnet). Owns everything under `cli/src` |
-| T13b | continued 2026-11-11 after a rate limit | `feat/network-policy-ui` (one commit: commands and schemas) | continuation: id ends `4a8ec970-15a0-47b3-a555-9d6fc607847c` (Sonnet) |
+| T13b | merged 2026-11-11 | `feat/network-policy-controls` | 3112 frontend tests and the shell's command tests passed in the item (same base as the merge). No review; never run in the real app |
 | T13a | merged 2026-11-11 | `feat/agent-install-onboarding` | focused suites passed after the merge; 3062 of 3063 frontend tests in the item (one runtime test timed out under load). No review; never run in the real app. It also brought `main`'s four commits (pull request #111 and the rebased direction documents) into `direction`. T13b (network policy control in the app) can start |
 | T10 | merged 2026-11-11 | `t3/60767d54` | 2989 frontend tests and the shell's command tests passed in the item; no review (quota); never run in the real app. The click-through list is under Found |
 | T14 | merged 2026-11-10 | `feat/exclude-logins-export` | 998 focused tests passed after the merge. **The canary failed**: the imported computer has no login files, but both markers are still in the export file, in the base disk layers (a fork's disks are layers over the source's and `msb` cannot flatten them; trimming reaches only the top layer). Shipped as best effort with the wording "removed, traces may remain". [evidence](evidence/T14.txt). Linux virtual machines only; checkpoint, macOS and container exports keep the old warning. The Dev engine is stopped and free |
@@ -82,6 +82,13 @@ These were not asked of the owner. Each is open to change.
     requests, which narrows it).
 
 ## Found during the build
+
+- **T13b click-through for the live run:** open a computer, change its network mode, Save,
+  Restart; add a host, then an invalid one; accept a preset update; toggle Silo's tools; the
+  Network page's links; create a computer with a mode; edit the floors in Settings; a network
+  request on Pending. Open: whether a computer still being created accepts `network.policy.set`
+  (the app waits until it has no lifecycle action); the Network page's link opens the computer's
+  page without scrolling to the section; the tools row reads the components list in T5b's shape.
 
 - **Build folders changed on 2026-11-11** (another session, after the disk lost 80 GB in a day): a
   local `post-checkout` hook clones the main checkout's `app/SiloUI/target` into every new
