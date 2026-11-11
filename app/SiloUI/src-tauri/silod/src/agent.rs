@@ -126,6 +126,9 @@ pub(crate) fn serve(
     // Checkpoint records written before automatic checkpoints existed become manual ones,
     // once, before anything reads them.
     silo_engine::checkpoints::upgrade_layouts(context.as_ref(), &context.migration_controller())?;
+    // Computers created before protected storage stay closed until the launch pass has moved
+    // them (or reported why not); see `startup::move_to_protected_storage`.
+    context.migration_controller().hold_for_protected_storage();
     // Computers made before the network bootstrap existed are converted once per launch. Start
     // and computer-changing work stay closed until the pass ends; the pass boots guests, so it
     // runs on its own thread and waits for the main-thread loop to start.

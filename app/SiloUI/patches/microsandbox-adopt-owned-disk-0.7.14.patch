@@ -1,6 +1,6 @@
 diff --git a/crates/cli/lib/commands/adopt_disk.rs b/crates/cli/lib/commands/adopt_disk.rs
 new file mode 100644
-index 00000000..0e559348
+index 0000000000000000000000000000000000000000..0e559348e5f691fa1caafdf953deee7b190330b9
 --- /dev/null
 +++ b/crates/cli/lib/commands/adopt_disk.rs
 @@ -0,0 +1,23 @@
@@ -28,7 +28,7 @@ index 00000000..0e559348
 +    Ok(())
 +}
 diff --git a/crates/cli/lib/commands/mod.rs b/crates/cli/lib/commands/mod.rs
-index 95255d9e..57bde463 100644
+index 02e0fc8b506c0713491d60b5b4df0ddf0b17fc73..083c0ec8f9acd5152f85c528075b3bddca94f595 100644
 --- a/crates/cli/lib/commands/mod.rs
 +++ b/crates/cli/lib/commands/mod.rs
 @@ -8,6 +8,7 @@ use crate::ui;
@@ -40,17 +40,17 @@ index 95255d9e..57bde463 100644
  pub mod common;
  pub mod completion;
 diff --git a/crates/cli/lib/commands/sandbox.rs b/crates/cli/lib/commands/sandbox.rs
-index e6f8a031..85a3d8fd 100644
+index ef9505e8050dea4929b1fa5cbb303dd2f391ee13..994736a6ca049e761167cc264056d69839701cb6 100644
 --- a/crates/cli/lib/commands/sandbox.rs
 +++ b/crates/cli/lib/commands/sandbox.rs
 @@ -4,8 +4,8 @@ use clap::{Args, Subcommand};
  use microsandbox::LogLevel;
  
  use super::{
--    branch, copy, create, exec, inspect, list, logs, metrics, modify, pause, ping, ps, remove,
--    restart, restore, run, start, stop, touch, wait,
-+    adopt_disk, branch, copy, create, exec, inspect, list, logs, metrics, modify, pause, ping, ps,
-+    remove, restart, restore, run, start, stop, touch, wait,
+-    branch, copy, create, exec, inspect, jobs, list, logs, metrics, modify, pause, ping, ps,
+-    remove, restart, restore, run, start, stop, touch, wait,
++    adopt_disk, branch, copy, create, exec, inspect, jobs, list, logs, metrics, modify, pause,
++    ping, ps, remove, restart, restore, run, start, stop, touch, wait,
  };
  
  //--------------------------------------------------------------------------------------------------
@@ -64,7 +64,7 @@ index e6f8a031..85a3d8fd 100644
      /// Start a stopped sandbox.
      Start(start::StartArgs),
  
-@@ -116,6 +119,7 @@ pub async fn run(command: SandboxCommands, log_level: Option<LogLevel>) -> anyho
+@@ -131,6 +134,7 @@ pub async fn run(command: SandboxCommands, log_level: Option<LogLevel>) -> anyho
          SandboxCommands::Create(args) => create::run(args, log_level).await,
          SandboxCommands::Restore(args) => restore::run(args, log_level).await,
          SandboxCommands::Modify(args) => modify::run(args).await,
@@ -73,45 +73,57 @@ index e6f8a031..85a3d8fd 100644
          SandboxCommands::Stop(args) => stop::run(args).await,
          SandboxCommands::Pause(args) => pause::run(args, false).await,
 diff --git a/sdk/rust/lib/sandbox/mod.rs b/sdk/rust/lib/sandbox/mod.rs
-index 19ded39a..93bdc517 100644
+index 65112ab91189895a9ad09d5783dd912f21271d81..db3a111db2f0e3505d43baa44103adadf3a55d84 100644
 --- a/sdk/rust/lib/sandbox/mod.rs
 +++ b/sdk/rust/lib/sandbox/mod.rs
-@@ -459,6 +459,12 @@ impl Sandbox {
+@@ -484,6 +484,17 @@ impl Sandbox {
          backend.sandboxes().get(backend.clone(), name).await
      }
  
++    #[cfg(feature = "local")]
 +    /// Copy an inactive sandbox's external raw ext4 disk into lifecycle-owned
 +    /// storage without starting guest code. The source image is retained.
-+    pub async fn adopt_disk_as_owned(name: &str, guest: &str, source: Option<&std::path::Path>) -> MicrosandboxResult<()> {
++    pub async fn adopt_disk_as_owned(
++        name: &str,
++        guest: &str,
++        source: Option<&std::path::Path>,
++    ) -> MicrosandboxResult<()> {
 +        modify::adopt_disk_as_owned(crate::backend::default_backend(), name, guest, source).await
 +    }
 +
      /// List the first page of sandboxes using the default page size.
      pub async fn list() -> MicrosandboxResult<SandboxPage> {
          Self::list_with(|list| list).await
-diff --git a/sdk/rust/lib/sandbox/modify.rs b/sdk/rust/lib/sandbox/modify.rs
-index 79e9953d..d6b62f54 100644
---- a/sdk/rust/lib/sandbox/modify.rs
-+++ b/sdk/rust/lib/sandbox/modify.rs
-@@ -1,9 +1,10 @@
- //! Sandbox modification planning.
+diff --git a/sdk/rust/lib/sandbox/modify/local.rs b/sdk/rust/lib/sandbox/modify/local.rs
+index 44a8c98ead352d7f86d944779120c79e7f4520b9..9111b22d4f3b35920201e750b2bb4cb9dca0d98b 100644
+--- a/sdk/rust/lib/sandbox/modify/local.rs
++++ b/sdk/rust/lib/sandbox/modify/local.rs
+@@ -3,14 +3,16 @@
  
--use std::{collections::HashMap, sync::Arc};
-+use std::{collections::HashMap, path::Path, sync::Arc, time::Duration};
- 
- use microsandbox_types::{
--    EnvVar, RootDisk, RootfsSource, SecretSubstitution, SecretViolationAction,
-+    EnvVar, OwnedVolumeStorage, RootDisk, RootfsSource, SecretSubstitution, SecretViolationAction,
-+    VolumeMount,
+ use std::{
+     collections::{BTreeMap, HashMap},
++    path::Path,
+     sync::Arc,
++    time::Duration,
  };
+ 
+ use microsandbox_types::secret_plan::{
+     self, DesiredSecret, RunningSecret, SecretPlanCapability, SecretPlanInput, SecretPlanStatus,
+     SecretSettings,
+ };
+-use microsandbox_types::{EnvVar, RootDisk, RootfsSource};
++use microsandbox_types::{EnvVar, OwnedVolumeStorage, RootDisk, RootfsSource, VolumeMount};
  use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, Set, sea_query::Expr};
  
-@@ -1570,6 +1571,99 @@ fn resolve_secret_source_value(
+ #[cfg(feature = "local")]
+@@ -1215,6 +1217,155 @@ fn resolve_secret_source_value(
      }
  }
  
 +/// One-time conversion of an external raw ext4 disk into a sandbox-owned disk.
-+/// The caller should run this on an independent copy of any pre-upgrade home.
++///
++/// The sandbox must be inactive. The disk is copied and verified before the owned mount replaces
++/// the external one, and the external image is retained.
 +pub(crate) async fn adopt_disk_as_owned(
 +    backend: Arc<dyn Backend>,
 +    name: &str,
@@ -122,26 +134,54 @@ index 79e9953d..d6b62f54 100644
 +    if guest != "/workspace" {
 +        return Err(invalid("only the /workspace disk can be adopted"));
 +    }
-+    let local = backend.as_local().ok_or_else(|| MicrosandboxError::local_only(Operation::SandboxModify))?;
++    let local = backend
++        .as_local()
++        .ok_or_else(|| MicrosandboxError::local_only(Operation::SandboxModify))?;
 +    let run_dir = local.config().run_dir();
-+    let _transition = crate::LocalBackend::acquire_sandbox_transition_guard(&run_dir, name).await?;
-+    let _lifecycle = crate::runtime::acquire_sandbox_lifecycle_guard(
-+        &run_dir, name, Duration::from_secs(5),
-+    ).await?;
++    let transition = crate::LocalBackend::acquire_sandbox_transition_guard(&run_dir, name).await?;
++    let lineage = crate::snapshot::lineage::lock_source(&run_dir, name).await?;
++    let lifecycle =
++        crate::runtime::acquire_sandbox_lifecycle_guard(&run_dir, name, Duration::from_secs(5))
++            .await?;
 +    let handle = backend.sandboxes().get(backend.clone(), name).await?;
-+    if !matches!(handle.status_snapshot(), SandboxStatus::Created | SandboxStatus::Stopped | SandboxStatus::Crashed) {
-+        return Err(invalid("disk adoption requires a created, stopped, or crashed sandbox"));
++    let local_state = handle
++        .local()
++        .ok_or_else(|| MicrosandboxError::local_only(Operation::SandboxModify))?;
++    if !matches!(
++        handle.status_snapshot(),
++        SandboxStatus::Created | SandboxStatus::Stopped | SandboxStatus::Crashed
++    ) {
++        return Err(invalid(
++            "disk adoption requires a created, stopped, or crashed sandbox",
++        ));
 +    }
++    creation::require_complete(local.db().await?.read(), local_state.db_id, name).await?;
 +    let mut config = handle.config()?;
 +    let sandbox_dir = local.sandboxes_dir().join(name);
-+    let Some(index) = config.spec.mounts.iter().position(|mount| mount.guest() == guest) else {
++    let Some(index) = config
++        .spec
++        .mounts
++        .iter()
++        .position(|mount| mount.guest() == guest)
++    else {
 +        return Err(invalid("sandbox has no /workspace disk"));
 +    };
-+    if let VolumeMount::Owned { storage: OwnedVolumeStorage::Disk { .. }, .. } = &config.spec.mounts[index] {
++    if let VolumeMount::Owned {
++        storage: OwnedVolumeStorage::Disk { .. },
++        ..
++    } = &config.spec.mounts[index]
++    {
 +        crate::runtime::owned_volumes::validate(&sandbox_dir, &config.spec.mounts)?;
 +        return Ok(());
 +    }
-+    let VolumeMount::DiskImage { host, format, fstype, options, .. } = &config.spec.mounts[index] else {
++    let VolumeMount::DiskImage {
++        host,
++        format,
++        fstype,
++        options,
++        ..
++    } = &config.spec.mounts[index]
++    else {
 +        return Err(invalid("/workspace is not an external disk image"));
 +    };
 +    if *format != microsandbox_types::DiskImageFormat::Raw || fstype.as_deref() != Some("ext4") {
@@ -151,64 +191,90 @@ index 79e9953d..d6b62f54 100644
 +        return Err(invalid("external disk image must not be a symlink"));
 +    }
 +    let original = host.clone();
++    let options = *options;
 +    let source = source_override.unwrap_or(&original).to_path_buf();
 +    if std::fs::symlink_metadata(&source)?.file_type().is_symlink() {
 +        return Err(invalid("source disk image must not be a symlink"));
 +    }
-+    let options = options.clone();
 +    let size = std::fs::metadata(&source)?;
 +    if !size.is_file() || size.len() == 0 || size.len() % (1024 * 1024) != 0 {
 +        return Err(invalid("external disk has invalid size"));
 +    }
 +    let capacity_mib = u32::try_from(size.len() / (1024 * 1024))
 +        .map_err(|_| invalid("external disk exceeds the supported owned-disk size"))?;
-+    if source_override.is_some() && (std::fs::metadata(&original)?.len() != size.len()
-+        || microsandbox_image::checkpoint::sparse_file_integrity(&original)?.root
-+            != microsandbox_image::checkpoint::sparse_file_integrity(&source)?.root) {
-+        return Err(invalid("staged source disk differs from configured external disk"));
-+    }
 +    let storage = OwnedVolumeStorage::Disk { capacity_mib };
 +    let backing = crate::runtime::owned_volumes::backing_path(&sandbox_dir, guest, &storage);
-+    let backing_dir = backing.parent().ok_or_else(|| invalid("owned disk path is invalid"))?;
-+    let owned_root = backing_dir.parent().ok_or_else(|| invalid("owned disk path is invalid"))?;
-+    std::fs::create_dir_all(owned_root)?;
-+    if !backing_dir.exists() {
-+        let stage = tempfile::Builder::new().prefix(".owned-disk-adopt-").tempdir_in(&sandbox_dir)?;
-+        let staged = stage.path().join("disk.raw");
-+        microsandbox_utils::copy::fast_copy(&source, &staged)?;
-+        if std::fs::metadata(&staged)?.len() != size.len()
-+            || microsandbox_image::checkpoint::sparse_file_integrity(&source)?.root
-+                != microsandbox_image::checkpoint::sparse_file_integrity(&staged)?.root
++    let backing_dir = backing
++        .parent()
++        .ok_or_else(|| invalid("owned disk path is invalid"))?
++        .to_path_buf();
++    let owned_root = backing_dir
++        .parent()
++        .ok_or_else(|| invalid("owned disk path is invalid"))?
++        .to_path_buf();
++    let length = size.len();
++    let stage_parent = CreationStorage::acquire(local, name)?;
++    let stage_dir = sandbox_dir.clone();
++    tokio::task::spawn_blocking(move || -> MicrosandboxResult<()> {
++        // The worker keeps every guard, so cancelling the caller cannot release the disk early.
++        let _storage = stage_parent;
++        let _lifecycle = lifecycle;
++        let _lineage = lineage;
++        let _transition = transition;
++        let invalid = |message: &str| MicrosandboxError::InvalidConfig(message.into());
++        let root = |path: &Path| -> MicrosandboxResult<_> {
++            Ok(microsandbox_image::checkpoint::sparse_file_integrity(path)?.root)
++        };
++        let source_root = root(&source)?;
++        if source != original
++            && (std::fs::metadata(&original)?.len() != length || root(&original)? != source_root)
 +        {
-+            return Err(invalid("copied disk differs from source"));
++            return Err(invalid(
++                "staged source disk differs from configured external disk",
++            ));
 +        }
-+        std::fs::File::open(&staged)?.sync_all()?;
-+        std::fs::rename(stage.path(), backing_dir)?;
-+        std::fs::File::open(owned_root)?.sync_all()?;
-+    }
-+    if !Path::new(&backing).is_file()
-+        || std::fs::metadata(&backing)?.len() != size.len()
-+        || microsandbox_image::checkpoint::sparse_file_integrity(&source)?.root
-+            != microsandbox_image::checkpoint::sparse_file_integrity(&backing)?.root
-+    {
-+        return Err(invalid("owned disk backing differs from source"));
-+    }
++        std::fs::create_dir_all(&owned_root)?;
++        if !backing_dir.exists() {
++            let stage = tempfile::Builder::new()
++                .prefix(".owned-disk-adopt-")
++                .tempdir_in(&stage_dir)?;
++            let staged = stage.path().join("disk.raw");
++            microsandbox_utils::copy::fast_copy(&source, &staged)?;
++            if std::fs::metadata(&staged)?.len() != length || root(&staged)? != source_root {
++                return Err(invalid("copied disk differs from source"));
++            }
++            std::fs::File::open(&staged)?.sync_all()?;
++            std::fs::rename(stage.path(), &backing_dir)?;
++            std::fs::File::open(&owned_root)?.sync_all()?;
++        }
++        if !backing.is_file()
++            || std::fs::metadata(&backing)?.len() != length
++            || root(&backing)? != source_root
++        {
++            return Err(invalid("owned disk backing differs from source"));
++        }
++        Ok(())
++    })
++    .await
++    .map_err(|error| MicrosandboxError::Runtime(format!("disk adoption task failed: {error}")))??;
 +    config.spec.mounts[index] = VolumeMount::Owned {
-+        guest: guest.into(), storage, options,
++        guest: guest.into(),
++        storage,
++        options,
 +        stat_virtualization: microsandbox_types::StatVirtualization::Strict,
 +        host_permissions: microsandbox_types::HostPermissions::Private,
 +    };
 +    crate::runtime::owned_volumes::validate(&sandbox_dir, &config.spec.mounts)?;
-+    persist_config(&backend, &handle, &config).await?;
++    persist_config(&backend, &handle, &config, None).await?;
 +    Ok(())
 +}
 +
- async fn persist_config(
-     backend: &Arc<dyn Backend>,
-     handle: &super::SandboxHandle,
-@@ -2775,6 +2869,132 @@ mod tests {
-     use crate::backend::LocalBackend;
-     use crate::size::SizeExt;
+ /// Save the desired config, its caller overrides, and searchable labels in one transaction.
+ ///
+ /// With `active_labels`, also replace `active_config`, but only while the
+@@ -2343,6 +2494,133 @@ mod tests {
+         });
+     }
  
 +    async fn adopt_disk_fixture(
 +        status: SandboxStatus,
@@ -336,6 +402,20 @@ index 79e9953d..d6b62f54 100644
 +            assert_eq!(row.status, status);
 +        }
 +    }
++
      #[test]
      fn guest_flush_capability_never_silently_weakens_capture() {
          use microsandbox_types::GuestFlush::{Auto, Required, Skip};
+diff --git a/sdk/rust/lib/sandbox/modify/mod.rs b/sdk/rust/lib/sandbox/modify/mod.rs
+index 97e6b444270666264e80e3c17e110886c941451d..069724c44ffbafbaaeaf771261a61c93875d9e3f 100644
+--- a/sdk/rust/lib/sandbox/modify/mod.rs
++++ b/sdk/rust/lib/sandbox/modify/mod.rs
+@@ -7,6 +7,8 @@
+ mod builder;
+ #[cfg(feature = "local")]
+ mod local;
++#[cfg(feature = "local")]
++pub(crate) use local::adopt_disk_as_owned;
+ 
+ //--------------------------------------------------------------------------------------------------
+ // Re-Exports

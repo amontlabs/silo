@@ -95,6 +95,7 @@ test("Linux package overlay preserves non-tool resources and places tools outsid
     "runtime/microsandbox/manifest.json",
     "runtime/microsandbox/licenses/",
     "runtime/lfs-transfer/",
+    "runtime/guest-silo/",
     "runtime/git/manifest.json",
     "runtime/git/licenses/",
     "runtime/git/share/",

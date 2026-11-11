@@ -77,12 +77,42 @@ pub fn start_background(
         update_recovery,
     ));
     let state = context.runtime_state().startup().clone();
+    let migration_context = context.clone();
     let spawned = std::thread::Builder::new()
         .name("silod-launch-pass".into())
-        .spawn(move || silo_engine::startup::install(state, services));
+        .spawn(move || {
+            // Computers are not started or listed as healthy before their storage is moved.
+            move_to_protected_storage(&migration_context);
+            silo_engine::startup::install(state, services)
+        });
     if let Err(error) = spawned {
         eprintln!("silod: could not start the launch pass: {error}");
+        context.migration_controller().release_protected_storage();
     }
+}
+
+// MARK: Protected storage
+
+/// Moves computers created by MicroSandbox 0.7.6 to the protected storage of the bundled
+/// runtime, once per launch until none needs attention. Publishes `migration.changed` on every
+/// step; a computer that cannot be moved says why in the computers list.
+fn move_to_protected_storage(context: &Arc<SilodContext>) {
+    let migration = context.migration_controller();
+    let host = SilodRuntimeHost::for_engine(context.clone());
+    let result = (|| {
+        let storage = silo_engine::runtime_migration::selected_runtime_storage(
+            &context.paths().app_data,
+        )?;
+        let paths = runtime::migration_runtime_paths(&host, &storage)?;
+        migration.run_protected_storage(&runtime::ProcessRunner, &paths, &|| {
+            silo_engine::runtime_migration::publish_state(context.as_ref(), &migration)
+        })
+    })();
+    if let Err(error) = result {
+        eprintln!("silod: the computer storage upgrade did not finish: {error}");
+    }
+    // A failure before the step started would otherwise leave the computers closed.
+    migration.release_protected_storage();
 }
 
 // MARK: Launch migration

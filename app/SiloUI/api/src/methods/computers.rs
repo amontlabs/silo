@@ -338,6 +338,10 @@ pub struct ApplicationComputer {
     pub freshness: Freshness,
     #[serde(default, skip_serializing_if = "is_false")]
     pub settling: bool,
+    /// The computer's storage could not be moved to the protected layout of the new runtime. It
+    /// cannot start until a later launch finishes the move; `attention` says why.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub needs_storage_upgrade: bool,
     pub repositories: Vec<serde_json::Value>,
     pub files: Vec<serde_json::Value>,
     pub ports: Vec<serde_json::Value>,

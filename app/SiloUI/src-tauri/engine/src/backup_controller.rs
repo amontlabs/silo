@@ -3139,6 +3139,7 @@ fn commit_import(
     if let Err(error) = store_fork_record(controller, id, record) {
         return discard(error);
     }
+    let name = configuration.name().to_owned();
     save_import_metadata(
         original,
         configuration,
@@ -3153,7 +3154,14 @@ fn commit_import(
             let _ = recovery::discard_uncommitted_import(paths, controller, id, Some(group));
         }
         error
-    })
+    })?;
+    // An export from an older Silo can bring a computer in the layout the move exists for.
+    crate::runtime_migration::check_protected_storage_of_arrival(
+        &runtime::ProcessRunner,
+        paths,
+        &name,
+    );
+    Ok(())
 }
 
 /// Stores the fork-time record an archive carried as the record of the imported computer `id`.
@@ -6924,10 +6932,21 @@ mod tests {
         runtime::create_disposable_test_computer(&paths, existing_name).unwrap();
         let cache_hashes = || {
             use sha2::{Digest, Sha256};
-            fs::read_dir(paths.home.join("cache/vmdk"))
-                .unwrap()
-                .map(|entry| {
+            fn files(directory: &Path, found: &mut Vec<PathBuf>) {
+                for entry in fs::read_dir(directory).unwrap() {
                     let path = entry.unwrap().path();
+                    if path.is_dir() {
+                        files(&path, found);
+                    } else {
+                        found.push(path);
+                    }
+                }
+            }
+            let mut found = Vec::new();
+            files(&paths.home.join("cache/vmdk"), &mut found);
+            found
+                .into_iter()
+                .map(|path| {
                     let mut file = fs::File::open(&path).unwrap();
                     let mut hash = Sha256::new();
                     std::io::copy(&mut file, &mut hash).unwrap();

@@ -348,6 +348,11 @@ fn checkpoint_start_selects_native_scope_and_desired_restore_mode_separately() {
             restore.iter().any(|arg| arg == "--cpus"),
             desired_mode == "disk"
         );
+        assert_eq!(
+            restore.iter().any(|arg| arg == "--allow-missing-resources"),
+            desired_mode == "disk",
+            "native={native_scope}, desired={desired_mode}: {restore:?}"
+        );
     }
 }
 
@@ -6698,7 +6703,7 @@ fn run_sh(program: &str) -> std::process::Output {
 fn the_boot_patch_carries_the_script_the_engine_runs() {
     let patch = std::fs::read_to_string(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../patches/microsandbox-create-stopped-0.7.6.patch"),
+            .join("../../patches/microsandbox-create-stopped-0.7.14.patch"),
     )
     .unwrap();
     let lines: Vec<&str> = patch.lines().collect();

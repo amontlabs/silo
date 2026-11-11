@@ -9,7 +9,9 @@
 //! copied first, so an export needs no disk space beyond the file. The guest image does not travel:
 //! the header names the image the layers sit on, and the importing Silo needs the same one.
 //!
-//!     "SILO-CTR-EXPORT1" | header length (u32) | header (JSON) | per layer: frame length (u64) | zstd frame
+//! ```text
+//! "SILO-CTR-EXPORT1" | header length (u32) | header (JSON) | per layer: frame length (u64) | zstd frame
+//! ```
 //!
 //! An import reads a file somebody else made. Each layer is unpacked by `silo-ctr unpack` in the
 //! user namespace of a container, with the new layer as its root and a limit on memory and

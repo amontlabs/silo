@@ -1,17 +1,18 @@
 diff --git a/crates/cli/bin/main.rs b/crates/cli/bin/main.rs
+index dfc0bd786f983a44b3517f2ccf2aaa5eb85a9234..72a49f4a811951bc17a273149f8d5a5dc456bd4d 100644
 --- a/crates/cli/bin/main.rs
 +++ b/crates/cli/bin/main.rs
-@@ -265,7 +265,8 @@ fn silo_protocol_probe(arguments: &[std::ffi::OsString]) -> Option<&'static str>
-             || flag == "--silo-github-protocol"
-             || flag == "--silo-working-account-protocol"
-             || flag == "--silo-secret-values-protocol"
--            || flag == "--silo-runtime-instance-protocol" => Some("1"),
-+            || flag == "--silo-runtime-instance-protocol"
-+            || flag == "--silo-restore-strict-protocol" => Some("1"),
-         _ => None,
-     }
- }
-@@ -803,6 +804,7 @@ mod command_tests {
+@@ -271,7 +271,8 @@ fn silo_protocol_probe(arguments: &[std::ffi::OsString]) -> Option<&'static str>
+                 || flag == "--silo-github-protocol"
+                 || flag == "--silo-working-account-protocol"
+                 || flag == "--silo-secret-values-protocol"
+-                || flag == "--silo-runtime-instance-protocol" =>
++                || flag == "--silo-runtime-instance-protocol"
++                || flag == "--silo-restore-strict-protocol" =>
+         {
+             Some("1")
+         }
+@@ -869,6 +870,7 @@ mod command_tests {
              "--silo-working-account-protocol",
              "--silo-secret-values-protocol",
              "--silo-runtime-instance-protocol",
@@ -20,9 +21,10 @@ diff --git a/crates/cli/bin/main.rs b/crates/cli/bin/main.rs
              assert_eq!(silo_protocol_probe(&[flag.into()]), Some("1"));
          }
 diff --git a/crates/cli/lib/commands/restore.rs b/crates/cli/lib/commands/restore.rs
+index be2230a9000e20707dd0df61fae419839187cd51..8b84181c049cb47cee0eb30c50ce3f6a628729ef 100644
 --- a/crates/cli/lib/commands/restore.rs
 +++ b/crates/cli/lib/commands/restore.rs
-@@ -127,6 +127,11 @@ pub struct RestoreControlArgs {
+@@ -144,6 +144,11 @@ pub struct RestoreControlArgs {
      #[cfg(feature = "net")]
      #[arg(long, value_name = "TOKENS")]
      pub net_rule: Vec<String>,
@@ -34,7 +36,7 @@ diff --git a/crates/cli/lib/commands/restore.rs b/crates/cli/lib/commands/restor
      /// Deprecated alias for --max-tcp-connections.
      #[cfg(feature = "net")]
      #[arg(long, conflicts_with = "max_tcp_connections")]
-@@ -175,6 +180,9 @@ impl RestoreControlArgs {
+@@ -195,6 +200,9 @@ impl RestoreControlArgs {
              if let Some(policy) = self.network_policy()? {
                  builder = builder.network_policy(policy);
              }
@@ -44,7 +46,7 @@ diff --git a/crates/cli/lib/commands/restore.rs b/crates/cli/lib/commands/restor
              if let Some(limit) = self.max_tcp_connections.or(self.max_connections) {
                  builder = builder.max_tcp_connections(limit);
              }
-@@ -458,6 +466,32 @@ mod tests {
+@@ -635,6 +643,27 @@ mod tests {
          }
      }
  
@@ -61,12 +63,7 @@ diff --git a/crates/cli/lib/commands/restore.rs b/crates/cli/lib/commands/restor
 +            arguments.extend(flags);
 +            let cli = TestCli::try_parse_from(arguments).unwrap();
 +            assert_eq!(cli.args.controls.net_strict, expected);
-+            assert!(
-+                cli.args
-+                    .controls
-+                    .apply(Sandbox::restore("ready"))
-+                    .is_ok()
-+            );
++            assert!(cli.args.controls.apply(Sandbox::restore("ready")).is_ok());
 +        }
 +        assert!(
 +            TestCli::try_parse_from(["restore", "ready", "--name", "child", "--net-strict=maybe"])
@@ -78,9 +75,10 @@ diff --git a/crates/cli/lib/commands/restore.rs b/crates/cli/lib/commands/restor
      #[test]
      fn restore_parses_independent_tcp_udp_limits_and_rejects_duplicate_tcp_aliases() {
 diff --git a/sdk/rust/lib/sandbox/restore_builder.rs b/sdk/rust/lib/sandbox/restore_builder.rs
+index d6cdf7d32b753b73c0c04bf2b2f4cd0ea5733259..2457a842e29ef38c4f0d1939ae3e9ed0920127df 100644
 --- a/sdk/rust/lib/sandbox/restore_builder.rs
 +++ b/sdk/rust/lib/sandbox/restore_builder.rs
-@@ -155,6 +155,14 @@ impl RestoreBuilder {
+@@ -145,6 +145,14 @@ impl RestoreBuilder {
          self
      }
  
@@ -95,7 +93,7 @@ diff --git a/sdk/rust/lib/sandbox/restore_builder.rs b/sdk/rust/lib/sandbox/rest
      /// Set the destination host's concurrent TCP connection limit; zero explicitly means unlimited.
      /// The limit is applied before disk boot or full-restore network activation.
      #[cfg(feature = "net")]
-@@ -516,6 +524,25 @@ mod tests {
+@@ -517,6 +525,25 @@ mod tests {
          assert!(!config(&disabled).spec.network.enabled);
      }
  

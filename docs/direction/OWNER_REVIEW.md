@@ -112,3 +112,13 @@ was chosen and why; any can be changed. Older items are also in the build log un
 28. **Silo's own per-computer files (the channel endpoint, the tools receipt, ids and tokens) are
     never part of a merge**, so a fork's merge no longer conflicts on them (R8).
 29. **One merge ask is one row on Pending**; its review opens from that row (R8).
+
+30. **Blocked web requests from a computer get Silo's JSON "blocked by policy" answer instead of
+    a refused connection** (MicroSandbox 0.7.14, upstream #1825). In allowlist mode a direct
+    connection to an unlisted address on port 80 or 443 now completes, and the gateway answers
+    it with a 403 itself; nothing is sent to that address. Silo keeps upstream's behaviour rather
+    than carrying a patch to turn it off (branch `silo/0714-fix-net` has that patch if wanted).
+    The live check found other ports behave the same way: a connection to an unlisted address
+    completes but gets nothing back (DNS over TCP gets the gateway's own "no such name"), so a
+    program sees a silent connection or a timeout rather than an immediate refusal. The live
+    network test checks that no data comes back from the unlisted address.

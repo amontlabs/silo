@@ -1,18 +1,18 @@
 diff --git a/crates/runtime/lib/checkpoint/coordinator.rs b/crates/runtime/lib/checkpoint/coordinator.rs
-index 39419dd..bb247d7 100644
+index f84ecf94a28da5cf8f415745611cf61c238bb0fe..a695653bca070a45f6094b81566771703ffbc10d 100644
 --- a/crates/runtime/lib/checkpoint/coordinator.rs
 +++ b/crates/runtime/lib/checkpoint/coordinator.rs
-@@ -362,8 +362,7 @@ impl CheckpointCoordinator {
-         workload_control: Arc<WorkloadControl>,
+@@ -374,8 +374,7 @@ impl CheckpointCoordinator {
          owned_directories: BTreeMap<String, microsandbox_filesystem::OwnedDirectoryCheckpoint>,
      ) -> Result<Self, String> {
--        let root = runtime_dir.join("checkpoints");
+         let host = super::layout::host_root(runtime_dir)?;
+-        let root = host.join("checkpoints");
 -        std::fs::create_dir_all(&root).map_err(|error| error.to_string())?;
-+        let root = prepare_capture_root(runtime_dir)?;
-         let store = LocalObjectStore::open(runtime_dir.join("checkpoint-store"))
++        let root = prepare_capture_root(host)?;
+         let store = LocalObjectStore::open(host.join("checkpoint-store"))
              .map_err(|error| error.to_string())?;
          let root_disk = RuntimeOwnedRootDisk::open(runtime_dir, vm)?;
-@@ -2386,6 +2385,58 @@ fn coalesce_extents(extents: Vec<MemoryExtent>) -> Vec<MemoryExtent> {
+@@ -2412,6 +2411,58 @@ fn coalesce_extents(extents: Vec<MemoryExtent>) -> Vec<MemoryExtent> {
      output
  }
  
@@ -20,8 +20,8 @@ index 39419dd..bb247d7 100644
 +///
 +/// This is the first thing `open` does, so the sweep finishes before the executor accepts a
 +/// capture of this process.
-+fn prepare_capture_root(runtime_dir: &Path) -> Result<PathBuf, String> {
-+    let root = runtime_dir.join("checkpoints");
++fn prepare_capture_root(host: &Path) -> Result<PathBuf, String> {
++    let root = host.join("checkpoints");
 +    std::fs::create_dir_all(&root).map_err(|error| error.to_string())?;
 +    reclaim_stale_captures(&root);
 +    Ok(root)
@@ -71,7 +71,7 @@ index 39419dd..bb247d7 100644
  fn publish_root_last(staging: &Path, final_path: &Path, bytes: &[u8]) -> Result<(), String> {
      let root = staging.join("checkpoint.json");
      let mut file = std::fs::OpenOptions::new()
-@@ -2551,8 +2602,8 @@ fn sync_directory(path: &Path) -> io::Result<()> {
+@@ -2577,8 +2628,8 @@ fn sync_directory(path: &Path) -> io::Result<()> {
  mod tests {
      use super::{
          FrozenWorkload, MemoryObjectSink, PendingDeviceState, WorkloadControl, overlay_extents,
@@ -82,7 +82,7 @@ index 39419dd..bb247d7 100644
      };
      use std::collections::BTreeSet;
  
-@@ -2568,6 +2619,76 @@ mod tests {
+@@ -2594,6 +2645,76 @@ mod tests {
      use msb_krun::{GuestMemoryRange, MemoryCaptureSink};
      use std::sync::Arc;
  
@@ -123,8 +123,8 @@ index 39419dd..bb247d7 100644
 +            std::fs::write(dir.join("layers/layer_x.qcow2"), b"layer").unwrap();
 +        }
 +        // The publishing client holds its lock on another open file description.
-+        let publisher = open_lock_file(&in_flight.join(crate::checkpoint::CAPTURE_PUBLISHING_LOCK))
-+            .unwrap();
++        let publisher =
++            open_lock_file(&in_flight.join(crate::checkpoint::CAPTURE_PUBLISHING_LOCK)).unwrap();
 +        assert!(try_lock_exclusive(&publisher).unwrap());
 +
 +        reclaim_stale_captures(&root);
@@ -139,14 +139,14 @@ index 39419dd..bb247d7 100644
 +    #[test]
 +    fn opening_the_coordinator_sweeps_before_returning_the_capture_root() {
 +        let temp = tempfile::tempdir().unwrap();
-+        let runtime_dir = temp.path().join("runtime");
-+        let stale = runtime_dir.join("checkpoints/checkpoint_stale/layers");
++        let host = temp.path().join("sandbox");
++        let stale = host.join("checkpoints/checkpoint_stale/layers");
 +        std::fs::create_dir_all(&stale).unwrap();
 +        std::fs::write(stale.join("layer_x.qcow2"), b"layer").unwrap();
 +
-+        let root = prepare_capture_root(&runtime_dir).unwrap();
++        let root = prepare_capture_root(&host).unwrap();
 +
-+        assert_eq!(root, runtime_dir.join("checkpoints"));
++        assert_eq!(root, host.join("checkpoints"));
 +        assert_eq!(std::fs::read_dir(&root).unwrap().count(), 0);
 +    }
 +
@@ -160,13 +160,14 @@ index 39419dd..bb247d7 100644
      fn block_writeback_follows_policy_without_weakening_directory_barriers() {
          use microsandbox_types::GuestFlush::{Auto, Required, Skip};
 diff --git a/crates/runtime/lib/checkpoint/mod.rs b/crates/runtime/lib/checkpoint/mod.rs
-index 6e226a4..d46ba69 100644
+index 1f474bb058584d7795b71d10697f67f211e77b08..2b9e7eec5a9e5167ba24a662289361f9baffa779 100644
 --- a/crates/runtime/lib/checkpoint/mod.rs
 +++ b/crates/runtime/lib/checkpoint/mod.rs
-@@ -26,6 +26,10 @@ mod restore;
- // Re-Exports
- //--------------------------------------------------------------------------------------------------
- 
+@@ -35,6 +35,11 @@ pub use cache_storage::{
+     MemoryCacheEntry, MemoryCacheKind, MemoryCacheReport, MemoryCacheState, MemoryPruneOptions,
+     MemoryPruneSession, inspect_memory_cache, prune_memory_cache,
+ };
++
 +/// Lock file a client holds inside a capture directory while it publishes from it. A runtime
 +/// start leaves every directory whose lock another process holds.
 +pub const CAPTURE_PUBLISHING_LOCK: &str = ".publishing";
@@ -175,10 +176,10 @@ index 6e226a4..d46ba69 100644
  #[cfg(feature = "runner")]
  pub(crate) use coordinator::{CheckpointCoordinator, CheckpointResult, UserPause};
 diff --git a/sdk/rust/lib/backend/local/snapshot/create.rs b/sdk/rust/lib/backend/local/snapshot/create.rs
-index 044c818..0d26308 100644
+index 6f8df08df4fd498766cfb6ef3bae58a4ec220d8e..b8d77e4e1b4e2168a90877c9c2d644c055a872c5 100644
 --- a/sdk/rust/lib/backend/local/snapshot/create.rs
 +++ b/sdk/rust/lib/backend/local/snapshot/create.rs
-@@ -37,6 +37,7 @@ pub(crate) const CHECKPOINT_DIRECTORY: &str = "checkpoint";
+@@ -38,6 +38,7 @@ pub(crate) const CHECKPOINT_DIRECTORY: &str = "checkpoint";
  
  struct CapturedFullSnapshot {
      checkpoint_path: PathBuf,
@@ -186,7 +187,7 @@ index 044c818..0d26308 100644
      checkpoint_root: ObjectId,
      manifest: Manifest,
      labels: BTreeMap<String, String>,
-@@ -48,6 +49,20 @@ struct CapturedFullSnapshot {
+@@ -50,6 +51,20 @@ struct CapturedFullSnapshot {
  struct StagedSnapshot {
      snapshot: Snapshot,
      source_recovery: Option<SnapshotSourceRecoveryError>,
@@ -207,7 +208,7 @@ index 044c818..0d26308 100644
  }
  
  /// Non-identity publication options shared by the full-capture entry point.
-@@ -112,6 +127,58 @@ impl Drop for SnapshotDiskClosure {
+@@ -116,6 +131,58 @@ impl Drop for SnapshotDiskClosure {
      }
  }
  
@@ -266,7 +267,7 @@ index 044c818..0d26308 100644
  //--------------------------------------------------------------------------------------------------
  // Functions
  //--------------------------------------------------------------------------------------------------
-@@ -173,6 +240,7 @@ async fn publish_snapshot_group(
+@@ -177,6 +244,7 @@ async fn publish_snapshot_group(
      let StagedSnapshot {
          snapshot: mut captured,
          source_recovery,
@@ -275,14 +276,14 @@ index 044c818..0d26308 100644
      let group_dir = staging
          .path()
 @@ -221,6 +289,7 @@ async fn publish_snapshot_group(
-     }
+     }).await.map_err(|error| MicrosandboxError::Runtime(format!("snapshot publication task: {error}")))??;
      Ok(captured)
      }.await;
 +    drop(capture_dir);
      finish_capture(published, source_recovery, installed_artifact)
  }
  
-@@ -437,6 +506,7 @@ async fn capture_installed(
+@@ -440,6 +509,7 @@ async fn capture_installed(
      Ok(StagedSnapshot {
          snapshot: Snapshot::from_parts(dest_dir, digest, manifest, labels),
          source_recovery: None,
@@ -290,7 +291,7 @@ index 044c818..0d26308 100644
      })
  }
  
-@@ -502,6 +572,7 @@ async fn stage_full_snapshot(
+@@ -505,6 +575,7 @@ async fn stage_full_snapshot(
          force,
      } = destination;
      let source_recovery = captured.source_recovery.take();
@@ -298,7 +299,7 @@ index 044c818..0d26308 100644
      // Recovery belongs to the source, not to the immutable artifact. Carry it through staging
      // until the outer publisher owns the final group member and its ancestry cursor.
      let published = async {
-@@ -571,6 +642,7 @@ async fn stage_full_snapshot(
+@@ -578,6 +649,7 @@ async fn stage_full_snapshot(
          Ok(snapshot) => Ok(StagedSnapshot {
              snapshot,
              source_recovery,
@@ -306,16 +307,15 @@ index 044c818..0d26308 100644
          }),
          Err(error) => Err(capture_publication_failure(error, source_recovery)),
      }
-@@ -902,6 +974,17 @@ async fn capture_full_snapshot(
-     )
-     .await?;
+@@ -914,6 +986,16 @@ async fn capture_full_snapshot(
+         .await?;
      let checkpoint = outcome.checkpoint;
+     let fs_state_limit = local.config().fs_state_limit();
 +    // Own the directory before validating, so every later failure reclaims it.
 +    let capture_dir = CaptureDir::adopt(
 +        local
 +            .sandboxes_dir()
 +            .join(source_sandbox)
-+            .join("runtime")
 +            .join("checkpoints")
 +            .join(&checkpoint_id),
 +        &checkpoint.path,
@@ -324,7 +324,7 @@ index 044c818..0d26308 100644
      let validated = (|| {
          if checkpoint.checkpoint_id != checkpoint_id {
              return Err(MicrosandboxError::SnapshotIntegrity(
-@@ -998,6 +1081,7 @@ async fn capture_full_snapshot(
+@@ -1014,6 +1096,7 @@ async fn capture_full_snapshot(
                      publication_error: None,
                  }
              }),
@@ -332,7 +332,7 @@ index 044c818..0d26308 100644
              checkpoint_path: checkpoint.path,
              checkpoint_root,
              manifest,
-@@ -2360,6 +2444,7 @@ mod tests {
+@@ -2502,6 +2585,7 @@ mod tests {
          manifest.validate().unwrap();
          CapturedFullSnapshot {
              checkpoint_path: root.to_path_buf(),
@@ -340,7 +340,7 @@ index 044c818..0d26308 100644
              source_recovery: detail.map(|detail| SnapshotSourceRecoveryError {
                  source_sandbox: "box".into(),
                  checkpoint_id: checkpoint.checkpoint_id,
-@@ -2587,6 +2672,147 @@ mod tests {
+@@ -2745,6 +2829,159 @@ mod tests {
          }
      }
  
@@ -355,7 +355,10 @@ index 044c818..0d26308 100644
 +
 +        let adopted = CaptureDir::adopt(checkpoint.clone(), &checkpoint, None);
 +        let other = open_lock_file(&lock_path).unwrap();
-+        assert!(!try_lock_exclusive(&other).unwrap(), "a runtime sweep must skip it");
++        assert!(
++            !try_lock_exclusive(&other).unwrap(),
++            "a runtime sweep must skip it"
++        );
 +        drop(other);
 +        drop(adopted);
 +        assert!(!checkpoint.exists());
@@ -373,7 +376,11 @@ index 044c818..0d26308 100644
 +        drop(CaptureDir::adopt(expected.clone(), &elsewhere, None));
 +        assert!(expected.exists() && elsewhere.exists());
 +        // A source that failed to resume keeps its directory until the runtime next starts.
-+        drop(CaptureDir::adopt(expected.clone(), &expected, Some("resume failed")));
++        drop(CaptureDir::adopt(
++            expected.clone(),
++            &expected,
++            Some("resume failed"),
++        ));
 +        assert!(expected.exists());
 +    }
 +
@@ -426,7 +433,12 @@ index 044c818..0d26308 100644
 +        .unwrap();
 +        assert!(!checkpoint.exists());
 +        assert_eq!(snapshot.path(), group.join(snapshot_id.as_str()));
-+        CheckpointClosure::open(snapshot.path().join(CHECKPOINT_DIRECTORY), Some(&root)).unwrap();
++        CheckpointClosure::open(
++            snapshot.path().join(CHECKPOINT_DIRECTORY),
++            Some(&root),
++            crate::test_support::DEFAULT_FS_STATE_LIMIT,
++        )
++        .unwrap();
 +    }
 +
 +    #[tokio::test]

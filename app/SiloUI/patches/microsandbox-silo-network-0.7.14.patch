@@ -1,8 +1,8 @@
 diff --git a/Cargo.lock b/Cargo.lock
-index 928ab2a0..da966fe5 100644
+index ccd5a00f146bf81b793a7bc2f88c437b7754e82b..6c83ff9771780c7dfc7d4053685ed4e49609517d 100644
 --- a/Cargo.lock
 +++ b/Cargo.lock
-@@ -2643,6 +2643,16 @@ dependencies = [
+@@ -2624,6 +2624,16 @@ dependencies = [
   "smallvec",
  ]
  
@@ -19,7 +19,7 @@ index 928ab2a0..da966fe5 100644
  [[package]]
  name = "group"
  version = "0.14.0"
-@@ -4111,6 +4121,7 @@ dependencies = [
+@@ -4112,6 +4122,7 @@ dependencies = [
   "core-foundation 0.9.4",
   "crossbeam-queue",
   "futures",
@@ -27,7 +27,7 @@ index 928ab2a0..da966fe5 100644
   "hickory-net",
   "hickory-proto",
   "httlib-hpack",
-@@ -4127,12 +4138,14 @@ dependencies = [
+@@ -4129,12 +4140,14 @@ dependencies = [
   "pem 3.0.6",
   "percent-encoding",
   "rcgen",
@@ -38,25 +38,29 @@ index 928ab2a0..da966fe5 100644
   "rustls-pki-types",
   "serde",
   "serde_json",
-+ "sha2 0.11.0",
-  "smoltcp",
++ "sha2 0.11.1",
   "socket2",
   "system-configuration",
+  "thiserror 2.0.21",
 diff --git a/crates/cli/bin/main.rs b/crates/cli/bin/main.rs
-index 99270542..98e3e154 100644
+index c65a118681c839d760fab14311ddb00762ac694b..9e98aff6559162265a01ab97878e8c9c4ac2dee9 100644
 --- a/crates/cli/bin/main.rs
 +++ b/crates/cli/bin/main.rs
-@@ -257,7 +257,23 @@ impl HelpStyles {
+@@ -262,7 +262,27 @@ impl HelpStyles {
  // Functions
  //--------------------------------------------------------------------------------------------------
  
 +fn silo_protocol_probe(arguments: &[std::ffi::OsString]) -> Option<&'static str> {
 +    match arguments {
-+        [flag] if flag == "--silo-storage-protocol"
-+            || flag == "--silo-desktop-protocol"
-+            || flag == "--silo-github-token-protocol"
-+            || flag == "--silo-github-protocol"
-+            || flag == "--silo-working-account-protocol" => Some("1"),
++        [flag]
++            if flag == "--silo-storage-protocol"
++                || flag == "--silo-desktop-protocol"
++                || flag == "--silo-github-token-protocol"
++                || flag == "--silo-github-protocol"
++                || flag == "--silo-working-account-protocol" =>
++        {
++            Some("1")
++        }
 +        _ => None,
 +    }
 +}
@@ -70,10 +74,11 @@ index 99270542..98e3e154 100644
      // Ensure terminal echo is restored even if a panic aborts the process
      // (release profile sets `panic = "abort"`, so Drop impls don't run).
      microsandbox_cli::ui::install_panic_hook();
-@@ -762,6 +778,22 @@ fn is_backend_independent_maintenance_command(command: &Commands) -> bool {
- mod command_tests {
-     use super::*;
- 
+@@ -823,6 +843,29 @@ mod command_tests {
+             has_reader
+         );
+     }
++
 +    #[test]
 +    fn silo_protocol_probe_accepts_only_supported_single_argument_probes() {
 +        for flag in [
@@ -86,20 +91,26 @@ index 99270542..98e3e154 100644
 +            assert_eq!(silo_protocol_probe(&[flag.into()]), Some("1"));
 +        }
 +        assert_eq!(silo_protocol_probe(&[]), None);
-+        assert_eq!(silo_protocol_probe(&["--silo-github-protocol".into(), "extra".into()]), None);
-+        assert_eq!(silo_protocol_probe(&["--silo-unknown-protocol".into()]), None);
++        assert_eq!(
++            silo_protocol_probe(&["--silo-github-protocol".into(), "extra".into()]),
++            None
++        );
++        assert_eq!(
++            silo_protocol_probe(&["--silo-unknown-protocol".into()]),
++            None
++        );
 +    }
 +
      #[test]
      fn catalog_upgrade_leaves_stop_and_diagnostics_available() {
          for (arguments, expected) in [
 diff --git a/crates/cli/lib/commands/exec.rs b/crates/cli/lib/commands/exec.rs
-index f1a61328..60b24a1c 100644
+index 34e27a43ded9c0b05f026f1f7987f81681fc15db..9b472919c8d677bb22e81ac2cc28ac861e7040f6 100644
 --- a/crates/cli/lib/commands/exec.rs
 +++ b/crates/cli/lib/commands/exec.rs
-@@ -20,6 +20,10 @@ pub struct ExecArgs {
-     /// Sandbox to run the command in.
-     pub name: String,
+@@ -34,6 +34,10 @@ pub struct ExecArgs {
+     #[arg(short = 'd', long, conflicts_with = "stream")]
+     pub detach: bool,
  
 +    /// Refuse to start a stopped sandbox.
 +    #[arg(long)]
@@ -108,9 +119,9 @@ index f1a61328..60b24a1c 100644
      /// Set an environment variable (KEY=value).
      #[arg(short, long)]
      pub env: Vec<String>,
-@@ -110,7 +114,16 @@ pub async fn run(args: ExecArgs) -> anyhow::Result<()> {
-         .transpose()?
-         .map(Duration::from_secs);
+@@ -159,7 +163,16 @@ pub async fn run(args: ExecArgs) -> anyhow::Result<()> {
+         return Ok(());
+     }
  
 -    let sandbox = super::resolve_and_start(&args.name, args.quiet).await?;
 +    let sandbox = if args.no_start {
@@ -127,7 +138,7 @@ index f1a61328..60b24a1c 100644
      let result = run_started(
          &sandbox,
 diff --git a/crates/cli/lib/commands/ssh.rs b/crates/cli/lib/commands/ssh.rs
-index e078fb9a..a0c55755 100644
+index e078fb9ab4ee5538a2b6e633cadcb61d2ea9e7ec..2d406980f156e1ffceec942bb34d4136b868468d 100644
 --- a/crates/cli/lib/commands/ssh.rs
 +++ b/crates/cli/lib/commands/ssh.rs
 @@ -1,5 +1,6 @@
@@ -293,37 +304,35 @@ index e078fb9a..a0c55755 100644
      let key_text = read_public_key_source(args).await?;
      let (key_base64, line) = parse_public_key_line(&key_text)?;
 diff --git a/crates/network/Cargo.toml b/crates/network/Cargo.toml
-index e5147a0b..606d9425 100644
+index a50feb73dc01626ca0857483ba7ae72632ee69e7..84c74ce43418c581446d328dc0877efd43ea8df9 100644
 --- a/crates/network/Cargo.toml
 +++ b/crates/network/Cargo.toml
-@@ -13,6 +13,10 @@ path = "lib/lib.rs"
+@@ -13,6 +13,9 @@ path = "lib/lib.rs"
  [features]
  default = ["engine"]
  engine = [
 +    "dep:graphql-parser",
 +    "dep:reqwest",
 +    "dep:sha2",
-+    "dep:serde_json",
      "dep:base64",
      "dep:bytes",
      "dep:core-foundation",
-@@ -44,6 +48,10 @@ engine = [
+@@ -45,6 +48,9 @@ engine = [
  ]
  
  [dependencies]
 +graphql-parser = { version = "0.4.1", optional = true }
 +reqwest = { workspace = true, optional = true }
 +sha2 = { workspace = true, optional = true }
-+serde_json = { workspace = true, optional = true }
  base64 = { version = "0.22", optional = true }
  bytes = { workspace = true, optional = true }
  crossbeam-queue = { workspace = true, optional = true }
 diff --git a/crates/network/lib/engine/secrets/github.rs b/crates/network/lib/engine/secrets/github.rs
 new file mode 100644
-index 00000000..762c6dbb
+index 0000000000000000000000000000000000000000..1f05bf366dacdb0650745245b253ded25db553a5
 --- /dev/null
 +++ b/crates/network/lib/engine/secrets/github.rs
-@@ -0,0 +1,1047 @@
+@@ -0,0 +1,1046 @@
 +//! Credential selection only. GitHub-issued tokens enforce repository authority.
 +//! Never split, replay, or authorize GraphQL fields here.
 +use crate::secrets::config::SecretViolationAction as ViolationAction;
@@ -784,10 +793,10 @@ index 00000000..762c6dbb
 +        .unwrap_or_else(|| serde_json::json!({}));
 +    let mut work = Vec::new();
 +    for definition in definitions {
-+        if variables.get(&definition.name).is_none() {
-+            if let Some(default) = &definition.default_value {
-+                variables[&definition.name] = input_value(default, &variables)?;
-+            }
++        if variables.get(&definition.name).is_none()
++            && let Some(default) = &definition.default_value
++        {
++            variables[&definition.name] = input_value(default, &variables)?;
 +        }
 +        if let Some(value) = variables.get(&definition.name) {
 +            work.push((variable_type(&definition.var_type), value.clone(), 0usize));
@@ -804,12 +813,11 @@ index 00000000..762c6dbb
 +            match item {
 +                Selection::Field(field) => {
 +                    for (name, value) in &field.arguments {
-+                        if name == "owner" {
-+                            if let Ok(serde_json::Value::String(owner)) =
++                        if name == "owner"
++                            && let Ok(serde_json::Value::String(owner)) =
 +                                input_value(value, &variables)
-+                            {
-+                                hints.insert(owner.to_ascii_lowercase());
-+                            }
++                        {
++                            hints.insert(owner.to_ascii_lowercase());
 +                        }
 +                        if matches!(value, graphql_parser::query::Value::Variable(_)) {
 +                            continue;
@@ -1372,7 +1380,7 @@ index 00000000..762c6dbb
 +            .is_none()
 +}
 diff --git a/crates/network/lib/engine/secrets/handle.rs b/crates/network/lib/engine/secrets/handle.rs
-index d4ed6d25..44a4c313 100644
+index d4ed6d254775203f03d770320d8a65d5b55df8d0..44a4c3139949ef4b93d35d0b590adedfdf7bc05d 100644
 --- a/crates/network/lib/engine/secrets/handle.rs
 +++ b/crates/network/lib/engine/secrets/handle.rs
 @@ -3,7 +3,7 @@
@@ -1446,7 +1454,7 @@ index d4ed6d25..44a4c313 100644
 +    }
  }
 diff --git a/crates/network/lib/engine/secrets/handler.rs b/crates/network/lib/engine/secrets/handler.rs
-index f5db984c..741505a9 100644
+index ed97e80b1f98ed060f65531d4a25a8160f15a4d2..64e9d499ba40de80303e232288e5dcde3a9e241a 100644
 --- a/crates/network/lib/engine/secrets/handler.rs
 +++ b/crates/network/lib/engine/secrets/handler.rs
 @@ -3,8 +3,9 @@
@@ -1460,7 +1468,7 @@ index f5db984c..741505a9 100644
  use std::fmt;
  use std::net::{IpAddr, SocketAddr};
  use std::sync::Arc;
-@@ -76,6 +77,8 @@ const HTTP2_FLAG_PRIORITY: u8 = 0x20;
+@@ -78,6 +79,8 @@ const HTTP2_FLAG_PRIORITY: u8 = 0x20;
  /// Created from [`SecretsConfig`] and the destination SNI. Determines which
  /// secrets are eligible for this connection based on host matching.
  pub struct SecretsHandler {
@@ -1469,8 +1477,8 @@ index f5db984c..741505a9 100644
      /// Secrets eligible for substitution on this connection.
      eligible_for_substitution: Vec<EligibleSecret>,
      /// Secret placeholders that should trigger an effective blocking action.
-@@ -118,6 +121,12 @@ pub struct SecretsHandler {
-     http2_state: Option<Http2State>,
+@@ -126,6 +129,12 @@ pub struct SecretsHandler {
+     http1_violation: bool,
  }
  
 +struct GithubLookup {
@@ -1482,7 +1490,7 @@ index f5db984c..741505a9 100644
  /// HTTP request framing state for the guest→server byte stream.
  #[derive(Debug, Clone)]
  enum HttpState {
-@@ -252,6 +261,7 @@ enum ChunkedBodyEvent<'a> {
+@@ -263,6 +272,7 @@ enum ChunkedBodyEvent<'a> {
  
  /// A secret that passed host matching for this connection.
  struct EligibleSecret {
@@ -1490,7 +1498,7 @@ index f5db984c..741505a9 100644
      placeholder: String,
      /// Resolved plaintext, wiped on drop so per-connection copies do not
      /// linger in freed memory.
-@@ -337,7 +347,7 @@ impl EligibleSecret {
+@@ -350,7 +360,7 @@ impl EligibleSecret {
      /// Returns true if any of the header-side substitution scopes is enabled
      /// (`headers` or `query`).
      fn wants_header_injection(&self) -> bool {
@@ -1498,8 +1506,8 @@ index f5db984c..741505a9 100644
 +        !self.silo_github && (self.substitute_headers || self.substitute_query)
      }
  
-     /// Returns true when the current header bytes contain this secret's
-@@ -651,11 +661,13 @@ impl SecretsHandler {
+     /// Returns true when this secret may be substituted in a header with the
+@@ -671,12 +681,14 @@ impl SecretsHandler {
                          .max(secret.placeholder.len().min(MAX_SECRET_PLACEHOLDER_BYTES));
                  }
                  eligible_for_substitution.push(EligibleSecret {
@@ -1507,16 +1515,17 @@ index f5db984c..741505a9 100644
                      placeholder: secret.placeholder.clone(),
                      value: secret.value.clone(),
 -                    substitute_headers: secret.substitution.headers,
--                    substitute_query: secret.substitution.query,
--                    substitute_body: secret.substitution.body,
 +                    substitute_headers: secret.env_var != "SILO_GITHUB"
 +                        && secret.substitution.headers,
+                     header_fields: secret.substitution.header_fields.clone(),
+-                    substitute_query: secret.substitution.query,
+-                    substitute_body: secret.substitution.body,
 +                    substitute_query: secret.env_var != "SILO_GITHUB" && secret.substitution.query,
 +                    substitute_body: secret.env_var != "SILO_GITHUB" && secret.substitution.body,
                      require_tls_identity: secret.require_tls_identity,
                  });
                  if !secret.require_tls_identity || tls_intercepted {
-@@ -704,6 +716,8 @@ impl SecretsHandler {
+@@ -725,6 +737,8 @@ impl SecretsHandler {
          });
  
          Self {
@@ -1525,7 +1534,7 @@ index f5db984c..741505a9 100644
              eligible_for_substitution,
              ineligible_for_substitution,
              tls_intercepted,
-@@ -742,6 +756,69 @@ impl SecretsHandler {
+@@ -766,6 +780,69 @@ impl SecretsHandler {
      pub fn substitute<'a>(
          &mut self,
          data: &'a [u8],
@@ -1543,17 +1552,17 @@ index f5db984c..741505a9 100644
 +            self.unsupported_body_tail.clone(),
 +        );
 +        let result = self.substitute_inner(data);
-+        if result.is_err() {
-+            if let Some(lookup) = self.github_lookup.as_mut() {
-+                (
-+                    self.http_state,
-+                    self.http_pending,
-+                    self.http1_request_summary,
-+                    self.prev_tail,
-+                    self.unsupported_body_tail,
-+                ) = snapshot;
-+                lookup.retry_input = data.to_vec();
-+            }
++        if result.is_err()
++            && let Some(lookup) = self.github_lookup.as_mut()
++        {
++            (
++                self.http_state,
++                self.http_pending,
++                self.http1_request_summary,
++                self.prev_tail,
++                self.unsupported_body_tail,
++            ) = snapshot;
++            lookup.retry_input = data.to_vec();
 +        }
 +        result
 +    }
@@ -1595,7 +1604,7 @@ index f5db984c..741505a9 100644
      ) -> Result<Cow<'a, [u8]>, SecretViolationAction> {
          if self.placeholder_limit_exceeded {
              tracing::error!(
-@@ -908,6 +985,9 @@ impl SecretsHandler {
+@@ -939,6 +1016,9 @@ impl SecretsHandler {
          &mut self,
          data: &[u8],
      ) -> Result<Cow<'a, [u8]>, SecretViolationAction> {
@@ -1605,7 +1614,7 @@ index f5db984c..741505a9 100644
          let mut state = self.http2_state.take().unwrap_or_default();
          let output = state.process(self, data)?;
          self.http2_state = Some(state);
-@@ -941,7 +1021,15 @@ impl SecretsHandler {
+@@ -982,7 +1062,15 @@ impl SecretsHandler {
                  validate_http1_authority(&metadata, validator)?;
              }
  
@@ -1621,7 +1630,7 @@ index f5db984c..741505a9 100644
              if transfer_encoding.is_some() && parse_content_length(header_text.as_ref())?.is_some()
              {
                  return Err(SecretViolationAction::Block);
-@@ -957,13 +1045,13 @@ impl SecretsHandler {
+@@ -998,13 +1086,13 @@ impl SecretsHandler {
              }
  
              let framing = next_state_after_headers(header_text.as_ref(), after_headers)?;
@@ -1637,7 +1646,7 @@ index f5db984c..741505a9 100644
                  && framing.body_substitution_allowed
                  && let HttpState::InBody { remaining } = &framing.state
              {
-@@ -1025,7 +1113,7 @@ impl SecretsHandler {
+@@ -1066,7 +1154,7 @@ impl SecretsHandler {
          }
  
          // Start with borrowed bytes; allocate only when a substitution is needed.
@@ -1646,7 +1655,7 @@ index f5db984c..741505a9 100644
          let mut body = None;
  
          for secret in &self.eligible_for_substitution {
-@@ -1194,7 +1282,7 @@ impl SecretsHandler {
+@@ -1235,7 +1323,7 @@ impl SecretsHandler {
              HttpState::InChunkedBody { state }
          };
  
@@ -1655,7 +1664,7 @@ index f5db984c..741505a9 100644
              let mut output = Vec::with_capacity(headers.len() + body_part.len() + spillover.len());
              output.extend_from_slice(headers.as_bytes());
              output.extend_from_slice(body_part);
-@@ -1242,7 +1330,7 @@ impl SecretsHandler {
+@@ -1283,7 +1371,7 @@ impl SecretsHandler {
          };
  
          let header_len = header_bytes.len();
@@ -1664,7 +1673,7 @@ index f5db984c..741505a9 100644
          let mut output = Vec::with_capacity(
              header_out
                  .as_ref()
-@@ -1472,8 +1560,105 @@ impl SecretsHandler {
+@@ -1510,8 +1598,105 @@ impl SecretsHandler {
          }
      }
  
@@ -1772,7 +1781,7 @@ index f5db984c..741505a9 100644
          for secret in &self.eligible_for_substitution {
              if secret.require_tls_identity && !self.tls_intercepted {
                  continue;
-@@ -1485,7 +1670,7 @@ impl SecretsHandler {
+@@ -1523,7 +1708,7 @@ impl SecretsHandler {
              }
          }
  
@@ -1781,7 +1790,7 @@ index f5db984c..741505a9 100644
      }
  
      fn consume_chunked_body_with_violation_detection(
-@@ -3537,6 +3722,82 @@ mod tests {
+@@ -3617,6 +3802,82 @@ mod tests {
          }
      }
  
@@ -1865,21 +1874,22 @@ index f5db984c..741505a9 100644
          SecretEntry {
              env_var: "TEST_KEY".into(),
 diff --git a/crates/network/lib/engine/secrets/mod.rs b/crates/network/lib/engine/secrets/mod.rs
-index ec158d98..9ee5ab92 100644
+index db54987c07f592cd967b7f4f8df6b3a7aa8cdf3b..ec6b048019eedd5543691b2da680c177c3864958 100644
 --- a/crates/network/lib/engine/secrets/mod.rs
 +++ b/crates/network/lib/engine/secrets/mod.rs
-@@ -5,5 +5,6 @@
+@@ -5,6 +5,7 @@
  //--------------------------------------------------------------------------------------------------
  
  pub(crate) mod config;
 +mod github;
  pub mod handle;
  pub mod handler;
+ mod hpack;
 diff --git a/crates/network/lib/engine/tls/proxy.rs b/crates/network/lib/engine/tls/proxy.rs
-index 05802c3e..902db780 100644
+index c7c098d4fe5284c82ca880c32adb7febd645eaaa..76ebc04980cdb0cbb914cf060a16e8771c4ddb7c 100644
 --- a/crates/network/lib/engine/tls/proxy.rs
 +++ b/crates/network/lib/engine/tls/proxy.rs
-@@ -216,6 +216,8 @@ impl TlsProxy {
+@@ -223,6 +223,8 @@ impl TlsProxy {
              return Ok(());
          }
  
@@ -1888,7 +1898,7 @@ index 05802c3e..902db780 100644
          let should_bypass = tls_state.should_bypass(&sni_name);
          if strict
              && should_bypass
-@@ -238,32 +240,38 @@ impl TlsProxy {
+@@ -245,32 +247,38 @@ impl TlsProxy {
  
          if should_bypass {
              tracing::debug!(sni = %sni_name, dst = %connect_dst, guest_dst = %guest_dst, "TLS bypass");
@@ -1949,7 +1959,7 @@ index 05802c3e..902db780 100644
              )
              .await
          }
-@@ -403,6 +411,35 @@ async fn complete_guest_handshake(
+@@ -409,6 +417,35 @@ async fn complete_guest_handshake(
      .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "TLS handshake timed out"))?
  }
  
@@ -1985,7 +1995,7 @@ index 05802c3e..902db780 100644
  /// Bypass mode: plain TCP splice, no TLS termination.
  #[allow(clippy::too_many_arguments)]
  async fn bypass_relay(
-@@ -670,7 +707,7 @@ async fn forward_plaintext(
+@@ -707,7 +744,7 @@ async fn forward_plaintext(
              continue;
          }
  
@@ -1994,8 +2004,19 @@ index 05802c3e..902db780 100644
              Ok(data) => {
                  if !data.is_empty() {
                      server_tls.write_all(&data).await?;
+@@ -1111,7 +1148,9 @@ mod tests {
+                 [address.ip()],
+                 Duration::from_secs(60),
+             );
+-            let state = test_tls_state(SecretsConfig::default());
++            let mut secrets = host_bound_secret_config();
++            secrets.secrets[0].allowed_hosts = vec![HostPattern::Exact(address.ip().to_string())];
++            let state = test_tls_state(secrets);
+             let mut roots = rustls::RootCertStore::empty();
+             roots.add(state.intercept_ca.cert_der.clone()).unwrap();
+             let config = rustls::ClientConfig::builder()
 diff --git a/crates/network/lib/engine/tls/state.rs b/crates/network/lib/engine/tls/state.rs
-index e855fa50..3eca7fd9 100644
+index e855fa50a416d7734b73fa88d2dbece399a69e8b..3eca7fd9eb58b09ebdb022b0836f866773a445c3 100644
 --- a/crates/network/lib/engine/tls/state.rs
 +++ b/crates/network/lib/engine/tls/state.rs
 @@ -187,12 +187,19 @@ impl TlsState {
@@ -2048,10 +2069,10 @@ index e855fa50..3eca7fd9 100644
      fn regenerates_cached_domain_cert_when_near_expiry() {
          let _ = rustls::crypto::ring::default_provider().install_default();
 diff --git a/sdk/rust/lib/sandbox/ssh.rs b/sdk/rust/lib/sandbox/ssh.rs
-index 2ba817df..507e9d41 100644
+index 7b7cda27239b68e720bad0681e001675b6004b41..383ae95e926eb1568494ab58ea2cabca8a347e42 100644
 --- a/sdk/rust/lib/sandbox/ssh.rs
 +++ b/sdk/rust/lib/sandbox/ssh.rs
-@@ -199,6 +199,7 @@ struct SshSession {
+@@ -202,6 +202,7 @@ struct SshSession {
      settings: SshSettings,
      client: Option<Arc<AgentClient>>,
      user: Option<String>,
@@ -2059,7 +2080,7 @@ index 2ba817df..507e9d41 100644
      channels: HashMap<ChannelId, ChannelState>,
  }
  
-@@ -1180,10 +1181,41 @@ impl SshSession {
+@@ -1192,10 +1193,41 @@ impl SshSession {
              settings,
              client: None,
              user: None,
@@ -2101,7 +2122,7 @@ index 2ba817df..507e9d41 100644
      async fn agent_client(&mut self) -> anyhow::Result<Arc<AgentClient>> {
          if let Some(client) = &self.client {
              return Ok(Arc::clone(client));
-@@ -1242,9 +1274,10 @@ impl SshSession {
+@@ -1254,9 +1286,10 @@ impl SshSession {
              .guest_user
              .clone()
              .or_else(|| self.user.clone());
@@ -2113,7 +2134,7 @@ index 2ba817df..507e9d41 100644
              user,
              env,
              timeout: None,
-@@ -1658,18 +1691,7 @@ impl russh::server::Handler for SshSession {
+@@ -1666,18 +1699,7 @@ impl russh::server::Handler for SshSession {
              return Ok(());
          }
  
@@ -2130,10 +2151,10 @@ index 2ba817df..507e9d41 100644
 -            .clone()
 -            .unwrap_or_else(|| "/".to_string());
 +        let cwd = self.session_home().await?;
-         let sftp = SftpServerSession {
-             client,
-             cwd,
-@@ -1709,8 +1731,12 @@ impl russh::server::Handler for SshSession {
+         // Root sessions keep the agent's own identity; others act as the same user as exec.
+         let user = self
+             .settings
+@@ -1725,8 +1747,12 @@ impl russh::server::Handler for SshSession {
      async fn channel_eof(
          &mut self,
          channel: ChannelId,
@@ -2147,7 +2168,7 @@ index 2ba817df..507e9d41 100644
          // The channel stream observes EOF independently of the callback path.
          if matches!(self.channels.get(&channel), Some(ChannelState::Tcp { .. })) {
              return Ok(());
-@@ -2575,6 +2601,15 @@ async fn relay_tcp_to_ssh(
+@@ -2636,6 +2662,15 @@ async fn relay_tcp_to_ssh(
      let _ = output.send(TcpOutput::Close).await;
  }
  
@@ -2163,7 +2184,7 @@ index 2ba817df..507e9d41 100644
  async fn build_authorized_keys(
      options: &SshServerOptions,
      default_path: Option<&Path>,
-@@ -3380,6 +3415,15 @@ mod tests {
+@@ -3609,6 +3644,15 @@ mod tests {
          .await;
      }
  
@@ -2177,5 +2198,5 @@ index 2ba817df..507e9d41 100644
 +    }
 +
      #[tokio::test]
-     async fn explicit_authorized_key_does_not_require_local_config() {
-         let mut rng = russh::keys::key::safe_rng();
+     async fn sftp_creations_carry_the_session_user() {
+         use microsandbox_protocol::{

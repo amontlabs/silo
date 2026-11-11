@@ -317,6 +317,10 @@
           "items": true,
           "type": "array"
         },
+        "needsStorageUpgrade": {
+          "description": "The computer's storage could not be moved to the protected layout of the new runtime. It\ncannot start until a later launch finishes the move; `attention` says why.",
+          "type": "boolean"
+        },
         "pendingCheckpointRestore": {
           "anyOf": [
             {

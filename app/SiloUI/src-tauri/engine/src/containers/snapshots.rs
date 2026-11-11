@@ -378,6 +378,23 @@ mod tests {
     }
 
     #[test]
+    fn a_disk_restore_may_allow_missing_host_mounts_for_a_container() {
+        let Command::Restore(restore) = parse(&strings(&[
+            "restore",
+            "box:c1",
+            "--name",
+            "child",
+            "--cpus",
+            "2",
+            "--allow-missing-resources",
+        ]))
+        .unwrap() else {
+            panic!("not a restore")
+        };
+        assert_eq!(restore.name, "child");
+    }
+
+    #[test]
     fn a_memory_restore_or_capture_is_refused_for_a_container() {
         let restore =
             parse(&strings(&["restore", "box:c1", "--name", "x", "--cow-mem"])).unwrap_err();

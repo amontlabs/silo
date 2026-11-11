@@ -1,0 +1,129 @@
+MicroSandbox 0.7.14 (+22 patches) live verification, 2026-11-11, branch feat/msb-0.7.15 (263494fe1 + live test)
+Fixture data only: private homes (~/.m14, /tmp/m14*, deleted afterwards), computers named e2e-*. The shared Dev
+home, production home, their Keychain items and the running Dev engine were never touched. Full logs (kept
+untracked): app/SiloUI/src-tauri/target/verification/msb-0714-live/. Scripts: docs/direction/checks/msb_0714_*.sh.
+
+== Step 1: npm --prefix app/SiloUI run runtime:prepare   (8m50s, ~100% of one core, ~30 s system; CPU heavy)
+binaries/msb-aarch64-apple-darwin --version   -> msb 0.7.14
+--silo-storage-repair-protocol 1, --silo-restore-strict-protocol 1, --silo-runtime-instance-protocol 1,
+--silo-secret-values-protocol 1                                           PASS
+
+== Step 2: opt-in live engine tests (bash docs/direction/checks/msb_0714_live_engine_tests.sh; guest image = Dev
+   image read-only via symlinks to runtime/guest-image, removed after). Final pass (pass1/ holds a first pass that
+   failed on setup only: missing guest-image path, 104-byte socket path):
+ PASS  live_checkpoint_restore_and_fork_use_the_runtimes_names   (create/start/stop, full checkpoint, fork from RAM, restore in place)
+ PASS  live_start_sets_up_the_silo_account_of_new_and_older_computers  (create, start, snapshot, restore, start refusal leaves stopped)
+ PASS  lifecycle_recovery_survives_real_worker_exit_without_repeating_restart
+ PASS  live_secret_adapter_uses_refs_and_preserves_boot_for_live_updates  (stdin secret values, live update; re-run after adding the image link)
+ FAIL  live_network_policy_modes_restore_and_fork  (live-network.log, live-network-rerun.log)
+         panicked at network_live.rs:177: Reach { example_com: "200", example_org: "000", public_ip: "connected",
+         github: "200", gateway_name: "2606:4700:10::ac42:9ded", resolver: "rcode=3 answers=0" }
+       Open mode passes. In allowlist mode after the change on stop->start, HTTPS to a non-listed host is blocked (000) and
+       the resolver is refused, but a direct TCP connect to 1.1.1.1:443 completes ("connected"); on 0.7.6 (T8.txt) it was
+       "failed (ConnectionRefusedError)". Not seen: whether data passes after the handshake (the test only connects).
+       Closed mode, fork of an allowlist computer and restore in place were not reached (test aborts at the first assert).
+ FAIL  live_export_accepts_each_network_policy            backup.rs:9362: open: e2e-t8-main has custom network http settings that Silo cannot carry in an export.
+ FAIL  real_backup_restore_preserves_root_and_computer_without_original_cache   backup_controller.rs:6643: UnsupportedStorage("silo-proof-backup has custom network http settings that Silo cannot carry in an export.")
+ FAIL  real_checkpoint_export_imports_and_cold_boots_checkpoint_time_disk       backup_controller.rs:7161: silo-ckpt-source has custom network http settings that Silo cannot carry in an export.
+       Cause (configs/open.json, saved by the new runtime for a default Silo computer): "http": {"deny_response": true,
+       "deny_response_format": "json"}. backup.rs `with_profile_defaults` (line ~3956) only treats {"deny_response": false} as the
+       default, and guest/github-network-default.json has no http key. So EVERY export of a computer created by the new
+       runtime is refused. Needs an engine fix (accept the JSON deny default, or have the profile carry it) before export/import
+       can be called verified on 0.7.14.
+ Totals: 4 passed, 4 failed (3 of them the same export cause), 0 skipped within the 8 run.
+ Direct runtime checks (step2b-ports-rename.log):
+ PASS  live public ports through the runtime control socket (the engine's own JSON protocol): ports_list, port_add (host_port 0 ->
+       56368), port_probe reachable, curl through the port 200, port_remove, curl refused; modify -p on a running computer is
+       refused ("requires restart") as designed since live ports go via the socket; taken host port is refused with
+       "Address already in use ... no changes were applied".
+ PASS  rename: stopped computer renamed, starts, data kept; renaming a running one refused ("stop it first").
+ Disk-only restore: covered in step 3 (e2e-mig-rcold). Network policy "closed" and fork/restore of allowlist: NOT verified (see FAIL).
+ Not run: GitHub live tests (need real credentials/fixture repos), Keychain-approval secret assignment, computer-use / v4 desktop
+ tests (network + approvals), storage reclaim test (needs explicit baseline inputs), macOS-computer probes.
+
+== Step 3: migration end to end (old runtime: silo-direction binaries/msb 0.7.6, read-only copy; created with the engine's create
+   arguments through msb directly, not the old app/engine). Home /tmp/m14 (deleted). New live test:
+   engine/src/runtime_migration/protected_storage_live_tests.rs  live_old_home_moves_to_protected_storage (#[ignore])
+ Final run (step3-migration-run4.log): 1 passed, 0 failed.
+ Old home: e2e-mig-main (owned /workspace disk, files a,b,c + /root/a, disk checkpoint diskck, full checkpoint fullck),
+   e2e-mig-run (left RUNNING) and its fork e2e-mig-fork, e2e-mig-disk (restore of diskck + later write d), e2e-mig-late
+   (arrives after migration), e2e-mig-bad (legacy journal pointed at another computer's disk).
+ Verified:
+  - launch 1: running computer stopped ("Stopping computers for the storage upgrade"), backup "runtime-backup-before-protected-storage"
+    made before the repair (no state-layout.json for e2e-mig-run in the clone, present in the original), e2e-mig-run Repaired.
+  - every computer reached ready (doctor) and started with data intact: main a/b/c + /root/a, fork r=run-1 and f, disk a+d
+    (b absent: restore predates it), run r. Originals kept.
+  - checkpoints made by 0.7.6 restore with the new runtime: diskck (cold: a, no b), fullck with memory (b, no c), fullck --disk-only (b, no c).
+  - report protected-storage.json written; next launch holds nothing and does not rewrite it (byte-identical).
+  - arrival flagged: check_protected_storage_of_arrival(e2e-mig-late) -> "This computer arrived with the older storage layout. Its files were kept untouched. Relaunch Silo to move it."
+  - refused case: e2e-mig-bad -> needs-attention "This computer's disks need a manual decision ... Report this problem before using the computer.",
+    the others already-ready, report incomplete, the step is pending again at the next launch, no state-layout.json for it.
+ FINDINGS (exact outputs kept in step3-*.log, step3-doctor-before.txt):
+  F1 (engine, medium): with ANY legacy VM running in the home, macOS doctor rates EVERY other computer recovery_required:
+     "legacy storage migration on macOS cannot exclude a writer in sandbox 'e2e-mig-run'; stop that legacy runtime, wait for its
+     process to exit, then retry. Protected sandboxes can remain running". The step inspects all computers before stopping any, so
+     launch 1 marks main, fork, disk (not even related to the running one) as needs-attention with the manual-decision text, repairs
+     only the running one, and finishes them only at launch 2 (a relaunch). Fix: stop running computers first, then inspect (or
+     re-inspect after the stops). The test records this and relaunches (it prints FINDING).
+  F2 (runtime, high for users who fork): a full checkpoint taken while running PLUS a fork of the same running computer makes doctor
+     report recovery_required for all related computers, with every legacy VM stopped:
+       dfk/bm: ["related sandbox 'bf' has an unsealed or different-role disk alias"]
+       dfk/bf: ['legacy selection names a file outside its disk producer roles']
+     Bisect (run1-forkfull-home/bisect.sh): none, disk checkpoint, full checkpoint, fork, disk restore alone -> maintenance_required
+     (repairable); full checkpoint + fork (also disk+full+fork, +restore) -> recovery_required. Silo can do both, so such computers
+     end as "needs attention" today. The final test home avoids the combination (fork taken from another computer).
+  F3 (test setup): computers restored/forked by 0.7.6 carry no silo.managed label, so run_msb refuses start/exec on them
+     ("not owned by Silo"); the live test calls msb directly for those. Fine for the migration step (it does not check the label).
+ Not tested: grown/compacted disks, containers, a Silo-built 0.7.15 guest image, the old app/engine itself driving the old runtime,
+   cross-home aliases, interactive/Keychain items.
+
+== Cleanup
+ Private homes (~/.m14, ~/.m14b, /tmp/m14*, /tmp/m14t, /tmp/m14u, /tmp/m14p) and the two guest-image symlinks deleted; two orphaned
+ e2e VMs from a failed intermediate run were stopped by PID (SIGTERM, command line checked). Dev guest image untouched.
+ Heavy: runtime:prepare 8m50s CPU; step 2 ~6 min with 1-GiB VMs one at a time; step 3 about 10 s per run.
+
+
+==================== SECOND RUN, 2026-11-11, branch feat/msb-0.7.15 (94f5d41bc + live test changes) ====================
+Same rules: private homes (~/.m14, /tmp/m14, /tmp/m14t; deleted afterwards), e2e-* computers, guest image = Dev image
+read-only via symlinks (src-tauri/runtime/guest-image and engine/runtime/guest-image, removed). Logs (untracked):
+app/SiloUI/src-tauri/target/verification/msb-0714-live/run2, run2b, run2c.
+
+== Step 1: runtime:prepare   PASS  msb 0.7.14; --silo-storage-repair-protocol, --silo-restore-strict-protocol,
+   --silo-runtime-instance-protocol, --silo-secret-values-protocol all print 1.
+
+== Steps 2-3: engine live tests
+ PASS  live_checkpoint_restore_and_fork_use_the_runtimes_names
+ PASS  live_start_sets_up_the_silo_account_of_new_and_older_computers
+ PASS  lifecycle_recovery_survives_real_worker_exit_without_repeating_restart
+ PASS  live_export_accepts_each_network_policy                      (was FAIL: http settings)
+ PASS  real_checkpoint_export_imports_and_cold_boots_checkpoint_time_disk   (was FAIL)
+ PASS  live_secret_adapter_uses_refs_and_preserves_boot_for_live_updates   (first pass failed on setup only: it reads the image
+       from engine/runtime/guest-image, a second link; passes in run2b)
+ PASS  real_backup_restore_preserves_root_and_computer_without_original_cache   (was FAIL: http settings)
+       Test bug found on the way and fixed: the cache check hashed cache/vmdk entries and failed with "Is a directory"
+       (backup_controller.rs:6941); it now hashes files recursively. Same intent, run2b.
+ PASS  live_network_policy_modes_restore_and_fork (run2c): open, allowlist after the change, closed, open again, fork of an
+       allowlist computer, restore in place. Test updated per OWNER_REVIEW 27 (probe + nothing_reaches_unlisted_ip):
+       allowlist/closed/fork/restore all show, for an unlisted public IP:
+         plain HTTP GET http://1.1.1.1/  -> 403, body {"code":"network_policy_denied","domain":"1.1.1.1","message":"Request blocked by network policy."}
+         (open mode: 301 from Cloudflare, so the 403 is the gateway's, not the address's)
+         TCP 1.1.1.1:853 + payload      -> connect completes, nothing comes back (timeout)
+         TCP 8.8.8.8:53 + DNS query     -> connect completes, reply is the gateway's own rcode=3 answers=0 (open mode: rcode=0 answers=2)
+         1.1.1.1:443 connect            -> completes (accepted by the test)
+   DEVIATION from OWNER_REVIEW 27 ("other ports are still refused"): on 0.7.14 the TCP connect to an unlisted IP completes on
+   non-HTTP ports too (853, 53). No data reaches the address (silent / gateway-answered DNS), but the connection is not refused.
+   The first version of the test asserted "failed" and tripped on exactly this (run2/live-network.log, run2b); the test now
+   asserts "no data from the address". OWNER_REVIEW 27 wording should change.
+ Resolver check: another resolver over UDP (1.1.1.1) rcode=3 answers=0 in allowlist/closed, as before.
+
+== Step 4: live_old_home_moves_to_protected_storage   PASS (step4-run.log, 8.3 s)
+ Home built by the 0.7.6 runtime (script updated): e2e-mig-main with disk checkpoint + FULL checkpoint taken while running, a
+ FORK of that same running computer (e2e-mig-mfork), e2e-mig-run left RUNNING at launch with its own fork, disk restore, late, bad.
+ One launch (scripted engine step, no relaunch, no FINDING line): stages Stopping computers -> Checking 1..5 -> Backing up ->
+ Upgrading 1..5 -> Migration complete; main, fork, disk, run, mfork all Repaired. Report complete.
+ Data intact on every computer (incl. mfork a/b/m, c absent), 0.7.6 checkpoints restore (cold disk, full with memory, full --disk-only),
+ second launch holds nothing and leaves the report byte-identical, arrival of e2e-mig-late flagged, e2e-mig-bad still refused with
+ files kept. F1 (relaunch needed) and F2 (full checkpoint + fork recovery_required) are both fixed.
+
+== Skipped: GitHub live tests, Keychain-approval secrets, computer-use/v4 desktop tests, storage reclaim, macOS-computer probes (as in run 1).
+== Cleanup: /tmp/m14, /tmp/m14t, ~/.m14 and both guest-image symlinks removed; no leftover processes.

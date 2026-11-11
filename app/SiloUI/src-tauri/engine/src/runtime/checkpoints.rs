@@ -1470,6 +1470,7 @@ pub(super) fn pending_computer(
         attention: None,
         freshness: Freshness::Fresh,
         settling: false,
+        needs_storage_upgrade: false,
         repositories: Vec::new(),
         files: Vec::new(),
         ports: Vec::new(),
@@ -2181,6 +2182,14 @@ pub(super) fn start_pending(
             "--memory".into(),
             format!("{memory_gib}G"),
         ]);
+        // A disk snapshot records the guest path of each host mount it cannot carry, and
+        // MicroSandbox 0.7.15 refuses to restore one that has no mount for it. Silo gives a
+        // computer no host mounts but the legacy ones above, so a recorded path without one
+        // (an import, or a computer whose legacy mounts were removed) is a leftover to start
+        // without. A full restore keeps the refusal: its guest still holds the mount.
+        if legacy_mounts.is_empty() {
+            args.push("--allow-missing-resources".into());
+        }
     }
     for label in [
         MANAGED_LABEL.to_string(),

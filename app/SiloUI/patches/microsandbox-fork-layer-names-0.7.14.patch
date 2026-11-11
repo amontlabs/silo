@@ -1,0 +1,115 @@
+diff --git a/crates/runtime/lib/checkpoint/migration/source.rs b/crates/runtime/lib/checkpoint/migration/source.rs
+index ba698051c866f88ca44918e73c7ec7508bbddce9..61ec7d0a593748cf4dd4d2442afddeb7797900d1 100644
+--- a/crates/runtime/lib/checkpoint/migration/source.rs
++++ b/crates/runtime/lib/checkpoint/migration/source.rs
+@@ -939,6 +939,16 @@ fn root_name(name: &str, flat: bool, format: &str) -> bool {
+     if format == "raw" {
+         return name == if flat { "rootfs.raw" } else { "upper.ext4" };
+     }
++    // A fork or restore of a sandbox whose chain has sealed qcow2 layers hard-links each ancestor
++    // into the child's directory under its journal layer id (`layer_<32 hex>.qcow2`).
++    if format == "qcow2"
++        && name
++            .strip_suffix(".qcow2")
++            .and_then(|s| s.strip_prefix("layer_"))
++            .is_some_and(hex32)
++    {
++        return true;
++    }
+     let prefix = if flat { "root-" } else { "upper-" };
+     let Some(stem) = name
+         .strip_prefix(prefix)
+diff --git a/sdk/rust/lib/runtime/storage_aliases.rs b/sdk/rust/lib/runtime/storage_aliases.rs
+index 7ee8f56c6dd6c38034f779e0301782e40ea737e4..fccf3ab9b0f4f10f3871373c0d43f1ea69638b07 100644
+--- a/sdk/rust/lib/runtime/storage_aliases.rs
++++ b/sdk/rust/lib/runtime/storage_aliases.rs
+@@ -1211,6 +1211,89 @@ mod tests {
+         );
+     }
+ 
++    /// A 0.7.6 fork of a running sandbox with a sealed qcow2 layer links that layer into the child
++    /// as `layer_<id>.qcow2`; both directions must account it as the sealed root alias it is.
++    #[test]
++    fn fork_child_layer_named_by_journal_id_is_a_sealed_root_alias() {
++        let temp = tempfile::tempdir().unwrap();
++        let root = temp.path().canonicalize().unwrap();
++        let rows = [record(1, "parent"), record(2, "child")];
++        let parent_bindings = initialize(&root, &rows[0], true);
++        let child_bindings = initialize(&root, &rows[1], false);
++        share_base(&root, "parent", "child");
++        // Parent chain: upper.ext4 <- sealed <- head. Its `initialize` layer is the sealed one here.
++        let sealed = root
++            .join("parent")
++            .join(format!("upper-{}.qcow2", "b".repeat(32)));
++        let head = root
++            .join("parent")
++            .join(format!("upper-{}.qcow2", "e".repeat(32)));
++        fs::write(&head, vec![23; 65536]).unwrap();
++        let journal_path = root.join("parent/runtime/root-disk.json");
++        let mut journal: serde_json::Value =
++            serde_json::from_slice(&fs::read(&journal_path).unwrap()).unwrap();
++        journal["layers"]
++            .as_array_mut()
++            .unwrap()
++            .push(serde_json::json!({
++                "layer_id": format!("layer_{}", "e".repeat(32)), "path": head,
++                "format": "qcow2", "integrity_root": null
++            }));
++        fs::write(&journal_path, serde_json::to_vec(&journal).unwrap()).unwrap();
++        let linked = root
++            .join("child")
++            .join(format!("layer_{}.qcow2", "b".repeat(32)));
++        fs::hard_link(&sealed, &linked).unwrap();
++        let restore = root
++            .join("child")
++            .join("upper-restore-0123456789abcdef.qcow2");
++        fs::write(&restore, vec![24; 65536]).unwrap();
++        fs::write(root.join("child/runtime/root-disk.json"), serde_json::to_vec(&serde_json::json!({
++            "schema":"microsandbox.runtime-root-disk/1", "volume_id":format!("vol_{}", "d".repeat(32)),
++            "device_id":"vdb", "layout":"managed-upper", "published_generation":0,
++            "layers":[
++                {"layer_id":format!("layer_{}", "a".repeat(32)), "path":root.join("child/upper.ext4"), "format":"raw", "integrity_root":null},
++                {"layer_id":format!("layer_{}", "b".repeat(32)), "path":linked, "format":"qcow2", "integrity_root":null},
++                {"layer_id":format!("layer_{}", "f".repeat(32)), "path":restore, "format":"qcow2", "integrity_root":null}
++            ]
++        })).unwrap()).unwrap();
++        for (current, bindings) in [(1, &parent_bindings), (2, &child_bindings)] {
++            let report =
++                discover(&root, &root.join("volumes"), current, bindings, &rows, &[]).unwrap();
++            assert!(
++                report.reasons.is_empty(),
++                "current {current}: {:?}",
++                report.reasons
++            );
++            assert!(
++                report
++                    .aliases
++                    .iter()
++                    .any(|alias| alias.path == linked || alias.path == sealed)
++            );
++        }
++        // The head is still never shared: a writable head aliased into the child stays refused.
++        fs::remove_file(&restore).unwrap();
++        fs::hard_link(&head, &restore).unwrap();
++        let report = discover(
++            &root,
++            &root.join("volumes"),
++            1,
++            &parent_bindings,
++            &rows,
++            &[],
++        )
++        .unwrap();
++        assert!(
++            report
++                .reasons
++                .iter()
++                .any(|reason| reason.contains("unsealed")),
++            "{:?}",
++            report.reasons
++        );
++    }
++
+     #[test]
+     fn writable_peer_head_is_refused_even_when_peer_is_stopped() {
+         let temp = tempfile::tempdir().unwrap();

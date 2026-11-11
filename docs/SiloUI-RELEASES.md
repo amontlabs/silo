@@ -192,7 +192,7 @@ Only run the command needed: `desktop` starts development mode;
 and updater artifacts are produced
 by the release workflow, after VM signature finalization. Platform resource
 preparation runs before native compilation and needs network access on a cold
-cache. Install Rust 1.94.0 (`rustup toolchain install 1.94.0`) for the pinned
+cache. Install Rust 1.95.0 (`rustup toolchain install 1.95.0`) for the pinned
 MicroSandbox source build, plus the device's Tauri prerequisites.
 
 The Rust `build.rs` loads the file relative to the crate, so it also covers
@@ -282,7 +282,7 @@ Run the checks relevant to the change from the repository root:
 npm --prefix app/SiloUI run typecheck
 npm --prefix app/SiloUI run lint
 npm --prefix app/SiloUI test
-cargo +1.94.0 fmt --manifest-path app/SiloUI/src-tauri/Cargo.toml --check
+cargo +1.95.0 fmt --manifest-path app/SiloUI/src-tauri/Cargo.toml --check
 cargo test --manifest-path app/SiloUI/Cargo.toml --workspace --locked
 cargo test --manifest-path app/SiloUI/src-tauri/Cargo.toml --locked -p tauri-plugin-updater --lib
 npm --prefix app/SiloUI run test:release
@@ -693,7 +693,7 @@ archive. The Linux engines are built for x86-64 and arm64.
    and release at the commit it built. Alternatively, tag the merged commit
    `engine-v<version>` and push the tag; the workflow then fails unless the tag
    equals `engine-v<version>` of the Cargo version.
-3. `.github/workflows/engine-release.yml` builds `silod` with Rust 1.94.0 for
+3. `.github/workflows/engine-release.yml` builds `silod` with Rust 1.95.0 for
    `aarch64-apple-darwin` on `macos-15`, packages it with
    `app/SiloUI/scripts/package-engine.py`, and checks that the binary is `arm64`
    and the checksum. A `tag` job checks the tag before either build starts. In
@@ -815,7 +815,7 @@ python3 app/SiloUI/scripts/package-engine.py --out-dir /tmp/silo-engine
 ```
 
 This writes `silo-engine-<version>-macos-arm64.tar.gz` and its `.sha256`.
-`--source-commit` overrides `git rev-parse HEAD`. Use the Rust 1.94.0 toolchain
+`--source-commit` overrides `git rev-parse HEAD`. Use the Rust 1.95.0 toolchain
 with the `aarch64-apple-darwin` target installed, and the local GitHub build
 configuration from [Local setup](#local-setup). The script refuses a Cargo
 version that differs from the production manifest's `engineVersion`.
