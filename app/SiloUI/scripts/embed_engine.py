@@ -23,14 +23,15 @@ DISTRIBUTION = 'Contents/Resources/SiloEngineDistribution/Silo Engine.app'
 # What silod resolves inside its own bundle, copied from the app that Tauri built:
 # `Contents/MacOS` (bundled_tools::resolve, the gateway and bootstrap lookups),
 # `Contents/Frameworks` (bundled_runtime_library) and `Contents/Resources` (the runtime and Git
-# manifests, Git templates and the LFS transfer helper, and their licenses).
+# manifests, Git templates and the LFS transfer helper, and their licenses; `guest-support`
+# holds the Linux `silo` pushed into Linux computers).
 ENGINE_TOOLS = (
     'msb', 'silo-macos-gateway', 'silo-network-bootstrap',
     'git', 'git-lfs', 'git-remote-http', 'git-remote-https',
     'silo',
 )
 ENGINE_FRAMEWORKS = ('libkrunfw.5.dylib',)
-ENGINE_RESOURCES = ('microsandbox', 'git-support', 'THIRD-PARTY-NOTICES.md')
+ENGINE_RESOURCES = ('microsandbox', 'git-support', 'guest-support', 'THIRD-PARTY-NOTICES.md')
 
 
 SIGNING_IDENTITY_ENV = 'SILO_ENGINE_SIGNING_IDENTITY'

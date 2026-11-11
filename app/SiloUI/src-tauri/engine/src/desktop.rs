@@ -277,7 +277,7 @@ fn action_script(action: &str) -> String {
         format!(
             "{}\n{}\n",
             crate::agent_tools::setup_script(),
-            crate::computer_use::register_installed_agents_command()
+            crate::agents::register_after_install_command()
         )
     } else if action == "update-streamer" {
         installer_script(action)
@@ -839,7 +839,7 @@ pub fn install_agent_for_job(
         &runtime::ProcessRunner,
         paths,
         computer,
-        &crate::computer_use::register_installed_agents_command(),
+        &crate::agents::register_after_install_command(),
         Duration::from_secs(120),
         false,
     );

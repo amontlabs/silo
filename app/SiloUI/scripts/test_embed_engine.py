@@ -63,6 +63,9 @@ class EmbedEngineTests(unittest.TestCase):
         (contents / 'Resources/git-support/lfs-transfer/git-lfs-transfer').write_bytes(b'lfs')
         (contents / 'Resources/git-support/share').mkdir()
         (contents / 'Resources/git-support/share/templates').symlink_to('../manifest.json')
+        (contents / 'Resources/guest-support/silo').mkdir(parents=True)
+        (contents / 'Resources/guest-support/silo/manifest.json').write_text('{}')
+        (contents / 'Resources/guest-support/silo/silo').write_bytes(b'guest silo')
         (contents / 'Resources/THIRD-PARTY-NOTICES.md').write_text('notices')
         self.binary = self.root / 'silod'
         self.binary.write_bytes(b'#!/bin/sh\n')
@@ -106,13 +109,14 @@ class EmbedEngineTests(unittest.TestCase):
             self.assertTrue((inner / 'Resources' / name).exists(), name)
         self.assertEqual((inner / 'Resources/git-support/lfs-transfer/git-lfs-transfer').read_bytes(), b'lfs')
         self.assertTrue((inner / 'Resources/git-support/share/templates').is_symlink())
+        self.assertEqual((inner / 'Resources/guest-support/silo/silo').read_bytes(), b'guest silo')
         self.assertTrue((inner / 'Resources/microsandbox/licenses').is_dir())
         # The engine is sealed only after everything is in place.
         self.assertEqual(self.signed, [(engine, SILOD / 'macos/Entitlements.plist')])
 
     def test_an_app_missing_an_engine_tool_is_refused_before_anything_is_written(self):
         for relative in ('MacOS/msb', 'MacOS/silo-network-bootstrap', 'Frameworks/libkrunfw.5.dylib',
-                         'Resources/git-support'):
+                         'Resources/git-support', 'Resources/guest-support'):
             with self.subTest(relative=relative):
                 self.setUp()
                 path = self.bundle / 'Contents' / relative

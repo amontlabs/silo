@@ -949,10 +949,12 @@ def strip_legacy_rules(settings):
     return changed
 
 
-def edit_claude(entry, approval):
+def edit_claude(entry, approval, server=SERVER, remove=False):
     """Claude Code: `mcpServers.cua-driver` in ~/.claude.json (`entry`; None leaves the
     registration alone) and `mcp__cua-driver` in ~/.claude/settings.json `permissions.allow`
-    for the auto mode. LCU's entries are removed from both."""
+    for the auto mode. LCU's entries are removed from both. Another `server` (Silo's own MCP
+    server) is only added to or, with `remove`, taken out of ~/.claude.json: it has no approval
+    rule and the settings file is left alone."""
     state = read_object(CLAUDE_STATE)
     if state is None:
         raise Failure('setup-failed', f'{CLAUDE_STATE} is not a JSON object')
@@ -962,13 +964,17 @@ def edit_claude(entry, approval):
         raise Failure('setup-failed', 'mcpServers is not an object')
     if isinstance(servers, dict):
         servers.pop('lcu', None)
+        if remove:
+            servers.pop(server, None)
     if entry is not None:
         if servers is None:
             # Absent or `null`: both mean no servers yet.
             servers = state['mcpServers'] = {}
-        servers[SERVER] = entry
+        servers[server] = entry
     if json.dumps(state, sort_keys=True) != original:
         write_text(CLAUDE_STATE, json.dumps(state, indent=2) + '\n')
+    if server != SERVER:
+        return
     settings = read_object(CLAUDE_SETTINGS)
     if settings is None:
         raise Failure('setup-failed', f'{CLAUDE_SETTINGS} is not a JSON object')
@@ -999,7 +1005,14 @@ def edit_claude(entry, approval):
 
 TOML_HEADER = re.compile(r'^\s*\[\[?\s*([^\[\]]+?)\s*\]\]?\s*(?:#.*)?$')
 LEGACY_SERVER = re.compile(r'^mcp_servers\.("?)lcu\1(\.|$)')
-OWN_SERVER = re.compile(r'^mcp_servers\.("?)' + re.escape(SERVER) + r'\1(\.|$)')
+
+
+def own_server(server):
+    """The header of Codex's table for `server` (or one of its sub-tables)."""
+    return re.compile(r'^mcp_servers\.("?)' + re.escape(server) + r'\1(\.|$)')
+
+
+OWN_SERVER = own_server(SERVER)
 
 
 def toml_sections(text):
@@ -1018,20 +1031,23 @@ def toml_string(value):
     return json.dumps(value)
 
 
-def codex_block(entry, approval):
-    lines = [f'[mcp_servers.{SERVER}]', f'command = {toml_string(entry["command"])}',
+def codex_block(entry, approval, server=SERVER):
+    lines = [f'[mcp_servers.{server}]', f'command = {toml_string(entry["command"])}',
              'args = [' + ', '.join(toml_string(a) for a in entry['args']) + ']']
     if approval == 'auto':
         lines.append('default_tools_approval_mode = "approve"')
-    lines += ['', f'[mcp_servers.{SERVER}.env]']
-    lines += [f'{key} = {toml_string(value)}' for key, value in entry['env'].items()]
+    if entry['env']:
+        lines += ['', f'[mcp_servers.{server}.env]']
+        lines += [f'{key} = {toml_string(value)}' for key, value in entry['env'].items()]
     return lines
 
 
-def edit_codex(entry, approval):
+def edit_codex(entry, approval, server=SERVER, remove=False):
     """Codex: `[mcp_servers.cua-driver]` in ~/.codex/config.toml with its env table, and
     `default_tools_approval_mode = "approve"` for the auto mode. Silo owns that section and
-    rewrites it; LCU's server table and hooks are removed. The result must parse as TOML."""
+    rewrites it; LCU's server table and hooks are removed. Another `server` has its own table
+    written (or, with `remove`, taken out) the same way. The result must parse as TOML."""
+    own = own_server(server)
     try:
         original = CODEX_CONFIG.read_text()
     except FileNotFoundError:
@@ -1039,9 +1055,9 @@ def edit_codex(entry, approval):
     kept = []
     for name, lines in toml_sections(original):
         if name is not None:
-            if LEGACY_SERVER.match(name) or (entry is not None and OWN_SERVER.match(name)):
+            if LEGACY_SERVER.match(name) or ((entry is not None or remove) and own.match(name)):
                 continue
-            if entry is None and approval == 'ask' and OWN_SERVER.match(name):
+            if entry is None and approval == 'ask' and own.match(name):
                 # No registration to write (the agent is not installed), but an auto line
                 # that came with a kept fork must not outlive the ask mode.
                 lines = [line for line in lines
@@ -1053,7 +1069,7 @@ def edit_codex(entry, approval):
         kept.append((name, lines))
     text = '\n'.join(line for _, lines in kept for line in lines).rstrip()
     if entry is not None:
-        text = (text + '\n\n' if text else '') + '\n'.join(codex_block(entry, approval))
+        text = (text + '\n\n' if text else '') + '\n'.join(codex_block(entry, approval, server))
     text = text + '\n' if text else ''
     try:
         tomllib.loads(text)
@@ -1083,6 +1099,24 @@ def binary_installed(name, directories=None):
     return None
 
 
+@contextlib.contextmanager
+def editing():
+    """Takes the lock for editing the agents' configuration files, so a registration of the driver
+    and one of another server never overwrite each other's change (waits at most a minute)."""
+    STATE.mkdir(mode=0o755, parents=True, exist_ok=True)
+    with open(STATE / 'edit.lock', 'a') as handle:
+        deadline = time.monotonic() + 60
+        while True:
+            try:
+                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    raise Failure('busy', 'another registration is running') from None
+                time.sleep(0.2)
+        yield
+
+
 def configure(names, approval):
     """Registers the driver with the agents in `names` that are installed. Returns
     `(registered, pending, failed)`: pending agents are not installed yet."""
@@ -1095,13 +1129,13 @@ def configure(names, approval):
             if approval == 'ask':
                 # Registers nothing; only removes the auto approval a kept fork may have left.
                 try:
-                    with as_user():
+                    with editing(), as_user():
                         EDITORS[name](None, 'ask')
                 except (Failure, OSError, ValueError, TypeError, tomllib.TOMLDecodeError) as error:
                     log(f'could not clear the auto approval for {name}: {type(error).__name__}: {error}')
             continue
         try:
-            with as_user():
+            with editing(), as_user():
                 EDITORS[name](entry, approval)
             registered.append(name)
         except (Failure, OSError, ValueError, TypeError, tomllib.TOMLDecodeError) as error:
@@ -1109,6 +1143,63 @@ def configure(names, approval):
             log(f'could not register {SERVER} with {name}: {type(error).__name__}: {error}')
             failed.append(name)
     return registered, pending, failed
+
+
+# ------------------------------------------------- other MCP servers (Silo's own tools)
+
+SERVER_NAME = re.compile(r'[a-z][a-z0-9-]{0,31}')
+
+
+def plain_entry(command, args):
+    """A stdio server entry with no environment of its own, in the shape both agents take."""
+    return {'type': 'stdio', 'command': str(command), 'args': [str(a) for a in args], 'env': {}}
+
+
+def valid_server(name, command=None, args=()):
+    if name == SERVER or not SERVER_NAME.fullmatch(name):
+        raise Failure('invalid-server', f'{name!r} is not a server name Silo may register')
+    if command is not None:
+        if not command.startswith('/') or '\0' in command or any('\0' in a for a in args):
+            raise Failure('invalid-server', 'the command must be an absolute path')
+
+
+def configure_server(name, command, args):
+    """Registers the plain stdio MCP server `name` with the installed agents, the way the driver
+    is registered (`configure`): returns `(registered, pending, failed)`, pending being agents
+    that are not installed yet."""
+    valid_server(name, command, args)
+    entry = plain_entry(command, args)
+    registered, pending, failed = [], [], []
+    repair_agent_files()
+    for agent in sorted(AGENTS):
+        if not binary_installed(AGENTS[agent]):
+            pending.append(agent)
+            continue
+        try:
+            with editing(), as_user():
+                EDITORS[agent](entry, None, server=name)
+            registered.append(agent)
+        except (Failure, OSError, ValueError, TypeError, tomllib.TOMLDecodeError) as error:
+            log(f'could not register {name} with {agent}: {type(error).__name__}: {error}')
+            failed.append(agent)
+    return registered, pending, failed
+
+
+def remove_server(name):
+    """Takes the server `name` out of every agent's configuration (a file that does not exist
+    is not created). Returns `(removed, failed)`."""
+    valid_server(name)
+    removed, failed = [], []
+    repair_agent_files()
+    for agent in sorted(AGENTS):
+        try:
+            with editing(), as_user():
+                EDITORS[agent](None, None, server=name, remove=True)
+            removed.append(agent)
+        except (Failure, OSError, ValueError, TypeError, tomllib.TOMLDecodeError) as error:
+            log(f'could not remove {name} from {agent}: {type(error).__name__}: {error}')
+            failed.append(agent)
+    return removed, failed
 
 
 def remove_legacy_user_files():
@@ -1493,6 +1584,12 @@ def main(argv=None):
     commands.add_parser('status')
     commands.add_parser('reconcile')
     commands.add_parser('watch')
+    add_parser = commands.add_parser('server-add', help="register another stdio MCP server with the agents")
+    add_parser.add_argument('--name', required=True)
+    add_parser.add_argument('--command', dest='command_path', required=True)
+    add_parser.add_argument('--arg', action='append', default=[])
+    remove_parser = commands.add_parser('server-remove', help="take a server registered by server-add out of the agents")
+    remove_parser.add_argument('--name', required=True)
     apply_parser = commands.add_parser('apply')
     apply_parser.add_argument('--approval', choices=APPROVALS, required=True)
     apply_parser.add_argument('--force', action='store_true')
@@ -1509,6 +1606,15 @@ def main(argv=None):
         watch()
         return 0
     try:
+        if args.command == 'server-add':
+            registered, pending, failed = configure_server(args.name, args.command_path, args.arg)
+            result = {'server': args.name, 'registered': registered, 'pending': pending, 'failed': failed}
+            print(json.dumps(result, sort_keys=True))
+            return 1 if failed else 0
+        if args.command == 'server-remove':
+            removed, failed = remove_server(args.name)
+            print(json.dumps({'server': args.name, 'removed': removed, 'failed': failed}, sort_keys=True))
+            return 1 if failed else 0
         if args.command == 'status':
             result = status()
         elif args.command == 'reconcile':
@@ -1518,6 +1624,9 @@ def main(argv=None):
     except Failure as failure:
         # The run could not even start (another run held the lock): still a report.
         result = {'schemaVersion': SCHEMA, 'state': 'failed', 'reason': failure.reason}
+        if args.command in ('server-add', 'server-remove'):
+            print(json.dumps({'server': args.name, 'error': failure.reason}, sort_keys=True))
+            return 1
         if args.command == 'apply':
             result['apply'] = report(args.approval, 'failed', failure.reason)
     print(json.dumps(result, sort_keys=True))

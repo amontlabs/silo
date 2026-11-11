@@ -19,12 +19,17 @@ pub const VERSION: u32 = 1;
 pub const EXEC_TIMEOUT: Duration = Duration::from_secs(8);
 const MAX_FILE_BYTES: usize = 4096;
 
-/// Writes standard input to `$1` atomically: root-owned, mode 0640 with the `silo` account's
-/// group when the computer has that account, else 0600.
+/// Writes standard input to `$1` atomically. On Linux the file is root-owned, mode 0640 with the
+/// `silo` account's group when the computer has that account (that group holds only that account),
+/// else 0600. On macOS the working account's group is `staff`, which every account is in, so the
+/// file is owned by the working account with mode 0600 instead (root-owned 0600 when the computer
+/// has no such account).
 pub const WRITE_SCRIPT: &str = "set -e; umask 077; dir=$(dirname \"$1\"); mkdir -p \"$dir\"; chmod 755 \"$dir\"; \
-     tmp=\"$1.new.$$\"; cat > \"$tmp\"; chown 0 \"$tmp\"; \
+     tmp=\"$1.new.$$\"; cat > \"$tmp\"; \
+     if [ \"$(uname -s)\" = Darwin ]; then chown silo \"$tmp\" 2>/dev/null || chown 0 \"$tmp\"; chmod 600 \"$tmp\"; else \
+     chown 0 \"$tmp\"; \
      group=$(id -gn silo 2>/dev/null || true); \
-     if [ -n \"$group\" ]; then chgrp \"$group\" \"$tmp\"; chmod 640 \"$tmp\"; else chmod 600 \"$tmp\"; fi; \
+     if [ -n \"$group\" ]; then chgrp \"$group\" \"$tmp\"; chmod 640 \"$tmp\"; else chmod 600 \"$tmp\"; fi; fi; \
      mv -f \"$tmp\" \"$1\"";
 
 #[derive(Deserialize)]
@@ -204,8 +209,11 @@ mod tests {
     fn the_write_script_writes_atomically_and_keeps_the_file_private_without_the_account() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("etc/silo/endpoint.json");
-        // As a normal user `chown 0` fails; the script stops before the file is replaced.
-        let script = WRITE_SCRIPT.replace("chown 0 \"$tmp\"; ", "");
+        // As a normal user `chown 0` fails; the script stops before the file is replaced. The
+        // Linux branch is the one run, whatever the machine running the test is.
+        let script = WRITE_SCRIPT
+            .replace("chown 0 \"$tmp\"; ", "")
+            .replace("$(uname -s)", "Linux");
         let mut child = std::process::Command::new("sh")
             .args(["-c", &script, "silo-endpoint"])
             .arg(&path)
@@ -222,5 +230,31 @@ mod tests {
         assert!(mode == 0o600 || mode == 0o640, "{mode:o}");
         assert!(WRITE_SCRIPT.contains("chown 0 \"$tmp\""));
         assert!(WRITE_SCRIPT.contains("mv -f \"$tmp\" \"$1\""));
+    }
+
+    #[test]
+    fn on_macos_the_file_is_the_working_accounts_and_private_not_shared_with_staff() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("etc/silo/endpoint.json");
+        // The test cannot give a file to `silo`; the branch's mode is what is checked.
+        let script = WRITE_SCRIPT
+            .replace("chown silo \"$tmp\" 2>/dev/null || chown 0 \"$tmp\"; ", "")
+            .replace("$(uname -s)", "Darwin");
+        let mut child = std::process::Command::new("sh")
+            .args(["-c", &script, "silo-endpoint"])
+            .arg(&path)
+            .stdin(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        use std::io::Write as _;
+        child.stdin.take().unwrap().write_all(b"{}").unwrap();
+        assert!(child.wait().unwrap().success());
+        let mode = std::os::unix::fs::PermissionsExt::mode(
+            &std::fs::metadata(&path).unwrap().permissions(),
+        ) & 0o777;
+        assert_eq!(mode, 0o600);
+        let macos_branch = WRITE_SCRIPT.split("; else ").next().unwrap();
+        assert!(macos_branch.contains("chown silo \"$tmp\""));
+        assert!(!macos_branch.contains("chgrp"), "no group, so not `staff`");
     }
 }

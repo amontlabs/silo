@@ -208,6 +208,22 @@ pub fn turn_off(computer_ids: &[&str]) -> Result<usize, String> {
 
 /// [`turn_off`] with the store given.
 pub fn turn_off_in(store: &TokenStore, computer_ids: &[&str]) -> Result<usize, String> {
+    // Silo's MCP server is registered with the agents of every computer that had the tools; it is
+    // taken out when the computer next runs (at once for a running one, see `guestClient.revoke`).
+    let had: Vec<&str> = computer_ids
+        .iter()
+        .copied()
+        .filter(|id| {
+            store
+                .status(id)
+                .ok()
+                .flatten()
+                .is_some_and(|record| record.enabled())
+        })
+        .collect();
+    if !had.is_empty() {
+        crate::guest_components::owe_removal(store.directory(), &had);
+    }
     let locked = store.locked();
     let mut records = locked.records()?;
     let mut held = locked.held()?;
@@ -251,6 +267,9 @@ pub fn computer_removed(computer_id: &str) {
         if let Err(error) = forget_in(&store, computer_id) {
             eprintln!("silo-engine: {error}");
         }
+    }
+    if let Some(store) = TokenStore::current() {
+        crate::guest_components::forget(store.directory(), computer_id);
     }
 }
 
@@ -428,14 +447,25 @@ mod tests {
         let (first, port) = bind(None).unwrap();
         assert_eq!(first.local_addr().unwrap().ip(), Ipv4Addr::LOCALHOST);
         assert_ne!(port, 0);
+        // While `first` holds the port no bind can have it, whatever else runs at the same time.
         let (second, other) = bind(Some(port)).unwrap();
         assert_ne!(other, port, "a taken port is not shared");
         assert!(bind_exact(port).is_err());
-        drop(first);
         drop(second);
-        let (again, same) = bind(Some(port)).unwrap();
-        assert_eq!(same, port, "a free port is kept");
-        drop(again);
+        // Once it is freed, the port is kept when nothing else took it in the meantime. Another
+        // test binding port 0 can be handed the freed number, so a few tries are made; each try
+        // that fails only shows that the port was taken, which is the case that falls back.
+        drop(first);
+        let kept = (0..100).any(|_| {
+            let (again, same) = bind(Some(port)).unwrap();
+            let kept = same == port;
+            drop(again);
+            if !kept {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            kept
+        });
+        assert!(kept, "a free port is kept");
     }
 
     #[test]

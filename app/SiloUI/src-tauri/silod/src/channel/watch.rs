@@ -21,6 +21,7 @@ use silo_api::methods::{network::NetworkPolicyTiming, MethodName};
 use silo_engine::{
     context::EngineContext,
     guest_client::{self, endpoint, now_secs, tokens, HeldPort, TokenStore},
+    guest_components,
     policy::store::PolicyStore,
 };
 
@@ -28,7 +29,7 @@ use super::Channels;
 use crate::{
     context::SilodContext,
     dispatcher::{DispatchError, RequestContext},
-    methods::{self, HandlerContext},
+    methods::{self, guest_client::Places, HandlerContext},
 };
 
 /// The watcher looks after every change the engine announces about computers or checkpoints,
@@ -245,12 +246,15 @@ pub(super) enum Check {
     Restart(String),
     /// Whether its network no longer names a held port, so the port can go.
     Held(HeldPort),
+    /// Taking Silo's MCP server out of its agents, which is owed since its tools were turned
+    /// off while it was not running.
+    Removal(String),
 }
 
 impl Check {
     fn computer(&self) -> &str {
         match self {
-            Self::Endpoint(id) | Self::Restart(id) => id,
+            Self::Endpoint(id) | Self::Restart(id) | Self::Removal(id) => id,
             Self::Held(entry) => &entry.computer_id,
         }
     }
@@ -299,14 +303,30 @@ impl Checker {
         silo_engine::runtime::runtime_paths(self.context.runtime_host().as_ref())
     }
 
+    /// The computer's endpoint file, then what Silo keeps in it (the program and its
+    /// registration with the agents). Returns whether the file was written. A piece that fails
+    /// to install is recorded in the computer's status; only a computer that cannot be read at
+    /// all is an error, which is tried again later.
     fn endpoint(&self, computer_id: &str) -> Outcome {
-        let target = silo_engine::guest::resolve(
-            self.runtime(),
-            &self.context.paths().app_data,
-            computer_id,
-        )
-        .map_err(|error| error.message)?;
-        endpoint::ensure(&target, &self.store())
+        let runtime = self.runtime();
+        let places = Places::of(&self.context, &runtime);
+        let app_data = &self.context.paths().app_data;
+        let target = silo_engine::guest::resolve(runtime, app_data, computer_id)
+            .map_err(|error| error.message)?;
+        let written = endpoint::ensure(&target, &self.store())?;
+        guest_components::reconcile(&target, app_data, &places.sources(), None)?;
+        Ok(written)
+    }
+
+    /// Takes Silo's MCP server out of the agents of a computer whose tools are off.
+    fn removal(&self, computer_id: &str) -> Outcome {
+        let runtime = self.runtime();
+        let places = Places::of(&self.context, &runtime);
+        let app_data = &self.context.paths().app_data;
+        let target = silo_engine::guest::resolve(runtime, app_data, computer_id)
+            .map_err(|error| error.message)?;
+        guest_components::remove_registration(&target, app_data, &places.sources())?;
+        Ok(true)
     }
 
     /// Whether the computer runs with the rules its plan asks for now.
@@ -337,6 +357,7 @@ impl Checker {
             Check::Endpoint(id) => self.endpoint(id),
             Check::Restart(id) => self.restart(id),
             Check::Held(entry) => self.held(entry),
+            Check::Removal(id) => self.removal(id),
         }
     }
 }
@@ -402,6 +423,8 @@ struct Watcher {
     results: mpsc::Receiver<(Check, Outcome)>,
     report: mpsc::Sender<(Check, Outcome)>,
     wake: mpsc::SyncSender<()>,
+    /// Computers whose registration is owed a removal: the look in progress or the next try.
+    removal_seen: HashMap<String, Seen>,
 }
 
 impl Watcher {
@@ -469,6 +492,7 @@ impl Watcher {
             let seen = match &check {
                 Check::Endpoint(id) | Check::Restart(id) => self.seen.get_mut(id),
                 Check::Held(entry) => self.held_seen.get_mut(entry),
+                Check::Removal(id) => self.removal_seen.get_mut(id),
             };
             let Some(seen) = seen else {
                 continue;
@@ -502,6 +526,29 @@ impl Watcher {
         }
     }
 
+    /// Takes Silo's MCP server out of the agents of running computers whose tools were turned off
+    /// while they were not running (or did not answer). Each removal is a check of its own, so
+    /// it is bounded and backed off like the others and never holds up another computer.
+    fn remove_owed(&mut self, owed: &[String], states: &HashMap<String, bool>) {
+        let now = Instant::now();
+        for id in owed {
+            if states.get(id) != Some(&true) {
+                continue;
+            }
+            let mut seen = self.removal_seen.get(id).cloned().unwrap_or_default();
+            if seen.retry_at.is_some_and(|at| now < at) {
+                continue;
+            }
+            if self.launch(Check::Removal(id.clone())) {
+                // Cleared or set again when the result comes in.
+                seen.retry_at = Some(now + MAX_RETRY);
+                self.removal_seen.insert(id.clone(), seen);
+            }
+        }
+        self.removal_seen
+            .retain(|id, _| states.contains_key(id) && owed.contains(id));
+    }
+
     fn tick(&mut self) {
         self.collect();
         let enabled = self.store.enabled();
@@ -510,12 +557,14 @@ impl Watcher {
             .retain(|id, _| enabled.iter().any(|record| &record.computer_id == id));
         self.held_seen.retain(|entry, _| held.contains(entry));
         hold_free(&held, self.checker.channels.as_ref());
-        if enabled.is_empty() && held.is_empty() {
+        let owed = guest_components::owed_removals(&self.context.paths().app_data);
+        if enabled.is_empty() && held.is_empty() && owed.is_empty() {
             return;
         }
         let Some(states) = self.states() else {
             return;
         };
+        self.remove_owed(&owed, &states);
         let now = Instant::now();
         for record in enabled {
             let id = record.computer_id;
@@ -644,6 +693,7 @@ pub fn start(context: Arc<SilodContext>) {
         results,
         report,
         wake: wake.clone(),
+        removal_seen: HashMap::new(),
     };
     watcher
         .handle

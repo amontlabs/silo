@@ -738,7 +738,7 @@ pub fn guest_prepare(params: guest::GuestPrepareParams) -> Request<kind::Command
 
 /// `guestClient.enable`
 pub fn guest_client_enable(
-    params: guest_client::GuestClientComputerParams,
+    params: guest_client::GuestClientEnableParams,
 ) -> Request<kind::Command> {
     Request::new(MethodParams::GuestClientEnable(params))
 }
