@@ -168,9 +168,9 @@ mod tests {
             }
             MethodName::GuestClientStatus
             | MethodName::GuestClientEnable
-            | MethodName::GuestClientRevoke => {
-                Ok(json!({"computerId": DEV, "enabled": true, "network": "nextStart", "written": false}))
-            }
+            | MethodName::GuestClientRevoke => Ok(
+                json!({"computerId": DEV, "enabled": true, "network": "nextStart", "written": false}),
+            ),
             _ => Ok(Value::Null),
         }
     }
@@ -241,12 +241,14 @@ mod tests {
 
     #[tokio::test]
     async fn the_engines_refusal_of_a_stale_save_reaches_the_window_in_its_words() {
-        let fake = FakeEngine::start(|method, params| match method {
+        let fake = FakeEngine::start(|method, params| {
+            match method {
             MethodName::NetworkPolicySet => Err((
                 "changed",
                 "The network policy of this computer changed while this was being decided. Read it again and retry.".to_owned(),
             )),
             other => replies(other, params),
+        }
         });
         let (engine, _) = connected_client(&fake).await;
         let error = save_policy(
