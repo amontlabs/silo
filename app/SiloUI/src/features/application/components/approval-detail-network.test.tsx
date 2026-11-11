@@ -27,3 +27,24 @@ it("says after Allow that the change waits for the computer's restart", () => {
   render(<ApprovalDetail approval={approval("allowed", { outcome: { result: { computerId: "c", timing: "nextRestart" } } })} actions={{ decideApproval: vi.fn(), readApprovalJob: vi.fn() }} onBack={vi.fn()} onChanged={vi.fn()} />)
   expect(screen.getByRole("status")).toHaveTextContent("Done. It applies when the computer restarts.")
 })
+
+it("strips bidi overrides, preserves meaningful newlines, and displays computer id beside its name", () => {
+  render(
+    <ApprovalDetail
+      approval={approval("pending", {
+        computerId: "cmp-id-456",
+        computerName: "dev\u202Efake",
+        summary: "Line 1\nLine 2\u202Ebad",
+        note: "Note 1\u200B\nNote 2",
+      })}
+      actions={{ decideApproval: vi.fn(), readApprovalJob: vi.fn() }}
+      onBack={vi.fn()}
+      onChanged={vi.fn()}
+    />
+  )
+  expect(screen.getByText("devfake asks")).toBeVisible()
+  expect(screen.getByText("cmp-id-456")).toBeVisible()
+  const summaryEl = screen.getByLabelText("What is asked").querySelector("p")
+  expect(summaryEl).toHaveClass("whitespace-pre-line")
+  expect(summaryEl?.textContent).toBe("Line 1\nLine 2bad")
+})

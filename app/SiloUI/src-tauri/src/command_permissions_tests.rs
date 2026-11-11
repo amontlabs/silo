@@ -324,6 +324,33 @@ fn agents_are_listed_by_the_status_panel_and_installed_from_the_main_window_only
 }
 
 #[test]
+fn approvals_are_listed_by_the_status_panel_and_decided_from_the_main_window_only() {
+    let capabilities: Value =
+        serde_json::from_str(include_str!("../gen/schemas/capabilities.json")).unwrap();
+    let granted = |window: &str, permission: &str| {
+        capabilities[window]["permissions"]
+            .as_array()
+            .unwrap()
+            .contains(&Value::String(permission.into()))
+    };
+    assert!(granted("preview", "allow-list-approvals"));
+    assert!(granted("preview", "allow-list-review-requests"));
+    assert!(granted("preview", "allow-decide-approval"));
+    assert!(granted("status", "allow-list-approvals"));
+    assert!(granted("status", "allow-list-review-requests"));
+    assert!(!granted("status", "allow-decide-approval"));
+    let events = &capabilities["application-events"];
+    assert!(events["windows"]
+        .as_array()
+        .unwrap()
+        .contains(&Value::String("status".into())));
+    assert!(events["permissions"]
+        .as_array()
+        .unwrap()
+        .contains(&Value::String("core:event:allow-listen".into())));
+}
+
+#[test]
 fn network_policy_and_silos_tools_are_for_the_main_window_only() {
     let capabilities: Value =
         serde_json::from_str(include_str!("../gen/schemas/capabilities.json")).unwrap();

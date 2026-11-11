@@ -369,7 +369,7 @@ pub(super) fn terminal_command(
     computer_id: &str,
     agent: Option<AgentId>,
 ) -> Result<CommandResult, String> {
-    let connection = ensure(app, computer_id, None, Some(true))?;
+    let connection = ensure(app, computer_id, None, Some(false))?;
     Ok(CommandResult {
         argv: terminal_argv(Path::new(&connection.config_path), &connection.alias, agent)?,
     })

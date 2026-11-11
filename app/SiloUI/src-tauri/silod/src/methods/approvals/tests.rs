@@ -973,6 +973,41 @@ async fn a_merge_into_itself_needs_the_reviewed_digest_and_makes_the_review_requ
 }
 
 #[tokio::test]
+async fn denying_a_merge_approval_closes_its_review_request() {
+    let _lock = crate::methods::MACOS_REGISTRY_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _serial = serial();
+    let tree = Tree::new();
+    use crate::methods::checkpoints::tests_rows;
+    tests_rows::set_empty();
+    tests_rows::set_sources(&[(tree.fork.as_str(), tree.me.as_str())]);
+    let ask_id = ask(
+        &tree.me(),
+        MethodName::ChangesKeep,
+        json!({"forkId": tree.fork, "reviewDigest": "d1"}),
+    )
+    .await;
+    let approval = get(&owner(), &ask_id).await.unwrap();
+    let request_id = approval["reviewRequestId"].as_str().unwrap().to_owned();
+    let before = fold_requests::Store::new(&app_data())
+        .get(&request_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(before.status, silo_api::methods::keep::FoldRequestStatus::Open);
+
+    decide(&ask_id, "deny").await.unwrap();
+    assert_eq!(get(&owner(), &ask_id).await.unwrap()["state"], "denied");
+
+    let after = fold_requests::Store::new(&app_data())
+        .get(&request_id)
+        .unwrap()
+        .unwrap();
+    assert_eq!(after.status, silo_api::methods::keep::FoldRequestStatus::ThrownAway);
+    tests_rows::set_sources(&[]);
+}
+
+#[tokio::test]
 async fn a_computer_holds_at_most_twenty_waiting_requests() {
     let tree = Tree::new();
     for port in 0..20 {

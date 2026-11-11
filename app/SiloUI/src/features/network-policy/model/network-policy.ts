@@ -4,6 +4,8 @@ import type { GuestComponent, NetworkMode, NetworkPolicy, NetworkPolicyState, Ne
 import type { ApplicationActions } from "@/features/application/model/application-source"
 import { errorMessage } from "@/lib/error-message"
 
+import publicSuffixes from "../../../../src-tauri/engine/src/network_policy/public_suffixes.json"
+
 export const modeChoices: readonly { mode: NetworkMode; label: string; description: string }[] = [
   { mode: "open", label: "Open", description: "Can reach any public address." },
   { mode: "allowlist", label: "Allowlist", description: "Only the hosts you list." },
@@ -41,10 +43,39 @@ export function hostCount(count: number): string {
   return `${count} more ${count === 1 ? "host" : "hosts"}`
 }
 
-/** Whether an error says the policy changed while the person was looking at it, so their draft is out of date. */
-export function isStaleSave(message: string): boolean {
-  return /read it again/i.test(message)
+/** The engine's own lists, so a host is refused here for the same reasons as when it is saved. */
+const RESERVED_TOP_LEVEL = new Set(["internal", "local", "localhost", "arpa", "invalid", "test", "onion", "lan", "home", "localdomain"])
+const PUBLIC_SUFFIXES = new Set(publicSuffixes.suffixes)
+
+/** Why the engine would refuse a host pattern, or nothing when it would take it. Mirrors `validate_host`. */
+export function validateHost(host: string): string | undefined {
+  const refuse = (why: string) => `"${host}" is not a host Silo can allow: ${why}.`
+  const name = host.startsWith("*.") ? host.slice(2) : host
+  if (!host || host.length > 253) return refuse("a host name has 1 to 253 characters")
+  if (name.includes("*")) return refuse("only one leading `*.` is allowed")
+  if (host.includes(":")) return refuse("give a name without a port; port 443 is allowed")
+  if (!/^[a-z0-9.-]+$/.test(name)) return refuse("use lowercase letters, digits, hyphens and dots only")
+  const labels = name.split(".")
+  if (labels.some(label => !label || label.length > 63 || label.startsWith("-") || label.endsWith("-"))) {
+    return refuse("each part between dots has 1 to 63 characters and does not start or end with a hyphen")
+  }
+  if (labels.length < 2) return refuse("a top-level name alone would allow a whole domain")
+  const top = labels[labels.length - 1]!
+  if (/^\d+$/.test(top)) return refuse("addresses are not allowed, only names")
+  if (RESERVED_TOP_LEVEL.has(top)) return refuse("that name stays on this device or its network")
+  if (host.startsWith("*.") && PUBLIC_SUFFIXES.has(name)) return refuse("a name under which anyone can get a host would allow all of them")
+  return undefined
 }
+
+/** The code the engine gives a save refused because the policy changed since the person read it. */
+const CHANGED_CODE = "changed"
+
+/** Whether an error is the engine refusing a save because the policy changed while the person was looking at it. */
+export function isStaleSave(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "code" in error && error.code === CHANGED_CODE
+}
+
+const STALE_MESSAGE = "The network policy of this computer changed while this was being decided. Read it again and retry."
 
 type Read = NonNullable<ApplicationActions["readNetworkPolicy"]>
 type Save = NonNullable<ApplicationActions["saveNetworkPolicy"]>
@@ -62,19 +93,38 @@ export function useNetworkPolicy({ read, save, target, enabled, refreshKey }: {
   refreshKey?: string
 }) {
   const [state, setState] = useState<NetworkPolicyState>()
-  const [draft, setDraft] = useState<NetworkPolicy>()
+  const [draft, setDraftState] = useState<NetworkPolicy>()
+  const [baseline, setBaseline] = useState<NetworkPolicy>()
   const [loadError, setLoadError] = useState<string | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
+  const [isStale, setIsStale] = useState(false)
   const [saving, setSaving] = useState(false)
   const requests = useRef(0)
-  const base = useRef<NetworkPolicy | undefined>(undefined)
+  // The draft and the policy it started from, readable between renders.
+  const current = useRef<{ draft?: NetworkPolicy; baseline?: NetworkPolicy }>({})
+
+  const setDraft = useCallback((next: NetworkPolicy) => {
+    current.current.draft = next
+    setDraftState(next)
+  }, [])
+
+  const rebase = useCallback((policy: NetworkPolicy) => {
+    current.current = { draft: policy, baseline: policy }
+    setBaseline(policy)
+    setDraftState(policy)
+    setIsStale(false)
+  }, [])
 
   const adopt = useCallback((next: NetworkPolicyState, discard: boolean) => {
-    const previous = base.current
-    base.current = next.policy
+    const { draft: edited, baseline: started } = current.current
+    const editing = Boolean(edited && started && !samePolicy(edited, started))
     setState(next)
-    setDraft(current => discard || !current || !previous || samePolicy(current, previous) ? next.policy : current)
-  }, [])
+    if (discard || !editing) rebase(next.policy)
+    else if (started && !samePolicy(next.policy, started)) {
+      setIsStale(true)
+      setSaveError(STALE_MESSAGE)
+    }
+  }, [rebase])
 
   const load = useCallback(async (discard = false) => {
     if (!read) return
@@ -96,28 +146,30 @@ export function useNetworkPolicy({ read, save, target, enabled, refreshKey }: {
     return () => { requests.current += 1 }
   }, [enabled, load, refreshKey])
 
-  const submit = useCallback(async (policy: NetworkPolicy) => {
+  const submit = useCallback(async (policy: NetworkPolicy, options?: { acceptPresets?: boolean }) => {
     if (!save || !state) return
     setSaving(true)
     setSaveError(null)
     try {
-      const next = await save(target, policy, state.policy)
+      const { baseline } = current.current
+      const next = await (options ? save(target, policy, baseline, options) : save(target, policy, baseline))
       requests.current += 1
       adopt(next, true)
     } catch (cause) {
+      setIsStale(isStaleSave(cause))
       setSaveError(errorMessage(cause))
     } finally {
       setSaving(false)
     }
   }, [save, state, target, adopt])
 
-  const dirty = Boolean(state && draft && !samePolicy(state.policy, draft))
+  const dirty = Boolean(draft && baseline && !samePolicy(draft, baseline))
   return {
-    state, draft, setDraft, dirty, saving, loadError, saveError,
+    state, draft, setDraft, dirty, isStale, saving, loadError, saveError,
     loading: enabled && !state && !loadError,
     submit,
-    reload: (discard = false) => { setSaveError(null); return load(discard) },
-    discard: () => { setSaveError(null); if (state) setDraft(state.policy) },
+    reload: (discard = false) => { setSaveError(null); setIsStale(false); return load(discard) },
+    discard: () => { setSaveError(null); if (state) rebase(state.policy) },
   }
 }
 

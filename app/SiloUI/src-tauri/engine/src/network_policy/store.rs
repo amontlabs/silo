@@ -51,6 +51,31 @@ impl Stored {
         Self::of(Held::latest(policy.clone()), false)
     }
 
+    /// `policy` saved over `before`: a preset already there keeps the version it was approved
+    /// at (none means the first), and a preset added now is pinned to the version this Silo has.
+    pub fn preserving_pins(
+        policy: &NetworkPolicy,
+        before: Option<&Stored>,
+        incoming_denied: bool,
+    ) -> Self {
+        let mut pins = Held::latest(policy.clone()).pins;
+        if let Some(before) = before {
+            for preset in before.presets.iter().filter(|name| policy.presets.contains(name)) {
+                match before.preset_versions.get(preset) {
+                    Some(version) => pins.insert(preset.clone(), *version),
+                    None => pins.remove(preset),
+                };
+            }
+        }
+        Self {
+            mode: policy.mode,
+            hosts: policy.hosts.clone(),
+            presets: policy.presets.clone(),
+            preset_versions: pins,
+            incoming_denied,
+        }
+    }
+
     pub fn of(held: Held, incoming_denied: bool) -> Self {
         Self {
             mode: held.policy.mode,

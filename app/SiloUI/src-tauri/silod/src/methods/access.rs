@@ -547,6 +547,8 @@ fn failure(message: impl Into<String>) -> DispatchError {
         ErrorCode::UpdateInProgress
     } else if message == silo_engine::github::CONNECTION_CANCELLED {
         ErrorCode::Cancelled
+    } else if message == silo_engine::network_policy::store::CHANGED {
+        ErrorCode::Changed
     } else {
         ErrorCode::Internal
     };
@@ -1978,17 +1980,18 @@ async fn network_policy(
     context: &HandlerContext,
     setting: bool,
 ) -> Result<HandlerOutput, DispatchError> {
-    let (computer_id, device_id, policy, expected) = if setting {
+    let (computer_id, device_id, policy, expected, accept_presets) = if setting {
         let typed = context.decode_params::<network::NetworkPolicySetParams>(params)?;
         (
             typed.computer_id,
             typed.device_id,
             Some(typed.policy),
             typed.expected,
+            typed.accept_presets,
         )
     } else {
         let typed = context.decode_params::<network::NetworkTargetParams>(params)?;
-        (typed.computer_id, typed.device_id, None, None)
+        (typed.computer_id, typed.device_id, None, None, None)
     };
     if remote_target(context, device_id.as_deref()).is_some() {
         return Err(DispatchError {
@@ -2003,7 +2006,13 @@ async fn network_policy(
         let paths = local_paths()?;
         let target = network_target(&paths, &computer_id)?;
         match &policy {
-            Some(policy) => service::set(&computer_id, policy, expected.as_ref(), target),
+            Some(policy) => service::set(
+                &computer_id,
+                policy,
+                expected.as_ref(),
+                accept_presets,
+                target,
+            ),
             None => service::get(&computer_id, target),
         }
     })
@@ -2883,6 +2892,10 @@ pub(crate) mod tests {
         assert_eq!(
             failure("GitHub connection cancelled.").code,
             ErrorCode::Cancelled
+        );
+        assert_eq!(
+            failure(silo_engine::network_policy::store::CHANGED).code,
+            ErrorCode::Changed
         );
         assert_eq!(failure("Anything else").code, ErrorCode::Internal);
         assert_eq!(
