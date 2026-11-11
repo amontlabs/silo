@@ -838,6 +838,7 @@ fn main_recipe(keep: Option<silo_api::methods::keep::KeepHooks>) -> silo_api::me
             keep,
             test: None,
             files: Vec::new(),
+            commands_hidden: None,
         },
     }
 }

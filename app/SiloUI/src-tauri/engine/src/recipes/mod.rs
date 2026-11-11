@@ -23,7 +23,7 @@ pub use additions::{append, manager_key, record_merge, unrecord_merge, Additions
 pub use cache::Cache;
 pub use quiet::{quiet_names, quiet_warnings};
 pub use library::{
-    built_in, built_in_names, hooks_of, validate_definition, Library, DEFAULT_RECIPE,
+    built_in, built_in_names, hide_commands, hooks_of, validate_definition, Library, DEFAULT_RECIPE,
 };
 
 /// Folded into every hash, so a change to how a build runs retires every cached build.

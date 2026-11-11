@@ -207,6 +207,7 @@ impl RecipeFile {
             }),
             test: self.test.clone(),
             files: self.files.clone(),
+            commands_hidden: None,
         }
     }
 

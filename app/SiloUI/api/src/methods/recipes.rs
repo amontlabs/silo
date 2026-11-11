@@ -101,6 +101,10 @@ wire_struct! {
         /// Settings files merged into the computer from forks. Merging appends to it.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         files: Vec<String>,
+        /// Set on an answer to a computer's agent: the command lines (`setup`, each service's
+        /// `run`, the `migrate` and `after` hooks) were left out because they may hold secrets.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        commands_hidden: Option<bool>,
     }
 }
 

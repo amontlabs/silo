@@ -1306,6 +1306,7 @@ fn a_merge_summary_into_a_recipe_target_names_saved_recipe_and_rejects_caller_ho
             }),
             test: None,
             files: Vec::new(),
+            commands_hidden: None,
         },
     };
     crate::recipes::records::set("main", &record).unwrap();

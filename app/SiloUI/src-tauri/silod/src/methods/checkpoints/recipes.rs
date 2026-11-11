@@ -381,6 +381,7 @@ pub(super) async fn build(
             keep: None,
             test: None,
             files: Vec::new(),
+            commands_hidden: None,
         },
         (None, Some((stored, _))) => stored,
         (None, None) => {
@@ -467,7 +468,7 @@ pub(super) async fn save(
 }
 
 /// What a computer's agent may read of a saved recipe: only the one its computer was built
-/// from. A recipe's setup lines may hold secrets the owner pasted.
+/// from, and without its command lines (see `recipes::hide_commands`).
 async fn computer_may_read(
     context: &HandlerContext,
     app_data: &std::path::Path,
@@ -500,10 +501,16 @@ pub(super) async fn get(
     require_local_device(context, params.device_id.as_deref())?;
     let app_data = context.engine_context().paths().app_data.clone();
     computer_may_read(context, &app_data, &params.name).await?;
+    let hide = matches!(context.caller(), Caller::Computer { .. });
     tokio::task::spawn_blocking(move || {
         let (recipe, built_in) = Library::new(&app_data)
             .get(&params.name)?
             .ok_or_else(|| format!("There is no recipe named {}.", params.name))?;
+        let recipe = if hide {
+            recipes::hide_commands(recipe)
+        } else {
+            recipe
+        };
         Ok::<_, String>(document(&app_data, &params.name, recipe, built_in))
     })
     .await
@@ -518,10 +525,20 @@ pub(super) async fn of_computer(
 ) -> Result<HandlerOutput, DispatchError> {
     let params: ComputerTargetParams = context.decode_params(params)?;
     require_local_device(context, params.device_id.as_deref())?;
-    let recipe = tokio::task::spawn_blocking(move || recipes::records::get(&params.computer_id))
+    let hide = matches!(context.caller(), Caller::Computer { .. });
+    let app_data = context.engine_context().paths().app_data.clone();
+    let recipe = tokio::task::spawn_blocking(move || {
+        recipes::records::get_at(&app_data, &params.computer_id)
+    })
         .await
         .map_err(|_| DispatchError::internal("The engine task stopped unexpectedly."))?
-        .map_err(invalid)?;
+        .map_err(invalid)?
+        .map(|mut record| {
+            if hide {
+                record.recipe = recipes::hide_commands(record.recipe);
+            }
+            record
+        });
     output(ComputerRecipeResult { recipe })
 }
 

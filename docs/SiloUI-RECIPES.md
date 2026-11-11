@@ -45,9 +45,21 @@ files: [/etc/app.conf] # settings files kept into the computer; a merge appends 
 one with its hash and any warnings. `silo recipe remove <name>` forgets it and drops its build
 (removing a saved recipe that replaced a shipped one brings the shipped one back). Storing, removing and building belong to the owner. A
 computer's agent can list the recipes (names, system, a one-way hash and whether each is built) and
-show the one its computer was built from, because setup lines may hold secrets; asking to show
-another is refused. It cannot change any. A computer that forks a recipe's hidden build gets a
-record with that recipe's full text, so it can read that one through `computers.recipe`.
+show the one its computer was built from; asking to show another is refused. It cannot change any.
+A computer that forks a recipe's hidden build gets a record of that recipe, so it can read that
+one through `computers.recipe`.
+
+**A computer never sees a recipe's command lines.** In what `recipes.get` and `computers.recipe`
+answer to a computer, the `setup` list, each service's `run`, and the `migrate` and `after`
+steps of `keep` are left out and the recipe says `"commandsHidden": true` (`silo recipe show`
+prints a line saying so). Packages, service names, `restart`, `quiet`, `scrub`, `files`, `test`
+and the resources stay visible. The engine runs the hidden commands itself (at build, at boot
+and at merge), so nothing needs them in the agent's hands. The owner sees everything.
+
+Anything a setup command writes to disk is on every computer built from the recipe, and so is
+readable by its agent. A token in a setup line is exposed both ways. Keep tokens in
+[secrets](SiloUI-SECRETS.md), never in setup, service or hook lines, and never in `test`, which
+a computer can read.
 
 Package names are single words (a version suffix such as `name@1.2` or `name==1.0` is fine);
 they are passed to the package manager as arguments, never as shell text. `setup` commands are

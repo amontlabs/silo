@@ -1650,7 +1650,7 @@ async fn a_computer_reads_only_the_recipe_it_was_built_from() {
     )
     .await
     .unwrap();
-    assert_eq!(own["recipe"], mine);
+    assert_eq!(own["recipe"]["spec"], mine["spec"]);
     for other in ["secret", "linux-dev"] {
         let refused = call_as_computer(
             &fixture,
@@ -1678,6 +1678,67 @@ async fn a_computer_reads_only_the_recipe_it_was_built_from() {
         .await
         .unwrap();
     assert_eq!(all["recipe"]["spec"]["setup"], secret["spec"]["setup"]);
+}
+
+const SECRET_RECIPE: &str = r#"{"spec": {"os": "linux", "packages": {"apt": ["nginx"]},
+    "setup": ["export TOKEN=hunter2"],
+    "services": [{"name": "web", "run": "web --token hunter2"}]},
+    "keep": {"restart": ["web"], "migrate": ["migrate --token hunter2"], "after": ["notify hunter2"]},
+    "test": "make test", "files": ["/etc/app.conf"]}"#;
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_computer_reads_its_recipe_without_the_command_lines() {
+    let fixture = fixture();
+    let recipe: Value = serde_json::from_str(SECRET_RECIPE).unwrap();
+    call(
+        &fixture,
+        MethodName::RecipesSave,
+        json!({"name": "mine", "recipe": recipe}),
+    )
+    .await
+    .unwrap();
+    build_from(&fixture, LINUX_ID, "mine", &recipe);
+
+    let shown = call_as_computer(
+        &fixture,
+        LINUX_ID,
+        MethodName::RecipesGet,
+        json!({"name": "mine"}),
+    )
+    .await
+    .unwrap();
+    let recorded = call_as_computer(
+        &fixture,
+        LINUX_ID,
+        MethodName::ComputersRecipe,
+        json!({"computerId": LINUX_ID}),
+    )
+    .await
+    .unwrap();
+    for definition in [&shown["recipe"], &recorded["recipe"]["recipe"]] {
+        assert!(!definition.to_string().contains("hunter2"), "{definition}");
+        assert_eq!(definition["commandsHidden"], true);
+        assert!(definition["spec"].get("setup").is_none());
+        assert_eq!(definition["spec"]["packages"]["apt"], json!(["nginx"]));
+        assert_eq!(definition["spec"]["services"][0]["name"], "web");
+        assert_eq!(definition["keep"]["restart"], json!(["web"]));
+        assert_eq!(definition["test"], "make test");
+        assert_eq!(definition["files"], json!(["/etc/app.conf"]));
+    }
+
+    // The owner still reads everything.
+    let owner = call(&fixture, MethodName::RecipesGet, json!({"name": "mine"}))
+        .await
+        .unwrap();
+    assert_eq!(owner["recipe"], recipe);
+    let owner = call(
+        &fixture,
+        MethodName::ComputersRecipe,
+        json!({"computerId": LINUX_ID}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(owner["recipe"]["recipe"], recipe);
 }
 
 #[tokio::test(flavor = "multi_thread")]

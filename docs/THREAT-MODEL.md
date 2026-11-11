@@ -766,8 +766,10 @@ held back. A start the owner approved checks the floor but does not hold memory,
 starts at once can pass together.
 
 **Recipes.** Saving, removing and building recipes belongs to the owner. A computer reads in full
-only the recipe it was built from, because setup lines may hold a token the owner pasted; for
-the others it sees names, system and a one-way hash. A merge changes a saved recipe only when the
+only the recipe it was built from, and even that without its command lines (setup, service
+commands, the migrate and after hooks), because they may hold a token the owner pasted; for
+the others it sees names, system and a one-way hash. Whatever a setup command writes is on every
+computer built from the recipe, so tokens belong in secrets, never in setup lines. A merge changes a saved recipe only when the
 owner runs it or approves it, and undoing the merge takes back exactly what it added. A merge
 into a computer built from a recipe runs that recipe's hooks, never hooks the caller supplied.
 See [Recipes](SiloUI-RECIPES.md).
@@ -1444,9 +1446,8 @@ planned.
 - A computer cannot read the event stream, notifications or the list of all jobs (only its own), because they are not
   cut per computer yet; its agent polls instead. A job result too large to send in one piece is
   withheld from it.
-- Any computer may fork a recipe's hidden build, and the fork records the recipe's full text, so
-  its agent can read that recipe through `computers.recipe` even though `recipes.get` refuses it.
-  Found by reading the code; not run.
+- A merge into a computer built from a recipe reports each hook command it ran, and a failing one
+  with its output, to the agent that asked, so a hook line can reach it that way.
 - A start the owner approved checks the memory floor but does not hold memory, so several approved
   starts at once can pass together. The check and the hold are not under one lock.
 - A computer whose tools check keeps failing is checked less and then not until its next start; a

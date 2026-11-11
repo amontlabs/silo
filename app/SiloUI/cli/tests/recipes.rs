@@ -604,6 +604,28 @@ async fn recipe_list_show_and_remove_use_the_engines_recipes() {
     assert!(text.contains("abc123abc123"), "{text}");
 }
 
+#[test]
+fn a_recipe_shown_to_a_computer_says_its_command_lines_are_hidden() {
+    let shown = serde_json::json!({
+        "name": "web", "builtIn": false, "hash": "abc123abc123",
+        "recipe": {
+            "spec": {"os": "linux", "packages": {"apt": ["nginx"]}},
+            "commandsHidden": true
+        }
+    });
+    let text = silo_cli::render::recipe_shown(&shown);
+    assert!(text.contains("nginx"), "{text}");
+    assert!(
+        text.contains("setup commands, service commands and keep commands are hidden"),
+        "{text}"
+    );
+    let owner = serde_json::json!({
+        "name": "web", "hash": "abc123abc123",
+        "recipe": {"spec": {"os": "linux", "setup": ["make"]}}
+    });
+    assert!(!silo_cli::render::recipe_shown(&owner).contains("hidden"));
+}
+
 #[tokio::test]
 async fn fork_from_a_recipe_by_the_command_line_starts_the_new_computer() {
     let (engine, world) = world_engine(vec![]);
